@@ -127,16 +127,32 @@ def _show_authenticated_layout_tweaks() -> None:
             display: none !important;
         }
 
-        section[data-testid="stSidebar"] {
+        /* ===== SIDEBAR EXPANDED ===== */
+        section[data-testid="stSidebar"][aria-expanded="true"] {
+            width: 320px !important;
             min-width: 320px !important;
             max-width: 320px !important;
             background: linear-gradient(180deg, #67b7ff 0%, #4298ee 48%, #1f6fd1 100%) !important;
             border-right: 1px solid rgba(255,255,255,0.14);
         }
 
-        section[data-testid="stSidebar"] > div {
+        section[data-testid="stSidebar"][aria-expanded="true"] > div {
             background: transparent !important;
             padding-top: 0.6rem !important;
+        }
+
+        /* ===== SIDEBAR COLLAPSED ===== */
+        section[data-testid="stSidebar"][aria-expanded="false"] {
+            width: 0 !important;
+            min-width: 0 !important;
+            max-width: 0 !important;
+        }
+
+        section[data-testid="stSidebar"][aria-expanded="false"] > div {
+            width: 0 !important;
+            min-width: 0 !important;
+            max-width: 0 !important;
+            overflow: visible !important;
         }
 
         div[data-testid="stSidebarUserContent"] {
