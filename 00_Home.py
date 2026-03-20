@@ -7,7 +7,16 @@ from core.ui.theme import apply_watermelon_theme
 from core.version import VERSION
 
 
-st.set_page_config(page_title="Watermelon System | Home", layout="wide")
+st.set_page_config(
+    page_title="Watermelon System | Home",
+    page_icon="🍉",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
+
+# Refuerzo en runtime para Community Cloud
+st.set_option("client.toolbarMode", "minimal")
+st.set_option("client.showSidebarNavigation", False)
 
 require_login()
 render_user_menu()
@@ -64,6 +73,21 @@ def apply_home_style() -> None:
     st.markdown(
         """
         <style>
+        #MainMenu {visibility: hidden !important;}
+        header {visibility: hidden !important;}
+        footer {visibility: hidden !important;}
+
+        [data-testid="stToolbar"] {display: none !important;}
+        [data-testid="stDecoration"] {display: none !important;}
+        [data-testid="stStatusWidget"] {display: none !important;}
+        [data-testid="stHeaderActionElements"] {display: none !important;}
+        [data-testid="stAppDeployButton"] {display: none !important;}
+        [data-testid="collapsedControl"] {display: none !important;}
+
+        .stAppHeader {
+            background: transparent !important;
+        }
+
         .block-container {
             padding-top: 1.3rem !important;
             padding-bottom: 2rem !important;
