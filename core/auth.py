@@ -14,6 +14,17 @@ DEFAULT_ITERATIONS = 260000
 DEFAULT_SESSION_TIMEOUT_MINUTES = 480
 
 
+NAV_ITEMS = [
+    {"label": "🏠 Home", "page": "00_Home.py"},
+    {"label": "📥 Load Data", "page": "pages/01_Load_Data.py"},
+    {"label": "🌊 Time Waveforms", "page": "pages/02_Time_Waveforms.py"},
+    {"label": "📈 Spectrum", "page": "pages/03_Spectrum.py"},
+    {"label": "📊 Trends", "page": "pages/04_Trends.py"},
+    {"label": "🌀 Orbit Analysis", "page": "pages/05_Orbit_Analysis.py"},
+    {"label": "🩺 Diagnostics", "page": "pages/15_Diagnostics.py"},
+]
+
+
 def make_password_hash(password: str, iterations: int = DEFAULT_ITERATIONS) -> str:
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac(
@@ -91,16 +102,7 @@ def _hide_streamlit_navigation() -> None:
     st.markdown(
         """
         <style>
-        [data-testid="stSidebar"] {
-            display: none !important;
-        }
-        [data-testid="collapsedControl"] {
-            display: none !important;
-        }
         [data-testid="stSidebarNav"] {
-            display: none !important;
-        }
-        section[data-testid="stSidebar"] {
             display: none !important;
         }
         .stAppHeader {
@@ -118,6 +120,60 @@ def _show_authenticated_layout_tweaks() -> None:
         <style>
         .stAppHeader {
             background: transparent !important;
+        }
+
+        [data-testid="stSidebarNav"] {
+            display: none !important;
+        }
+
+        section[data-testid="stSidebar"] {
+            min-width: 320px !important;
+            max-width: 320px !important;
+        }
+
+        .wm-side-title {
+            font-size: 0.92rem;
+            font-weight: 900;
+            color: #1f2937;
+            margin: 0.2rem 0 0.65rem 0;
+            letter-spacing: -0.02em;
+        }
+
+        .wm-side-divider {
+            height: 1px;
+            width: 100%;
+            background: linear-gradient(90deg, rgba(59,130,246,0.18) 0%, rgba(203,213,225,0.50) 45%, rgba(203,213,225,0.08) 100%);
+            border-radius: 999px;
+            margin: 0.65rem 0 1rem 0;
+        }
+
+        .wm-user-card {
+            padding: 14px 14px 10px 14px;
+            border-radius: 18px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(247,250,252,0.96) 100%);
+            border: 1px solid #d9e2ec;
+            box-shadow:
+                0 10px 24px rgba(15, 23, 42, 0.05),
+                inset 0 1px 0 rgba(255,255,255,0.84);
+            margin-bottom: 0.85rem;
+        }
+
+        .wm-user-line {
+            color: #4b5563;
+            font-size: 0.92rem;
+            margin: 0.28rem 0;
+        }
+
+        .wm-nav-wrap {
+            margin-top: 0.35rem;
+            margin-bottom: 0.9rem;
+        }
+
+        div[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+            width: 100% !important;
+            border-radius: 16px !important;
+            min-height: 2.85rem !important;
+            font-weight: 800 !important;
         }
         </style>
         """,
@@ -196,13 +252,7 @@ def require_login() -> None:
 
     _hide_streamlit_navigation()
     st.warning("Debes iniciar sesión para acceder al demo.")
-
-    try:
-        st.switch_page("pages/00_Login.py")
-    except Exception:
-        st.stop()
-
-    st.stop()
+    st.switch_page("pages/00_Login.py")
 
 
 def render_login_shell() -> None:
@@ -230,17 +280,30 @@ def render_user_menu() -> None:
     _show_authenticated_layout_tweaks()
 
     with st.sidebar:
-        st.markdown("### 🔐 Sesión")
-        st.caption(f"Usuario: {user.get('username', '-')}")
-        if user.get("full_name"):
-            st.caption(f"Nombre: {user.get('full_name')}")
-        if user.get("email"):
-            st.caption(f"Correo: {user.get('email')}")
-        st.caption(f"Rol: {user.get('role', 'viewer')}")
+        st.markdown('<div class="wm-side-title">🔐 Sesión</div>', unsafe_allow_html=True)
+
+        st.markdown(
+            f"""
+            <div class="wm-user-card">
+                <div class="wm-user-line"><b>Usuario:</b> {user.get('username', '-')}</div>
+                <div class="wm-user-line"><b>Nombre:</b> {user.get('full_name', '-')}</div>
+                <div class="wm-user-line"><b>Correo:</b> {user.get('email', '-')}</div>
+                <div class="wm-user-line"><b>Rol:</b> {user.get('role', 'viewer')}</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        st.markdown('<div class="wm-side-divider"></div>', unsafe_allow_html=True)
+        st.markdown('<div class="wm-side-title">🧭 Navegación</div>', unsafe_allow_html=True)
+        st.markdown('<div class="wm-nav-wrap"></div>', unsafe_allow_html=True)
+
+        for item in NAV_ITEMS:
+            if st.button(item["label"], use_container_width=True, key=f"nav_{item['page']}"):
+                st.switch_page(item["page"])
+
+        st.markdown('<div class="wm-side-divider"></div>', unsafe_allow_html=True)
 
         if st.button("Cerrar sesión", use_container_width=True, type="secondary"):
             logout()
-            try:
-                st.switch_page("pages/00_Login.py")
-            except Exception:
-                st.rerun()
+            st.switch_page("pages/00_Login.py")
