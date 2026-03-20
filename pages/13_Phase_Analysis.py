@@ -9,8 +9,8 @@ from io import BytesIO
 
 import numpy as np
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
+import plotly.graph_objects as go
 
 from core.phase import analyze_phase
 
@@ -65,34 +65,81 @@ def apply_page_style() -> None:
             color: #2563eb !important;
         }
 
-        .wm-metric-card {
-            background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(255,255,255,0.86));
-            border: 1px solid #dbe3ee;
-            border-radius: 18px;
-            padding: 16px 18px 14px 18px;
-            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
-            margin-bottom: 0.4rem;
+        .wm-phase-shell {
+            padding-top: 0.1rem;
         }
 
-        .wm-metric-label {
-            font-size: 0.78rem;
+        .wm-phase-title {
+            font-size: 0.82rem;
+            font-weight: 800;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: #64748b;
+            margin-bottom: 0.75rem;
+        }
+
+        .wm-phase-summary-card {
+            background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.88));
+            border: 1px solid #dbe3ee;
+            border-radius: 20px;
+            padding: 18px 18px 14px 18px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+            min-height: 170px;
+            margin-bottom: 0.9rem;
+        }
+
+        .wm-phase-name {
+            font-size: 1rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 14px;
+            line-height: 1.2;
+        }
+
+        .wm-phase-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px 14px;
+        }
+
+        .wm-phase-k {
+            font-size: 0.72rem;
             font-weight: 800;
             letter-spacing: 0.08em;
             text-transform: uppercase;
             color: #64748b;
-            margin-bottom: 6px;
+            margin-bottom: 3px;
         }
 
-        .wm-metric-value {
-            font-size: 1.6rem;
+        .wm-phase-v {
+            font-size: 1.15rem;
             font-weight: 800;
             color: #0f172a;
-            line-height: 1.0;
+            line-height: 1.05;
         }
 
-        .wm-export-actions {
-            margin-top: 0.9rem;
-            margin-bottom: 0.25rem;
+        .wm-phase-sub {
+            font-size: 0.88rem;
+            color: #64748b;
+            margin-top: 2px;
+        }
+
+        .wm-phase-status {
+            display: inline-block;
+            margin-top: 14px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid #dbeafe;
+            background: #f8fbff;
+            color: #2563eb;
+            font-size: 0.78rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+        }
+
+        .wm-phase-export-actions {
+            margin-top: 1rem;
+            margin-bottom: 0.2rem;
         }
 
         div[data-testid="stExpander"] {
@@ -118,99 +165,85 @@ def format_number(value, digits=3, fallback="—") -> str:
         return fallback
 
 
-def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
-    export_fig = go.Figure()
+def stability_badge_value(phase_stability_deg: float | None) -> str:
+    if phase_stability_deg is None or not np.isfinite(phase_stability_deg):
+        return "No stability data"
+    if phase_stability_deg <= 3.0:
+        return "Stable phase"
+    if phase_stability_deg <= 8.0:
+        return "Moderate variation"
+    return "High variation"
 
-    for trace in fig.data:
-        if isinstance(trace, go.Scattergl):
-            trace_json = trace.to_plotly_json()
-            export_fig.add_trace(
-                go.Scatter(
-                    x=np.array(trace_json.get("x")) if trace_json.get("x") is not None else None,
-                    y=np.array(trace_json.get("y")) if trace_json.get("y") is not None else None,
-                    mode=trace_json.get("mode"),
-                    line=trace_json.get("line"),
-                    marker=trace_json.get("marker"),
-                    fill=trace_json.get("fill"),
-                    fillcolor=trace_json.get("fillcolor"),
-                    hovertemplate=trace_json.get("hovertemplate"),
-                    showlegend=trace_json.get("showlegend"),
-                    connectgaps=trace_json.get("connectgaps", False),
-                    name=trace_json.get("name"),
-                )
+
+def build_summary_card_html(row: pd.Series) -> str:
+    return f"""
+    <div class="wm-phase-summary-card">
+        <div class="wm-phase-name">{row["Signal"]}</div>
+        <div class="wm-phase-grid">
+            <div>
+                <div class="wm-phase-k">1X Amplitude</div>
+                <div class="wm-phase-v">{row["1X Amplitude (PP)"]}</div>
+            </div>
+            <div>
+                <div class="wm-phase-k">1X Phase</div>
+                <div class="wm-phase-v">{row["1X Phase (deg)"]}</div>
+            </div>
+            <div>
+                <div class="wm-phase-k">Phase Stability</div>
+                <div class="wm-phase-v">{row["Phase Stability (deg)"]}</div>
+            </div>
+            <div>
+                <div class="wm-phase-k">Mean RPM</div>
+                <div class="wm-phase-v">{row["Mean RPM"]}</div>
+            </div>
+        </div>
+        <div class="wm-phase-status">{row["Status"]}</div>
+    </div>
+    """
+
+
+def build_export_safe_table_figure(summary_df: pd.DataFrame) -> go.Figure:
+    header_values = list(summary_df.columns)
+    cell_values = [summary_df[col].tolist() for col in summary_df.columns]
+
+    fig = go.Figure(
+        data=[
+            go.Table(
+                header=dict(
+                    values=header_values,
+                    fill_color="#eaf3ff",
+                    line_color="#dbe3ee",
+                    align="left",
+                    font=dict(color="#0f172a", size=22, family="Arial"),
+                    height=42,
+                ),
+                cells=dict(
+                    values=cell_values,
+                    fill_color="#ffffff",
+                    line_color="#e5e7eb",
+                    align="left",
+                    font=dict(color="#111827", size=20, family="Arial"),
+                    height=38,
+                ),
             )
-        else:
-            export_fig.add_trace(trace)
-
-    export_fig.update_layout(fig.layout)
-    return export_fig
-
-
-def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
-    fig = go.Figure(export_fig)
-
-    new_data = []
-    for trace in fig.data:
-        trace_json = trace.to_plotly_json()
-
-        if trace_json.get("type") == "scatter":
-            mode = trace_json.get("mode", "")
-
-            if "lines" in mode:
-                line = dict(trace_json.get("line", {}) or {})
-                line["width"] = max(4.8, float(line.get("width", 1.0)) * 2.8)
-                trace_json["line"] = line
-
-            if "markers" in mode:
-                marker = dict(trace_json.get("marker", {}) or {})
-                marker["size"] = max(14, float(marker.get("size", 6)) * 1.9)
-                trace_json["marker"] = marker
-
-        elif trace_json.get("type") == "scatterpolar":
-            mode = trace_json.get("mode", "")
-
-            if "lines" in mode:
-                line = dict(trace_json.get("line", {}) or {})
-                line["width"] = max(4.8, float(line.get("width", 1.0)) * 2.8)
-                trace_json["line"] = line
-
-            if "markers" in mode:
-                marker = dict(trace_json.get("marker", {}) or {})
-                marker["size"] = max(14, float(marker.get("size", 6)) * 1.9)
-                trace_json["marker"] = marker
-
-        trace_type = trace_json.get("type")
-        if trace_type == "scatterpolar":
-            new_data.append(go.Scatterpolar(**trace_json))
-        else:
-            new_data.append(go.Scatter(**trace_json))
-
-    fig = go.Figure(data=new_data, layout=fig.layout)
-
-    fig.update_layout(
-        width=4200,
-        height=2200,
-        margin=dict(l=120, r=90, t=180, b=120),
-        paper_bgcolor="#f3f4f6",
-        plot_bgcolor="#f8fafc",
-        font=dict(size=30, color="#111827"),
+        ]
     )
 
-    fig.update_xaxes(title_font=dict(size=40), tickfont=dict(size=26))
-    fig.update_yaxes(title_font=dict(size=40), tickfont=dict(size=26))
-
-    for ann in fig.layout.annotations:
-        if ann.font is not None:
-            ann.font.size = max(22, int((ann.font.size or 12) * 2.05))
-
+    n_rows = max(len(summary_df), 1)
+    fig.update_layout(
+        width=4200,
+        height=max(1200, 280 + n_rows * 74),
+        margin=dict(l=60, r=60, t=70, b=50),
+        paper_bgcolor="#f3f4f6",
+        plot_bgcolor="#f3f4f6",
+    )
     return fig
 
 
-def build_export_png_bytes(fig: go.Figure):
+def build_export_png_bytes(summary_df: pd.DataFrame):
     try:
-        export_fig = _build_export_safe_figure(fig)
-        export_fig = _scale_export_figure(export_fig)
-        png_bytes = export_fig.to_image(format="png", width=4200, height=2200, scale=2)
+        export_fig = build_export_safe_table_figure(summary_df)
+        png_bytes = export_fig.to_image(format="png", width=4200, height=export_fig.layout.height, scale=2)
         return png_bytes, None
     except Exception as e:
         return None, str(e)
@@ -231,186 +264,73 @@ if "signals" not in st.session_state or not st.session_state["signals"]:
 
 signal_names = list(st.session_state["signals"].keys())
 
+default_selection = signal_names[: min(4, len(signal_names))]
+
 with st.sidebar:
     st.markdown("### Phase Processing")
 
-    selected_signal = st.selectbox(
-        "Select Signal",
-        signal_names,
-        index=0,
+    selected_signals = st.multiselect(
+        "Select Signals",
+        options=signal_names,
+        default=default_selection,
     )
 
-signal = st.session_state["signals"][selected_signal]
-result = analyze_phase(signal)
+if not selected_signals:
+    st.warning("Select at least one signal.")
+    st.stop()
 
-phase_per_rev = np.asarray(result["phase_per_rev_deg"], dtype=float)
-amp_per_rev = np.asarray(result["amplitude_pp_per_rev"], dtype=float)
-rev_idx = np.arange(1, len(phase_per_rev) + 1)
-complex_1x = np.asarray(result["complex_1x_per_rev"])
+summary_rows = []
+diagnostics_rows = []
 
-phase_fig = go.Figure()
-phase_fig.add_trace(
-    go.Scattergl(
-        x=rev_idx,
-        y=phase_per_rev,
-        mode="lines+markers",
-        name="1X Phase",
-        line=dict(width=2.2, color="#5b9cf0"),
-        marker=dict(size=7, color="#2f80ed"),
-        hovertemplate="Rev %{x}<br>Phase %{y:.2f}°<extra></extra>",
-        showlegend=False,
-    )
-)
-phase_fig.update_layout(
-    title="Phase vs Revolution",
-    height=470,
-    margin=dict(l=28, r=18, t=58, b=28),
-    plot_bgcolor="#f8fafc",
-    paper_bgcolor="#f3f4f6",
-    font=dict(color="#111827"),
-    xaxis=dict(
-        title="Revolution",
-        showgrid=True,
-        gridcolor="rgba(148, 163, 184, 0.18)",
-        zeroline=False,
-        showline=True,
-        linecolor="#9ca3af",
-        ticks="outside",
-        tickcolor="#6b7280",
-        ticklen=4,
-    ),
-    yaxis=dict(
-        title="Phase (deg)",
-        showgrid=True,
-        gridcolor="rgba(148, 163, 184, 0.18)",
-        zeroline=False,
-        showline=True,
-        linecolor="#9ca3af",
-        ticks="outside",
-        tickcolor="#6b7280",
-        ticklen=4,
-    ),
-)
+for signal_name in selected_signals:
+    signal = st.session_state["signals"][signal_name]
+    result = analyze_phase(signal)
 
-polar_fig = go.Figure()
-polar_fig.add_trace(
-    go.Scatterpolar(
-        r=amp_per_rev,
-        theta=phase_per_rev,
-        mode="lines+markers",
-        name="1X Polar",
-        line=dict(width=2.2, color="#5b6df0"),
-        marker=dict(size=7, color="#2f80ed"),
-        hovertemplate="Amp %{r:.3f} mil pp<br>Phase %{theta:.2f}°<extra></extra>",
-        showlegend=False,
-    )
-)
-polar_fig.update_layout(
-    title="Polar Plot",
-    height=470,
-    margin=dict(l=20, r=20, t=58, b=20),
-    plot_bgcolor="#f3f4f6",
-    paper_bgcolor="#f3f4f6",
-    font=dict(color="#111827"),
-    polar=dict(
-        bgcolor="#f8fafc",
-        radialaxis=dict(
-            showgrid=True,
-            gridcolor="rgba(148, 163, 184, 0.18)",
-            linecolor="#9ca3af",
-            tickcolor="#6b7280",
-        ),
-        angularaxis=dict(
-            direction="clockwise",
-            rotation=90,
-            gridcolor="rgba(148, 163, 184, 0.18)",
-            linecolor="#9ca3af",
-            tickcolor="#6b7280",
-        ),
-    ),
-)
-
-col_plot_1, col_plot_2 = st.columns(2, gap="large")
-
-with col_plot_1:
-    st.plotly_chart(
-        phase_fig,
-        use_container_width=True,
-        config={"displaylogo": False},
-        key="wm_phase_plot_main_view",
-    )
-
-with col_plot_2:
-    st.plotly_chart(
-        polar_fig,
-        use_container_width=True,
-        config={"displaylogo": False},
-        key="wm_phase_plot_polar_view",
-    )
-
-metric_cols = st.columns(4, gap="large")
-
-metrics = [
-    ("1X Amplitude (PP)", format_number(result.get("mean_amplitude_pp"), 3)),
-    ("1X Phase (deg)", format_number(result.get("mean_phase_deg"), 2)),
-    ("Phase Stability (deg)", format_number(result.get("phase_stability_deg"), 2)),
-    ("Mean RPM", format_number(result.get("mean_rpm", 0.0), 1)),
-]
-
-for col, (label, value) in zip(metric_cols, metrics):
-    with col:
-        st.markdown(
-            f"""
-            <div class="wm-metric-card">
-                <div class="wm-metric-label">{label}</div>
-                <div class="wm-metric-value">{value}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-with st.expander("Technical Diagnostics", expanded=False):
+    phase_per_rev = np.asarray(result.get("phase_per_rev_deg", []), dtype=float)
+    amp_per_rev = np.asarray(result.get("amplitude_pp_per_rev", []), dtype=float)
+    complex_1x = np.asarray(result.get("complex_1x_per_rev", []))
     debug = result.get("debug", {})
 
-    df_diag = pd.DataFrame(
+    mean_amp = result.get("mean_amplitude_pp")
+    mean_phase = result.get("mean_phase_deg")
+    phase_stability = result.get("phase_stability_deg")
+    mean_rpm = result.get("mean_rpm", 0.0)
+
+    summary_rows.append(
         {
-            "Revolution": rev_idx,
-            "Amplitude_PP": amp_per_rev,
-            "Phase_deg": phase_per_rev,
-            "C1_Real": np.real(complex_1x),
-            "C1_Imag": np.imag(complex_1x),
+            "Signal": signal_name,
+            "1X Amplitude (PP)": f'{format_number(mean_amp, 3)}',
+            "1X Phase (deg)": f'{format_number(mean_phase, 2)}',
+            "Phase Stability (deg)": f'{format_number(phase_stability, 2)}',
+            "Mean RPM": f'{format_number(mean_rpm, 1)}',
+            "Status": stability_badge_value(phase_stability),
         }
     )
-    st.dataframe(df_diag, use_container_width=True, hide_index=True)
 
-    info_cols = st.columns(6)
-    info_cols[0].metric("Mode", result.get("mode", "-"))
-    info_cols[1].metric("Samples/Rev", int(result.get("samples_per_rev", 0)))
-    info_cols[2].metric("Revolutions", int(result.get("n_revs", 0)))
-    info_cols[3].metric("Sync Source", str(debug.get("sync_source", "-")))
-    info_cols[4].metric("Header Revs", int(debug.get("header_number_of_revs", 0) or 0))
-    info_cols[5].metric("Time-Inferred Revs", int(debug.get("inferred_revs_from_time", 0) or 0))
-
-    candidate_table = debug.get("candidate_table", [])
-    if candidate_table:
-        st.markdown("**Geometry Candidates**")
-        st.dataframe(pd.DataFrame(candidate_table), use_container_width=True, hide_index=True)
-
-    st.caption(f"Phase convention: {debug.get('phase_convention', '-')}")
-    st.caption(
-        f"Variable hint: "
-        f"{debug.get('variable_hint_samples_per_rev', '-')}"
-        f"X / {debug.get('variable_hint_revs', '-')}"
+    diagnostics_rows.append(
+        {
+            "Signal": signal_name,
+            "Mode": result.get("mode", "-"),
+            "Samples/Rev": int(result.get("samples_per_rev", 0) or 0),
+            "Revolutions": int(result.get("n_revs", 0) or 0),
+            "Sync Source": str(debug.get("sync_source", "-")),
+            "Header Revs": int(debug.get("header_number_of_revs", 0) or 0),
+            "Time-Inferred Revs": int(debug.get("inferred_revs_from_time", 0) or 0),
+            "Mean Phase": format_number(mean_phase, 2),
+            "Phase Stability": format_number(phase_stability, 2),
+            "Mean Amplitude": format_number(mean_amp, 3),
+            "C1 Count": int(len(complex_1x)),
+            "Phase Convention": str(debug.get("phase_convention", "-")),
+        }
     )
+
+summary_df = pd.DataFrame(summary_rows)
+diagnostics_df = pd.DataFrame(diagnostics_rows)
 
 export_state_key = "|".join(
     [
-        selected_signal,
-        format_number(result.get("mean_amplitude_pp"), 6),
-        format_number(result.get("mean_phase_deg"), 6),
-        format_number(result.get("phase_stability_deg"), 6),
-        format_number(result.get("mean_rpm", 0.0), 6),
-        str(len(phase_per_rev)),
+        ",".join(selected_signals),
+        *summary_df.astype(str).fillna("").values.flatten().tolist(),
     ]
 )
 
@@ -419,17 +339,29 @@ if st.session_state.wm_phase_export_png_key != export_state_key:
     st.session_state.wm_phase_export_png_key = export_state_key
     st.session_state.wm_phase_export_error = None
 
-phase_export_fig = go.Figure(phase_fig)
-phase_export_fig.update_layout(title="Phase Analysis")
+st.markdown('<div class="wm-phase-shell">', unsafe_allow_html=True)
+st.markdown('<div class="wm-phase-title">Phase Comparison</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
+for row_start in range(0, len(summary_rows), 3):
+    chunk = summary_rows[row_start:row_start + 3]
+    cols = st.columns(3, gap="large")
+    for i, row in enumerate(chunk):
+        with cols[i]:
+            st.markdown(build_summary_card_html(pd.Series(row)), unsafe_allow_html=True)
+
+st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+with st.expander("Technical Diagnostics", expanded=False):
+    st.dataframe(diagnostics_df, use_container_width=True, hide_index=True)
+
+st.markdown('<div class="wm-phase-export-actions"></div>', unsafe_allow_html=True)
 
 left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
 
 with col_export1:
     if st.button("Prepare PNG HD", use_container_width=True):
         with st.spinner("Generating HD export..."):
-            png_bytes, export_error = build_export_png_bytes(phase_export_fig)
+            png_bytes, export_error = build_export_png_bytes(summary_df)
             st.session_state.wm_phase_export_png_bytes = png_bytes
             st.session_state.wm_phase_export_error = export_error
 
@@ -438,7 +370,7 @@ with col_export2:
         st.download_button(
             "Download PNG HD",
             data=st.session_state.wm_phase_export_png_bytes,
-            file_name=f"{selected_signal}_phase_analysis_hd.png",
+            file_name="watermelon_phase_analysis_hd.png",
             mime="image/png",
             use_container_width=True,
         )
@@ -447,3 +379,5 @@ with col_export2:
 
 if st.session_state.wm_phase_export_error:
     st.warning(f"PNG export error: {st.session_state.wm_phase_export_error}")
+
+st.markdown("</div>", unsafe_allow_html=True)
