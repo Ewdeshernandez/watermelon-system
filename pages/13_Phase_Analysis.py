@@ -1,345 +1,189 @@
-from __future__ import annotations
-
-from core.auth import require_login, render_user_menu
-
-require_login()
-render_user_menu()
-
+import streamlit as st
 import numpy as np
 import pandas as pd
-import streamlit as st
 import plotly.graph_objects as go
+from datetime import datetime
+import base64
+from io import BytesIO
 
-from core.phase import analyze_phase
+# =========================
+# CONFIG
+# =========================
+st.set_page_config(layout="wide")
 
-st.set_page_config(page_title="Watermelon System | Phase Analysis", layout="wide")
-
-
-def apply_page_style() -> None:
-    st.markdown(
-        """
-        <style>
-        .main > div {
-            padding-top: 0.18rem;
-        }
-
-        .stApp {
-            background-color: #f3f4f6;
-        }
-
-        section[data-testid="stSidebar"] {
-            background: #e5e7eb;
-            border-right: 1px solid #cbd5e1;
-        }
-
-        section.main div[data-testid="stButton"] > button,
-        section.main div[data-testid="stDownloadButton"] > button {
-            min-height: 52px;
-            border-radius: 16px;
-            font-weight: 700;
-            border: 1px solid #bfd8ff !important;
-            background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%) !important;
-            color: #2563eb !important;
-            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
-            transition: all 0.18s ease;
-        }
-
-        section.main div[data-testid="stButton"] > button:hover,
-        section.main div[data-testid="stDownloadButton"] > button:hover {
-            border-color: #93c5fd !important;
-            background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%) !important;
-            color: #1d4ed8 !important;
-            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
-        }
-
-        section.main div[data-testid="stButton"] > button *,
-        section.main div[data-testid="stDownloadButton"] > button *,
-        section.main div[data-testid="stButton"] > button p,
-        section.main div[data-testid="stDownloadButton"] > button p,
-        section.main div[data-testid="stButton"] > button span,
-        section.main div[data-testid="stDownloadButton"] > button span,
-        section.main div[data-testid="stButton"] > button div,
-        section.main div[data-testid="stDownloadButton"] > button div {
-            color: #2563eb !important;
-        }
-
-        .wm-phase-shell {
-            padding-top: 0.1rem;
-        }
-
-        .wm-phase-title {
-            font-size: 0.82rem;
-            font-weight: 800;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            color: #64748b;
-            margin-bottom: 0.75rem;
-        }
-
-        .wm-phase-summary-card {
-            background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(255,255,255,0.88));
-            border: 1px solid #dbe3ee;
-            border-radius: 20px;
-            padding: 18px 18px 14px 18px;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
-            min-height: 170px;
-            margin-bottom: 0.9rem;
-        }
-
-        .wm-phase-name {
-            font-size: 1rem;
-            font-weight: 800;
-            color: #0f172a;
-            margin-bottom: 14px;
-            line-height: 1.2;
-        }
-
-        .wm-phase-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 10px 14px;
-        }
-
-        .wm-phase-k {
-            font-size: 0.72rem;
-            font-weight: 800;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            color: #64748b;
-            margin-bottom: 3px;
-        }
-
-        .wm-phase-v {
-            font-size: 1.15rem;
-            font-weight: 800;
-            color: #0f172a;
-            line-height: 1.05;
-        }
-
-        .wm-phase-status {
-            display: inline-block;
-            margin-top: 14px;
-            padding: 8px 12px;
-            border-radius: 999px;
-            border: 1px solid #dbeafe;
-            background: #f8fbff;
-            color: #2563eb;
-            font-size: 0.78rem;
-            font-weight: 800;
-            letter-spacing: 0.04em;
-        }
-
-        .wm-phase-export-actions {
-            margin-top: 1rem;
-            margin-bottom: 0.2rem;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def format_number(value, digits=3, fallback="—") -> str:
-    if value is None:
-        return fallback
+# =========================
+# HELPERS (SPECTRUM HEADER)
+# =========================
+def get_logo_data_uri(path="assets/watermelon_logo.png"):
     try:
-        v = float(value)
-        if not np.isfinite(v):
-            return fallback
-        return f"{v:.{digits}f}"
-    except Exception:
-        return fallback
+        with open(path, "rb") as f:
+            data = base64.b64encode(f.read()).decode()
+        return f"data:image/png;base64,{data}"
+    except:
+        return None
 
+def _draw_top_strip(fig, meta):
+    logo_uri = get_logo_data_uri()
 
-def stability_badge_value(phase_stability_deg: float | None) -> str:
-    if phase_stability_deg is None or not np.isfinite(phase_stability_deg):
-        return "No stability data"
-    if phase_stability_deg <= 3.0:
-        return "Stable phase"
-    if phase_stability_deg <= 8.0:
-        return "Moderate variation"
-    return "High variation"
-
-
-def build_summary_card_html(row: pd.Series) -> str:
-    return f"""
-    <div class="wm-phase-summary-card">
-        <div class="wm-phase-name">{row["Signal"]}</div>
-        <div class="wm-phase-grid">
-            <div>
-                <div class="wm-phase-k">1X Amplitude</div>
-                <div class="wm-phase-v">{row["1X Amplitude (PP)"]}</div>
-            </div>
-            <div>
-                <div class="wm-phase-k">1X Phase</div>
-                <div class="wm-phase-v">{row["1X Phase (deg)"]}</div>
-            </div>
-            <div>
-                <div class="wm-phase-k">Phase Stability</div>
-                <div class="wm-phase-v">{row["Phase Stability (deg)"]}</div>
-            </div>
-            <div>
-                <div class="wm-phase-k">Mean RPM</div>
-                <div class="wm-phase-v">{row["Mean RPM"]}</div>
-            </div>
-        </div>
-        <div class="wm-phase-status">{row["Status"]}</div>
-    </div>
-    """
-
-
-def build_export_safe_table_figure(summary_df: pd.DataFrame) -> go.Figure:
-    export_df = summary_df.copy()
-
-    fig = go.Figure(
-        data=[
-            go.Table(
-                header=dict(
-                    values=list(export_df.columns),
-                    fill_color="#eaf3ff",
-                    line_color="#dbe3ee",
-                    align="left",
-                    font=dict(color="#0f172a", size=22, family="Arial"),
-                    height=44,
-                ),
-                cells=dict(
-                    values=[export_df[col].tolist() for col in export_df.columns],
-                    fill_color="#ffffff",
-                    line_color="#e5e7eb",
-                    align="left",
-                    font=dict(color="#111827", size=20, family="Arial"),
-                    height=40,
-                ),
+    if logo_uri:
+        fig.add_layout_image(
+            dict(
+                source=logo_uri,
+                xref="paper", yref="paper",
+                x=0.01, y=1.1,
+                sizex=0.08, sizey=0.08,
+                xanchor="left", yanchor="top"
             )
-        ]
-    )
-
-    n_rows = max(len(export_df), 1)
-    fig.update_layout(
-        width=4200,
-        height=max(1100, 260 + n_rows * 90),
-        margin=dict(l=60, r=60, t=70, b=50),
-        paper_bgcolor="#f3f4f6",
-        plot_bgcolor="#f3f4f6",
-    )
-    return fig
-
-
-def build_export_png_bytes(summary_df: pd.DataFrame):
-    try:
-        export_fig = build_export_safe_table_figure(summary_df)
-        png_bytes = export_fig.to_image(
-            format="png",
-            width=4200,
-            height=export_fig.layout.height,
-            scale=2,
         )
-        return png_bytes, None
-    except Exception as e:
-        return None, str(e)
 
-
-apply_page_style()
-
-if "wm_phase_export_png_bytes" not in st.session_state:
-    st.session_state.wm_phase_export_png_bytes = None
-if "wm_phase_export_png_key" not in st.session_state:
-    st.session_state.wm_phase_export_png_key = None
-if "wm_phase_export_error" not in st.session_state:
-    st.session_state.wm_phase_export_error = None
-
-if "signals" not in st.session_state or not st.session_state["signals"]:
-    st.warning("No signals loaded.")
-    st.stop()
-
-signal_names = list(st.session_state["signals"].keys())
-default_selection = signal_names[: min(4, len(signal_names))]
-
-with st.sidebar:
-    st.markdown("### Phase Processing")
-
-    selected_signals = st.multiselect(
-        "Select Signals",
-        options=signal_names,
-        default=default_selection,
+    text = (
+        f"<b>{meta['machine']}</b> &nbsp;&nbsp;|&nbsp;&nbsp; "
+        f"{meta['point']} &nbsp;&nbsp;|&nbsp;&nbsp; "
+        f"{meta['config']} &nbsp;&nbsp;|&nbsp;&nbsp; "
+        f"RPM: {meta['rpm']:.0f} &nbsp;&nbsp;|&nbsp;&nbsp; "
+        f"Peak: {meta['peak']:.2f} &nbsp;&nbsp;|&nbsp;&nbsp; "
+        f"{meta['timestamp']}"
     )
 
-if not selected_signals:
-    st.warning("Select at least one signal.")
-    st.stop()
-
-summary_rows = []
-
-for signal_name in selected_signals:
-    signal = st.session_state["signals"][signal_name]
-    result = analyze_phase(signal)
-
-    mean_amp = result.get("mean_amplitude_pp")
-    mean_phase = result.get("mean_phase_deg")
-    phase_stability = result.get("phase_stability_deg")
-    mean_rpm = result.get("mean_rpm", 0.0)
-
-    summary_rows.append(
-        {
-            "Signal": signal_name,
-            "1X Amplitude (PP)": format_number(mean_amp, 3),
-            "1X Phase (deg)": format_number(mean_phase, 2),
-            "Phase Stability (deg)": format_number(phase_stability, 2),
-            "Mean RPM": format_number(mean_rpm, 1),
-            "Status": stability_badge_value(phase_stability),
-        }
+    fig.add_annotation(
+        x=0.12, y=1.08,
+        xref="paper", yref="paper",
+        text=text,
+        showarrow=False,
+        align="left",
+        font=dict(size=14)
     )
 
-summary_df = pd.DataFrame(summary_rows)
+# =========================
+# CORE CALC
+# =========================
+def compute_phase_metrics(signal):
+    x = np.array(signal["y"])
+    rpm = np.mean(signal.get("rpm", [1800]))
 
-export_state_key = "|".join(
-    [
-        ",".join(selected_signals),
-        *summary_df.astype(str).fillna("").values.flatten().tolist(),
-    ]
+    # 1X approx
+    fft_vals = np.fft.fft(x)
+    amp_1x = np.max(x) - np.min(x)
+    phase_1x = np.angle(fft_vals[1])
+    phase_std = np.std(np.unwrap(np.angle(fft_vals)))
+
+    stability = "Stable" if phase_std < 0.1 else "Variation"
+
+    return {
+        "Signal": signal["name"],
+        "1X Amplitude": amp_1x,
+        "Phase (deg)": np.degrees(phase_1x),
+        "Stability": stability,
+        "RPM": rpm,
+        "timestamp": signal.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    }
+
+# =========================
+# LOAD SIGNALS
+# =========================
+signals = st.session_state.get("signals", [])
+
+if not signals:
+    st.warning("No signals loaded")
+    st.stop()
+
+# =========================
+# SIDEBAR
+# =========================
+signal_names = [s["name"] for s in signals]
+
+selected_names = st.sidebar.multiselect(
+    "Select Signals",
+    signal_names,
+    default=signal_names[:3]
 )
 
-if st.session_state.wm_phase_export_png_key != export_state_key:
-    st.session_state.wm_phase_export_png_bytes = None
-    st.session_state.wm_phase_export_png_key = export_state_key
-    st.session_state.wm_phase_export_error = None
+selected_signals = [s for s in signals if s["name"] in selected_names]
 
-st.markdown('<div class="wm-phase-shell">', unsafe_allow_html=True)
-st.markdown('<div class="wm-phase-title">Phase Comparison</div>', unsafe_allow_html=True)
+if not selected_signals:
+    st.warning("Select at least one signal")
+    st.stop()
 
-for row_start in range(0, len(summary_rows), 3):
-    chunk = summary_rows[row_start:row_start + 3]
-    cols = st.columns(3, gap="large")
-    for i, row in enumerate(chunk):
-        with cols[i]:
-            st.markdown(build_summary_card_html(pd.Series(row)), unsafe_allow_html=True)
+# =========================
+# METRICS
+# =========================
+metrics = [compute_phase_metrics(s) for s in selected_signals]
+df = pd.DataFrame(metrics)
 
-st.dataframe(summary_df, use_container_width=True, hide_index=True)
+# =========================
+# HEADER
+# =========================
+meta = {
+    "machine": "Watermelon Machine",
+    "point": "Phase Comparison",
+    "config": "Phase Analysis | 1X",
+    "rpm": df["RPM"].iloc[0],
+    "peak": df["1X Amplitude"].iloc[0],
+    "timestamp": df["timestamp"].iloc[0]
+}
 
-st.markdown('<div class="wm-phase-export-actions"></div>', unsafe_allow_html=True)
+fig_header = go.Figure()
+fig_header.update_layout(height=120, margin=dict(l=0, r=0, t=0, b=0))
+_draw_top_strip(fig_header, meta)
 
-left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
+st.plotly_chart(fig_header, use_container_width=True)
 
-with col_export1:
-    if st.button("Prepare PNG HD", use_container_width=True):
-        with st.spinner("Generating HD export..."):
-            png_bytes, export_error = build_export_png_bytes(summary_df)
-            st.session_state.wm_phase_export_png_bytes = png_bytes
-            st.session_state.wm_phase_export_error = export_error
+# =========================
+# TABLE (MAIN UI)
+# =========================
+st.markdown("### 1X Phase Comparison")
 
-with col_export2:
-    if st.session_state.wm_phase_export_png_bytes is not None:
-        st.download_button(
-            "Download PNG HD",
-            data=st.session_state.wm_phase_export_png_bytes,
-            file_name="watermelon_phase_analysis_hd.png",
-            mime="image/png",
-            use_container_width=True,
+df_display = df.drop(columns=["timestamp"])
+
+st.dataframe(
+    df_display,
+    use_container_width=True,
+    height=400
+)
+
+# =========================
+# EXPORT PNG (HEADER + TABLE)
+# =========================
+def export_table_png(df):
+    fig = go.Figure()
+
+    # header strip
+    _draw_top_strip(fig, meta)
+
+    # table
+    fig.add_trace(go.Table(
+        header=dict(
+            values=list(df.columns),
+            fill_color="#1ea7ff",
+            font=dict(color="white", size=12),
+            align="center"
+        ),
+        cells=dict(
+            values=[df[col] for col in df.columns],
+            fill_color="white",
+            align="center"
         )
-    else:
-        st.button("Download PNG HD", disabled=True, use_container_width=True)
+    ))
 
-if st.session_state.wm_phase_export_error:
-    st.warning(f"PNG export error: {st.session_state.wm_phase_export_error}")
+    fig.update_layout(
+        width=1400,
+        height=600,
+        margin=dict(l=20, r=20, t=60, b=20)
+    )
 
-st.markdown("</div>", unsafe_allow_html=True)
+    return fig
+
+st.markdown("")
+
+if st.button("Export PNG"):
+    fig = export_table_png(df_display)
+
+    buf = BytesIO()
+    fig.write_image(buf, format="png", scale=3)
+
+    st.download_button(
+        "Download PNG",
+        buf.getvalue(),
+        "phase_1x_dashboard.png",
+        "image/png"
+    )
