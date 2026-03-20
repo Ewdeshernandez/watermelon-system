@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import streamlit as st
 
-from core.auth import render_user_menu, require_login
 from core.ui.theme import apply_watermelon_theme
 from core.version import VERSION
 
@@ -18,8 +17,10 @@ st.set_page_config(
 st.set_option("client.toolbarMode", "minimal")
 st.set_option("client.showSidebarNavigation", False)
 
-require_login()
-render_user_menu()
+# DEBUG TEMPORAL: auth desactivada para validar entrypoint y navegación
+# from core.auth import render_user_menu, require_login
+# require_login()
+# render_user_menu()
 apply_watermelon_theme()
 
 
