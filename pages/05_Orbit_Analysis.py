@@ -40,27 +40,44 @@ def apply_page_style():
             border-right: 1px solid #cbd5e1;
         }
 
-        .wm-export-note {
-            font-size: 0.95rem;
-            color: #374151;
-            padding-top: 0.30rem;
-        }
-
-        .wm-top-note {
-            font-size: 0.93rem;
-            color: #475569;
-            margin-bottom: 0.20rem;
-        }
-
         div[data-testid="stNumberInput"] input {
             font-family: monospace;
         }
 
-        div[data-testid="stButton"] > button,
-        div[data-testid="stDownloadButton"] > button {
-            min-height: 48px;
-            border-radius: 12px;
+        section.main div[data-testid="stButton"] > button,
+        section.main div[data-testid="stDownloadButton"] > button {
+            min-height: 52px;
+            border-radius: 16px;
             font-weight: 700;
+            border: 1px solid #bfd8ff !important;
+            background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%) !important;
+            color: #2563eb !important;
+            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
+            transition: all 0.18s ease;
+        }
+
+        section.main div[data-testid="stButton"] > button:hover,
+        section.main div[data-testid="stDownloadButton"] > button:hover {
+            border-color: #93c5fd !important;
+            background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%) !important;
+            color: #1d4ed8 !important;
+            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
+        }
+
+        section.main div[data-testid="stButton"] > button *,
+        section.main div[data-testid="stDownloadButton"] > button *,
+        section.main div[data-testid="stButton"] > button p,
+        section.main div[data-testid="stDownloadButton"] > button p,
+        section.main div[data-testid="stButton"] > button span,
+        section.main div[data-testid="stDownloadButton"] > button span,
+        section.main div[data-testid="stButton"] > button div,
+        section.main div[data-testid="stDownloadButton"] > button div {
+            color: #2563eb !important;
+        }
+
+        .wm-export-actions {
+            margin-top: 0.85rem;
+            margin-bottom: 0.25rem;
         }
         </style>
         """,
@@ -642,11 +659,6 @@ result = compute_orbit(
 
 logo_uri = get_logo_data_uri(LOGO_PATH)
 
-st.markdown(
-    f'<div class="wm-top-note">Vista premium de órbita habilitada: samples/rev automáticos desde header real del CSV = <b>{int(result.samples_per_rev)}</b> · revoluciones mostradas = <b>{int(result.revolutions_available)}</b> · escala = <b>{scale_mode}</b>.</div>',
-    unsafe_allow_html=True,
-)
-
 fig = build_orbit_figure(
     orbit_result=result,
     ui_filter_mode=ui_filter_mode,
@@ -679,7 +691,16 @@ if st.session_state.wm_orbit_export_png_key != export_state_key:
     st.session_state.wm_orbit_export_png_key = export_state_key
     st.session_state.wm_orbit_export_error = None
 
-col_export1, col_export2, col_export3 = st.columns([1.35, 1.35, 4.30])
+st.plotly_chart(
+    fig,
+    use_container_width=True,
+    config={"displaylogo": False},
+    key="wm_orbit_plot_main_view",
+)
+
+st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
+
+left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
 
 with col_export1:
     if st.button("Prepare PNG HD", use_container_width=True):
@@ -700,18 +721,5 @@ with col_export2:
     else:
         st.button("Download PNG HD", disabled=True, use_container_width=True)
 
-with col_export3:
-    st.markdown(
-        f'<div class="wm-export-note">Motor Orbit blindado para Direct, 1X y 2X usando el valor real de <b>Number of Revs</b> del CSV. Esto evita errores por nombres de archivo tipo REV32.</div>',
-        unsafe_allow_html=True,
-    )
-
 if st.session_state.wm_orbit_export_error:
     st.warning(f"PNG export error: {st.session_state.wm_orbit_export_error}")
-
-st.plotly_chart(
-    fig,
-    use_container_width=True,
-    config={"displaylogo": False},
-    key="wm_orbit_plot_main_view",
-)

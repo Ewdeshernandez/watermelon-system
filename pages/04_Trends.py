@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-from core.auth import require_login, render_user_menu
-
-require_login()
-render_user_menu()
-
 import base64
 import hashlib
 import math
@@ -18,13 +13,17 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from core.auth import require_login, render_user_menu
+
+st.set_page_config(page_title="Watermelon System | Trends", layout="wide")
+
+require_login()
+render_user_menu()
 
 # ============================================================
 # WATERMELON SYSTEM — TRENDS VIEWER
 # Premium industrial trend module
 # ============================================================
-
-st.set_page_config(page_title="Watermelon System | Trends", layout="wide")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOGO_PATH = PROJECT_ROOT / "assets" / "watermelon_logo.png"
@@ -50,51 +49,10 @@ def apply_page_style() -> None:
             border-right: 1px solid #cbd5e1;
         }
 
-        .wm-export-note {
-            font-size: 0.95rem;
-            color: #374151;
-            padding-top: 0.30rem;
-        }
-
-        .wm-top-note {
-            font-size: 0.93rem;
-            color: #475569;
-            margin-bottom: 0.20rem;
-        }
-
-        .wm-cursor-shell {
-            background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,255,255,0.78));
-            border: 1px solid #dbe3ee;
-            border-radius: 18px;
-            padding: 14px 16px 12px 16px;
-            margin-bottom: 12px;
-            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
-        }
-
-        .wm-cursor-title {
-            font-size: 1.02rem;
-            font-weight: 800;
-            color: #0f172a;
-            margin-bottom: 2px;
-        }
-
-        .wm-cursor-subtitle {
-            font-size: 0.88rem;
-            color: #64748b;
-            margin-bottom: 10px;
-        }
-
         div[data-testid="stNumberInput"] input,
         div[data-testid="stTextInput"] input,
         div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
             font-family: monospace;
-        }
-
-        div[data-testid="stButton"] > button,
-        div[data-testid="stDownloadButton"] > button {
-            min-height: 48px;
-            border-radius: 12px;
-            font-weight: 700;
         }
 
         div[data-testid="stFileUploader"] section {
@@ -113,6 +71,64 @@ def apply_page_style() -> None:
             border: 1px solid #dbe3ee;
             border-radius: 16px;
             background: rgba(255,255,255,0.65);
+        }
+
+        .wm-control-shell {
+            background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,255,255,0.78));
+            border: 1px solid #dbe3ee;
+            border-radius: 18px;
+            padding: 14px 16px 12px 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+        }
+
+        .wm-control-title {
+            font-size: 1.02rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 2px;
+        }
+
+        .wm-control-subtitle {
+            font-size: 0.88rem;
+            color: #64748b;
+            margin-bottom: 10px;
+        }
+
+        section.main div[data-testid="stButton"] > button,
+        section.main div[data-testid="stDownloadButton"] > button {
+            min-height: 52px;
+            border-radius: 16px;
+            font-weight: 700;
+            border: 1px solid #bfd8ff !important;
+            background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%) !important;
+            color: #2563eb !important;
+            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
+            transition: all 0.18s ease;
+        }
+
+        section.main div[data-testid="stButton"] > button:hover,
+        section.main div[data-testid="stDownloadButton"] > button:hover {
+            border-color: #93c5fd !important;
+            background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%) !important;
+            color: #1d4ed8 !important;
+            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
+        }
+
+        section.main div[data-testid="stButton"] > button *,
+        section.main div[data-testid="stDownloadButton"] > button *,
+        section.main div[data-testid="stButton"] > button p,
+        section.main div[data-testid="stDownloadButton"] > button p,
+        section.main div[data-testid="stButton"] > button span,
+        section.main div[data-testid="stDownloadButton"] > button span,
+        section.main div[data-testid="stButton"] > button div,
+        section.main div[data-testid="stDownloadButton"] > button div {
+            color: #2563eb !important;
+        }
+
+        .wm-export-actions {
+            margin-top: 0.85rem;
+            margin-bottom: 0.25rem;
         }
         </style>
         """,
@@ -182,7 +198,6 @@ def safe_datetime(value: Any) -> Optional[pd.Timestamp]:
 
 
 def color_for_index(index: int) -> str:
-    # Colores de señales sin rojo ni amarillo
     palette = [
         "#5b9cf0",
         "#10b981",
@@ -1252,75 +1267,9 @@ st.session_state.wm_tr_x_manual_end = get_valid_time_label(st.session_state.wm_t
 x_axis_manual_start: Optional[pd.Timestamp] = None
 x_axis_manual_end: Optional[pd.Timestamp] = None
 
-st.markdown(
-    f'<div class="wm-top-note">Premium trend viewer enabled: multi-variable overlay · metric = <b>{metric_key}</b> · alarm colors reserved exclusively for Warning/Danger · X-axis = <b>{x_axis_mode}</b> · Y-axis = <b>{y_axis_mode}</b>.</div>',
-    unsafe_allow_html=True,
-)
-
 if x_axis_mode == "Manual":
-    with st.expander("X-Axis Manual Window", expanded=True):
-        st.markdown(
-            """
-            <div class="wm-cursor-shell">
-                <div class="wm-cursor-title">X-Axis Window</div>
-                <div class="wm-cursor-subtitle">Ajusta el inicio y fin del tiempo con sliders precisos, sin escribir fechas manualmente.</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        col_x1, col_x2 = st.columns(2)
-        with col_x1:
-            st.select_slider(
-                "X Start",
-                options=time_labels,
-                key="wm_tr_x_manual_start",
-            )
-        with col_x2:
-            st.select_slider(
-                "X End",
-                options=time_labels,
-                key="wm_tr_x_manual_end",
-            )
-
     x_axis_manual_start = label_to_ts(st.session_state.wm_tr_x_manual_start)
     x_axis_manual_end = label_to_ts(st.session_state.wm_tr_x_manual_end)
-
-with st.expander("Cursor Controls", expanded=True):
-    st.markdown(
-        """
-        <div class="wm-cursor-shell">
-            <div class="wm-cursor-title">Cursor Controls</div>
-            <div class="wm-cursor-subtitle">Referencias temporales finas para comparar crecimiento real de vibración entre puntos y momentos.</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    c1, c2 = st.columns(2)
-
-    with c1:
-        st.select_slider(
-            "A Initial",
-            options=time_labels,
-            key="wm_tr_cursor_a_initial",
-        )
-        st.select_slider(
-            "A Current",
-            options=time_labels,
-            key="wm_tr_cursor_a_current",
-        )
-
-    with c2:
-        st.select_slider(
-            "B Initial",
-            options=time_labels,
-            key="wm_tr_cursor_b_initial",
-        )
-        st.select_slider(
-            "B Current",
-            options=time_labels,
-            key="wm_tr_cursor_b_current",
-        )
 
 cursor_map = {
     "A Initial": label_to_ts(st.session_state.wm_tr_cursor_a_initial),
@@ -1388,9 +1337,86 @@ if st.session_state.wm_tr_export_png_key != export_state_key:
 
 
 # ------------------------------------------------------------
-# Export row
+# Main chart
 # ------------------------------------------------------------
-col_export1, col_export2, col_export3 = st.columns([1.35, 1.35, 4.30])
+st.plotly_chart(
+    fig,
+    use_container_width=True,
+    config={"displaylogo": False},
+    key="wm_trends_plot_main_view",
+)
+
+# ------------------------------------------------------------
+# Bottom controls
+# ------------------------------------------------------------
+if x_axis_mode == "Manual":
+    with st.expander("X-Axis Manual Window", expanded=False):
+        st.markdown(
+            """
+            <div class="wm-control-shell">
+                <div class="wm-control-title">X-Axis Window</div>
+                <div class="wm-control-subtitle">Ajusta el inicio y fin del tiempo con sliders precisos.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        col_x1, col_x2 = st.columns(2)
+        with col_x1:
+            st.select_slider(
+                "X Start",
+                options=time_labels,
+                key="wm_tr_x_manual_start",
+            )
+        with col_x2:
+            st.select_slider(
+                "X End",
+                options=time_labels,
+                key="wm_tr_x_manual_end",
+            )
+
+with st.expander("Cursor Controls", expanded=False):
+    st.markdown(
+        """
+        <div class="wm-control-shell">
+            <div class="wm-control-title">Cursor Controls</div>
+            <div class="wm-control-subtitle">Referencias temporales A/B para comparar comportamiento entre dos momentos.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.select_slider(
+            "A Initial",
+            options=time_labels,
+            key="wm_tr_cursor_a_initial",
+        )
+        st.select_slider(
+            "A Current",
+            options=time_labels,
+            key="wm_tr_cursor_a_current",
+        )
+
+    with c2:
+        st.select_slider(
+            "B Initial",
+            options=time_labels,
+            key="wm_tr_cursor_b_initial",
+        )
+        st.select_slider(
+            "B Current",
+            options=time_labels,
+            key="wm_tr_cursor_b_current",
+        )
+
+# ------------------------------------------------------------
+# Bottom export actions
+# ------------------------------------------------------------
+st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
+
+left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
 
 with col_export1:
     if st.button("Prepare PNG HD", use_container_width=True):
@@ -1411,22 +1437,5 @@ with col_export2:
     else:
         st.button("Download PNG HD", disabled=True, use_container_width=True)
 
-with col_export3:
-    st.markdown(
-        '<div class="wm-export-note">Premium trend view. Cursor A/B with Initial and Current references. Trend Information keeps only cursor diagnostics and percentage change A/B.</div>',
-        unsafe_allow_html=True,
-    )
-
 if st.session_state.wm_tr_export_error:
     st.warning(f"PNG export error: {st.session_state.wm_tr_export_error}")
-
-
-# ------------------------------------------------------------
-# Main chart
-# ------------------------------------------------------------
-st.plotly_chart(
-    fig,
-    use_container_width=True,
-    config={"displaylogo": False},
-    key="wm_trends_plot_main_view",
-)
