@@ -30,7 +30,7 @@ def _draw_top_strip(fig, meta):
             dict(
                 source=logo_uri,
                 xref="paper", yref="paper",
-                x=0.01, y=1.1,
+                x=0.01, y=1.0,  # FIX (antes 1.1)
                 sizex=0.08, sizey=0.08,
                 xanchor="left", yanchor="top"
             )
@@ -46,7 +46,7 @@ def _draw_top_strip(fig, meta):
     )
 
     fig.add_annotation(
-        x=0.12, y=1.08,
+        x=0.12, y=0.98,  # FIX (antes 1.08)
         xref="paper", yref="paper",
         text=text,
         showarrow=False,
@@ -61,7 +61,6 @@ def compute_phase_metrics(signal):
     x = np.array(signal["y"])
     rpm = np.mean(signal.get("rpm", [1800]))
 
-    # 1X approx
     fft_vals = np.fft.fft(x)
     amp_1x = np.max(x) - np.min(x)
     phase_1x = np.angle(fft_vals[1])
@@ -111,7 +110,7 @@ metrics = [compute_phase_metrics(s) for s in selected_signals]
 df = pd.DataFrame(metrics)
 
 # =========================
-# HEADER
+# HEADER (FIXED)
 # =========================
 meta = {
     "machine": "Watermelon Machine",
@@ -123,13 +122,26 @@ meta = {
 }
 
 fig_header = go.Figure()
-fig_header.update_layout(height=120, margin=dict(l=0, r=0, t=0, b=0))
+
+# 🔥 FIX CRÍTICO
+fig_header.add_trace(go.Scatter(x=[0], y=[0], mode="markers", marker_opacity=0))
+
+fig_header.update_xaxes(visible=False)
+fig_header.update_yaxes(visible=False)
+
+fig_header.update_layout(
+    height=120,
+    margin=dict(l=0, r=0, t=0, b=0),
+    plot_bgcolor="white",
+    paper_bgcolor="white"
+)
+
 _draw_top_strip(fig_header, meta)
 
 st.plotly_chart(fig_header, use_container_width=True)
 
 # =========================
-# TABLE (MAIN UI)
+# TABLE
 # =========================
 st.markdown("### 1X Phase Comparison")
 
@@ -142,15 +154,17 @@ st.dataframe(
 )
 
 # =========================
-# EXPORT PNG (HEADER + TABLE)
+# EXPORT PNG
 # =========================
 def export_table_png(df):
     fig = go.Figure()
 
-    # header strip
+    fig.add_trace(go.Scatter(x=[0], y=[0], mode="markers", marker_opacity=0))
+    fig.update_xaxes(visible=False)
+    fig.update_yaxes(visible=False)
+
     _draw_top_strip(fig, meta)
 
-    # table
     fig.add_trace(go.Table(
         header=dict(
             values=list(df.columns),
@@ -172,8 +186,6 @@ def export_table_png(df):
     )
 
     return fig
-
-st.markdown("")
 
 if st.button("Export PNG"):
     fig = export_table_png(df_display)
