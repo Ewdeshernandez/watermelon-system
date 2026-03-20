@@ -3,4 +3,4 @@ pandas
 plotly
 streamlit
 scipy
-kaleido
+kaleido==0.2.1
