@@ -5,6 +5,8 @@ from core.auth import require_login, render_user_menu
 require_login()
 render_user_menu()
 
+from io import BytesIO
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -116,7 +118,112 @@ def format_number(value, digits=3, fallback="—") -> str:
         return fallback
 
 
+def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
+    export_fig = go.Figure()
+
+    for trace in fig.data:
+        if isinstance(trace, go.Scattergl):
+            trace_json = trace.to_plotly_json()
+            export_fig.add_trace(
+                go.Scatter(
+                    x=np.array(trace_json.get("x")) if trace_json.get("x") is not None else None,
+                    y=np.array(trace_json.get("y")) if trace_json.get("y") is not None else None,
+                    mode=trace_json.get("mode"),
+                    line=trace_json.get("line"),
+                    marker=trace_json.get("marker"),
+                    fill=trace_json.get("fill"),
+                    fillcolor=trace_json.get("fillcolor"),
+                    hovertemplate=trace_json.get("hovertemplate"),
+                    showlegend=trace_json.get("showlegend"),
+                    connectgaps=trace_json.get("connectgaps", False),
+                    name=trace_json.get("name"),
+                )
+            )
+        else:
+            export_fig.add_trace(trace)
+
+    export_fig.update_layout(fig.layout)
+    return export_fig
+
+
+def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
+    fig = go.Figure(export_fig)
+
+    new_data = []
+    for trace in fig.data:
+        trace_json = trace.to_plotly_json()
+
+        if trace_json.get("type") == "scatter":
+            mode = trace_json.get("mode", "")
+
+            if "lines" in mode:
+                line = dict(trace_json.get("line", {}) or {})
+                line["width"] = max(4.8, float(line.get("width", 1.0)) * 2.8)
+                trace_json["line"] = line
+
+            if "markers" in mode:
+                marker = dict(trace_json.get("marker", {}) or {})
+                marker["size"] = max(14, float(marker.get("size", 6)) * 1.9)
+                trace_json["marker"] = marker
+
+        elif trace_json.get("type") == "scatterpolar":
+            mode = trace_json.get("mode", "")
+
+            if "lines" in mode:
+                line = dict(trace_json.get("line", {}) or {})
+                line["width"] = max(4.8, float(line.get("width", 1.0)) * 2.8)
+                trace_json["line"] = line
+
+            if "markers" in mode:
+                marker = dict(trace_json.get("marker", {}) or {})
+                marker["size"] = max(14, float(marker.get("size", 6)) * 1.9)
+                trace_json["marker"] = marker
+
+        trace_type = trace_json.get("type")
+        if trace_type == "scatterpolar":
+            new_data.append(go.Scatterpolar(**trace_json))
+        else:
+            new_data.append(go.Scatter(**trace_json))
+
+    fig = go.Figure(data=new_data, layout=fig.layout)
+
+    fig.update_layout(
+        width=4200,
+        height=2200,
+        margin=dict(l=120, r=90, t=180, b=120),
+        paper_bgcolor="#f3f4f6",
+        plot_bgcolor="#f8fafc",
+        font=dict(size=30, color="#111827"),
+    )
+
+    fig.update_xaxes(title_font=dict(size=40), tickfont=dict(size=26))
+    fig.update_yaxes(title_font=dict(size=40), tickfont=dict(size=26))
+
+    for ann in fig.layout.annotations:
+        if ann.font is not None:
+            ann.font.size = max(22, int((ann.font.size or 12) * 2.05))
+
+    return fig
+
+
+def build_export_png_bytes(fig: go.Figure):
+    try:
+        export_fig = _build_export_safe_figure(fig)
+        export_fig = _scale_export_figure(export_fig)
+        png_bytes = export_fig.to_image(format="png", width=4200, height=2200, scale=2)
+        return png_bytes, None
+    except Exception as e:
+        return None, str(e)
+
+
 apply_page_style()
+
+if "wm_phase_export_png_bytes" not in st.session_state:
+    st.session_state.wm_phase_export_png_bytes = None
+if "wm_phase_export_png_key" not in st.session_state:
+    st.session_state.wm_phase_export_png_key = None
+if "wm_phase_export_error" not in st.session_state:
+    st.session_state.wm_phase_export_error = None
 
 if "signals" not in st.session_state or not st.session_state["signals"]:
     st.warning("No signals loaded.")
@@ -296,24 +403,47 @@ with st.expander("Technical Diagnostics", expanded=False):
         f"X / {debug.get('variable_hint_revs', '-')}"
     )
 
-csv_export = pd.DataFrame(
-    {
-        "Revolution": rev_idx,
-        "Amplitude_PP": amp_per_rev,
-        "Phase_deg": phase_per_rev,
-    }
+export_state_key = "|".join(
+    [
+        selected_signal,
+        format_number(result.get("mean_amplitude_pp"), 6),
+        format_number(result.get("mean_phase_deg"), 6),
+        format_number(result.get("phase_stability_deg"), 6),
+        format_number(result.get("mean_rpm", 0.0), 6),
+        str(len(phase_per_rev)),
+    ]
 )
-csv_bytes = csv_export.to_csv(index=False).encode("utf-8")
+
+if st.session_state.wm_phase_export_png_key != export_state_key:
+    st.session_state.wm_phase_export_png_bytes = None
+    st.session_state.wm_phase_export_png_key = export_state_key
+    st.session_state.wm_phase_export_error = None
+
+phase_export_fig = go.Figure(phase_fig)
+phase_export_fig.update_layout(title="Phase Analysis")
 
 st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
-left_pad, col_export, right_pad = st.columns([2.7, 1.6, 2.7])
+left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
 
-with col_export:
-    st.download_button(
-        label="Export Phase CSV",
-        data=csv_bytes,
-        file_name=f"{selected_signal}_phase_analysis.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
+with col_export1:
+    if st.button("Prepare PNG HD", use_container_width=True):
+        with st.spinner("Generating HD export..."):
+            png_bytes, export_error = build_export_png_bytes(phase_export_fig)
+            st.session_state.wm_phase_export_png_bytes = png_bytes
+            st.session_state.wm_phase_export_error = export_error
+
+with col_export2:
+    if st.session_state.wm_phase_export_png_bytes is not None:
+        st.download_button(
+            "Download PNG HD",
+            data=st.session_state.wm_phase_export_png_bytes,
+            file_name=f"{selected_signal}_phase_analysis_hd.png",
+            mime="image/png",
+            use_container_width=True,
+        )
+    else:
+        st.button("Download PNG HD", disabled=True, use_container_width=True)
+
+if st.session_state.wm_phase_export_error:
+    st.warning(f"PNG export error: {st.session_state.wm_phase_export_error}")
