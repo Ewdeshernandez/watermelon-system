@@ -5,8 +5,6 @@ from core.auth import require_login, render_user_menu
 require_login()
 render_user_menu()
 
-from io import BytesIO
-
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -118,12 +116,6 @@ def apply_page_style() -> None:
             line-height: 1.05;
         }
 
-        .wm-phase-sub {
-            font-size: 0.88rem;
-            color: #64748b;
-            margin-top: 2px;
-        }
-
         .wm-phase-status {
             display: inline-block;
             margin-top: 14px;
@@ -140,12 +132,6 @@ def apply_page_style() -> None:
         .wm-phase-export-actions {
             margin-top: 1rem;
             margin-bottom: 0.2rem;
-        }
-
-        div[data-testid="stExpander"] {
-            border: 1px solid #dbe3ee;
-            border-radius: 16px;
-            background: rgba(255,255,255,0.65);
         }
         </style>
         """,
@@ -203,36 +189,35 @@ def build_summary_card_html(row: pd.Series) -> str:
 
 
 def build_export_safe_table_figure(summary_df: pd.DataFrame) -> go.Figure:
-    header_values = list(summary_df.columns)
-    cell_values = [summary_df[col].tolist() for col in summary_df.columns]
+    export_df = summary_df.copy()
 
     fig = go.Figure(
         data=[
             go.Table(
                 header=dict(
-                    values=header_values,
+                    values=list(export_df.columns),
                     fill_color="#eaf3ff",
                     line_color="#dbe3ee",
                     align="left",
                     font=dict(color="#0f172a", size=22, family="Arial"),
-                    height=42,
+                    height=44,
                 ),
                 cells=dict(
-                    values=cell_values,
+                    values=[export_df[col].tolist() for col in export_df.columns],
                     fill_color="#ffffff",
                     line_color="#e5e7eb",
                     align="left",
                     font=dict(color="#111827", size=20, family="Arial"),
-                    height=38,
+                    height=40,
                 ),
             )
         ]
     )
 
-    n_rows = max(len(summary_df), 1)
+    n_rows = max(len(export_df), 1)
     fig.update_layout(
         width=4200,
-        height=max(1200, 280 + n_rows * 74),
+        height=max(1100, 260 + n_rows * 90),
         margin=dict(l=60, r=60, t=70, b=50),
         paper_bgcolor="#f3f4f6",
         plot_bgcolor="#f3f4f6",
@@ -243,7 +228,12 @@ def build_export_safe_table_figure(summary_df: pd.DataFrame) -> go.Figure:
 def build_export_png_bytes(summary_df: pd.DataFrame):
     try:
         export_fig = build_export_safe_table_figure(summary_df)
-        png_bytes = export_fig.to_image(format="png", width=4200, height=export_fig.layout.height, scale=2)
+        png_bytes = export_fig.to_image(
+            format="png",
+            width=4200,
+            height=export_fig.layout.height,
+            scale=2,
+        )
         return png_bytes, None
     except Exception as e:
         return None, str(e)
@@ -263,7 +253,6 @@ if "signals" not in st.session_state or not st.session_state["signals"]:
     st.stop()
 
 signal_names = list(st.session_state["signals"].keys())
-
 default_selection = signal_names[: min(4, len(signal_names))]
 
 with st.sidebar:
@@ -280,16 +269,10 @@ if not selected_signals:
     st.stop()
 
 summary_rows = []
-diagnostics_rows = []
 
 for signal_name in selected_signals:
     signal = st.session_state["signals"][signal_name]
     result = analyze_phase(signal)
-
-    phase_per_rev = np.asarray(result.get("phase_per_rev_deg", []), dtype=float)
-    amp_per_rev = np.asarray(result.get("amplitude_pp_per_rev", []), dtype=float)
-    complex_1x = np.asarray(result.get("complex_1x_per_rev", []))
-    debug = result.get("debug", {})
 
     mean_amp = result.get("mean_amplitude_pp")
     mean_phase = result.get("mean_phase_deg")
@@ -299,33 +282,15 @@ for signal_name in selected_signals:
     summary_rows.append(
         {
             "Signal": signal_name,
-            "1X Amplitude (PP)": f'{format_number(mean_amp, 3)}',
-            "1X Phase (deg)": f'{format_number(mean_phase, 2)}',
-            "Phase Stability (deg)": f'{format_number(phase_stability, 2)}',
-            "Mean RPM": f'{format_number(mean_rpm, 1)}',
+            "1X Amplitude (PP)": format_number(mean_amp, 3),
+            "1X Phase (deg)": format_number(mean_phase, 2),
+            "Phase Stability (deg)": format_number(phase_stability, 2),
+            "Mean RPM": format_number(mean_rpm, 1),
             "Status": stability_badge_value(phase_stability),
         }
     )
 
-    diagnostics_rows.append(
-        {
-            "Signal": signal_name,
-            "Mode": result.get("mode", "-"),
-            "Samples/Rev": int(result.get("samples_per_rev", 0) or 0),
-            "Revolutions": int(result.get("n_revs", 0) or 0),
-            "Sync Source": str(debug.get("sync_source", "-")),
-            "Header Revs": int(debug.get("header_number_of_revs", 0) or 0),
-            "Time-Inferred Revs": int(debug.get("inferred_revs_from_time", 0) or 0),
-            "Mean Phase": format_number(mean_phase, 2),
-            "Phase Stability": format_number(phase_stability, 2),
-            "Mean Amplitude": format_number(mean_amp, 3),
-            "C1 Count": int(len(complex_1x)),
-            "Phase Convention": str(debug.get("phase_convention", "-")),
-        }
-    )
-
 summary_df = pd.DataFrame(summary_rows)
-diagnostics_df = pd.DataFrame(diagnostics_rows)
 
 export_state_key = "|".join(
     [
@@ -350,9 +315,6 @@ for row_start in range(0, len(summary_rows), 3):
             st.markdown(build_summary_card_html(pd.Series(row)), unsafe_allow_html=True)
 
 st.dataframe(summary_df, use_container_width=True, hide_index=True)
-
-with st.expander("Technical Diagnostics", expanded=False):
-    st.dataframe(diagnostics_df, use_container_width=True, hide_index=True)
 
 st.markdown('<div class="wm-phase-export-actions"></div>', unsafe_allow_html=True)
 
