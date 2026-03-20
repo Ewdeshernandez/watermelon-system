@@ -1,83 +1,95 @@
 import streamlit as st
 
+def apply_theme():
+    st.markdown("""
+    <style>
 
-def apply_watermelon_theme() -> None:
-    st.markdown(
-        """
-        <style>
-        .main > div {
-            padding-top: 0.45rem;
-        }
+    /* ===== GLOBAL ===== */
+    html, body, [class*="css"] {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        color: #0f172a;
+    }
 
-        .stApp {
-            background:
-                radial-gradient(circle at top left, rgba(59,130,246,0.05), transparent 22%),
-                radial-gradient(circle at top right, rgba(14,165,233,0.04), transparent 18%),
-                linear-gradient(180deg, #f4f6f8 0%, #eef2f7 100%);
-        }
+    /* ===== SIDEBAR ===== */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #4FA3FF 0%, #1E6EDC 100%);
+        padding-top: 20px;
+    }
 
-        section[data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #edf1f6 0%, #e6ebf2 100%);
-            border-right: 1px solid #d3dbe5;
-        }
+    section[data-testid="stSidebar"] * {
+        color: white !important;
+        font-weight: 500;
+    }
 
-        section[data-testid="stSidebar"] * {
-            color: #394150;
-        }
+    /* Botones sidebar (nav) */
+    .stSidebar button {
+        background: transparent;
+        border: none;
+        text-align: left;
+        padding: 12px 10px;
+        border-radius: 10px;
+        font-size: 15px;
+        transition: 0.2s;
+    }
 
-        .block-container {
-            padding-top: 0.65rem;
-            padding-bottom: 1.6rem;
-        }
+    .stSidebar button:hover {
+        background: rgba(255,255,255,0.15);
+    }
 
-        div[data-testid="stButton"] > button,
-        div[data-testid="stDownloadButton"] > button {
-            min-height: 48px;
-            border-radius: 14px;
-            font-weight: 700;
-            border: 1px solid #d5dce6;
-            box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
-        }
+    /* ===== HEADER LIMPIO ===== */
+    .block-container {
+        padding-top: 2rem;
+    }
 
-        div[data-testid="stButton"] > button:hover,
-        div[data-testid="stDownloadButton"] > button:hover {
-            border-color: #b9c6d8;
-            box-shadow: 0 8px 24px rgba(37, 99, 235, 0.08);
-        }
+    /* ===== HERO ===== */
+    .wm-hero {
+        background: #f8fafc;
+        border-radius: 16px;
+        padding: 40px;
+        border: 1px solid #e2e8f0;
+    }
 
-        div[data-testid="stFileUploader"] {
-            background: rgba(255,255,255,0.78);
-            border: 1px solid #d8e0ea;
-            border-radius: 22px;
-            padding: 10px 12px 4px 12px;
-            box-shadow: 0 10px 30px rgba(15,23,42,0.04);
-        }
+    .wm-title {
+        font-size: 42px;
+        font-weight: 700;
+        letter-spacing: -0.5px;
+    }
 
-        div[data-testid="stNumberInput"] input,
-        div[data-testid="stTextInput"] input {
-            border-radius: 12px !important;
-        }
+    .wm-subtitle {
+        font-size: 16px;
+        color: #64748b;
+        margin-top: 8px;
+    }
 
-        div[data-testid="stSelectbox"] > div,
-        div[data-testid="stMultiSelect"] > div {
-            border-radius: 12px !important;
-        }
+    /* ===== GRID ===== */
+    .wm-grid {
+        margin-top: 30px;
+    }
 
-        .wm-surface {
-            background: rgba(255,255,255,0.82);
-            border: 1px solid #dbe3ec;
-            border-radius: 22px;
-            padding: 18px 20px;
-            box-shadow:
-                0 10px 30px rgba(15,23,42,0.04),
-                inset 0 1px 0 rgba(255,255,255,0.75);
-        }
+    .wm-card {
+        background: white;
+        border-radius: 14px;
+        padding: 20px;
+        border: 1px solid #e2e8f0;
+        transition: 0.2s;
+    }
 
-        .wm-note {
-            color: #536174;
-            font-size: 0.97rem;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    .wm-card:hover {
+        border: 1px solid #cbd5f5;
+        transform: translateY(-2px);
+    }
+
+    .wm-card-title {
+        font-size: 16px;
+        font-weight: 600;
+    }
+
+    .wm-card-button button {
+        width: 100%;
+        border-radius: 10px;
+        height: 38px;
+        font-weight: 500;
+    }
+
+    </style>
+    """, unsafe_allow_html=True)
