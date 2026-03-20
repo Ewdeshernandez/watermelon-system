@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-from core.auth import require_login, render_user_menu
-
-require_login()
-render_user_menu()
-
 import base64
 import hashlib
 import math
@@ -18,12 +13,16 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from core.auth import require_login, render_user_menu
+
+st.set_page_config(page_title="Watermelon System | Waveform", layout="wide")
+
+require_login()
+render_user_menu()
 
 # ============================================================
 # WATERMELON SYSTEM — TIME WAVEFORM VIEWER
 # ============================================================
-
-st.set_page_config(page_title="Watermelon System | Waveform", layout="wide")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOGO_PATH = PROJECT_ROOT / "assets" / "watermelon_logo.png"
@@ -49,27 +48,51 @@ def apply_page_style() -> None:
             border-right: 1px solid #cbd5e1;
         }
 
-        .wm-export-note {
-            font-size: 0.95rem;
-            color: #374151;
-            padding-top: 0.30rem;
-        }
-
-        .wm-top-note {
-            font-size: 0.93rem;
-            color: #475569;
-            margin-bottom: 0.20rem;
-        }
-
         div[data-testid="stNumberInput"] input {
             font-family: monospace;
         }
 
-        div[data-testid="stButton"] > button,
-        div[data-testid="stDownloadButton"] > button {
-            min-height: 48px;
-            border-radius: 12px;
+        section.main div[data-testid="stButton"] > button,
+        section.main div[data-testid="stDownloadButton"] > button {
+            min-height: 52px;
+            border-radius: 16px;
             font-weight: 700;
+            border: 1px solid #bfd8ff !important;
+            background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%) !important;
+            color: #2563eb !important;
+            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
+            transition: all 0.18s ease;
+        }
+
+        section.main div[data-testid="stButton"] > button:hover,
+        section.main div[data-testid="stDownloadButton"] > button:hover {
+            border-color: #93c5fd !important;
+            background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%) !important;
+            color: #1d4ed8 !important;
+            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
+        }
+
+        section.main div[data-testid="stButton"] > button *,
+        section.main div[data-testid="stDownloadButton"] > button *,
+        section.main div[data-testid="stButton"] > button p,
+        section.main div[data-testid="stDownloadButton"] > button p,
+        section.main div[data-testid="stButton"] > button span,
+        section.main div[data-testid="stDownloadButton"] > button span,
+        section.main div[data-testid="stButton"] > button div,
+        section.main div[data-testid="stDownloadButton"] > button div {
+            color: #2563eb !important;
+        }
+
+        .wm-export-actions {
+            margin-top: 0.85rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .wm-export-note-bottom {
+            font-size: 0.90rem;
+            color: #64748b;
+            text-align: center;
+            margin-top: 0.45rem;
         }
         </style>
         """,
@@ -1261,11 +1284,6 @@ prepared = SignalRecord(
 
 logo_uri = get_logo_data_uri(LOGO_PATH)
 
-st.markdown(
-    '<div class="wm-top-note">Synchronized workflow enabled: cycle starts are taken from t = 0 + n·(60/RPM) when RPM exists.</div>',
-    unsafe_allow_html=True,
-)
-
 fig = build_waveform_figure(
     record=prepared,
     cursor_a_s=cursor_a,
@@ -1315,7 +1333,22 @@ if st.session_state.wm_export_png_key != export_state_key:
     st.session_state.wm_export_png_key = export_state_key
     st.session_state.wm_export_error = None
 
-col_export1, col_export2, col_export3 = st.columns([1.35, 1.35, 4.30])
+# ------------------------------------------------------------
+# Main chart
+# ------------------------------------------------------------
+st.plotly_chart(
+    fig,
+    use_container_width=True,
+    config={"displaylogo": False},
+    key="wm_plot_main_view",
+)
+
+# ------------------------------------------------------------
+# Bottom export actions
+# ------------------------------------------------------------
+st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
+
+left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
 
 with col_export1:
     if st.button("Prepare PNG HD", use_container_width=True):
@@ -1336,21 +1369,5 @@ with col_export2:
     else:
         st.button("Download PNG HD", disabled=True, use_container_width=True)
 
-with col_export3:
-    st.markdown(
-        '<div class="wm-export-note">HD export lowered. Right info box cleaned and softened. Cycle markers remain synchronized from t = 0 + n·T.</div>',
-        unsafe_allow_html=True,
-    )
-
 if st.session_state.wm_export_error:
     st.warning(f"PNG export error: {st.session_state.wm_export_error}")
-
-# ------------------------------------------------------------
-# Main chart
-# ------------------------------------------------------------
-st.plotly_chart(
-    fig,
-    use_container_width=True,
-    config={"displaylogo": False},
-    key="wm_plot_main_view",
-)
