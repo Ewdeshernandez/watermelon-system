@@ -93,6 +93,12 @@ def apply_page_style() -> None:
             letter-spacing: -0.01em;
         }
 
+        .wm-phase-subnote {
+            font-size: 0.90rem;
+            color: #64748b;
+            margin-bottom: 12px;
+        }
+
         .wm-phase-table-wrap {
             overflow-x: auto;
             border-radius: 16px;
@@ -501,13 +507,69 @@ def harmonic_fit_amplitude_phase(
         return None, None
 
     a, b = coeffs
-    amp = float(np.sqrt(a * a + b * b))
+    amp_peak = float(np.sqrt(a * a + b * b))
+    amp_pp = 2.0 * amp_peak
     phase_deg = float(np.degrees(np.arctan2(-b, a)) % 360.0)
 
-    if not math.isfinite(amp) or not math.isfinite(phase_deg):
+    if not math.isfinite(amp_pp) or not math.isfinite(phase_deg):
         return None, None
 
-    return amp, phase_deg
+    return amp_pp, phase_deg
+
+
+def fft_local_amplitude_pp(
+    time_s: np.ndarray,
+    y: np.ndarray,
+    target_hz: float,
+) -> Optional[float]:
+    if target_hz <= 0 or time_s.size < 32 or y.size < 32:
+        return None
+
+    n = min(time_s.size, y.size)
+    t = time_s[:n]
+    x = y[:n].astype(float, copy=True)
+
+    finite_mask = np.isfinite(t) & np.isfinite(x)
+    t = t[finite_mask]
+    x = x[finite_mask]
+    if t.size < 32:
+        return None
+
+    x = x - np.mean(x)
+
+    dt = np.diff(t)
+    dt = dt[np.isfinite(dt)]
+    dt = dt[dt > 0]
+    if dt.size == 0:
+        return None
+
+    fs = 1.0 / float(np.mean(dt))
+    nfft = int(2 ** math.ceil(math.log2(len(x))))
+    window = np.hanning(len(x))
+    gain = float(np.mean(window))
+    xw = x * window
+
+    fft_vals = np.fft.rfft(xw, n=nfft)
+    freq_hz = np.fft.rfftfreq(nfft, d=1.0 / fs)
+
+    peak_amp = (2.0 / len(x)) * np.abs(fft_vals)
+    peak_amp = peak_amp / max(gain, 1e-12)
+
+    if peak_amp.size > 0:
+        peak_amp[0] *= 0.5
+    if nfft % 2 == 0 and peak_amp.size > 1:
+        peak_amp[-1] *= 0.5
+
+    band = max(target_hz * 0.08, 0.2)
+    mask = (freq_hz >= target_hz - band) & (freq_hz <= target_hz + band)
+    mask &= np.isfinite(peak_amp)
+
+    if not np.any(mask):
+        return None
+
+    amp_peak = float(np.max(peak_amp[mask]))
+    amp_pp = 2.0 * amp_peak
+    return amp_pp if math.isfinite(amp_pp) else None
 
 
 def phase_stability_percent(
@@ -541,19 +603,49 @@ def phase_stability_percent(
     return stability
 
 
+def confidence_score(
+    fit_amp_pp: Optional[float],
+    fft_amp_pp: Optional[float],
+    stability_pct: Optional[float],
+) -> Optional[float]:
+    if stability_pct is None or not math.isfinite(stability_pct):
+        return None
+
+    if fit_amp_pp is None or fft_amp_pp is None or fit_amp_pp <= 0 or fft_amp_pp <= 0:
+        return float(np.clip(stability_pct * 0.7, 0.0, 100.0))
+
+    ratio = min(fit_amp_pp, fft_amp_pp) / max(fit_amp_pp, fft_amp_pp)
+    conf = 0.65 * stability_pct + 35.0 * ratio
+    return float(np.clip(conf, 0.0, 100.0))
+
+
 def get_order_metrics(record: SignalRecord, order: float) -> Dict[str, Any]:
     rpm = record.rpm
     if rpm is None or rpm <= 0:
-        return {"amp": None, "phase": None, "stability": None}
+        return {
+            "freq_cpm": None,
+            "fit_amp_pp": None,
+            "fft_amp_pp": None,
+            "phase": None,
+            "stability": None,
+            "confidence": None,
+        }
 
     freq_hz = (rpm * order) / 60.0
-    amp, phase = harmonic_fit_amplitude_phase(record.time_s, record.amplitude, freq_hz)
+    freq_cpm = rpm * order
+
+    fit_amp_pp, phase = harmonic_fit_amplitude_phase(record.time_s, record.amplitude, freq_hz)
+    fft_amp_pp = fft_local_amplitude_pp(record.time_s, record.amplitude, freq_hz)
     stability = phase_stability_percent(record.time_s, record.amplitude, freq_hz)
+    confidence = confidence_score(fit_amp_pp, fft_amp_pp, stability)
 
     return {
-        "amp": amp,
+        "freq_cpm": freq_cpm,
+        "fit_amp_pp": fit_amp_pp,
+        "fft_amp_pp": fft_amp_pp,
         "phase": phase,
         "stability": stability,
+        "confidence": confidence,
     }
 
 
@@ -564,6 +656,23 @@ def stability_badge_html(value: Optional[float]) -> str:
     if value >= 85:
         bg = "#dcfce7"
         fg = "#166534"
+    elif value >= 65:
+        bg = "#fef3c7"
+        fg = "#92400e"
+    else:
+        bg = "#fee2e2"
+        fg = "#991b1b"
+
+    return f'<span class="wm-badge" style="background:{bg};color:{fg};">{value:.1f}%</span>'
+
+
+def confidence_badge_html(value: Optional[float]) -> str:
+    if value is None or not math.isfinite(value):
+        return '<span class="wm-badge" style="background:#f1f5f9;color:#475569;">—</span>'
+
+    if value >= 85:
+        bg = "#dbeafe"
+        fg = "#1d4ed8"
     elif value >= 65:
         bg = "#fef3c7"
         fg = "#92400e"
@@ -588,15 +697,28 @@ def build_phase_dataframe(records: List[SignalRecord]) -> pd.DataFrame:
                 "Machine": rec.machine,
                 "Point": rec.point,
                 "RPM": rec.rpm,
-                "0.5X Amp": m05["amp"],
+
+                "0.5X Freq": m05["freq_cpm"],
+                "0.5X Fit Amp": m05["fit_amp_pp"],
+                "0.5X FFT Amp": m05["fft_amp_pp"],
                 "0.5X Phase": m05["phase"],
                 "0.5X Stability": m05["stability"],
-                "1X Amp": m10["amp"],
+                "0.5X Confidence": m05["confidence"],
+
+                "1X Freq": m10["freq_cpm"],
+                "1X Fit Amp": m10["fit_amp_pp"],
+                "1X FFT Amp": m10["fft_amp_pp"],
                 "1X Phase": m10["phase"],
                 "1X Stability": m10["stability"],
-                "2X Amp": m20["amp"],
+                "1X Confidence": m10["confidence"],
+
+                "2X Freq": m20["freq_cpm"],
+                "2X Fit Amp": m20["fit_amp_pp"],
+                "2X FFT Amp": m20["fft_amp_pp"],
                 "2X Phase": m20["phase"],
                 "2X Stability": m20["stability"],
+                "2X Confidence": m20["confidence"],
+
                 "Timestamp": rec.timestamp,
                 "Unit": rec.amplitude_unit,
                 "Variable": rec.variable,
@@ -632,7 +754,7 @@ def render_top_strip(record: SignalRecord, selected_count: int, logo_uri: Option
                     <span style="color:#94a3b8;">|</span>
                     <span>{record.point}</span>
                     <span style="color:#94a3b8;">|</span>
-                    <span>{record.variable} | Phase Dashboard</span>
+                    <span>{record.variable} | Phase Dashboard | Amp = Peak-to-Peak</span>
                     <span style="color:#94a3b8;">|</span>
                     <span><b>RPM:</b> {format_number(record.rpm, 0)}</span>
                     <span style="color:#94a3b8;">|</span>
@@ -652,7 +774,7 @@ def render_phase_table(df: pd.DataFrame) -> None:
 
     for _, row in df.iterrows():
         unit = str(row["Unit"]).strip()
-        unit_txt = f" {unit}" if unit else ""
+        unit_txt = f" {unit} p-p" if unit else " p-p"
 
         row_html = (
             "<tr>"
@@ -660,15 +782,28 @@ def render_phase_table(df: pd.DataFrame) -> None:
             f"<td>{row['Machine']}</td>"
             f"<td>{row['Point']}</td>"
             f"<td>{format_number(row['RPM'], 0)}</td>"
-            f"<td>{format_number(row['0.5X Amp'], 3)}{unit_txt}</td>"
+
+            f"<td>{format_number(row['0.5X Freq'], 1)}</td>"
+            f"<td>{format_number(row['0.5X Fit Amp'], 3)}{unit_txt}</td>"
+            f"<td>{format_number(row['0.5X FFT Amp'], 3)}{unit_txt}</td>"
             f"<td>{format_number(row['0.5X Phase'], 1)}°</td>"
             f"<td>{stability_badge_html(row['0.5X Stability'])}</td>"
-            f"<td>{format_number(row['1X Amp'], 3)}{unit_txt}</td>"
+            f"<td>{confidence_badge_html(row['0.5X Confidence'])}</td>"
+
+            f"<td>{format_number(row['1X Freq'], 1)}</td>"
+            f"<td>{format_number(row['1X Fit Amp'], 3)}{unit_txt}</td>"
+            f"<td>{format_number(row['1X FFT Amp'], 3)}{unit_txt}</td>"
             f"<td>{format_number(row['1X Phase'], 1)}°</td>"
             f"<td>{stability_badge_html(row['1X Stability'])}</td>"
-            f"<td>{format_number(row['2X Amp'], 3)}{unit_txt}</td>"
+            f"<td>{confidence_badge_html(row['1X Confidence'])}</td>"
+
+            f"<td>{format_number(row['2X Freq'], 1)}</td>"
+            f"<td>{format_number(row['2X Fit Amp'], 3)}{unit_txt}</td>"
+            f"<td>{format_number(row['2X FFT Amp'], 3)}{unit_txt}</td>"
             f"<td>{format_number(row['2X Phase'], 1)}°</td>"
             f"<td>{stability_badge_html(row['2X Stability'])}</td>"
+            f"<td>{confidence_badge_html(row['2X Confidence'])}</td>"
+
             f"<td>{row['Timestamp'] or '—'}</td>"
             "</tr>"
         )
@@ -677,6 +812,7 @@ def render_phase_table(df: pd.DataFrame) -> None:
     table_html = (
         '<div class="wm-phase-table-shell">'
         '<div class="wm-phase-section-title">0.5X / 1X / 2X Phase Summary</div>'
+        '<div class="wm-phase-subnote">Amplitude shown as peak-to-peak. Fit Amp = sinusoidal fit result. FFT Amp = local FFT validation. Confidence combines phase stability + agreement between methods.</div>'
         '<div class="wm-phase-table-wrap">'
         '<table class="wm-phase-table">'
         "<thead>"
@@ -685,15 +821,17 @@ def render_phase_table(df: pd.DataFrame) -> None:
         '<th rowspan="2">Machine</th>'
         '<th rowspan="2">Point</th>'
         '<th rowspan="2">RPM</th>'
-        '<th colspan="3">0.5X</th>'
-        '<th colspan="3">1X</th>'
-        '<th colspan="3">2X</th>'
+
+        '<th colspan="6">0.5X</th>'
+        '<th colspan="6">1X</th>'
+        '<th colspan="6">2X</th>'
+
         '<th rowspan="2">Timestamp</th>'
         "</tr>"
         "<tr>"
-        "<th>Amp</th><th>Phase</th><th>Stability</th>"
-        "<th>Amp</th><th>Phase</th><th>Stability</th>"
-        "<th>Amp</th><th>Phase</th><th>Stability</th>"
+        "<th>Freq CPM</th><th>Fit Amp</th><th>FFT Amp</th><th>Phase</th><th>Stability</th><th>Confidence</th>"
+        "<th>Freq CPM</th><th>Fit Amp</th><th>FFT Amp</th><th>Phase</th><th>Stability</th><th>Confidence</th>"
+        "<th>Freq CPM</th><th>Fit Amp</th><th>FFT Amp</th><th>Phase</th><th>Stability</th><th>Confidence</th>"
         "</tr>"
         "</thead>"
         "<tbody>"
@@ -721,7 +859,7 @@ def _load_font(size: int, bold: bool = False):
     return ImageFont.load_default()
 
 
-def _badge_style(value: Optional[float]) -> Tuple[str, str]:
+def _badge_style_stability(value: Optional[float]) -> Tuple[str, str]:
     if value is None or not math.isfinite(value):
         return "#f1f5f9", "#475569"
     if value >= 85:
@@ -731,8 +869,18 @@ def _badge_style(value: Optional[float]) -> Tuple[str, str]:
     return "#fee2e2", "#991b1b"
 
 
+def _badge_style_confidence(value: Optional[float]) -> Tuple[str, str]:
+    if value is None or not math.isfinite(value):
+        return "#f1f5f9", "#475569"
+    if value >= 85:
+        return "#dbeafe", "#1d4ed8"
+    if value >= 65:
+        return "#fef3c7", "#92400e"
+    return "#fee2e2", "#991b1b"
+
+
 def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
-    width = 4400
+    width = 6200
     row_h = 92
     top_h = 180
     title_h = 84
@@ -746,7 +894,6 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
     border = "#dbe5f0"
     blue = "#1d4ed8"
     text = "#111827"
-    muted = "#94a3b8"
     header_fill = "#f8fbff"
     subheader_fill = "#eef6ff"
 
@@ -755,9 +902,9 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
 
     font_title = _load_font(54, True)
     font_small = _load_font(28, False)
-    font_header = _load_font(26, True)
-    font_cell = _load_font(24, False)
-    font_badge = _load_font(22, True)
+    font_header = _load_font(24, True)
+    font_cell = _load_font(22, False)
+    font_badge = _load_font(20, True)
 
     card_x0 = 60
     card_x1 = width - 60
@@ -782,7 +929,7 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
         draw.text((logo_x + 12, logo_y + 14), "WM", font=font_small, fill="white")
 
     meta_text = (
-        f"{primary.machine}   |   {primary.point}   |   {primary.variable} | Phase Dashboard   |   "
+        f"{primary.machine}   |   {primary.point}   |   {primary.variable} | Phase Dashboard | Amp = Peak-to-Peak   |   "
         f"RPM: {format_number(primary.rpm, 0)}   |   Signals: {len(df)}   |   {primary.timestamp or '—'}"
     )
     draw.text((logo_x + 150, top_y0 + 38), meta_text, font=font_small, fill=text)
@@ -797,7 +944,13 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
     table_x1 = card_x1 - 24
     table_y0 = shell_y0 + 100
 
-    col_widths = [520, 600, 460, 380, 380, 280, 340, 380, 280, 340, 380, 280, 340, 660]
+    col_widths = [
+        420, 420, 340, 220,
+        180, 220, 220, 180, 180, 180,
+        180, 220, 220, 180, 180, 180,
+        180, 220, 220, 180, 180, 180,
+        420
+    ]
     scale = (table_x1 - table_x0) / sum(col_widths)
     col_widths = [int(w * scale) for w in col_widths]
 
@@ -813,10 +966,10 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
         ("Machine", 1, 2),
         ("Point", 2, 3),
         ("RPM", 3, 4),
-        ("0.5X", 4, 7),
-        ("1X", 7, 10),
-        ("2X", 10, 13),
-        ("Timestamp", 13, 14),
+        ("0.5X", 4, 10),
+        ("1X", 10, 16),
+        ("2X", 16, 22),
+        ("Timestamp", 22, 23),
     ]
 
     for label, c0, c1 in group_spans:
@@ -829,7 +982,7 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
         draw.text((tx, ty), label.upper(), font=font_header, fill=blue)
 
     y2 = y + table_header_h1
-    sub_labels = ["Amp", "Phase", "Stability"] * 3
+    sub_labels = ["Freq", "Fit Amp", "FFT Amp", "Phase", "Stability", "Conf"] * 3
     for i, label in enumerate(sub_labels, start=4):
         x0 = col_x[i]
         x1 = col_x[i + 1]
@@ -839,7 +992,7 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
         ty = y2 + (table_header_h2 - (tw[3] - tw[1])) / 2 - 2
         draw.text((tx, ty), label, font=font_cell, fill="#334155")
 
-    for idx in [0, 1, 2, 3, 13]:
+    for idx in [0, 1, 2, 3, 22]:
         x0 = col_x[idx]
         x1 = col_x[idx + 1]
         draw.rectangle((x0, y2, x1, y2 + table_header_h2), fill=header_fill, outline=border, width=1)
@@ -853,22 +1006,35 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
         draw.rectangle((table_x0, y0, table_x1, y1), fill=fill, outline=border, width=1)
 
         unit = str(row["Unit"]).strip()
-        unit_txt = f" {unit}" if unit else ""
+        unit_txt = f" {unit} p-p" if unit else " p-p"
 
         cells = [
             str(row["Signal"]),
             str(row["Machine"]),
             str(row["Point"]),
             format_number(row["RPM"], 0),
-            f"{format_number(row['0.5X Amp'], 3)}{unit_txt}",
+
+            format_number(row["0.5X Freq"], 1),
+            f"{format_number(row['0.5X Fit Amp'], 3)}{unit_txt}",
+            f"{format_number(row['0.5X FFT Amp'], 3)}{unit_txt}",
             f"{format_number(row['0.5X Phase'], 1)}°",
             None,
-            f"{format_number(row['1X Amp'], 3)}{unit_txt}",
+            None,
+
+            format_number(row["1X Freq"], 1),
+            f"{format_number(row['1X Fit Amp'], 3)}{unit_txt}",
+            f"{format_number(row['1X FFT Amp'], 3)}{unit_txt}",
             f"{format_number(row['1X Phase'], 1)}°",
             None,
-            f"{format_number(row['2X Amp'], 3)}{unit_txt}",
+            None,
+
+            format_number(row["2X Freq"], 1),
+            f"{format_number(row['2X Fit Amp'], 3)}{unit_txt}",
+            f"{format_number(row['2X FFT Amp'], 3)}{unit_txt}",
             f"{format_number(row['2X Phase'], 1)}°",
             None,
+            None,
+
             str(row["Timestamp"] or "—"),
         ]
 
@@ -876,13 +1042,13 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
             x0 = col_x[c]
             x1 = col_x[c + 1]
 
-            if c in [6, 9, 12]:
-                stability_col = {6: "0.5X Stability", 9: "1X Stability", 12: "2X Stability"}[c]
+            if c in [8, 14, 20]:
+                stability_col = {8: "0.5X Stability", 14: "1X Stability", 20: "2X Stability"}[c]
                 val = row[stability_col]
-                bg_badge, fg_badge = _badge_style(val)
+                bg_badge, fg_badge = _badge_style_stability(val)
                 badge_text = "—" if val is None or not math.isfinite(val) else f"{val:.1f}%"
-                badge_w = 150
-                badge_h = 40
+                badge_w = 140
+                badge_h = 38
                 bx0 = x0 + (x1 - x0 - badge_w) / 2
                 by0 = y0 + (row_h - badge_h) / 2
                 bx1 = bx0 + badge_w
@@ -892,10 +1058,28 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
                 tx = bx0 + (badge_w - (tw[2] - tw[0])) / 2
                 ty = by0 + (badge_h - (tw[3] - tw[1])) / 2 - 1
                 draw.text((tx, ty), badge_text, font=font_badge, fill=fg_badge)
+
+            elif c in [9, 15, 21]:
+                conf_col = {9: "0.5X Confidence", 15: "1X Confidence", 21: "2X Confidence"}[c]
+                val = row[conf_col]
+                bg_badge, fg_badge = _badge_style_confidence(val)
+                badge_text = "—" if val is None or not math.isfinite(val) else f"{val:.1f}%"
+                badge_w = 140
+                badge_h = 38
+                bx0 = x0 + (x1 - x0 - badge_w) / 2
+                by0 = y0 + (row_h - badge_h) / 2
+                bx1 = bx0 + badge_w
+                by1 = by0 + badge_h
+                draw.rounded_rectangle((bx0, by0, bx1, by1), radius=20, fill=bg_badge)
+                tw = draw.textbbox((0, 0), badge_text, font=font_badge)
+                tx = bx0 + (badge_w - (tw[2] - tw[0])) / 2
+                ty = by0 + (badge_h - (tw[3] - tw[1])) / 2 - 1
+                draw.text((tx, ty), badge_text, font=font_badge, fill=fg_badge)
+
             else:
-                pad_x = 16
-                if c in [0, 1, 2, 13]:
-                    draw.text((x0 + pad_x, y0 + 28), cell, font=font_cell, fill=text)
+                pad_x = 12
+                if c in [0, 1, 2, 22]:
+                    draw.text((x0 + pad_x, y0 + 30), cell, font=font_cell, fill=text)
                 else:
                     tw = draw.textbbox((0, 0), cell, font=font_cell)
                     tx = x0 + (x1 - x0 - (tw[2] - tw[0])) / 2
@@ -996,22 +1180,11 @@ render_phase_table(df_phase)
 
 export_df = df_phase[
     [
-        "Signal",
-        "Machine",
-        "Point",
-        "RPM",
-        "0.5X Amp",
-        "0.5X Phase",
-        "0.5X Stability",
-        "1X Amp",
-        "1X Phase",
-        "1X Stability",
-        "2X Amp",
-        "2X Phase",
-        "2X Stability",
-        "Timestamp",
-        "Unit",
-        "Variable",
+        "Signal", "Machine", "Point", "RPM",
+        "0.5X Freq", "0.5X Fit Amp", "0.5X FFT Amp", "0.5X Phase", "0.5X Stability", "0.5X Confidence",
+        "1X Freq", "1X Fit Amp", "1X FFT Amp", "1X Phase", "1X Stability", "1X Confidence",
+        "2X Freq", "2X Fit Amp", "2X FFT Amp", "2X Phase", "2X Stability", "2X Confidence",
+        "Timestamp", "Unit", "Variable",
     ]
 ].copy()
 
