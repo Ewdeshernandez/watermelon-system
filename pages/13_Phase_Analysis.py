@@ -4,13 +4,14 @@ import base64
 import math
 import re
 from dataclasses import dataclass, field
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import streamlit as st
+from PIL import Image, ImageDraw, ImageFont
 
 from core.auth import require_login, render_user_menu
 
@@ -181,21 +182,6 @@ def get_logo_data_uri(path: Path) -> Optional[str]:
     if not b64:
         return None
     return f"data:image/png;base64,{b64}"
-
-
-def rounded_rect_path(x0: float, y0: float, x1: float, y1: float, r: float) -> str:
-    r = max(0.0, min(r, (x1 - x0) / 2.0, (y1 - y0) / 2.0))
-    return (
-        f"M {x0+r},{y0} "
-        f"L {x1-r},{y0} "
-        f"Q {x1},{y0} {x1},{y0+r} "
-        f"L {x1},{y1-r} "
-        f"Q {x1},{y1} {x1-r},{y1} "
-        f"L {x0+r},{y1} "
-        f"Q {x0},{y1} {x0},{y1-r} "
-        f"L {x0},{y0+r} "
-        f"Q {x0},{y0} {x0+r},{y0} Z"
-    )
 
 
 def parse_first_float(value: Any) -> Optional[float]:
@@ -524,18 +510,6 @@ def harmonic_fit_amplitude_phase(
     return amp, phase_deg
 
 
-def circular_mean_deg(phases_deg: List[float]) -> Optional[float]:
-    if not phases_deg:
-        return None
-    radians = np.deg2rad(phases_deg)
-    vec = np.exp(1j * radians)
-    mean_vec = np.mean(vec)
-    if abs(mean_vec) < 1e-12:
-        return None
-    angle = float(np.degrees(np.angle(mean_vec)) % 360.0)
-    return angle
-
-
 def phase_stability_percent(
     time_s: np.ndarray,
     y: np.ndarray,
@@ -636,12 +610,10 @@ def render_top_strip(record: SignalRecord, selected_count: int, logo_uri: Option
     if logo_uri:
         logo_html = f'<img src="{logo_uri}" style="height:42px; width:auto; object-fit:contain;" />'
     else:
-        logo_html = """
-        <div style="
-            width:42px;height:42px;border-radius:12px;background:#1ea7ff;color:white;
-            display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;
-        ">WM</div>
-        """
+        logo_html = (
+            '<div style="width:42px;height:42px;border-radius:12px;background:#1ea7ff;color:white;'
+            'display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;">WM</div>'
+        )
 
     st.markdown(
         f"""
@@ -676,83 +648,273 @@ def render_top_strip(record: SignalRecord, selected_count: int, logo_uri: Option
 
 
 def render_phase_table(df: pd.DataFrame) -> None:
-    html = []
-    html.append('<div class="wm-phase-table-shell">')
-    html.append('<div class="wm-phase-section-title">0.5X / 1X / 2X Phase Summary</div>')
-    html.append('<div class="wm-phase-table-wrap">')
-    html.append('<table class="wm-phase-table">')
-    html.append("<thead>")
-    html.append(
-        """
-        <tr>
-            <th rowspan="2">Signal</th>
-            <th rowspan="2">Machine</th>
-            <th rowspan="2">Point</th>
-            <th rowspan="2">RPM</th>
-            <th colspan="3">0.5X</th>
-            <th colspan="3">1X</th>
-            <th colspan="3">2X</th>
-            <th rowspan="2">Timestamp</th>
-        </tr>
-        """
-    )
-    html.append(
-        """
-        <tr>
-            <th>Amp</th>
-            <th>Phase</th>
-            <th>Stability</th>
-            <th>Amp</th>
-            <th>Phase</th>
-            <th>Stability</th>
-            <th>Amp</th>
-            <th>Phase</th>
-            <th>Stability</th>
-        </tr>
-        """
-    )
-    html.append("</thead>")
-    html.append("<tbody>")
+    rows_html = []
 
     for _, row in df.iterrows():
         unit = str(row["Unit"]).strip()
         unit_txt = f" {unit}" if unit else ""
 
-        html.append(
-            f"""
-            <tr>
-                <td>{row["Signal"]}</td>
-                <td>{row["Machine"]}</td>
-                <td>{row["Point"]}</td>
-                <td>{format_number(row["RPM"], 0)}</td>
-
-                <td>{format_number(row["0.5X Amp"], 3)}{unit_txt}</td>
-                <td>{format_number(row["0.5X Phase"], 1)}°</td>
-                <td>{stability_badge_html(row["0.5X Stability"])}</td>
-
-                <td>{format_number(row["1X Amp"], 3)}{unit_txt}</td>
-                <td>{format_number(row["1X Phase"], 1)}°</td>
-                <td>{stability_badge_html(row["1X Stability"])}</td>
-
-                <td>{format_number(row["2X Amp"], 3)}{unit_txt}</td>
-                <td>{format_number(row["2X Phase"], 1)}°</td>
-                <td>{stability_badge_html(row["2X Stability"])}</td>
-
-                <td>{row["Timestamp"] or "—"}</td>
-            </tr>
-            """
+        row_html = (
+            "<tr>"
+            f"<td>{row['Signal']}</td>"
+            f"<td>{row['Machine']}</td>"
+            f"<td>{row['Point']}</td>"
+            f"<td>{format_number(row['RPM'], 0)}</td>"
+            f"<td>{format_number(row['0.5X Amp'], 3)}{unit_txt}</td>"
+            f"<td>{format_number(row['0.5X Phase'], 1)}°</td>"
+            f"<td>{stability_badge_html(row['0.5X Stability'])}</td>"
+            f"<td>{format_number(row['1X Amp'], 3)}{unit_txt}</td>"
+            f"<td>{format_number(row['1X Phase'], 1)}°</td>"
+            f"<td>{stability_badge_html(row['1X Stability'])}</td>"
+            f"<td>{format_number(row['2X Amp'], 3)}{unit_txt}</td>"
+            f"<td>{format_number(row['2X Phase'], 1)}°</td>"
+            f"<td>{stability_badge_html(row['2X Stability'])}</td>"
+            f"<td>{row['Timestamp'] or '—'}</td>"
+            "</tr>"
         )
+        rows_html.append(row_html)
 
-    html.append("</tbody>")
-    html.append("</table>")
-    html.append("</div>")
-    html.append("</div>")
+    table_html = (
+        '<div class="wm-phase-table-shell">'
+        '<div class="wm-phase-section-title">0.5X / 1X / 2X Phase Summary</div>'
+        '<div class="wm-phase-table-wrap">'
+        '<table class="wm-phase-table">'
+        "<thead>"
+        "<tr>"
+        '<th rowspan="2">Signal</th>'
+        '<th rowspan="2">Machine</th>'
+        '<th rowspan="2">Point</th>'
+        '<th rowspan="2">RPM</th>'
+        '<th colspan="3">0.5X</th>'
+        '<th colspan="3">1X</th>'
+        '<th colspan="3">2X</th>'
+        '<th rowspan="2">Timestamp</th>'
+        "</tr>"
+        "<tr>"
+        "<th>Amp</th><th>Phase</th><th>Stability</th>"
+        "<th>Amp</th><th>Phase</th><th>Stability</th>"
+        "<th>Amp</th><th>Phase</th><th>Stability</th>"
+        "</tr>"
+        "</thead>"
+        "<tbody>"
+        + "".join(rows_html) +
+        "</tbody>"
+        "</table>"
+        "</div>"
+        "</div>"
+    )
 
-    st.markdown("".join(html), unsafe_allow_html=True)
+    st.markdown(table_html, unsafe_allow_html=True)
+
+
+def _load_font(size: int, bold: bool = False):
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "C:/Windows/Fonts/arialbd.ttf" if bold else "C:/Windows/Fonts/arial.ttf",
+        "/Library/Fonts/Arial Bold.ttf" if bold else "/Library/Fonts/Arial.ttf",
+    ]
+    for path in candidates:
+        try:
+            return ImageFont.truetype(path, size)
+        except Exception:
+            continue
+    return ImageFont.load_default()
+
+
+def _badge_style(value: Optional[float]) -> Tuple[str, str]:
+    if value is None or not math.isfinite(value):
+        return "#f1f5f9", "#475569"
+    if value >= 85:
+        return "#dcfce7", "#166534"
+    if value >= 65:
+        return "#fef3c7", "#92400e"
+    return "#fee2e2", "#991b1b"
+
+
+def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
+    width = 4400
+    row_h = 92
+    top_h = 180
+    title_h = 84
+    table_header_h1 = 72
+    table_header_h2 = 62
+    n_rows = len(df)
+    height = top_h + title_h + table_header_h1 + table_header_h2 + n_rows * row_h + 150
+
+    bg = "#f3f4f6"
+    white = "#ffffff"
+    border = "#dbe5f0"
+    blue = "#1d4ed8"
+    text = "#111827"
+    muted = "#94a3b8"
+    header_fill = "#f8fbff"
+    subheader_fill = "#eef6ff"
+
+    img = Image.new("RGB", (width, height), bg)
+    draw = ImageDraw.Draw(img)
+
+    font_title = _load_font(54, True)
+    font_small = _load_font(28, False)
+    font_header = _load_font(26, True)
+    font_cell = _load_font(24, False)
+    font_badge = _load_font(22, True)
+
+    card_x0 = 60
+    card_x1 = width - 60
+    top_y0 = 40
+    top_y1 = top_y0 + 110
+
+    draw.rounded_rectangle((card_x0, top_y0, card_x1, top_y1), radius=28, fill=white, outline=border, width=2)
+
+    logo_x = card_x0 + 26
+    logo_y = top_y0 + 22
+
+    if LOGO_PATH.exists():
+        try:
+            logo = Image.open(LOGO_PATH).convert("RGBA")
+            logo.thumbnail((110, 60))
+            img.paste(logo, (logo_x, logo_y), logo)
+        except Exception:
+            draw.rounded_rectangle((logo_x, logo_y, logo_x + 58, logo_y + 58), radius=12, fill="#1ea7ff")
+            draw.text((logo_x + 12, logo_y + 14), "WM", font=font_small, fill="white")
+    else:
+        draw.rounded_rectangle((logo_x, logo_y, logo_x + 58, logo_y + 58), radius=12, fill="#1ea7ff")
+        draw.text((logo_x + 12, logo_y + 14), "WM", font=font_small, fill="white")
+
+    meta_text = (
+        f"{primary.machine}   |   {primary.point}   |   {primary.variable} | Phase Dashboard   |   "
+        f"RPM: {format_number(primary.rpm, 0)}   |   Signals: {len(df)}   |   {primary.timestamp or '—'}"
+    )
+    draw.text((logo_x + 150, top_y0 + 38), meta_text, font=font_small, fill=text)
+
+    shell_y0 = top_y1 + 32
+    shell_y1 = height - 50
+    draw.rounded_rectangle((card_x0, shell_y0, card_x1, shell_y1), radius=28, fill=white, outline=border, width=2)
+
+    draw.text((card_x0 + 24, shell_y0 + 20), "0.5X / 1X / 2X Phase Summary", font=font_title, fill=text)
+
+    table_x0 = card_x0 + 24
+    table_x1 = card_x1 - 24
+    table_y0 = shell_y0 + 100
+
+    col_widths = [520, 600, 460, 380, 380, 280, 340, 380, 280, 340, 380, 280, 340, 660]
+    scale = (table_x1 - table_x0) / sum(col_widths)
+    col_widths = [int(w * scale) for w in col_widths]
+
+    col_x = [table_x0]
+    for w in col_widths:
+        col_x.append(col_x[-1] + w)
+
+    y = table_y0
+    draw.rounded_rectangle((table_x0, y, table_x1, y + table_header_h1 + table_header_h2 + n_rows * row_h), radius=22, fill=white, outline=border, width=2)
+
+    group_spans = [
+        ("Signal", 0, 1),
+        ("Machine", 1, 2),
+        ("Point", 2, 3),
+        ("RPM", 3, 4),
+        ("0.5X", 4, 7),
+        ("1X", 7, 10),
+        ("2X", 10, 13),
+        ("Timestamp", 13, 14),
+    ]
+
+    for label, c0, c1 in group_spans:
+        x0 = col_x[c0]
+        x1 = col_x[c1]
+        draw.rectangle((x0, y, x1, y + table_header_h1), fill=subheader_fill, outline=border, width=1)
+        tw = draw.textbbox((0, 0), label.upper(), font=font_header)
+        tx = x0 + (x1 - x0 - (tw[2] - tw[0])) / 2
+        ty = y + (table_header_h1 - (tw[3] - tw[1])) / 2 - 2
+        draw.text((tx, ty), label.upper(), font=font_header, fill=blue)
+
+    y2 = y + table_header_h1
+    sub_labels = ["Amp", "Phase", "Stability"] * 3
+    for i, label in enumerate(sub_labels, start=4):
+        x0 = col_x[i]
+        x1 = col_x[i + 1]
+        draw.rectangle((x0, y2, x1, y2 + table_header_h2), fill=header_fill, outline=border, width=1)
+        tw = draw.textbbox((0, 0), label, font=font_cell)
+        tx = x0 + (x1 - x0 - (tw[2] - tw[0])) / 2
+        ty = y2 + (table_header_h2 - (tw[3] - tw[1])) / 2 - 2
+        draw.text((tx, ty), label, font=font_cell, fill="#334155")
+
+    for idx in [0, 1, 2, 3, 13]:
+        x0 = col_x[idx]
+        x1 = col_x[idx + 1]
+        draw.rectangle((x0, y2, x1, y2 + table_header_h2), fill=header_fill, outline=border, width=1)
+
+    row_y = y2 + table_header_h2
+
+    for r, (_, row) in enumerate(df.iterrows()):
+        y0 = row_y + r * row_h
+        y1 = y0 + row_h
+        fill = "#ffffff" if r % 2 == 0 else "#fafcff"
+        draw.rectangle((table_x0, y0, table_x1, y1), fill=fill, outline=border, width=1)
+
+        unit = str(row["Unit"]).strip()
+        unit_txt = f" {unit}" if unit else ""
+
+        cells = [
+            str(row["Signal"]),
+            str(row["Machine"]),
+            str(row["Point"]),
+            format_number(row["RPM"], 0),
+            f"{format_number(row['0.5X Amp'], 3)}{unit_txt}",
+            f"{format_number(row['0.5X Phase'], 1)}°",
+            None,
+            f"{format_number(row['1X Amp'], 3)}{unit_txt}",
+            f"{format_number(row['1X Phase'], 1)}°",
+            None,
+            f"{format_number(row['2X Amp'], 3)}{unit_txt}",
+            f"{format_number(row['2X Phase'], 1)}°",
+            None,
+            str(row["Timestamp"] or "—"),
+        ]
+
+        for c, cell in enumerate(cells):
+            x0 = col_x[c]
+            x1 = col_x[c + 1]
+
+            if c in [6, 9, 12]:
+                stability_col = {6: "0.5X Stability", 9: "1X Stability", 12: "2X Stability"}[c]
+                val = row[stability_col]
+                bg_badge, fg_badge = _badge_style(val)
+                badge_text = "—" if val is None or not math.isfinite(val) else f"{val:.1f}%"
+                badge_w = 150
+                badge_h = 40
+                bx0 = x0 + (x1 - x0 - badge_w) / 2
+                by0 = y0 + (row_h - badge_h) / 2
+                bx1 = bx0 + badge_w
+                by1 = by0 + badge_h
+                draw.rounded_rectangle((bx0, by0, bx1, by1), radius=20, fill=bg_badge)
+                tw = draw.textbbox((0, 0), badge_text, font=font_badge)
+                tx = bx0 + (badge_w - (tw[2] - tw[0])) / 2
+                ty = by0 + (badge_h - (tw[3] - tw[1])) / 2 - 1
+                draw.text((tx, ty), badge_text, font=font_badge, fill=fg_badge)
+            else:
+                pad_x = 16
+                if c in [0, 1, 2, 13]:
+                    draw.text((x0 + pad_x, y0 + 28), cell, font=font_cell, fill=text)
+                else:
+                    tw = draw.textbbox((0, 0), cell, font=font_cell)
+                    tx = x0 + (x1 - x0 - (tw[2] - tw[0])) / 2
+                    ty = y0 + (row_h - (tw[3] - tw[1])) / 2 - 1
+                    draw.text((tx, ty), cell, font=font_cell, fill=text)
+
+    out = BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()
 
 
 if "wm_phase_primary_signal_id" not in st.session_state:
     st.session_state.wm_phase_primary_signal_id = None
+
+if "wm_phase_export_png_bytes" not in st.session_state:
+    st.session_state.wm_phase_export_png_bytes = None
+
+if "wm_phase_export_error" not in st.session_state:
+    st.session_state.wm_phase_export_error = None
 
 
 records_all = load_signals_from_session()
@@ -853,17 +1015,31 @@ export_df = df_phase[
     ]
 ].copy()
 
-csv_bytes = export_df.to_csv(index=False).encode("utf-8")
-
 st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
-left_pad, col_export, right_pad = st.columns([3.1, 1.8, 3.1])
+left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
 
-with col_export:
-    st.download_button(
-        "Export CSV",
-        data=csv_bytes,
-        file_name="watermelon_phase_analysis.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
+with col_export1:
+    if st.button("Prepare PNG HD", use_container_width=True):
+        try:
+            png_bytes = build_png_report(export_df, primary)
+            st.session_state.wm_phase_export_png_bytes = png_bytes
+            st.session_state.wm_phase_export_error = None
+        except Exception as e:
+            st.session_state.wm_phase_export_png_bytes = None
+            st.session_state.wm_phase_export_error = str(e)
+
+with col_export2:
+    if st.session_state.wm_phase_export_png_bytes is not None:
+        st.download_button(
+            "Download PNG HD",
+            data=st.session_state.wm_phase_export_png_bytes,
+            file_name="watermelon_phase_hd.png",
+            mime="image/png",
+            use_container_width=True,
+        )
+    else:
+        st.button("Download PNG HD", disabled=True, use_container_width=True)
+
+if st.session_state.wm_phase_export_error:
+    st.warning(f"PNG export error: {st.session_state.wm_phase_export_error}")
