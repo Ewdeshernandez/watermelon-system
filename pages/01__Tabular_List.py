@@ -526,7 +526,7 @@ def build_table_dataframe(
     alarm: float,
     danger: float,
     criterion_default: str,
-    criterion_by_machine: Dict[str, str],
+    criterion_by_point: Dict[str, str],
     family_mode: str,
     overall_mode: str,
 ) -> pd.DataFrame:
@@ -541,7 +541,7 @@ def build_table_dataframe(
         a10 = order_amplitude_pp(rec, 1.0)
         a20 = order_amplitude_pp(rec, 2.0)
 
-        criterion_row = criterion_by_machine.get(rec.machine, criterion_default)
+        criterion_row = criterion_by_point.get(rec.point, criterion_default)
 
         rows.append(
             {
@@ -928,27 +928,27 @@ with st.sidebar:
     if danger_value < alarm_value:
         st.warning("Danger debería ser mayor o igual que Alarm.")
 
-    st.markdown("### Criterion per Machine")
+    st.markdown("### Criterion per Point")
 
-    unique_machines = sorted({str(r.machine) for r in records_all if str(r.machine).strip()})
-    criterion_by_machine: Dict[str, str] = {}
+    unique_points = sorted({str(r.point) for r in records_all if str(r.point).strip()})
+    criterion_by_point: Dict[str, str] = {}
 
-    for machine_name in unique_machines:
-        machine_criterion = st.selectbox(
-            f"{machine_name}",
+    for point_name in unique_points:
+        point_criterion = st.selectbox(
+            f"{point_name}",
             options=criterion_options,
             index=criterion_options.index(criterion_selected) if criterion_selected in criterion_options else 0,
-            key=f"criterion_machine_{machine_name}",
+            key=f"criterion_point_{point_name}",
         )
 
-        if machine_criterion == "Custom":
-            machine_criterion = st.text_input(
-                f"Custom criterion for {machine_name}",
+        if point_criterion == "Custom":
+            point_criterion = st.text_input(
+                f"Custom criterion for {point_name}",
                 value=criterion_text if criterion_selected == "Custom" else "Criterio usuario",
-                key=f"criterion_machine_custom_{machine_name}",
+                key=f"criterion_point_custom_{point_name}",
             ).strip() or "Criterio usuario"
 
-        criterion_by_machine[machine_name] = machine_criterion
+        criterion_by_point[point_name] = point_criterion
 
 logo_uri = get_logo_data_uri(LOGO_PATH)
 
@@ -957,7 +957,7 @@ df_table = build_table_dataframe(
     alarm=float(alarm_value),
     danger=float(danger_value),
     criterion_default=criterion_text,
-    criterion_by_machine=criterion_by_machine,
+    criterion_by_point=criterion_by_point,
     family_mode=measurement_family,
     overall_mode=overall_mode,
 )
