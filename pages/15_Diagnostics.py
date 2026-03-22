@@ -1,5 +1,801 @@
+import io
+import math
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+from PIL import Image, ImageDraw, ImageFont
+
 from core.auth import require_login, render_user_menu
 
+
+# =========================
+# PAGE CONFIG / AUTH
+# =========================
+st.set_page_config(page_title="Watermelon System | Diagnostic", layout="wide")
 require_login()
 render_user_menu()
 
+
+# =========================
+# STYLES
+# =========================
+st.markdown(
+    """
+    <style>
+    .wm-hero {
+        background: linear-gradient(135deg, #0b1220 0%, #0f2747 45%, #123d73 100%);
+        padding: 22px 26px;
+        border-radius: 18px;
+        border: 1px solid rgba(255,255,255,0.10);
+        box-shadow: 0 12px 30px rgba(0,0,0,0.22);
+        margin-bottom: 18px;
+    }
+    .wm-hero-title {
+        color: white;
+        font-size: 30px;
+        font-weight: 800;
+        margin: 0;
+        letter-spacing: 0.2px;
+    }
+    .wm-hero-sub {
+        color: rgba(255,255,255,0.80);
+        font-size: 14px;
+        margin-top: 6px;
+    }
+    .wm-card {
+        background: white;
+        border-radius: 18px;
+        padding: 16px 18px;
+        border: 1px solid rgba(0,0,0,0.08);
+        box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+    }
+    .wm-kpi {
+        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+        border: 1px solid rgba(30,167,255,0.16);
+        border-radius: 18px;
+        padding: 14px 16px;
+        min-height: 110px;
+        box-shadow: 0 8px 22px rgba(30,167,255,0.08);
+    }
+    .wm-kpi-title {
+        color: #47607a;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.6px;
+    }
+    .wm-kpi-value {
+        color: #081326;
+        font-size: 30px;
+        font-weight: 800;
+        line-height: 1.1;
+        margin-top: 10px;
+    }
+    .wm-kpi-sub {
+        color: #5d718a;
+        font-size: 12px;
+        margin-top: 8px;
+    }
+    .wm-chip {
+        display: inline-block;
+        padding: 5px 10px;
+        border-radius: 999px;
+        font-size: 12px;
+        font-weight: 700;
+        margin-right: 6px;
+        margin-bottom: 6px;
+        border: 1px solid rgba(0,0,0,0.06);
+    }
+    .wm-chip-normal { background: #e8f8ee; color: #0d7a3a; }
+    .wm-chip-observe { background: #fff8e6; color: #9a6a00; }
+    .wm-chip-alert { background: #fff0ea; color: #b44700; }
+    .wm-chip-danger { background: #ffe9eb; color: #b42318; }
+    .wm-chip-info { background: #eef6ff; color: #185ea9; }
+    .wm-section-title {
+        font-size: 18px;
+        font-weight: 800;
+        color: #0b1628;
+        margin-bottom: 10px;
+    }
+    div[data-testid="stDataFrame"] div[role="table"] {
+        border-radius: 14px;
+        overflow: hidden;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# =========================
+# DATA MODELS
+# =========================
+@dataclass
+class DiagnosticResult:
+    signal_key: str
+    machine: str
+    point: str
+    variable: str
+    family: str
+    unit: str
+    timestamp: str
+    rpm: float
+    overall: float
+    overall_label: str
+    amp_05x: float
+    amp_1x: float
+    amp_2x: float
+    dominant_order: float
+    dominant_amp: float
+    confidence: float
+    health_status: str
+    finding: str
+    criterion_based: str
+    alarm: str
+    danger: str
+
+
+# =========================
+# HELPERS
+# =========================
+def safe_get(obj: Any, key: str, default=None):
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def get_signal_dict() -> Dict[str, Any]:
+    signals = st.session_state.get("signals", {})
+    if isinstance(signals, dict):
+        return signals
+    return {}
+
+
+def normalize_metadata(md: Dict[str, Any]) -> Dict[str, Any]:
+    if md is None:
+        md = {}
+
+    out = {}
+    for k, v in md.items():
+        out[str(k).strip()] = v
+
+    aliases = {
+        "machine": ["Machine Name", "Machine", "MachineName"],
+        "point": ["Point Name", "Point", "PointName", "Measurement Point"],
+        "variable": ["Variable", "Measurement", "Measure"],
+        "sample_speed": ["Sample Speed", "RPM", "Speed", "Running Speed"],
+        "timestamp": ["Timestamp", "Date", "Date Time", "Datetime"],
+        "unit": ["Y-Axis Unit", "Unit", "Amplitude Unit"],
+        "file_name": ["File Name", "Filename"],
+    }
+
+    result = {}
+    for std_key, keys in aliases.items():
+        result[std_key] = ""
+        for k in keys:
+            if k in out:
+                result[std_key] = str(out[k])
+                break
+    return result
+
+
+def infer_family(variable: str, unit: str) -> str:
+    v = (variable or "").lower()
+    u = (unit or "").lower()
+
+    if "prox" in v or "displ" in v or "shaft" in v or "mil" in u or "um" in u or "µm" in u:
+        return "Proximity"
+    if "vel" in v or "mm/s" in u or "ips" in u or "in/s" in u:
+        return "Velocity"
+    if "acc" in v or "g" == u.strip() or " g" in u or "accel" in v:
+        return "Acceleration"
+    return "Unknown"
+
+
+def to_numpy_signal(sig: Any) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any], str]:
+    time_arr = safe_get(sig, "time", None)
+    x_arr = safe_get(sig, "x", None)
+    md = safe_get(sig, "metadata", {}) or {}
+    file_name = safe_get(sig, "file_name", "")
+
+    t = np.asarray(time_arr if time_arr is not None else [], dtype=float)
+    x = np.asarray(x_arr if x_arr is not None else [], dtype=float)
+
+    if t.ndim != 1:
+        t = t.flatten()
+    if x.ndim != 1:
+        x = x.flatten()
+
+    n = min(len(t), len(x))
+    t = t[:n]
+    x = x[:n]
+
+    return t, x, md, str(file_name or "")
+
+
+def estimate_fs(time_array: np.ndarray) -> float:
+    if len(time_array) < 2:
+        return 0.0
+    dt = np.diff(time_array)
+    dt = dt[np.isfinite(dt)]
+    dt = dt[dt > 0]
+    if len(dt) == 0:
+        return 0.0
+    return float(1.0 / np.median(dt))
+
+
+def clean_signal(x: np.ndarray) -> np.ndarray:
+    if len(x) == 0:
+        return x
+    x = np.asarray(x, dtype=float)
+    x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+    x = x - np.mean(x)
+    return x
+
+
+def fft_amplitude_spectrum(x: np.ndarray, fs: float) -> Tuple[np.ndarray, np.ndarray]:
+    if len(x) < 8 or fs <= 0:
+        return np.array([]), np.array([])
+    n = len(x)
+    window = np.hanning(n)
+    xw = x * window
+    yf = np.fft.rfft(xw)
+    freqs = np.fft.rfftfreq(n, d=1.0 / fs)
+
+    coherent_gain = np.sum(window) / n
+    amps = (2.0 / n) * np.abs(yf) / max(coherent_gain, 1e-12)
+    if len(amps) > 0:
+        amps[0] = amps[0] / 2.0
+    return freqs, amps
+
+
+def parse_rpm(md_norm: Dict[str, Any], freqs: np.ndarray, amps: np.ndarray) -> float:
+    raw = str(md_norm.get("sample_speed", "")).strip()
+    if raw:
+        try:
+            txt = raw.lower().replace("rpm", "").replace(",", "").strip()
+            return float(txt)
+        except Exception:
+            pass
+
+    if len(freqs) == 0:
+        return 0.0
+
+    mask = (freqs >= 5.0) & (freqs <= 200.0)
+    if np.sum(mask) < 3:
+        return 0.0
+
+    f = freqs[mask]
+    a = amps[mask]
+    peak_idx = int(np.argmax(a))
+    dominant_hz = float(f[peak_idx])
+    return dominant_hz * 60.0
+
+
+def harmonic_amp(freqs: np.ndarray, amps: np.ndarray, target_hz: float, band_ratio: float = 0.04) -> float:
+    if len(freqs) == 0 or target_hz <= 0:
+        return 0.0
+    bw = max(target_hz * band_ratio, 0.5)
+    mask = (freqs >= target_hz - bw) & (freqs <= target_hz + bw)
+    if np.sum(mask) == 0:
+        return 0.0
+    return float(np.max(amps[mask]))
+
+
+def dominant_peak(freqs: np.ndarray, amps: np.ndarray) -> Tuple[float, float]:
+    if len(freqs) == 0:
+        return 0.0, 0.0
+    mask = freqs > 0.5
+    if np.sum(mask) == 0:
+        return 0.0, 0.0
+    f = freqs[mask]
+    a = amps[mask]
+    idx = int(np.argmax(a))
+    return float(f[idx]), float(a[idx])
+
+
+def overall_value(x: np.ndarray, family: str) -> Tuple[float, str]:
+    if len(x) == 0:
+        return 0.0, "N/A"
+
+    x = np.asarray(x, dtype=float)
+
+    if family == "Proximity":
+        return float(np.max(x) - np.min(x)), "Peak-to-Peak"
+    if family == "Velocity":
+        return float(np.sqrt(np.mean(x ** 2))), "RMS"
+    if family == "Acceleration":
+        return float(np.sqrt(np.mean(x ** 2))), "RMS"
+
+    return float(np.sqrt(np.mean(x ** 2))), "RMS"
+
+
+def score_health(family: str, overall: float, amp_1x: float, amp_2x: float, rpm: float) -> Tuple[str, str, str, str, str]:
+    ratio_2x = amp_2x / amp_1x if amp_1x > 1e-12 else 0.0
+
+    if family == "Proximity":
+        alarm_v = 3.0
+        danger_v = 5.0
+        unit_hint = "mil p-p aprox"
+    elif family == "Velocity":
+        alarm_v = 0.30
+        danger_v = 0.50
+        unit_hint = "ips rms aprox"
+    elif family == "Acceleration":
+        alarm_v = 0.50
+        danger_v = 1.00
+        unit_hint = "g rms aprox"
+    else:
+        alarm_v = 1.0
+        danger_v = 2.0
+        unit_hint = "engineering units"
+
+    if overall >= danger_v:
+        status = "Danger"
+    elif overall >= alarm_v:
+        status = "Alert"
+    elif overall >= alarm_v * 0.6:
+        status = "Observe"
+    else:
+        status = "Normal"
+
+    finding = "No dominant abnormal pattern detected"
+
+    if amp_1x > 0 and amp_1x >= max(amp_2x * 1.35, 1e-9):
+        finding = "1X dominant pattern compatible with unbalance tendency"
+    elif ratio_2x >= 0.8 and amp_2x > 0:
+        finding = "2X relevant pattern compatible with misalignment tendency"
+    elif rpm > 0 and overall > alarm_v and amp_1x < overall * 0.20:
+        finding = "Overall elevated with low 1X dominance, review broadband or non-synchronous content"
+
+    return status, finding, f"{alarm_v:.2f} {unit_hint}", f"{danger_v:.2f} {unit_hint}", "Auto"
+
+
+def build_result(signal_key: str, sig: Any) -> Optional[DiagnosticResult]:
+    t, x_raw, md, file_name = to_numpy_signal(sig)
+    if len(t) < 16 or len(x_raw) < 16:
+        return None
+
+    md_norm = normalize_metadata(md)
+    machine = md_norm.get("machine") or "Unknown Machine"
+    point = md_norm.get("point") or file_name or signal_key
+    variable = md_norm.get("variable") or "Unknown Variable"
+    timestamp = md_norm.get("timestamp") or ""
+    unit = md_norm.get("unit") or ""
+    family = infer_family(variable, unit)
+
+    x = clean_signal(x_raw)
+    fs = estimate_fs(t)
+    freqs, amps = fft_amplitude_spectrum(x, fs)
+    rpm = parse_rpm(md_norm, freqs, amps)
+
+    run_hz = rpm / 60.0 if rpm > 0 else 0.0
+    amp_05x = harmonic_amp(freqs, amps, run_hz * 0.5)
+    amp_1x = harmonic_amp(freqs, amps, run_hz * 1.0)
+    amp_2x = harmonic_amp(freqs, amps, run_hz * 2.0)
+    dom_freq, dom_amp = dominant_peak(freqs, amps)
+    dom_order = (dom_freq / run_hz) if run_hz > 0 else 0.0
+
+    overall, overall_label = overall_value(x_raw, family)
+
+    confidence = 0.0
+    if dom_amp > 0:
+        confidence = float(min(100.0, max(25.0, (amp_1x + amp_2x) / (dom_amp + 1e-12) * 60.0)))
+
+    status, finding, alarm, danger, criterion = score_health(family, overall, amp_1x, amp_2x, rpm)
+
+    return DiagnosticResult(
+        signal_key=signal_key,
+        machine=machine,
+        point=point,
+        variable=variable,
+        family=family,
+        unit=unit,
+        timestamp=timestamp,
+        rpm=float(rpm),
+        overall=float(overall),
+        overall_label=overall_label,
+        amp_05x=float(amp_05x),
+        amp_1x=float(amp_1x),
+        amp_2x=float(amp_2x),
+        dominant_order=float(dom_order),
+        dominant_amp=float(dom_amp),
+        confidence=float(confidence),
+        health_status=status,
+        finding=finding,
+        criterion_based=criterion,
+        alarm=alarm,
+        danger=danger,
+    )
+
+
+@st.cache_data(show_spinner=False)
+def evaluate_signals_cache(payload: List[Tuple[str, np.ndarray, np.ndarray, Dict[str, Any], str]]) -> List[DiagnosticResult]:
+    results: List[DiagnosticResult] = []
+
+    class SignalWrapper:
+        def __init__(self, time, x, metadata, file_name):
+            self.time = time
+            self.x = x
+            self.metadata = metadata
+            self.file_name = file_name
+
+    for signal_key, t, x, md, file_name in payload:
+        sig = SignalWrapper(t, x, md, file_name)
+        result = build_result(signal_key, sig)
+        if result is not None:
+            results.append(result)
+
+    return results
+
+
+def collect_payload(signals: Dict[str, Any]) -> List[Tuple[str, np.ndarray, np.ndarray, Dict[str, Any], str]]:
+    payload = []
+    for k, sig in signals.items():
+        t, x, md, file_name = to_numpy_signal(sig)
+        payload.append((str(k), t, x, md, file_name))
+    return payload
+
+
+def results_to_df(results: List[DiagnosticResult]) -> pd.DataFrame:
+    rows = []
+    for r in results:
+        rows.append(
+            {
+                "Machine": r.machine,
+                "Point": r.point,
+                "Variable": r.variable,
+                "Family": r.family,
+                "Timestamp": r.timestamp,
+                "RPM": round(r.rpm, 1),
+                "Overall": round(r.overall, 4),
+                "Overall Type": r.overall_label,
+                "0.5X Amplitude": round(r.amp_05x, 4),
+                "1X Amplitude": round(r.amp_1x, 4),
+                "2X Amplitude": round(r.amp_2x, 4),
+                "Dominant Order": round(r.dominant_order, 3),
+                "Dominant Amp": round(r.dominant_amp, 4),
+                "Confidence %": round(r.confidence, 1),
+                "Criterion Based": r.criterion_based,
+                "Alarm": r.alarm,
+                "Danger": r.danger,
+                "Status": r.health_status,
+                "Finding": r.finding,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def make_status_counts(results: List[DiagnosticResult]) -> Dict[str, int]:
+    counts = {"Normal": 0, "Observe": 0, "Alert": 0, "Danger": 0}
+    for r in results:
+        counts[r.health_status] = counts.get(r.health_status, 0) + 1
+    return counts
+
+
+def make_diagnostic_chart(results: List[DiagnosticResult]) -> go.Figure:
+    df = results_to_df(results)
+    if df.empty:
+        fig = go.Figure()
+        fig.update_layout(height=420, template="plotly_white")
+        return fig
+
+    order_map = {"Normal": 0, "Observe": 1, "Alert": 2, "Danger": 3}
+    df["Severity"] = df["Status"].map(order_map).fillna(0)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=df["RPM"],
+            y=df["Overall"],
+            mode="markers+text",
+            text=df["Point"],
+            textposition="top center",
+            marker=dict(
+                size=np.clip(df["Confidence %"].fillna(30).to_numpy(), 18, 42),
+                color=df["Severity"],
+                colorscale=[
+                    [0.00, "#18a957"],
+                    [0.33, "#d7a600"],
+                    [0.66, "#e26f00"],
+                    [1.00, "#d92d20"],
+                ],
+                showscale=False,
+                line=dict(width=1, color="rgba(0,0,0,0.18)"),
+            ),
+            hovertemplate=(
+                "<b>%{text}</b><br>"
+                "RPM: %{x:.1f}<br>"
+                "Overall: %{y:.4f}<extra></extra>"
+            ),
+        )
+    )
+
+    fig.update_layout(
+        height=500,
+        template="plotly_white",
+        margin=dict(l=20, r=20, t=20, b=20),
+        xaxis_title="RPM",
+        yaxis_title="Overall",
+        legend_title="Status",
+    )
+    return fig
+
+
+def status_chip(status: str) -> str:
+    klass = {
+        "Normal": "wm-chip-normal",
+        "Observe": "wm-chip-observe",
+        "Alert": "wm-chip-alert",
+        "Danger": "wm-chip-danger",
+    }.get(status, "wm-chip-info")
+    return f'<span class="wm-chip {klass}">{status}</span>'
+
+
+def build_png_summary(results: List[DiagnosticResult]) -> bytes:
+    width = 1800
+    row_h = 54
+    top_h = 200
+    bottom_pad = 60
+    num_rows = min(max(len(results), 1), 18)
+    height = top_h + num_rows * row_h + bottom_pad
+
+    img = Image.new("RGB", (width, height), (246, 249, 253))
+    draw = ImageDraw.Draw(img)
+
+    try:
+        title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 40)
+        sub_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 20)
+        hdr_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
+        txt_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 17)
+        bold_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 17)
+    except Exception:
+        title_font = sub_font = hdr_font = txt_font = bold_font = ImageFont.load_default()
+
+    draw.rounded_rectangle((40, 30, width - 40, 150), radius=28, fill=(11, 18, 32))
+    draw.text((70, 55), "Watermelon System | Diagnostic Executive Summary", font=title_font, fill=(255, 255, 255))
+    draw.text(
+        (70, 108),
+        f"Signals analyzed: {len(results)}   |   Generated for premium engineering review",
+        font=sub_font,
+        fill=(195, 210, 228),
+    )
+
+    cols = [
+        ("Machine", 50),
+        ("Point", 310),
+        ("RPM", 560),
+        ("Overall", 700),
+        ("1X", 860),
+        ("2X", 980),
+        ("Status", 1110),
+        ("Finding", 1270),
+    ]
+
+    header_y = 180
+    draw.rounded_rectangle((40, header_y, width - 40, header_y + 42), radius=12, fill=(224, 236, 249))
+    for text, x in cols:
+        draw.text((x, header_y + 10), text, font=hdr_font, fill=(13, 34, 61))
+
+    y = header_y + 52
+    for idx, r in enumerate(results[:18]):
+        fill = (255, 255, 255) if idx % 2 == 0 else (248, 251, 255)
+        draw.rounded_rectangle((40, y, width - 40, y + 42), radius=10, fill=fill)
+
+        color = {
+            "Normal": (24, 169, 87),
+            "Observe": (215, 166, 0),
+            "Alert": (226, 111, 0),
+            "Danger": (217, 45, 32),
+        }.get(r.health_status, (24, 94, 169))
+
+        draw.text((50, y + 10), str(r.machine)[:26], font=txt_font, fill=(18, 26, 39))
+        draw.text((310, y + 10), str(r.point)[:22], font=txt_font, fill=(18, 26, 39))
+        draw.text((560, y + 10), f"{r.rpm:.1f}", font=txt_font, fill=(18, 26, 39))
+        draw.text((700, y + 10), f"{r.overall:.4f}", font=txt_font, fill=(18, 26, 39))
+        draw.text((860, y + 10), f"{r.amp_1x:.4f}", font=txt_font, fill=(18, 26, 39))
+        draw.text((980, y + 10), f"{r.amp_2x:.4f}", font=txt_font, fill=(18, 26, 39))
+        draw.text((1110, y + 10), r.health_status, font=bold_font, fill=color)
+        draw.text((1270, y + 10), str(r.finding)[:48], font=txt_font, fill=(18, 26, 39))
+        y += row_h
+
+    buffer = io.BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+# =========================
+# HEADER
+# =========================
+st.markdown(
+    """
+    <div class="wm-hero">
+        <div class="wm-hero-title">Diagnostic</div>
+        <div class="wm-hero-sub">
+            Executive diagnosis layer for Watermelon System. Fast screening, order-based review,
+            commercial clarity and real engineering logic.
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# =========================
+# SIDEBAR FILTERS
+# =========================
+signals = get_signal_dict()
+
+with st.sidebar:
+    st.markdown("## Diagnostic Controls")
+
+    if not signals:
+        st.info("No signals loaded in session_state['signals'].")
+    only_alarm_plus = st.toggle("Show only Observe/Alert/Danger", value=False)
+    family_filter = st.multiselect(
+        "Measurement Family",
+        ["Proximity", "Velocity", "Acceleration", "Unknown"],
+        default=["Proximity", "Velocity", "Acceleration", "Unknown"],
+    )
+    sort_mode = st.selectbox(
+        "Sort by",
+        ["Severity", "Overall", "1X Amplitude", "2X Amplitude", "RPM", "Confidence"],
+        index=0,
+    )
+
+
+# =========================
+# MAIN
+# =========================
+if not signals:
+    st.warning("No loaded signals found. Load data first to use Diagnostic.")
+    st.stop()
+
+payload = collect_payload(signals)
+results = evaluate_signals_cache(payload)
+
+if not results:
+    st.warning("Signals were found, but no valid time waveform arrays could be processed.")
+    st.stop()
+
+if family_filter:
+    results = [r for r in results if r.family in family_filter]
+
+if only_alarm_plus:
+    results = [r for r in results if r.health_status in ["Observe", "Alert", "Danger"]]
+
+severity_rank = {"Danger": 3, "Alert": 2, "Observe": 1, "Normal": 0}
+if sort_mode == "Severity":
+    results = sorted(results, key=lambda r: (severity_rank.get(r.health_status, 0), r.overall), reverse=True)
+elif sort_mode == "Overall":
+    results = sorted(results, key=lambda r: r.overall, reverse=True)
+elif sort_mode == "1X Amplitude":
+    results = sorted(results, key=lambda r: r.amp_1x, reverse=True)
+elif sort_mode == "2X Amplitude":
+    results = sorted(results, key=lambda r: r.amp_2x, reverse=True)
+elif sort_mode == "RPM":
+    results = sorted(results, key=lambda r: r.rpm, reverse=True)
+elif sort_mode == "Confidence":
+    results = sorted(results, key=lambda r: r.confidence, reverse=True)
+
+df = results_to_df(results)
+counts = make_status_counts(results)
+
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.markdown(
+        f"""
+        <div class="wm-kpi">
+            <div class="wm-kpi-title">Signals Screened</div>
+            <div class="wm-kpi-value">{len(results)}</div>
+            <div class="wm-kpi-sub">Loaded from session signal bank</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with col2:
+    st.markdown(
+        f"""
+        <div class="wm-kpi">
+            <div class="wm-kpi-title">Danger + Alert</div>
+            <div class="wm-kpi-value">{counts.get("Danger", 0) + counts.get("Alert", 0)}</div>
+            <div class="wm-kpi-sub">Immediate engineering review recommended</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with col3:
+    avg_conf = round(float(np.mean([r.confidence for r in results])) if results else 0.0, 1)
+    st.markdown(
+        f"""
+        <div class="wm-kpi">
+            <div class="wm-kpi-title">Average Confidence</div>
+            <div class="wm-kpi-value">{avg_conf}%</div>
+            <div class="wm-kpi-sub">Auto diagnosis confidence layer</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with col4:
+    top_machine = "-"
+    if len(df) > 0 and "Machine" in df.columns:
+        top_machine = df["Machine"].value_counts().idxmax()
+    st.markdown(
+        f"""
+        <div class="wm-kpi">
+            <div class="wm-kpi-title">Top Machine in View</div>
+            <div class="wm-kpi-value" style="font-size:22px;">{top_machine}</div>
+            <div class="wm-kpi-sub">Current filtered selection</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+st.markdown("")
+left, right = st.columns([1.3, 1.0])
+
+with left:
+    st.markdown('<div class="wm-card">', unsafe_allow_html=True)
+    st.markdown('<div class="wm-section-title">Diagnostic Map</div>', unsafe_allow_html=True)
+    st.plotly_chart(make_diagnostic_chart(results), use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+with right:
+    st.markdown('<div class="wm-card">', unsafe_allow_html=True)
+    st.markdown('<div class="wm-section-title">Status Breakdown</div>', unsafe_allow_html=True)
+    st.markdown(
+        f"""
+        {status_chip('Normal')} {counts.get('Normal', 0)}<br>
+        {status_chip('Observe')} {counts.get('Observe', 0)}<br>
+        {status_chip('Alert')} {counts.get('Alert', 0)}<br>
+        {status_chip('Danger')} {counts.get('Danger', 0)}
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    top_findings = df["Finding"].value_counts().head(5) if not df.empty else pd.Series(dtype=int)
+    if len(top_findings) > 0:
+        st.markdown('<div class="wm-section-title">Top Findings</div>', unsafe_allow_html=True)
+        for finding, count in top_findings.items():
+            st.markdown(
+                f'<span class="wm-chip wm-chip-info">{count}x</span> {finding}',
+                unsafe_allow_html=True,
+            )
+    st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown("")
+st.markdown('<div class="wm-card">', unsafe_allow_html=True)
+st.markdown('<div class="wm-section-title">Executive Diagnostic Table</div>', unsafe_allow_html=True)
+st.dataframe(df, use_container_width=True, hide_index=True)
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown("")
+exp1, exp2 = st.columns([1, 1])
+
+with exp1:
+    csv_bytes = df.to_csv(index=False).encode("utf-8")
+    st.download_button(
+        "Download CSV",
+        data=csv_bytes,
+        file_name="watermelon_diagnostic_table.csv",
+        mime="text/csv",
+        use_container_width=True,
+    )
+
+with exp2:
+    png_bytes = build_png_summary(results)
+    st.download_button(
+        "Download PNG HD",
+        data=png_bytes,
+        file_name="watermelon_diagnostic_summary.png",
+        mime="image/png",
+        use_container_width=True,
+    )
