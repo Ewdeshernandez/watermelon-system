@@ -8,102 +8,95 @@ st.set_page_config(
 )
 
 # =========================================================
-# CSS PREMIUM LOGIN - WATERMELON SYSTEM
+# SESSION DEFAULTS
+# =========================================================
+if "authenticated" not in st.session_state:
+    st.session_state["authenticated"] = False
+
+# =========================================================
+# AUTH BRIDGE
+# IMPORTANTE:
+# AQUÍ CONECTAS TU AUTH REAL.
+# NO METO AUTH DEMO PARA NO DAÑARTE EL INGRESO.
+# =========================================================
+def do_login(username: str, password: str) -> bool:
+    """
+    Conecta aquí tu validación real.
+    Ejemplos:
+        return authenticate_user(username, password)
+        return login_user(username, password)
+        return auth_manager.login(username, password)
+
+    TEMPORAL:
+    Si quieres probar visualmente mientras conectas auth real,
+    descomenta la línea del return de abajo.
+    """
+
+    # ====== PEGA AQUÍ TU LÓGICA REAL ======
+    # return authenticate_user(username, password)
+
+    # ====== SOLO PARA PRUEBA VISUAL, BORRAR DESPUÉS ======
+    return False
+
+
+# Si ya hay sesión, no mostramos login
+if st.session_state.get("authenticated", False):
+    st.success("Sesión activa")
+    st.stop()
+
+# =========================================================
+# CSS
 # =========================================================
 st.markdown(
     """
     <style>
-    /* ---------- Hide Streamlit chrome ---------- */
-    header, #MainMenu, footer {
-        visibility: hidden;
-    }
+    header, #MainMenu, footer {visibility: hidden;}
+    [data-testid="stSidebar"] {display: none;}
 
-    [data-testid="stSidebar"] {
-        display: none;
-    }
-
-    /* ---------- Global background ---------- */
     .stApp {
         background:
-            radial-gradient(circle at 12% 18%, rgba(30,167,255,0.22) 0%, transparent 28%),
-            radial-gradient(circle at 88% 82%, rgba(255,45,85,0.18) 0%, transparent 30%),
-            radial-gradient(circle at 70% 20%, rgba(74,222,128,0.10) 0%, transparent 22%),
+            radial-gradient(circle at 12% 18%, rgba(30,167,255,0.20) 0%, transparent 28%),
+            radial-gradient(circle at 88% 82%, rgba(255,45,85,0.16) 0%, transparent 30%),
             linear-gradient(135deg, #07111f 0%, #0a1426 45%, #0d172b 100%);
         color: #f3f7ff;
     }
 
     .block-container {
         max-width: 1380px;
-        padding-top: 2.1rem;
+        padding-top: 2rem;
         padding-bottom: 1.5rem;
         padding-left: 2.5rem;
         padding-right: 2.5rem;
     }
 
-    /* ---------- Custom shells ---------- */
     .wm-shell {
-        position: relative;
         min-height: 82vh;
         border-radius: 28px;
         overflow: hidden;
         border: 1px solid rgba(255,255,255,0.08);
         background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
-        box-shadow:
-            0 30px 80px rgba(0,0,0,0.45),
-            inset 0 1px 0 rgba(255,255,255,0.05);
-    }
-
-    .wm-shell::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background:
-            linear-gradient(135deg, rgba(255,255,255,0.03), transparent 35%),
-            radial-gradient(circle at 20% 20%, rgba(30,167,255,0.12), transparent 22%),
-            radial-gradient(circle at 80% 75%, rgba(255,45,85,0.12), transparent 24%);
-        pointer-events: none;
+        box-shadow: 0 30px 80px rgba(0,0,0,0.45);
+        padding: 1.2rem;
     }
 
     .wm-left-card {
-        position: relative;
         min-height: 74vh;
-        padding: 3.3rem 3.1rem 3.0rem 3.1rem;
+        padding: 3rem;
         border-radius: 24px;
-        background:
-            linear-gradient(180deg, rgba(11, 20, 38, 0.88), rgba(8, 15, 28, 0.76));
+        background: linear-gradient(180deg, rgba(11, 20, 38, 0.88), rgba(8, 15, 28, 0.76));
         border: 1px solid rgba(255,255,255,0.06);
-        box-shadow:
-            inset 0 1px 0 rgba(255,255,255,0.05),
-            0 18px 44px rgba(0,0,0,0.28);
-        overflow: hidden;
-    }
-
-    .wm-left-card::after {
-        content: "";
-        position: absolute;
-        width: 420px;
-        height: 420px;
-        right: -140px;
-        top: -110px;
-        background: radial-gradient(circle, rgba(30,167,255,0.22) 0%, transparent 60%);
-        filter: blur(18px);
-        pointer-events: none;
+        box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 44px rgba(0,0,0,0.28);
     }
 
     .wm-login-card {
-        position: relative;
-        margin-top: 2.2rem;
-        padding: 2.0rem 1.8rem 1.7rem 1.8rem;
+        margin-top: 2rem;
+        padding: 1.8rem;
         border-radius: 24px;
-        background:
-            linear-gradient(180deg, rgba(12, 19, 34, 0.96), rgba(9, 16, 30, 0.90));
+        background: linear-gradient(180deg, rgba(12, 19, 34, 0.96), rgba(9, 16, 30, 0.90));
         border: 1px solid rgba(255,255,255,0.08);
-        box-shadow:
-            0 20px 50px rgba(0,0,0,0.42),
-            inset 0 1px 0 rgba(255,255,255,0.04);
+        box-shadow: 0 20px 50px rgba(0,0,0,0.42);
     }
 
-    /* ---------- Typography ---------- */
     .wm-badge {
         display: inline-flex;
         align-items: center;
@@ -120,7 +113,7 @@ st.markdown(
     }
 
     .wm-eyebrow {
-        margin-top: 0.6rem;
+        margin-top: 0.8rem;
         color: #49b8ff;
         font-size: 0.92rem;
         font-weight: 700;
@@ -130,18 +123,18 @@ st.markdown(
 
     .wm-title {
         margin-top: 1rem;
-        font-size: 4rem;
-        line-height: 0.97;
+        font-size: 3.8rem;
+        line-height: 0.98;
         font-weight: 900;
         color: #f5f9ff;
         letter-spacing: -0.04em;
     }
 
     .wm-subtitle {
-        margin-top: 1.1rem;
-        max-width: 760px;
-        font-size: 1.08rem;
-        line-height: 1.75;
+        margin-top: 1rem;
+        max-width: 720px;
+        font-size: 1.02rem;
+        line-height: 1.7;
         color: #a9b7cb;
     }
 
@@ -149,46 +142,44 @@ st.markdown(
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
         gap: 0.95rem;
-        margin-top: 2.0rem;
+        margin-top: 1.8rem;
     }
 
     .wm-kpi {
-        padding: 1rem 1rem 0.9rem 1rem;
+        padding: 1rem;
         border-radius: 18px;
         background: rgba(255,255,255,0.035);
         border: 1px solid rgba(255,255,255,0.06);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
     }
 
     .wm-kpi-value {
-        font-size: 1.45rem;
-        font-weight: 900;
+        font-size: 1.12rem;
+        font-weight: 800;
         color: #ffffff;
-        letter-spacing: -0.03em;
     }
 
     .wm-kpi-label {
         margin-top: 0.25rem;
-        font-size: 0.86rem;
+        font-size: 0.84rem;
         color: #9db0c8;
+        line-height: 1.45;
     }
 
     .wm-right-head {
         color: #eef5ff;
-        font-size: 1.75rem;
+        font-size: 1.55rem;
         font-weight: 850;
         letter-spacing: -0.03em;
-        margin-bottom: 0.35rem;
+        margin-bottom: 0.2rem;
     }
 
     .wm-right-copy {
         color: #93a6bf;
-        font-size: 0.98rem;
-        line-height: 1.65;
-        margin-bottom: 1.35rem;
+        font-size: 0.93rem;
+        line-height: 1.55;
+        margin-bottom: 1rem;
     }
 
-    /* ---------- Inputs ---------- */
     div[data-testid="stTextInput"] label {
         color: #dbe7f7 !important;
         font-weight: 650 !important;
@@ -199,7 +190,7 @@ st.markdown(
         background: linear-gradient(180deg, rgba(15,24,42,0.98), rgba(12,20,36,0.95)) !important;
         border: 1px solid rgba(255,255,255,0.08) !important;
         border-radius: 16px !important;
-        min-height: 54px !important;
+        min-height: 52px !important;
         box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
         transition: all 0.2s ease;
     }
@@ -221,50 +212,41 @@ st.markdown(
         opacity: 1 !important;
     }
 
-    /* ---------- Button ---------- */
     .stButton > button {
         width: 100%;
-        height: 54px;
-        margin-top: 0.55rem;
+        height: 52px;
+        margin-top: 0.35rem;
         border: 0 !important;
         border-radius: 16px !important;
         color: white !important;
         font-weight: 800 !important;
         font-size: 1rem !important;
-        letter-spacing: 0.01em;
-        background:
-            linear-gradient(90deg, #1593ff 0%, #1ea7ff 35%, #24c6ff 60%, #ff4d6d 100%) !important;
-        box-shadow:
-            0 14px 30px rgba(18, 131, 255, 0.24),
-            0 6px 20px rgba(255, 77, 109, 0.16);
+        background: linear-gradient(90deg, #1593ff 0%, #1ea7ff 35%, #24c6ff 60%, #ff4d6d 100%) !important;
+        box-shadow: 0 14px 30px rgba(18, 131, 255, 0.24), 0 6px 20px rgba(255, 77, 109, 0.16);
         transition: all 0.22s ease;
     }
 
     .stButton > button:hover {
         transform: translateY(-1px);
-        box-shadow:
-            0 18px 34px rgba(18, 131, 255, 0.34),
-            0 8px 24px rgba(255, 77, 109, 0.22);
+        box-shadow: 0 18px 34px rgba(18, 131, 255, 0.34), 0 8px 24px rgba(255, 77, 109, 0.22);
     }
 
-    /* ---------- Alert box ---------- */
     .wm-note {
-        margin-top: 1rem;
+        margin-top: 0.9rem;
         padding: 0.9rem 1rem;
         border-radius: 16px;
         background: rgba(255,255,255,0.04);
         border: 1px solid rgba(255,255,255,0.06);
         color: #98acc5;
-        font-size: 0.92rem;
-        line-height: 1.6;
+        font-size: 0.88rem;
+        line-height: 1.55;
     }
 
-    /* ---------- Divider stats ---------- */
     .wm-mini-row {
         display: flex;
         gap: 0.65rem;
         flex-wrap: wrap;
-        margin-top: 1.15rem;
+        margin-top: 1.1rem;
     }
 
     .wm-chip {
@@ -277,14 +259,9 @@ st.markdown(
         font-weight: 650;
     }
 
-    /* ---------- Responsive ---------- */
     @media (max-width: 1100px) {
-        .wm-title {
-            font-size: 3rem;
-        }
-        .wm-kpis {
-            grid-template-columns: 1fr;
-        }
+        .wm-title { font-size: 3rem; }
+        .wm-kpis { grid-template-columns: 1fr; }
     }
     </style>
     """,
@@ -292,34 +269,7 @@ st.markdown(
 )
 
 # =========================================================
-# SESSION DEFAULTS
-# =========================================================
-if "authenticated" not in st.session_state:
-    st.session_state["authenticated"] = False
-
-# =========================================================
-# AUTH FUNCTION
-# REEMPLAZA SOLO EL CUERPO INTERNO SI YA TIENES AUTH REAL
-# =========================================================
-def authenticate_user(username: str, password: str) -> bool:
-    """
-    Reemplaza esta función por tu auth real si ya existe.
-    Mantén la firma para no tocar el resto del archivo.
-    """
-    demo_users = {
-        "admin": "admin",
-        "demo": "demo",
-    }
-    return demo_users.get(username) == password
-
-
-# Si ya está autenticado, no mostramos el login
-if st.session_state.get("authenticated", False):
-    st.success("Sesión activa.")
-    st.stop()
-
-# =========================================================
-# MAIN LAYOUT
+# LAYOUT
 # =========================================================
 st.markdown('<div class="wm-shell">', unsafe_allow_html=True)
 
@@ -330,16 +280,15 @@ with left_col:
 
     st.markdown(
         """
-        <div class="wm-badge">● Watermelon System · Premium Platform</div>
+        <div class="wm-badge">● Watermelon System</div>
         <div class="wm-eyebrow">Industrial Vibration Intelligence</div>
         <div class="wm-title">
-            Diagnóstico moderno.<br>
-            Monitoreo serio.<br>
-            Presencia de producto.
+            El nuevo estándar<br>
+            en monitoreo<br>
+            de vibraciones.
         </div>
         <div class="wm-subtitle">
-            Plataforma SaaS industrial para análisis, monitoreo, visualización y diagnóstico de vibraciones.
-            Diseñada para una experiencia superior: más clara, más rápida y mucho más premium que el software industrial tradicional.
+            Plataforma industrial premium para análisis, visualización y diagnóstico moderno.
         </div>
         """,
         unsafe_allow_html=True,
@@ -349,16 +298,16 @@ with left_col:
         """
         <div class="wm-kpis">
             <div class="wm-kpi">
-                <div class="wm-kpi-value">HD Analytics</div>
-                <div class="wm-kpi-label">Visualización premium para señales, órbitas, espectros y diagnóstico.</div>
+                <div class="wm-kpi-value">Más claro</div>
+                <div class="wm-kpi-label">Visuales premium para análisis técnico serio.</div>
             </div>
             <div class="wm-kpi">
-                <div class="wm-kpi-value">Modern UX</div>
-                <div class="wm-kpi-label">Diseño enterprise limpio, veloz y comercialmente impecable.</div>
+                <div class="wm-kpi-value">Más rápido</div>
+                <div class="wm-kpi-label">Experiencia moderna enfocada en operación real.</div>
             </div>
             <div class="wm-kpi">
-                <div class="wm-kpi-value">Industrial Ready</div>
-                <div class="wm-kpi-label">Arquitectura orientada a confiabilidad, exportación y escalabilidad.</div>
+                <div class="wm-kpi-value">Más potente</div>
+                <div class="wm-kpi-label">Arquitectura lista para escalar módulos y diagnóstico.</div>
             </div>
         </div>
         """,
@@ -372,8 +321,7 @@ with left_col:
             <div class="wm-chip">Orbit</div>
             <div class="wm-chip">FFT</div>
             <div class="wm-chip">Trend</div>
-            <div class="wm-chip">Diagnostics</div>
-            <div class="wm-chip">Reports HD</div>
+            <div class="wm-chip">Reports</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -386,38 +334,38 @@ with right_col:
 
     st.markdown('<div class="wm-right-head">Acceso seguro</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="wm-right-copy">Ingresa a la plataforma con tus credenciales internas. '
-        'Entorno corporativo para monitoreo y análisis avanzado.</div>',
+        '<div class="wm-right-copy">Ingresa con tus credenciales.</div>',
         unsafe_allow_html=True,
     )
 
-    username = st.text_input(
-        "Usuario o correo",
-        placeholder="usuario@empresa.com",
-        key="login_username",
-    )
+    with st.form("login_form", clear_on_submit=False):
+        username = st.text_input(
+            "Usuario o correo",
+            placeholder="usuario",
+            key="login_username",
+        )
 
-    password = st.text_input(
-        "Clave",
-        placeholder="Ingresa tu contraseña",
-        type="password",
-        key="login_password",
-    )
+        password = st.text_input(
+            "Clave",
+            placeholder="••••••••",
+            type="password",
+            key="login_password",
+        )
 
-    login_clicked = st.button("Ingresar al sistema", use_container_width=True)
+        login_clicked = st.form_submit_button("Ingresar al sistema", use_container_width=True)
 
     if login_clicked:
-        if authenticate_user(username.strip(), password):
+        ok = do_login(username.strip(), password)
+        if ok:
             st.session_state["authenticated"] = True
             st.rerun()
         else:
-            st.error("Credenciales inválidas. Verifica usuario y contraseña.")
+            st.error("Credenciales inválidas.")
 
     st.markdown(
         """
         <div class="wm-note">
-            Watermelon System está diseñado para ofrecer una experiencia de análisis industrial más moderna,
-            más clara y más poderosa que el software legacy tradicional.
+            Plataforma premium de análisis industrial.
         </div>
         """,
         unsafe_allow_html=True,
