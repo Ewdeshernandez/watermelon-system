@@ -18,7 +18,7 @@ st.set_page_config(
 )
 
 # =========================================================
-# HELPERS
+# PATHS
 # =========================================================
 ROOT_DIR = Path(__file__).resolve().parents[1]
 ASSETS_DIR = ROOT_DIR / "assets"
@@ -33,7 +33,7 @@ def asset_exists(path: Path) -> bool:
 
 
 # =========================================================
-# AUTH STATE
+# AUTH
 # =========================================================
 if is_authenticated():
     st.switch_page("00_Home.py")
@@ -41,7 +41,7 @@ if is_authenticated():
 render_login_shell()
 
 # =========================================================
-# CSS - ULTRA PREMIUM LOGIN
+# CSS
 # =========================================================
 st.markdown(
     """
@@ -51,362 +51,267 @@ st.markdown(
 
     .stApp {
         background:
-            radial-gradient(circle at 8% 15%, rgba(37, 203, 255, 0.20) 0%, transparent 22%),
-            radial-gradient(circle at 88% 82%, rgba(255, 72, 113, 0.18) 0%, transparent 28%),
-            radial-gradient(circle at 75% 22%, rgba(101, 255, 179, 0.10) 0%, transparent 16%),
-            linear-gradient(135deg, #040b16 0%, #08111f 32%, #0b1630 65%, #101326 100%);
-        color: #f6fbff;
-        overflow: hidden;
+            radial-gradient(circle at 10% 12%, rgba(77, 208, 255, 0.16) 0%, transparent 24%),
+            radial-gradient(circle at 90% 18%, rgba(103, 114, 255, 0.10) 0%, transparent 20%),
+            linear-gradient(180deg, #f7fbff 0%, #eef5ff 100%);
+        color: #0f172a;
     }
 
     .block-container {
-        max-width: 1480px !important;
-        padding-top: 1.35rem !important;
-        padding-bottom: 1.35rem !important;
-        padding-left: 1.75rem !important;
-        padding-right: 1.75rem !important;
+        max-width: 1380px !important;
+        padding-top: 1.2rem !important;
+        padding-bottom: 1.2rem !important;
+        padding-left: 1.5rem !important;
+        padding-right: 1.5rem !important;
     }
 
-    .wm-page-shell {
-        position: relative;
-        min-height: 92vh;
-        border-radius: 30px;
+    .wm-shell {
+        min-height: 90vh;
+        border-radius: 28px;
         overflow: hidden;
-        border: 1px solid rgba(255,255,255,0.07);
+        border: 1px solid rgba(15, 23, 42, 0.06);
         background:
-            linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.018));
+            linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,255,255,0.78));
         box-shadow:
-            0 30px 100px rgba(0,0,0,0.50),
-            inset 0 1px 0 rgba(255,255,255,0.04);
+            0 24px 80px rgba(32, 84, 146, 0.12),
+            inset 0 1px 0 rgba(255,255,255,0.85);
         padding: 1rem;
     }
 
-    .wm-page-shell::before {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background:
-            linear-gradient(120deg, rgba(255,255,255,0.02), transparent 32%),
-            radial-gradient(circle at 18% 18%, rgba(30,167,255,0.10), transparent 25%),
-            radial-gradient(circle at 82% 78%, rgba(255,77,109,0.10), transparent 24%);
-        pointer-events: none;
-    }
-
-    .wm-grid-bg {
-        position: absolute;
-        inset: 0;
-        opacity: 0.18;
-        background-image:
-            linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px);
-        background-size: 42px 42px;
-        mask-image: radial-gradient(circle at center, black 40%, transparent 92%);
-        -webkit-mask-image: radial-gradient(circle at center, black 40%, transparent 92%);
-        pointer-events: none;
-    }
-
     .wm-left-panel {
-        position: relative;
-        min-height: 84vh;
-        padding: 3.2rem 3rem 2.6rem 3rem;
-        border-radius: 26px;
+        min-height: 82vh;
+        padding: 3.2rem 3rem;
+        border-radius: 24px;
         background:
-            linear-gradient(180deg, rgba(10, 20, 36, 0.88), rgba(7, 14, 26, 0.78));
+            linear-gradient(180deg, rgba(255,255,255,0.76), rgba(255,255,255,0.56));
+        border: 1px solid rgba(15, 23, 42, 0.06);
+        box-shadow:
+            inset 0 1px 0 rgba(255,255,255,0.8),
+            0 12px 36px rgba(57, 93, 135, 0.08);
+    }
+
+    .wm-right-panel {
+        min-height: 82vh;
+        padding: 2rem 1.8rem;
+        border-radius: 24px;
+        background:
+            linear-gradient(180deg, #0f172a 0%, #111c32 100%);
         border: 1px solid rgba(255,255,255,0.06);
         box-shadow:
-            inset 0 1px 0 rgba(255,255,255,0.04),
-            0 22px 50px rgba(0,0,0,0.26);
-        overflow: hidden;
+            0 22px 60px rgba(15, 23, 42, 0.24),
+            inset 0 1px 0 rgba(255,255,255,0.04);
     }
 
-    .wm-left-panel::before {
-        content: "";
-        position: absolute;
-        width: 520px;
-        height: 520px;
-        right: -170px;
-        top: -120px;
-        background: radial-gradient(circle, rgba(30,167,255,0.22) 0%, transparent 62%);
-        filter: blur(24px);
-        pointer-events: none;
-    }
-
-    .wm-left-panel::after {
-        content: "";
-        position: absolute;
-        width: 420px;
-        height: 420px;
-        left: -120px;
-        bottom: -170px;
-        background: radial-gradient(circle, rgba(255,77,109,0.16) 0%, transparent 62%);
-        filter: blur(28px);
-        pointer-events: none;
-    }
-
-    .wm-topline {
+    .wm-badge {
         display: inline-flex;
         align-items: center;
-        gap: 0.55rem;
-        padding: 0.5rem 0.95rem;
+        gap: 0.45rem;
+        padding: 0.48rem 0.85rem;
         border-radius: 999px;
-        background: rgba(30,167,255,0.11);
-        border: 1px solid rgba(30,167,255,0.28);
-        color: #87ddff;
+        background: rgba(30,167,255,0.10);
+        border: 1px solid rgba(30,167,255,0.18);
+        color: #1192ff;
         font-size: 0.78rem;
         font-weight: 800;
-        letter-spacing: 0.14em;
+        letter-spacing: 0.12em;
         text-transform: uppercase;
-        backdrop-filter: blur(10px);
     }
 
     .wm-brand-row {
         display: flex;
         align-items: center;
-        gap: 1rem;
-        margin-top: 1rem;
-        margin-bottom: 0.45rem;
+        gap: 0.9rem;
+        margin-top: 1.2rem;
     }
 
-    .wm-logo-wrap {
-        width: 66px;
-        height: 66px;
+    .wm-logo-box {
+        width: 62px;
+        height: 62px;
         border-radius: 18px;
         display: flex;
         align-items: center;
         justify-content: center;
-        background: linear-gradient(180deg, rgba(255,255,255,0.12), rgba(255,255,255,0.04));
-        border: 1px solid rgba(255,255,255,0.09);
-        box-shadow: 0 12px 28px rgba(0,0,0,0.22);
+        background: linear-gradient(180deg, #ffffff, #eef6ff);
+        border: 1px solid rgba(15, 23, 42, 0.06);
+        box-shadow: 0 10px 24px rgba(57, 93, 135, 0.10);
         overflow: hidden;
     }
 
-    .wm-brand-text {
-        color: #dff3ff;
-        font-size: 0.96rem;
-        font-weight: 700;
-        letter-spacing: 0.18em;
+    .wm-brand-name {
+        color: #0f172a;
+        font-size: 0.95rem;
+        font-weight: 800;
+        letter-spacing: 0.16em;
         text-transform: uppercase;
     }
 
+    .wm-brand-sub {
+        color: #4b5563;
+        font-size: 0.92rem;
+        font-weight: 600;
+        margin-top: 0.2rem;
+    }
+
     .wm-title {
-        margin-top: 1.15rem;
-        font-size: 4.45rem;
-        line-height: 0.93;
+        margin-top: 1.5rem;
+        font-size: 4.25rem;
+        line-height: 0.95;
         font-weight: 950;
-        letter-spacing: -0.05em;
-        color: #f7fbff;
-        max-width: 780px;
+        letter-spacing: -0.055em;
+        color: #0b1324;
+        max-width: 760px;
     }
 
     .wm-subtitle {
-        margin-top: 1.15rem;
-        max-width: 720px;
-        color: #aebcd0;
-        font-size: 1.08rem;
-        line-height: 1.78;
+        margin-top: 1rem;
+        max-width: 640px;
+        color: #475569;
+        font-size: 1.05rem;
+        line-height: 1.75;
     }
 
-    .wm-value-strip {
+    .wm-chips {
         display: flex;
-        gap: 0.7rem;
+        gap: 0.65rem;
         flex-wrap: wrap;
         margin-top: 1.35rem;
     }
 
     .wm-chip {
-        padding: 0.58rem 0.88rem;
+        padding: 0.55rem 0.82rem;
         border-radius: 999px;
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.08);
-        color: #c4d4e6;
-        font-size: 0.82rem;
+        background: rgba(255,255,255,0.72);
+        border: 1px solid rgba(15, 23, 42, 0.06);
+        color: #334155;
+        font-size: 0.80rem;
         font-weight: 700;
-        letter-spacing: 0.01em;
     }
 
     .wm-preview-card {
-        position: relative;
         margin-top: 2rem;
-        border-radius: 24px;
+        border-radius: 22px;
         padding: 1.1rem;
-        background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02));
-        border: 1px solid rgba(255,255,255,0.08);
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
-        overflow: hidden;
+        background: linear-gradient(180deg, #ffffff, #f5f9ff);
+        border: 1px solid rgba(15, 23, 42, 0.06);
+        box-shadow: 0 14px 34px rgba(57, 93, 135, 0.08);
     }
 
     .wm-preview-head {
         display: flex;
-        align-items: center;
         justify-content: space-between;
+        align-items: center;
         margin-bottom: 0.95rem;
     }
 
     .wm-preview-title {
-        color: #f2f8ff;
+        color: #0f172a;
         font-size: 1rem;
         font-weight: 800;
-        letter-spacing: -0.02em;
     }
 
-    .wm-preview-badge {
-        padding: 0.36rem 0.7rem;
+    .wm-preview-status {
+        padding: 0.38rem 0.7rem;
         border-radius: 999px;
-        background: rgba(101,255,179,0.10);
-        border: 1px solid rgba(101,255,179,0.26);
-        color: #8effbf;
+        background: rgba(16,185,129,0.10);
+        border: 1px solid rgba(16,185,129,0.18);
+        color: #059669;
         font-size: 0.74rem;
         font-weight: 800;
+        letter-spacing: 0.10em;
         text-transform: uppercase;
-        letter-spacing: 0.12em;
     }
 
     .wm-chart {
         position: relative;
-        height: 250px;
-        border-radius: 20px;
-        background:
-            linear-gradient(180deg, rgba(7,16,31,0.95), rgba(10,18,36,0.88));
-        border: 1px solid rgba(255,255,255,0.07);
+        height: 240px;
+        border-radius: 18px;
         overflow: hidden;
+        background:
+            linear-gradient(180deg, #eaf4ff 0%, #f7fbff 100%);
+        border: 1px solid rgba(15, 23, 42, 0.05);
     }
 
     .wm-chart-grid {
         position: absolute;
         inset: 0;
         background-image:
-            linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px);
-        background-size: 40px 40px;
-        opacity: 0.32;
+            linear-gradient(rgba(15, 23, 42, 0.05) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(15, 23, 42, 0.05) 1px, transparent 1px);
+        background-size: 42px 42px;
     }
 
-    .wm-chart-glow {
-        position: absolute;
-        inset: 0;
-        background:
-            radial-gradient(circle at 12% 70%, rgba(30,167,255,0.16), transparent 25%),
-            radial-gradient(circle at 86% 35%, rgba(255,77,109,0.14), transparent 24%);
-    }
-
-    .wm-line {
+    .wm-wave {
         position: absolute;
         left: 4%;
         width: 92%;
-        height: 3px;
         border-radius: 999px;
-        opacity: 0.95;
-        filter: drop-shadow(0 0 10px rgba(0,0,0,0.2));
     }
 
-    .wm-line-1 {
-        top: 30%;
-        background: linear-gradient(90deg, transparent 0%, #18b4ff 14%, #7ad7ff 55%, #18b4ff 100%);
-        clip-path: polygon(0% 55%, 6% 46%, 12% 58%, 18% 30%, 24% 64%, 30% 40%, 36% 52%, 42% 26%, 48% 61%, 54% 43%, 60% 49%, 66% 35%, 72% 57%, 78% 44%, 84% 60%, 90% 38%, 100% 48%, 100% 100%, 0% 100%);
-        height: 84px;
+    .wm-wave-1 {
+        top: 28%;
+        height: 72px;
+        background: linear-gradient(90deg, #28a8ff 0%, #78d7ff 100%);
+        clip-path: polygon(0% 62%, 8% 48%, 16% 66%, 24% 35%, 32% 54%, 40% 42%, 48% 64%, 56% 31%, 64% 58%, 72% 43%, 80% 62%, 88% 39%, 100% 54%, 100% 100%, 0% 100%);
+        opacity: 0.96;
     }
 
-    .wm-line-2 {
-        top: 52%;
-        background: linear-gradient(90deg, transparent 0%, #ff5c7a 12%, #ff9ab0 58%, #ff5c7a 100%);
-        clip-path: polygon(0% 60%, 8% 48%, 16% 65%, 24% 36%, 32% 54%, 40% 43%, 48% 67%, 56% 31%, 64% 58%, 72% 42%, 80% 63%, 88% 39%, 100% 57%, 100% 100%, 0% 100%);
-        height: 92px;
+    .wm-wave-2 {
+        top: 56%;
+        height: 62px;
+        background: linear-gradient(90deg, #ff5f8f 0%, #ff96b2 100%);
+        clip-path: polygon(0% 58%, 10% 42%, 20% 60%, 30% 32%, 40% 55%, 50% 38%, 60% 62%, 70% 37%, 80% 57%, 90% 40%, 100% 52%, 100% 100%, 0% 100%);
+        opacity: 0.92;
     }
 
-    .wm-metrics-row {
+    .wm-stats {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 0.8rem;
-        margin-top: 0.95rem;
+        gap: 0.75rem;
+        margin-top: 0.9rem;
     }
 
-    .wm-metric {
-        padding: 0.85rem 0.9rem;
+    .wm-stat {
+        padding: 0.9rem;
         border-radius: 18px;
-        background: rgba(255,255,255,0.035);
-        border: 1px solid rgba(255,255,255,0.07);
+        background: rgba(255,255,255,0.84);
+        border: 1px solid rgba(15, 23, 42, 0.06);
     }
 
-    .wm-metric-value {
-        font-size: 1.18rem;
+    .wm-stat-value {
+        color: #0f172a;
+        font-size: 1.15rem;
         font-weight: 900;
-        color: #ffffff;
         letter-spacing: -0.03em;
     }
 
-    .wm-metric-label {
+    .wm-stat-label {
         margin-top: 0.18rem;
+        color: #64748b;
         font-size: 0.82rem;
-        color: #9fb3cb;
-    }
-
-    .wm-login-panel {
-        position: relative;
-        min-height: 84vh;
-        padding: 2rem 1.8rem;
-        border-radius: 26px;
-        background:
-            linear-gradient(180deg, rgba(10, 18, 34, 0.97), rgba(9, 15, 29, 0.93));
-        border: 1px solid rgba(255,255,255,0.08);
-        box-shadow:
-            0 22px 54px rgba(0,0,0,0.36),
-            inset 0 1px 0 rgba(255,255,255,0.03);
-        overflow: hidden;
-    }
-
-    .wm-login-panel::before {
-        content: "";
-        position: absolute;
-        inset: auto -80px -90px auto;
-        width: 260px;
-        height: 260px;
-        background: radial-gradient(circle, rgba(255,77,109,0.18), transparent 62%);
-        filter: blur(24px);
-        pointer-events: none;
     }
 
     .wm-login-kicker {
         color: #53c4ff;
-        font-size: 0.82rem;
+        font-size: 0.80rem;
         font-weight: 800;
         letter-spacing: 0.14em;
         text-transform: uppercase;
     }
 
     .wm-login-title {
-        margin-top: 0.45rem;
-        color: #f4f8ff;
-        font-size: 2.15rem;
-        line-height: 1.02;
+        margin-top: 0.5rem;
+        color: #f8fbff;
+        font-size: 2rem;
         font-weight: 900;
         letter-spacing: -0.04em;
     }
 
     .wm-login-copy {
-        margin-top: 0.8rem;
-        color: #98abc1;
-        font-size: 0.97rem;
-        line-height: 1.65;
-        margin-bottom: 1.1rem;
-    }
-
-    .wm-status-row {
-        display: flex;
-        gap: 0.55rem;
-        flex-wrap: wrap;
+        margin-top: 0.7rem;
+        color: #9eb0c8;
+        font-size: 0.95rem;
+        line-height: 1.6;
         margin-bottom: 1.2rem;
-    }
-
-    .wm-status-pill {
-        padding: 0.45rem 0.72rem;
-        border-radius: 999px;
-        background: rgba(255,255,255,0.05);
-        border: 1px solid rgba(255,255,255,0.08);
-        color: #b7c8dc;
-        font-size: 0.76rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
     }
 
     div[data-testid="stForm"] {
@@ -416,86 +321,80 @@ st.markdown(
     }
 
     div[data-testid="stTextInput"] label {
-        color: #dce9f8 !important;
+        color: #e5eefb !important;
         font-weight: 700 !important;
         font-size: 0.92rem !important;
     }
 
     div[data-testid="stTextInput"] > div > div {
-        background:
-            linear-gradient(180deg, rgba(13,22,39,0.98), rgba(11,18,32,0.96)) !important;
-        border: 1px solid rgba(255,255,255,0.08) !important;
-        border-radius: 18px !important;
-        min-height: 56px !important;
-        box-shadow: inset 0 1px 0 rgba(255,255,255,0.03);
+        background: rgba(255,255,255,0.07) !important;
+        border: 1px solid rgba(255,255,255,0.10) !important;
+        border-radius: 16px !important;
+        min-height: 54px !important;
         transition: all 0.18s ease !important;
     }
 
     div[data-testid="stTextInput"] > div > div:focus-within {
-        border: 1px solid rgba(30,167,255,0.65) !important;
+        border: 1px solid rgba(76, 201, 255, 0.70) !important;
         box-shadow:
-            0 0 0 3px rgba(30,167,255,0.12),
-            0 0 24px rgba(30,167,255,0.16) !important;
+            0 0 0 3px rgba(76, 201, 255, 0.14),
+            0 0 20px rgba(76, 201, 255, 0.18) !important;
     }
 
     div[data-testid="stTextInput"] input {
-        color: #f5f9ff !important;
+        color: #f8fbff !important;
         font-size: 1rem !important;
     }
 
     div[data-testid="stTextInput"] input::placeholder {
-        color: #6f849e !important;
+        color: #91a5bf !important;
         opacity: 1 !important;
     }
 
-    .stButton > button,
     div[data-testid="stFormSubmitButton"] > button {
         width: 100% !important;
-        height: 56px !important;
+        height: 54px !important;
         margin-top: 0.55rem !important;
         border: 0 !important;
-        border-radius: 18px !important;
+        border-radius: 16px !important;
         color: #ffffff !important;
         font-weight: 900 !important;
         font-size: 1rem !important;
-        letter-spacing: 0.01em !important;
-        background:
-            linear-gradient(90deg, #1293ff 0%, #1fb1ff 38%, #4cc9ff 62%, #ff5676 100%) !important;
+        background: linear-gradient(90deg, #1293ff 0%, #3bc3ff 55%, #ff5f8f 100%) !important;
         box-shadow:
-            0 16px 34px rgba(18, 131, 255, 0.28),
-            0 8px 24px rgba(255, 86, 118, 0.16) !important;
+            0 16px 34px rgba(18, 147, 255, 0.24),
+            0 8px 22px rgba(255, 95, 143, 0.14) !important;
         transition: all 0.18s ease !important;
     }
 
-    .stButton > button:hover,
     div[data-testid="stFormSubmitButton"] > button:hover {
         transform: translateY(-1px);
         box-shadow:
-            0 20px 40px rgba(18, 131, 255, 0.34),
-            0 12px 26px rgba(255, 86, 118, 0.20) !important;
+            0 20px 40px rgba(18, 147, 255, 0.30),
+            0 10px 26px rgba(255, 95, 143, 0.18) !important;
     }
 
-    .wm-login-note {
+    .wm-note {
         margin-top: 1rem;
-        padding: 0.92rem 1rem;
-        border-radius: 18px;
-        background: rgba(255,255,255,0.035);
-        border: 1px solid rgba(255,255,255,0.07);
-        color: #9fb3cb;
+        padding: 0.95rem 1rem;
+        border-radius: 16px;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.08);
+        color: #a8bad1;
         font-size: 0.88rem;
-        line-height: 1.6;
+        line-height: 1.55;
     }
 
     div[data-testid="stAlert"] {
-        border-radius: 18px !important;
-        border: 1px solid rgba(255,255,255,0.08) !important;
+        border-radius: 16px !important;
+        border: 1px solid rgba(255,255,255,0.10) !important;
     }
 
     @media (max-width: 1200px) {
         .wm-title {
-            font-size: 3.5rem;
+            font-size: 3.3rem;
         }
-        .wm-metrics-row {
+        .wm-stats {
             grid-template-columns: 1fr;
         }
     }
@@ -505,52 +404,43 @@ st.markdown(
 )
 
 # =========================================================
-# SHELL
+# LAYOUT
 # =========================================================
-st.markdown(
-    """
-    <div class="wm-page-shell">
-        <div class="wm-grid-bg"></div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown('<div class="wm-shell">', unsafe_allow_html=True)
 
-left_col, right_col = st.columns([1.7, 0.95], gap="large")
+left_col, right_col = st.columns([1.55, 0.92], gap="large")
 
-# =========================================================
-# LEFT PANEL
-# =========================================================
 with left_col:
     st.markdown('<div class="wm-left-panel">', unsafe_allow_html=True)
 
     st.markdown(
         """
-        <div class="wm-topline">● Watermelon System · Enterprise Access</div>
+        <div class="wm-badge">● Watermelon System</div>
         """,
         unsafe_allow_html=True,
     )
 
-    brand_a, brand_b = st.columns([0.12, 0.88], gap="small")
+    logo_col, brand_col = st.columns([0.12, 0.88], gap="small")
 
-    with brand_a:
+    with logo_col:
+        st.markdown('<div class="wm-logo-box">', unsafe_allow_html=True)
         if asset_exists(LOGO_PATH):
-            st.markdown('<div class="wm-logo-wrap">', unsafe_allow_html=True)
             st.image(str(LOGO_PATH), use_container_width=True)
-            st.markdown('</div>', unsafe_allow_html=True)
         else:
             st.markdown(
-                """
-                <div class="wm-logo-wrap" style="font-size:1.9rem;">🍉</div>
-                """,
+                "<div style='font-size:1.8rem;'>🍉</div>",
                 unsafe_allow_html=True,
             )
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    with brand_b:
+    with brand_col:
         st.markdown(
             """
             <div class="wm-brand-row" style="margin-top:0;">
-                <div class="wm-brand-text">Industrial Vibration Intelligence</div>
+                <div>
+                    <div class="wm-brand-name">Industrial Vibration Intelligence</div>
+                    <div class="wm-brand-sub">Modern monitoring platform</div>
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -559,22 +449,19 @@ with left_col:
     st.markdown(
         """
         <div class="wm-title">
-            Control room<br>
-            experience for<br>
-            modern vibration teams.
+            Clean.<br>
+            Fast.<br>
+            Industrial.
         </div>
         <div class="wm-subtitle">
-            Watermelon System transforma la entrada a la plataforma en una experiencia de producto real:
-            rápida, premium y orientada a diagnóstico industrial serio. Más claridad visual, más presencia,
-            más nivel de software desde el primer segundo.
+            Una entrada más liviana, moderna y premium para Watermelon System.
         </div>
-        <div class="wm-value-strip">
-            <div class="wm-chip">Time Waveform</div>
+        <div class="wm-chips">
+            <div class="wm-chip">Waveform</div>
             <div class="wm-chip">Orbit</div>
             <div class="wm-chip">FFT</div>
             <div class="wm-chip">Trends</div>
             <div class="wm-chip">Diagnostics</div>
-            <div class="wm-chip">Reports HD</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -584,27 +471,26 @@ with left_col:
         """
         <div class="wm-preview-card">
             <div class="wm-preview-head">
-                <div class="wm-preview-title">Live Monitoring Preview</div>
-                <div class="wm-preview-badge">Online</div>
+                <div class="wm-preview-title">System Preview</div>
+                <div class="wm-preview-status">Online</div>
             </div>
             <div class="wm-chart">
                 <div class="wm-chart-grid"></div>
-                <div class="wm-chart-glow"></div>
-                <div class="wm-line wm-line-1"></div>
-                <div class="wm-line wm-line-2"></div>
+                <div class="wm-wave wm-wave-1"></div>
+                <div class="wm-wave wm-wave-2"></div>
             </div>
-            <div class="wm-metrics-row">
-                <div class="wm-metric">
-                    <div class="wm-metric-value">4.8 ms</div>
-                    <div class="wm-metric-label">UI response target</div>
+            <div class="wm-stats">
+                <div class="wm-stat">
+                    <div class="wm-stat-value">Fast UI</div>
+                    <div class="wm-stat-label">Interfaz clara y rápida</div>
                 </div>
-                <div class="wm-metric">
-                    <div class="wm-metric-value">24/7</div>
-                    <div class="wm-metric-label">Industrial readiness</div>
+                <div class="wm-stat">
+                    <div class="wm-stat-value">Modern UX</div>
+                    <div class="wm-stat-label">Diseño premium industrial</div>
                 </div>
-                <div class="wm-metric">
-                    <div class="wm-metric-value">HD Export</div>
-                    <div class="wm-metric-label">Premium reporting layer</div>
+                <div class="wm-stat">
+                    <div class="wm-stat-value">HD Export</div>
+                    <div class="wm-stat-label">Salida profesional</div>
                 </div>
             </div>
         </div>
@@ -614,24 +500,14 @@ with left_col:
 
     st.markdown("</div>", unsafe_allow_html=True)
 
-# =========================================================
-# RIGHT PANEL
-# =========================================================
 with right_col:
-    st.markdown('<div class="wm-login-panel">', unsafe_allow_html=True)
+    st.markdown('<div class="wm-right-panel">', unsafe_allow_html=True)
 
     st.markdown(
         """
         <div class="wm-login-kicker">Secure Access</div>
-        <div class="wm-login-title">Ingresar al sistema</div>
-        <div class="wm-login-copy">
-            Accede con tus credenciales corporativas y entra al entorno premium de monitoreo y análisis industrial.
-        </div>
-        <div class="wm-status-row">
-            <div class="wm-status-pill">Enterprise UI</div>
-            <div class="wm-status-pill">Secure Session</div>
-            <div class="wm-status-pill">Industrial Ready</div>
-        </div>
+        <div class="wm-login-title">Ingresar</div>
+        <div class="wm-login-copy">Accede con tus credenciales corporativas.</div>
         """,
         unsafe_allow_html=True,
     )
@@ -639,7 +515,7 @@ with right_col:
     with st.form("wm_login_form", clear_on_submit=False):
         username = st.text_input(
             "Usuario o correo",
-            placeholder="usuario o correo corporativo",
+            placeholder="usuario o correo",
             key="wm_login_username",
         )
 
@@ -650,7 +526,7 @@ with right_col:
             key="wm_login_password",
         )
 
-        submit = st.form_submit_button("Ingresar", use_container_width=True)
+        submit = st.form_submit_button("Entrar", use_container_width=True)
 
     if submit:
         ok, msg = wm_login(username.strip(), password)
@@ -662,11 +538,13 @@ with right_col:
 
     st.markdown(
         """
-        <div class="wm-login-note">
-            Plataforma premium de análisis de vibraciones, visualización avanzada y diagnóstico industrial moderno.
+        <div class="wm-note">
+            Monitoreo y análisis de vibraciones con experiencia visual moderna.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
     st.markdown("</div>", unsafe_allow_html=True)
+
+st.markdown("</div>", unsafe_allow_html=True)
