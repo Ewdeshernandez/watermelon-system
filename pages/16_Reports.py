@@ -1,675 +1,153 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
-
-import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
+import plotly.graph_objects as go
+import numpy as np
 
 from core.auth import require_login, render_user_menu
-
-# =========================================================
-# PAGE SETUP
-# =========================================================
-st.set_page_config(
-    page_title="Watermelon System | Reports",
-    page_icon="📑",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
 
 require_login()
 render_user_menu()
 
-# =========================================================
-# STYLES
-# =========================================================
-st.markdown(
-    """
-    <style>
-    .block-container {
-        max-width: 1520px !important;
-        padding-top: 1.2rem !important;
-        padding-bottom: 2rem !important;
-        padding-left: 1.2rem !important;
-        padding-right: 1.2rem !important;
-    }
+st.set_page_config(page_title="Reports", layout="wide")
 
-    .wm-hero {
-        border-radius: 24px;
-        padding: 1.3rem 1.5rem;
-        background: linear-gradient(135deg, #0f172a 0%, #13213b 100%);
-        border: 1px solid rgba(255,255,255,0.08);
-        box-shadow: 0 18px 40px rgba(15,23,42,0.18);
-        margin-bottom: 1rem;
-    }
+# ============================================================
+# VALIDACIÓN
+# ============================================================
 
-    .wm-kicker {
-        color: #66c2ff;
-        font-size: 0.78rem;
-        font-weight: 800;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-    }
+signals = st.session_state.get("signals", {})
 
-    .wm-title {
-        color: white;
-        font-size: 2rem;
-        font-weight: 900;
-        letter-spacing: -0.04em;
-        margin-top: 0.25rem;
-    }
+if not signals:
+    st.error("No hay señales cargadas. Ve a Load Data primero.")
+    st.stop()
 
-    .wm-copy {
-        color: #b9c6d8;
-        font-size: 0.97rem;
-        margin-top: 0.35rem;
-    }
+# ============================================================
+# SIDEBAR CONTROL
+# ============================================================
 
-    .wm-card {
-        background: white;
-        border: 1px solid #e5edf5;
-        border-radius: 22px;
-        padding: 1rem 1.1rem;
-        box-shadow: 0 10px 24px rgba(15,23,42,0.05);
-        margin-bottom: 1rem;
-    }
+st.sidebar.title("Report Builder")
 
-    .wm-section-title {
-        color: #0f172a;
-        font-size: 1.15rem;
-        font-weight: 800;
-        margin-bottom: 0.65rem;
-    }
-
-    .wm-muted {
-        color: #64748b;
-        font-size: 0.92rem;
-        line-height: 1.6;
-    }
-
-    .wm-report-cover {
-        background: #ffffff;
-        border: 1px solid #dbe5ef;
-        border-radius: 22px;
-        padding: 2rem 2.2rem;
-        box-shadow: 0 12px 28px rgba(15,23,42,0.05);
-    }
-
-    .wm-cover-top {
-        color: #1696ff;
-        font-size: 0.78rem;
-        font-weight: 800;
-        letter-spacing: 0.12em;
-        text-transform: uppercase;
-    }
-
-    .wm-cover-main {
-        margin-top: 1.4rem;
-        color: #111827;
-        font-size: 2rem;
-        font-weight: 900;
-        line-height: 1.08;
-    }
-
-    .wm-cover-sub {
-        margin-top: 0.35rem;
-        color: #334155;
-        font-size: 1.1rem;
-        font-weight: 700;
-    }
-
-    .wm-cover-meta {
-        margin-top: 1.4rem;
-        color: #475569;
-        font-size: 0.96rem;
-        line-height: 1.75;
-    }
-
-    .wm-chip {
-        display: inline-block;
-        padding: 0.35rem 0.65rem;
-        border-radius: 999px;
-        background: #eef6ff;
-        border: 1px solid #d3e8ff;
-        color: #167dd8;
-        font-size: 0.78rem;
-        font-weight: 700;
-        margin-right: 0.4rem;
-        margin-bottom: 0.4rem;
-    }
-
-    .wm-outline-item {
-        background: #f8fbff;
-        border: 1px solid #dbe7f3;
-        border-radius: 16px;
-        padding: 0.7rem 0.8rem;
-        margin-bottom: 0.55rem;
-    }
-
-    .wm-outline-title {
-        color: #0f172a;
-        font-size: 0.92rem;
-        font-weight: 800;
-    }
-
-    .wm-outline-sub {
-        color: #64748b;
-        font-size: 0.82rem;
-        margin-top: 0.15rem;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
+selected_signal_keys = st.sidebar.multiselect(
+    "Selecciona señales",
+    options=list(signals.keys())
 )
 
-# =========================================================
-# DATA MODELS
-# =========================================================
-@dataclass
-class AssetItem:
-    asset_id: str
-    category: str
-    source_name: str
-    title: str
-    dataframe: pd.DataFrame
-
-
-# =========================================================
-# SESSION
-# =========================================================
-if "report_outline" not in st.session_state:
-    st.session_state["report_outline"] = []
-
-if "report_recommendations" not in st.session_state:
-    st.session_state["report_recommendations"] = "1. \n2. \n3. "
-
-if "report_service_development" not in st.session_state:
-    st.session_state["report_service_development"] = (
-        "Describa aquí el desarrollo del servicio, las condiciones observadas y el análisis técnico."
-    )
-
-
-# =========================================================
-# HELPERS
-# =========================================================
-def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
-    out = df.copy()
-    out.columns = [str(c).strip() for c in out.columns]
-    return out
-
-
-def try_make_dataframe(obj: Any) -> Optional[pd.DataFrame]:
-    if isinstance(obj, pd.DataFrame):
-        return normalize_columns(obj)
-
-    if isinstance(obj, dict):
-        try:
-            df = pd.DataFrame(obj)
-            if not df.empty:
-                return normalize_columns(df)
-        except Exception:
-            return None
-
-    if isinstance(obj, list):
-        try:
-            df = pd.DataFrame(obj)
-            if not df.empty:
-                return normalize_columns(df)
-        except Exception:
-            return None
-
-    return None
-
-
-def extract_dataframes(obj: Any, prefix: str = "", max_depth: int = 4) -> List[Tuple[str, pd.DataFrame]]:
-    found: List[Tuple[str, pd.DataFrame]] = []
-
-    if max_depth < 0:
-        return found
-
-    df = try_make_dataframe(obj)
-    if df is not None and not df.empty:
-        found.append((prefix or "dataframe", df))
-        return found
-
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            child_prefix = f"{prefix}/{k}" if prefix else str(k)
-            found.extend(extract_dataframes(v, child_prefix, max_depth - 1))
-        return found
-
-    if isinstance(obj, list):
-        for i, v in enumerate(obj):
-            child_prefix = f"{prefix}[{i}]"
-            found.extend(extract_dataframes(v, child_prefix, max_depth - 1))
-        return found
-
-    for attr in ["df", "dataframe", "data", "table", "values"]:
-        if hasattr(obj, attr):
-            try:
-                child = getattr(obj, attr)
-                child_prefix = f"{prefix}.{attr}" if prefix else attr
-                found.extend(extract_dataframes(child, child_prefix, max_depth - 1))
-            except Exception:
-                pass
-
-    return found
-
-
-def unique_numeric_columns(df: pd.DataFrame) -> List[str]:
-    return [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c])]
-
-
-def detect_waveform_columns(df: pd.DataFrame) -> Optional[Tuple[str, str]]:
-    cols = {str(c).lower(): c for c in df.columns}
-    time_candidates = ["time", "tiempo", "t", "sample", "samples", "x"]
-    amp_candidates = ["amplitude", "amplitud", "value", "valor", "signal", "senal", "señal", "y"]
-
-    time_col = next((cols[c] for c in time_candidates if c in cols), None)
-    amp_col = next((cols[c] for c in amp_candidates if c in cols and cols[c] != time_col), None)
-
-    if time_col and amp_col:
-        return time_col, amp_col
-
-    numeric_cols = unique_numeric_columns(df)
-    if len(numeric_cols) >= 2:
-        return numeric_cols[0], numeric_cols[1]
-
-    return None
-
-
-def detect_spectrum_columns(df: pd.DataFrame) -> Optional[Tuple[str, str]]:
-    cols = {str(c).lower(): c for c in df.columns}
-    freq_candidates = ["frequency", "frecuencia", "freq", "cpm", "hz", "f"]
-    amp_candidates = ["amplitude", "amplitud", "value", "valor", "overall", "y"]
-
-    freq_col = next((cols[c] for c in freq_candidates if c in cols), None)
-    amp_col = next((cols[c] for c in amp_candidates if c in cols and cols[c] != freq_col), None)
-
-    if freq_col and amp_col:
-        return freq_col, amp_col
-
-    numeric_cols = unique_numeric_columns(df)
-    if len(numeric_cols) >= 2:
-        name0 = str(numeric_cols[0]).lower()
-        name1 = str(numeric_cols[1]).lower()
-        if any(k in name0 for k in ["freq", "hz", "cpm", "f"]) or any(k in name1 for k in ["amp", "overall", "val"]):
-            return numeric_cols[0], numeric_cols[1]
-
-    return None
-
-
-def detect_orbit_columns(df: pd.DataFrame) -> Optional[Tuple[str, str]]:
-    cols = {str(c).lower(): c for c in df.columns}
-    x_candidates = ["x", "orbit_x", "horizontal", "1x", "x_axis"]
-    y_candidates = ["y", "orbit_y", "vertical", "1y", "y_axis"]
-
-    x_col = next((cols[c] for c in x_candidates if c in cols), None)
-    y_col = next((cols[c] for c in y_candidates if c in cols and cols[c] != x_col), None)
-
-    if x_col and y_col:
-        return x_col, y_col
-
-    numeric_cols = unique_numeric_columns(df)
-    if len(numeric_cols) >= 2:
-        return numeric_cols[0], numeric_cols[1]
-
-    return None
-
-
-def discover_signal_assets() -> List[AssetItem]:
-    signals = st.session_state.get("signals", {})
-    items: List[AssetItem] = []
-    seen_ids = set()
-
-    if not isinstance(signals, dict):
-        return items
-
-    for signal_name, signal_obj in signals.items():
-        extracted = extract_dataframes(signal_obj, prefix=str(signal_name), max_depth=5)
-
-        for source_path, df in extracted:
-            if df.empty:
-                continue
-
-            source_name = str(source_path)
-            base_key = source_name.replace(" ", "_")
-
-            candidates = [
-                ("Tabular List", f"Tabla - {source_name}", f"table::{base_key}"),
-            ]
-
-            if detect_waveform_columns(df):
-                candidates.append(("Formas de Onda", f"Forma de onda - {source_name}", f"waveform::{base_key}"))
-
-            if detect_spectrum_columns(df):
-                candidates.append(("Espectros", f"Espectro - {source_name}", f"spectrum::{base_key}"))
-
-            if detect_orbit_columns(df):
-                candidates.append(("Órbitas", f"Órbita - {source_name}", f"orbit::{base_key}"))
-
-            for category, title, asset_id in candidates:
-                if asset_id in seen_ids:
-                    continue
-                seen_ids.add(asset_id)
-                items.append(
-                    AssetItem(
-                        asset_id=asset_id,
-                        category=category,
-                        source_name=source_name,
-                        title=title,
-                        dataframe=df,
-                    )
-                )
-
-    return items
-
-
-def get_asset_map(assets: List[AssetItem]) -> Dict[str, AssetItem]:
-    return {a.asset_id: a for a in assets}
-
-
-def add_to_outline(asset_id: str) -> None:
-    outline = list(st.session_state["report_outline"])
-    outline.append(asset_id)
-    st.session_state["report_outline"] = outline
-
-
-def move_outline_item(idx: int, direction: int) -> None:
-    outline = list(st.session_state["report_outline"])
-    new_idx = idx + direction
-    if 0 <= idx < len(outline) and 0 <= new_idx < len(outline):
-        outline[idx], outline[new_idx] = outline[new_idx], outline[idx]
-        st.session_state["report_outline"] = outline
-
-
-def remove_outline_item(idx: int) -> None:
-    outline = list(st.session_state["report_outline"])
-    if 0 <= idx < len(outline):
-        outline.pop(idx)
-        st.session_state["report_outline"] = outline
-
-
-def render_waveform(asset: AssetItem) -> None:
-    cols = detect_waveform_columns(asset.dataframe)
-    if not cols:
-        st.warning(f"No se pudieron detectar columnas válidas para forma de onda en {asset.source_name}.")
-        return
-
-    x_col, y_col = cols
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=asset.dataframe[x_col], y=asset.dataframe[y_col], mode="lines", name=asset.source_name))
-    fig.update_layout(
-        title=asset.title,
-        height=380,
-        template="plotly_white",
-        margin=dict(l=30, r=20, t=60, b=30),
-        xaxis_title=x_col,
-        yaxis_title=y_col,
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def render_spectrum(asset: AssetItem) -> None:
-    cols = detect_spectrum_columns(asset.dataframe)
-    if not cols:
-        st.warning(f"No se pudieron detectar columnas válidas para espectro en {asset.source_name}.")
-        return
-
-    x_col, y_col = cols
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=asset.dataframe[x_col], y=asset.dataframe[y_col], mode="lines", name=asset.source_name))
-    fig.update_layout(
-        title=asset.title,
-        height=380,
-        template="plotly_white",
-        margin=dict(l=30, r=20, t=60, b=30),
-        xaxis_title=x_col,
-        yaxis_title=y_col,
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def render_orbit(asset: AssetItem) -> None:
-    cols = detect_orbit_columns(asset.dataframe)
-    if not cols:
-        st.warning(f"No se pudieron detectar columnas válidas para órbita en {asset.source_name}.")
-        return
-
-    x_col, y_col = cols
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=asset.dataframe[x_col], y=asset.dataframe[y_col], mode="lines", name=asset.source_name))
-    fig.update_layout(
-        title=asset.title,
-        height=420,
-        template="plotly_white",
-        margin=dict(l=30, r=20, t=60, b=30),
-        xaxis_title=x_col,
-        yaxis_title=y_col,
-        yaxis_scaleanchor="x",
-        yaxis_scaleratio=1,
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
-def render_tabular(asset: AssetItem) -> None:
-    st.markdown(f"**{asset.title}**")
-    st.dataframe(asset.dataframe, use_container_width=True, hide_index=True)
-
-
-# =========================================================
-# DISCOVER DATA
-# =========================================================
-assets = discover_signal_assets()
-asset_map = get_asset_map(assets)
-
-assets_by_category: Dict[str, List[AssetItem]] = {
-    "Tabular List": [],
-    "Formas de Onda": [],
-    "Espectros": [],
-    "Órbitas": [],
-}
-for asset in assets:
-    assets_by_category.setdefault(asset.category, []).append(asset)
-
-# =========================================================
-# HEADER
-# =========================================================
-st.markdown(
-    """
-    <div class="wm-hero">
-        <div class="wm-kicker">Module 16</div>
-        <div class="wm-title">Reports</div>
-        <div class="wm-copy">Constructor de reportes técnicos para Watermelon System.</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
+block_type = st.sidebar.selectbox(
+    "Tipo de bloque",
+    [
+        "Waveform",
+        "Spectrum",
+        "Tabular"
+    ]
 )
 
-# =========================================================
-# SIDEBAR
-# =========================================================
-with st.sidebar:
-    st.markdown("## 📑 Reports")
-    st.markdown("Configura el contenido y el orden del reporte.")
+if "report_blocks" not in st.session_state:
+    st.session_state["report_blocks"] = []
 
-    st.markdown("---")
-    st.markdown("### Datos generales")
-    report_title = st.text_input("Título del reporte", value="REPORTE DE MONITOREO EN LÍNEA")
-    report_system = st.text_input("Sistema", value="Watermelon System")
-    unit_name = st.text_input("Unidad / Equipo", value="TURBOGENERADOR TES1")
-    equipment_model = st.text_input("Modelo", value="LM6000")
-    plant_location = st.text_input("Ubicación", value="VILLAVICENCIO")
-    company_name = st.text_input("Cliente / Planta", value="TERMOSURIA")
-    prepared_by = st.text_input("Preparado por", value="Ing. Responsable")
-    reviewed_by = st.text_input("Revisado por", value="Revisor Técnico")
-    evaluated_period = st.text_input("Periodo evaluado", value="9/03/2026 al 16/03/2026")
-    report_date = st.text_input("Fecha de reporte", value="17 de marzo de 2026")
-    consecutive = st.text_input("Consecutivo", value="SIGA-REP-TEC-WM-001")
+# ============================================================
+# FUNCIONES CORE
+# ============================================================
 
-    st.markdown("---")
-    st.markdown("### Texto técnico")
-    st.session_state["report_recommendations"] = st.text_area(
-        "Recomendaciones",
-        value=st.session_state["report_recommendations"],
-        height=180,
-    )
-    st.session_state["report_service_development"] = st.text_area(
-        "Desarrollo del servicio",
-        value=st.session_state["report_service_development"],
-        height=220,
+def build_waveform(signal):
+    fig = go.Figure()
+
+    fig.add_trace(go.Scatter(
+        x=signal.time,
+        y=signal.x,
+        mode="lines",
+        name="Waveform"
+    ))
+
+    fig.update_layout(
+        height=300,
+        margin=dict(l=10, r=10, t=20, b=10),
+        template="plotly_white"
     )
 
-    st.markdown("---")
-    st.markdown("### Contenido disponible")
+    return fig
 
-    if not assets:
-        st.error("No se detectaron activos válidos en st.session_state['signals'].")
-        with st.expander("Diagnóstico"):
-            st.write("Tipo de signals:", type(st.session_state.get("signals")).__name__)
-            if isinstance(st.session_state.get("signals"), dict):
-                st.write("Claves detectadas:", list(st.session_state["signals"].keys()))
-    else:
-        st.success(f"Activos detectados: {len(assets)}")
-        for category in ["Tabular List", "Formas de Onda", "Espectros", "Órbitas"]:
-            st.markdown(f"**{category}**")
-            category_items = assets_by_category.get(category, [])
-            if not category_items:
-                st.caption("Sin datos detectados.")
-                continue
 
-            option_map = {item.title: item for item in category_items}
-            selected_title = st.selectbox(
-                f"Seleccionar {category}",
-                list(option_map.keys()),
-                key=f"select_{category}",
-            )
+def build_spectrum(signal):
+    y = signal.x
+    n = len(y)
 
-            selected_item = option_map[selected_title]
-            if st.button(f"Agregar {category}", key=f"add_{category}"):
-                add_to_outline(selected_item.asset_id)
-                st.rerun()
+    fft_vals = np.fft.fft(y)
+    fft_vals = np.abs(fft_vals)[:n // 2]
 
-    st.markdown("---")
-    st.markdown("### Orden del reporte")
+    freqs = np.fft.fftfreq(n, d=(signal.time[1] - signal.time[0]))[:n // 2]
 
-    if not st.session_state["report_outline"]:
-        st.caption("Aún no has agregado bloques al reporte.")
-    else:
-        for idx, asset_id in enumerate(st.session_state["report_outline"]):
-            asset = asset_map.get(asset_id)
-            if not asset:
-                continue
+    fig = go.Figure()
 
-            st.markdown(
-                f"""
-                <div class="wm-outline-item">
-                    <div class="wm-outline-title">{idx + 1}. {asset.title}</div>
-                    <div class="wm-outline-sub">{asset.category}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
+    fig.add_trace(go.Scatter(
+        x=freqs,
+        y=fft_vals,
+        mode="lines",
+        name="Spectrum"
+    ))
 
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                if st.button("↑", key=f"up_{idx}", use_container_width=True):
-                    move_outline_item(idx, -1)
-                    st.rerun()
-            with c2:
-                if st.button("↓", key=f"down_{idx}", use_container_width=True):
-                    move_outline_item(idx, 1)
-                    st.rerun()
-            with c3:
-                if st.button("✕", key=f"remove_{idx}", use_container_width=True):
-                    remove_outline_item(idx)
-                    st.rerun()
-
-# =========================================================
-# MAIN LAYOUT
-# =========================================================
-left_col, right_col = st.columns([1.1, 1.9], gap="large")
-
-with left_col:
-    st.markdown('<div class="wm-card">', unsafe_allow_html=True)
-    st.markdown('<div class="wm-section-title">Resumen del reporte</div>', unsafe_allow_html=True)
-    st.markdown(f"<div class='wm-muted'><b>Título:</b> {report_title}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='wm-muted'><b>Unidad:</b> {unit_name}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='wm-muted'><b>Modelo:</b> {equipment_model}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='wm-muted'><b>Ubicación:</b> {plant_location}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='wm-muted'><b>Cliente:</b> {company_name}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='wm-muted'><b>Consecutivo:</b> {consecutive}</div>", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="wm-card">', unsafe_allow_html=True)
-    st.markdown('<div class="wm-section-title">Bloques seleccionados</div>', unsafe_allow_html=True)
-    if not st.session_state["report_outline"]:
-        st.info("Agrega bloques desde la barra lateral izquierda.")
-    else:
-        for idx, asset_id in enumerate(st.session_state["report_outline"]):
-            asset = asset_map.get(asset_id)
-            if asset:
-                st.markdown(
-                    f"<div class='wm-chip'>{idx + 1}. {asset.title}</div>",
-                    unsafe_allow_html=True,
-                )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-with right_col:
-    st.markdown('<div class="wm-report-cover">', unsafe_allow_html=True)
-    st.markdown(f"<div class='wm-cover-top'>{report_system}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='wm-cover-main'>{report_title}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='wm-cover-sub'>{unit_name}</div>", unsafe_allow_html=True)
-
-    st.markdown(
-        f"""
-        <div class="wm-cover-meta">
-            <b>Modelo:</b> {equipment_model}<br>
-            <b>Ubicación:</b> {plant_location}<br>
-            <b>Cliente:</b> {company_name}<br><br>
-            <b>Preparado por:</b> {prepared_by}<br>
-            <b>Revisado por:</b> {reviewed_by}<br><br>
-            <b>Periodo evaluado:</b> {evaluated_period}<br>
-            <b>Fecha de reporte:</b> {report_date}<br>
-            <b>Consecutivo:</b> {consecutive}
-        </div>
-        """,
-        unsafe_allow_html=True,
+    fig.update_layout(
+        height=300,
+        margin=dict(l=10, r=10, t=20, b=10),
+        template="plotly_white"
     )
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="wm-card">', unsafe_allow_html=True)
-    st.markdown('<div class="wm-section-title">1. Recomendaciones</div>', unsafe_allow_html=True)
-    st.text(st.session_state["report_recommendations"])
-    st.markdown("</div>", unsafe_allow_html=True)
+    return fig
 
-    st.markdown('<div class="wm-card">', unsafe_allow_html=True)
-    st.markdown('<div class="wm-section-title">2. Desarrollo del servicio</div>', unsafe_allow_html=True)
-    st.write(st.session_state["report_service_development"])
-    st.markdown("</div>", unsafe_allow_html=True)
 
-    if st.session_state["report_outline"]:
-        st.markdown("## Contenido seleccionado")
-        for idx, asset_id in enumerate(st.session_state["report_outline"], start=1):
-            asset = asset_map.get(asset_id)
-            if not asset:
-                continue
+def build_table(signal):
+    import pandas as pd
 
-            st.markdown('<div class="wm-card">', unsafe_allow_html=True)
-            st.markdown(
-                f"<div class='wm-section-title'>{idx + 2}. {asset.title}</div>",
-                unsafe_allow_html=True,
-            )
+    df = pd.DataFrame({
+        "Time": signal.time,
+        "Amplitude": signal.x
+    })
 
-            if asset.category == "Tabular List":
-                render_tabular(asset)
-            elif asset.category == "Formas de Onda":
-                render_waveform(asset)
-            elif asset.category == "Espectros":
-                render_spectrum(asset)
-            elif asset.category == "Órbitas":
-                render_orbit(asset)
+    return df
 
-            st.markdown("</div>", unsafe_allow_html=True)
+
+# ============================================================
+# AGREGAR BLOQUES
+# ============================================================
+
+if st.sidebar.button("Agregar al reporte"):
+
+    for key in selected_signal_keys:
+
+        signal = signals[key]
+
+        st.session_state["report_blocks"].append({
+            "type": block_type,
+            "signal_key": key
+        })
+
+# ============================================================
+# RENDER
+# ============================================================
+
+st.title("Report Builder")
+
+if not st.session_state["report_blocks"]:
+    st.info("Aún no hay bloques en el reporte")
+    st.stop()
+
+for i, block in enumerate(st.session_state["report_blocks"]):
+
+    signal = signals[block["signal_key"]]
+
+    st.markdown(f"### {block['signal_key']} — {block['type']}")
+
+    if block["type"] == "Waveform":
+        st.plotly_chart(build_waveform(signal), use_container_width=True)
+
+    elif block["type"] == "Spectrum":
+        st.plotly_chart(build_spectrum(signal), use_container_width=True)
+
+    elif block["type"] == "Tabular":
+        st.dataframe(build_table(signal), use_container_width=True)
+
+    col1, col2 = st.columns([1, 6])
+
+    with col1:
+        if st.button("Eliminar", key=f"del_{i}"):
+            st.session_state["report_blocks"].pop(i)
+            st.rerun()
