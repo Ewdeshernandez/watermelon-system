@@ -329,6 +329,14 @@ def display_suffix(display_mode: str) -> str:
     return ""
 
 
+def overall_mode_options_for_family(family_value: str) -> List[str]:
+    if family_value in ["Auto", "Proximity"]:
+        return ["Peak-to-Peak"]
+    if family_value in ["Velocity", "Acceleration"]:
+        return ["RMS", "0-Peak"]
+    return ["RMS"]
+
+
 @dataclass
 class SignalRecord:
     signal_id: str
@@ -544,6 +552,7 @@ def build_table_dataframe(
                 "family",
                 rec.measurement_family if family_mode == "Auto" else family_mode,
             )
+            overall_mode_row = machine_cfg.get("overall_mode", overall_mode)
         elif config_mode == "Criterion by Point":
             point_cfg = point_settings.get(rec.point, {})
             criterion_row = point_cfg.get("criterion", criterion_default)
@@ -553,14 +562,16 @@ def build_table_dataframe(
                 "family",
                 rec.measurement_family if family_mode == "Auto" else family_mode,
             )
+            overall_mode_row = point_cfg.get("overall_mode", overall_mode)
         else:
             criterion_row = criterion_default
             alarm_row = float(global_alarm)
             danger_row = float(global_danger)
             family_row = rec.measurement_family if family_mode == "Auto" else family_mode
+            overall_mode_row = overall_mode
 
         ov_rms = overall_rms(rec)
-        ov_display = convert_rms_to_display(ov_rms, overall_mode)
+        ov_display = convert_rms_to_display(ov_rms, overall_mode_row)
 
         a05 = order_amplitude_pp(rec, 0.5)
         a10 = order_amplitude_pp(rec, 1.0)
@@ -581,7 +592,7 @@ def build_table_dataframe(
                 "1X Amp": a10,
                 "2X Amp": a20,
                 "Unit": rec.amplitude_unit,
-                "Overall Mode": overall_mode,
+                "Overall Mode": overall_mode_row,
                 "Status": overall_status(ov_display, alarm_row, danger_row),
                 "_signal_name": rec.name,
                 "_timestamp": rec.timestamp,
@@ -595,7 +606,7 @@ def build_table_dataframe(
     return df
 
 
-def render_top_strip(sample_record: SignalRecord, total_rows: int, logo_uri: Optional[str], criterion: str, overall_mode: str) -> None:
+def render_top_strip(sample_record: SignalRecord, total_rows: int, logo_uri: Optional[str], criterion: str, overall_mode_text: str) -> None:
     if logo_uri:
         logo_html = f'<img src="{logo_uri}" style="height:42px; width:auto; object-fit:contain;" />'
     else:
@@ -625,7 +636,7 @@ def render_top_strip(sample_record: SignalRecord, total_rows: int, logo_uri: Opt
                     <span style="color:#94a3b8;">|</span>
                     <span><b>Criterion:</b> {criterion}</span>
                     <span style="color:#94a3b8;">|</span>
-                    <span><b>Overall:</b> {overall_mode}</span>
+                    <span><b>Overall:</b> {overall_mode_text}</span>
                     <span style="color:#94a3b8;">|</span>
                     <span><b>Harmonics:</b> Peak-to-Peak</span>
                 </div>
@@ -719,7 +730,7 @@ def _status_style(status: str) -> Tuple[str, str]:
     return "#f1f5f9", "#475569"
 
 
-def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: str, overall_mode: str) -> bytes:
+def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: str, overall_mode_text: str) -> bytes:
     width = 4200
     row_h = 88
     top_h = 180
@@ -768,7 +779,7 @@ def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: s
 
     meta_text = (
         f"{sample_record.machine}   |   {sample_record.variable} | Tabular List   |   Rows: {len(df)}   |   "
-        f"Criterion: {criterion}   |   Overall: {overall_mode}   |   Harmonics: Peak-to-Peak"
+        f"Criterion: {criterion}   |   Overall: {overall_mode_text}   |   Harmonics: Peak-to-Peak"
     )
     draw.text((logo_x + 150, top_y0 + 38), meta_text, font=font_small, fill=text)
 
@@ -925,17 +936,9 @@ with st.sidebar:
         index=0,
     )
 
-    if measurement_family in ["Auto", "Proximity"]:
-        overall_mode_options = ["Peak-to-Peak"]
-    elif measurement_family == "Velocity":
-        overall_mode_options = ["RMS", "0-Peak"]
-    elif measurement_family == "Acceleration":
-        overall_mode_options = ["RMS", "0-Peak"]
-    else:
-        overall_mode_options = ["RMS"]
-
+    overall_mode_options = overall_mode_options_for_family(measurement_family)
     overall_mode = st.selectbox(
-        "Overall display mode",
+        "Default overall display mode",
         options=overall_mode_options,
         index=0,
     )
@@ -991,6 +994,16 @@ with st.sidebar:
                 key=f"family_machine_{machine_name}",
             )
 
+            machine_overall_mode_options = overall_mode_options_for_family(machine_family)
+            default_machine_overall = overall_mode if overall_mode in machine_overall_mode_options else machine_overall_mode_options[0]
+
+            machine_overall_mode = st.selectbox(
+                f"Overall display mode - {machine_name}",
+                options=machine_overall_mode_options,
+                index=machine_overall_mode_options.index(default_machine_overall),
+                key=f"overall_mode_machine_{machine_name}",
+            )
+
             machine_alarm = st.number_input(
                 f"Alarm - {machine_name}",
                 min_value=0.0,
@@ -1012,6 +1025,7 @@ with st.sidebar:
             machine_settings[machine_name] = {
                 "criterion": machine_criterion,
                 "family": machine_family,
+                "overall_mode": machine_overall_mode,
                 "alarm": float(machine_alarm),
                 "danger": float(machine_danger),
             }
@@ -1045,6 +1059,16 @@ with st.sidebar:
                 key=f"family_point_{point_name}",
             )
 
+            point_overall_mode_options = overall_mode_options_for_family(point_family)
+            default_point_overall = overall_mode if overall_mode in point_overall_mode_options else point_overall_mode_options[0]
+
+            point_overall_mode = st.selectbox(
+                f"Overall display mode - {point_name}",
+                options=point_overall_mode_options,
+                index=point_overall_mode_options.index(default_point_overall),
+                key=f"overall_mode_point_{point_name}",
+            )
+
             point_alarm = st.number_input(
                 f"Alarm - {point_name}",
                 min_value=0.0,
@@ -1066,6 +1090,7 @@ with st.sidebar:
             point_settings[point_name] = {
                 "criterion": point_criterion,
                 "family": point_family,
+                "overall_mode": point_overall_mode,
                 "alarm": float(point_alarm),
                 "danger": float(point_danger),
             }
@@ -1088,7 +1113,14 @@ if df_table.empty:
     st.warning("No fue posible construir la tabla.")
     st.stop()
 
-render_top_strip(records_all[0], len(df_table), logo_uri, criterion_text, overall_mode)
+if config_mode == "Criterion by Point":
+    overall_mode_text = "Mixed by Point"
+elif config_mode == "Criterion by Machine":
+    overall_mode_text = "Mixed by Machine"
+else:
+    overall_mode_text = overall_mode
+
+render_top_strip(records_all[0], len(df_table), logo_uri, criterion_text, overall_mode_text)
 render_table(df_table)
 
 st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
@@ -1096,13 +1128,13 @@ st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
 
 with col_export1:
-    if st.button("Prepare PNG HD", use_container_width=True):
+    if st.button("Prepare PNG HD", width="stretch"):
         try:
             png_bytes = build_png_report(
                 df=df_table,
                 sample_record=records_all[0],
                 criterion=criterion_text,
-                overall_mode=overall_mode,
+                overall_mode_text=overall_mode_text,
             )
             st.session_state.wm_tabular_export_png_bytes = png_bytes
             st.session_state.wm_tabular_export_error = None
@@ -1117,10 +1149,10 @@ with col_export2:
             data=st.session_state.wm_tabular_export_png_bytes,
             file_name="watermelon_tabular_list_hd.png",
             mime="image/png",
-            use_container_width=True,
+            width="stretch",
         )
     else:
-        st.button("Download PNG HD", disabled=True, use_container_width=True)
+        st.button("Download PNG HD", disabled=True, width="stretch")
 
 if st.session_state.wm_tabular_export_error:
     st.warning(f"PNG export error: {st.session_state.wm_tabular_export_error}")
