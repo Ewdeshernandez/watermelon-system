@@ -535,7 +535,30 @@ def build_table_dataframe(
     rows = []
 
     for rec in records:
-        family = rec.measurement_family if family_mode == "Auto" else family_mode
+        if config_mode == "Criterion by Machine":
+            machine_cfg = machine_settings.get(rec.machine, {})
+            criterion_row = machine_cfg.get("criterion", criterion_default)
+            alarm_row = float(machine_cfg.get("alarm", global_alarm))
+            danger_row = float(machine_cfg.get("danger", global_danger))
+            family_row = machine_cfg.get(
+                "family",
+                rec.measurement_family if family_mode == "Auto" else family_mode,
+            )
+        elif config_mode == "Criterion by Point":
+            point_cfg = point_settings.get(rec.point, {})
+            criterion_row = point_cfg.get("criterion", criterion_default)
+            alarm_row = float(point_cfg.get("alarm", global_alarm))
+            danger_row = float(point_cfg.get("danger", global_danger))
+            family_row = point_cfg.get(
+                "family",
+                rec.measurement_family if family_mode == "Auto" else family_mode,
+            )
+        else:
+            criterion_row = criterion_default
+            alarm_row = float(global_alarm)
+            danger_row = float(global_danger)
+            family_row = rec.measurement_family if family_mode == "Auto" else family_mode
+
         ov_rms = overall_rms(rec)
         ov_display = convert_rms_to_display(ov_rms, overall_mode)
 
@@ -543,27 +566,12 @@ def build_table_dataframe(
         a10 = order_amplitude_pp(rec, 1.0)
         a20 = order_amplitude_pp(rec, 2.0)
 
-        if config_mode == "Criterion by Machine":
-            machine_cfg = machine_settings.get(rec.machine, {})
-            criterion_row = machine_cfg.get("criterion", criterion_default)
-            alarm_row = float(machine_cfg.get("alarm", global_alarm))
-            danger_row = float(machine_cfg.get("danger", global_danger))
-        elif config_mode == "Criterion by Point":
-            point_cfg = point_settings.get(rec.point, {})
-            criterion_row = point_cfg.get("criterion", criterion_default)
-            alarm_row = float(point_cfg.get("alarm", global_alarm))
-            danger_row = float(point_cfg.get("danger", global_danger))
-        else:
-            criterion_row = criterion_default
-            alarm_row = float(global_alarm)
-            danger_row = float(global_danger)
-
         rows.append(
             {
                 "Machine": rec.machine,
                 "Point": rec.point,
                 "RPM": rec.rpm,
-                "Family": family,
+                "Family": family_row,
                 "Alarm": alarm_row,
                 "Danger": danger_row,
                 "Criterion": criterion_row,
@@ -890,6 +898,8 @@ with st.sidebar:
         "Custom",
     ]
 
+    family_options = ["Auto", "Proximity", "Velocity", "Acceleration"]
+
     criterion_selected = st.selectbox(
         "Default criterion",
         options=criterion_options,
@@ -910,8 +920,8 @@ with st.sidebar:
     )
 
     measurement_family = st.selectbox(
-        "Measurement family",
-        options=["Auto", "Proximity", "Velocity", "Acceleration"],
+        "Default measurement family",
+        options=family_options,
         index=0,
     )
 
@@ -974,6 +984,13 @@ with st.sidebar:
                     key=f"criterion_machine_custom_{machine_name}",
                 ).strip() or "Criterio usuario"
 
+            machine_family = st.selectbox(
+                f"Measurement family - {machine_name}",
+                options=family_options,
+                index=family_options.index(measurement_family) if measurement_family in family_options else 0,
+                key=f"family_machine_{machine_name}",
+            )
+
             machine_alarm = st.number_input(
                 f"Alarm - {machine_name}",
                 min_value=0.0,
@@ -994,6 +1011,7 @@ with st.sidebar:
 
             machine_settings[machine_name] = {
                 "criterion": machine_criterion,
+                "family": machine_family,
                 "alarm": float(machine_alarm),
                 "danger": float(machine_danger),
             }
@@ -1020,6 +1038,13 @@ with st.sidebar:
                     key=f"criterion_point_custom_{point_name}",
                 ).strip() or "Criterio usuario"
 
+            point_family = st.selectbox(
+                f"Measurement family - {point_name}",
+                options=family_options,
+                index=family_options.index(measurement_family) if measurement_family in family_options else 0,
+                key=f"family_point_{point_name}",
+            )
+
             point_alarm = st.number_input(
                 f"Alarm - {point_name}",
                 min_value=0.0,
@@ -1040,6 +1065,7 @@ with st.sidebar:
 
             point_settings[point_name] = {
                 "criterion": point_criterion,
+                "family": point_family,
                 "alarm": float(point_alarm),
                 "danger": float(point_danger),
             }
