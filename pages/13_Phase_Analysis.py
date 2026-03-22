@@ -693,7 +693,6 @@ def build_phase_dataframe(records: List[SignalRecord]) -> pd.DataFrame:
 
         rows.append(
             {
-                "Signal": rec.name,
                 "Machine": rec.machine,
                 "Point": rec.point,
                 "RPM": rec.rpm,
@@ -722,6 +721,7 @@ def build_phase_dataframe(records: List[SignalRecord]) -> pd.DataFrame:
                 "Timestamp": rec.timestamp,
                 "Unit": rec.amplitude_unit,
                 "Variable": rec.variable,
+                "_signal_name": rec.name,
             }
         )
 
@@ -769,69 +769,76 @@ def render_top_strip(record: SignalRecord, selected_count: int, logo_uri: Option
     )
 
 
-def render_phase_table(df: pd.DataFrame) -> None:
+def render_phase_table(df: pd.DataFrame, visible_orders: List[str]) -> None:
+    order_map = {
+        "0.5X": {
+            "group_cols": ["0.5X Freq", "0.5X Fit Amp", "0.5X FFT Amp", "0.5X Phase", "0.5X Stability", "0.5X Confidence"],
+            "headers": ["Freq CPM", "Fit Amp", "FFT Amp", "Phase", "Stability", "Confidence"],
+        },
+        "1X": {
+            "group_cols": ["1X Freq", "1X Fit Amp", "1X FFT Amp", "1X Phase", "1X Stability", "1X Confidence"],
+            "headers": ["Freq CPM", "Fit Amp", "FFT Amp", "Phase", "Stability", "Confidence"],
+        },
+        "2X": {
+            "group_cols": ["2X Freq", "2X Fit Amp", "2X FFT Amp", "2X Phase", "2X Stability", "2X Confidence"],
+            "headers": ["Freq CPM", "Fit Amp", "FFT Amp", "Phase", "Stability", "Confidence"],
+        },
+    }
+
+    top_header = [
+        '<th rowspan="2">Machine</th>',
+        '<th rowspan="2">Point</th>',
+        '<th rowspan="2">RPM</th>',
+    ]
+
+    sub_header = []
+
+    for order in visible_orders:
+        top_header.append(f'<th colspan="6">{order}</th>')
+        sub_header.extend([f"<th>{h}</th>" for h in order_map[order]["headers"]])
+
+    top_header.append('<th rowspan="2">Timestamp</th>')
+
     rows_html = []
 
     for _, row in df.iterrows():
         unit = str(row["Unit"]).strip()
         unit_txt = f" {unit} p-p" if unit else " p-p"
 
-        row_html = (
-            "<tr>"
-            f"<td>{row['Signal']}</td>"
-            f"<td>{row['Machine']}</td>"
-            f"<td>{row['Point']}</td>"
-            f"<td>{format_number(row['RPM'], 0)}</td>"
+        cells = [
+            f"<td>{row['Machine']}</td>",
+            f"<td>{row['Point']}</td>",
+            f"<td>{format_number(row['RPM'], 0)}</td>",
+        ]
 
-            f"<td>{format_number(row['0.5X Freq'], 1)}</td>"
-            f"<td>{format_number(row['0.5X Fit Amp'], 3)}{unit_txt}</td>"
-            f"<td>{format_number(row['0.5X FFT Amp'], 3)}{unit_txt}</td>"
-            f"<td>{format_number(row['0.5X Phase'], 1)}°</td>"
-            f"<td>{stability_badge_html(row['0.5X Stability'])}</td>"
-            f"<td>{confidence_badge_html(row['0.5X Confidence'])}</td>"
+        for order in visible_orders:
+            prefix = order
+            cells.extend(
+                [
+                    f"<td>{format_number(row[f'{prefix} Freq'], 1)}</td>",
+                    f"<td>{format_number(row[f'{prefix} Fit Amp'], 3)}{unit_txt}</td>",
+                    f"<td>{format_number(row[f'{prefix} FFT Amp'], 3)}{unit_txt}</td>",
+                    f"<td>{format_number(row[f'{prefix} Phase'], 1)}°</td>",
+                    f"<td>{stability_badge_html(row[f'{prefix} Stability'])}</td>",
+                    f"<td>{confidence_badge_html(row[f'{prefix} Confidence'])}</td>",
+                ]
+            )
 
-            f"<td>{format_number(row['1X Freq'], 1)}</td>"
-            f"<td>{format_number(row['1X Fit Amp'], 3)}{unit_txt}</td>"
-            f"<td>{format_number(row['1X FFT Amp'], 3)}{unit_txt}</td>"
-            f"<td>{format_number(row['1X Phase'], 1)}°</td>"
-            f"<td>{stability_badge_html(row['1X Stability'])}</td>"
-            f"<td>{confidence_badge_html(row['1X Confidence'])}</td>"
-
-            f"<td>{format_number(row['2X Freq'], 1)}</td>"
-            f"<td>{format_number(row['2X Fit Amp'], 3)}{unit_txt}</td>"
-            f"<td>{format_number(row['2X FFT Amp'], 3)}{unit_txt}</td>"
-            f"<td>{format_number(row['2X Phase'], 1)}°</td>"
-            f"<td>{stability_badge_html(row['2X Stability'])}</td>"
-            f"<td>{confidence_badge_html(row['2X Confidence'])}</td>"
-
-            f"<td>{row['Timestamp'] or '—'}</td>"
-            "</tr>"
-        )
-        rows_html.append(row_html)
+        cells.append(f"<td>{row['Timestamp'] or '—'}</td>")
+        rows_html.append("<tr>" + "".join(cells) + "</tr>")
 
     table_html = (
         '<div class="wm-phase-table-shell">'
-        '<div class="wm-phase-section-title">0.5X / 1X / 2X Phase Summary</div>'
+        '<div class="wm-phase-section-title">Phase Summary</div>'
         '<div class="wm-phase-subnote">Amplitude shown as peak-to-peak. Fit Amp = sinusoidal fit result. FFT Amp = local FFT validation. Confidence combines phase stability + agreement between methods.</div>'
         '<div class="wm-phase-table-wrap">'
         '<table class="wm-phase-table">'
         "<thead>"
         "<tr>"
-        '<th rowspan="2">Signal</th>'
-        '<th rowspan="2">Machine</th>'
-        '<th rowspan="2">Point</th>'
-        '<th rowspan="2">RPM</th>'
-
-        '<th colspan="6">0.5X</th>'
-        '<th colspan="6">1X</th>'
-        '<th colspan="6">2X</th>'
-
-        '<th rowspan="2">Timestamp</th>'
+        + "".join(top_header) +
         "</tr>"
         "<tr>"
-        "<th>Freq CPM</th><th>Fit Amp</th><th>FFT Amp</th><th>Phase</th><th>Stability</th><th>Confidence</th>"
-        "<th>Freq CPM</th><th>Fit Amp</th><th>FFT Amp</th><th>Phase</th><th>Stability</th><th>Confidence</th>"
-        "<th>Freq CPM</th><th>Fit Amp</th><th>FFT Amp</th><th>Phase</th><th>Stability</th><th>Confidence</th>"
+        + "".join(sub_header) +
         "</tr>"
         "</thead>"
         "<tbody>"
@@ -879,7 +886,13 @@ def _badge_style_confidence(value: Optional[float]) -> Tuple[str, str]:
     return "#fee2e2", "#991b1b"
 
 
-def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
+def build_png_report(df: pd.DataFrame, primary: SignalRecord, visible_orders: List[str]) -> bytes:
+    order_cols = {
+        "0.5X": ["0.5X Freq", "0.5X Fit Amp", "0.5X FFT Amp", "0.5X Phase", "0.5X Stability", "0.5X Confidence"],
+        "1X": ["1X Freq", "1X Fit Amp", "1X FFT Amp", "1X Phase", "1X Stability", "1X Confidence"],
+        "2X": ["2X Freq", "2X Fit Amp", "2X FFT Amp", "2X Phase", "2X Stability", "2X Confidence"],
+    }
+
     width = 6200
     row_h = 92
     top_h = 180
@@ -928,8 +941,9 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
         draw.rounded_rectangle((logo_x, logo_y, logo_x + 58, logo_y + 58), radius=12, fill="#1ea7ff")
         draw.text((logo_x + 12, logo_y + 14), "WM", font=font_small, fill="white")
 
+    orders_text = " / ".join(visible_orders) if visible_orders else "1X"
     meta_text = (
-        f"{primary.machine}   |   {primary.point}   |   {primary.variable} | Phase Dashboard | Amp = Peak-to-Peak   |   "
+        f"{primary.machine}   |   {primary.point}   |   {primary.variable} | Phase Dashboard | Orders: {orders_text} | Amp = Peak-to-Peak   |   "
         f"RPM: {format_number(primary.rpm, 0)}   |   Signals: {len(df)}   |   {primary.timestamp or '—'}"
     )
     draw.text((logo_x + 150, top_y0 + 38), meta_text, font=font_small, fill=text)
@@ -938,19 +952,17 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
     shell_y1 = height - 50
     draw.rounded_rectangle((card_x0, shell_y0, card_x1, shell_y1), radius=28, fill=white, outline=border, width=2)
 
-    draw.text((card_x0 + 24, shell_y0 + 20), "0.5X / 1X / 2X Phase Summary", font=font_title, fill=text)
+    draw.text((card_x0 + 24, shell_y0 + 20), "Phase Summary", font=font_title, fill=text)
 
     table_x0 = card_x0 + 24
     table_x1 = card_x1 - 24
     table_y0 = shell_y0 + 100
 
-    col_widths = [
-        420, 420, 340, 220,
-        180, 220, 220, 180, 180, 180,
-        180, 220, 220, 180, 180, 180,
-        180, 220, 220, 180, 180, 180,
-        420
-    ]
+    col_widths = [420, 340, 220]
+    for _ in visible_orders:
+        col_widths.extend([180, 220, 220, 180, 180, 180])
+    col_widths.append(420)
+
     scale = (table_x1 - table_x0) / sum(col_widths)
     col_widths = [int(w * scale) for w in col_widths]
 
@@ -962,15 +974,16 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
     draw.rounded_rectangle((table_x0, y, table_x1, y + table_header_h1 + table_header_h2 + n_rows * row_h), radius=22, fill=white, outline=border, width=2)
 
     group_spans = [
-        ("Signal", 0, 1),
-        ("Machine", 1, 2),
-        ("Point", 2, 3),
-        ("RPM", 3, 4),
-        ("0.5X", 4, 10),
-        ("1X", 10, 16),
-        ("2X", 16, 22),
-        ("Timestamp", 22, 23),
+        ("Machine", 0, 1),
+        ("Point", 1, 2),
+        ("RPM", 2, 3),
     ]
+
+    current = 3
+    for order in visible_orders:
+        group_spans.append((order, current, current + 6))
+        current += 6
+    group_spans.append(("Timestamp", current, current + 1))
 
     for label, c0, c1 in group_spans:
         x0 = col_x[c0]
@@ -982,8 +995,12 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
         draw.text((tx, ty), label.upper(), font=font_header, fill=blue)
 
     y2 = y + table_header_h1
-    sub_labels = ["Freq", "Fit Amp", "FFT Amp", "Phase", "Stability", "Conf"] * 3
-    for i, label in enumerate(sub_labels, start=4):
+    sub_labels = []
+    for _ in visible_orders:
+        sub_labels.extend(["Freq", "Fit Amp", "FFT Amp", "Phase", "Stability", "Conf"])
+
+    sub_start = 3
+    for i, label in enumerate(sub_labels, start=sub_start):
         x0 = col_x[i]
         x1 = col_x[i + 1]
         draw.rectangle((x0, y2, x1, y2 + table_header_h2), fill=header_fill, outline=border, width=1)
@@ -992,7 +1009,7 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
         ty = y2 + (table_header_h2 - (tw[3] - tw[1])) / 2 - 2
         draw.text((tx, ty), label, font=font_cell, fill="#334155")
 
-    for idx in [0, 1, 2, 3, 22]:
+    for idx in [0, 1, 2, len(col_widths) - 1]:
         x0 = col_x[idx]
         x1 = col_x[idx + 1]
         draw.rectangle((x0, y2, x1, y2 + table_header_h2), fill=header_fill, outline=border, width=1)
@@ -1009,42 +1026,40 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
         unit_txt = f" {unit} p-p" if unit else " p-p"
 
         cells = [
-            str(row["Signal"]),
             str(row["Machine"]),
             str(row["Point"]),
             format_number(row["RPM"], 0),
-
-            format_number(row["0.5X Freq"], 1),
-            f"{format_number(row['0.5X Fit Amp'], 3)}{unit_txt}",
-            f"{format_number(row['0.5X FFT Amp'], 3)}{unit_txt}",
-            f"{format_number(row['0.5X Phase'], 1)}°",
-            None,
-            None,
-
-            format_number(row["1X Freq"], 1),
-            f"{format_number(row['1X Fit Amp'], 3)}{unit_txt}",
-            f"{format_number(row['1X FFT Amp'], 3)}{unit_txt}",
-            f"{format_number(row['1X Phase'], 1)}°",
-            None,
-            None,
-
-            format_number(row["2X Freq"], 1),
-            f"{format_number(row['2X Fit Amp'], 3)}{unit_txt}",
-            f"{format_number(row['2X FFT Amp'], 3)}{unit_txt}",
-            f"{format_number(row['2X Phase'], 1)}°",
-            None,
-            None,
-
-            str(row["Timestamp"] or "—"),
         ]
+
+        stability_positions = []
+        confidence_positions = []
+
+        for order in visible_orders:
+            cells.extend(
+                [
+                    format_number(row[f"{order} Freq"], 1),
+                    f"{format_number(row[f'{order} Fit Amp'], 3)}{unit_txt}",
+                    f"{format_number(row[f'{order} FFT Amp'], 3)}{unit_txt}",
+                    f"{format_number(row[f'{order} Phase'], 1)}°",
+                    None,
+                    None,
+                ]
+            )
+            start_idx = len(cells) - 2
+            stability_positions.append((start_idx - 1, f"{order} Stability"))
+            confidence_positions.append((start_idx, f"{order} Confidence"))
+
+        cells.append(str(row["Timestamp"] or "—"))
+
+        stability_index_map = {idx: col for idx, col in stability_positions}
+        confidence_index_map = {idx: col for idx, col in confidence_positions}
 
         for c, cell in enumerate(cells):
             x0 = col_x[c]
             x1 = col_x[c + 1]
 
-            if c in [8, 14, 20]:
-                stability_col = {8: "0.5X Stability", 14: "1X Stability", 20: "2X Stability"}[c]
-                val = row[stability_col]
+            if c in stability_index_map:
+                val = row[stability_index_map[c]]
                 bg_badge, fg_badge = _badge_style_stability(val)
                 badge_text = "—" if val is None or not math.isfinite(val) else f"{val:.1f}%"
                 badge_w = 140
@@ -1059,9 +1074,8 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
                 ty = by0 + (badge_h - (tw[3] - tw[1])) / 2 - 1
                 draw.text((tx, ty), badge_text, font=font_badge, fill=fg_badge)
 
-            elif c in [9, 15, 21]:
-                conf_col = {9: "0.5X Confidence", 15: "1X Confidence", 21: "2X Confidence"}[c]
-                val = row[conf_col]
+            elif c in confidence_index_map:
+                val = row[confidence_index_map[c]]
                 bg_badge, fg_badge = _badge_style_confidence(val)
                 badge_text = "—" if val is None or not math.isfinite(val) else f"{val:.1f}%"
                 badge_w = 140
@@ -1078,7 +1092,7 @@ def build_png_report(df: pd.DataFrame, primary: SignalRecord) -> bytes:
 
             else:
                 pad_x = 12
-                if c in [0, 1, 2, 22]:
+                if c in [0, 1, len(cells) - 1]:
                     draw.text((x0 + pad_x, y0 + 30), cell, font=font_cell, fill=text)
                 else:
                     tw = draw.textbbox((0, 0), cell, font=font_cell)
@@ -1153,6 +1167,14 @@ with st.sidebar:
         default=default_compare,
     )
 
+    st.markdown("### Orders")
+
+    visible_orders = st.multiselect(
+        "Show orders",
+        options=["0.5X", "1X", "2X"],
+        default=["1X"],
+    )
+
 all_records = records_all + uploaded_records
 
 if not all_records:
@@ -1163,6 +1185,10 @@ selected_records = [r for r in all_records if r.name in selected_compare_names]
 
 if not selected_records:
     st.warning("Selecciona al menos una señal.")
+    st.stop()
+
+if not visible_orders:
+    st.warning("Selecciona al menos una orden: 0.5X, 1X o 2X.")
     st.stop()
 
 primary = next(r for r in all_records if r.signal_id == st.session_state.wm_phase_primary_signal_id)
@@ -1176,17 +1202,9 @@ if df_phase.empty:
     st.warning("No fue posible calcular métricas de fase.")
     st.stop()
 
-render_phase_table(df_phase)
+render_phase_table(df_phase, visible_orders)
 
-export_df = df_phase[
-    [
-        "Signal", "Machine", "Point", "RPM",
-        "0.5X Freq", "0.5X Fit Amp", "0.5X FFT Amp", "0.5X Phase", "0.5X Stability", "0.5X Confidence",
-        "1X Freq", "1X Fit Amp", "1X FFT Amp", "1X Phase", "1X Stability", "1X Confidence",
-        "2X Freq", "2X Fit Amp", "2X FFT Amp", "2X Phase", "2X Stability", "2X Confidence",
-        "Timestamp", "Unit", "Variable",
-    ]
-].copy()
+export_df = df_phase.copy()
 
 st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
@@ -1195,7 +1213,7 @@ left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
 with col_export1:
     if st.button("Prepare PNG HD", use_container_width=True):
         try:
-            png_bytes = build_png_report(export_df, primary)
+            png_bytes = build_png_report(export_df, primary, visible_orders)
             st.session_state.wm_phase_export_png_bytes = png_bytes
             st.session_state.wm_phase_export_error = None
         except Exception as e:
