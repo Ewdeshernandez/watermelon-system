@@ -523,12 +523,14 @@ def status_badge_html(status: str) -> str:
 
 def build_table_dataframe(
     records: List[SignalRecord],
-    alarm: float,
-    danger: float,
     criterion_default: str,
-    criterion_by_point: Dict[str, str],
+    config_mode: str,
+    machine_settings: Dict[str, Dict[str, Any]],
+    point_settings: Dict[str, Dict[str, Any]],
     family_mode: str,
     overall_mode: str,
+    global_alarm: float,
+    global_danger: float,
 ) -> pd.DataFrame:
     rows = []
 
@@ -541,7 +543,20 @@ def build_table_dataframe(
         a10 = order_amplitude_pp(rec, 1.0)
         a20 = order_amplitude_pp(rec, 2.0)
 
-        criterion_row = criterion_by_point.get(rec.point, criterion_default)
+        if config_mode == "Criterion by Machine":
+            machine_cfg = machine_settings.get(rec.machine, {})
+            criterion_row = machine_cfg.get("criterion", criterion_default)
+            alarm_row = float(machine_cfg.get("alarm", global_alarm))
+            danger_row = float(machine_cfg.get("danger", global_danger))
+        elif config_mode == "Criterion by Point":
+            point_cfg = point_settings.get(rec.point, {})
+            criterion_row = point_cfg.get("criterion", criterion_default)
+            alarm_row = float(point_cfg.get("alarm", global_alarm))
+            danger_row = float(point_cfg.get("danger", global_danger))
+        else:
+            criterion_row = criterion_default
+            alarm_row = float(global_alarm)
+            danger_row = float(global_danger)
 
         rows.append(
             {
@@ -549,8 +564,8 @@ def build_table_dataframe(
                 "Point": rec.point,
                 "RPM": rec.rpm,
                 "Family": family,
-                "Alarm": alarm,
-                "Danger": danger,
+                "Alarm": alarm_row,
+                "Danger": danger_row,
                 "Criterion": criterion_row,
                 "Overall": ov_display,
                 "Overall RMS Base": ov_rms,
@@ -559,7 +574,7 @@ def build_table_dataframe(
                 "2X Amp": a20,
                 "Unit": rec.amplitude_unit,
                 "Overall Mode": overall_mode,
-                "Status": overall_status(ov_display, alarm, danger),
+                "Status": overall_status(ov_display, alarm_row, danger_row),
                 "_signal_name": rec.name,
                 "_timestamp": rec.timestamp,
                 "_variable": rec.variable,
@@ -876,7 +891,7 @@ with st.sidebar:
     ]
 
     criterion_selected = st.selectbox(
-        "Criterion based",
+        "Default criterion",
         options=criterion_options,
         index=0,
     )
@@ -887,6 +902,12 @@ with st.sidebar:
             "Custom criterion",
             value="Criterio usuario",
         ).strip() or "Criterio usuario"
+
+    config_mode = st.selectbox(
+        "Configuration mode",
+        options=["Criterion by Machine", "Criterion by Point"],
+        index=0,
+    )
 
     measurement_family = st.selectbox(
         "Measurement family",
@@ -910,7 +931,7 @@ with st.sidebar:
     )
 
     alarm_value = st.number_input(
-        f"Alarm threshold ({overall_mode})",
+        f"Default alarm threshold ({overall_mode})",
         min_value=0.0,
         value=4.5,
         step=0.1,
@@ -918,7 +939,7 @@ with st.sidebar:
     )
 
     danger_value = st.number_input(
-        f"Danger threshold ({overall_mode})",
+        f"Default danger threshold ({overall_mode})",
         min_value=0.0,
         value=7.1,
         step=0.1,
@@ -928,38 +949,113 @@ with st.sidebar:
     if danger_value < alarm_value:
         st.warning("Danger debería ser mayor o igual que Alarm.")
 
-    st.markdown("### Criterion per Point")
+    machine_settings: Dict[str, Dict[str, Any]] = {}
+    point_settings: Dict[str, Dict[str, Any]] = {}
 
-    unique_points = sorted({str(r.point) for r in records_all if str(r.point).strip()})
-    criterion_by_point: Dict[str, str] = {}
+    if config_mode == "Criterion by Machine":
+        st.markdown("### Machine Settings")
 
-    for point_name in unique_points:
-        point_criterion = st.selectbox(
-            f"{point_name}",
-            options=criterion_options,
-            index=criterion_options.index(criterion_selected) if criterion_selected in criterion_options else 0,
-            key=f"criterion_point_{point_name}",
-        )
+        unique_machines = sorted({str(r.machine) for r in records_all if str(r.machine).strip()})
 
-        if point_criterion == "Custom":
-            point_criterion = st.text_input(
-                f"Custom criterion for {point_name}",
-                value=criterion_text if criterion_selected == "Custom" else "Criterio usuario",
-                key=f"criterion_point_custom_{point_name}",
-            ).strip() or "Criterio usuario"
+        for machine_name in unique_machines:
+            st.markdown(f"**{machine_name}**")
 
-        criterion_by_point[point_name] = point_criterion
+            machine_criterion = st.selectbox(
+                f"Criterion - {machine_name}",
+                options=criterion_options,
+                index=criterion_options.index(criterion_selected) if criterion_selected in criterion_options else 0,
+                key=f"criterion_machine_{machine_name}",
+            )
+
+            if machine_criterion == "Custom":
+                machine_criterion = st.text_input(
+                    f"Custom criterion for {machine_name}",
+                    value=criterion_text if criterion_selected == "Custom" else "Criterio usuario",
+                    key=f"criterion_machine_custom_{machine_name}",
+                ).strip() or "Criterio usuario"
+
+            machine_alarm = st.number_input(
+                f"Alarm - {machine_name}",
+                min_value=0.0,
+                value=float(alarm_value),
+                step=0.1,
+                format="%.3f",
+                key=f"alarm_machine_{machine_name}",
+            )
+
+            machine_danger = st.number_input(
+                f"Danger - {machine_name}",
+                min_value=0.0,
+                value=float(danger_value),
+                step=0.1,
+                format="%.3f",
+                key=f"danger_machine_{machine_name}",
+            )
+
+            machine_settings[machine_name] = {
+                "criterion": machine_criterion,
+                "alarm": float(machine_alarm),
+                "danger": float(machine_danger),
+            }
+
+    elif config_mode == "Criterion by Point":
+        st.markdown("### Point Settings")
+
+        unique_points = sorted({str(r.point) for r in records_all if str(r.point).strip()})
+
+        for point_name in unique_points:
+            st.markdown(f"**{point_name}**")
+
+            point_criterion = st.selectbox(
+                f"Criterion - {point_name}",
+                options=criterion_options,
+                index=criterion_options.index(criterion_selected) if criterion_selected in criterion_options else 0,
+                key=f"criterion_point_{point_name}",
+            )
+
+            if point_criterion == "Custom":
+                point_criterion = st.text_input(
+                    f"Custom criterion for {point_name}",
+                    value=criterion_text if criterion_selected == "Custom" else "Criterio usuario",
+                    key=f"criterion_point_custom_{point_name}",
+                ).strip() or "Criterio usuario"
+
+            point_alarm = st.number_input(
+                f"Alarm - {point_name}",
+                min_value=0.0,
+                value=float(alarm_value),
+                step=0.1,
+                format="%.3f",
+                key=f"alarm_point_{point_name}",
+            )
+
+            point_danger = st.number_input(
+                f"Danger - {point_name}",
+                min_value=0.0,
+                value=float(danger_value),
+                step=0.1,
+                format="%.3f",
+                key=f"danger_point_{point_name}",
+            )
+
+            point_settings[point_name] = {
+                "criterion": point_criterion,
+                "alarm": float(point_alarm),
+                "danger": float(point_danger),
+            }
 
 logo_uri = get_logo_data_uri(LOGO_PATH)
 
 df_table = build_table_dataframe(
     records=records_all,
-    alarm=float(alarm_value),
-    danger=float(danger_value),
     criterion_default=criterion_text,
-    criterion_by_point=criterion_by_point,
+    config_mode=config_mode,
+    machine_settings=machine_settings,
+    point_settings=point_settings,
     family_mode=measurement_family,
     overall_mode=overall_mode,
+    global_alarm=float(alarm_value),
+    global_danger=float(danger_value),
 )
 
 if df_table.empty:
