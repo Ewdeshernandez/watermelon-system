@@ -47,38 +47,33 @@ st.markdown(
 
     .stApp {
         background:
-            radial-gradient(circle at top left, rgba(30,167,255,0.10) 0%, transparent 26%),
-            linear-gradient(180deg, #eef4fb 0%, #e8eef7 100%);
+            radial-gradient(circle at top left, rgba(30,167,255,0.10) 0%, transparent 24%),
+            linear-gradient(180deg, #edf3fa 0%, #e8eef6 100%);
         color: #0f172a;
     }
 
     .block-container {
-        max-width: 1320px !important;
-        padding-top: 2.2rem !important;
-        padding-bottom: 2.2rem !important;
-        padding-left: 1.6rem !important;
-        padding-right: 1.6rem !important;
+        max-width: 1280px !important;
+        padding-top: 2.4rem !important;
+        padding-bottom: 2.4rem !important;
+        padding-left: 1.8rem !important;
+        padding-right: 1.8rem !important;
     }
 
-    .wm-stage {
-        min-height: 88vh;
+    /* columnas */
+    [data-testid="column"] {
         display: flex;
         align-items: center;
     }
 
-    .wm-left {
-        padding-right: 2.5rem;
-    }
-
-    .wm-kicker {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.45rem;
-        padding: 0.45rem 0.82rem;
+    /* izquierda */
+    .wm-eyebrow {
+        display: inline-block;
+        padding: 0.45rem 0.8rem;
         border-radius: 999px;
         background: rgba(30,167,255,0.08);
         border: 1px solid rgba(30,167,255,0.16);
-        color: #1187ea;
+        color: #148df0;
         font-size: 0.76rem;
         font-weight: 800;
         letter-spacing: 0.12em;
@@ -88,13 +83,14 @@ st.markdown(
     .wm-brand-row {
         display: flex;
         align-items: center;
-        gap: 0.9rem;
+        gap: 0.95rem;
         margin-top: 1rem;
+        margin-bottom: 1.25rem;
     }
 
     .wm-logo-box {
-        width: 56px;
-        height: 56px;
+        width: 58px;
+        height: 58px;
         border-radius: 16px;
         background: #ffffff;
         border: 1px solid rgba(15, 23, 42, 0.06);
@@ -103,80 +99,66 @@ st.markdown(
         align-items: center;
         justify-content: center;
         overflow: hidden;
+        flex-shrink: 0;
     }
 
     .wm-brand-title {
+        color: #0f172a;
         font-size: 0.95rem;
         font-weight: 800;
-        letter-spacing: 0.16em;
+        letter-spacing: 0.15em;
         text-transform: uppercase;
-        color: #0f172a;
         margin: 0;
     }
 
     .wm-brand-subtitle {
+        color: #617287;
         font-size: 0.92rem;
-        color: #5b6b80;
         font-weight: 600;
         margin-top: 0.12rem;
     }
 
-    .wm-title {
-        margin-top: 1.7rem;
-        font-size: 4.25rem;
-        line-height: 0.96;
+    .wm-hero {
+        color: #081226;
+        font-size: 4.4rem;
+        line-height: 0.94;
         font-weight: 900;
-        letter-spacing: -0.055em;
-        color: #091224;
-        max-width: 620px;
+        letter-spacing: -0.06em;
+        max-width: 650px;
+        margin: 0;
     }
 
-    .wm-copy {
+    .wm-left-note {
         margin-top: 1rem;
-        max-width: 520px;
-        color: #5b6b80;
-        font-size: 1.02rem;
-        line-height: 1.7;
+        color: #617287;
+        font-size: 1rem;
+        line-height: 1.65;
+        max-width: 480px;
     }
 
-    .wm-tags {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.65rem;
-        margin-top: 1.4rem;
-    }
-
-    .wm-tag {
-        padding: 0.52rem 0.82rem;
-        border-radius: 999px;
-        background: rgba(255,255,255,0.78);
-        border: 1px solid rgba(15, 23, 42, 0.06);
-        color: #334155;
-        font-size: 0.80rem;
-        font-weight: 700;
-    }
-
-    .wm-card {
+    /* tarjeta login */
+    .wm-login-card {
+        width: 100%;
+        max-width: 460px;
+        margin-left: auto;
         background: #ffffff;
         border: 1px solid rgba(15, 23, 42, 0.07);
         border-radius: 24px;
         box-shadow:
-            0 20px 50px rgba(15, 23, 42, 0.08),
+            0 18px 46px rgba(15, 23, 42, 0.08),
             0 2px 8px rgba(15, 23, 42, 0.03);
         padding: 2rem 1.8rem;
-        max-width: 440px;
-        margin-left: auto;
     }
 
-    .wm-card-topline {
-        color: #1187ea;
-        font-size: 0.75rem;
+    .wm-login-top {
+        color: #148df0;
+        font-size: 0.76rem;
         font-weight: 800;
-        letter-spacing: 0.14em;
+        letter-spacing: 0.13em;
         text-transform: uppercase;
     }
 
-    .wm-card-title {
+    .wm-login-title {
         margin-top: 0.55rem;
         color: #0f172a;
         font-size: 2rem;
@@ -185,12 +167,12 @@ st.markdown(
         letter-spacing: -0.04em;
     }
 
-    .wm-card-copy {
+    .wm-login-copy {
         margin-top: 0.7rem;
+        margin-bottom: 1.2rem;
         color: #64748b;
         font-size: 0.95rem;
         line-height: 1.6;
-        margin-bottom: 1.2rem;
     }
 
     div[data-testid="stForm"] {
@@ -201,21 +183,21 @@ st.markdown(
 
     div[data-testid="stTextInput"] label {
         color: #243244 !important;
-        font-size: 0.90rem !important;
+        font-size: 0.91rem !important;
         font-weight: 700 !important;
     }
 
     div[data-testid="stTextInput"] > div > div {
         background: #f8fbff !important;
-        border: 1px solid #d9e4f1 !important;
+        border: 1px solid #d8e3ef !important;
         border-radius: 14px !important;
         min-height: 52px !important;
         transition: all 0.18s ease !important;
     }
 
     div[data-testid="stTextInput"] > div > div:focus-within {
-        border: 1px solid #51b7ff !important;
-        box-shadow: 0 0 0 4px rgba(81,183,255,0.14) !important;
+        border: 1px solid #53baff !important;
+        box-shadow: 0 0 0 4px rgba(83,186,255,0.14) !important;
     }
 
     div[data-testid="stTextInput"] input {
@@ -224,7 +206,7 @@ st.markdown(
     }
 
     div[data-testid="stTextInput"] input::placeholder {
-        color: #8aa0b8 !important;
+        color: #8ca1b8 !important;
         opacity: 1 !important;
     }
 
@@ -237,7 +219,7 @@ st.markdown(
         font-size: 1rem !important;
         font-weight: 800 !important;
         color: #ffffff !important;
-        background: linear-gradient(90deg, #1593ff 0%, #32c2ff 100%) !important;
+        background: linear-gradient(90deg, #1593ff 0%, #39c1ff 100%) !important;
         box-shadow: 0 12px 28px rgba(21,147,255,0.22) !important;
         transition: all 0.18s ease !important;
     }
@@ -247,13 +229,13 @@ st.markdown(
         box-shadow: 0 16px 32px rgba(21,147,255,0.28) !important;
     }
 
-    .wm-note {
+    .wm-footer-note {
         margin-top: 1rem;
         padding-top: 0.9rem;
-        border-top: 1px solid #e7eef6;
+        border-top: 1px solid #e7edf5;
         color: #7a8da3;
         font-size: 0.86rem;
-        line-height: 1.55;
+        line-height: 1.5;
     }
 
     div[data-testid="stAlert"] {
@@ -262,19 +244,14 @@ st.markdown(
     }
 
     @media (max-width: 1100px) {
-        .wm-left {
-            padding-right: 0.5rem;
-            margin-bottom: 2rem;
-        }
-
-        .wm-title {
+        .wm-hero {
             font-size: 3.2rem;
             max-width: 100%;
         }
 
-        .wm-card {
-            margin-left: 0;
+        .wm-login-card {
             max-width: 100%;
+            margin-left: 0;
         }
     }
     </style>
@@ -285,31 +262,27 @@ st.markdown(
 # =========================================================
 # LAYOUT
 # =========================================================
-st.markdown('<div class="wm-stage">', unsafe_allow_html=True)
-
-left_col, right_col = st.columns([1.25, 0.95], gap="large")
+left_col, right_col = st.columns([1.2, 0.95], gap="large")
 
 with left_col:
-    st.markdown('<div class="wm-left">', unsafe_allow_html=True)
-
     st.markdown(
         """
-        <div class="wm-kicker">● Watermelon System</div>
+        <div class="wm-eyebrow">● Watermelon System</div>
         """,
         unsafe_allow_html=True,
     )
 
-    brand_logo_col, brand_text_col = st.columns([0.12, 0.88], gap="small")
+    logo_col, text_col = st.columns([0.12, 0.88], gap="small")
 
-    with brand_logo_col:
+    with logo_col:
         st.markdown('<div class="wm-logo-box">', unsafe_allow_html=True)
         if asset_exists(LOGO_PATH):
             st.image(str(LOGO_PATH), use_container_width=True)
         else:
             st.markdown("<div style='font-size:1.5rem;'>🍉</div>", unsafe_allow_html=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    with brand_text_col:
+    with text_col:
         st.markdown(
             """
             <div class="wm-brand-row" style="margin-top:0;">
@@ -324,34 +297,25 @@ with left_col:
 
     st.markdown(
         """
-        <div class="wm-title">
-            Acceso premium,
-            serio y limpio.
+        <div class="wm-hero">
+            Inicia sesión
+            en Watermelon.
         </div>
-        <div class="wm-copy">
-            Una entrada sobria para una plataforma industrial moderna.
-        </div>
-        <div class="wm-tags">
-            <div class="wm-tag">Waveform</div>
-            <div class="wm-tag">Orbit</div>
-            <div class="wm-tag">FFT</div>
-            <div class="wm-tag">Trends</div>
-            <div class="wm-tag">Diagnostics</div>
+        <div class="wm-left-note">
+            Plataforma industrial para análisis, monitoreo y diagnóstico de vibraciones.
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown('</div>', unsafe_allow_html=True)
-
 with right_col:
-    st.markdown('<div class="wm-card">', unsafe_allow_html=True)
+    st.markdown('<div class="wm-login-card">', unsafe_allow_html=True)
 
     st.markdown(
         """
-        <div class="wm-card-topline">Secure Access</div>
-        <div class="wm-card-title">Ingresar</div>
-        <div class="wm-card-copy">Accede con tus credenciales corporativas.</div>
+        <div class="wm-login-top">Secure Access</div>
+        <div class="wm-login-title">Ingresar</div>
+        <div class="wm-login-copy">Accede con tus credenciales corporativas.</div>
         """,
         unsafe_allow_html=True,
     )
@@ -382,13 +346,11 @@ with right_col:
 
     st.markdown(
         """
-        <div class="wm-note">
+        <div class="wm-footer-note">
             Watermelon System · Industrial monitoring software
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.markdown('</div>', unsafe_allow_html=True)
-
-st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
