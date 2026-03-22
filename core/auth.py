@@ -24,6 +24,7 @@ NAV_ITEMS = [
     {"label": "Orbit Analysis", "page": "pages/05_Orbit_Analysis.py"},
     {"label": "Phase Analysis", "page": "pages/13_Phase_Analysis.py"},
     {"label": "Diagnostics", "page": "pages/15_Diagnostics.py"},
+    {"label": "Reports", "page": "pages/16_Reports.py"},
 ]
 
 
