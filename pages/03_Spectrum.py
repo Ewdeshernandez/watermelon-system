@@ -1,4 +1,4 @@
-python - <<'PY'
+
 from pathlib import Path
 import textwrap
 
