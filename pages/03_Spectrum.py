@@ -505,4 +505,3 @@ for panel_idx, record in enumerate(selected_records):
 new_src = head + new_tail
 path.write_text(new_src, encoding="utf-8")
 print("OK: pages/03_Spectrum.py actualizado")
-PY
