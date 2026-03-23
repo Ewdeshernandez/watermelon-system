@@ -3,15 +3,19 @@ from pathlib import Path
 
 from core.auth import require_login, render_user_menu
 
-# IMPORTS DE TUS MÓDULOS (CLAVE)
-from pages._02_Time_Waveforms import build_waveform_figure
-from pages._03_Spectrum import (
-    compute_spectrum_peak,
-    build_spectrum_figure,
-    convert_peak_to_mode,
-)
-from pages._05_Orbit_Analysis import build_orbit_figure
-from pages._06_Trend import build_trend_figure
+import importlib
+
+wave_module = importlib.import_module("pages.02_Time_Waveforms")
+spec_module = importlib.import_module("pages.03_Spectrum")
+orbit_module = importlib.import_module("pages.05_Orbit_Analysis")
+trend_module = importlib.import_module("pages.06_Trends")
+
+build_waveform_figure = wave_module.build_waveform_figure
+compute_spectrum_peak = spec_module.compute_spectrum_peak
+build_spectrum_figure = spec_module.build_spectrum_figure
+convert_peak_to_mode = spec_module.convert_peak_to_mode
+build_orbit_figure = orbit_module.build_orbit_figure
+build_trend_figure = trend_module.build_trend_figure
 
 st.set_page_config(page_title="Watermelon System | Reports", layout="wide")
 
