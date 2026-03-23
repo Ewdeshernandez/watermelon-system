@@ -1432,14 +1432,12 @@ def build_export_png_bytes(
 # ------------------------------------------------------------
 # Session defaults
 # ------------------------------------------------------------
-if "wm_sp_primary_signal_id" not in st.session_state:
-    st.session_state.wm_sp_primary_signal_id = None
-if "wm_sp_export_png_bytes" not in st.session_state:
-    st.session_state.wm_sp_export_png_bytes = None
-if "wm_sp_export_png_key" not in st.session_state:
-    st.session_state.wm_sp_export_png_key = None
-if "wm_sp_export_error" not in st.session_state:
-    st.session_state.wm_sp_export_error = None
+if "wm_sp_selected_signal_ids" not in st.session_state:
+    st.session_state.wm_sp_selected_signal_ids = []
+if "wm_sp_export_store" not in st.session_state:
+    st.session_state.wm_sp_export_store = {}
+if "report_items" not in st.session_state:
+    st.session_state.report_items = []
 
 
 # ------------------------------------------------------------
@@ -1461,20 +1459,22 @@ with st.sidebar:
     signal_name_map = {r.name: r.signal_id for r in records_all}
     signal_names = list(signal_name_map.keys())
 
-    if st.session_state.wm_sp_primary_signal_id not in [r.signal_id for r in records_all]:
-        st.session_state.wm_sp_primary_signal_id = records_all[0].signal_id
+    valid_ids = {r.signal_id for r in records_all}
+    current_ids = [sid for sid in st.session_state.wm_sp_selected_signal_ids if sid in valid_ids]
+    if not current_ids:
+        current_ids = [records_all[0].signal_id]
+        st.session_state.wm_sp_selected_signal_ids = current_ids
 
-    current_name = next(
-        (r.name for r in records_all if r.signal_id == st.session_state.wm_sp_primary_signal_id),
-        signal_names[0],
-    )
+    default_names = [r.name for r in records_all if r.signal_id in current_ids]
 
-    selected_name = st.selectbox(
-        "Primary signal",
+    selected_names = st.multiselect(
+        "Spectra to display",
         options=signal_names,
-        index=signal_names.index(current_name),
+        default=default_names,
     )
-    st.session_state.wm_sp_primary_signal_id = signal_name_map[selected_name]
+    st.session_state.wm_sp_selected_signal_ids = [
+        signal_name_map[name] for name in selected_names if name in signal_name_map
+    ]
 
     st.markdown("### Spectrum Processing")
 
@@ -1508,7 +1508,12 @@ with st.sidebar:
 
     st.markdown("### Display")
 
-    primary_for_defaults = next(r for r in records_all if r.signal_id == st.session_state.wm_sp_primary_signal_id)
+    default_source_id = (
+        st.session_state.wm_sp_selected_signal_ids[0]
+        if st.session_state.wm_sp_selected_signal_ids
+        else records_all[0].signal_id
+    )
+    primary_for_defaults = next(r for r in records_all if r.signal_id == default_source_id)
     default_max_cpm = float(primary_for_defaults.rpm * 10) if primary_for_defaults.rpm is not None else 60000.0
 
     max_cpm = st.number_input(
@@ -1579,195 +1584,282 @@ with st.sidebar:
 
 
 # ------------------------------------------------------------
-# Prepare signal
+# Prepare signals + multi-panel render
 # ------------------------------------------------------------
-primary = next(r for r in records_all if r.signal_id == st.session_state.wm_sp_primary_signal_id)
+def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title: str) -> None:
+    st.session_state.report_items.append(
+        {
+            "id": make_export_state_key(
+                [
+                    "report-spectrum",
+                    primary.signal_id,
+                    primary.timestamp,
+                    panel_title,
+                    len(st.session_state.report_items),
+                ]
+            ),
+            "type": "spectrum",
+            "title": panel_title,
+            "notes": "",
+            "signal_id": primary.signal_id,
+            "figure": go.Figure(fig),
+            "machine": primary.machine,
+            "point": primary.point,
+            "variable": primary.variable,
+            "timestamp": primary.timestamp,
+        }
+    )
 
-spectrum = compute_spectrum_peak(
-    time_s=primary.time_s,
-    y=primary.amplitude,
-    window_name=window_name,
-    remove_dc=remove_dc,
-    detrend=detrend,
-    zero_padding=zero_padding,
-    high_res_factor=high_res_factor,
-    min_peak_cpm=1.0,
-)
 
-if spectrum.freq_cpm.size == 0 or spectrum.amp_peak.size == 0:
-    st.warning("No fue posible calcular el espectro con la señal actual.")
-    st.stop()
-
-freq_cpm = spectrum.freq_cpm
-amp_peak = spectrum.amp_peak
-resolution_cpm = spectrum.resolution_cpm
-real_resolution_cpm = spectrum.real_resolution_cpm
-
-amp_display = convert_peak_to_mode(amp_peak, amplitude_mode)
-display_unit_text = amplitude_unit_text(primary.amplitude_unit, amplitude_mode)
-
-interpolated_peak_amp_display = convert_scalar_peak_to_mode(spectrum.peak_amp_peak, amplitude_mode)
-
-one_x_display_amp: Optional[float] = None
-one_x_display_freq_cpm: Optional[float] = None
-
-if primary.rpm is not None and primary.rpm > 0:
-    one_x_freq_cpm = float(primary.rpm)
-    one_x_freq_hz = one_x_freq_cpm / 60.0
-
-    one_x_peak_amp_from_waveform = estimate_harmonic_from_waveform_peak(
+def render_spectrum_panel(
+    primary: SignalRecord,
+    panel_index: int,
+    *,
+    window_name: str,
+    amplitude_mode: str,
+    remove_dc: bool,
+    detrend: bool,
+    zero_padding: bool,
+    high_res_display: bool,
+    high_res_factor: int,
+    max_cpm: float,
+    y_axis_mode: str,
+    y_axis_manual_max: Optional[float],
+    fill_area: bool,
+    annotate_peak: bool,
+    show_harmonics: bool,
+    harmonic_count: int,
+    harmonic_band_fraction: float,
+    show_harmonic_amplitudes: bool,
+    harmonic_label_mode: str,
+    show_right_info_box: bool,
+) -> None:
+    spectrum = compute_spectrum_peak(
         time_s=primary.time_s,
         y=primary.amplitude,
-        freq_hz=one_x_freq_hz,
-        remove_mean=True,
+        window_name=window_name,
+        remove_dc=remove_dc,
+        detrend=detrend,
+        zero_padding=zero_padding,
+        high_res_factor=high_res_factor,
+        min_peak_cpm=1.0,
     )
 
-    one_x_local_freq_cpm, one_x_peak_amp_from_spectrum = find_local_peak_near_1x(
+    freq_cpm = spectrum.freq_cpm
+    amp_peak = spectrum.amp_peak
+    resolution_cpm = spectrum.resolution_cpm
+    real_resolution_cpm = spectrum.real_resolution_cpm
+
+    amp_display = convert_peak_to_mode(amp_peak, amplitude_mode)
+    interpolated_peak_amp_display = convert_scalar_peak_to_mode(spectrum.peak_amp_peak, amplitude_mode)
+
+    one_x_display_amp: Optional[float] = None
+    one_x_display_freq_cpm: Optional[float] = None
+
+    if primary.rpm is not None and primary.rpm > 0:
+        one_x_freq_cpm = float(primary.rpm)
+        one_x_freq_hz = one_x_freq_cpm / 60.0
+
+        one_x_peak_amp_from_waveform = estimate_harmonic_from_waveform_peak(
+            time_s=primary.time_s,
+            y=primary.amplitude,
+            freq_hz=one_x_freq_hz,
+            remove_mean=True,
+        )
+
+        one_x_local_freq_cpm, one_x_peak_amp_from_spectrum = find_local_peak_near_1x(
+            freq_cpm=freq_cpm,
+            amp_peak=amp_peak,
+            one_x_cpm=one_x_freq_cpm,
+            band_fraction=harmonic_band_fraction,
+        )
+
+        if one_x_peak_amp_from_waveform is not None:
+            one_x_display_amp = convert_scalar_peak_to_mode(one_x_peak_amp_from_waveform, amplitude_mode)
+            one_x_display_freq_cpm = one_x_freq_cpm
+        elif one_x_peak_amp_from_spectrum is not None:
+            one_x_display_amp = convert_scalar_peak_to_mode(one_x_peak_amp_from_spectrum, amplitude_mode)
+            one_x_display_freq_cpm = one_x_local_freq_cpm
+
+    all_harmonic_points = collect_harmonic_points(
         freq_cpm=freq_cpm,
         amp_peak=amp_peak,
-        one_x_cpm=one_x_freq_cpm,
+        base_rpm=primary.rpm,
+        harmonic_count=harmonic_count,
         band_fraction=harmonic_band_fraction,
+        max_cpm=max_cpm,
     )
 
-    if one_x_peak_amp_from_waveform is not None:
-        one_x_display_amp = convert_scalar_peak_to_mode(one_x_peak_amp_from_waveform, amplitude_mode)
-        one_x_display_freq_cpm = one_x_freq_cpm
-    elif one_x_peak_amp_from_spectrum is not None:
-        one_x_display_amp = convert_scalar_peak_to_mode(one_x_peak_amp_from_spectrum, amplitude_mode)
-        one_x_display_freq_cpm = one_x_local_freq_cpm
+    harmonic_points_for_labels = choose_harmonics_to_annotate(
+        harmonic_points=all_harmonic_points,
+        label_mode=harmonic_label_mode,
+    )
 
-all_harmonic_points = collect_harmonic_points(
-    freq_cpm=freq_cpm,
-    amp_peak=amp_peak,
-    base_rpm=primary.rpm,
-    harmonic_count=harmonic_count,
-    band_fraction=harmonic_band_fraction,
-    max_cpm=max_cpm,
-)
+    overall_spec_rms = compute_spectrum_overall_rms_parseval(
+        time_s=primary.time_s,
+        y=primary.amplitude,
+        remove_dc=remove_dc,
+        detrend=detrend,
+        max_cpm=max_cpm,
+    )
 
-harmonic_points_for_labels = choose_harmonics_to_annotate(
-    harmonic_points=all_harmonic_points,
-    label_mode=harmonic_label_mode,
-)
+    logo_uri = get_logo_data_uri(LOGO_PATH)
 
-overall_spec_rms = compute_spectrum_overall_rms_parseval(
-    time_s=primary.time_s,
-    y=primary.amplitude,
-    remove_dc=remove_dc,
-    detrend=detrend,
-    max_cpm=max_cpm,
-)
+    fig = build_spectrum_figure(
+        record=primary,
+        freq_cpm=freq_cpm,
+        amp_display=amp_display,
+        amp_peak=amp_peak,
+        amplitude_mode=amplitude_mode,
+        max_cpm=max_cpm,
+        y_axis_mode=y_axis_mode,
+        y_axis_manual_max=y_axis_manual_max,
+        show_harmonics=show_harmonics,
+        show_harmonic_amplitudes=show_harmonic_amplitudes,
+        harmonic_points_for_labels=harmonic_points_for_labels if show_harmonics else [],
+        show_right_info_box=show_right_info_box,
+        fill_area=fill_area,
+        annotate_peak=annotate_peak,
+        logo_uri=logo_uri,
+        spectrum_mode_label=window_name,
+        one_x_display_amp=one_x_display_amp,
+        one_x_display_freq_cpm=one_x_display_freq_cpm,
+        overall_spec_rms=overall_spec_rms,
+        resolution_cpm=resolution_cpm,
+        real_resolution_cpm=real_resolution_cpm,
+        interpolated_peak_freq_cpm=spectrum.peak_freq_cpm,
+        interpolated_peak_amp_display=interpolated_peak_amp_display,
+    )
 
-logo_uri = get_logo_data_uri(LOGO_PATH)
+    export_state_key = make_export_state_key(
+        [
+            primary.signal_id,
+            primary.name,
+            primary.machine,
+            primary.point,
+            primary.variable,
+            primary.timestamp,
+            panel_index,
+            window_name,
+            amplitude_mode,
+            remove_dc,
+            detrend,
+            zero_padding,
+            high_res_display,
+            high_res_factor,
+            max_cpm,
+            y_axis_mode,
+            y_axis_manual_max,
+            fill_area,
+            annotate_peak,
+            show_harmonics,
+            harmonic_count,
+            harmonic_band_fraction,
+            show_harmonic_amplitudes,
+            harmonic_label_mode,
+            show_right_info_box,
+            primary.rpm,
+            float(np.nanmax(amp_display)) if amp_display.size else 0.0,
+            float(np.nanmin(amp_display)) if amp_display.size else 0.0,
+            amp_display.size,
+            overall_spec_rms,
+            resolution_cpm,
+            real_resolution_cpm,
+            spectrum.peak_freq_cpm,
+            spectrum.peak_amp_peak,
+            len(all_harmonic_points),
+        ]
+    )
 
-fig = build_spectrum_figure(
-    record=primary,
-    freq_cpm=freq_cpm,
-    amp_display=amp_display,
-    amp_peak=amp_peak,
-    amplitude_mode=amplitude_mode,
-    max_cpm=max_cpm,
-    y_axis_mode=y_axis_mode,
-    y_axis_manual_max=y_axis_manual_max,
-    show_harmonics=show_harmonics,
-    show_harmonic_amplitudes=show_harmonic_amplitudes,
-    harmonic_points_for_labels=harmonic_points_for_labels if show_harmonics else [],
-    show_right_info_box=show_right_info_box,
-    fill_area=fill_area,
-    annotate_peak=annotate_peak,
-    logo_uri=logo_uri,
-    spectrum_mode_label=window_name,
-    one_x_display_amp=one_x_display_amp,
-    one_x_display_freq_cpm=one_x_display_freq_cpm,
-    overall_spec_rms=overall_spec_rms,
-    resolution_cpm=resolution_cpm,
-    real_resolution_cpm=real_resolution_cpm,
-    interpolated_peak_freq_cpm=spectrum.peak_freq_cpm,
-    interpolated_peak_amp_display=interpolated_peak_amp_display,
-)
+    if export_state_key not in st.session_state.wm_sp_export_store:
+        st.session_state.wm_sp_export_store[export_state_key] = {
+            "png_bytes": None,
+            "error": None,
+        }
 
-# ------------------------------------------------------------
-# Export row — lazy generation
-# ------------------------------------------------------------
-export_state_key = make_export_state_key(
-    [
-        primary.signal_id,
-        primary.name,
-        primary.machine,
-        primary.point,
-        primary.variable,
-        primary.timestamp,
-        window_name,
-        amplitude_mode,
-        remove_dc,
-        detrend,
-        zero_padding,
-        high_res_display,
-        high_res_factor,
-        max_cpm,
-        y_axis_mode,
-        y_axis_manual_max,
-        fill_area,
-        annotate_peak,
-        show_harmonics,
-        harmonic_count,
-        harmonic_band_fraction,
-        show_harmonic_amplitudes,
-        harmonic_label_mode,
-        show_right_info_box,
-        primary.rpm,
-        float(np.nanmax(amp_display)) if amp_display.size else 0.0,
-        float(np.nanmin(amp_display)) if amp_display.size else 0.0,
-        amp_display.size,
-        overall_spec_rms,
-        resolution_cpm,
-        real_resolution_cpm,
-        spectrum.peak_freq_cpm,
-        spectrum.peak_amp_peak,
-        len(all_harmonic_points),
-    ]
-)
+    panel_title = f"Spectrum {panel_index + 1} — {primary.name}"
+    st.markdown(f"### {panel_title}")
 
-if st.session_state.wm_sp_export_png_key != export_state_key:
-    st.session_state.wm_sp_export_png_bytes = None
-    st.session_state.wm_sp_export_png_key = export_state_key
-    st.session_state.wm_sp_export_error = None
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displaylogo": False},
+        key=f"wm_spectrum_plot_{export_state_key}",
+    )
 
-# ------------------------------------------------------------
-# Main chart
-# ------------------------------------------------------------
-st.plotly_chart(
-    fig,
-    use_container_width=True,
-    config={"displaylogo": False},
-    key="wm_spectrum_plot_main_view",
-)
+    st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
+    left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
 
-# ------------------------------------------------------------
-# Bottom export actions
-# ------------------------------------------------------------
-st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
+    with col_export1:
+        if st.button("Prepare PNG HD", key=f"prepare_png_{export_state_key}", use_container_width=True):
+            with st.spinner("Generating HD export..."):
+                png_bytes, export_error = build_export_png_bytes(fig=fig)
+                st.session_state.wm_sp_export_store[export_state_key]["png_bytes"] = png_bytes
+                st.session_state.wm_sp_export_store[export_state_key]["error"] = export_error
 
-left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
+    with col_export2:
+        png_bytes = st.session_state.wm_sp_export_store[export_state_key]["png_bytes"]
+        if png_bytes is not None:
+            st.download_button(
+                "Download PNG HD",
+                data=png_bytes,
+                file_name=f"watermelon_spectrum_{panel_index + 1}_hd.png",
+                mime="image/png",
+                key=f"download_png_{export_state_key}",
+                use_container_width=True,
+            )
+        else:
+            st.button(
+                "Download PNG HD",
+                disabled=True,
+                key=f"download_disabled_{export_state_key}",
+                use_container_width=True,
+            )
 
-with col_export1:
-    if st.button("Prepare PNG HD", use_container_width=True):
-        with st.spinner("Generating HD export..."):
-            png_bytes, export_error = build_export_png_bytes(fig=fig)
-            st.session_state.wm_sp_export_png_bytes = png_bytes
-            st.session_state.wm_sp_export_error = export_error
+    with col_report:
+        if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
+            queue_spectrum_to_report(primary, fig, panel_title)
+            st.success("Spectrum enviado al reporte")
 
-with col_export2:
-    if st.session_state.wm_sp_export_png_bytes is not None:
-        st.download_button(
-            "Download PNG HD",
-            data=st.session_state.wm_sp_export_png_bytes,
-            file_name="watermelon_spectrum_hd.png",
-            mime="image/png",
-            use_container_width=True,
-        )
-    else:
-        st.button("Download PNG HD", disabled=True, use_container_width=True)
 
-if st.session_state.wm_sp_export_error:
-    st.warning(f"PNG export error: {st.session_state.wm_sp_export_error}")
+selected_ids = [
+    signal_id
+    for signal_id in st.session_state.wm_sp_selected_signal_ids
+    if signal_id in {r.signal_id for r in records_all}
+]
+
+if not selected_ids:
+    st.info("Selecciona uno o más espectros en la barra lateral.")
+    st.stop()
+
+selected_records = [
+    next(r for r in records_all if r.signal_id == signal_id)
+    for signal_id in selected_ids
+]
+
+for panel_index, primary in enumerate(selected_records):
+    render_spectrum_panel(
+        primary=primary,
+        panel_index=panel_index,
+        window_name=window_name,
+        amplitude_mode=amplitude_mode,
+        remove_dc=remove_dc,
+        detrend=detrend,
+        zero_padding=zero_padding,
+        high_res_display=high_res_display,
+        high_res_factor=high_res_factor,
+        max_cpm=max_cpm,
+        y_axis_mode=y_axis_mode,
+        y_axis_manual_max=y_axis_manual_max,
+        fill_area=fill_area,
+        annotate_peak=annotate_peak,
+        show_harmonics=show_harmonics,
+        harmonic_count=harmonic_count,
+        harmonic_band_fraction=harmonic_band_fraction,
+        show_harmonic_amplitudes=show_harmonic_amplitudes,
+        harmonic_label_mode=harmonic_label_mode,
+        show_right_info_box=show_right_info_box,
+    )
+
+    if panel_index < len(selected_records) - 1:
+        st.markdown("---")
