@@ -453,9 +453,9 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.drawRightString(page_width - 1.0 * cm, page_height - 1.0 * cm, f"Página {doc.page}")
 
         footer = "INFORME VALIDO UNICAMENTE PARA LAS CONDICIONES PRESENTES DURANTE EL SERVICIO. NO PODRA SER COPIADO PARCIAL O TOTALMENTE SIN PREVIA AUTORIZACION."
-        canvas.setFillColor(colors.HexColor("#ffffff"))
-        canvas.setFont("Helvetica-Bold", 6.1)
-        canvas.drawCentredString(page_width / 2, 0.40 * cm, footer)
+        canvas.setFillColor(colors.HexColor("#0f172a"))
+        canvas.setFont("Helvetica-Bold", 6.2)
+        canvas.drawCentredString((page_width - 4.5 * cm) / 2, 0.48 * cm, footer)
         canvas.restoreState()
 
     def _draw_internal_page(canvas, doc):
@@ -517,14 +517,11 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         ),
     ))
 
-    if logo_siga and logo_siga.exists():
-        story.append(Image(str(logo_siga), width=4.3 * cm, height=2.0 * cm))
-        story.append(Spacer(1, 0.12 * cm))
     if WATERMELON_LOGO.exists():
-        story.append(Image(str(WATERMELON_LOGO), width=2.3 * cm, height=1.15 * cm))
-        story.append(Spacer(1, 0.22 * cm))
+        story.append(Image(str(WATERMELON_LOGO), width=4.2 * cm, height=2.0 * cm))
+        story.append(Spacer(1, 0.35 * cm))
 
-    story.append(Spacer(1, 0.55 * cm))
+    story.append(Spacer(1, 0.35 * cm))
     story.append(Paragraph("Machinery Diagnostics Engineering", styles["WMSubTitle"]))
     story.append(Spacer(1, 0.8 * cm))
     story.append(Paragraph(_paragraph_safe(meta.get("report_title") or "REPORTE TECNICO"), styles["WMTitle"]))
