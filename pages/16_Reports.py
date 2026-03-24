@@ -415,10 +415,10 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         # Marca de agua grande inferior derecha
         if logo_watermark and logo_watermark.exists():
             try:
-                wm_w = 7.2 * cm
-                wm_h = 7.2 * cm
-                wm_x = page_width - 7.5 * cm
-                wm_y = 0.35 * cm
+                wm_w = 7.8 * cm
+                wm_h = 7.8 * cm
+                wm_x = page_width - 8.0 * cm
+                wm_y = 0.15 * cm
                 canvas.saveState()
                 canvas.setFillAlpha(0.20)
                 canvas.drawImage(
@@ -448,14 +448,14 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                     base_x + 0.35 * cm, y + 0.18 * cm,
                 )
 
-        canvas.setFont("Helvetica-Bold", 11)
+        canvas.setFont("Helvetica-Bold", 10.5)
         canvas.setFillColor(colors.HexColor("#111827"))
-        canvas.drawRightString(page_width - 1.0 * cm, page_height - 1.0 * cm, f"Página {doc.page}")
+        canvas.drawRightString(page_width - 1.15 * cm, page_height - 1.0 * cm, f"Página {doc.page}")
 
         footer = "INFORME VALIDO UNICAMENTE PARA LAS CONDICIONES PRESENTES DURANTE EL SERVICIO. NO PODRA SER COPIADO PARCIAL O TOTALMENTE SIN PREVIA AUTORIZACION."
-        canvas.setFillColor(colors.HexColor("#0f172a"))
-        canvas.setFont("Helvetica-Bold", 6.2)
-        canvas.drawCentredString((page_width - 4.5 * cm) / 2, 0.48 * cm, footer)
+        canvas.setFillColor(colors.HexColor("#334155"))
+        canvas.setFont("Helvetica-Bold", 5.8)
+        canvas.drawCentredString((page_width - 4.5 * cm) / 2, 0.52 * cm, footer)
         canvas.restoreState()
 
     def _draw_internal_page(canvas, doc):
@@ -521,9 +521,9 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         story.append(Image(str(WATERMELON_LOGO), width=4.2 * cm, height=2.0 * cm))
         story.append(Spacer(1, 0.35 * cm))
 
-    story.append(Spacer(1, 0.35 * cm))
+    story.append(Spacer(1, 0.18 * cm))
     story.append(Paragraph("Machinery Diagnostics Engineering", styles["WMSubTitle"]))
-    story.append(Spacer(1, 0.8 * cm))
+    story.append(Spacer(1, 0.55 * cm))
     story.append(Paragraph(_paragraph_safe(meta.get("report_title") or "REPORTE TECNICO"), styles["WMTitle"]))
     story.append(
         Paragraph(
@@ -532,10 +532,10 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 name="WMBrandSub",
                 parent=styles["Normal"],
                 fontName="Helvetica-Bold",
-                fontSize=17,
-                leading=21,
+                fontSize=15.5,
+                leading=19,
                 textColor=colors.HexColor("#111827"),
-                spaceAfter=24,
+                spaceAfter=18,
             ),
         )
     )
@@ -562,11 +562,11 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             )
         )
 
-    story.append(Spacer(1, 1.15 * cm))
+    story.append(Spacer(1, 0.85 * cm))
     story.append(Paragraph(f"<b>Preparado por:</b><br/>{_paragraph_safe(meta.get('prepared_by') or '-')}", styles["WMMeta"]))
     story.append(Spacer(1, 0.50 * cm))
     story.append(Paragraph(f"<b>Revisado por:</b><br/>{_paragraph_safe(meta.get('reviewed_by') or '-')}", styles["WMMeta"]))
-    story.append(Spacer(1, 1.1 * cm))
+    story.append(Spacer(1, 0.85 * cm))
     story.append(Paragraph(f"<b>Periodo evaluado:</b> {_paragraph_safe(meta.get('period') or '-')}", styles["WMMeta"]))
     story.append(Paragraph(f"<b>Fecha de reporte:</b> {_paragraph_safe(meta.get('report_date') or '-')}", styles["WMMeta"]))
     story.append(Paragraph(f"<b>Consecutivo:</b> {_paragraph_safe(meta.get('consecutive') or '-')}", styles["WMMeta"]))
