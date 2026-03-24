@@ -41,6 +41,12 @@ SIGA_LOGO_CANDIDATES = [
     ASSETS_DIR / "siga.png",
 ]
 
+SIGA_WATERMARK_CANDIDATES = [
+    ASSETS_DIR / "siga_watermark.png",
+    ASSETS_DIR / "SIGA_watermark.png",
+    ASSETS_DIR / "watermark_logo_transparent_background.png",
+]
+
 
 # ============================================================
 # Styles
@@ -258,6 +264,13 @@ def _first_existing_logo() -> Optional[Path]:
     return None
 
 
+def _first_existing_watermark() -> Optional[Path]:
+    for p in SIGA_WATERMARK_CANDIDATES:
+        if p.exists():
+            return p
+    return None
+
+
 def _paragraph_safe(text: str) -> str:
     return (
         (text or "")
@@ -383,31 +396,57 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     )
 
     logo_siga = _first_existing_logo()
+    logo_watermark = _first_existing_watermark()
 
     def _draw_cover_page(canvas, doc):
         canvas.saveState()
         canvas.setFillColor(colors.HexColor("#ffffff"))
         canvas.rect(0, 0, page_width, page_height, fill=1, stroke=0)
 
+        # Franja lateral principal
         canvas.setFillColor(colors.HexColor("#38bdf8"))
         canvas.rect(page_width - 4.5 * cm, 0, 4.5 * cm, page_height, fill=1, stroke=0)
 
+        # Barras verticales de identidad
         canvas.setFillColor(colors.HexColor("#0284c7"))
         canvas.roundRect(page_width - 4.95 * cm, page_height - 6.8 * cm, 0.42 * cm, 4.8 * cm, 0.2 * cm, fill=1, stroke=0)
         canvas.roundRect(page_width - 4.95 * cm, 1.0 * cm, 0.42 * cm, 2.3 * cm, 0.2 * cm, fill=1, stroke=0)
 
-        canvas.setStrokeColor(colors.HexColor("#ffffff"))
-        canvas.setLineWidth(8)
-        base_x = page_width - 2.0 * cm
-        base_y = 1.0 * cm
-        for i in range(5):
-            y = base_y + i * 0.42 * cm
-            canvas.bezier(
-                base_x - 6.3 * cm, y,
-                base_x - 3.6 * cm, y + 0.45 * cm,
-                base_x - 1.8 * cm, y + 0.5 * cm,
-                base_x + 0.35 * cm, y + 0.18 * cm,
-            )
+        # Marca de agua grande inferior derecha
+        if logo_watermark and logo_watermark.exists():
+            try:
+                wm_w = 7.2 * cm
+                wm_h = 7.2 * cm
+                wm_x = page_width - 7.5 * cm
+                wm_y = 0.35 * cm
+                canvas.saveState()
+                canvas.setFillAlpha(0.20)
+                canvas.drawImage(
+                    str(logo_watermark),
+                    wm_x,
+                    wm_y,
+                    width=wm_w,
+                    height=wm_h,
+                    mask='auto',
+                    preserveAspectRatio=True,
+                    anchor='c'
+                )
+                canvas.restoreState()
+            except Exception:
+                pass
+        else:
+            canvas.setStrokeColor(colors.HexColor("#ffffff"))
+            canvas.setLineWidth(8)
+            base_x = page_width - 2.0 * cm
+            base_y = 1.0 * cm
+            for i in range(5):
+                y = base_y + i * 0.42 * cm
+                canvas.bezier(
+                    base_x - 6.3 * cm, y,
+                    base_x - 3.6 * cm, y + 0.45 * cm,
+                    base_x - 1.8 * cm, y + 0.5 * cm,
+                    base_x + 0.35 * cm, y + 0.18 * cm,
+                )
 
         canvas.setFont("Helvetica-Bold", 11)
         canvas.setFillColor(colors.HexColor("#111827"))
@@ -479,11 +518,11 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     ))
 
     if logo_siga and logo_siga.exists():
-        story.append(Image(str(logo_siga), width=3.1 * cm, height=1.5 * cm))
-        story.append(Spacer(1, 0.10 * cm))
+        story.append(Image(str(logo_siga), width=4.3 * cm, height=2.0 * cm))
+        story.append(Spacer(1, 0.12 * cm))
     if WATERMELON_LOGO.exists():
-        story.append(Image(str(WATERMELON_LOGO), width=2.5 * cm, height=1.25 * cm))
-        story.append(Spacer(1, 0.20 * cm))
+        story.append(Image(str(WATERMELON_LOGO), width=2.3 * cm, height=1.15 * cm))
+        story.append(Spacer(1, 0.22 * cm))
 
     story.append(Spacer(1, 0.55 * cm))
     story.append(Paragraph("Machinery Diagnostics Engineering", styles["WMSubTitle"]))
