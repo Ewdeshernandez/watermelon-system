@@ -1,23 +1,26 @@
-from core.auth import require_login, render_user_menu
-
-require_login()
-render_user_menu()
+from __future__ import annotations
 
 import base64
+import hashlib
+from dataclasses import dataclass
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 
+from core.auth import require_login, render_user_menu
 from core.orbit import compute_orbit
 
+st.set_page_config(page_title="Watermelon System | Orbit Analysis", layout="wide")
+
+require_login()
+render_user_menu()
 
 # ============================================================
 # WATERMELON SYSTEM — ORBIT ANALYSIS
 # ============================================================
-
-st.set_page_config(page_title="Watermelon System | Orbit Analysis", layout="wide")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOGO_PATH = PROJECT_ROOT / "assets" / "watermelon_logo.png"
@@ -160,7 +163,19 @@ def _default_signal_pair(signals):
 
 def make_export_state_key(parts):
     raw = "|".join(str(p) for p in parts)
-    return str(abs(hash(raw)))
+    return hashlib.md5(raw.encode("utf-8")).hexdigest()
+
+
+def safe_slug(text: str) -> str:
+    text = (text or "").strip().lower()
+    out = []
+    for ch in text:
+        if ch.isalnum():
+            out.append(ch)
+        else:
+            out.append("_")
+    cleaned = "".join(out).strip("_")
+    return cleaned or "orbit"
 
 
 def _draw_top_strip(fig, orbit_result, ui_filter_mode, logo_uri):
@@ -400,7 +415,6 @@ def build_orbit_figure(orbit_result, ui_filter_mode, logo_uri, scale_mode, manua
     units = orbit_result.probe_state.get("units", "mil")
 
     fig = go.Figure()
-
     line_color = "#5b6df0"
     start_color = "#2f80ed"
 
@@ -583,13 +597,210 @@ def build_export_png_bytes(fig):
         return None, str(e)
 
 
-if "wm_orbit_export_png_bytes" not in st.session_state:
-    st.session_state.wm_orbit_export_png_bytes = None
-if "wm_orbit_export_png_key" not in st.session_state:
-    st.session_state.wm_orbit_export_png_key = None
-if "wm_orbit_export_error" not in st.session_state:
-    st.session_state.wm_orbit_export_error = None
+@dataclass
+class OrbitPair:
+    label: str
+    x_name: str
+    y_name: str
 
+
+def build_orbit_pairs(signals: dict) -> List[OrbitPair]:
+    names = list(signals.keys())
+    if len(names) < 2:
+        return []
+
+    used = set()
+    pairs: List[OrbitPair] = []
+
+    for name in names:
+        upper = name.upper()
+        if "X" not in upper or name in used:
+            continue
+
+        prefix = upper.replace("X", "")
+        candidate_y = None
+
+        for other in names:
+            if other == name or other in used:
+                continue
+            other_upper = other.upper()
+            if "Y" in other_upper and other_upper.replace("Y", "") == prefix:
+                candidate_y = other
+                break
+
+        if candidate_y is None:
+            for other in names:
+                if other == name or other in used:
+                    continue
+                if "Y" in other.upper():
+                    candidate_y = other
+                    break
+
+        if candidate_y is not None:
+            used.add(name)
+            used.add(candidate_y)
+            pairs.append(
+                OrbitPair(
+                    label=f"{name} + {candidate_y}",
+                    x_name=name,
+                    y_name=candidate_y,
+                )
+            )
+
+    if not pairs:
+        default_x, default_y = _default_signal_pair(signals)
+        pairs.append(OrbitPair(label=f"{default_x} + {default_y}", x_name=default_x, y_name=default_y))
+
+    return pairs
+
+
+def queue_orbit_to_report(pair: OrbitPair, fig: go.Figure, panel_title: str, result) -> None:
+    st.session_state.report_items.append(
+        {
+            "id": make_export_state_key(
+                [
+                    "report-orbit",
+                    pair.x_name,
+                    pair.y_name,
+                    result.probe_state.get("timestamp"),
+                    panel_title,
+                    len(st.session_state.report_items),
+                ]
+            ),
+            "type": "orbit",
+            "title": panel_title,
+            "notes": "",
+            "signal_id": f"{pair.x_name}|{pair.y_name}",
+            "figure": go.Figure(fig),
+            "machine": result.probe_state.get("machine_name", ""),
+            "point": f"{pair.x_name} + {pair.y_name}",
+            "variable": "Orbit",
+            "timestamp": str(result.probe_state.get("timestamp", "") or ""),
+        }
+    )
+
+
+def render_orbit_panel(
+    pair: OrbitPair,
+    signals: dict,
+    panel_index: int,
+    *,
+    ui_filter_mode: str,
+    machine_rotation: str,
+    scale_mode: str,
+    manual_scale_value: float,
+    logo_uri: Optional[str],
+) -> None:
+    x_signal = signals[pair.x_name]
+    y_signal = signals[pair.y_name]
+
+    result = compute_orbit(
+        x_signal,
+        y_signal,
+        filter_mode=ui_filter_mode,
+        machine_rotation=machine_rotation,
+        x_probe_angle_deg=45.0,
+        x_probe_side="Right",
+        y_probe_angle_deg=45.0,
+        y_probe_side="Left",
+        samples_per_rev=None,
+        revolution_index=0,
+        display_revolutions_raw=None,
+        average_revolutions_filtered=None,
+        harmonic_plot_samples=720,
+        rpm_override=None,
+    )
+
+    fig = build_orbit_figure(
+        orbit_result=result,
+        ui_filter_mode=ui_filter_mode,
+        logo_uri=logo_uri,
+        scale_mode=scale_mode,
+        manual_scale_value=manual_scale_value,
+    )
+
+    export_state_key = make_export_state_key(
+        [
+            pair.x_name,
+            pair.y_name,
+            panel_index,
+            ui_filter_mode,
+            machine_rotation,
+            result.samples_per_rev,
+            result.revolutions_available,
+            scale_mode,
+            manual_scale_value,
+            result.traversal,
+            result.precession,
+            result.diagnostics.get("x_wf_amp_pkpk"),
+            result.diagnostics.get("y_wf_amp_pkpk"),
+            result.diagnostics.get("x_harmonic_amplitude_mean"),
+            result.diagnostics.get("y_harmonic_amplitude_mean"),
+        ]
+    )
+
+    if export_state_key not in st.session_state.wm_orbit_export_store:
+        st.session_state.wm_orbit_export_store[export_state_key] = {
+            "png_bytes": None,
+            "error": None,
+        }
+
+    panel_title = f"Orbit {panel_index + 1} — {pair.label}"
+    st.markdown(f"### {panel_title}")
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displaylogo": False},
+        key=f"wm_orbit_plot_{export_state_key}",
+    )
+
+    st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
+
+    left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
+
+    with col_export1:
+        if st.button("Prepare PNG HD", key=f"prepare_png_{export_state_key}", use_container_width=True):
+            with st.spinner("Generating HD export..."):
+                png_bytes, export_error = build_export_png_bytes(fig)
+                st.session_state.wm_orbit_export_store[export_state_key]["png_bytes"] = png_bytes
+                st.session_state.wm_orbit_export_store[export_state_key]["error"] = export_error
+
+    with col_export2:
+        png_bytes = st.session_state.wm_orbit_export_store[export_state_key]["png_bytes"]
+        if png_bytes is not None:
+            st.download_button(
+                "Download PNG HD",
+                data=png_bytes,
+                file_name=f"{safe_slug(pair.x_name)}_{safe_slug(pair.y_name)}_orbit_hd.png",
+                mime="image/png",
+                key=f"download_png_{export_state_key}",
+                use_container_width=True,
+            )
+        else:
+            st.button(
+                "Download PNG HD",
+                disabled=True,
+                key=f"download_disabled_{export_state_key}",
+                use_container_width=True,
+            )
+
+    with col_report:
+        if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
+            queue_orbit_to_report(pair, fig, panel_title, result)
+            st.success("Orbit enviada al reporte")
+
+    panel_error = st.session_state.wm_orbit_export_store[export_state_key]["error"]
+    if panel_error:
+        st.warning(f"PNG export error: {panel_error}")
+
+
+if "wm_orbit_selected_labels" not in st.session_state:
+    st.session_state.wm_orbit_selected_labels = []
+if "wm_orbit_export_store" not in st.session_state:
+    st.session_state.wm_orbit_export_store = {}
+if "report_items" not in st.session_state:
+    st.session_state.report_items = []
 
 signals = _signals_dict()
 
@@ -601,24 +812,28 @@ if len(signals) < 2:
     st.warning("Orbit necesita mínimo dos señales cargadas.")
     st.stop()
 
-default_x_name, default_y_name = _default_signal_pair(signals)
-signal_names = list(signals.keys())
+pairs = build_orbit_pairs(signals)
+if not pairs:
+    st.warning("No fue posible construir pares X/Y para órbitas.")
+    st.stop()
 
+pair_label_map = {pair.label: pair for pair in pairs}
+pair_labels = list(pair_label_map.keys())
 
 with st.sidebar:
     st.markdown("### Orbit Processing")
 
-    x_name = st.selectbox(
-        "X probe signal",
-        options=signal_names,
-        index=signal_names.index(default_x_name) if default_x_name in signal_names else 0,
-    )
+    valid_labels = [label for label in st.session_state.wm_orbit_selected_labels if label in pair_label_map]
+    if not valid_labels:
+        valid_labels = [pair_labels[0]]
+        st.session_state.wm_orbit_selected_labels = valid_labels
 
-    y_name = st.selectbox(
-        "Y probe signal",
-        options=signal_names,
-        index=signal_names.index(default_y_name) if default_y_name in signal_names else min(1, len(signal_names) - 1),
+    selected_labels = st.multiselect(
+        "Orbits to display",
+        options=pair_labels,
+        default=valid_labels,
     )
+    st.session_state.wm_orbit_selected_labels = selected_labels
 
     ui_filter_mode = st.selectbox("Filter", ["Direct", "1X", "2X"], index=0)
     machine_rotation = st.selectbox("Machine rotation", ["CW", "CCW"], index=1)
@@ -636,90 +851,25 @@ with st.sidebar:
             )
         )
 
+selected_pairs = [pair_label_map[label] for label in st.session_state.wm_orbit_selected_labels if label in pair_label_map]
 
-x_signal = signals[x_name]
-y_signal = signals[y_name]
-
-result = compute_orbit(
-    x_signal,
-    y_signal,
-    filter_mode=ui_filter_mode,
-    machine_rotation=machine_rotation,
-    x_probe_angle_deg=45.0,
-    x_probe_side="Right",
-    y_probe_angle_deg=45.0,
-    y_probe_side="Left",
-    samples_per_rev=None,
-    revolution_index=0,
-    display_revolutions_raw=None,
-    average_revolutions_filtered=None,
-    harmonic_plot_samples=720,
-    rpm_override=None,
-)
+if not selected_pairs:
+    st.info("Selecciona una o más órbitas en la barra lateral.")
+    st.stop()
 
 logo_uri = get_logo_data_uri(LOGO_PATH)
 
-fig = build_orbit_figure(
-    orbit_result=result,
-    ui_filter_mode=ui_filter_mode,
-    logo_uri=logo_uri,
-    scale_mode=scale_mode,
-    manual_scale_value=manual_scale_value,
-)
+for panel_index, pair in enumerate(selected_pairs):
+    render_orbit_panel(
+        pair=pair,
+        signals=signals,
+        panel_index=panel_index,
+        ui_filter_mode=ui_filter_mode,
+        machine_rotation=machine_rotation,
+        scale_mode=scale_mode,
+        manual_scale_value=manual_scale_value,
+        logo_uri=logo_uri,
+    )
 
-export_state_key = make_export_state_key(
-    [
-        x_name,
-        y_name,
-        ui_filter_mode,
-        machine_rotation,
-        result.samples_per_rev,
-        result.revolutions_available,
-        scale_mode,
-        manual_scale_value,
-        result.traversal,
-        result.precession,
-        result.diagnostics.get("x_wf_amp_pkpk"),
-        result.diagnostics.get("y_wf_amp_pkpk"),
-        result.diagnostics.get("x_harmonic_amplitude_mean"),
-        result.diagnostics.get("y_harmonic_amplitude_mean"),
-    ]
-)
-
-if st.session_state.wm_orbit_export_png_key != export_state_key:
-    st.session_state.wm_orbit_export_png_bytes = None
-    st.session_state.wm_orbit_export_png_key = export_state_key
-    st.session_state.wm_orbit_export_error = None
-
-st.plotly_chart(
-    fig,
-    use_container_width=True,
-    config={"displaylogo": False},
-    key="wm_orbit_plot_main_view",
-)
-
-st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
-
-left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
-
-with col_export1:
-    if st.button("Prepare PNG HD", use_container_width=True):
-        with st.spinner("Generating HD export..."):
-            png_bytes, export_error = build_export_png_bytes(fig)
-            st.session_state.wm_orbit_export_png_bytes = png_bytes
-            st.session_state.wm_orbit_export_error = export_error
-
-with col_export2:
-    if st.session_state.wm_orbit_export_png_bytes is not None:
-        st.download_button(
-            "Download PNG HD",
-            data=st.session_state.wm_orbit_export_png_bytes,
-            file_name="watermelon_orbit_hd.png",
-            mime="image/png",
-            use_container_width=True,
-        )
-    else:
-        st.button("Download PNG HD", disabled=True, use_container_width=True)
-
-if st.session_state.wm_orbit_export_error:
-    st.warning(f"PNG export error: {st.session_state.wm_orbit_export_error}")
+    if panel_index < len(selected_pairs) - 1:
+        st.markdown("---")
