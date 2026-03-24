@@ -139,6 +139,12 @@ def rounded_rect_path(x0: float, y0: float, x1: float, y1: float, r: float) -> s
     )
 
 
+def safe_slug(text: str) -> str:
+    text = (text or "").strip().lower()
+    text = re.sub(r"[^a-z0-9]+", "_", text)
+    return text.strip("_") or "waveform"
+
+
 # ------------------------------------------------------------
 # Data model
 # ------------------------------------------------------------
@@ -1090,14 +1096,12 @@ if "wm_cursor_a" not in st.session_state:
     st.session_state.wm_cursor_a = 0.0
 if "wm_cursor_b" not in st.session_state:
     st.session_state.wm_cursor_b = 0.01
-if "wm_primary_signal_id" not in st.session_state:
-    st.session_state.wm_primary_signal_id = None
-if "wm_export_png_bytes" not in st.session_state:
-    st.session_state.wm_export_png_bytes = None
-if "wm_export_png_key" not in st.session_state:
-    st.session_state.wm_export_png_key = None
-if "wm_export_error" not in st.session_state:
-    st.session_state.wm_export_error = None
+if "wm_selected_signal_ids" not in st.session_state:
+    st.session_state.wm_selected_signal_ids = []
+if "wm_export_store" not in st.session_state:
+    st.session_state.wm_export_store = {}
+if "report_items" not in st.session_state:
+    st.session_state.report_items = []
 
 
 # ------------------------------------------------------------
@@ -1123,6 +1127,183 @@ if not records_all:
     st.stop()
 
 
+def queue_waveform_to_report(record: SignalRecord, fig: go.Figure, panel_title: str) -> None:
+    st.session_state.report_items.append(
+        {
+            "id": make_export_state_key(
+                [
+                    "report-waveform",
+                    record.signal_id,
+                    record.timestamp,
+                    panel_title,
+                    len(st.session_state.report_items),
+                ]
+            ),
+            "type": "waveform",
+            "title": panel_title,
+            "notes": "",
+            "signal_id": record.signal_id,
+            "figure": go.Figure(fig),
+            "machine": record.machine,
+            "point": record.point,
+            "variable": record.variable,
+            "timestamp": record.timestamp,
+        }
+    )
+
+
+def render_waveform_panel(
+    primary: SignalRecord,
+    panel_index: int,
+    *,
+    t_min: float,
+    t_max: float,
+    cursor_a: float,
+    cursor_b: float,
+    x_axis_unit: str,
+    show_cursor_b: bool,
+    show_right_info_box: bool,
+    y_scale_mode: str,
+    y_limit_abs: Optional[float],
+    logo_uri: Optional[str],
+    waveform_view_mode: str,
+    normalization_mode: str,
+    show_cycle_start_markers: bool,
+) -> None:
+    mask = (primary.time_s >= t_min) & (primary.time_s <= t_max)
+    if not np.any(mask):
+        st.warning(f"La ventana seleccionada no contiene datos para {primary.name}.")
+        return
+
+    base_y = normalize_signal(primary.amplitude, normalization_mode)[mask]
+    base_t = primary.time_s[mask]
+
+    local_view_mode = waveform_view_mode
+    if local_view_mode != "Raw" and (primary.rpm is None or primary.rpm <= 0):
+        local_view_mode = "Raw"
+
+    processed_y, waveform_mode_label = apply_waveform_view_mode(
+        time_s=base_t,
+        y=base_y,
+        rpm=primary.rpm,
+        mode=local_view_mode,
+    )
+
+    prepared = SignalRecord(
+        signal_id=primary.signal_id,
+        name=primary.name,
+        machine=primary.machine,
+        point=primary.point,
+        variable=primary.variable,
+        amplitude_unit=primary.amplitude_unit,
+        time_s=base_t,
+        amplitude=processed_y,
+        sample_rate_hz=primary.sample_rate_hz,
+        rpm=primary.rpm,
+        timestamp=primary.timestamp,
+        metadata=primary.metadata,
+        source_key=primary.source_key,
+        source_time_unit=primary.source_time_unit,
+    )
+
+    fig = build_waveform_figure(
+        record=prepared,
+        cursor_a_s=cursor_a,
+        cursor_b_s=cursor_b,
+        x_axis_unit=x_axis_unit,
+        show_cursor_b=show_cursor_b,
+        show_right_info_box=show_right_info_box,
+        y_scale_mode=y_scale_mode,
+        y_limit_abs=y_limit_abs,
+        logo_uri=logo_uri,
+        waveform_mode_label=waveform_mode_label,
+        show_cycle_start_markers=show_cycle_start_markers,
+    )
+
+    export_state_key = make_export_state_key(
+        [
+            prepared.signal_id,
+            prepared.name,
+            prepared.machine,
+            prepared.point,
+            prepared.variable,
+            prepared.timestamp,
+            panel_index,
+            t_min,
+            t_max,
+            cursor_a,
+            cursor_b,
+            x_axis_unit,
+            normalization_mode,
+            local_view_mode,
+            y_scale_mode,
+            y_limit_abs,
+            show_cycle_start_markers,
+            show_cursor_b,
+            show_right_info_box,
+            float(np.nanmax(prepared.amplitude)) if prepared.amplitude.size else 0.0,
+            float(np.nanmin(prepared.amplitude)) if prepared.amplitude.size else 0.0,
+            prepared.amplitude.size,
+            prepared.rpm,
+        ]
+    )
+
+    if export_state_key not in st.session_state.wm_export_store:
+        st.session_state.wm_export_store[export_state_key] = {
+            "png_bytes": None,
+            "error": None,
+        }
+
+    panel_title = f"Waveform {panel_index + 1} — {primary.name}"
+    st.markdown(f"### {panel_title}")
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displaylogo": False},
+        key=f"wm_waveform_plot_{export_state_key}",
+    )
+
+    st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
+
+    left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
+
+    with col_export1:
+        if st.button("Prepare PNG HD", key=f"prepare_png_{export_state_key}", use_container_width=True):
+            with st.spinner("Generating HD export..."):
+                png_bytes, export_error = build_export_png_bytes(fig=fig)
+                st.session_state.wm_export_store[export_state_key]["png_bytes"] = png_bytes
+                st.session_state.wm_export_store[export_state_key]["error"] = export_error
+
+    with col_export2:
+        png_bytes = st.session_state.wm_export_store[export_state_key]["png_bytes"]
+        if png_bytes is not None:
+            st.download_button(
+                "Download PNG HD",
+                data=png_bytes,
+                file_name=f"{safe_slug(primary.machine)}_{safe_slug(primary.point)}_{safe_slug(primary.variable)}_waveform_hd.png",
+                mime="image/png",
+                key=f"download_png_{export_state_key}",
+                use_container_width=True,
+            )
+        else:
+            st.button(
+                "Download PNG HD",
+                disabled=True,
+                key=f"download_disabled_{export_state_key}",
+                use_container_width=True,
+            )
+
+    with col_report:
+        if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
+            queue_waveform_to_report(prepared, fig, panel_title)
+            st.success("Waveform enviado al reporte")
+
+    panel_error = st.session_state.wm_export_store[export_state_key]["error"]
+    if panel_error:
+        st.warning(f"PNG export error: {panel_error}")
+
+
 # ------------------------------------------------------------
 # Sidebar controls
 # ------------------------------------------------------------
@@ -1131,21 +1312,24 @@ with st.sidebar:
 
     signal_name_map = {r.name: r.signal_id for r in records_all}
     signal_names = list(signal_name_map.keys())
+    valid_ids = {r.signal_id for r in records_all}
 
-    if st.session_state.wm_primary_signal_id not in [r.signal_id for r in records_all]:
-        st.session_state.wm_primary_signal_id = records_all[0].signal_id
+    current_ids = [sid for sid in st.session_state.wm_selected_signal_ids if sid in valid_ids]
+    if not current_ids:
+        current_ids = [records_all[0].signal_id]
+        st.session_state.wm_selected_signal_ids = current_ids
 
-    current_name = next(
-        (r.name for r in records_all if r.signal_id == st.session_state.wm_primary_signal_id),
-        signal_names[0],
-    )
+    default_names = [r.name for r in records_all if r.signal_id in current_ids]
 
-    selected_name = st.selectbox(
-        "Primary signal",
+    selected_names = st.multiselect(
+        "Waveforms to display",
         options=signal_names,
-        index=signal_names.index(current_name),
+        default=default_names,
     )
-    st.session_state.wm_primary_signal_id = signal_name_map[selected_name]
+
+    st.session_state.wm_selected_signal_ids = [
+        signal_name_map[name] for name in selected_names if name in signal_name_map
+    ]
 
     st.markdown("### View Controls")
 
@@ -1175,7 +1359,12 @@ with st.sidebar:
 
     show_cycle_start_markers = st.checkbox("Show cycle start markers", value=True)
 
-    primary_raw_for_unit = next(r for r in records_all if r.signal_id == st.session_state.wm_primary_signal_id)
+    default_source_id = (
+        st.session_state.wm_selected_signal_ids[0]
+        if st.session_state.wm_selected_signal_ids
+        else records_all[0].signal_id
+    )
+    primary_raw_for_unit = next(r for r in records_all if r.signal_id == default_source_id)
     default_y_limit = float(np.max(np.abs(primary_raw_for_unit.amplitude))) if primary_raw_for_unit.amplitude.size else 1.0
 
     y_limit_abs = None
@@ -1192,8 +1381,7 @@ with st.sidebar:
 
     st.markdown("### Time Window")
 
-    primary_raw = next(r for r in records_all if r.signal_id == st.session_state.wm_primary_signal_id)
-    max_duration = max(primary_raw.duration_s, 1e-9)
+    max_duration = max(primary_raw_for_unit.duration_s, 1e-9)
 
     window_mode = st.radio("Window mode", ["Full signal", "Custom window"], index=0)
 
@@ -1242,132 +1430,39 @@ with st.sidebar:
 
 
 # ------------------------------------------------------------
-# Prepare signal
+# Multi-panel render
 # ------------------------------------------------------------
-primary = next(r for r in records_all if r.signal_id == st.session_state.wm_primary_signal_id)
+selected_ids = [
+    signal_id
+    for signal_id in st.session_state.wm_selected_signal_ids
+    if signal_id in {r.signal_id for r in records_all}
+]
 
-mask = (primary.time_s >= t_min) & (primary.time_s <= t_max)
-if not np.any(mask):
-    st.warning("La ventana seleccionada no contiene datos.")
+if not selected_ids:
+    st.info("Selecciona una o más formas de onda en la barra lateral.")
     st.stop()
 
-base_y = normalize_signal(primary.amplitude, normalization_mode)[mask]
-base_t = primary.time_s[mask]
-
-if waveform_view_mode != "Raw" and (primary.rpm is None or primary.rpm <= 0):
-    st.warning("No hay RPM válida para construir 1X/2X. Se mostrará la waveform raw.")
-    waveform_view_mode = "Raw"
-
-processed_y, waveform_mode_label = apply_waveform_view_mode(
-    time_s=base_t,
-    y=base_y,
-    rpm=primary.rpm,
-    mode=waveform_view_mode,
-)
-
-prepared = SignalRecord(
-    signal_id=primary.signal_id,
-    name=primary.name,
-    machine=primary.machine,
-    point=primary.point,
-    variable=primary.variable,
-    amplitude_unit=primary.amplitude_unit,
-    time_s=base_t,
-    amplitude=processed_y,
-    sample_rate_hz=primary.sample_rate_hz,
-    rpm=primary.rpm,
-    timestamp=primary.timestamp,
-    metadata=primary.metadata,
-    source_key=primary.source_key,
-    source_time_unit=primary.source_time_unit,
-)
-
+selected_records = [next(r for r in records_all if r.signal_id == signal_id) for signal_id in selected_ids]
 logo_uri = get_logo_data_uri(LOGO_PATH)
 
-fig = build_waveform_figure(
-    record=prepared,
-    cursor_a_s=cursor_a,
-    cursor_b_s=cursor_b,
-    x_axis_unit=x_axis_unit,
-    show_cursor_b=show_cursor_b,
-    show_right_info_box=show_right_info_box,
-    y_scale_mode=y_scale_mode,
-    y_limit_abs=y_limit_abs,
-    logo_uri=logo_uri,
-    waveform_mode_label=waveform_mode_label,
-    show_cycle_start_markers=show_cycle_start_markers,
-)
+for panel_index, primary in enumerate(selected_records):
+    render_waveform_panel(
+        primary=primary,
+        panel_index=panel_index,
+        t_min=t_min,
+        t_max=t_max,
+        cursor_a=cursor_a,
+        cursor_b=cursor_b,
+        x_axis_unit=x_axis_unit,
+        show_cursor_b=show_cursor_b,
+        show_right_info_box=show_right_info_box,
+        y_scale_mode=y_scale_mode,
+        y_limit_abs=y_limit_abs,
+        logo_uri=logo_uri,
+        waveform_view_mode=waveform_view_mode,
+        normalization_mode=normalization_mode,
+        show_cycle_start_markers=show_cycle_start_markers,
+    )
 
-# ------------------------------------------------------------
-# Export row — lazy generation
-# ------------------------------------------------------------
-export_state_key = make_export_state_key(
-    [
-        prepared.signal_id,
-        prepared.name,
-        prepared.machine,
-        prepared.point,
-        prepared.variable,
-        prepared.timestamp,
-        t_min,
-        t_max,
-        cursor_a,
-        cursor_b,
-        x_axis_unit,
-        normalization_mode,
-        waveform_view_mode,
-        y_scale_mode,
-        y_limit_abs,
-        show_cycle_start_markers,
-        show_cursor_b,
-        show_right_info_box,
-        float(np.nanmax(prepared.amplitude)) if prepared.amplitude.size else 0.0,
-        float(np.nanmin(prepared.amplitude)) if prepared.amplitude.size else 0.0,
-        prepared.amplitude.size,
-        prepared.rpm,
-    ]
-)
-
-if st.session_state.wm_export_png_key != export_state_key:
-    st.session_state.wm_export_png_bytes = None
-    st.session_state.wm_export_png_key = export_state_key
-    st.session_state.wm_export_error = None
-
-# ------------------------------------------------------------
-# Main chart
-# ------------------------------------------------------------
-st.plotly_chart(
-    fig,
-    use_container_width=True,
-    config={"displaylogo": False},
-    key="wm_plot_main_view",
-)
-
-# ------------------------------------------------------------
-# Bottom export actions
-# ------------------------------------------------------------
-st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
-
-left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
-
-with col_export1:
-    if st.button("Prepare PNG HD", use_container_width=True):
-        with st.spinner("Generating HD export..."):
-            png_bytes, export_error = build_export_png_bytes(fig=fig)
-            st.session_state.wm_export_png_bytes = png_bytes
-            st.session_state.wm_export_error = export_error
-
-with col_export2:
-    if st.session_state.wm_export_png_bytes is not None:
-        st.download_button(
-            "Download PNG HD",
-            data=st.session_state.wm_export_png_bytes,
-            file_name="watermelon_waveform_hd.png",
-            mime="image/png",
-            use_container_width=True,
-        )
-    else:
-        st.button("Download PNG HD", disabled=True, use_container_width=True)
-
-if st.session_state.wm_export_error:
-    st.warning(f"PNG export error: {st.session_state.wm_export_error}")
+    if panel_index < len(selected_records) - 1:
+        st.markdown("---")
