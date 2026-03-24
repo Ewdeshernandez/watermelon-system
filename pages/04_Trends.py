@@ -20,59 +20,40 @@ st.set_page_config(page_title="Watermelon System | Trends", layout="wide")
 require_login()
 render_user_menu()
 
-# ============================================================
-# WATERMELON SYSTEM — TRENDS VIEWER
-# Premium industrial trend module
-# ============================================================
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOGO_PATH = PROJECT_ROOT / "assets" / "watermelon_logo.png"
 
 
-# ------------------------------------------------------------
-# Styling
-# ------------------------------------------------------------
 def apply_page_style() -> None:
     st.markdown(
         """
         <style>
-        .main > div {
-            padding-top: 0.18rem;
-        }
-
-        .stApp {
-            background-color: #f3f4f6;
-        }
-
+        .main > div { padding-top: 0.18rem; }
+        .stApp { background-color: #f3f4f6; }
         section[data-testid="stSidebar"] {
             background: #e5e7eb;
             border-right: 1px solid #cbd5e1;
         }
-
         div[data-testid="stNumberInput"] input,
         div[data-testid="stTextInput"] input,
         div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
             font-family: monospace;
         }
-
         div[data-testid="stFileUploader"] section {
             background: rgba(255,255,255,0.72);
             border: 1px solid #cbd5e1;
             border-radius: 14px;
             padding: 0.25rem;
         }
-
         div[data-testid="stSelectSlider"] label p {
             font-weight: 700;
             color: #0f172a;
         }
-
         div[data-testid="stExpander"] {
             border: 1px solid #dbe3ee;
             border-radius: 16px;
             background: rgba(255,255,255,0.65);
         }
-
         .wm-control-shell {
             background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(255,255,255,0.78));
             border: 1px solid #dbe3ee;
@@ -81,20 +62,17 @@ def apply_page_style() -> None:
             margin-bottom: 12px;
             box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
         }
-
         .wm-control-title {
             font-size: 1.02rem;
             font-weight: 800;
             color: #0f172a;
             margin-bottom: 2px;
         }
-
         .wm-control-subtitle {
             font-size: 0.88rem;
             color: #64748b;
             margin-bottom: 10px;
         }
-
         section.main div[data-testid="stButton"] > button,
         section.main div[data-testid="stDownloadButton"] > button {
             min-height: 52px;
@@ -106,7 +84,6 @@ def apply_page_style() -> None:
             box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
             transition: all 0.18s ease;
         }
-
         section.main div[data-testid="stButton"] > button:hover,
         section.main div[data-testid="stDownloadButton"] > button:hover {
             border-color: #93c5fd !important;
@@ -114,7 +91,6 @@ def apply_page_style() -> None:
             color: #1d4ed8 !important;
             box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
         }
-
         section.main div[data-testid="stButton"] > button *,
         section.main div[data-testid="stDownloadButton"] > button *,
         section.main div[data-testid="stButton"] > button p,
@@ -125,7 +101,6 @@ def apply_page_style() -> None:
         section.main div[data-testid="stDownloadButton"] > button div {
             color: #2563eb !important;
         }
-
         .wm-export-actions {
             margin-top: 0.85rem;
             margin-bottom: 0.25rem;
@@ -139,9 +114,6 @@ def apply_page_style() -> None:
 apply_page_style()
 
 
-# ------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------
 def get_logo_base64(path: Path) -> Optional[str]:
     if not path.exists():
         return None
@@ -199,16 +171,8 @@ def safe_datetime(value: Any) -> Optional[pd.Timestamp]:
 
 def color_for_index(index: int) -> str:
     palette = [
-        "#5b9cf0",
-        "#10b981",
-        "#8b5cf6",
-        "#06b6d4",
-        "#ec4899",
-        "#14b8a6",
-        "#6366f1",
-        "#0f766e",
-        "#7c3aed",
-        "#2563eb",
+        "#5b9cf0", "#10b981", "#8b5cf6", "#06b6d4", "#ec4899",
+        "#14b8a6", "#6366f1", "#0f766e", "#7c3aed", "#2563eb",
     ]
     return palette[index % len(palette)]
 
@@ -255,9 +219,6 @@ def label_to_ts(text: str) -> Optional[pd.Timestamp]:
     return safe_datetime(text)
 
 
-# ------------------------------------------------------------
-# Data model
-# ------------------------------------------------------------
 @dataclass
 class TrendRecord:
     trend_id: str
@@ -291,9 +252,6 @@ class TrendRecord:
         return int(len(self.x_time))
 
 
-# ------------------------------------------------------------
-# Trend CSV parser
-# ------------------------------------------------------------
 def parse_trend_csv(uploaded_file) -> Optional[TrendRecord]:
     try:
         raw_bytes = uploaded_file.getvalue()
@@ -328,13 +286,8 @@ def parse_trend_csv(uploaded_file) -> Optional[TrendRecord]:
         return None
 
     expected_cols = [
-        "X-Axis Value",
-        "Y-Axis Value",
-        "Y-Axis Status",
-        "Phase",
-        "Phase Status",
-        "Speed",
-        "Speed Status",
+        "X-Axis Value", "Y-Axis Value", "Y-Axis Status",
+        "Phase", "Phase Status", "Speed", "Speed Status",
     ]
     for col in expected_cols:
         if col not in df.columns:
@@ -347,7 +300,6 @@ def parse_trend_csv(uploaded_file) -> Optional[TrendRecord]:
 
     df = df.dropna(subset=["X-Axis Value"]).copy()
     df = df.sort_values("X-Axis Value").reset_index(drop=True)
-
     if df.empty:
         return None
 
@@ -388,9 +340,6 @@ def load_trend_records_from_uploader(files: List[Any]) -> List[TrendRecord]:
     return records
 
 
-# ------------------------------------------------------------
-# Figure chrome
-# ------------------------------------------------------------
 def _draw_top_strip(
     fig: go.Figure,
     machine_name: str,
@@ -438,62 +387,35 @@ def _draw_top_strip(
         machine_x = 0.020
 
     fig.add_annotation(
-        xref="paper",
-        yref="paper",
-        x=machine_x,
-        y=y_text,
-        xanchor="left",
-        yanchor="middle",
+        xref="paper", yref="paper", x=machine_x, y=y_text,
+        xanchor="left", yanchor="middle",
         text=f"<b>{trim_text(machine_name, 28)}</b>",
-        showarrow=False,
-        font=dict(size=12.8, color="#111827"),
-        align="left",
+        showarrow=False, font=dict(size=12.8, color="#111827"), align="left",
     )
 
     fig.add_annotation(
-        xref="paper",
-        yref="paper",
-        x=0.325,
-        y=y_text,
-        xanchor="center",
-        yanchor="middle",
+        xref="paper", yref="paper", x=0.325, y=y_text,
+        xanchor="center", yanchor="middle",
         text=trim_text(signal_names_text, 34),
-        showarrow=False,
-        font=dict(size=11.4, color="#111827"),
-        align="center",
+        showarrow=False, font=dict(size=11.4, color="#111827"), align="center",
     )
 
     fig.add_annotation(
-        xref="paper",
-        yref="paper",
-        x=0.640,
-        y=y_text,
-        xanchor="center",
-        yanchor="middle",
+        xref="paper", yref="paper", x=0.640, y=y_text,
+        xanchor="center", yanchor="middle",
         text=f"Metric: <b>{metric_name}</b> | Latest: <b>{trim_text(latest_text, 32)}</b>",
-        showarrow=False,
-        font=dict(size=11.3, color="#111827"),
-        align="center",
+        showarrow=False, font=dict(size=11.3, color="#111827"), align="center",
     )
 
     fig.add_annotation(
-        xref="paper",
-        yref="paper",
-        x=0.986,
-        y=y_text,
-        xanchor="right",
-        yanchor="middle",
+        xref="paper", yref="paper", x=0.986, y=y_text,
+        xanchor="right", yanchor="middle",
         text=trim_text(time_range_text, 28),
-        showarrow=False,
-        font=dict(size=11.2, color="#111827"),
-        align="right",
+        showarrow=False, font=dict(size=11.2, color="#111827"), align="right",
     )
 
 
-def _draw_right_info_box(
-    fig: go.Figure,
-    rows: List[Tuple[str, str]],
-) -> None:
+def _draw_right_info_box(fig: go.Figure, rows: List[Tuple[str, str]]) -> None:
     panel_x0 = 0.834
     panel_x1 = 0.976
     panel_y1 = 0.915
@@ -504,8 +426,7 @@ def _draw_right_info_box(
 
     fig.add_shape(
         type="path",
-        xref="paper",
-        yref="paper",
+        xref="paper", yref="paper",
         path=rounded_rect_path(panel_x0, panel_y0, panel_x1, panel_y1, 0.012),
         line=dict(color="rgba(0,0,0,0)", width=0),
         fillcolor="rgba(255,255,255,0.72)",
@@ -514,8 +435,7 @@ def _draw_right_info_box(
 
     fig.add_shape(
         type="path",
-        xref="paper",
-        yref="paper",
+        xref="paper", yref="paper",
         path=rounded_rect_path(panel_x0, panel_y1 - header_h, panel_x1, panel_y1, 0.012),
         line=dict(color="rgba(0,0,0,0)", width=0),
         fillcolor="rgba(147,197,253,0.94)",
@@ -523,55 +443,37 @@ def _draw_right_info_box(
     )
 
     fig.add_annotation(
-        xref="paper",
-        yref="paper",
-        x=(panel_x0 + panel_x1) / 2.0,
-        y=panel_y1 - header_h / 2.0,
+        xref="paper", yref="paper",
+        x=(panel_x0 + panel_x1) / 2.0, y=panel_y1 - header_h / 2.0,
         text="<b>Trend Information</b>",
-        showarrow=False,
-        xanchor="center",
-        yanchor="middle",
+        showarrow=False, xanchor="center", yanchor="middle",
         font=dict(size=11.4, color="#111827"),
     )
 
     current_top = panel_y1 - header_h - 0.008
-
     for title, value in rows:
         title_y = current_top - 0.004
         value_y = current_top - 0.030
 
         fig.add_annotation(
-            xref="paper",
-            yref="paper",
-            x=panel_x0 + 0.030,
-            y=title_y,
-            xanchor="left",
-            yanchor="top",
+            xref="paper", yref="paper",
+            x=panel_x0 + 0.030, y=title_y,
+            xanchor="left", yanchor="top",
             text=f"<b>{title}</b>",
-            showarrow=False,
-            font=dict(size=10.7, color="#111827"),
-            align="left",
+            showarrow=False, font=dict(size=10.7, color="#111827"), align="left",
         )
 
         fig.add_annotation(
-            xref="paper",
-            yref="paper",
-            x=panel_x0 + 0.030,
-            y=value_y,
-            xanchor="left",
-            yanchor="top",
+            xref="paper", yref="paper",
+            x=panel_x0 + 0.030, y=value_y,
+            xanchor="left", yanchor="top",
             text=value,
-            showarrow=False,
-            font=dict(size=10.4, color="#111827"),
-            align="left",
+            showarrow=False, font=dict(size=10.4, color="#111827"), align="left",
         )
 
         current_top -= row_h
 
 
-# ------------------------------------------------------------
-# Metric accessors
-# ------------------------------------------------------------
 def get_metric_series(record: TrendRecord, metric_key: str) -> Tuple[pd.Series, str]:
     if metric_key == "Amplitude":
         return record.y_value, record.y_axis_unit or ""
@@ -584,22 +486,13 @@ def get_metric_series(record: TrendRecord, metric_key: str) -> Tuple[pd.Series, 
 
 def get_clean_metric_df(record: TrendRecord, metric_key: str) -> pd.DataFrame:
     metric_series, _ = get_metric_series(record, metric_key)
-    df = pd.DataFrame(
-        {
-            "x": pd.to_datetime(record.x_time, errors="coerce"),
-            "y": pd.to_numeric(metric_series, errors="coerce"),
-        }
-    ).dropna(subset=["x", "y"])
+    df = pd.DataFrame({"x": pd.to_datetime(record.x_time, errors="coerce"), "y": pd.to_numeric(metric_series, errors="coerce")}).dropna(subset=["x", "y"])
     if df.empty:
         return df
     return df.sort_values("x").reset_index(drop=True)
 
 
-def get_cursor_nearest_info(
-    record: TrendRecord,
-    metric_key: str,
-    cursor_ts: Optional[pd.Timestamp],
-) -> Optional[Tuple[float, pd.Timestamp, str]]:
+def get_cursor_nearest_info(record: TrendRecord, metric_key: str, cursor_ts: Optional[pd.Timestamp]) -> Optional[Tuple[float, pd.Timestamp, str]]:
     if cursor_ts is None:
         return None
     df = get_clean_metric_df(record, metric_key)
@@ -623,9 +516,6 @@ def get_time_options_for_records(records: List[TrendRecord], metric_key: str) ->
     return [pd.Timestamp(x) for x in unique_sorted]
 
 
-# ------------------------------------------------------------
-# Figure builder
-# ------------------------------------------------------------
 def build_trend_figure(
     records: List[TrendRecord],
     metric_key: str,
@@ -657,7 +547,6 @@ def build_trend_figure(
     for idx, record in enumerate(records):
         df = get_clean_metric_df(record, metric_key)
         metric_unit = get_metric_series(record, metric_key)[1]
-
         if df.empty:
             continue
 
@@ -674,11 +563,7 @@ def build_trend_figure(
                 fill="tozeroy" if fill_area and len(records) == 1 else None,
                 fillcolor="rgba(91, 156, 240, 0.10)" if fill_area and len(records) == 1 else None,
                 name=record.point_clean,
-                hovertemplate=(
-                    "Point: %{fullData.name}<br>"
-                    "Time: %{x}<br>"
-                    f"{metric_key}: " + "%{y:.4f} " + f"{metric_unit}" + "<extra></extra>"
-                ),
+                hovertemplate=("Point: %{fullData.name}<br>" "Time: %{x}<br>" f"{metric_key}: " + "%{y:.4f} " + f"{metric_unit}" + "<extra></extra>"),
                 showlegend=show_legend,
                 connectgaps=False,
             )
@@ -697,21 +582,8 @@ def build_trend_figure(
         visible_records.append((record, df, metric_unit))
 
     if not visible_records:
-        fig.update_layout(
-            height=640,
-            plot_bgcolor="#f8fafc",
-            paper_bgcolor="#f3f4f6",
-            margin=dict(l=46, r=18, t=84, b=40),
-        )
-        fig.add_annotation(
-            x=0.5,
-            y=0.5,
-            xref="paper",
-            yref="paper",
-            text="No valid trend data available",
-            showarrow=False,
-            font=dict(size=18, color="#6b7280"),
-        )
+        fig.update_layout(height=640, plot_bgcolor="#f8fafc", paper_bgcolor="#f3f4f6", margin=dict(l=46, r=18, t=84, b=40))
+        fig.add_annotation(x=0.5, y=0.5, xref="paper", yref="paper", text="No valid trend data available", showarrow=False, font=dict(size=18, color="#6b7280"))
         return fig
 
     if not math.isfinite(global_y_min):
@@ -733,7 +605,6 @@ def build_trend_figure(
         alarm_values.append(float(warning_value))
     if danger_enabled and danger_value is not None and math.isfinite(float(danger_value)):
         alarm_values.append(float(danger_value))
-
     if alarm_values:
         global_y_max = max(global_y_max, max(alarm_values) * 1.08)
 
@@ -746,53 +617,31 @@ def build_trend_figure(
         y_min_final = float(global_y_min)
         y_max_final = float(global_y_max)
 
-    if x_axis_mode == "Manual" and x_axis_manual_start is not None and x_axis_manual_end is not None:
-        if x_axis_manual_start < x_axis_manual_end:
-            x_min_final = x_axis_manual_start
-            x_max_final = x_axis_manual_end
-        else:
-            x_min_final = global_x_min
-            x_max_final = global_x_max
+    if x_axis_mode == "Manual" and x_axis_manual_start is not None and x_axis_manual_end is not None and x_axis_manual_start < x_axis_manual_end:
+        x_min_final = x_axis_manual_start
+        x_max_final = x_axis_manual_end
     else:
         x_min_final = global_x_min
         x_max_final = global_x_max
 
     if warning_enabled and warning_value is not None and math.isfinite(float(warning_value)):
         fig.add_hline(
-            y=float(warning_value),
-            line_width=1.8,
-            line_dash="dash",
-            line_color="#f59e0b",
+            y=float(warning_value), line_width=1.8, line_dash="dash", line_color="#f59e0b",
             annotation_text=f"Warning {format_number(warning_value, 3)}",
-            annotation_position="top left",
-            annotation_font_color="#92400e",
+            annotation_position="top left", annotation_font_color="#92400e",
         )
 
     if danger_enabled and danger_value is not None and math.isfinite(float(danger_value)):
         fig.add_hline(
-            y=float(danger_value),
-            line_width=1.9,
-            line_dash="dash",
-            line_color="#ef4444",
+            y=float(danger_value), line_width=1.9, line_dash="dash", line_color="#ef4444",
             annotation_text=f"Danger {format_number(danger_value, 3)}",
-            annotation_position="top left",
-            annotation_font_color="#991b1b",
+            annotation_position="top left", annotation_font_color="#991b1b",
         )
 
-    cursor_line_specs = {
-        "A Initial": "#334155",
-        "A Current": "#64748b",
-        "B Initial": "#111827",
-        "B Current": "#475569",
-    }
+    cursor_line_specs = {"A Initial": "#334155", "A Current": "#64748b", "B Initial": "#111827", "B Current": "#475569"}
     for label, ts in cursor_map.items():
         if ts is not None:
-            fig.add_vline(
-                x=ts,
-                line_width=1.8,
-                line_dash="dot",
-                line_color=cursor_line_specs.get(label, "#475569"),
-            )
+            fig.add_vline(x=ts, line_width=1.8, line_dash="dot", line_color=cursor_line_specs.get(label, "#475569"))
 
     machine_name = records[0].machine if records else "Unknown"
     signal_names_text = " | ".join([r.point_clean for r in records[:2]])
@@ -812,19 +661,10 @@ def build_trend_figure(
     if global_x_min is not None and global_x_max is not None:
         time_range_text = f"{global_x_min.strftime('%Y-%m-%d %H:%M')} → {global_x_max.strftime('%Y-%m-%d %H:%M')}"
 
-    _draw_top_strip(
-        fig=fig,
-        machine_name=machine_name,
-        signal_names_text=signal_names_text,
-        metric_name=metric_key,
-        latest_text=latest_text,
-        logo_uri=logo_uri,
-        time_range_text=time_range_text,
-    )
+    _draw_top_strip(fig, machine_name, signal_names_text, metric_key, latest_text, logo_uri, time_range_text)
 
     if show_right_info_box:
         rows: List[Tuple[str, str]] = []
-
         first_rec = visible_records[0][0]
         second_rec = visible_records[1][0] if len(visible_records) >= 2 else first_rec
 
@@ -833,51 +673,17 @@ def build_trend_figure(
         b_initial_info = get_cursor_nearest_info(second_rec, metric_key, cursor_map.get("B Initial"))
         b_current_info = get_cursor_nearest_info(second_rec, metric_key, cursor_map.get("B Current"))
 
-        rows.append(
-            (
-                f"A Initial {first_rec.point_clean}",
-                f"{format_number(a_initial_info[0], 3)} {a_initial_info[2]} @ {pretty_time(a_initial_info[1])}".strip()
-                if a_initial_info is not None else "—",
-            )
-        )
-        rows.append(("A Initial Date", pretty_date(a_initial_info[1]) if a_initial_info is not None else "—"))
+        rows.append((f"A Initial {first_rec.point_clean}", f"{format_number(a_initial_info[0], 3)} {a_initial_info[2]} @ {pretty_time(a_initial_info[1])}".strip() if a_initial_info else "—"))
+        rows.append(("A Initial Date", pretty_date(a_initial_info[1]) if a_initial_info else "—"))
+        rows.append((f"A Current {first_rec.point_clean}", f"{format_number(a_current_info[0], 3)} {a_current_info[2]} @ {pretty_time(a_current_info[1])}".strip() if a_current_info else "—"))
+        rows.append(("A Current Date", pretty_date(a_current_info[1]) if a_current_info else "—"))
+        rows.append((f"B Initial {second_rec.point_clean}", f"{format_number(b_initial_info[0], 3)} {b_initial_info[2]} @ {pretty_time(b_initial_info[1])}".strip() if b_initial_info else "—"))
+        rows.append(("B Initial Date", pretty_date(b_initial_info[1]) if b_initial_info else "—"))
+        rows.append((f"B Current {second_rec.point_clean}", f"{format_number(b_current_info[0], 3)} {b_current_info[2]} @ {pretty_time(b_current_info[1])}".strip() if b_current_info else "—"))
+        rows.append(("B Current Date", pretty_date(b_current_info[1]) if b_current_info else "—"))
 
-        rows.append(
-            (
-                f"A Current {first_rec.point_clean}",
-                f"{format_number(a_current_info[0], 3)} {a_current_info[2]} @ {pretty_time(a_current_info[1])}".strip()
-                if a_current_info is not None else "—",
-            )
-        )
-        rows.append(("A Current Date", pretty_date(a_current_info[1]) if a_current_info is not None else "—"))
-
-        rows.append(
-            (
-                f"B Initial {second_rec.point_clean}",
-                f"{format_number(b_initial_info[0], 3)} {b_initial_info[2]} @ {pretty_time(b_initial_info[1])}".strip()
-                if b_initial_info is not None else "—",
-            )
-        )
-        rows.append(("B Initial Date", pretty_date(b_initial_info[1]) if b_initial_info is not None else "—"))
-
-        rows.append(
-            (
-                f"B Current {second_rec.point_clean}",
-                f"{format_number(b_current_info[0], 3)} {b_current_info[2]} @ {pretty_time(b_current_info[1])}".strip()
-                if b_current_info is not None else "—",
-            )
-        )
-        rows.append(("B Current Date", pretty_date(b_current_info[1]) if b_current_info is not None else "—"))
-
-        a_change = safe_percent_change(
-            a_initial_info[0] if a_initial_info else None,
-            a_current_info[0] if a_current_info else None,
-        )
-        b_change = safe_percent_change(
-            b_initial_info[0] if b_initial_info else None,
-            b_current_info[0] if b_current_info else None,
-        )
-
+        a_change = safe_percent_change(a_initial_info[0] if a_initial_info else None, a_current_info[0] if a_current_info else None)
+        b_change = safe_percent_change(b_initial_info[0] if b_initial_info else None, b_current_info[0] if b_current_info else None)
         rows.append(("A Change", f"{format_number(a_change, 2)}%" if a_change is not None else "—"))
         rows.append(("B Change", f"{format_number(b_change, 2)}%" if b_change is not None else "—"))
 
@@ -892,55 +698,28 @@ def build_trend_figure(
         hovermode="closest",
         dragmode="pan",
         legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.005,
-            xanchor="left",
-            x=0.0,
-            bgcolor="rgba(255,255,255,0.70)",
-            bordercolor="#d1d5db",
-            borderwidth=1,
+            orientation="h", yanchor="bottom", y=1.005, xanchor="left", x=0.0,
+            bgcolor="rgba(255,255,255,0.70)", bordercolor="#d1d5db", borderwidth=1,
             font=dict(size=11.2),
         ),
         xaxis=dict(
             title="Time",
             range=[x_min_final, x_max_final] if x_min_final is not None and x_max_final is not None else None,
-            showgrid=True,
-            gridcolor="rgba(148, 163, 184, 0.18)",
-            zeroline=False,
-            showline=True,
-            linecolor="#9ca3af",
-            ticks="outside",
-            tickcolor="#6b7280",
-            ticklen=4,
-            showspikes=True,
-            spikecolor="#6b7280",
-            spikesnap="cursor",
-            spikemode="across",
+            showgrid=True, gridcolor="rgba(148, 163, 184, 0.18)", zeroline=False,
+            showline=True, linecolor="#9ca3af", ticks="outside", tickcolor="#6b7280", ticklen=4,
+            showspikes=True, spikecolor="#6b7280", spikesnap="cursor", spikemode="across",
         ),
         yaxis=dict(
-            title=axis_title,
-            range=[y_min_final, y_max_final],
-            showgrid=True,
-            gridcolor="rgba(148, 163, 184, 0.18)",
-            zeroline=False,
-            showline=True,
-            linecolor="#9ca3af",
-            ticks="outside",
-            tickcolor="#6b7280",
-            ticklen=4,
+            title=axis_title, range=[y_min_final, y_max_final],
+            showgrid=True, gridcolor="rgba(148, 163, 184, 0.18)", zeroline=False,
+            showline=True, linecolor="#9ca3af", ticks="outside", tickcolor="#6b7280", ticklen=4,
         ),
     )
-
     return fig
 
 
-# ------------------------------------------------------------
-# Export helpers
-# ------------------------------------------------------------
 def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
     export_fig = go.Figure()
-
     for trace in fig.data:
         if isinstance(trace, go.Scattergl):
             trace_json = trace.to_plotly_json()
@@ -961,62 +740,39 @@ def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
             )
         else:
             export_fig.add_trace(trace)
-
     export_fig.update_layout(fig.layout)
     return export_fig
 
 
 def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     fig = go.Figure(export_fig)
-
     new_data = []
     for trace in fig.data:
         trace_json = trace.to_plotly_json()
-
         if trace_json.get("type") == "scatter":
             mode = trace_json.get("mode", "")
-
             if "lines" in mode:
                 line = dict(trace_json.get("line", {}) or {})
                 line["width"] = max(4.8, float(line.get("width", 1.0)) * 2.8)
                 trace_json["line"] = line
-
             if "markers" in mode:
                 marker = dict(trace_json.get("marker", {}) or {})
                 marker["size"] = max(14, float(marker.get("size", 6)) * 1.9)
                 trace_json["marker"] = marker
-
         new_data.append(go.Scatter(**trace_json))
-
     fig = go.Figure(data=new_data, layout=fig.layout)
 
-    fig.update_layout(
-        width=4200,
-        height=2200,
-        margin=dict(l=120, r=90, t=360, b=120),
-        paper_bgcolor="#f3f4f6",
-        plot_bgcolor="#f8fafc",
-        font=dict(size=30, color="#111827"),
-    )
-
-    fig.update_xaxes(
-        title_font=dict(size=40),
-        tickfont=dict(size=26),
-    )
-    fig.update_yaxes(
-        title_font=dict(size=40),
-        tickfont=dict(size=26),
-    )
+    fig.update_layout(width=4200, height=2200, margin=dict(l=120, r=90, t=360, b=120), paper_bgcolor="#f3f4f6", plot_bgcolor="#f8fafc", font=dict(size=30, color="#111827"))
+    fig.update_xaxes(title_font=dict(size=40), tickfont=dict(size=26))
+    fig.update_yaxes(title_font=dict(size=40), tickfont=dict(size=26))
 
     for shape in fig.layout.shapes:
         if shape.line is not None:
             width = getattr(shape.line, "width", 1) or 1
             shape.line.width = max(2.0, width * 2.2)
-
     for ann in fig.layout.annotations:
         if ann.font is not None:
             ann.font.size = max(22, int((ann.font.size or 12) * 2.05))
-
     for img in fig.layout.images:
         sx = getattr(img, "sizex", None)
         sy = getattr(img, "sizey", None)
@@ -1024,7 +780,6 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
             img.sizex = sx * 1.22
         if sy is not None:
             img.sizey = sy * 1.22
-
     return fig
 
 
@@ -1032,54 +787,35 @@ def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[st
     try:
         export_fig = _build_export_safe_figure(fig)
         export_fig = _scale_export_figure(export_fig)
-
-        png_bytes = export_fig.to_image(
-            format="png",
-            width=4200,
-            height=2200,
-            scale=2,
-        )
+        png_bytes = export_fig.to_image(format="png", width=4200, height=2200, scale=2)
         return png_bytes, None
     except Exception as e:
         return None, str(e)
 
 
-# ------------------------------------------------------------
-# Session defaults
-# ------------------------------------------------------------
+# session
 if "trend_signals" not in st.session_state:
     st.session_state["trend_signals"] = {}
-
 if "wm_tr_primary_signal_id" not in st.session_state:
     st.session_state.wm_tr_primary_signal_id = None
-
 if "wm_tr_extra_signal_ids" not in st.session_state:
     st.session_state.wm_tr_extra_signal_ids = []
-
-if "wm_tr_export_png_bytes" not in st.session_state:
-    st.session_state.wm_tr_export_png_bytes = None
-
-if "wm_tr_export_png_key" not in st.session_state:
-    st.session_state.wm_tr_export_png_key = None
-
-if "wm_tr_export_error" not in st.session_state:
-    st.session_state.wm_tr_export_error = None
+if "wm_tr_display_mode" not in st.session_state:
+    st.session_state.wm_tr_display_mode = "Combined"
+if "wm_tr_export_store" not in st.session_state:
+    st.session_state.wm_tr_export_store = {}
+if "report_items" not in st.session_state:
+    st.session_state.report_items = []
 
 for key in [
-    "wm_tr_cursor_a_initial",
-    "wm_tr_cursor_a_current",
-    "wm_tr_cursor_b_initial",
-    "wm_tr_cursor_b_current",
-    "wm_tr_x_manual_start",
-    "wm_tr_x_manual_end",
+    "wm_tr_cursor_a_initial", "wm_tr_cursor_a_current",
+    "wm_tr_cursor_b_initial", "wm_tr_cursor_b_current",
+    "wm_tr_x_manual_start", "wm_tr_x_manual_end",
 ]:
     if key not in st.session_state:
         st.session_state[key] = ""
 
 
-# ------------------------------------------------------------
-# Uploader
-# ------------------------------------------------------------
 with st.sidebar:
     st.markdown("### Trend CSV")
     uploaded_files = st.file_uploader(
@@ -1088,7 +824,6 @@ with st.sidebar:
         accept_multiple_files=True,
         key="wm_trend_uploader",
     )
-
     if uploaded_files:
         parsed_records = load_trend_records_from_uploader(uploaded_files)
         trend_store = {rec.trend_id: rec for rec in parsed_records}
@@ -1102,9 +837,38 @@ if not records_all:
     st.stop()
 
 
-# ------------------------------------------------------------
-# Sidebar controls
-# ------------------------------------------------------------
+def queue_trend_to_report(records: List[TrendRecord], fig: go.Figure, panel_title: str, metric_key: str) -> None:
+    first = records[0]
+    machine = first.machine if records else "Unknown"
+    point = " | ".join([r.point_clean for r in records[:2]])
+    if len(records) > 2:
+        point += f" +{len(records)-2}"
+
+    st.session_state.report_items.append(
+        {
+            "id": make_export_state_key(
+                [
+                    "report-trend",
+                    metric_key,
+                    panel_title,
+                    machine,
+                    point,
+                    len(st.session_state.report_items),
+                ]
+            ),
+            "type": "trends",
+            "title": panel_title,
+            "notes": "",
+            "signal_id": "|".join([r.trend_id for r in records]),
+            "figure": go.Figure(fig),
+            "machine": machine,
+            "point": point,
+            "variable": f"Trend | {metric_key}",
+            "timestamp": str(records[0].timestamp_max or "") if records else "",
+        }
+    )
+
+
 with st.sidebar:
     st.markdown("### Signal Selection")
 
@@ -1140,52 +904,31 @@ with st.sidebar:
     )
     st.session_state.wm_tr_extra_signal_ids = [signal_name_map[name] for name in selected_extra_names]
 
-    st.markdown("### Trend Processing")
-    metric_key = st.selectbox(
-        "Metric",
-        options=["Amplitude", "Phase", "Speed"],
-        index=0,
+    st.markdown("### Display")
+    st.session_state.wm_tr_display_mode = st.selectbox(
+        "Display mode",
+        options=["Combined", "Independent"],
+        index=0 if st.session_state.wm_tr_display_mode == "Combined" else 1,
     )
 
+    st.markdown("### Trend Processing")
+    metric_key = st.selectbox("Metric", options=["Amplitude", "Phase", "Speed"], index=0)
     show_markers = st.checkbox("Show markers", value=False)
     fill_area = st.checkbox("Fill area (single trend)", value=True)
 
     st.markdown("### Axes")
-    y_axis_mode = st.selectbox(
-        "Y-axis scale",
-        ["Auto", "Manual"],
-        index=0,
-    )
+    y_axis_mode = st.selectbox("Y-axis scale", ["Auto", "Manual"], index=0)
 
     y_axis_manual_min: Optional[float] = None
     y_axis_manual_max: Optional[float] = None
     if y_axis_mode == "Manual":
         c1, c2 = st.columns(2)
         with c1:
-            y_axis_manual_min = float(
-                st.number_input(
-                    "Y min",
-                    value=0.0,
-                    step=0.1,
-                    format="%.3f",
-                )
-            )
+            y_axis_manual_min = float(st.number_input("Y min", value=0.0, step=0.1, format="%.3f"))
         with c2:
-            y_axis_manual_max = float(
-                st.number_input(
-                    "Y max",
-                    value=5.0,
-                    step=0.1,
-                    format="%.3f",
-                )
-            )
+            y_axis_manual_max = float(st.number_input("Y max", value=5.0, step=0.1, format="%.3f"))
 
-    x_axis_mode = st.selectbox(
-        "X-axis scale",
-        ["Auto", "Manual"],
-        index=0,
-    )
-
+    x_axis_mode = st.selectbox("X-axis scale", ["Auto", "Manual"], index=0)
     show_right_info_box = st.checkbox("Show info box", value=True)
     show_legend = st.checkbox("Show legend", value=True)
 
@@ -1193,36 +936,18 @@ with st.sidebar:
     warning_enabled = st.checkbox("Enable warning line", value=True)
     warning_value: Optional[float] = None
     if warning_enabled:
-        warning_value = float(
-            st.number_input(
-                "Warning value",
-                value=3.500,
-                step=0.1,
-                format="%.3f",
-            )
-        )
+        warning_value = float(st.number_input("Warning value", value=3.500, step=0.1, format="%.3f"))
 
     danger_enabled = st.checkbox("Enable danger line", value=True)
     danger_value: Optional[float] = None
     if danger_enabled:
-        danger_value = float(
-            st.number_input(
-                "Danger value",
-                value=5.000,
-                step=0.1,
-                format="%.3f",
-            )
-        )
+        danger_value = float(st.number_input("Danger value", value=5.000, step=0.1, format="%.3f"))
 
 
-# ------------------------------------------------------------
-# Selected records
-# ------------------------------------------------------------
 selected_ids = [st.session_state.wm_tr_primary_signal_id] + st.session_state.wm_tr_extra_signal_ids
 selected_ids = [sid for sid in selected_ids if sid is not None]
 
 selected_records = [r for r in records_all if r.trend_id in selected_ids]
-
 selected_records_sorted: List[TrendRecord] = []
 for sid in selected_ids:
     rec = next((r for r in selected_records if r.trend_id == sid), None)
@@ -1266,7 +991,6 @@ st.session_state.wm_tr_x_manual_end = get_valid_time_label(st.session_state.wm_t
 
 x_axis_manual_start: Optional[pd.Timestamp] = None
 x_axis_manual_end: Optional[pd.Timestamp] = None
-
 if x_axis_mode == "Manual":
     x_axis_manual_start = label_to_ts(st.session_state.wm_tr_x_manual_start)
     x_axis_manual_end = label_to_ts(st.session_state.wm_tr_x_manual_end)
@@ -1278,77 +1002,6 @@ cursor_map = {
     "B Current": label_to_ts(st.session_state.wm_tr_cursor_b_current),
 }
 
-fig = build_trend_figure(
-    records=selected_records_sorted,
-    metric_key=metric_key,
-    show_markers=show_markers,
-    fill_area=fill_area,
-    y_axis_mode=y_axis_mode,
-    y_axis_manual_min=y_axis_manual_min,
-    y_axis_manual_max=y_axis_manual_max,
-    x_axis_mode=x_axis_mode,
-    x_axis_manual_start=x_axis_manual_start,
-    x_axis_manual_end=x_axis_manual_end,
-    warning_enabled=warning_enabled,
-    warning_value=warning_value,
-    danger_enabled=danger_enabled,
-    danger_value=danger_value,
-    show_right_info_box=show_right_info_box,
-    show_legend=show_legend,
-    logo_uri=logo_uri,
-    cursor_map=cursor_map,
-)
-
-
-# ------------------------------------------------------------
-# Export state
-# ------------------------------------------------------------
-export_state_key = make_export_state_key(
-    [
-        metric_key,
-        y_axis_mode,
-        y_axis_manual_min,
-        y_axis_manual_max,
-        x_axis_mode,
-        st.session_state.wm_tr_x_manual_start,
-        st.session_state.wm_tr_x_manual_end,
-        warning_enabled,
-        warning_value,
-        danger_enabled,
-        danger_value,
-        st.session_state.wm_tr_cursor_a_initial,
-        st.session_state.wm_tr_cursor_a_current,
-        st.session_state.wm_tr_cursor_b_initial,
-        st.session_state.wm_tr_cursor_b_current,
-        show_markers,
-        fill_area,
-        show_right_info_box,
-        show_legend,
-        "|".join(selected_ids),
-        "|".join([r.file_name for r in selected_records_sorted]),
-        "|".join([r.point_clean for r in selected_records_sorted]),
-    ]
-)
-
-if st.session_state.wm_tr_export_png_key != export_state_key:
-    st.session_state.wm_tr_export_png_bytes = None
-    st.session_state.wm_tr_export_png_key = export_state_key
-    st.session_state.wm_tr_export_error = None
-
-
-# ------------------------------------------------------------
-# Main chart
-# ------------------------------------------------------------
-st.plotly_chart(
-    fig,
-    use_container_width=True,
-    config={"displaylogo": False},
-    key="wm_trends_plot_main_view",
-)
-
-# ------------------------------------------------------------
-# Bottom controls
-# ------------------------------------------------------------
 if x_axis_mode == "Manual":
     with st.expander("X-Axis Manual Window", expanded=False):
         st.markdown(
@@ -1362,17 +1015,9 @@ if x_axis_mode == "Manual":
         )
         col_x1, col_x2 = st.columns(2)
         with col_x1:
-            st.select_slider(
-                "X Start",
-                options=time_labels,
-                key="wm_tr_x_manual_start",
-            )
+            st.select_slider("X Start", options=time_labels, key="wm_tr_x_manual_start")
         with col_x2:
-            st.select_slider(
-                "X End",
-                options=time_labels,
-                key="wm_tr_x_manual_end",
-            )
+            st.select_slider("X End", options=time_labels, key="wm_tr_x_manual_end")
 
 with st.expander("Cursor Controls", expanded=False):
     st.markdown(
@@ -1386,56 +1031,104 @@ with st.expander("Cursor Controls", expanded=False):
     )
 
     c1, c2 = st.columns(2)
-
     with c1:
-        st.select_slider(
-            "A Initial",
-            options=time_labels,
-            key="wm_tr_cursor_a_initial",
-        )
-        st.select_slider(
-            "A Current",
-            options=time_labels,
-            key="wm_tr_cursor_a_current",
-        )
-
+        st.select_slider("A Initial", options=time_labels, key="wm_tr_cursor_a_initial")
+        st.select_slider("A Current", options=time_labels, key="wm_tr_cursor_a_current")
     with c2:
-        st.select_slider(
-            "B Initial",
-            options=time_labels,
-            key="wm_tr_cursor_b_initial",
-        )
-        st.select_slider(
-            "B Current",
-            options=time_labels,
-            key="wm_tr_cursor_b_current",
-        )
+        st.select_slider("B Initial", options=time_labels, key="wm_tr_cursor_b_initial")
+        st.select_slider("B Current", options=time_labels, key="wm_tr_cursor_b_current")
 
-# ------------------------------------------------------------
-# Bottom export actions
-# ------------------------------------------------------------
-st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
-left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
+def render_trend_panel(panel_records: List[TrendRecord], panel_index: int, panel_label: str) -> None:
+    fig = build_trend_figure(
+        records=panel_records,
+        metric_key=metric_key,
+        show_markers=show_markers,
+        fill_area=fill_area,
+        y_axis_mode=y_axis_mode,
+        y_axis_manual_min=y_axis_manual_min,
+        y_axis_manual_max=y_axis_manual_max,
+        x_axis_mode=x_axis_mode,
+        x_axis_manual_start=x_axis_manual_start,
+        x_axis_manual_end=x_axis_manual_end,
+        warning_enabled=warning_enabled,
+        warning_value=warning_value,
+        danger_enabled=danger_enabled,
+        danger_value=danger_value,
+        show_right_info_box=show_right_info_box,
+        show_legend=show_legend,
+        logo_uri=logo_uri,
+        cursor_map=cursor_map,
+    )
 
-with col_export1:
-    if st.button("Prepare PNG HD", use_container_width=True):
-        with st.spinner("Generating HD export..."):
-            png_bytes, export_error = build_export_png_bytes(fig=fig)
-            st.session_state.wm_tr_export_png_bytes = png_bytes
-            st.session_state.wm_tr_export_error = export_error
+    export_state_key = make_export_state_key(
+        [
+            st.session_state.wm_tr_display_mode,
+            panel_label,
+            metric_key,
+            y_axis_mode, y_axis_manual_min, y_axis_manual_max,
+            x_axis_mode, st.session_state.wm_tr_x_manual_start, st.session_state.wm_tr_x_manual_end,
+            warning_enabled, warning_value, danger_enabled, danger_value,
+            st.session_state.wm_tr_cursor_a_initial, st.session_state.wm_tr_cursor_a_current,
+            st.session_state.wm_tr_cursor_b_initial, st.session_state.wm_tr_cursor_b_current,
+            show_markers, fill_area, show_right_info_box, show_legend,
+            "|".join([r.trend_id for r in panel_records]),
+            "|".join([r.file_name for r in panel_records]),
+            "|".join([r.point_clean for r in panel_records]),
+        ]
+    )
 
-with col_export2:
-    if st.session_state.wm_tr_export_png_bytes is not None:
-        st.download_button(
-            "Download PNG HD",
-            data=st.session_state.wm_tr_export_png_bytes,
-            file_name="watermelon_trend_hd.png",
-            mime="image/png",
-            use_container_width=True,
-        )
-    else:
-        st.button("Download PNG HD", disabled=True, use_container_width=True)
+    if export_state_key not in st.session_state.wm_tr_export_store:
+        st.session_state.wm_tr_export_store[export_state_key] = {"png_bytes": None, "error": None}
 
-if st.session_state.wm_tr_export_error:
-    st.warning(f"PNG export error: {st.session_state.wm_tr_export_error}")
+    st.markdown(f"### {panel_label}")
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displaylogo": False},
+        key=f"wm_trends_plot_{export_state_key}",
+    )
+
+    st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
+    left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.3, 1.3, 1.3, 2.0])
+
+    with col_export1:
+        if st.button("Prepare PNG HD", key=f"prepare_png_{export_state_key}", use_container_width=True):
+            with st.spinner("Generating HD export..."):
+                png_bytes, export_error = build_export_png_bytes(fig=fig)
+                st.session_state.wm_tr_export_store[export_state_key]["png_bytes"] = png_bytes
+                st.session_state.wm_tr_export_store[export_state_key]["error"] = export_error
+
+    with col_export2:
+        png_bytes = st.session_state.wm_tr_export_store[export_state_key]["png_bytes"]
+        if png_bytes is not None:
+            st.download_button(
+                "Download PNG HD",
+                data=png_bytes,
+                file_name=f"watermelon_trend_{panel_index + 1}_hd.png",
+                mime="image/png",
+                use_container_width=True,
+                key=f"download_png_{export_state_key}",
+            )
+        else:
+            st.button("Download PNG HD", disabled=True, use_container_width=True, key=f"download_disabled_{export_state_key}")
+
+    with col_report:
+        if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
+            queue_trend_to_report(panel_records, fig, panel_label, metric_key)
+            st.success("Trend enviado al reporte")
+
+    panel_error = st.session_state.wm_tr_export_store[export_state_key]["error"]
+    if panel_error:
+        st.warning(f"PNG export error: {panel_error}")
+
+
+if st.session_state.wm_tr_display_mode == "Combined":
+    combined_label = f"Trend Combined — {selected_records_sorted[0].machine}"
+    render_trend_panel(selected_records_sorted, 0, combined_label)
+else:
+    for idx, rec in enumerate(selected_records_sorted):
+        render_trend_panel([rec], idx, f"Trend {idx + 1} — {rec.point_clean}")
+        if idx < len(selected_records_sorted) - 1:
+            st.markdown("---")
