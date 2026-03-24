@@ -180,12 +180,16 @@ def _normalize_report_items(raw_items: Any) -> List[Dict[str, Any]]:
             continue
 
         fig = item.get("figure")
-        if fig is None:
-            continue
+        image_bytes = item.get("image_bytes")
+        safe_fig = None
 
-        try:
-            safe_fig = go.Figure(fig)
-        except Exception:
+        if fig is not None:
+            try:
+                safe_fig = go.Figure(fig)
+            except Exception:
+                safe_fig = None
+
+        if safe_fig is None and image_bytes is None:
             continue
 
         normalized = {
@@ -199,6 +203,7 @@ def _normalize_report_items(raw_items: Any) -> List[Dict[str, Any]]:
             "variable": str(item.get("variable") or ""),
             "timestamp": str(item.get("timestamp") or ""),
             "figure": safe_fig,
+            "image_bytes": item.get("image_bytes"),
         }
         items.append(normalized)
 
@@ -584,7 +589,12 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     max_img_height = 8.6 * cm
 
     for idx, item in enumerate(items, start=1):
-        png_bytes = _figure_png_bytes(item["figure"])
+        if item.get("figure") is not None:
+            png_bytes = _figure_png_bytes(item["figure"])
+        elif item.get("image_bytes") is not None:
+            png_bytes = item["image_bytes"]
+        else:
+            continue
         img_w, img_h = _fit_image_dimensions(png_bytes, max_img_width, max_img_height)
         img = Image(BytesIO(png_bytes), width=img_w, height=img_h)
         img.hAlign = "CENTER"
@@ -838,12 +848,18 @@ else:
                 _remove_item(item["id"])
                 st.rerun()
 
-        st.plotly_chart(
-            item["figure"],
-            use_container_width=True,
-            config={"displaylogo": False},
-            key=f"report_plot_{item['id']}",
-        )
+        if item.get("figure") is not None:
+            st.plotly_chart(
+                item["figure"],
+                use_container_width=True,
+                config={"displaylogo": False},
+                key=f"report_plot_{item['id']}",
+            )
+        elif item.get("image_bytes") is not None:
+            st.image(
+                item["image_bytes"],
+                use_container_width=True,
+            )
 
         new_notes = st.text_area(
             f"Technical interpretation for Figure {index}",
