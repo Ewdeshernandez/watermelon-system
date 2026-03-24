@@ -203,6 +203,40 @@ def _normalize_report_items(raw_items: Any) -> List[Dict[str, Any]]:
             "variable": str(item.get("variable") or ""),
             "timestamp": str(item.get("timestamp") or ""),
             "figure": safe_fig,
+            "image_bytes": image_bytes,
+        }
+        items.append(normalized)
+
+    return items
+
+    for idx, item in enumerate(raw_items):
+        if not isinstance(item, dict):
+            continue
+
+        fig = item.get("figure")
+        image_bytes = item.get("image_bytes")
+        safe_fig = None
+
+        if fig is not None:
+            try:
+                safe_fig = go.Figure(fig)
+            except Exception:
+                safe_fig = None
+
+        if safe_fig is None and image_bytes is None:
+            continue
+
+        normalized = {
+            "id": str(item.get("id") or f"report_item_{idx+1}"),
+            "type": str(item.get("type") or "figure"),
+            "title": str(item.get("title") or f"Figure {idx+1}"),
+            "notes": str(item.get("notes") or ""),
+            "signal_id": str(item.get("signal_id") or ""),
+            "machine": str(item.get("machine") or ""),
+            "point": str(item.get("point") or ""),
+            "variable": str(item.get("variable") or ""),
+            "timestamp": str(item.get("timestamp") or ""),
+            "figure": safe_fig,
             "image_bytes": item.get("image_bytes"),
         }
         items.append(normalized)
@@ -589,265 +623,6 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     max_img_height = 8.6 * cm
 
     for idx, item in enumerate(items, start=1):
-        if item.get("figure") is not None:
-            png_bytes = _figure_png_bytes(item["figure"])
-        elif item.get("image_bytes") is not None:
-            png_bytes = item["image_bytes"]
-        else:
-            continue
-        img_w, img_h = _fit_image_dimensions(png_bytes, max_img_width, max_img_height)
-        img = Image(BytesIO(png_bytes), width=img_w, height=img_h)
-        img.hAlign = "CENTER"
-        story.append(Spacer(1, 0.15 * cm))
-        story.append(img)
-
-        caption = f"Figura {idx}. {item.get('title') or f'Figura {idx}'}"
-        story.append(Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]))
-
-        notes = item.get("notes") or "Sin interpretación técnica todavía."
-        story.append(Paragraph(_paragraph_safe(notes), styles["WMFigureText"]))
-        story.append(Spacer(1, 0.20 * cm))
-
-    doc.build(story, onFirstPage=_draw_cover_page, onLaterPages=_draw_internal_page)
-    return buffer.getvalue()
-
-
-items = _get_items()
-meta = st.session_state["report_meta"]
-
-
-# ============================================================
-# Header
-# ============================================================
-
-st.markdown('<div class="wm-page-title">Reports</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="wm-page-subtitle">Editor de entregables técnicos premium. Este módulo consume figuras reales enviadas desde Spectrum y exporta PDF técnico profesional.</div>',
-    unsafe_allow_html=True,
-)
-
-
-# ============================================================
-# Top summary
-# ============================================================
-
-c1, c2, c3, c4 = st.columns(4)
-
-with c1:
-    st.markdown(
-        f"""
-        <div class="wm-kpi">
-            <div class="wm-kpi-label">Figures in Report</div>
-            <div class="wm-kpi-value">{len(items):,}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-with c2:
-    st.markdown(
-        f"""
-        <div class="wm-kpi">
-            <div class="wm-kpi-label">Spectrum Blocks</div>
-            <div class="wm-kpi-value">{_count_by_type(items, 'spectrum'):,}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-with c3:
-    st.markdown(
-        f"""
-        <div class="wm-kpi">
-            <div class="wm-kpi-label">Prepared By</div>
-            <div class="wm-kpi-value">{meta['prepared_by'] or '-'}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-with c4:
-    st.markdown(
-        f"""
-        <div class="wm-kpi">
-            <div class="wm-kpi-label">Consecutive</div>
-            <div class="wm-kpi-value">{meta['consecutive'] or '-'}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
-
-
-# ============================================================
-# Global actions
-# ============================================================
-
-st.markdown('<div class="wm-section-title">Report Actions</div>', unsafe_allow_html=True)
-
-ga1, ga2, ga3, ga4 = st.columns([1.2, 1.2, 1.2, 3.4])
-
-with ga1:
-    if st.button("Refresh Items", use_container_width=True):
-        _persist_items(_get_items())
-        st.rerun()
-
-with ga2:
-    clear_disabled = len(items) == 0
-    if st.button("Clear Report", use_container_width=True, disabled=clear_disabled):
-        _clear_all_items()
-        st.rerun()
-
-pdf_ready = len(items) > 0
-pdf_error = None
-pdf_bytes: Optional[bytes] = None
-if pdf_ready:
-    try:
-        pdf_bytes = _build_pdf_bytes(meta, items)
-    except Exception as e:
-        pdf_error = str(e)
-
-with ga3:
-    if pdf_bytes is not None:
-        st.download_button(
-            "Export PDF",
-            data=pdf_bytes,
-            file_name=(meta.get("consecutive") or "watermelon_report").replace(" ", "_") + ".pdf",
-            mime="application/pdf",
-            use_container_width=True,
-        )
-    else:
-        st.button("Export PDF", use_container_width=True, disabled=True)
-
-if pdf_error:
-    st.warning(f"PDF export error: {pdf_error}")
-
-st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
-
-
-# ============================================================
-# Metadata
-# ============================================================
-
-st.markdown('<div class="wm-section-title">Report Metadata</div>', unsafe_allow_html=True)
-
-m1, m2, m3 = st.columns(3)
-with m1:
-    meta["report_title"] = st.text_input("Report Title", value=meta["report_title"])
-with m2:
-    meta["client"] = st.text_input("Client", value=meta["client"])
-with m3:
-    meta["asset"] = st.text_input("Asset / Machine", value=meta["asset"])
-
-m4, m5, m6 = st.columns(3)
-with m4:
-    meta["unit"] = st.text_input("Unit", value=meta["unit"])
-with m5:
-    meta["location"] = st.text_input("Location", value=meta["location"])
-with m6:
-    meta["consecutive"] = st.text_input("Consecutive", value=meta["consecutive"])
-
-m7, m8, m9 = st.columns(3)
-with m7:
-    meta["prepared_by"] = st.text_input("Prepared By", value=meta["prepared_by"])
-with m8:
-    meta["reviewed_by"] = st.text_input("Reviewed By", value=meta["reviewed_by"])
-with m9:
-    meta["report_date"] = st.text_input("Report Date", value=meta["report_date"])
-
-m10, m11 = st.columns(2)
-with m10:
-    meta["period"] = st.text_input("Evaluation Period", value=meta["period"])
-with m11:
-    st.write("")
-
-t1, t2 = st.columns(2)
-with t1:
-    meta["service_development"] = st.text_area(
-        "Desarrollo del servicio",
-        value=meta["service_development"],
-        height=180,
-        placeholder="Describe la intervención, alcance, metodología, comportamiento dinámico observado y hallazgos clave.",
-    )
-with t2:
-    meta["recommendations"] = st.text_area(
-        "Recomendaciones",
-        value=meta["recommendations"],
-        height=180,
-        placeholder="Redacta recomendaciones técnicas, criticidad, acciones sugeridas y seguimiento.",
-    )
-
-st.session_state["report_meta"] = meta
-
-st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
-
-
-# ============================================================
-# Report structure
-# ============================================================
-
-st.markdown('<div class="wm-section-title">Report Structure</div>', unsafe_allow_html=True)
-
-if not items:
-    st.info("Todavía no hay figuras en el reporte. Entra a Spectrum y usa el botón 'Enviar a Reporte'.")
-else:
-    for index, item in enumerate(items, start=1):
-        st.markdown('<div class="wm-card">', unsafe_allow_html=True)
-        st.markdown(
-            f'<div class="wm-block-title">Figura {index}. {item["title"]}</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            f'<div class="wm-block-subtitle"><span class="wm-badge">{_type_badge(item["type"])}</span>{_source_line(item)}</div>',
-            unsafe_allow_html=True,
-        )
-
-        tcol1, tcol2, tcol3, tcol4 = st.columns([2.4, 0.8, 0.8, 0.8])
-
-        with tcol1:
-            new_title = st.text_input(
-                "Figure Title",
-                value=item["title"],
-                key=f"report_title_{item['id']}",
-            )
-            item["title"] = new_title
-
-        with tcol2:
-            st.write("")
-            st.write("")
-            if st.button(
-                "↑ Up",
-                key=f"report_up_{item['id']}",
-                use_container_width=True,
-                disabled=index == 1,
-            ):
-                _move_item(item["id"], -1)
-                st.rerun()
-
-        with tcol3:
-            st.write("")
-            st.write("")
-            if st.button(
-                "↓ Down",
-                key=f"report_down_{item['id']}",
-                use_container_width=True,
-                disabled=index == len(items),
-            ):
-                _move_item(item["id"], +1)
-                st.rerun()
-
-        with tcol4:
-            st.write("")
-            st.write("")
-            if st.button(
-                "Remove",
-                key=f"report_remove_{item['id']}",
-                use_container_width=True,
-            ):
-                _remove_item(item["id"])
-                st.rerun()
-
         if item.get("figure") is not None:
             st.plotly_chart(
                 item["figure"],
