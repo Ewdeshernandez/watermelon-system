@@ -428,31 +428,35 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.setFillColor(colors.HexColor("#111827"))
         canvas.drawRightString(page_width - 1.2 * cm, page_height - 1.0 * cm, f"Página {doc.page}")
 
+        internal_left = 2.1 * cm
+        internal_right = 2.1 * cm
+        internal_width_end = page_width - internal_right
+
         canvas.setStrokeColor(colors.HexColor("#0ea5e9"))
-        canvas.setLineWidth(1.4)
-        canvas.line(left_margin, page_height - 1.35 * cm, page_width - right_margin - 0.2 * cm, page_height - 1.35 * cm)
+        canvas.setLineWidth(1.1)
+        canvas.line(internal_left, page_height - 1.35 * cm, internal_width_end, page_height - 1.35 * cm)
 
         canvas.setFillColor(colors.HexColor("#0f172a"))
         canvas.setFont("Helvetica-Bold", 8.2)
-        canvas.drawString(left_margin, page_height - 1.0 * cm, "Machinery Diagnostics Engineering")
+        canvas.drawString(internal_left, page_height - 1.0 * cm, "Machinery Diagnostics Engineering")
 
         footer = "INFORME VALIDO UNICAMENTE PARA LAS CONDICIONES PRESENTES DURANTE EL SERVICIO. NO PODRA SER COPIADO PARCIAL O TOTALMENTE SIN PREVIA AUTORIZACION."
         canvas.setStrokeColor(colors.HexColor("#0ea5e9"))
-        canvas.setLineWidth(1.2)
-        canvas.line(left_margin, 0.95 * cm, page_width - right_margin - 0.2 * cm, 0.95 * cm)
+        canvas.setLineWidth(1.0)
+        canvas.line(internal_left, 0.95 * cm, internal_width_end, 0.95 * cm)
 
         canvas.setFillColor(colors.HexColor("#111827"))
-        canvas.setFont("Helvetica", 6.6)
-        canvas.drawCentredString((left_margin + (page_width - right_margin - 0.2 * cm)) / 2, 0.55 * cm, footer)
+        canvas.setFont("Helvetica", 6.4)
+        canvas.drawCentredString((internal_left + internal_width_end) / 2, 0.55 * cm, footer)
         canvas.restoreState()
 
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        leftMargin=left_margin,
-        rightMargin=right_margin + 3.2 * cm,
-        topMargin=top_margin,
-        bottomMargin=bottom_margin,
+        leftMargin=2.1 * cm,
+        rightMargin=2.1 * cm,
+        topMargin=1.6 * cm,
+        bottomMargin=1.5 * cm,
         title=meta.get("report_title") or "Watermelon System Report",
         author=meta.get("prepared_by") or "Watermelon System",
     )
@@ -539,14 +543,16 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     story.append(Paragraph(_paragraph_safe(meta.get("service_development") or "Sin desarrollo del servicio registrado."), styles["WMBody"]))
     story.append(Spacer(1, 0.35 * cm))
 
-    max_img_width = content_width - 0.2 * cm
-    max_img_height = 9.8 * cm
+    usable_width = A4[0] - doc.leftMargin - doc.rightMargin
+    max_img_width = usable_width - 1.0 * cm
+    max_img_height = 8.6 * cm
 
     for idx, item in enumerate(items, start=1):
         png_bytes = _figure_png_bytes(item["figure"])
         img_w, img_h = _fit_image_dimensions(png_bytes, max_img_width, max_img_height)
         img = Image(BytesIO(png_bytes), width=img_w, height=img_h)
         img.hAlign = "CENTER"
+        story.append(Spacer(1, 0.15 * cm))
         story.append(img)
 
         caption = f"Figura {idx}. {item.get('title') or f'Figura {idx}'}"
@@ -554,6 +560,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
         notes = item.get("notes") or "Sin interpretación técnica todavía."
         story.append(Paragraph(_paragraph_safe(notes), styles["WMFigureText"]))
+        story.append(Spacer(1, 0.20 * cm))
 
     doc.build(story, onFirstPage=_draw_cover_page, onLaterPages=_draw_internal_page)
     return buffer.getvalue()
