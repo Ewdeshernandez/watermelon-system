@@ -384,7 +384,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
     logo_siga = _first_existing_logo()
 
-    def _draw_page_frame(canvas, doc):
+    def _draw_cover_page(canvas, doc):
         canvas.saveState()
         canvas.setFillColor(colors.HexColor("#ffffff"))
         canvas.rect(0, 0, page_width, page_height, fill=1, stroke=0)
@@ -417,6 +417,33 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.setFillColor(colors.HexColor("#ffffff"))
         canvas.setFont("Helvetica-Bold", 6.1)
         canvas.drawCentredString(page_width / 2, 0.40 * cm, footer)
+        canvas.restoreState()
+
+    def _draw_internal_page(canvas, doc):
+        canvas.saveState()
+        canvas.setFillColor(colors.HexColor("#ffffff"))
+        canvas.rect(0, 0, page_width, page_height, fill=1, stroke=0)
+
+        canvas.setFont("Helvetica-Bold", 11)
+        canvas.setFillColor(colors.HexColor("#111827"))
+        canvas.drawRightString(page_width - 1.2 * cm, page_height - 1.0 * cm, f"Página {doc.page}")
+
+        canvas.setStrokeColor(colors.HexColor("#0ea5e9"))
+        canvas.setLineWidth(1.4)
+        canvas.line(left_margin, page_height - 1.35 * cm, page_width - right_margin - 0.2 * cm, page_height - 1.35 * cm)
+
+        canvas.setFillColor(colors.HexColor("#0f172a"))
+        canvas.setFont("Helvetica-Bold", 8.2)
+        canvas.drawString(left_margin, page_height - 1.0 * cm, "Machinery Diagnostics Engineering")
+
+        footer = "INFORME VALIDO UNICAMENTE PARA LAS CONDICIONES PRESENTES DURANTE EL SERVICIO. NO PODRA SER COPIADO PARCIAL O TOTALMENTE SIN PREVIA AUTORIZACION."
+        canvas.setStrokeColor(colors.HexColor("#0ea5e9"))
+        canvas.setLineWidth(1.2)
+        canvas.line(left_margin, 0.95 * cm, page_width - right_margin - 0.2 * cm, 0.95 * cm)
+
+        canvas.setFillColor(colors.HexColor("#111827"))
+        canvas.setFont("Helvetica", 6.6)
+        canvas.drawCentredString((left_margin + (page_width - right_margin - 0.2 * cm)) / 2, 0.55 * cm, footer)
         canvas.restoreState()
 
     doc = SimpleDocTemplate(
@@ -528,7 +555,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         notes = item.get("notes") or "Sin interpretación técnica todavía."
         story.append(Paragraph(_paragraph_safe(notes), styles["WMFigureText"]))
 
-    doc.build(story, onFirstPage=_draw_page_frame, onLaterPages=_draw_page_frame)
+    doc.build(story, onFirstPage=_draw_cover_page, onLaterPages=_draw_internal_page)
     return buffer.getvalue()
 
 
