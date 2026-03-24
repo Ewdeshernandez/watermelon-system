@@ -730,6 +730,33 @@ def _status_style(status: str) -> Tuple[str, str]:
     return "#f1f5f9", "#475569"
 
 
+
+def queue_tabular_to_report(
+    png_bytes: bytes,
+    sample_record: SignalRecord,
+    criterion_text: str,
+    overall_mode_text: str,
+    total_rows: int,
+) -> None:
+    item_id = f"report_tabular_{sample_record.machine}_{sample_record.point}_{total_rows}_{len(st.session_state.report_items)}"
+
+    st.session_state.report_items.append(
+        {
+            "id": item_id,
+            "type": "tabular",
+            "title": f"Tabular List — {sample_record.machine}",
+            "notes": "",
+            "signal_id": sample_record.signal_id,
+            "figure": None,
+            "image_bytes": png_bytes,
+            "machine": sample_record.machine,
+            "point": sample_record.point,
+            "variable": f"Tabular List | {criterion_text} | {overall_mode_text}",
+            "timestamp": sample_record.timestamp,
+        }
+    )
+
+
 def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: str, overall_mode_text: str) -> bytes:
     width = 4200
     row_h = 88
@@ -887,6 +914,9 @@ if "wm_tabular_export_png_bytes" not in st.session_state:
 
 if "wm_tabular_export_error" not in st.session_state:
     st.session_state.wm_tabular_export_error = None
+
+if "report_items" not in st.session_state:
+    st.session_state.report_items = []
 
 
 records_all = load_signals_from_session()
@@ -1125,7 +1155,7 @@ render_table(df_table)
 
 st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
-left_pad, col_export1, col_export2, right_pad = st.columns([2.4, 1.3, 1.3, 2.4])
+left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.3, 1.3, 1.3, 2.0])
 
 with col_export1:
     if st.button("Prepare PNG HD", width="stretch"):
@@ -1153,6 +1183,31 @@ with col_export2:
         )
     else:
         st.button("Download PNG HD", disabled=True, width="stretch")
+
+with col_report:
+    if st.button("Enviar a Reporte", width="stretch"):
+        try:
+            png_bytes = st.session_state.wm_tabular_export_png_bytes
+            if png_bytes is None:
+                png_bytes = build_png_report(
+                    df=df_table,
+                    sample_record=records_all[0],
+                    criterion=criterion_text,
+                    overall_mode_text=overall_mode_text,
+                )
+                st.session_state.wm_tabular_export_png_bytes = png_bytes
+                st.session_state.wm_tabular_export_error = None
+
+            queue_tabular_to_report(
+                png_bytes=png_bytes,
+                sample_record=records_all[0],
+                criterion_text=criterion_text,
+                overall_mode_text=overall_mode_text,
+                total_rows=len(df_table),
+            )
+            st.success("Tabular List enviado al reporte")
+        except Exception as e:
+            st.session_state.wm_tabular_export_error = str(e)
 
 if st.session_state.wm_tabular_export_error:
     st.warning(f"PNG export error: {st.session_state.wm_tabular_export_error}")
