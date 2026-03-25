@@ -1118,20 +1118,27 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
         yaxis2_cfg = dict(fig.layout.yaxis2.to_plotly_json()) if getattr(fig.layout, "yaxis2", None) is not None else {}
         yaxis2_cfg.update(
             dict(
-                automargin=True,
+                automargin=False,
                 side="right",
+                overlaying="y",
+                anchor="free",
+                position=0.80,
                 ticks="outside",
-                tickfont=dict(size=26),
-                title_font=dict(size=40),
+                tickfont=dict(size=26, color="#111827"),
+                title_font=dict(size=40, color="#111827"),
                 showline=True,
                 linecolor="#9ca3af",
+                tickcolor="#6b7280",
+                ticklen=6,
+                zeroline=False,
+                showgrid=False,
             )
         )
         fig.update_layout(yaxis2=yaxis2_cfg)
 
     if has_right_info_box:
         xaxis_cfg = dict(fig.layout.xaxis.to_plotly_json()) if getattr(fig.layout, "xaxis", None) is not None else {}
-        xaxis_cfg["domain"] = [0.0, 0.79]
+        xaxis_cfg["domain"] = [0.0, 0.72]
         fig.update_layout(xaxis=xaxis_cfg)
 
     for shape in fig.layout.shapes:
