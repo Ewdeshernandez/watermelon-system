@@ -1081,17 +1081,68 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
         new_data.append(go.Scatter(**trace_json))
     fig = go.Figure(data=new_data, layout=fig.layout)
 
-    fig.update_layout(width=4200, height=2200, margin=dict(l=120, r=90, t=360, b=120), paper_bgcolor="#f3f4f6", plot_bgcolor="#f8fafc", font=dict(size=30, color="#111827"))
+    has_secondary_y = getattr(fig.layout, "yaxis2", None) is not None
+    has_right_info_box = any(
+        getattr(ann, "xref", None) == "paper" and float(getattr(ann, "x", 0) or 0) >= 0.83
+        for ann in fig.layout.annotations
+    )
+
+    export_width = 4200
+    export_height = 2200
+    margin_left = 120
+    margin_right = 90
+    margin_top = 360
+    margin_bottom = 120
+
+    if has_secondary_y:
+        export_width = 4700
+        margin_right = 260
+
+    if has_right_info_box:
+        export_width = max(export_width, 4900)
+        margin_right = max(margin_right, 320)
+
+    fig.update_layout(
+        width=export_width,
+        height=export_height,
+        margin=dict(l=margin_left, r=margin_right, t=margin_top, b=margin_bottom),
+        paper_bgcolor="#f3f4f6",
+        plot_bgcolor="#f8fafc",
+        font=dict(size=30, color="#111827"),
+    )
+
     fig.update_xaxes(title_font=dict(size=40), tickfont=dict(size=26))
     fig.update_yaxes(title_font=dict(size=40), tickfont=dict(size=26))
+
+    if has_secondary_y:
+        yaxis2_cfg = dict(fig.layout.yaxis2.to_plotly_json()) if getattr(fig.layout, "yaxis2", None) is not None else {}
+        yaxis2_cfg.update(
+            dict(
+                automargin=True,
+                side="right",
+                ticks="outside",
+                tickfont=dict(size=26),
+                title_font=dict(size=40),
+                showline=True,
+                linecolor="#9ca3af",
+            )
+        )
+        fig.update_layout(yaxis2=yaxis2_cfg)
+
+    if has_right_info_box:
+        xaxis_cfg = dict(fig.layout.xaxis.to_plotly_json()) if getattr(fig.layout, "xaxis", None) is not None else {}
+        xaxis_cfg["domain"] = [0.0, 0.79]
+        fig.update_layout(xaxis=xaxis_cfg)
 
     for shape in fig.layout.shapes:
         if shape.line is not None:
             width = getattr(shape.line, "width", 1) or 1
             shape.line.width = max(2.0, width * 2.2)
+
     for ann in fig.layout.annotations:
         if ann.font is not None:
             ann.font.size = max(22, int((ann.font.size or 12) * 2.05))
+
     for img in fig.layout.images:
         sx = getattr(img, "sizex", None)
         sy = getattr(img, "sizey", None)
@@ -1099,6 +1150,7 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
             img.sizex = sx * 1.22
         if sy is not None:
             img.sizey = sy * 1.22
+
     return fig
 
 
