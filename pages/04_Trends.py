@@ -1,3 +1,21 @@
+
+# =========================
+# OPERATIONAL DATA HELPERS
+# =========================
+
+def is_operational_variable(name: str) -> bool:
+    name = str(name).lower()
+    return any(k in name for k in ["temp", "temperature", "mw", "load"])
+
+def is_temperature(name: str) -> bool:
+    name = str(name).lower()
+    return "temp" in name or "temperature" in name
+
+def is_load(name: str) -> bool:
+    name = str(name).lower()
+    return "mw" in name or "load" in name
+
+
 from __future__ import annotations
 
 import base64
@@ -536,7 +554,18 @@ def build_trend_figure(
     logo_uri: Optional[str],
     cursor_map: Dict[str, Optional[pd.Timestamp]],
 ) -> go.Figure:
-    fig = go.Figure()
+    
+    # =========================
+    # OPERATIONAL DATA AXIS LOGIC
+    # =========================
+    use_secondary_axis = any(is_operational_variable(s["variable"]) for s in selected_signals)
+
+    if use_secondary_axis:
+        from plotly.subplots import make_subplots
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+    else:
+        fig = go.Figure()
+
     visible_records: List[Tuple[TrendRecord, pd.DataFrame, str]] = []
 
     global_y_min = np.inf
@@ -553,7 +582,20 @@ def build_trend_figure(
         color = color_for_index(idx)
         mode = "lines+markers" if show_markers else "lines"
 
+        
+        # Decide axis
+        secondary = is_operational_variable(signal["variable"])
+
         fig.add_trace(
+            go.Scatter(
+                x=signal["x"],
+                y=signal["y"],
+                name=signal["variable"],
+                mode="lines"
+            ),
+            secondary_y=secondary if use_secondary_axis else False
+        )
+
             go.Scattergl(
                 x=df["x"],
                 y=df["y"],
@@ -719,11 +761,35 @@ def build_trend_figure(
 
 
 def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
-    export_fig = go.Figure()
+    export_
+    # =========================
+    # OPERATIONAL DATA AXIS LOGIC
+    # =========================
+    use_secondary_axis = any(is_operational_variable(s["variable"]) for s in selected_signals)
+
+    if use_secondary_axis:
+        from plotly.subplots import make_subplots
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
+    else:
+        fig = go.Figure()
+
     for trace in fig.data:
         if isinstance(trace, go.Scattergl):
             trace_json = trace.to_plotly_json()
-            export_fig.add_trace(
+            export_
+        # Decide axis
+        secondary = is_operational_variable(signal["variable"])
+
+        fig.add_trace(
+            go.Scatter(
+                x=signal["x"],
+                y=signal["y"],
+                name=signal["variable"],
+                mode="lines"
+            ),
+            secondary_y=secondary if use_secondary_axis else False
+        )
+
                 go.Scatter(
                     x=np.array(trace_json.get("x")) if trace_json.get("x") is not None else None,
                     y=np.array(trace_json.get("y")) if trace_json.get("y") is not None else None,
@@ -739,7 +805,20 @@ def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
                 )
             )
         else:
-            export_fig.add_trace(trace)
+            export_
+        # Decide axis
+        secondary = is_operational_variable(signal["variable"])
+
+        fig.add_trace(
+            go.Scatter(
+                x=signal["x"],
+                y=signal["y"],
+                name=signal["variable"],
+                mode="lines"
+            ),
+            secondary_y=secondary if use_secondary_axis else False
+        )
+trace)
     export_fig.update_layout(fig.layout)
     return export_fig
 
@@ -1132,3 +1211,9 @@ else:
         render_trend_panel([rec], idx, f"Trend {idx + 1} — {rec.point_clean}")
         if idx < len(selected_records_sorted) - 1:
             st.markdown("---")
+
+
+
+    if use_secondary_axis:
+        fig.update_yaxes(title_text="Vibration (mil pp)", secondary_y=False)
+        fig.update_yaxes(title_text="Operational Data (MW / °F / °C)", secondary_y=True)
