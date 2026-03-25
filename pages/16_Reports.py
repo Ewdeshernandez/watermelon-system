@@ -564,30 +564,33 @@ with ga2:
         _clear_all_items()
         st.rerun()
 
-pdf_ready = len(items) > 0 and REPORTLAB_AVAILABLE
 pdf_error = None
-pdf_bytes: Optional[bytes] = None
-if pdf_ready:
-    try:
-        pdf_bytes = _build_pdf_bytes(meta, items)
-    except Exception as e:
-        pdf_error = str(e)
+if "reports_pdf_bytes" not in st.session_state:
+    st.session_state["reports_pdf_bytes"] = None
+
+pdf_enabled = len(items) > 0 and REPORTLAB_AVAILABLE
 
 with ga3:
-    if pdf_bytes is not None:
+    if st.button(
+        "Prepare PDF",
+        use_container_width=True,
+        disabled=not pdf_enabled,
+        help=None if REPORTLAB_AVAILABLE else "PDF disabled in this environment.",
+    ):
+        try:
+            st.session_state["reports_pdf_bytes"] = _build_pdf_bytes(meta, items)
+            pdf_error = None
+        except Exception as e:
+            st.session_state["reports_pdf_bytes"] = None
+            pdf_error = str(e)
+
+    if st.session_state["reports_pdf_bytes"] is not None:
         st.download_button(
-            "Export PDF",
-            data=pdf_bytes,
+            "Download PDF",
+            data=st.session_state["reports_pdf_bytes"],
             file_name=(meta.get("consecutive") or "watermelon_report").replace(" ", "_") + ".pdf",
             mime="application/pdf",
             use_container_width=True,
-        )
-    else:
-        st.button(
-            "Export PDF",
-            use_container_width=True,
-            disabled=True,
-            help="PDF deshabilitado temporalmente en este entorno." if not REPORTLAB_AVAILABLE else None,
         )
 
 if pdf_error:
