@@ -6,13 +6,36 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import plotly.graph_objects as go
 import streamlit as st
-from reportlab.lib import colors
-from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
-from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import cm
-from reportlab.lib.utils import ImageReader
-from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer
+
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import cm
+    from reportlab.lib.utils import ImageReader
+    from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer
+    REPORTLAB_AVAILABLE = True
+    REPORTLAB_IMPORT_ERROR = ""
+except ModuleNotFoundError as e:
+    REPORTLAB_AVAILABLE = False
+    REPORTLAB_IMPORT_ERROR = str(e)
+
+    # Placeholders seguros para que el módulo cargue sin romperse
+    colors = None
+    TA_CENTER = 1
+    TA_JUSTIFY = 4
+    TA_LEFT = 0
+    A4 = (595.27, 841.89)
+    ParagraphStyle = None
+    getSampleStyleSheet = None
+    cm = 28.3464566929
+    ImageReader = None
+    Image = None
+    PageBreak = None
+    Paragraph = None
+    SimpleDocTemplate = None
+    Spacer = None
 
 from core.auth import require_login, render_user_menu
 
@@ -262,6 +285,7 @@ def _type_badge_class(item_type: str) -> str:
         "orbit": "wm-badge-orbit",
         "tabular": "wm-badge-tabular",
         "trends": "wm-badge-trends",
+        "bode": "wm-badge-generic",
     }
     return mapping.get(normalized, "wm-badge-generic")
 
@@ -316,6 +340,8 @@ def _figure_png_bytes(fig: go.Figure) -> bytes:
 
 
 def _fit_image_dimensions(img_bytes: bytes, max_width: float, max_height: float) -> Tuple[float, float]:
+    if not REPORTLAB_AVAILABLE or ImageReader is None:
+        raise RuntimeError("ReportLab no está disponible en este entorno.")
     reader = ImageReader(BytesIO(img_bytes))
     img_w, img_h = reader.getSize()
     scale = min(max_width / img_w, max_height / img_h)
@@ -323,6 +349,12 @@ def _fit_image_dimensions(img_bytes: bytes, max_width: float, max_height: float)
 
 
 def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes:
+    if not REPORTLAB_AVAILABLE:
+        raise RuntimeError(
+            f"PDF export temporalmente no disponible porque falta 'reportlab' en el entorno. "
+            f"Detalle: {REPORTLAB_IMPORT_ERROR}"
+        )
+
     buffer = BytesIO()
     page_width, page_height = A4
 
@@ -371,6 +403,12 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 canvas.setFillAlpha(0.20)
                 canvas.drawImage(str(logo_watermark), wm_x, wm_y, width=wm_w, height=wm_h, mask='auto', preserveAspectRatio=True, anchor='c')
                 canvas.restoreState()
+            except Exception:
+                pass
+
+        if logo_siga and logo_siga.exists():
+            try:
+                canvas.drawImage(str(logo_siga), 2.1 * cm, page_height - 3.4 * cm, width=3.0 * cm, height=1.0 * cm, mask='auto', preserveAspectRatio=True, anchor='nw')
             except Exception:
                 pass
 
@@ -495,6 +533,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+if not REPORTLAB_AVAILABLE:
+    st.warning(
+        "Modo contingencia activo: la exportación PDF está temporalmente deshabilitada en este entorno "
+        f"porque falta la dependencia 'reportlab'. Detalle: {REPORTLAB_IMPORT_ERROR}"
+    )
+
 c1, c2, c3, c4 = st.columns(4)
 with c1:
     st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Figures in Report</div><div class="wm-kpi-value">{len(items):,}</div></div>', unsafe_allow_html=True)
@@ -520,7 +564,7 @@ with ga2:
         _clear_all_items()
         st.rerun()
 
-pdf_ready = len(items) > 0
+pdf_ready = len(items) > 0 and REPORTLAB_AVAILABLE
 pdf_error = None
 pdf_bytes: Optional[bytes] = None
 if pdf_ready:
@@ -539,7 +583,12 @@ with ga3:
             use_container_width=True,
         )
     else:
-        st.button("Export PDF", use_container_width=True, disabled=True)
+        st.button(
+            "Export PDF",
+            use_container_width=True,
+            disabled=True,
+            help="PDF deshabilitado temporalmente en este entorno." if not REPORTLAB_AVAILABLE else None,
+        )
 
 if pdf_error:
     st.warning(f"PDF export error: {pdf_error}")
@@ -590,7 +639,7 @@ st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
 st.markdown('<div class="wm-section-title">Report Structure</div>', unsafe_allow_html=True)
 
 if not items:
-    st.info("Todavía no hay figuras en el reporte. Entra a Spectrum, Waveforms, Orbit o Tabular List y usa el botón 'Enviar a Reporte'.")
+    st.info("Todavía no hay figuras en el reporte. Entra a Spectrum, Waveforms, Orbit, Bode o Tabular List y usa el botón 'Enviar a Reporte'.")
 else:
     for index, item in enumerate(items, start=1):
         st.markdown('<div class="wm-card">', unsafe_allow_html=True)
@@ -705,6 +754,6 @@ with p2:
     st.markdown("</div>", unsafe_allow_html=True)
 
 st.caption(
-    "Flujo actual: Spectrum, Waveforms, Orbit y Tabular List empujan contenido real al reporte mediante st.session_state['report_items']. "
+    "Flujo actual: Spectrum, Waveforms, Orbit, Bode y Tabular List empujan contenido real al reporte mediante st.session_state['report_items']. "
     "Reports actúa como editor premium de entregable técnico y exportador PDF profesional, sin reconstruir motores visuales."
 )
