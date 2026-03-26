@@ -246,7 +246,7 @@ def read_bode_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame]
         raw_df.groupby("rpm", as_index=False)
         .agg(
             amp=("amp", "median"),
-            phase=("phase", "median"),
+            phase=("phase", lambda s: circular_mean_deg(s)),
             samples=("Timestamp", "size"),
             ts_min=("Timestamp", "min"),
             ts_max=("Timestamp", "max"),
@@ -266,6 +266,17 @@ def smooth_series(series: pd.Series, window: int) -> pd.Series:
         return series.copy()
     return series.rolling(window=window, center=True, min_periods=1).median()
 
+
+
+def circular_mean_deg(series: pd.Series) -> float:
+    vals = pd.to_numeric(series, errors="coerce").dropna().astype(float)
+    if vals.empty:
+        return float("nan")
+    rad = np.deg2rad(vals.to_numpy() % 360.0)
+    c = np.mean(np.cos(rad))
+    s = np.mean(np.sin(rad))
+    ang = np.rad2deg(np.arctan2(s, c))
+    return float((ang + 360.0) % 360.0)
 
 def circular_smooth_deg(phase_deg: pd.Series, window: int) -> pd.Series:
     if window <= 1:
@@ -515,8 +526,8 @@ def _draw_top_strip(
 
 
 def _draw_right_info_box(fig: go.Figure, rows: List[Tuple[str, str]]) -> None:
-    panel_x0 = 0.842
-    panel_x1 = 0.975
+    panel_x0 = 0.805
+    panel_x1 = 0.965
     panel_y1 = 0.915
     header_h = 0.034
     row_h = 0.054
@@ -700,7 +711,7 @@ def build_bode_figure(
         )
         _draw_right_info_box(fig, rows)
 
-    x_domain = [0.0, 0.81] if show_info_box else [0.0, 1.0]
+    x_domain = [0.0, 0.77] if show_info_box else [0.0, 1.0]
 
     fig.update_layout(
         height=820,
@@ -1063,5 +1074,3 @@ panel_error = st.session_state.wm_bode_export_store[export_state_key]["error"]
 if panel_error:
     st.warning(f"PNG export error: {panel_error}")
 
-with st.expander("Grouped Data", expanded=False):
-    st.dataframe(plot_df, width="stretch", hide_index=True)
