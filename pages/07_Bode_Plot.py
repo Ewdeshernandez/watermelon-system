@@ -444,6 +444,82 @@ def draw_top_strip(
     )
 
 
+
+
+def parse_linked_timestamp(value):
+    if value is None:
+        return None
+    try:
+        ts = pd.to_datetime(value, errors="coerce")
+        if pd.isna(ts):
+            return None
+        return pd.Timestamp(ts)
+    except Exception:
+        return None
+
+
+def nearest_bode_index_for_timestamp(grouped_df, target_ts):
+    if target_ts is None or grouped_df.empty:
+        return None
+
+    ts_ref = pd.to_datetime(grouped_df["ts_min"], errors="coerce")
+    ts_ref = ts_ref.fillna(pd.to_datetime(grouped_df["ts_max"], errors="coerce"))
+    if ts_ref.isna().all():
+        return None
+
+    deltas = (ts_ref - pd.Timestamp(target_ts)).abs()
+    try:
+        return int(deltas.idxmin())
+    except Exception:
+        return None
+
+
+def get_linked_bode_default_indices(grouped_df):
+    ctx = st.session_state.get("linked_bode_context", {})
+    if not isinstance(ctx, dict):
+        return None, None
+
+    a_ts = parse_linked_timestamp(ctx.get("trend_cursor_a_label"))
+    b_ts = parse_linked_timestamp(ctx.get("trend_cursor_b_label"))
+
+    a_idx = nearest_bode_index_for_timestamp(grouped_df, a_ts)
+    b_idx = nearest_bode_index_for_timestamp(grouped_df, b_ts)
+
+    return a_idx, b_idx
+
+
+def render_linked_cursor_status(default_a_idx, default_b_idx, grouped_df):
+    ctx = st.session_state.get("linked_bode_context", {})
+    if not isinstance(ctx, dict) or not ctx:
+        return
+
+    applied = []
+    if default_a_idx is not None and 0 <= default_a_idx < len(grouped_df):
+        row = grouped_df.iloc[default_a_idx]
+        applied.append(
+            f"A → {int(round(row['X-Axis Value']))} rpm | {format_number(row['amplitude'],3)}"
+        )
+    if default_b_idx is not None and 0 <= default_b_idx < len(grouped_df):
+        row = grouped_df.iloc[default_b_idx]
+        applied.append(
+            f"B → {int(round(row['X-Axis Value']))} rpm | {format_number(row['amplitude'],3)}"
+        )
+
+    if not applied:
+        return
+
+    st.markdown(
+        f"""
+        <div class="wm-card">
+            <div class="wm-card-title">Linked Cursor Sync</div>
+            <div class="wm-card-subtitle">Default Bode cursors estimated from Trends context</div>
+            <div class="wm-meta">{' &nbsp;&nbsp;|&nbsp;&nbsp; '.join(applied)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 # =========================
 # FIGURE
 # =========================
@@ -771,6 +847,14 @@ def main() -> None:
         cursor_labels = build_cursor_labels(grouped_df, x_unit, y_unit)
         default_a_idx = int(grouped_df["amplitude"].idxmax()) if not grouped_df.empty else 0
         default_b_idx = min(len(grouped_df) - 1, default_a_idx + max(1, len(grouped_df) // 8)) if not grouped_df.empty else 0
+
+        linked_a_idx, linked_b_idx = get_linked_bode_default_indices(grouped_df)
+        if linked_a_idx is not None:
+            default_a_idx = linked_a_idx
+        if linked_b_idx is not None:
+            default_b_idx = linked_b_idx
+
+        render_linked_cursor_status(default_a_idx, default_b_idx, grouped_df)
 
         csel1, csel2 = st.columns(2)
         with csel1:

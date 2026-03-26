@@ -1249,14 +1249,29 @@ if not records_all and not operational_records_all:
 def push_linked_bode_context(records: List[TrendRecord], metric_key: str) -> None:
     if not records:
         return
+
     first = records[0]
+
+    # intentamos capturar los cursores más útiles disponibles en Trends
+    cursor_a_label = (
+        st.session_state.get("wm_tr_cursor_a_current")
+        or st.session_state.get("wm_tr_cursor_a_initial")
+        or None
+    )
+    cursor_b_label = (
+        st.session_state.get("wm_tr_cursor_b_current")
+        or st.session_state.get("wm_tr_cursor_b_initial")
+        or None
+    )
+
     st.session_state["linked_bode_context"] = {
         "machine": first.machine,
         "point": first.point_clean,
         "variable": metric_key,
         "source_module": "04_Trends",
+        "trend_cursor_a_label": cursor_a_label,
+        "trend_cursor_b_label": cursor_b_label,
     }
-
 
 def queue_trend_to_report(
     records: List[TrendRecord],
