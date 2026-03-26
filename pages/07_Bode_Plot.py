@@ -655,6 +655,30 @@ def push_bode_to_report(title: str, fig: go.Figure, meta: Dict[str, str]) -> Non
 # =========================
 # UI HELPERS
 # =========================
+
+def render_linked_analysis_banner():
+    st.markdown(
+        """
+        <div style="
+            background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(255,255,255,0.86));
+            border: 1px solid #dbe3ee;
+            border-radius: 18px;
+            padding: 12px 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+        ">
+            <div style="font-size:1.02rem;font-weight:800;color:#0f172a;margin-bottom:4px;">
+                Linked Analysis
+            </div>
+            <div style="font-size:0.92rem;color:#475569;">
+                Bode Plot forma parte del flujo de análisis avanzado de Watermelon. 
+                Próximo paso: vinculación con Trends para correlación entre comportamiento temporal y respuesta dinámica del rotor.
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 def render_page_header() -> None:
     st.markdown('<div class="wm-page-title">Bode Plot</div>', unsafe_allow_html=True)
     st.markdown(
@@ -705,6 +729,7 @@ def main() -> None:
     inject_styles()
     ensure_report_state()
     render_page_header()
+    render_linked_analysis_banner()
 
     if "bode_loaded_files" not in st.session_state:
         st.session_state["bode_loaded_files"] = {}
