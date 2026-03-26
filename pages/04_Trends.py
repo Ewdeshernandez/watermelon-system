@@ -1244,6 +1244,20 @@ if not records_all and not operational_records_all:
     st.stop()
 
 
+
+
+def push_linked_bode_context(records: List[TrendRecord], metric_key: str) -> None:
+    if not records:
+        return
+    first = records[0]
+    st.session_state["linked_bode_context"] = {
+        "machine": first.machine,
+        "point": first.point_clean,
+        "variable": metric_key,
+        "source_module": "04_Trends",
+    }
+
+
 def queue_trend_to_report(
     records: List[TrendRecord],
     fig: go.Figure,
@@ -1600,7 +1614,7 @@ def render_trend_panel(
     )
 
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
-    left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.3, 1.3, 1.3, 2.0])
+    left_pad, col_export1, col_export2, col_report, col_bode, right_pad = st.columns([1.6, 1.2, 1.2, 1.2, 1.3, 1.5])
 
     with col_export1:
         if st.button("Prepare PNG HD", key=f"prepare_png_{export_state_key}", use_container_width=True):
@@ -1634,6 +1648,12 @@ def render_trend_panel(
                 operational_only_mode=operational_only_mode,
             )
             st.success("Trend enviado al reporte")
+
+    with col_bode:
+        bode_disabled = operational_only_mode or len(panel_records) == 0
+        if st.button("Open linked Bode", key=f"open_bode_{export_state_key}", use_container_width=True, disabled=bode_disabled):
+            push_linked_bode_context(panel_records, metric_key)
+            st.switch_page("pages/07_Bode_Plot.py")
 
     panel_error = st.session_state.wm_tr_export_store[export_state_key]["error"]
     if panel_error:
