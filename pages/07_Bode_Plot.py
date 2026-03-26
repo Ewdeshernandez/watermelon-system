@@ -301,10 +301,20 @@ def choose_best_phase_rotation(unwrapped_deg: pd.Series) -> float:
     return best_offset
 
 
-def make_pretty_wrapped_phase(unwrapped_deg: pd.Series) -> Tuple[pd.Series, float]:
-    offset = choose_best_phase_rotation(unwrapped_deg)
-    wrapped = (unwrapped_deg + offset) % 360.0
-    return wrapped.astype(float), offset
+
+def make_pretty_wrapped_phase(phase_deg: pd.Series, smooth_window: int = 1) -> Tuple[pd.Series, float]:
+    """
+    Para Bode tipo System 1:
+    - NO auto-rotation
+    - prioridad a fase wrapped real
+    - suavizado circular muy leve opcional
+    """
+    wrapped = (phase_deg.astype(float) % 360.0).copy()
+
+    if smooth_window > 1:
+        wrapped = circular_smooth_deg(wrapped, smooth_window)
+
+    return wrapped.astype(float), 0.0
 
 
 def nearest_row_for_rpm(df: pd.DataFrame, rpm_value: float) -> pd.Series:
@@ -312,60 +322,82 @@ def nearest_row_for_rpm(df: pd.DataFrame, rpm_value: float) -> pd.Series:
     return df.loc[idx]
 
 
+
 def estimate_critical_speeds_api684_style(df: pd.DataFrame, max_count: int = 2) -> List[Dict[str, float]]:
     """
-    Heurística basada en:
-    - picos de amplitud
-    - cambio de fase alrededor del pico (fase unwrapped)
-    No reemplaza un estudio rotodinámico formal.
+    Heurística práctica estilo API 684:
+    - picos dominantes de amplitud
+    - verifica cambio de fase local alrededor del pico
+    - permite hasta 2 velocidades críticas
     """
-    if df.empty or len(df) < 10:
+    if df.empty or len(df) < 12:
         return []
 
     amp = df["amp"].astype(float).to_numpy()
     rpm = df["rpm"].astype(float).to_numpy()
-    phase_u = df["phase_unwrapped"].astype(float).to_numpy()
 
-    if find_peaks is None:
-        peak_idx = int(np.argmax(amp))
-        if 2 <= peak_idx < len(df) - 2:
-            left = max(0, peak_idx - 3)
-            right = min(len(df) - 1, peak_idx + 3)
-            return [{
-                "rpm": float(rpm[peak_idx]),
-                "amp": float(amp[peak_idx]),
-                "phase_delta": float(phase_u[right] - phase_u[left]),
-                "idx": int(peak_idx),
-            }]
-        return []
+    # usar fase wrapped suave para evaluar cambio local de fase, más parecido a System 1
+    phase_ref = circular_smooth_deg(df["phase"].astype(float) % 360.0, 5).to_numpy()
 
-    prominence = max(np.nanmax(amp) * 0.08, 0.20)
-    distance = max(5, len(df) // 12)
+    def shortest_angle(a, b):
+        return ((b - a + 180.0) % 360.0) - 180.0
 
-    peaks, props = find_peaks(amp, prominence=prominence, distance=distance)
+    candidates = []
 
-    results: List[Dict[str, float]] = []
-    for p in peaks:
-        left = max(0, p - 4)
-        right = min(len(df) - 1, p + 4)
-        phase_delta = float(phase_u[right] - phase_u[left])
+    if find_peaks is not None:
+        prominence = max(np.nanmax(amp) * 0.06, 0.12)
+        distance = max(6, len(df) // 18)
+        peaks, props = find_peaks(amp, prominence=prominence, distance=distance)
 
-        # exigir cierto cambio de fase alrededor del pico
-        if abs(phase_delta) < 12.0:
-            continue
+        for i, p in enumerate(peaks):
+            left = max(0, p - 10)
+            right = min(len(df) - 1, p + 10)
 
-        results.append(
+            phase_delta = shortest_angle(phase_ref[left], phase_ref[right])
+            amp_peak = float(amp[p])
+            prom = float(props["prominences"][i])
+
+            # filtro más permisivo para capturar first y second critical
+            if amp_peak < np.nanmax(amp) * 0.45:
+                continue
+            if abs(phase_delta) < 6.0:
+                continue
+
+            candidates.append(
+                {
+                    "rpm": float(rpm[p]),
+                    "amp": amp_peak,
+                    "phase_delta": float(phase_delta),
+                    "idx": int(p),
+                    "prominence": prom,
+                }
+            )
+    else:
+        p = int(np.nanargmax(amp))
+        left = max(0, p - 10)
+        right = min(len(df) - 1, p + 10)
+        phase_delta = shortest_angle(phase_ref[left], phase_ref[right])
+        candidates.append(
             {
                 "rpm": float(rpm[p]),
                 "amp": float(amp[p]),
-                "phase_delta": phase_delta,
+                "phase_delta": float(phase_delta),
                 "idx": int(p),
-                "prominence": float(props["prominences"][list(peaks).index(p)]),
+                "prominence": float(amp[p]),
             }
         )
 
-    results = sorted(results, key=lambda x: (x["prominence"], x["amp"]), reverse=True)
-    return results[:max_count]
+    candidates = sorted(candidates, key=lambda x: (x["prominence"], x["amp"]), reverse=True)
+
+    # eliminar duplicados cercanos en rpm
+    filtered = []
+    for cand in candidates:
+        if all(abs(cand["rpm"] - kept["rpm"]) > 120 for kept in filtered):
+            filtered.append(cand)
+        if len(filtered) >= max_count:
+            break
+
+    return filtered
 
 
 # ============================================================
@@ -709,7 +741,7 @@ def build_bode_figure(
         row=1, col=1,
     )
 
-    phase_title = "Phase (°)" if phase_mode == "Wrapped 0-360 (Auto rotated)" else "Phase Unwrapped (°)"
+    phase_title = "Phase (°)" if phase_mode != "Unwrapped" else "Phase Unwrapped (°)"
     fig.update_yaxes(
         title=phase_title,
         showgrid=True,
@@ -894,7 +926,7 @@ with st.sidebar:
         x_max = st.number_input("Max RPM", value=float(x_max_default), step=10.0)
 
     st.markdown("### Phase Mode")
-    phase_mode = st.selectbox("Phase display", ["Wrapped 0-360 (Auto rotated)", "Unwrapped"], index=0)
+    phase_mode = st.selectbox("Phase display", ["Wrapped Raw 0-360", "Wrapped Smoothed", "Unwrapped"], index=0)
 
     st.markdown("### Smoothing")
     smooth_window = st.slider("Median smoothing window", 1, 21, 3, step=2)
@@ -913,18 +945,22 @@ with st.sidebar:
 plot_df = grouped_df.copy()
 plot_df["amp"] = smooth_series(plot_df["amp"], smooth_window)
 
-# fase más bonita: suavizado circular -> unwrap -> auto rotate
-phase_circ = circular_smooth_deg(plot_df["phase"], smooth_window)
-phase_unwrapped = unwrap_deg(phase_circ)
-plot_df["phase_unwrapped"] = phase_unwrapped
+# Fase: priorizar representación parecida a System 1
+plot_df["phase_wrapped_raw"] = plot_df["phase"].astype(float) % 360.0
+plot_df["phase_wrapped_smooth"] = circular_smooth_deg(plot_df["phase_wrapped_raw"], min(smooth_window, 5))
+plot_df["phase_unwrapped"] = unwrap_deg(plot_df["phase_wrapped_smooth"])
 
-if phase_mode == "Wrapped 0-360 (Auto rotated)":
-    phase_plot, phase_offset = make_pretty_wrapped_phase(phase_unwrapped)
-    plot_df["phase_plot"] = phase_plot
-    plot_df["phase_header"] = phase_plot
+if phase_mode == "Wrapped Raw 0-360":
+    plot_df["phase_plot"] = plot_df["phase_wrapped_raw"]
+    plot_df["phase_header"] = plot_df["phase_wrapped_raw"]
+    phase_offset = 0.0
+elif phase_mode == "Wrapped Smoothed":
+    plot_df["phase_plot"] = plot_df["phase_wrapped_smooth"]
+    plot_df["phase_header"] = plot_df["phase_wrapped_smooth"]
+    phase_offset = 0.0
 else:
-    plot_df["phase_plot"] = phase_unwrapped
-    plot_df["phase_header"] = phase_unwrapped
+    plot_df["phase_plot"] = plot_df["phase_unwrapped"]
+    plot_df["phase_header"] = plot_df["phase_unwrapped"]
     phase_offset = 0.0
 
 row_a = nearest_row_for_rpm(plot_df, cursor_a_rpm)
