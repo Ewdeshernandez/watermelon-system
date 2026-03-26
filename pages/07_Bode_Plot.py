@@ -13,7 +13,44 @@ if not uploaded_files:
 df_list = []
 
 for file in uploaded_files:
-    df = pd.read_csv(file)
+    
+# =========================
+# LECTOR ROBUSTO BODE (TIPO SYSTEM1)
+# =========================
+def read_bode_csv(file):
+    try:
+        return pd.read_csv(file)
+    except:
+        pass
+
+    try:
+        return pd.read_csv(file, sep=';')
+    except:
+        pass
+
+    try:
+        return pd.read_csv(file, engine="python", on_bad_lines="skip")
+    except:
+        pass
+
+    # intento avanzado: buscar header real
+    file.seek(0)
+    lines = file.readlines()
+
+    header_idx = None
+    for i, line in enumerate(lines):
+        if b"X-Axis" in line and b"Y-Axis" in line:
+            header_idx = i
+            break
+
+    if header_idx is not None:
+        file.seek(0)
+        return pd.read_csv(file, skiprows=header_idx)
+
+    raise Exception("No se pudo leer el CSV de Bode")
+
+df = read_bode_csv(file)
+
     df_list.append(df)
 
 df = pd.concat(df_list, ignore_index=True)
