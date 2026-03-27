@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import csv
 import io
-import math
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Tuple
+from typing import Optional, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -16,14 +16,9 @@ import streamlit as st
 # ============================================================
 
 def _safe_auth_bootstrap() -> None:
-    """
-    Intenta integrarse con core.auth sin romper si cambió el nombre
-    de funciones entre módulos.
-    """
     try:
         import core.auth as auth  # type: ignore
 
-        # Patrones comunes usados en el proyecto
         for fn_name in [
             "require_auth",
             "require_login",
@@ -77,7 +72,7 @@ st.markdown(
     """
     <style>
     .wm-header {
-        background: linear-gradient(135deg, #111827 0%, #0f172a 60%, #1e293b 100%);
+        background: linear-gradient(135deg, #081225 0%, #0b1730 55%, #16233b 100%);
         border: 1px solid rgba(255,255,255,0.08);
         border-radius: 18px;
         padding: 20px 24px 18px 24px;
@@ -122,6 +117,11 @@ st.markdown(
         margin: 0;
         font-size: 0.92rem;
     }
+    .wm-mini {
+        color: #94a3b8;
+        font-size: 0.82rem;
+        margin-top: 2px;
+    }
     .wm-metric-row {
         display: grid;
         grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -144,19 +144,14 @@ st.markdown(
         font-size: 1rem;
         font-weight: 700;
     }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 6px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 10px;
-        padding-left: 14px;
-        padding-right: 14px;
+    div[data-testid="stFileUploader"] section {
+        padding-top: 0.3rem !important;
+        padding-bottom: 0.3rem !important;
     }
     </style>
     """,
     unsafe_allow_html=True,
 )
-
 
 st.markdown(
     """
@@ -165,7 +160,7 @@ st.markdown(
         <div class="wm-title">Polar Plot</div>
         <p class="wm-subtitle">
             Visualización polar premium con múltiples gráficos independientes en una sola página,
-            lectura robusta de CSV, exportación HD y agrupación automática por canal / punto / etiqueta.
+            lectura robusta de CSV y exportación HD.
         </p>
     </div>
     """,
@@ -174,7 +169,7 @@ st.markdown(
 
 
 # ============================================================
-# Helpers
+# Data structures
 # ============================================================
 
 @dataclass
@@ -184,6 +179,10 @@ class PolarColumns:
     speed: Optional[str]
     group: Optional[str]
 
+
+# ============================================================
+# Helpers
+# ============================================================
 
 def _normalize_name(name: str) -> str:
     return (
@@ -203,28 +202,65 @@ def _normalize_name(name: str) -> str:
     )
 
 
+def _detect_delimiter(text: str) -> str:
+    sample = text[:10000]
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+        return dialect.delimiter
+    except Exception:
+        candidates = [",", ";", "\t", "|"]
+        counts = {sep: sample.count(sep) for sep in candidates}
+        return max(counts, key=counts.get)
+
+
 def _read_csv_robust(file) -> pd.DataFrame:
     raw = file.getvalue() if hasattr(file, "getvalue") else file.read()
     if isinstance(raw, str):
         raw = raw.encode("utf-8", errors="ignore")
 
-    for enc in ["utf-8", "utf-8-sig", "latin1", "cp1252"]:
+    text = None
+    for enc in ["utf-8-sig", "utf-8", "cp1252", "latin1"]:
         try:
             text = raw.decode(enc)
             break
         except Exception:
-            text = None
+            pass
+
     if text is None:
-        raise ValueError("No se pudo decodificar el archivo CSV.")
+        raise ValueError("No se pudo decodificar el archivo.")
 
-    sample = text[:10000]
-    candidates = [",", ";", "\t", "|"]
-    counts = {sep: sample.count(sep) for sep in candidates}
-    sep = max(counts, key=counts.get)
+    text = text.replace("\x00", "")
+    sep = _detect_delimiter(text)
 
-    df = pd.read_csv(io.StringIO(text), sep=sep)
-    df.columns = [str(c).strip() for c in df.columns]
-    return df
+    # intento 1: normal
+    try:
+        df = pd.read_csv(io.StringIO(text), sep=sep, engine="python")
+        df.columns = [str(c).strip() for c in df.columns]
+        return df
+    except Exception:
+        pass
+
+    # intento 2: salta líneas corruptas
+    try:
+        df = pd.read_csv(io.StringIO(text), sep=sep, engine="python", on_bad_lines="skip")
+        df.columns = [str(c).strip() for c in df.columns]
+        if len(df.columns) >= 2 and len(df) > 0:
+            return df
+    except Exception:
+        pass
+
+    # intento 3: autoseparador flexible
+    try:
+        df = pd.read_csv(io.StringIO(text), sep=None, engine="python", on_bad_lines="skip")
+        df.columns = [str(c).strip() for c in df.columns]
+        if len(df.columns) >= 2 and len(df) > 0:
+            return df
+    except Exception:
+        pass
+
+    raise ValueError(
+        "No se pudo interpretar el CSV. Revisa delimitador, encabezados o líneas corruptas."
+    )
 
 
 def _find_best_column(columns: List[str], patterns: List[str]) -> Optional[str]:
@@ -262,24 +298,24 @@ def _infer_columns(df: pd.DataFrame) -> PolarColumns:
         [
             "amplitude",
             "amp",
-            "overall",
             "direct",
+            "overall",
             "1x",
             "mils",
-            "mm s",
-            "um",
             "displacement",
             "vibration",
+            "y axis value",
+            "y axis",
         ],
     )
     phase = _find_best_column(
         cols,
         [
             "phase",
-            "angulo",
-            "angle",
             "deg",
             "degrees",
+            "angulo",
+            "angle",
         ],
     )
     speed = _find_best_column(
@@ -287,9 +323,10 @@ def _infer_columns(df: pd.DataFrame) -> PolarColumns:
         [
             "speed",
             "rpm",
-            "velocity",
             "turning",
             "rotational",
+            "x axis value",
+            "x axis",
         ],
     )
     group = _find_best_column(
@@ -298,21 +335,21 @@ def _infer_columns(df: pd.DataFrame) -> PolarColumns:
             "point name",
             "point",
             "channel",
-            "tag",
             "probe",
+            "tag",
             "measurement",
             "name",
             "label",
             "axis",
             "trace",
             "location",
+            "sensor",
         ],
     )
 
     if amplitude is None or phase is None:
         raise ValueError(
-            "No se pudieron inferir columnas de amplitud y fase. "
-            "El CSV debe contener al menos amplitude/direct y phase."
+            f"No se pudieron inferir columnas válidas de amplitud/fase. Columnas detectadas: {', '.join(cols)}"
         )
 
     return PolarColumns(amplitude=amplitude, phase=phase, speed=speed, group=group)
@@ -320,7 +357,6 @@ def _infer_columns(df: pd.DataFrame) -> PolarColumns:
 
 def _prepare_dataframe(df: pd.DataFrame, cols: PolarColumns) -> pd.DataFrame:
     work = df.copy()
-
     work["__amplitude__"] = _to_numeric_series(work[cols.amplitude])
     work["__phase__"] = _to_numeric_series(work[cols.phase])
 
@@ -335,25 +371,54 @@ def _prepare_dataframe(df: pd.DataFrame, cols: PolarColumns) -> pd.DataFrame:
         work["__group__"] = "Polar"
 
     work = work.dropna(subset=["__amplitude__", "__phase__", "__speed__"]).copy()
-
-    # Normalización prudente de fase
     work["__phase__"] = np.mod(work["__phase__"], 360.0)
-
     return work
 
 
+def _candidate_group_columns(df: pd.DataFrame) -> List[str]:
+    cols = list(df.columns)
+    candidates: List[str] = []
+    for c in cols:
+        norm = _normalize_name(c)
+        if any(k in norm for k in [
+            "point", "channel", "probe", "tag", "name", "label",
+            "measurement", "axis", "trace", "location", "sensor"
+        ]):
+            try:
+                n = df[c].astype(str).nunique(dropna=True)
+                if 1 < n <= 100:
+                    candidates.append(c)
+            except Exception:
+                pass
+    return candidates
+
+
+def _infer_unit_from_name(name: Optional[str], default: str) -> str:
+    if not name:
+        return default
+    n = _normalize_name(name)
+    if "mils" in n:
+        return "mils"
+    if "um" in n or "µm" in n:
+        return "µm"
+    if "mm/s" in n or "mm s" in n:
+        return "mm/s"
+    if "in/s" in n or "in s" in n:
+        return "in/s"
+    if "rpm" in n:
+        return "RPM"
+    if "deg" in n or "phase" in n or "angle" in n or "angulo" in n:
+        return "deg"
+    return default
+
+
 def _detect_critical_speeds(speed: np.ndarray, amp: np.ndarray, max_peaks: int = 3) -> List[float]:
-    """
-    Heurística prudente: detecta máximos locales amplios.
-    No pretende sustituir API 684; solo da referencias visuales.
-    """
     if len(speed) < 5 or len(amp) < 5:
         return []
 
     amp = np.asarray(amp, dtype=float)
     speed = np.asarray(speed, dtype=float)
 
-    # suavizado simple
     kernel = np.array([1, 2, 3, 2, 1], dtype=float)
     kernel /= kernel.sum()
     smooth = np.convolve(amp, kernel, mode="same")
@@ -368,21 +433,18 @@ def _detect_critical_speeds(speed: np.ndarray, amp: np.ndarray, max_peaks: int =
     peaks.sort(reverse=True, key=lambda x: x[0])
 
     selected: List[float] = []
+    min_sep = max(150.0, 0.05 * float(np.nanmax(speed)) if len(speed) else 150.0)
+
     for _, s in peaks:
-        if all(abs(s - prev) > max(150, 0.05 * max(speed)) for prev in selected):
+        if all(abs(s - prev) > min_sep for prev in selected):
             selected.append(float(s))
         if len(selected) >= max_peaks:
             break
+
     return selected
 
 
-def _polar_annotation_text(
-    title: str,
-    amp: np.ndarray,
-    speed: np.ndarray,
-    crit: List[float],
-    amp_unit: str,
-) -> str:
+def _polar_annotation_text(title: str, amp: np.ndarray, speed: np.ndarray, crit: List[float], amp_unit: str) -> str:
     amp_min = float(np.nanmin(amp)) if len(amp) else 0.0
     amp_max = float(np.nanmax(amp)) if len(amp) else 0.0
     rpm_min = float(np.nanmin(speed)) if len(speed) else 0.0
@@ -444,16 +506,11 @@ def _build_polar_figure(
             mode="lines+markers" if show_markers else "lines",
             line=dict(width=3, color="#38bdf8"),
             marker=dict(
-                size=8 if show_markers else 0,
+                size=8,
                 color=speed,
                 colorscale="Turbo",
                 showscale=True,
-                colorbar=dict(
-                    title=speed_unit,
-                    thickness=14,
-                    len=0.75,
-                    y=0.5,
-                ),
+                colorbar=dict(title=speed_unit, thickness=14, len=0.75, y=0.5),
                 line=dict(width=0.5, color="rgba(255,255,255,0.35)"),
             ) if show_markers else None,
             name=title,
@@ -462,7 +519,6 @@ def _build_polar_figure(
         )
     )
 
-    # Punto de inicio
     if len(amp) > 0:
         fig.add_trace(
             go.Scatterpolar(
@@ -476,7 +532,6 @@ def _build_polar_figure(
                 hovertemplate=f"START<br>Amp: {amp[0]:,.4f} {amp_unit}<br>Phase: {phase[0]:,.2f}°<extra></extra>",
             )
         )
-
         fig.add_trace(
             go.Scatterpolar(
                 r=[amp[-1]],
@@ -490,7 +545,6 @@ def _build_polar_figure(
             )
         )
 
-    # Labels RPM discretos
     if show_speed_labels and len(amp) > 0 and label_every > 0:
         idx = list(range(0, len(d), label_every))
         if idx[-1] != len(d) - 1:
@@ -509,7 +563,6 @@ def _build_polar_figure(
             )
         )
 
-    # Anillos de referencia
     rmax = float(np.nanmax(amp)) if len(amp) else 1.0
     if not np.isfinite(rmax) or rmax <= 0:
         rmax = 1.0
@@ -521,13 +574,7 @@ def _build_polar_figure(
         template="plotly_dark",
         height=760,
         margin=dict(l=50, r=90, t=70, b=40),
-        title=dict(
-            text=title,
-            x=0.02,
-            xanchor="left",
-            y=0.97,
-            font=dict(size=22),
-        ),
+        title=dict(text=title, x=0.02, xanchor="left", y=0.97, font=dict(size=22)),
         polar=dict(
             bgcolor="#0b1220",
             radialaxis=dict(
@@ -577,7 +624,6 @@ def _build_polar_figure(
         ],
     )
 
-    # Marcadores heurísticos de critical speed
     if crit:
         for c in crit:
             idx = int(np.argmin(np.abs(speed - c)))
@@ -602,52 +648,30 @@ def _build_polar_figure(
     return fig
 
 
-def _candidate_group_columns(df: pd.DataFrame) -> List[str]:
-    cols = list(df.columns)
-    candidates = []
-    for c in cols:
-        norm = _normalize_name(c)
-        if any(k in norm for k in [
-            "point", "channel", "tag", "probe", "name", "label", "measurement",
-            "axis", "trace", "location", "sensor"
-        ]):
-            candidates.append(c)
-
-    nunique_candidates = []
-    for c in candidates:
-        try:
-            n = df[c].astype(str).nunique(dropna=True)
-            if 1 < n <= 100:
-                nunique_candidates.append(c)
-        except Exception:
-            pass
-
-    return nunique_candidates
-
-
-def _infer_unit_from_name(name: str, default: str) -> str:
-    n = _normalize_name(name)
-    if "mils" in n:
-        return "mils"
-    if "um" in n or "µm" in n:
-        return "µm"
-    if "mm/s" in n or "mm s" in n:
-        return "mm/s"
-    if "in/s" in n or "in s" in n:
-        return "in/s"
-    if "rpm" in n:
-        return "RPM"
-    if "deg" in n or "phase" in n or "angulo" in n or "angle" in n:
-        return "deg"
-    return default
-
-
 # ============================================================
-# Main UI
+# Sidebar controls + uploader
 # ============================================================
+
+uploaded = None
+clockwise = True
+phase_offset = 0.0
+show_markers = True
+show_speed_labels = True
+label_every = 10
+max_critical = 3
+group_mode = "Automatic"
 
 with st.sidebar:
     st.markdown("### Polar Controls")
+
+    uploaded = st.file_uploader(
+        "Upload Polar CSV",
+        type=["csv", "txt"],
+        accept_multiple_files=False,
+        help="Carga el CSV aquí. El área principal queda limpia solo para visualización.",
+    )
+
+    st.markdown("---")
 
     clockwise = st.toggle("Clockwise machine rotation", value=True)
     phase_offset = st.number_input("Phase offset (deg)", value=0.0, step=1.0, format="%.1f")
@@ -656,174 +680,156 @@ with st.sidebar:
     label_every = st.number_input("Label every N points", min_value=1, max_value=200, value=10, step=1)
     max_critical = st.number_input("Max critical heuristics", min_value=0, max_value=5, value=3, step=1)
 
-
-tab_upload, tab_preview = st.tabs(["CSV Input", "Data Preview"])
-
-with tab_upload:
-    uploaded = st.file_uploader(
-        "Upload Polar CSV",
-        type=["csv", "txt"],
-        accept_multiple_files=False,
-        help="Carga un CSV con columnas de amplitud, fase y opcionalmente velocidad + etiqueta de canal/punto.",
+    st.markdown("---")
+    group_mode = st.radio(
+        "Grouping mode",
+        options=["Automatic", "Single chart", "Choose column"],
+        index=0,
     )
 
-df_raw: Optional[pd.DataFrame] = None
-cols: Optional[PolarColumns] = None
-df: Optional[pd.DataFrame] = None
 
-if uploaded is not None:
-    try:
-        df_raw = _read_csv_robust(uploaded)
-        cols = _infer_columns(df_raw)
-        df = _prepare_dataframe(df_raw, cols)
-    except Exception as e:
-        st.error(f"Error leyendo CSV: {e}")
-        st.stop()
+# ============================================================
+# Main body
+# ============================================================
 
-    with tab_preview:
-        st.dataframe(df_raw, use_container_width=True, height=340)
+if uploaded is None:
+    st.info("Carga el CSV desde la barra lateral izquierda para visualizar uno o varios gráficos polares.")
+    st.stop()
 
-        st.markdown(
-            f"""
-            <div class="wm-card">
-                <h3>Column detection</h3>
-                <p>
-                    Amplitude: <b>{cols.amplitude}</b> ·
-                    Phase: <b>{cols.phase}</b> ·
-                    Speed: <b>{cols.speed if cols.speed else 'Auto-generated index'}</b> ·
-                    Group: <b>{cols.group if cols.group else 'Single chart mode'}</b>
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+try:
+    df_raw = _read_csv_robust(uploaded)
+    cols = _infer_columns(df_raw)
+    df = _prepare_dataframe(df_raw, cols)
+except Exception as e:
+    st.error(f"Error leyendo CSV: {e}")
+    st.stop()
+
+amp_unit = _infer_unit_from_name(cols.amplitude, "Amp")
+speed_unit = _infer_unit_from_name(cols.speed, "RPM") if cols.speed else "Index"
+
+possible_group_cols = _candidate_group_columns(df_raw)
+default_group_col = cols.group if cols.group in possible_group_cols else (possible_group_cols[0] if possible_group_cols else None)
+
+selected_group_col = None
+if group_mode == "Choose column":
+    if possible_group_cols:
+        selected_group_col = st.selectbox(
+            "Group column",
+            options=possible_group_cols,
+            index=possible_group_cols.index(default_group_col) if default_group_col in possible_group_cols else 0,
         )
-
-    amp_unit = _infer_unit_from_name(cols.amplitude, "Amp")
-    speed_unit = _infer_unit_from_name(cols.speed, "RPM") if cols.speed else "Index"
-
-    possible_group_cols = _candidate_group_columns(df_raw)
-    default_group_col = cols.group if cols.group in possible_group_cols else (possible_group_cols[0] if possible_group_cols else None)
-
-    control_col1, control_col2, control_col3 = st.columns([1.2, 1.2, 1.6])
-
-    with control_col1:
-        group_mode = st.radio(
-            "Grouping mode",
-            options=["Automatic", "Single chart", "Choose column"],
-            horizontal=True,
-            index=0,
-        )
-
-    selected_group_col = None
-    if group_mode == "Choose column":
-        with control_col2:
-            selected_group_col = st.selectbox(
-                "Group column",
-                options=possible_group_cols if possible_group_cols else [cols.group] if cols.group else [],
-                index=0 if possible_group_cols else None,
-            )
-
-    work = df.copy()
-
-    if group_mode == "Single chart":
-        work["__group__"] = "Polar"
-    elif group_mode == "Choose column" and selected_group_col:
-        work["__group__"] = df_raw.loc[work.index, selected_group_col].astype(str).fillna("Polar")
     else:
-        # Automatic
-        pass
+        st.warning("No se detectaron columnas útiles para agrupar. Se usará Single chart.")
+        group_mode = "Single chart"
 
-    available_groups = list(work["__group__"].astype(str).dropna().unique())
-    available_groups = sorted(available_groups)
+work = df.copy()
 
-    selected_groups = st.multiselect(
-        "Curves / channels to render",
-        options=available_groups,
-        default=available_groups,
+if group_mode == "Single chart":
+    work["__group__"] = "Polar"
+elif group_mode == "Choose column" and selected_group_col:
+    work["__group__"] = df_raw.loc[work.index, selected_group_col].astype(str).fillna("Polar")
+
+available_groups = sorted(work["__group__"].astype(str).dropna().unique().tolist())
+
+selected_groups = st.multiselect(
+    "Curves / channels to render",
+    options=available_groups,
+    default=available_groups,
+)
+
+if not selected_groups:
+    st.warning("Selecciona al menos un gráfico polar.")
+    st.stop()
+
+render_df = work[work["__group__"].isin(selected_groups)].copy()
+
+st.markdown(
+    f"""
+    <div class="wm-card">
+        <h3>Polar dataset loaded</h3>
+        <p>Visualización lista. El área principal quedó limpia y toda la carga/control vive en la barra lateral.</p>
+        <div class="wm-metric-row">
+            <div class="wm-metric">
+                <div class="wm-metric-label">Rows loaded</div>
+                <div class="wm-metric-value">{len(df_raw):,}</div>
+            </div>
+            <div class="wm-metric">
+                <div class="wm-metric-label">Valid rows</div>
+                <div class="wm-metric-value">{len(df):,}</div>
+            </div>
+            <div class="wm-metric">
+                <div class="wm-metric-label">Charts selected</div>
+                <div class="wm-metric-value">{len(selected_groups)}</div>
+            </div>
+            <div class="wm-metric">
+                <div class="wm-metric-label">Amplitude unit</div>
+                <div class="wm-metric-value">{amp_unit}</div>
+            </div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    f"""
+    <div class="wm-card">
+        <h3>Detected columns</h3>
+        <p>
+            Amplitude: <b>{cols.amplitude}</b> ·
+            Phase: <b>{cols.phase}</b> ·
+            Speed: <b>{cols.speed if cols.speed else 'Auto-generated index'}</b> ·
+            Group: <b>{cols.group if cols.group else 'Single chart mode'}</b>
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+chart_config = {
+    "displaylogo": False,
+    "responsive": True,
+    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+    "toImageButtonOptions": {
+        "format": "png",
+        "filename": "watermelon_polar_plot",
+        "height": 1400,
+        "width": 1800,
+        "scale": 2,
+    },
+}
+
+for group_name in selected_groups:
+    g = render_df[render_df["__group__"].astype(str) == str(group_name)].copy()
+    if g.empty:
+        continue
+
+    title = str(group_name).strip() if str(group_name).strip() else "Polar"
+
+    fig = _build_polar_figure(
+        title=title,
+        data=g,
+        amp_unit=amp_unit,
+        speed_unit=speed_unit,
+        clockwise=clockwise,
+        phase_offset=float(phase_offset),
+        label_every=int(label_every),
+        show_markers=bool(show_markers),
+        show_speed_labels=bool(show_speed_labels),
+        max_critical=int(max_critical),
     )
-
-    if not selected_groups:
-        st.warning("Selecciona al menos un gráfico polar.")
-        st.stop()
-
-    render_df = work[work["__group__"].isin(selected_groups)].copy()
 
     st.markdown(
         f"""
         <div class="wm-card">
-            <h3>Multi-Polar Mode</h3>
-            <p>
-                Se renderizarán <b>{len(selected_groups)}</b> gráficos polares independientes,
-                cada uno con el mismo estándar visual premium y exportación HD por modebar.
-            </p>
-            <div class="wm-metric-row">
-                <div class="wm-metric">
-                    <div class="wm-metric-label">Rows loaded</div>
-                    <div class="wm-metric-value">{len(df_raw):,}</div>
-                </div>
-                <div class="wm-metric">
-                    <div class="wm-metric-label">Valid rows</div>
-                    <div class="wm-metric-value">{len(df):,}</div>
-                </div>
-                <div class="wm-metric">
-                    <div class="wm-metric-label">Charts selected</div>
-                    <div class="wm-metric-value">{len(selected_groups)}</div>
-                </div>
-                <div class="wm-metric">
-                    <div class="wm-metric-label">Amplitude unit</div>
-                    <div class="wm-metric-value">{amp_unit}</div>
-                </div>
-            </div>
+            <h3>{title}</h3>
+            <p>Gráfico polar independiente con amplitud, fase, velocidad, labels RPM y referencias heurísticas.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    chart_config = {
-        "displaylogo": False,
-        "responsive": True,
-        "modeBarButtonsToRemove": ["lasso2d", "select2d"],
-        "toImageButtonOptions": {
-            "format": "png",
-            "filename": "watermelon_polar_plot",
-            "height": 1400,
-            "width": 1800,
-            "scale": 2,
-        },
-    }
+    st.plotly_chart(fig, use_container_width=True, config=chart_config)
 
-    for group_name in selected_groups:
-        g = render_df[render_df["__group__"].astype(str) == str(group_name)].copy()
-
-        if g.empty:
-            continue
-
-        title = str(group_name).strip() if str(group_name).strip() else "Polar"
-
-        fig = _build_polar_figure(
-            title=title,
-            data=g,
-            amp_unit=amp_unit,
-            speed_unit=speed_unit,
-            clockwise=clockwise,
-            phase_offset=float(phase_offset),
-            label_every=int(label_every),
-            show_markers=bool(show_markers),
-            show_speed_labels=bool(show_speed_labels),
-            max_critical=int(max_critical),
-        )
-
-        st.markdown(
-            f"""
-            <div class="wm-card">
-                <h3>{title}</h3>
-                <p>Gráfico polar independiente con amplitud, fase, velocidad, labels RPM y referencias heurísticas.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.plotly_chart(fig, use_container_width=True, config=chart_config)
-
-else:
-    st.info("Carga un archivo CSV para visualizar uno o varios gráficos polares.")
+with st.expander("Data preview"):
+    st.dataframe(df_raw, use_container_width=True, height=320)
