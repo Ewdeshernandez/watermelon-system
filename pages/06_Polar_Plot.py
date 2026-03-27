@@ -1,737 +1,1158 @@
 from __future__ import annotations
 
-import csv
+import base64
 import io
-from dataclasses import dataclass
-from typing import Optional, List, Tuple
+import math
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+try:
+    from scipy.signal import find_peaks
+except Exception:
+    find_peaks = None
+
+from core.auth import require_login, render_user_menu
+
+
+st.set_page_config(page_title="Watermelon System | Polar Plot", layout="wide")
+require_login()
+render_user_menu()
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+LOGO_PATH = PROJECT_ROOT / "assets" / "watermelon_logo.png"
+
 
 # ============================================================
-# Safe auth / sidebar integration
+# STYLE
 # ============================================================
+def apply_page_style() -> None:
+    st.markdown(
+        """
+        <style>
+        .main > div { padding-top: 0.18rem; }
+        .stApp { background-color: #f3f4f6; }
 
-def _safe_auth_bootstrap() -> None:
-    try:
-        import core.auth as auth  # type: ignore
+        section[data-testid="stSidebar"] {
+            background: #e5e7eb;
+            border-right: 1px solid #cbd5e1;
+        }
 
-        for fn_name in [
-            "require_auth",
-            "require_login",
-            "check_auth",
-            "protect_page",
-            "ensure_authenticated",
-        ]:
-            fn = getattr(auth, fn_name, None)
-            if callable(fn):
-                try:
-                    fn()
-                    break
-                except TypeError:
-                    pass
+        .wm-page-title {
+            font-size: 2rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 0.08rem;
+            letter-spacing: -0.02em;
+        }
 
-        for fn_name in [
-            "render_sidebar",
-            "build_sidebar",
-            "show_sidebar",
-            "sidebar",
-        ]:
-            fn = getattr(auth, fn_name, None)
-            if callable(fn):
-                try:
-                    fn()
-                    break
-                except TypeError:
-                    pass
-    except Exception:
-        pass
+        .wm-page-subtitle {
+            color: #64748b;
+            font-size: 0.96rem;
+            margin-bottom: 1rem;
+        }
 
+        .wm-card {
+            background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.86));
+            border: 1px solid #dbe3ee;
+            border-radius: 18px;
+            padding: 14px 16px 14px 16px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+            margin-bottom: 12px;
+        }
 
-st.set_page_config(
-    page_title="Watermelon System | Polar Plot",
-    page_icon="🌀",
-    layout="wide",
-)
+        .wm-card-title {
+            font-size: 1.02rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 0.18rem;
+        }
 
-_safe_auth_bootstrap()
+        .wm-card-subtitle {
+            color: #64748b;
+            font-size: 0.90rem;
+            margin-bottom: 0.35rem;
+        }
 
-st.markdown(
-    """
-    <style>
-    .wm-header {
-        background: linear-gradient(135deg, #081225 0%, #0b1730 55%, #16233b 100%);
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 18px;
-        padding: 20px 24px 18px 24px;
-        margin-bottom: 18px;
-        box-shadow: 0 12px 30px rgba(0,0,0,0.18);
-    }
-    .wm-kicker {
-        color: #93c5fd;
-        font-size: 0.88rem;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        font-weight: 700;
-        margin-bottom: 6px;
-    }
-    .wm-title {
-        color: white;
-        font-size: 2rem;
-        font-weight: 800;
-        line-height: 1.05;
-        margin: 0 0 6px 0;
-    }
-    .wm-subtitle {
-        color: #cbd5e1;
-        font-size: 1rem;
-        margin: 0;
-    }
-    .wm-card {
-        background: linear-gradient(180deg, #0b1220 0%, #0f172a 100%);
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 18px;
-        padding: 14px 16px 10px 16px;
-        margin-bottom: 18px;
-        box-shadow: 0 12px 24px rgba(0,0,0,0.14);
-    }
-    .wm-card h3 {
-        color: white;
-        margin: 0 0 4px 0;
-        font-size: 1.08rem;
-    }
-    .wm-card p {
-        color: #cbd5e1;
-        margin: 0;
-        font-size: 0.92rem;
-    }
-    .wm-metric-row {
-        display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
-        gap: 10px;
-        margin-top: 10px;
-    }
-    .wm-metric {
-        background: rgba(255,255,255,0.04);
-        border: 1px solid rgba(255,255,255,0.06);
-        border-radius: 12px;
-        padding: 10px 12px;
-    }
-    .wm-metric-label {
-        color: #94a3b8;
-        font-size: 0.8rem;
-        margin-bottom: 4px;
-    }
-    .wm-metric-value {
-        color: white;
-        font-size: 1rem;
-        font-weight: 700;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+        .wm-meta {
+            color: #334155;
+            font-size: 0.92rem;
+            line-height: 1.6;
+        }
 
-st.markdown(
-    """
-    <div class="wm-header">
-        <div class="wm-kicker">Watermelon System · Rotordynamics</div>
-        <div class="wm-title">Polar Plot</div>
-        <p class="wm-subtitle">
-            Visualización polar premium con múltiples gráficos independientes, lectura robusta de CSV y exportación HD.
-        </p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+        .wm-chip-row {
+            display:flex;
+            flex-wrap:wrap;
+            gap:8px;
+            margin-top:10px;
+        }
 
+        .wm-chip {
+            border:1px solid #dbe3ee;
+            background:#f8fafc;
+            border-radius:999px;
+            padding:5px 10px;
+            color:#334155;
+            font-size:0.82rem;
+            font-weight:600;
+        }
 
-@dataclass
-class PolarColumns:
-    amplitude: str
-    phase: str
-    speed: Optional[str]
-    group: Optional[str]
+        section.main div[data-testid="stButton"] > button,
+        section.main div[data-testid="stDownloadButton"] > button {
+            min-height: 52px;
+            border-radius: 16px;
+            font-weight: 700;
+            border: 1px solid #bfd8ff !important;
+            background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%) !important;
+            color: #2563eb !important;
+            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
+            transition: all 0.18s ease;
+        }
 
-
-def _normalize_name(name: str) -> str:
-    return (
-        str(name)
-        .strip()
-        .lower()
-        .replace("\n", " ")
-        .replace("\r", " ")
-        .replace("-", " ")
-        .replace("_", " ")
-        .replace("/", " ")
-        .replace("(", " ")
-        .replace(")", " ")
-        .replace("[", " ")
-        .replace("]", " ")
-        .replace(".", " ")
+        section.main div[data-testid="stButton"] > button:hover,
+        section.main div[data-testid="stDownloadButton"] > button:hover {
+            border-color: #93c5fd !important;
+            background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%) !important;
+            color: #1d4ed8 !important;
+            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
 
 
-def _detect_delimiter(text: str) -> str:
-    sample = text[:10000]
+apply_page_style()
+
+
+# ============================================================
+# HELPERS
+# ============================================================
+def ensure_report_state() -> None:
+    if "report_items" not in st.session_state:
+        st.session_state["report_items"] = []
+
+
+def format_number(value: Any, digits: int = 3, fallback: str = "—") -> str:
+    if value is None:
+        return fallback
     try:
-        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
-        return dialect.delimiter
+        val = float(value)
+        if not math.isfinite(val):
+            return fallback
+        return f"{val:.{digits}f}"
     except Exception:
-        candidates = [",", ";", "\t", "|"]
-        counts = {sep: sample.count(sep) for sep in candidates}
-        return max(counts, key=counts.get)
+        return fallback
 
 
-def _read_csv_robust(file) -> pd.DataFrame:
-    raw = file.getvalue() if hasattr(file, "getvalue") else file.read()
-    if isinstance(raw, str):
-        raw = raw.encode("utf-8", errors="ignore")
-
-    text = None
-    for enc in ["utf-8-sig", "utf-8", "cp1252", "latin1"]:
-        try:
-            text = raw.decode(enc)
-            break
-        except Exception:
-            pass
-
-    if text is None:
-        raise ValueError("No se pudo decodificar el archivo.")
-
-    text = text.replace("\x00", "")
-    sep = _detect_delimiter(text)
-
-    try:
-        df = pd.read_csv(io.StringIO(text), sep=sep, engine="python")
-        df.columns = [str(c).strip() for c in df.columns]
-        return df
-    except Exception:
-        pass
-
-    try:
-        df = pd.read_csv(io.StringIO(text), sep=sep, engine="python", on_bad_lines="skip")
-        df.columns = [str(c).strip() for c in df.columns]
-        if len(df.columns) >= 2 and len(df) > 0:
-            return df
-    except Exception:
-        pass
-
-    try:
-        df = pd.read_csv(io.StringIO(text), sep=None, engine="python", on_bad_lines="skip")
-        df.columns = [str(c).strip() for c in df.columns]
-        if len(df.columns) >= 2 and len(df) > 0:
-            return df
-    except Exception:
-        pass
-
-    raise ValueError("No se pudo interpretar el CSV. Revisa delimitador, encabezados o líneas corruptas.")
-
-
-def _find_best_column(columns: List[str], patterns: List[str]) -> Optional[str]:
-    scored: List[Tuple[int, str]] = []
-    for col in columns:
-        norm = _normalize_name(col)
-        score = 0
-        for i, p in enumerate(patterns):
-            if p in norm:
-                score += max(1, len(patterns) - i)
-        if score > 0:
-            scored.append((score, col))
-    if not scored:
+def get_logo_data_uri(path: Path) -> Optional[str]:
+    if not path.exists():
         return None
-    scored.sort(key=lambda x: (-x[0], x[1]))
-    return scored[0][1]
+    try:
+        b64 = base64.b64encode(path.read_bytes()).decode("utf-8")
+        return f"data:image/png;base64,{b64}"
+    except Exception:
+        return None
 
 
-def _to_numeric_series(s: pd.Series) -> pd.Series:
-    if pd.api.types.is_numeric_dtype(s):
-        return pd.to_numeric(s, errors="coerce")
-    cleaned = (
-        s.astype(str)
-        .str.replace(",", ".", regex=False)
-        .str.replace(r"[^0-9\.\-+eE]", "", regex=True)
-    )
-    return pd.to_numeric(cleaned, errors="coerce")
-
-
-def _infer_columns(df: pd.DataFrame) -> PolarColumns:
-    cols = list(df.columns)
-
-    amplitude = _find_best_column(
-        cols,
-        ["amplitude", "amp", "direct", "overall", "1x", "mils", "displacement", "vibration", "y axis value", "y axis"],
-    )
-    phase = _find_best_column(
-        cols,
-        ["phase", "deg", "degrees", "angulo", "angle"],
-    )
-    speed = _find_best_column(
-        cols,
-        ["speed", "rpm", "turning", "rotational", "x axis value", "x axis"],
-    )
-    group = _find_best_column(
-        cols,
-        ["point name", "point", "channel", "probe", "tag", "measurement", "name", "label", "axis", "trace", "location", "sensor"],
+def rounded_rect_path(x0: float, y0: float, x1: float, y1: float, r: float) -> str:
+    r = max(0.0, min(r, (x1 - x0) / 2.0, (y1 - y0) / 2.0))
+    return (
+        f"M {x0+r},{y0} "
+        f"L {x1-r},{y0} "
+        f"Q {x1},{y0} {x1},{y0+r} "
+        f"L {x1},{y1-r} "
+        f"Q {x1},{y1} {x1-r},{y1} "
+        f"L {x0+r},{y1} "
+        f"Q {x0},{y1} {x0},{y1-r} "
+        f"L {x0},{y0+r} "
+        f"Q {x0},{y0} {x0+r},{y0} Z"
     )
 
-    if amplitude is None or phase is None:
-        raise ValueError(f"No se pudieron inferir amplitud/fase. Columnas detectadas: {', '.join(cols)}")
 
-    return PolarColumns(amplitude=amplitude, phase=phase, speed=speed, group=group)
+def circular_mean_deg(series: pd.Series) -> float:
+    vals = pd.to_numeric(series, errors="coerce").dropna().astype(float)
+    if vals.empty:
+        return float("nan")
+    rad = np.deg2rad(vals.to_numpy() % 360.0)
+    c = np.mean(np.cos(rad))
+    s = np.mean(np.sin(rad))
+    ang = np.rad2deg(np.arctan2(s, c))
+    return float((ang + 360.0) % 360.0)
 
 
-def _prepare_dataframe(df: pd.DataFrame, cols: PolarColumns) -> pd.DataFrame:
-    work = df.copy()
-    work["__amplitude__"] = _to_numeric_series(work[cols.amplitude])
-    work["__phase__"] = _to_numeric_series(work[cols.phase])
+def circular_smooth_deg(phase_deg: pd.Series, window: int) -> pd.Series:
+    if window <= 1:
+        return phase_deg.astype(float).copy()
+    rad = np.deg2rad(phase_deg.astype(float).to_numpy() % 360.0)
+    c = pd.Series(np.cos(rad)).rolling(window=window, center=True, min_periods=1).mean().to_numpy()
+    s = pd.Series(np.sin(rad)).rolling(window=window, center=True, min_periods=1).mean().to_numpy()
+    out = np.rad2deg(np.arctan2(s, c))
+    out = (out + 360.0) % 360.0
+    return pd.Series(out, index=phase_deg.index)
 
-    if cols.speed and cols.speed in work.columns:
-        work["__speed__"] = _to_numeric_series(work[cols.speed])
+
+def smooth_series(series: pd.Series, window: int) -> pd.Series:
+    if window is None or window < 2:
+        return series.astype(float).copy()
+
+    smoothed = series.astype(float).rolling(window=window, center=True, min_periods=1).mean()
+    std = smoothed.std()
+    mean = smoothed.mean()
+
+    if pd.notna(std) and pd.notna(mean) and std > 0:
+        smoothed = smoothed.clip(lower=mean - 3 * std, upper=mean + 3 * std)
+
+    return smoothed
+
+
+def nearest_row_for_speed(df: pd.DataFrame, speed_value: float) -> pd.Series:
+    idx = int((df["speed"] - speed_value).abs().idxmin())
+    return df.loc[idx]
+
+
+def shortest_angle_delta_deg(a: float, b: float) -> float:
+    return ((b - a + 180.0) % 360.0) - 180.0
+
+
+# ============================================================
+# CSV LOADER
+# ============================================================
+def read_polar_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame]:
+    file_obj.seek(0)
+    raw_bytes = file_obj.read()
+    text = raw_bytes.decode("utf-8-sig", errors="replace") if isinstance(raw_bytes, bytes) else str(raw_bytes)
+
+    lines = text.splitlines()
+    if not lines:
+        raise ValueError("Archivo vacío.")
+
+    header_idx = None
+    for i, line in enumerate(lines):
+        if "Amp" in line and "Phase" in line and "Speed" in line and "Timestamp" in line:
+            header_idx = i
+            break
+
+    if header_idx is None:
+        raise ValueError("No se encontró el encabezado real del CSV Polar.")
+
+    meta_lines = lines[:header_idx]
+    data_text = "\n".join(lines[header_idx:])
+
+    meta: Dict[str, str] = {}
+    for line in meta_lines:
+        if not line.strip():
+            continue
+        parts = [p.strip() for p in line.split(",", 1)]
+        if len(parts) == 2:
+            meta[parts[0]] = parts[1]
+
+    df = pd.read_csv(io.StringIO(data_text), encoding="utf-8-sig")
+
+    required = ["Amp", "Amp Status", "Phase", "Phase Status", "Speed", "Speed Status", "Timestamp"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Faltan columnas en el CSV: {missing}")
+
+    df["amp"] = pd.to_numeric(df["Amp"], errors="coerce")
+    df["phase"] = pd.to_numeric(df["Phase"], errors="coerce")
+    df["speed"] = pd.to_numeric(df["Speed"], errors="coerce")
+    df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
+
+    df = df.dropna(subset=["amp", "phase", "speed", "Timestamp"]).copy()
+    df = df[
+        df["Amp Status"].astype(str).str.strip().str.lower().eq("valid")
+        & df["Phase Status"].astype(str).str.strip().str.lower().eq("valid")
+        & df["Speed Status"].astype(str).str.strip().str.lower().eq("valid")
+    ].copy()
+
+    if df.empty:
+        raise ValueError("No quedaron filas válidas después del filtrado.")
+
+    raw_df = df.sort_values(["Timestamp", "speed"]).reset_index(drop=True)
+
+    grouped_df = (
+        raw_df.groupby("speed", as_index=False)
+        .agg(
+            amp=("amp", "median"),
+            phase=("phase", lambda s: circular_mean_deg(s)),
+            samples=("Timestamp", "size"),
+            ts_min=("Timestamp", "min"),
+            ts_max=("Timestamp", "max"),
+        )
+        .sort_values("speed", kind="stable")
+        .reset_index(drop=True)
+    )
+
+    return meta, raw_df, grouped_df
+
+
+# ============================================================
+# POLAR ORIENTATION ENGINE
+# ============================================================
+def compute_probe_base_angle(axis_label: str, side_label: str, install_angle_deg: float) -> float:
+    """
+    Convención de visualización:
+    - X Right arranca desde 0°
+    - X Left arranca desde 180°
+    - Y Right arranca desde 90°
+    - Y Left arranca desde 270°
+    y luego suma el ángulo físico del probe
+    """
+    axis_label = str(axis_label).strip().upper()
+    side_label = str(side_label).strip().capitalize()
+
+    base = 0.0
+    if axis_label == "X":
+        base = 0.0 if side_label == "Right" else 180.0
+    elif axis_label == "Y":
+        base = 90.0 if side_label == "Right" else 270.0
     else:
-        work["__speed__"] = np.arange(1, len(work) + 1, dtype=float)
+        base = 0.0
 
-    if cols.group and cols.group in work.columns:
-        work["__group__"] = work[cols.group].astype(str).fillna("Polar")
-    else:
-        work["__group__"] = "Polar"
-
-    work = work.dropna(subset=["__amplitude__", "__phase__", "__speed__"]).copy()
-    work["__phase__"] = np.mod(work["__phase__"], 360.0)
-    return work
+    return (base + float(install_angle_deg)) % 360.0
 
 
-def _candidate_group_columns(df: pd.DataFrame) -> List[str]:
-    candidates: List[str] = []
-    for c in df.columns:
-        norm = _normalize_name(c)
-        if any(k in norm for k in ["point", "channel", "probe", "tag", "name", "label", "measurement", "axis", "trace", "location", "sensor"]):
-            try:
-                n = df[c].astype(str).nunique(dropna=True)
-                if 1 < n <= 100:
-                    candidates.append(c)
-            except Exception:
-                pass
-    return candidates
+
+def get_polar_axis_rotation_and_direction(
+    axis_label: str,
+    side_label: str,
+    install_angle_deg: float,
+    rotation_direction: str,
+) -> Tuple[float, str, float]:
+    """
+    El 0° del polar se alinea con la orientación física del probe.
+    Si la máquina gira CCW, los grados del polar cuentan CW.
+    Si la máquina gira CW, los grados del polar cuentan CCW.
+    """
+    probe_ref = compute_probe_base_angle(axis_label, side_label, install_angle_deg)
+    axis_rotation = (90.0 - probe_ref) % 360.0
+    angular_direction = "clockwise" if str(rotation_direction).upper() == "CCW" else "counterclockwise"
+    return axis_rotation, angular_direction, probe_ref
 
 
-def _infer_unit_from_name(name: Optional[str], default: str) -> str:
-    if not name:
-        return default
-    n = _normalize_name(name)
-    if "mils" in n:
-        return "mils"
-    if "um" in n or "µm" in n:
-        return "µm"
-    if "mm/s" in n or "mm s" in n:
-        return "mm/s"
-    if "in/s" in n or "in s" in n:
-        return "in/s"
-    if "rpm" in n:
-        return "RPM"
-    if "deg" in n or "phase" in n or "angle" in n or "angulo" in n:
-        return "deg"
-    return default
+def compute_polar_display_theta(
+    phase_deg: pd.Series,
+    axis_label: str,
+    side_label: str,
+    install_angle_deg: float,
+    rotation_direction: str,
+) -> pd.Series:
+    """
+    La trayectoria conserva la fase medida 0-360.
+    La orientación física del sensor y el sentido de giro se aplican al EJE ANGULAR,
+    no deformando la trayectoria.
+    """
+    return phase_deg.astype(float) % 360.0
 
 
-def _detect_critical_speeds(speed: np.ndarray, amp: np.ndarray, max_peaks: int = 3) -> List[float]:
-    if len(speed) < 5 or len(amp) < 5:
+# ============================================================
+# API 684 HEURISTIC FOR POLAR
+# ============================================================
+def estimate_critical_speeds_api684_style(df: pd.DataFrame, max_count: int = 2) -> List[Dict[str, float]]:
+    """
+    Heurística práctica:
+    - picos dominantes de amplitud
+    - cambio local de fase suficiente
+    - filtra candidatos muy cercanos
+    """
+    if df.empty or len(df) < 12:
         return []
 
-    amp = np.asarray(amp, dtype=float)
-    speed = np.asarray(speed, dtype=float)
+    amp = df["amp"].astype(float).to_numpy()
+    speed = df["speed"].astype(float).to_numpy()
+    phase = df["phase_for_detection"].astype(float).to_numpy()
 
-    kernel = np.array([1, 2, 3, 2, 1], dtype=float)
-    kernel /= kernel.sum()
-    smooth = np.convolve(amp, kernel, mode="same")
+    candidates: List[Dict[str, float]] = []
 
-    peaks: List[Tuple[float, float]] = []
-    threshold = np.nanpercentile(smooth, 70)
+    if find_peaks is not None:
+        prominence = max(np.nanmax(amp) * 0.08, 0.12)
+        distance = max(8, len(df) // 16)
+        peaks, props = find_peaks(amp, prominence=prominence, distance=distance)
 
-    for i in range(2, len(smooth) - 2):
-        if smooth[i] >= threshold and smooth[i] > smooth[i - 1] and smooth[i] > smooth[i + 1]:
-            peaks.append((smooth[i], speed[i]))
+        for i, p in enumerate(peaks):
+            left = max(0, p - 10)
+            right = min(len(df) - 1, p + 10)
 
-    peaks.sort(reverse=True, key=lambda x: x[0])
+            amp_peak = float(amp[p])
+            prom = float(props["prominences"][i])
+            phase_delta = float(phase[right] - phase[left])
 
-    selected: List[float] = []
-    min_sep = max(150.0, 0.05 * float(np.nanmax(speed)) if len(speed) else 150.0)
+            if amp_peak < np.nanmax(amp) * 0.50:
+                continue
+            if abs(phase_delta) < 10.0:
+                continue
 
-    for _, s in peaks:
-        if all(abs(s - prev) > min_sep for prev in selected):
-            selected.append(float(s))
-        if len(selected) >= max_peaks:
+            if amp_peak < np.nanmax(amp) * 0.85 and abs(phase_delta) < 20.0:
+                continue
+
+            candidates.append(
+                {
+                    "speed": float(speed[p]),
+                    "amp": amp_peak,
+                    "phase_delta": phase_delta,
+                    "idx": int(p),
+                    "prominence": prom,
+                }
+            )
+    else:
+        p = int(np.nanargmax(amp))
+        left = max(0, p - 10)
+        right = min(len(df) - 1, p + 10)
+        candidates.append(
+            {
+                "speed": float(speed[p]),
+                "amp": float(amp[p]),
+                "phase_delta": float(phase[right] - phase[left]),
+                "idx": int(p),
+                "prominence": float(amp[p]),
+            }
+        )
+
+    candidates = sorted(candidates, key=lambda x: (x["prominence"], x["amp"]), reverse=True)
+
+    filtered = []
+    for cand in candidates:
+        if all(abs(cand["speed"] - kept["speed"]) > 120 for kept in filtered):
+            filtered.append(cand)
+        if len(filtered) >= max_count:
             break
 
-    return selected
+    filtered = sorted(filtered, key=lambda x: x["speed"])
+    return filtered
 
 
-def _polar_annotation_text(title: str, amp: np.ndarray, speed: np.ndarray, crit: List[float], amp_unit: str) -> str:
-    amp_min = float(np.nanmin(amp)) if len(amp) else 0.0
-    amp_max = float(np.nanmax(amp)) if len(amp) else 0.0
-    rpm_min = float(np.nanmin(speed)) if len(speed) else 0.0
-    rpm_max = float(np.nanmax(speed)) if len(speed) else 0.0
-    crit_txt = ", ".join(f"{c:,.0f}" for c in crit) if crit else "N/A"
+# ============================================================
+# IN-CHART DECORATION
+# ============================================================
+def _draw_top_strip(
+    fig: go.Figure,
+    meta: Dict[str, str],
+    logo_uri: Optional[str],
+    df: pd.DataFrame,
+    axis_label: str,
+    side_label: str,
+    install_angle_deg: float,
+    rotation_direction: str,
+) -> None:
+    x0, x1 = 0.006, 0.994
+    y0, y1 = 1.014, 1.104
+    radius = 0.014
 
-    return (
-        f"<b>{title}</b><br>"
-        f"Amp max: {amp_max:,.3f} {amp_unit}<br>"
-        f"Amp min: {amp_min:,.3f} {amp_unit}<br>"
-        f"RPM range: {rpm_min:,.0f} - {rpm_max:,.0f}<br>"
-        f"Crit. heurísticos: {crit_txt}"
+    fig.add_shape(
+        type="path",
+        xref="paper",
+        yref="paper",
+        path=rounded_rect_path(x0, y0, x1, y1, radius),
+        line=dict(color="#cfd8e3", width=1.1),
+        fillcolor="rgba(255,255,255,0.97)",
+        layer="below",
+    )
+
+    y_text = (y0 + y1) / 2.0
+
+    machine = meta.get("Machine Name", "")
+    point = meta.get("Point Name", "")
+    variable = meta.get("Variable", "")
+    speed_unit = meta.get("Speed Unit", "rpm") or "rpm"
+
+    if logo_uri:
+        fig.add_layout_image(
+            dict(
+                source=logo_uri,
+                xref="paper",
+                yref="paper",
+                x=0.014,
+                y=y1 - 0.008,
+                sizex=0.055,
+                sizey=0.085,
+                xanchor="left",
+                yanchor="top",
+                layer="above",
+                sizing="contain",
+                opacity=1.0,
+            )
+        )
+        machine_x = 0.082
+    else:
+        machine_x = 0.020
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=machine_x, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=f"<b>{machine}</b>",
+        showarrow=False,
+        font=dict(size=12.3, color="#111827"),
+    )
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.205, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=point,
+        showarrow=False,
+        font=dict(size=11.7, color="#111827"),
+    )
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.355, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=f"{variable}",
+        showarrow=False,
+        font=dict(size=11.5, color="#111827"),
+    )
+
+    orient_text = f"{axis_label} | {install_angle_deg:.0f}° {side_label} | Rotation {rotation_direction}"
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.47, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=orient_text,
+        showarrow=False,
+        font=dict(size=11.3, color="#111827"),
+    )
+
+    dt_start = pd.to_datetime(df["ts_min"], errors="coerce").min()
+    dt_end = pd.to_datetime(df["ts_max"], errors="coerce").max()
+    dt_text = "—"
+    if pd.notna(dt_start) and pd.notna(dt_end):
+        dt_text = f"{dt_start.strftime('%Y-%m-%d %H:%M:%S')} → {dt_end.strftime('%Y-%m-%d %H:%M:%S')}"
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.72, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=dt_text,
+        showarrow=False,
+        font=dict(size=10.8, color="#111827"),
+    )
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.986, y=y_text,
+        xanchor="right", yanchor="middle",
+        text=f"{int(round(df['speed'].min()))} - {int(round(df['speed'].max()))} {speed_unit}",
+        showarrow=False,
+        font=dict(size=10.8, color="#111827"),
     )
 
 
-def _build_polar_figure(
-    title: str,
-    data: pd.DataFrame,
+def _draw_right_info_box(fig: go.Figure, rows: List[Tuple[str, str]]) -> None:
+    panel_x0 = 0.805
+    panel_x1 = 0.965
+    panel_y1 = 0.915
+    header_h = 0.033
+    row_h = 0.050
+    panel_h = header_h + len(rows) * row_h + 0.016
+    panel_y0 = panel_y1 - panel_h
+
+    fig.add_shape(
+        type="path",
+        xref="paper", yref="paper",
+        path=rounded_rect_path(panel_x0, panel_y0, panel_x1, panel_y1, 0.012),
+        line=dict(color="rgba(0,0,0,0)", width=0),
+        fillcolor="rgba(255,255,255,0.74)",
+        layer="above",
+    )
+
+    fig.add_shape(
+        type="path",
+        xref="paper", yref="paper",
+        path=rounded_rect_path(panel_x0, panel_y1 - header_h, panel_x1, panel_y1, 0.012),
+        line=dict(color="rgba(0,0,0,0)", width=0),
+        fillcolor="rgba(147,197,253,0.94)",
+        layer="above",
+    )
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=(panel_x0 + panel_x1) / 2.0, y=panel_y1 - header_h / 2.0,
+        text="<b>Polar Information</b>",
+        showarrow=False,
+        xanchor="center", yanchor="middle",
+        font=dict(size=11.1, color="#111827"),
+    )
+
+    current_top = panel_y1 - header_h - 0.008
+    for title, value in rows:
+        title_y = current_top - 0.003
+        value_y = current_top - 0.026
+
+        fig.add_annotation(
+            xref="paper", yref="paper",
+            x=panel_x0 + 0.026, y=title_y,
+            xanchor="left", yanchor="top",
+            text=f"<b>{title}</b>",
+            showarrow=False, font=dict(size=10.2, color="#111827"), align="left",
+        )
+
+        fig.add_annotation(
+            xref="paper", yref="paper",
+            x=panel_x0 + 0.026, y=value_y,
+            xanchor="left", yanchor="top",
+            text=value,
+            showarrow=False, font=dict(size=9.9, color="#111827"), align="left",
+        )
+
+        current_top -= row_h
+
+
+def build_info_rows(
+    row_a: pd.Series,
+    row_b: pd.Series,
     amp_unit: str,
     speed_unit: str,
-    clockwise: bool,
-    phase_offset: float,
-    label_every: int,
-    show_markers: bool,
-    show_speed_labels: bool,
-    max_critical: int,
-) -> go.Figure:
-    d = data.sort_values("__speed__").copy()
-
-    amp = d["__amplitude__"].to_numpy(dtype=float)
-    phase = d["__phase__"].to_numpy(dtype=float)
-    speed = d["__speed__"].to_numpy(dtype=float)
-
-    if clockwise:
-        theta = np.mod(phase_offset - phase, 360.0)
-        rotation = 90
-        direction = "clockwise"
-    else:
-        theta = np.mod(phase + phase_offset, 360.0)
-        rotation = 90
-        direction = "counterclockwise"
-
-    crit = _detect_critical_speeds(speed, amp, max_peaks=max_critical)
-
-    text = [
-        f"{title}<br>Amp: {a:,.4f} {amp_unit}<br>Phase: {p:,.2f}°<br>Speed: {s:,.0f} {speed_unit}"
-        for a, p, s in zip(amp, phase, speed)
+    axis_label: str,
+    side_label: str,
+    install_angle_deg: float,
+    rotation_direction: str,
+    show_rpm_labels: bool,
+    marker_stride: int,
+    critical_speeds: List[Dict[str, float]],
+) -> List[Tuple[str, str]]:
+    rows = [
+        ("Cursor A", f"{format_number(row_a['amp'],3)} {amp_unit} @ {int(round(row_a['speed']))} {speed_unit} | ∠{format_number(row_a['theta_display'],1)}°"),
+        ("Cursor B", f"{format_number(row_b['amp'],3)} {amp_unit} @ {int(round(row_b['speed']))} {speed_unit} | ∠{format_number(row_b['theta_display'],1)}°"),
+        ("Probe Orientation", f"{axis_label} | {install_angle_deg:.0f}° {side_label}"),
+        ("Rotation", rotation_direction),
+        ("RPM Labels", "Enabled" if show_rpm_labels else "Disabled"),
+        ("Label Step", f"Every {marker_stride} points"),
     ]
+
+    for i, cs in enumerate(critical_speeds, start=1):
+        title = f"Critical Speed {i}" if i == 1 else f"Secondary Candidate {i}"
+        rows.append((title, f"{int(round(cs['speed']))} {speed_unit} | {format_number(cs['amp'],3)} {amp_unit}"))
+        rows.append((f"Phase Delta {i}", f"{format_number(cs['phase_delta'],1)}°"))
+
+    return rows
+
+
+# ============================================================
+# FIGURE BUILD
+# ============================================================
+
+
+def build_probe_reference_overlay(fig: go.Figure, max_r: float) -> None:
+    """
+    Dibuja una referencia tipo probe/proximitor sobre theta=0 del sistema polar ya orientado.
+    """
+    # línea radial de referencia
+    ref_r0 = max_r * 0.10
+    ref_r1 = max_r * 0.98
+
+    fig.add_trace(
+        go.Scatterpolar(
+            r=[ref_r0, ref_r1],
+            theta=[0, 0],
+            mode="lines",
+            line=dict(color="#111827", width=2.2, dash="dash"),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+
+    # cuerpo del probe (segmento más grueso fuera del radio)
+    body_r0 = max_r * 1.02
+    body_r1 = max_r * 1.12
+    fig.add_trace(
+        go.Scatterpolar(
+            r=[body_r0, body_r1],
+            theta=[0, 0],
+            mode="lines",
+            line=dict(color="#111827", width=5.0),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+
+    # punta del probe
+    tip_r = max_r * 1.145
+    fig.add_trace(
+        go.Scatterpolar(
+            r=[tip_r],
+            theta=[0],
+            mode="markers",
+            marker=dict(size=11, color="#111827", symbol="diamond"),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+
+    # pequeño cono/abanico visual del sensor
+    cone_r = [max_r * 1.00, max_r * 1.06, max_r * 1.00]
+    cone_t = [-4, 0, 4]
+    fig.add_trace(
+        go.Scatterpolar(
+            r=cone_r,
+            theta=cone_t,
+            mode="lines",
+            line=dict(color="#111827", width=2.0),
+            fill="toself",
+            fillcolor="rgba(17,24,39,0.12)",
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+
+    # texto
+    fig.add_trace(
+        go.Scatterpolar(
+            r=[max_r * 1.18],
+            theta=[0],
+            mode="text",
+            text=["Probe"],
+            textposition="top center",
+            textfont=dict(size=10, color="#111827"),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+
+
+def build_polar_figure(
+    df: pd.DataFrame,
+    meta: Dict[str, str],
+    row_a: pd.Series,
+    row_b: pd.Series,
+    logo_uri: Optional[str],
+    show_info_box: bool,
+    show_rpm_labels: bool,
+    marker_stride: int,
+    axis_label: str,
+    side_label: str,
+    install_angle_deg: float,
+    rotation_direction: str,
+    critical_speeds: List[Dict[str, float]],
+) -> go.Figure:
+    amp_unit = meta.get("Amp Unit", "") or ""
+    speed_unit = meta.get("Speed Unit", "rpm") or "rpm"
+
+    axis_rotation, angular_direction, probe_ref = get_polar_axis_rotation_and_direction(
+        axis_label=axis_label,
+        side_label=side_label,
+        install_angle_deg=install_angle_deg,
+        rotation_direction=rotation_direction,
+    )
+    max_r = max(0.1, float(df["amp"].max()) * 1.18)
 
     fig = go.Figure()
 
     fig.add_trace(
         go.Scatterpolar(
-            r=amp,
-            theta=theta,
-            mode="lines+markers" if show_markers else "lines",
-            line=dict(width=3, color="#38bdf8"),
-            marker=dict(
-                size=8,
-                color=speed,
-                colorscale="Turbo",
-                showscale=True,
-                colorbar=dict(title=speed_unit, thickness=14, len=0.75, y=0.5),
-                line=dict(width=0.5, color="rgba(255,255,255,0.35)"),
-            ) if show_markers else None,
-            name=title,
-            text=text,
-            hovertemplate="%{text}<extra></extra>",
+            r=df["amp"],
+            theta=df["theta_display"],
+            mode="lines",
+            line=dict(width=1.35, color="#5b9cf0"),
+            hovertemplate=(
+                f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
+                f"Phase Display: %{{theta:.1f}}°<br>"
+                f"Speed: %{{customdata[0]:.0f}} {speed_unit}<extra></extra>"
+            ),
+            customdata=np.stack([df["speed"]], axis=1),
+            showlegend=False,
+            name="Polar Path",
         )
     )
 
-    if len(amp) > 0:
+    for row, color, name in [
+        (row_a, "#efb08c", "Cursor A"),
+        (row_b, "#7ac77b", "Cursor B"),
+    ]:
         fig.add_trace(
             go.Scatterpolar(
-                r=[amp[0]],
-                theta=[theta[0]],
-                mode="markers+text",
-                marker=dict(size=14, color="#22c55e", symbol="diamond"),
-                text=["START"],
-                textposition="top center",
-                name="Start",
-                hovertemplate=f"START<br>Amp: {amp[0]:,.4f} {amp_unit}<br>Phase: {phase[0]:,.2f}°<extra></extra>",
-            )
-        )
-        fig.add_trace(
-            go.Scatterpolar(
-                r=[amp[-1]],
-                theta=[theta[-1]],
-                mode="markers+text",
-                marker=dict(size=14, color="#ef4444", symbol="diamond"),
-                text=["END"],
-                textposition="bottom center",
-                name="End",
-                hovertemplate=f"END<br>Amp: {amp[-1]:,.4f} {amp_unit}<br>Phase: {phase[-1]:,.2f}°<extra></extra>",
-            )
-        )
-
-    if show_speed_labels and len(amp) > 0 and label_every > 0:
-        idx = list(range(0, len(d), label_every))
-        if idx[-1] != len(d) - 1:
-            idx.append(len(d) - 1)
-
-        fig.add_trace(
-            go.Scatterpolar(
-                r=amp[idx],
-                theta=theta[idx],
-                mode="text",
-                text=[f"{speed[i]:,.0f}" for i in idx],
-                textfont=dict(size=10, color="white"),
-                hoverinfo="skip",
+                r=[row["amp"]],
+                theta=[row["theta_display"]],
+                mode="markers",
+                marker=dict(size=10, color=color, line=dict(width=1.2, color="#ffffff")),
+                name=name,
                 showlegend=False,
-                name="RPM Labels",
+                hovertemplate=(
+                    f"{name}<br>"
+                    f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
+                    f"Phase Display: %{{theta:.1f}}°<br>"
+                    f"Speed: {int(round(row['speed']))} {speed_unit}<extra></extra>"
+                ),
             )
         )
 
-    rmax = float(np.nanmax(amp)) if len(amp) else 1.0
-    if not np.isfinite(rmax) or rmax <= 0:
-        rmax = 1.0
-    rmax *= 1.15
+    if show_rpm_labels and len(df) > 0:
+        idxs = list(range(0, len(df), max(1, marker_stride)))
+        if idxs[-1] != len(df) - 1:
+            idxs.append(len(df) - 1)
+
+        fig.add_trace(
+            go.Scatterpolar(
+                r=df.iloc[idxs]["amp"],
+                theta=df.iloc[idxs]["theta_display"],
+                mode="text",
+                text=[str(int(round(v))) for v in df.iloc[idxs]["speed"]],
+                textfont=dict(size=9, color="#6b7280"),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
+
+    cs_colors = ["#ef4444", "#f59e0b"]
+    for idx, cs in enumerate(critical_speeds):
+        color = cs_colors[idx % len(cs_colors)]
+        cs_row = nearest_row_for_speed(df, cs["speed"])
+
+        fig.add_trace(
+            go.Scatterpolar(
+                r=[cs_row["amp"]],
+                theta=[cs_row["theta_display"]],
+                mode="markers+text",
+                marker=dict(size=9, color=color, symbol="diamond"),
+                text=[f"CS{idx+1} {int(round(cs['speed']))}"],
+                textposition="top center",
+                textfont=dict(size=10, color=color),
+                showlegend=False,
+                hovertemplate=(
+                    f"Critical Speed {idx+1}<br>"
+                    f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
+                    f"Phase Display: %{{theta:.1f}}°<br>"
+                    f"Speed: {int(round(cs['speed']))} {speed_unit}<extra></extra>"
+                ),
+            )
+        )
+
+    rows = build_info_rows(
+        row_a=row_a,
+        row_b=row_b,
+        amp_unit=amp_unit,
+        speed_unit=speed_unit,
+        axis_label=axis_label,
+        side_label=side_label,
+        install_angle_deg=install_angle_deg,
+        rotation_direction=rotation_direction,
+        show_rpm_labels=show_rpm_labels,
+        marker_stride=marker_stride,
+        critical_speeds=critical_speeds,
+    )
+
+    domain_x = [0.0, 0.78] if show_info_box else [0.0, 1.0]
 
     fig.update_layout(
-        template="plotly_dark",
-        height=760,
-        margin=dict(l=50, r=90, t=70, b=40),
-        title=dict(text=title, x=0.02, xanchor="left", y=0.97, font=dict(size=22)),
         polar=dict(
-            bgcolor="#0b1220",
-            radialaxis=dict(
-                title=amp_unit,
-                angle=90,
-                gridcolor="rgba(255,255,255,0.10)",
-                linecolor="rgba(255,255,255,0.18)",
-                tickcolor="rgba(255,255,255,0.35)",
-                showline=True,
-                linewidth=1,
-                ticks="outside",
-                range=[0, rmax],
-            ),
+            domain=dict(x=domain_x, y=[0.05, 0.96]),
+            bgcolor="#f8fafc",
             angularaxis=dict(
-                direction=direction,
-                rotation=rotation,
-                gridcolor="rgba(255,255,255,0.10)",
-                linecolor="rgba(255,255,255,0.18)",
-                tickcolor="rgba(255,255,255,0.35)",
+                rotation=axis_rotation,
+                direction=angular_direction,
+                tickfont=dict(size=12, color="#111827"),
+                gridcolor="rgba(148, 163, 184, 0.18)",
+                linecolor="#9ca3af",
                 showline=True,
-                linewidth=1,
+                ticks="outside",
+            ),
+            radialaxis=dict(
+                range=[0, max_r],
+                tickfont=dict(size=11, color="#111827"),
+                gridcolor="rgba(148, 163, 184, 0.18)",
+                linecolor="#9ca3af",
+                showline=True,
+                ticks="outside",
+                angle=225,
             ),
         ),
-        annotations=[
-            dict(
-                x=1.02,
-                y=0.92,
-                xref="paper",
-                yref="paper",
-                align="left",
-                text=_polar_annotation_text(title, amp, speed, crit, amp_unit),
-                showarrow=False,
-                bordercolor="rgba(255,255,255,0.10)",
-                borderwidth=1,
-                borderpad=10,
-                bgcolor="rgba(15,23,42,0.92)",
-                font=dict(size=12, color="white"),
-            )
-        ],
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.03,
-            xanchor="right",
-            x=1.0,
-            bgcolor="rgba(0,0,0,0)",
-        ),
+        height=820,
+        margin=dict(l=48, r=20, t=145, b=48),
+        plot_bgcolor="#f8fafc",
+        paper_bgcolor="#f3f4f6",
+        font=dict(color="#111827"),
+        showlegend=False,
     )
 
-    if crit:
-        for c in crit:
-            idx = int(np.argmin(np.abs(speed - c)))
-            fig.add_trace(
-                go.Scatterpolar(
-                    r=[amp[idx]],
-                    theta=[theta[idx]],
-                    mode="markers+text",
-                    marker=dict(size=12, color="#f59e0b", symbol="x"),
-                    text=[f"CS ~ {speed[idx]:,.0f}"],
-                    textposition="middle right",
-                    name=f"Critical ~ {speed[idx]:,.0f} {speed_unit}",
-                    hovertemplate=f"Critical heuristic<br>Speed: {speed[idx]:,.0f} {speed_unit}<br>Amp: {amp[idx]:,.4f} {amp_unit}<br>Phase: {phase[idx]:,.2f}°<extra></extra>",
-                )
-            )
+    _draw_top_strip(
+        fig=fig,
+        meta=meta,
+        logo_uri=logo_uri,
+        df=df,
+        axis_label=axis_label,
+        side_label=side_label,
+        install_angle_deg=install_angle_deg,
+        rotation_direction=rotation_direction,
+    )
+
+    if show_info_box:
+        _draw_right_info_box(fig, rows)
+
+    build_probe_reference_overlay(fig, max_r)
 
     return fig
 
 
 # ============================================================
-# Internal control panel (NO sidebar override)
+# EXPORT / REPORT
 # ============================================================
+def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
+    return go.Figure(fig.to_dict())
 
-left_col, right_col = st.columns([0.28, 0.72], gap="large")
 
-with left_col:
-    st.markdown(
-        """
-        <div class="wm-card">
-            <h3>Polar Controls</h3>
-            <p>Panel interno del módulo. La navegación lateral global queda intacta.</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
+
+def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
+    fig = go.Figure(export_fig)
+
+    # engrosar trazas y marcadores sin destruir composición
+    for trace in fig.data:
+        tj = trace.to_plotly_json()
+        mode = tj.get("mode", "") or ""
+
+        if "lines" in mode:
+            line = dict(tj.get("line", {}) or {})
+            line["width"] = max(3.2, float(line.get("width", 1.0)) * 2.0)
+            trace.line = line
+
+        if "markers" in mode:
+            marker = dict(tj.get("marker", {}) or {})
+            marker["size"] = max(10, float(marker.get("size", 6)) * 1.5)
+            trace.marker = marker
+
+        if "text" in mode:
+            textfont = dict(tj.get("textfont", {}) or {})
+            textfont["size"] = max(16, int(float(textfont.get("size", 10)) * 1.8))
+            trace.textfont = textfont
+
+    # mantener proporción bonita del polar en export HD
+    fig.update_layout(
+        width=4300,
+        height=2400,
+        margin=dict(l=110, r=80, t=320, b=120),
+        paper_bgcolor="#f3f4f6",
+        plot_bgcolor="#f8fafc",
+        font=dict(size=26, color="#111827"),
     )
 
-    uploaded = st.file_uploader(
-        "Upload Polar CSV",
-        type=["csv", "txt"],
-        accept_multiple_files=False,
-    )
+    # reforzar dominio y tamaño del polar para export
+    polar_cfg = dict(fig.layout.polar.to_plotly_json()) if getattr(fig.layout, "polar", None) is not None else {}
+    domain_cfg = dict(polar_cfg.get("domain", {}) or {})
+    current_x = domain_cfg.get("x", [0.0, 0.78])
+    current_y = domain_cfg.get("y", [0.05, 0.96])
 
-    clockwise = st.toggle("Clockwise machine rotation", value=True)
-    phase_offset = st.number_input("Phase offset (deg)", value=0.0, step=1.0, format="%.1f")
-    show_markers = st.toggle("Show markers", value=True)
-    show_speed_labels = st.toggle("Show RPM labels", value=True)
-    label_every = st.number_input("Label every N points", min_value=1, max_value=200, value=10, step=1)
-    max_critical = st.number_input("Max critical heuristics", min_value=0, max_value=5, value=3, step=1)
-    group_mode = st.radio("Grouping mode", ["Automatic", "Single chart", "Choose column"], index=0)
+    domain_cfg["x"] = [current_x[0], min(0.80, current_x[1])]
+    domain_cfg["y"] = [0.06, 0.95]
+    polar_cfg["domain"] = domain_cfg
 
-with right_col:
-    if uploaded is None:
-        st.info("Carga el CSV en el panel izquierdo del módulo. La barra lateral de navegación debe permanecer visible.")
-        st.stop()
+    angular_cfg = dict(polar_cfg.get("angularaxis", {}) or {})
+    angular_cfg["tickfont"] = dict(size=22, color="#111827")
+    polar_cfg["angularaxis"] = angular_cfg
 
+    radial_cfg = dict(polar_cfg.get("radialaxis", {}) or {})
+    radial_cfg["tickfont"] = dict(size=20, color="#111827")
+    polar_cfg["radialaxis"] = radial_cfg
+
+    fig.update_layout(polar=polar_cfg)
+
+    for ann in fig.layout.annotations or []:
+        if ann.font is not None:
+            ann.font.size = max(20, int((ann.font.size or 12) * 1.75))
+
+    for img in fig.layout.images or []:
+        sx = getattr(img, "sizex", None)
+        sy = getattr(img, "sizey", None)
+        if sx is not None:
+            img.sizex = sx * 1.10
+        if sy is not None:
+            img.sizey = sy * 1.10
+
+    return fig
+
+
+def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[str]]:
     try:
-        df_raw = _read_csv_robust(uploaded)
-        cols = _infer_columns(df_raw)
-        df = _prepare_dataframe(df_raw, cols)
+        export_fig = _build_export_safe_figure(fig)
+        export_fig = _scale_export_figure(export_fig)
+        return export_fig.to_image(format="png", width=4300, height=2200, scale=2), None
     except Exception as e:
-        st.error(f"Error leyendo CSV: {e}")
-        st.stop()
+        return None, str(e)
 
-    amp_unit = _infer_unit_from_name(cols.amplitude, "Amp")
-    speed_unit = _infer_unit_from_name(cols.speed, "RPM") if cols.speed else "Index"
 
-    possible_group_cols = _candidate_group_columns(df_raw)
-    default_group_col = cols.group if cols.group in possible_group_cols else (possible_group_cols[0] if possible_group_cols else None)
-
-    selected_group_col = None
-    if group_mode == "Choose column":
-        if possible_group_cols:
-            selected_group_col = st.selectbox(
-                "Group column",
-                options=possible_group_cols,
-                index=possible_group_cols.index(default_group_col) if default_group_col in possible_group_cols else 0,
-            )
-        else:
-            st.warning("No se detectaron columnas útiles para agrupar. Se usará Single chart.")
-            group_mode = "Single chart"
-
-    work = df.copy()
-    if group_mode == "Single chart":
-        work["__group__"] = "Polar"
-    elif group_mode == "Choose column" and selected_group_col:
-        work["__group__"] = df_raw.loc[work.index, selected_group_col].astype(str).fillna("Polar")
-
-    available_groups = sorted(work["__group__"].astype(str).dropna().unique().tolist())
-
-    selected_groups = st.multiselect(
-        "Curves / channels to render",
-        options=available_groups,
-        default=available_groups,
+def queue_polar_to_report(meta: Dict[str, str], fig: go.Figure, title: str) -> None:
+    ensure_report_state()
+    st.session_state.report_items.append(
+        {
+            "id": f"report-polar-{meta.get('Machine Name','')}-{meta.get('Point Name','')}-{title}",
+            "type": "polar",
+            "title": title,
+            "notes": "",
+            "signal_id": meta.get("Point Name", ""),
+            "figure": go.Figure(fig),
+            "machine": meta.get("Machine Name", ""),
+            "point": meta.get("Point Name", ""),
+            "variable": meta.get("Variable", ""),
+            "timestamp": "",
+        }
     )
 
-    if not selected_groups:
-        st.warning("Selecciona al menos un gráfico polar.")
-        st.stop()
 
-    render_df = work[work["__group__"].isin(selected_groups)].copy()
+# ============================================================
+# MAIN
+# ============================================================
+if "wm_polar_export_store" not in st.session_state:
+    st.session_state.wm_polar_export_store = {}
+ensure_report_state()
 
-    st.markdown(
-        f"""
-        <div class="wm-card">
-            <h3>Polar dataset loaded</h3>
-            <p>Rows loaded, valid rows y selección de gráficos lista para render premium.</p>
-            <div class="wm-metric-row">
-                <div class="wm-metric">
-                    <div class="wm-metric-label">Rows loaded</div>
-                    <div class="wm-metric-value">{len(df_raw):,}</div>
-                </div>
-                <div class="wm-metric">
-                    <div class="wm-metric-label">Valid rows</div>
-                    <div class="wm-metric-value">{len(df):,}</div>
-                </div>
-                <div class="wm-metric">
-                    <div class="wm-metric-label">Charts selected</div>
-                    <div class="wm-metric-value">{len(selected_groups)}</div>
-                </div>
-                <div class="wm-metric">
-                    <div class="wm-metric-label">Amplitude unit</div>
-                    <div class="wm-metric-value">{amp_unit}</div>
-                </div>
-            </div>
+st.markdown('<div class="wm-page-title">Polar Plot</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="wm-page-subtitle">Dynamic polar trajectory from amplitude, phase and speed.</div>',
+    unsafe_allow_html=True,
+)
+
+with st.sidebar:
+    st.markdown("### Upload Polar CSV")
+    uploaded_file = st.file_uploader("Upload Polar CSV", type=["csv"], accept_multiple_files=False)
+
+if not uploaded_file:
+    st.info("Carga un archivo CSV Polar para visualizar trayectoria dinámica.")
+    st.stop()
+
+try:
+    meta, raw_df, grouped_df = read_polar_csv(uploaded_file)
+except Exception as e:
+    st.error(f"No pude leer el CSV Polar: {e}")
+    st.stop()
+
+if grouped_df.empty:
+    st.error("No hay datos válidos para construir el Polar.")
+    st.stop()
+
+with st.sidebar:
+    st.markdown("### Probe Orientation")
+    axis_label = st.selectbox("Probe Axis", ["X", "Y"], index=1)
+    side_label = st.selectbox("Probe Side", ["Right", "Left"], index=1)
+    install_angle_deg = st.slider("Probe Installation Angle", 0, 90, 45, step=5)
+
+    st.markdown("### Machine Rotation")
+    rotation_direction = st.selectbox("Rotation Direction", ["CCW", "CW"], index=0)
+
+    st.markdown("### Polar Controls")
+    smooth_window = st.slider("Circular phase smoothing", 1, 11, 3, step=2)
+    amp_smooth_window = st.slider("Amplitude smoothing", 1, 11, 3, step=2)
+    show_info_box = st.checkbox("Show Polar Information", value=True)
+    show_rpm_labels = st.checkbox("Show RPM labels", value=True)
+    marker_stride = st.slider("RPM label step", 10, 150, 45, step=5)
+
+    st.markdown("### Critical Speed Detection")
+    detect_cs = st.checkbox("Estimate critical speeds (API-684 heuristic)", value=True)
+    max_critical_speeds = st.selectbox("Max critical speeds", [1, 2], index=1)
+
+    st.markdown("### Cursors")
+    speed_min = int(grouped_df["speed"].min())
+    speed_max = int(grouped_df["speed"].max())
+    cursor_a_speed = st.slider("Cursor A (RPM)", speed_min, speed_max, speed_min)
+    cursor_b_speed = st.slider("Cursor B (RPM)", speed_min, speed_max, speed_max)
+
+plot_df = grouped_df.copy()
+plot_df["amp"] = smooth_series(plot_df["amp"], amp_smooth_window)
+plot_df["phase_smoothed"] = circular_smooth_deg(plot_df["phase"], smooth_window) % 360.0
+plot_df["theta_display"] = compute_polar_display_theta(
+    phase_deg=plot_df["phase_smoothed"],
+    axis_label=axis_label,
+    side_label=side_label,
+    install_angle_deg=float(install_angle_deg),
+    rotation_direction=rotation_direction,
+)
+
+# para detección API 684 usar fase continua interna
+phase_internal = np.rad2deg(np.unwrap(np.deg2rad(plot_df["phase_smoothed"].to_numpy())))
+plot_df["phase_for_detection"] = phase_internal
+
+row_a = nearest_row_for_speed(plot_df, cursor_a_speed)
+row_b = nearest_row_for_speed(plot_df, cursor_b_speed)
+
+critical_speeds: List[Dict[str, float]] = []
+if detect_cs:
+    critical_speeds = estimate_critical_speeds_api684_style(plot_df, max_count=max_critical_speeds)
+
+machine = meta.get("Machine Name", "-")
+point = meta.get("Point Name", "-")
+variable = meta.get("Variable", "-")
+speed_unit = meta.get("Speed Unit", "rpm")
+amp_unit = meta.get("Amp Unit", "")
+
+st.markdown(
+    f"""
+    <div class="wm-card">
+        <div class="wm-card-title">{machine} · {point}</div>
+        <div class="wm-card-subtitle">Dynamic polar view</div>
+        <div class="wm-meta">
+            Variable: <b>{variable}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
+            Orientation: <b>{axis_label} | {install_angle_deg:.0f}° {side_label}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
+            Rotation: <b>{rotation_direction}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
+            Speed Range: <b>{int(plot_df['speed'].min())} - {int(plot_df['speed'].max())} {speed_unit}</b>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        f"""
-        <div class="wm-card">
-            <h3>Detected columns</h3>
-            <p>
-                Amplitude: <b>{cols.amplitude}</b> ·
-                Phase: <b>{cols.phase}</b> ·
-                Speed: <b>{cols.speed if cols.speed else 'Auto-generated index'}</b> ·
-                Group: <b>{cols.group if cols.group else 'Single chart mode'}</b>
-            </p>
+        <div class="wm-chip-row">
+            <div class="wm-chip">Raw rows: {len(raw_df):,}</div>
+            <div class="wm-chip">Grouped points: {len(plot_df):,}</div>
+            <div class="wm-chip">Phase smoothing: {smooth_window}</div>
+            <div class="wm-chip">Amplitude smoothing: {amp_smooth_window}</div>
+            <div class="wm-chip">Critical speeds: {len(critical_speeds)}</div>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-    chart_config = {
-        "displaylogo": False,
-        "responsive": True,
-        "modeBarButtonsToRemove": ["lasso2d", "select2d"],
-        "toImageButtonOptions": {
-            "format": "png",
-            "filename": "watermelon_polar_plot",
-            "height": 1400,
-            "width": 1800,
-            "scale": 2,
-        },
-    }
+logo_uri = get_logo_data_uri(LOGO_PATH)
+fig = build_polar_figure(
+    df=plot_df,
+    meta=meta,
+    row_a=row_a,
+    row_b=row_b,
+    logo_uri=logo_uri,
+    show_info_box=show_info_box,
+    show_rpm_labels=show_rpm_labels,
+    marker_stride=marker_stride,
+    axis_label=axis_label,
+    side_label=side_label,
+    install_angle_deg=float(install_angle_deg),
+    rotation_direction=rotation_direction,
+    critical_speeds=critical_speeds,
+)
 
-    for group_name in selected_groups:
-        g = render_df[render_df["__group__"].astype(str) == str(group_name)].copy()
-        if g.empty:
-            continue
+st.plotly_chart(fig, width="stretch", config={"displaylogo": False}, key="wm_polar_plot")
 
-        title = str(group_name).strip() if str(group_name).strip() else "Polar"
+title = f"Polar — {machine} — {point}"
 
-        st.markdown(
-            f"""
-            <div class="wm-card">
-                <h3>{title}</h3>
-                <p>Gráfico polar independiente con amplitud, fase, velocidad, labels RPM y referencias heurísticas.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
+export_state_key = (
+    f"polar::{machine}::{point}::{variable}::{smooth_window}::{amp_smooth_window}::"
+    f"{show_info_box}::{show_rpm_labels}::{marker_stride}::{axis_label}::{side_label}::"
+    f"{install_angle_deg}::{rotation_direction}::{detect_cs}::{max_critical_speeds}"
+)
+
+if export_state_key not in st.session_state.wm_polar_export_store:
+    st.session_state.wm_polar_export_store[export_state_key] = {"png_bytes": None, "error": None}
+
+left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
+
+with col_export1:
+    if st.button("Prepare PNG HD", key=f"prepare_polar_png_{export_state_key}", width="stretch"):
+        with st.spinner("Generating HD export..."):
+            png_bytes, export_error = build_export_png_bytes(fig)
+            st.session_state.wm_polar_export_store[export_state_key]["png_bytes"] = png_bytes
+            st.session_state.wm_polar_export_store[export_state_key]["error"] = export_error
+
+with col_export2:
+    png_bytes = st.session_state.wm_polar_export_store[export_state_key]["png_bytes"]
+    if png_bytes is not None:
+        st.download_button(
+            "Download PNG HD",
+            data=png_bytes,
+            file_name=f"{Path(uploaded_file.name).stem}_polar_hd.png",
+            mime="image/png",
+            key=f"download_polar_png_{export_state_key}",
+            width="stretch",
         )
+    else:
+        st.button("Download PNG HD", disabled=True, key=f"download_polar_disabled_{export_state_key}", width="stretch")
 
-        fig = _build_polar_figure(
-            title=title,
-            data=g,
-            amp_unit=amp_unit,
-            speed_unit=speed_unit,
-            clockwise=clockwise,
-            phase_offset=float(phase_offset),
-            label_every=int(label_every),
-            show_markers=bool(show_markers),
-            show_speed_labels=bool(show_speed_labels),
-            max_critical=int(max_critical),
-        )
-
-        st.plotly_chart(fig, use_container_width=True, config=chart_config)
-
-    with st.expander("Data preview"):
-        st.dataframe(df_raw, use_container_width=True, height=320)
+with col_report:
+    if st.button("Enviar a Reporte", key=f"report_polar_{export_state_key}", width="stretch"):
+        queue_polar_to_report(meta, fig, title)
+        st.success("Polar enviado al reporte.")
