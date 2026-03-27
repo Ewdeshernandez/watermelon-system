@@ -412,6 +412,7 @@ def _draw_top_strip(
     row_a: pd.Series,
     row_b: pd.Series,
     logo_uri: Optional[str],
+    df: pd.DataFrame,
 ) -> None:
     x0, x1 = 0.006, 0.994
     y0, y1 = 1.014, 1.104
@@ -484,20 +485,18 @@ def _draw_top_strip(
         font=dict(size=11.5, color="#111827"),
     )
 
-    a_txt = (
-        f"A: <b>{format_number(row_a['amp'],3)} {y_unit}</b> "
-        f"∠{format_number(row_a['phase_header'],1)}° @ {int(round(row_a['rpm']))} {x_unit}"
-    )
-    b_txt = (
-        f"B: <b>{format_number(row_b['amp'],3)} {y_unit}</b> "
-        f"∠{format_number(row_b['phase_header'],1)}° @ {int(round(row_b['rpm']))} {x_unit}"
-    )
+    dt_start = pd.to_datetime(df["ts_min"], errors="coerce").min()
+    dt_end = pd.to_datetime(df["ts_max"], errors="coerce").max()
+
+    dt_text = "—"
+    if pd.notna(dt_start) and pd.notna(dt_end):
+        dt_text = f"{dt_start.strftime('%Y-%m-%d %H:%M:%S')} → {dt_end.strftime('%Y-%m-%d %H:%M:%S')}"
 
     fig.add_annotation(
         xref="paper", yref="paper",
         x=0.60, y=y_text,
         xanchor="left", yanchor="middle",
-        text=f"{a_txt} &nbsp;&nbsp;|&nbsp;&nbsp; {b_txt}",
+        text=dt_text,
         showarrow=False,
         font=dict(size=10.8, color="#111827"),
     )
@@ -506,7 +505,7 @@ def _draw_top_strip(
         xref="paper", yref="paper",
         x=0.986, y=y_text,
         xanchor="right", yanchor="middle",
-        text=f"{int(round(row_a['rpm']))} - {int(round(row_b['rpm']))} {x_unit}",
+        text=f"{int(round(df['rpm'].min()))} - {int(round(df['rpm'].max()))} {x_unit}",
         showarrow=False,
         font=dict(size=10.8, color="#111827"),
     )
@@ -580,9 +579,16 @@ def build_bode_info_rows(
     x_unit: str,
     critical_speeds: List[Dict[str, float]],
 ) -> List[Tuple[str, str]]:
+    dt_a = pd.to_datetime(row_a.get("ts_min"), errors="coerce")
+    dt_b = pd.to_datetime(row_b.get("ts_max"), errors="coerce")
+    date_text = "—"
+    if pd.notna(dt_a) and pd.notna(dt_b):
+        date_text = f"{dt_a.strftime('%Y-%m-%d %H:%M:%S')} → {dt_b.strftime('%Y-%m-%d %H:%M:%S')}"
+
     rows: List[Tuple[str, str]] = [
         ("Cursor A", f"{format_number(row_a['amp'],3)} {y_unit} @ {int(round(row_a['rpm']))} {x_unit} | ∠{format_number(row_a['phase_header'],1)}°"),
         ("Cursor B", f"{format_number(row_b['amp'],3)} {y_unit} @ {int(round(row_b['rpm']))} {x_unit} | ∠{format_number(row_b['phase_header'],1)}°"),
+        ("Date Range", date_text),
         ("Phase Mode", phase_mode),
     ]
 
@@ -726,7 +732,7 @@ def build_bode_figure(
             bordercolor="#fecaca" if idx == 0 else "#fde68a",
         )
 
-    _draw_top_strip(fig, meta, row_a, row_b, logo_uri)
+    _draw_top_strip(fig, meta, row_a, row_b, logo_uri, df)
 
     if show_info_box:
         rows = build_bode_info_rows(row_a, row_b, phase_mode, y_unit, x_unit, critical_speeds)
