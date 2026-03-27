@@ -22,6 +22,7 @@ NAV_ITEMS = [
     {"label": "Spectrum", "page": "pages/03_Spectrum.py"},
     {"label": "Trends", "page": "pages/04_Trends.py"},
     {"label": "Orbit Analysis", "page": "pages/05_Orbit_Analysis.py"},
+    {"label": "Bode Plot", "page": "pages/07_Bode_Plot.py"},
     {"label": "Phase Analysis", "page": "pages/13_Phase_Analysis.py"},
     {"label": "Diagnostics", "page": "pages/15_Diagnostics.py"},
     {"label": "Reports", "page": "pages/16_Reports.py"},
