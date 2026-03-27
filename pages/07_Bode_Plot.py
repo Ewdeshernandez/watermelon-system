@@ -294,6 +294,32 @@ def unwrap_deg(phase_deg: pd.Series) -> pd.Series:
     return pd.Series(np.rad2deg(np.unwrap(rad)), index=phase_deg.index)
 
 
+
+def phase_display_nearest_branch(phase_deg: pd.Series) -> pd.Series:
+    """
+    Mantiene display en 0-360, pero evita saltos feos escogiendo la rama
+    visual más cercana entre puntos consecutivos.
+    El resultado final sigue estando limitado a 0-360.
+    """
+    vals = pd.to_numeric(phase_deg, errors="coerce").astype(float).to_numpy()
+    if len(vals) == 0:
+        return pd.Series(dtype=float)
+
+    out = np.zeros_like(vals, dtype=float)
+    out[0] = vals[0] % 360.0
+
+    for i in range(1, len(vals)):
+        raw = vals[i] % 360.0
+        prev = out[i - 1]
+
+        candidates = np.array([raw - 360.0, raw, raw + 360.0], dtype=float)
+        best = candidates[np.argmin(np.abs(candidates - prev))]
+
+        # devolverlo a display 0-360, pero preservando continuidad local
+        out[i] = best % 360.0
+
+    return pd.Series(out, index=phase_deg.index)
+
 def nearest_row_for_rpm(df: pd.DataFrame, rpm_value: float) -> pd.Series:
     idx = int((df["rpm"] - rpm_value).abs().idxmin())
     return df.loc[idx]
@@ -316,7 +342,7 @@ def estimate_critical_speeds_api684_style(df: pd.DataFrame, max_count: int = 2) 
     amp = df["amp"].astype(float).to_numpy()
     rpm = df["rpm"].astype(float).to_numpy()
 
-    phase_ref = df["phase_continuous"].astype(float).to_numpy()
+    phase_ref = df["phase_continuous_internal"].astype(float).to_numpy()
 
     candidates = []
 
@@ -742,7 +768,7 @@ def build_bode_figure(
         row=1, col=1,
     )
 
-    phase_title = "Phase Continuous (°)" if phase_mode == "Continuous Unwrapped" else "Phase (°)"
+    phase_title = "Phase (°)"
     fig.update_yaxes(
         title=phase_title,
         showgrid=True,
@@ -927,7 +953,7 @@ with st.sidebar:
         x_max = st.number_input("Max RPM", value=float(x_max_default), step=10.0)
 
     st.markdown("### Phase Mode")
-    phase_mode = st.selectbox("Phase display", ["Wrapped Raw 0-360", "Wrapped Smoothed", "Continuous Unwrapped"], index=2)
+    phase_mode = st.selectbox("Phase display", ["Wrapped Raw 0-360", "Wrapped Smoothed", "Wrapped Nearest Branch"], index=2)
 
     st.markdown("### Smoothing")
     smooth_window = st.slider("Median smoothing window", 1, 21, 3, step=2)
@@ -948,11 +974,13 @@ plot_df["amp"] = smooth_series(plot_df["amp"], smooth_window)
 
 phase_wrapped_raw = plot_df["phase"].astype(float) % 360.0
 phase_wrapped_smooth = circular_smooth_deg(phase_wrapped_raw, min(smooth_window, 5))
-phase_continuous = unwrap_deg(phase_wrapped_smooth)
+phase_continuous_internal = unwrap_deg(phase_wrapped_smooth)
+phase_nearest_branch = phase_display_nearest_branch(phase_wrapped_smooth)
 
 plot_df["phase_wrapped_raw"] = phase_wrapped_raw
 plot_df["phase_wrapped_smooth"] = phase_wrapped_smooth
-plot_df["phase_continuous"] = phase_continuous
+plot_df["phase_continuous_internal"] = phase_continuous_internal
+plot_df["phase_nearest_branch"] = phase_nearest_branch
 
 if phase_mode == "Wrapped Raw 0-360":
     plot_df["phase_plot"] = plot_df["phase_wrapped_raw"]
@@ -961,8 +989,8 @@ elif phase_mode == "Wrapped Smoothed":
     plot_df["phase_plot"] = plot_df["phase_wrapped_smooth"]
     plot_df["phase_header"] = plot_df["phase_wrapped_smooth"]
 else:
-    plot_df["phase_plot"] = plot_df["phase_continuous"]
-    plot_df["phase_header"] = plot_df["phase_continuous"]
+    plot_df["phase_plot"] = plot_df["phase_nearest_branch"]
+    plot_df["phase_header"] = plot_df["phase_nearest_branch"]
 
 row_a = nearest_row_for_rpm(plot_df, cursor_a_rpm)
 row_b = nearest_row_for_rpm(plot_df, cursor_b_rpm)
