@@ -579,16 +579,9 @@ def build_bode_info_rows(
     x_unit: str,
     critical_speeds: List[Dict[str, float]],
 ) -> List[Tuple[str, str]]:
-    dt_a = pd.to_datetime(row_a.get("ts_min"), errors="coerce")
-    dt_b = pd.to_datetime(row_b.get("ts_max"), errors="coerce")
-    date_text = "—"
-    if pd.notna(dt_a) and pd.notna(dt_b):
-        date_text = f"{dt_a.strftime('%Y-%m-%d %H:%M:%S')} → {dt_b.strftime('%Y-%m-%d %H:%M:%S')}"
-
     rows: List[Tuple[str, str]] = [
         ("Cursor A", f"{format_number(row_a['amp'],3)} {y_unit} @ {int(round(row_a['rpm']))} {x_unit} | ∠{format_number(row_a['phase_header'],1)}°"),
         ("Cursor B", f"{format_number(row_b['amp'],3)} {y_unit} @ {int(round(row_b['rpm']))} {x_unit} | ∠{format_number(row_b['phase_header'],1)}°"),
-        ("Date Range", date_text),
         ("Phase Mode", phase_mode),
     ]
 
@@ -779,7 +772,7 @@ def build_bode_figure(
         row=1, col=1,
     )
 
-    phase_title = "Phase (°) — System 1 style"
+    phase_title = "Phase (°)"
     fig.update_yaxes(
         title=phase_title,
         autorange="reversed",
