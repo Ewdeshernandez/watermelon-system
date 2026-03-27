@@ -422,6 +422,7 @@ def estimate_critical_speeds_api684_style(df: pd.DataFrame, max_count: int = 2) 
         if len(filtered) >= max_count:
             break
 
+    filtered = sorted(filtered, key=lambda x: x["speed"])
     return filtered
 
 
@@ -636,47 +637,75 @@ def build_info_rows(
 # FIGURE BUILD
 # ============================================================
 
+
 def build_probe_reference_overlay(fig: go.Figure, max_r: float) -> None:
     """
-    Dibuja referencia del probe en theta=0 del sistema polar ya orientado.
+    Dibuja una referencia tipo probe/proximitor sobre theta=0 del sistema polar ya orientado.
     """
-    line_r0 = max_r * 0.18
-    line_r1 = max_r * 1.02
-    body_r0 = max_r * 1.04
-    body_r1 = max_r * 1.12
-    tip_r = max_r * 1.15
+    # línea radial de referencia
+    ref_r0 = max_r * 0.10
+    ref_r1 = max_r * 0.98
 
-    # Línea radial de referencia del probe
     fig.add_trace(
         go.Scatterpolar(
-            r=[line_r0, line_r1],
+            r=[ref_r0, ref_r1],
             theta=[0, 0],
             mode="lines",
-            line=dict(color="#111827", width=2.0, dash="dash"),
+            line=dict(color="#111827", width=2.2, dash="dash"),
             showlegend=False,
             hoverinfo="skip",
         )
     )
 
-    # Cuerpo simple del probe
+    # cuerpo del probe (segmento más grueso fuera del radio)
+    body_r0 = max_r * 1.02
+    body_r1 = max_r * 1.12
     fig.add_trace(
         go.Scatterpolar(
             r=[body_r0, body_r1],
             theta=[0, 0],
             mode="lines",
-            line=dict(color="#111827", width=4.0),
+            line=dict(color="#111827", width=5.0),
             showlegend=False,
             hoverinfo="skip",
         )
     )
 
-    # Punta del probe
+    # punta del probe
+    tip_r = max_r * 1.145
     fig.add_trace(
         go.Scatterpolar(
             r=[tip_r],
             theta=[0],
-            mode="markers+text",
-            marker=dict(size=9, color="#111827", symbol="diamond"),
+            mode="markers",
+            marker=dict(size=11, color="#111827", symbol="diamond"),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+
+    # pequeño cono/abanico visual del sensor
+    cone_r = [max_r * 1.00, max_r * 1.06, max_r * 1.00]
+    cone_t = [-4, 0, 4]
+    fig.add_trace(
+        go.Scatterpolar(
+            r=cone_r,
+            theta=cone_t,
+            mode="lines",
+            line=dict(color="#111827", width=2.0),
+            fill="toself",
+            fillcolor="rgba(17,24,39,0.12)",
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+
+    # texto
+    fig.add_trace(
+        go.Scatterpolar(
+            r=[max_r * 1.18],
+            theta=[0],
+            mode="text",
             text=["Probe"],
             textposition="top center",
             textfont=dict(size=10, color="#111827"),
@@ -866,39 +895,71 @@ def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
     return go.Figure(fig.to_dict())
 
 
+
 def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     fig = go.Figure(export_fig)
 
+    # engrosar trazas y marcadores sin destruir composición
     for trace in fig.data:
         tj = trace.to_plotly_json()
-        if tj.get("mode") and "lines" in tj.get("mode", ""):
+        mode = tj.get("mode", "") or ""
+
+        if "lines" in mode:
             line = dict(tj.get("line", {}) or {})
-            line["width"] = max(3.6, float(line.get("width", 1.0)) * 2.25)
+            line["width"] = max(3.2, float(line.get("width", 1.0)) * 2.0)
             trace.line = line
-        if tj.get("mode") and "markers" in tj.get("mode", ""):
+
+        if "markers" in mode:
             marker = dict(tj.get("marker", {}) or {})
-            marker["size"] = max(10, float(marker.get("size", 6)) * 1.6)
+            marker["size"] = max(10, float(marker.get("size", 6)) * 1.5)
             trace.marker = marker
 
+        if "text" in mode:
+            textfont = dict(tj.get("textfont", {}) or {})
+            textfont["size"] = max(16, int(float(textfont.get("size", 10)) * 1.8))
+            trace.textfont = textfont
+
+    # mantener proporción bonita del polar en export HD
     fig.update_layout(
         width=4300,
-        height=2200,
-        margin=dict(l=110, r=60, t=320, b=110),
+        height=2400,
+        margin=dict(l=110, r=80, t=320, b=120),
         paper_bgcolor="#f3f4f6",
-        font=dict(size=27, color="#111827"),
+        plot_bgcolor="#f8fafc",
+        font=dict(size=26, color="#111827"),
     )
+
+    # reforzar dominio y tamaño del polar para export
+    polar_cfg = dict(fig.layout.polar.to_plotly_json()) if getattr(fig.layout, "polar", None) is not None else {}
+    domain_cfg = dict(polar_cfg.get("domain", {}) or {})
+    current_x = domain_cfg.get("x", [0.0, 0.78])
+    current_y = domain_cfg.get("y", [0.05, 0.96])
+
+    domain_cfg["x"] = [current_x[0], min(0.80, current_x[1])]
+    domain_cfg["y"] = [0.06, 0.95]
+    polar_cfg["domain"] = domain_cfg
+
+    angular_cfg = dict(polar_cfg.get("angularaxis", {}) or {})
+    angular_cfg["tickfont"] = dict(size=22, color="#111827")
+    polar_cfg["angularaxis"] = angular_cfg
+
+    radial_cfg = dict(polar_cfg.get("radialaxis", {}) or {})
+    radial_cfg["tickfont"] = dict(size=20, color="#111827")
+    polar_cfg["radialaxis"] = radial_cfg
+
+    fig.update_layout(polar=polar_cfg)
 
     for ann in fig.layout.annotations or []:
         if ann.font is not None:
-            ann.font.size = max(20, int((ann.font.size or 12) * 1.8))
+            ann.font.size = max(20, int((ann.font.size or 12) * 1.75))
 
     for img in fig.layout.images or []:
         sx = getattr(img, "sizex", None)
         sy = getattr(img, "sizey", None)
         if sx is not None:
-            img.sizex = sx * 1.12
+            img.sizex = sx * 1.10
         if sy is not None:
-            img.sizey = sy * 1.12
+            img.sizey = sy * 1.10
 
     return fig
 
