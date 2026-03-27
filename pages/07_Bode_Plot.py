@@ -364,6 +364,10 @@ def estimate_critical_speeds_api684_style(df: pd.DataFrame, max_count: int = 2) 
             if abs(phase_delta) < 10.0:
                 continue
 
+            # para candidatos secundarios ser más estrictos
+            if amp_peak < np.nanmax(amp) * 0.85 and abs(phase_delta) < 20.0:
+                continue
+
             candidates.append(
                 {
                     "rpm": float(rpm[p]),
@@ -583,7 +587,8 @@ def build_bode_info_rows(
     ]
 
     for i, cs in enumerate(critical_speeds, start=1):
-        rows.append((f"Critical Speed {i}", f"{int(round(cs['rpm']))} {x_unit} | {format_number(cs['amp'],3)} {y_unit}"))
+        title = f"Critical Speed {i}" if i == 1 else f"Secondary Candidate {i}"
+        rows.append((title, f"{int(round(cs['rpm']))} {x_unit} | {format_number(cs['amp'],3)} {y_unit}"))
         rows.append((f"Phase Delta {i}", f"{format_number(cs['phase_delta'],1)}°"))
 
     return rows
@@ -768,9 +773,10 @@ def build_bode_figure(
         row=1, col=1,
     )
 
-    phase_title = "Phase (°)"
+    phase_title = "Phase (°) — System 1 style"
     fig.update_yaxes(
         title=phase_title,
+        autorange="reversed",
         showgrid=True,
         gridcolor="rgba(148, 163, 184, 0.18)",
         zeroline=False,
@@ -953,7 +959,7 @@ with st.sidebar:
         x_max = st.number_input("Max RPM", value=float(x_max_default), step=10.0)
 
     st.markdown("### Phase Mode")
-    phase_mode = st.selectbox("Phase display", ["Wrapped Raw 0-360", "Wrapped Smoothed", "Wrapped Nearest Branch"], index=2)
+    phase_mode = st.selectbox("Phase display", ["Wrapped Raw 0-360", "Wrapped Smoothed"], index=0)
 
     st.markdown("### Smoothing")
     smooth_window = st.slider("Median smoothing window", 1, 21, 3, step=2)
@@ -985,12 +991,9 @@ plot_df["phase_nearest_branch"] = phase_nearest_branch
 if phase_mode == "Wrapped Raw 0-360":
     plot_df["phase_plot"] = plot_df["phase_wrapped_raw"]
     plot_df["phase_header"] = plot_df["phase_wrapped_raw"]
-elif phase_mode == "Wrapped Smoothed":
+else:
     plot_df["phase_plot"] = plot_df["phase_wrapped_smooth"]
     plot_df["phase_header"] = plot_df["phase_wrapped_smooth"]
-else:
-    plot_df["phase_plot"] = plot_df["phase_nearest_branch"]
-    plot_df["phase_header"] = plot_df["phase_nearest_branch"]
 
 row_a = nearest_row_for_rpm(plot_df, cursor_a_rpm)
 row_b = nearest_row_for_rpm(plot_df, cursor_b_rpm)
