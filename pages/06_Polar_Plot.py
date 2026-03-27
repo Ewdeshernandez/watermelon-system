@@ -11,6 +11,11 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+try:
+    from scipy.signal import find_peaks
+except Exception:
+    find_peaks = None
+
 from core.auth import require_login, render_user_menu
 
 
@@ -191,9 +196,27 @@ def circular_smooth_deg(phase_deg: pd.Series, window: int) -> pd.Series:
     return pd.Series(out, index=phase_deg.index)
 
 
+def smooth_series(series: pd.Series, window: int) -> pd.Series:
+    if window is None or window < 2:
+        return series.astype(float).copy()
+
+    smoothed = series.astype(float).rolling(window=window, center=True, min_periods=1).mean()
+    std = smoothed.std()
+    mean = smoothed.mean()
+
+    if pd.notna(std) and pd.notna(mean) and std > 0:
+        smoothed = smoothed.clip(lower=mean - 3 * std, upper=mean + 3 * std)
+
+    return smoothed
+
+
 def nearest_row_for_speed(df: pd.DataFrame, speed_value: float) -> pd.Series:
     idx = int((df["speed"] - speed_value).abs().idxmin())
     return df.loc[idx]
+
+
+def shortest_angle_delta_deg(a: float, b: float) -> float:
+    return ((b - a + 180.0) % 360.0) - 180.0
 
 
 # ============================================================
@@ -269,15 +292,145 @@ def read_polar_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame
 
 
 # ============================================================
+# POLAR ORIENTATION ENGINE
+# ============================================================
+def compute_probe_base_angle(axis_label: str, side_label: str, install_angle_deg: float) -> float:
+    """
+    Convención de visualización:
+    - X Right arranca desde 0°
+    - X Left arranca desde 180°
+    - Y Right arranca desde 90°
+    - Y Left arranca desde 270°
+    y luego suma el ángulo físico del probe
+    """
+    axis_label = str(axis_label).strip().upper()
+    side_label = str(side_label).strip().capitalize()
+
+    base = 0.0
+    if axis_label == "X":
+        base = 0.0 if side_label == "Right" else 180.0
+    elif axis_label == "Y":
+        base = 90.0 if side_label == "Right" else 270.0
+    else:
+        base = 0.0
+
+    return (base + float(install_angle_deg)) % 360.0
+
+
+def compute_polar_display_theta(
+    phase_deg: pd.Series,
+    axis_label: str,
+    side_label: str,
+    install_angle_deg: float,
+    rotation_direction: str,
+) -> pd.Series:
+    """
+    Construye el ángulo mostrado en polar según:
+    - orientación física del sensor
+    - sentido de giro de la máquina
+    regla:
+    - si la máquina gira CCW, el polar corre en sentido opuesto -> CW
+    - si la máquina gira CW, el polar corre en sentido opuesto -> CCW
+    """
+    phase_deg = phase_deg.astype(float) % 360.0
+    probe_ref = compute_probe_base_angle(axis_label, side_label, install_angle_deg)
+
+    if str(rotation_direction).upper() == "CCW":
+        # grados avanzan opuesto al giro
+        theta = (probe_ref - phase_deg) % 360.0
+    else:
+        theta = (probe_ref + phase_deg) % 360.0
+
+    return theta.astype(float)
+
+
+# ============================================================
+# API 684 HEURISTIC FOR POLAR
+# ============================================================
+def estimate_critical_speeds_api684_style(df: pd.DataFrame, max_count: int = 2) -> List[Dict[str, float]]:
+    """
+    Heurística práctica:
+    - picos dominantes de amplitud
+    - cambio local de fase suficiente
+    - filtra candidatos muy cercanos
+    """
+    if df.empty or len(df) < 12:
+        return []
+
+    amp = df["amp"].astype(float).to_numpy()
+    speed = df["speed"].astype(float).to_numpy()
+    phase = df["phase_for_detection"].astype(float).to_numpy()
+
+    candidates: List[Dict[str, float]] = []
+
+    if find_peaks is not None:
+        prominence = max(np.nanmax(amp) * 0.08, 0.12)
+        distance = max(8, len(df) // 16)
+        peaks, props = find_peaks(amp, prominence=prominence, distance=distance)
+
+        for i, p in enumerate(peaks):
+            left = max(0, p - 10)
+            right = min(len(df) - 1, p + 10)
+
+            amp_peak = float(amp[p])
+            prom = float(props["prominences"][i])
+            phase_delta = float(phase[right] - phase[left])
+
+            if amp_peak < np.nanmax(amp) * 0.50:
+                continue
+            if abs(phase_delta) < 10.0:
+                continue
+
+            if amp_peak < np.nanmax(amp) * 0.85 and abs(phase_delta) < 20.0:
+                continue
+
+            candidates.append(
+                {
+                    "speed": float(speed[p]),
+                    "amp": amp_peak,
+                    "phase_delta": phase_delta,
+                    "idx": int(p),
+                    "prominence": prom,
+                }
+            )
+    else:
+        p = int(np.nanargmax(amp))
+        left = max(0, p - 10)
+        right = min(len(df) - 1, p + 10)
+        candidates.append(
+            {
+                "speed": float(speed[p]),
+                "amp": float(amp[p]),
+                "phase_delta": float(phase[right] - phase[left]),
+                "idx": int(p),
+                "prominence": float(amp[p]),
+            }
+        )
+
+    candidates = sorted(candidates, key=lambda x: (x["prominence"], x["amp"]), reverse=True)
+
+    filtered = []
+    for cand in candidates:
+        if all(abs(cand["speed"] - kept["speed"]) > 120 for kept in filtered):
+            filtered.append(cand)
+        if len(filtered) >= max_count:
+            break
+
+    return filtered
+
+
+# ============================================================
 # IN-CHART DECORATION
 # ============================================================
 def _draw_top_strip(
     fig: go.Figure,
     meta: Dict[str, str],
-    row_a: pd.Series,
-    row_b: pd.Series,
     logo_uri: Optional[str],
     df: pd.DataFrame,
+    axis_label: str,
+    side_label: str,
+    install_angle_deg: float,
+    rotation_direction: str,
 ) -> None:
     x0, x1 = 0.006, 0.994
     y0, y1 = 1.014, 1.104
@@ -298,9 +451,7 @@ def _draw_top_strip(
     machine = meta.get("Machine Name", "")
     point = meta.get("Point Name", "")
     variable = meta.get("Variable", "")
-    angle = meta.get("Probe Angle", "")
     speed_unit = meta.get("Speed Unit", "rpm") or "rpm"
-    amp_unit = meta.get("Amp Unit", "") or ""
 
     if logo_uri:
         fig.add_layout_image(
@@ -345,9 +496,19 @@ def _draw_top_strip(
         xref="paper", yref="paper",
         x=0.355, y=y_text,
         xanchor="left", yanchor="middle",
-        text=f"{variable} | {angle}",
+        text=f"{variable}",
         showarrow=False,
         font=dict(size=11.5, color="#111827"),
+    )
+
+    orient_text = f"{axis_label} | {install_angle_deg:.0f}° {side_label} | Rotation {rotation_direction}"
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.47, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=orient_text,
+        showarrow=False,
+        font=dict(size=11.3, color="#111827"),
     )
 
     dt_start = pd.to_datetime(df["ts_min"], errors="coerce").min()
@@ -358,7 +519,7 @@ def _draw_top_strip(
 
     fig.add_annotation(
         xref="paper", yref="paper",
-        x=0.60, y=y_text,
+        x=0.72, y=y_text,
         xanchor="left", yanchor="middle",
         text=dt_text,
         showarrow=False,
@@ -440,20 +601,59 @@ def build_info_rows(
     row_b: pd.Series,
     amp_unit: str,
     speed_unit: str,
+    axis_label: str,
+    side_label: str,
+    install_angle_deg: float,
+    rotation_direction: str,
     show_rpm_labels: bool,
     marker_stride: int,
+    critical_speeds: List[Dict[str, float]],
 ) -> List[Tuple[str, str]]:
-    return [
-        ("Cursor A", f"{format_number(row_a['amp'],3)} {amp_unit} @ {int(round(row_a['speed']))} {speed_unit} | ∠{format_number(row_a['phase_plot'],1)}°"),
-        ("Cursor B", f"{format_number(row_b['amp'],3)} {amp_unit} @ {int(round(row_b['speed']))} {speed_unit} | ∠{format_number(row_b['phase_plot'],1)}°"),
+    rows = [
+        ("Cursor A", f"{format_number(row_a['amp'],3)} {amp_unit} @ {int(round(row_a['speed']))} {speed_unit} | ∠{format_number(row_a['theta_display'],1)}°"),
+        ("Cursor B", f"{format_number(row_b['amp'],3)} {amp_unit} @ {int(round(row_b['speed']))} {speed_unit} | ∠{format_number(row_b['theta_display'],1)}°"),
+        ("Probe Orientation", f"{axis_label} | {install_angle_deg:.0f}° {side_label}"),
+        ("Rotation", rotation_direction),
         ("RPM Labels", "Enabled" if show_rpm_labels else "Disabled"),
         ("Label Step", f"Every {marker_stride} points"),
     ]
+
+    for i, cs in enumerate(critical_speeds, start=1):
+        title = f"Critical Speed {i}" if i == 1 else f"Secondary Candidate {i}"
+        rows.append((title, f"{int(round(cs['speed']))} {speed_unit} | {format_number(cs['amp'],3)} {amp_unit}"))
+        rows.append((f"Phase Delta {i}", f"{format_number(cs['phase_delta'],1)}°"))
+
+    return rows
 
 
 # ============================================================
 # FIGURE BUILD
 # ============================================================
+def build_probe_reference_arrow(fig: go.Figure, ref_angle_deg: float, show_info_box: bool) -> None:
+    x_domain = [0.0, 0.78] if show_info_box else [0.0, 1.0]
+    cx = (x_domain[0] + x_domain[1]) / 2.0
+    cy = 0.50
+    r_outer = 0.34
+
+    theta = np.deg2rad(90.0 - ref_angle_deg)
+    x_tip = cx + r_outer * np.cos(theta)
+    y_tip = cy + r_outer * np.sin(theta)
+    x_start = cx + (r_outer + 0.08) * np.cos(theta)
+    y_start = cy + (r_outer + 0.08) * np.sin(theta)
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=x_tip, y=y_tip,
+        ax=x_start, ay=y_start,
+        showarrow=True,
+        arrowhead=3,
+        arrowsize=1.2,
+        arrowwidth=2.0,
+        arrowcolor="#111827",
+        text="",
+    )
+
+
 def build_polar_figure(
     df: pd.DataFrame,
     meta: Dict[str, str],
@@ -463,6 +663,11 @@ def build_polar_figure(
     show_info_box: bool,
     show_rpm_labels: bool,
     marker_stride: int,
+    axis_label: str,
+    side_label: str,
+    install_angle_deg: float,
+    rotation_direction: str,
+    critical_speeds: List[Dict[str, float]],
 ) -> go.Figure:
     amp_unit = meta.get("Amp Unit", "") or ""
     speed_unit = meta.get("Speed Unit", "rpm") or "rpm"
@@ -472,12 +677,12 @@ def build_polar_figure(
     fig.add_trace(
         go.Scatterpolar(
             r=df["amp"],
-            theta=df["phase_plot"],
+            theta=df["theta_display"],
             mode="lines",
             line=dict(width=1.35, color="#5b9cf0"),
             hovertemplate=(
                 f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
-                f"Phase: %{{theta:.1f}}°<br>"
+                f"Phase Display: %{{theta:.1f}}°<br>"
                 f"Speed: %{{customdata[0]:.0f}} {speed_unit}<extra></extra>"
             ),
             customdata=np.stack([df["speed"]], axis=1),
@@ -486,7 +691,6 @@ def build_polar_figure(
         )
     )
 
-    # Cursor A/B markers
     for row, color, name in [
         (row_a, "#efb08c", "Cursor A"),
         (row_b, "#7ac77b", "Cursor B"),
@@ -494,7 +698,7 @@ def build_polar_figure(
         fig.add_trace(
             go.Scatterpolar(
                 r=[row["amp"]],
-                theta=[row["phase_plot"]],
+                theta=[row["theta_display"]],
                 mode="markers",
                 marker=dict(size=10, color=color, line=dict(width=1.2, color="#ffffff")),
                 name=name,
@@ -502,13 +706,12 @@ def build_polar_figure(
                 hovertemplate=(
                     f"{name}<br>"
                     f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
-                    f"Phase: %{{theta:.1f}}°<br>"
+                    f"Phase Display: %{{theta:.1f}}°<br>"
                     f"Speed: {int(round(row['speed']))} {speed_unit}<extra></extra>"
                 ),
             )
         )
 
-    # Optional RPM labels
     if show_rpm_labels and len(df) > 0:
         idxs = list(range(0, len(df), max(1, marker_stride)))
         if idxs[-1] != len(df) - 1:
@@ -517,7 +720,7 @@ def build_polar_figure(
         fig.add_trace(
             go.Scatterpolar(
                 r=df.iloc[idxs]["amp"],
-                theta=df.iloc[idxs]["phase_plot"],
+                theta=df.iloc[idxs]["theta_display"],
                 mode="text",
                 text=[str(int(round(v))) for v in df.iloc[idxs]["speed"]],
                 textfont=dict(size=9, color="#6b7280"),
@@ -526,9 +729,44 @@ def build_polar_figure(
             )
         )
 
-    rows = build_info_rows(row_a, row_b, amp_unit, speed_unit, show_rpm_labels, marker_stride)
+    cs_colors = ["#ef4444", "#f59e0b"]
+    for idx, cs in enumerate(critical_speeds):
+        color = cs_colors[idx % len(cs_colors)]
+        cs_row = nearest_row_for_speed(df, cs["speed"])
 
-    # Increase right margin domain if info box visible
+        fig.add_trace(
+            go.Scatterpolar(
+                r=[cs_row["amp"]],
+                theta=[cs_row["theta_display"]],
+                mode="markers+text",
+                marker=dict(size=9, color=color, symbol="diamond"),
+                text=[f"CS{idx+1} {int(round(cs['speed']))}"],
+                textposition="top center",
+                textfont=dict(size=10, color=color),
+                showlegend=False,
+                hovertemplate=(
+                    f"Critical Speed {idx+1}<br>"
+                    f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
+                    f"Phase Display: %{{theta:.1f}}°<br>"
+                    f"Speed: {int(round(cs['speed']))} {speed_unit}<extra></extra>"
+                ),
+            )
+        )
+
+    rows = build_info_rows(
+        row_a=row_a,
+        row_b=row_b,
+        amp_unit=amp_unit,
+        speed_unit=speed_unit,
+        axis_label=axis_label,
+        side_label=side_label,
+        install_angle_deg=install_angle_deg,
+        rotation_direction=rotation_direction,
+        show_rpm_labels=show_rpm_labels,
+        marker_stride=marker_stride,
+        critical_speeds=critical_speeds,
+    )
+
     domain_x = [0.0, 0.78] if show_info_box else [0.0, 1.0]
 
     fig.update_layout(
@@ -561,10 +799,22 @@ def build_polar_figure(
         showlegend=False,
     )
 
-    _draw_top_strip(fig, meta, row_a, row_b, logo_uri, df)
+    _draw_top_strip(
+        fig=fig,
+        meta=meta,
+        logo_uri=logo_uri,
+        df=df,
+        axis_label=axis_label,
+        side_label=side_label,
+        install_angle_deg=install_angle_deg,
+        rotation_direction=rotation_direction,
+    )
 
     if show_info_box:
         _draw_right_info_box(fig, rows)
+
+    probe_ref = compute_probe_base_angle(axis_label, side_label, install_angle_deg)
+    build_probe_reference_arrow(fig, probe_ref, show_info_box)
 
     return fig
 
@@ -573,8 +823,7 @@ def build_polar_figure(
 # EXPORT / REPORT
 # ============================================================
 def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
-    export_fig = go.Figure(fig.to_dict())
-    return export_fig
+    return go.Figure(fig.to_dict())
 
 
 def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
@@ -673,12 +922,24 @@ if grouped_df.empty:
     st.stop()
 
 with st.sidebar:
+    st.markdown("### Probe Orientation")
+    axis_label = st.selectbox("Probe Axis", ["X", "Y"], index=1)
+    side_label = st.selectbox("Probe Side", ["Right", "Left"], index=1)
+    install_angle_deg = st.slider("Probe Installation Angle", 0, 90, 45, step=5)
+
+    st.markdown("### Machine Rotation")
+    rotation_direction = st.selectbox("Rotation Direction", ["CCW", "CW"], index=0)
+
     st.markdown("### Polar Controls")
     smooth_window = st.slider("Circular phase smoothing", 1, 11, 3, step=2)
     amp_smooth_window = st.slider("Amplitude smoothing", 1, 11, 3, step=2)
     show_info_box = st.checkbox("Show Polar Information", value=True)
     show_rpm_labels = st.checkbox("Show RPM labels", value=True)
     marker_stride = st.slider("RPM label step", 10, 150, 45, step=5)
+
+    st.markdown("### Critical Speed Detection")
+    detect_cs = st.checkbox("Estimate critical speeds (API-684 heuristic)", value=True)
+    max_critical_speeds = st.selectbox("Max critical speeds", [1, 2], index=1)
 
     st.markdown("### Cursors")
     speed_min = int(grouped_df["speed"].min())
@@ -688,15 +949,29 @@ with st.sidebar:
 
 plot_df = grouped_df.copy()
 plot_df["amp"] = smooth_series(plot_df["amp"], amp_smooth_window)
-plot_df["phase_plot"] = circular_smooth_deg(plot_df["phase"], smooth_window) % 360.0
+plot_df["phase_smoothed"] = circular_smooth_deg(plot_df["phase"], smooth_window) % 360.0
+plot_df["theta_display"] = compute_polar_display_theta(
+    phase_deg=plot_df["phase_smoothed"],
+    axis_label=axis_label,
+    side_label=side_label,
+    install_angle_deg=float(install_angle_deg),
+    rotation_direction=rotation_direction,
+)
+
+# para detección API 684 usar fase continua interna
+phase_internal = np.rad2deg(np.unwrap(np.deg2rad(plot_df["phase_smoothed"].to_numpy())))
+plot_df["phase_for_detection"] = phase_internal
 
 row_a = nearest_row_for_speed(plot_df, cursor_a_speed)
 row_b = nearest_row_for_speed(plot_df, cursor_b_speed)
 
+critical_speeds: List[Dict[str, float]] = []
+if detect_cs:
+    critical_speeds = estimate_critical_speeds_api684_style(plot_df, max_count=max_critical_speeds)
+
 machine = meta.get("Machine Name", "-")
 point = meta.get("Point Name", "-")
 variable = meta.get("Variable", "-")
-probe_angle = meta.get("Probe Angle", "-")
 speed_unit = meta.get("Speed Unit", "rpm")
 amp_unit = meta.get("Amp Unit", "")
 
@@ -707,7 +982,8 @@ st.markdown(
         <div class="wm-card-subtitle">Dynamic polar view</div>
         <div class="wm-meta">
             Variable: <b>{variable}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
-            Probe Angle: <b>{probe_angle}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
+            Orientation: <b>{axis_label} | {install_angle_deg:.0f}° {side_label}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
+            Rotation: <b>{rotation_direction}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
             Speed Range: <b>{int(plot_df['speed'].min())} - {int(plot_df['speed'].max())} {speed_unit}</b>
         </div>
         <div class="wm-chip-row">
@@ -715,6 +991,7 @@ st.markdown(
             <div class="wm-chip">Grouped points: {len(plot_df):,}</div>
             <div class="wm-chip">Phase smoothing: {smooth_window}</div>
             <div class="wm-chip">Amplitude smoothing: {amp_smooth_window}</div>
+            <div class="wm-chip">Critical speeds: {len(critical_speeds)}</div>
         </div>
     </div>
     """,
@@ -731,6 +1008,11 @@ fig = build_polar_figure(
     show_info_box=show_info_box,
     show_rpm_labels=show_rpm_labels,
     marker_stride=marker_stride,
+    axis_label=axis_label,
+    side_label=side_label,
+    install_angle_deg=float(install_angle_deg),
+    rotation_direction=rotation_direction,
+    critical_speeds=critical_speeds,
 )
 
 st.plotly_chart(fig, width="stretch", config={"displaylogo": False}, key="wm_polar_plot")
@@ -739,7 +1021,8 @@ title = f"Polar — {machine} — {point}"
 
 export_state_key = (
     f"polar::{machine}::{point}::{variable}::{smooth_window}::{amp_smooth_window}::"
-    f"{show_info_box}::{show_rpm_labels}::{marker_stride}"
+    f"{show_info_box}::{show_rpm_labels}::{marker_stride}::{axis_label}::{side_label}::"
+    f"{install_angle_deg}::{rotation_direction}::{detect_cs}::{max_critical_speeds}"
 )
 
 if export_state_key not in st.session_state.wm_polar_export_store:
