@@ -317,6 +317,24 @@ def compute_probe_base_angle(axis_label: str, side_label: str, install_angle_deg
     return (base + float(install_angle_deg)) % 360.0
 
 
+
+def get_polar_axis_rotation_and_direction(
+    axis_label: str,
+    side_label: str,
+    install_angle_deg: float,
+    rotation_direction: str,
+) -> Tuple[float, str, float]:
+    """
+    El 0° del polar se alinea con la orientación física del probe.
+    Si la máquina gira CCW, los grados del polar cuentan CW.
+    Si la máquina gira CW, los grados del polar cuentan CCW.
+    """
+    probe_ref = compute_probe_base_angle(axis_label, side_label, install_angle_deg)
+    axis_rotation = (90.0 - probe_ref) % 360.0
+    angular_direction = "clockwise" if str(rotation_direction).upper() == "CCW" else "counterclockwise"
+    return axis_rotation, angular_direction, probe_ref
+
+
 def compute_polar_display_theta(
     phase_deg: pd.Series,
     axis_label: str,
@@ -325,23 +343,11 @@ def compute_polar_display_theta(
     rotation_direction: str,
 ) -> pd.Series:
     """
-    Construye el ángulo mostrado en polar según:
-    - orientación física del sensor
-    - sentido de giro de la máquina
-    regla:
-    - si la máquina gira CCW, el polar corre en sentido opuesto -> CW
-    - si la máquina gira CW, el polar corre en sentido opuesto -> CCW
+    La trayectoria conserva la fase medida 0-360.
+    La orientación física del sensor y el sentido de giro se aplican al EJE ANGULAR,
+    no deformando la trayectoria.
     """
-    phase_deg = phase_deg.astype(float) % 360.0
-    probe_ref = compute_probe_base_angle(axis_label, side_label, install_angle_deg)
-
-    if str(rotation_direction).upper() == "CCW":
-        # grados avanzan opuesto al giro
-        theta = (probe_ref - phase_deg) % 360.0
-    else:
-        theta = (probe_ref + phase_deg) % 360.0
-
-    return theta.astype(float)
+    return phase_deg.astype(float) % 360.0
 
 
 # ============================================================
@@ -629,28 +635,54 @@ def build_info_rows(
 # ============================================================
 # FIGURE BUILD
 # ============================================================
-def build_probe_reference_arrow(fig: go.Figure, ref_angle_deg: float, show_info_box: bool) -> None:
-    x_domain = [0.0, 0.78] if show_info_box else [0.0, 1.0]
-    cx = (x_domain[0] + x_domain[1]) / 2.0
-    cy = 0.50
-    r_outer = 0.34
 
-    theta = np.deg2rad(90.0 - ref_angle_deg)
-    x_tip = cx + r_outer * np.cos(theta)
-    y_tip = cy + r_outer * np.sin(theta)
-    x_start = cx + (r_outer + 0.08) * np.cos(theta)
-    y_start = cy + (r_outer + 0.08) * np.sin(theta)
+def build_probe_reference_overlay(fig: go.Figure, max_r: float) -> None:
+    """
+    Dibuja referencia del probe en theta=0 del sistema polar ya orientado.
+    """
+    line_r0 = max_r * 0.18
+    line_r1 = max_r * 1.02
+    body_r0 = max_r * 1.04
+    body_r1 = max_r * 1.12
+    tip_r = max_r * 1.15
 
-    fig.add_annotation(
-        xref="paper", yref="paper",
-        x=x_tip, y=y_tip,
-        ax=x_start, ay=y_start,
-        showarrow=True,
-        arrowhead=3,
-        arrowsize=1.2,
-        arrowwidth=2.0,
-        arrowcolor="#111827",
-        text="",
+    # Línea radial de referencia del probe
+    fig.add_trace(
+        go.Scatterpolar(
+            r=[line_r0, line_r1],
+            theta=[0, 0],
+            mode="lines",
+            line=dict(color="#111827", width=2.0, dash="dash"),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+
+    # Cuerpo simple del probe
+    fig.add_trace(
+        go.Scatterpolar(
+            r=[body_r0, body_r1],
+            theta=[0, 0],
+            mode="lines",
+            line=dict(color="#111827", width=4.0),
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
+
+    # Punta del probe
+    fig.add_trace(
+        go.Scatterpolar(
+            r=[tip_r],
+            theta=[0],
+            mode="markers+text",
+            marker=dict(size=9, color="#111827", symbol="diamond"),
+            text=["Probe"],
+            textposition="top center",
+            textfont=dict(size=10, color="#111827"),
+            showlegend=False,
+            hoverinfo="skip",
+        )
     )
 
 
@@ -671,6 +703,14 @@ def build_polar_figure(
 ) -> go.Figure:
     amp_unit = meta.get("Amp Unit", "") or ""
     speed_unit = meta.get("Speed Unit", "rpm") or "rpm"
+
+    axis_rotation, angular_direction, probe_ref = get_polar_axis_rotation_and_direction(
+        axis_label=axis_label,
+        side_label=side_label,
+        install_angle_deg=install_angle_deg,
+        rotation_direction=rotation_direction,
+    )
+    max_r = max(0.1, float(df["amp"].max()) * 1.18)
 
     fig = go.Figure()
 
@@ -774,8 +814,8 @@ def build_polar_figure(
             domain=dict(x=domain_x, y=[0.05, 0.96]),
             bgcolor="#f8fafc",
             angularaxis=dict(
-                rotation=90,
-                direction="clockwise",
+                rotation=axis_rotation,
+                direction=angular_direction,
                 tickfont=dict(size=12, color="#111827"),
                 gridcolor="rgba(148, 163, 184, 0.18)",
                 linecolor="#9ca3af",
@@ -783,6 +823,7 @@ def build_polar_figure(
                 ticks="outside",
             ),
             radialaxis=dict(
+                range=[0, max_r],
                 tickfont=dict(size=11, color="#111827"),
                 gridcolor="rgba(148, 163, 184, 0.18)",
                 linecolor="#9ca3af",
@@ -813,8 +854,7 @@ def build_polar_figure(
     if show_info_box:
         _draw_right_info_box(fig, rows)
 
-    probe_ref = compute_probe_base_angle(axis_label, side_label, install_angle_deg)
-    build_probe_reference_arrow(fig, probe_ref, show_info_box)
+    build_probe_reference_overlay(fig, max_r)
 
     return fig
 
