@@ -29,7 +29,7 @@ LOGO_PATH = PROJECT_ROOT / "assets" / "watermelon_logo.png"
 
 
 # ============================================================
-# PAGE STYLE
+# STYLE
 # ============================================================
 def apply_page_style() -> None:
     st.markdown(
@@ -183,6 +183,17 @@ def rounded_rect_path(x0: float, y0: float, x1: float, y1: float, r: float) -> s
 # ============================================================
 # CSV LOADER
 # ============================================================
+def circular_mean_deg(series: pd.Series) -> float:
+    vals = pd.to_numeric(series, errors="coerce").dropna().astype(float)
+    if vals.empty:
+        return float("nan")
+    rad = np.deg2rad(vals.to_numpy() % 360.0)
+    c = np.mean(np.cos(rad))
+    s = np.mean(np.sin(rad))
+    ang = np.rad2deg(np.arctan2(s, c))
+    return float((ang + 360.0) % 360.0)
+
+
 def read_bode_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame]:
     file_obj.seek(0)
     raw_bytes = file_obj.read()
@@ -267,22 +278,10 @@ def smooth_series(series: pd.Series, window: int) -> pd.Series:
     return series.rolling(window=window, center=True, min_periods=1).median()
 
 
-
-def circular_mean_deg(series: pd.Series) -> float:
-    vals = pd.to_numeric(series, errors="coerce").dropna().astype(float)
-    if vals.empty:
-        return float("nan")
-    rad = np.deg2rad(vals.to_numpy() % 360.0)
-    c = np.mean(np.cos(rad))
-    s = np.mean(np.sin(rad))
-    ang = np.rad2deg(np.arctan2(s, c))
-    return float((ang + 360.0) % 360.0)
-
 def circular_smooth_deg(phase_deg: pd.Series, window: int) -> pd.Series:
     if window <= 1:
         return phase_deg.astype(float).copy()
-
-    rad = np.deg2rad(phase_deg.astype(float).to_numpy())
+    rad = np.deg2rad(phase_deg.astype(float).to_numpy() % 360.0)
     c = pd.Series(np.cos(rad)).rolling(window=window, center=True, min_periods=1).mean().to_numpy()
     s = pd.Series(np.sin(rad)).rolling(window=window, center=True, min_periods=1).mean().to_numpy()
     out = np.rad2deg(np.arctan2(s, c))
@@ -295,51 +294,21 @@ def unwrap_deg(phase_deg: pd.Series) -> pd.Series:
     return pd.Series(np.rad2deg(np.unwrap(rad)), index=phase_deg.index)
 
 
-def choose_best_phase_rotation(unwrapped_deg: pd.Series) -> float:
-    # Busca un offset que minimice saltos visuales en la fase envuelta
-    values = unwrapped_deg.astype(float).to_numpy()
-    best_offset = 0.0
-    best_score = float("inf")
-
-    for offset in range(0, 360, 2):
-        wrapped = (values + offset) % 360.0
-        diffs = np.abs(np.diff(wrapped))
-        score = diffs.sum() + 25.0 * np.sum(diffs > 120.0)
-        if score < best_score:
-            best_score = score
-            best_offset = float(offset)
-
-    return best_offset
-
-
-
-def make_pretty_wrapped_phase(phase_deg: pd.Series, smooth_window: int = 1) -> Tuple[pd.Series, float]:
-    """
-    Para Bode tipo System 1:
-    - NO auto-rotation
-    - prioridad a fase wrapped real
-    - suavizado circular muy leve opcional
-    """
-    wrapped = (phase_deg.astype(float) % 360.0).copy()
-
-    if smooth_window > 1:
-        wrapped = circular_smooth_deg(wrapped, smooth_window)
-
-    return wrapped.astype(float), 0.0
-
-
 def nearest_row_for_rpm(df: pd.DataFrame, rpm_value: float) -> pd.Series:
     idx = int((df["rpm"] - rpm_value).abs().idxmin())
     return df.loc[idx]
 
 
+def shortest_angle_delta_deg(a: float, b: float) -> float:
+    return ((b - a + 180.0) % 360.0) - 180.0
+
 
 def estimate_critical_speeds_api684_style(df: pd.DataFrame, max_count: int = 2) -> List[Dict[str, float]]:
     """
-    Heurística práctica estilo API 684:
-    - picos dominantes de amplitud
-    - verifica cambio de fase local alrededor del pico
-    - permite hasta 2 velocidades críticas
+    Heurística más estricta:
+    - picos de amplitud prominentes
+    - cambio de fase local suficiente
+    - descarte de duplicados cercanos
     """
     if df.empty or len(df) < 12:
         return []
@@ -347,38 +316,33 @@ def estimate_critical_speeds_api684_style(df: pd.DataFrame, max_count: int = 2) 
     amp = df["amp"].astype(float).to_numpy()
     rpm = df["rpm"].astype(float).to_numpy()
 
-    # usar fase wrapped suave para evaluar cambio local de fase, más parecido a System 1
-    phase_ref = circular_smooth_deg(df["phase"].astype(float) % 360.0, 5).to_numpy()
-
-    def shortest_angle(a, b):
-        return ((b - a + 180.0) % 360.0) - 180.0
+    phase_ref = df["phase_continuous"].astype(float).to_numpy()
 
     candidates = []
 
     if find_peaks is not None:
-        prominence = max(np.nanmax(amp) * 0.06, 0.12)
-        distance = max(6, len(df) // 18)
+        prominence = max(np.nanmax(amp) * 0.08, 0.18)
+        distance = max(8, len(df) // 16)
         peaks, props = find_peaks(amp, prominence=prominence, distance=distance)
 
         for i, p in enumerate(peaks):
             left = max(0, p - 10)
             right = min(len(df) - 1, p + 10)
 
-            phase_delta = shortest_angle(phase_ref[left], phase_ref[right])
             amp_peak = float(amp[p])
             prom = float(props["prominences"][i])
 
-            # filtro más permisivo para capturar first y second critical
-            if amp_peak < np.nanmax(amp) * 0.45:
+            phase_delta = float(phase_ref[right] - phase_ref[left])
+            if amp_peak < np.nanmax(amp) * 0.50:
                 continue
-            if abs(phase_delta) < 6.0:
+            if abs(phase_delta) < 10.0:
                 continue
 
             candidates.append(
                 {
                     "rpm": float(rpm[p]),
                     "amp": amp_peak,
-                    "phase_delta": float(phase_delta),
+                    "phase_delta": phase_delta,
                     "idx": int(p),
                     "prominence": prom,
                 }
@@ -387,12 +351,11 @@ def estimate_critical_speeds_api684_style(df: pd.DataFrame, max_count: int = 2) 
         p = int(np.nanargmax(amp))
         left = max(0, p - 10)
         right = min(len(df) - 1, p + 10)
-        phase_delta = shortest_angle(phase_ref[left], phase_ref[right])
         candidates.append(
             {
                 "rpm": float(rpm[p]),
                 "amp": float(amp[p]),
-                "phase_delta": float(phase_delta),
+                "phase_delta": float(phase_ref[right] - phase_ref[left]),
                 "idx": int(p),
                 "prominence": float(amp[p]),
             }
@@ -400,7 +363,6 @@ def estimate_critical_speeds_api684_style(df: pd.DataFrame, max_count: int = 2) 
 
     candidates = sorted(candidates, key=lambda x: (x["prominence"], x["amp"]), reverse=True)
 
-    # eliminar duplicados cercanos en rpm
     filtered = []
     for cand in candidates:
         if all(abs(cand["rpm"] - kept["rpm"]) > 120 for kept in filtered):
@@ -412,7 +374,7 @@ def estimate_critical_speeds_api684_style(df: pd.DataFrame, max_count: int = 2) 
 
 
 # ============================================================
-# IN-CHART DECORATION
+# FIGURE DECORATION
 # ============================================================
 def _draw_top_strip(
     fig: go.Figure,
@@ -422,15 +384,15 @@ def _draw_top_strip(
     logo_uri: Optional[str],
 ) -> None:
     x0, x1 = 0.006, 0.994
-    y0, y1 = 1.014, 1.106
-    radius = 0.015
+    y0, y1 = 1.014, 1.104
+    radius = 0.014
 
     fig.add_shape(
         type="path",
         xref="paper",
         yref="paper",
         path=rounded_rect_path(x0, y0, x1, y1, radius),
-        line=dict(color="#cfd8e3", width=1.15),
+        line=dict(color="#cfd8e3", width=1.1),
         fillcolor="rgba(255,255,255,0.97)",
         layer="below",
     )
@@ -451,9 +413,9 @@ def _draw_top_strip(
                 xref="paper",
                 yref="paper",
                 x=0.014,
-                y=y1 - 0.009,
-                sizex=0.060,
-                sizey=0.090,
+                y=y1 - 0.008,
+                sizex=0.055,
+                sizey=0.085,
                 xanchor="left",
                 yanchor="top",
                 layer="above",
@@ -461,7 +423,7 @@ def _draw_top_strip(
                 opacity=1.0,
             )
         )
-        machine_x = 0.083
+        machine_x = 0.082
     else:
         machine_x = 0.020
 
@@ -471,8 +433,7 @@ def _draw_top_strip(
         xanchor="left", yanchor="middle",
         text=f"<b>{machine}</b>",
         showarrow=False,
-        font=dict(size=12.8, color="#111827"),
-        align="left",
+        font=dict(size=12.3, color="#111827"),
     )
 
     fig.add_annotation(
@@ -481,18 +442,16 @@ def _draw_top_strip(
         xanchor="left", yanchor="middle",
         text=point,
         showarrow=False,
-        font=dict(size=12.1, color="#111827"),
-        align="left",
+        font=dict(size=11.7, color="#111827"),
     )
 
     fig.add_annotation(
         xref="paper", yref="paper",
-        x=0.370, y=y_text,
+        x=0.355, y=y_text,
         xanchor="left", yanchor="middle",
         text=f"{variable} | {angle}",
         showarrow=False,
-        font=dict(size=12.0, color="#111827"),
-        align="left",
+        font=dict(size=11.5, color="#111827"),
     )
 
     a_txt = (
@@ -506,12 +465,11 @@ def _draw_top_strip(
 
     fig.add_annotation(
         xref="paper", yref="paper",
-        x=0.605, y=y_text,
+        x=0.60, y=y_text,
         xanchor="left", yanchor="middle",
         text=f"{a_txt} &nbsp;&nbsp;|&nbsp;&nbsp; {b_txt}",
         showarrow=False,
-        font=dict(size=11.2, color="#111827"),
-        align="left",
+        font=dict(size=10.8, color="#111827"),
     )
 
     fig.add_annotation(
@@ -520,8 +478,7 @@ def _draw_top_strip(
         xanchor="right", yanchor="middle",
         text=f"{int(round(row_a['rpm']))} - {int(round(row_b['rpm']))} {x_unit}",
         showarrow=False,
-        font=dict(size=11.2, color="#111827"),
-        align="right",
+        font=dict(size=10.8, color="#111827"),
     )
 
 
@@ -529,9 +486,9 @@ def _draw_right_info_box(fig: go.Figure, rows: List[Tuple[str, str]]) -> None:
     panel_x0 = 0.805
     panel_x1 = 0.965
     panel_y1 = 0.915
-    header_h = 0.034
-    row_h = 0.054
-    panel_h = header_h + len(rows) * row_h + 0.018
+    header_h = 0.033
+    row_h = 0.049
+    panel_h = header_h + len(rows) * row_h + 0.016
     panel_y0 = panel_y1 - panel_h
 
     fig.add_shape(
@@ -539,7 +496,7 @@ def _draw_right_info_box(fig: go.Figure, rows: List[Tuple[str, str]]) -> None:
         xref="paper", yref="paper",
         path=rounded_rect_path(panel_x0, panel_y0, panel_x1, panel_y1, 0.012),
         line=dict(color="rgba(0,0,0,0)", width=0),
-        fillcolor="rgba(255,255,255,0.72)",
+        fillcolor="rgba(255,255,255,0.74)",
         layer="above",
     )
 
@@ -558,28 +515,28 @@ def _draw_right_info_box(fig: go.Figure, rows: List[Tuple[str, str]]) -> None:
         text="<b>Bode Information</b>",
         showarrow=False,
         xanchor="center", yanchor="middle",
-        font=dict(size=11.4, color="#111827"),
+        font=dict(size=11.1, color="#111827"),
     )
 
     current_top = panel_y1 - header_h - 0.008
     for title, value in rows:
-        title_y = current_top - 0.004
-        value_y = current_top - 0.028
+        title_y = current_top - 0.003
+        value_y = current_top - 0.026
 
         fig.add_annotation(
             xref="paper", yref="paper",
-            x=panel_x0 + 0.028, y=title_y,
+            x=panel_x0 + 0.026, y=title_y,
             xanchor="left", yanchor="top",
             text=f"<b>{title}</b>",
-            showarrow=False, font=dict(size=10.6, color="#111827"), align="left",
+            showarrow=False, font=dict(size=10.2, color="#111827"), align="left",
         )
 
         fig.add_annotation(
             xref="paper", yref="paper",
-            x=panel_x0 + 0.028, y=value_y,
+            x=panel_x0 + 0.026, y=value_y,
             xanchor="left", yanchor="top",
             text=value,
-            showarrow=False, font=dict(size=10.2, color="#111827"), align="left",
+            showarrow=False, font=dict(size=9.9, color="#111827"), align="left",
         )
 
         current_top -= row_h
@@ -607,8 +564,50 @@ def build_bode_info_rows(
 
 
 # ============================================================
-# FIGURE
+# FIGURE BUILD
 # ============================================================
+def add_crosshair(fig: go.Figure, rpm_val: float, phase_val: float, amp_val: float, color: str) -> None:
+    fig.add_vline(x=rpm_val, line_width=1.3, line_dash="dot", line_color=color, row=1, col=1)
+    fig.add_vline(x=rpm_val, line_width=1.3, line_dash="dot", line_color=color, row=2, col=1)
+
+    phase_span = 18
+    amp_span = 0.20
+
+    fig.add_shape(
+        type="line", x0=rpm_val, x1=rpm_val, y0=phase_val-phase_span, y1=phase_val+phase_span,
+        line=dict(color=color, width=1.2), row=1, col=1
+    )
+    fig.add_shape(
+        type="line", x0=rpm_val-18, x1=rpm_val+18, y0=phase_val, y1=phase_val,
+        line=dict(color=color, width=1.2), row=1, col=1
+    )
+    fig.add_shape(
+        type="line", x0=rpm_val, x1=rpm_val, y0=amp_val-amp_span, y1=amp_val+amp_span,
+        line=dict(color=color, width=1.2), row=2, col=1
+    )
+    fig.add_shape(
+        type="line", x0=rpm_val-18, x1=rpm_val+18, y0=amp_val, y1=amp_val,
+        line=dict(color=color, width=1.2), row=2, col=1
+    )
+
+    fig.add_trace(
+        go.Scatter(
+            x=[rpm_val], y=[phase_val], mode="markers",
+            marker=dict(size=6, color=color, line=dict(width=1, color="#ffffff")),
+            showlegend=False, hoverinfo="skip"
+        ),
+        row=1, col=1,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=[rpm_val], y=[amp_val], mode="markers",
+            marker=dict(size=6, color=color, line=dict(width=1, color="#ffffff")),
+            showlegend=False, hoverinfo="skip"
+        ),
+        row=2, col=1,
+    )
+
+
 def build_bode_figure(
     df: pd.DataFrame,
     meta: Dict[str, str],
@@ -632,39 +631,37 @@ def build_bode_figure(
         row_heights=[0.48, 0.52],
     )
 
-    phase_trace = go.Scattergl(
-        x=df["rpm"],
-        y=df["phase_plot"],
-        mode="lines",
-        line=dict(width=1.22, color="#5b9cf0"),
-        name="Phase",
-        hovertemplate=f"Speed: %{{x:.0f}} {x_unit}<br>Phase: %{{y:.1f}}°<extra></extra>",
-        showlegend=False,
-        connectgaps=False,
-    )
-    amp_trace = go.Scattergl(
-        x=df["rpm"],
-        y=df["amp"],
-        mode="lines",
-        line=dict(width=1.45, color="#5b9cf0"),
-        name="Amplitude",
-        hovertemplate=f"Speed: %{{x:.0f}} {x_unit}<br>Amplitude: %{{y:.3f}} {y_unit}<extra></extra>",
-        showlegend=False,
-        connectgaps=False,
+    fig.add_trace(
+        go.Scattergl(
+            x=df["rpm"],
+            y=df["phase_plot"],
+            mode="lines",
+            line=dict(width=1.10, color="#5b9cf0"),
+            name="Phase",
+            hovertemplate=f"Speed: %{{x:.0f}} {x_unit}<br>Phase: %{{y:.1f}}°<extra></extra>",
+            showlegend=False,
+            connectgaps=False,
+        ),
+        row=1, col=1,
     )
 
-    fig.add_trace(phase_trace, row=1, col=1)
-    fig.add_trace(amp_trace, row=2, col=1)
+    fig.add_trace(
+        go.Scattergl(
+            x=df["rpm"],
+            y=df["amp"],
+            mode="lines",
+            line=dict(width=1.35, color="#5b9cf0"),
+            name="Amplitude",
+            hovertemplate=f"Speed: %{{x:.0f}} {x_unit}<br>Amplitude: %{{y:.3f}} {y_unit}<extra></extra>",
+            showlegend=False,
+            connectgaps=False,
+        ),
+        row=2, col=1,
+    )
 
-    # cursores
-    for rpm_val, color in [
-        (float(row_a["rpm"]), "#efb08c"),
-        (float(row_b["rpm"]), "#7ac77b"),
-    ]:
-        fig.add_vline(x=rpm_val, line_width=1.5, line_dash="dot", line_color=color, row=1, col=1)
-        fig.add_vline(x=rpm_val, line_width=1.5, line_dash="dot", line_color=color, row=2, col=1)
+    add_crosshair(fig, float(row_a["rpm"]), float(row_a["phase_plot"]), float(row_a["amp"]), "#efb08c")
+    add_crosshair(fig, float(row_b["rpm"]), float(row_b["phase_plot"]), float(row_b["amp"]), "#7ac77b")
 
-    # critical speeds
     cs_colors = ["#ef4444", "#f59e0b"]
     for idx, cs in enumerate(critical_speeds):
         color = cs_colors[idx % len(cs_colors)]
@@ -673,16 +670,16 @@ def build_bode_figure(
         cs_phase_row = nearest_row_for_rpm(df, cs_rpm)
         cs_phase = float(cs_phase_row["phase_plot"])
 
-        fig.add_vline(x=cs_rpm, line_width=2.0, line_dash="dash", line_color=color, row=1, col=1)
-        fig.add_vline(x=cs_rpm, line_width=2.0, line_dash="dash", line_color=color, row=2, col=1)
+        fig.add_vline(x=cs_rpm, line_width=1.8, line_dash="dash", line_color=color, row=1, col=1)
+        fig.add_vline(x=cs_rpm, line_width=1.8, line_dash="dash", line_color=color, row=2, col=1)
 
         fig.add_annotation(
             x=cs_rpm, y=cs_phase,
             xref="x", yref="y",
             text=f"Critical Speed {idx+1}<br>{int(round(cs_rpm))} rpm",
             showarrow=True, arrowhead=2, arrowcolor=color,
-            ax=42, ay=-35,
-            font=dict(size=10.5, color="#7f1d1d" if idx == 0 else "#92400e"),
+            ax=34, ay=-28,
+            font=dict(size=9.6, color="#7f1d1d" if idx == 0 else "#92400e"),
             bgcolor="rgba(255,255,255,0.92)",
             bordercolor="#fecaca" if idx == 0 else "#fde68a",
         )
@@ -692,8 +689,8 @@ def build_bode_figure(
             xref="x2", yref="y2",
             text=f"{format_number(cs_amp,3)} {y_unit}",
             showarrow=True, arrowhead=2, arrowcolor=color,
-            ax=40, ay=-30,
-            font=dict(size=10.5, color="#7f1d1d" if idx == 0 else "#92400e"),
+            ax=35, ay=-26,
+            font=dict(size=9.4, color="#7f1d1d" if idx == 0 else "#92400e"),
             bgcolor="rgba(255,255,255,0.92)",
             bordercolor="#fecaca" if idx == 0 else "#fde68a",
         )
@@ -701,14 +698,7 @@ def build_bode_figure(
     _draw_top_strip(fig, meta, row_a, row_b, logo_uri)
 
     if show_info_box:
-        rows = build_bode_info_rows(
-            row_a=row_a,
-            row_b=row_b,
-            phase_mode=phase_mode,
-            y_unit=y_unit,
-            x_unit=x_unit,
-            critical_speeds=critical_speeds,
-        )
+        rows = build_bode_info_rows(row_a, row_b, phase_mode, y_unit, x_unit, critical_speeds)
         _draw_right_info_box(fig, rows)
 
     x_domain = [0.0, 0.77] if show_info_box else [0.0, 1.0]
@@ -752,7 +742,7 @@ def build_bode_figure(
         row=1, col=1,
     )
 
-    phase_title = "Phase (°)" if phase_mode != "Unwrapped" else "Phase Unwrapped (°)"
+    phase_title = "Phase Continuous (°)" if phase_mode == "Continuous Unwrapped" else "Phase (°)"
     fig.update_yaxes(
         title=phase_title,
         showgrid=True,
@@ -823,11 +813,11 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
             mode = tj.get("mode", "")
             if "lines" in mode:
                 line = dict(tj.get("line", {}) or {})
-                line["width"] = max(3.8, float(line.get("width", 1.0)) * 2.4)
+                line["width"] = max(3.6, float(line.get("width", 1.0)) * 2.25)
                 tj["line"] = line
             if "markers" in mode:
                 marker = dict(tj.get("marker", {}) or {})
-                marker["size"] = max(12, float(marker.get("size", 6)) * 1.7)
+                marker["size"] = max(10, float(marker.get("size", 6)) * 1.6)
                 tj["marker"] = marker
         scaled.append(go.Scatter(**tj))
 
@@ -836,31 +826,31 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     fig.update_layout(
         width=4300,
         height=2200,
-        margin=dict(l=110, r=60, t=330, b=110),
+        margin=dict(l=110, r=60, t=320, b=110),
         paper_bgcolor="#f3f4f6",
         plot_bgcolor="#f8fafc",
-        font=dict(size=28, color="#111827"),
+        font=dict(size=27, color="#111827"),
     )
 
-    fig.update_xaxes(title_font=dict(size=38), tickfont=dict(size=24))
-    fig.update_yaxes(title_font=dict(size=38), tickfont=dict(size=24))
+    fig.update_xaxes(title_font=dict(size=36), tickfont=dict(size=23))
+    fig.update_yaxes(title_font=dict(size=36), tickfont=dict(size=23))
 
     for shape in fig.layout.shapes or []:
         if shape.line is not None:
             width = getattr(shape.line, "width", 1) or 1
-            shape.line.width = max(2.0, width * 2.0)
+            shape.line.width = max(1.8, width * 1.9)
 
     for ann in fig.layout.annotations or []:
         if ann.font is not None:
-            ann.font.size = max(21, int((ann.font.size or 12) * 1.9))
+            ann.font.size = max(20, int((ann.font.size or 12) * 1.8))
 
     for img in fig.layout.images or []:
         sx = getattr(img, "sizex", None)
         sy = getattr(img, "sizey", None)
         if sx is not None:
-            img.sizex = sx * 1.15
+            img.sizex = sx * 1.12
         if sy is not None:
-            img.sizey = sy * 1.15
+            img.sizey = sy * 1.12
 
     return fig
 
@@ -937,13 +927,13 @@ with st.sidebar:
         x_max = st.number_input("Max RPM", value=float(x_max_default), step=10.0)
 
     st.markdown("### Phase Mode")
-    phase_mode = st.selectbox("Phase display", ["Wrapped Raw 0-360", "Wrapped Smoothed", "Unwrapped"], index=0)
+    phase_mode = st.selectbox("Phase display", ["Wrapped Raw 0-360", "Wrapped Smoothed", "Continuous Unwrapped"], index=2)
 
     st.markdown("### Smoothing")
     smooth_window = st.slider("Median smoothing window", 1, 21, 3, step=2)
 
     st.markdown("### Critical Speed Detection")
-    detect_cs = st.checkbox("Estimate critical speeds (API-684 heuristic)", value=True)
+    detect_cs = st.checkbox("Estimate critical speeds (API-684 strict heuristic)", value=True)
     max_critical_speeds = st.selectbox("Max critical speeds", [1, 2], index=1)
 
     st.markdown("### Information Box")
@@ -956,23 +946,23 @@ with st.sidebar:
 plot_df = grouped_df.copy()
 plot_df["amp"] = smooth_series(plot_df["amp"], smooth_window)
 
-# Fase: priorizar representación parecida a System 1
-plot_df["phase_wrapped_raw"] = plot_df["phase"].astype(float) % 360.0
-plot_df["phase_wrapped_smooth"] = circular_smooth_deg(plot_df["phase_wrapped_raw"], min(smooth_window, 5))
-plot_df["phase_unwrapped"] = unwrap_deg(plot_df["phase_wrapped_smooth"])
+phase_wrapped_raw = plot_df["phase"].astype(float) % 360.0
+phase_wrapped_smooth = circular_smooth_deg(phase_wrapped_raw, min(smooth_window, 5))
+phase_continuous = unwrap_deg(phase_wrapped_smooth)
+
+plot_df["phase_wrapped_raw"] = phase_wrapped_raw
+plot_df["phase_wrapped_smooth"] = phase_wrapped_smooth
+plot_df["phase_continuous"] = phase_continuous
 
 if phase_mode == "Wrapped Raw 0-360":
     plot_df["phase_plot"] = plot_df["phase_wrapped_raw"]
     plot_df["phase_header"] = plot_df["phase_wrapped_raw"]
-    phase_offset = 0.0
 elif phase_mode == "Wrapped Smoothed":
     plot_df["phase_plot"] = plot_df["phase_wrapped_smooth"]
     plot_df["phase_header"] = plot_df["phase_wrapped_smooth"]
-    phase_offset = 0.0
 else:
-    plot_df["phase_plot"] = plot_df["phase_unwrapped"]
-    plot_df["phase_header"] = plot_df["phase_unwrapped"]
-    phase_offset = 0.0
+    plot_df["phase_plot"] = plot_df["phase_continuous"]
+    plot_df["phase_header"] = plot_df["phase_continuous"]
 
 row_a = nearest_row_for_rpm(plot_df, cursor_a_rpm)
 row_b = nearest_row_for_rpm(plot_df, cursor_b_rpm)
@@ -1003,7 +993,6 @@ st.markdown(
             <div class="wm-chip">Grouped points: {len(plot_df):,}</div>
             <div class="wm-chip">Phase mode: {phase_mode}</div>
             <div class="wm-chip">Smoothing: {smooth_window}</div>
-            <div class="wm-chip">Phase offset: {format_number(phase_offset,1)}°</div>
         </div>
     </div>
     """,
@@ -1024,12 +1013,7 @@ fig = build_bode_figure(
     show_info_box=show_info_box,
 )
 
-st.plotly_chart(
-    fig,
-    width="stretch",
-    config={"displaylogo": False},
-    key="wm_bode_plot",
-)
+st.plotly_chart(fig, width="stretch", config={"displaylogo": False}, key="wm_bode_plot")
 
 title = f"Bode — {machine} — {point}"
 
@@ -1069,8 +1053,3 @@ with col_report:
     if st.button("Enviar a Reporte", key=f"report_bode_{export_state_key}", width="stretch"):
         queue_bode_to_report(meta, fig, title)
         st.success("Bode enviado al reporte")
-
-panel_error = st.session_state.wm_bode_export_store[export_state_key]["error"]
-if panel_error:
-    st.warning(f"PNG export error: {panel_error}")
-
