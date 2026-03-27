@@ -51,10 +51,6 @@ def _safe_auth_bootstrap() -> None:
         pass
 
 
-# ============================================================
-# Page config
-# ============================================================
-
 st.set_page_config(
     page_title="Watermelon System | Polar Plot",
     page_icon="🌀",
@@ -62,11 +58,6 @@ st.set_page_config(
 )
 
 _safe_auth_bootstrap()
-
-
-# ============================================================
-# Styling
-# ============================================================
 
 st.markdown(
     """
@@ -110,17 +101,12 @@ st.markdown(
     .wm-card h3 {
         color: white;
         margin: 0 0 4px 0;
-        font-size: 1.12rem;
+        font-size: 1.08rem;
     }
     .wm-card p {
         color: #cbd5e1;
         margin: 0;
         font-size: 0.92rem;
-    }
-    .wm-mini {
-        color: #94a3b8;
-        font-size: 0.82rem;
-        margin-top: 2px;
     }
     .wm-metric-row {
         display: grid;
@@ -144,10 +130,6 @@ st.markdown(
         font-size: 1rem;
         font-weight: 700;
     }
-    div[data-testid="stFileUploader"] section {
-        padding-top: 0.3rem !important;
-        padding-bottom: 0.3rem !important;
-    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -159,18 +141,13 @@ st.markdown(
         <div class="wm-kicker">Watermelon System · Rotordynamics</div>
         <div class="wm-title">Polar Plot</div>
         <p class="wm-subtitle">
-            Visualización polar premium con múltiples gráficos independientes en una sola página,
-            lectura robusta de CSV y exportación HD.
+            Visualización polar premium con múltiples gráficos independientes, lectura robusta de CSV y exportación HD.
         </p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-
-# ============================================================
-# Data structures
-# ============================================================
 
 @dataclass
 class PolarColumns:
@@ -179,10 +156,6 @@ class PolarColumns:
     speed: Optional[str]
     group: Optional[str]
 
-
-# ============================================================
-# Helpers
-# ============================================================
 
 def _normalize_name(name: str) -> str:
     return (
@@ -232,7 +205,6 @@ def _read_csv_robust(file) -> pd.DataFrame:
     text = text.replace("\x00", "")
     sep = _detect_delimiter(text)
 
-    # intento 1: normal
     try:
         df = pd.read_csv(io.StringIO(text), sep=sep, engine="python")
         df.columns = [str(c).strip() for c in df.columns]
@@ -240,7 +212,6 @@ def _read_csv_robust(file) -> pd.DataFrame:
     except Exception:
         pass
 
-    # intento 2: salta líneas corruptas
     try:
         df = pd.read_csv(io.StringIO(text), sep=sep, engine="python", on_bad_lines="skip")
         df.columns = [str(c).strip() for c in df.columns]
@@ -249,7 +220,6 @@ def _read_csv_robust(file) -> pd.DataFrame:
     except Exception:
         pass
 
-    # intento 3: autoseparador flexible
     try:
         df = pd.read_csv(io.StringIO(text), sep=None, engine="python", on_bad_lines="skip")
         df.columns = [str(c).strip() for c in df.columns]
@@ -258,9 +228,7 @@ def _read_csv_robust(file) -> pd.DataFrame:
     except Exception:
         pass
 
-    raise ValueError(
-        "No se pudo interpretar el CSV. Revisa delimitador, encabezados o líneas corruptas."
-    )
+    raise ValueError("No se pudo interpretar el CSV. Revisa delimitador, encabezados o líneas corruptas.")
 
 
 def _find_best_column(columns: List[str], patterns: List[str]) -> Optional[str]:
@@ -295,62 +263,23 @@ def _infer_columns(df: pd.DataFrame) -> PolarColumns:
 
     amplitude = _find_best_column(
         cols,
-        [
-            "amplitude",
-            "amp",
-            "direct",
-            "overall",
-            "1x",
-            "mils",
-            "displacement",
-            "vibration",
-            "y axis value",
-            "y axis",
-        ],
+        ["amplitude", "amp", "direct", "overall", "1x", "mils", "displacement", "vibration", "y axis value", "y axis"],
     )
     phase = _find_best_column(
         cols,
-        [
-            "phase",
-            "deg",
-            "degrees",
-            "angulo",
-            "angle",
-        ],
+        ["phase", "deg", "degrees", "angulo", "angle"],
     )
     speed = _find_best_column(
         cols,
-        [
-            "speed",
-            "rpm",
-            "turning",
-            "rotational",
-            "x axis value",
-            "x axis",
-        ],
+        ["speed", "rpm", "turning", "rotational", "x axis value", "x axis"],
     )
     group = _find_best_column(
         cols,
-        [
-            "point name",
-            "point",
-            "channel",
-            "probe",
-            "tag",
-            "measurement",
-            "name",
-            "label",
-            "axis",
-            "trace",
-            "location",
-            "sensor",
-        ],
+        ["point name", "point", "channel", "probe", "tag", "measurement", "name", "label", "axis", "trace", "location", "sensor"],
     )
 
     if amplitude is None or phase is None:
-        raise ValueError(
-            f"No se pudieron inferir columnas válidas de amplitud/fase. Columnas detectadas: {', '.join(cols)}"
-        )
+        raise ValueError(f"No se pudieron inferir amplitud/fase. Columnas detectadas: {', '.join(cols)}")
 
     return PolarColumns(amplitude=amplitude, phase=phase, speed=speed, group=group)
 
@@ -376,14 +305,10 @@ def _prepare_dataframe(df: pd.DataFrame, cols: PolarColumns) -> pd.DataFrame:
 
 
 def _candidate_group_columns(df: pd.DataFrame) -> List[str]:
-    cols = list(df.columns)
     candidates: List[str] = []
-    for c in cols:
+    for c in df.columns:
         norm = _normalize_name(c)
-        if any(k in norm for k in [
-            "point", "channel", "probe", "tag", "name", "label",
-            "measurement", "axis", "trace", "location", "sensor"
-        ]):
+        if any(k in norm for k in ["point", "channel", "probe", "tag", "name", "label", "measurement", "axis", "trace", "location", "sensor"]):
             try:
                 n = df[c].astype(str).nunique(dropna=True)
                 if 1 < n <= 100:
@@ -490,10 +415,7 @@ def _build_polar_figure(
     crit = _detect_critical_speeds(speed, amp, max_peaks=max_critical)
 
     text = [
-        f"{title}<br>"
-        f"Amp: {a:,.4f} {amp_unit}<br>"
-        f"Phase: {p:,.2f}°<br>"
-        f"Speed: {s:,.0f} {speed_unit}"
+        f"{title}<br>Amp: {a:,.4f} {amp_unit}<br>Phase: {p:,.2f}°<br>Speed: {s:,.0f} {speed_unit}"
         for a, p, s in zip(amp, phase, speed)
     ]
 
@@ -557,9 +479,9 @@ def _build_polar_figure(
                 mode="text",
                 text=[f"{speed[i]:,.0f}" for i in idx],
                 textfont=dict(size=10, color="white"),
-                name="RPM Labels",
                 hoverinfo="skip",
                 showlegend=False,
+                name="RPM Labels",
             )
         )
 
@@ -567,8 +489,6 @@ def _build_polar_figure(
     if not np.isfinite(rmax) or rmax <= 0:
         rmax = 1.0
     rmax *= 1.15
-
-    annotation_text = _polar_annotation_text(title, amp, speed, crit, amp_unit)
 
     fig.update_layout(
         template="plotly_dark",
@@ -598,14 +518,6 @@ def _build_polar_figure(
                 linewidth=1,
             ),
         ),
-        legend=dict(
-            orientation="h",
-            yanchor="bottom",
-            y=1.03,
-            xanchor="right",
-            x=1.0,
-            bgcolor="rgba(0,0,0,0)",
-        ),
         annotations=[
             dict(
                 x=1.02,
@@ -613,7 +525,7 @@ def _build_polar_figure(
                 xref="paper",
                 yref="paper",
                 align="left",
-                text=annotation_text,
+                text=_polar_annotation_text(title, amp, speed, crit, amp_unit),
                 showarrow=False,
                 bordercolor="rgba(255,255,255,0.10)",
                 borderwidth=1,
@@ -622,6 +534,14 @@ def _build_polar_figure(
                 font=dict(size=12, color="white"),
             )
         ],
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.03,
+            xanchor="right",
+            x=1.0,
+            bgcolor="rgba(0,0,0,0)",
+        ),
     )
 
     if crit:
@@ -636,12 +556,7 @@ def _build_polar_figure(
                     text=[f"CS ~ {speed[idx]:,.0f}"],
                     textposition="middle right",
                     name=f"Critical ~ {speed[idx]:,.0f} {speed_unit}",
-                    hovertemplate=(
-                        f"Critical heuristic<br>"
-                        f"Speed: {speed[idx]:,.0f} {speed_unit}<br>"
-                        f"Amp: {amp[idx]:,.4f} {amp_unit}<br>"
-                        f"Phase: {phase[idx]:,.2f}°<extra></extra>"
-                    ),
+                    hovertemplate=f"Critical heuristic<br>Speed: {speed[idx]:,.0f} {speed_unit}<br>Amp: {amp[idx]:,.4f} {amp_unit}<br>Phase: {phase[idx]:,.2f}°<extra></extra>",
                 )
             )
 
@@ -649,29 +564,27 @@ def _build_polar_figure(
 
 
 # ============================================================
-# Sidebar controls + uploader
+# Internal control panel (NO sidebar override)
 # ============================================================
 
-uploaded = None
-clockwise = True
-phase_offset = 0.0
-show_markers = True
-show_speed_labels = True
-label_every = 10
-max_critical = 3
-group_mode = "Automatic"
+left_col, right_col = st.columns([0.28, 0.72], gap="large")
 
-with st.sidebar:
-    st.markdown("### Polar Controls")
+with left_col:
+    st.markdown(
+        """
+        <div class="wm-card">
+            <h3>Polar Controls</h3>
+            <p>Panel interno del módulo. La navegación lateral global queda intacta.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     uploaded = st.file_uploader(
         "Upload Polar CSV",
         type=["csv", "txt"],
         accept_multiple_files=False,
-        help="Carga el CSV aquí. El área principal queda limpia solo para visualización.",
     )
-
-    st.markdown("---")
 
     clockwise = st.toggle("Clockwise machine rotation", value=True)
     phase_offset = st.number_input("Phase offset (deg)", value=0.0, step=1.0, format="%.1f")
@@ -679,157 +592,146 @@ with st.sidebar:
     show_speed_labels = st.toggle("Show RPM labels", value=True)
     label_every = st.number_input("Label every N points", min_value=1, max_value=200, value=10, step=1)
     max_critical = st.number_input("Max critical heuristics", min_value=0, max_value=5, value=3, step=1)
+    group_mode = st.radio("Grouping mode", ["Automatic", "Single chart", "Choose column"], index=0)
 
-    st.markdown("---")
-    group_mode = st.radio(
-        "Grouping mode",
-        options=["Automatic", "Single chart", "Choose column"],
-        index=0,
+with right_col:
+    if uploaded is None:
+        st.info("Carga el CSV en el panel izquierdo del módulo. La barra lateral de navegación debe permanecer visible.")
+        st.stop()
+
+    try:
+        df_raw = _read_csv_robust(uploaded)
+        cols = _infer_columns(df_raw)
+        df = _prepare_dataframe(df_raw, cols)
+    except Exception as e:
+        st.error(f"Error leyendo CSV: {e}")
+        st.stop()
+
+    amp_unit = _infer_unit_from_name(cols.amplitude, "Amp")
+    speed_unit = _infer_unit_from_name(cols.speed, "RPM") if cols.speed else "Index"
+
+    possible_group_cols = _candidate_group_columns(df_raw)
+    default_group_col = cols.group if cols.group in possible_group_cols else (possible_group_cols[0] if possible_group_cols else None)
+
+    selected_group_col = None
+    if group_mode == "Choose column":
+        if possible_group_cols:
+            selected_group_col = st.selectbox(
+                "Group column",
+                options=possible_group_cols,
+                index=possible_group_cols.index(default_group_col) if default_group_col in possible_group_cols else 0,
+            )
+        else:
+            st.warning("No se detectaron columnas útiles para agrupar. Se usará Single chart.")
+            group_mode = "Single chart"
+
+    work = df.copy()
+    if group_mode == "Single chart":
+        work["__group__"] = "Polar"
+    elif group_mode == "Choose column" and selected_group_col:
+        work["__group__"] = df_raw.loc[work.index, selected_group_col].astype(str).fillna("Polar")
+
+    available_groups = sorted(work["__group__"].astype(str).dropna().unique().tolist())
+
+    selected_groups = st.multiselect(
+        "Curves / channels to render",
+        options=available_groups,
+        default=available_groups,
     )
 
+    if not selected_groups:
+        st.warning("Selecciona al menos un gráfico polar.")
+        st.stop()
 
-# ============================================================
-# Main body
-# ============================================================
-
-if uploaded is None:
-    st.info("Carga el CSV desde la barra lateral izquierda para visualizar uno o varios gráficos polares.")
-    st.stop()
-
-try:
-    df_raw = _read_csv_robust(uploaded)
-    cols = _infer_columns(df_raw)
-    df = _prepare_dataframe(df_raw, cols)
-except Exception as e:
-    st.error(f"Error leyendo CSV: {e}")
-    st.stop()
-
-amp_unit = _infer_unit_from_name(cols.amplitude, "Amp")
-speed_unit = _infer_unit_from_name(cols.speed, "RPM") if cols.speed else "Index"
-
-possible_group_cols = _candidate_group_columns(df_raw)
-default_group_col = cols.group if cols.group in possible_group_cols else (possible_group_cols[0] if possible_group_cols else None)
-
-selected_group_col = None
-if group_mode == "Choose column":
-    if possible_group_cols:
-        selected_group_col = st.selectbox(
-            "Group column",
-            options=possible_group_cols,
-            index=possible_group_cols.index(default_group_col) if default_group_col in possible_group_cols else 0,
-        )
-    else:
-        st.warning("No se detectaron columnas útiles para agrupar. Se usará Single chart.")
-        group_mode = "Single chart"
-
-work = df.copy()
-
-if group_mode == "Single chart":
-    work["__group__"] = "Polar"
-elif group_mode == "Choose column" and selected_group_col:
-    work["__group__"] = df_raw.loc[work.index, selected_group_col].astype(str).fillna("Polar")
-
-available_groups = sorted(work["__group__"].astype(str).dropna().unique().tolist())
-
-selected_groups = st.multiselect(
-    "Curves / channels to render",
-    options=available_groups,
-    default=available_groups,
-)
-
-if not selected_groups:
-    st.warning("Selecciona al menos un gráfico polar.")
-    st.stop()
-
-render_df = work[work["__group__"].isin(selected_groups)].copy()
-
-st.markdown(
-    f"""
-    <div class="wm-card">
-        <h3>Polar dataset loaded</h3>
-        <p>Visualización lista. El área principal quedó limpia y toda la carga/control vive en la barra lateral.</p>
-        <div class="wm-metric-row">
-            <div class="wm-metric">
-                <div class="wm-metric-label">Rows loaded</div>
-                <div class="wm-metric-value">{len(df_raw):,}</div>
-            </div>
-            <div class="wm-metric">
-                <div class="wm-metric-label">Valid rows</div>
-                <div class="wm-metric-value">{len(df):,}</div>
-            </div>
-            <div class="wm-metric">
-                <div class="wm-metric-label">Charts selected</div>
-                <div class="wm-metric-value">{len(selected_groups)}</div>
-            </div>
-            <div class="wm-metric">
-                <div class="wm-metric-label">Amplitude unit</div>
-                <div class="wm-metric-value">{amp_unit}</div>
-            </div>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-st.markdown(
-    f"""
-    <div class="wm-card">
-        <h3>Detected columns</h3>
-        <p>
-            Amplitude: <b>{cols.amplitude}</b> ·
-            Phase: <b>{cols.phase}</b> ·
-            Speed: <b>{cols.speed if cols.speed else 'Auto-generated index'}</b> ·
-            Group: <b>{cols.group if cols.group else 'Single chart mode'}</b>
-        </p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-chart_config = {
-    "displaylogo": False,
-    "responsive": True,
-    "modeBarButtonsToRemove": ["lasso2d", "select2d"],
-    "toImageButtonOptions": {
-        "format": "png",
-        "filename": "watermelon_polar_plot",
-        "height": 1400,
-        "width": 1800,
-        "scale": 2,
-    },
-}
-
-for group_name in selected_groups:
-    g = render_df[render_df["__group__"].astype(str) == str(group_name)].copy()
-    if g.empty:
-        continue
-
-    title = str(group_name).strip() if str(group_name).strip() else "Polar"
-
-    fig = _build_polar_figure(
-        title=title,
-        data=g,
-        amp_unit=amp_unit,
-        speed_unit=speed_unit,
-        clockwise=clockwise,
-        phase_offset=float(phase_offset),
-        label_every=int(label_every),
-        show_markers=bool(show_markers),
-        show_speed_labels=bool(show_speed_labels),
-        max_critical=int(max_critical),
-    )
+    render_df = work[work["__group__"].isin(selected_groups)].copy()
 
     st.markdown(
         f"""
         <div class="wm-card">
-            <h3>{title}</h3>
-            <p>Gráfico polar independiente con amplitud, fase, velocidad, labels RPM y referencias heurísticas.</p>
+            <h3>Polar dataset loaded</h3>
+            <p>Rows loaded, valid rows y selección de gráficos lista para render premium.</p>
+            <div class="wm-metric-row">
+                <div class="wm-metric">
+                    <div class="wm-metric-label">Rows loaded</div>
+                    <div class="wm-metric-value">{len(df_raw):,}</div>
+                </div>
+                <div class="wm-metric">
+                    <div class="wm-metric-label">Valid rows</div>
+                    <div class="wm-metric-value">{len(df):,}</div>
+                </div>
+                <div class="wm-metric">
+                    <div class="wm-metric-label">Charts selected</div>
+                    <div class="wm-metric-value">{len(selected_groups)}</div>
+                </div>
+                <div class="wm-metric">
+                    <div class="wm-metric-label">Amplitude unit</div>
+                    <div class="wm-metric-value">{amp_unit}</div>
+                </div>
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    st.plotly_chart(fig, use_container_width=True, config=chart_config)
+    st.markdown(
+        f"""
+        <div class="wm-card">
+            <h3>Detected columns</h3>
+            <p>
+                Amplitude: <b>{cols.amplitude}</b> ·
+                Phase: <b>{cols.phase}</b> ·
+                Speed: <b>{cols.speed if cols.speed else 'Auto-generated index'}</b> ·
+                Group: <b>{cols.group if cols.group else 'Single chart mode'}</b>
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-with st.expander("Data preview"):
-    st.dataframe(df_raw, use_container_width=True, height=320)
+    chart_config = {
+        "displaylogo": False,
+        "responsive": True,
+        "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+        "toImageButtonOptions": {
+            "format": "png",
+            "filename": "watermelon_polar_plot",
+            "height": 1400,
+            "width": 1800,
+            "scale": 2,
+        },
+    }
+
+    for group_name in selected_groups:
+        g = render_df[render_df["__group__"].astype(str) == str(group_name)].copy()
+        if g.empty:
+            continue
+
+        title = str(group_name).strip() if str(group_name).strip() else "Polar"
+
+        st.markdown(
+            f"""
+            <div class="wm-card">
+                <h3>{title}</h3>
+                <p>Gráfico polar independiente con amplitud, fase, velocidad, labels RPM y referencias heurísticas.</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        fig = _build_polar_figure(
+            title=title,
+            data=g,
+            amp_unit=amp_unit,
+            speed_unit=speed_unit,
+            clockwise=clockwise,
+            phase_offset=float(phase_offset),
+            label_every=int(label_every),
+            show_markers=bool(show_markers),
+            show_speed_labels=bool(show_speed_labels),
+            max_critical=int(max_critical),
+        )
+
+        st.plotly_chart(fig, use_container_width=True, config=chart_config)
+
+    with st.expander("Data preview"):
+        st.dataframe(df_raw, use_container_width=True, height=320)
