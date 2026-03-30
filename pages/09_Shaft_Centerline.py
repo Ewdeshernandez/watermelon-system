@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from core.auth import render_user_menu, require_login
 
 
 # ============================================================
@@ -444,60 +445,74 @@ def _draw_top_strip(
 
 
 def _draw_right_info_box(fig: go.Figure, rows: List[Tuple[str, str]]) -> None:
-    panel_x0 = 0.805
-    panel_x1 = 0.965
-    panel_y1 = 0.915
-    header_h = 0.033
-    row_h = 0.054
-    panel_h = header_h + len(rows) * row_h + 0.016
+    panel_x0 = 0.875
+    panel_x1 = 0.970
+    panel_y1 = 0.950
+    header_h = 0.022
+    row_h = 0.033
+    body_pad = 0.008
+    radius = 0.008
+
+    panel_h = header_h + len(rows) * row_h + body_pad
     panel_y0 = panel_y1 - panel_h
 
     fig.add_shape(
         type="path",
         xref="paper", yref="paper",
-        path=rounded_rect_path(panel_x0, panel_y0, panel_x1, panel_y1, 0.012),
-        line=dict(color="rgba(0,0,0,0)", width=0),
-        fillcolor="rgba(255,255,255,0.74)",
+        path=rounded_rect_path(panel_x0, panel_y0, panel_x1, panel_y1, radius),
+        line=dict(color="rgba(203,213,225,0.90)", width=1),
+        fillcolor="rgba(255,255,255,0.78)",
         layer="above",
     )
 
     fig.add_shape(
         type="path",
         xref="paper", yref="paper",
-        path=rounded_rect_path(panel_x0, panel_y1 - header_h, panel_x1, panel_y1, 0.012),
+        path=rounded_rect_path(panel_x0, panel_y1 - header_h, panel_x1, panel_y1, radius),
         line=dict(color="rgba(0,0,0,0)", width=0),
-        fillcolor="rgba(147,197,253,0.94)",
+        fillcolor="rgba(147,197,253,0.88)",
         layer="above",
     )
 
     fig.add_annotation(
         xref="paper", yref="paper",
-        x=(panel_x0 + panel_x1) / 2.0, y=panel_y1 - header_h / 2.0,
+        x=(panel_x0 + panel_x1) / 2.0,
+        y=panel_y1 - header_h / 2.0,
         text="<b>Shaft Centerline</b>",
         showarrow=False,
-        xanchor="center", yanchor="middle",
-        font=dict(size=11.1, color="#111827"),
+        xanchor="center",
+        yanchor="middle",
+        font=dict(size=8.8, color="#111827"),
     )
 
-    current_top = panel_y1 - header_h - 0.008
+    current_top = panel_y1 - header_h - 0.004
+
     for title, value in rows:
-        title_y = current_top - 0.003
-        value_y = current_top - 0.026
+        title_y = current_top
+        value_y = current_top - 0.013
 
         fig.add_annotation(
             xref="paper", yref="paper",
-            x=panel_x0 + 0.026, y=title_y,
-            xanchor="left", yanchor="top",
+            x=panel_x0 + 0.008,
+            y=title_y,
+            xanchor="left",
+            yanchor="top",
             text=f"<b>{title}</b>",
-            showarrow=False, font=dict(size=10.2, color="#111827"), align="left",
+            showarrow=False,
+            font=dict(size=7.8, color="#111827"),
+            align="left",
         )
 
         fig.add_annotation(
             xref="paper", yref="paper",
-            x=panel_x0 + 0.026, y=value_y,
-            xanchor="left", yanchor="top",
+            x=panel_x0 + 0.008,
+            y=value_y,
+            xanchor="left",
+            yanchor="top",
             text=value,
-            showarrow=False, font=dict(size=9.9, color="#111827"), align="left",
+            showarrow=False,
+            font=dict(size=7.2, color="#111827"),
+            align="left",
         )
 
         current_top -= row_h
@@ -980,6 +995,7 @@ def render_scl_panel(
 # MAIN
 # ============================================================
 def main():
+    require_login()
     ensure_report_state()
 
     st.markdown('<div class="wm-page-title">Shaft Centerline</div>', unsafe_allow_html=True)
@@ -989,6 +1005,8 @@ def main():
     )
 
     with st.sidebar:
+        render_user_menu()
+        st.markdown("---")
         st.markdown("### Shaft Centerline input")
         uploaded_files = st.file_uploader(
             "Upload one or more Shaft Centerline CSV files",
