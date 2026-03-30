@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import base64
 import io
 import math
@@ -11,15 +9,13 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from core.auth import require_login, render_user_menu
 
+# ============================================================
+# CONFIG
+# ============================================================
+st.set_page_config(page_title="Shaft Centerline", layout="wide")
 
-st.set_page_config(page_title="Watermelon System | Shaft Centerline", layout="wide")
-require_login()
-render_user_menu()
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-LOGO_PATH = PROJECT_ROOT / "assets" / "watermelon_logo.png"
+LOGO_PATH = Path("assets/watermelon_logo.png")
 
 
 # ============================================================
@@ -29,26 +25,24 @@ def apply_page_style() -> None:
     st.markdown(
         """
         <style>
-        .main > div { padding-top: 0.18rem; }
-        .stApp { background-color: #f3f4f6; }
-
-        section[data-testid="stSidebar"] {
-            background: #e5e7eb;
-            border-right: 1px solid #cbd5e1;
+        .block-container {
+            padding-top: 1.2rem;
+            padding-bottom: 2.0rem;
+            max-width: 100%;
         }
 
         .wm-page-title {
-            font-size: 2rem;
+            font-size: 2.15rem;
             font-weight: 800;
             color: #0f172a;
-            margin-bottom: 0.08rem;
+            margin-bottom: 0.15rem;
             letter-spacing: -0.02em;
         }
 
         .wm-page-subtitle {
             color: #64748b;
-            font-size: 0.96rem;
-            margin-bottom: 1rem;
+            font-size: 0.98rem;
+            margin-bottom: 1.15rem;
         }
 
         .wm-card {
@@ -202,6 +196,16 @@ def parse_probe_angle_text(text: str) -> Tuple[float, str]:
         side = "Right"
 
     return angle, side
+
+
+def compute_auto_axis_ranges(x: np.ndarray, y: np.ndarray) -> Tuple[List[float], List[float]]:
+    max_abs = max(
+        float(np.nanmax(np.abs(x))) if len(x) else 0.0,
+        float(np.nanmax(np.abs(y))) if len(y) else 0.0,
+        0.1,
+    )
+    lim = max_abs * 1.20
+    return [-lim, lim], [-lim, lim]
 
 
 # ============================================================
@@ -513,6 +517,11 @@ def build_scl_figure(
     marker_stride: int,
     show_reference_circle: bool,
     normalize_to_origin: bool,
+    auto_scale_xy: bool,
+    manual_x_min: float,
+    manual_x_max: float,
+    manual_y_min: float,
+    manual_y_max: float,
 ) -> go.Figure:
     gap_unit = meta.get("Gap Unit", "").strip() or "mil"
     speed_unit = meta.get("Speed Unit", "rpm").strip() or "rpm"
@@ -539,22 +548,39 @@ def build_scl_figure(
     x = plot_df["x_plot"].to_numpy(dtype=float)
     y = plot_df["y_plot"].to_numpy(dtype=float)
 
-    max_abs = max(
+    auto_x_range, auto_y_range = compute_auto_axis_ranges(x, y)
+
+    if auto_scale_xy:
+        x_range = auto_x_range
+        y_range = auto_y_range
+    else:
+        x_lo = min(float(manual_x_min), float(manual_x_max))
+        x_hi = max(float(manual_x_min), float(manual_x_max))
+        y_lo = min(float(manual_y_min), float(manual_y_max))
+        y_hi = max(float(manual_y_min), float(manual_y_max))
+
+        if math.isclose(x_lo, x_hi):
+            x_hi = x_lo + 1.0
+        if math.isclose(y_lo, y_hi):
+            y_hi = y_lo + 1.0
+
+        x_range = [x_lo, x_hi]
+        y_range = [y_lo, y_hi]
+
+    ref_radius = max(
         float(np.nanmax(np.abs(x))) if len(x) else 0.0,
         float(np.nanmax(np.abs(y))) if len(y) else 0.0,
         0.1,
     )
-    lim = max_abs * 1.20
 
     fig = go.Figure()
 
     if show_reference_circle:
         theta = np.linspace(0.0, 2.0 * np.pi, 361)
-        r = max_abs if max_abs > 0 else 1.0
         fig.add_trace(
             go.Scatter(
-                x=r * np.cos(theta),
-                y=r * np.sin(theta),
+                x=ref_radius * np.cos(theta),
+                y=ref_radius * np.sin(theta),
                 mode="lines",
                 line=dict(color="rgba(17,24,39,0.45)", width=2, dash="dot"),
                 hoverinfo="skip",
@@ -665,6 +691,7 @@ def build_scl_figure(
         ("Probe Angles", f"{meta.get('Paired Probe Angle', '-')} / {meta.get('Probe Angle', '-')}"),
         ("Normalize", "Enabled" if normalize_to_origin else "Disabled"),
         ("RPM Labels", "Enabled" if show_rpm_labels else "Disabled"),
+        ("Scale Mode", "Auto" if auto_scale_xy else "Manual"),
     ]
 
     fig.update_layout(
@@ -678,7 +705,7 @@ def build_scl_figure(
 
     fig.update_xaxes(
         title_text=f"{meta.get('Paired Point Name', 'X')} ({gap_unit})",
-        range=[-lim, lim],
+        range=x_range,
         showgrid=True,
         gridcolor="rgba(148, 163, 184, 0.18)",
         zeroline=True,
@@ -692,7 +719,7 @@ def build_scl_figure(
 
     fig.update_yaxes(
         title_text=f"{meta.get('Point Name', 'Y')} ({gap_unit})",
-        range=[-lim, lim],
+        range=y_range,
         showgrid=True,
         gridcolor="rgba(148, 163, 184, 0.18)",
         zeroline=True,
@@ -804,6 +831,11 @@ def render_scl_panel(
     marker_stride: int,
     show_reference_circle: bool,
     normalize_to_origin: bool,
+    auto_scale_xy: bool,
+    manual_x_min: float,
+    manual_x_max: float,
+    manual_y_min: float,
+    manual_y_max: float,
 ) -> None:
     meta = item["meta"]
     raw_df = item["raw_df"]
@@ -864,6 +896,7 @@ def render_scl_panel(
                 <div class="wm-chip">Gap Unit: {gap_unit}</div>
                 <div class="wm-chip">Smoothing: {smooth_window}</div>
                 <div class="wm-chip">Normalize: {"Yes" if normalize_to_origin else "No"}</div>
+                <div class="wm-chip">Scale: {"Auto" if auto_scale_xy else "Manual"}</div>
             </div>
         </div>
         """,
@@ -881,6 +914,11 @@ def render_scl_panel(
         marker_stride=marker_stride,
         show_reference_circle=show_reference_circle,
         normalize_to_origin=normalize_to_origin,
+        auto_scale_xy=auto_scale_xy,
+        manual_x_min=manual_x_min,
+        manual_x_max=manual_x_max,
+        manual_y_min=manual_y_min,
+        manual_y_max=manual_y_max,
     )
 
     st.plotly_chart(
@@ -894,7 +932,8 @@ def render_scl_panel(
 
     export_state_key = (
         f"scl::{item['id']}::{panel_index}::{smooth_window}::{show_info_box}::{show_rpm_labels}::"
-        f"{marker_stride}::{show_reference_circle}::{normalize_to_origin}::{cursor_a_speed}::{cursor_b_speed}"
+        f"{marker_stride}::{show_reference_circle}::{normalize_to_origin}::{auto_scale_xy}::"
+        f"{manual_x_min}::{manual_x_max}::{manual_y_min}::{manual_y_max}::{cursor_a_speed}::{cursor_b_speed}"
     )
 
     if "wm_scl_export_store" not in st.session_state:
@@ -965,6 +1004,28 @@ def main():
         show_reference_circle = st.checkbox("Show reference circle", value=True)
         normalize_to_origin = st.checkbox("Normalize to first point", value=False)
 
+        st.markdown("### X / Y Scale")
+        auto_scale_xy = st.checkbox("Auto scale X / Y", value=True)
+
+        if auto_scale_xy:
+            st.caption("Using automatic X/Y limits.")
+            manual_x_min = -10.0
+            manual_x_max = 10.0
+            manual_y_min = -10.0
+            manual_y_max = 10.0
+        else:
+            sx1, sx2 = st.columns(2)
+            with sx1:
+                manual_x_min = st.number_input("X min", value=-10.0, step=0.5, format="%.3f")
+            with sx2:
+                manual_x_max = st.number_input("X max", value=10.0, step=0.5, format="%.3f")
+
+            sy1, sy2 = st.columns(2)
+            with sy1:
+                manual_y_min = st.number_input("Y min", value=-10.0, step=0.5, format="%.3f")
+            with sy2:
+                manual_y_max = st.number_input("Y max", value=10.0, step=0.5, format="%.3f")
+
     if not uploaded_files:
         st.info("Carga uno o varios archivos CSV de Shaft Centerline para visualizar la posición del eje.")
         return
@@ -992,6 +1053,11 @@ def main():
             marker_stride=marker_stride,
             show_reference_circle=show_reference_circle,
             normalize_to_origin=normalize_to_origin,
+            auto_scale_xy=auto_scale_xy,
+            manual_x_min=manual_x_min,
+            manual_x_max=manual_x_max,
+            manual_y_min=manual_y_min,
+            manual_y_max=manual_y_max,
         )
 
         if panel_index < len(parsed_items) - 1:
