@@ -24,6 +24,7 @@ NAV_ITEMS = [
     {"label": "Orbit Analysis", "page": "pages/05_Orbit_Analysis.py"},
     {"label": "Polar Plot", "page": "pages/06_Polar_Plot.py"},
     {"label": "Bode Plot", "page": "pages/07_Bode_Plot.py"},
+    {"label": "Shaft Centerline", "path": "pages/09_Shaft_Centerline.py"}
     {"label": "Phase Analysis", "page": "pages/13_Phase_Analysis.py"},
     {"label": "Diagnostics", "page": "pages/15_Diagnostics.py"},
     {"label": "Reports", "page": "pages/16_Reports.py"},
