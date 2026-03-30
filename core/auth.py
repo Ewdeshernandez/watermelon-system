@@ -17,13 +17,14 @@ DEFAULT_SESSION_TIMEOUT_MINUTES = 480
 NAV_ITEMS = [
     {"label": "Home", "page": "00_Home.py"},
     {"label": "Load Data", "page": "pages/01_Load_Data.py"},
-    {"label": "Tabular List", "page": "pages/01__Tabular_List.py"}, 
+    {"label": "Tabular List", "page": "pages/01__Tabular_List.py"},
     {"label": "Time Waveforms", "page": "pages/02_Time_Waveforms.py"},
     {"label": "Spectrum", "page": "pages/03_Spectrum.py"},
     {"label": "Trends", "page": "pages/04_Trends.py"},
     {"label": "Orbit Analysis", "page": "pages/05_Orbit_Analysis.py"},
     {"label": "Polar Plot", "page": "pages/06_Polar_Plot.py"},
     {"label": "Bode Plot", "page": "pages/07_Bode_Plot.py"},
+    {"label": "Shaft Centerline", "page": "pages/09_Shaft_Centerline.py"},  # ✅ FIX
     {"label": "Phase Analysis", "page": "pages/13_Phase_Analysis.py"},
     {"label": "Diagnostics", "page": "pages/15_Diagnostics.py"},
     {"label": "Reports", "page": "pages/16_Reports.py"},

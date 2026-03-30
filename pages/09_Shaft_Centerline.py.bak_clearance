@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-
 from core.auth import render_user_menu, require_login
 
 
@@ -28,7 +27,7 @@ def apply_page_style() -> None:
         """
         <style>
         .block-container {
-            padding-top: 1.15rem;
+            padding-top: 1.2rem;
             padding-bottom: 2.0rem;
             max-width: 100%;
         }
@@ -48,7 +47,7 @@ def apply_page_style() -> None:
         }
 
         .wm-card {
-            background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.88));
+            background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.86));
             border: 1px solid #dbe3ee;
             border-radius: 18px;
             padding: 14px 16px 14px 16px;
@@ -200,93 +199,14 @@ def parse_probe_angle_text(text: str) -> Tuple[float, str]:
     return angle, side
 
 
-def compute_xy_ranges(
-    x: np.ndarray,
-    y: np.ndarray,
-    auto_scale_xy: bool,
-    manual_x_min: float,
-    manual_x_max: float,
-    manual_y_min: float,
-    manual_y_max: float,
-) -> Tuple[List[float], List[float]]:
-    if auto_scale_xy:
-        x_span = max(float(np.nanmax(np.abs(x))) if len(x) else 0.0, 0.1) * 1.20
-        y_span = max(float(np.nanmax(np.abs(y))) if len(y) else 0.0, 0.1) * 1.20
-        return [-x_span, x_span], [-y_span, y_span]
-
-    x_lo = min(float(manual_x_min), float(manual_x_max))
-    x_hi = max(float(manual_x_min), float(manual_x_max))
-    y_lo = min(float(manual_y_min), float(manual_y_max))
-    y_hi = max(float(manual_y_min), float(manual_y_max))
-
-    if math.isclose(x_lo, x_hi):
-        x_hi = x_lo + 1.0
-    if math.isclose(y_lo, y_hi):
-        y_hi = y_lo + 1.0
-
-    return [x_lo, x_hi], [y_lo, y_hi]
-
-
-def resolve_clearance_boundary(
-    x: np.ndarray,
-    y: np.ndarray,
-    mode: str,
-    center_mode: str,
-    manual_cx: float,
-    manual_cy: float,
-    manual_center_x: float,
-    manual_center_y: float,
-) -> Dict[str, float]:
-    if center_mode == "Origin (0,0)":
-        cx0 = 0.0
-        cy0 = 0.0
-    elif center_mode == "Data Mean":
-        cx0 = float(np.nanmean(x)) if len(x) else 0.0
-        cy0 = float(np.nanmean(y)) if len(y) else 0.0
-    else:
-        cx0 = float(manual_center_x)
-        cy0 = float(manual_center_y)
-
-    x_rel = x - cx0
-    y_rel = y - cy0
-
-    if mode == "Auto":
-        cx = max(float(np.nanmax(np.abs(x_rel))) if len(x_rel) else 0.0, 0.1) * 1.08
-        cy = max(float(np.nanmax(np.abs(y_rel))) if len(y_rel) else 0.0, 0.1) * 1.08
-    else:
-        cx = max(abs(float(manual_cx)), 0.001)
-        cy = max(abs(float(manual_cy)), 0.001)
-
-    return {
-        "center_x": cx0,
-        "center_y": cy0,
-        "clearance_x": cx,
-        "clearance_y": cy,
-    }
-
-
-def boundary_utilization_pct(
-    px: float,
-    py: float,
-    center_x: float,
-    center_y: float,
-    clearance_x: float,
-    clearance_y: float,
-) -> float:
-    nx = (px - center_x) / max(clearance_x, 1e-9)
-    ny = (py - center_y) / max(clearance_y, 1e-9)
-    return math.sqrt(nx * nx + ny * ny) * 100.0
-
-
-def remaining_margin_pct(util_pct: float) -> float:
-    return max(0.0, 100.0 - util_pct)
-
-
-def build_boundary_curve(center_x: float, center_y: float, clearance_x: float, clearance_y: float) -> Tuple[np.ndarray, np.ndarray]:
-    theta = np.linspace(0.0, 2.0 * np.pi, 361)
-    bx = center_x + clearance_x * np.cos(theta)
-    by = center_y + clearance_y * np.sin(theta)
-    return bx, by
+def compute_auto_axis_ranges(x: np.ndarray, y: np.ndarray) -> Tuple[List[float], List[float]]:
+    max_abs = max(
+        float(np.nanmax(np.abs(x))) if len(x) else 0.0,
+        float(np.nanmax(np.abs(y))) if len(y) else 0.0,
+        0.1,
+    )
+    lim = max_abs * 1.20
+    return [-lim, lim], [-lim, lim]
 
 
 # ============================================================
@@ -525,7 +445,7 @@ def _draw_top_strip(
 
 
 def _draw_right_info_box(fig: go.Figure, rows: List[Tuple[str, str]]) -> None:
-    panel_x0 = 0.855
+    panel_x0 = 0.875
     panel_x1 = 0.970
     panel_y1 = 0.950
     header_h = 0.022
@@ -610,18 +530,14 @@ def build_scl_figure(
     show_info_box: bool,
     show_rpm_labels: bool,
     marker_stride: int,
+    show_reference_circle: bool,
     normalize_to_origin: bool,
-    x_range: List[float],
-    y_range: List[float],
-    clearance_mode: str,
-    clearance_center_mode: str,
-    clearance_center_x: float,
-    clearance_center_y: float,
-    clearance_x: float,
-    clearance_y: float,
-    display_speed_min: float,
-    display_speed_max: float,
-) -> Tuple[go.Figure, Dict[str, float]]:
+    auto_scale_xy: bool,
+    manual_x_min: float,
+    manual_x_max: float,
+    manual_y_min: float,
+    manual_y_max: float,
+) -> go.Figure:
     gap_unit = meta.get("Gap Unit", "").strip() or "mil"
     speed_unit = meta.get("Speed Unit", "rpm").strip() or "rpm"
 
@@ -647,46 +563,45 @@ def build_scl_figure(
     x = plot_df["x_plot"].to_numpy(dtype=float)
     y = plot_df["y_plot"].to_numpy(dtype=float)
 
+    auto_x_range, auto_y_range = compute_auto_axis_ranges(x, y)
+
+    if auto_scale_xy:
+        x_range = auto_x_range
+        y_range = auto_y_range
+    else:
+        x_lo = min(float(manual_x_min), float(manual_x_max))
+        x_hi = max(float(manual_x_min), float(manual_x_max))
+        y_lo = min(float(manual_y_min), float(manual_y_max))
+        y_hi = max(float(manual_y_min), float(manual_y_max))
+
+        if math.isclose(x_lo, x_hi):
+            x_hi = x_lo + 1.0
+        if math.isclose(y_lo, y_hi):
+            y_hi = y_lo + 1.0
+
+        x_range = [x_lo, x_hi]
+        y_range = [y_lo, y_hi]
+
+    ref_radius = max(
+        float(np.nanmax(np.abs(x))) if len(x) else 0.0,
+        float(np.nanmax(np.abs(y))) if len(y) else 0.0,
+        0.1,
+    )
+
     fig = go.Figure()
 
-    bx, by = build_boundary_curve(
-        center_x=clearance_center_x,
-        center_y=clearance_center_y,
-        clearance_x=clearance_x,
-        clearance_y=clearance_y,
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=bx,
-            y=by,
-            mode="lines",
-            line=dict(color="rgba(17,24,39,0.45)", width=2, dash="dot"),
-            hovertemplate=(
-                f"Clearance Boundary<br>"
-                f"Center X: {clearance_center_x:.3f} {gap_unit}<br>"
-                f"Center Y: {clearance_center_y:.3f} {gap_unit}<br>"
-                f"Cx: {clearance_x:.3f} {gap_unit}<br>"
-                f"Cy: {clearance_y:.3f} {gap_unit}<extra></extra>"
-            ),
-            showlegend=False,
-            name="Clearance Boundary",
+    if show_reference_circle:
+        theta = np.linspace(0.0, 2.0 * np.pi, 361)
+        fig.add_trace(
+            go.Scatter(
+                x=ref_radius * np.cos(theta),
+                y=ref_radius * np.sin(theta),
+                mode="lines",
+                line=dict(color="rgba(17,24,39,0.45)", width=2, dash="dot"),
+                hoverinfo="skip",
+                showlegend=False,
+            )
         )
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=[clearance_center_x],
-            y=[clearance_center_y],
-            mode="markers",
-            marker=dict(size=8, color="#111827", symbol="x"),
-            hovertemplate=(
-                f"Boundary Center<br>X: {clearance_center_x:.3f} {gap_unit}<br>"
-                f"Y: {clearance_center_y:.3f} {gap_unit}<extra></extra>"
-            ),
-            showlegend=False,
-        )
-    )
 
     fig.add_trace(
         go.Scatter(
@@ -784,33 +699,14 @@ def build_scl_figure(
             )
         )
 
-    util_a = boundary_utilization_pct(row_a_x, row_a_y, clearance_center_x, clearance_center_y, clearance_x, clearance_y)
-    util_b = boundary_utilization_pct(row_b_x, row_b_y, clearance_center_x, clearance_center_y, clearance_x, clearance_y)
-    util_end = boundary_utilization_pct(float(x[-1]), float(y[-1]), clearance_center_x, clearance_center_y, clearance_x, clearance_y)
-    max_util = max(
-        boundary_utilization_pct(float(px), float(py), clearance_center_x, clearance_center_y, clearance_x, clearance_y)
-        for px, py in zip(x, y)
-    ) if len(x) else 0.0
-
-    diag = {
-        "util_a": util_a,
-        "util_b": util_b,
-        "util_end": util_end,
-        "util_max": max_util,
-        "margin_a": remaining_margin_pct(util_a),
-        "margin_b": remaining_margin_pct(util_b),
-        "margin_end": remaining_margin_pct(util_end),
-        "margin_min": remaining_margin_pct(max_util),
-    }
-
     rows = [
         ("Cursor A", f"X={format_number(row_a_x,3)} / Y={format_number(row_a_y,3)} {gap_unit} @ {int(round(row_a['speed']))} {speed_unit}"),
         ("Cursor B", f"X={format_number(row_b_x,3)} / Y={format_number(row_b_y,3)} {gap_unit} @ {int(round(row_b['speed']))} {speed_unit}"),
-        ("Boundary", f"{clearance_mode} · Cx={format_number(clearance_x,3)} / Cy={format_number(clearance_y,3)} {gap_unit}"),
-        ("Boundary Center", f"{clearance_center_mode} · X={format_number(clearance_center_x,3)} / Y={format_number(clearance_center_y,3)}"),
-        ("RPM Window", f"{int(round(display_speed_min))} to {int(round(display_speed_max))} {speed_unit}"),
-        ("API 684 Helper", f"Max utilization {format_number(max_util,1)}% · Min margin {format_number(diag['margin_min'],1)}%"),
+        ("Probe Pair", f"{meta.get('Paired Point Name', '-')} / {meta.get('Point Name', '-')}"),
+        ("Probe Angles", f"{meta.get('Paired Probe Angle', '-')} / {meta.get('Probe Angle', '-')}"),
         ("Normalize", "Enabled" if normalize_to_origin else "Disabled"),
+        ("RPM Labels", "Enabled" if show_rpm_labels else "Disabled"),
+        ("Scale Mode", "Auto" if auto_scale_xy else "Manual"),
     ]
 
     fig.update_layout(
@@ -853,7 +749,7 @@ def build_scl_figure(
     if show_info_box:
         _draw_right_info_box(fig, rows)
 
-    return fig, diag
+    return fig
 
 
 # ============================================================
@@ -946,9 +842,15 @@ def render_scl_panel(
     logo_uri: Optional[str],
     smooth_window: int,
     show_info_box: bool,
-    show_rpm_labels_global: bool,
-    marker_stride_global: int,
+    show_rpm_labels: bool,
+    marker_stride: int,
+    show_reference_circle: bool,
     normalize_to_origin: bool,
+    auto_scale_xy: bool,
+    manual_x_min: float,
+    manual_x_max: float,
+    manual_y_min: float,
+    manual_y_max: float,
 ) -> None:
     meta = item["meta"]
     raw_df = item["raw_df"]
@@ -958,152 +860,8 @@ def render_scl_panel(
     plot_df["x_gap"] = smooth_series(plot_df["x_gap"], smooth_window)
     plot_df["y_gap"] = smooth_series(plot_df["y_gap"], smooth_window)
 
-    full_speed_min = int(plot_df["speed"].min())
-    full_speed_max = int(plot_df["speed"].max())
-
-    with st.expander(f"Panel {panel_index + 1} · Geometry / Scale / Clearance / RPM Window", expanded=False):
-        st.markdown("#### RPM Display Range")
-        rpm_range_mode = st.selectbox(
-            "RPM display mode",
-            ["Auto", "Manual"],
-            index=0,
-            key=f"scl_rpm_range_mode_{panel_index}_{item['id']}",
-        )
-
-        if rpm_range_mode == "Auto":
-            display_speed_min = float(full_speed_min)
-            display_speed_max = float(full_speed_max)
-            st.caption("Showing the full RPM range available in this panel.")
-        else:
-            display_speed_min, display_speed_max = st.slider(
-                "Visible RPM range",
-                min_value=full_speed_min,
-                max_value=full_speed_max,
-                value=(full_speed_min, full_speed_max),
-                step=1,
-                key=f"scl_visible_rpm_range_{panel_index}_{item['id']}",
-            )
-            display_speed_min = float(display_speed_min)
-            display_speed_max = float(display_speed_max)
-
-        st.markdown("#### X / Y Scale")
-        auto_scale_xy = st.checkbox(
-            "Auto X/Y",
-            value=True,
-            key=f"scl_auto_xy_{panel_index}_{item['id']}",
-        )
-
-        if auto_scale_xy:
-            manual_x_min = -10.0
-            manual_x_max = 10.0
-            manual_y_min = -10.0
-            manual_y_max = 10.0
-            st.caption("Using automatic independent X and Y ranges for this panel.")
-        else:
-            sx1, sx2 = st.columns(2)
-            with sx1:
-                manual_x_min = st.number_input(
-                    "X min",
-                    value=-10.0,
-                    step=0.5,
-                    format="%.3f",
-                    key=f"scl_xmin_{panel_index}_{item['id']}",
-                )
-                manual_y_min = st.number_input(
-                    "Y min",
-                    value=-10.0,
-                    step=0.5,
-                    format="%.3f",
-                    key=f"scl_ymin_{panel_index}_{item['id']}",
-                )
-            with sx2:
-                manual_x_max = st.number_input(
-                    "X max",
-                    value=10.0,
-                    step=0.5,
-                    format="%.3f",
-                    key=f"scl_xmax_{panel_index}_{item['id']}",
-                )
-                manual_y_max = st.number_input(
-                    "Y max",
-                    value=10.0,
-                    step=0.5,
-                    format="%.3f",
-                    key=f"scl_ymax_{panel_index}_{item['id']}",
-                )
-
-        st.markdown("#### Clearance Boundary")
-        cb1, cb2 = st.columns(2)
-        clearance_mode = cb1.selectbox(
-            "Boundary mode",
-            ["Auto", "Manual"],
-            index=0,
-            key=f"scl_clear_mode_{panel_index}_{item['id']}",
-        )
-        clearance_center_mode = cb2.selectbox(
-            "Boundary center",
-            ["Origin (0,0)", "Data Mean", "Manual"],
-            index=0,
-            key=f"scl_clear_center_mode_{panel_index}_{item['id']}",
-        )
-
-        if clearance_center_mode == "Manual":
-            cc1, cc2 = st.columns(2)
-            manual_center_x = cc1.number_input(
-                "Boundary center X",
-                value=0.0,
-                step=0.1,
-                format="%.3f",
-                key=f"scl_center_x_{panel_index}_{item['id']}",
-            )
-            manual_center_y = cc2.number_input(
-                "Boundary center Y",
-                value=0.0,
-                step=0.1,
-                format="%.3f",
-                key=f"scl_center_y_{panel_index}_{item['id']}",
-            )
-        else:
-            manual_center_x = 0.0
-            manual_center_y = 0.0
-
-        if clearance_mode == "Manual":
-            cm1, cm2 = st.columns(2)
-            manual_clearance_x = cm1.number_input(
-                "Clearance X (Cx)",
-                value=5.0,
-                min_value=0.001,
-                step=0.1,
-                format="%.3f",
-                key=f"scl_clear_x_{panel_index}_{item['id']}",
-            )
-            manual_clearance_y = cm2.number_input(
-                "Clearance Y (Cy)",
-                value=5.0,
-                min_value=0.001,
-                step=0.1,
-                format="%.3f",
-                key=f"scl_clear_y_{panel_index}_{item['id']}",
-            )
-        else:
-            manual_clearance_x = 5.0
-            manual_clearance_y = 5.0
-
-        st.caption(
-            "API 684 helper: this module normalizes shaft position against the clearance boundary "
-            "and shows utilization/margin. Use it as a diagnostic helper, not as a standalone acceptance limit."
-        )
-
-    display_df = plot_df[
-        (plot_df["speed"] >= display_speed_min) & (plot_df["speed"] <= display_speed_max)
-    ].copy()
-
-    if display_df.empty:
-        st.warning(f"Panel {panel_index + 1}: no hay puntos en el rango RPM seleccionado.")
-        return
-
-    speed_min = int(display_df["speed"].min())
-    speed_max = int(display_df["speed"].max())
+    speed_min = int(plot_df["speed"].min())
+    speed_max = int(plot_df["speed"].max())
 
     c1, c2 = st.columns(2)
     with c1:
@@ -1123,38 +881,8 @@ def render_scl_panel(
             key=f"scl_cursor_b_{panel_index}_{item['id']}",
         )
 
-    row_a = nearest_row_for_speed(display_df, cursor_a_speed)
-    row_b = nearest_row_for_speed(display_df, cursor_b_speed)
-
-    if normalize_to_origin:
-        base_x = float(display_df["x_gap"].iloc[0])
-        base_y = float(display_df["y_gap"].iloc[0])
-        x_plot = (display_df["x_gap"] - base_x).to_numpy(dtype=float)
-        y_plot = (display_df["y_gap"] - base_y).to_numpy(dtype=float)
-    else:
-        x_plot = display_df["x_gap"].to_numpy(dtype=float)
-        y_plot = display_df["y_gap"].to_numpy(dtype=float)
-
-    x_range, y_range = compute_xy_ranges(
-        x=x_plot,
-        y=y_plot,
-        auto_scale_xy=auto_scale_xy,
-        manual_x_min=manual_x_min,
-        manual_x_max=manual_x_max,
-        manual_y_min=manual_y_min,
-        manual_y_max=manual_y_max,
-    )
-
-    boundary = resolve_clearance_boundary(
-        x=x_plot,
-        y=y_plot,
-        mode=clearance_mode,
-        center_mode=clearance_center_mode,
-        manual_cx=manual_clearance_x,
-        manual_cy=manual_clearance_y,
-        manual_center_x=manual_center_x,
-        manual_center_y=manual_center_y,
-    )
+    row_a = nearest_row_for_speed(plot_df, cursor_a_speed)
+    row_b = nearest_row_for_speed(plot_df, cursor_b_speed)
 
     machine = meta.get("Machine Name", "-")
     point = meta.get("Point Name", "-")
@@ -1174,45 +902,38 @@ def render_scl_panel(
             <div class="wm-meta">
                 Variable: <b>{variable}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
                 Probe Angles: <b>{probe_angle:.0f}° {probe_side}</b> / <b>{paired_angle:.0f}° {paired_side}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
-                Visible Speed Range: <b>{int(display_df['speed'].min())} - {int(display_df['speed'].max())} {speed_unit}</b>
+                Speed Range: <b>{int(plot_df['speed'].min())} - {int(plot_df['speed'].max())} {speed_unit}</b>
             </div>
             <div class="wm-chip-row">
                 <div class="wm-chip">File: {item["file_name"]}</div>
                 <div class="wm-chip">Raw rows: {len(raw_df):,}</div>
-                <div class="wm-chip">Grouped points: {len(display_df):,}</div>
+                <div class="wm-chip">Grouped points: {len(plot_df):,}</div>
                 <div class="wm-chip">Gap Unit: {gap_unit}</div>
                 <div class="wm-chip">Smoothing: {smooth_window}</div>
                 <div class="wm-chip">Normalize: {"Yes" if normalize_to_origin else "No"}</div>
-                <div class="wm-chip">RPM Window: {"Auto" if rpm_range_mode == "Auto" else "Manual"}</div>
-                <div class="wm-chip">X/Y Scale: {"Auto" if auto_scale_xy else "Manual"}</div>
-                <div class="wm-chip">Boundary: {clearance_mode}</div>
-                <div class="wm-chip">Boundary Center: {clearance_center_mode}</div>
+                <div class="wm-chip">Scale: {"Auto" if auto_scale_xy else "Manual"}</div>
             </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    fig, diag = build_scl_figure(
-        df=display_df,
+    fig = build_scl_figure(
+        df=plot_df,
         meta=meta,
         row_a=row_a,
         row_b=row_b,
         logo_uri=logo_uri,
         show_info_box=show_info_box,
-        show_rpm_labels=show_rpm_labels_global,
-        marker_stride=marker_stride_global,
+        show_rpm_labels=show_rpm_labels,
+        marker_stride=marker_stride,
+        show_reference_circle=show_reference_circle,
         normalize_to_origin=normalize_to_origin,
-        x_range=x_range,
-        y_range=y_range,
-        clearance_mode=clearance_mode,
-        clearance_center_mode=clearance_center_mode,
-        clearance_center_x=boundary["center_x"],
-        clearance_center_y=boundary["center_y"],
-        clearance_x=boundary["clearance_x"],
-        clearance_y=boundary["clearance_y"],
-        display_speed_min=display_speed_min,
-        display_speed_max=display_speed_max,
+        auto_scale_xy=auto_scale_xy,
+        manual_x_min=manual_x_min,
+        manual_x_max=manual_x_max,
+        manual_y_min=manual_y_min,
+        manual_y_max=manual_y_max,
     )
 
     st.plotly_chart(
@@ -1222,34 +943,12 @@ def render_scl_panel(
         key=f"wm_scl_plot_{panel_index}_{item['id']}",
     )
 
-    st.markdown(
-        f"""
-        <div class="wm-card">
-            <div class="wm-card-title">API 684 helper · Panel {panel_index + 1}</div>
-            <div class="wm-card-subtitle">Normalized position against clearance boundary for wear / margin tracking.</div>
-            <div class="wm-chip-row">
-                <div class="wm-chip">Cursor A util: {diag["util_a"]:.1f}%</div>
-                <div class="wm-chip">Cursor A margin: {diag["margin_a"]:.1f}%</div>
-                <div class="wm-chip">Cursor B util: {diag["util_b"]:.1f}%</div>
-                <div class="wm-chip">Cursor B margin: {diag["margin_b"]:.1f}%</div>
-                <div class="wm-chip">End util: {diag["util_end"]:.1f}%</div>
-                <div class="wm-chip">End margin: {diag["margin_end"]:.1f}%</div>
-                <div class="wm-chip">Max util: {diag["util_max"]:.1f}%</div>
-                <div class="wm-chip">Minimum margin: {diag["margin_min"]:.1f}%</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
     title = f"Shaft Centerline {panel_index + 1} — {machine} — {point} / {paired_point}"
 
     export_state_key = (
-        f"scl::{item['id']}::{panel_index}::{smooth_window}::{show_info_box}::{show_rpm_labels_global}::{marker_stride_global}::"
-        f"{normalize_to_origin}::{rpm_range_mode}::{display_speed_min}::{display_speed_max}::"
-        f"{auto_scale_xy}::{manual_x_min}::{manual_x_max}::{manual_y_min}::{manual_y_max}::"
-        f"{clearance_mode}::{clearance_center_mode}::{boundary['center_x']}::{boundary['center_y']}::{boundary['clearance_x']}::{boundary['clearance_y']}::"
-        f"{cursor_a_speed}::{cursor_b_speed}"
+        f"scl::{item['id']}::{panel_index}::{smooth_window}::{show_info_box}::{show_rpm_labels}::"
+        f"{marker_stride}::{show_reference_circle}::{normalize_to_origin}::{auto_scale_xy}::"
+        f"{manual_x_min}::{manual_x_max}::{manual_y_min}::{manual_y_max}::{cursor_a_speed}::{cursor_b_speed}"
     )
 
     if "wm_scl_export_store" not in st.session_state:
@@ -1315,25 +1014,38 @@ def main():
             accept_multiple_files=True,
         )
 
-        st.markdown("### Global Controls")
+        st.markdown("### Controls")
         smooth_window = st.slider("Gap smoothing", 1, 11, 3, step=2)
         show_info_box = st.checkbox("Show information box", value=True)
         show_rpm_labels = st.checkbox("Show RPM labels", value=True)
         marker_stride = st.slider("RPM label step", 10, 150, 45, step=5)
+        show_reference_circle = st.checkbox("Show reference circle", value=True)
         normalize_to_origin = st.checkbox("Normalize to first point", value=False)
 
+        st.markdown("### X / Y Scale")
+        auto_scale_xy = st.checkbox("Auto scale X / Y", value=True)
+
+        if auto_scale_xy:
+            st.caption("Using automatic X/Y limits.")
+            manual_x_min = -10.0
+            manual_x_max = 10.0
+            manual_y_min = -10.0
+            manual_y_max = 10.0
+        else:
+            sx1, sx2 = st.columns(2)
+            with sx1:
+                manual_x_min = st.number_input("X min", value=-10.0, step=0.5, format="%.3f")
+            with sx2:
+                manual_x_max = st.number_input("X max", value=10.0, step=0.5, format="%.3f")
+
+            sy1, sy2 = st.columns(2)
+            with sy1:
+                manual_y_min = st.number_input("Y min", value=-10.0, step=0.5, format="%.3f")
+            with sy2:
+                manual_y_max = st.number_input("Y max", value=10.0, step=0.5, format="%.3f")
+
     if not uploaded_files:
-        st.markdown(
-            """
-            <div class="wm-card" style="max-width: 980px;">
-                <div class="wm-card-title">Carga archivos para comenzar</div>
-                <div class="wm-card-subtitle">
-                    Sube uno o varios archivos CSV de Shaft Centerline desde el panel izquierdo.
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.info("Carga uno o varios archivos CSV de Shaft Centerline para visualizar la posición del eje.")
         return
 
     parsed_items, failed_items = parse_uploaded_scl_files(uploaded_files)
@@ -1355,9 +1067,15 @@ def main():
             logo_uri=logo_uri,
             smooth_window=smooth_window,
             show_info_box=show_info_box,
-            show_rpm_labels_global=show_rpm_labels,
-            marker_stride_global=marker_stride,
+            show_rpm_labels=show_rpm_labels,
+            marker_stride=marker_stride,
+            show_reference_circle=show_reference_circle,
             normalize_to_origin=normalize_to_origin,
+            auto_scale_xy=auto_scale_xy,
+            manual_x_min=manual_x_min,
+            manual_x_max=manual_x_max,
+            manual_y_min=manual_y_min,
+            manual_y_max=manual_y_max,
         )
 
         if panel_index < len(parsed_items) - 1:
