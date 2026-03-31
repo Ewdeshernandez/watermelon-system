@@ -16,7 +16,6 @@ from core.auth import render_user_menu, require_login
 # CONFIG
 # ============================================================
 st.set_page_config(page_title="Shaft Centerline", layout="wide")
-
 LOGO_PATH = Path("assets/watermelon_logo.png")
 
 
@@ -287,6 +286,100 @@ def build_boundary_curve(center_x: float, center_y: float, clearance_x: float, c
     bx = center_x + clearance_x * np.cos(theta)
     by = center_y + clearance_y * np.sin(theta)
     return bx, by
+
+
+def get_clearance_status(util_pct: float) -> Tuple[str, str]:
+    if util_pct < 60.0:
+        return "SAFE", "#16a34a"
+    if util_pct < 85.0:
+        return "WARNING", "#f59e0b"
+    return "DANGER", "#dc2626"
+
+
+def detect_early_rub(
+    x: np.ndarray,
+    y: np.ndarray,
+    speed: np.ndarray,
+    center_x: float,
+    center_y: float,
+    clearance_x: float,
+    clearance_y: float,
+    warning_util_pct: float,
+    danger_util_pct: float,
+) -> Dict[str, Any]:
+    if len(x) < 3:
+        return {
+            "triggered": False,
+            "severity": "SAFE",
+            "color": "#16a34a",
+            "message": "Insufficient points",
+            "max_util_pct": 0.0,
+            "contact_points": 0,
+            "warning_points": 0,
+            "trend_score": 0.0,
+            "first_warning_speed": None,
+            "first_danger_speed": None,
+        }
+
+    utils = []
+    for px, py in zip(x, y):
+        util = boundary_utilization_pct(px, py, center_x, center_y, clearance_x, clearance_y)
+        utils.append(util)
+    utils = np.array(utils, dtype=float)
+
+    warning_mask = utils >= warning_util_pct
+    danger_mask = utils >= danger_util_pct
+
+    warning_points = int(np.sum(warning_mask))
+    contact_points = int(np.sum(danger_mask))
+
+    # Tendencia creciente al límite
+    if len(utils) >= 5:
+        idx = np.arange(len(utils), dtype=float)
+        slope = float(np.polyfit(idx, utils, 1)[0])
+    else:
+        slope = 0.0
+
+    last_n = min(8, len(utils))
+    tail_mean = float(np.mean(utils[-last_n:])) if last_n else 0.0
+    max_util = float(np.max(utils)) if len(utils) else 0.0
+
+    if contact_points > 0 or max_util >= danger_util_pct:
+        severity = "DANGER"
+        color = "#dc2626"
+        triggered = True
+        message = "Early rub risk high"
+    elif warning_points >= 2 or tail_mean >= warning_util_pct or slope > 1.5:
+        severity = "WARNING"
+        color = "#f59e0b"
+        triggered = True
+        message = "Possible early rub tendency"
+    else:
+        severity = "SAFE"
+        color = "#16a34a"
+        triggered = False
+        message = "No early rub tendency detected"
+
+    first_warning_speed = None
+    first_danger_speed = None
+
+    if np.any(warning_mask):
+        first_warning_speed = float(speed[np.argmax(warning_mask)])
+    if np.any(danger_mask):
+        first_danger_speed = float(speed[np.argmax(danger_mask)])
+
+    return {
+        "triggered": triggered,
+        "severity": severity,
+        "color": color,
+        "message": message,
+        "max_util_pct": max_util,
+        "contact_points": contact_points,
+        "warning_points": warning_points,
+        "trend_score": slope,
+        "first_warning_speed": first_warning_speed,
+        "first_danger_speed": first_danger_speed,
+    }
 
 
 # ============================================================
@@ -621,6 +714,8 @@ def build_scl_figure(
     clearance_y: float,
     display_speed_min: float,
     display_speed_max: float,
+    semaforo_status: str,
+    semaforo_color: str,
 ) -> Tuple[go.Figure, Dict[str, float]]:
     gap_unit = meta.get("Gap Unit", "").strip() or "mil"
     speed_unit = meta.get("Speed Unit", "rpm").strip() or "rpm"
@@ -661,18 +756,32 @@ def build_scl_figure(
             x=bx,
             y=by,
             mode="lines",
-            line=dict(color="rgba(17,24,39,0.45)", width=2, dash="dot"),
+            line=dict(color=semaforo_color, width=2.4, dash="dot"),
             hovertemplate=(
                 f"Clearance Boundary<br>"
                 f"Center X: {clearance_center_x:.3f} {gap_unit}<br>"
                 f"Center Y: {clearance_center_y:.3f} {gap_unit}<br>"
                 f"Cx: {clearance_x:.3f} {gap_unit}<br>"
-                f"Cy: {clearance_y:.3f} {gap_unit}<extra></extra>"
+                f"Cy: {clearance_y:.3f} {gap_unit}<br>"
+                f"Status: {semaforo_status}<extra></extra>"
             ),
             showlegend=False,
             name="Clearance Boundary",
         )
     )
+
+    if semaforo_status == "DANGER":
+        fig.add_trace(
+            go.Scatter(
+                x=bx,
+                y=by,
+                mode="lines",
+                line=dict(color=semaforo_color, width=7),
+                opacity=0.12,
+                hoverinfo="skip",
+                showlegend=False,
+            )
+        )
 
     fig.add_trace(
         go.Scatter(
@@ -809,6 +918,7 @@ def build_scl_figure(
         ("Boundary", f"{clearance_mode} · Cx={format_number(clearance_x,3)} / Cy={format_number(clearance_y,3)} {gap_unit}"),
         ("Boundary Center", f"{clearance_center_mode} · X={format_number(clearance_center_x,3)} / Y={format_number(clearance_center_y,3)}"),
         ("RPM Window", f"{int(round(display_speed_min))} to {int(round(display_speed_max))} {speed_unit}"),
+        ("Status", f"<span style='color:{semaforo_color};'><b>{semaforo_status}</b></span>"),
         ("API 684 Helper", f"Max utilization {format_number(max_util,1)}% · Min margin {format_number(diag['margin_min'],1)}%"),
         ("Normalize", "Enabled" if normalize_to_origin else "Disabled"),
     ]
@@ -961,7 +1071,7 @@ def render_scl_panel(
     full_speed_min = int(plot_df["speed"].min())
     full_speed_max = int(plot_df["speed"].max())
 
-    with st.expander(f"Panel {panel_index + 1} · Geometry / Scale / Clearance / RPM Window", expanded=False):
+    with st.expander(f"Panel {panel_index + 1} · Geometry / Scale / Clearance / RPM Window / Rub", expanded=False):
         st.markdown("#### RPM Display Range")
         rpm_range_mode = st.selectbox(
             "RPM display mode",
@@ -1089,9 +1199,31 @@ def render_scl_panel(
             manual_clearance_x = 5.0
             manual_clearance_y = 5.0
 
+        st.markdown("#### Early Rub Detection")
+        er1, er2 = st.columns(2)
+        early_rub_warning_pct = er1.slider(
+            "Warning utilization %",
+            min_value=50,
+            max_value=98,
+            value=80,
+            step=1,
+            key=f"scl_rub_warn_{panel_index}_{item['id']}",
+        )
+        early_rub_danger_pct = er2.slider(
+            "Danger utilization %",
+            min_value=60,
+            max_value=100,
+            value=95,
+            step=1,
+            key=f"scl_rub_danger_{panel_index}_{item['id']}",
+        )
+
+        if early_rub_danger_pct <= early_rub_warning_pct:
+            early_rub_danger_pct = early_rub_warning_pct + 1
+
         st.caption(
-            "API 684 helper: this module normalizes shaft position against the clearance boundary "
-            "and shows utilization/margin. Use it as a diagnostic helper, not as a standalone acceptance limit."
+            "API 684 helper: normalized position against clearance boundary. "
+            "Early rub detection here is an analytical helper based on utilization proximity and trend."
         )
 
     display_df = plot_df[
@@ -1156,6 +1288,20 @@ def render_scl_panel(
         manual_center_y=manual_center_y,
     )
 
+    early_rub = detect_early_rub(
+        x=x_plot,
+        y=y_plot,
+        speed=display_df["speed"].to_numpy(dtype=float),
+        center_x=boundary["center_x"],
+        center_y=boundary["center_y"],
+        clearance_x=boundary["clearance_x"],
+        clearance_y=boundary["clearance_y"],
+        warning_util_pct=float(early_rub_warning_pct),
+        danger_util_pct=float(early_rub_danger_pct),
+    )
+
+    semaforo_status, semaforo_color = get_clearance_status(early_rub["max_util_pct"])
+
     machine = meta.get("Machine Name", "-")
     point = meta.get("Point Name", "-")
     paired_point = meta.get("Paired Point Name", "-")
@@ -1187,6 +1333,8 @@ def render_scl_panel(
                 <div class="wm-chip">X/Y Scale: {"Auto" if auto_scale_xy else "Manual"}</div>
                 <div class="wm-chip">Boundary: {clearance_mode}</div>
                 <div class="wm-chip">Boundary Center: {clearance_center_mode}</div>
+                <div class="wm-chip" style="color:{semaforo_color}; border-color:{semaforo_color};"><b>Status: {semaforo_status}</b></div>
+                <div class="wm-chip" style="color:{early_rub['color']}; border-color:{early_rub['color']};"><b>Rub: {early_rub['severity']}</b></div>
             </div>
         </div>
         """,
@@ -1213,6 +1361,8 @@ def render_scl_panel(
         clearance_y=boundary["clearance_y"],
         display_speed_min=display_speed_min,
         display_speed_max=display_speed_max,
+        semaforo_status=semaforo_status,
+        semaforo_color=semaforo_color,
     )
 
     st.plotly_chart(
@@ -1222,20 +1372,31 @@ def render_scl_panel(
         key=f"wm_scl_plot_{panel_index}_{item['id']}",
     )
 
+    first_warning_text = "—"
+    first_danger_text = "—"
+    if early_rub["first_warning_speed"] is not None:
+        first_warning_text = f"{early_rub['first_warning_speed']:.0f} {speed_unit}"
+    if early_rub["first_danger_speed"] is not None:
+        first_danger_text = f"{early_rub['first_danger_speed']:.0f} {speed_unit}"
+
     st.markdown(
         f"""
         <div class="wm-card">
-            <div class="wm-card-title">API 684 helper · Panel {panel_index + 1}</div>
-            <div class="wm-card-subtitle">Normalized position against clearance boundary for wear / margin tracking.</div>
+            <div class="wm-card-title">API 684 Helper + Early Rub Detection · Panel {panel_index + 1}</div>
+            <div class="wm-card-subtitle">Clearance utilization, margin, semáforo y tendencia temprana de roce.</div>
             <div class="wm-chip-row">
-                <div class="wm-chip">Cursor A util: {diag["util_a"]:.1f}%</div>
-                <div class="wm-chip">Cursor A margin: {diag["margin_a"]:.1f}%</div>
-                <div class="wm-chip">Cursor B util: {diag["util_b"]:.1f}%</div>
-                <div class="wm-chip">Cursor B margin: {diag["margin_b"]:.1f}%</div>
-                <div class="wm-chip">End util: {diag["util_end"]:.1f}%</div>
-                <div class="wm-chip">End margin: {diag["margin_end"]:.1f}%</div>
+                <div class="wm-chip" style="color:{semaforo_color}; border-color:{semaforo_color};">Semáforo: {semaforo_status}</div>
                 <div class="wm-chip">Max util: {diag["util_max"]:.1f}%</div>
                 <div class="wm-chip">Minimum margin: {diag["margin_min"]:.1f}%</div>
+                <div class="wm-chip">Cursor A util: {diag["util_a"]:.1f}%</div>
+                <div class="wm-chip">Cursor B util: {diag["util_b"]:.1f}%</div>
+                <div class="wm-chip" style="color:{early_rub['color']}; border-color:{early_rub['color']};">Early rub: {early_rub["severity"]}</div>
+                <div class="wm-chip">Rub message: {early_rub["message"]}</div>
+                <div class="wm-chip">Warning points: {early_rub["warning_points"]}</div>
+                <div class="wm-chip">Danger points: {early_rub["contact_points"]}</div>
+                <div class="wm-chip">Trend score: {early_rub["trend_score"]:.2f}</div>
+                <div class="wm-chip">1st warning: {first_warning_text}</div>
+                <div class="wm-chip">1st danger: {first_danger_text}</div>
             </div>
         </div>
         """,
@@ -1249,7 +1410,7 @@ def render_scl_panel(
         f"{normalize_to_origin}::{rpm_range_mode}::{display_speed_min}::{display_speed_max}::"
         f"{auto_scale_xy}::{manual_x_min}::{manual_x_max}::{manual_y_min}::{manual_y_max}::"
         f"{clearance_mode}::{clearance_center_mode}::{boundary['center_x']}::{boundary['center_y']}::{boundary['clearance_x']}::{boundary['clearance_y']}::"
-        f"{cursor_a_speed}::{cursor_b_speed}"
+        f"{early_rub_warning_pct}::{early_rub_danger_pct}::{cursor_a_speed}::{cursor_b_speed}"
     )
 
     if "wm_scl_export_store" not in st.session_state:
