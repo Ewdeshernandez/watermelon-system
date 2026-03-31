@@ -17,24 +17,116 @@ except Exception:
     find_peaks = None
 
 from core.auth import require_login, render_user_menu
-from core.module_patterns import export_report_row, helper_card, panel_card
-from core.ui_theme import (
-    apply_watermelon_page_style,
-    draw_info_box,
-    draw_top_strip,
-    page_header,
-)
-from core.wm_diagnostics import format_number, get_semaforo_status
 
 
-# ============================================================
-# CONFIG
-# ============================================================
 st.set_page_config(page_title="Watermelon System | Polar Plot", layout="wide")
+require_login()
+render_user_menu()
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOGO_PATH = PROJECT_ROOT / "assets" / "watermelon_logo.png"
 
-apply_watermelon_page_style()
+
+# ============================================================
+# STYLE
+# ============================================================
+def apply_page_style() -> None:
+    st.markdown(
+        """
+        <style>
+        .main > div { padding-top: 0.18rem; }
+        .stApp { background-color: #f3f4f6; }
+
+        section[data-testid="stSidebar"] {
+            background: #e5e7eb;
+            border-right: 1px solid #cbd5e1;
+        }
+
+        .wm-page-title {
+            font-size: 2rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 0.08rem;
+            letter-spacing: -0.02em;
+        }
+
+        .wm-page-subtitle {
+            color: #64748b;
+            font-size: 0.96rem;
+            margin-bottom: 1rem;
+        }
+
+        .wm-card {
+            background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.86));
+            border: 1px solid #dbe3ee;
+            border-radius: 18px;
+            padding: 14px 16px 14px 16px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+            margin-bottom: 12px;
+        }
+
+        .wm-card-title {
+            font-size: 1.02rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 0.18rem;
+        }
+
+        .wm-card-subtitle {
+            color: #64748b;
+            font-size: 0.90rem;
+            margin-bottom: 0.35rem;
+        }
+
+        .wm-meta {
+            color: #334155;
+            font-size: 0.92rem;
+            line-height: 1.6;
+        }
+
+        .wm-chip-row {
+            display:flex;
+            flex-wrap:wrap;
+            gap:8px;
+            margin-top:10px;
+        }
+
+        .wm-chip {
+            border:1px solid #dbe3ee;
+            background:#f8fafc;
+            border-radius:999px;
+            padding:5px 10px;
+            color:#334155;
+            font-size:0.82rem;
+            font-weight:600;
+        }
+
+        section.main div[data-testid="stButton"] > button,
+        section.main div[data-testid="stDownloadButton"] > button {
+            min-height: 52px;
+            border-radius: 16px;
+            font-weight: 700;
+            border: 1px solid #bfd8ff !important;
+            background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%) !important;
+            color: #2563eb !important;
+            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
+            transition: all 0.18s ease;
+        }
+
+        section.main div[data-testid="stButton"] > button:hover,
+        section.main div[data-testid="stDownloadButton"] > button:hover {
+            border-color: #93c5fd !important;
+            background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%) !important;
+            color: #1d4ed8 !important;
+            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+apply_page_style()
 
 
 # ============================================================
@@ -45,6 +137,18 @@ def ensure_report_state() -> None:
         st.session_state["report_items"] = []
 
 
+def format_number(value: Any, digits: int = 3, fallback: str = "—") -> str:
+    if value is None:
+        return fallback
+    try:
+        val = float(value)
+        if not math.isfinite(val):
+            return fallback
+        return f"{val:.{digits}f}"
+    except Exception:
+        return fallback
+
+
 def get_logo_data_uri(path: Path) -> Optional[str]:
     if not path.exists():
         return None
@@ -53,6 +157,21 @@ def get_logo_data_uri(path: Path) -> Optional[str]:
         return f"data:image/png;base64,{b64}"
     except Exception:
         return None
+
+
+def rounded_rect_path(x0: float, y0: float, x1: float, y1: float, r: float) -> str:
+    r = max(0.0, min(r, (x1 - x0) / 2.0, (y1 - y0) / 2.0))
+    return (
+        f"M {x0+r},{y0} "
+        f"L {x1-r},{y0} "
+        f"Q {x1},{y0} {x1},{y0+r} "
+        f"L {x1},{y1-r} "
+        f"Q {x1},{y1} {x1-r},{y1} "
+        f"L {x0+r},{y1} "
+        f"Q {x0},{y1} {x0},{y1-r} "
+        f"L {x0},{y0+r} "
+        f"Q {x0},{y0} {x0+r},{y0} Z"
+    )
 
 
 def circular_mean_deg(series: pd.Series) -> float:
@@ -94,28 +213,6 @@ def smooth_series(series: pd.Series, window: int) -> pd.Series:
 def nearest_row_for_speed(df: pd.DataFrame, speed_value: float) -> pd.Series:
     idx = int((df["speed"] - speed_value).abs().idxmin())
     return df.loc[idx]
-
-
-def polar_health_status(
-    critical_speeds: List[Dict[str, float]],
-    amp_series: pd.Series,
-) -> Tuple[str, str, Dict[str, float]]:
-    max_amp = float(amp_series.max()) if len(amp_series) else 0.0
-    candidate_count = len(critical_speeds)
-
-    if candidate_count == 0:
-        score = 15.0
-    else:
-        dominant_amp = max(float(cs["amp"]) for cs in critical_speeds)
-        phase_delta = max(abs(float(cs["phase_delta"])) for cs in critical_speeds)
-        score = min(100.0, dominant_amp * 10.0 + abs(phase_delta) * 0.35)
-
-    status, color = get_semaforo_status(score, safe_limit=35.0, warning_limit=70.0)
-    return status, color, {
-        "score": score,
-        "max_amp": max_amp,
-        "candidate_count": candidate_count,
-    }
 
 
 # ============================================================
@@ -202,6 +299,8 @@ def compute_probe_base_angle(axis_label: str, side_label: str, install_angle_deg
         base = 0.0 if side_label == "Right" else 180.0
     elif axis_label == "Y":
         base = 90.0 if side_label == "Right" else 270.0
+    else:
+        base = 0.0
 
     return (base + float(install_angle_deg)) % 360.0
 
@@ -298,7 +397,214 @@ def estimate_critical_speeds_api684_style(df: pd.DataFrame, max_count: int = 2) 
 
 
 # ============================================================
-# FIGURE
+# IN-CHART DECORATION
+# ============================================================
+def _draw_top_strip(
+    fig: go.Figure,
+    meta: Dict[str, str],
+    logo_uri: Optional[str],
+    df: pd.DataFrame,
+    axis_label: str,
+    side_label: str,
+    install_angle_deg: float,
+    rotation_direction: str,
+) -> None:
+    x0, x1 = 0.006, 0.994
+    y0, y1 = 1.014, 1.104
+    radius = 0.014
+
+    fig.add_shape(
+        type="path",
+        xref="paper",
+        yref="paper",
+        path=rounded_rect_path(x0, y0, x1, y1, radius),
+        line=dict(color="#cfd8e3", width=1.1),
+        fillcolor="rgba(255,255,255,0.97)",
+        layer="below",
+    )
+
+    y_text = (y0 + y1) / 2.0
+
+    machine = meta.get("Machine Name", "")
+    point = meta.get("Point Name", "")
+    variable = meta.get("Variable", "")
+    speed_unit = meta.get("Speed Unit", "rpm") or "rpm"
+
+    if logo_uri:
+        fig.add_layout_image(
+            dict(
+                source=logo_uri,
+                xref="paper",
+                yref="paper",
+                x=0.014,
+                y=y1 - 0.008,
+                sizex=0.055,
+                sizey=0.085,
+                xanchor="left",
+                yanchor="top",
+                layer="above",
+                sizing="contain",
+                opacity=1.0,
+            )
+        )
+        machine_x = 0.082
+    else:
+        machine_x = 0.020
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=machine_x, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=f"<b>{machine}</b>",
+        showarrow=False,
+        font=dict(size=12.3, color="#111827"),
+    )
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.205, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=point,
+        showarrow=False,
+        font=dict(size=11.7, color="#111827"),
+    )
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.355, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=f"{variable}",
+        showarrow=False,
+        font=dict(size=11.5, color="#111827"),
+    )
+
+    orient_text = f"{axis_label} | {install_angle_deg:.0f}° {side_label} | Rotation {rotation_direction}"
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.47, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=orient_text,
+        showarrow=False,
+        font=dict(size=11.3, color="#111827"),
+    )
+
+    dt_start = pd.to_datetime(df["ts_min"], errors="coerce").min()
+    dt_end = pd.to_datetime(df["ts_max"], errors="coerce").max()
+    dt_text = "—"
+    if pd.notna(dt_start) and pd.notna(dt_end):
+        dt_text = f"{dt_start.strftime('%Y-%m-%d %H:%M:%S')} → {dt_end.strftime('%Y-%m-%d %H:%M:%S')}"
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.72, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=dt_text,
+        showarrow=False,
+        font=dict(size=10.8, color="#111827"),
+    )
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.986, y=y_text,
+        xanchor="right", yanchor="middle",
+        text=f"{int(round(df['speed'].min()))} - {int(round(df['speed'].max()))} {speed_unit}",
+        showarrow=False,
+        font=dict(size=10.8, color="#111827"),
+    )
+
+
+def _draw_right_info_box(fig: go.Figure, rows: List[Tuple[str, str]]) -> None:
+    panel_x0 = 0.805
+    panel_x1 = 0.965
+    panel_y1 = 0.915
+    header_h = 0.033
+    row_h = 0.050
+    panel_h = header_h + len(rows) * row_h + 0.016
+    panel_y0 = panel_y1 - panel_h
+
+    fig.add_shape(
+        type="path",
+        xref="paper", yref="paper",
+        path=rounded_rect_path(panel_x0, panel_y0, panel_x1, panel_y1, 0.012),
+        line=dict(color="rgba(0,0,0,0)", width=0),
+        fillcolor="rgba(255,255,255,0.74)",
+        layer="above",
+    )
+
+    fig.add_shape(
+        type="path",
+        xref="paper", yref="paper",
+        path=rounded_rect_path(panel_x0, panel_y1 - header_h, panel_x1, panel_y1, 0.012),
+        line=dict(color="rgba(0,0,0,0)", width=0),
+        fillcolor="rgba(147,197,253,0.94)",
+        layer="above",
+    )
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=(panel_x0 + panel_x1) / 2.0, y=panel_y1 - header_h / 2.0,
+        text="<b>Polar Information</b>",
+        showarrow=False,
+        xanchor="center", yanchor="middle",
+        font=dict(size=11.1, color="#111827"),
+    )
+
+    current_top = panel_y1 - header_h - 0.008
+    for title, value in rows:
+        title_y = current_top - 0.003
+        value_y = current_top - 0.026
+
+        fig.add_annotation(
+            xref="paper", yref="paper",
+            x=panel_x0 + 0.026, y=title_y,
+            xanchor="left", yanchor="top",
+            text=f"<b>{title}</b>",
+            showarrow=False, font=dict(size=10.2, color="#111827"), align="left",
+        )
+
+        fig.add_annotation(
+            xref="paper", yref="paper",
+            x=panel_x0 + 0.026, y=value_y,
+            xanchor="left", yanchor="top",
+            text=value,
+            showarrow=False, font=dict(size=9.9, color="#111827"), align="left",
+        )
+
+        current_top -= row_h
+
+
+def build_info_rows(
+    row_a: pd.Series,
+    row_b: pd.Series,
+    amp_unit: str,
+    speed_unit: str,
+    axis_label: str,
+    side_label: str,
+    install_angle_deg: float,
+    rotation_direction: str,
+    show_rpm_labels: bool,
+    marker_stride: int,
+    critical_speeds: List[Dict[str, float]],
+) -> List[Tuple[str, str]]:
+    rows = [
+        ("Cursor A", f"{format_number(row_a['amp'],3)} {amp_unit} @ {int(round(row_a['speed']))} {speed_unit} | ∠{format_number(row_a['theta_display'],1)}°"),
+        ("Cursor B", f"{format_number(row_b['amp'],3)} {amp_unit} @ {int(round(row_b['speed']))} {speed_unit} | ∠{format_number(row_b['theta_display'],1)}°"),
+        ("Probe Orientation", f"{axis_label} | {install_angle_deg:.0f}° {side_label}"),
+        ("Rotation", rotation_direction),
+        ("RPM Labels", "Enabled" if show_rpm_labels else "Disabled"),
+        ("Label Step", f"Every {marker_stride} points"),
+    ]
+
+    for i, cs in enumerate(critical_speeds, start=1):
+        title = f"Critical Speed {i}" if i == 1 else f"Secondary Candidate {i}"
+        rows.append((title, f"{int(round(cs['speed']))} {speed_unit} | {format_number(cs['amp'],3)} {amp_unit}"))
+        rows.append((f"Phase Delta {i}", f"{format_number(cs['phase_delta'],1)}°"))
+
+    return rows
+
+
+# ============================================================
+# FIGURE BUILD
 # ============================================================
 def build_probe_reference_overlay(fig: go.Figure, max_r: float) -> None:
     ref_r0 = max_r * 0.10
@@ -383,8 +689,6 @@ def build_polar_figure(
     install_angle_deg: float,
     rotation_direction: str,
     critical_speeds: List[Dict[str, float]],
-    semaforo_status: str,
-    semaforo_color: str,
 ) -> go.Figure:
     amp_unit = meta.get("Amp Unit", "") or ""
     speed_unit = meta.get("Speed Unit", "rpm") or "rpm"
@@ -404,7 +708,7 @@ def build_polar_figure(
             r=df["amp"],
             theta=df["theta_display"],
             mode="lines",
-            line=dict(width=1.9, color="#5b9cf0"),
+            line=dict(width=1.35, color="#5b9cf0"),
             hovertemplate=(
                 f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
                 f"Phase Display: %{{theta:.1f}}°<br>"
@@ -478,43 +782,25 @@ def build_polar_figure(
             )
         )
 
-    dt_start = pd.to_datetime(df["ts_min"], errors="coerce").min()
-    dt_end = pd.to_datetime(df["ts_max"], errors="coerce").max()
-    dt_text = "—"
-    if pd.notna(dt_start) and pd.notna(dt_end):
-        dt_text = f"{dt_start.strftime('%Y-%m-%d %H:%M:%S')} → {dt_end.strftime('%Y-%m-%d %H:%M:%S')}"
-
-    draw_top_strip(
-        fig=fig,
-        machine=meta.get("Machine Name", ""),
-        point_text=meta.get("Point Name", ""),
-        variable=f"{meta.get('Variable', '-')} | {axis_label} | {install_angle_deg:.0f}° {side_label} | Rotation {rotation_direction}",
-        dt_text=dt_text,
-        rpm_text=f"{int(round(df['speed'].min()))} - {int(round(df['speed'].max()))} {speed_unit}",
-        logo_uri=logo_uri,
+    rows = build_info_rows(
+        row_a=row_a,
+        row_b=row_b,
+        amp_unit=amp_unit,
+        speed_unit=speed_unit,
+        axis_label=axis_label,
+        side_label=side_label,
+        install_angle_deg=install_angle_deg,
+        rotation_direction=rotation_direction,
+        show_rpm_labels=show_rpm_labels,
+        marker_stride=marker_stride,
+        critical_speeds=critical_speeds,
     )
 
-    if show_info_box:
-        rows = [
-            ("Cursor A", f"{format_number(row_a['amp'],3)} {amp_unit} @ {int(round(row_a['speed']))} {speed_unit} | ∠{format_number(row_a['theta_display'],1)}°"),
-            ("Cursor B", f"{format_number(row_b['amp'],3)} {amp_unit} @ {int(round(row_b['speed']))} {speed_unit} | ∠{format_number(row_b['theta_display'],1)}°"),
-            ("Probe Orientation", f"{axis_label} | {install_angle_deg:.0f}° {side_label}"),
-            ("Rotation", rotation_direction),
-            ("RPM Labels", "Enabled" if show_rpm_labels else "Disabled"),
-            ("Label Step", f"Every {marker_stride} points"),
-            ("Status", f"<span style='color:{semaforo_color};'><b>{semaforo_status}</b></span>"),
-        ]
-
-        for i, cs in enumerate(critical_speeds, start=1):
-            title = f"Critical Speed {i}" if i == 1 else f"Secondary Candidate {i}"
-            rows.append((title, f"{int(round(cs['speed']))} {speed_unit} | {format_number(cs['amp'],3)} {amp_unit}"))
-            rows.append((f"Phase Delta {i}", f"{format_number(cs['phase_delta'],1)}°"))
-
-        draw_info_box(fig=fig, title="Polar Information", rows=rows)
+    domain_x = [0.0, 0.78] if show_info_box else [0.0, 1.0]
 
     fig.update_layout(
         polar=dict(
-            domain=dict(x=[0.0, 0.78] if show_info_box else [0.0, 1.0], y=[0.05, 0.96]),
+            domain=dict(x=domain_x, y=[0.05, 0.96]),
             bgcolor="#f8fafc",
             angularaxis=dict(
                 rotation=axis_rotation,
@@ -542,6 +828,20 @@ def build_polar_figure(
         font=dict(color="#111827"),
         showlegend=False,
     )
+
+    _draw_top_strip(
+        fig=fig,
+        meta=meta,
+        logo_uri=logo_uri,
+        df=df,
+        axis_label=axis_label,
+        side_label=side_label,
+        install_angle_deg=install_angle_deg,
+        rotation_direction=rotation_direction,
+    )
+
+    if show_info_box:
+        _draw_right_info_box(fig, rows)
 
     build_probe_reference_overlay(fig, max_r)
 
@@ -772,34 +1072,34 @@ def render_polar_panel(
     if detect_cs:
         critical_speeds = estimate_critical_speeds_api684_style(plot_df, max_count=max_critical_speeds)
 
-    semaforo_status, semaforo_color, polar_diag = polar_health_status(
-        critical_speeds=critical_speeds,
-        amp_series=plot_df["amp"],
-    )
-
     machine = meta.get("Machine Name", "-")
     point = meta.get("Point Name", "-")
     variable = meta.get("Variable", "-")
     speed_unit = meta.get("Speed Unit", "rpm")
     amp_unit = meta.get("Amp Unit", "")
 
-    panel_card(
-        title=f"Polar {panel_index + 1} · {machine} · {point}",
-        subtitle="Dynamic polar view",
-        meta_html=(
-            f"Variable: <b>{variable}</b> &nbsp;&nbsp;|&nbsp;&nbsp;"
-            f"Orientation: <b>{axis_label} | {install_angle_deg:.0f}° {side_label}</b> &nbsp;&nbsp;|&nbsp;&nbsp;"
-            f"Rotation: <b>{rotation_direction}</b> &nbsp;&nbsp;|&nbsp;&nbsp;"
-            f"Speed Range: <b>{int(plot_df['speed'].min())} - {int(plot_df['speed'].max())} {speed_unit}</b>"
-        ),
-        chips=[
-            f"File: {item['file_name']}",
-            f"Raw rows: {len(raw_df):,}",
-            f"Grouped points: {len(plot_df):,}",
-            f"Phase smoothing: {smooth_window}",
-            f"Amplitude smoothing: {amp_smooth_window}",
-            f"Critical speeds: {len(critical_speeds)}",
-        ],
+    st.markdown(
+        f"""
+        <div class="wm-card">
+            <div class="wm-card-title">Polar {panel_index + 1} · {machine} · {point}</div>
+            <div class="wm-card-subtitle">Dynamic polar view</div>
+            <div class="wm-meta">
+                Variable: <b>{variable}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
+                Orientation: <b>{axis_label} | {install_angle_deg:.0f}° {side_label}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
+                Rotation: <b>{rotation_direction}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
+                Speed Range: <b>{int(plot_df['speed'].min())} - {int(plot_df['speed'].max())} {speed_unit}</b>
+            </div>
+            <div class="wm-chip-row">
+                <div class="wm-chip">File: {item["file_name"]}</div>
+                <div class="wm-chip">Raw rows: {len(raw_df):,}</div>
+                <div class="wm-chip">Grouped points: {len(plot_df):,}</div>
+                <div class="wm-chip">Phase smoothing: {smooth_window}</div>
+                <div class="wm-chip">Amplitude smoothing: {amp_smooth_window}</div>
+                <div class="wm-chip">Critical speeds: {len(critical_speeds)}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     fig = build_polar_figure(
@@ -816,28 +1116,13 @@ def render_polar_panel(
         install_angle_deg=install_angle_deg,
         rotation_direction=rotation_direction,
         critical_speeds=critical_speeds,
-        semaforo_status=semaforo_status,
-        semaforo_color=semaforo_color,
     )
 
     st.plotly_chart(
         fig,
-        width="stretch",
+        use_container_width=True,
         config={"displaylogo": False},
         key=f"wm_polar_plot_{panel_index}_{item['id']}",
-    )
-
-    helper_card(
-        title=f"API 684 Helper · Polar {panel_index + 1}",
-        subtitle="Critical speed candidate severity and quick visual health indicator.",
-        chips=[
-            (f"Semáforo: {semaforo_status}", semaforo_color),
-            (f"Health score: {polar_diag['score']:.1f}", None),
-            (f"Max amplitude: {polar_diag['max_amp']:.3f} {amp_unit}", None),
-            (f"Critical candidates: {polar_diag['candidate_count']}", None),
-            (f"Cursor A: {row_a['amp']:.3f} {amp_unit}", None),
-            (f"Cursor B: {row_b['amp']:.3f} {amp_unit}", None),
-        ],
     )
 
     title = f"Polar {panel_index + 1} — {machine} — {point}"
@@ -849,164 +1134,181 @@ def render_polar_panel(
         f"{cursor_a_speed}::{cursor_b_speed}"
     )
 
-    export_report_row(
-        export_key=export_state_key,
-        fig=fig,
-        export_builder=build_export_png_bytes,
-        report_callback=lambda: queue_polar_to_report(meta, fig, title),
-        file_name=f"{item['file_stem']}_polar_hd.png",
-    )
+    if export_state_key not in st.session_state.wm_polar_export_store:
+        st.session_state.wm_polar_export_store[export_state_key] = {"png_bytes": None, "error": None}
+
+    left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
+
+    with col_export1:
+        if st.button("Prepare PNG HD", key=f"prepare_polar_png_{export_state_key}", use_container_width=True):
+            with st.spinner("Generating HD export..."):
+                png_bytes, export_error = build_export_png_bytes(fig)
+                st.session_state.wm_polar_export_store[export_state_key]["png_bytes"] = png_bytes
+                st.session_state.wm_polar_export_store[export_state_key]["error"] = export_error
+
+    with col_export2:
+        png_bytes = st.session_state.wm_polar_export_store[export_state_key]["png_bytes"]
+        if png_bytes is not None:
+            st.download_button(
+                "Download PNG HD",
+                data=png_bytes,
+                file_name=f"{item['file_stem']}_polar_hd.png",
+                mime="image/png",
+                key=f"download_polar_png_{export_state_key}",
+                use_container_width=True,
+            )
+        else:
+            st.button(
+                "Download PNG HD",
+                disabled=True,
+                key=f"download_polar_disabled_{export_state_key}",
+                use_container_width=True,
+            )
+
+    with col_report:
+        if st.button("Enviar a Reporte", key=f"report_polar_{export_state_key}", use_container_width=True):
+            queue_polar_to_report(meta, fig, title)
+            st.success("Polar enviado al reporte.")
 
 
 # ============================================================
 # MAIN
 # ============================================================
-def main() -> None:
-    require_login()
-    ensure_report_state()
+if "wm_polar_export_store" not in st.session_state:
+    st.session_state.wm_polar_export_store = {}
+if "wm_polar_selected_ids" not in st.session_state:
+    st.session_state.wm_polar_selected_ids = []
+ensure_report_state()
 
-    if "wm_polar_selected_ids" not in st.session_state:
-        st.session_state.wm_polar_selected_ids = []
+st.markdown('<div class="wm-page-title">Polar Plot</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="wm-page-subtitle">Dynamic polar trajectory from amplitude, phase and speed.</div>',
+    unsafe_allow_html=True,
+)
 
-    page_header(
-        title="Polar Plot",
-        subtitle="Dynamic polar trajectory from amplitude, phase and speed.",
+with st.sidebar:
+    st.markdown("### Upload Polar CSV")
+    uploaded_files = st.file_uploader(
+        "Upload one or more Polar CSV",
+        type=["csv"],
+        accept_multiple_files=True,
     )
 
-    with st.sidebar:
-        render_user_menu()
+if not uploaded_files:
+    st.info("Carga uno o varios archivos CSV Polar para visualizar trayectorias dinámicas.")
+    st.stop()
+
+parsed_items, failed_items = parse_uploaded_polar_files(uploaded_files)
+
+if failed_items:
+    for file_name, error_text in failed_items:
+        st.warning(f"No pude leer {file_name}: {error_text}")
+
+if not parsed_items:
+    st.error("No se pudo cargar ningún archivo Polar válido.")
+    st.stop()
+
+id_to_item = {item["id"]: item for item in parsed_items}
+label_to_id = {
+    f"{item['machine']} · {item['point']} · {item['file_name']}": item["id"]
+    for item in parsed_items
+}
+selection_labels = list(label_to_id.keys())
+
+valid_ids = set(id_to_item.keys())
+current_ids = [sid for sid in st.session_state.wm_polar_selected_ids if sid in valid_ids]
+if not current_ids:
+    current_ids = [parsed_items[0]["id"]]
+    st.session_state.wm_polar_selected_ids = current_ids
+
+default_labels = [label for label, sid in label_to_id.items() if sid in current_ids]
+
+with st.sidebar:
+    st.markdown("### Polar Selection")
+    selected_labels = st.multiselect(
+        "Polars to display",
+        options=selection_labels,
+        default=default_labels,
+    )
+    st.session_state.wm_polar_selected_ids = [label_to_id[label] for label in selected_labels if label in label_to_id]
+
+    selected_ids_for_sidebar = [sid for sid in st.session_state.wm_polar_selected_ids if sid in id_to_item]
+
+    if selected_ids_for_sidebar:
+        st.markdown("### Probe Orientation by Polar")
+        for panel_index, sid in enumerate(selected_ids_for_sidebar, start=1):
+            item = id_to_item[sid]
+            orient_key = f"wm_polar_orientation::{sid}"
+            current = get_panel_orientation(sid)
+
+            with st.expander(f"Polar {panel_index} · {item['point']}", expanded=(panel_index == 1)):
+                axis_value = st.selectbox(
+                    "Probe Axis",
+                    ["X", "Y"],
+                    index=0 if current["axis_label"] == "X" else 1,
+                    key=f"{orient_key}::axis",
+                )
+                side_value = st.selectbox(
+                    "Probe Side",
+                    ["Right", "Left"],
+                    index=0 if current["side_label"] == "Right" else 1,
+                    key=f"{orient_key}::side",
+                )
+                angle_value = st.slider(
+                    "Probe Installation Angle",
+                    0,
+                    90,
+                    int(current["install_angle_deg"]),
+                    step=5,
+                    key=f"{orient_key}::angle",
+                )
+                rotation_value = st.selectbox(
+                    "Rotation Direction",
+                    ["CCW", "CW"],
+                    index=0 if current["rotation_direction"] == "CCW" else 1,
+                    key=f"{orient_key}::rotation",
+                )
+
+                st.session_state[orient_key] = {
+                    "axis_label": axis_value,
+                    "side_label": side_value,
+                    "install_angle_deg": angle_value,
+                    "rotation_direction": rotation_value,
+                }
+
+    st.markdown("### Polar Controls")
+    smooth_window = st.slider("Circular phase smoothing", 1, 11, 3, step=2)
+    amp_smooth_window = st.slider("Amplitude smoothing", 1, 11, 3, step=2)
+    show_info_box = st.checkbox("Show Polar Information", value=True)
+    show_rpm_labels = st.checkbox("Show RPM labels", value=True)
+    marker_stride = st.slider("RPM label step", 10, 150, 45, step=5)
+
+    st.markdown("### Critical Speed Detection")
+    detect_cs = st.checkbox("Estimate critical speeds (API-684 heuristic)", value=True)
+    max_critical_speeds = st.selectbox("Max critical speeds", [1, 2], index=1)
+
+selected_ids = [sid for sid in st.session_state.wm_polar_selected_ids if sid in id_to_item]
+
+if not selected_ids:
+    st.info("Selecciona uno o más polares en la barra lateral.")
+    st.stop()
+
+selected_items = [id_to_item[sid] for sid in selected_ids]
+logo_uri = get_logo_data_uri(LOGO_PATH)
+
+for panel_index, item in enumerate(selected_items):
+    render_polar_panel(
+        item=item,
+        panel_index=panel_index,
+        logo_uri=logo_uri,
+        smooth_window=smooth_window,
+        amp_smooth_window=amp_smooth_window,
+        show_info_box=show_info_box,
+        show_rpm_labels=show_rpm_labels,
+        marker_stride=marker_stride,
+        detect_cs=detect_cs,
+        max_critical_speeds=max_critical_speeds,
+    )
+
+    if panel_index < len(selected_items) - 1:
         st.markdown("---")
-        st.markdown("### Upload Polar CSV")
-        uploaded_files = st.file_uploader(
-            "Upload one or more Polar CSV",
-            type=["csv"],
-            accept_multiple_files=True,
-        )
-
-    if not uploaded_files:
-        panel_card(
-            title="Carga archivos para comenzar",
-            subtitle="Sube uno o varios archivos CSV Polar desde el panel izquierdo.",
-            meta_html="",
-            chips=[],
-        )
-        return
-
-    parsed_items, failed_items = parse_uploaded_polar_files(uploaded_files)
-
-    if failed_items:
-        for file_name, error_text in failed_items:
-            st.warning(f"No pude leer {file_name}: {error_text}")
-
-    if not parsed_items:
-        st.error("No se pudo cargar ningún archivo Polar válido.")
-        return
-
-    id_to_item = {item["id"]: item for item in parsed_items}
-    label_to_id = {
-        f"{item['machine']} · {item['point']} · {item['file_name']}": item["id"]
-        for item in parsed_items
-    }
-    selection_labels = list(label_to_id.keys())
-
-    valid_ids = set(id_to_item.keys())
-    current_ids = [sid for sid in st.session_state.wm_polar_selected_ids if sid in valid_ids]
-    if not current_ids:
-        current_ids = [parsed_items[0]["id"]]
-        st.session_state.wm_polar_selected_ids = current_ids
-
-    default_labels = [label for label, sid in label_to_id.items() if sid in current_ids]
-
-    with st.sidebar:
-        st.markdown("### Polar Selection")
-        selected_labels = st.multiselect(
-            "Polars to display",
-            options=selection_labels,
-            default=default_labels,
-        )
-        st.session_state.wm_polar_selected_ids = [label_to_id[label] for label in selected_labels if label in label_to_id]
-
-        selected_ids_for_sidebar = [sid for sid in st.session_state.wm_polar_selected_ids if sid in id_to_item]
-
-        if selected_ids_for_sidebar:
-            st.markdown("### Probe Orientation by Polar")
-            for panel_index, sid in enumerate(selected_ids_for_sidebar, start=1):
-                item = id_to_item[sid]
-                orient_key = f"wm_polar_orientation::{sid}"
-                current = get_panel_orientation(sid)
-
-                with st.expander(f"Polar {panel_index} · {item['point']}", expanded=(panel_index == 1)):
-                    axis_value = st.selectbox(
-                        "Probe Axis",
-                        ["X", "Y"],
-                        index=0 if current["axis_label"] == "X" else 1,
-                        key=f"{orient_key}::axis",
-                    )
-                    side_value = st.selectbox(
-                        "Probe Side",
-                        ["Right", "Left"],
-                        index=0 if current["side_label"] == "Right" else 1,
-                        key=f"{orient_key}::side",
-                    )
-                    angle_value = st.slider(
-                        "Probe Installation Angle",
-                        0,
-                        90,
-                        int(current["install_angle_deg"]),
-                        step=5,
-                        key=f"{orient_key}::angle",
-                    )
-                    rotation_value = st.selectbox(
-                        "Rotation Direction",
-                        ["CCW", "CW"],
-                        index=0 if current["rotation_direction"] == "CCW" else 1,
-                        key=f"{orient_key}::rotation",
-                    )
-
-                    st.session_state[orient_key] = {
-                        "axis_label": axis_value,
-                        "side_label": side_value,
-                        "install_angle_deg": angle_value,
-                        "rotation_direction": rotation_value,
-                    }
-
-        st.markdown("### Polar Controls")
-        smooth_window = st.slider("Circular phase smoothing", 1, 11, 3, step=2)
-        amp_smooth_window = st.slider("Amplitude smoothing", 1, 11, 3, step=2)
-        show_info_box = st.checkbox("Show Polar Information", value=True)
-        show_rpm_labels = st.checkbox("Show RPM labels", value=True)
-        marker_stride = st.slider("RPM label step", 10, 150, 45, step=5)
-
-        st.markdown("### Critical Speed Detection")
-        detect_cs = st.checkbox("Estimate critical speeds (API-684 heuristic)", value=True)
-        max_critical_speeds = st.selectbox("Max critical speeds", [1, 2], index=1)
-
-    selected_ids = [sid for sid in st.session_state.wm_polar_selected_ids if sid in id_to_item]
-
-    if not selected_ids:
-        st.info("Selecciona uno o más polares en la barra lateral.")
-        return
-
-    selected_items = [id_to_item[sid] for sid in selected_ids]
-    logo_uri = get_logo_data_uri(LOGO_PATH)
-
-    for panel_index, item in enumerate(selected_items):
-        render_polar_panel(
-            item=item,
-            panel_index=panel_index,
-            logo_uri=logo_uri,
-            smooth_window=smooth_window,
-            amp_smooth_window=amp_smooth_window,
-            show_info_box=show_info_box,
-            show_rpm_labels=show_rpm_labels,
-            marker_stride=marker_stride,
-            detect_cs=detect_cs,
-            max_critical_speeds=max_critical_speeds,
-        )
-
-        if panel_index < len(selected_items) - 1:
-            st.markdown("---")
-
-
-if __name__ == "__main__":
-    main()
