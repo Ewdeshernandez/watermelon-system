@@ -10,21 +10,6 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.auth import render_user_menu, require_login
-from core.module_patterns import export_report_row, helper_card, panel_card
-from core.ui_theme import (
-    apply_watermelon_page_style,
-    draw_info_box,
-    draw_top_strip,
-    page_header,
-)
-from core.wm_diagnostics import (
-    boundary_utilization_pct,
-    build_clearance_diagnostics,
-    detect_early_rub,
-    format_number,
-    get_semaforo_status,
-    remaining_margin_pct,
-)
 
 
 # ============================================================
@@ -33,7 +18,105 @@ from core.wm_diagnostics import (
 st.set_page_config(page_title="Shaft Centerline", layout="wide")
 LOGO_PATH = Path("assets/watermelon_logo.png")
 
-apply_watermelon_page_style()
+
+# ============================================================
+# STYLE
+# ============================================================
+def apply_page_style() -> None:
+    st.markdown(
+        """
+        <style>
+        .block-container {
+            padding-top: 1.15rem;
+            padding-bottom: 2.0rem;
+            max-width: 100%;
+        }
+
+        .wm-page-title {
+            font-size: 2.15rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 0.15rem;
+            letter-spacing: -0.02em;
+        }
+
+        .wm-page-subtitle {
+            color: #64748b;
+            font-size: 0.98rem;
+            margin-bottom: 1.15rem;
+        }
+
+        .wm-card {
+            background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.88));
+            border: 1px solid #dbe3ee;
+            border-radius: 18px;
+            padding: 14px 16px 14px 16px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+            margin-bottom: 12px;
+        }
+
+        .wm-card-title {
+            font-size: 1.02rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 0.18rem;
+        }
+
+        .wm-card-subtitle {
+            color: #64748b;
+            font-size: 0.90rem;
+            margin-bottom: 0.35rem;
+        }
+
+        .wm-meta {
+            color: #334155;
+            font-size: 0.92rem;
+            line-height: 1.6;
+        }
+
+        .wm-chip-row {
+            display:flex;
+            flex-wrap:wrap;
+            gap:8px;
+            margin-top:10px;
+        }
+
+        .wm-chip {
+            border:1px solid #dbe3ee;
+            background:#f8fafc;
+            border-radius:999px;
+            padding:5px 10px;
+            color:#334155;
+            font-size:0.82rem;
+            font-weight:600;
+        }
+
+        section.main div[data-testid="stButton"] > button,
+        section.main div[data-testid="stDownloadButton"] > button {
+            min-height: 52px;
+            border-radius: 16px;
+            font-weight: 700;
+            border: 1px solid #bfd8ff !important;
+            background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%) !important;
+            color: #2563eb !important;
+            box-shadow: 0 8px 20px rgba(37, 99, 235, 0.08);
+            transition: all 0.18s ease;
+        }
+
+        section.main div[data-testid="stButton"] > button:hover,
+        section.main div[data-testid="stDownloadButton"] > button:hover {
+            border-color: #93c5fd !important;
+            background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%) !important;
+            color: #1d4ed8 !important;
+            box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+apply_page_style()
 
 
 # ============================================================
@@ -44,6 +127,18 @@ def ensure_report_state() -> None:
         st.session_state["report_items"] = []
 
 
+def format_number(value: Any, digits: int = 3, fallback: str = "—") -> str:
+    if value is None:
+        return fallback
+    try:
+        val = float(value)
+        if not math.isfinite(val):
+            return fallback
+        return f"{val:.{digits}f}"
+    except Exception:
+        return fallback
+
+
 def get_logo_data_uri(path: Path) -> Optional[str]:
     if not path.exists():
         return None
@@ -52,6 +147,21 @@ def get_logo_data_uri(path: Path) -> Optional[str]:
         return f"data:image/png;base64,{b64}"
     except Exception:
         return None
+
+
+def rounded_rect_path(x0: float, y0: float, x1: float, y1: float, r: float) -> str:
+    r = max(0.0, min(r, (x1 - x0) / 2.0, (y1 - y0) / 2.0))
+    return (
+        f"M {x0+r},{y0} "
+        f"L {x1-r},{y0} "
+        f"Q {x1},{y0} {x1},{y0+r} "
+        f"L {x1},{y1-r} "
+        f"Q {x1},{y1} {x1-r},{y1} "
+        f"L {x0+r},{y1} "
+        f"Q {x0},{y1} {x0},{y1-r} "
+        f"L {x0},{y0+r} "
+        f"Q {x0},{y0} {x0+r},{y0} Z"
+    )
 
 
 def smooth_series(series: pd.Series, window: int) -> pd.Series:
@@ -154,11 +264,122 @@ def resolve_clearance_boundary(
     }
 
 
+def boundary_utilization_pct(
+    px: float,
+    py: float,
+    center_x: float,
+    center_y: float,
+    clearance_x: float,
+    clearance_y: float,
+) -> float:
+    nx = (px - center_x) / max(clearance_x, 1e-9)
+    ny = (py - center_y) / max(clearance_y, 1e-9)
+    return math.sqrt(nx * nx + ny * ny) * 100.0
+
+
+def remaining_margin_pct(util_pct: float) -> float:
+    return max(0.0, 100.0 - util_pct)
+
+
 def build_boundary_curve(center_x: float, center_y: float, clearance_x: float, clearance_y: float) -> Tuple[np.ndarray, np.ndarray]:
     theta = np.linspace(0.0, 2.0 * np.pi, 361)
     bx = center_x + clearance_x * np.cos(theta)
     by = center_y + clearance_y * np.sin(theta)
     return bx, by
+
+
+def get_clearance_status(util_pct: float) -> Tuple[str, str]:
+    if util_pct < 60.0:
+        return "SAFE", "#16a34a"
+    if util_pct < 85.0:
+        return "WARNING", "#f59e0b"
+    return "DANGER", "#dc2626"
+
+
+def detect_early_rub(
+    x: np.ndarray,
+    y: np.ndarray,
+    speed: np.ndarray,
+    center_x: float,
+    center_y: float,
+    clearance_x: float,
+    clearance_y: float,
+    warning_util_pct: float,
+    danger_util_pct: float,
+) -> Dict[str, Any]:
+    if len(x) < 3:
+        return {
+            "triggered": False,
+            "severity": "SAFE",
+            "color": "#16a34a",
+            "message": "Insufficient points",
+            "max_util_pct": 0.0,
+            "contact_points": 0,
+            "warning_points": 0,
+            "trend_score": 0.0,
+            "first_warning_speed": None,
+            "first_danger_speed": None,
+        }
+
+    utils = []
+    for px, py in zip(x, y):
+        util = boundary_utilization_pct(px, py, center_x, center_y, clearance_x, clearance_y)
+        utils.append(util)
+    utils = np.array(utils, dtype=float)
+
+    warning_mask = utils >= warning_util_pct
+    danger_mask = utils >= danger_util_pct
+
+    warning_points = int(np.sum(warning_mask))
+    contact_points = int(np.sum(danger_mask))
+
+    # Tendencia creciente al límite
+    if len(utils) >= 5:
+        idx = np.arange(len(utils), dtype=float)
+        slope = float(np.polyfit(idx, utils, 1)[0])
+    else:
+        slope = 0.0
+
+    last_n = min(8, len(utils))
+    tail_mean = float(np.mean(utils[-last_n:])) if last_n else 0.0
+    max_util = float(np.max(utils)) if len(utils) else 0.0
+
+    if contact_points > 0 or max_util >= danger_util_pct:
+        severity = "DANGER"
+        color = "#dc2626"
+        triggered = True
+        message = "Early rub risk high"
+    elif warning_points >= 2 or tail_mean >= warning_util_pct or slope > 1.5:
+        severity = "WARNING"
+        color = "#f59e0b"
+        triggered = True
+        message = "Possible early rub tendency"
+    else:
+        severity = "SAFE"
+        color = "#16a34a"
+        triggered = False
+        message = "No early rub tendency detected"
+
+    first_warning_speed = None
+    first_danger_speed = None
+
+    if np.any(warning_mask):
+        first_warning_speed = float(speed[np.argmax(warning_mask)])
+    if np.any(danger_mask):
+        first_danger_speed = float(speed[np.argmax(danger_mask)])
+
+    return {
+        "triggered": triggered,
+        "severity": severity,
+        "color": color,
+        "message": message,
+        "max_util_pct": max_util,
+        "contact_points": contact_points,
+        "warning_points": warning_points,
+        "trend_score": slope,
+        "first_warning_speed": first_warning_speed,
+        "first_danger_speed": first_danger_speed,
+    }
 
 
 # ============================================================
@@ -290,6 +511,184 @@ def parse_uploaded_scl_files(files: List[Any]) -> Tuple[List[Dict[str, Any]], Li
             failed_items.append((uploaded_file_label(file_obj), str(e)))
 
     return parsed_items, failed_items
+
+
+# ============================================================
+# DECORATION
+# ============================================================
+def _draw_top_strip(
+    fig: go.Figure,
+    meta: Dict[str, str],
+    df: pd.DataFrame,
+    logo_uri: Optional[str],
+) -> None:
+    x0, x1 = 0.006, 0.994
+    y0, y1 = 1.014, 1.104
+    radius = 0.014
+
+    fig.add_shape(
+        type="path",
+        xref="paper",
+        yref="paper",
+        path=rounded_rect_path(x0, y0, x1, y1, radius),
+        line=dict(color="#cfd8e3", width=1.1),
+        fillcolor="rgba(255,255,255,0.97)",
+        layer="below",
+    )
+
+    y_text = (y0 + y1) / 2.0
+
+    machine = meta.get("Machine Name", "")
+    point = meta.get("Point Name", "")
+    paired_point = meta.get("Paired Point Name", "")
+    variable = meta.get("Variable", "")
+    speed_unit = meta.get("Speed Unit", "rpm") or "rpm"
+
+    if logo_uri:
+        fig.add_layout_image(
+            dict(
+                source=logo_uri,
+                xref="paper",
+                yref="paper",
+                x=0.014,
+                y=y1 - 0.008,
+                sizex=0.055,
+                sizey=0.085,
+                xanchor="left",
+                yanchor="top",
+                layer="above",
+                sizing="contain",
+                opacity=1.0,
+            )
+        )
+        machine_x = 0.082
+    else:
+        machine_x = 0.020
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=machine_x, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=f"<b>{machine}</b>",
+        showarrow=False,
+        font=dict(size=12.3, color="#111827"),
+    )
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.205, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=f"{point} / {paired_point}",
+        showarrow=False,
+        font=dict(size=11.7, color="#111827"),
+    )
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.43, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=variable,
+        showarrow=False,
+        font=dict(size=11.5, color="#111827"),
+    )
+
+    dt_start = pd.to_datetime(df["ts_min"], errors="coerce").min()
+    dt_end = pd.to_datetime(df["ts_max"], errors="coerce").max()
+    dt_text = "—"
+    if pd.notna(dt_start) and pd.notna(dt_end):
+        dt_text = f"{dt_start.strftime('%Y-%m-%d %H:%M:%S')} → {dt_end.strftime('%Y-%m-%d %H:%M:%S')}"
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.66, y=y_text,
+        xanchor="left", yanchor="middle",
+        text=dt_text,
+        showarrow=False,
+        font=dict(size=10.8, color="#111827"),
+    )
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.986, y=y_text,
+        xanchor="right", yanchor="middle",
+        text=f"{int(round(df['speed'].min()))} - {int(round(df['speed'].max()))} {speed_unit}",
+        showarrow=False,
+        font=dict(size=10.8, color="#111827"),
+    )
+
+
+def _draw_right_info_box(fig: go.Figure, rows: List[Tuple[str, str]]) -> None:
+    panel_x0 = 0.855
+    panel_x1 = 0.970
+    panel_y1 = 0.950
+    header_h = 0.022
+    row_h = 0.033
+    body_pad = 0.008
+    radius = 0.008
+
+    panel_h = header_h + len(rows) * row_h + body_pad
+    panel_y0 = panel_y1 - panel_h
+
+    fig.add_shape(
+        type="path",
+        xref="paper", yref="paper",
+        path=rounded_rect_path(panel_x0, panel_y0, panel_x1, panel_y1, radius),
+        line=dict(color="rgba(203,213,225,0.90)", width=1),
+        fillcolor="rgba(255,255,255,0.78)",
+        layer="above",
+    )
+
+    fig.add_shape(
+        type="path",
+        xref="paper", yref="paper",
+        path=rounded_rect_path(panel_x0, panel_y1 - header_h, panel_x1, panel_y1, radius),
+        line=dict(color="rgba(0,0,0,0)", width=0),
+        fillcolor="rgba(147,197,253,0.88)",
+        layer="above",
+    )
+
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=(panel_x0 + panel_x1) / 2.0,
+        y=panel_y1 - header_h / 2.0,
+        text="<b>Shaft Centerline</b>",
+        showarrow=False,
+        xanchor="center",
+        yanchor="middle",
+        font=dict(size=8.8, color="#111827"),
+    )
+
+    current_top = panel_y1 - header_h - 0.004
+
+    for title, value in rows:
+        title_y = current_top
+        value_y = current_top - 0.013
+
+        fig.add_annotation(
+            xref="paper", yref="paper",
+            x=panel_x0 + 0.008,
+            y=title_y,
+            xanchor="left",
+            yanchor="top",
+            text=f"<b>{title}</b>",
+            showarrow=False,
+            font=dict(size=7.8, color="#111827"),
+            align="left",
+        )
+
+        fig.add_annotation(
+            xref="paper", yref="paper",
+            x=panel_x0 + 0.008,
+            y=value_y,
+            xanchor="left",
+            yanchor="top",
+            text=value,
+            showarrow=False,
+            font=dict(size=7.2, color="#111827"),
+            align="left",
+        )
+
+        current_top -= row_h
 
 
 # ============================================================
@@ -494,54 +893,35 @@ def build_scl_figure(
             )
         )
 
-    diag = build_clearance_diagnostics(
-        x=x,
-        y=y,
-        center_x=clearance_center_x,
-        center_y=clearance_center_y,
-        clearance_x=clearance_x,
-        clearance_y=clearance_y,
-    )
-
     util_a = boundary_utilization_pct(row_a_x, row_a_y, clearance_center_x, clearance_center_y, clearance_x, clearance_y)
     util_b = boundary_utilization_pct(row_b_x, row_b_y, clearance_center_x, clearance_center_y, clearance_x, clearance_y)
     util_end = boundary_utilization_pct(float(x[-1]), float(y[-1]), clearance_center_x, clearance_center_y, clearance_x, clearance_y)
+    max_util = max(
+        boundary_utilization_pct(float(px), float(py), clearance_center_x, clearance_center_y, clearance_x, clearance_y)
+        for px, py in zip(x, y)
+    ) if len(x) else 0.0
 
-    diag["util_a"] = util_a
-    diag["util_b"] = util_b
-    diag["util_end"] = util_end
-    diag["margin_a"] = remaining_margin_pct(util_a)
-    diag["margin_b"] = remaining_margin_pct(util_b)
-    diag["margin_end"] = remaining_margin_pct(util_end)
+    diag = {
+        "util_a": util_a,
+        "util_b": util_b,
+        "util_end": util_end,
+        "util_max": max_util,
+        "margin_a": remaining_margin_pct(util_a),
+        "margin_b": remaining_margin_pct(util_b),
+        "margin_end": remaining_margin_pct(util_end),
+        "margin_min": remaining_margin_pct(max_util),
+    }
 
-    dt_start = pd.to_datetime(df["ts_min"], errors="coerce").min()
-    dt_end = pd.to_datetime(df["ts_max"], errors="coerce").max()
-    dt_text = "—"
-    if pd.notna(dt_start) and pd.notna(dt_end):
-        dt_text = f"{dt_start.strftime('%Y-%m-%d %H:%M:%S')} → {dt_end.strftime('%Y-%m-%d %H:%M:%S')}"
-
-    draw_top_strip(
-        fig=fig,
-        machine=meta.get("Machine Name", ""),
-        point_text=f"{meta.get('Point Name', '-')} / {meta.get('Paired Point Name', '-')}",
-        variable=meta.get("Variable", "-"),
-        dt_text=dt_text,
-        rpm_text=f"{int(round(df['speed'].min()))} - {int(round(df['speed'].max()))} {speed_unit}",
-        logo_uri=logo_uri,
-    )
-
-    if show_info_box:
-        rows = [
-            ("Cursor A", f"X={format_number(row_a_x,3)} / Y={format_number(row_a_y,3)} {gap_unit} @ {int(round(row_a['speed']))} {speed_unit}"),
-            ("Cursor B", f"X={format_number(row_b_x,3)} / Y={format_number(row_b_y,3)} {gap_unit} @ {int(round(row_b['speed']))} {speed_unit}"),
-            ("Boundary", f"{clearance_mode} · Cx={format_number(clearance_x,3)} / Cy={format_number(clearance_y,3)} {gap_unit}"),
-            ("Boundary Center", f"{clearance_center_mode} · X={format_number(clearance_center_x,3)} / Y={format_number(clearance_center_y,3)}"),
-            ("RPM Window", f"{int(round(display_speed_min))} to {int(round(display_speed_max))} {speed_unit}"),
-            ("Status", f"<span style='color:{semaforo_color};'><b>{semaforo_status}</b></span>"),
-            ("API 684 Helper", f"Max utilization {format_number(diag['util_max'],1)}% · Min margin {format_number(diag['margin_min'],1)}%"),
-            ("Normalize", "Enabled" if normalize_to_origin else "Disabled"),
-        ]
-        draw_info_box(fig=fig, title="Shaft Centerline", rows=rows)
+    rows = [
+        ("Cursor A", f"X={format_number(row_a_x,3)} / Y={format_number(row_a_y,3)} {gap_unit} @ {int(round(row_a['speed']))} {speed_unit}"),
+        ("Cursor B", f"X={format_number(row_b_x,3)} / Y={format_number(row_b_y,3)} {gap_unit} @ {int(round(row_b['speed']))} {speed_unit}"),
+        ("Boundary", f"{clearance_mode} · Cx={format_number(clearance_x,3)} / Cy={format_number(clearance_y,3)} {gap_unit}"),
+        ("Boundary Center", f"{clearance_center_mode} · X={format_number(clearance_center_x,3)} / Y={format_number(clearance_center_y,3)}"),
+        ("RPM Window", f"{int(round(display_speed_min))} to {int(round(display_speed_max))} {speed_unit}"),
+        ("Status", f"<span style='color:{semaforo_color};'><b>{semaforo_status}</b></span>"),
+        ("API 684 Helper", f"Max utilization {format_number(max_util,1)}% · Min margin {format_number(diag['margin_min'],1)}%"),
+        ("Normalize", "Enabled" if normalize_to_origin else "Disabled"),
+    ]
 
     fig.update_layout(
         height=820,
@@ -577,6 +957,11 @@ def build_scl_figure(
         linecolor="#9ca3af",
         ticks="outside",
     )
+
+    _draw_top_strip(fig=fig, meta=meta, df=df, logo_uri=logo_uri)
+
+    if show_info_box:
+        _draw_right_info_box(fig, rows)
 
     return fig, diag
 
@@ -915,7 +1300,7 @@ def render_scl_panel(
         danger_util_pct=float(early_rub_danger_pct),
     )
 
-    semaforo_status, semaforo_color = get_semaforo_status(early_rub["max_util_pct"])
+    semaforo_status, semaforo_color = get_clearance_status(early_rub["max_util_pct"])
 
     machine = meta.get("Machine Name", "-")
     point = meta.get("Point Name", "-")
@@ -927,26 +1312,33 @@ def render_scl_panel(
     probe_angle, probe_side = parse_probe_angle_text(meta.get("Probe Angle", ""))
     paired_angle, paired_side = parse_probe_angle_text(meta.get("Paired Probe Angle", ""))
 
-    panel_card(
-        title=f"Shaft Centerline {panel_index + 1} · {machine}",
-        subtitle=f"{point} / {paired_point}",
-        meta_html=(
-            f"Variable: <b>{variable}</b> &nbsp;&nbsp;|&nbsp;&nbsp;"
-            f"Probe Angles: <b>{probe_angle:.0f}° {probe_side}</b> / <b>{paired_angle:.0f}° {paired_side}</b> &nbsp;&nbsp;|&nbsp;&nbsp;"
-            f"Visible Speed Range: <b>{int(display_df['speed'].min())} - {int(display_df['speed'].max())} {speed_unit}</b>"
-        ),
-        chips=[
-            f"File: {item['file_name']}",
-            f"Raw rows: {len(raw_df):,}",
-            f"Grouped points: {len(display_df):,}",
-            f"Gap Unit: {gap_unit}",
-            f"Smoothing: {smooth_window}",
-            f"Normalize: {'Yes' if normalize_to_origin else 'No'}",
-            f"RPM Window: {'Auto' if rpm_range_mode == 'Auto' else 'Manual'}",
-            f"X/Y Scale: {'Auto' if auto_scale_xy else 'Manual'}",
-            f"Boundary: {clearance_mode}",
-            f"Boundary Center: {clearance_center_mode}",
-        ],
+    st.markdown(
+        f"""
+        <div class="wm-card">
+            <div class="wm-card-title">Shaft Centerline {panel_index + 1} · {machine}</div>
+            <div class="wm-card-subtitle">{point} / {paired_point}</div>
+            <div class="wm-meta">
+                Variable: <b>{variable}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
+                Probe Angles: <b>{probe_angle:.0f}° {probe_side}</b> / <b>{paired_angle:.0f}° {paired_side}</b> &nbsp;&nbsp;|&nbsp;&nbsp;
+                Visible Speed Range: <b>{int(display_df['speed'].min())} - {int(display_df['speed'].max())} {speed_unit}</b>
+            </div>
+            <div class="wm-chip-row">
+                <div class="wm-chip">File: {item["file_name"]}</div>
+                <div class="wm-chip">Raw rows: {len(raw_df):,}</div>
+                <div class="wm-chip">Grouped points: {len(display_df):,}</div>
+                <div class="wm-chip">Gap Unit: {gap_unit}</div>
+                <div class="wm-chip">Smoothing: {smooth_window}</div>
+                <div class="wm-chip">Normalize: {"Yes" if normalize_to_origin else "No"}</div>
+                <div class="wm-chip">RPM Window: {"Auto" if rpm_range_mode == "Auto" else "Manual"}</div>
+                <div class="wm-chip">X/Y Scale: {"Auto" if auto_scale_xy else "Manual"}</div>
+                <div class="wm-chip">Boundary: {clearance_mode}</div>
+                <div class="wm-chip">Boundary Center: {clearance_center_mode}</div>
+                <div class="wm-chip" style="color:{semaforo_color}; border-color:{semaforo_color};"><b>Status: {semaforo_status}</b></div>
+                <div class="wm-chip" style="color:{early_rub['color']}; border-color:{early_rub['color']};"><b>Rub: {early_rub['severity']}</b></div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     fig, diag = build_scl_figure(
@@ -987,23 +1379,28 @@ def render_scl_panel(
     if early_rub["first_danger_speed"] is not None:
         first_danger_text = f"{early_rub['first_danger_speed']:.0f} {speed_unit}"
 
-    helper_card(
-        title=f"API 684 Helper + Early Rub Detection · Panel {panel_index + 1}",
-        subtitle="Clearance utilization, margin, semáforo y tendencia temprana de roce.",
-        chips=[
-            (f"Semáforo: {semaforo_status}", semaforo_color),
-            (f"Max util: {diag['util_max']:.1f}%", None),
-            (f"Minimum margin: {diag['margin_min']:.1f}%", None),
-            (f"Cursor A util: {diag['util_a']:.1f}%", None),
-            (f"Cursor B util: {diag['util_b']:.1f}%", None),
-            (f"Early rub: {early_rub['severity']}", early_rub["color"]),
-            (f"Rub message: {early_rub['message']}", None),
-            (f"Warning points: {early_rub['warning_points']}", None),
-            (f"Danger points: {early_rub['contact_points']}", None),
-            (f"Trend score: {early_rub['trend_score']:.2f}", None),
-            (f"1st warning: {first_warning_text}", None),
-            (f"1st danger: {first_danger_text}", None),
-        ],
+    st.markdown(
+        f"""
+        <div class="wm-card">
+            <div class="wm-card-title">API 684 Helper + Early Rub Detection · Panel {panel_index + 1}</div>
+            <div class="wm-card-subtitle">Clearance utilization, margin, semáforo y tendencia temprana de roce.</div>
+            <div class="wm-chip-row">
+                <div class="wm-chip" style="color:{semaforo_color}; border-color:{semaforo_color};">Semáforo: {semaforo_status}</div>
+                <div class="wm-chip">Max util: {diag["util_max"]:.1f}%</div>
+                <div class="wm-chip">Minimum margin: {diag["margin_min"]:.1f}%</div>
+                <div class="wm-chip">Cursor A util: {diag["util_a"]:.1f}%</div>
+                <div class="wm-chip">Cursor B util: {diag["util_b"]:.1f}%</div>
+                <div class="wm-chip" style="color:{early_rub['color']}; border-color:{early_rub['color']};">Early rub: {early_rub["severity"]}</div>
+                <div class="wm-chip">Rub message: {early_rub["message"]}</div>
+                <div class="wm-chip">Warning points: {early_rub["warning_points"]}</div>
+                <div class="wm-chip">Danger points: {early_rub["contact_points"]}</div>
+                <div class="wm-chip">Trend score: {early_rub["trend_score"]:.2f}</div>
+                <div class="wm-chip">1st warning: {first_warning_text}</div>
+                <div class="wm-chip">1st danger: {first_danger_text}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
     title = f"Shaft Centerline {panel_index + 1} — {machine} — {point} / {paired_point}"
@@ -1016,13 +1413,44 @@ def render_scl_panel(
         f"{early_rub_warning_pct}::{early_rub_danger_pct}::{cursor_a_speed}::{cursor_b_speed}"
     )
 
-    export_report_row(
-        export_key=export_state_key,
-        fig=fig,
-        export_builder=build_export_png_bytes,
-        report_callback=lambda: queue_scl_to_report(meta, fig, title),
-        file_name=f"{item['file_stem']}_shaft_centerline_hd.png",
-    )
+    if "wm_scl_export_store" not in st.session_state:
+        st.session_state["wm_scl_export_store"] = {}
+
+    if export_state_key not in st.session_state["wm_scl_export_store"]:
+        st.session_state["wm_scl_export_store"][export_state_key] = {"png_bytes": None, "error": None}
+
+    left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
+
+    with col_export1:
+        if st.button("Prepare PNG HD", key=f"prepare_scl_png_{export_state_key}", width="stretch"):
+            with st.spinner("Generating HD export..."):
+                png_bytes, export_error = build_export_png_bytes(fig)
+                st.session_state["wm_scl_export_store"][export_state_key]["png_bytes"] = png_bytes
+                st.session_state["wm_scl_export_store"][export_state_key]["error"] = export_error
+
+    with col_export2:
+        png_bytes = st.session_state["wm_scl_export_store"][export_state_key]["png_bytes"]
+        if png_bytes is not None:
+            st.download_button(
+                "Download PNG HD",
+                data=png_bytes,
+                file_name=f"{item['file_stem']}_shaft_centerline_hd.png",
+                mime="image/png",
+                key=f"download_scl_png_{export_state_key}",
+                width="stretch",
+            )
+        else:
+            st.button(
+                "Download PNG HD",
+                disabled=True,
+                key=f"download_scl_disabled_{export_state_key}",
+                width="stretch",
+            )
+
+    with col_report:
+        if st.button("Enviar a Reporte", key=f"report_scl_{export_state_key}", width="stretch"):
+            queue_scl_to_report(meta, fig, title)
+            st.success("Shaft Centerline enviado al reporte.")
 
 
 # ============================================================
@@ -1032,9 +1460,10 @@ def main():
     require_login()
     ensure_report_state()
 
-    page_header(
-        title="Shaft Centerline",
-        subtitle="Centerline position from paired X/Y gap probes versus speed.",
+    st.markdown('<div class="wm-page-title">Shaft Centerline</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="wm-page-subtitle">Centerline position from paired X/Y gap probes versus speed.</div>',
+        unsafe_allow_html=True,
     )
 
     with st.sidebar:
@@ -1055,11 +1484,16 @@ def main():
         normalize_to_origin = st.checkbox("Normalize to first point", value=False)
 
     if not uploaded_files:
-        panel_card(
-            title="Carga archivos para comenzar",
-            subtitle="Sube uno o varios archivos CSV de Shaft Centerline desde el panel izquierdo.",
-            meta_html="",
-            chips=[],
+        st.markdown(
+            """
+            <div class="wm-card" style="max-width: 980px;">
+                <div class="wm-card-title">Carga archivos para comenzar</div>
+                <div class="wm-card-subtitle">
+                    Sube uno o varios archivos CSV de Shaft Centerline desde el panel izquierdo.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
         return
 
