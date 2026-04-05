@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import io
 import math
 from pathlib import Path
@@ -579,8 +580,8 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
 
     fig.update_layout(
         width=4300,
-        height=2400,
-        margin=dict(l=110, r=80, t=320, b=120),
+        height=2900,
+        margin=dict(l=110, r=80, t=320, b=760),
         paper_bgcolor="#f3f4f6",
         plot_bgcolor="#f8fafc",
         font=dict(size=26, color="#111827"),
@@ -619,23 +620,125 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     return fig
 
 
-def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[str]]:
+def _build_polar_report_notes(text_diag: Dict[str, str]) -> str:
+    headline = str(text_diag.get("headline", "") or "").strip()
+    detail = str(text_diag.get("detail", "") or "").strip()
+    action = str(text_diag.get("action", "") or "").strip()
+
+    blocks: List[str] = []
+    if headline:
+        blocks.append(f"Resumen diagnóstico: {headline}")
+    if detail:
+        blocks.append(f"Detalle: {detail}")
+    if action:
+        blocks.append(f"Acción recomendada: {action}")
+
+    return "\n\n".join(blocks).strip()
+
+
+def _add_export_diagnostic_footer(fig: go.Figure, text_diag: Dict[str, str]) -> go.Figure:
+    headline = str(text_diag.get("headline", "") or "").strip()
+    detail = str(text_diag.get("detail", "") or "").strip()
+    action = str(text_diag.get("action", "") or "").strip()
+
+    if not any([headline, detail, action]):
+        return go.Figure(fig)
+
+    export_fig = go.Figure(fig)
+
+    current_annotations = list(export_fig.layout.annotations) if export_fig.layout.annotations else []
+    current_shapes = list(export_fig.layout.shapes) if export_fig.layout.shapes else []
+
+    footer_y0 = -0.285
+    footer_y1 = -0.035
+
+    current_shapes.extend(
+        [
+            dict(
+                type="line",
+                xref="paper",
+                yref="paper",
+                x0=0.03,
+                x1=0.97,
+                y0=-0.008,
+                y1=-0.008,
+                line=dict(color="rgba(148,163,184,0.55)", width=2),
+            ),
+            dict(
+                type="rect",
+                xref="paper",
+                yref="paper",
+                x0=0.03,
+                x1=0.97,
+                y0=footer_y0,
+                y1=footer_y1,
+                line=dict(color="rgba(148,163,184,0.55)", width=2),
+                fillcolor="rgba(255,255,255,0.98)",
+                layer="below",
+            ),
+        ]
+    )
+
+    summary_html = (
+        f"<b>{html.escape(headline)}</b><br><br>"
+        f"<b>Detail:</b> {html.escape(detail)}<br><br>"
+        f"<b>Action:</b> {html.escape(action)}"
+    )
+
+    current_annotations.extend(
+        [
+            dict(
+                xref="paper",
+                yref="paper",
+                x=0.05,
+                y=-0.055,
+                xanchor="left",
+                yanchor="top",
+                showarrow=False,
+                align="left",
+                text="<b>DIAGNOSTIC SUMMARY</b>",
+                font=dict(size=24, color="#0f172a"),
+            ),
+            dict(
+                xref="paper",
+                yref="paper",
+                x=0.05,
+                y=-0.112,
+                xanchor="left",
+                yanchor="top",
+                showarrow=False,
+                align="left",
+                text=summary_html,
+                font=dict(size=20, color="#111827"),
+            ),
+        ]
+    )
+
+    export_fig.update_layout(
+        annotations=current_annotations,
+        shapes=current_shapes,
+    )
+    return export_fig
+
+
+def build_export_png_bytes(fig: go.Figure, text_diag: Dict[str, str]) -> Tuple[Optional[bytes], Optional[str]]:
     try:
         export_fig = _build_export_safe_figure(fig)
         export_fig = _scale_export_figure(export_fig)
-        return export_fig.to_image(format="png", width=4300, height=2200, scale=2), None
+        export_fig = _add_export_diagnostic_footer(export_fig, text_diag)
+        return export_fig.to_image(format="png", width=4300, height=2900, scale=2), None
     except Exception as e:
         return None, str(e)
 
 
-def queue_polar_to_report(meta: Dict[str, str], fig: go.Figure, title: str) -> None:
+def queue_polar_to_report(meta: Dict[str, str], fig: go.Figure, title: str, text_diag: Dict[str, str]) -> None:
     ensure_report_state()
     st.session_state.report_items.append(
         {
             "id": f"report-polar-{meta.get('Machine Name','')}-{meta.get('Point Name','')}-{title}",
             "type": "polar",
             "title": title,
-            "notes": "",
+            "notes": _build_polar_report_notes(text_diag),
             "signal_id": meta.get("Point Name", ""),
             "figure": go.Figure(fig),
             "machine": meta.get("Machine Name", ""),
@@ -863,8 +966,8 @@ def render_polar_panel(
     export_report_row(
         export_key=export_state_key,
         fig=fig,
-        export_builder=build_export_png_bytes,
-        report_callback=lambda: queue_polar_to_report(meta, fig, title),
+        export_builder=lambda export_fig: build_export_png_bytes(export_fig, text_diag),
+        report_callback=lambda: queue_polar_to_report(meta, fig, title, text_diag),
         file_name=f"{item['file_stem']}_polar_hd.png",
     )
 
