@@ -17,7 +17,6 @@ except Exception:
     find_peaks = None
 
 from core.auth import require_login, render_user_menu
-from core.diagnostics import build_polar_text_diagnostics, format_number, get_semaforo_status
 from core.module_patterns import export_report_row, helper_card, panel_card
 from core.ui_theme import (
     apply_watermelon_page_style,
@@ -25,6 +24,7 @@ from core.ui_theme import (
     draw_top_strip,
     page_header,
 )
+from core.wm_diagnostics import format_number, get_semaforo_status
 
 
 # ============================================================
@@ -777,12 +777,6 @@ def render_polar_panel(
         amp_series=plot_df["amp"],
     )
 
-    text_diag = build_polar_text_diagnostics(
-        status=semaforo_status,
-        critical_speeds=critical_speeds,
-        max_amp=polar_diag["max_amp"],
-    )
-
     machine = meta.get("Machine Name", "-")
     point = meta.get("Point Name", "-")
     variable = meta.get("Variable", "-")
@@ -835,7 +829,7 @@ def render_polar_panel(
 
     helper_card(
         title=f"API 684 Helper · Polar {panel_index + 1}",
-        subtitle=text_diag["headline"],
+        subtitle="Critical speed candidate severity and quick visual health indicator.",
         chips=[
             (f"Semáforo: {semaforo_status}", semaforo_color),
             (f"Health score: {polar_diag['score']:.1f}", None),
@@ -844,11 +838,6 @@ def render_polar_panel(
             (f"Cursor A: {row_a['amp']:.3f} {amp_unit}", None),
             (f"Cursor B: {row_b['amp']:.3f} {amp_unit}", None),
         ],
-    )
-
-    st.info(
-        f"**Diagnostic detail:** {text_diag['detail']}\n\n"
-        f"**Recommended action:** {text_diag['action']}"
     )
 
     title = f"Polar {panel_index + 1} — {machine} — {point}"

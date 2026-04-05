@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
 
 import numpy as np
 
@@ -184,96 +184,3 @@ def detect_early_rub(
         "first_warning_speed": first_warning_speed,
         "first_danger_speed": first_danger_speed,
     }
-
-
-# ============================================================
-# TEXTUAL DIAGNOSTICS
-# ============================================================
-def build_polar_text_diagnostics(
-    *,
-    status: str,
-    critical_speeds: List[Dict[str, float]],
-    max_amp: float,
-) -> Dict[str, str]:
-    candidate_count = len(critical_speeds)
-
-    if candidate_count == 0:
-        headline = "No clear critical speed candidate detected"
-        detail = (
-            "The polar response does not show a strong peak-phase combination in the current speed range. "
-            "Behavior looks relatively stable for this run."
-        )
-        action = "Continue monitoring during future run-up or coast-down events."
-        return {"headline": headline, "detail": detail, "action": action}
-
-    cs1 = critical_speeds[0]
-    cs1_speed = int(round(float(cs1["speed"])))
-    cs1_amp = float(cs1["amp"])
-    cs1_phase = abs(float(cs1["phase_delta"]))
-
-    if status == "SAFE":
-        headline = f"Critical speed candidate detected near {cs1_speed} rpm, but response is still controlled"
-        detail = (
-            f"A candidate appears near {cs1_speed} rpm with amplitude around {cs1_amp:.3f} and "
-            f"phase change of {cs1_phase:.1f}°. The response is present but not yet severe."
-        )
-        action = "Track the same zone in the next startup and compare growth trend."
-        return {"headline": headline, "detail": detail, "action": action}
-
-    if status == "WARNING":
-        headline = f"Possible proximity to critical speed near {cs1_speed} rpm"
-        detail = (
-            f"The polar path shows a relevant response near {cs1_speed} rpm with amplitude around {cs1_amp:.3f} "
-            f"and phase shift of {cs1_phase:.1f}°. This suggests dynamic amplification, but not a fully developed severe resonance."
-        )
-        action = "Monitor behavior during ramp-up, compare with Bode phase/amplitude, and verify if the peak repeats consistently."
-        return {"headline": headline, "detail": detail, "action": action}
-
-    headline = f"Strong critical speed behavior near {cs1_speed} rpm"
-    detail = (
-        f"The polar path shows a dominant response near {cs1_speed} rpm with amplitude around {cs1_amp:.3f} "
-        f"and phase shift of {cs1_phase:.1f}°. This is consistent with a highly significant dynamic event."
-    )
-    action = "Review operating avoidance, confirm with Bode/orbit behavior, and evaluate mechanical margin before repeated runs."
-    return {"headline": headline, "detail": detail, "action": action}
-
-
-def build_shaft_text_diagnostics(
-    *,
-    status: str,
-    util_max: float,
-    margin_min: float,
-    first_warning_speed: float | None = None,
-    first_danger_speed: float | None = None,
-) -> Dict[str, str]:
-    if status == "SAFE":
-        headline = "Shaft position is operating with healthy clearance margin"
-        detail = (
-            f"Maximum clearance utilization is {util_max:.1f}% and minimum remaining margin is {margin_min:.1f}%. "
-            "The shaft centerline remains well inside the configured boundary."
-        )
-        action = "Keep trending clearance utilization and compare future runs for drift."
-        return {"headline": headline, "detail": detail, "action": action}
-
-    if status == "WARNING":
-        speed_text = ""
-        if first_warning_speed is not None:
-            speed_text = f" First warning tendency appears near {first_warning_speed:.0f} rpm."
-        headline = "Shaft position is approaching the configured clearance boundary"
-        detail = (
-            f"Maximum clearance utilization is {util_max:.1f}% and minimum remaining margin is {margin_min:.1f}%."
-            f"{speed_text} This suggests reduced dynamic margin or possible bearing condition change."
-        )
-        action = "Review boundary definition, compare with past centerline plots, and verify if the trend is repeatable."
-        return {"headline": headline, "detail": detail, "action": action}
-
-    speed_text = ""
-    if first_danger_speed is not None:
-        speed_text = f" Boundary overutilization tendency begins near {first_danger_speed:.0f} rpm."
-    headline = "Shaft position is extremely close to the configured clearance limit"
-    detail = (
-        f"Maximum clearance utilization is {util_max:.1f}% and minimum remaining margin is {margin_min:.1f}%."
-        f"{speed_text} The shaft centerline is operating with very low geometric margin."
-    )
-    action = "Treat as high priority: verify bearing clearance assumptions, inspect machine condition, and avoid repeated operation until reviewed."
-    return {"headline": headline, "detail": detail, "action": action}
