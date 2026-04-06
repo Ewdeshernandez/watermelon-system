@@ -16,7 +16,7 @@ def build_spectrum_report_notes(text_diag: Dict[str, str]) -> str:
     if headline:
         blocks.append(f"Resumen diagnóstico: {headline}")
     if detail:
-        blocks.append(f"Detalle: {detail}")
+        blocks.append(f"Diagnóstico: {detail}")
     if action:
         blocks.append(f"Acción recomendada: {action}")
     return "\n\n".join(blocks).strip()
@@ -89,90 +89,84 @@ def evaluate_spectrum_diagnostic(
     status = "SAFE"
     color = SAFE_COLOR
 
-    # 1) Mechanical looseness / harmonic-rich spectrum
     if strong_harmonic_count >= 4 and ratio_high >= 0.20:
         status = "DANGER"
         color = DANGER_COLOR
         return {
             "status": status,
             "color": color,
-            "headline": "Mechanical looseness pattern suspected",
+            "headline": "Posible holgura mecánica",
             "detail": (
-                "Multiple harmonic components are present with significant high-order content. "
-                "This spectrum shape is consistent with looseness or structural non-linearity."
+                "Se observan múltiples componentes armónicas con contenido significativo en armónicos altos. "
+                "Esta forma espectral es consistente con holgura mecánica o no linealidad estructural."
             ),
             "action": (
-                "Inspect support rigidity, hold-down condition, pedestal / base looseness, "
-                "and compare with time waveform for impact or modulation behavior."
+                "Inspeccionar rigidez de soportes, condición de anclajes, pedestal o base, "
+                "y comparar con la forma de onda para buscar impactos o modulación."
             ),
         }
 
-    # 2) Misalignment tendency
     if ratio_2x >= 0.35 or (ratio_2x >= 0.25 and ratio_3x >= 0.18):
         status = "WARNING"
         color = WARNING_COLOR
         return {
             "status": status,
             "color": color,
-            "headline": "Misalignment tendency suspected",
+            "headline": "Posible desalineación",
             "detail": (
-                "The 2X component is significant relative to the synchronous component, "
-                "with possible contribution from higher harmonics. This may indicate coupling "
-                "or shaft train misalignment."
+                "La componente 2X es significativa respecto a la componente sincrónica, con posible aporte "
+                "de armónicos superiores. Esto puede indicar desalineación en el tren rotativo o en el acople."
             ),
             "action": (
-                "Review alignment condition, verify coupling behavior, and correlate with axial / radial "
-                "measurements and phase behavior."
+                "Revisar condición de alineación, verificar comportamiento del acople y correlacionar con "
+                "mediciones radiales, axiales y de fase."
             ),
         }
 
-    # 3) Unbalance tendency
     if one_x > 0 and near_1x and ratio_2x < 0.25 and ratio_high < 0.15:
         status = "WARNING"
         color = WARNING_COLOR
         return {
             "status": status,
             "color": color,
-            "headline": "Synchronous unbalance signature suspected",
+            "headline": "Posible desbalance",
             "detail": (
-                "The spectrum is dominated by a strong 1X component near running speed with low relative "
-                "harmonic content. This is consistent with unbalance-type behavior."
+                "El espectro está dominado por una componente 1X fuerte cercana a la velocidad de giro, "
+                "con bajo contenido relativo de armónicos. Esto es consistente con un comportamiento tipo desbalance."
             ),
             "action": (
-                "Verify balance condition, review phase consistency across startups, and correlate with "
-                "Polar / Bode response before corrective action."
+                "Verificar condición de balanceo, revisar consistencia de fase entre arranques "
+                "y correlacionar con Polar y Bode antes de intervenir."
             ),
         }
 
-    # 4) Broadband / distributed energy
     if overall > 0 and dom_amp > 0 and (overall / max(dom_amp, 1e-9)) > 0.65 and strong_harmonic_count <= 2:
         status = "WARNING"
         color = WARNING_COLOR
         return {
             "status": status,
             "color": color,
-            "headline": "Broadband energy pattern observed",
+            "headline": "Energía de banda ancha detectada",
             "detail": (
-                "Overall spectral energy is elevated relative to the dominant discrete peak, "
-                "suggesting distributed broadband content rather than a purely synchronous signature."
+                "La energía global del espectro está elevada respecto al pico discreto dominante, "
+                "lo que sugiere contenido de banda ancha y no una firma puramente sincrónica."
             ),
             "action": (
-                "Review process condition, flow-induced excitation, cavitation / turbulence possibility, "
-                "or non-stationary excitation sources."
+                "Revisar condición de proceso, excitación inducida por flujo, "
+                "posible cavitación, turbulencia o fuentes no estacionarias."
             ),
         }
 
-    # 5) Default
     return {
         "status": status,
         "color": color,
-        "headline": "No dominant abnormal spectral pattern identified",
+        "headline": "Sin patrón anormal dominante",
         "detail": (
-            "The current spectrum does not show a strong harmonic pattern clearly associated with "
-            "unbalance, misalignment, or looseness."
+            "El espectro actual no muestra una firma armónica fuerte claramente asociada con "
+            "desbalance, desalineación o holgura mecánica."
         ),
         "action": (
-            "Continue trending the spectrum and compare with waveform, Bode, Polar, and operating condition "
-            "before concluding a machine fault mechanism."
+            "Continuar el monitoreo del espectro y comparar con forma de onda, Bode, Polar "
+            "y condición operativa antes de concluir un mecanismo de falla."
         ),
     }

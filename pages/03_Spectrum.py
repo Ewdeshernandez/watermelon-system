@@ -1121,10 +1121,10 @@ def build_spectrum_figure(
 
     if freq_cpm.size < 2 or amp_display.size < 2:
         fig.update_layout(
-            height=640,
+            height=940,
             plot_bgcolor="#f8fafc",
             paper_bgcolor="#f3f4f6",
-            margin=dict(l=46, r=18, t=84, b=40),
+            margin=dict(l=46, r=18, t=84, b=240),
             xaxis_title="Frequency (CPM)",
             yaxis_title=y_title,
         )
@@ -1277,8 +1277,8 @@ def build_spectrum_figure(
         )
 
     fig.update_layout(
-        height=640,
-        margin=dict(l=46, r=18, t=84, b=40),
+        height=940,
+        margin=dict(l=46, r=18, t=84, b=240),
         plot_bgcolor="#f8fafc",
         paper_bgcolor="#f3f4f6",
         font=dict(color="#111827"),
@@ -1423,6 +1423,10 @@ def _add_spectrum_export_footer(fig: go.Figure, text_diag: Dict[str, str]) -> go
     existing_shapes = list(export_fig.layout.shapes) if export_fig.layout.shapes else []
     existing_annotations = list(export_fig.layout.annotations) if export_fig.layout.annotations else []
 
+    # Reservar franja inferior real para el footer dentro del canvas
+    export_fig.update_xaxes(domain=[0.03, 0.80])
+    export_fig.update_yaxes(domain=[0.30, 0.95])
+
     existing_shapes.extend(
         [
             dict(
@@ -1431,8 +1435,8 @@ def _add_spectrum_export_footer(fig: go.Figure, text_diag: Dict[str, str]) -> go
                 yref="paper",
                 x0=0.03,
                 x1=0.97,
-                y0=0.19,
-                y1=0.19,
+                y0=0.24,
+                y1=0.24,
                 line=dict(color="#64748b", width=3),
             ),
             dict(
@@ -1441,8 +1445,8 @@ def _add_spectrum_export_footer(fig: go.Figure, text_diag: Dict[str, str]) -> go
                 yref="paper",
                 x0=0.03,
                 x1=0.97,
-                y0=0.02,
-                y1=0.175,
+                y0=0.03,
+                y1=0.22,
                 line=dict(color="rgba(148,163,184,0.75)", width=2),
                 fillcolor="rgba(255,255,255,0.97)",
                 layer="below",
@@ -1454,19 +1458,19 @@ def _add_spectrum_export_footer(fig: go.Figure, text_diag: Dict[str, str]) -> go
         [
             dict(
                 x=0.05,
-                y=0.160,
+                y=0.200,
                 xref="paper",
                 yref="paper",
                 showarrow=False,
                 xanchor="left",
                 yanchor="top",
                 align="left",
-                text="<b>DIAGNOSTIC SUMMARY</b>",
+                text="<b>RESUMEN DIAGNÓSTICO</b>",
                 font=dict(size=24, color="#0f172a"),
             ),
             dict(
                 x=0.05,
-                y=0.125,
+                y=0.162,
                 xref="paper",
                 yref="paper",
                 showarrow=False,
@@ -1478,34 +1482,34 @@ def _add_spectrum_export_footer(fig: go.Figure, text_diag: Dict[str, str]) -> go
             ),
             dict(
                 x=0.05,
-                y=0.090,
+                y=0.118,
                 xref="paper",
                 yref="paper",
                 showarrow=False,
                 xanchor="left",
                 yanchor="top",
                 align="left",
-                text=f"<b>Detail:</b> {detail}",
+                text=f"<b>Diagnóstico:</b> {detail}",
                 font=dict(size=16, color="#111827"),
             ),
             dict(
                 x=0.05,
-                y=0.050,
+                y=0.070,
                 xref="paper",
                 yref="paper",
                 showarrow=False,
                 xanchor="left",
                 yanchor="top",
                 align="left",
-                text=f"<b>Action:</b> {action}",
+                text=f"<b>Acción recomendada:</b> {action}",
                 font=dict(size=16, color="#111827"),
             ),
         ]
     )
 
     export_fig.update_layout(
-        height=2700,
-        margin=dict(l=120, r=90, t=360, b=170),
+        height=3000,
+        margin=dict(l=120, r=90, t=360, b=180),
         shapes=existing_shapes,
         annotations=existing_annotations,
     )
@@ -1525,7 +1529,7 @@ def build_export_png_bytes(
         png_bytes = export_fig.to_image(
             format="png",
             width=4200,
-            height=2700,
+            height=3000,
             scale=2,
         )
         return png_bytes, None
