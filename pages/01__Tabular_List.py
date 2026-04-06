@@ -321,6 +321,19 @@ def convert_rms_to_display(value_rms: Optional[float], display_mode: str) -> Opt
     return value_rms
 
 
+def convert_pp_to_display(value_pp: Optional[float], display_mode: str) -> Optional[float]:
+    if value_pp is None or not math.isfinite(value_pp):
+        return None
+
+    if display_mode == "Peak-to-Peak":
+        return value_pp
+    if display_mode == "0-Peak":
+        return value_pp / 2.0
+    if display_mode == "RMS":
+        return value_pp / (2.0 * math.sqrt(2.0))
+    return value_pp
+
+
 def display_suffix(display_mode: str) -> str:
     if display_mode == "RMS":
         return "rms"
@@ -575,9 +588,13 @@ def build_table_dataframe(
         ov_rms = overall_rms(rec)
         ov_display = convert_rms_to_display(ov_rms, overall_mode_row)
 
-        a05 = order_amplitude_pp(rec, 0.5)
-        a10 = order_amplitude_pp(rec, 1.0)
-        a20 = order_amplitude_pp(rec, 2.0)
+        a05_pp = order_amplitude_pp(rec, 0.5)
+        a10_pp = order_amplitude_pp(rec, 1.0)
+        a20_pp = order_amplitude_pp(rec, 2.0)
+
+        a05 = convert_pp_to_display(a05_pp, overall_mode_row)
+        a10 = convert_pp_to_display(a10_pp, overall_mode_row)
+        a20 = convert_pp_to_display(a20_pp, overall_mode_row)
 
         rows.append(
             {
@@ -656,7 +673,8 @@ def render_table(df: pd.DataFrame) -> None:
         unit = str(row["Unit"]).strip()
         overall_suffix = display_suffix(str(row["Overall Mode"]))
         overall_unit = f"{unit} {overall_suffix}".strip() if unit else overall_suffix
-        harm_unit = f"{unit} p-p".strip() if unit else "p-p"
+        harm_suffix = display_suffix(str(row["Overall Mode"]))
+        harm_unit = f"{unit} {harm_suffix}".strip() if unit else harm_suffix
 
         row_html = (
             "<tr>"
@@ -864,7 +882,8 @@ def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: s
         unit = str(row["Unit"]).strip()
         overall_suffix = display_suffix(str(row["Overall Mode"]))
         overall_unit = f"{unit} {overall_suffix}".strip() if unit else overall_suffix
-        harm_unit = f"{unit} p-p".strip() if unit else "p-p"
+        harm_suffix = display_suffix(str(row["Overall Mode"]))
+        harm_unit = f"{unit} {harm_suffix}".strip() if unit else harm_suffix
 
         cells = [
             str(row["Machine"]),
