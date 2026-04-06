@@ -14,6 +14,8 @@ import streamlit as st
 from PIL import Image, ImageDraw, ImageFont
 
 from core.auth import require_login, render_user_menu
+from core.module_patterns import helper_card
+from core.tabular_diagnostics import evaluate_tabular_diagnostic, build_tabular_report_notes
 
 st.set_page_config(page_title="Watermelon System | Tabular List", layout="wide")
 
@@ -737,6 +739,7 @@ def queue_tabular_to_report(
     criterion_text: str,
     overall_mode_text: str,
     total_rows: int,
+    text_diag: Dict[str, str],
 ) -> None:
     item_id = f"report_tabular_{sample_record.machine}_{sample_record.point}_{total_rows}_{len(st.session_state.report_items)}"
 
@@ -745,7 +748,7 @@ def queue_tabular_to_report(
             "id": item_id,
             "type": "tabular",
             "title": f"Tabular List — {sample_record.machine}",
-            "notes": "",
+            "notes": build_tabular_report_notes(text_diag),
             "signal_id": sample_record.signal_id,
             "figure": None,
             "image_bytes": png_bytes,
@@ -757,14 +760,15 @@ def queue_tabular_to_report(
     )
 
 
-def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: str, overall_mode_text: str) -> bytes:
+def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: str, overall_mode_text: str, text_diag: Dict[str, str]) -> bytes:
     width = 4200
     row_h = 88
     top_h = 180
     title_h = 84
     table_header_h = 72
     n_rows = len(df)
-    height = top_h + title_h + table_header_h + n_rows * row_h + 170
+    diag_h = 250
+    height = top_h + title_h + table_header_h + n_rows * row_h + diag_h + 170
 
     bg = "#f3f4f6"
     white = "#ffffff"
@@ -903,6 +907,25 @@ def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: s
                     tx = x0 + (x1 - x0 - (tw[2] - tw[0])) / 2
                     ty = y0 + (row_h - (tw[3] - tw[1])) / 2 - 1
                     draw.text((tx, ty), cell, font=font_cell, fill=text)
+
+    diag_y0 = table_y0 + table_header_h + n_rows * row_h + 28
+    diag_y1 = diag_y0 + 190
+
+    draw.line((table_x0, diag_y0 - 18, table_x1, diag_y0 - 18), fill="#64748b", width=3)
+    draw.rounded_rectangle((table_x0, diag_y0, table_x1, diag_y1), radius=22, fill=white, outline=border, width=2)
+
+    font_diag_title = _load_font(28, True)
+    font_diag_head = _load_font(24, True)
+    font_diag_text = _load_font(21, False)
+
+    headline = str(text_diag.get("headline", "") or "")
+    detail = str(text_diag.get("detail", "") or "")
+    action = str(text_diag.get("action", "") or "")
+
+    draw.text((table_x0 + 22, diag_y0 + 18), "RESUMEN DIAGNÓSTICO", font=font_diag_title, fill=text)
+    draw.text((table_x0 + 22, diag_y0 + 58), headline, font=font_diag_head, fill=text)
+    draw.text((table_x0 + 22, diag_y0 + 100), f"Diagnóstico: {detail}", font=font_diag_text, fill=text)
+    draw.text((table_x0 + 22, diag_y0 + 142), f"Acción recomendada: {action}", font=font_diag_text, fill=text)
 
     out = BytesIO()
     img.save(out, format="PNG")
@@ -1150,8 +1173,27 @@ elif config_mode == "Criterion by Machine":
 else:
     overall_mode_text = overall_mode
 
+text_diag = evaluate_tabular_diagnostic(df_table)
+
 render_top_strip(records_all[0], len(df_table), logo_uri, criterion_text, overall_mode_text)
 render_table(df_table)
+
+helper_card(
+    title="Autoanálisis Tabular List",
+    subtitle=text_diag["headline"],
+    chips=[
+        (f"Semáforo: {text_diag['status']}", text_diag["color"]),
+        (f"Normal: {text_diag['normal_count']}", None),
+        (f"Alarm: {text_diag['alarm_count']}", None),
+        (f"Danger: {text_diag['danger_count']}", None),
+        (f"Firma dominante: {text_diag['primary_pattern']}", None),
+    ],
+)
+
+st.info(
+    f"**Diagnóstico:** {text_diag['detail']}\n\n"
+    f"**Acción recomendada:** {text_diag['action']}"
+)
 
 st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
@@ -1165,6 +1207,7 @@ with col_export1:
                 sample_record=records_all[0],
                 criterion=criterion_text,
                 overall_mode_text=overall_mode_text,
+                text_diag=text_diag,
             )
             st.session_state.wm_tabular_export_png_bytes = png_bytes
             st.session_state.wm_tabular_export_error = None
@@ -1204,6 +1247,7 @@ with col_report:
                 criterion_text=criterion_text,
                 overall_mode_text=overall_mode_text,
                 total_rows=len(df_table),
+                text_diag=text_diag,
             )
             st.success("Tabular List enviado al reporte")
         except Exception as e:
