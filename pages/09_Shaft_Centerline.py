@@ -1,4 +1,5 @@
 import base64
+import html
 import io
 import math
 from pathlib import Path
@@ -10,6 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.auth import render_user_menu, require_login
+from core.diagnostics import build_shaft_text_diagnostics
 from core.module_patterns import export_report_row, helper_card, panel_card
 from core.ui_theme import (
     apply_watermelon_page_style,
@@ -643,14 +645,14 @@ def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[st
         return None, str(e)
 
 
-def queue_scl_to_report(meta: Dict[str, str], fig: go.Figure, title: str) -> None:
+def queue_scl_to_report(meta: Dict[str, str], fig: go.Figure, title: str, text_diag) -> None:
     ensure_report_state()
     st.session_state.report_items.append(
         {
             "id": f"report-scl-{meta.get('Machine Name','')}-{meta.get('Point Name','')}-{title}",
             "type": "shaft_centerline",
             "title": title,
-            "notes": "",
+            "notes": _build_scl_report_notes(text_diag),
             "signal_id": meta.get("Point Name", ""),
             "figure": go.Figure(fig),
             "machine": meta.get("Machine Name", ""),
@@ -973,6 +975,14 @@ def render_scl_panel(
         semaforo_color=semaforo_color,
     )
 
+    text_diag = build_shaft_text_diagnostics(
+        status=semaforo_status,
+        util_max=diag["util_max"],
+        margin_min=diag["margin_min"],
+        first_warning_speed=early_rub["first_warning_speed"],
+        first_danger_speed=early_rub["first_danger_speed"],
+    )
+
     st.plotly_chart(
         fig,
         width="stretch",
@@ -1019,10 +1029,122 @@ def render_scl_panel(
     export_report_row(
         export_key=export_state_key,
         fig=fig,
-        export_builder=build_export_png_bytes,
-        report_callback=lambda: queue_scl_to_report(meta, fig, title),
+        export_builder=lambda f: build_export_png_bytes(_add_scl_export_footer(f, text_diag)),
+        report_callback=lambda: queue_scl_to_report(meta, fig, title, text_diag),
         file_name=f"{item['file_stem']}_shaft_centerline_hd.png",
     )
+
+
+
+
+# ============================================================
+# DIAGNOSTIC EXPORT HELPERS (SHAFT)
+# ============================================================
+def _build_scl_report_notes(text_diag):
+    return f"{text_diag['headline']}\n\n{text_diag['detail']}\n\n{text_diag['action']}"
+
+def _add_scl_export_footer(fig, text_diag):
+    export_fig = go.Figure(fig)
+
+    headline = html.escape(str(text_diag.get("headline", "") or ""))
+    detail = html.escape(str(text_diag.get("detail", "") or ""))
+    action = html.escape(str(text_diag.get("action", "") or ""))
+
+    existing_shapes = list(export_fig.layout.shapes) if export_fig.layout.shapes else []
+    existing_annotations = list(export_fig.layout.annotations) if export_fig.layout.annotations else []
+
+    # Reservar franja inferior real para el footer
+    export_fig.update_xaxes(domain=[0.06, 0.94])
+    export_fig.update_yaxes(domain=[0.26, 0.95])
+
+    existing_shapes.extend(
+        [
+            dict(
+                type="line",
+                xref="paper",
+                yref="paper",
+                x0=0.04,
+                x1=0.96,
+                y0=0.215,
+                y1=0.215,
+                line=dict(color="#64748b", width=3),
+            ),
+            dict(
+                type="rect",
+                xref="paper",
+                yref="paper",
+                x0=0.04,
+                x1=0.96,
+                y0=0.015,
+                y1=0.205,
+                line=dict(color="rgba(148,163,184,0.75)", width=2),
+                fillcolor="rgba(255,255,255,0.97)",
+                layer="below",
+            ),
+        ]
+    )
+
+    existing_annotations.extend(
+        [
+            dict(
+                x=0.06,
+                y=0.185,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                xanchor="left",
+                yanchor="top",
+                align="left",
+                text="<b>DIAGNOSTIC SUMMARY</b>",
+                font=dict(size=26, color="#0f172a"),
+            ),
+            dict(
+                x=0.06,
+                y=0.145,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                xanchor="left",
+                yanchor="top",
+                align="left",
+                text=f"<b>{headline}</b>",
+                font=dict(size=18, color="#111827"),
+            ),
+            dict(
+                x=0.06,
+                y=0.102,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                xanchor="left",
+                yanchor="top",
+                align="left",
+                text=f"<b>Detail:</b> {detail}",
+                font=dict(size=16, color="#111827"),
+            ),
+            dict(
+                x=0.06,
+                y=0.055,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                xanchor="left",
+                yanchor="top",
+                align="left",
+                text=f"<b>Action:</b> {action}",
+                font=dict(size=16, color="#111827"),
+            ),
+        ]
+    )
+
+    export_fig.update_layout(
+        height=3000,
+        margin=dict(l=120, r=80, t=320, b=170),
+        shapes=existing_shapes,
+        annotations=existing_annotations,
+    )
+
+    return export_fig
 
 
 # ============================================================
