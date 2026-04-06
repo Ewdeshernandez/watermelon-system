@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import hashlib
 import math
 import re
@@ -14,6 +15,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.auth import require_login, render_user_menu
+from core.spectrum_diagnostics import evaluate_spectrum_diagnostic, build_spectrum_report_notes
 
 st.set_page_config(page_title="Watermelon System | Spectrum", layout="wide")
 
@@ -1411,17 +1413,119 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     return fig
 
 
+def _add_spectrum_export_footer(fig: go.Figure, text_diag: Dict[str, str]) -> go.Figure:
+    export_fig = go.Figure(fig)
+
+    headline = html.escape(str(text_diag.get("headline", "") or ""))
+    detail = html.escape(str(text_diag.get("detail", "") or ""))
+    action = html.escape(str(text_diag.get("action", "") or ""))
+
+    existing_shapes = list(export_fig.layout.shapes) if export_fig.layout.shapes else []
+    existing_annotations = list(export_fig.layout.annotations) if export_fig.layout.annotations else []
+
+    existing_shapes.extend(
+        [
+            dict(
+                type="line",
+                xref="paper",
+                yref="paper",
+                x0=0.03,
+                x1=0.97,
+                y0=0.19,
+                y1=0.19,
+                line=dict(color="#64748b", width=3),
+            ),
+            dict(
+                type="rect",
+                xref="paper",
+                yref="paper",
+                x0=0.03,
+                x1=0.97,
+                y0=0.02,
+                y1=0.175,
+                line=dict(color="rgba(148,163,184,0.75)", width=2),
+                fillcolor="rgba(255,255,255,0.97)",
+                layer="below",
+            ),
+        ]
+    )
+
+    existing_annotations.extend(
+        [
+            dict(
+                x=0.05,
+                y=0.160,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                xanchor="left",
+                yanchor="top",
+                align="left",
+                text="<b>DIAGNOSTIC SUMMARY</b>",
+                font=dict(size=24, color="#0f172a"),
+            ),
+            dict(
+                x=0.05,
+                y=0.125,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                xanchor="left",
+                yanchor="top",
+                align="left",
+                text=f"<b>{headline}</b>",
+                font=dict(size=18, color="#111827"),
+            ),
+            dict(
+                x=0.05,
+                y=0.090,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                xanchor="left",
+                yanchor="top",
+                align="left",
+                text=f"<b>Detail:</b> {detail}",
+                font=dict(size=16, color="#111827"),
+            ),
+            dict(
+                x=0.05,
+                y=0.050,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                xanchor="left",
+                yanchor="top",
+                align="left",
+                text=f"<b>Action:</b> {action}",
+                font=dict(size=16, color="#111827"),
+            ),
+        ]
+    )
+
+    export_fig.update_layout(
+        height=2700,
+        margin=dict(l=120, r=90, t=360, b=170),
+        shapes=existing_shapes,
+        annotations=existing_annotations,
+    )
+
+    return export_fig
+
+
 def build_export_png_bytes(
     fig: go.Figure,
+    text_diag: Dict[str, str],
 ) -> Tuple[Optional[bytes], Optional[str]]:
     try:
         export_fig = _build_export_safe_figure(fig)
         export_fig = _scale_export_figure(export_fig)
+        export_fig = _add_spectrum_export_footer(export_fig, text_diag)
 
         png_bytes = export_fig.to_image(
             format="png",
             width=4200,
-            height=2200,
+            height=2700,
             scale=2,
         )
         return png_bytes, None
@@ -1579,7 +1683,7 @@ with st.sidebar:
 # ------------------------------------------------------------
 # Prepare signals + multi-panel render
 # ------------------------------------------------------------
-def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title: str) -> None:
+def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title: str, text_diag: Dict[str, str]) -> None:
     st.session_state.report_items.append(
         {
             "id": make_export_state_key(
@@ -1593,7 +1697,7 @@ def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title:
             ),
             "type": "spectrum",
             "title": panel_title,
-            "notes": "",
+            "notes": build_spectrum_report_notes(text_diag),
             "signal_id": primary.signal_id,
             "figure": go.Figure(fig),
             "machine": primary.machine,
@@ -1696,6 +1800,17 @@ def render_spectrum_panel(
         max_cpm=max_cpm,
     )
 
+    text_diag = evaluate_spectrum_diagnostic(
+        one_x_amp=one_x_display_amp,
+        harmonics=[{"order": p.order, "freq_cpm": p.freq_cpm, "amp_peak": p.amp_peak} for p in all_harmonic_points],
+        overall_spec_rms=overall_spec_rms,
+        dominant_peak_freq_cpm=spectrum.peak_freq_cpm,
+        dominant_peak_amp=spectrum.peak_amp_peak,
+        rpm=primary.rpm,
+    )
+    semaforo_status = text_diag["status"]
+    semaforo_color = text_diag["color"]
+
     logo_uri = get_logo_data_uri(LOGO_PATH)
 
     fig = build_spectrum_figure(
@@ -1780,13 +1895,38 @@ def render_spectrum_panel(
         key=f"wm_spectrum_plot_{export_state_key}",
     )
 
+    helper_title = f"Spectrum Diagnostic Helper · Panel {panel_index + 1}"
+    helper_subtitle = text_diag["headline"]
+
+    st.markdown("")
+
+    helper_cols = [
+        (f"Semáforo: {semaforo_status}", semaforo_color),
+        (f"1X Amp: {format_number(one_x_display_amp, 3)} {amplitude_unit_text(primary.amplitude_unit, amplitude_mode)}".strip(), None),
+        (f"Overall: {format_number(overall_spec_rms, 3)} {amplitude_unit_text(primary.amplitude_unit, amplitude_mode)}".strip(), None),
+        (f"Peak Freq: {format_number(spectrum.peak_freq_cpm, 1)} CPM", None),
+        (f"Harmonics: {len(all_harmonic_points)}", None),
+    ]
+
+    from core.module_patterns import helper_card
+    helper_card(
+        title=helper_title,
+        subtitle=helper_subtitle,
+        chips=helper_cols,
+    )
+
+    st.info(
+        f"**Diagnostic detail:** {text_diag['detail']}\n\n"
+        f"**Recommended action:** {text_diag['action']}"
+    )
+
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
 
     with col_export1:
         if st.button("Prepare PNG HD", key=f"prepare_png_{export_state_key}", use_container_width=True):
             with st.spinner("Generating HD export..."):
-                png_bytes, export_error = build_export_png_bytes(fig=fig)
+                png_bytes, export_error = build_export_png_bytes(fig=fig, text_diag=text_diag)
                 st.session_state.wm_sp_export_store[export_state_key]["png_bytes"] = png_bytes
                 st.session_state.wm_sp_export_store[export_state_key]["error"] = export_error
 
@@ -1811,7 +1951,7 @@ def render_spectrum_panel(
 
     with col_report:
         if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
-            queue_spectrum_to_report(primary, fig, panel_title)
+            queue_spectrum_to_report(primary, fig, panel_title, text_diag)
             st.success("Spectrum enviado al reporte")
 
 
