@@ -1560,14 +1560,7 @@ with st.sidebar:
         )
     )
 
-    harmonic_band_fraction = st.slider(
-        "Harmonic search band (% of target)",
-        min_value=5,
-        max_value=40,
-        value=20,
-        step=1,
-        disabled=not show_harmonics,
-    ) / 100.0
+    harmonic_band_fraction = 0.12
 
     show_harmonic_amplitudes = st.checkbox(
         "Show harmonic amplitudes",
