@@ -15,7 +15,7 @@ def build_tabular_report_notes(text_diag: Dict[str, str]) -> str:
 
     blocks = []
     if headline:
-        blocks.append(f"Resumen diagnóstico: {headline}")
+        blocks.append(headline)
     if narrative:
         blocks.append(narrative)
     return "\n\n".join(blocks).strip()
