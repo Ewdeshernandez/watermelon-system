@@ -12,7 +12,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.lib.utils import ImageReader
-from reportlab.platypus import Image, PageBreak, Paragraph, SimpleDocTemplate, Spacer
+from reportlab.platypus import Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer
 
 from core.auth import require_login, render_user_menu
 
@@ -46,9 +46,9 @@ st.markdown(
     <style>
         .wm-page-title {
             font-size: 2rem;
-            font-weight: 700;
+            font-weight: 800;
             color: #f5f7fb;
-            margin-bottom: 0.20rem;
+            margin-bottom: 0.18rem;
             letter-spacing: 0.2px;
         }
         .wm-page-subtitle {
@@ -83,7 +83,7 @@ st.markdown(
         }
         .wm-section-title {
             color: #ffffff;
-            font-weight: 700;
+            font-weight: 800;
             font-size: 1.08rem;
             margin-top: 0.15rem;
             margin-bottom: 0.75rem;
@@ -91,7 +91,7 @@ st.markdown(
         .wm-block-title {
             color: #f5f7fb;
             font-size: 1.05rem;
-            font-weight: 700;
+            font-weight: 800;
             margin-bottom: 0.15rem;
         }
         .wm-block-subtitle {
@@ -152,6 +152,20 @@ st.markdown(
             font-size: 0.92rem;
             line-height: 1.55;
         }
+        .wm-figure-card {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 16px;
+            padding: 0.9rem;
+            margin-bottom: 1rem;
+        }
+        .wm-preview-card {
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 16px;
+            padding: 0.85rem 0.95rem;
+            margin-bottom: 0.8rem;
+        }
     </style>
     """,
     unsafe_allow_html=True,
@@ -163,7 +177,7 @@ if "report_items" not in st.session_state:
 
 if "report_meta" not in st.session_state:
     st.session_state["report_meta"] = {
-        "report_title": "REPORTE DE MONITOREO EN LINEA",
+        "report_title": "REPORTE DE MONITOREO EN LÍNEA",
         "client": "",
         "asset": "",
         "unit": "",
@@ -173,6 +187,7 @@ if "report_meta" not in st.session_state:
         "period": "",
         "report_date": "",
         "consecutive": "",
+        "service_objective": "",
         "service_development": "",
         "recommendations": "",
     }
@@ -204,7 +219,7 @@ def _normalize_report_items(raw_items: Any) -> List[Dict[str, Any]]:
         normalized = {
             "id": str(item.get("id") or f"report_item_{idx+1}"),
             "type": str(item.get("type") or "figure"),
-            "title": str(item.get("title") or f"Figure {idx+1}"),
+            "title": str(item.get("title") or f"Figura {idx+1}"),
             "notes": str(item.get("notes") or ""),
             "signal_id": str(item.get("signal_id") or ""),
             "machine": str(item.get("machine") or ""),
@@ -335,7 +350,6 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     styles.add(ParagraphStyle(name="WMFigureCaption", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=10.2, leading=13, alignment=TA_CENTER, textColor=colors.HexColor("#111827"), spaceBefore=5, spaceAfter=8))
     styles.add(ParagraphStyle(name="WMFigureText", parent=styles["BodyText"], fontName="Helvetica", fontSize=10.2, leading=14, alignment=TA_JUSTIFY, textColor=colors.HexColor("#111827"), spaceAfter=14))
 
-    logo_siga = _first_existing_logo()
     logo_watermark = _first_existing_watermark()
 
     doc = SimpleDocTemplate(
@@ -378,7 +392,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.setFillColor(colors.HexColor("#111827"))
         canvas.drawRightString(page_width - 1.15 * cm, page_height - 1.0 * cm, f"Página {doc.page}")
 
-        footer = "INFORME VALIDO UNICAMENTE PARA LAS CONDICIONES PRESENTES DURANTE EL SERVICIO. NO PODRA SER COPIADO PARCIAL O TOTALMENTE SIN PREVIA AUTORIZACION."
+        footer = "INFORME VÁLIDO ÚNICAMENTE PARA LAS CONDICIONES PRESENTES DURANTE EL SERVICIO. NO PODRÁ SER COPIADO PARCIAL O TOTALMENTE SIN PREVIA AUTORIZACIÓN."
         canvas.setFillColor(colors.HexColor("#334155"))
         canvas.setFont("Helvetica-Bold", 5.8)
         canvas.drawCentredString((page_width - 4.5 * cm) / 2, 0.52 * cm, footer)
@@ -405,7 +419,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.setFont("Helvetica-Bold", 8.2)
         canvas.drawString(internal_left, page_height - 1.0 * cm, "Machinery Diagnostics Engineering")
 
-        footer = "INFORME VALIDO UNICAMENTE PARA LAS CONDICIONES PRESENTES DURANTE EL SERVICIO. NO PODRA SER COPIADO PARCIAL O TOTALMENTE SIN PREVIA AUTORIZACION."
+        footer = "INFORME VÁLIDO ÚNICAMENTE PARA LAS CONDICIONES PRESENTES DURANTE EL SERVICIO. NO PODRÁ SER COPIADO PARCIAL O TOTALMENTE SIN PREVIA AUTORIZACIÓN."
         canvas.setStrokeColor(colors.HexColor("#0ea5e9"))
         canvas.setLineWidth(1.0)
         canvas.line(internal_left, 0.95 * cm, internal_width_end, 0.95 * cm)
@@ -417,8 +431,22 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
     story: List[Any] = []
 
-    header_code = meta.get("consecutive") or "SIGA-FMT-178 | Version 3 | Fecha 19-06-2024"
-    story.append(Paragraph(_paragraph_safe(header_code), ParagraphStyle(name="WMCoverHead", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=9.3, leading=12, textColor=colors.HexColor("#0ea5e9"), alignment=TA_LEFT, spaceAfter=10)))
+    header_code = meta.get("consecutive") or "SIGA-FMT-178 | Versión 3 | Fecha 19-06-2024"
+    story.append(
+        Paragraph(
+            _paragraph_safe(header_code),
+            ParagraphStyle(
+                name="WMCoverHead",
+                parent=styles["Normal"],
+                fontName="Helvetica-Bold",
+                fontSize=9.3,
+                leading=12,
+                textColor=colors.HexColor("#0ea5e9"),
+                alignment=TA_LEFT,
+                spaceAfter=10,
+            ),
+        )
+    )
 
     if WATERMELON_LOGO.exists():
         story.append(Image(str(WATERMELON_LOGO), width=4.2 * cm, height=2.0 * cm))
@@ -427,8 +455,21 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     story.append(Spacer(1, 0.18 * cm))
     story.append(Paragraph("Machinery Diagnostics Engineering", styles["WMSubTitle"]))
     story.append(Spacer(1, 0.55 * cm))
-    story.append(Paragraph(_paragraph_safe(meta.get("report_title") or "REPORTE TECNICO"), styles["WMTitle"]))
-    story.append(Paragraph("Watermelon System", ParagraphStyle(name="WMBrandSub", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=15.5, leading=19, textColor=colors.HexColor("#111827"), spaceAfter=18)))
+    story.append(Paragraph(_paragraph_safe(meta.get("report_title") or "REPORTE TÉCNICO"), styles["WMTitle"]))
+    story.append(
+        Paragraph(
+            "Watermelon System",
+            ParagraphStyle(
+                name="WMBrandSub",
+                parent=styles["Normal"],
+                fontName="Helvetica-Bold",
+                fontSize=15.5,
+                leading=19,
+                textColor=colors.HexColor("#111827"),
+                spaceAfter=18,
+            ),
+        )
+    )
 
     cover_lines = [
         meta.get("asset") or "-",
@@ -437,7 +478,20 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         meta.get("client") or "-",
     ]
     for line in cover_lines:
-        story.append(Paragraph(_paragraph_safe(line), ParagraphStyle(name=f"WMCoverLine_{len(story)}", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=12.8, leading=16, textColor=colors.HexColor("#111827"), spaceAfter=3)))
+        story.append(
+            Paragraph(
+                _paragraph_safe(line),
+                ParagraphStyle(
+                    name=f"WMCoverLine_{len(story)}",
+                    parent=styles["Normal"],
+                    fontName="Helvetica-Bold",
+                    fontSize=12.8,
+                    leading=16,
+                    textColor=colors.HexColor("#111827"),
+                    spaceAfter=3,
+                ),
+            )
+        )
 
     story.append(Spacer(1, 0.85 * cm))
     story.append(Paragraph(f"<b>Preparado por:</b><br/>{_paragraph_safe(meta.get('prepared_by') or '-')}", styles["WMMeta"]))
@@ -449,12 +503,15 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     story.append(Paragraph(f"<b>Consecutivo:</b> {_paragraph_safe(meta.get('consecutive') or '-')}", styles["WMMeta"]))
     story.append(PageBreak())
 
-    story.append(Paragraph("1. RECOMENDACIONES", styles["WMSection"]))
+    story.append(Paragraph("1. OBJETIVO DEL SERVICIO", styles["WMSection"]))
+    story.append(Paragraph(_paragraph_safe(meta.get("service_objective") or "Sin objetivo del servicio registrado."), styles["WMBody"]))
+    story.append(Spacer(1, 0.10 * cm))
+    story.append(Paragraph("2. RECOMENDACIONES", styles["WMSection"]))
     story.append(Paragraph(_paragraph_safe(meta.get("recommendations") or "Sin recomendaciones registradas."), styles["WMBody"]))
-    story.append(Spacer(1, 0.20 * cm))
-    story.append(Paragraph("2. DESARROLLO DEL SERVICIO", styles["WMSection"]))
+    story.append(Spacer(1, 0.10 * cm))
+    story.append(Paragraph("3. DESARROLLO DEL SERVICIO", styles["WMSection"]))
     story.append(Paragraph(_paragraph_safe(meta.get("service_development") or "Sin desarrollo del servicio registrado."), styles["WMBody"]))
-    story.append(Spacer(1, 0.35 * cm))
+    story.append(Spacer(1, 0.30 * cm))
 
     usable_width = A4[0] - doc.leftMargin - doc.rightMargin
     max_img_width = usable_width - 1.0 * cm
@@ -471,15 +528,18 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         img_w, img_h = _fit_image_dimensions(png_bytes, max_img_width, max_img_height)
         img = Image(BytesIO(png_bytes), width=img_w, height=img_h)
         img.hAlign = "CENTER"
-        story.append(Spacer(1, 0.15 * cm))
-        story.append(img)
 
         caption = f"Figura {idx}. {item.get('title') or f'Figura {idx}'}"
-        story.append(Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]))
-
         notes = item.get("notes") or "Sin interpretación técnica todavía."
-        story.append(Paragraph(_paragraph_safe(notes), styles["WMFigureText"]))
-        story.append(Spacer(1, 0.20 * cm))
+
+        block = [
+            Spacer(1, 0.15 * cm),
+            img,
+            Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]),
+            Paragraph(_paragraph_safe(notes), styles["WMFigureText"]),
+            Spacer(1, 0.18 * cm),
+        ]
+        story.append(KeepTogether(block))
 
     doc.build(story, onFirstPage=_draw_cover_page, onLaterPages=_draw_internal_page)
     return buffer.getvalue()
@@ -491,32 +551,32 @@ meta = st.session_state["report_meta"]
 
 st.markdown('<div class="wm-page-title">Reports</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="wm-page-subtitle">Editor de entregables técnicos premium. Este módulo consume figuras reales enviadas desde Spectrum y otros módulos, y exporta PDF técnico profesional.</div>',
+    '<div class="wm-page-subtitle">Editor premium de entregables técnicos. Este módulo organiza figuras reales enviadas desde Spectrum, Waveform, Orbit y Tabular List, y exporta un PDF corporativo listo para cliente.</div>',
     unsafe_allow_html=True,
 )
 
 c1, c2, c3, c4 = st.columns(4)
 with c1:
-    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Figures in Report</div><div class="wm-kpi-value">{len(items):,}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Figuras en reporte</div><div class="wm-kpi-value">{len(items):,}</div></div>', unsafe_allow_html=True)
 with c2:
-    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Spectrum Blocks</div><div class="wm-kpi-value">{_count_by_type(items, "spectrum"):,}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Bloques Spectrum</div><div class="wm-kpi-value">{_count_by_type(items, "spectrum"):,}</div></div>', unsafe_allow_html=True)
 with c3:
-    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Prepared By</div><div class="wm-kpi-value">{meta["prepared_by"] or "-"}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Preparado por</div><div class="wm-kpi-value">{meta["prepared_by"] or "-"}</div></div>', unsafe_allow_html=True)
 with c4:
-    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Consecutive</div><div class="wm-kpi-value">{meta["consecutive"] or "-"}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Consecutivo</div><div class="wm-kpi-value">{meta["consecutive"] or "-"}</div></div>', unsafe_allow_html=True)
 
 st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
 
-st.markdown('<div class="wm-section-title">Report Actions</div>', unsafe_allow_html=True)
+st.markdown('<div class="wm-section-title">Acciones del reporte</div>', unsafe_allow_html=True)
 
 ga1, ga2, ga3, ga4 = st.columns([1.2, 1.2, 1.2, 3.4])
 with ga1:
-    if st.button("Refresh Items", use_container_width=True):
+    if st.button("Actualizar figuras", use_container_width=True):
         _persist_items(_get_items())
         st.rerun()
 with ga2:
     clear_disabled = len(items) == 0
-    if st.button("Clear Report", use_container_width=True, disabled=clear_disabled):
+    if st.button("Vaciar reporte", use_container_width=True, disabled=clear_disabled):
         _clear_all_items()
         st.rerun()
 
@@ -532,51 +592,55 @@ if pdf_ready:
 with ga3:
     if pdf_bytes is not None:
         st.download_button(
-            "Export PDF",
+            "Exportar PDF",
             data=pdf_bytes,
             file_name=(meta.get("consecutive") or "watermelon_report").replace(" ", "_") + ".pdf",
             mime="application/pdf",
             use_container_width=True,
         )
     else:
-        st.button("Export PDF", use_container_width=True, disabled=True)
+        st.button("Exportar PDF", use_container_width=True, disabled=True)
 
 if pdf_error:
     st.warning(f"PDF export error: {pdf_error}")
 
 st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
 
-st.markdown('<div class="wm-section-title">Report Metadata</div>', unsafe_allow_html=True)
+st.markdown('<div class="wm-section-title">Metadatos del reporte</div>', unsafe_allow_html=True)
 
 m1, m2, m3 = st.columns(3)
 with m1:
-    meta["report_title"] = st.text_input("Report Title", value=meta["report_title"])
+    meta["report_title"] = st.text_input("Título del reporte", value=meta["report_title"])
 with m2:
-    meta["client"] = st.text_input("Client", value=meta["client"])
+    meta["client"] = st.text_input("Cliente", value=meta["client"])
 with m3:
-    meta["asset"] = st.text_input("Asset / Machine", value=meta["asset"])
+    meta["asset"] = st.text_input("Activo / máquina", value=meta["asset"])
 
 m4, m5, m6 = st.columns(3)
 with m4:
-    meta["unit"] = st.text_input("Unit", value=meta["unit"])
+    meta["unit"] = st.text_input("Unidad", value=meta["unit"])
 with m5:
-    meta["location"] = st.text_input("Location", value=meta["location"])
+    meta["location"] = st.text_input("Ubicación", value=meta["location"])
 with m6:
-    meta["consecutive"] = st.text_input("Consecutive", value=meta["consecutive"])
+    meta["consecutive"] = st.text_input("Consecutivo", value=meta["consecutive"])
 
 m7, m8, m9 = st.columns(3)
 with m7:
-    meta["prepared_by"] = st.text_input("Prepared By", value=meta["prepared_by"])
+    meta["prepared_by"] = st.text_input("Preparado por", value=meta["prepared_by"])
 with m8:
-    meta["reviewed_by"] = st.text_input("Reviewed By", value=meta["reviewed_by"])
+    meta["reviewed_by"] = st.text_input("Revisado por", value=meta["reviewed_by"])
 with m9:
-    meta["report_date"] = st.text_input("Report Date", value=meta["report_date"])
+    meta["report_date"] = st.text_input("Fecha del reporte", value=meta["report_date"])
 
 m10, m11 = st.columns(2)
 with m10:
-    meta["period"] = st.text_input("Evaluation Period", value=meta["period"])
+    meta["period"] = st.text_input("Periodo evaluado", value=meta["period"])
 with m11:
     st.write("")
+
+t0 = st.columns(1)[0]
+with t0:
+    meta["service_objective"] = st.text_area("Objetivo del servicio", value=meta["service_objective"], height=120)
 
 t1, t2 = st.columns(2)
 with t1:
@@ -587,37 +651,37 @@ with t2:
 st.session_state["report_meta"] = meta
 
 st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
-st.markdown('<div class="wm-section-title">Report Structure</div>', unsafe_allow_html=True)
+st.markdown('<div class="wm-section-title">Estructura del reporte</div>', unsafe_allow_html=True)
 
 if not items:
-    st.info("Todavía no hay figuras en el reporte. Entra a Spectrum, Waveforms, Orbit o Tabular List y usa el botón 'Enviar a Reporte'.")
+    st.info("Todavía no hay figuras en el reporte. Entra a Spectrum, Waveform, Orbit o Tabular List y usa el botón 'Enviar a Reporte'.")
 else:
     for index, item in enumerate(items, start=1):
-        st.markdown('<div class="wm-card">', unsafe_allow_html=True)
+        st.markdown('<div class="wm-card"><div class="wm-figure-card">', unsafe_allow_html=True)
         badge_class = _type_badge_class(item["type"])
         st.markdown(f'<div class="wm-block-title">Figura {index}. {item["title"]}</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="wm-block-subtitle"><span class="wm-badge {badge_class}">{_type_badge(item["type"])}</span>{_source_line(item)}</div>', unsafe_allow_html=True)
 
         tcol1, tcol2, tcol3, tcol4 = st.columns([2.4, 0.8, 0.8, 0.8])
         with tcol1:
-            new_title = st.text_input("Figure Title", value=item["title"], key=f"report_title_{item['id']}")
+            new_title = st.text_input("Título de la figura", value=item["title"], key=f"report_title_{item['id']}")
             item["title"] = new_title
         with tcol2:
             st.write("")
             st.write("")
-            if st.button("↑ Up", key=f"report_up_{item['id']}", use_container_width=True, disabled=index == 1):
+            if st.button("↑ Subir", key=f"report_up_{item['id']}", use_container_width=True, disabled=index == 1):
                 _move_item(item["id"], -1)
                 st.rerun()
         with tcol3:
             st.write("")
             st.write("")
-            if st.button("↓ Down", key=f"report_down_{item['id']}", use_container_width=True, disabled=index == len(items)):
+            if st.button("↓ Bajar", key=f"report_down_{item['id']}", use_container_width=True, disabled=index == len(items)):
                 _move_item(item["id"], +1)
                 st.rerun()
         with tcol4:
             st.write("")
             st.write("")
-            if st.button("Remove", key=f"report_remove_{item['id']}", use_container_width=True):
+            if st.button("Eliminar", key=f"report_remove_{item['id']}", use_container_width=True):
                 _remove_item(item["id"])
                 st.rerun()
 
@@ -635,7 +699,7 @@ else:
             )
 
         new_notes = st.text_area(
-            f"Technical interpretation for Figure {index}",
+            f"Interpretación técnica de la figura {index}",
             value=item["notes"],
             key=f"report_notes_{item['id']}",
             height=140,
@@ -643,33 +707,36 @@ else:
         )
         item["notes"] = new_notes
 
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div></div>", unsafe_allow_html=True)
 
     _persist_items(items)
 
 st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
-st.markdown('<div class="wm-section-title">Report Preview</div>', unsafe_allow_html=True)
+st.markdown('<div class="wm-section-title">Vista previa del reporte</div>', unsafe_allow_html=True)
 
 p1, p2 = st.columns([1.15, 1.85])
 with p1:
     st.markdown('<div class="wm-card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="wm-block-title">{meta["report_title"] or "Technical Vibration Report"}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="wm-block-title">{meta["report_title"] or "Reporte técnico de vibraciones"}</div>', unsafe_allow_html=True)
     st.markdown(
         f"""
         <div class="wm-note">
-            <strong>Client:</strong> {meta["client"] or "-"}<br>
-            <strong>Asset:</strong> {meta["asset"] or "-"}<br>
-            <strong>Unit:</strong> {meta["unit"] or "-"}<br>
-            <strong>Location:</strong> {meta["location"] or "-"}<br>
-            <strong>Prepared By:</strong> {meta["prepared_by"] or "-"}<br>
-            <strong>Reviewed By:</strong> {meta["reviewed_by"] or "-"}<br>
-            <strong>Period:</strong> {meta["period"] or "-"}<br>
-            <strong>Report Date:</strong> {meta["report_date"] or "-"}<br>
-            <strong>Consecutive:</strong> {meta["consecutive"] or "-"}<br>
+            <strong>Cliente:</strong> {meta["client"] or "-"}<br>
+            <strong>Activo:</strong> {meta["asset"] or "-"}<br>
+            <strong>Unidad:</strong> {meta["unit"] or "-"}<br>
+            <strong>Ubicación:</strong> {meta["location"] or "-"}<br>
+            <strong>Preparado por:</strong> {meta["prepared_by"] or "-"}<br>
+            <strong>Revisado por:</strong> {meta["reviewed_by"] or "-"}<br>
+            <strong>Periodo evaluado:</strong> {meta["period"] or "-"}<br>
+            <strong>Fecha del reporte:</strong> {meta["report_date"] or "-"}<br>
+            <strong>Consecutivo:</strong> {meta["consecutive"] or "-"}<br>
         </div>
         """,
         unsafe_allow_html=True,
     )
+    st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="wm-block-subtitle">Objetivo del servicio</div>', unsafe_allow_html=True)
+    st.write(meta["service_objective"] or "—")
     st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
     st.markdown('<div class="wm-block-subtitle">Recomendaciones</div>', unsafe_allow_html=True)
     st.write(meta["recommendations"] or "—")
@@ -680,24 +747,23 @@ with p1:
 
 with p2:
     st.markdown('<div class="wm-card">', unsafe_allow_html=True)
-    st.markdown('<div class="wm-block-title">Ordered Figure Summary</div>', unsafe_allow_html=True)
+    st.markdown('<div class="wm-block-title">Resumen ordenado de figuras</div>', unsafe_allow_html=True)
 
     if not items:
         st.markdown('<div class="wm-note">No hay figuras agregadas todavía.</div>', unsafe_allow_html=True)
     else:
         for index, item in enumerate(items, start=1):
-            summary_note = item["notes"][:220] + ("..." if len(item["notes"]) > 220 else "") if item["notes"] else "Sin interpretación técnica todavía."
+            summary_note = item["notes"][:240] + ("..." if len(item["notes"]) > 240 else "") if item["notes"] else "Sin interpretación técnica todavía."
             badge_class = _type_badge_class(item["type"])
             st.markdown(
                 f"""
-                <div class="wm-note">
+                <div class="wm-preview-card">
                     <span class="wm-badge {badge_class}">{_type_badge(item["type"])}</span>
                     <span class="wm-badge wm-badge-generic">Figura {index}</span>
                     <strong>{item["title"]}</strong><br>
-                    {_source_line(item)}<br>
-                    {summary_note}
+                    <span class="wm-muted">{_source_line(item)}</span><br><br>
+                    <span class="wm-note">{summary_note}</span>
                 </div>
-                <div class="wm-divider"></div>
                 """,
                 unsafe_allow_html=True,
             )
@@ -705,6 +771,6 @@ with p2:
     st.markdown("</div>", unsafe_allow_html=True)
 
 st.caption(
-    "Flujo actual: Spectrum, Waveforms, Orbit y Tabular List empujan contenido real al reporte mediante st.session_state['report_items']. "
+    "Flujo actual: Spectrum, Waveform, Orbit y Tabular List empujan contenido real al reporte mediante st.session_state['report_items']. "
     "Reports actúa como editor premium de entregable técnico y exportador PDF profesional, sin reconstruir motores visuales."
 )
