@@ -191,6 +191,11 @@ st.markdown(
 if "report_items" not in st.session_state:
     st.session_state["report_items"] = []
 
+if "report_pdf_bytes" not in st.session_state:
+    st.session_state["report_pdf_bytes"] = None
+if "report_pdf_error" not in st.session_state:
+    st.session_state["report_pdf_error"] = None
+
 if "report_meta" not in st.session_state:
     st.session_state["report_meta"] = {
         "report_title": "REPORTE DE MONITOREO EN LÍNEA",
@@ -617,23 +622,28 @@ pdf_ready = len(items) > 0
 pdf_error = None
 pdf_bytes: Optional[bytes] = None
 meta = st.session_state["report_meta"]
-if pdf_ready:
-    try:
-        pdf_bytes = _build_pdf_bytes(meta, items)
-    except Exception as e:
-        pdf_error = str(e)
 
 with ga3:
-    if pdf_bytes is not None:
-        st.download_button(
-            "Exportar PDF",
-            data=pdf_bytes,
-            file_name=(meta.get("consecutive") or "watermelon_report").replace(" ", "_") + ".pdf",
-            mime="application/pdf",
-            use_container_width=True,
-        )
-    else:
-        st.button("Exportar PDF", use_container_width=True, disabled=True)
+    if st.button("Preparar PDF", use_container_width=True, disabled=not pdf_ready):
+        try:
+            pdf_bytes = _build_pdf_bytes(meta, items)
+            st.session_state["report_pdf_bytes"] = pdf_bytes
+            st.session_state["report_pdf_error"] = None
+        except Exception as e:
+            st.session_state["report_pdf_bytes"] = None
+            st.session_state["report_pdf_error"] = str(e)
+
+pdf_bytes = st.session_state.get("report_pdf_bytes")
+pdf_error = st.session_state.get("report_pdf_error")
+
+if pdf_bytes is not None:
+    st.download_button(
+        "Descargar PDF",
+        data=pdf_bytes,
+        file_name=(meta.get("consecutive") or "watermelon_report").replace(" ", "_") + ".pdf",
+        mime="application/pdf",
+        use_container_width=True,
+    )
 
 if pdf_error:
     st.warning(f"PDF export error: {pdf_error}")
