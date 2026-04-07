@@ -1600,6 +1600,7 @@ def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title:
             "notes": build_spectrum_report_notes(text_diag),
             "signal_id": primary.signal_id,
             "figure": go.Figure(fig),
+            "image_bytes": image_bytes,
             "machine": primary.machine,
             "point": primary.point,
             "variable": primary.variable,
