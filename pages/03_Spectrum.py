@@ -1583,7 +1583,7 @@ with st.sidebar:
 # ------------------------------------------------------------
 # Prepare signals + multi-panel render
 # ------------------------------------------------------------
-def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title: str, text_diag: Dict[str, str]) -> None:
+def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title: str, image_bytes: Optional[bytes] = None) -> None:
     st.session_state.report_items.append(
         {
             "id": make_export_state_key(
@@ -1597,7 +1597,7 @@ def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title:
             ),
             "type": "spectrum",
             "title": panel_title,
-            "notes": build_spectrum_report_notes(text_diag),
+            "notes": "Interpretación técnica pendiente para este espectro.",
             "signal_id": primary.signal_id,
             "figure": go.Figure(fig),
             "image_bytes": image_bytes,
@@ -1849,7 +1849,13 @@ def render_spectrum_panel(
 
     with col_report:
         if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
-            queue_spectrum_to_report(primary, fig, panel_title, text_diag)
+            png_bytes_for_report = None
+            try:
+                png_bytes_for_report, _png_error_for_report = build_export_png_bytes(fig=fig)
+            except Exception:
+                png_bytes_for_report = None
+
+            queue_spectrum_to_report(primary, fig, panel_title, image_bytes=png_bytes_for_report)
             st.success("Spectrum enviado al reporte")
 
 
