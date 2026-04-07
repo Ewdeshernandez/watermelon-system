@@ -815,7 +815,7 @@ def queue_tabular_to_report(
     overall_mode_text: str,
     total_rows: int,
     text_diag: Dict[str, str],
-) -> None:
+, image_bytes: Optional[bytes] = None, report_notes: str = "") -> None:
     item_id = f"report_tabular_{sample_record.machine}_{sample_record.point}_{total_rows}_{len(st.session_state.report_items)}"
 
     st.session_state.report_items.append(
