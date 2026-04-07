@@ -1128,7 +1128,7 @@ if not records_all:
     st.stop()
 
 
-def queue_waveform_to_report(record: SignalRecord, fig: go.Figure, panel_title: str, text_diag: Dict[str, str]) -> None:
+def queue_waveform_to_report(record: SignalRecord, fig: go.Figure, panel_title: str, text_diag: Dict[str, str], image_bytes: Optional[bytes] = None) -> None:
     st.session_state.report_items.append(
         {
             "id": make_export_state_key(
@@ -1145,6 +1145,7 @@ def queue_waveform_to_report(record: SignalRecord, fig: go.Figure, panel_title: 
             "notes": build_waveform_report_notes(text_diag),
             "signal_id": record.signal_id,
             "figure": go.Figure(fig),
+            "image_bytes": image_bytes,
             "machine": record.machine,
             "point": record.point,
             "variable": record.variable,
@@ -1302,7 +1303,19 @@ def render_waveform_panel(
 
     with col_report:
         if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
-            queue_waveform_to_report(prepared, fig, panel_title, text_diag)
+            png_bytes_for_report = None
+            try:
+                png_bytes_for_report, _png_error_for_report = build_export_png_bytes(fig=fig)
+            except Exception:
+                png_bytes_for_report = None
+
+            queue_waveform_to_report(
+                prepared,
+                fig,
+                panel_title,
+                text_diag,
+                image_bytes=png_bytes_for_report,
+            )
             st.success("Waveform enviado al reporte")
 
     panel_error = st.session_state.wm_export_store[export_state_key]["error"]
