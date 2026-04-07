@@ -815,7 +815,7 @@ def queue_tabular_to_report(
     overall_mode_text: str,
     total_rows: int,
     text_diag: Dict[str, str],
-, image_bytes: Optional[bytes] = None, report_notes: str = "") -> None:
+) -> None:
     item_id = f"report_tabular_{sample_record.machine}_{sample_record.point}_{total_rows}_{len(st.session_state.report_items)}"
 
     st.session_state.report_items.append(
@@ -823,7 +823,7 @@ def queue_tabular_to_report(
             "id": item_id,
             "type": "tabular",
             "title": f"Tabular List — {sample_record.machine}",
-            "notes": build_tabular_report_notes(text_diag),
+            "notes": text_diag.get("narrative", "Resumen técnico generado automáticamente."),
             "signal_id": sample_record.signal_id,
             "figure": None,
             "image_bytes": png_bytes,
