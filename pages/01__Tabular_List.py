@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import math
 import re
+import textwrap
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
@@ -750,6 +751,15 @@ def _status_style(status: str) -> Tuple[str, str]:
     return "#f1f5f9", "#475569"
 
 
+def _wrap_text_for_png(text_value: str, width: int = 145) -> List[str]:
+    if not text_value:
+        return []
+    lines: List[str] = []
+    for part in str(text_value).split("\n"):
+        wrapped = textwrap.wrap(part, width=width) or [""]
+        lines.extend(wrapped)
+    return lines
+
 
 def queue_tabular_to_report(
     png_bytes: bytes,
@@ -928,7 +938,7 @@ def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: s
                     draw.text((tx, ty), cell, font=font_cell, fill=text)
 
     diag_y0 = table_y0 + table_header_h + n_rows * row_h + 28
-    diag_y1 = diag_y0 + 190
+    diag_y1 = diag_y0 + 210
 
     draw.line((table_x0, diag_y0 - 18, table_x1, diag_y0 - 18), fill="#64748b", width=3)
     draw.rounded_rectangle((table_x0, diag_y0, table_x1, diag_y1), radius=22, fill=white, outline=border, width=2)
@@ -938,13 +948,16 @@ def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: s
     font_diag_text = _load_font(21, False)
 
     headline = str(text_diag.get("headline", "") or "")
-    detail = str(text_diag.get("detail", "") or "")
-    action = str(text_diag.get("action", "") or "")
+    narrative = str(text_diag.get("narrative", "") or "")
 
     draw.text((table_x0 + 22, diag_y0 + 18), "RESUMEN DIAGNÓSTICO", font=font_diag_title, fill=text)
     draw.text((table_x0 + 22, diag_y0 + 58), headline, font=font_diag_head, fill=text)
-    draw.text((table_x0 + 22, diag_y0 + 100), f"Diagnóstico: {detail}", font=font_diag_text, fill=text)
-    draw.text((table_x0 + 22, diag_y0 + 142), f"Acción recomendada: {action}", font=font_diag_text, fill=text)
+
+    wrapped_lines = _wrap_text_for_png(narrative, width=145)
+    base_y = diag_y0 + 102
+    line_h = 28
+    for i, line in enumerate(wrapped_lines[:4]):
+        draw.text((table_x0 + 22, base_y + i * line_h), line, font=font_diag_text, fill=text)
 
     out = BytesIO()
     img.save(out, format="PNG")
@@ -1209,10 +1222,7 @@ helper_card(
     ],
 )
 
-st.info(
-    f"**Diagnóstico:** {text_diag['detail']}\n\n"
-    f"**Acción recomendada:** {text_diag['action']}"
-)
+st.info(text_diag["narrative"])
 
 st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
