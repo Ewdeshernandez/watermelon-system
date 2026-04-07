@@ -551,9 +551,11 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         png_bytes = None
         figure_render_error = None
 
-        # 🔥 FORZAR MODO SIN IMÁGENES (DIAGNÓSTICO CLOUD)
-        png_bytes = None
-        figure_render_error = "Render de figuras deshabilitado temporalmente en cloud"
+        # En cloud SOLO usamos image_bytes ya preparados desde el módulo origen.
+        if item.get("image_bytes") is not None:
+            png_bytes = item["image_bytes"]
+        else:
+            figure_render_error = "La figura no traía image_bytes pre-renderizados"
 
         caption = f"Figura {idx}. {item.get('title') or f'Figura {idx}'}"
         notes = item.get("notes") or "Sin interpretación técnica todavía."
