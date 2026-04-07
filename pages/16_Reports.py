@@ -548,27 +548,45 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     max_img_height = 8.9 * cm
 
     for idx, item in enumerate(items, start=1):
-        if item.get("figure") is not None:
-            png_bytes = _figure_png_bytes(item["figure"])
-        elif item.get("image_bytes") is not None:
-            png_bytes = item["image_bytes"]
-        else:
-            continue
+        png_bytes = None
+        figure_render_error = None
 
-        img_w, img_h = _fit_image_dimensions(png_bytes, max_img_width, max_img_height)
-        img = Image(BytesIO(png_bytes), width=img_w, height=img_h)
-        img.hAlign = "CENTER"
+        if item.get("image_bytes") is not None:
+            png_bytes = item["image_bytes"]
+        elif item.get("figure") is not None:
+            try:
+                png_bytes = _figure_png_bytes(item["figure"])
+            except Exception as e:
+                figure_render_error = str(e)
 
         caption = f"Figura {idx}. {item.get('title') or f'Figura {idx}'}"
         notes = item.get("notes") or "Sin interpretación técnica todavía."
 
-        block = [
-            Spacer(1, 0.18 * cm),
-            img,
-            Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]),
-            Paragraph(_paragraph_safe(notes), styles["WMFigureText"]),
-            Spacer(1, 0.24 * cm),
-        ]
+        if png_bytes is not None:
+            img_w, img_h = _fit_image_dimensions(png_bytes, max_img_width, max_img_height)
+            img = Image(BytesIO(png_bytes), width=img_w, height=img_h)
+            img.hAlign = "CENTER"
+
+            block = [
+                Spacer(1, 0.18 * cm),
+                img,
+                Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]),
+                Paragraph(_paragraph_safe(notes), styles["WMFigureText"]),
+                Spacer(1, 0.24 * cm),
+            ]
+        else:
+            error_text = "No fue posible renderizar esta figura como imagen dentro del entorno de despliegue."
+            if figure_render_error:
+                error_text += f" Detalle técnico: {figure_render_error}"
+
+            block = [
+                Spacer(1, 0.18 * cm),
+                Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]),
+                Paragraph(_paragraph_safe(error_text), styles["WMFigureText"]),
+                Paragraph(_paragraph_safe(notes), styles["WMFigureText"]),
+                Spacer(1, 0.24 * cm),
+            ]
+
         story.append(KeepTogether(block))
 
     story.append(Spacer(1, 0.40 * cm))
