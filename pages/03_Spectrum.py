@@ -1583,7 +1583,13 @@ with st.sidebar:
 # ------------------------------------------------------------
 # Prepare signals + multi-panel render
 # ------------------------------------------------------------
-def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title: str, image_bytes: Optional[bytes] = None, report_notes: str = "") -> None:
+def queue_spectrum_to_report(
+    primary: SignalRecord,
+    fig: go.Figure,
+    panel_title: str,
+    image_bytes: Optional[bytes] = None,
+    report_notes: str = "",
+) -> None:
     st.session_state.report_items.append(
         {
             "id": make_export_state_key(
@@ -1606,47 +1612,6 @@ def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title:
             "variable": primary.variable,
             "timestamp": primary.timestamp,
         }
-    )
-
-
-
-def generate_spectrum_report_notes(
-    primary: SignalRecord,
-    harmonic_points: List[HarmonicPoint],
-) -> str:
-    point_name = primary.point or "punto no identificado"
-    machine_name = primary.machine or "máquina no identificada"
-
-    if not harmonic_points:
-        return (
-            f"Se analizó el espectro correspondiente al punto {point_name} en la máquina {machine_name}. "
-            f"No se identificó una familia armónica suficientemente definida dentro de la ventana analizada, por lo que "
-            f"se recomienda correlacionar este resultado con forma de onda, tendencia y condición operativa."
-        )
-
-    ordered = sorted(harmonic_points, key=lambda p: p.amp_peak, reverse=True)
-    dominant = ordered[0]
-
-    if dominant.order == 1:
-        return (
-            f"Se analizó el espectro de vibración correspondiente al punto {point_name} en la máquina {machine_name}. "
-            f"El espectro presenta predominio de la componente 1X con bajo contenido relativo de armónicos superiores, "
-            f"comportamiento consistente con una condición tipo desbalance. "
-            f"Se recomienda verificar balanceo, revisar consistencia de fase entre arranques y correlacionar este resultado con los módulos Polar y Bode."
-        )
-
-    if dominant.order == 2:
-        return (
-            f"Se analizó el espectro de vibración correspondiente al punto {point_name} en la máquina {machine_name}. "
-            f"Se observa predominio de la componente 2X, comportamiento que puede ser compatible con desalineación "
-            f"o efectos mecánicos asociados al tren rotativo. "
-            f"Se recomienda validar alineación y correlacionar con fase, polar y condición del acoplamiento."
-        )
-
-    return (
-        f"Se analizó el espectro de vibración correspondiente al punto {point_name} en la máquina {machine_name}. "
-        f"El contenido espectral muestra predominio de armónicos superiores, lo que sugiere una respuesta mecánica más compleja "
-        f"que debe correlacionarse con forma de onda, soltura mecánica y condiciones estructurales antes de emitir una conclusión definitiva."
     )
 
 
@@ -1896,7 +1861,47 @@ def render_spectrum_panel(
             except Exception:
                 png_bytes_for_report = None
 
-            queue_spectrum_to_report(primary, fig, panel_title, image_bytes=png_bytes_for_report)
+            dominant_order = 0
+            if all_harmonic_points:
+                dominant_order = max(all_harmonic_points, key=lambda p: p.amp_peak).order
+
+            if dominant_order == 1:
+                spectrum_report_notes = (
+                    f"Se analizó el espectro de vibración correspondiente al punto {primary.point or 'punto no identificado'} "
+                    f"en la máquina {primary.machine or 'máquina no identificada'}. El espectro presenta predominio de la "
+                    f"componente 1X con bajo contenido relativo de armónicos superiores, comportamiento consistente con una "
+                    f"condición tipo desbalance. Se recomienda verificar balanceo, revisar consistencia de fase entre arranques "
+                    f"y correlacionar este resultado con los módulos Polar y Bode."
+                )
+            elif dominant_order == 2:
+                spectrum_report_notes = (
+                    f"Se analizó el espectro de vibración correspondiente al punto {primary.point or 'punto no identificado'} "
+                    f"en la máquina {primary.machine or 'máquina no identificada'}. Se observa predominio de la componente 2X, "
+                    f"comportamiento que puede ser compatible con desalineación o efectos mecánicos asociados al tren rotativo. "
+                    f"Se recomienda validar alineación y correlacionar con fase, polar y condición del acoplamiento."
+                )
+            elif dominant_order >= 3:
+                spectrum_report_notes = (
+                    f"Se analizó el espectro de vibración correspondiente al punto {primary.point or 'punto no identificado'} "
+                    f"en la máquina {primary.machine or 'máquina no identificada'}. El contenido espectral muestra predominio "
+                    f"de armónicos superiores, lo que sugiere una respuesta mecánica más compleja que debe correlacionarse con "
+                    f"forma de onda, soltura mecánica y condiciones estructurales antes de emitir una conclusión definitiva."
+                )
+            else:
+                spectrum_report_notes = (
+                    f"Se analizó el espectro de vibración correspondiente al punto {primary.point or 'punto no identificado'} "
+                    f"en la máquina {primary.machine or 'máquina no identificada'}. No se identificó una familia armónica "
+                    f"suficientemente definida dentro de la ventana analizada, por lo que se recomienda correlacionar este "
+                    f"resultado con forma de onda, tendencia y condición operativa."
+                )
+
+            queue_spectrum_to_report(
+                primary,
+                fig,
+                panel_title,
+                image_bytes=png_bytes_for_report,
+                report_notes=spectrum_report_notes,
+            )
             st.success("Spectrum enviado al reporte")
 
 
