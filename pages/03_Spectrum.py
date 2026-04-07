@@ -1413,123 +1413,19 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     return fig
 
 
-def _add_spectrum_export_footer(fig: go.Figure, text_diag: Dict[str, str]) -> go.Figure:
-    export_fig = go.Figure(fig)
-
-    headline = html.escape(str(text_diag.get("headline", "") or ""))
-    detail = html.escape(str(text_diag.get("detail", "") or ""))
-    action = html.escape(str(text_diag.get("action", "") or ""))
-
-    existing_shapes = list(export_fig.layout.shapes) if export_fig.layout.shapes else []
-    existing_annotations = list(export_fig.layout.annotations) if export_fig.layout.annotations else []
-
-    # Reservar franja inferior real para el footer dentro del canvas
-    export_fig.update_xaxes(domain=[0.03, 0.80])
-    export_fig.update_yaxes(domain=[0.30, 0.95])
-
-    existing_shapes.extend(
-        [
-            dict(
-                type="line",
-                xref="paper",
-                yref="paper",
-                x0=0.03,
-                x1=0.97,
-                y0=0.24,
-                y1=0.24,
-                line=dict(color="#64748b", width=3),
-            ),
-            dict(
-                type="rect",
-                xref="paper",
-                yref="paper",
-                x0=0.03,
-                x1=0.97,
-                y0=0.03,
-                y1=0.22,
-                line=dict(color="rgba(148,163,184,0.75)", width=2),
-                fillcolor="rgba(255,255,255,0.97)",
-                layer="below",
-            ),
-        ]
-    )
-
-    existing_annotations.extend(
-        [
-            dict(
-                x=0.05,
-                y=0.200,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                text="<b>RESUMEN DIAGNÓSTICO</b>",
-                font=dict(size=24, color="#0f172a"),
-            ),
-            dict(
-                x=0.05,
-                y=0.162,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                text=f"<b>{headline}</b>",
-                font=dict(size=18, color="#111827"),
-            ),
-            dict(
-                x=0.05,
-                y=0.118,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                text=f"<b>Diagnóstico:</b> {detail}",
-                font=dict(size=16, color="#111827"),
-            ),
-            dict(
-                x=0.05,
-                y=0.070,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                text=f"<b>Acción recomendada:</b> {action}",
-                font=dict(size=16, color="#111827"),
-            ),
-        ]
-    )
-
-    export_fig.update_layout(
-        height=3000,
-        margin=dict(l=120, r=90, t=360, b=180),
-        shapes=existing_shapes,
-        annotations=existing_annotations,
-    )
-
-    return export_fig
 
 
 def build_export_png_bytes(
     fig: go.Figure,
-    text_diag: Dict[str, str],
 ) -> Tuple[Optional[bytes], Optional[str]]:
     try:
         export_fig = _build_export_safe_figure(fig)
         export_fig = _scale_export_figure(export_fig)
-        export_fig = _add_spectrum_export_footer(export_fig, text_diag)
 
         png_bytes = export_fig.to_image(
             format="png",
             width=4200,
-            height=3000,
+            height=2200,
             scale=2,
         )
         return png_bytes, None
@@ -1930,7 +1826,7 @@ def render_spectrum_panel(
     with col_export1:
         if st.button("Prepare PNG HD", key=f"prepare_png_{export_state_key}", use_container_width=True):
             with st.spinner("Generating HD export..."):
-                png_bytes, export_error = build_export_png_bytes(fig=fig, text_diag=text_diag)
+                png_bytes, export_error = build_export_png_bytes(fig=fig)
                 st.session_state.wm_sp_export_store[export_state_key]["png_bytes"] = png_bytes
                 st.session_state.wm_sp_export_store[export_state_key]["error"] = export_error
 
