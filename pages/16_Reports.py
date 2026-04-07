@@ -467,11 +467,11 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
     if WATERMELON_LOGO.exists():
         story.append(Image(str(WATERMELON_LOGO), width=4.2 * cm, height=2.0 * cm))
-        story.append(Spacer(1, 0.40 * cm))
+        story.append(Spacer(1, 0.85 * cm))
 
-    story.append(Spacer(1, 0.14 * cm))
+    story.append(Spacer(1, 0.28 * cm))
     story.append(Paragraph("Machinery Diagnostics Engineering", styles["WMSubTitle"]))
-    story.append(Spacer(1, 0.48 * cm))
+    story.append(Spacer(1, 0.72 * cm))
     story.append(Paragraph(_paragraph_safe(meta.get("report_title") or "REPORTE TÉCNICO"), styles["WMTitle"]))
     story.append(
         Paragraph(
@@ -483,16 +483,16 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 fontSize=15.8,
                 leading=19,
                 textColor=colors.HexColor("#111827"),
-                spaceAfter=18,
+                spaceAfter=28,
             ),
         )
     )
 
     cover_lines = [
-        meta.get("asset") or "-",
-        meta.get("unit") or "-",
-        meta.get("location") or "-",
-        meta.get("client") or "-",
+        meta.get("asset") or "",
+        meta.get("unit") or "",
+        meta.get("location") or "",
+        meta.get("client") or "",
     ]
     for line in cover_lines:
         story.append(
@@ -510,20 +510,33 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             )
         )
 
-    story.append(Spacer(1, 0.82 * cm))
-    story.append(Paragraph(f"<b>Preparado por:</b><br/>{_paragraph_safe(meta.get('prepared_by') or '-')}", styles["WMMeta"]))
-    story.append(Paragraph(_paragraph_safe(meta.get("prepared_role") or "Ingeniero de diagnóstico"), styles["WMMeta"]))
-    story.append(Spacer(1, 0.32 * cm))
-    story.append(Paragraph(f"<b>Revisado por:</b><br/>{_paragraph_safe(meta.get('reviewed_by') or '-')}", styles["WMMeta"]))
-    story.append(Paragraph(_paragraph_safe(meta.get("reviewed_role") or "Revisión técnica"), styles["WMMeta"]))
-    story.append(Spacer(1, 0.72 * cm))
+    story.append(Spacer(1, 1.15 * cm))
+
+    prepared_by = (meta.get("prepared_by") or "").strip()
+    prepared_role = (meta.get("prepared_role") or "Ingeniero de diagnóstico").strip()
+    reviewed_by = (meta.get("reviewed_by") or "").strip()
+    reviewed_role = (meta.get("reviewed_role") or "Revisión técnica").strip()
+
+    if prepared_by:
+        story.append(Paragraph(f"<b>Preparado por:</b><br/>{_paragraph_safe(prepared_by)}", styles["WMMeta"]))
+        story.append(Paragraph(_paragraph_safe(prepared_role), styles["WMMeta"]))
+        story.append(Spacer(1, 0.42 * cm))
+
+    if reviewed_by:
+        story.append(Paragraph(f"<b>Revisado por:</b><br/>{_paragraph_safe(reviewed_by)}", styles["WMMeta"]))
+        story.append(Paragraph(_paragraph_safe(reviewed_role), styles["WMMeta"]))
+        story.append(Spacer(1, 0.42 * cm))
+
+    story.append(Spacer(1, 0.62 * cm))
 
     report_date_value = meta.get("report_date") or TODAY_STR
     period_value = meta.get("period") or "No aplica"
 
     story.append(Paragraph(f"<b>Fecha del reporte:</b> {_paragraph_safe(report_date_value)}", styles["WMMeta"]))
     story.append(Paragraph(f"<b>Periodo evaluado:</b> {_paragraph_safe(period_value)}", styles["WMMeta"]))
-    story.append(Paragraph(f"<b>Consecutivo:</b> {_paragraph_safe(meta.get('consecutive') or '-')}", styles["WMMeta"]))
+    consecutive_value = (meta.get("consecutive") or "").strip()
+    if consecutive_value:
+        story.append(Paragraph(f"<b>Consecutivo:</b> {_paragraph_safe(consecutive_value)}", styles["WMMeta"]))
     story.append(PageBreak())
 
     story.append(Paragraph("1. OBJETIVO DEL SERVICIO", styles["WMSection"]))
@@ -567,18 +580,6 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         story.append(KeepTogether(block))
 
     story.append(Spacer(1, 0.40 * cm))
-    story.append(Paragraph("5. APROBACIÓN", styles["WMSection"]))
-    story.append(Spacer(1, 0.55 * cm))
-
-    sig_line = "________________________________________"
-    story.append(Paragraph(sig_line, styles["WMSignLine"]))
-    story.append(Paragraph(_paragraph_safe(meta.get("prepared_by") or "-"), styles["WMSignLine"]))
-    story.append(Paragraph(_paragraph_safe(meta.get("prepared_role") or "Ingeniero de diagnóstico"), styles["WMSignLine"]))
-    story.append(Spacer(1, 0.55 * cm))
-    story.append(Paragraph(sig_line, styles["WMSignLine"]))
-    story.append(Paragraph(_paragraph_safe(meta.get("reviewed_by") or "-"), styles["WMSignLine"]))
-    story.append(Paragraph(_paragraph_safe(meta.get("reviewed_role") or "Revisión técnica"), styles["WMSignLine"]))
-
     doc.build(story, onFirstPage=_draw_cover_page, onLaterPages=_draw_internal_page)
     return buffer.getvalue()
 
