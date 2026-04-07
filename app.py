@@ -2,24 +2,17 @@ from __future__ import annotations
 
 import streamlit as st
 
-st.set_page_config(page_title="Watermelon System", layout="wide")
+from core.auth import is_authenticated
 
-st.title("🍉 Watermelon System")
+st.set_page_config(
+    page_title="Watermelon System",
+    page_icon="🍉",
+    layout="wide",
+    initial_sidebar_state="collapsed",
+)
 
-if st.button("Load Data"):
-    st.switch_page("pages/01_Load_Data.py")
-
-if st.button("Time Waveforms"):
-    st.switch_page("pages/02_Time_Waveforms.py")
-
-if st.button("Spectrum"):
-    st.switch_page("pages/03_Spectrum.py")
-
-if st.button("Trends"):
-    st.switch_page("pages/04_Trends.py")
-
-if st.button("Orbit Analysis"):
-    st.switch_page("pages/05_Orbit_Analysis.py")
-
-if st.button("Diagnostics"):
-    st.switch_page("pages/15_Diagnostics.py")
+# Router inicial de la app
+if is_authenticated():
+    st.switch_page("00_Home.py")
+else:
+    st.switch_page("pages/00_Login.py")
