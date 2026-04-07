@@ -1815,10 +1815,7 @@ def render_spectrum_panel(
         chips=helper_cols,
     )
 
-    st.info(
-        f"**Diagnostic detail:** {text_diag['detail']}\n\n"
-        f"**Recommended action:** {text_diag['action']}"
-    )
+    st.info(text_diag["narrative"])
 
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
