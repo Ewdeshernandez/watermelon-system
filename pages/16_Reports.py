@@ -356,7 +356,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     page_width, page_height = A4
 
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="WMTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=24, leading=28, alignment=TA_LEFT, textColor=colors.HexColor("#0f172a"), spaceAfter=10))
+    styles.add(ParagraphStyle(name="WMTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=15, leading=18, alignment=TA_LEFT, textColor=colors.HexColor("#0f172a"), spaceAfter=6))
     styles.add(ParagraphStyle(name="WMSubTitle", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=12.5, leading=15, alignment=TA_LEFT, textColor=colors.HexColor("#111827"), spaceAfter=5))
     styles.add(ParagraphStyle(name="WMBody", parent=styles["BodyText"], fontName="Helvetica", fontSize=10.5, leading=15.5, alignment=TA_JUSTIFY, textColor=colors.HexColor("#111827"), spaceAfter=10))
     styles.add(ParagraphStyle(name="WMMeta", parent=styles["Normal"], fontName="Helvetica", fontSize=10.4, leading=14.2, alignment=TA_LEFT, textColor=colors.HexColor("#111827"), spaceAfter=5))
@@ -444,32 +444,15 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
     story: List[Any] = []
 
-    header_code = meta.get("consecutive") or "SIGA-FMT-178 | Versión 3 | Fecha 19-06-2024"
-    story.append(
-        Paragraph(
-            _paragraph_safe(header_code),
-            ParagraphStyle(
-                name="WMCoverHead",
-                parent=styles["Normal"],
-                fontName="Helvetica-Bold",
-                fontSize=9.3,
-                leading=12,
-                textColor=colors.HexColor("#0ea5e9"),
-                alignment=TA_LEFT,
-                spaceAfter=10,
-            ),
-        )
-    )
-
     if WATERMELON_LOGO.exists():
         cover_logo = Image(str(WATERMELON_LOGO), width=4.2 * cm, height=2.0 * cm)
         cover_logo.hAlign = "LEFT"
         story.append(cover_logo)
-        story.append(Spacer(1, 1.00 * cm))
+        story.append(Spacer(1, 1.35 * cm))
 
-    story.append(Spacer(1, 0.38 * cm))
+    story.append(Spacer(1, 1.45 * cm))
     story.append(Paragraph("Machinery Diagnostics Engineering", styles["WMSubTitle"]))
-    story.append(Spacer(1, 0.95 * cm))
+    story.append(Spacer(1, 1.10 * cm))
     story.append(Paragraph(_paragraph_safe(meta.get("report_title") or "REPORTE TÉCNICO"), styles["WMTitle"]))
     story.append(
         Paragraph(
@@ -508,7 +491,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             )
         )
 
-    story.append(Spacer(1, 1.30 * cm))
+    story.append(Spacer(1, 2.15 * cm))
 
     prepared_by = (meta.get("prepared_by") or "").strip()
     prepared_role = (meta.get("prepared_role") or "Ingeniero de diagnóstico").strip()
@@ -523,16 +506,16 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         story.append(Paragraph(_paragraph_safe(prepared_by), styles["WMMeta"]))
         if prepared_role:
             story.append(Paragraph(_paragraph_safe(prepared_role), styles["WMMeta"]))
-        story.append(Spacer(1, 0.42 * cm))
+        story.append(Spacer(1, 0.82 * cm))
 
     if reviewed_by:
         story.append(Paragraph("<b>Revisado por:</b>", styles["WMMeta"]))
         story.append(Paragraph(_paragraph_safe(reviewed_by), styles["WMMeta"]))
         if reviewed_role:
             story.append(Paragraph(_paragraph_safe(reviewed_role), styles["WMMeta"]))
-        story.append(Spacer(1, 0.70 * cm))
+        story.append(Spacer(1, 1.25 * cm))
     else:
-        story.append(Spacer(1, 0.35 * cm))
+        story.append(Spacer(1, 0.95 * cm))
 
     story.append(Spacer(1, 0.55 * cm))
     story.append(Paragraph(f"<b>Fecha del reporte:</b> {_paragraph_safe(report_date_value)}", styles["WMMeta"]))
@@ -633,6 +616,7 @@ with ga2:
 pdf_ready = len(items) > 0
 pdf_error = None
 pdf_bytes: Optional[bytes] = None
+meta = st.session_state["report_meta"]
 if pdf_ready:
     try:
         pdf_bytes = _build_pdf_bytes(meta, items)
@@ -664,27 +648,27 @@ st.markdown(
 
 m1, m2, m3 = st.columns(3)
 with m1:
-    meta["report_title"] = st.text_input("Título del reporte", value=meta["report_title"])
+    meta["report_title"] = st.text_input("Título del reporte", key="report_meta_report_title", value=meta["report_title"])
 with m2:
-    meta["client"] = st.text_input("Cliente", value=meta["client"])
+    meta["client"] = st.text_input("Cliente", key="report_meta_client", value=meta["client"])
 with m3:
-    meta["asset"] = st.text_input("Activo / máquina", value=meta["asset"])
+    meta["asset"] = st.text_input("Activo / máquina", key="report_meta_asset", value=meta["asset"])
 
 m4, m5, m6 = st.columns(3)
 with m4:
-    meta["unit"] = st.text_input("Unidad", value=meta["unit"])
+    meta["unit"] = st.text_input("Unidad", key="report_meta_unit", value=meta["unit"])
 with m5:
-    meta["location"] = st.text_input("Ubicación", value=meta["location"])
+    meta["location"] = st.text_input("Ubicación", key="report_meta_location", value=meta["location"])
 with m6:
-    meta["consecutive"] = st.text_input("Consecutivo", value=meta["consecutive"])
+    meta["consecutive"] = st.text_input("Consecutivo", key="report_meta_consecutive", value=meta["consecutive"])
 
 m7, m8 = st.columns(2)
 with m7:
-    meta["prepared_by"] = st.text_input("Preparado por", value=meta["prepared_by"])
-    meta["prepared_role"] = st.text_input("Cargo de quien prepara", value=meta["prepared_role"])
+    meta["prepared_by"] = st.text_input("Preparado por", key="report_meta_prepared_by", value=meta["prepared_by"])
+    meta["prepared_role"] = st.text_input("Cargo de quien prepara", key="report_meta_prepared_role", value=meta["prepared_role"])
 with m8:
-    meta["reviewed_by"] = st.text_input("Revisado por", value=meta["reviewed_by"])
-    meta["reviewed_role"] = st.text_input("Cargo de quien revisa", value=meta["reviewed_role"])
+    meta["reviewed_by"] = st.text_input("Revisado por", key="report_meta_reviewed_by", value=meta["reviewed_by"])
+    meta["reviewed_role"] = st.text_input("Cargo de quien revisa", key="report_meta_reviewed_role", value=meta["reviewed_role"])
 
 st.markdown(
     '<div class="wm-signature-help">Estos cargos también se mostrarán en el bloque final de aprobación del PDF.</div>',
@@ -693,9 +677,9 @@ st.markdown(
 
 m9, m10 = st.columns(2)
 with m9:
-    meta["report_date"] = st.text_input("Fecha del reporte", value=meta["report_date"] or TODAY_STR)
+    meta["report_date"] = st.text_input("Fecha del reporte", key="report_meta_report_date", value=meta["report_date"] or TODAY_STR)
 with m10:
-    meta["period"] = st.text_input("Periodo evaluado (opcional)", value=meta["period"], placeholder="Ejemplo: 2026-04-01 a 2026-04-07")
+    meta["period"] = st.text_input("Periodo evaluado (opcional)", key="report_meta_period", value=meta["period"], placeholder="Ejemplo: 2026-04-01 a 2026-04-07")
 
 st.markdown(
     '<div class="wm-highlight-box"><b>Sugerencia editorial</b><br>Si el servicio corresponde a una visita puntual, puedes dejar vacío el periodo evaluado y usar solo la fecha del reporte. Si cubre tendencia, campaña o ventana de operación, sí conviene llenarlo.</div>',
@@ -706,13 +690,13 @@ meta["report_date"] = meta["report_date"] or TODAY_STR
 
 t0 = st.columns(1)[0]
 with t0:
-    meta["service_objective"] = st.text_area("Objetivo del servicio", value=meta["service_objective"], height=120)
+    meta["service_objective"] = st.text_area("Objetivo del servicio", key="report_meta_service_objective", value=meta["service_objective"], height=120)
 
 t1, t2 = st.columns(2)
 with t1:
-    meta["service_development"] = st.text_area("Desarrollo del servicio", value=meta["service_development"], height=190)
+    meta["service_development"] = st.text_area("Desarrollo del servicio", key="report_meta_service_development", value=meta["service_development"], height=190)
 with t2:
-    meta["recommendations"] = st.text_area("Recomendaciones", value=meta["recommendations"], height=190)
+    meta["recommendations"] = st.text_area("Recomendaciones", key="report_meta_recommendations", value=meta["recommendations"], height=190)
 
 st.session_state["report_meta"] = meta
 
