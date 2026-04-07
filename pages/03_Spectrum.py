@@ -1583,7 +1583,7 @@ with st.sidebar:
 # ------------------------------------------------------------
 # Prepare signals + multi-panel render
 # ------------------------------------------------------------
-def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title: str, image_bytes: Optional[bytes] = None) -> None:
+def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title: str, image_bytes: Optional[bytes] = None, report_notes: str = "") -> None:
     st.session_state.report_items.append(
         {
             "id": make_export_state_key(
@@ -1597,7 +1597,7 @@ def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title:
             ),
             "type": "spectrum",
             "title": panel_title,
-            "notes": "Interpretación técnica pendiente para este espectro.",
+            "notes": report_notes or "Interpretación técnica pendiente para este espectro.",
             "signal_id": primary.signal_id,
             "figure": go.Figure(fig),
             "image_bytes": image_bytes,
@@ -1606,6 +1606,47 @@ def queue_spectrum_to_report(primary: SignalRecord, fig: go.Figure, panel_title:
             "variable": primary.variable,
             "timestamp": primary.timestamp,
         }
+    )
+
+
+
+def generate_spectrum_report_notes(
+    primary: SignalRecord,
+    harmonic_points: List[HarmonicPoint],
+) -> str:
+    point_name = primary.point or "punto no identificado"
+    machine_name = primary.machine or "máquina no identificada"
+
+    if not harmonic_points:
+        return (
+            f"Se analizó el espectro correspondiente al punto {point_name} en la máquina {machine_name}. "
+            f"No se identificó una familia armónica suficientemente definida dentro de la ventana analizada, por lo que "
+            f"se recomienda correlacionar este resultado con forma de onda, tendencia y condición operativa."
+        )
+
+    ordered = sorted(harmonic_points, key=lambda p: p.amp_peak, reverse=True)
+    dominant = ordered[0]
+
+    if dominant.order == 1:
+        return (
+            f"Se analizó el espectro de vibración correspondiente al punto {point_name} en la máquina {machine_name}. "
+            f"El espectro presenta predominio de la componente 1X con bajo contenido relativo de armónicos superiores, "
+            f"comportamiento consistente con una condición tipo desbalance. "
+            f"Se recomienda verificar balanceo, revisar consistencia de fase entre arranques y correlacionar este resultado con los módulos Polar y Bode."
+        )
+
+    if dominant.order == 2:
+        return (
+            f"Se analizó el espectro de vibración correspondiente al punto {point_name} en la máquina {machine_name}. "
+            f"Se observa predominio de la componente 2X, comportamiento que puede ser compatible con desalineación "
+            f"o efectos mecánicos asociados al tren rotativo. "
+            f"Se recomienda validar alineación y correlacionar con fase, polar y condición del acoplamiento."
+        )
+
+    return (
+        f"Se analizó el espectro de vibración correspondiente al punto {point_name} en la máquina {machine_name}. "
+        f"El contenido espectral muestra predominio de armónicos superiores, lo que sugiere una respuesta mecánica más compleja "
+        f"que debe correlacionarse con forma de onda, soltura mecánica y condiciones estructurales antes de emitir una conclusión definitiva."
     )
 
 
