@@ -407,10 +407,6 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.setFillColor(colors.HexColor("#111827"))
         canvas.drawRightString(page_width - 1.15 * cm, page_height - 1.0 * cm, f"Página {doc.page}")
 
-        footer = "INFORME VÁLIDO ÚNICAMENTE PARA LAS CONDICIONES PRESENTES DURANTE EL SERVICIO. NO PODRÁ SER COPIADO PARCIAL O TOTALMENTE SIN PREVIA AUTORIZACIÓN."
-        canvas.setFillColor(colors.HexColor("#334155"))
-        canvas.setFont("Helvetica-Bold", 5.8)
-        canvas.drawCentredString((page_width - 4.5 * cm) / 2, 0.52 * cm, footer)
         canvas.restoreState()
 
     def _draw_internal_page(canvas, doc):
@@ -466,12 +462,14 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     )
 
     if WATERMELON_LOGO.exists():
-        story.append(Image(str(WATERMELON_LOGO), width=4.2 * cm, height=2.0 * cm))
-        story.append(Spacer(1, 0.85 * cm))
+        cover_logo = Image(str(WATERMELON_LOGO), width=4.2 * cm, height=2.0 * cm)
+        cover_logo.hAlign = "LEFT"
+        story.append(cover_logo)
+        story.append(Spacer(1, 1.00 * cm))
 
-    story.append(Spacer(1, 0.28 * cm))
+    story.append(Spacer(1, 0.38 * cm))
     story.append(Paragraph("Machinery Diagnostics Engineering", styles["WMSubTitle"]))
-    story.append(Spacer(1, 0.72 * cm))
+    story.append(Spacer(1, 0.95 * cm))
     story.append(Paragraph(_paragraph_safe(meta.get("report_title") or "REPORTE TÉCNICO"), styles["WMTitle"]))
     story.append(
         Paragraph(
@@ -483,7 +481,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 fontSize=15.8,
                 leading=19,
                 textColor=colors.HexColor("#111827"),
-                spaceAfter=28,
+                spaceAfter=36,
             ),
         )
     )
@@ -510,32 +508,38 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             )
         )
 
-    story.append(Spacer(1, 1.15 * cm))
+    story.append(Spacer(1, 1.30 * cm))
 
     prepared_by = (meta.get("prepared_by") or "").strip()
     prepared_role = (meta.get("prepared_role") or "Ingeniero de diagnóstico").strip()
     reviewed_by = (meta.get("reviewed_by") or "").strip()
     reviewed_role = (meta.get("reviewed_role") or "Revisión técnica").strip()
+    report_date_value = meta.get("report_date") or TODAY_STR
+    period_value = meta.get("period") or "No aplica"
+    consecutive_value = (meta.get("consecutive") or "").strip()
 
     if prepared_by:
-        story.append(Paragraph(f"<b>Preparado por:</b><br/>{_paragraph_safe(prepared_by)}", styles["WMMeta"]))
-        story.append(Paragraph(_paragraph_safe(prepared_role), styles["WMMeta"]))
+        story.append(Paragraph("<b>Preparado por:</b>", styles["WMMeta"]))
+        story.append(Paragraph(_paragraph_safe(prepared_by), styles["WMMeta"]))
+        if prepared_role:
+            story.append(Paragraph(_paragraph_safe(prepared_role), styles["WMMeta"]))
         story.append(Spacer(1, 0.42 * cm))
 
     if reviewed_by:
-        story.append(Paragraph(f"<b>Revisado por:</b><br/>{_paragraph_safe(reviewed_by)}", styles["WMMeta"]))
-        story.append(Paragraph(_paragraph_safe(reviewed_role), styles["WMMeta"]))
-        story.append(Spacer(1, 0.42 * cm))
+        story.append(Paragraph("<b>Revisado por:</b>", styles["WMMeta"]))
+        story.append(Paragraph(_paragraph_safe(reviewed_by), styles["WMMeta"]))
+        if reviewed_role:
+            story.append(Paragraph(_paragraph_safe(reviewed_role), styles["WMMeta"]))
+        story.append(Spacer(1, 0.70 * cm))
+    else:
+        story.append(Spacer(1, 0.35 * cm))
 
-    story.append(Spacer(1, 0.62 * cm))
-
-    report_date_value = meta.get("report_date") or TODAY_STR
-    period_value = meta.get("period") or "No aplica"
-
+    story.append(Spacer(1, 0.55 * cm))
     story.append(Paragraph(f"<b>Fecha del reporte:</b> {_paragraph_safe(report_date_value)}", styles["WMMeta"]))
+    story.append(Spacer(1, 0.08 * cm))
     story.append(Paragraph(f"<b>Periodo evaluado:</b> {_paragraph_safe(period_value)}", styles["WMMeta"]))
-    consecutive_value = (meta.get("consecutive") or "").strip()
     if consecutive_value:
+        story.append(Spacer(1, 0.08 * cm))
         story.append(Paragraph(f"<b>Consecutivo:</b> {_paragraph_safe(consecutive_value)}", styles["WMMeta"]))
     story.append(PageBreak())
 
