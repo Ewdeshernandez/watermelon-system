@@ -150,6 +150,40 @@ def apply_page_style() -> None:
             margin-top: 0.95rem;
             margin-bottom: 0.15rem;
         }
+
+        .wm-diagnostic-box {
+            margin-top: 10px;
+            background: #ffffff;
+            border: 1px solid #dbe5f0;
+            border-radius: 18px;
+            padding: 16px 18px;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.04);
+        }
+
+        .wm-diagnostic-title {
+            font-size: 13px;
+            font-weight: 900;
+            color: #111827;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+        }
+
+        .wm-diagnostic-headline {
+            font-size: 15px;
+            font-weight: 800;
+            color: #111827;
+            margin-bottom: 8px;
+            line-height: 1.35;
+        }
+
+        .wm-diagnostic-body {
+            font-size: 14px;
+            color: #374151;
+            line-height: 1.62;
+            text-align: justify;
+            max-width: 100%;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -761,6 +795,19 @@ def _wrap_text_for_png(text_value: str, width: int = 145) -> List[str]:
     return lines
 
 
+def render_tabular_narrative_box(headline: str, narrative: str) -> None:
+    st.markdown(
+        f'''
+        <div class="wm-diagnostic-box">
+            <div class="wm-diagnostic-title">Resumen diagnóstico</div>
+            <div class="wm-diagnostic-headline">{headline}</div>
+            <div class="wm-diagnostic-body">{narrative}</div>
+        </div>
+        ''',
+        unsafe_allow_html=True,
+    )
+
+
 def queue_tabular_to_report(
     png_bytes: bytes,
     sample_record: SignalRecord,
@@ -788,15 +835,14 @@ def queue_tabular_to_report(
     )
 
 
-def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: str, overall_mode_text: str, text_diag: Dict[str, str]) -> bytes:
+def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: str, overall_mode_text: str) -> bytes:
     width = 4200
     row_h = 88
     top_h = 180
     title_h = 84
     table_header_h = 72
     n_rows = len(df)
-    diag_h = 250
-    height = top_h + title_h + table_header_h + n_rows * row_h + diag_h + 170
+    height = top_h + title_h + table_header_h + n_rows * row_h + 170
 
     bg = "#f3f4f6"
     white = "#ffffff"
@@ -937,27 +983,6 @@ def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: s
                     ty = y0 + (row_h - (tw[3] - tw[1])) / 2 - 1
                     draw.text((tx, ty), cell, font=font_cell, fill=text)
 
-    diag_y0 = table_y0 + table_header_h + n_rows * row_h + 28
-    diag_y1 = diag_y0 + 210
-
-    draw.line((table_x0, diag_y0 - 18, table_x1, diag_y0 - 18), fill="#64748b", width=3)
-    draw.rounded_rectangle((table_x0, diag_y0, table_x1, diag_y1), radius=22, fill=white, outline=border, width=2)
-
-    font_diag_title = _load_font(28, True)
-    font_diag_head = _load_font(24, True)
-    font_diag_text = _load_font(21, False)
-
-    headline = str(text_diag.get("headline", "") or "")
-    narrative = str(text_diag.get("narrative", "") or "")
-
-    draw.text((table_x0 + 22, diag_y0 + 18), "RESUMEN DIAGNÓSTICO", font=font_diag_title, fill=text)
-    draw.text((table_x0 + 22, diag_y0 + 58), headline, font=font_diag_head, fill=text)
-
-    wrapped_lines = _wrap_text_for_png(narrative, width=145)
-    base_y = diag_y0 + 102
-    line_h = 28
-    for i, line in enumerate(wrapped_lines[:4]):
-        draw.text((table_x0 + 22, base_y + i * line_h), line, font=font_diag_text, fill=text)
 
     out = BytesIO()
     img.save(out, format="PNG")
@@ -1222,7 +1247,7 @@ helper_card(
     ],
 )
 
-st.info(text_diag["narrative"])
+render_tabular_narrative_box(text_diag["headline"], text_diag["narrative"])
 
 st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
@@ -1236,7 +1261,6 @@ with col_export1:
                 sample_record=records_all[0],
                 criterion=criterion_text,
                 overall_mode_text=overall_mode_text,
-                text_diag=text_diag,
             )
             st.session_state.wm_tabular_export_png_bytes = png_bytes
             st.session_state.wm_tabular_export_error = None
