@@ -14,6 +14,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.auth import require_login, render_user_menu
+from core.waveform_diagnostics import generate_waveform_diagnostic, build_waveform_report_notes
 
 st.set_page_config(page_title="Watermelon System | Waveform", layout="wide")
 
@@ -1127,7 +1128,7 @@ if not records_all:
     st.stop()
 
 
-def queue_waveform_to_report(record: SignalRecord, fig: go.Figure, panel_title: str) -> None:
+def queue_waveform_to_report(record: SignalRecord, fig: go.Figure, panel_title: str, text_diag: Dict[str, str]) -> None:
     st.session_state.report_items.append(
         {
             "id": make_export_state_key(
@@ -1141,7 +1142,7 @@ def queue_waveform_to_report(record: SignalRecord, fig: go.Figure, panel_title: 
             ),
             "type": "waveform",
             "title": panel_title,
-            "notes": "",
+            "notes": build_waveform_report_notes(text_diag),
             "signal_id": record.signal_id,
             "figure": go.Figure(fig),
             "machine": record.machine,
@@ -1264,6 +1265,11 @@ def render_waveform_panel(
         key=f"wm_waveform_plot_{export_state_key}",
     )
 
+    summary_diag = build_measurement_summary(prepared)
+    text_diag = generate_waveform_diagnostic(prepared, summary_diag)
+
+    st.info(text_diag["narrative"])
+
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
@@ -1296,7 +1302,7 @@ def render_waveform_panel(
 
     with col_report:
         if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
-            queue_waveform_to_report(prepared, fig, panel_title)
+            queue_waveform_to_report(prepared, fig, panel_title, text_diag)
             st.success("Waveform enviado al reporte")
 
     panel_error = st.session_state.wm_export_store[export_state_key]["error"]
