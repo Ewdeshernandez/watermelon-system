@@ -27,20 +27,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ASSETS_DIR = PROJECT_ROOT / "assets"
 WATERMELON_LOGO = ASSETS_DIR / "watermelon_logo.png"
 
-SIGA_LOGO_CANDIDATES = [
-    ASSETS_DIR / "siga_logo.png",
-    ASSETS_DIR / "SIGA_logo.png",
-    ASSETS_DIR / "siga_group_logo.png",
-    ASSETS_DIR / "SIGA_GROUP_logo.png",
-    ASSETS_DIR / "siga.png",
-]
-
 SIGA_WATERMARK_CANDIDATES = [
     ASSETS_DIR / "siga_watermark.png",
     ASSETS_DIR / "SIGA_watermark.png",
     ASSETS_DIR / "watermark_logo_transparent_background.png",
 ]
-
 
 TODAY_STR = date.today().strftime("%Y-%m-%d")
 
@@ -49,7 +40,7 @@ st.markdown(
     """
     <style>
         .wm-page-title {
-            font-size: 2.05rem;
+            font-size: 2.08rem;
             font-weight: 800;
             color: #f5f7fb;
             margin-bottom: 0.18rem;
@@ -185,6 +176,12 @@ st.markdown(
             font-size: 0.92rem;
             line-height: 1.55;
         }
+        .wm-signature-help {
+            color: #8fa0b5;
+            font-size: 0.83rem;
+            margin-top: -0.15rem;
+            margin-bottom: 0.85rem;
+        }
     </style>
     """,
     unsafe_allow_html=True,
@@ -203,6 +200,8 @@ if "report_meta" not in st.session_state:
         "location": "",
         "prepared_by": "",
         "reviewed_by": "",
+        "prepared_role": "Ingeniero de diagnóstico",
+        "reviewed_role": "Revisión técnica",
         "period": "",
         "report_date": TODAY_STR,
         "consecutive": "",
@@ -364,6 +363,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     styles.add(ParagraphStyle(name="WMSection", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=14.6, leading=18.5, alignment=TA_LEFT, textColor=colors.HexColor("#0f172a"), spaceBefore=6, spaceAfter=11))
     styles.add(ParagraphStyle(name="WMFigureCaption", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=10.5, leading=13.5, alignment=TA_CENTER, textColor=colors.HexColor("#111827"), spaceBefore=6, spaceAfter=8))
     styles.add(ParagraphStyle(name="WMFigureText", parent=styles["BodyText"], fontName="Helvetica", fontSize=10.2, leading=14.8, alignment=TA_JUSTIFY, textColor=colors.HexColor("#111827"), spaceAfter=16))
+    styles.add(ParagraphStyle(name="WMSignLine", parent=styles["Normal"], fontName="Helvetica", fontSize=9.6, leading=12, alignment=TA_CENTER, textColor=colors.HexColor("#111827"), spaceAfter=2))
 
     logo_watermark = _first_existing_watermark()
 
@@ -433,6 +433,8 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.setFillColor(colors.HexColor("#0f172a"))
         canvas.setFont("Helvetica-Bold", 8.2)
         canvas.drawString(internal_left, page_height - 1.0 * cm, "Machinery Diagnostics Engineering")
+        canvas.setFont("Helvetica", 8.2)
+        canvas.drawString(internal_left + 6.2 * cm, page_height - 1.0 * cm, f"| {meta.get('report_title') or 'Reporte técnico'}")
 
         footer = "INFORME VÁLIDO ÚNICAMENTE PARA LAS CONDICIONES PRESENTES DURANTE EL SERVICIO. NO PODRÁ SER COPIADO PARCIAL O TOTALMENTE SIN PREVIA AUTORIZACIÓN."
         canvas.setStrokeColor(colors.HexColor("#0ea5e9"))
@@ -465,11 +467,11 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
     if WATERMELON_LOGO.exists():
         story.append(Image(str(WATERMELON_LOGO), width=4.2 * cm, height=2.0 * cm))
-        story.append(Spacer(1, 0.38 * cm))
+        story.append(Spacer(1, 0.40 * cm))
 
-    story.append(Spacer(1, 0.16 * cm))
+    story.append(Spacer(1, 0.14 * cm))
     story.append(Paragraph("Machinery Diagnostics Engineering", styles["WMSubTitle"]))
-    story.append(Spacer(1, 0.52 * cm))
+    story.append(Spacer(1, 0.48 * cm))
     story.append(Paragraph(_paragraph_safe(meta.get("report_title") or "REPORTE TÉCNICO"), styles["WMTitle"]))
     story.append(
         Paragraph(
@@ -510,9 +512,11 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
     story.append(Spacer(1, 0.82 * cm))
     story.append(Paragraph(f"<b>Preparado por:</b><br/>{_paragraph_safe(meta.get('prepared_by') or '-')}", styles["WMMeta"]))
-    story.append(Spacer(1, 0.45 * cm))
+    story.append(Paragraph(_paragraph_safe(meta.get("prepared_role") or "Ingeniero de diagnóstico"), styles["WMMeta"]))
+    story.append(Spacer(1, 0.32 * cm))
     story.append(Paragraph(f"<b>Revisado por:</b><br/>{_paragraph_safe(meta.get('reviewed_by') or '-')}", styles["WMMeta"]))
-    story.append(Spacer(1, 0.82 * cm))
+    story.append(Paragraph(_paragraph_safe(meta.get("reviewed_role") or "Revisión técnica"), styles["WMMeta"]))
+    story.append(Spacer(1, 0.72 * cm))
 
     report_date_value = meta.get("report_date") or TODAY_STR
     period_value = meta.get("period") or "No aplica"
@@ -530,10 +534,12 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     story.append(Spacer(1, 0.12 * cm))
     story.append(Paragraph("3. DESARROLLO DEL SERVICIO", styles["WMSection"]))
     story.append(Paragraph(_paragraph_safe(meta.get("service_development") or "Sin desarrollo del servicio registrado."), styles["WMBody"]))
-    story.append(Spacer(1, 0.34 * cm))
+    story.append(Spacer(1, 0.15 * cm))
+    story.append(Paragraph("4. FIGURAS Y ANÁLISIS", styles["WMSection"]))
+    story.append(Spacer(1, 0.08 * cm))
 
     usable_width = A4[0] - doc.leftMargin - doc.rightMargin
-    max_img_width = usable_width - 0.8 * cm
+    max_img_width = usable_width - 0.6 * cm
     max_img_height = 8.9 * cm
 
     for idx, item in enumerate(items, start=1):
@@ -556,9 +562,22 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             img,
             Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]),
             Paragraph(_paragraph_safe(notes), styles["WMFigureText"]),
-            Spacer(1, 0.22 * cm),
+            Spacer(1, 0.24 * cm),
         ]
         story.append(KeepTogether(block))
+
+    story.append(Spacer(1, 0.40 * cm))
+    story.append(Paragraph("5. APROBACIÓN", styles["WMSection"]))
+    story.append(Spacer(1, 0.55 * cm))
+
+    sig_line = "________________________________________"
+    story.append(Paragraph(sig_line, styles["WMSignLine"]))
+    story.append(Paragraph(_paragraph_safe(meta.get("prepared_by") or "-"), styles["WMSignLine"]))
+    story.append(Paragraph(_paragraph_safe(meta.get("prepared_role") or "Ingeniero de diagnóstico"), styles["WMSignLine"]))
+    story.append(Spacer(1, 0.55 * cm))
+    story.append(Paragraph(sig_line, styles["WMSignLine"]))
+    story.append(Paragraph(_paragraph_safe(meta.get("reviewed_by") or "-"), styles["WMSignLine"]))
+    story.append(Paragraph(_paragraph_safe(meta.get("reviewed_role") or "Revisión técnica"), styles["WMSignLine"]))
 
     doc.build(story, onFirstPage=_draw_cover_page, onLaterPages=_draw_internal_page)
     return buffer.getvalue()
@@ -569,6 +588,10 @@ meta = st.session_state["report_meta"]
 
 if not meta.get("report_date"):
     meta["report_date"] = TODAY_STR
+if not meta.get("prepared_role"):
+    meta["prepared_role"] = "Ingeniero de diagnóstico"
+if not meta.get("reviewed_role"):
+    meta["reviewed_role"] = "Revisión técnica"
 
 
 st.markdown('<div class="wm-page-title">Reports</div>', unsafe_allow_html=True)
@@ -650,22 +673,29 @@ with m5:
 with m6:
     meta["consecutive"] = st.text_input("Consecutivo", value=meta["consecutive"])
 
-m7, m8, m9 = st.columns(3)
+m7, m8 = st.columns(2)
 with m7:
     meta["prepared_by"] = st.text_input("Preparado por", value=meta["prepared_by"])
+    meta["prepared_role"] = st.text_input("Cargo de quien prepara", value=meta["prepared_role"])
 with m8:
     meta["reviewed_by"] = st.text_input("Revisado por", value=meta["reviewed_by"])
+    meta["reviewed_role"] = st.text_input("Cargo de quien revisa", value=meta["reviewed_role"])
+
+st.markdown(
+    '<div class="wm-signature-help">Estos cargos también se mostrarán en el bloque final de aprobación del PDF.</div>',
+    unsafe_allow_html=True,
+)
+
+m9, m10 = st.columns(2)
 with m9:
     meta["report_date"] = st.text_input("Fecha del reporte", value=meta["report_date"] or TODAY_STR)
-
-m10, m11 = st.columns(2)
 with m10:
     meta["period"] = st.text_input("Periodo evaluado (opcional)", value=meta["period"], placeholder="Ejemplo: 2026-04-01 a 2026-04-07")
-with m11:
-    st.markdown(
-        '<div class="wm-highlight-box"><b>Sugerencia editorial</b><br>Si el servicio corresponde a una visita puntual, puedes dejar vacío el periodo evaluado y usar solo la fecha del reporte. Si cubre tendencia, campaña o ventana de operación, sí conviene llenarlo.</div>',
-        unsafe_allow_html=True,
-    )
+
+st.markdown(
+    '<div class="wm-highlight-box"><b>Sugerencia editorial</b><br>Si el servicio corresponde a una visita puntual, puedes dejar vacío el periodo evaluado y usar solo la fecha del reporte. Si cubre tendencia, campaña o ventana de operación, sí conviene llenarlo.</div>',
+    unsafe_allow_html=True,
+)
 
 meta["report_date"] = meta["report_date"] or TODAY_STR
 
@@ -757,7 +787,9 @@ with p1:
             <strong>Unidad:</strong> {meta["unit"] or "-"}<br>
             <strong>Ubicación:</strong> {meta["location"] or "-"}<br>
             <strong>Preparado por:</strong> {meta["prepared_by"] or "-"}<br>
+            <strong>Cargo:</strong> {meta["prepared_role"] or "-"}<br>
             <strong>Revisado por:</strong> {meta["reviewed_by"] or "-"}<br>
+            <strong>Cargo revisión:</strong> {meta["reviewed_role"] or "-"}<br>
             <strong>Fecha del reporte:</strong> {meta["report_date"] or TODAY_STR}<br>
             <strong>Periodo evaluado:</strong> {meta["period"] or "No aplica"}<br>
             <strong>Consecutivo:</strong> {meta["consecutive"] or "-"}<br>
