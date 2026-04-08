@@ -53,6 +53,13 @@ def _harmonic_count_above(harmonics: List[dict], threshold: float) -> int:
     return c
 
 
+def _append_bearing_text(narrative: str, bearing_text: Optional[str]) -> str:
+    extra = str(bearing_text or "").strip()
+    if not extra:
+        return narrative
+    return f"{narrative}\n\n{extra}"
+
+
 def evaluate_spectrum_diagnostic(
     *,
     one_x_amp: Optional[float],
@@ -61,6 +68,7 @@ def evaluate_spectrum_diagnostic(
     dominant_peak_freq_cpm: Optional[float],
     dominant_peak_amp: Optional[float],
     rpm: Optional[float],
+    bearing_text: Optional[str] = None,
 ) -> Dict[str, str]:
     one_x = float(one_x_amp) if one_x_amp is not None else 0.0
     overall = float(overall_spec_rms) if overall_spec_rms is not None else 0.0
@@ -96,7 +104,7 @@ def evaluate_spectrum_diagnostic(
             "Se recomienda inspeccionar rigidez de soportes, condición de anclajes, pedestal o base, "
             "y contrastar con la forma de onda para buscar impactos o modulación."
         )
-        return {"status": status, "color": color, "headline": headline, "narrative": narrative}
+        return {"status": status, "color": color, "headline": headline, "narrative": _append_bearing_text(narrative, bearing_text)}
 
     if ratio_2x >= 0.35 or (ratio_2x >= 0.25 and ratio_3x >= 0.18):
         status = "WARNING"
@@ -107,7 +115,7 @@ def evaluate_spectrum_diagnostic(
             "lo que puede indicar desalineación o comportamiento asociado al tren de potencia. "
             "Se recomienda revisar alineación, condición del acople y correlacionar con mediciones radiales, axiales y análisis de fase."
         )
-        return {"status": status, "color": color, "headline": headline, "narrative": narrative}
+        return {"status": status, "color": color, "headline": headline, "narrative": _append_bearing_text(narrative, bearing_text)}
 
     if one_x > 0 and near_1x and ratio_2x < 0.25 and ratio_high < 0.15:
         status = "WARNING"
@@ -119,7 +127,7 @@ def evaluate_spectrum_diagnostic(
             "Se recomienda verificar condición de balanceo, revisar consistencia de fase entre arranques "
             "y correlacionar con los módulos Polar y Bode antes de definir una intervención."
         )
-        return {"status": status, "color": color, "headline": headline, "narrative": narrative}
+        return {"status": status, "color": color, "headline": headline, "narrative": _append_bearing_text(narrative, bearing_text)}
 
     if overall > 0 and dom_amp > 0 and (overall / max(dom_amp, 1e-9)) > 0.65 and strong_harmonic_count <= 2:
         status = "WARNING"
@@ -131,7 +139,7 @@ def evaluate_spectrum_diagnostic(
             "Se recomienda revisar condición de proceso, excitación inducida por flujo, "
             "posible cavitación, turbulencia o fuentes no estacionarias."
         )
-        return {"status": status, "color": color, "headline": headline, "narrative": narrative}
+        return {"status": status, "color": color, "headline": headline, "narrative": _append_bearing_text(narrative, bearing_text)}
 
     headline = "Sin patrón anormal dominante"
     narrative = (
@@ -139,4 +147,4 @@ def evaluate_spectrum_diagnostic(
         "desalineación o holgura mecánica. Se recomienda continuar el monitoreo y correlacionar con forma de onda, "
         "Bode, Polar y condición operativa antes de concluir un mecanismo de falla."
     )
-    return {"status": status, "color": color, "headline": headline, "narrative": narrative}
+    return {"status": status, "color": color, "headline": headline, "narrative": _append_bearing_text(narrative, bearing_text)}

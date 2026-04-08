@@ -16,6 +16,7 @@ import streamlit as st
 
 from core.auth import require_login, render_user_menu
 from core.spectrum_diagnostics import evaluate_spectrum_diagnostic, build_spectrum_report_notes
+from core.bearing_fault_frequencies import build_bearing_fault_overlay, build_bearing_fault_assessment
 
 st.set_page_config(page_title="Watermelon System | Spectrum", layout="wide")
 
@@ -1078,6 +1079,48 @@ def add_harmonic_annotations(
             )
 
 
+def add_bearing_fault_annotations(
+    fig: go.Figure,
+    bearing_fault_lines: List[Dict[str, Any]],
+    y_top: float,
+) -> None:
+    if not bearing_fault_lines:
+        return
+
+    label_y = y_top * 0.985 if y_top > 0 else 1.0
+
+    for line in bearing_fault_lines:
+        freq_cpm = float(line.get("freq_cpm", 0.0))
+        if not math.isfinite(freq_cpm) or freq_cpm <= 0:
+            continue
+
+        color = str(line.get("color") or "rgba(107,114,128,0.55)")
+        label = str(line.get("label") or "")
+        harmonic = int(line.get("harmonic", 1))
+
+        fig.add_vline(
+            x=freq_cpm,
+            line_width=1.2,
+            line_dash="dot",
+            line_color=color,
+        )
+
+        fig.add_annotation(
+            x=freq_cpm,
+            y=label_y,
+            text=label,
+            showarrow=False,
+            xanchor="center",
+            yanchor="bottom",
+            textangle=-90,
+            font=dict(size=9.2 if harmonic > 1 else 10.2, color=color),
+            bgcolor="rgba(255,255,255,0.80)" if harmonic == 1 else "rgba(255,255,255,0.55)",
+            bordercolor=color if harmonic == 1 else "rgba(0,0,0,0)",
+            borderwidth=1 if harmonic == 1 else 0,
+            borderpad=2,
+        )
+
+
 def build_spectrum_figure(
     record: SignalRecord,
     freq_cpm: np.ndarray,
@@ -1090,6 +1133,8 @@ def build_spectrum_figure(
     show_harmonics: bool,
     show_harmonic_amplitudes: bool,
     harmonic_points_for_labels: List[HarmonicPoint],
+    show_bearing_faults: bool,
+    bearing_fault_lines: List[Dict[str, Any]],
     show_right_info_box: bool,
     fill_area: bool,
     annotate_peak: bool,
@@ -1211,6 +1256,14 @@ def build_spectrum_figure(
             base_unit=record.amplitude_unit,
             y_top=y_top,
             show_harmonic_amplitudes=show_harmonic_amplitudes,
+        )
+
+    if show_bearing_faults and bearing_fault_lines:
+        visible_bearing_lines = [line for line in bearing_fault_lines if float(line.get("freq_cpm", 0.0)) <= x_max]
+        add_bearing_fault_annotations(
+            fig=fig,
+            bearing_fault_lines=visible_bearing_lines,
+            y_top=y_top,
         )
 
     peak_amp_text = (
@@ -1579,6 +1632,82 @@ with st.sidebar:
         disabled=not (show_harmonics and show_harmonic_amplitudes),
     )
 
+    st.markdown("### Bearing Fault Frequencies")
+
+    enable_bearing_faults = st.checkbox("Show bearing fault frequencies", value=False)
+
+    bearing_model = st.text_input(
+        "Bearing model",
+        value="SKF 6319",
+        disabled=not enable_bearing_faults,
+    )
+
+    bearing_harmonic_count = int(
+        st.number_input(
+            "Bearing harmonics per fault",
+            min_value=1,
+            max_value=10,
+            value=5,
+            step=1,
+            disabled=not enable_bearing_faults,
+        )
+    )
+
+    bearing_tolerance_pct = float(
+        st.number_input(
+            "Bearing match tolerance (%)",
+            min_value=0.5,
+            max_value=10.0,
+            value=3.0,
+            step=0.5,
+            format="%.1f",
+            disabled=not enable_bearing_faults,
+        )
+    )
+
+    custom_bearing_factors: Optional[Dict[str, float]] = None
+    with st.expander("Custom bearing factors override (optional)", expanded=False):
+        custom_bpfo = st.number_input(
+            "BPFO factor",
+            min_value=0.0,
+            value=0.0,
+            step=0.001,
+            format="%.4f",
+            disabled=not enable_bearing_faults,
+        )
+        custom_bpfi = st.number_input(
+            "BPFI factor",
+            min_value=0.0,
+            value=0.0,
+            step=0.001,
+            format="%.4f",
+            disabled=not enable_bearing_faults,
+        )
+        custom_bsf = st.number_input(
+            "BSF factor",
+            min_value=0.0,
+            value=0.0,
+            step=0.001,
+            format="%.4f",
+            disabled=not enable_bearing_faults,
+        )
+        custom_ftf = st.number_input(
+            "FTF factor",
+            min_value=0.0,
+            value=0.0,
+            step=0.001,
+            format="%.4f",
+            disabled=not enable_bearing_faults,
+        )
+
+    if enable_bearing_faults and all(v > 0 for v in [custom_bpfo, custom_bpfi, custom_bsf, custom_ftf]):
+        custom_bearing_factors = {
+            "BPFO": float(custom_bpfo),
+            "BPFI": float(custom_bpfi),
+            "BSF": float(custom_bsf),
+            "FTF": float(custom_ftf),
+        }
+
 
 # ------------------------------------------------------------
 # Prepare signals + multi-panel render
@@ -1637,6 +1766,11 @@ def render_spectrum_panel(
     show_harmonic_amplitudes: bool,
     harmonic_label_mode: str,
     show_right_info_box: bool,
+    enable_bearing_faults: bool,
+    bearing_model: str,
+    bearing_harmonic_count: int,
+    bearing_tolerance_pct: float,
+    custom_bearing_factors: Optional[Dict[str, float]],
 ) -> None:
     spectrum = compute_spectrum_peak(
         time_s=primary.time_s,
@@ -1707,6 +1841,25 @@ def render_spectrum_panel(
         max_cpm=max_cpm,
     )
 
+    bearing_fault_lines: List[Dict[str, Any]] = []
+    bearing_diagnostic_text = ""
+
+    if enable_bearing_faults:
+        bearing_overlay = build_bearing_fault_overlay(
+            selected_name=bearing_model,
+            rpm=primary.rpm,
+            harmonic_count=bearing_harmonic_count,
+            
+        )
+        bearing_fault_lines = list(bearing_overlay.get("lines", []))
+        bearing_assessment = build_bearing_fault_assessment(
+            freq_cpm=freq_cpm,
+            amp_peak=amp_peak,
+            overlay=bearing_overlay,
+            tolerance_pct=bearing_tolerance_pct,
+        )
+        bearing_diagnostic_text = str(bearing_assessment.get("narrative") or "").strip()
+
     text_diag = evaluate_spectrum_diagnostic(
         one_x_amp=one_x_display_amp,
         harmonics=[{"order": p.order, "freq_cpm": p.freq_cpm, "amp_peak": p.amp_peak} for p in all_harmonic_points],
@@ -1714,6 +1867,7 @@ def render_spectrum_panel(
         dominant_peak_freq_cpm=spectrum.peak_freq_cpm,
         dominant_peak_amp=spectrum.peak_amp_peak,
         rpm=primary.rpm,
+        bearing_text=bearing_diagnostic_text or None,
     )
     semaforo_status = text_diag["status"]
     semaforo_color = text_diag["color"]
@@ -1732,6 +1886,8 @@ def render_spectrum_panel(
         show_harmonics=show_harmonics,
         show_harmonic_amplitudes=show_harmonic_amplitudes,
         harmonic_points_for_labels=harmonic_points_for_labels if show_harmonics else [],
+        show_bearing_faults=enable_bearing_faults,
+        bearing_fault_lines=bearing_fault_lines if enable_bearing_faults else [],
         show_right_info_box=show_right_info_box,
         fill_area=fill_area,
         annotate_peak=annotate_peak,
@@ -1773,6 +1929,11 @@ def render_spectrum_panel(
             show_harmonic_amplitudes,
             harmonic_label_mode,
             show_right_info_box,
+            enable_bearing_faults,
+            bearing_model,
+            bearing_harmonic_count,
+            bearing_tolerance_pct,
+            custom_bearing_factors,
             primary.rpm,
             float(np.nanmax(amp_display)) if amp_display.size else 0.0,
             float(np.nanmin(amp_display)) if amp_display.size else 0.0,
@@ -1861,39 +2022,9 @@ def render_spectrum_panel(
             except Exception:
                 png_bytes_for_report = None
 
-            dominant_order = 0
-            if all_harmonic_points:
-                dominant_order = max(all_harmonic_points, key=lambda p: p.amp_peak).order
-
-            if dominant_order == 1:
-                spectrum_report_notes = (
-                    f"Se analizó el espectro de vibración correspondiente al punto {primary.point or 'punto no identificado'} "
-                    f"en la máquina {primary.machine or 'máquina no identificada'}. El espectro presenta predominio de la "
-                    f"componente 1X con bajo contenido relativo de armónicos superiores, comportamiento consistente con una "
-                    f"condición tipo desbalance. Se recomienda verificar balanceo, revisar consistencia de fase entre arranques "
-                    f"y correlacionar este resultado con los módulos Polar y Bode."
-                )
-            elif dominant_order == 2:
-                spectrum_report_notes = (
-                    f"Se analizó el espectro de vibración correspondiente al punto {primary.point or 'punto no identificado'} "
-                    f"en la máquina {primary.machine or 'máquina no identificada'}. Se observa predominio de la componente 2X, "
-                    f"comportamiento que puede ser compatible con desalineación o efectos mecánicos asociados al tren rotativo. "
-                    f"Se recomienda validar alineación y correlacionar con fase, polar y condición del acoplamiento."
-                )
-            elif dominant_order >= 3:
-                spectrum_report_notes = (
-                    f"Se analizó el espectro de vibración correspondiente al punto {primary.point or 'punto no identificado'} "
-                    f"en la máquina {primary.machine or 'máquina no identificada'}. El contenido espectral muestra predominio "
-                    f"de armónicos superiores, lo que sugiere una respuesta mecánica más compleja que debe correlacionarse con "
-                    f"forma de onda, soltura mecánica y condiciones estructurales antes de emitir una conclusión definitiva."
-                )
-            else:
-                spectrum_report_notes = (
-                    f"Se analizó el espectro de vibración correspondiente al punto {primary.point or 'punto no identificado'} "
-                    f"en la máquina {primary.machine or 'máquina no identificada'}. No se identificó una familia armónica "
-                    f"suficientemente definida dentro de la ventana analizada, por lo que se recomienda correlacionar este "
-                    f"resultado con forma de onda, tendencia y condición operativa."
-                )
+            spectrum_report_notes = build_spectrum_report_notes(text_diag)
+            if not spectrum_report_notes.strip():
+                spectrum_report_notes = "Interpretación técnica pendiente para este espectro."
 
             queue_spectrum_to_report(
                 primary,
@@ -1942,6 +2073,11 @@ for panel_index, primary in enumerate(selected_records):
         show_harmonic_amplitudes=show_harmonic_amplitudes,
         harmonic_label_mode=harmonic_label_mode,
         show_right_info_box=show_right_info_box,
+        enable_bearing_faults=enable_bearing_faults,
+        bearing_model=bearing_model,
+        bearing_harmonic_count=bearing_harmonic_count,
+        bearing_tolerance_pct=bearing_tolerance_pct,
+        custom_bearing_factors=custom_bearing_factors,
     )
 
     if panel_index < len(selected_records) - 1:
