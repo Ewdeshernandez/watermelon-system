@@ -253,8 +253,6 @@ class TrendRecord:
         return int(len(self.x_time))
 
 
-
-
 @dataclass
 class OperationalRecord:
     op_id: str
@@ -362,6 +360,7 @@ def load_operational_records_from_uploader(files: List[Any], temperature_unit: s
     for file in files:
         records.extend(parse_operational_csv(file, temperature_unit=temperature_unit))
     return records
+
 
 def parse_trend_csv(uploaded_file) -> Optional[TrendRecord]:
     try:
@@ -625,7 +624,6 @@ def get_time_options_for_records(records: List[TrendRecord], metric_key: str) ->
         return []
     unique_sorted = sorted(pd.Series(ts_values).dropna().unique())
     return [pd.Timestamp(x) for x in unique_sorted]
-
 
 
 def get_operational_clean_df(record: OperationalRecord) -> pd.DataFrame:
@@ -1171,6 +1169,181 @@ def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[st
         return None, str(e)
 
 
+def _sanitize_series_for_analysis(values: pd.Series) -> np.ndarray:
+    arr = pd.to_numeric(values, errors="coerce").dropna().astype(float).to_numpy()
+    if arr.size == 0:
+        return np.array([], dtype=float)
+    return arr[np.isfinite(arr)]
+
+
+def _classify_trend_behavior(values: pd.Series) -> Dict[str, Any]:
+    arr = _sanitize_series_for_analysis(values)
+    result: Dict[str, Any] = {
+        "classification": "insufficient",
+        "slope_ratio": None,
+        "change_pct": None,
+        "volatility_ratio": None,
+        "jerk_ratio": None,
+        "sample_count": int(arr.size),
+    }
+    if arr.size < 3:
+        return result
+
+    x = np.arange(arr.size, dtype=float)
+    slope, intercept = np.polyfit(x, arr, 1)
+    fitted = slope * x + intercept
+    residual = arr - fitted
+
+    mean_abs = float(np.mean(np.abs(arr)))
+    value_span = float(np.max(arr) - np.min(arr))
+    scale = max(mean_abs, value_span, 1e-9)
+
+    slope_ratio = float(abs(slope) * max(arr.size - 1, 1) / scale)
+    volatility_ratio = float(np.std(residual) / scale)
+    diffs = np.diff(arr)
+    jerk_ratio = float(np.std(diffs) / scale) if diffs.size else 0.0
+    change_pct = safe_percent_change(float(arr[0]), float(arr[-1]))
+
+    direction = "up" if slope > 0 else "down"
+    classification = "stable"
+    if jerk_ratio >= 0.28 or volatility_ratio >= 0.22:
+        classification = "abrupt"
+    elif slope_ratio >= 0.18 and direction == "up":
+        classification = "progressive_increase"
+    elif slope_ratio >= 0.18 and direction == "down":
+        classification = "progressive_decrease"
+
+    result.update(
+        {
+            "classification": classification,
+            "direction": direction,
+            "slope_ratio": slope_ratio,
+            "change_pct": change_pct,
+            "volatility_ratio": volatility_ratio,
+            "jerk_ratio": jerk_ratio,
+            "initial_value": float(arr[0]),
+            "final_value": float(arr[-1]),
+            "min_value": float(np.min(arr)),
+            "max_value": float(np.max(arr)),
+            "mean_value": float(np.mean(arr)),
+        }
+    )
+    return result
+
+
+def _trend_unit_for_metric(record: TrendRecord, metric_key: str) -> str:
+    return get_metric_series(record, metric_key)[1]
+
+
+def _build_single_trend_narrative(record: TrendRecord, metric_key: str) -> str:
+    df = get_clean_metric_df(record, metric_key)
+    unit = _trend_unit_for_metric(record, metric_key)
+    if df.empty:
+        return (
+            f"{record.point_clean}: no se identificaron datos válidos para el análisis de {metric_key.lower()}, "
+            "por lo que no fue posible emitir diagnóstico automático."
+        )
+
+    analysis = _classify_trend_behavior(df["y"])
+    sample_count = analysis.get("sample_count", 0)
+    start_ts = safe_datetime(df["x"].iloc[0])
+    end_ts = safe_datetime(df["x"].iloc[-1])
+
+    base = (
+        f"{record.point_clean} — ventana analizada desde {pretty_date(start_ts)} {pretty_time(start_ts)} "
+        f"hasta {pretty_date(end_ts)} {pretty_time(end_ts)}, con {sample_count} muestras válidas. "
+        f"Valor inicial {format_number(analysis.get('initial_value'), 3)} {unit}, "
+        f"valor final {format_number(analysis.get('final_value'), 3)} {unit}, "
+        f"variación total {format_number(analysis.get('change_pct'), 2)}%."
+    )
+
+    classification = analysis.get("classification")
+    if classification == "progressive_increase":
+        return (
+            f"{base} La tendencia presenta un incremento progresivo del {metric_key.lower()}, "
+            "lo cual sugiere posible deterioro del estado mecánico o evolución de una condición incipiente. "
+            "Se recomienda seguimiento estrecho y correlación con variables operativas y alarmas."
+        )
+    if classification == "progressive_decrease":
+        return (
+            f"{base} La señal muestra una disminución progresiva del {metric_key.lower()}, "
+            "compatible con normalización de la condición o reducción de carga/excitación. "
+            "Se recomienda verificar si el comportamiento coincide con cambios operativos esperados."
+        )
+    if classification == "abrupt":
+        return (
+            f"{base} Se observan variaciones bruscas y dispersión elevada en la señal, "
+            "compatibles con condición transitoria, inestabilidad o cambios operativos repentinos. "
+            "Se recomienda revisar eventos de proceso, transientes de arranque/parada y consistencia de la instrumentación."
+        )
+    if classification == "stable":
+        return (
+            f"{base} El comportamiento es estable y sin desviaciones significativas, "
+            "lo que es consistente con una condición normal dentro de la ventana evaluada. "
+            "Se recomienda continuar monitoreo rutinario."
+        )
+    return (
+        f"{base} La cantidad de información disponible no es suficiente para clasificar con confianza la tendencia. "
+        "Se recomienda ampliar la ventana temporal o validar la calidad de los datos."
+    )
+
+
+def _build_operational_only_narrative(records: List[OperationalRecord]) -> str:
+    lines: List[str] = []
+    for rec in records:
+        df = get_operational_clean_df(rec)
+        if df.empty:
+            lines.append(
+                f"{rec.variable}: no se identificaron datos válidos para emitir diagnóstico automático."
+            )
+            continue
+        analysis = _classify_trend_behavior(df["y"])
+        start_ts = safe_datetime(df["x"].iloc[0])
+        end_ts = safe_datetime(df["x"].iloc[-1])
+        unit = rec.unit or ""
+        base = (
+            f"{rec.variable} — ventana analizada desde {pretty_date(start_ts)} {pretty_time(start_ts)} "
+            f"hasta {pretty_date(end_ts)} {pretty_time(end_ts)}. "
+            f"Valor inicial {format_number(analysis.get('initial_value'), 3)} {unit}, "
+            f"valor final {format_number(analysis.get('final_value'), 3)} {unit}, "
+            f"variación total {format_number(analysis.get('change_pct'), 2)}%."
+        )
+
+        classification = analysis.get("classification")
+        if classification == "progressive_increase":
+            lines.append(f"{base} Tendencia operativa con incremento progresivo sostenido.")
+        elif classification == "progressive_decrease":
+            lines.append(f"{base} Tendencia operativa con descenso progresivo sostenido.")
+        elif classification == "abrupt":
+            lines.append(f"{base} Tendencia operativa con variaciones bruscas o comportamiento transitorio.")
+        elif classification == "stable":
+            lines.append(f"{base} Tendencia operativa estable durante la ventana evaluada.")
+        else:
+            lines.append(f"{base} Información insuficiente para clasificar la tendencia.")
+    return "\n\n".join(lines)
+
+
+def build_trend_report_narrative(
+    records: List[TrendRecord],
+    metric_key: str,
+    operational_records: Optional[List[OperationalRecord]] = None,
+    operational_only_mode: bool = False,
+) -> str:
+    operational_records = operational_records or []
+
+    if operational_only_mode and operational_records:
+        return _build_operational_only_narrative(operational_records)
+
+    trend_lines = [_build_single_trend_narrative(rec, metric_key) for rec in records]
+    if operational_records:
+        op_summary = _build_operational_only_narrative(operational_records)
+        trend_lines.append(
+            "Correlación operativa disponible:\n\n"
+            f"{op_summary}"
+        )
+    return "\n\n".join(trend_lines)
+
+
 # session
 if "trend_signals" not in st.session_state:
     st.session_state["trend_signals"] = {}
@@ -1244,15 +1417,12 @@ if not records_all and not operational_records_all:
     st.stop()
 
 
-
-
 def push_linked_bode_context(records: List[TrendRecord], metric_key: str) -> None:
     if not records:
         return
 
     first = records[0]
 
-    # intentamos capturar los cursores más útiles disponibles en Trends
     cursor_a_label = (
         st.session_state.get("wm_tr_cursor_a_current")
         or st.session_state.get("wm_tr_cursor_a_initial")
@@ -1273,6 +1443,7 @@ def push_linked_bode_context(records: List[TrendRecord], metric_key: str) -> Non
         "trend_cursor_b_label": cursor_b_label,
     }
 
+
 def queue_trend_to_report(
     records: List[TrendRecord],
     fig: go.Figure,
@@ -1280,7 +1451,7 @@ def queue_trend_to_report(
     metric_key: str,
     operational_records: Optional[List[OperationalRecord]] = None,
     operational_only_mode: bool = False,
-) -> None:
+) -> Tuple[bool, Optional[str]]:
     operational_records = operational_records or []
     if records:
         first = records[0]
@@ -1301,7 +1472,16 @@ def queue_trend_to_report(
         timestamp = str(first_op.timestamp_max or "")
         variable = "Operational Data" if operational_only_mode else f"Trend + Operational | {metric_key}"
     else:
-        return
+        return False, "No valid signals to send."
+
+    narrative = build_trend_report_narrative(
+        records=records,
+        metric_key=metric_key,
+        operational_records=operational_records,
+        operational_only_mode=operational_only_mode,
+    )
+
+    image_bytes, image_error = build_export_png_bytes(fig=fig)
 
     st.session_state.report_items.append(
         {
@@ -1317,15 +1497,20 @@ def queue_trend_to_report(
             ),
             "type": "trends",
             "title": panel_title,
-            "notes": "",
+            "notes": narrative,
             "signal_id": signal_id,
-            "figure": go.Figure(fig),
+            "figure": None,
+            "image_bytes": image_bytes,
+            "image_error": image_error,
+            "source_module": "04_Trends",
+            "report_payload_version": "v2",
             "machine": machine,
             "point": point,
             "variable": variable,
             "timestamp": timestamp,
         }
     )
+    return image_bytes is not None, image_error
 
 
 with st.sidebar:
@@ -1434,6 +1619,7 @@ with st.sidebar:
     danger_value: Optional[float] = None
     if danger_enabled:
         danger_value = float(st.number_input("Danger value", value=5.000, step=0.1, format="%.3f"))
+
 selected_ids = [st.session_state.wm_tr_primary_signal_id] + st.session_state.wm_tr_extra_signal_ids
 selected_ids = [sid for sid in selected_ids if sid is not None]
 
@@ -1471,6 +1657,7 @@ if st.session_state.wm_tr_display_mode == "Mixed" and len(selected_operational_r
             f"Se usarán únicamente las señales de tipo '{first_family}'."
         )
     selected_operational_records_sorted = filtered
+
 logo_uri = get_logo_data_uri(LOGO_PATH)
 
 if selected_records_sorted:
@@ -1486,6 +1673,7 @@ time_labels = [ts_to_label(ts) for ts in time_options]
 if not time_labels:
     st.warning("No hay datos válidos para los cursores en la selección actual.")
     st.stop()
+
 
 def get_valid_time_label(saved_value: str, fallback_label: str) -> str:
     saved_value = str(saved_value or "")
@@ -1654,7 +1842,7 @@ def render_trend_panel(
 
     with col_report:
         if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
-            queue_trend_to_report(
+            image_ok, image_error = queue_trend_to_report(
                 panel_records,
                 fig,
                 panel_label,
@@ -1662,7 +1850,10 @@ def render_trend_panel(
                 operational_records=panel_operational_records,
                 operational_only_mode=operational_only_mode,
             )
-            st.success("Trend enviado al reporte")
+            if image_ok:
+                st.success("Trend enviado al reporte")
+            else:
+                st.warning(f"Trend enviado al reporte sin imagen PNG. Motivo: {image_error or 'error desconocido'}")
 
     with col_bode:
         bode_disabled = operational_only_mode or len(panel_records) == 0
