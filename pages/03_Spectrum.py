@@ -1972,8 +1972,43 @@ def render_spectrum_panel(
         chips=helper_cols,
     )
 
-    st.info(text_diag["narrative"])
+    
 
+    # ------------------------------------------------------------
+    # Bearing Validation Panel
+    # ------------------------------------------------------------
+    if enable_bearing_faults:
+        st.markdown("#### Bearing Frequency Validation")
+
+        bearing_mode_label = "Catalog" if bearing_calc_mode == "Catalog" else "Approximate"
+        bearing_identifier = bearing_overlay.get("model_display", "—") if bearing_calc_mode == "Catalog" else f"Nb={bearing_nb}"
+
+        info_cols = st.columns(4)
+
+        with info_cols[0]:
+            st.metric("RPM used", f"{primary.rpm:.1f}" if primary.rpm else "—")
+
+        with info_cols[1]:
+            st.metric("Mode", bearing_mode_label)
+
+        with info_cols[2]:
+            st.metric("Reference", bearing_identifier)
+
+        with info_cols[3]:
+            st.metric("Tolerance", f"±{bearing_tolerance_pct:.1f}%")
+
+        rows = []
+        for fam in bearing_overlay.get("families", []):
+            rows.append({
+                "Family": fam.get("family"),
+                "Base CPM": round(fam.get("base_freq_cpm", 0), 1),
+                "Factor": round(fam.get("factor", 0), 4),
+            })
+
+        if rows:
+            import pandas as pd
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.info(text_diag["narrative"])
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
 
