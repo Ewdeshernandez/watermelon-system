@@ -16,7 +16,12 @@ import streamlit as st
 
 from core.auth import require_login, render_user_menu
 from core.spectrum_diagnostics import evaluate_spectrum_diagnostic, build_spectrum_report_notes
-from core.bearing_fault_frequencies import build_bearing_fault_overlay, build_bearing_fault_assessment
+from core.bearing_catalog import (
+    build_bearing_fault_overlay_from_catalog,
+    build_bearing_fault_overlay_from_nb,
+    build_bearing_fault_assessment,
+    list_bearing_catalog_options,
+)
 
 st.set_page_config(page_title="Watermelon System | Spectrum", layout="wide")
 
@@ -1632,22 +1637,44 @@ with st.sidebar:
         disabled=not (show_harmonics and show_harmonic_amplitudes),
     )
 
+
     st.markdown("### Bearing Fault Frequencies")
+
+    bearing_catalog_options = list_bearing_catalog_options()
 
     enable_bearing_faults = st.checkbox("Show bearing fault frequencies", value=False)
 
-    bearing_model = st.text_input(
-        "Bearing model",
-        value="SKF 6319",
+    bearing_calc_mode = st.selectbox(
+        "Bearing calculation mode",
+        options=["Catalog", "Approximate from rolling elements"],
+        index=0,
         disabled=not enable_bearing_faults,
+    )
+
+    bearing_model = st.selectbox(
+        "Bearing catalog",
+        options=bearing_catalog_options,
+        index=0 if bearing_catalog_options else None,
+        disabled=not enable_bearing_faults or bearing_calc_mode != "Catalog" or not bearing_catalog_options,
+    )
+
+    bearing_nb = int(
+        st.number_input(
+            "Number of rolling elements (Nb)",
+            min_value=1,
+            max_value=50,
+            value=8,
+            step=1,
+            disabled=not enable_bearing_faults or bearing_calc_mode != "Approximate from rolling elements",
+        )
     )
 
     bearing_harmonic_count = int(
         st.number_input(
             "Bearing harmonics per fault",
             min_value=1,
-            max_value=10,
-            value=5,
+            max_value=6,
+            value=3,
             step=1,
             disabled=not enable_bearing_faults,
         )
@@ -1664,49 +1691,6 @@ with st.sidebar:
             disabled=not enable_bearing_faults,
         )
     )
-
-    custom_bearing_factors: Optional[Dict[str, float]] = None
-    with st.expander("Custom bearing factors override (optional)", expanded=False):
-        custom_bpfo = st.number_input(
-            "BPFO factor",
-            min_value=0.0,
-            value=0.0,
-            step=0.001,
-            format="%.4f",
-            disabled=not enable_bearing_faults,
-        )
-        custom_bpfi = st.number_input(
-            "BPFI factor",
-            min_value=0.0,
-            value=0.0,
-            step=0.001,
-            format="%.4f",
-            disabled=not enable_bearing_faults,
-        )
-        custom_bsf = st.number_input(
-            "BSF factor",
-            min_value=0.0,
-            value=0.0,
-            step=0.001,
-            format="%.4f",
-            disabled=not enable_bearing_faults,
-        )
-        custom_ftf = st.number_input(
-            "FTF factor",
-            min_value=0.0,
-            value=0.0,
-            step=0.001,
-            format="%.4f",
-            disabled=not enable_bearing_faults,
-        )
-
-    if enable_bearing_faults and all(v > 0 for v in [custom_bpfo, custom_bpfi, custom_bsf, custom_ftf]):
-        custom_bearing_factors = {
-            "BPFO": float(custom_bpfo),
-            "BPFI": float(custom_bpfi),
-            "BSF": float(custom_bsf),
-            "FTF": float(custom_ftf),
-        }
 
 
 # ------------------------------------------------------------
@@ -1770,7 +1754,6 @@ def render_spectrum_panel(
     bearing_model: str,
     bearing_harmonic_count: int,
     bearing_tolerance_pct: float,
-    custom_bearing_factors: Optional[Dict[str, float]],
 ) -> None:
     spectrum = compute_spectrum_peak(
         time_s=primary.time_s,
@@ -1845,12 +1828,19 @@ def render_spectrum_panel(
     bearing_diagnostic_text = ""
 
     if enable_bearing_faults:
-        bearing_overlay = build_bearing_fault_overlay(
-            selected_name=bearing_model,
-            rpm=primary.rpm,
-            harmonic_count=bearing_harmonic_count,
-            
-        )
+        if bearing_calc_mode == "Catalog":
+            bearing_overlay = build_bearing_fault_overlay_from_catalog(
+                selected_name=bearing_model,
+                rpm=primary.rpm,
+                harmonic_count=bearing_harmonic_count,
+            )
+        else:
+            bearing_overlay = build_bearing_fault_overlay_from_nb(
+                nb=bearing_nb,
+                rpm=primary.rpm,
+                harmonic_count=bearing_harmonic_count,
+            )
+
         bearing_fault_lines = list(bearing_overlay.get("lines", []))
         bearing_assessment = build_bearing_fault_assessment(
             freq_cpm=freq_cpm,
@@ -1933,7 +1923,6 @@ def render_spectrum_panel(
             bearing_model,
             bearing_harmonic_count,
             bearing_tolerance_pct,
-            custom_bearing_factors,
             primary.rpm,
             float(np.nanmax(amp_display)) if amp_display.size else 0.0,
             float(np.nanmin(amp_display)) if amp_display.size else 0.0,
@@ -2077,7 +2066,6 @@ for panel_index, primary in enumerate(selected_records):
         bearing_model=bearing_model,
         bearing_harmonic_count=bearing_harmonic_count,
         bearing_tolerance_pct=bearing_tolerance_pct,
-        custom_bearing_factors=custom_bearing_factors,
     )
 
     if panel_index < len(selected_records) - 1:
