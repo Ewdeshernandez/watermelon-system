@@ -1093,6 +1093,8 @@ def add_bearing_fault_annotations(
         return
 
     label_y = y_top * 0.985 if y_top > 0 else 1.0
+    last_labeled_freq = {}
+    min_label_spacing_cpm = 5000.0
 
     for line in bearing_fault_lines:
         freq_cpm = float(line.get("freq_cpm", 0.0))
@@ -1102,28 +1104,40 @@ def add_bearing_fault_annotations(
         color = str(line.get("color") or "rgba(107,114,128,0.55)")
         label = str(line.get("label") or "")
         harmonic = int(line.get("harmonic", 1))
+        family = str(line.get("family") or "")
 
         fig.add_vline(
             x=freq_cpm,
-            line_width=1.2,
+            line_width=1.2 if harmonic == 1 else 0.9,
             line_dash="dot",
             line_color=color,
+            opacity=0.90 if harmonic == 1 else 0.45,
         )
 
-        fig.add_annotation(
-            x=freq_cpm,
-            y=label_y,
-            text=label,
-            showarrow=False,
-            xanchor="center",
-            yanchor="bottom",
-            textangle=-90,
-            font=dict(size=9.2 if harmonic > 1 else 10.2, color=color),
-            bgcolor="rgba(255,255,255,0.80)" if harmonic == 1 else "rgba(255,255,255,0.55)",
-            bordercolor=color if harmonic == 1 else "rgba(0,0,0,0)",
-            borderwidth=1 if harmonic == 1 else 0,
-            borderpad=2,
-        )
+        should_label = False
+        if harmonic == 1:
+            should_label = True
+        else:
+            prev = last_labeled_freq.get(family)
+            if prev is None or abs(freq_cpm - prev) >= min_label_spacing_cpm:
+                should_label = True
+
+        if should_label:
+            fig.add_annotation(
+                x=freq_cpm,
+                y=label_y,
+                text=label,
+                showarrow=False,
+                xanchor="center",
+                yanchor="bottom",
+                textangle=-90,
+                font=dict(size=9.2 if harmonic > 1 else 10.2, color=color),
+                bgcolor="rgba(255,255,255,0.85)" if harmonic == 1 else "rgba(255,255,255,0.60)",
+                bordercolor=color if harmonic == 1 else "rgba(0,0,0,0)",
+                borderwidth=1 if harmonic == 1 else 0,
+                borderpad=2,
+            )
+            last_labeled_freq[family] = freq_cpm
 
 
 def build_spectrum_figure(
@@ -1241,9 +1255,11 @@ def build_spectrum_figure(
         )
 
     x_min = 0.0
-    x_max = float(np.max(freq_cpm))
-    if x_max <= 0:
-        x_max = max_cpm if max_cpm > 0 else 1.0
+    data_x_max = float(np.max(freq_cpm)) if freq_cpm.size else 0.0
+    if max_cpm > 0:
+        x_max = float(max_cpm)
+    else:
+        x_max = data_x_max if data_x_max > 0 else 1.0
 
     y_data_max = float(np.max(amp_display))
     auto_top = max(y_data_max * 1.12, y_data_max + 0.05 if y_data_max > 0 else 1.0)
