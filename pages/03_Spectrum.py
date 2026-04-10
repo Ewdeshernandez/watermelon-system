@@ -37,7 +37,6 @@ render_user_menu()
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOGO_PATH = PROJECT_ROOT / "assets" / "watermelon_logo.png"
 
-
 # ------------------------------------------------------------
 # Styling
 # ------------------------------------------------------------
@@ -109,9 +108,7 @@ def apply_page_style() -> None:
         unsafe_allow_html=True,
     )
 
-
 apply_page_style()
-
 
 # ------------------------------------------------------------
 # Helpers
@@ -121,18 +118,15 @@ def get_logo_base64(path: Path) -> Optional[str]:
         return None
     return base64.b64encode(path.read_bytes()).decode("utf-8")
 
-
 def get_logo_data_uri(path: Path) -> Optional[str]:
     b64 = get_logo_base64(path)
     if not b64:
         return None
     return f"data:image/png;base64,{b64}"
 
-
 def make_export_state_key(parts: List[Any]) -> str:
     raw = "|".join(str(p) for p in parts)
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
-
 
 def rounded_rect_path(x0: float, y0: float, x1: float, y1: float, r: float) -> str:
     r = max(0.0, min(r, (x1 - x0) / 2.0, (y1 - y0) / 2.0))
@@ -147,7 +141,6 @@ def rounded_rect_path(x0: float, y0: float, x1: float, y1: float, r: float) -> s
         f"L {x0},{y0+r} "
         f"Q {x0},{y0} {x0+r},{y0} Z"
     )
-
 
 # ------------------------------------------------------------
 # Data model
@@ -175,7 +168,6 @@ class SignalRecord:
             return 0.0
         return float(self.time_s[-1] - self.time_s[0])
 
-
 @dataclass
 class SpectrumResult:
     freq_cpm: np.ndarray
@@ -188,13 +180,11 @@ class SpectrumResult:
     peak_amp_peak: Optional[float]
     peak_bin_index: Optional[int]
 
-
 @dataclass
 class HarmonicPoint:
     order: int
     freq_cpm: float
     amp_peak: float
-
 
 # ------------------------------------------------------------
 # Utilities
@@ -220,7 +210,6 @@ def parse_first_float(value: Any) -> Optional[float]:
     except Exception:
         return None
 
-
 def to_numpy(value: Any) -> np.ndarray:
     if value is None:
         return np.array([], dtype=float)
@@ -238,7 +227,6 @@ def to_numpy(value: Any) -> np.ndarray:
             return np.array([], dtype=float)
     return np.array([], dtype=float)
 
-
 def infer_sample_rate_from_seconds(time_s: np.ndarray) -> Optional[float]:
     if time_s.size < 2:
         return None
@@ -252,7 +240,6 @@ def infer_sample_rate_from_seconds(time_s: np.ndarray) -> Optional[float]:
         return None
     return 1.0 / mean_dt
 
-
 def format_number(value: Any, digits: int = 4, fallback: str = "—") -> str:
     if value is None:
         return fallback
@@ -263,7 +250,6 @@ def format_number(value: Any, digits: int = 4, fallback: str = "—") -> str:
         return f"{val:.{digits}f}"
     except Exception:
         return fallback
-
 
 def find_meta(metadata: Dict[str, Any], candidates: List[str]) -> Any:
     lower_map = {str(k).lower(): v for k, v in metadata.items()}
@@ -276,7 +262,6 @@ def find_meta(metadata: Dict[str, Any], candidates: List[str]) -> Any:
             if c in k:
                 return v
     return None
-
 
 def infer_amplitude_unit(metadata: Dict[str, Any]) -> str:
     y_axis_unit = find_meta(
@@ -303,7 +288,6 @@ def infer_amplitude_unit(metadata: Dict[str, Any]) -> str:
         return "g"
     return ""
 
-
 def convert_input_time_to_seconds(raw_time: np.ndarray) -> Tuple[np.ndarray, str]:
     if raw_time.size == 0:
         return raw_time, "s"
@@ -316,10 +300,8 @@ def convert_input_time_to_seconds(raw_time: np.ndarray) -> Tuple[np.ndarray, str
         return raw / 1000.0, "ms"
     return raw, "s"
 
-
 def next_pow_2(n: int) -> int:
     return 1 if n <= 1 else 2 ** int(math.ceil(math.log2(n)))
-
 
 def get_window(name: str, n: int) -> np.ndarray:
     if name == "Hanning":
@@ -330,12 +312,10 @@ def get_window(name: str, n: int) -> np.ndarray:
         return np.blackman(n)
     return np.ones(n, dtype=float)
 
-
 def coherent_gain(window: np.ndarray) -> float:
     if window.size == 0:
         return 1.0
     return float(np.mean(window))
-
 
 def dominant_peak(freq_cpm: np.ndarray, amp: np.ndarray, min_cpm: float = 1.0) -> Tuple[Optional[float], Optional[float]]:
     if freq_cpm.size == 0 or amp.size == 0:
@@ -347,7 +327,6 @@ def dominant_peak(freq_cpm: np.ndarray, amp: np.ndarray, min_cpm: float = 1.0) -
     amp_sel = amp[mask]
     idx = int(np.argmax(amp_sel))
     return float(freq_sel[idx]), float(amp_sel[idx])
-
 
 # ------------------------------------------------------------
 # Amplitude conversions
@@ -361,7 +340,6 @@ def convert_peak_to_mode(peak_amp: np.ndarray, mode: str) -> np.ndarray:
         return peak_amp / np.sqrt(2.0)
     return peak_amp
 
-
 def convert_scalar_peak_to_mode(value: Optional[float], mode: str) -> Optional[float]:
     if value is None:
         return None
@@ -372,7 +350,6 @@ def convert_scalar_peak_to_mode(value: Optional[float], mode: str) -> Optional[f
     if mode == "RMS":
         return value / math.sqrt(2.0)
     return value
-
 
 def convert_rms_to_mode(value_rms: Optional[float], mode: str) -> Optional[float]:
     if value_rms is None:
@@ -385,7 +362,6 @@ def convert_rms_to_mode(value_rms: Optional[float], mode: str) -> Optional[float
         return value_rms * 2.0 * math.sqrt(2.0)
     return value_rms
 
-
 def amplitude_mode_suffix(mode: str) -> str:
     if mode == "Peak":
         return "pk"
@@ -394,7 +370,6 @@ def amplitude_mode_suffix(mode: str) -> str:
     if mode == "RMS":
         return "rms"
     return ""
-
 
 def amplitude_mode_label(mode: str) -> str:
     if mode == "Peak":
@@ -405,7 +380,6 @@ def amplitude_mode_label(mode: str) -> str:
         return "RMS"
     return mode
 
-
 def amplitude_unit_text(base_unit: str, mode: str) -> str:
     suffix = amplitude_mode_suffix(mode)
     if base_unit and suffix:
@@ -413,7 +387,6 @@ def amplitude_unit_text(base_unit: str, mode: str) -> str:
     if base_unit:
         return base_unit
     return suffix or ""
-
 
 # ------------------------------------------------------------
 # Load signals
@@ -494,7 +467,6 @@ def signal_object_to_record(
         source_time_unit=detected_unit,
     )
 
-
 def load_signals_from_session() -> List[SignalRecord]:
     records: List[SignalRecord] = []
     signals_dict = st.session_state.get("signals", {})
@@ -510,7 +482,6 @@ def load_signals_from_session() -> List[SignalRecord]:
                 records.append(rec)
 
     return records
-
 
 # ------------------------------------------------------------
 # Spectrum engine
@@ -553,7 +524,6 @@ def _prepare_signal_for_spectrum(
 
     return time_s, y, float(fs)
 
-
 def parabolic_peak_interpolation(
     freq_cpm: np.ndarray,
     amp_peak: np.ndarray,
@@ -578,7 +548,6 @@ def parabolic_peak_interpolation(
     interp_amp = float(y2 - 0.25 * (y1 - y3) * delta)
 
     return interp_freq, interp_amp
-
 
 def compute_spectrum_peak(
     time_s: np.ndarray,
@@ -658,7 +627,6 @@ def compute_spectrum_peak(
         peak_bin_index=peak_bin_index,
     )
 
-
 def compute_spectrum_overall_rms_parseval(
     time_s: np.ndarray,
     y: np.ndarray,
@@ -702,7 +670,6 @@ def compute_spectrum_overall_rms_parseval(
     mean_square = max(mean_square, 0.0)
     return float(np.sqrt(mean_square))
 
-
 # ------------------------------------------------------------
 # Harmonic estimators
 # ------------------------------------------------------------
@@ -739,7 +706,6 @@ def estimate_harmonic_from_waveform_peak(
     amp_peak = float(np.sqrt(a * a + b * b))
     return amp_peak if math.isfinite(amp_peak) else None
 
-
 def find_local_peak_near_1x(
     freq_cpm: np.ndarray,
     amp_peak: np.ndarray,
@@ -759,7 +725,6 @@ def find_local_peak_near_1x(
     idx_candidates = np.where(mask)[0]
     idx = int(idx_candidates[np.argmax(amp_peak[mask])])
     return parabolic_peak_interpolation(freq_cpm, amp_peak, idx)
-
 
 def collect_harmonic_points(
     freq_cpm: np.ndarray,
@@ -801,7 +766,6 @@ def collect_harmonic_points(
 
     return points
 
-
 def choose_harmonics_to_annotate(
     harmonic_points: List[HarmonicPoint],
     label_mode: str,
@@ -835,7 +799,6 @@ def choose_harmonics_to_annotate(
         return unique
 
     return harmonic_points
-
 
 # ------------------------------------------------------------
 # Plot helpers
@@ -964,7 +927,6 @@ def _draw_top_strip(
             align="right",
         )
 
-
 def _draw_right_info_box(
     fig: go.Figure,
     rows: List[Tuple[str, str]],
@@ -1031,7 +993,6 @@ def _draw_right_info_box(
 
         current_top -= row_h
 
-
 def add_harmonic_annotations(
     fig: go.Figure,
     harmonic_points: List[HarmonicPoint],
@@ -1083,7 +1044,6 @@ def add_harmonic_annotations(
                 yanchor="bottom",
                 font=dict(size=10.8, color="#111827"),
             )
-
 
 def add_bearing_fault_annotations(
     fig: go.Figure,
@@ -1140,6 +1100,66 @@ def add_bearing_fault_annotations(
             )
             last_labeled_freq[family] = freq_cpm
 
+def add_bearing_match_markers(
+    fig: go.Figure,
+    matched_peak_markers: List[Dict[str, Any]],
+    amplitude_mode: str,
+    base_unit: str,
+    y_top: float,
+) -> None:
+    if not matched_peak_markers:
+        return
+
+    display_unit_text = amplitude_unit_text(base_unit, amplitude_mode)
+    y_offset = max(0.02 * y_top, 0.05)
+
+    for marker in matched_peak_markers:
+        freq_cpm = float(marker.get("found_cpm", 0.0))
+        amp_peak = float(marker.get("amp_peak", 0.0))
+        amp_display = convert_scalar_peak_to_mode(amp_peak, amplitude_mode)
+        if amp_display is None or not math.isfinite(freq_cpm):
+            continue
+
+        color = str(marker.get("color") or "#dc2626")
+        family = str(marker.get("family") or "")
+        harmonic = int(marker.get("harmonic", 1))
+
+        fig.add_trace(
+            go.Scatter(
+                x=[freq_cpm],
+                y=[amp_display],
+                mode="markers",
+                marker=dict(
+                    symbol="diamond",
+                    size=10 if harmonic == 1 else 8,
+                    color=color,
+                    line=dict(width=1.2, color="#ffffff"),
+                ),
+                hovertemplate=(
+                    f"{family} {harmonic}H<br>"
+                    "Frequency: %{x:.1f} CPM<br>"
+                    + (f"Amplitude: " + "%{y:.3f} " + display_unit_text if display_unit_text else "Amplitude: %{y:.3f}")
+                    + "<extra></extra>"
+                ),
+                showlegend=False,
+                name=f"bearing_match_{family}_{harmonic}",
+            )
+        )
+
+        label_y = min(amp_display + y_offset, y_top * 0.96 if y_top > 0 else amp_display + y_offset)
+        fig.add_annotation(
+            x=freq_cpm,
+            y=label_y,
+            text=f"{family}-{harmonic}H",
+            showarrow=False,
+            xanchor="center",
+            yanchor="bottom",
+            bgcolor="rgba(255,255,255,0.92)",
+            bordercolor=color,
+            borderwidth=1,
+            borderpad=3,
+            font=dict(size=10, color=color),
+        )
 
 def build_spectrum_figure(
     record: SignalRecord,
@@ -1155,6 +1175,7 @@ def build_spectrum_figure(
     harmonic_points_for_labels: List[HarmonicPoint],
     show_bearing_faults: bool,
     bearing_fault_lines: List[Dict[str, Any]],
+    matched_peak_markers: List[Dict[str, Any]],
     show_right_info_box: bool,
     fill_area: bool,
     annotate_peak: bool,
@@ -1288,6 +1309,19 @@ def build_spectrum_figure(
             y_top=y_top,
         )
 
+    if show_bearing_faults and matched_peak_markers:
+        visible_matched_peak_markers = [
+            marker for marker in matched_peak_markers
+            if float(marker.get("found_cpm", 0.0)) <= x_max
+        ]
+        add_bearing_match_markers(
+            fig=fig,
+            matched_peak_markers=visible_matched_peak_markers,
+            amplitude_mode=amplitude_mode,
+            base_unit=record.amplitude_unit,
+            y_top=y_top,
+        )
+
     peak_amp_text = (
         f"{format_number(one_x_display_amp, 3)} {display_unit_text}".strip()
         if one_x_display_amp is not None
@@ -1393,7 +1427,6 @@ def build_spectrum_figure(
 
     return fig
 
-
 def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
     export_fig = go.Figure()
 
@@ -1424,7 +1457,6 @@ def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
 
     export_fig.update_layout(fig.layout)
     return export_fig
-
 
 def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     fig = go.Figure(export_fig)
@@ -1487,9 +1519,6 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
 
     return fig
 
-
-
-
 def build_export_png_bytes(
     fig: go.Figure,
 ) -> Tuple[Optional[bytes], Optional[str]]:
@@ -1507,7 +1536,6 @@ def build_export_png_bytes(
     except Exception as e:
         return None, str(e)
 
-
 # ------------------------------------------------------------
 # Session defaults
 # ------------------------------------------------------------
@@ -1518,7 +1546,6 @@ if "wm_sp_export_store" not in st.session_state:
 if "report_items" not in st.session_state:
     st.session_state.report_items = []
 
-
 # ------------------------------------------------------------
 # Load signals
 # ------------------------------------------------------------
@@ -1527,7 +1554,6 @@ records_all = load_signals_from_session()
 if not records_all:
     st.warning("No se pudieron cargar señales válidas desde `st.session_state['signals']`.")
     st.stop()
-
 
 # ------------------------------------------------------------
 # Sidebar controls
@@ -1654,7 +1680,6 @@ with st.sidebar:
         disabled=not (show_harmonics and show_harmonic_amplitudes),
     )
 
-
     st.markdown("### Bearing Fault Frequencies")
 
     bearing_catalog_options = list_bearing_catalog_options()
@@ -1720,7 +1745,6 @@ with st.sidebar:
         )
     )
 
-
 # ------------------------------------------------------------
 # Prepare signals + multi-panel render
 # ------------------------------------------------------------
@@ -1754,7 +1778,6 @@ def queue_spectrum_to_report(
             "timestamp": primary.timestamp,
         }
     )
-
 
 def render_spectrum_panel(
     primary: SignalRecord,
@@ -1854,6 +1877,7 @@ def render_spectrum_panel(
     )
 
     bearing_fault_lines: List[Dict[str, Any]] = []
+    matched_peak_markers: List[Dict[str, Any]] = []
     bearing_diagnostic_text = ""
     bearing_overlay: Dict[str, Any] = {
         "available": False,
@@ -1887,21 +1911,34 @@ def render_spectrum_panel(
             overlay=bearing_overlay,
             tolerance_pct=bearing_tolerance_pct,
         )
-        bearing_diagnostic_text = str(bearing_assessment.get("narrative") or "").strip()
         bearing_ai = build_bearing_fault_ai_diagnosis(bearing_assessment)
 
-        st.markdown("### AI Bearing Diagnosis")
+        family_color_map = {
+            str(line.get("family")): str(line.get("color"))
+            for line in bearing_fault_lines
+            if line.get("family") is not None
+        }
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.metric("Fault", bearing_ai["fault_type"])
-        with c2:
-            st.metric("Severity", bearing_ai["severity"])
-        with c3:
-            st.metric("Confidence", f"{bearing_ai['confidence']*100:.0f}%")
+        for fam in bearing_assessment.get("matched_families", []):
+            family_name = str(fam.get("family") or "")
+            family_color = family_color_map.get(family_name, "#dc2626")
+            for hit in fam.get("hits", []):
+                matched_peak_markers.append(
+                    {
+                        "family": family_name,
+                        "harmonic": int(hit.get("harmonic", 1)),
+                        "found_cpm": float(hit.get("found_cpm", 0.0)),
+                        "amp_peak": float(hit.get("amp_peak", 0.0)),
+                        "color": family_color,
+                    }
+                )
 
-        st.info(bearing_ai["message"])
-
+        ai_message = str(bearing_ai.get("message") or "").strip()
+        assessment_message = str(bearing_assessment.get("narrative") or "").strip()
+        bearing_diagnostic_text = "\n\n".join(
+            [part for part in [ai_message, assessment_message] if part]
+        ).strip()
+        bearing_ai = build_bearing_fault_ai_diagnosis(bearing_assessment)
 
     text_diag = evaluate_spectrum_diagnostic(
         one_x_amp=one_x_display_amp,
@@ -1931,6 +1968,7 @@ def render_spectrum_panel(
         harmonic_points_for_labels=harmonic_points_for_labels if show_harmonics else [],
         show_bearing_faults=enable_bearing_faults,
         bearing_fault_lines=bearing_fault_lines if enable_bearing_faults else [],
+        matched_peak_markers=matched_peak_markers if enable_bearing_faults else [],
         show_right_info_box=show_right_info_box,
         fill_area=fill_area,
         annotate_peak=annotate_peak,
@@ -2112,7 +2150,6 @@ def render_spectrum_panel(
                 report_notes=spectrum_report_notes,
             )
             st.success("Spectrum enviado al reporte")
-
 
 selected_ids = [
     signal_id
