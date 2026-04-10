@@ -20,6 +20,7 @@ from core.bearing_catalog import (
     build_bearing_fault_overlay_from_catalog,
     build_bearing_fault_overlay_from_nb,
     build_bearing_fault_assessment,
+    build_bearing_fault_ai_diagnosis,
     list_bearing_catalog_options,
 )
 
@@ -1887,6 +1888,20 @@ def render_spectrum_panel(
             tolerance_pct=bearing_tolerance_pct,
         )
         bearing_diagnostic_text = str(bearing_assessment.get("narrative") or "").strip()
+        bearing_ai = build_bearing_fault_ai_diagnosis(bearing_assessment)
+
+        st.markdown("### AI Bearing Diagnosis")
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.metric("Fault", bearing_ai["fault_type"])
+        with c2:
+            st.metric("Severity", bearing_ai["severity"])
+        with c3:
+            st.metric("Confidence", f"{bearing_ai['confidence']*100:.0f}%")
+
+        st.info(bearing_ai["message"])
+
 
     text_diag = evaluate_spectrum_diagnostic(
         one_x_amp=one_x_display_amp,

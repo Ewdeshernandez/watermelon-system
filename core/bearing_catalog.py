@@ -379,3 +379,59 @@ def build_bearing_fault_assessment(
         "unmatched_families": unmatched_families,
         "narrative": narrative,
     }
+
+
+# ----------------------------------------------------------------------
+# AI DIAGNOSIS (Industrial Level)
+# ----------------------------------------------------------------------
+def build_bearing_fault_ai_diagnosis(assessment: Dict[str, Any]) -> Dict[str, Any]:
+    matched = assessment.get("matched_families", [])
+    if not matched:
+        return {
+            "fault_type": "No clear bearing fault",
+            "severity": "Normal",
+            "confidence": 0.0,
+            "message": "No se identifican patrones claros de falla de rodamiento."
+        }
+
+    best = sorted(matched, key=lambda x: (x["hit_count"], sum(h["amp_peak"] for h in x["hits"])), reverse=True)[0]
+
+    family = best["family"]
+    hit_count = best["hit_count"]
+    harmonic_count = best["harmonic_count"]
+
+    total_amp = sum(h["amp_peak"] for h in best["hits"])
+    avg_amp = total_amp / max(len(best["hits"]), 1)
+
+    ratio = hit_count / max(harmonic_count, 1)
+
+    if ratio >= 0.7 and hit_count >= 3:
+        severity = "Severa"
+    elif ratio >= 0.4:
+        severity = "Moderada"
+    else:
+        severity = "Incipiente"
+
+    fault_map = {
+        "BPFO": "Outer race defect",
+        "BPFI": "Inner race defect",
+        "BSF": "Rolling element defect",
+        "FTF": "Cage defect",
+    }
+
+    fault_type = fault_map.get(family, family)
+
+    confidence = min(1.0, 0.4 + ratio + (avg_amp / (avg_amp + 1e-6)) * 0.2)
+
+    message = (
+        f"Diagnóstico automático: {fault_type} con severidad {severity}. "
+        f"Se detectaron {hit_count} armónicos relevantes de {family}, "
+        f"indicando patrón consistente de falla."
+    )
+
+    return {
+        "fault_type": fault_type,
+        "severity": severity,
+        "confidence": confidence,
+        "message": message,
+    }
