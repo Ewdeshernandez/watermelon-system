@@ -18,16 +18,24 @@ FAULT_COLORS = {
     "FTF": FTF_COLOR,
 }
 
-# Seed inicial de catálogo. Puedes ampliar este diccionario fácilmente.
-# Los factores están en órdenes respecto a 1X.
-BEARING_CATALOG: Dict[str, Dict[str, float]] = {
-    "6319": {"BPFO": 3.0960, "BPFI": 4.9040, "BSF": 4.1980, "FTF": 0.3870},
-    "SKF6319": {"BPFO": 3.0960, "BPFI": 4.9040, "BSF": 4.1980, "FTF": 0.3870},
+BEARING_CATALOG: Dict[str, Dict[str, Any]] = {
+    "SKF 6319": {
+        "manufacturer": "SKF",
+        "model": "6319",
+        "display_name": "SKF 6319",
+        "factors": {"BPFO": 3.0960, "BPFI": 4.9040, "BSF": 4.1980, "FTF": 0.3870},
+    },
+    "SKF 6319/C3": {
+        "manufacturer": "SKF",
+        "model": "6319/C3",
+        "display_name": "SKF 6319/C3",
+        "factors": {"BPFO": 3.0960, "BPFI": 4.9040, "BSF": 4.1980, "FTF": 0.3870},
+    },
 }
 
 
-def normalize_bearing_code(code: str) -> str:
-    return "".join(ch for ch in str(code or "").upper() if ch.isalnum())
+def list_bearing_catalog_options() -> List[str]:
+    return sorted(BEARING_CATALOG.keys())
 
 
 def format_number(value: Any, digits: int = 3, fallback: str = "—") -> str:
@@ -42,64 +50,40 @@ def format_number(value: Any, digits: int = 3, fallback: str = "—") -> str:
         return fallback
 
 
-def resolve_bearing_factors(
-    model_code: str,
-    custom_factors: Optional[Dict[str, float]] = None,
-) -> Tuple[Optional[Dict[str, float]], str]:
-    if custom_factors:
-        clean = {}
-        for key in ["BPFO", "BPFI", "BSF", "FTF"]:
-            val = custom_factors.get(key)
-            if val is None:
-                continue
-            try:
-                fval = float(val)
-                if math.isfinite(fval) and fval > 0:
-                    clean[key] = fval
-            except Exception:
-                pass
-        if len(clean) == 4:
-            return clean, "manual"
-
-    normalized = normalize_bearing_code(model_code)
-    if normalized in BEARING_CATALOG:
-        return dict(BEARING_CATALOG[normalized]), "catalog"
-
-    return None, "missing"
+def get_catalog_entry(selected_name: str) -> Optional[Dict[str, Any]]:
+    name = str(selected_name or "").strip()
+    if not name:
+        return None
+    return BEARING_CATALOG.get(name)
 
 
 def build_bearing_fault_overlay(
-    model_code: str,
+    selected_name: str,
     rpm: Optional[float],
-    harmonic_count: int = 5,
-    custom_factors: Optional[Dict[str, float]] = None,
+    harmonic_count: int = 3,
 ) -> Dict[str, Any]:
-    factors, source = resolve_bearing_factors(model_code=model_code, custom_factors=custom_factors)
-    model_display = str(model_code or "").strip()
+    entry = get_catalog_entry(selected_name)
+    model_display = str(selected_name or "").strip()
 
     if rpm is None or float(rpm) <= 0:
         return {
             "available": False,
             "model_display": model_display or "—",
-            "source": source,
             "families": [],
             "lines": [],
             "message": "No se pudo calcular frecuencias de falla de rodamiento porque la señal no tiene RPM válido.",
         }
 
-    if factors is None:
+    if entry is None:
         return {
             "available": False,
             "model_display": model_display or "—",
-            "source": source,
             "families": [],
             "lines": [],
-            "message": (
-                "No se encontró el rodamiento en el catálogo interno. "
-                "Puedes ampliar el catálogo o ingresar factores manuales de BPFO, BPFI, BSF y FTF."
-            ),
+            "message": "No se encontró el rodamiento seleccionado en el catálogo interno.",
         }
 
+    factors = dict(entry["factors"])
     rpm_value = float(rpm)
     harmonic_count = max(1, int(harmonic_count))
 
@@ -108,25 +92,29 @@ def build_bearing_fault_overlay(
 
     for family in ["BPFO", "BPFI", "BSF", "FTF"]:
         factor = float(factors[family])
+        base_freq_cpm = rpm_value * factor
         color = FAULT_COLORS[family]
         lines = []
         for harmonic in range(1, harmonic_count + 1):
-            freq_cpm = rpm_value * factor * harmonic
+            freq_cpm = base_freq_cpm * harmonic
             line = {
                 "family": family,
                 "harmonic": harmonic,
                 "factor": factor,
+                "base_freq_cpm": base_freq_cpm,
                 "freq_cpm": freq_cpm,
-                "label": f"{family}-{harmonic}H",
+                "label": f"{harmonic}x {family}",
                 "color": color,
             }
             lines.append(line)
+
             flat_lines.append(line)
 
         families.append(
             {
                 "family": family,
                 "factor": factor,
+                "base_freq_cpm": base_freq_cpm,
                 "color": color,
                 "lines": lines,
             }
@@ -134,8 +122,7 @@ def build_bearing_fault_overlay(
 
     return {
         "available": True,
-        "model_display": model_display or "—",
-        "source": source,
+        "model_display": entry.get("display_name", model_display or "—"),
         "families": families,
         "lines": flat_lines,
         "message": "",
@@ -188,11 +175,7 @@ def build_bearing_fault_assessment(
         }
 
     finite_amp = amp_peak[np.isfinite(amp_peak)]
-    if finite_amp.size == 0:
-        ref_amp = 0.0
-    else:
-        ref_amp = float(np.max(finite_amp))
-
+    ref_amp = float(np.max(finite_amp)) if finite_amp.size else 0.0
     amplitude_threshold = ref_amp * max(0.0, float(min_relative_amp))
 
     matched_families: List[Dict[str, Any]] = []
@@ -225,11 +208,12 @@ def build_bearing_fault_assessment(
                 }
             )
 
-        if len(hits) >= 2:
+        if len(hits) >= 1:
             matched_families.append(
                 {
                     "family": family,
                     "factor": float(family_block["factor"]),
+                    "base_freq_cpm": float(family_block["base_freq_cpm"]),
                     "hit_count": len(hits),
                     "harmonic_count": len(family_block.get("lines", [])),
                     "hits": hits,
@@ -240,30 +224,30 @@ def build_bearing_fault_assessment(
 
     model_display = overlay.get("model_display", "—")
     family_factors_text = ", ".join(
-        f"{fam['family']}={format_number(fam['factor'], 3)}X"
+        f"{fam['family']}={format_number(fam['base_freq_cpm'], 1)} CPM"
         for fam in overlay.get("families", [])
     )
 
     if matched_families:
         matched_txt = "; ".join(
-            f"{fam['family']} ({fam['hit_count']}/{fam['harmonic_count']} armónicos dentro de ±{format_number(tolerance_pct, 1)}%)"
+            f"{fam['family']} ({fam['hit_count']}/{fam['harmonic_count']} armónicos)"
             for fam in matched_families
         )
         if unmatched_families:
             unmatched_txt = ", ".join(unmatched_families)
             narrative = (
-                f"Se calcularon las frecuencias de falla del rodamiento {model_display} "
+                f"Se calcularon las frecuencias características del rodamiento {model_display} "
                 f"({family_factors_text}). Se observa coincidencia espectral con {matched_txt}. "
                 f"No se observa coincidencia clara con {unmatched_txt}."
             )
         else:
             narrative = (
-                f"Se calcularon las frecuencias de falla del rodamiento {model_display} "
+                f"Se calcularon las frecuencias características del rodamiento {model_display} "
                 f"({family_factors_text}). Se observa coincidencia espectral con {matched_txt}."
             )
     else:
         narrative = (
-            f"Se calcularon las frecuencias de falla del rodamiento {model_display} "
+            f"Se calcularon las frecuencias características del rodamiento {model_display} "
             f"({family_factors_text}). No se observa coincidencia clara con BPFO, BPFI, BSF ni FTF "
             f"dentro de una tolerancia de ±{format_number(tolerance_pct, 1)}%."
         )
