@@ -1685,6 +1685,17 @@ with st.sidebar:
         )
     )
 
+    bearing_manual_rpm = float(
+        st.number_input(
+            "Bearing speed RPM (manual)",
+            min_value=0.1,
+            value=float(primary_for_defaults.rpm) if primary_for_defaults.rpm is not None and primary_for_defaults.rpm > 0 else 1490.0,
+            step=1.0,
+            format="%.1f",
+            disabled=not enable_bearing_faults,
+        )
+    )
+
     bearing_harmonic_count = int(
         st.number_input(
             "Bearing harmonics per fault",
@@ -1768,6 +1779,7 @@ def render_spectrum_panel(
     show_right_info_box: bool,
     enable_bearing_faults: bool,
     bearing_model: str,
+    bearing_manual_rpm: float,
     bearing_harmonic_count: int,
     bearing_tolerance_pct: float,
 ) -> None:
@@ -1842,18 +1854,28 @@ def render_spectrum_panel(
 
     bearing_fault_lines: List[Dict[str, Any]] = []
     bearing_diagnostic_text = ""
+    bearing_overlay: Dict[str, Any] = {
+        "available": False,
+        "model_display": "—",
+        "families": [],
+        "lines": [],
+        "message": "",
+    }
+    bearing_rpm_used: Optional[float] = None
 
     if enable_bearing_faults:
+        bearing_rpm_used = float(bearing_manual_rpm) if bearing_manual_rpm is not None and bearing_manual_rpm > 0 else None
+
         if bearing_calc_mode == "Catalog":
             bearing_overlay = build_bearing_fault_overlay_from_catalog(
                 selected_name=bearing_model,
-                rpm=primary.rpm,
+                rpm=bearing_rpm_used,
                 harmonic_count=bearing_harmonic_count,
             )
         else:
             bearing_overlay = build_bearing_fault_overlay_from_nb(
                 nb=bearing_nb,
-                rpm=primary.rpm,
+                rpm=bearing_rpm_used,
                 harmonic_count=bearing_harmonic_count,
             )
 
@@ -1937,6 +1959,7 @@ def render_spectrum_panel(
             show_right_info_box,
             enable_bearing_faults,
             bearing_model,
+            bearing_manual_rpm,
             bearing_harmonic_count,
             bearing_tolerance_pct,
             primary.rpm,
@@ -2002,7 +2025,7 @@ def render_spectrum_panel(
         info_cols = st.columns(4)
 
         with info_cols[0]:
-            st.metric("RPM used", f"{primary.rpm:.1f}" if primary.rpm else "—")
+            st.metric("RPM used", format_number(bearing_rpm_used, 1))
 
         with info_cols[1]:
             st.metric("Mode", bearing_mode_label)
@@ -2115,6 +2138,7 @@ for panel_index, primary in enumerate(selected_records):
         show_right_info_box=show_right_info_box,
         enable_bearing_faults=enable_bearing_faults,
         bearing_model=bearing_model,
+        bearing_manual_rpm=bearing_manual_rpm,
         bearing_harmonic_count=bearing_harmonic_count,
         bearing_tolerance_pct=bearing_tolerance_pct,
     )
