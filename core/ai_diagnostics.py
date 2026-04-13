@@ -110,16 +110,16 @@ def build_unified_spectrum_ai_diagnosis(
 
     if has_bearing_fault and secondary_fault:
         parts.append(
-            f"Diagnóstico global: la condición dominante del espectro es consistente con {primary_fault.lower()}, "
+            f"la condición dominante del espectro es consistente con {primary_fault.lower()}, "
             f"con evidencia secundaria compatible con {secondary_fault.lower()}."
         )
     elif has_bearing_fault:
         parts.append(
-            f"Diagnóstico global: el patrón más relevante es compatible con {primary_fault.lower()}."
+            f"el patrón más relevante es compatible con {primary_fault.lower()}."
         )
     elif spectrum_headline:
         parts.append(
-            f"Diagnóstico global: la condición dominante del espectro es consistente con {primary_fault.lower()}."
+            f"la condición dominante del espectro es consistente con {primary_fault.lower()}."
         )
 
     if spectrum_narrative:
