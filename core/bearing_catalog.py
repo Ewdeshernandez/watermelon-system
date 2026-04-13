@@ -424,7 +424,7 @@ def build_bearing_fault_ai_diagnosis(assessment: Dict[str, Any]) -> Dict[str, An
     confidence = min(1.0, 0.4 + ratio + (avg_amp / (avg_amp + 1e-6)) * 0.2)
 
     message = (
-        f"Diagnóstico automático: {fault_type} con severidad {severity}. "
+        f"{fault_type} con severidad {severity}. "
         f"Se detectaron {hit_count} armónicos relevantes de {family}, "
         f"indicando patrón consistente de falla."
     )
