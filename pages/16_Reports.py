@@ -558,7 +558,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             figure_render_error = "La figura no traía image_bytes pre-renderizados"
 
         caption = f"Figura {idx}. {item.get('title') or f'Figura {idx}'}"
-        notes = item.get("notes") or "Sin interpretación técnica todavía."
+        notes = (item.get("notes") or "").strip()
 
         if png_bytes is not None:
             img_w, img_h = _fit_image_dimensions(png_bytes, max_img_width, max_img_height)
@@ -569,7 +569,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 Spacer(1, 0.18 * cm),
                 img,
                 Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]),
-                Paragraph(_paragraph_safe(notes), styles["WMFigureText"]),
+                Paragraph(_paragraph_safe(notes), styles["WMFigureText"]) if notes else Spacer(1, 0.01 * cm),
                 Spacer(1, 0.24 * cm),
             ]
         else:
@@ -831,7 +831,7 @@ with p2:
         st.markdown('<div class="wm-note">No hay figuras agregadas todavía.</div>', unsafe_allow_html=True)
     else:
         for index, item in enumerate(items, start=1):
-            summary_note = item["notes"][:240] + ("..." if len(item["notes"]) > 240 else "") if item["notes"] else "Sin interpretación técnica todavía."
+            summary_note = item["notes"][:240] + ("..." if len(item["notes"]) > 240 else "") if item["notes"] else ""
             badge_class = _type_badge_class(item["type"])
             st.markdown(
                 f"""
