@@ -16,6 +16,7 @@ import streamlit as st
 
 from core.auth import require_login, render_user_menu
 from core.spectrum_diagnostics import evaluate_spectrum_diagnostic, build_spectrum_report_notes
+from core.ai_diagnostics import build_unified_spectrum_ai_diagnosis
 from core.bearing_catalog import (
     build_bearing_fault_overlay_from_catalog,
     build_bearing_fault_overlay_from_nb,
@@ -1879,6 +1880,8 @@ def render_spectrum_panel(
     bearing_fault_lines: List[Dict[str, Any]] = []
     matched_peak_markers: List[Dict[str, Any]] = []
     bearing_diagnostic_text = ""
+    bearing_assessment: Dict[str, Any] = {}
+    bearing_ai: Dict[str, Any] = {}
     bearing_overlay: Dict[str, Any] = {
         "available": False,
         "model_display": "—",
@@ -1938,7 +1941,6 @@ def render_spectrum_panel(
         bearing_diagnostic_text = "\n\n".join(
             [part for part in [ai_message, assessment_message] if part]
         ).strip()
-        bearing_ai = build_bearing_fault_ai_diagnosis(bearing_assessment)
 
     text_diag = evaluate_spectrum_diagnostic(
         one_x_amp=one_x_display_amp,
@@ -1947,10 +1949,24 @@ def render_spectrum_panel(
         dominant_peak_freq_cpm=spectrum.peak_freq_cpm,
         dominant_peak_amp=spectrum.peak_amp_peak,
         rpm=primary.rpm,
-        bearing_text=bearing_diagnostic_text or None,
+        bearing_text=None,
     )
-    semaforo_status = text_diag["status"]
-    semaforo_color = text_diag["color"]
+
+    unified_diag = build_unified_spectrum_ai_diagnosis(
+        text_diag,
+        bearing_enabled=enable_bearing_faults,
+        bearing_ai=bearing_ai,
+        bearing_assessment=bearing_assessment,
+    )
+
+    severity_color_map = {
+        "Normal": "#16a34a",
+        "Alerta": "#f59e0b",
+        "Moderada": "#f59e0b",
+        "Severa": "#dc2626",
+    }
+    semaforo_status = str(unified_diag.get("severity") or "Alerta")
+    semaforo_color = severity_color_map.get(semaforo_status, "#2563eb")
 
     logo_uri = get_logo_data_uri(LOGO_PATH)
 
@@ -2045,16 +2061,16 @@ def render_spectrum_panel(
     )
 
     helper_title = f"Spectrum Diagnostic Helper · Panel {panel_index + 1}"
-    helper_subtitle = text_diag["headline"]
+    helper_subtitle = str(unified_diag.get("title") or text_diag["headline"]).strip()
 
     st.markdown("")
 
     helper_cols = [
-        (f"Semáforo: {semaforo_status}", semaforo_color),
-        (f"1X Amp: {format_number(one_x_display_amp, 3)} {amplitude_unit_text(primary.amplitude_unit, amplitude_mode)}".strip(), None),
-        (f"Overall: {format_number(overall_spec_rms, 3)} {amplitude_unit_text(primary.amplitude_unit, amplitude_mode)}".strip(), None),
+        (f"Severidad: {semaforo_status}", semaforo_color),
+        (f"Confianza: {int(unified_diag.get('confidence_pct', 0))}%", None),
+        (f"Falla primaria: {str(unified_diag.get('primary_fault') or '—')}", None),
+        (f"Falla secundaria: {str(unified_diag.get('secondary_fault') or '—')}", None),
         (f"Peak Freq: {format_number(spectrum.peak_freq_cpm, 1)} CPM", None),
-        (f"Harmonics: {len(all_harmonic_points)}", None),
     ]
 
     from core.module_patterns import helper_card
@@ -2100,7 +2116,7 @@ def render_spectrum_panel(
         if rows:
             import pandas as pd
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    st.info(text_diag["narrative"])
+    st.info(str(unified_diag.get("narrative") or text_diag["narrative"]))
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
 
@@ -2138,7 +2154,7 @@ def render_spectrum_panel(
             except Exception:
                 png_bytes_for_report = None
 
-            spectrum_report_notes = build_spectrum_report_notes(text_diag)
+            spectrum_report_notes = build_spectrum_report_notes(unified_diag)
             if not spectrum_report_notes.strip():
                 spectrum_report_notes = "Interpretación técnica pendiente para este espectro."
 

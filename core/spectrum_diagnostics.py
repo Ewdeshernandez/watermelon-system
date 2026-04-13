@@ -1,21 +1,26 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 SAFE_COLOR = "#16a34a"
 WARNING_COLOR = "#f59e0b"
 DANGER_COLOR = "#dc2626"
 
 
-def build_spectrum_report_notes(text_diag: Dict[str, str]) -> str:
+def build_spectrum_report_notes(text_diag: Dict[str, Any]) -> str:
+    title = str(text_diag.get("title", "") or "").strip()
     headline = str(text_diag.get("headline", "") or "").strip()
     narrative = str(text_diag.get("narrative", "") or "").strip()
 
     blocks = []
-    if headline:
+    if title:
+        blocks.append(title)
+    elif headline:
         blocks.append(headline)
+
     if narrative:
         blocks.append(narrative)
+
     return "\n\n".join(blocks).strip()
 
 
@@ -104,7 +109,12 @@ def evaluate_spectrum_diagnostic(
             "Se recomienda inspeccionar rigidez de soportes, condición de anclajes, pedestal o base, "
             "y contrastar con la forma de onda para buscar impactos o modulación."
         )
-        return {"status": status, "color": color, "headline": headline, "narrative": _append_bearing_text(narrative, bearing_text)}
+        return {
+            "status": status,
+            "color": color,
+            "headline": headline,
+            "narrative": _append_bearing_text(narrative, bearing_text),
+        }
 
     if ratio_2x >= 0.35 or (ratio_2x >= 0.25 and ratio_3x >= 0.18):
         status = "WARNING"
@@ -115,7 +125,12 @@ def evaluate_spectrum_diagnostic(
             "lo que puede indicar desalineación o comportamiento asociado al tren de potencia. "
             "Se recomienda revisar alineación, condición del acople y correlacionar con mediciones radiales, axiales y análisis de fase."
         )
-        return {"status": status, "color": color, "headline": headline, "narrative": _append_bearing_text(narrative, bearing_text)}
+        return {
+            "status": status,
+            "color": color,
+            "headline": headline,
+            "narrative": _append_bearing_text(narrative, bearing_text),
+        }
 
     if one_x > 0 and near_1x and ratio_2x < 0.25 and ratio_high < 0.15:
         status = "WARNING"
@@ -127,7 +142,12 @@ def evaluate_spectrum_diagnostic(
             "Se recomienda verificar condición de balanceo, revisar consistencia de fase entre arranques "
             "y correlacionar con los módulos Polar y Bode antes de definir una intervención."
         )
-        return {"status": status, "color": color, "headline": headline, "narrative": _append_bearing_text(narrative, bearing_text)}
+        return {
+            "status": status,
+            "color": color,
+            "headline": headline,
+            "narrative": _append_bearing_text(narrative, bearing_text),
+        }
 
     if overall > 0 and dom_amp > 0 and (overall / max(dom_amp, 1e-9)) > 0.65 and strong_harmonic_count <= 2:
         status = "WARNING"
@@ -139,7 +159,12 @@ def evaluate_spectrum_diagnostic(
             "Se recomienda revisar condición de proceso, excitación inducida por flujo, "
             "posible cavitación, turbulencia o fuentes no estacionarias."
         )
-        return {"status": status, "color": color, "headline": headline, "narrative": _append_bearing_text(narrative, bearing_text)}
+        return {
+            "status": status,
+            "color": color,
+            "headline": headline,
+            "narrative": _append_bearing_text(narrative, bearing_text),
+        }
 
     headline = "Sin patrón anormal dominante"
     narrative = (
@@ -147,4 +172,9 @@ def evaluate_spectrum_diagnostic(
         "desalineación o holgura mecánica. Se recomienda continuar el monitoreo y correlacionar con forma de onda, "
         "Bode, Polar y condición operativa antes de concluir un mecanismo de falla."
     )
-    return {"status": status, "color": color, "headline": headline, "narrative": _append_bearing_text(narrative, bearing_text)}
+    return {
+        "status": status,
+        "color": color,
+        "headline": headline,
+        "narrative": _append_bearing_text(narrative, bearing_text),
+    }

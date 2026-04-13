@@ -22,6 +22,18 @@ def _safe_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _unique_texts(values: List[str]) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for v in values:
+        txt = _safe_text(v)
+        key = txt.lower()
+        if txt and key not in seen:
+            out.append(txt)
+            seen.add(key)
+    return out
+
+
 def build_unified_spectrum_ai_diagnosis(
     spectrum_diag: Dict[str, Any],
     *,
@@ -49,11 +61,15 @@ def build_unified_spectrum_ai_diagnosis(
     )
 
     matched_families = bearing_assessment.get("matched_families", []) or []
-    matched_family_names = [str(item.get("family") or "") for item in matched_families if item.get("family")]
+    matched_family_names = [
+        str(item.get("family") or "")
+        for item in matched_families
+        if item.get("family")
+    ]
+    matched_family_names = _unique_texts(matched_family_names)
 
     spectrum_rank = _status_rank(spectrum_status)
     bearing_rank = _bearing_severity_rank(bearing_severity)
-
     global_rank = max(spectrum_rank, bearing_rank)
     global_severity = _global_severity_name(global_rank)
 
@@ -92,32 +108,34 @@ def build_unified_spectrum_ai_diagnosis(
 
     parts: List[str] = []
 
-    if spectrum_narrative:
-        if has_bearing_fault:
-            parts.append(
-                f"Diagnóstico global: la firma dominante del espectro es consistente con {primary_fault.lower()}, "
-                f"y adicionalmente se observan indicios de {secondary_fault.lower()}."
-            )
-        else:
-            parts.append(
-                f"Diagnóstico global: la condición dominante del espectro es consistente con {primary_fault.lower()}."
-            )
+    if has_bearing_fault and secondary_fault:
+        parts.append(
+            f"Diagnóstico global: la condición dominante del espectro es consistente con {primary_fault.lower()}, "
+            f"con evidencia secundaria compatible con {secondary_fault.lower()}."
+        )
+    elif has_bearing_fault:
+        parts.append(
+            f"Diagnóstico global: el patrón más relevante es compatible con {primary_fault.lower()}."
+        )
+    elif spectrum_headline:
+        parts.append(
+            f"Diagnóstico global: la condición dominante del espectro es consistente con {primary_fault.lower()}."
+        )
 
     if spectrum_narrative:
         parts.append(spectrum_narrative)
 
-    if has_bearing_fault:
-        if bearing_fault_message:
-            parts.append(bearing_fault_message)
+    if has_bearing_fault and bearing_fault_message:
+        parts.append(bearing_fault_message)
 
-        if matched_family_names:
-            unique_names = []
-            for name in matched_family_names:
-                if name not in unique_names:
-                    unique_names.append(name)
-            parts.append(
-                "Familias coincidentes de rodamiento detectadas: " + ", ".join(unique_names) + "."
-            )
+    assessment_narrative = _safe_text(bearing_assessment.get("narrative"))
+    if has_bearing_fault and assessment_narrative:
+        parts.append(assessment_narrative)
+
+    if has_bearing_fault and matched_family_names:
+        parts.append(
+            "Familias coincidentes de rodamiento detectadas: " + ", ".join(matched_family_names) + "."
+        )
 
     narrative = "\n\n".join([p for p in parts if p]).strip()
     if not narrative:
@@ -128,6 +146,7 @@ def build_unified_spectrum_ai_diagnosis(
         contributors.append(spectrum_headline)
     if has_bearing_fault:
         contributors.append(bearing_fault_type)
+    contributors = _unique_texts(contributors)
 
     return {
         "title": title,
@@ -136,5 +155,6 @@ def build_unified_spectrum_ai_diagnosis(
         "primary_fault": primary_fault,
         "secondary_fault": secondary_fault,
         "contributors": contributors,
+        "headline": title,
         "narrative": narrative,
     }
