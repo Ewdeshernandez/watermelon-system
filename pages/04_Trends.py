@@ -1482,32 +1482,6 @@ operational_records_all: List[OperationalRecord] = list(st.session_state.get("op
 operational_records_all = sorted(operational_records_all, key=lambda r: (r.machine, r.variable, r.file_name))
 
 
-# ================================
-# MACHINE DIAGNOSTIC CONTEXT (Trends)
-# ================================
-st.markdown("### Machine Diagnostic Context (Trends)")
-
-asset_type = st.selectbox(
-    "Asset Type",
-    ["Seleccionar...", "Motor", "Bomba", "Compresor", "Turbina", "Generador", "Otro"]
-)
-
-machine_description = st.text_area(
-    "Machine Description",
-    placeholder="Ej: Turbogenerador LM6000 acoplado a generador Brush..."
-)
-
-if asset_type == "Seleccionar..." or not machine_description.strip():
-    st.warning("Debe definir el contexto de máquina para habilitar diagnóstico en Trends.")
-    st.stop()
-
-# Guardar en session_state para diagnóstico
-st.session_state["asset_context"] = {
-    "type": asset_type,
-    "description": machine_description
-}
-
-
 if not records_all and not operational_records_all:
     st.warning("Cargue al menos un CSV de tendencia o un CSV de data operativa en este módulo.")
     st.stop()
@@ -1539,6 +1513,16 @@ if trend_context_errors:
     for msg in trend_context_errors:
         st.warning(msg)
     st.stop()
+
+st.session_state["asset_context"] = {
+    "type": st.session_state.wm_tr_asset_type,
+    "description": st.session_state.wm_tr_machine_description.strip(),
+    "asset_type": st.session_state.wm_tr_asset_type,
+    "machine_configuration": st.session_state.wm_tr_machine_configuration,
+    "primary_equipment": st.session_state.wm_tr_primary_equipment,
+    "secondary_equipment": st.session_state.wm_tr_secondary_equipment,
+    "machine_description": st.session_state.wm_tr_machine_description.strip(),
+}
 
 
 def push_linked_bode_context(records: List[TrendRecord], metric_key: str) -> None:
