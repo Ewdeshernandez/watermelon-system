@@ -16,6 +16,15 @@ from reportlab.lib.utils import ImageReader
 from reportlab.platypus import Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer
 
 from core.auth import require_login, render_user_menu
+from core.report_state import (
+    clear_report_state,
+    delete_named_report_draft,
+    list_report_drafts,
+    load_named_report_draft,
+    load_report_state,
+    save_named_report_draft,
+    save_report_state,
+)
 
 
 st.set_page_config(page_title="Watermelon System | Reports", layout="wide")
@@ -188,6 +197,39 @@ st.markdown(
 )
 
 
+DEFAULT_REPORT_META = {
+    "report_title": "REPORTE DE MONITOREO EN LÍNEA",
+    "client": "",
+    "asset": "",
+    "unit": "",
+    "location": "",
+    "prepared_by": "",
+    "reviewed_by": "",
+    "prepared_role": "Ingeniero de diagnóstico",
+    "reviewed_role": "Revisión técnica",
+    "period": "",
+    "report_date": TODAY_STR,
+    "consecutive": "",
+    "service_objective": "",
+    "service_development": "",
+    "recommendations": "",
+}
+
+if "report_state_loaded" not in st.session_state:
+    persisted_state = load_report_state()
+
+    persisted_items = persisted_state.get("items", [])
+    persisted_meta = persisted_state.get("meta", {})
+
+    st.session_state["report_items"] = persisted_items if isinstance(persisted_items, list) else []
+    merged_meta = dict(DEFAULT_REPORT_META)
+    if isinstance(persisted_meta, dict):
+        merged_meta.update(persisted_meta)
+    if not merged_meta.get("report_date"):
+        merged_meta["report_date"] = TODAY_STR
+    st.session_state["report_meta"] = merged_meta
+    st.session_state["report_state_loaded"] = True
+
 if "report_items" not in st.session_state:
     st.session_state["report_items"] = []
 
@@ -195,25 +237,11 @@ if "report_pdf_bytes" not in st.session_state:
     st.session_state["report_pdf_bytes"] = None
 if "report_pdf_error" not in st.session_state:
     st.session_state["report_pdf_error"] = None
+if "report_draft_name_value" not in st.session_state:
+    st.session_state["report_draft_name_value"] = ""
 
 if "report_meta" not in st.session_state:
-    st.session_state["report_meta"] = {
-        "report_title": "REPORTE DE MONITOREO EN LÍNEA",
-        "client": "",
-        "asset": "",
-        "unit": "",
-        "location": "",
-        "prepared_by": "",
-        "reviewed_by": "",
-        "prepared_role": "Ingeniero de diagnóstico",
-        "reviewed_role": "Revisión técnica",
-        "period": "",
-        "report_date": TODAY_STR,
-        "consecutive": "",
-        "service_objective": "",
-        "service_development": "",
-        "recommendations": "",
-    }
+    st.session_state["report_meta"] = dict(DEFAULT_REPORT_META)
 
 if not st.session_state["report_meta"].get("report_date"):
     st.session_state["report_meta"]["report_date"] = TODAY_STR
@@ -267,6 +295,7 @@ def _persist_items(items: List[Dict[str, Any]]) -> None:
 def _get_items() -> List[Dict[str, Any]]:
     items = _normalize_report_items(st.session_state.get("report_items", []))
     _persist_items(items)
+    save_report_state(items=items, meta=st.session_state.get("report_meta", {}))
     return items
 
 
@@ -289,6 +318,7 @@ def _remove_item(item_id: str) -> None:
 
 def _clear_all_items() -> None:
     st.session_state["report_items"] = []
+    clear_report_state()
 
 
 def _type_badge(item_type: str) -> str:
@@ -666,6 +696,100 @@ if pdf_error:
 
 st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
 
+drafts = list_report_drafts()
+
+st.markdown('<div class="wm-section-title">Borradores del reporte</div>', unsafe_allow_html=True)
+
+d1, d2, d3, d4 = st.columns([1.9, 1.1, 1.1, 1.1])
+with d1:
+    default_draft_name = (
+        st.session_state.get("report_draft_name_value", "").strip()
+        or meta.get("consecutive")
+        or meta.get("asset")
+        or "reporte_actual"
+    )
+    if not st.session_state.get("report_draft_name_value"):
+        st.session_state["report_draft_name_value"] = default_draft_name
+
+    draft_name = st.text_input(
+        "Nombre del borrador",
+        key="report_draft_name_value",
+    )
+with d2:
+    st.write("")
+    st.write("")
+    if st.button("Guardar borrador", use_container_width=True):
+        saved_name = save_named_report_draft(
+            draft_name=draft_name,
+            items=st.session_state.get("report_items", []),
+            meta=st.session_state.get("report_meta", {}),
+        )
+        save_report_state(items=st.session_state.get("report_items", []), meta=st.session_state.get("report_meta", {}))
+        st.success(f"Borrador guardado: {saved_name}")
+        st.rerun()
+with d3:
+    st.write("")
+    st.write("")
+    if st.button("Duplicar borrador", use_container_width=True):
+        base_name = (draft_name or "reporte_actual").strip()
+        duplicate_name = f"{base_name}_copia"
+        saved_name = save_named_report_draft(
+            draft_name=duplicate_name,
+            items=st.session_state.get("report_items", []),
+            meta=st.session_state.get("report_meta", {}),
+        )
+        st.success(f"Borrador duplicado: {saved_name}")
+        st.rerun()
+with d4:
+    st.write("")
+    st.write("")
+    if st.button("Nuevo reporte", use_container_width=True):
+        st.session_state["report_items"] = []
+        st.session_state["report_meta"] = dict(DEFAULT_REPORT_META)
+        st.session_state["report_pdf_bytes"] = None
+        st.session_state["report_pdf_error"] = None
+        clear_report_state()
+        save_report_state(items=st.session_state["report_items"], meta=st.session_state["report_meta"])
+        st.rerun()
+
+d5, d6, d7 = st.columns([2.2, 1.1, 1.1])
+with d5:
+    selected_draft = st.selectbox(
+        "Borradores existentes",
+        options=drafts if drafts else ["—"],
+        index=0,
+        key="report_selected_draft",
+    )
+with d6:
+    st.write("")
+    st.write("")
+    if st.button("Cargar borrador", use_container_width=True, disabled=not drafts or selected_draft == "—"):
+        loaded = load_named_report_draft(selected_draft)
+        merged_meta = dict(DEFAULT_REPORT_META)
+        if isinstance(loaded.get("meta"), dict):
+            merged_meta.update(loaded["meta"])
+        if not merged_meta.get("report_date"):
+            merged_meta["report_date"] = TODAY_STR
+
+        st.session_state["report_items"] = loaded.get("items", [])
+        st.session_state["report_meta"] = merged_meta
+        st.session_state["report_pdf_bytes"] = None
+        st.session_state["report_pdf_error"] = None
+        save_report_state(items=st.session_state["report_items"], meta=st.session_state["report_meta"])
+        st.success(f"Borrador cargado: {selected_draft}")
+        st.rerun()
+with d7:
+    st.write("")
+    st.write("")
+    if st.button("Eliminar borrador", use_container_width=True, disabled=not drafts or selected_draft == "—"):
+        delete_named_report_draft(selected_draft)
+        if st.session_state.get("report_draft_name_value") == selected_draft:
+            pass
+        st.success(f"Borrador eliminado: {selected_draft}")
+        st.rerun()
+
+st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
+
 st.markdown('<div class="wm-section-title">Metadatos del reporte</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="wm-meta-hint">La fecha del reporte se carga automáticamente con la fecha actual. El periodo evaluado es opcional y vale la pena cuando el servicio corresponde a una campaña, ventana operativa o rango de fechas.</div>',
@@ -725,6 +849,7 @@ with t2:
     meta["recommendations"] = st.text_area("Recomendaciones", key="report_meta_recommendations", value=meta["recommendations"], height=190)
 
 st.session_state["report_meta"] = meta
+save_report_state(items=st.session_state.get("report_items", []), meta=st.session_state["report_meta"])
 
 st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
 st.markdown('<div class="wm-section-title">Estructura del reporte</div>', unsafe_allow_html=True)
