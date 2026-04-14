@@ -15,6 +15,7 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 from core.auth import require_login, render_user_menu
+from core.trend_diagnostics import build_trend_report_narrative as build_trend_report_narrative_core
 
 st.set_page_config(page_title="Watermelon System | Trends", layout="wide")
 
@@ -1341,7 +1342,11 @@ def build_trend_report_narrative(
             "Correlación operativa disponible:\n\n"
             f"{op_summary}"
         )
-    return "\n\n".join(trend_lines)
+    
+context = st.session_state.get("asset_context", {})
+ctx_text = f"\n\nContexto de máquina: {context.get('type','')} - {context.get('description','')}"
+
+
 
 
 # session
@@ -1363,6 +1368,17 @@ if "wm_tr_export_store" not in st.session_state:
     st.session_state.wm_tr_export_store = {}
 if "report_items" not in st.session_state:
     st.session_state.report_items = []
+
+if "wm_tr_asset_type" not in st.session_state:
+    st.session_state.wm_tr_asset_type = ""
+if "wm_tr_machine_configuration" not in st.session_state:
+    st.session_state.wm_tr_machine_configuration = ""
+if "wm_tr_primary_equipment" not in st.session_state:
+    st.session_state.wm_tr_primary_equipment = ""
+if "wm_tr_secondary_equipment" not in st.session_state:
+    st.session_state.wm_tr_secondary_equipment = ""
+if "wm_tr_machine_description" not in st.session_state:
+    st.session_state.wm_tr_machine_description = ""
 
 for key in [
     "wm_tr_cursor_a_initial", "wm_tr_cursor_a_current",
@@ -1406,14 +1422,122 @@ with st.sidebar:
         operational_store = {rec.op_id: rec for rec in parsed_operational_records}
         st.session_state["operational_signals"] = operational_store
 
+    st.markdown("### Machine Diagnostic Context")
+    asset_type_options = [
+        "",
+        "Turbogenerador",
+        "Turbina de gas",
+        "Generador eléctrico",
+        "Motor eléctrico",
+        "Bomba",
+        "Compresor",
+        "Ventilador",
+        "Gearbox",
+        "Otro",
+    ]
+    st.session_state.wm_tr_asset_type = st.selectbox(
+        "Asset type *",
+        options=asset_type_options,
+        index=asset_type_options.index(st.session_state.wm_tr_asset_type) if st.session_state.wm_tr_asset_type in asset_type_options else 0,
+        key="wm_tr_asset_type_select",
+    )
+
+    config_options = ["", "Simple", "Compuesta / tren de máquinas"]
+    st.session_state.wm_tr_machine_configuration = st.selectbox(
+        "Machine configuration *",
+        options=config_options,
+        index=config_options.index(st.session_state.wm_tr_machine_configuration) if st.session_state.wm_tr_machine_configuration in config_options else 0,
+        key="wm_tr_machine_configuration_select",
+    )
+
+    if st.session_state.wm_tr_machine_configuration == "Compuesta / tren de máquinas":
+        st.session_state.wm_tr_primary_equipment = st.text_input(
+            "Primary equipment *",
+            value=st.session_state.wm_tr_primary_equipment,
+            placeholder="Ejemplo: Turbina LM6000",
+            key="wm_tr_primary_equipment_input",
+        )
+        st.session_state.wm_tr_secondary_equipment = st.text_input(
+            "Secondary equipment *",
+            value=st.session_state.wm_tr_secondary_equipment,
+            placeholder="Ejemplo: Generador Brush",
+            key="wm_tr_secondary_equipment_input",
+        )
+    else:
+        st.session_state.wm_tr_primary_equipment = ""
+        st.session_state.wm_tr_secondary_equipment = ""
+
+    st.session_state.wm_tr_machine_description = st.text_area(
+        "Machine technical description *",
+        value=st.session_state.wm_tr_machine_description,
+        height=120,
+        placeholder="Ejemplo: Turbina LM6000 acoplada a generador Brush. No corresponde a sistema hidráulico.",
+        key="wm_tr_machine_description_input",
+    )
+
 records_all: List[TrendRecord] = list(st.session_state.get("trend_signals", {}).values())
 records_all = sorted(records_all, key=lambda r: (r.machine, r.point_clean, r.file_name))
 
 operational_records_all: List[OperationalRecord] = list(st.session_state.get("operational_signals", {}).values())
 operational_records_all = sorted(operational_records_all, key=lambda r: (r.machine, r.variable, r.file_name))
 
+
+# ================================
+# MACHINE DIAGNOSTIC CONTEXT (Trends)
+# ================================
+st.markdown("### Machine Diagnostic Context (Trends)")
+
+asset_type = st.selectbox(
+    "Asset Type",
+    ["Seleccionar...", "Motor", "Bomba", "Compresor", "Turbina", "Generador", "Otro"]
+)
+
+machine_description = st.text_area(
+    "Machine Description",
+    placeholder="Ej: Turbogenerador LM6000 acoplado a generador Brush..."
+)
+
+if asset_type == "Seleccionar..." or not machine_description.strip():
+    st.warning("Debe definir el contexto de máquina para habilitar diagnóstico en Trends.")
+    st.stop()
+
+# Guardar en session_state para diagnóstico
+st.session_state["asset_context"] = {
+    "type": asset_type,
+    "description": machine_description
+}
+
+
 if not records_all and not operational_records_all:
     st.warning("Cargue al menos un CSV de tendencia o un CSV de data operativa en este módulo.")
+    st.stop()
+
+trend_context_errors: List[str] = []
+if not st.session_state.wm_tr_asset_type:
+    trend_context_errors.append("Asset type is required in Trends.")
+if not st.session_state.wm_tr_machine_configuration:
+    trend_context_errors.append("Machine configuration is required in Trends.")
+if st.session_state.wm_tr_machine_configuration == "Compuesta / tren de máquinas":
+    if not str(st.session_state.wm_tr_primary_equipment).strip():
+        trend_context_errors.append("Primary equipment is required for composite machine trains.")
+    if not str(st.session_state.wm_tr_secondary_equipment).strip():
+        trend_context_errors.append("Secondary equipment is required for composite machine trains.")
+if not str(st.session_state.wm_tr_machine_description).strip():
+    trend_context_errors.append("Machine technical description is required in Trends.")
+
+st.session_state["asset_context"] = {
+    "type": st.session_state.wm_tr_asset_type,
+    "description": st.session_state.wm_tr_machine_description.strip(),
+    "asset_type": st.session_state.wm_tr_asset_type,
+    "machine_configuration": st.session_state.wm_tr_machine_configuration,
+    "primary_equipment": st.session_state.wm_tr_primary_equipment,
+    "secondary_equipment": st.session_state.wm_tr_secondary_equipment,
+    "machine_description": st.session_state.wm_tr_machine_description.strip(),
+}
+
+if trend_context_errors:
+    for msg in trend_context_errors:
+        st.warning(msg)
     st.stop()
 
 
@@ -1474,43 +1598,49 @@ def queue_trend_to_report(
     else:
         return False, "No valid signals to send."
 
-    narrative = build_trend_report_narrative(
+    narrative = build_trend_report_narrative_core(
         records=records,
         metric_key=metric_key,
         operational_records=operational_records,
         operational_only_mode=operational_only_mode,
+        asset_context=st.session_state.get("asset_context", {}) or {},
     )
 
     image_bytes, image_error = build_export_png_bytes(fig=fig)
 
-    st.session_state.report_items.append(
-        {
-            "id": make_export_state_key(
-                [
-                    "report-trend",
-                    metric_key,
-                    panel_title,
-                    machine,
-                    point,
-                    len(st.session_state.report_items),
-                ]
-            ),
-            "type": "trends",
-            "title": panel_title,
-            "notes": narrative,
-            "signal_id": signal_id,
-            "figure": None,
-            "image_bytes": image_bytes,
-            "image_error": image_error,
-            "source_module": "04_Trends",
-            "report_payload_version": "v2",
-            "machine": machine,
-            "point": point,
-            "variable": variable,
-            "timestamp": timestamp,
-        }
-    )
-    return image_bytes is not None, image_error
+    item_payload = {
+        "id": make_export_state_key(
+            [
+                "report-trend",
+                metric_key,
+                panel_title,
+                machine,
+                point,
+                len(st.session_state.report_items),
+            ]
+        ),
+        "type": "trends",
+        "title": panel_title,
+        "notes": narrative,
+        "signal_id": signal_id,
+        "figure": None,
+        "image_bytes": image_bytes,
+        "image_error": image_error,
+        "source_module": "04_Trends",
+        "report_payload_version": "v2",
+        "machine": machine,
+        "point": point,
+        "variable": variable,
+        "timestamp": timestamp,
+    }
+    st.session_state.report_items.append(item_payload)
+    st.session_state["wm_tr_last_report_debug"] = {
+        "notes_len": len(str(narrative or "")),
+        "report_items_count": len(st.session_state.report_items),
+        "last_title": panel_title,
+        "has_image": image_bytes is not None,
+    }
+    return True, image_error
 
 
 with st.sidebar:
@@ -1860,6 +1990,13 @@ def render_trend_panel(
         if st.button("Open linked Bode", key=f"open_bode_{export_state_key}", use_container_width=True, disabled=bode_disabled):
             push_linked_bode_context(panel_records, metric_key)
             st.switch_page("pages/07_Bode_Plot.py")
+
+    if st.session_state.get("wm_tr_last_report_debug"):
+        dbg = st.session_state["wm_tr_last_report_debug"]
+        st.caption(
+            f"Report debug → notes_len={dbg.get('notes_len')} | report_items={dbg.get('report_items_count')} | "
+            f"title={dbg.get('last_title')} | has_image={dbg.get('has_image')}"
+        )
 
     panel_error = st.session_state.wm_tr_export_store[export_state_key]["error"]
     if panel_error:

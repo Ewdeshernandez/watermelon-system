@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
-from core.asset_context import get_asset_type, adjust_trend_diagnostic_text
 
 
 def format_number(value: Any, digits: int = 3, fallback: str = "—") -> str:
@@ -52,7 +51,7 @@ def safe_percent_change(initial_value: Optional[float], final_value: Optional[fl
             return None
         if abs(init_val) < 1e-12:
             return None
-        text = ((final_val - init_val) / abs(init_val)) * 100.0
+        return ((final_val - init_val) / abs(init_val)) * 100.0
     except Exception:
         return None
 
@@ -116,10 +115,24 @@ def _classify_trend_behavior(values: pd.Series) -> Dict[str, Any]:
             "mean_value": float(np.mean(arr)),
         }
     )
-    asset_type = get_asset_type(getattr(record, 'metadata', {}))
-    text = adjust_trend_diagnostic_text(text, asset_type)
-    return text
     return result
+
+
+def _asset_type(asset_context: Optional[Dict[str, Any]]) -> str:
+    return str((asset_context or {}).get("type") or "").strip().lower()
+
+
+def _context_line(asset_context: Optional[Dict[str, Any]]) -> str:
+    asset_type = str((asset_context or {}).get("type") or "").strip()
+    description = str((asset_context or {}).get("description") or "").strip()
+
+    parts: List[str] = []
+    if asset_type:
+        parts.append(f"Tipo de activo: {asset_type}.")
+    if description:
+        parts.append(f"Contexto técnico: {description}")
+
+    return (" " + " ".join(parts)) if parts else ""
 
 
 def _build_single_trend_narrative_from_df(
@@ -127,15 +140,17 @@ def _build_single_trend_narrative_from_df(
     metric_key: str,
     unit: str,
     df: pd.DataFrame,
+    asset_context: Optional[Dict[str, Any]] = None,
 ) -> str:
+    asset_type = _asset_type(asset_context)
+    context_line = _context_line(asset_context)
+
     if df.empty:
-        text = (
+        return (
             f"{point_name}: no se identificaron datos válidos para el análisis de "
             f"{metric_key.lower()}, por lo que no fue posible emitir diagnóstico automático."
+            f"{context_line}"
         )
-    asset_type = get_asset_type(getattr(record, 'metadata', {}))
-    text = adjust_trend_diagnostic_text(text, asset_type)
-    return text
 
     analysis = _classify_trend_behavior(df["y"])
     sample_count = analysis.get("sample_count", 0)
@@ -149,54 +164,93 @@ def _build_single_trend_narrative_from_df(
         f"valor final {format_number(analysis.get('final_value'), 3)} {unit}, "
         f"variación total {format_number(analysis.get('change_pct'), 2)}%."
     )
-    asset_type = get_asset_type(getattr(record, 'metadata', {}))
-    text = adjust_trend_diagnostic_text(text, asset_type)
-    return text
 
     classification = analysis.get("classification")
+
+    is_generator_like = asset_type in {"generador", "generador eléctrico", "turbogenerador"}
+    is_pump_like = asset_type in {"bomba", "compresor"}
+    is_motor_like = asset_type in {"motor", "motor eléctrico"}
+    is_turbine_like = asset_type in {"turbina", "turbina de gas", "turbogenerador"}
+
     if classification == "progressive_increase":
-        text = (
+        if is_generator_like:
+            return (
+                f"{base} La tendencia presenta un incremento progresivo del {metric_key.lower()}, "
+                "compatible con evolución de condición mecánica rotacional, cambio de carga o amplificación asociada al tren turbina-generador. "
+                "Se recomienda correlacionar con espectro, fase, balanceo, alineación y comportamiento del tren acoplado."
+                f"{context_line}"
+            )
+        if is_motor_like:
+            return (
+                f"{base} La tendencia presenta un incremento progresivo del {metric_key.lower()}, "
+                "compatible con cambio de carga, excitación o evolución de condición electromecánica. "
+                "Se recomienda correlacionar con condición del motor, acople, alineación y variables operativas."
+                f"{context_line}"
+            )
+        if is_pump_like:
+            return (
+                f"{base} La tendencia presenta un incremento progresivo del {metric_key.lower()}, "
+                "compatible con deterioro mecánico o influencia del proceso. "
+                "Se recomienda correlacionar con condición hidráulica, caudal, carga y variables operativas del equipo."
+                f"{context_line}"
+            )
+        if is_turbine_like:
+            return (
+                f"{base} La tendencia presenta un incremento progresivo del {metric_key.lower()}, "
+                "compatible con evolución de condición mecánica del tren rotativo o cambio operativo sostenido. "
+                "Se recomienda correlacionar con balanceo, alineación, espectro y comportamiento del equipo acoplado."
+                f"{context_line}"
+            )
+        return (
             f"{base} La tendencia presenta un incremento progresivo del {metric_key.lower()}, "
             "lo cual sugiere posible deterioro del estado mecánico o evolución de una condición incipiente. "
             "Se recomienda seguimiento estrecho y correlación con variables operativas y alarmas."
+            f"{context_line}"
         )
-    asset_type = get_asset_type(getattr(record, 'metadata', {}))
-    text = adjust_trend_diagnostic_text(text, asset_type)
-    return text
+
     if classification == "progressive_decrease":
-        text = (
+        return (
             f"{base} La señal muestra una disminución progresiva del {metric_key.lower()}, "
             "compatible con normalización de la condición o reducción de carga/excitación. "
             "Se recomienda verificar si el comportamiento coincide con cambios operativos esperados."
+            f"{context_line}"
         )
-    asset_type = get_asset_type(getattr(record, 'metadata', {}))
-    text = adjust_trend_diagnostic_text(text, asset_type)
-    return text
+
     if classification == "abrupt":
-        text = (
+        if is_generator_like or is_turbine_like:
+            return (
+                f"{base} Se observan variaciones bruscas y dispersión elevada en la señal, "
+                "compatibles con transitorios operativos, cambios de carga o inestabilidad del tren rotativo. "
+                "Se recomienda revisar eventos de arranque/parada, cambios de carga, consistencia instrumental y correlación con otras señales del tren."
+                f"{context_line}"
+            )
+        if is_pump_like:
+            return (
+                f"{base} Se observan variaciones bruscas y dispersión elevada en la señal, "
+                "compatibles con transitorios del proceso o inestabilidad operativa. "
+                "Se recomienda revisar eventos de proceso, cambios de régimen y consistencia de la instrumentación."
+                f"{context_line}"
+            )
+        return (
             f"{base} Se observan variaciones bruscas y dispersión elevada en la señal, "
-            "compatibles con condición transitoria o inestabilidad. "
+            "compatibles con condición transitoria, inestabilidad o cambios operativos repentinos. "
             "Se recomienda revisar eventos de proceso, transientes de arranque/parada y consistencia de la instrumentación."
+            f"{context_line}"
         )
-    asset_type = get_asset_type(getattr(record, 'metadata', {}))
-    text = adjust_trend_diagnostic_text(text, asset_type)
-    return text
+
     if classification == "stable":
-        text = (
+        return (
             f"{base} El comportamiento es estable y sin desviaciones significativas, "
             "lo que es consistente con una condición normal dentro de la ventana evaluada. "
             "Se recomienda continuar monitoreo rutinario."
+            f"{context_line}"
         )
-    asset_type = get_asset_type(getattr(record, 'metadata', {}))
-    text = adjust_trend_diagnostic_text(text, asset_type)
-    return text
-    text = (
+
+    return (
         f"{base} La cantidad de información disponible no es suficiente para clasificar con confianza la tendencia. "
         "Se recomienda ampliar la ventana temporal o validar la calidad de los datos."
+        f"{context_line}"
     )
-    asset_type = get_asset_type(getattr(record, 'metadata', {}))
-    text = adjust_trend_diagnostic_text(text, asset_type)
-    return text
 
 
 def build_trend_report_narrative(
@@ -204,6 +258,7 @@ def build_trend_report_narrative(
     metric_key: str,
     operational_records: Optional[List[Any]] = None,
     operational_only_mode: bool = False,
+    asset_context: Optional[Dict[str, Any]] = None,
 ) -> str:
     operational_records = operational_records or []
     lines: List[str] = []
@@ -227,10 +282,7 @@ def build_trend_report_narrative(
                 "x": pd.to_datetime(getattr(record, "x_time", pd.Series(dtype="datetime64[ns]")), errors="coerce"),
                 "y": pd.to_numeric(series, errors="coerce"),
             }
-        )
-    asset_type = get_asset_type(getattr(record, 'metadata', {}))
-    text = adjust_trend_diagnostic_text(text, asset_type)
-    return text.dropna(subset=["x", "y"])
+        ).dropna(subset=["x", "y"])
 
         if not df.empty:
             df = df.sort_values("x").reset_index(drop=True)
@@ -242,10 +294,7 @@ def build_trend_report_narrative(
                 "x": pd.to_datetime(getattr(record, "x_time", pd.Series(dtype="datetime64[ns]")), errors="coerce"),
                 "y": pd.to_numeric(getattr(record, "y_value", pd.Series(dtype=float)), errors="coerce"),
             }
-        )
-    asset_type = get_asset_type(getattr(record, 'metadata', {}))
-    text = adjust_trend_diagnostic_text(text, asset_type)
-    return text.dropna(subset=["x", "y"])
+        ).dropna(subset=["x", "y"])
         if not df.empty:
             df = df.sort_values("x").reset_index(drop=True)
         return df
@@ -254,7 +303,15 @@ def build_trend_report_narrative(
         for record in records:
             df, unit = _trend_metric_df(record)
             point_name = getattr(record, "point_clean", None) or getattr(record, "point", None) or getattr(record, "file_name", "Signal")
-            lines.append(_build_single_trend_narrative_from_df(point_name, metric_key, unit, df))
+            lines.append(
+                _build_single_trend_narrative_from_df(
+                    point_name,
+                    metric_key,
+                    unit,
+                    df,
+                    asset_context=asset_context,
+                )
+            )
 
     if operational_records:
         op_lines: List[str] = []
@@ -262,11 +319,19 @@ def build_trend_report_narrative(
             df = _operational_df(record)
             variable = getattr(record, "variable", "Operational Data")
             unit = getattr(record, "unit", "") or ""
-            op_lines.append(_build_single_trend_narrative_from_df(variable, "Operational Data", unit, df))
+            op_lines.append(
+                _build_single_trend_narrative_from_df(
+                    variable,
+                    "Operational Data",
+                    unit,
+                    df,
+                    asset_context=asset_context,
+                )
+            )
         if op_lines:
             if operational_only_mode:
                 lines.extend(op_lines)
             else:
                 lines.append("Correlación operativa disponible:\n\n" + "\n\n".join(op_lines))
 
-    return "\n\n".join(lines).strip() or "Sin interpretación técnica todavía."
+    return "\n\n".join(lines).strip() or ""
