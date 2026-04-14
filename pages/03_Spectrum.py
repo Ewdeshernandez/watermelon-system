@@ -1652,6 +1652,18 @@ with st.sidebar:
     annotate_peak = st.checkbox("Annotate dominant peak", value=True)
     show_right_info_box = st.checkbox("Show info box", value=True)
 
+    st.markdown("### Compare Mode")
+    enable_compare_mode = st.checkbox(
+        "Enable compare mode (2 spectra overlay)",
+        value=False,
+        help="Overlay exactly two selected spectra in a single chart using the current processing settings.",
+    )
+    compare_fill_area = st.checkbox(
+        "Fill area in compare mode",
+        value=False,
+        disabled=not enable_compare_mode,
+    )
+
     st.markdown("### Harmonics")
 
     show_harmonics = st.checkbox("Show 1X harmonics", value=True)
@@ -2167,6 +2179,458 @@ def render_spectrum_panel(
             )
             st.success("Spectrum enviado al reporte")
 
+
+def compute_compare_payload(
+    record: SignalRecord,
+    *,
+    window_name: str,
+    amplitude_mode: str,
+    remove_dc: bool,
+    detrend: bool,
+    zero_padding: bool,
+    high_res_factor: int,
+    max_cpm: float,
+) -> Dict[str, Any]:
+    spectrum = compute_spectrum_peak(
+        time_s=record.time_s,
+        y=record.amplitude,
+        window_name=window_name,
+        remove_dc=remove_dc,
+        detrend=detrend,
+        zero_padding=zero_padding,
+        high_res_factor=high_res_factor,
+        min_peak_cpm=1.0,
+    )
+
+    freq_cpm = spectrum.freq_cpm
+    amp_peak = spectrum.amp_peak
+    amp_display = convert_peak_to_mode(amp_peak, amplitude_mode)
+
+    if max_cpm > 0 and freq_cpm.size:
+        visible_mask = np.isfinite(freq_cpm) & np.isfinite(amp_display) & (freq_cpm <= max_cpm)
+        freq_visible = freq_cpm[visible_mask]
+        amp_visible = amp_display[visible_mask]
+    else:
+        visible_mask = np.isfinite(freq_cpm) & np.isfinite(amp_display)
+        freq_visible = freq_cpm[visible_mask]
+        amp_visible = amp_display[visible_mask]
+
+    peak_freq_visible, peak_amp_visible = dominant_peak(freq_visible, amp_visible, min_cpm=1.0)
+
+    return {
+        "record": record,
+        "spectrum": spectrum,
+        "freq_cpm": freq_cpm,
+        "amp_peak": amp_peak,
+        "amp_display": amp_display,
+        "visible_freq_cpm": freq_visible,
+        "visible_amp_display": amp_visible,
+        "peak_freq_cpm": peak_freq_visible,
+        "peak_amp_display": peak_amp_visible,
+    }
+
+
+def build_compare_figure(
+    payloads: List[Dict[str, Any]],
+    *,
+    amplitude_mode: str,
+    max_cpm: float,
+    y_axis_mode: str,
+    y_axis_manual_max: Optional[float],
+    fill_area: bool,
+    annotate_peak: bool,
+    logo_uri: Optional[str],
+    spectrum_mode_label: str,
+) -> go.Figure:
+    fig = go.Figure()
+
+    colors = ["#2563eb", "#dc2626", "#16a34a", "#7c3aed"]
+    display_unit_text = amplitude_unit_text(payloads[0]["record"].amplitude_unit, amplitude_mode) if payloads else ""
+    y_title = f"Amplitude ({display_unit_text})" if display_unit_text else "Amplitude"
+
+    all_visible_y = []
+
+    for idx, payload in enumerate(payloads):
+        record = payload["record"]
+        freq_cpm = payload["freq_cpm"]
+        amp_display = payload["amp_display"]
+
+        mask = np.isfinite(freq_cpm) & np.isfinite(amp_display)
+        freq_cpm = freq_cpm[mask]
+        amp_display = amp_display[mask]
+
+        if max_cpm > 0:
+            visible_mask = freq_cpm <= max_cpm
+            freq_cpm = freq_cpm[visible_mask]
+            amp_display = amp_display[visible_mask]
+
+        if freq_cpm.size < 2 or amp_display.size < 2:
+            continue
+
+        all_visible_y.append(float(np.max(amp_display)))
+        color = colors[idx % len(colors)]
+        label_prefix = "A" if idx == 0 else ("B" if idx == 1 else f"S{idx+1}")
+        trace_name = f"{label_prefix} · {record.name}"
+
+        fig.add_trace(
+            go.Scattergl(
+                x=freq_cpm,
+                y=amp_display,
+                mode="lines",
+                line=dict(width=2.2, color=color),
+                fill="tozeroy" if fill_area else None,
+                fillcolor=f"rgba(37, 99, 235, 0.08)" if (fill_area and idx == 0) else (f"rgba(220, 38, 38, 0.08)" if fill_area and idx == 1 else None),
+                hovertemplate=(
+                    f"{html.escape(trace_name)}<br>"
+                    "Frequency: %{x:.2f} CPM<br>"
+                    + (f"Amplitude: " + "%{y:.4f} " + display_unit_text if display_unit_text else "Amplitude: %{y:.4f}")
+                    + "<extra></extra>"
+                ),
+                showlegend=True,
+                connectgaps=False,
+                name=trace_name,
+            )
+        )
+
+        peak_freq = payload["peak_freq_cpm"]
+        peak_amp = payload["peak_amp_display"]
+
+        if annotate_peak and peak_freq is not None and peak_amp is not None:
+            fig.add_trace(
+                go.Scatter(
+                    x=[peak_freq],
+                    y=[peak_amp],
+                    mode="markers",
+                    marker=dict(symbol="circle", size=9, color=color, line=dict(width=1.0, color="#ffffff")),
+                    hovertemplate=(
+                        f"{html.escape(trace_name)} peak<br>"
+                        "Frequency: %{x:.2f} CPM<br>"
+                        + (f"Amplitude: " + "%{y:.4f} " + display_unit_text if display_unit_text else "Amplitude: %{y:.4f}")
+                        + "<extra></extra>"
+                    ),
+                    showlegend=False,
+                    name=f"{trace_name}_peak",
+                )
+            )
+            fig.add_annotation(
+                x=peak_freq,
+                y=peak_amp,
+                text=f"{label_prefix} peak · {format_number(peak_freq, 1)} CPM",
+                showarrow=True,
+                arrowhead=2,
+                ax=26 if idx == 0 else -26,
+                ay=-34,
+                bgcolor="rgba(255,255,255,0.95)",
+                bordercolor="#d1d5db",
+                borderwidth=1,
+                font=dict(size=10.5, color="#111827"),
+            )
+
+    if not all_visible_y:
+        fig.update_layout(
+            height=940,
+            plot_bgcolor="#f8fafc",
+            paper_bgcolor="#f3f4f6",
+            margin=dict(l=46, r=18, t=84, b=120),
+            xaxis_title="Frequency (CPM)",
+            yaxis_title=y_title,
+        )
+        fig.add_annotation(
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            text="No valid spectrum data available for compare mode",
+            showarrow=False,
+            font=dict(size=18, color="#6b7280"),
+        )
+        return fig
+
+    x_max = float(max_cpm) if max_cpm > 0 else 1.0
+    y_data_max = max(all_visible_y)
+    auto_top = max(y_data_max * 1.12, y_data_max + 0.05 if y_data_max > 0 else 1.0)
+
+    if y_axis_mode == "Manual" and y_axis_manual_max is not None and y_axis_manual_max > 0:
+        y_top = float(y_axis_manual_max)
+    else:
+        y_top = float(auto_top)
+
+    grid_step = 1000.0
+    if x_max > 5000:
+        grid_step = 5000.0
+    if x_max > 20000:
+        grid_step = 10000.0
+    if x_max > 60000:
+        grid_step = 20000.0
+
+    tickvals = list(np.arange(0.0, x_max + grid_step * 0.5, grid_step))
+    for gx in tickvals:
+        if abs(float(gx)) < 1e-12:
+            continue
+        fig.add_vline(
+            x=gx,
+            line_width=1,
+            line_color="rgba(148, 163, 184, 0.18)",
+            layer="below",
+        )
+
+    x0, x1 = 0.006, 0.994
+    y0, y1 = 1.014, 1.106
+
+    fig.add_shape(
+        type="path",
+        xref="paper",
+        yref="paper",
+        path=rounded_rect_path(x0, y0, x1, y1, 0.015),
+        line=dict(color="#cfd8e3", width=1.15),
+        fillcolor="rgba(255,255,255,0.97)",
+        layer="below",
+    )
+
+    if logo_uri:
+        fig.add_layout_image(
+            dict(
+                source=logo_uri,
+                xref="paper",
+                yref="paper",
+                x=0.014,
+                y=y1 - 0.009,
+                sizex=0.060,
+                sizey=0.090,
+                xanchor="left",
+                yanchor="top",
+                layer="above",
+                sizing="contain",
+                opacity=1.0,
+            )
+        )
+        title_x = 0.083
+    else:
+        title_x = 0.020
+
+    fig.add_annotation(
+        xref="paper",
+        yref="paper",
+        x=title_x,
+        y=(y0 + y1) / 2.0,
+        xanchor="left",
+        yanchor="middle",
+        text=f"<b>Spectrum Compare</b> · {spectrum_mode_label} · {amplitude_mode_label(amplitude_mode)}",
+        showarrow=False,
+        font=dict(size=12.6, color="#111827"),
+        align="left",
+    )
+
+    if len(payloads) >= 2:
+        rec_a = payloads[0]["record"]
+        rec_b = payloads[1]["record"]
+        fig.add_annotation(
+            xref="paper",
+            yref="paper",
+            x=0.420,
+            y=(y0 + y1) / 2.0,
+            xanchor="left",
+            yanchor="middle",
+            text=f"A: {html.escape(rec_a.name)}",
+            showarrow=False,
+            font=dict(size=11.8, color="#2563eb"),
+            align="left",
+        )
+        fig.add_annotation(
+            xref="paper",
+            yref="paper",
+            x=0.680,
+            y=(y0 + y1) / 2.0,
+            xanchor="left",
+            yanchor="middle",
+            text=f"B: {html.escape(rec_b.name)}",
+            showarrow=False,
+            font=dict(size=11.8, color="#dc2626"),
+            align="left",
+        )
+
+    fig.update_layout(
+        height=940,
+        margin=dict(l=46, r=18, t=84, b=120),
+        plot_bgcolor="#f8fafc",
+        paper_bgcolor="#f3f4f6",
+        font=dict(color="#111827"),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.125,
+            xanchor="right",
+            x=0.99,
+            bgcolor="rgba(255,255,255,0.75)",
+            bordercolor="#d1d5db",
+            borderwidth=1,
+        ),
+        xaxis=dict(
+            title="Frequency (CPM)",
+            range=[0.0, x_max],
+            tickvals=tickvals,
+            tickformat=".0f",
+            showgrid=False,
+            zeroline=False,
+            showline=True,
+            linecolor="#9ca3af",
+            ticks="outside",
+            tickcolor="#6b7280",
+            ticklen=4,
+            showspikes=True,
+            spikecolor="#6b7280",
+            spikesnap="cursor",
+            spikemode="across",
+        ),
+        yaxis=dict(
+            title=y_title,
+            range=[0.0, y_top],
+            showgrid=True,
+            gridcolor="rgba(148, 163, 184, 0.18)",
+            zeroline=False,
+            showline=True,
+            linecolor="#9ca3af",
+            ticks="outside",
+            tickcolor="#6b7280",
+            ticklen=4,
+        ),
+        hovermode="closest",
+    )
+
+    return fig
+
+
+def render_compare_panel(
+    compare_records: List[SignalRecord],
+    *,
+    window_name: str,
+    amplitude_mode: str,
+    remove_dc: bool,
+    detrend: bool,
+    zero_padding: bool,
+    high_res_factor: int,
+    max_cpm: float,
+    y_axis_mode: str,
+    y_axis_manual_max: Optional[float],
+    compare_fill_area: bool,
+    annotate_peak: bool,
+) -> None:
+    payloads = [
+        compute_compare_payload(
+            record=record,
+            window_name=window_name,
+            amplitude_mode=amplitude_mode,
+            remove_dc=remove_dc,
+            detrend=detrend,
+            zero_padding=zero_padding,
+            high_res_factor=high_res_factor,
+            max_cpm=max_cpm,
+        )
+        for record in compare_records
+    ]
+
+    logo_uri = get_logo_data_uri(LOGO_PATH)
+
+    fig = build_compare_figure(
+        payloads=payloads,
+        amplitude_mode=amplitude_mode,
+        max_cpm=max_cpm,
+        y_axis_mode=y_axis_mode,
+        y_axis_manual_max=y_axis_manual_max,
+        fill_area=compare_fill_area,
+        annotate_peak=annotate_peak,
+        logo_uri=logo_uri,
+        spectrum_mode_label=window_name,
+    )
+
+    compare_export_key = make_export_state_key(
+        [
+            "compare_mode",
+            *[r.signal_id for r in compare_records],
+            window_name,
+            amplitude_mode,
+            remove_dc,
+            detrend,
+            zero_padding,
+            high_res_factor,
+            max_cpm,
+            y_axis_mode,
+            y_axis_manual_max,
+            compare_fill_area,
+            annotate_peak,
+        ]
+    )
+
+    if compare_export_key not in st.session_state.wm_sp_export_store:
+        st.session_state.wm_sp_export_store[compare_export_key] = {
+            "png_bytes": None,
+            "error": None,
+        }
+
+    st.markdown("### Spectrum Compare Mode")
+
+    compare_rows = []
+    for idx, payload in enumerate(payloads):
+        record = payload["record"]
+        peak_freq = payload["peak_freq_cpm"]
+        peak_amp = payload["peak_amp_display"]
+        label_prefix = "A" if idx == 0 else ("B" if idx == 1 else f"S{idx+1}")
+        compare_rows.append(
+            {
+                "Label": label_prefix,
+                "Signal": record.name,
+                "Machine": record.machine,
+                "Point": record.point,
+                "RPM": format_number(record.rpm, 0),
+                "Peak CPM": format_number(peak_freq, 1),
+                "Peak Amp": format_number(peak_amp, 3),
+                "Timestamp": record.timestamp or "—",
+            }
+        )
+
+    st.dataframe(pd.DataFrame(compare_rows), use_container_width=True, hide_index=True)
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={"displaylogo": False},
+        key=f"wm_spectrum_compare_plot_{compare_export_key}",
+    )
+
+    st.info(
+        "Compare mode fase 1 es visual y seguro: superpone dos espectros con la misma cadena de procesamiento actual. "
+        "En esta fase no empuja contenido a reportes ni genera diagnóstico comparativo automático."
+    )
+
+    st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
+    left_pad, col_export1, col_export2, right_pad = st.columns([2.3, 1.2, 1.2, 2.3])
+
+    with col_export1:
+        if st.button("Prepare PNG HD", key=f"prepare_compare_png_{compare_export_key}", use_container_width=True):
+            with st.spinner("Generating HD export..."):
+                png_bytes, export_error = build_export_png_bytes(fig=fig)
+                st.session_state.wm_sp_export_store[compare_export_key]["png_bytes"] = png_bytes
+                st.session_state.wm_sp_export_store[compare_export_key]["error"] = export_error
+
+    with col_export2:
+        png_bytes = st.session_state.wm_sp_export_store[compare_export_key]["png_bytes"]
+        if png_bytes is not None:
+            st.download_button(
+                "Download PNG HD",
+                data=png_bytes,
+                file_name="watermelon_spectrum_compare_hd.png",
+                mime="image/png",
+                key=f"download_compare_png_{compare_export_key}",
+                use_container_width=True,
+            )
+        else:
+            st.button(
+                "Download PNG HD",
+                disabled=True,
+                key=f"download_compare_disabled_{compare_export_key}",
+                use_container_width=True,
+            )
+
+
 selected_ids = [
     signal_id
     for signal_id in st.session_state.wm_sp_selected_signal_ids
@@ -2182,34 +2646,54 @@ selected_records = [
     for signal_id in selected_ids
 ]
 
-for panel_index, primary in enumerate(selected_records):
-    render_spectrum_panel(
-        primary=primary,
-        panel_index=panel_index,
+if enable_compare_mode:
+    if len(selected_records) != 2:
+        st.warning("Compare mode requiere exactamente 2 señales seleccionadas.")
+        st.stop()
+
+    render_compare_panel(
+        compare_records=selected_records,
         window_name=window_name,
         amplitude_mode=amplitude_mode,
         remove_dc=remove_dc,
         detrend=detrend,
         zero_padding=zero_padding,
-        high_res_display=high_res_display,
         high_res_factor=high_res_factor,
         max_cpm=max_cpm,
         y_axis_mode=y_axis_mode,
         y_axis_manual_max=y_axis_manual_max,
-        fill_area=fill_area,
+        compare_fill_area=compare_fill_area,
         annotate_peak=annotate_peak,
-        show_harmonics=show_harmonics,
-        harmonic_count=harmonic_count,
-        harmonic_band_fraction=harmonic_band_fraction,
-        show_harmonic_amplitudes=show_harmonic_amplitudes,
-        harmonic_label_mode=harmonic_label_mode,
-        show_right_info_box=show_right_info_box,
-        enable_bearing_faults=enable_bearing_faults,
-        bearing_model=bearing_model,
-        bearing_manual_rpm=bearing_manual_rpm,
-        bearing_harmonic_count=bearing_harmonic_count,
-        bearing_tolerance_pct=bearing_tolerance_pct,
     )
+else:
+    for panel_index, primary in enumerate(selected_records):
+        render_spectrum_panel(
+            primary=primary,
+            panel_index=panel_index,
+            window_name=window_name,
+            amplitude_mode=amplitude_mode,
+            remove_dc=remove_dc,
+            detrend=detrend,
+            zero_padding=zero_padding,
+            high_res_display=high_res_display,
+            high_res_factor=high_res_factor,
+            max_cpm=max_cpm,
+            y_axis_mode=y_axis_mode,
+            y_axis_manual_max=y_axis_manual_max,
+            fill_area=fill_area,
+            annotate_peak=annotate_peak,
+            show_harmonics=show_harmonics,
+            harmonic_count=harmonic_count,
+            harmonic_band_fraction=harmonic_band_fraction,
+            show_harmonic_amplitudes=show_harmonic_amplitudes,
+            harmonic_label_mode=harmonic_label_mode,
+            show_right_info_box=show_right_info_box,
+            enable_bearing_faults=enable_bearing_faults,
+            bearing_model=bearing_model,
+            bearing_manual_rpm=bearing_manual_rpm,
+            bearing_harmonic_count=bearing_harmonic_count,
+            bearing_tolerance_pct=bearing_tolerance_pct,
+        )
 
-    if panel_index < len(selected_records) - 1:
-        st.markdown("---")
+        if panel_index < len(selected_records) - 1:
+            st.markdown("---")
