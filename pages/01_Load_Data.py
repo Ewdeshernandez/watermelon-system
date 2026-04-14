@@ -622,6 +622,45 @@ def build_signal_from_parsed(parsed: Dict[str, Any]) -> SimpleNamespace:
     )
 
 
+
+def apply_machine_context_to_parsed_files(
+    parsed_files: List[Dict[str, Any]],
+    machine_context: Dict[str, Any],
+) -> List[Dict[str, Any]]:
+    enriched: List[Dict[str, Any]] = []
+
+    asset_type = str(machine_context.get("asset_type") or "").strip()
+    machine_configuration = str(machine_context.get("machine_configuration") or "").strip()
+    machine_description = str(machine_context.get("machine_description") or "").strip()
+    primary_equipment = str(machine_context.get("primary_equipment") or "").strip()
+    secondary_equipment = str(machine_context.get("secondary_equipment") or "").strip()
+
+    context_summary_parts = [
+        f"Asset Type: {asset_type}" if asset_type else "",
+        f"Machine Configuration: {machine_configuration}" if machine_configuration else "",
+        f"Primary Equipment: {primary_equipment}" if primary_equipment else "",
+        f"Secondary Equipment: {secondary_equipment}" if secondary_equipment else "",
+        machine_description,
+    ]
+    context_summary = " | ".join([part for part in context_summary_parts if part])
+
+    for parsed in parsed_files:
+        parsed_copy = dict(parsed)
+        metadata = canonicalize_metadata(dict(parsed_copy.get("metadata", {})))
+
+        metadata["Asset Type"] = asset_type
+        metadata["Machine Configuration"] = machine_configuration
+        metadata["Machine Description"] = machine_description
+        metadata["Primary Equipment"] = primary_equipment
+        metadata["Secondary Equipment"] = secondary_equipment
+        metadata["Diagnostic Context Summary"] = context_summary
+
+        parsed_copy["metadata"] = metadata
+        enriched.append(parsed_copy)
+
+    return enriched
+
+
 def register_signals_to_session(parsed_files: List[Dict[str, Any]]) -> Tuple[int, List[str]]:
     # KEEP AS DICT to preserve compatibility with Time Waveforms and Spectrum
     st.session_state["signals"] = {}
@@ -771,6 +810,82 @@ if invalid_files:
         text = "; ".join(parsed["issues"]) if parsed["issues"] else "Invalid file."
         st.warning(f"{parsed['file_name']}: {text}")
 
+
+st.markdown("### Machine Diagnostic Context")
+
+ctx1, ctx2 = st.columns(2)
+
+with ctx1:
+    asset_type = st.selectbox(
+        "Asset type *",
+        options=[
+            "",
+            "Turbogenerador",
+            "Turbina de gas",
+            "Generador eléctrico",
+            "Motor eléctrico",
+            "Bomba",
+            "Compresor",
+            "Ventilador",
+            "Gearbox",
+            "Otro",
+        ],
+        index=0,
+        help="This context will be attached to every loaded signal and later used by diagnostics.",
+    )
+
+with ctx2:
+    machine_configuration = st.selectbox(
+        "Machine configuration *",
+        options=["", "Simple", "Compuesta / tren de máquinas"],
+        index=0,
+        help="Use composite when the machine train has at least two main coupled assets.",
+    )
+
+primary_equipment = ""
+secondary_equipment = ""
+
+if machine_configuration == "Compuesta / tren de máquinas":
+    ctx3, ctx4 = st.columns(2)
+    with ctx3:
+        primary_equipment = st.text_input(
+            "Primary equipment *",
+            placeholder="Ejemplo: Turbina LM6000",
+        ).strip()
+    with ctx4:
+        secondary_equipment = st.text_input(
+            "Secondary equipment *",
+            placeholder="Ejemplo: Generador Brush",
+        ).strip()
+
+machine_description = st.text_area(
+    "Machine technical description *",
+    height=120,
+    placeholder="Ejemplo: Turbina de gas LM6000 acoplada a generador Brush. No corresponde a sistema hidráulico.",
+).strip()
+
+context_errors: List[str] = []
+
+if not asset_type:
+    context_errors.append("Asset type is required.")
+if not machine_configuration:
+    context_errors.append("Machine configuration is required.")
+if machine_configuration == "Compuesta / tren de máquinas":
+    if not primary_equipment:
+        context_errors.append("Primary equipment is required for composite machines.")
+    if not secondary_equipment:
+        context_errors.append("Secondary equipment is required for composite machines.")
+if not machine_description:
+    context_errors.append("Machine technical description is required.")
+
+machine_context = {
+    "asset_type": asset_type,
+    "machine_configuration": machine_configuration,
+    "primary_equipment": primary_equipment,
+    "secondary_equipment": secondary_equipment,
+    "machine_description": machine_description,
+}
+
 col_a, col_b = st.columns([1.7, 4.3])
 
 with col_a:
@@ -778,7 +893,7 @@ with col_a:
         "Generate Time Waveforms",
         type="primary",
         use_container_width=True,
-        disabled=(len(valid_files) == 0),
+        disabled=(len(valid_files) == 0 or len(context_errors) > 0),
     )
 
 with col_b:
@@ -787,8 +902,13 @@ with col_b:
         unsafe_allow_html=True,
     )
 
+if context_errors:
+    for msg in context_errors:
+        st.warning(msg)
+
 if generate_clicked:
-    count, errors = register_signals_to_session(valid_files)
+    context_enriched_files = apply_machine_context_to_parsed_files(valid_files, machine_context)
+    count, errors = register_signals_to_session(context_enriched_files)
 
     if errors:
         for err in errors:
