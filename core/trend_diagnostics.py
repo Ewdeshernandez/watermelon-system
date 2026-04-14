@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
+from core.asset_context import get_asset_type, adjust_trend_diagnostic_text
 
 
 def format_number(value: Any, digits: int = 3, fallback: str = "—") -> str:
@@ -51,7 +52,7 @@ def safe_percent_change(initial_value: Optional[float], final_value: Optional[fl
             return None
         if abs(init_val) < 1e-12:
             return None
-        return ((final_val - init_val) / abs(init_val)) * 100.0
+        text = ((final_val - init_val) / abs(init_val)) * 100.0
     except Exception:
         return None
 
@@ -115,6 +116,9 @@ def _classify_trend_behavior(values: pd.Series) -> Dict[str, Any]:
             "mean_value": float(np.mean(arr)),
         }
     )
+    asset_type = get_asset_type(getattr(record, 'metadata', {}))
+    text = adjust_trend_diagnostic_text(text, asset_type)
+    return text
     return result
 
 
@@ -125,10 +129,13 @@ def _build_single_trend_narrative_from_df(
     df: pd.DataFrame,
 ) -> str:
     if df.empty:
-        return (
+        text = (
             f"{point_name}: no se identificaron datos válidos para el análisis de "
             f"{metric_key.lower()}, por lo que no fue posible emitir diagnóstico automático."
         )
+    asset_type = get_asset_type(getattr(record, 'metadata', {}))
+    text = adjust_trend_diagnostic_text(text, asset_type)
+    return text
 
     analysis = _classify_trend_behavior(df["y"])
     sample_count = analysis.get("sample_count", 0)
@@ -142,36 +149,54 @@ def _build_single_trend_narrative_from_df(
         f"valor final {format_number(analysis.get('final_value'), 3)} {unit}, "
         f"variación total {format_number(analysis.get('change_pct'), 2)}%."
     )
+    asset_type = get_asset_type(getattr(record, 'metadata', {}))
+    text = adjust_trend_diagnostic_text(text, asset_type)
+    return text
 
     classification = analysis.get("classification")
     if classification == "progressive_increase":
-        return (
+        text = (
             f"{base} La tendencia presenta un incremento progresivo del {metric_key.lower()}, "
             "lo cual sugiere posible deterioro del estado mecánico o evolución de una condición incipiente. "
             "Se recomienda seguimiento estrecho y correlación con variables operativas y alarmas."
         )
+    asset_type = get_asset_type(getattr(record, 'metadata', {}))
+    text = adjust_trend_diagnostic_text(text, asset_type)
+    return text
     if classification == "progressive_decrease":
-        return (
+        text = (
             f"{base} La señal muestra una disminución progresiva del {metric_key.lower()}, "
             "compatible con normalización de la condición o reducción de carga/excitación. "
             "Se recomienda verificar si el comportamiento coincide con cambios operativos esperados."
         )
+    asset_type = get_asset_type(getattr(record, 'metadata', {}))
+    text = adjust_trend_diagnostic_text(text, asset_type)
+    return text
     if classification == "abrupt":
-        return (
+        text = (
             f"{base} Se observan variaciones bruscas y dispersión elevada en la señal, "
             "compatibles con condición transitoria o inestabilidad. "
             "Se recomienda revisar eventos de proceso, transientes de arranque/parada y consistencia de la instrumentación."
         )
+    asset_type = get_asset_type(getattr(record, 'metadata', {}))
+    text = adjust_trend_diagnostic_text(text, asset_type)
+    return text
     if classification == "stable":
-        return (
+        text = (
             f"{base} El comportamiento es estable y sin desviaciones significativas, "
             "lo que es consistente con una condición normal dentro de la ventana evaluada. "
             "Se recomienda continuar monitoreo rutinario."
         )
-    return (
+    asset_type = get_asset_type(getattr(record, 'metadata', {}))
+    text = adjust_trend_diagnostic_text(text, asset_type)
+    return text
+    text = (
         f"{base} La cantidad de información disponible no es suficiente para clasificar con confianza la tendencia. "
         "Se recomienda ampliar la ventana temporal o validar la calidad de los datos."
     )
+    asset_type = get_asset_type(getattr(record, 'metadata', {}))
+    text = adjust_trend_diagnostic_text(text, asset_type)
+    return text
 
 
 def build_trend_report_narrative(
@@ -202,7 +227,10 @@ def build_trend_report_narrative(
                 "x": pd.to_datetime(getattr(record, "x_time", pd.Series(dtype="datetime64[ns]")), errors="coerce"),
                 "y": pd.to_numeric(series, errors="coerce"),
             }
-        ).dropna(subset=["x", "y"])
+        )
+    asset_type = get_asset_type(getattr(record, 'metadata', {}))
+    text = adjust_trend_diagnostic_text(text, asset_type)
+    return text.dropna(subset=["x", "y"])
 
         if not df.empty:
             df = df.sort_values("x").reset_index(drop=True)
@@ -214,7 +242,10 @@ def build_trend_report_narrative(
                 "x": pd.to_datetime(getattr(record, "x_time", pd.Series(dtype="datetime64[ns]")), errors="coerce"),
                 "y": pd.to_numeric(getattr(record, "y_value", pd.Series(dtype=float)), errors="coerce"),
             }
-        ).dropna(subset=["x", "y"])
+        )
+    asset_type = get_asset_type(getattr(record, 'metadata', {}))
+    text = adjust_trend_diagnostic_text(text, asset_type)
+    return text.dropna(subset=["x", "y"])
         if not df.empty:
             df = df.sort_values("x").reset_index(drop=True)
         return df
