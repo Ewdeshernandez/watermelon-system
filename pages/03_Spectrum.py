@@ -2230,6 +2230,341 @@ def compute_compare_payload(
     }
 
 
+
+def safe_pct_change(new_value: Optional[float], old_value: Optional[float]) -> Optional[float]:
+    if new_value is None or old_value is None:
+        return None
+    try:
+        new_v = float(new_value)
+        old_v = float(old_value)
+    except Exception:
+        return None
+    if not math.isfinite(new_v) or not math.isfinite(old_v):
+        return None
+    if abs(old_v) < 1e-12:
+        return None
+    return ((new_v - old_v) / abs(old_v)) * 100.0
+
+
+def compare_status_badge(value: Optional[float], up_warn: float, up_danger: float) -> Tuple[str, str]:
+    if value is None:
+        return ("—", "#64748b")
+    if value >= up_danger:
+        return ("Severa", "#dc2626")
+    if value >= up_warn:
+        return ("Alerta", "#f59e0b")
+    if value <= -up_warn:
+        return ("Disminuye", "#2563eb")
+    return ("Estable", "#16a34a")
+
+
+def summarize_compare_payload(
+    payload: Dict[str, Any],
+    *,
+    amplitude_mode: str,
+    max_cpm: float,
+    harmonic_count: int = 8,
+    harmonic_band_fraction: float = 0.12,
+) -> Dict[str, Any]:
+    record = payload["record"]
+    spectrum = payload["spectrum"]
+    freq_cpm = payload["freq_cpm"]
+    amp_peak = payload["amp_peak"]
+
+    overall_rms_peak = compute_spectrum_overall_rms_parseval(
+        time_s=record.time_s,
+        y=record.amplitude,
+        remove_dc=True,
+        detrend=True,
+        max_cpm=max_cpm,
+    )
+    overall_display = convert_rms_to_mode(overall_rms_peak, amplitude_mode)
+
+    one_x_peak = None
+    one_x_display = None
+    one_x_freq = None
+    if record.rpm is not None and record.rpm > 0:
+        one_x_freq = float(record.rpm)
+        one_x_freq_hz = one_x_freq / 60.0
+
+        one_x_peak = estimate_harmonic_from_waveform_peak(
+            time_s=record.time_s,
+            y=record.amplitude,
+            freq_hz=one_x_freq_hz,
+            remove_mean=True,
+        )
+
+        if one_x_peak is None:
+            local_freq, local_peak = find_local_peak_near_1x(
+                freq_cpm=freq_cpm,
+                amp_peak=amp_peak,
+                one_x_cpm=one_x_freq,
+                band_fraction=harmonic_band_fraction,
+            )
+            one_x_peak = local_peak
+            if local_freq is not None:
+                one_x_freq = local_freq
+
+        one_x_display = convert_scalar_peak_to_mode(one_x_peak, amplitude_mode)
+
+    harmonic_points = collect_harmonic_points(
+        freq_cpm=freq_cpm,
+        amp_peak=amp_peak,
+        base_rpm=record.rpm,
+        harmonic_count=harmonic_count,
+        band_fraction=harmonic_band_fraction,
+        max_cpm=max_cpm,
+    )
+
+    harmonic_map_peak = {int(p.order): float(p.amp_peak) for p in harmonic_points}
+    harmonic_map_display = {
+        int(order): convert_scalar_peak_to_mode(val, amplitude_mode)
+        for order, val in harmonic_map_peak.items()
+    }
+
+    high_harm_peak = max(
+        [float(v) for k, v in harmonic_map_peak.items() if int(k) >= 4],
+        default=0.0,
+    )
+    high_harm_display = convert_scalar_peak_to_mode(high_harm_peak, amplitude_mode)
+
+    strong_harmonic_count = 0
+    ref_peak = max(float(one_x_peak or 0.0), float(spectrum.peak_amp_peak or 0.0), 1e-9)
+    threshold_peak = ref_peak * 0.25
+    for point in harmonic_points:
+        if float(point.amp_peak) >= threshold_peak:
+            strong_harmonic_count += 1
+
+    near_1x = False
+    if record.rpm is not None and record.rpm > 0 and spectrum.peak_freq_cpm is not None:
+        near_1x = abs(float(spectrum.peak_freq_cpm) - float(record.rpm)) <= max(0.08 * float(record.rpm), 60.0)
+
+    return {
+        "record": record,
+        "peak_freq_cpm": spectrum.peak_freq_cpm,
+        "peak_amp_display": convert_scalar_peak_to_mode(spectrum.peak_amp_peak, amplitude_mode),
+        "overall_display": overall_display,
+        "one_x_display": one_x_display,
+        "one_x_freq_cpm": one_x_freq,
+        "harmonic_map_display": harmonic_map_display,
+        "high_harm_display": high_harm_display,
+        "strong_harmonic_count": strong_harmonic_count,
+        "near_1x": near_1x,
+        "resolution_cpm": spectrum.resolution_cpm,
+        "real_resolution_cpm": spectrum.real_resolution_cpm,
+        "sample_rate_hz": record.sample_rate_hz,
+        "duration_s": record.duration_s,
+        "timestamp": record.timestamp,
+        "amplitude_unit": record.amplitude_unit,
+    }
+
+
+def build_compare_assessment(
+    summary_a: Dict[str, Any],
+    summary_b: Dict[str, Any],
+    *,
+    amplitude_mode: str,
+) -> Dict[str, Any]:
+    rec_a = summary_a["record"]
+    rec_b = summary_b["record"]
+
+    warnings = []
+
+    if rec_a.amplitude_unit != rec_b.amplitude_unit:
+        warnings.append("Las unidades base no coinciden entre A y B.")
+
+    rpm_a = rec_a.rpm
+    rpm_b = rec_b.rpm
+    rpm_delta_pct = safe_pct_change(rpm_b, rpm_a)
+    if rpm_delta_pct is not None and abs(rpm_delta_pct) > 3.0:
+        warnings.append(f"RPM diferentes entre A y B ({format_number(rpm_delta_pct, 1)}%).")
+
+    fs_delta_pct = safe_pct_change(summary_b.get("sample_rate_hz"), summary_a.get("sample_rate_hz"))
+    if fs_delta_pct is not None and abs(fs_delta_pct) > 5.0:
+        warnings.append(f"Frecuencia de muestreo diferente ({format_number(fs_delta_pct, 1)}%).")
+
+    dur_delta_pct = safe_pct_change(summary_b.get("duration_s"), summary_a.get("duration_s"))
+    if dur_delta_pct is not None and abs(dur_delta_pct) > 20.0:
+        warnings.append(f"Duración de señal diferente ({format_number(dur_delta_pct, 1)}%).")
+
+    peak_delta_pct = safe_pct_change(summary_b.get("peak_amp_display"), summary_a.get("peak_amp_display"))
+    overall_delta_pct = safe_pct_change(summary_b.get("overall_display"), summary_a.get("overall_display"))
+    one_x_delta_pct = safe_pct_change(summary_b.get("one_x_display"), summary_a.get("one_x_display"))
+    two_x_delta_pct = safe_pct_change(
+        summary_b.get("harmonic_map_display", {}).get(2),
+        summary_a.get("harmonic_map_display", {}).get(2),
+    )
+    three_x_delta_pct = safe_pct_change(
+        summary_b.get("harmonic_map_display", {}).get(3),
+        summary_a.get("harmonic_map_display", {}).get(3),
+    )
+    high_harm_delta_pct = safe_pct_change(summary_b.get("high_harm_display"), summary_a.get("high_harm_display"))
+
+    comparability_penalty = 0
+    comparability_penalty += 15 if any("RPM diferentes" in w for w in warnings) else 0
+    comparability_penalty += 10 if any("Frecuencia de muestreo" in w for w in warnings) else 0
+    comparability_penalty += 10 if any("Duración de señal" in w for w in warnings) else 0
+    comparability_penalty += 10 if any("unidades base" in w for w in warnings) else 0
+
+    severity = "Normal"
+    severity_color = "#16a34a"
+    title = "Sin cambio espectral dominante"
+    narrative = (
+        "La comparación A vs B no muestra un cambio dominante claramente asociado a una evolución mecánica específica. "
+        "Se recomienda conservar este compare mode como referencia base y seguir correlacionando con Orbit, Bode, Trends y condición operativa."
+    )
+
+    confidence = 82 - comparability_penalty
+
+    if one_x_delta_pct is not None and one_x_delta_pct >= 20 and (two_x_delta_pct is None or two_x_delta_pct < 15) and (high_harm_delta_pct is None or high_harm_delta_pct < 15):
+        severity = "Alerta"
+        severity_color = "#f59e0b"
+        title = "Incremento dominante en 1X"
+        narrative = (
+            "El espectro B presenta incremento dominante de la componente 1X respecto a A, sin crecimiento proporcional en 2X ni en armónicos altos. "
+            "El patrón es consistente con aumento de condición sincrónica, compatible con progresión de desbalance si la condición operativa es comparable."
+        )
+        confidence = max(confidence, 86)
+
+    if two_x_delta_pct is not None and two_x_delta_pct >= 20:
+        severity = "Alerta"
+        severity_color = "#f59e0b"
+        title = "Mayor contenido en 2X"
+        narrative = (
+            "El espectro B incrementa la componente 2X respecto a A. Este cambio es compatible con evolución hacia desalineación o incremento del efecto del tren de potencia, "
+            "especialmente si también existe crecimiento en 3X o cambio de fase en otros módulos."
+        )
+        confidence = max(confidence, 84)
+
+    if (
+        high_harm_delta_pct is not None and high_harm_delta_pct >= 25
+        and int(summary_b.get("strong_harmonic_count", 0)) >= int(summary_a.get("strong_harmonic_count", 0)) + 1
+    ):
+        severity = "Severa"
+        severity_color = "#dc2626"
+        title = "Aumento de armónicos altos"
+        narrative = (
+            "El espectro B muestra incremento relevante en armónicos altos y mayor densidad de contenido armónico respecto a A. "
+            "Este patrón apunta a progresión hacia holgura mecánica, no linealidad estructural o degradación de rigidez."
+        )
+        confidence = max(confidence, 88)
+
+    if (
+        overall_delta_pct is not None and overall_delta_pct >= 20
+        and (peak_delta_pct is None or peak_delta_pct < 12)
+    ):
+        severity = "Alerta"
+        severity_color = "#f59e0b"
+        title = "Mayor energía de banda ancha"
+        narrative = (
+            "La energía global del espectro en B aumenta más que el pico dominante. "
+            "Esto sugiere crecimiento de contenido distribuido o banda ancha, compatible con proceso, flujo, fricción o excitación no puramente sincrónica."
+        )
+        confidence = max(confidence, 83)
+
+    if peak_delta_pct is not None and abs(peak_delta_pct) <= 8 and (overall_delta_pct is None or abs(overall_delta_pct) <= 8):
+        severity = "Normal"
+        severity_color = "#16a34a"
+        title = "Espectros comparables sin variación fuerte"
+        narrative = (
+            "A y B se mantienen cercanos en pico dominante y energía global. "
+            "No se observa una evolución espectral fuerte entre ambos estados bajo esta comparación."
+        )
+        confidence = max(confidence, 80)
+
+    confidence = max(45, min(96, int(round(confidence))))
+
+    chips = [
+        (f"Severidad: {severity}", severity_color),
+        (f"Confianza: {confidence}%", None),
+        (f"Δ Peak: {format_number(peak_delta_pct, 1)}%", None),
+        (f"Δ Overall: {format_number(overall_delta_pct, 1)}%", None),
+        (f"Δ 1X: {format_number(one_x_delta_pct, 1)}%", None),
+        (f"Δ 2X: {format_number(two_x_delta_pct, 1)}%", None),
+    ]
+
+    return {
+        "severity": severity,
+        "severity_color": severity_color,
+        "title": title,
+        "narrative": narrative,
+        "confidence_pct": confidence,
+        "chips": chips,
+        "warnings": warnings,
+        "peak_delta_pct": peak_delta_pct,
+        "overall_delta_pct": overall_delta_pct,
+        "one_x_delta_pct": one_x_delta_pct,
+        "two_x_delta_pct": two_x_delta_pct,
+        "three_x_delta_pct": three_x_delta_pct,
+        "high_harm_delta_pct": high_harm_delta_pct,
+    }
+
+
+def build_compare_metric_table(
+    summary_a: Dict[str, Any],
+    summary_b: Dict[str, Any],
+) -> pd.DataFrame:
+    def _fmt(v: Any, d: int = 3) -> str:
+        return format_number(v, d)
+
+    rows = [
+        {
+            "Metric": "Dominant Peak Frequency (CPM)",
+            "A": _fmt(summary_a.get("peak_freq_cpm"), 1),
+            "B": _fmt(summary_b.get("peak_freq_cpm"), 1),
+            "Δ %": _fmt(safe_pct_change(summary_b.get("peak_freq_cpm"), summary_a.get("peak_freq_cpm")), 1),
+        },
+        {
+            "Metric": "Dominant Peak Amplitude",
+            "A": _fmt(summary_a.get("peak_amp_display"), 3),
+            "B": _fmt(summary_b.get("peak_amp_display"), 3),
+            "Δ %": _fmt(safe_pct_change(summary_b.get("peak_amp_display"), summary_a.get("peak_amp_display")), 1),
+        },
+        {
+            "Metric": "Spectrum Overall",
+            "A": _fmt(summary_a.get("overall_display"), 3),
+            "B": _fmt(summary_b.get("overall_display"), 3),
+            "Δ %": _fmt(safe_pct_change(summary_b.get("overall_display"), summary_a.get("overall_display")), 1),
+        },
+        {
+            "Metric": "1X Amplitude",
+            "A": _fmt(summary_a.get("one_x_display"), 3),
+            "B": _fmt(summary_b.get("one_x_display"), 3),
+            "Δ %": _fmt(safe_pct_change(summary_b.get("one_x_display"), summary_a.get("one_x_display")), 1),
+        },
+        {
+            "Metric": "2X Amplitude",
+            "A": _fmt(summary_a.get("harmonic_map_display", {}).get(2), 3),
+            "B": _fmt(summary_b.get("harmonic_map_display", {}).get(2), 3),
+            "Δ %": _fmt(safe_pct_change(summary_b.get("harmonic_map_display", {}).get(2), summary_a.get("harmonic_map_display", {}).get(2)), 1),
+        },
+        {
+            "Metric": "3X Amplitude",
+            "A": _fmt(summary_a.get("harmonic_map_display", {}).get(3), 3),
+            "B": _fmt(summary_b.get("harmonic_map_display", {}).get(3), 3),
+            "Δ %": _fmt(safe_pct_change(summary_b.get("harmonic_map_display", {}).get(3), summary_a.get("harmonic_map_display", {}).get(3)), 1),
+        },
+        {
+            "Metric": "Max Harmonic ≥4X",
+            "A": _fmt(summary_a.get("high_harm_display"), 3),
+            "B": _fmt(summary_b.get("high_harm_display"), 3),
+            "Δ %": _fmt(safe_pct_change(summary_b.get("high_harm_display"), summary_a.get("high_harm_display")), 1),
+        },
+        {
+            "Metric": "Sample Rate (Hz)",
+            "A": _fmt(summary_a.get("sample_rate_hz"), 2),
+            "B": _fmt(summary_b.get("sample_rate_hz"), 2),
+            "Δ %": _fmt(safe_pct_change(summary_b.get("sample_rate_hz"), summary_a.get("sample_rate_hz")), 1),
+        },
+        {
+            "Metric": "Duration (s)",
+            "A": _fmt(summary_a.get("duration_s"), 3),
+            "B": _fmt(summary_b.get("duration_s"), 3),
+            "Δ %": _fmt(safe_pct_change(summary_b.get("duration_s"), summary_a.get("duration_s")), 1),
+        },
+    ]
+    return pd.DataFrame(rows)
+
 def build_compare_figure(
     payloads: List[Dict[str, Any]],
     *,
@@ -2500,6 +2835,7 @@ def build_compare_figure(
     return fig
 
 
+
 def render_compare_panel(
     compare_records: List[SignalRecord],
     *,
@@ -2528,6 +2864,23 @@ def render_compare_panel(
         )
         for record in compare_records
     ]
+
+    summary_a = summarize_compare_payload(
+        payloads[0],
+        amplitude_mode=amplitude_mode,
+        max_cpm=max_cpm,
+    )
+    summary_b = summarize_compare_payload(
+        payloads[1],
+        amplitude_mode=amplitude_mode,
+        max_cpm=max_cpm,
+    )
+    compare_assessment = build_compare_assessment(
+        summary_a,
+        summary_b,
+        amplitude_mode=amplitude_mode,
+    )
+    compare_metrics_df = build_compare_metric_table(summary_a, summary_b)
 
     logo_uri = get_logo_data_uri(LOGO_PATH)
 
@@ -2570,11 +2923,9 @@ def render_compare_panel(
     st.markdown("### Spectrum Compare Mode")
 
     compare_rows = []
-    for idx, payload in enumerate(payloads):
-        record = payload["record"]
-        peak_freq = payload["peak_freq_cpm"]
-        peak_amp = payload["peak_amp_display"]
-        label_prefix = "A" if idx == 0 else ("B" if idx == 1 else f"S{idx+1}")
+    for idx, summary in enumerate([summary_a, summary_b]):
+        record = summary["record"]
+        label_prefix = "A" if idx == 0 else "B"
         compare_rows.append(
             {
                 "Label": label_prefix,
@@ -2582,8 +2933,10 @@ def render_compare_panel(
                 "Machine": record.machine,
                 "Point": record.point,
                 "RPM": format_number(record.rpm, 0),
-                "Peak CPM": format_number(peak_freq, 1),
-                "Peak Amp": format_number(peak_amp, 3),
+                "Peak CPM": format_number(summary.get("peak_freq_cpm"), 1),
+                "Peak Amp": format_number(summary.get("peak_amp_display"), 3),
+                "Overall": format_number(summary.get("overall_display"), 3),
+                "1X": format_number(summary.get("one_x_display"), 3),
                 "Timestamp": record.timestamp or "—",
             }
         )
@@ -2596,10 +2949,26 @@ def render_compare_panel(
         key=f"wm_spectrum_compare_plot_{compare_export_key}",
     )
 
-    st.info(
-        "Compare mode fase 1 es visual y seguro: superpone dos espectros con la misma cadena de procesamiento actual. "
-        "En esta fase no empuja contenido a reportes ni genera diagnóstico comparativo automático."
+    from core.module_patterns import helper_card
+
+    helper_card(
+        title="Spectrum Compare Diagnostic Helper",
+        subtitle=str(compare_assessment.get("title") or "").strip(),
+        chips=compare_assessment.get("chips", []),
     )
+
+    st.info(str(compare_assessment.get("narrative") or "").strip())
+
+    st.markdown("#### Compare Technical Body")
+    st.dataframe(compare_metrics_df, use_container_width=True, hide_index=True)
+
+    st.markdown("#### Compare Validation")
+    warnings = compare_assessment.get("warnings", [])
+    if warnings:
+        for warning in warnings:
+            st.warning(warning)
+    else:
+        st.success("Comparación válida: A y B son razonablemente comparables para lectura técnica rápida.")
 
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
     left_pad, col_export1, col_export2, right_pad = st.columns([2.3, 1.2, 1.2, 2.3])
