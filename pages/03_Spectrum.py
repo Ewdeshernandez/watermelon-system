@@ -2500,6 +2500,351 @@ def build_compare_assessment(
     }
 
 
+
+
+def interpolate_compare_series(
+    freq_src: np.ndarray,
+    amp_src: np.ndarray,
+    freq_target: np.ndarray,
+) -> np.ndarray:
+    if freq_src.size < 2 or amp_src.size < 2 or freq_target.size == 0:
+        return np.zeros_like(freq_target, dtype=float)
+
+    mask = np.isfinite(freq_src) & np.isfinite(amp_src)
+    freq_src = freq_src[mask]
+    amp_src = amp_src[mask]
+
+    if freq_src.size < 2:
+        return np.zeros_like(freq_target, dtype=float)
+
+    order = np.argsort(freq_src)
+    freq_src = freq_src[order]
+    amp_src = amp_src[order]
+
+    unique_mask = np.ones_like(freq_src, dtype=bool)
+    if freq_src.size > 1:
+        unique_mask[1:] = np.diff(freq_src) > 0
+
+    freq_src = freq_src[unique_mask]
+    amp_src = amp_src[unique_mask]
+
+    if freq_src.size < 2:
+        return np.zeros_like(freq_target, dtype=float)
+
+    left = float(amp_src[0])
+    right = float(amp_src[-1])
+
+    return np.interp(freq_target, freq_src, amp_src, left=left, right=right)
+
+
+def build_delta_spectrum_payload(
+    payload_a: Dict[str, Any],
+    payload_b: Dict[str, Any],
+    *,
+    max_cpm: float,
+) -> Dict[str, Any]:
+    freq_a = payload_a["visible_freq_cpm"]
+    amp_a = payload_a["visible_amp_display"]
+    freq_b = payload_b["visible_freq_cpm"]
+    amp_b = payload_b["visible_amp_display"]
+
+    if freq_a.size < 2 or freq_b.size < 2:
+        return {
+            "freq_cpm": np.array([], dtype=float),
+            "delta_amp": np.array([], dtype=float),
+            "max_abs_delta": None,
+            "peak_growth_cpm": None,
+            "peak_growth_amp": None,
+            "peak_drop_cpm": None,
+            "peak_drop_amp": None,
+        }
+
+    if max_cpm > 0:
+        df_candidates = []
+        if freq_a.size > 1:
+            df_candidates.append(float(np.min(np.diff(freq_a))))
+        if freq_b.size > 1:
+            df_candidates.append(float(np.min(np.diff(freq_b))))
+        df_candidates = [v for v in df_candidates if np.isfinite(v) and v > 0]
+        df = min(df_candidates) if df_candidates else max_cpm / 2000.0
+        df = max(df, 1.0)
+        common_freq = np.arange(0.0, max_cpm + df * 0.5, df, dtype=float)
+    else:
+        max_visible = max(float(np.max(freq_a)), float(np.max(freq_b)))
+        df = max(min(float(np.min(np.diff(freq_a))), float(np.min(np.diff(freq_b)))), 1.0)
+        common_freq = np.arange(0.0, max_visible + df * 0.5, df, dtype=float)
+
+    amp_a_i = interpolate_compare_series(freq_a, amp_a, common_freq)
+    amp_b_i = interpolate_compare_series(freq_b, amp_b, common_freq)
+    delta_amp = amp_b_i - amp_a_i
+
+    if delta_amp.size == 0:
+        return {
+            "freq_cpm": common_freq,
+            "delta_amp": delta_amp,
+            "max_abs_delta": None,
+            "peak_growth_cpm": None,
+            "peak_growth_amp": None,
+            "peak_drop_cpm": None,
+            "peak_drop_amp": None,
+        }
+
+    idx_growth = int(np.argmax(delta_amp))
+    idx_drop = int(np.argmin(delta_amp))
+
+    return {
+        "freq_cpm": common_freq,
+        "delta_amp": delta_amp,
+        "max_abs_delta": float(np.max(np.abs(delta_amp))) if delta_amp.size else None,
+        "peak_growth_cpm": float(common_freq[idx_growth]) if delta_amp.size else None,
+        "peak_growth_amp": float(delta_amp[idx_growth]) if delta_amp.size else None,
+        "peak_drop_cpm": float(common_freq[idx_drop]) if delta_amp.size else None,
+        "peak_drop_amp": float(delta_amp[idx_drop]) if delta_amp.size else None,
+    }
+
+
+def build_delta_spectrum_figure(
+    delta_payload: Dict[str, Any],
+    *,
+    amplitude_mode: str,
+    base_unit: str,
+    max_cpm: float,
+) -> go.Figure:
+    fig = go.Figure()
+
+    freq_cpm = delta_payload["freq_cpm"]
+    delta_amp = delta_payload["delta_amp"]
+
+    display_unit_text = amplitude_unit_text(base_unit, amplitude_mode)
+    y_title = f"Delta Amplitude ({display_unit_text})" if display_unit_text else "Delta Amplitude"
+
+    if freq_cpm.size < 2 or delta_amp.size < 2:
+        fig.update_layout(
+            height=360,
+            margin=dict(l=46, r=18, t=40, b=70),
+            plot_bgcolor="#f8fafc",
+            paper_bgcolor="#f3f4f6",
+            xaxis_title="Frequency (CPM)",
+            yaxis_title=y_title,
+        )
+        fig.add_annotation(
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            text="No delta spectrum available",
+            showarrow=False,
+            font=dict(size=16, color="#6b7280"),
+        )
+        return fig
+
+    pos_amp = np.where(delta_amp > 0, delta_amp, 0.0)
+    neg_amp = np.where(delta_amp < 0, delta_amp, 0.0)
+
+    fig.add_trace(
+        go.Scattergl(
+            x=freq_cpm,
+            y=pos_amp,
+            mode="lines",
+            line=dict(width=1.8, color="#dc2626"),
+            fill="tozeroy",
+            fillcolor="rgba(220, 38, 38, 0.12)",
+            name="B - A positive",
+            hovertemplate=(
+                "Growth zone<br>"
+                "Frequency: %{x:.2f} CPM<br>"
+                + (f"Delta: " + "%{y:.4f} " + display_unit_text if display_unit_text else "Delta: %{y:.4f}")
+                + "<extra></extra>"
+            ),
+            showlegend=True,
+        )
+    )
+
+    fig.add_trace(
+        go.Scattergl(
+            x=freq_cpm,
+            y=neg_amp,
+            mode="lines",
+            line=dict(width=1.8, color="#2563eb"),
+            fill="tozeroy",
+            fillcolor="rgba(37, 99, 235, 0.12)",
+            name="B - A negative",
+            hovertemplate=(
+                "Drop zone<br>"
+                "Frequency: %{x:.2f} CPM<br>"
+                + (f"Delta: " + "%{y:.4f} " + display_unit_text if display_unit_text else "Delta: %{y:.4f}")
+                + "<extra></extra>"
+            ),
+            showlegend=True,
+        )
+    )
+
+    fig.add_hline(y=0.0, line_width=1.2, line_color="#64748b")
+
+    peak_growth_cpm = delta_payload.get("peak_growth_cpm")
+    peak_growth_amp = delta_payload.get("peak_growth_amp")
+    if peak_growth_cpm is not None and peak_growth_amp is not None and peak_growth_amp > 0:
+        fig.add_annotation(
+            x=peak_growth_cpm,
+            y=peak_growth_amp,
+            text=f"Max growth · {format_number(peak_growth_cpm, 1)} CPM",
+            showarrow=True,
+            arrowhead=2,
+            ax=24,
+            ay=-32,
+            bgcolor="rgba(255,255,255,0.95)",
+            bordercolor="#d1d5db",
+            borderwidth=1,
+            font=dict(size=10.5, color="#111827"),
+        )
+
+    peak_drop_cpm = delta_payload.get("peak_drop_cpm")
+    peak_drop_amp = delta_payload.get("peak_drop_amp")
+    if peak_drop_cpm is not None and peak_drop_amp is not None and peak_drop_amp < 0:
+        fig.add_annotation(
+            x=peak_drop_cpm,
+            y=peak_drop_amp,
+            text=f"Max drop · {format_number(peak_drop_cpm, 1)} CPM",
+            showarrow=True,
+            arrowhead=2,
+            ax=-24,
+            ay=32,
+            bgcolor="rgba(255,255,255,0.95)",
+            bordercolor="#d1d5db",
+            borderwidth=1,
+            font=dict(size=10.5, color="#111827"),
+        )
+
+    x_max = float(max_cpm) if max_cpm > 0 else float(np.max(freq_cpm))
+    y_abs = float(np.max(np.abs(delta_amp))) if delta_amp.size else 1.0
+    y_abs = max(y_abs * 1.15, 0.05)
+
+    grid_step = 1000.0
+    if x_max > 5000:
+        grid_step = 5000.0
+    if x_max > 20000:
+        grid_step = 10000.0
+    if x_max > 60000:
+        grid_step = 20000.0
+    tickvals = list(np.arange(0.0, x_max + grid_step * 0.5, grid_step))
+
+    fig.update_layout(
+        height=360,
+        margin=dict(l=46, r=18, t=40, b=70),
+        plot_bgcolor="#f8fafc",
+        paper_bgcolor="#f3f4f6",
+        font=dict(color="#111827"),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=0.99,
+            bgcolor="rgba(255,255,255,0.75)",
+            bordercolor="#d1d5db",
+            borderwidth=1,
+        ),
+        xaxis=dict(
+            title="Frequency (CPM)",
+            range=[0.0, x_max],
+            tickvals=tickvals,
+            tickformat=".0f",
+            showgrid=False,
+            zeroline=False,
+            showline=True,
+            linecolor="#9ca3af",
+            ticks="outside",
+            tickcolor="#6b7280",
+            ticklen=4,
+        ),
+        yaxis=dict(
+            title=y_title,
+            range=[-y_abs, y_abs],
+            showgrid=True,
+            gridcolor="rgba(148, 163, 184, 0.18)",
+            zeroline=False,
+            showline=True,
+            linecolor="#9ca3af",
+            ticks="outside",
+            tickcolor="#6b7280",
+            ticklen=4,
+        ),
+        hovermode="closest",
+    )
+
+    return fig
+
+
+def build_compare_report_notes(
+    compare_assessment: Dict[str, Any],
+    summary_a: Dict[str, Any],
+    summary_b: Dict[str, Any],
+) -> str:
+    blocks = []
+
+    title = str(compare_assessment.get("title") or "").strip()
+    narrative = str(compare_assessment.get("narrative") or "").strip()
+
+    if title:
+        blocks.append(title)
+    if narrative:
+        blocks.append(narrative)
+
+    blocks.append(
+        (
+            "Resumen comparativo:\n"
+            f"- A Peak: {format_number(summary_a.get('peak_amp_display'), 3)} @ {format_number(summary_a.get('peak_freq_cpm'), 1)} CPM\n"
+            f"- B Peak: {format_number(summary_b.get('peak_amp_display'), 3)} @ {format_number(summary_b.get('peak_freq_cpm'), 1)} CPM\n"
+            f"- Δ Peak: {format_number(compare_assessment.get('peak_delta_pct'), 1)}%\n"
+            f"- Δ Overall: {format_number(compare_assessment.get('overall_delta_pct'), 1)}%\n"
+            f"- Δ 1X: {format_number(compare_assessment.get('one_x_delta_pct'), 1)}%\n"
+            f"- Δ 2X: {format_number(compare_assessment.get('two_x_delta_pct'), 1)}%"
+        )
+    )
+
+    warnings = compare_assessment.get("warnings", [])
+    if warnings:
+        blocks.append("Advertencias de comparabilidad:\n- " + "\n- ".join(str(w) for w in warnings))
+
+    return "\n\n".join(blocks).strip()
+
+
+def queue_compare_spectrum_to_report(
+    compare_records: List[SignalRecord],
+    compare_fig: go.Figure,
+    report_title: str,
+    report_notes: str,
+    image_bytes: Optional[bytes] = None,
+) -> None:
+    record_a = compare_records[0]
+    record_b = compare_records[1]
+
+    st.session_state.report_items.append(
+        {
+            "id": make_export_state_key(
+                [
+                    "report-spectrum-compare",
+                    record_a.signal_id,
+                    record_b.signal_id,
+                    record_a.timestamp,
+                    record_b.timestamp,
+                    report_title,
+                    len(st.session_state.report_items),
+                ]
+            ),
+            "type": "spectrum_compare",
+            "title": report_title,
+            "notes": report_notes or "Comparación espectral pendiente de interpretación técnica.",
+            "signal_id": f"{record_a.signal_id}__{record_b.signal_id}",
+            "figure": go.Figure(compare_fig),
+            "image_bytes": image_bytes,
+            "machine": f"{record_a.machine} vs {record_b.machine}",
+            "point": f"{record_a.point} vs {record_b.point}",
+            "variable": f"{record_a.variable} vs {record_b.variable}",
+            "timestamp": f"{record_a.timestamp or '—'} | {record_b.timestamp or '—'}",
+        }
+    )
+
 def build_compare_metric_table(
     summary_a: Dict[str, Any],
     summary_b: Dict[str, Any],
@@ -2881,10 +3226,15 @@ def render_compare_panel(
         amplitude_mode=amplitude_mode,
     )
     compare_metrics_df = build_compare_metric_table(summary_a, summary_b)
+    delta_payload = build_delta_spectrum_payload(
+        payloads[0],
+        payloads[1],
+        max_cpm=max_cpm,
+    )
 
     logo_uri = get_logo_data_uri(LOGO_PATH)
 
-    fig = build_compare_figure(
+    compare_fig = build_compare_figure(
         payloads=payloads,
         amplitude_mode=amplitude_mode,
         max_cpm=max_cpm,
@@ -2894,6 +3244,13 @@ def render_compare_panel(
         annotate_peak=annotate_peak,
         logo_uri=logo_uri,
         spectrum_mode_label=window_name,
+    )
+
+    delta_fig = build_delta_spectrum_figure(
+        delta_payload=delta_payload,
+        amplitude_mode=amplitude_mode,
+        base_unit=summary_a.get("amplitude_unit") or "",
+        max_cpm=max_cpm,
     )
 
     compare_export_key = make_export_state_key(
@@ -2943,11 +3300,34 @@ def render_compare_panel(
 
     st.dataframe(pd.DataFrame(compare_rows), use_container_width=True, hide_index=True)
     st.plotly_chart(
-        fig,
+        compare_fig,
         use_container_width=True,
         config={"displaylogo": False},
         key=f"wm_spectrum_compare_plot_{compare_export_key}",
     )
+
+    st.markdown("#### Delta Spectrum (B - A)")
+    st.plotly_chart(
+        delta_fig,
+        use_container_width=True,
+        config={"displaylogo": False},
+        key=f"wm_spectrum_delta_plot_{compare_export_key}",
+    )
+
+    delta_growth = delta_payload.get("peak_growth_amp")
+    delta_drop = delta_payload.get("peak_drop_amp")
+    delta_growth_cpm = delta_payload.get("peak_growth_cpm")
+    delta_drop_cpm = delta_payload.get("peak_drop_cpm")
+
+    delta_info_cols = st.columns(4)
+    with delta_info_cols[0]:
+        st.metric("Max growth Δ", format_number(delta_growth, 3))
+    with delta_info_cols[1]:
+        st.metric("Growth freq CPM", format_number(delta_growth_cpm, 1))
+    with delta_info_cols[2]:
+        st.metric("Max drop Δ", format_number(delta_drop, 3))
+    with delta_info_cols[3]:
+        st.metric("Drop freq CPM", format_number(delta_drop_cpm, 1))
 
     from core.module_patterns import helper_card
 
@@ -2971,12 +3351,12 @@ def render_compare_panel(
         st.success("Comparación válida: A y B son razonablemente comparables para lectura técnica rápida.")
 
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
-    left_pad, col_export1, col_export2, right_pad = st.columns([2.3, 1.2, 1.2, 2.3])
+    left_pad, col_export1, col_export2, col_report, right_pad = st.columns([1.8, 1.2, 1.2, 1.2, 1.8])
 
     with col_export1:
         if st.button("Prepare PNG HD", key=f"prepare_compare_png_{compare_export_key}", use_container_width=True):
             with st.spinner("Generating HD export..."):
-                png_bytes, export_error = build_export_png_bytes(fig=fig)
+                png_bytes, export_error = build_export_png_bytes(fig=compare_fig)
                 st.session_state.wm_sp_export_store[compare_export_key]["png_bytes"] = png_bytes
                 st.session_state.wm_sp_export_store[compare_export_key]["error"] = export_error
 
@@ -2998,6 +3378,26 @@ def render_compare_panel(
                 key=f"download_compare_disabled_{compare_export_key}",
                 use_container_width=True,
             )
+
+    with col_report:
+        if st.button("Enviar compare a Reporte", key=f"send_compare_report_{compare_export_key}", use_container_width=True):
+            png_bytes_for_report = None
+            try:
+                png_bytes_for_report, _png_error_for_report = build_export_png_bytes(fig=compare_fig)
+            except Exception:
+                png_bytes_for_report = None
+
+            report_title = f"Spectrum Compare — {compare_records[0].name} vs {compare_records[1].name}"
+            report_notes = build_compare_report_notes(compare_assessment, summary_a, summary_b)
+
+            queue_compare_spectrum_to_report(
+                compare_records=compare_records,
+                compare_fig=compare_fig,
+                report_title=report_title,
+                report_notes=report_notes,
+                image_bytes=png_bytes_for_report,
+            )
+            st.success("Compare mode enviado al reporte")
 
 
 selected_ids = [
