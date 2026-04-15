@@ -23,6 +23,13 @@ from core.bearing_catalog import (
     build_bearing_fault_ai_diagnosis,
     list_bearing_catalog_options,
 )
+from core.spectrum_compare import (
+    build_compare_assessment,
+    build_compare_report_notes,
+    build_compare_time_label,
+    format_number as compare_format_number,
+    order_compare_records_by_time,
+)
 
 st.set_page_config(page_title="Watermelon System | Spectrum", layout="wide")
 
@@ -1651,6 +1658,18 @@ with st.sidebar:
     annotate_peak = st.checkbox("Annotate dominant peak", value=True)
     show_right_info_box = st.checkbox("Show info box", value=True)
 
+    st.markdown("### Compare Mode")
+    enable_compare_mode = st.checkbox(
+        "Enable compare mode (2 spectra overlay)",
+        value=False,
+        help="Overlay exactly two selected spectra using the same processing chain as the individual spectrum view.",
+    )
+    compare_fill_area = st.checkbox(
+        "Fill area in compare mode",
+        value=False,
+        disabled=not enable_compare_mode,
+    )
+
     st.markdown("### Harmonics")
 
     show_harmonics = st.checkbox("Show 1X harmonics", value=True)
@@ -2151,6 +2170,612 @@ def render_spectrum_panel(
             )
             st.success("Spectrum enviado al reporte")
 
+
+def summarize_compare_signal(
+    record: SignalRecord,
+    *,
+    spectrum: SpectrumResult,
+    amplitude_mode: str,
+    max_cpm: float,
+    harmonic_count: int = 8,
+    harmonic_band_fraction: float = 0.12,
+) -> Dict[str, Any]:
+    freq_cpm = spectrum.freq_cpm
+    amp_peak = spectrum.amp_peak
+
+    peak_amp = convert_scalar_peak_to_mode(spectrum.peak_amp_peak, amplitude_mode)
+
+    overall_rms_peak = compute_spectrum_overall_rms_parseval(
+        time_s=record.time_s,
+        y=record.amplitude,
+        remove_dc=True,
+        detrend=True,
+        max_cpm=max_cpm,
+    )
+    overall_display = convert_rms_to_mode(overall_rms_peak, amplitude_mode)
+
+    one_x_peak = None
+    if record.rpm is not None and record.rpm > 0:
+        one_x_peak = estimate_harmonic_from_waveform_peak(
+            time_s=record.time_s,
+            y=record.amplitude,
+            freq_hz=float(record.rpm) / 60.0,
+            remove_mean=True,
+        )
+        if one_x_peak is None:
+            _local_freq, local_peak = find_local_peak_near_1x(
+                freq_cpm=freq_cpm,
+                amp_peak=amp_peak,
+                one_x_cpm=float(record.rpm),
+                band_fraction=harmonic_band_fraction,
+            )
+            one_x_peak = local_peak
+
+    one_x_display = convert_scalar_peak_to_mode(one_x_peak, amplitude_mode)
+
+    harmonic_points = collect_harmonic_points(
+        freq_cpm=freq_cpm,
+        amp_peak=amp_peak,
+        base_rpm=record.rpm,
+        harmonic_count=harmonic_count,
+        band_fraction=harmonic_band_fraction,
+        max_cpm=max_cpm,
+    )
+
+    harmonic_map_peak = {int(p.order): float(p.amp_peak) for p in harmonic_points}
+
+    summary = {
+        "record": record,
+        "timestamp": record.timestamp,
+        "rpm": record.rpm,
+        "amplitude_unit": record.amplitude_unit,
+        "sample_rate_hz": record.sample_rate_hz,
+        "duration_s": record.duration_s,
+        "peak_freq_cpm": spectrum.peak_freq_cpm,
+        "peak_amp": peak_amp,
+        "overall": overall_display,
+        "one_x_amp": one_x_display,
+        "two_x_amp": convert_scalar_peak_to_mode(harmonic_map_peak.get(2), amplitude_mode),
+        "three_x_amp": convert_scalar_peak_to_mode(harmonic_map_peak.get(3), amplitude_mode),
+        "high_harm_amp": convert_scalar_peak_to_mode(
+            max([v for k, v in harmonic_map_peak.items() if int(k) >= 4], default=0.0),
+            amplitude_mode,
+        ),
+    }
+    return summary
+
+
+def build_compare_overlay_figure(
+    compare_records: List[SignalRecord],
+    compare_spectra: List[SpectrumResult],
+    *,
+    amplitude_mode: str,
+    max_cpm: float,
+    y_axis_mode: str,
+    y_axis_manual_max: Optional[float],
+    fill_area: bool,
+    annotate_peak: bool,
+    logo_uri: Optional[str],
+    spectrum_mode_label: str,
+) -> go.Figure:
+    fig = go.Figure()
+
+    colors = ["#2563eb", "#dc2626"]
+    display_unit_text = amplitude_unit_text(compare_records[0].amplitude_unit, amplitude_mode) if compare_records else ""
+    y_title = f"Amplitude ({display_unit_text})" if display_unit_text else "Amplitude"
+
+    ymax = 0.0
+
+    for idx, (record, spectrum) in enumerate(zip(compare_records, compare_spectra)):
+        freq_cpm = spectrum.freq_cpm
+        amp_display = convert_peak_to_mode(spectrum.amp_peak, amplitude_mode)
+
+        mask = np.isfinite(freq_cpm) & np.isfinite(amp_display)
+        freq_cpm = freq_cpm[mask]
+        amp_display = amp_display[mask]
+
+        if max_cpm > 0:
+            visible_mask = freq_cpm <= max_cpm
+            freq_cpm = freq_cpm[visible_mask]
+            amp_display = amp_display[visible_mask]
+
+        if freq_cpm.size < 2:
+            continue
+
+        ymax = max(ymax, float(np.max(amp_display)))
+        color = colors[idx]
+        label = "A" if idx == 0 else "B"
+
+        fig.add_trace(
+            go.Scattergl(
+                x=freq_cpm,
+                y=amp_display,
+                mode="lines",
+                line=dict(width=2.0, color=color),
+                fill="tozeroy" if fill_area else None,
+                fillcolor="rgba(37, 99, 235, 0.08)" if (fill_area and idx == 0) else ("rgba(220, 38, 38, 0.08)" if fill_area else None),
+                hovertemplate=(
+                    f"{label} · {html.escape(record.name)}<br>"
+                    "Frequency: %{x:.2f} CPM<br>"
+                    + (f"Amplitude: " + "%{y:.4f} " + display_unit_text if display_unit_text else "Amplitude: %{y:.4f}")
+                    + "<extra></extra>"
+                ),
+                showlegend=True,
+                name=f"{label} · {record.name}",
+            )
+        )
+
+        peak_freq = spectrum.peak_freq_cpm
+        peak_amp = convert_scalar_peak_to_mode(spectrum.peak_amp_peak, amplitude_mode)
+        if annotate_peak and peak_freq is not None and peak_amp is not None:
+            fig.add_trace(
+                go.Scatter(
+                    x=[peak_freq],
+                    y=[peak_amp],
+                    mode="markers",
+                    marker=dict(symbol="circle", size=9, color=color, line=dict(width=1.0, color="#ffffff")),
+                    showlegend=False,
+                    name=f"{label}_peak",
+                    hovertemplate=(
+                        f"{label} peak<br>"
+                        "Frequency: %{x:.2f} CPM<br>"
+                        + (f"Amplitude: " + "%{y:.4f} " + display_unit_text if display_unit_text else "Amplitude: %{y:.4f}")
+                        + "<extra></extra>"
+                    ),
+                )
+            )
+
+    if ymax <= 0:
+        ymax = 1.0
+
+    auto_top = max(ymax * 1.12, ymax + 0.05)
+    y_top = float(y_axis_manual_max) if (y_axis_mode == "Manual" and y_axis_manual_max is not None and y_axis_manual_max > 0) else float(auto_top)
+
+    x_max = float(max_cpm) if max_cpm > 0 else 60000.0
+
+    grid_step = 1000.0
+    if x_max > 5000:
+        grid_step = 5000.0
+    if x_max > 20000:
+        grid_step = 10000.0
+    if x_max > 60000:
+        grid_step = 20000.0
+    tickvals = list(np.arange(0.0, x_max + grid_step * 0.5, grid_step))
+
+    for gx in tickvals:
+        if abs(float(gx)) < 1e-12:
+            continue
+        fig.add_vline(
+            x=gx,
+            line_width=1,
+            line_color="rgba(148, 163, 184, 0.18)",
+            layer="below",
+        )
+
+    x0, x1 = 0.006, 0.994
+    y0, y1 = 1.014, 1.106
+    y_text = (y0 + y1) / 2.0
+
+    fig.add_shape(
+        type="path",
+        xref="paper",
+        yref="paper",
+        path=rounded_rect_path(x0, y0, x1, y1, 0.015),
+        line=dict(color="#cfd8e3", width=1.15),
+        fillcolor="rgba(255,255,255,0.97)",
+        layer="below",
+    )
+
+    if logo_uri:
+        fig.add_layout_image(
+            dict(
+                source=logo_uri,
+                xref="paper",
+                yref="paper",
+                x=0.014,
+                y=y1 - 0.009,
+                sizex=0.060,
+                sizey=0.090,
+                xanchor="left",
+                yanchor="top",
+                layer="above",
+                sizing="contain",
+                opacity=1.0,
+            )
+        )
+        title_x = 0.083
+    else:
+        title_x = 0.020
+
+    fig.add_annotation(
+        xref="paper",
+        yref="paper",
+        x=title_x,
+        y=y_text,
+        xanchor="left",
+        yanchor="middle",
+        text=f"<b>Spectrum Compare</b> · {spectrum_mode_label} · {amplitude_mode_label(amplitude_mode)}",
+        showarrow=False,
+        font=dict(size=12.6, color="#111827"),
+        align="left",
+    )
+
+    rec_a = compare_records[0]
+    rec_b = compare_records[1]
+    fig.add_annotation(
+        xref="paper",
+        yref="paper",
+        x=0.420,
+        y=y_text,
+        xanchor="left",
+        yanchor="middle",
+        text=f"A: {html.escape(rec_a.name)}<br><span style='font-size:10px'>{html.escape(str(rec_a.timestamp or '—'))}</span>",
+        showarrow=False,
+        font=dict(size=11.6, color="#2563eb"),
+        align="left",
+    )
+    fig.add_annotation(
+        xref="paper",
+        yref="paper",
+        x=0.700,
+        y=y_text,
+        xanchor="left",
+        yanchor="middle",
+        text=f"B: {html.escape(rec_b.name)}<br><span style='font-size:10px'>{html.escape(str(rec_b.timestamp or '—'))}</span>",
+        showarrow=False,
+        font=dict(size=11.6, color="#dc2626"),
+        align="left",
+    )
+
+    fig.update_layout(
+        height=940,
+        margin=dict(l=46, r=18, t=84, b=140),
+        plot_bgcolor="#f8fafc",
+        paper_bgcolor="#f3f4f6",
+        font=dict(color="#111827"),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.125,
+            xanchor="right",
+            x=0.99,
+            bgcolor="rgba(255,255,255,0.75)",
+            bordercolor="#d1d5db",
+            borderwidth=1,
+        ),
+        xaxis=dict(
+            title="Frequency (CPM)",
+            range=[0.0, x_max],
+            tickvals=tickvals,
+            tickformat=".0f",
+            showgrid=False,
+            zeroline=False,
+            showline=True,
+            linecolor="#9ca3af",
+            ticks="outside",
+            tickcolor="#6b7280",
+            ticklen=4,
+        ),
+        yaxis=dict(
+            title=y_title,
+            range=[0.0, y_top],
+            showgrid=True,
+            gridcolor="rgba(148, 163, 184, 0.18)",
+            zeroline=False,
+            showline=True,
+            linecolor="#9ca3af",
+            ticks="outside",
+            tickcolor="#6b7280",
+            ticklen=4,
+        ),
+        hovermode="closest",
+    )
+
+    return fig
+
+
+def queue_compare_to_report(
+    compare_records: List[SignalRecord],
+    compare_fig: go.Figure,
+    report_title: str,
+    report_notes: str,
+    image_bytes: Optional[bytes] = None,
+) -> None:
+    record_a = compare_records[0]
+    record_b = compare_records[1]
+
+    if "report_items" not in st.session_state:
+        st.session_state.report_items = []
+
+    st.session_state.report_items.append(
+        {
+            "id": make_export_state_key(
+                [
+                    "report-spectrum-compare",
+                    record_a.signal_id,
+                    record_b.signal_id,
+                    record_a.timestamp,
+                    record_b.timestamp,
+                    report_title,
+                    len(st.session_state.report_items),
+                ]
+            ),
+            "type": "spectrum",
+            "title": report_title,
+            "notes": report_notes or "Comparación espectral pendiente de interpretación técnica.",
+            "signal_id": f"{record_a.signal_id}__{record_b.signal_id}",
+            "figure": go.Figure(compare_fig),
+            "image_bytes": image_bytes,
+            "machine": f"{record_a.machine} vs {record_b.machine}",
+            "point": f"{record_a.point} vs {record_b.point}",
+            "variable": f"{record_a.variable} vs {record_b.variable}",
+            "timestamp": f"{record_a.timestamp or '—'} | {record_b.timestamp or '—'}",
+        }
+    )
+
+
+def render_compare_panel(
+    compare_records: List[SignalRecord],
+    *,
+    window_name: str,
+    amplitude_mode: str,
+    remove_dc: bool,
+    detrend: bool,
+    zero_padding: bool,
+    high_res_factor: int,
+    max_cpm: float,
+    y_axis_mode: str,
+    y_axis_manual_max: Optional[float],
+    compare_fill_area: bool,
+    annotate_peak: bool,
+) -> None:
+    compare_dicts = [
+        {"timestamp": rec.timestamp, "record": rec}
+        for rec in compare_records
+    ]
+    ordered_dicts, ts_a, ts_b, delta_days = order_compare_records_by_time(compare_dicts)
+    compare_records = [item["record"] for item in ordered_dicts]
+
+    compare_spectra = [
+        compute_spectrum_peak(
+            time_s=record.time_s,
+            y=record.amplitude,
+            window_name=window_name,
+            remove_dc=remove_dc,
+            detrend=detrend,
+            zero_padding=zero_padding,
+            high_res_factor=high_res_factor,
+            min_peak_cpm=1.0,
+        )
+        for record in compare_records
+    ]
+
+    summary_a = summarize_compare_signal(
+        compare_records[0],
+        spectrum=compare_spectra[0],
+        amplitude_mode=amplitude_mode,
+        max_cpm=max_cpm,
+    )
+    summary_b = summarize_compare_signal(
+        compare_records[1],
+        spectrum=compare_spectra[1],
+        amplitude_mode=amplitude_mode,
+        max_cpm=max_cpm,
+    )
+
+    compare_assessment = build_compare_assessment(
+        summary_a,
+        summary_b,
+        delta_days=delta_days,
+    )
+
+    compare_metrics_df = pd.DataFrame(
+        [
+            {
+                "Metric": "Dominant Peak Frequency (CPM)",
+                "A": compare_format_number(summary_a.get("peak_freq_cpm"), 1),
+                "B": compare_format_number(summary_b.get("peak_freq_cpm"), 1),
+                "Δ %": compare_format_number(compare_assessment.get("peak_delta_pct"), 1),
+            },
+            {
+                "Metric": "Dominant Peak Amplitude",
+                "A": compare_format_number(summary_a.get("peak_amp"), 3),
+                "B": compare_format_number(summary_b.get("peak_amp"), 3),
+                "Δ %": compare_format_number(compare_assessment.get("peak_delta_pct"), 1),
+            },
+            {
+                "Metric": "Spectrum Overall",
+                "A": compare_format_number(summary_a.get("overall"), 3),
+                "B": compare_format_number(summary_b.get("overall"), 3),
+                "Δ %": compare_format_number(compare_assessment.get("overall_delta_pct"), 1),
+            },
+            {
+                "Metric": "1X Amplitude",
+                "A": compare_format_number(summary_a.get("one_x_amp"), 3),
+                "B": compare_format_number(summary_b.get("one_x_amp"), 3),
+                "Δ %": compare_format_number(compare_assessment.get("one_x_delta_pct"), 1),
+            },
+            {
+                "Metric": "2X Amplitude",
+                "A": compare_format_number(summary_a.get("two_x_amp"), 3),
+                "B": compare_format_number(summary_b.get("two_x_amp"), 3),
+                "Δ %": compare_format_number(compare_assessment.get("two_x_delta_pct"), 1),
+            },
+            {
+                "Metric": "3X Amplitude",
+                "A": compare_format_number(summary_a.get("three_x_amp"), 3),
+                "B": compare_format_number(summary_b.get("three_x_amp"), 3),
+                "Δ %": compare_format_number(compare_assessment.get("three_x_delta_pct"), 1),
+            },
+            {
+                "Metric": "Sample Rate (Hz)",
+                "A": compare_format_number(summary_a.get("sample_rate_hz"), 2),
+                "B": compare_format_number(summary_b.get("sample_rate_hz"), 2),
+                "Δ %": compare_format_number(
+                    ((float(summary_b.get("sample_rate_hz")) - float(summary_a.get("sample_rate_hz"))) / abs(float(summary_a.get("sample_rate_hz")))) * 100.0
+                    if summary_a.get("sample_rate_hz") not in [None, 0] and summary_b.get("sample_rate_hz") not in [None]
+                    else None,
+                    1,
+                ),
+            },
+            {
+                "Metric": "Duration (s)",
+                "A": compare_format_number(summary_a.get("duration_s"), 3),
+                "B": compare_format_number(summary_b.get("duration_s"), 3),
+                "Δ %": compare_format_number(
+                    ((float(summary_b.get("duration_s")) - float(summary_a.get("duration_s"))) / abs(float(summary_a.get("duration_s")))) * 100.0
+                    if summary_a.get("duration_s") not in [None, 0] and summary_b.get("duration_s") not in [None]
+                    else None,
+                    1,
+                ),
+            },
+        ]
+    )
+
+    logo_uri = get_logo_data_uri(LOGO_PATH)
+    compare_fig = build_compare_overlay_figure(
+        compare_records,
+        compare_spectra,
+        amplitude_mode=amplitude_mode,
+        max_cpm=max_cpm,
+        y_axis_mode=y_axis_mode,
+        y_axis_manual_max=y_axis_manual_max,
+        fill_area=compare_fill_area,
+        annotate_peak=annotate_peak,
+        logo_uri=logo_uri,
+        spectrum_mode_label=window_name,
+    )
+
+    compare_export_key = make_export_state_key(
+        [
+            "compare_mode",
+            *[r.signal_id for r in compare_records],
+            window_name,
+            amplitude_mode,
+            remove_dc,
+            detrend,
+            zero_padding,
+            high_res_factor,
+            max_cpm,
+            y_axis_mode,
+            y_axis_manual_max,
+            compare_fill_area,
+            annotate_peak,
+        ]
+    )
+
+    if compare_export_key not in st.session_state.wm_sp_export_store:
+        st.session_state.wm_sp_export_store[compare_export_key] = {
+            "png_bytes": None,
+            "error": None,
+        }
+
+    time_label = build_compare_time_label(ts_a, ts_b, delta_days)
+
+    st.markdown("### Spectrum Compare Mode")
+    st.caption(f"Orden temporal aplicado automáticamente: A = más antigua, B = más reciente | {time_label}")
+
+    compare_rows = [
+        {
+            "Label": "A",
+            "Signal": compare_records[0].name,
+            "Machine": compare_records[0].machine,
+            "Point": compare_records[0].point,
+            "RPM": compare_format_number(compare_records[0].rpm, 0),
+            "Timestamp": compare_records[0].timestamp or "—",
+        },
+        {
+            "Label": "B",
+            "Signal": compare_records[1].name,
+            "Machine": compare_records[1].machine,
+            "Point": compare_records[1].point,
+            "RPM": compare_format_number(compare_records[1].rpm, 0),
+            "Timestamp": compare_records[1].timestamp or "—",
+        },
+    ]
+    st.dataframe(pd.DataFrame(compare_rows), use_container_width=True, hide_index=True)
+
+    st.plotly_chart(
+        compare_fig,
+        use_container_width=True,
+        config={"displaylogo": False},
+        key=f"wm_spectrum_compare_plot_{compare_export_key}",
+    )
+
+    from core.module_patterns import helper_card
+    helper_card(
+        title="Spectrum Compare Diagnostic Helper",
+        subtitle=str(compare_assessment.get("title") or "").strip(),
+        chips=compare_assessment.get("chips", []),
+    )
+
+    st.info(str(compare_assessment.get("narrative") or "").strip())
+
+    st.markdown("#### Compare Technical Body")
+    st.dataframe(compare_metrics_df, use_container_width=True, hide_index=True)
+
+    st.markdown("#### Compare Validation")
+    warnings = compare_assessment.get("warnings", [])
+    if warnings:
+        for warning in warnings:
+            st.warning(warning)
+    else:
+        st.success("Comparación válida: A y B son razonablemente comparables para lectura técnica rápida.")
+
+    st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
+    left_pad, col_export1, col_export2, col_report, right_pad = st.columns([1.8, 1.2, 1.2, 1.2, 1.8])
+
+    with col_export1:
+        if st.button("Prepare PNG HD", key=f"prepare_compare_png_{compare_export_key}", use_container_width=True):
+            with st.spinner("Generating HD export..."):
+                png_bytes, export_error = build_export_png_bytes(fig=compare_fig)
+                st.session_state.wm_sp_export_store[compare_export_key]["png_bytes"] = png_bytes
+                st.session_state.wm_sp_export_store[compare_export_key]["error"] = export_error
+
+    with col_export2:
+        png_bytes = st.session_state.wm_sp_export_store[compare_export_key]["png_bytes"]
+        if png_bytes is not None:
+            st.download_button(
+                "Download PNG HD",
+                data=png_bytes,
+                file_name="watermelon_spectrum_compare_hd.png",
+                mime="image/png",
+                key=f"download_compare_png_{compare_export_key}",
+                use_container_width=True,
+            )
+        else:
+            st.button(
+                "Download PNG HD",
+                disabled=True,
+                key=f"download_compare_disabled_{compare_export_key}",
+                use_container_width=True,
+            )
+
+    with col_report:
+        if st.button("Enviar compare a Reporte", key=f"send_compare_report_{compare_export_key}", use_container_width=True):
+            png_bytes_for_report = None
+            try:
+                png_bytes_for_report, _png_error_for_report = build_export_png_bytes(fig=compare_fig)
+            except Exception:
+                png_bytes_for_report = None
+
+            report_title = f"Spectrum Compare — {compare_records[0].name} vs {compare_records[1].name}"
+            report_notes = build_compare_report_notes(
+                compare_assessment=compare_assessment,
+                summary_a=summary_a,
+                summary_b=summary_b,
+                time_label=time_label,
+            )
+
+            queue_compare_to_report(
+                compare_records=compare_records,
+                compare_fig=compare_fig,
+                report_title=report_title,
+                report_notes=report_notes,
+                image_bytes=png_bytes_for_report,
+            )
+            st.success("Compare mode enviado al reporte")
+
 selected_ids = [
     signal_id
     for signal_id in st.session_state.wm_sp_selected_signal_ids
@@ -2166,34 +2791,54 @@ selected_records = [
     for signal_id in selected_ids
 ]
 
-for panel_index, primary in enumerate(selected_records):
-    render_spectrum_panel(
-        primary=primary,
-        panel_index=panel_index,
+if enable_compare_mode:
+    if len(selected_records) != 2:
+        st.warning("Compare mode requiere exactamente 2 señales seleccionadas.")
+        st.stop()
+
+    render_compare_panel(
+        compare_records=selected_records,
         window_name=window_name,
         amplitude_mode=amplitude_mode,
         remove_dc=remove_dc,
         detrend=detrend,
         zero_padding=zero_padding,
-        high_res_display=high_res_display,
         high_res_factor=high_res_factor,
         max_cpm=max_cpm,
         y_axis_mode=y_axis_mode,
         y_axis_manual_max=y_axis_manual_max,
-        fill_area=fill_area,
+        compare_fill_area=compare_fill_area,
         annotate_peak=annotate_peak,
-        show_harmonics=show_harmonics,
-        harmonic_count=harmonic_count,
-        harmonic_band_fraction=harmonic_band_fraction,
-        show_harmonic_amplitudes=show_harmonic_amplitudes,
-        harmonic_label_mode=harmonic_label_mode,
-        show_right_info_box=show_right_info_box,
-        enable_bearing_faults=enable_bearing_faults,
-        bearing_model=bearing_model,
-        bearing_manual_rpm=bearing_manual_rpm,
-        bearing_harmonic_count=bearing_harmonic_count,
-        bearing_tolerance_pct=bearing_tolerance_pct,
     )
+else:
+    for panel_index, primary in enumerate(selected_records):
+        render_spectrum_panel(
+            primary=primary,
+            panel_index=panel_index,
+            window_name=window_name,
+            amplitude_mode=amplitude_mode,
+            remove_dc=remove_dc,
+            detrend=detrend,
+            zero_padding=zero_padding,
+            high_res_display=high_res_display,
+            high_res_factor=high_res_factor,
+            max_cpm=max_cpm,
+            y_axis_mode=y_axis_mode,
+            y_axis_manual_max=y_axis_manual_max,
+            fill_area=fill_area,
+            annotate_peak=annotate_peak,
+            show_harmonics=show_harmonics,
+            harmonic_count=harmonic_count,
+            harmonic_band_fraction=harmonic_band_fraction,
+            show_harmonic_amplitudes=show_harmonic_amplitudes,
+            harmonic_label_mode=harmonic_label_mode,
+            show_right_info_box=show_right_info_box,
+            enable_bearing_faults=enable_bearing_faults,
+            bearing_model=bearing_model,
+            bearing_manual_rpm=bearing_manual_rpm,
+            bearing_harmonic_count=bearing_harmonic_count,
+            bearing_tolerance_pct=bearing_tolerance_pct,
+        )
 
-    if panel_index < len(selected_records) - 1:
-        st.markdown("---")
+        if panel_index < len(selected_records) - 1:
+            st.markdown("---")
