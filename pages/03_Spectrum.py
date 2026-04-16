@@ -2738,6 +2738,8 @@ def render_compare_panel(
                 summary_a=summary_a,
                 summary_b=summary_b,
                 time_label=time_label,
+                insights_df=compare_insights_df,
+                delta_days=delta_days,
             )
 
             queue_compare_to_report(
