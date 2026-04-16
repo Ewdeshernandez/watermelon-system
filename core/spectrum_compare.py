@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 import math
+import re
 import pandas as pd
 
 
@@ -84,7 +85,6 @@ def build_compare_time_label(ts_a: Optional[pd.Timestamp], ts_b: Optional[pd.Tim
     return f"{left} → {right}"
 
 
-
 def build_compare_assessment(
     summary_a: Dict[str, Any],
     summary_b: Dict[str, Any],
@@ -136,9 +136,7 @@ def build_compare_assessment(
     recommendation = "Mantener esta comparación como referencia base y correlacionar con Orbit, Bode, Trends y condición operativa."
     confidence = 82 - comparability_penalty
 
-    # -------------------------
-    # REGLAS DE INCREMENTO
-    # -------------------------
+    # INCREMENTOS
     if (
         one_x_delta_pct is not None and one_x_delta_pct >= 20
         and (two_x_delta_pct is None or two_x_delta_pct < 15)
@@ -223,9 +221,7 @@ def build_compare_assessment(
         recommendation = "Revisar condición de proceso, cavitación, turbulencia, roce o excitaciones no estacionarias."
         confidence = max(confidence, 84)
 
-    # -------------------------
-    # REGLAS DE DISMINUCIÓN
-    # -------------------------
+    # DISMINUCIONES
     if (
         one_x_delta_pct is not None and one_x_delta_pct <= -20
         and overall_delta_pct is not None and overall_delta_pct <= -20
@@ -241,9 +237,7 @@ def build_compare_assessment(
             "La disminución simultánea de 1X y del overall indica reducción de la respuesta sincrónica de la máquina, "
             "compatible con disminución de la firma asociada a desbalance o con una condición operativa menos severa."
         )
-        recommendation = (
-            "Validar que RPM, carga y condiciones de proceso sean comparables antes de interpretar esta disminución como mejora mecánica real."
-        )
+        recommendation = "Validar que RPM, carga y condiciones de proceso sean comparables antes de interpretar esta disminución como mejora mecánica real."
         confidence = max(confidence, 84)
 
     if (
@@ -261,9 +255,7 @@ def build_compare_assessment(
             "La reducción conjunta de 1X, 2X y overall sugiere disminución de la firma sincrónica de la máquina, "
             "compatible con menor severidad de desbalance/desalineación o con cambio favorable en condición operativa."
         )
-        recommendation = (
-            "Correlacionar con condición operativa, fase, carga y antecedentes de mantenimiento para diferenciar mejora mecánica real de cambio de proceso."
-        )
+        recommendation = "Correlacionar con condición operativa, fase, carga y antecedentes de mantenimiento para diferenciar mejora mecánica real de cambio de proceso."
         confidence = max(confidence, 87)
 
     if (
@@ -279,9 +271,7 @@ def build_compare_assessment(
         technical_basis = (
             "La disminución de 2X y 3X sugiere reducción de la firma asociada a desalineación o menor excitación del tren de potencia."
         )
-        recommendation = (
-            "Confirmar si existió intervención mecánica o si las condiciones de carga/proceso cambiaron entre mediciones."
-        )
+        recommendation = "Confirmar si existió intervención mecánica o si las condiciones de carga/proceso cambiaron entre mediciones."
         confidence = max(confidence, 84)
 
     if high_harm_delta_pct is not None and high_harm_delta_pct <= -25:
@@ -291,12 +281,8 @@ def build_compare_assessment(
         primary_fault = "Menor no linealidad / holgura aparente"
         secondary_fault = "Disminución de contenido armónico alto"
         executive_summary = "B reduce el contenido de armónicos altos respecto a A."
-        technical_basis = (
-            "La disminución de armónicos altos puede indicar reducción de no linealidad, impactos o holgura aparente."
-        )
-        recommendation = (
-            "Correlacionar con forma de onda e historial de intervención para confirmar si hubo mejora estructural o mecánica."
-        )
+        technical_basis = "La disminución de armónicos altos puede indicar reducción de no linealidad, impactos o holgura aparente."
+        recommendation = "Correlacionar con forma de onda e historial de intervención para confirmar si hubo mejora estructural o mecánica."
         confidence = max(confidence, 82)
 
     if (
@@ -309,12 +295,8 @@ def build_compare_assessment(
         primary_fault = "Disminución general de severidad"
         secondary_fault = "Menor excitación global"
         executive_summary = "B presenta reducción global de energía respecto a A."
-        technical_basis = (
-            "La caída del overall y del pico dominante sugiere una condición menos energética en la medición más reciente."
-        )
-        recommendation = (
-            "Validar comparabilidad operativa antes de concluir mejora mecánica definitiva."
-        )
+        technical_basis = "La caída del overall y del pico dominante sugiere una condición menos energética en la medición más reciente."
+        recommendation = "Validar comparabilidad operativa antes de concluir mejora mecánica definitiva."
         confidence = max(confidence, 80)
 
     if peak_delta_pct is not None and abs(peak_delta_pct) <= 8 and (overall_delta_pct is None or abs(overall_delta_pct) <= 8):
@@ -372,29 +354,57 @@ def build_compare_assessment(
         "high_harm_delta_pct": high_harm_delta_pct,
     }
 
+
+def build_compare_narrative(
+    compare_assessment: Dict[str, Any],
+    delta_days: Optional[int],
+) -> str:
+    exec_sum = str(compare_assessment.get("executive_summary") or "").strip()
+    tech = str(compare_assessment.get("technical_basis") or "").strip()
+    reco = str(compare_assessment.get("recommendation") or "").strip()
+
+    intro = ""
+    if delta_days is not None and delta_days > 0:
+        intro = f"En un periodo de {delta_days} días, "
+
+    narrative = f"{intro}{exec_sum} {tech} {reco}".strip()
+    narrative = re.sub(r"\s+", " ", narrative)
+    return narrative
+
+
 def build_compare_report_notes(
     compare_assessment: Dict[str, Any],
     summary_a: Dict[str, Any],
     summary_b: Dict[str, Any],
     time_label: str = "",
+    insights_df: Optional[pd.DataFrame] = None,
+    delta_days: Optional[int] = None,
 ) -> str:
     blocks: List[str] = []
 
-    title = str(compare_assessment.get("title") or "").strip()
-    executive_summary = str(compare_assessment.get("executive_summary") or "").strip()
-    technical_basis = str(compare_assessment.get("technical_basis") or "").strip()
-    recommendation = str(compare_assessment.get("recommendation") or "").strip()
-
     if time_label:
         blocks.append(time_label)
+
+    title = str(compare_assessment.get("title") or "").strip()
     if title:
         blocks.append(title)
-    if executive_summary:
-        blocks.append(f"Resumen ejecutivo: {executive_summary}")
-    if technical_basis:
-        blocks.append(f"Soporte técnico: {technical_basis}")
-    if recommendation:
-        blocks.append(f"Recomendación: {recommendation}")
+
+    narrative = build_compare_narrative(compare_assessment, delta_days)
+    if narrative:
+        blocks.append(narrative)
+
+    if insights_df is not None and not insights_df.empty:
+        top = insights_df.head(3)
+        insight_lines: List[str] = []
+        for _, row in top.iterrows():
+            insight_lines.append(
+                f"- {row['Insight']}: Δ {row['Δ % vs A']}% — {row['Interpretation']}"
+            )
+        if insight_lines:
+            blocks.append(
+                "Principales cambios detectados:\n" +
+                "\n".join(insight_lines)
+            )
 
     blocks.append(
         "Resumen comparativo cuantitativo:\n"
@@ -412,7 +422,10 @@ def build_compare_report_notes(
 
     warnings = compare_assessment.get("warnings", [])
     if warnings:
-        blocks.append("Advertencias de comparabilidad:\n- " + "\n- ".join(str(w) for w in warnings))
+        blocks.append(
+            "Advertencias de comparabilidad:\n- " +
+            "\n- ".join(str(w) for w in warnings)
+        )
 
     return "\n\n".join(blocks).strip()
 
@@ -505,6 +518,7 @@ def build_compare_validation_table(
     ]
     return pd.DataFrame(rows)
 
+
 def _insight_interpretation(label: str, delta_pct: Optional[float]) -> str:
     if delta_pct is None:
         return "Sin referencia suficiente para comparar."
@@ -515,14 +529,14 @@ def _insight_interpretation(label: str, delta_pct: Optional[float]) -> str:
         if delta_pct >= 20:
             return "Crecimiento sincrónico fuerte; compatible con desbalance o aumento de respuesta 1X."
         if delta_pct <= -20:
-            return "Disminución de respuesta 1X respecto a la referencia."
+            return "Disminución de respuesta 1X respecto a la referencia; posible reducción de firma sincrónica."
         return "Cambio menor en componente sincrónica."
 
     if label == "2X":
         if delta_pct >= 20:
             return "Crecimiento relevante en 2X; compatible con desalineación o efecto del tren de potencia."
         if delta_pct <= -20:
-            return "Reducción importante en 2X."
+            return "Reducción importante en 2X; posible disminución de firma asociada a desalineación."
         return "Cambio menor en 2X."
 
     if label == "3X":
@@ -536,7 +550,7 @@ def _insight_interpretation(label: str, delta_pct: Optional[float]) -> str:
         if delta_pct >= 20:
             return "Aumento global de energía; revisar si el crecimiento es concentrado o distribuido."
         if delta_pct <= -20:
-            return "Reducción global de energía."
+            return "Reducción global de energía respecto a la referencia."
         return "Cambio global moderado."
 
     if label == "High Harmonics":
@@ -594,7 +608,7 @@ def build_compare_insight_table(
         },
     ]
 
-    normalized_rows = []
+    normalized_rows: List[Dict[str, Any]] = []
     for row in insight_rows:
         delta_pct = row["DeltaPct"]
         normalized_rows.append(
@@ -630,4 +644,3 @@ def build_compare_top_findings(compare_insights_df: pd.DataFrame, max_items: int
         findings.append(f"{insight}: Δ {delta_pct}% — {interpretation}")
 
     return findings
-
