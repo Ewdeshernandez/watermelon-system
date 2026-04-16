@@ -125,10 +125,14 @@ def build_compare_assessment(
     severity = "Normal"
     severity_color = "#16a34a"
     title = "Sin cambio espectral dominante"
-    narrative = (
-        "La comparación A vs B no muestra un cambio dominante claramente asociado a una evolución mecánica específica. "
-        "Se recomienda conservar esta comparación como referencia base y correlacionar con Orbit, Bode, Trends y condición operativa."
+    primary_fault = "Sin patrón dominante"
+    secondary_fault = "—"
+    executive_summary = "No se observa un cambio dominante claramente atribuible a un mecanismo de falla específico."
+    technical_basis = (
+        "La comparación A vs B no muestra una variación fuerte y consistente en 1X, 2X, 3X o armónicos altos "
+        "que justifique inferir una evolución mecánica dominante con buena confianza."
     )
+    recommendation = "Mantener esta comparación como referencia base y correlacionar con Orbit, Bode, Trends y condición operativa."
     confidence = 82 - comparability_penalty
 
     if (
@@ -139,10 +143,15 @@ def build_compare_assessment(
         severity = "Alerta"
         severity_color = "#f59e0b"
         title = "Incremento dominante en 1X"
-        narrative = (
-            "El espectro B presenta incremento dominante de la componente 1X respecto a A, sin crecimiento proporcional en 2X ni en armónicos altos. "
-            "Este patrón es consistente con aumento de respuesta sincrónica, compatible con progresión de desbalance si la condición operativa es comparable."
+        primary_fault = "Cambio sincrónico tipo desbalance"
+        secondary_fault = "Sin evidencia fuerte de armónicos altos"
+        executive_summary = "B presenta crecimiento dominante en 1X respecto a A."
+        technical_basis = (
+            "La componente 1X aumenta sin crecimiento proporcional en 2X ni en armónicos altos, "
+            "patrón consistente con aumento de respuesta sincrónica, compatible con progresión de desbalance "
+            "si la condición operativa entre ambas mediciones es comparable."
         )
+        recommendation = "Verificar balanceo, condición del rotor y estabilidad de fase; correlacionar con módulos Polar y Bode."
         confidence = max(confidence, 86)
 
     if (
@@ -152,11 +161,14 @@ def build_compare_assessment(
         severity = "Alerta"
         severity_color = "#f59e0b"
         title = "Incremento simultáneo de 1X y 2X"
-        narrative = (
-            "El espectro B incrementa simultáneamente las componentes 1X y 2X respecto a A. "
-            "Este comportamiento sugiere evolución del fenómeno sincrónico con posible transición desde una condición dominada por 1X "
-            "hacia desalineación, incremento de carga dinámica o mayor efecto del tren de potencia."
+        primary_fault = "Evolución sincrónica compuesta"
+        secondary_fault = "Posible desalineación / tren de potencia"
+        executive_summary = "B incrementa simultáneamente las componentes 1X y 2X frente a A."
+        technical_basis = (
+            "El crecimiento conjunto de 1X y 2X sugiere evolución del fenómeno sincrónico con posible transición "
+            "desde una condición dominada por 1X hacia desalineación, incremento de carga dinámica o mayor influencia del tren de potencia."
         )
+        recommendation = "Revisar alineación, condición del acople, rigidez de soportes y correlacionar con mediciones axiales y análisis de fase."
         confidence = max(confidence, 89)
 
     if (
@@ -166,20 +178,28 @@ def build_compare_assessment(
         severity = "Alerta"
         severity_color = "#f59e0b"
         title = "Mayor contenido en 2X y 3X"
-        narrative = (
-            "El espectro B incrementa las componentes 2X y 3X respecto a A. "
-            "El patrón es compatible con evolución hacia desalineación, incremento del efecto del acople o cambios dinámicos del tren de potencia."
+        primary_fault = "Firma compatible con desalineación"
+        secondary_fault = "Efecto del tren de potencia"
+        executive_summary = "B incrementa 2X y 3X respecto a A."
+        technical_basis = (
+            "El aumento conjunto de 2X y 3X es compatible con evolución hacia desalineación, "
+            "incremento del efecto del acople o cambios dinámicos del tren de potencia."
         )
+        recommendation = "Revisar alineación, acople, fijaciones mecánicas y confirmar con forma de onda y fase."
         confidence = max(confidence, 88)
 
     if high_harm_delta_pct is not None and high_harm_delta_pct >= 25:
         severity = "Severa"
         severity_color = "#dc2626"
         title = "Aumento de armónicos altos"
-        narrative = (
-            "El espectro B muestra incremento relevante en armónicos altos respecto a A. "
-            "Este patrón apunta a progresión hacia holgura mecánica, no linealidad estructural o degradación de rigidez."
+        primary_fault = "Posible holgura / no linealidad"
+        secondary_fault = "Degradación de rigidez"
+        executive_summary = "B muestra crecimiento importante en armónicos altos respecto a A."
+        technical_basis = (
+            "El aumento de armónicos altos apunta a progresión hacia holgura mecánica, "
+            "no linealidad estructural o pérdida de rigidez."
         )
+        recommendation = "Inspeccionar bases, pernos, soportes, pedestal, holguras y comportamiento de impactos en forma de onda."
         confidence = max(confidence, 90)
 
     if (
@@ -189,30 +209,43 @@ def build_compare_assessment(
         severity = "Alerta"
         severity_color = "#f59e0b"
         title = "Mayor energía de banda ancha"
-        narrative = (
-            "La energía global del espectro en B aumenta más que el pico dominante. "
-            "Esto sugiere crecimiento de contenido distribuido o banda ancha, compatible con proceso, flujo, fricción o excitación no puramente sincrónica."
+        primary_fault = "Incremento de contenido distribuido"
+        secondary_fault = "Proceso / flujo / fricción"
+        executive_summary = "La energía global crece más que el pico dominante."
+        technical_basis = (
+            "Esto sugiere aumento de contenido distribuido o banda ancha, compatible con proceso, "
+            "flujo, fricción o excitación no puramente sincrónica."
         )
+        recommendation = "Revisar condición de proceso, cavitación, turbulencia, roce o excitaciones no estacionarias."
         confidence = max(confidence, 84)
 
     if peak_delta_pct is not None and abs(peak_delta_pct) <= 8 and (overall_delta_pct is None or abs(overall_delta_pct) <= 8):
         severity = "Normal"
         severity_color = "#16a34a"
         title = "Espectros comparables sin variación fuerte"
-        narrative = (
-            "A y B se mantienen cercanos en pico dominante y energía global. "
-            "No se observa una evolución espectral fuerte entre ambos estados bajo esta comparación."
-        )
+        primary_fault = "Sin evolución dominante"
+        secondary_fault = "—"
+        executive_summary = "A y B se mantienen cercanos en pico dominante y energía global."
+        technical_basis = "No se observa una evolución espectral fuerte entre ambos estados bajo esta comparación."
+        recommendation = "Mantener monitoreo y usar esta comparación como línea base."
         confidence = max(confidence, 80)
 
-    if delta_days is not None and delta_days > 0 and narrative:
-        narrative = f"En un periodo de {delta_days} días, {narrative[0].lower() + narrative[1:]}"
+    narrative_parts: List[str] = []
+    if delta_days is not None and delta_days > 0:
+        narrative_parts.append(f"En un periodo de {delta_days} días, {executive_summary[0].lower() + executive_summary[1:]}")
+    else:
+        narrative_parts.append(executive_summary)
+    narrative_parts.append(technical_basis)
+    narrative_parts.append(recommendation)
+    narrative = " ".join(part.strip() for part in narrative_parts if part and part.strip())
 
     confidence = max(45, min(96, int(round(confidence))))
+    comparability_score = max(0, min(100, 100 - comparability_penalty))
 
     chips = [
         (f"Severidad: {severity}", severity_color),
         (f"Confianza: {confidence}%", None),
+        (f"Comparabilidad: {comparability_score}%", None),
         (f"Δ Peak: {format_number(peak_delta_pct, 1)}%", None),
         (f"Δ Overall: {format_number(overall_delta_pct, 1)}%", None),
         (f"Δ 1X: {format_number(one_x_delta_pct, 1)}%", None),
@@ -224,6 +257,12 @@ def build_compare_assessment(
         "severity_color": severity_color,
         "title": title,
         "narrative": narrative,
+        "executive_summary": executive_summary,
+        "technical_basis": technical_basis,
+        "recommendation": recommendation,
+        "primary_fault": primary_fault,
+        "secondary_fault": secondary_fault,
+        "comparability_score": comparability_score,
         "confidence_pct": confidence,
         "chips": chips,
         "warnings": warnings,
@@ -242,28 +281,36 @@ def build_compare_report_notes(
     summary_b: Dict[str, Any],
     time_label: str = "",
 ) -> str:
-    blocks = []
+    blocks: List[str] = []
 
     title = str(compare_assessment.get("title") or "").strip()
-    narrative = str(compare_assessment.get("narrative") or "").strip()
+    executive_summary = str(compare_assessment.get("executive_summary") or "").strip()
+    technical_basis = str(compare_assessment.get("technical_basis") or "").strip()
+    recommendation = str(compare_assessment.get("recommendation") or "").strip()
 
     if time_label:
         blocks.append(time_label)
     if title:
         blocks.append(title)
-    if narrative:
-        blocks.append(narrative)
+    if executive_summary:
+        blocks.append(f"Resumen ejecutivo: {executive_summary}")
+    if technical_basis:
+        blocks.append(f"Soporte técnico: {technical_basis}")
+    if recommendation:
+        blocks.append(f"Recomendación: {recommendation}")
 
     blocks.append(
-        (
-            "Resumen comparativo:\n"
-            f"- A Peak: {format_number(summary_a.get('peak_amp'), 3)} @ {format_number(summary_a.get('peak_freq_cpm'), 1)} CPM\n"
-            f"- B Peak: {format_number(summary_b.get('peak_amp'), 3)} @ {format_number(summary_b.get('peak_freq_cpm'), 1)} CPM\n"
-            f"- Δ Peak: {format_number(compare_assessment.get('peak_delta_pct'), 1)}%\n"
-            f"- Δ Overall: {format_number(compare_assessment.get('overall_delta_pct'), 1)}%\n"
-            f"- Δ 1X: {format_number(compare_assessment.get('one_x_delta_pct'), 1)}%\n"
-            f"- Δ 2X: {format_number(compare_assessment.get('two_x_delta_pct'), 1)}%"
-        )
+        "Resumen comparativo cuantitativo:\n"
+        f"- A Peak: {format_number(summary_a.get('peak_amp'), 3)} @ {format_number(summary_a.get('peak_freq_cpm'), 1)} CPM\n"
+        f"- B Peak: {format_number(summary_b.get('peak_amp'), 3)} @ {format_number(summary_b.get('peak_freq_cpm'), 1)} CPM\n"
+        f"- Δ Peak: {format_number(compare_assessment.get('peak_delta_pct'), 1)}%\n"
+        f"- Δ Overall: {format_number(compare_assessment.get('overall_delta_pct'), 1)}%\n"
+        f"- Δ 1X: {format_number(compare_assessment.get('one_x_delta_pct'), 1)}%\n"
+        f"- Δ 2X: {format_number(compare_assessment.get('two_x_delta_pct'), 1)}%\n"
+        f"- Falla primaria: {compare_assessment.get('primary_fault') or '—'}\n"
+        f"- Falla secundaria: {compare_assessment.get('secondary_fault') or '—'}\n"
+        f"- Comparabilidad: {format_number(compare_assessment.get('comparability_score'), 0)}%\n"
+        f"- Confianza diagnóstica: {format_number(compare_assessment.get('confidence_pct'), 0)}%"
     )
 
     warnings = compare_assessment.get("warnings", [])
@@ -271,3 +318,92 @@ def build_compare_report_notes(
         blocks.append("Advertencias de comparabilidad:\n- " + "\n- ".join(str(w) for w in warnings))
 
     return "\n\n".join(blocks).strip()
+
+
+def build_compare_metric_table(
+    summary_a: Dict[str, Any],
+    summary_b: Dict[str, Any],
+    compare_assessment: Dict[str, Any],
+) -> pd.DataFrame:
+    rows = [
+        {
+            "Metric": "Dominant Peak Frequency (CPM)",
+            "A": format_number(summary_a.get("peak_freq_cpm"), 1),
+            "B": format_number(summary_b.get("peak_freq_cpm"), 1),
+            "Δ % vs A": format_number(safe_pct_change(summary_b.get("peak_freq_cpm"), summary_a.get("peak_freq_cpm")), 1),
+        },
+        {
+            "Metric": "Dominant Peak Amplitude",
+            "A": format_number(summary_a.get("peak_amp"), 3),
+            "B": format_number(summary_b.get("peak_amp"), 3),
+            "Δ % vs A": format_number(compare_assessment.get("peak_delta_pct"), 1),
+        },
+        {
+            "Metric": "Spectrum Overall",
+            "A": format_number(summary_a.get("overall"), 3),
+            "B": format_number(summary_b.get("overall"), 3),
+            "Δ % vs A": format_number(compare_assessment.get("overall_delta_pct"), 1),
+        },
+        {
+            "Metric": "1X Amplitude",
+            "A": format_number(summary_a.get("one_x_amp"), 3),
+            "B": format_number(summary_b.get("one_x_amp"), 3),
+            "Δ % vs A": format_number(compare_assessment.get("one_x_delta_pct"), 1),
+        },
+        {
+            "Metric": "2X Amplitude",
+            "A": format_number(summary_a.get("two_x_amp"), 3),
+            "B": format_number(summary_b.get("two_x_amp"), 3),
+            "Δ % vs A": format_number(compare_assessment.get("two_x_delta_pct"), 1),
+        },
+        {
+            "Metric": "3X Amplitude",
+            "A": format_number(summary_a.get("three_x_amp"), 3),
+            "B": format_number(summary_b.get("three_x_amp"), 3),
+            "Δ % vs A": format_number(compare_assessment.get("three_x_delta_pct"), 1),
+        },
+        {
+            "Metric": "High Harmonic Amplitude (≥4X)",
+            "A": format_number(summary_a.get("high_harm_amp"), 3),
+            "B": format_number(summary_b.get("high_harm_amp"), 3),
+            "Δ % vs A": format_number(compare_assessment.get("high_harm_delta_pct"), 1),
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+def build_compare_validation_table(
+    summary_a: Dict[str, Any],
+    summary_b: Dict[str, Any],
+) -> pd.DataFrame:
+    rpm_delta = safe_pct_change(summary_b.get("rpm"), summary_a.get("rpm"))
+    fs_delta = safe_pct_change(summary_b.get("sample_rate_hz"), summary_a.get("sample_rate_hz"))
+    dur_delta = safe_pct_change(summary_b.get("duration_s"), summary_a.get("duration_s"))
+
+    rows = [
+        {
+            "Validation Parameter": "Amplitude unit",
+            "A": str(summary_a.get("amplitude_unit") or "—"),
+            "B": str(summary_b.get("amplitude_unit") or "—"),
+            "Δ / Status": "OK" if summary_a.get("amplitude_unit") == summary_b.get("amplitude_unit") else "Mismatch",
+        },
+        {
+            "Validation Parameter": "RPM",
+            "A": format_number(summary_a.get("rpm"), 0),
+            "B": format_number(summary_b.get("rpm"), 0),
+            "Δ / Status": (format_number(rpm_delta, 1) + "%") if rpm_delta is not None else "—",
+        },
+        {
+            "Validation Parameter": "Sample Rate (Hz)",
+            "A": format_number(summary_a.get("sample_rate_hz"), 2),
+            "B": format_number(summary_b.get("sample_rate_hz"), 2),
+            "Δ / Status": (format_number(fs_delta, 1) + "%") if fs_delta is not None else "—",
+        },
+        {
+            "Validation Parameter": "Duration (s)",
+            "A": format_number(summary_a.get("duration_s"), 3),
+            "B": format_number(summary_b.get("duration_s"), 3),
+            "Δ / Status": (format_number(dur_delta, 1) + "%") if dur_delta is not None else "—",
+        },
+    ]
+    return pd.DataFrame(rows)

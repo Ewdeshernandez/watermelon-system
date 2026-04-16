@@ -25,8 +25,10 @@ from core.bearing_catalog import (
 )
 from core.spectrum_compare import (
     build_compare_assessment,
+    build_compare_metric_table,
     build_compare_report_notes,
     build_compare_time_label,
+    build_compare_validation_table,
     format_number as compare_format_number,
     order_compare_records_by_time,
 )
@@ -2569,67 +2571,14 @@ def render_compare_panel(
         delta_days=delta_days,
     )
 
-    compare_metrics_df = pd.DataFrame(
-        [
-            {
-                "Metric": "Dominant Peak Frequency (CPM)",
-                "A": compare_format_number(summary_a.get("peak_freq_cpm"), 1),
-                "B": compare_format_number(summary_b.get("peak_freq_cpm"), 1),
-                "Δ %": compare_format_number(compare_assessment.get("peak_delta_pct"), 1),
-            },
-            {
-                "Metric": "Dominant Peak Amplitude",
-                "A": compare_format_number(summary_a.get("peak_amp"), 3),
-                "B": compare_format_number(summary_b.get("peak_amp"), 3),
-                "Δ %": compare_format_number(compare_assessment.get("peak_delta_pct"), 1),
-            },
-            {
-                "Metric": "Spectrum Overall",
-                "A": compare_format_number(summary_a.get("overall"), 3),
-                "B": compare_format_number(summary_b.get("overall"), 3),
-                "Δ %": compare_format_number(compare_assessment.get("overall_delta_pct"), 1),
-            },
-            {
-                "Metric": "1X Amplitude",
-                "A": compare_format_number(summary_a.get("one_x_amp"), 3),
-                "B": compare_format_number(summary_b.get("one_x_amp"), 3),
-                "Δ %": compare_format_number(compare_assessment.get("one_x_delta_pct"), 1),
-            },
-            {
-                "Metric": "2X Amplitude",
-                "A": compare_format_number(summary_a.get("two_x_amp"), 3),
-                "B": compare_format_number(summary_b.get("two_x_amp"), 3),
-                "Δ %": compare_format_number(compare_assessment.get("two_x_delta_pct"), 1),
-            },
-            {
-                "Metric": "3X Amplitude",
-                "A": compare_format_number(summary_a.get("three_x_amp"), 3),
-                "B": compare_format_number(summary_b.get("three_x_amp"), 3),
-                "Δ %": compare_format_number(compare_assessment.get("three_x_delta_pct"), 1),
-            },
-            {
-                "Metric": "Sample Rate (Hz)",
-                "A": compare_format_number(summary_a.get("sample_rate_hz"), 2),
-                "B": compare_format_number(summary_b.get("sample_rate_hz"), 2),
-                "Δ %": compare_format_number(
-                    ((float(summary_b.get("sample_rate_hz")) - float(summary_a.get("sample_rate_hz"))) / abs(float(summary_a.get("sample_rate_hz")))) * 100.0
-                    if summary_a.get("sample_rate_hz") not in [None, 0] and summary_b.get("sample_rate_hz") not in [None]
-                    else None,
-                    1,
-                ),
-            },
-            {
-                "Metric": "Duration (s)",
-                "A": compare_format_number(summary_a.get("duration_s"), 3),
-                "B": compare_format_number(summary_b.get("duration_s"), 3),
-                "Δ %": compare_format_number(
-                    ((float(summary_b.get("duration_s")) - float(summary_a.get("duration_s"))) / abs(float(summary_a.get("duration_s")))) * 100.0
-                    if summary_a.get("duration_s") not in [None, 0] and summary_b.get("duration_s") not in [None]
-                    else None,
-                    1,
-                ),
-            },
-        ]
+    compare_metrics_df = build_compare_metric_table(
+        summary_a=summary_a,
+        summary_b=summary_b,
+        compare_assessment=compare_assessment,
+    )
+    compare_validation_df = build_compare_validation_table(
+        summary_a=summary_a,
+        summary_b=summary_b,
     )
 
     logo_uri = get_logo_data_uri(LOGO_PATH)
@@ -2714,7 +2663,17 @@ def render_compare_panel(
     st.markdown("#### Compare Technical Body")
     st.dataframe(compare_metrics_df, use_container_width=True, hide_index=True)
 
+    detail_cols = st.columns(3)
+    with detail_cols[0]:
+        st.metric("Falla primaria", str(compare_assessment.get("primary_fault") or "—"))
+    with detail_cols[1]:
+        st.metric("Falla secundaria", str(compare_assessment.get("secondary_fault") or "—"))
+    with detail_cols[2]:
+        st.metric("Comparabilidad", f"{int(compare_assessment.get('comparability_score', 0))}%")
+
     st.markdown("#### Compare Validation")
+    st.dataframe(compare_validation_df, use_container_width=True, hide_index=True)
+
     warnings = compare_assessment.get("warnings", [])
     if warnings:
         for warning in warnings:
