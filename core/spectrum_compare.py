@@ -84,6 +84,7 @@ def build_compare_time_label(ts_a: Optional[pd.Timestamp], ts_b: Optional[pd.Tim
     return f"{left} → {right}"
 
 
+
 def build_compare_assessment(
     summary_a: Dict[str, Any],
     summary_b: Dict[str, Any],
@@ -135,6 +136,9 @@ def build_compare_assessment(
     recommendation = "Mantener esta comparación como referencia base y correlacionar con Orbit, Bode, Trends y condición operativa."
     confidence = 82 - comparability_penalty
 
+    # -------------------------
+    # REGLAS DE INCREMENTO
+    # -------------------------
     if (
         one_x_delta_pct is not None and one_x_delta_pct >= 20
         and (two_x_delta_pct is None or two_x_delta_pct < 15)
@@ -219,6 +223,100 @@ def build_compare_assessment(
         recommendation = "Revisar condición de proceso, cavitación, turbulencia, roce o excitaciones no estacionarias."
         confidence = max(confidence, 84)
 
+    # -------------------------
+    # REGLAS DE DISMINUCIÓN
+    # -------------------------
+    if (
+        one_x_delta_pct is not None and one_x_delta_pct <= -20
+        and overall_delta_pct is not None and overall_delta_pct <= -20
+        and (two_x_delta_pct is None or two_x_delta_pct > -20)
+    ):
+        severity = "Normal"
+        severity_color = "#16a34a"
+        title = "Reducción de respuesta sincrónica"
+        primary_fault = "Disminución de firma tipo desbalance"
+        secondary_fault = "Menor respuesta 1X"
+        executive_summary = "B presenta reducción importante de la componente 1X y de la energía global respecto a A."
+        technical_basis = (
+            "La disminución simultánea de 1X y del overall indica reducción de la respuesta sincrónica de la máquina, "
+            "compatible con disminución de la firma asociada a desbalance o con una condición operativa menos severa."
+        )
+        recommendation = (
+            "Validar que RPM, carga y condiciones de proceso sean comparables antes de interpretar esta disminución como mejora mecánica real."
+        )
+        confidence = max(confidence, 84)
+
+    if (
+        one_x_delta_pct is not None and one_x_delta_pct <= -20
+        and two_x_delta_pct is not None and two_x_delta_pct <= -20
+        and overall_delta_pct is not None and overall_delta_pct <= -20
+    ):
+        severity = "Normal"
+        severity_color = "#16a34a"
+        title = "Reducción de firma sincrónica global"
+        primary_fault = "Disminución de 1X y 2X"
+        secondary_fault = "Menor excitación dinámica"
+        executive_summary = "B muestra reducción simultánea de 1X, 2X y energía global respecto a A."
+        technical_basis = (
+            "La reducción conjunta de 1X, 2X y overall sugiere disminución de la firma sincrónica de la máquina, "
+            "compatible con menor severidad de desbalance/desalineación o con cambio favorable en condición operativa."
+        )
+        recommendation = (
+            "Correlacionar con condición operativa, fase, carga y antecedentes de mantenimiento para diferenciar mejora mecánica real de cambio de proceso."
+        )
+        confidence = max(confidence, 87)
+
+    if (
+        two_x_delta_pct is not None and two_x_delta_pct <= -20
+        and three_x_delta_pct is not None and three_x_delta_pct <= -10
+    ):
+        severity = "Normal"
+        severity_color = "#16a34a"
+        title = "Reducción de contenido 2X y 3X"
+        primary_fault = "Disminución de firma compatible con desalineación"
+        secondary_fault = "Menor efecto del tren de potencia"
+        executive_summary = "B reduce 2X y 3X respecto a A."
+        technical_basis = (
+            "La disminución de 2X y 3X sugiere reducción de la firma asociada a desalineación o menor excitación del tren de potencia."
+        )
+        recommendation = (
+            "Confirmar si existió intervención mecánica o si las condiciones de carga/proceso cambiaron entre mediciones."
+        )
+        confidence = max(confidence, 84)
+
+    if high_harm_delta_pct is not None and high_harm_delta_pct <= -25:
+        severity = "Normal"
+        severity_color = "#16a34a"
+        title = "Reducción de armónicos altos"
+        primary_fault = "Menor no linealidad / holgura aparente"
+        secondary_fault = "Disminución de contenido armónico alto"
+        executive_summary = "B reduce el contenido de armónicos altos respecto a A."
+        technical_basis = (
+            "La disminución de armónicos altos puede indicar reducción de no linealidad, impactos o holgura aparente."
+        )
+        recommendation = (
+            "Correlacionar con forma de onda e historial de intervención para confirmar si hubo mejora estructural o mecánica."
+        )
+        confidence = max(confidence, 82)
+
+    if (
+        overall_delta_pct is not None and overall_delta_pct <= -20
+        and (peak_delta_pct is None or peak_delta_pct <= -12)
+    ):
+        severity = "Normal"
+        severity_color = "#16a34a"
+        title = "Reducción global de energía"
+        primary_fault = "Disminución general de severidad"
+        secondary_fault = "Menor excitación global"
+        executive_summary = "B presenta reducción global de energía respecto a A."
+        technical_basis = (
+            "La caída del overall y del pico dominante sugiere una condición menos energética en la medición más reciente."
+        )
+        recommendation = (
+            "Validar comparabilidad operativa antes de concluir mejora mecánica definitiva."
+        )
+        confidence = max(confidence, 80)
+
     if peak_delta_pct is not None and abs(peak_delta_pct) <= 8 and (overall_delta_pct is None or abs(overall_delta_pct) <= 8):
         severity = "Normal"
         severity_color = "#16a34a"
@@ -273,7 +371,6 @@ def build_compare_assessment(
         "three_x_delta_pct": three_x_delta_pct,
         "high_harm_delta_pct": high_harm_delta_pct,
     }
-
 
 def build_compare_report_notes(
     compare_assessment: Dict[str, Any],
