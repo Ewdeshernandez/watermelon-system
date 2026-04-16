@@ -407,3 +407,130 @@ def build_compare_validation_table(
         },
     ]
     return pd.DataFrame(rows)
+
+def _insight_interpretation(label: str, delta_pct: Optional[float]) -> str:
+    if delta_pct is None:
+        return "Sin referencia suficiente para comparar."
+
+    abs_delta = abs(float(delta_pct))
+
+    if label == "1X":
+        if delta_pct >= 20:
+            return "Crecimiento sincrónico fuerte; compatible con desbalance o aumento de respuesta 1X."
+        if delta_pct <= -20:
+            return "Disminución de respuesta 1X respecto a la referencia."
+        return "Cambio menor en componente sincrónica."
+
+    if label == "2X":
+        if delta_pct >= 20:
+            return "Crecimiento relevante en 2X; compatible con desalineación o efecto del tren de potencia."
+        if delta_pct <= -20:
+            return "Reducción importante en 2X."
+        return "Cambio menor en 2X."
+
+    if label == "3X":
+        if delta_pct >= 15:
+            return "Crecimiento en 3X; refuerza lectura de desalineación / comportamiento del tren."
+        if delta_pct <= -15:
+            return "Disminución clara en 3X."
+        return "Cambio menor en 3X."
+
+    if label == "Overall":
+        if delta_pct >= 20:
+            return "Aumento global de energía; revisar si el crecimiento es concentrado o distribuido."
+        if delta_pct <= -20:
+            return "Reducción global de energía."
+        return "Cambio global moderado."
+
+    if label == "High Harmonics":
+        if delta_pct >= 25:
+            return "Crecimiento en armónicos altos; posible holgura, no linealidad o pérdida de rigidez."
+        if delta_pct <= -25:
+            return "Disminución clara de armónicos altos."
+        return "Cambio moderado en contenido armónico alto."
+
+    if abs_delta >= 20:
+        return "Cambio relevante."
+    return "Cambio moderado o bajo."
+
+
+def build_compare_insight_table(
+    summary_a: Dict[str, Any],
+    summary_b: Dict[str, Any],
+    compare_assessment: Dict[str, Any],
+) -> pd.DataFrame:
+    insight_rows = [
+        {
+            "Component": "1X",
+            "A": summary_a.get("one_x_amp"),
+            "B": summary_b.get("one_x_amp"),
+            "DeltaPct": compare_assessment.get("one_x_delta_pct"),
+            "Priority": 1,
+        },
+        {
+            "Component": "2X",
+            "A": summary_a.get("two_x_amp"),
+            "B": summary_b.get("two_x_amp"),
+            "DeltaPct": compare_assessment.get("two_x_delta_pct"),
+            "Priority": 2,
+        },
+        {
+            "Component": "3X",
+            "A": summary_a.get("three_x_amp"),
+            "B": summary_b.get("three_x_amp"),
+            "DeltaPct": compare_assessment.get("three_x_delta_pct"),
+            "Priority": 3,
+        },
+        {
+            "Component": "Overall",
+            "A": summary_a.get("overall"),
+            "B": summary_b.get("overall"),
+            "DeltaPct": compare_assessment.get("overall_delta_pct"),
+            "Priority": 4,
+        },
+        {
+            "Component": "High Harmonics",
+            "A": summary_a.get("high_harm_amp"),
+            "B": summary_b.get("high_harm_amp"),
+            "DeltaPct": compare_assessment.get("high_harm_delta_pct"),
+            "Priority": 5,
+        },
+    ]
+
+    normalized_rows = []
+    for row in insight_rows:
+        delta_pct = row["DeltaPct"]
+        normalized_rows.append(
+            {
+                "Insight": row["Component"],
+                "A": format_number(row["A"], 3),
+                "B": format_number(row["B"], 3),
+                "Δ % vs A": format_number(delta_pct, 1),
+                "Interpretation": _insight_interpretation(row["Component"], delta_pct),
+                "_abs_delta": abs(float(delta_pct)) if delta_pct is not None else -1.0,
+                "_priority": row["Priority"],
+            }
+        )
+
+    df = pd.DataFrame(normalized_rows)
+    if df.empty:
+        return df
+
+    df = df.sort_values(by=["_abs_delta", "_priority"], ascending=[False, True]).reset_index(drop=True)
+    df = df.drop(columns=["_abs_delta", "_priority"])
+    return df
+
+
+def build_compare_top_findings(compare_insights_df: pd.DataFrame, max_items: int = 3) -> List[str]:
+    findings: List[str] = []
+    if compare_insights_df is None or compare_insights_df.empty:
+        return findings
+
+    for _, row in compare_insights_df.head(max_items).iterrows():
+        insight = str(row.get("Insight") or "—")
+        delta_pct = str(row.get("Δ % vs A") or "—")
+        interpretation = str(row.get("Interpretation") or "").strip()
+        findings.append(f"{insight}: Δ {delta_pct}% — {interpretation}")
+
+    return findings
+

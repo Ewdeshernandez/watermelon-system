@@ -25,9 +25,11 @@ from core.bearing_catalog import (
 )
 from core.spectrum_compare import (
     build_compare_assessment,
+    build_compare_insight_table,
     build_compare_metric_table,
     build_compare_report_notes,
     build_compare_time_label,
+    build_compare_top_findings,
     build_compare_validation_table,
     format_number as compare_format_number,
     order_compare_records_by_time,
@@ -2580,6 +2582,12 @@ def render_compare_panel(
         summary_a=summary_a,
         summary_b=summary_b,
     )
+    compare_insights_df = build_compare_insight_table(
+        summary_a=summary_a,
+        summary_b=summary_b,
+        compare_assessment=compare_assessment,
+    )
+    top_findings = build_compare_top_findings(compare_insights_df, max_items=3)
 
     logo_uri = get_logo_data_uri(LOGO_PATH)
     compare_fig = build_compare_overlay_figure(
@@ -2659,6 +2667,12 @@ def render_compare_panel(
     )
 
     st.info(str(compare_assessment.get("narrative") or "").strip())
+
+    st.markdown("#### Compare Insights Engine")
+    if top_findings:
+        for finding in top_findings:
+            st.success(finding)
+    st.dataframe(compare_insights_df, use_container_width=True, hide_index=True)
 
     st.markdown("#### Compare Technical Body")
     st.dataframe(compare_metrics_df, use_container_width=True, hide_index=True)
