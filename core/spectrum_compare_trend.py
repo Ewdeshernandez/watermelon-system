@@ -181,22 +181,29 @@ def deduplicate_trend_records(records: List[Dict[str, Any]]) -> Tuple[List[Dict[
     unique_records: List[Dict[str, Any]] = []
     duplicate_count = 0
 
+    def _round(v):
+        try:
+            return round(float(v), 5)
+        except:
+            return None
+
     for rec in ordered:
-        ts = str(rec.get("timestamp") or "").strip()
-        name = str(rec.get("name") or "").strip()
-        signal_id = str(rec.get("signal_id") or "").strip()
+        key = (
+            str(rec.get("timestamp") or "").strip(),
+            _round(rec.get("one_x_amp")),
+            _round(rec.get("two_x_amp")),
+            _round(rec.get("overall")),
+            _round(rec.get("peak_amp")),
+        )
 
-        primary_key = (ts, signal_id) if signal_id else (ts, name)
-
-        if primary_key in seen:
+        if key in seen:
             duplicate_count += 1
             continue
 
-        seen.add(primary_key)
+        seen.add(key)
         unique_records.append(rec)
 
     return unique_records, duplicate_count
-
 
 def build_trend_series_table(records: List[Dict[str, Any]]) -> pd.DataFrame:
     ordered, _duplicate_count = deduplicate_trend_records(records)
@@ -389,7 +396,6 @@ def build_trend_report_notes(records: List[Dict[str, Any]]) -> str:
     series_df = build_trend_series_table(records)
 
     blocks: List[str] = []
-    blocks.append(str(assessment.get("headline") or "").strip())
     blocks.append(str(assessment.get("narrative") or "").strip())
 
     blocks.append(
