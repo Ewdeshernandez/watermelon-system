@@ -25,6 +25,7 @@ from core.bearing_catalog import (
 )
 from core.spectrum_compare import (
     build_compare_assessment,
+    build_compare_executive_card,
     build_compare_insight_table,
     build_compare_metric_table,
     build_compare_report_notes,
@@ -2588,6 +2589,7 @@ def render_compare_panel(
         compare_assessment=compare_assessment,
     )
     top_findings = build_compare_top_findings(compare_insights_df, max_items=3)
+    compare_executive_card = build_compare_executive_card(compare_assessment)
 
     logo_uri = get_logo_data_uri(LOGO_PATH)
     compare_fig = build_compare_overlay_figure(
@@ -2667,6 +2669,25 @@ def render_compare_panel(
     )
 
     st.info(str(compare_assessment.get("narrative") or "").strip())
+
+    card_color = compare_executive_card.get("traffic_color", "#64748b")
+    st.markdown(
+        f"""
+        <div style="border:1px solid #d1d5db;border-left:8px solid {card_color};background:#ffffff;padding:16px 18px;border-radius:14px;margin:8px 0 14px 0;">
+            <div style="font-size:13px;color:#6b7280;margin-bottom:6px;">Compare Executive Card</div>
+            <div style="font-size:22px;font-weight:700;color:#111827;margin-bottom:8px;">{compare_executive_card.get("title", "Compare Assessment")}</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                <span style="padding:6px 10px;border-radius:999px;background:{card_color};color:white;font-weight:600;">Score {compare_executive_card.get("compare_score", 0)}/100</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Trend: {compare_executive_card.get("condition_trend", "—")}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Semáforo: {compare_executive_card.get("traffic_light", "—")}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Comparabilidad: {compare_executive_card.get("comparability_score", 0)}%</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Confianza: {compare_executive_card.get("confidence_pct", 0)}%</span>
+            </div>
+            <div style="font-size:14px;color:#111827;line-height:1.5;">{compare_executive_card.get("condition_text", "")}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.markdown("#### Compare Insights Engine")
     if top_findings:

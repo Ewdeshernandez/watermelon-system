@@ -397,6 +397,7 @@ def build_compare_narrative(
     narrative = re.sub(r"\s+", " ", narrative)
     return narrative
 
+
 def build_compare_report_notes(
     compare_assessment: Dict[str, Any],
     summary_a: Dict[str, Any],
@@ -406,6 +407,8 @@ def build_compare_report_notes(
     delta_days: Optional[int] = None,
 ) -> str:
     blocks: List[str] = []
+
+    executive_card = build_compare_executive_card(compare_assessment)
 
     if time_label:
         blocks.append(time_label)
@@ -417,6 +420,18 @@ def build_compare_report_notes(
     narrative = build_compare_narrative(compare_assessment, delta_days)
     if narrative:
         blocks.append(narrative)
+
+    blocks.append(
+        "Resumen ejecutivo de condición:\n"
+        f"- Compare Score: {executive_card['compare_score']}/100\n"
+        f"- Condition Trend: {executive_card['condition_trend']}\n"
+        f"- Semáforo: {executive_card['traffic_light']}\n"
+        f"- Estado: {executive_card['condition_text']}\n"
+        f"- Falla primaria: {executive_card['primary_fault']}\n"
+        f"- Falla secundaria: {executive_card['secondary_fault']}\n"
+        f"- Comparabilidad: {executive_card['comparability_score']}%\n"
+        f"- Confianza diagnóstica: {executive_card['confidence_pct']}%"
+    )
 
     if insights_df is not None and not insights_df.empty:
         top = insights_df.head(3)
@@ -438,14 +453,7 @@ def build_compare_report_notes(
         f"- Δ Peak: {format_number(compare_assessment.get('peak_delta_pct'), 1)}%\n"
         f"- Δ Overall: {format_number(compare_assessment.get('overall_delta_pct'), 1)}%\n"
         f"- Δ 1X: {format_number(compare_assessment.get('one_x_delta_pct'), 1)}%\n"
-        f"- Δ 2X: {format_number(compare_assessment.get('two_x_delta_pct'), 1)}%\n"
-        f"- Falla primaria: {compare_assessment.get('primary_fault') or '—'}\n"
-        f"- Falla secundaria: {compare_assessment.get('secondary_fault') or '—'}\n"
-        f"- Compare Score: {format_number(compare_assessment.get('compare_score'), 0)}/100\n"
-        f"- Condition Trend: {compare_assessment.get('condition_trend') or '—'}\n"
-        f"- Semáforo: {compare_assessment.get('traffic_light') or '—'}\n"
-        f"- Comparabilidad: {format_number(compare_assessment.get('comparability_score'), 0)}%\n"
-        f"- Confianza diagnóstica: {format_number(compare_assessment.get('confidence_pct'), 0)}%"
+        f"- Δ 2X: {format_number(compare_assessment.get('two_x_delta_pct'), 1)}%"
     )
 
     warnings = compare_assessment.get("warnings", [])
@@ -738,5 +746,19 @@ def build_compare_condition_summary(
         "traffic_light": traffic_light,
         "traffic_color": traffic_color,
         "condition_text": condition_text,
+    }
+
+def build_compare_executive_card(compare_assessment: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "title": str(compare_assessment.get("title") or "Compare Assessment").strip(),
+        "compare_score": int(compare_assessment.get("compare_score") or 0),
+        "condition_trend": str(compare_assessment.get("condition_trend") or "—").strip(),
+        "traffic_light": str(compare_assessment.get("traffic_light") or "—").strip(),
+        "traffic_color": str(compare_assessment.get("traffic_color") or "#64748b").strip(),
+        "condition_text": str(compare_assessment.get("condition_text") or "").strip(),
+        "primary_fault": str(compare_assessment.get("primary_fault") or "—").strip(),
+        "secondary_fault": str(compare_assessment.get("secondary_fault") or "—").strip(),
+        "comparability_score": int(compare_assessment.get("comparability_score") or 0),
+        "confidence_pct": int(compare_assessment.get("confidence_pct") or 0),
     }
 
