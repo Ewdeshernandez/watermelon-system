@@ -2494,31 +2494,15 @@ def build_compare_overlay_figure(
 
 
 
-def _build_trend_image(df: pd.DataFrame):
+def _build_trend_image(fig: go.Figure):
     try:
-        import plotly.graph_objects as go
-
-        fig = go.Figure()
-
-        if "Timestamp" in df.columns and "Trend Score" in df.columns:
-            fig.add_trace(
-                go.Scatter(
-                    x=df["Timestamp"],
-                    y=df["Trend Score"],
-                    mode="lines+markers",
-                    name="Trend Score",
-                )
-            )
-
-        fig.update_layout(
-            template="plotly_white",
-            height=420,
-            margin=dict(l=40, r=40, t=40, b=40),
-            xaxis_title="Timestamp",
-            yaxis_title="Trend Score",
+        export_fig = go.Figure(fig)
+        export_fig.update_layout(
+            paper_bgcolor="#ffffff",
+            plot_bgcolor="#ffffff",
+            font=dict(color="#0f172a"),
         )
-
-        return fig.to_image(format="png", width=1600, height=700, scale=2)
+        return export_fig.to_image(format="png", width=2200, height=1100, scale=2)
     except Exception:
         return None
 
@@ -2903,13 +2887,14 @@ def queue_trend_to_report(
     trend_title: str,
     trend_notes: str,
     trend_table_df: pd.DataFrame,
+    trend_fig: go.Figure,
 ) -> None:
     if "report_items" not in st.session_state:
         st.session_state.report_items = []
 
     first_record = trend_records[0]
     last_record = trend_records[-1]
-    trend_image_bytes = _build_trend_image(trend_table_df)
+    trend_image_bytes = _build_trend_image(trend_fig)
 
     st.session_state.report_items.append(
         {
@@ -3131,6 +3116,7 @@ def render_trend_panel(
                 trend_title=trend_title,
                 trend_notes=trend_notes,
                 trend_table_df=trend_df,
+                trend_fig=trend_fig,
             )
             st.success("Trend mode enviado al reporte")
 
