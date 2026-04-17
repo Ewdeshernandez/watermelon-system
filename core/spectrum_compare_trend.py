@@ -102,21 +102,77 @@ def build_trend_condition_summary(record_summary: Dict[str, Any], comparability_
     }
 
 
-def _derive_trend_direction(score_deltas: List[float]) -> str:
-    if not score_deltas:
+
+def _derive_trend_direction(
+    score_deltas: List[float],
+    first_record: Optional[Dict[str, Any]] = None,
+    last_record: Optional[Dict[str, Any]] = None,
+) -> str:
+    if not score_deltas and (first_record is None or last_record is None):
         return "Stable"
 
     positive = sum(1 for x in score_deltas if x > 2.5)
     negative = sum(1 for x in score_deltas if x < -2.5)
 
+    one_x_change = safe_pct_change(
+        last_record.get("one_x_amp") if last_record else None,
+        first_record.get("one_x_amp") if first_record else None,
+    )
+    two_x_change = safe_pct_change(
+        last_record.get("two_x_amp") if last_record else None,
+        first_record.get("two_x_amp") if first_record else None,
+    )
+    overall_change = safe_pct_change(
+        last_record.get("overall") if last_record else None,
+        first_record.get("overall") if first_record else None,
+    )
+    high_harm_change = safe_pct_change(
+        last_record.get("high_harm_amp") if last_record else None,
+        first_record.get("high_harm_amp") if first_record else None,
+    )
+
+    worsening_votes = 0
+    improving_votes = 0
+
+    for value, threshold in [
+        (one_x_change, 18.0),
+        (two_x_change, 18.0),
+        (overall_change, 18.0),
+        (high_harm_change, 22.0),
+    ]:
+        if value is None:
+            continue
+        if value >= threshold:
+            worsening_votes += 1
+        elif value <= -threshold:
+            improving_votes += 1
+
+    if positive > 0 and negative > 0:
+        if abs(positive - negative) <= 1:
+            return "Volatile"
+
+    if improving_votes >= 2 and worsening_votes == 0:
+        return "Improving"
+
+    if worsening_votes >= 2 and improving_votes == 0:
+        return "Worsening"
+
+    if positive >= 2 and negative == 0:
+        return "Worsening"
+
+    if negative >= 2 and positive == 0:
+        return "Improving"
+
     if positive > 0 and negative > 0:
         return "Volatile"
-    if positive > 0 and negative == 0:
-        return "Worsening"
-    if negative > 0 and positive == 0:
-        return "Improving"
-    return "Stable"
 
+    if improving_votes == 1 and worsening_votes == 0 and negative >= 1:
+        return "Improving"
+
+    if worsening_votes == 1 and improving_votes == 0 and positive >= 1:
+        return "Worsening"
+
+    return "Stable"
 
 def deduplicate_trend_records(records: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
     ordered = order_trend_records_by_time(records)
@@ -217,7 +273,14 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     for i in range(1, len(scores)):
         score_deltas.append(scores[i] - scores[i - 1])
 
-    trend_label = _derive_trend_direction(score_deltas)
+    first = ordered[0]
+    last = ordered[-1]
+
+    trend_label = _derive_trend_direction(
+        score_deltas,
+        first_record=first,
+        last_record=last,
+    )
 
     first_ts = parse_trend_timestamp(ordered[0].get("timestamp"))
     last_ts = parse_trend_timestamp(ordered[-1].get("timestamp"))
@@ -252,11 +315,11 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     if trend_label == "Worsening":
         traffic_light = "Red"
         traffic_color = "#dc2626"
-        headline = "La condición de la máquina muestra tendencia al deterioro."
+        headline = "La condición de la máquina muestra tendencia al deterioro con crecimiento acumulado de componentes dinámicos."
     elif trend_label == "Improving":
         traffic_light = "Green"
         traffic_color = "#16a34a"
-        headline = "La condición de la máquina muestra tendencia a la mejora."
+        headline = "La condición de la máquina muestra tendencia a la mejora con reducción acumulada de severidad dinámica."
     elif trend_label == "Volatile":
         traffic_light = "Yellow"
         traffic_color = "#f59e0b"
@@ -264,7 +327,7 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     else:
         traffic_light = "Yellow"
         traffic_color = "#f59e0b"
-        headline = "La condición de la máquina se mantiene relativamente estable."
+        headline = "La condición de la máquina se mantiene relativamente estable sin cambio acumulado dominante."
 
     span_text = f" en {days_span} días" if days_span is not None and days_span >= 0 else ""
     driver_text = ""
