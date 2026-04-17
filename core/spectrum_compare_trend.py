@@ -346,6 +346,9 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         duplicate_text = f" Se omitieron {duplicate_count} registros duplicados antes del análisis."
 
     latest_score = scores[-1] if scores else None
+
+    faults = infer_trend_faults(first, last)
+
     narrative = (
         f"{headline}{span_text} "
         f"Se evaluaron {len(ordered)} mediciones únicas ordenadas cronológicamente."
@@ -367,8 +370,58 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         "top_driver": top_driver,
         "top_driver_pct": top_driver_val,
         "latest_score": latest_score,
+        "primary_fault": faults.get("primary_fault"),
+        "secondary_fault": faults.get("secondary_fault"),
         "series_count": len(ordered),
         "duplicate_count": duplicate_count,
+    }
+
+
+
+def infer_trend_faults(
+    first: Dict[str, Any],
+    last: Dict[str, Any],
+) -> Dict[str, str]:
+
+    def pct(a, b):
+        try:
+            return ((float(a) - float(b)) / abs(float(b))) * 100.0
+        except:
+            return None
+
+    one_x = pct(last.get("one_x_amp"), first.get("one_x_amp"))
+    two_x = pct(last.get("two_x_amp"), first.get("two_x_amp"))
+    overall = pct(last.get("overall"), first.get("overall"))
+    high = pct(last.get("high_harm_amp"), first.get("high_harm_amp"))
+
+    primary = "Sin cambio dominante"
+    secondary = "Sin patrón secundario claro"
+
+    # --- DESBALANCEO ---
+    if one_x is not None and abs(one_x) > 20:
+        if one_x > 0:
+            primary = "Incremento de desbalanceo"
+        else:
+            primary = "Reducción de desbalanceo"
+
+    # --- DESALINEACIÓN ---
+    if two_x is not None and abs(two_x) > 20:
+        secondary = "Comportamiento compatible con desalineación"
+
+    # --- FALLA INCIPIENTE ---
+    if high is not None and abs(high) > 25:
+        secondary = "Incremento de componentes de alta frecuencia (posible daño incipiente)"
+
+    # --- ENERGÍA GLOBAL ---
+    if overall is not None and abs(overall) > 20:
+        if overall > 0:
+            secondary = "Incremento global de energía"
+        else:
+            secondary = "Reducción global de energía"
+
+    return {
+        "primary_fault": primary,
+        "secondary_fault": secondary,
     }
 
 
@@ -397,6 +450,12 @@ def build_trend_report_notes(records: List[Dict[str, Any]]) -> str:
 
     blocks: List[str] = []
     blocks.append(str(assessment.get("narrative") or "").strip())
+
+    blocks.append(
+        "Diagnóstico técnico:\n"
+        f"- Falla primaria: {assessment.get('primary_fault')}\n"
+        f"- Falla secundaria: {assessment.get('secondary_fault')}"
+    )
 
     blocks.append(
         "Resumen de tendencia:\n"
