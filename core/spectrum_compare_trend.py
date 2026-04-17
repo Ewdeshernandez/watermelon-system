@@ -296,3 +296,22 @@ def build_trend_report_notes(records: List[Dict[str, Any]]) -> str:
         blocks.append("Serie temporal resumida:\n" + "\n".join(lines))
 
     return "\n\n".join(block for block in blocks if block.strip())
+
+
+def build_trend_executive_card(records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    assessment = build_trend_assessment(records)
+    return {
+        "headline": str(assessment.get("headline") or "Trend Assessment").strip(),
+        "trend_label": str(assessment.get("trend_label") or "—").strip(),
+        "traffic_light": str(assessment.get("traffic_light") or "—").strip(),
+        "traffic_color": str(assessment.get("traffic_color") or "#64748b").strip(),
+        "narrative": str(assessment.get("narrative") or "").strip(),
+        "top_driver": str(assessment.get("top_driver") or "—").strip(),
+        "top_driver_pct": assessment.get("top_driver_pct"),
+        "latest_score": assessment.get("latest_score"),
+        "series_count": int(assessment.get("series_count") or 0),
+        "first_timestamp": assessment.get("first_timestamp"),
+        "last_timestamp": assessment.get("last_timestamp"),
+        "days_span": assessment.get("days_span"),
+    }
+
