@@ -2936,6 +2936,95 @@ def queue_trend_to_report(
     )
 
 
+
+def build_trend_overview_figure(trend_df: pd.DataFrame) -> go.Figure:
+    fig = go.Figure()
+
+    if trend_df is None or trend_df.empty:
+        fig.update_layout(
+            template="plotly_white",
+            height=460,
+            margin=dict(l=40, r=40, t=40, b=40),
+            title="Trend Overview",
+        )
+        return fig
+
+    x = trend_df["Timestamp"]
+
+    def _to_numeric(series_name: str):
+        if series_name not in trend_df.columns:
+            return None
+        return pd.to_numeric(trend_df[series_name], errors="coerce")
+
+    score = _to_numeric("Trend Score")
+    one_x = _to_numeric("1X")
+    two_x = _to_numeric("2X")
+    overall = _to_numeric("Overall")
+
+    if score is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=score,
+                mode="lines+markers",
+                name="Trend Score",
+                yaxis="y1",
+            )
+        )
+
+    if one_x is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=one_x,
+                mode="lines+markers",
+                name="1X",
+                yaxis="y2",
+            )
+        )
+
+    if two_x is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=two_x,
+                mode="lines+markers",
+                name="2X",
+                yaxis="y2",
+            )
+        )
+
+    if overall is not None:
+        fig.add_trace(
+            go.Scatter(
+                x=x,
+                y=overall,
+                mode="lines+markers",
+                name="Overall",
+                yaxis="y2",
+            )
+        )
+
+    fig.update_layout(
+        template="plotly_white",
+        height=520,
+        margin=dict(l=50, r=55, t=50, b=55),
+        title="Trend Overview",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        xaxis=dict(title="Timestamp"),
+        yaxis=dict(title="Trend Score", side="left"),
+        yaxis2=dict(
+            title="Amplitude",
+            overlaying="y",
+            side="right",
+            showgrid=False,
+        ),
+        hovermode="x unified",
+    )
+
+    return fig
+
+
 def render_trend_panel(
     trend_records: List[SignalRecord],
     *,
@@ -3010,6 +3099,16 @@ def render_trend_panel(
         st.metric("Cambio driver", compare_format_number(trend_assessment.get("top_driver_pct"), 1) + "%" if trend_assessment.get("top_driver_pct") is not None else "—")
     with metric_cols[4]:
         st.metric("Último score", compare_format_number(trend_assessment.get("latest_score"), 2))
+
+    trend_fig = build_trend_overview_figure(trend_df)
+
+    st.markdown("#### Trend Overview Plot")
+    st.plotly_chart(
+        trend_fig,
+        use_container_width=True,
+        config={"displaylogo": False},
+        key=f"wm_trend_overview_{len(ordered_records)}_{ordered_records[0].signal_id}_{ordered_records[-1].signal_id}",
+    )
 
     st.markdown("#### Trend Series Table")
     st.dataframe(trend_df, use_container_width=True, hide_index=True)
