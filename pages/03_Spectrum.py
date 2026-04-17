@@ -2677,12 +2677,18 @@ def render_compare_panel(
     st.markdown("#### Compare Technical Body")
     st.dataframe(compare_metrics_df, use_container_width=True, hide_index=True)
 
-    detail_cols = st.columns(3)
+    detail_cols = st.columns(6)
     with detail_cols[0]:
         st.metric("Falla primaria", str(compare_assessment.get("primary_fault") or "—"))
     with detail_cols[1]:
         st.metric("Falla secundaria", str(compare_assessment.get("secondary_fault") or "—"))
     with detail_cols[2]:
+        st.metric("Compare Score", f"{int(compare_assessment.get('compare_score', 0))}/100")
+    with detail_cols[3]:
+        st.metric("Condition Trend", str(compare_assessment.get("condition_trend") or "—"))
+    with detail_cols[4]:
+        st.metric("Semáforo", str(compare_assessment.get("traffic_light") or "—"))
+    with detail_cols[5]:
         st.metric("Comparabilidad", f"{int(compare_assessment.get('comparability_score', 0))}%")
 
     st.markdown("#### Compare Validation")

@@ -85,6 +85,7 @@ def build_compare_time_label(ts_a: Optional[pd.Timestamp], ts_b: Optional[pd.Tim
     return f"{left} → {right}"
 
 
+
 def build_compare_assessment(
     summary_a: Dict[str, Any],
     summary_b: Dict[str, Any],
@@ -310,6 +311,20 @@ def build_compare_assessment(
         recommendation = "Mantener monitoreo y usar esta comparación como línea base."
         confidence = max(confidence, 80)
 
+    confidence = max(45, min(96, int(round(confidence))))
+    comparability_score = max(0, min(100, 100 - comparability_penalty))
+
+    condition_summary = build_compare_condition_summary(
+        {
+            "peak_delta_pct": peak_delta_pct,
+            "overall_delta_pct": overall_delta_pct,
+            "one_x_delta_pct": one_x_delta_pct,
+            "two_x_delta_pct": two_x_delta_pct,
+            "high_harm_delta_pct": high_harm_delta_pct,
+            "comparability_score": comparability_score,
+        }
+    )
+
     narrative_parts: List[str] = []
     if delta_days is not None and delta_days > 0:
         narrative_parts.append(f"En un periodo de {delta_days} días, {executive_summary[0].lower() + executive_summary[1:]}")
@@ -319,12 +334,12 @@ def build_compare_assessment(
     narrative_parts.append(recommendation)
     narrative = " ".join(part.strip() for part in narrative_parts if part and part.strip())
 
-    confidence = max(45, min(96, int(round(confidence))))
-    comparability_score = max(0, min(100, 100 - comparability_penalty))
-
     chips = [
         (f"Severidad: {severity}", severity_color),
         (f"Confianza: {confidence}%", None),
+        (f"Compare Score: {condition_summary['compare_score']}", condition_summary["traffic_color"]),
+        (f"Trend: {condition_summary['condition_trend']}", None),
+        (f"Semáforo: {condition_summary['traffic_light']}", condition_summary["traffic_color"]),
         (f"Comparabilidad: {comparability_score}%", None),
         (f"Δ Peak: {format_number(peak_delta_pct, 1)}%", None),
         (f"Δ Overall: {format_number(overall_delta_pct, 1)}%", None),
@@ -343,6 +358,11 @@ def build_compare_assessment(
         "primary_fault": primary_fault,
         "secondary_fault": secondary_fault,
         "comparability_score": comparability_score,
+        "compare_score": condition_summary["compare_score"],
+        "condition_trend": condition_summary["condition_trend"],
+        "traffic_light": condition_summary["traffic_light"],
+        "traffic_color": condition_summary["traffic_color"],
+        "condition_text": condition_summary["condition_text"],
         "confidence_pct": confidence,
         "chips": chips,
         "warnings": warnings,
@@ -354,7 +374,6 @@ def build_compare_assessment(
         "high_harm_delta_pct": high_harm_delta_pct,
     }
 
-
 def build_compare_narrative(
     compare_assessment: Dict[str, Any],
     delta_days: Optional[int],
@@ -362,15 +381,21 @@ def build_compare_narrative(
     exec_sum = str(compare_assessment.get("executive_summary") or "").strip()
     tech = str(compare_assessment.get("technical_basis") or "").strip()
     reco = str(compare_assessment.get("recommendation") or "").strip()
+    condition_text = str(compare_assessment.get("condition_text") or "").strip()
+    trend = str(compare_assessment.get("condition_trend") or "").strip()
+    score = compare_assessment.get("compare_score")
 
     intro = ""
     if delta_days is not None and delta_days > 0:
         intro = f"En un periodo de {delta_days} días, "
 
-    narrative = f"{intro}{exec_sum} {tech} {reco}".strip()
+    score_text = ""
+    if score is not None and trend:
+        score_text = f" El compare score es {score}/100 y la tendencia estimada de condición es {trend}."
+
+    narrative = f"{intro}{exec_sum} {tech} {reco}{score_text} {condition_text}".strip()
     narrative = re.sub(r"\s+", " ", narrative)
     return narrative
-
 
 def build_compare_report_notes(
     compare_assessment: Dict[str, Any],
@@ -416,6 +441,9 @@ def build_compare_report_notes(
         f"- Δ 2X: {format_number(compare_assessment.get('two_x_delta_pct'), 1)}%\n"
         f"- Falla primaria: {compare_assessment.get('primary_fault') or '—'}\n"
         f"- Falla secundaria: {compare_assessment.get('secondary_fault') or '—'}\n"
+        f"- Compare Score: {format_number(compare_assessment.get('compare_score'), 0)}/100\n"
+        f"- Condition Trend: {compare_assessment.get('condition_trend') or '—'}\n"
+        f"- Semáforo: {compare_assessment.get('traffic_light') or '—'}\n"
         f"- Comparabilidad: {format_number(compare_assessment.get('comparability_score'), 0)}%\n"
         f"- Confianza diagnóstica: {format_number(compare_assessment.get('confidence_pct'), 0)}%"
     )
@@ -428,8 +456,6 @@ def build_compare_report_notes(
         )
 
     return "\n\n".join(blocks).strip()
-
-
 def build_compare_metric_table(
     summary_a: Dict[str, Any],
     summary_b: Dict[str, Any],
@@ -644,3 +670,73 @@ def build_compare_top_findings(compare_insights_df: pd.DataFrame, max_items: int
         findings.append(f"{insight}: Δ {delta_pct}% — {interpretation}")
 
     return findings
+
+
+def build_compare_condition_summary(
+    compare_assessment: Dict[str, Any],
+) -> Dict[str, Any]:
+    peak_delta = compare_assessment.get("peak_delta_pct")
+    overall_delta = compare_assessment.get("overall_delta_pct")
+    one_x_delta = compare_assessment.get("one_x_delta_pct")
+    two_x_delta = compare_assessment.get("two_x_delta_pct")
+    high_harm_delta = compare_assessment.get("high_harm_delta_pct")
+    comparability = float(compare_assessment.get("comparability_score") or 0.0)
+
+    worsening_score = 0.0
+    improving_score = 0.0
+
+    def add_component(delta: Optional[float], weight: float) -> None:
+        nonlocal worsening_score, improving_score
+        if delta is None:
+            return
+        try:
+            val = float(delta)
+        except Exception:
+            return
+        if val > 0:
+            worsening_score += min(abs(val), 100.0) * weight
+        elif val < 0:
+            improving_score += min(abs(val), 100.0) * weight
+
+    add_component(one_x_delta, 0.34)
+    add_component(two_x_delta, 0.24)
+    add_component(overall_delta, 0.24)
+    add_component(high_harm_delta, 0.12)
+    add_component(peak_delta, 0.06)
+
+    raw_balance = worsening_score - improving_score
+
+    if comparability < 85:
+        raw_balance *= 0.90
+    if comparability < 70:
+        raw_balance *= 0.82
+    if comparability < 50:
+        raw_balance *= 0.72
+
+    compare_score = 50.0 + raw_balance / 3.0
+    compare_score = max(0.0, min(100.0, compare_score))
+
+    if compare_score >= 60:
+        condition_trend = "Worsening"
+        traffic_light = "Red"
+        traffic_color = "#dc2626"
+        condition_text = "La condición comparativa sugiere deterioro respecto a la referencia."
+    elif compare_score <= 40:
+        condition_trend = "Improving"
+        traffic_light = "Green"
+        traffic_color = "#16a34a"
+        condition_text = "La condición comparativa sugiere mejora o reducción de severidad respecto a la referencia."
+    else:
+        condition_trend = "Stable"
+        traffic_light = "Yellow"
+        traffic_color = "#f59e0b"
+        condition_text = "La condición comparativa se mantiene estable o con cambio moderado."
+
+    return {
+        "compare_score": int(round(compare_score)),
+        "condition_trend": condition_trend,
+        "traffic_light": traffic_light,
+        "traffic_color": traffic_color,
+        "condition_text": condition_text,
+    }
+
