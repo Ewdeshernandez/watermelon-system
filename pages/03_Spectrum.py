@@ -3070,9 +3070,18 @@ if enable_compare_mode:
         annotate_peak=annotate_peak,
     )
 elif enable_trend_mode:
-    if len(selected_records) < 3:
+    n_records = len(selected_records)
+
+    if n_records < 3:
         st.warning("Trend mode requiere mínimo 3 señales seleccionadas.")
         st.stop()
+
+    if n_records > 10:
+        st.error("Trend mode soporta máximo 10 señales para mantener calidad de análisis.")
+        st.stop()
+
+    if n_records > 8:
+        st.warning(f"Se están usando {n_records} señales. Se recomienda máximo 8 para mejor interpretación.")
 
     render_trend_panel(
         trend_records=selected_records,
