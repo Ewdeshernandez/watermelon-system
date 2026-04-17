@@ -35,6 +35,12 @@ from core.spectrum_compare import (
     format_number as compare_format_number,
     order_compare_records_by_time,
 )
+from core.spectrum_compare_trend import (
+    build_trend_assessment,
+    build_trend_report_notes,
+    build_trend_series_table,
+    order_trend_records_by_time,
+)
 
 st.set_page_config(page_title="Watermelon System | Spectrum", layout="wide")
 
@@ -1675,6 +1681,14 @@ with st.sidebar:
         disabled=not enable_compare_mode,
     )
 
+    st.markdown("### Trend Mode")
+    enable_trend_mode = st.checkbox(
+        "Enable trend mode (3+ spectra over time)",
+        value=False,
+        help="Analyze 3 or more spectra from the same point ordered by timestamp to estimate machine condition trend.",
+        disabled=enable_compare_mode,
+    )
+
     st.markdown("### Harmonics")
 
     show_harmonics = st.checkbox("Show 1X harmonics", value=True)
@@ -2778,6 +2792,162 @@ def render_compare_panel(
             )
             st.success("Compare mode enviado al reporte")
 
+
+def summarize_trend_signal(
+    record: SignalRecord,
+    *,
+    spectrum: SpectrumResult,
+    amplitude_mode: str,
+    max_cpm: float,
+    harmonic_count: int = 8,
+    harmonic_band_fraction: float = 0.12,
+) -> Dict[str, Any]:
+    freq_cpm = spectrum.freq_cpm
+    amp_peak = spectrum.amp_peak
+
+    peak_amp = convert_scalar_peak_to_mode(spectrum.peak_amp_peak, amplitude_mode)
+
+    overall_rms_peak = compute_spectrum_overall_rms_parseval(
+        time_s=record.time_s,
+        y=record.amplitude,
+        remove_dc=True,
+        detrend=True,
+        max_cpm=max_cpm,
+    )
+    overall_display = convert_rms_to_mode(overall_rms_peak, amplitude_mode)
+
+    one_x_peak = None
+    if record.rpm is not None and record.rpm > 0:
+        one_x_peak = estimate_harmonic_from_waveform_peak(
+            time_s=record.time_s,
+            y=record.amplitude,
+            freq_hz=float(record.rpm) / 60.0,
+            remove_mean=True,
+        )
+        if one_x_peak is None:
+            _local_freq, local_peak = find_local_peak_near_1x(
+                freq_cpm=freq_cpm,
+                amp_peak=amp_peak,
+                one_x_cpm=float(record.rpm),
+                band_fraction=harmonic_band_fraction,
+            )
+            one_x_peak = local_peak
+
+    one_x_display = convert_scalar_peak_to_mode(one_x_peak, amplitude_mode)
+
+    harmonic_points = collect_harmonic_points(
+        freq_cpm=freq_cpm,
+        amp_peak=amp_peak,
+        base_rpm=record.rpm,
+        harmonic_count=harmonic_count,
+        band_fraction=harmonic_band_fraction,
+        max_cpm=max_cpm,
+    )
+
+    harmonic_map_peak = {int(p.order): float(p.amp_peak) for p in harmonic_points}
+
+    return {
+        "name": record.name,
+        "timestamp": record.timestamp,
+        "rpm": record.rpm,
+        "amplitude_unit": record.amplitude_unit,
+        "sample_rate_hz": record.sample_rate_hz,
+        "duration_s": record.duration_s,
+        "peak_freq_cpm": spectrum.peak_freq_cpm,
+        "peak_amp": peak_amp,
+        "overall": overall_display,
+        "one_x_amp": one_x_display,
+        "two_x_amp": convert_scalar_peak_to_mode(harmonic_map_peak.get(2), amplitude_mode),
+        "three_x_amp": convert_scalar_peak_to_mode(harmonic_map_peak.get(3), amplitude_mode),
+        "high_harm_amp": convert_scalar_peak_to_mode(
+            max([v for k, v in harmonic_map_peak.items() if int(k) >= 4], default=0.0),
+            amplitude_mode,
+        ),
+        "comparability_score": 100.0,
+    }
+
+
+def render_trend_panel(
+    trend_records: List[SignalRecord],
+    *,
+    window_name: str,
+    amplitude_mode: str,
+    remove_dc: bool,
+    detrend: bool,
+    zero_padding: bool,
+    high_res_factor: int,
+    max_cpm: float,
+) -> None:
+    raw_records = [{"timestamp": rec.timestamp, "record": rec} for rec in trend_records]
+    ordered_dicts = order_trend_records_by_time(raw_records)
+    ordered_records = [item["record"] for item in ordered_dicts]
+
+    trend_summaries = []
+    for record in ordered_records:
+        spectrum = compute_spectrum_peak(
+            time_s=record.time_s,
+            y=record.amplitude,
+            window_name=window_name,
+            remove_dc=remove_dc,
+            detrend=detrend,
+            zero_padding=zero_padding,
+            high_res_factor=high_res_factor,
+            min_peak_cpm=1.0,
+        )
+        trend_summaries.append(
+            summarize_trend_signal(
+                record,
+                spectrum=spectrum,
+                amplitude_mode=amplitude_mode,
+                max_cpm=max_cpm,
+            )
+        )
+
+    trend_df = build_trend_series_table(trend_summaries)
+    trend_assessment = build_trend_assessment(trend_summaries)
+    trend_notes = build_trend_report_notes(trend_summaries)
+
+    traffic_color = str(trend_assessment.get("traffic_color") or "#64748b")
+
+    st.markdown("### Spectrum Trend Mode")
+    st.caption("Trend Mode evalúa 3 o más mediciones ordenadas por fecha para estimar la evolución de condición de la máquina.")
+
+    st.markdown(
+        f"""
+        <div style="border:1px solid #d1d5db;border-left:8px solid {traffic_color};background:#ffffff;padding:16px 18px;border-radius:14px;margin:8px 0 14px 0;">
+            <div style="font-size:13px;color:#6b7280;margin-bottom:6px;">Machine Condition Trend</div>
+            <div style="font-size:22px;font-weight:700;color:#111827;margin-bottom:8px;">{trend_assessment.get("headline", "Trend Assessment")}</div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+                <span style="padding:6px 10px;border-radius:999px;background:{traffic_color};color:white;font-weight:600;">Trend: {trend_assessment.get("trend_label", "—")}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Semáforo: {trend_assessment.get("traffic_light", "—")}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Driver: {trend_assessment.get("top_driver", "—")}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Último score: {compare_format_number(trend_assessment.get("latest_score"), 2)}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Series: {trend_assessment.get("series_count", 0)}</span>
+            </div>
+            <div style="font-size:14px;color:#111827;line-height:1.5;">{trend_assessment.get("narrative", "")}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    metric_cols = st.columns(5)
+    with metric_cols[0]:
+        st.metric("Trend Label", str(trend_assessment.get("trend_label") or "—"))
+    with metric_cols[1]:
+        st.metric("Semáforo", str(trend_assessment.get("traffic_light") or "—"))
+    with metric_cols[2]:
+        st.metric("Driver dominante", str(trend_assessment.get("top_driver") or "—"))
+    with metric_cols[3]:
+        st.metric("Cambio driver", compare_format_number(trend_assessment.get("top_driver_pct"), 1) + "%" if trend_assessment.get("top_driver_pct") is not None else "—")
+    with metric_cols[4]:
+        st.metric("Último score", compare_format_number(trend_assessment.get("latest_score"), 2))
+
+    st.markdown("#### Trend Series Table")
+    st.dataframe(trend_df, use_container_width=True, hide_index=True)
+
+    st.markdown("#### Trend Narrative")
+    st.info(trend_notes)
+
 selected_ids = [
     signal_id
     for signal_id in st.session_state.wm_sp_selected_signal_ids
@@ -2811,6 +2981,21 @@ if enable_compare_mode:
         y_axis_manual_max=y_axis_manual_max,
         compare_fill_area=compare_fill_area,
         annotate_peak=annotate_peak,
+    )
+elif enable_trend_mode:
+    if len(selected_records) < 3:
+        st.warning("Trend mode requiere mínimo 3 señales seleccionadas.")
+        st.stop()
+
+    render_trend_panel(
+        trend_records=selected_records,
+        window_name=window_name,
+        amplitude_mode=amplitude_mode,
+        remove_dc=remove_dc,
+        detrend=detrend,
+        zero_padding=zero_padding,
+        high_res_factor=high_res_factor,
+        max_cpm=max_cpm,
     )
 else:
     for panel_index, primary in enumerate(selected_records):
