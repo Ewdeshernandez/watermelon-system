@@ -118,8 +118,32 @@ def _derive_trend_direction(score_deltas: List[float]) -> str:
     return "Stable"
 
 
-def build_trend_series_table(records: List[Dict[str, Any]]) -> pd.DataFrame:
+def deduplicate_trend_records(records: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
     ordered = order_trend_records_by_time(records)
+
+    seen = set()
+    unique_records: List[Dict[str, Any]] = []
+    duplicate_count = 0
+
+    for rec in ordered:
+        ts = str(rec.get("timestamp") or "").strip()
+        name = str(rec.get("name") or "").strip()
+        signal_id = str(rec.get("signal_id") or "").strip()
+
+        primary_key = (ts, signal_id) if signal_id else (ts, name)
+
+        if primary_key in seen:
+            duplicate_count += 1
+            continue
+
+        seen.add(primary_key)
+        unique_records.append(rec)
+
+    return unique_records, duplicate_count
+
+
+def build_trend_series_table(records: List[Dict[str, Any]]) -> pd.DataFrame:
+    ordered, _duplicate_count = deduplicate_trend_records(records)
 
     if not ordered:
         return pd.DataFrame()
@@ -129,7 +153,10 @@ def build_trend_series_table(records: List[Dict[str, Any]]) -> pd.DataFrame:
 
     for idx, rec in enumerate(ordered, start=1):
         ts = parse_trend_timestamp(rec.get("timestamp"))
-        score_info = build_trend_condition_summary(rec, comparability_score=float(rec.get("comparability_score", 100.0) or 100.0))
+        score_info = build_trend_condition_summary(
+            rec,
+            comparability_score=float(rec.get("comparability_score", 100.0) or 100.0),
+        )
         score = score_info["severity_raw"]
 
         delta_score = None
@@ -158,7 +185,7 @@ def build_trend_series_table(records: List[Dict[str, Any]]) -> pd.DataFrame:
 
 
 def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
-    ordered = order_trend_records_by_time(records)
+    ordered, duplicate_count = deduplicate_trend_records(records)
 
     if len(ordered) < 3:
         return {
@@ -166,13 +193,15 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
             "traffic_light": "Yellow",
             "traffic_color": "#f59e0b",
             "headline": "No hay suficientes fechas para análisis multitemporal.",
-            "narrative": "Se requieren al menos 3 mediciones para evaluar tendencia multitemporal de condición.",
+            "narrative": "Se requieren al menos 3 mediciones únicas para evaluar tendencia multitemporal de condición.",
             "score_deltas": [],
             "first_timestamp": None,
             "last_timestamp": None,
             "days_span": None,
             "top_driver": "—",
             "latest_score": None,
+            "duplicate_count": duplicate_count,
+            "series_count": len(ordered),
         }
 
     scores: List[float] = []
@@ -213,12 +242,12 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
 
     top_driver = "—"
     top_driver_val = None
-    for k, v in driver_candidates.items():
-        if v is None:
+    for key, val in driver_candidates.items():
+        if val is None:
             continue
-        if top_driver_val is None or abs(float(v)) > abs(float(top_driver_val)):
-            top_driver_val = float(v)
-            top_driver = k
+        if top_driver_val is None or abs(float(val)) > abs(float(top_driver_val)):
+            top_driver_val = float(val)
+            top_driver = key
 
     if trend_label == "Worsening":
         traffic_light = "Red"
@@ -242,11 +271,16 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     if top_driver_val is not None:
         driver_text = f" El componente con mayor cambio acumulado es {top_driver} ({format_number(top_driver_val, 1)}%)."
 
+    duplicate_text = ""
+    if duplicate_count > 0:
+        duplicate_text = f" Se omitieron {duplicate_count} registros duplicados antes del análisis."
+
     latest_score = scores[-1] if scores else None
     narrative = (
         f"{headline}{span_text} "
-        f"Se evaluaron {len(ordered)} mediciones ordenadas cronológicamente."
-        f"{driver_text} "
+        f"Se evaluaron {len(ordered)} mediciones únicas ordenadas cronológicamente."
+        f"{driver_text}"
+        f"{duplicate_text} "
         "Esta lectura multitemporal permite distinguir si la condición evoluciona, mejora o fluctúa entre campañas de medición."
     ).strip()
 
@@ -264,6 +298,26 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         "top_driver_pct": top_driver_val,
         "latest_score": latest_score,
         "series_count": len(ordered),
+        "duplicate_count": duplicate_count,
+    }
+
+
+def build_trend_executive_card(records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    assessment = build_trend_assessment(records)
+    return {
+        "headline": str(assessment.get("headline") or "Trend Assessment").strip(),
+        "trend_label": str(assessment.get("trend_label") or "—").strip(),
+        "traffic_light": str(assessment.get("traffic_light") or "—").strip(),
+        "traffic_color": str(assessment.get("traffic_color") or "#64748b").strip(),
+        "narrative": str(assessment.get("narrative") or "").strip(),
+        "top_driver": str(assessment.get("top_driver") or "—").strip(),
+        "top_driver_pct": assessment.get("top_driver_pct"),
+        "latest_score": assessment.get("latest_score"),
+        "series_count": int(assessment.get("series_count") or 0),
+        "first_timestamp": assessment.get("first_timestamp"),
+        "last_timestamp": assessment.get("last_timestamp"),
+        "days_span": assessment.get("days_span"),
+        "duplicate_count": int(assessment.get("duplicate_count") or 0),
     }
 
 
@@ -284,7 +338,8 @@ def build_trend_report_notes(records: List[Dict[str, Any]]) -> str:
         f"- Horizonte: {assessment.get('days_span') if assessment.get('days_span') is not None else '—'} días\n"
         f"- Driver dominante: {assessment.get('top_driver') or '—'}\n"
         f"- Cambio del driver: {format_number(assessment.get('top_driver_pct'), 1)}%\n"
-        f"- Último trend score: {format_number(assessment.get('latest_score'), 2)}"
+        f"- Último trend score: {format_number(assessment.get('latest_score'), 2)}\n"
+        f"- Duplicados omitidos: {assessment.get('duplicate_count') or 0}"
     )
 
     if not series_df.empty:
@@ -296,22 +351,3 @@ def build_trend_report_notes(records: List[Dict[str, Any]]) -> str:
         blocks.append("Serie temporal resumida:\n" + "\n".join(lines))
 
     return "\n\n".join(block for block in blocks if block.strip())
-
-
-def build_trend_executive_card(records: List[Dict[str, Any]]) -> Dict[str, Any]:
-    assessment = build_trend_assessment(records)
-    return {
-        "headline": str(assessment.get("headline") or "Trend Assessment").strip(),
-        "trend_label": str(assessment.get("trend_label") or "—").strip(),
-        "traffic_light": str(assessment.get("traffic_light") or "—").strip(),
-        "traffic_color": str(assessment.get("traffic_color") or "#64748b").strip(),
-        "narrative": str(assessment.get("narrative") or "").strip(),
-        "top_driver": str(assessment.get("top_driver") or "—").strip(),
-        "top_driver_pct": assessment.get("top_driver_pct"),
-        "latest_score": assessment.get("latest_score"),
-        "series_count": int(assessment.get("series_count") or 0),
-        "first_timestamp": assessment.get("first_timestamp"),
-        "last_timestamp": assessment.get("last_timestamp"),
-        "days_span": assessment.get("days_span"),
-    }
-
