@@ -37,6 +37,7 @@ from core.spectrum_compare import (
 )
 from core.spectrum_compare_trend import (
     build_trend_assessment,
+    build_trend_executive_card,
     build_trend_report_notes,
     build_trend_series_table,
     order_trend_records_by_time,
@@ -2867,6 +2868,43 @@ def summarize_trend_signal(
     }
 
 
+
+def queue_trend_to_report(
+    trend_records: List[SignalRecord],
+    trend_title: str,
+    trend_notes: str,
+    trend_table_df: pd.DataFrame,
+) -> None:
+    if "report_items" not in st.session_state:
+        st.session_state.report_items = []
+
+    first_record = trend_records[0]
+    last_record = trend_records[-1]
+
+    st.session_state.report_items.append(
+        {
+            "id": make_export_state_key(
+                [
+                    "report-spectrum-trend",
+                    *[r.signal_id for r in trend_records],
+                    trend_title,
+                    len(st.session_state.report_items),
+                ]
+            ),
+            "type": "spectrum",
+            "title": trend_title,
+            "notes": trend_notes or "Tendencia multitemporal pendiente de interpretación técnica.",
+            "signal_id": "__".join(r.signal_id for r in trend_records),
+            "figure": None,
+            "image_bytes": None,
+            "machine": first_record.machine if first_record.machine == last_record.machine else f"{first_record.machine} → {last_record.machine}",
+            "point": first_record.point if first_record.point == last_record.point else f"{first_record.point} → {last_record.point}",
+            "variable": first_record.variable if first_record.variable == last_record.variable else f"{first_record.variable} → {last_record.variable}",
+            "timestamp": f"{first_record.timestamp or '—'} | {last_record.timestamp or '—'}",
+            "trend_table": trend_table_df.to_dict(orient="records") if trend_table_df is not None else [],
+        }
+    )
+
 def render_trend_panel(
     trend_records: List[SignalRecord],
     *,
@@ -2906,8 +2944,9 @@ def render_trend_panel(
     trend_df = build_trend_series_table(trend_summaries)
     trend_assessment = build_trend_assessment(trend_summaries)
     trend_notes = build_trend_report_notes(trend_summaries)
+    trend_card = build_trend_executive_card(trend_summaries)
 
-    traffic_color = str(trend_assessment.get("traffic_color") or "#64748b")
+    traffic_color = str(trend_card.get("traffic_color") or "#64748b")
 
     st.markdown("### Spectrum Trend Mode")
     st.caption("Trend Mode evalúa 3 o más mediciones ordenadas por fecha para estimar la evolución de condición de la máquina.")
@@ -2916,37 +2955,53 @@ def render_trend_panel(
         f"""
         <div style="border:1px solid #d1d5db;border-left:8px solid {traffic_color};background:#ffffff;padding:16px 18px;border-radius:14px;margin:8px 0 14px 0;">
             <div style="font-size:13px;color:#6b7280;margin-bottom:6px;">Machine Condition Trend</div>
-            <div style="font-size:22px;font-weight:700;color:#111827;margin-bottom:8px;">{trend_assessment.get("headline", "Trend Assessment")}</div>
+            <div style="font-size:22px;font-weight:700;color:#111827;margin-bottom:8px;">{trend_card.get("headline", "Trend Assessment")}</div>
             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-                <span style="padding:6px 10px;border-radius:999px;background:{traffic_color};color:white;font-weight:600;">Trend: {trend_assessment.get("trend_label", "—")}</span>
-                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Semáforo: {trend_assessment.get("traffic_light", "—")}</span>
-                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Driver: {trend_assessment.get("top_driver", "—")}</span>
-                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Último score: {compare_format_number(trend_assessment.get("latest_score"), 2)}</span>
-                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Series: {trend_assessment.get("series_count", 0)}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:{traffic_color};color:white;font-weight:600;">Trend: {trend_card.get("trend_label", "—")}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Semáforo: {trend_card.get("traffic_light", "—")}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Driver: {trend_card.get("top_driver", "—")}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Último score: {compare_format_number(trend_card.get("latest_score"), 2)}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Series: {trend_card.get("series_count", 0)}</span>
             </div>
-            <div style="font-size:14px;color:#111827;line-height:1.5;">{trend_assessment.get("narrative", "")}</div>
+            <div style="font-size:14px;color:#111827;line-height:1.5;">{trend_card.get("narrative", "")}</div>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    metric_cols = st.columns(5)
+    metric_cols = st.columns(6)
     with metric_cols[0]:
-        st.metric("Trend Label", str(trend_assessment.get("trend_label") or "—"))
+        st.metric("Trend Label", str(trend_card.get("trend_label") or "—"))
     with metric_cols[1]:
-        st.metric("Semáforo", str(trend_assessment.get("traffic_light") or "—"))
+        st.metric("Semáforo", str(trend_card.get("traffic_light") or "—"))
     with metric_cols[2]:
-        st.metric("Driver dominante", str(trend_assessment.get("top_driver") or "—"))
+        st.metric("Driver dominante", str(trend_card.get("top_driver") or "—"))
     with metric_cols[3]:
-        st.metric("Cambio driver", compare_format_number(trend_assessment.get("top_driver_pct"), 1) + "%" if trend_assessment.get("top_driver_pct") is not None else "—")
+        st.metric("Cambio driver", compare_format_number(trend_card.get("top_driver_pct"), 1) + "%" if trend_card.get("top_driver_pct") is not None else "—")
     with metric_cols[4]:
-        st.metric("Último score", compare_format_number(trend_assessment.get("latest_score"), 2))
+        st.metric("Último score", compare_format_number(trend_card.get("latest_score"), 2))
+    with metric_cols[5]:
+        st.metric("Horizonte", f"{trend_card.get('days_span')} días" if trend_card.get("days_span") is not None else "—")
 
     st.markdown("#### Trend Series Table")
     st.dataframe(trend_df, use_container_width=True, hide_index=True)
 
     st.markdown("#### Trend Narrative")
     st.info(trend_notes)
+
+    st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
+    left_pad, col_report, right_pad = st.columns([2.6, 1.4, 2.6])
+
+    with col_report:
+        if st.button("Enviar trend a Reporte", key=f"send_trend_report_{len(ordered_records)}_{ordered_records[0].signal_id}_{ordered_records[-1].signal_id}", use_container_width=True):
+            trend_title = f"Spectrum Trend — {ordered_records[0].name} to {ordered_records[-1].name}"
+            queue_trend_to_report(
+                trend_records=ordered_records,
+                trend_title=trend_title,
+                trend_notes=trend_notes,
+                trend_table_df=trend_df,
+            )
+            st.success("Trend mode enviado al reporte")
 
 selected_ids = [
     signal_id
