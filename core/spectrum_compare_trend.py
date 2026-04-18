@@ -6,6 +6,51 @@ import math
 import pandas as pd
 
 
+# ============================================================
+# F5 EDITORIAL NARRATIVE
+# ============================================================
+def build_trend_editorial_narrative(assessment: dict) -> str:
+    trend = str(assessment.get("trend_label") or "").lower()
+    driver = str(assessment.get("top_driver") or "").upper()
+    driver_pct = assessment.get("top_driver_pct")
+
+    try:
+        driver_pct_txt = f"{abs(float(driver_pct)):.1f}%"
+    except:
+        driver_pct_txt = "significativo"
+
+    if trend == "improving":
+        return (
+            f"La tendencia multitemporal evidencia una mejora de la condición dinámica de la máquina, "
+            f"caracterizada por la reducción de la respuesta vibratoria, especialmente en la componente {driver} "
+            f"({driver_pct_txt}). Este comportamiento es consistente con una disminución de excitaciones dinámicas "
+            f"como el desbalanceo y una menor severidad vibratoria global. "
+            f"Se recomienda validar comparabilidad operativa antes de concluir una mejora mecánica definitiva."
+        )
+
+    if trend == "deteriorating":
+        return (
+            f"La tendencia multitemporal muestra un deterioro progresivo de la condición dinámica, con incremento "
+            f"de la respuesta vibratoria, destacándose la componente {driver} ({driver_pct_txt}). "
+            f"Este comportamiento puede estar asociado a aumento de excitaciones mecánicas como desbalanceo, "
+            f"desalineación u otros fenómenos dinámicos."
+        )
+
+    if trend == "stable":
+        return (
+            f"La evaluación multitemporal no evidencia cambios significativos en la condición dinámica. "
+            f"La respuesta vibratoria se mantiene estable sin variaciones dominantes."
+        )
+
+    if trend == "volatile":
+        return (
+            f"La tendencia presenta comportamiento variable sin patrón dominante claro. "
+            f"Esto puede estar influenciado por condiciones operativas cambiantes."
+        )
+
+    return "No fue posible construir una interpretación técnica consistente."
+
+
 def format_number(value: Any, digits: int = 3, fallback: str = "—") -> str:
     if value is None:
         return fallback
@@ -304,20 +349,87 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     high_harm_change = safe_pct_change(last.get("high_harm_amp"), first.get("high_harm_amp"))
 
     driver_candidates = {
-        "1X": one_x_change,
-        "2X": two_x_change,
-        "Overall": overall_change,
-        "High Harmonics": high_harm_change,
+        "1X": {
+            "delta_pct": one_x_change,
+            "amplitude": last.get("one_x_amp"),
+            "priority": 1.00,
+        },
+        "2X": {
+            "delta_pct": two_x_change,
+            "amplitude": last.get("two_x_amp"),
+            "priority": 0.88,
+        },
+        "Overall": {
+            "delta_pct": overall_change,
+            "amplitude": last.get("overall"),
+            "priority": 0.82,
+        },
+        "High Harmonics": {
+            "delta_pct": high_harm_change,
+            "amplitude": last.get("high_harm_amp"),
+            "priority": 0.72,
+        },
     }
 
     top_driver = "—"
     top_driver_val = None
-    for key, val in driver_candidates.items():
-        if val is None:
+    top_driver_score = None
+
+    for key, payload in driver_candidates.items():
+        delta_pct = payload.get("delta_pct")
+        amplitude = payload.get("amplitude")
+        priority = payload.get("priority", 1.0)
+
+        if delta_pct is None:
             continue
-        if top_driver_val is None or abs(float(val)) > abs(float(top_driver_val)):
-            top_driver_val = float(val)
+
+        try:
+            delta_abs = abs(float(delta_pct))
+        except Exception:
+            continue
+
+        try:
+            amp_val = abs(float(amplitude)) if amplitude is not None else 0.0
+        except Exception:
+            amp_val = 0.0
+
+        weighted_score = delta_abs * priority * (1.0 + min(amp_val, 10.0) / 10.0)
+
+        if top_driver_score is None or weighted_score > top_driver_score:
+            top_driver_score = weighted_score
             top_driver = key
+            top_driver_val = float(delta_pct)
+
+    # Regla editorial/mecánica:
+    # si 1X y 2X están muy cerca en % pero 1X domina en amplitud, priorizar 1X
+    try:
+        one_x_amp = abs(float(last.get("one_x_amp"))) if last.get("one_x_amp") is not None else 0.0
+    except Exception:
+        one_x_amp = 0.0
+
+    try:
+        two_x_amp = abs(float(last.get("two_x_amp"))) if last.get("two_x_amp") is not None else 0.0
+    except Exception:
+        two_x_amp = 0.0
+
+    try:
+        one_x_abs = abs(float(one_x_change)) if one_x_change is not None else None
+    except Exception:
+        one_x_abs = None
+
+    try:
+        two_x_abs = abs(float(two_x_change)) if two_x_change is not None else None
+    except Exception:
+        two_x_abs = None
+
+    if (
+        one_x_abs is not None
+        and two_x_abs is not None
+        and abs(one_x_abs - two_x_abs) <= 5.0
+        and one_x_amp >= (two_x_amp * 3.0)
+    ):
+        top_driver = "1X"
+        top_driver_val = float(one_x_change)
 
     if trend_label == "Worsening":
         traffic_light = "Red"
@@ -452,9 +564,8 @@ def build_trend_report_notes(records: List[Dict[str, Any]]) -> str:
     blocks.append(str(assessment.get("narrative") or "").strip())
 
     blocks.append(
-        "Diagnóstico técnico:\n"
-        f"- Falla primaria: {assessment.get('primary_fault')}\n"
-        f"- Falla secundaria: {assessment.get('secondary_fault')}"
+        "Interpretación técnica:\n"
+        f"{build_trend_editorial_narrative(assessment)}"
     )
 
     blocks.append(
