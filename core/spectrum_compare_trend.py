@@ -514,10 +514,47 @@ def build_trend_action_priority(
     }
 
 
+
+def build_trend_executive_summary(
+    trend_label: Optional[str],
+    severity_level: Optional[str],
+    action: Optional[str],
+) -> str:
+    trend = str(trend_label or "").strip().lower()
+    severity = str(severity_level or "").strip().lower()
+    action_txt = str(action or "Monitorear").strip()
+
+    trend_map = {
+        "improving": "en mejora",
+        "worsening": "en deterioro",
+        "stable": "estable",
+        "volatile": "variable",
+        "insufficient data": "sin tendencia concluyente",
+    }
+
+    severity_map = {
+        "leve": "leve",
+        "moderada": "moderada",
+        "alta": "alta",
+    }
+
+    trend_part = trend_map.get(trend, "sin tendencia concluyente")
+    severity_part = severity_map.get(severity, "no clasificada")
+
+    return f"Condición dinámica {trend_part} de severidad {severity_part} — {action_txt}."
+
+
+
 def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     ordered, duplicate_count = deduplicate_trend_records(records)
 
     if len(ordered) < 3:
+        action_info = build_trend_action_priority("Leve", "Insufficient Data")
+        executive_summary = build_trend_executive_summary(
+            "Insufficient Data",
+            "Leve",
+            action_info.get("action"),
+        )
         return {
             "trend_label": "Insufficient Data",
             "traffic_light": "Yellow",
@@ -529,6 +566,7 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
             "last_timestamp": None,
             "days_span": None,
             "top_driver": "—",
+            "top_driver_pct": None,
             "latest_score": None,
             "duplicate_count": duplicate_count,
             "series_count": len(ordered),
@@ -538,6 +576,8 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
             "severity_level": "Leve",
             "severity_color": "#16a34a",
             "severity_text": "Información insuficiente para estimar severidad.",
+            **action_info,
+            "executive_summary": executive_summary,
         }
 
     first = ordered[0]
@@ -689,11 +729,19 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         trend_label,
     )
     severity_info = build_trend_severity(
-
         trend_label=trend_label,
         top_driver_pct=top_driver_val,
         latest_score=latest_score,
         last_record=last,
+    )
+    action_info = build_trend_action_priority(
+        severity_info.get("severity_level"),
+        trend_label,
+    )
+    executive_summary = build_trend_executive_summary(
+        trend_label,
+        severity_info.get("severity_level"),
+        action_info.get("action"),
     )
 
     narrative = (
@@ -723,10 +771,8 @@ def build_trend_assessment(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         "severity_level": severity_info.get("severity_level"),
         "severity_color": severity_info.get("severity_color"),
         "severity_text": severity_info.get("severity_text"),
-        **build_trend_action_priority(
-            severity_info.get("severity_level"),
-            trend_label,
-        ),
+        **action_info,
+        "executive_summary": executive_summary,
         "series_count": len(ordered),
         "duplicate_count": duplicate_count,
     }
@@ -749,6 +795,10 @@ def build_trend_executive_card(records: List[Dict[str, Any]]) -> Dict[str, Any]:
         "severity_level": str(assessment.get("severity_level") or "").strip(),
         "severity_color": str(assessment.get("severity_color") or "#64748b").strip(),
         "severity_text": str(assessment.get("severity_text") or "").strip(),
+        "action": str(assessment.get("action") or "").strip(),
+        "action_color": str(assessment.get("action_color") or "#64748b").strip(),
+        "action_text": str(assessment.get("action_text") or "").strip(),
+        "executive_summary": str(assessment.get("executive_summary") or "").strip(),
         "series_count": int(assessment.get("series_count") or 0),
         "first_timestamp": assessment.get("first_timestamp"),
         "last_timestamp": assessment.get("last_timestamp"),
@@ -757,41 +807,47 @@ def build_trend_executive_card(records: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-
 def build_trend_report_notes(records: List[Dict[str, Any]]) -> str:
     assessment = build_trend_assessment(records)
     series_df = build_trend_series_table(records)
 
     blocks: List[str] = []
 
+    blocks.append(str(assessment.get("executive_summary") or "").strip())
     blocks.append(str(assessment.get("narrative") or "").strip())
 
     blocks.append(
-        "Interpretación técnica:\n" +
-        f"{build_trend_editorial_narrative(assessment)}"
+        "Interpretación técnica:\n"
+        + f"{build_trend_editorial_narrative(assessment)}"
     )
 
     blocks.append(
-        "Recomendación automática:\n" +
-        f"{assessment.get('recommendation') or 'Sin recomendación automática disponible.'}"
+        "Recomendación automática:\n"
+        + f"{assessment.get('recommendation') or 'Sin recomendación automática disponible.'}"
     )
 
     blocks.append(
-        "Severidad estimada:\n" +
-        f"- Nivel: {assessment.get('severity_level') or '—'}\n" +
-        f"- Contexto: {assessment.get('severity_text') or 'Sin contexto disponible.'}"
+        "Severidad estimada:\n"
+        + f"- Nivel: {assessment.get('severity_level') or '—'}\n"
+        + f"- Contexto: {assessment.get('severity_text') or 'Sin contexto disponible.'}"
     )
 
     blocks.append(
-        "Resumen de tendencia:\n" +
-        f"- Trend Label: {assessment.get('trend_label') or '—'}\n" +
-        f"- Semáforo: {assessment.get('traffic_light') or '—'}\n" +
-        f"- Primer registro: {assessment.get('first_timestamp') or '—'}\n" +
-        f"- Último registro: {assessment.get('last_timestamp') or '—'}\n" +
-        f"- Horizonte: {assessment.get('days_span') if assessment.get('days_span') is not None else '—'} días\n" +
-        f"- Driver dominante: {assessment.get('top_driver') or '—'}\n" +
-        f"- Cambio del driver: {format_number(assessment.get('top_driver_pct'), 1)}%\n" +
-        f"- Último trend score: {format_number(assessment.get('latest_score'), 2)}"
+        "Prioridad de acción:\n"
+        + f"- Acción: {assessment.get('action') or '—'}\n"
+        + f"- Justificación: {assessment.get('action_text') or 'Sin justificación disponible.'}"
+    )
+
+    blocks.append(
+        "Resumen de tendencia:\n"
+        + f"- Trend Label: {assessment.get('trend_label') or '—'}\n"
+        + f"- Semáforo: {assessment.get('traffic_light') or '—'}\n"
+        + f"- Primer registro: {assessment.get('first_timestamp') or '—'}\n"
+        + f"- Último registro: {assessment.get('last_timestamp') or '—'}\n"
+        + f"- Horizonte: {assessment.get('days_span') if assessment.get('days_span') is not None else '—'} días\n"
+        + f"- Driver dominante: {assessment.get('top_driver') or '—'}\n"
+        + f"- Cambio del driver: {format_number(assessment.get('top_driver_pct'), 1)}%\n"
+        + f"- Último trend score: {format_number(assessment.get('latest_score'), 2)}"
     )
 
     if not series_df.empty:
@@ -803,3 +859,4 @@ def build_trend_report_notes(records: List[Dict[str, Any]]) -> str:
         blocks.append("Serie temporal resumida:\n" + "\n".join(lines))
 
     return "\n\n".join(block for block in blocks if block.strip())
+
