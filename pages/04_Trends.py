@@ -1512,7 +1512,6 @@ st.session_state["asset_context"] = {
 if trend_context_errors:
     for msg in trend_context_errors:
         st.warning(msg)
-    st.stop()
 
 st.session_state["asset_context"] = {
     "type": st.session_state.wm_tr_asset_type,
@@ -1561,6 +1560,22 @@ def queue_trend_to_report(
     operational_only_mode: bool = False,
 ) -> Tuple[bool, Optional[str]]:
     operational_records = operational_records or []
+
+    trend_context_errors: List[str] = []
+    if not st.session_state.get("wm_tr_asset_type"):
+        trend_context_errors.append("Asset type is required in Trends before sending to report.")
+    if not st.session_state.get("wm_tr_machine_configuration"):
+        trend_context_errors.append("Machine configuration is required in Trends before sending to report.")
+    if st.session_state.get("wm_tr_machine_configuration") == "Compuesta / tren de máquinas":
+        if not str(st.session_state.get("wm_tr_primary_equipment", "")).strip():
+            trend_context_errors.append("Primary equipment is required for composite machine trains before sending to report.")
+        if not str(st.session_state.get("wm_tr_secondary_equipment", "")).strip():
+            trend_context_errors.append("Secondary equipment is required for composite machine trains before sending to report.")
+    if not str(st.session_state.get("wm_tr_machine_description", "")).strip():
+        trend_context_errors.append("Machine technical description is required in Trends before sending to report.")
+
+    if trend_context_errors:
+        return False, " | ".join(trend_context_errors)
     if records:
         first = records[0]
         machine = first.machine
@@ -1967,7 +1982,7 @@ def render_trend_panel(
             if image_ok:
                 st.success("Trend enviado al reporte")
             else:
-                st.warning(f"Trend enviado al reporte sin imagen PNG. Motivo: {image_error or 'error desconocido'}")
+                st.error(image_error or "No fue posible enviar el trend al reporte.")
 
     with col_bode:
         bode_disabled = operational_only_mode or len(panel_records) == 0
