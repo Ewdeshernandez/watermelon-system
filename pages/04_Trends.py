@@ -868,10 +868,130 @@ def build_correlation_scatter_figure(correlation_info: Dict[str, Any]) -> go.Fig
     return fig
 
 
+
+def _robust_scale(series: pd.Series) -> float:
+    arr = pd.to_numeric(series, errors="coerce").dropna().astype(float).to_numpy()
+    if arr.size == 0:
+        return 1.0
+    median = float(np.median(arr))
+    mad = float(np.median(np.abs(arr - median)))
+    if mad > 1e-12:
+        return max(1.4826 * mad, 1e-9)
+    std = float(np.std(arr))
+    if std > 1e-12:
+        return max(std, 1e-9)
+    return 1.0
+
+
+def detect_trend_anomalies(record: TrendRecord, metric_key: str) -> pd.DataFrame:
+    df = get_clean_metric_df(record, metric_key).copy()
+    if df.empty or len(df) < 8:
+        return pd.DataFrame(columns=["x", "y", "anomaly_type", "severity", "point_score", "diff_score"])
+
+    df["y"] = pd.to_numeric(df["y"], errors="coerce")
+    df = df.dropna(subset=["x", "y"]).reset_index(drop=True)
+    if df.empty or len(df) < 8:
+        return pd.DataFrame(columns=["x", "y", "anomaly_type", "severity", "point_score", "diff_score"])
+
+    y_median = float(df["y"].median())
+    y_scale = _robust_scale(df["y"])
+
+    diffs = df["y"].diff()
+    diff_median = float(diffs.dropna().median()) if diffs.dropna().size else 0.0
+    diff_scale = _robust_scale(diffs.dropna()) if diffs.dropna().size else 1.0
+
+    df["point_score"] = (df["y"] - y_median).abs() / max(y_scale, 1e-9)
+    df["diff_score"] = (diffs - diff_median).abs() / max(diff_scale, 1e-9)
+    df["diff_score"] = df["diff_score"].fillna(0.0)
+
+    anomaly_mask = (df["point_score"] >= 4.5) | (df["diff_score"] >= 5.0)
+    anomalies = df.loc[anomaly_mask, ["x", "y", "point_score", "diff_score"]].copy()
+
+    if anomalies.empty:
+        return pd.DataFrame(columns=["x", "y", "anomaly_type", "severity", "point_score", "diff_score"])
+
+    def classify_row(row: pd.Series) -> str:
+        y_val = float(row["y"])
+        diff_score = float(row["diff_score"])
+        if y_val > y_median and diff_score >= 5.0:
+            return "Spike"
+        if y_val < y_median and diff_score >= 5.0:
+            return "Drop"
+        return "Outlier"
+
+    def classify_severity(row: pd.Series) -> str:
+        max_score = max(float(row["point_score"]), float(row["diff_score"]))
+        if max_score >= 8.0:
+            return "High"
+        if max_score >= 6.0:
+            return "Medium"
+        return "Low"
+
+    anomalies["anomaly_type"] = anomalies.apply(classify_row, axis=1)
+    anomalies["severity"] = anomalies.apply(classify_severity, axis=1)
+
+    return anomalies.reset_index(drop=True)
+
+
+def build_panel_anomaly_summary(records: List[TrendRecord], metric_key: str) -> Dict[str, Any]:
+    total_count = 0
+    affected_records = 0
+    top_severity = "None"
+    details: List[Dict[str, Any]] = []
+
+    severity_rank = {"None": 0, "Low": 1, "Medium": 2, "High": 3}
+
+    for rec in records:
+        anomalies = detect_trend_anomalies(rec, metric_key)
+        count = int(len(anomalies))
+        if count > 0:
+            affected_records += 1
+            total_count += count
+            local_top = "Low"
+            if "High" in set(anomalies["severity"]):
+                local_top = "High"
+            elif "Medium" in set(anomalies["severity"]):
+                local_top = "Medium"
+
+            if severity_rank.get(local_top, 0) > severity_rank.get(top_severity, 0):
+                top_severity = local_top
+
+            details.append(
+                {
+                    "record_name": rec.point_clean,
+                    "count": count,
+                    "top_severity": local_top,
+                }
+            )
+
+    if total_count == 0:
+        interpretation = "No se detectaron anomalías puntuales relevantes en la señal dentro de la ventana mostrada."
+        color = "#16a34a"
+    elif top_severity == "High":
+        interpretation = "Se detectaron anomalías de alta severidad. Conviene revisar eventos transitorios, instrumentación o condición mecánica local."
+        color = "#dc2626"
+    elif top_severity == "Medium":
+        interpretation = "Se detectaron anomalías moderadas. Conviene revisar cambios operativos o perturbaciones puntuales."
+        color = "#f59e0b"
+    else:
+        interpretation = "Se detectaron anomalías leves y aisladas. Mantener seguimiento y correlacionar con operación."
+        color = "#f97316"
+
+    return {
+        "total_count": total_count,
+        "affected_records": affected_records,
+        "top_severity": top_severity,
+        "interpretation": interpretation,
+        "color": color,
+        "details": details,
+    }
+
+
 def build_trend_figure(
     records: List[TrendRecord],
     metric_key: str,
     show_markers: bool,
+    show_anomaly_markers: bool,
     fill_area: bool,
     y_axis_mode: str,
     y_axis_manual_min: Optional[float],
@@ -937,6 +1057,33 @@ def build_trend_figure(
                 fig.add_trace(trace, secondary_y=False)
             else:
                 fig.add_trace(trace)
+
+            if show_anomaly_markers:
+                anomaly_df = detect_trend_anomalies(record, metric_key)
+                if not anomaly_df.empty:
+                    anomaly_trace = go.Scatter(
+                        x=anomaly_df["x"],
+                        y=anomaly_df["y"],
+                        mode="markers",
+                        name=f"Anomalies — {record.point_clean}",
+                        marker=dict(
+                            size=11,
+                            color="#ef4444",
+                            symbol="x",
+                            line=dict(width=1.0, color="#7f1d1d"),
+                        ),
+                        hovertemplate=(
+                            "Point: %{fullData.name}<br>"
+                            "Time: %{x}<br>"
+                            "Value: %{y:.4f}<br>"
+                            "Anomaly detected<extra></extra>"
+                        ),
+                        showlegend=show_legend,
+                    )
+                    if use_secondary_axis:
+                        fig.add_trace(anomaly_trace, secondary_y=False)
+                    else:
+                        fig.add_trace(anomaly_trace)
 
             y_min_local = float(df["y"].min())
             y_max_local = float(df["y"].max())
@@ -1906,6 +2053,7 @@ with st.sidebar:
     st.markdown("### Trend Processing")
     metric_key = st.selectbox("Metric", options=["Amplitude", "Phase", "Speed"], index=0)
     show_markers = st.checkbox("Show markers", value=False)
+    show_anomaly_markers = st.checkbox("Show anomaly markers", value=True)
     fill_area = st.checkbox("Fill area (single trend)", value=True)
 
     st.markdown("### Axes")
@@ -2085,6 +2233,7 @@ def render_trend_panel(
         records=panel_records,
         metric_key=metric_key,
         show_markers=show_markers,
+        show_anomaly_markers=show_anomaly_markers,
         fill_area=fill_area,
         y_axis_mode=y_axis_mode,
         y_axis_manual_min=y_axis_manual_min,
@@ -2119,7 +2268,7 @@ def render_trend_panel(
             warning_enabled, warning_value, danger_enabled, danger_value,
             st.session_state.wm_tr_cursor_a_initial, st.session_state.wm_tr_cursor_a_current,
             st.session_state.wm_tr_cursor_b_initial, st.session_state.wm_tr_cursor_b_current,
-            show_markers, fill_area, show_right_info_box, show_legend,
+            show_markers, show_anomaly_markers, fill_area, show_right_info_box, show_legend,
             "|".join([r.trend_id for r in panel_records]),
             "|".join([r.file_name for r in panel_records]),
             "|".join([r.point_clean for r in panel_records]),
@@ -2196,6 +2345,18 @@ def render_trend_panel(
     panel_error = st.session_state.wm_tr_export_store[export_state_key]["error"]
     if panel_error:
         st.warning(f"PNG export error: {panel_error}")
+
+    if panel_records:
+        anomaly_summary = build_panel_anomaly_summary(panel_records, metric_key)
+        st.markdown("#### Detección automática de anomalías")
+        a1, a2, a3 = st.columns(3)
+        with a1:
+            st.metric("Anomalies", str(anomaly_summary.get("total_count", 0)))
+        with a2:
+            st.metric("Affected signals", str(anomaly_summary.get("affected_records", 0)))
+        with a3:
+            st.metric("Top severity", anomaly_summary.get("top_severity", "None"))
+        st.info(anomaly_summary.get("interpretation", "Sin interpretación disponible."))
 
     # ------------------------------------------------------------
     # Automatic correlation: primary vibration vs first operational
