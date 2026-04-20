@@ -1329,6 +1329,119 @@ def build_operational_correlation_report_block(
     return "\\n".join(lines)
 
 
+
+def build_operational_variable_ranking(
+    trend_record: Optional[TrendRecord],
+    operational_records: List[OperationalRecord],
+    metric_key: str,
+) -> pd.DataFrame:
+    if trend_record is None or not operational_records:
+        return pd.DataFrame(
+            columns=[
+                "Variable",
+                "Family",
+                "Simple Corr",
+                "Lag Corr",
+                "Best Lag (min)",
+                "Score",
+                "Strength",
+                "Direction",
+                "Interpretation",
+            ]
+        )
+
+    rows = []
+    for op_rec in operational_records:
+        corr_info = build_trend_operational_correlation(
+            trend_record=trend_record,
+            operational_record=op_rec,
+            metric_key=metric_key,
+        )
+        lag_info = build_lagged_correlation_analysis(
+            trend_record=trend_record,
+            operational_record=op_rec,
+            metric_key=metric_key,
+            max_lag_minutes=180,
+            step_minutes=10,
+        )
+
+        corr_val = corr_info.get("corr_value")
+        lag_corr = lag_info.get("best_corr")
+        lag_min = lag_info.get("best_lag_min")
+
+        try:
+            corr_abs = abs(float(corr_val)) if corr_val is not None and math.isfinite(float(corr_val)) else 0.0
+        except Exception:
+            corr_abs = 0.0
+
+        try:
+            lag_corr_abs = abs(float(lag_corr)) if lag_corr is not None and math.isfinite(float(lag_corr)) else 0.0
+        except Exception:
+            lag_corr_abs = 0.0
+
+        try:
+            lag_penalty = min(abs(int(lag_min)) / 180.0, 1.0) * 0.15 if lag_min is not None else 0.15
+        except Exception:
+            lag_penalty = 0.15
+
+        score = (0.45 * corr_abs) + (0.65 * lag_corr_abs) - lag_penalty
+
+        if score < 0:
+            score = 0.0
+
+        interpretation = lag_info.get("interpretation") or corr_info.get("interpretation") or "Sin interpretación disponible."
+
+        rows.append(
+            {
+                "Variable": op_rec.variable,
+                "Family": op_rec.family,
+                "Simple Corr": corr_val,
+                "Lag Corr": lag_corr,
+                "Best Lag (min)": lag_min,
+                "Score": score,
+                "Strength": lag_info.get("strength") or corr_info.get("strength") or "Nula",
+                "Direction": lag_info.get("direction") or corr_info.get("direction") or "Indeterminada",
+                "Interpretation": interpretation,
+            }
+        )
+
+    ranking_df = pd.DataFrame(rows)
+    if ranking_df.empty:
+        return ranking_df
+
+    ranking_df = ranking_df.sort_values(
+        by=["Score", "Lag Corr", "Simple Corr"],
+        ascending=False,
+        na_position="last",
+    ).reset_index(drop=True)
+
+    return ranking_df
+
+
+def build_operational_variable_ranking_summary(ranking_df: pd.DataFrame) -> str:
+    if ranking_df is None or ranking_df.empty:
+        return (
+            "No se identificó una variable operativa dominante que explique la vibración, "
+            "ya sea por falta de datos o por ausencia de correlaciones confiables."
+        )
+
+    top = ranking_df.iloc[0]
+    variable = str(top.get("Variable") or "—")
+    family = str(top.get("Family") or "generic")
+    strength = str(top.get("Strength") or "Nula")
+    direction = str(top.get("Direction") or "Indeterminada")
+    lag_corr = format_number(top.get("Lag Corr"), 3)
+    lag_min = top.get("Best Lag (min)")
+    lag_txt = str(int(lag_min)) if pd.notna(lag_min) else "—"
+
+    return (
+        f"La variable operativa que mejor explica el comportamiento vibratorio es {variable} "
+        f"(familia {family}), con correlación dominante {strength.lower()} {direction.lower()} "
+        f"y mejor correlación con desfase de {lag_corr}, observada en un lag de {lag_txt} min. "
+        f"Esto sugiere que dicha variable tiene la mayor influencia operativa relativa sobre la vibración dentro de la ventana analizada."
+    )
+
+
 def build_trend_figure(
     records: List[TrendRecord],
     metric_key: str,
@@ -2333,8 +2446,24 @@ def queue_trend_to_report(
             "interpretation": lag_info.get("interpretation"),
         }
 
+    ranking_payload: List[Dict[str, Any]] = []
+    ranking_summary = ""
+
+    if records and len(operational_records) > 1:
+        ranking_df = build_operational_variable_ranking(
+            trend_record=records[0],
+            operational_records=operational_records,
+            metric_key=metric_key,
+        )
+        if not ranking_df.empty:
+            ranking_summary = build_operational_variable_ranking_summary(ranking_df)
+            ranking_payload = ranking_df.to_dict(orient="records")
+
     if correlation_report_block:
         narrative = f"{narrative}\n\n{correlation_report_block}"
+
+    if ranking_summary:
+        narrative = f"{narrative}\n\nRanking automático de variables operativas:\n{ranking_summary}"
 
     image_bytes, image_error = build_export_png_bytes(fig=fig)
 
@@ -2364,6 +2493,8 @@ def queue_trend_to_report(
         "timestamp": timestamp,
         "correlation_payload": correlation_payload,
         "lag_payload": lag_payload,
+        "ranking_summary": ranking_summary,
+        "ranking_payload": ranking_payload,
     }
     st.session_state.report_items.append(item_payload)
     st.session_state["wm_tr_last_report_debug"] = {
@@ -2825,6 +2956,23 @@ def render_trend_panel(
             config={"displaylogo": False},
             key=f"wm_trends_lagcorr_{export_state_key}",
         )
+
+        if len(panel_operational_records) > 1:
+            ranking_df = build_operational_variable_ranking(
+                trend_record=primary_trend,
+                operational_records=panel_operational_records,
+                metric_key=metric_key,
+            )
+
+            st.markdown("#### Ranking automático de variables operativas")
+            ranking_summary = build_operational_variable_ranking_summary(ranking_df)
+            st.info(ranking_summary)
+
+            if not ranking_df.empty:
+                ranking_view = ranking_df.copy()
+                for col in ["Simple Corr", "Lag Corr", "Score"]:
+                    ranking_view[col] = ranking_view[col].apply(lambda v: format_number(v, 3))
+                st.dataframe(ranking_view, use_container_width=True, hide_index=True)
 
 
 if mixed_operational_notice:
