@@ -1286,6 +1286,49 @@ def build_lag_correlation_figure(lag_info: Dict[str, Any]) -> go.Figure:
     return fig
 
 
+
+def build_operational_correlation_report_block(
+    trend_record: Optional[TrendRecord],
+    operational_record: Optional[OperationalRecord],
+    metric_key: str,
+) -> str:
+    if trend_record is None or operational_record is None:
+        return ""
+
+    corr_info = build_trend_operational_correlation(
+        trend_record=trend_record,
+        operational_record=operational_record,
+        metric_key=metric_key,
+    )
+    lag_info = build_lagged_correlation_analysis(
+        trend_record=trend_record,
+        operational_record=operational_record,
+        metric_key=metric_key,
+        max_lag_minutes=180,
+        step_minutes=10,
+    )
+
+    variable_name = operational_record.variable or "Operational variable"
+
+    corr_txt = format_number(corr_info.get("corr_value"), 3)
+    lag_corr_txt = format_number(lag_info.get("best_corr"), 3)
+    lag_txt = lag_info.get("best_lag_min")
+    lag_txt = str(lag_txt) if lag_txt is not None else "—"
+
+    lines = [
+        "Correlación operativa:",
+        f"- Variable analizada: {variable_name}",
+        f"- Correlación simple: {corr_txt}",
+        f"- Fuerza: {corr_info.get('strength') or '—'}",
+        f"- Dirección: {corr_info.get('direction') or '—'}",
+        f"- Correlación con mejor lag: {lag_corr_txt}",
+        f"- Mejor lag: {lag_txt} min",
+        f"- Interpretación simple: {corr_info.get('interpretation') or 'Sin interpretación disponible.'}",
+        f"- Interpretación con lag: {lag_info.get('interpretation') or 'Sin interpretación disponible.'}",
+    ]
+    return "\\n".join(lines)
+
+
 def build_trend_figure(
     records: List[TrendRecord],
     metric_key: str,
@@ -2247,6 +2290,52 @@ def queue_trend_to_report(
         asset_context=st.session_state.get("asset_context", {}) or {},
     )
 
+    correlation_report_block = ""
+    correlation_payload: Dict[str, Any] = {}
+    lag_payload: Dict[str, Any] = {}
+
+    if records and operational_records:
+        primary_trend = records[0]
+        primary_operational = operational_records[0]
+
+        correlation_report_block = build_operational_correlation_report_block(
+            trend_record=primary_trend,
+            operational_record=primary_operational,
+            metric_key=metric_key,
+        )
+
+        corr_info = build_trend_operational_correlation(
+            trend_record=primary_trend,
+            operational_record=primary_operational,
+            metric_key=metric_key,
+        )
+        lag_info = build_lagged_correlation_analysis(
+            trend_record=primary_trend,
+            operational_record=primary_operational,
+            metric_key=metric_key,
+            max_lag_minutes=180,
+            step_minutes=10,
+        )
+
+        correlation_payload = {
+            "variable_name": primary_operational.variable,
+            "corr_value": corr_info.get("corr_value"),
+            "strength": corr_info.get("strength"),
+            "direction": corr_info.get("direction"),
+            "interpretation": corr_info.get("interpretation"),
+            "sample_count": corr_info.get("sample_count"),
+        }
+        lag_payload = {
+            "best_corr": lag_info.get("best_corr"),
+            "best_lag_min": lag_info.get("best_lag_min"),
+            "strength": lag_info.get("strength"),
+            "direction": lag_info.get("direction"),
+            "interpretation": lag_info.get("interpretation"),
+        }
+
+    if correlation_report_block:
+        narrative = f"{narrative}\n\n{correlation_report_block}"
+
     image_bytes, image_error = build_export_png_bytes(fig=fig)
 
     item_payload = {
@@ -2273,6 +2362,8 @@ def queue_trend_to_report(
         "point": point,
         "variable": variable,
         "timestamp": timestamp,
+        "correlation_payload": correlation_payload,
+        "lag_payload": lag_payload,
     }
     st.session_state.report_items.append(item_payload)
     st.session_state["wm_tr_last_report_debug"] = {
