@@ -662,6 +662,212 @@ def get_time_options_for_operational_records(records: List[OperationalRecord]) -
     return [pd.Timestamp(x) for x in unique_sorted]
 
 
+
+def align_trend_and_operational_for_correlation(
+    trend_record: TrendRecord,
+    operational_record: OperationalRecord,
+    metric_key: str,
+) -> pd.DataFrame:
+    trend_df = get_clean_metric_df(trend_record, metric_key)
+    op_df = get_operational_clean_df(operational_record)
+
+    if trend_df.empty or op_df.empty:
+        return pd.DataFrame(columns=["x", "trend", "operational"])
+
+    trend_df = trend_df.rename(columns={"y": "trend"}).copy()
+    op_df = op_df.rename(columns={"y": "operational"}).copy()
+
+    trend_df["x"] = pd.to_datetime(trend_df["x"], errors="coerce")
+    op_df["x"] = pd.to_datetime(op_df["x"], errors="coerce")
+
+    trend_df = trend_df.dropna(subset=["x", "trend"]).sort_values("x").reset_index(drop=True)
+    op_df = op_df.dropna(subset=["x", "operational"]).sort_values("x").reset_index(drop=True)
+
+    if trend_df.empty or op_df.empty:
+        return pd.DataFrame(columns=["x", "trend", "operational"])
+
+    merged = pd.merge_asof(
+        trend_df,
+        op_df,
+        on="x",
+        direction="nearest",
+        tolerance=pd.Timedelta("30min"),
+    )
+
+    merged = merged.dropna(subset=["trend", "operational"]).reset_index(drop=True)
+    return merged
+
+
+def classify_correlation_strength(corr_value: Optional[float]) -> Dict[str, str]:
+    if corr_value is None or not math.isfinite(float(corr_value)):
+        return {
+            "strength": "Nula",
+            "direction": "Indeterminada",
+            "interpretation": "No fue posible calcular correlación válida entre vibración y variable operativa.",
+            "color": "#64748b",
+        }
+
+    corr = float(corr_value)
+    abs_corr = abs(corr)
+
+    if corr >= 0.0:
+        direction = "Positiva"
+    else:
+        direction = "Negativa"
+
+    if abs_corr >= 0.75:
+        strength = "Fuerte"
+        color = "#16a34a"
+    elif abs_corr >= 0.50:
+        strength = "Moderada"
+        color = "#f59e0b"
+    elif abs_corr >= 0.25:
+        strength = "Débil"
+        color = "#f97316"
+    else:
+        strength = "Nula"
+        color = "#64748b"
+
+    if strength == "Fuerte" and direction == "Positiva":
+        interpretation = "La vibración aumenta cuando aumenta la variable operativa, lo que sugiere influencia operativa importante."
+    elif strength == "Fuerte" and direction == "Negativa":
+        interpretation = "La vibración disminuye cuando aumenta la variable operativa, indicando relación inversa fuerte."
+    elif strength == "Moderada" and direction == "Positiva":
+        interpretation = "Existe relación operativa apreciable, aunque no completamente dominante."
+    elif strength == "Moderada" and direction == "Negativa":
+        interpretation = "Existe relación inversa moderada entre vibración y variable operativa."
+    elif strength == "Débil":
+        interpretation = "La dependencia operativa es débil; conviene complementar con diagnóstico mecánico."
+    else:
+        interpretation = "No se observa dependencia operativa clara; la condición podría estar dominada por factores mecánicos o por ruido operacional."
+
+    return {
+        "strength": strength,
+        "direction": direction,
+        "interpretation": interpretation,
+        "color": color,
+    }
+
+
+def build_trend_operational_correlation(
+    trend_record: Optional[TrendRecord],
+    operational_record: Optional[OperationalRecord],
+    metric_key: str,
+) -> Dict[str, Any]:
+    if trend_record is None or operational_record is None:
+        return {
+            "valid": False,
+            "corr_value": None,
+            "sample_count": 0,
+            "strength": "Nula",
+            "direction": "Indeterminada",
+            "interpretation": "Seleccione una señal de vibración y una variable operativa para habilitar la correlación.",
+            "color": "#64748b",
+            "trend_name": trend_record.point_clean if trend_record else "—",
+            "operational_name": operational_record.variable if operational_record else "—",
+        }
+
+    merged = align_trend_and_operational_for_correlation(
+        trend_record=trend_record,
+        operational_record=operational_record,
+        metric_key=metric_key,
+    )
+
+    if len(merged) < 4:
+        return {
+            "valid": False,
+            "corr_value": None,
+            "sample_count": int(len(merged)),
+            "strength": "Nula",
+            "direction": "Indeterminada",
+            "interpretation": "No hay suficientes puntos coincidentes en el tiempo para calcular correlación confiable.",
+            "color": "#64748b",
+            "trend_name": trend_record.point_clean,
+            "operational_name": operational_record.variable,
+        }
+
+    corr_value = merged["trend"].corr(merged["operational"])
+    meta = classify_correlation_strength(corr_value)
+
+    return {
+        "valid": True,
+        "corr_value": float(corr_value) if corr_value is not None and math.isfinite(float(corr_value)) else None,
+        "sample_count": int(len(merged)),
+        "strength": meta["strength"],
+        "direction": meta["direction"],
+        "interpretation": meta["interpretation"],
+        "color": meta["color"],
+        "trend_name": trend_record.point_clean,
+        "operational_name": operational_record.variable,
+        "trend_unit": get_metric_series(trend_record, metric_key)[1],
+        "operational_unit": operational_record.unit,
+        "merged_df": merged,
+    }
+
+
+def build_correlation_scatter_figure(correlation_info: Dict[str, Any]) -> go.Figure:
+    fig = go.Figure()
+
+    merged = correlation_info.get("merged_df")
+    if merged is None or not isinstance(merged, pd.DataFrame) or merged.empty:
+        fig.update_layout(
+            template="plotly_white",
+            height=420,
+            margin=dict(l=40, r=40, t=40, b=40),
+            title="Correlation Plot",
+        )
+        return fig
+
+    fig.add_trace(
+        go.Scatter(
+            x=merged["operational"],
+            y=merged["trend"],
+            mode="markers",
+            name="Samples",
+            marker=dict(size=8),
+            hovertemplate=(
+                "Operational: %{x:.4f}<br>"
+                "Trend: %{y:.4f}<extra></extra>"
+            ),
+        )
+    )
+
+    if len(merged) >= 2:
+        x_vals = merged["operational"].astype(float).to_numpy()
+        y_vals = merged["trend"].astype(float).to_numpy()
+        if np.isfinite(x_vals).all() and np.isfinite(y_vals).all():
+            try:
+                slope, intercept = np.polyfit(x_vals, y_vals, 1)
+                x_line = np.linspace(np.min(x_vals), np.max(x_vals), 100)
+                y_line = slope * x_line + intercept
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_line,
+                        y=y_line,
+                        mode="lines",
+                        name="Trend line",
+                        line=dict(width=2.5),
+                    )
+                )
+            except Exception:
+                pass
+
+    trend_name = correlation_info.get("trend_name") or "Trend"
+    operational_name = correlation_info.get("operational_name") or "Operational"
+
+    fig.update_layout(
+        template="plotly_white",
+        height=420,
+        margin=dict(l=40, r=40, t=50, b=50),
+        title=f"Correlation: {trend_name} vs {operational_name}",
+        xaxis_title=operational_name,
+        yaxis_title=trend_name,
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    )
+
+    return fig
+
+
 def build_trend_figure(
     records: List[TrendRecord],
     metric_key: str,
@@ -1990,6 +2196,44 @@ def render_trend_panel(
     panel_error = st.session_state.wm_tr_export_store[export_state_key]["error"]
     if panel_error:
         st.warning(f"PNG export error: {panel_error}")
+
+    # ------------------------------------------------------------
+    # Automatic correlation: primary vibration vs first operational
+    # ------------------------------------------------------------
+    correlation_enabled = bool(panel_records) and bool(panel_operational_records)
+    if correlation_enabled:
+        primary_trend = panel_records[0]
+        primary_operational = panel_operational_records[0]
+        correlation_info = build_trend_operational_correlation(
+            trend_record=primary_trend,
+            operational_record=primary_operational,
+            metric_key=metric_key,
+        )
+
+        st.markdown("#### Correlación automática vibración vs variable operativa")
+
+        corr_value = correlation_info.get("corr_value")
+        corr_text = format_number(corr_value, 3) if corr_value is not None else "—"
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.metric("Correlation", corr_text)
+        with c2:
+            st.metric("Strength", correlation_info.get("strength") or "—")
+        with c3:
+            st.metric("Direction", correlation_info.get("direction") or "—")
+        with c4:
+            st.metric("Samples", str(correlation_info.get("sample_count") or 0))
+
+        st.info(correlation_info.get("interpretation") or "Sin interpretación disponible.")
+
+        scatter_fig = build_correlation_scatter_figure(correlation_info)
+        st.plotly_chart(
+            scatter_fig,
+            use_container_width=True,
+            config={"displaylogo": False},
+            key=f"wm_trends_corr_{export_state_key}",
+        )
 
 
 if mixed_operational_notice:
