@@ -933,6 +933,119 @@ def detect_trend_anomalies(record: TrendRecord, metric_key: str) -> pd.DataFrame
     return anomalies.reset_index(drop=True)
 
 
+
+
+def build_anomaly_table_for_report(records: List[TrendRecord], metric_key: str) -> pd.DataFrame:
+    rows = []
+
+    for rec in records:
+        df = detect_trend_anomalies(rec, metric_key)
+        if df.empty:
+            continue
+
+        for _, row in df.iterrows():
+            rows.append({
+                "Timestamp": row["x"],
+                "Signal": rec.point_clean,
+                "Value": float(row["y"]),
+                "Type": row["anomaly_type"],
+                "Severity": row["severity"],
+            })
+
+    if not rows:
+        return pd.DataFrame(columns=["Timestamp", "Signal", "Value", "Type", "Severity"])
+
+    table = pd.DataFrame(rows)
+    table = table.sort_values("Timestamp").reset_index(drop=True)
+
+    return table
+
+
+def build_anomaly_narrative(records: List[TrendRecord], metric_key: str) -> str:
+    all_anomalies = []
+
+    for rec in records:
+        df = detect_trend_anomalies(rec, metric_key)
+        if not df.empty:
+            df = df.copy()
+            df["record"] = rec.point_clean
+            all_anomalies.append(df)
+
+    if not all_anomalies:
+        return "No se identifican eventos anómalos relevantes en la señal dentro de la ventana analizada."
+
+    df_all = pd.concat(all_anomalies, ignore_index=True)
+
+    total = len(df_all)
+    spikes = int((df_all["anomaly_type"] == "Spike").sum())
+    drops = int((df_all["anomaly_type"] == "Drop").sum())
+    outliers = int((df_all["anomaly_type"] == "Outlier").sum())
+
+    high = int((df_all["severity"] == "High").sum())
+    medium = int((df_all["severity"] == "Medium").sum())
+    low = int((df_all["severity"] == "Low").sum())
+
+    # ------------------------------------------------------------
+    # Clasificación de comportamiento
+    # ------------------------------------------------------------
+    if total >= 15:
+        pattern = "recurrente"
+    elif total >= 6:
+        pattern = "intermitente"
+    else:
+        pattern = "aislado"
+
+    # ------------------------------------------------------------
+    # Tipo dominante
+    # ------------------------------------------------------------
+    if spikes > drops and spikes > outliers:
+        dominant = "spikes (incrementos abruptos)"
+    elif drops > spikes and drops > outliers:
+        dominant = "drops (caídas abruptas)"
+    else:
+        dominant = "outliers dispersos"
+
+    # ------------------------------------------------------------
+    # Severidad dominante
+    # ------------------------------------------------------------
+    if high > 0:
+        severity_text = "con presencia de eventos de alta severidad"
+    elif medium > 0:
+        severity_text = "con eventos de severidad moderada"
+    else:
+        severity_text = "predominantemente de baja severidad"
+
+    # ------------------------------------------------------------
+    # Interpretación técnica
+    # ------------------------------------------------------------
+    if pattern == "recurrente":
+        interpretation = (
+            "La recurrencia de eventos anómalos sugiere un comportamiento no aleatorio, "
+            "posiblemente asociado a condiciones operativas repetitivas o a una condición mecánica persistente."
+        )
+    elif pattern == "intermitente":
+        interpretation = (
+            "Los eventos anómalos aparecen de forma intermitente, lo que puede estar asociado "
+            "a cambios operativos, transitorios o perturbaciones externas."
+        )
+    else:
+        interpretation = (
+            "Los eventos detectados son aislados, sin patrón repetitivo claro, "
+            "posiblemente asociados a ruido o perturbaciones puntuales."
+        )
+
+    # ------------------------------------------------------------
+    # Construcción final
+    # ------------------------------------------------------------
+    narrative = (
+        f"Se detectaron {total} eventos anómalos en la señal, clasificados como comportamiento {pattern}, "
+        f"con predominio de {dominant} y {severity_text}. "
+        f"{interpretation}"
+    )
+
+    return narrative
+
+
 def build_panel_anomaly_summary(records: List[TrendRecord], metric_key: str) -> Dict[str, Any]:
     total_count = 0
     affected_records = 0
@@ -985,6 +1098,192 @@ def build_panel_anomaly_summary(records: List[TrendRecord], metric_key: str) -> 
         "color": color,
         "details": details,
     }
+
+
+
+def build_lagged_correlation_analysis(
+    trend_record: Optional[TrendRecord],
+    operational_record: Optional[OperationalRecord],
+    metric_key: str,
+    max_lag_minutes: int = 180,
+    step_minutes: int = 10,
+) -> Dict[str, Any]:
+    if trend_record is None or operational_record is None:
+        return {
+            "valid": False,
+            "best_corr": None,
+            "best_lag_min": None,
+            "direction": "Indeterminada",
+            "strength": "Nula",
+            "interpretation": "Seleccione una señal de vibración y una variable operativa para habilitar el análisis con desfase.",
+            "lag_df": pd.DataFrame(columns=["lag_min", "corr"]),
+            "color": "#64748b",
+        }
+
+    base_df = align_trend_and_operational_for_correlation(
+        trend_record=trend_record,
+        operational_record=operational_record,
+        metric_key=metric_key,
+    )
+
+    if base_df.empty or len(base_df) < 6:
+        return {
+            "valid": False,
+            "best_corr": None,
+            "best_lag_min": None,
+            "direction": "Indeterminada",
+            "strength": "Nula",
+            "interpretation": "No hay suficientes puntos coincidentes para analizar correlación con desfase.",
+            "lag_df": pd.DataFrame(columns=["lag_min", "corr"]),
+            "color": "#64748b",
+        }
+
+    trend_df = get_clean_metric_df(trend_record, metric_key).rename(columns={"y": "trend"}).copy()
+    op_df = get_operational_clean_df(operational_record).rename(columns={"y": "operational"}).copy()
+
+    trend_df["x"] = pd.to_datetime(trend_df["x"], errors="coerce")
+    op_df["x"] = pd.to_datetime(op_df["x"], errors="coerce")
+
+    trend_df = trend_df.dropna(subset=["x", "trend"]).sort_values("x").reset_index(drop=True)
+    op_df = op_df.dropna(subset=["x", "operational"]).sort_values("x").reset_index(drop=True)
+
+    lag_rows = []
+    for lag_min in range(-max_lag_minutes, max_lag_minutes + 1, step_minutes):
+        shifted = op_df.copy()
+        shifted["x"] = shifted["x"] + pd.Timedelta(minutes=lag_min)
+
+        merged = pd.merge_asof(
+            trend_df,
+            shifted,
+            on="x",
+            direction="nearest",
+            tolerance=pd.Timedelta("30min"),
+        ).dropna(subset=["trend", "operational"]).reset_index(drop=True)
+
+        corr_val = None
+        if len(merged) >= 6:
+            try:
+                c = merged["trend"].corr(merged["operational"])
+                if c is not None and math.isfinite(float(c)):
+                    corr_val = float(c)
+            except Exception:
+                corr_val = None
+
+        lag_rows.append(
+            {
+                "lag_min": lag_min,
+                "corr": corr_val,
+                "samples": int(len(merged)),
+            }
+        )
+
+    lag_df = pd.DataFrame(lag_rows)
+    valid_df = lag_df.dropna(subset=["corr"]).copy()
+
+    if valid_df.empty:
+        return {
+            "valid": False,
+            "best_corr": None,
+            "best_lag_min": None,
+            "direction": "Indeterminada",
+            "strength": "Nula",
+            "interpretation": "No fue posible calcular correlaciones válidas en la ventana de desfases.",
+            "lag_df": lag_df,
+            "color": "#64748b",
+        }
+
+    best_idx = valid_df["corr"].abs().idxmax()
+    best_row = valid_df.loc[best_idx]
+    best_corr = float(best_row["corr"])
+    best_lag = int(best_row["lag_min"])
+
+    meta = classify_correlation_strength(best_corr)
+
+    if abs(best_lag) <= step_minutes:
+        lag_meaning = "La relación parece prácticamente simultánea entre vibración y variable operativa."
+    elif best_lag > 0:
+        lag_meaning = (
+            f"La mejor correlación aparece con un desfase de +{best_lag} min, "
+            "lo que sugiere que la variable operativa antecede la respuesta vibratoria."
+        )
+    else:
+        lag_meaning = (
+            f"La mejor correlación aparece con un desfase de {best_lag} min, "
+            "lo que sugiere que la vibración antecede a la variable operativa o que existe inversión temporal en el comportamiento."
+        )
+
+    interpretation = f"{meta['interpretation']} {lag_meaning}"
+
+    return {
+        "valid": True,
+        "best_corr": best_corr,
+        "best_lag_min": best_lag,
+        "direction": meta["direction"],
+        "strength": meta["strength"],
+        "interpretation": interpretation,
+        "lag_df": lag_df,
+        "color": meta["color"],
+        "trend_name": trend_record.point_clean,
+        "operational_name": operational_record.variable,
+    }
+
+
+def build_lag_correlation_figure(lag_info: Dict[str, Any]) -> go.Figure:
+    fig = go.Figure()
+    lag_df = lag_info.get("lag_df")
+
+    if lag_df is None or not isinstance(lag_df, pd.DataFrame) or lag_df.empty:
+        fig.update_layout(
+            template="plotly_white",
+            height=360,
+            margin=dict(l=40, r=40, t=40, b=40),
+            title="Lag Correlation",
+        )
+        return fig
+
+    valid_df = lag_df.dropna(subset=["corr"]).copy()
+
+    fig.add_trace(
+        go.Scatter(
+            x=lag_df["lag_min"],
+            y=lag_df["corr"],
+            mode="lines+markers",
+            name="Correlation vs lag",
+            line=dict(width=2.5),
+            marker=dict(size=7),
+            hovertemplate="Lag: %{x} min<br>Correlation: %{y:.4f}<extra></extra>",
+        )
+    )
+
+    if not valid_df.empty:
+        best_idx = valid_df["corr"].abs().idxmax()
+        best_row = valid_df.loc[best_idx]
+        fig.add_trace(
+            go.Scatter(
+                x=[best_row["lag_min"]],
+                y=[best_row["corr"]],
+                mode="markers",
+                name="Best lag",
+                marker=dict(size=13, color="#ef4444", symbol="diamond"),
+                hovertemplate="Best lag: %{x} min<br>Correlation: %{y:.4f}<extra></extra>",
+            )
+        )
+
+    trend_name = lag_info.get("trend_name") or "Trend"
+    operational_name = lag_info.get("operational_name") or "Operational"
+
+    fig.update_layout(
+        template="plotly_white",
+        height=360,
+        margin=dict(l=40, r=40, t=50, b=50),
+        title=f"Lag Correlation: {trend_name} vs {operational_name}",
+        xaxis_title="Lag (minutes)",
+        yaxis_title="Correlation",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+    )
+
+    fig.add_hline(y=0.0, line_dash="dot", line_color="#94a3b8", line_width=1.4)
+    return fig
 
 
 def build_trend_figure(
@@ -2358,6 +2657,10 @@ def render_trend_panel(
             st.metric("Top severity", anomaly_summary.get("top_severity", "None"))
         st.info(anomaly_summary.get("interpretation", "Sin interpretación disponible."))
 
+        anomaly_narrative = build_anomaly_narrative(panel_records, metric_key)
+        st.markdown("**Interpretación técnica de anomalías:**")
+        st.write(anomaly_narrative)
+
     # ------------------------------------------------------------
     # Automatic correlation: primary vibration vs first operational
     # ------------------------------------------------------------
@@ -2394,6 +2697,42 @@ def render_trend_panel(
             use_container_width=True,
             config={"displaylogo": False},
             key=f"wm_trends_corr_{export_state_key}",
+        )
+
+        lag_info = build_lagged_correlation_analysis(
+            trend_record=primary_trend,
+            operational_record=primary_operational,
+            metric_key=metric_key,
+            max_lag_minutes=180,
+            step_minutes=10,
+        )
+
+        st.markdown("#### Correlación con desfase temporal (lag)")
+        l1, l2, l3, l4 = st.columns(4)
+        with l1:
+            st.metric(
+                "Best correlation",
+                format_number(lag_info.get("best_corr"), 3),
+            )
+        with l2:
+            best_lag_val = lag_info.get("best_lag_min")
+            st.metric(
+                "Best lag (min)",
+                str(best_lag_val) if best_lag_val is not None else "—",
+            )
+        with l3:
+            st.metric("Lag strength", lag_info.get("strength") or "—")
+        with l4:
+            st.metric("Lag direction", lag_info.get("direction") or "—")
+
+        st.info(lag_info.get("interpretation") or "Sin interpretación disponible.")
+
+        lag_fig = build_lag_correlation_figure(lag_info)
+        st.plotly_chart(
+            lag_fig,
+            use_container_width=True,
+            config={"displaylogo": False},
+            key=f"wm_trends_lagcorr_{export_state_key}",
         )
 
 
