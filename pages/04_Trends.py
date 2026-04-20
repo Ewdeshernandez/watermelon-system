@@ -1036,31 +1036,21 @@ def build_trend_figure(
     return fig
 
 
+
 def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
     export_fig = go.Figure()
+
     for trace in fig.data:
-        if isinstance(trace, go.Scattergl):
-            trace_json = trace.to_plotly_json()
-            export_fig.add_trace(
-                go.Scatter(
-                    x=np.array(trace_json.get("x")) if trace_json.get("x") is not None else None,
-                    y=np.array(trace_json.get("y")) if trace_json.get("y") is not None else None,
-                    mode=trace_json.get("mode"),
-                    line=trace_json.get("line"),
-                    marker=trace_json.get("marker"),
-                    fill=trace_json.get("fill"),
-                    fillcolor=trace_json.get("fillcolor"),
-                    hovertemplate=trace_json.get("hovertemplate"),
-                    showlegend=trace_json.get("showlegend"),
-                    connectgaps=trace_json.get("connectgaps", False),
-                    name=trace_json.get("name"),
-                )
-            )
-        else:
-            export_fig.add_trace(trace)
+        trace_json = trace.to_plotly_json()
+
+        # Convertir Scattergl -> Scatter preservando eje secundario y metadatos
+        if trace_json.get("type") == "scattergl":
+            trace_json["type"] = "scatter"
+
+        export_fig.add_trace(go.Scatter(**trace_json))
+
     export_fig.update_layout(fig.layout)
     return export_fig
-
 
 def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     fig = go.Figure(export_fig)
