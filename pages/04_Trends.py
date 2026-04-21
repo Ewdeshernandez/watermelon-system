@@ -2722,6 +2722,42 @@ def final_report_cleanup(text: Any) -> str:
 
     return t.strip()
 
+
+def build_behavior_change_report_block(records: List[TrendRecord], metric_key: str) -> str:
+    summary = build_behavior_change_summary(records, metric_key)
+    details = summary.get("details", []) or []
+
+    valid = [
+        d for d in details
+        if d.get("valid") and d.get("classification") in ["Strong change", "Moderate change"]
+    ]
+
+    if not valid:
+        return (
+            "Cambio de comportamiento: no se identifican transiciones relevantes de régimen "
+            "dentro de la ventana analizada."
+        )
+
+    top = sorted(
+        valid,
+        key=lambda d: float(d.get("change_score") or 0.0),
+        reverse=True
+    )[0]
+
+    change_ts = top.get("change_timestamp")
+    if change_ts is not None:
+        ts_txt = f"{pretty_date(change_ts)} {pretty_time(change_ts)}"
+    else:
+        ts_txt = "sin timestamp identificable"
+
+    return (
+        f"Cambio de comportamiento: la clasificación dominante es {summary.get('top_classification', '—')}. "
+        f"El cambio más representativo se localiza en la señal {top.get('record_name', '—')} "
+        f"alrededor de {ts_txt}. "
+        f"{top.get('interpretation', 'Sin interpretación disponible.')}"
+    )
+
+
 def queue_trend_to_report(
     records: List[TrendRecord],
     fig: go.Figure,
@@ -2841,6 +2877,15 @@ def queue_trend_to_report(
         drift_narrative = build_drift_narrative(records, metric_key)
         drift_details = drift_summary.get("details", []) or []
 
+    behavior_summary: Dict[str, Any] = {}
+    behavior_details: List[Dict[str, Any]] = []
+    behavior_narrative = ""
+
+    if records:
+        behavior_summary = build_behavior_change_summary(records, metric_key)
+        behavior_details = behavior_summary.get("details", []) or []
+        behavior_narrative = build_behavior_change_report_block(records, metric_key)
+
     if correlation_report_block:
         narrative = f"{narrative}\n\n{correlation_report_block}"
 
@@ -2854,6 +2899,9 @@ def queue_trend_to_report(
             f"Señales con drift: {drift_summary.get('total_drift_signals', 0)} | "
             f"Severidad máxima: {drift_summary.get('top_severity', 'None')}."
         )
+
+    if behavior_narrative:
+        narrative = f"{narrative}\n\n{behavior_narrative}"
 
     # ============================================================
     # 🔥 FIX DEFINITIVO DEL REPORTE
@@ -2892,6 +2940,8 @@ def queue_trend_to_report(
         "ranking_payload": ranking_payload,
         "drift_summary": drift_summary,
         "drift_details": drift_details,
+        "behavior_summary": behavior_summary,
+        "behavior_details": behavior_details,
     }
     st.session_state.report_items.append(item_payload)
     st.session_state["wm_tr_last_report_debug"] = {
