@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import math
+import re
 from dataclasses import dataclass, field
 from io import BytesIO
 from pathlib import Path
@@ -1443,6 +1444,190 @@ def build_operational_variable_ranking_summary(ranking_df: pd.DataFrame) -> str:
 
 
 
+
+
+def detect_behavior_change(record: TrendRecord, metric_key: str) -> Dict[str, Any]:
+    df = get_clean_metric_df(record, metric_key)
+
+    if df.empty or len(df) < 20:
+        return {
+            "valid": False,
+            "record_name": record.point_clean,
+            "change_score": None,
+            "classification": "Insufficient data",
+            "change_timestamp": None,
+            "interpretation": "No hay suficientes datos para evaluar cambio de comportamiento."
+        }
+
+    df = df.copy()
+    df["y"] = pd.to_numeric(df["y"], errors="coerce")
+    df = df.dropna(subset=["x", "y"]).reset_index(drop=True)
+
+    if len(df) < 20:
+        return {
+            "valid": False,
+            "record_name": record.point_clean,
+            "change_score": None,
+            "classification": "Insufficient data",
+            "change_timestamp": None,
+            "interpretation": "No hay suficientes datos para evaluar cambio de comportamiento."
+        }
+
+    y = df["y"].to_numpy(dtype=float)
+    x_ts = pd.to_datetime(df["x"], errors="coerce")
+
+    min_segment = max(10, len(df) // 10)
+    best_score = -1.0
+    best_idx = None
+    best_stats = None
+
+    scale = max(float(np.mean(np.abs(y))), 1e-9)
+
+    for split in range(min_segment, len(y) - min_segment):
+        y1 = y[:split]
+        y2 = y[split:]
+
+        mean1, mean2 = float(np.mean(y1)), float(np.mean(y2))
+        std1, std2 = float(np.std(y1)), float(np.std(y2))
+
+        mean_change = abs(mean2 - mean1) / scale
+        std_change = abs(std2 - std1) / scale
+        local_score = mean_change + std_change
+
+        if local_score > best_score:
+            best_score = local_score
+            best_idx = split
+            best_stats = {
+                "mean_before": mean1,
+                "mean_after": mean2,
+                "std_before": std1,
+                "std_after": std2,
+            }
+
+    if best_idx is None or best_stats is None:
+        return {
+            "valid": False,
+            "record_name": record.point_clean,
+            "change_score": None,
+            "classification": "Insufficient data",
+            "change_timestamp": None,
+            "interpretation": "No fue posible localizar un punto de cambio confiable."
+        }
+
+    change_ts = safe_datetime(x_ts.iloc[best_idx]) if best_idx < len(x_ts) else None
+
+    if best_score > 0.35:
+        classification = "Strong change"
+    elif best_score > 0.18:
+        classification = "Moderate change"
+    else:
+        classification = "No significant change"
+
+    ts_txt = (
+        f" alrededor de {pretty_date(change_ts)} {pretty_time(change_ts)}"
+        if change_ts is not None else ""
+    )
+
+    if classification == "Strong change":
+        interpretation = (
+            f"Se detecta un cambio claro de comportamiento en la señal{ts_txt}, indicando transición entre dos regímenes "
+            "operativos o modificación relevante de la condición de la máquina."
+        )
+    elif classification == "Moderate change":
+        interpretation = (
+            f"Se observa un cambio moderado en el comportamiento de la señal{ts_txt}, que podría estar asociado a "
+            "variaciones operativas o evolución de la condición mecánica."
+        )
+    else:
+        interpretation = (
+            "No se identifican cambios significativos de comportamiento dentro de la ventana analizada."
+        )
+
+    return {
+        "valid": True,
+        "record_name": record.point_clean,
+        "change_score": float(best_score),
+        "classification": classification,
+        "change_timestamp": change_ts,
+        "mean_before": best_stats["mean_before"],
+        "mean_after": best_stats["mean_after"],
+        "std_before": best_stats["std_before"],
+        "std_after": best_stats["std_after"],
+        "interpretation": interpretation
+    }
+
+def build_behavior_change_summary(records: List[TrendRecord], metric_key: str) -> Dict[str, Any]:
+    results = []
+    for r in records:
+        results.append(detect_behavior_change(r, metric_key))
+
+    valid = [r for r in results if r.get("valid")]
+
+    if not valid:
+        return {
+            "count": 0,
+            "top_classification": "None",
+            "interpretation": "No hay datos suficientes para evaluar cambios de comportamiento.",
+            "details": results
+        }
+
+    strong = sum(1 for r in valid if r["classification"] == "Strong change")
+    moderate = sum(1 for r in valid if r["classification"] == "Moderate change")
+
+    if strong > 0:
+        top = "Strong change"
+        interpretation = (
+            "Se detecta al menos un cambio fuerte de comportamiento en las señales, indicando transición clara de régimen."
+        )
+    elif moderate > 0:
+        top = "Moderate change"
+        interpretation = (
+            "Se identifican cambios moderados de comportamiento, que sugieren variaciones operativas o evolución progresiva."
+        )
+    else:
+        top = "No significant change"
+        interpretation = (
+            "No se detectan cambios relevantes de comportamiento en la ventana analizada."
+        )
+
+    return {
+        "count": len(valid),
+        "top_classification": top,
+        "interpretation": interpretation,
+        "details": results
+    }
+
+
+
+def build_behavior_narrative(records: List[TrendRecord], metric_key: str) -> str:
+    summary = build_behavior_change_summary(records, metric_key)
+
+    if summary["count"] == 0:
+        return "No hay información suficiente para evaluar cambios de comportamiento."
+
+    details = summary.get("details", [])
+    valid = [d for d in details if d.get("valid") and d.get("classification") in ["Strong change", "Moderate change"]]
+
+    if not valid:
+        return summary["interpretation"]
+
+    top = sorted(
+        valid,
+        key=lambda d: float(d.get("change_score") or 0.0),
+        reverse=True
+    )[0]
+
+    change_ts = top.get("change_timestamp")
+    ts_txt = (
+        f"{pretty_date(change_ts)} {pretty_time(change_ts)}"
+        if change_ts is not None else "sin timestamp identificable"
+    )
+
+    return (
+        f"{summary['interpretation']} El cambio más representativo se localiza en la señal "
+        f"{top.get('record_name', '—')} alrededor de {ts_txt}."
+    )
+
 def detect_trend_drift(record: TrendRecord, metric_key: str) -> Dict[str, Any]:
     df = get_clean_metric_df(record, metric_key).copy()
     if df.empty or len(df) < 8:
@@ -2513,6 +2698,30 @@ def push_linked_bode_context(records: List[TrendRecord], metric_key: str) -> Non
     }
 
 
+
+
+def final_report_cleanup(text: Any) -> str:
+    t = str(text or "")
+
+    # Convertir secuencias literales a saltos reales
+    t = t.replace("\\n", "\n")
+    t = t.replace("\\t", " ")
+
+    # Normalizar saltos y espacios
+    t = re.sub(r"\n{3,}", "\n\n", t)
+    t = re.sub(r"[ \t]+", " ", t)
+
+    # Ajustes editoriales
+    t = t.replace("amplitude", "amplitud vibratoria")
+    t = t.replace("Amplitude", "Amplitud vibratoria")
+    t = t.replace("del amplitud vibratoria", "de la amplitud vibratoria")
+    t = t.replace("del amplitude", "de la amplitud vibratoria")
+    t = t.replace("de amplitude", "de la amplitud vibratoria")
+    t = t.replace(" phase ", " fase ")
+    t = t.replace(" speed ", " velocidad ")
+
+    return t.strip()
+
 def queue_trend_to_report(
     records: List[TrendRecord],
     fig: go.Figure,
@@ -2645,6 +2854,11 @@ def queue_trend_to_report(
             f"Señales con drift: {drift_summary.get('total_drift_signals', 0)} | "
             f"Severidad máxima: {drift_summary.get('top_severity', 'None')}."
         )
+
+    # ============================================================
+    # 🔥 FIX DEFINITIVO DEL REPORTE
+    # ============================================================
+    narrative = final_report_cleanup(narrative)
 
     image_bytes, image_error = build_export_png_bytes(fig=fig)
 
@@ -3083,6 +3297,47 @@ def render_trend_panel(
         st.write(drift_narrative)
 
     # ------------------------------------------------------------
+    # 
+    if panel_records:
+        behavior_summary = build_behavior_change_summary(panel_records, metric_key)
+        behavior_narrative = build_behavior_narrative(panel_records, metric_key)
+
+        st.markdown("#### Cambio de comportamiento (F9-A)")
+        details_valid = [
+            d for d in behavior_summary.get("details", [])
+            if d.get("valid") and d.get("classification") in ["Strong change", "Moderate change"]
+        ]
+        top_change = None
+        if details_valid:
+            top_change = sorted(
+                details_valid,
+                key=lambda d: float(d.get("change_score") or 0.0),
+                reverse=True
+            )[0]
+
+        b1, b2, b3 = st.columns(3)
+
+        with b1:
+            st.metric("Signals analyzed", str(behavior_summary.get("count", 0)))
+
+        with b2:
+            st.metric("Top classification", behavior_summary.get("top_classification", "None"))
+
+        with b3:
+            if top_change and top_change.get("change_timestamp") is not None:
+                st.metric(
+                    "Main change timestamp",
+                    f"{pretty_date(top_change.get('change_timestamp'))} {pretty_time(top_change.get('change_timestamp'))}"
+                )
+            else:
+                st.metric("Main change timestamp", "—")
+
+        st.info(behavior_summary.get("interpretation", "Sin interpretación"))
+
+        st.markdown("**Interpretación técnica:**")
+        st.write(behavior_narrative)
+
+
     # Automatic correlation: primary vibration vs first operational
     # ------------------------------------------------------------
     correlation_enabled = bool(panel_records) and bool(panel_operational_records)
