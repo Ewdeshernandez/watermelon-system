@@ -2623,11 +2623,28 @@ def queue_trend_to_report(
             ranking_summary = build_operational_variable_ranking_summary(ranking_df)
             ranking_payload = ranking_df.to_dict(orient="records")
 
+    drift_summary: Dict[str, Any] = {}
+    drift_details: List[Dict[str, Any]] = []
+    drift_narrative = ""
+
+    if records:
+        drift_summary = build_panel_drift_summary(records, metric_key)
+        drift_narrative = build_drift_narrative(records, metric_key)
+        drift_details = drift_summary.get("details", []) or []
+
     if correlation_report_block:
         narrative = f"{narrative}\n\n{correlation_report_block}"
 
     if ranking_summary:
         narrative = f"{narrative}\n\nRanking automático de variables operativas:\n{ranking_summary}"
+
+    if drift_narrative:
+        narrative = (
+            f"{narrative}\n\nDeriva progresiva (drift):\n"
+            f"{drift_narrative}\n"
+            f"Señales con drift: {drift_summary.get('total_drift_signals', 0)} | "
+            f"Severidad máxima: {drift_summary.get('top_severity', 'None')}."
+        )
 
     image_bytes, image_error = build_export_png_bytes(fig=fig)
 
@@ -2659,6 +2676,8 @@ def queue_trend_to_report(
         "lag_payload": lag_payload,
         "ranking_summary": ranking_summary,
         "ranking_payload": ranking_payload,
+        "drift_summary": drift_summary,
+        "drift_details": drift_details,
     }
     st.session_state.report_items.append(item_payload)
     st.session_state["wm_tr_last_report_debug"] = {
