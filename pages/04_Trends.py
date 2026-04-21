@@ -1442,6 +1442,170 @@ def build_operational_variable_ranking_summary(ranking_df: pd.DataFrame) -> str:
     )
 
 
+
+def detect_trend_drift(record: TrendRecord, metric_key: str) -> Dict[str, Any]:
+    df = get_clean_metric_df(record, metric_key).copy()
+    if df.empty or len(df) < 8:
+        return {
+            "record_name": record.point_clean,
+            "classification": "No Drift",
+            "severity": "None",
+            "change_pct": None,
+            "slope_ratio": None,
+            "direction": "Indeterminada",
+            "interpretation": "No hay suficientes datos para evaluar drift.",
+            "valid": False,
+        }
+
+    y = pd.to_numeric(df["y"], errors="coerce").dropna().astype(float).to_numpy()
+    if y.size < 8:
+        return {
+            "record_name": record.point_clean,
+            "classification": "No Drift",
+            "severity": "None",
+            "change_pct": None,
+            "slope_ratio": None,
+            "direction": "Indeterminada",
+            "interpretation": "No hay suficientes datos para evaluar drift.",
+            "valid": False,
+        }
+
+    x = np.arange(y.size, dtype=float)
+    slope, intercept = np.polyfit(x, y, 1)
+    fitted = slope * x + intercept
+    residual = y - fitted
+
+    mean_abs = float(np.mean(np.abs(y)))
+    value_span = float(np.max(y) - np.min(y))
+    scale = max(mean_abs, value_span, 1e-9)
+
+    slope_ratio = float(abs(slope) * max(y.size - 1, 1) / scale)
+    volatility_ratio = float(np.std(residual) / scale)
+    change_pct = safe_percent_change(float(y[0]), float(y[-1]))
+
+    direction = "Increasing" if slope > 0 else "Decreasing"
+
+    classification = "No Drift"
+    severity = "None"
+    interpretation = "No se observa deriva sostenida relevante."
+
+    # Drift sostenido = pendiente importante con dispersión controlada
+    if slope_ratio >= 0.18 and volatility_ratio <= 0.35:
+        if direction == "Increasing":
+            classification = "Progressive Increase"
+        else:
+            classification = "Progressive Decrease"
+
+        if slope_ratio >= 0.45 or (change_pct is not None and abs(change_pct) >= 35):
+            severity = "High"
+        elif slope_ratio >= 0.28 or (change_pct is not None and abs(change_pct) >= 18):
+            severity = "Medium"
+        else:
+            severity = "Low"
+
+        if classification == "Progressive Increase":
+            interpretation = (
+                "La señal presenta deriva progresiva ascendente, compatible con incremento sostenido "
+                "de la condición medida dentro de la ventana analizada."
+            )
+        else:
+            interpretation = (
+                "La señal presenta deriva progresiva descendente, compatible con reducción sostenida "
+                "de la condición medida dentro de la ventana analizada."
+            )
+
+    return {
+        "record_name": record.point_clean,
+        "classification": classification,
+        "severity": severity,
+        "change_pct": change_pct,
+        "slope_ratio": slope_ratio,
+        "direction": direction,
+        "interpretation": interpretation,
+        "valid": True,
+    }
+
+
+def build_panel_drift_summary(records: List[TrendRecord], metric_key: str) -> Dict[str, Any]:
+    rows = []
+    for rec in records:
+        rows.append(detect_trend_drift(rec, metric_key))
+
+    if not rows:
+        return {
+            "total_drift_signals": 0,
+            "top_severity": "None",
+            "interpretation": "No hay señales disponibles para analizar drift.",
+            "details": [],
+        }
+
+    drift_rows = [r for r in rows if r.get("classification") != "No Drift"]
+
+    if not drift_rows:
+        return {
+            "total_drift_signals": 0,
+            "top_severity": "None",
+            "interpretation": "No se detecta deriva progresiva dominante en las señales seleccionadas.",
+            "details": rows,
+        }
+
+    severity_rank = {"None": 0, "Low": 1, "Medium": 2, "High": 3}
+    top_severity = "Low"
+    for r in drift_rows:
+        sev = str(r.get("severity") or "None")
+        if severity_rank.get(sev, 0) > severity_rank.get(top_severity, 0):
+            top_severity = sev
+
+    if top_severity == "High":
+        interpretation = (
+            "Se detecta deriva progresiva de alta severidad en al menos una señal, "
+            "lo que sugiere cambio sostenido de condición y amerita revisión prioritaria."
+        )
+    elif top_severity == "Medium":
+        interpretation = (
+            "Se detecta deriva progresiva moderada, compatible con evolución sostenida de la condición "
+            "que conviene seguir de cerca."
+        )
+    else:
+        interpretation = (
+            "Se detecta deriva leve en la ventana analizada. Conviene monitorear si el patrón se consolida."
+        )
+
+    return {
+        "total_drift_signals": len(drift_rows),
+        "top_severity": top_severity,
+        "interpretation": interpretation,
+        "details": rows,
+    }
+
+
+def build_drift_narrative(records: List[TrendRecord], metric_key: str) -> str:
+    summary = build_panel_drift_summary(records, metric_key)
+    rows = summary.get("details", [])
+
+    drift_rows = [r for r in rows if r.get("classification") != "No Drift"]
+    if not drift_rows:
+        return "No se identifican patrones de deriva progresiva relevantes en la ventana analizada."
+
+    increasing = sum(1 for r in drift_rows if r.get("classification") == "Progressive Increase")
+    decreasing = sum(1 for r in drift_rows if r.get("classification") == "Progressive Decrease")
+    total = len(drift_rows)
+    top_severity = summary.get("top_severity", "None")
+
+    if increasing > decreasing:
+        dominant = "deriva progresiva ascendente"
+    elif decreasing > increasing:
+        dominant = "deriva progresiva descendente"
+    else:
+        dominant = "deriva mixta sin una dirección dominante"
+
+    return (
+        f"Se identifican {total} señales con comportamiento de drift, con predominio de {dominant} "
+        f"y severidad máxima {top_severity}. Esto sugiere un desplazamiento sostenido de la línea base "
+        f"más allá de eventos puntuales, por lo que conviene revisar evolución temporal, carga y condición mecánica."
+    )
+
+
 def build_trend_figure(
     records: List[TrendRecord],
     metric_key: str,
@@ -2575,6 +2739,7 @@ with st.sidebar:
     metric_key = st.selectbox("Metric", options=["Amplitude", "Phase", "Speed"], index=0)
     show_markers = st.checkbox("Show markers", value=False)
     show_anomaly_markers = st.checkbox("Show anomaly markers", value=True)
+    show_drift_analysis = st.checkbox("Show drift analysis", value=True)
     fill_area = st.checkbox("Fill area (single trend)", value=True)
 
     st.markdown("### Axes")
@@ -2882,6 +3047,21 @@ def render_trend_panel(
         anomaly_narrative = build_anomaly_narrative(panel_records, metric_key)
         st.markdown("**Interpretación técnica de anomalías:**")
         st.write(anomaly_narrative)
+
+    if panel_records and show_drift_analysis:
+        drift_summary = build_panel_drift_summary(panel_records, metric_key)
+        drift_narrative = build_drift_narrative(panel_records, metric_key)
+
+        st.markdown("#### Detección de drift (deriva progresiva)")
+        d1, d2 = st.columns(2)
+        with d1:
+            st.metric("Signals with drift", str(drift_summary.get("total_drift_signals", 0)))
+        with d2:
+            st.metric("Top drift severity", drift_summary.get("top_severity", "None"))
+
+        st.info(drift_summary.get("interpretation", "Sin interpretación disponible."))
+        st.markdown("**Interpretación técnica de drift:**")
+        st.write(drift_narrative)
 
     # ------------------------------------------------------------
     # Automatic correlation: primary vibration vs first operational
