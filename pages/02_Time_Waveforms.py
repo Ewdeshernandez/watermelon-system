@@ -1521,3 +1521,63 @@ if "signals" in st.session_state:
     )
 else:
     st.session_state["waveform_impacts"] = {}
+
+
+
+# W2.1: Waveform Technical Summary Panel
+try:
+    _wm_metrics = st.session_state.get("waveform_metrics", {}) or {}
+    _wm_insights = st.session_state.get("waveform_insights", {}) or {}
+    _wm_impacts = st.session_state.get("waveform_impacts", {}) or {}
+
+    if _wm_metrics:
+        st.markdown("### Resumen técnico de forma de onda")
+
+        with st.expander("Ver métricas automáticas, insights e impactos", expanded=False):
+            signal_names = list(_wm_metrics.keys())
+
+            if signal_names:
+                selected_signal = st.selectbox(
+                    "Señal analizada",
+                    options=signal_names,
+                    key="wm_waveform_summary_signal",
+                )
+
+                metrics = _wm_metrics.get(selected_signal, {}) or {}
+                insight = _wm_insights.get(selected_signal, "") or ""
+                impacts = _wm_impacts.get(selected_signal, {}) or {}
+
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("RMS", f'{metrics.get("rms", 0.0):.4f}')
+                c2.metric("Peak", f'{metrics.get("peak", 0.0):.4f}')
+                c3.metric("Crest Factor", f'{metrics.get("crest_factor", 0.0):.3f}')
+                c4.metric("Peak-to-Peak", f'{metrics.get("peak_to_peak", 0.0):.4f}')
+
+                c5, c6, c7, c8 = st.columns(4)
+                c5.metric("Mean", f'{metrics.get("mean", 0.0):.4f}')
+                c6.metric("Std", f'{metrics.get("std", 0.0):.4f}')
+                c7.metric("Skewness", f'{metrics.get("skewness", 0.0):.3f}')
+                c8.metric("Kurtosis", f'{metrics.get("kurtosis", 0.0):.3f}')
+
+                st.markdown("#### Insight automático")
+                if insight:
+                    st.info(insight)
+                else:
+                    st.caption("Sin insight automático disponible para esta señal.")
+
+                st.markdown("#### Impactos detectados")
+                ic1, ic2 = st.columns(2)
+                ic1.metric("Cantidad de impactos", str(impacts.get("count", 0)))
+                ic2.metric("Threshold dinámico", f'{float(impacts.get("threshold", 0.0)):.4f}')
+
+                impact_indices = impacts.get("indices", []) or []
+                if impact_indices:
+                    preview = ", ".join(str(x) for x in impact_indices[:20])
+                    st.caption(f"Índices detectados: {preview}")
+                    if len(impact_indices) > 20:
+                        st.caption(f"Mostrando 20 de {len(impact_indices)} índices detectados.")
+                else:
+                    st.caption("No se detectaron impactos sobre el umbral dinámico.")
+except Exception as _wm_summary_error:
+    st.warning(f"No fue posible renderizar el resumen técnico de waveform: {_wm_summary_error}")
+
