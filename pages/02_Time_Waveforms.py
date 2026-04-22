@@ -15,7 +15,21 @@ import streamlit as st
 
 from core.auth import require_login, render_user_menu
 from core.waveform_diagnostics import generate_waveform_diagnostic, build_waveform_report_notes
+from core.waveform_metrics import compute_metrics_batch
 
+
+# ==============================
+# W1-A: Waveform Metrics Engine
+# ==============================
+if "signals" in st.session_state and st.session_state["signals"]:
+    try:
+        st.session_state["waveform_metrics"] = compute_metrics_batch(
+            st.session_state["signals"]
+        )
+    except Exception:
+        st.session_state["waveform_metrics"] = {}
+else:
+    st.session_state["waveform_metrics"] = {}
 st.set_page_config(page_title="Watermelon System | Waveform", layout="wide")
 
 require_login()
