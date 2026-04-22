@@ -19,9 +19,6 @@ from core.waveform_metrics import compute_metrics_batch
 from core.waveform_insights import generate_batch_insights
 from core.waveform_impacts import detect_impacts_batch
 
-
-# ==============================
-# W1-A: Waveform Metrics Engine
 # ==============================
 if "signals" in st.session_state and st.session_state["signals"]:
     try:
@@ -1481,6 +1478,18 @@ selected_records = [next(r for r in records_all if r.signal_id == signal_id) for
 logo_uri = get_logo_data_uri(LOGO_PATH)
 
 for panel_index, primary in enumerate(selected_records):
+    # W2.2.8: inject visible waveform signal into session_state
+    if "signals" not in st.session_state:
+        st.session_state["signals"] = {}
+
+    try:
+        _wm_signal_values = primary.y if hasattr(primary, "y") else None
+    except Exception:
+        _wm_signal_values = None
+
+    st.session_state["signals"][str(primary.signal_id)] = {
+        "y": _wm_signal_values
+    }
     render_waveform_panel(
         primary=primary,
         panel_index=panel_index,
@@ -1503,8 +1512,6 @@ for panel_index, primary in enumerate(selected_records):
         st.markdown("---")
 
 # ==============================
-# W1-B: Waveform Insights Engine
-# ==============================
 if "waveform_metrics" in st.session_state:
     st.session_state["waveform_insights"] = generate_batch_insights(
         st.session_state["waveform_metrics"]
@@ -1512,8 +1519,6 @@ if "waveform_metrics" in st.session_state:
 else:
     st.session_state["waveform_insights"] = {}
 
-# ==============================
-# W2: Waveform Impact Detection
 # ==============================
 if "signals" in st.session_state:
     st.session_state["waveform_impacts"] = detect_impacts_batch(
@@ -1524,60 +1529,88 @@ else:
 
 
 
-# W2.1: Waveform Technical Summary Panel
+# ==============================
+# W2.2.8: Final waveform analytics panel
+# ==============================
+try:
+    _wm_current_signals = st.session_state.get("signals", {}) or {}
+    if _wm_current_signals:
+        st.session_state["waveform_metrics"] = compute_metrics_batch(_wm_current_signals)
+        st.session_state["waveform_insights"] = generate_batch_insights(
+            st.session_state["waveform_metrics"]
+        )
+        st.session_state["waveform_impacts"] = detect_impacts_batch(_wm_current_signals)
+    else:
+        st.session_state["waveform_metrics"] = {}
+        st.session_state["waveform_insights"] = {}
+        st.session_state["waveform_impacts"] = {}
+except Exception as _wm_refresh_error:
+    st.error(f"Waveform analytics refresh error: {_wm_refresh_error}")
+    st.session_state["waveform_metrics"] = {}
+    st.session_state["waveform_insights"] = {}
+    st.session_state["waveform_impacts"] = {}
+
 try:
     _wm_metrics = st.session_state.get("waveform_metrics", {}) or {}
     _wm_insights = st.session_state.get("waveform_insights", {}) or {}
     _wm_impacts = st.session_state.get("waveform_impacts", {}) or {}
 
     if _wm_metrics:
-        st.markdown("### Resumen técnico de forma de onda")
+        st.markdown("### Análisis automático de la señal")
 
-        with st.expander("Ver métricas automáticas, insights e impactos", expanded=False):
-            signal_names = list(_wm_metrics.keys())
+        _wm_signal_names = list(_wm_metrics.keys())
+        _wm_selected_name = st.selectbox(
+            "Señal analizada",
+            options=_wm_signal_names,
+            key="wm_final_selected_signal",
+        )
 
-            if signal_names:
-                selected_signal = st.selectbox(
-                    "Señal analizada",
-                    options=signal_names,
-                    key="wm_waveform_summary_signal",
-                )
+        _m = _wm_metrics.get(_wm_selected_name, {}) or {}
+        _i = _wm_insights.get(_wm_selected_name, "") or ""
+        _imp = _wm_impacts.get(_wm_selected_name, {}) or {}
 
-                metrics = _wm_metrics.get(selected_signal, {}) or {}
-                insight = _wm_insights.get(selected_signal, "") or ""
-                impacts = _wm_impacts.get(selected_signal, {}) or {}
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("RMS", f'{_m.get("rms", 0.0):.4f}')
+        c2.metric("Peak", f'{_m.get("peak", 0.0):.4f}')
+        c3.metric("Crest Factor", f'{_m.get("crest_factor", 0.0):.3f}')
+        c4.metric("Kurtosis", f'{_m.get("kurtosis", 0.0):.3f}')
 
-                c1, c2, c3, c4 = st.columns(4)
-                c1.metric("RMS", f'{metrics.get("rms", 0.0):.4f}')
-                c2.metric("Peak", f'{metrics.get("peak", 0.0):.4f}')
-                c3.metric("Crest Factor", f'{metrics.get("crest_factor", 0.0):.3f}')
-                c4.metric("Peak-to-Peak", f'{metrics.get("peak_to_peak", 0.0):.4f}')
+        c5, c6, c7, c8 = st.columns(4)
+        c5.metric("Mean", f'{_m.get("mean", 0.0):.4f}')
+        c6.metric("Std", f'{_m.get("std", 0.0):.4f}')
+        c7.metric("Skewness", f'{_m.get("skewness", 0.0):.3f}')
+        c8.metric("Peak-to-Peak", f'{_m.get("peak_to_peak", 0.0):.4f}')
 
-                c5, c6, c7, c8 = st.columns(4)
-                c5.metric("Mean", f'{metrics.get("mean", 0.0):.4f}')
-                c6.metric("Std", f'{metrics.get("std", 0.0):.4f}')
-                c7.metric("Skewness", f'{metrics.get("skewness", 0.0):.3f}')
-                c8.metric("Kurtosis", f'{metrics.get("kurtosis", 0.0):.3f}')
+        st.markdown("#### Insight automático")
+        if _i:
+            st.info(_i)
+        else:
+            st.caption("Sin insight automático disponible para esta señal.")
 
-                st.markdown("#### Insight automático")
-                if insight:
-                    st.info(insight)
-                else:
-                    st.caption("Sin insight automático disponible para esta señal.")
+        st.markdown("#### Impactos detectados")
+        ic1, ic2 = st.columns(2)
+        ic1.metric("Cantidad de impactos", str(_imp.get("count", 0)))
+        ic2.metric("Threshold dinámico", f'{float(_imp.get("threshold", 0.0)):.4f}')
 
-                st.markdown("#### Impactos detectados")
-                ic1, ic2 = st.columns(2)
-                ic1.metric("Cantidad de impactos", str(impacts.get("count", 0)))
-                ic2.metric("Threshold dinámico", f'{float(impacts.get("threshold", 0.0)):.4f}')
+        _impact_indices = _imp.get("indices", []) or []
+        if _impact_indices:
+            _preview = ", ".join(str(x) for x in _impact_indices[:20])
+            st.caption(f"Índices detectados: {_preview}")
+            if len(_impact_indices) > 20:
+                st.caption(f"Mostrando 20 de {len(_impact_indices)} índices detectados.")
+        else:
+            st.caption("No se detectaron impactos sobre el umbral dinámico.")
 
-                impact_indices = impacts.get("indices", []) or []
-                if impact_indices:
-                    preview = ", ".join(str(x) for x in impact_indices[:20])
-                    st.caption(f"Índices detectados: {preview}")
-                    if len(impact_indices) > 20:
-                        st.caption(f"Mostrando 20 de {len(impact_indices)} índices detectados.")
-                else:
-                    st.caption("No se detectaron impactos sobre el umbral dinámico.")
-except Exception as _wm_summary_error:
-    st.warning(f"No fue posible renderizar el resumen técnico de waveform: {_wm_summary_error}")
-
+        st.markdown("### Debug waveform")
+        st.write("signals_count:", len(_wm_current_signals))
+        st.write("metrics_count:", len(_wm_metrics))
+        st.write("insights_count:", len(_wm_insights))
+        st.write("impacts_count:", len(_wm_impacts))
+    else:
+        st.markdown("### Debug waveform")
+        st.write("signals_count:", len(_wm_current_signals))
+        st.write("metrics_count:", 0)
+        st.write("insights_count:", 0)
+        st.write("impacts_count:", 0)
+except Exception as _wm_panel_error:
+    st.error(f"W2.2.8 final panel error: {_wm_panel_error}")
