@@ -16,6 +16,8 @@ import streamlit as st
 from core.auth import require_login, render_user_menu
 from core.waveform_diagnostics import generate_waveform_diagnostic, build_waveform_report_notes
 from core.waveform_metrics import compute_metrics_batch
+from core.waveform_insights import generate_batch_insights
+from core.waveform_impacts import detect_impacts_batch
 
 
 # ==============================
@@ -1499,3 +1501,23 @@ for panel_index, primary in enumerate(selected_records):
 
     if panel_index < len(selected_records) - 1:
         st.markdown("---")
+
+# ==============================
+# W1-B: Waveform Insights Engine
+# ==============================
+if "waveform_metrics" in st.session_state:
+    st.session_state["waveform_insights"] = generate_batch_insights(
+        st.session_state["waveform_metrics"]
+    )
+else:
+    st.session_state["waveform_insights"] = {}
+
+# ==============================
+# W2: Waveform Impact Detection
+# ==============================
+if "signals" in st.session_state:
+    st.session_state["waveform_impacts"] = detect_impacts_batch(
+        st.session_state["signals"]
+    )
+else:
+    st.session_state["waveform_impacts"] = {}
