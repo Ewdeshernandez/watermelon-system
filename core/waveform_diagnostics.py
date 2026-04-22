@@ -19,6 +19,30 @@ def build_waveform_report_notes(text_diag: Dict[str, str]) -> str:
     return "\n\n".join(blocks).strip()
 
 
+
+def _waveform_machine_context_adjustment(machine: str, narrative: str) -> str:
+    machine_upper = (machine or "").upper()
+
+    is_recip = "RECIP" in machine_upper or "RECIPROC" in machine_upper
+    is_compressor = "COMPRESOR" in machine_upper or "COMPRESSOR" in machine_upper
+    is_plain_bearing_context = is_recip or is_compressor
+
+    updated = narrative
+
+    if is_plain_bearing_context:
+        updated = updated.replace("rodamientos", "cojinetes planos")
+        updated = updated.replace("rodamiento", "cojinete plano")
+        updated = updated.replace(
+            "presencia moderada de transitorios de alta energía",
+            "presencia moderada de transitorios de alta energía y excitaciones no lineales"
+        )
+        updated = updated.replace(
+            "Se recomienda correlacionar este comportamiento con Spectrum, condiciones operativas y estado de lubricación antes de definir intervención.",
+            "Se recomienda correlacionar este comportamiento con Spectrum, condiciones operativas, holgura dinámica y estado de lubricación del cojinete plano antes de definir intervención."
+        )
+
+    return updated
+
 def generate_waveform_diagnostic(record, summary: Dict[str, float]) -> Dict[str, str]:
     machine = str(getattr(record, "machine", "") or "máquina no identificada")
     point = str(getattr(record, "point", "") or "punto no identificado")
@@ -72,7 +96,7 @@ def generate_waveform_diagnostic(record, summary: Dict[str, float]) -> Dict[str,
             "narrative": (
                 f"Se analizó la forma de onda de vibración correspondiente al punto {point} en la máquina {machine}. "
                 f"La señal presenta un comportamiento estable, con un factor de cresta de {cf:.2f}, un valor RMS de {rms_txt} "
-                f"y una amplitud pico a pico de {pp_txt}, sin evidencia significativa de eventos impulsivos o comportamiento no lineal. "
+                f"y una amplitud pico a pico de {pp_txt}, sin evidencia significativa de transitorios de alta energía o comportamiento no lineal. "
                 f"Se recomienda continuar el monitoreo periódico y correlacionar este resultado con el análisis espectral para seguimiento de condición."
             ),
         }
@@ -81,12 +105,12 @@ def generate_waveform_diagnostic(record, summary: Dict[str, float]) -> Dict[str,
         return {
             "status": "WARNING",
             "color": WARNING_COLOR,
-            "headline": "Forma de onda con indicios moderados de impacto",
+            "headline": "Forma de onda con indicios moderados de transitorios de alta energía",
             "narrative": (
                 f"Se analizó la forma de onda de vibración correspondiente al punto {point} en la máquina {machine}. "
                 f"La señal presenta un comportamiento ligeramente no lineal, con un factor de cresta de {cf:.2f}, un valor RMS de {rms_txt} "
-                f"y una amplitud pico a pico de {pp_txt}, lo cual sugiere presencia moderada de eventos impulsivos. "
-                f"Se recomienda revisar condición de rodamientos y correlacionar este comportamiento con Spectrum y Envelope antes de definir intervención."
+                f"y una amplitud pico a pico de {pp_txt}, lo cual sugiere presencia moderada de transitorios de alta energía. "
+                f"Se recomienda correlacionar este comportamiento con Spectrum, condiciones operativas y estado de lubricación antes de definir intervención."
             ),
         }
 
@@ -97,7 +121,7 @@ def generate_waveform_diagnostic(record, summary: Dict[str, float]) -> Dict[str,
         "narrative": (
             f"Se analizó la forma de onda de vibración correspondiente al punto {point} en la máquina {machine}. "
             f"La señal presenta un comportamiento altamente impulsivo, con un factor de cresta de {cf:.2f}, un valor RMS de {rms_txt} "
-            f"y una amplitud pico a pico de {pp_txt}, condición compatible con impactos mecánicos, contacto intermitente o daño incipiente en elementos rodantes. "
+            f"y una amplitud pico a pico de {pp_txt}, condición compatible con transitorios mecánicos, contacto intermitente o daño incipiente en elementos rodantes. "
             f"Se recomienda priorizar la inspección mecánica, validar la condición del rodamiento y correlacionar con Envelope Spectrum antes de operación repetida."
         ),
     }

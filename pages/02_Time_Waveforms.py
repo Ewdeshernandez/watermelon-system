@@ -1118,19 +1118,19 @@ def build_export_png_bytes(
     fig: go.Figure,
 ) -> Tuple[Optional[bytes], Optional[str]]:
     try:
-        export_fig = _build_export_safe_figure(fig)
-        export_fig = _scale_export_figure(export_fig)
+        import plotly.io as pio
 
-        png_bytes = export_fig.to_image(
+        png_bytes = pio.to_image(
+            fig,
             format="png",
-            width=4200,
-            height=2200,
+            width=1600,
+            height=900,
             scale=2,
         )
         return png_bytes, None
+
     except Exception as e:
         return None, str(e)
-
 
 # ------------------------------------------------------------
 # Session defaults
@@ -1265,6 +1265,30 @@ def render_waveform_panel(
     )
 
 
+    # W4C2: cleanup legacy impact traces
+    try:
+        cleaned_traces = []
+        legacy_names = {
+            "Impacts",
+            "Impacts_DISABLED_OLD",
+            "IMPACTS",
+            "IMPACTS_OLD",
+            "IMPACTS_OLD_DISABLED",
+            "Impactos detectados_OLD_DISABLED",
+            "Impactos detectados OLD DISABLED",
+        }
+
+        for tr in fig.data:
+            tr_name = str(getattr(tr, "name", "") or "").strip()
+            if tr_name in legacy_names or tr_name.endswith("_OLD_DISABLED"):
+                continue
+            cleaned_traces.append(tr)
+
+        fig.data = tuple(cleaned_traces)
+    except Exception:
+        pass
+
+
     # ==============================
     # W2.3: Visual impact markers
     # ==============================
@@ -1301,7 +1325,7 @@ def render_waveform_panel(
                         x=impact_x,
                         y=impact_mark_y,
                         mode="markers",
-                        name="Impacts",
+                        name="Impactos detectados_OLD_DISABLED",
                         marker=dict(
                             size=9,
                             color="red",
@@ -1355,6 +1379,92 @@ def render_waveform_panel(
     panel_title = f"Waveform {panel_index + 1} — {primary.name}"
     st.markdown(f"### {panel_title}")
 
+    
+    # ==============================
+    # W2.3 FINAL: Impact markers (VISIBLE)
+    # ==============================
+    try:
+        impact_y = np.asarray(prepared.amplitude, dtype=float)
+        impact_t = np.asarray(prepared.time_s, dtype=float)
+
+        mask = np.isfinite(impact_y) & np.isfinite(impact_t)
+        impact_y = impact_y[mask]
+        impact_t = impact_t[mask]
+
+        if impact_y.size > 0:
+            rms_val = float(np.sqrt(np.mean(impact_y ** 2)))
+            threshold = 3.5 * rms_val
+
+            idx = np.where(np.abs(impact_y) > threshold)[0]
+
+            clean_idx = []
+            if idx.size > 0:
+                clean_idx = [int(idx[0])]
+                for i in idx[1:]:
+                    i = int(i)
+                    if i - clean_idx[-1] > 5:
+                        clean_idx.append(i)
+
+            if clean_idx:
+                x_imp = impact_t[clean_idx]
+                y_imp = impact_y[clean_idx]
+
+                if x_axis_unit == "ms":
+                    x_imp = x_imp * 1000.0
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_imp,
+                        y=y_imp,
+                        mode="markers",
+                        name="Impactos detectados",
+                        marker=dict(
+                            size=10,
+                            color="red",
+                            line=dict(width=2, color="white"),
+                        ),
+                        hovertemplate="Impacto<br>x=%{x}<br>y=%{y}<extra></extra>",
+                    )
+                )
+    except Exception:
+        pass
+
+
+    # W4C3: final legend cleanup right before rendering
+    try:
+        filtered = []
+        seen_visible_impact = False
+
+        for tr in fig.data:
+            tr_name = str(getattr(tr, "name", "") or "").strip()
+
+            # eliminar cualquier rastro viejo/renombrado
+            if (
+                tr_name.endswith("_OLD_DISABLED")
+                or tr_name in {
+                    "Impacts",
+                    "Impacts_DISABLED_OLD",
+                    "IMPACTS",
+                    "IMPACTS_OLD",
+                    "IMPACTS_OLD_DISABLED",
+                    "Impactos detectados_OLD_DISABLED",
+                    "Impactos detectados OLD DISABLED",
+                }
+            ):
+                continue
+
+            # si por alguna razón hay más de una traza visible de impactos, dejar solo una
+            if tr_name == "Impactos detectados":
+                if seen_visible_impact:
+                    continue
+                seen_visible_impact = True
+
+            filtered.append(tr)
+
+        fig.data = tuple(filtered)
+    except Exception:
+        pass
+
     st.plotly_chart(
         fig,
         use_container_width=True,
@@ -1400,10 +1510,13 @@ def render_waveform_panel(
     with col_report:
         if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
             png_bytes_for_report = None
+            png_error_for_report = None
+
             try:
-                png_bytes_for_report, _png_error_for_report = build_export_png_bytes(fig=fig)
-            except Exception:
+                png_bytes_for_report, png_error_for_report = build_export_png_bytes(fig=fig)
+            except Exception as e:
                 png_bytes_for_report = None
+                png_error_for_report = str(e)
 
             queue_waveform_to_report(
                 prepared,
@@ -1412,7 +1525,11 @@ def render_waveform_panel(
                 text_diag,
                 image_bytes=png_bytes_for_report,
             )
-            st.success("Waveform enviado al reporte")
+
+            if png_bytes_for_report is not None:
+                st.success("Waveform enviado al reporte con imagen PNG.")
+            else:
+                st.warning(f"Waveform enviado al reporte sin PNG. Detalle: {png_error_for_report}")
 
     panel_error = st.session_state.wm_export_store[export_state_key]["error"]
     if panel_error:
@@ -1667,10 +1784,48 @@ try:
                 if idx - impacts[-1] > 5:
                     impacts.append(idx)
 
+        
         insight_parts = []
+
         if kurtosis > 4.0:
             insight_parts.append(
-                "Se detecta comportamiento impulsivo en la señal, compatible con impactos o transitorios."
+                "La señal presenta contenido transitorio de alta energía, indicando excitaciones no lineales en el sistema."
+            )
+
+        if crest_factor > 3.0:
+            insight_parts.append(
+                "El incremento en el factor de cresta sugiere la presencia de eventos transitorios de corta duración."
+            )
+
+        if abs(skewness) > 0.5:
+            direction = "positiva" if skewness > 0 else "negativa"
+            insight_parts.append(
+                f"La señal presenta asimetría {direction}, asociada a condiciones dinámicas no balanceadas."
+            )
+
+        if not insight_parts:
+            insight_parts.append(
+                "La señal presenta comportamiento estable dentro de condiciones normales de operación."
+            )
+
+        # 🔥 CONTEXTO DE SOPORTE (COJINETE vs RODAMIENTO)
+        machine_name = str(primary.name).upper()
+
+        if "COMPRESOR" in machine_name or "RECIP" in machine_name:
+            soporte_txt = (
+                " Para sistemas con cojinete plano, este comportamiento puede estar relacionado con "
+                "condiciones de lubricación, holguras dinámicas o contacto intermitente."
+            )
+        else:
+            soporte_txt = (
+                " En sistemas con rodamientos, este patrón puede asociarse a defectos incipientes o condiciones de carga."
+            )
+
+        insight_parts = [" ".join(insight_parts) + soporte_txt]
+
+        if kurtosis > 4.0:
+            insight_parts.append(
+                "Se detecta comportamiento impulsivo en la señal, compatible con transitorios o transitorios."
             )
         if crest_factor > 3.0:
             insight_parts.append(
@@ -1707,16 +1862,16 @@ try:
         st.info(" ".join(insight_parts))
 
         ic1, ic2 = st.columns(2)
-        ic1.metric("Cantidad de impactos", str(len(impacts)))
+        ic1.metric("Cantidad de transitorios", str(len(impacts)))
         ic2.metric("Threshold dinámico", f"{threshold:.4f}")
 
         if impacts:
             preview = ", ".join(str(x) for x in impacts[:20])
             st.caption(f"Índices detectados: {preview}")
             if len(impacts) > 20:
-                st.caption(f"Mostrando 20 de {len(impacts)} impactos detectados.")
+                st.caption(f"Mostrando 20 de {len(impacts)} transitorios detectados.")
         else:
-            st.caption("No se detectaron impactos sobre el umbral dinámico.")
+            st.caption("No se detectaron transitorios sobre el umbral dinámico.")
 
     st.markdown("### Debug waveform")
     st.write("signals_count:", debug_signals_count)
