@@ -1,5 +1,6 @@
+from __future__ import annotations
+
 import base64
-import html
 import io
 import math
 from pathlib import Path
@@ -8,25 +9,11 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.io as pio
 import streamlit as st
 
 from core.auth import render_user_menu, require_login
-from core.diagnostics import build_shaft_text_diagnostics
-from core.module_patterns import export_report_row, helper_card, panel_card
-from core.ui_theme import (
-    apply_watermelon_page_style,
-    draw_info_box,
-    draw_top_strip,
-    page_header,
-)
-from core.wm_diagnostics import (
-    boundary_utilization_pct,
-    build_clearance_diagnostics,
-    detect_early_rub,
-    format_number,
-    get_semaforo_status,
-    remaining_margin_pct,
-)
+from core.ui_theme import apply_watermelon_page_style, page_header
 
 
 # ============================================================
@@ -35,15 +22,71 @@ from core.wm_diagnostics import (
 st.set_page_config(page_title="Shaft Centerline", layout="wide")
 LOGO_PATH = Path("assets/watermelon_logo.png")
 
+require_login()
 apply_watermelon_page_style()
+
+
+# ============================================================
+# SESSION KEYS
+# ============================================================
+SCL_UPLOAD_FILES_KEY = "wm_scl_upload_files"
+REPORT_ITEMS_KEY = "report_items"
 
 
 # ============================================================
 # HELPERS
 # ============================================================
+class PersistedUploadedFile:
+    def __init__(self, name: str, data: bytes):
+        self.name = name
+        self._data = data
+
+    def read(self) -> bytes:
+        return self._data
+
+    def getvalue(self) -> bytes:
+        return self._data
+
+    def seek(self, pos: int) -> None:
+        return None
+
+
 def ensure_report_state() -> None:
-    if "report_items" not in st.session_state:
-        st.session_state["report_items"] = []
+    if REPORT_ITEMS_KEY not in st.session_state:
+        st.session_state[REPORT_ITEMS_KEY] = []
+
+
+def set_scl_persisted_files(file_objs) -> None:
+    packed = []
+    for file_obj in file_objs or []:
+        if file_obj is None:
+            continue
+        try:
+            data = file_obj.getvalue()
+        except Exception:
+            try:
+                file_obj.seek(0)
+            except Exception:
+                pass
+            data = file_obj.read()
+        packed.append(
+            {
+                "name": getattr(file_obj, "name", "Shaft_Centerline.csv"),
+                "data": data,
+            }
+        )
+    st.session_state[SCL_UPLOAD_FILES_KEY] = packed
+
+
+def get_scl_persisted_files() -> List[PersistedUploadedFile]:
+    out: List[PersistedUploadedFile] = []
+    for item in st.session_state.get(SCL_UPLOAD_FILES_KEY, []):
+        out.append(PersistedUploadedFile(name=item["name"], data=item["data"]))
+    return out
+
+
+def clear_scl_persisted_files() -> None:
+    st.session_state.pop(SCL_UPLOAD_FILES_KEY, None)
 
 
 def get_logo_data_uri(path: Path) -> Optional[str]:
@@ -163,9 +206,172 @@ def build_boundary_curve(center_x: float, center_y: float, clearance_x: float, c
     return bx, by
 
 
-# ============================================================
-# CSV LOADER
-# ============================================================
+def boundary_utilization_pct(
+    x: np.ndarray,
+    y: np.ndarray,
+    center_x: float,
+    center_y: float,
+    clearance_x: float,
+    clearance_y: float,
+) -> np.ndarray:
+    if clearance_x <= 0 or clearance_y <= 0:
+        return np.zeros_like(x, dtype=float)
+    x_rel = (x - center_x) / clearance_x
+    y_rel = (y - center_y) / clearance_y
+    util = np.sqrt(x_rel**2 + y_rel**2) * 100.0
+    return util
+
+
+def detect_early_rub(
+    x: np.ndarray,
+    y: np.ndarray,
+    speed: np.ndarray,
+    center_x: float,
+    center_y: float,
+    clearance_x: float,
+    clearance_y: float,
+    warning_util_pct: float = 80.0,
+    danger_util_pct: float = 95.0,
+) -> Dict[str, Any]:
+    util = boundary_utilization_pct(x, y, center_x, center_y, clearance_x, clearance_y)
+    warning_idx = np.where(util >= warning_util_pct)[0]
+    danger_idx = np.where(util >= danger_util_pct)[0]
+
+    first_warning_speed = float(speed[warning_idx[0]]) if len(warning_idx) else None
+    first_danger_speed = float(speed[danger_idx[0]]) if len(danger_idx) else None
+
+    max_util = float(np.max(util)) if len(util) else 0.0
+
+    if max_util >= danger_util_pct:
+        severity = "DANGER"
+        color = "#dc2626"
+        message = "Riesgo alto de pérdida de margen geométrico / rub"
+    elif max_util >= warning_util_pct:
+        severity = "WARNING"
+        color = "#f59e0b"
+        message = "Aproximación significativa al límite geométrico"
+    else:
+        severity = "NORMAL"
+        color = "#16a34a"
+        message = "Operación dentro del margen geométrico"
+
+    trend_score = 0.0
+    if len(util) > 1:
+        trend_score = float(util[-1] - util[0])
+
+    return {
+        "severity": severity,
+        "color": color,
+        "message": message,
+        "max_util_pct": max_util,
+        "first_warning_speed": first_warning_speed,
+        "first_danger_speed": first_danger_speed,
+        "warning_points": int(len(warning_idx)),
+        "contact_points": int(len(danger_idx)),
+        "trend_score": trend_score,
+    }
+
+
+def get_semaforo_status(max_util_pct: float) -> Tuple[str, str]:
+    if max_util_pct >= 95.0:
+        return "DANGER", "#dc2626"
+    if max_util_pct >= 80.0:
+        return "WARNING", "#f59e0b"
+    return "NORMAL", "#16a34a"
+
+
+def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[str]]:
+    try:
+        png = pio.to_image(fig, format="png", width=1800, height=1100, scale=2)
+        return png, None
+    except Exception as e:
+        return None, str(e)
+
+
+def push_report_item(title: str, notes: str, image_bytes: Optional[bytes]) -> None:
+    ensure_report_state()
+    st.session_state[REPORT_ITEMS_KEY].append(
+        {
+            "type": "figure",
+            "title": title,
+            "notes": notes,
+            "image_bytes": image_bytes,
+        }
+    )
+
+
+def build_shaft_text_diagnostics(
+    status: str,
+    util_max: float,
+    margin_min: float,
+    first_warning_speed: Optional[float],
+    first_danger_speed: Optional[float],
+) -> Dict[str, str]:
+    status_up = str(status or "").upper()
+    util_max = float(util_max or 0.0)
+    margin_min = float(margin_min or 0.0)
+
+    warning_txt = f"{float(first_warning_speed):.0f} rpm" if first_warning_speed is not None else "no identificado"
+    danger_txt = f"{float(first_danger_speed):.0f} rpm" if first_danger_speed is not None else "no identificado"
+
+    if status_up == "DANGER" or util_max >= 100.0 or margin_min <= 0.0:
+        headline = "Posición de eje fuera del margen geométrico admisible del cojinete"
+        detail = (
+            f"La trayectoria del eje (shaft centerline) evidencia una condición de operación fuera de la envolvente geométrica del cojinete, "
+            f"con una utilización máxima del clearance del {util_max:.1f}% y un margen residual de {margin_min:.1f}%. "
+            f"Se identifica ingreso a condición de advertencia alrededor de {warning_txt} y condición severa alrededor de {danger_txt}.\n\n"
+            f"Desde el punto de vista rotodinámico, este comportamiento es consistente con un desplazamiento excéntrico elevado del rotor dentro del cojinete, "
+            f"lo que sugiere sobrecarga radial efectiva o pérdida de capacidad de centrado hidrodinámico. El patrón observado puede asociarse a desalineación, "
+            f"incremento de carga transmitida, pérdida de rigidez del film lubricante, clearances reales diferentes a los asumidos o combinación de estos mecanismos.\n\n"
+            f"La pérdida de margen geométrico incrementa de forma significativa la probabilidad de interacción rotor-estator (rub), "
+            f"especialmente durante transitorios, cambios de carga o pasos por velocidad crítica."
+        )
+        action = (
+            "Se recomienda como acción prioritaria:\n"
+            "- Verificar alineación en condición fría y caliente\n"
+            "- Evaluar carga radial real del tren y condición de soporte\n"
+            "- Revisar presión, temperatura y viscosidad del sistema de lubricación\n"
+            "- Validar clearances reales del cojinete frente a los valores de diseño\n"
+            "- Evitar operación sostenida en este régimen hasta completar la evaluación técnica"
+        )
+    elif status_up == "WARNING" or util_max >= 80.0 or margin_min <= 20.0:
+        headline = "Posición de eje con reducción significativa del margen geométrico"
+        detail = (
+            f"La trayectoria del eje muestra aproximación relevante al límite geométrico del cojinete, "
+            f"con una utilización máxima del clearance del {util_max:.1f}% y un margen mínimo remanente de {margin_min:.1f}%. "
+            f"Se identifica inicio de condición de advertencia alrededor de {warning_txt}.\n\n"
+            f"Este comportamiento sugiere incremento de excentricidad operativa y reducción de la capacidad de centrado del sistema rotor-cojinete. "
+            f"Desde la perspectiva rotodinámica, la condición requiere seguimiento cercano para evitar evolución hacia pérdida total de margen y eventual interacción rotor-estator."
+        )
+        action = (
+            "Se recomienda:\n"
+            "- Correlacionar esta condición con historial de operación y tendencia de vibración\n"
+            "- Revisar alineación, carga radial y comportamiento térmico\n"
+            "- Confirmar condición de lubricación y estabilidad del film\n"
+            "- Mantener seguimiento estrecho antes de extender operación en este régimen"
+        )
+    else:
+        headline = "Posición de eje dentro del margen geométrico esperado"
+        detail = (
+            f"La trayectoria del eje se mantiene dentro de la envolvente geométrica del cojinete, "
+            f"con una utilización máxima del clearance del {util_max:.1f}% y un margen mínimo remanente de {margin_min:.1f}%.\n\n"
+            f"Desde el punto de vista rotodinámico, no se observan indicios de pérdida relevante de margen geométrico en la condición analizada. "
+            f"La respuesta es compatible con operación estable del sistema rotor-cojinete dentro del rango evaluado."
+        )
+        action = (
+            "Se recomienda:\n"
+            "- Mantener seguimiento periódico de la posición de eje\n"
+            "- Correlacionar con vibración, fase y variables operativas\n"
+            "- Confirmar estabilidad del comportamiento en futuras corridas"
+        )
+
+    return {
+        "headline": headline,
+        "detail": detail,
+        "action": action,
+    }
+
+
 def read_scl_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame]:
     file_obj.seek(0)
     raw_bytes = file_obj.read()
@@ -249,9 +455,6 @@ def read_scl_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame]:
     return meta, raw_df, grouped_df
 
 
-# ============================================================
-# MULTI-FILE LOADER
-# ============================================================
 def uploaded_file_label(file_obj) -> str:
     return Path(getattr(file_obj, "name", "Shaft_Centerline.csv")).name
 
@@ -294,9 +497,6 @@ def parse_uploaded_scl_files(files: List[Any]) -> Tuple[List[Dict[str, Any]], Li
     return parsed_items, failed_items
 
 
-# ============================================================
-# FIGURE
-# ============================================================
 def build_scl_figure(
     df: pd.DataFrame,
     meta: Dict[str, str],
@@ -309,14 +509,10 @@ def build_scl_figure(
     normalize_to_origin: bool,
     x_range: List[float],
     y_range: List[float],
-    clearance_mode: str,
-    clearance_center_mode: str,
     clearance_center_x: float,
     clearance_center_y: float,
     clearance_x: float,
     clearance_y: float,
-    display_speed_min: float,
-    display_speed_max: float,
     semaforo_status: str,
     semaforo_color: str,
 ) -> Tuple[go.Figure, Dict[str, float]]:
@@ -361,42 +557,13 @@ def build_scl_figure(
             mode="lines",
             line=dict(color=semaforo_color, width=2.4, dash="dot"),
             hovertemplate=(
-                f"Clearance Boundary<br>"
-                f"Center X: {clearance_center_x:.3f} {gap_unit}<br>"
+                f"Boundary<br>Center X: {clearance_center_x:.3f} {gap_unit}<br>"
                 f"Center Y: {clearance_center_y:.3f} {gap_unit}<br>"
                 f"Cx: {clearance_x:.3f} {gap_unit}<br>"
-                f"Cy: {clearance_y:.3f} {gap_unit}<br>"
-                f"Status: {semaforo_status}<extra></extra>"
+                f"Cy: {clearance_y:.3f} {gap_unit}<extra></extra>"
             ),
             showlegend=False,
-            name="Clearance Boundary",
-        )
-    )
-
-    if semaforo_status == "DANGER":
-        fig.add_trace(
-            go.Scatter(
-                x=bx,
-                y=by,
-                mode="lines",
-                line=dict(color=semaforo_color, width=7),
-                opacity=0.12,
-                hoverinfo="skip",
-                showlegend=False,
-            )
-        )
-
-    fig.add_trace(
-        go.Scatter(
-            x=[clearance_center_x],
-            y=[clearance_center_y],
-            mode="markers",
-            marker=dict(size=8, color="#111827", symbol="x"),
-            hovertemplate=(
-                f"Boundary Center<br>X: {clearance_center_x:.3f} {gap_unit}<br>"
-                f"Y: {clearance_center_y:.3f} {gap_unit}<extra></extra>"
-            ),
-            showlegend=False,
+            name="Boundary",
         )
     )
 
@@ -479,376 +646,334 @@ def build_scl_figure(
         )
     )
 
-    if show_rpm_labels and len(plot_df) > 0:
-        idxs = list(range(0, len(plot_df), max(1, marker_stride)))
-        if idxs[-1] != len(plot_df) - 1:
-            idxs.append(len(plot_df) - 1)
-
+    if show_rpm_labels:
+        stride = max(int(marker_stride), 1)
+        label_df = plot_df.iloc[::stride, :]
         fig.add_trace(
             go.Scatter(
-                x=plot_df.iloc[idxs]["x_plot"],
-                y=plot_df.iloc[idxs]["y_plot"],
+                x=label_df["x_plot"],
+                y=label_df["y_plot"],
                 mode="text",
-                text=[str(int(round(v))) for v in plot_df.iloc[idxs]["speed"]],
-                textfont=dict(size=10, color="#6b7280"),
+                text=[f"{int(round(v))}" for v in label_df["speed"]],
+                textposition="top center",
+                textfont=dict(size=10, color="#334155"),
                 hoverinfo="skip",
                 showlegend=False,
             )
         )
 
-    diag = build_clearance_diagnostics(
-        x=x,
-        y=y,
+    fig.update_layout(
+        template="plotly_white",
+        height=760,
+        xaxis_title=f"Paired probe ({gap_unit})",
+        yaxis_title=f"Probe ({gap_unit})",
+        xaxis=dict(range=x_range, zeroline=True, showline=True, linecolor="#9ca3af", ticks="outside"),
+        yaxis=dict(range=y_range, zeroline=True, showline=True, linecolor="#9ca3af", ticks="outside", scaleanchor="x", scaleratio=1),
+        margin=dict(l=60, r=60, t=60, b=60),
+        showlegend=False,
+    )
+
+    util = boundary_utilization_pct(
+        x=plot_df["x_plot"].to_numpy(dtype=float),
+        y=plot_df["y_plot"].to_numpy(dtype=float),
         center_x=clearance_center_x,
         center_y=clearance_center_y,
         clearance_x=clearance_x,
         clearance_y=clearance_y,
     )
 
-    util_a = boundary_utilization_pct(row_a_x, row_a_y, clearance_center_x, clearance_center_y, clearance_x, clearance_y)
-    util_b = boundary_utilization_pct(row_b_x, row_b_y, clearance_center_x, clearance_center_y, clearance_x, clearance_y)
-    util_end = boundary_utilization_pct(float(x[-1]), float(y[-1]), clearance_center_x, clearance_center_y, clearance_x, clearance_y)
-
-    diag["util_a"] = util_a
-    diag["util_b"] = util_b
-    diag["util_end"] = util_end
-    diag["margin_a"] = remaining_margin_pct(util_a)
-    diag["margin_b"] = remaining_margin_pct(util_b)
-    diag["margin_end"] = remaining_margin_pct(util_end)
-
-    dt_start = pd.to_datetime(df["ts_min"], errors="coerce").min()
-    dt_end = pd.to_datetime(df["ts_max"], errors="coerce").max()
-    dt_text = "—"
-    if pd.notna(dt_start) and pd.notna(dt_end):
-        dt_text = f"{dt_start.strftime('%Y-%m-%d %H:%M:%S')} → {dt_end.strftime('%Y-%m-%d %H:%M:%S')}"
-
-    draw_top_strip(
-        fig=fig,
-        machine=meta.get("Machine Name", ""),
-        point_text=f"{meta.get('Point Name', '-')} / {meta.get('Paired Point Name', '-')}",
-        variable=meta.get("Variable", "-"),
-        dt_text=dt_text,
-        rpm_text=f"{int(round(df['speed'].min()))} - {int(round(df['speed'].max()))} {speed_unit}",
-        logo_uri=logo_uri,
-    )
-
-    if show_info_box:
-        rows = [
-            ("Cursor A", f"X={format_number(row_a_x,3)} / Y={format_number(row_a_y,3)} {gap_unit} @ {int(round(row_a['speed']))} {speed_unit}"),
-            ("Cursor B", f"X={format_number(row_b_x,3)} / Y={format_number(row_b_y,3)} {gap_unit} @ {int(round(row_b['speed']))} {speed_unit}"),
-            ("Boundary", f"{clearance_mode} · Cx={format_number(clearance_x,3)} / Cy={format_number(clearance_y,3)} {gap_unit}"),
-            ("Boundary Center", f"{clearance_center_mode} · X={format_number(clearance_center_x,3)} / Y={format_number(clearance_center_y,3)}"),
-            ("RPM Window", f"{int(round(display_speed_min))} to {int(round(display_speed_max))} {speed_unit}"),
-            ("Status", f"<span style='color:{semaforo_color};'><b>{semaforo_status}</b></span>"),
-            ("API 684 Helper", f"Max utilization {format_number(diag['util_max'],1)}% · Min margin {format_number(diag['margin_min'],1)}%"),
-            ("Normalize", "Enabled" if normalize_to_origin else "Disabled"),
-        ]
-        draw_info_box(fig=fig, title="Shaft Centerline", rows=rows)
-
-    fig.update_layout(
-        height=820,
-        margin=dict(l=60, r=20, t=145, b=60),
-        plot_bgcolor="#f8fafc",
-        paper_bgcolor="#f3f4f6",
-        font=dict(color="#111827"),
-        showlegend=False,
-    )
-
-    fig.update_xaxes(
-        title_text=f"{meta.get('Paired Point Name', 'X')} ({gap_unit})",
-        range=x_range,
-        showgrid=True,
-        gridcolor="rgba(148, 163, 184, 0.18)",
-        zeroline=True,
-        zerolinecolor="rgba(148,163,184,0.35)",
-        showline=True,
-        linecolor="#9ca3af",
-        ticks="outside",
-        scaleanchor="y",
-        scaleratio=1,
-    )
-
-    fig.update_yaxes(
-        title_text=f"{meta.get('Point Name', 'Y')} ({gap_unit})",
-        range=y_range,
-        showgrid=True,
-        gridcolor="rgba(148, 163, 184, 0.18)",
-        zeroline=True,
-        zerolinecolor="rgba(148,163,184,0.35)",
-        showline=True,
-        linecolor="#9ca3af",
-        ticks="outside",
-    )
+    diag = {
+        "util_max": float(np.max(util)) if len(util) else 0.0,
+        "margin_min": max(0.0, 100.0 - (float(np.max(util)) if len(util) else 0.0)),
+        "util_a": float(boundary_utilization_pct(np.array([row_a_x]), np.array([row_a_y]), clearance_center_x, clearance_center_y, clearance_x, clearance_y)[0]),
+        "util_b": float(boundary_utilization_pct(np.array([row_b_x]), np.array([row_b_y]), clearance_center_x, clearance_center_y, clearance_x, clearance_y)[0]),
+    }
 
     return fig, diag
 
 
-# ============================================================
-# EXPORT / REPORT
-# ============================================================
-def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
-    return go.Figure(fig.to_dict())
+def _build_scl_report_notes(text_diag: Dict[str, str]) -> str:
+    return f"{text_diag['headline']}\n\n{text_diag['detail']}\n\n{text_diag['action']}"
 
 
-def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
-    fig = go.Figure(export_fig)
 
-    for trace in fig.data:
-        tj = trace.to_plotly_json()
-        mode = tj.get("mode", "") or ""
+def _add_scl_export_footer(fig: go.Figure, text_diag: Dict[str, str]) -> go.Figure:
+    """
+    Exportación limpia de la gráfica Shaft Centerline.
+    El diagnóstico NO debe ir incrustado en la imagen porque el reporte ya lo coloca debajo.
+    """
+    export_fig = go.Figure(fig)
+    export_fig.update_layout(
+        margin=dict(l=70, r=70, t=60, b=80),
+        height=900,
+    )
+    return export_fig
 
-        if "lines" in mode:
-            line = dict(tj.get("line", {}) or {})
-            line["width"] = max(3.2, float(line.get("width", 1.0)) * 2.0)
-            trace.line = line
 
-        if "markers" in mode:
-            marker = dict(tj.get("marker", {}) or {})
-            marker["size"] = max(10, float(marker.get("size", 6)) * 1.5)
-            trace.marker = marker
+def queue_scl_to_report(meta, fig, title, text_diag, image_bytes=None):
+    notes = _build_scl_report_notes(text_diag)
+    push_report_item(title=title, notes=notes, image_bytes=image_bytes)
 
-        if "text" in mode:
-            textfont = dict(tj.get("textfont", {}) or {})
-            textfont["size"] = max(16, int(float(textfont.get("size", 10)) * 1.8))
-            trace.textfont = textfont
 
-    fig.update_layout(
-        width=4300,
-        height=2400,
-        margin=dict(l=120, r=80, t=320, b=120),
-        paper_bgcolor="#f3f4f6",
-        plot_bgcolor="#f8fafc",
-        font=dict(size=26, color="#111827"),
+def _scl_prepare_compare_df(
+    grouped_df: pd.DataFrame,
+    smooth_window: int,
+    normalize_to_origin: bool,
+    rpm_min_filter: Optional[float],
+    rpm_max_filter: Optional[float],
+) -> pd.DataFrame:
+    df = grouped_df.copy()
+
+    if rpm_min_filter is not None and rpm_max_filter is not None:
+        rpm_lo = min(float(rpm_min_filter), float(rpm_max_filter))
+        rpm_hi = max(float(rpm_min_filter), float(rpm_max_filter))
+        df = df[
+            (df["speed"] >= rpm_lo) &
+            (df["speed"] <= rpm_hi)
+        ].copy()
+
+    df["x_gap"] = smooth_series(df["x_gap"], smooth_window)
+    df["y_gap"] = smooth_series(df["y_gap"], smooth_window)
+
+    if normalize_to_origin and len(df) > 0:
+        x0 = float(df["x_gap"].iloc[0])
+        y0 = float(df["y_gap"].iloc[0])
+        df["x_plot"] = df["x_gap"] - x0
+        df["y_plot"] = df["y_gap"] - y0
+    else:
+        df["x_plot"] = df["x_gap"]
+        df["y_plot"] = df["y_gap"]
+    return df
+
+
+def _scl_compare_metrics(
+    item: Dict[str, Any],
+    smooth_window: int,
+    normalize_to_origin: bool,
+    rpm_min_filter: Optional[float],
+    rpm_max_filter: Optional[float],
+) -> Dict[str, Any]:
+    df = _scl_prepare_compare_df(
+        item["grouped_df"],
+        smooth_window,
+        normalize_to_origin,
+        rpm_min_filter,
+        rpm_max_filter,
     )
 
-    for ann in fig.layout.annotations or []:
-        if ann.font is not None:
-            ann.font.size = max(20, int((ann.font.size or 12) * 1.75))
+    x = df["x_plot"].to_numpy(dtype=float)
+    y = df["y_plot"].to_numpy(dtype=float)
+    speed = df["speed"].to_numpy(dtype=float)
 
-    for img in fig.layout.images or []:
-        sx = getattr(img, "sizex", None)
-        sy = getattr(img, "sizey", None)
-        if sx is not None:
-            img.sizex = sx * 1.10
-        if sy is not None:
-            img.sizey = sy * 1.10
-
-    return fig
-
-
-def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[str]]:
-    try:
-        export_fig = _build_export_safe_figure(fig)
-        export_fig = _scale_export_figure(export_fig)
-        return export_fig.to_image(format="png", width=4300, height=2200, scale=2), None
-    except Exception as e:
-        return None, str(e)
-
-
-def queue_scl_to_report(meta: Dict[str, str], fig: go.Figure, title: str, text_diag) -> None:
-    ensure_report_state()
-    st.session_state.report_items.append(
-        {
-            "id": f"report-scl-{meta.get('Machine Name','')}-{meta.get('Point Name','')}-{title}",
-            "type": "shaft_centerline",
-            "title": title,
-            "notes": _build_scl_report_notes(text_diag),
-            "signal_id": meta.get("Point Name", ""),
-            "figure": go.Figure(fig),
-            "machine": meta.get("Machine Name", ""),
-            "point": meta.get("Point Name", ""),
-            "variable": meta.get("Variable", ""),
-            "timestamp": "",
-        }
+    boundary = resolve_clearance_boundary(
+        x=x,
+        y=y,
+        mode="Auto",
+        center_mode="Data Mean" if not normalize_to_origin else "Origin (0,0)",
+        manual_cx=5.0,
+        manual_cy=5.0,
+        manual_center_x=0.0,
+        manual_center_y=0.0,
     )
 
+    early_rub = detect_early_rub(
+        x=x,
+        y=y,
+        speed=speed,
+        center_x=boundary["center_x"],
+        center_y=boundary["center_y"],
+        clearance_x=boundary["clearance_x"],
+        clearance_y=boundary["clearance_y"],
+        warning_util_pct=80.0,
+        danger_util_pct=95.0,
+    )
 
-# ============================================================
-# PANEL RENDER
-# ============================================================
+    max_util = float(early_rub.get("max_util_pct", 0.0) or 0.0)
+    min_margin = max(0.0, 100.0 - max_util)
+    centroid_x = float(np.mean(x)) if len(x) else 0.0
+    centroid_y = float(np.mean(y)) if len(y) else 0.0
+    radial_peak = float(np.max(np.sqrt(x**2 + y**2))) if len(x) else 0.0
+
+    ts_start = pd.to_datetime(df["ts_min"], errors="coerce").min() if "ts_min" in df.columns else None
+    ts_end = pd.to_datetime(df["ts_max"], errors="coerce").max() if "ts_max" in df.columns else None
+
+    return {
+        "label": item["label"],
+        "machine": item["machine"],
+        "point": item["point"],
+        "paired_point": item["paired_point"],
+        "df": df,
+        "max_util": max_util,
+        "min_margin": min_margin,
+        "first_warning_speed": early_rub.get("first_warning_speed"),
+        "first_danger_speed": early_rub.get("first_danger_speed"),
+        "severity": early_rub.get("severity", "NORMAL"),
+        "centroid_x": centroid_x,
+        "centroid_y": centroid_y,
+        "radial_peak": radial_peak,
+        "ts_start": ts_start,
+        "ts_end": ts_end,
+    }
+
+
+def _scl_compare_diagnostic(records: List[Dict[str, Any]]) -> Dict[str, str]:
+    ordered = sorted(
+        records,
+        key=lambda r: pd.Timestamp(r["ts_start"]) if r["ts_start"] is not None else pd.Timestamp.min
+    )
+
+    baseline = ordered[0]
+    latest = ordered[-1]
+
+    delta_util = float(latest["max_util"] - baseline["max_util"])
+    delta_margin = float(latest["min_margin"] - baseline["min_margin"])
+    delta_radial = float(latest["radial_peak"] - baseline["radial_peak"])
+
+    baseline_centroid = np.array([baseline["centroid_x"], baseline["centroid_y"]], dtype=float)
+    latest_centroid = np.array([latest["centroid_x"], latest["centroid_y"]], dtype=float)
+    centroid_shift = float(np.linalg.norm(latest_centroid - baseline_centroid))
+
+    all_over_limit = all(float(r["max_util"]) >= 100.0 for r in ordered)
+    all_zero_margin = all(float(r["min_margin"]) <= 0.0 for r in ordered)
+    latest_critical = float(latest["max_util"]) >= 100.0 or float(latest["min_margin"]) <= 0.0
+
+    deterioration_score = 0
+    if delta_util > 5.0:
+        deterioration_score += 1
+    if delta_margin < -5.0:
+        deterioration_score += 1
+    if delta_radial > 0.2:
+        deterioration_score += 1
+    if centroid_shift > 0.1:
+        deterioration_score += 1
+
+    improvement_score = 0
+    if delta_util < -5.0:
+        improvement_score += 1
+    if delta_margin > 5.0:
+        improvement_score += 1
+    if delta_radial < -0.2:
+        improvement_score += 1
+
+    if all_over_limit or all_zero_margin:
+        trend_class = "condición crítica sostenida"
+        headline = "Comparación multi-fecha con condición crítica sostenida del sistema rotor-cojinete"
+        trend_sentence = (
+            "Todas las corridas analizadas muestran operación fuera del margen geométrico admisible del cojinete, "
+            "por lo que no se trata de un evento aislado sino de una condición persistente del sistema."
+        )
+    elif latest_critical and deterioration_score >= 2:
+        trend_class = "deterioro progresivo hacia condición crítica"
+        headline = "Comparación multi-fecha con deterioro progresivo hacia condición crítica"
+        trend_sentence = (
+            "La corrida más reciente evidencia empeoramiento respecto a la línea base, "
+            "con reducción adicional del margen geométrico y mayor compromiso dinámico del eje dentro del cojinete."
+        )
+    elif deterioration_score >= 2:
+        trend_class = "deterioro progresivo"
+        headline = "Comparación multi-fecha con deterioro progresivo de la condición rotodinámica"
+        trend_sentence = (
+            "La comparación secuencial evidencia una tendencia desfavorable, compatible con incremento de excentricidad operativa "
+            "y pérdida de capacidad de centrado hidrodinámico."
+        )
+    elif improvement_score >= 2 and not latest_critical:
+        trend_class = "mejora parcial"
+        headline = "Comparación multi-fecha con mejora parcial respecto a la condición base"
+        trend_sentence = (
+            "La corrida más reciente muestra reducción del compromiso geométrico frente a la línea base; "
+            "sin embargo, la condición aún debe validarse contra criterios de aceptación del sistema."
+        )
+    else:
+        trend_class = "cambio moderado"
+        headline = "Comparación multi-fecha con cambios operativos medibles en la trayectoria del eje"
+        trend_sentence = (
+            "No se identifica una variación concluyente compatible con deterioro progresivo severo, "
+            "pero sí cambios medibles en la posición del eje y en la respuesta geométrica del cojinete."
+        )
+
+    detail = (
+        f"Se compararon {len(ordered)} corridas de shaft centerline correspondientes a diferentes fechas de adquisición. "
+        f"La comparación entre la corrida base ({baseline['label']}) y la más reciente ({latest['label']}) muestra una variación de "
+        f"{delta_util:+.1f} puntos porcentuales en la utilización máxima del clearance, "
+        f"{delta_margin:+.1f} puntos en el margen geométrico remanente y "
+        f"{delta_radial:+.3f} en el desplazamiento radial máximo.\n\n"
+        f"El desplazamiento del centro medio de la trayectoria entre ambas corridas es de {centroid_shift:.3f}, "
+        f"parámetro útil para evaluar migración del eje dentro del cojinete y cambios en la condición de centrado hidrodinámico. "
+        f"En clasificación global, la tendencia observada corresponde a: {trend_class}.\n\n"
+        f"{trend_sentence}\n\n"
+        f"Desde el punto de vista de dinámica del rotor, una migración sostenida del centerline acompañada por incremento de utilización de clearance "
+        f"es consistente con aumento de excentricidad operativa, modificación de la carga radial efectiva, cambios en la rigidez del film lubricante, "
+        f"variación de clearances reales o alteraciones en alineación y condición de soporte."
+    )
+
+    if all_over_limit or latest_critical:
+        action = (
+            "Se recomienda:\n"
+            "- Tratar la condición comparativa como hallazgo de alta criticidad\n"
+            "- Contrastar las corridas contra condición base de aceptación o condición post-mantenimiento\n"
+            "- Correlacionar el cambio del centerline con carga, temperatura, lubricación, vibración y fase\n"
+            "- Verificar alineación, condición de soporte y clearances reales del cojinete\n"
+            "- Restringir operación sostenida en el régimen comprometido hasta completar evaluación técnica"
+        )
+    else:
+        action = (
+            "Se recomienda:\n"
+            "- Mantener seguimiento multi-fecha para confirmar si la tendencia es progresiva o dependiente del régimen operativo\n"
+            "- Correlacionar el cambio de centerline con carga, temperatura, lubricación y vibración\n"
+            "- Validar la condición frente a la línea base de aceptación del equipo"
+        )
+
+    return {
+        "headline": headline,
+        "detail": detail,
+        "action": action,
+    }
+
+
 def render_scl_panel(
     item: Dict[str, Any],
     panel_index: int,
-    *,
     logo_uri: Optional[str],
     smooth_window: int,
     show_info_box: bool,
     show_rpm_labels_global: bool,
     marker_stride_global: int,
     normalize_to_origin: bool,
+    clearance_mode: str,
+    clearance_center_mode: str,
+    manual_center_x: float,
+    manual_center_y: float,
+    manual_clearance_x: float,
+    manual_clearance_y: float,
+    auto_scale_xy: bool,
+    manual_x_min: float,
+    manual_x_max: float,
+    manual_y_min: float,
+    manual_y_max: float,
+    early_rub_warning_pct: int,
+    early_rub_danger_pct: int,
+    rpm_min_filter: Optional[float],
+    rpm_max_filter: Optional[float],
 ) -> None:
     meta = item["meta"]
     raw_df = item["raw_df"]
-    grouped_df = item["grouped_df"]
+    grouped_df = item["grouped_df"].copy()
 
-    plot_df = grouped_df.copy()
-    plot_df["x_gap"] = smooth_series(plot_df["x_gap"], smooth_window)
-    plot_df["y_gap"] = smooth_series(plot_df["y_gap"], smooth_window)
+    grouped_df["x_gap"] = smooth_series(grouped_df["x_gap"], smooth_window)
+    grouped_df["y_gap"] = smooth_series(grouped_df["y_gap"], smooth_window)
 
-    full_speed_min = int(plot_df["speed"].min())
-    full_speed_max = int(plot_df["speed"].max())
+    display_df = grouped_df.copy()
 
-    with st.expander(f"Panel {panel_index + 1} · Geometry / Scale / Clearance / RPM Window / Rub", expanded=False):
-        st.markdown("#### RPM Display Range")
-        rpm_range_mode = st.selectbox(
-            "RPM display mode",
-            ["Auto", "Manual"],
-            index=0,
-            key=f"scl_rpm_range_mode_{panel_index}_{item['id']}",
-        )
-
-        if rpm_range_mode == "Auto":
-            display_speed_min = float(full_speed_min)
-            display_speed_max = float(full_speed_max)
-            st.caption("Showing the full RPM range available in this panel.")
-        else:
-            display_speed_min, display_speed_max = st.slider(
-                "Visible RPM range",
-                min_value=full_speed_min,
-                max_value=full_speed_max,
-                value=(full_speed_min, full_speed_max),
-                step=1,
-                key=f"scl_visible_rpm_range_{panel_index}_{item['id']}",
-            )
-            display_speed_min = float(display_speed_min)
-            display_speed_max = float(display_speed_max)
-
-        st.markdown("#### X / Y Scale")
-        auto_scale_xy = st.checkbox(
-            "Auto X/Y",
-            value=True,
-            key=f"scl_auto_xy_{panel_index}_{item['id']}",
-        )
-
-        if auto_scale_xy:
-            manual_x_min = -10.0
-            manual_x_max = 10.0
-            manual_y_min = -10.0
-            manual_y_max = 10.0
-            st.caption("Using automatic independent X and Y ranges for this panel.")
-        else:
-            sx1, sx2 = st.columns(2)
-            with sx1:
-                manual_x_min = st.number_input(
-                    "X min",
-                    value=-10.0,
-                    step=0.5,
-                    format="%.3f",
-                    key=f"scl_xmin_{panel_index}_{item['id']}",
-                )
-                manual_y_min = st.number_input(
-                    "Y min",
-                    value=-10.0,
-                    step=0.5,
-                    format="%.3f",
-                    key=f"scl_ymin_{panel_index}_{item['id']}",
-                )
-            with sx2:
-                manual_x_max = st.number_input(
-                    "X max",
-                    value=10.0,
-                    step=0.5,
-                    format="%.3f",
-                    key=f"scl_xmax_{panel_index}_{item['id']}",
-                )
-                manual_y_max = st.number_input(
-                    "Y max",
-                    value=10.0,
-                    step=0.5,
-                    format="%.3f",
-                    key=f"scl_ymax_{panel_index}_{item['id']}",
-                )
-
-        st.markdown("#### Clearance Boundary")
-        cb1, cb2 = st.columns(2)
-        clearance_mode = cb1.selectbox(
-            "Boundary mode",
-            ["Auto", "Manual"],
-            index=0,
-            key=f"scl_clear_mode_{panel_index}_{item['id']}",
-        )
-        clearance_center_mode = cb2.selectbox(
-            "Boundary center",
-            ["Origin (0,0)", "Data Mean", "Manual"],
-            index=0,
-            key=f"scl_clear_center_mode_{panel_index}_{item['id']}",
-        )
-
-        if clearance_center_mode == "Manual":
-            cc1, cc2 = st.columns(2)
-            manual_center_x = cc1.number_input(
-                "Boundary center X",
-                value=0.0,
-                step=0.1,
-                format="%.3f",
-                key=f"scl_center_x_{panel_index}_{item['id']}",
-            )
-            manual_center_y = cc2.number_input(
-                "Boundary center Y",
-                value=0.0,
-                step=0.1,
-                format="%.3f",
-                key=f"scl_center_y_{panel_index}_{item['id']}",
-            )
-        else:
-            manual_center_x = 0.0
-            manual_center_y = 0.0
-
-        if clearance_mode == "Manual":
-            cm1, cm2 = st.columns(2)
-            manual_clearance_x = cm1.number_input(
-                "Clearance X (Cx)",
-                value=5.0,
-                min_value=0.001,
-                step=0.1,
-                format="%.3f",
-                key=f"scl_clear_x_{panel_index}_{item['id']}",
-            )
-            manual_clearance_y = cm2.number_input(
-                "Clearance Y (Cy)",
-                value=5.0,
-                min_value=0.001,
-                step=0.1,
-                format="%.3f",
-                key=f"scl_clear_y_{panel_index}_{item['id']}",
-            )
-        else:
-            manual_clearance_x = 5.0
-            manual_clearance_y = 5.0
-
-        st.markdown("#### Early Rub Detection")
-        er1, er2 = st.columns(2)
-        early_rub_warning_pct = er1.slider(
-            "Warning utilization %",
-            min_value=50,
-            max_value=98,
-            value=80,
-            step=1,
-            key=f"scl_rub_warn_{panel_index}_{item['id']}",
-        )
-        early_rub_danger_pct = er2.slider(
-            "Danger utilization %",
-            min_value=60,
-            max_value=100,
-            value=95,
-            step=1,
-            key=f"scl_rub_danger_{panel_index}_{item['id']}",
-        )
-
-        if early_rub_danger_pct <= early_rub_warning_pct:
-            early_rub_danger_pct = early_rub_warning_pct + 1
-
-        st.caption(
-            "API 684 helper: normalized position against clearance boundary. "
-            "Early rub detection here is an analytical helper based on utilization proximity and trend."
-        )
-
-    display_df = plot_df[
-        (plot_df["speed"] >= display_speed_min) & (plot_df["speed"] <= display_speed_max)
-    ].copy()
+    if rpm_min_filter is not None and rpm_max_filter is not None:
+        rpm_lo = min(float(rpm_min_filter), float(rpm_max_filter))
+        rpm_hi = max(float(rpm_min_filter), float(rpm_max_filter))
+        display_df = display_df[
+            (display_df["speed"] >= rpm_lo) &
+            (display_df["speed"] <= rpm_hi)
+        ].copy()
 
     if display_df.empty:
-        st.warning(f"Panel {panel_index + 1}: no hay puntos en el rango RPM seleccionado.")
+        st.warning(f"Panel {panel_index + 1}: no hay datos válidos en el rango RPM seleccionado.")
         return
 
     speed_min = int(display_df["speed"].min())
@@ -929,26 +1054,11 @@ def render_scl_panel(
     probe_angle, probe_side = parse_probe_angle_text(meta.get("Probe Angle", ""))
     paired_angle, paired_side = parse_probe_angle_text(meta.get("Paired Probe Angle", ""))
 
-    panel_card(
-        title=f"Shaft Centerline {panel_index + 1} · {machine}",
-        subtitle=f"{point} / {paired_point}",
-        meta_html=(
-            f"Variable: <b>{variable}</b> &nbsp;&nbsp;|&nbsp;&nbsp;"
-            f"Probe Angles: <b>{probe_angle:.0f}° {probe_side}</b> / <b>{paired_angle:.0f}° {paired_side}</b> &nbsp;&nbsp;|&nbsp;&nbsp;"
-            f"Visible Speed Range: <b>{int(display_df['speed'].min())} - {int(display_df['speed'].max())} {speed_unit}</b>"
-        ),
-        chips=[
-            f"File: {item['file_name']}",
-            f"Raw rows: {len(raw_df):,}",
-            f"Grouped points: {len(display_df):,}",
-            f"Gap Unit: {gap_unit}",
-            f"Smoothing: {smooth_window}",
-            f"Normalize: {'Yes' if normalize_to_origin else 'No'}",
-            f"RPM Window: {'Auto' if rpm_range_mode == 'Auto' else 'Manual'}",
-            f"X/Y Scale: {'Auto' if auto_scale_xy else 'Manual'}",
-            f"Boundary: {clearance_mode}",
-            f"Boundary Center: {clearance_center_mode}",
-        ],
+    st.markdown(f"### Shaft Centerline {panel_index + 1} · {machine}")
+    st.caption(
+        f"{point} / {paired_point} | Variable: {variable} | "
+        f"Probe Angles: {probe_angle:.0f}° {probe_side} / {paired_angle:.0f}° {paired_side} | "
+        f"Visible Speed Range: {int(display_df['speed'].min())} - {int(display_df['speed'].max())} {speed_unit}"
     )
 
     fig, diag = build_scl_figure(
@@ -963,14 +1073,10 @@ def render_scl_panel(
         normalize_to_origin=normalize_to_origin,
         x_range=x_range,
         y_range=y_range,
-        clearance_mode=clearance_mode,
-        clearance_center_mode=clearance_center_mode,
         clearance_center_x=boundary["center_x"],
         clearance_center_y=boundary["center_y"],
         clearance_x=boundary["clearance_x"],
         clearance_y=boundary["clearance_y"],
-        display_speed_min=display_speed_min,
-        display_speed_max=display_speed_max,
         semaforo_status=semaforo_status,
         semaforo_color=semaforo_color,
     )
@@ -990,168 +1096,235 @@ def render_scl_panel(
         key=f"wm_scl_plot_{panel_index}_{item['id']}",
     )
 
-    first_warning_text = "—"
-    first_danger_text = "—"
-    if early_rub["first_warning_speed"] is not None:
-        first_warning_text = f"{early_rub['first_warning_speed']:.0f} {speed_unit}"
-    if early_rub["first_danger_speed"] is not None:
-        first_danger_text = f"{early_rub['first_danger_speed']:.0f} {speed_unit}"
-
-    helper_card(
-        title=f"API 684 Helper + Early Rub Detection · Panel {panel_index + 1}",
-        subtitle="Clearance utilization, margin, semáforo y tendencia temprana de roce.",
-        chips=[
-            (f"Semáforo: {semaforo_status}", semaforo_color),
-            (f"Max util: {diag['util_max']:.1f}%", None),
-            (f"Minimum margin: {diag['margin_min']:.1f}%", None),
-            (f"Cursor A util: {diag['util_a']:.1f}%", None),
-            (f"Cursor B util: {diag['util_b']:.1f}%", None),
-            (f"Early rub: {early_rub['severity']}", early_rub["color"]),
-            (f"Rub message: {early_rub['message']}", None),
-            (f"Warning points: {early_rub['warning_points']}", None),
-            (f"Danger points: {early_rub['contact_points']}", None),
-            (f"Trend score: {early_rub['trend_score']:.2f}", None),
-            (f"1st warning: {first_warning_text}", None),
-            (f"1st danger: {first_danger_text}", None),
-        ],
-    )
+    with st.expander(f"Diagnóstico automático · Panel {panel_index + 1}", expanded=True):
+        st.markdown(f"**{text_diag['headline']}**")
+        st.write(text_diag["detail"])
+        st.write(text_diag["action"])
 
     title = f"Shaft Centerline {panel_index + 1} — {machine} — {point} / {paired_point}"
+    notes = _build_scl_report_notes(text_diag)
+    export_fig = _add_scl_export_footer(fig, text_diag)
 
-    export_state_key = (
-        f"scl::{item['id']}::{panel_index}::{smooth_window}::{show_info_box}::{show_rpm_labels_global}::{marker_stride_global}::"
-        f"{normalize_to_origin}::{rpm_range_mode}::{display_speed_min}::{display_speed_max}::"
-        f"{auto_scale_xy}::{manual_x_min}::{manual_x_max}::{manual_y_min}::{manual_y_max}::"
-        f"{clearance_mode}::{clearance_center_mode}::{boundary['center_x']}::{boundary['center_y']}::{boundary['clearance_x']}::{boundary['clearance_y']}::"
-        f"{early_rub_warning_pct}::{early_rub_danger_pct}::{cursor_a_speed}::{cursor_b_speed}"
+    b1, b2 = st.columns(2)
+    with b1:
+        png_bytes, png_error = build_export_png_bytes(export_fig)
+        if st.button("Enviar panel a reporte", key=f"scl_report_btn_{panel_index}_{item['id']}"):
+            push_report_item(title=title, notes=notes, image_bytes=png_bytes)
+            st.success("Panel individual enviado al reporte.")
+    with b2:
+        if png_bytes is not None:
+            st.download_button(
+                "Descargar PNG panel",
+                data=png_bytes,
+                file_name=f"{item['file_stem']}_shaft_centerline_hd.png",
+                mime="image/png",
+                key=f"scl_dl_btn_{panel_index}_{item['id']}",
+                width="stretch",
+            )
+        elif png_error:
+            st.warning(f"No fue posible generar PNG: {png_error}")
+
+
+def render_scl_compare_section(
+    items: List[Dict[str, Any]],
+    *,
+    smooth_window: int,
+    normalize_to_origin: bool,
+    rpm_min_filter: Optional[float] = None,
+    rpm_max_filter: Optional[float] = None,
+    clearance_mode: str = "Auto",
+    clearance_center_mode: str = "Origin (0,0)",
+    manual_center_x: float = 0.0,
+    manual_center_y: float = 0.0,
+    manual_clearance_x: float = 5.0,
+    manual_clearance_y: float = 5.0,
+    auto_scale_xy: bool = True,
+    manual_x_min: float = -10.0,
+    manual_x_max: float = 10.0,
+    manual_y_min: float = -10.0,
+    manual_y_max: float = 10.0,
+) -> None:
+    if len(items) < 2:
+        return
+
+    compare_records = [
+        _scl_compare_metrics(
+            item,
+            smooth_window=smooth_window,
+            normalize_to_origin=normalize_to_origin,
+            rpm_min_filter=rpm_min_filter,
+            rpm_max_filter=rpm_max_filter,
+        )
+        for item in items
+    ]
+
+    compare_records = sorted(
+        compare_records,
+        key=lambda r: pd.Timestamp(r["ts_start"]) if r["ts_start"] is not None else pd.Timestamp.min
     )
 
-    export_report_row(
-        export_key=export_state_key,
-        fig=fig,
-        export_builder=lambda f: build_export_png_bytes(_add_scl_export_footer(f, text_diag)),
-        report_callback=lambda: queue_scl_to_report(meta, fig, title, text_diag),
-        file_name=f"{item['file_stem']}_shaft_centerline_hd.png",
+    st.markdown("---")
+    st.markdown("## Comparación multi-fecha · Shaft Centerline")
+
+    fig = go.Figure()
+
+    # Envolvente visual común para el comparativo multi-fecha.
+    # Usa todos los puntos comparados para construir una referencia geométrica similar a los paneles individuales.
+    valid_dfs = [rec["df"] for rec in compare_records if not rec["df"].empty]
+    if valid_dfs:
+        all_x = np.concatenate([df["x_plot"].to_numpy(dtype=float) for df in valid_dfs])
+        all_y = np.concatenate([df["y_plot"].to_numpy(dtype=float) for df in valid_dfs])
+
+        x_range, y_range = compute_xy_ranges(
+            x=all_x,
+            y=all_y,
+            auto_scale_xy=auto_scale_xy,
+            manual_x_min=manual_x_min,
+            manual_x_max=manual_x_max,
+            manual_y_min=manual_y_min,
+            manual_y_max=manual_y_max,
+        )
+
+        boundary = resolve_clearance_boundary(
+            x=all_x,
+            y=all_y,
+            mode=clearance_mode,
+            center_mode=clearance_center_mode,
+            manual_cx=manual_clearance_x,
+            manual_cy=manual_clearance_y,
+            manual_center_x=manual_center_x,
+            manual_center_y=manual_center_y,
+        )
+
+        bx, by = build_boundary_curve(
+            center_x=boundary["center_x"],
+            center_y=boundary["center_y"],
+            clearance_x=boundary["clearance_x"],
+            clearance_y=boundary["clearance_y"],
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=bx,
+                y=by,
+                mode="lines",
+                name="Clearance / Bearing envelope",
+                line=dict(color="#dc2626", width=2.4, dash="dot"),
+                hoverinfo="skip",
+                showlegend=True,
+            )
+        )
+
+    palette = ["#2563eb", "#16a34a", "#9333ea", "#ea580c", "#dc2626", "#0891b2", "#7c3aed", "#0f766e"]
+
+    for idx, rec in enumerate(compare_records):
+        df = rec["df"]
+        color = palette[idx % len(palette)]
+        date_label = "sin fecha"
+        if rec["ts_start"] is not None:
+            date_label = pd.Timestamp(rec["ts_start"]).strftime("%Y-%m-%d %H:%M")
+
+        fig.add_trace(
+            go.Scatter(
+                x=df["x_plot"],
+                y=df["y_plot"],
+                mode="lines+markers",
+                name=f"{date_label} · {rec['label']}",
+                line=dict(width=2.2, color=color),
+                marker=dict(size=5, color=color),
+                hovertemplate="X: %{x:.3f}<br>Y: %{y:.3f}<extra></extra>",
+            )
+        )
+
+    fig.update_layout(
+        title="Shaft Centerline · Comparación multi-fecha",
+        xaxis_title="Paired probe (mil)",
+        yaxis_title="Probe (mil)",
+        height=720,
+        template="plotly_white",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0.0),
+    )
+    fig.update_xaxes(
+        range=x_range,
+        zeroline=True,
+        showline=True,
+        linecolor="#9ca3af",
+        ticks="outside",
+        gridcolor="rgba(148,163,184,0.20)",
+    )
+    fig.update_yaxes(
+        range=y_range,
+        zeroline=True,
+        showline=True,
+        linecolor="#9ca3af",
+        ticks="outside",
+        gridcolor="rgba(148,163,184,0.20)",
+        scaleanchor="x",
+        scaleratio=1,
     )
 
+    st.plotly_chart(fig, width="stretch", config={"displaylogo": False}, key="wm_scl_compare_plot")
 
+    summary_rows = []
+    for rec in compare_records:
+        summary_rows.append(
+            {
+                "Archivo": rec["label"],
+                "Fecha inicio": pd.Timestamp(rec["ts_start"]).strftime("%Y-%m-%d %H:%M") if rec["ts_start"] is not None else "—",
+                "Fecha fin": pd.Timestamp(rec["ts_end"]).strftime("%Y-%m-%d %H:%M") if rec["ts_end"] is not None else "—",
+                "Max util %": round(rec["max_util"], 2),
+                "Min margin %": round(rec["min_margin"], 2),
+                "1st warning": "—" if rec["first_warning_speed"] is None else round(float(rec["first_warning_speed"]), 0),
+                "1st danger": "—" if rec["first_danger_speed"] is None else round(float(rec["first_danger_speed"]), 0),
+                "Radial peak": round(rec["radial_peak"], 4),
+                "Centro X": round(rec["centroid_x"], 4),
+                "Centro Y": round(rec["centroid_y"], 4),
+                "Severity": rec["severity"],
+            }
+        )
 
+    summary_df = pd.DataFrame(summary_rows)
+    st.dataframe(summary_df, width="stretch", hide_index=True)
 
-# ============================================================
-# DIAGNOSTIC EXPORT HELPERS (SHAFT)
-# ============================================================
-def _build_scl_report_notes(text_diag):
-    return f"{text_diag['headline']}\n\n{text_diag['detail']}\n\n{text_diag['action']}"
+    diag = _scl_compare_diagnostic(compare_records)
+    st.markdown("### Diagnóstico comparativo automático")
+    st.markdown(f"**{diag['headline']}**")
+    st.write(diag["detail"])
+    st.write(diag["action"])
 
-def _add_scl_export_footer(fig, text_diag):
-    export_fig = go.Figure(fig)
-
-    headline = html.escape(str(text_diag.get("headline", "") or ""))
-    detail = html.escape(str(text_diag.get("detail", "") or ""))
-    action = html.escape(str(text_diag.get("action", "") or ""))
-
-    existing_shapes = list(export_fig.layout.shapes) if export_fig.layout.shapes else []
-    existing_annotations = list(export_fig.layout.annotations) if export_fig.layout.annotations else []
-
-    # Reservar franja inferior real para el footer
-    export_fig.update_xaxes(domain=[0.06, 0.94])
-    export_fig.update_yaxes(domain=[0.26, 0.95])
-
-    existing_shapes.extend(
-        [
-            dict(
-                type="line",
-                xref="paper",
-                yref="paper",
-                x0=0.04,
-                x1=0.96,
-                y0=0.215,
-                y1=0.215,
-                line=dict(color="#64748b", width=3),
-            ),
-            dict(
-                type="rect",
-                xref="paper",
-                yref="paper",
-                x0=0.04,
-                x1=0.96,
-                y0=0.015,
-                y1=0.205,
-                line=dict(color="rgba(148,163,184,0.75)", width=2),
-                fillcolor="rgba(255,255,255,0.97)",
-                layer="below",
-            ),
-        ]
+    notes = (
+        f"{diag['headline']}\n\n"
+        f"{diag['detail']}\n\n"
+        f"{diag['action']}\n\n"
+        f"--- RESUMEN ---\n{summary_df.to_string(index=False)}"
     )
 
-    existing_annotations.extend(
-        [
-            dict(
-                x=0.06,
-                y=0.185,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                text="<b>DIAGNOSTIC SUMMARY</b>",
-                font=dict(size=26, color="#0f172a"),
-            ),
-            dict(
-                x=0.06,
-                y=0.145,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                text=f"<b>{headline}</b>",
-                font=dict(size=18, color="#111827"),
-            ),
-            dict(
-                x=0.06,
-                y=0.102,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                text=f"<b>Detail:</b> {detail}",
-                font=dict(size=16, color="#111827"),
-            ),
-            dict(
-                x=0.06,
-                y=0.055,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                text=f"<b>Action:</b> {action}",
-                font=dict(size=16, color="#111827"),
-            ),
-        ]
-    )
+    png_bytes, png_error = build_export_png_bytes(fig)
 
-    export_fig.update_layout(
-        height=3000,
-        margin=dict(l=120, r=80, t=320, b=170),
-        shapes=existing_shapes,
-        annotations=existing_annotations,
-    )
-
-    return export_fig
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Enviar comparativo a reporte", key="wm_scl_compare_report_btn"):
+            push_report_item(
+                title="Shaft Centerline · Comparación multi-fecha",
+                notes=notes,
+                image_bytes=png_bytes,
+            )
+            st.success("Comparación multi-fecha enviada al reporte.")
+    with c2:
+        if png_bytes is not None:
+            st.download_button(
+                "Descargar PNG comparativo",
+                data=png_bytes,
+                file_name="shaft_centerline_compare.png",
+                mime="image/png",
+                key="wm_scl_compare_dl_btn",
+                width="stretch",
+            )
+        elif png_error:
+            st.warning(f"No fue posible generar PNG del comparativo: {png_error}")
 
 
-# ============================================================
-# MAIN
-# ============================================================
 def main():
-    require_login()
     ensure_report_state()
 
     page_header(
@@ -1163,11 +1336,29 @@ def main():
         render_user_menu()
         st.markdown("---")
         st.markdown("### Shaft Centerline input")
-        uploaded_files = st.file_uploader(
-            "Upload one or more Shaft Centerline CSV files",
+
+        uploaded_files_new = st.file_uploader(
+            "Cargar CSV Shaft Centerline",
             type=["csv"],
             accept_multiple_files=True,
+            key="wm_scl_file_uploader",
         )
+
+        if uploaded_files_new:
+            set_scl_persisted_files(uploaded_files_new)
+
+        active_files = get_scl_persisted_files()
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if active_files:
+                st.caption(f"Archivos Shaft activos: {len(active_files)}")
+            else:
+                st.caption("No hay archivos Shaft cargados")
+        with col2:
+            if st.button("Limpiar archivos Shaft", key="wm_scl_clear_file_btn"):
+                clear_scl_persisted_files()
+                st.rerun()
 
         st.markdown("### Global Controls")
         smooth_window = st.slider("Gap smoothing", 1, 11, 3, step=2)
@@ -1176,23 +1367,47 @@ def main():
         marker_stride = st.slider("RPM label step", 10, 150, 45, step=5)
         normalize_to_origin = st.checkbox("Normalize to first point", value=False)
 
-    if not uploaded_files:
-        panel_card(
-            title="Carga archivos para comenzar",
-            subtitle="Sube uno o varios archivos CSV de Shaft Centerline desde el panel izquierdo.",
-            meta_html="",
-            chips=[],
-        )
+        st.markdown("### RPM filter")
+        rpm_filter_enabled = st.checkbox("Filtrar rango RPM", value=False)
+        rpm_min_filter_ui = st.number_input("RPM inicio", value=0.0, step=100.0, format="%.0f")
+        rpm_max_filter_ui = st.number_input("RPM fin", value=100000.0, step=100.0, format="%.0f")
+
+        rpm_min_filter = rpm_min_filter_ui if rpm_filter_enabled else None
+        rpm_max_filter = rpm_max_filter_ui if rpm_filter_enabled else None
+
+        st.markdown("### Boundary controls")
+        clearance_mode = st.selectbox("Boundary mode", ["Auto", "Manual"], index=0)
+        clearance_center_mode = st.selectbox("Boundary center", ["Origin (0,0)", "Data Mean", "Manual"], index=0)
+
+        manual_center_x = st.number_input("Boundary center X", value=0.0, step=0.1, format="%.3f")
+        manual_center_y = st.number_input("Boundary center Y", value=0.0, step=0.1, format="%.3f")
+
+        manual_clearance_x = st.number_input("Clearance X (Cx)", value=5.0, min_value=0.001, step=0.1, format="%.3f")
+        manual_clearance_y = st.number_input("Clearance Y (Cy)", value=5.0, min_value=0.001, step=0.1, format="%.3f")
+
+        st.markdown("### Axis controls")
+        auto_scale_xy = st.checkbox("Auto X/Y", value=True)
+        manual_x_min = st.number_input("X min", value=-10.0, step=0.5, format="%.3f")
+        manual_x_max = st.number_input("X max", value=10.0, step=0.5, format="%.3f")
+        manual_y_min = st.number_input("Y min", value=-10.0, step=0.5, format="%.3f")
+        manual_y_max = st.number_input("Y max", value=10.0, step=0.5, format="%.3f")
+
+        st.markdown("### Early Rub Detection")
+        early_rub_warning_pct = st.slider("Warning utilization %", min_value=50, max_value=98, value=80, step=1)
+        early_rub_danger_pct = st.slider("Danger utilization %", min_value=60, max_value=100, value=95, step=1)
+
+    if not active_files:
+        st.info("Carga uno o varios archivos CSV de Shaft Centerline desde el panel izquierdo.")
         return
 
-    parsed_items, failed_items = parse_uploaded_scl_files(uploaded_files)
+    parsed_items, failed_items = parse_uploaded_scl_files(active_files)
 
     if failed_items:
         for file_name, error_text in failed_items:
-            st.warning(f"No pude leer {file_name}: {error_text}")
+            st.warning(f"{file_name}: {error_text}")
 
     if not parsed_items:
-        st.error("No se pudo cargar ningún archivo válido de Shaft Centerline.")
+        st.info("No se pudo procesar ningún archivo válido.")
         return
 
     logo_uri = get_logo_data_uri(LOGO_PATH)
@@ -1207,10 +1422,45 @@ def main():
             show_rpm_labels_global=show_rpm_labels,
             marker_stride_global=marker_stride,
             normalize_to_origin=normalize_to_origin,
+            clearance_mode=clearance_mode,
+            clearance_center_mode=clearance_center_mode,
+            manual_center_x=manual_center_x,
+            manual_center_y=manual_center_y,
+            manual_clearance_x=manual_clearance_x,
+            manual_clearance_y=manual_clearance_y,
+            auto_scale_xy=auto_scale_xy,
+            manual_x_min=manual_x_min,
+            manual_x_max=manual_x_max,
+            manual_y_min=manual_y_min,
+            manual_y_max=manual_y_max,
+            early_rub_warning_pct=early_rub_warning_pct,
+            early_rub_danger_pct=early_rub_danger_pct,
+            rpm_min_filter=rpm_min_filter,
+            rpm_max_filter=rpm_max_filter,
         )
 
         if panel_index < len(parsed_items) - 1:
             st.markdown("---")
+
+    if len(parsed_items) >= 2:
+        render_scl_compare_section(
+            parsed_items,
+            smooth_window=smooth_window,
+            normalize_to_origin=normalize_to_origin,
+            rpm_min_filter=rpm_min_filter,
+            rpm_max_filter=rpm_max_filter,
+            clearance_mode=clearance_mode,
+            clearance_center_mode=clearance_center_mode,
+            manual_center_x=manual_center_x,
+            manual_center_y=manual_center_y,
+            manual_clearance_x=manual_clearance_x,
+            manual_clearance_y=manual_clearance_y,
+            auto_scale_xy=auto_scale_xy,
+            manual_x_min=manual_x_min,
+            manual_x_max=manual_x_max,
+            manual_y_min=manual_y_min,
+            manual_y_max=manual_y_max,
+        )
 
 
 if __name__ == "__main__":
