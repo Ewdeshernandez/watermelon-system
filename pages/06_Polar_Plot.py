@@ -588,7 +588,7 @@ def build_polar_figure(
                 angle=225,
             ),
         ),
-        height=820,
+        height=860,
         margin=dict(l=48, r=20, t=145, b=48),
         plot_bgcolor="#f8fafc",
         paper_bgcolor="#f3f4f6",
@@ -1224,10 +1224,10 @@ def render_polar_compare_section(
     build_probe_reference_overlay(fig, max_r)
 
     fig.update_layout(
-        title="Polar Plot · Comparación multi-fecha",
+        title=None,
         polar=dict(
             bgcolor="#f8fafc",
-            domain=dict(x=[0.0, 0.86], y=[0.05, 0.94]),
+            domain=dict(x=[0.0, 0.86], y=[0.01, 0.86]),
             radialaxis=dict(
                 range=[0, max_r],
                 tickfont=dict(size=11, color="#111827"),
@@ -1251,7 +1251,14 @@ def render_polar_compare_section(
         template="plotly_white",
         paper_bgcolor="#f3f4f6",
         plot_bgcolor="#f8fafc",
-        legend=dict(orientation="h", yanchor="bottom", y=1.04, x=0.0),
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.08,
+            xanchor="center",
+            x=0.50,
+            bgcolor="rgba(255,255,255,0.75)",
+        ),
     )
 
     st.plotly_chart(fig, width="stretch", config={"displaylogo": False}, key="wm_polar_compare_plot")
