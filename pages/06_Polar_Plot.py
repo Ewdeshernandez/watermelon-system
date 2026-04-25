@@ -4,6 +4,7 @@ import base64
 import html
 import io
 import math
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -36,6 +37,57 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOGO_PATH = PROJECT_ROOT / "assets" / "watermelon_logo.png"
 
 apply_watermelon_page_style()
+
+
+# ============================================================
+# POLAR FILE PERSISTENCE
+# ============================================================
+POLAR_UPLOAD_FILES_KEY = "wm_polar_upload_files"
+
+class PolarPersistedUploadedFile:
+    def __init__(self, name, data):
+        self.name = name
+        self._data = data
+
+    def read(self):
+        return self._data
+
+    def getvalue(self):
+        return self._data
+
+    def seek(self, pos):
+        return None
+
+
+def set_polar_persisted_files(files):
+    packed = []
+    for f in files or []:
+        try:
+            data = f.getvalue()
+        except Exception:
+            try:
+                f.seek(0)
+            except Exception:
+                pass
+            data = f.read()
+
+        packed.append({
+            "name": getattr(f, "name", "Polar.csv"),
+            "data": data,
+        })
+
+    st.session_state[POLAR_UPLOAD_FILES_KEY] = packed
+
+
+def get_polar_persisted_files():
+    return [
+        PolarPersistedUploadedFile(item["name"], item["data"])
+        for item in st.session_state.get(POLAR_UPLOAD_FILES_KEY, [])
+    ]
+
+
+def clear_polar_persisted_files():
+    st.session_state.pop(POLAR_UPLOAD_FILES_KEY, None)
 
 
 # ============================================================
@@ -625,15 +677,33 @@ def _build_polar_report_notes(text_diag: Dict[str, str]) -> str:
     detail = str(text_diag.get("detail", "") or "").strip()
     action = str(text_diag.get("action", "") or "").strip()
 
+    def clean_text(value: str) -> str:
+        value = str(value or "")
+        value = value.replace("\\n", "\n")
+        value = value.replace("\r", "")
+        value = re.sub(r"\n{3,}", "\n\n", value)
+        value = value.replace("Se recomienda se recomienda:", "Se recomienda:")
+        value = value.replace("Se recomienda: Se recomienda:", "Se recomienda:")
+        return value.strip()
+
+    headline = clean_text(headline)
+    detail = clean_text(detail)
+    action = clean_text(action)
+
     blocks: List[str] = []
     if headline:
-        blocks.append(f"Resumen diagnóstico: {headline}")
+        blocks.append(headline)
     if detail:
-        blocks.append(f"Detalle: {detail}")
-    if action:
-        blocks.append(f"Acción recomendada: {action}")
+        blocks.append(detail)
 
-    return "\n\n".join(blocks).strip()
+    if action:
+        action_clean = action
+        action_clean = re.sub(r"^Se recomienda:\s*", "", action_clean, flags=re.IGNORECASE)
+        action_clean = action_clean.strip()
+        if action_clean:
+            blocks.append("Se recomienda:\n" + action_clean)
+
+    return "\n\n".join([b for b in blocks if b]).strip()
 
 
 def _add_export_diagnostic_footer(fig: go.Figure, text_diag: Dict[str, str]) -> go.Figure:
@@ -725,13 +795,19 @@ def build_export_png_bytes(fig: go.Figure, text_diag: Dict[str, str]) -> Tuple[O
     try:
         export_fig = _build_export_safe_figure(fig)
         export_fig = _scale_export_figure(export_fig)
-        export_fig = _add_export_diagnostic_footer(export_fig, text_diag)
+        # Imagen limpia: el diagnóstico va debajo en el reporte, no incrustado en el PNG.
         return export_fig.to_image(format="png", width=4300, height=2900, scale=2), None
     except Exception as e:
         return None, str(e)
 
 
-def queue_polar_to_report(meta: Dict[str, str], fig: go.Figure, title: str, text_diag: Dict[str, str]) -> None:
+def queue_polar_to_report(
+    meta: Dict[str, str],
+    fig: go.Figure,
+    title: str,
+    text_diag: Dict[str, str],
+    image_bytes: Optional[bytes] = None,
+) -> None:
     ensure_report_state()
     st.session_state.report_items.append(
         {
@@ -740,7 +816,7 @@ def queue_polar_to_report(meta: Dict[str, str], fig: go.Figure, title: str, text
             "title": title,
             "notes": _build_polar_report_notes(text_diag),
             "signal_id": meta.get("Point Name", ""),
-            "figure": go.Figure(fig),
+            "image_bytes": image_bytes,
             "machine": meta.get("Machine Name", ""),
             "point": meta.get("Point Name", ""),
             "variable": meta.get("Variable", ""),
@@ -748,6 +824,501 @@ def queue_polar_to_report(meta: Dict[str, str], fig: go.Figure, title: str, text
         }
     )
 
+
+
+# ============================================================
+# POLAR PRO OVERRIDES - DIAGNOSTIC + CLEAN HD EXPORT
+# ============================================================
+def build_polar_text_diagnostics(
+    status: str,
+    critical_speeds: List[Dict[str, float]],
+    max_amp: float,
+) -> Dict[str, str]:
+    status_up = str(status or "").upper()
+    max_amp = float(max_amp or 0.0)
+
+    if critical_speeds:
+        dominant = critical_speeds[0]
+        cs_speed = float(dominant.get("speed", 0.0) or 0.0)
+        cs_amp = float(dominant.get("amp", 0.0) or 0.0)
+        phase_delta = float(dominant.get("phase_delta", 0.0) or 0.0)
+
+        if status_up == "DANGER":
+            headline = f"Respuesta polar severa compatible con amplificación dinámica cerca de {cs_speed:.0f} rpm"
+            detail = (
+                f"La trayectoria polar evidencia una respuesta dinámica significativa alrededor de {cs_speed:.0f} rpm, "
+                f"con amplitud aproximada de {cs_amp:.3f} y variación de fase de {phase_delta:.1f}°. "
+                f"La combinación de incremento de amplitud y cambio de fase sugiere proximidad a una velocidad crítica, "
+                f"pérdida de margen dinámico o cambio relevante de rigidez/amortiguamiento del sistema rotor-soporte.\n\n"
+                f"Desde el punto de vista de dinámica de rotores, esta condición debe correlacionarse con Bode, órbitas, "
+                f"forma de onda, shaft centerline y condiciones reales de carga."
+            )
+            action = (
+                "Se recomienda como acción prioritaria:\n"
+                "- Correlacionar el pico polar con Bode de amplitud y fase\n"
+                "- Confirmar repetibilidad durante arranque/parada\n"
+                "- Verificar alineación, rigidez de soporte, balance y condición de cojinetes\n"
+                "- Revisar el cambio de fase alrededor del régimen identificado\n"
+                "- Evitar operación sostenida cerca del régimen crítico hasta completar evaluación"
+            )
+        elif status_up == "WARNING":
+            headline = f"Respuesta polar con indicios de amplificación dinámica cerca de {cs_speed:.0f} rpm"
+            detail = (
+                f"La trayectoria polar muestra una zona de respuesta relevante alrededor de {cs_speed:.0f} rpm, "
+                f"con amplitud aproximada de {cs_amp:.3f} y cambio de fase de {phase_delta:.1f}°. "
+                f"El comportamiento es consistente con amplificación dinámica moderada, sin evidencia suficiente para clasificarla como severa.\n\n"
+                f"Desde el enfoque de análisis de vibraciones, esta condición debe mantenerse bajo seguimiento, especialmente si el pico se repite "
+                f"en corridas posteriores o si se acompaña de incremento en 1X, cambio de fase o alteración de órbita."
+            )
+            action = (
+                "Se recomienda:\n"
+                "- Comparar contra corridas históricas y condición base\n"
+                "- Validar la respuesta con Bode y espectro 1X\n"
+                "- Confirmar si existe tendencia creciente de amplitud\n"
+                "- Mantener seguimiento durante próximos arranques/paradas"
+            )
+        else:
+            headline = f"Respuesta polar controlada con candidato dinámico cerca de {cs_speed:.0f} rpm"
+            detail = (
+                f"Se identifica un candidato dinámico alrededor de {cs_speed:.0f} rpm, con amplitud aproximada de {cs_amp:.3f} "
+                f"y cambio de fase de {phase_delta:.1f}°. La trayectoria polar no evidencia una respuesta severa en esta condición.\n\n"
+                f"El comportamiento es compatible con operación estable, aunque el punto identificado debe conservarse como referencia para comparación futura."
+            )
+            action = (
+                "Se recomienda:\n"
+                "- Mantener la corrida como línea base\n"
+                "- Comparar con futuras trayectorias polares\n"
+                "- Correlacionar con Bode, órbita y tendencia de amplitud 1X"
+            )
+    else:
+        headline = "Respuesta polar sin velocidad crítica dominante claramente identificada"
+        detail = (
+            f"La trayectoria polar presenta amplitud máxima de {max_amp:.3f} y no muestra un candidato claro de velocidad crítica bajo la heurística aplicada. "
+            f"La condición debe correlacionarse con Bode, espectro, órbita y variables operativas antes de concluir el mecanismo dominante."
+        )
+        action = (
+            "Se recomienda:\n"
+            "- Mantener seguimiento histórico\n"
+            "- Comparar contra futuras corridas\n"
+            "- Validar con Bode, espectro y órbita si cambia la condición"
+        )
+
+    return {"headline": headline, "detail": detail, "action": action}
+
+
+def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
+    fig = go.Figure(export_fig)
+
+    fig.update_layout(
+        width=4300,
+        height=2450,
+        margin=dict(l=60, r=50, t=220, b=120),
+        paper_bgcolor="#f3f4f6",
+        plot_bgcolor="#f8fafc",
+        font=dict(size=25, color="#111827"),
+    )
+
+    polar_cfg = dict(fig.layout.polar.to_plotly_json()) if getattr(fig.layout, "polar", None) is not None else {}
+    domain_cfg = dict(polar_cfg.get("domain", {}) or {})
+    domain_cfg["x"] = [0.01, 0.86]
+    domain_cfg["y"] = [0.02, 0.98]
+    polar_cfg["domain"] = domain_cfg
+
+    angular_cfg = dict(polar_cfg.get("angularaxis", {}) or {})
+    angular_cfg["tickfont"] = dict(size=22, color="#111827")
+    angular_cfg["gridcolor"] = "rgba(148, 163, 184, 0.18)"
+    polar_cfg["angularaxis"] = angular_cfg
+
+    radial_cfg = dict(polar_cfg.get("radialaxis", {}) or {})
+    radial_cfg["tickfont"] = dict(size=20, color="#111827")
+    radial_cfg["gridcolor"] = "rgba(148, 163, 184, 0.18)"
+    polar_cfg["radialaxis"] = radial_cfg
+
+    fig.update_layout(polar=polar_cfg)
+
+    for trace in fig.data:
+        tj = trace.to_plotly_json()
+        mode = tj.get("mode", "") or ""
+        if "lines" in mode and hasattr(trace, "line"):
+            line = dict(tj.get("line", {}) or {})
+            line["width"] = max(3.0, float(line.get("width", 1.0)) * 1.8)
+            trace.line = line
+        if "markers" in mode and hasattr(trace, "marker"):
+            marker = dict(tj.get("marker", {}) or {})
+            marker["size"] = max(9, float(marker.get("size", 6)) * 1.35)
+            trace.marker = marker
+        if "text" in mode:
+            textfont = dict(tj.get("textfont", {}) or {})
+            textfont["size"] = max(15, int(float(textfont.get("size", 10)) * 1.6))
+            trace.textfont = textfont
+
+    return fig
+
+
+def build_export_png_bytes(fig: go.Figure, text_diag: Dict[str, str]) -> Tuple[Optional[bytes], Optional[str]]:
+    try:
+        export_fig = _build_export_safe_figure(fig)
+        export_fig = _scale_export_figure(export_fig)
+        return export_fig.to_image(format="png", width=4300, height=2450, scale=2), None
+    except Exception as e:
+        return None, str(e)
+
+
+
+# ============================================================
+# POLAR PRO MODAL DIAGNOSTICS + COMPARISON
+# ============================================================
+def build_polar_text_diagnostics(
+    status: str,
+    critical_speeds: List[Dict[str, float]],
+    max_amp: float,
+) -> Dict[str, str]:
+    status_up = str(status or "").upper()
+    max_amp = float(max_amp or 0.0)
+
+    if critical_speeds:
+        dominant = critical_speeds[0]
+        cs_speed = float(dominant.get("speed", 0.0) or 0.0)
+        cs_amp = float(dominant.get("amp", 0.0) or 0.0)
+        phase_delta = float(dominant.get("phase_delta", 0.0) or 0.0)
+
+        if abs(phase_delta) >= 45.0:
+            modal_txt = (
+                "El cambio de fase es suficientemente representativo para sospechar transición modal marcada. "
+                "Antes de la velocidad crítica el rotor tiende a comportarse con respuesta más rígida; después del paso por la zona modal, "
+                "la respuesta se vuelve más flexible y la fase evidencia el cambio de relación entre fuerza excitadora y desplazamiento."
+            )
+        elif abs(phase_delta) >= 15.0:
+            modal_txt = (
+                "El cambio de fase es moderado y sugiere aproximación a una zona de amplificación dinámica. "
+                "La respuesta aún no confirma por sí sola un paso crítico plenamente desarrollado, pero sí muestra una modificación de rigidez dinámica aparente."
+            )
+        else:
+            modal_txt = (
+                "El cambio de fase es bajo, por lo que el punto identificado debe tratarse como candidato dinámico y no como velocidad crítica confirmada. "
+                "La confirmación requiere correlación con Bode, fase, órbita y repetibilidad entre corridas."
+            )
+
+        if status_up == "DANGER":
+            headline = f"Respuesta polar severa asociada a posible velocidad crítica cerca de {cs_speed:.0f} rpm"
+        elif status_up == "WARNING":
+            headline = f"Respuesta polar con indicios de amplificación dinámica cerca de {cs_speed:.0f} rpm"
+        else:
+            headline = f"Respuesta polar controlada con candidato modal cerca de {cs_speed:.0f} rpm"
+
+        detail = (
+            f"La trayectoria polar identifica una zona de interés alrededor de {cs_speed:.0f} rpm, con amplitud aproximada de {cs_amp:.3f} "
+            f"y variación de fase de {phase_delta:.1f}°. Esta condición es compatible con una posible aproximación a velocidad crítica o forma modal del sistema rotor-soporte.\\n\\n"
+            f"{modal_txt}\\n\\n"
+            f"Desde el punto de vista de análisis rotodinámico, la interpretación debe enfocarse en la relación entre amplitud, fase y velocidad. "
+            f"Un incremento de amplitud acompañado por cambio de fase consistente puede indicar paso por una forma modal; si la amplitud aumenta sin cambio de fase suficiente, "
+            f"la condición puede estar más asociada a desbalance, excentricidad, respuesta forzada o cambios operativos."
+        )
+
+        action = (
+            "Correlacionar la trayectoria polar con Bode de amplitud y fase.\\n"
+            "Verificar repetibilidad de la zona modal entre arranques/paradas.\\n"
+            "Comparar contra órbitas filtradas 1X y shaft centerline.\\n"
+            "Confirmar si el cambio de fase ocurre antes, durante o después del máximo de amplitud.\\n"
+            "Validar condiciones de balance, alineación, rigidez de soporte, lubricación y carga."
+        )
+    else:
+        headline = "Respuesta polar sin velocidad crítica dominante claramente identificada"
+        detail = (
+            f"La trayectoria polar presenta amplitud máxima de {max_amp:.3f}, sin un candidato modal dominante bajo la heurística aplicada. "
+            f"No se observa una combinación suficientemente clara de incremento de amplitud y cambio de fase para confirmar velocidad crítica.\\n\\n"
+            f"Esta condición puede representar una respuesta estable, una excitación forzada o una corrida donde el régimen crítico no fue cruzado de forma suficientemente clara."
+        )
+        action = (
+            "Mantener la corrida como referencia histórica.\\n"
+            "Comparar contra futuras trayectorias polares.\\n"
+            "Correlacionar con Bode, espectro 1X, órbita y variables operativas."
+        )
+
+    return {"headline": headline, "detail": detail, "action": action}
+
+
+def _prepare_polar_compare_df(item: Dict[str, Any], smooth_window: int, amp_smooth_window: int) -> pd.DataFrame:
+    orient = get_panel_orientation(item["id"])
+    df = item["grouped_df"].copy()
+
+    df["amp"] = smooth_series(df["amp"], amp_smooth_window)
+    df["phase_smoothed"] = circular_smooth_deg(df["phase"], smooth_window) % 360.0
+    df["theta_display"] = compute_polar_display_theta(
+        phase_deg=df["phase_smoothed"],
+        axis_label=orient["axis_label"],
+        side_label=orient["side_label"],
+        install_angle_deg=float(orient["install_angle_deg"]),
+        rotation_direction=orient["rotation_direction"],
+    )
+    df["phase_for_detection"] = np.rad2deg(np.unwrap(np.deg2rad(df["phase_smoothed"].to_numpy())))
+    return df
+
+
+def _polar_compare_metrics(item: Dict[str, Any], smooth_window: int, amp_smooth_window: int, max_critical_speeds: int) -> Dict[str, Any]:
+    df = _prepare_polar_compare_df(item, smooth_window, amp_smooth_window)
+    cs = estimate_critical_speeds_api684_style(df, max_count=max_critical_speeds)
+    max_amp = float(df["amp"].max()) if len(df) else 0.0
+
+    if cs:
+        dom = cs[0]
+        dom_speed = float(dom.get("speed", 0.0))
+        dom_amp = float(dom.get("amp", 0.0))
+        dom_phase = float(dom.get("phase_delta", 0.0))
+    else:
+        idx = int(df["amp"].idxmax()) if len(df) else 0
+        dom_speed = float(df.loc[idx, "speed"]) if len(df) else 0.0
+        dom_amp = max_amp
+        dom_phase = 0.0
+
+    ts_start = pd.to_datetime(df["ts_min"], errors="coerce").min() if "ts_min" in df.columns else None
+    ts_end = pd.to_datetime(df["ts_max"], errors="coerce").max() if "ts_max" in df.columns else None
+
+    return {
+        "label": item["label"],
+        "machine": item["machine"],
+        "point": item["point"],
+        "df": df,
+        "critical_speeds": cs,
+        "max_amp": max_amp,
+        "dominant_speed": dom_speed,
+        "dominant_amp": dom_amp,
+        "dominant_phase_delta": dom_phase,
+        "ts_start": ts_start,
+        "ts_end": ts_end,
+    }
+
+
+def _polar_compare_diagnostic(records: List[Dict[str, Any]]) -> Dict[str, str]:
+    ordered = sorted(
+        records,
+        key=lambda r: pd.Timestamp(r["ts_start"]) if r["ts_start"] is not None else pd.Timestamp.min
+    )
+    baseline = ordered[0]
+    latest = ordered[-1]
+
+    delta_amp = float(latest["dominant_amp"] - baseline["dominant_amp"])
+    delta_speed = float(latest["dominant_speed"] - baseline["dominant_speed"])
+    delta_phase = float(latest["dominant_phase_delta"] - baseline["dominant_phase_delta"])
+
+    amp_trend = "incremento" if delta_amp > 0.15 else "reducción" if delta_amp < -0.15 else "estabilidad"
+    speed_shift = "desplazamiento hacia mayor velocidad" if delta_speed > 100 else "desplazamiento hacia menor velocidad" if delta_speed < -100 else "sin desplazamiento relevante de velocidad"
+
+    headline = "Comparación multi-fecha de trayectoria polar y respuesta modal"
+
+    detail = (
+        f"Se compararon {len(ordered)} corridas polares. Entre la corrida base ({baseline['label']}) y la más reciente ({latest['label']}) "
+        f"se observa {amp_trend} de la amplitud dominante ({delta_amp:+.3f}), {speed_shift} ({delta_speed:+.0f} rpm) "
+        f"y variación de fase dominante de {delta_phase:+.1f}°.\\n\\n"
+        f"Desde el punto de vista rotodinámico, la comparación polar permite evaluar si la respuesta del rotor mantiene el mismo patrón modal o si existe migración de la zona crítica. "
+        f"Cuando el máximo de amplitud y el cambio de fase se desplazan entre corridas, puede existir modificación de rigidez efectiva, amortiguamiento, condición de soporte, balance o carga.\\n\\n"
+        f"Antes de una velocidad crítica el rotor tiende a comportarse como un sistema más rígido; al cruzar una forma modal, la fase y la trayectoria cambian y el rotor manifiesta comportamiento flexible. "
+        f"Por eso, la lectura conjunta de amplitud, fase y velocidad es más concluyente que la amplitud por sí sola."
+    )
+
+    action = (
+        "Correlacionar las corridas polares con Bode de amplitud/fase.\\n"
+        "Verificar si la velocidad candidata se repite o migra entre fechas.\\n"
+        "Comparar contra órbitas 1X y shaft centerline.\\n"
+        "Validar si hubo cambios de balance, alineación, lubricación, temperatura o carga.\\n"
+        "Usar la corrida más estable como línea base de aceptación."
+    )
+
+    return {"headline": headline, "detail": detail, "action": action}
+
+
+def render_polar_compare_section(
+    items: List[Dict[str, Any]],
+    *,
+    smooth_window: int,
+    amp_smooth_window: int,
+    max_critical_speeds: int,
+    logo_uri: Optional[str],
+) -> None:
+    if len(items) < 2:
+        return
+
+    records = [
+        _polar_compare_metrics(item, smooth_window, amp_smooth_window, max_critical_speeds)
+        for item in items
+    ]
+
+    st.markdown("---")
+    st.markdown("## Comparación multi-fecha · Polar Plot")
+
+    fig = go.Figure()
+    palette = ["#2563eb", "#16a34a", "#9333ea", "#ea580c", "#dc2626", "#0891b2", "#7c3aed"]
+
+    for idx, rec in enumerate(records):
+        df = rec["df"]
+        color = palette[idx % len(palette)]
+        date_label = pd.Timestamp(rec["ts_start"]).strftime("%Y-%m-%d %H:%M") if rec["ts_start"] is not None else rec["label"]
+
+        fig.add_trace(
+            go.Scatterpolar(
+                r=df["amp"],
+                theta=df["theta_display"],
+                mode="lines",
+                name=f"{date_label} · {rec['label']}",
+                line=dict(width=2.5, color=color),
+                hovertemplate="Amp: %{r:.3f}<br>Phase: %{theta:.1f}°<extra></extra>",
+            )
+        )
+
+        if rec["critical_speeds"]:
+            cs = rec["critical_speeds"][0]
+            row = nearest_row_for_speed(df, cs["speed"])
+            fig.add_trace(
+                go.Scatterpolar(
+                    r=[row["amp"]],
+                    theta=[row["theta_display"]],
+                    mode="markers+text",
+                    marker=dict(size=9, color=color, symbol="diamond"),
+                    text=[f"{int(round(cs['speed']))} rpm"],
+                    textposition="top center",
+                    textfont=dict(size=10, color=color),
+                    showlegend=False,
+                    hovertemplate="Candidate<br>Amp: %{r:.3f}<br>Phase: %{theta:.1f}°<extra></extra>",
+                )
+            )
+
+    max_r = max([float(rec["df"]["amp"].max()) for rec in records if len(rec["df"])], default=1.0) * 1.18
+
+    base_orient = get_panel_orientation(items[0]["id"])
+    axis_label = base_orient["axis_label"]
+    side_label = base_orient["side_label"]
+    install_angle_deg = float(base_orient["install_angle_deg"])
+    rotation_direction = base_orient["rotation_direction"]
+
+    axis_rotation, angular_direction, _ = get_polar_axis_rotation_and_direction(
+        axis_label=axis_label,
+        side_label=side_label,
+        install_angle_deg=install_angle_deg,
+        rotation_direction=rotation_direction,
+    )
+
+    all_speeds = []
+    for rec in records:
+        if len(rec["df"]):
+            all_speeds.extend(rec["df"]["speed"].astype(float).tolist())
+
+    rpm_text = "—"
+    if all_speeds:
+        rpm_text = f"{int(min(all_speeds))} - {int(max(all_speeds))} rpm"
+
+    dt_values = [r["ts_start"] for r in records if r["ts_start"] is not None]
+    dt_text = "Comparación multi-fecha"
+    if dt_values:
+        dt_text = " / ".join([pd.Timestamp(v).strftime("%Y-%m-%d") for v in dt_values[:4]])
+
+    draw_top_strip(
+        fig=fig,
+        machine=items[0].get("machine", ""),
+        point_text="Polar Plot · Comparación multi-fecha",
+        variable=f"{axis_label} | {install_angle_deg:.0f}° {side_label} | Rotation {rotation_direction}",
+        dt_text=dt_text,
+        rpm_text=rpm_text,
+        logo_uri=logo_uri,
+    )
+
+    build_probe_reference_overlay(fig, max_r)
+
+    fig.update_layout(
+        title="Polar Plot · Comparación multi-fecha",
+        polar=dict(
+            bgcolor="#f8fafc",
+            domain=dict(x=[0.0, 0.86], y=[0.05, 0.94]),
+            radialaxis=dict(
+                range=[0, max_r],
+                tickfont=dict(size=11, color="#111827"),
+                gridcolor="rgba(148,163,184,0.18)",
+                linecolor="#9ca3af",
+                showline=True,
+                ticks="outside",
+                angle=225,
+            ),
+            angularaxis=dict(
+                rotation=axis_rotation,
+                direction=angular_direction,
+                tickfont=dict(size=12, color="#111827"),
+                gridcolor="rgba(148,163,184,0.18)",
+                linecolor="#9ca3af",
+                showline=True,
+                ticks="outside",
+            ),
+        ),
+        height=820,
+        template="plotly_white",
+        paper_bgcolor="#f3f4f6",
+        plot_bgcolor="#f8fafc",
+        legend=dict(orientation="h", yanchor="bottom", y=1.04, x=0.0),
+    )
+
+    st.plotly_chart(fig, width="stretch", config={"displaylogo": False}, key="wm_polar_compare_plot")
+
+    summary = pd.DataFrame([
+        {
+            "Archivo": r["label"],
+            "Fecha inicio": pd.Timestamp(r["ts_start"]).strftime("%Y-%m-%d %H:%M") if r["ts_start"] is not None else "—",
+            "Fecha fin": pd.Timestamp(r["ts_end"]).strftime("%Y-%m-%d %H:%M") if r["ts_end"] is not None else "—",
+            "Amp dominante": round(r["dominant_amp"], 3),
+            "RPM candidata": round(r["dominant_speed"], 0),
+            "Delta fase": round(r["dominant_phase_delta"], 1),
+            "Max amp": round(r["max_amp"], 3),
+        }
+        for r in records
+    ])
+
+    st.dataframe(summary, width="stretch", hide_index=True)
+
+    diag = _polar_compare_diagnostic(records)
+    st.markdown("### Diagnóstico comparativo automático")
+    st.markdown(f"**{diag['headline']}**")
+    st.write(diag["detail"])
+    st.write("Se recomienda:")
+    st.write(diag["action"])
+
+    summary_lines = []
+    for _, row in summary.iterrows():
+        summary_lines.append(
+            f"- {row['Archivo']}: candidato {row['RPM candidata']:.0f} rpm, "
+            f"amplitud dominante {row['Amp dominante']:.3f}, "
+            f"Δfase {row['Delta fase']:.1f}°, máximo {row['Max amp']:.3f}."
+        )
+
+    notes = (
+        _build_polar_report_notes(diag)
+        + "\n\nResumen comparativo de corridas:\n"
+        + "\n".join(summary_lines)
+    )
+
+    png_bytes, png_error = build_export_png_bytes(fig, diag)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Enviar comparativo Polar a reporte", key="wm_polar_compare_report_btn"):
+            ensure_report_state()
+            st.session_state.report_items.append(
+                {
+                    "type": "polar_compare",
+                    "title": "Polar Plot · Comparación multi-fecha",
+                    "notes": notes,
+                    "image_bytes": png_bytes,
+                }
+            )
+            st.success("Comparativo Polar enviado al reporte.")
+    with c2:
+        if png_bytes is not None:
+            st.download_button(
+                "Descargar PNG comparativo Polar",
+                data=png_bytes,
+                file_name="polar_compare_hd.png",
+                mime="image/png",
+                key="wm_polar_compare_download_btn",
+                width="stretch",
+            )
+        elif png_error:
+            st.warning(f"No fue posible generar PNG comparativo: {png_error}")
 
 # ============================================================
 # MULTI-FILE LOADER
@@ -967,7 +1538,13 @@ def render_polar_panel(
         export_key=export_state_key,
         fig=fig,
         export_builder=lambda export_fig: build_export_png_bytes(export_fig, text_diag),
-        report_callback=lambda: queue_polar_to_report(meta, fig, title, text_diag),
+        report_callback=lambda: queue_polar_to_report(
+            meta,
+            fig,
+            title,
+            text_diag,
+            image_bytes=build_export_png_bytes(fig, text_diag)[0],
+        ),
         file_name=f"{item['file_stem']}_polar_hd.png",
     )
 
@@ -991,11 +1568,32 @@ def main() -> None:
         render_user_menu()
         st.markdown("---")
         st.markdown("### Upload Polar CSV")
-        uploaded_files = st.file_uploader(
+
+        uploaded_files_new = st.file_uploader(
             "Upload one or more Polar CSV",
             type=["csv"],
             accept_multiple_files=True,
+            key="wm_polar_file_uploader",
         )
+
+        if uploaded_files_new:
+            set_polar_persisted_files(uploaded_files_new)
+
+        active_polar_files = get_polar_persisted_files()
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if active_polar_files:
+                st.caption(f"Archivos Polar activos: {len(active_polar_files)}")
+            else:
+                st.caption("No hay archivos Polar cargados")
+
+        with col2:
+            if st.button("Limpiar archivos Polar", key="wm_polar_clear_files_btn"):
+                clear_polar_persisted_files()
+                st.rerun()
+
+        uploaded_files = active_polar_files
 
     if not uploaded_files:
         panel_card(
@@ -1026,7 +1624,7 @@ def main() -> None:
     valid_ids = set(id_to_item.keys())
     current_ids = [sid for sid in st.session_state.wm_polar_selected_ids if sid in valid_ids]
     if not current_ids:
-        current_ids = [parsed_items[0]["id"]]
+        current_ids = [item["id"] for item in parsed_items]
         st.session_state.wm_polar_selected_ids = current_ids
 
     default_labels = [label for label, sid in label_to_id.items() if sid in current_ids]
@@ -1120,6 +1718,16 @@ def main() -> None:
 
         if panel_index < len(selected_items) - 1:
             st.markdown("---")
+
+    if len(selected_items) >= 2:
+        render_polar_compare_section(
+            selected_items,
+            smooth_window=smooth_window,
+            amp_smooth_window=amp_smooth_window,
+            max_critical_speeds=max_critical_speeds,
+            logo_uri=logo_uri,
+        )
+
 
 
 if __name__ == "__main__":
