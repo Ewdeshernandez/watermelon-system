@@ -13,6 +13,12 @@ import plotly.io as pio
 import streamlit as st
 
 from core.auth import render_user_menu, require_login
+from core.csv_common import (
+    decode_csv_text,
+    filter_status_valid,
+    find_header_line,
+    parse_metadata_block,
+)
 from core.ui_theme import apply_watermelon_page_style, page_header
 
 
@@ -373,38 +379,21 @@ def build_shaft_text_diagnostics(
 
 
 def read_scl_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame]:
-    file_obj.seek(0)
-    raw_bytes = file_obj.read()
-    text = raw_bytes.decode("utf-8-sig", errors="replace") if isinstance(raw_bytes, bytes) else str(raw_bytes)
+    text = decode_csv_text(file_obj, errors="replace")
 
     lines = text.splitlines()
     if not lines:
         raise ValueError("Archivo vacío.")
 
-    header_idx = None
-    for i, line in enumerate(lines):
-        if (
-            "Point Value" in line
-            and "Paired Point Value" in line
-            and "Speed" in line
-            and "Timestamp" in line
-        ):
-            header_idx = i
-            break
-
+    header_idx = find_header_line(
+        lines,
+        required_signals=("Point Value", "Paired Point Value", "Speed", "Timestamp"),
+    )
     if header_idx is None:
         raise ValueError("No se encontró el encabezado real del CSV Shaft Centerline.")
 
-    meta_lines = lines[:header_idx]
+    meta = parse_metadata_block(lines[:header_idx])
     data_text = "\n".join(lines[header_idx:])
-
-    meta: Dict[str, str] = {}
-    for line in meta_lines:
-        if not line.strip():
-            continue
-        parts = [p.strip() for p in line.split(",", 1)]
-        if len(parts) == 2:
-            meta[parts[0]] = parts[1]
 
     df = pd.read_csv(io.StringIO(data_text), encoding="utf-8-sig")
 
@@ -427,11 +416,7 @@ def read_scl_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame]:
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
 
     df = df.dropna(subset=["Point Value", "Paired Point Value", "Speed", "Timestamp"]).copy()
-    df = df[
-        df["Value Status"].astype(str).str.strip().str.lower().eq("valid")
-        & df["Paired Value Status"].astype(str).str.strip().str.lower().eq("valid")
-        & df["Speed Status"].astype(str).str.strip().str.lower().eq("valid")
-    ].copy()
+    df = filter_status_valid(df, ["Value Status", "Paired Value Status", "Speed Status"])
 
     if df.empty:
         raise ValueError("No quedaron filas válidas después del filtrado.")

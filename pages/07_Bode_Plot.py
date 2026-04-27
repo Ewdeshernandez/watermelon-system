@@ -18,6 +18,15 @@ except Exception:
     find_peaks = None
 
 from core.auth import require_login, render_user_menu
+from core.csv_common import (
+    circular_mean_deg,
+    circular_smooth_deg,
+    decode_csv_text,
+    filter_status_valid,
+    find_header_line,
+    parse_metadata_block,
+    unwrap_deg,
+)
 from core.diagnostics import format_number, get_semaforo_status
 from core.module_patterns import export_report_row, helper_card, panel_card
 from core.ui_theme import apply_watermelon_page_style, draw_top_strip, page_header
@@ -54,26 +63,8 @@ def get_logo_data_uri(path: Path) -> Optional[str]:
 # ============================================================
 # LOAD / TRANSFORM
 # ============================================================
-def circular_mean_deg(series: pd.Series) -> float:
-    vals = pd.to_numeric(series, errors="coerce").dropna().astype(float)
-    if vals.empty:
-        return float("nan")
-    rad = np.deg2rad(vals.to_numpy() % 360.0)
-    c = np.mean(np.cos(rad))
-    s = np.mean(np.sin(rad))
-    ang = np.rad2deg(np.arctan2(s, c))
-    return float((ang + 360.0) % 360.0)
-
-
-def circular_smooth_deg(phase_deg: pd.Series, window: int) -> pd.Series:
-    if window <= 1:
-        return phase_deg.astype(float).copy()
-    rad = np.deg2rad(phase_deg.astype(float).to_numpy() % 360.0)
-    c = pd.Series(np.cos(rad)).rolling(window=window, center=True, min_periods=1).mean().to_numpy()
-    s = pd.Series(np.sin(rad)).rolling(window=window, center=True, min_periods=1).mean().to_numpy()
-    out = np.rad2deg(np.arctan2(s, c))
-    out = (out + 360.0) % 360.0
-    return pd.Series(out, index=phase_deg.index)
+# circular_mean_deg, circular_smooth_deg y unwrap_deg ahora se importan
+# desde core.csv_common (mantienen el mismo comportamiento).
 
 
 def smooth_series(series: pd.Series, window: int) -> pd.Series:
@@ -82,39 +73,21 @@ def smooth_series(series: pd.Series, window: int) -> pd.Series:
     return series.astype(float).rolling(window=window, center=True, min_periods=1).median()
 
 
-def unwrap_deg(series: pd.Series) -> pd.Series:
-    vals = series.astype(float).to_numpy()
-    unwrapped = np.rad2deg(np.unwrap(np.deg2rad(vals)))
-    return pd.Series(unwrapped, index=series.index)
-
-
 def read_bode_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame]:
-    file_obj.seek(0)
-    raw_bytes = file_obj.read()
-    text = raw_bytes.decode("utf-8-sig", errors="replace") if isinstance(raw_bytes, bytes) else str(raw_bytes)
+    text = decode_csv_text(file_obj, errors="replace")
     lines = text.splitlines()
     if not lines:
         raise ValueError("Archivo vacío.")
 
-    header_idx = None
-    for i, line in enumerate(lines):
-        if "X-Axis Value" in line and "Y-Axis Value" in line and "Phase" in line and "Timestamp" in line:
-            header_idx = i
-            break
-
+    header_idx = find_header_line(
+        lines,
+        required_signals=("X-Axis Value", "Y-Axis Value", "Phase", "Timestamp"),
+    )
     if header_idx is None:
         raise ValueError("No se encontró el encabezado real del CSV Bode.")
 
-    meta_lines = lines[:header_idx]
+    meta = parse_metadata_block(lines[:header_idx])
     data_text = "\n".join(lines[header_idx:])
-
-    meta: Dict[str, str] = {}
-    for line in meta_lines:
-        if not line.strip():
-            continue
-        parts = [p.strip() for p in line.split(",", 1)]
-        if len(parts) == 2:
-            meta[parts[0]] = parts[1]
 
     df = pd.read_csv(io.StringIO(data_text), encoding="utf-8-sig")
 
@@ -129,10 +102,7 @@ def read_bode_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame]
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
 
     df = df.dropna(subset=["rpm", "amp", "phase", "Timestamp"]).copy()
-    df = df[
-        df["Y-Axis Status"].astype(str).str.strip().str.lower().eq("valid")
-        & df["Phase Status"].astype(str).str.strip().str.lower().eq("valid")
-    ].copy()
+    df = filter_status_valid(df, ["Y-Axis Status", "Phase Status"])
 
     if df.empty:
         raise ValueError("No quedaron filas válidas después del filtrado.")
