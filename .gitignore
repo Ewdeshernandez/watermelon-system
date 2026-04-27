@@ -1,10 +1,53 @@
+# =============================================================
+# Watermelon System — .gitignore
+# =============================================================
+
+# --- Python ---
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Entornos virtuales ---
 .venv/
+venv/
 env/
+.env
+.envrc
+
+# --- Editores / SO ---
 .DS_Store
 .vscode/
-.streamlit/secrets.toml
+.idea/
+*.swp
+*.swo
+Thumbs.db
+
+# --- Logs y temporales ---
 *.log
 *.bak
+*.save
+*.tmp
+*.cache
+
+# --- Streamlit secrets (NUNCA commitear) ---
 .streamlit/secrets.toml
+
+# --- Estado de runtime de la app (no es código) ---
+data/report_state.json
+data/report_drafts/
+
+# --- Backups manuales ---
+backup_*/
+backup_phase*/
+*_backup_*/
+
+# --- Outputs locales no versionables ---
+exports/
+*.pdf
+!docs/*.pdf
