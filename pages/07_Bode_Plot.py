@@ -296,46 +296,69 @@ def build_bode_text_diagnostics(
     critical_speeds: List[Dict[str, float]],
     max_amp: float,
 ) -> Dict[str, str]:
+    status_up = str(status or "").upper()
+    max_amp = float(max_amp or 0.0)
+
     if not critical_speeds:
-        headline = "No strong resonance candidate detected in the current Bode range"
+        headline = "Respuesta Bode sin velocidad crítica dominante claramente identificada"
         detail = (
-            f"The amplitude-phase response remains relatively controlled in the evaluated speed range. "
-            f"Maximum observed amplitude is {max_amp:.3f}."
+            f"La curva Bode no evidencia un candidato dominante de velocidad crítica dentro del rango evaluado. "
+            f"La amplitud máxima observada es {max_amp:.3f}. La ausencia de un pico dominante acompañado por rotación clara de fase "
+            f"sugiere una respuesta relativamente controlada para esta corrida.\n\n"
+            f"Desde el punto de vista rotodinámico, esta condición debe conservarse como referencia histórica para comparación futura con nuevas corridas, "
+            f"ya que el valor analítico del Bode aumenta cuando se contrasta con Polar Plot, órbita 1X y shaft centerline."
         )
-        action = "Keep trending future run-up/coast-down events and compare repeatability."
+        action = (
+            "Mantener esta corrida como línea base de comparación.\n"
+            "Comparar futuras corridas Bode para identificar migración de fase, incremento de amplitud o aparición de picos nuevos.\n"
+            "Correlacionar con Polar Plot, órbitas 1X, espectro y condiciones operativas."
+        )
         return {"headline": headline, "detail": detail, "action": action}
 
     cs1 = critical_speeds[0]
-    rpm = int(round(float(cs1["rpm"])))
-    amp = float(cs1["amp"])
-    phase_delta = abs(float(cs1["phase_delta"]))
+    rpm = float(cs1.get("rpm", 0.0))
+    amp = float(cs1.get("amp", 0.0))
+    phase_delta = abs(float(cs1.get("phase_delta", 0.0)))
 
-    if status == "SAFE":
-        headline = f"Critical speed candidate near {rpm} rpm, but current response remains controlled"
-        detail = (
-            f"A candidate appears near {rpm} rpm with amplitude around {amp:.3f} and "
-            f"phase change of {phase_delta:.1f}°. The event is present, but not yet severe."
+    if phase_delta >= 60:
+        modal_sentence = (
+            "El giro de fase es suficientemente representativo para considerar una transición modal marcada. "
+            "Antes de esta zona el rotor responde de forma predominantemente rígida; al cruzar la forma modal, "
+            "la respuesta pasa a estar gobernada por flexibilidad dinámica del sistema rotor-soporte."
         )
-        action = "Track the same speed band during the next startup and compare amplitude growth."
-        return {"headline": headline, "detail": detail, "action": action}
-
-    if status == "WARNING":
-        headline = f"Possible critical speed proximity near {rpm} rpm"
-        detail = (
-            f"The Bode response shows amplitude amplification near {rpm} rpm with a phase change of "
-            f"{phase_delta:.1f}°. This is consistent with a relevant dynamic amplification zone."
+    elif phase_delta >= 20:
+        modal_sentence = (
+            "El giro de fase es moderado y sugiere aproximación a una zona de amplificación dinámica. "
+            "Existe modificación de rigidez dinámica aparente, aunque no puede hablarse aún de una velocidad crítica completamente definida."
         )
-        action = "Compare with Polar and Shaft Centerline behavior, and verify whether the peak repeats consistently."
-        return {"headline": headline, "detail": detail, "action": action}
+    else:
+        modal_sentence = (
+            "El giro de fase es bajo; por tanto, el pico debe tratarse como candidato dinámico no confirmado. "
+            "La elevación de amplitud puede estar influenciada por desbalance, excentricidad o condición operativa."
+        )
 
-    headline = f"Strong critical speed behavior near {rpm} rpm"
+    if status_up == "DANGER":
+        headline = f"Respuesta Bode severa compatible con velocidad crítica cerca de {rpm:.0f} rpm"
+    elif status_up == "WARNING":
+        headline = f"Respuesta Bode con indicios de amplificación dinámica cerca de {rpm:.0f} rpm"
+    else:
+        headline = f"Respuesta Bode controlada con candidato modal cerca de {rpm:.0f} rpm"
+
     detail = (
-        f"The Bode response shows a dominant amplitude peak near {rpm} rpm with a phase change of "
-        f"{phase_delta:.1f}°. This is highly consistent with resonance behavior."
+        f"La curva Bode identifica una zona de interés alrededor de {rpm:.0f} rpm, con amplitud aproximada de {amp:.3f} "
+        f"y variación de fase de {phase_delta:.1f}°. {modal_sentence}\n\n"
+        f"Desde el enfoque de análisis de vibraciones y dinámica de rotores, cuando el máximo de amplitud aparece acompañado por rotación de fase "
+        f"en el mismo corredor de velocidad, aumenta la probabilidad de estar frente a una velocidad crítica o forma modal del rotor."
     )
-    action = "Treat as high priority: review operating avoidance, correlate with Polar/Shaft behavior, and avoid repeated operation in this speed zone until assessed."
-    return {"headline": headline, "detail": detail, "action": action}
 
+    action = (
+        "Correlacionar esta zona con Polar Plot y órbita 1X.\n"
+        "Verificar si el cambio de fase ocurre antes, durante o después del máximo de amplitud.\n"
+        "Comparar contra corridas históricas para confirmar repetibilidad o migración modal.\n"
+        "Validar condiciones de balance, alineación, rigidez de soporte, lubricación y carga."
+    )
+
+    return {"headline": headline, "detail": detail, "action": action}
 
 # ============================================================
 # FIGURE UI
@@ -732,128 +755,42 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
 
 
 def _build_bode_report_notes(text_diag: Dict[str, str]) -> str:
-    return (
-        f"Resumen diagnóstico: {text_diag['headline']}\n\n"
-        f"Detalle: {text_diag['detail']}\n\n"
-        f"Acción recomendada: {text_diag['action']}"
-    )
+    headline = str(text_diag.get("headline", "") or "").strip()
+    detail = str(text_diag.get("detail", "") or "").strip()
+    action = str(text_diag.get("action", "") or "").strip()
 
+    blocks = []
+    if headline:
+        blocks.append(headline)
+    if detail:
+        blocks.append(detail)
+    if action:
+        blocks.append("Se recomienda:\n" + action)
 
-def _add_bode_export_footer(fig: go.Figure, text_diag: Dict[str, str]) -> go.Figure:
-    export_fig = go.Figure(fig)
-
-    headline = html.escape(str(text_diag.get("headline", "") or ""))
-    detail = html.escape(str(text_diag.get("detail", "") or ""))
-    action = html.escape(str(text_diag.get("action", "") or ""))
-
-    existing_shapes = list(export_fig.layout.shapes) if export_fig.layout.shapes else []
-    existing_annotations = list(export_fig.layout.annotations) if export_fig.layout.annotations else []
-
-    export_fig.update_xaxes(domain=[0.06, 0.94])
-    export_fig.update_yaxes(domain=[0.28, 0.95])
-
-    existing_shapes.extend(
-        [
-            dict(
-                type="line",
-                xref="paper",
-                yref="paper",
-                x0=0.04,
-                x1=0.96,
-                y0=0.22,
-                y1=0.22,
-                line=dict(color="#64748b", width=3),
-            ),
-            dict(
-                type="rect",
-                xref="paper",
-                yref="paper",
-                x0=0.04,
-                x1=0.96,
-                y0=0.02,
-                y1=0.205,
-                line=dict(color="rgba(148,163,184,0.75)", width=2),
-                fillcolor="rgba(255,255,255,0.97)",
-                layer="below",
-            ),
-        ]
-    )
-
-    existing_annotations.extend(
-        [
-            dict(
-                x=0.06,
-                y=0.185,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                text="<b>DIAGNOSTIC SUMMARY</b>",
-                font=dict(size=26, color="#0f172a"),
-            ),
-            dict(
-                x=0.06,
-                y=0.145,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                text=f"<b>{headline}</b>",
-                font=dict(size=18, color="#111827"),
-            ),
-            dict(
-                x=0.06,
-                y=0.102,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                text=f"<b>Detail:</b> {detail}",
-                font=dict(size=16, color="#111827"),
-            ),
-            dict(
-                x=0.06,
-                y=0.055,
-                xref="paper",
-                yref="paper",
-                showarrow=False,
-                xanchor="left",
-                yanchor="top",
-                align="left",
-                text=f"<b>Action:</b> {action}",
-                font=dict(size=16, color="#111827"),
-            ),
-        ]
-    )
-
-    export_fig.update_layout(
-        height=3000,
-        margin=dict(l=110, r=60, t=320, b=170),
-        shapes=existing_shapes,
-        annotations=existing_annotations,
-    )
-
-    return export_fig
+    return "\n\n".join(blocks).strip()
 
 
 def build_export_png_bytes(fig: go.Figure, text_diag: Dict[str, str]) -> Tuple[Optional[bytes], Optional[str]]:
     try:
         export_fig = _build_export_safe_figure(fig)
         export_fig = _scale_export_figure(export_fig)
-        export_fig = _add_bode_export_footer(export_fig, text_diag)
-        return export_fig.to_image(format="png", width=4300, height=3000, scale=2), None
+        return export_fig.to_image(format="png", width=4300, height=2200, scale=2), None
     except Exception as e:
         return None, str(e)
 
 
-def queue_bode_to_report(meta: Dict[str, str], fig: go.Figure, title: str, text_diag: Dict[str, str]) -> None:
+def queue_bode_to_report(
+    meta: Dict[str, str],
+    fig: go.Figure,
+    title: str,
+    text_diag: Dict[str, str],
+    image_bytes: Optional[bytes] = None,
+) -> None:
     ensure_report_state()
+
+    if image_bytes is None:
+        image_bytes = build_export_png_bytes(fig, text_diag)[0]
+
     st.session_state.report_items.append(
         {
             "id": f"report-bode-{meta.get('Machine Name','')}-{meta.get('Point Name','')}-{title}",
@@ -861,13 +798,146 @@ def queue_bode_to_report(meta: Dict[str, str], fig: go.Figure, title: str, text_
             "title": title,
             "notes": _build_bode_report_notes(text_diag),
             "signal_id": meta.get("Point Name", ""),
-            "figure": go.Figure(fig),
+            "image_bytes": image_bytes,
             "machine": meta.get("Machine Name", ""),
             "point": meta.get("Point Name", ""),
             "variable": meta.get("Variable", ""),
             "timestamp": "",
         }
     )
+
+
+# ============================================================
+# BODE MULTI-FECHA COMPARE
+# ============================================================
+def render_bode_compare_section(
+    items: List[Dict[str, Any]],
+    *,
+    smooth_window: int,
+    phase_mode: str,
+    detect_cs: bool,
+    max_critical_speeds: int,
+    logo_uri: Optional[str],
+) -> None:
+    if len(items) < 2:
+        return
+
+    st.markdown("---")
+    st.markdown("## Comparación multi-fecha · Bode Plot")
+
+    palette = ["#2563eb","#16a34a","#9333ea","#ea580c","#dc2626","#0891b2"]
+
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.055, row_heights=[0.48,0.52])
+
+    summary_rows = []
+    records = []
+
+    for idx, item in enumerate(items):
+        df = item["grouped_df"].copy()
+        df["amp"] = smooth_series(df["amp"], smooth_window)
+
+        phase_wrapped_raw = df["phase"].astype(float) % 360.0
+        phase_wrapped_smooth = circular_smooth_deg(phase_wrapped_raw, min(smooth_window, 5))
+
+        if phase_mode == "Wrapped Raw 0-360":
+            df["phase_plot"] = phase_wrapped_raw
+        else:
+            df["phase_plot"] = phase_wrapped_smooth
+
+        critical_speeds = estimate_critical_speeds_api684_style(df, max_count=max_critical_speeds) if detect_cs else []
+
+        if critical_speeds:
+            cs = critical_speeds[0]
+            dom_rpm = float(cs["rpm"])
+            dom_amp = float(cs["amp"])
+            dom_phase = float(cs["phase_delta"])
+        else:
+            peak_idx = int(df["amp"].idxmax())
+            dom_rpm = float(df.loc[peak_idx,"rpm"])
+            dom_amp = float(df.loc[peak_idx,"amp"])
+            dom_phase = 0.0
+
+        records.append((dom_rpm, dom_amp, dom_phase, item["file_name"]))
+
+        color = palette[idx % len(palette)]
+
+        fig.add_trace(go.Scatter(x=df["rpm"], y=df["phase_plot"], mode="lines", line=dict(width=2.2,color=color), showlegend=False), row=1,col=1)
+        fig.add_trace(go.Scatter(x=df["rpm"], y=df["amp"], mode="lines", line=dict(width=2.5,color=color), name=item["file_name"]), row=2,col=1)
+
+        fig.add_vline(x=dom_rpm, line_width=1.5, line_dash="dash", line_color=color, row=1,col=1)
+        fig.add_vline(x=dom_rpm, line_width=1.5, line_dash="dash", line_color=color, row=2,col=1)
+
+        summary_rows.append({
+            "Archivo": item["file_name"],
+            "RPM candidata": round(dom_rpm,0),
+            "Amp dominante": round(dom_amp,3),
+            "Delta fase": round(dom_phase,1),
+        })
+
+    draw_top_strip(
+        fig=fig,
+        machine=items[0]["machine"],
+        point_text="Bode Plot · Comparación multi-fecha",
+        variable=items[0]["meta"].get("Variable","-"),
+        dt_text="Comparación histórica",
+        rpm_text="Superposición multi-corrida",
+        logo_uri=logo_uri,
+    )
+
+    fig.update_layout(
+        height=860,
+        margin=dict(l=60,r=50,t=145,b=105),
+        plot_bgcolor="#f8fafc",
+        paper_bgcolor="#f3f4f6",
+        legend=dict(orientation="h",yanchor="top",y=-0.08,xanchor="center",x=0.5),
+    )
+
+    fig.update_yaxes(title="Phase (°)", autorange="reversed", row=1,col=1)
+    fig.update_yaxes(title="Amplitude", row=2,col=1)
+    fig.update_xaxes(title="Speed (rpm)", row=2,col=1)
+
+    st.plotly_chart(fig, width="stretch", config={"displaylogo": False}, key="wm_bode_compare_plot")
+
+    summary = pd.DataFrame(summary_rows)
+    st.dataframe(summary, width="stretch", hide_index=True)
+
+    baseline = records[0]
+    latest = records[-1]
+
+    diag = {
+        "headline": "Comparación multi-fecha Bode de amplitud, fase y respuesta modal",
+        "detail": (
+            f"Entre la corrida base ({baseline[3]}) y la más reciente ({latest[3]}) se observa variación de "
+            f"{latest[1]-baseline[1]:+.3f} en amplitud dominante, desplazamiento de {latest[0]-baseline[0]:+.0f} rpm "
+            f"y cambio de {latest[2]-baseline[2]:+.1f}° en fase dominante.\n\n"
+            f"Este comportamiento permite evaluar migración modal, modificación de rigidez efectiva o cambios en soporte/carga del rotor."
+        ),
+        "action": (
+            "Correlacionar las corridas Bode con Polar Plot y órbitas 1X.\n"
+            "Verificar si la velocidad candidata se mantiene o migra entre fechas.\n"
+            "Usar la corrida más estable como línea base histórica."
+        )
+    }
+
+    st.markdown("### Diagnóstico comparativo automático")
+    st.markdown(f"**{diag['headline']}**")
+    st.write(diag["detail"])
+    st.write("Se recomienda:")
+    st.write(diag["action"])
+
+    png_bytes = build_export_png_bytes(fig, diag)[0]
+
+    if st.button("Enviar comparativo Bode a reporte", key="wm_bode_compare_report_btn"):
+        ensure_report_state()
+        st.session_state.report_items.append(
+            {
+                "type": "bode_compare",
+                "title": "Bode Plot · Comparación multi-fecha",
+                "notes": _build_bode_report_notes(diag),
+                "image_bytes": png_bytes,
+            }
+        )
+        st.success("Comparativo Bode enviado al reporte.")
 
 
 # ============================================================
@@ -1040,9 +1110,212 @@ def render_bode_panel(
         export_key=export_state_key,
         fig=fig,
         export_builder=lambda export_fig: build_export_png_bytes(export_fig, text_diag),
-        report_callback=lambda: queue_bode_to_report(meta, fig, title, text_diag),
+        report_callback=lambda: queue_bode_to_report(
+            meta,
+            fig,
+            title,
+            text_diag,
+            image_bytes=build_export_png_bytes(fig, text_diag)[0],
+        ),
         file_name=f"{item['file_stem']}_bode_hd.png",
     )
+
+
+
+# ============================================================
+# BODE COMPARISON PRO
+# ============================================================
+def render_bode_compare_section(
+    items: List[Dict[str, Any]],
+    *,
+    smooth_window: int,
+    phase_mode: str,
+    detect_cs: bool,
+    max_critical_speeds: int,
+    logo_uri: Optional[str],
+) -> None:
+    if len(items) < 2:
+        return
+
+    st.markdown("---")
+    st.markdown("## Comparación multi-fecha · Bode Plot")
+
+    fig = make_subplots(
+        rows=2,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.055,
+        row_heights=[0.48, 0.52],
+    )
+
+    palette = ["#2563eb", "#16a34a", "#9333ea", "#ea580c", "#dc2626", "#0891b2", "#7c3aed"]
+    records = []
+
+    for idx, item in enumerate(items):
+        df = item["grouped_df"].copy()
+        df["amp"] = smooth_series(df["amp"], smooth_window)
+
+        phase_wrapped_raw = df["phase"].astype(float) % 360.0
+        phase_wrapped_smooth = circular_smooth_deg(phase_wrapped_raw, min(smooth_window, 5))
+        df["phase_continuous_internal"] = unwrap_deg(phase_wrapped_smooth)
+
+        if phase_mode == "Wrapped Raw 0-360":
+            df["phase_plot"] = phase_wrapped_raw
+        else:
+            df["phase_plot"] = phase_wrapped_smooth
+
+        critical_speeds = estimate_critical_speeds_api684_style(df, max_count=max_critical_speeds) if detect_cs else []
+
+        if critical_speeds:
+            cs = critical_speeds[0]
+            dom_rpm = float(cs["rpm"])
+            dom_amp = float(cs["amp"])
+            dom_phase = float(cs["phase_delta"])
+        else:
+            peak_idx = int(df["amp"].idxmax())
+            dom_rpm = float(df.loc[peak_idx, "rpm"])
+            dom_amp = float(df.loc[peak_idx, "amp"])
+            dom_phase = 0.0
+
+        color = palette[idx % len(palette)]
+        label = item.get("file_name", f"Bode {idx+1}")
+
+        fig.add_trace(
+            go.Scatter(
+                x=df["rpm"],
+                y=df["phase_plot"],
+                mode="lines",
+                line=dict(width=2.2, color=color),
+                name=f"{label} · fase",
+                showlegend=False,
+            ),
+            row=1,
+            col=1,
+        )
+
+        fig.add_trace(
+            go.Scatter(
+                x=df["rpm"],
+                y=df["amp"],
+                mode="lines",
+                line=dict(width=2.6, color=color),
+                name=label,
+                showlegend=True,
+            ),
+            row=2,
+            col=1,
+        )
+
+        fig.add_vline(x=dom_rpm, line_width=1.4, line_dash="dash", line_color=color, row=1, col=1)
+        fig.add_vline(x=dom_rpm, line_width=1.4, line_dash="dash", line_color=color, row=2, col=1)
+
+        records.append(
+            {
+                "Archivo": label,
+                "RPM candidata": dom_rpm,
+                "Amp dominante": dom_amp,
+                "Delta fase": dom_phase,
+                "Max amp": float(df["amp"].max()),
+            }
+        )
+
+    combined = pd.concat([item["grouped_df"] for item in items], ignore_index=True)
+    x_min = float(combined["rpm"].min())
+    x_max = float(combined["rpm"].max())
+
+    first_meta = items[0]["meta"]
+    x_unit = first_meta.get("X-Axis Unit", "rpm") or "rpm"
+    y_unit = first_meta.get("Y-Axis Unit", "") or ""
+
+    draw_top_strip(
+        fig=fig,
+        machine=items[0].get("machine", ""),
+        point_text="Bode Plot · Comparación multi-fecha",
+        variable=first_meta.get("Variable", "-"),
+        dt_text="Comparación histórica",
+        rpm_text=f"{int(x_min)} - {int(x_max)} {x_unit}",
+        logo_uri=logo_uri,
+    )
+
+    fig.update_layout(
+        height=860,
+        margin=dict(l=60, r=50, t=145, b=105),
+        plot_bgcolor="#f8fafc",
+        paper_bgcolor="#f3f4f6",
+        font=dict(color="#111827"),
+        hovermode="closest",
+        showlegend=True,
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.08,
+            xanchor="center",
+            x=0.5,
+            bgcolor="rgba(255,255,255,0.75)",
+        ),
+    )
+
+    fig.update_xaxes(range=[x_min, x_max], showgrid=True, gridcolor="rgba(148,163,184,0.18)", row=1, col=1)
+    fig.update_xaxes(title=f"Speed ({x_unit})", range=[x_min, x_max], showgrid=True, gridcolor="rgba(148,163,184,0.18)", row=2, col=1)
+    fig.update_yaxes(title="Phase (°)", autorange="reversed", showgrid=True, gridcolor="rgba(148,163,184,0.18)", row=1, col=1)
+    fig.update_yaxes(title=f"Amplitude ({y_unit})" if y_unit else "Amplitude", showgrid=True, gridcolor="rgba(148,163,184,0.18)", row=2, col=1)
+
+    st.plotly_chart(fig, width="stretch", config={"displaylogo": False}, key="wm_bode_compare_plot")
+
+    summary = pd.DataFrame(records)
+    summary["RPM candidata"] = summary["RPM candidata"].round(0)
+    summary["Amp dominante"] = summary["Amp dominante"].round(3)
+    summary["Delta fase"] = summary["Delta fase"].round(1)
+    summary["Max amp"] = summary["Max amp"].round(3)
+    st.dataframe(summary, width="stretch", hide_index=True)
+
+    base = records[0]
+    last = records[-1]
+    delta_amp = float(last["Amp dominante"] - base["Amp dominante"])
+    delta_rpm = float(last["RPM candidata"] - base["RPM candidata"])
+    delta_phase = float(last["Delta fase"] - base["Delta fase"])
+
+    diag = {
+        "headline": "Comparación multi-fecha Bode de amplitud, fase y respuesta modal",
+        "detail": (
+            f"Se compararon {len(records)} corridas Bode. Entre la corrida base ({base['Archivo']}) y la más reciente ({last['Archivo']}) "
+            f"se observa una variación de {delta_amp:+.3f} en amplitud dominante, desplazamiento de {delta_rpm:+.0f} rpm "
+            f"y cambio de fase dominante de {delta_phase:+.1f}°.\\n\\n"
+            f"Desde el punto de vista rotodinámico, este comparativo permite evaluar si el corredor modal se mantiene estable o si existe migración de la zona crítica. "
+            f"Cuando la amplitud y la fase cambian entre corridas, puede existir modificación de rigidez efectiva, amortiguamiento, soporte, carga, balance o condición de cojinetes."
+        ),
+        "action": (
+            "Correlacionar las corridas Bode con Polar Plot y órbitas 1X.\\n"
+            "Verificar si la velocidad candidata se mantiene, migra o incrementa amplitud entre fechas.\\n"
+            "Usar la corrida más estable como línea base histórica."
+        ),
+    }
+
+    st.markdown("### Diagnóstico comparativo automático")
+    st.markdown(f"**{diag['headline']}**")
+    st.write(diag["detail"])
+    st.write("Se recomienda:")
+    st.write(diag["action"])
+
+    summary_lines = [
+        f"- {r['Archivo']}: candidato {r['RPM candidata']:.0f} rpm, amplitud dominante {r['Amp dominante']:.3f}, Δfase {r['Delta fase']:.1f}°, máximo {r['Max amp']:.3f}."
+        for r in records
+    ]
+
+    notes = _build_bode_report_notes(diag) + "\\n\\nResumen comparativo de corridas:\\n" + "\\n".join(summary_lines)
+    png_bytes = build_export_png_bytes(fig, diag)[0]
+
+    if st.button("Enviar comparativo Bode a reporte", key="wm_bode_compare_report_btn"):
+        ensure_report_state()
+        st.session_state.report_items.append(
+            {
+                "type": "bode_compare",
+                "title": "Bode Plot · Comparación multi-fecha",
+                "notes": notes,
+                "image_bytes": png_bytes,
+            }
+        )
+        st.success("Comparativo Bode enviado al reporte.")
 
 
 # ============================================================
@@ -1167,6 +1440,17 @@ def main() -> None:
 
         if panel_index < len(selected_items) - 1:
             st.markdown("---")
+
+    if len(selected_items) >= 2:
+        render_bode_compare_section(
+            selected_items,
+            smooth_window=smooth_window,
+            phase_mode=phase_mode,
+            detect_cs=detect_cs,
+            max_critical_speeds=max_critical_speeds,
+            logo_uri=logo_uri,
+        )
+
 
 
 if __name__ == "__main__":
