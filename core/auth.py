@@ -15,7 +15,7 @@ DEFAULT_SESSION_TIMEOUT_MINUTES = 480
 
 
 NAV_ITEMS = [
-    {"label": "Home", "page": "00_Home.py"},
+    {"label": "Home", "page": "app.py"},
     {"label": "Load Data", "page": "pages/01_Load_Data.py"},
     {"label": "Tabular List", "page": "pages/01__Tabular_List.py"},
     {"label": "Time Waveforms", "page": "pages/02_Time_Waveforms.py"},
