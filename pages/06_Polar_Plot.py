@@ -19,6 +19,13 @@ except Exception:
     find_peaks = None
 
 from core.auth import require_login, render_user_menu
+from core.csv_common import (
+    circular_mean_deg,
+    decode_csv_text,
+    filter_status_valid,
+    find_header_line,
+    parse_metadata_block,
+)
 from core.diagnostics import build_polar_text_diagnostics, format_number, get_semaforo_status
 from core.module_patterns import export_report_row, helper_card, panel_card
 from core.ui_theme import (
@@ -108,15 +115,7 @@ def get_logo_data_uri(path: Path) -> Optional[str]:
         return None
 
 
-def circular_mean_deg(series: pd.Series) -> float:
-    vals = pd.to_numeric(series, errors="coerce").dropna().astype(float)
-    if vals.empty:
-        return float("nan")
-    rad = np.deg2rad(vals.to_numpy() % 360.0)
-    c = np.mean(np.cos(rad))
-    s = np.mean(np.sin(rad))
-    ang = np.rad2deg(np.arctan2(s, c))
-    return float((ang + 360.0) % 360.0)
+# circular_mean_deg ahora se importa desde core.csv_common
 
 
 def circular_smooth_deg(phase_deg: pd.Series, window: int) -> pd.Series:
@@ -175,33 +174,21 @@ def polar_health_status(
 # CSV LOADER
 # ============================================================
 def read_polar_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame]:
-    file_obj.seek(0)
-    raw_bytes = file_obj.read()
-    text = raw_bytes.decode("utf-8-sig", errors="replace") if isinstance(raw_bytes, bytes) else str(raw_bytes)
+    text = decode_csv_text(file_obj, errors="replace")
 
     lines = text.splitlines()
     if not lines:
         raise ValueError("Archivo vacío.")
 
-    header_idx = None
-    for i, line in enumerate(lines):
-        if "Amp" in line and "Phase" in line and "Speed" in line and "Timestamp" in line:
-            header_idx = i
-            break
-
+    header_idx = find_header_line(
+        lines,
+        required_signals=("Amp", "Phase", "Speed", "Timestamp"),
+    )
     if header_idx is None:
         raise ValueError("No se encontró el encabezado real del CSV Polar.")
 
-    meta_lines = lines[:header_idx]
+    meta = parse_metadata_block(lines[:header_idx])
     data_text = "\n".join(lines[header_idx:])
-
-    meta: Dict[str, str] = {}
-    for line in meta_lines:
-        if not line.strip():
-            continue
-        parts = [p.strip() for p in line.split(",", 1)]
-        if len(parts) == 2:
-            meta[parts[0]] = parts[1]
 
     df = pd.read_csv(io.StringIO(data_text), encoding="utf-8-sig")
 
@@ -216,11 +203,7 @@ def read_polar_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame
     df["Timestamp"] = pd.to_datetime(df["Timestamp"], errors="coerce")
 
     df = df.dropna(subset=["amp", "phase", "speed", "Timestamp"]).copy()
-    df = df[
-        df["Amp Status"].astype(str).str.strip().str.lower().eq("valid")
-        & df["Phase Status"].astype(str).str.strip().str.lower().eq("valid")
-        & df["Speed Status"].astype(str).str.strip().str.lower().eq("valid")
-    ].copy()
+    df = filter_status_valid(df, ["Amp Status", "Phase Status", "Speed Status"])
 
     if df.empty:
         raise ValueError("No quedaron filas válidas después del filtrado.")
