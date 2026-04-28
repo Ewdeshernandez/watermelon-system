@@ -16,6 +16,7 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 from core.auth import require_login, render_user_menu
+from core.csv_common import decode_csv_text, find_header_line, parse_metadata_block
 from core.trend_diagnostics import build_trend_report_narrative as build_trend_report_narrative_core
 
 st.set_page_config(page_title="Watermelon System | Trends", layout="wide")
@@ -366,8 +367,7 @@ def load_operational_records_from_uploader(files: List[Any], temperature_unit: s
 
 def parse_trend_csv(uploaded_file) -> Optional[TrendRecord]:
     try:
-        raw_bytes = uploaded_file.getvalue()
-        text = raw_bytes.decode("utf-8-sig", errors="ignore")
+        text = decode_csv_text(uploaded_file, errors="ignore")
     except Exception:
         return None
 
@@ -375,21 +375,14 @@ def parse_trend_csv(uploaded_file) -> Optional[TrendRecord]:
     if len(lines) < 2:
         return None
 
-    header_map: Dict[str, str] = {}
-    data_header_idx: Optional[int] = None
-
-    for idx, line in enumerate(lines):
-        if "X-Axis Value" in line and "Y-Axis Value" in line:
-            data_header_idx = idx
-            break
-        parts = line.split(",", 1)
-        key = parts[0].strip() if parts else ""
-        value = parts[1].strip() if len(parts) > 1 else ""
-        if key:
-            header_map[key] = value
-
+    data_header_idx = find_header_line(
+        lines,
+        required_signals=("X-Axis Value", "Y-Axis Value"),
+    )
     if data_header_idx is None:
         return None
+
+    header_map: Dict[str, str] = parse_metadata_block(lines[:data_header_idx])
 
     csv_text = "\n".join(lines[data_header_idx:])
     try:
