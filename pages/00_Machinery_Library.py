@@ -1,11 +1,12 @@
 """
-pages/17_Asset_Documents.py
-============================
+pages/00_Machinery_Library.py
+=============================
 
-Asset Documents — gestión de instancias de activos físicos. Cada
-instancia (máquina física específica, ej. "TES1" del cliente
-Atlántico) tiene su propio Vault con manuales, reportes y
-parámetros físicos del cojinete.
+Machinery Library — cockpit central del sistema (Ciclo 14a).
+Renombrado desde pages/17_Asset_Documents.py + promovido a primera
+página post-login. Cada instancia (máquina física específica, ej.
+"TES1" del cliente Ecopetrol) tiene su propio perfil técnico
+extendido + Vault con manuales y parámetros físicos del cojinete.
 
 Diferencia clave con la versión anterior (Ciclo 7):
 
