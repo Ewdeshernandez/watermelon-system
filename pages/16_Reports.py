@@ -1436,11 +1436,11 @@ def _autodraft_sections_from_items(meta_dict: Dict[str, Any], current_items: Lis
         f"a partir de {n} {type_phrase} adquiridas en condición operativa "
         f"mediante el sistema de monitoreo en línea y remoto Watermelon System, "
         f"con el propósito de identificar hallazgos rotodinámicos relevantes y "
-        f"emitir recomendaciones técnicas alineadas con normas internacionales "
-        f"aplicables (API 670 para instrumentación con sondas de proximidad, "
-        f"API 684 para análisis rotodinámico, ISO 20816 para evaluación de "
-        f"vibración mecánica e ISO 21940 para criterios de balanceo) bajo "
-        f"prácticas de análisis Categoría IV del Vibration Institute."
+        f"emitir recomendaciones técnicas alineadas con las normas internacionales "
+        f"aplicables al análisis avanzado de rotordinámica: API 670 para "
+        f"instrumentación con sondas de proximidad, API 684 para análisis "
+        f"rotodinámico, ISO 20816 para evaluación de severidad de vibración "
+        f"mecánica e ISO 21940 para criterios de balanceo."
     )
 
     development_lines = [

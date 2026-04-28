@@ -1512,7 +1512,7 @@ def render_waveform_panel(
             "CONDICIÓN ACEPTABLE": "#16a34a",
         }.get(sev, "#475569")
         with st.expander(
-            f"🔬 Diagnóstico Cat IV (rotordynamics) · {cat_iv_wf_diag.get('headline', '')}",
+            f"🔬 Diagnóstico avanzado · {cat_iv_wf_diag.get('headline', '')}",
             expanded=True,
         ):
             st.markdown(
@@ -1522,6 +1522,44 @@ def render_waveform_panel(
                 f"Severidad global: {sev}</div>",
                 unsafe_allow_html=True,
             )
+
+            # Ciclo 12.2 — métricas duras dentro del expander avanzado
+            # (antes estaban en una seccion 'Analisis automatico' huerfana
+            # que no llegaba al reporte; ahora viven al lado de la
+            # narrativa que SI las usa).
+            try:
+                _struct = cat_iv_wf_diag.get("structured") or {}
+                _metrics_block = _struct.get("metrics") or {}
+                _impacts_block = _struct.get("impacts") or {}
+                _rms = float(_metrics_block.get("rms", 0.0) or 0.0)
+                _peak = float(_metrics_block.get("peak", 0.0) or 0.0)
+                _p2p = float(_metrics_block.get("peak_to_peak", 0.0) or 0.0)
+                _cf = float(_metrics_block.get("crest_factor", 0.0) or 0.0)
+                _kurt = float(_metrics_block.get("kurtosis", 0.0) or 0.0)
+                _skew = float(_metrics_block.get("skewness", 0.0) or 0.0)
+                _mean = float(_metrics_block.get("mean", 0.0) or 0.0)
+                _std = float(_metrics_block.get("std", 0.0) or 0.0)
+                _impacts_count = int(_impacts_block.get("count", 0) or 0)
+                _impacts_thr = float(_impacts_block.get("threshold", 0.0) or 0.0)
+
+                _c1, _c2, _c3, _c4 = st.columns(4)
+                _c1.metric("RMS", f"{_rms:.4f}")
+                _c2.metric("Peak", f"{_peak:.4f}")
+                _c3.metric("Crest Factor", f"{_cf:.3f}")
+                _c4.metric("Kurtosis", f"{_kurt:.3f}")
+
+                _c5, _c6, _c7, _c8 = st.columns(4)
+                _c5.metric("Mean", f"{_mean:.4f}")
+                _c6.metric("Std", f"{_std:.4f}")
+                _c7.metric("Skewness", f"{_skew:.3f}")
+                _c8.metric("Peak-to-Peak", f"{_p2p:.4f}")
+
+                _ic1, _ic2 = st.columns(2)
+                _ic1.metric("Cantidad de transitorios", str(_impacts_count))
+                _ic2.metric("Threshold dinámico", f"{_impacts_thr:.4f}")
+            except Exception:
+                pass
+
             st.write(cat_iv_wf_diag.get("detail", ""))
             st.write(cat_iv_wf_diag.get("action", ""))
             findings = cat_iv_wf_diag.get("findings", [])
@@ -1789,89 +1827,9 @@ else:
 
 
 
-# ==============================
-# W FINAL: External Waveform Analysis (SAFE)
-# ==============================
-try:
-    import numpy as np
-
-    st.markdown("### Análisis automático de forma de onda")
-
-    for primary in selected_records:
-        mask = (primary.time_s >= t_min) & (primary.time_s <= t_max)
-        if not np.any(mask):
-            continue
-
-        base_y = normalize_signal(primary.amplitude, normalization_mode)[mask]
-        base_t = primary.time_s[mask]
-
-        local_view_mode = waveform_view_mode
-        if local_view_mode != "Raw" and (primary.rpm is None or primary.rpm <= 0):
-            local_view_mode = "Raw"
-
-        processed_y, waveform_mode_label = apply_waveform_view_mode(
-            time_s=base_t,
-            y=base_y,
-            rpm=primary.rpm,
-            mode=local_view_mode,
-        )
-
-        y = np.asarray(processed_y, dtype=float).reshape(-1)
-        y = y[np.isfinite(y)]
-
-        if y.size == 0:
-            continue
-
-        rms = float(np.sqrt(np.mean(y ** 2)))
-        peak = float(np.max(np.abs(y)))
-        crest_factor = float(peak / rms) if rms > 0 else 0.0
-        mean = float(np.mean(y))
-        std = float(np.std(y))
-        peak_to_peak = float(np.max(y) - np.min(y))
-
-        if std > 0:
-            z = (y - mean) / std
-            skewness = float(np.mean(z ** 3))
-            kurtosis = float(np.mean(z ** 4))
-        else:
-            skewness = 0.0
-            kurtosis = 0.0
-
-        threshold = 3.5 * rms
-        peak_idx = np.where(np.abs(y) > threshold)[0]
-        impacts = []
-        if peak_idx.size > 0:
-            impacts = [int(peak_idx[0])]
-            for idx in peak_idx[1:]:
-                idx = int(idx)
-                if idx - impacts[-1] > 5:
-                    impacts.append(idx)
-
-        st.markdown(f"#### Señal {primary.name}")
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("RMS", f"{rms:.4f}")
-        c2.metric("Peak", f"{peak:.4f}")
-        c3.metric("Crest Factor", f"{crest_factor:.3f}")
-        c4.metric("Kurtosis", f"{kurtosis:.3f}")
-
-        c5, c6, c7, c8 = st.columns(4)
-        c5.metric("Mean", f"{mean:.4f}")
-        c6.metric("Std", f"{std:.4f}")
-        c7.metric("Skewness", f"{skewness:.3f}")
-        c8.metric("Peak-to-Peak", f"{peak_to_peak:.4f}")
-
-        ic1, ic2 = st.columns(2)
-        ic1.metric("Cantidad de transitorios", str(len(impacts)))
-        ic2.metric("Threshold dinámico", f"{threshold:.4f}")
-
-        if impacts:
-            preview = ", ".join(str(x) for x in impacts[:20])
-            st.caption(f"Índices detectados: {preview}")
-            if len(impacts) > 20:
-                st.caption(f"Mostrando 20 de {len(impacts)} transitorios detectados.")
-        else:
-            st.caption("No se detectaron transitorios sobre el umbral dinámico.")
-
-except Exception as e:
-    st.error(f"Waveform analysis error: {e}")
+# Ciclo 12.2 — sección 'Análisis automático de forma de onda' eliminada.
+# Las 8 métricas (RMS, Peak, CF, Kurtosis, Mean, Std, Skewness, P2P) y los
+# transitorios ahora viven DENTRO del expander '🔬 Diagnóstico avanzado'
+# por panel, junto a la narrativa que las usa. La sección suelta había
+# quedado huérfana: mostraba números pero no llegaban al reporte ni se
+# correlacionaban con findings.

@@ -1244,9 +1244,10 @@ def build_scl_diagnostics_rotordyn(
 
     paragraphs.append(
         f"El análisis de Shaft Centerline evalúa la posición DC del muñón "
-        f"dentro del cojinete plano hidrodinámico siguiendo prácticas Cat IV "
-        f"y los criterios de API 670 para instrumentación con sondas de "
-        f"proximidad.{profile_clause}{physical_clause}{babbitt_clause}{doc_clause}{frame_clause}"
+        f"dentro del cojinete plano hidrodinámico bajo los criterios de "
+        f"API 670 para instrumentación con sondas de proximidad y de "
+        f"API 684 para evaluación rotodinámica avanzada."
+        f"{profile_clause}{physical_clause}{babbitt_clause}{doc_clause}{frame_clause}"
     )
 
     # Párrafo 2: eccentricity ratio + interpretación

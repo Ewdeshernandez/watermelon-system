@@ -187,6 +187,21 @@ def build_waveform_diagnostics_rotordyn(
     kurt = float(metrics.get("kurtosis", 0.0) or 0.0)
     skew = float(metrics.get("skewness", 0.0) or 0.0)
 
+    # mean / std calculados directos de la señal (no siempre vienen
+    # en `metrics`); se exponen en `structured` para que la UI los
+    # consuma sin recalcular.
+    if a_arr.size > 0:
+        a_finite = a_arr[np.isfinite(a_arr)]
+        mean_val = float(np.mean(a_finite)) if a_finite.size else 0.0
+        std_val = float(np.std(a_finite)) if a_finite.size else 0.0
+    else:
+        mean_val = 0.0
+        std_val = 0.0
+
+    # impacts: si el caller pasó dict del detector, lo reusamos; si no, 0.
+    impacts_count = int((impacts or {}).get("count", 0) or 0)
+    impacts_threshold = float((impacts or {}).get("threshold", 0.0) or 0.0)
+
     cf_class = classify_crest_factor(cf)
     am = detect_amplitude_modulation(t_arr, a_arr)
     asym = detect_asymmetry(a_arr)
@@ -204,7 +219,7 @@ def build_waveform_diagnostics_rotordyn(
             "headline": f"Crest Factor en zona {cf_class.get('bucket')}",
             "narrative": (
                 f"El factor de cresta de {cf:.2f} ubica la forma de onda en "
-                f"el bucket Cat IV {cf_class.get('bucket')}. {cf_class.get('message')}"
+                f"la zona {cf_class.get('bucket')}. {cf_class.get('message')}"
             ),
             "severity": cf_class.get("severity_label"),
         })
@@ -331,13 +346,14 @@ def build_waveform_diagnostics_rotordyn(
 
     paragraphs.append(
         f"El análisis de forma de onda en dominio del tiempo{machine_clause}"
-        f"{point_clause}{unit_clause} aplica detectores Cat IV para "
-        f"identificar firmas mecánicas que el espectro promedia y oculta: "
-        f"crest factor por bucket, modulación de amplitud (envolvente "
-        f"Hilbert), asimetría direccional, beating, clipping, forma diente "
-        f"de sierra y kurtosis estadística. Métricas observadas: RMS = "
-        f"{rms:.4f}, Peak = {peak:.4f}, Peak-to-Peak = {p2p:.4f}, Crest "
-        f"Factor = {cf:.2f}, Kurtosis = {kurt:.2f}, Skewness = {skew:.2f}."
+        f"{point_clause}{unit_clause} aplica detectores avanzados, conforme "
+        f"a los lineamientos de ISO 13373-1 y API 670, para identificar "
+        f"firmas mecánicas que el espectro promedia y oculta: factor de "
+        f"cresta por zona, modulación de amplitud (envolvente Hilbert), "
+        f"asimetría direccional, beating, clipping, forma diente de sierra "
+        f"y kurtosis estadística. Métricas observadas: RMS = {rms:.4f}, "
+        f"Peak = {peak:.4f}, Peak-to-Peak = {p2p:.4f}, Crest Factor = "
+        f"{cf:.2f}, Kurtosis = {kurt:.2f}, Skewness = {skew:.2f}."
     )
 
     if findings:
@@ -445,7 +461,7 @@ def build_waveform_diagnostics_rotordyn(
         )
 
     intro = (
-        "A partir del análisis Cat IV de la forma de onda, se establecen "
+        "A partir del análisis avanzado de la forma de onda, se establecen "
         "las siguientes recomendaciones técnicas priorizadas:"
     )
     action = intro + "\n\n" + "\n\n".join(f"{i}. {a}" for i, a in enumerate(actions, start=1))
@@ -459,9 +475,24 @@ def build_waveform_diagnostics_rotordyn(
         "findings": findings,
         "crest_factor_class": cf_class,
         "structured": {
+            "metrics": {
+                "rms": rms,
+                "peak": peak,
+                "peak_to_peak": p2p,
+                "crest_factor": cf,
+                "kurtosis": kurt,
+                "skewness": skew,
+                "mean": mean_val,
+                "std": std_val,
+            },
+            "impacts": {
+                "count": impacts_count,
+                "threshold": impacts_threshold,
+            },
+            "n_findings": len(findings),
+            # legacy: campos en el nivel raíz para back-compat
             "rms": rms, "peak": peak, "peak_to_peak": p2p,
             "crest_factor": cf, "kurtosis": kurt, "skewness": skew,
-            "n_findings": len(findings),
         },
     }
 

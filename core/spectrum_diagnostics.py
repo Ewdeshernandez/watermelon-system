@@ -614,8 +614,9 @@ def build_spectrum_diagnostics_rotordyn(
 
     paragraphs.append(
         f"El análisis espectral{profile_clause}{rpm_clause} aplica detectores "
-        f"automáticos de firmas mecánicas Cat IV (1X / 2X / armónicos altos / "
-        f"sub-sincrónicos / resonancia) y, cuando el activo tiene rodamientos "
+        f"automáticos de firmas mecánicas (1X / 2X / armónicos altos / "
+        f"sub-sincrónicos / resonancia) conforme a los criterios de API 684 "
+        f"e ISO 13373-1, y, cuando el activo tiene rodamientos "
         f"caracterizados, también busca coincidencias con las frecuencias "
         f"características BPFO / BPFI / BSF / FTF dentro de una tolerancia "
         f"configurable. La unidad de medición empleada es {measurement_unit}."

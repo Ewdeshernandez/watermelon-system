@@ -2218,7 +2218,7 @@ def render_spectrum_panel(
             "CONDICIÓN ACEPTABLE": "#16a34a",
         }.get(sev, "#475569")
         with st.expander(
-            f"🔬 Diagnóstico Cat IV (rotordynamics) · {cat_iv_diag.get('headline', '')}",
+            f"🔬 Diagnóstico avanzado · {cat_iv_diag.get('headline', '')}",
             expanded=True,
         ):
             st.markdown(
