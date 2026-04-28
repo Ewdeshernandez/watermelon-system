@@ -268,10 +268,13 @@ DEFAULT_REPORT_META = {
     "location": "",
     "prepared_by": "",
     "reviewed_by": "",
+    # Cargos y ciudad pre-llenados con el default profesional de Watermelon.
+    # El usuario los puede editar libremente — son solo punto de partida
+    # para evitar campos vacíos en la portada.
     "prepared_role": "Junior Condition Monitoring Engineer",
     "reviewed_role": "Machinery Diagnostic Champion",
-    "prepared_city": "",
-    "reviewed_city": "",
+    "prepared_city": "Cajicá, Cundinamarca · Colombia",
+    "reviewed_city": "Cajicá, Cundinamarca · Colombia",
     "period": "",
     "report_date": TODAY_STR,
     "consecutive": "",
@@ -861,14 +864,16 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         )
     )
 
-    story.append(Spacer(1, 0.80 * cm))
+    # Aire grande antes del bloque de firmas (estética SIGA: las firmas
+    # quedan en el tercio inferior del cover, no apretadas al activo)
+    story.append(Spacer(1, 2.20 * cm))
 
     prepared_by = (meta.get("prepared_by") or "").strip()
     prepared_role = (meta.get("prepared_role") or "Junior Condition Monitoring Engineer").strip()
-    prepared_city = (meta.get("prepared_city") or "").strip()
+    prepared_city = (meta.get("prepared_city") or "Cajicá, Cundinamarca · Colombia").strip()
     reviewed_by = (meta.get("reviewed_by") or "").strip()
     reviewed_role = (meta.get("reviewed_role") or "Machinery Diagnostic Champion").strip()
-    reviewed_city = (meta.get("reviewed_city") or "").strip()
+    reviewed_city = (meta.get("reviewed_city") or "Cajicá, Cundinamarca · Colombia").strip()
     report_date_value = meta.get("report_date") or TODAY_STR
     period_value = (meta.get("period") or "").strip()
     consecutive_value = (meta.get("consecutive") or "").strip()
@@ -945,7 +950,9 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         ]))
         sig_table.hAlign = "CENTER"
         story.append(sig_table)
-        story.append(Spacer(1, 1.1 * cm))
+        # Aire amplio entre firmas y mini-tabla de fecha/consecutivo: que
+        # ese bloque quede empujado contra el pie de la portada (estética SIGA)
+        story.append(Spacer(1, 2.40 * cm))
 
     # Bloque de fecha/periodo/consecutivo como mini-tabla 2 columnas — más
     # profesional y compacto que un párrafo plano. "Periodo evaluado" se
