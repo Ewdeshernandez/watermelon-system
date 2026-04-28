@@ -49,6 +49,15 @@ DATA_DIR = PROJECT_ROOT / "data"
 DOCUMENTS_DIR = DATA_DIR / "asset_documents"
 METADATA_DIR = DATA_DIR / "asset_metadata"
 
+# Seeds: documentos de referencia commiteados al repo para que sobrevivan
+# cualquier redeploy de Streamlit Cloud. Manuales OEM y reportes históricos
+# del cliente que conviene tener "de fábrica" sin requerir re-subida en
+# cada reinicio del container. Cada profile tiene su carpeta con un
+# _index.json que describe los documentos. Estos docs son read-only desde
+# la UI (no se pueden borrar), pero el usuario puede subir versiones más
+# nuevas que conviven con la semilla.
+SEED_DOCUMENTS_DIR = DATA_DIR / "asset_documents_seed"
+
 
 # =============================================================
 # DOCUMENT TYPES PRE-DEFINIDOS
@@ -288,6 +297,48 @@ def _save_metadata(profile_key: str, meta: Dict[str, Any]) -> None:
 
 
 # =============================================================
+# DOCUMENTOS SEMILLA (committed al repo)
+# =============================================================
+
+def _seed_index_path(profile_key: str) -> Path:
+    """Path al _index.json de seeds para un profile."""
+    return SEED_DOCUMENTS_DIR / profile_key / "_index.json"
+
+
+def _seed_document_path(profile_key: str, filename: str) -> Path:
+    """Path al archivo PDF/imagen de un seed document."""
+    return SEED_DOCUMENTS_DIR / profile_key / filename
+
+
+def _load_seed_documents(profile_key: str) -> List[Dict[str, Any]]:
+    """
+    Lee _index.json de seeds y devuelve la lista de documentos
+    "de fábrica" para un profile. Cada entry queda marcado con
+    is_seed=True para que la UI los muestre con un badge especial.
+    Si no hay seeds para ese profile, devuelve [].
+    """
+    idx = _seed_index_path(profile_key)
+    if not idx.exists():
+        return []
+    try:
+        with open(idx, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        docs = list(data.get("documents", []))
+        # Verificar que el archivo físico exista; si falta, descartar la entrada
+        valid = []
+        for d in docs:
+            fname = d.get("filename")
+            if fname and _seed_document_path(profile_key, fname).exists():
+                d = dict(d)
+                d["is_seed"] = True
+                d["storage_filename"] = fname
+                valid.append(d)
+        return valid
+    except Exception:
+        return []
+
+
+# =============================================================
 # API PÚBLICA
 # =============================================================
 
@@ -374,15 +425,45 @@ def add_document(
 
 
 def list_documents(profile_key: str) -> List[Dict[str, Any]]:
-    """Lista los documentos asociados a un profile, ordenados por fecha desc."""
+    """
+    Lista los documentos asociados a un profile, ordenados por fecha desc.
+
+    Devuelve la unión de:
+      - Seeds del repo (committed, sobreviven cualquier redeploy)
+      - Uploads del usuario (filesystem efímero en Streamlit Cloud)
+
+    Si un seed y un upload tienen el mismo id, gana el upload (permite
+    que el usuario "actualice" un documento de fábrica con una versión
+    más nueva sin perder la trazabilidad del seed original).
+    """
     meta = _load_metadata(profile_key)
-    docs = list(meta.get("documents", []))
-    docs.sort(key=lambda d: d.get("uploaded_at", ""), reverse=True)
-    return docs
+    user_docs = list(meta.get("documents", []))
+    seed_docs = _load_seed_documents(profile_key)
+
+    # Merge: arrancamos con seeds, los user docs los sobrescriben por id
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for d in seed_docs:
+        d_id = d.get("id")
+        if d_id:
+            by_id[d_id] = d
+    for d in user_docs:
+        d_id = d.get("id")
+        if d_id:
+            d = dict(d)
+            d["is_seed"] = False
+            by_id[d_id] = d
+
+    merged = list(by_id.values())
+    merged.sort(key=lambda d: d.get("uploaded_at", ""), reverse=True)
+    return merged
 
 
 def get_document_path(profile_key: str, doc_id: str) -> Optional[Path]:
-    """Devuelve el path en disco del archivo, o None si no existe."""
+    """
+    Devuelve el path en disco del archivo, o None si no existe.
+    Busca primero en uploads del usuario, luego en seeds del repo.
+    """
+    # Primero buscamos en uploads del usuario
     meta = _load_metadata(profile_key)
     for d in meta.get("documents", []):
         if d.get("id") == doc_id:
@@ -390,6 +471,15 @@ def get_document_path(profile_key: str, doc_id: str) -> Optional[Path]:
             if path.exists():
                 return path
             return None
+
+    # Después en seeds del repo
+    for d in _load_seed_documents(profile_key):
+        if d.get("id") == doc_id:
+            path = _seed_document_path(profile_key, d["filename"])
+            if path.exists():
+                return path
+            return None
+
     return None
 
 
@@ -403,7 +493,18 @@ def get_document_bytes(profile_key: str, doc_id: str) -> Optional[bytes]:
 
 
 def delete_document(profile_key: str, doc_id: str) -> bool:
-    """Borra el archivo del filesystem y lo remueve del índice."""
+    """
+    Borra el archivo del filesystem y lo remueve del índice.
+
+    Los documentos seed del repo NO se pueden borrar desde la UI (son
+    parte del codebase). Esta función solo opera sobre uploads del
+    usuario. Si se invoca con el id de un seed, devuelve False.
+    """
+    # Bloquear borrado de seeds
+    for d in _load_seed_documents(profile_key):
+        if d.get("id") == doc_id:
+            return False
+
     meta = _load_metadata(profile_key)
     docs = meta.get("documents", [])
     target = None

@@ -88,10 +88,14 @@ def render_documents_section(profile_key: str) -> None:
 
     df = pd.DataFrame([
         {
+            "Origen": "🔒 Fábrica" if d.get("is_seed") else "👤 Usuario",
             "Título": d.get("title", d.get("filename", "—")),
-            "Tipo": DOCUMENT_TYPES.get(d.get("type", "other"), d.get("type", "—")),
+            "Tipo": DOCUMENT_TYPES.get(
+                d.get("document_type") or d.get("type", "other"),
+                d.get("document_type") or d.get("type", "—"),
+            ),
             "Archivo": d.get("filename", "—"),
-            "Tamaño": _bytes_to_human(int(d.get("size_bytes", 0))),
+            "Tamaño": _bytes_to_human(int(d.get("size_bytes", 0))) if d.get("size_bytes") else "—",
             "Subido": _format_date(d.get("uploaded_at", "")),
             "Tags": ", ".join(d.get("tags", [])) if d.get("tags") else "—",
         }
@@ -101,9 +105,19 @@ def render_documents_section(profile_key: str) -> None:
 
     st.markdown("**Acciones**")
     for d in docs:
-        with st.expander(f"📄 {d.get('title') or d.get('filename')}"):
+        is_seed = bool(d.get("is_seed"))
+        title_prefix = "🔒 " if is_seed else "📄 "
+        with st.expander(f"{title_prefix}{d.get('title') or d.get('filename')}"):
             col1, col2, col3 = st.columns([2, 1, 1])
             with col1:
+                if is_seed:
+                    st.caption(
+                        "**Documento de fábrica** — viene committeado al repo "
+                        "y sobrevive cualquier reinicio del despliegue. No "
+                        "puede borrarse desde la UI; solo el equipo de "
+                        "ingeniería puede modificarlo o reemplazarlo en el "
+                        "código fuente."
+                    )
                 st.caption(d.get("description", "") or "_(sin descripción)_")
                 if d.get("tags"):
                     st.caption("Tags: " + ", ".join(d["tags"]))
@@ -123,10 +137,20 @@ def render_documents_section(profile_key: str) -> None:
                     st.caption("Archivo no disponible")
 
             with col3:
-                if st.button("Eliminar", key=f"del_{d['id']}", width="stretch"):
-                    delete_document(profile_key, d["id"])
-                    st.success(f"Documento '{d.get('title')}' eliminado.")
-                    st.rerun()
+                if is_seed:
+                    st.button(
+                        "🔒 Permanente",
+                        key=f"del_{d['id']}",
+                        width="stretch",
+                        disabled=True,
+                        help="Los documentos de fábrica son permanentes y no "
+                             "pueden borrarse desde la UI.",
+                    )
+                else:
+                    if st.button("Eliminar", key=f"del_{d['id']}", width="stretch"):
+                        delete_document(profile_key, d["id"])
+                        st.success(f"Documento '{d.get('title')}' eliminado.")
+                        st.rerun()
 
 
 def render_upload_section(profile_key: str) -> None:

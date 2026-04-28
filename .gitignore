@@ -46,6 +46,14 @@ data/report_drafts/
 data/asset_documents/
 data/asset_metadata/
 
+# --- Document Vault SEEDS (manuales de fábrica, SÍ commitear) ---
+# Esta carpeta contiene PDFs de referencia (manuales OEM, reportes
+# históricos del cliente) que viven en el repo y sobreviven cualquier
+# redeploy de Streamlit Cloud. Se sobrescribe la regla global *.pdf
+# de más abajo para esta carpeta específica.
+!data/asset_documents_seed/
+!data/asset_documents_seed/**
+
 # --- Backups manuales ---
 backup_*/
 backup_phase*/
@@ -55,3 +63,4 @@ backup_phase*/
 exports/
 *.pdf
 !docs/*.pdf
+!data/asset_documents_seed/**/*.pdf
