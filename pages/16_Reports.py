@@ -594,31 +594,58 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     )
 
     def _draw_cover_page(canvas, doc):
+        # Portada SIGA-style: fondo blanco completamente limpio, sin cintas
+        # de colores ni acentos — la sobriedad es el branding. La estructura
+        # del contenido (logo centrado, bloque del activo en jerarquía
+        # tipográfica, firmas paralelas) es la que aporta el peso visual,
+        # no decoración cromática agresiva.
         canvas.saveState()
         canvas.setFillColor(colors.HexColor("#ffffff"))
         canvas.rect(0, 0, page_width, page_height, fill=1, stroke=0)
 
-        # Cinta cyan a la derecha
-        canvas.setFillColor(colors.HexColor("#38bdf8"))
-        canvas.rect(page_width - 4.5 * cm, 0, 4.5 * cm, page_height, fill=1, stroke=0)
+        # Header SIGA-style (mismo formato que en páginas internas para
+        # consistencia): código de formato controlado a la izquierda,
+        # número de página a la derecha. Línea fina cyan debajo, sutil.
+        format_code = meta.get("format_code") or "WMS-FMT-001"
+        format_version = meta.get("format_version") or "1"
+        format_date = meta.get("format_date") or "2026-04-28"
+        format_header = f"{format_code} | Versión {format_version} | Fecha {format_date}"
 
-        # Acentos azul oscuro en la cinta (decoración vertical)
-        canvas.setFillColor(colors.HexColor("#0284c7"))
-        canvas.roundRect(page_width - 4.95 * cm, page_height - 6.8 * cm, 0.42 * cm, 4.8 * cm, 0.2 * cm, fill=1, stroke=0)
-        canvas.roundRect(page_width - 4.95 * cm, 1.0 * cm, 0.42 * cm, 2.3 * cm, 0.2 * cm, fill=1, stroke=0)
+        internal_left = 2.1 * cm
+        internal_right = 2.1 * cm
+        internal_width_end = page_width - internal_right
 
-        # (Marca de agua SIGA quitada — no aporta sin contexto.
-        #  Si en el futuro queremos un watermark Watermelon-only,
-        #  acá iría con setFillAlpha 0.10 + drawImage del logo.)
+        canvas.setFillColor(colors.HexColor("#0f172a"))
+        canvas.setFont(PDF_FONT_BOLD, 7.8)
+        canvas.drawString(internal_left, page_height - 1.0 * cm, format_header)
 
-        # Número de página BLANCO sobre la cinta cyan (mejor contraste
-        # que el color oscuro anterior)
-        canvas.setFont(PDF_FONT_BOLD, 10.5)
-        canvas.setFillColor(colors.white)
+        canvas.setFont(PDF_FONT_BOLD, 9.0)
         canvas.drawRightString(
-            page_width - 1.15 * cm,
+            page_width - internal_right,
             page_height - 1.0 * cm,
             f"Página {doc.page}",
+        )
+
+        # Línea fina cyan separadora arriba — único acento de color en la portada
+        canvas.setStrokeColor(colors.HexColor("#0ea5e9"))
+        canvas.setLineWidth(0.8)
+        canvas.line(internal_left, page_height - 1.35 * cm, internal_width_end, page_height - 1.35 * cm)
+
+        # Footer disclaimer (mismo de SIGA, idéntico a páginas internas)
+        footer = (
+            "INFORME VÁLIDO ÚNICAMENTE PARA LAS CONDICIONES PRESENTES "
+            "DURANTE EL SERVICIO. NO PODRÁ SER COPIADO PARCIAL O TOTALMENTE "
+            "SIN PREVIA AUTORIZACIÓN."
+        )
+        canvas.setStrokeColor(colors.HexColor("#0ea5e9"))
+        canvas.setLineWidth(0.8)
+        canvas.line(internal_left, 0.95 * cm, internal_width_end, 0.95 * cm)
+        canvas.setFillColor(colors.HexColor("#475569"))
+        canvas.setFont(PDF_FONT_REGULAR, 6.4)
+        canvas.drawCentredString(
+            (internal_left + internal_width_end) / 2,
+            0.55 * cm,
+            footer,
         )
 
         canvas.restoreState()
@@ -670,29 +697,37 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
     story: List[Any] = []
 
-    if WATERMELON_LOGO.exists():
-        cover_logo = Image(str(WATERMELON_LOGO), width=4.2 * cm, height=2.0 * cm)
-        cover_logo.hAlign = "LEFT"
-        story.append(cover_logo)
-        story.append(Spacer(1, 0.50 * cm))
+    # ============================================================
+    # PORTADA SIGA-STYLE — todo centrado, sobrio, simétrico.
+    # ============================================================
+    from reportlab.platypus import HRFlowable
 
-    # Eyebrow (label chico arriba, en uppercase tracked) — categoría editorial
+    # 1. Logo Watermelon centrado arriba
+    if WATERMELON_LOGO.exists():
+        cover_logo = Image(str(WATERMELON_LOGO), width=5.8 * cm, height=2.7 * cm)
+        cover_logo.hAlign = "CENTER"
+        story.append(Spacer(1, 0.40 * cm))
+        story.append(cover_logo)
+        story.append(Spacer(1, 0.85 * cm))
+
+    # 2. Eyebrow centrado, color sobrio
     story.append(
         Paragraph(
-            "MACHINERY DIAGNOSTICS ENGINEERING",
+            "Machinery Diagnostics Engineering",
             ParagraphStyle(
                 name="WMCoverEyebrow",
                 parent=styles["Normal"],
                 fontName=PDF_FONT_BOLD,
-                fontSize=8.5,
-                leading=11,
-                textColor=colors.HexColor("#0284c7"),
-                spaceAfter=4,
+                fontSize=11,
+                leading=14,
+                alignment=TA_CENTER,
+                textColor=colors.HexColor("#475569"),
+                spaceAfter=6,
             ),
         )
     )
 
-    # Título grande del reporte
+    # 3. Título grande del reporte, centrado
     story.append(
         Paragraph(
             _paragraph_safe(meta.get("report_title") or "REPORTE TÉCNICO"),
@@ -700,24 +735,29 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 name="WMCoverReportTitle",
                 parent=styles["Normal"],
                 fontName=PDF_FONT_BOLD,
-                fontSize=18,
-                leading=22,
+                fontSize=20,
+                leading=24,
+                alignment=TA_CENTER,
                 textColor=colors.HexColor("#0f172a"),
-                spaceAfter=14,
+                spaceAfter=4,
             ),
         )
     )
 
-    # Línea divisoria cyan delgada — separa la marca del bloque del activo
-    from reportlab.platypus import HRFlowable
+    # 4. Sub-marca "Watermelon System" centrada (igual al SIGA)
     story.append(
-        HRFlowable(
-            width="60%",
-            thickness=1.4,
-            color=colors.HexColor("#0ea5e9"),
-            spaceBefore=2,
-            spaceAfter=14,
-            hAlign="LEFT",
+        Paragraph(
+            "Watermelon System",
+            ParagraphStyle(
+                name="WMCoverBrand",
+                parent=styles["Normal"],
+                fontName=PDF_FONT_REGULAR,
+                fontSize=12,
+                leading=15,
+                alignment=TA_CENTER,
+                textColor=colors.HexColor("#475569"),
+                spaceAfter=20,
+            ),
         )
     )
 
@@ -756,10 +796,22 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     ]
     cover_block_lines = [ln for ln in cover_block_lines if ln]
 
+    # Separador horizontal sutil arriba del bloque del activo
+    story.append(
+        HRFlowable(
+            width="40%",
+            thickness=0.7,
+            color=colors.HexColor("#94a3b8"),
+            spaceBefore=4,
+            spaceAfter=14,
+            hAlign="CENTER",
+        )
+    )
+
     for idx, line in enumerate(cover_block_lines):
         # La primera línea (clase + tag) va más grande, las demás un poco menores
-        font_size = 22 if idx == 0 else 17
-        leading = 26 if idx == 0 else 21
+        font_size = 24 if idx == 0 else 16
+        leading = 28 if idx == 0 else 20
         story.append(
             Paragraph(
                 _paragraph_safe(line),
@@ -769,17 +821,16 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                     fontName=PDF_FONT_BOLD,
                     fontSize=font_size,
                     leading=leading,
+                    alignment=TA_CENTER,
                     textColor=colors.HexColor("#0f172a"),
-                    spaceAfter=4,
+                    spaceAfter=2,
                 ),
             )
         )
 
-    # Si hay descripción del tren acoplado, sub-cabecera en regular más chica
+    # Si hay descripción del tren acoplado, sub-cabecera centrada en regular
     train_text = (meta.get("train_description") or "").strip()
     if train_text:
-        # Espacio extra entre el bloque grande del activo y la descripción
-        # del tren (antes quedaba muy pegado al ECOPETROL - MAGNEX)
         story.append(Spacer(1, 0.30 * cm))
         story.append(
             Paragraph(
@@ -788,17 +839,29 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                     name="WMCoverTrain",
                     parent=styles["Normal"],
                     fontName=PDF_FONT_REGULAR,
-                    fontSize=10.8,
+                    fontSize=10.5,
                     leading=14,
-                    textColor=colors.HexColor("#374151"),
+                    alignment=TA_CENTER,
+                    textColor=colors.HexColor("#475569"),
                     spaceBefore=4,
                     spaceAfter=3,
                 ),
             )
         )
 
-    # Espaciado vertical reducido (antes 2.15 cm — generaba mucho aire)
-    story.append(Spacer(1, 1.10 * cm))
+    # Separador horizontal sutil abajo del bloque del activo
+    story.append(
+        HRFlowable(
+            width="40%",
+            thickness=0.7,
+            color=colors.HexColor("#94a3b8"),
+            spaceBefore=14,
+            spaceAfter=14,
+            hAlign="CENTER",
+        )
+    )
+
+    story.append(Spacer(1, 0.80 * cm))
 
     prepared_by = (meta.get("prepared_by") or "").strip()
     prepared_role = (meta.get("prepared_role") or "Junior Condition Monitoring Engineer").strip()
@@ -810,47 +873,79 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     period_value = (meta.get("period") or "").strip()
     consecutive_value = (meta.get("consecutive") or "").strip()
 
-    if prepared_by:
-        story.append(Paragraph("<b>Preparado por:</b>", styles["WMMeta"]))
-        story.append(Paragraph(_paragraph_safe(prepared_by), styles["WMMeta"]))
-        if prepared_role:
-            story.append(Paragraph(_paragraph_safe(prepared_role), styles["WMMeta"]))
-        if prepared_city:
-            story.append(
-                Paragraph(
-                    _paragraph_safe(prepared_city),
-                    ParagraphStyle(
-                        name="WMCoverPrepCity",
-                        parent=styles["WMMeta"],
-                        fontName=PDF_FONT_REGULAR,
-                        fontSize=9.4,
-                        textColor=colors.HexColor("#475569"),
-                    ),
-                )
-            )
-        story.append(Spacer(1, 0.55 * cm))
+    # Bloque de firmas en DOS COLUMNAS PARALELAS centradas (estilo SIGA).
+    # Cada columna: "Preparado/Revisado por:" en bold + nombre + cargo + ciudad.
+    # Si solo hay uno (preparado o revisado), la otra columna queda vacía.
+    sig_label_style = ParagraphStyle(
+        name="WMCoverSigLabel",
+        parent=styles["Normal"],
+        fontName=PDF_FONT_BOLD,
+        fontSize=10.2,
+        leading=13,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#0f172a"),
+        spaceAfter=4,
+    )
+    sig_name_style = ParagraphStyle(
+        name="WMCoverSigName",
+        parent=styles["Normal"],
+        fontName=PDF_FONT_BOLD,
+        fontSize=11,
+        leading=14,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#0f172a"),
+        spaceAfter=2,
+    )
+    sig_role_style = ParagraphStyle(
+        name="WMCoverSigRole",
+        parent=styles["Normal"],
+        fontName=PDF_FONT_REGULAR,
+        fontSize=9.5,
+        leading=12,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#374151"),
+        spaceAfter=2,
+    )
+    sig_city_style = ParagraphStyle(
+        name="WMCoverSigCity",
+        parent=styles["Normal"],
+        fontName=PDF_FONT_REGULAR,
+        fontSize=9.0,
+        leading=11.5,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#64748b"),
+    )
 
-    if reviewed_by:
-        story.append(Paragraph("<b>Revisado por:</b>", styles["WMMeta"]))
-        story.append(Paragraph(_paragraph_safe(reviewed_by), styles["WMMeta"]))
-        if reviewed_role:
-            story.append(Paragraph(_paragraph_safe(reviewed_role), styles["WMMeta"]))
-        if reviewed_city:
-            story.append(
-                Paragraph(
-                    _paragraph_safe(reviewed_city),
-                    ParagraphStyle(
-                        name="WMCoverRevCity",
-                        parent=styles["WMMeta"],
-                        fontName=PDF_FONT_REGULAR,
-                        fontSize=9.4,
-                        textColor=colors.HexColor("#475569"),
-                    ),
-                )
-            )
-        story.append(Spacer(1, 0.85 * cm))
-    else:
-        story.append(Spacer(1, 0.55 * cm))
+    def _build_signature_cell(label: str, name: str, role: str, city: str) -> List[Any]:
+        cell: List[Any] = []
+        if not name:
+            return [Paragraph("", sig_label_style)]
+        cell.append(Paragraph(label, sig_label_style))
+        cell.append(Paragraph(_paragraph_safe(name), sig_name_style))
+        if role:
+            cell.append(Paragraph(_paragraph_safe(role), sig_role_style))
+        if city:
+            cell.append(Paragraph(_paragraph_safe(city), sig_city_style))
+        return cell
+
+    if prepared_by or reviewed_by:
+        sig_table = Table(
+            [[
+                _build_signature_cell("Preparado por:", prepared_by, prepared_role, prepared_city),
+                _build_signature_cell("Revisado por:", reviewed_by, reviewed_role, reviewed_city),
+            ]],
+            colWidths=[8.3 * cm, 8.3 * cm],
+        )
+        sig_table.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        sig_table.hAlign = "CENTER"
+        story.append(sig_table)
+        story.append(Spacer(1, 1.1 * cm))
 
     # Bloque de fecha/periodo/consecutivo como mini-tabla 2 columnas — más
     # profesional y compacto que un párrafo plano. "Periodo evaluado" se
@@ -886,39 +981,24 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         ])
 
     if meta_rows:
-        # Columna 1 más ancha (4.4 cm) para que "Fecha del reporte" entre en
-        # una sola línea sin partirse.
-        meta_tbl = Table(meta_rows, colWidths=[4.4 * cm, 8.0 * cm])
+        # Tabla CENTRADA (estilo SIGA): label bold + valor regular, columna
+        # 1 angosta para alinear con la columna 2 amplia. Líneas finas
+        # arriba y abajo, sin colores fuertes.
+        meta_tbl = Table(meta_rows, colWidths=[4.4 * cm, 6.6 * cm])
         meta_tbl.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
             ("RIGHTPADDING", (0, 0), (-1, -1), 4),
             ("TOPPADDING", (0, 0), (-1, -1), 4),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
             ("LINEABOVE", (0, 0), (-1, 0), 0.6, colors.HexColor("#cbd5e1")),
             ("LINEBELOW", (0, -1), (-1, -1), 0.6, colors.HexColor("#cbd5e1")),
         ]))
-        meta_tbl.hAlign = "LEFT"
+        meta_tbl.hAlign = "CENTER"
         story.append(meta_tbl)
 
-    # Disclaimer legal al pie de la portada (mismo del SIGA original)
-    story.append(Spacer(1, 1.2 * cm))
-    story.append(
-        Paragraph(
-            "INFORME VÁLIDO ÚNICAMENTE PARA LAS CONDICIONES PRESENTES "
-            "DURANTE EL SERVICIO. NO PODRÁ SER COPIADO PARCIAL O TOTALMENTE "
-            "SIN PREVIA AUTORIZACIÓN.",
-            ParagraphStyle(
-                name="WMCoverLegal",
-                parent=styles["Normal"],
-                fontName=PDF_FONT_REGULAR,
-                fontSize=7.0,
-                leading=9.5,
-                alignment=TA_LEFT,
-                textColor=colors.HexColor("#64748b"),
-            ),
-        )
-    )
+    # (El disclaimer legal se imprime con el footer del canvas — no hace
+    # falta repetirlo acá. Eso lo deja consistente con páginas internas.)
 
     story.append(PageBreak())
 
