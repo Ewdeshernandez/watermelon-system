@@ -26,8 +26,22 @@ from core.csv_common import (
     find_header_line,
     parse_metadata_block,
 )
-from core.diagnostics import build_polar_text_diagnostics, format_number, get_semaforo_status
+from core.diagnostics import (
+    build_polar_compare_diagnostics_rotordyn,
+    build_polar_diagnostics_rotordyn,
+    build_polar_text_diagnostics,
+    format_number,
+    get_semaforo_status,
+)
 from core.module_patterns import export_report_row, helper_card, panel_card
+from core.profile_state import render_profile_selector
+from core.rotordynamics import (
+    detect_critical_speeds,
+    evaluate_api684_margin,
+    iso_20816_2_zone,
+    iso_20816_zone_multipart,
+    mils_to_micrometers,
+)
 from core.ui_theme import (
     apply_watermelon_page_style,
     draw_info_box,
@@ -421,6 +435,10 @@ def build_polar_figure(
     critical_speeds: List[Dict[str, float]],
     semaforo_status: str,
     semaforo_color: str,
+    *,
+    operating_rpm: Optional[float] = None,
+    iso_thresholds: Optional[Dict[str, float]] = None,
+    critical_speeds_pro: Optional[List[Dict[str, Any]]] = None,
 ) -> go.Figure:
     amp_unit = meta.get("Amp Unit", "") or ""
     speed_unit = meta.get("Speed Unit", "rpm") or "rpm"
@@ -433,7 +451,56 @@ def build_polar_figure(
     )
     max_r = max(0.1, float(df["amp"].max()) * 1.18)
 
+    # Permitir que los anillos ISO empujen el max_r si caen fuera de la curva
+    if iso_thresholds is not None:
+        cd_iso = float(iso_thresholds.get("CD", 0.0))
+        if cd_iso > max_r:
+            max_r = cd_iso * 1.10
+
     fig = go.Figure()
+
+    # ============================================================
+    # ISO 20816-2 ZONE RINGS — anillos concéntricos sobre el polar
+    # ============================================================
+    if iso_thresholds is not None:
+        ab = float(iso_thresholds.get("AB", 0.0))
+        bc = float(iso_thresholds.get("BC", 0.0))
+        cd = float(iso_thresholds.get("CD", 0.0))
+        if ab > 0 and bc > ab and cd > bc:
+            theta_circle = np.linspace(0, 360, 181)
+
+            # Anillos como superficies anulares (relleno entre dos radios)
+            for r_outer, r_inner, fill_color, label_letter in (
+                (ab, 0.0, "rgba(34, 197, 94, 0.10)", "A"),
+                (bc, ab, "rgba(234, 179, 8, 0.10)", "B"),
+                (cd, bc, "rgba(249, 115, 22, 0.13)", "C"),
+                (max_r, cd, "rgba(220, 38, 38, 0.15)", "D"),
+            ):
+                # Borde de cada zona (anillo punteado tenue)
+                fig.add_trace(
+                    go.Scatterpolar(
+                        r=[r_outer] * len(theta_circle),
+                        theta=theta_circle,
+                        mode="lines",
+                        line=dict(width=1.2, color="rgba(100,116,139,0.45)", dash="dot"),
+                        hoverinfo="skip",
+                        showlegend=False,
+                    )
+                )
+                # Etiqueta de la zona en ángulo 60° (esquina superior derecha)
+                if r_outer > 0:
+                    label_r = (r_outer + r_inner) / 2.0 if r_inner > 0 else r_outer * 0.5
+                    fig.add_trace(
+                        go.Scatterpolar(
+                            r=[label_r],
+                            theta=[60.0],
+                            mode="text",
+                            text=[f"<b>{label_letter}</b>"],
+                            textfont=dict(size=11, color="#475569"),
+                            hoverinfo="skip",
+                            showlegend=False,
+                        )
+                    )
 
     fig.add_trace(
         go.Scatterpolar(
@@ -490,29 +557,95 @@ def build_polar_figure(
             )
         )
 
-    cs_colors = ["#ef4444", "#f59e0b"]
-    for idx, cs in enumerate(critical_speeds):
-        color = cs_colors[idx % len(cs_colors)]
-        cs_row = nearest_row_for_speed(df, cs["speed"])
+    # ============================================================
+    # CRÍTICAS PRO con label enriquecido (RPM + Q)
+    # ============================================================
+    if critical_speeds_pro:
+        cs_pro_colors = ["#dc2626", "#ea580c", "#9333ea"]
+        for idx, cs_pro in enumerate(critical_speeds_pro):
+            color = cs_pro_colors[idx % len(cs_pro_colors)]
+            cs_rpm_pro = float(cs_pro.get("rpm", 0.0))
+            q_pro = cs_pro.get("q_factor")
+            label_q = f"Q={q_pro:.2f}" if (q_pro is not None and np.isfinite(q_pro)) else "Q=—"
+            cs_row_pro = nearest_row_for_speed(df, cs_rpm_pro)
 
-        fig.add_trace(
-            go.Scatterpolar(
-                r=[cs_row["amp"]],
-                theta=[cs_row["theta_display"]],
-                mode="markers+text",
-                marker=dict(size=9, color=color, symbol="diamond"),
-                text=[f"CS{idx+1} {int(round(cs['speed']))}"],
-                textposition="top center",
-                textfont=dict(size=10, color=color),
-                showlegend=False,
-                hovertemplate=(
-                    f"Critical Speed {idx+1}<br>"
-                    f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
-                    f"Phase Display: %{{theta:.1f}}°<br>"
-                    f"Speed: {int(round(cs['speed']))} {speed_unit}<extra></extra>"
-                ),
+            fig.add_trace(
+                go.Scatterpolar(
+                    r=[cs_row_pro["amp"]],
+                    theta=[cs_row_pro["theta_display"]],
+                    mode="markers+text",
+                    marker=dict(
+                        size=14, color=color, symbol="diamond",
+                        line=dict(width=2, color="white"),
+                    ),
+                    text=[f"<b>{int(round(cs_rpm_pro))} rpm · {label_q}</b>"],
+                    textposition="top center",
+                    textfont=dict(size=11, color=color, family="Arial Black"),
+                    showlegend=False,
+                    hovertemplate=(
+                        f"<b>Crítica #{idx+1}</b><br>"
+                        f"RPM: {int(round(cs_rpm_pro))}<br>"
+                        f"{label_q}<br>"
+                        f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
+                        f"Phase Display: %{{theta:.1f}}°<extra></extra>"
+                    ),
+                )
             )
-        )
+    else:
+        # Modo legacy (sin rotordyn pro): conservamos los CS antiguos
+        cs_colors = ["#ef4444", "#f59e0b"]
+        for idx, cs in enumerate(critical_speeds):
+            color = cs_colors[idx % len(cs_colors)]
+            cs_row = nearest_row_for_speed(df, cs["speed"])
+
+            fig.add_trace(
+                go.Scatterpolar(
+                    r=[cs_row["amp"]],
+                    theta=[cs_row["theta_display"]],
+                    mode="markers+text",
+                    marker=dict(size=9, color=color, symbol="diamond"),
+                    text=[f"CS{idx+1} {int(round(cs['speed']))}"],
+                    textposition="top center",
+                    textfont=dict(size=10, color=color),
+                    showlegend=False,
+                    hovertemplate=(
+                        f"Critical Speed {idx+1}<br>"
+                        f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
+                        f"Phase Display: %{{theta:.1f}}°<br>"
+                        f"Speed: {int(round(cs['speed']))} {speed_unit}<extra></extra>"
+                    ),
+                )
+            )
+
+    # ============================================================
+    # OPERATING SPEED — marker estrella con label
+    # ============================================================
+    if operating_rpm is not None:
+        sp_min = float(df["speed"].min()) if len(df) else 0.0
+        sp_max = float(df["speed"].max()) if len(df) else 0.0
+        if sp_min <= operating_rpm <= sp_max:
+            op_row = nearest_row_for_speed(df, operating_rpm)
+            fig.add_trace(
+                go.Scatterpolar(
+                    r=[op_row["amp"]],
+                    theta=[op_row["theta_display"]],
+                    mode="markers+text",
+                    marker=dict(
+                        size=18, color="#0f172a", symbol="star",
+                        line=dict(width=2, color="white"),
+                    ),
+                    text=[f"<b>Op. {int(round(operating_rpm))} rpm</b>"],
+                    textposition="bottom center",
+                    textfont=dict(size=10, color="#0f172a", family="Arial Black"),
+                    showlegend=False,
+                    hovertemplate=(
+                        f"<b>Operación nominal</b><br>"
+                        f"RPM: {int(round(operating_rpm))}<br>"
+                        f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
+                        f"Phase Display: %{{theta:.1f}}°<extra></extra>"
+                    ),
+                )
+            )
 
     dt_start = pd.to_datetime(df["ts_min"], errors="coerce").min()
     dt_end = pd.to_datetime(df["ts_max"], errors="coerce").max()
@@ -1038,37 +1171,113 @@ def _prepare_polar_compare_df(item: Dict[str, Any], smooth_window: int, amp_smoo
     return df
 
 
-def _polar_compare_metrics(item: Dict[str, Any], smooth_window: int, amp_smooth_window: int, max_critical_speeds: int) -> Dict[str, Any]:
+def _polar_compare_metrics(
+    item: Dict[str, Any],
+    smooth_window: int,
+    amp_smooth_window: int,
+    max_critical_speeds: int,
+    *,
+    operating_rpm: float = 3600.0,
+    machine_group: str = "group2",
+    iso_part: str = "20816-2",
+    custom_thresholds: Optional[Tuple[float, float, float]] = None,
+) -> Dict[str, Any]:
     df = _prepare_polar_compare_df(item, smooth_window, amp_smooth_window)
-    cs = estimate_critical_speeds_api684_style(df, max_count=max_critical_speeds)
+    cs_legacy = estimate_critical_speeds_api684_style(df, max_count=max_critical_speeds)
     max_amp = float(df["amp"].max()) if len(df) else 0.0
 
-    if cs:
-        dom = cs[0]
+    if cs_legacy:
+        dom = cs_legacy[0]
         dom_speed = float(dom.get("speed", 0.0))
         dom_amp = float(dom.get("amp", 0.0))
         dom_phase = float(dom.get("phase_delta", 0.0))
     else:
-        idx = int(df["amp"].idxmax()) if len(df) else 0
-        dom_speed = float(df.loc[idx, "speed"]) if len(df) else 0.0
+        idx_legacy = int(df["amp"].idxmax()) if len(df) else 0
+        dom_speed = float(df.loc[idx_legacy, "speed"]) if len(df) else 0.0
         dom_amp = max_amp
         dom_phase = 0.0
 
     ts_start = pd.to_datetime(df["ts_min"], errors="coerce").min() if "ts_min" in df.columns else None
     ts_end = pd.to_datetime(df["ts_max"], errors="coerce").max() if "ts_max" in df.columns else None
 
+    # =========================================================
+    # ROTORDYNAMICS — análisis Cat IV por corrida
+    # =========================================================
+    amp_unit = item.get("meta", {}).get("Amp Unit", "mil pp") or "mil pp"
+    criticals_rotordyn = []
+    primary_critical = None
+    primary_api684 = None
+    api684_evals = []
+    iso_eval = None
+    peak_amp_um_pp = 0.0
+
+    if len(df) >= 8:
+        try:
+            criticals_rotordyn = detect_critical_speeds(
+                rpm=df["speed"].to_numpy(),
+                amp=df["amp"].to_numpy(),
+                phase=df["phase"].to_numpy(),
+            )
+        except Exception:
+            criticals_rotordyn = []
+
+        if criticals_rotordyn:
+            primary_critical = criticals_rotordyn[0]
+            for cs_obj in criticals_rotordyn:
+                api_eval = evaluate_api684_margin(
+                    critical_rpm=cs_obj.rpm,
+                    operating_rpm=operating_rpm,
+                    q_factor=cs_obj.q_factor,
+                )
+                api684_evals.append(api_eval)
+            primary_api684 = api684_evals[0]
+
+        peak_amp_csv = max_amp
+        unit_lower = amp_unit.strip().lower()
+        if "mil" in unit_lower:
+            peak_amp_um_pp = mils_to_micrometers(peak_amp_csv)
+        elif "µm" in unit_lower or "um" in unit_lower:
+            peak_amp_um_pp = peak_amp_csv
+        else:
+            peak_amp_um_pp = peak_amp_csv
+
+        try:
+            mtype_polar_compare = (
+                "casing_velocity" if iso_part in ("20816-4", "20816-7")
+                else "shaft_displacement"
+            )
+            iso_eval = iso_20816_zone_multipart(
+                amplitude=peak_amp_um_pp,
+                iso_part=iso_part,
+                machine_group=machine_group,
+                measurement_type=mtype_polar_compare,
+                operating_speed_rpm=operating_rpm,
+                custom_thresholds=custom_thresholds,
+            )
+        except Exception:
+            iso_eval = None
+
     return {
         "label": item["label"],
         "machine": item["machine"],
         "point": item["point"],
         "df": df,
-        "critical_speeds": cs,
+        "critical_speeds": cs_legacy,
         "max_amp": max_amp,
         "dominant_speed": dom_speed,
         "dominant_amp": dom_amp,
         "dominant_phase_delta": dom_phase,
         "ts_start": ts_start,
         "ts_end": ts_end,
+        # rotordynamics
+        "amp_unit": amp_unit,
+        "criticals_rotordyn": criticals_rotordyn,
+        "primary_critical": primary_critical,
+        "api684_evals": api684_evals,
+        "primary_api684": primary_api684,
+        "iso_eval": iso_eval,
+        "peak_amp_csv": max_amp,
+        "peak_amp_um_pp": peak_amp_um_pp,
     }
 
 
@@ -1110,6 +1319,29 @@ def _polar_compare_diagnostic(records: List[Dict[str, Any]]) -> Dict[str, str]:
     return {"headline": headline, "detail": detail, "action": action}
 
 
+def _temporal_palette(n: int) -> List[str]:
+    """
+    Paleta de colores para visualización temporal (oldest → newest).
+    Gradiente azul claro → naranja oscuro pasando por gris/verde.
+    Colores seleccionados para máxima distinción y legibilidad.
+    """
+    if n <= 1:
+        return ["#2563eb"]
+    if n == 2:
+        return ["#3b82f6", "#ea580c"]
+    if n == 3:
+        return ["#3b82f6", "#16a34a", "#ea580c"]
+    if n == 4:
+        return ["#3b82f6", "#16a34a", "#f59e0b", "#dc2626"]
+    if n == 5:
+        return ["#3b82f6", "#0891b2", "#16a34a", "#f59e0b", "#dc2626"]
+    # Más de 5: usar gradiente generado
+    base = ["#3b82f6", "#0891b2", "#16a34a", "#84cc16", "#f59e0b", "#ea580c", "#dc2626"]
+    if n <= len(base):
+        return base[:n]
+    return base + ["#7c3aed"] * (n - len(base))
+
+
 def render_polar_compare_section(
     items: List[Dict[str, Any]],
     *,
@@ -1117,51 +1349,157 @@ def render_polar_compare_section(
     amp_smooth_window: int,
     max_critical_speeds: int,
     logo_uri: Optional[str],
+    use_rotordyn_pro: bool = True,
+    operating_rpm: float = 3600.0,
+    machine_group: str = "group2",
+    speed_min_filter: Optional[float] = None,
+    speed_max_filter: Optional[float] = None,
+    iso_part: str = "20816-2",
+    custom_thresholds: Optional[Tuple[float, float, float]] = None,
 ) -> None:
     if len(items) < 2:
         return
 
     records = [
-        _polar_compare_metrics(item, smooth_window, amp_smooth_window, max_critical_speeds)
+        _polar_compare_metrics(
+            item,
+            smooth_window,
+            amp_smooth_window,
+            max_critical_speeds,
+            operating_rpm=operating_rpm,
+            machine_group=machine_group,
+            iso_part=iso_part,
+            custom_thresholds=custom_thresholds,
+        )
         for item in items
     ]
+
+    # Aplicar Speed Range a cada record (filtra el df que se va a graficar
+    # y a usar para rotordynamics)
+    if speed_min_filter is not None and speed_max_filter is not None:
+        lo = float(min(speed_min_filter, speed_max_filter))
+        hi = float(max(speed_min_filter, speed_max_filter))
+        for r in records:
+            df_full = r["df"]
+            df_filtered = df_full[(df_full["speed"] >= lo) & (df_full["speed"] <= hi)].copy()
+            if not df_filtered.empty:
+                r["df"] = df_filtered
+                # Recalcular peak amp en el rango filtrado para que la zona ISO
+                # del comparativo refleje SOLO los datos visibles
+                new_peak_csv = float(df_filtered["amp"].max())
+                r["peak_amp_csv"] = new_peak_csv
+                amp_unit_lower = (r.get("amp_unit") or "").lower()
+                if "mil" in amp_unit_lower:
+                    r["peak_amp_um_pp"] = mils_to_micrometers(new_peak_csv)
+                else:
+                    r["peak_amp_um_pp"] = new_peak_csv
+                # Re-detectar críticas dentro del rango
+                try:
+                    crits = detect_critical_speeds(
+                        rpm=df_filtered["speed"].to_numpy(),
+                        amp=df_filtered["amp"].to_numpy(),
+                        phase=df_filtered["phase"].to_numpy(),
+                    )
+                    r["criticals_rotordyn"] = crits
+                    r["primary_critical"] = crits[0] if crits else None
+                    if r["primary_critical"] is not None:
+                        r["primary_api684"] = evaluate_api684_margin(
+                            critical_rpm=r["primary_critical"].rpm,
+                            operating_rpm=operating_rpm,
+                            q_factor=r["primary_critical"].q_factor,
+                        )
+                    else:
+                        r["primary_api684"] = None
+                    r["iso_eval"] = iso_20816_2_zone(
+                        amplitude=r["peak_amp_um_pp"],
+                        measurement_type="shaft_displacement",
+                        machine_group=machine_group,
+                        operating_speed_rpm=operating_rpm,
+                    )
+                except Exception:
+                    pass
+
+    # Ordenar cronológicamente para que la paleta refleje secuencia temporal
+    records_chrono = sorted(
+        records,
+        key=lambda r: pd.Timestamp(r["ts_start"]) if r["ts_start"] is not None else pd.Timestamp.min,
+    )
 
     st.markdown("---")
     st.markdown("## Comparación multi-fecha · Polar Plot")
 
     fig = go.Figure()
-    palette = ["#2563eb", "#16a34a", "#9333ea", "#ea580c", "#dc2626", "#0891b2", "#7c3aed"]
+    palette = _temporal_palette(len(records_chrono))
 
-    for idx, rec in enumerate(records):
+    for idx, rec in enumerate(records_chrono):
         df = rec["df"]
-        color = palette[idx % len(palette)]
-        date_label = pd.Timestamp(rec["ts_start"]).strftime("%Y-%m-%d %H:%M") if rec["ts_start"] is not None else rec["label"]
+        color = palette[idx]
+        date_label = (
+            pd.Timestamp(rec["ts_start"]).strftime("%d %b %Y")
+            if rec["ts_start"] is not None
+            else rec["label"]
+        )
+
+        # Etiqueta enriquecida con métricas Cat IV cuando hay rotordyn
+        if use_rotordyn_pro and rec.get("primary_critical") is not None:
+            cs_pro = rec["primary_critical"]
+            zone = rec.get("iso_eval").zone if rec.get("iso_eval") else "—"
+            q_str = f"{cs_pro.q_factor:.2f}" if np.isfinite(cs_pro.q_factor) else "—"
+            trace_name = f"{date_label}  ·  Q={q_str}  ·  zona {zone}"
+        else:
+            trace_name = f"{date_label}  ·  {rec['label']}"
 
         fig.add_trace(
             go.Scatterpolar(
                 r=df["amp"],
                 theta=df["theta_display"],
                 mode="lines",
-                name=f"{date_label} · {rec['label']}",
-                line=dict(width=2.5, color=color),
+                name=trace_name,
+                line=dict(width=2.6, color=color),
                 hovertemplate="Amp: %{r:.3f}<br>Phase: %{theta:.1f}°<extra></extra>",
             )
         )
 
-        if rec["critical_speeds"]:
-            cs = rec["critical_speeds"][0]
-            row = nearest_row_for_speed(df, cs["speed"])
+        # Marker de la crítica detectada (rotordyn si está, legacy si no)
+        cs_marker_speed = None
+        cs_marker_label = ""
+        if use_rotordyn_pro and rec.get("primary_critical") is not None:
+            cs_marker_speed = float(rec["primary_critical"].rpm)
+            cs_marker_label = f"{int(round(cs_marker_speed))} rpm"
+        elif rec["critical_speeds"]:
+            cs_legacy = rec["critical_speeds"][0]
+            cs_marker_speed = float(cs_legacy.get("speed", 0.0))
+            cs_marker_label = f"{int(round(cs_marker_speed))} rpm"
+
+        if cs_marker_speed and cs_marker_speed > 0:
+            row_marker = nearest_row_for_speed(df, cs_marker_speed)
             fig.add_trace(
                 go.Scatterpolar(
-                    r=[row["amp"]],
-                    theta=[row["theta_display"]],
+                    r=[row_marker["amp"]],
+                    theta=[row_marker["theta_display"]],
                     mode="markers+text",
-                    marker=dict(size=9, color=color, symbol="diamond"),
-                    text=[f"{int(round(cs['speed']))} rpm"],
+                    marker=dict(size=12, color=color, symbol="diamond", line=dict(width=2, color="white")),
+                    text=[cs_marker_label],
                     textposition="top center",
-                    textfont=dict(size=10, color=color),
+                    textfont=dict(size=11, color=color, family="Arial Black"),
                     showlegend=False,
-                    hovertemplate="Candidate<br>Amp: %{r:.3f}<br>Phase: %{theta:.1f}°<extra></extra>",
+                    hovertemplate=f"<b>Crítica detectada</b><br>{cs_marker_label}<br>Amp: %{{r:.3f}}<br>Phase: %{{theta:.1f}}°<extra></extra>",
+                )
+            )
+
+        # Marker de velocidad operativa si está dentro del rango medido
+        if (
+            float(df["speed"].min()) <= operating_rpm <= float(df["speed"].max())
+        ):
+            row_op = nearest_row_for_speed(df, operating_rpm)
+            fig.add_trace(
+                go.Scatterpolar(
+                    r=[row_op["amp"]],
+                    theta=[row_op["theta_display"]],
+                    mode="markers",
+                    marker=dict(size=14, color=color, symbol="star", line=dict(width=2, color="white")),
+                    showlegend=False,
+                    hovertemplate=f"<b>Operación nominal</b><br>{operating_rpm:.0f} rpm<br>Amp: %{{r:.3f}}<br>Phase: %{{theta:.1f}}°<extra></extra>",
                 )
             )
 
@@ -1246,41 +1584,125 @@ def render_polar_compare_section(
 
     st.plotly_chart(fig, width="stretch", config={"displaylogo": False}, key="wm_polar_compare_plot")
 
-    summary = pd.DataFrame([
-        {
-            "Archivo": r["label"],
-            "Fecha inicio": pd.Timestamp(r["ts_start"]).strftime("%Y-%m-%d %H:%M") if r["ts_start"] is not None else "—",
-            "Fecha fin": pd.Timestamp(r["ts_end"]).strftime("%Y-%m-%d %H:%M") if r["ts_end"] is not None else "—",
-            "Amp dominante": round(r["dominant_amp"], 3),
-            "RPM candidata": round(r["dominant_speed"], 0),
-            "Delta fase": round(r["dominant_phase_delta"], 1),
-            "Max amp": round(r["max_amp"], 3),
-        }
-        for r in records
-    ])
+    # =========================================================
+    # Tabla comparativa rotodinámica Cat IV (en unidad de origen del CSV)
+    # =========================================================
+    if use_rotordyn_pro:
+        amp_unit_common = records_chrono[0].get("amp_unit", "mil pp") if records_chrono else "mil pp"
+        peak_col_label = f"Peak ({amp_unit_common})"
+        unit_lower = amp_unit_common.lower()
+        peak_fmt = "{:.3f}" if "mil" in unit_lower else "{:.1f}"
+
+        rows = []
+        for r in records_chrono:
+            cs_pro = r.get("primary_critical")
+            api_pro = r.get("primary_api684")
+            iso_eval = r.get("iso_eval")
+            rows.append({
+                "Fecha": pd.Timestamp(r["ts_start"]).strftime("%Y-%m-%d") if r["ts_start"] is not None else "—",
+                "Archivo": r["label"],
+                "RPM crítica": f"{cs_pro.rpm:.0f}" if cs_pro is not None else "—",
+                "Q factor": f"{cs_pro.q_factor:.2f}" if (cs_pro is not None and np.isfinite(cs_pro.q_factor)) else "—",
+                "Δfase (°)": f"{cs_pro.phase_change_deg:.0f}" if cs_pro is not None else "—",
+                "FWHM (rpm)": f"{cs_pro.fwhm_rpm:.0f}" if (cs_pro is not None and np.isfinite(cs_pro.fwhm_rpm)) else "—",
+                peak_col_label: peak_fmt.format(r.get("peak_amp_csv", 0.0)),
+                "Zona ISO": iso_eval.zone if iso_eval is not None else "—",
+                "API 684": ("✓" if api_pro is not None and api_pro.compliant else "✗") if api_pro is not None else "—",
+            })
+        summary = pd.DataFrame(rows)
+    else:
+        summary = pd.DataFrame([
+            {
+                "Archivo": r["label"],
+                "Fecha inicio": pd.Timestamp(r["ts_start"]).strftime("%Y-%m-%d %H:%M") if r["ts_start"] is not None else "—",
+                "Fecha fin": pd.Timestamp(r["ts_end"]).strftime("%Y-%m-%d %H:%M") if r["ts_end"] is not None else "—",
+                "Amp dominante": round(r["dominant_amp"], 3),
+                "RPM candidata": round(r["dominant_speed"], 0),
+                "Delta fase": round(r["dominant_phase_delta"], 1),
+                "Max amp": round(r["max_amp"], 3),
+            }
+            for r in records_chrono
+        ])
 
     st.dataframe(summary, width="stretch", hide_index=True)
 
-    diag = _polar_compare_diagnostic(records)
+    # =========================================================
+    # Diagnóstico comparativo: nuevo (Cat IV) o legacy
+    # =========================================================
+    if use_rotordyn_pro:
+        diag = build_polar_compare_diagnostics_rotordyn(
+            records=records_chrono,
+            operating_rpm=operating_rpm,
+            machine_group=machine_group,
+        )
+    else:
+        diag = _polar_compare_diagnostic(records_chrono)
+
     st.markdown("### Diagnóstico comparativo automático")
     st.markdown(f"**{diag['headline']}**")
     st.write(diag["detail"])
-    st.write("Se recomienda:")
     st.write(diag["action"])
 
-    summary_lines = []
-    for _, row in summary.iterrows():
-        summary_lines.append(
-            f"- {row['Archivo']}: candidato {row['RPM candidata']:.0f} rpm, "
-            f"amplitud dominante {row['Amp dominante']:.3f}, "
-            f"Δfase {row['Delta fase']:.1f}°, máximo {row['Max amp']:.3f}."
-        )
+    # Notas para reporte: prosa fluida + síntesis por corrida en oraciones
+    if use_rotordyn_pro:
+        # Resumen prosa: una oración natural por cada corrida cronológicamente
+        amp_unit_common = records_chrono[0].get("amp_unit", "mil pp") if records_chrono else "mil pp"
+        prose_lines = []
+        for r in records_chrono:
+            cs_pro = r.get("primary_critical")
+            api_pro = r.get("primary_api684")
+            iso_eval = r.get("iso_eval")
+            date_str = (
+                pd.Timestamp(r["ts_start"]).strftime("%d %b %Y")
+                if r["ts_start"] is not None
+                else r["label"]
+            )
 
-    notes = (
-        _build_polar_report_notes(diag)
-        + "\n\nResumen comparativo de corridas:\n"
-        + "\n".join(summary_lines)
-    )
+            if cs_pro is not None and iso_eval is not None and api_pro is not None:
+                amp_str = (
+                    f"{r.get('peak_amp_csv', 0.0):.3f} {amp_unit_common}"
+                    if "mil" in amp_unit_common.lower()
+                    else f"{r.get('peak_amp_csv', 0.0):.1f} {amp_unit_common}"
+                )
+                q_str = (
+                    f"{cs_pro.q_factor:.2f}"
+                    if np.isfinite(cs_pro.q_factor)
+                    else "—"
+                )
+                compliant_str = "conforme API 684" if api_pro.compliant else "NO conforme API 684"
+                prose_lines.append(
+                    f"La corrida del {date_str} ({r['label']}) reportó velocidad crítica en "
+                    f"{cs_pro.rpm:.0f} rpm con factor Q de {q_str} y amplitud pico de {amp_str}, "
+                    f"clasificada en zona {iso_eval.zone} de ISO 20816-2 y {compliant_str}."
+                )
+            else:
+                prose_lines.append(
+                    f"La corrida del {date_str} ({r['label']}) no presenta velocidad crítica "
+                    f"detectable bajo los criterios automáticos."
+                )
+
+        prose_summary = "\n\n".join(prose_lines)
+
+        notes = (
+            f"{diag['detail']}\n\n"
+            f"Síntesis cronológica de las corridas analizadas:\n\n"
+            f"{prose_summary}\n\n"
+            f"{diag['action']}"
+        )
+    else:
+        summary_lines = []
+        for _, row in summary.iterrows():
+            summary_lines.append(
+                f"- {row['Archivo']}: candidato {row['RPM candidata']:.0f} rpm, "
+                f"amplitud dominante {row['Amp dominante']:.3f}, "
+                f"Δfase {row['Delta fase']:.1f}°, máximo {row['Max amp']:.3f}."
+            )
+
+        notes = (
+            _build_polar_report_notes(diag)
+            + "\n\nResumen comparativo de corridas:\n"
+            + "\n".join(summary_lines)
+        )
 
     png_bytes, png_error = build_export_png_bytes(fig, diag)
 
@@ -1383,6 +1805,14 @@ def render_polar_panel(
     marker_stride: int,
     detect_cs: bool,
     max_critical_speeds: int,
+    use_rotordyn_pro: bool = True,
+    operating_rpm: float = 3600.0,
+    machine_group: str = "group2",
+    speed_min_filter: Optional[float] = None,
+    speed_max_filter: Optional[float] = None,
+    iso_part: str = "20816-2",
+    custom_thresholds: Optional[Tuple[float, float, float]] = None,
+    profile_label: Optional[str] = None,
 ) -> None:
     meta = item["meta"]
     raw_df = item["raw_df"]
@@ -1395,6 +1825,19 @@ def render_polar_panel(
     rotation_direction = orient["rotation_direction"]
 
     plot_df = grouped_df.copy()
+
+    # Aplicar filtro de Speed Range si fue configurado por sidebar
+    if speed_min_filter is not None and speed_max_filter is not None:
+        lo = float(min(speed_min_filter, speed_max_filter))
+        hi = float(max(speed_min_filter, speed_max_filter))
+        plot_df = plot_df[(plot_df["speed"] >= lo) & (plot_df["speed"] <= hi)].copy()
+        if plot_df.empty:
+            st.warning(
+                f"Panel {panel_index + 1}: no hay puntos en el rango RPM "
+                f"[{lo:.0f} – {hi:.0f}]. Ajusta el rango en la sidebar."
+            )
+            return
+
     plot_df["amp"] = smooth_series(plot_df["amp"], amp_smooth_window)
     plot_df["phase_smoothed"] = circular_smooth_deg(plot_df["phase"], smooth_window) % 360.0
     plot_df["theta_display"] = compute_polar_display_theta(
@@ -1441,17 +1884,36 @@ def render_polar_panel(
         amp_series=plot_df["amp"],
     )
 
-    text_diag = build_polar_text_diagnostics(
-        status=semaforo_status,
-        critical_speeds=critical_speeds,
-        max_amp=polar_diag["max_amp"],
-    )
-
     machine = meta.get("Machine Name", "-")
     point = meta.get("Point Name", "-")
     variable = meta.get("Variable", "-")
     speed_unit = meta.get("Speed Unit", "rpm")
     amp_unit = meta.get("Amp Unit", "")
+
+    if use_rotordyn_pro:
+        mtype_polar = (
+            "casing_velocity" if iso_part in ("20816-4", "20816-7")
+            else "shaft_displacement"
+        )
+        text_diag = build_polar_diagnostics_rotordyn(
+            rpm=plot_df["speed"].to_numpy(),
+            amp=plot_df["amp"].to_numpy(),
+            phase=plot_df["phase"].to_numpy(),
+            operating_rpm=operating_rpm,
+            machine_group=machine_group,
+            amp_unit=amp_unit or "mil pp",
+            measurement_type=mtype_polar,
+            iso_part=iso_part,
+            custom_thresholds=custom_thresholds,
+            profile_label=profile_label,
+        )
+    else:
+        # Modo legacy (preservado para compatibilidad)
+        text_diag = build_polar_text_diagnostics(
+            status=semaforo_status,
+            critical_speeds=critical_speeds,
+            max_amp=polar_diag["max_amp"],
+        )
 
     panel_card(
         title=f"Polar {panel_index + 1} · {machine} · {point}",
@@ -1472,6 +1934,52 @@ def render_polar_panel(
         ],
     )
 
+    # Datos para overlay visual Cat IV: críticas PRO + umbrales ISO
+    pro_overlay_criticals: List[Dict[str, Any]] = []
+    iso_thresholds_overlay: Optional[Dict[str, float]] = None
+    if use_rotordyn_pro:
+        try:
+            crits_pro_polar = detect_critical_speeds(
+                rpm=plot_df["speed"].to_numpy(),
+                amp=plot_df["amp"].to_numpy(),
+                phase=plot_df["phase"].to_numpy(),
+            )
+            pro_overlay_criticals = [
+                {"rpm": cs.rpm, "q_factor": cs.q_factor}
+                for cs in crits_pro_polar
+            ]
+            unit_lower = (amp_unit or "").lower()
+            if "mil" in unit_lower:
+                amp_for_iso = mils_to_micrometers(float(plot_df["amp"].max()))
+            else:
+                amp_for_iso = float(plot_df["amp"].max())
+            mtype_overlay_polar = (
+                "casing_velocity" if iso_part in ("20816-4", "20816-7")
+                else "shaft_displacement"
+            )
+            iso_eval_overlay = iso_20816_zone_multipart(
+                amplitude=amp_for_iso,
+                iso_part=iso_part,
+                machine_group=machine_group,
+                measurement_type=mtype_overlay_polar,
+                operating_speed_rpm=operating_rpm,
+                custom_thresholds=custom_thresholds,
+            )
+            if "mil" in unit_lower:
+                iso_thresholds_overlay = {
+                    "AB": iso_eval_overlay.boundary_AB / 25.4,
+                    "BC": iso_eval_overlay.boundary_BC / 25.4,
+                    "CD": iso_eval_overlay.boundary_CD / 25.4,
+                }
+            else:
+                iso_thresholds_overlay = {
+                    "AB": iso_eval_overlay.boundary_AB,
+                    "BC": iso_eval_overlay.boundary_BC,
+                    "CD": iso_eval_overlay.boundary_CD,
+                }
+        except Exception:
+            pass
+
     fig = build_polar_figure(
         df=plot_df,
         meta=meta,
@@ -1488,6 +1996,9 @@ def render_polar_panel(
         critical_speeds=critical_speeds,
         semaforo_status=semaforo_status,
         semaforo_color=semaforo_color,
+        operating_rpm=operating_rpm if use_rotordyn_pro else None,
+        iso_thresholds=iso_thresholds_overlay,
+        critical_speeds_pro=pro_overlay_criticals if pro_overlay_criticals else None,
     )
 
     st.plotly_chart(
@@ -1672,6 +2183,38 @@ def main() -> None:
                         "rotation_direction": rotation_value,
                     }
 
+        # Speed Range Control — restringe el rango de RPM a graficar y analizar.
+        # En modo Auto graficamos todos los datos; en modo manual el usuario fija
+        # los límites con number_input. El filtro se aplica antes del rotordynamics
+        # para que la crítica detectada esté siempre dentro del rango visible.
+        sel_items = [id_to_item[sid] for sid in selected_ids_for_sidebar] if selected_ids_for_sidebar else parsed_items[:1]
+        candidate_speed_frames = [it["grouped_df"] for it in sel_items if "grouped_df" in it]
+        if candidate_speed_frames:
+            sp_combined = pd.concat(candidate_speed_frames, ignore_index=True)
+            speed_min_default = float(sp_combined["speed"].min())
+            speed_max_default = float(sp_combined["speed"].max())
+        else:
+            speed_min_default, speed_max_default = 0.0, 3600.0
+
+        st.markdown("### Speed Range Control")
+        auto_speed = st.checkbox("Auto scale speed range", value=True, key="wm_polar_auto_speed")
+        if auto_speed:
+            speed_min_filter = speed_min_default
+            speed_max_filter = speed_max_default
+        else:
+            speed_min_filter = st.number_input(
+                "Min RPM",
+                value=float(speed_min_default),
+                step=10.0,
+                key="wm_polar_speed_min",
+            )
+            speed_max_filter = st.number_input(
+                "Max RPM",
+                value=float(speed_max_default),
+                step=10.0,
+                key="wm_polar_speed_max",
+            )
+
         st.markdown("### Polar Controls")
         smooth_window = st.slider("Circular phase smoothing", 1, 11, 3, step=2)
         amp_smooth_window = st.slider("Amplitude smoothing", 1, 11, 3, step=2)
@@ -1682,6 +2225,18 @@ def main() -> None:
         st.markdown("### Critical Speed Detection")
         detect_cs = st.checkbox("Estimate critical speeds (API-684 heuristic)", value=True)
         max_critical_speeds = st.selectbox("Max critical speeds", [1, 2], index=1)
+
+        # Asset Profile selector (compartido entre módulos)
+        profile_state = render_profile_selector(module_name="polar")
+        use_rotordyn_pro = profile_state["is_applicable"]
+        operating_rpm = profile_state["operating_rpm"]
+        machine_group = profile_state["machine_group"]
+        active_iso_part = profile_state["iso_part"]
+        active_custom_thresholds = profile_state["custom_thresholds"]
+        active_profile_label = profile_state["profile_label"]
+
+        if not profile_state["is_applicable"]:
+            st.warning(profile_state["applicability_message"])
 
     selected_ids = [sid for sid in st.session_state.wm_polar_selected_ids if sid in id_to_item]
 
@@ -1704,6 +2259,14 @@ def main() -> None:
             marker_stride=marker_stride,
             detect_cs=detect_cs,
             max_critical_speeds=max_critical_speeds,
+            use_rotordyn_pro=use_rotordyn_pro,
+            operating_rpm=float(operating_rpm),
+            machine_group=machine_group,
+            speed_min_filter=None if auto_speed else float(speed_min_filter),
+            speed_max_filter=None if auto_speed else float(speed_max_filter),
+            iso_part=active_iso_part,
+            custom_thresholds=active_custom_thresholds,
+            profile_label=active_profile_label,
         )
 
         if panel_index < len(selected_items) - 1:
@@ -1716,6 +2279,13 @@ def main() -> None:
             amp_smooth_window=amp_smooth_window,
             max_critical_speeds=max_critical_speeds,
             logo_uri=logo_uri,
+            use_rotordyn_pro=use_rotordyn_pro,
+            operating_rpm=float(operating_rpm),
+            machine_group=machine_group,
+            speed_min_filter=None if auto_speed else float(speed_min_filter),
+            speed_max_filter=None if auto_speed else float(speed_max_filter),
+            iso_part=active_iso_part,
+            custom_thresholds=active_custom_thresholds,
         )
 
 

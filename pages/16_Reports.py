@@ -13,7 +13,19 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.lib.utils import ImageReader
-from reportlab.platypus import Image, KeepTogether, PageBreak, Paragraph, SimpleDocTemplate, Spacer
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.pdfmetrics import registerFontFamily
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import (
+    Image,
+    KeepTogether,
+    PageBreak,
+    Paragraph,
+    SimpleDocTemplate,
+    Spacer,
+    Table,
+    TableStyle,
+)
 
 from core.auth import require_login, render_user_menu
 from core.report_state import (
@@ -34,7 +46,58 @@ render_user_menu()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ASSETS_DIR = PROJECT_ROOT / "assets"
+FONTS_DIR = ASSETS_DIR / "fonts"
 WATERMELON_LOGO = ASSETS_DIR / "watermelon_logo.png"
+
+
+def _register_unicode_fonts() -> Tuple[str, str]:
+    """
+    Registra una fuente Unicode TrueType desde assets/fonts/, en orden de
+    preferencia. La primera familia disponible gana:
+
+      1. IBM Plex Sans  — recomendada para reportes técnicos (look engineering
+         pro, claridad metrológica). SIL Open Font License.
+      2. DejaVu Sans   — fallback robusto, ya bundled.
+      3. Helvetica     — último recurso (sin glifos extendidos).
+
+    Devuelve (regular_name, bold_name) ya registrados y con familia mapeada
+    para que <b>...</b> resuelva al peso bold.
+
+    Para activar IBM Plex Sans, deja en assets/fonts/:
+        IBMPlexSans-Regular.ttf
+        IBMPlexSans-Bold.ttf
+    (Descarga: github.com/IBM/plex / Google Fonts.)
+    """
+    candidates = (
+        ("IBMPlexSans",  "IBMPlexSans-Regular.ttf",  "IBMPlexSans-Bold.ttf"),
+        ("DejaVuSans",   "DejaVuSans.ttf",           "DejaVuSans-Bold.ttf"),
+    )
+
+    for family, regular_file, bold_file in candidates:
+        try:
+            regular_path = FONTS_DIR / regular_file
+            bold_path = FONTS_DIR / bold_file
+            if not (regular_path.exists() and bold_path.exists()):
+                continue
+            bold_name = f"{family}-Bold"
+            if family not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont(family, str(regular_path)))
+            if bold_name not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont(bold_name, str(bold_path)))
+            registerFontFamily(
+                family,
+                normal=family,
+                bold=bold_name,
+                italic=family,
+                boldItalic=bold_name,
+            )
+            return family, bold_name
+        except Exception:
+            continue
+    return "Helvetica", "Helvetica-Bold"
+
+
+PDF_FONT_REGULAR, PDF_FONT_BOLD = _register_unicode_fonts()
 
 SIGA_WATERMARK_CANDIDATES = [
     ASSETS_DIR / "siga_watermark.png",
@@ -213,6 +276,8 @@ DEFAULT_REPORT_META = {
     "service_objective": "",
     "service_development": "",
     "recommendations": "",
+    "executive_summary": "",
+    "train_description": "",
 }
 
 if "report_state_loaded" not in st.session_state:
@@ -360,13 +425,25 @@ def _first_existing_watermark() -> Optional[Path]:
 
 
 def _paragraph_safe(text: str) -> str:
-    return (
+    """
+    Escapa caracteres especiales para insertar texto en un Paragraph de
+    ReportLab, pero rehabilita un set acotado de tags inline soportados por
+    ReportLab (negrita, itálica, subíndice, superíndice). Esto permite que
+    las narrativas auto-redactadas usen <b>...</b> para sub-headers sin
+    inyectar HTML peligroso desde fuentes no controladas.
+    """
+    escaped = (
         (text or "")
         .replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace("\n", "<br/>")
     )
+    # Rehabilitar tags whitelisted (ya escapados a &lt;tag&gt;)
+    for opener, closer in (("b", "b"), ("i", "i"), ("sub", "sub"), ("sup", "sup")):
+        escaped = escaped.replace(f"&lt;{opener}&gt;", f"<{opener}>")
+        escaped = escaped.replace(f"&lt;/{closer}&gt;", f"</{closer}>")
+    return escaped
 
 
 def _figure_png_bytes(fig: go.Figure) -> bytes:
@@ -386,19 +463,113 @@ def _fit_image_dimensions(img_bytes: bytes, max_width: float, max_height: float)
     return img_w * scale, img_h * scale
 
 
+def _split_notes_and_summary_table(notes: str) -> Tuple[str, Optional[List[List[str]]]]:
+    """
+    Si el bloque de notes contiene un marcador '--- RESUMEN ---' seguido de una
+    tabla en formato to_string() de pandas, la separa y la devuelve como
+    matriz [[col1, col2, ...], [val11, val12, ...], ...].
+
+    Devuelve (notes_sin_tabla, tabla_o_None).
+    """
+    if not notes or "--- RESUMEN ---" not in notes:
+        return notes, None
+
+    parts = notes.split("--- RESUMEN ---", 1)
+    main_text = parts[0].rstrip()
+    raw_block = parts[1].strip()
+
+    if not raw_block:
+        return main_text, None
+
+    raw_lines = [ln for ln in raw_block.splitlines() if ln.strip()]
+    if len(raw_lines) < 2:
+        return main_text, None
+
+    # Para tablas tipo df.to_string(): la primera línea son cabeceras separadas
+    # por múltiples espacios; las restantes son filas. Se usa un split por
+    # ≥ 2 espacios para preservar valores que contengan un solo espacio.
+    import re
+    rows: List[List[str]] = []
+    for ln in raw_lines:
+        cells = re.split(r"\s{2,}", ln.strip())
+        rows.append(cells)
+
+    # Si las filas no tienen el mismo ancho, abandonamos y devolvemos texto plano.
+    width = len(rows[0])
+    if any(len(r) != width for r in rows[1:]):
+        return notes, None
+
+    return main_text, rows
+
+
+def _render_notes_flowables(
+    notes_main: str,
+    styles,
+    summary_table: Optional[List[List[str]]],
+    usable_width: float,
+) -> List[Any]:
+    """
+    Construye la secuencia de flowables para el bloque de notas de una figura:
+    el texto principal como Paragraph y, si aplica, el RESUMEN como Table
+    nativa de ReportLab con cabecera coloreada y zebra striping.
+    """
+    flowables: List[Any] = []
+
+    if notes_main.strip():
+        flowables.append(Paragraph(_paragraph_safe(notes_main), styles["WMFigureText"]))
+
+    if summary_table and len(summary_table) >= 1:
+        header = [Paragraph(_paragraph_safe(c), styles["WMTableHeader"]) for c in summary_table[0]]
+        body_rows = []
+        for r in summary_table[1:]:
+            body_rows.append([Paragraph(_paragraph_safe(c), styles["WMTableCell"]) for c in r])
+
+        n_cols = len(summary_table[0])
+        # distribuir el ancho disponible de forma uniforme (con padding)
+        col_w = (usable_width - 0.6 * cm) / max(n_cols, 1)
+        col_widths = [col_w] * n_cols
+
+        table_data = [header] + body_rows
+        tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+        tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("FONTNAME", (0, 0), (-1, 0), PDF_FONT_BOLD),
+            ("FONTNAME", (0, 1), (-1, -1), PDF_FONT_REGULAR),
+            ("FONTSIZE", (0, 0), (-1, -1), 8.4),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+            ("TOPPADDING", (0, 0), (-1, 0), 6),
+            ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+            ("TOPPADDING", (0, 1), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f1f5f9"), colors.white]),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
+        ]))
+        flowables.append(Spacer(1, 0.15 * cm))
+        flowables.append(tbl)
+        flowables.append(Spacer(1, 0.10 * cm))
+
+    return flowables
+
+
 def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes:
     buffer = BytesIO()
     page_width, page_height = A4
 
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name="WMTitle", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=15, leading=18, alignment=TA_LEFT, textColor=colors.HexColor("#0f172a"), spaceAfter=6))
-    styles.add(ParagraphStyle(name="WMSubTitle", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=12.5, leading=15, alignment=TA_LEFT, textColor=colors.HexColor("#111827"), spaceAfter=5))
-    styles.add(ParagraphStyle(name="WMBody", parent=styles["BodyText"], fontName="Helvetica", fontSize=10.5, leading=15.5, alignment=TA_JUSTIFY, textColor=colors.HexColor("#111827"), spaceAfter=10))
-    styles.add(ParagraphStyle(name="WMMeta", parent=styles["Normal"], fontName="Helvetica", fontSize=10.4, leading=14.2, alignment=TA_LEFT, textColor=colors.HexColor("#111827"), spaceAfter=5))
-    styles.add(ParagraphStyle(name="WMSection", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=14.6, leading=18.5, alignment=TA_LEFT, textColor=colors.HexColor("#0f172a"), spaceBefore=6, spaceAfter=11))
-    styles.add(ParagraphStyle(name="WMFigureCaption", parent=styles["Normal"], fontName="Helvetica-Bold", fontSize=10.5, leading=13.5, alignment=TA_CENTER, textColor=colors.HexColor("#111827"), spaceBefore=6, spaceAfter=8))
-    styles.add(ParagraphStyle(name="WMFigureText", parent=styles["BodyText"], fontName="Helvetica", fontSize=10.2, leading=14.8, alignment=TA_JUSTIFY, textColor=colors.HexColor("#111827"), spaceAfter=16))
-    styles.add(ParagraphStyle(name="WMSignLine", parent=styles["Normal"], fontName="Helvetica", fontSize=9.6, leading=12, alignment=TA_CENTER, textColor=colors.HexColor("#111827"), spaceAfter=2))
+    styles.add(ParagraphStyle(name="WMTitle", parent=styles["Title"], fontName=PDF_FONT_BOLD, fontSize=15, leading=18, alignment=TA_LEFT, textColor=colors.HexColor("#0f172a"), spaceAfter=6))
+    styles.add(ParagraphStyle(name="WMSubTitle", parent=styles["Normal"], fontName=PDF_FONT_BOLD, fontSize=12.5, leading=15, alignment=TA_LEFT, textColor=colors.HexColor("#111827"), spaceAfter=5))
+    styles.add(ParagraphStyle(name="WMBody", parent=styles["BodyText"], fontName=PDF_FONT_REGULAR, fontSize=10.5, leading=15.5, alignment=TA_JUSTIFY, textColor=colors.HexColor("#111827"), spaceAfter=10))
+    styles.add(ParagraphStyle(name="WMMeta", parent=styles["Normal"], fontName=PDF_FONT_REGULAR, fontSize=10.4, leading=14.2, alignment=TA_LEFT, textColor=colors.HexColor("#111827"), spaceAfter=5))
+    styles.add(ParagraphStyle(name="WMSection", parent=styles["Heading2"], fontName=PDF_FONT_BOLD, fontSize=14.6, leading=18.5, alignment=TA_LEFT, textColor=colors.HexColor("#0f172a"), spaceBefore=6, spaceAfter=11))
+    styles.add(ParagraphStyle(name="WMFigureCaption", parent=styles["Normal"], fontName=PDF_FONT_BOLD, fontSize=10.5, leading=13.5, alignment=TA_CENTER, textColor=colors.HexColor("#111827"), spaceBefore=6, spaceAfter=8))
+    styles.add(ParagraphStyle(name="WMFigureText", parent=styles["BodyText"], fontName=PDF_FONT_REGULAR, fontSize=10.2, leading=14.8, alignment=TA_JUSTIFY, textColor=colors.HexColor("#111827"), spaceAfter=16))
+    styles.add(ParagraphStyle(name="WMSignLine", parent=styles["Normal"], fontName=PDF_FONT_REGULAR, fontSize=9.6, leading=12, alignment=TA_CENTER, textColor=colors.HexColor("#111827"), spaceAfter=2))
+    styles.add(ParagraphStyle(name="WMTableCell", parent=styles["Normal"], fontName=PDF_FONT_REGULAR, fontSize=8.4, leading=11, alignment=TA_LEFT, textColor=colors.HexColor("#111827")))
+    styles.add(ParagraphStyle(name="WMTableHeader", parent=styles["Normal"], fontName=PDF_FONT_BOLD, fontSize=8.5, leading=11, alignment=TA_LEFT, textColor=colors.HexColor("#ffffff")))
 
     logo_watermark = _first_existing_watermark()
 
@@ -438,7 +609,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             except Exception:
                 pass
 
-        canvas.setFont("Helvetica-Bold", 10.5)
+        canvas.setFont(PDF_FONT_BOLD, 10.5)
         canvas.setFillColor(colors.HexColor("#111827"))
         canvas.drawRightString(page_width - 1.15 * cm, page_height - 1.0 * cm, f"Página {doc.page}")
 
@@ -449,7 +620,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.setFillColor(colors.HexColor("#ffffff"))
         canvas.rect(0, 0, page_width, page_height, fill=1, stroke=0)
 
-        canvas.setFont("Helvetica-Bold", 11)
+        canvas.setFont(PDF_FONT_BOLD, 11)
         canvas.setFillColor(colors.HexColor("#111827"))
         canvas.drawRightString(page_width - 1.2 * cm, page_height - 1.0 * cm, f"Página {doc.page}")
 
@@ -462,9 +633,9 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.line(internal_left, page_height - 1.35 * cm, internal_width_end, page_height - 1.35 * cm)
 
         canvas.setFillColor(colors.HexColor("#0f172a"))
-        canvas.setFont("Helvetica-Bold", 8.2)
+        canvas.setFont(PDF_FONT_BOLD, 8.2)
         canvas.drawString(internal_left, page_height - 1.0 * cm, "Machinery Diagnostics Engineering")
-        canvas.setFont("Helvetica", 8.2)
+        canvas.setFont(PDF_FONT_REGULAR, 8.2)
         canvas.drawString(internal_left + 6.2 * cm, page_height - 1.0 * cm, f"| {meta.get('report_title') or 'Reporte técnico'}")
 
         footer = "INFORME VÁLIDO ÚNICAMENTE PARA LAS CONDICIONES PRESENTES DURANTE EL SERVICIO. NO PODRÁ SER COPIADO PARCIAL O TOTALMENTE SIN PREVIA AUTORIZACIÓN."
@@ -473,7 +644,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.line(internal_left, 0.95 * cm, internal_width_end, 0.95 * cm)
 
         canvas.setFillColor(colors.HexColor("#111827"))
-        canvas.setFont("Helvetica", 6.4)
+        canvas.setFont(PDF_FONT_REGULAR, 6.4)
         canvas.drawCentredString((internal_left + internal_width_end) / 2, 0.55 * cm, footer)
         canvas.restoreState()
 
@@ -495,7 +666,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             ParagraphStyle(
                 name="WMBrandSub",
                 parent=styles["Normal"],
-                fontName="Helvetica-Bold",
+                fontName=PDF_FONT_BOLD,
                 fontSize=15.8,
                 leading=19,
                 textColor=colors.HexColor("#111827"),
@@ -517,10 +688,30 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 ParagraphStyle(
                     name=f"WMCoverLine_{len(story)}",
                     parent=styles["Normal"],
-                    fontName="Helvetica-Bold",
+                    fontName=PDF_FONT_BOLD,
                     fontSize=12.8,
                     leading=16,
                     textColor=colors.HexColor("#111827"),
+                    spaceAfter=3,
+                ),
+            )
+        )
+
+    # Si hay descripción del tren acoplado, se muestra debajo de las líneas
+    # del activo en peso regular y un tamaño menor (sub-cabecera de portada).
+    train_text = (meta.get("train_description") or "").strip()
+    if train_text:
+        story.append(
+            Paragraph(
+                _paragraph_safe(train_text),
+                ParagraphStyle(
+                    name="WMCoverTrain",
+                    parent=styles["Normal"],
+                    fontName=PDF_FONT_REGULAR,
+                    fontSize=10.8,
+                    leading=14,
+                    textColor=colors.HexColor("#374151"),
+                    spaceBefore=6,
                     spaceAfter=3,
                 ),
             )
@@ -561,16 +752,72 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         story.append(Paragraph(f"<b>Consecutivo:</b> {_paragraph_safe(consecutive_value)}", styles["WMMeta"]))
     story.append(PageBreak())
 
-    story.append(Paragraph("1. OBJETIVO DEL SERVICIO", styles["WMSection"]))
-    story.append(Paragraph(_paragraph_safe(meta.get("service_objective") or "Sin objetivo del servicio registrado."), styles["WMBody"]))
-    story.append(Spacer(1, 0.12 * cm))
-    story.append(Paragraph("2. RECOMENDACIONES", styles["WMSection"]))
-    story.append(Paragraph(_paragraph_safe(meta.get("recommendations") or "Sin recomendaciones registradas."), styles["WMBody"]))
-    story.append(Spacer(1, 0.12 * cm))
-    story.append(Paragraph("3. DESARROLLO DEL SERVICIO", styles["WMSection"]))
-    story.append(Paragraph(_paragraph_safe(meta.get("service_development") or "Sin desarrollo del servicio registrado."), styles["WMBody"]))
-    story.append(Spacer(1, 0.15 * cm))
-    story.append(Paragraph("4. FIGURAS Y ANÁLISIS", styles["WMSection"]))
+    # RESUMEN EJECUTIVO — página inicial después de la portada (si existe).
+    # Es el "elevator pitch" del reporte: lo primero que el cliente lee.
+    executive_text = (meta.get("executive_summary") or "").strip()
+    if executive_text:
+        story.append(Paragraph("RESUMEN EJECUTIVO", styles["WMSection"]))
+
+        # Cinta de severidad: una franja con estado global y color (si se puede
+        # detectar desde el primer párrafo del resumen). Si no, omitida.
+        severity_label = ""
+        for known in ("CRÍTICA", "ACCIÓN REQUERIDA", "ATENCIÓN", "VIGILANCIA", "CONDICIÓN ACEPTABLE"):
+            if known in executive_text:
+                severity_label = known
+                break
+        if severity_label:
+            color_map = {
+                "CRÍTICA": "#dc2626",
+                "ACCIÓN REQUERIDA": "#ea580c",
+                "ATENCIÓN": "#f59e0b",
+                "VIGILANCIA": "#84cc16",
+                "CONDICIÓN ACEPTABLE": "#16a34a",
+            }
+            severity_color = color_map.get(severity_label, "#475569")
+            severity_style = ParagraphStyle(
+                name="WMExecSeverity",
+                parent=styles["Normal"],
+                fontName=PDF_FONT_BOLD,
+                fontSize=11.5,
+                leading=14,
+                alignment=TA_CENTER,
+                textColor=colors.white,
+                backColor=colors.HexColor(severity_color),
+                borderPadding=(8, 10, 8, 10),
+                spaceAfter=12,
+            )
+            story.append(Paragraph(f"Estado global: {severity_label}", severity_style))
+
+        story.append(Paragraph(_paragraph_safe(executive_text), styles["WMBody"]))
+        story.append(Spacer(1, 0.30 * cm))
+        story.append(PageBreak())
+
+    # Secciones 1/2/3: solo se muestran si tienen contenido. Si todas están
+    # vacías, las figuras pasan a ser la sección 1 directamente.
+    section_idx = 1
+    objective_text = (meta.get("service_objective") or "").strip()
+    recommendations_text = (meta.get("recommendations") or "").strip()
+    development_text = (meta.get("service_development") or "").strip()
+
+    if objective_text:
+        story.append(Paragraph(f"{section_idx}. OBJETIVO DEL SERVICIO", styles["WMSection"]))
+        story.append(Paragraph(_paragraph_safe(objective_text), styles["WMBody"]))
+        story.append(Spacer(1, 0.12 * cm))
+        section_idx += 1
+
+    if recommendations_text:
+        story.append(Paragraph(f"{section_idx}. RECOMENDACIONES", styles["WMSection"]))
+        story.append(Paragraph(_paragraph_safe(recommendations_text), styles["WMBody"]))
+        story.append(Spacer(1, 0.12 * cm))
+        section_idx += 1
+
+    if development_text:
+        story.append(Paragraph(f"{section_idx}. DESARROLLO DEL SERVICIO", styles["WMSection"]))
+        story.append(Paragraph(_paragraph_safe(development_text), styles["WMBody"]))
+        story.append(Spacer(1, 0.15 * cm))
+        section_idx += 1
+
+    story.append(Paragraph(f"{section_idx}. FIGURAS Y ANÁLISIS", styles["WMSection"]))
     story.append(Spacer(1, 0.08 * cm))
 
     usable_width = A4[0] - doc.leftMargin - doc.rightMargin
@@ -590,6 +837,13 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         caption = f"Figura {idx}. {item.get('title') or f'Figura {idx}'}"
         notes = (item.get("notes") or "").strip()
 
+        # Detecta y separa el bloque "--- RESUMEN ---" para renderizarlo como
+        # tabla nativa de ReportLab en vez de texto monoespaciado.
+        notes_main, summary_table = _split_notes_and_summary_table(notes)
+        notes_flowables = _render_notes_flowables(
+            notes_main, styles, summary_table, usable_width
+        )
+
         if png_bytes is not None:
             img_w, img_h = _fit_image_dimensions(png_bytes, max_img_width, max_img_height)
             img = Image(BytesIO(png_bytes), width=img_w, height=img_h)
@@ -599,7 +853,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 Spacer(1, 0.18 * cm),
                 img,
                 Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]),
-                Paragraph(_paragraph_safe(notes), styles["WMFigureText"]) if notes else Spacer(1, 0.01 * cm),
+                *notes_flowables,
                 Spacer(1, 0.24 * cm),
             ]
         else:
@@ -611,7 +865,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 Spacer(1, 0.18 * cm),
                 Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]),
                 Paragraph(_paragraph_safe(error_text), styles["WMFigureText"]),
-                Paragraph(_paragraph_safe(notes), styles["WMFigureText"]),
+                *notes_flowables,
                 Spacer(1, 0.24 * cm),
             ]
 
@@ -812,6 +1066,21 @@ with m5:
 with m6:
     meta["consecutive"] = st.text_input("Consecutivo", key="report_meta_consecutive", value=meta["consecutive"])
 
+# Composición del tren acoplado — la mayoría de máquinas reales son trenes
+# acoplados (turbina + generador, motor + bomba, motor + compresor, etc.)
+meta["train_description"] = st.text_area(
+    "Composición del tren acoplado (opcional)",
+    key="report_meta_train_description",
+    value=meta.get("train_description", ""),
+    height=80,
+    placeholder=(
+        "Ejemplo: una turbina aeroderivada GE LM6000 acoplada por reductor "
+        "doble-helicoidal a un generador eléctrico Brush de 54 MW a 3600 rpm. "
+        "Este texto reemplaza al campo 'Activo' en la portada y narrativas "
+        "cuando se completa, permitiendo describir trenes mecánicos completos."
+    ),
+)
+
 m7, m8 = st.columns(2)
 with m7:
     meta["prepared_by"] = st.text_input("Preparado por", key="report_meta_prepared_by", value=meta["prepared_by"])
@@ -837,6 +1106,564 @@ st.markdown(
 )
 
 meta["report_date"] = meta["report_date"] or TODAY_STR
+
+
+def _autodraft_sections_from_items(meta_dict: Dict[str, Any], current_items: List[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    Genera un draft inicial de Objetivo, Desarrollo y Recomendaciones a partir
+    de las figuras enviadas al reporte. Sirve para que el ingeniero parta de
+    una base prosa-coherente y solo ajuste matices.
+    """
+    asset = (meta_dict.get("asset") or "").strip()
+    client = (meta_dict.get("client") or "").strip()
+    train = (meta_dict.get("train_description") or "").strip()
+    n = len(current_items)
+    types_seen = sorted({(it.get("type") or "figure").strip().lower() for it in current_items})
+    type_label_map = {
+        "figure": "figuras de análisis", "spectrum": "espectros",
+        "waveform": "formas de onda", "orbit": "órbitas",
+        "trends": "tendencias", "tabular": "tablas tabulares",
+    }
+    type_phrase = ", ".join(type_label_map.get(t, t) for t in types_seen) or "figuras de análisis"
+
+    # Cláusula del activo: prioriza la descripción del tren acoplado si la hay,
+    # cae al asset simple si no.
+    asset_clause = train if train else (asset or "[activo]")
+    if not train and asset:
+        asset_clause = f"activo {asset}"
+    elif train:
+        asset_clause = f"tren acoplado conformado por {train}"
+    else:
+        asset_clause = "activo [activo]"
+    client_clause = f" del cliente {client}" if client else ""
+
+    objective = (
+        f"Evaluar la condición rotodinámica del {asset_clause}{client_clause} "
+        f"a partir de {n} {type_phrase} adquiridas en condición operativa "
+        f"mediante el sistema de monitoreo en línea y remoto Watermelon System, "
+        f"con el propósito de identificar hallazgos rotodinámicos relevantes y "
+        f"emitir recomendaciones técnicas alineadas con normas internacionales "
+        f"aplicables (API 670 para instrumentación con sondas de proximidad, "
+        f"API 684 para análisis rotodinámico, ISO 20816 para evaluación de "
+        f"vibración mecánica e ISO 21940 para criterios de balanceo) bajo "
+        f"prácticas de análisis Categoría IV del Vibration Institute."
+    )
+
+    development_lines = [
+        "El servicio se ejecutó bajo la metodología de diagnóstico avanzado del "
+        "sistema Watermelon System, plataforma de monitoreo en línea y remoto "
+        "para máquinas rotativas críticas, conforme a las siguientes etapas:",
+
+        "<b>1. Adquisición de datos.</b> La data fue capturada de forma continua "
+        "por el sistema Watermelon System a través de las sondas de proximidad y "
+        "acelerómetros instalados en el tren mecánico, registrando simultáneamente "
+        "las variables operativas relevantes desde el sistema de control distribuido "
+        "(DCS) del proceso. Las señales fueron validadas en cuanto a integridad de "
+        "estado, continuidad temporal y consistencia de unidades de origen, "
+        "preservando la trazabilidad metrológica del registro original.",
+
+        "<b>2. Procesamiento analítico.</b> Cada corrida fue analizada en los "
+        "módulos especializados de Watermelon System según la naturaleza del "
+        "fenómeno a caracterizar: análisis de respuesta sincrónica 1X (Polar y "
+        "Bode con detección automática de velocidades críticas y factor de "
+        "amplificación Q según API 684), análisis de posición DC del muñón en el "
+        "cojinete (Shaft Centerline con cálculo de eccentricity ratio, attitude "
+        "angle, lift-off speed y migración multi-fecha conforme práctica estándar "
+        "API 670 para cojinetes hidrodinámicos), y evaluación de severidad de "
+        "vibración según ISO 20816 en la parte aplicable a la familia del activo. "
+        "Todo el procesamiento respeta la unidad de la fuente original sin "
+        "conversiones forzadas que pudieran introducir error de redondeo en la "
+        "narrativa.",
+
+        "<b>3. Comparación temporal.</b> Cuando se dispone de más de una corrida "
+        "del mismo activo, el sistema realiza comparativos multi-fecha para "
+        "detectar evolución del eccentricity ratio, migración del centerline del "
+        "muñón, deriva de fase y cambios del factor de amplificación entre "
+        "corridas, lo que permite distinguir hallazgos transitorios de tendencias "
+        "sostenidas de degradación.",
+
+        "<b>4. Síntesis y recomendaciones.</b> Los hallazgos individuales se "
+        "consolidan en un resumen ejecutivo de severidad global, y se emiten "
+        "recomendaciones técnicas priorizadas por horizonte de acción "
+        "(inmediato, corto plazo y vigilancia rutinaria), correlacionadas con la "
+        "información del Document Vault del activo (manuales de fabricante, "
+        "reportes históricos de mantenimiento, dimensiones de cojinetes y "
+        "parámetros físicos validados).",
+    ]
+    development = "\n\n".join(development_lines)
+
+    bullets: List[str] = []
+    seen = set()
+    for it in current_items:
+        notes = (it.get("notes") or "").strip()
+        if not notes:
+            continue
+        for line in notes.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            # Captura líneas que ya vienen numeradas en la narrativa de cada figura
+            import re
+            m = re.match(r"^(\d+)\.\s+(.*)", stripped)
+            if not m:
+                continue
+            text = m.group(2).strip()
+            key = text.lower()[:120]
+            if key in seen:
+                continue
+            seen.add(key)
+            bullets.append(text)
+            if len(bullets) >= 8:
+                break
+        if len(bullets) >= 8:
+            break
+
+    if bullets:
+        rec_intro = (
+            "A partir de los hallazgos consolidados de las figuras del reporte, "
+            "se emiten las siguientes recomendaciones técnicas priorizadas:"
+        )
+        rec_body = "\n\n".join(f"{i}. {b}" for i, b in enumerate(bullets, start=1))
+        recommendations = f"{rec_intro}\n\n{rec_body}"
+    else:
+        recommendations = (
+            "Se recomienda mantener el seguimiento periódico de las variables "
+            "monitoreadas y correlacionar contra histórico de mantenimiento y "
+            "condición operativa registrada en el DCS."
+        )
+
+    return {
+        "service_objective": objective,
+        "service_development": development,
+        "recommendations": recommendations,
+    }
+
+
+# =============================================================
+# RESUMEN EJECUTIVO AUTO-REDACTADO
+# =============================================================
+
+# Severidad: ranking ordinal para clasificar el estado global del activo
+# a partir de los hallazgos individuales de cada figura.
+_SCL_SEVERITY_RANK = {
+    "HEALTHY": 0,
+    "STABLE": 0,
+    "MARGINAL_LOW": 1,
+    "MARGINAL_HIGH": 2,
+    "MINOR_DRIFT": 1,
+    "MODERATE_DRIFT": 2,
+    "WHIRL_RISK": 3,
+    "MAJOR_DRIFT": 3,
+    "WIPE_RISK": 4,
+}
+
+_ISO_ZONE_RANK = {"A": 0, "B": 1, "C": 2, "D": 3}
+
+
+def _extract_findings_from_items(current_items: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Recorre cada figura del reporte y extrae métricas estructuradas a partir
+    del texto de las narrativas Cat IV ya escritas. Funciona como lector
+    semántico de las narrativas que produjimos en SCL/Polar/Bode.
+
+    Returns:
+        Dict con listas de findings clasificadas por tipo. Útil para que
+        _compose_executive_summary() arme la prosa de síntesis.
+    """
+    import re
+
+    findings: Dict[str, Any] = {
+        "scl_states": [],         # {classification, e_c, alpha, fig_title}
+        "scl_migrations": [],     # {classification, pct_clearance, fig_title}
+        "critical_speeds": [],    # {rpm, q, fig_title}
+        "iso_zones": [],          # {zone, fig_title}
+        "lift_off": [],           # {rpm, margin_pct, fig_title}
+        "high_priority_actions": [],
+        "n_figures": len(current_items),
+    }
+
+    for it in current_items:
+        notes = (it.get("notes") or "")
+        title = (it.get("title") or "")
+        if not notes:
+            continue
+
+        # Patrón numérico estricto para evitar capturar puntos finales/comas
+        NUM = r"(\d+(?:\.\d+)?)"
+
+        # SCL Cat IV classification + e/c + α (formato del comparativo)
+        for m in re.finditer(
+            rf"eccentricity ratio (?:de\s+|e/c\s*=\s*){NUM}[^.]*?attitude angle (?:de\s+){NUM}°[^.]*?clasificación\s+(\w+)",
+            notes,
+        ):
+            findings["scl_states"].append({
+                "e_c": float(m.group(1)),
+                "alpha": float(m.group(2)),
+                "classification": m.group(3),
+                "fig_title": title,
+            })
+
+        # SCL panel individual: extrae todas las pares (e/c, classification)
+        # cuando la classification aparece en la misma figura aunque no esté
+        # explícito el word "clasificación".
+        already_titled = any(s["fig_title"] == title for s in findings["scl_states"])
+        if not already_titled:
+            ec_match = re.search(rf"eccentricity ratio de {NUM}", notes)
+            cls_hits = re.findall(r"\b(WIPE_RISK|HEALTHY|MARGINAL_HIGH|MARGINAL_LOW|WHIRL_RISK)\b", notes)
+            if ec_match and cls_hits:
+                findings["scl_states"].append({
+                    "e_c": float(ec_match.group(1)),
+                    "alpha": None,
+                    "classification": cls_hits[0],
+                    "fig_title": title,
+                })
+            elif ec_match:
+                # Inferir desde rango: 0.40-0.70 healthy, <0.30 whirl risk, etc.
+                e_c = float(ec_match.group(1))
+                if e_c < 0.30:
+                    inferred = "WHIRL_RISK"
+                elif e_c < 0.40:
+                    inferred = "MARGINAL_LOW"
+                elif e_c <= 0.70:
+                    inferred = "HEALTHY"
+                elif e_c <= 0.85:
+                    inferred = "MARGINAL_HIGH"
+                else:
+                    inferred = "WIPE_RISK"
+                findings["scl_states"].append({
+                    "e_c": e_c, "alpha": None,
+                    "classification": inferred, "fig_title": title,
+                })
+
+        # SCL migration
+        mig = re.search(
+            rf"[Mm]igraci[oó]n (\w+) del centerline\s*\({NUM}%\s*del clearance",
+            notes,
+        )
+        if mig:
+            severity_word = mig.group(1).lower()
+            mig_class = {
+                "estable": "STABLE", "menor": "MINOR_DRIFT",
+                "moderada": "MODERATE_DRIFT", "mayor": "MAJOR_DRIFT",
+            }.get(severity_word, "MINOR_DRIFT")
+            findings["scl_migrations"].append({
+                "classification": mig_class,
+                "pct_clearance": float(mig.group(2)),
+                "fig_title": title,
+            })
+
+        # Critical speeds + Q factor (Polar/Bode narrative)
+        for m in re.finditer(
+            rf"velocidad cr[ií]tica.*?(\d[\d,]*)\s*rpm.*?(?:factor\s+Q|Q\s*=)\s*(?:de\s+)?{NUM}",
+            notes,
+        ):
+            try:
+                rpm_val = float(m.group(1).replace(",", ""))
+                q_val = float(m.group(2))
+                findings["critical_speeds"].append({
+                    "rpm": rpm_val, "q": q_val, "fig_title": title,
+                })
+            except ValueError:
+                pass
+
+        # ISO 20816 zone (A/B/C/D)
+        iso_zone = re.search(r"zona\s+ISO\s+([ABCD])\b", notes)
+        if iso_zone:
+            findings["iso_zones"].append({
+                "zone": iso_zone.group(1), "fig_title": title,
+            })
+
+        # Lift-off
+        lo = re.search(
+            rf"lift[\-\s]off.*?(\d[\d,]*)\s*rpm.*?margen del\s+{NUM}%",
+            notes,
+        )
+        if lo:
+            try:
+                rpm_lo = float(lo.group(1).replace(",", ""))
+                margin = float(lo.group(2))
+                findings["lift_off"].append({
+                    "rpm": rpm_lo, "margin_pct": margin, "fig_title": title,
+                })
+            except ValueError:
+                pass
+
+        # PRIORIDAD ALTA actions
+        for line in notes.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if "PRIORIDAD ALTA" in stripped.upper():
+                findings["high_priority_actions"].append({
+                    "text": stripped, "fig_title": title,
+                })
+
+    return findings
+
+
+def _global_severity(findings: Dict[str, Any]) -> Tuple[str, str]:
+    """
+    Calcula severidad global del activo combinando todos los findings.
+    Devuelve (severity_label, color_hex).
+    """
+    rank = 0
+
+    for s in findings["scl_states"]:
+        rank = max(rank, _SCL_SEVERITY_RANK.get(s["classification"], 0))
+    for m in findings["scl_migrations"]:
+        rank = max(rank, _SCL_SEVERITY_RANK.get(m["classification"], 0))
+    for z in findings["iso_zones"]:
+        rank = max(rank, _ISO_ZONE_RANK.get(z["zone"], 0))
+    if findings["high_priority_actions"]:
+        rank = max(rank, 3)
+
+    label_map = {
+        0: ("CONDICIÓN ACEPTABLE", "#16a34a"),
+        1: ("VIGILANCIA", "#84cc16"),
+        2: ("ATENCIÓN", "#f59e0b"),
+        3: ("ACCIÓN REQUERIDA", "#ea580c"),
+        4: ("CRÍTICA", "#dc2626"),
+    }
+    return label_map.get(rank, label_map[0])
+
+
+def _compose_executive_summary(meta_dict: Dict[str, Any], findings: Dict[str, Any]) -> str:
+    """
+    Convierte los findings estructurados en prosa de resumen ejecutivo
+    estilo Cat IV. Cuatro bloques: estado global, hallazgos principales,
+    severidad y acciones críticas.
+    """
+    if findings["n_figures"] == 0:
+        return ""
+
+    asset = (meta_dict.get("asset") or "").strip()
+    train = (meta_dict.get("train_description") or "").strip()
+    if train:
+        asset_clause = f"tren acoplado conformado por {train}"
+    elif asset:
+        asset_clause = f"activo {asset}"
+    else:
+        asset_clause = "activo en evaluación"
+    severity_label, _ = _global_severity(findings)
+
+    paragraphs: List[str] = []
+
+    # Bloque 1: estado global
+    n_fig = findings["n_figures"]
+    n_scl = len(findings["scl_states"])
+    n_mig = len(findings["scl_migrations"])
+    n_crit = len(findings["critical_speeds"])
+
+    components = []
+    if n_scl:
+        components.append(f"{n_scl} análisis de Shaft Centerline")
+    if n_crit:
+        components.append(f"{n_crit} detección{'es' if n_crit != 1 else ''} de velocidades críticas")
+    if n_mig:
+        components.append(f"{n_mig} comparativ{'os' if n_mig != 1 else 'o'} de migración multi-fecha")
+    composition_clause = ", ".join(components) if components else f"{n_fig} figuras de análisis"
+
+    paragraphs.append(
+        f"El presente reporte sintetiza la condición rotodinámica del "
+        f"{asset_clause} a partir de {n_fig} figuras de análisis adquiridas "
+        f"mediante el sistema de monitoreo en línea y remoto Watermelon System, "
+        f"incluyendo {composition_clause}. La evaluación combinada de los "
+        f"hallazgos según los criterios técnicos aplicables (API 670 / API 684 "
+        f"para análisis rotodinámico, ISO 20816 para severidad de vibración) "
+        f"arroja una clasificación global de {severity_label}."
+    )
+
+    # Bloque 2: hallazgos principales
+    hallazgos: List[str] = []
+
+    # SCL states (peor primero)
+    if findings["scl_states"]:
+        scl_sorted = sorted(
+            findings["scl_states"],
+            key=lambda s: -_SCL_SEVERITY_RANK.get(s["classification"], 0),
+        )
+        worst = scl_sorted[0]
+        if worst["classification"] == "HEALTHY":
+            hallazgos.append(
+                f"el centerline del muñón opera en zona hidrodinámica sana "
+                f"(e/c = {worst['e_c']:.2f}), lo que indica buen amortiguamiento "
+                f"y condición de cojinete adecuada"
+            )
+        elif worst["classification"] == "WIPE_RISK":
+            hallazgos.append(
+                f"se detectó eccentricity ratio crítico (e/c = {worst['e_c']:.2f}) "
+                f"con riesgo de wipe del babbitt — requiere acción prioritaria"
+            )
+        elif worst["classification"] == "WHIRL_RISK":
+            hallazgos.append(
+                f"el centerline presenta eccentricity ratio bajo "
+                f"(e/c = {worst['e_c']:.2f}) sugestivo de riesgo de oil whirl, "
+                f"lo que amerita verificación del espectro subsíncrono"
+            )
+        elif worst["classification"] == "MARGINAL_HIGH":
+            hallazgos.append(
+                f"el centerline opera con eccentricity ratio elevado "
+                f"(e/c = {worst['e_c']:.2f}), cerca del límite del clearance"
+            )
+        else:
+            hallazgos.append(
+                f"el centerline presenta eccentricity ratio de "
+                f"{worst['e_c']:.2f} en condición de margen reducido"
+            )
+
+    # Migration
+    if findings["scl_migrations"]:
+        mig_sorted = sorted(
+            findings["scl_migrations"],
+            key=lambda m: -_SCL_SEVERITY_RANK.get(m["classification"], 0),
+        )
+        worst_mig = mig_sorted[0]
+        mig_word = {
+            "STABLE": "estable", "MINOR_DRIFT": "menor",
+            "MODERATE_DRIFT": "moderada", "MAJOR_DRIFT": "mayor",
+        }.get(worst_mig["classification"], "menor")
+        hallazgos.append(
+            f"la comparación multi-fecha del centerline muestra una migración "
+            f"{mig_word} ({worst_mig['pct_clearance']:.1f}% del clearance radial)"
+        )
+
+    # Critical speeds
+    if findings["critical_speeds"]:
+        crit_sorted = sorted(findings["critical_speeds"], key=lambda c: -c["q"])
+        worst_crit = crit_sorted[0]
+        q_descriptor = (
+            "con factor Q elevado, indicando bajo amortiguamiento"
+            if worst_crit["q"] >= 5.0 else
+            "con factor Q moderado, dentro de rangos aceptables"
+            if worst_crit["q"] >= 2.5 else
+            "con factor Q bajo, indicando buen amortiguamiento"
+        )
+        hallazgos.append(
+            f"se identificó velocidad crítica en {worst_crit['rpm']:.0f} rpm "
+            f"con factor Q de {worst_crit['q']:.2f}, {q_descriptor}"
+        )
+
+    # ISO zones
+    if findings["iso_zones"]:
+        worst_zone = max(findings["iso_zones"], key=lambda z: _ISO_ZONE_RANK.get(z["zone"], 0))
+        zone_text = {
+            "A": "zona A (recién comisionado / aceptable)",
+            "B": "zona B (operación sostenida aceptable)",
+            "C": "zona C (operación restringida en tiempo)",
+            "D": "zona D (no se permite operación sostenida)",
+        }.get(worst_zone["zone"], f"zona {worst_zone['zone']}")
+        hallazgos.append(
+            f"los niveles de vibración se ubican en {zone_text} según ISO 20816"
+        )
+
+    if hallazgos:
+        paragraphs.append(
+            "Los hallazgos principales del análisis combinado son: " +
+            "; ".join(hallazgos) + "."
+        )
+
+    # Bloque 3: lift-off y soporte
+    if findings["lift_off"]:
+        lo_avg = sum(l["margin_pct"] for l in findings["lift_off"]) / len(findings["lift_off"])
+        lo_min = min(l["margin_pct"] for l in findings["lift_off"])
+        if lo_avg >= 80.0:
+            lo_clause = (
+                f"La velocidad de lift-off detectada deja un margen promedio de "
+                f"{lo_avg:.0f}% respecto a la velocidad operativa, lo que confirma "
+                f"el establecimiento adecuado del régimen hidrodinámico durante el "
+                f"arranque del rotor."
+            )
+        else:
+            lo_clause = (
+                f"El margen entre la velocidad de lift-off y la velocidad operativa "
+                f"({lo_min:.0f}% mínimo) está por debajo del rango sano típico "
+                f"(80–95%), lo que sugiere transición tardía al régimen hidrodinámico."
+            )
+        paragraphs.append(lo_clause)
+
+    # Bloque 4: acciones críticas
+    if findings["high_priority_actions"]:
+        actions_text: List[str] = []
+        seen_actions = set()
+        for a in findings["high_priority_actions"][:3]:
+            key = a["text"].lower()[:80]
+            if key in seen_actions:
+                continue
+            seen_actions.add(key)
+            actions_text.append(a["text"])
+        if actions_text:
+            paragraphs.append(
+                "El análisis identifica las siguientes acciones de prioridad alta "
+                "que deben ser ejecutadas en el corto plazo:\n\n" +
+                "\n\n".join(f"• {a}" for a in actions_text)
+            )
+    else:
+        if severity_label in ("CONDICIÓN ACEPTABLE", "VIGILANCIA"):
+            paragraphs.append(
+                "No se identifican acciones de prioridad alta en el análisis. Se "
+                "recomienda mantener la frecuencia actual de monitoreo y conservar "
+                "el presente reporte como línea base de aceptación para comparaciones "
+                "en próximas corridas."
+            )
+        else:
+            paragraphs.append(
+                "Aunque no se identifican acciones explícitamente clasificadas como "
+                "PRIORIDAD ALTA en las narrativas, la severidad global de "
+                f"{severity_label} amerita seguimiento estrecho, correlación con "
+                "datos de proceso del DCS y revisión de las recomendaciones "
+                "numeradas dentro de cada figura del reporte."
+            )
+
+    return "\n\n".join(paragraphs)
+
+
+def _autodraft_executive_summary(meta_dict: Dict[str, Any], current_items: List[Dict[str, Any]]) -> str:
+    """Wrapper público: extrae findings y compone el resumen ejecutivo."""
+    findings = _extract_findings_from_items(current_items)
+    return _compose_executive_summary(meta_dict, findings)
+
+
+st.markdown('<div class="wm-section-title">Secciones narrativas</div>', unsafe_allow_html=True)
+st.markdown(
+    '<div class="wm-meta-hint">Si dejas vacíos los tres campos, esas secciones se ocultan en el PDF y las figuras pasan a numerarse desde 1. Usa "Auto-redactar desde figuras" para generar un draft inicial a partir de las narrativas de cada figura cargada.</div>',
+    unsafe_allow_html=True,
+)
+
+ad1, ad2, ad3 = st.columns([1.4, 1.6, 3.0])
+with ad1:
+    if st.button("Auto-redactar secciones 1/2/3", use_container_width=True, disabled=len(items) == 0):
+        draft = _autodraft_sections_from_items(meta, items)
+        for k, v in draft.items():
+            meta[k] = v
+            st.session_state[f"report_meta_{k}"] = v
+        st.session_state["report_meta"] = meta
+        save_report_state(items=st.session_state.get("report_items", []), meta=meta)
+        st.success("Secciones 1/2/3 redactadas como draft. Ajusta los matices que quieras.")
+        st.rerun()
+with ad2:
+    if st.button("Auto-redactar resumen ejecutivo", use_container_width=True, disabled=len(items) == 0):
+        exec_draft = _autodraft_executive_summary(meta, items)
+        meta["executive_summary"] = exec_draft
+        st.session_state["report_meta_executive_summary"] = exec_draft
+        st.session_state["report_meta"] = meta
+        save_report_state(items=st.session_state.get("report_items", []), meta=meta)
+        st.success("Resumen ejecutivo generado. Aparece como página inicial del PDF, después de la portada.")
+        st.rerun()
+with ad3:
+    st.markdown(
+        '<div class="wm-muted">El draft se basa en metadatos del reporte (cliente, activo) y en hallazgos extraídos de las narrativas de cada figura. El resumen ejecutivo sintetiza estado global, hallazgos clave, severidad y acciones críticas.</div>',
+        unsafe_allow_html=True,
+    )
+
+exec_col = st.columns(1)[0]
+with exec_col:
+    meta["executive_summary"] = st.text_area(
+        "Resumen ejecutivo (página inicial del PDF, después de portada)",
+        key="report_meta_executive_summary",
+        value=meta.get("executive_summary", ""),
+        height=220,
+        placeholder="Síntesis de 4–5 párrafos: estado global, hallazgos clave, severidad y acciones críticas. Lo que el cliente lee primero al abrir el PDF.",
+    )
 
 t0 = st.columns(1)[0]
 with t0:
@@ -937,6 +1764,9 @@ with p1:
         """,
         unsafe_allow_html=True,
     )
+    st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
+    st.markdown('<div class="wm-block-subtitle">Resumen ejecutivo (página inicial del PDF)</div>', unsafe_allow_html=True)
+    st.write(meta.get("executive_summary") or "—")
     st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
     st.markdown('<div class="wm-block-subtitle">Objetivo del servicio</div>', unsafe_allow_html=True)
     st.write(meta["service_objective"] or "—")

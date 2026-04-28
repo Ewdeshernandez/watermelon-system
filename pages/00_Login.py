@@ -340,7 +340,7 @@ with right_col:
         ok, msg = wm_login(username.strip(), password)
         if ok:
             st.success(msg)
-            st.switch_page("app.py")
+            st.switch_page("pages/_landing.py")
         else:
             st.error(msg)
 

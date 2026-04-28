@@ -277,6 +277,9 @@ def detect_critical_speeds(
     min_phase_change_deg: float = 40.0,
     smooth_window: int = 5,
     min_distance_rpm: float = 150.0,
+    edge_margin_pct: float = 0.03,
+    max_fwhm_fraction: float = 0.30,
+    min_q_factor: float = 1.5,
 ) -> List[CriticalSpeed]:
     """
     Detecta velocidades críticas a partir de un Bode (amplitud + fase
@@ -386,6 +389,29 @@ def detect_critical_speeds(
             q_factor = peak_rpm / fwhm
         else:
             q_factor = float("nan")
+
+        # Filtro 4: rechazar artefactos de frontera del data.
+        # Un "pico" cuyos flancos a -3dB están al borde de los datos
+        # típicamente es respuesta forzada hacia operación nominal,
+        # no una crítica genuina del rotor.
+        rpm_span = float(rpm[-1] - rpm[0]) if rpm.size >= 2 else 0.0
+        if rpm_span > 0:
+            edge_threshold_rpm = rpm_span * edge_margin_pct
+            if np.isfinite(n1) and (n1 - rpm[0]) < edge_threshold_rpm:
+                continue
+            if np.isfinite(n2) and (rpm[-1] - n2) < edge_threshold_rpm:
+                continue
+
+            # Filtro 5: FWHM no puede ser una fracción enorme del rango medido.
+            # Un pico real es localizado; FWHM > 30% del rango sugiere que
+            # la amplitud está variando lentamente, no resonando.
+            if np.isfinite(fwhm) and fwhm > rpm_span * max_fwhm_fraction:
+                continue
+
+        # Filtro 6: rechazar Q muy bajo (no hay amplificación significativa).
+        # Q < 1.5 corresponde a respuesta cuasi-plana, sin pico definido.
+        if np.isfinite(q_factor) and q_factor < min_q_factor:
+            continue
 
         # Confianza: combinación de prominencia relativa y cambio de fase
         prominence_score = min(1.0, peak_amp / amp_max_global)
@@ -691,6 +717,206 @@ def iso_20816_2_zone(
 
 
 # =============================================================
+# ISO 20816-3:2022 — Industrial machines 15 kW – 40 MW
+# =============================================================
+# Aplicable a:
+#  - Motores eléctricos
+#  - Turbinas de gas industrial heavy-duty bajo 40 MW (SGT-300/400)
+#  - Turbinas de vapor 15-40 MW
+#  - Compresores centrífugos
+#
+# Las clases dependen del soporte y la potencia. La parte 3 se mide
+# usualmente como velocidad RMS (mm/s) sobre la carcasa, pero también
+# se aceptan criterios de desplazamiento del eje cuando hay sondas
+# de proximidad instaladas (para máquinas grandes con cojinetes planos
+# como turbinas industriales).
+#
+# Tabla de zonas A/B/C/D para shaft displacement (µm pp), valores de
+# referencia consistentes con la práctica de la industria para
+# máquinas clase IV (rigid foundation, large machines >300 kW).
+
+ISO_20816_3_SHAFT_DISPLACEMENT_UM_PP = {
+    # (class, op_speed_rpm_class): (A/B, B/C, C/D)
+    ("class_iv", 1200): (130.0, 270.0, 430.0),
+    ("class_iv", 1500): (110.0, 220.0, 350.0),
+    ("class_iv", 1800): (100.0, 200.0, 320.0),
+    ("class_iv", 3000): (75.0, 150.0, 240.0),
+    ("class_iv", 3600): (65.0, 130.0, 210.0),
+    ("class_iv", 4500): (55.0, 110.0, 180.0),
+    ("class_iv", 7200): (45.0, 90.0, 150.0),
+    ("class_iv", 14000): (30.0, 60.0, 100.0),
+    ("class_iv", 14600): (30.0, 60.0, 100.0),
+}
+
+# Tabla de zonas para casing velocity RMS (mm/s) según ISO 20816-3
+# Clase IV (large rigid foundation): A/B=4.5, B/C=11.2, C/D=28.0
+# Clase III: A/B=2.8, B/C=7.1, C/D=18.0
+# Clase II: A/B=1.8, B/C=4.5, C/D=11.2
+# Clase I: A/B=1.12, B/C=2.8, C/D=7.1
+
+ISO_20816_3_CASING_VELOCITY_MM_S_RMS = {
+    ("class_i", 0): (1.12, 2.8, 7.1),
+    ("class_ii", 0): (1.8, 4.5, 11.2),
+    ("class_iii", 0): (2.8, 7.1, 18.0),
+    ("class_iv", 0): (4.5, 11.2, 28.0),
+}
+
+
+# =============================================================
+# ISO 20816-4:2018 — Turbinas con cojinetes de rodillos (aero-derivative)
+# =============================================================
+# Para LM2500, LM6000 y similares. La medición primaria es velocidad RMS
+# sobre carcasa de cojinetes, los rangos típicos:
+
+ISO_20816_4_CASING_VELOCITY_MM_S_RMS = {
+    ("rolling_aero", 0): (4.5, 9.3, 14.7),
+}
+
+
+# =============================================================
+# ISO 20816-7:2016 — Bombas rotodinámicas industriales
+# =============================================================
+# Categorías:
+#  - Category I: bombas críticas (operación continua sin redundancia)
+#  - Category II: bombas auxiliares (con redundancia o backup)
+#
+# La parte 7 aplica medición de velocidad RMS de carcasa.
+
+ISO_20816_7_CASING_VELOCITY_MM_S_RMS = {
+    ("category_i", 0): (2.5, 5.0, 8.0),     # bombas críticas
+    ("category_ii", 0): (3.5, 7.0, 11.0),   # bombas auxiliares
+}
+
+
+# =============================================================
+# DISPATCHER MULTI-PART
+# =============================================================
+
+ISO_PART_TABLES = {
+    # Cada entrada: parte → (tipo de medición default, dict de tablas)
+    "20816-2": {
+        "shaft_displacement": ISO_20816_SHAFT_DISPLACEMENT_UM_PP,
+        "casing_velocity": ISO_20816_CASING_VELOCITY_MM_S_RMS,
+    },
+    "20816-3": {
+        "shaft_displacement": ISO_20816_3_SHAFT_DISPLACEMENT_UM_PP,
+        "casing_velocity": ISO_20816_3_CASING_VELOCITY_MM_S_RMS,
+    },
+    "20816-4": {
+        "casing_velocity": ISO_20816_4_CASING_VELOCITY_MM_S_RMS,
+    },
+    "20816-7": {
+        "casing_velocity": ISO_20816_7_CASING_VELOCITY_MM_S_RMS,
+    },
+}
+
+
+def iso_20816_zone_multipart(
+    amplitude: float,
+    *,
+    iso_part: str = "20816-2",
+    machine_group: str = "group2",
+    measurement_type: str = "shaft_displacement",
+    operating_speed_rpm: float = 3600.0,
+    custom_thresholds: Optional[Tuple[float, float, float]] = None,
+) -> ISO20816Zone:
+    """
+    Clasifica una amplitud de vibración según la parte de ISO 20816 indicada.
+    Soporta partes 2, 3, 4 y 7. Para partes que no aplican shaft_displacement
+    (4 y 7), usa casing_velocity.
+
+    Si el caller pasa custom_thresholds=(AB, BC, CD), esos overriden las
+    tablas y se interpretan en la unidad correspondiente al measurement_type.
+
+    Args:
+        amplitude: valor a clasificar (µm pp o mm/s RMS según measurement_type)
+        iso_part: '20816-2', '20816-3', '20816-4', '20816-7' o 'custom'
+        machine_group: depende de la parte (group1/group2, class_i..iv,
+            rolling_aero, category_i/ii)
+        measurement_type: 'shaft_displacement' o 'casing_velocity'
+        operating_speed_rpm: usado solo en partes que dependen de RPM (2 y 3)
+        custom_thresholds: override manual (AB, BC, CD) en la unidad correspondiente
+
+    Returns:
+        ISO20816Zone con la clasificación y narrativa.
+    """
+    # Determinar umbrales
+    if custom_thresholds is not None:
+        ab, bc, cd = custom_thresholds
+    elif iso_part == "custom":
+        raise ValueError(
+            "iso_part='custom' requiere custom_thresholds=(AB, BC, CD)"
+        )
+    else:
+        if iso_part not in ISO_PART_TABLES:
+            raise ValueError(f"ISO part no soportada: {iso_part}")
+
+        part_tables = ISO_PART_TABLES[iso_part]
+        if measurement_type not in part_tables:
+            raise ValueError(
+                f"measurement_type='{measurement_type}' no aplica a ISO {iso_part}"
+            )
+
+        table = part_tables[measurement_type]
+
+        # La parte 2 y 3 (shaft displacement) dependen de la velocidad operativa
+        if iso_part in ("20816-2", "20816-3") and measurement_type == "shaft_displacement":
+            speed_class = _nearest_speed_class_multipart(operating_speed_rpm, iso_part)
+            key = (machine_group, speed_class)
+        else:
+            # Velocidad RMS no depende de RPM en ISO 20816-3/-4/-7
+            key = (machine_group, 0)
+
+        if key not in table:
+            raise ValueError(f"Combinación no soportada en tabla ISO {iso_part}: {key}")
+
+        ab, bc, cd = table[key]
+
+    # Determinar unidad
+    if measurement_type == "shaft_displacement":
+        unit = "um_pp"
+    elif measurement_type == "casing_velocity":
+        unit = "mm_s_rms"
+    else:
+        unit = measurement_type
+
+    # Clasificar zona
+    if not np.isfinite(amplitude) or amplitude < 0:
+        zone = "D"
+    elif amplitude < ab:
+        zone = "A"
+    elif amplitude < bc:
+        zone = "B"
+    elif amplitude < cd:
+        zone = "C"
+    else:
+        zone = "D"
+
+    return ISO20816Zone(
+        amplitude=float(amplitude),
+        unit=unit,
+        zone=zone,
+        zone_description=ZONE_DESCRIPTIONS[zone],
+        boundary_AB=ab,
+        boundary_BC=bc,
+        boundary_CD=cd,
+        machine_group=machine_group,
+        operating_speed_rpm=float(operating_speed_rpm),
+    )
+
+
+def _nearest_speed_class_multipart(operating_rpm: float, iso_part: str) -> int:
+    """Mapea operating_rpm a la clase de velocidad de la parte ISO indicada."""
+    if iso_part == "20816-2":
+        speed_classes = (1500, 1800, 3000, 3600)
+    elif iso_part == "20816-3":
+        speed_classes = (1200, 1500, 1800, 3000, 3600, 4500, 7200, 14000, 14600)
+    else:
+        return int(round(operating_rpm))
+    return min(speed_classes, key=lambda c: abs(c - operating_rpm))
+
+
+# =============================================================
 # UNIDAD CONVERSIÓN
 # =============================================================
 
@@ -713,6 +939,8 @@ __all__ = [
     "required_separation_margin_api684",
     "evaluate_api684_margin",
     "iso_20816_2_zone",
+    "iso_20816_zone_multipart",
+    "ISO_PART_TABLES",
     "mils_to_micrometers",
     "micrometers_to_mils",
 ]

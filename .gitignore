@@ -42,6 +42,10 @@ Thumbs.db
 data/report_state.json
 data/report_drafts/
 
+# --- Document Vault (datos del usuario, NO commitear) ---
+data/asset_documents/
+data/asset_metadata/
+
 # --- Backups manuales ---
 backup_*/
 backup_phase*/
