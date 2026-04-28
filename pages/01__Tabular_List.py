@@ -589,11 +589,54 @@ def build_table_dataframe(
     overall_mode: str,
     global_alarm: float,
     global_danger: float,
+    sensors_map: Optional[List[Dict[str, Any]]] = None,
 ) -> pd.DataFrame:
+    """
+    Construye el DataFrame de la tabla.
+
+    Ciclo 14c.1: si se pasa sensors_map, cada record intenta matchear a
+    un sensor del mapa (resolve_sensor_for_point). Si encuentra match,
+    usa los thresholds + family + overall_mode + criterion del SENSOR
+    (granular per-sensor) ANTES de los machine_settings / point_settings
+    o el global. Si no hay match, cae al comportamiento legacy.
+    """
     rows = []
+    sensors_map = sensors_map or []
+
+    # Import on-demand para evitar dependencia circular en versiones legacy
+    try:
+        from core.sensor_map import resolve_sensor_for_point, sensor_label, sensor_unit_family
+        _has_sensor_map = bool(sensors_map)
+    except Exception:
+        _has_sensor_map = False
 
     for rec in records:
-        if config_mode == "Criterion by Machine":
+        # Ciclo 14c.1 — resolver sensor del mapa primero (prioridad máxima)
+        sensor_match = None
+        sensor_label_str = ""
+        if _has_sensor_map:
+            sensor_match = resolve_sensor_for_point(
+                sensors_map,
+                csv_point=str(rec.point or ""),
+                csv_variable=str(rec.variable or ""),
+                csv_unit=str(rec.amplitude_unit or ""),
+            )
+            if sensor_match is not None:
+                sensor_label_str = sensor_label(sensor_match)
+
+        if sensor_match is not None:
+            # Usar valores granulares del sensor del mapa
+            sensor_type = str(sensor_match.get("sensor_type", "")).lower()
+            criterion_row = (
+                "API 670 + ISO 7919-3 / ISO 20816-3" if sensor_type == "proximity"
+                else "ISO 20816-3"
+            )
+            alarm_row = float(sensor_match.get("alarm", 0.0) or 0.0)
+            danger_row = float(sensor_match.get("danger", 0.0) or 0.0)
+            family_row = sensor_unit_family(sensor_match)
+            # Overall mode por sensor: PP para proximity, RMS para velocity/accel
+            overall_mode_row = "PP" if family_row == "Proximity" else "RMS"
+        elif config_mode == "Criterion by Machine":
             machine_cfg = machine_settings.get(rec.machine, {})
             criterion_row = machine_cfg.get("criterion", criterion_default)
             alarm_row = float(machine_cfg.get("alarm", global_alarm))
@@ -640,6 +683,7 @@ def build_table_dataframe(
                 "Alarm": alarm_row,
                 "Danger": danger_row,
                 "Criterion": criterion_row,
+                "Sensor": sensor_label_str,  # Ciclo 14c.1: label del sensor matched
                 "Overall": ov_display,
                 "Overall RMS Base": ov_rms,
                 "0.5X Amp": a05,
@@ -1059,11 +1103,31 @@ with st.container(border=True):
             f"_{_defaults['criterion_explanation']}_"
         )
         st.markdown(
-            f"**Alert:** `{_defaults['alarm']:.3f} {_defaults['unit_hint']}` "
+            f"**Alert (default):** `{_defaults['alarm']:.3f} {_defaults['unit_hint']}` "
             f"· _{_defaults['alarm_source']}_  \n"
-            f"**Danger:** `{_defaults['danger']:.3f} {_defaults['unit_hint']}` "
+            f"**Danger (default):** `{_defaults['danger']:.3f} {_defaults['unit_hint']}` "
             f"· _{_defaults['danger_source']}_"
         )
+        # Ciclo 14c.1 — info del Sensor Map
+        _n_sensors = len(_active_instance.sensors or [])
+        if _n_sensors > 0:
+            _types_count: Dict[str, int] = {}
+            for _s in _active_instance.sensors:
+                _t = str(_s.get("sensor_type", "")).lower() or "unknown"
+                _types_count[_t] = _types_count.get(_t, 0) + 1
+            _types_str = " + ".join(f"{c} {t}" for t, c in _types_count.items())
+            st.markdown(
+                f"**📍 Sensor Map:** `{_n_sensors}` sensores configurados "
+                f"({_types_str}). Los thresholds individuales del DCS tienen prioridad "
+                f"sobre los defaults de arriba — la tabla clasifica cada fila con el "
+                f"sensor que matchea su Point."
+            )
+        else:
+            st.warning(
+                "📍 **Sensor Map vacío.** El activo no tiene sensores configurados. "
+                "Andá a Machinery Library → Mapa de Sensores para configurarlos. "
+                "Mientras tanto, todas las filas se clasifican con los defaults globales."
+            )
 
 criterion_options = [
     "ISO 20816-3",
@@ -1347,6 +1411,9 @@ df_table = build_table_dataframe(
     overall_mode=overall_mode,
     global_alarm=float(alarm_value),
     global_danger=float(danger_value),
+    # Ciclo 14c.1: el sensor_map de la instancia activa tiene prioridad
+    # máxima — cada sensor con su tipo/unidad/setpoints individuales.
+    sensors_map=list(_active_instance.sensors or []),
 )
 
 if df_table.empty:

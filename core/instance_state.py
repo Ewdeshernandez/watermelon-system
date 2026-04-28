@@ -130,6 +130,12 @@ class Instance:
     last_overhaul_date: str = ""
     commissioning_date: str = ""
 
+    # Ciclo 14c.1 — Mapa de sensores de vibración por plano (API 670 / ISO 20816-1).
+    # Cada sensor describe ubicación física + tipo + unidad + setpoints
+    # individuales + patrón de match al Point del CSV cargado en Load Data.
+    # Si está vacío, Tabular List cae a los defaults derivados de la instancia.
+    sensors: List[Dict[str, Any]] = field(default_factory=list)
+
     # Datos capturados ad-hoc (legacy, sigue funcionando)
     captured_parameters: Dict[str, Any] = field(default_factory=dict)
     documents: List[Dict[str, Any]] = field(default_factory=list)
@@ -185,6 +191,7 @@ class Instance:
             last_alignment_date=_f("last_alignment_date"),
             last_overhaul_date=_f("last_overhaul_date"),
             commissioning_date=_f("commissioning_date"),
+            sensors=list(data.get("sensors", []) or []),
             captured_parameters=dict(data.get("captured_parameters", {}) or {}),
             documents=list(data.get("documents", []) or []),
             created_at=_f("created_at"),
@@ -281,7 +288,7 @@ def update_instance_header(
     if inst is None:
         return False
 
-    # Campos legacy (Ciclo 8) + extendidos (Ciclo 14a)
+    # Campos legacy (Ciclo 8) + extendidos (Ciclo 14a) + sensores (Ciclo 14c.1)
     allowed = {
         "tag", "serial_number", "location", "notes", "profile_key",
         "client", "site", "asset_class",
@@ -294,6 +301,7 @@ def update_instance_header(
         "coupling_class", "schematic_png",
         "last_balance_date", "last_alignment_date", "last_overhaul_date",
         "commissioning_date",
+        "sensors",
     }
     for key, val in kwargs.items():
         if key in allowed and val is not None:

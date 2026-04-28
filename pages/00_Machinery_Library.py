@@ -399,6 +399,196 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                 st.rerun()
 
 
+# ============================================================
+# Ciclo 14c.1 — SENSOR MAP (mapa de sensores per-instancia)
+# ============================================================
+
+def render_sensor_map_section(instance_id: str) -> None:
+    """
+    Sección "📍 Mapa de Sensores" — editable in-place con st.data_editor.
+
+    Cada fila describe un sensor de vibración con su ubicación física
+    (plano + lado + ángulo + dirección) + tipo + unidad nativa +
+    setpoints individuales + patrón para matchear el Point del CSV.
+
+    Botones:
+      - Generar mapa estándar: pre-llena 8 sensores típicos
+        (4 cojinetes × 2 sondas X-Y proximity API 670 a 45° R/L).
+      - Limpiar mapa: borra todos los sensores.
+      - Guardar mapa: persiste los cambios del data_editor.
+    """
+    from core.sensor_map import generate_standard_sensor_map, sensor_label
+
+    inst = get_instance(instance_id)
+    if inst is None:
+        return
+
+    st.markdown("### 📍 Mapa de Sensores")
+    st.caption(
+        "Configurá una sola vez los sensores físicos del activo: ubicación API 670 / "
+        "ISO 20816-1 (planos numerados de **driver → driven**), dirección X/Y a 45° R/L, "
+        "tipo (proximity / velocity / accelerometer), unidad nativa y setpoints "
+        "individuales del DCS. Después Tabular List clasifica cada CSV cargado con "
+        "los thresholds correctos del sensor que matchea."
+    )
+
+    # Acciones rápidas
+    col_gen, col_clear, col_pad = st.columns([1.5, 1.5, 4.5])
+    with col_gen:
+        if st.button(
+            "🪄 Generar mapa estándar",
+            key=f"gen_sensor_map_{instance_id}",
+            help=(
+                "Pre-llena 8 sensores típicos: 4 cojinetes (2 driver + 2 driven) × "
+                "par X-Y proximity a 45° R/L + 1 acelerómetro radial por cada "
+                "cojinete del driven. Después editá los patterns y setpoints."
+            ),
+            disabled=len(inst.sensors) > 0,
+        ):
+            new_map = generate_standard_sensor_map(
+                nominal_planes_driver=2, nominal_planes_driven=2,
+                include_axial_accelerometer=True,
+            )
+            update_instance_header(instance_id, sensors=new_map)
+            st.success(f"Mapa estándar generado con {len(new_map)} sensores.")
+            st.rerun()
+
+    with col_clear:
+        if st.button(
+            "🗑️ Limpiar mapa",
+            key=f"clear_sensor_map_{instance_id}",
+            disabled=len(inst.sensors) == 0,
+        ):
+            update_instance_header(instance_id, sensors=[])
+            st.success("Mapa de sensores limpiado.")
+            st.rerun()
+
+    if not inst.sensors:
+        st.info(
+            "Este activo no tiene sensores configurados. "
+            "Click en **🪄 Generar mapa estándar** para empezar con un layout "
+            "típico de 4 cojinetes con sondas X-Y proximity + acelerómetros, o "
+            "configurá sensor por sensor manualmente con el editor de abajo."
+        )
+
+    # Editor in-place del mapa
+    df_sensors = pd.DataFrame(inst.sensors)
+    if df_sensors.empty:
+        # Skeleton de columnas para que el data_editor permita agregar filas
+        df_sensors = pd.DataFrame(columns=[
+            "plane", "plane_label", "side", "angle_deg", "direction",
+            "sensor_type", "unit_native", "alarm", "danger",
+            "csv_match_pattern", "notes",
+        ])
+
+    edited_df = st.data_editor(
+        df_sensors,
+        num_rows="dynamic",
+        key=f"sensor_map_editor_{instance_id}",
+        column_config={
+            "plane": st.column_config.NumberColumn(
+                "Plano", min_value=1, max_value=20, step=1, default=1,
+                help="Número correlativo desde driver (1) a driven (último). API 670.",
+            ),
+            "plane_label": st.column_config.TextColumn(
+                "Etiqueta plano",
+                help="ej. 'DE driver', 'NDE driven'. Opcional, para display en UI.",
+            ),
+            "side": st.column_config.SelectboxColumn(
+                "Lado",
+                options=["L", "R", "top", "bottom", "—"],
+                default="L",
+                help="Hemisferio visto desde el extremo del driver. L=izquierdo, R=derecho.",
+            ),
+            "angle_deg": st.column_config.NumberColumn(
+                "Ángulo (°)", min_value=-180.0, max_value=180.0, step=1.0, default=45.0,
+                help="0° = arriba. Sondas X-Y API 670 típicas: ±45°.",
+            ),
+            "direction": st.column_config.SelectboxColumn(
+                "Dir",
+                options=["X", "Y", "radial", "axial"],
+                default="Y",
+            ),
+            "sensor_type": st.column_config.SelectboxColumn(
+                "Tipo",
+                options=["proximity", "velocity", "accelerometer"],
+                default="proximity",
+                help="proximity → mil pp / µm pp. velocity → mm/s. accelerometer → g.",
+            ),
+            "unit_native": st.column_config.TextColumn(
+                "Unidad",
+                default="mil pp",
+                help="ej. 'mil pp', 'µm pp', 'mm/s RMS', 'g RMS'",
+            ),
+            "alarm": st.column_config.NumberColumn(
+                "Alarm", min_value=0.0, step=0.1, format="%.3f", default=4.0,
+            ),
+            "danger": st.column_config.NumberColumn(
+                "Danger", min_value=0.0, step=0.1, format="%.3f", default=6.0,
+            ),
+            "csv_match_pattern": st.column_config.TextColumn(
+                "Match CSV Point",
+                help=(
+                    "Glob (case-insensitive) que matchea el campo Point del CSV. "
+                    "Ej. '*5807*Y*' matchea el Point 'VE5807 (Y)'. "
+                    "Usá '*' como comodín."
+                ),
+            ),
+            "notes": st.column_config.TextColumn("Notas"),
+        },
+        width="stretch",
+    )
+
+    if st.button(
+        "💾 Guardar mapa de sensores",
+        key=f"save_sensor_map_{instance_id}",
+        type="primary",
+        width="stretch",
+    ):
+        # Convertir DataFrame a lista de dicts limpios
+        new_sensors = []
+        for _, row in edited_df.iterrows():
+            try:
+                sensor_dict = {
+                    "plane": int(row.get("plane", 1) or 1),
+                    "plane_label": str(row.get("plane_label", "") or ""),
+                    "side": str(row.get("side", "L") or "L"),
+                    "angle_deg": float(row.get("angle_deg", 45.0) or 45.0),
+                    "direction": str(row.get("direction", "Y") or "Y"),
+                    "sensor_type": str(row.get("sensor_type", "proximity") or "proximity"),
+                    "unit_native": str(row.get("unit_native", "mil pp") or "mil pp"),
+                    "alarm": float(row.get("alarm", 0.0) or 0.0),
+                    "danger": float(row.get("danger", 0.0) or 0.0),
+                    "csv_match_pattern": str(row.get("csv_match_pattern", "") or ""),
+                    "notes": str(row.get("notes", "") or ""),
+                }
+                new_sensors.append(sensor_dict)
+            except Exception:
+                continue
+        update_instance_header(instance_id, sensors=new_sensors)
+        st.success(f"Mapa guardado con {len(new_sensors)} sensores.")
+        st.rerun()
+
+    # Preview del mapa actual con labels formateados
+    if inst.sensors:
+        with st.expander(f"Preview del mapa actual ({len(inst.sensors)} sensores)", expanded=False):
+            preview_lines = []
+            for s in inst.sensors:
+                lbl = sensor_label(s)
+                ploc = (
+                    f"plano {s.get('plane', '?')} ({s.get('plane_label', '')}) · "
+                    f"{s.get('side', '')} {s.get('angle_deg', 0):.0f}° · "
+                    f"{s.get('direction', '')}"
+                )
+                tinfo = (
+                    f"{s.get('sensor_type', '')} ({s.get('unit_native', '')}) · "
+                    f"A={s.get('alarm', 0):.2f} D={s.get('danger', 0):.2f}"
+                )
+                pat = s.get('csv_match_pattern', '') or '(sin pattern)'
+                preview_lines.append(f"- **{lbl}** · {ploc} · {tinfo} · match=`{pat}`")
+            st.markdown("\n".join(preview_lines))
+
+
 def render_documents_section(instance_id: str) -> None:
     """Lista de documentos cargados de la instancia + acciones."""
     inst = get_instance(instance_id)
@@ -834,6 +1024,9 @@ def main() -> None:
 
     st.markdown("---")
     render_instance_header(state)
+
+    st.markdown("---")
+    render_sensor_map_section(instance_id)
 
     st.markdown("---")
     render_captured_parameters_section(instance_id)
