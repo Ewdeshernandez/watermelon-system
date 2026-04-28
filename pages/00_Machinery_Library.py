@@ -52,7 +52,7 @@ from core.machine_profiles import PROFILES as MACHINE_PROFILES, get_profile
 from core.ui_theme import apply_watermelon_page_style, page_header
 
 
-st.set_page_config(page_title="Watermelon System | Asset Documents", layout="wide")
+st.set_page_config(page_title="Watermelon System | Machinery Library", layout="wide")
 require_login()
 apply_watermelon_page_style()
 
@@ -173,43 +173,208 @@ def render_create_instance_section() -> None:
 
 
 def render_instance_header(state: Dict[str, Any]) -> None:
-    """Cabecera con metadata editable de la instancia activa."""
+    """
+    Header de la instancia + formulario completo de metadata (Ciclo 14a).
+    Tabs por categoría: Identificación · Tren · Operación · Soportes ·
+    Sondas · Setpoints · Mantenimiento · Esquemático.
+    """
     instance_id = state["instance_id"]
     profile_label = state["profile_label"]
     profile = get_profile(state["profile_key"])
 
-    st.markdown(f"## {state.get('tag') or instance_id}")
+    inst = get_instance(instance_id)
+    if inst is None:
+        st.warning("Instancia no encontrada.")
+        return
+
+    # Cabecera resumen
+    title_text = inst.tag or instance_id
+    if inst.driver_model:
+        title_text += f" · {inst.driver_model}"
+    if inst.driven_model and "generador" in inst.driven_model.lower():
+        title_text += f" + {inst.driven_model}"
+    st.markdown(f"## {title_text}")
+
     sub_parts = [profile_label]
     if profile:
         sub_parts.append(f"ISO {profile.iso_part}")
         sub_parts.append(f"{profile.operating_rpm:.0f} rpm nominal")
         sub_parts.append(profile.bearing_type)
     st.caption(" · ".join(sub_parts))
-    if state.get("location"):
-        st.caption(f"📍 {state['location']}")
-    if state.get("serial_number"):
-        st.caption(f"S/N: {state['serial_number']}")
-    if state.get("notes"):
-        with st.expander("Notas de la instancia", expanded=False):
-            st.write(state["notes"])
 
-    with st.expander("Editar metadata de esta instancia", expanded=False):
+    if inst.client or inst.site:
+        loc_parts = [p for p in [inst.client, inst.site or inst.location] if p]
+        st.caption(f"📍 {' · '.join(loc_parts)}")
+    if inst.notes:
+        with st.expander("Notas de la instancia", expanded=False):
+            st.write(inst.notes)
+
+    # Preview del esquemático (si está cargado)
+    if inst.schematic_png:
+        try:
+            png_bytes = get_instance_document_bytes(instance_id, inst.schematic_png)
+            if png_bytes:
+                st.image(png_bytes, caption="Esquemático del tren acoplado", width=480)
+        except Exception:
+            pass
+
+    with st.expander("Editar metadata completa de esta instancia", expanded=False):
+        tab_id, tab_train, tab_op, tab_sup, tab_pr, tab_set, tab_mnt, tab_sch = st.tabs([
+            "Identificación", "Tren acoplado", "Operación", "Soportes",
+            "Sondas", "Setpoints", "Mantenimiento", "Esquemático",
+        ])
+
         with st.form(f"edit_header_{instance_id}"):
-            c1, c2 = st.columns(2)
-            with c1:
-                new_tag = st.text_input("Tag", value=state.get("tag") or "")
-                new_serial = st.text_input("Número de serie", value=state.get("serial_number") or "")
-            with c2:
-                new_loc = st.text_input("Ubicación", value=state.get("location") or "")
-            new_notes = st.text_area("Notas", value=state.get("notes") or "", height=80)
-            saved = st.form_submit_button("Actualizar metadata", width="stretch")
+            with tab_id:
+                c1, c2 = st.columns(2)
+                with c1:
+                    new_tag = st.text_input("Tag", value=inst.tag or "", help="Identificador corto operativo, ej. TES1")
+                    new_client = st.text_input("Cliente", value=inst.client or "", help="ej. ECOPETROL - MAGNEX")
+                    new_site = st.text_input("Sitio / Planta", value=inst.site or "", help="ej. TERMOSURIA - VILLAVICENCIO")
+                with c2:
+                    new_asset_class = st.text_input("Clase de activo", value=inst.asset_class or "", help="ej. TURBOGENERADOR")
+                    new_loc = st.text_input("Ubicación (legacy)", value=inst.location or "", help="campo libre antiguo")
+                new_notes = st.text_area("Notas", value=inst.notes or "", height=70)
+
+            with tab_train:
+                st.markdown("**Driver (máquina motriz)**")
+                d1, d2, d3 = st.columns(3)
+                with d1:
+                    new_drv_mfr = st.text_input("Fabricante driver", value=inst.driver_manufacturer or "")
+                with d2:
+                    new_drv_mdl = st.text_input("Modelo driver", value=inst.driver_model or "")
+                with d3:
+                    new_drv_ser = st.text_input("S/N driver (interno)", value=inst.driver_serial or "")
+                st.markdown("**Driven (máquina accionada)**")
+                e1, e2, e3 = st.columns(3)
+                with e1:
+                    new_dvn_mfr = st.text_input("Fabricante driven", value=inst.driven_manufacturer or "")
+                with e2:
+                    new_dvn_mdl = st.text_input("Modelo driven", value=inst.driven_model or "")
+                with e3:
+                    new_dvn_ser = st.text_input("S/N driven (interno)", value=inst.driven_serial or "")
+                p1, p2 = st.columns(2)
+                with p1:
+                    new_power = st.number_input("Potencia nominal (MW)", value=float(inst.nominal_power_mw or 0.0), min_value=0.0, max_value=2000.0, step=1.0)
+                with p2:
+                    new_coupling = st.selectbox(
+                        "Clase de acople",
+                        ["", "rigid", "flexible", "fluid"],
+                        index=["", "rigid", "flexible", "fluid"].index(inst.coupling_class) if inst.coupling_class in ["", "rigid", "flexible", "fluid"] else 0,
+                    )
+
+            with tab_op:
+                o1, o2 = st.columns(2)
+                with o1:
+                    new_nom_rpm = st.number_input("RPM nominal", value=float(inst.nominal_rpm or 0.0), min_value=0.0, max_value=200000.0, step=10.0)
+                    new_min_rpm = st.number_input("Min RPM operativo", value=float(inst.min_rpm or 0.0), min_value=0.0, max_value=200000.0, step=10.0)
+                with o2:
+                    new_max_rpm = st.number_input("Max RPM operativo", value=float(inst.max_rpm or 0.0), min_value=0.0, max_value=200000.0, step=10.0)
+                    new_trip_rpm = st.number_input("Trip RPM (overspeed)", value=float(inst.trip_rpm or 0.0), min_value=0.0, max_value=200000.0, step=10.0)
+                new_iso_group = st.text_input("ISO group", value=inst.iso_group or "", help="rigid / flexible")
+
+            with tab_sup:
+                s1, s2 = st.columns(2)
+                with s1:
+                    new_sup_type = st.selectbox(
+                        "Tipo de soporte",
+                        ["", "fluid_film", "rolling_element", "magnetic", "mixed"],
+                        index=["", "fluid_film", "rolling_element", "magnetic", "mixed"].index(inst.support_type) if inst.support_type in ["", "fluid_film", "rolling_element", "magnetic", "mixed"] else 0,
+                    )
+                with s2:
+                    new_sup_count = st.number_input("Cantidad de soportes", value=int(inst.support_count or 0), min_value=0, max_value=20, step=1)
+                new_sup_detail = st.text_area(
+                    "Detalle (texto libre)",
+                    value=inst.support_detail or "",
+                    height=80,
+                    help="ej. '4 cojinetes planos tilting pad 5 zapatas, ID 254mm, clearance 8mil'",
+                )
+
+            with tab_pr:
+                p1, p2 = st.columns(2)
+                with p1:
+                    new_px = st.number_input("Orientación sonda X (°)", value=float(inst.probe_x_orientation_deg or 0.0), min_value=-180.0, max_value=180.0, step=1.0, help="típico 45° (XL) o 0° (vertical)")
+                with p2:
+                    new_py = st.number_input("Orientación sonda Y (°)", value=float(inst.probe_y_orientation_deg or 0.0), min_value=-180.0, max_value=180.0, step=1.0, help="típico -45° (YR) o 90° (horizontal)")
+
+            with tab_set:
+                st.caption("Si están definidos, el motor de severidad usa estos thresholds reales antes que ISO genérico.")
+                a1, a2, a3 = st.columns(3)
+                with a1:
+                    new_alert = st.number_input("Alert level", value=float(inst.alert_level or 0.0), min_value=0.0, step=0.1)
+                with a2:
+                    new_danger = st.number_input("Danger level", value=float(inst.danger_level or 0.0), min_value=0.0, step=0.1)
+                with a3:
+                    new_trip = st.number_input("Trip level", value=float(inst.trip_level or 0.0), min_value=0.0, step=0.1)
+                new_sp_unit = st.text_input("Unidad", value=inst.setpoint_unit or "", help="ej. mil pp / mm/s rms")
+
+            with tab_mnt:
+                m1, m2 = st.columns(2)
+                with m1:
+                    new_lb = st.text_input("Último balanceo (YYYY-MM-DD)", value=inst.last_balance_date or "")
+                    new_la = st.text_input("Último alineamiento", value=inst.last_alignment_date or "")
+                with m2:
+                    new_lo = st.text_input("Último overhaul mayor", value=inst.last_overhaul_date or "")
+                    new_co = st.text_input("Fecha de comisionamiento", value=inst.commissioning_date or "")
+
+            with tab_sch:
+                st.caption(
+                    "Subí el esquemático PNG/JPG en la sección 'Cargar nuevo documento' "
+                    "más abajo, con tipo='schematic'. Después seleccioná aquí cuál es el esquemático "
+                    "principal del tren para que aparezca en el Resumen Ejecutivo del PDF."
+                )
+                schematic_options = [("", "(sin esquemático)")]
+                for d in inst.documents:
+                    if d.get("document_type", "").lower() in ("schematic", "esquematico", "diagram"):
+                        schematic_options.append((d.get("id", ""), d.get("title") or d.get("filename") or "—"))
+                option_ids = [o[0] for o in schematic_options]
+                option_labels = [o[1] for o in schematic_options]
+                current_idx = option_ids.index(inst.schematic_png) if inst.schematic_png in option_ids else 0
+                new_sch_idx = st.selectbox(
+                    "Esquemático principal",
+                    options=range(len(option_ids)),
+                    format_func=lambda i: option_labels[i],
+                    index=current_idx,
+                )
+                new_sch_id = option_ids[new_sch_idx]
+
+            saved = st.form_submit_button("💾 Actualizar metadata completa", width="stretch")
             if saved:
                 update_instance_header(
                     instance_id,
                     tag=new_tag.strip(),
-                    serial_number=new_serial.strip(),
+                    client=new_client.strip(),
+                    site=new_site.strip(),
+                    asset_class=new_asset_class.strip(),
                     location=new_loc.strip(),
                     notes=new_notes.strip(),
+                    driver_manufacturer=new_drv_mfr.strip(),
+                    driver_model=new_drv_mdl.strip(),
+                    driver_serial=new_drv_ser.strip(),
+                    driven_manufacturer=new_dvn_mfr.strip(),
+                    driven_model=new_dvn_mdl.strip(),
+                    driven_serial=new_dvn_ser.strip(),
+                    nominal_power_mw=float(new_power),
+                    coupling_class=new_coupling.strip(),
+                    nominal_rpm=float(new_nom_rpm),
+                    min_rpm=float(new_min_rpm),
+                    max_rpm=float(new_max_rpm),
+                    trip_rpm=float(new_trip_rpm),
+                    iso_group=new_iso_group.strip(),
+                    support_type=new_sup_type.strip(),
+                    support_count=int(new_sup_count),
+                    support_detail=new_sup_detail.strip(),
+                    probe_x_orientation_deg=float(new_px),
+                    probe_y_orientation_deg=float(new_py),
+                    alert_level=float(new_alert),
+                    danger_level=float(new_danger),
+                    trip_level=float(new_trip),
+                    setpoint_unit=new_sp_unit.strip(),
+                    last_balance_date=new_lb.strip(),
+                    last_alignment_date=new_la.strip(),
+                    last_overhaul_date=new_lo.strip(),
+                    commissioning_date=new_co.strip(),
+                    schematic_png=new_sch_id.strip(),
                 )
                 st.success("Metadata actualizada.")
                 st.rerun()
@@ -503,6 +668,77 @@ def render_danger_zone(instance_id: str) -> None:
 
 
 # ============================================================
+# Ciclo 14a — GRID DE MÁQUINAS (cockpit)
+# ============================================================
+
+def render_machinery_grid() -> None:
+    """
+    Grilla de cards con todas las máquinas registradas. Cada card resume
+    tag · driver · driven · cliente · sitio · cantidad de docs/parámetros.
+    Click → activa esa instancia y dispara rerun.
+    """
+    instances = list_instances()
+    if not instances:
+        return
+
+    st.markdown("### Máquinas registradas")
+    st.caption(
+        f"{len(instances)} máquina(s) en el sistema. "
+        "Click en cualquier card para activarla en todos los módulos de análisis."
+    )
+
+    cards_per_row = 3
+    rows = [instances[i:i + cards_per_row] for i in range(0, len(instances), cards_per_row)]
+    for row in rows:
+        cols = st.columns(cards_per_row)
+        for idx, summary in enumerate(row):
+            with cols[idx]:
+                inst_id = summary.get("instance_id", "")
+                inst = get_instance(inst_id)
+                if inst is None:
+                    continue
+
+                tag = inst.tag or inst_id
+                driver_part = " ".join(p for p in [inst.driver_manufacturer, inst.driver_model] if p) or "(sin driver)"
+                driven_part = " ".join(p for p in [inst.driven_manufacturer, inst.driven_model] if p)
+                client = inst.client or "(sin cliente)"
+                site = inst.site or inst.location or ""
+                n_docs = len(inst.documents)
+                power_str = f"{inst.nominal_power_mw:.0f} MW" if inst.nominal_power_mw > 0 else ""
+                rpm_str = f"{inst.nominal_rpm:.0f} rpm" if inst.nominal_rpm > 0 else ""
+
+                # Card con el esquemático si existe
+                with st.container(border=True):
+                    if inst.schematic_png:
+                        try:
+                            png = get_instance_document_bytes(inst_id, inst.schematic_png)
+                            if png:
+                                st.image(png, use_container_width=True)
+                        except Exception:
+                            pass
+                    st.markdown(f"**{tag}**")
+                    st.caption(driver_part)
+                    if driven_part:
+                        st.caption(f"+ {driven_part}")
+                    meta_bits = [b for b in [power_str, rpm_str] if b]
+                    if meta_bits:
+                        st.caption(" · ".join(meta_bits))
+                    if client or site:
+                        st.caption(" · ".join(p for p in [client, site] if p))
+                    st.caption(f"📄 {n_docs} documento(s)")
+
+                    # Indicador si esta es la activa
+                    if st.session_state.get("wm_active_instance_id") == inst_id:
+                        st.success("✓ activa", icon="🟢")
+                    else:
+                        if st.button("Activar", key=f"activate_{inst_id}", width="stretch"):
+                            st.session_state["wm_active_instance_id"] = inst_id
+                            st.rerun()
+
+    st.markdown("---")
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -511,28 +747,27 @@ def main() -> None:
     render_user_menu()
 
     page_header(
-        title="Asset Documents",
-        subtitle="Vault de manuales, reportes y parámetros físicos por instancia de activo.",
+        title="Machinery Library",
+        subtitle="Cockpit central de máquinas — perfil técnico, esquemáticos, manuales OEM y parámetros físicos por instancia de activo.",
     )
 
     with st.sidebar:
         st.markdown("---")
-        state = render_instance_selector(module_name="documents")
+        state = render_instance_selector(module_name="library")
 
     instance_id = state.get("instance_id")
 
-    # Sección siempre visible: crear instancia nueva (al tope para que sea accesible)
+    # Ciclo 14a — Grid de cards de TODAS las máquinas registradas (cockpit)
+    render_machinery_grid()
+
+    # Sección siempre visible: crear instancia nueva
     render_create_instance_section()
 
     if not instance_id:
         st.info(
-            "No hay instancia activa. Creá una desde el formulario de arriba "
-            "o seleccioná una existente desde la sidebar."
+            "No hay máquina activa. Creá una desde el formulario de arriba "
+            "o seleccioná una desde el grid de máquinas (sidebar)."
         )
-        # Debug visual: cuántas instancias hay
-        n = len(list_instances())
-        if n:
-            st.caption(f"Hay {n} instancia(s) registrada(s).")
         return
 
     st.markdown("---")

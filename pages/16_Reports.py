@@ -291,6 +291,9 @@ DEFAULT_REPORT_META = {
     "format_code": "WMS-FMT-001",  # equivalente al SIGA-FMT-178
     "format_version": "1",
     "format_date": "2026-04-28",
+    # Ciclo 14a — esquemático del tren (proviene de Asset Instance activa)
+    "schematic_doc_id": "",       # doc_id en el Vault de la instancia
+    "schematic_instance_id": "",  # id de la instancia para resolver el doc
 }
 
 if "report_state_loaded" not in st.session_state:
@@ -323,6 +326,62 @@ if "report_meta" not in st.session_state:
 
 if not st.session_state["report_meta"].get("report_date"):
     st.session_state["report_meta"]["report_date"] = TODAY_STR
+
+
+# =============================================================
+# Ciclo 14a — Auto-fill desde Asset Instance activa
+# =============================================================
+# Cuando hay una máquina seleccionada en la Machinery Library,
+# pre-llenamos los campos de portada del reporte (cliente, sitio,
+# clase, modelo, descripción del tren, esquemático). Sólo aplica
+# si los campos están vacíos: NO sobreescribe lo que el ingeniero
+# ya tipeó. Eso permite que el usuario haga override manual sin
+# que el auto-fill se lo pise en cada rerun.
+def _autofill_report_meta_from_active_instance() -> None:
+    try:
+        from core.instance_selector import get_active_instance_id
+        from core.instance_state import get_instance, compose_train_description
+    except Exception:
+        return
+
+    inst_id = get_active_instance_id()
+    if not inst_id:
+        return
+    inst = get_instance(inst_id)
+    if inst is None:
+        return
+
+    meta = st.session_state["report_meta"]
+
+    # Mapa instance.field → meta key. Sólo se rellena si meta[key] está
+    # vacío (back-fill no destructivo).
+    mappings = {
+        "client": (inst.client or "").strip(),
+        "asset_class": (inst.asset_class or "").strip(),
+        "asset_model": (inst.driver_model or inst.driven_model or "").strip(),
+        "location": (inst.site or inst.location or "").strip(),
+        "asset": (inst.tag or "").strip(),
+        "unit": (inst.tag or "").strip(),
+    }
+    for k, v in mappings.items():
+        if v and not (meta.get(k) or "").strip():
+            meta[k] = v
+
+    # Train description: si el meta no la tiene, la componemos de
+    # los campos driver/driven de la instance.
+    if not (meta.get("train_description") or "").strip():
+        composed = compose_train_description(inst)
+        if composed:
+            meta["train_description"] = composed
+
+    # Schematic: doc_id del esquemático en el Vault de la instance.
+    # El render del PDF lo resuelve a bytes vía get_instance_document_bytes.
+    if inst.schematic_png and not (meta.get("schematic_doc_id") or "").strip():
+        meta["schematic_doc_id"] = inst.schematic_png
+        meta["schematic_instance_id"] = inst.instance_id
+
+
+_autofill_report_meta_from_active_instance()
 
 
 def _normalize_report_items(raw_items: Any) -> List[Dict[str, Any]]:
@@ -1141,6 +1200,54 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 spaceAfter=12,
             )
             story.append(Paragraph(f"Estado global: {severity_label}", severity_style))
+
+        # Ciclo 14a — Esquemático del tren acoplado (debajo del badge de
+        # severidad, sobre el cuerpo del Resumen Ejecutivo). Aparece
+        # automáticamente cuando hay una Asset Instance activa con
+        # schematic_png cargado en su Vault. Si no hay, omite limpio.
+        sch_doc_id = (meta.get("schematic_doc_id") or "").strip()
+        sch_inst_id = (meta.get("schematic_instance_id") or "").strip()
+        if sch_doc_id and sch_inst_id:
+            try:
+                from core.instance_state import get_instance_document_bytes
+                sch_bytes = get_instance_document_bytes(sch_inst_id, sch_doc_id)
+                if sch_bytes:
+                    usable_w = A4[0] - doc.leftMargin - doc.rightMargin
+                    target_w = min(12.5 * cm, usable_w)
+                    target_h = 6.0 * cm
+                    fitted_w, fitted_h = _fit_image_dimensions(
+                        sch_bytes, target_w, target_h
+                    )
+                    sch_img = Image(BytesIO(sch_bytes), width=fitted_w, height=fitted_h)
+                    sch_img.hAlign = "CENTER"
+                    story.append(Spacer(1, 0.10 * cm))
+                    story.append(sch_img)
+                    sch_caption_style = ParagraphStyle(
+                        name="WMSchematicCaption",
+                        parent=styles["WMMeta"],
+                        fontName=PDF_FONT_REGULAR,
+                        fontSize=8.8,
+                        leading=11,
+                        alignment=TA_CENTER,
+                        textColor=colors.HexColor("#475569"),
+                        spaceBefore=2,
+                        spaceAfter=10,
+                    )
+                    train_lbl = (meta.get("train_description") or "").strip()
+                    if train_lbl:
+                        story.append(Paragraph(
+                            f"Esquemático del tren · {train_lbl}",
+                            sch_caption_style,
+                        ))
+                    else:
+                        story.append(Paragraph(
+                            "Esquemático del tren acoplado",
+                            sch_caption_style,
+                        ))
+            except Exception:
+                # Si falla cualquier paso (instancia borrada, doc roto,
+                # imagen corrupta) silenciamos para no bloquear el reporte.
+                pass
 
         story.append(Paragraph(_paragraph_safe(executive_text), styles["WMBody"]))
         story.append(Spacer(1, 0.30 * cm))

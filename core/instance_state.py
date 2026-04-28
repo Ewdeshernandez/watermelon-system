@@ -65,13 +65,72 @@ from core.instance_repository import get_active_repository, INSTANCES_DIR
 
 @dataclass
 class Instance:
-    """Representa una máquina física registrada en el sistema."""
+    """
+    Representa una máquina física registrada en el sistema.
+
+    Ciclo 14a — header extendido con identificación de tren acoplado
+    (driver/driven), rango operativo, soportes, sondas, setpoints y
+    metadata de mantenimiento. Todos los campos nuevos tienen default
+    vacío → instancias creadas en ciclos previos siguen siendo válidas.
+    """
+    # Identificación core (Ciclo 8)
     instance_id: str          # slug único, ej. "brush_tes1"
     profile_key: str           # referencia al profile (familia/tipo)
-    tag: str = ""              # tag interno del cliente, ej. "TES1"
-    serial_number: str = ""    # número de serie OEM
-    location: str = ""         # ubicación física (planta, ciudad)
+    tag: str = ""              # tag corto operativo, ej. "TES1"
+    serial_number: str = ""    # legacy — alias de driven_serial (back-compat)
+    location: str = ""         # ubicación física (legacy single-string)
     notes: str = ""            # notas libres del operador
+
+    # Ciclo 14a — Identificación extendida del activo
+    client: str = ""           # ej. "ECOPETROL - MAGNEX"
+    site: str = ""             # ej. "TERMOSURIA - VILLAVICENCIO"
+    asset_class: str = ""      # ej. "TURBOGENERADOR"
+
+    # Ciclo 14a — Tren acoplado (driver = motriz, driven = accionada)
+    driver_manufacturer: str = ""   # ej. "GE"
+    driver_model: str = ""          # ej. "LM6000"
+    driver_serial: str = ""         # oculto del reporte; útil para garantías
+    driven_manufacturer: str = ""   # ej. "Brush"
+    driven_model: str = ""          # ej. "Generador 54 MW"
+    driven_serial: str = ""         # oculto del reporte
+    nominal_power_mw: float = 0.0   # ej. 54
+
+    # Ciclo 14a — Operación y rango de velocidad
+    nominal_rpm: float = 0.0
+    min_rpm: float = 0.0            # rango operativo mínimo
+    max_rpm: float = 0.0            # rango operativo máximo
+    trip_rpm: float = 0.0           # velocidad de disparo (overspeed trip)
+    iso_group: str = ""             # rigid | flexible | etc.
+
+    # Ciclo 14a — Soportes (clave para diagnóstico)
+    support_type: str = ""          # fluid_film | rolling_element | magnetic | mixed
+    support_count: int = 0          # cantidad total de soportes en el tren
+    support_detail: str = ""        # texto libre descriptivo
+
+    # Ciclo 14a — Sondas de proximidad (orientación física)
+    probe_x_orientation_deg: float = 0.0  # típico 45 (XL) o 0 (vertical)
+    probe_y_orientation_deg: float = 0.0  # típico -45 (YR) o 90 (horizontal)
+
+    # Ciclo 14a — Setpoints (si están definidos, tienen prioridad sobre ISO genérico)
+    alert_level: float = 0.0
+    danger_level: float = 0.0
+    trip_level: float = 0.0
+    setpoint_unit: str = ""         # ej. "mil pp" / "mm/s rms"
+
+    # Ciclo 14a — Acople
+    coupling_class: str = ""        # rigid | flexible | fluid
+
+    # Ciclo 14a — Esquemático visual (PNG HD)
+    schematic_png: str = ""         # storage_filename dentro del Document Vault de la instancia
+                                    # (se resuelve via get_instance_document_bytes)
+
+    # Ciclo 14a — Mantenimiento (oculto del cuerpo del reporte, contexto interno)
+    last_balance_date: str = ""
+    last_alignment_date: str = ""
+    last_overhaul_date: str = ""
+    commissioning_date: str = ""
+
+    # Datos capturados ad-hoc (legacy, sigue funcionando)
     captured_parameters: Dict[str, Any] = field(default_factory=dict)
     documents: List[Dict[str, Any]] = field(default_factory=list)
     created_at: str = ""
@@ -79,18 +138,57 @@ class Instance:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "Instance":
-        """Construye desde un dict serializado (de filesystem o Supabase)."""
+        """
+        Construye desde un dict serializado (de filesystem o Supabase).
+        Resiliente a versiones previas: campos nuevos del Ciclo 14a
+        usan default vacío si no están presentes en el dict.
+        """
+        def _f(k: str, default: Any = "") -> Any:
+            v = data.get(k, default)
+            return v if v is not None else default
+
         return cls(
-            instance_id=data.get("instance_id", ""),
-            profile_key=data.get("profile_key", ""),
-            tag=data.get("tag", ""),
-            serial_number=data.get("serial_number", ""),
-            location=data.get("location", ""),
-            notes=data.get("notes", ""),
-            captured_parameters=dict(data.get("captured_parameters", {})),
-            documents=list(data.get("documents", [])),
-            created_at=data.get("created_at", ""),
-            updated_at=data.get("updated_at", ""),
+            instance_id=_f("instance_id"),
+            profile_key=_f("profile_key"),
+            tag=_f("tag"),
+            serial_number=_f("serial_number"),
+            location=_f("location"),
+            notes=_f("notes"),
+            # extended
+            client=_f("client"),
+            site=_f("site"),
+            asset_class=_f("asset_class"),
+            driver_manufacturer=_f("driver_manufacturer"),
+            driver_model=_f("driver_model"),
+            driver_serial=_f("driver_serial"),
+            driven_manufacturer=_f("driven_manufacturer"),
+            driven_model=_f("driven_model"),
+            driven_serial=_f("driven_serial"),
+            nominal_power_mw=float(_f("nominal_power_mw", 0.0) or 0.0),
+            nominal_rpm=float(_f("nominal_rpm", 0.0) or 0.0),
+            min_rpm=float(_f("min_rpm", 0.0) or 0.0),
+            max_rpm=float(_f("max_rpm", 0.0) or 0.0),
+            trip_rpm=float(_f("trip_rpm", 0.0) or 0.0),
+            iso_group=_f("iso_group"),
+            support_type=_f("support_type"),
+            support_count=int(_f("support_count", 0) or 0),
+            support_detail=_f("support_detail"),
+            probe_x_orientation_deg=float(_f("probe_x_orientation_deg", 0.0) or 0.0),
+            probe_y_orientation_deg=float(_f("probe_y_orientation_deg", 0.0) or 0.0),
+            alert_level=float(_f("alert_level", 0.0) or 0.0),
+            danger_level=float(_f("danger_level", 0.0) or 0.0),
+            trip_level=float(_f("trip_level", 0.0) or 0.0),
+            setpoint_unit=_f("setpoint_unit"),
+            coupling_class=_f("coupling_class"),
+            schematic_png=_f("schematic_png"),
+            last_balance_date=_f("last_balance_date"),
+            last_alignment_date=_f("last_alignment_date"),
+            last_overhaul_date=_f("last_overhaul_date"),
+            commissioning_date=_f("commissioning_date"),
+            captured_parameters=dict(data.get("captured_parameters", {}) or {}),
+            documents=list(data.get("documents", []) or []),
+            created_at=_f("created_at"),
+            updated_at=_f("updated_at"),
         )
 
 
@@ -171,24 +269,90 @@ def create_instance(
 
 def update_instance_header(
     instance_id: str,
-    *,
-    tag: Optional[str] = None,
-    serial_number: Optional[str] = None,
-    location: Optional[str] = None,
-    notes: Optional[str] = None,
-    profile_key: Optional[str] = None,
+    **kwargs: Any,
 ) -> bool:
-    """Actualiza solo los campos de header (sin tocar parámetros ni docs)."""
+    """
+    Actualiza campos de header (sin tocar parámetros capturados ni docs).
+    Acepta todos los campos del Ciclo 14a vía kwargs — sólo se actualizan
+    los que se pasan; los demás quedan intactos. Pasar None para un campo
+    es no-op (no lo actualiza), pasar "" o 0 SÍ lo actualiza al valor vacío.
+    """
     inst = get_instance(instance_id)
     if inst is None:
         return False
-    if tag is not None: inst.tag = tag
-    if serial_number is not None: inst.serial_number = serial_number
-    if location is not None: inst.location = location
-    if notes is not None: inst.notes = notes
-    if profile_key is not None: inst.profile_key = profile_key
+
+    # Campos legacy (Ciclo 8) + extendidos (Ciclo 14a)
+    allowed = {
+        "tag", "serial_number", "location", "notes", "profile_key",
+        "client", "site", "asset_class",
+        "driver_manufacturer", "driver_model", "driver_serial",
+        "driven_manufacturer", "driven_model", "driven_serial",
+        "nominal_power_mw", "nominal_rpm", "min_rpm", "max_rpm", "trip_rpm",
+        "iso_group", "support_type", "support_count", "support_detail",
+        "probe_x_orientation_deg", "probe_y_orientation_deg",
+        "alert_level", "danger_level", "trip_level", "setpoint_unit",
+        "coupling_class", "schematic_png",
+        "last_balance_date", "last_alignment_date", "last_overhaul_date",
+        "commissioning_date",
+    }
+    for key, val in kwargs.items():
+        if key in allowed and val is not None:
+            setattr(inst, key, val)
+
     _save_instance(inst)
     return True
+
+
+def compose_train_description(inst: Instance) -> str:
+    """
+    Compone una descripción narrativa del tren acoplado a partir de los
+    campos driver/driven. Ejemplos:
+
+      driver=GE LM6000, driven=Brush 54 MW
+        → "Turbogenerador GE LM6000 acoplado a Generador Brush 54 MW"
+
+      driver=GE TM2500, driven=Generador 25 MW
+        → "Turbogenerador GE TM2500 acoplado a Generador 25 MW"
+
+    Si los campos no están presentes, cae a notes/legacy. Si tampoco,
+    devuelve string vacío para que el caller decida fallback.
+    """
+    asset_class = (inst.asset_class or "").strip()
+    drv_mfr = (inst.driver_manufacturer or "").strip()
+    drv_mdl = (inst.driver_model or "").strip()
+    drvn_mfr = (inst.driven_manufacturer or "").strip()
+    drvn_mdl = (inst.driven_model or "").strip()
+    power = inst.nominal_power_mw or 0.0
+
+    driver_part = " ".join(p for p in [drv_mfr, drv_mdl] if p).strip()
+    driven_part = " ".join(p for p in [drvn_mfr, drvn_mdl] if p).strip()
+
+    if asset_class and driver_part and driven_part:
+        # Activo principal según la clase del tren
+        head = asset_class.capitalize()
+        if asset_class.upper() == "TURBOGENERADOR":
+            head = "Turbogenerador"
+        # No duplicar la palabra "Generador" en la frase final.
+        # Casos típicos:
+        #   driven="Brush Generador 54 MW" → contiene "generador" → no agrega prefijo
+        #   driven="Brush 54 MW"           → no contiene → agrega prefijo "Generador"
+        #   driven="Generador Brush 54 MW" → ya está → no agrega
+        if asset_class.upper() == "TURBOGENERADOR":
+            already_has = "generador" in driven_part.lower()
+            driven_phrase = driven_part if already_has else f"Generador {driven_part}"
+        else:
+            driven_phrase = driven_part
+        return f"{head} {driver_part} acoplado a {driven_phrase}"
+
+    if driver_part and driven_part:
+        return f"{driver_part} acoplado a {driven_part}"
+
+    if driver_part:
+        suffix = f" de {power:.0f} MW" if power > 0 else ""
+        return f"{driver_part}{suffix}"
+
+    # Fallback al legacy notes si existe
+    return (inst.notes or "").strip()
 
 
 def delete_instance(instance_id: str) -> bool:
@@ -422,4 +586,5 @@ __all__ = [
     "get_instance_document_path",
     "get_instance_document_bytes",
     "get_active_backend_name",
+    "compose_train_description",
 ]
