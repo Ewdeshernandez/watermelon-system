@@ -427,9 +427,40 @@ def delete_document(profile_key: str, doc_id: str) -> bool:
 
 
 def get_captured_parameters(profile_key: str) -> Dict[str, Any]:
-    """Devuelve los parámetros estructurados capturados para el profile."""
+    """
+    Devuelve los parámetros estructurados capturados para el profile.
+
+    Estrategia de resolución (la primera fuente con dato gana, campo a
+    campo — no a nivel de dict completo):
+
+      1. Datos persistidos en filesystem por el usuario (lo último que
+         haya editado en Asset Documents). Sobrevive entre sesiones
+         del mismo container, pero se pierde en redeploy.
+
+      2. Semillas del repo (core/vault_seeds.py). Sobreviven cualquier
+         redeploy porque viven en el código. Sirven como defaults de
+         fábrica para los activos conocidos (Brush 54 MW, etc.).
+
+    Esto significa que en producción Streamlit Cloud, después de un
+    redeploy, el activo Brush ya viene con sus dimensiones de cojinete
+    y babbitt sin requerir ingreso manual repetido. Si el usuario edita
+    un campo, ese valor se persiste y gana sobre la semilla en futuras
+    consultas.
+    """
+    from core.vault_seeds import get_seed_parameters
+
     meta = _load_metadata(profile_key)
-    return dict(meta.get("captured_parameters", {}))
+    persisted = dict(meta.get("captured_parameters", {}))
+    seeded = get_seed_parameters(profile_key)
+
+    # Merge: arrancamos con las semillas y dejamos que lo persistido por
+    # el usuario las sobrescriba campo a campo.
+    merged = dict(seeded)
+    for key, value in persisted.items():
+        if value is None or value == "":
+            continue
+        merged[key] = value
+    return merged
 
 
 def update_captured_parameter(profile_key: str, key: str, value: Any) -> None:
