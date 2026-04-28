@@ -33,7 +33,8 @@ from core.diagnostics import (
     format_number,
     get_semaforo_status,
 )
-from core.profile_state import render_profile_selector
+from core.profile_state import render_profile_selector  # legacy compat
+from core.instance_selector import render_instance_selector
 from core.rotordynamics import (
     detect_critical_speeds,
     evaluate_api684_margin,
@@ -1954,17 +1955,18 @@ def main() -> None:
         detect_cs = st.checkbox("Estimate critical speeds (API RP 684 heuristic)", value=True)
         max_critical_speeds = st.selectbox("Max critical speeds", [1, 2], index=1)
 
-        # Asset Profile selector (compartido entre módulos)
-        profile_state = render_profile_selector(module_name="bode")
-        use_rotordyn_pro = profile_state["is_applicable"]
-        operating_rpm = profile_state["operating_rpm"]
-        machine_group = profile_state["machine_group"]
-        active_iso_part = profile_state["iso_part"]
-        active_custom_thresholds = profile_state["custom_thresholds"]
-        active_profile_label = profile_state["profile_label"]
+        # Asset Instance selector (Ciclo 8) — antes solo seleccionaba profile,
+        # ahora selecciona la máquina física específica con sus propios datos.
+        instance_state = render_instance_selector(module_name="bode")
+        use_rotordyn_pro = instance_state["is_applicable"]
+        operating_rpm = instance_state["operating_rpm"]
+        machine_group = instance_state["machine_group"]
+        active_iso_part = instance_state["iso_part"]
+        active_custom_thresholds = instance_state["custom_thresholds"]
+        active_profile_label = instance_state["profile_label"]
 
-        if not profile_state["is_applicable"]:
-            st.warning(profile_state["applicability_message"])
+        if not instance_state["is_applicable"]:
+            st.warning(instance_state["applicability_message"])
 
         st.markdown("### Information Box")
         show_info_box = st.checkbox("Show Bode Information", value=True)
