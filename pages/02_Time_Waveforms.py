@@ -14,10 +14,14 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.auth import require_login, render_user_menu
-from core.waveform_diagnostics import generate_waveform_diagnostic, build_waveform_report_notes
-from core.waveform_metrics import compute_metrics_batch
+from core.waveform_diagnostics import (
+    generate_waveform_diagnostic,
+    build_waveform_report_notes,
+    build_waveform_diagnostics_rotordyn,  # Ciclo 12: Cat IV completo
+)
+from core.waveform_metrics import compute_metrics_batch, compute_waveform_metrics
 from core.waveform_insights import generate_batch_insights
-from core.waveform_impacts import detect_impacts_batch
+from core.waveform_impacts import detect_impacts_batch, detect_impacts
 
 
 # ==============================
@@ -1477,6 +1481,56 @@ def render_waveform_panel(
 
     st.info(text_diag["narrative"])
 
+    # Ciclo 12 — Diagnóstico Cat IV completo: extiende el text_diag
+    # legacy con detectores de modulación AM (Hilbert), asimetría
+    # direccional, beating, clipping, sawtooth y kurtosis estadística.
+    # NO reemplaza el legacy; se suma como narrativa profunda Cat IV
+    # con recomendaciones priorizadas y normas citadas.
+    cat_iv_wf_diag = None
+    try:
+        amp_arr_cat = prepared.amplitude
+        time_arr_cat = prepared.time_s
+        metrics_cat = compute_waveform_metrics(amp_arr_cat)
+        impacts_cat = detect_impacts(amp_arr_cat)
+        cat_iv_wf_diag = build_waveform_diagnostics_rotordyn(
+            time_s=time_arr_cat,
+            amplitude=amp_arr_cat,
+            metrics=metrics_cat,
+            impacts=impacts_cat,
+            machine_label=str(prepared.machine or ""),
+            point_label=str(prepared.point or ""),
+            amplitude_unit=infer_amplitude_unit(prepared.metadata or {}),
+        )
+    except Exception:
+        cat_iv_wf_diag = None
+
+    if cat_iv_wf_diag is not None:
+        sev = cat_iv_wf_diag.get("severity_global", "VIGILANCIA")
+        sev_color = {
+            "CRÍTICA": "#dc2626", "ACCIÓN REQUERIDA": "#ea580c",
+            "ATENCIÓN": "#f59e0b", "VIGILANCIA": "#84cc16",
+            "CONDICIÓN ACEPTABLE": "#16a34a",
+        }.get(sev, "#475569")
+        with st.expander(
+            f"🔬 Diagnóstico Cat IV (rotordynamics) · {cat_iv_wf_diag.get('headline', '')}",
+            expanded=True,
+        ):
+            st.markdown(
+                f"<div style='display:inline-block; padding:6px 14px; "
+                f"border-radius:999px; background:{sev_color}; color:white; "
+                f"font-weight:700; font-size:0.95rem; margin-bottom:8px;'>"
+                f"Severidad global: {sev}</div>",
+                unsafe_allow_html=True,
+            )
+            st.write(cat_iv_wf_diag.get("detail", ""))
+            st.write(cat_iv_wf_diag.get("action", ""))
+            findings = cat_iv_wf_diag.get("findings", [])
+            if findings:
+                st.caption(
+                    "Hallazgos detectados: "
+                    + " · ".join(f.get("headline", "") for f in findings)
+                )
+
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
@@ -1518,11 +1572,25 @@ def render_waveform_panel(
                 png_bytes_for_report = None
                 png_error_for_report = str(e)
 
+            # Ciclo 12 — preferir narrativa Cat IV completa cuando esté
+            # disponible. Combina headline + detail + action numerado con
+            # normas citadas. Si Cat IV falla, fallback a notes legacy.
+            if cat_iv_wf_diag is not None:
+                _h = (cat_iv_wf_diag.get("headline") or "").strip()
+                _d = (cat_iv_wf_diag.get("detail") or "").strip()
+                _a = (cat_iv_wf_diag.get("action") or "").strip()
+                _diag_for_report = {
+                    "headline": _h,
+                    "narrative": "\n\n".join(p for p in (_d, _a) if p),
+                }
+            else:
+                _diag_for_report = text_diag
+
             queue_waveform_to_report(
                 prepared,
                 fig,
                 panel_title,
-                text_diag,
+                _diag_for_report,
                 image_bytes=png_bytes_for_report,
             )
 
