@@ -19,6 +19,15 @@ from core.csv_common import (
     find_header_line,
     parse_metadata_block,
 )
+from core.diagnostics import build_scl_diagnostics_rotordyn
+from core.document_vault import get_captured_parameters, list_documents
+from core.profile_state import render_profile_selector
+from core.scl_diagnostics import (
+    compare_centerline_migration,
+    compute_eccentricity_state,
+    derive_radial_clearance_from_vault,
+    detect_lift_off_speed,
+)
 from core.ui_theme import apply_watermelon_page_style, page_header
 
 
@@ -148,8 +157,30 @@ def compute_xy_ranges(
     manual_x_max: float,
     manual_y_min: float,
     manual_y_max: float,
+    *,
+    clearance_x: Optional[float] = None,
+    clearance_y: Optional[float] = None,
+    center_x: float = 0.0,
+    center_y: float = 0.0,
 ) -> Tuple[List[float], List[float]]:
+    """
+    Calcula los rangos del plot X/Y. En modo Auto, si hay clearance del
+    cojinete disponible, fija la escala a ±1.2× clearance respecto al
+    centro (así el círculo de clearance siempre queda visible y el dato
+    no se ve aplastado contra los bordes). Si no hay clearance, usa el
+    rango de los datos como fallback.
+    """
     if auto_scale_xy:
+        if clearance_x is not None and clearance_y is not None and clearance_x > 0 and clearance_y > 0:
+            # Asegurar que tanto el clearance como los datos quepan
+            cx = float(clearance_x)
+            cy = float(clearance_y)
+            data_max_x = float(np.nanmax(np.abs(x - center_x))) if len(x) else 0.0
+            data_max_y = float(np.nanmax(np.abs(y - center_y))) if len(y) else 0.0
+            span_x = max(cx, data_max_x) * 1.20
+            span_y = max(cy, data_max_y) * 1.20
+            return [center_x - span_x, center_x + span_x], [center_y - span_y, center_y + span_y]
+
         x_span = max(float(np.nanmax(np.abs(x))) if len(x) else 0.0, 0.1) * 1.20
         y_span = max(float(np.nanmax(np.abs(y))) if len(y) else 0.0, 0.1) * 1.20
         return [-x_span, x_span], [-y_span, y_span]
@@ -177,7 +208,39 @@ def resolve_clearance_boundary(
     manual_center_x: float,
     manual_center_y: float,
 ) -> Dict[str, float]:
-    if center_mode == "Origin (0,0)":
+    """
+    Resuelve la geometría del bearing clearance circle.
+
+    center_mode acepta:
+      - "Bottom load reference (API 670 / práctica estándar)" — convención
+        estándar para máquinas horizontales con carga gravitacional vertical.
+        El (0,0) del registro corresponde al muñón en reposo apoyado en la
+        babbitt al fondo del cojinete. El bearing center geométrico queda Cr
+        (radio del clearance) por encima → (0, +Cr). Esta es la convención
+        correcta para cálculo de eccentricity ratio y attitude angle.
+      - "Origin (0,0)" — bearing center forzado al origen del data. Solo para
+        debug, máquinas verticales o sistemas con calibración no estándar.
+      - "Data Mean" — bearing center en el centroide del data. Útil cuando
+        el data no fue calibrado al rest position.
+      - "Manual" — bearing center especificado por el usuario.
+    """
+    # Primero determinar Cx, Cy radial (necesario para Bottom load reference)
+    if mode == "Manual":
+        cx_radial_initial = max(abs(float(manual_cx)), 0.001)
+        cy_radial_initial = max(abs(float(manual_cy)), 0.001)
+    else:
+        # Auto heurístico: estimación basada en datos (fallback)
+        cx_radial_initial = max(float(np.nanmax(np.abs(x))) if len(x) else 0.0, 0.1) * 1.08
+        cy_radial_initial = max(float(np.nanmax(np.abs(y))) if len(y) else 0.0, 0.1) * 1.08
+
+    if center_mode.startswith("Bottom load reference"):
+        # Práctica estándar API 670 para cojinetes hidrodinámicos: bearing
+        # center está Cr por encima del rest. Si el registro está normalizado
+        # a su origen, rest está en (0,0). Para casos especiales el usuario
+        # puede overridear con Manual.
+        cx0 = 0.0
+        cy0 = float(cy_radial_initial)
+    elif center_mode == "Origin (0,0)":
         cx0 = 0.0
         cy0 = 0.0
     elif center_mode == "Data Mean":
@@ -210,6 +273,104 @@ def build_boundary_curve(center_x: float, center_y: float, clearance_x: float, c
     bx = center_x + clearance_x * np.cos(theta)
     by = center_y + clearance_y * np.sin(theta)
     return bx, by
+
+
+def build_eccentricity_ring(
+    center_x: float,
+    center_y: float,
+    clearance_x: float,
+    clearance_y: float,
+    eccentricity_fraction: float,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Construye un anillo a una fracción dada del clearance (e/c = fraction).
+    Útil para superponer los límites de zonas Cat IV: 0.40 / 0.70 / 0.85.
+    """
+    theta = np.linspace(0.0, 2.0 * np.pi, 361)
+    bx = center_x + clearance_x * eccentricity_fraction * np.cos(theta)
+    by = center_y + clearance_y * eccentricity_fraction * np.sin(theta)
+    return bx, by
+
+
+def add_scl_cat_iv_overlay(
+    fig: go.Figure,
+    *,
+    center_x: float,
+    center_y: float,
+    clearance_x: float,
+    clearance_y: float,
+    show_rest_marker: bool = True,
+    show_load_arrow: bool = True,
+) -> None:
+    """
+    Agrega elementos Cat IV de referencia al plot SCL:
+      - Anillos de eccentricity (zonas verde/amarilla/naranja/roja)
+      - Marker BEARING CENTER
+      - Marker REST (en (0,0) si aplica)
+      - Flecha de load direction (gravity, hacia abajo)
+    """
+    # Anillos de eccentricity Cat IV
+    for fraction, color, label in (
+        (0.40, "rgba(34, 197, 94, 0.55)", "e/c=0.40"),
+        (0.70, "rgba(234, 179, 8, 0.55)", "e/c=0.70"),
+        (0.85, "rgba(220, 38, 38, 0.55)", "e/c=0.85"),
+    ):
+        rx, ry = build_eccentricity_ring(center_x, center_y, clearance_x, clearance_y, fraction)
+        fig.add_trace(
+            go.Scatter(
+                x=rx, y=ry, mode="lines",
+                line=dict(width=1.0, color=color, dash="dot"),
+                name=label,
+                hoverinfo="skip", showlegend=True,
+            )
+        )
+
+    # BEARING CENTER marker
+    fig.add_trace(
+        go.Scatter(
+            x=[center_x], y=[center_y], mode="markers+text",
+            marker=dict(size=11, color="#0f172a", symbol="cross", line=dict(width=2, color="white")),
+            text=["BEARING CENTER"], textposition="top right",
+            textfont=dict(size=10, color="#0f172a", family="Arial Black"),
+            name="Bearing center", hoverinfo="text",
+            hovertext=f"Bearing center geométrico ({center_x:.2f}, {center_y:.2f}) mil pp",
+            showlegend=False,
+        )
+    )
+
+    # REST marker (en data origin si bearing center está desplazado)
+    if show_rest_marker and abs(center_y) > 0.01:
+        fig.add_trace(
+            go.Scatter(
+                x=[0.0], y=[0.0], mode="markers+text",
+                marker=dict(size=10, color="#dc2626", symbol="circle", line=dict(width=2, color="white")),
+                text=["REST"], textposition="bottom left",
+                textfont=dict(size=10, color="#dc2626", family="Arial Black"),
+                name="Rest position", hoverinfo="text",
+                hovertext="Posición de reposo (rotor parado, muñón al fondo del cojinete por gravedad)",
+                showlegend=False,
+            )
+        )
+
+    # Flecha de load direction (gravity, hacia abajo desde bearing center)
+    if show_load_arrow:
+        load_arrow_length = clearance_y * 0.95
+        fig.add_annotation(
+            x=center_x,
+            y=center_y - load_arrow_length,
+            ax=center_x,
+            ay=center_y,
+            xref="x", yref="y",
+            axref="x", ayref="y",
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1.2,
+            arrowwidth=1.8,
+            arrowcolor="#475569",
+            text="W (load)",
+            font=dict(size=10, color="#475569"),
+            xshift=8,
+        )
 
 
 def boundary_utilization_pct(
@@ -550,6 +711,15 @@ def build_scl_figure(
             showlegend=False,
             name="Boundary",
         )
+    )
+
+    # Cat IV overlay (eccentricity rings + bearing center + rest + load arrow)
+    add_scl_cat_iv_overlay(
+        fig,
+        center_x=clearance_center_x,
+        center_y=clearance_center_y,
+        clearance_x=clearance_x,
+        clearance_y=clearance_y,
     )
 
     fig.add_trace(
@@ -939,6 +1109,13 @@ def render_scl_panel(
     early_rub_danger_pct: int,
     rpm_min_filter: Optional[float],
     rpm_max_filter: Optional[float],
+    *,
+    vault_clearance_radial_mil: Optional[float] = None,
+    vault_params: Optional[Dict[str, Any]] = None,
+    vault_doc_ref: Optional[str] = None,
+    profile_label: Optional[str] = None,
+    operating_rpm: float = 3600.0,
+    cr_source: str = "",
 ) -> None:
     meta = item["meta"]
     raw_df = item["raw_df"]
@@ -994,6 +1171,46 @@ def render_scl_panel(
         x_plot = display_df["x_gap"].to_numpy(dtype=float)
         y_plot = display_df["y_gap"].to_numpy(dtype=float)
 
+    # Resolver clearance — prioridad:
+    #   1. Manual (el usuario siempre puede sobrescribir desde sidebar)
+    #   2. Vault (smart default cuando hay datos físicos del cojinete)
+    #   3. Heurístico Auto (legacy, basado en datos)
+    if clearance_mode == "Manual":
+        boundary = resolve_clearance_boundary(
+            x=x_plot, y=y_plot,
+            mode="Manual",
+            center_mode=clearance_center_mode,
+            manual_cx=manual_clearance_x,
+            manual_cy=manual_clearance_y,
+            manual_center_x=manual_center_x,
+            manual_center_y=manual_center_y,
+        )
+        boundary["source"] = "manual (sidebar)"
+    elif vault_clearance_radial_mil is not None:
+        boundary = resolve_clearance_boundary(
+            x=x_plot, y=y_plot,
+            mode="Manual",  # internamente usamos Manual con valores del Vault
+            center_mode=clearance_center_mode,
+            manual_cx=float(vault_clearance_radial_mil),
+            manual_cy=float(vault_clearance_radial_mil),
+            manual_center_x=manual_center_x,
+            manual_center_y=manual_center_y,
+        )
+        boundary["source"] = f"Vault ({cr_source})"
+    else:
+        boundary = resolve_clearance_boundary(
+            x=x_plot, y=y_plot,
+            mode=clearance_mode,  # Auto heurístico
+            center_mode=clearance_center_mode,
+            manual_cx=manual_clearance_x,
+            manual_cy=manual_clearance_y,
+            manual_center_x=manual_center_x,
+            manual_center_y=manual_center_y,
+        )
+        boundary["source"] = "auto heurístico (datos)"
+
+    # Auto X/Y ahora consciente del clearance: la escala visible incluye
+    # siempre el círculo de clearance del cojinete
     x_range, y_range = compute_xy_ranges(
         x=x_plot,
         y=y_plot,
@@ -1002,17 +1219,10 @@ def render_scl_panel(
         manual_x_max=manual_x_max,
         manual_y_min=manual_y_min,
         manual_y_max=manual_y_max,
-    )
-
-    boundary = resolve_clearance_boundary(
-        x=x_plot,
-        y=y_plot,
-        mode=clearance_mode,
-        center_mode=clearance_center_mode,
-        manual_cx=manual_clearance_x,
-        manual_cy=manual_clearance_y,
-        manual_center_x=manual_center_x,
-        manual_center_y=manual_center_y,
+        clearance_x=boundary.get("clearance_x"),
+        clearance_y=boundary.get("clearance_y"),
+        center_x=boundary.get("center_x", 0.0),
+        center_y=boundary.get("center_y", 0.0),
     )
 
     early_rub = detect_early_rub(
@@ -1086,8 +1296,109 @@ def render_scl_panel(
         st.write(text_diag["detail"])
         st.write(text_diag["action"])
 
-    title = f"Shaft Centerline {panel_index + 1} — {machine} — {point} / {paired_point}"
-    notes = _build_scl_report_notes(text_diag)
+    # =========================================================
+    # Diagnóstico Cat IV (rotordynamics + Vault) — solo si hay clearance
+    # válido (sea del Vault o manual configurado por el usuario)
+    # =========================================================
+    cat_iv_text_diag = None
+    if boundary["clearance_x"] > 0 and boundary["clearance_y"] > 0 and len(display_df) > 5:
+        # Buscar posición a operating_rpm
+        op_speed_target = float(operating_rpm)
+        rpms_arr = display_df["speed"].to_numpy(dtype=float)
+        if rpms_arr.size > 0 and rpms_arr.min() <= op_speed_target <= rpms_arr.max():
+            op_idx = int(np.argmin(np.abs(rpms_arr - op_speed_target)))
+        else:
+            # Si operating_rpm está fuera del rango medido, usar el máximo
+            op_idx = int(np.argmax(rpms_arr))
+
+        x_at_op = float(x_plot[op_idx])
+        y_at_op = float(y_plot[op_idx])
+        actual_op_rpm = float(rpms_arr[op_idx])
+
+        ecc_state = compute_eccentricity_state(
+            x_pos=x_at_op,
+            y_pos=y_at_op,
+            rpm=actual_op_rpm,
+            cx_radial=float(boundary["clearance_x"]),
+            cy_radial=float(boundary["clearance_y"]),
+            bearing_center_x=float(boundary["center_x"]),
+            bearing_center_y=float(boundary["center_y"]),
+            load_direction_deg=270.0,
+        )
+
+        lift_off_rpm = detect_lift_off_speed(
+            rpms=rpms_arr,
+            x_positions=x_plot,
+            y_positions=y_plot,
+            cx_radial=float(boundary["clearance_x"]),
+            cy_radial=float(boundary["clearance_y"]),
+        )
+
+        diametral_clearance_mm_value = None
+        if vault_params and vault_params.get("diametral_clearance_mm"):
+            diametral_clearance_mm_value = float(vault_params["diametral_clearance_mm"])
+        elif vault_clearance_radial_mil is not None:
+            # Reconstruir Cd_mm desde el radial en mil
+            diametral_clearance_mm_value = float(vault_clearance_radial_mil) * 0.0254 * 2.0
+
+        cat_iv_text_diag = build_scl_diagnostics_rotordyn(
+            eccentricity_state=ecc_state,
+            operating_rpm=actual_op_rpm,
+            profile_label=profile_label or "",
+            bearing_inner_diameter_mm=(
+                vault_params.get("bearing_inner_diameter_mm") if vault_params else None
+            ),
+            diametral_clearance_mm=diametral_clearance_mm_value,
+            clearance_source=cr_source or "configuración manual de la sidebar",
+            babbitt_material=(vault_params.get("babbitt_material") if vault_params else None),
+            last_rebabbiting_date=(
+                vault_params.get("last_rebabbiting_date") if vault_params else None
+            ),
+            document_reference=vault_doc_ref,
+            lift_off_rpm=lift_off_rpm,
+            amp_unit="mil pp",
+            clearance_reference_frame=clearance_center_mode or "",
+            bearing_center_x=float(boundary["center_x"]),
+            bearing_center_y=float(boundary["center_y"]),
+        )
+
+        with st.expander(
+            f"Diagnóstico Cat IV (rotordynamics + Vault) · Panel {panel_index + 1}",
+            expanded=True,
+        ):
+            st.markdown(f"**{cat_iv_text_diag['headline']}**")
+            st.write(cat_iv_text_diag["detail"])
+            st.write(cat_iv_text_diag["action"])
+
+    # Título con etiqueta de fecha de la corrida (más útil para el PDF)
+    date_tag = ""
+    if "ts_min" in display_df.columns and not display_df["ts_min"].isna().all():
+        try:
+            date_tag = pd.Timestamp(display_df["ts_min"].min()).strftime("%d %b %Y")
+        except Exception:
+            date_tag = ""
+    if not date_tag and item.get("file_stem"):
+        date_tag = str(item["file_stem"])
+    title_date_clause = f" · {date_tag}" if date_tag else ""
+    title = (
+        f"Shaft Centerline {panel_index + 1}{title_date_clause} — "
+        f"{machine} — {point} / {paired_point}"
+    )
+
+    # Cuando hay narrativa Cat IV, el bloque legacy basado en (0,0) confunde
+    # (mide utilización contra la posición de reposo, no contra el bearing
+    # center real). Lo suprimimos del PDF para no contradecir al Cat IV.
+    bently_frame = (clearance_center_mode or "").lower().startswith("bottom load")
+    if cat_iv_text_diag is not None and bently_frame:
+        notes = f"{cat_iv_text_diag['detail']}\n\n{cat_iv_text_diag['action']}"
+    elif cat_iv_text_diag is not None:
+        notes = (
+            f"{cat_iv_text_diag['detail']}\n\n{cat_iv_text_diag['action']}\n\n"
+            f"---\nDiagnóstico de utilización de boundary (referencia rest position):\n\n"
+            f"{_build_scl_report_notes(text_diag)}"
+        )
+    else:
+        notes = _build_scl_report_notes(text_diag)
     export_fig = _add_scl_export_footer(fig, text_diag)
 
     b1, b2 = st.columns(2)
@@ -1128,6 +1439,12 @@ def render_scl_compare_section(
     manual_x_max: float = 10.0,
     manual_y_min: float = -10.0,
     manual_y_max: float = 10.0,
+    vault_clearance_radial_mil: Optional[float] = None,
+    vault_params: Optional[Dict[str, Any]] = None,
+    vault_doc_ref: Optional[str] = None,
+    profile_label: Optional[str] = None,
+    operating_rpm: float = 3600.0,
+    cr_source: str = "",
 ) -> None:
     if len(items) < 2:
         return
@@ -1156,29 +1473,49 @@ def render_scl_compare_section(
     # Envolvente visual común para el comparativo multi-fecha.
     # Usa todos los puntos comparados para construir una referencia geométrica similar a los paneles individuales.
     valid_dfs = [rec["df"] for rec in compare_records if not rec["df"].empty]
+    boundary = None
     if valid_dfs:
         all_x = np.concatenate([df["x_plot"].to_numpy(dtype=float) for df in valid_dfs])
         all_y = np.concatenate([df["y_plot"].to_numpy(dtype=float) for df in valid_dfs])
 
-        x_range, y_range = compute_xy_ranges(
-            x=all_x,
-            y=all_y,
-            auto_scale_xy=auto_scale_xy,
-            manual_x_min=manual_x_min,
-            manual_x_max=manual_x_max,
-            manual_y_min=manual_y_min,
-            manual_y_max=manual_y_max,
-        )
+        # Misma lógica de prioridad que el panel individual:
+        # Manual > Vault > Auto heurístico
+        if clearance_mode == "Manual":
+            boundary = resolve_clearance_boundary(
+                x=all_x, y=all_y, mode="Manual",
+                center_mode=clearance_center_mode,
+                manual_cx=manual_clearance_x, manual_cy=manual_clearance_y,
+                manual_center_x=manual_center_x, manual_center_y=manual_center_y,
+            )
+            boundary["source"] = "manual (sidebar)"
+        elif vault_clearance_radial_mil is not None:
+            boundary = resolve_clearance_boundary(
+                x=all_x, y=all_y, mode="Manual",
+                center_mode=clearance_center_mode,
+                manual_cx=float(vault_clearance_radial_mil),
+                manual_cy=float(vault_clearance_radial_mil),
+                manual_center_x=manual_center_x, manual_center_y=manual_center_y,
+            )
+            boundary["source"] = f"Vault ({cr_source})"
+        else:
+            boundary = resolve_clearance_boundary(
+                x=all_x, y=all_y, mode=clearance_mode,
+                center_mode=clearance_center_mode,
+                manual_cx=manual_clearance_x, manual_cy=manual_clearance_y,
+                manual_center_x=manual_center_x, manual_center_y=manual_center_y,
+            )
+            boundary["source"] = "auto heurístico (datos)"
 
-        boundary = resolve_clearance_boundary(
-            x=all_x,
-            y=all_y,
-            mode=clearance_mode,
-            center_mode=clearance_center_mode,
-            manual_cx=manual_clearance_x,
-            manual_cy=manual_clearance_y,
-            manual_center_x=manual_center_x,
-            manual_center_y=manual_center_y,
+        # Auto X/Y consciente del clearance también en el comparativo
+        x_range, y_range = compute_xy_ranges(
+            x=all_x, y=all_y,
+            auto_scale_xy=auto_scale_xy,
+            manual_x_min=manual_x_min, manual_x_max=manual_x_max,
+            manual_y_min=manual_y_min, manual_y_max=manual_y_max,
+            clearance_x=boundary.get("clearance_x"),
+            clearance_y=boundary.get("clearance_y"),
+            center_x=boundary.get("center_x", 0.0),
+            center_y=boundary.get("center_y", 0.0),
         )
 
         bx, by = build_boundary_curve(
@@ -1200,7 +1537,19 @@ def render_scl_compare_section(
             )
         )
 
+        # Cat IV overlay (eccentricity rings + bearing center + rest + load arrow)
+        add_scl_cat_iv_overlay(
+            fig,
+            center_x=boundary["center_x"],
+            center_y=boundary["center_y"],
+            clearance_x=boundary["clearance_x"],
+            clearance_y=boundary["clearance_y"],
+        )
+
     palette = ["#2563eb", "#16a34a", "#9333ea", "#ea580c", "#dc2626", "#0891b2", "#7c3aed", "#0f766e"]
+
+    # Collect operating-speed point per record for migration overlays
+    op_points: List[Dict[str, Any]] = []
 
     for idx, rec in enumerate(compare_records):
         df = rec["df"]
@@ -1218,6 +1567,87 @@ def render_scl_compare_section(
                 line=dict(width=2.2, color=color),
                 marker=dict(size=5, color=color),
                 hovertemplate="X: %{x:.3f}<br>Y: %{y:.3f}<extra></extra>",
+            )
+        )
+
+        # Identificar el punto a velocidad operativa para overlay Cat IV
+        if not df.empty:
+            rpms_arr = df["speed"].to_numpy(dtype=float)
+            x_arr = df["x_plot"].to_numpy(dtype=float)
+            y_arr = df["y_plot"].to_numpy(dtype=float)
+            target = float(operating_rpm)
+            if rpms_arr.size > 0 and rpms_arr.min() <= target <= rpms_arr.max():
+                k_idx = int(np.argmin(np.abs(rpms_arr - target)))
+            elif rpms_arr.size > 0:
+                k_idx = int(np.argmax(rpms_arr))
+            else:
+                continue
+            op_points.append({
+                "x": float(x_arr[k_idx]),
+                "y": float(y_arr[k_idx]),
+                "rpm": float(rpms_arr[k_idx]),
+                "color": color,
+                "date_label": date_label,
+                "ts_start": rec["ts_start"],
+            })
+
+    # Marcadores de punto operativo por fecha (estrella con label de fecha)
+    for op in op_points:
+        fig.add_trace(
+            go.Scatter(
+                x=[op["x"]], y=[op["y"]],
+                mode="markers+text",
+                marker=dict(size=14, color=op["color"], symbol="star",
+                            line=dict(width=1.5, color="white")),
+                text=[op["date_label"].split(" ")[0]],
+                textposition="top center",
+                textfont=dict(size=10, color=op["color"], family="Arial Black"),
+                name=f"Op @ {op['rpm']:.0f} rpm · {op['date_label']}",
+                hovertemplate=(
+                    f"Punto operativo<br>{op['date_label']}<br>"
+                    f"X: {op['x']:.3f} mil pp<br>Y: {op['y']:.3f} mil pp<br>"
+                    f"RPM: {op['rpm']:.0f}<extra></extra>"
+                ),
+                showlegend=False,
+            )
+        )
+
+    # Vectores de migración entre fechas consecutivas
+    if boundary is not None and len(op_points) >= 2:
+        cx_b = float(boundary.get("clearance_x", 0.0)) or 0.0
+        cy_b = float(boundary.get("clearance_y", 0.0)) or 0.0
+        clr_ref = max(cx_b, cy_b, 1e-9)
+        for i in range(1, len(op_points)):
+            p0 = op_points[i - 1]
+            p1 = op_points[i]
+            dx = p1["x"] - p0["x"]
+            dy = p1["y"] - p0["y"]
+            mag = float(np.hypot(dx, dy))
+            pct_clr = (mag / clr_ref) * 100.0
+            fig.add_annotation(
+                x=p1["x"], y=p1["y"],
+                ax=p0["x"], ay=p0["y"],
+                xref="x", yref="y", axref="x", ayref="y",
+                showarrow=True, arrowhead=3, arrowsize=1.2, arrowwidth=2.0,
+                arrowcolor="#0f172a",
+                text=f"Δ={mag:.2f} mil pp ({pct_clr:.1f}% c)",
+                font=dict(size=10, color="#0f172a"),
+                bgcolor="rgba(255,255,255,0.85)",
+                bordercolor="#0f172a", borderwidth=1, borderpad=2,
+                xshift=6, yshift=6,
+            )
+
+        # Línea de attitude angle (bearing center → punto operativo de la última fecha)
+        last_op = op_points[-1]
+        fig.add_trace(
+            go.Scatter(
+                x=[boundary["center_x"], last_op["x"]],
+                y=[boundary["center_y"], last_op["y"]],
+                mode="lines",
+                line=dict(width=1.5, color="#0f172a", dash="dash"),
+                name="Attitude angle (última fecha)",
+                hoverinfo="skip",
+                showlegend=True,
             )
         )
 
@@ -1271,26 +1701,211 @@ def render_scl_compare_section(
     summary_df = pd.DataFrame(summary_rows)
     st.dataframe(summary_df, width="stretch", hide_index=True)
 
+    # =========================================================
+    # Diagnóstico legacy (boundary utilization)
+    # =========================================================
     diag = _scl_compare_diagnostic(compare_records)
-    st.markdown("### Diagnóstico comparativo automático")
-    st.markdown(f"**{diag['headline']}**")
-    st.write(diag["detail"])
-    st.write(diag["action"])
+    with st.expander("Diagnóstico comparativo automático (boundary)", expanded=False):
+        st.markdown(f"**{diag['headline']}**")
+        st.write(diag["detail"])
+        st.write(diag["action"])
 
-    notes = (
-        f"{diag['headline']}\n\n"
-        f"{diag['detail']}\n\n"
-        f"{diag['action']}\n\n"
-        f"--- RESUMEN ---\n{summary_df.to_string(index=False)}"
-    )
+    # =========================================================
+    # Diagnóstico Cat IV multi-fecha (rotordynamics + Vault)
+    # =========================================================
+    cat_iv_compare_md = ""
+    if boundary is not None and boundary.get("clearance_x", 0) > 0:
+        # Calcular eccentricity_state para cada record a operating_rpm
+        ecc_states = []
+        for rec in compare_records:
+            df = rec["df"]
+            if df.empty:
+                continue
+            rpms_arr = df["speed"].to_numpy(dtype=float)
+            x_arr = df["x_plot"].to_numpy(dtype=float)
+            y_arr = df["y_plot"].to_numpy(dtype=float)
+
+            if rpms_arr.size == 0:
+                continue
+            target = float(operating_rpm)
+            if rpms_arr.min() <= target <= rpms_arr.max():
+                idx = int(np.argmin(np.abs(rpms_arr - target)))
+            else:
+                idx = int(np.argmax(rpms_arr))
+
+            es = compute_eccentricity_state(
+                x_pos=float(x_arr[idx]),
+                y_pos=float(y_arr[idx]),
+                rpm=float(rpms_arr[idx]),
+                cx_radial=float(boundary["clearance_x"]),
+                cy_radial=float(boundary["clearance_y"]),
+                bearing_center_x=float(boundary["center_x"]),
+                bearing_center_y=float(boundary["center_y"]),
+                load_direction_deg=270.0,
+            )
+            ecc_states.append({
+                "label": rec.get("label", "—"),
+                "ts_start": rec.get("ts_start"),
+                "ecc_state": es,
+            })
+
+        if len(ecc_states) >= 2:
+            # Ordenar por fecha
+            ecc_states.sort(
+                key=lambda e: pd.Timestamp(e["ts_start"]) if e["ts_start"] is not None else pd.Timestamp.min
+            )
+
+            with st.expander("Diagnóstico Cat IV multi-fecha (rotordynamics + Vault)", expanded=True):
+                # Tabla de e/c por fecha
+                rows_cat = []
+                for e in ecc_states:
+                    es = e["ecc_state"]
+                    rows_cat.append({
+                        "Fecha": pd.Timestamp(e["ts_start"]).strftime("%Y-%m-%d") if e["ts_start"] is not None else "—",
+                        "Archivo": e["label"],
+                        "RPM": f"{es.rpm:.0f}",
+                        "X (mil pp)": f"{es.x_pos:+.3f}",
+                        "Y (mil pp)": f"{es.y_pos:+.3f}",
+                        "e/c": f"{es.eccentricity_ratio:.3f}",
+                        "α (°)": f"{es.attitude_angle_deg:.1f}",
+                        "Clasificación": es.classification,
+                    })
+                st.dataframe(pd.DataFrame(rows_cat), width="stretch", hide_index=True)
+
+                # Narrativa: introducción + síntesis cronológica + migración
+                first = ecc_states[0]
+                last = ecc_states[-1]
+                first_date = pd.Timestamp(first["ts_start"]).strftime("%d %b %Y") if first["ts_start"] is not None else first["label"]
+                last_date = pd.Timestamp(last["ts_start"]).strftime("%d %b %Y") if last["ts_start"] is not None else last["label"]
+
+                # Comparación entre primera y última corrida
+                migration = compare_centerline_migration(first["ecc_state"], last["ecc_state"])
+
+                profile_clause = f"El profile activo es '{profile_label}'." if profile_label else ""
+                doc_clause = f" Documento de referencia: {vault_doc_ref}." if vault_doc_ref else ""
+
+                clearance_clause = ""
+                if boundary.get("source"):
+                    clearance_clause = f" Clearance radial usado en el análisis: {boundary['clearance_x']:.3f} mil pp ({boundary['source']})."
+
+                # Construir narrativa fluida
+                paragraphs_cat = []
+
+                paragraphs_cat.append(
+                    f"Se analizó la evolución del centerline del muñón a velocidad operativa "
+                    f"{operating_rpm:.0f} rpm a lo largo de {len(ecc_states)} corridas comprendidas "
+                    f"entre {first_date} y {last_date}. {profile_clause}{clearance_clause}{doc_clause}"
+                )
+
+                # Síntesis cronológica
+                prose_lines = []
+                for e in ecc_states:
+                    es = e["ecc_state"]
+                    date_str = pd.Timestamp(e["ts_start"]).strftime("%d %b %Y") if e["ts_start"] is not None else e["label"]
+                    prose_lines.append(
+                        f"La corrida del {date_str} ubicó el muñón en posición "
+                        f"({es.x_pos:+.3f}, {es.y_pos:+.3f}) mil pp, con eccentricity ratio "
+                        f"e/c = {es.eccentricity_ratio:.3f} y attitude angle "
+                        f"{es.attitude_angle_deg:.1f}°, clasificación {es.classification}."
+                    )
+                paragraphs_cat.append(
+                    "Síntesis cronológica de las posiciones medidas:\n\n" +
+                    "\n\n".join(prose_lines)
+                )
+
+                # Migración
+                paragraphs_cat.append(migration.narrative)
+
+                detail_cat = "\n\n".join(paragraphs_cat)
+
+                # Acciones según severidad de migración
+                if migration.classification == "STABLE":
+                    items_cat = [
+                        f"Adoptar la corrida del {last_date} como línea base actualizada del centerline.",
+                        "Mantener la frecuencia actual de medición y comparar próximos arranques contra la línea base.",
+                        "Vigilar e/c y attitude angle en cada nueva corrida para detectar tendencias tempranas.",
+                        "Correlacionar con datos de Polar/Bode 1X y temperatura de cojinetes para confirmar estabilidad de condición.",
+                    ]
+                elif migration.classification == "MINOR_DRIFT":
+                    items_cat = [
+                        "Continuar el monitoreo con frecuencia mayor para confirmar si la migración es transient o tendencia.",
+                        "Verificar consistencia de las condiciones de medición entre fechas (carga, temperatura del aceite, balance).",
+                        "Correlacionar con eventos de mantenimiento u operación entre fechas.",
+                    ]
+                elif migration.classification == "MODERATE_DRIFT":
+                    items_cat = [
+                        "Investigar causas de la migración: cambio de carga, alineación del tren, condición del babbitt.",
+                        "Inspeccionar visualmente el cojinete en próximo paro programado.",
+                        "Verificar viscosidad del aceite y temperatura de cojinetes contra valores de comisionamiento.",
+                        "Correlacionar con espectro 1X (Polar/Bode) y órbita filtrada.",
+                    ]
+                else:
+                    items_cat = [
+                        "PRIORIDAD ALTA: programar inspección directa del babbitt en próxima oportunidad.",
+                        "Verificar inmediatamente temperatura, viscosidad y caudal del aceite contra especificación OEM.",
+                        "Confirmar carga real del rotor y descartar desalineación del tren.",
+                        "Documentar como hallazgo crítico, notificar al equipo de ingeniería rotodinámica.",
+                        "Si la condición persiste, restringir operación sostenida hasta confirmación del estado del cojinete.",
+                    ]
+
+                intro_cat = (
+                    "A partir del análisis de migración del centerline entre las fechas "
+                    "evaluadas, se establecen las siguientes recomendaciones:"
+                )
+                action_cat = intro_cat + "\n\n" + "\n\n".join(
+                    f"{i+1}. {item}" for i, item in enumerate(items_cat)
+                )
+
+                st.markdown(f"**{migration.narrative.split('.')[0]}.**")
+                st.write(detail_cat)
+                st.write(action_cat)
+
+                cat_iv_compare_md = (
+                    f"{detail_cat}\n\n{action_cat}"
+                )
+
+    # Cuando hay narrativa Cat IV, se suprime el bloque legacy basado en (0,0)
+    # para evitar contradicciones en el PDF (la legacy mide utilización contra
+    # la posición de reposo, no contra el bearing center real). Se conserva en
+    # los expanders de la UI para inspección, pero no entra al PDF.
+    bently_frame = (clearance_center_mode or "").lower().startswith("bottom load")
+    summary_block = f"--- RESUMEN ---\n{summary_df.to_string(index=False)}"
+    if cat_iv_compare_md and bently_frame:
+        notes = f"{cat_iv_compare_md}\n\n{summary_block}"
+    elif cat_iv_compare_md:
+        notes = (
+            f"{cat_iv_compare_md}\n\n---\n\n"
+            f"Diagnóstico de utilización de boundary (referencia rest position):\n\n"
+            f"{diag['headline']}\n\n{diag['detail']}\n\n{diag['action']}\n\n"
+            f"{summary_block}"
+        )
+    else:
+        notes = (
+            f"{diag['headline']}\n\n"
+            f"{diag['detail']}\n\n"
+            f"{diag['action']}\n\n"
+            f"{summary_block}"
+        )
 
     png_bytes, png_error = build_export_png_bytes(fig)
+
+    # Rango temporal del comparativo en el título (más informativo en el PDF)
+    valid_starts = [r["ts_start"] for r in compare_records if r["ts_start"] is not None]
+    range_clause = ""
+    if valid_starts:
+        try:
+            t_min = pd.Timestamp(min(valid_starts)).strftime("%d %b %Y")
+            t_max = pd.Timestamp(max(valid_starts)).strftime("%d %b %Y")
+            range_clause = f" · {t_min} → {t_max}"
+        except Exception:
+            range_clause = ""
+    compare_title = f"Shaft Centerline · Comparación multi-fecha{range_clause}"
 
     c1, c2 = st.columns(2)
     with c1:
         if st.button("Enviar comparativo a reporte", key="wm_scl_compare_report_btn"):
             push_report_item(
-                title="Shaft Centerline · Comparación multi-fecha",
+                title=compare_title,
                 notes=notes,
                 image_bytes=png_bytes,
             )
@@ -1319,6 +1934,41 @@ def main():
 
     with st.sidebar:
         render_user_menu()
+        st.markdown("---")
+
+        # Asset Profile + Vault integration (Cat IV)
+        profile_state = render_profile_selector(module_name="shaft_centerline")
+        active_profile_key = profile_state["profile_key"]
+        active_profile_label = profile_state["profile_label"]
+        active_operating_rpm = profile_state["operating_rpm"]
+
+        if not profile_state["is_applicable"]:
+            st.warning(profile_state["applicability_message"])
+
+        # Lookup del Vault para dimensiones del cojinete
+        vault_params = get_captured_parameters(active_profile_key)
+        vault_docs = list_documents(active_profile_key)
+        vault_doc_ref = vault_docs[0]["title"] if vault_docs else None
+
+        cr_mil_vault, cr_source = derive_radial_clearance_from_vault(
+            bearing_inner_diameter_mm=vault_params.get("bearing_inner_diameter_mm"),
+            shaft_journal_diameter_mm=vault_params.get("shaft_journal_diameter_mm"),
+            diametral_clearance_mm=vault_params.get("diametral_clearance_mm"),
+            target_unit="mil",
+        )
+
+        if cr_mil_vault is not None:
+            st.success(
+                f"**Vault:** clearance radial = {cr_mil_vault:.2f} mil pp "
+                f"({cr_source})"
+            )
+        else:
+            st.info(
+                "Sin datos de cojinete en el Vault. Captura el diámetro interno "
+                "y/o clearance del cojinete en Asset Documents para análisis "
+                "Cat IV preciso. Usando valores manuales de la sidebar."
+            )
+
         st.markdown("---")
         st.markdown("### Shaft Centerline input")
 
@@ -1362,7 +2012,29 @@ def main():
 
         st.markdown("### Boundary controls")
         clearance_mode = st.selectbox("Boundary mode", ["Auto", "Manual"], index=0)
-        clearance_center_mode = st.selectbox("Boundary center", ["Origin (0,0)", "Data Mean", "Manual"], index=0)
+        clearance_center_mode = st.selectbox(
+            "Boundary center",
+            options=[
+                "Bottom load reference (API 670 / práctica estándar)",
+                "Origin (0,0)",
+                "Data Mean",
+                "Manual",
+            ],
+            index=0,
+            help=(
+                "Convención de placement del clearance circle:\n\n"
+                "**Bottom load reference**: práctica estándar para cojinetes hidrodinámicos en "
+                "máquinas horizontales con carga gravitacional (referencia API 670). "
+                "El (0,0) del registro = muñón en reposo apoyado al fondo del cojinete. "
+                "Bearing center automáticamente en (0, +Cr). "
+                "Usar este default a menos que haya razón específica.\n\n"
+                "**Origin (0,0)**: bearing center forzado al origen. Solo para debug, máquinas "
+                "verticales o sistemas con calibración no estándar.\n\n"
+                "**Data Mean**: bearing center en el centroide. Útil cuando el registro no fue "
+                "calibrado al rest position.\n\n"
+                "**Manual**: especifica el centro tú mismo."
+            ),
+        )
 
         manual_center_x = st.number_input("Boundary center X", value=0.0, step=0.1, format="%.3f")
         manual_center_y = st.number_input("Boundary center Y", value=0.0, step=0.1, format="%.3f")
@@ -1422,6 +2094,12 @@ def main():
             early_rub_danger_pct=early_rub_danger_pct,
             rpm_min_filter=rpm_min_filter,
             rpm_max_filter=rpm_max_filter,
+            vault_clearance_radial_mil=cr_mil_vault,
+            vault_params=vault_params,
+            vault_doc_ref=vault_doc_ref,
+            profile_label=active_profile_label,
+            operating_rpm=float(active_operating_rpm),
+            cr_source=cr_source,
         )
 
         if panel_index < len(parsed_items) - 1:
@@ -1445,6 +2123,12 @@ def main():
             manual_x_max=manual_x_max,
             manual_y_min=manual_y_min,
             manual_y_max=manual_y_max,
+            vault_clearance_radial_mil=cr_mil_vault,
+            vault_params=vault_params,
+            vault_doc_ref=vault_doc_ref,
+            profile_label=active_profile_label,
+            operating_rpm=float(active_operating_rpm),
+            cr_source=cr_source,
         )
 
 
