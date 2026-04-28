@@ -182,22 +182,29 @@ def render_instance_selector(module_name: str = "module") -> Dict[str, Any]:
 
     label_map = {i["instance_id"]: _label_for(i) for i in instances}
 
+    # Ciclo 14a hotfix — usar SESSION_KEY_INSTANCE como key del widget
+    # para que (a) sea fuente única de verdad entre todos los módulos
+    # (Polar/Bode/SCL/Library/etc.) y (b) callbacks externos (como el
+    # botón "Activar" del grid) puedan setear esa key vía on_click sin
+    # caer en el error "cannot be modified after the widget is instantiated".
+    # Si la key ya existe en session_state, Streamlit la usa y ignora index.
+    # Si no existe, usa el index= para inicializar.
     selected_id = st.selectbox(
         "Instancia activa",
         options=instance_ids,
         index=instance_ids.index(current_id),
         format_func=lambda iid: label_map.get(iid, iid),
-        key=f"wm_instance_select_{module_name}",
+        key=SESSION_KEY_INSTANCE,
         help=(
             "Cada instancia representa una máquina física específica. "
             "Los datos del Vault (parámetros, manuales) y los reportes "
             "se asocian a la instancia, no al tipo de máquina. "
-            "Crea instancias nuevas desde Asset Documents."
+            "Crea instancias nuevas desde la Machinery Library."
         ),
     )
 
-    # 5. Persistir selección
-    st.session_state[SESSION_KEY_INSTANCE] = selected_id
+    # 5. La línea de "persistir selección" ya no hace falta — el widget
+    #    escribe directo a SESSION_KEY_INSTANCE porque es su propia key.
     inst = get_instance(selected_id)
     if inst is None:
         return _empty_state()

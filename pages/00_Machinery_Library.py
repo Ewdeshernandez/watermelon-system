@@ -672,6 +672,23 @@ def render_danger_zone(instance_id: str) -> None:
 # Ciclo 14a — GRID DE MÁQUINAS (cockpit)
 # ============================================================
 
+def _set_active_instance(target_instance_id: str) -> None:
+    """
+    Callback del botón "Activar" en cada card del grid.
+
+    Se invoca con on_click ANTES de que se re-instancien los widgets
+    del próximo render. En esa fase, st.session_state se puede modificar
+    libremente — incluso keys que están vinculadas a widgets (como
+    'wm_active_instance_id', que es la key del selectbox del sidebar).
+
+    Si lo intentáramos hacer fuera de un callback (con
+    `st.session_state["wm_active_instance_id"] = X` directamente en el
+    cuerpo del script), Streamlit lanzaría:
+      "cannot be modified after the widget with key X is instantiated".
+    """
+    st.session_state["wm_active_instance_id"] = target_instance_id
+
+
 def render_machinery_grid() -> None:
     """
     Grilla de cards con todas las máquinas registradas. Cada card resume
@@ -732,13 +749,20 @@ def render_machinery_grid() -> None:
                     if st.session_state.get("wm_active_instance_id") == inst_id:
                         st.success("✓ activa", icon="🟢")
                     else:
-                        if st.button("Activar", key=f"activate_{inst_id}", width="stretch"):
-                            # Sincronizar la state key principal Y la key del
-                            # selectbox del sidebar — sino el selectbox lo
-                            # pisa con su valor anterior en el rerun.
-                            st.session_state["wm_active_instance_id"] = inst_id
-                            st.session_state["wm_instance_select_documents"] = inst_id
-                            st.rerun()
+                        # Usamos on_click callback porque la key
+                        # 'wm_active_instance_id' ya está instanciada por el
+                        # selectbox del sidebar; modificarla directo con
+                        # st.session_state[...] = ... lanzaría
+                        # 'cannot be modified after widget instantiated'.
+                        # Los callbacks corren en una fase especial donde
+                        # session_state se puede escribir libremente.
+                        st.button(
+                            "Activar",
+                            key=f"activate_{inst_id}",
+                            on_click=_set_active_instance,
+                            args=(inst_id,),
+                            width="stretch",
+                        )
 
     st.markdown("---")
 
