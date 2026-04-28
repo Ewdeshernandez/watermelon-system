@@ -42,7 +42,7 @@ from core.instance_state import (
     create_instance,
     delete_instance,
     get_instance,
-    get_instance_document_path,
+    get_instance_document_bytes,
     list_instances,
     remove_instance_document,
     update_instance_header,
@@ -255,16 +255,17 @@ def render_documents_section(instance_id: str) -> None:
                     st.caption("Tags: " + ", ".join(d["tags"]))
                 st.caption(f"ID interno: `{d.get('id')}`")
             with col2:
-                path = get_instance_document_path(instance_id, d["id"])
-                if path is not None and path.exists():
-                    with open(path, "rb") as fh:
-                        st.download_button(
-                            "Descargar",
-                            data=fh.read(),
-                            file_name=d.get("filename", "document"),
-                            key=f"dl_{instance_id}_{d['id']}",
-                            width="stretch",
-                        )
+                # Bytes streaming-friendly: funciona igual con backend Local
+                # o Supabase sin diferencias de UX para el usuario.
+                file_bytes = get_instance_document_bytes(instance_id, d["id"])
+                if file_bytes is not None:
+                    st.download_button(
+                        "Descargar",
+                        data=file_bytes,
+                        file_name=d.get("filename", "document"),
+                        key=f"dl_{instance_id}_{d['id']}",
+                        width="stretch",
+                    )
                 else:
                     st.caption("Archivo no disponible")
             with col3:

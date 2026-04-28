@@ -51,6 +51,7 @@ from core.instance_state import (
     get_instance,
     get_instance_parameters,
     create_instance,
+    get_active_backend_name,
 )
 from core.machine_profiles import (
     PROFILES as MACHINE_PROFILES,
@@ -140,6 +141,16 @@ def render_instance_selector(module_name: str = "module") -> Dict[str, Any]:
 
     st.markdown("### Activo monitoreado")
 
+    # Badge del backend activo (Local efímero vs Supabase persistente)
+    backend = get_active_backend_name()
+    if backend == "supabase":
+        st.caption("☁️ Persistencia Supabase activa — los datos sobreviven cualquier redeploy.")
+    else:
+        st.caption(
+            "💾 Storage local — los datos se pierden en redeploy de Streamlit Cloud. "
+            "Configurá Supabase en secrets para persistencia real."
+        )
+
     if not instances:
         st.warning(
             "No hay instancias de activo registradas. Andá a "
@@ -206,7 +217,7 @@ def render_instance_selector(module_name: str = "module") -> Dict[str, Any]:
     is_applicable = module_name in profile.applicable_modules
     applicability_message = (
         "" if is_applicable
-        else module_not_applicable_message(profile.profile_key, module_name)
+        else module_not_applicable_message(profile.key, module_name)
     )
 
     # 7. Mostrar resumen visual

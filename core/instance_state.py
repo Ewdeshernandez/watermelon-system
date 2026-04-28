@@ -24,14 +24,15 @@ Diferencia conceptual entre Profile e Instance:
                                        específicos de esta unidad,
                                        histórico de mantenimiento.
 
-Storage en disco:
+Storage:
+  Las funciones de este módulo NO tocan filesystem ni Supabase
+  directamente — delegan en core/instance_repository.get_active_repository(),
+  que selecciona automáticamente el backend (Local en dev, Supabase en
+  producción cuando hay credenciales en st.secrets).
 
-    data/
-      instances/
-        {instance_id}/
-          metadata.json       ← info del activo + parámetros + índice docs
-          documents/
-            {doc_id}__{filename}
+  Backend Local:    data/instances/{instance_id}/metadata.json
+                    data/instances/{instance_id}/documents/{file}
+  Backend Supabase: tabla 'instances' + bucket 'instance-documents'
 
 Cada instance tiene un ID único (slug) elegido por el usuario al
 crearla (ej. "brush_tes1", "siemens_sgt300_planta_b"). El profile_key
@@ -48,17 +49,14 @@ Backwards compatibility con Ciclo 7 (vault_seeds + profile_key):
 
 from __future__ import annotations
 
-import json
 import re
+import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATA_DIR = PROJECT_ROOT / "data"
-INSTANCES_DIR = DATA_DIR / "instances"
+from core.instance_repository import get_active_repository, INSTANCES_DIR
 
 
 # =============================================================
@@ -79,90 +77,11 @@ class Instance:
     created_at: str = ""
     updated_at: str = ""
 
-
-# =============================================================
-# HELPERS DE FILESYSTEM
-# =============================================================
-
-def _slugify(name: str) -> str:
-    """Convierte un nombre arbitrario a un slug seguro para filesystem."""
-    s = name.strip().lower()
-    s = re.sub(r"[^a-z0-9_-]+", "_", s)
-    s = re.sub(r"_+", "_", s).strip("_")
-    return s[:80] if s else "unnamed"
-
-
-def _instance_dir(instance_id: str) -> Path:
-    return INSTANCES_DIR / instance_id
-
-
-def _metadata_path(instance_id: str) -> Path:
-    return _instance_dir(instance_id) / "metadata.json"
-
-
-def _documents_dir(instance_id: str) -> Path:
-    return _instance_dir(instance_id) / "documents"
-
-
-def _ensure_dirs(instance_id: str) -> None:
-    INSTANCES_DIR.mkdir(parents=True, exist_ok=True)
-    _instance_dir(instance_id).mkdir(parents=True, exist_ok=True)
-    _documents_dir(instance_id).mkdir(parents=True, exist_ok=True)
-
-
-# =============================================================
-# CRUD DE INSTANCIAS
-# =============================================================
-
-def list_instances() -> List[Dict[str, Any]]:
-    """
-    Devuelve resumen de todas las instances registradas, ordenadas por
-    fecha de actualización descendente. Cada entry tiene los campos
-    del header (instance_id, profile_key, tag, serial_number, location,
-    notes, created_at, updated_at) — sin parámetros ni documentos para
-    que sea liviano.
-    """
-    if not INSTANCES_DIR.exists():
-        return []
-    entries: List[Dict[str, Any]] = []
-    for child in INSTANCES_DIR.iterdir():
-        if not child.is_dir():
-            continue
-        meta_path = child / "metadata.json"
-        if not meta_path.exists():
-            continue
-        try:
-            with open(meta_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            header = {
-                "instance_id": data.get("instance_id", child.name),
-                "profile_key": data.get("profile_key", ""),
-                "tag": data.get("tag", ""),
-                "serial_number": data.get("serial_number", ""),
-                "location": data.get("location", ""),
-                "notes": data.get("notes", ""),
-                "created_at": data.get("created_at", ""),
-                "updated_at": data.get("updated_at", ""),
-                "n_documents": len(data.get("documents", [])),
-                "n_parameters": len(data.get("captured_parameters", {})),
-            }
-            entries.append(header)
-        except Exception:
-            continue
-    entries.sort(key=lambda e: e.get("updated_at", ""), reverse=True)
-    return entries
-
-
-def get_instance(instance_id: str) -> Optional[Instance]:
-    """Devuelve la Instance completa o None si no existe."""
-    path = _metadata_path(instance_id)
-    if not path.exists():
-        return None
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return Instance(
-            instance_id=data.get("instance_id", instance_id),
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "Instance":
+        """Construye desde un dict serializado (de filesystem o Supabase)."""
+        return cls(
+            instance_id=data.get("instance_id", ""),
             profile_key=data.get("profile_key", ""),
             tag=data.get("tag", ""),
             serial_number=data.get("serial_number", ""),
@@ -173,18 +92,43 @@ def get_instance(instance_id: str) -> Optional[Instance]:
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
         )
-    except Exception:
+
+
+# =============================================================
+# UTILIDADES
+# =============================================================
+
+def _slugify(name: str) -> str:
+    """Convierte un nombre arbitrario a un slug seguro para filesystem/URLs."""
+    s = name.strip().lower()
+    s = re.sub(r"[^a-z0-9_-]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s[:80] if s else "unnamed"
+
+
+# =============================================================
+# CRUD DE INSTANCIAS
+# =============================================================
+
+def list_instances() -> List[Dict[str, Any]]:
+    """
+    Devuelve resumen liviano de todas las instances registradas,
+    ordenadas por fecha de actualización descendente.
+    """
+    return get_active_repository().list_instances()
+
+
+def get_instance(instance_id: str) -> Optional[Instance]:
+    """Devuelve la Instance completa o None si no existe."""
+    data = get_active_repository().load_instance(instance_id)
+    if data is None:
         return None
+    return Instance.from_dict(data)
 
 
 def _save_instance(inst: Instance) -> None:
-    _ensure_dirs(inst.instance_id)
-    inst.updated_at = datetime.now().isoformat(timespec="seconds")
-    if not inst.created_at:
-        inst.created_at = inst.updated_at
-    payload = asdict(inst)
-    with open(_metadata_path(inst.instance_id), "w", encoding="utf-8") as f:
-        json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
+    """Persiste una Instance al backend activo."""
+    get_active_repository().save_instance(asdict(inst))
 
 
 def create_instance(
@@ -198,20 +142,9 @@ def create_instance(
     seed_from_profile: bool = True,
 ) -> Instance:
     """
-    Crea una nueva Instance en disco. Si seed_from_profile=True y existe
-    una semilla en core/vault_seeds.py para el profile_key, los
-    parámetros del seed se inyectan como defaults en captured_parameters.
-
-    Args:
-        instance_id: slug único (se sanitiza). Si ya existe, sobrescribe.
-        profile_key: referencia al profile (debe existir en MACHINE_PROFILES).
-        tag: tag interno del cliente (ej. "TES1").
-        serial_number, location, notes: metadata libre.
-        seed_from_profile: si True, pre-puebla parámetros desde
-            core/vault_seeds.get_seed_parameters(profile_key).
-
-    Returns:
-        Instance recién creada y persistida.
+    Crea una nueva Instance. Si seed_from_profile=True y existe semilla
+    en core/vault_seeds.py para el profile_key, los parámetros del seed
+    se inyectan como defaults iniciales en captured_parameters.
     """
     inst_id = _slugify(instance_id)
     seeded_params: Dict[str, Any] = {}
@@ -259,19 +192,8 @@ def update_instance_header(
 
 
 def delete_instance(instance_id: str) -> bool:
-    """
-    Borra completamente una Instance del disco (metadata + todos sus
-    documentos). Operación destructiva, sin papelera.
-    """
-    inst_dir = _instance_dir(instance_id)
-    if not inst_dir.exists():
-        return False
-    try:
-        import shutil
-        shutil.rmtree(inst_dir)
-        return True
-    except Exception:
-        return False
+    """Borra completamente una Instance del backend (metadata + documentos)."""
+    return get_active_repository().delete_instance(instance_id)
 
 
 # =============================================================
@@ -279,14 +201,9 @@ def delete_instance(instance_id: str) -> bool:
 # =============================================================
 
 def get_instance_parameters(instance_id: str) -> Dict[str, Any]:
-    """
-    Devuelve los parámetros capturados de una instancia específica.
-    Si la instance no existe, devuelve {} (no levanta).
-    """
+    """Devuelve los parámetros capturados de una instancia, o {} si no existe."""
     inst = get_instance(instance_id)
-    if inst is None:
-        return {}
-    return dict(inst.captured_parameters)
+    return dict(inst.captured_parameters) if inst else {}
 
 
 def update_instance_parameters_bulk(
@@ -294,8 +211,8 @@ def update_instance_parameters_bulk(
     values: Dict[str, Any],
 ) -> bool:
     """
-    Actualiza múltiples parámetros de una instancia. Valores None o ""
-    eliminan el parámetro existente.
+    Actualiza múltiples parámetros. Valores None o "" eliminan el
+    parámetro existente.
     """
     inst = get_instance(instance_id)
     if inst is None:
@@ -332,36 +249,31 @@ def add_uploaded_file_to_instance(
     tags: Optional[List[str]] = None,
 ) -> Optional[str]:
     """
-    Acepta un UploadedFile de Streamlit (o cualquier objeto file-like
-    con .name y .read()), lo persiste a disco bajo
-    data/instances/{instance_id}/documents/ y lo indexa en metadata.json.
-    Devuelve el doc_id generado, o None si la instance no existe o
-    el upload falló.
+    Acepta un UploadedFile de Streamlit, lo persiste vía backend activo
+    (Local o Supabase Storage) y lo indexa en metadata.
     """
     inst = get_instance(instance_id)
     if inst is None:
         return None
-    _ensure_dirs(instance_id)
 
-    # Generar storage_filename con prefijo UUID para evitar colisiones
-    import uuid
     original = getattr(file_obj, "name", "document")
     safe_name = _slugify(original.rsplit(".", 1)[0])
     ext = original.rsplit(".", 1)[-1] if "." in original else "bin"
     storage_id = uuid.uuid4().hex[:12]
     storage_filename = f"{storage_id}__{safe_name}.{ext}"
-    target = _documents_dir(instance_id) / storage_filename
 
+    # Leer bytes del file_obj
     try:
-        # Streamlit UploadedFile: .read() devuelve bytes
-        file_obj.seek(0) if hasattr(file_obj, "seek") else None
+        if hasattr(file_obj, "seek"):
+            file_obj.seek(0)
         data = file_obj.read() if hasattr(file_obj, "read") else file_obj
         if isinstance(data, str):
             data = data.encode("utf-8")
-        with open(target, "wb") as f:
-            f.write(data)
-        size = target.stat().st_size
     except Exception:
+        return None
+
+    repo = get_active_repository()
+    if not repo.upload_document_bytes(instance_id, storage_filename, data):
         return None
 
     return add_instance_document(
@@ -372,7 +284,7 @@ def add_uploaded_file_to_instance(
         document_type=document_type,
         description=description,
         tags=tags,
-        size_bytes=size,
+        size_bytes=len(data),
     )
 
 
@@ -388,12 +300,9 @@ def add_instance_document(
     size_bytes: int = 0,
 ) -> Optional[str]:
     """
-    Agrega un documento al índice de una instancia. El archivo binario
-    debe haberse copiado previamente a _documents_dir(instance_id) /
-    storage_filename. Devuelve el doc_id generado, o None si la
-    instancia no existe.
+    Indexa un documento ya persistido (vía repo.upload_document_bytes)
+    en la metadata de la instancia. Devuelve el doc_id generado.
     """
-    import uuid
     inst = get_instance(instance_id)
     if inst is None:
         return None
@@ -415,7 +324,7 @@ def add_instance_document(
 
 
 def remove_instance_document(instance_id: str, doc_id: str) -> bool:
-    """Quita un documento del índice y borra el archivo del disco."""
+    """Quita el documento del índice y borra el archivo del backend."""
     inst = get_instance(instance_id)
     if inst is None:
         return False
@@ -424,19 +333,21 @@ def remove_instance_document(instance_id: str, doc_id: str) -> bool:
         return False
     storage = target.get("storage_filename", "")
     if storage:
-        path = _documents_dir(instance_id) / storage
-        try:
-            if path.exists():
-                path.unlink()
-        except Exception:
-            pass
+        get_active_repository().delete_document_file(instance_id, storage)
     inst.documents = [d for d in inst.documents if d.get("id") != doc_id]
     _save_instance(inst)
     return True
 
 
 def get_instance_document_path(instance_id: str, doc_id: str) -> Optional[Path]:
-    """Devuelve el path en disco del archivo de un documento, o None."""
+    """
+    Devuelve un Path local al archivo del documento. Para el backend
+    Local, es el path real en disco. Para Supabase, descarga el archivo
+    a un tempfile y devuelve ese path (caché de sesión).
+
+    Si el módulo solo necesita los bytes, preferí get_instance_document_bytes
+    que evita el round-trip por filesystem.
+    """
     inst = get_instance(instance_id)
     if inst is None:
         return None
@@ -446,8 +357,52 @@ def get_instance_document_path(instance_id: str, doc_id: str) -> Optional[Path]:
     storage = target.get("storage_filename", "")
     if not storage:
         return None
-    path = _documents_dir(instance_id) / storage
-    return path if path.exists() else None
+
+    repo = get_active_repository()
+    # Si es local, podemos devolver el path directo
+    if repo.backend_name == "local_filesystem":
+        path = INSTANCES_DIR / instance_id / "documents" / storage
+        return path if path.exists() else None
+
+    # Si es Supabase, descargamos a tempfile
+    data = repo.download_document_bytes(instance_id, storage)
+    if data is None:
+        return None
+    import tempfile
+    tmp = Path(tempfile.gettempdir()) / f"wm_{instance_id}_{doc_id}_{storage}"
+    try:
+        with open(tmp, "wb") as f:
+            f.write(data)
+        return tmp
+    except Exception:
+        return None
+
+
+def get_instance_document_bytes(instance_id: str, doc_id: str) -> Optional[bytes]:
+    """
+    Devuelve los bytes del archivo del documento, leyéndolos del backend
+    activo. Más eficiente que get_instance_document_path para servir
+    descargas (evita el round-trip por tempfile en backend Supabase).
+    """
+    inst = get_instance(instance_id)
+    if inst is None:
+        return None
+    target = next((d for d in inst.documents if d.get("id") == doc_id), None)
+    if target is None:
+        return None
+    storage = target.get("storage_filename", "")
+    if not storage:
+        return None
+    return get_active_repository().download_document_bytes(instance_id, storage)
+
+
+# =============================================================
+# DIAGNÓSTICOS DE BACKEND (para mostrar en sidebar)
+# =============================================================
+
+def get_active_backend_name() -> str:
+    """Devuelve el nombre del backend activo ('local_filesystem' o 'supabase')."""
+    return get_active_repository().backend_name
 
 
 __all__ = [
@@ -465,4 +420,6 @@ __all__ = [
     "add_uploaded_file_to_instance",
     "remove_instance_document",
     "get_instance_document_path",
+    "get_instance_document_bytes",
+    "get_active_backend_name",
 ]

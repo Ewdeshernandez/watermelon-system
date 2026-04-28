@@ -5,4 +5,8 @@ scipy
 plotly==6.1.1
 kaleido==1.0.0
 reportlab>=4.0.0
+# Ciclo 9: persistencia real del Vault contra Supabase (Postgres + Storage).
+# Si st.secrets[supabase] no está configurado, la app cae a filesystem
+# local automáticamente — supabase queda como dependencia opcional.
+supabase>=2.0.0
 # rebuild trigger
