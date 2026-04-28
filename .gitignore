@@ -46,6 +46,9 @@ data/report_drafts/
 data/asset_documents/
 data/asset_metadata/
 
+# --- Asset Instances (Ciclo 8: datos por máquina física, NO commitear) ---
+data/instances/
+
 # --- Document Vault SEEDS (manuales de fábrica, SÍ commitear) ---
 # Esta carpeta contiene PDFs de referencia (manuales OEM, reportes
 # históricos del cliente) que viven en el repo y sobreviven cualquier

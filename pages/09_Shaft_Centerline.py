@@ -21,7 +21,8 @@ from core.csv_common import (
 )
 from core.diagnostics import build_scl_diagnostics_rotordyn
 from core.document_vault import get_captured_parameters, list_documents
-from core.profile_state import render_profile_selector
+from core.profile_state import render_profile_selector  # legacy compat
+from core.instance_selector import render_instance_selector
 from core.scl_diagnostics import (
     compare_centerline_migration,
     compute_eccentricity_state,
@@ -1936,18 +1937,23 @@ def main():
         render_user_menu()
         st.markdown("---")
 
-        # Asset Profile + Vault integration (Cat IV)
-        profile_state = render_profile_selector(module_name="shaft_centerline")
-        active_profile_key = profile_state["profile_key"]
-        active_profile_label = profile_state["profile_label"]
-        active_operating_rpm = profile_state["operating_rpm"]
+        # Asset Instance + Vault integration (Cat IV) — Ciclo 8
+        # Cada máquina física tiene su propia instancia con sus propios
+        # parámetros y documentos. Antes (Ciclo 7) la selección era por
+        # profile, lo que mezclaba data entre máquinas físicamente
+        # distintas del mismo modelo.
+        instance_state = render_instance_selector(module_name="shaft_centerline")
+        active_instance_id = instance_state["instance_id"]
+        active_profile_key = instance_state["profile_key"]
+        active_profile_label = instance_state["profile_label"]
+        active_operating_rpm = instance_state["operating_rpm"]
 
-        if not profile_state["is_applicable"]:
-            st.warning(profile_state["applicability_message"])
+        if not instance_state["is_applicable"]:
+            st.warning(instance_state["applicability_message"])
 
-        # Lookup del Vault para dimensiones del cojinete
-        vault_params = get_captured_parameters(active_profile_key)
-        vault_docs = list_documents(active_profile_key)
+        # Lookup del Vault PER-INSTANCIA (no per-profile)
+        vault_params = dict(instance_state.get("captured_parameters", {}))
+        vault_docs = list(instance_state.get("documents", []))
         vault_doc_ref = vault_docs[0]["title"] if vault_docs else None
 
         cr_mil_vault, cr_source = derive_radial_clearance_from_vault(
