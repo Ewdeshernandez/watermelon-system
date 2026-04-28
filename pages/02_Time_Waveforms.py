@@ -1616,7 +1616,7 @@ with st.sidebar:
 
     current_ids = [sid for sid in st.session_state.wm_selected_signal_ids if sid in valid_ids]
     if not current_ids:
-        current_ids = [records_all[0].signal_id]
+        current_ids = [r.signal_id for r in records_all]
         st.session_state.wm_selected_signal_ids = current_ids
 
     default_names = [r.name for r in records_all if r.signal_id in current_ids]
@@ -1797,11 +1797,6 @@ try:
 
     st.markdown("### Análisis automático de forma de onda")
 
-    debug_signals_count = len(selected_records) if "selected_records" in locals() else 0
-    debug_metrics_count = 0
-    debug_insights_count = 0
-    debug_impacts_count = 0
-
     for primary in selected_records:
         mask = (primary.time_s >= t_min) & (primary.time_s <= t_max)
         if not np.any(mask):
@@ -1852,67 +1847,6 @@ try:
                 if idx - impacts[-1] > 5:
                     impacts.append(idx)
 
-        
-        insight_parts = []
-
-        if kurtosis > 4.0:
-            insight_parts.append(
-                "La señal presenta contenido transitorio de alta energía, indicando excitaciones no lineales en el sistema."
-            )
-
-        if crest_factor > 3.0:
-            insight_parts.append(
-                "El incremento en el factor de cresta sugiere la presencia de eventos transitorios de corta duración."
-            )
-
-        if abs(skewness) > 0.5:
-            direction = "positiva" if skewness > 0 else "negativa"
-            insight_parts.append(
-                f"La señal presenta asimetría {direction}, asociada a condiciones dinámicas no balanceadas."
-            )
-
-        if not insight_parts:
-            insight_parts.append(
-                "La señal presenta comportamiento estable dentro de condiciones normales de operación."
-            )
-
-        # 🔥 CONTEXTO DE SOPORTE (COJINETE vs RODAMIENTO)
-        machine_name = str(primary.name).upper()
-
-        if "COMPRESOR" in machine_name or "RECIP" in machine_name:
-            soporte_txt = (
-                " Para sistemas con cojinete plano, este comportamiento puede estar relacionado con "
-                "condiciones de lubricación, holguras dinámicas o contacto intermitente."
-            )
-        else:
-            soporte_txt = (
-                " En sistemas con rodamientos, este patrón puede asociarse a defectos incipientes o condiciones de carga."
-            )
-
-        insight_parts = [" ".join(insight_parts) + soporte_txt]
-
-        if kurtosis > 4.0:
-            insight_parts.append(
-                "Se detecta comportamiento impulsivo en la señal, compatible con transitorios o transitorios."
-            )
-        if crest_factor > 3.0:
-            insight_parts.append(
-                "El factor de cresta es elevado, indicando presencia de picos transitorios relevantes."
-            )
-        if abs(skewness) > 0.5:
-            direction = "positiva" if skewness > 0 else "negativa"
-            insight_parts.append(
-                f"La señal presenta asimetría {direction}, lo que sugiere componente direccional o sesgo dinámico."
-            )
-        if not insight_parts:
-            insight_parts.append(
-                "La señal presenta comportamiento estable sin evidencia fuerte de impulsividad."
-            )
-
-        debug_metrics_count += 1
-        debug_insights_count += 1
-        debug_impacts_count += 1
-
         st.markdown(f"#### Señal {primary.name}")
 
         c1, c2, c3, c4 = st.columns(4)
@@ -1927,8 +1861,6 @@ try:
         c7.metric("Skewness", f"{skewness:.3f}")
         c8.metric("Peak-to-Peak", f"{peak_to_peak:.4f}")
 
-        st.info(" ".join(insight_parts))
-
         ic1, ic2 = st.columns(2)
         ic1.metric("Cantidad de transitorios", str(len(impacts)))
         ic2.metric("Threshold dinámico", f"{threshold:.4f}")
@@ -1940,12 +1872,6 @@ try:
                 st.caption(f"Mostrando 20 de {len(impacts)} transitorios detectados.")
         else:
             st.caption("No se detectaron transitorios sobre el umbral dinámico.")
-
-    st.markdown("### Debug waveform")
-    st.write("signals_count:", debug_signals_count)
-    st.write("metrics_count:", debug_metrics_count)
-    st.write("insights_count:", debug_insights_count)
-    st.write("impacts_count:", debug_impacts_count)
 
 except Exception as e:
     st.error(f"Waveform analysis error: {e}")
