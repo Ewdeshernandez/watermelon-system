@@ -17,6 +17,13 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+# Ciclo 14b — wire del selector de instancia activa en Load Data.
+# Cuando hay una máquina activa en Machinery Library, los CSVs que
+# se suban acá quedan etiquetados con instance_id + instance_tag en
+# su metadata, para futura segregación por máquina (Ciclo 14c+).
+from core.instance_selector import render_instance_selector, get_active_instance_id
+from core.instance_state import get_instance, get_instance_document_bytes, compose_train_description
+
 
 # ============================================================
 # WATERMELON SYSTEM — LOAD DATA
@@ -597,6 +604,36 @@ def build_signal_from_parsed(parsed: Dict[str, Any]) -> SimpleNamespace:
     metadata["Timestamp"] = metadata.get("Timestamp", "")
     metadata["Y-Axis Unit"] = metadata.get("Y-Axis Unit", metadata.get("Unit", ""))
 
+    # Ciclo 14b — etiquetar cada signal con la instancia activa.
+    # Si la sesión tiene una máquina activa (Machinery Library), todos
+    # los CSVs subidos en este batch quedan vinculados a ella vía
+    # instance_id / instance_tag / instance_train. Esto permite que
+    # módulos posteriores (Polar/Bode/SCL/Spectrum/Waveform/Trend) y
+    # Reports infieran cliente, sitio y train_description sin pedírselo
+    # al ingeniero. También enriquece los campos legacy Machine/Point
+    # cuando están vacíos o son "Unknown".
+    try:
+        _act_id = st.session_state.get("wm_active_instance_id", "")
+        if _act_id:
+            _act_inst = get_instance(_act_id)
+            if _act_inst is not None:
+                metadata["instance_id"] = _act_inst.instance_id
+                metadata["instance_tag"] = _act_inst.tag or _act_inst.instance_id
+                metadata["instance_train"] = compose_train_description(_act_inst)
+                metadata["instance_client"] = _act_inst.client or ""
+                metadata["instance_site"] = _act_inst.site or _act_inst.location or ""
+                # Backfill de Machine si llegaba vacío/Unknown desde el CSV
+                if metadata.get("Machine", "").strip() in ("", "Unknown"):
+                    metadata["Machine"] = metadata["instance_tag"]
+                # Backfill de RPM nominal si el CSV no lo trae
+                if (not metadata.get("RPM")) and _act_inst.nominal_rpm > 0:
+                    metadata["RPM"] = _act_inst.nominal_rpm
+                    metadata["Sample Speed"] = _act_inst.nominal_rpm
+    except Exception:
+        # Si por algún motivo falla, no rompe el upload — el signal
+        # queda sin etiquetar pero se sigue cargando.
+        pass
+
     # Sample rate
     dt = np.diff(time_arr)
     dt = dt[np.isfinite(dt) & (dt > 0)]
@@ -730,6 +767,80 @@ else:
         """,
         unsafe_allow_html=True,
     )
+
+
+# ------------------------------------------------------------
+# Ciclo 14b — Selector de instancia activa en sidebar
+# ------------------------------------------------------------
+# Rendererizado igual que Polar/Bode/SCL. Si el usuario activó TES1
+# en Machinery Library, acá lo va a ver en el sidebar también, y los
+# CSVs subidos quedan etiquetados con instance_id en su metadata.
+with st.sidebar:
+    st.markdown("---")
+    _instance_state = render_instance_selector(module_name="load_data")
+
+_active_instance_id = _instance_state.get("instance_id") or ""
+_active_instance = get_instance(_active_instance_id) if _active_instance_id else None
+
+
+# ------------------------------------------------------------
+# Ciclo 14b — Banner de máquina activa + bloqueo si falta
+# ------------------------------------------------------------
+# Si no hay máquina activa, bloqueamos con un mensaje grande que
+# fuerza al usuario a ir a Machinery Library. La idea: nunca subir
+# CSVs anónimos, siempre vinculados a una máquina física.
+if _active_instance is None:
+    st.error(
+        "🚨 **No hay máquina activa.** Antes de cargar CSVs tenés que "
+        "seleccionar el activo monitoreado en **Machinery Library** "
+        "para que los datos queden vinculados a la máquina correcta."
+    )
+    st.info(
+        "Andá al menú lateral → **Machinery Library** → click en la "
+        "card de la máquina que vas a analizar (badge verde 'activa') "
+        "y volvé acá."
+    )
+    st.stop()
+
+# Banner verde con preview del esquemático + datos de la máquina
+_train_desc = compose_train_description(_active_instance) or "(sin descripción del tren)"
+_client = _active_instance.client or "(sin cliente)"
+_site = _active_instance.site or _active_instance.location or ""
+_tag = _active_instance.tag or _active_instance.instance_id
+
+with st.container(border=True):
+    banner_cols = st.columns([1.0, 3.5])
+    with banner_cols[0]:
+        if _active_instance.schematic_png:
+            try:
+                _png = get_instance_document_bytes(
+                    _active_instance.instance_id,
+                    _active_instance.schematic_png,
+                )
+                if _png:
+                    st.image(_png, use_container_width=True)
+            except Exception:
+                pass
+    with banner_cols[1]:
+        st.markdown(f"### 🟢 Cargando CSVs para: **{_tag}**")
+        st.caption(_train_desc)
+        meta_bits = []
+        if _active_instance.nominal_power_mw > 0:
+            meta_bits.append(f"{_active_instance.nominal_power_mw:.0f} MW")
+        if _active_instance.nominal_rpm > 0:
+            meta_bits.append(f"{_active_instance.nominal_rpm:.0f} rpm")
+        if _client:
+            meta_bits.append(_client)
+        if _site:
+            meta_bits.append(_site)
+        if meta_bits:
+            st.caption(" · ".join(meta_bits))
+        st.caption(
+            "ℹ️ Los CSVs que subas a continuación quedarán etiquetados con "
+            f"`instance_id={_active_instance.instance_id}` y disponibles para "
+            "todos los módulos de análisis (Polar, Bode, SCL, Spectrum, "
+            "Time Waveforms, Trends) y para Reports."
+        )
 
 
 # ------------------------------------------------------------
