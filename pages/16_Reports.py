@@ -598,29 +598,28 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.setFillColor(colors.HexColor("#ffffff"))
         canvas.rect(0, 0, page_width, page_height, fill=1, stroke=0)
 
+        # Cinta cyan a la derecha
         canvas.setFillColor(colors.HexColor("#38bdf8"))
         canvas.rect(page_width - 4.5 * cm, 0, 4.5 * cm, page_height, fill=1, stroke=0)
 
+        # Acentos azul oscuro en la cinta (decoración vertical)
         canvas.setFillColor(colors.HexColor("#0284c7"))
         canvas.roundRect(page_width - 4.95 * cm, page_height - 6.8 * cm, 0.42 * cm, 4.8 * cm, 0.2 * cm, fill=1, stroke=0)
         canvas.roundRect(page_width - 4.95 * cm, 1.0 * cm, 0.42 * cm, 2.3 * cm, 0.2 * cm, fill=1, stroke=0)
 
-        if logo_watermark and logo_watermark.exists():
-            try:
-                wm_w = 7.8 * cm
-                wm_h = 7.8 * cm
-                wm_x = page_width - 8.0 * cm
-                wm_y = 0.15 * cm
-                canvas.saveState()
-                canvas.setFillAlpha(0.18)
-                canvas.drawImage(str(logo_watermark), wm_x, wm_y, width=wm_w, height=wm_h, mask='auto', preserveAspectRatio=True, anchor='c')
-                canvas.restoreState()
-            except Exception:
-                pass
+        # (Marca de agua SIGA quitada — no aporta sin contexto.
+        #  Si en el futuro queremos un watermark Watermelon-only,
+        #  acá iría con setFillAlpha 0.10 + drawImage del logo.)
 
+        # Número de página BLANCO sobre la cinta cyan (mejor contraste
+        # que el color oscuro anterior)
         canvas.setFont(PDF_FONT_BOLD, 10.5)
-        canvas.setFillColor(colors.HexColor("#111827"))
-        canvas.drawRightString(page_width - 1.15 * cm, page_height - 1.0 * cm, f"Página {doc.page}")
+        canvas.setFillColor(colors.white)
+        canvas.drawRightString(
+            page_width - 1.15 * cm,
+            page_height - 1.0 * cm,
+            f"Página {doc.page}",
+        )
 
         canvas.restoreState()
 
@@ -675,24 +674,50 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         cover_logo = Image(str(WATERMELON_LOGO), width=4.2 * cm, height=2.0 * cm)
         cover_logo.hAlign = "LEFT"
         story.append(cover_logo)
-        story.append(Spacer(1, 1.35 * cm))
+        story.append(Spacer(1, 0.50 * cm))
 
-    story.append(Spacer(1, 1.45 * cm))
-    story.append(Paragraph("Machinery Diagnostics Engineering", styles["WMSubTitle"]))
-    story.append(Spacer(1, 1.10 * cm))
-    story.append(Paragraph(_paragraph_safe(meta.get("report_title") or "REPORTE TÉCNICO"), styles["WMTitle"]))
+    # Eyebrow (label chico arriba, en uppercase tracked) — categoría editorial
     story.append(
         Paragraph(
-            "Watermelon System",
+            "MACHINERY DIAGNOSTICS ENGINEERING",
             ParagraphStyle(
-                name="WMBrandSub",
+                name="WMCoverEyebrow",
                 parent=styles["Normal"],
                 fontName=PDF_FONT_BOLD,
-                fontSize=15.8,
-                leading=19,
-                textColor=colors.HexColor("#111827"),
-                spaceAfter=36,
+                fontSize=8.5,
+                leading=11,
+                textColor=colors.HexColor("#0284c7"),
+                spaceAfter=4,
             ),
+        )
+    )
+
+    # Título grande del reporte
+    story.append(
+        Paragraph(
+            _paragraph_safe(meta.get("report_title") or "REPORTE TÉCNICO"),
+            ParagraphStyle(
+                name="WMCoverReportTitle",
+                parent=styles["Normal"],
+                fontName=PDF_FONT_BOLD,
+                fontSize=18,
+                leading=22,
+                textColor=colors.HexColor("#0f172a"),
+                spaceAfter=14,
+            ),
+        )
+    )
+
+    # Línea divisoria cyan delgada — separa la marca del bloque del activo
+    from reportlab.platypus import HRFlowable
+    story.append(
+        HRFlowable(
+            width="60%",
+            thickness=1.4,
+            color=colors.HexColor("#0ea5e9"),
+            spaceBefore=2,
+            spaceAfter=14,
+            hAlign="LEFT",
         )
     )
 
@@ -753,6 +778,9 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     # Si hay descripción del tren acoplado, sub-cabecera en regular más chica
     train_text = (meta.get("train_description") or "").strip()
     if train_text:
+        # Espacio extra entre el bloque grande del activo y la descripción
+        # del tren (antes quedaba muy pegado al ECOPETROL - MAGNEX)
+        story.append(Spacer(1, 0.30 * cm))
         story.append(
             Paragraph(
                 _paragraph_safe(train_text),
@@ -763,20 +791,23 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                     fontSize=10.8,
                     leading=14,
                     textColor=colors.HexColor("#374151"),
-                    spaceBefore=10,
+                    spaceBefore=4,
                     spaceAfter=3,
                 ),
             )
         )
 
-    story.append(Spacer(1, 2.15 * cm))
+    # Espaciado vertical reducido (antes 2.15 cm — generaba mucho aire)
+    story.append(Spacer(1, 1.10 * cm))
 
     prepared_by = (meta.get("prepared_by") or "").strip()
-    prepared_role = (meta.get("prepared_role") or "Ingeniero de diagnóstico").strip()
+    prepared_role = (meta.get("prepared_role") or "Junior Condition Monitoring Engineer").strip()
+    prepared_city = (meta.get("prepared_city") or "").strip()
     reviewed_by = (meta.get("reviewed_by") or "").strip()
-    reviewed_role = (meta.get("reviewed_role") or "Revisión técnica").strip()
+    reviewed_role = (meta.get("reviewed_role") or "Machinery Diagnostic Champion").strip()
+    reviewed_city = (meta.get("reviewed_city") or "").strip()
     report_date_value = meta.get("report_date") or TODAY_STR
-    period_value = meta.get("period") or "No aplica"
+    period_value = (meta.get("period") or "").strip()
     consecutive_value = (meta.get("consecutive") or "").strip()
 
     if prepared_by:
@@ -784,24 +815,111 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         story.append(Paragraph(_paragraph_safe(prepared_by), styles["WMMeta"]))
         if prepared_role:
             story.append(Paragraph(_paragraph_safe(prepared_role), styles["WMMeta"]))
-        story.append(Spacer(1, 0.82 * cm))
+        if prepared_city:
+            story.append(
+                Paragraph(
+                    _paragraph_safe(prepared_city),
+                    ParagraphStyle(
+                        name="WMCoverPrepCity",
+                        parent=styles["WMMeta"],
+                        fontName=PDF_FONT_REGULAR,
+                        fontSize=9.4,
+                        textColor=colors.HexColor("#475569"),
+                    ),
+                )
+            )
+        story.append(Spacer(1, 0.55 * cm))
 
     if reviewed_by:
         story.append(Paragraph("<b>Revisado por:</b>", styles["WMMeta"]))
         story.append(Paragraph(_paragraph_safe(reviewed_by), styles["WMMeta"]))
         if reviewed_role:
             story.append(Paragraph(_paragraph_safe(reviewed_role), styles["WMMeta"]))
-        story.append(Spacer(1, 1.25 * cm))
+        if reviewed_city:
+            story.append(
+                Paragraph(
+                    _paragraph_safe(reviewed_city),
+                    ParagraphStyle(
+                        name="WMCoverRevCity",
+                        parent=styles["WMMeta"],
+                        fontName=PDF_FONT_REGULAR,
+                        fontSize=9.4,
+                        textColor=colors.HexColor("#475569"),
+                    ),
+                )
+            )
+        story.append(Spacer(1, 0.85 * cm))
     else:
-        story.append(Spacer(1, 0.95 * cm))
+        story.append(Spacer(1, 0.55 * cm))
 
-    story.append(Spacer(1, 0.55 * cm))
-    story.append(Paragraph(f"<b>Fecha del reporte:</b> {_paragraph_safe(report_date_value)}", styles["WMMeta"]))
-    story.append(Spacer(1, 0.08 * cm))
-    story.append(Paragraph(f"<b>Periodo evaluado:</b> {_paragraph_safe(period_value)}", styles["WMMeta"]))
+    # Bloque de fecha/periodo/consecutivo como mini-tabla 2 columnas — más
+    # profesional y compacto que un párrafo plano. "Periodo evaluado" se
+    # OCULTA cuando viene vacío o "No aplica" (estética SIGA).
+    meta_rows: List[List[Any]] = []
+    label_style = ParagraphStyle(
+        name="WMCoverMetaLabel",
+        parent=styles["WMMeta"],
+        fontName=PDF_FONT_BOLD,
+        fontSize=10.0,
+        textColor=colors.HexColor("#0f172a"),
+    )
+    value_style = ParagraphStyle(
+        name="WMCoverMetaValue",
+        parent=styles["WMMeta"],
+        fontName=PDF_FONT_REGULAR,
+        fontSize=10.0,
+        textColor=colors.HexColor("#111827"),
+    )
+    meta_rows.append([
+        Paragraph("Fecha del reporte", label_style),
+        Paragraph(_paragraph_safe(report_date_value), value_style),
+    ])
+    if period_value and period_value.lower() not in ("no aplica", "n/a", "-"):
+        meta_rows.append([
+            Paragraph("Periodo evaluado", label_style),
+            Paragraph(_paragraph_safe(period_value), value_style),
+        ])
     if consecutive_value:
-        story.append(Spacer(1, 0.08 * cm))
-        story.append(Paragraph(f"<b>Consecutivo:</b> {_paragraph_safe(consecutive_value)}", styles["WMMeta"]))
+        meta_rows.append([
+            Paragraph("Consecutivo", label_style),
+            Paragraph(_paragraph_safe(consecutive_value), value_style),
+        ])
+
+    if meta_rows:
+        # Columna 1 más ancha (4.4 cm) para que "Fecha del reporte" entre en
+        # una sola línea sin partirse.
+        meta_tbl = Table(meta_rows, colWidths=[4.4 * cm, 8.0 * cm])
+        meta_tbl.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LINEABOVE", (0, 0), (-1, 0), 0.6, colors.HexColor("#cbd5e1")),
+            ("LINEBELOW", (0, -1), (-1, -1), 0.6, colors.HexColor("#cbd5e1")),
+        ]))
+        meta_tbl.hAlign = "LEFT"
+        story.append(meta_tbl)
+
+    # Disclaimer legal al pie de la portada (mismo del SIGA original)
+    story.append(Spacer(1, 1.2 * cm))
+    story.append(
+        Paragraph(
+            "INFORME VÁLIDO ÚNICAMENTE PARA LAS CONDICIONES PRESENTES "
+            "DURANTE EL SERVICIO. NO PODRÁ SER COPIADO PARCIAL O TOTALMENTE "
+            "SIN PREVIA AUTORIZACIÓN.",
+            ParagraphStyle(
+                name="WMCoverLegal",
+                parent=styles["Normal"],
+                fontName=PDF_FONT_REGULAR,
+                fontSize=7.0,
+                leading=9.5,
+                alignment=TA_LEFT,
+                textColor=colors.HexColor("#64748b"),
+            ),
+        )
+    )
+
     story.append(PageBreak())
 
     # RESUMEN EJECUTIVO — página inicial después de la portada (si existe).
@@ -1160,9 +1278,22 @@ m7, m8 = st.columns(2)
 with m7:
     meta["prepared_by"] = st.text_input("Preparado por", key="report_meta_prepared_by", value=meta["prepared_by"])
     meta["prepared_role"] = st.text_input("Cargo de quien prepara", key="report_meta_prepared_role", value=meta["prepared_role"])
+    meta["prepared_city"] = st.text_input(
+        "Ciudad / país de quien prepara",
+        key="report_meta_prepared_city",
+        value=meta.get("prepared_city", ""),
+        placeholder="Cajicá, Cundinamarca · Colombia",
+        help="Ciudad y país que aparecen debajo del nombre/cargo en la portada.",
+    )
 with m8:
     meta["reviewed_by"] = st.text_input("Revisado por", key="report_meta_reviewed_by", value=meta["reviewed_by"])
     meta["reviewed_role"] = st.text_input("Cargo de quien revisa", key="report_meta_reviewed_role", value=meta["reviewed_role"])
+    meta["reviewed_city"] = st.text_input(
+        "Ciudad / país de quien revisa",
+        key="report_meta_reviewed_city",
+        value=meta.get("reviewed_city", ""),
+        placeholder="Cajicá, Cundinamarca · Colombia",
+    )
 
 st.markdown(
     '<div class="wm-signature-help">Estos cargos también se mostrarán en el bloque final de aprobación del PDF.</div>',
