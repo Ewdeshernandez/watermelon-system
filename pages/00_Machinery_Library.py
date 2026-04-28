@@ -733,7 +733,11 @@ def render_machinery_grid() -> None:
                         st.success("✓ activa", icon="🟢")
                     else:
                         if st.button("Activar", key=f"activate_{inst_id}", width="stretch"):
+                            # Sincronizar la state key principal Y la key del
+                            # selectbox del sidebar — sino el selectbox lo
+                            # pisa con su valor anterior en el rerun.
                             st.session_state["wm_active_instance_id"] = inst_id
+                            st.session_state["wm_instance_select_documents"] = inst_id
                             st.rerun()
 
     st.markdown("---")
