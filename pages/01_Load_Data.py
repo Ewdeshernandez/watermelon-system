@@ -925,92 +925,33 @@ if invalid_files:
 # =====================================================================
 # Ciclo 14b — Machine Diagnostic Context AUTO-DERIVADO de la instancia
 # =====================================================================
-# Antes (Ciclo 6 y previos): el usuario tenía que llenar manualmente
-# 5 campos (Asset type, Machine configuration, Primary equipment,
-# Secondary equipment, Machine technical description) en cada carga
-# de CSVs, repitiendo información que ya vivía en la instancia activa.
+# El contexto de máquina (asset_type, machine_configuration, primary,
+# secondary, description) se deriva 100% del Instance.header de la
+# máquina activa. Sin formulario manual, sin override.
 #
-# Ahora (Ciclo 14b): los 5 campos se DERIVAN automáticamente del
-# Instance.header de la máquina activa en Machinery Library:
-#   asset_type            ← inst.asset_class
-#   machine_configuration ← 'Compuesta / tren' si driver+driven, sino 'Simple'
-#   primary_equipment     ← driver_manufacturer + driver_model
-#   secondary_equipment   ← driven_manufacturer + driven_model
-#   machine_description   ← compose_train_description(inst)
-#
-# Si por algún motivo el ingeniero quiere un override puntual (raro,
-# pero válido), hay un expander "Override manual" colapsado por default.
-# Cero campos requeridos, cero validaciones bloqueantes — el flujo no
-# se traba.
-
-_auto_asset_type = (
-    _active_instance.asset_class
-    or ("Turbogenerador" if (_active_instance.driver_model and _active_instance.driven_model) else "Otro")
-)
-_auto_machine_configuration = (
-    "Compuesta / tren de máquinas"
-    if (_active_instance.driver_model and _active_instance.driven_model)
-    else "Simple"
-)
-_auto_primary = " ".join(p for p in [_active_instance.driver_manufacturer, _active_instance.driver_model] if p)
-_auto_secondary = " ".join(p for p in [_active_instance.driven_manufacturer, _active_instance.driven_model] if p)
-_auto_description = compose_train_description(_active_instance) or _active_instance.notes or ""
-
-# Por default tomamos los valores auto-derivados
-asset_type = _auto_asset_type
-machine_configuration = _auto_machine_configuration
-primary_equipment = _auto_primary
-secondary_equipment = _auto_secondary
-machine_description = _auto_description
-
-with st.expander("⚙️ Override manual del contexto de máquina (opcional)", expanded=False):
-    st.caption(
-        f"Los 5 campos vienen pre-llenados desde la instancia activa **{_active_instance.tag}**. "
-        "Sólo modificá si necesitás un override puntual para este batch de CSVs "
-        "(la instancia en Machinery Library NO se modifica)."
-    )
-    ovr_c1, ovr_c2 = st.columns(2)
-    with ovr_c1:
-        asset_type = st.text_input(
-            "Asset type",
-            value=_auto_asset_type,
-            help="Auto-derivado de instance.asset_class",
-        ).strip() or _auto_asset_type
-    with ovr_c2:
-        _config_options = ["Simple", "Compuesta / tren de máquinas"]
-        machine_configuration = st.selectbox(
-            "Machine configuration",
-            options=_config_options,
-            index=_config_options.index(_auto_machine_configuration) if _auto_machine_configuration in _config_options else 1,
-        )
-
-    if machine_configuration == "Compuesta / tren de máquinas":
-        ovr_c3, ovr_c4 = st.columns(2)
-        with ovr_c3:
-            primary_equipment = st.text_input(
-                "Primary (driver)",
-                value=_auto_primary,
-                help="Auto-derivado de instance.driver_manufacturer + driver_model",
-            ).strip() or _auto_primary
-        with ovr_c4:
-            secondary_equipment = st.text_input(
-                "Secondary (driven)",
-                value=_auto_secondary,
-                help="Auto-derivado de instance.driven_manufacturer + driven_model",
-            ).strip() or _auto_secondary
-    machine_description = st.text_area(
-        "Machine technical description",
-        value=_auto_description,
-        height=80,
-        help="Auto-compuesto por compose_train_description(instance)",
-    ).strip() or _auto_description
+# Si el ingeniero necesita corregir algún dato, lo corrige en
+# Machinery Library — única fuente de verdad. Eso garantiza que los
+# CSVs cargados acá nunca tengan metadata que contradiga la instancia.
 
 machine_context = {
-    "asset_type": asset_type,
-    "machine_configuration": machine_configuration,
-    "primary_equipment": primary_equipment,
-    "secondary_equipment": secondary_equipment,
-    "machine_description": machine_description,
+    "asset_type": (
+        _active_instance.asset_class
+        or ("Turbogenerador" if (_active_instance.driver_model and _active_instance.driven_model) else "Otro")
+    ),
+    "machine_configuration": (
+        "Compuesta / tren de máquinas"
+        if (_active_instance.driver_model and _active_instance.driven_model)
+        else "Simple"
+    ),
+    "primary_equipment": " ".join(
+        p for p in [_active_instance.driver_manufacturer, _active_instance.driver_model] if p
+    ),
+    "secondary_equipment": " ".join(
+        p for p in [_active_instance.driven_manufacturer, _active_instance.driven_model] if p
+    ),
+    "machine_description": (
+        compose_train_description(_active_instance) or _active_instance.notes or ""
+    ),
 }
 
 col_a, col_b = st.columns([1.7, 4.3])
