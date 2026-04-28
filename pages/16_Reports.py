@@ -26,6 +26,7 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+from reportlab.platypus.tableofcontents import TableOfContents
 
 from core.auth import require_login, render_user_menu
 from core.report_state import (
@@ -567,6 +568,49 @@ def _render_notes_flowables(
     return flowables
 
 
+# =============================================================
+# Tabla de Contenido (Ciclo 10A.4)
+# =============================================================
+# WMDocTemplate subclasea SimpleDocTemplate para que `multiBuild` pueda
+# llamar `afterFlowable` y registrar entradas TOC con número de página.
+# Estrategia:
+#   * Los Paragraphs de las 5 secciones principales (RESUMEN EJECUTIVO,
+#     RECOMENDACIONES, OBJETIVO, DESARROLLO, FIGURAS) usan estilo
+#     'WMTOC1' (visualmente idéntico a 'WMSection') → entran al TOC
+#     como nivel 0.
+#   * Los captions de cada figura usan 'WMTOC2' → nivel 1 (sub-entradas
+#     bajo "FIGURAS Y ANÁLISIS").
+#   * Los headings que NO deben aparecer en el TOC (e.g. 'TABLA DE
+#     CONTENIDO' propio, sub-bloques internos) siguen usando 'WMSection'
+#     o 'WMFigureCaption' originales — invisibles al TOC.
+# `multiBuild` corre 2-3 pasadas hasta que los números de página
+# convergen. `bookmarkPage` permite que cada entrada del TOC sea un
+# link interno clickeable (PDF nativo).
+class WMDocTemplate(SimpleDocTemplate):
+    def afterFlowable(self, flowable):
+        if not isinstance(flowable, Paragraph):
+            return
+        try:
+            style_name = flowable.style.name
+        except Exception:
+            return
+        if style_name == "WMTOC1":
+            level = 0
+        elif style_name == "WMTOC2":
+            level = 1
+        else:
+            return
+        text = flowable.getPlainText()
+        # Key estable basado en id(flowable): el mismo objeto vive en
+        # todas las pasadas de multiBuild → mismo key → el TOC compara
+        # entries igualadas y converge en 2 pasadas. Si reseteáramos un
+        # contador (1, 2, 3...) los keys cambiarían entre pasadas y
+        # multiBuild fallaría con "Index entries not resolved".
+        key = f"toc-{level}-{id(flowable):x}"
+        self.canv.bookmarkPage(key)
+        self.notify("TOCEntry", (level, text, self.page, key))
+
+
 def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes:
     buffer = BytesIO()
     page_width, page_height = A4
@@ -583,9 +627,40 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     styles.add(ParagraphStyle(name="WMTableCell", parent=styles["Normal"], fontName=PDF_FONT_REGULAR, fontSize=8.4, leading=11, alignment=TA_LEFT, textColor=colors.HexColor("#111827")))
     styles.add(ParagraphStyle(name="WMTableHeader", parent=styles["Normal"], fontName=PDF_FONT_BOLD, fontSize=8.5, leading=11, alignment=TA_LEFT, textColor=colors.HexColor("#ffffff")))
 
+    # Ciclo 10A.4 — estilos para entradas que SÍ entran al TOC.
+    # Visualmente idénticos a WMSection / WMFigureCaption respectivamente,
+    # pero con nombre distinto para que afterFlowable los detecte.
+    styles.add(ParagraphStyle(name="WMTOC1", parent=styles["WMSection"]))
+    styles.add(ParagraphStyle(name="WMTOC2", parent=styles["WMFigureCaption"]))
+
+    # Ciclo 10A.4 — estilos del PROPIO TOC (cómo se ven las entradas
+    # dentro de la página de Tabla de Contenido). H1 negrita, H2 indentada.
+    toc_level0_style = ParagraphStyle(
+        name="WMTOCLevel0",
+        fontName=PDF_FONT_BOLD,
+        fontSize=11,
+        leading=16,
+        leftIndent=0,
+        firstLineIndent=0,
+        spaceBefore=8,
+        spaceAfter=2,
+        textColor=colors.HexColor("#0f172a"),
+    )
+    toc_level1_style = ParagraphStyle(
+        name="WMTOCLevel1",
+        fontName=PDF_FONT_REGULAR,
+        fontSize=10,
+        leading=14,
+        leftIndent=18,
+        firstLineIndent=0,
+        spaceBefore=2,
+        spaceAfter=1,
+        textColor=colors.HexColor("#334155"),
+    )
+
     logo_watermark = _first_existing_watermark()
 
-    doc = SimpleDocTemplate(
+    doc = WMDocTemplate(
         buffer,
         pagesize=A4,
         leftMargin=2.1 * cm,
@@ -1010,11 +1085,32 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
     story.append(PageBreak())
 
-    # RESUMEN EJECUTIVO — página inicial después de la portada (si existe).
-    # Es el "elevator pitch" del reporte: lo primero que el cliente lee.
+    # =========================================================
+    # PÁGINA 2 — TABLA DE CONTENIDO (Ciclo 10A.4)
+    # =========================================================
+    # Se construye automáticamente en la 2ª pasada de multiBuild.
+    # El header del título usa WMSection (no WMTOC1) para que NO entre
+    # al TOC como auto-referencia.
+    story.append(Paragraph("TABLA DE CONTENIDO", styles["WMSection"]))
+    story.append(Spacer(1, 0.20 * cm))
+
+    toc = TableOfContents()
+    toc.levelStyles = [toc_level0_style, toc_level1_style]
+    # Dot leaders + número de página alineado a la derecha.
+    # ReportLab dibuja esto automáticamente cuando el levelStyle no
+    # define justify especial; el separador se controla con
+    # toc.dotsMinLevel.
+    toc.dotsMinLevel = 0
+    story.append(toc)
+
+    story.append(PageBreak())
+
+    # RESUMEN EJECUTIVO — página inicial después del TOC.
+    # Es el "elevator pitch" del reporte: lo primero que el cliente lee
+    # de fondo del análisis (después de la portada y la TOC).
     executive_text = (meta.get("executive_summary") or "").strip()
     if executive_text:
-        story.append(Paragraph("RESUMEN EJECUTIVO", styles["WMSection"]))
+        story.append(Paragraph("RESUMEN EJECUTIVO", styles["WMTOC1"]))
 
         # Cinta de severidad: una franja con estado global y color (si se puede
         # detectar desde el primer párrafo del resumen). Si no, omitida.
@@ -1059,24 +1155,24 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     development_text = (meta.get("service_development") or "").strip()
 
     if recommendations_text:
-        story.append(Paragraph(f"{section_idx}. RECOMENDACIONES", styles["WMSection"]))
+        story.append(Paragraph(f"{section_idx}. RECOMENDACIONES", styles["WMTOC1"]))
         story.append(Paragraph(_paragraph_safe(recommendations_text), styles["WMBody"]))
         story.append(Spacer(1, 0.12 * cm))
         section_idx += 1
 
     if objective_text:
-        story.append(Paragraph(f"{section_idx}. OBJETIVO DEL SERVICIO", styles["WMSection"]))
+        story.append(Paragraph(f"{section_idx}. OBJETIVO DEL SERVICIO", styles["WMTOC1"]))
         story.append(Paragraph(_paragraph_safe(objective_text), styles["WMBody"]))
         story.append(Spacer(1, 0.12 * cm))
         section_idx += 1
 
     if development_text:
-        story.append(Paragraph(f"{section_idx}. DESARROLLO DEL SERVICIO", styles["WMSection"]))
+        story.append(Paragraph(f"{section_idx}. DESARROLLO DEL SERVICIO", styles["WMTOC1"]))
         story.append(Paragraph(_paragraph_safe(development_text), styles["WMBody"]))
         story.append(Spacer(1, 0.15 * cm))
         section_idx += 1
 
-    story.append(Paragraph(f"{section_idx}. FIGURAS Y ANÁLISIS", styles["WMSection"]))
+    story.append(Paragraph(f"{section_idx}. FIGURAS Y ANÁLISIS", styles["WMTOC1"]))
     story.append(Spacer(1, 0.08 * cm))
 
     usable_width = A4[0] - doc.leftMargin - doc.rightMargin
@@ -1111,7 +1207,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             block = [
                 Spacer(1, 0.18 * cm),
                 img,
-                Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]),
+                Paragraph(_paragraph_safe(caption), styles["WMTOC2"]),
                 *notes_flowables,
                 Spacer(1, 0.24 * cm),
             ]
@@ -1122,7 +1218,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
             block = [
                 Spacer(1, 0.18 * cm),
-                Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]),
+                Paragraph(_paragraph_safe(caption), styles["WMTOC2"]),
                 Paragraph(_paragraph_safe(error_text), styles["WMFigureText"]),
                 *notes_flowables,
                 Spacer(1, 0.24 * cm),
@@ -1131,7 +1227,11 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         story.append(KeepTogether(block))
 
     story.append(Spacer(1, 0.40 * cm))
-    doc.build(story, onFirstPage=_draw_cover_page, onLaterPages=_draw_internal_page)
+    # Ciclo 10A.4 — multiBuild: 2-3 pasadas para que el TableOfContents
+    # converja con los números de página correctos. La primera pasada
+    # registra las entradas (afterFlowable las captura); la segunda las
+    # imprime con los page numbers reales.
+    doc.multiBuild(story, onFirstPage=_draw_cover_page, onLaterPages=_draw_internal_page)
     return buffer.getvalue()
 
 
