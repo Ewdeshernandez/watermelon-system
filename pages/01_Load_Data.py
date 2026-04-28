@@ -922,72 +922,88 @@ if invalid_files:
         st.warning(f"{parsed['file_name']}: {text}")
 
 
-st.markdown("### Machine Diagnostic Context")
+# =====================================================================
+# Ciclo 14b — Machine Diagnostic Context AUTO-DERIVADO de la instancia
+# =====================================================================
+# Antes (Ciclo 6 y previos): el usuario tenía que llenar manualmente
+# 5 campos (Asset type, Machine configuration, Primary equipment,
+# Secondary equipment, Machine technical description) en cada carga
+# de CSVs, repitiendo información que ya vivía en la instancia activa.
+#
+# Ahora (Ciclo 14b): los 5 campos se DERIVAN automáticamente del
+# Instance.header de la máquina activa en Machinery Library:
+#   asset_type            ← inst.asset_class
+#   machine_configuration ← 'Compuesta / tren' si driver+driven, sino 'Simple'
+#   primary_equipment     ← driver_manufacturer + driver_model
+#   secondary_equipment   ← driven_manufacturer + driven_model
+#   machine_description   ← compose_train_description(inst)
+#
+# Si por algún motivo el ingeniero quiere un override puntual (raro,
+# pero válido), hay un expander "Override manual" colapsado por default.
+# Cero campos requeridos, cero validaciones bloqueantes — el flujo no
+# se traba.
 
-ctx1, ctx2 = st.columns(2)
+_auto_asset_type = (
+    _active_instance.asset_class
+    or ("Turbogenerador" if (_active_instance.driver_model and _active_instance.driven_model) else "Otro")
+)
+_auto_machine_configuration = (
+    "Compuesta / tren de máquinas"
+    if (_active_instance.driver_model and _active_instance.driven_model)
+    else "Simple"
+)
+_auto_primary = " ".join(p for p in [_active_instance.driver_manufacturer, _active_instance.driver_model] if p)
+_auto_secondary = " ".join(p for p in [_active_instance.driven_manufacturer, _active_instance.driven_model] if p)
+_auto_description = compose_train_description(_active_instance) or _active_instance.notes or ""
 
-with ctx1:
-    asset_type = st.selectbox(
-        "Asset type *",
-        options=[
-            "",
-            "Turbogenerador",
-            "Turbina de gas",
-            "Generador eléctrico",
-            "Motor eléctrico",
-            "Bomba",
-            "Compresor",
-            "Ventilador",
-            "Gearbox",
-            "Otro",
-        ],
-        index=0,
-        help="This context will be attached to every loaded signal and later used by diagnostics.",
+# Por default tomamos los valores auto-derivados
+asset_type = _auto_asset_type
+machine_configuration = _auto_machine_configuration
+primary_equipment = _auto_primary
+secondary_equipment = _auto_secondary
+machine_description = _auto_description
+
+with st.expander("⚙️ Override manual del contexto de máquina (opcional)", expanded=False):
+    st.caption(
+        f"Los 5 campos vienen pre-llenados desde la instancia activa **{_active_instance.tag}**. "
+        "Sólo modificá si necesitás un override puntual para este batch de CSVs "
+        "(la instancia en Machinery Library NO se modifica)."
     )
+    ovr_c1, ovr_c2 = st.columns(2)
+    with ovr_c1:
+        asset_type = st.text_input(
+            "Asset type",
+            value=_auto_asset_type,
+            help="Auto-derivado de instance.asset_class",
+        ).strip() or _auto_asset_type
+    with ovr_c2:
+        _config_options = ["Simple", "Compuesta / tren de máquinas"]
+        machine_configuration = st.selectbox(
+            "Machine configuration",
+            options=_config_options,
+            index=_config_options.index(_auto_machine_configuration) if _auto_machine_configuration in _config_options else 1,
+        )
 
-with ctx2:
-    machine_configuration = st.selectbox(
-        "Machine configuration *",
-        options=["", "Simple", "Compuesta / tren de máquinas"],
-        index=0,
-        help="Use composite when the machine train has at least two main coupled assets.",
-    )
-
-primary_equipment = ""
-secondary_equipment = ""
-
-if machine_configuration == "Compuesta / tren de máquinas":
-    ctx3, ctx4 = st.columns(2)
-    with ctx3:
-        primary_equipment = st.text_input(
-            "Primary equipment *",
-            placeholder="Ejemplo: Turbina LM6000",
-        ).strip()
-    with ctx4:
-        secondary_equipment = st.text_input(
-            "Secondary equipment *",
-            placeholder="Ejemplo: Generador Brush",
-        ).strip()
-
-machine_description = st.text_area(
-    "Machine technical description *",
-    height=120,
-    placeholder="Ejemplo: Turbina de gas LM6000 acoplada a generador Brush. No corresponde a sistema hidráulico.",
-).strip()
-
-context_errors: List[str] = []
-
-if not asset_type:
-    context_errors.append("Asset type is required.")
-if not machine_configuration:
-    context_errors.append("Machine configuration is required.")
-if machine_configuration == "Compuesta / tren de máquinas":
-    if not primary_equipment:
-        context_errors.append("Primary equipment is required for composite machines.")
-    if not secondary_equipment:
-        context_errors.append("Secondary equipment is required for composite machines.")
-if not machine_description:
-    context_errors.append("Machine technical description is required.")
+    if machine_configuration == "Compuesta / tren de máquinas":
+        ovr_c3, ovr_c4 = st.columns(2)
+        with ovr_c3:
+            primary_equipment = st.text_input(
+                "Primary (driver)",
+                value=_auto_primary,
+                help="Auto-derivado de instance.driver_manufacturer + driver_model",
+            ).strip() or _auto_primary
+        with ovr_c4:
+            secondary_equipment = st.text_input(
+                "Secondary (driven)",
+                value=_auto_secondary,
+                help="Auto-derivado de instance.driven_manufacturer + driven_model",
+            ).strip() or _auto_secondary
+    machine_description = st.text_area(
+        "Machine technical description",
+        value=_auto_description,
+        height=80,
+        help="Auto-compuesto por compose_train_description(instance)",
+    ).strip() or _auto_description
 
 machine_context = {
     "asset_type": asset_type,
@@ -1004,18 +1020,14 @@ with col_a:
         "Generate Time Waveforms",
         type="primary",
         use_container_width=True,
-        disabled=(len(valid_files) == 0 or len(context_errors) > 0),
+        disabled=(len(valid_files) == 0),
     )
 
 with col_b:
     st.markdown(
-        '<div class="wm-export-note">Only valid CSV files will be registered into the signal session and passed to the approved Time Waveform Viewer workflow.</div>',
+        '<div class="wm-export-note">Solo los CSVs válidos se registran en la sesión de signals y pasan al workflow de Time Waveform Viewer. El contexto de máquina se vincula automáticamente desde la instancia activa.</div>',
         unsafe_allow_html=True,
     )
-
-if context_errors:
-    for msg in context_errors:
-        st.warning(msg)
 
 if generate_clicked:
     context_enriched_files = apply_machine_context_to_parsed_files(valid_files, machine_context)
