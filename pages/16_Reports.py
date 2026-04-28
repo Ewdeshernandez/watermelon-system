@@ -268,8 +268,10 @@ DEFAULT_REPORT_META = {
     "location": "",
     "prepared_by": "",
     "reviewed_by": "",
-    "prepared_role": "Ingeniero de diagnóstico",
-    "reviewed_role": "Revisión técnica",
+    "prepared_role": "Junior Condition Monitoring Engineer",
+    "reviewed_role": "Machinery Diagnostic Champion",
+    "prepared_city": "",
+    "reviewed_city": "",
     "period": "",
     "report_date": TODAY_STR,
     "consecutive": "",
@@ -278,6 +280,13 @@ DEFAULT_REPORT_META = {
     "recommendations": "",
     "executive_summary": "",
     "train_description": "",
+    # Ciclo 10A — campos SIGA-style para bloque grande del activo en portada
+    "asset_class": "",         # ej. "TURBOGENERADOR"
+    "asset_model": "",         # ej. "LM5000"
+    # Format control SIGA-style (header de cada página)
+    "format_code": "WMS-FMT-001",  # equivalente al SIGA-FMT-178
+    "format_version": "1",
+    "format_date": "2026-04-28",
 }
 
 if "report_state_loaded" not in st.session_state:
@@ -632,11 +641,23 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.setLineWidth(1.1)
         canvas.line(internal_left, page_height - 1.35 * cm, internal_width_end, page_height - 1.35 * cm)
 
+        # Header SIGA-style (Ciclo 10A): código de formato controlado a la
+        # izquierda + título del reporte centrado. El consecutivo va arriba a
+        # la derecha junto al número de página, lo arma _draw_internal_page
+        # justo después.
+        format_code = meta.get("format_code") or "WMS-FMT-001"
+        format_version = meta.get("format_version") or "1"
+        format_date = meta.get("format_date") or "2026-04-28"
+        format_header = f"{format_code} | Versión {format_version} | Fecha {format_date}"
         canvas.setFillColor(colors.HexColor("#0f172a"))
-        canvas.setFont(PDF_FONT_BOLD, 8.2)
-        canvas.drawString(internal_left, page_height - 1.0 * cm, "Machinery Diagnostics Engineering")
-        canvas.setFont(PDF_FONT_REGULAR, 8.2)
-        canvas.drawString(internal_left + 6.2 * cm, page_height - 1.0 * cm, f"| {meta.get('report_title') or 'Reporte técnico'}")
+        canvas.setFont(PDF_FONT_BOLD, 7.8)
+        canvas.drawString(internal_left, page_height - 1.0 * cm, format_header)
+        canvas.setFont(PDF_FONT_REGULAR, 7.8)
+        canvas.drawString(
+            internal_left + 7.2 * cm,
+            page_height - 1.0 * cm,
+            f"| {meta.get('report_title') or 'Reporte técnico'}",
+        )
 
         footer = "INFORME VÁLIDO ÚNICAMENTE PARA LAS CONDICIONES PRESENTES DURANTE EL SERVICIO. NO PODRÁ SER COPIADO PARCIAL O TOTALMENTE SIN PREVIA AUTORIZACIÓN."
         canvas.setStrokeColor(colors.HexColor("#0ea5e9"))
@@ -675,30 +696,61 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         )
     )
 
-    cover_lines = [
-        meta.get("asset") or "",
-        meta.get("unit") or "",
-        meta.get("location") or "",
-        meta.get("client") or "",
+    # ===== Bloque grande del activo (estilo SIGA) =====
+    # En el reporte SIGA original se ve algo como:
+    #     TURBOGENERADOR TES1
+    #     LM5000
+    #     VILLAVICENCIO
+    #     TERMOSURIA
+    # Cada línea grande, centrada (o alineada a izquierda según diseño).
+    # Mantenemos alineación a izquierda para que case con el resto de la
+    # portada que ya tiene logo + Machinery Diagnostics Engineering.
+    asset_class = (meta.get("asset_class") or "").strip()
+    asset_name = (meta.get("asset") or "").strip()
+    unit_name = (meta.get("unit") or "").strip()
+    asset_model = (meta.get("asset_model") or "").strip()
+    location_name = (meta.get("location") or "").strip()
+    client_name = (meta.get("client") or "").strip()
+
+    # Línea 1: clase + tag/unidad ("TURBOGENERADOR TES1")
+    line1_parts = []
+    if asset_class:
+        line1_parts.append(asset_class)
+    if unit_name:
+        line1_parts.append(unit_name)
+    elif asset_name and not asset_class:
+        line1_parts.append(asset_name)
+    line1 = " ".join(line1_parts).strip().upper()
+
+    # Líneas siguientes: modelo, ubicación, cliente
+    cover_block_lines = [
+        line1,
+        asset_model.upper() if asset_model else "",
+        location_name.upper() if location_name else "",
+        client_name.upper() if client_name else "",
     ]
-    for line in cover_lines:
+    cover_block_lines = [ln for ln in cover_block_lines if ln]
+
+    for idx, line in enumerate(cover_block_lines):
+        # La primera línea (clase + tag) va más grande, las demás un poco menores
+        font_size = 22 if idx == 0 else 17
+        leading = 26 if idx == 0 else 21
         story.append(
             Paragraph(
                 _paragraph_safe(line),
                 ParagraphStyle(
-                    name=f"WMCoverLine_{len(story)}",
+                    name=f"WMCoverBlock_{idx}",
                     parent=styles["Normal"],
                     fontName=PDF_FONT_BOLD,
-                    fontSize=12.8,
-                    leading=16,
-                    textColor=colors.HexColor("#111827"),
-                    spaceAfter=3,
+                    fontSize=font_size,
+                    leading=leading,
+                    textColor=colors.HexColor("#0f172a"),
+                    spaceAfter=4,
                 ),
             )
         )
 
-    # Si hay descripción del tren acoplado, se muestra debajo de las líneas
-    # del activo en peso regular y un tamaño menor (sub-cabecera de portada).
+    # Si hay descripción del tren acoplado, sub-cabecera en regular más chica
     train_text = (meta.get("train_description") or "").strip()
     if train_text:
         story.append(
@@ -711,7 +763,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                     fontSize=10.8,
                     leading=14,
                     textColor=colors.HexColor("#374151"),
-                    spaceBefore=6,
+                    spaceBefore=10,
                     spaceAfter=3,
                 ),
             )
@@ -792,22 +844,23 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         story.append(Spacer(1, 0.30 * cm))
         story.append(PageBreak())
 
-    # Secciones 1/2/3: solo se muestran si tienen contenido. Si todas están
-    # vacías, las figuras pasan a ser la sección 1 directamente.
+    # Orden SIGA-style (Ciclo 10A): RECOMENDACIONES primero — es lo que el
+    # cliente abre y lee de inmediato. Objetivo y Desarrollo van después.
+    # Secciones que están vacías se ocultan y la numeración se compacta.
     section_idx = 1
     objective_text = (meta.get("service_objective") or "").strip()
     recommendations_text = (meta.get("recommendations") or "").strip()
     development_text = (meta.get("service_development") or "").strip()
 
-    if objective_text:
-        story.append(Paragraph(f"{section_idx}. OBJETIVO DEL SERVICIO", styles["WMSection"]))
-        story.append(Paragraph(_paragraph_safe(objective_text), styles["WMBody"]))
-        story.append(Spacer(1, 0.12 * cm))
-        section_idx += 1
-
     if recommendations_text:
         story.append(Paragraph(f"{section_idx}. RECOMENDACIONES", styles["WMSection"]))
         story.append(Paragraph(_paragraph_safe(recommendations_text), styles["WMBody"]))
+        story.append(Spacer(1, 0.12 * cm))
+        section_idx += 1
+
+    if objective_text:
+        story.append(Paragraph(f"{section_idx}. OBJETIVO DEL SERVICIO", styles["WMSection"]))
+        story.append(Paragraph(_paragraph_safe(objective_text), styles["WMBody"]))
         story.append(Spacer(1, 0.12 * cm))
         section_idx += 1
 
@@ -1065,6 +1118,28 @@ with m5:
     meta["location"] = st.text_input("Ubicación", key="report_meta_location", value=meta["location"])
 with m6:
     meta["consecutive"] = st.text_input("Consecutivo", key="report_meta_consecutive", value=meta["consecutive"])
+
+# Ciclo 10A — bloque grande SIGA-style del activo en la portada
+m_sa1, m_sa2 = st.columns(2)
+with m_sa1:
+    meta["asset_class"] = st.text_input(
+        "Clase de activo (portada)",
+        key="report_meta_asset_class",
+        value=meta.get("asset_class", ""),
+        placeholder="TURBOGENERADOR, MOTOR-BOMBA, COMPRESOR…",
+        help=(
+            "Clase técnica del activo en mayúsculas — aparece en grande "
+            "en la portada del PDF, junto a la unidad. Estilo reporte SIGA."
+        ),
+    )
+with m_sa2:
+    meta["asset_model"] = st.text_input(
+        "Modelo / configuración (portada)",
+        key="report_meta_asset_model",
+        value=meta.get("asset_model", ""),
+        placeholder="LM5000, SGT-300, Brush 54 MW…",
+        help="Modelo/configuración del activo. Se imprime en grande debajo de la clase.",
+    )
 
 # Composición del tren acoplado — la mayoría de máquinas reales son trenes
 # acoplados (turbina + generador, motor + bomba, motor + compresor, etc.)
