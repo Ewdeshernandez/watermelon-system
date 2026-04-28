@@ -1,0 +1,15 @@
+{
+  "profile_key": "brush_turbogenerator_54mw_3600",
+  "documents": [
+    {
+      "id": "seed_wersin_rebabbiting_2018",
+      "filename": "wersin_rebabbiting_2018-10-23.pdf",
+      "title": "Reporte de rebabbiting de cojinetes radiales (Wersin)",
+      "document_type": "bearing_repair_report",
+      "description": "Informe técnico del rebabbiting de los cuatro cojinetes radiales del turbogenerador Brush 54 MW realizado por Wersin el 23 de octubre de 2018. Documenta dimensiones finales mecanizadas, propiedades del babbitt aplicado (ASTM B-23 Grade 2 / BERA 90), tolerancias dimensionales y pruebas de adherencia conforme ISO 4386-1. Documento de referencia para análisis Cat IV del activo.",
+      "tags": ["babbitt", "rebabbiting", "cojinetes", "Wersin", "OEM"],
+      "uploaded_at": "2018-10-23T00:00:00",
+      "is_seed": true
+    }
+  ]
+}
