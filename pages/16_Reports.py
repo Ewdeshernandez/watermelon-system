@@ -866,7 +866,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
     # Aire grande antes del bloque de firmas (estética SIGA: las firmas
     # quedan en el tercio inferior del cover, no apretadas al activo)
-    story.append(Spacer(1, 2.20 * cm))
+    story.append(Spacer(1, 3.50 * cm))
 
     prepared_by = (meta.get("prepared_by") or "").strip()
     prepared_role = (meta.get("prepared_role") or "Junior Condition Monitoring Engineer").strip()
@@ -951,8 +951,9 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         sig_table.hAlign = "CENTER"
         story.append(sig_table)
         # Aire amplio entre firmas y mini-tabla de fecha/consecutivo: que
-        # ese bloque quede empujado contra el pie de la portada (estética SIGA)
-        story.append(Spacer(1, 2.40 * cm))
+        # ese bloque quede empujado contra el pie de la portada (estética SIGA).
+        # Casi pegado al disclaimer del footer.
+        story.append(Spacer(1, 4.50 * cm))
 
     # Bloque de fecha/periodo/consecutivo como mini-tabla 2 columnas — más
     # profesional y compacto que un párrafo plano. "Periodo evaluado" se
