@@ -64,6 +64,10 @@ SEED_DOCUMENTS_DIR = DATA_DIR / "asset_documents_seed"
 # =============================================================
 
 DOCUMENT_TYPES = {
+    "schematic": "Esquemático del tren acoplado",  # Ciclo 14a — usado por
+                                                    # Machinery Library para
+                                                    # vincular imagen del tren
+                                                    # al Resumen Ejecutivo del PDF
     "bearing_repair_report": "Reporte de reparación / rebabbitado de cojinete",
     "oem_manual": "Manual del fabricante (OEM)",
     "commissioning_report": "Reporte de comisionamiento",
