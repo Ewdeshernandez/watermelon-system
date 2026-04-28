@@ -320,14 +320,26 @@ def render_instance_header(state: Dict[str, Any]) -> None:
 
             with tab_sch:
                 st.caption(
-                    "Subí el esquemático PNG/JPG en la sección 'Cargar nuevo documento' "
-                    "más abajo, con tipo='schematic'. Después seleccioná aquí cuál es el esquemático "
+                    "Cualquier imagen del Vault del activo (PNG / JPG / JPEG / GIF / "
+                    "WEBP / SVG) aparece como opción acá, sin importar el 'document_type' "
+                    "con que la hayas subido. Seleccioná cuál usar como esquemático "
                     "principal del tren para que aparezca en el Resumen Ejecutivo del PDF."
                 )
+                # Filtro permisivo (Ciclo 14a hotfix 6): acepta documentos que
+                # sean imágenes por extensión, además del tipo 'schematic'.
+                # Así el usuario no tiene que re-subir si eligió otro tipo
+                # cuando lo cargó.
+                _SCH_TYPES = ("schematic", "esquematico", "diagram")
+                _SCH_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".tiff")
                 schematic_options = [("", "(sin esquemático)")]
                 for d in inst.documents:
-                    if d.get("document_type", "").lower() in ("schematic", "esquematico", "diagram"):
-                        schematic_options.append((d.get("id", ""), d.get("title") or d.get("filename") or "—"))
+                    dtype = (d.get("document_type") or "").lower()
+                    fname = (d.get("filename") or "").lower()
+                    is_type_match = dtype in _SCH_TYPES
+                    is_ext_match = any(fname.endswith(ext) for ext in _SCH_EXTS)
+                    if is_type_match or is_ext_match:
+                        label = d.get("title") or d.get("filename") or "—"
+                        schematic_options.append((d.get("id", ""), label))
                 option_ids = [o[0] for o in schematic_options]
                 option_labels = [o[1] for o in schematic_options]
                 current_idx = option_ids.index(inst.schematic_png) if inst.schematic_png in option_ids else 0
@@ -338,6 +350,12 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     index=current_idx,
                 )
                 new_sch_id = option_ids[new_sch_idx]
+                if len(schematic_options) == 1:
+                    st.warning(
+                        "El Vault de este activo no tiene aún ninguna imagen. "
+                        "Subí un PNG/JPG en la sección 'Cargar nuevo documento' "
+                        "más abajo y volvé acá."
+                    )
 
             saved = st.form_submit_button("💾 Actualizar metadata completa", width="stretch")
             if saved:
