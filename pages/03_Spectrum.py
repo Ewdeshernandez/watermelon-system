@@ -20,6 +20,7 @@ from core.spectrum_diagnostics import (
     build_spectrum_report_notes,
     build_spectrum_diagnostics_rotordyn,  # Ciclo 11: Cat IV completo
 )
+from core.spectrum_scale import suggest_max_cpm_for_unit  # Ciclo 11.1: auto-escala
 from core.bearing_catalog import (
     build_bearing_fault_overlay_from_catalog,
     build_bearing_fault_overlay_from_nb,
@@ -1588,8 +1589,13 @@ with st.sidebar:
 
     valid_ids = {r.signal_id for r in records_all}
     current_ids = [sid for sid in st.session_state.wm_sp_selected_signal_ids if sid in valid_ids]
+
+    # Auto-select all (Ciclo 11.1): si el usuario no tiene selección activa,
+    # mostrar TODAS las señales cargadas en lugar de solo la primera. Igual
+    # que el patrón ya implementado en Bode (Ciclo 2-B). Le ahorra al usuario
+    # el clic repetitivo de seleccionar uno por uno cuando carga 3+ CSVs.
     if not current_ids:
-        current_ids = [records_all[0].signal_id]
+        current_ids = [r.signal_id for r in records_all]
         st.session_state.wm_sp_selected_signal_ids = current_ids
 
     default_names = [r.name for r in records_all if r.signal_id in current_ids]
@@ -1641,15 +1647,46 @@ with st.sidebar:
         else records_all[0].signal_id
     )
     primary_for_defaults = next(r for r in records_all if r.signal_id == default_source_id)
-    default_max_cpm = float(primary_for_defaults.rpm * 10) if primary_for_defaults.rpm is not None else 60000.0
+
+    # Ciclo 11.1 — Auto-escala del eje X según la unidad física de la
+    # señal: displacement→60k CPM, velocity→120k CPM, acceleration→
+    # 600k CPM. El usuario puede overridear desde 'Max frequency (CPM)'
+    # cambiando el valor manualmente. Cuando cambia la primera señal
+    # seleccionada y la unidad cambia de familia, el sistema sugiere
+    # un nuevo default sin pisar la edición manual del usuario.
+    primary_unit_text = amplitude_unit_text(
+        infer_amplitude_unit(primary_for_defaults.metadata or {}),
+        amplitude_mode,
+    )
+    suggested_max_cpm, scale_reason = suggest_max_cpm_for_unit(
+        primary_unit_text, rpm=primary_for_defaults.rpm,
+    )
+
+    # Persistir la preferencia del usuario en session_state. La clave
+    # incluye la "familia" inferida — si el usuario cambia a una señal
+    # de otra familia (ej. de displacement a acceleration), se reaplica
+    # el default automáticamente (ya no le sirve 60k CPM si está mirando
+    # un acelerómetro).
+    from core.spectrum_scale import classify_amplitude_quantity
+    current_family = classify_amplitude_quantity(primary_unit_text)
+    family_key = f"wm_sp_max_cpm_family_{current_family}"
+    if family_key not in st.session_state:
+        st.session_state[family_key] = suggested_max_cpm
 
     max_cpm = st.number_input(
         "Max frequency (CPM)",
         min_value=100.0,
-        value=float(max(1000.0, default_max_cpm)),
-        step=100.0,
+        value=float(max(1000.0, st.session_state[family_key])),
+        step=1000.0,
         format="%.0f",
+        help=(
+            f"Auto-sugerido para esta señal: {suggested_max_cpm:,.0f} CPM. "
+            f"Razón: {scale_reason} Cambialo si necesitás otro rango."
+        ),
+        key=f"wm_sp_max_cpm_input_{current_family}",
     )
+    st.session_state[family_key] = float(max_cpm)
+    st.caption(f"📊 Auto-rango: {scale_reason}")
 
     y_axis_mode = st.selectbox(
         "Y-axis scale",
