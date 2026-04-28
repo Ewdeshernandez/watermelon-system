@@ -762,6 +762,14 @@ def render_machinery_grid() -> None:
                     if client or site:
                         st.caption(" · ".join(p for p in [client, site] if p))
                     st.caption(f"📄 {n_docs} documento(s)")
+                    # Ciclo 14a — badge claro de estado del esquemático.
+                    # Le dice al usuario de un vistazo si esta maquina ya
+                    # tiene el esquematico vinculado para que aparezca en
+                    # el Resumen Ejecutivo del PDF.
+                    if inst.schematic_png:
+                        st.caption("🖼️ esquemático vinculado")
+                    else:
+                        st.caption("⚠️ sin esquemático principal")
 
                     # Indicador si esta es la activa
                     if st.session_state.get("wm_active_instance_id") == inst_id:

@@ -1389,6 +1389,87 @@ pdf_error = None
 pdf_bytes: Optional[bytes] = None
 meta = st.session_state["report_meta"]
 
+# =============================================================
+# Ciclo 14a — Panel de status del auto-fill (debug visual)
+# =============================================================
+# Justo antes del botón "Preparar PDF" mostramos qué se rellenó
+# desde la instancia activa. Esto le permite al ingeniero confirmar
+# CON SUS PROPIOS OJOS que el esquemático está vinculado y va a
+# aparecer en el Resumen Ejecutivo, sin tener que generar el PDF
+# y verificar a posteriori.
+try:
+    from core.instance_selector import get_active_instance_id
+    from core.instance_state import get_instance
+    _active_id = get_active_instance_id()
+    _active_inst = get_instance(_active_id) if _active_id else None
+except Exception:
+    _active_id = None
+    _active_inst = None
+
+with st.expander("📋 Auto-fill desde activo monitoreado", expanded=True):
+    if _active_inst is None:
+        st.warning(
+            "No hay activo monitoreado activo. Anda a Machinery Library "
+            "y activa una máquina para que sus datos se auto-llenen acá."
+        )
+    else:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(f"**Activo:** {_active_inst.tag or _active_inst.instance_id}")
+            st.caption(f"Cliente · {meta.get('client') or '—'}")
+            st.caption(f"Sitio · {meta.get('location') or '—'}")
+            st.caption(f"Clase · {meta.get('asset_class') or '—'}")
+            st.caption(f"Modelo · {meta.get('asset_model') or '—'}")
+        with c2:
+            train_d = (meta.get('train_description') or '').strip()
+            if train_d:
+                st.caption("**Train description:**")
+                st.caption(train_d)
+            else:
+                st.caption("**Train description:** —")
+
+            # Estado del esquemático — diagnóstico crítico
+            sch_doc = (meta.get("schematic_doc_id") or "").strip()
+            sch_inst = (meta.get("schematic_instance_id") or "").strip()
+            inst_sch = (_active_inst.schematic_png or "").strip()
+
+            if sch_doc and sch_inst:
+                # Validar que el doc realmente exista y traiga bytes
+                try:
+                    from core.instance_state import get_instance_document_bytes
+                    test_bytes = get_instance_document_bytes(sch_inst, sch_doc)
+                    if test_bytes:
+                        st.success(
+                            f"✓ Esquemático listo para Resumen Ejecutivo "
+                            f"({len(test_bytes) // 1024} KB)"
+                        )
+                    else:
+                        st.error(
+                            f"✗ schematic_doc_id presente ({sch_doc}) pero "
+                            f"no se pudo leer el archivo del Vault. "
+                            f"¿El documento fue borrado?"
+                        )
+                except Exception as e:
+                    st.error(f"✗ Error leyendo esquemático: {e}")
+            elif inst_sch:
+                # La instancia tiene schematic_png pero el meta no se rellenó
+                st.warning(
+                    f"⚠️ El activo tiene schematic_png={inst_sch[:20]}... "
+                    f"pero el meta del reporte no lo tomó. Click en "
+                    f"'Reset auto-fill' abajo para forzar recarga."
+                )
+                if st.button("Reset auto-fill desde activo", key="reset_autofill"):
+                    meta["schematic_doc_id"] = ""
+                    meta["schematic_instance_id"] = ""
+                    _autofill_report_meta_from_active_instance()
+                    st.rerun()
+            else:
+                st.error(
+                    "✗ El activo NO tiene esquemático principal vinculado. "
+                    "Andá a Machinery Library → tu máquina activa → "
+                    "Editar metadata → tab Esquemático → seleccioná tu PNG/JPG → guardar."
+                )
+
 with ga3:
     if st.button("Preparar PDF", use_container_width=True, disabled=not pdf_ready):
         try:
