@@ -694,17 +694,19 @@ def _set_active_instance(target_instance_id: str) -> None:
     """
     Callback del botón "Activar" en cada card del grid.
 
-    Se invoca con on_click ANTES de que se re-instancien los widgets
-    del próximo render. En esa fase, st.session_state se puede modificar
-    libremente — incluso keys que están vinculadas a widgets (como
-    'wm_active_instance_id', que es la key del selectbox del sidebar).
+    Hotfix 8: actualiza AMBAS keys porque están separadas:
+    - 'wm_active_instance_id' es la key persistente que get_active_instance_id()
+      lee desde otras páginas (no atada a ningún widget).
+    - 'wm_instance_select_library' es la key del selectbox del sidebar de
+      esta página específica; al setearla acá, el selectbox al
+      re-renderizarse en el próximo cycle se posiciona en la nueva activa.
 
-    Si lo intentáramos hacer fuera de un callback (con
-    `st.session_state["wm_active_instance_id"] = X` directamente en el
-    cuerpo del script), Streamlit lanzaría:
-      "cannot be modified after the widget with key X is instantiated".
+    Los callbacks corren en una fase pre-render donde session_state
+    se puede modificar libremente — incluso keys de widgets ya
+    instanciados en el cycle anterior.
     """
     st.session_state["wm_active_instance_id"] = target_instance_id
+    st.session_state["wm_instance_select_library"] = target_instance_id
 
 
 def render_machinery_grid() -> None:

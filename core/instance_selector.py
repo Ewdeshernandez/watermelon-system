@@ -182,19 +182,25 @@ def render_instance_selector(module_name: str = "module") -> Dict[str, Any]:
 
     label_map = {i["instance_id"]: _label_for(i) for i in instances}
 
-    # Ciclo 14a hotfix — usar SESSION_KEY_INSTANCE como key del widget
-    # para que (a) sea fuente única de verdad entre todos los módulos
-    # (Polar/Bode/SCL/Library/etc.) y (b) callbacks externos (como el
-    # botón "Activar" del grid) puedan setear esa key vía on_click sin
-    # caer en el error "cannot be modified after the widget is instantiated".
-    # Si la key ya existe en session_state, Streamlit la usa y ignora index.
-    # Si no existe, usa el index= para inicializar.
+    # Ciclo 14a hotfix 8 — separar key del widget de la key persistente.
+    # Razón: cuando el widget tiene la misma key que SESSION_KEY_INSTANCE,
+    # al navegar a otra página (ej. Reports) Streamlit "des-instancia" el
+    # widget y la key se pierde. Esto rompía el auto-fill cross-page.
+    # Solución: el widget tiene su propia key efímera, y después del
+    # selectbox copiamos el valor a SESSION_KEY_INSTANCE (key persistente
+    # NO atada a ningún widget → sobrevive cualquier navegación).
+    widget_key = f"wm_instance_select_{module_name}"
+    # Si la key del widget no existe pero tenemos un current_id válido,
+    # inicializarla con el current_id antes de instanciar el widget.
+    if widget_key not in st.session_state:
+        st.session_state[widget_key] = current_id
+
     selected_id = st.selectbox(
         "Instancia activa",
         options=instance_ids,
         index=instance_ids.index(current_id),
         format_func=lambda iid: label_map.get(iid, iid),
-        key=SESSION_KEY_INSTANCE,
+        key=widget_key,
         help=(
             "Cada instancia representa una máquina física específica. "
             "Los datos del Vault (parámetros, manuales) y los reportes "
@@ -203,8 +209,9 @@ def render_instance_selector(module_name: str = "module") -> Dict[str, Any]:
         ),
     )
 
-    # 5. La línea de "persistir selección" ya no hace falta — el widget
-    #    escribe directo a SESSION_KEY_INSTANCE porque es su propia key.
+    # 5. Persistir selección en la key principal (no-widget). Esto es
+    #    lo que get_active_instance_id() lee desde otras páginas.
+    st.session_state[SESSION_KEY_INSTANCE] = selected_id
     inst = get_instance(selected_id)
     if inst is None:
         return _empty_state()
