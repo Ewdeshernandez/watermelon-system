@@ -1,0 +1,512 @@
+"""
+core.sensor_map
+===============
+
+Mapa de sensores de vibración por máquina (Ciclo 14c.1).
+
+Cada Asset Instance tiene una lista de sensores configurados en
+Machinery Library, donde cada sensor describe:
+
+  - **Plano**: número correlativo desde el conductor al conducido,
+    siguiendo la convención API 670 / ISO 20816-1.
+    Para un tren motor + bomba: planos 1-2 = motor (DE/NDE),
+    3-4 = bomba (DE/NDE).
+  - **Lado y ángulo**: convención polar dividida en hemisferio L y R
+    vista desde el extremo conductor del eje, con 0° arriba.
+    Las sondas X-Y típicas API 670 van a +45° R (X) y +45° L (Y).
+  - **Dirección**: X / Y / radial / axial.
+  - **Tipo de sensor**: proximity (Desplazamiento, mil pp / µm pp),
+    velocity (V, mm/s RMS), accelerometer (A, g RMS).
+  - **Unidad nativa** y **setpoints individuales** (alarm / danger).
+  - **Patrón de match al Point del CSV**: glob estilo ``*5807*Y*``
+    que asocia los CSVs cargados al sensor correspondiente.
+
+El label de sensor sigue convención naming industrial: ``1Y_D``
+(plano 1, dirección Y, Desplazamiento), ``3X_A`` (plano 3, X,
+Aceleración), ``2_RAD_V`` (plano 2, radial, Velocidad).
+
+Ciclo 14c.1 — exporta:
+
+  - :func:`generate_standard_sensor_map` — pre-llena 8 sensores típicos
+  - :func:`resolve_sensor_for_point` — encuentra el sensor que matchea
+    un Point del CSV
+  - :func:`sensor_label` — formatea label estilo industrial
+  - :func:`sensor_unit_family` — Proximity / Velocity / Acceleration
+  - :func:`new_sensor` — constructor con defaults
+"""
+
+from __future__ import annotations
+
+import fnmatch
+import re
+from typing import Any, Dict, List, Optional
+
+
+# Mapeo tipo de sensor → familia de medida (para Tabular List)
+_TYPE_TO_FAMILY = {
+    "proximity": "Proximity",
+    "velocity": "Velocity",
+    "accelerometer": "Acceleration",
+    "keyphasor": "Phase Reference",  # Ciclo 14c.1.1 — referencia 1X de fase
+}
+
+# Mapeo tipo de sensor → letra de unidad (para naming convention)
+_TYPE_TO_LETTER = {
+    "proximity": "D",       # Desplazamiento
+    "velocity": "V",
+    "accelerometer": "A",
+    "keyphasor": "K",       # Keyphasor → 1 pulso/rev
+}
+
+# Unidades nativas por defecto según tipo
+_DEFAULT_UNIT_BY_TYPE = {
+    "proximity": "mil pp",
+    "velocity": "mm/s RMS",
+    "accelerometer": "g RMS",
+    "keyphasor": "pulses/rev",
+}
+
+
+def new_sensor(
+    *,
+    plane: int = 1,
+    plane_label: str = "",
+    side: str = "L",
+    angle_deg: float = 45.0,
+    direction: str = "Y",
+    sensor_type: str = "proximity",
+    unit_native: str = "",
+    alarm: float = 0.0,
+    danger: float = 0.0,
+    csv_match_pattern: str = "",
+    notes: str = "",
+) -> Dict[str, Any]:
+    """Constructor de un sensor con defaults razonables."""
+    if not unit_native:
+        unit_native = _DEFAULT_UNIT_BY_TYPE.get(sensor_type, "")
+    return {
+        "plane": int(plane),
+        "plane_label": plane_label,
+        "side": side,
+        "angle_deg": float(angle_deg),
+        "direction": direction,
+        "sensor_type": sensor_type,
+        "unit_native": unit_native,
+        "alarm": float(alarm),
+        "danger": float(danger),
+        "csv_match_pattern": csv_match_pattern,
+        "notes": notes,
+    }
+
+
+def sensor_label(sensor: Dict[str, Any]) -> str:
+    """
+    Devuelve label industrial corto: ``1Y_D``, ``3X_A``, ``2_RAD_V``.
+
+    Formato: ``{plane}{direction}_{type_letter}`` cuando direction
+    es X / Y. Cuando es radial o axial, formato ``{plane}_{DIR}_{letter}``.
+    """
+    plane = int(sensor.get("plane", 0) or 0)
+    direction = str(sensor.get("direction", "") or "").strip().upper()
+    sensor_type = str(sensor.get("sensor_type", "") or "").lower()
+    letter = _TYPE_TO_LETTER.get(sensor_type, "?")
+
+    if direction in ("X", "Y"):
+        return f"{plane}{direction}_{letter}"
+    if direction in ("RADIAL", "RAD"):
+        return f"{plane}_RAD_{letter}"
+    if direction in ("AXIAL", "AX"):
+        return f"{plane}_AX_{letter}"
+    return f"{plane}_{direction or '?'}_{letter}"
+
+
+def sensor_unit_family(sensor: Dict[str, Any]) -> str:
+    """Devuelve la familia de medida en el lenguaje de Tabular List."""
+    return _TYPE_TO_FAMILY.get(
+        str(sensor.get("sensor_type", "") or "").lower(),
+        "Auto",
+    )
+
+
+def _normalize_for_match(text: str) -> str:
+    """Normaliza un string para comparación case-insensitive sin espacios extra."""
+    return re.sub(r"\s+", " ", str(text or "").strip().lower())
+
+
+def _pattern_matches(pattern_text: str, target_norm: str) -> bool:
+    """
+    Devuelve True si ``pattern_text`` matchea ``target_norm`` (lowercased).
+
+    Reglas (en orden):
+    - Si pattern_text tiene comas, se splitea y matchea CUALQUIERA (OR).
+    - Si una entrada contiene ``*`` o ``?``, se usa fnmatch (glob).
+    - Si no, se usa substring case-insensitive.
+    """
+    if not pattern_text:
+        return False
+    for token in pattern_text.split(","):
+        token = token.strip().lower()
+        if not token:
+            continue
+        if "*" in token or "?" in token:
+            if fnmatch.fnmatch(target_norm, token):
+                return True
+        else:
+            if token in target_norm:
+                return True
+    return False
+
+
+def resolve_sensor_for_point(
+    sensors: List[Dict[str, Any]],
+    csv_point: str,
+    csv_variable: str = "",
+    csv_unit: str = "",
+) -> Optional[Dict[str, Any]]:
+    """
+    Encuentra el sensor del mapa que matchea un Point del CSV.
+
+    Estrategia de match (en orden de prioridad):
+      1. ``csv_match_pattern`` del sensor — admite tres formatos:
+         * Lista separada por comas: "VE5807 (Y), VE5807-Y" (OR)
+         * Glob: "*5807*y*"
+         * Substring case-insensitive: "VE5807" matchea cualquier
+           Point que contenga "VE5807" (sin importar mayúsculas).
+      2. Match heurístico: si el csv_point contiene "(X)" o "(Y)"
+         busca un sensor con misma direction. Si csv_unit indica
+         g/m/s² busca accelerometer; mil/µm busca proximity; mm/s
+         o in/s busca velocity. (Solo si exactamente 1 sensor matchea.)
+
+    Args:
+        sensors: lista de sensores del Instance.sensors.
+        csv_point: campo Point del CSV (ej. "VE5807 (Y)").
+        csv_variable: campo Variable del CSV (ej. "Disp Wf").
+        csv_unit: unidad de amplitud (ej. "mil pp", "g").
+
+    Returns:
+        El sensor que matcheó (dict) o None si no encontró match.
+    """
+    if not sensors:
+        return None
+
+    point_norm = _normalize_for_match(csv_point)
+    variable_norm = _normalize_for_match(csv_variable)
+    unit_norm = _normalize_for_match(csv_unit)
+
+    # 1. Match por csv_match_pattern (lista comas / glob / substring)
+    for sensor in sensors:
+        pattern = (sensor.get("csv_match_pattern") or "").strip()
+        if not pattern:
+            continue
+        if _pattern_matches(pattern, point_norm) or _pattern_matches(pattern, variable_norm):
+            return sensor
+
+    # 2. Match heurístico por dirección X/Y + unidad
+    direction_hint = ""
+    if "(x)" in point_norm or " x " in f" {point_norm} " or point_norm.endswith(" x"):
+        direction_hint = "X"
+    elif "(y)" in point_norm or " y " in f" {point_norm} " or point_norm.endswith(" y"):
+        direction_hint = "Y"
+
+    type_hint = ""
+    # Velocity primero porque "mm/s" / "in/s" matchean específicamente.
+    # Si chequeáramos accelerometer ("m/s²") antes, el substring "m/s"
+    # haría falso positivo contra "mm/s" (velocidad).
+    if any(tok in unit_norm for tok in ("mm/s", "in/s", "ips")):
+        type_hint = "velocity"
+    elif any(tok in unit_norm for tok in ("g rms", "g pk", "g p", "m/s²", "m/s2")):
+        type_hint = "accelerometer"
+    elif any(tok in unit_norm for tok in ("mil", "µm", "um")):
+        type_hint = "proximity"
+
+    if not type_hint and ("acell" in point_norm or "accel" in point_norm or "ace" in variable_norm):
+        type_hint = "accelerometer"
+
+    candidates = sensors
+    if direction_hint:
+        candidates = [s for s in candidates if str(s.get("direction", "")).upper() == direction_hint]
+    if type_hint:
+        candidates = [s for s in candidates if str(s.get("sensor_type", "")).lower() == type_hint]
+
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Tie-break en orden: label → plane_label → tokens del pattern → primer
+    # candidate del tipo correcto (fallback gracioso).
+    if candidates:
+        # 1. Substring del label industrial (1y_d, 2_rad_a, etc.)
+        for sensor in candidates:
+            lbl = sensor_label(sensor).lower()
+            if lbl in point_norm:
+                return sensor
+
+        # 2. Substring del plane_label (ej. "DE driver", "TRF (LM6000)")
+        for sensor in candidates:
+            plbl = _normalize_for_match(sensor.get("plane_label", ""))
+            if plbl and plbl in point_norm:
+                return sensor
+
+        # 3. Tokens distintivos del csv_match_pattern (ej. "trf", "crf"
+        # extraídos de "*trf*acell*"). Filtramos comunes (x, y, acell, etc.).
+        _common_tokens = {"acell", "acc", "vel", "rad", "ax", "x", "y"}
+        for sensor in candidates:
+            pattern = (sensor.get("csv_match_pattern") or "").lower()
+            for chunk in pattern.replace(",", " ").split():
+                for token in chunk.split("*"):
+                    token = token.strip()
+                    if not token or token in _common_tokens or token.isdigit():
+                        continue
+                    if token in point_norm:
+                        return sensor
+
+        # 4. Fallback gracioso: si después de filtrar por type_hint quedan
+        # varios candidates pero ninguno matchea por substring, devolvemos
+        # el primero. Mejor un match de tipo correcto que caer al global
+        # que tendría una familia incorrecta (proximity en vez de accel,
+        # por ejemplo).
+        if type_hint:
+            return candidates[0]
+
+    return None
+
+
+def _generate_plane_sensors(
+    plane_idx: int,
+    plane_label: str,
+    instrumentation_mode: str,
+    accel_prefix: str,
+    proximity_alarm: float,
+    proximity_danger: float,
+    accel_alarm: float,
+    accel_danger: float,
+    velocity_alarm: float,
+    velocity_danger: float,
+) -> List[Dict[str, Any]]:
+    """
+    Genera los sensores para UN plano según el modo de instrumentación.
+
+    Modos soportados (Ciclo 14c.1.1):
+    - **proximity_xy**: par X-Y proximity a 45° R/L (estándar API 670 para
+      cojinetes hidrodinámicos / fluid_film).
+    - **axial_accel**: 1 acelerómetro radial top (sólo para rolling_element
+      simple, ej. motor pequeño).
+    - **accel_plus_velocity**: 1 acelerómetro + 1 velocímetro radial juntos
+      (estándar turbinas aeroderivadas modernas tipo LM6000 con instrumentación
+      en TRF y CRF).
+    """
+    mode = (instrumentation_mode or "").lower()
+    out: List[Dict[str, Any]] = []
+    prefix_lower = accel_prefix.lower()
+
+    if mode == "axial_accel":
+        out.append(new_sensor(
+            plane=plane_idx, plane_label=plane_label, side="top", angle_deg=0.0,
+            direction="radial", sensor_type="accelerometer",
+            unit_native="g RMS",
+            alarm=accel_alarm, danger=accel_danger,
+            csv_match_pattern=f"*{plane_idx}*{prefix_lower}*, *{prefix_lower}*{plane_idx}*",
+        ))
+    elif mode == "accel_plus_velocity":
+        # Turbina aeroderivada con accel + velocity en el mismo cojinete
+        # (típico LM6000: TRF y CRF cada uno con un par accel+velocity)
+        out.append(new_sensor(
+            plane=plane_idx, plane_label=plane_label, side="top", angle_deg=0.0,
+            direction="radial", sensor_type="accelerometer",
+            unit_native="g RMS",
+            alarm=accel_alarm, danger=accel_danger,
+            csv_match_pattern=f"*{prefix_lower}*acell*, *{plane_idx}*{prefix_lower}*acell*, *{prefix_lower}*acc*",
+        ))
+        out.append(new_sensor(
+            plane=plane_idx, plane_label=plane_label, side="top", angle_deg=0.0,
+            direction="radial", sensor_type="velocity",
+            unit_native="mm/s RMS",
+            alarm=velocity_alarm, danger=velocity_danger,
+            csv_match_pattern=f"*{prefix_lower}*vel*, *{plane_idx}*{prefix_lower}*vel*",
+        ))
+    else:
+        # proximity_xy (default): par X-Y a 45° R/L (estándar API 670)
+        out.append(new_sensor(
+            plane=plane_idx, plane_label=plane_label, side="R", angle_deg=45.0,
+            direction="X", sensor_type="proximity",
+            unit_native="mil pp",
+            alarm=proximity_alarm, danger=proximity_danger,
+            csv_match_pattern=f"*{plane_idx}*x*",
+        ))
+        out.append(new_sensor(
+            plane=plane_idx, plane_label=plane_label, side="L", angle_deg=45.0,
+            direction="Y", sensor_type="proximity",
+            unit_native="mil pp",
+            alarm=proximity_alarm, danger=proximity_danger,
+            csv_match_pattern=f"*{plane_idx}*y*",
+        ))
+
+    return out
+
+
+def _support_type_to_default_mode(support_type: str) -> str:
+    """
+    Mapea support_type del Instance.header al modo de instrumentación
+    típico de ese support type:
+      - fluid_film / magnetic / mixed → proximity_xy (API 670 X-Y)
+      - rolling_element → accel_plus_velocity (turbinas aero modernas)
+        En vez de axial_accel, default es el más completo. El usuario puede
+        cambiar a axial_accel en la UI si su máquina solo tiene 1 sensor.
+    """
+    sup = (support_type or "").lower()
+    if sup == "rolling_element":
+        return "accel_plus_velocity"
+    return "proximity_xy"
+
+
+def generate_standard_sensor_map(
+    *,
+    # Driver (máquina motriz)
+    driver_planes: int = 2,
+    driver_instrumentation: str = "proximity_xy",
+    driver_accel_prefix: str = "acell",
+    driver_plane_labels: Optional[List[str]] = None,
+    # Driven (máquina accionada)
+    driven_planes: int = 2,
+    driven_instrumentation: str = "proximity_xy",
+    driven_accel_prefix: str = "acell",
+    driven_plane_labels: Optional[List[str]] = None,
+    # Keyphasor (referencia 1X de fase, opcional, ubicación coupling)
+    include_keyphasor: bool = False,
+    keyphasor_pattern: str = "*kphgen*, *keyph*, *kp*",
+    # Setpoints
+    proximity_alarm_mil_pp: float = 4.0,
+    proximity_danger_mil_pp: float = 6.0,
+    accel_alarm_g_rms: float = 4.5,
+    accel_danger_g_rms: float = 9.0,
+    velocity_alarm_mm_s: float = 4.5,
+    velocity_danger_mm_s: float = 11.2,
+    # Compatibilidad con API previo (Ciclo 14c.1)
+    driver_support_type: Optional[str] = None,
+    driven_support_type: Optional[str] = None,
+    nominal_planes_driver: Optional[int] = None,
+    nominal_planes_driven: Optional[int] = None,
+    include_axial_accelerometer: Optional[bool] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Genera un mapa estándar de sensores para un tren acoplado.
+
+    Modos de instrumentación por máquina (driver y driven independientes):
+
+      - **proximity_xy**: par X-Y proxímetros a 45° R/L (API 670 clásico).
+        Default para fluid_film / magnetic.
+
+      - **axial_accel**: 1 acelerómetro radial top por plano. Para rolling
+        element simple (motores chicos, bombas pequeñas).
+
+      - **accel_plus_velocity**: 1 acelerómetro + 1 velocímetro radial top
+        por plano. Estándar turbinas aeroderivadas modernas (LM6000, TM2500
+        con TRF y CRF instrumentados completos).
+
+    Casos típicos:
+
+      - **TES1 (LM6000 + Brush 54 MW)**: driver=accel_plus_velocity con
+        prefix='TRF'/'CRF' (configurable), driven=proximity_xy + keyphasor.
+        Total: 4 (driver) + 4 (driven) + 1 (keyphasor) = 9 sensores.
+      - **Compresor centrífugo**: ambos proximity_xy. Total: 8 sensores.
+      - **Motor + bomba pequeña**: ambos axial_accel. Total: 4 sensores.
+
+    Args:
+        driver_planes / driven_planes: cantidad de cojinetes (típico 2).
+        driver_instrumentation / driven_instrumentation: modo (ver arriba).
+        driver_accel_prefix / driven_accel_prefix: prefijo para nombres de
+            acelerómetros (ej. 'TRF', 'CRF', 'BRG', 'casing', 'acell').
+            Sólo aplica si el modo incluye acelerómetros.
+        driver_plane_labels / driven_plane_labels: nombres custom para cada
+            plano. Si None, usa 'DE driver' / 'NDE driver' / 'DE driven' / etc.
+        include_keyphasor: agrega un sensor keyphasor en el coupling al final.
+        keyphasor_pattern: pattern de match para el Point del CSV del keyphasor.
+        proximity_alarm/danger_mil_pp, accel_alarm/danger_g_rms,
+            velocity_alarm/danger_mm_s: setpoints por familia.
+
+    Returns:
+        Lista de sensores lista para asignar a Instance.sensors.
+    """
+    # Back-compat con API previo (Ciclo 14c.1): si se pasa support_type,
+    # se mapea al modo de instrumentación correspondiente.
+    if driver_support_type is not None:
+        driver_instrumentation = _support_type_to_default_mode(driver_support_type)
+    if driven_support_type is not None:
+        driven_instrumentation = _support_type_to_default_mode(driven_support_type)
+    if nominal_planes_driver is not None:
+        driver_planes = nominal_planes_driver
+    if nominal_planes_driven is not None:
+        driven_planes = nominal_planes_driven
+    if include_axial_accelerometer is True and driven_support_type is None:
+        driven_instrumentation = "axial_accel"
+
+    sensors: List[Dict[str, Any]] = []
+    plane_idx = 0
+
+    # Driver: planos 1..N
+    for i in range(driver_planes):
+        plane_idx += 1
+        if driver_plane_labels and i < len(driver_plane_labels):
+            plane_lbl = driver_plane_labels[i]
+        else:
+            plane_lbl = "DE driver" if i == 0 else (
+                "NDE driver" if i == 1 else f"Driver bearing {i + 1}"
+            )
+        sensors.extend(_generate_plane_sensors(
+            plane_idx=plane_idx, plane_label=plane_lbl,
+            instrumentation_mode=driver_instrumentation,
+            accel_prefix=driver_accel_prefix,
+            proximity_alarm=proximity_alarm_mil_pp,
+            proximity_danger=proximity_danger_mil_pp,
+            accel_alarm=accel_alarm_g_rms,
+            accel_danger=accel_danger_g_rms,
+            velocity_alarm=velocity_alarm_mm_s,
+            velocity_danger=velocity_danger_mm_s,
+        ))
+
+    # Driven: planos siguientes
+    for i in range(driven_planes):
+        plane_idx += 1
+        if driven_plane_labels and i < len(driven_plane_labels):
+            plane_lbl = driven_plane_labels[i]
+        else:
+            plane_lbl = "DE driven" if i == 0 else (
+                "NDE driven" if i == 1 else f"Driven bearing {i + 1}"
+            )
+        sensors.extend(_generate_plane_sensors(
+            plane_idx=plane_idx, plane_label=plane_lbl,
+            instrumentation_mode=driven_instrumentation,
+            accel_prefix=driven_accel_prefix,
+            proximity_alarm=proximity_alarm_mil_pp,
+            proximity_danger=proximity_danger_mil_pp,
+            accel_alarm=accel_alarm_g_rms,
+            accel_danger=accel_danger_g_rms,
+            velocity_alarm=velocity_alarm_mm_s,
+            velocity_danger=velocity_danger_mm_s,
+        ))
+
+    # Keyphasor opcional al final, en coupling (entre driver y driven).
+    # Convención: se le asigna plano 0 (especial) o el último + 1 con label
+    # 'Coupling'. No tiene alarm/danger porque es referencia, no medición.
+    if include_keyphasor:
+        sensors.append(new_sensor(
+            plane=0,
+            plane_label="Coupling (keyphasor)",
+            side="—", angle_deg=0.0,
+            direction="axial",
+            sensor_type="keyphasor",
+            unit_native="pulses/rev",
+            alarm=0.0, danger=0.0,  # Referencia de fase, no medición
+            csv_match_pattern=keyphasor_pattern,
+            notes="Referencia 1X para Polar/Bode. Montado en lado acople.",
+        ))
+
+    return sensors
+
+
+__all__ = [
+    "new_sensor",
+    "sensor_label",
+    "sensor_unit_family",
+    "resolve_sensor_for_point",
+    "generate_standard_sensor_map",
+]

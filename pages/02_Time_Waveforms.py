@@ -14,10 +14,14 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.auth import require_login, render_user_menu
-from core.waveform_diagnostics import generate_waveform_diagnostic, build_waveform_report_notes
-from core.waveform_metrics import compute_metrics_batch
+from core.waveform_diagnostics import (
+    generate_waveform_diagnostic,
+    build_waveform_report_notes,
+    build_waveform_diagnostics_rotordyn,  # Ciclo 12: Cat IV completo
+)
+from core.waveform_metrics import compute_metrics_batch, compute_waveform_metrics
 from core.waveform_insights import generate_batch_insights
-from core.waveform_impacts import detect_impacts_batch
+from core.waveform_impacts import detect_impacts_batch, detect_impacts
 
 
 # ==============================
@@ -1477,6 +1481,94 @@ def render_waveform_panel(
 
     st.info(text_diag["narrative"])
 
+    # Ciclo 12 — Diagnóstico Cat IV completo: extiende el text_diag
+    # legacy con detectores de modulación AM (Hilbert), asimetría
+    # direccional, beating, clipping, sawtooth y kurtosis estadística.
+    # NO reemplaza el legacy; se suma como narrativa profunda Cat IV
+    # con recomendaciones priorizadas y normas citadas.
+    cat_iv_wf_diag = None
+    try:
+        amp_arr_cat = prepared.amplitude
+        time_arr_cat = prepared.time_s
+        metrics_cat = compute_waveform_metrics(amp_arr_cat)
+        impacts_cat = detect_impacts(amp_arr_cat)
+        cat_iv_wf_diag = build_waveform_diagnostics_rotordyn(
+            time_s=time_arr_cat,
+            amplitude=amp_arr_cat,
+            metrics=metrics_cat,
+            impacts=impacts_cat,
+            machine_label=str(prepared.machine or ""),
+            point_label=str(prepared.point or ""),
+            amplitude_unit=infer_amplitude_unit(prepared.metadata or {}),
+        )
+    except Exception:
+        cat_iv_wf_diag = None
+
+    if cat_iv_wf_diag is not None:
+        sev = cat_iv_wf_diag.get("severity_global", "VIGILANCIA")
+        sev_color = {
+            "CRÍTICA": "#dc2626", "ACCIÓN REQUERIDA": "#ea580c",
+            "ATENCIÓN": "#f59e0b", "VIGILANCIA": "#84cc16",
+            "CONDICIÓN ACEPTABLE": "#16a34a",
+        }.get(sev, "#475569")
+        with st.expander(
+            f"🔬 Diagnóstico avanzado · {cat_iv_wf_diag.get('headline', '')}",
+            expanded=True,
+        ):
+            st.markdown(
+                f"<div style='display:inline-block; padding:6px 14px; "
+                f"border-radius:999px; background:{sev_color}; color:white; "
+                f"font-weight:700; font-size:0.95rem; margin-bottom:8px;'>"
+                f"Severidad global: {sev}</div>",
+                unsafe_allow_html=True,
+            )
+
+            # Ciclo 12.2 — métricas duras dentro del expander avanzado
+            # (antes estaban en una seccion 'Analisis automatico' huerfana
+            # que no llegaba al reporte; ahora viven al lado de la
+            # narrativa que SI las usa).
+            try:
+                _struct = cat_iv_wf_diag.get("structured") or {}
+                _metrics_block = _struct.get("metrics") or {}
+                _impacts_block = _struct.get("impacts") or {}
+                _rms = float(_metrics_block.get("rms", 0.0) or 0.0)
+                _peak = float(_metrics_block.get("peak", 0.0) or 0.0)
+                _p2p = float(_metrics_block.get("peak_to_peak", 0.0) or 0.0)
+                _cf = float(_metrics_block.get("crest_factor", 0.0) or 0.0)
+                _kurt = float(_metrics_block.get("kurtosis", 0.0) or 0.0)
+                _skew = float(_metrics_block.get("skewness", 0.0) or 0.0)
+                _mean = float(_metrics_block.get("mean", 0.0) or 0.0)
+                _std = float(_metrics_block.get("std", 0.0) or 0.0)
+                _impacts_count = int(_impacts_block.get("count", 0) or 0)
+                _impacts_thr = float(_impacts_block.get("threshold", 0.0) or 0.0)
+
+                _c1, _c2, _c3, _c4 = st.columns(4)
+                _c1.metric("RMS", f"{_rms:.4f}")
+                _c2.metric("Peak", f"{_peak:.4f}")
+                _c3.metric("Crest Factor", f"{_cf:.3f}")
+                _c4.metric("Kurtosis", f"{_kurt:.3f}")
+
+                _c5, _c6, _c7, _c8 = st.columns(4)
+                _c5.metric("Mean", f"{_mean:.4f}")
+                _c6.metric("Std", f"{_std:.4f}")
+                _c7.metric("Skewness", f"{_skew:.3f}")
+                _c8.metric("Peak-to-Peak", f"{_p2p:.4f}")
+
+                _ic1, _ic2 = st.columns(2)
+                _ic1.metric("Cantidad de transitorios", str(_impacts_count))
+                _ic2.metric("Threshold dinámico", f"{_impacts_thr:.4f}")
+            except Exception:
+                pass
+
+            st.write(cat_iv_wf_diag.get("detail", ""))
+            st.write(cat_iv_wf_diag.get("action", ""))
+            findings = cat_iv_wf_diag.get("findings", [])
+            if findings:
+                st.caption(
+                    "Hallazgos detectados: "
+                    + " · ".join(f.get("headline", "") for f in findings)
+                )
+
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
@@ -1518,11 +1610,25 @@ def render_waveform_panel(
                 png_bytes_for_report = None
                 png_error_for_report = str(e)
 
+            # Ciclo 12 — preferir narrativa Cat IV completa cuando esté
+            # disponible. Combina headline + detail + action numerado con
+            # normas citadas. Si Cat IV falla, fallback a notes legacy.
+            if cat_iv_wf_diag is not None:
+                _h = (cat_iv_wf_diag.get("headline") or "").strip()
+                _d = (cat_iv_wf_diag.get("detail") or "").strip()
+                _a = (cat_iv_wf_diag.get("action") or "").strip()
+                _diag_for_report = {
+                    "headline": _h,
+                    "narrative": "\n\n".join(p for p in (_d, _a) if p),
+                }
+            else:
+                _diag_for_report = text_diag
+
             queue_waveform_to_report(
                 prepared,
                 fig,
                 panel_title,
-                text_diag,
+                _diag_for_report,
                 image_bytes=png_bytes_for_report,
             )
 
@@ -1548,7 +1654,7 @@ with st.sidebar:
 
     current_ids = [sid for sid in st.session_state.wm_selected_signal_ids if sid in valid_ids]
     if not current_ids:
-        current_ids = [records_all[0].signal_id]
+        current_ids = [r.signal_id for r in records_all]
         st.session_state.wm_selected_signal_ids = current_ids
 
     default_names = [r.name for r in records_all if r.signal_id in current_ids]
@@ -1721,163 +1827,9 @@ else:
 
 
 
-# ==============================
-# W FINAL: External Waveform Analysis (SAFE)
-# ==============================
-try:
-    import numpy as np
-
-    st.markdown("### Análisis automático de forma de onda")
-
-    debug_signals_count = len(selected_records) if "selected_records" in locals() else 0
-    debug_metrics_count = 0
-    debug_insights_count = 0
-    debug_impacts_count = 0
-
-    for primary in selected_records:
-        mask = (primary.time_s >= t_min) & (primary.time_s <= t_max)
-        if not np.any(mask):
-            continue
-
-        base_y = normalize_signal(primary.amplitude, normalization_mode)[mask]
-        base_t = primary.time_s[mask]
-
-        local_view_mode = waveform_view_mode
-        if local_view_mode != "Raw" and (primary.rpm is None or primary.rpm <= 0):
-            local_view_mode = "Raw"
-
-        processed_y, waveform_mode_label = apply_waveform_view_mode(
-            time_s=base_t,
-            y=base_y,
-            rpm=primary.rpm,
-            mode=local_view_mode,
-        )
-
-        y = np.asarray(processed_y, dtype=float).reshape(-1)
-        y = y[np.isfinite(y)]
-
-        if y.size == 0:
-            continue
-
-        rms = float(np.sqrt(np.mean(y ** 2)))
-        peak = float(np.max(np.abs(y)))
-        crest_factor = float(peak / rms) if rms > 0 else 0.0
-        mean = float(np.mean(y))
-        std = float(np.std(y))
-        peak_to_peak = float(np.max(y) - np.min(y))
-
-        if std > 0:
-            z = (y - mean) / std
-            skewness = float(np.mean(z ** 3))
-            kurtosis = float(np.mean(z ** 4))
-        else:
-            skewness = 0.0
-            kurtosis = 0.0
-
-        threshold = 3.5 * rms
-        peak_idx = np.where(np.abs(y) > threshold)[0]
-        impacts = []
-        if peak_idx.size > 0:
-            impacts = [int(peak_idx[0])]
-            for idx in peak_idx[1:]:
-                idx = int(idx)
-                if idx - impacts[-1] > 5:
-                    impacts.append(idx)
-
-        
-        insight_parts = []
-
-        if kurtosis > 4.0:
-            insight_parts.append(
-                "La señal presenta contenido transitorio de alta energía, indicando excitaciones no lineales en el sistema."
-            )
-
-        if crest_factor > 3.0:
-            insight_parts.append(
-                "El incremento en el factor de cresta sugiere la presencia de eventos transitorios de corta duración."
-            )
-
-        if abs(skewness) > 0.5:
-            direction = "positiva" if skewness > 0 else "negativa"
-            insight_parts.append(
-                f"La señal presenta asimetría {direction}, asociada a condiciones dinámicas no balanceadas."
-            )
-
-        if not insight_parts:
-            insight_parts.append(
-                "La señal presenta comportamiento estable dentro de condiciones normales de operación."
-            )
-
-        # 🔥 CONTEXTO DE SOPORTE (COJINETE vs RODAMIENTO)
-        machine_name = str(primary.name).upper()
-
-        if "COMPRESOR" in machine_name or "RECIP" in machine_name:
-            soporte_txt = (
-                " Para sistemas con cojinete plano, este comportamiento puede estar relacionado con "
-                "condiciones de lubricación, holguras dinámicas o contacto intermitente."
-            )
-        else:
-            soporte_txt = (
-                " En sistemas con rodamientos, este patrón puede asociarse a defectos incipientes o condiciones de carga."
-            )
-
-        insight_parts = [" ".join(insight_parts) + soporte_txt]
-
-        if kurtosis > 4.0:
-            insight_parts.append(
-                "Se detecta comportamiento impulsivo en la señal, compatible con transitorios o transitorios."
-            )
-        if crest_factor > 3.0:
-            insight_parts.append(
-                "El factor de cresta es elevado, indicando presencia de picos transitorios relevantes."
-            )
-        if abs(skewness) > 0.5:
-            direction = "positiva" if skewness > 0 else "negativa"
-            insight_parts.append(
-                f"La señal presenta asimetría {direction}, lo que sugiere componente direccional o sesgo dinámico."
-            )
-        if not insight_parts:
-            insight_parts.append(
-                "La señal presenta comportamiento estable sin evidencia fuerte de impulsividad."
-            )
-
-        debug_metrics_count += 1
-        debug_insights_count += 1
-        debug_impacts_count += 1
-
-        st.markdown(f"#### Señal {primary.name}")
-
-        c1, c2, c3, c4 = st.columns(4)
-        c1.metric("RMS", f"{rms:.4f}")
-        c2.metric("Peak", f"{peak:.4f}")
-        c3.metric("Crest Factor", f"{crest_factor:.3f}")
-        c4.metric("Kurtosis", f"{kurtosis:.3f}")
-
-        c5, c6, c7, c8 = st.columns(4)
-        c5.metric("Mean", f"{mean:.4f}")
-        c6.metric("Std", f"{std:.4f}")
-        c7.metric("Skewness", f"{skewness:.3f}")
-        c8.metric("Peak-to-Peak", f"{peak_to_peak:.4f}")
-
-        st.info(" ".join(insight_parts))
-
-        ic1, ic2 = st.columns(2)
-        ic1.metric("Cantidad de transitorios", str(len(impacts)))
-        ic2.metric("Threshold dinámico", f"{threshold:.4f}")
-
-        if impacts:
-            preview = ", ".join(str(x) for x in impacts[:20])
-            st.caption(f"Índices detectados: {preview}")
-            if len(impacts) > 20:
-                st.caption(f"Mostrando 20 de {len(impacts)} transitorios detectados.")
-        else:
-            st.caption("No se detectaron transitorios sobre el umbral dinámico.")
-
-    st.markdown("### Debug waveform")
-    st.write("signals_count:", debug_signals_count)
-    st.write("metrics_count:", debug_metrics_count)
-    st.write("insights_count:", debug_insights_count)
-    st.write("impacts_count:", debug_impacts_count)
-
-except Exception as e:
-    st.error(f"Waveform analysis error: {e}")
+# Ciclo 12.2 — sección 'Análisis automático de forma de onda' eliminada.
+# Las 8 métricas (RMS, Peak, CF, Kurtosis, Mean, Std, Skewness, P2P) y los
+# transitorios ahora viven DENTRO del expander '🔬 Diagnóstico avanzado'
+# por panel, junto a la narrativa que las usa. La sección suelta había
+# quedado huérfana: mostraba números pero no llegaban al reporte ni se
+# correlacionaban con findings.

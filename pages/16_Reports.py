@@ -26,6 +26,7 @@ from reportlab.platypus import (
     Table,
     TableStyle,
 )
+from reportlab.platypus.tableofcontents import TableOfContents
 
 from core.auth import require_login, render_user_menu
 from core.report_state import (
@@ -268,8 +269,13 @@ DEFAULT_REPORT_META = {
     "location": "",
     "prepared_by": "",
     "reviewed_by": "",
-    "prepared_role": "Ingeniero de diagnóstico",
-    "reviewed_role": "Revisión técnica",
+    # Cargos y ciudad pre-llenados con el default profesional de Watermelon.
+    # El usuario los puede editar libremente — son solo punto de partida
+    # para evitar campos vacíos en la portada.
+    "prepared_role": "Junior Condition Monitoring Engineer",
+    "reviewed_role": "Machinery Diagnostic Champion",
+    "prepared_city": "Cajicá, Cundinamarca · Colombia",
+    "reviewed_city": "Cajicá, Cundinamarca · Colombia",
     "period": "",
     "report_date": TODAY_STR,
     "consecutive": "",
@@ -278,6 +284,16 @@ DEFAULT_REPORT_META = {
     "recommendations": "",
     "executive_summary": "",
     "train_description": "",
+    # Ciclo 10A — campos SIGA-style para bloque grande del activo en portada
+    "asset_class": "",         # ej. "TURBOGENERADOR"
+    "asset_model": "",         # ej. "LM5000"
+    # Format control SIGA-style (header de cada página)
+    "format_code": "WMS-FMT-001",  # equivalente al SIGA-FMT-178
+    "format_version": "1",
+    "format_date": "2026-04-28",
+    # Ciclo 14a — esquemático del tren (proviene de Asset Instance activa)
+    "schematic_doc_id": "",       # doc_id en el Vault de la instancia
+    "schematic_instance_id": "",  # id de la instancia para resolver el doc
 }
 
 if "report_state_loaded" not in st.session_state:
@@ -310,6 +326,62 @@ if "report_meta" not in st.session_state:
 
 if not st.session_state["report_meta"].get("report_date"):
     st.session_state["report_meta"]["report_date"] = TODAY_STR
+
+
+# =============================================================
+# Ciclo 14a — Auto-fill desde Asset Instance activa
+# =============================================================
+# Cuando hay una máquina seleccionada en la Machinery Library,
+# pre-llenamos los campos de portada del reporte (cliente, sitio,
+# clase, modelo, descripción del tren, esquemático). Sólo aplica
+# si los campos están vacíos: NO sobreescribe lo que el ingeniero
+# ya tipeó. Eso permite que el usuario haga override manual sin
+# que el auto-fill se lo pise en cada rerun.
+def _autofill_report_meta_from_active_instance() -> None:
+    try:
+        from core.instance_selector import get_active_instance_id
+        from core.instance_state import get_instance, compose_train_description
+    except Exception:
+        return
+
+    inst_id = get_active_instance_id()
+    if not inst_id:
+        return
+    inst = get_instance(inst_id)
+    if inst is None:
+        return
+
+    meta = st.session_state["report_meta"]
+
+    # Mapa instance.field → meta key. Sólo se rellena si meta[key] está
+    # vacío (back-fill no destructivo).
+    mappings = {
+        "client": (inst.client or "").strip(),
+        "asset_class": (inst.asset_class or "").strip(),
+        "asset_model": (inst.driver_model or inst.driven_model or "").strip(),
+        "location": (inst.site or inst.location or "").strip(),
+        "asset": (inst.tag or "").strip(),
+        "unit": (inst.tag or "").strip(),
+    }
+    for k, v in mappings.items():
+        if v and not (meta.get(k) or "").strip():
+            meta[k] = v
+
+    # Train description: si el meta no la tiene, la componemos de
+    # los campos driver/driven de la instance.
+    if not (meta.get("train_description") or "").strip():
+        composed = compose_train_description(inst)
+        if composed:
+            meta["train_description"] = composed
+
+    # Schematic: doc_id del esquemático en el Vault de la instance.
+    # El render del PDF lo resuelve a bytes vía get_instance_document_bytes.
+    if inst.schematic_png and not (meta.get("schematic_doc_id") or "").strip():
+        meta["schematic_doc_id"] = inst.schematic_png
+        meta["schematic_instance_id"] = inst.instance_id
+
+
+_autofill_report_meta_from_active_instance()
 
 
 def _normalize_report_items(raw_items: Any) -> List[Dict[str, Any]]:
@@ -555,6 +627,49 @@ def _render_notes_flowables(
     return flowables
 
 
+# =============================================================
+# Tabla de Contenido (Ciclo 10A.4)
+# =============================================================
+# WMDocTemplate subclasea SimpleDocTemplate para que `multiBuild` pueda
+# llamar `afterFlowable` y registrar entradas TOC con número de página.
+# Estrategia:
+#   * Los Paragraphs de las 5 secciones principales (RESUMEN EJECUTIVO,
+#     RECOMENDACIONES, OBJETIVO, DESARROLLO, FIGURAS) usan estilo
+#     'WMTOC1' (visualmente idéntico a 'WMSection') → entran al TOC
+#     como nivel 0.
+#   * Los captions de cada figura usan 'WMTOC2' → nivel 1 (sub-entradas
+#     bajo "FIGURAS Y ANÁLISIS").
+#   * Los headings que NO deben aparecer en el TOC (e.g. 'TABLA DE
+#     CONTENIDO' propio, sub-bloques internos) siguen usando 'WMSection'
+#     o 'WMFigureCaption' originales — invisibles al TOC.
+# `multiBuild` corre 2-3 pasadas hasta que los números de página
+# convergen. `bookmarkPage` permite que cada entrada del TOC sea un
+# link interno clickeable (PDF nativo).
+class WMDocTemplate(SimpleDocTemplate):
+    def afterFlowable(self, flowable):
+        if not isinstance(flowable, Paragraph):
+            return
+        try:
+            style_name = flowable.style.name
+        except Exception:
+            return
+        if style_name == "WMTOC1":
+            level = 0
+        elif style_name == "WMTOC2":
+            level = 1
+        else:
+            return
+        text = flowable.getPlainText()
+        # Key estable basado en id(flowable): el mismo objeto vive en
+        # todas las pasadas de multiBuild → mismo key → el TOC compara
+        # entries igualadas y converge en 2 pasadas. Si reseteáramos un
+        # contador (1, 2, 3...) los keys cambiarían entre pasadas y
+        # multiBuild fallaría con "Index entries not resolved".
+        key = f"toc-{level}-{id(flowable):x}"
+        self.canv.bookmarkPage(key)
+        self.notify("TOCEntry", (level, text, self.page, key))
+
+
 def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes:
     buffer = BytesIO()
     page_width, page_height = A4
@@ -571,9 +686,40 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     styles.add(ParagraphStyle(name="WMTableCell", parent=styles["Normal"], fontName=PDF_FONT_REGULAR, fontSize=8.4, leading=11, alignment=TA_LEFT, textColor=colors.HexColor("#111827")))
     styles.add(ParagraphStyle(name="WMTableHeader", parent=styles["Normal"], fontName=PDF_FONT_BOLD, fontSize=8.5, leading=11, alignment=TA_LEFT, textColor=colors.HexColor("#ffffff")))
 
+    # Ciclo 10A.4 — estilos para entradas que SÍ entran al TOC.
+    # Visualmente idénticos a WMSection / WMFigureCaption respectivamente,
+    # pero con nombre distinto para que afterFlowable los detecte.
+    styles.add(ParagraphStyle(name="WMTOC1", parent=styles["WMSection"]))
+    styles.add(ParagraphStyle(name="WMTOC2", parent=styles["WMFigureCaption"]))
+
+    # Ciclo 10A.4 — estilos del PROPIO TOC (cómo se ven las entradas
+    # dentro de la página de Tabla de Contenido). H1 negrita, H2 indentada.
+    toc_level0_style = ParagraphStyle(
+        name="WMTOCLevel0",
+        fontName=PDF_FONT_BOLD,
+        fontSize=11,
+        leading=16,
+        leftIndent=0,
+        firstLineIndent=0,
+        spaceBefore=8,
+        spaceAfter=2,
+        textColor=colors.HexColor("#0f172a"),
+    )
+    toc_level1_style = ParagraphStyle(
+        name="WMTOCLevel1",
+        fontName=PDF_FONT_REGULAR,
+        fontSize=10,
+        leading=14,
+        leftIndent=18,
+        firstLineIndent=0,
+        spaceBefore=2,
+        spaceAfter=1,
+        textColor=colors.HexColor("#334155"),
+    )
+
     logo_watermark = _first_existing_watermark()
 
-    doc = SimpleDocTemplate(
+    doc = WMDocTemplate(
         buffer,
         pagesize=A4,
         leftMargin=2.1 * cm,
@@ -585,33 +731,59 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     )
 
     def _draw_cover_page(canvas, doc):
+        # Portada SIGA-style: fondo blanco completamente limpio, sin cintas
+        # de colores ni acentos — la sobriedad es el branding. La estructura
+        # del contenido (logo centrado, bloque del activo en jerarquía
+        # tipográfica, firmas paralelas) es la que aporta el peso visual,
+        # no decoración cromática agresiva.
         canvas.saveState()
         canvas.setFillColor(colors.HexColor("#ffffff"))
         canvas.rect(0, 0, page_width, page_height, fill=1, stroke=0)
 
-        canvas.setFillColor(colors.HexColor("#38bdf8"))
-        canvas.rect(page_width - 4.5 * cm, 0, 4.5 * cm, page_height, fill=1, stroke=0)
+        # Header SIGA-style (mismo formato que en páginas internas para
+        # consistencia): código de formato controlado a la izquierda,
+        # número de página a la derecha. Línea fina cyan debajo, sutil.
+        format_code = meta.get("format_code") or "WMS-FMT-001"
+        format_version = meta.get("format_version") or "1"
+        format_date = meta.get("format_date") or "2026-04-28"
+        format_header = f"{format_code} | Versión {format_version} | Fecha {format_date}"
 
-        canvas.setFillColor(colors.HexColor("#0284c7"))
-        canvas.roundRect(page_width - 4.95 * cm, page_height - 6.8 * cm, 0.42 * cm, 4.8 * cm, 0.2 * cm, fill=1, stroke=0)
-        canvas.roundRect(page_width - 4.95 * cm, 1.0 * cm, 0.42 * cm, 2.3 * cm, 0.2 * cm, fill=1, stroke=0)
+        internal_left = 2.1 * cm
+        internal_right = 2.1 * cm
+        internal_width_end = page_width - internal_right
 
-        if logo_watermark and logo_watermark.exists():
-            try:
-                wm_w = 7.8 * cm
-                wm_h = 7.8 * cm
-                wm_x = page_width - 8.0 * cm
-                wm_y = 0.15 * cm
-                canvas.saveState()
-                canvas.setFillAlpha(0.18)
-                canvas.drawImage(str(logo_watermark), wm_x, wm_y, width=wm_w, height=wm_h, mask='auto', preserveAspectRatio=True, anchor='c')
-                canvas.restoreState()
-            except Exception:
-                pass
+        canvas.setFillColor(colors.HexColor("#0f172a"))
+        canvas.setFont(PDF_FONT_BOLD, 7.8)
+        canvas.drawString(internal_left, page_height - 1.0 * cm, format_header)
 
-        canvas.setFont(PDF_FONT_BOLD, 10.5)
-        canvas.setFillColor(colors.HexColor("#111827"))
-        canvas.drawRightString(page_width - 1.15 * cm, page_height - 1.0 * cm, f"Página {doc.page}")
+        canvas.setFont(PDF_FONT_BOLD, 9.0)
+        canvas.drawRightString(
+            page_width - internal_right,
+            page_height - 1.0 * cm,
+            f"Página {doc.page}",
+        )
+
+        # Línea fina cyan separadora arriba — único acento de color en la portada
+        canvas.setStrokeColor(colors.HexColor("#0ea5e9"))
+        canvas.setLineWidth(0.8)
+        canvas.line(internal_left, page_height - 1.35 * cm, internal_width_end, page_height - 1.35 * cm)
+
+        # Footer disclaimer (mismo de SIGA, idéntico a páginas internas)
+        footer = (
+            "INFORME VÁLIDO ÚNICAMENTE PARA LAS CONDICIONES PRESENTES "
+            "DURANTE EL SERVICIO. NO PODRÁ SER COPIADO PARCIAL O TOTALMENTE "
+            "SIN PREVIA AUTORIZACIÓN."
+        )
+        canvas.setStrokeColor(colors.HexColor("#0ea5e9"))
+        canvas.setLineWidth(0.8)
+        canvas.line(internal_left, 0.95 * cm, internal_width_end, 0.95 * cm)
+        canvas.setFillColor(colors.HexColor("#475569"))
+        canvas.setFont(PDF_FONT_REGULAR, 6.4)
+        canvas.drawCentredString(
+            (internal_left + internal_width_end) / 2,
+            0.55 * cm,
+            footer,
+        )
 
         canvas.restoreState()
 
@@ -632,11 +804,23 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.setLineWidth(1.1)
         canvas.line(internal_left, page_height - 1.35 * cm, internal_width_end, page_height - 1.35 * cm)
 
+        # Header SIGA-style (Ciclo 10A): código de formato controlado a la
+        # izquierda + título del reporte centrado. El consecutivo va arriba a
+        # la derecha junto al número de página, lo arma _draw_internal_page
+        # justo después.
+        format_code = meta.get("format_code") or "WMS-FMT-001"
+        format_version = meta.get("format_version") or "1"
+        format_date = meta.get("format_date") or "2026-04-28"
+        format_header = f"{format_code} | Versión {format_version} | Fecha {format_date}"
         canvas.setFillColor(colors.HexColor("#0f172a"))
-        canvas.setFont(PDF_FONT_BOLD, 8.2)
-        canvas.drawString(internal_left, page_height - 1.0 * cm, "Machinery Diagnostics Engineering")
-        canvas.setFont(PDF_FONT_REGULAR, 8.2)
-        canvas.drawString(internal_left + 6.2 * cm, page_height - 1.0 * cm, f"| {meta.get('report_title') or 'Reporte técnico'}")
+        canvas.setFont(PDF_FONT_BOLD, 7.8)
+        canvas.drawString(internal_left, page_height - 1.0 * cm, format_header)
+        canvas.setFont(PDF_FONT_REGULAR, 7.8)
+        canvas.drawString(
+            internal_left + 7.2 * cm,
+            page_height - 1.0 * cm,
+            f"| {meta.get('report_title') or 'Reporte técnico'}",
+        )
 
         footer = "INFORME VÁLIDO ÚNICAMENTE PARA LAS CONDICIONES PRESENTES DURANTE EL SERVICIO. NO PODRÁ SER COPIADO PARCIAL O TOTALMENTE SIN PREVIA AUTORIZACIÓN."
         canvas.setStrokeColor(colors.HexColor("#0ea5e9"))
@@ -650,57 +834,141 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
     story: List[Any] = []
 
-    if WATERMELON_LOGO.exists():
-        cover_logo = Image(str(WATERMELON_LOGO), width=4.2 * cm, height=2.0 * cm)
-        cover_logo.hAlign = "LEFT"
-        story.append(cover_logo)
-        story.append(Spacer(1, 1.35 * cm))
+    # ============================================================
+    # PORTADA SIGA-STYLE — todo centrado, sobrio, simétrico.
+    # ============================================================
+    from reportlab.platypus import HRFlowable
 
-    story.append(Spacer(1, 1.45 * cm))
-    story.append(Paragraph("Machinery Diagnostics Engineering", styles["WMSubTitle"]))
-    story.append(Spacer(1, 1.10 * cm))
-    story.append(Paragraph(_paragraph_safe(meta.get("report_title") or "REPORTE TÉCNICO"), styles["WMTitle"]))
+    # 1. Logo Watermelon centrado arriba
+    if WATERMELON_LOGO.exists():
+        cover_logo = Image(str(WATERMELON_LOGO), width=5.8 * cm, height=2.7 * cm)
+        cover_logo.hAlign = "CENTER"
+        story.append(Spacer(1, 0.40 * cm))
+        story.append(cover_logo)
+        story.append(Spacer(1, 0.85 * cm))
+
+    # 2. Eyebrow centrado, color sobrio
     story.append(
         Paragraph(
-            "Watermelon System",
+            "Machinery Diagnostics Engineering",
             ParagraphStyle(
-                name="WMBrandSub",
+                name="WMCoverEyebrow",
                 parent=styles["Normal"],
                 fontName=PDF_FONT_BOLD,
-                fontSize=15.8,
-                leading=19,
-                textColor=colors.HexColor("#111827"),
-                spaceAfter=36,
+                fontSize=11,
+                leading=14,
+                alignment=TA_CENTER,
+                textColor=colors.HexColor("#475569"),
+                spaceAfter=6,
             ),
         )
     )
 
-    cover_lines = [
-        meta.get("asset") or "",
-        meta.get("unit") or "",
-        meta.get("location") or "",
-        meta.get("client") or "",
+    # 3. Título grande del reporte, centrado
+    story.append(
+        Paragraph(
+            _paragraph_safe(meta.get("report_title") or "REPORTE TÉCNICO"),
+            ParagraphStyle(
+                name="WMCoverReportTitle",
+                parent=styles["Normal"],
+                fontName=PDF_FONT_BOLD,
+                fontSize=20,
+                leading=24,
+                alignment=TA_CENTER,
+                textColor=colors.HexColor("#0f172a"),
+                spaceAfter=4,
+            ),
+        )
+    )
+
+    # 4. Sub-marca "Watermelon System" centrada (igual al SIGA)
+    story.append(
+        Paragraph(
+            "Watermelon System",
+            ParagraphStyle(
+                name="WMCoverBrand",
+                parent=styles["Normal"],
+                fontName=PDF_FONT_REGULAR,
+                fontSize=12,
+                leading=15,
+                alignment=TA_CENTER,
+                textColor=colors.HexColor("#475569"),
+                spaceAfter=20,
+            ),
+        )
+    )
+
+    # ===== Bloque grande del activo (estilo SIGA) =====
+    # En el reporte SIGA original se ve algo como:
+    #     TURBOGENERADOR TES1
+    #     LM5000
+    #     VILLAVICENCIO
+    #     TERMOSURIA
+    # Cada línea grande, centrada (o alineada a izquierda según diseño).
+    # Mantenemos alineación a izquierda para que case con el resto de la
+    # portada que ya tiene logo + Machinery Diagnostics Engineering.
+    asset_class = (meta.get("asset_class") or "").strip()
+    asset_name = (meta.get("asset") or "").strip()
+    unit_name = (meta.get("unit") or "").strip()
+    asset_model = (meta.get("asset_model") or "").strip()
+    location_name = (meta.get("location") or "").strip()
+    client_name = (meta.get("client") or "").strip()
+
+    # Línea 1: clase + tag/unidad ("TURBOGENERADOR TES1")
+    line1_parts = []
+    if asset_class:
+        line1_parts.append(asset_class)
+    if unit_name:
+        line1_parts.append(unit_name)
+    elif asset_name and not asset_class:
+        line1_parts.append(asset_name)
+    line1 = " ".join(line1_parts).strip().upper()
+
+    # Líneas siguientes: modelo, ubicación, cliente
+    cover_block_lines = [
+        line1,
+        asset_model.upper() if asset_model else "",
+        location_name.upper() if location_name else "",
+        client_name.upper() if client_name else "",
     ]
-    for line in cover_lines:
+    cover_block_lines = [ln for ln in cover_block_lines if ln]
+
+    # Separador horizontal sutil arriba del bloque del activo
+    story.append(
+        HRFlowable(
+            width="40%",
+            thickness=0.7,
+            color=colors.HexColor("#94a3b8"),
+            spaceBefore=4,
+            spaceAfter=14,
+            hAlign="CENTER",
+        )
+    )
+
+    for idx, line in enumerate(cover_block_lines):
+        # La primera línea (clase + tag) va más grande, las demás un poco menores
+        font_size = 24 if idx == 0 else 16
+        leading = 28 if idx == 0 else 20
         story.append(
             Paragraph(
                 _paragraph_safe(line),
                 ParagraphStyle(
-                    name=f"WMCoverLine_{len(story)}",
+                    name=f"WMCoverBlock_{idx}",
                     parent=styles["Normal"],
                     fontName=PDF_FONT_BOLD,
-                    fontSize=12.8,
-                    leading=16,
-                    textColor=colors.HexColor("#111827"),
-                    spaceAfter=3,
+                    fontSize=font_size,
+                    leading=leading,
+                    alignment=TA_CENTER,
+                    textColor=colors.HexColor("#0f172a"),
+                    spaceAfter=2,
                 ),
             )
         )
 
-    # Si hay descripción del tren acoplado, se muestra debajo de las líneas
-    # del activo en peso regular y un tamaño menor (sub-cabecera de portada).
+    # Si hay descripción del tren acoplado, sub-cabecera centrada en regular
     train_text = (meta.get("train_description") or "").strip()
     if train_text:
+        story.append(Spacer(1, 0.30 * cm))
         story.append(
             Paragraph(
                 _paragraph_safe(train_text),
@@ -708,55 +976,200 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                     name="WMCoverTrain",
                     parent=styles["Normal"],
                     fontName=PDF_FONT_REGULAR,
-                    fontSize=10.8,
+                    fontSize=10.5,
                     leading=14,
-                    textColor=colors.HexColor("#374151"),
-                    spaceBefore=6,
+                    alignment=TA_CENTER,
+                    textColor=colors.HexColor("#475569"),
+                    spaceBefore=4,
                     spaceAfter=3,
                 ),
             )
         )
 
-    story.append(Spacer(1, 2.15 * cm))
+    # Separador horizontal sutil abajo del bloque del activo
+    story.append(
+        HRFlowable(
+            width="40%",
+            thickness=0.7,
+            color=colors.HexColor("#94a3b8"),
+            spaceBefore=14,
+            spaceAfter=14,
+            hAlign="CENTER",
+        )
+    )
+
+    # Aire grande antes del bloque de firmas (estética SIGA: las firmas
+    # quedan en el tercio inferior del cover, no apretadas al activo)
+    story.append(Spacer(1, 3.50 * cm))
 
     prepared_by = (meta.get("prepared_by") or "").strip()
-    prepared_role = (meta.get("prepared_role") or "Ingeniero de diagnóstico").strip()
+    prepared_role = (meta.get("prepared_role") or "Junior Condition Monitoring Engineer").strip()
+    prepared_city = (meta.get("prepared_city") or "Cajicá, Cundinamarca · Colombia").strip()
     reviewed_by = (meta.get("reviewed_by") or "").strip()
-    reviewed_role = (meta.get("reviewed_role") or "Revisión técnica").strip()
+    reviewed_role = (meta.get("reviewed_role") or "Machinery Diagnostic Champion").strip()
+    reviewed_city = (meta.get("reviewed_city") or "Cajicá, Cundinamarca · Colombia").strip()
     report_date_value = meta.get("report_date") or TODAY_STR
-    period_value = meta.get("period") or "No aplica"
+    period_value = (meta.get("period") or "").strip()
     consecutive_value = (meta.get("consecutive") or "").strip()
 
-    if prepared_by:
-        story.append(Paragraph("<b>Preparado por:</b>", styles["WMMeta"]))
-        story.append(Paragraph(_paragraph_safe(prepared_by), styles["WMMeta"]))
-        if prepared_role:
-            story.append(Paragraph(_paragraph_safe(prepared_role), styles["WMMeta"]))
-        story.append(Spacer(1, 0.82 * cm))
+    # Bloque de firmas en DOS COLUMNAS PARALELAS centradas (estilo SIGA).
+    # Cada columna: "Preparado/Revisado por:" en bold + nombre + cargo + ciudad.
+    # Si solo hay uno (preparado o revisado), la otra columna queda vacía.
+    sig_label_style = ParagraphStyle(
+        name="WMCoverSigLabel",
+        parent=styles["Normal"],
+        fontName=PDF_FONT_BOLD,
+        fontSize=10.2,
+        leading=13,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#0f172a"),
+        spaceAfter=4,
+    )
+    sig_name_style = ParagraphStyle(
+        name="WMCoverSigName",
+        parent=styles["Normal"],
+        fontName=PDF_FONT_BOLD,
+        fontSize=11,
+        leading=14,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#0f172a"),
+        spaceAfter=2,
+    )
+    sig_role_style = ParagraphStyle(
+        name="WMCoverSigRole",
+        parent=styles["Normal"],
+        fontName=PDF_FONT_REGULAR,
+        fontSize=9.5,
+        leading=12,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#374151"),
+        spaceAfter=2,
+    )
+    sig_city_style = ParagraphStyle(
+        name="WMCoverSigCity",
+        parent=styles["Normal"],
+        fontName=PDF_FONT_REGULAR,
+        fontSize=9.0,
+        leading=11.5,
+        alignment=TA_CENTER,
+        textColor=colors.HexColor("#64748b"),
+    )
 
-    if reviewed_by:
-        story.append(Paragraph("<b>Revisado por:</b>", styles["WMMeta"]))
-        story.append(Paragraph(_paragraph_safe(reviewed_by), styles["WMMeta"]))
-        if reviewed_role:
-            story.append(Paragraph(_paragraph_safe(reviewed_role), styles["WMMeta"]))
-        story.append(Spacer(1, 1.25 * cm))
-    else:
-        story.append(Spacer(1, 0.95 * cm))
+    def _build_signature_cell(label: str, name: str, role: str, city: str) -> List[Any]:
+        cell: List[Any] = []
+        if not name:
+            return [Paragraph("", sig_label_style)]
+        cell.append(Paragraph(label, sig_label_style))
+        cell.append(Paragraph(_paragraph_safe(name), sig_name_style))
+        if role:
+            cell.append(Paragraph(_paragraph_safe(role), sig_role_style))
+        if city:
+            cell.append(Paragraph(_paragraph_safe(city), sig_city_style))
+        return cell
 
-    story.append(Spacer(1, 0.55 * cm))
-    story.append(Paragraph(f"<b>Fecha del reporte:</b> {_paragraph_safe(report_date_value)}", styles["WMMeta"]))
-    story.append(Spacer(1, 0.08 * cm))
-    story.append(Paragraph(f"<b>Periodo evaluado:</b> {_paragraph_safe(period_value)}", styles["WMMeta"]))
+    if prepared_by or reviewed_by:
+        sig_table = Table(
+            [[
+                _build_signature_cell("Preparado por:", prepared_by, prepared_role, prepared_city),
+                _build_signature_cell("Revisado por:", reviewed_by, reviewed_role, reviewed_city),
+            ]],
+            colWidths=[8.3 * cm, 8.3 * cm],
+        )
+        sig_table.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        sig_table.hAlign = "CENTER"
+        story.append(sig_table)
+        # Aire amplio entre firmas y mini-tabla de fecha/consecutivo: que
+        # ese bloque quede empujado contra el pie de la portada (estética SIGA).
+        # Casi pegado al disclaimer del footer.
+        story.append(Spacer(1, 4.50 * cm))
+
+    # Bloque de fecha/periodo/consecutivo como mini-tabla 2 columnas — más
+    # profesional y compacto que un párrafo plano. "Periodo evaluado" se
+    # OCULTA cuando viene vacío o "No aplica" (estética SIGA).
+    meta_rows: List[List[Any]] = []
+    label_style = ParagraphStyle(
+        name="WMCoverMetaLabel",
+        parent=styles["WMMeta"],
+        fontName=PDF_FONT_BOLD,
+        fontSize=10.0,
+        textColor=colors.HexColor("#0f172a"),
+    )
+    value_style = ParagraphStyle(
+        name="WMCoverMetaValue",
+        parent=styles["WMMeta"],
+        fontName=PDF_FONT_REGULAR,
+        fontSize=10.0,
+        textColor=colors.HexColor("#111827"),
+    )
+    meta_rows.append([
+        Paragraph("Fecha del reporte", label_style),
+        Paragraph(_paragraph_safe(report_date_value), value_style),
+    ])
+    if period_value and period_value.lower() not in ("no aplica", "n/a", "-"):
+        meta_rows.append([
+            Paragraph("Periodo evaluado", label_style),
+            Paragraph(_paragraph_safe(period_value), value_style),
+        ])
     if consecutive_value:
-        story.append(Spacer(1, 0.08 * cm))
-        story.append(Paragraph(f"<b>Consecutivo:</b> {_paragraph_safe(consecutive_value)}", styles["WMMeta"]))
+        meta_rows.append([
+            Paragraph("Consecutivo", label_style),
+            Paragraph(_paragraph_safe(consecutive_value), value_style),
+        ])
+
+    if meta_rows:
+        # Tabla CENTRADA (estilo SIGA): label bold + valor regular, columna
+        # 1 angosta para alinear con la columna 2 amplia. Líneas finas
+        # arriba y abajo, sin colores fuertes.
+        meta_tbl = Table(meta_rows, colWidths=[4.4 * cm, 6.6 * cm])
+        meta_tbl.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LINEABOVE", (0, 0), (-1, 0), 0.6, colors.HexColor("#cbd5e1")),
+            ("LINEBELOW", (0, -1), (-1, -1), 0.6, colors.HexColor("#cbd5e1")),
+        ]))
+        meta_tbl.hAlign = "CENTER"
+        story.append(meta_tbl)
+
+    # (El disclaimer legal se imprime con el footer del canvas — no hace
+    # falta repetirlo acá. Eso lo deja consistente con páginas internas.)
+
     story.append(PageBreak())
 
-    # RESUMEN EJECUTIVO — página inicial después de la portada (si existe).
-    # Es el "elevator pitch" del reporte: lo primero que el cliente lee.
+    # =========================================================
+    # PÁGINA 2 — TABLA DE CONTENIDO (Ciclo 10A.4)
+    # =========================================================
+    # Se construye automáticamente en la 2ª pasada de multiBuild.
+    # El header del título usa WMSection (no WMTOC1) para que NO entre
+    # al TOC como auto-referencia.
+    story.append(Paragraph("TABLA DE CONTENIDO", styles["WMSection"]))
+    story.append(Spacer(1, 0.20 * cm))
+
+    toc = TableOfContents()
+    toc.levelStyles = [toc_level0_style, toc_level1_style]
+    # Dot leaders + número de página alineado a la derecha.
+    # ReportLab dibuja esto automáticamente cuando el levelStyle no
+    # define justify especial; el separador se controla con
+    # toc.dotsMinLevel.
+    toc.dotsMinLevel = 0
+    story.append(toc)
+
+    story.append(PageBreak())
+
+    # RESUMEN EJECUTIVO — página inicial después del TOC.
+    # Es el "elevator pitch" del reporte: lo primero que el cliente lee
+    # de fondo del análisis (después de la portada y la TOC).
     executive_text = (meta.get("executive_summary") or "").strip()
     if executive_text:
-        story.append(Paragraph("RESUMEN EJECUTIVO", styles["WMSection"]))
+        story.append(Paragraph("RESUMEN EJECUTIVO", styles["WMTOC1"]))
 
         # Cinta de severidad: una franja con estado global y color (si se puede
         # detectar desde el primer párrafo del resumen). Si no, omitida.
@@ -788,36 +1201,85 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             )
             story.append(Paragraph(f"Estado global: {severity_label}", severity_style))
 
+        # Ciclo 14a — Esquemático del tren acoplado (debajo del badge de
+        # severidad, sobre el cuerpo del Resumen Ejecutivo). Aparece
+        # automáticamente cuando hay una Asset Instance activa con
+        # schematic_png cargado en su Vault. Si no hay, omite limpio.
+        sch_doc_id = (meta.get("schematic_doc_id") or "").strip()
+        sch_inst_id = (meta.get("schematic_instance_id") or "").strip()
+        if sch_doc_id and sch_inst_id:
+            try:
+                from core.instance_state import get_instance_document_bytes
+                sch_bytes = get_instance_document_bytes(sch_inst_id, sch_doc_id)
+                if sch_bytes:
+                    usable_w = A4[0] - doc.leftMargin - doc.rightMargin
+                    target_w = min(12.5 * cm, usable_w)
+                    target_h = 6.0 * cm
+                    fitted_w, fitted_h = _fit_image_dimensions(
+                        sch_bytes, target_w, target_h
+                    )
+                    sch_img = Image(BytesIO(sch_bytes), width=fitted_w, height=fitted_h)
+                    sch_img.hAlign = "CENTER"
+                    story.append(Spacer(1, 0.10 * cm))
+                    story.append(sch_img)
+                    sch_caption_style = ParagraphStyle(
+                        name="WMSchematicCaption",
+                        parent=styles["WMMeta"],
+                        fontName=PDF_FONT_REGULAR,
+                        fontSize=8.8,
+                        leading=11,
+                        alignment=TA_CENTER,
+                        textColor=colors.HexColor("#475569"),
+                        spaceBefore=2,
+                        spaceAfter=10,
+                    )
+                    train_lbl = (meta.get("train_description") or "").strip()
+                    if train_lbl:
+                        story.append(Paragraph(
+                            f"Esquemático del tren · {train_lbl}",
+                            sch_caption_style,
+                        ))
+                    else:
+                        story.append(Paragraph(
+                            "Esquemático del tren acoplado",
+                            sch_caption_style,
+                        ))
+            except Exception:
+                # Si falla cualquier paso (instancia borrada, doc roto,
+                # imagen corrupta) silenciamos para no bloquear el reporte.
+                pass
+
         story.append(Paragraph(_paragraph_safe(executive_text), styles["WMBody"]))
         story.append(Spacer(1, 0.30 * cm))
         story.append(PageBreak())
 
-    # Secciones 1/2/3: solo se muestran si tienen contenido. Si todas están
-    # vacías, las figuras pasan a ser la sección 1 directamente.
+    # Orden SIGA-style (Ciclo 10A): RECOMENDACIONES primero — es lo que el
+    # cliente abre y lee de inmediato. Objetivo y Desarrollo van después.
+    # Secciones que están vacías se ocultan y la numeración se compacta.
     section_idx = 1
     objective_text = (meta.get("service_objective") or "").strip()
     recommendations_text = (meta.get("recommendations") or "").strip()
     development_text = (meta.get("service_development") or "").strip()
 
-    if objective_text:
-        story.append(Paragraph(f"{section_idx}. OBJETIVO DEL SERVICIO", styles["WMSection"]))
-        story.append(Paragraph(_paragraph_safe(objective_text), styles["WMBody"]))
-        story.append(Spacer(1, 0.12 * cm))
-        section_idx += 1
-
     if recommendations_text:
-        story.append(Paragraph(f"{section_idx}. RECOMENDACIONES", styles["WMSection"]))
+        story.append(Paragraph(f"{section_idx}. RECOMENDACIONES", styles["WMTOC1"]))
         story.append(Paragraph(_paragraph_safe(recommendations_text), styles["WMBody"]))
         story.append(Spacer(1, 0.12 * cm))
         section_idx += 1
 
+    if objective_text:
+        story.append(Paragraph(f"{section_idx}. OBJETIVO DEL SERVICIO", styles["WMTOC1"]))
+        story.append(Paragraph(_paragraph_safe(objective_text), styles["WMBody"]))
+        story.append(Spacer(1, 0.12 * cm))
+        section_idx += 1
+
     if development_text:
-        story.append(Paragraph(f"{section_idx}. DESARROLLO DEL SERVICIO", styles["WMSection"]))
+        story.append(Paragraph(f"{section_idx}. DESARROLLO DEL SERVICIO", styles["WMTOC1"]))
         story.append(Paragraph(_paragraph_safe(development_text), styles["WMBody"]))
         story.append(Spacer(1, 0.15 * cm))
         section_idx += 1
 
-    story.append(Paragraph(f"{section_idx}. FIGURAS Y ANÁLISIS", styles["WMSection"]))
+    story.append(Paragraph(f"{section_idx}. FIGURAS Y ANÁLISIS", styles["WMTOC1"]))
     story.append(Spacer(1, 0.08 * cm))
 
     usable_width = A4[0] - doc.leftMargin - doc.rightMargin
@@ -852,7 +1314,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             block = [
                 Spacer(1, 0.18 * cm),
                 img,
-                Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]),
+                Paragraph(_paragraph_safe(caption), styles["WMTOC2"]),
                 *notes_flowables,
                 Spacer(1, 0.24 * cm),
             ]
@@ -863,7 +1325,7 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
             block = [
                 Spacer(1, 0.18 * cm),
-                Paragraph(_paragraph_safe(caption), styles["WMFigureCaption"]),
+                Paragraph(_paragraph_safe(caption), styles["WMTOC2"]),
                 Paragraph(_paragraph_safe(error_text), styles["WMFigureText"]),
                 *notes_flowables,
                 Spacer(1, 0.24 * cm),
@@ -872,7 +1334,11 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         story.append(KeepTogether(block))
 
     story.append(Spacer(1, 0.40 * cm))
-    doc.build(story, onFirstPage=_draw_cover_page, onLaterPages=_draw_internal_page)
+    # Ciclo 10A.4 — multiBuild: 2-3 pasadas para que el TableOfContents
+    # converja con los números de página correctos. La primera pasada
+    # registra las entradas (afterFlowable las captura); la segunda las
+    # imprime con los page numbers reales.
+    doc.multiBuild(story, onFirstPage=_draw_cover_page, onLaterPages=_draw_internal_page)
     return buffer.getvalue()
 
 
@@ -922,6 +1388,87 @@ pdf_ready = len(items) > 0
 pdf_error = None
 pdf_bytes: Optional[bytes] = None
 meta = st.session_state["report_meta"]
+
+# =============================================================
+# Ciclo 14a — Panel de status del auto-fill (debug visual)
+# =============================================================
+# Justo antes del botón "Preparar PDF" mostramos qué se rellenó
+# desde la instancia activa. Esto le permite al ingeniero confirmar
+# CON SUS PROPIOS OJOS que el esquemático está vinculado y va a
+# aparecer en el Resumen Ejecutivo, sin tener que generar el PDF
+# y verificar a posteriori.
+try:
+    from core.instance_selector import get_active_instance_id
+    from core.instance_state import get_instance
+    _active_id = get_active_instance_id()
+    _active_inst = get_instance(_active_id) if _active_id else None
+except Exception:
+    _active_id = None
+    _active_inst = None
+
+with st.expander("📋 Auto-fill desde activo monitoreado", expanded=True):
+    if _active_inst is None:
+        st.warning(
+            "No hay activo monitoreado activo. Anda a Machinery Library "
+            "y activa una máquina para que sus datos se auto-llenen acá."
+        )
+    else:
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(f"**Activo:** {_active_inst.tag or _active_inst.instance_id}")
+            st.caption(f"Cliente · {meta.get('client') or '—'}")
+            st.caption(f"Sitio · {meta.get('location') or '—'}")
+            st.caption(f"Clase · {meta.get('asset_class') or '—'}")
+            st.caption(f"Modelo · {meta.get('asset_model') or '—'}")
+        with c2:
+            train_d = (meta.get('train_description') or '').strip()
+            if train_d:
+                st.caption("**Train description:**")
+                st.caption(train_d)
+            else:
+                st.caption("**Train description:** —")
+
+            # Estado del esquemático — diagnóstico crítico
+            sch_doc = (meta.get("schematic_doc_id") or "").strip()
+            sch_inst = (meta.get("schematic_instance_id") or "").strip()
+            inst_sch = (_active_inst.schematic_png or "").strip()
+
+            if sch_doc and sch_inst:
+                # Validar que el doc realmente exista y traiga bytes
+                try:
+                    from core.instance_state import get_instance_document_bytes
+                    test_bytes = get_instance_document_bytes(sch_inst, sch_doc)
+                    if test_bytes:
+                        st.success(
+                            f"✓ Esquemático listo para Resumen Ejecutivo "
+                            f"({len(test_bytes) // 1024} KB)"
+                        )
+                    else:
+                        st.error(
+                            f"✗ schematic_doc_id presente ({sch_doc}) pero "
+                            f"no se pudo leer el archivo del Vault. "
+                            f"¿El documento fue borrado?"
+                        )
+                except Exception as e:
+                    st.error(f"✗ Error leyendo esquemático: {e}")
+            elif inst_sch:
+                # La instancia tiene schematic_png pero el meta no se rellenó
+                st.warning(
+                    f"⚠️ El activo tiene schematic_png={inst_sch[:20]}... "
+                    f"pero el meta del reporte no lo tomó. Click en "
+                    f"'Reset auto-fill' abajo para forzar recarga."
+                )
+                if st.button("Reset auto-fill desde activo", key="reset_autofill"):
+                    meta["schematic_doc_id"] = ""
+                    meta["schematic_instance_id"] = ""
+                    _autofill_report_meta_from_active_instance()
+                    st.rerun()
+            else:
+                st.error(
+                    "✗ El activo NO tiene esquemático principal vinculado. "
+                    "Andá a Machinery Library → tu máquina activa → "
+                    "Editar metadata → tab Esquemático → seleccioná tu PNG/JPG → guardar."
+                )
 
 with ga3:
     if st.button("Preparar PDF", use_container_width=True, disabled=not pdf_ready):
@@ -1066,6 +1613,28 @@ with m5:
 with m6:
     meta["consecutive"] = st.text_input("Consecutivo", key="report_meta_consecutive", value=meta["consecutive"])
 
+# Ciclo 10A — bloque grande SIGA-style del activo en la portada
+m_sa1, m_sa2 = st.columns(2)
+with m_sa1:
+    meta["asset_class"] = st.text_input(
+        "Clase de activo (portada)",
+        key="report_meta_asset_class",
+        value=meta.get("asset_class", ""),
+        placeholder="TURBOGENERADOR, MOTOR-BOMBA, COMPRESOR…",
+        help=(
+            "Clase técnica del activo en mayúsculas — aparece en grande "
+            "en la portada del PDF, junto a la unidad. Estilo reporte SIGA."
+        ),
+    )
+with m_sa2:
+    meta["asset_model"] = st.text_input(
+        "Modelo / configuración (portada)",
+        key="report_meta_asset_model",
+        value=meta.get("asset_model", ""),
+        placeholder="LM5000, SGT-300, Brush 54 MW…",
+        help="Modelo/configuración del activo. Se imprime en grande debajo de la clase.",
+    )
+
 # Composición del tren acoplado — la mayoría de máquinas reales son trenes
 # acoplados (turbina + generador, motor + bomba, motor + compresor, etc.)
 meta["train_description"] = st.text_area(
@@ -1085,9 +1654,22 @@ m7, m8 = st.columns(2)
 with m7:
     meta["prepared_by"] = st.text_input("Preparado por", key="report_meta_prepared_by", value=meta["prepared_by"])
     meta["prepared_role"] = st.text_input("Cargo de quien prepara", key="report_meta_prepared_role", value=meta["prepared_role"])
+    meta["prepared_city"] = st.text_input(
+        "Ciudad / país de quien prepara",
+        key="report_meta_prepared_city",
+        value=meta.get("prepared_city", ""),
+        placeholder="Cajicá, Cundinamarca · Colombia",
+        help="Ciudad y país que aparecen debajo del nombre/cargo en la portada.",
+    )
 with m8:
     meta["reviewed_by"] = st.text_input("Revisado por", key="report_meta_reviewed_by", value=meta["reviewed_by"])
     meta["reviewed_role"] = st.text_input("Cargo de quien revisa", key="report_meta_reviewed_role", value=meta["reviewed_role"])
+    meta["reviewed_city"] = st.text_input(
+        "Ciudad / país de quien revisa",
+        key="report_meta_reviewed_city",
+        value=meta.get("reviewed_city", ""),
+        placeholder="Cajicá, Cundinamarca · Colombia",
+    )
 
 st.markdown(
     '<div class="wm-signature-help">Estos cargos también se mostrarán en el bloque final de aprobación del PDF.</div>',
@@ -1142,11 +1724,11 @@ def _autodraft_sections_from_items(meta_dict: Dict[str, Any], current_items: Lis
         f"a partir de {n} {type_phrase} adquiridas en condición operativa "
         f"mediante el sistema de monitoreo en línea y remoto Watermelon System, "
         f"con el propósito de identificar hallazgos rotodinámicos relevantes y "
-        f"emitir recomendaciones técnicas alineadas con normas internacionales "
-        f"aplicables (API 670 para instrumentación con sondas de proximidad, "
-        f"API 684 para análisis rotodinámico, ISO 20816 para evaluación de "
-        f"vibración mecánica e ISO 21940 para criterios de balanceo) bajo "
-        f"prácticas de análisis Categoría IV del Vibration Institute."
+        f"emitir recomendaciones técnicas alineadas con las normas internacionales "
+        f"aplicables al análisis avanzado de rotordinámica: API 670 para "
+        f"instrumentación con sondas de proximidad, API 684 para análisis "
+        f"rotodinámico, ISO 20816 para evaluación de severidad de vibración "
+        f"mecánica e ISO 21940 para criterios de balanceo."
     )
 
     development_lines = [

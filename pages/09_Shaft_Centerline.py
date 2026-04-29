@@ -1364,7 +1364,7 @@ def render_scl_panel(
         )
 
         with st.expander(
-            f"Diagnóstico Cat IV (rotordynamics + Vault) · Panel {panel_index + 1}",
+            f"Diagnóstico avanzado (rotordynamics + Vault) · Panel {panel_index + 1}",
             expanded=True,
         ):
             st.markdown(f"**{cat_iv_text_diag['headline']}**")
@@ -1756,7 +1756,7 @@ def render_scl_compare_section(
                 key=lambda e: pd.Timestamp(e["ts_start"]) if e["ts_start"] is not None else pd.Timestamp.min
             )
 
-            with st.expander("Diagnóstico Cat IV multi-fecha (rotordynamics + Vault)", expanded=True):
+            with st.expander("Diagnóstico avanzado multi-fecha (rotordynamics + Vault)", expanded=True):
                 # Tabla de e/c por fecha
                 rows_cat = []
                 for e in ecc_states:
@@ -1972,7 +1972,7 @@ def main():
             st.info(
                 "Sin datos de cojinete en el Vault. Captura el diámetro interno "
                 "y/o clearance del cojinete en Asset Documents para análisis "
-                "Cat IV preciso. Usando valores manuales de la sidebar."
+                "preciso conforme a API 670. Usando valores manuales de la sidebar."
             )
 
         st.markdown("---")

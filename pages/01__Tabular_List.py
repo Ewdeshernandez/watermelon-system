@@ -589,11 +589,54 @@ def build_table_dataframe(
     overall_mode: str,
     global_alarm: float,
     global_danger: float,
+    sensors_map: Optional[List[Dict[str, Any]]] = None,
 ) -> pd.DataFrame:
+    """
+    Construye el DataFrame de la tabla.
+
+    Ciclo 14c.1: si se pasa sensors_map, cada record intenta matchear a
+    un sensor del mapa (resolve_sensor_for_point). Si encuentra match,
+    usa los thresholds + family + overall_mode + criterion del SENSOR
+    (granular per-sensor) ANTES de los machine_settings / point_settings
+    o el global. Si no hay match, cae al comportamiento legacy.
+    """
     rows = []
+    sensors_map = sensors_map or []
+
+    # Import on-demand para evitar dependencia circular en versiones legacy
+    try:
+        from core.sensor_map import resolve_sensor_for_point, sensor_label, sensor_unit_family
+        _has_sensor_map = bool(sensors_map)
+    except Exception:
+        _has_sensor_map = False
 
     for rec in records:
-        if config_mode == "Criterion by Machine":
+        # Ciclo 14c.1 — resolver sensor del mapa primero (prioridad máxima)
+        sensor_match = None
+        sensor_label_str = ""
+        if _has_sensor_map:
+            sensor_match = resolve_sensor_for_point(
+                sensors_map,
+                csv_point=str(rec.point or ""),
+                csv_variable=str(rec.variable or ""),
+                csv_unit=str(rec.amplitude_unit or ""),
+            )
+            if sensor_match is not None:
+                sensor_label_str = sensor_label(sensor_match)
+
+        if sensor_match is not None:
+            # Usar valores granulares del sensor del mapa
+            sensor_type = str(sensor_match.get("sensor_type", "")).lower()
+            criterion_row = (
+                "API 670 + ISO 7919-3 / ISO 20816-3" if sensor_type == "proximity"
+                else "ISO 20816-3"
+            )
+            alarm_row = float(sensor_match.get("alarm", 0.0) or 0.0)
+            danger_row = float(sensor_match.get("danger", 0.0) or 0.0)
+            family_row = sensor_unit_family(sensor_match)
+            # Overall mode por sensor: PP para proximity, RMS para velocity/accel
+            overall_mode_row = "PP" if family_row == "Proximity" else "RMS"
+        elif config_mode == "Criterion by Machine":
             machine_cfg = machine_settings.get(rec.machine, {})
             criterion_row = machine_cfg.get("criterion", criterion_default)
             alarm_row = float(machine_cfg.get("alarm", global_alarm))
@@ -640,6 +683,7 @@ def build_table_dataframe(
                 "Alarm": alarm_row,
                 "Danger": danger_row,
                 "Criterion": criterion_row,
+                "Sensor": sensor_label_str,  # Ciclo 14c.1: label del sensor matched
                 "Overall": ov_display,
                 "Overall RMS Base": ov_rms,
                 "0.5X Amp": a05,
@@ -999,6 +1043,21 @@ if "report_items" not in st.session_state:
     st.session_state.report_items = []
 
 
+# =====================================================================
+# Ciclo 14b.2 — Wire de Machinery Library + auto-derivación de defaults
+# =====================================================================
+# El sidebar ahora arranca con el selector de instancia activa.
+# Los 5 inputs default (criterion / family / overall_mode / alarm /
+# danger) que antes eran manuales pasan a derivarse de la instancia
+# activa vía core/tabular_defaults.derive_tabular_defaults(). Si el
+# usuario quiere override puntual (caso legítimo: comparar criterios
+# distintos sobre la misma data), expande el bloque "Override criterio
+# para este análisis" en sidebar.
+
+from core.instance_selector import render_instance_selector
+from core.instance_state import get_instance, get_instance_document_bytes, compose_train_description
+from core.tabular_defaults import derive_tabular_defaults
+
 records_all = load_signals_from_session()
 
 if not records_all:
@@ -1006,33 +1065,99 @@ if not records_all:
     st.stop()
 
 with st.sidebar:
-    st.markdown("### Tabular List Setup")
+    st.markdown("---")
+    _instance_state = render_instance_selector(module_name="tabular")
 
-    criterion_options = [
-        "ISO 20816-3",
-        "ISO 20816-9",
-        "ISO 7919-3",
-        "API 670",
-        "API 684",
-        "Boletín fabricante",
-        "Criterio interno SIGA",
-        "Custom",
-    ]
+_active_instance_id = _instance_state.get("instance_id") or ""
+_active_instance = get_instance(_active_instance_id) if _active_instance_id else None
 
-    family_options = ["Auto", "Proximity", "Velocity", "Acceleration"]
-
-    criterion_selected = st.selectbox(
-        "Default criterion",
-        options=criterion_options,
-        index=0,
+if _active_instance is None:
+    st.error(
+        "🚨 **No hay máquina activa.** Andá al menú lateral → "
+        "**Machinery Library** → activá la máquina que vas a analizar "
+        "y volvé acá. Tabular List no opera sin un activo seleccionado."
     )
+    st.stop()
 
-    criterion_text = criterion_selected
-    if criterion_selected == "Custom":
-        criterion_text = st.text_input(
-            "Custom criterion",
-            value="Criterio usuario",
-        ).strip() or "Criterio usuario"
+# Auto-derivación de defaults desde la instancia activa
+_defaults = derive_tabular_defaults(_active_instance)
+
+# Banner verde arriba con info del criterio + thresholds + sources
+with st.container(border=True):
+    bcols = st.columns([1.0, 3.5])
+    with bcols[0]:
+        if _active_instance.schematic_png:
+            try:
+                _png = get_instance_document_bytes(
+                    _active_instance.instance_id, _active_instance.schematic_png
+                )
+                if _png:
+                    st.image(_png, use_container_width=True)
+            except Exception:
+                pass
+    with bcols[1]:
+        st.markdown(f"### 🟢 Tabular List · **{_active_instance.tag or _active_instance.instance_id}**")
+        st.caption(compose_train_description(_active_instance) or "(sin descripción)")
+        st.markdown(
+            f"**Criterio aplicado:** {_defaults['criterion']}  \n"
+            f"_{_defaults['criterion_explanation']}_"
+        )
+        st.markdown(
+            f"**Alert (default):** `{_defaults['alarm']:.3f} {_defaults['unit_hint']}` "
+            f"· _{_defaults['alarm_source']}_  \n"
+            f"**Danger (default):** `{_defaults['danger']:.3f} {_defaults['unit_hint']}` "
+            f"· _{_defaults['danger_source']}_"
+        )
+        # Ciclo 14c.1 — info del Sensor Map
+        _n_sensors = len(_active_instance.sensors or [])
+        if _n_sensors > 0:
+            _types_count: Dict[str, int] = {}
+            for _s in _active_instance.sensors:
+                _t = str(_s.get("sensor_type", "")).lower() or "unknown"
+                _types_count[_t] = _types_count.get(_t, 0) + 1
+            _types_str = " + ".join(f"{c} {t}" for t, c in _types_count.items())
+            st.markdown(
+                f"**📍 Sensor Map:** `{_n_sensors}` sensores configurados "
+                f"({_types_str}). Los thresholds individuales del DCS tienen prioridad "
+                f"sobre los defaults de arriba — la tabla clasifica cada fila con el "
+                f"sensor que matchea su Point."
+            )
+        else:
+            st.warning(
+                "📍 **Sensor Map vacío.** El activo no tiene sensores configurados. "
+                "Andá a Machinery Library → Mapa de Sensores para configurarlos. "
+                "Mientras tanto, todas las filas se clasifican con los defaults globales."
+            )
+
+criterion_options = [
+    "ISO 20816-3",
+    "ISO 20816-9",
+    "ISO 7919-3",
+    "API 670",
+    "API 684",
+    "Boletín fabricante",
+    "Criterio interno SIGA",
+    "Custom",
+]
+
+family_options = ["Auto", "Proximity", "Velocity", "Acceleration"]
+
+# Inicializar valores derivados (usados como default si no hay override)
+criterion_selected = _defaults["criterion"]
+criterion_text = _defaults["criterion"]
+measurement_family = _defaults["family"]
+overall_mode = _defaults["overall_mode"]
+alarm_value = float(_defaults["alarm"])
+danger_value = float(_defaults["danger"])
+_override_active = False
+
+with st.sidebar:
+    st.markdown("---")
+    st.markdown("### Tabular List Setup")
+    st.caption(
+        "Los defaults vienen automáticos desde la instancia activa. "
+        "Configuration mode permite agrupar por Machine o Point."
+    )
 
     config_mode = st.selectbox(
         "Configuration mode",
@@ -1040,37 +1165,106 @@ with st.sidebar:
         index=0,
     )
 
-    measurement_family = st.selectbox(
-        "Default measurement family",
-        options=family_options,
-        index=0,
-    )
+    with st.expander("⚙️ Override criterio para este análisis (avanzado)", expanded=False):
+        st.caption(
+            "Útil para comparar el mismo set de datos contra criterios alternativos "
+            "(ej. ISO 20816-2 vs ISO 7919-3). NO modifica la instancia en Machinery Library."
+        )
 
-    overall_mode_options = overall_mode_options_for_family(measurement_family)
-    overall_mode = st.selectbox(
-        "Default overall display mode",
-        options=overall_mode_options,
-        index=0,
-    )
+        _ovr_criterion_idx = (
+            criterion_options.index(_defaults["criterion"])
+            if _defaults["criterion"] in criterion_options
+            else len(criterion_options) - 1  # "Custom"
+        )
+        _ovr_criterion = st.selectbox(
+            "Criterion (override)",
+            options=criterion_options,
+            index=_ovr_criterion_idx,
+            key="wm_tab_ovr_criterion",
+        )
 
-    alarm_value = st.number_input(
-        f"Default alarm threshold ({overall_mode})",
-        min_value=0.0,
-        value=4.5,
-        step=0.1,
-        format="%.3f",
-    )
+        _ovr_criterion_text = _ovr_criterion
+        if _ovr_criterion == "Custom":
+            _ovr_criterion_text = st.text_input(
+                "Custom criterion",
+                value=_defaults["criterion"],
+                key="wm_tab_ovr_criterion_text",
+            ).strip() or _defaults["criterion"]
 
-    danger_value = st.number_input(
-        f"Default danger threshold ({overall_mode})",
-        min_value=0.0,
-        value=7.1,
-        step=0.1,
-        format="%.3f",
-    )
+        _ovr_family_idx = (
+            family_options.index(_defaults["family"])
+            if _defaults["family"] in family_options
+            else 0
+        )
+        _ovr_family = st.selectbox(
+            "Measurement family (override)",
+            options=family_options,
+            index=_ovr_family_idx,
+            key="wm_tab_ovr_family",
+        )
+
+        _ovr_overall_options = overall_mode_options_for_family(_ovr_family)
+        _ovr_overall_idx = (
+            _ovr_overall_options.index(_defaults["overall_mode"])
+            if _defaults["overall_mode"] in _ovr_overall_options
+            else 0
+        )
+        _ovr_overall = st.selectbox(
+            "Overall display mode (override)",
+            options=_ovr_overall_options,
+            index=_ovr_overall_idx,
+            key="wm_tab_ovr_overall",
+        )
+
+        _ovr_alarm = st.number_input(
+            f"Alarm threshold ({_ovr_overall})",
+            min_value=0.0,
+            value=float(_defaults["alarm"]),
+            step=0.1,
+            format="%.3f",
+            key="wm_tab_ovr_alarm",
+        )
+
+        _ovr_danger = st.number_input(
+            f"Danger threshold ({_ovr_overall})",
+            min_value=0.0,
+            value=float(_defaults["danger"]),
+            step=0.1,
+            format="%.3f",
+            key="wm_tab_ovr_danger",
+        )
+
+        # Detectar si el usuario tocó algo — si los valores del override
+        # difieren de los defaults, marcamos override activo.
+        _override_active = (
+            _ovr_criterion != _defaults["criterion"]
+            or _ovr_family != _defaults["family"]
+            or _ovr_overall != _defaults["overall_mode"]
+            or abs(_ovr_alarm - _defaults["alarm"]) > 1e-6
+            or abs(_ovr_danger - _defaults["danger"]) > 1e-6
+        )
+
+        if _override_active:
+            st.warning("⚠️ Override activo")
+            criterion_selected = _ovr_criterion
+            criterion_text = _ovr_criterion_text
+            measurement_family = _ovr_family
+            overall_mode = _ovr_overall
+            alarm_value = float(_ovr_alarm)
+            danger_value = float(_ovr_danger)
 
     if danger_value < alarm_value:
         st.warning("Danger debería ser mayor o igual que Alarm.")
+
+# Banner de override fuera del sidebar (visible para el usuario)
+if _override_active:
+    st.warning(
+        f"⚠️ **Override criterio activo** — "
+        f"Criterion: {criterion_text} · Family: {measurement_family} · "
+        f"Overall: {overall_mode} · Alarm: {alarm_value:.3f} · Danger: {danger_value:.3f}. "
+        f"Los defaults de la instancia ({_defaults['criterion']}) están desactivados "
+        f"para este análisis."
+    )
 
     machine_settings: Dict[str, Dict[str, Any]] = {}
     point_settings: Dict[str, Dict[str, Any]] = {}
@@ -1217,6 +1411,9 @@ df_table = build_table_dataframe(
     overall_mode=overall_mode,
     global_alarm=float(alarm_value),
     global_danger=float(danger_value),
+    # Ciclo 14c.1: el sensor_map de la instancia activa tiene prioridad
+    # máxima — cada sensor con su tipo/unidad/setpoints individuales.
+    sensors_map=list(_active_instance.sensors or []),
 )
 
 if df_table.empty:

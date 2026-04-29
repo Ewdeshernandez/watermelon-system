@@ -15,7 +15,12 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.auth import require_login, render_user_menu
-from core.spectrum_diagnostics import evaluate_spectrum_diagnostic, build_spectrum_report_notes
+from core.spectrum_diagnostics import (
+    evaluate_spectrum_diagnostic,
+    build_spectrum_report_notes,
+    build_spectrum_diagnostics_rotordyn,  # Ciclo 11: Cat IV completo
+)
+from core.spectrum_scale import suggest_max_cpm_for_unit  # Ciclo 11.1: auto-escala
 from core.bearing_catalog import (
     build_bearing_fault_overlay_from_catalog,
     build_bearing_fault_overlay_from_nb,
@@ -1584,8 +1589,13 @@ with st.sidebar:
 
     valid_ids = {r.signal_id for r in records_all}
     current_ids = [sid for sid in st.session_state.wm_sp_selected_signal_ids if sid in valid_ids]
+
+    # Auto-select all (Ciclo 11.1): si el usuario no tiene selección activa,
+    # mostrar TODAS las señales cargadas en lugar de solo la primera. Igual
+    # que el patrón ya implementado en Bode (Ciclo 2-B). Le ahorra al usuario
+    # el clic repetitivo de seleccionar uno por uno cuando carga 3+ CSVs.
     if not current_ids:
-        current_ids = [records_all[0].signal_id]
+        current_ids = [r.signal_id for r in records_all]
         st.session_state.wm_sp_selected_signal_ids = current_ids
 
     default_names = [r.name for r in records_all if r.signal_id in current_ids]
@@ -1637,15 +1647,46 @@ with st.sidebar:
         else records_all[0].signal_id
     )
     primary_for_defaults = next(r for r in records_all if r.signal_id == default_source_id)
-    default_max_cpm = float(primary_for_defaults.rpm * 10) if primary_for_defaults.rpm is not None else 60000.0
+
+    # Ciclo 11.1 — Auto-escala del eje X según la unidad física de la
+    # señal: displacement→60k CPM, velocity→120k CPM, acceleration→
+    # 600k CPM. El usuario puede overridear desde 'Max frequency (CPM)'
+    # cambiando el valor manualmente. Cuando cambia la primera señal
+    # seleccionada y la unidad cambia de familia, el sistema sugiere
+    # un nuevo default sin pisar la edición manual del usuario.
+    primary_unit_text = amplitude_unit_text(
+        infer_amplitude_unit(primary_for_defaults.metadata or {}),
+        amplitude_mode,
+    )
+    suggested_max_cpm, scale_reason = suggest_max_cpm_for_unit(
+        primary_unit_text, rpm=primary_for_defaults.rpm,
+    )
+
+    # Persistir la preferencia del usuario en session_state. La clave
+    # incluye la "familia" inferida — si el usuario cambia a una señal
+    # de otra familia (ej. de displacement a acceleration), se reaplica
+    # el default automáticamente (ya no le sirve 60k CPM si está mirando
+    # un acelerómetro).
+    from core.spectrum_scale import classify_amplitude_quantity
+    current_family = classify_amplitude_quantity(primary_unit_text)
+    family_key = f"wm_sp_max_cpm_family_{current_family}"
+    if family_key not in st.session_state:
+        st.session_state[family_key] = suggested_max_cpm
 
     max_cpm = st.number_input(
         "Max frequency (CPM)",
         min_value=100.0,
-        value=float(max(1000.0, default_max_cpm)),
-        step=100.0,
+        value=float(max(1000.0, st.session_state[family_key])),
+        step=1000.0,
         format="%.0f",
+        help=(
+            f"Auto-sugerido para esta señal: {suggested_max_cpm:,.0f} CPM. "
+            f"Razón: {scale_reason} Cambialo si necesitás otro rango."
+        ),
+        key=f"wm_sp_max_cpm_input_{current_family}",
     )
+    st.session_state[family_key] = float(max_cpm)
+    st.caption(f"📊 Auto-rango: {scale_reason}")
 
     y_axis_mode = st.selectbox(
         "Y-axis scale",
@@ -1990,6 +2031,32 @@ def render_spectrum_panel(
     semaforo_status = text_diag["status"]
     semaforo_color = text_diag["color"]
 
+    # Ciclo 11 — Diagnóstico Cat IV completo (extiende text_diag con
+    # detección de sub-síncrono / oil whirl, resonancia 1X, recomendaciones
+    # priorizadas con normas citadas, integración con bearing_assessment).
+    # NO reemplaza text_diag (que sigue alimentando el semáforo y la UI
+    # legacy) — se suma como narrativa profunda que va al reporte.
+    try:
+        cat_iv_diag = build_spectrum_diagnostics_rotordyn(
+            freq_cpm=freq_cpm,
+            amp_peak=amp_peak,
+            one_x_amp=one_x_display_amp,
+            harmonics=[
+                {"order": p.order, "freq_cpm": p.freq_cpm, "amp_peak": p.amp_peak}
+                for p in all_harmonic_points
+            ],
+            overall_spec_rms=overall_spec_rms,
+            dominant_peak_freq_cpm=spectrum.peak_freq_cpm,
+            dominant_peak_amp=spectrum.peak_amp_peak,
+            rpm=primary.rpm,
+            bearing_assessment=bearing_assessment if enable_bearing_faults else None,
+            bearing_ai=bearing_ai if enable_bearing_faults else None,
+            profile_label="",
+            measurement_unit=amplitude_unit_text(infer_amplitude_unit(primary.metadata or {}), amplitude_mode),
+        )
+    except Exception:
+        cat_iv_diag = None
+
     logo_uri = get_logo_data_uri(LOGO_PATH)
 
     fig = build_spectrum_figure(
@@ -2139,6 +2206,39 @@ def render_spectrum_panel(
             import pandas as pd
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
     st.info(text_diag["narrative"])
+
+    # Ciclo 11 — Bloque Cat IV con narrativa profunda + recomendaciones
+    # numeradas con normas citadas. Aparece como expander expanded por
+    # default para que el usuario lo vea de inmediato.
+    if cat_iv_diag is not None:
+        sev = cat_iv_diag.get("severity_global", "VIGILANCIA")
+        sev_color = {
+            "CRÍTICA": "#dc2626", "ACCIÓN REQUERIDA": "#ea580c",
+            "ATENCIÓN": "#f59e0b", "VIGILANCIA": "#84cc16",
+            "CONDICIÓN ACEPTABLE": "#16a34a",
+        }.get(sev, "#475569")
+        with st.expander(
+            f"🔬 Diagnóstico avanzado · {cat_iv_diag.get('headline', '')}",
+            expanded=True,
+        ):
+            st.markdown(
+                f"<div style='display:inline-block; padding:6px 14px; "
+                f"border-radius:999px; background:{sev_color}; color:white; "
+                f"font-weight:700; font-size:0.95rem; margin-bottom:8px;'>"
+                f"Severidad global: {sev}</div>",
+                unsafe_allow_html=True,
+            )
+            st.write(cat_iv_diag.get("detail", ""))
+            st.write(cat_iv_diag.get("action", ""))
+
+            findings = cat_iv_diag.get("findings", [])
+            if findings:
+                st.caption(
+                    "Hallazgos detectados: " + " · ".join(
+                        f"{f.get('headline')}" for f in findings
+                    )
+                )
+
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
 
@@ -2176,7 +2276,24 @@ def render_spectrum_panel(
             except Exception:
                 png_bytes_for_report = None
 
-            spectrum_report_notes = build_spectrum_report_notes(text_diag)
+            # Reporte: si hay diagnóstico Cat IV completo (Ciclo 11), lo
+            # usamos como narrativa principal (detail + action numerado con
+            # normas citadas). Sino, fallback a la narrativa legacy.
+            if cat_iv_diag is not None:
+                cat_detail = (cat_iv_diag.get("detail") or "").strip()
+                cat_action = (cat_iv_diag.get("action") or "").strip()
+                cat_headline = (cat_iv_diag.get("headline") or "").strip()
+                blocks = []
+                if cat_headline:
+                    blocks.append(cat_headline)
+                if cat_detail:
+                    blocks.append(cat_detail)
+                if cat_action:
+                    blocks.append(cat_action)
+                spectrum_report_notes = "\n\n".join(blocks).strip()
+            else:
+                spectrum_report_notes = build_spectrum_report_notes(text_diag)
+
             if not spectrum_report_notes.strip():
                 spectrum_report_notes = "Interpretación técnica pendiente para este espectro."
 
