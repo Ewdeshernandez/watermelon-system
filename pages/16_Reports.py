@@ -1253,6 +1253,235 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         story.append(Spacer(1, 0.30 * cm))
         story.append(PageBreak())
 
+    # ============================================================
+    # Ciclo 15.1.2 — SECCIÓN MAPA DE SENSORES (Machine Map)
+    # ------------------------------------------------------------
+    # Va inmediatamente después del Resumen Ejecutivo y antes de
+    # Recomendaciones. Aparece automáticamente cuando hay una
+    # Asset Instance activa (schematic_instance_id en meta) con
+    # Sensor Map configurado. Si no hay, se omite limpio.
+    #
+    # Composición:
+    #   - Título "MAPA DE SENSORES" en WMTOC1 (entra al TOC).
+    #   - Párrafo de síntesis con totales por zona en prosa
+    #     ("De los N sensores configurados, X están en condición
+    #      aceptable, Y en atención y Z requieren acción inmediata.").
+    #   - Heatmap full (lateral + polar por plano) renderizado con
+    #     render_sensor_map_diagram en modo severity_by_label.
+    #   - Caption corto bajo la figura.
+    #   - Tabla drill-down de sensores con atención requerida
+    #     (Alarm + Danger), solo si hay alguno. Si todo está
+    #     aceptable, se omite la tabla y se cierra con una línea
+    #     positiva.
+    # ============================================================
+    sm_inst_id = (meta.get("schematic_instance_id") or "").strip()
+    if sm_inst_id:
+        try:
+            from core.instance_state import get_instance, compose_train_description
+            from core.sensor_diagram import render_sensor_map_diagram
+            from core.machine_severity import build_severity_table, count_status
+
+            sm_instance = get_instance(sm_inst_id)
+        except Exception:
+            sm_instance = None
+
+        if sm_instance is not None and getattr(sm_instance, "sensors", None):
+            try:
+                sm_signals = st.session_state.get("signals", {}) or {}
+                sm_df = build_severity_table(sm_instance.sensors, sm_signals)
+                sm_counts = count_status(sm_df)
+                sm_total = sm_counts["total"]
+
+                story.append(Paragraph("MAPA DE SENSORES", styles["WMTOC1"]))
+
+                # Sintesis en prosa — coherente con el tono del resto del
+                # reporte (no bullets, no tablas markdown).
+                synth_parts = [
+                    f"Del Sensor Map configurado para la unidad ({sm_total} "
+                    f"{'sensor' if sm_total == 1 else 'sensores'} en total)"
+                ]
+                pieces = []
+                if sm_counts["normal"]:
+                    pieces.append(
+                        f"{sm_counts['normal']} se mantienen en condición "
+                        f"aceptable contra los setpoints individuales del DCS"
+                    )
+                if sm_counts["alarm"]:
+                    pieces.append(
+                        f"{sm_counts['alarm']} se encuentran en zona de atención"
+                    )
+                if sm_counts["danger"]:
+                    pieces.append(
+                        f"{sm_counts['danger']} {'requiere' if sm_counts['danger'] == 1 else 'requieren'} "
+                        f"acción inmediata"
+                    )
+                if sm_counts["no_data"]:
+                    pieces.append(
+                        f"{sm_counts['no_data']} no presentan dato cargado en sesión"
+                    )
+                if pieces:
+                    synth_parts.append(", ".join(pieces) + ".")
+                else:
+                    synth_parts.append("no hay datos disponibles para clasificar.")
+                synth_text = ", ".join(synth_parts) if len(synth_parts) > 1 else synth_parts[0]
+                # Recomponer prosa con punto final
+                if not synth_text.endswith("."):
+                    synth_text += "."
+
+                synth_text = (
+                    synth_text + " El heatmap a continuación ubica cada sonda "
+                    "en su posición física sobre el tren acoplado y la colorea "
+                    "según el estado actual contra los umbrales de Alarm y "
+                    "Danger del propio sensor (no contra defaults globales)."
+                )
+                story.append(Paragraph(_paragraph_safe(synth_text), styles["WMBody"]))
+
+                # Heatmap full
+                try:
+                    sm_drv = " ".join(p for p in [
+                        getattr(sm_instance, "driver_manufacturer", ""),
+                        getattr(sm_instance, "driver_model", ""),
+                    ] if p) or "Driver"
+                    sm_dvn = " ".join(p for p in [
+                        getattr(sm_instance, "driven_manufacturer", ""),
+                        getattr(sm_instance, "driven_model", ""),
+                    ] if p) or "Driven"
+                    sev_by_label = dict(zip(
+                        sm_df["Label"].astype(str),
+                        sm_df["Status"].astype(str),
+                    ))
+                    sm_png = render_sensor_map_diagram(
+                        sm_instance.sensors,
+                        train_label=compose_train_description(sm_instance) or "",
+                        driver_label=sm_drv,
+                        driven_label=sm_dvn,
+                        severity_by_label=sev_by_label,
+                    )
+                    if sm_png:
+                        usable_w = A4[0] - doc.leftMargin - doc.rightMargin
+                        target_w = min(15.5 * cm, usable_w)
+                        target_h = 11.0 * cm
+                        fitted_w, fitted_h = _fit_image_dimensions(
+                            sm_png, target_w, target_h
+                        )
+                        sm_img = Image(BytesIO(sm_png), width=fitted_w, height=fitted_h)
+                        sm_img.hAlign = "CENTER"
+                        story.append(Spacer(1, 0.10 * cm))
+                        story.append(sm_img)
+                        sm_caption_style = ParagraphStyle(
+                            name="WMSensorMapCaption",
+                            parent=styles["WMMeta"],
+                            fontName=PDF_FONT_REGULAR,
+                            fontSize=8.8,
+                            leading=11,
+                            alignment=TA_CENTER,
+                            textColor=colors.HexColor("#475569"),
+                            spaceBefore=2,
+                            spaceAfter=10,
+                        )
+                        story.append(Paragraph(
+                            "Heatmap del Sensor Map · vista lateral del tren "
+                            "y vista polar por plano, coloreadas por severidad "
+                            "actual frente a los setpoints individuales del DCS.",
+                            sm_caption_style,
+                        ))
+                except Exception:
+                    pass
+
+                # Drill-down de sensores con atención requerida
+                critical_df = sm_df[sm_df["Status"].isin(["Alarm", "Danger"])].copy()
+                if not critical_df.empty:
+                    critical_df = critical_df.sort_values(
+                        by=["Status", "Overall"], ascending=[True, False]
+                    )
+                    table_data = [[
+                        Paragraph("<b>Sensor</b>", styles["WMTableHeader"]),
+                        Paragraph("<b>Plano</b>", styles["WMTableHeader"]),
+                        Paragraph("<b>Tipo</b>", styles["WMTableHeader"]),
+                        Paragraph("<b>Overall</b>", styles["WMTableHeader"]),
+                        Paragraph("<b>Alarm</b>", styles["WMTableHeader"]),
+                        Paragraph("<b>Danger</b>", styles["WMTableHeader"]),
+                        Paragraph("<b>Unidad</b>", styles["WMTableHeader"]),
+                        Paragraph("<b>Estado</b>", styles["WMTableHeader"]),
+                    ]]
+                    status_color = {
+                        "Alarm": "#f59e0b",
+                        "Danger": "#dc2626",
+                    }
+                    for _, r in critical_df.iterrows():
+                        st_color = status_color.get(r["Status"], "#475569")
+                        st_label = (
+                            "ATENCIÓN" if r["Status"] == "Alarm"
+                            else "ACCIÓN REQUERIDA" if r["Status"] == "Danger"
+                            else r["Status"]
+                        )
+                        table_data.append([
+                            Paragraph(str(r["Label"]), styles["WMTableCell"]),
+                            Paragraph(str(r["Plane Label"] or r["Plane"]), styles["WMTableCell"]),
+                            Paragraph(str(r["Type"]).capitalize(), styles["WMTableCell"]),
+                            Paragraph(f"{float(r['Overall']):.3f}", styles["WMTableCell"]),
+                            Paragraph(f"{float(r['Alarm']):.3f}", styles["WMTableCell"]),
+                            Paragraph(f"{float(r['Danger']):.3f}", styles["WMTableCell"]),
+                            Paragraph(str(r["Unit"]), styles["WMTableCell"]),
+                            Paragraph(
+                                f'<font color="{st_color}"><b>{st_label}</b></font>',
+                                styles["WMTableCell"],
+                            ),
+                        ])
+                    sm_tbl = Table(
+                        table_data,
+                        colWidths=[
+                            2.6 * cm, 2.4 * cm, 2.0 * cm, 1.7 * cm,
+                            1.6 * cm, 1.6 * cm, 1.7 * cm, 2.6 * cm,
+                        ],
+                        repeatRows=1,
+                    )
+                    sm_tbl.setStyle(TableStyle([
+                        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+                        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+                         [colors.HexColor("#ffffff"), colors.HexColor("#f8fafc")]),
+                        ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
+                        ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                        ("TOPPADDING", (0, 0), (-1, -1), 4),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                    ]))
+                    story.append(Spacer(1, 0.15 * cm))
+                    drill_caption = ParagraphStyle(
+                        name="WMDrillCaption",
+                        parent=styles["WMMeta"],
+                        fontName=PDF_FONT_BOLD,
+                        fontSize=10.0,
+                        leading=13,
+                        textColor=colors.HexColor("#0f172a"),
+                        spaceBefore=2,
+                        spaceAfter=4,
+                    )
+                    story.append(Paragraph(
+                        "Sensores con atención requerida",
+                        drill_caption,
+                    ))
+                    story.append(sm_tbl)
+                else:
+                    if sm_total > 0 and sm_counts["no_data"] < sm_total:
+                        story.append(Paragraph(
+                            "Todos los sensores con dato cargado en la sesión "
+                            "se mantienen en zona aceptable, por debajo del "
+                            "umbral de Alarm.",
+                            styles["WMBody"],
+                        ))
+
+                story.append(Spacer(1, 0.20 * cm))
+                story.append(PageBreak())
+            except Exception:
+                # Si falla cualquier paso de la sección Machine Map,
+                # no bloqueamos el reporte.
+                pass
+
     # Orden SIGA-style (Ciclo 10A): RECOMENDACIONES primero — es lo que el
     # cliente abre y lee de inmediato. Objetivo y Desarrollo van después.
     # Secciones que están vacías se ocultan y la numeración se compacta.
