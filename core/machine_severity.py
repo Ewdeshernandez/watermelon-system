@@ -74,10 +74,41 @@ def _safe_float(v) -> float:
 # ============================================================
 
 def compute_signal_overall_rms(signal_obj: Any) -> float:
-    """Calcula overall RMS robusto a NaN. Devuelve 0.0 si no se puede."""
+    """
+    Calcula overall RMS robusto a NaN. Devuelve 0.0 si no se puede.
+
+    Soporta múltiples formas en las que viene un signal en la sesión:
+      * ``SimpleNamespace(time=..., x=..., metadata=...)`` — formato real
+        que produce build_signal_from_parsed en Load Data.
+      * Objeto con atributo ``.amplitude`` — formato del SignalRecord de
+        Tabular/Time Waveforms/Spectrum.
+      * Dict con clave ``"y"`` o ``"amplitude"``.
+
+    Hotfix Ciclo 15.1.3 — la version anterior solo miraba .amplitude o
+    dict["y"], asi que sobre SimpleNamespace lanzaba AttributeError
+    silencioso y devolvia 0.0 SIEMPRE. Resultado: el Machine Map clasificaba
+    todos los sensores como Normal por overall=0 < alarm. Bug detectado por
+    contraste con el Tabular List, que sí veía 2 ATENCIÓN sobre los mismos
+    CSVs (CRF/TRF ACELL al 64%/52% del danger).
+    """
     import numpy as np
     try:
-        amp = signal_obj.amplitude if hasattr(signal_obj, "amplitude") else signal_obj.get("y")
+        amp = None
+        if hasattr(signal_obj, "amplitude"):
+            amp = signal_obj.amplitude
+        elif hasattr(signal_obj, "x"):
+            # SimpleNamespace de Load Data: .x es la amplitud, .time el eje t
+            amp = signal_obj.x
+        elif isinstance(signal_obj, dict):
+            # Cuidado con truthiness sobre numpy arrays — no usar `or`.
+            for k in ("amplitude", "y", "x"):
+                if k in signal_obj and signal_obj[k] is not None:
+                    amp = signal_obj[k]
+                    break
+
+        if amp is None:
+            return 0.0
+
         amp = np.asarray(amp, dtype=float)
         amp = amp[np.isfinite(amp)]
         if amp.size == 0:

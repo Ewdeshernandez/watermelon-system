@@ -1167,7 +1167,17 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     # RESUMEN EJECUTIVO — página inicial después del TOC.
     # Es el "elevator pitch" del reporte: lo primero que el cliente lee
     # de fondo del análisis (después de la portada y la TOC).
+    #
+    # Hotfix Ciclo 15.1.3 — si el usuario no llenó el Resumen Ejecutivo
+    # manualmente, lo auto-redactamos a partir de las figuras cargadas.
+    # Antes, si estaba vacio, se OMITIA la seccion entera y el reporte
+    # llegaba al cliente sin elevator pitch. Eso es peor que un draft.
     executive_text = (meta.get("executive_summary") or "").strip()
+    if not executive_text and items:
+        try:
+            executive_text = (_autodraft_executive_summary(meta, items) or "").strip()
+        except Exception:
+            executive_text = ""
     if executive_text:
         story.append(Paragraph("RESUMEN EJECUTIVO", styles["WMTOC1"]))
 
