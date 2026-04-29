@@ -209,31 +209,33 @@ def resolve_sensor_for_point(
         direction_hint = "Y"
 
     type_hint = ""
-    # Velocity primero porque "mm/s" / "in/s" matchean específicamente.
-    # Si chequeáramos accelerometer ("m/s²") antes, el substring "m/s"
-    # haría falso positivo contra "mm/s" (velocidad).
-    if any(tok in unit_norm for tok in ("mm/s", "in/s", "ips")):
+
+    # Ciclo 15.1 hotfix — DETECCIÓN POR POINT NAME PRIMERO.
+    # Los velocity transducers Bently (VT5000 series) reportan
+    # amplitude_unit en "mil pp" porque internamente integran a
+    # displacement. Si chequeáramos la unit primero, "mil" haría
+    # falso positivo contra "proximity" para Points "1VT6805".
+    # El nombre del Point es más confiable que la unit en estos casos.
+    if "1vt" in point_norm or "2vt" in point_norm or "vt" in point_norm.split() or "velo" in point_norm:
         type_hint = "velocity"
-    elif any(tok in unit_norm for tok in ("g rms", "g pk", "g p", "m/s²", "m/s2")):
+    elif "vel" in point_norm.split():
+        type_hint = "velocity"
+    elif "acell" in point_norm or "accel" in point_norm or "ace" in variable_norm:
         type_hint = "accelerometer"
-    elif any(tok in unit_norm for tok in ("mil", "µm", "um")):
+    elif (
+        "ve" in point_norm.split() or "ve5" in point_norm
+        or "disp" in variable_norm or "dsp" in variable_norm
+        or "(x)" in point_norm or "(y)" in point_norm
+    ):
         type_hint = "proximity"
 
-    # Ciclo 15.1 — además del unit, detectar tipo por SUBSTRING del Point
-    # con tokens conocidos del campo Bently / API 670:
-    #   VT / VEL  → velocity transducer
-    #   ACELL / ACC / AC → accelerometer
-    #   XL / YR / VE / Disp / DSP → proximity/displacement
+    # Si el Point name no fue conclusive, usar la unit como respaldo
     if not type_hint:
-        if "vt" in point_norm or "vel" in point_norm or "velo" in point_norm:
+        if any(tok in unit_norm for tok in ("mm/s", "in/s", "ips")):
             type_hint = "velocity"
-        elif "acell" in point_norm or "accel" in point_norm or "ace" in variable_norm:
+        elif any(tok in unit_norm for tok in ("g rms", "g pk", "g p", "m/s²", "m/s2")):
             type_hint = "accelerometer"
-        elif (
-            "ve" in point_norm.split() or "ve5" in point_norm
-            or "disp" in variable_norm or "dsp" in variable_norm
-            or "(x)" in point_norm or "(y)" in point_norm
-        ):
+        elif any(tok in unit_norm for tok in ("mil", "µm", "um")):
             type_hint = "proximity"
 
     candidates = sensors
@@ -338,20 +340,24 @@ def _generate_plane_sensors(
         ))
     elif mode == "accel_plus_velocity":
         # Turbina aeroderivada con accel + velocity en el mismo cojinete
-        # (típico LM6000: TRF y CRF cada uno con un par accel+velocity)
+        # (típico LM6000: TRF y CRF cada uno con un par accel+velocity).
+        # Patterns separados:
+        #   accel: usa prefix + "acell" / "acc"
+        #   velocity: usa prefix + "vt" / "vel" (Bently VT transducers
+        #             tipicamente nombrados "1VT", "2VT", o con sufijo VEL)
         out.append(new_sensor(
             plane=plane_idx, plane_label=plane_label, side="top", angle_deg=0.0,
             direction="radial", sensor_type="accelerometer",
             unit_native="g RMS",
             alarm=accel_alarm, danger=accel_danger,
-            csv_match_pattern=f"*{prefix_lower}*acell*, *{plane_idx}*{prefix_lower}*acell*, *{prefix_lower}*acc*",
+            csv_match_pattern=f"*{prefix_lower}*acell*, *{prefix_lower}*acc*, *acell*{prefix_lower}*",
         ))
         out.append(new_sensor(
             plane=plane_idx, plane_label=plane_label, side="top", angle_deg=0.0,
             direction="radial", sensor_type="velocity",
             unit_native="mm/s RMS",
             alarm=velocity_alarm, danger=velocity_danger,
-            csv_match_pattern=f"*{prefix_lower}*vel*, *{plane_idx}*{prefix_lower}*vel*",
+            csv_match_pattern=f"*vt*{prefix_lower}*, *{prefix_lower}*vel*, *{prefix_lower}*vt*",
         ))
     else:
         # proximity_xy (default): par X-Y a 45° R/L (estándar API 670)
