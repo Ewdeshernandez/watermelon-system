@@ -219,8 +219,22 @@ def resolve_sensor_for_point(
     elif any(tok in unit_norm for tok in ("mil", "µm", "um")):
         type_hint = "proximity"
 
-    if not type_hint and ("acell" in point_norm or "accel" in point_norm or "ace" in variable_norm):
-        type_hint = "accelerometer"
+    # Ciclo 15.1 — además del unit, detectar tipo por SUBSTRING del Point
+    # con tokens conocidos del campo Bently / API 670:
+    #   VT / VEL  → velocity transducer
+    #   ACELL / ACC / AC → accelerometer
+    #   XL / YR / VE / Disp / DSP → proximity/displacement
+    if not type_hint:
+        if "vt" in point_norm or "vel" in point_norm or "velo" in point_norm:
+            type_hint = "velocity"
+        elif "acell" in point_norm or "accel" in point_norm or "ace" in variable_norm:
+            type_hint = "accelerometer"
+        elif (
+            "ve" in point_norm.split() or "ve5" in point_norm
+            or "disp" in variable_norm or "dsp" in variable_norm
+            or "(x)" in point_norm or "(y)" in point_norm
+        ):
+            type_hint = "proximity"
 
     candidates = sensors
     if direction_hint:
@@ -240,11 +254,27 @@ def resolve_sensor_for_point(
             if lbl in point_norm:
                 return sensor
 
-        # 2. Substring del plane_label (ej. "DE driver", "TRF (LM6000)")
+        # 2. Substring del plane_label completo (ej. "TRF (LM6000)")
         for sensor in candidates:
             plbl = _normalize_for_match(sensor.get("plane_label", ""))
             if plbl and plbl in point_norm:
                 return sensor
+
+        # 2b. Tokens cortos del plane_label (Ciclo 15.1) — split por
+        # whitespace y paréntesis. Busca tokens distintivos como TRF,
+        # CRF, NDE, DE, BRG en el Point del CSV. Ignora tokens muy
+        # cortos o comunes.
+        _label_skip = {"de", "nde", "(", ")", "lm", "tm", "brush", "bearing", "driver", "driven"}
+        for sensor in candidates:
+            plbl = _normalize_for_match(sensor.get("plane_label", ""))
+            if not plbl:
+                continue
+            for token in re.split(r"[\s()/_\-]+", plbl):
+                token = token.strip()
+                if len(token) < 2 or token in _label_skip or token.isdigit():
+                    continue
+                if token in point_norm:
+                    return sensor
 
         # 3. Tokens distintivos del csv_match_pattern (ej. "trf", "crf"
         # extraídos de "*trf*acell*"). Filtramos comunes (x, y, acell, etc.).
