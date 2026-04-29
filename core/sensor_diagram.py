@@ -80,6 +80,32 @@ def _marker_for_sensor_type(sensor_type: str) -> str:
     return "."
 
 
+def _worst_status_for_plane(
+    sensors_in_plane: List[Dict[str, Any]],
+    severity_by_label: Optional[Dict[str, str]],
+) -> str:
+    """
+    Devuelve el status peor entre los sensores del plano:
+    Danger > Alarm > Normal > No Data. Si severity_by_label es None
+    devuelve "" (sin color de severidad).
+    """
+    if not severity_by_label:
+        return ""
+    rank = {"Danger": 3, "Alarm": 2, "Normal": 1, "No Data": 0, "": 0}
+    worst = ""
+    worst_rank = -1
+    # Import diferido para evitar ciclo
+    from core.sensor_map import sensor_label as _slabel
+    for s in sensors_in_plane:
+        lbl = _slabel(s)
+        st = severity_by_label.get(lbl, "No Data")
+        r = rank.get(st, 0)
+        if r > worst_rank:
+            worst_rank = r
+            worst = st
+    return worst
+
+
 def render_sensor_map_diagram(
     sensors: List[Dict[str, Any]],
     *,
@@ -88,9 +114,10 @@ def render_sensor_map_diagram(
     driven_label: str = "Driven",
     figure_width_in: float = 12.0,
     severity_by_label: Optional[Dict[str, str]] = None,
+    compact: bool = False,
 ) -> Optional[bytes]:
     """
-    Devuelve PNG bytes con el diagrama completo del Sensor Map.
+    Devuelve PNG bytes con el diagrama del Sensor Map.
 
     Args:
         sensors: lista de sensores (dicts).
@@ -101,6 +128,12 @@ def render_sensor_map_diagram(
             → status ("Normal" / "Alarm" / "Danger" / "No Data"). Cuando
             se provee, los markers se colorean por severidad. Cuando no,
             usan el color por tipo de sensor (modo "configuración").
+        compact: (Ciclo 15.1.1) si True, renderiza SOLO la vista lateral
+            del tren, con cada cojinete coloreado según el peor status
+            de los sensores en ese plano (worst-of). Pensado como banner
+            arriba del Tabular List. Sin polar por plano. Si
+            severity_by_label es None en compact, los cojinetes salen
+            todos neutros.
 
     Returns:
         Bytes PNG o None si matplotlib no está disponible.
@@ -142,21 +175,30 @@ def render_sensor_map_diagram(
     if n_planes_total == 0:
         return None
 
-    # Layout: panel superior con el tren, panel inferior con polar views
-    fig = plt.figure(
-        figsize=(figure_width_in, 5.5 + 1.5 * ((n_planes_total + 3) // 4)),
-        facecolor=_COLOR_BG,
-    )
-    gs = fig.add_gridspec(
-        2, max(n_planes_total, 4),
-        height_ratios=[1.5, 2.0],
-        hspace=0.45, wspace=0.35,
-    )
+    # Layout: en modo full hay panel superior (tren) + panel inferior
+    # (polar por plano). En modo compact solo hay tren, mas chico.
+    if compact:
+        fig = plt.figure(
+            figsize=(figure_width_in, 2.6),
+            facecolor=_COLOR_BG,
+        )
+        gs = fig.add_gridspec(1, 1)
+        ax_top = fig.add_subplot(gs[0, 0])
+    else:
+        fig = plt.figure(
+            figsize=(figure_width_in, 5.5 + 1.5 * ((n_planes_total + 3) // 4)),
+            facecolor=_COLOR_BG,
+        )
+        gs = fig.add_gridspec(
+            2, max(n_planes_total, 4),
+            height_ratios=[1.5, 2.0],
+            hspace=0.45, wspace=0.35,
+        )
 
-    # ============================================================
-    # Panel superior: vista lateral del tren
-    # ============================================================
-    ax_top = fig.add_subplot(gs[0, :])
+        # ========================================================
+        # Panel superior: vista lateral del tren
+        # ========================================================
+        ax_top = fig.add_subplot(gs[0, :])
     ax_top.set_xlim(0, 10)
     ax_top.set_ylim(0, 4)
     ax_top.set_aspect("equal")
@@ -198,15 +240,36 @@ def render_sensor_map_diagram(
         color="#0f172a", linewidth=2.5, zorder=2,
     )
 
+    # En modo compact los cojinetes se rellenan con el color de la
+    # peor severidad de los sensores en ese plano (worst-of). Asi el
+    # banner del Tabular muestra de un vistazo donde esta el problema.
+    def _bearing_facecolor_for_plane(plane_num: int) -> str:
+        if not compact or not severity_by_label:
+            return "white"
+        plane_sensors = [s for s in sensors if int(s.get("plane", 0)) == plane_num]
+        worst = _worst_status_for_plane(plane_sensors, severity_by_label)
+        return _COLOR_SEVERITY.get(worst, "white")
+
+    # En compact los cojinetes son ligeramente mas grandes y el numero
+    # va en blanco si el fondo es de color (mejor contraste).
+    bearing_radius = 0.24 if compact else 0.18
+
+    def _bearing_text_color(face: str) -> str:
+        # Si el fondo es severidad (no blanco), usar blanco. Si es blanco,
+        # usar slate (color del bearing).
+        return "white" if face != "white" else _COLOR_BEARING
+
     # Cojinetes del driver
     for i, p in enumerate(driver_planes):
         bx = x_start + (i + 0.5) * (drv_w / n_drv)
+        face = _bearing_facecolor_for_plane(p)
         ax_top.add_patch(mpatches.Circle(
-            (bx, 2.0), 0.18, facecolor="white",
+            (bx, 2.0), bearing_radius, facecolor=face,
             edgecolor=_COLOR_BEARING, linewidth=1.8, zorder=3,
         ))
         ax_top.text(bx, 2.0, str(p), fontsize=9, fontweight="bold",
-                    ha="center", va="center", color=_COLOR_BEARING, zorder=4)
+                    ha="center", va="center",
+                    color=_bearing_text_color(face), zorder=4)
         # plane label abajo
         plane_lbl = next((s.get("plane_label", "") for s in sensors if s.get("plane") == p), "")
         ax_top.text(bx, 1.45, plane_lbl, fontsize=7, ha="center", va="top",
@@ -215,12 +278,14 @@ def render_sensor_map_diagram(
     # Cojinetes del driven
     for i, p in enumerate(driven_planes):
         bx = dvn_x + (i + 0.5) * (dvn_w / n_dvn)
+        face = _bearing_facecolor_for_plane(p)
         ax_top.add_patch(mpatches.Circle(
-            (bx, 2.0), 0.18, facecolor="white",
+            (bx, 2.0), bearing_radius, facecolor=face,
             edgecolor=_COLOR_BEARING, linewidth=1.8, zorder=3,
         ))
         ax_top.text(bx, 2.0, str(p), fontsize=9, fontweight="bold",
-                    ha="center", va="center", color=_COLOR_BEARING, zorder=4)
+                    ha="center", va="center",
+                    color=_bearing_text_color(face), zorder=4)
         plane_lbl = next((s.get("plane_label", "") for s in sensors if s.get("plane") == p), "")
         ax_top.text(bx, 1.45, plane_lbl, fontsize=7, ha="center", va="top",
                     color=_COLOR_TEXT, alpha=0.75)
@@ -239,17 +304,23 @@ def render_sensor_map_diagram(
         ax_top.text(coup_x + 0.2, 2.45, "kp", fontsize=8,
                     color=_COLOR_KEYPHASOR, fontweight="bold", va="center")
 
-    # Título superior
-    title_text = "Mapa de Sensores"
-    if train_label:
-        title_text += f" — {train_label}"
-    ax_top.set_title(title_text, fontsize=12, fontweight="bold",
-                     color=_COLOR_TEXT, pad=8)
+    # Título superior — en compact lo dejamos vacio (el banner del
+    # Tabular ya tiene su propia cabecera con el tag del activo).
+    if not compact:
+        title_text = "Mapa de Sensores"
+        if train_label:
+            title_text += f" — {train_label}"
+        ax_top.set_title(title_text, fontsize=12, fontweight="bold",
+                         color=_COLOR_TEXT, pad=8)
 
     # ============================================================
-    # Panel inferior: vista polar por plano (R/L con sondas)
+    # Panel inferior: vista polar por plano (R/L con sondas).
+    # En compact se omite por completo.
     # ============================================================
-    plane_axes_planes = list(driver_planes) + list(driven_planes)
+    if compact:
+        plane_axes_planes = []
+    else:
+        plane_axes_planes = list(driver_planes) + list(driven_planes)
     cols = max(n_planes_total, 4)
     for i, plane_num in enumerate(plane_axes_planes):
         ax = fig.add_subplot(gs[1, i % cols])
@@ -329,25 +400,31 @@ def render_sensor_map_diagram(
             title += f"\n{plane_lbl}"
         ax.set_title(title, fontsize=8, fontweight="bold", color=_COLOR_TEXT, pad=4)
 
-    # Ciclo 15.1 — leyenda según modo (severidad vs configuración)
-    if severity_by_label:
-        legend_handles = [
-            mpatches.Patch(color=_COLOR_SEVERITY["Normal"], label="CONDICIÓN ACEPTABLE"),
-            mpatches.Patch(color=_COLOR_SEVERITY["Alarm"], label="ATENCIÓN"),
-            mpatches.Patch(color=_COLOR_SEVERITY["Danger"], label="ACCIÓN REQUERIDA"),
-            mpatches.Patch(color=_COLOR_SEVERITY["No Data"], label="Sin datos"),
-        ]
-    else:
-        legend_handles = [
-            mpatches.Patch(color=_COLOR_PROXIMITY, label="Proximity"),
-            mpatches.Patch(color=_COLOR_VELOCITY, label="Velocity"),
-            mpatches.Patch(color=_COLOR_ACCELEROMETER, label="Accelerometer"),
-            mpatches.Patch(color=_COLOR_KEYPHASOR, label="Keyphasor"),
-        ]
-    fig.legend(handles=legend_handles, loc="lower center", ncol=4,
-               frameon=False, fontsize=8, bbox_to_anchor=(0.5, 0.0))
+    # Ciclo 15.1 — leyenda según modo (severidad vs configuración).
+    # En compact omitimos la leyenda: el banner del Tabular ya muestra
+    # 4 metricas KPI con los mismos colores y labels arriba.
+    if not compact:
+        if severity_by_label:
+            legend_handles = [
+                mpatches.Patch(color=_COLOR_SEVERITY["Normal"], label="CONDICIÓN ACEPTABLE"),
+                mpatches.Patch(color=_COLOR_SEVERITY["Alarm"], label="ATENCIÓN"),
+                mpatches.Patch(color=_COLOR_SEVERITY["Danger"], label="ACCIÓN REQUERIDA"),
+                mpatches.Patch(color=_COLOR_SEVERITY["No Data"], label="Sin datos"),
+            ]
+        else:
+            legend_handles = [
+                mpatches.Patch(color=_COLOR_PROXIMITY, label="Proximity"),
+                mpatches.Patch(color=_COLOR_VELOCITY, label="Velocity"),
+                mpatches.Patch(color=_COLOR_ACCELEROMETER, label="Accelerometer"),
+                mpatches.Patch(color=_COLOR_KEYPHASOR, label="Keyphasor"),
+            ]
+        fig.legend(handles=legend_handles, loc="lower center", ncol=4,
+                   frameon=False, fontsize=8, bbox_to_anchor=(0.5, 0.0))
 
-    fig.tight_layout(rect=[0, 0.03, 1, 1])
+    if compact:
+        fig.tight_layout(pad=0.4)
+    else:
+        fig.tight_layout(rect=[0, 0.03, 1, 1])
     buf = BytesIO()
     fig.savefig(buf, format="png", dpi=130, bbox_inches="tight",
                 facecolor=_COLOR_BG)

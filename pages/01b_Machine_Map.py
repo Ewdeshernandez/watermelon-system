@@ -45,6 +45,10 @@ from core.sensor_map import (
     sensor_label as sensor_label_fn,
     sensor_unit_family,
 )
+from core.machine_severity import (
+    build_severity_table as _shared_build_severity_table,
+    count_status as _shared_count_status,
+)
 from core.sensor_diagram import render_sensor_map_diagram
 from core.ui_theme import apply_watermelon_page_style, page_header
 
@@ -56,124 +60,12 @@ apply_watermelon_page_style()
 
 
 # ============================================================
-# HELPERS
+# HELPERS — desde Ciclo 15.1.1 viven en core.machine_severity
+# para compartir con el Mini Machine Map del Tabular List.
+# Aquí solo dejamos alias finos para no tocar el render más abajo.
 # ============================================================
 
-def _classify_severity(overall: float, alarm: float, danger: float) -> str:
-    """Clasifica una amplitud según los thresholds del sensor."""
-    try:
-        ov = float(overall)
-        a = float(alarm or 0.0)
-        d = float(danger or 0.0)
-    except Exception:
-        return "No Data"
-    if d > 0 and ov >= d:
-        return "Danger"
-    if a > 0 and ov >= a:
-        return "Alarm"
-    return "Normal"
-
-
-def _safe_float(v) -> float:
-    try:
-        return float(v)
-    except Exception:
-        return 0.0
-
-
-def _compute_signal_overall_rms(signal_obj: Any) -> float:
-    """Calcula overall RMS de un signal (similar al Tabular List)."""
-    import numpy as np
-    try:
-        amp = signal_obj.amplitude if hasattr(signal_obj, "amplitude") else signal_obj.get("y")
-        amp = np.asarray(amp, dtype=float)
-        amp = amp[np.isfinite(amp)]
-        if amp.size == 0:
-            return 0.0
-        rms = float(np.sqrt(np.mean(amp ** 2)))
-        return rms
-    except Exception:
-        return 0.0
-
-
-def _convert_rms_to_unit(rms_value: float, unit_native: str) -> float:
-    """
-    Convierte RMS al modo de display que indique unit_native:
-    - "X pp" / "X p-p" / "X peak-to-peak" → RMS × 2√2
-    - "X peak" / "X pk" → RMS × √2
-    - "X RMS" o nada → RMS directo
-    """
-    import math
-    u = (unit_native or "").lower()
-    if "pp" in u or "p-p" in u or "peak-to-peak" in u:
-        return rms_value * 2.0 * math.sqrt(2.0)
-    if "peak" in u or "pk" in u:
-        return rms_value * math.sqrt(2.0)
-    return rms_value
-
-
-def _build_severity_table(
-    sensors: List[Dict[str, Any]],
-    signals: Dict[str, Any],
-) -> pd.DataFrame:
-    """
-    Para cada sensor del mapa, busca el signal que matchea, calcula su
-    overall en la unidad nativa del sensor, y clasifica severidad.
-    Devuelve un DataFrame con: Label, Plane, Plane Label, Type, Unit,
-    Alarm, Danger, Overall (matched), Status, Source signal.
-    """
-    rows = []
-    for s in sensors:
-        lbl = sensor_label_fn(s)
-        family = sensor_unit_family(s)
-        unit_native = s.get("unit_native", "")
-        alarm = _safe_float(s.get("alarm"))
-        danger = _safe_float(s.get("danger"))
-
-        # Buscar el signal que matchea este sensor
-        matched_signal = None
-        matched_source = ""
-        for signame, sigobj in (signals or {}).items():
-            try:
-                metadata = (
-                    getattr(sigobj, "metadata", None)
-                    or (sigobj.get("metadata") if isinstance(sigobj, dict) else {})
-                    or {}
-                )
-                point = str(metadata.get("Point", "") or "")
-                variable = str(metadata.get("Variable", "") or "")
-                csv_unit = str(metadata.get("Y-Axis Unit", "") or metadata.get("Unit", "") or "")
-                m = resolve_sensor_for_point([s], point, variable, csv_unit)
-                if m is not None:
-                    matched_signal = sigobj
-                    matched_source = signame
-                    break
-            except Exception:
-                continue
-
-        if matched_signal is not None:
-            rms = _compute_signal_overall_rms(matched_signal)
-            overall_in_unit = _convert_rms_to_unit(rms, unit_native)
-            status = _classify_severity(overall_in_unit, alarm, danger)
-        else:
-            overall_in_unit = 0.0
-            status = "No Data"
-
-        rows.append({
-            "Label": lbl,
-            "Plane": s.get("plane", 0),
-            "Plane Label": s.get("plane_label", ""),
-            "Type": s.get("sensor_type", ""),
-            "Family": family,
-            "Unit": unit_native,
-            "Alarm": alarm,
-            "Danger": danger,
-            "Overall": overall_in_unit,
-            "Status": status,
-            "Source": matched_source,
-        })
-
-    return pd.DataFrame(rows)
+_build_severity_table = _shared_build_severity_table
 
 
 # ============================================================
@@ -246,12 +138,13 @@ if not signals:
 
 df_severity = _build_severity_table(_active_instance.sensors, signals)
 
-# Resumen estadístico
-total = len(df_severity)
-n_normal = int((df_severity["Status"] == "Normal").sum())
-n_alarm = int((df_severity["Status"] == "Alarm").sum())
-n_danger = int((df_severity["Status"] == "Danger").sum())
-n_nodata = int((df_severity["Status"] == "No Data").sum())
+# Resumen estadístico (mismo helper compartido que usa el Mini Map)
+_counts = _shared_count_status(df_severity)
+total = _counts["total"]
+n_normal = _counts["normal"]
+n_alarm = _counts["alarm"]
+n_danger = _counts["danger"]
+n_nodata = _counts["no_data"]
 
 cols_summary = st.columns(4)
 cols_summary[0].metric("✅ CONDICIÓN ACEPTABLE", f"{n_normal}", f"de {total}")
