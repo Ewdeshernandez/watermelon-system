@@ -186,6 +186,8 @@ def render_sensor_map_diagram(
     figure_width_in: float = 12.0,
     severity_by_label: Optional[Dict[str, str]] = None,
     compact: bool = False,
+    overall_by_label: Optional[Dict[str, float]] = None,
+    unit_by_label: Optional[Dict[str, str]] = None,
 ) -> Optional[bytes]:
     """
     Devuelve PNG bytes con el diagrama del Sensor Map.
@@ -205,6 +207,16 @@ def render_sensor_map_diagram(
             arriba del Tabular List. Sin polar por plano. Si
             severity_by_label es None en compact, los cojinetes salen
             todos neutros.
+        overall_by_label: (Ciclo 15.1.5) dict opcional sensor_label →
+            valor Overall numérico (en la unidad nativa del sensor).
+            Cuando se provee, debajo de cada cojinete del lateral se
+            muestra el Overall del peor sensor del plano coloreado por
+            severidad — convierte el "esquemático del tren" del Resumen
+            Ejecutivo en un diagrama que ENTREGA información de estado
+            real, no solo decora.
+        unit_by_label: (Ciclo 15.1.5) dict opcional sensor_label →
+            unidad de display (ej. "g peak", "mil pp"). Acompaña al
+            valor Overall debajo del cojinete.
 
     Returns:
         Bytes PNG o None si matplotlib no está disponible.
@@ -260,8 +272,11 @@ def render_sensor_map_diagram(
     # Layout: en modo full hay panel superior (tren) + panel inferior
     # (polar por plano). En modo compact solo hay tren, mas chico.
     if compact:
+        # Alto un poco mayor cuando hay valores numericos por plano
+        # (necesitamos espacio para la linea del Overall debajo).
+        compact_h = 3.0 if overall_by_label else 2.6
         fig = plt.figure(
-            figsize=(figure_width_in, 2.6),
+            figsize=(figure_width_in, compact_h),
             facecolor=_COLOR_BG,
         )
         gs = fig.add_gridspec(1, 1)
@@ -494,6 +509,52 @@ def render_sensor_map_diagram(
             ax_top.text(bx, label_y_top, plane_lbl,
                         fontsize=7.2, ha="center", va="top",
                         color=_COLOR_TEXT, alpha=0.85, fontweight="bold")
+            label_y_top -= 0.18
+
+        # Ciclo 15.1.5 — etiqueta numerica con el Overall del peor sensor
+        # del plano coloreada por severidad. Convierte el esquematico en
+        # un diagrama vivo que entrega informacion real del estado del
+        # tren, no solo posicion de las sondas.
+        if overall_by_label:
+            # Encontrar el sensor del plano cuyo % de Danger consumido es
+            # mayor (ranking ingenieril estandar). Si no hay severity,
+            # tomar el que tenga mayor valor absoluto.
+            from core.sensor_map import sensor_label as _slabel
+            best = None
+            best_pct = -1.0
+            for s in plane_sensors:
+                if str(s.get("sensor_type", "")).lower() == "keyphasor":
+                    continue  # keyphasor no tiene overall
+                lbl = _slabel(s)
+                ov = overall_by_label.get(lbl)
+                if ov is None:
+                    continue
+                try:
+                    danger = float(s.get("danger") or 0.0)
+                    pct = (float(ov) / danger * 100.0) if danger > 0 else 0.0
+                except Exception:
+                    pct = 0.0
+                if pct > best_pct:
+                    best_pct = pct
+                    best = (lbl, float(ov))
+
+            if best is not None:
+                lbl_best, ov_best = best
+                unit = ""
+                if unit_by_label and lbl_best in unit_by_label:
+                    unit = str(unit_by_label[lbl_best] or "").strip()
+                # Color por severidad del propio sensor (no worst-of-plane)
+                if severity_by_label and lbl_best in severity_by_label:
+                    sv = severity_by_label[lbl_best]
+                    val_color = _COLOR_SEVERITY.get(sv, _COLOR_TEXT)
+                else:
+                    val_color = _COLOR_TEXT
+                txt = f"{ov_best:.2f}"
+                if unit:
+                    txt = f"{txt} {unit}"
+                ax_top.text(bx, label_y_top, txt,
+                            fontsize=7.0, ha="center", va="top",
+                            color=val_color, fontweight="bold")
 
     # Cojinetes del driver
     for i, p in enumerate(driver_planes):

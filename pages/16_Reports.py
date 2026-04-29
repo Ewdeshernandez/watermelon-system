@@ -1211,13 +1211,115 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             )
             story.append(Paragraph(f"Estado global: {severity_label}", severity_style))
 
-        # Ciclo 14a — Esquemático del tren acoplado (debajo del badge de
-        # severidad, sobre el cuerpo del Resumen Ejecutivo). Aparece
-        # automáticamente cuando hay una Asset Instance activa con
-        # schematic_png cargado en su Vault. Si no hay, omite limpio.
+        # Ciclo 15.1.5 — esquemático VIVO en el Resumen Ejecutivo:
+        # cuando hay una Asset Instance activa con Sensor Map y
+        # severidad disponible (sesion del Tabular o cálculo legacy),
+        # mostramos el HEATMAP del tren con valores Overall por plano
+        # coloreados por severidad, EN LUGAR DE la imagen estática.
+        # El esquemático asi entrega información — el cliente abre la
+        # primera página y ve de un vistazo cuáles cojinetes están en
+        # alarma con sus valores numéricos, no solo decoración.
+        #
+        # Si no hay Sensor Map / sesión de Tabular / signals → fallback
+        # al schematic_png estático del Vault (Ciclo 14a).
         sch_doc_id = (meta.get("schematic_doc_id") or "").strip()
         sch_inst_id = (meta.get("schematic_instance_id") or "").strip()
-        if sch_doc_id and sch_inst_id:
+
+        # Helper local para insertar caption y cerrar el bloque
+        def _emit_train_caption(label_text: str, alive: bool):
+            sch_caption_style = ParagraphStyle(
+                name="WMSchematicCaption_RE",
+                parent=styles["WMMeta"],
+                fontName=PDF_FONT_REGULAR,
+                fontSize=8.8,
+                leading=11,
+                alignment=TA_CENTER,
+                textColor=colors.HexColor("#475569"),
+                spaceBefore=2,
+                spaceAfter=10,
+            )
+            story.append(Paragraph(label_text, sch_caption_style))
+
+        rendered_alive_schematic = False
+
+        if sch_inst_id:
+            try:
+                from core.instance_state import get_instance, compose_train_description
+                from core.sensor_diagram import render_sensor_map_diagram
+                from core.machine_severity import build_severity_table
+
+                _re_inst = get_instance(sch_inst_id)
+                if _re_inst is not None and getattr(_re_inst, "sensors", None):
+                    _re_signals = st.session_state.get("signals", {}) or {}
+                    _re_df = build_severity_table(_re_inst.sensors, _re_signals)
+                    if _re_df is not None and not _re_df.empty:
+                        _re_sev = dict(zip(
+                            _re_df["Label"].astype(str),
+                            _re_df["Status"].astype(str),
+                        ))
+                        _re_overall = {}
+                        _re_unit = {}
+                        for _, _r in _re_df.iterrows():
+                            try:
+                                _lbl = str(_r["Label"])
+                                _re_overall[_lbl] = float(_r.get("Overall") or 0.0)
+                                _re_unit[_lbl] = str(_r.get("Unit") or "")
+                            except Exception:
+                                pass
+
+                        _re_drv = " ".join(p for p in [
+                            getattr(_re_inst, "driver_manufacturer", ""),
+                            getattr(_re_inst, "driver_model", ""),
+                        ] if p) or "Driver"
+                        _re_dvn = " ".join(p for p in [
+                            getattr(_re_inst, "driven_manufacturer", ""),
+                            getattr(_re_inst, "driven_model", ""),
+                        ] if p) or "Driven"
+                        _re_png = render_sensor_map_diagram(
+                            _re_inst.sensors,
+                            train_label="",
+                            driver_label=_re_drv,
+                            driven_label=_re_dvn,
+                            severity_by_label=_re_sev,
+                            overall_by_label=_re_overall,
+                            unit_by_label=_re_unit,
+                            figure_width_in=11.5,
+                            compact=True,
+                        )
+                        if _re_png:
+                            usable_w = A4[0] - doc.leftMargin - doc.rightMargin
+                            target_w = min(15.0 * cm, usable_w)
+                            target_h = 7.0 * cm
+                            fitted_w, fitted_h = _fit_image_dimensions(
+                                _re_png, target_w, target_h
+                            )
+                            _re_img = Image(BytesIO(_re_png), width=fitted_w, height=fitted_h)
+                            _re_img.hAlign = "CENTER"
+                            story.append(Spacer(1, 0.10 * cm))
+                            story.append(_re_img)
+                            train_lbl = (meta.get("train_description")
+                                         or compose_train_description(_re_inst)
+                                         or "").strip()
+                            cap = (
+                                "Estado actual del tren acoplado · cojinetes "
+                                "coloreados según severidad por plano "
+                                "(verde = aceptable, ámbar = atención, "
+                                "rojo = acción requerida); valores Overall "
+                                "del peor sensor por plano sobre la "
+                                "etiqueta. Detalle por sonda en la sección "
+                                "Mapa de Sensores."
+                            )
+                            if train_lbl:
+                                cap = f"{train_lbl} — " + cap
+                            _emit_train_caption(cap, alive=True)
+                            rendered_alive_schematic = True
+            except Exception:
+                # Si algo falla en el esquematico vivo, caemos al estatico.
+                rendered_alive_schematic = False
+
+        if not rendered_alive_schematic and sch_doc_id and sch_inst_id:
+            # Fallback Ciclo 14a — esquematico estatico del Vault de la
+            # instancia (foto/dibujo subido por el usuario).
             try:
                 from core.instance_state import get_instance_document_bytes
                 sch_bytes = get_instance_document_bytes(sch_inst_id, sch_doc_id)
@@ -1232,31 +1334,18 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                     sch_img.hAlign = "CENTER"
                     story.append(Spacer(1, 0.10 * cm))
                     story.append(sch_img)
-                    sch_caption_style = ParagraphStyle(
-                        name="WMSchematicCaption",
-                        parent=styles["WMMeta"],
-                        fontName=PDF_FONT_REGULAR,
-                        fontSize=8.8,
-                        leading=11,
-                        alignment=TA_CENTER,
-                        textColor=colors.HexColor("#475569"),
-                        spaceBefore=2,
-                        spaceAfter=10,
-                    )
                     train_lbl = (meta.get("train_description") or "").strip()
                     if train_lbl:
-                        story.append(Paragraph(
+                        _emit_train_caption(
                             f"Esquemático del tren · {train_lbl}",
-                            sch_caption_style,
-                        ))
+                            alive=False,
+                        )
                     else:
-                        story.append(Paragraph(
+                        _emit_train_caption(
                             "Esquemático del tren acoplado",
-                            sch_caption_style,
-                        ))
+                            alive=False,
+                        )
             except Exception:
-                # Si falla cualquier paso (instancia borrada, doc roto,
-                # imagen corrupta) silenciamos para no bloquear el reporte.
                 pass
 
         story.append(Paragraph(_paragraph_safe(executive_text), styles["WMBody"]))
@@ -1332,30 +1421,50 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 # Construir prosa en bloques
                 paras: List[str] = []
 
-                # Encabezado factual con totales
-                head_bits = [
+                # Encabezado factual con totales — Ciclo 15.1.5: separamos
+                # keyphasor (referencia de fase) de los sensores de vibración.
+                # Reportarlos como un "sensor de vibración más" da una imagen
+                # incorrecta del Sensor Map al cliente.
+                n_vib = sm_counts.get("vibration_total", sm_total)
+                n_kp = sm_counts.get("keyphasor", 0)
+
+                head_intro = (
                     f"El Sensor Map configurado para esta unidad consta de "
-                    f"{sm_total} {'sensor' if sm_total == 1 else 'sensores'} "
-                    f"de monitoreo continuo distribuidos a lo largo del tren acoplado"
-                ]
-                if sm_counts["no_data"] == sm_total:
-                    head_bits.append(
-                        ", de los cuales ninguno cuenta con señal cargada en la "
-                        "sesión actual; los marcadores del heatmap aparecen en "
-                        "estado neutro hasta que se carguen los CSV correspondientes."
+                    f"{n_vib} "
+                    f"{'sensor' if n_vib == 1 else 'sensores'} de vibración "
+                    f"de monitoreo continuo distribuidos a lo largo del tren "
+                    f"acoplado"
+                )
+                if n_kp > 0:
+                    head_intro += (
+                        f", complementados por "
+                        f"{n_kp} "
+                        f"{'señal de referencia de fase (keyphasor) instalada' if n_kp == 1 else 'señales de referencia de fase (keyphasors) instaladas'} "
+                        f"sobre el eje del rotor para sincronización de "
+                        f"medidas vectoriales (orbits, Polar y Bode) y "
+                        f"diagnóstico de fenómenos rotodinámicos según "
+                        f"API 670"
+                    )
+
+                if sm_counts["no_data"] == n_vib:
+                    head_intro += (
+                        ". Ninguno de los sensores de vibración cuenta con "
+                        "señal cargada en la sesión actual; los marcadores "
+                        "del heatmap aparecen en estado neutro hasta que se "
+                        "carguen los CSV correspondientes."
                     )
                 else:
-                    n_eval = sm_total - sm_counts["no_data"]
-                    head_bits.append(
-                        f". De estos, {n_eval} "
-                        f"{'cuenta' if n_eval == 1 else 'cuentan'} con señal cargada "
-                        f"en la sesión y "
+                    n_eval = n_vib - sm_counts["no_data"]
+                    head_intro += (
+                        f". De los sensores de vibración, {n_eval} "
+                        f"{'cuenta' if n_eval == 1 else 'cuentan'} con señal "
+                        f"cargada en la sesión y "
                         f"{'fue evaluado' if n_eval == 1 else 'fueron evaluados'} "
                         f"contra los umbrales individuales de Alarm y Danger "
                         f"definidos por sensor en el Sensor Map (los mismos "
                         f"setpoints que utiliza el módulo Tabular List)."
                     )
-                paras.append("".join(head_bits))
+                paras.append(head_intro)
 
                 # Distribución de severidad — orientada a lo critico primero
                 if sm_counts["danger"] > 0 or sm_counts["alarm"] > 0:

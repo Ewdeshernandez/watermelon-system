@@ -300,16 +300,41 @@ def build_severity_table(
 
 
 def count_status(df: pd.DataFrame) -> Dict[str, int]:
-    """Devuelve dict con total y desglose por status para los KPIs."""
+    """
+    Devuelve dict con total y desglose por status para los KPIs.
+
+    Ciclo 15.1.5 — separa los keyphasors (sensores de referencia de
+    fase, NO de vibración) del conteo de vibración. Un keyphasor es
+    típicamente una sonda once-per-rev sobre el coupling/eje que
+    detecta una marca para timing/fase de orbits/Polar/Bode/balanceo;
+    no mide amplitud de vibración y por eso no se evalúa contra
+    setpoints de Alarm/Danger en el Tabular. Reportarlo como un
+    "sensor de vibración más" daría una imagen incorrecta del Sensor
+    Map al cliente.
+
+    Claves devueltas:
+      total           — todos los sensores configurados (incluye kp).
+      vibration_total — solo sensores de vibración (sin kp).
+      keyphasor       — cuántos keyphasors hay.
+      normal/alarm/danger/no_data — desglose entre los de vibración.
+    """
     if df is None or df.empty:
-        return {"total": 0, "normal": 0, "alarm": 0, "danger": 0, "no_data": 0}
+        return {
+            "total": 0, "vibration_total": 0, "keyphasor": 0,
+            "normal": 0, "alarm": 0, "danger": 0, "no_data": 0,
+        }
     total = len(df)
+    is_kp = df["Type"].astype(str).str.lower().eq("keyphasor")
+    n_kp = int(is_kp.sum())
+    vib = df[~is_kp]
     return {
         "total": total,
-        "normal": int((df["Status"] == "Normal").sum()),
-        "alarm": int((df["Status"] == "Alarm").sum()),
-        "danger": int((df["Status"] == "Danger").sum()),
-        "no_data": int((df["Status"] == "No Data").sum()),
+        "vibration_total": int(len(vib)),
+        "keyphasor": n_kp,
+        "normal": int((vib["Status"] == "Normal").sum()),
+        "alarm": int((vib["Status"] == "Alarm").sum()),
+        "danger": int((vib["Status"] == "Danger").sum()),
+        "no_data": int((vib["Status"] == "No Data").sum()),
     }
 
 
