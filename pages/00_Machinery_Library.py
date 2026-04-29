@@ -40,6 +40,7 @@ from core.document_vault import CAPTURED_PARAMETER_FIELDS, DOCUMENT_TYPES
 from core.instance_selector import render_instance_selector
 from core.instance_state import (
     add_uploaded_file_to_instance,
+    compose_train_description,
     create_instance,
     delete_instance,
     get_instance,
