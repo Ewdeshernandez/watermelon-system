@@ -137,21 +137,111 @@ def convert_rms_to_unit(rms_value: float, unit_native: str) -> float:
 # TABLA DE SEVERIDAD POR SENSOR DEL MAPA
 # ============================================================
 
+def _build_severity_table_from_tabular_df(
+    sensors: List[Dict[str, Any]],
+    tabular_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Ciclo 15.1.4 — fuente de verdad: cuando la pagina del Tabular ya
+    construyo su DataFrame (con columna 'Sensor', 'Overall', 'Status',
+    'Alarm', 'Danger', 'Unit Full'), tomamos de ahi los valores y los
+    proyectamos sobre la geometria del Sensor Map. Asi el Machine Map
+    nunca puede contradecir al Tabular — son la misma data, otra forma
+    de presentarla (graficamente sobre el tren).
+    """
+    rows: List[Dict[str, Any]] = []
+    # Indexar por Sensor (label del Sensor Map)
+    by_label: Dict[str, Any] = {}
+    if tabular_df is not None and not tabular_df.empty and "Sensor" in tabular_df.columns:
+        for _, r in tabular_df.iterrows():
+            lbl = str(r.get("Sensor") or "").strip()
+            if lbl and lbl not in by_label:
+                by_label[lbl] = r
+
+    for s in sensors:
+        lbl = sensor_label_fn(s)
+        family = sensor_unit_family(s)
+        unit_native = s.get("unit_native", "")
+        alarm_default = _safe_float(s.get("alarm"))
+        danger_default = _safe_float(s.get("danger"))
+
+        match = by_label.get(lbl)
+        if match is not None:
+            try:
+                overall_val = float(match.get("Overall") or 0.0)
+            except Exception:
+                overall_val = 0.0
+            try:
+                alarm_val = float(match.get("Alarm") or alarm_default)
+            except Exception:
+                alarm_val = alarm_default
+            try:
+                danger_val = float(match.get("Danger") or danger_default)
+            except Exception:
+                danger_val = danger_default
+            status_val = str(match.get("Status") or "No Data")
+            unit_val = str(match.get("Unit Full") or match.get("Unit") or unit_native)
+            source_val = str(match.get("_signal_name") or match.get("Point") or "")
+        else:
+            # Sensor configurado pero el Tabular no tiene fila para el (no
+            # hay CSV cargado que lo matchee). Marcar No Data.
+            overall_val = 0.0
+            alarm_val = alarm_default
+            danger_val = danger_default
+            status_val = "No Data"
+            unit_val = unit_native
+            source_val = ""
+
+        rows.append({
+            "Label": lbl,
+            "Plane": s.get("plane", 0),
+            "Plane Label": s.get("plane_label", ""),
+            "Type": s.get("sensor_type", ""),
+            "Family": family,
+            "Unit": unit_val,
+            "Alarm": alarm_val,
+            "Danger": danger_val,
+            "Overall": overall_val,
+            "Status": status_val,
+            "Source": source_val,
+        })
+
+    return pd.DataFrame(rows)
+
+
 def build_severity_table(
     sensors: List[Dict[str, Any]],
     signals: Dict[str, Any],
 ) -> pd.DataFrame:
     """
-    Para cada sensor del mapa, busca el signal cargado que matchea
-    su csv_match_pattern, calcula overall en la unidad nativa del
-    sensor, y clasifica severidad contra alarm/danger.
+    Para cada sensor del mapa, devuelve overall + status + thresholds.
 
-    Devuelve un DataFrame con columnas:
-      Label, Plane, Plane Label, Type, Family, Unit,
-      Alarm, Danger, Overall, Status, Source
+    Ciclo 15.1.4 — FUENTE DE VERDAD: si la pagina del Tabular ya corrio
+    en esta sesion y dejo su DataFrame en
+    ``st.session_state["wm_tabular_df"]``, tomamos de ahi los valores
+    de Overall y Status. Asi el Machine Map y el Tabular nunca pueden
+    contradecirse.
 
-    ``Status`` toma "Normal" / "Alarm" / "Danger" / "No Data".
+    Si no hay df cacheado (el usuario abrio Reports / Machine Map
+    directamente sin pasar por Tabular), caemos al calculo legacy
+    sobre los signals crudos — es robusto pero menos preciso porque
+    no aplica los overrides de criterio del usuario.
+
+    Columnas devueltas:
+      Label, Plane, Plane Label, Type, Family, Unit, Alarm, Danger,
+      Overall, Status, Source.
+      ``Status`` toma "Normal" / "Alarm" / "Danger" / "No Data".
     """
+    # Fast path: usar el DF del Tabular si lo tenemos en sesion
+    try:
+        import streamlit as st
+        cached = st.session_state.get("wm_tabular_df", None)
+        if cached is not None and hasattr(cached, "empty") and not cached.empty:
+            return _build_severity_table_from_tabular_df(sensors, cached)
+    except Exception:
+        pass
+
+    # Legacy fallback: calcular por nuestra cuenta sobre los signals
     rows: List[Dict[str, Any]] = []
     for s in sensors:
         lbl = sensor_label_fn(s)

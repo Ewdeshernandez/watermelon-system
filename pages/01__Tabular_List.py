@@ -1434,6 +1434,17 @@ df_table = build_table_dataframe(
     sensors_map=list(_active_instance.sensors or []),
 )
 
+# Ciclo 15.1.4 — exponer el df del Tabular para que el Machine Map
+# (página completa, Mini Map del Tabular y sección del PDF report) lo
+# use como FUENTE DE VERDAD en lugar de calcular su propio overall.
+# El usuario espera que la severidad mostrada en el heatmap sea
+# IDÉNTICA a la columna Status del Tabular — porque conceptualmente
+# el Machine Map ES una visualización del Tabular sobre el tren físico.
+st.session_state["wm_tabular_df"] = df_table.copy()
+st.session_state["wm_tabular_active_instance_id"] = (
+    _active_instance.instance_id if _active_instance else ""
+)
+
 if df_table.empty:
     st.warning("No fue posible construir la tabla.")
     st.stop()

@@ -1304,47 +1304,132 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
                 story.append(Paragraph("MAPA DE SENSORES", styles["WMTOC1"]))
 
-                # Sintesis en prosa — coherente con el tono del resto del
-                # reporte (no bullets, no tablas markdown).
-                synth_parts = [
-                    f"Del Sensor Map configurado para la unidad ({sm_total} "
-                    f"{'sensor' if sm_total == 1 else 'sensores'} en total)"
-                ]
-                pieces = []
-                if sm_counts["normal"]:
-                    pieces.append(
-                        f"{sm_counts['normal']} se mantienen en condición "
-                        f"aceptable contra los setpoints individuales del DCS"
-                    )
-                if sm_counts["alarm"]:
-                    pieces.append(
-                        f"{sm_counts['alarm']} se encuentran en zona de atención"
-                    )
-                if sm_counts["danger"]:
-                    pieces.append(
-                        f"{sm_counts['danger']} {'requiere' if sm_counts['danger'] == 1 else 'requieren'} "
-                        f"acción inmediata"
-                    )
-                if sm_counts["no_data"]:
-                    pieces.append(
-                        f"{sm_counts['no_data']} no presentan dato cargado en sesión"
-                    )
-                if pieces:
-                    synth_parts.append(", ".join(pieces) + ".")
-                else:
-                    synth_parts.append("no hay datos disponibles para clasificar.")
-                synth_text = ", ".join(synth_parts) if len(synth_parts) > 1 else synth_parts[0]
-                # Recomponer prosa con punto final
-                if not synth_text.endswith("."):
-                    synth_text += "."
+                # Ciclo 15.1.4 — sintesis ingenieril basada en la columna
+                # Overall + Status del Tabular (misma data, no calculo
+                # paralelo). Mencionamos por NOMBRE los sensores con mayor
+                # consumo de margen para que el reporte sea diagnostico,
+                # no descriptivo.
+                #
+                # Calcular % de danger consumido por sensor para ranking
+                def _pct_of_danger(row):
+                    try:
+                        d = float(row.get("Danger", 0) or 0)
+                        o = float(row.get("Overall", 0) or 0)
+                        return (o / d * 100.0) if d > 0 else 0.0
+                    except Exception:
+                        return 0.0
+                sm_df = sm_df.copy()
+                sm_df["_pct_danger"] = sm_df.apply(_pct_of_danger, axis=1)
 
-                synth_text = (
-                    synth_text + " El heatmap a continuación ubica cada sonda "
-                    "en su posición física sobre el tren acoplado y la colorea "
-                    "según el estado actual contra los umbrales de Alarm y "
-                    "Danger del propio sensor (no contra defaults globales)."
+                # Sensor con mayor consumo (cualquier estado, excepto No Data)
+                with_data = sm_df[sm_df["Status"] != "No Data"].copy()
+                top_consumer = None
+                if not with_data.empty:
+                    top_consumer = with_data.sort_values(
+                        "_pct_danger", ascending=False
+                    ).iloc[0]
+
+                # Construir prosa en bloques
+                paras: List[str] = []
+
+                # Encabezado factual con totales
+                head_bits = [
+                    f"El Sensor Map configurado para esta unidad consta de "
+                    f"{sm_total} {'sensor' if sm_total == 1 else 'sensores'} "
+                    f"de monitoreo continuo distribuidos a lo largo del tren acoplado"
+                ]
+                if sm_counts["no_data"] == sm_total:
+                    head_bits.append(
+                        ", de los cuales ninguno cuenta con señal cargada en la "
+                        "sesión actual; los marcadores del heatmap aparecen en "
+                        "estado neutro hasta que se carguen los CSV correspondientes."
+                    )
+                else:
+                    n_eval = sm_total - sm_counts["no_data"]
+                    head_bits.append(
+                        f". De estos, {n_eval} "
+                        f"{'cuenta' if n_eval == 1 else 'cuentan'} con señal cargada "
+                        f"en la sesión y "
+                        f"{'fue evaluado' if n_eval == 1 else 'fueron evaluados'} "
+                        f"contra los umbrales individuales de Alarm y Danger "
+                        f"definidos por sensor en el Sensor Map (los mismos "
+                        f"setpoints que utiliza el módulo Tabular List)."
+                    )
+                paras.append("".join(head_bits))
+
+                # Distribución de severidad — orientada a lo critico primero
+                if sm_counts["danger"] > 0 or sm_counts["alarm"] > 0:
+                    sev_parts = []
+                    if sm_counts["danger"] > 0:
+                        sev_parts.append(
+                            f"{sm_counts['danger']} "
+                            f"{'sensor supera' if sm_counts['danger'] == 1 else 'sensores superan'} "
+                            f"el umbral de Danger y "
+                            f"{'requiere' if sm_counts['danger'] == 1 else 'requieren'} "
+                            f"acción inmediata"
+                        )
+                    if sm_counts["alarm"] > 0:
+                        sev_parts.append(
+                            f"{sm_counts['alarm']} "
+                            f"{'se encuentra' if sm_counts['alarm'] == 1 else 'se encuentran'} "
+                            f"en zona de Atención (entre Alarm y Danger)"
+                        )
+                    sev_parts.append(
+                        f"{sm_counts['normal']} "
+                        f"{'mantiene' if sm_counts['normal'] == 1 else 'mantienen'} "
+                        f"condición aceptable por debajo del setpoint de Alarm"
+                    )
+                    paras.append(
+                        "La distribución de severidad indica que " +
+                        ", ".join(sev_parts) + "."
+                    )
+
+                    # Top consumer por nombre
+                    if top_consumer is not None:
+                        paras.append(
+                            f"El sensor con mayor margen consumido del setpoint "
+                            f"de Danger es {top_consumer.get('Label', '')} "
+                            f"({top_consumer.get('Plane Label', '') or 'plano '+str(top_consumer.get('Plane',''))}) "
+                            f"con un Overall de {float(top_consumer.get('Overall', 0)):.3f} "
+                            f"{top_consumer.get('Unit', '')} sobre un Danger de "
+                            f"{float(top_consumer.get('Danger', 0)):.3f} "
+                            f"{top_consumer.get('Unit', '')}, equivalente al "
+                            f"{float(top_consumer.get('_pct_danger', 0)):.0f}% del "
+                            f"umbral. Se recomienda priorizar la verificación de "
+                            f"este punto en el siguiente ciclo de inspección."
+                        )
+                else:
+                    # Todo aceptable — pero igual mencionar el de mayor margen consumido
+                    if top_consumer is not None:
+                        paras.append(
+                            f"El conjunto de {sm_counts['normal']} "
+                            f"{'sensor evaluado se mantiene' if sm_counts['normal'] == 1 else 'sensores evaluados se mantienen'} "
+                            f"por debajo del umbral de Alarm definido por sensor; "
+                            f"el de mayor margen consumido del setpoint de Danger "
+                            f"es {top_consumer.get('Label','')} "
+                            f"({top_consumer.get('Plane Label','') or 'plano '+str(top_consumer.get('Plane',''))}) "
+                            f"al {float(top_consumer.get('_pct_danger', 0)):.0f}% del "
+                            f"setpoint, lo cual se considera dentro del margen de "
+                            f"operación normal."
+                        )
+                    else:
+                        paras.append(
+                            "No hay sensores en zona de Atención ni de Acción "
+                            "Requerida en la sesión actual."
+                        )
+
+                # Cierre — explica que es el heatmap
+                paras.append(
+                    "El heatmap a continuación ubica cada sonda en su posición "
+                    "física sobre el tren acoplado y la colorea según el estado "
+                    "actual contra los umbrales de Alarm y Danger del propio "
+                    "sensor. Los chips circulares bajo cada cojinete indican los "
+                    "tipos de sensor presentes en ese plano (sondas de proximidad, "
+                    "transductores de velocidad y/o acelerómetros)."
                 )
-                story.append(Paragraph(_paragraph_safe(synth_text), styles["WMBody"]))
+
+                for _p in paras:
+                    story.append(Paragraph(_paragraph_safe(_p), styles["WMBody"]))
 
                 # Heatmap full
                 try:
