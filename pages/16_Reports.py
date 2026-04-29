@@ -1332,29 +1332,13 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                             train_lbl = (meta.get("train_description")
                                          or compose_train_description(_re_inst)
                                          or "").strip()
-                            if _used_real_schematic:
-                                cap = (
-                                    "Estado actual del tren sobre el "
-                                    "esquemático del activo · cojinetes "
-                                    "coloreados según severidad por plano "
-                                    "(verde = aceptable, ámbar = atención, "
-                                    "rojo = acción requerida); valores Overall "
-                                    "del peor sensor por plano sobre la "
-                                    "etiqueta. Detalle por sonda en la "
-                                    "sección Mapa de Sensores."
-                                )
-                            else:
-                                cap = (
-                                    "Estado actual del tren acoplado · "
-                                    "cojinetes coloreados según severidad "
-                                    "por plano (verde = aceptable, ámbar = "
-                                    "atención, rojo = acción requerida); "
-                                    "valores Overall del peor sensor por "
-                                    "plano sobre la etiqueta. Detalle por "
-                                    "sonda en la sección Mapa de Sensores."
-                                )
+                            # Ciclo 15.2.3 — caption corta y ejecutiva.
+                            # La imagen + colores + valores hablan solos;
+                            # detalle ingenieril va en MAPA DE SENSORES.
                             if train_lbl:
-                                cap = f"{train_lbl} — " + cap
+                                cap = f"Estado actual del tren · {train_lbl}"
+                            else:
+                                cap = "Estado actual del tren acoplado"
                             _emit_train_caption(cap, alive=True)
                             rendered_alive_schematic = True
             except Exception:
