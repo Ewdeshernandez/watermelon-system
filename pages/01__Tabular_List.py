@@ -1301,11 +1301,48 @@ if _override_active:
         f"para este análisis."
     )
 
-    # Ciclo 14c.3 — bloques Machine Settings / Point Settings eliminados.
-    # Toda la configuración granular vive en el Sensor Map de Machinery
-    # Library. Mantenemos diccionarios vacíos para compat con build_table_dataframe.
-    machine_settings: Dict[str, Dict[str, Any]] = {}
-    point_settings: Dict[str, Dict[str, Any]] = {}
+# Ciclo 14c.3 — bloques Machine Settings / Point Settings eliminados.
+# Toda la configuración granular vive en el Sensor Map de Machinery
+# Library. Mantenemos diccionarios vacíos para compat con build_table_dataframe.
+# (Ciclo 15.1 hotfix — sacados del if _override_active, sino quedaban
+# undefined cuando NO había override y el resto del código fallaba.)
+machine_settings: Dict[str, Dict[str, Any]] = {}
+point_settings: Dict[str, Dict[str, Any]] = {}
+
+# Ciclo 15.1 hotfix — Panel de debug del matching sensor → CSV.
+# Permite verificar de un vistazo qué Point/Variable/Unit le llega
+# al matcher por cada signal cargado y qué sensor del map matcheó
+# (o si cayó al fallback global).
+with st.expander("🔍 Debug: matching de sensores con signals cargados", expanded=False):
+    try:
+        from core.sensor_map import resolve_sensor_for_point as _dbg_resolve, sensor_label as _dbg_label
+        _dbg_sensors = list(_active_instance.sensors or [])
+        st.caption(f"Sensor Map activo: {len(_dbg_sensors)} sensores")
+        _dbg_rows = []
+        for _r in records_all:
+            _m = _dbg_resolve(
+                _dbg_sensors,
+                csv_point=str(_r.point or ""),
+                csv_variable=str(_r.variable or ""),
+                csv_unit=str(_r.amplitude_unit or ""),
+            )
+            _dbg_rows.append({
+                "CSV Point": _r.point,
+                "CSV Variable": _r.variable,
+                "CSV Unit": _r.amplitude_unit,
+                "Inferred Family": _r.measurement_family,
+                "Sensor matched": _dbg_label(_m) if _m else "— SIN MATCH —",
+                "Sensor type": _m.get("sensor_type", "—") if _m else "—",
+                "Sensor unit_native": _m.get("unit_native", "—") if _m else "—",
+                "Sensor alarm": _m.get("alarm", "—") if _m else "—",
+                "Sensor danger": _m.get("danger", "—") if _m else "—",
+            })
+        if _dbg_rows:
+            st.dataframe(pd.DataFrame(_dbg_rows), use_container_width=True, hide_index=True)
+        else:
+            st.caption("No hay signals para debuggear.")
+    except Exception as _dbg_e:
+        st.caption(f"Debug no disponible: {_dbg_e}")
 
 logo_uri = get_logo_data_uri(LOGO_PATH)
 
