@@ -891,8 +891,6 @@ def render_sensor_map_section(instance_id: str) -> None:
                         from streamlit_image_coordinates import streamlit_image_coordinates
                         from PIL import Image as PILImage
                         from io import BytesIO as _BIO
-                        _pil = PILImage.open(_BIO(_sch_bytes))
-                        img_w_px, img_h_px = _pil.size
 
                         # Renderizar overlay con TODOS los sensores ya
                         # posicionados (modo configuracion — sin severity)
@@ -906,27 +904,24 @@ def render_sensor_map_section(instance_id: str) -> None:
                             show_labels=True,
                         ) or _sch_bytes
 
+                        # streamlit_image_coordinates exige un PIL.Image o
+                        # path/numpy array — no acepta bytes crudos. Lo
+                        # decodificamos antes de pasarlo.
+                        _preview_pil = PILImage.open(_BIO(_preview_png))
+                        img_w_px, img_h_px = _preview_pil.size
+
                         coords = streamlit_image_coordinates(
-                            _preview_png,
+                            _preview_pil,
                             key=f"ctp_canvas_{instance_id}",
                             use_column_width=True,
                         )
                         if coords is not None:
                             # streamlit_image_coordinates devuelve coords en
-                            # PIXELES de la imagen mostrada. Las normalizamos
-                            # contra el tamaño REAL de la imagen subida.
+                            # pixeles relativos al tamaño REAL de la imagen
+                            # (no el display) desde v0.1.6+.
                             try:
-                                # widget reporta x,y en pixels relativos al display
-                                # con use_column_width los reescala — si la version
-                                # del paquete devuelve px del display, calculamos
-                                # el ratio. La heuristica robusta: si el x devuelto
-                                # esta dentro del rango del PNG original, usarlo
-                                # directo; si no, escalarlo.
                                 cx = float(coords["x"])
                                 cy = float(coords["y"])
-                                # display width != original width cuando use_column_width
-                                # streamlit-image-coordinates returns coords
-                                # relative to the IMAGE (not display) since v0.1.6+
                                 xp_pct = (cx / img_w_px) * 100.0
                                 yp_pct = (cy / img_h_px) * 100.0
                                 xp_pct = max(0.0, min(100.0, xp_pct))
