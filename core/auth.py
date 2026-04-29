@@ -22,6 +22,8 @@ NAV_ITEMS = [
     {"label": "Machinery Library", "page": "pages/00_Machinery_Library.py"},
     {"label": "Load Data", "page": "pages/01_Load_Data.py"},
     {"label": "Tabular List", "page": "pages/01__Tabular_List.py"},
+    # Ciclo 15.1 — Machine Map (heatmap de severidad por sensor)
+    {"label": "Machine Map", "page": "pages/01b_Machine_Map.py"},
     {"label": "Time Waveforms", "page": "pages/02_Time_Waveforms.py"},
     {"label": "Spectrum", "page": "pages/03_Spectrum.py"},
     {"label": "Trends", "page": "pages/04_Trends.py"},
