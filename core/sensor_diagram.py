@@ -511,17 +511,12 @@ def render_sensor_map_diagram(
                         color=_COLOR_TEXT, alpha=0.85, fontweight="bold")
             label_y_top -= 0.18
 
-        # Ciclo 15.1.5 — etiqueta numerica con el Overall del peor sensor
-        # del plano coloreada por severidad. Convierte el esquematico en
-        # un diagrama vivo que entrega informacion real del estado del
-        # tren, no solo posicion de las sondas.
+        # Ciclo 15.2.1 — listar TODOS los sensores del plano con sus
+        # valores Overall coloreados por severidad propia. Asi en TRF/CRF
+        # se ven velocity Y accelerometer, en planos 3/4 se ven X y Y.
         if overall_by_label:
-            # Encontrar el sensor del plano cuyo % de Danger consumido es
-            # mayor (ranking ingenieril estandar). Si no hay severity,
-            # tomar el que tenga mayor valor absoluto.
             from core.sensor_map import sensor_label as _slabel
-            best = None
-            best_pct = -1.0
+            sensor_lines = []
             for s in plane_sensors:
                 if str(s.get("sensor_type", "")).lower() == "keyphasor":
                     continue  # keyphasor no tiene overall
@@ -534,27 +529,27 @@ def render_sensor_map_diagram(
                     pct = (float(ov) / danger * 100.0) if danger > 0 else 0.0
                 except Exception:
                     pct = 0.0
-                if pct > best_pct:
-                    best_pct = pct
-                    best = (lbl, float(ov))
-
-            if best is not None:
-                lbl_best, ov_best = best
                 unit = ""
-                if unit_by_label and lbl_best in unit_by_label:
-                    unit = str(unit_by_label[lbl_best] or "").strip()
-                # Color por severidad del propio sensor (no worst-of-plane)
-                if severity_by_label and lbl_best in severity_by_label:
-                    sv = severity_by_label[lbl_best]
+                if unit_by_label and lbl in unit_by_label:
+                    unit = str(unit_by_label[lbl] or "").strip()
+                if severity_by_label and lbl in severity_by_label:
+                    sv = severity_by_label[lbl]
                     val_color = _COLOR_SEVERITY.get(sv, _COLOR_TEXT)
                 else:
                     val_color = _COLOR_TEXT
-                txt = f"{ov_best:.2f}"
+                txt = f"{lbl}: {float(ov):.2f}"
                 if unit:
                     txt = f"{txt} {unit}"
+                sensor_lines.append((pct, txt, val_color))
+
+            # Mas critico primero (justo debajo del cojinete)
+            sensor_lines.sort(key=lambda t: -t[0])
+
+            for _pct, txt, val_color in sensor_lines:
                 ax_top.text(bx, label_y_top, txt,
-                            fontsize=7.0, ha="center", va="top",
+                            fontsize=6.5, ha="center", va="top",
                             color=val_color, fontweight="bold")
+                label_y_top -= 0.13
 
     # Cojinetes del driver
     for i, p in enumerate(driver_planes):
@@ -904,10 +899,16 @@ def render_on_schematic(
                 except Exception:
                     pass
 
-        if show_values and overall_by_label:
-            # Encontrar el sensor del plano con mayor % de Danger consumido
-            best = None
-            best_pct = -1.0
+        if show_values and overall_by_label and value_font is not None:
+            # Ciclo 15.2.1 — listar TODOS los sensores del plano (no solo
+            # el peor). Asi en TRF/CRF se ven velocity Y accelerometer; en
+            # los planos del generador se ven X y Y. Cada linea coloreada
+            # por SU propia severidad.
+            #
+            # Orden de display: por % de Danger consumido descendente para
+            # que el sensor mas critico aparezca arriba (justo debajo del
+            # cojinete).
+            sensor_lines = []
             for s in grp_sensors:
                 if str(s.get("sensor_type", "")).lower() == "keyphasor":
                     continue
@@ -920,20 +921,24 @@ def render_on_schematic(
                     pct = (float(ov) / danger * 100.0) if danger > 0 else 0.0
                 except Exception:
                     pct = 0.0
-                if pct > best_pct:
-                    best_pct = pct
-                    best = (lbl, float(ov))
-            if best is not None and value_font is not None:
-                lbl_best, ov_best = best
                 unit = ""
-                if unit_by_label and lbl_best in unit_by_label:
-                    unit = str(unit_by_label[lbl_best] or "").strip()
-                if severity_by_label and lbl_best in severity_by_label:
-                    sv = severity_by_label[lbl_best]
+                if unit_by_label and lbl in unit_by_label:
+                    unit = str(unit_by_label[lbl] or "").strip()
+                if severity_by_label and lbl in severity_by_label:
+                    sv = severity_by_label[lbl]
                     val_color = _COLOR_SEVERITY.get(sv, "#0f172a")
                 else:
                     val_color = "#0f172a"
-                txt = f"{ov_best:.2f} {unit}".strip()
+                # Texto en formato "{label}: {value} {unit}"
+                txt = f"{lbl}: {float(ov):.2f}"
+                if unit:
+                    txt = f"{txt} {unit}"
+                sensor_lines.append((pct, txt, val_color))
+
+            # Ordenar por % desc (mas critico primero)
+            sensor_lines.sort(key=lambda t: -t[0])
+
+            for _pct_unused, txt, val_color in sensor_lines:
                 try:
                     tb = draw.textbbox((0, 0), txt, font=value_font)
                     tw = tb[2] - tb[0]
@@ -941,9 +946,10 @@ def render_on_schematic(
                     pad = 3
                     bg = [cx - tw / 2 - pad, below_y - 1,
                           cx + tw / 2 + pad, below_y + th + pad]
-                    draw.rectangle(bg, fill=(255, 255, 255, 220))
+                    draw.rectangle(bg, fill=(255, 255, 255, 230))
                     draw.text((cx - tw / 2, below_y), txt,
                               font=value_font, fill=val_color)
+                    below_y += th + 4
                 except Exception:
                     pass
 
