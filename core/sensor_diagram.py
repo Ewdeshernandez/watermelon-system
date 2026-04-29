@@ -803,10 +803,10 @@ def render_on_schematic(
         except Exception:
             return None
 
-    marker_radius = max(14, int(W / 60))
-    label_font = _load_font(max(11, int(W / 90)))
-    value_font = _load_font(max(10, int(W / 100)))
-    num_font = _load_font(max(13, int(W / 80)))
+    marker_radius = max(16, int(W / 55))
+    label_font = _load_font(max(12, int(W / 80)))
+    value_font = _load_font(max(11, int(W / 88)))
+    num_font = _load_font(max(15, int(W / 70)))
 
     # Agrupar sensores por (plano, x_pct, y_pct) — varios sensores en
     # el mismo cojinete deben renderizar UN marker (worst-of-plane).
@@ -878,9 +878,10 @@ def render_on_schematic(
             except Exception:
                 pass
 
-        # Etiqueta del plano (TRF / CRF / GEN DE / GEN NDE) + valor Overall
-        # del peor sensor del plano coloreado por severidad.
-        below_y = cy + marker_radius + 4
+        # Etiqueta del plano (TRF / CRF / GEN DE / GEN NDE) + valores
+        # Overall por sensor coloreados por severidad. Ciclo 15.2.2 — mas
+        # aire entre lineas para que se lean comodas sobre la foto real.
+        below_y = cy + marker_radius + 8
         if show_labels:
             plane_lbl = _plane_display_label(grp_sensors)
             if plane_lbl and label_font is not None:
@@ -888,14 +889,14 @@ def render_on_schematic(
                     tb = draw.textbbox((0, 0), plane_lbl, font=label_font)
                     tw = tb[2] - tb[0]
                     th = tb[3] - tb[1]
-                    # Fondo blanco semitransparente para legibilidad
-                    pad = 3
-                    bg = [cx - tw / 2 - pad, below_y - 1,
-                          cx + tw / 2 + pad, below_y + th + pad]
-                    draw.rectangle(bg, fill=(255, 255, 255, 220))
+                    pad_x = 6
+                    pad_y = 4
+                    bg = [cx - tw / 2 - pad_x, below_y - pad_y,
+                          cx + tw / 2 + pad_x, below_y + th + pad_y]
+                    draw.rectangle(bg, fill=(255, 255, 255, 235))
                     draw.text((cx - tw / 2, below_y), plane_lbl,
                               font=label_font, fill="#0f172a")
-                    below_y += th + 6
+                    below_y += th + 12  # gap entre label de plano y valores
                 except Exception:
                     pass
 
@@ -943,13 +944,14 @@ def render_on_schematic(
                     tb = draw.textbbox((0, 0), txt, font=value_font)
                     tw = tb[2] - tb[0]
                     th = tb[3] - tb[1]
-                    pad = 3
-                    bg = [cx - tw / 2 - pad, below_y - 1,
-                          cx + tw / 2 + pad, below_y + th + pad]
-                    draw.rectangle(bg, fill=(255, 255, 255, 230))
+                    pad_x = 6
+                    pad_y = 4
+                    bg = [cx - tw / 2 - pad_x, below_y - pad_y,
+                          cx + tw / 2 + pad_x, below_y + th + pad_y]
+                    draw.rectangle(bg, fill=(255, 255, 255, 235))
                     draw.text((cx - tw / 2, below_y), txt,
                               font=value_font, fill=val_color)
-                    below_y += th + 4
+                    below_y += th + 10  # mas aire entre valores stackeados
                 except Exception:
                     pass
 
