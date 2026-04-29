@@ -432,43 +432,154 @@ def render_sensor_map_section(instance_id: str) -> None:
         "los thresholds correctos del sensor que matchea."
     )
 
-    # Acciones rápidas
-    col_gen, col_clear, col_pad = st.columns([1.5, 1.5, 4.5])
-    with col_gen:
+    # Form de generación + botón limpiar
+    # Ciclo 14c.1.1 — antes el botón "Generar mapa estándar" asumía un layout
+    # único (8 proxímetros + 2 acelerómetros). Ahora pregunta el tipo de
+    # soporte de driver y driven por separado, soportando trenes mixtos como
+    # turbina aero (rolling_element con TRF/CRF) + generador (fluid_film X-Y).
+
+    with st.expander(
+        "🪄 Generar mapa estándar (configurable)",
+        expanded=(len(inst.sensors) == 0),
+    ):
+        st.caption(
+            "Configurá driver y driven por separado. "
+            "**Driver = máquina motriz** (turbina, motor). "
+            "**Driven = máquina accionada** (generador, bomba, compresor). "
+            "Para cada lado elegís cuántos planos (cojinetes) tiene y qué tipo "
+            "de soporte: `fluid_film` genera par X-Y proxímetros a 45° R/L "
+            "(API 670); `rolling_element` genera 1 acelerómetro radial por plano."
+        )
+
+        # 3 modos de instrumentación. Para que sean amigables, traducimos
+        # internamente los keys técnicos a etiquetas claras.
+        _MODE_LABELS = {
+            "proximity_xy": "Proxímetros X-Y (API 670, fluid_film)",
+            "axial_accel": "Acelerómetro radial (1 por cojinete)",
+            "accel_plus_velocity": "Acelerómetro + Velocímetro (turbinas aero, TRF/CRF)",
+        }
+        _MODE_KEYS = list(_MODE_LABELS.keys())
+        _MODE_LABEL_LIST = list(_MODE_LABELS.values())
+
+        gcol1, gcol2 = st.columns(2)
+        with gcol1:
+            st.markdown("**Driver (motriz)**")
+            gen_driver_planes = st.number_input(
+                "Planos del driver",
+                min_value=1, max_value=8, value=2, step=1,
+                key=f"gen_driver_planes_{instance_id}",
+            )
+            # Default modo según support_type ya configurado en la instancia
+            _sup = (inst.support_type or "").lower()
+            _driver_default_mode_idx = (
+                _MODE_KEYS.index("accel_plus_velocity") if _sup == "rolling_element"
+                else _MODE_KEYS.index("proximity_xy")
+            )
+            _gen_driver_mode_label = st.selectbox(
+                "Instrumentación driver",
+                options=_MODE_LABEL_LIST,
+                index=_driver_default_mode_idx,
+                key=f"gen_driver_mode_{instance_id}",
+                help=(
+                    "**Proxímetros X-Y**: cojinetes planos hidrodinámicos (Brush, Siemens grandes). "
+                    "**Acelerómetro radial**: rodamientos simples (motores chicos, bombas). "
+                    "**Accel + Velocity**: turbinas aero modernas (LM6000, TM2500) con "
+                    "instrumentación completa en TRF y CRF."
+                ),
+            )
+            gen_driver_mode = _MODE_KEYS[_MODE_LABEL_LIST.index(_gen_driver_mode_label)]
+            gen_driver_prefix = ""
+            if gen_driver_mode in ("axial_accel", "accel_plus_velocity"):
+                gen_driver_prefix = st.text_input(
+                    "Prefijo Point CSV (acelerómetros)",
+                    value="acell",
+                    key=f"gen_driver_prefix_{instance_id}",
+                    help="Texto que aparece en el Point del CSV. Ej. 'TRF', 'CRF', 'BRG', 'casing', 'acell'. "
+                         "Si tu equipo tiene CRF y TRF (LM6000), generá una primera vez con prefijo 'CRF' y "
+                         "después editá manualmente el segundo plano para que su pattern diga 'TRF'.",
+                )
+
+        with gcol2:
+            st.markdown("**Driven (accionada)**")
+            gen_driven_planes = st.number_input(
+                "Planos del driven",
+                min_value=1, max_value=8, value=2, step=1,
+                key=f"gen_driven_planes_{instance_id}",
+            )
+            _gen_driven_mode_label = st.selectbox(
+                "Instrumentación driven",
+                options=_MODE_LABEL_LIST,
+                index=_MODE_KEYS.index("proximity_xy"),
+                key=f"gen_driven_mode_{instance_id}",
+                help="Generadores grandes y compresores centrífugos típicamente = "
+                     "Proxímetros X-Y. Bombas chicas y motores = Accel radial.",
+            )
+            gen_driven_mode = _MODE_KEYS[_MODE_LABEL_LIST.index(_gen_driven_mode_label)]
+            gen_driven_prefix = ""
+            if gen_driven_mode in ("axial_accel", "accel_plus_velocity"):
+                gen_driven_prefix = st.text_input(
+                    "Prefijo Point CSV (acelerómetros driven)",
+                    value="acell",
+                    key=f"gen_driven_prefix_{instance_id}",
+                )
+
+        # Keyphasor (referencia 1X de fase)
+        gen_include_keyphasor = st.checkbox(
+            "Incluir keyphasor en coupling (referencia 1X para Polar/Bode)",
+            value=False,
+            key=f"gen_keyphasor_{instance_id}",
+            help="Sensor de fase montado típicamente en el lado acople "
+                 "entre driver y driven. Genera 1 pulso por revolución y se usa "
+                 "como referencia angular para los plots polares y diagramas Bode.",
+        )
+
+        # Confirmación si ya hay sensores configurados
+        confirm_overwrite = True
+        if len(inst.sensors) > 0:
+            st.warning(
+                f"⚠️ Ya hay **{len(inst.sensors)} sensores** configurados. "
+                "Al generar uno nuevo se reemplazan TODOS los existentes."
+            )
+            confirm_overwrite = st.checkbox(
+                "Confirmo sobreescribir el mapa actual",
+                key=f"confirm_overwrite_{instance_id}",
+            )
+
         if st.button(
-            "🪄 Generar mapa estándar",
+            "🪄 Generar mapa con esta configuración",
             key=f"gen_sensor_map_{instance_id}",
-            help=(
-                "Pre-llena 8 sensores típicos: 4 cojinetes (2 driver + 2 driven) × "
-                "par X-Y proximity a 45° R/L + 1 acelerómetro radial por cada "
-                "cojinete del driven. Después editá los patterns y setpoints."
-            ),
-            disabled=len(inst.sensors) > 0,
+            type="primary",
+            disabled=(len(inst.sensors) > 0 and not confirm_overwrite),
         ):
             new_map = generate_standard_sensor_map(
-                nominal_planes_driver=2, nominal_planes_driven=2,
-                include_axial_accelerometer=True,
+                driver_planes=int(gen_driver_planes),
+                driver_instrumentation=gen_driver_mode,
+                driver_accel_prefix=gen_driver_prefix.strip() or "acell",
+                driven_planes=int(gen_driven_planes),
+                driven_instrumentation=gen_driven_mode,
+                driven_accel_prefix=gen_driven_prefix.strip() or "acell",
+                include_keyphasor=gen_include_keyphasor,
             )
             update_instance_header(instance_id, sensors=new_map)
-            st.success(f"Mapa estándar generado con {len(new_map)} sensores.")
+            st.success(f"Mapa generado con {len(new_map)} sensores.")
             st.rerun()
 
-    with col_clear:
-        if st.button(
-            "🗑️ Limpiar mapa",
-            key=f"clear_sensor_map_{instance_id}",
-            disabled=len(inst.sensors) == 0,
-        ):
-            update_instance_header(instance_id, sensors=[])
-            st.success("Mapa de sensores limpiado.")
-            st.rerun()
+    # Botón limpiar (separado, siempre disponible)
+    if st.button(
+        "🗑️ Limpiar mapa de sensores",
+        key=f"clear_sensor_map_{instance_id}",
+        disabled=len(inst.sensors) == 0,
+    ):
+        update_instance_header(instance_id, sensors=[])
+        st.success("Mapa de sensores limpiado.")
+        st.rerun()
 
     if not inst.sensors:
         st.info(
             "Este activo no tiene sensores configurados. "
-            "Click en **🪄 Generar mapa estándar** para empezar con un layout "
-            "típico de 4 cojinetes con sondas X-Y proximity + acelerómetros, o "
-            "configurá sensor por sensor manualmente con el editor de abajo."
+            "Expandí **🪄 Generar mapa estándar** arriba para empezar con un "
+            "layout configurable según tipo de soporte de driver y driven, "
+            "o configurá sensor por sensor manualmente con el editor de abajo."
         )
 
     # Editor in-place del mapa
@@ -511,12 +622,14 @@ def render_sensor_map_section(instance_id: str) -> None:
             ),
             "sensor_type": st.column_config.SelectboxColumn(
                 "Tipo",
-                options=["proximity", "velocity", "accelerometer"],
+                options=["proximity", "velocity", "accelerometer", "keyphasor"],
                 default="proximity",
                 help=(
                     "proximity → Desplazamiento (mil pp / µm pp). "
                     "velocity → Velocidad (mm/s RMS / in/s peak). "
-                    "accelerometer → Aceleración (g RMS / m/s² RMS)."
+                    "accelerometer → Aceleración (g RMS / m/s² RMS). "
+                    "keyphasor → Referencia 1X de fase (pulses/rev), "
+                    "típicamente en coupling."
                 ),
             ),
             "unit_native": st.column_config.SelectboxColumn(
