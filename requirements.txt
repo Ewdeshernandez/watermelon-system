@@ -2,6 +2,12 @@ numpy
 pandas
 streamlit
 scipy
+# matplotlib es requerido por core/sensor_diagram.py (turbomachinery
+# silhouette + polar per plane) y por core/plot_export.py.
+# Antes venia como dep transitiva pero un rebuild de Streamlit Cloud
+# en v2.5 dejo de incluirlo. Agregado explicitamente para que main
+# nunca pierda el diagrama del Sensor Map.
+matplotlib>=3.7.0
 plotly==6.1.1
 kaleido==1.0.0
 reportlab>=4.0.0
