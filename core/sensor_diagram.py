@@ -39,6 +39,20 @@ _COLOR_BG = "#ffffff"
 _COLOR_GRID = "#e2e8f0"
 _COLOR_TEXT = "#0f172a"
 
+# Ciclo 15.1 — paleta de severidad para Machine Map (coherente con
+# las cintas de severidad de los expanders Cat IV).
+_COLOR_SEVERITY = {
+    "Normal": "#16a34a",                # verde — CONDICIÓN ACEPTABLE
+    "CONDICIÓN ACEPTABLE": "#16a34a",
+    "Alarm": "#f59e0b",                 # ámbar — ATENCIÓN
+    "ATENCIÓN": "#f59e0b",
+    "Danger": "#dc2626",                # rojo — ACCIÓN REQUERIDA / CRÍTICA
+    "ACCIÓN REQUERIDA": "#dc2626",
+    "CRÍTICA": "#dc2626",
+    "No Data": "#94a3b8",               # gris — sin CSV matched
+    "": "#94a3b8",
+}
+
 
 def _color_for_sensor_type(sensor_type: str) -> str:
     t = (sensor_type or "").lower()
@@ -73,6 +87,7 @@ def render_sensor_map_diagram(
     driver_label: str = "Driver",
     driven_label: str = "Driven",
     figure_width_in: float = 12.0,
+    severity_by_label: Optional[Dict[str, str]] = None,
 ) -> Optional[bytes]:
     """
     Devuelve PNG bytes con el diagrama completo del Sensor Map.
@@ -82,6 +97,10 @@ def render_sensor_map_diagram(
         train_label: subtítulo (ej. "Turbogenerador GE LM6000 + Brush 54 MW").
         driver_label / driven_label: etiquetas de las dos máquinas.
         figure_width_in: ancho del figure en pulgadas.
+        severity_by_label: (Ciclo 15.1) dict opcional mapeando sensor_label
+            → status ("Normal" / "Alarm" / "Danger" / "No Data"). Cuando
+            se provee, los markers se colorean por severidad. Cuando no,
+            usan el color por tipo de sensor (modo "configuración").
 
     Returns:
         Bytes PNG o None si matplotlib no está disponible.
@@ -283,14 +302,20 @@ def render_sensor_map_diagram(
             x = r_marker * math.cos(theta_rad)
             y = r_marker * math.sin(theta_rad)
 
-            color = _color_for_sensor_type(sensor_type)
-            marker = _marker_for_sensor_type(sensor_type)
-            ax.plot(x, y, marker=marker, markersize=11, color=color,
-                    markeredgecolor=_COLOR_TEXT, markeredgewidth=0.7, zorder=4)
-
-            # Label sensor (1Y_D, 2_RAD_A, etc.)
+            # Ciclo 15.1 — color por severidad si está disponible,
+            # si no por tipo de sensor (modo configuración).
             from core.sensor_map import sensor_label as _slabel
             lbl = _slabel(s)
+            if severity_by_label and lbl in severity_by_label:
+                sev_status = severity_by_label[lbl]
+                color = _COLOR_SEVERITY.get(sev_status, _COLOR_SEVERITY.get("No Data", "#94a3b8"))
+            else:
+                color = _color_for_sensor_type(sensor_type)
+            marker = _marker_for_sensor_type(sensor_type)
+            ax.plot(x, y, marker=marker, markersize=12, color=color,
+                    markeredgecolor=_COLOR_TEXT, markeredgewidth=0.8, zorder=4)
+
+            # Label sensor (1Y_D, 2_RAD_A, etc.)
             label_r = 1.32
             lx = label_r * math.cos(theta_rad)
             ly = label_r * math.sin(theta_rad)
@@ -304,13 +329,21 @@ def render_sensor_map_diagram(
             title += f"\n{plane_lbl}"
         ax.set_title(title, fontsize=8, fontweight="bold", color=_COLOR_TEXT, pad=4)
 
-    # Leyenda abajo
-    legend_handles = [
-        mpatches.Patch(color=_COLOR_PROXIMITY, label="Proximity"),
-        mpatches.Patch(color=_COLOR_VELOCITY, label="Velocity"),
-        mpatches.Patch(color=_COLOR_ACCELEROMETER, label="Accelerometer"),
-        mpatches.Patch(color=_COLOR_KEYPHASOR, label="Keyphasor"),
-    ]
+    # Ciclo 15.1 — leyenda según modo (severidad vs configuración)
+    if severity_by_label:
+        legend_handles = [
+            mpatches.Patch(color=_COLOR_SEVERITY["Normal"], label="CONDICIÓN ACEPTABLE"),
+            mpatches.Patch(color=_COLOR_SEVERITY["Alarm"], label="ATENCIÓN"),
+            mpatches.Patch(color=_COLOR_SEVERITY["Danger"], label="ACCIÓN REQUERIDA"),
+            mpatches.Patch(color=_COLOR_SEVERITY["No Data"], label="Sin datos"),
+        ]
+    else:
+        legend_handles = [
+            mpatches.Patch(color=_COLOR_PROXIMITY, label="Proximity"),
+            mpatches.Patch(color=_COLOR_VELOCITY, label="Velocity"),
+            mpatches.Patch(color=_COLOR_ACCELEROMETER, label="Accelerometer"),
+            mpatches.Patch(color=_COLOR_KEYPHASOR, label="Keyphasor"),
+        ]
     fig.legend(handles=legend_handles, loc="lower center", ncol=4,
                frameon=False, fontsize=8, bbox_to_anchor=(0.5, 0.0))
 
