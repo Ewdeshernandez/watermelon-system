@@ -857,10 +857,11 @@ def render_sensor_map_section(instance_id: str) -> None:
                         "para poder posicionarlos sobre el esquemático."
                     )
                 else:
-                    # UI de seleccion: que plano vamos a posicionar
+                    # UI de seleccion: que plano vamos a posicionar.
+                    # Sort: planos numericos primero, KP al final.
                     plane_keys_sorted = sorted(
                         planes_map.keys(),
-                        key=lambda k: (k != "KP", k if k != "KP" else 999),
+                        key=lambda k: (1, 999) if k == "KP" else (0, k),
                     )
                     plane_options = []
                     for k in plane_keys_sorted:
@@ -875,13 +876,29 @@ def render_sensor_map_section(instance_id: str) -> None:
                         else:
                             plane_options.append((k, f"Plano {k} · {info['plane_label']}{coord_status}"))
 
-                    sel_label_to_key = {lbl: k for k, lbl in plane_options}
+                    # Mantener seleccion entre reruns mediante session_state.
+                    # Usamos la KEY del plano (no la label) porque la label
+                    # cambia cuando se guarda una posicion (pasa de "sin
+                    # posicionar" a "posicionado") y eso hacia que Streamlit
+                    # no pudiera matchear el value previo y caia al indice 0
+                    # (= Keyphasor con sort viejo).
+                    _ctp_state_key = f"ctp_selected_plane_key_{instance_id}"
+                    keys_in_order = [k for k, _ in plane_options]
+                    if _ctp_state_key not in st.session_state or \
+                       st.session_state[_ctp_state_key] not in keys_in_order:
+                        st.session_state[_ctp_state_key] = keys_in_order[0]
+                    default_idx = keys_in_order.index(st.session_state[_ctp_state_key])
+
                     selected_label = st.selectbox(
                         "Plano a posicionar (clic en la imagen abajo)",
                         [lbl for _, lbl in plane_options],
-                        key=f"ctp_plane_select_{instance_id}",
+                        index=default_idx,
+                        key=f"ctp_plane_select_widget_{instance_id}",
                     )
+                    sel_label_to_key = {lbl: k for k, lbl in plane_options}
                     selected_plane = sel_label_to_key[selected_label]
+                    # Persistir la key seleccionada para sobrevivir reruns
+                    st.session_state[_ctp_state_key] = selected_plane
 
                     # Render con streamlit_image_coordinates
                     captured_xy: Optional[tuple] = None
