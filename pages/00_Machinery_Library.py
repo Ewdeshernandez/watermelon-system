@@ -712,7 +712,7 @@ def render_sensor_map_section(instance_id: str) -> None:
         st.success(f"Mapa guardado con {len(new_sensors)} sensores.")
         st.rerun()
 
-    # Preview del mapa actual con labels formateados
+    # Preview del mapa actual con labels formateados + diagrama visual
     if inst.sensors:
         with st.expander(f"Preview del mapa actual ({len(inst.sensors)} sensores)", expanded=False):
             preview_lines = []
@@ -730,6 +730,34 @@ def render_sensor_map_section(instance_id: str) -> None:
                 pat = s.get('csv_match_pattern', '') or '(sin pattern)'
                 preview_lines.append(f"- **{lbl}** · {ploc} · {tinfo} · match=`{pat}`")
             st.markdown("\n".join(preview_lines))
+
+        # Ciclo 14c.2 — diagrama visual del mapa de sensores
+        st.markdown("#### 🎯 Diagrama visual del mapa")
+        st.caption(
+            "Vista lateral del tren con cojinetes numerados (convención API 670 / "
+            "ISO 20816-1 driver→driven) y vista polar por plano con sondas en sus "
+            "ángulos físicos. R/L vistos desde el extremo del driver, 0° arriba."
+        )
+        try:
+            from core.sensor_diagram import render_sensor_map_diagram
+            _train_lbl = compose_train_description(inst) or ""
+            _drv_lbl = " ".join(p for p in [inst.driver_manufacturer, inst.driver_model] if p) or "Driver"
+            _dvn_lbl = " ".join(p for p in [inst.driven_manufacturer, inst.driven_model] if p) or "Driven"
+            _diag_png = render_sensor_map_diagram(
+                inst.sensors,
+                train_label=_train_lbl,
+                driver_label=_drv_lbl,
+                driven_label=_dvn_lbl,
+            )
+            if _diag_png:
+                st.image(_diag_png, use_container_width=True)
+            else:
+                st.warning(
+                    "No se pudo renderizar el diagrama. "
+                    "Verificá que matplotlib esté disponible en el entorno."
+                )
+        except Exception as e:
+            st.warning(f"Error al renderizar diagrama: {e}")
 
 
 def render_documents_section(instance_id: str) -> None:

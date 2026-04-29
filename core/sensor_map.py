@@ -231,11 +231,41 @@ def resolve_sensor_for_point(
     if len(candidates) == 1:
         return candidates[0]
 
-    # Si quedan varios, intentar tie-break por substring del label
-    for sensor in candidates:
-        lbl = sensor_label(sensor).lower()
-        if lbl in point_norm:
-            return sensor
+    # Tie-break en orden: label → plane_label → tokens del pattern → primer
+    # candidate del tipo correcto (fallback gracioso).
+    if candidates:
+        # 1. Substring del label industrial (1y_d, 2_rad_a, etc.)
+        for sensor in candidates:
+            lbl = sensor_label(sensor).lower()
+            if lbl in point_norm:
+                return sensor
+
+        # 2. Substring del plane_label (ej. "DE driver", "TRF (LM6000)")
+        for sensor in candidates:
+            plbl = _normalize_for_match(sensor.get("plane_label", ""))
+            if plbl and plbl in point_norm:
+                return sensor
+
+        # 3. Tokens distintivos del csv_match_pattern (ej. "trf", "crf"
+        # extraídos de "*trf*acell*"). Filtramos comunes (x, y, acell, etc.).
+        _common_tokens = {"acell", "acc", "vel", "rad", "ax", "x", "y"}
+        for sensor in candidates:
+            pattern = (sensor.get("csv_match_pattern") or "").lower()
+            for chunk in pattern.replace(",", " ").split():
+                for token in chunk.split("*"):
+                    token = token.strip()
+                    if not token or token in _common_tokens or token.isdigit():
+                        continue
+                    if token in point_norm:
+                        return sensor
+
+        # 4. Fallback gracioso: si después de filtrar por type_hint quedan
+        # varios candidates pero ninguno matchea por substring, devolvemos
+        # el primero. Mejor un match de tipo correcto que caer al global
+        # que tendría una familia incorrecta (proximity en vez de accel,
+        # por ejemplo).
+        if type_hint:
+            return candidates[0]
 
     return None
 
