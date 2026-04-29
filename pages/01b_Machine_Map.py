@@ -34,9 +34,6 @@ import streamlit as st
 
 from core.auth import require_login, render_user_menu
 
-require_login()
-render_user_menu()
-
 from core.instance_selector import render_instance_selector
 from core.instance_state import (
     get_instance,
@@ -54,6 +51,7 @@ from core.ui_theme import apply_watermelon_page_style, page_header
 
 st.set_page_config(page_title="Watermelon System | Machine Map", layout="wide")
 require_login()
+render_user_menu()
 apply_watermelon_page_style()
 
 
@@ -182,7 +180,6 @@ def _build_severity_table(
 # RENDER
 # ============================================================
 
-render_user_menu()
 page_header(
     title="Machine Map",
     subtitle=(
