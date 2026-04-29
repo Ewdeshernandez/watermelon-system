@@ -1309,20 +1309,10 @@ if _override_active:
 machine_settings: Dict[str, Dict[str, Any]] = {}
 point_settings: Dict[str, Dict[str, Any]] = {}
 
-# Ciclo 15.1 hotfix — Panel de debug del matching sensor → CSV.
-# Permite verificar de un vistazo qué Point/Variable/Unit le llega
-# al matcher por cada signal cargado y qué sensor del map matcheó.
-# Marker de versión: si NO ves "BUILD 14c.3-debug-v2" abajo,
-# Streamlit está cacheando una versión vieja del archivo.
-st.markdown(
-    "<div style='background:#fef3c7; border:1px solid #f59e0b; padding:6px 10px; "
-    "border-radius:6px; font-size:0.85rem; margin-bottom:8px;'>"
-    "<b>BUILD 14c.3-debug-v2</b> — si ves este banner, Streamlit cargó la versión nueva. "
-    "Abrí el expander 🔍 abajo para diagnosticar el matching."
-    "</div>",
-    unsafe_allow_html=True,
-)
-with st.expander("🔍 Debug: matching de sensores con signals cargados", expanded=True):
+# Ciclo 15.1 — debug del matching opcional, colapsado por default.
+# Útil para diagnosticar mapeo sensor↔signal cuando hay sospecha de
+# falso match. No interfiere con el flujo normal del usuario.
+with st.expander("🔍 Debug: matching de sensores con signals cargados", expanded=False):
     try:
         from core.sensor_map import resolve_sensor_for_point as _dbg_resolve, sensor_label as _dbg_label
         _dbg_sensors = list(_active_instance.sensors or [])
@@ -1339,7 +1329,6 @@ with st.expander("🔍 Debug: matching de sensores con signals cargados", expand
                 "CSV Point": _r.point,
                 "CSV Variable": _r.variable,
                 "CSV Unit": _r.amplitude_unit,
-                "Inferred Family": _r.measurement_family,
                 "Sensor matched": _dbg_label(_m) if _m else "— SIN MATCH —",
                 "Sensor type": _m.get("sensor_type", "—") if _m else "—",
                 "Sensor unit_native": _m.get("unit_native", "—") if _m else "—",
