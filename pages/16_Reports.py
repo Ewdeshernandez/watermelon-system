@@ -1244,8 +1244,15 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
 
         if sch_inst_id:
             try:
-                from core.instance_state import get_instance, compose_train_description
-                from core.sensor_diagram import render_sensor_map_diagram
+                from core.instance_state import (
+                    get_instance,
+                    compose_train_description,
+                    get_instance_document_bytes,
+                )
+                from core.sensor_diagram import (
+                    render_sensor_map_diagram,
+                    render_on_schematic,
+                )
                 from core.machine_severity import build_severity_table
 
                 _re_inst = get_instance(sch_inst_id)
@@ -1267,6 +1274,30 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                             except Exception:
                                 pass
 
+                        # Ciclo 15.2 — INTENTAR primero el render sobre la
+                        # foto/dibujo REAL del activo si hay sensores con
+                        # coordenadas x_pct/y_pct configuradas. Si no, caer
+                        # al render generico turbomachinery silhouette.
+                        _re_png = None
+                        _used_real_schematic = False
+                        if _re_inst.schematic_png:
+                            try:
+                                _sch_bytes = get_instance_document_bytes(
+                                    _re_inst.instance_id, _re_inst.schematic_png
+                                )
+                                if _sch_bytes:
+                                    _re_png_real = render_on_schematic(
+                                        _sch_bytes, _re_inst.sensors,
+                                        severity_by_label=_re_sev,
+                                        overall_by_label=_re_overall,
+                                        unit_by_label=_re_unit,
+                                    )
+                                    if _re_png_real:
+                                        _re_png = _re_png_real
+                                        _used_real_schematic = True
+                            except Exception:
+                                pass
+
                         _re_drv = " ".join(p for p in [
                             getattr(_re_inst, "driver_manufacturer", ""),
                             getattr(_re_inst, "driver_model", ""),
@@ -1275,17 +1306,18 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                             getattr(_re_inst, "driven_manufacturer", ""),
                             getattr(_re_inst, "driven_model", ""),
                         ] if p) or "Driven"
-                        _re_png = render_sensor_map_diagram(
-                            _re_inst.sensors,
-                            train_label="",
-                            driver_label=_re_drv,
-                            driven_label=_re_dvn,
-                            severity_by_label=_re_sev,
-                            overall_by_label=_re_overall,
-                            unit_by_label=_re_unit,
-                            figure_width_in=11.5,
-                            compact=True,
-                        )
+                        if _re_png is None:
+                            _re_png = render_sensor_map_diagram(
+                                _re_inst.sensors,
+                                train_label="",
+                                driver_label=_re_drv,
+                                driven_label=_re_dvn,
+                                severity_by_label=_re_sev,
+                                overall_by_label=_re_overall,
+                                unit_by_label=_re_unit,
+                                figure_width_in=11.5,
+                                compact=True,
+                            )
                         if _re_png:
                             usable_w = A4[0] - doc.leftMargin - doc.rightMargin
                             target_w = min(15.0 * cm, usable_w)
@@ -1300,15 +1332,27 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                             train_lbl = (meta.get("train_description")
                                          or compose_train_description(_re_inst)
                                          or "").strip()
-                            cap = (
-                                "Estado actual del tren acoplado · cojinetes "
-                                "coloreados según severidad por plano "
-                                "(verde = aceptable, ámbar = atención, "
-                                "rojo = acción requerida); valores Overall "
-                                "del peor sensor por plano sobre la "
-                                "etiqueta. Detalle por sonda en la sección "
-                                "Mapa de Sensores."
-                            )
+                            if _used_real_schematic:
+                                cap = (
+                                    "Estado actual del tren sobre el "
+                                    "esquemático del activo · cojinetes "
+                                    "coloreados según severidad por plano "
+                                    "(verde = aceptable, ámbar = atención, "
+                                    "rojo = acción requerida); valores Overall "
+                                    "del peor sensor por plano sobre la "
+                                    "etiqueta. Detalle por sonda en la "
+                                    "sección Mapa de Sensores."
+                                )
+                            else:
+                                cap = (
+                                    "Estado actual del tren acoplado · "
+                                    "cojinetes coloreados según severidad "
+                                    "por plano (verde = aceptable, ámbar = "
+                                    "atención, rojo = acción requerida); "
+                                    "valores Overall del peor sensor por "
+                                    "plano sobre la etiqueta. Detalle por "
+                                    "sonda en la sección Mapa de Sensores."
+                                )
                             if train_lbl:
                                 cap = f"{train_lbl} — " + cap
                             _emit_train_caption(cap, alive=True)

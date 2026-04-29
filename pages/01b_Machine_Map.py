@@ -157,27 +157,70 @@ st.markdown("### 🎯 Heatmap de severidad por plano")
 severity_by_label: Dict[str, str] = dict(
     zip(df_severity["Label"].astype(str), df_severity["Status"].astype(str))
 )
+overall_by_label: Dict[str, float] = {}
+unit_by_label: Dict[str, str] = {}
+for _, _row in df_severity.iterrows():
+    try:
+        _lbl = str(_row["Label"])
+        overall_by_label[_lbl] = float(_row.get("Overall") or 0.0)
+        unit_by_label[_lbl] = str(_row.get("Unit") or "")
+    except Exception:
+        pass
 
-try:
-    _drv_lbl = " ".join(p for p in [
-        _active_instance.driver_manufacturer, _active_instance.driver_model
-    ] if p) or "Driver"
-    _dvn_lbl = " ".join(p for p in [
-        _active_instance.driven_manufacturer, _active_instance.driven_model
-    ] if p) or "Driven"
-    _diag_png = render_sensor_map_diagram(
-        _active_instance.sensors,
-        train_label=compose_train_description(_active_instance) or "",
-        driver_label=_drv_lbl,
-        driven_label=_dvn_lbl,
-        severity_by_label=severity_by_label,
-    )
-    if _diag_png:
-        st.image(_diag_png, use_container_width=True)
-    else:
-        st.warning("No se pudo renderizar el diagrama.")
-except Exception as e:
-    st.warning(f"Error al renderizar diagrama: {e}")
+# Ciclo 15.2 — preferimos render sobre la foto/dibujo real del activo si
+# el usuario configuro x_pct/y_pct via click-to-place. Si no, caemos al
+# render generico turbomachinery silhouette.
+_used_real_schematic = False
+_diag_png = None
+if _active_instance.schematic_png:
+    try:
+        from core.sensor_diagram import render_on_schematic
+        _sch_bytes_mm = get_instance_document_bytes(
+            _active_instance.instance_id, _active_instance.schematic_png
+        )
+        if _sch_bytes_mm:
+            _diag_png_real = render_on_schematic(
+                _sch_bytes_mm, _active_instance.sensors,
+                severity_by_label=severity_by_label,
+                overall_by_label=overall_by_label,
+                unit_by_label=unit_by_label,
+            )
+            if _diag_png_real:
+                _diag_png = _diag_png_real
+                _used_real_schematic = True
+    except Exception:
+        pass
+
+if _diag_png is None:
+    try:
+        _drv_lbl = " ".join(p for p in [
+            _active_instance.driver_manufacturer, _active_instance.driver_model
+        ] if p) or "Driver"
+        _dvn_lbl = " ".join(p for p in [
+            _active_instance.driven_manufacturer, _active_instance.driven_model
+        ] if p) or "Driven"
+        _diag_png = render_sensor_map_diagram(
+            _active_instance.sensors,
+            train_label=compose_train_description(_active_instance) or "",
+            driver_label=_drv_lbl,
+            driven_label=_dvn_lbl,
+            severity_by_label=severity_by_label,
+            overall_by_label=overall_by_label,
+            unit_by_label=unit_by_label,
+        )
+    except Exception as e:
+        st.warning(f"Error al renderizar diagrama: {e}")
+
+if _diag_png:
+    st.image(_diag_png, use_container_width=True)
+    if _used_real_schematic:
+        st.caption(
+            "Heatmap renderizado sobre el esquemático real del activo "
+            "(coordenadas configuradas en Machinery Library → Posicionar "
+            "sensores sobre el esquemático)."
+        )
+else:
+    st.warning("No se pudo renderizar el diagrama.")
 
 # Drill-down: sensores con atención requerida
 critical_df = df_severity[df_severity["Status"].isin(["Alarm", "Danger"])].copy()
@@ -211,3 +254,134 @@ with st.expander(f"Tabla completa de sensores ({total} configurados)", expanded=
     full_display["Alarm"] = full_display["Alarm"].map(lambda x: f"{x:.3f}")
     full_display["Danger"] = full_display["Danger"].map(lambda x: f"{x:.3f}")
     st.dataframe(full_display, use_container_width=True, hide_index=True)
+
+
+# ============================================================
+# Ciclo 15.1.6 — Diagnóstico self-service para sensores Sin Datos
+# ------------------------------------------------------------
+# Cuando un sensor del Sensor Map sale en "Sin datos" puede ser
+# porque (a) el CSV no se cargó, (b) el csv_match_pattern del
+# sensor no matchea el Point name del CSV cargado, o (c) el tipo
+# de sensor / unit_native no coincide con el tipo del CSV
+# (cross-type guard del matcher).
+#
+# Esta sección lista, para cada sensor sin datos:
+#   - Su patrón esperado.
+#   - Los Point names actualmente cargados en sesión.
+#   - Una sugerencia de pattern que SI matchearia.
+# ============================================================
+nodata_df = df_severity[df_severity["Status"] == "No Data"].copy()
+if not nodata_df.empty and signals:
+    with st.expander(
+        f"🔍 Diagnóstico — por qué {len(nodata_df)} "
+        f"{'sensor aparece' if len(nodata_df) == 1 else 'sensores aparecen'} "
+        f"sin datos",
+        expanded=False,
+    ):
+        # Recolectar Point names + variables + units de los signals en sesion
+        point_inventory = []
+        for signame, sigobj in (signals or {}).items():
+            try:
+                metadata = (
+                    getattr(sigobj, "metadata", None)
+                    or (sigobj.get("metadata") if isinstance(sigobj, dict) else {})
+                    or {}
+                )
+                point_inventory.append({
+                    "File": signame,
+                    "Point": str(metadata.get("Point", "") or ""),
+                    "Variable": str(metadata.get("Variable", "") or ""),
+                    "Y-Axis Unit": str(
+                        metadata.get("Y-Axis Unit", "")
+                        or metadata.get("Unit", "")
+                        or ""
+                    ),
+                })
+            except Exception:
+                continue
+
+        if not point_inventory:
+            st.info(
+                "No hay signals con metadata disponible en sesión para "
+                "diagnosticar. Recargá los CSVs en Load Data."
+            )
+        else:
+            st.caption(
+                "El matcher empareja CSVs con sensores del Sensor Map "
+                "usando el `csv_match_pattern` del sensor contra el "
+                "Point name del CSV. La unidad del CSV también debe ser "
+                "compatible con la familia del sensor."
+            )
+
+            inv_df = pd.DataFrame(point_inventory)
+            st.markdown("**Signals cargados en sesión:**")
+            st.dataframe(inv_df, use_container_width=True, hide_index=True)
+
+            st.markdown("**Sensores sin datos y patrones esperados:**")
+
+            # Para cada sensor sin datos, mostrar patron + intento manual
+            from core.sensor_map import resolve_sensor_for_point as _diag_resolve
+            diag_rows = []
+            for _, sr in nodata_df.iterrows():
+                # Buscar el sensor original en _active_instance.sensors
+                sensor_obj = None
+                for _s in _active_instance.sensors:
+                    try:
+                        from core.sensor_map import sensor_label as _slbl
+                        if _slbl(_s) == sr["Label"]:
+                            sensor_obj = _s
+                            break
+                    except Exception:
+                        pass
+                pattern = (sensor_obj.get("csv_match_pattern", "")
+                           if sensor_obj else "")
+                stype = (sensor_obj.get("sensor_type", "")
+                         if sensor_obj else "")
+                unit_native = (sensor_obj.get("unit_native", "")
+                               if sensor_obj else "")
+
+                # Probar el matcher contra cada signal
+                hit_signal = ""
+                for inv in point_inventory:
+                    try:
+                        if sensor_obj is not None:
+                            m = _diag_resolve(
+                                [sensor_obj],
+                                inv["Point"], inv["Variable"], inv["Y-Axis Unit"],
+                            )
+                            if m is not None:
+                                hit_signal = inv["File"]
+                                break
+                    except Exception:
+                        continue
+
+                diag_rows.append({
+                    "Sensor": sr["Label"],
+                    "Plano": sr["Plane Label"] or sr["Plane"],
+                    "Tipo": stype,
+                    "Unidad esperada": unit_native,
+                    "csv_match_pattern": pattern or "(vacío)",
+                    "¿Algún signal cargado matchea?": (
+                        f"✓ {hit_signal}" if hit_signal else "✗ ninguno"
+                    ),
+                })
+
+            st.dataframe(
+                pd.DataFrame(diag_rows),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.info(
+                "💡 **Cómo solucionarlo:**\n\n"
+                "• Si tu CSV tiene Point name distinto al esperado, "
+                "edita el `csv_match_pattern` del sensor en "
+                "**Machinery Library → Mapa de Sensores** para que "
+                "matchee. Ejemplo: si el Point real es `VE5809`, "
+                "podés usar pattern `*5809*` o `VE58*`.\n\n"
+                "• Si tu CSV no está cargado, andá a **Load Data** "
+                "y subilo.\n\n"
+                "• Si el sensor es de proximidad pero el CSV está "
+                "en `g` o `in/s`, no es ese signal — tenés que cargar "
+                "el CSV en `mil pp` o `µm pp` que corresponde al sensor."
+            )

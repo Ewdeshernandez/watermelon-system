@@ -706,4 +706,252 @@ def render_sensor_map_diagram(
     return buf.getvalue()
 
 
-__all__ = ["render_sensor_map_diagram"]
+def render_on_schematic(
+    schematic_bytes: bytes,
+    sensors: List[Dict[str, Any]],
+    *,
+    severity_by_label: Optional[Dict[str, str]] = None,
+    overall_by_label: Optional[Dict[str, float]] = None,
+    unit_by_label: Optional[Dict[str, str]] = None,
+    show_values: bool = True,
+    show_labels: bool = True,
+    target_width_px: int = 1400,
+) -> Optional[bytes]:
+    """
+    Ciclo 15.2 — renderiza markers de severidad + valores Overall sobre
+    la imagen schematic_png REAL del activo, usando las coordenadas
+    x_pct/y_pct guardadas en cada sensor del Sensor Map.
+
+    Para cada plano (agrupando sensores con la misma posicion fisica),
+    dibuja un marker circular del color de la peor severidad del plano,
+    con el numero del cojinete adentro. Debajo opcionalmente la
+    etiqueta del plano y el valor Overall del peor sensor coloreado.
+
+    Args:
+        schematic_bytes: bytes del PNG / JPG / etc. del activo.
+        sensors: lista de sensores (deben tener x_pct y y_pct seteados
+            para que aparezcan; los que no estan posicionados se omiten).
+        severity_by_label: dict label → "Normal" / "Alarm" / "Danger" / "No Data".
+        overall_by_label: dict label → valor Overall numerico.
+        unit_by_label: dict label → unidad de display.
+        show_values: si True, dibuja el valor Overall debajo del marker.
+        show_labels: si True, dibuja la etiqueta del plano.
+        target_width_px: ancho de la salida (mantiene aspect ratio).
+
+    Returns:
+        Bytes PNG con la imagen anotada, o None si no hay coordenadas
+        configuradas o falla la decodificacion. El caller debe caer al
+        render_sensor_map_diagram() generico en ese caso.
+    """
+    try:
+        from PIL import Image as PILImage, ImageDraw, ImageFont
+    except Exception:
+        return None
+
+    if not schematic_bytes or not sensors:
+        return None
+
+    # Filtrar sensores con coordenadas configuradas
+    placed = []
+    for s in sensors:
+        xp = s.get("x_pct")
+        yp = s.get("y_pct")
+        if xp is None or yp is None:
+            continue
+        try:
+            xp_f = float(xp)
+            yp_f = float(yp)
+        except Exception:
+            continue
+        if not (0.0 <= xp_f <= 100.0 and 0.0 <= yp_f <= 100.0):
+            continue
+        placed.append((s, xp_f, yp_f))
+
+    if not placed:
+        return None  # nadie posicionado → caller cae al render generico
+
+    # Cargar y escalar la imagen base
+    try:
+        img = PILImage.open(BytesIO(schematic_bytes)).convert("RGBA")
+    except Exception:
+        return None
+
+    orig_w, orig_h = img.size
+    if orig_w <= 0 or orig_h <= 0:
+        return None
+    if orig_w != target_width_px:
+        scale = target_width_px / orig_w
+        new_w = target_width_px
+        new_h = int(orig_h * scale)
+        img = img.resize((new_w, new_h), PILImage.LANCZOS)
+    W, H = img.size
+
+    # Capa de overlay separada (asi los markers pueden tener semitransparencia)
+    overlay = PILImage.new("RGBA", img.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+
+    # Tipografia: tratar de cargar IBM Plex / DejaVu del repo, fallback default
+    def _load_font(size: int):
+        from pathlib import Path
+        candidates = [
+            Path(__file__).resolve().parent.parent / "assets" / "fonts" / "IBMPlexSans-Bold.ttf",
+            Path(__file__).resolve().parent.parent / "assets" / "fonts" / "DejaVuSans-Bold.ttf",
+        ]
+        for c in candidates:
+            try:
+                if c.exists():
+                    return ImageFont.truetype(str(c), size)
+            except Exception:
+                continue
+        try:
+            return ImageFont.load_default()
+        except Exception:
+            return None
+
+    marker_radius = max(14, int(W / 60))
+    label_font = _load_font(max(11, int(W / 90)))
+    value_font = _load_font(max(10, int(W / 100)))
+    num_font = _load_font(max(13, int(W / 80)))
+
+    # Agrupar sensores por (plano, x_pct, y_pct) — varios sensores en
+    # el mismo cojinete deben renderizar UN marker (worst-of-plane).
+    # Tolerancia: redondeamos x_pct/y_pct a 1 decimal para agrupar.
+    from collections import defaultdict
+    groups: Dict[tuple, List[Dict[str, Any]]] = defaultdict(list)
+    for s, xp, yp in placed:
+        key = (int(s.get("plane", 0) or 0), round(xp, 1), round(yp, 1))
+        groups[key].append(s)
+
+    # Importar lookup de label
+    from core.sensor_map import sensor_label as _slbl
+
+    for (plane_num, xp_r, yp_r), grp_sensors in groups.items():
+        # px = porcentaje → pixel
+        # Tomar el x_pct/y_pct EXACTO del primer sensor (no el redondeado).
+        x_first = float(grp_sensors[0].get("x_pct", 0.0))
+        y_first = float(grp_sensors[0].get("y_pct", 0.0))
+        cx = int(W * x_first / 100.0)
+        cy = int(H * y_first / 100.0)
+
+        # Worst-of-plane severity
+        worst = _worst_status_for_plane(grp_sensors, severity_by_label)
+        face_hex = _COLOR_SEVERITY.get(worst, "#94a3b8") if worst else "#475569"
+
+        # Si es solo keyphasor, dibujar estrella ambar (no marker numerico)
+        only_kp = all(
+            str(s.get("sensor_type", "")).lower() == "keyphasor"
+            for s in grp_sensors
+        )
+        if only_kp:
+            # Estrella simple
+            r = marker_radius
+            star_pts = []
+            for i in range(10):
+                ang = math.radians(-90 + 36 * i)
+                rr = r if i % 2 == 0 else r * 0.45
+                star_pts.append((cx + rr * math.cos(ang), cy + rr * math.sin(ang)))
+            draw.polygon(star_pts, fill=_COLOR_KEYPHASOR + "EE",
+                         outline="#0f172a", width=2)
+            if num_font is not None:
+                try:
+                    draw.text(
+                        (cx + r + 6, cy - r - 4), "kp",
+                        font=value_font, fill=_COLOR_KEYPHASOR,
+                    )
+                except Exception:
+                    pass
+            continue
+
+        # Circulo del cojinete con fill de severidad y borde oscuro
+        bbox = [cx - marker_radius, cy - marker_radius,
+                cx + marker_radius, cy + marker_radius]
+        # Sombra suave para destacar sobre la foto
+        shadow_bbox = [cx - marker_radius + 2, cy - marker_radius + 3,
+                       cx + marker_radius + 2, cy + marker_radius + 3]
+        draw.ellipse(shadow_bbox, fill=(0, 0, 0, 70))
+        draw.ellipse(bbox, fill=face_hex, outline="#0f172a", width=2)
+
+        # Numero del cojinete adentro
+        if num_font is not None:
+            txt = str(plane_num)
+            try:
+                tb = draw.textbbox((0, 0), txt, font=num_font)
+                tw = tb[2] - tb[0]
+                th = tb[3] - tb[1]
+                draw.text((cx - tw / 2, cy - th / 2 - 2), txt,
+                          font=num_font, fill="white")
+            except Exception:
+                pass
+
+        # Etiqueta del plano (TRF / CRF / GEN DE / GEN NDE) + valor Overall
+        # del peor sensor del plano coloreado por severidad.
+        below_y = cy + marker_radius + 4
+        if show_labels:
+            plane_lbl = _plane_display_label(grp_sensors)
+            if plane_lbl and label_font is not None:
+                try:
+                    tb = draw.textbbox((0, 0), plane_lbl, font=label_font)
+                    tw = tb[2] - tb[0]
+                    th = tb[3] - tb[1]
+                    # Fondo blanco semitransparente para legibilidad
+                    pad = 3
+                    bg = [cx - tw / 2 - pad, below_y - 1,
+                          cx + tw / 2 + pad, below_y + th + pad]
+                    draw.rectangle(bg, fill=(255, 255, 255, 220))
+                    draw.text((cx - tw / 2, below_y), plane_lbl,
+                              font=label_font, fill="#0f172a")
+                    below_y += th + 6
+                except Exception:
+                    pass
+
+        if show_values and overall_by_label:
+            # Encontrar el sensor del plano con mayor % de Danger consumido
+            best = None
+            best_pct = -1.0
+            for s in grp_sensors:
+                if str(s.get("sensor_type", "")).lower() == "keyphasor":
+                    continue
+                lbl = _slbl(s)
+                ov = overall_by_label.get(lbl)
+                if ov is None:
+                    continue
+                try:
+                    danger = float(s.get("danger") or 0.0)
+                    pct = (float(ov) / danger * 100.0) if danger > 0 else 0.0
+                except Exception:
+                    pct = 0.0
+                if pct > best_pct:
+                    best_pct = pct
+                    best = (lbl, float(ov))
+            if best is not None and value_font is not None:
+                lbl_best, ov_best = best
+                unit = ""
+                if unit_by_label and lbl_best in unit_by_label:
+                    unit = str(unit_by_label[lbl_best] or "").strip()
+                if severity_by_label and lbl_best in severity_by_label:
+                    sv = severity_by_label[lbl_best]
+                    val_color = _COLOR_SEVERITY.get(sv, "#0f172a")
+                else:
+                    val_color = "#0f172a"
+                txt = f"{ov_best:.2f} {unit}".strip()
+                try:
+                    tb = draw.textbbox((0, 0), txt, font=value_font)
+                    tw = tb[2] - tb[0]
+                    th = tb[3] - tb[1]
+                    pad = 3
+                    bg = [cx - tw / 2 - pad, below_y - 1,
+                          cx + tw / 2 + pad, below_y + th + pad]
+                    draw.rectangle(bg, fill=(255, 255, 255, 220))
+                    draw.text((cx - tw / 2, below_y), txt,
+                              font=value_font, fill=val_color)
+                except Exception:
+                    pass
+
+    # Componer overlay sobre la imagen
+    composed = PILImage.alpha_composite(img, overlay).convert("RGB")
+    out = BytesIO()
+    composed.save(out, format="PNG", optimize=True)
+    return out.getvalue()
+
+
+__all__ = ["render_sensor_map_diagram", "render_on_schematic"]
