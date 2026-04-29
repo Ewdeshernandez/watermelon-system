@@ -193,15 +193,16 @@ def resolve_sensor_for_point(
     variable_norm = _normalize_for_match(csv_variable)
     unit_norm = _normalize_for_match(csv_unit)
 
-    # 1. Match por csv_match_pattern (lista comas / glob / substring)
-    for sensor in sensors:
-        pattern = (sensor.get("csv_match_pattern") or "").strip()
-        if not pattern:
-            continue
-        if _pattern_matches(pattern, point_norm) or _pattern_matches(pattern, variable_norm):
-            return sensor
+    # =========================================================
+    # Ciclo 15.1 hotfix v2 — PRE-FILTRO POR TYPE_HINT
+    # =========================================================
+    # Antes hacíamos pattern matching contra point Y variable, lo que
+    # generaba falsos positivos cross-tipo: el pattern '*4*x*' (sensor
+    # proximity plano 4) matcheaba contra variable 'Vel Wf(64X/32revs).
+    # KPHGEN' porque '4x' está en '64x'. Ahora pre-filtramos los
+    # candidates por type_hint detectado del Point name (más confiable
+    # que la unit en CSVs Bently donde VT reporta en mil pp).
 
-    # 2. Match heurístico por dirección X/Y + unidad
     direction_hint = ""
     if "(x)" in point_norm or " x " in f" {point_norm} " or point_norm.endswith(" x"):
         direction_hint = "X"
@@ -209,13 +210,7 @@ def resolve_sensor_for_point(
         direction_hint = "Y"
 
     type_hint = ""
-
-    # Ciclo 15.1 hotfix — DETECCIÓN POR POINT NAME PRIMERO.
-    # Los velocity transducers Bently (VT5000 series) reportan
-    # amplitude_unit en "mil pp" porque internamente integran a
-    # displacement. Si chequeáramos la unit primero, "mil" haría
-    # falso positivo contra "proximity" para Points "1VT6805".
-    # El nombre del Point es más confiable que la unit en estos casos.
+    # 1) Por SUBSTRING del Point name (más confiable, cubre VT Bently)
     if "1vt" in point_norm or "2vt" in point_norm or "vt" in point_norm.split() or "velo" in point_norm:
         type_hint = "velocity"
     elif "vel" in point_norm.split():
@@ -229,7 +224,7 @@ def resolve_sensor_for_point(
     ):
         type_hint = "proximity"
 
-    # Si el Point name no fue conclusive, usar la unit como respaldo
+    # 2) Por unit como respaldo solo si Point name no fue conclusive
     if not type_hint:
         if any(tok in unit_norm for tok in ("mm/s", "in/s", "ips")):
             type_hint = "velocity"
@@ -238,11 +233,43 @@ def resolve_sensor_for_point(
         elif any(tok in unit_norm for tok in ("mil", "µm", "um")):
             type_hint = "proximity"
 
-    candidates = sensors
-    if direction_hint:
-        candidates = [s for s in candidates if str(s.get("direction", "")).upper() == direction_hint]
+    # PRE-FILTRO: si tenemos type_hint, restringir el universo de
+    # sensores candidatos a ese tipo ANTES de hacer pattern matching.
+    # Esto evita falsos positivos donde un pattern de otro tipo
+    # matchea contra la variable o un substring genérico.
+    universe = list(sensors)
     if type_hint:
-        candidates = [s for s in candidates if str(s.get("sensor_type", "")).lower() == type_hint]
+        filtered = [s for s in universe if str(s.get("sensor_type", "")).lower() == type_hint]
+        if filtered:
+            universe = filtered
+    if direction_hint:
+        filtered_dir = [
+            s for s in universe
+            if str(s.get("direction", "")).upper() == direction_hint
+            or str(s.get("direction", "")).upper() in ("RADIAL", "AXIAL", "")
+        ]
+        # Solo aplicamos el filtro de dirección si quedan candidates;
+        # un sensor radial no debería excluirse cuando el Point apunta
+        # a X/Y (puede ser un acelerómetro de carcasa que no distingue).
+        if filtered_dir:
+            universe = filtered_dir
+
+    # =========================================================
+    # FASE 1: pattern matching SOBRE EL UNIVERSO YA FILTRADO
+    # =========================================================
+    # Solo el point_norm se usa para pattern matching (no variable_norm)
+    # para evitar falsos match contra metadata técnica de la variable.
+    for sensor in universe:
+        pattern = (sensor.get("csv_match_pattern") or "").strip()
+        if not pattern:
+            continue
+        if _pattern_matches(pattern, point_norm):
+            return sensor
+
+    # =========================================================
+    # FASE 2: tie-break sobre el universo filtrado
+    # =========================================================
+    candidates = universe
 
     if len(candidates) == 1:
         return candidates[0]
