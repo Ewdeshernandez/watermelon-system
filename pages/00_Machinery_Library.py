@@ -513,25 +513,55 @@ def render_sensor_map_section(instance_id: str) -> None:
                 "Tipo",
                 options=["proximity", "velocity", "accelerometer"],
                 default="proximity",
-                help="proximity → mil pp / µm pp. velocity → mm/s. accelerometer → g.",
+                help=(
+                    "proximity → Desplazamiento (mil pp / µm pp). "
+                    "velocity → Velocidad (mm/s RMS / in/s peak). "
+                    "accelerometer → Aceleración (g RMS / m/s² RMS)."
+                ),
             ),
-            "unit_native": st.column_config.TextColumn(
+            "unit_native": st.column_config.SelectboxColumn(
                 "Unidad",
+                options=[
+                    # Desplazamiento
+                    "mil pp",
+                    "µm pp",
+                    "mm pp",
+                    # Velocidad
+                    "mm/s RMS",
+                    "mm/s peak",
+                    "in/s RMS",
+                    "in/s peak",
+                    # Aceleración
+                    "g RMS",
+                    "g peak",
+                    "m/s² RMS",
+                    "m/s² peak",
+                ],
                 default="mil pp",
-                help="ej. 'mil pp', 'µm pp', 'mm/s RMS', 'g RMS'",
+                help=(
+                    "Unidad nativa del sensor según su tipo. Las opciones están "
+                    "agrupadas: las primeras 3 son desplazamiento (proximity), "
+                    "las siguientes 4 velocidad (velocity), las últimas 4 "
+                    "aceleración (accelerometer). Elegí la que use tu DCS / OEM."
+                ),
             ),
             "alarm": st.column_config.NumberColumn(
                 "Alarm", min_value=0.0, step=0.1, format="%.3f", default=4.0,
+                help="Setpoint de alerta en la unidad nativa. Cuando la amplitud supera este valor, status = ATENCIÓN.",
             ),
             "danger": st.column_config.NumberColumn(
                 "Danger", min_value=0.0, step=0.1, format="%.3f", default=6.0,
+                help="Setpoint de disparo en la unidad nativa. Cuando la amplitud supera este valor, status = ACCIÓN REQUERIDA / CRÍTICA.",
             ),
             "csv_match_pattern": st.column_config.TextColumn(
-                "Match CSV Point",
+                "Texto Point CSV",
                 help=(
-                    "Glob (case-insensitive) que matchea el campo Point del CSV. "
-                    "Ej. '*5807*Y*' matchea el Point 'VE5807 (Y)'. "
-                    "Usá '*' como comodín."
+                    "Texto que aparece en el campo Point del CSV cargado. "
+                    "Tres formatos válidos:\n"
+                    "  • Substring simple: 'VE5807' matchea 'VE5807 (Y)' o 'VE5807-Y'.\n"
+                    "  • Lista por comas: 'VE5807 (Y), VE5807-Y, 5807_Y' matchea cualquiera de las variantes.\n"
+                    "  • Glob: '*5807*y*' usa comodines para casos avanzados.\n"
+                    "El match es case-insensitive."
                 ),
             ),
             "notes": st.column_config.TextColumn("Notas"),

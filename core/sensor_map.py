@@ -130,6 +130,30 @@ def _normalize_for_match(text: str) -> str:
     return re.sub(r"\s+", " ", str(text or "").strip().lower())
 
 
+def _pattern_matches(pattern_text: str, target_norm: str) -> bool:
+    """
+    Devuelve True si ``pattern_text`` matchea ``target_norm`` (lowercased).
+
+    Reglas (en orden):
+    - Si pattern_text tiene comas, se splitea y matchea CUALQUIERA (OR).
+    - Si una entrada contiene ``*`` o ``?``, se usa fnmatch (glob).
+    - Si no, se usa substring case-insensitive.
+    """
+    if not pattern_text:
+        return False
+    for token in pattern_text.split(","):
+        token = token.strip().lower()
+        if not token:
+            continue
+        if "*" in token or "?" in token:
+            if fnmatch.fnmatch(target_norm, token):
+                return True
+        else:
+            if token in target_norm:
+                return True
+    return False
+
+
 def resolve_sensor_for_point(
     sensors: List[Dict[str, Any]],
     csv_point: str,
@@ -140,8 +164,11 @@ def resolve_sensor_for_point(
     Encuentra el sensor del mapa que matchea un Point del CSV.
 
     Estrategia de match (en orden de prioridad):
-      1. ``csv_match_pattern`` del sensor (glob, case-insensitive)
-         contra ``csv_point`` o ``csv_variable``.
+      1. ``csv_match_pattern`` del sensor — admite tres formatos:
+         * Lista separada por comas: "VE5807 (Y), VE5807-Y" (OR)
+         * Glob: "*5807*y*"
+         * Substring case-insensitive: "VE5807" matchea cualquier
+           Point que contenga "VE5807" (sin importar mayúsculas).
       2. Match heurístico: si el csv_point contiene "(X)" o "(Y)"
          busca un sensor con misma direction. Si csv_unit indica
          g/m/s² busca accelerometer; mil/µm busca proximity; mm/s
@@ -163,16 +190,12 @@ def resolve_sensor_for_point(
     variable_norm = _normalize_for_match(csv_variable)
     unit_norm = _normalize_for_match(csv_unit)
 
-    # 1. Match por csv_match_pattern (más confiable)
+    # 1. Match por csv_match_pattern (lista comas / glob / substring)
     for sensor in sensors:
         pattern = (sensor.get("csv_match_pattern") or "").strip()
         if not pattern:
             continue
-        pattern_norm = pattern.lower()
-        if (
-            fnmatch.fnmatch(point_norm, pattern_norm)
-            or fnmatch.fnmatch(variable_norm, pattern_norm)
-        ):
+        if _pattern_matches(pattern, point_norm) or _pattern_matches(pattern, variable_norm):
             return sensor
 
     # 2. Match heurístico por dirección X/Y + unidad
@@ -183,12 +206,15 @@ def resolve_sensor_for_point(
         direction_hint = "Y"
 
     type_hint = ""
-    if any(tok in unit_norm for tok in ("g rms", "g pk", "g p", "m/s", "m/s²", "m/s2")):
+    # Velocity primero porque "mm/s" / "in/s" matchean específicamente.
+    # Si chequeáramos accelerometer ("m/s²") antes, el substring "m/s"
+    # haría falso positivo contra "mm/s" (velocidad).
+    if any(tok in unit_norm for tok in ("mm/s", "in/s", "ips")):
+        type_hint = "velocity"
+    elif any(tok in unit_norm for tok in ("g rms", "g pk", "g p", "m/s²", "m/s2")):
         type_hint = "accelerometer"
     elif any(tok in unit_norm for tok in ("mil", "µm", "um")):
         type_hint = "proximity"
-    elif any(tok in unit_norm for tok in ("mm/s", "in/s", "ips")):
-        type_hint = "velocity"
 
     if not type_hint and ("acell" in point_norm or "accel" in point_norm or "ace" in variable_norm):
         type_hint = "accelerometer"
