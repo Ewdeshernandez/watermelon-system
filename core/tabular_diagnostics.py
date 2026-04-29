@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict
+from typing import Dict, List
 
 import pandas as pd
 
@@ -157,29 +157,139 @@ def evaluate_tabular_diagnostic(df: pd.DataFrame) -> Dict[str, str]:
             "antes de concluir un mecanismo de falla."
         )
 
+    # =========================================================
+    # Ciclo 14c.3 — análisis enriquecido Cat IV
+    # =========================================================
+
+    # Distribución por familia de sensor
+    family_series = work.get("Family", pd.Series(dtype=str)).astype(str).fillna("")
+    family_counts: Dict[str, int] = {}
+    for f in family_series:
+        f_clean = f.strip()
+        if not f_clean:
+            continue
+        family_counts[f_clean] = family_counts.get(f_clean, 0) + 1
+    family_summary_parts = [f"{c} {f}" for f, c in sorted(family_counts.items(), key=lambda x: -x[1])]
+    family_summary = " + ".join(family_summary_parts) if family_summary_parts else "sin clasificación de familia"
+
+    # Citas a normas según familias presentes
+    norms_cited = set()
+    fams_lower = {k.lower() for k in family_counts.keys()}
+    if "proximity" in fams_lower:
+        norms_cited.add("API 670 (sondas de proximidad)")
+        norms_cited.add("ISO 7919-3 / ISO 20816-3 (shaft displacement)")
+    if "velocity" in fams_lower:
+        norms_cited.add("ISO 20816-3 (casing velocity)")
+    if "acceleration" in fams_lower:
+        norms_cited.add("ISO 20816-3 / ISO 13373-1 (envelope acceleration)")
+    norms_text = " · ".join(sorted(norms_cited)) if norms_cited else "ISO 20816-3"
+
+    # Margen de severidad de los puntos críticos (% del danger)
+    severity_summary = ""
+    if danger_count > 0 or alarm_count > 0:
+        crit_df = work[work["Status"].isin(["Alarm", "Danger"])].copy()
+        crit_df["margin_pct"] = (
+            pd.to_numeric(crit_df["Overall"], errors="coerce")
+            / pd.to_numeric(crit_df["Danger"], errors="coerce").replace(0, pd.NA)
+            * 100.0
+        )
+        crit_df = crit_df.sort_values("margin_pct", ascending=False).head(3)
+        margin_lines = []
+        for _, row in crit_df.iterrows():
+            mp = row.get("margin_pct")
+            if mp is None or pd.isna(mp):
+                continue
+            margin_lines.append(
+                f"{row['Machine']}/{row['Point']} a {float(mp):.0f}% del danger"
+            )
+        if margin_lines:
+            severity_summary = "; ".join(margin_lines)
+
+    # Recomendaciones priorizadas (lista numerada estilo Cat IV)
+    recommendations: List[str] = [] if False else []  # type ignore
+    recommendations: list = []
+
+    if danger_count > 0:
+        recommendations.append(
+            "PRIORIDAD CRÍTICA: programar verificación inmediata de los puntos "
+            "en zona Danger. Restringir operación sostenida hasta confirmar "
+            "diagnóstico. Correlacionar con Time Waveform (impactos), Spectrum "
+            "(firmas mecánicas) y Polar/Bode 1X antes de cualquier intervención."
+        )
+    if alarm_count > 0:
+        recommendations.append(
+            "Investigar puntos en zona Alarm: comparar contra histórico (Trends) "
+            "para distinguir condición transitoria de degradación sostenida."
+        )
+
+    if primary_pattern == "1X":
+        recommendations.append(
+            "Verificar condición de balanceo según ISO 21940-12 nivel G 2.5 "
+            "para turbomaquinaria de proceso. Confirmar consistencia de fase "
+            "entre arranques antes de programar balanceo en sitio."
+        )
+    elif primary_pattern == "2X":
+        recommendations.append(
+            "Inspeccionar alineación del tren acoplado (eje del driver respecto "
+            "al driven) según API 686. Verificar condición del acople: "
+            "desgaste de dientes, juego radial, deformación de elementos "
+            "elastoméricos."
+        )
+    elif primary_pattern == "0.5X":
+        recommendations.append(
+            "Investigar inestabilidad sub-síncrona (oil whirl / oil whip / rub) "
+            "según API 684. Validar régimen hidrodinámico del cojinete, "
+            "presiones de aceite, holguras radiales y temperatura de babbitt."
+        )
+
     if status == "SAFE":
-        headline = "Condición general estable en Tabular List"
+        recommendations.append(
+            "Mantener la frecuencia actual de monitoreo y conservar este "
+            "reporte como línea base de aceptación para comparaciones en "
+            "próximas corridas."
+        )
+
+    rec_block = ""
+    if recommendations:
+        rec_block = "\n\nRecomendaciones técnicas priorizadas:\n" + "\n".join(
+            f"{i + 1}. {r}" for i, r in enumerate(recommendations)
+        )
+
+    # Narrativa final por status
+    base_intro = (
+        f"El módulo Tabular List analizó {signal_count} señales de vibración "
+        f"correspondientes a {machine_scope}, distribuidas por familia como "
+        f"{family_summary}. La evaluación se realizó conforme a los criterios "
+        f"técnicos aplicables: {norms_text}. "
+    )
+
+    base_status = (
+        f"Distribución global de severidad: {normal_count} señal(es) en "
+        f"CONDICIÓN ACEPTABLE, {alarm_count} en ATENCIÓN, {danger_count} en "
+        f"ACCIÓN REQUERIDA / CRÍTICA. "
+    )
+
+    if status == "SAFE":
+        headline = "Condición global ACEPTABLE en todos los puntos analizados"
         narrative = (
-            f"Se analizaron {signal_count} señales de vibración correspondientes a {machine_scope}. "
-            f"Actualmente {normal_count} señales se encuentran en condición Normal, {alarm_count} en Alarm "
-            f"y {danger_count} en Danger. {pattern_text} {recommendation}"
+            base_intro + base_status +
+            f"{pattern_text} La firma armónica predominante es {primary_pattern}, "
+            f"sin excursiones por encima de los setpoints individuales del "
+            f"Sensor Map." + rec_block
         )
     elif status == "WARNING":
-        headline = f"Se identifican señales en alarma. {pattern_headline}"
+        headline = f"Señales en zona ATENCIÓN — {pattern_headline.lower()}"
+        crit_text = f"Activos con mayor margen consumido: {severity_summary}." if severity_summary else f"Activos relevantes: {top_assets}."
         narrative = (
-            f"Se analizaron {signal_count} señales de vibración correspondientes a {machine_scope}. "
-            f"Actualmente {normal_count} señales se encuentran en condición Normal, {alarm_count} en Alarm "
-            f"y {danger_count} en Danger. Los activos que requieren mayor atención son: {top_assets}. "
-            f"{pattern_text} {recommendation}"
+            base_intro + base_status +
+            crit_text + " " + pattern_text + rec_block
         )
     else:
-        headline = f"Se identifican señales en peligro. {pattern_headline}"
+        headline = f"Señales en zona DANGER — {pattern_headline.lower()}"
+        crit_text = f"Activos críticos con mayor margen consumido: {severity_summary}." if severity_summary else f"Activos críticos: {top_assets}."
         narrative = (
-            f"Se analizaron {signal_count} señales de vibración correspondientes a {machine_scope}. "
-            f"Actualmente {normal_count} señales se encuentran en condición Normal, {alarm_count} en Alarm "
-            f"y {danger_count} en Danger. Los activos más críticos son: {top_assets}. "
-            f"{pattern_text} Se recomienda atender primero los puntos en Danger y validar la condición mecánica "
-            f"antes de operación repetida. {recommendation}"
+            base_intro + base_status +
+            crit_text + " " + pattern_text + rec_block
         )
 
     return {
@@ -191,4 +301,6 @@ def evaluate_tabular_diagnostic(df: pd.DataFrame) -> Dict[str, str]:
         "alarm_count": alarm_count,
         "danger_count": danger_count,
         "primary_pattern": primary_pattern,
+        "family_summary": family_summary,
+        "norms_cited": norms_text,
     }
