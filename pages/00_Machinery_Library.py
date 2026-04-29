@@ -40,6 +40,7 @@ from core.document_vault import CAPTURED_PARAMETER_FIELDS, DOCUMENT_TYPES
 from core.instance_selector import render_instance_selector
 from core.instance_state import (
     add_uploaded_file_to_instance,
+    compose_train_description,
     create_instance,
     delete_instance,
     get_instance,
@@ -688,7 +689,27 @@ def render_sensor_map_section(instance_id: str) -> None:
         type="primary",
         width="stretch",
     ):
-        # Convertir DataFrame a lista de dicts limpios
+        # Convertir DataFrame a lista de dicts limpios. Ciclo 15.2 —
+        # preservar x_pct/y_pct (coordenadas click-to-place) que no
+        # estan en el data_editor pero viven en el sensor original.
+        # Mapeamos por (plane, direction, side, sensor_type) que en
+        # conjunto identifican univocamente al sensor.
+        existing_coords: Dict[tuple, tuple] = {}
+        for _s in (inst.sensors or []):
+            try:
+                k = (
+                    int(_s.get("plane", 0) or 0),
+                    str(_s.get("direction", "") or ""),
+                    str(_s.get("side", "") or ""),
+                    str(_s.get("sensor_type", "") or ""),
+                )
+                xp = _s.get("x_pct")
+                yp = _s.get("y_pct")
+                if xp is not None or yp is not None:
+                    existing_coords[k] = (xp, yp)
+            except Exception:
+                continue
+
         new_sensors = []
         for _, row in edited_df.iterrows():
             try:
@@ -705,6 +726,19 @@ def render_sensor_map_section(instance_id: str) -> None:
                     "csv_match_pattern": str(row.get("csv_match_pattern", "") or ""),
                     "notes": str(row.get("notes", "") or ""),
                 }
+                # Re-asociar coordenadas previas si las habia
+                k = (
+                    sensor_dict["plane"],
+                    sensor_dict["direction"],
+                    sensor_dict["side"],
+                    sensor_dict["sensor_type"],
+                )
+                if k in existing_coords:
+                    sensor_dict["x_pct"] = existing_coords[k][0]
+                    sensor_dict["y_pct"] = existing_coords[k][1]
+                else:
+                    sensor_dict["x_pct"] = None
+                    sensor_dict["y_pct"] = None
                 new_sensors.append(sensor_dict)
             except Exception:
                 continue
@@ -758,6 +792,231 @@ def render_sensor_map_section(instance_id: str) -> None:
                 )
         except Exception as e:
             st.warning(f"Error al renderizar diagrama: {e}")
+
+        # ============================================================
+        # Ciclo 15.2 — Click-to-place sobre el schematic_png real
+        # ------------------------------------------------------------
+        # Permite asignar coordenadas (x_pct, y_pct) a cada sensor del
+        # mapa haciendo clic en la imagen del activo. Una vez
+        # configurado, el Resumen Ejecutivo del PDF y la pagina
+        # Machine Map renderizan los markers de severidad + valores
+        # Overall sobre la foto/dibujo real en lugar del esquematico
+        # generico turbomachinery.
+        #
+        # Si no hay schematic_png cargado para esta instancia, se omite
+        # la seccion. Si no hay streamlit_image_coordinates instalado,
+        # se ofrece un fallback de inputs numericos (defensivo).
+        # ============================================================
+        if inst.schematic_png:
+            st.markdown("---")
+            st.markdown("#### 📍 Posicionar sensores sobre el esquemático")
+            st.caption(
+                "Ubicá cada cojinete sobre la foto/dibujo del activo. Una vez "
+                "posicionados, los reportes muestran los valores de vibración "
+                "Overall coloreados por severidad sobre tu esquemático real, "
+                "no sobre el genérico turbomachinery."
+            )
+
+            try:
+                _sch_bytes = get_instance_document_bytes(
+                    inst.instance_id, inst.schematic_png
+                )
+            except Exception:
+                _sch_bytes = None
+
+            if not _sch_bytes:
+                st.info("No se pudo cargar el esquemático del activo.")
+            else:
+                # Inventario de planos del Sensor Map (un boton por plano —
+                # no por sensor — porque los sensores que comparten plano
+                # comparten posicion fisica).
+                planes_map: Dict[int, Dict[str, Any]] = {}
+                for _s in inst.sensors:
+                    p = int(_s.get("plane", 0) or 0)
+                    if p <= 0 or str(_s.get("sensor_type", "")).lower() == "keyphasor":
+                        # Keyphasor lo manejamos aparte (suele ir en coupling)
+                        if str(_s.get("sensor_type", "")).lower() == "keyphasor":
+                            planes_map.setdefault("KP", {
+                                "is_kp": True,
+                                "plane_label": "Keyphasor",
+                                "x_pct": _s.get("x_pct"),
+                                "y_pct": _s.get("y_pct"),
+                            })
+                        continue
+                    if p not in planes_map:
+                        planes_map[p] = {
+                            "is_kp": False,
+                            "plane_label": _s.get("plane_label", "") or f"Plano {p}",
+                            "x_pct": _s.get("x_pct"),
+                            "y_pct": _s.get("y_pct"),
+                        }
+
+                if not planes_map:
+                    st.info(
+                        "Configurá primero los sensores del mapa arriba "
+                        "para poder posicionarlos sobre el esquemático."
+                    )
+                else:
+                    # UI de seleccion: que plano vamos a posicionar.
+                    # Sort: planos numericos primero, KP al final.
+                    plane_keys_sorted = sorted(
+                        planes_map.keys(),
+                        key=lambda k: (1, 999) if k == "KP" else (0, k),
+                    )
+                    plane_options = []
+                    for k in plane_keys_sorted:
+                        info = planes_map[k]
+                        coord_status = (
+                            f" · ✓ posicionado ({info['x_pct']:.1f}%, {info['y_pct']:.1f}%)"
+                            if info["x_pct"] is not None and info["y_pct"] is not None
+                            else " · ✗ sin posicionar"
+                        )
+                        if k == "KP":
+                            plane_options.append(("KP", f"⭐ Keyphasor{coord_status}"))
+                        else:
+                            plane_options.append((k, f"Plano {k} · {info['plane_label']}{coord_status}"))
+
+                    # Mantener seleccion entre reruns mediante session_state.
+                    # Usamos la KEY del plano (no la label) porque la label
+                    # cambia cuando se guarda una posicion (pasa de "sin
+                    # posicionar" a "posicionado") y eso hacia que Streamlit
+                    # no pudiera matchear el value previo y caia al indice 0
+                    # (= Keyphasor con sort viejo).
+                    _ctp_state_key = f"ctp_selected_plane_key_{instance_id}"
+                    keys_in_order = [k for k, _ in plane_options]
+                    if _ctp_state_key not in st.session_state or \
+                       st.session_state[_ctp_state_key] not in keys_in_order:
+                        st.session_state[_ctp_state_key] = keys_in_order[0]
+                    default_idx = keys_in_order.index(st.session_state[_ctp_state_key])
+
+                    selected_label = st.selectbox(
+                        "Plano a posicionar (clic en la imagen abajo)",
+                        [lbl for _, lbl in plane_options],
+                        index=default_idx,
+                        key=f"ctp_plane_select_widget_{instance_id}",
+                    )
+                    sel_label_to_key = {lbl: k for k, lbl in plane_options}
+                    selected_plane = sel_label_to_key[selected_label]
+                    # Persistir la key seleccionada para sobrevivir reruns
+                    st.session_state[_ctp_state_key] = selected_plane
+
+                    # Render con streamlit_image_coordinates
+                    captured_xy: Optional[tuple] = None
+                    img_w_px: Optional[int] = None
+                    img_h_px: Optional[int] = None
+                    try:
+                        from streamlit_image_coordinates import streamlit_image_coordinates
+                        from PIL import Image as PILImage
+                        from io import BytesIO as _BIO
+
+                        # Renderizar overlay con TODOS los sensores ya
+                        # posicionados (modo configuracion — sin severity)
+                        from core.sensor_diagram import render_on_schematic
+                        _preview_png = render_on_schematic(
+                            _sch_bytes, inst.sensors,
+                            severity_by_label=None,
+                            overall_by_label=None,
+                            unit_by_label=None,
+                            show_values=False,
+                            show_labels=True,
+                        ) or _sch_bytes
+
+                        # streamlit_image_coordinates exige un PIL.Image o
+                        # path/numpy array — no acepta bytes crudos. Lo
+                        # decodificamos antes de pasarlo.
+                        _preview_pil = PILImage.open(_BIO(_preview_png))
+                        img_w_px, img_h_px = _preview_pil.size
+
+                        coords = streamlit_image_coordinates(
+                            _preview_pil,
+                            key=f"ctp_canvas_{instance_id}",
+                            use_column_width=True,
+                        )
+                        if coords is not None:
+                            # streamlit_image_coordinates devuelve coords en
+                            # pixeles relativos al tamaño REAL de la imagen
+                            # (no el display) desde v0.1.6+.
+                            try:
+                                cx = float(coords["x"])
+                                cy = float(coords["y"])
+                                xp_pct = (cx / img_w_px) * 100.0
+                                yp_pct = (cy / img_h_px) * 100.0
+                                xp_pct = max(0.0, min(100.0, xp_pct))
+                                yp_pct = max(0.0, min(100.0, yp_pct))
+                                captured_xy = (xp_pct, yp_pct)
+                            except Exception:
+                                captured_xy = None
+                    except ImportError:
+                        st.warning(
+                            "El paquete `streamlit-image-coordinates` no está "
+                            "instalado. Usá el fallback numérico abajo."
+                        )
+
+                    # Fallback / edicion manual + confirmacion
+                    cur_xp = planes_map[selected_plane].get("x_pct")
+                    cur_yp = planes_map[selected_plane].get("y_pct")
+
+                    cols_xy = st.columns([1, 1, 1])
+                    new_xp = cols_xy[0].number_input(
+                        "X (%)", min_value=0.0, max_value=100.0,
+                        value=float(captured_xy[0]) if captured_xy else (
+                            float(cur_xp) if cur_xp is not None else 50.0
+                        ),
+                        step=0.5, format="%.1f",
+                        key=f"ctp_x_{instance_id}_{selected_plane}",
+                    )
+                    new_yp = cols_xy[1].number_input(
+                        "Y (%)", min_value=0.0, max_value=100.0,
+                        value=float(captured_xy[1]) if captured_xy else (
+                            float(cur_yp) if cur_yp is not None else 50.0
+                        ),
+                        step=0.5, format="%.1f",
+                        key=f"ctp_y_{instance_id}_{selected_plane}",
+                    )
+                    if cols_xy[2].button(
+                        "💾 Guardar posición de este plano",
+                        key=f"ctp_save_{instance_id}_{selected_plane}",
+                        type="primary",
+                        width="stretch",
+                    ):
+                        # Aplicar coords a TODOS los sensores que comparten el plano
+                        updated_sensors = []
+                        for _s in inst.sensors:
+                            _s2 = dict(_s)
+                            if selected_plane == "KP":
+                                if str(_s.get("sensor_type", "")).lower() == "keyphasor":
+                                    _s2["x_pct"] = float(new_xp)
+                                    _s2["y_pct"] = float(new_yp)
+                            else:
+                                if int(_s.get("plane", 0) or 0) == int(selected_plane):
+                                    _s2["x_pct"] = float(new_xp)
+                                    _s2["y_pct"] = float(new_yp)
+                            updated_sensors.append(_s2)
+                        update_instance_header(instance_id, sensors=updated_sensors)
+                        st.success(
+                            f"Posición guardada para "
+                            f"{'Keyphasor' if selected_plane == 'KP' else f'Plano {selected_plane}'}"
+                            f" → ({new_xp:.1f}%, {new_yp:.1f}%)"
+                        )
+                        st.rerun()
+
+                    # Boton para limpiar todas las coords (rehacer desde cero)
+                    if any(
+                        v.get("x_pct") is not None for v in planes_map.values()
+                    ):
+                        if st.button(
+                            "🧹 Borrar todas las posiciones",
+                            key=f"ctp_clear_{instance_id}",
+                        ):
+                            cleared = []
+                            for _s in inst.sensors:
+                                _s2 = dict(_s)
+                                _s2["x_pct"] = None
+                                _s2["y_pct"] = None
+                                cleared.append(_s2)
+                            update_instance_header(instance_id, sensors=cleared)
+                            st.info("Coordenadas limpiadas.")
+                            st.rerun()
 
 
 def render_documents_section(instance_id: str) -> None:

@@ -9,4 +9,11 @@ reportlab>=4.0.0
 # Si st.secrets[supabase] no está configurado, la app cae a filesystem
 # local automáticamente — supabase queda como dependencia opcional.
 supabase>=2.0.0
+# Ciclo 15.2: click-to-place de sensores sobre el schematic_png del activo
+# para que el Resumen Ejecutivo y Machine Map rendericen los valores
+# Overall + colores de severidad sobre la foto/dibujo real, no el
+# turbomachinery genérico.
+streamlit-image-coordinates>=0.1.7
+# Pillow para overlay de markers + texto sobre el schematic_png
+Pillow>=10.0.0
 # rebuild trigger

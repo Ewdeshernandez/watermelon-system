@@ -80,8 +80,21 @@ def new_sensor(
     danger: float = 0.0,
     csv_match_pattern: str = "",
     notes: str = "",
+    x_pct: Optional[float] = None,
+    y_pct: Optional[float] = None,
 ) -> Dict[str, Any]:
-    """Constructor de un sensor con defaults razonables."""
+    """
+    Constructor de un sensor con defaults razonables.
+
+    Ciclo 15.2 — los campos x_pct y y_pct (0-100) son las coordenadas
+    del sensor sobre el schematic_png del activo, expresadas como
+    porcentaje del ancho/alto de la imagen. Cuando estan presentes,
+    el render del Machine Map y del Resumen Ejecutivo overlaya
+    markers de severidad sobre la foto/dibujo real del activo en
+    lugar de usar el turbomachinery generico. Si quedan en None, el
+    sistema cae al render generico — retro-compatible con sensor maps
+    creados antes del 15.2.
+    """
     if not unit_native:
         unit_native = _DEFAULT_UNIT_BY_TYPE.get(sensor_type, "")
     return {
@@ -96,6 +109,8 @@ def new_sensor(
         "danger": float(danger),
         "csv_match_pattern": csv_match_pattern,
         "notes": notes,
+        "x_pct": x_pct,
+        "y_pct": y_pct,
     }
 
 

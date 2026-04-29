@@ -1163,6 +1163,109 @@ with st.container(border=True):
                 "Mientras tanto, todas las filas se clasifican con los defaults globales."
             )
 
+# ============================================================
+# Ciclo 15.1.1 — Mini Machine Map arriba del Tabular
+# ------------------------------------------------------------
+# Banner colapsable con 4 KPIs de severidad + vista lateral
+# del tren coloreada por el peor estado por plano. Reusa el
+# helper render_sensor_map_diagram en modo compact y el
+# build_severity_table compartido con el Machine Map completo.
+# Asi el ingeniero ve de un vistazo donde esta el problema sin
+# salir de la pagina, y tiene un link directo al Machine Map
+# completo si quiere drill-down con polar por plano.
+# ============================================================
+if _active_instance.sensors:
+    try:
+        from core.machine_severity import (
+            build_severity_table as _mini_build_severity,
+            count_status as _mini_count_status,
+        )
+        from core.sensor_diagram import render_sensor_map_diagram as _mini_render
+
+        _mini_signals = st.session_state.get("signals", {}) or {}
+        _mini_df = _mini_build_severity(_active_instance.sensors, _mini_signals)
+        _mini_counts = _mini_count_status(_mini_df)
+        _mini_total = _mini_counts["total"]
+
+        _mini_title = (
+            f"🗺️ Machine Map (vista rápida) · "
+            f"{_mini_counts['normal']} aceptables · "
+            f"{_mini_counts['alarm']} atención · "
+            f"{_mini_counts['danger']} acción · "
+            f"{_mini_counts['no_data']} sin datos"
+        )
+        with st.expander(_mini_title, expanded=True):
+            _kpi_cols = st.columns(4)
+            _kpi_cols[0].metric(
+                "✅ CONDICIÓN ACEPTABLE",
+                f"{_mini_counts['normal']}",
+                f"de {_mini_total}",
+            )
+            _kpi_cols[1].metric(
+                "⚠️ ATENCIÓN",
+                f"{_mini_counts['alarm']}",
+                f"de {_mini_total}",
+            )
+            _kpi_cols[2].metric(
+                "🚨 ACCIÓN REQUERIDA",
+                f"{_mini_counts['danger']}",
+                f"de {_mini_total}",
+            )
+            _kpi_cols[3].metric(
+                "◌ Sin datos",
+                f"{_mini_counts['no_data']}",
+                f"de {_mini_total}",
+            )
+
+            if not _mini_signals:
+                st.caption(
+                    "ℹ️ No hay señales cargadas en sesión — todos los planos se "
+                    "muestran neutros. Andá a **Load Data** para cargar CSVs."
+                )
+
+            _sev_by_label = dict(
+                zip(
+                    _mini_df["Label"].astype(str),
+                    _mini_df["Status"].astype(str),
+                )
+            )
+            try:
+                _drv_lbl = " ".join(p for p in [
+                    _active_instance.driver_manufacturer,
+                    _active_instance.driver_model,
+                ] if p) or "Driver"
+                _dvn_lbl = " ".join(p for p in [
+                    _active_instance.driven_manufacturer,
+                    _active_instance.driven_model,
+                ] if p) or "Driven"
+                _mini_png = _mini_render(
+                    _active_instance.sensors,
+                    train_label="",
+                    driver_label=_drv_lbl,
+                    driven_label=_dvn_lbl,
+                    severity_by_label=_sev_by_label,
+                    figure_width_in=11.0,
+                    compact=True,
+                )
+                if _mini_png:
+                    st.image(_mini_png, use_container_width=True)
+            except Exception as _mini_e:
+                st.caption(f"_(no se pudo renderizar el mini-diagrama: {_mini_e})_")
+
+            _link_cols = st.columns([3, 1])
+            with _link_cols[1]:
+                try:
+                    st.page_link(
+                        "pages/01b_Machine_Map.py",
+                        label="Ver Machine Map completo →",
+                        icon="🗺️",
+                    )
+                except Exception:
+                    st.caption("Machine Map completo disponible en el menú lateral.")
+    except Exception as _mini_outer_e:
+        # No queremos que un fallo del mini-map rompa el Tabular.
+        st.caption(f"_(mini Machine Map no disponible: {_mini_outer_e})_")
+
 criterion_options = [
     "ISO 20816-3",
     "ISO 20816-9",
@@ -1329,6 +1432,17 @@ df_table = build_table_dataframe(
     # Ciclo 14c.1: el sensor_map de la instancia activa tiene prioridad
     # máxima — cada sensor con su tipo/unidad/setpoints individuales.
     sensors_map=list(_active_instance.sensors or []),
+)
+
+# Ciclo 15.1.4 — exponer el df del Tabular para que el Machine Map
+# (página completa, Mini Map del Tabular y sección del PDF report) lo
+# use como FUENTE DE VERDAD en lugar de calcular su propio overall.
+# El usuario espera que la severidad mostrada en el heatmap sea
+# IDÉNTICA a la columna Status del Tabular — porque conceptualmente
+# el Machine Map ES una visualización del Tabular sobre el tren físico.
+st.session_state["wm_tabular_df"] = df_table.copy()
+st.session_state["wm_tabular_active_instance_id"] = (
+    _active_instance.instance_id if _active_instance else ""
 )
 
 if df_table.empty:

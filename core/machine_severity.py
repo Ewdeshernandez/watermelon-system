@@ -1,0 +1,347 @@
+"""
+core.machine_severity
+=====================
+
+Helpers compartidos entre **Machine Map** (pagina 01b) y el **Mini
+Machine Map** del Tabular List (Ciclo 15.1.1) para clasificar el
+estado de cada sensor del Sensor Map activo contra los CSVs cargados
+en sesion.
+
+La logica vive aca para que Tabular y Machine Map produzcan el MISMO
+estado por sensor — no queremos que el banner del Tabular diga
+"verde" cuando el Machine Map dice "ámbar". Una sola fuente de
+verdad para severidad.
+
+Funciones publicas:
+
+  - ``classify_severity(overall, alarm, danger)``: Normal / Alarm /
+    Danger / No Data segun thresholds del sensor.
+  - ``compute_signal_overall_rms(signal_obj)``: RMS robusto contra
+    NaN / arrays vacios.
+  - ``convert_rms_to_unit(rms, unit_native)``: convierte RMS al modo
+    de display que indique unit_native ("X pp" → 2√2·RMS,
+    "X peak" → √2·RMS, "X RMS" o nada → RMS).
+  - ``build_severity_table(sensors, signals)``: dataframe con una
+    fila por sensor del mapa, su signal matched, overall en unidad
+    nativa y status. La columna ``Status`` toma los strings
+    canonicos ``Normal`` / ``Alarm`` / ``Danger`` / ``No Data``.
+  - ``count_status(df)``: dict con ``total`` / ``normal`` / ``alarm``
+    / ``danger`` / ``no_data`` para los KPIs de la cabecera.
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Any, Dict, List
+
+import pandas as pd
+
+from core.sensor_map import (
+    resolve_sensor_for_point,
+    sensor_label as sensor_label_fn,
+    sensor_unit_family,
+)
+
+
+# ============================================================
+# CLASIFICACION
+# ============================================================
+
+def classify_severity(overall: float, alarm: float, danger: float) -> str:
+    """Clasifica una amplitud contra alarm/danger del sensor."""
+    try:
+        ov = float(overall)
+        a = float(alarm or 0.0)
+        d = float(danger or 0.0)
+    except Exception:
+        return "No Data"
+    if d > 0 and ov >= d:
+        return "Danger"
+    if a > 0 and ov >= a:
+        return "Alarm"
+    return "Normal"
+
+
+def _safe_float(v) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return 0.0
+
+
+# ============================================================
+# CALCULO DE OVERALL POR SIGNAL
+# ============================================================
+
+def compute_signal_overall_rms(signal_obj: Any) -> float:
+    """
+    Calcula overall RMS robusto a NaN. Devuelve 0.0 si no se puede.
+
+    Soporta múltiples formas en las que viene un signal en la sesión:
+      * ``SimpleNamespace(time=..., x=..., metadata=...)`` — formato real
+        que produce build_signal_from_parsed en Load Data.
+      * Objeto con atributo ``.amplitude`` — formato del SignalRecord de
+        Tabular/Time Waveforms/Spectrum.
+      * Dict con clave ``"y"`` o ``"amplitude"``.
+
+    Hotfix Ciclo 15.1.3 — la version anterior solo miraba .amplitude o
+    dict["y"], asi que sobre SimpleNamespace lanzaba AttributeError
+    silencioso y devolvia 0.0 SIEMPRE. Resultado: el Machine Map clasificaba
+    todos los sensores como Normal por overall=0 < alarm. Bug detectado por
+    contraste con el Tabular List, que sí veía 2 ATENCIÓN sobre los mismos
+    CSVs (CRF/TRF ACELL al 64%/52% del danger).
+    """
+    import numpy as np
+    try:
+        amp = None
+        if hasattr(signal_obj, "amplitude"):
+            amp = signal_obj.amplitude
+        elif hasattr(signal_obj, "x"):
+            # SimpleNamespace de Load Data: .x es la amplitud, .time el eje t
+            amp = signal_obj.x
+        elif isinstance(signal_obj, dict):
+            # Cuidado con truthiness sobre numpy arrays — no usar `or`.
+            for k in ("amplitude", "y", "x"):
+                if k in signal_obj and signal_obj[k] is not None:
+                    amp = signal_obj[k]
+                    break
+
+        if amp is None:
+            return 0.0
+
+        amp = np.asarray(amp, dtype=float)
+        amp = amp[np.isfinite(amp)]
+        if amp.size == 0:
+            return 0.0
+        return float(np.sqrt(np.mean(amp ** 2)))
+    except Exception:
+        return 0.0
+
+
+def convert_rms_to_unit(rms_value: float, unit_native: str) -> float:
+    """
+    Convierte RMS al modo de display indicado por unit_native:
+      - "X pp" / "X p-p" / "X peak-to-peak" → RMS × 2√2
+      - "X peak" / "X pk"                    → RMS × √2
+      - "X RMS" / vacio                      → RMS
+    """
+    u = (unit_native or "").lower()
+    if "pp" in u or "p-p" in u or "peak-to-peak" in u:
+        return rms_value * 2.0 * math.sqrt(2.0)
+    if "peak" in u or "pk" in u:
+        return rms_value * math.sqrt(2.0)
+    return rms_value
+
+
+# ============================================================
+# TABLA DE SEVERIDAD POR SENSOR DEL MAPA
+# ============================================================
+
+def _build_severity_table_from_tabular_df(
+    sensors: List[Dict[str, Any]],
+    tabular_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    Ciclo 15.1.4 — fuente de verdad: cuando la pagina del Tabular ya
+    construyo su DataFrame (con columna 'Sensor', 'Overall', 'Status',
+    'Alarm', 'Danger', 'Unit Full'), tomamos de ahi los valores y los
+    proyectamos sobre la geometria del Sensor Map. Asi el Machine Map
+    nunca puede contradecir al Tabular — son la misma data, otra forma
+    de presentarla (graficamente sobre el tren).
+    """
+    rows: List[Dict[str, Any]] = []
+    # Indexar por Sensor (label del Sensor Map)
+    by_label: Dict[str, Any] = {}
+    if tabular_df is not None and not tabular_df.empty and "Sensor" in tabular_df.columns:
+        for _, r in tabular_df.iterrows():
+            lbl = str(r.get("Sensor") or "").strip()
+            if lbl and lbl not in by_label:
+                by_label[lbl] = r
+
+    for s in sensors:
+        lbl = sensor_label_fn(s)
+        family = sensor_unit_family(s)
+        unit_native = s.get("unit_native", "")
+        alarm_default = _safe_float(s.get("alarm"))
+        danger_default = _safe_float(s.get("danger"))
+
+        match = by_label.get(lbl)
+        if match is not None:
+            try:
+                overall_val = float(match.get("Overall") or 0.0)
+            except Exception:
+                overall_val = 0.0
+            try:
+                alarm_val = float(match.get("Alarm") or alarm_default)
+            except Exception:
+                alarm_val = alarm_default
+            try:
+                danger_val = float(match.get("Danger") or danger_default)
+            except Exception:
+                danger_val = danger_default
+            status_val = str(match.get("Status") or "No Data")
+            unit_val = str(match.get("Unit Full") or match.get("Unit") or unit_native)
+            source_val = str(match.get("_signal_name") or match.get("Point") or "")
+        else:
+            # Sensor configurado pero el Tabular no tiene fila para el (no
+            # hay CSV cargado que lo matchee). Marcar No Data.
+            overall_val = 0.0
+            alarm_val = alarm_default
+            danger_val = danger_default
+            status_val = "No Data"
+            unit_val = unit_native
+            source_val = ""
+
+        rows.append({
+            "Label": lbl,
+            "Plane": s.get("plane", 0),
+            "Plane Label": s.get("plane_label", ""),
+            "Type": s.get("sensor_type", ""),
+            "Family": family,
+            "Unit": unit_val,
+            "Alarm": alarm_val,
+            "Danger": danger_val,
+            "Overall": overall_val,
+            "Status": status_val,
+            "Source": source_val,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def build_severity_table(
+    sensors: List[Dict[str, Any]],
+    signals: Dict[str, Any],
+) -> pd.DataFrame:
+    """
+    Para cada sensor del mapa, devuelve overall + status + thresholds.
+
+    Ciclo 15.1.4 — FUENTE DE VERDAD: si la pagina del Tabular ya corrio
+    en esta sesion y dejo su DataFrame en
+    ``st.session_state["wm_tabular_df"]``, tomamos de ahi los valores
+    de Overall y Status. Asi el Machine Map y el Tabular nunca pueden
+    contradecirse.
+
+    Si no hay df cacheado (el usuario abrio Reports / Machine Map
+    directamente sin pasar por Tabular), caemos al calculo legacy
+    sobre los signals crudos — es robusto pero menos preciso porque
+    no aplica los overrides de criterio del usuario.
+
+    Columnas devueltas:
+      Label, Plane, Plane Label, Type, Family, Unit, Alarm, Danger,
+      Overall, Status, Source.
+      ``Status`` toma "Normal" / "Alarm" / "Danger" / "No Data".
+    """
+    # Fast path: usar el DF del Tabular si lo tenemos en sesion
+    try:
+        import streamlit as st
+        cached = st.session_state.get("wm_tabular_df", None)
+        if cached is not None and hasattr(cached, "empty") and not cached.empty:
+            return _build_severity_table_from_tabular_df(sensors, cached)
+    except Exception:
+        pass
+
+    # Legacy fallback: calcular por nuestra cuenta sobre los signals
+    rows: List[Dict[str, Any]] = []
+    for s in sensors:
+        lbl = sensor_label_fn(s)
+        family = sensor_unit_family(s)
+        unit_native = s.get("unit_native", "")
+        alarm = _safe_float(s.get("alarm"))
+        danger = _safe_float(s.get("danger"))
+
+        matched_signal = None
+        matched_source = ""
+        for signame, sigobj in (signals or {}).items():
+            try:
+                metadata = (
+                    getattr(sigobj, "metadata", None)
+                    or (sigobj.get("metadata") if isinstance(sigobj, dict) else {})
+                    or {}
+                )
+                point = str(metadata.get("Point", "") or "")
+                variable = str(metadata.get("Variable", "") or "")
+                csv_unit = str(
+                    metadata.get("Y-Axis Unit", "")
+                    or metadata.get("Unit", "")
+                    or ""
+                )
+                m = resolve_sensor_for_point([s], point, variable, csv_unit)
+                if m is not None:
+                    matched_signal = sigobj
+                    matched_source = signame
+                    break
+            except Exception:
+                continue
+
+        if matched_signal is not None:
+            rms = compute_signal_overall_rms(matched_signal)
+            overall_in_unit = convert_rms_to_unit(rms, unit_native)
+            status = classify_severity(overall_in_unit, alarm, danger)
+        else:
+            overall_in_unit = 0.0
+            status = "No Data"
+
+        rows.append({
+            "Label": lbl,
+            "Plane": s.get("plane", 0),
+            "Plane Label": s.get("plane_label", ""),
+            "Type": s.get("sensor_type", ""),
+            "Family": family,
+            "Unit": unit_native,
+            "Alarm": alarm,
+            "Danger": danger,
+            "Overall": overall_in_unit,
+            "Status": status,
+            "Source": matched_source,
+        })
+
+    return pd.DataFrame(rows)
+
+
+def count_status(df: pd.DataFrame) -> Dict[str, int]:
+    """
+    Devuelve dict con total y desglose por status para los KPIs.
+
+    Ciclo 15.1.5 — separa los keyphasors (sensores de referencia de
+    fase, NO de vibración) del conteo de vibración. Un keyphasor es
+    típicamente una sonda once-per-rev sobre el coupling/eje que
+    detecta una marca para timing/fase de orbits/Polar/Bode/balanceo;
+    no mide amplitud de vibración y por eso no se evalúa contra
+    setpoints de Alarm/Danger en el Tabular. Reportarlo como un
+    "sensor de vibración más" daría una imagen incorrecta del Sensor
+    Map al cliente.
+
+    Claves devueltas:
+      total           — todos los sensores configurados (incluye kp).
+      vibration_total — solo sensores de vibración (sin kp).
+      keyphasor       — cuántos keyphasors hay.
+      normal/alarm/danger/no_data — desglose entre los de vibración.
+    """
+    if df is None or df.empty:
+        return {
+            "total": 0, "vibration_total": 0, "keyphasor": 0,
+            "normal": 0, "alarm": 0, "danger": 0, "no_data": 0,
+        }
+    total = len(df)
+    is_kp = df["Type"].astype(str).str.lower().eq("keyphasor")
+    n_kp = int(is_kp.sum())
+    vib = df[~is_kp]
+    return {
+        "total": total,
+        "vibration_total": int(len(vib)),
+        "keyphasor": n_kp,
+        "normal": int((vib["Status"] == "Normal").sum()),
+        "alarm": int((vib["Status"] == "Alarm").sum()),
+        "danger": int((vib["Status"] == "Danger").sum()),
+        "no_data": int((vib["Status"] == "No Data").sum()),
+    }
+
+
+__all__ = [
+    "classify_severity",
+    "compute_signal_overall_rms",
+    "convert_rms_to_unit",
+    "build_severity_table",
+    "count_status",
+]
