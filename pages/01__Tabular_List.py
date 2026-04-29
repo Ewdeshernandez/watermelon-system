@@ -1311,9 +1311,18 @@ point_settings: Dict[str, Dict[str, Any]] = {}
 
 # Ciclo 15.1 hotfix — Panel de debug del matching sensor → CSV.
 # Permite verificar de un vistazo qué Point/Variable/Unit le llega
-# al matcher por cada signal cargado y qué sensor del map matcheó
-# (o si cayó al fallback global).
-with st.expander("🔍 Debug: matching de sensores con signals cargados", expanded=False):
+# al matcher por cada signal cargado y qué sensor del map matcheó.
+# Marker de versión: si NO ves "BUILD 14c.3-debug-v2" abajo,
+# Streamlit está cacheando una versión vieja del archivo.
+st.markdown(
+    "<div style='background:#fef3c7; border:1px solid #f59e0b; padding:6px 10px; "
+    "border-radius:6px; font-size:0.85rem; margin-bottom:8px;'>"
+    "<b>BUILD 14c.3-debug-v2</b> — si ves este banner, Streamlit cargó la versión nueva. "
+    "Abrí el expander 🔍 abajo para diagnosticar el matching."
+    "</div>",
+    unsafe_allow_html=True,
+)
+with st.expander("🔍 Debug: matching de sensores con signals cargados", expanded=True):
     try:
         from core.sensor_map import resolve_sensor_for_point as _dbg_resolve, sensor_label as _dbg_label
         _dbg_sensors = list(_active_instance.sensors or [])
