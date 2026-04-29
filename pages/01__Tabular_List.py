@@ -625,7 +625,7 @@ def build_table_dataframe(
                 sensor_label_str = sensor_label(sensor_match)
 
         if sensor_match is not None:
-            # Usar valores granulares del sensor del mapa
+            # Usar valores granulares del sensor del mapa (Ciclo 14c.3)
             sensor_type = str(sensor_match.get("sensor_type", "")).lower()
             criterion_row = (
                 "API 670 + ISO 7919-3 / ISO 20816-3" if sensor_type == "proximity"
@@ -634,8 +634,17 @@ def build_table_dataframe(
             alarm_row = float(sensor_match.get("alarm", 0.0) or 0.0)
             danger_row = float(sensor_match.get("danger", 0.0) or 0.0)
             family_row = sensor_unit_family(sensor_match)
-            # Overall mode por sensor: PP para proximity, RMS para velocity/accel
-            overall_mode_row = "PP" if family_row == "Proximity" else "RMS"
+            # Inferir el modo (RMS / 0-Peak / Peak-to-Peak) desde la
+            # unit_native del sensor para que las conversiones de RMS
+            # a display sean correctas. "g peak" → 0-Peak, "mil pp" →
+            # Peak-to-Peak, "mm/s RMS" → RMS.
+            _unit_lower = str(sensor_match.get("unit_native", "")).lower()
+            if "pp" in _unit_lower or "p-p" in _unit_lower or "peak-to-peak" in _unit_lower:
+                overall_mode_row = "Peak-to-Peak"
+            elif "peak" in _unit_lower or "pk" in _unit_lower:
+                overall_mode_row = "0-Peak"
+            else:
+                overall_mode_row = "RMS"
         elif config_mode == "Criterion by Machine":
             machine_cfg = machine_settings.get(rec.machine, {})
             criterion_row = machine_cfg.get("criterion", criterion_default)
@@ -674,6 +683,17 @@ def build_table_dataframe(
         a10 = convert_pp_to_display(a10_pp, overall_mode_row)
         a20 = convert_pp_to_display(a20_pp, overall_mode_row)
 
+        # Ciclo 14c.3 — Unit Full: cuando hay sensor match, usamos
+        # directamente la unit_native del sensor (ej. "g peak", "mil pp").
+        # Cuando no, construimos legacy con `amplitude_unit + display_suffix`.
+        if sensor_match is not None and sensor_match.get("unit_native"):
+            unit_full = str(sensor_match["unit_native"]).strip()
+            unit_legacy = unit_full
+        else:
+            _suffix = display_suffix(overall_mode_row)
+            unit_legacy = str(rec.amplitude_unit or "").strip()
+            unit_full = f"{unit_legacy} {_suffix}".strip() if unit_legacy else _suffix
+
         rows.append(
             {
                 "Machine": rec.machine,
@@ -689,7 +709,8 @@ def build_table_dataframe(
                 "0.5X Amp": a05,
                 "1X Amp": a10,
                 "2X Amp": a20,
-                "Unit": rec.amplitude_unit,
+                "Unit": unit_legacy,
+                "Unit Full": unit_full,  # Ciclo 14c.3: texto completo a mostrar
                 "Overall Mode": overall_mode_row,
                 "Status": overall_status(ov_display, alarm_row, danger_row),
                 "_signal_name": rec.name,
@@ -749,11 +770,18 @@ def render_table(df: pd.DataFrame) -> None:
     rows_html = []
 
     for _, row in df.iterrows():
-        unit = str(row["Unit"]).strip()
-        overall_suffix = display_suffix(str(row["Overall Mode"]))
-        overall_unit = f"{unit} {overall_suffix}".strip() if unit else overall_suffix
-        harm_suffix = display_suffix(str(row["Overall Mode"]))
-        harm_unit = f"{unit} {harm_suffix}".strip() if unit else harm_suffix
+        # Ciclo 14c.3 — preferir Unit Full (que ya viene con sufijo correcto
+        # del sensor map). Si no está, fallback al legacy unit + suffix.
+        unit_full = str(row.get("Unit Full") or "").strip()
+        if unit_full:
+            overall_unit = unit_full
+            harm_unit = unit_full
+        else:
+            unit = str(row["Unit"]).strip()
+            overall_suffix = display_suffix(str(row["Overall Mode"]))
+            overall_unit = f"{unit} {overall_suffix}".strip() if unit else overall_suffix
+            harm_suffix = display_suffix(str(row["Overall Mode"]))
+            harm_unit = f"{unit} {harm_suffix}".strip() if unit else harm_suffix
 
         row_html = (
             "<tr>"
@@ -979,11 +1007,17 @@ def build_png_report(df: pd.DataFrame, sample_record: SignalRecord, criterion: s
         fill = "#ffffff" if r % 2 == 0 else "#fafcff"
         draw.rectangle((table_x0, y0, table_x1, y1), fill=fill, outline=border, width=1)
 
-        unit = str(row["Unit"]).strip()
-        overall_suffix = display_suffix(str(row["Overall Mode"]))
-        overall_unit = f"{unit} {overall_suffix}".strip() if unit else overall_suffix
-        harm_suffix = display_suffix(str(row["Overall Mode"]))
-        harm_unit = f"{unit} {harm_suffix}".strip() if unit else harm_suffix
+        # Ciclo 14c.3 — preferir Unit Full (sensor map). Fallback al legacy.
+        unit_full = str(row.get("Unit Full") or "").strip()
+        if unit_full:
+            overall_unit = unit_full
+            harm_unit = unit_full
+        else:
+            unit = str(row["Unit"]).strip()
+            overall_suffix = display_suffix(str(row["Overall Mode"]))
+            overall_unit = f"{unit} {overall_suffix}".strip() if unit else overall_suffix
+            harm_suffix = display_suffix(str(row["Overall Mode"]))
+            harm_unit = f"{unit} {harm_suffix}".strip() if unit else harm_suffix
 
         cells = [
             str(row["Machine"]),
@@ -1155,15 +1189,16 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Tabular List Setup")
     st.caption(
-        "Los defaults vienen automáticos desde la instancia activa. "
-        "Configuration mode permite agrupar por Machine o Point."
+        "Toda la configuración (criterio, familia, unidades, setpoints) "
+        "viene automáticamente del Sensor Map de la instancia activa. "
+        "El override avanzado abajo solo se usa para análisis comparativos."
     )
 
-    config_mode = st.selectbox(
-        "Configuration mode",
-        options=["Criterion by Machine", "Criterion by Point"],
-        index=0,
-    )
+    # Ciclo 14c.3 — config_mode siempre 'sensor_map' (no más selector
+    # manual). Cada record toma su config del sensor que le matchea
+    # en el mapa; si no hay match, cae al default global derivado de
+    # la instancia (auto). Ningún input manual per-machine ni per-point.
+    config_mode = "sensor_map"
 
     with st.expander("⚙️ Override criterio para este análisis (avanzado)", expanded=False):
         st.caption(
@@ -1266,138 +1301,11 @@ if _override_active:
         f"para este análisis."
     )
 
+    # Ciclo 14c.3 — bloques Machine Settings / Point Settings eliminados.
+    # Toda la configuración granular vive en el Sensor Map de Machinery
+    # Library. Mantenemos diccionarios vacíos para compat con build_table_dataframe.
     machine_settings: Dict[str, Dict[str, Any]] = {}
     point_settings: Dict[str, Dict[str, Any]] = {}
-
-    if config_mode == "Criterion by Machine":
-        st.markdown("### Machine Settings")
-
-        unique_machines = sorted({str(r.machine) for r in records_all if str(r.machine).strip()})
-
-        for machine_name in unique_machines:
-            st.markdown(f"**{machine_name}**")
-
-            machine_criterion = st.selectbox(
-                f"Criterion - {machine_name}",
-                options=criterion_options,
-                index=criterion_options.index(criterion_selected) if criterion_selected in criterion_options else 0,
-                key=f"criterion_machine_{machine_name}",
-            )
-
-            if machine_criterion == "Custom":
-                machine_criterion = st.text_input(
-                    f"Custom criterion for {machine_name}",
-                    value=criterion_text if criterion_selected == "Custom" else "Criterio usuario",
-                    key=f"criterion_machine_custom_{machine_name}",
-                ).strip() or "Criterio usuario"
-
-            machine_family = st.selectbox(
-                f"Measurement family - {machine_name}",
-                options=family_options,
-                index=family_options.index(measurement_family) if measurement_family in family_options else 0,
-                key=f"family_machine_{machine_name}",
-            )
-
-            machine_overall_mode_options = overall_mode_options_for_family(machine_family)
-            default_machine_overall = overall_mode if overall_mode in machine_overall_mode_options else machine_overall_mode_options[0]
-
-            machine_overall_mode = st.selectbox(
-                f"Overall display mode - {machine_name}",
-                options=machine_overall_mode_options,
-                index=machine_overall_mode_options.index(default_machine_overall),
-                key=f"overall_mode_machine_{machine_name}",
-            )
-
-            machine_alarm = st.number_input(
-                f"Alarm - {machine_name}",
-                min_value=0.0,
-                value=float(alarm_value),
-                step=0.1,
-                format="%.3f",
-                key=f"alarm_machine_{machine_name}",
-            )
-
-            machine_danger = st.number_input(
-                f"Danger - {machine_name}",
-                min_value=0.0,
-                value=float(danger_value),
-                step=0.1,
-                format="%.3f",
-                key=f"danger_machine_{machine_name}",
-            )
-
-            machine_settings[machine_name] = {
-                "criterion": machine_criterion,
-                "family": machine_family,
-                "overall_mode": machine_overall_mode,
-                "alarm": float(machine_alarm),
-                "danger": float(machine_danger),
-            }
-
-    elif config_mode == "Criterion by Point":
-        st.markdown("### Point Settings")
-
-        unique_points = sorted({str(r.point) for r in records_all if str(r.point).strip()})
-
-        for point_name in unique_points:
-            st.markdown(f"**{point_name}**")
-
-            point_criterion = st.selectbox(
-                f"Criterion - {point_name}",
-                options=criterion_options,
-                index=criterion_options.index(criterion_selected) if criterion_selected in criterion_options else 0,
-                key=f"criterion_point_{point_name}",
-            )
-
-            if point_criterion == "Custom":
-                point_criterion = st.text_input(
-                    f"Custom criterion for {point_name}",
-                    value=criterion_text if criterion_selected == "Custom" else "Criterio usuario",
-                    key=f"criterion_point_custom_{point_name}",
-                ).strip() or "Criterio usuario"
-
-            point_family = st.selectbox(
-                f"Measurement family - {point_name}",
-                options=family_options,
-                index=family_options.index(measurement_family) if measurement_family in family_options else 0,
-                key=f"family_point_{point_name}",
-            )
-
-            point_overall_mode_options = overall_mode_options_for_family(point_family)
-            default_point_overall = overall_mode if overall_mode in point_overall_mode_options else point_overall_mode_options[0]
-
-            point_overall_mode = st.selectbox(
-                f"Overall display mode - {point_name}",
-                options=point_overall_mode_options,
-                index=point_overall_mode_options.index(default_point_overall),
-                key=f"overall_mode_point_{point_name}",
-            )
-
-            point_alarm = st.number_input(
-                f"Alarm - {point_name}",
-                min_value=0.0,
-                value=float(alarm_value),
-                step=0.1,
-                format="%.3f",
-                key=f"alarm_point_{point_name}",
-            )
-
-            point_danger = st.number_input(
-                f"Danger - {point_name}",
-                min_value=0.0,
-                value=float(danger_value),
-                step=0.1,
-                format="%.3f",
-                key=f"danger_point_{point_name}",
-            )
-
-            point_settings[point_name] = {
-                "criterion": point_criterion,
-                "family": point_family,
-                "overall_mode": point_overall_mode,
-                "alarm": float(point_alarm),
-                "danger": float(point_danger),
-            }
 
 logo_uri = get_logo_data_uri(LOGO_PATH)
 
@@ -1420,12 +1328,9 @@ if df_table.empty:
     st.warning("No fue posible construir la tabla.")
     st.stop()
 
-if config_mode == "Criterion by Point":
-    overall_mode_text = "Mixed by Point"
-elif config_mode == "Criterion by Machine":
-    overall_mode_text = "Mixed by Machine"
-else:
-    overall_mode_text = overall_mode
+# Ciclo 14c.3 — overall_mode_text refleja que cada fila usa la unidad
+# nativa de su sensor (peak / rms / pp varía por sensor).
+overall_mode_text = "Per-sensor (Sensor Map)" if _active_instance.sensors else overall_mode
 
 text_diag = evaluate_tabular_diagnostic(df_table)
 
