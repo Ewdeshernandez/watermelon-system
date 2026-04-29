@@ -1309,38 +1309,10 @@ if _override_active:
 machine_settings: Dict[str, Dict[str, Any]] = {}
 point_settings: Dict[str, Dict[str, Any]] = {}
 
-# Ciclo 15.1 — debug del matching opcional, colapsado por default.
-# Útil para diagnosticar mapeo sensor↔signal cuando hay sospecha de
-# falso match. No interfiere con el flujo normal del usuario.
-with st.expander("🔍 Debug: matching de sensores con signals cargados", expanded=False):
-    try:
-        from core.sensor_map import resolve_sensor_for_point as _dbg_resolve, sensor_label as _dbg_label
-        _dbg_sensors = list(_active_instance.sensors or [])
-        st.caption(f"Sensor Map activo: {len(_dbg_sensors)} sensores")
-        _dbg_rows = []
-        for _r in records_all:
-            _m = _dbg_resolve(
-                _dbg_sensors,
-                csv_point=str(_r.point or ""),
-                csv_variable=str(_r.variable or ""),
-                csv_unit=str(_r.amplitude_unit or ""),
-            )
-            _dbg_rows.append({
-                "CSV Point": _r.point,
-                "CSV Variable": _r.variable,
-                "CSV Unit": _r.amplitude_unit,
-                "Sensor matched": _dbg_label(_m) if _m else "— SIN MATCH —",
-                "Sensor type": _m.get("sensor_type", "—") if _m else "—",
-                "Sensor unit_native": _m.get("unit_native", "—") if _m else "—",
-                "Sensor alarm": _m.get("alarm", "—") if _m else "—",
-                "Sensor danger": _m.get("danger", "—") if _m else "—",
-            })
-        if _dbg_rows:
-            st.dataframe(pd.DataFrame(_dbg_rows), use_container_width=True, hide_index=True)
-        else:
-            st.caption("No hay signals para debuggear.")
-    except Exception as _dbg_e:
-        st.caption(f"Debug no disponible: {_dbg_e}")
+# Ciclo 15.1 — debug del matching removido. Si en algún caso futuro
+# el matcher cae al fallback global cuando debería matchear un sensor,
+# el expander se puede restaurar desde el historial git
+# (commit con BUILD 14c.3-debug-v2).
 
 logo_uri = get_logo_data_uri(LOGO_PATH)
 
