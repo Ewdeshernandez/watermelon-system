@@ -1445,6 +1445,18 @@ st.session_state["wm_tabular_active_instance_id"] = (
     _active_instance.instance_id if _active_instance else ""
 )
 
+# Ciclo 16.2 — calcular tambien el df-de-severidad-por-sensor (formato
+# build_severity_table) para uso del histórico. Esto reusa la fast path
+# que proyecta wm_tabular_df sobre la geometria del Sensor Map.
+try:
+    from core.machine_severity import build_severity_table as _wm_bst
+    st.session_state["wm_severity_df"] = _wm_bst(
+        list(_active_instance.sensors or []),
+        st.session_state.get("signals", {}) or {},
+    )
+except Exception:
+    st.session_state["wm_severity_df"] = None
+
 if df_table.empty:
     st.warning("No fue posible construir la tabla.")
     st.stop()
@@ -1457,6 +1469,203 @@ text_diag = evaluate_tabular_diagnostic(df_table)
 
 render_top_strip(records_all[0], len(df_table), logo_uri, criterion_text, overall_mode_text)
 render_table(df_table)
+
+
+# ============================================================
+# Ciclo 16.2 — Histórico + Comparativo multi-fecha
+# ------------------------------------------------------------
+# Permite snapshotear la corrida actual y compararla contra cualquier
+# corrida anterior guardada. La idea: el ingeniero NO necesita conservar
+# los CSVs viejos — el sistema mantiene los readings consolidados (~5KB
+# por corrida) y muestra tendencia (▲ subiendo / → estable / ▼ bajando)
+# con delta porcentual.
+# ============================================================
+try:
+    from core.instance_history import (
+        save_snapshot, list_snapshots, load_snapshot,
+        delete_snapshot, get_previous_snapshot, compare_to_previous,
+        trend_arrow, trend_color,
+    )
+
+    _hist_inst_id = _active_instance.instance_id if _active_instance else ""
+    _wm_severity_df = st.session_state.get("wm_severity_df")
+
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 📚 Histórico de la unidad")
+
+        _existing_snaps = list_snapshots(_hist_inst_id) if _hist_inst_id else []
+        st.caption(
+            f"{len(_existing_snaps)} corrida(s) guardada(s) para esta unidad."
+        )
+
+        if _wm_severity_df is not None and not _wm_severity_df.empty:
+            with st.expander("📸 Guardar corrida actual", expanded=False):
+                _snap_label = st.text_input(
+                    "Etiqueta de la corrida (opcional)",
+                    value="",
+                    placeholder="Ej. Corrida abril 2026",
+                    key=f"wm_snap_label_{_hist_inst_id}",
+                )
+                _snap_notes = st.text_area(
+                    "Observaciones (opcional)",
+                    value="",
+                    placeholder="Condición operativa, cambios recientes, etc.",
+                    key=f"wm_snap_notes_{_hist_inst_id}",
+                    height=80,
+                )
+                if st.button(
+                    "💾 Guardar snapshot",
+                    type="primary",
+                    width="stretch",
+                    key=f"wm_snap_save_{_hist_inst_id}",
+                ):
+                    try:
+                        sid = save_snapshot(
+                            _hist_inst_id,
+                            _wm_severity_df,
+                            corrida_label=_snap_label,
+                            notes=_snap_notes,
+                        )
+                        st.success(f"✓ Snapshot guardado: {sid}")
+                        st.rerun()
+                    except Exception as _e:
+                        st.error(f"No se pudo guardar: {_e}")
+        else:
+            st.caption("_(Cargá los CSVs primero para poder snapshotear.)_")
+
+        # Selector de comparación
+        if _existing_snaps:
+            _opts = [("__none__", "— Sin comparación —")] + [
+                (s["snapshot_id"],
+                 f"{s['corrida_label'][:30]} ({s['timestamp'][:10]})")
+                for s in _existing_snaps
+            ]
+            _opt_keys = [k for k, _ in _opts]
+            _opt_lbls = [l for _, l in _opts]
+            _cmp_state_key = f"wm_cmp_select_{_hist_inst_id}"
+            _default_cmp_idx = 1 if len(_opts) > 1 else 0
+            if _cmp_state_key in st.session_state and \
+               st.session_state[_cmp_state_key] in _opt_keys:
+                _default_cmp_idx = _opt_keys.index(st.session_state[_cmp_state_key])
+            _selected_cmp = st.selectbox(
+                "Comparar con corrida anterior",
+                options=_opt_lbls,
+                index=_default_cmp_idx,
+                key=f"wm_cmp_select_widget_{_hist_inst_id}",
+            )
+            _selected_cmp_id = _opt_keys[_opt_lbls.index(_selected_cmp)]
+            st.session_state[_cmp_state_key] = _selected_cmp_id
+        else:
+            _selected_cmp_id = "__none__"
+            st.caption(
+                "_(Aún no hay snapshots. Guardá uno arriba para empezar a "
+                "comparar.)_"
+            )
+
+        # Lista compacta de snapshots existentes con borrar
+        if _existing_snaps:
+            with st.expander(f"🗂️ Gestionar snapshots ({len(_existing_snaps)})"):
+                for s in _existing_snaps:
+                    cols_h = st.columns([4, 1])
+                    cols_h[0].markdown(
+                        f"**{s['corrida_label'][:30]}**  \n"
+                        f"_{s['timestamp']} · {s['n_readings']} sensores_"
+                    )
+                    if cols_h[1].button(
+                        "🗑️",
+                        key=f"wm_del_snap_{s['snapshot_id']}",
+                        help="Borrar este snapshot",
+                    ):
+                        if delete_snapshot(_hist_inst_id, s['snapshot_id']):
+                            st.success("Borrado.")
+                            st.rerun()
+
+    # Vista de comparativo en el cuerpo principal
+    if _selected_cmp_id and _selected_cmp_id != "__none__" and _wm_severity_df is not None:
+        prev_snap = load_snapshot(_hist_inst_id, _selected_cmp_id)
+        if prev_snap is not None:
+            cmp_df = compare_to_previous(_wm_severity_df, prev_snap)
+            if not cmp_df.empty:
+                st.markdown("### 📈 Comparativo con corrida anterior")
+                _prev_lbl = prev_snap.get("corrida_label", _selected_cmp_id)
+                _prev_ts = prev_snap.get("timestamp", "")[:10]
+                st.caption(
+                    f"Comparando esta corrida contra **{_prev_lbl}** "
+                    f"({_prev_ts}). Sensores que aparecieron por primera vez "
+                    f"se marcan como '—'."
+                )
+
+                # Resumen de tendencias
+                _trends = cmp_df["Trend"].value_counts().to_dict()
+                _summary_chips = []
+                if _trends.get("up_critical", 0):
+                    _summary_chips.append(
+                        f"▲ {_trends['up_critical']} con alza significativa"
+                    )
+                if _trends.get("up", 0):
+                    _summary_chips.append(f"↑ {_trends['up']} subiendo")
+                if _trends.get("stable", 0):
+                    _summary_chips.append(f"→ {_trends['stable']} estables")
+                if _trends.get("down", 0):
+                    _summary_chips.append(f"↓ {_trends['down']} bajando")
+                if _trends.get("down_good", 0):
+                    _summary_chips.append(
+                        f"▼ {_trends['down_good']} con baja significativa"
+                    )
+                if _trends.get("no_prev", 0):
+                    _summary_chips.append(
+                        f"— {_trends['no_prev']} sin lectura previa"
+                    )
+                st.markdown(" · ".join(_summary_chips))
+
+                # Tabla comparativa
+                _disp = cmp_df[[
+                    "Label", "Plane Label", "Type", "Unit",
+                    "Overall_prev", "Overall", "Delta", "Delta_pct",
+                    "Trend", "Status_prev", "Status",
+                ]].copy()
+
+                def _fmt_num(v):
+                    try:
+                        return f"{float(v):.3f}" if v is not None else "—"
+                    except Exception:
+                        return "—"
+                def _fmt_pct(v):
+                    if v is None:
+                        return "—"
+                    try:
+                        return f"{float(v):+.1f}%"
+                    except Exception:
+                        return "—"
+                def _fmt_trend(t):
+                    return f"{trend_arrow(t)} {t}"
+
+                _disp["Anterior"] = _disp["Overall_prev"].map(_fmt_num)
+                _disp["Actual"] = _disp["Overall"].map(_fmt_num)
+                _disp["Δ"] = _disp["Delta"].map(_fmt_num)
+                _disp["Δ %"] = _disp["Delta_pct"].map(_fmt_pct)
+                _disp["Tendencia"] = _disp["Trend"].map(_fmt_trend)
+                _disp = _disp[[
+                    "Label", "Plane Label", "Type", "Unit",
+                    "Anterior", "Actual", "Δ", "Δ %", "Tendencia",
+                    "Status_prev", "Status",
+                ]].rename(columns={
+                    "Status_prev": "Status anterior",
+                    "Status": "Status actual",
+                })
+                # Ordenar por trend critico primero
+                _trend_order = {"up_critical": 0, "up": 1, "no_prev": 2,
+                                "stable": 3, "down": 4, "down_good": 5}
+                cmp_df = cmp_df.sort_values(
+                    by="Trend",
+                    key=lambda col: col.map(_trend_order),
+                )
+                _disp = _disp.loc[cmp_df.index]
+                st.dataframe(_disp, width="stretch", hide_index=True)
+except Exception as _hist_e:
+    st.caption(f"_(Histórico no disponible: {_hist_e})_")
+
 
 helper_card(
     title="Autoanálisis Tabular List",
