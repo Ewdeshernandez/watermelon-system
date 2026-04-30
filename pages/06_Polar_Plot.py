@@ -440,6 +440,19 @@ def build_polar_figure(
     operating_rpm: Optional[float] = None,
     iso_thresholds: Optional[Dict[str, float]] = None,
     critical_speeds_pro: Optional[List[Dict[str, Any]]] = None,
+    # Ciclo 17.1 P3 — overlay del snapshot anterior
+    prev_snapshot_amp: Optional[float] = None,
+    prev_snapshot_phase: Optional[float] = None,
+    prev_snapshot_label: Optional[str] = None,
+    prev_snapshot_op_speed: Optional[float] = None,
+    # Ciclo 17.1.1 — multi-snapshot overlays (lista de dicts con
+    # {amp, phase, label, op_speed, timestamp, trajectory_speed,
+    # trajectory_amp, trajectory_phase}). Si está, prevalece sobre
+    # single-snapshot legacy. Cada uno con color gradient cronologico
+    # (mas viejo = azul claro, mas reciente = rojo). Si trajectory_*
+    # está presente, se dibuja el LOOP COMPLETO superpuesto (lo que
+    # permite ver paso por la velocidad critica entre corridas).
+    prev_snapshots: Optional[List[Dict[str, Any]]] = None,
 ) -> go.Figure:
     amp_unit = meta.get("Amp Unit", "") or ""
     speed_unit = meta.get("Speed Unit", "rpm") or "rpm"
@@ -626,6 +639,204 @@ def build_polar_figure(
         sp_max = float(df["speed"].max()) if len(df) else 0.0
         if sp_min <= operating_rpm <= sp_max:
             op_row = nearest_row_for_speed(df, operating_rpm)
+
+            # ============================================================
+            # Ciclo 17.1.1 — Overlay multi-snapshot (lista) o single
+            # legacy. Cada snapshot anterior se dibuja con marker
+            # ghost + linea conectora dotted al actual. Color en
+            # gradiente cronologico: mas viejo = azul claro, mas
+            # reciente = rojo intenso. La paleta es Viridis-ish para
+            # buena percepción de "edad".
+            # ============================================================
+            _curr_amp = float(op_row["amp"])
+            _curr_phase = float(op_row["theta_display"])
+
+            # Construir la lista efectiva de snapshots a dibujar
+            _snaps_to_draw: List[Dict[str, Any]] = []
+            if prev_snapshots:
+                # Ordenar por timestamp asc (mas viejo primero) para
+                # mapear el gradiente correctamente
+                _snaps_to_draw = sorted(
+                    [s for s in prev_snapshots if s.get("amp", 0) > 0],
+                    key=lambda s: s.get("timestamp", "") or "",
+                )
+            elif (
+                prev_snapshot_amp is not None
+                and prev_snapshot_phase is not None
+                and prev_snapshot_amp > 0
+            ):
+                _snaps_to_draw = [{
+                    "amp": float(prev_snapshot_amp),
+                    "phase": float(prev_snapshot_phase),
+                    "label": prev_snapshot_label or "anterior",
+                    "op_speed": prev_snapshot_op_speed,
+                    "timestamp": "",
+                }]
+
+            # Paleta cronologica: mas viejo = azul claro (#7dd3fc),
+            # medio = ambar (#f59e0b), mas reciente = rojo (#dc2626).
+            # Si solo hay 1, usamos gris/rojo neutro.
+            def _gradient_color(idx: int, total: int) -> Tuple[str, str]:
+                """Devuelve (marker_color, line_color) hex segun posicion."""
+                if total <= 1:
+                    return ("rgba(148,163,184,0.55)",
+                            "rgba(220,38,38,0.55)")
+                # Interpolacion lineal en HSV-ish via 3 paradas
+                # 0.0 -> light blue
+                # 0.5 -> amber
+                # 1.0 -> red (mas cercano al actual)
+                pos = idx / max(1, total - 1)
+                stops = [
+                    (0.00, (125, 211, 252)),   # light blue
+                    (0.50, (245, 158,  11)),   # amber
+                    (1.00, (220,  38,  38)),   # red
+                ]
+                # Encontrar segmento
+                for i in range(len(stops) - 1):
+                    t0, c0 = stops[i]
+                    t1, c1 = stops[i + 1]
+                    if t0 <= pos <= t1:
+                        frac = (pos - t0) / (t1 - t0)
+                        r = int(c0[0] + (c1[0] - c0[0]) * frac)
+                        g = int(c0[1] + (c1[1] - c0[1]) * frac)
+                        b = int(c0[2] + (c1[2] - c0[2]) * frac)
+                        return (
+                            f"rgba({r},{g},{b},0.65)",
+                            f"rgba({r},{g},{b},0.75)",
+                        )
+                return ("rgba(148,163,184,0.55)",
+                        "rgba(220,38,38,0.55)")
+
+            for _idx, _snap in enumerate(_snaps_to_draw):
+                _prev_amp = float(_snap["amp"])
+                _prev_phase_disp = float(_snap["phase"]) % 360.0
+                _prev_lbl_text = _snap.get("label", "anterior") or "anterior"
+                _prev_op = _snap.get("op_speed")
+                _prev_op_text = (
+                    f" @ {int(round(_prev_op))} rpm" if _prev_op else ""
+                )
+
+                _marker_color, _line_color = _gradient_color(
+                    _idx, len(_snaps_to_draw)
+                )
+
+                # ============================================================
+                # Ciclo 17.1.2 — TRAYECTORIA COMPLETA superpuesta
+                # Si el snapshot trae trajectory_speed/amp/phase, dibujamos
+                # el loop polar entero del run-up/coast-down. Asi se ve el
+                # paso por la velocidad critica (peak de la curva), la
+                # forma del loop (sub-síncronos, fase de Bode) y como
+                # cambio entre corridas. Lo dibujamos PRIMERO (zorder bajo)
+                # para que el actual quede arriba.
+                # ============================================================
+                _traj_speed = _snap.get("trajectory_speed") or []
+                _traj_amp = _snap.get("trajectory_amp") or []
+                _traj_phase = _snap.get("trajectory_phase") or []
+                _has_full_traj = (
+                    len(_traj_speed) > 1
+                    and len(_traj_speed) == len(_traj_amp) == len(_traj_phase)
+                )
+                if _has_full_traj:
+                    _traj_theta = [float(p) % 360.0 for p in _traj_phase]
+                    fig.add_trace(
+                        go.Scatterpolar(
+                            r=_traj_amp,
+                            theta=_traj_theta,
+                            mode="lines",
+                            line=dict(
+                                width=1.8,
+                                color=_line_color,
+                                dash="solid",
+                            ),
+                            opacity=0.55,
+                            customdata=np.array(_traj_speed).reshape(-1, 1),
+                            hovertemplate=(
+                                f"<b>{_prev_lbl_text}</b><br>"
+                                f"Speed: %{{customdata[0]:.0f}} rpm<br>"
+                                f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
+                                f"Phase: %{{theta:.1f}}°<extra></extra>"
+                            ),
+                            showlegend=False,
+                            name=f"Polar {_prev_lbl_text}",
+                        )
+                    )
+                    # Marcador del PICO (max amplitud) de la trayectoria
+                    # historica = velocidad critica de esa corrida.
+                    try:
+                        _i_pk = int(np.argmax(_traj_amp))
+                        _peak_amp = float(_traj_amp[_i_pk])
+                        _peak_phase = float(_traj_theta[_i_pk])
+                        _peak_speed = float(_traj_speed[_i_pk])
+                        fig.add_trace(
+                            go.Scatterpolar(
+                                r=[_peak_amp],
+                                theta=[_peak_phase],
+                                mode="markers",
+                                marker=dict(
+                                    size=12,
+                                    color=_marker_color,
+                                    symbol="diamond-open",
+                                    line=dict(width=2.0, color="#0f172a"),
+                                ),
+                                opacity=0.85,
+                                showlegend=False,
+                                hovertemplate=(
+                                    f"<b>Pico {_prev_lbl_text}</b><br>"
+                                    f"Speed: {_peak_speed:.0f} rpm<br>"
+                                    f"Amp: {_peak_amp:.3f} {amp_unit}<br>"
+                                    f"Phase: {_peak_phase:.1f}°<extra></extra>"
+                                ),
+                            )
+                        )
+                    except Exception:
+                        pass
+                else:
+                    # Sin trayectoria — fallback: linea conectora simple
+                    # del snapshot anterior al punto actual (legacy).
+                    _n_seg = 12
+                    _frac = np.linspace(0.0, 1.0, _n_seg)
+                    _seg_r = _prev_amp + (_curr_amp - _prev_amp) * _frac
+                    _delta_seg = ((_curr_phase - _prev_phase_disp + 540.0) % 360.0) - 180.0
+                    _seg_theta = (_prev_phase_disp + _delta_seg * _frac) % 360.0
+                    fig.add_trace(
+                        go.Scatterpolar(
+                            r=_seg_r,
+                            theta=_seg_theta,
+                            mode="lines",
+                            line=dict(width=2.0, color=_line_color, dash="dot"),
+                            showlegend=False,
+                            hoverinfo="skip",
+                            name=f"Trail {_prev_lbl_text} → actual",
+                        )
+                    )
+
+                # Marker GHOST del punto operativo del snapshot anterior
+                _delta_ph = ((_curr_phase - _prev_phase_disp + 540.0) % 360.0) - 180.0
+                fig.add_trace(
+                    go.Scatterpolar(
+                        r=[_prev_amp],
+                        theta=[_prev_phase_disp],
+                        mode="markers+text",
+                        marker=dict(
+                            size=18, color=_marker_color,
+                            symbol="star-open",
+                            line=dict(width=2.5, color="#0f172a"),
+                        ),
+                        text=[f"<i>{_prev_lbl_text[:18]}{_prev_op_text}</i>"],
+                        textposition="top center",
+                        textfont=dict(size=9, color="#0f172a", family="Arial"),
+                        showlegend=False,
+                        hovertemplate=(
+                            f"<b>Op {_prev_lbl_text}</b><br>"
+                            f"Amplitude: {_prev_amp:.3f} {amp_unit}<br>"
+                            f"Phase: {_prev_phase_disp:.1f}°<br>"
+                            f"Δ amp: {(_curr_amp - _prev_amp):+.3f} "
+                            f"({((_curr_amp - _prev_amp) / _prev_amp * 100.0):+.1f}%)<br>"
+                            f"Δ phase: {_delta_ph:+.1f}°<extra></extra>"
+                        ),
+                    )
+                )
+
             fig.add_trace(
                 go.Scatterpolar(
                     r=[op_row["amp"]],
@@ -793,6 +1004,8 @@ def _build_polar_report_notes(text_diag: Dict[str, str]) -> str:
     headline = str(text_diag.get("headline", "") or "").strip()
     detail = str(text_diag.get("detail", "") or "").strip()
     action = str(text_diag.get("action", "") or "").strip()
+    # Ciclo 17.1 P5 — narrativa del comparativo Polar (vs corrida anterior)
+    comparison_narrative = str(text_diag.get("comparison_narrative", "") or "").strip()
 
     def clean_text(value: str) -> str:
         value = str(value or "")
@@ -806,12 +1019,19 @@ def _build_polar_report_notes(text_diag: Dict[str, str]) -> str:
     headline = clean_text(headline)
     detail = clean_text(detail)
     action = clean_text(action)
+    comparison_narrative = clean_text(comparison_narrative)
 
     blocks: List[str] = []
     if headline:
         blocks.append(headline)
     if detail:
         blocks.append(detail)
+    # Inyectar el comparativo después del diagnostico principal y antes
+    # de las acciones priorizadas — lo natural en un reporte de
+    # vibraciones es ver primero la severidad actual, luego el contexto
+    # historico, y por ultimo las recomendaciones.
+    if comparison_narrative:
+        blocks.append(comparison_narrative)
 
     if action:
         action_clean = action
@@ -1981,6 +2201,360 @@ def render_polar_panel(
         except Exception:
             pass
 
+    # Ciclo 17.1.1 — buscar TODOS los snapshots elegidos en sidebar
+    # y extraer la lectura del sensor actual para overlay multi-snap.
+    _prev_amp = None
+    _prev_phase = None
+    _prev_label = None
+    _prev_op_speed = None
+    _prev_snapshots_list: List[Dict[str, Any]] = []
+    try:
+        _polar_cmp_snap_ids = (
+            st.session_state.get("wm_polar_compare_snapshot_ids") or []
+        )
+        # Backward-compat: si no hay multi pero hay single, usar single
+        if not _polar_cmp_snap_ids:
+            _single = st.session_state.get("wm_polar_compare_snapshot_id")
+            if _single and _single != "__none__":
+                _polar_cmp_snap_ids = [_single]
+        if _polar_cmp_snap_ids:
+            from core.polar_history import load_polar_snapshot
+            from core.sensor_map import resolve_sensor_for_point as _sm_resolve, sensor_label as _sm_slbl
+            _polar_inst_id_local = st.session_state.get("wm_active_instance_id", "")
+            if not _polar_inst_id_local:
+                _polar_inst_id_local = st.session_state.get("wm_polar_compare_inst_id", "")
+            if _polar_inst_id_local:
+                # Identificar a qué sensor corresponde ESTE panel UNA vez
+                from core.instance_state import get_instance as _sm_get_inst
+                _inst_obj = _sm_get_inst(_polar_inst_id_local)
+                _curr_panel_lbl = None
+                if _inst_obj is not None and _inst_obj.sensors:
+                    _sensor_match = _sm_resolve(
+                        list(_inst_obj.sensors),
+                        str(meta.get("Point Name", "") or item.get("point", "")),
+                        str(meta.get("Variable", "") or item.get("variable", "")),
+                        str(meta.get("Y-Axis Unit", "") or meta.get("Unit", "") or ""),
+                    )
+                    if _sensor_match is not None:
+                        _curr_panel_lbl = _sm_slbl(_sensor_match)
+                if _curr_panel_lbl:
+                    for _snap_id in _polar_cmp_snap_ids:
+                        _prev_snap_full = load_polar_snapshot(
+                            _polar_inst_id_local, _snap_id,
+                        )
+                        if _prev_snap_full is None:
+                            continue
+                        for _ps in _prev_snap_full.get("sensors", []):
+                            if str(_ps.get("sensor_label", "")) == _curr_panel_lbl:
+                                _prev_snapshots_list.append({
+                                    "amp": float(_ps.get("amp_at_op", 0) or 0),
+                                    "phase": float(_ps.get("phase_at_op", 0) or 0),
+                                    "label": _prev_snap_full.get("corrida_label", ""),
+                                    "op_speed": float(_prev_snap_full.get("operating_speed_rpm", 0) or 0),
+                                    "timestamp": _prev_snap_full.get("timestamp", ""),
+                                    # Ciclo 17.1.2 — trayectoria completa para overlay
+                                    "trajectory_speed": _ps.get("trajectory_speed", []) or [],
+                                    "trajectory_amp": _ps.get("trajectory_amp", []) or [],
+                                    "trajectory_phase": _ps.get("trajectory_phase", []) or [],
+                                })
+                                break
+                # Para backward-compat con narrativa PDF: usar el primero
+                # como _prev_amp/_prev_phase/_prev_label (que va al
+                # comparison_narrative).
+                if _prev_snapshots_list:
+                    _first = _prev_snapshots_list[0]
+                    _prev_amp = _first["amp"]
+                    _prev_phase = _first["phase"]
+                    _prev_label = _first["label"]
+                    _prev_op_speed = _first["op_speed"]
+    except Exception:
+        _prev_amp = None
+        _prev_phase = None
+        _prev_snapshots_list = []
+
+    # Ciclo 17.1.3 — Narrativa modal completa del comparativo Polar
+    # para el PDF report. Reemplaza la narrativa simple de balance por
+    # un análisis rotodinámico estilo Bently Nevada Technical Training:
+    # caracterización del modo (translacional / cónico / flexural por
+    # Δfase a la crítica), análisis de sensitividad vectorial,
+    # distinción modal del rotor vs estructural, persistencia /
+    # migración del modo, y diagnóstico diferencial (balance vs fault
+    # vs operacional).
+    if (
+        _prev_amp is not None and _prev_phase is not None
+        and _prev_amp > 0 and use_rotordyn_pro and operating_rpm is not None
+    ):
+        try:
+            from core.polar_history import (
+                phase_shift_classifier,
+                amplitude_change_classifier,
+                shortest_arc_phase_diff,
+            )
+            sp_min_chk = float(plot_df["speed"].min()) if len(plot_df) else 0.0
+            sp_max_chk = float(plot_df["speed"].max()) if len(plot_df) else 0.0
+            if sp_min_chk <= operating_rpm <= sp_max_chk:
+                _curr_op_row = nearest_row_for_speed(plot_df, operating_rpm)
+                _curr_amp_op = float(_curr_op_row["amp"])
+                _curr_phase_op = float(_curr_op_row["theta_display"])
+                _delta_amp = _curr_amp_op - float(_prev_amp)
+                _delta_amp_pct = (
+                    (_delta_amp / float(_prev_amp) * 100.0)
+                    if float(_prev_amp) > 0 else None
+                )
+                _delta_phase = shortest_arc_phase_diff(
+                    float(_prev_phase), _curr_phase_op,
+                )
+                _phase_class = phase_shift_classifier(_delta_phase)
+                _amp_unit_local = meta.get("Amp Unit", "") or meta.get("Y-Axis Unit", "") or ""
+                _prev_lbl_text = _prev_label or "corrida anterior"
+
+                # --- Datos del modo en la corrida ACTUAL ---
+                # Phase delta a través del peak (via critical_speeds_pro
+                # si está disponible).
+                _curr_cs_rpm = None
+                _curr_cs_amp = None
+                _curr_cs_phase_delta = None
+                _curr_q = None
+                if pro_overlay_criticals:
+                    try:
+                        _cs_pro_first = pro_overlay_criticals[0]
+                        _curr_cs_rpm = float(_cs_pro_first.get("rpm", 0) or 0)
+                        _curr_cs_amp = float(_cs_pro_first.get("amp", 0) or 0)
+                        _curr_cs_phase_delta = float(
+                            _cs_pro_first.get("phase_delta", 0) or 0
+                        )
+                        _curr_q = float(_cs_pro_first.get("q_factor", 0) or 0)
+                    except Exception:
+                        pass
+
+                # Caracterizar el modo por el Δfase a través del peak:
+                # ~180° = primer modo translacional/cylindrical (clásico
+                #         para balance shift)
+                # ~90°  = modo conical/pivotal o segundo modo
+                # >270° = posible flexural / segundo modo bending
+                # <90°  = anti-resonancia o resonancia estructural
+                _mode_type = "modo no caracterizado"
+                if _curr_cs_phase_delta is not None and _curr_cs_phase_delta != 0:
+                    _abs_pd = abs(_curr_cs_phase_delta)
+                    if 150.0 <= _abs_pd <= 210.0:
+                        _mode_type = (
+                            "primer modo translacional (Δφ ≈ 180°), "
+                            "consistente con bending mode tipo 'in-phase' "
+                            "del rotor según la nomenclatura de Bently y "
+                            "API 684 §6"
+                        )
+                    elif 70.0 <= _abs_pd < 150.0:
+                        _mode_type = (
+                            "modo cónico / pivotal o segundo modo "
+                            "translacional (Δφ ≈ 90–150°), respuesta "
+                            "típica cuando el rotor pivota alrededor "
+                            "de un punto nodal cercano al cojinete"
+                        )
+                    elif 210.0 < _abs_pd <= 360.0:
+                        _mode_type = (
+                            "segundo modo flexural o respuesta acoplada "
+                            "rotor-estructura (Δφ > 210°)"
+                        )
+                    else:
+                        _mode_type = (
+                            "respuesta de baja deflexión modal "
+                            "(Δφ < 70°) — posible resonancia "
+                            "estructural del soporte / fundación más "
+                            "que modo del rotor"
+                        )
+
+                _narr_parts: List[str] = []
+
+                # 1) Encabezado factual
+                _narr_parts.append(
+                    f"Análisis comparativo rotodinámico contra "
+                    f"«{_prev_lbl_text}»"
+                    + (
+                        f" del {_prev_label[:10]}"
+                        if _prev_label and len(_prev_label) >= 10 else ""
+                    )
+                    + ". A la velocidad operativa "
+                    f"({operating_rpm:.0f} rpm), la respuesta sincrónica "
+                    f"1X del sensor evolucionó de "
+                    f"{float(_prev_amp):.3f} {_amp_unit_local} @ "
+                    f"{float(_prev_phase):.1f}° a "
+                    f"{_curr_amp_op:.3f} {_amp_unit_local} @ "
+                    f"{_curr_phase_op:.1f}°, lo que representa un "
+                    + (
+                        f"vector change de {_delta_amp:+.3f} {_amp_unit_local} "
+                        f"({_delta_amp_pct:+.1f}%)"
+                        if _delta_amp_pct is not None
+                        else f"vector change de {_delta_amp:+.3f} {_amp_unit_local}"
+                    )
+                    + f" en magnitud y un shift de fase 1X de "
+                    f"{_delta_phase:+.1f}° en arco menor."
+                )
+
+                # 2) Caracterización del modo y forma estructural
+                if _curr_cs_rpm and _curr_cs_rpm > 0:
+                    _ratio_op_cs = operating_rpm / _curr_cs_rpm
+                    _separation_pct = (_ratio_op_cs - 1.0) * 100.0
+                    _q_str = (
+                        f", con factor de amplificación Q={_curr_q:.2f}"
+                        if _curr_q else ""
+                    )
+                    _mode_para = (
+                        f"La trayectoria polar revela una velocidad "
+                        f"crítica en {_curr_cs_rpm:.0f} rpm con un "
+                        f"cambio de fase de "
+                        f"{abs(_curr_cs_phase_delta or 0):.0f}° a través "
+                        f"del peak{_q_str}. Este patrón se interpreta "
+                        f"como {_mode_type}. "
+                    )
+                    if _separation_pct >= 15.0:
+                        _mode_para += (
+                            f"La velocidad operativa queda "
+                            f"{_separation_pct:+.1f}% por encima del "
+                            f"modo, separación amplia que cumple el "
+                            f"requisito de margen de API 684 §6. "
+                        )
+                    elif _separation_pct >= 0:
+                        _mode_para += (
+                            f"La velocidad operativa queda solo "
+                            f"{_separation_pct:+.1f}% por encima del "
+                            f"modo. Es estrecho contra el margen "
+                            f"recomendado de API 684 §6 (≥15%) y "
+                            f"merece evaluación detallada de "
+                            f"separation margin si el Q se incrementa. "
+                        )
+                    else:
+                        _mode_para += (
+                            f"La velocidad operativa está "
+                            f"{abs(_separation_pct):.1f}% por debajo "
+                            f"del modo identificado, configuración de "
+                            f"sub-crítica que se considera estable "
+                            f"siempre que el Q se mantenga acotado. "
+                        )
+                    _narr_parts.append(_mode_para)
+
+                # 3) Diagnóstico diferencial del shift
+                if _phase_class == "shift_critical":
+                    _narr_parts.append(
+                        "El shift de fase 1X supera 60° en arco menor, "
+                        "magnitud considerada crítica según los criterios "
+                        "de Bently / API 684. Magnitudes de esta escala "
+                        "son inconsistentes con simple deriva térmica o "
+                        "operacional y apuntan a un cambio mecánico "
+                        "estructural del rotor: pérdida de masa por "
+                        "desprendimiento de pieza, propagación de "
+                        "fisura / crack, asentamiento súbito del cojinete "
+                        "o pérdida del contacto con el sello / impeller. "
+                        "Se recomienda parada controlada para inspección "
+                        "y análisis complementario de orbits filtrados a "
+                        "1X y forma de onda en ambos planos del cojinete "
+                        "antes de continuar operación."
+                    )
+                elif _phase_class == "shift_major":
+                    _narr_parts.append(
+                        "El shift de fase 1X entre 30° y 60° es la firma "
+                        "clásica de un cambio de balance del rotor según "
+                        "la metodología de vector polar response que "
+                        "documentan Bently y API 684. La magnitud y "
+                        "dirección del vector change son consistentes "
+                        "con una redistribución de masa rotativa "
+                        "(suciedad acumulada o desprendida en álabes, "
+                        "pérdida progresiva de balance weights, "
+                        "deformación térmica residual). Se recomienda "
+                        "programar balance de campo según ISO 21940-12 "
+                        "nivel G 2.5 en próxima ventana, verificando "
+                        "previamente la consistencia de fase entre "
+                        "arranques sucesivos para descartar componente "
+                        "transitoria."
+                    )
+                elif _phase_class == "shift_minor":
+                    _narr_parts.append(
+                        "El shift de fase 1X entre 10° y 30° es menor y "
+                        "puede atribuirse a deriva operacional normal "
+                        "(temperatura, carga, expansión térmica del "
+                        "rotor o de los soportes). No constituye por sí "
+                        "solo evidencia de cambio mecánico, pero merece "
+                        "vigilancia: una tendencia consolidada a lo "
+                        "largo de varias corridas en la misma dirección "
+                        "vectorial sí indicaría cambio incipiente de "
+                        "balance que conviene caracterizar antes de que "
+                        "cruce la zona mayor."
+                    )
+                elif _phase_class == "stable":
+                    _narr_parts.append(
+                        "El shift de fase 1X (<10°) está dentro de la "
+                        "variación normal de la respuesta sincrónica y "
+                        "no constituye evidencia de cambio mecánico ni "
+                        "de balance. La forma del vector se considera "
+                        "estable entre corridas."
+                    )
+
+                # 4) Análisis del cambio de amplitud (sensitividad)
+                if _delta_amp_pct is not None:
+                    _amp_class = amplitude_change_classifier(_delta_amp_pct)
+                    if _amp_class == "amp_critical":
+                        _narr_parts.append(
+                            "El crecimiento de amplitud 1X supera el "
+                            "50% entre corridas. Combinado con el shift "
+                            "de fase descrito, refuerza el diagnóstico "
+                            "de degradación activa de la respuesta "
+                            "modal — la sensibilidad del rotor a la "
+                            "fuerza de excitación residual está "
+                            "creciendo, lo que es típico de pérdida de "
+                            "amortiguamiento (damping degradation) en "
+                            "los soportes hidrodinámicos según el "
+                            "marco de análisis de API 684."
+                        )
+                    elif _amp_class == "amp_high":
+                        _narr_parts.append(
+                            "El crecimiento de amplitud 1X (≥20%) "
+                            "acompañando al shift de fase es consistente "
+                            "con un cambio activo en la respuesta modal "
+                            "del sistema rotor-soporte. Vale revisar "
+                            "el factor de amplificación Q en próximas "
+                            "corridas para descartar pérdida progresiva "
+                            "de damping."
+                        )
+                    elif _amp_class in ("amp_down_strong", "amp_down"):
+                        _narr_parts.append(
+                            "La amplitud 1X bajó de manera significativa "
+                            "respecto a la corrida anterior. Si esto "
+                            "coincide con un shift de fase mayor, puede "
+                            "tratarse de un cambio de balance "
+                            "compensatorio (ej. una intervención previa, "
+                            "redistribución térmica) más que de "
+                            "degradación. Conviene revisar el "
+                            "registro operacional y los reportes de "
+                            "mantenimiento entre corridas para "
+                            "confirmar."
+                        )
+
+                # 5) Distinción modal del rotor vs estructural
+                if (
+                    _phase_class in ("shift_major", "shift_critical")
+                    and _curr_cs_phase_delta is not None
+                    and abs(_curr_cs_phase_delta) < 90.0
+                ):
+                    _narr_parts.append(
+                        "Nota diferencial: el cambio de fase a través "
+                        "del peak observado (<90°) es atípico de un "
+                        "modo libre del rotor y sugiere que el peak "
+                        "podría corresponder a una resonancia "
+                        "estructural del soporte o fundación más que a "
+                        "un modo del rotor. Es importante validar "
+                        "antes de atribuir el cambio observado a "
+                        "balance del rotor — un cambio mecánico en la "
+                        "fundación (suelta de anclajes, deterioro de "
+                        "grouting) produce el mismo patrón en el "
+                        "polar pero requiere intervención estructural, "
+                        "no balance."
+                    )
+
+                _comp_narr = " ".join(_narr_parts)
+                if isinstance(text_diag, dict):
+                    text_diag["comparison_narrative"] = _comp_narr
+        except Exception:
+            pass
+
     fig = build_polar_figure(
         df=plot_df,
         meta=meta,
@@ -2000,6 +2574,11 @@ def render_polar_panel(
         operating_rpm=operating_rpm if use_rotordyn_pro else None,
         iso_thresholds=iso_thresholds_overlay,
         critical_speeds_pro=pro_overlay_criticals if pro_overlay_criticals else None,
+        prev_snapshot_amp=_prev_amp,
+        prev_snapshot_phase=_prev_phase,
+        prev_snapshot_label=_prev_label,
+        prev_snapshot_op_speed=_prev_op_speed,
+        prev_snapshots=_prev_snapshots_list if _prev_snapshots_list else None,
     )
 
     st.plotly_chart(
@@ -2242,12 +2821,460 @@ def main() -> None:
 
     selected_ids = [sid for sid in st.session_state.wm_polar_selected_ids if sid in id_to_item]
 
+    # ============================================================
+    # Ciclo 17.1 — Histórico Polar (1X amp + phase trends)
+    # ------------------------------------------------------------
+    # Snapshotea por sensor matched el 1X amp + fase a la velocidad
+    # operativa actual. Permite comparar contra corridas previas y
+    # diagnosticar cambios de balance (shift de fase >30° = sintoma
+    # API 684).
+    # ============================================================
+    _polar_inst_id = (
+        instance_state.get("instance_id")
+        or st.session_state.get("wm_active_instance_id", "")
+    )
+    _polar_inst = None
+    _polar_sensors_map: List[Dict[str, Any]] = []
+    if _polar_inst_id:
+        try:
+            from core.instance_state import get_instance as _polar_get_inst
+            _polar_inst = _polar_get_inst(_polar_inst_id)
+            if _polar_inst is not None:
+                _polar_sensors_map = list(_polar_inst.sensors or [])
+        except Exception:
+            _polar_inst = None
+
+    # Helper: para cada parsed_item (= cada CSV polar), encontrar el
+    # sensor del Sensor Map matched y extraer amp/phase a op_speed +
+    # trayectoria completa downsampleada para superposicion historica.
+    def _wm_extract_polar_readings(
+        items: List[Dict[str, Any]],
+        sensors_map: List[Dict[str, Any]],
+        op_speed_rpm: float,
+    ) -> List[Dict[str, Any]]:
+        from core.sensor_map import resolve_sensor_for_point as _wm_resolve, sensor_label as _wm_slbl
+        out = []
+        for it in items:
+            try:
+                meta = it.get("meta") or {}
+                point = str(meta.get("Point Name", "") or it.get("point", "") or "")
+                variable = str(meta.get("Variable", "") or it.get("variable", "") or "")
+                unit = str(meta.get("Y-Axis Unit", "") or meta.get("Unit", "") or "")
+                sensor_match = None
+                if sensors_map:
+                    sensor_match = _wm_resolve(sensors_map, point, variable, unit)
+                if sensor_match is None:
+                    continue
+                df = it.get("grouped_df")
+                if df is None or len(df) == 0:
+                    continue
+                # Si op_speed está fuera del rango cargado, usar el más cercano
+                row = nearest_row_for_speed(df, op_speed_rpm)
+                amp_at_op = float(row.get("amp", 0.0))
+                phase_at_op = float(row.get("phase", 0.0)) % 360.0
+
+                # Ciclo 17.1.2 — Trayectoria completa downsampleada.
+                # Polar/Bode tipicos tienen 1000+ puntos. Para mantener
+                # el JSON liviano (~10KB por sensor) bajamos a ~80 puntos
+                # uniformemente espaciados por RPM. Esto preserva la
+                # forma del loop incluyendo el paso por la critica.
+                _df_sorted = df.sort_values("speed").reset_index(drop=True)
+                _N_TARGET = 80
+                if len(_df_sorted) > _N_TARGET:
+                    _idx = np.linspace(0, len(_df_sorted) - 1, _N_TARGET).astype(int)
+                    _df_ds = _df_sorted.iloc[_idx]
+                else:
+                    _df_ds = _df_sorted
+                traj_speed = _df_ds["speed"].astype(float).tolist()
+                traj_amp = _df_ds["amp"].astype(float).tolist()
+                traj_phase = (_df_ds["phase"].astype(float) % 360.0).tolist()
+
+                entry = {
+                    "sensor_label": _wm_slbl(sensor_match),
+                    "csv_file": it.get("file_name", ""),
+                    "amp_at_op": amp_at_op,
+                    "phase_at_op": phase_at_op,
+                    "amp_unit": unit or "mil pp",
+                    "phase_unit": "deg",
+                    "csv_timestamp": str(meta.get("Timestamp", "") or ""),
+                    "trajectory_speed": traj_speed,
+                    "trajectory_amp": traj_amp,
+                    "trajectory_phase": traj_phase,
+                }
+                out.append(entry)
+            except Exception:
+                continue
+        return out
+
+    _polar_curr_readings: List[Dict[str, Any]] = []
+    if selected_ids and _polar_sensors_map:
+        try:
+            _selected_items_for_snap = [id_to_item[sid] for sid in selected_ids]
+            _polar_curr_readings = _wm_extract_polar_readings(
+                _selected_items_for_snap, _polar_sensors_map, float(operating_rpm),
+            )
+        except Exception:
+            _polar_curr_readings = []
+
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 📚 Histórico Polar")
+
+        try:
+            from core.polar_history import (
+                save_polar_snapshot,
+                list_polar_snapshots,
+                load_polar_snapshot,
+                delete_polar_snapshot,
+                get_previous_polar_snapshot,
+                phase_shift_classifier,
+                amplitude_change_classifier,
+                shortest_arc_phase_diff,
+            )
+            _polar_hist_ok = True
+        except Exception as _hist_e:
+            _polar_hist_ok = False
+            st.caption(f"_(Histórico Polar no disponible: {_hist_e})_")
+
+        if _polar_hist_ok and _polar_inst_id:
+            _polar_existing_snaps = list_polar_snapshots(_polar_inst_id)
+            st.caption(
+                f"{len(_polar_existing_snaps)} snapshot(s) Polar guardado(s) "
+                f"para esta unidad."
+            )
+
+            if not _polar_curr_readings:
+                if not _polar_sensors_map:
+                    st.caption(
+                        "_(No hay Sensor Map configurado para esta instancia. "
+                        "Andá a Machinery Library a configurarlo.)_"
+                    )
+                else:
+                    st.caption(
+                        "_(Ningún CSV Polar cargado matchea sensores del "
+                        "Sensor Map de esta instancia.)_"
+                    )
+            else:
+                with st.expander("📸 Guardar snapshot Polar actual", expanded=False):
+                    st.caption(
+                        f"Captura el 1X amp + fase a {operating_rpm:.0f} rpm "
+                        f"para {len(_polar_curr_readings)} sensor(es) matched."
+                    )
+                    _polar_snap_label = st.text_input(
+                        "Etiqueta de la corrida",
+                        value="",
+                        placeholder="Ej. Coastdown abril 27",
+                        key=f"wm_polar_snap_label_{_polar_inst_id}",
+                    )
+                    _polar_snap_notes = st.text_area(
+                        "Observaciones (opcional)",
+                        value="",
+                        placeholder="Velocidad operativa, condición, evento.",
+                        key=f"wm_polar_snap_notes_{_polar_inst_id}",
+                        height=70,
+                    )
+                    if st.button(
+                        "💾 Guardar snapshot Polar",
+                        type="primary",
+                        width="stretch",
+                        key=f"wm_polar_snap_save_{_polar_inst_id}",
+                    ):
+                        try:
+                            sid = save_polar_snapshot(
+                                _polar_inst_id,
+                                operating_speed_rpm=float(operating_rpm),
+                                sensors_data=_polar_curr_readings,
+                                corrida_label=_polar_snap_label,
+                                notes=_polar_snap_notes,
+                            )
+                            st.success(
+                                f"✓ Snapshot Polar guardado: {sid} "
+                                f"({len(_polar_curr_readings)} sensores)"
+                            )
+                            st.rerun()
+                        except Exception as _e:
+                            st.error(f"No se pudo guardar: {_e}")
+
+            # Selector de comparación — Ciclo 17.1.1 multi-select
+            # Permite 0 snapshots (solo corrida actual), 1 (vs una corrida
+            # especifica) o N (todas con gradiente cronologico).
+            _selected_polar_cmp_ids: List[str] = []
+            if _polar_existing_snaps:
+                _curr_by_lbl = {
+                    r["sensor_label"]: {"amp": r["amp_at_op"], "phase": r["phase_at_op"]}
+                    for r in _polar_curr_readings
+                }
+                # Marcar snapshots identicos a la corrida actual y armar
+                # opciones del multiselect (label + key)
+                _polar_opt_pairs: List[Tuple[str, str]] = []
+                _polar_default_pick: List[str] = []
+                _polar_first_non_current = None
+                for _i, s in enumerate(_polar_existing_snaps):
+                    _is_current = False
+                    if _curr_by_lbl:
+                        try:
+                            _snap_full = load_polar_snapshot(_polar_inst_id, s["snapshot_id"])
+                            if _snap_full is not None:
+                                from core.polar_history import _polar_snapshot_is_identical_to
+                                _is_current = _polar_snapshot_is_identical_to(
+                                    _snap_full, _curr_by_lbl,
+                                )
+                        except Exception:
+                            pass
+                    _suffix = " · (corrida actual)" if _is_current else ""
+                    _opspeed = s.get("operating_speed_rpm")
+                    _opspeed_str = f" @ {_opspeed:.0f}rpm" if _opspeed else ""
+                    _lbl = (f"{s['corrida_label'][:28]}{_opspeed_str} "
+                            f"({s['timestamp'][:10]}){_suffix}")
+                    _polar_opt_pairs.append((s["snapshot_id"], _lbl))
+                    if not _is_current and _polar_first_non_current is None:
+                        _polar_first_non_current = _lbl
+
+                _polar_opt_lbls = [l for _, l in _polar_opt_pairs]
+                _polar_lbl_to_key = {l: k for k, l in _polar_opt_pairs}
+                # Default: el primer snapshot no-actual (uno preseleccionado).
+                # El usuario puede agregar mas o quitarlo.
+                if _polar_first_non_current:
+                    _polar_default_pick = [_polar_first_non_current]
+                _polar_cmp_state_key = f"wm_polar_cmp_picks_{_polar_inst_id}"
+                if _polar_cmp_state_key in st.session_state:
+                    # Filtrar picks que ya no existen
+                    _saved = st.session_state[_polar_cmp_state_key]
+                    _polar_default_pick = [
+                        l for l in _saved if l in _polar_opt_lbls
+                    ]
+                _picked = st.multiselect(
+                    "Corridas a superponer en el polar",
+                    options=_polar_opt_lbls,
+                    default=_polar_default_pick,
+                    key=f"wm_polar_cmp_multi_{_polar_inst_id}",
+                    help=(
+                        "Elegí 0 corridas para ver solo la actual, 1 para "
+                        "comparativo simple, o varias para superposición "
+                        "histórica con gradiente cronológico (más viejas "
+                        "más claritas, más recientes más oscuras)."
+                    ),
+                )
+                st.session_state[_polar_cmp_state_key] = _picked
+                _selected_polar_cmp_ids = [
+                    _polar_lbl_to_key[l] for l in _picked if l in _polar_lbl_to_key
+                ]
+                if not _selected_polar_cmp_ids:
+                    st.caption("ℹ️ _Solo se mostrará la corrida actual._")
+                else:
+                    st.caption(
+                        f"Se superpondrán **{len(_selected_polar_cmp_ids)}** "
+                        f"corrida(s) anterior(es) sobre la actual."
+                    )
+
+            # Lista de snapshots con borrar + indicador de trayectoria
+            if _polar_existing_snaps:
+                # Pre-cargar para detectar cuales tienen trayectoria completa
+                _legacy_count = 0
+                _snap_has_trail: Dict[str, bool] = {}
+                for s in _polar_existing_snaps:
+                    try:
+                        _full = load_polar_snapshot(_polar_inst_id, s["snapshot_id"])
+                        if _full is not None:
+                            _has_traj = any(
+                                len(sens.get("trajectory_speed", []) or []) > 1
+                                for sens in _full.get("sensors", [])
+                            )
+                            _snap_has_trail[s["snapshot_id"]] = _has_traj
+                            if not _has_traj:
+                                _legacy_count += 1
+                    except Exception:
+                        _snap_has_trail[s["snapshot_id"]] = False
+
+                if _legacy_count > 0:
+                    st.warning(
+                        f"⚠️ {_legacy_count} snapshot(s) viejos sin "
+                        f"trayectoria completa — solo muestran el operating "
+                        f"point en el polar. Para ver el loop completo, "
+                        f"resnapshoteá cargando esa corrida y volviendo a "
+                        f"guardar."
+                    )
+
+                with st.expander(f"🗂️ Gestionar snapshots Polar ({len(_polar_existing_snaps)})"):
+                    if _legacy_count > 0:
+                        if st.button(
+                            f"🧹 Borrar los {_legacy_count} snapshot(s) sin trayectoria",
+                            key=f"wm_polar_del_legacy_{_polar_inst_id}",
+                            help=(
+                                "Borra todos los snapshots que se guardaron "
+                                "antes del Ciclo 17.1.2 (sin trail completo). "
+                                "Los snapshots actuales con trayectoria NO se "
+                                "tocan."
+                            ),
+                        ):
+                            _deleted = 0
+                            for s in _polar_existing_snaps:
+                                if not _snap_has_trail.get(s["snapshot_id"], False):
+                                    if delete_polar_snapshot(_polar_inst_id, s["snapshot_id"]):
+                                        _deleted += 1
+                            st.success(
+                                f"✓ {_deleted} snapshot(s) viejos borrados. "
+                                f"Cargá las corridas y guardá snapshots "
+                                f"nuevos para reconstruir el histórico con "
+                                f"trayectoria."
+                            )
+                            st.rerun()
+                        st.markdown("---")
+
+                    for s in _polar_existing_snaps:
+                        cols_h = st.columns([4, 1])
+                        _has_traj = _snap_has_trail.get(s["snapshot_id"], False)
+                        _traj_chip = (
+                            "🟢 con trayectoria" if _has_traj
+                            else "🟡 solo punto Op (legacy)"
+                        )
+                        cols_h[0].markdown(
+                            f"**{s['corrida_label'][:30]}** · {_traj_chip}  \n"
+                            f"_{s['timestamp']} · {s['n_sensors']} sensores · "
+                            f"{s.get('operating_speed_rpm', 0):.0f} rpm_"
+                        )
+                        if cols_h[1].button(
+                            "🗑️",
+                            key=f"wm_polar_del_{s['snapshot_id']}",
+                            help="Borrar este snapshot",
+                        ):
+                            if delete_polar_snapshot(_polar_inst_id, s["snapshot_id"]):
+                                st.success("Borrado.")
+                                st.rerun()
+
+            # Persistir los snapshot ids elegidos (lista) para que el
+            # render del polar y del PDF los pueda leer.
+            st.session_state["wm_polar_compare_snapshot_ids"] = _selected_polar_cmp_ids
+            # Backward-compat: si hay 1 elegido, lo expongo como single
+            st.session_state["wm_polar_compare_snapshot_id"] = (
+                _selected_polar_cmp_ids[0] if _selected_polar_cmp_ids else "__none__"
+            )
+            st.session_state["wm_polar_compare_skip_identical"] = bool(_polar_curr_readings)
+            st.session_state["wm_polar_compare_inst_id"] = _polar_inst_id
+        elif _polar_hist_ok and not _polar_inst_id:
+            st.caption(
+                "_(Activá una Asset Instance arriba para guardar histórico.)_"
+            )
+
     if not selected_ids:
         st.info("Selecciona uno o más polares en la barra lateral.")
         return
 
     selected_items = [id_to_item[sid] for sid in selected_ids]
     logo_uri = get_logo_data_uri(LOGO_PATH)
+
+    # ============================================================
+    # Ciclo 17.1.1 — Comparativo Polar inline (multi-snapshot)
+    # ------------------------------------------------------------
+    # Cuando el usuario elige una o más corridas anteriores,
+    # mostramos arriba de los paneles individuales una tabla
+    # comparativa con UNA fila por (sensor × snapshot) + diagnostico
+    # de shift de fase + crecimiento de amplitud.
+    # ============================================================
+    _polar_cmp_ids: List[str] = st.session_state.get(
+        "wm_polar_compare_snapshot_ids", []
+    ) or []
+    if _polar_cmp_ids and _polar_curr_readings:
+        try:
+            from core.polar_history import (
+                load_polar_snapshot,
+                phase_shift_classifier,
+                amplitude_change_classifier,
+                shortest_arc_phase_diff,
+            )
+
+            _cmp_rows = []
+            _snap_meta_by_id = {}
+            for _snap_id in _polar_cmp_ids:
+                _snap_full = load_polar_snapshot(_polar_inst_id, _snap_id)
+                if _snap_full is None:
+                    continue
+                _snap_meta_by_id[_snap_id] = _snap_full
+                _prev_by_lbl = {
+                    str(s.get("sensor_label", "")): s
+                    for s in _snap_full.get("sensors", [])
+                }
+                _snap_label_short = _snap_full.get("corrida_label", _snap_id)[:22]
+                _snap_ts = (_snap_full.get("timestamp", "") or "")[:10]
+
+                for r in _polar_curr_readings:
+                    _lbl = r["sensor_label"]
+                    _prev = _prev_by_lbl.get(_lbl)
+                    if _prev is None:
+                        _cmp_rows.append({
+                            "Sensor": _lbl,
+                            "vs Corrida": f"{_snap_label_short} ({_snap_ts})",
+                            "Anterior amp": "—",
+                            "Actual amp": f"{r['amp_at_op']:.3f} {r['amp_unit']}",
+                            "Δ amp": "—",
+                            "Anterior fase": "—",
+                            "Actual fase": f"{r['phase_at_op']:.1f}°",
+                            "Δ fase": "—",
+                            "Diagnóstico": "Sin lectura previa para este sensor",
+                        })
+                        continue
+                    _prev_amp = float(_prev.get("amp_at_op", 0))
+                    _prev_phase = float(_prev.get("phase_at_op", 0))
+                    _delta_amp = r["amp_at_op"] - _prev_amp
+                    _delta_amp_pct = (_delta_amp / _prev_amp * 100.0) if _prev_amp > 0 else None
+                    _delta_phase = shortest_arc_phase_diff(_prev_phase, r["phase_at_op"])
+                    _phase_class = phase_shift_classifier(_delta_phase)
+                    _amp_class = amplitude_change_classifier(_delta_amp_pct)
+
+                    _diag_parts = []
+                    if _phase_class == "shift_critical":
+                        _diag_parts.append("⚠️ Shift fase crítico (>60°)")
+                    elif _phase_class == "shift_major":
+                        _diag_parts.append("⚠️ Shift fase mayor (≥30°)")
+                    elif _phase_class == "shift_minor":
+                        _diag_parts.append("Shift fase menor (10–30°)")
+                    elif _phase_class == "stable":
+                        _diag_parts.append("Fase estable (<10°)")
+                    if _delta_amp_pct is not None:
+                        if _amp_class in ("amp_critical", "amp_high"):
+                            _diag_parts.append(f"Amp {_delta_amp_pct:+.0f}% (alza)")
+                        elif _amp_class == "amp_up":
+                            _diag_parts.append(f"Amp {_delta_amp_pct:+.0f}%")
+                        elif _amp_class in ("amp_down_strong", "amp_down"):
+                            _diag_parts.append(f"Amp {_delta_amp_pct:+.0f}%")
+
+                    _cmp_rows.append({
+                        "Sensor": _lbl,
+                        "vs Corrida": f"{_snap_label_short} ({_snap_ts})",
+                        "Anterior amp": f"{_prev_amp:.3f} {r['amp_unit']}",
+                        "Actual amp": f"{r['amp_at_op']:.3f} {r['amp_unit']}",
+                        "Δ amp": (
+                            f"{_delta_amp:+.3f} ({_delta_amp_pct:+.1f}%)"
+                            if _delta_amp_pct is not None else "—"
+                        ),
+                        "Anterior fase": f"{_prev_phase:.1f}°",
+                        "Actual fase": f"{r['phase_at_op']:.1f}°",
+                        "Δ fase": f"{_delta_phase:+.1f}°",
+                        "Diagnóstico": " · ".join(_diag_parts) if _diag_parts else "—",
+                    })
+
+            if _cmp_rows:
+                st.markdown("### 📈 Comparativo Polar — vs corridas anteriores")
+                _n_snaps = len(_snap_meta_by_id)
+                if _n_snaps == 1:
+                    _only = list(_snap_meta_by_id.values())[0]
+                    st.caption(
+                        f"Comparando contra **{_only.get('corrida_label', '')}** "
+                        f"del {_only.get('timestamp', '')[:10]}. Shift de fase "
+                        f"1X >30° es síntoma diagnóstico de cambio de balance "
+                        f"del rotor (API 684 / ISO 21940-12)."
+                    )
+                else:
+                    st.caption(
+                        f"Mostrando comparativo contra **{_n_snaps} corridas "
+                        f"anteriores**. Cada fila es una combinación "
+                        f"(sensor × corrida). Shift de fase 1X >30° = "
+                        f"síntoma de cambio de balance (API 684)."
+                    )
+                _cmp_disp = pd.DataFrame(_cmp_rows)
+                st.dataframe(_cmp_disp, width="stretch", hide_index=True)
+        except Exception as _polar_cmp_e:
+            st.caption(f"_(Comparativo Polar no disponible: {_polar_cmp_e})_")
 
     for panel_index, item in enumerate(selected_items):
         render_polar_panel(

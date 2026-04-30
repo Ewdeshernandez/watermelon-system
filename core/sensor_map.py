@@ -344,6 +344,204 @@ def resolve_sensor_for_point(
     return None
 
 
+# ============================================================
+# Ciclo 16.1 — Wizard auto-pattern desde CSVs cargados
+# ------------------------------------------------------------
+# Para cada sensor del Sensor Map sin match, mira los signals
+# cargados en sesion y propone un csv_match_pattern concreto
+# basado en el Point name del signal mas compatible (tipo +
+# direccion). Reduce el setup manual que el usuario tiene que
+# hacer cuando los Point names del DCS no siguen la convencion
+# API 670 (3X/3Y/4X/4Y) sino una numeracion del cliente
+# (VE5807/VE5808/VE5809/VE5810).
+# ============================================================
+
+def _signal_type_compatible(sensor_type: str, signal_meta: Dict[str, Any]) -> bool:
+    """¿La unidad/variable del signal es compatible con el tipo del sensor?"""
+    unit = str(signal_meta.get("Y-Axis Unit", "") or signal_meta.get("Unit", "") or "").lower()
+    variable = str(signal_meta.get("Variable", "") or "").lower()
+    point = str(signal_meta.get("Point", "") or "").lower()
+
+    stype = (sensor_type or "").lower()
+    if stype == "proximity":
+        # mil, µm, um (displacement)
+        return ("mil" in unit) or ("µm" in unit) or ("um " in unit) or unit.strip() == "um" or "disp" in variable
+    if stype == "velocity":
+        return ("mm/s" in unit) or ("in/s" in unit) or ("vel" in variable) or ("vel" in point) or ("vt" in point)
+    if stype == "accelerometer":
+        # 'g' exacto, 'g peak', 'm/s²', accel/ace
+        u = unit.strip()
+        return (u == "g" or u.startswith("g ") or u.endswith(" g") or "g pk" in u or "g pp" in u
+                or "m/s" in u or "accel" in variable or "ace" in variable
+                or "acell" in point or "accel" in point or "ace" in point)
+    if stype == "keyphasor":
+        return "kph" in variable or "key" in variable or "rev" in variable or "tach" in variable
+    return False
+
+
+def _signal_direction_compatible(direction: str, signal_meta: Dict[str, Any]) -> bool:
+    """¿El Point/Variable del signal indica la misma direccion del sensor?"""
+    d = (direction or "").upper().strip()
+    if not d or d in ("RAD", "AXIAL", "AX"):
+        return True  # sensores radial/axial no necesitan matching de direccion
+    point = str(signal_meta.get("Point", "") or "").upper()
+    variable = str(signal_meta.get("Variable", "") or "").upper()
+    haystack = f" {point} {variable} "
+    if d == "X":
+        return ("(X)" in haystack) or (" X " in haystack) or ("_X" in haystack) or point.endswith(" X")
+    if d == "Y":
+        return ("(Y)" in haystack) or (" Y " in haystack) or ("_Y" in haystack) or point.endswith(" Y")
+    return True
+
+
+def _extract_pattern_token(point_name: str) -> str:
+    """
+    Extrae el token mas distintivo del Point name para usar como pattern.
+
+    Estrategia:
+      1. Buscar el numero mas largo (suelen ser tags unicos del DCS,
+         ej. 'VE5810' → '5810').
+      2. Si no hay numero, usar la primera palabra alfanumerica.
+
+    Devuelve el token (sin asteriscos), el caller lo envuelve.
+    """
+    import re
+    pn = (point_name or "").strip()
+    if not pn:
+        return ""
+    # Numero mas largo
+    nums = re.findall(r"\d{2,}", pn)  # minimo 2 digitos para evitar tokens 0/1/2
+    if nums:
+        return max(nums, key=len)
+    # Primera palabra alfanumerica
+    words = re.findall(r"[A-Za-z0-9]+", pn)
+    return words[0] if words else ""
+
+
+def detect_definitive_matches(
+    sensors: List[Dict[str, Any]],
+    signals_meta: List[Dict[str, Any]],
+) -> Dict[str, str]:
+    """
+    Detecta los matches "definitivos" entre sensores y signals — solo
+    aquellos donde el csv_match_pattern del sensor es NO vacio Y matchea
+    explicitamente el Point name del signal. NO usa el fallback gracioso
+    del resolver (que devuelve "el primer candidato del tipo correcto"
+    aunque ningun pattern matchee).
+
+    Args:
+        sensors: lista del Sensor Map.
+        signals_meta: lista de dicts con File, Point, Variable, Y-Axis Unit.
+
+    Returns:
+        Dict ``{sensor_label: signal_file}`` solo con matches con pattern
+        explicito que matchea. Sensores sin pattern o con pattern que no
+        matchea ningun signal NO aparecen aqui.
+    """
+    out: Dict[str, str] = {}
+    claimed_signals: set = set()
+    for s in sensors:
+        pattern = (s.get("csv_match_pattern") or "").strip()
+        if not pattern:
+            continue
+        lbl = sensor_label(s)
+        for sig in signals_meta:
+            sig_file = str(sig.get("File", "") or sig.get("signal_name", ""))
+            if sig_file in claimed_signals:
+                continue
+            point = str(sig.get("Point", "") or "")
+            point_norm = _normalize_for_match(point)
+            if _pattern_matches(pattern, point_norm):
+                out[lbl] = sig_file
+                claimed_signals.add(sig_file)
+                break
+    return out
+
+
+def suggest_pattern_for_sensor(
+    sensor: Dict[str, Any],
+    signals_meta: List[Dict[str, Any]],
+    already_claimed_signals: Optional[set] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Para un sensor del Sensor Map sin match, propone un csv_match_pattern
+    basado en los signals cargados en sesion.
+
+    Args:
+        sensor: dict del sensor (sensor_type, direction, unit_native, ...).
+        signals_meta: lista de dicts con keys File, Point, Variable,
+            Y-Axis Unit (provista por el caller, normalmente desde
+            session_state.signals).
+        already_claimed_signals: set de signal_names que ya estan tomados
+            por otros sensores. Estos se excluyen del pool de candidatos.
+
+    Returns:
+        Dict con:
+          proposed_pattern: ej. "*5810*"
+          candidate_point: ej. "VE5810 (X)"
+          candidate_signal: ej. "5810 WF 19.csv"
+          confidence: "high" / "medium" / "low"
+          reason: explicacion humana breve.
+        O None si no hay candidatos compatibles.
+    """
+    sensor_type = str(sensor.get("sensor_type", "")).lower()
+    direction = str(sensor.get("direction", "")).upper()
+    claimed = already_claimed_signals or set()
+
+    # Filtrar pool: no claimed, type-compatible
+    pool = []
+    for sig in signals_meta:
+        sig_name = str(sig.get("File", "") or sig.get("signal_name", "") or "")
+        if sig_name and sig_name in claimed:
+            continue
+        if not _signal_type_compatible(sensor_type, sig):
+            continue
+        pool.append(sig)
+
+    if not pool:
+        return None
+
+    # Refinar por direccion si aplica
+    dir_filtered = [s for s in pool if _signal_direction_compatible(direction, s)]
+    if dir_filtered:
+        pool = dir_filtered
+
+    if not pool:
+        return None
+
+    # Elegir candidato: si quedo uno solo, confidence high. Si quedaron
+    # varios y todos comparten el mismo numero, tambien high. Si no, low.
+    chosen = pool[0]
+    point_name = str(chosen.get("Point", ""))
+    token = _extract_pattern_token(point_name)
+    if not token:
+        return None
+    proposed = f"*{token}*"
+
+    if len(pool) == 1:
+        confidence = "high"
+        reason = (
+            f"Único signal cargado compatible con un sensor "
+            f"{sensor_type or 'de este tipo'}"
+            + (f" en dirección {direction}" if direction in ("X", "Y") else "")
+            + f". El número {token} aparece en el Point name."
+        )
+    else:
+        confidence = "medium"
+        reason = (
+            f"{len(pool)} signals compatibles; tomamos el primero "
+            f"({point_name}). Verificá manualmente si la asignación es correcta."
+        )
+
+    return {
+        "proposed_pattern": proposed,
+        "candidate_point": point_name,
+        "candidate_signal": str(chosen.get("File", "") or chosen.get("signal_name", "")),
+        "confidence": confidence,
+        "reason": reason,
+    }
+
+
 def _generate_plane_sensors(
     plane_idx: int,
     plane_label: str,

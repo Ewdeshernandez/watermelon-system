@@ -189,16 +189,20 @@ def render_instance_selector(module_name: str = "module") -> Dict[str, Any]:
     # Solución: el widget tiene su propia key efímera, y después del
     # selectbox copiamos el valor a SESSION_KEY_INSTANCE (key persistente
     # NO atada a ningún widget → sobrevive cualquier navegación).
+    #
+    # v2.6 hotfix — Sincronizar SIEMPRE el widget desde la key persistente
+    # ANTES de instanciar el widget. Esto resuelve el bug donde clickear
+    # "Activar" en una card del cockpit (que setea SESSION_KEY_INSTANCE
+    # via callback) no actualizaba el selectbox del sidebar porque el
+    # widget tenia su propio valor "pegado". Como el callback corre
+    # ANTES del rerun y nuestro código ANTES del widget, podemos
+    # sobreescribir libremente la key del widget aquí.
     widget_key = f"wm_instance_select_{module_name}"
-    # Si la key del widget no existe pero tenemos un current_id válido,
-    # inicializarla con el current_id antes de instanciar el widget.
-    if widget_key not in st.session_state:
-        st.session_state[widget_key] = current_id
+    st.session_state[widget_key] = current_id
 
     selected_id = st.selectbox(
         "Instancia activa",
         options=instance_ids,
-        index=instance_ids.index(current_id),
         format_func=lambda iid: label_map.get(iid, iid),
         key=widget_key,
         help=(

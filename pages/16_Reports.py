@@ -1714,6 +1714,395 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 # no bloqueamos el reporte.
                 pass
 
+    # ============================================================
+    # Ciclo 16.2 — SECCIÓN EVOLUCIÓN (comparativo multi-fecha)
+    # ------------------------------------------------------------
+    # Justo después del MAPA DE SENSORES, antes de Recomendaciones.
+    # Aparece automáticamente cuando hay al menos 1 snapshot anterior
+    # guardado para esta instancia. Compara la corrida actual contra
+    # la última corrida snapshoteada y reporta tendencias por sensor.
+    # ============================================================
+    if sm_inst_id:
+        try:
+            from core.instance_history import (
+                get_previous_snapshot,
+                compare_to_previous,
+                trend_arrow,
+                save_snapshot as _hist_save_snapshot,
+            )
+            from core.machine_severity import build_severity_table as _hist_bst
+            from core.instance_state import get_instance as _hist_get_instance
+
+            _hist_inst = _hist_get_instance(sm_inst_id)
+            if _hist_inst is not None and getattr(_hist_inst, "sensors", None):
+                _curr_sev_df = _hist_bst(
+                    _hist_inst.sensors,
+                    st.session_state.get("signals", {}) or {},
+                )
+                # Ciclo 16.2.1 — saltea snapshots cuyas lecturas son
+                # identicas a la corrida actual (caso: usuario guarda
+                # manualmente la corrida actual y despues genera el PDF).
+                _prev_snap = get_previous_snapshot(
+                    sm_inst_id,
+                    skip_identical_to=_curr_sev_df,
+                )
+
+                if _prev_snap is not None and _curr_sev_df is not None and not _curr_sev_df.empty:
+                    cmp_df = compare_to_previous(_curr_sev_df, _prev_snap)
+                    if cmp_df is not None and not cmp_df.empty:
+                        story.append(Paragraph("EVOLUCIÓN DESDE LA CORRIDA ANTERIOR", styles["WMTOC1"]))
+
+                        _prev_lbl = _prev_snap.get("corrida_label", "—")
+                        _prev_ts = (_prev_snap.get("timestamp", "") or "")[:10]
+
+                        # Síntesis en prosa
+                        _trends = cmp_df["Trend"].value_counts().to_dict()
+                        _n_total = int(sum(_trends.values()))
+                        _n_up_crit = int(_trends.get("up_critical", 0))
+                        _n_up = int(_trends.get("up", 0))
+                        _n_stable = int(_trends.get("stable", 0))
+                        _n_down = int(_trends.get("down", 0))
+                        _n_down_g = int(_trends.get("down_good", 0))
+                        _n_no_prev = int(_trends.get("no_prev", 0))
+
+                        _intro = (
+                            f"Esta corrida se compara contra la corrida anterior "
+                            f"registrada bajo la etiqueta «{_prev_lbl}» del "
+                            f"{_prev_ts}. La comparación se realiza sensor por "
+                            f"sensor sobre la misma instancia y respeta los "
+                            f"setpoints individuales del Sensor Map."
+                        )
+                        story.append(Paragraph(_paragraph_safe(_intro), styles["WMBody"]))
+
+                        # Hallazgos cuantitativos
+                        _findings_parts = []
+                        if _n_up_crit > 0:
+                            _findings_parts.append(
+                                f"{_n_up_crit} "
+                                f"{'sensor presenta' if _n_up_crit == 1 else 'sensores presentan'} "
+                                f"alza significativa (≥20% o cambio de zona hacia "
+                                f"Atención/Acción Requerida)"
+                            )
+                        if _n_up > 0:
+                            _findings_parts.append(
+                                f"{_n_up} con tendencia ascendente moderada (+5 a +20%)"
+                            )
+                        if _n_stable > 0:
+                            _findings_parts.append(
+                                f"{_n_stable} estables (variación menor al 5%)"
+                            )
+                        if _n_down > 0 or _n_down_g > 0:
+                            _down_total = _n_down + _n_down_g
+                            _findings_parts.append(
+                                f"{_down_total} con tendencia descendente"
+                            )
+                        if _n_no_prev > 0:
+                            _findings_parts.append(
+                                f"{_n_no_prev} sin lectura previa para comparar"
+                            )
+
+                        if _findings_parts:
+                            _findings_text = (
+                                "Distribución por tendencia: " +
+                                ", ".join(_findings_parts) + "."
+                            )
+                            story.append(Paragraph(
+                                _paragraph_safe(_findings_text), styles["WMBody"]))
+
+                        # Mencionar el sensor con mayor incremento por nombre
+                        _crits = cmp_df[cmp_df["Trend"] == "up_critical"].copy()
+                        if not _crits.empty and "Delta_pct" in _crits.columns:
+                            _crits = _crits.dropna(subset=["Delta_pct"]).sort_values(
+                                "Delta_pct", ascending=False
+                            )
+                            if not _crits.empty:
+                                _top = _crits.iloc[0]
+                                _lbl = str(_top.get("Label", ""))
+                                _pl = str(_top.get("Plane Label", "") or "")
+                                _ov_prev = float(_top.get("Overall_prev", 0) or 0)
+                                _ov_curr = float(_top.get("Overall", 0) or 0)
+                                _dp = float(_top.get("Delta_pct", 0) or 0)
+                                _unit = str(_top.get("Unit", "") or "")
+                                _st_prev = str(_top.get("Status_prev", "") or "")
+                                _st_curr = str(_top.get("Status", "") or "")
+                                _msg = (
+                                    f"El mayor incremento se observa en el sensor "
+                                    f"{_lbl} ({_pl}), que pasó de {_ov_prev:.3f} a "
+                                    f"{_ov_curr:.3f} {_unit} ({_dp:+.1f}%)"
+                                )
+                                if _st_prev != _st_curr:
+                                    _msg += (
+                                        f", cruzando además del estado «{_st_prev}» "
+                                        f"al estado «{_st_curr}»"
+                                    )
+                                _msg += (
+                                    ". Se recomienda priorizar la verificación de "
+                                    "este punto y revisar el histórico de Trends "
+                                    "para descartar comportamiento transitorio."
+                                )
+                                story.append(Paragraph(
+                                    _paragraph_safe(_msg), styles["WMBody"]))
+
+                        # Tabla compacta solo con sensores con cambio significativo
+                        _show = cmp_df[
+                            cmp_df["Trend"].isin(["up_critical", "up", "down", "down_good"])
+                        ].copy()
+                        if not _show.empty:
+                            # Orden por trend criticidad
+                            _trend_order = {
+                                "up_critical": 0, "up": 1,
+                                "down": 2, "down_good": 3,
+                            }
+                            _show = _show.sort_values(
+                                by="Trend",
+                                key=lambda col: col.map(_trend_order),
+                            )
+                            _table_data = [[
+                                Paragraph("<b>Sensor</b>", styles["WMTableHeader"]),
+                                Paragraph("<b>Plano</b>", styles["WMTableHeader"]),
+                                Paragraph("<b>Anterior</b>", styles["WMTableHeader"]),
+                                Paragraph("<b>Actual</b>", styles["WMTableHeader"]),
+                                Paragraph("<b>Δ</b>", styles["WMTableHeader"]),
+                                Paragraph("<b>Δ %</b>", styles["WMTableHeader"]),
+                                Paragraph("<b>Tendencia</b>", styles["WMTableHeader"]),
+                                Paragraph("<b>Estado</b>", styles["WMTableHeader"]),
+                            ]]
+                            _trend_color_map = {
+                                "up_critical": "#dc2626",
+                                "up": "#f59e0b",
+                                "stable": "#475569",
+                                "down": "#16a34a",
+                                "down_good": "#059669",
+                            }
+                            for _, _r in _show.iterrows():
+                                _trend = str(_r["Trend"])
+                                _color = _trend_color_map.get(_trend, "#475569")
+                                _dp_v = _r.get("Delta_pct")
+                                _dp_str = f"{float(_dp_v):+.1f}%" if _dp_v is not None and pd.notna(_dp_v) else "—"
+                                _d_v = _r.get("Delta")
+                                _d_str = f"{float(_d_v):+.3f}" if _d_v is not None and pd.notna(_d_v) else "—"
+                                _ovp = _r.get("Overall_prev")
+                                _ovp_str = f"{float(_ovp):.3f}" if _ovp is not None and pd.notna(_ovp) else "—"
+                                _ovc = _r.get("Overall")
+                                _ovc_str = f"{float(_ovc):.3f}" if _ovc is not None and pd.notna(_ovc) else "—"
+                                _st_curr = str(_r["Status"] or "")
+                                _table_data.append([
+                                    Paragraph(str(_r["Label"]), styles["WMTableCell"]),
+                                    Paragraph(str(_r["Plane Label"] or _r["Plane"]), styles["WMTableCell"]),
+                                    Paragraph(_ovp_str, styles["WMTableCell"]),
+                                    Paragraph(_ovc_str, styles["WMTableCell"]),
+                                    Paragraph(_d_str, styles["WMTableCell"]),
+                                    Paragraph(
+                                        f'<font color="{_color}"><b>{_dp_str}</b></font>',
+                                        styles["WMTableCell"],
+                                    ),
+                                    Paragraph(
+                                        f'<font color="{_color}"><b>{trend_arrow(_trend)}</b></font>',
+                                        styles["WMTableCell"],
+                                    ),
+                                    Paragraph(_st_curr, styles["WMTableCell"]),
+                                ])
+                            _evo_tbl = Table(
+                                _table_data,
+                                colWidths=[
+                                    2.5 * cm, 2.6 * cm, 1.9 * cm, 1.9 * cm,
+                                    1.7 * cm, 1.6 * cm, 1.4 * cm, 2.4 * cm,
+                                ],
+                                repeatRows=1,
+                            )
+                            _evo_tbl.setStyle(TableStyle([
+                                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+                                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                                ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+                                 [colors.HexColor("#ffffff"), colors.HexColor("#f8fafc")]),
+                                ("BOX", (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
+                                ("INNERGRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+                                ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                                ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                                ("TOPPADDING", (0, 0), (-1, -1), 4),
+                                ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                            ]))
+                            story.append(Spacer(1, 0.10 * cm))
+                            _evo_caption_style = ParagraphStyle(
+                                name="WMEvolutionCaption",
+                                parent=styles["WMMeta"],
+                                fontName=PDF_FONT_BOLD,
+                                fontSize=10.0,
+                                leading=13,
+                                textColor=colors.HexColor("#0f172a"),
+                                spaceBefore=2,
+                                spaceAfter=4,
+                            )
+                            story.append(Paragraph(
+                                "Sensores con cambio significativo respecto a la "
+                                "corrida anterior",
+                                _evo_caption_style,
+                            ))
+                            story.append(_evo_tbl)
+                        else:
+                            story.append(Paragraph(
+                                "Ningún sensor presentó variación significativa "
+                                "(±5%) entre corridas. La condición global se "
+                                "mantiene estable.",
+                                styles["WMBody"],
+                            ))
+
+                        # ============================================
+                        # Ciclo 16.3 — TRENDS multi-snapshot grid
+                        # --------------------------------------------
+                        # Mini line charts por sensor crítico mostrando
+                        # los últimos N snapshots con threshold lines
+                        # Alarm/Danger. Permite ver la trajectoria del
+                        # sensor en el tiempo, no solo el delta vs la
+                        # corrida anterior.
+                        # ============================================
+                        try:
+                            from core.trend_charts import render_sensor_trend_chart
+                            from core.instance_history import get_sensor_history
+
+                            # Top sensores criticos: up_critical y up
+                            _crit_for_trends = cmp_df[
+                                cmp_df["Trend"].isin(["up_critical", "up"])
+                            ].copy()
+                            if not _crit_for_trends.empty:
+                                _crit_for_trends["__pct"] = _crit_for_trends["Delta_pct"].fillna(0)
+                                _crit_for_trends = _crit_for_trends.sort_values(
+                                    "__pct", ascending=False
+                                ).head(6)
+
+                                # Renderizar chart por sensor
+                                _chart_imgs = []
+                                for _, _cr in _crit_for_trends.iterrows():
+                                    _lbl = str(_cr["Label"])
+                                    _plbl = str(_cr.get("Plane Label", "") or "")
+                                    _alarm = float(_cr.get("Alarm") or 0)
+                                    _danger = float(_cr.get("Danger") or 0)
+                                    _unit = str(_cr.get("Unit", "") or "")
+                                    # Buscar alarm/danger del sensor en el
+                                    # current_sev_df (cmp_df no las trae)
+                                    _curr_row = _curr_sev_df[
+                                        _curr_sev_df["Label"] == _lbl
+                                    ]
+                                    if not _curr_row.empty:
+                                        _curr_row_d = _curr_row.iloc[0]
+                                        _alarm = float(_curr_row_d.get("Alarm") or 0)
+                                        _danger = float(_curr_row_d.get("Danger") or 0)
+                                        _unit = str(_curr_row_d.get("Unit", "") or "")
+
+                                    # Histórico + corrida actual al final
+                                    _current_reading = {
+                                        "overall": float(_cr.get("Overall") or 0),
+                                        "status": str(_cr.get("Status", "") or ""),
+                                        "alarm": _alarm,
+                                        "danger": _danger,
+                                        "unit": _unit,
+                                        "corrida_label": "Actual",
+                                    }
+                                    _hist = get_sensor_history(
+                                        sm_inst_id, _lbl,
+                                        max_snapshots=8,
+                                        current_reading=_current_reading,
+                                    )
+                                    if len(_hist) < 2:
+                                        # Necesitamos al menos 2 puntos para una tendencia
+                                        continue
+                                    _png = render_sensor_trend_chart(
+                                        _hist,
+                                        sensor_label=_lbl,
+                                        plane_label=_plbl,
+                                        alarm=_alarm, danger=_danger,
+                                        unit=_unit,
+                                        figure_width_in=4.6,
+                                        figure_height_in=2.4,
+                                    )
+                                    if _png:
+                                        _chart_imgs.append(_png)
+
+                                if _chart_imgs:
+                                    story.append(Spacer(1, 0.30 * cm))
+                                    story.append(Paragraph(
+                                        "Trayectoria histórica de los sensores con mayor evolución",
+                                        _evo_caption_style,
+                                    ))
+                                    story.append(Paragraph(
+                                        "Cada gráfico muestra el Overall del sensor a "
+                                        "lo largo de las últimas corridas snapshoteadas, "
+                                        "con líneas horizontales para los setpoints "
+                                        "individuales de Alarm (ámbar) y Danger (rojo). "
+                                        "El último punto corresponde a la corrida actual. "
+                                        "Los markers se colorean por estado de cada "
+                                        "snapshot (verde aceptable, ámbar atención, rojo "
+                                        "acción requerida).",
+                                        styles["WMBody"],
+                                    ))
+
+                                    # Grid 2 cols × N filas con los charts
+                                    usable_w = A4[0] - doc.leftMargin - doc.rightMargin
+                                    cell_w = usable_w / 2.0 - 0.2 * cm
+                                    target_h = 4.5 * cm
+                                    grid_data = []
+                                    for i in range(0, len(_chart_imgs), 2):
+                                        row = []
+                                        for j in range(2):
+                                            if i + j < len(_chart_imgs):
+                                                _bytes = _chart_imgs[i + j]
+                                                fitted_w, fitted_h = _fit_image_dimensions(
+                                                    _bytes, cell_w, target_h
+                                                )
+                                                _img = Image(BytesIO(_bytes),
+                                                             width=fitted_w,
+                                                             height=fitted_h)
+                                                _img.hAlign = "CENTER"
+                                                row.append(_img)
+                                            else:
+                                                row.append("")
+                                        grid_data.append(row)
+
+                                    grid_tbl = Table(
+                                        grid_data,
+                                        colWidths=[cell_w + 0.2 * cm, cell_w + 0.2 * cm],
+                                    )
+                                    grid_tbl.setStyle(TableStyle([
+                                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                                        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                                        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                                        ("TOPPADDING", (0, 0), (-1, -1), 4),
+                                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                                    ]))
+                                    story.append(Spacer(1, 0.10 * cm))
+                                    story.append(grid_tbl)
+                        except Exception:
+                            # Si trends no se puede renderizar, seguimos
+                            # con el resto del reporte sin bloquear.
+                            pass
+
+                        story.append(Spacer(1, 0.20 * cm))
+                        story.append(PageBreak())
+
+                # AUTO-SNAPSHOT: al final, guardar la corrida actual como
+                # snapshot para que la próxima corrida tenga referencia.
+                # Solo si hay datos (no snapshotear corridas vacías).
+                if _curr_sev_df is not None and not _curr_sev_df.empty:
+                    try:
+                        _auto_label = (
+                            (meta.get("consecutive") or "").strip()
+                            or f"Reporte {meta.get('report_date', '')}"
+                        )
+                        _hist_save_snapshot(
+                            sm_inst_id,
+                            _curr_sev_df,
+                            corrida_label=_auto_label,
+                            notes="Snapshot automático al generar PDF.",
+                        )
+                    except Exception:
+                        pass
+        except Exception:
+            # Si falla cualquier cosa de evolución, no bloqueamos el reporte.
+            pass
+
     # Orden SIGA-style (Ciclo 10A): RECOMENDACIONES primero — es lo que el
     # cliente abre y lee de inmediato. Objetivo y Desarrollo van después.
     # Secciones que están vacías se ocultan y la numeración se compacta.

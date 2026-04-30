@@ -571,6 +571,11 @@ def build_bode_figure(
     operating_rpm: Optional[float] = None,
     iso_thresholds: Optional[Dict[str, float]] = None,
     critical_speeds_pro: Optional[List[Dict[str, Any]]] = None,
+    # Ciclo 17.2 — multi-snapshot overlay (lista de dicts con
+    # trajectory_speed/amp/phase + label + timestamp). Cada snapshot
+    # se dibuja como linea amp vs RPM y phase vs RPM con gradiente
+    # cronologico (azul claro = mas viejo, rojo = mas reciente).
+    prev_snapshots: Optional[List[Dict[str, Any]]] = None,
 ) -> go.Figure:
     x_unit = meta.get("X-Axis Unit", "rpm") or "rpm"
     y_unit = meta.get("Y-Axis Unit", "") or ""
@@ -610,6 +615,113 @@ def build_bode_figure(
         ),
         row=2, col=1,
     )
+
+    # ============================================================
+    # Ciclo 17.2 — Overlays históricos (amp + phase vs RPM)
+    # ------------------------------------------------------------
+    # Para cada snapshot anterior con trayectoria, dibujamos una línea
+    # amp vs RPM en row=2 y phase vs RPM en row=1 con gradiente
+    # cronológico (azul claro = más viejo, rojo = más reciente). Se
+    # ven como "ghost curves" debajo del actual y permiten comparar:
+    #   - Migración del peak en RPM (mode shift)
+    #   - Cambio de amplitud del peak (Q factor degradation)
+    #   - Deriva de la fase a través del modo
+    # ============================================================
+    if prev_snapshots:
+        _snaps_sorted = sorted(
+            [s for s in prev_snapshots if s.get("trajectory_speed")],
+            key=lambda s: s.get("timestamp", "") or "",
+        )
+
+        def _bode_gradient(idx: int, total: int) -> str:
+            if total <= 1:
+                return "rgba(148,163,184,0.55)"
+            pos = idx / max(1, total - 1)
+            # Mismo esquema que Polar: light blue -> amber -> red
+            stops = [
+                (0.00, (125, 211, 252)),
+                (0.50, (245, 158,  11)),
+                (1.00, (220,  38,  38)),
+            ]
+            for i in range(len(stops) - 1):
+                t0, c0 = stops[i]
+                t1, c1 = stops[i + 1]
+                if t0 <= pos <= t1:
+                    frac = (pos - t0) / (t1 - t0)
+                    r = int(c0[0] + (c1[0] - c0[0]) * frac)
+                    g = int(c0[1] + (c1[1] - c0[1]) * frac)
+                    b = int(c0[2] + (c1[2] - c0[2]) * frac)
+                    return f"rgba({r},{g},{b},0.55)"
+            return "rgba(148,163,184,0.55)"
+
+        for _idx, _snap in enumerate(_snaps_sorted):
+            _color = _bode_gradient(_idx, len(_snaps_sorted))
+            _lbl = _snap.get("label", "anterior") or "anterior"
+            _t_speed = _snap.get("trajectory_speed", []) or []
+            _t_amp = _snap.get("trajectory_amp", []) or []
+            _t_phase = _snap.get("trajectory_phase", []) or []
+            if not (len(_t_speed) > 1 and len(_t_speed) == len(_t_amp) == len(_t_phase)):
+                continue
+
+            # Phase vs RPM (row 1)
+            fig.add_trace(
+                go.Scattergl(
+                    x=_t_speed,
+                    y=_t_phase,
+                    mode="lines",
+                    line=dict(width=1.4, color=_color, dash="solid"),
+                    name=f"Phase {_lbl[:18]}",
+                    hovertemplate=(
+                        f"<b>{_lbl}</b><br>"
+                        f"Speed: %{{x:.0f}} {x_unit}<br>"
+                        f"Phase: %{{y:.1f}}°<extra></extra>"
+                    ),
+                    showlegend=False,
+                ),
+                row=1, col=1,
+            )
+            # Amp vs RPM (row 2)
+            fig.add_trace(
+                go.Scattergl(
+                    x=_t_speed,
+                    y=_t_amp,
+                    mode="lines",
+                    line=dict(width=1.4, color=_color, dash="solid"),
+                    name=f"Amp {_lbl[:18]}",
+                    hovertemplate=(
+                        f"<b>{_lbl}</b><br>"
+                        f"Speed: %{{x:.0f}} {x_unit}<br>"
+                        f"Amplitude: %{{y:.3f}} {y_unit}<extra></extra>"
+                    ),
+                    showlegend=False,
+                ),
+                row=2, col=1,
+            )
+            # Marker en el peak de amplitud (= velocidad critica historica)
+            try:
+                _i_pk = int(np.argmax(_t_amp))
+                fig.add_trace(
+                    go.Scattergl(
+                        x=[float(_t_speed[_i_pk])],
+                        y=[float(_t_amp[_i_pk])],
+                        mode="markers",
+                        marker=dict(
+                            size=10, color=_color,
+                            symbol="diamond-open",
+                            line=dict(width=1.8, color="#0f172a"),
+                        ),
+                        name=f"Peak {_lbl[:18]}",
+                        hovertemplate=(
+                            f"<b>Peak {_lbl}</b><br>"
+                            f"Speed: %{{x:.0f}} {x_unit}<br>"
+                            f"Amplitude: %{{y:.3f}} {y_unit}<extra></extra>"
+                        ),
+                        showlegend=False,
+                    ),
+                    row=2, col=1,
+                )
+            except Exception:
+                pass
 
     # ============================================================
     # ISO 20816-2 ZONE BANDS — fondo de la amplitud
@@ -973,12 +1085,18 @@ def _build_bode_report_notes(text_diag: Dict[str, str]) -> str:
     headline = str(text_diag.get("headline", "") or "").strip()
     detail = str(text_diag.get("detail", "") or "").strip()
     action = str(text_diag.get("action", "") or "").strip()
+    # Ciclo 17.2 P3 — narrativa comparativa modal (cuando hay snapshot)
+    comparison_narrative = str(text_diag.get("comparison_narrative", "") or "").strip()
 
     blocks = []
     if headline:
         blocks.append(headline)
     if detail:
         blocks.append(detail)
+    # Inyectar el comparativo entre detalle y acciones — flujo natural
+    # del reporte: estado actual → contexto histórico → acciones.
+    if comparison_narrative:
+        blocks.append(comparison_narrative)
     if action:
         blocks.append("Se recomienda:\n" + action)
 
@@ -1343,6 +1461,330 @@ def render_bode_panel(
         ],
     )
 
+    # Ciclo 17.2 — buscar snapshots elegidos y armar lista de prev
+    _bode_prev_snapshots_list: List[Dict[str, Any]] = []
+    try:
+        _bode_cmp_snap_ids = (
+            st.session_state.get("wm_bode_compare_snapshot_ids") or []
+        )
+        if _bode_cmp_snap_ids:
+            from core.bode_history import load_bode_snapshot
+            from core.sensor_map import (
+                resolve_sensor_for_point as _sm_resolve,
+                sensor_label as _sm_slbl,
+            )
+            from core.instance_state import get_instance as _sm_get_inst
+            _bode_inst_id_local = (
+                st.session_state.get("wm_active_instance_id", "")
+                or st.session_state.get("wm_bode_compare_inst_id", "")
+            )
+            if _bode_inst_id_local:
+                _inst_obj = _sm_get_inst(_bode_inst_id_local)
+                _curr_panel_lbl = None
+                if _inst_obj is not None and _inst_obj.sensors:
+                    _sensor_match = _sm_resolve(
+                        list(_inst_obj.sensors),
+                        str(meta.get("Point Name", "") or item.get("point", "")),
+                        str(meta.get("Variable", "") or item.get("variable", "")),
+                        str(meta.get("Y-Axis Unit", "") or meta.get("Unit", "") or ""),
+                    )
+                    if _sensor_match is not None:
+                        _curr_panel_lbl = _sm_slbl(_sensor_match)
+                if _curr_panel_lbl:
+                    for _snap_id in _bode_cmp_snap_ids:
+                        _prev_snap_full = load_bode_snapshot(
+                            _bode_inst_id_local, _snap_id,
+                        )
+                        if _prev_snap_full is None:
+                            continue
+                        for _ps in _prev_snap_full.get("sensors", []):
+                            if str(_ps.get("sensor_label", "")) == _curr_panel_lbl:
+                                _bode_prev_snapshots_list.append({
+                                    "amp": float(_ps.get("amp_at_op", 0) or 0),
+                                    "phase": float(_ps.get("phase_at_op", 0) or 0),
+                                    "label": _prev_snap_full.get("corrida_label", ""),
+                                    "op_speed": float(_prev_snap_full.get("operating_speed_rpm", 0) or 0),
+                                    "timestamp": _prev_snap_full.get("timestamp", ""),
+                                    "trajectory_speed": _ps.get("trajectory_speed", []) or [],
+                                    "trajectory_amp": _ps.get("trajectory_amp", []) or [],
+                                    "trajectory_phase": _ps.get("trajectory_phase", []) or [],
+                                })
+                                break
+    except Exception:
+        _bode_prev_snapshots_list = []
+
+    # Ciclo 17.2 P3 — narrativa modal completa estilo Bently/API 684
+    # para el PDF Reports cuando hay snapshot anterior elegido.
+    if (
+        _bode_prev_snapshots_list and use_rotordyn_pro
+        and operating_rpm is not None
+    ):
+        try:
+            from core.bode_history import (
+                phase_shift_classifier,
+                amplitude_change_classifier,
+                shortest_arc_phase_diff,
+            )
+            _first_prev = _bode_prev_snapshots_list[0]
+            _prev_amp = float(_first_prev.get("amp", 0))
+            _prev_phase = float(_first_prev.get("phase", 0))
+            _prev_label = str(_first_prev.get("label", "corrida anterior"))
+            _prev_op_speed = float(_first_prev.get("op_speed", 0) or 0)
+
+            if _prev_amp > 0 and len(display_df) > 0:
+                _amp_unit_local = (
+                    meta.get("Amp Unit", "")
+                    or meta.get("Y-Axis Unit", "")
+                    or ""
+                )
+                # Op point actual
+                _diff = (display_df["rpm"] - operating_rpm).abs()
+                _curr_row = display_df.loc[int(_diff.idxmin())]
+                _curr_amp_op = float(_curr_row.get("amp", 0))
+                _curr_phase_op = float(_curr_row.get("phase_plot", _curr_row.get("phase", 0))) % 360.0
+
+                _delta_amp = _curr_amp_op - _prev_amp
+                _delta_amp_pct = (
+                    (_delta_amp / _prev_amp * 100.0) if _prev_amp > 0 else None
+                )
+                _delta_phase = shortest_arc_phase_diff(_prev_phase, _curr_phase_op)
+                _phase_class = phase_shift_classifier(_delta_phase)
+
+                # Datos del modo en la corrida actual
+                _curr_cs_rpm = None
+                _curr_q = None
+                _curr_cs_phase_delta = None
+                if pro_overlay_criticals:
+                    try:
+                        _cs0 = pro_overlay_criticals[0]
+                        _curr_cs_rpm = float(_cs0.get("rpm", 0) or 0)
+                        _curr_q = float(_cs0.get("q_factor", 0) or 0)
+                        _curr_cs_phase_delta = float(_cs0.get("phase_delta", 0) or 0)
+                    except Exception:
+                        pass
+
+                # Clasificar el modo por phase delta a la critica
+                _mode_type = "modo no caracterizado"
+                if _curr_cs_phase_delta and _curr_cs_phase_delta != 0:
+                    _abs_pd = abs(_curr_cs_phase_delta)
+                    if 150.0 <= _abs_pd <= 210.0:
+                        _mode_type = (
+                            "primer modo translacional (Δφ ≈ 180°), "
+                            "consistente con bending mode tipo 'in-phase' "
+                            "del rotor según la nomenclatura de Bently y "
+                            "API 684 §6"
+                        )
+                    elif 70.0 <= _abs_pd < 150.0:
+                        _mode_type = (
+                            "modo cónico / pivotal o segundo modo "
+                            "translacional (Δφ ≈ 90–150°), respuesta "
+                            "típica cuando el rotor pivota alrededor de "
+                            "un punto nodal cercano al cojinete"
+                        )
+                    elif 210.0 < _abs_pd <= 360.0:
+                        _mode_type = (
+                            "segundo modo flexural o respuesta acoplada "
+                            "rotor-estructura (Δφ > 210°)"
+                        )
+                    else:
+                        _mode_type = (
+                            "respuesta de baja deflexión modal "
+                            "(Δφ < 70°) — posible resonancia estructural "
+                            "del soporte / fundación más que modo del "
+                            "rotor"
+                        )
+
+                _narr_parts: List[str] = []
+
+                # 1) Encabezado factual
+                _narr_parts.append(
+                    f"Análisis comparativo rotodinámico Bode contra "
+                    f"«{_prev_label}». A la velocidad operativa "
+                    f"({operating_rpm:.0f} rpm), la respuesta sincrónica "
+                    f"1X del sensor evolucionó de "
+                    f"{_prev_amp:.3f} {_amp_unit_local} @ "
+                    f"{_prev_phase:.1f}° a "
+                    f"{_curr_amp_op:.3f} {_amp_unit_local} @ "
+                    f"{_curr_phase_op:.1f}°, vector change de "
+                    + (
+                        f"{_delta_amp:+.3f} {_amp_unit_local} "
+                        f"({_delta_amp_pct:+.1f}%)"
+                        if _delta_amp_pct is not None
+                        else f"{_delta_amp:+.3f} {_amp_unit_local}"
+                    )
+                    + f" en magnitud y un shift de fase 1X de "
+                    f"{_delta_phase:+.1f}° en arco menor."
+                )
+
+                # 2) Caracterizacion del modo + critical speed evolution
+                if _curr_cs_rpm and _curr_cs_rpm > 0:
+                    _ratio_op_cs = operating_rpm / _curr_cs_rpm
+                    _separation_pct = (_ratio_op_cs - 1.0) * 100.0
+                    _q_str = (
+                        f", con factor de amplificación Q={_curr_q:.2f}"
+                        if _curr_q else ""
+                    )
+                    _mode_para = (
+                        f"El Bode actual identifica una velocidad crítica en "
+                        f"{_curr_cs_rpm:.0f} rpm con un cambio de fase de "
+                        f"{abs(_curr_cs_phase_delta or 0):.0f}° a través "
+                        f"del peak{_q_str}, patrón consistente con "
+                        f"{_mode_type}. "
+                    )
+                    if _separation_pct >= 15.0:
+                        _mode_para += (
+                            f"La separación operativa-modo es de "
+                            f"{_separation_pct:+.1f}%, dentro del margen "
+                            f"recomendado por API 684 §6 (≥15%). "
+                        )
+                    elif _separation_pct >= 0:
+                        _mode_para += (
+                            f"La separación operativa-modo es de solo "
+                            f"{_separation_pct:+.1f}%, estrecha frente al "
+                            f"margen recomendado por API 684 §6 (≥15%) — "
+                            f"merece evaluación detallada si el Q crece. "
+                        )
+                    else:
+                        _mode_para += (
+                            f"La operativa está {abs(_separation_pct):.1f}% "
+                            f"por debajo del modo identificado, configuración "
+                            f"sub-crítica estable mientras el Q se mantenga "
+                            f"acotado. "
+                        )
+
+                    # Comparativo de critical speed entre snapshots
+                    _prev_cs_strs = []
+                    for _ps in _bode_prev_snapshots_list:
+                        _ts_amps = _ps.get("trajectory_amp", []) or []
+                        _ts_speeds = _ps.get("trajectory_speed", []) or []
+                        if len(_ts_amps) > 1 and len(_ts_amps) == len(_ts_speeds):
+                            try:
+                                _i_pk_p = int(np.argmax(_ts_amps))
+                                _prev_cs_rpm_i = float(_ts_speeds[_i_pk_p])
+                                _prev_cs_amp_i = float(_ts_amps[_i_pk_p])
+                                _prev_cs_strs.append(
+                                    f"{_ps.get('label','prev')[:18]} pico en "
+                                    f"{_prev_cs_rpm_i:.0f} rpm "
+                                    f"({_prev_cs_amp_i:.2f} {_amp_unit_local})"
+                                )
+                            except Exception:
+                                pass
+                    if _prev_cs_strs:
+                        _mode_para += (
+                            "Comparado contra los snapshots seleccionados — "
+                            + "; ".join(_prev_cs_strs[:3])
+                            + " — se evalúa migración del modo "
+                            "(desplazamiento del peak en RPM = mode shift) "
+                            "y evolución del Q (cambio de amplitud del "
+                            "peak = damping change)."
+                        )
+                    _narr_parts.append(_mode_para)
+
+                # 3) Diagnostico diferencial del shift
+                if _phase_class == "shift_critical":
+                    _narr_parts.append(
+                        "El shift de fase 1X supera 60° en arco menor, "
+                        "magnitud crítica según los criterios de Bently / "
+                        "API 684. Este nivel es inconsistente con simple "
+                        "deriva térmica u operacional y apunta a un cambio "
+                        "mecánico estructural del rotor: pérdida de masa, "
+                        "propagación de fisura, asentamiento súbito del "
+                        "cojinete o pérdida de contacto en el sello / "
+                        "impeller. Se recomienda parada controlada, "
+                        "análisis de orbits filtrados a 1X y forma de "
+                        "onda en ambos planos del cojinete antes de "
+                        "continuar operación."
+                    )
+                elif _phase_class == "shift_major":
+                    _narr_parts.append(
+                        "El shift de fase 1X entre 30° y 60° es la firma "
+                        "clásica de un cambio de balance del rotor según "
+                        "la metodología de vector polar response que "
+                        "documentan Bently y API 684. Magnitud y dirección "
+                        "del vector change consistentes con redistribución "
+                        "de masa rotativa (suciedad acumulada / desprendida "
+                        "en álabes, pérdida de balance weights, "
+                        "deformación térmica residual). Se recomienda "
+                        "balance de campo según ISO 21940-12 nivel G 2.5 "
+                        "en próxima ventana."
+                    )
+                elif _phase_class == "shift_minor":
+                    _narr_parts.append(
+                        "El shift de fase 1X entre 10° y 30° es menor y "
+                        "puede atribuirse a deriva operacional normal "
+                        "(temperatura, carga, expansión térmica). No "
+                        "evidencia cambio mecánico por sí solo, pero una "
+                        "tendencia consolidada en la misma dirección "
+                        "vectorial a lo largo de varias corridas indica "
+                        "cambio incipiente de balance que conviene "
+                        "caracterizar antes que cruce la zona mayor."
+                    )
+                elif _phase_class == "stable":
+                    _narr_parts.append(
+                        "El shift de fase 1X (<10°) está dentro de la "
+                        "variación normal de la respuesta sincrónica. La "
+                        "forma del vector se considera estable entre "
+                        "corridas."
+                    )
+
+                # 4) Sensitividad
+                if _delta_amp_pct is not None:
+                    _amp_class = amplitude_change_classifier(_delta_amp_pct)
+                    if _amp_class == "amp_critical":
+                        _narr_parts.append(
+                            "El crecimiento de amplitud 1X supera 50% entre "
+                            "corridas. Combinado con el shift de fase, "
+                            "refuerza el diagnóstico de degradación activa "
+                            "de la respuesta modal — la sensibilidad del "
+                            "rotor a la fuerza de excitación residual está "
+                            "creciendo, típico de pérdida de "
+                            "amortiguamiento (damping degradation) en "
+                            "soportes hidrodinámicos según API 684."
+                        )
+                    elif _amp_class == "amp_high":
+                        _narr_parts.append(
+                            "El crecimiento de amplitud 1X (≥20%) "
+                            "acompañando al shift de fase es consistente "
+                            "con cambio activo en la respuesta modal del "
+                            "sistema rotor-soporte. Conviene revisar el Q "
+                            "factor en próximas corridas para descartar "
+                            "pérdida progresiva de damping."
+                        )
+                    elif _amp_class in ("amp_down_strong", "amp_down"):
+                        _narr_parts.append(
+                            "La amplitud 1X bajó respecto a la corrida "
+                            "anterior. Si esto coincide con shift de fase "
+                            "mayor, puede tratarse de balance "
+                            "compensatorio (intervención previa, "
+                            "redistribución térmica) más que degradación. "
+                            "Revisar registro operacional y reportes de "
+                            "mantenimiento entre corridas."
+                        )
+
+                # 5) Distinción modal rotor vs estructural
+                if (
+                    _phase_class in ("shift_major", "shift_critical")
+                    and _curr_cs_phase_delta is not None
+                    and abs(_curr_cs_phase_delta) < 90.0
+                ):
+                    _narr_parts.append(
+                        "Nota diferencial: el cambio de fase a través del "
+                        "peak (<90°) es atípico de un modo libre del rotor "
+                        "y sugiere que el peak podría corresponder a una "
+                        "resonancia estructural del soporte o fundación "
+                        "más que a un modo del rotor. Importante validar "
+                        "antes de atribuir el cambio observado a balance "
+                        "del rotor — falla en fundación / grouting / "
+                        "anclajes produce el mismo patrón en el Bode pero "
+                        "requiere intervención estructural, no balance."
+                    )
+
+                _comp_narr = " ".join(_narr_parts)
+                if isinstance(text_diag, dict):
+                    text_diag["comparison_narrative"] = _comp_narr
+        except Exception:
+            pass
+
     fig = build_bode_figure(
         df=display_df,
         meta=meta,
@@ -1359,6 +1801,7 @@ def render_bode_panel(
         operating_rpm=operating_rpm if use_rotordyn_pro else None,
         iso_thresholds=iso_thresholds_overlay,
         critical_speeds_pro=pro_overlay_criticals if pro_overlay_criticals else None,
+        prev_snapshots=_bode_prev_snapshots_list if _bode_prev_snapshots_list else None,
     )
 
     st.plotly_chart(
@@ -1972,11 +2415,418 @@ def main() -> None:
         show_info_box = st.checkbox("Show Bode Information", value=True)
 
     selected_ids = [sid for sid in st.session_state.wm_bode_selected_ids if sid in id_to_item]
+
+    # ============================================================
+    # Ciclo 17.2 — Histórico Bode (multi-snapshot trail overlay)
+    # ============================================================
+    _bode_inst_id = (
+        instance_state.get("instance_id")
+        or st.session_state.get("wm_active_instance_id", "")
+    )
+    _bode_inst = None
+    _bode_sensors_map: List[Dict[str, Any]] = []
+    if _bode_inst_id:
+        try:
+            from core.instance_state import get_instance as _bode_get_inst
+            _bode_inst = _bode_get_inst(_bode_inst_id)
+            if _bode_inst is not None:
+                _bode_sensors_map = list(_bode_inst.sensors or [])
+        except Exception:
+            _bode_inst = None
+
+    def _wm_extract_bode_readings(
+        items: List[Dict[str, Any]],
+        sensors_map: List[Dict[str, Any]],
+        op_speed_rpm: float,
+    ) -> List[Dict[str, Any]]:
+        """Extrae amp/phase a op_speed + trayectoria por sensor matched."""
+        from core.sensor_map import (
+            resolve_sensor_for_point as _wm_resolve,
+            sensor_label as _wm_slbl,
+        )
+        out = []
+        for it in items:
+            try:
+                meta = it.get("meta") or {}
+                point = str(meta.get("Point Name", "") or it.get("point", "") or "")
+                variable = str(meta.get("Variable", "") or it.get("variable", "") or "")
+                unit = str(meta.get("Y-Axis Unit", "") or meta.get("Unit", "") or "")
+                sensor_match = None
+                if sensors_map:
+                    sensor_match = _wm_resolve(sensors_map, point, variable, unit)
+                if sensor_match is None:
+                    continue
+                df = it.get("grouped_df")
+                if df is None or len(df) == 0:
+                    continue
+
+                # Punto operativo: nearest row to op_speed
+                _diff = (df["speed"] - op_speed_rpm).abs()
+                _row = df.loc[int(_diff.idxmin())]
+                amp_at_op = float(_row.get("amp", 0.0))
+                phase_at_op = float(_row.get("phase", 0.0)) % 360.0
+
+                # Trayectoria downsampleada a 80 puntos
+                _df_sorted = df.sort_values("speed").reset_index(drop=True)
+                _N = 80
+                if len(_df_sorted) > _N:
+                    _idx = np.linspace(0, len(_df_sorted) - 1, _N).astype(int)
+                    _df_ds = _df_sorted.iloc[_idx]
+                else:
+                    _df_ds = _df_sorted
+                traj_speed = _df_ds["speed"].astype(float).tolist()
+                traj_amp = _df_ds["amp"].astype(float).tolist()
+                traj_phase = (_df_ds["phase"].astype(float) % 360.0).tolist()
+
+                out.append({
+                    "sensor_label": _wm_slbl(sensor_match),
+                    "csv_file": it.get("file_name", ""),
+                    "amp_at_op": amp_at_op,
+                    "phase_at_op": phase_at_op,
+                    "amp_unit": unit or "µm pp",
+                    "phase_unit": "deg",
+                    "csv_timestamp": str(meta.get("Timestamp", "") or ""),
+                    "trajectory_speed": traj_speed,
+                    "trajectory_amp": traj_amp,
+                    "trajectory_phase": traj_phase,
+                })
+            except Exception:
+                continue
+        return out
+
+    _bode_curr_readings: List[Dict[str, Any]] = []
+    if selected_ids and _bode_sensors_map:
+        try:
+            _selected_for_snap = [id_to_item[sid] for sid in selected_ids]
+            _bode_curr_readings = _wm_extract_bode_readings(
+                _selected_for_snap, _bode_sensors_map, float(operating_rpm),
+            )
+        except Exception:
+            _bode_curr_readings = []
+
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 📚 Histórico Bode")
+
+        try:
+            from core.bode_history import (
+                save_bode_snapshot,
+                list_bode_snapshots,
+                load_bode_snapshot,
+                delete_bode_snapshot,
+                _bode_snapshot_is_identical_to,
+            )
+            _bode_hist_ok = True
+        except Exception as _e:
+            _bode_hist_ok = False
+            st.caption(f"_(Histórico Bode no disponible: {_e})_")
+
+        if _bode_hist_ok and _bode_inst_id:
+            _bode_existing_snaps = list_bode_snapshots(_bode_inst_id)
+            st.caption(
+                f"{len(_bode_existing_snaps)} snapshot(s) Bode guardado(s) "
+                f"para esta unidad."
+            )
+
+            if not _bode_curr_readings:
+                if not _bode_sensors_map:
+                    st.caption(
+                        "_(No hay Sensor Map configurado para esta instancia. "
+                        "Andá a Machinery Library a configurarlo.)_"
+                    )
+                elif not selected_ids:
+                    st.caption(
+                        "_(No hay CSVs Bode cargados todavía. Subilos arriba "
+                        "en 'Upload Bode CSV' y volvé.)_"
+                    )
+                else:
+                    st.warning(
+                        f"⚠️ Hay {len(selected_ids)} CSV(s) Bode cargado(s) "
+                        f"pero ninguno matchea con los {len(_bode_sensors_map)} "
+                        f"sensores del Sensor Map de esta unidad."
+                    )
+                    with st.expander("🔍 Diagnóstico — ver CSVs vs patterns"):
+                        st.caption(
+                            "El matcher usa el `csv_match_pattern` de cada "
+                            "sensor contra el Point name del CSV. Si los "
+                            "Point names del DCS no siguen la convención "
+                            "API 670 (3X/3Y/4X/4Y), editá los patterns en "
+                            "Machinery Library → Mapa de Sensores."
+                        )
+                        # Listar CSVs con sus Point names
+                        _diag_csv_rows = []
+                        for sid in selected_ids:
+                            it = id_to_item.get(sid)
+                            if it is None:
+                                continue
+                            m = it.get("meta") or {}
+                            _diag_csv_rows.append({
+                                "Archivo": it.get("file_name", ""),
+                                "Point": str(m.get("Point Name", "") or ""),
+                                "Variable": str(m.get("Variable", "") or ""),
+                                "Unit": str(m.get("Y-Axis Unit", "")
+                                            or m.get("Unit", "") or ""),
+                            })
+                        if _diag_csv_rows:
+                            st.markdown("**CSVs Bode cargados:**")
+                            st.dataframe(
+                                pd.DataFrame(_diag_csv_rows),
+                                width="stretch", hide_index=True,
+                            )
+                        # Listar sensores con sus patterns
+                        _diag_sensor_rows = []
+                        from core.sensor_map import sensor_label as _diag_slbl
+                        for s in _bode_sensors_map:
+                            _diag_sensor_rows.append({
+                                "Sensor": _diag_slbl(s),
+                                "Plano": s.get("plane_label", "") or "",
+                                "Tipo": s.get("sensor_type", ""),
+                                "Pattern": s.get("csv_match_pattern", "")
+                                           or "(vacío)",
+                            })
+                        if _diag_sensor_rows:
+                            st.markdown("**Sensores del mapa con sus patterns:**")
+                            st.dataframe(
+                                pd.DataFrame(_diag_sensor_rows),
+                                width="stretch", hide_index=True,
+                            )
+                        st.info(
+                            "💡 **Tip:** podés usar el wizard automático en "
+                            "**Machinery Library → Sugerir patterns desde "
+                            "CSVs cargados** para que el sistema proponga "
+                            "patterns que matcheen con tus CSVs reales."
+                        )
+            else:
+                with st.expander("📸 Guardar snapshot Bode actual", expanded=False):
+                    st.caption(
+                        f"Captura amp + fase a {operating_rpm:.0f} rpm + "
+                        f"trayectoria completa para {len(_bode_curr_readings)} "
+                        f"sensor(es) matched."
+                    )
+                    _bode_snap_label = st.text_input(
+                        "Etiqueta de la corrida",
+                        value="",
+                        placeholder="Ej. Run-up abril 27",
+                        key=f"wm_bode_snap_label_{_bode_inst_id}",
+                    )
+                    _bode_snap_notes = st.text_area(
+                        "Observaciones (opcional)",
+                        value="",
+                        key=f"wm_bode_snap_notes_{_bode_inst_id}",
+                        height=70,
+                    )
+                    if st.button(
+                        "💾 Guardar snapshot Bode",
+                        type="primary",
+                        width="stretch",
+                        key=f"wm_bode_snap_save_{_bode_inst_id}",
+                    ):
+                        try:
+                            sid = save_bode_snapshot(
+                                _bode_inst_id,
+                                operating_speed_rpm=float(operating_rpm),
+                                sensors_data=_bode_curr_readings,
+                                corrida_label=_bode_snap_label,
+                                notes=_bode_snap_notes,
+                            )
+                            st.success(f"✓ Snapshot Bode guardado: {sid}")
+                            st.rerun()
+                        except Exception as _e:
+                            st.error(f"No se pudo guardar: {_e}")
+
+            # Selector multi-snapshot
+            _selected_bode_cmp_ids: List[str] = []
+            if _bode_existing_snaps:
+                _curr_by_lbl = {
+                    r["sensor_label"]: {"amp": r["amp_at_op"], "phase": r["phase_at_op"]}
+                    for r in _bode_curr_readings
+                }
+                _bode_opt_pairs: List[Tuple[str, str]] = []
+                _bode_first_non_current = None
+                for _i, s in enumerate(_bode_existing_snaps):
+                    _is_current = False
+                    if _curr_by_lbl:
+                        try:
+                            _snap_full = load_bode_snapshot(
+                                _bode_inst_id, s["snapshot_id"])
+                            if _snap_full is not None:
+                                _is_current = _bode_snapshot_is_identical_to(
+                                    _snap_full, _curr_by_lbl)
+                        except Exception:
+                            pass
+                    _suffix = " · (corrida actual)" if _is_current else ""
+                    _opspeed = s.get("operating_speed_rpm")
+                    _opspeed_str = f" @ {_opspeed:.0f}rpm" if _opspeed else ""
+                    _lbl = (f"{s['corrida_label'][:28]}{_opspeed_str} "
+                            f"({s['timestamp'][:10]}){_suffix}")
+                    _bode_opt_pairs.append((s["snapshot_id"], _lbl))
+                    if not _is_current and _bode_first_non_current is None:
+                        _bode_first_non_current = _lbl
+
+                _bode_opt_lbls = [l for _, l in _bode_opt_pairs]
+                _bode_lbl_to_key = {l: k for k, l in _bode_opt_pairs}
+                _bode_default_pick = []
+                if _bode_first_non_current:
+                    _bode_default_pick = [_bode_first_non_current]
+                _bode_cmp_state_key = f"wm_bode_cmp_picks_{_bode_inst_id}"
+                if _bode_cmp_state_key in st.session_state:
+                    _saved = st.session_state[_bode_cmp_state_key]
+                    _bode_default_pick = [l for l in _saved if l in _bode_opt_lbls]
+                _bode_picked = st.multiselect(
+                    "Corridas a superponer en el Bode",
+                    options=_bode_opt_lbls,
+                    default=_bode_default_pick,
+                    key=f"wm_bode_cmp_multi_{_bode_inst_id}",
+                    help=(
+                        "0 = solo actual; 1 = comparativo simple; "
+                        "N = superposición histórica con gradiente "
+                        "cronológico sobre amp y fase vs RPM."
+                    ),
+                )
+                st.session_state[_bode_cmp_state_key] = _bode_picked
+                _selected_bode_cmp_ids = [
+                    _bode_lbl_to_key[l] for l in _bode_picked
+                    if l in _bode_lbl_to_key
+                ]
+                if not _selected_bode_cmp_ids:
+                    st.caption("ℹ️ _Solo se mostrará la corrida actual._")
+                else:
+                    st.caption(
+                        f"Se superpondrán **{len(_selected_bode_cmp_ids)}** "
+                        f"corrida(s) anterior(es) sobre la actual."
+                    )
+
+                # Lista con borrar
+                with st.expander(f"🗂️ Gestionar snapshots Bode ({len(_bode_existing_snaps)})"):
+                    for s in _bode_existing_snaps:
+                        cols_h = st.columns([4, 1])
+                        cols_h[0].markdown(
+                            f"**{s['corrida_label'][:30]}**  \n"
+                            f"_{s['timestamp']} · {s['n_sensors']} sensores · "
+                            f"{s.get('operating_speed_rpm', 0):.0f} rpm_"
+                        )
+                        if cols_h[1].button(
+                            "🗑️",
+                            key=f"wm_bode_del_{s['snapshot_id']}",
+                            help="Borrar este snapshot",
+                        ):
+                            if delete_bode_snapshot(_bode_inst_id, s["snapshot_id"]):
+                                st.success("Borrado.")
+                                st.rerun()
+
+            # Persistir picks
+            st.session_state["wm_bode_compare_snapshot_ids"] = _selected_bode_cmp_ids
+            st.session_state["wm_bode_compare_inst_id"] = _bode_inst_id
     if not selected_ids:
         st.info("Selecciona uno o más Bodes en la barra lateral.")
         return
 
     selected_items = [id_to_item[sid] for sid in selected_ids]
+
+    # ============================================================
+    # Ciclo 17.2 — Comparativo Bode inline (multi-snapshot)
+    # ============================================================
+    _bode_cmp_ids: List[str] = st.session_state.get(
+        "wm_bode_compare_snapshot_ids", []) or []
+    if _bode_cmp_ids and _bode_curr_readings:
+        try:
+            from core.bode_history import (
+                load_bode_snapshot,
+                phase_shift_classifier,
+                amplitude_change_classifier,
+                shortest_arc_phase_diff,
+            )
+
+            _cmp_rows = []
+            _snap_meta_by_id = {}
+            for _snap_id in _bode_cmp_ids:
+                _snap_full = load_bode_snapshot(_bode_inst_id, _snap_id)
+                if _snap_full is None:
+                    continue
+                _snap_meta_by_id[_snap_id] = _snap_full
+                _prev_by_lbl = {
+                    str(s.get("sensor_label", "")): s
+                    for s in _snap_full.get("sensors", [])
+                }
+                _snap_label_short = _snap_full.get("corrida_label", _snap_id)[:22]
+                _snap_ts = (_snap_full.get("timestamp", "") or "")[:10]
+
+                for r in _bode_curr_readings:
+                    _lbl = r["sensor_label"]
+                    _prev = _prev_by_lbl.get(_lbl)
+                    if _prev is None:
+                        continue
+                    _prev_amp = float(_prev.get("amp_at_op", 0))
+                    _prev_phase = float(_prev.get("phase_at_op", 0))
+                    _delta_amp = r["amp_at_op"] - _prev_amp
+                    _delta_amp_pct = (_delta_amp / _prev_amp * 100.0) if _prev_amp > 0 else None
+                    _delta_phase = shortest_arc_phase_diff(_prev_phase, r["phase_at_op"])
+                    _phase_class = phase_shift_classifier(_delta_phase)
+                    _amp_class = amplitude_change_classifier(_delta_amp_pct)
+
+                    # Critical speed comparison
+                    _prev_cs_rpm = _prev.get("critical_speed_rpm")
+                    _prev_q = _prev.get("q_factor")
+                    _cs_str = "—"
+                    if _prev_cs_rpm:
+                        _cs_str = f"{_prev_cs_rpm:.0f} rpm"
+                        if _prev_q:
+                            _cs_str += f" Q={_prev_q:.2f}"
+
+                    _diag_parts = []
+                    if _phase_class == "shift_critical":
+                        _diag_parts.append("⚠️ Shift fase crítico")
+                    elif _phase_class == "shift_major":
+                        _diag_parts.append("⚠️ Shift fase mayor")
+                    elif _phase_class == "shift_minor":
+                        _diag_parts.append("Shift fase menor")
+                    elif _phase_class == "stable":
+                        _diag_parts.append("Fase estable")
+                    if _delta_amp_pct is not None:
+                        if _amp_class in ("amp_critical", "amp_high"):
+                            _diag_parts.append(f"Amp {_delta_amp_pct:+.0f}%")
+                        elif _amp_class == "amp_up":
+                            _diag_parts.append(f"Amp {_delta_amp_pct:+.0f}%")
+                        elif _amp_class in ("amp_down_strong", "amp_down"):
+                            _diag_parts.append(f"Amp {_delta_amp_pct:+.0f}%")
+
+                    _cmp_rows.append({
+                        "Sensor": _lbl,
+                        "vs Corrida": f"{_snap_label_short} ({_snap_ts})",
+                        "Crítica anterior": _cs_str,
+                        "Anterior amp": f"{_prev_amp:.3f} {r['amp_unit']}",
+                        "Actual amp": f"{r['amp_at_op']:.3f} {r['amp_unit']}",
+                        "Δ amp": (
+                            f"{_delta_amp:+.3f} ({_delta_amp_pct:+.1f}%)"
+                            if _delta_amp_pct is not None else "—"
+                        ),
+                        "Anterior fase": f"{_prev_phase:.1f}°",
+                        "Actual fase": f"{r['phase_at_op']:.1f}°",
+                        "Δ fase": f"{_delta_phase:+.1f}°",
+                        "Diagnóstico": " · ".join(_diag_parts) if _diag_parts else "—",
+                    })
+
+            if _cmp_rows:
+                st.markdown("### 📈 Comparativo Bode — vs corridas anteriores")
+                _n_snaps = len(_snap_meta_by_id)
+                if _n_snaps == 1:
+                    _only = list(_snap_meta_by_id.values())[0]
+                    st.caption(
+                        f"Comparando contra **{_only.get('corrida_label', '')}** "
+                        f"del {_only.get('timestamp', '')[:10]}. Los overlays "
+                        f"sobre el Bode permiten ver migración del peak en RPM, "
+                        f"cambios del Q factor y deriva de fase a través del modo."
+                    )
+                else:
+                    st.caption(
+                        f"Mostrando comparativo contra **{_n_snaps} corridas "
+                        f"anteriores**. Cada fila es una combinación "
+                        f"(sensor × corrida)."
+                    )
+                _cmp_disp = pd.DataFrame(_cmp_rows)
+                st.dataframe(_cmp_disp, width="stretch", hide_index=True)
+        except Exception as _bode_cmp_e:
+            st.caption(f"_(Comparativo Bode no disponible: {_bode_cmp_e})_")
     logo_uri = get_logo_data_uri(LOGO_PATH)
 
     for panel_index, item in enumerate(selected_items):
