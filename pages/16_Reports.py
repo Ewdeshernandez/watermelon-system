@@ -1949,6 +1949,136 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                                 styles["WMBody"],
                             ))
 
+                        # ============================================
+                        # Ciclo 16.3 — TRENDS multi-snapshot grid
+                        # --------------------------------------------
+                        # Mini line charts por sensor crítico mostrando
+                        # los últimos N snapshots con threshold lines
+                        # Alarm/Danger. Permite ver la trajectoria del
+                        # sensor en el tiempo, no solo el delta vs la
+                        # corrida anterior.
+                        # ============================================
+                        try:
+                            from core.trend_charts import render_sensor_trend_chart
+                            from core.instance_history import get_sensor_history
+
+                            # Top sensores criticos: up_critical y up
+                            _crit_for_trends = cmp_df[
+                                cmp_df["Trend"].isin(["up_critical", "up"])
+                            ].copy()
+                            if not _crit_for_trends.empty:
+                                _crit_for_trends["__pct"] = _crit_for_trends["Delta_pct"].fillna(0)
+                                _crit_for_trends = _crit_for_trends.sort_values(
+                                    "__pct", ascending=False
+                                ).head(6)
+
+                                # Renderizar chart por sensor
+                                _chart_imgs = []
+                                for _, _cr in _crit_for_trends.iterrows():
+                                    _lbl = str(_cr["Label"])
+                                    _plbl = str(_cr.get("Plane Label", "") or "")
+                                    _alarm = float(_cr.get("Alarm") or 0)
+                                    _danger = float(_cr.get("Danger") or 0)
+                                    _unit = str(_cr.get("Unit", "") or "")
+                                    # Buscar alarm/danger del sensor en el
+                                    # current_sev_df (cmp_df no las trae)
+                                    _curr_row = _curr_sev_df[
+                                        _curr_sev_df["Label"] == _lbl
+                                    ]
+                                    if not _curr_row.empty:
+                                        _curr_row_d = _curr_row.iloc[0]
+                                        _alarm = float(_curr_row_d.get("Alarm") or 0)
+                                        _danger = float(_curr_row_d.get("Danger") or 0)
+                                        _unit = str(_curr_row_d.get("Unit", "") or "")
+
+                                    # Histórico + corrida actual al final
+                                    _current_reading = {
+                                        "overall": float(_cr.get("Overall") or 0),
+                                        "status": str(_cr.get("Status", "") or ""),
+                                        "alarm": _alarm,
+                                        "danger": _danger,
+                                        "unit": _unit,
+                                        "corrida_label": "Actual",
+                                    }
+                                    _hist = get_sensor_history(
+                                        sm_inst_id, _lbl,
+                                        max_snapshots=8,
+                                        current_reading=_current_reading,
+                                    )
+                                    if len(_hist) < 2:
+                                        # Necesitamos al menos 2 puntos para una tendencia
+                                        continue
+                                    _png = render_sensor_trend_chart(
+                                        _hist,
+                                        sensor_label=_lbl,
+                                        plane_label=_plbl,
+                                        alarm=_alarm, danger=_danger,
+                                        unit=_unit,
+                                        figure_width_in=4.6,
+                                        figure_height_in=2.4,
+                                    )
+                                    if _png:
+                                        _chart_imgs.append(_png)
+
+                                if _chart_imgs:
+                                    story.append(Spacer(1, 0.30 * cm))
+                                    story.append(Paragraph(
+                                        "Trayectoria histórica de los sensores con mayor evolución",
+                                        _evo_caption_style,
+                                    ))
+                                    story.append(Paragraph(
+                                        "Cada gráfico muestra el Overall del sensor a "
+                                        "lo largo de las últimas corridas snapshoteadas, "
+                                        "con líneas horizontales para los setpoints "
+                                        "individuales de Alarm (ámbar) y Danger (rojo). "
+                                        "El último punto corresponde a la corrida actual. "
+                                        "Los markers se colorean por estado de cada "
+                                        "snapshot (verde aceptable, ámbar atención, rojo "
+                                        "acción requerida).",
+                                        styles["WMBody"],
+                                    ))
+
+                                    # Grid 2 cols × N filas con los charts
+                                    usable_w = A4[0] - doc.leftMargin - doc.rightMargin
+                                    cell_w = usable_w / 2.0 - 0.2 * cm
+                                    target_h = 4.5 * cm
+                                    grid_data = []
+                                    for i in range(0, len(_chart_imgs), 2):
+                                        row = []
+                                        for j in range(2):
+                                            if i + j < len(_chart_imgs):
+                                                _bytes = _chart_imgs[i + j]
+                                                fitted_w, fitted_h = _fit_image_dimensions(
+                                                    _bytes, cell_w, target_h
+                                                )
+                                                _img = Image(BytesIO(_bytes),
+                                                             width=fitted_w,
+                                                             height=fitted_h)
+                                                _img.hAlign = "CENTER"
+                                                row.append(_img)
+                                            else:
+                                                row.append("")
+                                        grid_data.append(row)
+
+                                    grid_tbl = Table(
+                                        grid_data,
+                                        colWidths=[cell_w + 0.2 * cm, cell_w + 0.2 * cm],
+                                    )
+                                    grid_tbl.setStyle(TableStyle([
+                                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                                        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+                                        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+                                        ("TOPPADDING", (0, 0), (-1, -1), 4),
+                                        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+                                    ]))
+                                    story.append(Spacer(1, 0.10 * cm))
+                                    story.append(grid_tbl)
+                        except Exception:
+                            # Si trends no se puede renderizar, seguimos
+                            # con el resto del reporte sin bloquear.
+                            pass
+
                         story.append(Spacer(1, 0.20 * cm))
                         story.append(PageBreak())
 

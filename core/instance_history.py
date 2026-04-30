@@ -411,6 +411,71 @@ def trend_arrow(trend: str) -> str:
     }.get(trend, "—")
 
 
+def get_sensor_history(
+    instance_id: str,
+    sensor_label: str,
+    max_snapshots: int = 6,
+    current_reading: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Devuelve las últimas N lecturas de un sensor específico a través
+    de los snapshots de la instancia, ordenadas cronológicamente
+    (asc — la más vieja primero).
+
+    Si se pasa ``current_reading`` (dict con keys overall, status,
+    alarm, danger, unit), se anexa al final como punto "ahora" — útil
+    en el momento de generar un PDF donde la corrida actual todavía
+    no está snapshoteada.
+
+    Cada punto devuelto tiene keys:
+      timestamp, corrida_label, overall, status, alarm, danger, unit.
+    """
+    snaps = list_snapshots(instance_id, limit=max_snapshots)
+    points: List[Dict[str, Any]] = []
+    for s in snaps:
+        snap = load_snapshot(instance_id, s["snapshot_id"])
+        if snap is None:
+            continue
+        for r in snap.get("readings", []):
+            if str(r.get("sensor_label", "")) == sensor_label:
+                points.append({
+                    "timestamp": snap.get("timestamp", ""),
+                    "corrida_label": snap.get("corrida_label", ""),
+                    "overall": _safe_float(r.get("overall")),
+                    "status": str(r.get("status", "") or ""),
+                    "alarm": _safe_float(r.get("alarm")),
+                    "danger": _safe_float(r.get("danger")),
+                    "unit": str(r.get("unit", "") or ""),
+                })
+                break
+
+    # Ordenar cronologicamente ascendente (más viejo primero)
+    points.sort(key=lambda p: p["timestamp"])
+
+    # Anexar el current_reading si fue dado (corrida actual sin snap)
+    if current_reading is not None:
+        cur_ts = current_reading.get("timestamp") or datetime.now().isoformat(timespec="seconds")
+        # Solo anexar si el ultimo punto NO es esencialmente la corrida actual
+        cur_overall = _safe_float(current_reading.get("overall"))
+        already = False
+        if points:
+            last = points[-1]
+            if abs(last["overall"] - cur_overall) < 0.001:
+                already = True
+        if not already:
+            points.append({
+                "timestamp": cur_ts,
+                "corrida_label": current_reading.get("corrida_label", "Actual"),
+                "overall": cur_overall,
+                "status": str(current_reading.get("status", "") or ""),
+                "alarm": _safe_float(current_reading.get("alarm")),
+                "danger": _safe_float(current_reading.get("danger")),
+                "unit": str(current_reading.get("unit", "") or ""),
+            })
+
+    return points
+
+
 def trend_color(trend: str) -> str:
     """Color hex para chip de tendencia."""
     return {
@@ -456,6 +521,7 @@ __all__ = [
     "load_snapshot",
     "delete_snapshot",
     "get_previous_snapshot",
+    "get_sensor_history",
     "compare_to_previous",
     "trend_arrow",
     "trend_color",
