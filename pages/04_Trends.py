@@ -17,7 +17,16 @@ import streamlit as st
 
 from core.auth import require_login, render_user_menu
 from core.csv_common import decode_csv_text, find_header_line, parse_metadata_block
+from core.instance_selector import render_instance_selector
 from core.trend_diagnostics import build_trend_report_narrative as build_trend_report_narrative_core
+from core.trend_history import (
+    delete_trend_corrida,
+    list_corridas_summary,
+    list_trend_corridas,
+    load_trend_corrida_files,
+    save_trend_corrida,
+    update_corrida_time_range,
+)
 
 st.set_page_config(page_title="Watermelon System | Trends", layout="wide")
 
@@ -443,6 +452,137 @@ def load_trend_records_from_uploader(files: List[Any]) -> List[TrendRecord]:
         if rec is not None:
             records.append(rec)
     return records
+
+
+# =============================================================
+# HISTORICO DE TENDENCIAS — wrappers para CSVs persistidos
+# =============================================================
+# Ciclo 17.5 P2 — los CSVs guardados por core.trend_history se
+# vuelven a cargar como bytes. Para que parse_trend_csv y
+# parse_operational_csv funcionen sin cambios, los envolvemos
+# en una clase mínima que imita la interfaz de UploadedFile de
+# Streamlit (`.name`, `.read()`, `.seek()`).
+
+class _NamedBytesIO(BytesIO):
+    """BytesIO con atributo `.name` para que los parsers existentes
+    lo traten como un UploadedFile de Streamlit."""
+
+    def __init__(self, data: bytes, name: str) -> None:
+        super().__init__(data or b"")
+        self.name = str(name or "archivo.csv")
+
+
+def _collect_uploader_bytes(files: List[Any]) -> List[Tuple[str, bytes]]:
+    """Lee los bytes de cada UploadedFile sin consumirlo
+    (rebobina al final para que el parser posterior funcione)."""
+    out: List[Tuple[str, bytes]] = []
+    for f in files or []:
+        try:
+            f.seek(0)
+        except Exception:
+            pass
+        try:
+            data = f.read()
+        except Exception:
+            continue
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+        try:
+            f.seek(0)
+        except Exception:
+            pass
+        try:
+            name = f.name
+        except Exception:
+            name = "archivo.csv"
+        out.append((name, data))
+    return out
+
+
+def _parse_corrida_files(
+    files_bytes: List[Tuple[str, bytes]],
+    *,
+    temperature_unit: str,
+    corrida_label: str,
+) -> Tuple[List[TrendRecord], List[OperationalRecord]]:
+    """Recibe lista (nombre, bytes) y los clasifica entre trend
+    vs operational probando ambos parsers. El nombre del CSV se
+    sufija con la corrida para que los IDs no colisionen al hacer
+    merge con la corrida actual."""
+    trend_recs: List[TrendRecord] = []
+    op_recs: List[OperationalRecord] = []
+    suffix = f" [{corrida_label}]" if corrida_label else ""
+
+    for name, data in files_bytes:
+        # Probar primero como trend CSV (header con X-Axis Value).
+        wrapper = _NamedBytesIO(data, name + suffix)
+        rec = parse_trend_csv(wrapper)
+        if rec is not None:
+            trend_recs.append(rec)
+            continue
+        # Si no es trend, intentar operational.
+        wrapper2 = _NamedBytesIO(data, name + suffix)
+        op_list = parse_operational_csv(wrapper2, temperature_unit=temperature_unit)
+        if op_list:
+            op_recs.extend(op_list)
+
+    return trend_recs, op_recs
+
+
+def _detect_time_range_for_uploads(
+    files: List[Any],
+) -> Tuple[Optional[pd.Timestamp], Optional[pd.Timestamp]]:
+    """Antes de guardar una corrida, detecta el rango temporal
+    global de todos los CSVs (vibración + operacional) para
+    poblar metadata.time_range."""
+    mins: List[pd.Timestamp] = []
+    maxs: List[pd.Timestamp] = []
+    for f in files or []:
+        try:
+            f.seek(0)
+        except Exception:
+            pass
+        try:
+            text = decode_csv_text(f, errors="ignore")
+        except Exception:
+            continue
+        finally:
+            try:
+                f.seek(0)
+            except Exception:
+                pass
+        # Trend CSV
+        lines = [ln.rstrip("\r") for ln in text.splitlines() if ln.strip()]
+        if len(lines) < 2:
+            continue
+        idx = find_header_line(lines, required_signals=("X-Axis Value", "Y-Axis Value"))
+        if idx is not None:
+            try:
+                csv_text = "\n".join(lines[idx:])
+                df = pd.read_csv(BytesIO(csv_text.encode("utf-8")))
+                if "X-Axis Value" in df.columns:
+                    ts = pd.to_datetime(df["X-Axis Value"], errors="coerce").dropna()
+                    if not ts.empty:
+                        mins.append(ts.min())
+                        maxs.append(ts.max())
+            except Exception:
+                pass
+            continue
+        # Operational CSV — buscar columna timestamp
+        try:
+            df = pd.read_csv(BytesIO(text.encode("utf-8")))
+            for cand in ["Timestamp", "Time", "DateTime", "Datetime", "timestamp", "time"]:
+                if cand in df.columns:
+                    ts = pd.to_datetime(df[cand], errors="coerce").dropna()
+                    if not ts.empty:
+                        mins.append(ts.min())
+                        maxs.append(ts.max())
+                    break
+        except Exception:
+            continue
+    ts_min = min(mins) if mins else None
+    ts_max = max(maxs) if maxs else None
+    return ts_min, ts_max
 
 
 def _draw_top_strip(
@@ -1784,6 +1924,529 @@ def build_drift_narrative(records: List[TrendRecord], metric_key: str) -> str:
     )
 
 
+def _compute_trend_health(
+    records: List[TrendRecord],
+    metric_key: str,
+    *,
+    warning_value: Optional[float],
+    danger_value: Optional[float],
+) -> Dict[str, Any]:
+    """
+    Ciclo 17.5 P3 — Computes a compact health snapshot for the
+    trend figure header. Returns:
+
+      {
+        "status":          "ok" | "watch" | "alarm" | "action" | "unknown",
+        "status_label":    "Normal" | "Vigilancia" | ...,
+        "max_value":        float,
+        "latest_value":     float,
+        "slope_per_day":    float,
+        "forecast_days":    Optional[float],   # days hasta alcanzar
+                                               # warning a la pendiente
+                                               # actual; None si la
+                                               # pendiente no avanza al
+                                               # umbral
+        "forecast_target":  "warning" | "danger" | None
+      }
+    """
+    out: Dict[str, Any] = {
+        "status": "unknown",
+        "status_label": "Sin datos",
+        "max_value": float("nan"),
+        "latest_value": float("nan"),
+        "slope_per_day": float("nan"),
+        "forecast_days": None,
+        "forecast_target": None,
+    }
+
+    if not records:
+        return out
+
+    # 1) Reunir todas las muestras del métrico en un único stream
+    merged_x: List[pd.Timestamp] = []
+    merged_y: List[float] = []
+    for rec in records:
+        df = get_clean_metric_df(rec, metric_key)
+        if df.empty:
+            continue
+        merged_x.extend(list(df["x"]))
+        merged_y.extend([float(v) for v in df["y"]])
+
+    if not merged_y:
+        return out
+
+    s = pd.Series(merged_y, index=pd.to_datetime(pd.Series(merged_x)))
+    s = s[~s.index.isna()].sort_index()
+    if s.empty:
+        return out
+
+    out["max_value"] = float(s.max())
+    out["latest_value"] = float(s.iloc[-1])
+
+    # 2) Clasificar status según warning/danger
+    latest = out["latest_value"]
+    has_warning = warning_value is not None and math.isfinite(float(warning_value))
+    has_danger = danger_value is not None and math.isfinite(float(danger_value))
+
+    if has_danger and latest >= float(danger_value):
+        out["status"] = "action"
+        out["status_label"] = "Acción Requerida"
+    elif has_warning and latest >= float(warning_value):
+        out["status"] = "alarm"
+        out["status_label"] = "Atención"
+    elif has_warning and latest >= 0.85 * float(warning_value):
+        out["status"] = "watch"
+        out["status_label"] = "Vigilancia"
+    elif has_warning or has_danger:
+        out["status"] = "ok"
+        out["status_label"] = "Normal"
+    else:
+        out["status"] = "ok"
+        out["status_label"] = "Sin umbrales"
+
+    # 3) Pendiente por linealizar contra tiempo (días)
+    try:
+        # Tomar últimos 60 puntos para evitar dominancia de épocas viejas
+        tail = s.tail(60).copy()
+        if len(tail) >= 4:
+            t0 = pd.Timestamp(tail.index.min())
+            x_days = (tail.index - t0).total_seconds() / 86400.0
+            y_vals = tail.values
+            slope, intercept = np.polyfit(x_days, y_vals, 1)
+            out["slope_per_day"] = float(slope)
+
+            # 4) Forecast: días hasta llegar a Warning (o Danger si ya
+            # estamos sobre Warning)
+            target_val: Optional[float] = None
+            target_lbl: Optional[str] = None
+            if has_warning and latest < float(warning_value):
+                target_val = float(warning_value)
+                target_lbl = "warning"
+            elif has_danger and latest < float(danger_value):
+                target_val = float(danger_value)
+                target_lbl = "danger"
+
+            if target_val is not None and slope > 1e-9:
+                # último punto x en días
+                x_last = float((tail.index.max() - t0).total_seconds() / 86400.0)
+                y_last = float(slope * x_last + intercept)
+                if y_last < target_val:
+                    days_to_target = (target_val - y_last) / slope
+                    if math.isfinite(days_to_target) and days_to_target > 0:
+                        out["forecast_days"] = float(days_to_target)
+                        out["forecast_target"] = target_lbl
+    except Exception:
+        pass
+
+    return out
+
+
+def _draw_health_chip(
+    fig: go.Figure,
+    health: Dict[str, Any],
+    *,
+    show_below_strip: bool = True,
+) -> None:
+    """Dibuja un chip de salud (Normal / Vigilancia / Atención /
+    Acción Requerida) en la parte superior derecha del strip,
+    coloreado según el estado y con la pendiente y forecast en
+    pequeño debajo."""
+    status = health.get("status", "unknown")
+    label = health.get("status_label", "—")
+
+    palette = {
+        "ok":      ("#10b981", "#ecfdf5", "#065f46"),  # verde
+        "watch":   ("#0ea5e9", "#e0f2fe", "#075985"),  # azul
+        "alarm":   ("#f59e0b", "#fef3c7", "#78350f"),  # ámbar
+        "action":  ("#ef4444", "#fee2e2", "#7f1d1d"),  # rojo
+        "unknown": ("#9ca3af", "#f1f5f9", "#1f2937"),  # gris
+    }
+    border, fill, text_color = palette.get(status, palette["unknown"])
+
+    # Posición del chip (esquina superior derecha del strip)
+    cx0, cx1 = 0.846, 0.978
+    cy0, cy1 = 1.122, 1.184  # justo arriba del strip
+
+    fig.add_shape(
+        type="path",
+        xref="paper", yref="paper",
+        path=rounded_rect_path(cx0, cy0, cx1, cy1, 0.020),
+        line=dict(color=border, width=1.4),
+        fillcolor=fill,
+        layer="above",
+    )
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=(cx0 + cx1) / 2.0, y=(cy0 + cy1) / 2.0,
+        xanchor="center", yanchor="middle",
+        text=f"<b>{label}</b>",
+        showarrow=False,
+        font=dict(size=11.6, color=text_color),
+    )
+
+    if not show_below_strip:
+        return
+
+    # Línea informativa debajo del chip — pendiente y forecast
+    slope = health.get("slope_per_day", float("nan"))
+    forecast_days = health.get("forecast_days")
+    forecast_target = health.get("forecast_target")
+
+    bits: List[str] = []
+    if isinstance(slope, (int, float)) and math.isfinite(slope):
+        if abs(slope) < 1e-9:
+            bits.append("pendiente: estable")
+        else:
+            arrow = "↑" if slope > 0 else "↓"
+            bits.append(f"pendiente {arrow} {abs(slope):.3g}/día")
+    if forecast_days is not None and forecast_target is not None:
+        if forecast_days < 365 * 5:
+            bits.append(f"~{forecast_days:.0f} días → {forecast_target}")
+
+    info_text = " · ".join(bits)
+    if info_text:
+        fig.add_annotation(
+            xref="paper", yref="paper",
+            x=(cx0 + cx1) / 2.0, y=cy0 - 0.018,
+            xanchor="center", yanchor="top",
+            text=f"<i>{info_text}</i>",
+            showarrow=False,
+            font=dict(size=10.0, color="#475569"),
+        )
+
+
+def build_trend_autodiagnostic(
+    records: List[TrendRecord],
+    metric_key: str,
+    *,
+    warning_value: Optional[float],
+    danger_value: Optional[float],
+    operational_records: Optional[List[OperationalRecord]] = None,
+) -> Dict[str, Any]:
+    """
+    Ciclo 17.5 P4 — autodiagnóstico ejecutivo del trend, en prosa
+    estilo Bently Nevada Technical Training. Sintetiza:
+
+      - Estado vs umbrales (Normal / Vigilancia / Atención / Acción)
+      - Pendiente del último tramo + forecast a Warning / Danger
+      - Anomalías puntuales (cantidad, tipo, severidad)
+      - Drift progresivo (deriva)
+      - Cambio de comportamiento (régimen)
+      - Vínculo operacional cuando hay variables operativas
+
+    El output es un dict con:
+        status:        "ok" | "watch" | "alarm" | "action" | "unknown"
+        status_label:  texto humano del status
+        headline:      una frase ejecutiva (≤ 35 palabras)
+        prose:         lista de párrafos en prosa Bently/ISO 20816
+        recommendations: lista de acciones recomendadas
+
+    Vocabulario alineado con Bently Nevada Technical Training y
+    los criterios de severidad de ISO 20816 / API 670 §6.7.
+    """
+    out: Dict[str, Any] = {
+        "status": "unknown",
+        "status_label": "Sin datos",
+        "headline": "No hay suficientes datos para emitir autodiagnóstico.",
+        "prose": [],
+        "recommendations": [],
+    }
+
+    if not records:
+        return out
+
+    health = _compute_trend_health(
+        records, metric_key,
+        warning_value=warning_value,
+        danger_value=danger_value,
+    )
+    out["status"] = health["status"]
+    out["status_label"] = health["status_label"]
+
+    latest_value = health["latest_value"]
+    max_value = health["max_value"]
+    slope = health["slope_per_day"]
+    forecast_days = health["forecast_days"]
+    forecast_target = health["forecast_target"]
+
+    # -------------------------------------------------------------
+    # Construir headline + descripción de signal/punto
+    # -------------------------------------------------------------
+    n_records = len(records)
+    primary = records[0]
+    metric_unit = (get_metric_series(primary, metric_key)[1] or "").strip()
+    point_label = primary.point_clean
+
+    if n_records == 1:
+        signal_descriptor = f"el punto «{point_label}»"
+    else:
+        signal_descriptor = (
+            f"{n_records} puntos de medición sobre el activo «{primary.machine}»"
+        )
+
+    # -------------------------------------------------------------
+    # 1) Encabezado + estado vs umbrales
+    # -------------------------------------------------------------
+    par1: List[str] = []
+    if not math.isnan(latest_value):
+        par1.append(
+            f"El último valor reportado de {metric_key.lower()} en {signal_descriptor} "
+            f"es {latest_value:.3g} {metric_unit}".rstrip() + "."
+        )
+
+    if warning_value is not None and math.isfinite(float(warning_value)):
+        pct_w = (latest_value / float(warning_value) * 100.0) if float(warning_value) > 0 else 0.0
+        par1.append(
+            f"Esto representa el {pct_w:.0f}% del umbral Warning "
+            f"({float(warning_value):.3g} {metric_unit})".rstrip() + "."
+        )
+    if danger_value is not None and math.isfinite(float(danger_value)):
+        pct_d = (latest_value / float(danger_value) * 100.0) if float(danger_value) > 0 else 0.0
+        par1.append(
+            f"Frente al umbral Danger ({float(danger_value):.3g} {metric_unit}) "
+            f"el consumo es del {pct_d:.0f}%".rstrip() + "."
+        )
+
+    status = out["status"]
+    if status == "action":
+        par1.append(
+            "El nivel actual supera el umbral Danger establecido; según los criterios "
+            "de ISO 20816 y de los manuales de fábrica esto corresponde a la zona D — "
+            "se recomienda parada para inspección o reducción de carga inmediata."
+        )
+    elif status == "alarm":
+        par1.append(
+            "El nivel actual cruza el umbral Warning (zona C de ISO 20816) — la máquina "
+            "no debería operar de forma continua bajo esta amplitud sin un programa "
+            "explícito de seguimiento condicional."
+        )
+    elif status == "watch":
+        par1.append(
+            "El nivel se encuentra entre el 85% y el 100% del Warning, en una zona de "
+            "vigilancia prudente; conviene aumentar la frecuencia de monitoreo y "
+            "documentar las condiciones de operación de cada toma."
+        )
+    elif status == "ok":
+        par1.append(
+            "El nivel se encuentra dentro de la zona operacional normal de los "
+            "criterios de severidad establecidos."
+        )
+
+    # -------------------------------------------------------------
+    # 2) Pendiente + forecast
+    # -------------------------------------------------------------
+    par2: List[str] = []
+    if isinstance(slope, (int, float)) and math.isfinite(slope):
+        if abs(slope) < 1e-9:
+            par2.append(
+                "La pendiente del último tramo es prácticamente plana, lo que sugiere "
+                "un régimen estable de la señal — sin tendencia direccional clara."
+            )
+        elif slope > 0:
+            par2.append(
+                f"La pendiente del último tramo es positiva, +{slope:.3g} "
+                f"{metric_unit}/día, evidenciando un crecimiento gradual de la "
+                f"amplitud."
+            )
+        else:
+            par2.append(
+                f"La pendiente del último tramo es negativa, {slope:.3g} "
+                f"{metric_unit}/día — la señal disminuye con el tiempo, lo que "
+                f"puede asociarse a estabilización post-mantenimiento, "
+                f"asentamiento térmico o redistribución de carga del rotor."
+            )
+
+        if forecast_days is not None and forecast_target is not None:
+            if forecast_days < 14:
+                par2.append(
+                    f"Si la pendiente actual se mantiene, el umbral {forecast_target} "
+                    f"se alcanzaría en aproximadamente {forecast_days:.0f} días — "
+                    f"horizonte corto que justifica intervención preventiva."
+                )
+            elif forecast_days < 60:
+                par2.append(
+                    f"Manteniendo la pendiente actual, el umbral {forecast_target} "
+                    f"sería alcanzado en aproximadamente {forecast_days:.0f} días, "
+                    f"lo que permite planificar una intervención dentro del próximo "
+                    f"ciclo de mantenimiento."
+                )
+            elif forecast_days < 365:
+                par2.append(
+                    f"El forecast lineal sitúa el cruce del umbral {forecast_target} "
+                    f"a unos {forecast_days:.0f} días — horizonte cómodo, pero "
+                    f"conviene reevaluar la pendiente con la próxima corrida."
+                )
+
+    # -------------------------------------------------------------
+    # 3) Anomalías puntuales
+    # -------------------------------------------------------------
+    par3: List[str] = []
+    try:
+        anom = build_panel_anomaly_summary(records, metric_key)
+        n_anom = int(anom.get("total_count", 0) or 0)
+        top_sev = str(anom.get("top_severity", "None") or "None")
+        if n_anom > 0:
+            if top_sev == "High":
+                par3.append(
+                    f"Se identifican {n_anom} eventos puntuales en la ventana, con "
+                    f"presencia de eventos de alta severidad — patrón sugestivo de "
+                    f"transitorios mecánicos, eventos de instrumentación o fallas "
+                    f"locales del cojinete que merecen revisión específica."
+                )
+            elif top_sev == "Medium":
+                par3.append(
+                    f"Se identifican {n_anom} eventos puntuales, con severidad "
+                    f"moderada predominante — pueden estar asociados a cambios "
+                    f"operacionales, transitorios de carga o perturbaciones puntuales "
+                    f"del proceso."
+                )
+            else:
+                par3.append(
+                    f"Se identifican {n_anom} eventos puntuales de baja severidad — "
+                    f"compatibles con ruido de medición o perturbaciones aisladas, "
+                    f"sin patrón mecánico claro."
+                )
+        # Si no hay anomalías significativas, simplemente no agregamos
+        # nada — el lector lo asume del estado general.
+    except Exception:
+        pass
+
+    # -------------------------------------------------------------
+    # 4) Drift progresivo
+    # -------------------------------------------------------------
+    par4: List[str] = []
+    try:
+        drift = build_panel_drift_summary(records, metric_key)
+        n_drift = int(drift.get("total_drift_signals", 0) or 0)
+        top_drift = str(drift.get("top_severity", "None") or "None")
+        if n_drift > 0 and top_drift in ("High", "Medium"):
+            if top_drift == "High":
+                par4.append(
+                    f"El detector de deriva progresiva clasifica {n_drift} "
+                    f"señal(es) en severidad alta. Esto refleja un cambio "
+                    f"sostenido de tendencia (no eventos puntuales) y suele "
+                    f"asociarse a procesos lentos: desgaste, drift térmico del "
+                    f"sistema, deriva de la instrumentación o evolución progresiva "
+                    f"del balance dinámico."
+                )
+            else:
+                par4.append(
+                    f"El detector de deriva progresiva señala {n_drift} señal(es) "
+                    f"en severidad media — una evolución gradual pero todavía "
+                    f"contenida, recomendable seguir bajo vigilancia condicional."
+                )
+    except Exception:
+        pass
+
+    # -------------------------------------------------------------
+    # 5) Cambio de régimen (behavior change)
+    # -------------------------------------------------------------
+    par5: List[str] = []
+    try:
+        behav = build_behavior_change_summary(records, metric_key)
+        top_class = str(behav.get("top_classification", "None") or "None")
+        if top_class == "Strong change":
+            par5.append(
+                "Adicionalmente, el detector de cambio de régimen identifica un "
+                "salto fuerte de comportamiento — la señal cruza un punto de "
+                "inflexión claro, lo que sugiere un evento puntual (cambio de "
+                "carga importante, intervención mecánica, falla incipiente) que "
+                "redefine el promedio operacional."
+            )
+        elif top_class == "Moderate change":
+            par5.append(
+                "El detector de cambio de régimen reporta una transición "
+                "moderada, compatible con ajuste operacional o evolución "
+                "progresiva del proceso."
+            )
+    except Exception:
+        pass
+
+    # -------------------------------------------------------------
+    # 6) Vínculo operacional
+    # -------------------------------------------------------------
+    par6: List[str] = []
+    if operational_records:
+        op_var_names = sorted({r.variable for r in operational_records if r.variable})
+        if op_var_names:
+            shown = ", ".join(op_var_names[:3])
+            extra = " y otras" if len(op_var_names) > 3 else ""
+            par6.append(
+                f"En esta corrida se cuenta con variables operativas correlacionadas "
+                f"({shown}{extra}). Se recomienda revisar el panel de correlación "
+                f"con desfase para verificar si la evolución de la señal sigue a "
+                f"un parámetro de proceso (carga, temperatura, RPM) — esto permite "
+                f"distinguir entre cambio de régimen operacional y degradación "
+                f"mecánica intrínseca."
+            )
+
+    # -------------------------------------------------------------
+    # Recomendaciones por status
+    # -------------------------------------------------------------
+    recs: List[str] = []
+    if status == "action":
+        recs.append("Coordinar parada planificada o reducción de carga inmediata para inspección.")
+        recs.append("Capturar espectro y forma de onda en condiciones actuales para confirmar la fuente del incremento.")
+        recs.append("Verificar tendencia de centerline y acoplamientos asociados al punto comprometido.")
+    elif status == "alarm":
+        recs.append("Aumentar frecuencia de monitoreo (diaria si es posible) y registrar evolución bajo condiciones operacionales conocidas.")
+        recs.append("Programar inspección dirigida en el próximo paro programado.")
+        recs.append("Evaluar correlación con cambios recientes de carga, temperatura o composición de fluido de proceso.")
+    elif status == "watch":
+        recs.append("Mantener seguimiento semanal y documentar las condiciones de cada toma.")
+        recs.append("Si la pendiente se mantiene positiva en la siguiente corrida, escalar a Atención.")
+    elif status == "ok":
+        recs.append("Continuar con el plan rutinario de monitoreo periódico.")
+        recs.append("Conservar la línea base actual como referencia post-mantenimiento.")
+
+    if forecast_days is not None and forecast_target is not None and forecast_days < 60:
+        recs.append(
+            f"Programar inspección antes de los {int(forecast_days)} días de forecast "
+            f"al cruce del umbral {forecast_target}."
+        )
+
+    # -------------------------------------------------------------
+    # Headline ejecutivo
+    # -------------------------------------------------------------
+    if status == "action":
+        out["headline"] = (
+            f"Estado: ACCIÓN REQUERIDA. {metric_key} en zona D "
+            f"({latest_value:.3g} {metric_unit}); supera el umbral Danger."
+        ).strip()
+    elif status == "alarm":
+        out["headline"] = (
+            f"Estado: ATENCIÓN. {metric_key} cruza Warning "
+            f"({latest_value:.3g} {metric_unit}); requiere monitoreo intensivo."
+        ).strip()
+    elif status == "watch":
+        out["headline"] = (
+            f"Estado: VIGILANCIA. {metric_key} consume el 85–100% del Warning."
+        ).strip()
+    elif status == "ok":
+        if isinstance(slope, (int, float)) and math.isfinite(slope) and slope > 0 and forecast_days is not None and forecast_days < 90:
+            out["headline"] = (
+                f"Estado: NORMAL con tendencia ascendente; cruce de umbral "
+                f"proyectado en ~{forecast_days:.0f} días."
+            )
+        else:
+            out["headline"] = "Estado: NORMAL. Señal dentro de la zona operacional sin tendencia preocupante."
+    else:
+        out["headline"] = "Sin umbrales definidos; el autodiagnóstico se limita a la descripción estadística."
+
+    # -------------------------------------------------------------
+    # Componer prosa final
+    # -------------------------------------------------------------
+    prose: List[str] = []
+    for block in (par1, par2, par3, par4, par5, par6):
+        joined = " ".join([s.strip() for s in block if s.strip()])
+        if joined:
+            prose.append(joined)
+
+    out["prose"] = prose
+    out["recommendations"] = recs
+    return out
+
+
 def build_trend_figure(
     records: List[TrendRecord],
     metric_key: str,
@@ -1991,6 +2654,42 @@ def build_trend_figure(
             if y_min_final >= y_max_final:
                 y_min_final, y_max_final = min(y_min_final, y_max_final), max(y_min_final, y_max_final) + 1.0
 
+    # Ciclo 17.5 P3 — bandas de zona de severidad (alarma / acción).
+    # Se dibujan ANTES de los hlines para que las líneas queden por
+    # encima del fill. Operan únicamente en single-axis mode (en
+    # mixed/secondary axis el eje secundario complica el yref).
+    if not operational_only_mode and not use_secondary_axis:
+        try:
+            _y_top_band = float(y_max_final)
+        except Exception:
+            _y_top_band = None
+        if _y_top_band is not None and math.isfinite(_y_top_band):
+            if warning_enabled and warning_value is not None and math.isfinite(float(warning_value)):
+                _w = float(warning_value)
+                if danger_enabled and danger_value is not None and math.isfinite(float(danger_value)):
+                    _d_for_top = float(danger_value)
+                else:
+                    _d_for_top = _y_top_band
+                _band_top = min(_d_for_top, _y_top_band)
+                if _band_top > _w:
+                    fig.add_shape(
+                        type="rect", xref="paper", yref="y",
+                        x0=0.0, x1=1.0, y0=_w, y1=_band_top,
+                        line=dict(width=0),
+                        fillcolor="rgba(245, 158, 11, 0.08)",
+                        layer="below",
+                    )
+            if danger_enabled and danger_value is not None and math.isfinite(float(danger_value)):
+                _d = float(danger_value)
+                if _y_top_band > _d:
+                    fig.add_shape(
+                        type="rect", xref="paper", yref="y",
+                        x0=0.0, x1=1.0, y0=_d, y1=_y_top_band,
+                        line=dict(width=0),
+                        fillcolor="rgba(239, 68, 68, 0.10)",
+                        layer="below",
+                    )
+
     if warning_enabled and warning_value is not None and math.isfinite(float(warning_value)) and not operational_only_mode:
         fig.add_hline(
             y=float(warning_value), line_width=1.8, line_dash="dash", line_color="#f59e0b",
@@ -2063,6 +2762,21 @@ def build_trend_figure(
 
     _draw_top_strip(fig, machine_name, signal_names_text, metric_header_name, latest_text, logo_uri, time_range_text)
 
+    # Ciclo 17.5 P3 — health chip + slope/forecast (sólo cuando
+    # estamos analizando vibración con umbrales).
+    if not operational_only_mode and visible_records:
+        try:
+            _records_for_health = [r for r, _, _ in visible_records]
+            _health = _compute_trend_health(
+                _records_for_health,
+                metric_key,
+                warning_value=float(warning_value) if (warning_enabled and warning_value is not None) else None,
+                danger_value=float(danger_value) if (danger_enabled and danger_value is not None) else None,
+            )
+            _draw_health_chip(fig, _health, show_below_strip=True)
+        except Exception:
+            pass
+
     if show_right_info_box:
         rows: List[Tuple[str, str]] = []
         if visible_records:
@@ -2121,7 +2835,7 @@ def build_trend_figure(
     if use_secondary_axis:
         fig.update_layout(
             height=640,
-            margin=dict(l=46, r=18, t=84, b=40),
+            margin=dict(l=46, r=18, t=120, b=40),
             plot_bgcolor="#f8fafc",
             paper_bgcolor="#f3f4f6",
             font=dict(color="#111827"),
@@ -2157,7 +2871,7 @@ def build_trend_figure(
     else:
         fig.update_layout(
             height=640,
-            margin=dict(l=46, r=18, t=84, b=40),
+            margin=dict(l=46, r=18, t=120, b=40),
             plot_bgcolor="#f8fafc",
             paper_bgcolor="#f3f4f6",
             font=dict(color="#111827"),
@@ -2530,6 +3244,11 @@ for key in [
 
 
 with st.sidebar:
+    # Ciclo 17.5 — instancia activa (necesaria para histórico de
+    # tendencias persistente bajo {INSTANCES_DIR}/{instance_id}).
+    trend_instance_state = render_instance_selector(module_name="trend")
+    trend_active_instance_id = str(trend_instance_state.get("instance_id") or "").strip()
+
     st.markdown("### Trend CSV")
     uploaded_files = st.file_uploader(
         "Upload one or more trend CSV files",
@@ -2561,6 +3280,159 @@ with st.sidebar:
         )
         operational_store = {rec.op_id: rec for rec in parsed_operational_records}
         st.session_state["operational_signals"] = operational_store
+
+    # =========================================================
+    # HISTORICO DE TENDENCIAS (Ciclo 17.5 P2)
+    # =========================================================
+    # Permite archivar la corrida actual (CSVs vibración +
+    # operacional) bajo la instancia activa, y volver a traer
+    # corridas anteriores para concatenarlas con la corrida
+    # actual y tener un trend largo de meses/años.
+    st.markdown("### 📚 Histórico de Tendencias")
+    if not trend_active_instance_id:
+        st.caption(
+            "Seleccione una instancia activa (arriba) para guardar y "
+            "recuperar corridas históricas."
+        )
+        historical_corrida_ids: List[str] = []
+    else:
+        # ----- Resumen del histórico
+        try:
+            _hist_summary = list_corridas_summary(trend_active_instance_id)
+        except Exception:
+            _hist_summary = {"n_corridas": 0, "earliest": "", "latest": "", "total_files": 0}
+        _n_corr = int(_hist_summary.get("n_corridas", 0) or 0)
+        if _n_corr > 0:
+            _earl = str(_hist_summary.get("earliest", "") or "").split("T")[0]
+            _late = str(_hist_summary.get("latest", "") or "").split("T")[0]
+            _tot_files = int(_hist_summary.get("total_files", 0) or 0)
+            _resumen_txt = f"📊 {_n_corr} corrida(s) archivada(s) · {_tot_files} CSV total"
+            if _earl and _late:
+                _resumen_txt += f" · rango: {_earl} → {_late}"
+            st.caption(_resumen_txt)
+        else:
+            st.caption("Aún no hay corridas archivadas para esta instancia.")
+
+        # ----- Guardar corrida actual
+        with st.expander("📸 Archivar corrida actual", expanded=False):
+            _all_current_files = list(uploaded_files or []) + list(operational_uploaded_files or [])
+            if not _all_current_files:
+                st.caption(
+                    "Cargue al menos un CSV (trend u operacional) en los uploaders "
+                    "de arriba antes de archivar."
+                )
+            else:
+                _label_default = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")
+                _corrida_label_in = st.text_input(
+                    "Etiqueta de la corrida (opcional)",
+                    value="",
+                    placeholder=f"Ejemplo: «Post-mantenimiento abril» — default: {_label_default}",
+                    key="wm_trend_hist_label",
+                )
+                _corrida_notes_in = st.text_area(
+                    "Observaciones (opcional)",
+                    value="",
+                    height=80,
+                    placeholder="Condiciones de la corrida, eventos notables, ajustes operacionales…",
+                    key="wm_trend_hist_notes",
+                )
+                if st.button(
+                    "Guardar al histórico",
+                    key="wm_trend_hist_save_btn",
+                    use_container_width=True,
+                ):
+                    try:
+                        _files_bytes = _collect_uploader_bytes(_all_current_files)
+                        _ts_min, _ts_max = _detect_time_range_for_uploads(_all_current_files)
+                        _new_id = save_trend_corrida(
+                            trend_active_instance_id,
+                            _files_bytes,
+                            corrida_label=_corrida_label_in or _label_default,
+                            notes=_corrida_notes_in or "",
+                            detected_time_range=(_ts_min, _ts_max),
+                        )
+                        # Forzar update_corrida_time_range por si el caller
+                        # quiere fijar el rango después (ya viene seteado
+                        # arriba, pero esto es defensivo).
+                        if _ts_min is not None or _ts_max is not None:
+                            try:
+                                update_corrida_time_range(
+                                    trend_active_instance_id, _new_id, _ts_min, _ts_max
+                                )
+                            except Exception:
+                                pass
+                        st.success(
+                            f"Corrida archivada bajo «{trend_active_instance_id}» "
+                            f"({len(_files_bytes)} CSV)."
+                        )
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f"No se pudo archivar la corrida: {exc}")
+
+        # ----- Cargar corridas anteriores para merge
+        try:
+            _avail_corridas = list_trend_corridas(trend_active_instance_id)
+        except Exception:
+            _avail_corridas = []
+
+        if _avail_corridas:
+            def _corrida_label_fmt(meta: Dict[str, Any]) -> str:
+                cid = meta.get("corrida_id", "")
+                lab = (meta.get("corrida_label") or "").strip()
+                ts = (meta.get("timestamp") or "").split("T")[0]
+                tr = meta.get("time_range", {}) or {}
+                tmin = (tr.get("min") or "").split("T")[0]
+                tmax = (tr.get("max") or "").split("T")[0]
+                nf = int(meta.get("n_files", 0) or 0)
+                bits = [lab or ts]
+                if tmin and tmax and tmin != tmax:
+                    bits.append(f"{tmin}→{tmax}")
+                elif tmin:
+                    bits.append(tmin)
+                bits.append(f"{nf} CSV")
+                return " · ".join([b for b in bits if b])
+
+            _corrida_id_to_label = {
+                c["corrida_id"]: _corrida_label_fmt(c) for c in _avail_corridas
+            }
+            historical_corrida_ids = st.multiselect(
+                "Incluir corridas anteriores en el análisis",
+                options=list(_corrida_id_to_label.keys()),
+                format_func=lambda cid: _corrida_id_to_label.get(cid, cid),
+                default=st.session_state.get("wm_trend_hist_selected", []),
+                key="wm_trend_hist_selected",
+                help=(
+                    "Las corridas seleccionadas se concatenan cronológicamente "
+                    "con la corrida actual para reconstruir tendencias largas."
+                ),
+            )
+
+            with st.expander("Administrar corridas archivadas", expanded=False):
+                for _meta in _avail_corridas:
+                    _cid = _meta.get("corrida_id", "")
+                    cols = st.columns([0.78, 0.22])
+                    cols[0].caption(f"• {_corrida_label_fmt(_meta)}")
+                    if cols[1].button(
+                        "🗑",
+                        key=f"wm_trend_hist_del_{_cid}",
+                        help=f"Borrar corrida {_cid}",
+                    ):
+                        try:
+                            ok = delete_trend_corrida(trend_active_instance_id, _cid)
+                            if ok:
+                                st.success(f"Corrida {_cid} eliminada.")
+                                # Limpiar de la selección si estaba ahí
+                                _sel = list(st.session_state.get("wm_trend_hist_selected", []))
+                                if _cid in _sel:
+                                    _sel.remove(_cid)
+                                    st.session_state["wm_trend_hist_selected"] = _sel
+                                st.rerun()
+                            else:
+                                st.warning("No se pudo borrar la corrida.")
+                        except Exception as exc:
+                            st.error(f"Error borrando: {exc}")
+        else:
+            historical_corrida_ids = []
 
     st.markdown("### Machine Diagnostic Context")
     asset_type_options = [
@@ -2616,9 +3488,57 @@ with st.sidebar:
     )
 
 records_all: List[TrendRecord] = list(st.session_state.get("trend_signals", {}).values())
-records_all = sorted(records_all, key=lambda r: (r.machine, r.point_clean, r.file_name))
-
 operational_records_all: List[OperationalRecord] = list(st.session_state.get("operational_signals", {}).values())
+
+# =========================================================
+# MERGE HISTORICO (Ciclo 17.5 P2)
+# =========================================================
+# Si el usuario seleccionó corridas anteriores en la sidebar,
+# se cargan los CSVs persistidos, se reparsean al vuelo y se
+# concatenan con la corrida actual. La concatenación efectiva
+# (combinar series temporales de un mismo punto a través de
+# corridas) se hace más abajo en build_trend_figure cuando se
+# suman registros con el mismo display_name; aquí solo
+# enrichecemos la lista de records.
+_hist_corrida_ids: List[str] = list(st.session_state.get("wm_trend_hist_selected", []) or [])
+_hist_active_instance_id: str = str(st.session_state.get("wm_active_instance_id", "") or "")
+if _hist_corrida_ids and _hist_active_instance_id:
+    _temp_unit_for_hist = st.session_state.get("wm_tr_operational_temp_unit", "°F")
+    _hist_summary_msgs: List[str] = []
+    for _cid in _hist_corrida_ids:
+        try:
+            _files_bytes = load_trend_corrida_files(_hist_active_instance_id, _cid)
+        except Exception:
+            _files_bytes = []
+        if not _files_bytes:
+            continue
+        _label = _cid
+        try:
+            _all_meta = list_trend_corridas(_hist_active_instance_id)
+            for _m in _all_meta:
+                if _m.get("corrida_id") == _cid:
+                    _label = (_m.get("corrida_label") or _cid).strip() or _cid
+                    break
+        except Exception:
+            pass
+        _hist_trend_recs, _hist_op_recs = _parse_corrida_files(
+            _files_bytes,
+            temperature_unit=_temp_unit_for_hist,
+            corrida_label=_label,
+        )
+        records_all.extend(_hist_trend_recs)
+        operational_records_all.extend(_hist_op_recs)
+        _hist_summary_msgs.append(
+            f"«{_label}» · {len(_hist_trend_recs)} trend / "
+            f"{len(_hist_op_recs)} operacional"
+        )
+    if _hist_summary_msgs:
+        st.info(
+            "📚 Corridas históricas incluidas en el análisis:\n\n- "
+            + "\n- ".join(_hist_summary_msgs)
+        )
+
+records_all = sorted(records_all, key=lambda r: (r.machine, r.point_clean, r.file_name))
 operational_records_all = sorted(operational_records_all, key=lambda r: (r.machine, r.variable, r.file_name))
 
 
@@ -3307,6 +4227,60 @@ def render_trend_panel(
     panel_error = st.session_state.wm_tr_export_store[export_state_key]["error"]
     if panel_error:
         st.warning(f"PNG export error: {panel_error}")
+
+    # ----------------------------------------------------------------
+    # Ciclo 17.5 P4 — Autodiagnóstico ejecutivo (síntesis del trend)
+    # ----------------------------------------------------------------
+    # Se muestra una síntesis Bently-style ANTES de los detectores
+    # individuales, agrupando estado vs umbrales, pendiente, forecast,
+    # anomalías, drift, cambio de régimen y vínculo operacional en una
+    # sola lectura ejecutiva.
+    if panel_records and not operational_only_mode:
+        try:
+            _autodiag = build_trend_autodiagnostic(
+                panel_records,
+                metric_key,
+                warning_value=float(warning_value) if (warning_enabled and warning_value is not None) else None,
+                danger_value=float(danger_value) if (danger_enabled and danger_value is not None) else None,
+                operational_records=panel_operational_records,
+            )
+            _status = _autodiag.get("status", "unknown")
+            _color_map = {
+                "ok":      "#10b981",
+                "watch":   "#0ea5e9",
+                "alarm":   "#f59e0b",
+                "action":  "#ef4444",
+                "unknown": "#9ca3af",
+            }
+            _bg_map = {
+                "ok":      "#ecfdf5",
+                "watch":   "#e0f2fe",
+                "alarm":   "#fef3c7",
+                "action":  "#fee2e2",
+                "unknown": "#f1f5f9",
+            }
+            _border = _color_map.get(_status, _color_map["unknown"])
+            _bg = _bg_map.get(_status, _bg_map["unknown"])
+            _headline = _autodiag.get("headline", "")
+            st.markdown(
+                f"<div style='background:{_bg};border-left:4px solid {_border};"
+                f"padding:14px 18px;border-radius:8px;margin:14px 0 10px 0;'>"
+                f"<div style='font-weight:700;font-size:1.02rem;color:#111827;'>"
+                f"🩺 Autodiagnóstico ejecutivo</div>"
+                f"<div style='font-size:0.95rem;color:#1f2937;margin-top:4px;'>"
+                f"{_headline}</div>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            for _para in _autodiag.get("prose", []):
+                st.write(_para)
+            _recs = _autodiag.get("recommendations", []) or []
+            if _recs:
+                st.markdown("**Acciones recomendadas:**")
+                for _i, _r in enumerate(_recs, 1):
+                    st.markdown(f"{_i}. {_r}")
+        except Exception as _exc:
+            st.caption(f"Autodiagnóstico no disponible ({_exc})")
 
     if panel_records:
         anomaly_summary = build_panel_anomaly_summary(panel_records, metric_key)
