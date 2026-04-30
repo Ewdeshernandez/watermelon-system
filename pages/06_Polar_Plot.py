@@ -446,10 +446,12 @@ def build_polar_figure(
     prev_snapshot_label: Optional[str] = None,
     prev_snapshot_op_speed: Optional[float] = None,
     # Ciclo 17.1.1 — multi-snapshot overlays (lista de dicts con
-    # {amp, phase, label, op_speed, timestamp}). Si está, prevalece
-    # sobre el single-snapshot legacy. Cada uno con color gradient
-    # cronologico (mas viejo = mas claro / azul, mas reciente = mas
-    # oscuro / rojo).
+    # {amp, phase, label, op_speed, timestamp, trajectory_speed,
+    # trajectory_amp, trajectory_phase}). Si está, prevalece sobre
+    # single-snapshot legacy. Cada uno con color gradient cronologico
+    # (mas viejo = azul claro, mas reciente = rojo). Si trajectory_*
+    # está presente, se dibuja el LOOP COMPLETO superpuesto (lo que
+    # permite ver paso por la velocidad critica entre corridas).
     prev_snapshots: Optional[List[Dict[str, Any]]] = None,
 ) -> go.Figure:
     amp_unit = meta.get("Amp Unit", "") or ""
@@ -718,25 +720,98 @@ def build_polar_figure(
                     _idx, len(_snaps_to_draw)
                 )
 
-                # Linea conectora con interpolacion shortest-arc en fase
-                _n_seg = 12
-                _frac = np.linspace(0.0, 1.0, _n_seg)
-                _seg_r = _prev_amp + (_curr_amp - _prev_amp) * _frac
-                _delta = ((_curr_phase - _prev_phase_disp + 540.0) % 360.0) - 180.0
-                _seg_theta = (_prev_phase_disp + _delta * _frac) % 360.0
-                fig.add_trace(
-                    go.Scatterpolar(
-                        r=_seg_r,
-                        theta=_seg_theta,
-                        mode="lines",
-                        line=dict(width=2.0, color=_line_color, dash="dot"),
-                        showlegend=False,
-                        hoverinfo="skip",
-                        name=f"Trail {_prev_lbl_text} → actual",
-                    )
+                # ============================================================
+                # Ciclo 17.1.2 — TRAYECTORIA COMPLETA superpuesta
+                # Si el snapshot trae trajectory_speed/amp/phase, dibujamos
+                # el loop polar entero del run-up/coast-down. Asi se ve el
+                # paso por la velocidad critica (peak de la curva), la
+                # forma del loop (sub-síncronos, fase de Bode) y como
+                # cambio entre corridas. Lo dibujamos PRIMERO (zorder bajo)
+                # para que el actual quede arriba.
+                # ============================================================
+                _traj_speed = _snap.get("trajectory_speed") or []
+                _traj_amp = _snap.get("trajectory_amp") or []
+                _traj_phase = _snap.get("trajectory_phase") or []
+                _has_full_traj = (
+                    len(_traj_speed) > 1
+                    and len(_traj_speed) == len(_traj_amp) == len(_traj_phase)
                 )
+                if _has_full_traj:
+                    _traj_theta = [float(p) % 360.0 for p in _traj_phase]
+                    fig.add_trace(
+                        go.Scatterpolar(
+                            r=_traj_amp,
+                            theta=_traj_theta,
+                            mode="lines",
+                            line=dict(
+                                width=1.8,
+                                color=_line_color,
+                                dash="solid",
+                            ),
+                            opacity=0.55,
+                            customdata=np.array(_traj_speed).reshape(-1, 1),
+                            hovertemplate=(
+                                f"<b>{_prev_lbl_text}</b><br>"
+                                f"Speed: %{{customdata[0]:.0f}} rpm<br>"
+                                f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
+                                f"Phase: %{{theta:.1f}}°<extra></extra>"
+                            ),
+                            showlegend=False,
+                            name=f"Polar {_prev_lbl_text}",
+                        )
+                    )
+                    # Marcador del PICO (max amplitud) de la trayectoria
+                    # historica = velocidad critica de esa corrida.
+                    try:
+                        _i_pk = int(np.argmax(_traj_amp))
+                        _peak_amp = float(_traj_amp[_i_pk])
+                        _peak_phase = float(_traj_theta[_i_pk])
+                        _peak_speed = float(_traj_speed[_i_pk])
+                        fig.add_trace(
+                            go.Scatterpolar(
+                                r=[_peak_amp],
+                                theta=[_peak_phase],
+                                mode="markers",
+                                marker=dict(
+                                    size=12,
+                                    color=_marker_color,
+                                    symbol="diamond-open",
+                                    line=dict(width=2.0, color="#0f172a"),
+                                ),
+                                opacity=0.85,
+                                showlegend=False,
+                                hovertemplate=(
+                                    f"<b>Pico {_prev_lbl_text}</b><br>"
+                                    f"Speed: {_peak_speed:.0f} rpm<br>"
+                                    f"Amp: {_peak_amp:.3f} {amp_unit}<br>"
+                                    f"Phase: {_peak_phase:.1f}°<extra></extra>"
+                                ),
+                            )
+                        )
+                    except Exception:
+                        pass
+                else:
+                    # Sin trayectoria — fallback: linea conectora simple
+                    # del snapshot anterior al punto actual (legacy).
+                    _n_seg = 12
+                    _frac = np.linspace(0.0, 1.0, _n_seg)
+                    _seg_r = _prev_amp + (_curr_amp - _prev_amp) * _frac
+                    _delta_seg = ((_curr_phase - _prev_phase_disp + 540.0) % 360.0) - 180.0
+                    _seg_theta = (_prev_phase_disp + _delta_seg * _frac) % 360.0
+                    fig.add_trace(
+                        go.Scatterpolar(
+                            r=_seg_r,
+                            theta=_seg_theta,
+                            mode="lines",
+                            line=dict(width=2.0, color=_line_color, dash="dot"),
+                            showlegend=False,
+                            hoverinfo="skip",
+                            name=f"Trail {_prev_lbl_text} → actual",
+                        )
+                    )
 
-                # Marker GHOST con label corta
+                # Marker GHOST del punto operativo del snapshot anterior
+                _delta_ph = ((_curr_phase - _prev_phase_disp + 540.0) % 360.0) - 180.0
                 fig.add_trace(
                     go.Scatterpolar(
                         r=[_prev_amp],
@@ -752,12 +827,12 @@ def build_polar_figure(
                         textfont=dict(size=9, color="#0f172a", family="Arial"),
                         showlegend=False,
                         hovertemplate=(
-                            f"<b>Snapshot: {_prev_lbl_text}</b><br>"
+                            f"<b>Op {_prev_lbl_text}</b><br>"
                             f"Amplitude: {_prev_amp:.3f} {amp_unit}<br>"
                             f"Phase: {_prev_phase_disp:.1f}°<br>"
                             f"Δ amp: {(_curr_amp - _prev_amp):+.3f} "
                             f"({((_curr_amp - _prev_amp) / _prev_amp * 100.0):+.1f}%)<br>"
-                            f"Δ phase: {_delta:+.1f}°<extra></extra>"
+                            f"Δ phase: {_delta_ph:+.1f}°<extra></extra>"
                         ),
                     )
                 )
@@ -2177,6 +2252,10 @@ def render_polar_panel(
                                     "label": _prev_snap_full.get("corrida_label", ""),
                                     "op_speed": float(_prev_snap_full.get("operating_speed_rpm", 0) or 0),
                                     "timestamp": _prev_snap_full.get("timestamp", ""),
+                                    # Ciclo 17.1.2 — trayectoria completa para overlay
+                                    "trajectory_speed": _ps.get("trajectory_speed", []) or [],
+                                    "trajectory_amp": _ps.get("trajectory_amp", []) or [],
+                                    "trajectory_phase": _ps.get("trajectory_phase", []) or [],
                                 })
                                 break
                 # Para backward-compat con narrativa PDF: usar el primero
@@ -2584,7 +2663,8 @@ def main() -> None:
             _polar_inst = None
 
     # Helper: para cada parsed_item (= cada CSV polar), encontrar el
-    # sensor del Sensor Map matched y extraer amp/phase a op_speed.
+    # sensor del Sensor Map matched y extraer amp/phase a op_speed +
+    # trayectoria completa downsampleada para superposicion historica.
     def _wm_extract_polar_readings(
         items: List[Dict[str, Any]],
         sensors_map: List[Dict[str, Any]],
@@ -2610,7 +2690,24 @@ def main() -> None:
                 row = nearest_row_for_speed(df, op_speed_rpm)
                 amp_at_op = float(row.get("amp", 0.0))
                 phase_at_op = float(row.get("phase", 0.0)) % 360.0
-                out.append({
+
+                # Ciclo 17.1.2 — Trayectoria completa downsampleada.
+                # Polar/Bode tipicos tienen 1000+ puntos. Para mantener
+                # el JSON liviano (~10KB por sensor) bajamos a ~80 puntos
+                # uniformemente espaciados por RPM. Esto preserva la
+                # forma del loop incluyendo el paso por la critica.
+                _df_sorted = df.sort_values("speed").reset_index(drop=True)
+                _N_TARGET = 80
+                if len(_df_sorted) > _N_TARGET:
+                    _idx = np.linspace(0, len(_df_sorted) - 1, _N_TARGET).astype(int)
+                    _df_ds = _df_sorted.iloc[_idx]
+                else:
+                    _df_ds = _df_sorted
+                traj_speed = _df_ds["speed"].astype(float).tolist()
+                traj_amp = _df_ds["amp"].astype(float).tolist()
+                traj_phase = (_df_ds["phase"].astype(float) % 360.0).tolist()
+
+                entry = {
                     "sensor_label": _wm_slbl(sensor_match),
                     "csv_file": it.get("file_name", ""),
                     "amp_at_op": amp_at_op,
@@ -2618,7 +2715,11 @@ def main() -> None:
                     "amp_unit": unit or "mil pp",
                     "phase_unit": "deg",
                     "csv_timestamp": str(meta.get("Timestamp", "") or ""),
-                })
+                    "trajectory_speed": traj_speed,
+                    "trajectory_amp": traj_amp,
+                    "trajectory_phase": traj_phase,
+                }
+                out.append(entry)
             except Exception:
                 continue
         return out

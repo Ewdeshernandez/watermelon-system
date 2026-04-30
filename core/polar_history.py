@@ -125,7 +125,7 @@ def save_polar_snapshot(
     cleaned = []
     for s in sensors_data:
         try:
-            cleaned.append({
+            entry = {
                 "sensor_label": str(s.get("sensor_label", "")),
                 "csv_file": str(s.get("csv_file", "")),
                 "amp_at_op": _safe_float(s.get("amp_at_op")),
@@ -133,7 +133,36 @@ def save_polar_snapshot(
                 "amp_unit": str(s.get("amp_unit", "") or ""),
                 "phase_unit": str(s.get("phase_unit", "deg") or "deg"),
                 "csv_timestamp": str(s.get("csv_timestamp", "") or ""),
-            })
+            }
+            # Ciclo 17.1.2 — trayectoria completa downsampleada
+            traj_speed = s.get("trajectory_speed")
+            traj_amp = s.get("trajectory_amp")
+            traj_phase = s.get("trajectory_phase")
+            if (
+                traj_speed is not None and traj_amp is not None
+                and traj_phase is not None
+                and len(traj_speed) == len(traj_amp) == len(traj_phase)
+                and len(traj_speed) > 1
+            ):
+                entry["trajectory_speed"] = [
+                    round(_safe_float(v), 2) for v in traj_speed
+                ]
+                entry["trajectory_amp"] = [
+                    round(_safe_float(v), 4) for v in traj_amp
+                ]
+                entry["trajectory_phase"] = [
+                    round(_safe_float(v) % 360.0, 2) for v in traj_phase
+                ]
+            # Velocidad crítica + Q de la corrida (si la hay)
+            cs_rpm = s.get("critical_speed_rpm")
+            if cs_rpm is not None:
+                entry["critical_speed_rpm"] = _safe_float(cs_rpm)
+                entry["critical_speed_amp"] = _safe_float(
+                    s.get("critical_speed_amp"))
+                entry["critical_speed_phase"] = _safe_float(
+                    s.get("critical_speed_phase"))
+                entry["q_factor"] = _safe_float(s.get("q_factor"))
+            cleaned.append(entry)
         except Exception:
             continue
 
