@@ -765,6 +765,184 @@ def render_sensor_map_section(instance_id: str) -> None:
                 preview_lines.append(f"- **{lbl}** · {ploc} · {tinfo} · match=`{pat}`")
             st.markdown("\n".join(preview_lines))
 
+        # ============================================================
+        # Ciclo 16.1 — Wizard auto-pattern desde CSVs cargados
+        # ------------------------------------------------------------
+        # Detecta sensores sin match definitivo y propone patterns
+        # basados en los Point names de los CSVs en sesion. El usuario
+        # acepta/rechaza por sensor y aplica en bulk.
+        # ============================================================
+        st.markdown("---")
+        st.markdown("#### 🪄 Sugerir patterns desde CSVs cargados")
+        st.caption(
+            "Si subiste CSVs en Load Data y algunos sensores aparecen sin "
+            "match contra el Sensor Map, este asistente analiza los Point "
+            "names de los CSVs y propone un `csv_match_pattern` concreto "
+            "para cada sensor sin pattern. Acepta o rechaza por fila."
+        )
+
+        try:
+            from core.sensor_map import (
+                detect_definitive_matches,
+                suggest_pattern_for_sensor,
+                sensor_label as _slbl,
+            )
+
+            # Recolectar metadata de los signals en sesion
+            _wiz_signals_meta = []
+            for _signame, _sigobj in (st.session_state.get("signals", {}) or {}).items():
+                try:
+                    _md = (
+                        getattr(_sigobj, "metadata", None)
+                        or (_sigobj.get("metadata") if isinstance(_sigobj, dict) else {})
+                        or {}
+                    )
+                    _wiz_signals_meta.append({
+                        "File": _signame,
+                        "Point": str(_md.get("Point", "") or ""),
+                        "Variable": str(_md.get("Variable", "") or ""),
+                        "Y-Axis Unit": str(
+                            _md.get("Y-Axis Unit", "")
+                            or _md.get("Unit", "")
+                            or ""
+                        ),
+                    })
+                except Exception:
+                    continue
+
+            if not _wiz_signals_meta:
+                st.info(
+                    "No hay signals cargados en sesión. Andá a **Load Data** "
+                    "para subir los CSVs y volvé aquí — el asistente analiza "
+                    "los Point names y propone patterns para tus sensores."
+                )
+            else:
+                # Detectar matches definitivos y proponer para los que faltan
+                _definitive = detect_definitive_matches(inst.sensors, _wiz_signals_meta)
+                _claimed = set(_definitive.values())
+
+                _wiz_rows = []
+                for _s in inst.sensors:
+                    _lbl = _slbl(_s)
+                    if _lbl in _definitive:
+                        continue  # ya matched definitivamente
+                    # Solo proponer para los SIN pattern; si ya tiene pattern
+                    # pero no matchea, el usuario lo escribió mal — lo
+                    # mostramos también.
+                    _sug = suggest_pattern_for_sensor(
+                        _s, _wiz_signals_meta, already_claimed_signals=_claimed
+                    )
+                    if _sug is None:
+                        continue
+                    _wiz_rows.append({
+                        "_sensor_label": _lbl,
+                        "_sensor_obj": _s,
+                        "_suggestion": _sug,
+                    })
+
+                if not _wiz_rows:
+                    if len(_definitive) == sum(
+                        1 for _s in inst.sensors
+                        if str(_s.get("sensor_type", "")).lower() != "keyphasor"
+                    ):
+                        st.success(
+                            "✓ Todos los sensores de vibración tienen un "
+                            "pattern que matchea correctamente con un CSV "
+                            "cargado. No hay sugerencias pendientes."
+                        )
+                    else:
+                        st.info(
+                            "No hay sugerencias adicionales. Sensores sin "
+                            "match no tienen CSVs compatibles cargados."
+                        )
+                else:
+                    st.markdown(
+                        f"**{len(_wiz_rows)}** "
+                        f"{'sensor sin match' if len(_wiz_rows) == 1 else 'sensores sin match definitivo'}"
+                        f" — propuestas:"
+                    )
+
+                    # Inicializar checkboxes en session_state
+                    _wiz_state_key = f"ml_wiz_apply_{instance_id}"
+                    if _wiz_state_key not in st.session_state:
+                        st.session_state[_wiz_state_key] = {
+                            row["_sensor_label"]: True for row in _wiz_rows
+                        }
+
+                    # Render: una fila por sensor con checkbox + info
+                    for row in _wiz_rows:
+                        _lbl = row["_sensor_label"]
+                        _sug = row["_suggestion"]
+                        _sensor = row["_sensor_obj"]
+                        _cur_pattern = (_sensor.get("csv_match_pattern") or "").strip()
+                        _conf_emoji = {"high": "🟢", "medium": "🟡", "low": "🔴"}.get(
+                            _sug["confidence"], "🟡"
+                        )
+
+                        cols_w = st.columns([0.5, 4, 4])
+                        with cols_w[0]:
+                            checked = st.checkbox(
+                                "Apply",
+                                value=st.session_state[_wiz_state_key].get(_lbl, True),
+                                key=f"wiz_apply_cb_{instance_id}_{_lbl}",
+                                label_visibility="collapsed",
+                            )
+                            st.session_state[_wiz_state_key][_lbl] = checked
+                        with cols_w[1]:
+                            st.markdown(
+                                f"**{_lbl}** · {_sensor.get('plane_label', '')} "
+                                f"· {_sensor.get('sensor_type', '')} "
+                                f"`{_sensor.get('direction', '')}`"
+                            )
+                            st.caption(
+                                f"Pattern actual: `{_cur_pattern or '(vacío)'}`"
+                            )
+                        with cols_w[2]:
+                            st.markdown(
+                                f"{_conf_emoji} → propone `{_sug['proposed_pattern']}` "
+                                f"(matchea **{_sug['candidate_point']}**)"
+                            )
+                            st.caption(
+                                f"Desde `{_sug['candidate_signal']}` · "
+                                f"{_sug['reason']}"
+                            )
+
+                    if st.button(
+                        f"✨ Aplicar {sum(st.session_state[_wiz_state_key].values())} pattern(s) seleccionados",
+                        key=f"wiz_apply_btn_{instance_id}",
+                        type="primary",
+                        width="stretch",
+                    ):
+                        _new_sensors = list(inst.sensors)
+                        # Map por label para update inplace
+                        _by_label = {_slbl(_s): i for i, _s in enumerate(_new_sensors)}
+                        _applied = 0
+                        for row in _wiz_rows:
+                            _lbl = row["_sensor_label"]
+                            if not st.session_state[_wiz_state_key].get(_lbl):
+                                continue
+                            if _lbl not in _by_label:
+                                continue
+                            _idx = _by_label[_lbl]
+                            _s_copy = dict(_new_sensors[_idx])
+                            _s_copy["csv_match_pattern"] = row["_suggestion"]["proposed_pattern"]
+                            _new_sensors[_idx] = _s_copy
+                            _applied += 1
+                        if _applied > 0:
+                            update_instance_header(instance_id, sensors=_new_sensors)
+                            st.success(
+                                f"✓ {_applied} pattern(s) aplicados al Sensor Map. "
+                                f"Volvé a Tabular List o Reports y los sensores "
+                                f"aparecerán con sus valores Overall."
+                            )
+                            # limpiar el state para que no quede pegado
+                            st.session_state.pop(_wiz_state_key, None)
+                            st.rerun()
+                        else:
+                            st.info("Marcá al menos una fila para aplicar.")
+        except Exception as _wiz_e:
+            st.caption(f"_(wizard no disponible: {_wiz_e})_")
+
         # Ciclo 14c.2 — diagrama visual del mapa de sensores
         st.markdown("#### 🎯 Diagrama visual del mapa")
         st.caption(
