@@ -18,6 +18,8 @@ import streamlit as st
 from core.auth import require_login, render_user_menu
 from core.csv_common import decode_csv_text, find_header_line, parse_metadata_block
 from core.instance_selector import render_instance_selector
+from core.instance_state import get_instance as _get_instance_for_threshold
+from core.sensor_map import resolve_sensor_for_point
 from core.trend_diagnostics import build_trend_report_narrative as build_trend_report_narrative_core
 from core.trend_history import (
     delete_trend_corrida,
@@ -452,6 +454,137 @@ def load_trend_records_from_uploader(files: List[Any]) -> List[TrendRecord]:
         if rec is not None:
             records.append(rec)
     return records
+
+
+# =============================================================
+# Ciclo 17.5.2 — Sugerencia de Warning/Danger desde Sensor Map
+# =============================================================
+# Cada sensor del Sensor Map tiene `alarm` (= warning) y `danger`
+# en su unit_native (mil pp para proximity, mm/s RMS para
+# velocity, g RMS para accelerometer). Para los CSVs cargados,
+# resolvemos el sensor que matchea por nombre/dirección y
+# devolvemos el setpoint más conservador (mínimo) cuando hay
+# múltiples sensores en el panel — así si CUALQUIERA cruza el
+# umbral, dispara la alarma.
+#
+# Fallback por jerarquía:
+#   1. Sensor Map de la instancia (Vault per-instance)
+#   2. profile.custom_thresholds (si existe)
+#   3. ISO 20816 por machine_group (defaults conservadores)
+#
+# El usuario SIEMPRE puede sobreescribir manualmente — el chip
+# de fuente lo deja explícito ("Override del cliente").
+
+def _iso_20816_amplitude_defaults(machine_group: str, metric_unit: str) -> Tuple[float, float, str]:
+    """ISO 20816 thresholds básicos por machine_group para
+    Amplitude. Retorna (warning, danger, source_label)."""
+    mg = (machine_group or "").lower()
+    mu = (metric_unit or "").lower()
+
+    # Para vibración relativa al eje (proximity probes, mil pp)
+    # los manuales típicos usan 3 mil pp / 5 mil pp como referencia.
+    if "mil" in mu or "µm" in mu or "um" in mu:
+        return (3.000, 5.000, "ISO/Bently default")
+
+    # Para velocity (mm/s RMS) — ISO 20816-1/2 zonas C/D para
+    # class IV (>75kW, fundación rígida) son ≈2.8 / 4.5 mm/s.
+    if "mm/s" in mu:
+        if "class_i" in mg and "iv" not in mg and "iii" not in mg:
+            return (1.4, 2.8, "ISO 20816 class I")
+        if "class_ii" == mg or "class_ii_" in mg:
+            return (1.8, 4.5, "ISO 20816 class II")
+        if "class_iii" in mg:
+            return (2.8, 7.1, "ISO 20816 class III")
+        # default: class IV
+        return (2.8, 4.5, "ISO 20816 class IV")
+
+    # Para g RMS (accelerometer) — heurística genérica.
+    if mu.startswith("g") or "g rms" in mu or "g pk" in mu:
+        return (3.0, 6.0, "Default accelerometer")
+
+    return (3.000, 5.000, "Default")
+
+
+def suggest_trend_thresholds(
+    records: List[TrendRecord],
+    sensors: List[Dict[str, Any]],
+    metric_key: str,
+    machine_group: str,
+) -> Dict[str, Any]:
+    """
+    Calcula los setpoints Warning/Danger sugeridos para los
+    records seleccionados.
+
+    Devuelve dict:
+        warning:        Optional[float]
+        danger:         Optional[float]
+        source:         "Sensor Map" | "ISO 20816" | "default"
+        detail:         texto humano para mostrar como caption
+        unit_hint:      unidad inferida del primer record
+        applicable:     False cuando metric_key no es Amplitude
+                        (Phase / Speed no usan setpoints del Vault)
+    """
+    out: Dict[str, Any] = {
+        "warning": None,
+        "danger": None,
+        "source": "default",
+        "detail": "",
+        "unit_hint": "",
+        "applicable": False,
+    }
+
+    if metric_key != "Amplitude":
+        out["detail"] = "Setpoints sólo aplican a Amplitude"
+        return out
+
+    out["applicable"] = True
+    unit_hint = ""
+    if records:
+        unit_hint = (records[0].y_axis_unit or "").strip()
+    out["unit_hint"] = unit_hint
+
+    # 1) Intentar Sensor Map per-record
+    matched_pairs: List[Tuple[TrendRecord, Dict[str, Any]]] = []
+    if records and sensors:
+        for rec in records:
+            try:
+                s = resolve_sensor_for_point(
+                    sensors, rec.point, rec.variable, rec.y_axis_unit,
+                )
+            except Exception:
+                s = None
+            if s and (float(s.get("alarm", 0) or 0) > 0 or float(s.get("danger", 0) or 0) > 0):
+                matched_pairs.append((rec, s))
+
+    if matched_pairs:
+        w_vals = [float(s.get("alarm", 0) or 0) for _, s in matched_pairs if float(s.get("alarm", 0) or 0) > 0]
+        d_vals = [float(s.get("danger", 0) or 0) for _, s in matched_pairs if float(s.get("danger", 0) or 0) > 0]
+        out["warning"] = min(w_vals) if w_vals else None
+        out["danger"] = min(d_vals) if d_vals else None
+        out["source"] = "Sensor Map"
+        if len(matched_pairs) == 1:
+            rec, s = matched_pairs[0]
+            plane_lbl = s.get("plane_label") or f"plano {s.get('plane','')}"
+            stype = s.get("sensor_type", "")
+            unit = s.get("unit_native", "") or unit_hint
+            out["detail"] = f"{rec.point_clean} → {plane_lbl} · {stype} ({unit})"
+        else:
+            out["detail"] = (
+                f"{len(matched_pairs)} sensores en el panel · usando los "
+                f"setpoints más conservadores"
+            )
+        return out
+
+    # 2) Fallback ISO 20816 / Bently
+    w_iso, d_iso, src = _iso_20816_amplitude_defaults(machine_group, unit_hint)
+    out["warning"] = w_iso
+    out["danger"] = d_iso
+    out["source"] = src
+    out["detail"] = (
+        f"{src} para {unit_hint or 'Amplitude'}"
+        f" (no hay match con Sensor Map)"
+    )
+    return out
 
 
 # =============================================================
@@ -2989,7 +3122,33 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     fig.update_xaxes(title_font=dict(size=40), tickfont=dict(size=26))
     fig.update_yaxes(title_font=dict(size=40), tickfont=dict(size=26))
 
-    if has_secondary_y:
+    # Ciclo 17.5.4 — coordenadas explícitas del segundo eje en
+    # función de si además hay info box a la derecha. Antes el
+    # secondary axis quedaba en position=0.80 incluso sin info
+    # box, lo que dejaba la curva operacional fuera del eje
+    # visible. Ahora:
+    #   - has_secondary_y SIN info box → xaxis [0, 0.93], yaxis2 @ 0.94
+    #   - has_secondary_y CON info box → xaxis [0, 0.72], yaxis2 @ 0.73
+    #   - solo info box (sin secondary) → xaxis [0, 0.72] como antes
+    if has_secondary_y and has_right_info_box:
+        _xaxis_end = 0.72
+        _yaxis2_pos = 0.735
+    elif has_secondary_y:
+        _xaxis_end = 0.935
+        _yaxis2_pos = 0.945
+    elif has_right_info_box:
+        _xaxis_end = 0.72
+        _yaxis2_pos = None
+    else:
+        _xaxis_end = None
+        _yaxis2_pos = None
+
+    if _xaxis_end is not None:
+        xaxis_cfg = dict(fig.layout.xaxis.to_plotly_json()) if getattr(fig.layout, "xaxis", None) is not None else {}
+        xaxis_cfg["domain"] = [0.0, float(_xaxis_end)]
+        fig.update_layout(xaxis=xaxis_cfg)
+
+    if has_secondary_y and _yaxis2_pos is not None:
         yaxis2_cfg = dict(fig.layout.yaxis2.to_plotly_json()) if getattr(fig.layout, "yaxis2", None) is not None else {}
         yaxis2_cfg.update(
             dict(
@@ -2997,7 +3156,7 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
                 side="right",
                 overlaying="y",
                 anchor="free",
-                position=0.80,
+                position=float(_yaxis2_pos),
                 ticks="outside",
                 tickfont=dict(size=26, color="#111827"),
                 title_font=dict(size=40, color="#111827"),
@@ -3010,11 +3169,6 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
             )
         )
         fig.update_layout(yaxis2=yaxis2_cfg)
-
-    if has_right_info_box:
-        xaxis_cfg = dict(fig.layout.xaxis.to_plotly_json()) if getattr(fig.layout, "xaxis", None) is not None else {}
-        xaxis_cfg["domain"] = [0.0, 0.72]
-        fig.update_layout(xaxis=xaxis_cfg)
 
     for shape in fig.layout.shapes:
         if shape.line is not None:
@@ -3040,7 +3194,19 @@ def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[st
     try:
         export_fig = _build_export_safe_figure(fig)
         export_fig = _scale_export_figure(export_fig)
-        png_bytes = export_fig.to_image(format="png", width=4200, height=2200, scale=2)
+        # Ciclo 17.5.4 — antes pasábamos width=4200 fijo y se
+        # comían el eje secundario / info box cuando los hay. Ahora
+        # respetamos el width que _scale_export_figure ya seteó
+        # (puede ser 4200 / 4700 / 4900 según contenido).
+        try:
+            _w = int(export_fig.layout.width or 4200)
+        except Exception:
+            _w = 4200
+        try:
+            _h = int(export_fig.layout.height or 2200)
+        except Exception:
+            _h = 2200
+        png_bytes = export_fig.to_image(format="png", width=_w, height=_h, scale=2)
         return png_bytes, None
     except Exception as e:
         return None, str(e)
@@ -3726,6 +3892,65 @@ def queue_trend_to_report(
         asset_context=st.session_state.get("asset_context", {}) or {},
     )
 
+    # =================================================================
+    # Ciclo 17.5.3 — Autodiagnóstico ejecutivo en el PDF
+    # =================================================================
+    # El autodiagnóstico que ya se muestra en pantalla (headline + 6
+    # párrafos Bently + recomendaciones) se inyecta al inicio de la
+    # narrativa del reporte. Antes el reporte recibía solo la
+    # narrativa core (descripción factual) y los detectores
+    # individuales — ahora la síntesis ejecutiva va arriba para que
+    # el lector capture el diagnóstico en una página.
+    autodiag_block_text = ""
+    _autodiag_for_pdf: Dict[str, Any] = {}
+    if records and not operational_only_mode:
+        try:
+            _thr_meta = st.session_state.get("wm_tr_threshold_source", {}) or {}
+            _w_for_diag = _thr_meta.get("warning_value")
+            _d_for_diag = _thr_meta.get("danger_value")
+            _autodiag_for_pdf = build_trend_autodiagnostic(
+                records,
+                metric_key,
+                warning_value=float(_w_for_diag) if _w_for_diag is not None else None,
+                danger_value=float(_d_for_diag) if _d_for_diag is not None else None,
+                operational_records=operational_records,
+            )
+            _bits: List[str] = []
+            _headline = _autodiag_for_pdf.get("headline", "")
+            if _headline:
+                _bits.append(f"AUTODIAGNÓSTICO EJECUTIVO\n{_headline}")
+
+            for _para in _autodiag_for_pdf.get("prose", []) or []:
+                if _para and _para.strip():
+                    _bits.append(_para.strip())
+
+            _recs_for_pdf = _autodiag_for_pdf.get("recommendations", []) or []
+            if _recs_for_pdf:
+                _rec_lines = "\n".join([f"  {_i}. {_r}" for _i, _r in enumerate(_recs_for_pdf, 1)])
+                _bits.append(f"Acciones recomendadas:\n{_rec_lines}")
+
+            # Marco de fuente de los setpoints (Vault / ISO / Override)
+            _src = (_thr_meta.get("source") or "").strip()
+            if _src and _src not in ("default", "n/a"):
+                _src_line_parts = [f"Setpoints: {_src}"]
+                if _thr_meta.get("warning_is_override") or _thr_meta.get("danger_is_override"):
+                    _sw = _thr_meta.get("suggested_warning")
+                    _sd = _thr_meta.get("suggested_danger")
+                    _src_line_parts.append(
+                        "Override del cliente activo "
+                        f"(sugeridos: W={_sw} / D={_sd})"
+                    )
+                _detail = (_thr_meta.get("detail") or "").strip()
+                if _detail:
+                    _src_line_parts.append(_detail)
+                _bits.append(" · ".join(_src_line_parts))
+
+            if _bits:
+                autodiag_block_text = "\n\n".join(_bits)
+                narrative = f"{autodiag_block_text}\n\n{narrative}"
+        except Exception:
+            pass
+
     correlation_report_block = ""
     correlation_payload: Dict[str, Any] = {}
     lag_payload: Dict[str, Any] = {}
@@ -3856,6 +4081,15 @@ def queue_trend_to_report(
         "drift_details": drift_details,
         "behavior_summary": behavior_summary,
         "behavior_details": behavior_details,
+        # Ciclo 17.5.3 — autodiag ejecutivo + threshold source
+        "autodiagnostic": {
+            "headline": _autodiag_for_pdf.get("headline", ""),
+            "prose": list(_autodiag_for_pdf.get("prose", []) or []),
+            "recommendations": list(_autodiag_for_pdf.get("recommendations", []) or []),
+            "status": _autodiag_for_pdf.get("status", "unknown"),
+            "status_label": _autodiag_for_pdf.get("status_label", ""),
+        },
+        "threshold_source": dict(st.session_state.get("wm_tr_threshold_source", {}) or {}),
     }
     st.session_state.report_items.append(item_payload)
     st.session_state["wm_tr_last_report_debug"] = {
@@ -3966,15 +4200,126 @@ with st.sidebar:
     show_legend = st.checkbox("Show legend", value=True)
 
     st.markdown("### Alarms")
-    warning_enabled = st.checkbox("Enable warning line", value=True)
-    warning_value: Optional[float] = None
-    if warning_enabled:
-        warning_value = float(st.number_input("Warning value", value=3.500, step=0.1, format="%.3f"))
+    # =========================================================
+    # Ciclo 17.5.2 — sugerencia de Warning/Danger desde el Vault
+    # =========================================================
+    # Tomamos los records actualmente seleccionados (primary +
+    # extras) y consultamos el Sensor Map de la instancia activa
+    # para extraer alarm / danger por sensor. El resultado se
+    # PRE-LLENA en los inputs pero el usuario puede sobrescribir
+    # libremente (caso típico: la norma dice 4 mil pp pero el
+    # cliente exige 3 mil pp como criterio conservador).
+    _sel_for_thr = [
+        r for r in records_all
+        if r.trend_id in (
+            [st.session_state.wm_tr_primary_signal_id]
+            + list(st.session_state.wm_tr_extra_signal_ids)
+        )
+    ]
+    try:
+        _inst_for_thr = _get_instance_for_threshold(trend_active_instance_id) if trend_active_instance_id else None
+    except Exception:
+        _inst_for_thr = None
+    _sensors_for_thr = list(_inst_for_thr.sensors) if _inst_for_thr else []
+    _machine_group_for_thr = str(trend_instance_state.get("machine_group") or "class_iv")
 
-    danger_enabled = st.checkbox("Enable danger line", value=True)
+    _thr_suggestion = suggest_trend_thresholds(
+        _sel_for_thr,
+        _sensors_for_thr,
+        metric_key=metric_key,
+        machine_group=_machine_group_for_thr,
+    )
+
+    # Source chip
+    _src = _thr_suggestion.get("source", "default")
+    _src_color = {
+        "Sensor Map":           ("#10b981", "#ecfdf5"),
+        "ISO/Bently default":   ("#0ea5e9", "#e0f2fe"),
+        "ISO 20816 class I":    ("#0ea5e9", "#e0f2fe"),
+        "ISO 20816 class II":   ("#0ea5e9", "#e0f2fe"),
+        "ISO 20816 class III":  ("#0ea5e9", "#e0f2fe"),
+        "ISO 20816 class IV":   ("#0ea5e9", "#e0f2fe"),
+        "Default accelerometer": ("#0ea5e9", "#e0f2fe"),
+        "Default":              ("#9ca3af", "#f1f5f9"),
+        "default":              ("#9ca3af", "#f1f5f9"),
+        "n/a":                  ("#9ca3af", "#f1f5f9"),
+    }.get(_src, ("#9ca3af", "#f1f5f9"))
+
+    st.markdown(
+        f"<div style='background:{_src_color[1]};border-left:3px solid {_src_color[0]};"
+        f"padding:8px 12px;border-radius:6px;margin:2px 0 8px 0;font-size:0.85rem;'>"
+        f"<b>Setpoints sugeridos:</b> {_src}<br>"
+        f"<span style='color:#475569;font-size:0.78rem;'>"
+        f"{_thr_suggestion.get('detail','')}</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Resolver defaults para los number_input. Si el usuario ya
+    # overrideó manualmente en sesiones previas (wm_tr_warning_override /
+    # wm_tr_danger_override), respetamos el override; si no, usamos
+    # la sugerencia.
+    _suggested_w = _thr_suggestion.get("warning")
+    _suggested_d = _thr_suggestion.get("danger")
+    _default_w = float(_suggested_w) if _suggested_w is not None else 3.500
+    _default_d = float(_suggested_d) if _suggested_d is not None else 5.000
+
+    # Boton "Aplicar Vault" que limpia overrides y pre-llena con sugerencia.
+    _btn_cols = st.columns([0.6, 0.4])
+    with _btn_cols[0]:
+        if st.button("Aplicar setpoints sugeridos", key="wm_tr_apply_vault_thr", use_container_width=True):
+            st.session_state.pop("wm_tr_warning_override_value", None)
+            st.session_state.pop("wm_tr_danger_override_value", None)
+            st.rerun()
+
+    warning_enabled = st.checkbox("Enable warning line", value=True, key="wm_tr_warning_enabled")
+    warning_value: Optional[float] = None
+    _w_is_override = False
+    if warning_enabled:
+        _w_session_default = st.session_state.get("wm_tr_warning_override_value", _default_w)
+        warning_value = float(st.number_input(
+            "Warning value",
+            value=float(_w_session_default),
+            step=0.1, format="%.3f",
+            key="wm_tr_warning_input",
+        ))
+        st.session_state["wm_tr_warning_override_value"] = warning_value
+        if abs(warning_value - _default_w) > 1e-9:
+            _w_is_override = True
+            st.caption(
+                f"⚙️ Override del cliente · sugerido: {_default_w:.3f}"
+            )
+
+    danger_enabled = st.checkbox("Enable danger line", value=True, key="wm_tr_danger_enabled")
     danger_value: Optional[float] = None
+    _d_is_override = False
     if danger_enabled:
-        danger_value = float(st.number_input("Danger value", value=5.000, step=0.1, format="%.3f"))
+        _d_session_default = st.session_state.get("wm_tr_danger_override_value", _default_d)
+        danger_value = float(st.number_input(
+            "Danger value",
+            value=float(_d_session_default),
+            step=0.1, format="%.3f",
+            key="wm_tr_danger_input",
+        ))
+        st.session_state["wm_tr_danger_override_value"] = danger_value
+        if abs(danger_value - _default_d) > 1e-9:
+            _d_is_override = True
+            st.caption(
+                f"⚙️ Override del cliente · sugerido: {_default_d:.3f}"
+            )
+
+    # Persistir el origen para que el reporte/PDF lo cite correctamente
+    st.session_state["wm_tr_threshold_source"] = {
+        "warning_value": warning_value,
+        "danger_value": danger_value,
+        "suggested_warning": _suggested_w,
+        "suggested_danger": _suggested_d,
+        "source": _src,
+        "detail": _thr_suggestion.get("detail", ""),
+        "warning_is_override": _w_is_override,
+        "danger_is_override": _d_is_override,
+        "machine_group": _machine_group_for_thr,
+    }
 
 selected_ids = [st.session_state.wm_tr_primary_signal_id] + st.session_state.wm_tr_extra_signal_ids
 selected_ids = [sid for sid in selected_ids if sid is not None]
