@@ -2272,9 +2272,14 @@ def render_polar_panel(
         _prev_phase = None
         _prev_snapshots_list = []
 
-    # Ciclo 17.1 P5 — narrativa del comparativo Polar para el PDF
-    # report. Se inyecta en text_diag["comparison_narrative"] que
-    # _build_polar_report_notes incluye en las notas de la figura.
+    # Ciclo 17.1.3 — Narrativa modal completa del comparativo Polar
+    # para el PDF report. Reemplaza la narrativa simple de balance por
+    # un análisis rotodinámico estilo Bently Nevada Technical Training:
+    # caracterización del modo (translacional / cónico / flexural por
+    # Δfase a la crítica), análisis de sensitividad vectorial,
+    # distinción modal del rotor vs estructural, persistencia /
+    # migración del modo, y diagnóstico diferencial (balance vs fault
+    # vs operacional).
     if (
         _prev_amp is not None and _prev_phase is not None
         and _prev_amp > 0 and use_rotordyn_pro and operating_rpm is not None
@@ -2303,69 +2308,246 @@ def render_polar_panel(
                 _amp_unit_local = meta.get("Amp Unit", "") or meta.get("Y-Axis Unit", "") or ""
                 _prev_lbl_text = _prev_label or "corrida anterior"
 
-                _narr_parts = []
+                # --- Datos del modo en la corrida ACTUAL ---
+                # Phase delta a través del peak (via critical_speeds_pro
+                # si está disponible).
+                _curr_cs_rpm = None
+                _curr_cs_amp = None
+                _curr_cs_phase_delta = None
+                _curr_q = None
+                if pro_overlay_criticals:
+                    try:
+                        _cs_pro_first = pro_overlay_criticals[0]
+                        _curr_cs_rpm = float(_cs_pro_first.get("rpm", 0) or 0)
+                        _curr_cs_amp = float(_cs_pro_first.get("amp", 0) or 0)
+                        _curr_cs_phase_delta = float(
+                            _cs_pro_first.get("phase_delta", 0) or 0
+                        )
+                        _curr_q = float(_cs_pro_first.get("q_factor", 0) or 0)
+                    except Exception:
+                        pass
+
+                # Caracterizar el modo por el Δfase a través del peak:
+                # ~180° = primer modo translacional/cylindrical (clásico
+                #         para balance shift)
+                # ~90°  = modo conical/pivotal o segundo modo
+                # >270° = posible flexural / segundo modo bending
+                # <90°  = anti-resonancia o resonancia estructural
+                _mode_type = "modo no caracterizado"
+                if _curr_cs_phase_delta is not None and _curr_cs_phase_delta != 0:
+                    _abs_pd = abs(_curr_cs_phase_delta)
+                    if 150.0 <= _abs_pd <= 210.0:
+                        _mode_type = (
+                            "primer modo translacional (Δφ ≈ 180°), "
+                            "consistente con bending mode tipo 'in-phase' "
+                            "del rotor según la nomenclatura de Bently y "
+                            "API 684 §6"
+                        )
+                    elif 70.0 <= _abs_pd < 150.0:
+                        _mode_type = (
+                            "modo cónico / pivotal o segundo modo "
+                            "translacional (Δφ ≈ 90–150°), respuesta "
+                            "típica cuando el rotor pivota alrededor "
+                            "de un punto nodal cercano al cojinete"
+                        )
+                    elif 210.0 < _abs_pd <= 360.0:
+                        _mode_type = (
+                            "segundo modo flexural o respuesta acoplada "
+                            "rotor-estructura (Δφ > 210°)"
+                        )
+                    else:
+                        _mode_type = (
+                            "respuesta de baja deflexión modal "
+                            "(Δφ < 70°) — posible resonancia "
+                            "estructural del soporte / fundación más "
+                            "que modo del rotor"
+                        )
+
+                _narr_parts: List[str] = []
+
+                # 1) Encabezado factual
                 _narr_parts.append(
-                    f"Comparativo de balance contra «{_prev_lbl_text}»"
+                    f"Análisis comparativo rotodinámico contra "
+                    f"«{_prev_lbl_text}»"
                     + (
-                        f" del {_prev_label[:10]}" if _prev_label and len(_prev_label) >= 10
-                        else ""
+                        f" del {_prev_label[:10]}"
+                        if _prev_label and len(_prev_label) >= 10 else ""
                     )
                     + ". A la velocidad operativa "
-                    f"({operating_rpm:.0f} rpm), el sensor pasó de "
+                    f"({operating_rpm:.0f} rpm), la respuesta sincrónica "
+                    f"1X del sensor evolucionó de "
                     f"{float(_prev_amp):.3f} {_amp_unit_local} @ "
                     f"{float(_prev_phase):.1f}° a "
                     f"{_curr_amp_op:.3f} {_amp_unit_local} @ "
-                    f"{_curr_phase_op:.1f}°."
-                )
-                if _delta_amp_pct is not None:
-                    _narr_parts.append(
-                        f"La amplitud 1X varió en {_delta_amp:+.3f} "
-                        f"{_amp_unit_local} ({_delta_amp_pct:+.1f}%) y la "
-                        f"fase 1X muestra un shift de {_delta_phase:+.1f}° "
-                        f"(cambio circular de menor arco)."
+                    f"{_curr_phase_op:.1f}°, lo que representa un "
+                    + (
+                        f"vector change de {_delta_amp:+.3f} {_amp_unit_local} "
+                        f"({_delta_amp_pct:+.1f}%)"
+                        if _delta_amp_pct is not None
+                        else f"vector change de {_delta_amp:+.3f} {_amp_unit_local}"
                     )
+                    + f" en magnitud y un shift de fase 1X de "
+                    f"{_delta_phase:+.1f}° en arco menor."
+                )
 
+                # 2) Caracterización del modo y forma estructural
+                if _curr_cs_rpm and _curr_cs_rpm > 0:
+                    _ratio_op_cs = operating_rpm / _curr_cs_rpm
+                    _separation_pct = (_ratio_op_cs - 1.0) * 100.0
+                    _q_str = (
+                        f", con factor de amplificación Q={_curr_q:.2f}"
+                        if _curr_q else ""
+                    )
+                    _mode_para = (
+                        f"La trayectoria polar revela una velocidad "
+                        f"crítica en {_curr_cs_rpm:.0f} rpm con un "
+                        f"cambio de fase de "
+                        f"{abs(_curr_cs_phase_delta or 0):.0f}° a través "
+                        f"del peak{_q_str}. Este patrón se interpreta "
+                        f"como {_mode_type}. "
+                    )
+                    if _separation_pct >= 15.0:
+                        _mode_para += (
+                            f"La velocidad operativa queda "
+                            f"{_separation_pct:+.1f}% por encima del "
+                            f"modo, separación amplia que cumple el "
+                            f"requisito de margen de API 684 §6. "
+                        )
+                    elif _separation_pct >= 0:
+                        _mode_para += (
+                            f"La velocidad operativa queda solo "
+                            f"{_separation_pct:+.1f}% por encima del "
+                            f"modo. Es estrecho contra el margen "
+                            f"recomendado de API 684 §6 (≥15%) y "
+                            f"merece evaluación detallada de "
+                            f"separation margin si el Q se incrementa. "
+                        )
+                    else:
+                        _mode_para += (
+                            f"La velocidad operativa está "
+                            f"{abs(_separation_pct):.1f}% por debajo "
+                            f"del modo identificado, configuración de "
+                            f"sub-crítica que se considera estable "
+                            f"siempre que el Q se mantenga acotado. "
+                        )
+                    _narr_parts.append(_mode_para)
+
+                # 3) Diagnóstico diferencial del shift
                 if _phase_class == "shift_critical":
                     _narr_parts.append(
-                        "El shift de fase 1X supera los 60°, magnitud "
-                        "considerada crítica según API 684 / ISO 21940-12. "
-                        "Este patrón es consistente con un cambio severo de "
-                        "balance del rotor — posible pérdida de masa, crack "
-                        "estructural o daño en el rotor. Se recomienda "
-                        "verificación inmediata mediante parada controlada y "
-                        "análisis de orbits / forma de onda en cojinetes "
-                        "principales."
+                        "El shift de fase 1X supera 60° en arco menor, "
+                        "magnitud considerada crítica según los criterios "
+                        "de Bently / API 684. Magnitudes de esta escala "
+                        "son inconsistentes con simple deriva térmica o "
+                        "operacional y apuntan a un cambio mecánico "
+                        "estructural del rotor: pérdida de masa por "
+                        "desprendimiento de pieza, propagación de "
+                        "fisura / crack, asentamiento súbito del cojinete "
+                        "o pérdida del contacto con el sello / impeller. "
+                        "Se recomienda parada controlada para inspección "
+                        "y análisis complementario de orbits filtrados a "
+                        "1X y forma de onda en ambos planos del cojinete "
+                        "antes de continuar operación."
                     )
                 elif _phase_class == "shift_major":
                     _narr_parts.append(
-                        "El shift de fase 1X entre 30° y 60° es síntoma "
-                        "diagnóstico clásico de cambio de balance del rotor "
-                        "(API 684, ISO 21940-12). Se recomienda programar "
-                        "verificación de balance en próxima ventana de "
-                        "mantenimiento y revisar consistencia de fase entre "
-                        "arranques antes de cualquier intervención."
+                        "El shift de fase 1X entre 30° y 60° es la firma "
+                        "clásica de un cambio de balance del rotor según "
+                        "la metodología de vector polar response que "
+                        "documentan Bently y API 684. La magnitud y "
+                        "dirección del vector change son consistentes "
+                        "con una redistribución de masa rotativa "
+                        "(suciedad acumulada o desprendida en álabes, "
+                        "pérdida progresiva de balance weights, "
+                        "deformación térmica residual). Se recomienda "
+                        "programar balance de campo según ISO 21940-12 "
+                        "nivel G 2.5 en próxima ventana, verificando "
+                        "previamente la consistencia de fase entre "
+                        "arranques sucesivos para descartar componente "
+                        "transitoria."
                     )
                 elif _phase_class == "shift_minor":
                     _narr_parts.append(
-                        "El shift de fase 1X entre 10° y 30° es menor pero "
-                        "merece vigilancia: monitorear evolución en próximas "
-                        "corridas para confirmar si se consolida una "
-                        "tendencia o es transitorio."
+                        "El shift de fase 1X entre 10° y 30° es menor y "
+                        "puede atribuirse a deriva operacional normal "
+                        "(temperatura, carga, expansión térmica del "
+                        "rotor o de los soportes). No constituye por sí "
+                        "solo evidencia de cambio mecánico, pero merece "
+                        "vigilancia: una tendencia consolidada a lo "
+                        "largo de varias corridas en la misma dirección "
+                        "vectorial sí indicaría cambio incipiente de "
+                        "balance que conviene caracterizar antes de que "
+                        "cruce la zona mayor."
                     )
                 elif _phase_class == "stable":
                     _narr_parts.append(
-                        "El shift de fase 1X (<10°) está dentro del margen "
-                        "de variación normal y no sugiere cambio de balance."
+                        "El shift de fase 1X (<10°) está dentro de la "
+                        "variación normal de la respuesta sincrónica y "
+                        "no constituye evidencia de cambio mecánico ni "
+                        "de balance. La forma del vector se considera "
+                        "estable entre corridas."
                     )
 
+                # 4) Análisis del cambio de amplitud (sensitividad)
                 if _delta_amp_pct is not None:
                     _amp_class = amplitude_change_classifier(_delta_amp_pct)
-                    if _amp_class in ("amp_critical", "amp_high"):
+                    if _amp_class == "amp_critical":
                         _narr_parts.append(
-                            "El crecimiento de amplitud 1X acompañando al "
-                            "shift de fase refuerza el diagnóstico de "
-                            "degradación activa."
+                            "El crecimiento de amplitud 1X supera el "
+                            "50% entre corridas. Combinado con el shift "
+                            "de fase descrito, refuerza el diagnóstico "
+                            "de degradación activa de la respuesta "
+                            "modal — la sensibilidad del rotor a la "
+                            "fuerza de excitación residual está "
+                            "creciendo, lo que es típico de pérdida de "
+                            "amortiguamiento (damping degradation) en "
+                            "los soportes hidrodinámicos según el "
+                            "marco de análisis de API 684."
                         )
+                    elif _amp_class == "amp_high":
+                        _narr_parts.append(
+                            "El crecimiento de amplitud 1X (≥20%) "
+                            "acompañando al shift de fase es consistente "
+                            "con un cambio activo en la respuesta modal "
+                            "del sistema rotor-soporte. Vale revisar "
+                            "el factor de amplificación Q en próximas "
+                            "corridas para descartar pérdida progresiva "
+                            "de damping."
+                        )
+                    elif _amp_class in ("amp_down_strong", "amp_down"):
+                        _narr_parts.append(
+                            "La amplitud 1X bajó de manera significativa "
+                            "respecto a la corrida anterior. Si esto "
+                            "coincide con un shift de fase mayor, puede "
+                            "tratarse de un cambio de balance "
+                            "compensatorio (ej. una intervención previa, "
+                            "redistribución térmica) más que de "
+                            "degradación. Conviene revisar el "
+                            "registro operacional y los reportes de "
+                            "mantenimiento entre corridas para "
+                            "confirmar."
+                        )
+
+                # 5) Distinción modal del rotor vs estructural
+                if (
+                    _phase_class in ("shift_major", "shift_critical")
+                    and _curr_cs_phase_delta is not None
+                    and abs(_curr_cs_phase_delta) < 90.0
+                ):
+                    _narr_parts.append(
+                        "Nota diferencial: el cambio de fase a través "
+                        "del peak observado (<90°) es atípico de un "
+                        "modo libre del rotor y sugiere que el peak "
+                        "podría corresponder a una resonancia "
+                        "estructural del soporte o fundación más que a "
+                        "un modo del rotor. Es importante validar "
+                        "antes de atribuir el cambio observado a "
+                        "balance del rotor — un cambio mecánico en la "
+                        "fundación (suelta de anclajes, deterioro de "
+                        "grouting) produce el mismo patrón en el "
+                        "polar pero requiere intervención estructural, "
+                        "no balance."
+                    )
 
                 _comp_narr = " ".join(_narr_parts)
                 if isinstance(text_diag, dict):
@@ -2885,13 +3067,69 @@ def main() -> None:
                         f"corrida(s) anterior(es) sobre la actual."
                     )
 
-            # Lista de snapshots con borrar
+            # Lista de snapshots con borrar + indicador de trayectoria
             if _polar_existing_snaps:
+                # Pre-cargar para detectar cuales tienen trayectoria completa
+                _legacy_count = 0
+                _snap_has_trail: Dict[str, bool] = {}
+                for s in _polar_existing_snaps:
+                    try:
+                        _full = load_polar_snapshot(_polar_inst_id, s["snapshot_id"])
+                        if _full is not None:
+                            _has_traj = any(
+                                len(sens.get("trajectory_speed", []) or []) > 1
+                                for sens in _full.get("sensors", [])
+                            )
+                            _snap_has_trail[s["snapshot_id"]] = _has_traj
+                            if not _has_traj:
+                                _legacy_count += 1
+                    except Exception:
+                        _snap_has_trail[s["snapshot_id"]] = False
+
+                if _legacy_count > 0:
+                    st.warning(
+                        f"⚠️ {_legacy_count} snapshot(s) viejos sin "
+                        f"trayectoria completa — solo muestran el operating "
+                        f"point en el polar. Para ver el loop completo, "
+                        f"resnapshoteá cargando esa corrida y volviendo a "
+                        f"guardar."
+                    )
+
                 with st.expander(f"🗂️ Gestionar snapshots Polar ({len(_polar_existing_snaps)})"):
+                    if _legacy_count > 0:
+                        if st.button(
+                            f"🧹 Borrar los {_legacy_count} snapshot(s) sin trayectoria",
+                            key=f"wm_polar_del_legacy_{_polar_inst_id}",
+                            help=(
+                                "Borra todos los snapshots que se guardaron "
+                                "antes del Ciclo 17.1.2 (sin trail completo). "
+                                "Los snapshots actuales con trayectoria NO se "
+                                "tocan."
+                            ),
+                        ):
+                            _deleted = 0
+                            for s in _polar_existing_snaps:
+                                if not _snap_has_trail.get(s["snapshot_id"], False):
+                                    if delete_polar_snapshot(_polar_inst_id, s["snapshot_id"]):
+                                        _deleted += 1
+                            st.success(
+                                f"✓ {_deleted} snapshot(s) viejos borrados. "
+                                f"Cargá las corridas y guardá snapshots "
+                                f"nuevos para reconstruir el histórico con "
+                                f"trayectoria."
+                            )
+                            st.rerun()
+                        st.markdown("---")
+
                     for s in _polar_existing_snaps:
                         cols_h = st.columns([4, 1])
+                        _has_traj = _snap_has_trail.get(s["snapshot_id"], False)
+                        _traj_chip = (
+                            "🟢 con trayectoria" if _has_traj
+                            else "🟡 solo punto Op (legacy)"
+                        )
                         cols_h[0].markdown(
-                            f"**{s['corrida_label'][:30]}**  \n"
+                            f"**{s['corrida_label'][:30]}** · {_traj_chip}  \n"
                             f"_{s['timestamp']} · {s['n_sensors']} sensores · "
                             f"{s.get('operating_speed_rpm', 0):.0f} rpm_"
                         )
