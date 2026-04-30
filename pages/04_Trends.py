@@ -3074,17 +3074,40 @@ def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
 def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     fig = go.Figure(export_fig)
     new_data = []
+
+    def _scale_size(value: Any, factor: float, floor_val: float) -> Any:
+        """Escala size/width que puede ser float, int, list (por punto)
+        o tupla. Antes el código hacía float(value) directo y reventaba
+        cuando los marcadores de anomalía tenían size por punto (lista)."""
+        try:
+            if isinstance(value, (list, tuple)):
+                return [
+                    max(floor_val, float(v) * factor) if v is not None else floor_val
+                    for v in value
+                ]
+            if value is None:
+                return max(floor_val, 6.0 * factor)
+            return max(floor_val, float(value) * factor)
+        except Exception:
+            return floor_val
+
     for trace in fig.data:
         trace_json = trace.to_plotly_json()
         if trace_json.get("type") == "scatter":
             mode = trace_json.get("mode", "")
             if "lines" in mode:
                 line = dict(trace_json.get("line", {}) or {})
-                line["width"] = max(4.8, float(line.get("width", 1.0)) * 2.8)
+                # line.width usually scalar; defensive against list anyway.
+                line["width"] = _scale_size(line.get("width", 1.0), 2.8, 4.8)
                 trace_json["line"] = line
             if "markers" in mode:
                 marker = dict(trace_json.get("marker", {}) or {})
-                marker["size"] = max(14, float(marker.get("size", 6)) * 1.9)
+                marker["size"] = _scale_size(marker.get("size", 6), 1.9, 14.0)
+                # marker.line.width: same defensive scaling
+                if marker.get("line"):
+                    mline = dict(marker["line"])
+                    mline["width"] = _scale_size(mline.get("width", 1.0), 1.9, 1.4)
+                    marker["line"] = mline
                 trace_json["marker"] = marker
         new_data.append(go.Scatter(**trace_json))
     fig = go.Figure(data=new_data, layout=fig.layout)
