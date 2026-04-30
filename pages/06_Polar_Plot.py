@@ -2242,12 +2242,354 @@ def main() -> None:
 
     selected_ids = [sid for sid in st.session_state.wm_polar_selected_ids if sid in id_to_item]
 
+    # ============================================================
+    # Ciclo 17.1 — Histórico Polar (1X amp + phase trends)
+    # ------------------------------------------------------------
+    # Snapshotea por sensor matched el 1X amp + fase a la velocidad
+    # operativa actual. Permite comparar contra corridas previas y
+    # diagnosticar cambios de balance (shift de fase >30° = sintoma
+    # API 684).
+    # ============================================================
+    _polar_inst_id = (
+        instance_state.get("instance_id")
+        or st.session_state.get("wm_active_instance_id", "")
+    )
+    _polar_inst = None
+    _polar_sensors_map: List[Dict[str, Any]] = []
+    if _polar_inst_id:
+        try:
+            from core.instance_state import get_instance as _polar_get_inst
+            _polar_inst = _polar_get_inst(_polar_inst_id)
+            if _polar_inst is not None:
+                _polar_sensors_map = list(_polar_inst.sensors or [])
+        except Exception:
+            _polar_inst = None
+
+    # Helper: para cada parsed_item (= cada CSV polar), encontrar el
+    # sensor del Sensor Map matched y extraer amp/phase a op_speed.
+    def _wm_extract_polar_readings(
+        items: List[Dict[str, Any]],
+        sensors_map: List[Dict[str, Any]],
+        op_speed_rpm: float,
+    ) -> List[Dict[str, Any]]:
+        from core.sensor_map import resolve_sensor_for_point as _wm_resolve, sensor_label as _wm_slbl
+        out = []
+        for it in items:
+            try:
+                meta = it.get("meta") or {}
+                point = str(meta.get("Point Name", "") or it.get("point", "") or "")
+                variable = str(meta.get("Variable", "") or it.get("variable", "") or "")
+                unit = str(meta.get("Y-Axis Unit", "") or meta.get("Unit", "") or "")
+                sensor_match = None
+                if sensors_map:
+                    sensor_match = _wm_resolve(sensors_map, point, variable, unit)
+                if sensor_match is None:
+                    continue
+                df = it.get("grouped_df")
+                if df is None or len(df) == 0:
+                    continue
+                # Si op_speed está fuera del rango cargado, usar el más cercano
+                row = nearest_row_for_speed(df, op_speed_rpm)
+                amp_at_op = float(row.get("amp", 0.0))
+                phase_at_op = float(row.get("phase", 0.0)) % 360.0
+                out.append({
+                    "sensor_label": _wm_slbl(sensor_match),
+                    "csv_file": it.get("file_name", ""),
+                    "amp_at_op": amp_at_op,
+                    "phase_at_op": phase_at_op,
+                    "amp_unit": unit or "mil pp",
+                    "phase_unit": "deg",
+                    "csv_timestamp": str(meta.get("Timestamp", "") or ""),
+                })
+            except Exception:
+                continue
+        return out
+
+    _polar_curr_readings: List[Dict[str, Any]] = []
+    if selected_ids and _polar_sensors_map:
+        try:
+            _selected_items_for_snap = [id_to_item[sid] for sid in selected_ids]
+            _polar_curr_readings = _wm_extract_polar_readings(
+                _selected_items_for_snap, _polar_sensors_map, float(operating_rpm),
+            )
+        except Exception:
+            _polar_curr_readings = []
+
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 📚 Histórico Polar")
+
+        try:
+            from core.polar_history import (
+                save_polar_snapshot,
+                list_polar_snapshots,
+                load_polar_snapshot,
+                delete_polar_snapshot,
+                get_previous_polar_snapshot,
+                phase_shift_classifier,
+                amplitude_change_classifier,
+                shortest_arc_phase_diff,
+            )
+            _polar_hist_ok = True
+        except Exception as _hist_e:
+            _polar_hist_ok = False
+            st.caption(f"_(Histórico Polar no disponible: {_hist_e})_")
+
+        if _polar_hist_ok and _polar_inst_id:
+            _polar_existing_snaps = list_polar_snapshots(_polar_inst_id)
+            st.caption(
+                f"{len(_polar_existing_snaps)} snapshot(s) Polar guardado(s) "
+                f"para esta unidad."
+            )
+
+            if not _polar_curr_readings:
+                if not _polar_sensors_map:
+                    st.caption(
+                        "_(No hay Sensor Map configurado para esta instancia. "
+                        "Andá a Machinery Library a configurarlo.)_"
+                    )
+                else:
+                    st.caption(
+                        "_(Ningún CSV Polar cargado matchea sensores del "
+                        "Sensor Map de esta instancia.)_"
+                    )
+            else:
+                with st.expander("📸 Guardar snapshot Polar actual", expanded=False):
+                    st.caption(
+                        f"Captura el 1X amp + fase a {operating_rpm:.0f} rpm "
+                        f"para {len(_polar_curr_readings)} sensor(es) matched."
+                    )
+                    _polar_snap_label = st.text_input(
+                        "Etiqueta de la corrida",
+                        value="",
+                        placeholder="Ej. Coastdown abril 27",
+                        key=f"wm_polar_snap_label_{_polar_inst_id}",
+                    )
+                    _polar_snap_notes = st.text_area(
+                        "Observaciones (opcional)",
+                        value="",
+                        placeholder="Velocidad operativa, condición, evento.",
+                        key=f"wm_polar_snap_notes_{_polar_inst_id}",
+                        height=70,
+                    )
+                    if st.button(
+                        "💾 Guardar snapshot Polar",
+                        type="primary",
+                        width="stretch",
+                        key=f"wm_polar_snap_save_{_polar_inst_id}",
+                    ):
+                        try:
+                            sid = save_polar_snapshot(
+                                _polar_inst_id,
+                                operating_speed_rpm=float(operating_rpm),
+                                sensors_data=_polar_curr_readings,
+                                corrida_label=_polar_snap_label,
+                                notes=_polar_snap_notes,
+                            )
+                            st.success(
+                                f"✓ Snapshot Polar guardado: {sid} "
+                                f"({len(_polar_curr_readings)} sensores)"
+                            )
+                            st.rerun()
+                        except Exception as _e:
+                            st.error(f"No se pudo guardar: {_e}")
+
+            # Selector de comparación
+            _selected_polar_cmp_id = "__none__"
+            if _polar_existing_snaps:
+                _curr_by_lbl = {
+                    r["sensor_label"]: {"amp": r["amp_at_op"], "phase": r["phase_at_op"]}
+                    for r in _polar_curr_readings
+                }
+                # Marcar snapshots identicos a la corrida actual
+                _polar_opts = [("__none__", "— Sin comparación —")]
+                _first_diff_idx = -1
+                for _i, s in enumerate(_polar_existing_snaps):
+                    _is_current = False
+                    if _curr_by_lbl:
+                        try:
+                            _snap_full = load_polar_snapshot(_polar_inst_id, s["snapshot_id"])
+                            if _snap_full is not None:
+                                from core.polar_history import _polar_snapshot_is_identical_to
+                                _is_current = _polar_snapshot_is_identical_to(
+                                    _snap_full, _curr_by_lbl,
+                                )
+                        except Exception:
+                            pass
+                    _suffix = " · _(corrida actual)_" if _is_current else ""
+                    _opspeed = s.get("operating_speed_rpm")
+                    _opspeed_str = f" @ {_opspeed:.0f}rpm" if _opspeed else ""
+                    _lbl = (f"{s['corrida_label'][:28]}{_opspeed_str} "
+                            f"({s['timestamp'][:10]}){_suffix}")
+                    _polar_opts.append((s["snapshot_id"], _lbl))
+                    if not _is_current and _first_diff_idx < 0:
+                        _first_diff_idx = _i + 1
+
+                _polar_opt_keys = [k for k, _ in _polar_opts]
+                _polar_opt_lbls = [l for _, l in _polar_opts]
+                _polar_cmp_state_key = f"wm_polar_cmp_{_polar_inst_id}"
+                _default_polar_cmp_idx = (
+                    _first_diff_idx if _first_diff_idx > 0
+                    else (1 if len(_polar_opts) > 1 else 0)
+                )
+                if _polar_cmp_state_key in st.session_state and \
+                   st.session_state[_polar_cmp_state_key] in _polar_opt_keys:
+                    _default_polar_cmp_idx = _polar_opt_keys.index(
+                        st.session_state[_polar_cmp_state_key]
+                    )
+                _polar_cmp_label = st.selectbox(
+                    "Comparar contra corrida anterior",
+                    options=_polar_opt_lbls,
+                    index=_default_polar_cmp_idx,
+                    key=f"wm_polar_cmp_widget_{_polar_inst_id}",
+                )
+                _selected_polar_cmp_id = _polar_opt_keys[
+                    _polar_opt_lbls.index(_polar_cmp_label)
+                ]
+                st.session_state[_polar_cmp_state_key] = _selected_polar_cmp_id
+
+            # Lista de snapshots con borrar
+            if _polar_existing_snaps:
+                with st.expander(f"🗂️ Gestionar snapshots Polar ({len(_polar_existing_snaps)})"):
+                    for s in _polar_existing_snaps:
+                        cols_h = st.columns([4, 1])
+                        cols_h[0].markdown(
+                            f"**{s['corrida_label'][:30]}**  \n"
+                            f"_{s['timestamp']} · {s['n_sensors']} sensores · "
+                            f"{s.get('operating_speed_rpm', 0):.0f} rpm_"
+                        )
+                        if cols_h[1].button(
+                            "🗑️",
+                            key=f"wm_polar_del_{s['snapshot_id']}",
+                            help="Borrar este snapshot",
+                        ):
+                            if delete_polar_snapshot(_polar_inst_id, s["snapshot_id"]):
+                                st.success("Borrado.")
+                                st.rerun()
+
+            # Persistir el snapshot elegido para que las funciones de
+            # render abajo (panel + PDF) lo puedan leer
+            st.session_state["wm_polar_compare_snapshot_id"] = _selected_polar_cmp_id
+            st.session_state["wm_polar_compare_skip_identical"] = bool(_polar_curr_readings)
+        elif _polar_hist_ok and not _polar_inst_id:
+            st.caption(
+                "_(Activá una Asset Instance arriba para guardar histórico.)_"
+            )
+
     if not selected_ids:
         st.info("Selecciona uno o más polares en la barra lateral.")
         return
 
     selected_items = [id_to_item[sid] for sid in selected_ids]
     logo_uri = get_logo_data_uri(LOGO_PATH)
+
+    # ============================================================
+    # Ciclo 17.1 — Comparativo Polar inline
+    # ------------------------------------------------------------
+    # Cuando el usuario eligió un snapshot anterior en el sidebar,
+    # mostramos arriba de los paneles individuales un comparativo
+    # tipo "antes vs ahora" por sensor con clasificación
+    # diagnóstica de shift de fase + crecimiento de amplitud.
+    # ============================================================
+    _polar_cmp_id = st.session_state.get("wm_polar_compare_snapshot_id", "__none__")
+    if _polar_cmp_id and _polar_cmp_id != "__none__" and _polar_curr_readings:
+        try:
+            from core.polar_history import (
+                load_polar_snapshot,
+                phase_shift_classifier,
+                amplitude_change_classifier,
+                shortest_arc_phase_diff,
+            )
+            _polar_prev_snap = load_polar_snapshot(_polar_inst_id, _polar_cmp_id)
+            if _polar_prev_snap is not None:
+                _prev_by_lbl = {
+                    str(s.get("sensor_label", "")): s
+                    for s in _polar_prev_snap.get("sensors", [])
+                }
+                _cmp_rows = []
+                for r in _polar_curr_readings:
+                    _lbl = r["sensor_label"]
+                    _prev = _prev_by_lbl.get(_lbl)
+                    if _prev is None:
+                        _cmp_rows.append({
+                            "Sensor": _lbl,
+                            "CSV": r["csv_file"],
+                            "Anterior amp": "—",
+                            "Actual amp": f"{r['amp_at_op']:.3f} {r['amp_unit']}",
+                            "Δ amp": "—",
+                            "Anterior fase": "—",
+                            "Actual fase": f"{r['phase_at_op']:.1f}°",
+                            "Δ fase": "—",
+                            "Diagnóstico": "Sin lectura previa",
+                            "_color": "#94a3b8",
+                        })
+                        continue
+                    _prev_amp = float(_prev.get("amp_at_op", 0))
+                    _prev_phase = float(_prev.get("phase_at_op", 0))
+                    _delta_amp = r["amp_at_op"] - _prev_amp
+                    _delta_amp_pct = (_delta_amp / _prev_amp * 100.0) if _prev_amp > 0 else None
+                    _delta_phase = shortest_arc_phase_diff(_prev_phase, r["phase_at_op"])
+                    _phase_class = phase_shift_classifier(_delta_phase)
+                    _amp_class = amplitude_change_classifier(_delta_amp_pct)
+
+                    # Diagnostico humano
+                    _diag_parts = []
+                    if _phase_class == "shift_critical":
+                        _diag_parts.append("⚠️ Shift de fase crítico (>60°) — posible crack o falla severa")
+                    elif _phase_class == "shift_major":
+                        _diag_parts.append("⚠️ Shift de fase mayor (≥30°) — síntoma probable de cambio de balance")
+                    elif _phase_class == "shift_minor":
+                        _diag_parts.append("Shift de fase menor (10–30°) — vigilar")
+                    elif _phase_class == "stable":
+                        _diag_parts.append("Fase estable (<10°)")
+                    if _amp_class in ("amp_critical", "amp_high"):
+                        _diag_parts.append(f"Amplitud {('+' if _delta_amp_pct > 0 else '')}{_delta_amp_pct:.0f}% (crecimiento significativo)")
+                    elif _amp_class == "amp_up":
+                        _diag_parts.append(f"Amplitud subiendo {_delta_amp_pct:+.0f}%")
+                    elif _amp_class in ("amp_down_strong", "amp_down"):
+                        _diag_parts.append(f"Amplitud bajando {_delta_amp_pct:+.0f}%")
+
+                    _color_map = {
+                        "shift_critical": "#dc2626",
+                        "shift_major": "#f59e0b",
+                        "shift_minor": "#0ea5e9",
+                        "stable": "#16a34a",
+                    }
+                    _cmp_rows.append({
+                        "Sensor": _lbl,
+                        "CSV": r["csv_file"],
+                        "Anterior amp": f"{_prev_amp:.3f} {r['amp_unit']}",
+                        "Actual amp": f"{r['amp_at_op']:.3f} {r['amp_unit']}",
+                        "Δ amp": (
+                            f"{_delta_amp:+.3f} ({_delta_amp_pct:+.1f}%)"
+                            if _delta_amp_pct is not None else "—"
+                        ),
+                        "Anterior fase": f"{_prev_phase:.1f}°",
+                        "Actual fase": f"{r['phase_at_op']:.1f}°",
+                        "Δ fase": f"{_delta_phase:+.1f}°",
+                        "Diagnóstico": " · ".join(_diag_parts) if _diag_parts else "—",
+                        "_color": _color_map.get(_phase_class, "#94a3b8"),
+                    })
+
+                if _cmp_rows:
+                    st.markdown("### 📈 Comparativo Polar — vs corrida anterior")
+                    _prev_lbl = _polar_prev_snap.get("corrida_label", _polar_cmp_id)
+                    _prev_ts = _polar_prev_snap.get("timestamp", "")[:10]
+                    _prev_op = _polar_prev_snap.get("operating_speed_rpm", 0)
+                    st.caption(
+                        f"Comparando contra **{_prev_lbl}** del {_prev_ts} "
+                        f"a {_prev_op:.0f} rpm. La corrida actual está a "
+                        f"{operating_rpm:.0f} rpm. Shift de fase 1X >30° es "
+                        f"síntoma diagnóstico de cambio de balance del rotor "
+                        f"(API 684 / ISO 21940-12)."
+                    )
+                    _cmp_disp = pd.DataFrame([
+                        {k: v for k, v in r.items() if not k.startswith("_")}
+                        for r in _cmp_rows
+                    ])
+                    st.dataframe(_cmp_disp, width="stretch", hide_index=True)
+        except Exception as _polar_cmp_e:
+            st.caption(f"_(Comparativo Polar no disponible: {_polar_cmp_e})_")
 
     for panel_index, item in enumerate(selected_items):
         render_polar_panel(
