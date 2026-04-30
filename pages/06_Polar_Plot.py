@@ -445,6 +445,12 @@ def build_polar_figure(
     prev_snapshot_phase: Optional[float] = None,
     prev_snapshot_label: Optional[str] = None,
     prev_snapshot_op_speed: Optional[float] = None,
+    # Ciclo 17.1.1 — multi-snapshot overlays (lista de dicts con
+    # {amp, phase, label, op_speed, timestamp}). Si está, prevalece
+    # sobre el single-snapshot legacy. Cada uno con color gradient
+    # cronologico (mas viejo = mas claro / azul, mas reciente = mas
+    # oscuro / rojo).
+    prev_snapshots: Optional[List[Dict[str, Any]]] = None,
 ) -> go.Figure:
     amp_unit = meta.get("Amp Unit", "") or ""
     speed_unit = meta.get("Speed Unit", "rpm") or "rpm"
@@ -633,29 +639,89 @@ def build_polar_figure(
             op_row = nearest_row_for_speed(df, operating_rpm)
 
             # ============================================================
-            # Ciclo 17.1 P3 — Overlay snapshot anterior (ghost gris) +
-            # flecha conectora desde la corrida vieja al punto actual.
-            # Permite ver de un vistazo la migración de amplitud + shift
-            # de fase entre dos corridas en el mismo plano polar.
+            # Ciclo 17.1.1 — Overlay multi-snapshot (lista) o single
+            # legacy. Cada snapshot anterior se dibuja con marker
+            # ghost + linea conectora dotted al actual. Color en
+            # gradiente cronologico: mas viejo = azul claro, mas
+            # reciente = rojo intenso. La paleta es Viridis-ish para
+            # buena percepción de "edad".
             # ============================================================
-            if (
+            _curr_amp = float(op_row["amp"])
+            _curr_phase = float(op_row["theta_display"])
+
+            # Construir la lista efectiva de snapshots a dibujar
+            _snaps_to_draw: List[Dict[str, Any]] = []
+            if prev_snapshots:
+                # Ordenar por timestamp asc (mas viejo primero) para
+                # mapear el gradiente correctamente
+                _snaps_to_draw = sorted(
+                    [s for s in prev_snapshots if s.get("amp", 0) > 0],
+                    key=lambda s: s.get("timestamp", "") or "",
+                )
+            elif (
                 prev_snapshot_amp is not None
                 and prev_snapshot_phase is not None
                 and prev_snapshot_amp > 0
             ):
-                _prev_phase_disp = float(prev_snapshot_phase) % 360.0
-                _prev_amp = float(prev_snapshot_amp)
-                _curr_amp = float(op_row["amp"])
-                _curr_phase = float(op_row["theta_display"])
+                _snaps_to_draw = [{
+                    "amp": float(prev_snapshot_amp),
+                    "phase": float(prev_snapshot_phase),
+                    "label": prev_snapshot_label or "anterior",
+                    "op_speed": prev_snapshot_op_speed,
+                    "timestamp": "",
+                }]
 
-                # Linea conectora (en cartesianas, convertida a polar via
-                # interpolacion lineal en (theta, r) — usamos un segmento
-                # con pocos puntos para que la flecha en el polar quede
-                # recta visual).
+            # Paleta cronologica: mas viejo = azul claro (#7dd3fc),
+            # medio = ambar (#f59e0b), mas reciente = rojo (#dc2626).
+            # Si solo hay 1, usamos gris/rojo neutro.
+            def _gradient_color(idx: int, total: int) -> Tuple[str, str]:
+                """Devuelve (marker_color, line_color) hex segun posicion."""
+                if total <= 1:
+                    return ("rgba(148,163,184,0.55)",
+                            "rgba(220,38,38,0.55)")
+                # Interpolacion lineal en HSV-ish via 3 paradas
+                # 0.0 -> light blue
+                # 0.5 -> amber
+                # 1.0 -> red (mas cercano al actual)
+                pos = idx / max(1, total - 1)
+                stops = [
+                    (0.00, (125, 211, 252)),   # light blue
+                    (0.50, (245, 158,  11)),   # amber
+                    (1.00, (220,  38,  38)),   # red
+                ]
+                # Encontrar segmento
+                for i in range(len(stops) - 1):
+                    t0, c0 = stops[i]
+                    t1, c1 = stops[i + 1]
+                    if t0 <= pos <= t1:
+                        frac = (pos - t0) / (t1 - t0)
+                        r = int(c0[0] + (c1[0] - c0[0]) * frac)
+                        g = int(c0[1] + (c1[1] - c0[1]) * frac)
+                        b = int(c0[2] + (c1[2] - c0[2]) * frac)
+                        return (
+                            f"rgba({r},{g},{b},0.65)",
+                            f"rgba({r},{g},{b},0.75)",
+                        )
+                return ("rgba(148,163,184,0.55)",
+                        "rgba(220,38,38,0.55)")
+
+            for _idx, _snap in enumerate(_snaps_to_draw):
+                _prev_amp = float(_snap["amp"])
+                _prev_phase_disp = float(_snap["phase"]) % 360.0
+                _prev_lbl_text = _snap.get("label", "anterior") or "anterior"
+                _prev_op = _snap.get("op_speed")
+                _prev_op_text = (
+                    f" @ {int(round(_prev_op))} rpm" if _prev_op else ""
+                )
+
+                _marker_color, _line_color = _gradient_color(
+                    _idx, len(_snaps_to_draw)
+                )
+
+                # Linea conectora con interpolacion shortest-arc en fase
                 _n_seg = 12
                 _frac = np.linspace(0.0, 1.0, _n_seg)
                 _seg_r = _prev_amp + (_curr_amp - _prev_amp) * _frac
-                # Para shift de fase usar shortest arc
                 _delta = ((_curr_phase - _prev_phase_disp + 540.0) % 360.0) - 180.0
                 _seg_theta = (_prev_phase_disp + _delta * _frac) % 360.0
                 fig.add_trace(
@@ -663,42 +729,30 @@ def build_polar_figure(
                         r=_seg_r,
                         theta=_seg_theta,
                         mode="lines",
-                        line=dict(
-                            width=2.0, color="rgba(220,38,38,0.55)",
-                            dash="dot",
-                        ),
+                        line=dict(width=2.0, color=_line_color, dash="dot"),
                         showlegend=False,
                         hoverinfo="skip",
-                        name="Trail anterior → actual",
+                        name=f"Trail {_prev_lbl_text} → actual",
                     )
                 )
 
-                # Marker GHOST de la corrida anterior (gris claro, hueco)
-                _prev_lbl_text = prev_snapshot_label or "anterior"
-                _prev_op_text = (
-                    f" @ {int(round(prev_snapshot_op_speed))} rpm"
-                    if prev_snapshot_op_speed else ""
-                )
+                # Marker GHOST con label corta
                 fig.add_trace(
                     go.Scatterpolar(
                         r=[_prev_amp],
                         theta=[_prev_phase_disp],
                         mode="markers+text",
                         marker=dict(
-                            size=20, color="rgba(148,163,184,0.45)",
+                            size=18, color=_marker_color,
                             symbol="star-open",
-                            line=dict(width=2.5, color="#475569"),
+                            line=dict(width=2.5, color="#0f172a"),
                         ),
-                        text=[
-                            f"<i>Anterior · "
-                            f"{_prev_lbl_text[:18]}{_prev_op_text}</i>"
-                        ],
+                        text=[f"<i>{_prev_lbl_text[:18]}{_prev_op_text}</i>"],
                         textposition="top center",
-                        textfont=dict(size=9, color="#475569", family="Arial"),
+                        textfont=dict(size=9, color="#0f172a", family="Arial"),
                         showlegend=False,
                         hovertemplate=(
-                            f"<b>Snapshot anterior</b><br>"
-                            f"Etiqueta: {_prev_lbl_text}<br>"
+                            f"<b>Snapshot: {_prev_lbl_text}</b><br>"
                             f"Amplitude: {_prev_amp:.3f} {amp_unit}<br>"
                             f"Phase: {_prev_phase_disp:.1f}°<br>"
                             f"Δ amp: {(_curr_amp - _prev_amp):+.3f} "
@@ -2072,47 +2126,72 @@ def render_polar_panel(
         except Exception:
             pass
 
-    # Ciclo 17.1 P3 — buscar snapshot anterior elegido en sidebar
-    # y extraer la lectura del sensor actual para overlay.
+    # Ciclo 17.1.1 — buscar TODOS los snapshots elegidos en sidebar
+    # y extraer la lectura del sensor actual para overlay multi-snap.
     _prev_amp = None
     _prev_phase = None
     _prev_label = None
     _prev_op_speed = None
+    _prev_snapshots_list: List[Dict[str, Any]] = []
     try:
-        _polar_cmp_snap_id = st.session_state.get("wm_polar_compare_snapshot_id")
-        if _polar_cmp_snap_id and _polar_cmp_snap_id != "__none__":
+        _polar_cmp_snap_ids = (
+            st.session_state.get("wm_polar_compare_snapshot_ids") or []
+        )
+        # Backward-compat: si no hay multi pero hay single, usar single
+        if not _polar_cmp_snap_ids:
+            _single = st.session_state.get("wm_polar_compare_snapshot_id")
+            if _single and _single != "__none__":
+                _polar_cmp_snap_ids = [_single]
+        if _polar_cmp_snap_ids:
             from core.polar_history import load_polar_snapshot
             from core.sensor_map import resolve_sensor_for_point as _sm_resolve, sensor_label as _sm_slbl
             _polar_inst_id_local = st.session_state.get("wm_active_instance_id", "")
             if not _polar_inst_id_local:
-                # Fallback: buscar en wm_polar_compare_inst_id si lo persistimos
                 _polar_inst_id_local = st.session_state.get("wm_polar_compare_inst_id", "")
             if _polar_inst_id_local:
-                _prev_snap_full = load_polar_snapshot(_polar_inst_id_local, _polar_cmp_snap_id)
-                if _prev_snap_full is not None:
-                    # Identificar a qué sensor corresponde ESTE panel
-                    from core.instance_state import get_instance as _sm_get_inst
-                    _inst_obj = _sm_get_inst(_polar_inst_id_local)
-                    _sensor_match = None
-                    if _inst_obj is not None and _inst_obj.sensors:
-                        _sensor_match = _sm_resolve(
-                            list(_inst_obj.sensors),
-                            str(meta.get("Point Name", "") or item.get("point", "")),
-                            str(meta.get("Variable", "") or item.get("variable", "")),
-                            str(meta.get("Y-Axis Unit", "") or meta.get("Unit", "") or ""),
-                        )
+                # Identificar a qué sensor corresponde ESTE panel UNA vez
+                from core.instance_state import get_instance as _sm_get_inst
+                _inst_obj = _sm_get_inst(_polar_inst_id_local)
+                _curr_panel_lbl = None
+                if _inst_obj is not None and _inst_obj.sensors:
+                    _sensor_match = _sm_resolve(
+                        list(_inst_obj.sensors),
+                        str(meta.get("Point Name", "") or item.get("point", "")),
+                        str(meta.get("Variable", "") or item.get("variable", "")),
+                        str(meta.get("Y-Axis Unit", "") or meta.get("Unit", "") or ""),
+                    )
                     if _sensor_match is not None:
                         _curr_panel_lbl = _sm_slbl(_sensor_match)
+                if _curr_panel_lbl:
+                    for _snap_id in _polar_cmp_snap_ids:
+                        _prev_snap_full = load_polar_snapshot(
+                            _polar_inst_id_local, _snap_id,
+                        )
+                        if _prev_snap_full is None:
+                            continue
                         for _ps in _prev_snap_full.get("sensors", []):
                             if str(_ps.get("sensor_label", "")) == _curr_panel_lbl:
-                                _prev_amp = float(_ps.get("amp_at_op", 0) or 0)
-                                _prev_phase = float(_ps.get("phase_at_op", 0) or 0)
-                                _prev_label = _prev_snap_full.get("corrida_label", "")
-                                _prev_op_speed = float(_prev_snap_full.get("operating_speed_rpm", 0) or 0)
+                                _prev_snapshots_list.append({
+                                    "amp": float(_ps.get("amp_at_op", 0) or 0),
+                                    "phase": float(_ps.get("phase_at_op", 0) or 0),
+                                    "label": _prev_snap_full.get("corrida_label", ""),
+                                    "op_speed": float(_prev_snap_full.get("operating_speed_rpm", 0) or 0),
+                                    "timestamp": _prev_snap_full.get("timestamp", ""),
+                                })
                                 break
+                # Para backward-compat con narrativa PDF: usar el primero
+                # como _prev_amp/_prev_phase/_prev_label (que va al
+                # comparison_narrative).
+                if _prev_snapshots_list:
+                    _first = _prev_snapshots_list[0]
+                    _prev_amp = _first["amp"]
+                    _prev_phase = _first["phase"]
+                    _prev_label = _first["label"]
+                    _prev_op_speed = _first["op_speed"]
     except Exception:
         _prev_amp = None
         _prev_phase = None
+        _prev_snapshots_list = []
 
     # Ciclo 17.1 P5 — narrativa del comparativo Polar para el PDF
     # report. Se inyecta en text_diag["comparison_narrative"] que
@@ -2238,6 +2317,7 @@ def render_polar_panel(
         prev_snapshot_phase=_prev_phase,
         prev_snapshot_label=_prev_label,
         prev_snapshot_op_speed=_prev_op_speed,
+        prev_snapshots=_prev_snapshots_list if _prev_snapshots_list else None,
     )
 
     st.plotly_chart(
@@ -2632,16 +2712,20 @@ def main() -> None:
                         except Exception as _e:
                             st.error(f"No se pudo guardar: {_e}")
 
-            # Selector de comparación
-            _selected_polar_cmp_id = "__none__"
+            # Selector de comparación — Ciclo 17.1.1 multi-select
+            # Permite 0 snapshots (solo corrida actual), 1 (vs una corrida
+            # especifica) o N (todas con gradiente cronologico).
+            _selected_polar_cmp_ids: List[str] = []
             if _polar_existing_snaps:
                 _curr_by_lbl = {
                     r["sensor_label"]: {"amp": r["amp_at_op"], "phase": r["phase_at_op"]}
                     for r in _polar_curr_readings
                 }
-                # Marcar snapshots identicos a la corrida actual
-                _polar_opts = [("__none__", "— Sin comparación —")]
-                _first_diff_idx = -1
+                # Marcar snapshots identicos a la corrida actual y armar
+                # opciones del multiselect (label + key)
+                _polar_opt_pairs: List[Tuple[str, str]] = []
+                _polar_default_pick: List[str] = []
+                _polar_first_non_current = None
                 for _i, s in enumerate(_polar_existing_snaps):
                     _is_current = False
                     if _curr_by_lbl:
@@ -2654,37 +2738,51 @@ def main() -> None:
                                 )
                         except Exception:
                             pass
-                    _suffix = " · _(corrida actual)_" if _is_current else ""
+                    _suffix = " · (corrida actual)" if _is_current else ""
                     _opspeed = s.get("operating_speed_rpm")
                     _opspeed_str = f" @ {_opspeed:.0f}rpm" if _opspeed else ""
                     _lbl = (f"{s['corrida_label'][:28]}{_opspeed_str} "
                             f"({s['timestamp'][:10]}){_suffix}")
-                    _polar_opts.append((s["snapshot_id"], _lbl))
-                    if not _is_current and _first_diff_idx < 0:
-                        _first_diff_idx = _i + 1
+                    _polar_opt_pairs.append((s["snapshot_id"], _lbl))
+                    if not _is_current and _polar_first_non_current is None:
+                        _polar_first_non_current = _lbl
 
-                _polar_opt_keys = [k for k, _ in _polar_opts]
-                _polar_opt_lbls = [l for _, l in _polar_opts]
-                _polar_cmp_state_key = f"wm_polar_cmp_{_polar_inst_id}"
-                _default_polar_cmp_idx = (
-                    _first_diff_idx if _first_diff_idx > 0
-                    else (1 if len(_polar_opts) > 1 else 0)
-                )
-                if _polar_cmp_state_key in st.session_state and \
-                   st.session_state[_polar_cmp_state_key] in _polar_opt_keys:
-                    _default_polar_cmp_idx = _polar_opt_keys.index(
-                        st.session_state[_polar_cmp_state_key]
-                    )
-                _polar_cmp_label = st.selectbox(
-                    "Comparar contra corrida anterior",
+                _polar_opt_lbls = [l for _, l in _polar_opt_pairs]
+                _polar_lbl_to_key = {l: k for k, l in _polar_opt_pairs}
+                # Default: el primer snapshot no-actual (uno preseleccionado).
+                # El usuario puede agregar mas o quitarlo.
+                if _polar_first_non_current:
+                    _polar_default_pick = [_polar_first_non_current]
+                _polar_cmp_state_key = f"wm_polar_cmp_picks_{_polar_inst_id}"
+                if _polar_cmp_state_key in st.session_state:
+                    # Filtrar picks que ya no existen
+                    _saved = st.session_state[_polar_cmp_state_key]
+                    _polar_default_pick = [
+                        l for l in _saved if l in _polar_opt_lbls
+                    ]
+                _picked = st.multiselect(
+                    "Corridas a superponer en el polar",
                     options=_polar_opt_lbls,
-                    index=_default_polar_cmp_idx,
-                    key=f"wm_polar_cmp_widget_{_polar_inst_id}",
+                    default=_polar_default_pick,
+                    key=f"wm_polar_cmp_multi_{_polar_inst_id}",
+                    help=(
+                        "Elegí 0 corridas para ver solo la actual, 1 para "
+                        "comparativo simple, o varias para superposición "
+                        "histórica con gradiente cronológico (más viejas "
+                        "más claritas, más recientes más oscuras)."
+                    ),
                 )
-                _selected_polar_cmp_id = _polar_opt_keys[
-                    _polar_opt_lbls.index(_polar_cmp_label)
+                st.session_state[_polar_cmp_state_key] = _picked
+                _selected_polar_cmp_ids = [
+                    _polar_lbl_to_key[l] for l in _picked if l in _polar_lbl_to_key
                 ]
-                st.session_state[_polar_cmp_state_key] = _selected_polar_cmp_id
+                if not _selected_polar_cmp_ids:
+                    st.caption("ℹ️ _Solo se mostrará la corrida actual._")
+                else:
+                    st.caption(
+                        f"Se superpondrán **{len(_selected_polar_cmp_ids)}** "
+                        f"corrida(s) anterior(es) sobre la actual."
+                    )
 
             # Lista de snapshots con borrar
             if _polar_existing_snaps:
@@ -2705,9 +2803,13 @@ def main() -> None:
                                 st.success("Borrado.")
                                 st.rerun()
 
-            # Persistir el snapshot elegido para que las funciones de
-            # render abajo (panel + PDF) lo puedan leer
-            st.session_state["wm_polar_compare_snapshot_id"] = _selected_polar_cmp_id
+            # Persistir los snapshot ids elegidos (lista) para que el
+            # render del polar y del PDF los pueda leer.
+            st.session_state["wm_polar_compare_snapshot_ids"] = _selected_polar_cmp_ids
+            # Backward-compat: si hay 1 elegido, lo expongo como single
+            st.session_state["wm_polar_compare_snapshot_id"] = (
+                _selected_polar_cmp_ids[0] if _selected_polar_cmp_ids else "__none__"
+            )
             st.session_state["wm_polar_compare_skip_identical"] = bool(_polar_curr_readings)
             st.session_state["wm_polar_compare_inst_id"] = _polar_inst_id
         elif _polar_hist_ok and not _polar_inst_id:
@@ -2723,15 +2825,17 @@ def main() -> None:
     logo_uri = get_logo_data_uri(LOGO_PATH)
 
     # ============================================================
-    # Ciclo 17.1 — Comparativo Polar inline
+    # Ciclo 17.1.1 — Comparativo Polar inline (multi-snapshot)
     # ------------------------------------------------------------
-    # Cuando el usuario eligió un snapshot anterior en el sidebar,
-    # mostramos arriba de los paneles individuales un comparativo
-    # tipo "antes vs ahora" por sensor con clasificación
-    # diagnóstica de shift de fase + crecimiento de amplitud.
+    # Cuando el usuario elige una o más corridas anteriores,
+    # mostramos arriba de los paneles individuales una tabla
+    # comparativa con UNA fila por (sensor × snapshot) + diagnostico
+    # de shift de fase + crecimiento de amplitud.
     # ============================================================
-    _polar_cmp_id = st.session_state.get("wm_polar_compare_snapshot_id", "__none__")
-    if _polar_cmp_id and _polar_cmp_id != "__none__" and _polar_curr_readings:
+    _polar_cmp_ids: List[str] = st.session_state.get(
+        "wm_polar_compare_snapshot_ids", []
+    ) or []
+    if _polar_cmp_ids and _polar_curr_readings:
         try:
             from core.polar_history import (
                 load_polar_snapshot,
@@ -2739,28 +2843,35 @@ def main() -> None:
                 amplitude_change_classifier,
                 shortest_arc_phase_diff,
             )
-            _polar_prev_snap = load_polar_snapshot(_polar_inst_id, _polar_cmp_id)
-            if _polar_prev_snap is not None:
+
+            _cmp_rows = []
+            _snap_meta_by_id = {}
+            for _snap_id in _polar_cmp_ids:
+                _snap_full = load_polar_snapshot(_polar_inst_id, _snap_id)
+                if _snap_full is None:
+                    continue
+                _snap_meta_by_id[_snap_id] = _snap_full
                 _prev_by_lbl = {
                     str(s.get("sensor_label", "")): s
-                    for s in _polar_prev_snap.get("sensors", [])
+                    for s in _snap_full.get("sensors", [])
                 }
-                _cmp_rows = []
+                _snap_label_short = _snap_full.get("corrida_label", _snap_id)[:22]
+                _snap_ts = (_snap_full.get("timestamp", "") or "")[:10]
+
                 for r in _polar_curr_readings:
                     _lbl = r["sensor_label"]
                     _prev = _prev_by_lbl.get(_lbl)
                     if _prev is None:
                         _cmp_rows.append({
                             "Sensor": _lbl,
-                            "CSV": r["csv_file"],
+                            "vs Corrida": f"{_snap_label_short} ({_snap_ts})",
                             "Anterior amp": "—",
                             "Actual amp": f"{r['amp_at_op']:.3f} {r['amp_unit']}",
                             "Δ amp": "—",
                             "Anterior fase": "—",
                             "Actual fase": f"{r['phase_at_op']:.1f}°",
                             "Δ fase": "—",
-                            "Diagnóstico": "Sin lectura previa",
-                            "_color": "#94a3b8",
+                            "Diagnóstico": "Sin lectura previa para este sensor",
                         })
                         continue
                     _prev_amp = float(_prev.get("amp_at_op", 0))
@@ -2771,32 +2882,26 @@ def main() -> None:
                     _phase_class = phase_shift_classifier(_delta_phase)
                     _amp_class = amplitude_change_classifier(_delta_amp_pct)
 
-                    # Diagnostico humano
                     _diag_parts = []
                     if _phase_class == "shift_critical":
-                        _diag_parts.append("⚠️ Shift de fase crítico (>60°) — posible crack o falla severa")
+                        _diag_parts.append("⚠️ Shift fase crítico (>60°)")
                     elif _phase_class == "shift_major":
-                        _diag_parts.append("⚠️ Shift de fase mayor (≥30°) — síntoma probable de cambio de balance")
+                        _diag_parts.append("⚠️ Shift fase mayor (≥30°)")
                     elif _phase_class == "shift_minor":
-                        _diag_parts.append("Shift de fase menor (10–30°) — vigilar")
+                        _diag_parts.append("Shift fase menor (10–30°)")
                     elif _phase_class == "stable":
                         _diag_parts.append("Fase estable (<10°)")
-                    if _amp_class in ("amp_critical", "amp_high"):
-                        _diag_parts.append(f"Amplitud {('+' if _delta_amp_pct > 0 else '')}{_delta_amp_pct:.0f}% (crecimiento significativo)")
-                    elif _amp_class == "amp_up":
-                        _diag_parts.append(f"Amplitud subiendo {_delta_amp_pct:+.0f}%")
-                    elif _amp_class in ("amp_down_strong", "amp_down"):
-                        _diag_parts.append(f"Amplitud bajando {_delta_amp_pct:+.0f}%")
+                    if _delta_amp_pct is not None:
+                        if _amp_class in ("amp_critical", "amp_high"):
+                            _diag_parts.append(f"Amp {_delta_amp_pct:+.0f}% (alza)")
+                        elif _amp_class == "amp_up":
+                            _diag_parts.append(f"Amp {_delta_amp_pct:+.0f}%")
+                        elif _amp_class in ("amp_down_strong", "amp_down"):
+                            _diag_parts.append(f"Amp {_delta_amp_pct:+.0f}%")
 
-                    _color_map = {
-                        "shift_critical": "#dc2626",
-                        "shift_major": "#f59e0b",
-                        "shift_minor": "#0ea5e9",
-                        "stable": "#16a34a",
-                    }
                     _cmp_rows.append({
                         "Sensor": _lbl,
-                        "CSV": r["csv_file"],
+                        "vs Corrida": f"{_snap_label_short} ({_snap_ts})",
                         "Anterior amp": f"{_prev_amp:.3f} {r['amp_unit']}",
                         "Actual amp": f"{r['amp_at_op']:.3f} {r['amp_unit']}",
                         "Δ amp": (
@@ -2807,26 +2912,28 @@ def main() -> None:
                         "Actual fase": f"{r['phase_at_op']:.1f}°",
                         "Δ fase": f"{_delta_phase:+.1f}°",
                         "Diagnóstico": " · ".join(_diag_parts) if _diag_parts else "—",
-                        "_color": _color_map.get(_phase_class, "#94a3b8"),
                     })
 
-                if _cmp_rows:
-                    st.markdown("### 📈 Comparativo Polar — vs corrida anterior")
-                    _prev_lbl = _polar_prev_snap.get("corrida_label", _polar_cmp_id)
-                    _prev_ts = _polar_prev_snap.get("timestamp", "")[:10]
-                    _prev_op = _polar_prev_snap.get("operating_speed_rpm", 0)
+            if _cmp_rows:
+                st.markdown("### 📈 Comparativo Polar — vs corridas anteriores")
+                _n_snaps = len(_snap_meta_by_id)
+                if _n_snaps == 1:
+                    _only = list(_snap_meta_by_id.values())[0]
                     st.caption(
-                        f"Comparando contra **{_prev_lbl}** del {_prev_ts} "
-                        f"a {_prev_op:.0f} rpm. La corrida actual está a "
-                        f"{operating_rpm:.0f} rpm. Shift de fase 1X >30° es "
-                        f"síntoma diagnóstico de cambio de balance del rotor "
-                        f"(API 684 / ISO 21940-12)."
+                        f"Comparando contra **{_only.get('corrida_label', '')}** "
+                        f"del {_only.get('timestamp', '')[:10]}. Shift de fase "
+                        f"1X >30° es síntoma diagnóstico de cambio de balance "
+                        f"del rotor (API 684 / ISO 21940-12)."
                     )
-                    _cmp_disp = pd.DataFrame([
-                        {k: v for k, v in r.items() if not k.startswith("_")}
-                        for r in _cmp_rows
-                    ])
-                    st.dataframe(_cmp_disp, width="stretch", hide_index=True)
+                else:
+                    st.caption(
+                        f"Mostrando comparativo contra **{_n_snaps} corridas "
+                        f"anteriores**. Cada fila es una combinación "
+                        f"(sensor × corrida). Shift de fase 1X >30° = "
+                        f"síntoma de cambio de balance (API 684)."
+                    )
+                _cmp_disp = pd.DataFrame(_cmp_rows)
+                st.dataframe(_cmp_disp, width="stretch", hide_index=True)
         except Exception as _polar_cmp_e:
             st.caption(f"_(Comparativo Polar no disponible: {_polar_cmp_e})_")
 
