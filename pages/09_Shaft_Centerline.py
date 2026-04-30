@@ -849,7 +849,25 @@ def build_scl_figure(
 
 
 def _build_scl_report_notes(text_diag: Dict[str, str]) -> str:
-    return f"{text_diag['headline']}\n\n{text_diag['detail']}\n\n{text_diag['action']}"
+    headline = str(text_diag.get('headline', '') or '').strip()
+    detail = str(text_diag.get('detail', '') or '').strip()
+    action = str(text_diag.get('action', '') or '').strip()
+    # Ciclo 17.3 — narrativa comparativa SCL (cuando hay snapshot)
+    comparison_narrative = str(
+        text_diag.get('comparison_narrative', '') or ''
+    ).strip()
+
+    blocks = []
+    if headline:
+        blocks.append(headline)
+    if detail:
+        blocks.append(detail)
+    # Inyectar comparativo entre detalle y acciones
+    if comparison_narrative:
+        blocks.append(comparison_narrative)
+    if action:
+        blocks.append(action)
+    return "\n\n".join(blocks).strip()
 
 
 
@@ -2074,6 +2092,412 @@ def main():
         return
 
     logo_uri = get_logo_data_uri(LOGO_PATH)
+
+    # ============================================================
+    # Ciclo 17.3 — Histórico SCL (multi-snapshot trail)
+    # ============================================================
+    _scl_inst_id = (
+        instance_state.get("instance_id")
+        or st.session_state.get("wm_active_instance_id", "")
+    )
+    _scl_inst = None
+    _scl_sensors_map: List[Dict[str, Any]] = []
+    if _scl_inst_id:
+        try:
+            from core.instance_state import get_instance as _scl_get_inst
+            _scl_inst = _scl_get_inst(_scl_inst_id)
+            if _scl_inst is not None:
+                _scl_sensors_map = list(_scl_inst.sensors or [])
+        except Exception:
+            _scl_inst = None
+
+    def _wm_extract_scl_readings(
+        items: List[Dict[str, Any]],
+        sensors_map: List[Dict[str, Any]],
+        op_speed_rpm: float,
+        clearance_radial_mil: float,
+    ) -> List[Dict[str, Any]]:
+        """Por cada CSV SCL extrae bearing match + posición + eccentricity."""
+        from core.sensor_map import (
+            resolve_sensor_for_point as _wm_resolve,
+            sensor_label as _wm_slbl,
+        )
+        from core.scl_diagnostics import compute_eccentricity_state
+        out = []
+        for it in items:
+            try:
+                meta = it.get("meta") or {}
+                # Para SCL, el matching usa Point Name (Y probe usual)
+                point = str(meta.get("Point Name", "") or it.get("point", "") or "")
+                paired = str(meta.get("Paired Point Name", "") or "")
+                variable = str(meta.get("Variable", "") or it.get("variable", "") or "")
+                unit = str(meta.get("Y-Axis Unit", "") or meta.get("Unit", "") or "")
+
+                # Buscar el sensor matched (cualquiera del par X/Y)
+                sensor_match = None
+                if sensors_map:
+                    sensor_match = _wm_resolve(sensors_map, point, variable, unit)
+                    if sensor_match is None and paired:
+                        sensor_match = _wm_resolve(sensors_map, paired, variable, unit)
+                if sensor_match is None:
+                    continue
+
+                df = it.get("grouped_df")
+                if df is None or len(df) == 0:
+                    continue
+
+                # Punto operativo
+                _diff = (df["speed"] - op_speed_rpm).abs()
+                _row = df.loc[int(_diff.idxmin())]
+                x_at_op = float(_row.get("x_gap", 0.0))
+                y_at_op = float(_row.get("y_gap", 0.0))
+
+                # Bearing label (del plano del sensor matched)
+                bearing_label = (
+                    sensor_match.get("plane_label", "")
+                    or f"Plano {sensor_match.get('plane', 0)}"
+                )
+
+                # Eccentricity state
+                ecc_ratio = 0.0
+                attitude_angle = 0.0
+                try:
+                    if clearance_radial_mil and clearance_radial_mil > 0:
+                        ecc_state = compute_eccentricity_state(
+                            x_pos=x_at_op,
+                            y_pos=y_at_op,
+                            rpm=op_speed_rpm,
+                            cx_radial=clearance_radial_mil,
+                            cy_radial=clearance_radial_mil,
+                            bearing_center_x=0.0,
+                            bearing_center_y=0.0,
+                            load_direction_deg=270.0,
+                        )
+                        ecc_ratio = float(getattr(ecc_state, "eccentricity_ratio", 0))
+                        attitude_angle = float(getattr(ecc_state, "attitude_angle_deg", 0))
+                except Exception:
+                    pass
+
+                # Lift-off speed: heuristica simple — primer punto donde
+                # eccentricity_ratio cae por debajo de 0.95.
+                lift_off_speed = 0.0
+                try:
+                    if clearance_radial_mil and clearance_radial_mil > 0:
+                        for _, r in df.sort_values("speed").iterrows():
+                            _x = float(r.get("x_gap", 0))
+                            _y = float(r.get("y_gap", 0))
+                            _ecc = (_x ** 2 + _y ** 2) ** 0.5 / clearance_radial_mil
+                            if _ecc < 0.95:
+                                lift_off_speed = float(r.get("speed", 0))
+                                break
+                except Exception:
+                    pass
+
+                # Trayectoria downsampleada
+                _df_sorted = df.sort_values("speed").reset_index(drop=True)
+                _N = 80
+                if len(_df_sorted) > _N:
+                    _idx = np.linspace(0, len(_df_sorted) - 1, _N).astype(int)
+                    _df_ds = _df_sorted.iloc[_idx]
+                else:
+                    _df_ds = _df_sorted
+
+                out.append({
+                    "bearing_label": bearing_label,
+                    "csv_file": it.get("file_name", ""),
+                    "x_gap_at_op": x_at_op,
+                    "y_gap_at_op": y_at_op,
+                    "gap_unit": unit or "mil",
+                    "eccentricity_ratio": ecc_ratio,
+                    "attitude_angle": attitude_angle,
+                    "clearance_radial": clearance_radial_mil or 0.0,
+                    "lift_off_speed": lift_off_speed,
+                    "csv_timestamp": str(meta.get("Timestamp", "") or ""),
+                    "trajectory_speed": _df_ds["speed"].astype(float).tolist(),
+                    "trajectory_x_gap": _df_ds["x_gap"].astype(float).tolist(),
+                    "trajectory_y_gap": _df_ds["y_gap"].astype(float).tolist(),
+                })
+            except Exception:
+                continue
+        return out
+
+    _scl_curr_readings: List[Dict[str, Any]] = []
+    if _scl_sensors_map and parsed_items:
+        try:
+            _scl_curr_readings = _wm_extract_scl_readings(
+                parsed_items, _scl_sensors_map,
+                float(active_operating_rpm),
+                float(cr_mil_vault) if cr_mil_vault else 0.0,
+            )
+        except Exception:
+            _scl_curr_readings = []
+
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("### 📚 Histórico SCL")
+        try:
+            from core.scl_history import (
+                save_scl_snapshot,
+                list_scl_snapshots,
+                load_scl_snapshot,
+                delete_scl_snapshot,
+                _scl_snapshot_is_identical_to,
+            )
+            _scl_hist_ok = True
+        except Exception as _e:
+            _scl_hist_ok = False
+            st.caption(f"_(Histórico SCL no disponible: {_e})_")
+
+        if _scl_hist_ok and _scl_inst_id:
+            _scl_existing_snaps = list_scl_snapshots(_scl_inst_id)
+            st.caption(
+                f"{len(_scl_existing_snaps)} snapshot(s) SCL guardado(s)."
+            )
+
+            if not _scl_curr_readings:
+                if not _scl_sensors_map:
+                    st.caption("_(No hay Sensor Map configurado.)_")
+                elif not parsed_items:
+                    st.caption("_(No hay CSVs SCL cargados todavía.)_")
+                else:
+                    st.warning(
+                        f"⚠️ {len(parsed_items)} CSV(s) SCL cargado(s) "
+                        f"pero ninguno matchea sensores del Sensor Map."
+                    )
+                    with st.expander("🔍 Diagnóstico — CSVs vs patterns"):
+                        _dr = []
+                        for it in parsed_items:
+                            m = it.get("meta") or {}
+                            _dr.append({
+                                "Archivo": it.get("file_name", ""),
+                                "Point": str(m.get("Point Name", "") or ""),
+                                "Paired": str(m.get("Paired Point Name", "") or ""),
+                            })
+                        if _dr:
+                            st.markdown("**CSVs SCL cargados:**")
+                            st.dataframe(
+                                pd.DataFrame(_dr),
+                                width="stretch", hide_index=True,
+                            )
+                        from core.sensor_map import sensor_label as _diag_slbl
+                        _sr = []
+                        for s in _scl_sensors_map:
+                            if str(s.get("sensor_type", "")).lower() != "proximity":
+                                continue
+                            _sr.append({
+                                "Sensor": _diag_slbl(s),
+                                "Plano": s.get("plane_label", "") or "",
+                                "Pattern": s.get("csv_match_pattern", "") or "(vacío)",
+                            })
+                        if _sr:
+                            st.markdown("**Sensores proximity del mapa:**")
+                            st.dataframe(
+                                pd.DataFrame(_sr),
+                                width="stretch", hide_index=True,
+                            )
+            else:
+                with st.expander("📸 Guardar snapshot SCL actual", expanded=False):
+                    st.caption(
+                        f"Captura X/Y position + eccentricity + attitude a "
+                        f"{active_operating_rpm:.0f} rpm para "
+                        f"{len(_scl_curr_readings)} bearing(s)."
+                    )
+                    _scl_snap_label = st.text_input(
+                        "Etiqueta de la corrida",
+                        value="",
+                        placeholder="Ej. Coastdown abril 27",
+                        key=f"wm_scl_snap_label_{_scl_inst_id}",
+                    )
+                    _scl_snap_notes = st.text_area(
+                        "Observaciones (opcional)",
+                        value="",
+                        key=f"wm_scl_snap_notes_{_scl_inst_id}",
+                        height=70,
+                    )
+                    if st.button(
+                        "💾 Guardar snapshot SCL",
+                        type="primary", width="stretch",
+                        key=f"wm_scl_snap_save_{_scl_inst_id}",
+                    ):
+                        try:
+                            sid = save_scl_snapshot(
+                                _scl_inst_id,
+                                operating_speed_rpm=float(active_operating_rpm),
+                                bearings_data=_scl_curr_readings,
+                                corrida_label=_scl_snap_label,
+                                notes=_scl_snap_notes,
+                            )
+                            st.success(f"✓ Snapshot SCL guardado: {sid}")
+                            st.rerun()
+                        except Exception as _e:
+                            st.error(f"No se pudo guardar: {_e}")
+
+            # Multiselect comparativo
+            _selected_scl_cmp_ids: List[str] = []
+            if _scl_existing_snaps:
+                _curr_by_lbl = {
+                    r["bearing_label"]: {
+                        "x_gap": r["x_gap_at_op"],
+                        "y_gap": r["y_gap_at_op"],
+                        "eccentricity_ratio": r["eccentricity_ratio"],
+                    }
+                    for r in _scl_curr_readings
+                }
+                _scl_opt_pairs: List[Tuple[str, str]] = []
+                _scl_first_non_current = None
+                for s in _scl_existing_snaps:
+                    _is_current = False
+                    if _curr_by_lbl:
+                        try:
+                            _full = load_scl_snapshot(_scl_inst_id, s["snapshot_id"])
+                            if _full is not None:
+                                _is_current = _scl_snapshot_is_identical_to(
+                                    _full, _curr_by_lbl)
+                        except Exception:
+                            pass
+                    _suffix = " · (corrida actual)" if _is_current else ""
+                    _opspeed = s.get("operating_speed_rpm")
+                    _opspeed_str = f" @ {_opspeed:.0f}rpm" if _opspeed else ""
+                    _lbl = (f"{s['corrida_label'][:28]}{_opspeed_str} "
+                            f"({s['timestamp'][:10]}){_suffix}")
+                    _scl_opt_pairs.append((s["snapshot_id"], _lbl))
+                    if not _is_current and _scl_first_non_current is None:
+                        _scl_first_non_current = _lbl
+
+                _scl_opt_lbls = [l for _, l in _scl_opt_pairs]
+                _scl_lbl_to_key = {l: k for k, l in _scl_opt_pairs}
+                _scl_default_pick = []
+                if _scl_first_non_current:
+                    _scl_default_pick = [_scl_first_non_current]
+                _scl_cmp_state_key = f"wm_scl_cmp_picks_{_scl_inst_id}"
+                if _scl_cmp_state_key in st.session_state:
+                    _saved = st.session_state[_scl_cmp_state_key]
+                    _scl_default_pick = [l for l in _saved if l in _scl_opt_lbls]
+                _scl_picked = st.multiselect(
+                    "Corridas a superponer en el SCL",
+                    options=_scl_opt_lbls,
+                    default=_scl_default_pick,
+                    key=f"wm_scl_cmp_multi_{_scl_inst_id}",
+                    help=(
+                        "0 = solo actual; 1 = comparativo simple; "
+                        "N = superposición histórica con gradiente "
+                        "cronológico de las trayectorias del muñón."
+                    ),
+                )
+                st.session_state[_scl_cmp_state_key] = _scl_picked
+                _selected_scl_cmp_ids = [
+                    _scl_lbl_to_key[l] for l in _scl_picked
+                    if l in _scl_lbl_to_key
+                ]
+
+                # Lista borrar
+                with st.expander(
+                    f"🗂️ Gestionar snapshots SCL ({len(_scl_existing_snaps)})"
+                ):
+                    for s in _scl_existing_snaps:
+                        cols_h = st.columns([4, 1])
+                        cols_h[0].markdown(
+                            f"**{s['corrida_label'][:30]}**  \n"
+                            f"_{s['timestamp']} · {s['n_bearings']} bearings · "
+                            f"{s.get('operating_speed_rpm', 0):.0f} rpm_"
+                        )
+                        if cols_h[1].button(
+                            "🗑️",
+                            key=f"wm_scl_del_{s['snapshot_id']}",
+                            help="Borrar este snapshot",
+                        ):
+                            if delete_scl_snapshot(_scl_inst_id, s["snapshot_id"]):
+                                st.success("Borrado.")
+                                st.rerun()
+
+            st.session_state["wm_scl_compare_snapshot_ids"] = _selected_scl_cmp_ids
+            st.session_state["wm_scl_compare_inst_id"] = _scl_inst_id
+
+    # Comparativo SCL inline
+    _scl_cmp_ids: List[str] = st.session_state.get(
+        "wm_scl_compare_snapshot_ids", []) or []
+    if _scl_cmp_ids and _scl_curr_readings:
+        try:
+            from core.scl_history import (
+                load_scl_snapshot,
+                eccentricity_change_classifier,
+                attitude_shift_classifier,
+            )
+            _cmp_rows = []
+            for _snap_id in _scl_cmp_ids:
+                _snap_full = load_scl_snapshot(_scl_inst_id, _snap_id)
+                if _snap_full is None:
+                    continue
+                _prev_by_lbl = {
+                    str(b.get("bearing_label", "")): b
+                    for b in _snap_full.get("bearings", [])
+                }
+                _slbl = _snap_full.get("corrida_label", _snap_id)[:22]
+                _sts = (_snap_full.get("timestamp", "") or "")[:10]
+
+                for r in _scl_curr_readings:
+                    _lbl = r["bearing_label"]
+                    _prev = _prev_by_lbl.get(_lbl)
+                    if _prev is None:
+                        continue
+                    _prev_x = float(_prev.get("x_gap_at_op", 0))
+                    _prev_y = float(_prev.get("y_gap_at_op", 0))
+                    _prev_ecc = float(_prev.get("eccentricity_ratio", 0))
+                    _prev_att = float(_prev.get("attitude_angle", 0))
+                    _prev_lo = float(_prev.get("lift_off_speed", 0))
+
+                    _delta_ecc = r["eccentricity_ratio"] - _prev_ecc
+                    _delta_att = r["attitude_angle"] - _prev_att
+                    _delta_x = r["x_gap_at_op"] - _prev_x
+                    _delta_y = r["y_gap_at_op"] - _prev_y
+                    _delta_lo = r["lift_off_speed"] - _prev_lo
+
+                    _ecc_class = eccentricity_change_classifier(_delta_ecc)
+                    _att_class = attitude_shift_classifier(_delta_att)
+
+                    _diag = []
+                    if _ecc_class == "migration_critical":
+                        _diag.append("⚠️ Migración crítica (>25% clearance)")
+                    elif _ecc_class == "migration_major":
+                        _diag.append("⚠️ Migración mayor (>15% clearance)")
+                    elif _ecc_class == "migration_minor":
+                        _diag.append("Migración menor")
+                    elif _ecc_class == "stable":
+                        _diag.append("Eccentricity estable")
+                    if _att_class == "shift_critical":
+                        _diag.append("⚠️ Shift attitude crítico (≥30°)")
+                    elif _att_class == "shift_major":
+                        _diag.append("Shift attitude mayor")
+
+                    _cmp_rows.append({
+                        "Bearing": _lbl,
+                        "vs Corrida": f"{_slbl} ({_sts})",
+                        "Anterior X/Y": f"{_prev_x:.2f} / {_prev_y:.2f} mil",
+                        "Actual X/Y": f"{r['x_gap_at_op']:.2f} / {r['y_gap_at_op']:.2f} mil",
+                        "Δ X/Y": f"{_delta_x:+.2f} / {_delta_y:+.2f}",
+                        "e/c anterior": f"{_prev_ecc:.3f}",
+                        "e/c actual": f"{r['eccentricity_ratio']:.3f}",
+                        "Δ e/c": f"{_delta_ecc:+.3f}",
+                        "Anterior attitude": f"{_prev_att:.1f}°",
+                        "Actual attitude": f"{r['attitude_angle']:.1f}°",
+                        "Δ attitude": f"{_delta_att:+.1f}°",
+                        "Diagnóstico": " · ".join(_diag) if _diag else "—",
+                    })
+
+            if _cmp_rows:
+                st.markdown("### 📈 Comparativo SCL — vs corridas anteriores")
+                st.caption(
+                    "Migración del centerline del muñón entre corridas. "
+                    "Cambio de eccentricity ratio o shift de attitude angle "
+                    "indican cambio en distribución de carga, viscosidad del "
+                    "aceite o pérdida de clearance del cojinete (API 670 §6.7)."
+                )
+                st.dataframe(
+                    pd.DataFrame(_cmp_rows),
+                    width="stretch", hide_index=True,
+                )
+        except Exception as _scl_cmp_e:
+            st.caption(f"_(Comparativo SCL no disponible: {_scl_cmp_e})_")
 
     for panel_index, item in enumerate(parsed_items):
         render_scl_panel(
