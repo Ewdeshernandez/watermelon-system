@@ -2521,16 +2521,37 @@ def build_trend_figure(
             if show_anomaly_markers:
                 anomaly_df = detect_trend_anomalies(record, metric_key)
                 if not anomaly_df.empty:
+                    # Ciclo 17.5 — marcadores sutiles: círculos
+                    # huecos pequeños semitransparentes que ya no
+                    # compiten con la curva ni saturan el plot.
+                    # Las severidades High siguen destacando con
+                    # un anillo más opaco; las Low/Medium quedan
+                    # como puntos discretos.
+                    anomaly_df = anomaly_df.copy()
+                    sev_colors = {
+                        "High":   "rgba(220, 38, 38, 0.85)",
+                        "Medium": "rgba(245, 158, 11, 0.70)",
+                        "Low":    "rgba(100, 116, 139, 0.55)",
+                    }
+                    sev_sizes = {"High": 9, "Medium": 7, "Low": 6}
+                    point_colors = [
+                        sev_colors.get(str(s), "rgba(100,116,139,0.55)")
+                        for s in anomaly_df["severity"].astype(str)
+                    ]
+                    point_sizes = [
+                        sev_sizes.get(str(s), 6)
+                        for s in anomaly_df["severity"].astype(str)
+                    ]
                     anomaly_trace = go.Scatter(
                         x=anomaly_df["x"],
                         y=anomaly_df["y"],
                         mode="markers",
                         name=f"Anomalies — {record.point_clean}",
                         marker=dict(
-                            size=11,
-                            color="#ef4444",
-                            symbol="x",
-                            line=dict(width=1.0, color="#7f1d1d"),
+                            size=point_sizes,
+                            color=point_colors,
+                            symbol="circle-open",
+                            line=dict(width=1.4, color=point_colors),
                         ),
                         hovertemplate=(
                             "Point: %{fullData.name}<br>"
@@ -2539,6 +2560,7 @@ def build_trend_figure(
                             "Anomaly detected<extra></extra>"
                         ),
                         showlegend=show_legend,
+                        opacity=0.85,
                     )
                     if use_secondary_axis:
                         fig.add_trace(anomaly_trace, secondary_y=False)
@@ -3246,7 +3268,7 @@ for key in [
 with st.sidebar:
     # Ciclo 17.5 — instancia activa (necesaria para histórico de
     # tendencias persistente bajo {INSTANCES_DIR}/{instance_id}).
-    trend_instance_state = render_instance_selector(module_name="trend")
+    trend_instance_state = render_instance_selector(module_name="trends")
     trend_active_instance_id = str(trend_instance_state.get("instance_id") or "").strip()
 
     st.markdown("### Trend CSV")
@@ -3434,58 +3456,11 @@ with st.sidebar:
         else:
             historical_corrida_ids = []
 
-    st.markdown("### Machine Diagnostic Context")
-    asset_type_options = [
-        "",
-        "Turbogenerador",
-        "Turbina de gas",
-        "Generador eléctrico",
-        "Motor eléctrico",
-        "Bomba",
-        "Compresor",
-        "Ventilador",
-        "Gearbox",
-        "Otro",
-    ]
-    st.session_state.wm_tr_asset_type = st.selectbox(
-        "Asset type *",
-        options=asset_type_options,
-        index=asset_type_options.index(st.session_state.wm_tr_asset_type) if st.session_state.wm_tr_asset_type in asset_type_options else 0,
-        key="wm_tr_asset_type_select",
-    )
-
-    config_options = ["", "Simple", "Compuesta / tren de máquinas"]
-    st.session_state.wm_tr_machine_configuration = st.selectbox(
-        "Machine configuration *",
-        options=config_options,
-        index=config_options.index(st.session_state.wm_tr_machine_configuration) if st.session_state.wm_tr_machine_configuration in config_options else 0,
-        key="wm_tr_machine_configuration_select",
-    )
-
-    if st.session_state.wm_tr_machine_configuration == "Compuesta / tren de máquinas":
-        st.session_state.wm_tr_primary_equipment = st.text_input(
-            "Primary equipment *",
-            value=st.session_state.wm_tr_primary_equipment,
-            placeholder="Ejemplo: Turbina LM6000",
-            key="wm_tr_primary_equipment_input",
-        )
-        st.session_state.wm_tr_secondary_equipment = st.text_input(
-            "Secondary equipment *",
-            value=st.session_state.wm_tr_secondary_equipment,
-            placeholder="Ejemplo: Generador Brush",
-            key="wm_tr_secondary_equipment_input",
-        )
-    else:
-        st.session_state.wm_tr_primary_equipment = ""
-        st.session_state.wm_tr_secondary_equipment = ""
-
-    st.session_state.wm_tr_machine_description = st.text_area(
-        "Machine technical description *",
-        value=st.session_state.wm_tr_machine_description,
-        height=120,
-        placeholder="Ejemplo: Turbina LM6000 acoplada a generador Brush. No corresponde a sistema hidráulico.",
-        key="wm_tr_machine_description_input",
-    )
+    # Ciclo 17.5 — el contexto de la máquina (asset type, configuración,
+    # descripción técnica) ahora se hereda automáticamente de la
+    # instancia activa de Machinery Library, así no se duplica la
+    # entrada de datos. Más abajo se construye `asset_context` desde
+    # `trend_instance_state` para alimentar el reporte PDF.
 
 records_all: List[TrendRecord] = list(st.session_state.get("trend_signals", {}).values())
 operational_records_all: List[OperationalRecord] = list(st.session_state.get("operational_signals", {}).values())
@@ -3546,42 +3521,80 @@ if not records_all and not operational_records_all:
     st.warning("Cargue al menos un CSV de tendencia o un CSV de data operativa en este módulo.")
     st.stop()
 
-trend_context_errors: List[str] = []
-if not st.session_state.wm_tr_asset_type:
-    trend_context_errors.append("Asset type is required in Trends.")
-if not st.session_state.wm_tr_machine_configuration:
-    trend_context_errors.append("Machine configuration is required in Trends.")
-if st.session_state.wm_tr_machine_configuration == "Compuesta / tren de máquinas":
-    if not str(st.session_state.wm_tr_primary_equipment).strip():
-        trend_context_errors.append("Primary equipment is required for composite machine trains.")
-    if not str(st.session_state.wm_tr_secondary_equipment).strip():
-        trend_context_errors.append("Secondary equipment is required for composite machine trains.")
-if not str(st.session_state.wm_tr_machine_description).strip():
-    trend_context_errors.append("Machine technical description is required in Trends.")
+# =========================================================
+# Ciclo 17.5 — Asset context auto-derivado de la instancia activa
+# =========================================================
+# Antes el usuario tenía que repetir asset_type, configuración,
+# primary/secondary equipment y descripción técnica desde esta
+# página. Ahora la instancia activa (Machinery Library) ya
+# contiene todos estos campos, así que los heredamos
+# automáticamente y los conservamos en session_state para que el
+# reporte PDF y la narrativa sigan funcionando sin cambios.
+def _build_trend_asset_context_from_instance(state: Dict[str, Any]) -> Dict[str, Any]:
+    profile_label = str(state.get("profile_label") or "").strip()
+    machine_group = str(state.get("machine_group") or "").strip()
+    tag = str(state.get("tag") or "").strip()
+    location = str(state.get("location") or "").strip()
+    notes = str(state.get("notes") or "").strip()
+    instance_label = str(state.get("instance_label") or state.get("instance_id") or "").strip()
 
-st.session_state["asset_context"] = {
-    "type": st.session_state.wm_tr_asset_type,
-    "description": st.session_state.wm_tr_machine_description.strip(),
-    "asset_type": st.session_state.wm_tr_asset_type,
-    "machine_configuration": st.session_state.wm_tr_machine_configuration,
-    "primary_equipment": st.session_state.wm_tr_primary_equipment,
-    "secondary_equipment": st.session_state.wm_tr_secondary_equipment,
-    "machine_description": st.session_state.wm_tr_machine_description.strip(),
-}
+    # asset_type: heurística por profile_label / machine_group
+    pl_low = profile_label.lower()
+    if "turbogen" in pl_low or "tg-" in pl_low:
+        asset_type = "Turbogenerador"
+    elif "turbina de gas" in pl_low or "lm6000" in pl_low or "frame " in pl_low:
+        asset_type = "Turbina de gas"
+    elif "vapor" in pl_low and "turbina" in pl_low:
+        asset_type = "Turbina de vapor"
+    elif "generador" in pl_low or "alternador" in pl_low:
+        asset_type = "Generador eléctrico"
+    elif "compresor" in pl_low:
+        asset_type = "Compresor"
+    elif "bomba" in pl_low:
+        asset_type = "Bomba"
+    elif "ventilador" in pl_low or "fan" in pl_low:
+        asset_type = "Ventilador"
+    elif "gearbox" in pl_low or "caja" in pl_low:
+        asset_type = "Gearbox"
+    elif "motor" in pl_low:
+        asset_type = "Motor eléctrico"
+    elif machine_group:
+        asset_type = profile_label or machine_group
+    else:
+        asset_type = profile_label or "Activo monitoreado"
 
-if trend_context_errors:
-    for msg in trend_context_errors:
-        st.warning(msg)
+    machine_configuration = "Simple"
+    description_bits: List[str] = []
+    if profile_label:
+        description_bits.append(profile_label)
+    if tag and tag != "(default)":
+        description_bits.append(f"tag {tag}")
+    if location:
+        description_bits.append(f"ubicación {location}")
+    if notes:
+        description_bits.append(notes)
+    machine_description = ". ".join(description_bits) if description_bits else (instance_label or asset_type)
 
-st.session_state["asset_context"] = {
-    "type": st.session_state.wm_tr_asset_type,
-    "description": st.session_state.wm_tr_machine_description.strip(),
-    "asset_type": st.session_state.wm_tr_asset_type,
-    "machine_configuration": st.session_state.wm_tr_machine_configuration,
-    "primary_equipment": st.session_state.wm_tr_primary_equipment,
-    "secondary_equipment": st.session_state.wm_tr_secondary_equipment,
-    "machine_description": st.session_state.wm_tr_machine_description.strip(),
-}
+    return {
+        "type": asset_type,
+        "description": machine_description,
+        "asset_type": asset_type,
+        "machine_configuration": machine_configuration,
+        "primary_equipment": "",
+        "secondary_equipment": "",
+        "machine_description": machine_description,
+    }
+
+
+_trend_ctx = _build_trend_asset_context_from_instance(trend_instance_state)
+# Mantener legacy session keys sincronizadas (varios consumidores
+# aguas abajo todavía leen wm_tr_asset_type / wm_tr_machine_*).
+st.session_state["wm_tr_asset_type"] = _trend_ctx["asset_type"]
+st.session_state["wm_tr_machine_configuration"] = _trend_ctx["machine_configuration"]
+st.session_state["wm_tr_primary_equipment"] = _trend_ctx["primary_equipment"]
+st.session_state["wm_tr_secondary_equipment"] = _trend_ctx["secondary_equipment"]
+st.session_state["wm_tr_machine_description"] = _trend_ctx["machine_description"]
+st.session_state["asset_context"] = _trend_ctx
 
 
 def push_linked_bode_context(records: List[TrendRecord], metric_key: str) -> None:
@@ -3681,21 +3694,9 @@ def queue_trend_to_report(
 ) -> Tuple[bool, Optional[str]]:
     operational_records = operational_records or []
 
-    trend_context_errors: List[str] = []
-    if not st.session_state.get("wm_tr_asset_type"):
-        trend_context_errors.append("Asset type is required in Trends before sending to report.")
-    if not st.session_state.get("wm_tr_machine_configuration"):
-        trend_context_errors.append("Machine configuration is required in Trends before sending to report.")
-    if st.session_state.get("wm_tr_machine_configuration") == "Compuesta / tren de máquinas":
-        if not str(st.session_state.get("wm_tr_primary_equipment", "")).strip():
-            trend_context_errors.append("Primary equipment is required for composite machine trains before sending to report.")
-        if not str(st.session_state.get("wm_tr_secondary_equipment", "")).strip():
-            trend_context_errors.append("Secondary equipment is required for composite machine trains before sending to report.")
-    if not str(st.session_state.get("wm_tr_machine_description", "")).strip():
-        trend_context_errors.append("Machine technical description is required in Trends before sending to report.")
-
-    if trend_context_errors:
-        return False, " | ".join(trend_context_errors)
+    # Ciclo 17.5 — el asset context ya viene auto-derivado de la
+    # instancia activa, así que no hay validaciones manuales que
+    # bloqueen el envío al reporte.
     if records:
         first = records[0]
         machine = first.machine
