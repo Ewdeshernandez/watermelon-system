@@ -1175,21 +1175,50 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     # Antes, si estaba vacio, se OMITIA la seccion entera y el reporte
     # llegaba al cliente sin elevator pitch. Eso es peor que un draft.
     executive_text = (meta.get("executive_summary") or "").strip()
-    if not executive_text and items:
+
+    # Ciclo 17.5.8 — recomputar severidad LIVE en cada generación
+    # de PDF. Antes el badge se extraía del texto cacheado en meta
+    # (`for known in ...: if known in executive_text`), lo que dejaba
+    # la severidad pegada al draft viejo aunque el usuario hubiera
+    # añadido figuras nuevas (caso reportado: Trend con Strong change
+    # llegaba al PDF pero el Resumen Ejecutivo seguía diciendo
+    # "CONDICIÓN ACEPTABLE" porque la prosa cached era previa a la
+    # adición del item).
+    severity_live = ""
+    severity_live_color = ""
+    if items:
+        try:
+            _findings_live = _extract_findings_from_items(items)
+            severity_live, severity_live_color = _global_severity(_findings_live)
+        except Exception:
+            severity_live = ""
+
+    # Si el draft cached menciona una severidad distinta a la live,
+    # el draft está stale → regeneramos automáticamente para que la
+    # prosa se alinee. Preservamos la edición manual cuando severidad
+    # cached coincide con la live (asumimos que el usuario sigue OK
+    # con la conclusión).
+    cached_severity = ""
+    for known in ("CRÍTICA", "ACCIÓN REQUERIDA", "ATENCIÓN", "VIGILANCIA", "CONDICIÓN ACEPTABLE"):
+        if executive_text and known in executive_text:
+            cached_severity = known
+            break
+
+    needs_redraft = bool(items) and (
+        not executive_text
+        or (severity_live and cached_severity and severity_live != cached_severity)
+    )
+    if needs_redraft:
         try:
             executive_text = (_autodraft_executive_summary(meta, items) or "").strip()
         except Exception:
-            executive_text = ""
+            pass
+
     if executive_text:
         story.append(Paragraph("RESUMEN EJECUTIVO", styles["WMTOC1"]))
 
-        # Cinta de severidad: una franja con estado global y color (si se puede
-        # detectar desde el primer párrafo del resumen). Si no, omitida.
-        severity_label = ""
-        for known in ("CRÍTICA", "ACCIÓN REQUERIDA", "ATENCIÓN", "VIGILANCIA", "CONDICIÓN ACEPTABLE"):
-            if known in executive_text:
-                severity_label = known
-                break
+        # Cinta de severidad: usamos SIEMPRE la live (live wins).
+        severity_label = severity_live or cached_severity
         if severity_label:
             color_map = {
                 "CRÍTICA": "#dc2626",
@@ -2937,16 +2966,19 @@ def _compose_executive_summary(meta_dict: Dict[str, Any], findings: Dict[str, An
         components.append(f"{n_crit} detección{'es' if n_crit != 1 else ''} de velocidades críticas")
     if n_mig:
         components.append(f"{n_mig} comparativ{'os' if n_mig != 1 else 'o'} de migración multi-fecha")
-    composition_clause = ", ".join(components) if components else f"{n_fig} figuras de análisis"
+    # Ciclo 17.5.8 — pluralización correcta de "figura" / "figuras"
+    _fig_word = "figura" if n_fig == 1 else "figuras"
+    composition_clause = ", ".join(components) if components else f"{n_fig} {_fig_word} de análisis"
 
     paragraphs.append(
         f"El presente reporte sintetiza la condición rotodinámica del "
-        f"{asset_clause} a partir de {n_fig} figuras de análisis adquiridas "
-        f"mediante el sistema de monitoreo en línea y remoto Watermelon System, "
-        f"incluyendo {composition_clause}. La evaluación combinada de los "
-        f"hallazgos según los criterios técnicos aplicables (API 670 / API 684 "
-        f"para análisis rotodinámico, ISO 20816 para severidad de vibración) "
-        f"arroja una clasificación global de {severity_label}."
+        f"{asset_clause} a partir de {n_fig} {_fig_word} de análisis adquirida"
+        f"{'s' if n_fig != 1 else ''} mediante el sistema de monitoreo en línea "
+        f"y remoto Watermelon System, incluyendo {composition_clause}. La "
+        f"evaluación combinada de los hallazgos según los criterios técnicos "
+        f"aplicables (API 670 / API 684 para análisis rotodinámico, ISO 20816 "
+        f"para severidad de vibración) arroja una clasificación global de "
+        f"{severity_label}."
     )
 
     # Bloque 2: hallazgos principales
