@@ -440,6 +440,11 @@ def build_polar_figure(
     operating_rpm: Optional[float] = None,
     iso_thresholds: Optional[Dict[str, float]] = None,
     critical_speeds_pro: Optional[List[Dict[str, Any]]] = None,
+    # Ciclo 17.1 P3 — overlay del snapshot anterior
+    prev_snapshot_amp: Optional[float] = None,
+    prev_snapshot_phase: Optional[float] = None,
+    prev_snapshot_label: Optional[str] = None,
+    prev_snapshot_op_speed: Optional[float] = None,
 ) -> go.Figure:
     amp_unit = meta.get("Amp Unit", "") or ""
     speed_unit = meta.get("Speed Unit", "rpm") or "rpm"
@@ -626,6 +631,83 @@ def build_polar_figure(
         sp_max = float(df["speed"].max()) if len(df) else 0.0
         if sp_min <= operating_rpm <= sp_max:
             op_row = nearest_row_for_speed(df, operating_rpm)
+
+            # ============================================================
+            # Ciclo 17.1 P3 — Overlay snapshot anterior (ghost gris) +
+            # flecha conectora desde la corrida vieja al punto actual.
+            # Permite ver de un vistazo la migración de amplitud + shift
+            # de fase entre dos corridas en el mismo plano polar.
+            # ============================================================
+            if (
+                prev_snapshot_amp is not None
+                and prev_snapshot_phase is not None
+                and prev_snapshot_amp > 0
+            ):
+                _prev_phase_disp = float(prev_snapshot_phase) % 360.0
+                _prev_amp = float(prev_snapshot_amp)
+                _curr_amp = float(op_row["amp"])
+                _curr_phase = float(op_row["theta_display"])
+
+                # Linea conectora (en cartesianas, convertida a polar via
+                # interpolacion lineal en (theta, r) — usamos un segmento
+                # con pocos puntos para que la flecha en el polar quede
+                # recta visual).
+                _n_seg = 12
+                _frac = np.linspace(0.0, 1.0, _n_seg)
+                _seg_r = _prev_amp + (_curr_amp - _prev_amp) * _frac
+                # Para shift de fase usar shortest arc
+                _delta = ((_curr_phase - _prev_phase_disp + 540.0) % 360.0) - 180.0
+                _seg_theta = (_prev_phase_disp + _delta * _frac) % 360.0
+                fig.add_trace(
+                    go.Scatterpolar(
+                        r=_seg_r,
+                        theta=_seg_theta,
+                        mode="lines",
+                        line=dict(
+                            width=2.0, color="rgba(220,38,38,0.55)",
+                            dash="dot",
+                        ),
+                        showlegend=False,
+                        hoverinfo="skip",
+                        name="Trail anterior → actual",
+                    )
+                )
+
+                # Marker GHOST de la corrida anterior (gris claro, hueco)
+                _prev_lbl_text = prev_snapshot_label or "anterior"
+                _prev_op_text = (
+                    f" @ {int(round(prev_snapshot_op_speed))} rpm"
+                    if prev_snapshot_op_speed else ""
+                )
+                fig.add_trace(
+                    go.Scatterpolar(
+                        r=[_prev_amp],
+                        theta=[_prev_phase_disp],
+                        mode="markers+text",
+                        marker=dict(
+                            size=20, color="rgba(148,163,184,0.45)",
+                            symbol="star-open",
+                            line=dict(width=2.5, color="#475569"),
+                        ),
+                        text=[
+                            f"<i>Anterior · "
+                            f"{_prev_lbl_text[:18]}{_prev_op_text}</i>"
+                        ],
+                        textposition="top center",
+                        textfont=dict(size=9, color="#475569", family="Arial"),
+                        showlegend=False,
+                        hovertemplate=(
+                            f"<b>Snapshot anterior</b><br>"
+                            f"Etiqueta: {_prev_lbl_text}<br>"
+                            f"Amplitude: {_prev_amp:.3f} {amp_unit}<br>"
+                            f"Phase: {_prev_phase_disp:.1f}°<br>"
+                            f"Δ amp: {(_curr_amp - _prev_amp):+.3f} "
+                            f"({((_curr_amp - _prev_amp) / _prev_amp * 100.0):+.1f}%)<br>"
+                            f"Δ phase: {_delta:+.1f}°<extra></extra>"
+                        ),
+                    )
+                )
+
             fig.add_trace(
                 go.Scatterpolar(
                     r=[op_row["amp"]],
@@ -793,6 +875,8 @@ def _build_polar_report_notes(text_diag: Dict[str, str]) -> str:
     headline = str(text_diag.get("headline", "") or "").strip()
     detail = str(text_diag.get("detail", "") or "").strip()
     action = str(text_diag.get("action", "") or "").strip()
+    # Ciclo 17.1 P5 — narrativa del comparativo Polar (vs corrida anterior)
+    comparison_narrative = str(text_diag.get("comparison_narrative", "") or "").strip()
 
     def clean_text(value: str) -> str:
         value = str(value or "")
@@ -806,12 +890,19 @@ def _build_polar_report_notes(text_diag: Dict[str, str]) -> str:
     headline = clean_text(headline)
     detail = clean_text(detail)
     action = clean_text(action)
+    comparison_narrative = clean_text(comparison_narrative)
 
     blocks: List[str] = []
     if headline:
         blocks.append(headline)
     if detail:
         blocks.append(detail)
+    # Inyectar el comparativo después del diagnostico principal y antes
+    # de las acciones priorizadas — lo natural en un reporte de
+    # vibraciones es ver primero la severidad actual, luego el contexto
+    # historico, y por ultimo las recomendaciones.
+    if comparison_narrative:
+        blocks.append(comparison_narrative)
 
     if action:
         action_clean = action
@@ -1981,6 +2072,149 @@ def render_polar_panel(
         except Exception:
             pass
 
+    # Ciclo 17.1 P3 — buscar snapshot anterior elegido en sidebar
+    # y extraer la lectura del sensor actual para overlay.
+    _prev_amp = None
+    _prev_phase = None
+    _prev_label = None
+    _prev_op_speed = None
+    try:
+        _polar_cmp_snap_id = st.session_state.get("wm_polar_compare_snapshot_id")
+        if _polar_cmp_snap_id and _polar_cmp_snap_id != "__none__":
+            from core.polar_history import load_polar_snapshot
+            from core.sensor_map import resolve_sensor_for_point as _sm_resolve, sensor_label as _sm_slbl
+            _polar_inst_id_local = st.session_state.get("wm_active_instance_id", "")
+            if not _polar_inst_id_local:
+                # Fallback: buscar en wm_polar_compare_inst_id si lo persistimos
+                _polar_inst_id_local = st.session_state.get("wm_polar_compare_inst_id", "")
+            if _polar_inst_id_local:
+                _prev_snap_full = load_polar_snapshot(_polar_inst_id_local, _polar_cmp_snap_id)
+                if _prev_snap_full is not None:
+                    # Identificar a qué sensor corresponde ESTE panel
+                    from core.instance_state import get_instance as _sm_get_inst
+                    _inst_obj = _sm_get_inst(_polar_inst_id_local)
+                    _sensor_match = None
+                    if _inst_obj is not None and _inst_obj.sensors:
+                        _sensor_match = _sm_resolve(
+                            list(_inst_obj.sensors),
+                            str(meta.get("Point Name", "") or item.get("point", "")),
+                            str(meta.get("Variable", "") or item.get("variable", "")),
+                            str(meta.get("Y-Axis Unit", "") or meta.get("Unit", "") or ""),
+                        )
+                    if _sensor_match is not None:
+                        _curr_panel_lbl = _sm_slbl(_sensor_match)
+                        for _ps in _prev_snap_full.get("sensors", []):
+                            if str(_ps.get("sensor_label", "")) == _curr_panel_lbl:
+                                _prev_amp = float(_ps.get("amp_at_op", 0) or 0)
+                                _prev_phase = float(_ps.get("phase_at_op", 0) or 0)
+                                _prev_label = _prev_snap_full.get("corrida_label", "")
+                                _prev_op_speed = float(_prev_snap_full.get("operating_speed_rpm", 0) or 0)
+                                break
+    except Exception:
+        _prev_amp = None
+        _prev_phase = None
+
+    # Ciclo 17.1 P5 — narrativa del comparativo Polar para el PDF
+    # report. Se inyecta en text_diag["comparison_narrative"] que
+    # _build_polar_report_notes incluye en las notas de la figura.
+    if (
+        _prev_amp is not None and _prev_phase is not None
+        and _prev_amp > 0 and use_rotordyn_pro and operating_rpm is not None
+    ):
+        try:
+            from core.polar_history import (
+                phase_shift_classifier,
+                amplitude_change_classifier,
+                shortest_arc_phase_diff,
+            )
+            sp_min_chk = float(plot_df["speed"].min()) if len(plot_df) else 0.0
+            sp_max_chk = float(plot_df["speed"].max()) if len(plot_df) else 0.0
+            if sp_min_chk <= operating_rpm <= sp_max_chk:
+                _curr_op_row = nearest_row_for_speed(plot_df, operating_rpm)
+                _curr_amp_op = float(_curr_op_row["amp"])
+                _curr_phase_op = float(_curr_op_row["theta_display"])
+                _delta_amp = _curr_amp_op - float(_prev_amp)
+                _delta_amp_pct = (
+                    (_delta_amp / float(_prev_amp) * 100.0)
+                    if float(_prev_amp) > 0 else None
+                )
+                _delta_phase = shortest_arc_phase_diff(
+                    float(_prev_phase), _curr_phase_op,
+                )
+                _phase_class = phase_shift_classifier(_delta_phase)
+                _amp_unit_local = meta.get("Amp Unit", "") or meta.get("Y-Axis Unit", "") or ""
+                _prev_lbl_text = _prev_label or "corrida anterior"
+
+                _narr_parts = []
+                _narr_parts.append(
+                    f"Comparativo de balance contra «{_prev_lbl_text}»"
+                    + (
+                        f" del {_prev_label[:10]}" if _prev_label and len(_prev_label) >= 10
+                        else ""
+                    )
+                    + ". A la velocidad operativa "
+                    f"({operating_rpm:.0f} rpm), el sensor pasó de "
+                    f"{float(_prev_amp):.3f} {_amp_unit_local} @ "
+                    f"{float(_prev_phase):.1f}° a "
+                    f"{_curr_amp_op:.3f} {_amp_unit_local} @ "
+                    f"{_curr_phase_op:.1f}°."
+                )
+                if _delta_amp_pct is not None:
+                    _narr_parts.append(
+                        f"La amplitud 1X varió en {_delta_amp:+.3f} "
+                        f"{_amp_unit_local} ({_delta_amp_pct:+.1f}%) y la "
+                        f"fase 1X muestra un shift de {_delta_phase:+.1f}° "
+                        f"(cambio circular de menor arco)."
+                    )
+
+                if _phase_class == "shift_critical":
+                    _narr_parts.append(
+                        "El shift de fase 1X supera los 60°, magnitud "
+                        "considerada crítica según API 684 / ISO 21940-12. "
+                        "Este patrón es consistente con un cambio severo de "
+                        "balance del rotor — posible pérdida de masa, crack "
+                        "estructural o daño en el rotor. Se recomienda "
+                        "verificación inmediata mediante parada controlada y "
+                        "análisis de orbits / forma de onda en cojinetes "
+                        "principales."
+                    )
+                elif _phase_class == "shift_major":
+                    _narr_parts.append(
+                        "El shift de fase 1X entre 30° y 60° es síntoma "
+                        "diagnóstico clásico de cambio de balance del rotor "
+                        "(API 684, ISO 21940-12). Se recomienda programar "
+                        "verificación de balance en próxima ventana de "
+                        "mantenimiento y revisar consistencia de fase entre "
+                        "arranques antes de cualquier intervención."
+                    )
+                elif _phase_class == "shift_minor":
+                    _narr_parts.append(
+                        "El shift de fase 1X entre 10° y 30° es menor pero "
+                        "merece vigilancia: monitorear evolución en próximas "
+                        "corridas para confirmar si se consolida una "
+                        "tendencia o es transitorio."
+                    )
+                elif _phase_class == "stable":
+                    _narr_parts.append(
+                        "El shift de fase 1X (<10°) está dentro del margen "
+                        "de variación normal y no sugiere cambio de balance."
+                    )
+
+                if _delta_amp_pct is not None:
+                    _amp_class = amplitude_change_classifier(_delta_amp_pct)
+                    if _amp_class in ("amp_critical", "amp_high"):
+                        _narr_parts.append(
+                            "El crecimiento de amplitud 1X acompañando al "
+                            "shift de fase refuerza el diagnóstico de "
+                            "degradación activa."
+                        )
+
+                _comp_narr = " ".join(_narr_parts)
+                if isinstance(text_diag, dict):
+                    text_diag["comparison_narrative"] = _comp_narr
+        except Exception:
+            pass
+
     fig = build_polar_figure(
         df=plot_df,
         meta=meta,
@@ -2000,6 +2234,10 @@ def render_polar_panel(
         operating_rpm=operating_rpm if use_rotordyn_pro else None,
         iso_thresholds=iso_thresholds_overlay,
         critical_speeds_pro=pro_overlay_criticals if pro_overlay_criticals else None,
+        prev_snapshot_amp=_prev_amp,
+        prev_snapshot_phase=_prev_phase,
+        prev_snapshot_label=_prev_label,
+        prev_snapshot_op_speed=_prev_op_speed,
     )
 
     st.plotly_chart(
@@ -2471,6 +2709,7 @@ def main() -> None:
             # render abajo (panel + PDF) lo puedan leer
             st.session_state["wm_polar_compare_snapshot_id"] = _selected_polar_cmp_id
             st.session_state["wm_polar_compare_skip_identical"] = bool(_polar_curr_readings)
+            st.session_state["wm_polar_compare_inst_id"] = _polar_inst_id
         elif _polar_hist_ok and not _polar_inst_id:
             st.caption(
                 "_(Activá una Asset Instance arriba para guardar histórico.)_"
