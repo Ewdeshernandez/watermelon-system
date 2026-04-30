@@ -1492,19 +1492,22 @@ def _set_active_instance(target_instance_id: str) -> None:
     """
     Callback del botón "Activar" en cada card del grid.
 
-    Hotfix 8: actualiza AMBAS keys porque están separadas:
-    - 'wm_active_instance_id' es la key persistente que get_active_instance_id()
-      lee desde otras páginas (no atada a ningún widget).
-    - 'wm_instance_select_library' es la key del selectbox del sidebar de
-      esta página específica; al setearla acá, el selectbox al
-      re-renderizarse en el próximo cycle se posiciona en la nueva activa.
+    Hotfix v2.6: setea la key persistente y TODAS las posibles keys
+    de widget de instance_selector que pueda haber en sesión. La
+    Machinery Library usa module_name="documents" pero otras páginas
+    pueden tener "polar", "bode", "tabular", etc. Sincronizamos todas
+    las que ya estén instanciadas para evitar que un selectbox quede
+    "pegado" en una página por la que pasamos antes.
 
     Los callbacks corren en una fase pre-render donde session_state
     se puede modificar libremente — incluso keys de widgets ya
     instanciados en el cycle anterior.
     """
     st.session_state["wm_active_instance_id"] = target_instance_id
-    st.session_state["wm_instance_select_library"] = target_instance_id
+    # Sincronizar todos los widgets de instance_selector ya instanciados
+    for k in list(st.session_state.keys()):
+        if isinstance(k, str) and k.startswith("wm_instance_select_"):
+            st.session_state[k] = target_instance_id
 
 
 def render_machinery_grid() -> None:

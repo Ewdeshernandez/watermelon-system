@@ -2531,13 +2531,71 @@ def main() -> None:
             if not _bode_curr_readings:
                 if not _bode_sensors_map:
                     st.caption(
-                        "_(No hay Sensor Map configurado para esta instancia.)_"
+                        "_(No hay Sensor Map configurado para esta instancia. "
+                        "Andá a Machinery Library a configurarlo.)_"
+                    )
+                elif not selected_ids:
+                    st.caption(
+                        "_(No hay CSVs Bode cargados todavía. Subilos arriba "
+                        "en 'Upload Bode CSV' y volvé.)_"
                     )
                 else:
-                    st.caption(
-                        "_(Ningún CSV Bode cargado matchea sensores del "
-                        "Sensor Map.)_"
+                    st.warning(
+                        f"⚠️ Hay {len(selected_ids)} CSV(s) Bode cargado(s) "
+                        f"pero ninguno matchea con los {len(_bode_sensors_map)} "
+                        f"sensores del Sensor Map de esta unidad."
                     )
+                    with st.expander("🔍 Diagnóstico — ver CSVs vs patterns"):
+                        st.caption(
+                            "El matcher usa el `csv_match_pattern` de cada "
+                            "sensor contra el Point name del CSV. Si los "
+                            "Point names del DCS no siguen la convención "
+                            "API 670 (3X/3Y/4X/4Y), editá los patterns en "
+                            "Machinery Library → Mapa de Sensores."
+                        )
+                        # Listar CSVs con sus Point names
+                        _diag_csv_rows = []
+                        for sid in selected_ids:
+                            it = id_to_item.get(sid)
+                            if it is None:
+                                continue
+                            m = it.get("meta") or {}
+                            _diag_csv_rows.append({
+                                "Archivo": it.get("file_name", ""),
+                                "Point": str(m.get("Point Name", "") or ""),
+                                "Variable": str(m.get("Variable", "") or ""),
+                                "Unit": str(m.get("Y-Axis Unit", "")
+                                            or m.get("Unit", "") or ""),
+                            })
+                        if _diag_csv_rows:
+                            st.markdown("**CSVs Bode cargados:**")
+                            st.dataframe(
+                                pd.DataFrame(_diag_csv_rows),
+                                width="stretch", hide_index=True,
+                            )
+                        # Listar sensores con sus patterns
+                        _diag_sensor_rows = []
+                        from core.sensor_map import sensor_label as _diag_slbl
+                        for s in _bode_sensors_map:
+                            _diag_sensor_rows.append({
+                                "Sensor": _diag_slbl(s),
+                                "Plano": s.get("plane_label", "") or "",
+                                "Tipo": s.get("sensor_type", ""),
+                                "Pattern": s.get("csv_match_pattern", "")
+                                           or "(vacío)",
+                            })
+                        if _diag_sensor_rows:
+                            st.markdown("**Sensores del mapa con sus patterns:**")
+                            st.dataframe(
+                                pd.DataFrame(_diag_sensor_rows),
+                                width="stretch", hide_index=True,
+                            )
+                        st.info(
+                            "💡 **Tip:** podés usar el wizard automático en "
+                            "**Machinery Library → Sugerir patterns desde "
+                            "CSVs cargados** para que el sistema proponga "
+                            "patterns que matcheen con tus CSVs reales."
+                        )
             else:
                 with st.expander("📸 Guardar snapshot Bode actual", expanded=False):
                     st.caption(
