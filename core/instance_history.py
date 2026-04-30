@@ -217,10 +217,22 @@ def delete_snapshot(instance_id: str, snapshot_id: str) -> bool:
 
 def get_previous_snapshot(
     instance_id: str, before_ts: Optional[str] = None,
+    skip_identical_to: Optional[pd.DataFrame] = None,
+    identical_tol_pct: float = 1.0,
 ) -> Optional[Dict[str, Any]]:
     """
     Devuelve el snapshot más reciente anterior a ``before_ts``.
     Si before_ts es None, devuelve el más reciente sin filtro.
+
+    Ciclo 16.2.1 — parametro skip_identical_to: si se pasa el
+    DataFrame de la corrida ACTUAL, los snapshots cuyas lecturas
+    sean esencialmente identicas a la actual (variacion media
+    de Overall <= identical_tol_pct%) se saltean. Esto evita el
+    caso comun donde el usuario guarda manualmente la corrida
+    actual y despues genera un PDF — antes el PDF comparaba
+    contra ese snapshot recien guardado y devolvia '8 estables'
+    obvio. Ahora el PDF saltea esos y compara contra la corrida
+    REALMENTE anterior.
     """
     snaps = list_snapshots(instance_id, limit=MAX_SNAPSHOTS_PER_INSTANCE)
     if not snaps:
@@ -229,7 +241,59 @@ def get_previous_snapshot(
         snaps = [s for s in snaps if s["timestamp"] < before_ts]
     if not snaps:
         return None
-    return load_snapshot(instance_id, snaps[0]["snapshot_id"])
+
+    # Iterar snapshots en orden cronologico inverso, devolviendo
+    # el primero que NO sea identico a la corrida actual.
+    for s in snaps:
+        snap = load_snapshot(instance_id, s["snapshot_id"])
+        if snap is None:
+            continue
+        if skip_identical_to is None:
+            return snap
+        if not _readings_are_identical(snap, skip_identical_to, identical_tol_pct):
+            return snap
+    return None
+
+
+def _readings_are_identical(
+    snapshot: Dict[str, Any],
+    current_df: pd.DataFrame,
+    tol_pct: float = 1.0,
+) -> bool:
+    """
+    Devuelve True si las lecturas del snapshot son esencialmente
+    identicas al current_df. Compara el Overall de cada sensor por
+    label; si la variacion media absoluta es menor a tol_pct%,
+    considera que es la misma corrida (el usuario la guardo y volvio
+    a generar el PDF inmediato).
+    """
+    if current_df is None or current_df.empty:
+        return False
+    snap_by_label = {
+        str(r.get("sensor_label", "")): _safe_float(r.get("overall"))
+        for r in snapshot.get("readings", [])
+    }
+    if not snap_by_label:
+        return False
+    diffs = []
+    for _, r in current_df.iterrows():
+        lbl = str(r.get("Label", ""))
+        if lbl not in snap_by_label:
+            continue
+        ov_curr = _safe_float(r.get("Overall"))
+        ov_snap = snap_by_label[lbl]
+        if ov_snap == 0:
+            # Si snap=0 y curr!=0 NO son iguales
+            if ov_curr != 0:
+                return False
+            continue
+        # Diferencia relativa
+        rel = abs(ov_curr - ov_snap) / abs(ov_snap) * 100.0
+        diffs.append(rel)
+    if not diffs:
+        return False
+    mean_diff = sum(diffs) / len(diffs)
+    return mean_diff <= tol_pct
 
 
 # ============================================================

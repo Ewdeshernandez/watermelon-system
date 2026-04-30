@@ -1739,7 +1739,13 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                     _hist_inst.sensors,
                     st.session_state.get("signals", {}) or {},
                 )
-                _prev_snap = get_previous_snapshot(sm_inst_id)
+                # Ciclo 16.2.1 — saltea snapshots cuyas lecturas son
+                # identicas a la corrida actual (caso: usuario guarda
+                # manualmente la corrida actual y despues genera el PDF).
+                _prev_snap = get_previous_snapshot(
+                    sm_inst_id,
+                    skip_identical_to=_curr_sev_df,
+                )
 
                 if _prev_snap is not None and _curr_sev_df is not None and not _curr_sev_df.empty:
                     cmp_df = compare_to_previous(_curr_sev_df, _prev_snap)

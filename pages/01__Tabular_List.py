@@ -1536,15 +1536,41 @@ try:
 
         # Selector de comparación
         if _existing_snaps:
-            _opts = [("__none__", "— Sin comparación —")] + [
-                (s["snapshot_id"],
-                 f"{s['corrida_label'][:30]} ({s['timestamp'][:10]})")
-                for s in _existing_snaps
-            ]
+            # Ciclo 16.2.1 — anotar snapshots que sean esencialmente la
+            # misma corrida que la actual (caso: usuario guarda manual y
+            # ya carga la sesion). Asi el default no cae sobre el snap
+            # recien guardado y muestra "todo estable" obvio.
+            try:
+                from core.instance_history import _readings_are_identical as _wm_is_ident
+            except Exception:
+                _wm_is_ident = None
+
+            _opts = [("__none__", "— Sin comparación —")]
+            _first_diff_idx = -1
+            for _i, s in enumerate(_existing_snaps):
+                _is_current = False
+                if _wm_is_ident is not None and _wm_severity_df is not None:
+                    try:
+                        _snap_full = load_snapshot(_hist_inst_id, s["snapshot_id"])
+                        if _snap_full is not None:
+                            _is_current = _wm_is_ident(_snap_full, _wm_severity_df, 1.0)
+                    except Exception:
+                        pass
+                _suffix = " · _(corrida actual)_" if _is_current else ""
+                _lbl = f"{s['corrida_label'][:30]} ({s['timestamp'][:10]}){_suffix}"
+                _opts.append((s["snapshot_id"], _lbl))
+                # Marcar el primer snapshot que NO es la corrida actual
+                # como default
+                if not _is_current and _first_diff_idx < 0:
+                    _first_diff_idx = _i + 1  # +1 por el "__none__" inicial
+
             _opt_keys = [k for k, _ in _opts]
             _opt_lbls = [l for _, l in _opts]
             _cmp_state_key = f"wm_cmp_select_{_hist_inst_id}"
-            _default_cmp_idx = 1 if len(_opts) > 1 else 0
+            # Default = primer snapshot DIFERENTE a la corrida actual
+            _default_cmp_idx = _first_diff_idx if _first_diff_idx > 0 else (
+                1 if len(_opts) > 1 else 0
+            )
             if _cmp_state_key in st.session_state and \
                st.session_state[_cmp_state_key] in _opt_keys:
                 _default_cmp_idx = _opt_keys.index(st.session_state[_cmp_state_key])
