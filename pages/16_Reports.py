@@ -2712,11 +2712,45 @@ def _extract_findings_from_items(current_items: List[Dict[str, Any]]) -> Dict[st
         "critical_speeds": [],    # {rpm, q, fig_title}
         "iso_zones": [],          # {zone, fig_title}
         "lift_off": [],           # {rpm, margin_pct, fig_title}
+        "trend_states": [],       # {status, headline, fig_title} — Ciclo 17.5.7
         "high_priority_actions": [],
         "n_figures": len(current_items),
     }
 
     for it in current_items:
+        # Ciclo 17.5.7 — Trend items tienen un campo estructurado
+        # `autodiagnostic` con {status, status_label, headline,
+        # prose, recommendations} y un `behavior_summary` con
+        # {top_classification}. Lo leemos antes del parsing por
+        # regex para que el Resumen Ejecutivo pueda escalar la
+        # severidad global cuando haya alarm/action o Strong
+        # change. Antes esto se perdía porque el extractor solo
+        # leía SCL/Polar/Bode/ISO.
+        if str(it.get("type", "")).lower() == "trends":
+            autodiag = it.get("autodiagnostic") or {}
+            status_str = str(autodiag.get("status") or "").lower()
+            behav = it.get("behavior_summary") or {}
+            top_class = str(behav.get("top_classification") or "")
+
+            if status_str in ("watch", "alarm", "action") or top_class == "Strong change":
+                findings["trend_states"].append({
+                    "status": status_str or "unknown",
+                    "headline": str(autodiag.get("headline") or "").strip(),
+                    "behavior": top_class,
+                    "fig_title": str(it.get("title") or ""),
+                })
+
+            # Si el autodiag dice action/alarm, levantamos high_priority_actions
+            # para que entren al cálculo de _global_severity sin tocar más código.
+            if status_str in ("alarm", "action"):
+                findings["high_priority_actions"].append({
+                    "text": (
+                        f"PRIORIDAD ALTA — {autodiag.get('headline','').strip()}"
+                        if autodiag.get("headline") else "PRIORIDAD ALTA — Trend en zona Atención/Acción"
+                    ),
+                    "fig_title": str(it.get("title") or ""),
+                })
+
         notes = (it.get("notes") or "")
         title = (it.get("title") or "")
         if not notes:
@@ -2848,6 +2882,14 @@ def _global_severity(findings: Dict[str, Any]) -> Tuple[str, str]:
         rank = max(rank, _SCL_SEVERITY_RANK.get(m["classification"], 0))
     for z in findings["iso_zones"]:
         rank = max(rank, _ISO_ZONE_RANK.get(z["zone"], 0))
+    # Ciclo 17.5.7 — Trend autodiag escala el severity global.
+    _TREND_STATUS_RANK = {
+        "ok": 0, "watch": 1, "alarm": 2, "action": 3,
+    }
+    for t in findings.get("trend_states", []) or []:
+        rank = max(rank, _TREND_STATUS_RANK.get(t.get("status", "ok"), 0))
+        if t.get("behavior") == "Strong change":
+            rank = max(rank, 2)  # Strong change → al menos ATENCIÓN
     if findings["high_priority_actions"]:
         rank = max(rank, 3)
 
@@ -2989,6 +3031,38 @@ def _compose_executive_summary(meta_dict: Dict[str, Any], findings: Dict[str, An
         hallazgos.append(
             f"los niveles de vibración se ubican en {zone_text} según ISO 20816"
         )
+
+    # Ciclo 17.5.7 — Trend autodiag findings al hallazgo principal
+    _trend_states = findings.get("trend_states", []) or []
+    if _trend_states:
+        _ts_rank = {"action": 3, "alarm": 2, "watch": 1, "ok": 0, "unknown": 0}
+        _worst_t = max(_trend_states, key=lambda t: _ts_rank.get(t.get("status", "ok"), 0))
+        _worst_status = _worst_t.get("status", "ok")
+        _worst_behavior = _worst_t.get("behavior", "")
+        _n_alarming = sum(1 for t in _trend_states if _ts_rank.get(t.get("status", "ok"), 0) >= 2)
+        _n_strong = sum(1 for t in _trend_states if t.get("behavior") == "Strong change")
+
+        if _worst_status == "action":
+            hallazgos.append(
+                "el análisis de tendencias reporta al menos una señal en zona "
+                "ACCIÓN REQUERIDA (umbral Danger superado) que demanda intervención inmediata"
+            )
+        elif _worst_status == "alarm":
+            hallazgos.append(
+                f"el análisis de tendencias reporta {_n_alarming} señal(es) en zona ATENCIÓN "
+                f"(umbral Warning superado) que requieren monitoreo intensivo"
+            )
+        elif _worst_status == "watch":
+            hallazgos.append(
+                "el análisis de tendencias muestra al menos una señal en zona de vigilancia "
+                "(85–100% del Warning), conviene aumentar la frecuencia de monitoreo"
+            )
+
+        if _n_strong > 0 and _worst_behavior == "Strong change":
+            hallazgos.append(
+                f"el detector de cambio de régimen identifica {_n_strong} transición(es) "
+                f"fuerte(s) de comportamiento entre la línea base y la corrida actual"
+            )
 
     if hallazgos:
         paragraphs.append(

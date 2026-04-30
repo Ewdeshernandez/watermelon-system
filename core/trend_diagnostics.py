@@ -100,6 +100,25 @@ def _classify_trend_behavior(values: pd.Series) -> Dict[str, Any]:
     elif slope_ratio >= 0.18 and direction == "down":
         classification = "progressive_decrease"
 
+    # Ciclo 17.5.7 — guardrail anti-contradicción.
+    # Si el cambio porcentual absoluto es >100% (la señal cambió
+    # más del doble entre primer y último valor), llamar a esto
+    # "estable" es claramente erróneo (caso reportado: arranque
+    # 0.025 → 1.8 mil pp ≈ 7088%). En esa situación la
+    # clasificación se promueve según la jerk/volatility.
+    if (
+        change_pct is not None
+        and abs(float(change_pct)) >= 100.0
+        and classification == "stable"
+    ):
+        if jerk_ratio > 0.15 or volatility_ratio > 0.12:
+            classification = "abrupt"
+        else:
+            classification = (
+                "progressive_increase" if direction == "up"
+                else "progressive_decrease"
+            )
+
     result.update(
         {
             "classification": classification,

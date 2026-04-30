@@ -2138,7 +2138,24 @@ def _compute_trend_health(
         out["status"] = "ok"
         out["status_label"] = "Sin umbrales"
 
-    # 3) Pendiente por linealizar contra tiempo (días)
+    # 3) Pendiente por linealizar contra tiempo (días) + forecast
+    #    Ciclo 17.5.7 — endurecemos la validez del forecast:
+    #
+    #    El usuario reportó "cruce de umbral proyectado en ~0 días"
+    #    cuando la corrida es un transient de arranque (data 2 horas,
+    #    7088% de variación, slope +45.9 mil pp/día). En ese régimen
+    #    el slope lineal NO representa una tendencia operacional —
+    #    extrapolarlo da números físicamente irreales.
+    #
+    #    Reglas de invalidación:
+    #      a) Ventana total < 24h → no hay base estadística para
+    #         proyectar a múltiples días. Suprimimos forecast.
+    #      b) Coeficiente de variación de la cola > 50% → cola
+    #         altamente inestable (transitorio o swing operacional);
+    #         el slope lineal no es representativo.
+    #      c) days_to_target < 0.5 días → físicamente irreal salvo
+    #         que la máquina esté en runaway. Suprimimos en lugar de
+    #         redondear a "0 días".
     try:
         # Tomar últimos 60 puntos para evitar dominancia de épocas viejas
         tail = s.tail(60).copy()
@@ -2148,6 +2165,31 @@ def _compute_trend_health(
             y_vals = tail.values
             slope, intercept = np.polyfit(x_days, y_vals, 1)
             out["slope_per_day"] = float(slope)
+
+            # ---------------------------------------------------
+            # Validar si el slope es proyectable como tendencia
+            # ---------------------------------------------------
+            # Ventana total de la serie completa (no solo cola)
+            try:
+                full_span_days = float(
+                    (s.index.max() - s.index.min()).total_seconds() / 86400.0
+                )
+            except Exception:
+                full_span_days = 0.0
+
+            # Coef. de variación de la cola (estabilidad)
+            try:
+                _tail_mean = float(np.mean(y_vals))
+                _tail_std = float(np.std(y_vals))
+                _cv = _tail_std / abs(_tail_mean) if abs(_tail_mean) > 1e-9 else float("inf")
+            except Exception:
+                _cv = float("inf")
+
+            forecast_is_meaningful = True
+            if full_span_days < 1.0:
+                forecast_is_meaningful = False
+            if _cv > 0.50:
+                forecast_is_meaningful = False
 
             # 4) Forecast: días hasta llegar a Warning (o Danger si ya
             # estamos sobre Warning)
@@ -2160,13 +2202,22 @@ def _compute_trend_health(
                 target_val = float(danger_value)
                 target_lbl = "danger"
 
-            if target_val is not None and slope > 1e-9:
+            if (
+                forecast_is_meaningful
+                and target_val is not None
+                and slope > 1e-9
+            ):
                 # último punto x en días
                 x_last = float((tail.index.max() - t0).total_seconds() / 86400.0)
                 y_last = float(slope * x_last + intercept)
                 if y_last < target_val:
                     days_to_target = (target_val - y_last) / slope
-                    if math.isfinite(days_to_target) and days_to_target > 0:
+                    # Físicamente irreal: cruce en menos de medio día
+                    # con datos limitados. Suprimimos.
+                    if (
+                        math.isfinite(days_to_target)
+                        and days_to_target >= 0.5
+                    ):
                         out["forecast_days"] = float(days_to_target)
                         out["forecast_target"] = target_lbl
     except Exception:
@@ -2233,9 +2284,15 @@ def _draw_health_chip(
         else:
             arrow = "↑" if slope > 0 else "↓"
             bits.append(f"pendiente {arrow} {abs(slope):.3g}/día")
+    # Ciclo 17.5.7 — solo mostramos forecast cuando es válido
+    # (>= 0.5 días, ventana >= 24h, varianza estable). El
+    # _compute_trend_health ya filtra esos casos a None.
     if forecast_days is not None and forecast_target is not None:
-        if forecast_days < 365 * 5:
-            bits.append(f"~{forecast_days:.0f} días → {forecast_target}")
+        if 0.5 <= forecast_days < 365 * 5:
+            if forecast_days < 1.5:
+                bits.append(f"~1 día → {forecast_target}")
+            else:
+                bits.append(f"~{forecast_days:.0f} días → {forecast_target}")
 
     info_text = " · ".join(bits)
     if info_text:
@@ -2390,26 +2447,47 @@ def build_trend_autodiagnostic(
                 f"asentamiento térmico o redistribución de carga del rotor."
             )
 
+        # Ciclo 17.5.7 — solo emitimos forecast si _compute_trend_health
+        # lo validó (>= 0.5 días, ventana >= 24h, varianza estable).
+        # Si no es válido, agregamos una caveat explícita en lugar de
+        # mostrar "0 días" o un horizonte inventado.
         if forecast_days is not None and forecast_target is not None:
+            _fcast_int = max(1, int(round(float(forecast_days))))
             if forecast_days < 14:
                 par2.append(
                     f"Si la pendiente actual se mantiene, el umbral {forecast_target} "
-                    f"se alcanzaría en aproximadamente {forecast_days:.0f} días — "
+                    f"se alcanzaría en aproximadamente {_fcast_int} día(s) — "
                     f"horizonte corto que justifica intervención preventiva."
                 )
             elif forecast_days < 60:
                 par2.append(
                     f"Manteniendo la pendiente actual, el umbral {forecast_target} "
-                    f"sería alcanzado en aproximadamente {forecast_days:.0f} días, "
+                    f"sería alcanzado en aproximadamente {_fcast_int} días, "
                     f"lo que permite planificar una intervención dentro del próximo "
                     f"ciclo de mantenimiento."
                 )
             elif forecast_days < 365:
                 par2.append(
                     f"El forecast lineal sitúa el cruce del umbral {forecast_target} "
-                    f"a unos {forecast_days:.0f} días — horizonte cómodo, pero "
+                    f"a unos {_fcast_int} días — horizonte cómodo, pero "
                     f"conviene reevaluar la pendiente con la próxima corrida."
                 )
+        elif (
+            isinstance(slope, (int, float))
+            and math.isfinite(slope)
+            and abs(slope) > 1e-9
+        ):
+            # Hay pendiente real pero el forecast fue invalidado por el
+            # validador. Lo decimos honestamente en lugar de inventar
+            # una proyección.
+            par2.append(
+                "La ventana actual es demasiado corta o la cola es "
+                "demasiado inestable como para emitir un forecast lineal "
+                "confiable a Warning/Danger; se sugiere repetir la "
+                "medición en condiciones operacionales estables y con "
+                "al menos 24 horas de datos para construir una "
+                "proyección representativa."
+            )
 
     # -------------------------------------------------------------
     # 3) Anomalías puntuales
@@ -2534,8 +2612,9 @@ def build_trend_autodiagnostic(
         recs.append("Conservar la línea base actual como referencia post-mantenimiento.")
 
     if forecast_days is not None and forecast_target is not None and forecast_days < 60:
+        _fcast_rec = max(1, int(round(float(forecast_days))))
         recs.append(
-            f"Programar inspección antes de los {int(forecast_days)} días de forecast "
+            f"Programar inspección antes de los {_fcast_rec} día(s) de forecast "
             f"al cruce del umbral {forecast_target}."
         )
 
@@ -2557,10 +2636,29 @@ def build_trend_autodiagnostic(
             f"Estado: VIGILANCIA. {metric_key} consume el 85–100% del Warning."
         ).strip()
     elif status == "ok":
-        if isinstance(slope, (int, float)) and math.isfinite(slope) and slope > 0 and forecast_days is not None and forecast_days < 90:
+        if (
+            isinstance(slope, (int, float))
+            and math.isfinite(slope)
+            and slope > 0
+            and forecast_days is not None
+            and forecast_days < 90
+        ):
+            _fcast_hl = max(1, int(round(float(forecast_days))))
             out["headline"] = (
                 f"Estado: NORMAL con tendencia ascendente; cruce de umbral "
-                f"proyectado en ~{forecast_days:.0f} días."
+                f"proyectado en ~{_fcast_hl} día(s)."
+            )
+        elif (
+            isinstance(slope, (int, float))
+            and math.isfinite(slope)
+            and slope > 0
+            and forecast_days is None
+        ):
+            # Hay pendiente positiva pero el forecast fue invalidado
+            # (ventana <24h o cola inestable). Headline honesto.
+            out["headline"] = (
+                "Estado: NORMAL con tendencia ascendente; ventana actual "
+                "insuficiente para emitir un forecast confiable."
             )
         else:
             out["headline"] = "Estado: NORMAL. Señal dentro de la zona operacional sin tendencia preocupante."
