@@ -32,6 +32,7 @@ from core.auth import require_login, render_user_menu
 from core.report_state import (
     clear_report_state,
     delete_named_report_draft,
+    ensure_report_state_loaded,
     list_report_drafts,
     load_named_report_draft,
     load_report_state,
@@ -296,20 +297,21 @@ DEFAULT_REPORT_META = {
     "schematic_instance_id": "",  # id de la instancia para resolver el doc
 }
 
-if "report_state_loaded" not in st.session_state:
-    persisted_state = load_report_state()
-
-    persisted_items = persisted_state.get("items", [])
-    persisted_meta = persisted_state.get("meta", {})
-
-    st.session_state["report_items"] = persisted_items if isinstance(persisted_items, list) else []
-    merged_meta = dict(DEFAULT_REPORT_META)
-    if isinstance(persisted_meta, dict):
-        merged_meta.update(persisted_meta)
-    if not merged_meta.get("report_date"):
-        merged_meta["report_date"] = TODAY_STR
-    st.session_state["report_meta"] = merged_meta
-    st.session_state["report_state_loaded"] = True
+# Ciclo 17.5.6 — ahora delegamos en ensure_report_state_loaded()
+# que respeta items en memoria (bug histórico: si un módulo
+# añadía items antes de visitar Reports, esta página los
+# sobrescribía con los del disco). El helper compartido hace
+# merge correcto.
+ensure_report_state_loaded()
+# Asegurar que el meta tenga los defaults del módulo Reports
+# (campos como report_date) sin pisar lo que ya había.
+_loaded_meta = st.session_state.get("report_meta", {}) or {}
+_merged_meta = dict(DEFAULT_REPORT_META)
+if isinstance(_loaded_meta, dict):
+    _merged_meta.update(_loaded_meta)
+if not _merged_meta.get("report_date"):
+    _merged_meta["report_date"] = TODAY_STR
+st.session_state["report_meta"] = _merged_meta
 
 if "report_items" not in st.session_state:
     st.session_state["report_items"] = []

@@ -19,6 +19,7 @@ from core.auth import require_login, render_user_menu
 from core.csv_common import decode_csv_text, find_header_line, parse_metadata_block
 from core.instance_selector import render_instance_selector
 from core.instance_state import get_instance as _get_instance_for_threshold
+from core.report_state import append_report_item_and_persist, ensure_report_state_loaded
 from core.sensor_map import resolve_sensor_for_point
 from core.trend_diagnostics import build_trend_report_narrative as build_trend_report_narrative_core
 from core.trend_history import (
@@ -3941,7 +3942,7 @@ def queue_trend_to_report(
             _bits: List[str] = []
             _headline = _autodiag_for_pdf.get("headline", "")
             if _headline:
-                _bits.append(f"AUTODIAGNÓSTICO EJECUTIVO\n{_headline}")
+                _bits.append(f"Diagnóstico ejecutivo: {_headline}")
 
             for _para in _autodiag_for_pdf.get("prose", []) or []:
                 if _para and _para.strip():
@@ -4114,7 +4115,7 @@ def queue_trend_to_report(
         },
         "threshold_source": dict(st.session_state.get("wm_tr_threshold_source", {}) or {}),
     }
-    st.session_state.report_items.append(item_payload)
+    append_report_item_and_persist(item_payload)
     st.session_state["wm_tr_last_report_debug"] = {
         "notes_len": len(str(narrative or "")),
         "report_items_count": len(st.session_state.report_items),
@@ -4613,43 +4614,24 @@ def render_trend_panel(
                 danger_value=float(danger_value) if (danger_enabled and danger_value is not None) else None,
                 operational_records=panel_operational_records,
             )
-            _status = _autodiag.get("status", "unknown")
-            _color_map = {
-                "ok":      "#10b981",
-                "watch":   "#0ea5e9",
-                "alarm":   "#f59e0b",
-                "action":  "#ef4444",
-                "unknown": "#9ca3af",
-            }
-            _bg_map = {
-                "ok":      "#ecfdf5",
-                "watch":   "#e0f2fe",
-                "alarm":   "#fef3c7",
-                "action":  "#fee2e2",
-                "unknown": "#f1f5f9",
-            }
-            _border = _color_map.get(_status, _color_map["unknown"])
-            _bg = _bg_map.get(_status, _bg_map["unknown"])
             _headline = _autodiag.get("headline", "")
-            st.markdown(
-                f"<div style='background:{_bg};border-left:4px solid {_border};"
-                f"padding:14px 18px;border-radius:8px;margin:14px 0 10px 0;'>"
-                f"<div style='font-weight:700;font-size:1.02rem;color:#111827;'>"
-                f"🩺 Autodiagnóstico ejecutivo</div>"
-                f"<div style='font-size:0.95rem;color:#1f2937;margin-top:4px;'>"
-                f"{_headline}</div>"
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-            for _para in _autodiag.get("prose", []):
-                st.write(_para)
+            # Estilo sobrio alineado con Polar / Bode / SCL: header
+            # markdown simple, headline en bold, prosa con st.write,
+            # recomendaciones como prosa enumerada. Sin chips de
+            # color, sin emojis grandes, sin border-left.
+            st.markdown("### Diagnóstico ejecutivo")
+            if _headline:
+                st.markdown(f"**{_headline}**")
+            for _para in _autodiag.get("prose", []) or []:
+                if _para and str(_para).strip():
+                    st.write(_para)
             _recs = _autodiag.get("recommendations", []) or []
             if _recs:
-                st.markdown("**Acciones recomendadas:**")
+                st.write("Acciones recomendadas:")
                 for _i, _r in enumerate(_recs, 1):
-                    st.markdown(f"{_i}. {_r}")
+                    st.write(f"{_i}. {_r}")
         except Exception as _exc:
-            st.caption(f"Autodiagnóstico no disponible ({_exc})")
+            st.caption(f"Diagnóstico no disponible ({_exc})")
 
     if panel_records:
         anomaly_summary = build_panel_anomaly_summary(panel_records, metric_key)

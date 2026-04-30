@@ -12,6 +12,7 @@ import streamlit as st
 
 from core.auth import require_login, render_user_menu
 from core.orbit import compute_orbit
+from core.report_state import append_report_item_and_persist
 
 st.set_page_config(page_title="Watermelon System | Orbit Analysis", layout="wide")
 
@@ -655,7 +656,7 @@ def build_orbit_pairs(signals: dict) -> List[OrbitPair]:
 
 
 def queue_orbit_to_report(pair: OrbitPair, fig: go.Figure, panel_title: str, result) -> None:
-    st.session_state.report_items.append(
+    append_report_item_and_persist(
         {
             "id": make_export_state_key(
                 [

@@ -15,6 +15,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.auth import require_login, render_user_menu
+from core.report_state import append_report_item_and_persist
 from core.spectrum_diagnostics import (
     evaluate_spectrum_diagnostic,
     build_spectrum_report_notes,
@@ -1834,7 +1835,7 @@ def queue_spectrum_to_report(
     image_bytes: Optional[bytes] = None,
     report_notes: str = "",
 ) -> None:
-    st.session_state.report_items.append(
+    append_report_item_and_persist(
         {
             "id": make_export_state_key(
                 [
@@ -2637,7 +2638,7 @@ def queue_compare_to_report(
     if "report_items" not in st.session_state:
         st.session_state.report_items = []
 
-    st.session_state.report_items.append(
+    append_report_item_and_persist(
         {
             "id": make_export_state_key(
                 [
@@ -3013,7 +3014,7 @@ def queue_trend_to_report(
     last_record = trend_records[-1]
     trend_image_bytes = _build_trend_image(trend_fig)
 
-    st.session_state.report_items.append(
+    append_report_item_and_persist(
         {
             "id": make_export_state_key(
                 [
