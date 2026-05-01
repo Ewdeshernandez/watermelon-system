@@ -16,6 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from core.auth import require_login, render_user_menu
 from core.module_patterns import helper_card
+from core.report_state import append_report_item_and_persist
 from core.tabular_diagnostics import evaluate_tabular_diagnostic, build_tabular_report_notes
 
 st.set_page_config(page_title="Watermelon System | Tabular List", layout="wide")
@@ -890,7 +891,7 @@ def queue_tabular_to_report(
 ) -> None:
     item_id = f"report_tabular_{sample_record.machine}_{sample_record.point}_{total_rows}_{len(st.session_state.report_items)}"
 
-    st.session_state.report_items.append(
+    append_report_item_and_persist(
         {
             "id": item_id,
             "type": "tabular",

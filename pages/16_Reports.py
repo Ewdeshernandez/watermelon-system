@@ -32,6 +32,7 @@ from core.auth import require_login, render_user_menu
 from core.report_state import (
     clear_report_state,
     delete_named_report_draft,
+    ensure_report_state_loaded,
     list_report_drafts,
     load_named_report_draft,
     load_report_state,
@@ -296,20 +297,21 @@ DEFAULT_REPORT_META = {
     "schematic_instance_id": "",  # id de la instancia para resolver el doc
 }
 
-if "report_state_loaded" not in st.session_state:
-    persisted_state = load_report_state()
-
-    persisted_items = persisted_state.get("items", [])
-    persisted_meta = persisted_state.get("meta", {})
-
-    st.session_state["report_items"] = persisted_items if isinstance(persisted_items, list) else []
-    merged_meta = dict(DEFAULT_REPORT_META)
-    if isinstance(persisted_meta, dict):
-        merged_meta.update(persisted_meta)
-    if not merged_meta.get("report_date"):
-        merged_meta["report_date"] = TODAY_STR
-    st.session_state["report_meta"] = merged_meta
-    st.session_state["report_state_loaded"] = True
+# Ciclo 17.5.6 — ahora delegamos en ensure_report_state_loaded()
+# que respeta items en memoria (bug histórico: si un módulo
+# añadía items antes de visitar Reports, esta página los
+# sobrescribía con los del disco). El helper compartido hace
+# merge correcto.
+ensure_report_state_loaded()
+# Asegurar que el meta tenga los defaults del módulo Reports
+# (campos como report_date) sin pisar lo que ya había.
+_loaded_meta = st.session_state.get("report_meta", {}) or {}
+_merged_meta = dict(DEFAULT_REPORT_META)
+if isinstance(_loaded_meta, dict):
+    _merged_meta.update(_loaded_meta)
+if not _merged_meta.get("report_date"):
+    _merged_meta["report_date"] = TODAY_STR
+st.session_state["report_meta"] = _merged_meta
 
 if "report_items" not in st.session_state:
     st.session_state["report_items"] = []
@@ -1173,21 +1175,50 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     # Antes, si estaba vacio, se OMITIA la seccion entera y el reporte
     # llegaba al cliente sin elevator pitch. Eso es peor que un draft.
     executive_text = (meta.get("executive_summary") or "").strip()
-    if not executive_text and items:
+
+    # Ciclo 17.5.8 — recomputar severidad LIVE en cada generación
+    # de PDF. Antes el badge se extraía del texto cacheado en meta
+    # (`for known in ...: if known in executive_text`), lo que dejaba
+    # la severidad pegada al draft viejo aunque el usuario hubiera
+    # añadido figuras nuevas (caso reportado: Trend con Strong change
+    # llegaba al PDF pero el Resumen Ejecutivo seguía diciendo
+    # "CONDICIÓN ACEPTABLE" porque la prosa cached era previa a la
+    # adición del item).
+    severity_live = ""
+    severity_live_color = ""
+    if items:
+        try:
+            _findings_live = _extract_findings_from_items(items)
+            severity_live, severity_live_color = _global_severity(_findings_live)
+        except Exception:
+            severity_live = ""
+
+    # Si el draft cached menciona una severidad distinta a la live,
+    # el draft está stale → regeneramos automáticamente para que la
+    # prosa se alinee. Preservamos la edición manual cuando severidad
+    # cached coincide con la live (asumimos que el usuario sigue OK
+    # con la conclusión).
+    cached_severity = ""
+    for known in ("CRÍTICA", "ACCIÓN REQUERIDA", "ATENCIÓN", "VIGILANCIA", "CONDICIÓN ACEPTABLE"):
+        if executive_text and known in executive_text:
+            cached_severity = known
+            break
+
+    needs_redraft = bool(items) and (
+        not executive_text
+        or (severity_live and cached_severity and severity_live != cached_severity)
+    )
+    if needs_redraft:
         try:
             executive_text = (_autodraft_executive_summary(meta, items) or "").strip()
         except Exception:
-            executive_text = ""
+            pass
+
     if executive_text:
         story.append(Paragraph("RESUMEN EJECUTIVO", styles["WMTOC1"]))
 
-        # Cinta de severidad: una franja con estado global y color (si se puede
-        # detectar desde el primer párrafo del resumen). Si no, omitida.
-        severity_label = ""
-        for known in ("CRÍTICA", "ACCIÓN REQUERIDA", "ATENCIÓN", "VIGILANCIA", "CONDICIÓN ACEPTABLE"):
-            if known in executive_text:
-                severity_label = known
-                break
+        # Cinta de severidad: usamos SIEMPRE la live (live wins).
+        severity_label = severity_live or cached_severity
         if severity_label:
             color_map = {
                 "CRÍTICA": "#dc2626",
@@ -2710,11 +2741,45 @@ def _extract_findings_from_items(current_items: List[Dict[str, Any]]) -> Dict[st
         "critical_speeds": [],    # {rpm, q, fig_title}
         "iso_zones": [],          # {zone, fig_title}
         "lift_off": [],           # {rpm, margin_pct, fig_title}
+        "trend_states": [],       # {status, headline, fig_title} — Ciclo 17.5.7
         "high_priority_actions": [],
         "n_figures": len(current_items),
     }
 
     for it in current_items:
+        # Ciclo 17.5.7 — Trend items tienen un campo estructurado
+        # `autodiagnostic` con {status, status_label, headline,
+        # prose, recommendations} y un `behavior_summary` con
+        # {top_classification}. Lo leemos antes del parsing por
+        # regex para que el Resumen Ejecutivo pueda escalar la
+        # severidad global cuando haya alarm/action o Strong
+        # change. Antes esto se perdía porque el extractor solo
+        # leía SCL/Polar/Bode/ISO.
+        if str(it.get("type", "")).lower() == "trends":
+            autodiag = it.get("autodiagnostic") or {}
+            status_str = str(autodiag.get("status") or "").lower()
+            behav = it.get("behavior_summary") or {}
+            top_class = str(behav.get("top_classification") or "")
+
+            if status_str in ("watch", "alarm", "action") or top_class == "Strong change":
+                findings["trend_states"].append({
+                    "status": status_str or "unknown",
+                    "headline": str(autodiag.get("headline") or "").strip(),
+                    "behavior": top_class,
+                    "fig_title": str(it.get("title") or ""),
+                })
+
+            # Si el autodiag dice action/alarm, levantamos high_priority_actions
+            # para que entren al cálculo de _global_severity sin tocar más código.
+            if status_str in ("alarm", "action"):
+                findings["high_priority_actions"].append({
+                    "text": (
+                        f"PRIORIDAD ALTA — {autodiag.get('headline','').strip()}"
+                        if autodiag.get("headline") else "PRIORIDAD ALTA — Trend en zona Atención/Acción"
+                    ),
+                    "fig_title": str(it.get("title") or ""),
+                })
+
         notes = (it.get("notes") or "")
         title = (it.get("title") or "")
         if not notes:
@@ -2846,6 +2911,14 @@ def _global_severity(findings: Dict[str, Any]) -> Tuple[str, str]:
         rank = max(rank, _SCL_SEVERITY_RANK.get(m["classification"], 0))
     for z in findings["iso_zones"]:
         rank = max(rank, _ISO_ZONE_RANK.get(z["zone"], 0))
+    # Ciclo 17.5.7 — Trend autodiag escala el severity global.
+    _TREND_STATUS_RANK = {
+        "ok": 0, "watch": 1, "alarm": 2, "action": 3,
+    }
+    for t in findings.get("trend_states", []) or []:
+        rank = max(rank, _TREND_STATUS_RANK.get(t.get("status", "ok"), 0))
+        if t.get("behavior") == "Strong change":
+            rank = max(rank, 2)  # Strong change → al menos ATENCIÓN
     if findings["high_priority_actions"]:
         rank = max(rank, 3)
 
@@ -2893,16 +2966,19 @@ def _compose_executive_summary(meta_dict: Dict[str, Any], findings: Dict[str, An
         components.append(f"{n_crit} detección{'es' if n_crit != 1 else ''} de velocidades críticas")
     if n_mig:
         components.append(f"{n_mig} comparativ{'os' if n_mig != 1 else 'o'} de migración multi-fecha")
-    composition_clause = ", ".join(components) if components else f"{n_fig} figuras de análisis"
+    # Ciclo 17.5.8 — pluralización correcta de "figura" / "figuras"
+    _fig_word = "figura" if n_fig == 1 else "figuras"
+    composition_clause = ", ".join(components) if components else f"{n_fig} {_fig_word} de análisis"
 
     paragraphs.append(
         f"El presente reporte sintetiza la condición rotodinámica del "
-        f"{asset_clause} a partir de {n_fig} figuras de análisis adquiridas "
-        f"mediante el sistema de monitoreo en línea y remoto Watermelon System, "
-        f"incluyendo {composition_clause}. La evaluación combinada de los "
-        f"hallazgos según los criterios técnicos aplicables (API 670 / API 684 "
-        f"para análisis rotodinámico, ISO 20816 para severidad de vibración) "
-        f"arroja una clasificación global de {severity_label}."
+        f"{asset_clause} a partir de {n_fig} {_fig_word} de análisis adquirida"
+        f"{'s' if n_fig != 1 else ''} mediante el sistema de monitoreo en línea "
+        f"y remoto Watermelon System, incluyendo {composition_clause}. La "
+        f"evaluación combinada de los hallazgos según los criterios técnicos "
+        f"aplicables (API 670 / API 684 para análisis rotodinámico, ISO 20816 "
+        f"para severidad de vibración) arroja una clasificación global de "
+        f"{severity_label}."
     )
 
     # Bloque 2: hallazgos principales
@@ -2987,6 +3063,38 @@ def _compose_executive_summary(meta_dict: Dict[str, Any], findings: Dict[str, An
         hallazgos.append(
             f"los niveles de vibración se ubican en {zone_text} según ISO 20816"
         )
+
+    # Ciclo 17.5.7 — Trend autodiag findings al hallazgo principal
+    _trend_states = findings.get("trend_states", []) or []
+    if _trend_states:
+        _ts_rank = {"action": 3, "alarm": 2, "watch": 1, "ok": 0, "unknown": 0}
+        _worst_t = max(_trend_states, key=lambda t: _ts_rank.get(t.get("status", "ok"), 0))
+        _worst_status = _worst_t.get("status", "ok")
+        _worst_behavior = _worst_t.get("behavior", "")
+        _n_alarming = sum(1 for t in _trend_states if _ts_rank.get(t.get("status", "ok"), 0) >= 2)
+        _n_strong = sum(1 for t in _trend_states if t.get("behavior") == "Strong change")
+
+        if _worst_status == "action":
+            hallazgos.append(
+                "el análisis de tendencias reporta al menos una señal en zona "
+                "ACCIÓN REQUERIDA (umbral Danger superado) que demanda intervención inmediata"
+            )
+        elif _worst_status == "alarm":
+            hallazgos.append(
+                f"el análisis de tendencias reporta {_n_alarming} señal(es) en zona ATENCIÓN "
+                f"(umbral Warning superado) que requieren monitoreo intensivo"
+            )
+        elif _worst_status == "watch":
+            hallazgos.append(
+                "el análisis de tendencias muestra al menos una señal en zona de vigilancia "
+                "(85–100% del Warning), conviene aumentar la frecuencia de monitoreo"
+            )
+
+        if _n_strong > 0 and _worst_behavior == "Strong change":
+            hallazgos.append(
+                f"el detector de cambio de régimen identifica {_n_strong} transición(es) "
+                f"fuerte(s) de comportamiento entre la línea base y la corrida actual"
+            )
 
     if hallazgos:
         paragraphs.append(

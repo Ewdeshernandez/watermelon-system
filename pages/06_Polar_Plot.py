@@ -36,6 +36,7 @@ from core.diagnostics import (
 from core.module_patterns import export_report_row, helper_card, panel_card
 from core.profile_state import render_profile_selector  # legacy compat
 from core.instance_selector import render_instance_selector
+from core.report_state import append_report_item_and_persist
 from core.rotordynamics import (
     detect_critical_speeds,
     evaluate_api684_margin,
@@ -1146,7 +1147,7 @@ def queue_polar_to_report(
     image_bytes: Optional[bytes] = None,
 ) -> None:
     ensure_report_state()
-    st.session_state.report_items.append(
+    append_report_item_and_persist(
         {
             "id": f"report-polar-{meta.get('Machine Name','')}-{meta.get('Point Name','')}-{title}",
             "type": "polar",
@@ -1931,7 +1932,7 @@ def render_polar_compare_section(
     with c1:
         if st.button("Enviar comparativo Polar a reporte", key="wm_polar_compare_report_btn"):
             ensure_report_state()
-            st.session_state.report_items.append(
+            append_report_item_and_persist(
                 {
                     "type": "polar_compare",
                     "title": "Polar Plot · Comparación multi-fecha",

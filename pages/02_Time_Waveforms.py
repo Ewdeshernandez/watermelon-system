@@ -14,6 +14,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from core.auth import require_login, render_user_menu
+from core.report_state import append_report_item_and_persist
 from core.waveform_diagnostics import (
     generate_waveform_diagnostic,
     build_waveform_report_notes,
@@ -1175,7 +1176,7 @@ if not records_all:
 
 
 def queue_waveform_to_report(record: SignalRecord, fig: go.Figure, panel_title: str, text_diag: Dict[str, str], image_bytes: Optional[bytes] = None) -> None:
-    st.session_state.report_items.append(
+    append_report_item_and_persist(
         {
             "id": make_export_state_key(
                 [

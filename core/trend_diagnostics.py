@@ -100,6 +100,25 @@ def _classify_trend_behavior(values: pd.Series) -> Dict[str, Any]:
     elif slope_ratio >= 0.18 and direction == "down":
         classification = "progressive_decrease"
 
+    # Ciclo 17.5.7 — guardrail anti-contradicción.
+    # Si el cambio porcentual absoluto es >100% (la señal cambió
+    # más del doble entre primer y último valor), llamar a esto
+    # "estable" es claramente erróneo (caso reportado: arranque
+    # 0.025 → 1.8 mil pp ≈ 7088%). En esa situación la
+    # clasificación se promueve según la jerk/volatility.
+    if (
+        change_pct is not None
+        and abs(float(change_pct)) >= 100.0
+        and classification == "stable"
+    ):
+        if jerk_ratio > 0.15 or volatility_ratio > 0.12:
+            classification = "abrupt"
+        else:
+            classification = (
+                "progressive_increase" if direction == "up"
+                else "progressive_decrease"
+            )
+
     result.update(
         {
             "classification": classification,
@@ -157,12 +176,28 @@ def _build_single_trend_narrative_from_df(
     start_ts = safe_datetime(df["x"].iloc[0])
     end_ts = safe_datetime(df["x"].iloc[-1])
 
+    # Ciclo 17.5.8 — variación total: cuando el valor inicial es ~0
+    # (caso de arranque desde reposo) safe_percent_change devuelve
+    # None y antes salía "variación total —%". Ahora si la pendiente
+    # porcentual no es computable, expresamos la variación absoluta.
+    _init_val = analysis.get("initial_value")
+    _final_val = analysis.get("final_value")
+    _change_pct = analysis.get("change_pct")
+    if _change_pct is not None:
+        _variation_text = f"variación total {format_number(_change_pct, 2)}%"
+    else:
+        try:
+            _delta = float(_final_val) - float(_init_val)
+            _variation_text = f"variación absoluta {format_number(_delta, 3)} {unit}".rstrip()
+        except Exception:
+            _variation_text = "variación total no computable (valor inicial cercano a cero)"
+
     base = (
         f"{point_name} — ventana analizada desde {pretty_date(start_ts)} {pretty_time(start_ts)} "
         f"hasta {pretty_date(end_ts)} {pretty_time(end_ts)}, con {sample_count} muestras válidas. "
-        f"Valor inicial {format_number(analysis.get('initial_value'), 3)} {unit}, "
-        f"valor final {format_number(analysis.get('final_value'), 3)} {unit}, "
-        f"variación total {format_number(analysis.get('change_pct'), 2)}%."
+        f"Valor inicial {format_number(_init_val, 3)} {unit}, "
+        f"valor final {format_number(_final_val, 3)} {unit}, "
+        f"{_variation_text}."
     )
 
     classification = analysis.get("classification")

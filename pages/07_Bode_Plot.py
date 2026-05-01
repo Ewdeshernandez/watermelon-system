@@ -35,6 +35,7 @@ from core.diagnostics import (
 )
 from core.profile_state import render_profile_selector  # legacy compat
 from core.instance_selector import render_instance_selector
+from core.report_state import append_report_item_and_persist
 from core.rotordynamics import (
     detect_critical_speeds,
     evaluate_api684_margin,
@@ -1124,7 +1125,7 @@ def queue_bode_to_report(
     if image_bytes is None:
         image_bytes = build_export_png_bytes(fig, text_diag)[0]
 
-    st.session_state.report_items.append(
+    append_report_item_and_persist(
         {
             "id": f"report-bode-{meta.get('Machine Name','')}-{meta.get('Point Name','')}-{title}",
             "type": "bode",
@@ -1262,7 +1263,7 @@ def render_bode_compare_section(
 
     if st.button("Enviar comparativo Bode a reporte", key="wm_bode_compare_report_btn"):
         ensure_report_state()
-        st.session_state.report_items.append(
+        append_report_item_and_persist(
             {
                 "type": "bode_compare",
                 "title": "Bode Plot · Comparación multi-fecha",
@@ -2252,7 +2253,7 @@ def render_bode_compare_section(
     with c1:
         if st.button("Enviar comparativo Bode a reporte", key="wm_bode_compare_report_btn"):
             ensure_report_state()
-            st.session_state.report_items.append({
+            append_report_item_and_persist({
                 "type": "bode_compare",
                 "title": "Bode Plot · Comparación multi-fecha",
                 "notes": notes,
