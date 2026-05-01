@@ -2118,17 +2118,47 @@ def _compute_trend_health(
     out["latest_value"] = float(s.iloc[-1])
 
     # 2) Clasificar status según warning/danger
-    latest = out["latest_value"]
+    #
+    # Ciclo 17.5.9 — antes el chip se computaba SOLO sobre
+    # latest_value (último sample), lo que daba "Normal" cuando el
+    # último punto estaba debajo de Warning aunque la ventana tuviera
+    # múltiples picos sobre Danger. Reportado por el usuario:
+    # "aparece Normal si esta arriba los datos de la alarma".
+    #
+    # Fix: clasificar por el WORST de la ventana reciente (último
+    # 7 días o últimos 100 samples si la ventana es densa). Si
+    # cualquier punto reciente cruza Danger → action; cualquiera
+    # cruza Warning → alarm. La latest sigue siendo lo que se
+    # reporta como número, pero el status refleja el peor reciente.
     has_warning = warning_value is not None and math.isfinite(float(warning_value))
     has_danger = danger_value is not None and math.isfinite(float(danger_value))
 
-    if has_danger and latest >= float(danger_value):
+    # Ventana reciente para clasificación
+    try:
+        _last_ts = pd.Timestamp(s.index.max())
+        _recent_cutoff = _last_ts - pd.Timedelta(days=7)
+        _recent = s[s.index >= _recent_cutoff]
+        if len(_recent) < 30 and len(s) > 30:
+            _recent = s.tail(min(100, len(s)))
+        if len(_recent) == 0:
+            _recent = s
+        recent_max = float(_recent.max())
+    except Exception:
+        recent_max = float(s.max())
+
+    out["recent_max_value"] = recent_max
+    latest = out["latest_value"]
+
+    if has_danger and recent_max >= float(danger_value):
         out["status"] = "action"
         out["status_label"] = "Acción Requerida"
-    elif has_warning and latest >= float(warning_value):
+    elif has_warning and recent_max >= float(warning_value):
         out["status"] = "alarm"
         out["status_label"] = "Atención"
-    elif has_warning and latest >= 0.85 * float(warning_value):
+    elif has_warning and (
+        recent_max >= 0.85 * float(warning_value)
+        or latest >= 0.85 * float(warning_value)
+    ):
         out["status"] = "watch"
         out["status_label"] = "Vigilancia"
     elif has_warning or has_danger:
@@ -2356,6 +2386,7 @@ def build_trend_autodiagnostic(
 
     latest_value = health["latest_value"]
     max_value = health["max_value"]
+    recent_max_value = health.get("recent_max_value", max_value)
     slope = health["slope_per_day"]
     forecast_days = health["forecast_days"]
     forecast_target = health["forecast_target"]
@@ -2397,6 +2428,27 @@ def build_trend_autodiagnostic(
             f"Frente al umbral Danger ({float(danger_value):.3g} {metric_unit}) "
             f"el consumo es del {pct_d:.0f}%".rstrip() + "."
         )
+
+    # Ciclo 17.5.9 — si el último valor es bajo PERO la ventana
+    # reciente tuvo un pico que superó Warning/Danger, lo
+    # explicitamos para que el lector no piense que el sistema
+    # ignoró los picos.
+    if (
+        not math.isnan(recent_max_value)
+        and recent_max_value > latest_value * 1.5  # pico significativo arriba del latest
+    ):
+        _exceed_what = ""
+        if danger_value is not None and recent_max_value >= float(danger_value):
+            _exceed_what = f"superando el umbral Danger ({float(danger_value):.3g} {metric_unit})".rstrip()
+        elif warning_value is not None and recent_max_value >= float(warning_value):
+            _exceed_what = f"superando el umbral Warning ({float(warning_value):.3g} {metric_unit})".rstrip()
+        if _exceed_what:
+            par1.append(
+                f"Sin embargo, dentro de la ventana reciente se registró un pico "
+                f"de {recent_max_value:.3g} {metric_unit} ".rstrip()
+                + f", {_exceed_what}; el estado se clasifica según el peor valor "
+                f"reciente, no únicamente el último sample."
+            )
 
     status = out["status"]
     if status == "action":
