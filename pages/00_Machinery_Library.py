@@ -284,7 +284,7 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                         index=["", "fluid_film", "rolling_element", "magnetic", "mixed"].index(inst.support_type) if inst.support_type in ["", "fluid_film", "rolling_element", "magnetic", "mixed"] else 0,
                     )
                 with s2:
-                    new_sup_count = st.number_input("Cantidad de soportes", value=int(inst.support_count or 0), min_value=0, max_value=20, step=1)
+                    new_sup_count = st.number_input("Cantidad de soportes", value=int(inst.support_count or 0), min_value=0, max_value=50, step=1)
                 new_sup_detail = st.text_area(
                     "Detalle (texto libre)",
                     value=inst.support_detail or "",
@@ -467,8 +467,9 @@ def render_sensor_map_section(instance_id: str) -> None:
             st.markdown("**Driver (motriz)**")
             gen_driver_planes = st.number_input(
                 "Planos del driver",
-                min_value=1, max_value=8, value=2, step=1,
+                min_value=1, max_value=50, value=2, step=1,
                 key=f"gen_driver_planes_{instance_id}",
+                help="Hasta 50 apoyos por sección (driver+driven = 100 máx).",
             )
             # Default modo según support_type ya configurado en la instancia
             _sup = (inst.support_type or "").lower()
@@ -504,8 +505,9 @@ def render_sensor_map_section(instance_id: str) -> None:
             st.markdown("**Driven (accionada)**")
             gen_driven_planes = st.number_input(
                 "Planos del driven",
-                min_value=1, max_value=8, value=2, step=1,
+                min_value=1, max_value=50, value=2, step=1,
                 key=f"gen_driven_planes_{instance_id}",
+                help="Hasta 50 apoyos por sección (driver+driven = 100 máx).",
             )
             _gen_driven_mode_label = st.selectbox(
                 "Instrumentación driven",
@@ -599,8 +601,9 @@ def render_sensor_map_section(instance_id: str) -> None:
         key=f"sensor_map_editor_{instance_id}",
         column_config={
             "plane": st.column_config.NumberColumn(
-                "Plano", min_value=1, max_value=20, step=1, default=1,
-                help="Número correlativo desde driver (1) a driven (último). API 670.",
+                "Plano", min_value=1, max_value=100, step=1, default=1,
+                help="Número correlativo desde driver (1) a driven (último). "
+                     "API 670. Hasta 100 planos en máquinas con muchos apoyos.",
             ),
             "plane_label": st.column_config.TextColumn(
                 "Etiqueta plano",
