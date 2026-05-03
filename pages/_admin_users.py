@@ -96,26 +96,31 @@ if not is_supabase_auth_enabled():
 # actual.
 st.session_state.pop("_supabase_admin_client", None)
 
-# Caption de debug para verificar QUÉ key está leyendo en runtime.
-# Solo visible al admin (que ya pasó el guard arriba).
-_sb_cfg = st.secrets.get("supabase", {}) if hasattr(st, "secrets") else {}
-_sk = str(_sb_cfg.get("service_key", "") or "")
-if _sk.startswith("eyJ"):
-    _kind, _ico = "JWT service_role legacy", "✅"
-elif _sk.startswith("sb_secret_"):
-    _kind, _ico = "sb_secret nueva (NO sirve para admin)", "⚠️"
-else:
-    _kind, _ico = "desconocida", "❌"
+# Debug opcional de la key cargada — solo si ?debug=auth en URL.
+# Útil si en el futuro vuelve un problema de cache de secrets.
 try:
-    import supabase as _sbpy
-    _sbver = _sbpy.__version__
+    _qp = st.query_params if hasattr(st, "query_params") else {}
+    if str(_qp.get("debug", "")).lower() == "auth":
+        _sb_cfg = st.secrets.get("supabase", {}) if hasattr(st, "secrets") else {}
+        _sk = str(_sb_cfg.get("service_key", "") or "")
+        if _sk.startswith("eyJ"):
+            _kind, _ico = "JWT service_role legacy", "✅"
+        elif _sk.startswith("sb_secret_"):
+            _kind, _ico = "sb_secret nueva (NO sirve para admin)", "⚠️"
+        else:
+            _kind, _ico = "desconocida", "❌"
+        try:
+            import supabase as _sbpy
+            _sbver = _sbpy.__version__
+        except Exception:
+            _sbver = "?"
+        st.caption(
+            f"{_ico} **Auth debug** (visible por ?debug=auth): "
+            f"key_kind=**{_kind}** · len={len(_sk)} · "
+            f"prefix=`{_sk[:10]}…{_sk[-6:]}` · supabase-py={_sbver}"
+        )
 except Exception:
-    _sbver = "?"
-st.caption(
-    f"{_ico} **Auth debug**: key_kind=**{_kind}** · "
-    f"len={len(_sk)} · prefix=`{_sk[:10]}…{_sk[-6:]}` · "
-    f"supabase-py={_sbver}"
-)
+    pass
 
 
 # =============================================================
