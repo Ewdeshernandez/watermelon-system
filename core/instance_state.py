@@ -136,6 +136,16 @@ class Instance:
     # Si está vacío, Tabular List cae a los defaults derivados de la instancia.
     sensors: List[Dict[str, Any]] = field(default_factory=list)
 
+    # Ciclo 17.9 — Norma de evaluación de vibración + override del especialista.
+    # Cuando la instancia tiene una norma asignada, los setpoints sugeridos en
+    # Trends/Tabular/Reports se derivan de la tabla de la norma (con la
+    # posibilidad de override manual). Ver core/iso_thresholds.py.
+    iso_norm_code: str = ""             # ej. "ISO_20816_8"
+    iso_norm_class: str = ""            # ej. "2"
+    setpoint_warning_override: float = 0.0   # 0 = usar el de la norma
+    setpoint_danger_override: float = 0.0    # 0 = usar el de la norma
+    override_justification: str = ""    # texto libre, queda en el reporte
+
     # Datos capturados ad-hoc (legacy, sigue funcionando)
     captured_parameters: Dict[str, Any] = field(default_factory=dict)
     documents: List[Dict[str, Any]] = field(default_factory=list)
@@ -192,6 +202,11 @@ class Instance:
             last_overhaul_date=_f("last_overhaul_date"),
             commissioning_date=_f("commissioning_date"),
             sensors=list(data.get("sensors", []) or []),
+            iso_norm_code=_f("iso_norm_code"),
+            iso_norm_class=_f("iso_norm_class"),
+            setpoint_warning_override=float(_f("setpoint_warning_override", 0.0) or 0.0),
+            setpoint_danger_override=float(_f("setpoint_danger_override", 0.0) or 0.0),
+            override_justification=_f("override_justification"),
             captured_parameters=dict(data.get("captured_parameters", {}) or {}),
             documents=list(data.get("documents", []) or []),
             created_at=_f("created_at"),
@@ -302,6 +317,10 @@ def update_instance_header(
         "last_balance_date", "last_alignment_date", "last_overhaul_date",
         "commissioning_date",
         "sensors",
+        # Ciclo 17.9 — norma de evaluación
+        "iso_norm_code", "iso_norm_class",
+        "setpoint_warning_override", "setpoint_danger_override",
+        "override_justification",
     }
     for key, val in kwargs.items():
         if key in allowed and val is not None:

@@ -221,9 +221,9 @@ def render_instance_header(state: Dict[str, Any]) -> None:
             pass
 
     with st.expander("Editar metadata completa de esta instancia", expanded=False):
-        tab_id, tab_train, tab_op, tab_sup, tab_pr, tab_set, tab_mnt, tab_sch = st.tabs([
+        tab_id, tab_train, tab_op, tab_sup, tab_pr, tab_set, tab_norm, tab_mnt, tab_sch = st.tabs([
             "Identificación", "Tren acoplado", "Operación", "Soportes",
-            "Sondas", "Setpoints", "Mantenimiento", "Esquemático",
+            "Sondas", "Setpoints", "Norma ISO", "Mantenimiento", "Esquemático",
         ])
 
         with st.form(f"edit_header_{instance_id}"):
@@ -310,6 +310,144 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     new_trip = st.number_input("Trip level", value=float(inst.trip_level or 0.0), min_value=0.0, step=0.1)
                 new_sp_unit = st.text_input("Unidad", value=inst.setpoint_unit or "", help="ej. mil pp / mm/s rms")
 
+            # =========================================================
+            # Ciclo 17.9 — Tab "Norma ISO"
+            # =========================================================
+            # Permite asignar la norma de evaluación de vibración
+            # (ISO 20816-2/3/4/8, API 670, API 618, etc.) y la clase
+            # dentro de la norma. Los setpoints sugeridos se muestran
+            # en vivo y el usuario puede overrideearlos con
+            # justificación que queda en el reporte.
+            with tab_norm:
+                from core.iso_thresholds import (
+                    list_norms, list_classes_for_norm, get_thresholds,
+                    suggest_norm_for_machine, suggest_class_for_machine,
+                )
+                st.caption(
+                    "La norma de evaluación define los setpoints Warning/Danger "
+                    "para vibración estructural. Si no la asignás, el sistema cae "
+                    "a defaults heurísticos. Si la asignás, los módulos Trend, "
+                    "Tabular y Reports usan estos valores y citan la norma en "
+                    "el PDF."
+                )
+
+                _norms = list_norms()
+                _norm_codes = [""] + [n["code"] for n in _norms]
+                _norm_labels = ["(sin asignar — usar defaults)"] + [
+                    f"{n['name']}" for n in _norms
+                ]
+                # Auto-sugerir norma si no hay seleccionada
+                _current_norm = inst.iso_norm_code
+                if not _current_norm:
+                    _suggested = suggest_norm_for_machine(
+                        inst.asset_class or "",
+                        inst.driver_model or "",
+                        inst.driven_model or "",
+                    )
+                    if _suggested and _suggested in _norm_codes:
+                        st.info(
+                            f"💡 Norma sugerida según el activo: **"
+                            f"{next((n['name'] for n in _norms if n['code'] == _suggested), _suggested)}**"
+                        )
+
+                _norm_idx = _norm_codes.index(_current_norm) if _current_norm in _norm_codes else 0
+                _selected_norm_idx = st.selectbox(
+                    "Norma de evaluación",
+                    options=range(len(_norm_codes)),
+                    format_func=lambda i: _norm_labels[i],
+                    index=_norm_idx,
+                    key=f"iso_norm_select_{instance_id}",
+                )
+                new_norm_code = _norm_codes[_selected_norm_idx]
+
+                new_norm_class = ""
+                new_warn_override = 0.0
+                new_danger_override = 0.0
+                new_justification = inst.override_justification or ""
+
+                if new_norm_code:
+                    _classes = list_classes_for_norm(new_norm_code)
+                    _class_codes = [c["code"] for c in _classes]
+                    _class_labels = [c["label"] for c in _classes]
+                    # Sugerir clase si no hay
+                    _current_class = inst.iso_norm_class
+                    if not _current_class:
+                        _suggested_class = suggest_class_for_machine(
+                            new_norm_code,
+                            float(inst.nominal_power_mw or 0) * 1000.0,  # MW → kW
+                            inst.support_type or "",
+                        )
+                        if _suggested_class:
+                            _current_class = _suggested_class
+
+                    _class_idx = (
+                        _class_codes.index(_current_class)
+                        if _current_class in _class_codes else 0
+                    )
+                    _selected_class_idx = st.selectbox(
+                        "Class / Categoría dentro de la norma",
+                        options=range(len(_class_codes)),
+                        format_func=lambda i: _class_labels[i],
+                        index=_class_idx,
+                        key=f"iso_class_select_{instance_id}",
+                    )
+                    new_norm_class = _class_codes[_selected_class_idx]
+
+                    _info = get_thresholds(new_norm_code, new_norm_class)
+                    if _info:
+                        _w = _info["warning"]
+                        _d = _info["danger"]
+                        _u = _info["unit"]
+                        st.success(
+                            f"**Setpoints sugeridos por la norma:**  "
+                            f"Warning **{_w} {_u}** · Danger **{_d} {_u}**"
+                        )
+                        st.caption(f"📚 {_info['reference']}")
+
+                        # Override del especialista
+                        st.markdown("**Override del especialista (opcional)**")
+                        oc1, oc2 = st.columns(2)
+                        with oc1:
+                            new_warn_override = float(st.number_input(
+                                f"Warning override ({_u})",
+                                value=float(inst.setpoint_warning_override or 0.0),
+                                min_value=0.0,
+                                step=0.1,
+                                format="%.3f",
+                                help="0 = usar el de la norma. Cualquier otro valor "
+                                     "overridea (más conservador o más laxo).",
+                                key=f"warn_override_{instance_id}",
+                            ))
+                        with oc2:
+                            new_danger_override = float(st.number_input(
+                                f"Danger override ({_u})",
+                                value=float(inst.setpoint_danger_override or 0.0),
+                                min_value=0.0,
+                                step=0.1,
+                                format="%.3f",
+                                key=f"danger_override_{instance_id}",
+                            ))
+                        if new_warn_override > 0 or new_danger_override > 0:
+                            new_justification = st.text_area(
+                                "Justificación del override (queda en el reporte)",
+                                value=new_justification,
+                                height=80,
+                                placeholder="Ej. Cliente exige criterio conservador "
+                                            "Class 1 en lugar de Class 2 estándar de "
+                                            "la norma — máquina nueva sin baseline.",
+                                key=f"override_just_{instance_id}",
+                            )
+                            # Mostrar resumen del override efectivo
+                            _eff_w = new_warn_override or _w
+                            _eff_d = new_danger_override or _d
+                            _diff_w = ((_eff_w - _w) / _w * 100) if _w > 0 else 0
+                            _diff_d = ((_eff_d - _d) / _d * 100) if _d > 0 else 0
+                            st.caption(
+                                f"⚙️ **Setpoints efectivos:** "
+                                f"Warning {_eff_w:.3f} ({_diff_w:+.0f}% vs norma) · "
+                                f"Danger {_eff_d:.3f} ({_diff_d:+.0f}% vs norma)"
+                            )
+
             with tab_mnt:
                 m1, m2 = st.columns(2)
                 with m1:
@@ -395,6 +533,12 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     last_overhaul_date=new_lo.strip(),
                     commissioning_date=new_co.strip(),
                     schematic_png=new_sch_id.strip(),
+                    # Ciclo 17.9 — norma de evaluación
+                    iso_norm_code=(new_norm_code or "").strip(),
+                    iso_norm_class=(new_norm_class or "").strip(),
+                    setpoint_warning_override=float(new_warn_override or 0.0),
+                    setpoint_danger_override=float(new_danger_override or 0.0),
+                    override_justification=(new_justification or "").strip(),
                 )
                 st.success("Metadata actualizada.")
                 st.rerun()

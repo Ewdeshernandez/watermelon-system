@@ -690,19 +690,17 @@ def suggest_trend_thresholds(
     sensors: List[Dict[str, Any]],
     metric_key: str,
     machine_group: str,
+    instance: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Calcula los setpoints Warning/Danger sugeridos para los
     records seleccionados.
 
-    Devuelve dict:
-        warning:        Optional[float]
-        danger:         Optional[float]
-        source:         "Sensor Map" | "ISO 20816" | "default"
-        detail:         texto humano para mostrar como caption
-        unit_hint:      unidad inferida del primer record
-        applicable:     False cuando metric_key no es Amplitude
-                        (Phase / Speed no usan setpoints del Vault)
+    Ciclo 17.9 — orden de prioridad:
+        1. Norma ISO/API asignada a la instancia (con override del
+           especialista si fue editado en Machinery Library)
+        2. Sensor Map per-record (alarm/danger del Sensor Map)
+        3. Fallback ISO 20816 genérico por machine_group
     """
     out: Dict[str, Any] = {
         "warning": None,
@@ -711,6 +709,7 @@ def suggest_trend_thresholds(
         "detail": "",
         "unit_hint": "",
         "applicable": False,
+        "norm_reference": "",
     }
 
     if metric_key != "Amplitude":
@@ -723,7 +722,43 @@ def suggest_trend_thresholds(
         unit_hint = (records[0].y_axis_unit or "").strip()
     out["unit_hint"] = unit_hint
 
-    # 1) Intentar Sensor Map per-record
+    # =====================================================
+    # Ciclo 17.9 — PRIORIDAD 1: Norma asignada a la instance
+    # =====================================================
+    if instance is not None:
+        _norm_code = (getattr(instance, "iso_norm_code", "") or "").strip()
+        _norm_class = (getattr(instance, "iso_norm_class", "") or "").strip()
+        if _norm_code and _norm_class:
+            try:
+                from core.iso_thresholds import get_thresholds as _gt
+                _info = _gt(_norm_code, _norm_class)
+            except Exception:
+                _info = None
+            if _info:
+                _w_norma = float(_info["warning"])
+                _d_norma = float(_info["danger"])
+                _w_over = float(getattr(instance, "setpoint_warning_override", 0) or 0)
+                _d_over = float(getattr(instance, "setpoint_danger_override", 0) or 0)
+                # Override del especialista si > 0
+                _w_eff = _w_over if _w_over > 0 else _w_norma
+                _d_eff = _d_over if _d_over > 0 else _d_norma
+                _has_override = (_w_over > 0 or _d_over > 0)
+                out["warning"] = _w_eff
+                out["danger"] = _d_eff
+                out["source"] = (
+                    f"{_info['source_label']} (Override)"
+                    if _has_override else _info["source_label"]
+                )
+                out["detail"] = (
+                    f"{_info['label']}"
+                    + (" · Override del especialista" if _has_override else "")
+                )
+                out["norm_reference"] = _info["reference"]
+                return out
+
+    # =====================================================
+    # PRIORIDAD 2: Sensor Map per-record
+    # =====================================================
     matched_pairs: List[Tuple[TrendRecord, Dict[str, Any]]] = []
     if records and sensors:
         for rec in records:
@@ -4469,6 +4504,16 @@ def queue_trend_to_report(
                     _src_line_parts.append(_detail)
                 _bits.append(" · ".join(_src_line_parts))
 
+                # Ciclo 17.9 — cita normativa explícita en el PDF
+                _norm_ref = (_thr_meta.get("norm_reference") or "").strip()
+                if _norm_ref:
+                    _bits.append(f"Referencia normativa: {_norm_ref}.")
+                _override_just = (_thr_meta.get("override_justification") or "").strip()
+                if _override_just and (_thr_meta.get("warning_is_override") or _thr_meta.get("danger_is_override")):
+                    _bits.append(
+                        f"Justificación del override del especialista: {_override_just}"
+                    )
+
             if _bits:
                 autodiag_block_text = "\n\n".join(_bits)
                 narrative = f"{autodiag_block_text}\n\n{narrative}"
@@ -4799,6 +4844,7 @@ with st.sidebar:
         _sensors_for_thr,
         metric_key=metric_key,
         machine_group=_machine_group_for_thr,
+        instance=_inst_for_thr,  # Ciclo 17.9 — para chequear iso_norm_code/class
     )
 
     # Source chip
@@ -4890,6 +4936,13 @@ with st.sidebar:
         "warning_is_override": _w_is_override,
         "danger_is_override": _d_is_override,
         "machine_group": _machine_group_for_thr,
+        # Ciclo 17.9 — referencia normativa para el reporte
+        "norm_reference": _thr_suggestion.get("norm_reference", ""),
+        "norm_code": getattr(_inst_for_thr, "iso_norm_code", "") if _inst_for_thr else "",
+        "norm_class": getattr(_inst_for_thr, "iso_norm_class", "") if _inst_for_thr else "",
+        "override_justification": (
+            getattr(_inst_for_thr, "override_justification", "") if _inst_for_thr else ""
+        ),
     }
 
 selected_ids = [st.session_state.wm_tr_primary_signal_id] + st.session_state.wm_tr_extra_signal_ids
