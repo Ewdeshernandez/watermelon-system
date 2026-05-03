@@ -363,7 +363,10 @@ def render_sensor_map_diagram(
         == "recip_compressor"
     )
     if _need_lower_y:
-        ax_top.set_ylim(-0.4, 4)
+        # Cilindros UP grandes + cabezal + válvulas + etiqueta del
+        # driven llegan a y≈4.4. Cilindros DOWN bajan hasta y≈-0.1.
+        # Damos margen amplio para que nada se corte.
+        ax_top.set_ylim(-0.4, 4.7)
     else:
         ax_top.set_ylim(0, 4)
     ax_top.set_aspect("equal")
@@ -407,162 +410,85 @@ def render_sensor_map_diagram(
     drv_top_y = rotor_y + 1.25  # para etiqueta (todas las siluetas la usan)
 
     if drv_kind_resolved == "motor":
-        # --- Motor eléctrico TEFC industrial:
-        #     - Frame cilíndrico con cooling fins LONGITUDINALES
-        #       que recorren TODO el cuerpo (no solo los primeros cm)
-        #     - Caja de bornes prominente arriba con entradas de cable
-        #     - End shields con bolt circles visibles
-        #     - Tapa del ventilador (fan cover) en el outboard end
-        #       con grilla circular
-        #     - Eje sobresaliendo del lado coupling (DE)
+        # --- Motor eléctrico industrial: silueta LIMPIA tipo TEFC.
+        #     Sin grilla circular del ventilador (el usuario la
+        #     odió: "rueda de carreta horrible"). Diseño minimal:
+        #     - Frame con cooling fins horizontales sutiles
+        #     - Caja de bornes pequeña arriba
+        #     - End shields planos en ambos extremos
+        #     - Eje sobresale del lado DE (coupling)
         #     - Patas de montaje abajo
-        # Ciclo 17.5.13 — silhouette más profesional, alineada con
-        # un TEFC induction motor estándar IEC/NEMA.
-        body_h = 1.10
-        es_w = 0.18         # ancho de end shields
-        fan_cover_w = 0.32  # ancho de la tapa del ventilador (outboard)
+        # Ciclo 17.5.14 — versión sobria, sin adornos.
+        body_h = 1.05
+        es_w = 0.16
 
-        # ---------- Frame principal (cuerpo cilíndrico) ----------
-        # El frame va desde end_shield outboard hasta end_shield DE
-        frame_left = drv_left + fan_cover_w
-        frame_right = drv_right - es_w
-        frame_w = frame_right - frame_left
+        # Frame principal (cuerpo) — un solo bloque rounded
         ax_top.add_patch(mpatches.FancyBboxPatch(
-            (frame_left, rotor_y - body_h),
-            frame_w, 2 * body_h,
-            boxstyle="round,pad=0.01,rounding_size=0.04",
+            (drv_left + es_w, rotor_y - body_h),
+            drv_w - 2 * es_w, 2 * body_h,
+            boxstyle="round,pad=0.01,rounding_size=0.05",
             facecolor=_COLOR_DRIVER, alpha=0.18,
             edgecolor=_COLOR_DRIVER, linewidth=1.6, zorder=1,
         ))
 
-        # Cooling fins longitudinales cubriendo TODO el frame
-        # (líneas horizontales finas evenly spaced, características
-        # de un motor TEFC con frame ribbed)
-        n_fins = 9
+        # Cooling fins horizontales SUTILES recorriendo el frame
+        # (5 líneas evenly spaced — no saturan el dibujo)
+        n_fins = 5
         for _k in range(n_fins):
-            _fy = rotor_y - body_h * 0.88 + _k * (body_h * 1.76 / (n_fins - 1))
+            _fy = rotor_y - body_h * 0.70 + _k * (body_h * 1.40 / (n_fins - 1))
             ax_top.plot(
-                [frame_left + 0.08, frame_right - 0.08],
+                [drv_left + es_w + 0.10, drv_right - es_w - 0.10],
                 [_fy, _fy],
-                color=_COLOR_DRIVER, linewidth=0.55, alpha=0.40, zorder=2,
+                color=_COLOR_DRIVER, linewidth=0.50, alpha=0.35, zorder=2,
             )
 
-        # ---------- Tapa del ventilador (outboard end, izquierda) ----------
-        # Bloque rectangular + círculo con grilla cruzada
-        fan_cx = drv_left + fan_cover_w / 2.0
-        # Cuerpo del fan cover (caja rectangular)
-        ax_top.add_patch(mpatches.FancyBboxPatch(
-            (drv_left, rotor_y - body_h * 0.95),
-            fan_cover_w, body_h * 1.90,
-            boxstyle="round,pad=0.01,rounding_size=0.05",
-            facecolor=_COLOR_DRIVER, alpha=0.30,
-            edgecolor=_COLOR_DRIVER, linewidth=1.5, zorder=2,
-        ))
-        # Grilla circular del ventilador
-        grille_r = body_h * 0.58
-        ax_top.add_patch(mpatches.Circle(
-            (fan_cx, rotor_y), grille_r,
-            facecolor="none", edgecolor=_COLOR_DRIVER,
-            linewidth=1.2, alpha=0.85, zorder=3,
-        ))
-        # Cruz interior de la grilla (4 brazos)
-        for _ang in (0, 45, 90, 135):
-            _a = math.radians(_ang)
-            ax_top.plot(
-                [fan_cx - grille_r * math.cos(_a), fan_cx + grille_r * math.cos(_a)],
-                [rotor_y - grille_r * math.sin(_a), rotor_y + grille_r * math.sin(_a)],
-                color=_COLOR_DRIVER, linewidth=0.8, alpha=0.60, zorder=3,
-            )
-        # Hub central del ventilador
-        ax_top.add_patch(mpatches.Circle(
-            (fan_cx, rotor_y), grille_r * 0.18,
-            facecolor=_COLOR_DRIVER, alpha=0.75,
-            edgecolor=_COLOR_DRIVER, linewidth=1.0, zorder=4,
-        ))
-
-        # ---------- End shield del lado DE (drive end) ----------
-        ax_top.add_patch(mpatches.FancyBboxPatch(
-            (frame_right, rotor_y - body_h * 0.95),
-            es_w, body_h * 1.90,
-            boxstyle="round,pad=0.01,rounding_size=0.05",
-            facecolor=_COLOR_DRIVER, alpha=0.32,
-            edgecolor=_COLOR_DRIVER, linewidth=1.5, zorder=2,
-        ))
-        # Bolt circle visible en el end shield (4 tornillos)
-        es_cx = frame_right + es_w / 2.0
-        for _ang in (45, 135, 225, 315):
-            _a = math.radians(_ang)
-            ax_top.add_patch(mpatches.Circle(
-                (es_cx + es_w * 0.30 * math.cos(_a),
-                 rotor_y + body_h * 0.55 * math.sin(_a)),
-                0.025,
-                facecolor="#0f172a", edgecolor="#0f172a",
-                alpha=0.75, zorder=4,
+        # End shields en ambos extremos (sin bolt circles ni grilla)
+        for _esx in (drv_left, drv_right - es_w):
+            ax_top.add_patch(mpatches.FancyBboxPatch(
+                (_esx, rotor_y - body_h * 0.96),
+                es_w, body_h * 1.92,
+                boxstyle="round,pad=0.01,rounding_size=0.05",
+                facecolor=_COLOR_DRIVER, alpha=0.30,
+                edgecolor=_COLOR_DRIVER, linewidth=1.4, zorder=2,
             ))
-        # Eje sobresaliendo del end shield DE hacia el coupling
-        shaft_extension = 0.10
+
+        # Eje sobresaliendo del lado DE (coupling)
         ax_top.plot(
-            [drv_right, drv_right + shaft_extension],
+            [drv_right, drv_right + 0.10],
             [rotor_y, rotor_y],
             color="#0f172a", linewidth=2.4, alpha=0.95, zorder=5,
         )
 
-        # ---------- Caja de bornes (terminal box) ----------
-        # Más alta, con cable entries (2 stubs verticales)
-        tb_w = drv_w * 0.26
-        tb_h = 0.38
+        # Caja de bornes arriba (chica, sobria)
+        tb_w = drv_w * 0.22
+        tb_h = 0.28
         tb_x = drv_left + (drv_w - tb_w) / 2.0
         tb_y = rotor_y + body_h
         ax_top.add_patch(mpatches.FancyBboxPatch(
             (tb_x, tb_y),
             tb_w, tb_h,
             boxstyle="round,pad=0.01,rounding_size=0.03",
-            facecolor=_COLOR_DRIVER, alpha=0.40,
-            edgecolor=_COLOR_DRIVER, linewidth=1.4, zorder=3,
+            facecolor=_COLOR_DRIVER, alpha=0.38,
+            edgecolor=_COLOR_DRIVER, linewidth=1.3, zorder=3,
         ))
-        # Tapa de la caja de bornes (línea de partición)
+        # Línea de partición de la tapa (un solo trazo sutil)
         ax_top.plot(
-            [tb_x + tb_w * 0.10, tb_x + tb_w * 0.90],
+            [tb_x + tb_w * 0.12, tb_x + tb_w * 0.88],
             [tb_y + tb_h * 0.55, tb_y + tb_h * 0.55],
-            color=_COLOR_DRIVER, linewidth=0.8, alpha=0.65, zorder=4,
+            color=_COLOR_DRIVER, linewidth=0.8, alpha=0.60, zorder=4,
         )
-        # Cable entries (2 prensaestopas/glands en la parte superior)
-        for _gx in (tb_x + tb_w * 0.32, tb_x + tb_w * 0.68):
-            ax_top.add_patch(mpatches.Rectangle(
-                (_gx - 0.04, tb_y + tb_h),
-                0.08, 0.08,
-                facecolor=_COLOR_DRIVER, alpha=0.55,
-                edgecolor=_COLOR_DRIVER, linewidth=1.0, zorder=4,
-            ))
 
-        # ---------- Patas de montaje (mounting feet) ----------
-        feet_w = 0.30
-        feet_h = 0.18
+        # Patas de montaje (mounting feet) — sobrias
+        feet_w = 0.28
+        feet_h = 0.14
         feet_y = rotor_y - body_h - feet_h
-        # Pata izquierda (al pie del frame)
-        ax_top.add_patch(mpatches.Rectangle(
-            (frame_left + 0.08, feet_y),
-            feet_w, feet_h,
-            facecolor=_COLOR_DRIVER, alpha=0.42,
-            edgecolor=_COLOR_DRIVER, linewidth=1.2, zorder=2,
-        ))
-        # Pata derecha (cerca del end shield DE)
-        ax_top.add_patch(mpatches.Rectangle(
-            (frame_right - 0.08 - feet_w, feet_y),
-            feet_w, feet_h,
-            facecolor=_COLOR_DRIVER, alpha=0.42,
-            edgecolor=_COLOR_DRIVER, linewidth=1.2, zorder=2,
-        ))
-        # Tornillos de anclaje en las patas (1 por pata)
-        for _ftx in (frame_left + 0.08 + feet_w / 2.0,
-                     frame_right - 0.08 - feet_w / 2.0):
-            ax_top.add_patch(mpatches.Circle(
-                (_ftx, feet_y + feet_h * 0.5), 0.025,
-                facecolor="#0f172a", edgecolor="#0f172a",
-                alpha=0.75, zorder=3,
+        for _ftx in (drv_left + es_w + 0.12, drv_right - es_w - 0.12 - feet_w):
+            ax_top.add_patch(mpatches.Rectangle(
+                (_ftx, feet_y), feet_w, feet_h,
+                facecolor=_COLOR_DRIVER, alpha=0.40,
+                edgecolor=_COLOR_DRIVER, linewidth=1.2, zorder=2,
             ))
 
-        # Etiqueta queda arriba de la caja de bornes
         drv_top_y = tb_y + tb_h + 0.20
 
     elif drv_kind_resolved in ("recip_compressor", "centrif_compressor"):
@@ -644,21 +570,37 @@ def render_sensor_map_diagram(
     dvn_top_y = rotor_y + 1.50  # default para etiqueta
 
     if dvn_kind_resolved == "recip_compressor":
-        # --- Compresor reciprocante balanced-opposed (estilo ARIEL):
-        #     crankcase horizontal + N cilindros distribuidos en
-        #     PARES OPUESTOS — la mitad sticking up, la mitad
-        #     sticking down. Esto representa correctamente máquinas
-        #     como ARIEL KBK/4 (4 cilindros = 2 throws con par
-        #     opuesto cada uno).
-        crank_h = 0.85
-        # Crankcase principal (caja horizontal grande)
-        ax_top.add_patch(mpatches.Rectangle(
-            (dvn_left, rotor_y - crank_h),
-            dvn_w, 2 * crank_h,
-            facecolor=_COLOR_DRIVEN, alpha=0.16,
+        # --- Compresor reciprocante balanced-opposed (estilo
+        #     ARIEL KBK): crankcase compacto + cilindros GRANDES
+        #     y bien distinguibles, distribuidos en pares opuestos
+        #     (UP / DOWN) por throw del cigüeñal.
+        # Ciclo 17.5.14 — el dibujo previo hacía el crankcase
+        # gigante y cilindros pequeños, lo que confundía: los
+        # cilindros DOWN se leían como patas. Ahora crankcase más
+        # bajo + cilindros prominentes con cabezales claros y
+        # válvulas visibles.
+
+        crank_h = 0.50  # crankcase más bajo (antes 0.85)
+        # Crankcase central (más estrecho que el dvn_w total para
+        # dejar aire alrededor de los cilindros)
+        crank_pad = 0.10
+        crank_left = dvn_left + crank_pad
+        crank_right = dvn_right - crank_pad
+        crank_w = crank_right - crank_left
+        ax_top.add_patch(mpatches.FancyBboxPatch(
+            (crank_left, rotor_y - crank_h),
+            crank_w, 2 * crank_h,
+            boxstyle="round,pad=0.01,rounding_size=0.03",
+            facecolor=_COLOR_DRIVEN, alpha=0.18,
             edgecolor=_COLOR_DRIVEN, linewidth=1.6, zorder=1,
         ))
-        # Detectamos los planos cilindro
+        # Línea de eje del cigüeñal (visible dentro del crankcase)
+        ax_top.plot(
+            [crank_left + 0.06, crank_right - 0.06], [rotor_y, rotor_y],
+            color=_COLOR_DRIVEN, linewidth=0.7, alpha=0.45, zorder=2,
+        )
+
+        # ---------- detectar planos cilindro ----------
         cyl_planes = [
             int(s.get("plane", 0))
             for s in sensors
@@ -666,88 +608,88 @@ def render_sensor_map_diagram(
             and "cilindro" in str(s.get("plane_label", "")).lower()
         ]
         cyl_planes = sorted(set(cyl_planes))
-        # Si no detectamos por label (caso default), asumimos los
-        # planos centrales (excluyendo primero y último que serían
-        # DE/NDE del frame).
         if not cyl_planes and len(driven_planes) >= 3:
             cyl_planes = list(driven_planes[1:-1])
         if not cyl_planes:
-            # fallback: asumimos 4 cilindros centrales
             cyl_planes = [driven_planes[len(driven_planes) // 2]] if driven_planes else []
 
         n_cyl = max(1, len(cyl_planes))
-        cyl_h = 0.95   # alto del cilindro afuera del crankcase
-        cyl_w = min(0.42, (dvn_w - 0.4) / max(n_cyl + 1, 4))
 
-        # Ciclo 17.5.12 — distribución balanced-opposed:
-        # Si N >= 2, dividimos en n_throws = ceil(N/2) posiciones a
-        # lo largo del crankcase. En cada throw position colocamos
-        # un cilindro UP y (si hay otro disponible) un cilindro
-        # DOWN. Resultado para N=4: 2 throws × 2 cilindros = 4
-        # cilindros, 2 arriba y 2 abajo en pares opuestos.
+        # Distribución balanced-opposed:
+        # n_throws = ceil(N/2). Cada throw tiene un cilindro UP y
+        # otro DOWN (cuando hay otro disponible).
         n_throws = max(1, (n_cyl + 1) // 2)
-        throw_step = (dvn_w - 0.4 - cyl_w) / max(n_throws - 1, 1) if n_throws > 1 else 0
-        # Centrar bloque de throws sobre el crankcase
+
+        # Cilindros AHORA son grandes y proporcionados al espacio
+        cyl_h = 1.20  # más altos (antes 0.95)
+        cyl_w = min(0.55, (crank_w - 0.20) / max(n_throws + 0.5, 2))
+
+        # Distribución horizontal de los throws
+        throw_step = (crank_w - 0.20 - cyl_w) / max(n_throws - 1, 1) if n_throws > 1 else 0
         block_w = (cyl_w + throw_step * (n_throws - 1)) if n_throws > 1 else cyl_w
         throw_start_x = dvn_left + (dvn_w - block_w) / 2.0
 
-        # Asignación: cilindros pares (índice 0, 2, 4, ...) van UP,
-        # cilindros impares (índice 1, 3, 5, ...) van DOWN, opuestos
-        # al UP del mismo throw. Throw index = i // 2.
+        # Helper para dibujar UN cilindro con cabezal + válvulas
+        def _draw_cylinder(cx_left: float, dir_up: bool, cyl_label: str = ""):
+            """Dibuja un cilindro vertical con cabezal y detalle
+            de válvulas. dir_up=True → arriba; False → abajo."""
+            sign = 1 if dir_up else -1
+            base_y = rotor_y + sign * crank_h
+            # 1) Cilindro propiamente (cuerpo)
+            cyl_y0 = base_y if dir_up else base_y - cyl_h
+            ax_top.add_patch(mpatches.FancyBboxPatch(
+                (cx_left, cyl_y0),
+                cyl_w, cyl_h,
+                boxstyle="round,pad=0.01,rounding_size=0.04",
+                facecolor=_COLOR_DRIVEN, alpha=0.26,
+                edgecolor=_COLOR_DRIVEN, linewidth=1.6, zorder=2,
+            ))
+            # 2) Cabezal (head) con válvulas — más alto y prominente
+            head_h = 0.26
+            head_y0 = (cyl_y0 + cyl_h) if dir_up else (cyl_y0 - head_h)
+            ax_top.add_patch(mpatches.FancyBboxPatch(
+                (cx_left - cyl_w * 0.12, head_y0),
+                cyl_w * 1.24, head_h,
+                boxstyle="round,pad=0.01,rounding_size=0.05",
+                facecolor=_COLOR_DRIVEN, alpha=0.42,
+                edgecolor=_COLOR_DRIVEN, linewidth=1.5, zorder=3,
+            ))
+            # 3) Válvulas en el cabezal (2 stubs verticales pequeños
+            #    representando válvula de succión y descarga)
+            valve_w = 0.07
+            valve_h = 0.10
+            valve_y = (head_y0 + head_h) if dir_up else (head_y0 - valve_h)
+            for _vx in (cx_left + cyl_w * 0.18, cx_left + cyl_w * 0.62):
+                ax_top.add_patch(mpatches.Rectangle(
+                    (_vx, valve_y), valve_w, valve_h,
+                    facecolor=_COLOR_DRIVEN, alpha=0.55,
+                    edgecolor=_COLOR_DRIVEN, linewidth=1.0, zorder=4,
+                ))
+            # 4) Etiqueta del cilindro (numero) en el centro del body
+            if cyl_label:
+                ax_top.text(
+                    cx_left + cyl_w / 2.0,
+                    cyl_y0 + cyl_h / 2.0,
+                    cyl_label,
+                    fontsize=10, fontweight="bold",
+                    color=_COLOR_DRIVEN, ha="center", va="center",
+                    zorder=5,
+                )
+
+        # Asignar cilindros a posiciones:
+        # i=0 → throw 0 UP    (Cilindro 1)
+        # i=1 → throw 0 DOWN  (Cilindro 2, opuesto)
+        # i=2 → throw 1 UP    (Cilindro 3)
+        # i=3 → throw 1 DOWN  (Cilindro 4, opuesto)
         for _i in range(n_cyl):
             _throw_idx = _i // 2
-            _go_up = (_i % 2 == 0)
-            _cx = throw_start_x + _throw_idx * (cyl_w + throw_step)
+            _is_up = (_i % 2 == 0)
+            _cx_left = throw_start_x + _throw_idx * (cyl_w + throw_step)
+            _label = str(_i + 1)  # numero del cilindro
+            _draw_cylinder(_cx_left, dir_up=_is_up, cyl_label=_label)
 
-            if _go_up:
-                # Distance piece UP
-                ax_top.add_patch(mpatches.Rectangle(
-                    (_cx + cyl_w * 0.20, rotor_y + crank_h),
-                    cyl_w * 0.60, 0.14,
-                    facecolor=_COLOR_DRIVEN, alpha=0.30,
-                    edgecolor=_COLOR_DRIVEN, linewidth=1.0, zorder=2,
-                ))
-                # Cilindro UP
-                ax_top.add_patch(mpatches.Rectangle(
-                    (_cx, rotor_y + crank_h + 0.14),
-                    cyl_w, cyl_h,
-                    facecolor=_COLOR_DRIVEN, alpha=0.22,
-                    edgecolor=_COLOR_DRIVEN, linewidth=1.4, zorder=2,
-                ))
-                # Cabezal con válvulas (UP)
-                ax_top.add_patch(mpatches.FancyBboxPatch(
-                    (_cx - cyl_w * 0.05, rotor_y + crank_h + 0.14 + cyl_h),
-                    cyl_w * 1.10, 0.16,
-                    boxstyle="round,pad=0.01,rounding_size=0.04",
-                    facecolor=_COLOR_DRIVEN, alpha=0.35,
-                    edgecolor=_COLOR_DRIVEN, linewidth=1.2, zorder=3,
-                ))
-            else:
-                # Distance piece DOWN (espejo del UP)
-                ax_top.add_patch(mpatches.Rectangle(
-                    (_cx + cyl_w * 0.20, rotor_y - crank_h - 0.14),
-                    cyl_w * 0.60, 0.14,
-                    facecolor=_COLOR_DRIVEN, alpha=0.30,
-                    edgecolor=_COLOR_DRIVEN, linewidth=1.0, zorder=2,
-                ))
-                # Cilindro DOWN
-                ax_top.add_patch(mpatches.Rectangle(
-                    (_cx, rotor_y - crank_h - 0.14 - cyl_h),
-                    cyl_w, cyl_h,
-                    facecolor=_COLOR_DRIVEN, alpha=0.22,
-                    edgecolor=_COLOR_DRIVEN, linewidth=1.4, zorder=2,
-                ))
-                # Cabezal con válvulas (DOWN — abajo del cilindro)
-                ax_top.add_patch(mpatches.FancyBboxPatch(
-                    (_cx - cyl_w * 0.05, rotor_y - crank_h - 0.14 - cyl_h - 0.16),
-                    cyl_w * 1.10, 0.16,
-                    boxstyle="round,pad=0.01,rounding_size=0.04",
-                    facecolor=_COLOR_DRIVEN, alpha=0.35,
-                    edgecolor=_COLOR_DRIVEN, linewidth=1.2, zorder=3,
-                ))
-
-        # La etiqueta queda arriba (sobre el cilindro UP más alto)
-        dvn_top_y = rotor_y + crank_h + 0.14 + cyl_h + 0.50
+        # Etiqueta del driven (arriba, sobre el cilindro UP)
+        dvn_top_y = rotor_y + crank_h + cyl_h + 0.26 + 0.10 + 0.30
 
     elif dvn_kind_resolved == "centrif_compressor":
         # --- Compresor centrífugo: voluta tipo snail
