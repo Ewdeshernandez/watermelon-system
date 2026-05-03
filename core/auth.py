@@ -409,3 +409,36 @@ def render_user_menu() -> None:
         if st.button("Cerrar sesión", use_container_width=True, key="logout_button"):
             logout()
             st.switch_page("pages/00_Login.py")
+
+        # Ciclo 17.7 — versión del sistema al pie del sidebar.
+        # Sutil, monoespaciada, color tenue para no competir con la
+        # navegación pero permitir trazabilidad del build (la versión
+        # se autoderiva de git tags vía core.version).
+        try:
+            from core.version import get_version_info as _gvi
+            _v = _gvi()
+            _env = _v.get("environment", "")
+            _env_color = {
+                "production":  "#10b981",
+                "staging":     "#f59e0b",
+                "development": "#0ea5e9",
+            }.get(_env, "#94a3b8")
+            _commit_part = f" · {_v['commit']}" if _v.get("commit") else ""
+            st.markdown(
+                f"""
+                <div style="margin-top:0.7rem;padding-top:0.6rem;
+                            border-top:1px solid rgba(15,23,42,0.06);
+                            font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+                            font-size:0.68rem;color:#94a3b8;line-height:1.5;
+                            text-align:center;">
+                    <span style="color:#475569;font-weight:700;">{_v['version']}</span>
+                    <span style="display:inline-block;width:6px;height:6px;
+                                 border-radius:999px;background:{_env_color};
+                                 margin:0 0.25rem;vertical-align:middle;"></span>
+                    <span>{_env}{_commit_part}</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        except Exception:
+            pass

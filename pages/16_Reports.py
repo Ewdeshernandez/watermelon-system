@@ -831,6 +831,32 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             footer,
         )
 
+        # Ciclo 17.7 — version stamp en la PORTADA del PDF.
+        # Trazabilidad: cualquier cliente que abra el reporte sabe
+        # exactamente con qué build del sistema fue generado. Se
+        # imprime en la esquina inferior derecha, fuente pequeña
+        # gris muy tenue para no compitir con el disclaimer.
+        try:
+            from core.version import get_version_info as _gvi_pdf
+            _vinfo_pdf = _gvi_pdf()
+            _ver_line = (
+                f"Generado con Watermelon System "
+                f"{_vinfo_pdf['version']}"
+            )
+            if _vinfo_pdf.get("commit"):
+                _ver_line += f" · build {_vinfo_pdf['commit']}"
+            if _vinfo_pdf.get("date"):
+                _ver_line += f" · {_vinfo_pdf['date']}"
+            canvas.setFillColor(colors.HexColor("#94a3b8"))
+            canvas.setFont(PDF_FONT_REGULAR, 5.6)
+            canvas.drawRightString(
+                page_width - internal_right,
+                0.30 * cm,
+                _ver_line,
+            )
+        except Exception:
+            pass
+
         canvas.restoreState()
 
     def _draw_internal_page(canvas, doc):
@@ -876,6 +902,21 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.setFillColor(colors.HexColor("#111827"))
         canvas.setFont(PDF_FONT_REGULAR, 6.4)
         canvas.drawCentredString((internal_left + internal_width_end) / 2, 0.55 * cm, footer)
+
+        # Ciclo 17.7 — version stamp en páginas internas también
+        try:
+            from core.version import get_version_short as _gvs_pdf
+            _ver_short = _gvs_pdf()
+            canvas.setFillColor(colors.HexColor("#94a3b8"))
+            canvas.setFont(PDF_FONT_REGULAR, 5.6)
+            canvas.drawRightString(
+                page_width - internal_right,
+                0.30 * cm,
+                f"Watermelon System {_ver_short}",
+            )
+        except Exception:
+            pass
+
         canvas.restoreState()
 
     story: List[Any] = []

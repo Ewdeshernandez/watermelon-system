@@ -5,6 +5,7 @@ from pathlib import Path
 import streamlit as st
 
 from core.auth import is_authenticated, login as wm_login, render_login_shell
+from core.version import get_version_info
 
 st.set_page_config(
     page_title="Watermelon System | Login",
@@ -523,11 +524,42 @@ with right_col:
         else:
             st.error(msg)
 
+    # Ciclo 17.6.3 — versión real desde core.version (deriva de
+    # git tags, no hardcoded). Pinta un chip con el environment
+    # coloreado para distinguir production / development a simple
+    # vista.
+    _vinfo = get_version_info()
+    _env_color = {
+        "production":  ("#10b981", "#ecfdf5"),  # verde (prod estable)
+        "staging":     ("#f59e0b", "#fef3c7"),  # ámbar
+        "development": ("#0ea5e9", "#e0f2fe"),  # azul (dev)
+    }.get(_vinfo["environment"], ("#64748b", "#f1f5f9"))
+    _env_chip = (
+        f"<span style='display:inline-flex;align-items:center;gap:0.3rem;"
+        f"padding:0.12rem 0.5rem;border-radius:999px;"
+        f"background:{_env_color[1]};color:{_env_color[0]};"
+        f"font-size:0.68rem;font-weight:700;text-transform:uppercase;"
+        f"letter-spacing:0.06em;border:1px solid {_env_color[0]}33;'>"
+        f"{_vinfo['environment']}</span>"
+    )
+    _build_extras = []
+    if _vinfo["commit"]:
+        _build_extras.append(_vinfo["commit"])
+    if _vinfo["date"]:
+        _build_extras.append(_vinfo["date"])
+    _build_line = " · ".join(_build_extras)
+
     st.markdown(
-        """
+        f"""
         <div class="wm-footer-note">
             <div>Watermelon System — Industrial monitoring software</div>
-            <div class="wm-footer-build">© 2026 SIGASAS · build dev</div>
+            <div class="wm-footer-build">
+                <b>{_vinfo['version']}</b> {_env_chip}
+                {('· ' + _build_line) if _build_line else ''}
+            </div>
+            <div class="wm-footer-build" style="font-size:0.7rem;opacity:0.7;">
+                © 2026 SIGASAS · All rights reserved
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
