@@ -2,14 +2,20 @@
 pages/_landing.py
 =================
 
-Página de aterrizaje (Home) — Ciclo 17.11 rediseño Nivel 1+2.
+Página de aterrizaje (Home) — Ciclo 17.11 (Nivel 1+2) +
+Ciclo 17.12 (Nivel 3: gauge + omnibox + modo turno).
 
 De brochure → HMI de centro de control.
 
-Layout:
+Layout (de arriba a abajo):
 
   ┌─ HERO COMPACTO ──────────────────────────────────────────┐
   │  Saludo personalizado + reloj turno + status flota        │
+  └───────────────────────────────────────────────────────────┘
+
+  ┌─ OMNIBOX (Cmd+K visual) ─────────────────────────────────┐
+  │  🔍 Buscar instancia, reporte o norma...                  │
+  │  [Resultados live debajo cuando hay query]                │
   └───────────────────────────────────────────────────────────┘
 
   ┌─ KPI BAND ────────────────────────────────────────────────┐
@@ -21,9 +27,17 @@ Layout:
   └───────────────────────────────────────────────────────────┘
 
   ┌─ ACTIVE ASSETS GRID ──────────┐  ┌─ ACTIVITY FEED ──────┐
-  │  Card por instancia con dot   │  │  Últimas 8-10        │
-  │  health + acciones rápidas    │  │  acciones del usuario│
+  │  Card por instancia con GAUGE │  │  Últimas 10          │
+  │  semicircular 0-100 (Bently)  │  │  acciones del usuario│
   └───────────────────────────────┘  └──────────────────────┘
+
+  ┌─ SCADA STATUS BAR ───────────────────────────────────────┐
+  │  ENV · version · vault · sync · sesión                    │
+  └───────────────────────────────────────────────────────────┘
+
+Modo turno: si la hora actual cae en turno noche (22-06), todo el
+hero + footer se renderizan con un acento rojo en lugar del verde
+watermelon (señal visual de "estás en modo guardia nocturna").
 
 Filosofía: en un ciclo el operador entra, ve la flota en 2 segundos,
 sabe a qué activo ir, y arranca a trabajar sin clics extra.
@@ -34,6 +48,10 @@ from __future__ import annotations
 import streamlit as st
 
 from core.auth import get_current_user, render_user_menu, require_login
+from core.health_score import (
+    compute_health_score,
+    render_score_gauge,
+)
 from core.home_metrics import (
     activity_sparkline,
     compute_fleet_status,
@@ -42,6 +60,7 @@ from core.home_metrics import (
     list_recent_activity,
     severity_sparkline,
 )
+from core.omnibox_search import kind_color, kind_label, omnibox_search
 from core.ui.theme import apply_theme
 
 
@@ -65,6 +84,28 @@ _greet = get_personalized_greeting(_full_name)
 _fleet = compute_fleet_status()
 _health = get_system_health()
 _activity = list_recent_activity(limit=10)
+
+# =============================================================
+# MODO TURNO (Ciclo 17.12 — Nivel 3)
+# =============================================================
+# El "modo noche" se activa entre 22:00 y 06:00 y vira el accent
+# del hero+footer del verde watermelon a un rojo guardia. No es
+# dark mode pleno (eso requiere theme.toml de Streamlit), es una
+# señal visual sutil para que el operador sepa que está en turno
+# nocturno cuando entra al sistema.
+_is_night = _greet["shift"] == "Turno noche"
+_HERO_BG_DAY = (
+    "radial-gradient(circle at 12% 10%, rgba(74,222,128,0.10) 0%, transparent 35%),"
+    "radial-gradient(circle at 92% 90%, rgba(56,189,248,0.10) 0%, transparent 38%),"
+    "linear-gradient(135deg, #0b1426 0%, #0f1d36 50%, #0b1426 100%)"
+)
+_HERO_BG_NIGHT = (
+    "radial-gradient(circle at 12% 10%, rgba(239,68,68,0.14) 0%, transparent 35%),"
+    "radial-gradient(circle at 92% 90%, rgba(168,85,247,0.10) 0%, transparent 38%),"
+    "linear-gradient(135deg, #1a0a14 0%, #2a0e1f 50%, #1a0a14 100%)"
+)
+_ACCENT_COLOR = "#ef4444" if _is_night else "#10b981"
+_HERO_BG = _HERO_BG_NIGHT if _is_night else _HERO_BG_DAY
 
 
 # =============================================================
@@ -96,6 +137,13 @@ st.markdown(
         justify-content: space-between;
         gap: 28px;
         flex-wrap: wrap;
+        position: relative;
+    }
+    .wmh-hero::before {
+        content: "";
+        position: absolute; left: 0; top: 0; bottom: 0;
+        width: 4px; border-radius: 22px 0 0 22px;
+        opacity: 0.85;
     }
     .wmh-hero-left { flex: 1 1 60%; min-width: 320px; }
     .wmh-hero-right { flex: 0 0 auto; text-align: right; min-width: 240px; }
@@ -271,6 +319,78 @@ st.markdown(
     .wmh-sev-pill.danger  { background: #fee2e2; color: #b91c1c; }
     .wmh-sev-pill.unknown { background: #f1f5f9; color: #475569; }
 
+    /* ───── HEALTH SCORE GAUGE WRAPPER ───── */
+    .wmh-gauge-wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        padding: 6px 0 0 0;
+    }
+    .wmh-gauge-band {
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.10em;
+        text-transform: uppercase;
+    }
+    .wmh-gauge-tip {
+        font-size: 10px;
+        color: #94a3b8;
+        text-align: center;
+        line-height: 1.3;
+        max-width: 130px;
+    }
+
+    /* ───── OMNIBOX (Cmd+K visual) ───── */
+    .wmh-omni-wrap {
+        background: #ffffff;
+        border: 1px solid #e6ebf2;
+        border-radius: 14px;
+        padding: 8px 14px 8px 14px;
+        margin-bottom: 22px;
+        box-shadow: 0 4px 14px rgba(15,23,42,0.05);
+    }
+    .wmh-omni-hint {
+        font-size: 11px;
+        color: #94a3b8;
+        margin-top: 4px;
+        margin-left: 2px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .wmh-omni-results {
+        margin-top: 8px;
+        max-height: 320px;
+        overflow-y: auto;
+        border-top: 1px solid #f1f5f9;
+        padding-top: 6px;
+    }
+    .wmh-omni-hit {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 8px;
+        border-radius: 8px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: background 0.08s ease;
+    }
+    .wmh-omni-hit:hover { background: #f8fafc; }
+    .wmh-omni-hit-icon { font-size: 16px; flex: 0 0 auto; }
+    .wmh-omni-hit-body { flex: 1 1 auto; }
+    .wmh-omni-hit-title { color: #0f172a; font-weight: 700; }
+    .wmh-omni-hit-sub {
+        color: #94a3b8; font-size: 11px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .wmh-omni-hit-kind {
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.10em;
+        padding: 2px 8px;
+        border-radius: 999px;
+        flex: 0 0 auto;
+    }
+
     /* ───── ACTIVITY FEED ───── */
     .wmh-feed {
         background: #ffffff;
@@ -331,6 +451,21 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# =============================================================
+# CSS DINÁMICO — modo turno (Ciclo 17.12)
+# =============================================================
+# Override condicional del background del hero y del accent.
+# Si _is_night, vira a tonos rojo/púrpura "guardia nocturna".
+st.markdown(
+    f"""
+    <style>
+    .wmh-hero {{ background: {_HERO_BG} !important; }}
+    .wmh-hero::before {{ background: {_ACCENT_COLOR}; }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 # =============================================================
 # HERO COMPACTO
@@ -372,6 +507,82 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+
+# =============================================================
+# OMNIBOX (Ciclo 17.12 — Nivel 3)
+# =============================================================
+# Búsqueda global fuzzy contra: instancias del Vault, drafts de
+# reportes y normas ISO/API. Resultados live debajo.
+# Si la query está vacía → no muestra nada (no satura el home).
+st.markdown('<div class="wmh-omni-wrap">', unsafe_allow_html=True)
+_omni_q = st.text_input(
+    label="Búsqueda global",
+    placeholder="🔍  Buscar activo, reporte o norma — ej. \"TES1\", \"ISO 20816\", \"684\", \"balanceo\"…",
+    key="wmh_omnibox_q",
+    label_visibility="collapsed",
+)
+st.markdown(
+    '<div class="wmh-omni-hint">tip: tipea ≥2 caracteres · '
+    'enter para buscar · click en un resultado para ir directo</div>',
+    unsafe_allow_html=True,
+)
+
+if _omni_q and len(_omni_q.strip()) >= 2:
+    _hits = omnibox_search(_omni_q, limit=8)
+    if not _hits:
+        st.markdown(
+            '<div class="wmh-omni-results">'
+            '<div style="padding:10px;color:#94a3b8;font-size:13px;">'
+            'Sin resultados para esa búsqueda.</div></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown('<div class="wmh-omni-results">', unsafe_allow_html=True)
+        for i, h in enumerate(_hits):
+            kcol = kind_color(h.kind)
+            klabel = kind_label(h.kind).upper()
+            cols = st.columns([0.07, 0.78, 0.15])
+            with cols[0]:
+                st.markdown(
+                    f'<div style="font-size:18px;text-align:center;'
+                    f'padding-top:6px;">{h.icon}</div>',
+                    unsafe_allow_html=True,
+                )
+            with cols[1]:
+                st.markdown(
+                    f'<div style="line-height:1.25;padding-top:4px;">'
+                    f'<div style="color:#0f172a;font-weight:700;font-size:13px;">{h.title}</div>'
+                    f'<div style="color:#94a3b8;font-size:11px;'
+                    f'font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">'
+                    f'{h.subtitle}</div></div>',
+                    unsafe_allow_html=True,
+                )
+            with cols[2]:
+                _btn_key = f"omni_hit_{i}_{h.kind}_{h.payload.get('instance_id','') or h.payload.get('draft_name','') or h.payload.get('norm_code','')}"
+                _btn_label = "Abrir →"
+                if st.button(_btn_label, key=_btn_key, use_container_width=True):
+                    if h.kind == "instance":
+                        st.session_state["wm_active_instance"] = h.payload.get("instance_id", "")
+                    elif h.kind == "report":
+                        st.session_state["wm_active_draft_name"] = h.payload.get("draft_name", "")
+                    elif h.kind == "norm":
+                        st.session_state["wm_omnibox_focus_norm"] = h.payload.get("norm_code", "")
+                    if h.target_page:
+                        try:
+                            st.switch_page(h.target_page)
+                        except Exception:
+                            pass
+            # Pill kind small
+            st.markdown(
+                f'<div style="margin:-4px 0 6px 38px;">'
+                f'<span class="wmh-omni-hit-kind" style="background:{kcol}1A;color:{kcol};">'
+                f'{klabel}</span></div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 
 # =============================================================
@@ -493,6 +704,7 @@ with left:
         )
     else:
         # Grid 3 columnas, máximo 9 cards visibles
+        # Cada card incluye Health Score gauge SVG (Ciclo 17.12 Nivel 3)
         instances = _fleet["instances"][:9]
         for row_start in range(0, len(instances), 3):
             cols = st.columns(3, gap="medium")
@@ -501,6 +713,35 @@ with left:
                     sev_class = inst.severity
                     asset_line = inst.asset_class or inst.profile_key or "—"
                     loc_line = inst.location or "sin ubicación"
+
+                    # Calcular health score (carga la instancia full)
+                    try:
+                        from core.instance_state import get_instance
+                        _full = get_instance(inst.instance_id)
+                        if _full is not None:
+                            _hs_data = {
+                                "tag": inst.tag,
+                                "iso_norm_code": getattr(_full, "iso_norm_code", "") or "",
+                                "last_balance_date": getattr(_full, "last_balance_date", "") or "",
+                                "documents": getattr(_full, "documents", []) or [],
+                                "setpoint_warning_override": getattr(_full, "setpoint_warning_override", 0.0) or 0.0,
+                                "setpoint_danger_override": getattr(_full, "setpoint_danger_override", 0.0) or 0.0,
+                                "override_justification": getattr(_full, "override_justification", "") or "",
+                            }
+                            _hs = compute_health_score(_hs_data)
+                        else:
+                            _hs = compute_health_score({"tag": inst.tag, "iso_norm_code": "",
+                                                         "last_balance_date": "", "documents": []})
+                    except Exception:
+                        _hs = compute_health_score({"tag": inst.tag, "iso_norm_code": "",
+                                                     "last_balance_date": "", "documents": []})
+
+                    _gauge_html = render_score_gauge(_hs.score, _hs.color, size=110)
+                    _band_html = (
+                        f'<div class="wmh-gauge-band" style="color:{_hs.color};">'
+                        f'{_hs.band_label}</div>'
+                    )
+
                     st.markdown(
                         f"""
                         <div class="wmh-asset">
@@ -509,6 +750,11 @@ with left:
                                 <span class="wmh-sev-pill {sev_class}">{inst.severity_label}</span>
                             </div>
                             <div class="wmh-asset-class">{asset_line}</div>
+                            <div class="wmh-gauge-wrap">
+                                {_gauge_html}
+                                {_band_html}
+                                <div class="wmh-gauge-tip">{_hs.one_liner}</div>
+                            </div>
                             <div class="wmh-asset-meta">
                                 📍 {loc_line} · 📁 {inst.n_documents} docs · 🕒 {inst.last_seen_human}
                             </div>
