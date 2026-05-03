@@ -3333,11 +3333,16 @@ def build_trend_figure(
             ),
         )
         fig.update_xaxes(
+            type="date",  # Ciclo 17.8.1 — forzar date axis (en mixed mode
+                          # con secondary_y, Plotly a veces se va a 'linear'
+                          # y muestra timestamps en nanosegundos)
             title="Time",
             range=[x_min_final, x_max_final] if x_min_final is not None and x_max_final is not None else None,
             showgrid=True, gridcolor="rgba(148, 163, 184, 0.18)", zeroline=False,
             showline=True, linecolor="#9ca3af", ticks="outside", tickcolor="#6b7280", ticklen=4,
             showspikes=True, spikecolor="#6b7280", spikesnap="cursor", spikemode="across",
+            tickformat="%Y-%m-%d %H:%M",
+            hoverformat="%Y-%m-%d %H:%M:%S",
         )
         fig.update_yaxes(
             title_text=axis_title,
@@ -3368,11 +3373,15 @@ def build_trend_figure(
                 font=dict(size=11.2),
             ),
             xaxis=dict(
+                type="date",  # Ciclo 17.8.1 — forzar date axis para que
+                              # NUNCA muestre timestamps en nanosegundos
                 title="Time",
                 range=[x_min_final, x_max_final] if x_min_final is not None and x_max_final is not None else None,
                 showgrid=True, gridcolor="rgba(148, 163, 184, 0.18)", zeroline=False,
                 showline=True, linecolor="#9ca3af", ticks="outside", tickcolor="#6b7280", ticklen=4,
                 showspikes=True, spikecolor="#6b7280", spikesnap="cursor", spikemode="across",
+                tickformat="%Y-%m-%d %H:%M",
+                hoverformat="%Y-%m-%d %H:%M:%S",
             ),
             yaxis=dict(
                 title=axis_title,
@@ -3472,7 +3481,12 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
         font=dict(size=30, color="#111827"),
     )
 
-    fig.update_xaxes(title_font=dict(size=40), tickfont=dict(size=26))
+    fig.update_xaxes(
+        type="date",  # Ciclo 17.8.1 — date axis también en HD export
+        title_font=dict(size=40),
+        tickfont=dict(size=26),
+        tickformat="%Y-%m-%d %H:%M",
+    )
     fig.update_yaxes(title_font=dict(size=40), tickfont=dict(size=26))
 
     # Ciclo 17.5.4 — coordenadas explícitas del segundo eje en
