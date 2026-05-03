@@ -161,10 +161,32 @@ def create_user(
         u = getattr(resp, "user", None) or resp
         return {"ok": True, "user": _user_to_dict(u)}
     except Exception as e:
-        msg = str(e)
-        if "already" in msg.lower() or "duplicate" in msg.lower():
+        msg = str(e) or repr(e)
+        cls = e.__class__.__name__
+        low = msg.lower()
+        # Loggear a stderr también para que aparezca en Streamlit Cloud logs
+        import sys as _sys
+        print(f"[WM_AUTH] create_user FAIL · {cls}: {msg}", file=_sys.stderr, flush=True)
+        # Intentar extraer status code y body si es AuthApiError
+        status = getattr(e, "status", None) or getattr(e, "code", None) or ""
+        body = getattr(e, "message", "") or getattr(e, "msg", "") or ""
+        if isinstance(body, dict):
+            body = str(body)
+
+        if "already" in low or "duplicate" in low or "exists" in low:
             return {"ok": False, "error": f"Ya existe un usuario con email {email_norm}."}
-        return {"ok": False, "error": msg}
+        if "user not allowed" in low or "not_admin" in low or "forbidden" in low:
+            return {"ok": False, "error": (
+                f"❌ Permiso denegado por Supabase Auth.\n\n"
+                f"**Error:** `{cls}: {msg}`\n"
+                f"**Status:** `{status}`\n\n"
+                f"Causas posibles:\n"
+                f"1. La service_key efectivamente cargada NO es service_role legacy. "
+                f"Andá a Streamlit Cloud → app → Manage app → Reboot, y volvé a intentar.\n"
+                f"2. Email Provider no está habilitado en el proyecto Supabase.\n"
+                f"3. Hay rate limiting (más de 30 creaciones/hora)."
+            )}
+        return {"ok": False, "error": f"{cls}: {msg} (status={status})"}
 
 
 def signin_user(email: str, password: str) -> Dict[str, Any]:
