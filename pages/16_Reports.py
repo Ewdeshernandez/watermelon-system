@@ -355,32 +355,76 @@ def _autofill_report_meta_from_active_instance() -> None:
 
     meta = st.session_state["report_meta"]
 
-    # Mapa instance.field → meta key. Sólo se rellena si meta[key] está
-    # vacío (back-fill no destructivo).
-    mappings = {
-        "client": (inst.client or "").strip(),
-        "asset_class": (inst.asset_class or "").strip(),
-        "asset_model": (inst.driver_model or inst.driven_model or "").strip(),
-        "location": (inst.site or inst.location or "").strip(),
-        "asset": (inst.tag or "").strip(),
-        "unit": (inst.tag or "").strip(),
-    }
-    for k, v in mappings.items():
-        if v and not (meta.get(k) or "").strip():
-            meta[k] = v
+    # Ciclo 17.5.10 — DETECCIÓN DE CAMBIO DE INSTANCIA
+    # ===============================================================
+    # Bug reportado: cliente activo TES1 pero el reporte muestra
+    # cliente, sitio, clase, modelo, train_description y esquemático
+    # de C200C (la instancia previa). Causa: el back-fill original
+    # solo escribía cuando el meta[key] estaba VACÍO, lo que dejaba
+    # los datos pegados al cambiar de instancia.
+    #
+    # Fix: si la instancia activa cambió desde el último auto-fill,
+    # los campos heredados de la instancia anterior están stale y
+    # deben sobrescribirse. Marcamos el origen del autofill en
+    # meta["_autofilled_from_instance_id"] para detectar el cambio.
+    last_filled_from = (meta.get("_autofilled_from_instance_id") or "").strip()
+    instance_changed = bool(last_filled_from) and last_filled_from != inst_id
 
-    # Train description: si el meta no la tiene, la componemos de
-    # los campos driver/driven de la instance.
-    if not (meta.get("train_description") or "").strip():
-        composed = compose_train_description(inst)
-        if composed:
-            meta["train_description"] = composed
+    def _maybe_set(key: str, value: str) -> None:
+        """Escribe meta[key]=value si está vacío O si cambió la
+        instancia activa. Sincroniza también el widget key
+        report_meta_<key> para que el textbox refleje el cambio."""
+        value = (value or "").strip()
+        if not value:
+            return
+        if instance_changed or not (meta.get(key) or "").strip():
+            meta[key] = value
+            _wkey = f"report_meta_{key}"
+            if _wkey in st.session_state:
+                st.session_state[_wkey] = value
 
-    # Schematic: doc_id del esquemático en el Vault de la instance.
-    # El render del PDF lo resuelve a bytes vía get_instance_document_bytes.
-    if inst.schematic_png and not (meta.get("schematic_doc_id") or "").strip():
-        meta["schematic_doc_id"] = inst.schematic_png
-        meta["schematic_instance_id"] = inst.instance_id
+    # Campos directos de la instancia
+    _maybe_set("client", inst.client or "")
+    _maybe_set("asset_class", inst.asset_class or "")
+    _maybe_set("asset_model", inst.driver_model or inst.driven_model or "")
+    _maybe_set("location", inst.site or inst.location or "")
+    _maybe_set("asset", inst.tag or "")
+    _maybe_set("unit", inst.tag or "")
+
+    # Train description compuesta
+    composed = compose_train_description(inst)
+    _maybe_set("train_description", composed or "")
+
+    # Esquemático principal: si la instancia cambió, hay que
+    # invalidar el cached del meta antes de re-leer.
+    if instance_changed:
+        meta.pop("schematic_doc_id", None)
+        meta.pop("schematic_instance_id", None)
+    if inst.schematic_png:
+        if instance_changed or not (meta.get("schematic_doc_id") or "").strip():
+            meta["schematic_doc_id"] = inst.schematic_png
+            meta["schematic_instance_id"] = inst.instance_id
+
+    # Cuando cambió la instancia el resumen ejecutivo cached pierde
+    # validez (puede mencionar la máquina vieja). Lo invalidamos para
+    # forzar regeneración con findings de la nueva instancia.
+    if instance_changed:
+        meta["executive_summary"] = ""
+        if "report_meta_executive_summary" in st.session_state:
+            st.session_state["report_meta_executive_summary"] = ""
+
+    # Marcar el origen para detectar futuros cambios
+    meta["_autofilled_from_instance_id"] = inst_id
+
+    # Persistir a disco si hubo cambio efectivo
+    if instance_changed:
+        try:
+            save_report_state(
+                items=st.session_state.get("report_items", []) or [],
+                meta=meta,
+            )
+        except Exception:
+            pass
 
 
 _autofill_report_meta_from_active_instance()
