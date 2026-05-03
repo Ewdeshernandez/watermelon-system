@@ -363,10 +363,12 @@ def render_sensor_map_diagram(
         == "recip_compressor"
     )
     if _need_lower_y:
-        # Cilindros UP grandes + cabezal + válvulas + etiqueta del
-        # driven llegan a y≈4.4. Cilindros DOWN bajan hasta y≈-0.1.
-        # Damos margen amplio para que nada se corte.
-        ax_top.set_ylim(-0.4, 4.7)
+        # Ciclo 17.5.15 — con cilindros horizontales (en lugar de
+        # UP/DOWN verticales) ya no necesitamos ylim negativo. El
+        # crankcase central es alto (1.55) pero queda dentro del
+        # rango (0, 4). Damos margen extra para la etiqueta del
+        # driven que va arriba del crankcase.
+        ax_top.set_ylim(0, 4.2)
     else:
         ax_top.set_ylim(0, 4)
     ax_top.set_aspect("equal")
@@ -570,37 +572,63 @@ def render_sensor_map_diagram(
     dvn_top_y = rotor_y + 1.50  # default para etiqueta
 
     if dvn_kind_resolved == "recip_compressor":
-        # --- Compresor reciprocante balanced-opposed (estilo
-        #     ARIEL KBK): crankcase compacto + cilindros GRANDES
-        #     y bien distinguibles, distribuidos en pares opuestos
-        #     (UP / DOWN) por throw del cigüeñal.
-        # Ciclo 17.5.14 — el dibujo previo hacía el crankcase
-        # gigante y cilindros pequeños, lo que confundía: los
-        # cilindros DOWN se leían como patas. Ahora crankcase más
-        # bajo + cilindros prominentes con cabezales claros y
-        # válvulas visibles.
+        # --- Compresor reciprocante HORIZONTAL-OPPOSED (estilo
+        #     ARIEL KBK real): crankcase central VERTICAL +
+        #     cilindros HORIZONTALES extendiéndose hacia los lados
+        #     en pares opuestos (top-left + top-right + bottom-left
+        #     + bottom-right). Esto coincide con el dibujo técnico
+        #     real de un ARIEL KBK/4: 2 cilindros por cada lado
+        #     del cajón, todos horizontales.
+        # Ciclo 17.5.15 — pivote del diseño: cilindros horizontales
+        # en lugar de verticales.
 
-        crank_h = 0.50  # crankcase más bajo (antes 0.85)
-        # Crankcase central (más estrecho que el dvn_w total para
-        # dejar aire alrededor de los cilindros)
-        crank_pad = 0.10
-        crank_left = dvn_left + crank_pad
-        crank_right = dvn_right - crank_pad
-        crank_w = crank_right - crank_left
+        # ---------- Crankcase: bloque central VERTICAL ----------
+        # Más alto que ancho. Centrado horizontalmente en el
+        # driven section. Deja espacio a los lados para que los
+        # cilindros se extiendan horizontalmente.
+        crank_w_ratio = 0.32   # 32% del ancho del driven
+        crank_h_total = 1.55   # altura total del crankcase
+        crank_w = dvn_w * crank_w_ratio
+        crank_left = dvn_left + (dvn_w - crank_w) / 2.0
+        crank_right = crank_left + crank_w
+        crank_top = rotor_y + crank_h_total / 2.0
+        crank_btm = rotor_y - crank_h_total / 2.0
+
         ax_top.add_patch(mpatches.FancyBboxPatch(
-            (crank_left, rotor_y - crank_h),
-            crank_w, 2 * crank_h,
-            boxstyle="round,pad=0.01,rounding_size=0.03",
-            facecolor=_COLOR_DRIVEN, alpha=0.18,
-            edgecolor=_COLOR_DRIVEN, linewidth=1.6, zorder=1,
+            (crank_left, crank_btm),
+            crank_w, crank_h_total,
+            boxstyle="round,pad=0.01,rounding_size=0.04",
+            facecolor=_COLOR_DRIVEN, alpha=0.20,
+            edgecolor=_COLOR_DRIVEN, linewidth=1.7, zorder=2,
         ))
-        # Línea de eje del cigüeñal (visible dentro del crankcase)
-        ax_top.plot(
-            [crank_left + 0.06, crank_right - 0.06], [rotor_y, rotor_y],
-            color=_COLOR_DRIVEN, linewidth=0.7, alpha=0.45, zorder=2,
+
+        # Cigüeñal en el centro del crankcase (círculo grande +
+        # contramasas/throws visibles como pequeños círculos
+        # alrededor)
+        ax_top.add_patch(mpatches.Circle(
+            ((crank_left + crank_right) / 2.0, rotor_y),
+            crank_w * 0.18,
+            facecolor=_COLOR_DRIVEN, alpha=0.45,
+            edgecolor=_COLOR_DRIVEN, linewidth=1.4, zorder=3,
+        ))
+        # Marca interior del cigüeñal (cruz)
+        cs_cx = (crank_left + crank_right) / 2.0
+        cs_r = crank_w * 0.18
+        ax_top.plot([cs_cx - cs_r * 0.7, cs_cx + cs_r * 0.7],
+                    [rotor_y, rotor_y],
+                    color=_COLOR_DRIVEN, linewidth=0.9, alpha=0.7, zorder=4)
+        ax_top.plot([cs_cx, cs_cx],
+                    [rotor_y - cs_r * 0.7, rotor_y + cs_r * 0.7],
+                    color=_COLOR_DRIVEN, linewidth=0.9, alpha=0.7, zorder=4)
+        # Etiqueta del cigüeñal en el centro
+        ax_top.text(
+            cs_cx, rotor_y - cs_r - 0.08, "cigüeñal",
+            fontsize=7.5, fontstyle="italic",
+            color=_COLOR_DRIVEN, ha="center", va="top",
+            alpha=0.75, zorder=4,
         )
 
-        # ---------- detectar planos cilindro ----------
+        # ---------- Detectar planos cilindro ----------
         cyl_planes = [
             int(s.get("plane", 0))
             for s in sensors
@@ -615,81 +643,147 @@ def render_sensor_map_diagram(
 
         n_cyl = max(1, len(cyl_planes))
 
-        # Distribución balanced-opposed:
-        # n_throws = ceil(N/2). Cada throw tiene un cilindro UP y
-        # otro DOWN (cuando hay otro disponible).
-        n_throws = max(1, (n_cyl + 1) // 2)
+        # ---------- Cilindros HORIZONTALES alrededor del crankcase ----------
+        # Para N cilindros distribuidos:
+        #   N=1 → solo 1 (lado derecho)
+        #   N=2 → 1 izquierda + 1 derecha (al medio)
+        #   N=3 → 1 izquierda + 2 derecha (top+bottom)
+        #   N=4 → 2 izquierda + 2 derecha (top+bottom cada lado)
+        #   N=6 → 3 izquierda + 3 derecha
+        # Convención: pares (1,3) van TOP, impares (2,4) van BOTTOM.
+        # Asignación por índice:
+        #   i=0 → top-left   (Cilindro 1)
+        #   i=1 → bottom-left (Cilindro 2)
+        #   i=2 → top-right  (Cilindro 3)
+        #   i=3 → bottom-right (Cilindro 4)
+        #   i=4 → mid-left
+        #   i=5 → mid-right
+        # Para n=4 esto da exactamente 2 LEFT + 2 RIGHT como en el
+        # ARIEL KBK/4 real.
 
-        # Cilindros AHORA son grandes y proporcionados al espacio
-        cyl_h = 1.20  # más altos (antes 0.95)
-        cyl_w = min(0.55, (crank_w - 0.20) / max(n_throws + 0.5, 2))
+        # cyl_len: largo del cuerpo horizontal del cilindro.
+        # Se descuenta el ancho del cabezal (head_w) y un margen
+        # de 0.20 para que el cabezal del lado IZQUIERDO no se
+        # superponga con el coupling.
+        head_w = 0.22  # ancho del cabezal con válvulas
+        side_margin = 0.22
+        cyl_len = (dvn_w - crank_w) / 2.0 - head_w - side_margin
+        cyl_len = max(cyl_len, 0.50)  # mínimo razonable
+        cyl_h = 0.45                              # alto del cilindro
+        cyl_y_top = rotor_y + crank_h_total * 0.32
+        cyl_y_bot = rotor_y - crank_h_total * 0.32 - cyl_h
+        cyl_y_mid = rotor_y - cyl_h / 2.0
+        valve_w = 0.07
+        valve_h = 0.08
 
-        # Distribución horizontal de los throws
-        throw_step = (crank_w - 0.20 - cyl_w) / max(n_throws - 1, 1) if n_throws > 1 else 0
-        block_w = (cyl_w + throw_step * (n_throws - 1)) if n_throws > 1 else cyl_w
-        throw_start_x = dvn_left + (dvn_w - block_w) / 2.0
+        def _draw_horizontal_cylinder(
+            side: str, position: str, cyl_label: str
+        ) -> None:
+            """side='left' or 'right'; position='top'/'bot'/'mid'."""
+            # x range
+            if side == "left":
+                # Cilindro extiende desde el crankcase HACIA LA IZQUIERDA
+                cyl_x_right = crank_left
+                cyl_x_left = cyl_x_right - cyl_len
+                head_x_left = cyl_x_left - head_w
+                head_x_right = cyl_x_left
+                valve_anchor = head_x_left  # válvulas en el extremo lejano (izquierdo)
+            else:  # right
+                cyl_x_left = crank_right
+                cyl_x_right = cyl_x_left + cyl_len
+                head_x_left = cyl_x_right
+                head_x_right = cyl_x_right + head_w
+                valve_anchor = head_x_right  # válvulas en el extremo lejano (derecho)
+            # y range
+            if position == "top":
+                cy = cyl_y_top
+            elif position == "bot":
+                cy = cyl_y_bot
+            else:
+                cy = cyl_y_mid
 
-        # Helper para dibujar UN cilindro con cabezal + válvulas
-        def _draw_cylinder(cx_left: float, dir_up: bool, cyl_label: str = ""):
-            """Dibuja un cilindro vertical con cabezal y detalle
-            de válvulas. dir_up=True → arriba; False → abajo."""
-            sign = 1 if dir_up else -1
-            base_y = rotor_y + sign * crank_h
-            # 1) Cilindro propiamente (cuerpo)
-            cyl_y0 = base_y if dir_up else base_y - cyl_h
+            # 1) Cuerpo del cilindro (rectángulo horizontal)
             ax_top.add_patch(mpatches.FancyBboxPatch(
-                (cx_left, cyl_y0),
-                cyl_w, cyl_h,
+                (cyl_x_left, cy),
+                cyl_x_right - cyl_x_left, cyl_h,
                 boxstyle="round,pad=0.01,rounding_size=0.04",
-                facecolor=_COLOR_DRIVEN, alpha=0.26,
-                edgecolor=_COLOR_DRIVEN, linewidth=1.6, zorder=2,
+                facecolor=_COLOR_DRIVEN, alpha=0.28,
+                edgecolor=_COLOR_DRIVEN, linewidth=1.6, zorder=3,
             ))
-            # 2) Cabezal (head) con válvulas — más alto y prominente
-            head_h = 0.26
-            head_y0 = (cyl_y0 + cyl_h) if dir_up else (cyl_y0 - head_h)
+
+            # 2) Cabezal con válvulas (en el extremo lejano del crankcase)
             ax_top.add_patch(mpatches.FancyBboxPatch(
-                (cx_left - cyl_w * 0.12, head_y0),
-                cyl_w * 1.24, head_h,
+                (head_x_left, cy - cyl_h * 0.12),
+                head_x_right - head_x_left, cyl_h * 1.24,
                 boxstyle="round,pad=0.01,rounding_size=0.05",
-                facecolor=_COLOR_DRIVEN, alpha=0.42,
-                edgecolor=_COLOR_DRIVEN, linewidth=1.5, zorder=3,
+                facecolor=_COLOR_DRIVEN, alpha=0.45,
+                edgecolor=_COLOR_DRIVEN, linewidth=1.5, zorder=4,
             ))
-            # 3) Válvulas en el cabezal (2 stubs verticales pequeños
-            #    representando válvula de succión y descarga)
-            valve_w = 0.07
-            valve_h = 0.10
-            valve_y = (head_y0 + head_h) if dir_up else (head_y0 - valve_h)
-            for _vx in (cx_left + cyl_w * 0.18, cx_left + cyl_w * 0.62):
+
+            # 3) Válvulas (2 stubs verticales en el cabezal)
+            valve_y_top = cy + cyl_h - valve_h * 0.20
+            valve_y_bot = cy - valve_h * 0.80
+            valve_x_offset_top = head_x_left + (head_x_right - head_x_left) * 0.30 - valve_w / 2.0
+            valve_x_offset_bot = head_x_left + (head_x_right - head_x_left) * 0.70 - valve_w / 2.0
+            for _vy, _vx in [
+                (valve_y_top, valve_x_offset_top),
+                (valve_y_top, valve_x_offset_bot),
+                (valve_y_bot, valve_x_offset_top),
+                (valve_y_bot, valve_x_offset_bot),
+            ]:
                 ax_top.add_patch(mpatches.Rectangle(
-                    (_vx, valve_y), valve_w, valve_h,
-                    facecolor=_COLOR_DRIVEN, alpha=0.55,
-                    edgecolor=_COLOR_DRIVEN, linewidth=1.0, zorder=4,
+                    (_vx, _vy), valve_w, valve_h,
+                    facecolor=_COLOR_DRIVEN, alpha=0.60,
+                    edgecolor=_COLOR_DRIVEN, linewidth=0.9, zorder=5,
                 ))
+
             # 4) Etiqueta del cilindro (numero) en el centro del body
             if cyl_label:
                 ax_top.text(
-                    cx_left + cyl_w / 2.0,
-                    cyl_y0 + cyl_h / 2.0,
+                    (cyl_x_left + cyl_x_right) / 2.0,
+                    cy + cyl_h / 2.0,
                     cyl_label,
                     fontsize=10, fontweight="bold",
                     color=_COLOR_DRIVEN, ha="center", va="center",
-                    zorder=5,
+                    zorder=6,
                 )
 
-        # Asignar cilindros a posiciones:
-        # i=0 → throw 0 UP    (Cilindro 1)
-        # i=1 → throw 0 DOWN  (Cilindro 2, opuesto)
-        # i=2 → throw 1 UP    (Cilindro 3)
-        # i=3 → throw 1 DOWN  (Cilindro 4, opuesto)
-        for _i in range(n_cyl):
-            _throw_idx = _i // 2
-            _is_up = (_i % 2 == 0)
-            _cx_left = throw_start_x + _throw_idx * (cyl_w + throw_step)
-            _label = str(_i + 1)  # numero del cilindro
-            _draw_cylinder(_cx_left, dir_up=_is_up, cyl_label=_label)
+        # Asignación de los cilindros a las 4 (o más) posiciones
+        # alrededor del crankcase. Se sigue el orden visible en
+        # photos reales del ARIEL KBK/4.
+        positions = []
+        if n_cyl == 1:
+            positions = [("right", "mid")]
+        elif n_cyl == 2:
+            positions = [("left", "mid"), ("right", "mid")]
+        elif n_cyl == 3:
+            positions = [("left", "top"), ("right", "top"), ("right", "bot")]
+        elif n_cyl == 4:
+            # ARIEL KBK/4: 2 a la izquierda + 2 a la derecha
+            positions = [
+                ("left", "top"),    # Cilindro 1
+                ("left", "bot"),    # Cilindro 2
+                ("right", "top"),   # Cilindro 3
+                ("right", "bot"),   # Cilindro 4
+            ]
+        elif n_cyl == 6:
+            positions = [
+                ("left", "top"), ("left", "mid"), ("left", "bot"),
+                ("right", "top"), ("right", "mid"), ("right", "bot"),
+            ]
+        else:
+            # general: dividir mitad-y-mitad alternando lados
+            for _i in range(n_cyl):
+                _side = "left" if _i % 2 == 0 else "right"
+                _slot = ("top", "mid", "bot")[(_i // 2) % 3]
+                positions.append((_side, _slot))
 
-        # Etiqueta del driven (arriba, sobre el cilindro UP)
-        dvn_top_y = rotor_y + crank_h + cyl_h + 0.26 + 0.10 + 0.30
+        for _i in range(min(n_cyl, len(positions))):
+            _side, _pos = positions[_i]
+            _draw_horizontal_cylinder(_side, _pos, str(_i + 1))
+
+        # Etiqueta del driven (arriba del crankcase)
+        dvn_top_y = crank_top + 0.30
 
     elif dvn_kind_resolved == "centrif_compressor":
         # --- Compresor centrífugo: voluta tipo snail
