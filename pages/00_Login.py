@@ -271,10 +271,18 @@ st.markdown(
        de webkit-autofill/focus-visible.
        ========================================================= */
 
-    /* Wrapper exterior del input */
-    div[data-testid="stTextInput"] > div > div,
-    div[data-testid="stTextInput"] [data-baseweb="input"],
-    div[data-testid="stTextInput"] [data-baseweb="base-input"] {
+    /* =========================================================
+       FIX 17.6.2 — Doble borde resuelto.
+       BaseWeb tiene 2 capas anidadas que ambas pintaban borde:
+         [data-baseweb="input"]      ← OUTER (le ponemos el borde)
+           [data-baseweb="base-input"]  ← INNER (transparente)
+       Antes le ponía borde a las DOS y se veía doble (uno
+       afuera del otro). Ahora solo el OUTER tiene borde + bg,
+       el INNER queda transparente sin borde.
+       ========================================================= */
+
+    /* OUTER: el único que pinta borde + background */
+    div[data-testid="stTextInput"] [data-baseweb="input"] {
         background: #f8fafd !important;
         border: 1px solid #d3dde9 !important;
         border-radius: 12px !important;
@@ -283,30 +291,36 @@ st.markdown(
         outline: none !important;
         transition: border-color 0.18s ease, box-shadow 0.18s ease !important;
     }
-    /* Hover */
-    div[data-testid="stTextInput"] > div > div:hover,
-    div[data-testid="stTextInput"] [data-baseweb="input"]:hover,
-    div[data-testid="stTextInput"] [data-baseweb="base-input"]:hover {
+    /* INNER: transparente, sin borde, sin radius (hereda del outer) */
+    div[data-testid="stTextInput"] [data-baseweb="base-input"] {
+        background: transparent !important;
+        border: 0 !important;
+        border-radius: 0 !important;
+        box-shadow: none !important;
+        outline: none !important;
+        min-height: 50px !important;
+    }
+    /* Hover (solo outer) */
+    div[data-testid="stTextInput"] [data-baseweb="input"]:hover {
         border-color: #b8c6d8 !important;
         box-shadow: none !important;
     }
-    /* Focus: azul corporativo, NO rojo */
-    div[data-testid="stTextInput"] > div > div:focus-within,
-    div[data-testid="stTextInput"] [data-baseweb="input"]:focus-within,
-    div[data-testid="stTextInput"] [data-baseweb="base-input"]:focus-within {
+    /* Focus (solo outer): azul corporativo, NO rojo */
+    div[data-testid="stTextInput"] [data-baseweb="input"]:focus-within {
         border-color: #21478c !important;
         box-shadow: 0 0 0 3px rgba(33,71,140,0.15) !important;
     }
-    /* Override TOTAL de cualquier rojo: aria-invalid, :invalid,
-       inline styles con rgb rojo, y selector :has() para
-       Chrome autofill */
-    div[data-testid="stTextInput"][aria-invalid] > div > div,
-    div[data-testid="stTextInput"] [aria-invalid="true"],
-    div[data-testid="stTextInput"] > div > div[style*="rgb(255"],
+    /* Asegurar que el inner NO pinte un focus ring propio */
+    div[data-testid="stTextInput"] [data-baseweb="base-input"]:focus-within {
+        border: 0 !important;
+        box-shadow: none !important;
+    }
+    /* Override TOTAL de cualquier rojo (sólo en el outer ahora) */
+    div[data-testid="stTextInput"][aria-invalid] [data-baseweb="input"],
+    div[data-testid="stTextInput"] [data-baseweb="input"][aria-invalid="true"],
     div[data-testid="stTextInput"] [data-baseweb="input"][style*="rgb(255"],
-    div[data-testid="stTextInput"] input:invalid,
-    div[data-testid="stTextInput"]:has(input:invalid) > div > div,
-    div[data-testid="stTextInput"]:has(input:-webkit-autofill) > div > div {
+    div[data-testid="stTextInput"]:has(input:invalid) [data-baseweb="input"],
+    div[data-testid="stTextInput"]:has(input:-webkit-autofill) [data-baseweb="input"] {
         border-color: #d3dde9 !important;
         box-shadow: none !important;
         background-color: #f8fafd !important;
