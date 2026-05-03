@@ -296,30 +296,28 @@ def render_score_gauge(score: int, color: str, size: int = 110) -> str:
     # large_arc_flag = 0 si score < 50 (arco corto), 0 igual porque siempre <180
     fg_path = f"M {cx - r:.2f} {cy:.2f} A {r:.2f} {r:.2f} 0 0 1 {px:.2f} {py:.2f}"
 
-    return f"""
-    <div style="display:flex;flex-direction:column;align-items:center;
-                margin:0;padding:0;">
-      <svg width="{w}" height="{h + 8}" viewBox="0 0 {w} {h + 8}"
-           xmlns="http://www.w3.org/2000/svg" style="display:block;">
-        <!-- arco fondo -->
-        <path d="{bg_path}" fill="none" stroke="#e6ebf2"
-              stroke-width="9" stroke-linecap="round"/>
-        <!-- arco progreso -->
-        <path d="{fg_path}" fill="none" stroke="{color}"
-              stroke-width="9" stroke-linecap="round"/>
-        <!-- número central -->
-        <text x="{cx}" y="{cy - 6}" text-anchor="middle"
-              font-family="ui-monospace,SFMono-Regular,Menlo,monospace"
-              font-size="{int(size * 0.30)}" font-weight="800"
-              fill="#0f172a">{score}</text>
-        <!-- /100 chiquito -->
-        <text x="{cx}" y="{cy + 4}" text-anchor="middle"
-              font-family="ui-sans-serif,system-ui"
-              font-size="9" font-weight="600" fill="#94a3b8"
-              letter-spacing="0.12em">/ 100</text>
-      </svg>
-    </div>
-    """
+    # IMPORTANTE: devolver el SVG en UNA sola línea sin comentarios
+    # HTML. Streamlit pasa st.markdown a marko/markdown-it que rompe
+    # bloques HTML al encontrar blank lines o ciertos comentarios,
+    # y entonces el resto del card se muestra como texto plano.
+    fs_num = int(size * 0.30)
+    svg = (
+        f'<svg width="{w}" height="{h + 8}" viewBox="0 0 {w} {h + 8}" '
+        f'xmlns="http://www.w3.org/2000/svg" style="display:block;">'
+        f'<path d="{bg_path}" fill="none" stroke="#e6ebf2" stroke-width="9" stroke-linecap="round"/>'
+        f'<path d="{fg_path}" fill="none" stroke="{color}" stroke-width="9" stroke-linecap="round"/>'
+        f'<text x="{cx}" y="{cy - 6}" text-anchor="middle" '
+        f'font-family="ui-monospace,SFMono-Regular,Menlo,monospace" '
+        f'font-size="{fs_num}" font-weight="800" fill="#0f172a">{score}</text>'
+        f'<text x="{cx}" y="{cy + 4}" text-anchor="middle" '
+        f'font-family="ui-sans-serif,system-ui" font-size="9" font-weight="600" '
+        f'fill="#94a3b8" letter-spacing="0.12em">/ 100</text>'
+        f'</svg>'
+    )
+    return (
+        f'<div style="display:flex;flex-direction:column;'
+        f'align-items:center;margin:0;padding:0;">{svg}</div>'
+    )
 
 
 def render_score_pill(score: int, band_label: str, color: str) -> str:

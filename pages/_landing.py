@@ -742,26 +742,25 @@ with left:
                         f'{_hs.band_label}</div>'
                     )
 
-                    st.markdown(
-                        f"""
-                        <div class="wmh-asset">
-                            <div class="wmh-asset-head">
-                                <span class="wmh-asset-tag">{inst.severity_dot} {inst.tag}</span>
-                                <span class="wmh-sev-pill {sev_class}">{inst.severity_label}</span>
-                            </div>
-                            <div class="wmh-asset-class">{asset_line}</div>
-                            <div class="wmh-gauge-wrap">
-                                {_gauge_html}
-                                {_band_html}
-                                <div class="wmh-gauge-tip">{_hs.one_liner}</div>
-                            </div>
-                            <div class="wmh-asset-meta">
-                                📍 {loc_line} · 📁 {inst.n_documents} docs · 🕒 {inst.last_seen_human}
-                            </div>
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
+                    # IMPORTANTE: HTML colapsado a sin saltos internos
+                    # para que el markdown parser de Streamlit no corte
+                    # el bloque HTML por blank lines y muestre crudo.
+                    _card_html = (
+                        f'<div class="wmh-asset">'
+                        f'<div class="wmh-asset-head">'
+                        f'<span class="wmh-asset-tag">{inst.severity_dot} {inst.tag}</span>'
+                        f'<span class="wmh-sev-pill {sev_class}">{inst.severity_label}</span>'
+                        f'</div>'
+                        f'<div class="wmh-asset-class">{asset_line}</div>'
+                        f'<div class="wmh-gauge-wrap">{_gauge_html}{_band_html}'
+                        f'<div class="wmh-gauge-tip">{_hs.one_liner}</div>'
+                        f'</div>'
+                        f'<div class="wmh-asset-meta">'
+                        f'📍 {loc_line} · 📁 {inst.n_documents} docs · 🕒 {inst.last_seen_human}'
+                        f'</div>'
+                        f'</div>'
                     )
+                    st.markdown(_card_html, unsafe_allow_html=True)
                     bcols = st.columns(2)
                     with bcols[0]:
                         if st.button("Trends", key=f"asset_tr_{inst.instance_id}",
