@@ -831,6 +831,32 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             footer,
         )
 
+        # Ciclo 17.7 — version stamp en la PORTADA del PDF.
+        # Trazabilidad: cualquier cliente que abra el reporte sabe
+        # exactamente con qué build del sistema fue generado. Se
+        # imprime en la esquina inferior derecha, fuente pequeña
+        # gris muy tenue para no compitir con el disclaimer.
+        try:
+            from core.version import get_version_info as _gvi_pdf
+            _vinfo_pdf = _gvi_pdf()
+            _ver_line = (
+                f"Generado con Watermelon System "
+                f"{_vinfo_pdf['version']}"
+            )
+            if _vinfo_pdf.get("commit"):
+                _ver_line += f" · build {_vinfo_pdf['commit']}"
+            if _vinfo_pdf.get("date"):
+                _ver_line += f" · {_vinfo_pdf['date']}"
+            canvas.setFillColor(colors.HexColor("#94a3b8"))
+            canvas.setFont(PDF_FONT_REGULAR, 5.6)
+            canvas.drawRightString(
+                page_width - internal_right,
+                0.30 * cm,
+                _ver_line,
+            )
+        except Exception:
+            pass
+
         canvas.restoreState()
 
     def _draw_internal_page(canvas, doc):
@@ -876,6 +902,21 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         canvas.setFillColor(colors.HexColor("#111827"))
         canvas.setFont(PDF_FONT_REGULAR, 6.4)
         canvas.drawCentredString((internal_left + internal_width_end) / 2, 0.55 * cm, footer)
+
+        # Ciclo 17.7 — version stamp en páginas internas también
+        try:
+            from core.version import get_version_short as _gvs_pdf
+            _ver_short = _gvs_pdf()
+            canvas.setFillColor(colors.HexColor("#94a3b8"))
+            canvas.setFont(PDF_FONT_REGULAR, 5.6)
+            canvas.drawRightString(
+                page_width - internal_right,
+                0.30 * cm,
+                f"Watermelon System {_ver_short}",
+            )
+        except Exception:
+            pass
+
         canvas.restoreState()
 
     story: List[Any] = []
@@ -3231,57 +3272,121 @@ def _autodraft_executive_summary(meta_dict: Dict[str, Any], current_items: List[
     return _compose_executive_summary(meta_dict, findings)
 
 
+def _autodraft_single_section(
+    section: str,
+    meta_dict: Dict[str, Any],
+    current_items: List[Dict[str, Any]],
+) -> str:
+    """Ciclo 17.6 — Devuelve UN solo campo regenerado del draft.
+
+    section: 'executive_summary' | 'service_objective' |
+             'service_development' | 'recommendations'
+    """
+    if section == "executive_summary":
+        return _autodraft_executive_summary(meta_dict, current_items)
+    full = _autodraft_sections_from_items(meta_dict, current_items)
+    return full.get(section, "")
+
+
 st.markdown('<div class="wm-section-title">Secciones narrativas</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="wm-meta-hint">Si dejas vacíos los tres campos, esas secciones se ocultan en el PDF y las figuras pasan a numerarse desde 1. Usa "Auto-redactar desde figuras" para generar un draft inicial a partir de las narrativas de cada figura cargada.</div>',
     unsafe_allow_html=True,
 )
 
-ad1, ad2, ad3 = st.columns([1.4, 1.6, 3.0])
-with ad1:
-    if st.button("Auto-redactar secciones 1/2/3", use_container_width=True, disabled=len(items) == 0):
-        draft = _autodraft_sections_from_items(meta, items)
-        for k, v in draft.items():
-            meta[k] = v
-            st.session_state[f"report_meta_{k}"] = v
-        st.session_state["report_meta"] = meta
-        save_report_state(items=st.session_state.get("report_items", []), meta=meta)
-        st.success("Secciones 1/2/3 redactadas como draft. Ajusta los matices que quieras.")
-        st.rerun()
-with ad2:
-    if st.button("Auto-redactar resumen ejecutivo", use_container_width=True, disabled=len(items) == 0):
-        exec_draft = _autodraft_executive_summary(meta, items)
-        meta["executive_summary"] = exec_draft
-        st.session_state["report_meta_executive_summary"] = exec_draft
-        st.session_state["report_meta"] = meta
-        save_report_state(items=st.session_state.get("report_items", []), meta=meta)
-        st.success("Resumen ejecutivo generado. Aparece como página inicial del PDF, después de la portada.")
-        st.rerun()
-with ad3:
-    st.markdown(
-        '<div class="wm-muted">El draft se basa en metadatos del reporte (cliente, activo) y en hallazgos extraídos de las narrativas de cada figura. El resumen ejecutivo sintetiza estado global, hallazgos clave, severidad y acciones críticas.</div>',
-        unsafe_allow_html=True,
+# =============================================================
+# Ciclo 17.6 — Editor de secciones UNIFICADO
+# =============================================================
+# Cada una de las 4 secciones (Resumen ejecutivo, Objetivo,
+# Desarrollo, Recomendaciones) tiene su propia fila full-width
+# con su botón de Auto-redactar individual + textarea propio.
+# Antes el layout era inconsistente: 2 textareas full-width y
+# 2 en columnas; auto-redactar global vs auto-redactar
+# resumen ejecutivo separado. Ahora todo coherente.
+
+st.markdown(
+    '<div class="wm-muted">Cada sección puede regenerarse individualmente con el botón <b>Auto-redactar</b>. El draft se basa en metadatos del reporte (cliente, activo) y en hallazgos extraídos de las narrativas de cada figura cargada.</div>',
+    unsafe_allow_html=True,
+)
+
+_section_specs = [
+    {
+        "key": "executive_summary",
+        "label": "Resumen ejecutivo",
+        "hint": "Página inicial del PDF, después de la portada",
+        "height": 220,
+        "placeholder": "Síntesis de 4–5 párrafos: estado global, hallazgos clave, severidad y acciones críticas. Lo que el cliente lee primero al abrir el PDF.",
+        "btn_label": "Auto-redactar Resumen Ejecutivo",
+    },
+    {
+        "key": "service_objective",
+        "label": "Objetivo del servicio",
+        "hint": "¿Qué se evaluó y bajo qué normas?",
+        "height": 150,
+        "placeholder": "Evaluar la condición rotodinámica del activo según API 670 / API 684 / ISO 20816...",
+        "btn_label": "Auto-redactar Objetivo",
+    },
+    {
+        "key": "service_development",
+        "label": "Desarrollo del servicio",
+        "hint": "Metodología — adquisición, procesamiento, comparación temporal, síntesis",
+        "height": 220,
+        "placeholder": "Etapas del servicio ejecutado por el sistema Watermelon System...",
+        "btn_label": "Auto-redactar Desarrollo",
+    },
+    {
+        "key": "recommendations",
+        "label": "Recomendaciones",
+        "hint": "Acciones priorizadas a partir de los hallazgos consolidados",
+        "height": 220,
+        "placeholder": "1. Investigar puntos en zona Alarm. 2. Verificar...",
+        "btn_label": "Auto-redactar Recomendaciones",
+    },
+]
+
+for _spec in _section_specs:
+    _key = _spec["key"]
+    _wkey = f"report_meta_{_key}"
+
+    # Encabezado de la sección + botón Auto-redactar a la derecha
+    _h_left, _h_right = st.columns([0.78, 0.22])
+    with _h_left:
+        st.markdown(
+            f'<div class="wm-block-title" style="margin-top:0.6rem;">{_spec["label"]}</div>'
+            f'<div class="wm-block-subtitle" style="margin-bottom:0.45rem;">{_spec["hint"]}</div>',
+            unsafe_allow_html=True,
+        )
+    with _h_right:
+        if st.button(
+            "🪄 Auto-redactar",
+            use_container_width=True,
+            disabled=len(items) == 0,
+            key=f"autodraft_btn_{_key}",
+            help=_spec["btn_label"],
+        ):
+            try:
+                _new_text = _autodraft_single_section(_key, meta, items)
+                meta[_key] = _new_text
+                st.session_state[_wkey] = _new_text
+                st.session_state["report_meta"] = meta
+                save_report_state(
+                    items=st.session_state.get("report_items", []),
+                    meta=meta,
+                )
+                st.success(f"«{_spec['label']}» regenerada.")
+                st.rerun()
+            except Exception as _exc:
+                st.error(f"No se pudo auto-redactar: {_exc}")
+
+    # Textarea full-width
+    meta[_key] = st.text_area(
+        label=_spec["label"],
+        label_visibility="collapsed",
+        key=_wkey,
+        value=meta.get(_key, ""),
+        height=_spec["height"],
+        placeholder=_spec["placeholder"],
     )
-
-exec_col = st.columns(1)[0]
-with exec_col:
-    meta["executive_summary"] = st.text_area(
-        "Resumen ejecutivo (página inicial del PDF, después de portada)",
-        key="report_meta_executive_summary",
-        value=meta.get("executive_summary", ""),
-        height=220,
-        placeholder="Síntesis de 4–5 párrafos: estado global, hallazgos clave, severidad y acciones críticas. Lo que el cliente lee primero al abrir el PDF.",
-    )
-
-t0 = st.columns(1)[0]
-with t0:
-    meta["service_objective"] = st.text_area("Objetivo del servicio", key="report_meta_service_objective", value=meta["service_objective"], height=120)
-
-t1, t2 = st.columns(2)
-with t1:
-    meta["service_development"] = st.text_area("Desarrollo del servicio", key="report_meta_service_development", value=meta["service_development"], height=190)
-with t2:
-    meta["recommendations"] = st.text_area("Recomendaciones", key="report_meta_recommendations", value=meta["recommendations"], height=190)
 
 st.session_state["report_meta"] = meta
 save_report_state(items=st.session_state.get("report_items", []), meta=st.session_state["report_meta"])
