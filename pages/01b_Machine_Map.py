@@ -199,6 +199,14 @@ if _diag_png is None:
         _dvn_lbl = " ".join(p for p in [
             _active_instance.driven_manufacturer, _active_instance.driven_model
         ] if p) or "Driven"
+        # Ciclo 17.5.11 — kind adaptativo (motor/recip/turbine/etc.)
+        try:
+            from core.sensor_diagram import _infer_machine_kind as _ifk_mm
+            _mm_drv_kind = _ifk_mm(_drv_lbl) or _ifk_mm(getattr(_active_instance, "asset_class", "")) or "turbine"
+            _mm_dvn_kind = _ifk_mm(_dvn_lbl) or _ifk_mm(getattr(_active_instance, "asset_class", "")) or "generator"
+        except Exception:
+            _mm_drv_kind = "turbine"
+            _mm_dvn_kind = "generator"
         _diag_png = render_sensor_map_diagram(
             _active_instance.sensors,
             train_label=compose_train_description(_active_instance) or "",
@@ -207,6 +215,8 @@ if _diag_png is None:
             severity_by_label=severity_by_label,
             overall_by_label=overall_by_label,
             unit_by_label=unit_by_label,
+            driver_kind=_mm_drv_kind,
+            driven_kind=_mm_dvn_kind,
         )
     except Exception as e:
         st.warning(f"Error al renderizar diagrama: {e}")

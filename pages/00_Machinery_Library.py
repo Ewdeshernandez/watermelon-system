@@ -954,15 +954,31 @@ def render_sensor_map_section(instance_id: str) -> None:
             "ángulos físicos. R/L vistos desde el extremo del driver, 0° arriba."
         )
         try:
-            from core.sensor_diagram import render_sensor_map_diagram
+            from core.sensor_diagram import render_sensor_map_diagram, _infer_machine_kind
             _train_lbl = compose_train_description(inst) or ""
             _drv_lbl = " ".join(p for p in [inst.driver_manufacturer, inst.driver_model] if p) or "Driver"
             _dvn_lbl = " ".join(p for p in [inst.driven_manufacturer, inst.driven_model] if p) or "Driven"
+            # Ciclo 17.5.11 — inferimos kind del driver y driven a
+            # partir de su label combinado con el asset_class. Esto
+            # hace que el silhouette dibuje motor en vez de turbina,
+            # compresor recip en vez de generador, etc.
+            _drv_kind = (
+                _infer_machine_kind(_drv_lbl)
+                or _infer_machine_kind(inst.asset_class)
+                or "turbine"
+            )
+            _dvn_kind = (
+                _infer_machine_kind(_dvn_lbl)
+                or _infer_machine_kind(inst.asset_class)
+                or "generator"
+            )
             _diag_png = render_sensor_map_diagram(
                 inst.sensors,
                 train_label=_train_lbl,
                 driver_label=_drv_lbl,
                 driven_label=_dvn_lbl,
+                driver_kind=_drv_kind,
+                driven_kind=_dvn_kind,
             )
             if _diag_png:
                 st.image(_diag_png, use_container_width=True)

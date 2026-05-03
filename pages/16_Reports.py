@@ -1382,6 +1382,18 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                             getattr(_re_inst, "driven_model", ""),
                         ] if p) or "Driven"
                         if _re_png is None:
+                            # Ciclo 17.5.11 — pasar kind para silhouette correcto
+                            try:
+                                from core.sensor_diagram import _infer_machine_kind as _ifk
+                                _re_drv_kind = (
+                                    _ifk(_re_drv) or _ifk(getattr(_re_inst, "asset_class", "")) or "turbine"
+                                )
+                                _re_dvn_kind = (
+                                    _ifk(_re_dvn) or _ifk(getattr(_re_inst, "asset_class", "")) or "generator"
+                                )
+                            except Exception:
+                                _re_drv_kind = "turbine"
+                                _re_dvn_kind = "generator"
                             _re_png = render_sensor_map_diagram(
                                 _re_inst.sensors,
                                 train_label="",
@@ -1390,6 +1402,8 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                                 severity_by_label=_re_sev,
                                 overall_by_label=_re_overall,
                                 unit_by_label=_re_unit,
+                                driver_kind=_re_drv_kind,
+                                driven_kind=_re_dvn_kind,
                                 figure_width_in=11.5,
                                 compact=True,
                             )
@@ -1657,12 +1671,22 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                         sm_df["Label"].astype(str),
                         sm_df["Status"].astype(str),
                     ))
+                    # Ciclo 17.5.11 — kind adaptativo
+                    try:
+                        from core.sensor_diagram import _infer_machine_kind as _ifk2
+                        _sm_drv_kind = _ifk2(sm_drv) or _ifk2(getattr(sm_instance, "asset_class", "")) or "turbine"
+                        _sm_dvn_kind = _ifk2(sm_dvn) or _ifk2(getattr(sm_instance, "asset_class", "")) or "generator"
+                    except Exception:
+                        _sm_drv_kind = "turbine"
+                        _sm_dvn_kind = "generator"
                     sm_png = render_sensor_map_diagram(
                         sm_instance.sensors,
                         train_label=compose_train_description(sm_instance) or "",
                         driver_label=sm_drv,
                         driven_label=sm_dvn,
                         severity_by_label=sev_by_label,
+                        driver_kind=_sm_drv_kind,
+                        driven_kind=_sm_dvn_kind,
                     )
                     if sm_png:
                         usable_w = A4[0] - doc.leftMargin - doc.rightMargin
