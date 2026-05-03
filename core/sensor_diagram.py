@@ -177,6 +177,59 @@ def _worst_status_for_plane(
     return worst
 
 
+def _infer_machine_kind(label: str) -> str:
+    """Heurística para mapear un label a un silhouette kind:
+    'turbine' | 'motor' | 'recip_compressor' | 'centrif_compressor' |
+    'pump' | 'gearbox' | 'generator'. Devuelve '' (vacío) cuando no
+    matchea — el caller decide el default."""
+    txt = (label or "").lower()
+    if not txt:
+        return ""
+    # Motor eléctrico (chequear ANTES de generator/turbine porque
+    # "motor" es muy específico)
+    if any(tok in txt for tok in (
+        "motor electrico", "motor eléctrico", "motor induction",
+        "induction motor", "motor sync", "synchronous motor",
+        "hyundai electric", "weg motor", "hnp2",
+    )):
+        return "motor"
+    if "motor" in txt and not ("turbomotor" in txt):
+        return "motor"
+    # Compresor reciprocante
+    if any(tok in txt for tok in (
+        "recip", "reciprocating", "ariel", "kbk", "dresser-rand",
+        "dresser rand",
+    )):
+        return "recip_compressor"
+    # Compresor centrífugo
+    if any(tok in txt for tok in (
+        "centrif", "centrifugal", "centr ", "compresor centr",
+    )):
+        return "centrif_compressor"
+    # Compresor genérico (sin tipo) → recip por defecto cuando es compresor
+    if "compresor" in txt or "compressor" in txt:
+        return "recip_compressor"
+    # Generador eléctrico
+    if any(tok in txt for tok in (
+        "generador", "generator", "alternador", "alternator",
+        "brush", "stamford", "leroy",
+    )):
+        return "generator"
+    # Bomba
+    if any(tok in txt for tok in ("bomba", "pump")):
+        return "pump"
+    # Gearbox
+    if any(tok in txt for tok in ("gearbox", "caja reductora", "reductor")):
+        return "gearbox"
+    # Turbinas
+    if any(tok in txt for tok in (
+        "turbina", "turbine", "lm6000", "lm2500", "tm2500", "frame ",
+        "sgt-", "ge tg", "vapor",
+    )):
+        return "turbine"
+    return ""
+
+
 def render_sensor_map_diagram(
     sensors: List[Dict[str, Any]],
     *,
@@ -188,6 +241,8 @@ def render_sensor_map_diagram(
     compact: bool = False,
     overall_by_label: Optional[Dict[str, float]] = None,
     unit_by_label: Optional[Dict[str, str]] = None,
+    driver_kind: str = "",
+    driven_kind: str = "",
 ) -> Optional[bytes]:
     """
     Devuelve PNG bytes con el diagrama del Sensor Map.
@@ -325,107 +380,291 @@ def render_sensor_map_diagram(
         color="#0f172a", linewidth=2.2, zorder=2,
     )
 
-    # ----- Driver: silueta de turbina -----
-    # Polygon con un perfil tipo aero-turbine: inlet ancho a la izquierda,
-    # carcaza de combustión, anillos de turbina HP/LP, exhaust hacia el
-    # coupling. Es generico (no replica un modelo especifico).
+    # ============================================================
+    # Ciclo 17.5.11 — DRIVER silhouette adaptativa según kind
+    # ============================================================
+    # Antes el driver SIEMPRE se dibujaba como aero-turbine, lo
+    # que no representaba motores eléctricos / compresores
+    # reciprocantes / bombas. Ahora el caller pasa driver_kind y
+    # se dibuja la silueta adecuada. Si no se pasa, intentamos
+    # inferir del driver_label.
     drv_left = x_start
     drv_right = x_start + drv_w
-    inlet_h = 1.25       # alto del inlet (lado outboard)
-    body_h = 1.05        # alto principal del gas generator
-    exhaust_h = 0.85     # alto cerca del coupling
-    drv_top = rotor_y + inlet_h
-    drv_btm = rotor_y - inlet_h
+    drv_kind_resolved = (driver_kind or _infer_machine_kind(driver_label) or "turbine").lower()
+    drv_top_y = rotor_y + 1.25  # para etiqueta (todas las siluetas la usan)
 
-    # Vertices definidos en sentido horario, simetricos sobre rotor_y
-    inlet_x = drv_left
-    body_start_x = drv_left + 0.45
-    body_end_x = drv_right - 0.45
-    drv_polygon = [
-        (inlet_x,         rotor_y + inlet_h),
-        (inlet_x + 0.18,  rotor_y + inlet_h),
-        (body_start_x,    rotor_y + body_h),
-        (body_end_x,      rotor_y + body_h * 0.85),
-        (drv_right,       rotor_y + exhaust_h),
-        (drv_right,       rotor_y - exhaust_h),
-        (body_end_x,      rotor_y - body_h * 0.85),
-        (body_start_x,    rotor_y - body_h),
-        (inlet_x + 0.18,  rotor_y - inlet_h),
-        (inlet_x,         rotor_y - inlet_h),
-    ]
-    drv_patch = mpatches.Polygon(
-        drv_polygon, closed=True,
-        facecolor=_COLOR_DRIVER, alpha=0.16,
-        edgecolor=_COLOR_DRIVER, linewidth=1.6, zorder=1,
-    )
-    ax_top.add_patch(drv_patch)
+    if drv_kind_resolved == "motor":
+        # --- Motor eléctrico: caja rectangular + caja de bornes
+        #     arriba + cooling fins en el lado outboard.
+        body_h = 1.10
+        es_w = 0.18
+        # Cuerpo principal
+        ax_top.add_patch(mpatches.Rectangle(
+            (drv_left + es_w, rotor_y - body_h),
+            drv_w - 2 * es_w, 2 * body_h,
+            facecolor=_COLOR_DRIVER, alpha=0.16,
+            edgecolor=_COLOR_DRIVER, linewidth=1.6, zorder=1,
+        ))
+        # End shields
+        for _esx in (drv_left, drv_right - es_w):
+            ax_top.add_patch(mpatches.FancyBboxPatch(
+                (_esx, rotor_y - body_h * 0.92), es_w, body_h * 1.84,
+                boxstyle="round,pad=0.01,rounding_size=0.05",
+                facecolor=_COLOR_DRIVER, alpha=0.28,
+                edgecolor=_COLOR_DRIVER, linewidth=1.4, zorder=2,
+            ))
+        # Caja de bornes (terminal box) arriba del centro
+        tb_w = drv_w * 0.30
+        tb_x = drv_left + (drv_w - tb_w) / 2.0
+        ax_top.add_patch(mpatches.Rectangle(
+            (tb_x, rotor_y + body_h),
+            tb_w, 0.30,
+            facecolor=_COLOR_DRIVER, alpha=0.32,
+            edgecolor=_COLOR_DRIVER, linewidth=1.2, zorder=3,
+        ))
+        # Cooling fins en lado outboard (izquierdo)
+        fins_x0 = drv_left + es_w + 0.05
+        for _fx in [fins_x0 + 0.10 * k for k in range(0, 5)]:
+            if _fx >= drv_left + drv_w * 0.45:
+                break
+            ax_top.plot(
+                [_fx, _fx], [rotor_y - body_h * 0.85, rotor_y + body_h * 0.85],
+                color=_COLOR_DRIVER, linewidth=0.7, alpha=0.55, zorder=2,
+            )
+        drv_top_y = rotor_y + body_h + 0.50
 
-    # Anillo de inlet (vanes guías) — barras verticales finas
-    for _vx in (inlet_x + 0.05, inlet_x + 0.10, inlet_x + 0.15):
-        ax_top.plot([_vx, _vx], [rotor_y - inlet_h * 0.85, rotor_y + inlet_h * 0.85],
-                    color=_COLOR_DRIVER, linewidth=0.8, alpha=0.55, zorder=2)
+    elif drv_kind_resolved in ("recip_compressor", "centrif_compressor"):
+        # Caso poco común que un compresor sea el DRIVER, pero
+        # cubrimos por completitud — si llega aquí es recip o centrif.
+        # Reusamos el mismo dibujo del lado driven (definido más
+        # abajo) — para evitar duplicación, dibujamos un placeholder
+        # rectangular y dejamos que el lector vea el label real.
+        body_h = 1.05
+        ax_top.add_patch(mpatches.Rectangle(
+            (drv_left, rotor_y - body_h),
+            drv_w, 2 * body_h,
+            facecolor=_COLOR_DRIVER, alpha=0.14,
+            edgecolor=_COLOR_DRIVER, linewidth=1.6, zorder=1,
+        ))
+        drv_top_y = rotor_y + body_h + 0.40
 
-    # Stage rings dentro del cuerpo: 2-3 lineas verticales sutiles
-    n_stages = 3
-    for k in range(1, n_stages + 1):
-        sx = body_start_x + (body_end_x - body_start_x) * k / (n_stages + 1)
-        # alto local interpolado
-        frac = (sx - body_start_x) / max(1e-6, body_end_x - body_start_x)
-        local_h = body_h - (body_h - body_h * 0.85) * frac
-        ax_top.plot([sx, sx], [rotor_y - local_h * 0.95, rotor_y + local_h * 0.95],
-                    color=_COLOR_DRIVER, linewidth=0.7, alpha=0.45, zorder=2)
+    else:
+        # --- Default: turbina (silueta aero-derivative original)
+        inlet_h = 1.25
+        body_h = 1.05
+        exhaust_h = 0.85
 
-    # Cono de exhaust (transicion al coupling)
-    ax_top.plot([body_end_x, drv_right], [rotor_y + body_h * 0.85, rotor_y + exhaust_h],
-                color=_COLOR_DRIVER, linewidth=1.2, alpha=0.7, zorder=2)
-    ax_top.plot([body_end_x, drv_right], [rotor_y - body_h * 0.85, rotor_y - exhaust_h],
-                color=_COLOR_DRIVER, linewidth=1.2, alpha=0.7, zorder=2)
+        inlet_x = drv_left
+        body_start_x = drv_left + 0.45
+        body_end_x = drv_right - 0.45
+        drv_polygon = [
+            (inlet_x,         rotor_y + inlet_h),
+            (inlet_x + 0.18,  rotor_y + inlet_h),
+            (body_start_x,    rotor_y + body_h),
+            (body_end_x,      rotor_y + body_h * 0.85),
+            (drv_right,       rotor_y + exhaust_h),
+            (drv_right,       rotor_y - exhaust_h),
+            (body_end_x,      rotor_y - body_h * 0.85),
+            (body_start_x,    rotor_y - body_h),
+            (inlet_x + 0.18,  rotor_y - inlet_h),
+            (inlet_x,         rotor_y - inlet_h),
+        ]
+        ax_top.add_patch(mpatches.Polygon(
+            drv_polygon, closed=True,
+            facecolor=_COLOR_DRIVER, alpha=0.16,
+            edgecolor=_COLOR_DRIVER, linewidth=1.6, zorder=1,
+        ))
+        # Anillo de inlet
+        for _vx in (inlet_x + 0.05, inlet_x + 0.10, inlet_x + 0.15):
+            ax_top.plot([_vx, _vx], [rotor_y - inlet_h * 0.85, rotor_y + inlet_h * 0.85],
+                        color=_COLOR_DRIVER, linewidth=0.8, alpha=0.55, zorder=2)
+        # Stage rings
+        n_stages = 3
+        for k in range(1, n_stages + 1):
+            sx = body_start_x + (body_end_x - body_start_x) * k / (n_stages + 1)
+            frac = (sx - body_start_x) / max(1e-6, body_end_x - body_start_x)
+            local_h = body_h - (body_h - body_h * 0.85) * frac
+            ax_top.plot([sx, sx], [rotor_y - local_h * 0.95, rotor_y + local_h * 0.95],
+                        color=_COLOR_DRIVER, linewidth=0.7, alpha=0.45, zorder=2)
+        # Cono de exhaust
+        ax_top.plot([body_end_x, drv_right], [rotor_y + body_h * 0.85, rotor_y + exhaust_h],
+                    color=_COLOR_DRIVER, linewidth=1.2, alpha=0.7, zorder=2)
+        ax_top.plot([body_end_x, drv_right], [rotor_y - body_h * 0.85, rotor_y - exhaust_h],
+                    color=_COLOR_DRIVER, linewidth=1.2, alpha=0.7, zorder=2)
+        drv_top_y = rotor_y + inlet_h + 0.30
 
-    # Etiqueta del driver arriba del cuerpo
-    ax_top.text(x_start + drv_w / 2, rotor_y + inlet_h + 0.30, driver_label,
+    # Etiqueta del driver arriba del cuerpo (común a todos los kinds)
+    ax_top.text(x_start + drv_w / 2, drv_top_y, driver_label,
                 fontsize=12, fontweight="bold", color=_COLOR_DRIVER,
                 ha="center", va="center")
 
-    # ----- Driven: silueta de generador / motor electrico -----
-    # Cilindro con end shields a ambos lados. Vanes radiales en el lado
-    # outboard (lejos del coupling) que sugieren el rotor de aire/cooling.
+    # ============================================================
+    # Ciclo 17.5.11 — DRIVEN silhouette adaptativa según kind
+    # ============================================================
+    # Antes el driven SIEMPRE se dibujaba como generador (cilindro
+    # con vanes). Ahora soporta también compresor reciprocante
+    # (frame con N cilindros verticales), centrífugo (forma snail),
+    # bomba y gearbox. El kind viene del caller o se infiere del
+    # driven_label.
     dvn_left = dvn_x
     dvn_right = dvn_x + dvn_w
-    gen_h = 1.10
-    es_w = 0.20  # ancho de end shields
+    dvn_kind_resolved = (driven_kind or _infer_machine_kind(driven_label) or "generator").lower()
+    dvn_top_y = rotor_y + 1.50  # default para etiqueta
 
-    # Cuerpo principal (cilindro)
-    dvn_body = mpatches.Rectangle(
-        (dvn_left + es_w, rotor_y - gen_h),
-        dvn_w - 2 * es_w, 2 * gen_h,
-        facecolor=_COLOR_DRIVEN, alpha=0.18,
-        edgecolor=_COLOR_DRIVEN, linewidth=1.6, zorder=1,
-    )
-    ax_top.add_patch(dvn_body)
+    if dvn_kind_resolved == "recip_compressor":
+        # --- Compresor reciprocante: crankcase horizontal +
+        #     N cilindros verticales sticking up.
+        # n_cyl: lo deducimos por los planos del driven que NO son
+        # DE / NDE (driven outboard / driven coupling). Si plane_label
+        # contiene 'cilindro' → es un cilindro; si no, asumimos
+        # bearing del frame.
+        crank_h = 0.85
+        # Crankcase principal (caja horizontal grande)
+        ax_top.add_patch(mpatches.Rectangle(
+            (dvn_left, rotor_y - crank_h),
+            dvn_w, 2 * crank_h,
+            facecolor=_COLOR_DRIVEN, alpha=0.16,
+            edgecolor=_COLOR_DRIVEN, linewidth=1.6, zorder=1,
+        ))
+        # Detectamos los planos cilindro
+        cyl_planes = [
+            int(s.get("plane", 0))
+            for s in sensors
+            if int(s.get("plane", 0)) in driven_planes
+            and "cilindro" in str(s.get("plane_label", "")).lower()
+        ]
+        cyl_planes = sorted(set(cyl_planes))
+        # Si no detectamos por label (caso default), asumimos los
+        # planos centrales (excluyendo primero y último que serían
+        # DE/NDE del frame).
+        if not cyl_planes and len(driven_planes) >= 3:
+            cyl_planes = list(driven_planes[1:-1])
+        if not cyl_planes:
+            # fallback: asumimos 4 cilindros centrales
+            cyl_planes = [driven_planes[len(driven_planes) // 2]] if driven_planes else []
 
-    # End shields (pequenos rectangulos achaflanados a ambos lados)
-    for _esx in (dvn_left, dvn_right - es_w):
-        es_patch = mpatches.FancyBboxPatch(
-            (_esx, rotor_y - gen_h * 0.92), es_w, gen_h * 1.84,
-            boxstyle="round,pad=0.01,rounding_size=0.05",
-            facecolor=_COLOR_DRIVEN, alpha=0.28,
-            edgecolor=_COLOR_DRIVEN, linewidth=1.4, zorder=2,
+        n_cyl = max(1, len(cyl_planes))
+        cyl_h = 0.95   # alto del cilindro arriba del crankcase
+        cyl_w = min(0.42, (dvn_w - 0.4) / max(n_cyl + 1, 4))
+        # Repartir cilindros uniformemente sobre el frame
+        cyl_step = (dvn_w - 0.4 - cyl_w) / max(n_cyl - 1, 1) if n_cyl > 1 else 0
+        cyl_start_x = dvn_left + 0.20 + (
+            (dvn_w - 0.4 - cyl_w * n_cyl - cyl_step * (n_cyl - 1)) / 2.0
+            if n_cyl > 0 else 0
         )
-        ax_top.add_patch(es_patch)
 
-    # Vanes radiales en el lado outboard (derecho — lejos del coupling)
-    fan_cx = dvn_right - es_w * 0.5
-    for _ang_deg in range(0, 360, 30):
-        _a = math.radians(_ang_deg)
-        _x0 = fan_cx
-        _y0 = rotor_y
-        _x1 = fan_cx + 0.10 * math.cos(_a)
-        _y1 = rotor_y + gen_h * 0.55 * math.sin(_a)
-        ax_top.plot([_x0, _x1], [_y0, _y1], color=_COLOR_DRIVEN,
-                    linewidth=0.8, alpha=0.55, zorder=3)
+        for _i in range(n_cyl):
+            _cx = cyl_start_x + _i * (cyl_w + cyl_step)
+            # Distance piece (chiquito entre crankcase y cilindro)
+            ax_top.add_patch(mpatches.Rectangle(
+                (_cx + cyl_w * 0.20, rotor_y + crank_h),
+                cyl_w * 0.60, 0.14,
+                facecolor=_COLOR_DRIVEN, alpha=0.30,
+                edgecolor=_COLOR_DRIVEN, linewidth=1.0, zorder=2,
+            ))
+            # Cilindro propiamente (rectángulo vertical con cap)
+            ax_top.add_patch(mpatches.Rectangle(
+                (_cx, rotor_y + crank_h + 0.14),
+                cyl_w, cyl_h,
+                facecolor=_COLOR_DRIVEN, alpha=0.22,
+                edgecolor=_COLOR_DRIVEN, linewidth=1.4, zorder=2,
+            ))
+            # Cabezal del cilindro (cap superior con válvulas)
+            ax_top.add_patch(mpatches.FancyBboxPatch(
+                (_cx - cyl_w * 0.05, rotor_y + crank_h + 0.14 + cyl_h),
+                cyl_w * 1.10, 0.16,
+                boxstyle="round,pad=0.01,rounding_size=0.04",
+                facecolor=_COLOR_DRIVEN, alpha=0.35,
+                edgecolor=_COLOR_DRIVEN, linewidth=1.2, zorder=3,
+            ))
 
-    # Etiqueta del driven
-    ax_top.text(dvn_x + dvn_w / 2, rotor_y + gen_h + 0.42, driven_label,
+        dvn_top_y = rotor_y + crank_h + 0.14 + cyl_h + 0.50
+
+    elif dvn_kind_resolved == "centrif_compressor":
+        # --- Compresor centrífugo: voluta tipo snail
+        body_h = 1.00
+        ax_top.add_patch(mpatches.Circle(
+            ((dvn_left + dvn_right) / 2.0, rotor_y),
+            min(body_h * 1.05, dvn_w / 2.0 * 0.85),
+            facecolor=_COLOR_DRIVEN, alpha=0.16,
+            edgecolor=_COLOR_DRIVEN, linewidth=1.6, zorder=1,
+        ))
+        # Tobera de descarga arriba
+        ax_top.add_patch(mpatches.Rectangle(
+            ((dvn_left + dvn_right) / 2.0 - 0.10, rotor_y + body_h),
+            0.20, 0.35,
+            facecolor=_COLOR_DRIVEN, alpha=0.30,
+            edgecolor=_COLOR_DRIVEN, linewidth=1.2, zorder=2,
+        ))
+        dvn_top_y = rotor_y + body_h + 0.55
+
+    elif dvn_kind_resolved == "pump":
+        # --- Bomba centrífuga: voluta + descarga
+        body_h = 0.95
+        cx = (dvn_left + dvn_right) / 2.0
+        ax_top.add_patch(mpatches.Circle(
+            (cx, rotor_y), body_h,
+            facecolor=_COLOR_DRIVEN, alpha=0.16,
+            edgecolor=_COLOR_DRIVEN, linewidth=1.6, zorder=1,
+        ))
+        # Descarga arriba
+        ax_top.add_patch(mpatches.Rectangle(
+            (cx - 0.18, rotor_y + body_h), 0.36, 0.30,
+            facecolor=_COLOR_DRIVEN, alpha=0.28,
+            edgecolor=_COLOR_DRIVEN, linewidth=1.2, zorder=2,
+        ))
+        dvn_top_y = rotor_y + body_h + 0.50
+
+    elif dvn_kind_resolved == "gearbox":
+        # --- Gearbox: caja con dientes engranados visibles arriba
+        gb_h = 0.95
+        ax_top.add_patch(mpatches.Rectangle(
+            (dvn_left, rotor_y - gb_h),
+            dvn_w, 2 * gb_h,
+            facecolor=_COLOR_DRIVEN, alpha=0.16,
+            edgecolor=_COLOR_DRIVEN, linewidth=1.6, zorder=1,
+        ))
+        # Dos engranajes dibujados como círculos con teeth marks
+        for _gx in (dvn_left + dvn_w * 0.30, dvn_left + dvn_w * 0.65):
+            ax_top.add_patch(mpatches.Circle(
+                (_gx, rotor_y), 0.30,
+                facecolor="none", edgecolor=_COLOR_DRIVEN,
+                linewidth=1.4, zorder=2,
+            ))
+        dvn_top_y = rotor_y + gb_h + 0.40
+
+    else:
+        # --- Default: generador / motor cilíndrico (silueta original)
+        gen_h = 1.10
+        es_w = 0.20
+
+        ax_top.add_patch(mpatches.Rectangle(
+            (dvn_left + es_w, rotor_y - gen_h),
+            dvn_w - 2 * es_w, 2 * gen_h,
+            facecolor=_COLOR_DRIVEN, alpha=0.18,
+            edgecolor=_COLOR_DRIVEN, linewidth=1.6, zorder=1,
+        ))
+        for _esx in (dvn_left, dvn_right - es_w):
+            ax_top.add_patch(mpatches.FancyBboxPatch(
+                (_esx, rotor_y - gen_h * 0.92), es_w, gen_h * 1.84,
+                boxstyle="round,pad=0.01,rounding_size=0.05",
+                facecolor=_COLOR_DRIVEN, alpha=0.28,
+                edgecolor=_COLOR_DRIVEN, linewidth=1.4, zorder=2,
+            ))
+        # Vanes radiales en el lado outboard (derecho)
+        fan_cx = dvn_right - es_w * 0.5
+        for _ang_deg in range(0, 360, 30):
+            _a = math.radians(_ang_deg)
+            _x0 = fan_cx
+            _y0 = rotor_y
+            _x1 = fan_cx + 0.10 * math.cos(_a)
+            _y1 = rotor_y + gen_h * 0.55 * math.sin(_a)
+            ax_top.plot([_x0, _x1], [_y0, _y1], color=_COLOR_DRIVEN,
+                        linewidth=0.8, alpha=0.55, zorder=3)
+        dvn_top_y = rotor_y + gen_h + 0.42
+
+    # Etiqueta del driven (común a todos los kinds)
+    ax_top.text(dvn_x + dvn_w / 2, dvn_top_y, driven_label,
                 fontsize=12, fontweight="bold", color=_COLOR_DRIVEN,
                 ha="center", va="center")
 
