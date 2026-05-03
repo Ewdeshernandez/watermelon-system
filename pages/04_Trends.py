@@ -3577,37 +3577,65 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
 
 
 def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[str]]:
-    """Export HD MINIMAL — Ciclo 17.8.4.
+    """Export HD — Ciclo 17.8.5 (último approach: ISO strings).
 
-    Bug histórico: PNG HD salía sin curvas dibujadas en mixed
-    mode. Causa raíz fueron las DOS funciones helper
-    (_build_export_safe_figure + _scale_export_figure) que
-    recreaban la figura plana y perdían la estructura subplots
-    + secondary_y. Múltiples intentos de fix fallaron porque
-    cada uno solo arreglaba la mitad.
+    Sospecho que el problema histórico era que kaleido (motor de
+    PNG render) no interpretaba bien los `datetime64[ns]` que
+    venían en los traces vía to_dict(). Los serializaba como
+    int64 nanosegundos crudos, pero el x-axis tenía range en
+    formato datetime — los puntos quedaban fuera del rango
+    visible, traces no se dibujaban.
 
-    Esta versión BORRA toda la complejidad y pasa la figura
-    PRÁCTICAMENTE INTACTA a kaleido. Solo hace 3 cosas:
-      1. Clone via to_dict() (preserva subplots+secondary_y)
-      2. Convierte scattergl→scatter (kaleido no soporta WebGL)
-      3. Bumpa width/height/font para HD legible
-    Sin scaling per-trace, sin recreate de figuras, sin
-    transformaciones de dominio o overlay. La figura sale como
-    se ve en pantalla, solo más grande.
+    Fix: convertir EXPLÍCITAMENTE las x de cada trace a ISO
+    strings ANTES de pasar a kaleido. ISO strings son universal-
+    mente entendibles por cualquier renderer. Si esto no
+    funciona, devolvemos un mensaje de error detallado en lugar
+    de None silencioso para que el usuario pueda diagnosticar.
     """
     try:
-        # 1. Clone via to_dict (preserva TODA la estructura)
+        # 1. Clone via to_dict (preserva subplots+secondary_y)
         fig_dict = fig.to_dict()
 
-        # 2. scattergl → scatter (kaleido no renderea WebGL)
+        # 2. SERIALIZACIÓN DEFENSIVA — convertir x de cada trace
+        #    a ISO strings cuando sean datetime. Ídem y si fuera
+        #    necesario (no aplica para Trend pero defensivo).
+        n_traces_with_data = 0
         for trace in fig_dict.get("data", []):
+            x = trace.get("x")
+            if x is not None and len(x) > 0:
+                try:
+                    x_ser = pd.Series(x)
+                    if pd.api.types.is_datetime64_any_dtype(x_ser):
+                        # datetime64[ns] → ISO string
+                        trace["x"] = x_ser.dt.strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ).tolist()
+                    elif len(x) > 0 and hasattr(x[0], "isoformat"):
+                        # pd.Timestamp / datetime objects
+                        trace["x"] = [
+                            t.isoformat(sep=" ", timespec="seconds")
+                            if hasattr(t, "isoformat") else str(t)
+                            for t in x
+                        ]
+                except Exception:
+                    pass  # dejar como esté
+
+                if trace.get("y") is not None and len(trace.get("y", [])) > 0:
+                    n_traces_with_data += 1
+
+            # scattergl → scatter (kaleido no soporta WebGL)
             if trace.get("type") == "scattergl":
                 trace["type"] = "scatter"
 
-        # 3. Construir figura HD a partir del dict + bump dimensions
-        export_fig = go.Figure(fig_dict)
+        # 3. Si NO hay traces con data, devolver error explícito
+        if n_traces_with_data == 0:
+            return None, (
+                "Figura sin traces con datos. ¿Hay señales seleccionadas? "
+                "(Verificá Signal Selection y Operational Selection en sidebar)"
+            )
 
-        # Detectar si tiene secondary axis para ajustar margen derecho
+        # 4. Construir figura HD
+        export_fig = go.Figure(fig_dict)
         has_secondary = "yaxis2" in fig_dict.get("layout", {})
         has_right_panel = any(
             (ann.get("xref") == "paper" and float(ann.get("x", 0) or 0) >= 0.83)
@@ -3615,6 +3643,9 @@ def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[st
         )
         export_w = 4900 if has_right_panel else (4700 if has_secondary else 4200)
         export_h = 2200
+
+        # IMPORTANTE: limpiar xaxis range del original (estaba en
+        # datetime objects). Que kaleido auto-infiera del data ISO.
         export_fig.update_layout(
             width=export_w,
             height=export_h,
@@ -3628,28 +3659,37 @@ def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[st
             paper_bgcolor="#f3f4f6",
             plot_bgcolor="#f8fafc",
         )
-        # Bump fonts de ejes
         export_fig.update_xaxes(
             type="date",
             tickfont=dict(size=22),
             title_font=dict(size=30),
             tickformat="%Y-%m-%d %H:%M",
+            autorange=True,  # 17.8.5: forzar autorange con la nueva data ISO
         )
         export_fig.update_yaxes(
             tickfont=dict(size=22),
             title_font=dict(size=30),
         )
 
-        # 4. Render PNG via kaleido
+        # 5. Render PNG via kaleido — con engine explícito
         png_bytes = export_fig.to_image(
             format="png",
             width=export_w,
             height=export_h,
             scale=2,
+            engine="kaleido",
         )
+
+        # 6. Validar que no devuelva bytes vacíos
+        if not png_bytes or len(png_bytes) < 1000:
+            return None, (
+                f"Kaleido devolvió PNG inválido ({len(png_bytes) if png_bytes else 0} bytes). "
+                f"Probable bug de versión kaleido — reportá al equipo."
+            )
+
         return png_bytes, None
     except Exception as e:
-        return None, str(e)
+        return None, f"Error generando PNG HD: {type(e).__name__}: {e}"
 
 
 def _sanitize_series_for_analysis(values: pd.Series) -> np.ndarray:
