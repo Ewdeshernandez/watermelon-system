@@ -291,25 +291,191 @@ class OperationalRecord:
         return int(len(self.x_time))
 
 
-def infer_operational_unit(column_name: str, temperature_unit: str) -> str:
-    name = str(column_name or "").lower()
-    if "mw" in name or "power" in name or "load" in name:
-        return "MW"
-    if "temp" in name or "temperature" in name or "t48" in name or "t3" in name:
-        return temperature_unit
-    return ""
+# =============================================================
+# Ciclo 17.8 — Operational data parser CLASE MUNDIAL
+# =============================================================
+# El CSV oficial del cliente (DCS export tipo C200C) tiene:
+#   - Column tags técnicos: [C200C]TIT_200AXPV, [C200C]PT_200AXPV,
+#     [BL1_BPCS]VFD_Siemens_C_200CVSD_Freq, AGA3_FIT_*Flow_GASFlow
+#   - Date format M/D/YYYY HH:MM:SS (US locale del DCS)
+#   - Timestamps DESORDENADOS (DCS export interleaves retries)
+#   - Mezcla de familias: temperature, pressure, flow, frequency
+#
+# Antes el parser solo reconocía power/temperature y los labels
+# salían crudos como '[C200C]TIT_200AXPV' — ilegibles.
+# Ahora soporta:
+#   1. Date M/D/YYYY explícito + fallback a auto-detección
+#   2. Sort + dedup automático por timestamp
+#   3. Familias extendidas: pressure, flow, frequency, vibration
+#      (además de power, temperature, generic)
+#   4. Humanización de labels: '[C200C]TIT_200AXPV' →
+#      'Temp 200A (TIT)'
+#   5. Unidades inferidas correctamente: psi para PT, MMSCFD para
+#      FIT*Flow, Hz para *Freq
+
+# Tag → familia (substrings, en orden de prioridad)
+_OP_FAMILY_PATTERNS: List[Tuple[Tuple[str, ...], str]] = [
+    # Pressure (PT_, PI_, "press") — chequear primero porque "PT" es muy específico
+    (("pt_", "pi_", "press", "pressure"),                 "pressure"),
+    # Flow (FIT_, FI_, FT_, "flow", AGA3)
+    (("fit_", "fi_", "ft_", "flow", "aga3"),              "flow"),
+    # Frequency / VFD speed (Hz, *Freq, VFD_, VSD_)
+    (("freq", "vfd", "vsd", " hz", "_hz"),                "frequency"),
+    # Speed / RPM
+    (("rpm", "speed", "_n_", "_rev"),                     "speed"),
+    # Power / Load (MW, kW)
+    (("mw", "kw", "power", "load", "_kva"),               "power"),
+    # Temperature (TIT_, TE_, TI_, T48, T3, "temp")
+    (("tit_", "te_", "ti_", "_t48", "_t3", "temp"),       "temperature"),
+    # Vibration overall (VIB, *Vel*, *Disp*)
+    (("vib_", "_vib", "vibration", "overall"),            "vibration"),
+]
 
 
 def infer_operational_family(column_name: str) -> str:
+    """Detecta familia del operacional con patterns extendidos.
+
+    Soporta tags DCS reales: PT_200AXPV → pressure, TIT_200AXPV →
+    temperature, AGA3_FIT_*Flow → flow, VFD_*Freq → frequency.
+    """
     name = str(column_name or "").lower()
-    if "mw" in name or "power" in name or "load" in name:
-        return "power"
-    if "temp" in name or "temperature" in name or "t48" in name or "t3" in name:
-        return "temperature"
+    for tokens, fam in _OP_FAMILY_PATTERNS:
+        if any(t in name for t in tokens):
+            return fam
     return "generic"
 
 
+def infer_operational_unit(column_name: str, temperature_unit: str = "°F") -> str:
+    """Unidad por familia. Defaults industriales típicos."""
+    fam = infer_operational_family(column_name)
+    if fam == "pressure":
+        return "psi"        # default; cliente puede tener bar/MPa/kg-cm²
+    if fam == "temperature":
+        return temperature_unit
+    if fam == "flow":
+        return "MMSCFD"     # gas natural típico AGA3
+    if fam == "frequency":
+        return "Hz"
+    if fam == "speed":
+        return "rpm"
+    if fam == "power":
+        return "MW"
+    if fam == "vibration":
+        return "mm/s RMS"
+    return ""
+
+
+def humanize_operational_label(column_name: str) -> str:
+    """Convierte tag DCS críptico en label legible.
+
+    Ejemplos:
+        '[C200C]TIT_200AXPV'  →  'Temp 200A (TIT)'
+        '[C200C]PT_200AXPV'   →  'Press 200A (PT)'
+        '[BL1_BPCS]AGA3_FIT_2000CFlow_GASFlow'
+                              →  'Flow Gas 2000C (AGA3)'
+        '[BL1_BPCS]VFD_Siemens_C_200CVSD_Freq'
+                              →  'VFD Frecuencia 200C'
+    """
+    raw = str(column_name or "").strip()
+    if not raw:
+        return ""
+
+    # Strip [SystemName] prefix (e.g. [C200C], [BL1_BPCS])
+    if raw.startswith("["):
+        end = raw.find("]")
+        if end > 0:
+            raw = raw[end + 1:]
+
+    # Strip common DCS suffixes (PV = process value, XPV = etc.)
+    for sfx in ("AXPV", "BXPV", "XPV", "_PV", "PV"):
+        if raw.endswith(sfx):
+            raw = raw[: -len(sfx)]
+            break
+
+    low = raw.lower()
+    # Mapeo de prefijos técnicos a etiquetas humanas + tag corto
+    prefix_map = [
+        ("tit_",  "Temp",   "TIT"),
+        ("te_",   "Temp",   "TE"),
+        ("ti_",   "Temp",   "TI"),
+        ("pt_",   "Press",  "PT"),
+        ("pi_",   "Press",  "PI"),
+        ("fit_",  "Flow",   "FIT"),
+        ("fi_",   "Flow",   "FI"),
+        ("ft_",   "Flow",   "FT"),
+        ("vfd_",  "VFD",    ""),
+        ("vsd_",  "VSD",    ""),
+        ("aga3_", "Flow Gas", "AGA3"),
+    ]
+    pretty = ""
+    tag_short = ""
+    for pfx, label, tag in prefix_map:
+        if pfx in low:
+            pretty = label
+            tag_short = tag
+            # remover el prefijo y dejar solo el resto (el "200A" del PT_200A)
+            idx = low.find(pfx)
+            after = raw[idx + len(pfx):]
+            # Limpiar separadores
+            after = after.replace("_", " ").strip()
+            if after:
+                pretty = f"{label} {after}"
+            break
+
+    if not pretty:
+        # Sin prefijo técnico reconocido → limpiar lo que tengamos
+        pretty = raw.replace("_", " ").strip()
+        # Eliminar tokens muy técnicos como "Siemens", "BPCS"
+        for tok in ("siemens ", "bpcs ", "bl1 "):
+            pretty = pretty.replace(tok.title(), "").replace(tok.upper(), "").replace(tok, "")
+        pretty = " ".join(pretty.split())
+
+    if tag_short and tag_short.lower() not in pretty.lower():
+        pretty += f" ({tag_short})"
+
+    # Trim
+    if len(pretty) > 42:
+        pretty = pretty[:40] + "…"
+    return pretty or column_name
+
+
+def _parse_timestamps_robust(series: pd.Series) -> pd.Series:
+    """Intenta varios formatos de fecha en orden de probabilidad
+    para CSVs de DCS internacionales.
+
+    Orden:
+        1. M/D/YYYY HH:MM:SS  (US locale, típico Honeywell/Emerson)
+        2. D/M/YYYY HH:MM:SS  (EU)
+        3. ISO 8601           (YAML / moderno)
+        4. Auto (pandas default)
+    """
+    raw = series.astype(str)
+    # Intento 1: US M/D/YYYY
+    out = pd.to_datetime(raw, errors="coerce", format="%m/%d/%Y %H:%M:%S")
+    if out.notna().sum() > len(raw) * 0.5:
+        return out
+    # Intento 2: EU D/M/YYYY
+    out = pd.to_datetime(raw, errors="coerce", format="%d/%m/%Y %H:%M:%S")
+    if out.notna().sum() > len(raw) * 0.5:
+        return out
+    # Intento 3: ISO
+    out = pd.to_datetime(raw, errors="coerce", format="ISO8601")
+    if out.notna().sum() > len(raw) * 0.5:
+        return out
+    # Intento 4: pandas auto-infer (último recurso)
+    return pd.to_datetime(raw, errors="coerce")
+
+
 def parse_operational_csv(uploaded_file, temperature_unit: str = "°F") -> List[OperationalRecord]:
+    """Parser robusto del CSV operacional (DCS export).
+
+    Maneja:
+        - Date M/D/YYYY (US) y D/M/YYYY (EU) automáticamente
+        - Timestamps desordenados (ordena ascending)
+        - Timestamps duplicados (deja el último, política DCS)
+        - Tags técnicos crípticos (humaniza labels para display)
+        - Familias extendidas: pressure, flow, frequency, etc.
+    """
     try:
         uploaded_file.seek(0)
     except Exception:
@@ -323,19 +489,29 @@ def parse_operational_csv(uploaded_file, temperature_unit: str = "°F") -> List[
     if df.empty:
         return []
 
+    # 1. Localizar columna timestamp
     timestamp_col = None
-    for candidate in ["Timestamp", "Time", "DateTime", "Datetime", "timestamp", "time"]:
+    for candidate in ["Time", "Timestamp", "DateTime", "Datetime",
+                      "timestamp", "time", "TIMESTAMP", "Date", "date",
+                      "FECHA", "Fecha"]:
         if candidate in df.columns:
             timestamp_col = candidate
             break
-
     if timestamp_col is None:
         return []
 
-    df[timestamp_col] = pd.to_datetime(df[timestamp_col], errors="coerce")
+    # 2. Parser robusto multi-formato
+    df[timestamp_col] = _parse_timestamps_robust(df[timestamp_col])
     df = df.dropna(subset=[timestamp_col]).copy()
     if df.empty:
         return []
+
+    # 3. Sort + dedup por timestamp (DCS exports interleaves retries)
+    df = (
+        df.sort_values(timestamp_col)
+          .drop_duplicates(subset=[timestamp_col], keep="last")
+          .reset_index(drop=True)
+    )
 
     records: List[OperationalRecord] = []
     machine_name = Path(uploaded_file.name).stem
@@ -351,13 +527,16 @@ def parse_operational_csv(uploaded_file, temperature_unit: str = "°F") -> List[
 
         unit = infer_operational_unit(col, temperature_unit)
         family = infer_operational_family(col)
+        # Label humanizado para display, pero op_id queda con tag
+        # crudo para no romper persistencia y matching de session.
+        clean_label = humanize_operational_label(col)
 
         records.append(
             OperationalRecord(
                 op_id=f"operational::{uploaded_file.name}::{col}",
                 file_name=uploaded_file.name,
                 machine=machine_name,
-                variable=str(col),
+                variable=clean_label,
                 unit=unit,
                 family=family,
                 timestamp_min=safe_datetime(tmp["x"].min()),
@@ -3643,6 +3822,50 @@ with st.sidebar:
         operational_store = {rec.op_id: rec for rec in parsed_operational_records}
         st.session_state["operational_signals"] = operational_store
 
+        # Ciclo 17.8 — Data quality banner: feedback explícito de
+        # qué se cargó. Esto convierte el "subí el CSV y no sé si
+        # quedó bien" en una validación visible inmediata.
+        if parsed_operational_records:
+            _n_vars = len(parsed_operational_records)
+            _total_pts = sum(r.n_samples for r in parsed_operational_records)
+            _families = sorted({r.family for r in parsed_operational_records if r.family != "generic"})
+            _ts_min = min((r.timestamp_min for r in parsed_operational_records if r.timestamp_min is not None), default=None)
+            _ts_max = max((r.timestamp_max for r in parsed_operational_records if r.timestamp_max is not None), default=None)
+            _window_txt = ""
+            if _ts_min is not None and _ts_max is not None:
+                _delta = _ts_max - _ts_min
+                _days = _delta.total_seconds() / 86400.0
+                if _days >= 1:
+                    _window_txt = f"{_days:.1f} días"
+                else:
+                    _window_txt = f"{_delta.total_seconds() / 3600.0:.1f} h"
+            _fam_chips = " ".join(
+                f"<span style='background:#e0f2fe;color:#075985;"
+                f"padding:1px 7px;border-radius:999px;font-size:0.72rem;"
+                f"font-weight:600;margin-right:3px;'>{f}</span>"
+                for f in _families
+            )
+            st.markdown(
+                f"""
+                <div style="background:#ecfdf5;border-left:3px solid #10b981;
+                            padding:8px 11px;border-radius:6px;margin-top:6px;
+                            font-size:0.82rem;color:#065f46;">
+                    <b>✓ {_n_vars} variables operativas</b>
+                    · {_total_pts:,} muestras · ventana {_window_txt}
+                    <br><span style='font-size:0.74rem;color:#047857;'>
+                    Familias detectadas:</span> {_fam_chips}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            # Auto-select de los primeros N (default 3) si no hay
+            # selección previa. Antes el chart arrancaba VACÍO y el
+            # usuario no veía nada hasta ir a la sidebar y seleccionar.
+            if not st.session_state.get("wm_tr_operational_signal_ids"):
+                default_ids = [r.op_id for r in parsed_operational_records[:3]]
+                st.session_state["wm_tr_operational_signal_ids"] = default_ids
+
     # =========================================================
     # HISTORICO DE TENDENCIAS (Ciclo 17.5 P2)
     # =========================================================
@@ -4318,15 +4541,62 @@ with st.sidebar:
     st.markdown("### Operational Selection")
     operational_name_map = {r.display_name: r.op_id for r in operational_records_all}
     operational_names = list(operational_name_map.keys())
+
+    # Ciclo 17.8 — Quick-pick por familia. En CSVs DCS típicos hay
+    # 12+ variables; seleccionar de a uno es tedioso. Estos botones
+    # cargan TODAS las de un tipo de un click.
+    if operational_records_all:
+        _by_family: Dict[str, List[str]] = {}
+        for r in operational_records_all:
+            _by_family.setdefault(r.family, []).append(r.op_id)
+        # Orden de prioridad de display
+        _fam_order = ["pressure", "temperature", "flow", "frequency",
+                      "speed", "power", "vibration", "generic"]
+        _fam_label = {
+            "pressure": "🔵 Presiones",
+            "temperature": "🟠 Temperaturas",
+            "flow": "🟢 Flujos",
+            "frequency": "🟡 Frecuencia/VFD",
+            "speed": "⚙️ Velocidad",
+            "power": "⚡ Potencia",
+            "vibration": "📊 Vibración",
+            "generic": "📂 Otros",
+        }
+        _qp_cols = st.columns(2)
+        _qp_idx = 0
+        for fam in _fam_order:
+            if fam not in _by_family:
+                continue
+            _ids = _by_family[fam]
+            with _qp_cols[_qp_idx % 2]:
+                if st.button(
+                    f"{_fam_label.get(fam, fam.title())} ({len(_ids)})",
+                    key=f"wm_tr_qp_{fam}",
+                    use_container_width=True,
+                    help=f"Cargar todas las variables de tipo {fam}",
+                ):
+                    st.session_state.wm_tr_operational_signal_ids = list(_ids)
+                    st.rerun()
+            _qp_idx += 1
+        # Botón "Limpiar" si hay seleccionadas
+        if st.session_state.get("wm_tr_operational_signal_ids"):
+            if st.button("✕ Limpiar selección operativa",
+                         key="wm_tr_op_clear",
+                         use_container_width=True,
+                         type="secondary"):
+                st.session_state.wm_tr_operational_signal_ids = []
+                st.rerun()
+
     default_operational_names = [
         r.display_name
         for r in operational_records_all
         if r.op_id in st.session_state.wm_tr_operational_signal_ids and r.display_name in operational_names
     ]
     selected_operational_names = st.multiselect(
-        "Operational signals (MW / Temp)",
+        "Variables operativas (presión, temperatura, flujo, VFD…)",
         options=operational_names,
         default=default_operational_names,
+        help="Seleccione variables individuales o use los botones rápidos de arriba para cargar por familia.",
     )
     st.session_state.wm_tr_operational_signal_ids = [operational_name_map[name] for name in selected_operational_names]
 
