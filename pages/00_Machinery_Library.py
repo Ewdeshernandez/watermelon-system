@@ -320,22 +320,45 @@ def render_instance_header(state: Dict[str, Any]) -> None:
             # justificación que queda en el reporte.
             with tab_norm:
                 from core.iso_thresholds import (
-                    list_norms, list_classes_for_norm, get_thresholds,
-                    suggest_norm_for_machine, suggest_class_for_machine,
+                    list_norms, list_norm_groups, list_classes_for_norm,
+                    get_thresholds, suggest_norm_for_machine,
+                    suggest_class_for_machine,
                 )
                 st.caption(
                     "La norma de evaluación define los setpoints Warning/Danger "
-                    "para vibración estructural. Si no la asignás, el sistema cae "
-                    "a defaults heurísticos. Si la asignás, los módulos Trend, "
-                    "Tabular y Reports usan estos valores y citan la norma en "
-                    "el PDF."
+                    "para vibración estructural, vibración de eje, balanceo de "
+                    "rotor o análisis rotodinámico. Si no la asignás, el sistema "
+                    "cae a defaults heurísticos. Si la asignás, Trend, Tabular y "
+                    "Reports usan estos valores y citan la norma en el PDF."
                 )
 
-                _norms = list_norms()
-                _norm_codes = [""] + [n["code"] for n in _norms]
-                _norm_labels = ["(sin asignar — usar defaults)"] + [
-                    f"{n['name']}" for n in _norms
-                ]
+                # =====================================================
+                # Ciclo 17.10 — Lista AGRUPADA por dominio (4 grupos)
+                # =====================================================
+                # Vibración (carcasa) · Vibración eje · Balanceo · Rotor.
+                # Cada opción del selectbox lleva un prefijo de grupo
+                # para que el usuario sepa qué tipo de norma elige.
+                _GROUP_TAGS = {
+                    "Vibración (carcasa)":          "📳 VIB",
+                    "Vibración de eje (proximity)": "🛡️ EJE",
+                    "Balanceo de rotor":            "⚖️ BAL",
+                    "Análisis rotodinámico":        "🔬 ROT",
+                }
+                _groups = list_norm_groups()
+                _norm_codes = [""]
+                _norm_labels = ["(sin asignar — usar defaults heurísticos)"]
+                _norm_meta_by_code: Dict[str, Dict[str, Any]] = {}
+                for grp_name, items in _groups.items():
+                    tag = _GROUP_TAGS.get(grp_name, grp_name)
+                    for it in items:
+                        _norm_codes.append(it["code"])
+                        _norm_labels.append(f"{tag}  ·  {it['name']}")
+                        _norm_meta_by_code[it["code"]] = {
+                            "group": grp_name,
+                            "metric": it["metric"],
+                            "unit": it["unit"],
+                        }
+
                 # Auto-sugerir norma si no hay seleccionada
                 _current_norm = inst.iso_norm_code
                 if not _current_norm:
@@ -345,20 +368,41 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                         inst.driven_model or "",
                     )
                     if _suggested and _suggested in _norm_codes:
-                        st.info(
-                            f"💡 Norma sugerida según el activo: **"
-                            f"{next((n['name'] for n in _norms if n['code'] == _suggested), _suggested)}**"
+                        _sname = next(
+                            (lbl for c, lbl in zip(_norm_codes, _norm_labels)
+                             if c == _suggested),
+                            _suggested,
                         )
+                        st.info(f"💡 Norma sugerida según el activo: **{_sname}**")
 
                 _norm_idx = _norm_codes.index(_current_norm) if _current_norm in _norm_codes else 0
                 _selected_norm_idx = st.selectbox(
-                    "Norma de evaluación",
+                    "Norma de evaluación (agrupada por dominio)",
                     options=range(len(_norm_codes)),
                     format_func=lambda i: _norm_labels[i],
                     index=_norm_idx,
                     key=f"iso_norm_select_{instance_id}",
                 )
                 new_norm_code = _norm_codes[_selected_norm_idx]
+
+                # Pista de unidad/metric apenas selecciona la norma
+                if new_norm_code:
+                    _nm = _norm_meta_by_code.get(new_norm_code, {})
+                    _grp = _nm.get("group", "")
+                    _met = _nm.get("metric", "")
+                    _un  = _nm.get("unit", "")
+                    _MET_HINTS = {
+                        "velocity_rms":         "Vibración estructural en velocidad RMS.",
+                        "velocity_pk":          "Vibración estructural en velocidad pico.",
+                        "displacement_pp":      "Vibración de eje pico-a-pico (proximity probe).",
+                        "acceleration_rms":     "Aceleración RMS (alta frecuencia).",
+                        "unbalance_grade":      "Grado de balanceo del rotor (e_per · ω).",
+                        "amplification_factor": "Factor de amplificación rotodinámico (Q/AF) o margen de separación.",
+                    }
+                    st.caption(
+                        f"📐 **Dominio:** {_grp}  ·  **Métrica:** `{_met}`  ·  "
+                        f"**Unidad:** {_un}.  {_MET_HINTS.get(_met, '')}"
+                    )
 
                 new_norm_class = ""
                 new_warn_override = 0.0
