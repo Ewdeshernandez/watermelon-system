@@ -3577,22 +3577,76 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
 
 
 def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[str]]:
+    """Export HD MINIMAL — Ciclo 17.8.4.
+
+    Bug histórico: PNG HD salía sin curvas dibujadas en mixed
+    mode. Causa raíz fueron las DOS funciones helper
+    (_build_export_safe_figure + _scale_export_figure) que
+    recreaban la figura plana y perdían la estructura subplots
+    + secondary_y. Múltiples intentos de fix fallaron porque
+    cada uno solo arreglaba la mitad.
+
+    Esta versión BORRA toda la complejidad y pasa la figura
+    PRÁCTICAMENTE INTACTA a kaleido. Solo hace 3 cosas:
+      1. Clone via to_dict() (preserva subplots+secondary_y)
+      2. Convierte scattergl→scatter (kaleido no soporta WebGL)
+      3. Bumpa width/height/font para HD legible
+    Sin scaling per-trace, sin recreate de figuras, sin
+    transformaciones de dominio o overlay. La figura sale como
+    se ve en pantalla, solo más grande.
+    """
     try:
-        export_fig = _build_export_safe_figure(fig)
-        export_fig = _scale_export_figure(export_fig)
-        # Ciclo 17.5.4 — antes pasábamos width=4200 fijo y se
-        # comían el eje secundario / info box cuando los hay. Ahora
-        # respetamos el width que _scale_export_figure ya seteó
-        # (puede ser 4200 / 4700 / 4900 según contenido).
-        try:
-            _w = int(export_fig.layout.width or 4200)
-        except Exception:
-            _w = 4200
-        try:
-            _h = int(export_fig.layout.height or 2200)
-        except Exception:
-            _h = 2200
-        png_bytes = export_fig.to_image(format="png", width=_w, height=_h, scale=2)
+        # 1. Clone via to_dict (preserva TODA la estructura)
+        fig_dict = fig.to_dict()
+
+        # 2. scattergl → scatter (kaleido no renderea WebGL)
+        for trace in fig_dict.get("data", []):
+            if trace.get("type") == "scattergl":
+                trace["type"] = "scatter"
+
+        # 3. Construir figura HD a partir del dict + bump dimensions
+        export_fig = go.Figure(fig_dict)
+
+        # Detectar si tiene secondary axis para ajustar margen derecho
+        has_secondary = "yaxis2" in fig_dict.get("layout", {})
+        has_right_panel = any(
+            (ann.get("xref") == "paper" and float(ann.get("x", 0) or 0) >= 0.83)
+            for ann in fig_dict.get("layout", {}).get("annotations", [])
+        )
+        export_w = 4900 if has_right_panel else (4700 if has_secondary else 4200)
+        export_h = 2200
+        export_fig.update_layout(
+            width=export_w,
+            height=export_h,
+            margin=dict(
+                l=120,
+                r=320 if has_right_panel else (260 if has_secondary else 90),
+                t=200,
+                b=120,
+            ),
+            font=dict(size=24, color="#111827"),
+            paper_bgcolor="#f3f4f6",
+            plot_bgcolor="#f8fafc",
+        )
+        # Bump fonts de ejes
+        export_fig.update_xaxes(
+            type="date",
+            tickfont=dict(size=22),
+            title_font=dict(size=30),
+            tickformat="%Y-%m-%d %H:%M",
+        )
+        export_fig.update_yaxes(
+            tickfont=dict(size=22),
+            title_font=dict(size=30),
+        )
+
+        # 4. Render PNG via kaleido
+        png_bytes = export_fig.to_image(
+            format="png",
+            width=export_w,
+            height=export_h,
+            scale=2,
+        )
         return png_bytes, None
     except Exception as e:
         return None, str(e)
