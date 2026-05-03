@@ -303,6 +303,53 @@ DEFAULT_REPORT_META = {
 # sobrescribía con los del disco). El helper compartido hace
 # merge correcto.
 ensure_report_state_loaded()
+
+# =====================================================================
+# Ciclo 17.14.1 HOTFIX — Banners de recovery / pérdida de datos
+# =====================================================================
+# Si load_report_state tuvo que recuperar desde un backup (porque el
+# JSON principal estaba corrupto), avisamos al usuario VISIBLEMENTE.
+# Esto era el bug histórico: antes el sistema silenciosamente devolvía
+# {} y el usuario perdía un día de trabajo sin saber por qué.
+_rec_from = st.session_state.get("wm_report_recovered_from")
+_load_err = st.session_state.get("wm_report_load_error")
+
+if _rec_from and not st.session_state.get("wm_report_recovery_dismissed"):
+    _rec_n = st.session_state.get("wm_report_recovered_n_items", 0)
+    _rec_at = st.session_state.get("wm_report_recovered_at", "")
+    st.warning(
+        f"⚠️ **Tu reporte se recuperó de un backup automático.** "
+        f"El archivo principal tenía un problema (probablemente "
+        f"Streamlit se interrumpió mientras guardaba) y restauramos "
+        f"desde **`{_rec_from}`** con **{_rec_n} items**.\n\n"
+        f"📌 **Por favor revisá** que estén todos los items que esperabas. "
+        f"Si falta algo del último ratito, puede haberse perdido entre el "
+        f"último guardado exitoso y la corrupción.",
+        icon="🔄",
+    )
+    if st.button("Entendido — descartar este aviso",
+                 key="wm_report_recovery_dismiss"):
+        st.session_state["wm_report_recovery_dismissed"] = True
+        st.session_state.pop("wm_report_recovered_from", None)
+        st.rerun()
+
+if _load_err and not st.session_state.get("wm_report_load_err_dismissed"):
+    st.error(
+        f"🚨 **No pude cargar tu reporte ni desde backups.** "
+        f"El archivo `data/report_state.json` y todos sus backups (.bak.1 a "
+        f".bak.{5}) están corruptos o ilegibles.\n\n"
+        f"**Error técnico:** `{_load_err[:200]}`\n\n"
+        f"📌 **Acción sugerida:** revisá manualmente la carpeta "
+        f"`data/` por si hay algún archivo recuperable. Si no, vas a tener "
+        f"que reconstruir el reporte desde cero. Esto NO debería volver a "
+        f"pasar — el sistema nuevo guarda 5 backups rotativos.",
+        icon="🚨",
+    )
+    if st.button("Entendido — empezar reporte limpio",
+                 key="wm_report_load_err_dismiss"):
+        st.session_state["wm_report_load_err_dismissed"] = True
+        st.session_state.pop("wm_report_load_error", None)
+        st.rerun()
 # Asegurar que el meta tenga los defaults del módulo Reports
 # (campos como report_date) sin pisar lo que ya había.
 _loaded_meta = st.session_state.get("report_meta", {}) or {}

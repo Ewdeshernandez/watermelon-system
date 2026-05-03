@@ -2,15 +2,42 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
+import shutil
+import tempfile
+from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
 REPORT_STATE_FILE = DATA_DIR / "report_state.json"
 REPORT_DRAFTS_DIR = DATA_DIR / "report_drafts"
+
+# =============================================================
+# Ciclo 17.14.1 HOTFIX — Anti-pérdida de trabajo
+# =============================================================
+# Bug crítico reportado: con 50-100 imágenes, se pierde TODO el
+# trabajo del día porque:
+#   1. save_report_state escribía al JSON directo (NO atómico).
+#      Si Streamlit crasheaba mid-write (timeout/OOM con 67MB
+#      de JSON con base64 inline) → archivo corrupto.
+#   2. load_report_state silenciosamente devolvía {} sin
+#      avisar al usuario que el JSON estaba roto.
+#
+# Fix:
+#   - Write atómico vía tempfile + os.replace
+#   - Backup rotativo (.bak.1 → .bak.5) ANTES de cada write
+#     exitoso, así siempre tenemos N versiones de respaldo
+#   - load_report_state ahora intenta recovery desde backup
+#     si el archivo principal está corrupto, y EXPONE el flag
+#     'recovered_from' para que la UI muestre banner al usuario
+#   - cleanup_old_backups limita a max N backups por archivo
+# =============================================================
+
+MAX_BACKUPS = 5  # cantidad de versiones de respaldo a mantener
 
 
 def _encode_image_bytes(value: Any) -> str:
@@ -109,30 +136,218 @@ def _restore_state(raw: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+# =============================================================
+# Ciclo 17.14.1 — Helpers internos de write atómico + backups
+# =============================================================
+
+def _backup_path(target: Path, idx: int) -> Path:
+    """Devuelve el path del backup número `idx` (1..MAX_BACKUPS)
+    para el archivo `target`. Ej: report_state.json → report_state.json.bak.1
+    """
+    return target.with_suffix(target.suffix + f".bak.{idx}")
+
+
+def _rotate_backups(target: Path) -> None:
+    """Rota los backups del archivo `target`:
+       - .bak.5 se elimina (más viejo)
+       - .bak.4 → .bak.5
+       - .bak.3 → .bak.4
+       - ...
+       - .bak.1 → .bak.2
+       - target → .bak.1 (más reciente)
+    Si el target no existe (primer save), simplemente no rota nada.
+    """
+    if not target.exists():
+        return
+    # Eliminar el más viejo (.bak.MAX_BACKUPS) si existe
+    oldest = _backup_path(target, MAX_BACKUPS)
+    if oldest.exists():
+        try:
+            oldest.unlink()
+        except Exception:
+            pass
+    # Rotar desde el (MAX-1) hacia atrás
+    for i in range(MAX_BACKUPS - 1, 0, -1):
+        src = _backup_path(target, i)
+        dst = _backup_path(target, i + 1)
+        if src.exists():
+            try:
+                src.replace(dst)
+            except Exception:
+                pass
+    # target → .bak.1 (copia, no movimiento, para que el target
+    # quede disponible mientras escribimos el nuevo)
+    try:
+        shutil.copy2(target, _backup_path(target, 1))
+    except Exception:
+        pass
+
+
+def _atomic_write_json(target: Path, payload: Dict[str, Any]) -> None:
+    """Escribe `payload` a `target` ATÓMICAMENTE:
+       1. Escribe a un archivo temporal en el mismo directorio
+       2. fsync para asegurar bytes en disco antes del rename
+       3. os.replace (atómico en POSIX y Windows) → si crashea,
+          el archivo final queda intacto en su versión previa
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        prefix=target.stem + ".",
+        suffix=".tmp",
+        dir=str(target.parent),
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False, default=str)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except Exception:
+                pass
+        # Rename atómico — si crashea aquí, target queda con
+        # contenido viejo, NO con archivo corrupto a medio escribir
+        os.replace(str(tmp_path), str(target))
+    except Exception:
+        # Si algo falló, asegurar limpieza del temp
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
+        raise
+
+
+# =============================================================
+# API PÚBLICA
+# =============================================================
+
 def save_report_state(*, items: Any, meta: Any, filename: Path | None = None) -> None:
+    """Persiste el estado del reporte de forma SEGURA.
+
+    Ciclo 17.14.1 HOTFIX:
+      - Antes del write, rota backups (mantiene 5 versiones)
+      - Write ATÓMICO via tmp file + os.replace
+      - Si crashea mid-write, el archivo final queda intacto
+        y se puede recuperar desde el backup más reciente
+    """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     target = filename or REPORT_STATE_FILE
     payload = _serialize_state(items=items, meta=meta)
-    target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    # Inyectar metadata interna del save (útil para debugging)
+    payload["_save_meta"] = {
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "n_items": len(payload.get("items", [])),
+    }
+    _rotate_backups(target)
+    _atomic_write_json(target, payload)
 
 
 def load_report_state(*, filename: Path | None = None) -> Dict[str, Any]:
+    """Carga el estado del reporte. Si el archivo principal está
+    corrupto, intenta recovery automático desde los backups.
+
+    Ciclo 17.14.1 HOTFIX:
+      - Si el JSON principal falla → intenta .bak.1, luego .bak.2, etc.
+      - Si recupera desde backup, agrega `_recovered_from` al dict
+        para que la UI pueda mostrar un banner al usuario
+      - Si TODOS fallan, devuelve {} pero con `_load_error` poblado
+        para que la UI sepa que hubo un problema (no silent fail)
+    """
     target = filename or REPORT_STATE_FILE
     if not target.exists():
         return {"items": [], "meta": {}}
 
+    # Intento principal
     try:
         raw = json.loads(target.read_text(encoding="utf-8"))
-    except Exception:
-        return {"items": [], "meta": {}}
-
-    return _restore_state(raw)
+        result = _restore_state(raw)
+        # No agregamos _recovered_from porque cargó normal
+        return result
+    except Exception as primary_err:
+        # Recovery desde backups (1..MAX, del más reciente al más viejo)
+        for i in range(1, MAX_BACKUPS + 1):
+            bk = _backup_path(target, i)
+            if not bk.exists():
+                continue
+            try:
+                raw = json.loads(bk.read_text(encoding="utf-8"))
+                result = _restore_state(raw)
+                # Marcar de dónde se recuperó para que la UI avise
+                result["_recovered_from"] = bk.name
+                result["_recovered_at"] = datetime.now().isoformat(timespec="seconds")
+                # Reescribir el archivo principal con el contenido del backup
+                # para que las próximas cargas no tengan que recurrir al backup.
+                # (Si esto falla, no es bloqueante — la lectura ya tuvo éxito)
+                try:
+                    _atomic_write_json(target, raw)
+                except Exception:
+                    pass
+                return result
+            except Exception:
+                continue
+        # Ningún backup salvable
+        return {
+            "items": [],
+            "meta": {},
+            "_load_error": str(primary_err),
+            "_load_error_at": datetime.now().isoformat(timespec="seconds"),
+        }
 
 
 def clear_report_state(*, filename: Path | None = None) -> None:
+    """Borra el estado actual del reporte.
+    Ciclo 17.14.1: NO toca los backups (.bak.*) — siguen disponibles
+    si después el usuario quiere recuperar.
+    """
     target = filename or REPORT_STATE_FILE
     if target.exists():
         target.unlink()
+
+
+def list_available_backups(filename: Path | None = None) -> List[Dict[str, Any]]:
+    """Devuelve lista de backups disponibles con metadata útil.
+    Útil para UI de "restaurar desde backup específico" si se necesita.
+    """
+    target = filename or REPORT_STATE_FILE
+    out: List[Dict[str, Any]] = []
+    for i in range(1, MAX_BACKUPS + 1):
+        bk = _backup_path(target, i)
+        if not bk.exists():
+            continue
+        try:
+            stat = bk.stat()
+            # Intentar leer el _save_meta del backup
+            saved_at = ""
+            n_items = 0
+            try:
+                raw = json.loads(bk.read_text(encoding="utf-8"))
+                sm = raw.get("_save_meta", {}) or {}
+                saved_at = sm.get("saved_at", "") or ""
+                n_items = int(sm.get("n_items", 0) or 0)
+            except Exception:
+                pass
+            out.append({
+                "backup_idx": i,
+                "filename": bk.name,
+                "path": str(bk),
+                "size_bytes": stat.st_size,
+                "size_human": _human_size(stat.st_size),
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+                "saved_at": saved_at,
+                "n_items": n_items,
+            })
+        except Exception:
+            continue
+    return out
+
+
+def _human_size(n: int) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
 
 
 # =============================================================
@@ -187,6 +402,21 @@ def ensure_report_state_loaded() -> None:
     persisted = load_report_state()
     disk_items = persisted.get("items", []) if isinstance(persisted, dict) else []
     disk_meta = persisted.get("meta", {}) if isinstance(persisted, dict) else {}
+
+    # Ciclo 17.14.1 — Propagar flags de recovery/error a session_state
+    # para que la UI de Reports pueda mostrar banners visibles al usuario.
+    if isinstance(persisted, dict):
+        rec_from = persisted.get("_recovered_from")
+        rec_at = persisted.get("_recovered_at")
+        load_err = persisted.get("_load_error")
+        load_err_at = persisted.get("_load_error_at")
+        if rec_from:
+            st.session_state["wm_report_recovered_from"] = rec_from
+            st.session_state["wm_report_recovered_at"] = rec_at or ""
+            st.session_state["wm_report_recovered_n_items"] = len(disk_items)
+        if load_err:
+            st.session_state["wm_report_load_error"] = load_err
+            st.session_state["wm_report_load_error_at"] = load_err_at or ""
 
     # Si memoria ya tiene items (race del bug), preservamos esos y
     # adjuntamos los faltantes del disco por id.
