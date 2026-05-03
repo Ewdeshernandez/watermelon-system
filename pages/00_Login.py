@@ -178,11 +178,17 @@ st.markdown(
         font-weight: 600;
     }
 
-    /* ---------- DERECHA: tarjeta login glassmorphism ---------- */
-    .wm-login-card {
-        width: 100%;
-        max-width: 440px;
-        margin-left: auto;
+    /* ---------- DERECHA: tarjeta login glassmorphism ----------
+       FIX 17.6.1: antes envolvía el form en <div class="wm-login-card">
+       pero Streamlit renderiza cada st.markdown como bloque
+       independiente, así que el div se mostraba VACÍO arriba del
+       form (caja blanca fantasma). Ahora estilamos directamente
+       el [data-testid="stForm"] para que el form SEA la card.
+
+       Usamos :has() para detectar nuestro marker .wm-login-marker
+       dentro del column derecho y aplicar el estilo a TODO el
+       column como card. */
+    [data-testid="column"]:has(.wm-login-marker) {
         background: rgba(255, 255, 255, 0.88);
         backdrop-filter: blur(14px);
         -webkit-backdrop-filter: blur(14px);
@@ -191,7 +197,23 @@ st.markdown(
         box-shadow:
             0 22px 50px rgba(15, 23, 42, 0.10),
             0 2px 8px rgba(15, 23, 42, 0.03);
-        padding: 2.1rem 1.9rem 1.7rem 1.9rem;
+        padding: 2rem 1.85rem 1.55rem 1.85rem !important;
+        max-width: 480px;
+        margin-left: auto;
+        align-items: stretch !important;
+    }
+    .wm-login-marker { display: none; }
+    .wm-logo-marker { display: none; }
+
+    /* Logo: dejar la imagen plana, sin "caja" envolvente fantasma */
+    [data-testid="column"]:has(.wm-logo-marker) {
+        align-items: center !important;
+    }
+    [data-testid="column"]:has(.wm-logo-marker) [data-testid="stImage"] img {
+        width: 56px !important;
+        height: 56px !important;
+        border-radius: 14px;
+        box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06);
     }
 
     .wm-login-top {
@@ -236,32 +258,73 @@ st.markdown(
         letter-spacing: 0.01em !important;
     }
 
-    /* Borde por defecto + en focus + cuando "needs attention" siempre AZUL/GRIS,
-       nunca el rojo de validación de Streamlit. */
+    /* =========================================================
+       FIX 17.6.1 — KILL del recuadro rojo en username/password.
+       El borde rojo viene de DOS sitios:
+         (a) Streamlit BaseWeb pinta border-color:rgb(255,75,75)
+             cuando el input está "needs attention" o vacío
+             dentro de un st.form sin submit.
+         (b) Chrome pone outline rojizo en autofill +
+             :focus-visible (especialmente con password manager).
+       Estrategia: override TOTAL en TODOS los selectores de
+       BaseWeb (data-baseweb=input, base-input, input) y kill
+       de webkit-autofill/focus-visible.
+       ========================================================= */
+
+    /* Wrapper exterior del input */
     div[data-testid="stTextInput"] > div > div,
-    div[data-testid="stTextInput"] > div > div:focus,
-    div[data-testid="stTextInput"] > div > div:focus-within,
-    div[data-testid="stTextInput"] > div > div:hover,
-    div[data-testid="stTextInput"]:focus-within > div > div {
+    div[data-testid="stTextInput"] [data-baseweb="input"],
+    div[data-testid="stTextInput"] [data-baseweb="base-input"] {
         background: #f8fafd !important;
         border: 1px solid #d3dde9 !important;
         border-radius: 12px !important;
         min-height: 52px !important;
         box-shadow: none !important;
-        transition: all 0.18s ease !important;
         outline: none !important;
+        transition: border-color 0.18s ease, box-shadow 0.18s ease !important;
     }
-    div[data-testid="stTextInput"] > div > div:focus-within {
-        border: 1px solid #21478c !important;
+    /* Hover */
+    div[data-testid="stTextInput"] > div > div:hover,
+    div[data-testid="stTextInput"] [data-baseweb="input"]:hover,
+    div[data-testid="stTextInput"] [data-baseweb="base-input"]:hover {
+        border-color: #b8c6d8 !important;
+        box-shadow: none !important;
+    }
+    /* Focus: azul corporativo, NO rojo */
+    div[data-testid="stTextInput"] > div > div:focus-within,
+    div[data-testid="stTextInput"] [data-baseweb="input"]:focus-within,
+    div[data-testid="stTextInput"] [data-baseweb="base-input"]:focus-within {
+        border-color: #21478c !important;
         box-shadow: 0 0 0 3px rgba(33,71,140,0.15) !important;
     }
-    /* Override agresivo de cualquier rojo de validación */
+    /* Override TOTAL de cualquier rojo: aria-invalid, :invalid,
+       inline styles con rgb rojo, y selector :has() para
+       Chrome autofill */
     div[data-testid="stTextInput"][aria-invalid] > div > div,
+    div[data-testid="stTextInput"] [aria-invalid="true"],
     div[data-testid="stTextInput"] > div > div[style*="rgb(255"],
+    div[data-testid="stTextInput"] [data-baseweb="input"][style*="rgb(255"],
     div[data-testid="stTextInput"] input:invalid,
-    div[data-testid="stTextInput"]:has(input:invalid) > div > div {
+    div[data-testid="stTextInput"]:has(input:invalid) > div > div,
+    div[data-testid="stTextInput"]:has(input:-webkit-autofill) > div > div {
         border-color: #d3dde9 !important;
         box-shadow: none !important;
+        background-color: #f8fafd !important;
+    }
+    /* Quitar el outline rojo de :focus-visible */
+    div[data-testid="stTextInput"] *:focus,
+    div[data-testid="stTextInput"] *:focus-visible {
+        outline: none !important;
+        outline-color: transparent !important;
+    }
+    /* Chrome autofill — quitar el fondo amarillo/rojizo */
+    div[data-testid="stTextInput"] input:-webkit-autofill,
+    div[data-testid="stTextInput"] input:-webkit-autofill:hover,
+    div[data-testid="stTextInput"] input:-webkit-autofill:focus {
+        -webkit-text-fill-color: #0e1a30 !important;
+        -webkit-box-shadow: 0 0 0 1000px #f8fafd inset !important;
+        box-shadow: 0 0 0 1000px #f8fafd inset !important;
+        transition: background-color 5000s ease-in-out 0s !important;
     }
 
     div[data-testid="stTextInput"] input {
@@ -359,12 +422,16 @@ with left_col:
     logo_col, text_col = st.columns([0.12, 0.88], gap="small")
 
     with logo_col:
-        st.markdown('<div class="wm-logo-box">', unsafe_allow_html=True)
+        # Marker invisible que sirve para que el CSS detecte ESTA
+        # columna vía :has() y aplique los estilos del logo.
+        # Antes envolvíamos con <div class="wm-logo-box"> pero
+        # Streamlit renderizaba el div VACÍO porque la imagen va
+        # como bloque aparte, dejando una caja blanca fantasma.
+        st.markdown('<span class="wm-logo-marker"></span>', unsafe_allow_html=True)
         if asset_exists(LOGO_PATH):
             st.image(str(LOGO_PATH), use_container_width=True)
         else:
             st.markdown("<div style='font-size:1.5rem;'>🍉</div>", unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
 
     with text_col:
         st.markdown(
@@ -401,7 +468,11 @@ with left_col:
     )
 
 with right_col:
-    st.markdown('<div class="wm-login-card">', unsafe_allow_html=True)
+    # Marker invisible para que :has() detecte ESTA columna y le
+    # aplique los estilos de card glassmorphism. Antes envolvíamos
+    # con <div class="wm-login-card"> pero Streamlit lo renderizaba
+    # VACÍO arriba del form (caja blanca fantasma).
+    st.markdown('<span class="wm-login-marker"></span>', unsafe_allow_html=True)
 
     st.markdown(
         """
@@ -417,6 +488,7 @@ with right_col:
             "Usuario o correo corporativo",
             placeholder="nombre.apellido@empresa.com",
             key="wm_login_username",
+            autocomplete="username",
         )
 
         password = st.text_input(
@@ -424,6 +496,7 @@ with right_col:
             placeholder="••••••••••••",
             type="password",
             key="wm_login_password",
+            autocomplete="current-password",
         )
 
         submit = st.form_submit_button("Iniciar sesión", use_container_width=True)
@@ -445,5 +518,3 @@ with right_col:
         """,
         unsafe_allow_html=True,
     )
-
-    st.markdown("</div>", unsafe_allow_html=True)
