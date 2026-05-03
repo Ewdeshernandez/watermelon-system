@@ -297,14 +297,54 @@ def get_current_user() -> Optional[Dict[str, Any]]:
         return None
 
     return {
-        "username": st.session_state.get("auth_username"),
-        "email": st.session_state.get("auth_email"),
+        "username":  st.session_state.get("auth_username"),
+        "email":     st.session_state.get("auth_email"),
         "full_name": st.session_state.get("auth_full_name"),
-        "role": st.session_state.get("auth_role"),
+        "role":      st.session_state.get("auth_role"),
+        # Ciclo 17.14 — campos nuevos para identificación + ACL
+        "user_id":   st.session_state.get("auth_user_id", ""),
+        "is_admin":  bool(st.session_state.get("auth_is_admin", False)),
+        "source":    st.session_state.get("auth_source", "legacy"),
     }
 
 
 def login(identifier: str, password: str) -> tuple[bool, str]:
+    """Intenta autenticar.
+
+    Ciclo 17.14: prioridad a Supabase Auth (usuarios reales).
+    Si Supabase no está configurado o el usuario no existe ahí, fallback
+    al sistema viejo de usuarios hardcoded en .streamlit/secrets.toml
+    (back-compat para no romper sesiones existentes durante la migración).
+    """
+    # ─── Try 1: Supabase Auth (Ciclo 17.14)
+    try:
+        from core.supabase_auth import is_supabase_auth_enabled, signin_user
+        if is_supabase_auth_enabled():
+            result = signin_user(identifier, password)
+            if result.get("ok"):
+                u = result["user"]
+                st.session_state["auth_ok"] = True
+                st.session_state["auth_username"] = u.get("email", "")
+                st.session_state["auth_email"] = u.get("email", "")
+                st.session_state["auth_full_name"] = u.get("full_name", "") or u.get("email", "")
+                st.session_state["auth_role"] = u.get("role", "client")
+                st.session_state["auth_user_id"] = u.get("id", "")
+                st.session_state["auth_is_admin"] = bool(u.get("is_admin"))
+                st.session_state["auth_source"] = "supabase"
+                st.session_state["auth_expires_at"] = _now() + _session_timeout_seconds()
+                return True, "Acceso concedido."
+            # Si el error es "credenciales inválidas", NO caer al fallback —
+            # significa que Supabase respondió pero no aceptó. Para evitar
+            # confusión donde un usuario legacy haga login después de migrar.
+            err = result.get("error", "")
+            if any(s in err.lower() for s in ("incorrectos", "bloqueada", "no confirmada")):
+                return False, err
+            # Si el error es de config / red, continuar al fallback legacy
+    except Exception:
+        # Cualquier problema con Supabase: no romper, ir al fallback legacy
+        pass
+
+    # ─── Try 2: sistema legacy (.streamlit/secrets.toml hardcoded)
     user = _find_user(identifier)
     if user is None:
         return False, "Usuario o correo no encontrado."
@@ -321,6 +361,9 @@ def login(identifier: str, password: str) -> tuple[bool, str]:
     st.session_state["auth_email"] = user.get("email", "")
     st.session_state["auth_full_name"] = user.get("full_name", user.get("username", ""))
     st.session_state["auth_role"] = user.get("role", "viewer")
+    st.session_state["auth_user_id"] = ""
+    st.session_state["auth_is_admin"] = (user.get("role") == "admin")
+    st.session_state["auth_source"] = "legacy"
     st.session_state["auth_expires_at"] = _now() + _session_timeout_seconds()
 
     return True, "Acceso concedido."
@@ -334,6 +377,11 @@ def logout(silent: bool = False) -> None:
         "auth_full_name",
         "auth_role",
         "auth_expires_at",
+        # Ciclo 17.14
+        "auth_user_id",
+        "auth_is_admin",
+        "auth_source",
+        "_supabase_admin_client",
     ]
     for key in keys_to_remove:
         if key in st.session_state:
@@ -398,9 +446,27 @@ def render_user_menu() -> None:
         st.markdown('<div class="wm-side-section">Navegación</div>', unsafe_allow_html=True)
         st.markdown('<div class="wm-nav-wrap"></div>', unsafe_allow_html=True)
 
+        # Ciclo 17.14 — Filtrar nav según role.
+        # client: vista limitada (sin Load Data, Reports edit, Library edit, etc.)
+        #   Eso lo aplicamos en 17.16. Por ahora client ve el menú completo.
+        # admin/specialist: menú completo + botón Admin Panel para admin
         for item in NAV_ITEMS:
             if st.button(item["label"], use_container_width=True, key=f"nav_{item['page']}"):
                 st.switch_page(item["page"])
+
+        # Ciclo 17.14 — Botón "Admin Panel" SOLO para admin único
+        if user.get("is_admin"):
+            st.markdown('<div class="wm-side-divider"></div>', unsafe_allow_html=True)
+            st.markdown(
+                '<div class="wm-side-section">Administración</div>',
+                unsafe_allow_html=True,
+            )
+            if st.button("👥  Admin · Usuarios", use_container_width=True,
+                         key="nav_admin_users"):
+                try:
+                    st.switch_page("pages/_admin_users.py")
+                except Exception:
+                    st.warning("Admin Panel todavía no está disponible.")
 
         st.markdown('<div class="wm-side-divider"></div>', unsafe_allow_html=True)
         st.markdown('<div class="wm-logout-spacer"></div>', unsafe_allow_html=True)

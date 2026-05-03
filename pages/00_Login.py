@@ -500,10 +500,14 @@ with right_col:
 
     with st.form("wm_login_form", clear_on_submit=False):
         username = st.text_input(
-            "Usuario o correo corporativo",
-            placeholder="nombre.apellido@empresa.com",
+            "Correo corporativo",
+            placeholder="nombre.apellido@sigasas.com",
             key="wm_login_username",
-            autocomplete="username",
+            autocomplete="email",
+            help=(
+                "Para usuarios SIGASAS: tu correo @sigasas.com. "
+                "Para clientes: el correo registrado por tu administrador."
+            ),
         )
 
         password = st.text_input(
