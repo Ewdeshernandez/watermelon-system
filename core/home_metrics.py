@@ -129,12 +129,41 @@ _SEVERITY_META = {
 }
 
 
+# Ciclo 17.13 — Mapeo de labels de severidad ejecutiva (literales del
+# PDF generator en pages/16_Reports.py) a las 4 bandas del Home.
+# Se chequea con normalize() simple para tolerar mayús/minús/acentos.
+_EXEC_SEVERITY_TO_BAND = {
+    "critica":            "danger",
+    "accion requerida":   "danger",
+    "atencion":           "warning",
+    "vigilancia":         "warning",
+    "condicion aceptable":"healthy",
+    # Variantes ya usadas en el helper antiguo (back-compat)
+    "danger":             "danger",
+    "warning":            "warning",
+    "healthy":            "healthy",
+}
+
+
+def _norm_no_accents(s: str) -> str:
+    """Normaliza string a lower sin acentos para comparar severidad."""
+    if not s:
+        return ""
+    s = s.lower().strip()
+    repl = {"á":"a","é":"e","í":"i","ó":"o","ú":"u","ñ":"n","ü":"u"}
+    for a, b in repl.items():
+        s = s.replace(a, b)
+    return s
+
+
 def _heuristic_severity(inst_summary: Dict[str, Any],
                          full_metadata: Optional[Dict[str, Any]] = None) -> str:
-    """Calcula severity heurística para una instancia.
+    """Calcula severity para una instancia.
 
-    Si full_metadata viene, lo usa para chequear iso_norm_code y
-    last_balance_date. Si no, intenta solo con el summary.
+    Ciclo 17.13: si la instancia tiene `last_executive_severity` persistido
+    desde el último PDF, USA ESE valor (estado real del activo) en lugar
+    de la heurística de configuración. La heurística sólo aplica cuando
+    el activo nunca fue analizado.
     """
     has_norm = False
     has_balance = False
@@ -143,10 +172,11 @@ def _heuristic_severity(inst_summary: Dict[str, Any],
     if full_metadata:
         has_norm = bool((full_metadata.get("iso_norm_code") or "").strip())
         has_balance = bool((full_metadata.get("last_balance_date") or "").strip())
-        # Si el especialista persistió una severity ejecutiva (futuro), usarla
-        explicit = (full_metadata.get("last_executive_severity") or "").strip().lower()
-        if explicit in ("healthy", "warning", "danger"):
-            return explicit
+        # Severidad ejecutiva persistida del último PDF — toma prioridad
+        explicit = _norm_no_accents(full_metadata.get("last_executive_severity", ""))
+        mapped = _EXEC_SEVERITY_TO_BAND.get(explicit)
+        if mapped:
+            return mapped
 
     if has_norm and n_docs >= 1 and has_balance:
         return "healthy"
@@ -213,6 +243,8 @@ def compute_fleet_status() -> Dict[str, Any]:
                     "iso_norm_code": getattr(inst, "iso_norm_code", "") or "",
                     "last_balance_date": getattr(inst, "last_balance_date", "") or "",
                     "last_executive_severity": getattr(inst, "last_executive_severity", "") or "",
+                    "last_executive_summary": getattr(inst, "last_executive_summary", "") or "",
+                    "last_report_date": getattr(inst, "last_report_date", "") or "",
                     "asset_class": getattr(inst, "asset_class", "") or "",
                 }
         except Exception:

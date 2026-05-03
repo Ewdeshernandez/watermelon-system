@@ -45,9 +45,12 @@ sabe a qué activo ir, y arranca a trabajar sin clics extra.
 
 from __future__ import annotations
 
+from datetime import datetime
+
 import streamlit as st
 
 from core.auth import get_current_user, render_user_menu, require_login
+from core.briefing import generate_and_save_briefing
 from core.health_score import (
     compute_health_score,
     render_score_gauge,
@@ -518,13 +521,60 @@ st.markdown(
 st.markdown('<div class="wmh-omni-wrap">', unsafe_allow_html=True)
 _omni_q = st.text_input(
     label="Búsqueda global",
-    placeholder="🔍  Buscar activo, reporte o norma — ej. \"TES1\", \"ISO 20816\", \"684\", \"balanceo\"…",
+    placeholder="🔍  Buscar activo, reporte o norma — ej. \"TES1\", \"ISO 20816\", \"684\", \"balanceo\"… (Cmd+K)",
     key="wmh_omnibox_q",
     label_visibility="collapsed",
 )
 st.markdown(
     '<div class="wmh-omni-hint">tip: tipea ≥2 caracteres · '
-    'enter para buscar · click en un resultado para ir directo</div>',
+    'enter para buscar · click en un resultado para ir directo · '
+    '<b>Cmd+K</b> (o Ctrl+K) para enfocar desde cualquier lugar</div>',
+    unsafe_allow_html=True,
+)
+
+# Ciclo 17.13 — Cmd+K real: hotkey global que enfoca el omnibox
+# sin necesidad de instalar streamlit-shortcuts. Inyecta JS inline
+# que escucha keydown en el iframe parent y enfoca el text_input
+# por su placeholder (que sirve de selector estable).
+st.markdown(
+    """
+    <script>
+    (function() {
+        function attachOmniHotkey() {
+            // Streamlit corre dentro de iframe; intentar window.parent también.
+            const targets = [window];
+            try { if (window.parent && window.parent !== window) targets.push(window.parent); } catch(e){}
+            const focusOmni = function() {
+                // Selector: input cuyo placeholder empiece con el lupa+texto
+                let nodes = document;
+                try { nodes = window.parent.document; } catch(e){}
+                const el = nodes.querySelector('input[placeholder^="\\u{1F50D}"]');
+                if (el) { el.focus(); el.select && el.select(); return true; }
+                return false;
+            };
+            const handler = function(ev) {
+                const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+                const cmdK = (isMac ? ev.metaKey : ev.ctrlKey) && (ev.key === 'k' || ev.key === 'K');
+                if (cmdK) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    focusOmni();
+                }
+            };
+            targets.forEach(function(t) {
+                try { t.addEventListener('keydown', handler, true); } catch(e){}
+            });
+        }
+        // Re-enganchar tras rerender de Streamlit
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', attachOmniHotkey);
+        } else {
+            attachOmniHotkey();
+        }
+        setTimeout(attachOmniHotkey, 800);
+    })();
+    </script>
+    """,
     unsafe_allow_html=True,
 )
 
@@ -668,21 +718,57 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-qa_cols = st.columns(5)
+qa_cols = st.columns(6)
 _QUICK = [
-    ("📤  Cargar CSV",    "pages/01_Load_Data.py"),
-    ("📈  Trends",        "pages/04_Trends.py"),
-    ("📚  Machinery Lib", "pages/00_Machinery_Library.py"),
-    ("🔬  Diagnostics",   "pages/15_Diagnostics.py"),
-    ("📄  Reports",       "pages/16_Reports.py"),
+    ("📤  Cargar CSV",    "pages/01_Load_Data.py",          "page"),
+    ("📈  Trends",        "pages/04_Trends.py",             "page"),
+    ("📚  Machinery Lib", "pages/00_Machinery_Library.py",  "page"),
+    ("🔬  Diagnostics",   "pages/15_Diagnostics.py",        "page"),
+    ("📄  Reports",       "pages/16_Reports.py",            "page"),
+    ("📰  Briefing día",  "_briefing_action",               "briefing"),
 ]
-for col, (label, page) in zip(qa_cols, _QUICK):
+for col, (label, target, kind) in zip(qa_cols, _QUICK):
     with col:
-        if st.button(label, use_container_width=True, key=f"qa_{page}"):
-            try:
-                st.switch_page(page)
-            except Exception:
-                st.warning(f"No pude abrir {page}")
+        if st.button(label, use_container_width=True, key=f"qa_{target}"):
+            if kind == "briefing":
+                # Ciclo 17.13 — Genera el PDF del día al instante.
+                # Snapshot, comparativo vs ayer, top 3, vencimientos.
+                try:
+                    with st.spinner("Generando briefing del día…"):
+                        _pdf_b, _pdf_p = generate_and_save_briefing()
+                    st.session_state["wm_briefing_pdf_bytes"] = _pdf_b
+                    st.session_state["wm_briefing_pdf_path"] = str(_pdf_p)
+                    st.session_state["wm_briefing_pdf_at"] = datetime.now().strftime("%H:%M")
+                except Exception as _e:
+                    st.session_state["wm_briefing_pdf_bytes"] = None
+                    st.session_state["wm_briefing_pdf_error"] = str(_e)
+            else:
+                try:
+                    st.switch_page(target)
+                except Exception:
+                    st.warning(f"No pude abrir {target}")
+
+# Download del briefing si recién se generó
+_brief_bytes = st.session_state.get("wm_briefing_pdf_bytes")
+_brief_err = st.session_state.get("wm_briefing_pdf_error")
+if _brief_err:
+    st.error(f"No pude generar el briefing: {_brief_err}")
+    st.session_state.pop("wm_briefing_pdf_error", None)
+elif _brief_bytes:
+    _at = st.session_state.get("wm_briefing_pdf_at", "")
+    _date_str = datetime.now().strftime("%Y-%m-%d")
+    st.success(
+        f"✓ Briefing diario listo (generado {_at}). "
+        f"Tamaño {len(_brief_bytes)/1024:.1f} KB."
+    )
+    st.download_button(
+        label=f"⬇️  Descargar briefing_{_date_str}.pdf",
+        data=_brief_bytes,
+        file_name=f"briefing_{_date_str}.pdf",
+        mime="application/pdf",
+        use_container_width=True,
+        key="wm_briefing_dl",
+    )
 
 
 # =============================================================

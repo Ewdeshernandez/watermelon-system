@@ -2466,6 +2466,38 @@ with ga3:
             pdf_bytes = _build_pdf_bytes(meta, items)
             st.session_state["report_pdf_bytes"] = pdf_bytes
             st.session_state["report_pdf_error"] = None
+
+            # ─────────────────────────────────────────────────────
+            # Ciclo 17.13 — Persistir severidad ejecutiva al Vault
+            # ─────────────────────────────────────────────────────
+            # Después de generar el PDF con éxito, recomputamos la
+            # severity_live (igual que hace _build_pdf_bytes internamente)
+            # y la persistimos en metadata.json del activo activo. Esto
+            # alimenta el Home con datos REALES (no heurística) para
+            # mostrar dot rojo si el activo está en CRÍTICA, etc.
+            try:
+                _active_iid = (
+                    st.session_state.get("wm_active_instance")
+                    or meta.get("instance_id", "")
+                    or ""
+                ).strip()
+                if _active_iid:
+                    _findings = _extract_findings_from_items(items)
+                    _sev_label, _sev_color = _global_severity(_findings)
+                    _summary = (
+                        meta.get("executive_summary", "")
+                        or _findings.get("executive_oneliner", "")
+                        or ""
+                    )
+                    from core.instance_state import update_instance_executive_severity
+                    update_instance_executive_severity(
+                        instance_id=_active_iid,
+                        severity=_sev_label,
+                        summary=_summary,
+                    )
+            except Exception:
+                # No interrumpir el flujo del PDF si la persistencia falla
+                pass
         except Exception as e:
             st.session_state["report_pdf_bytes"] = None
             st.session_state["report_pdf_error"] = str(e)

@@ -146,6 +146,16 @@ class Instance:
     setpoint_danger_override: float = 0.0    # 0 = usar el de la norma
     override_justification: str = ""    # texto libre, queda en el reporte
 
+    # Ciclo 17.13 — Severidad ejecutiva persistida desde el último PDF.
+    # Cuando se genera un reporte ejecutivo (pages/16_Reports.py), el
+    # severity_live calculado por _global_severity() se persiste acá
+    # para que el Home muestre el estado REAL del activo (CRÍTICA /
+    # ACCIÓN REQUERIDA / ATENCIÓN / VIGILANCIA / CONDICIÓN ACEPTABLE)
+    # en lugar de la heurística de configuración.
+    last_executive_severity: str = ""   # texto literal del PDF
+    last_executive_summary: str = ""    # frase ejecutiva resumen
+    last_report_date: str = ""          # ISO timestamp del último PDF
+
     # Datos capturados ad-hoc (legacy, sigue funcionando)
     captured_parameters: Dict[str, Any] = field(default_factory=dict)
     documents: List[Dict[str, Any]] = field(default_factory=list)
@@ -207,6 +217,10 @@ class Instance:
             setpoint_warning_override=float(_f("setpoint_warning_override", 0.0) or 0.0),
             setpoint_danger_override=float(_f("setpoint_danger_override", 0.0) or 0.0),
             override_justification=_f("override_justification"),
+            # Ciclo 17.13 — severidad ejecutiva persistida
+            last_executive_severity=_f("last_executive_severity"),
+            last_executive_summary=_f("last_executive_summary"),
+            last_report_date=_f("last_report_date"),
             captured_parameters=dict(data.get("captured_parameters", {}) or {}),
             documents=list(data.get("documents", []) or []),
             created_at=_f("created_at"),
@@ -321,6 +335,8 @@ def update_instance_header(
         "iso_norm_code", "iso_norm_class",
         "setpoint_warning_override", "setpoint_danger_override",
         "override_justification",
+        # Ciclo 17.13 — severidad ejecutiva persistida
+        "last_executive_severity", "last_executive_summary", "last_report_date",
     }
     for key, val in kwargs.items():
         if key in allowed and val is not None:
@@ -328,6 +344,32 @@ def update_instance_header(
 
     _save_instance(inst)
     return True
+
+
+def update_instance_executive_severity(
+    instance_id: str,
+    severity: str,
+    summary: str = "",
+    report_date: str = "",
+) -> bool:
+    """Ciclo 17.13 — Helper específico para persistir el resultado del
+    último análisis ejecutivo desde el PDF generator.
+
+    Args:
+        instance_id:  ID de la instancia
+        severity:     uno de "CRÍTICA" / "ACCIÓN REQUERIDA" / "ATENCIÓN" /
+                      "VIGILANCIA" / "CONDICIÓN ACEPTABLE" (literal del PDF)
+        summary:      frase ejecutiva resumen (opcional)
+        report_date:  ISO timestamp; si vacío usa now()
+    """
+    if not report_date:
+        report_date = datetime.now().isoformat(timespec="seconds")
+    return update_instance_header(
+        instance_id,
+        last_executive_severity=(severity or "").strip(),
+        last_executive_summary=(summary or "").strip(),
+        last_report_date=report_date,
+    )
 
 
 def compose_train_description(inst: Instance) -> str:
