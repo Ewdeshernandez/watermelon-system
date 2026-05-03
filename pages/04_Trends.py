@@ -3418,8 +3418,21 @@ def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
     return go.Figure(fig_dict)
 
 def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
-    fig = go.Figure(export_fig)
-    new_data = []
+    """Escala fonts/lines/markers para HD export.
+
+    Ciclo 17.8.3 — bug crítico: antes esta función hacía
+        fig = go.Figure(data=new_data, layout=fig.layout)
+    al final del loop de scaling, lo que recreaba la figura
+    desde cero y PERDÍA la estructura de subplots (yaxis="y2"
+    apuntando a un axis inexistente). Resultado: PNG HD con
+    chart vacío de traces aunque axes y leyenda salieran bien.
+
+    Fix: trabajar SIEMPRE sobre fig_dict (clone) y modificar
+    los campos en el dict directamente, sin recrear go.Figure.
+    Al final, un solo go.Figure(fig_dict) reconstruye la
+    estructura entera (subplots + secondary_y + axis refs)
+    intacta.
+    """
 
     def _scale_size(value: Any, factor: float, floor_val: float) -> Any:
         """Escala size/width que puede ser float, int, list (por punto)
@@ -3437,26 +3450,25 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
         except Exception:
             return floor_val
 
-    for trace in fig.data:
-        trace_json = trace.to_plotly_json()
-        if trace_json.get("type") == "scatter":
-            mode = trace_json.get("mode", "")
+    # ---------- 1) Scaling de traces SOBRE EL DICT ----------
+    fig_dict = export_fig.to_dict()
+    for trace in fig_dict.get("data", []):
+        if trace.get("type") in ("scatter", "scattergl"):
+            mode = trace.get("mode", "") or ""
             if "lines" in mode:
-                line = dict(trace_json.get("line", {}) or {})
-                # line.width usually scalar; defensive against list anyway.
+                line = dict(trace.get("line", {}) or {})
                 line["width"] = _scale_size(line.get("width", 1.0), 2.8, 4.8)
-                trace_json["line"] = line
+                trace["line"] = line
             if "markers" in mode:
-                marker = dict(trace_json.get("marker", {}) or {})
+                marker = dict(trace.get("marker", {}) or {})
                 marker["size"] = _scale_size(marker.get("size", 6), 1.9, 14.0)
-                # marker.line.width: same defensive scaling
                 if marker.get("line"):
                     mline = dict(marker["line"])
                     mline["width"] = _scale_size(mline.get("width", 1.0), 1.9, 1.4)
                     marker["line"] = mline
-                trace_json["marker"] = marker
-        new_data.append(go.Scatter(**trace_json))
-    fig = go.Figure(data=new_data, layout=fig.layout)
+                trace["marker"] = marker
+    # Reconstruir la figura PRESERVANDO subplots/secondary_y
+    fig = go.Figure(fig_dict)
 
     has_secondary_y = getattr(fig.layout, "yaxis2", None) is not None
     has_right_info_box = any(
