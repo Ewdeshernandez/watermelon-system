@@ -3396,19 +3396,26 @@ def build_trend_figure(
 
 
 def _build_export_safe_figure(fig: go.Figure) -> go.Figure:
-    export_fig = go.Figure()
+    """Convierte scattergl→scatter preservando la ESTRUCTURA
+    completa de la figura.
 
-    for trace in fig.data:
-        trace_json = trace.to_plotly_json()
+    Ciclo 17.8.2 — bug crítico: antes esta función creaba un
+    `go.Figure()` plano y copiaba traces. Pero cuando el chart
+    original era `make_subplots(secondary_y=True)`, las traces
+    tenían `yaxis="y2"` que apunta a un subplot inexistente en
+    la figura plana → las curvas se dibujaban fuera de pantalla
+    en kaleido (PNG export). El reporte HD salía con axes
+    correctos pero sin traces visibles.
 
-        # Convertir Scattergl -> Scatter preservando eje secundario y metadatos
-        if trace_json.get("type") == "scattergl":
-            trace_json["type"] = "scatter"
-
-        export_fig.add_trace(go.Scatter(**trace_json))
-
-    export_fig.update_layout(fig.layout)
-    return export_fig
+    Fix: clonar el dict entero y solo cambiar el `type` de las
+    traces. La estructura (subplots, secondary_y, axis refs) se
+    preserva intacta y kaleido puede renderizarla bien.
+    """
+    fig_dict = fig.to_dict()
+    for trace in fig_dict.get("data", []):
+        if trace.get("type") == "scattergl":
+            trace["type"] = "scatter"
+    return go.Figure(fig_dict)
 
 def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     fig = go.Figure(export_fig)
