@@ -13,8 +13,17 @@ from typing import Any, Dict, List, Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
-REPORT_STATE_FILE = DATA_DIR / "report_state.json"
-REPORT_DRAFTS_DIR = DATA_DIR / "report_drafts"
+
+# Paths LEGACY (Ciclo <17.15) — globales, sin namespace por usuario.
+# Todavía se usan como fallback y para detectar/migrar estado viejo.
+_LEGACY_REPORT_STATE_FILE = DATA_DIR / "report_state.json"
+_LEGACY_REPORT_DRAFTS_DIR = DATA_DIR / "report_drafts"
+
+# Re-exports para back-compat: módulos viejos pueden importar estas
+# constantes y siguen funcionando (resuelven al path del usuario activo
+# vía las funciones de helper si están en una sesión Streamlit).
+REPORT_STATE_FILE = _LEGACY_REPORT_STATE_FILE
+REPORT_DRAFTS_DIR = _LEGACY_REPORT_DRAFTS_DIR
 
 # =============================================================
 # Ciclo 17.14.1 HOTFIX — Anti-pérdida de trabajo
@@ -38,6 +47,113 @@ REPORT_DRAFTS_DIR = DATA_DIR / "report_drafts"
 # =============================================================
 
 MAX_BACKUPS = 5  # cantidad de versiones de respaldo a mantener
+
+
+# =============================================================
+# Ciclo 17.15 — Namespacing por owner_email
+# =============================================================
+# Reemplaza el storage global por uno per-usuario:
+#
+#   data/                            (legacy, pre 17.15)
+#     report_state.json              ← compartido entre todos (BUG)
+#     report_drafts/{name}.json
+#
+#   data/users/{email_slug}/         (Ciclo 17.15+)
+#     report_state.json              ← privado de cada usuario
+#     report_state.json.bak.1..5     ← backups rotativos
+#     report_drafts/{name}.json      ← drafts privados
+#
+# Los módulos consumidores (Trends, Spectrum, Polar, Bode, etc.) NO
+# necesitan cambiar nada — el namespacing se resuelve internamente
+# leyendo `st.session_state["auth_email"]`.
+#
+# Migración automática: si existe el archivo legacy `data/report_state.json`
+# Y el path del usuario activo es admin, se mueve al espacio del admin
+# como su trabajo personal (asumiendo que era él quien tenía el reporte
+# en curso). Para otros usuarios, el legacy queda intacto hasta que el
+# admin lo gestione manualmente.
+
+def _email_slug(email: str) -> str:
+    """Convierte email a slug seguro para filesystem.
+    'ehernandez@sigasas.com' → 'ehernandez_at_sigasas_com'
+    """
+    s = (email or "").strip().lower().replace("@", "_at_")
+    s = re.sub(r"[^a-z0-9_-]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "anonymous"
+
+
+def _current_owner_email() -> str:
+    """Lee el email del usuario activo desde session_state. Si no
+    hay sesión Streamlit (corriendo standalone) devuelve string vacío.
+    """
+    try:
+        import streamlit as st  # type: ignore
+        v = st.session_state.get("auth_email", "") or ""
+        return str(v).strip().lower()
+    except Exception:
+        return ""
+
+
+def get_user_data_dir(email: Optional[str] = None) -> Path:
+    """Devuelve `data/users/{slug}/` para el usuario indicado o el activo.
+    Crea el directorio si no existe.
+    """
+    e = email if email is not None else _current_owner_email()
+    slug = _email_slug(e or "anonymous")
+    d = DATA_DIR / "users" / slug
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def get_user_state_file(email: Optional[str] = None) -> Path:
+    """Path al report_state.json del usuario indicado o activo."""
+    return get_user_data_dir(email) / "report_state.json"
+
+
+def get_user_drafts_dir(email: Optional[str] = None) -> Path:
+    """Path a la carpeta de drafts nombrados del usuario."""
+    d = get_user_data_dir(email) / "report_drafts"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _maybe_migrate_legacy_to_user(email: str) -> None:
+    """Si existe el report_state.json legacy global Y NO existe el del
+    usuario actual, lo movemos al espacio del usuario.
+
+    Solo migra para el ADMIN ÚNICO porque el archivo legacy era el
+    "reporte global" del sistema viejo de admin/demo. Para otros
+    usuarios, el legacy queda intacto.
+    """
+    if not email:
+        return
+    try:
+        from core.supabase_auth import is_admin_email
+        if not is_admin_email(email):
+            return
+    except Exception:
+        # Si no podemos importar supabase_auth, no migrar
+        return
+
+    user_state = get_user_state_file(email)
+    if user_state.exists():
+        return  # ya tiene su archivo, no pisar
+    if not _LEGACY_REPORT_STATE_FILE.exists():
+        return  # no hay legacy
+
+    try:
+        # Copia (no movimiento) para que el legacy quede como referencia
+        shutil.copy2(_LEGACY_REPORT_STATE_FILE, user_state)
+        # Y los drafts también
+        if _LEGACY_REPORT_DRAFTS_DIR.exists():
+            user_drafts = get_user_drafts_dir(email)
+            for p in _LEGACY_REPORT_DRAFTS_DIR.glob("*.json"):
+                tgt = user_drafts / p.name
+                if not tgt.exists():
+                    shutil.copy2(p, tgt)
+    except Exception:
+        pass
 
 
 def _encode_image_bytes(value: Any) -> str:
@@ -222,7 +338,24 @@ def _atomic_write_json(target: Path, payload: Dict[str, Any]) -> None:
 # API PÚBLICA
 # =============================================================
 
-def save_report_state(*, items: Any, meta: Any, filename: Path | None = None) -> None:
+def _resolve_state_file(filename: Optional[Path] = None,
+                         email: Optional[str] = None) -> Path:
+    """Ciclo 17.15: si el caller no pasa filename, devuelve el path
+    per-usuario (data/users/{slug}/report_state.json). Si tampoco hay
+    sesión Streamlit, cae al path legacy global para back-compat.
+    """
+    if filename is not None:
+        return filename
+    e = email if email is not None else _current_owner_email()
+    if e:
+        # Una sola vez por sesión, intentar migración legacy → user
+        return get_user_state_file(e)
+    return _LEGACY_REPORT_STATE_FILE
+
+
+def save_report_state(*, items: Any, meta: Any,
+                       filename: Path | None = None,
+                       email: Optional[str] = None) -> None:
     """Persiste el estado del reporte de forma SEGURA.
 
     Ciclo 17.14.1 HOTFIX:
@@ -230,20 +363,27 @@ def save_report_state(*, items: Any, meta: Any, filename: Path | None = None) ->
       - Write ATÓMICO via tmp file + os.replace
       - Si crashea mid-write, el archivo final queda intacto
         y se puede recuperar desde el backup más reciente
+
+    Ciclo 17.15: si no se pasa filename, persiste al espacio per-usuario
+    (data/users/{email_slug}/report_state.json).
     """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    target = filename or REPORT_STATE_FILE
+    target = _resolve_state_file(filename, email)
+    target.parent.mkdir(parents=True, exist_ok=True)
+
     payload = _serialize_state(items=items, meta=meta)
     # Inyectar metadata interna del save (útil para debugging)
     payload["_save_meta"] = {
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "n_items": len(payload.get("items", [])),
+        "owner_email": (email if email is not None else _current_owner_email()) or "",
     }
     _rotate_backups(target)
     _atomic_write_json(target, payload)
 
 
-def load_report_state(*, filename: Path | None = None) -> Dict[str, Any]:
+def load_report_state(*, filename: Path | None = None,
+                       email: Optional[str] = None) -> Dict[str, Any]:
     """Carga el estado del reporte. Si el archivo principal está
     corrupto, intenta recovery automático desde los backups.
 
@@ -253,8 +393,16 @@ def load_report_state(*, filename: Path | None = None) -> Dict[str, Any]:
         para que la UI pueda mostrar un banner al usuario
       - Si TODOS fallan, devuelve {} pero con `_load_error` poblado
         para que la UI sepa que hubo un problema (no silent fail)
+
+    Ciclo 17.15: si no se pasa filename, lee del espacio per-usuario.
+    Migra automáticamente del path legacy global si corresponde.
     """
-    target = filename or REPORT_STATE_FILE
+    e = email if email is not None else _current_owner_email()
+    # Migración automática legacy → user (idempotente, solo para admin)
+    if filename is None and e:
+        _maybe_migrate_legacy_to_user(e)
+
+    target = _resolve_state_file(filename, e)
     if not target.exists():
         return {"items": [], "meta": {}}
 
@@ -295,21 +443,25 @@ def load_report_state(*, filename: Path | None = None) -> Dict[str, Any]:
         }
 
 
-def clear_report_state(*, filename: Path | None = None) -> None:
+def clear_report_state(*, filename: Path | None = None,
+                        email: Optional[str] = None) -> None:
     """Borra el estado actual del reporte.
     Ciclo 17.14.1: NO toca los backups (.bak.*) — siguen disponibles
     si después el usuario quiere recuperar.
+    Ciclo 17.15: opera sobre el espacio per-usuario por default.
     """
-    target = filename or REPORT_STATE_FILE
+    target = _resolve_state_file(filename, email)
     if target.exists():
         target.unlink()
 
 
-def list_available_backups(filename: Path | None = None) -> List[Dict[str, Any]]:
+def list_available_backups(filename: Path | None = None,
+                            email: Optional[str] = None) -> List[Dict[str, Any]]:
     """Devuelve lista de backups disponibles con metadata útil.
     Útil para UI de "restaurar desde backup específico" si se necesita.
+    Ciclo 17.15: opera sobre el espacio per-usuario por default.
     """
-    target = filename or REPORT_STATE_FILE
+    target = _resolve_state_file(filename, email)
     out: List[Dict[str, Any]] = []
     for i in range(1, MAX_BACKUPS + 1):
         bk = _backup_path(target, i)
@@ -396,7 +548,12 @@ def ensure_report_state_loaded() -> None:
     except Exception:
         return
 
-    if st.session_state.get("report_state_loaded"):
+    # Ciclo 17.15 — el flag de "loaded" ahora se asocia al email del
+    # owner. Si el usuario cambia (logout + login con otro), el flag
+    # se invalida automáticamente y se recarga el estado del nuevo.
+    _current = _current_owner_email() or "anonymous"
+    _loaded_for = st.session_state.get("report_state_loaded_for")
+    if _loaded_for == _current:
         return
 
     persisted = load_report_state()
@@ -441,6 +598,8 @@ def ensure_report_state_loaded() -> None:
             disk_meta if isinstance(disk_meta, dict) else {}
         )
 
+    st.session_state["report_state_loaded_for"] = _current
+    # Mantener flag legacy para back-compat por si algún módulo lo lee
     st.session_state["report_state_loaded"] = True
 
 
@@ -476,36 +635,103 @@ def append_report_item_and_persist(item: Dict[str, Any]) -> bool:
         return False
 
 
-def _draft_path(draft_name: Any) -> Path:
-    REPORT_DRAFTS_DIR.mkdir(parents=True, exist_ok=True)
-    return REPORT_DRAFTS_DIR / f"{_safe_slug(draft_name)}.json"
+def _draft_path(draft_name: Any, email: Optional[str] = None) -> Path:
+    """Ciclo 17.15: drafts ahora viven per-usuario en
+    data/users/{email_slug}/report_drafts/{name}.json.
+    """
+    drafts_dir = get_user_drafts_dir(email) if (email is not None or _current_owner_email()) else _LEGACY_REPORT_DRAFTS_DIR
+    drafts_dir.mkdir(parents=True, exist_ok=True)
+    return drafts_dir / f"{_safe_slug(draft_name)}.json"
 
 
-def list_report_drafts() -> List[str]:
-    if not REPORT_DRAFTS_DIR.exists():
+def list_report_drafts(email: Optional[str] = None) -> List[str]:
+    """Lista los drafts del usuario indicado o activo.
+    Ciclo 17.15: por usuario, no global.
+    """
+    if email is not None or _current_owner_email():
+        drafts_dir = get_user_drafts_dir(email)
+    else:
+        drafts_dir = _LEGACY_REPORT_DRAFTS_DIR
+    if not drafts_dir.exists():
         return []
-
-    drafts: List[str] = []
-    for path in sorted(REPORT_DRAFTS_DIR.glob("*.json")):
-        drafts.append(path.stem)
-    return drafts
+    return [p.stem for p in sorted(drafts_dir.glob("*.json"))]
 
 
-def save_named_report_draft(*, draft_name: Any, items: Any, meta: Any) -> str:
-    target = _draft_path(draft_name)
+def save_named_report_draft(*, draft_name: Any, items: Any, meta: Any,
+                              email: Optional[str] = None) -> str:
+    """Guarda un draft nombrado. Ciclo 17.15: en el espacio del usuario."""
+    target = _draft_path(draft_name, email)
     payload = _serialize_state(items=items, meta=meta)
-    target.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+    target.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str),
+                      encoding="utf-8")
     return target.stem
 
 
-def load_named_report_draft(draft_name: Any) -> Dict[str, Any]:
-    target = _draft_path(draft_name)
+def load_named_report_draft(draft_name: Any,
+                             email: Optional[str] = None) -> Dict[str, Any]:
+    target = _draft_path(draft_name, email)
     if not target.exists():
         return {"items": [], "meta": {}}
-    return load_report_state(filename=target)
+    return load_report_state(filename=target, email=email)
 
 
-def delete_named_report_draft(draft_name: Any) -> None:
-    target = _draft_path(draft_name)
+def delete_named_report_draft(draft_name: Any,
+                               email: Optional[str] = None) -> None:
+    target = _draft_path(draft_name, email)
     if target.exists():
         target.unlink()
+
+
+# =============================================================
+# Ciclo 17.15 — Helpers de visibilidad cross-usuario (admin)
+# =============================================================
+
+def list_all_users_with_state() -> List[Dict[str, Any]]:
+    """Lista todos los usuarios que tienen report_state guardado en disco.
+    Útil para que admin/specialist puedan ver "los reportes de quién están
+    activos en el sistema".
+    Devuelve [{email_slug, n_items, last_saved, n_drafts, total_size_bytes}].
+    """
+    users_root = DATA_DIR / "users"
+    if not users_root.exists():
+        return []
+    out: List[Dict[str, Any]] = []
+    for user_dir in users_root.iterdir():
+        if not user_dir.is_dir():
+            continue
+        state_file = user_dir / "report_state.json"
+        drafts_dir = user_dir / "report_drafts"
+        n_items = 0
+        last_saved = ""
+        owner_email = ""
+        size = 0
+        if state_file.exists():
+            try:
+                stat = state_file.stat()
+                size += stat.st_size
+                raw = json.loads(state_file.read_text(encoding="utf-8"))
+                sm = raw.get("_save_meta", {}) or {}
+                n_items = int(sm.get("n_items", 0) or 0)
+                last_saved = sm.get("saved_at", "") or ""
+                owner_email = sm.get("owner_email", "") or ""
+            except Exception:
+                pass
+        n_drafts = 0
+        if drafts_dir.exists():
+            n_drafts = len(list(drafts_dir.glob("*.json")))
+            for p in drafts_dir.glob("*.json"):
+                try:
+                    size += p.stat().st_size
+                except Exception:
+                    pass
+        out.append({
+            "email_slug": user_dir.name,
+            "owner_email": owner_email,
+            "n_items": n_items,
+            "n_drafts": n_drafts,
+            "last_saved": last_saved,
+            "total_size_bytes": size,
+            "total_size_human": _human_size(size),
+        })
+    out.sort(key=lambda x: x.get("last_saved", ""), reverse=True)
+    return out

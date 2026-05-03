@@ -18,6 +18,7 @@ deterministicamente testeable. La capa UI vive en pages/_landing.py.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -298,25 +299,69 @@ def _iso_to_epoch(iso_ts: str) -> int:
 @dataclass
 class ActivityEvent:
     timestamp: datetime = field(default_factory=datetime.now)
-    kind: str = ""           # report | instance_edit | csv_load
+    kind: str = ""           # report | instance_edit | csv_load | report_archived
     icon: str = "•"
     title: str = ""
     subtitle: str = ""
     age_human: str = ""
+    owner_email: str = ""    # Ciclo 17.15 — quién hizo la acción
 
 
-def list_recent_activity(limit: int = 12) -> List[ActivityEvent]:
+def _email_to_initials(email: str) -> str:
+    """Convierte 'jane.doe@sigasas.com' a 'JD'. Útil para avatar visual."""
+    name = (email or "").split("@")[0].strip()
+    if not name:
+        return "?"
+    parts = re.split(r"[._-]+", name)
+    if len(parts) >= 2 and parts[0] and parts[1]:
+        return (parts[0][0] + parts[1][0]).upper()
+    return (name[:2]).upper()
+
+
+def list_recent_activity(limit: int = 12,
+                          viewer_email: str = "",
+                          viewer_role: str = "",
+                          owner_filter: str = "") -> List[ActivityEvent]:
     """Combina eventos de:
        - Edits a metadata.json de instancias (instance_edit)
-       - Drafts de reportes (report)
-       - report_state.json activo (current_report)
+       - Drafts de reportes per-usuario (report)
+       - report_state.json activo per-usuario (current_report)
+       - Archivos PDF inmutables (report_archived)
+
+    Ciclo 17.15:
+      - viewer_role + viewer_email: filtros de visibilidad
+        * admin → ve actividad de TODOS los usuarios
+        * specialist → ve la suya + la de otros @sigasas.com
+        * client → ve solo la SUYA
+      - owner_filter (opcional): filtra por email específico para que
+        admin/specialist puedan ver actividad de un usuario puntual
 
     Devuelve top N ordenados por timestamp desc.
     """
     events: List[ActivityEvent] = []
     now = datetime.now()
+    role = (viewer_role or "").strip().lower()
+    me = (viewer_email or "").strip().lower()
+    owner_filter_l = (owner_filter or "").strip().lower()
 
-    # Instance edits
+    def _can_see(event_owner: str) -> bool:
+        """Filtro central de visibilidad por role."""
+        eo = (event_owner or "").lower()
+        if not me:
+            return True  # caso edge: no auth, mostrar todo (ej. tests)
+        if owner_filter_l:
+            # Si hay filtro explícito, respetarlo (independiente del role)
+            return eo == owner_filter_l
+        if role == "admin":
+            return True
+        if role == "specialist":
+            if eo == me or not eo:
+                return True
+            return eo.endswith("@sigasas.com")
+        # client (default conservador)
+        return eo == me
+
+    # ─── 1. Instance edits (Vault) — son globales (sin owner)
     if INSTANCES_DIR.exists():
         for child in INSTANCES_DIR.iterdir():
             if not child.is_dir():
@@ -327,7 +372,6 @@ def list_recent_activity(limit: int = 12) -> List[ActivityEvent]:
             try:
                 ts = datetime.fromtimestamp(meta.stat().st_mtime)
                 tag = child.name
-                # Try get tag from json
                 try:
                     import json
                     with open(meta, "r", encoding="utf-8") as f:
@@ -339,40 +383,110 @@ def list_recent_activity(limit: int = 12) -> List[ActivityEvent]:
                     timestamp=ts,
                     kind="instance_edit",
                     icon="🛠️",
-                    title=f"Editaste metadata de {tag}",
+                    title=f"Vault: metadata de {tag} actualizada",
                     subtitle=f"Vault · {child.name}",
                     age_human=_humanize_age(ts.isoformat(timespec="seconds"), now),
+                    owner_email="",  # vault es compartido
                 ))
             except Exception:
                 continue
 
-    # Report drafts
-    if REPORT_DRAFTS_DIR.exists():
-        for path in REPORT_DRAFTS_DIR.glob("*.json"):
+    # ─── 2. Drafts de reportes per-usuario (Ciclo 17.15)
+    users_root = DATA_DIR / "users"
+    if users_root.exists():
+        for user_dir in users_root.iterdir():
+            if not user_dir.is_dir():
+                continue
+            # Recuperar email del owner desde el state si está
+            owner_email_for_user = ""
+            state_file = user_dir / "report_state.json"
+            if state_file.exists():
+                try:
+                    import json
+                    raw = json.loads(state_file.read_text(encoding="utf-8"))
+                    owner_email_for_user = (raw.get("_save_meta", {}) or {}).get("owner_email", "") or ""
+                except Exception:
+                    pass
+            if not owner_email_for_user:
+                # Reconstruir desde el slug si no está en _save_meta
+                owner_email_for_user = user_dir.name.replace("_at_", "@")
+
+            if not _can_see(owner_email_for_user):
+                continue
+
+            # Drafts nombrados
+            drafts_dir = user_dir / "report_drafts"
+            if drafts_dir.exists():
+                for path in drafts_dir.glob("*.json"):
+                    try:
+                        ts = datetime.fromtimestamp(path.stat().st_mtime)
+                        events.append(ActivityEvent(
+                            timestamp=ts,
+                            kind="report",
+                            icon="📄",
+                            title=f"Draft '{path.stem}'",
+                            subtitle=f"{owner_email_for_user} · Reports",
+                            age_human=_humanize_age(ts.isoformat(timespec="seconds"), now),
+                            owner_email=owner_email_for_user,
+                        ))
+                    except Exception:
+                        continue
+
+            # Estado actual del reporte (current_report)
+            if state_file.exists():
+                try:
+                    ts = datetime.fromtimestamp(state_file.stat().st_mtime)
+                    events.append(ActivityEvent(
+                        timestamp=ts,
+                        kind="current_report",
+                        icon="📋",
+                        title="Reporte en curso actualizado",
+                        subtitle=f"{owner_email_for_user} · Reports",
+                        age_human=_humanize_age(ts.isoformat(timespec="seconds"), now),
+                        owner_email=owner_email_for_user,
+                    ))
+                except Exception:
+                    pass
+
+    # ─── 3. Reportes archivados PDF (Ciclo 17.15)
+    archive_root = DATA_DIR / "reports_archive"
+    if archive_root.exists():
+        for sidecar in archive_root.rglob("*.json"):
             try:
-                ts = datetime.fromtimestamp(path.stat().st_mtime)
+                import json
+                sc = json.loads(sidecar.read_text(encoding="utf-8"))
+                _ow = sc.get("owner_email", "")
+                if not _can_see(_ow):
+                    continue
+                ts_iso = sc.get("archived_at", "")
+                ts = datetime.fromisoformat(ts_iso) if ts_iso else datetime.fromtimestamp(sidecar.stat().st_mtime)
+                rm = sc.get("report_meta", {}) or {}
+                _client = rm.get("client", "—")
+                _asset = rm.get("asset_class") or rm.get("instance_tag") or "—"
                 events.append(ActivityEvent(
                     timestamp=ts,
-                    kind="report",
-                    icon="📄",
-                    title=f"Borrador de reporte: {path.stem}",
-                    subtitle="Reports · draft guardado",
+                    kind="report_archived",
+                    icon="📦",
+                    title=f"Archivado: {_client} · {_asset}",
+                    subtitle=f"{_ow} · {sc.get('size_human','')}",
                     age_human=_humanize_age(ts.isoformat(timespec="seconds"), now),
+                    owner_email=_ow,
                 ))
             except Exception:
                 continue
 
-    # Current report state
-    if REPORT_STATE_FILE.exists():
+    # ─── 4. Legacy (estado pre-17.15) si todavía existe — solo admin
+    if role == "admin" and REPORT_STATE_FILE.exists():
         try:
             ts = datetime.fromtimestamp(REPORT_STATE_FILE.stat().st_mtime)
             events.append(ActivityEvent(
                 timestamp=ts,
-                kind="current_report",
+                kind="current_report_legacy",
                 icon="📋",
-                title="Actualizaste el reporte activo",
-                subtitle="Reports · estado en curso",
+                title="Reporte legacy compartido (pre-17.15)",
+                subtitle="data/report_state.json · global histórico",
                 age_human=_humanize_age(ts.isoformat(timespec="seconds"), now),
+                owner_email="",
             ))
         except Exception:
             pass

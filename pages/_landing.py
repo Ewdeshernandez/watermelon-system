@@ -86,7 +86,22 @@ _full_name = _user.get("full_name", "") or _user.get("username", "")
 _greet = get_personalized_greeting(_full_name)
 _fleet = compute_fleet_status()
 _health = get_system_health()
-_activity = list_recent_activity(limit=10)
+# Ciclo 17.15 — activity feed filtrable por usuario
+_my_email = (_user.get("email", "") or "").strip().lower()
+_my_role  = (_user.get("role", "")  or "").strip().lower()
+
+# Toggle para admin/specialist: "Mi actividad" vs "Toda la actividad"
+# Default: "toda" para admin (ven movimiento del equipo entero), "mía"
+# para specialist (su trabajo). Client siempre ve solo la suya.
+_default_scope = "all" if _my_role == "admin" else "mine"
+_activity_scope = st.session_state.get("wm_activity_scope", _default_scope)
+
+_activity = list_recent_activity(
+    limit=10,
+    viewer_email=_my_email,
+    viewer_role=_my_role,
+    owner_filter=_my_email if _activity_scope == "mine" else "",
+)
 
 # =============================================================
 # MODO TURNO (Ciclo 17.12 — Nivel 3)
@@ -875,6 +890,23 @@ with right:
         unsafe_allow_html=True,
     )
 
+    # Ciclo 17.15 — Toggle "Mi actividad / Toda la actividad" para
+    # admin/specialist. Client siempre ve solo su actividad.
+    if _my_role in ("admin", "specialist"):
+        _scope_label = {"mine": "🙋 Solo mía", "all": "🌐 Toda la actividad"}
+        _picked = st.radio(
+            "Alcance",
+            options=["mine", "all"],
+            format_func=lambda s: _scope_label[s],
+            index=0 if _activity_scope == "mine" else 1,
+            horizontal=True,
+            key="wm_activity_scope_radio",
+            label_visibility="collapsed",
+        )
+        if _picked != _activity_scope:
+            st.session_state["wm_activity_scope"] = _picked
+            st.rerun()
+
     if not _activity:
         st.markdown(
             '<div class="wmh-feed">'
@@ -887,13 +919,35 @@ with right:
             unsafe_allow_html=True,
         )
     else:
+        # Ciclo 17.15 — avatar de iniciales según owner_email del evento
+        def _initials_avatar(email: str) -> str:
+            if not email:
+                return ""
+            name = email.split("@")[0].strip()
+            parts = name.replace(".", " ").replace("_", " ").replace("-", " ").split()
+            if len(parts) >= 2 and parts[0] and parts[1]:
+                ini = (parts[0][0] + parts[1][0]).upper()
+            else:
+                ini = name[:2].upper() if name else "?"
+            # Color determinístico por hash del email
+            h = sum(ord(c) for c in email) % 6
+            colors = ["#0ea5e9", "#84cc16", "#a855f7", "#f59e0b", "#ec4899", "#14b8a6"]
+            return (
+                f'<span style="display:inline-flex;align-items:center;'
+                f'justify-content:center;width:24px;height:24px;border-radius:999px;'
+                f'background:{colors[h]};color:white;font-size:9px;font-weight:800;'
+                f'letter-spacing:0;flex-shrink:0;margin-right:6px;'
+                f'vertical-align:middle;">{ini}</span>'
+            )
+
         feed_html = ['<div class="wmh-feed">']
         for ev in _activity:
+            avatar_html = _initials_avatar(getattr(ev, "owner_email", "") or "")
             feed_html.append(
                 f'<div class="wmh-feed-item">'
                 f'<div class="wmh-feed-icon">{ev.icon}</div>'
                 f'<div class="wmh-feed-body">'
-                f'<div class="wmh-feed-title">{ev.title}</div>'
+                f'<div class="wmh-feed-title">{avatar_html}{ev.title}</div>'
                 f'<div class="wmh-feed-sub">{ev.subtitle}</div>'
                 f'<div class="wmh-feed-age">{ev.age_human}</div>'
                 f'</div></div>'

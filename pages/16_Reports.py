@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -28,16 +28,25 @@ from reportlab.platypus import (
 )
 from reportlab.platypus.tableofcontents import TableOfContents
 
-from core.auth import require_login, render_user_menu
+from core.auth import require_login, render_user_menu, get_current_user
 from core.report_state import (
     clear_report_state,
     delete_named_report_draft,
     ensure_report_state_loaded,
     list_report_drafts,
+    list_all_users_with_state,
     load_named_report_draft,
     load_report_state,
     save_named_report_draft,
     save_report_state,
+)
+from core.reports_archive import (
+    archive_report_pdf,
+    list_archived_reports,
+    get_archived_pdf_bytes,
+    delete_archived_report,
+    share_with_client,
+    get_archive_stats,
 )
 
 
@@ -358,7 +367,112 @@ if isinstance(_loaded_meta, dict):
     _merged_meta.update(_loaded_meta)
 if not _merged_meta.get("report_date"):
     _merged_meta["report_date"] = TODAY_STR
+
+# =====================================================================
+# Ciclo 17.15 — Inyectar owner_email en meta automáticamente
+# =====================================================================
+# El meta ahora incluye owner_email para identificar al autor del
+# reporte y aplicar permisos. Si el meta no tiene owner_email,
+# se asigna al usuario activo (primera vez que se persiste).
+_wm_user = get_current_user() or {}
+_wm_my_email = (_wm_user.get("email", "") or "").strip().lower()
+_wm_my_role = (_wm_user.get("role", "") or "").strip().lower()
+if not _merged_meta.get("owner_email"):
+    _merged_meta["owner_email"] = _wm_my_email
 st.session_state["report_meta"] = _merged_meta
+
+# =====================================================================
+# Ciclo 17.15 — Selector "¿De quién es el reporte que estás viendo?"
+# =====================================================================
+# Por default cada usuario carga SU propio reporte (vive en
+# data/users/{email_slug}/report_state.json). Pero admin/specialist
+# pueden inspeccionar el reporte de otro colega @sigasas.com en modo
+# READ-ONLY, sin pisar el suyo. Si quieren editarlo, usan "Duplicar
+# a mi reporte".
+_owner_of_this_report = (_merged_meta.get("owner_email") or _wm_my_email).strip().lower()
+_is_my_own = (_owner_of_this_report == _wm_my_email) or not _owner_of_this_report
+_can_inspect_others = _wm_my_role in ("admin", "specialist")
+
+# Selector solo si admin/specialist Y hay al menos otro usuario con estado
+if _can_inspect_others:
+    _all_users = list_all_users_with_state()
+    _other_users = [
+        u for u in _all_users
+        if u.get("owner_email") and u["owner_email"].lower() != _wm_my_email
+    ]
+    if _other_users:
+        with st.expander(
+            "🔍 Inspeccionar el reporte de otro especialista (read-only)",
+            expanded=False,
+        ):
+            _opts = ["(mi propio reporte)"] + [
+                f"{u['owner_email']}  ·  {u['n_items']} items  ·  "
+                f"último guardado: {u.get('last_saved', '')[:16]}"
+                for u in _other_users
+            ]
+            _emails = [_wm_my_email] + [u["owner_email"] for u in _other_users]
+            _current_idx = 0
+            if _owner_of_this_report and _owner_of_this_report != _wm_my_email:
+                if _owner_of_this_report in _emails:
+                    _current_idx = _emails.index(_owner_of_this_report)
+            _pick_idx = st.selectbox(
+                "¿De quién?",
+                options=range(len(_opts)),
+                format_func=lambda i: _opts[i],
+                index=_current_idx,
+                key="wm_inspect_other_report",
+            )
+            _new_target = _emails[_pick_idx]
+            if _new_target != _owner_of_this_report:
+                # Cargar el reporte del otro usuario en modo lectura
+                _other_state = load_report_state(email=_new_target)
+                st.session_state["report_items"] = _other_state.get("items", [])
+                _other_meta = _other_state.get("meta", {}) or {}
+                if not _other_meta.get("owner_email"):
+                    _other_meta["owner_email"] = _new_target
+                st.session_state["report_meta"] = _other_meta
+                st.session_state["report_state_loaded_for"] = _new_target
+                st.rerun()
+
+# Recalcular flags después del posible switch
+_owner_of_this_report = (
+    st.session_state.get("report_meta", {}).get("owner_email", "") or _wm_my_email
+).strip().lower()
+_is_my_own = (_owner_of_this_report == _wm_my_email)
+
+# Banner de modo lectura si no es tu reporte
+if not _is_my_own and _owner_of_this_report:
+    bcols = st.columns([0.7, 0.3])
+    with bcols[0]:
+        st.warning(
+            f"👁️ **Estás viendo el reporte de `{_owner_of_this_report}` "
+            f"en modo SOLO LECTURA.** Cualquier cambio que hagas no se va a "
+            f"guardar. Para editarlo, usá el botón 'Duplicar a mi reporte'.",
+            icon="🔒",
+        )
+    with bcols[1]:
+        if st.button("📋  Duplicar a mi reporte",
+                     use_container_width=True,
+                     key="wm_dup_to_mine",
+                     type="primary"):
+            # Copiar items + meta al espacio del usuario actual
+            _items_to_copy = list(st.session_state.get("report_items", []) or [])
+            _meta_to_copy = dict(st.session_state.get("report_meta", {}) or {})
+            _meta_to_copy["owner_email"] = _wm_my_email
+            _meta_to_copy["duplicated_from"] = _owner_of_this_report
+            _meta_to_copy["duplicated_at"] = datetime.now().isoformat(timespec="seconds")
+            save_report_state(
+                items=_items_to_copy,
+                meta=_meta_to_copy,
+                email=_wm_my_email,
+            )
+            st.session_state["report_meta"] = _meta_to_copy
+            st.session_state["report_state_loaded_for"] = _wm_my_email
+            st.success(
+                f"✓ Duplicado al espacio tuyo ({len(_items_to_copy)} items). "
+                "Ahora podés editarlo libremente."
+            )
+            st.rerun()
 
 if "report_items" not in st.session_state:
     st.session_state["report_items"] = []
@@ -2553,13 +2667,63 @@ pdf_bytes = st.session_state.get("report_pdf_bytes")
 pdf_error = st.session_state.get("report_pdf_error")
 
 if pdf_bytes is not None:
-    st.download_button(
-        "Descargar PDF",
-        data=pdf_bytes,
-        file_name=(meta.get("consecutive") or "watermelon_report").replace(" ", "_") + ".pdf",
-        mime="application/pdf",
-        use_container_width=True,
-    )
+    dl_cols = st.columns([0.5, 0.5])
+    with dl_cols[0]:
+        st.download_button(
+            "⬇️  Descargar PDF",
+            data=pdf_bytes,
+            file_name=(meta.get("consecutive") or "watermelon_report").replace(" ", "_") + ".pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+    with dl_cols[1]:
+        # Ciclo 17.15 — Archivar PDF como copia inmutable
+        # Solo el OWNER del reporte puede archivar (no read-only viewers)
+        _can_archive = _is_my_own and _wm_my_role in ("admin", "specialist")
+        if not _can_archive:
+            st.button(
+                "📦  Archivar reporte",
+                disabled=True, use_container_width=True,
+                help="Solo el autor del reporte puede archivarlo.",
+            )
+        else:
+            with st.popover("📦  Archivar reporte", use_container_width=True):
+                st.markdown("**Archivar copia inmutable del PDF**")
+                st.caption(
+                    "Una vez archivado, el PDF queda guardado de forma permanente "
+                    "en el repositorio histórico (no se sobrescribe). "
+                    "Vas a poder consultarlo desde la pestaña 'Archivo histórico'."
+                )
+                _share = st.checkbox(
+                    "Compartir con cliente (visible para users con role=client)",
+                    value=False,
+                    key="wm_archive_share_cb",
+                )
+                _notes = st.text_area(
+                    "Notas de esta versión (opcional)",
+                    placeholder="Ej: revisión final tras feedback del cliente; "
+                                "incluye análisis del segundo trip del jueves",
+                    key="wm_archive_notes",
+                    height=80,
+                )
+                if st.button("Confirmar archivado",
+                             key="wm_archive_do",
+                             type="primary",
+                             use_container_width=True):
+                    _arch_res = archive_report_pdf(
+                        pdf_bytes=pdf_bytes,
+                        meta=meta,
+                        owner_email=_wm_my_email,
+                        shared_with_client=_share,
+                        extra_notes=_notes,
+                    )
+                    if _arch_res.get("ok"):
+                        st.success(
+                            f"✓ Archivado como `{_arch_res['archive_id']}` · "
+                            f"{_arch_res['size_human']}"
+                        )
+                    else:
+                        st.error(f"Falló: {_arch_res.get('error', 'error')}")
 
 if pdf_error:
     st.warning(f"PDF export error: {pdf_error}")
@@ -3599,3 +3763,177 @@ st.caption(
     "Flujo actual: Spectrum, Waveform, Orbit y Tabular List empujan contenido real al reporte mediante st.session_state['report_items']. "
     "Reports actúa como editor premium del entregable técnico y exportador PDF profesional, sin reconstruir motores visuales."
 )
+
+
+# =====================================================================
+# Ciclo 17.15 P5 — Tab "Archivo histórico" de PDFs aprobados
+# =====================================================================
+# Lista los reportes archivados que el usuario actual puede ver según
+# su role (admin todo / specialist mismo dominio / client solo shared).
+# Filtros multi-criterio + descarga directa + opciones de admin
+# (compartir con cliente, eliminar).
+st.divider()
+st.markdown(
+    '<div class="wm-divider"></div><br/>'
+    '<h2 style="margin-top:0;font-weight:800;color:#0f172a;">'
+    '📚 Archivo histórico de reportes</h2>',
+    unsafe_allow_html=True,
+)
+
+_archive_stats = get_archive_stats()
+ah_k1, ah_k2, ah_k3 = st.columns(3)
+with ah_k1:
+    st.metric("Total archivados", _archive_stats["total"])
+with ah_k2:
+    st.metric("Espacio total", _archive_stats["total_size_human"])
+with ah_k3:
+    st.metric("Autores con archivo", len(_archive_stats["by_owner"]))
+
+# Filtros
+fc1, fc2, fc3, fc4 = st.columns([0.27, 0.27, 0.27, 0.19])
+with fc1:
+    _f_client = st.text_input("Filtrar cliente", placeholder="ej. PAREX",
+                               key="wm_arch_client").strip()
+with fc2:
+    _f_asset = st.text_input("Filtrar activo", placeholder="ej. C-200C",
+                              key="wm_arch_asset").strip()
+with fc3:
+    _f_owner = st.text_input("Filtrar autor", placeholder="ej. jsuarez",
+                              key="wm_arch_owner").strip()
+with fc4:
+    _f_year = st.selectbox(
+        "Año",
+        options=["(todos)"] + [str(y) for y in range(datetime.now().year, 2023, -1)],
+        index=0,
+        key="wm_arch_year",
+    )
+
+date_from = ""
+date_to = ""
+if _f_year and _f_year != "(todos)":
+    date_from = f"{_f_year}-01-01"
+    date_to = f"{_f_year}-12-31"
+
+_archived = list_archived_reports(
+    viewer_email=_wm_my_email,
+    viewer_role=_wm_my_role,
+    owner_filter=_f_owner,
+    client_filter=_f_client,
+    asset_filter=_f_asset,
+    date_from=date_from,
+    date_to=date_to,
+    limit=100,
+)
+
+st.caption(
+    f"📋 Mostrando **{len(_archived)}** reportes archivados visibles para tu role "
+    f"(`{_wm_my_role}`)"
+)
+
+if not _archived:
+    st.info(
+        "📦 No hay reportes archivados que coincidan con tus filtros. "
+        "Cuando generes un PDF y le des 'Archivar reporte', aparecerá acá."
+    )
+else:
+    for sc in _archived:
+        rm = sc.get("report_meta", {}) or {}
+        _aid = sc.get("archive_id", "")
+        _client = rm.get("client", "—")
+        _asset = rm.get("asset_class") or rm.get("instance_tag") or "—"
+        _sev = rm.get("executive_severity", "")
+        _date = sc.get("archived_at", "")[:16]
+        _owner = sc.get("owner_email", "—")
+        _shared = sc.get("shared_with_client", False)
+        _size = sc.get("size_human", "")
+
+        with st.container():
+            st.markdown(
+                f"""
+                <div style="background:white;border:1px solid #e6ebf2;
+                            border-radius:12px;padding:14px 18px;margin-bottom:8px;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                      <div style="font-weight:800;color:#0f172a;font-size:15px;">
+                        {_client} · {_asset}
+                      </div>
+                      <div style="color:#475569;font-size:12px;margin-top:2px;">
+                        {_owner} · {_date} · {_size}
+                        {' · 🌐 compartido con cliente' if _shared else ''}
+                      </div>
+                      <div style="margin-top:4px;font-size:11px;color:#64748b;
+                                  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
+                        ID: {_aid}
+                      </div>
+                    </div>
+                    <div>
+                      {f'<span style="background:#fee2e2;color:#b91c1c;padding:4px 10px;border-radius:999px;font-size:10px;font-weight:800;">{_sev}</span>' if _sev else ''}
+                    </div>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            ac1, ac2, ac3 = st.columns([0.5, 0.25, 0.25])
+            with ac1:
+                # Descarga directa
+                _pdf_b = get_archived_pdf_bytes(
+                    _aid, viewer_email=_wm_my_email, viewer_role=_wm_my_role,
+                )
+                if _pdf_b:
+                    st.download_button(
+                        "⬇️  Descargar PDF",
+                        data=_pdf_b,
+                        file_name=f"{_aid.split('/')[-1]}.pdf",
+                        mime="application/pdf",
+                        key=f"dl_{_aid}",
+                        use_container_width=True,
+                    )
+                else:
+                    st.button("⬇️  Descargar PDF", disabled=True,
+                              key=f"dl_dis_{_aid}", use_container_width=True)
+            with ac2:
+                # Toggle compartir con cliente (solo owner o admin)
+                _can_share = (_owner.lower() == _wm_my_email
+                              or _wm_my_role == "admin")
+                if _can_share:
+                    if _shared:
+                        if st.button("🔒  Despublicar",
+                                     key=f"unsh_{_aid}",
+                                     use_container_width=True):
+                            r = share_with_client(_aid, False,
+                                                   viewer_email=_wm_my_email,
+                                                   viewer_role=_wm_my_role)
+                            if r.get("ok"):
+                                st.rerun()
+                            else:
+                                st.error(r.get("error"))
+                    else:
+                        if st.button("🌐  Compartir",
+                                     key=f"sh_{_aid}",
+                                     use_container_width=True):
+                            r = share_with_client(_aid, True,
+                                                   viewer_email=_wm_my_email,
+                                                   viewer_role=_wm_my_role)
+                            if r.get("ok"):
+                                st.rerun()
+                            else:
+                                st.error(r.get("error"))
+            with ac3:
+                # Eliminar (solo owner o admin)
+                _can_del = (_owner.lower() == _wm_my_email
+                            or _wm_my_role == "admin")
+                if _can_del:
+                    with st.popover("🗑️  Eliminar", use_container_width=True):
+                        st.warning(f"Vas a eliminar: `{_aid}`")
+                        if st.button("Confirmar eliminación",
+                                     key=f"del_{_aid}",
+                                     type="primary"):
+                            r = delete_archived_report(_aid,
+                                                        viewer_email=_wm_my_email,
+                                                        viewer_role=_wm_my_role)
+                            if r.get("ok"):
+                                st.success("Eliminado.")
+                                st.rerun()
+                            else:
+                                st.error(r.get("error"))
