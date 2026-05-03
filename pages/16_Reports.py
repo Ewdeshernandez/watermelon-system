@@ -303,6 +303,53 @@ DEFAULT_REPORT_META = {
 # sobrescribía con los del disco). El helper compartido hace
 # merge correcto.
 ensure_report_state_loaded()
+
+# =====================================================================
+# Ciclo 17.14.1 HOTFIX — Banners de recovery / pérdida de datos
+# =====================================================================
+# Si load_report_state tuvo que recuperar desde un backup (porque el
+# JSON principal estaba corrupto), avisamos al usuario VISIBLEMENTE.
+# Esto era el bug histórico: antes el sistema silenciosamente devolvía
+# {} y el usuario perdía un día de trabajo sin saber por qué.
+_rec_from = st.session_state.get("wm_report_recovered_from")
+_load_err = st.session_state.get("wm_report_load_error")
+
+if _rec_from and not st.session_state.get("wm_report_recovery_dismissed"):
+    _rec_n = st.session_state.get("wm_report_recovered_n_items", 0)
+    _rec_at = st.session_state.get("wm_report_recovered_at", "")
+    st.warning(
+        f"⚠️ **Tu reporte se recuperó de un backup automático.** "
+        f"El archivo principal tenía un problema (probablemente "
+        f"Streamlit se interrumpió mientras guardaba) y restauramos "
+        f"desde **`{_rec_from}`** con **{_rec_n} items**.\n\n"
+        f"📌 **Por favor revisá** que estén todos los items que esperabas. "
+        f"Si falta algo del último ratito, puede haberse perdido entre el "
+        f"último guardado exitoso y la corrupción.",
+        icon="🔄",
+    )
+    if st.button("Entendido — descartar este aviso",
+                 key="wm_report_recovery_dismiss"):
+        st.session_state["wm_report_recovery_dismissed"] = True
+        st.session_state.pop("wm_report_recovered_from", None)
+        st.rerun()
+
+if _load_err and not st.session_state.get("wm_report_load_err_dismissed"):
+    st.error(
+        f"🚨 **No pude cargar tu reporte ni desde backups.** "
+        f"El archivo `data/report_state.json` y todos sus backups (.bak.1 a "
+        f".bak.{5}) están corruptos o ilegibles.\n\n"
+        f"**Error técnico:** `{_load_err[:200]}`\n\n"
+        f"📌 **Acción sugerida:** revisá manualmente la carpeta "
+        f"`data/` por si hay algún archivo recuperable. Si no, vas a tener "
+        f"que reconstruir el reporte desde cero. Esto NO debería volver a "
+        f"pasar — el sistema nuevo guarda 5 backups rotativos.",
+        icon="🚨",
+    )
+    if st.button("Entendido — empezar reporte limpio",
+                 key="wm_report_load_err_dismiss"):
+        st.session_state["wm_report_load_err_dismissed"] = True
+        st.session_state.pop("wm_report_load_error", None)
+        st.rerun()
 # Asegurar que el meta tenga los defaults del módulo Reports
 # (campos como report_date) sin pisar lo que ya había.
 _loaded_meta = st.session_state.get("report_meta", {}) or {}
@@ -2466,6 +2513,38 @@ with ga3:
             pdf_bytes = _build_pdf_bytes(meta, items)
             st.session_state["report_pdf_bytes"] = pdf_bytes
             st.session_state["report_pdf_error"] = None
+
+            # ─────────────────────────────────────────────────────
+            # Ciclo 17.13 — Persistir severidad ejecutiva al Vault
+            # ─────────────────────────────────────────────────────
+            # Después de generar el PDF con éxito, recomputamos la
+            # severity_live (igual que hace _build_pdf_bytes internamente)
+            # y la persistimos en metadata.json del activo activo. Esto
+            # alimenta el Home con datos REALES (no heurística) para
+            # mostrar dot rojo si el activo está en CRÍTICA, etc.
+            try:
+                _active_iid = (
+                    st.session_state.get("wm_active_instance")
+                    or meta.get("instance_id", "")
+                    or ""
+                ).strip()
+                if _active_iid:
+                    _findings = _extract_findings_from_items(items)
+                    _sev_label, _sev_color = _global_severity(_findings)
+                    _summary = (
+                        meta.get("executive_summary", "")
+                        or _findings.get("executive_oneliner", "")
+                        or ""
+                    )
+                    from core.instance_state import update_instance_executive_severity
+                    update_instance_executive_severity(
+                        instance_id=_active_iid,
+                        severity=_sev_label,
+                        summary=_summary,
+                    )
+            except Exception:
+                # No interrumpir el flujo del PDF si la persistencia falla
+                pass
         except Exception as e:
             st.session_state["report_pdf_bytes"] = None
             st.session_state["report_pdf_error"] = str(e)
