@@ -509,6 +509,16 @@ def add_uploaded_file_to_instance(
     if not repo.upload_document_bytes(instance_id, storage_filename, data):
         return None
 
+    # Ciclo 17.18: invalidar cualquier cache stale para este path. El
+    # storage_filename incluye un uuid único así que normalmente no
+    # debería haber cache previo, pero invalidamos defensivamente
+    # para que un re-upload con el mismo nombre no sirva bytes viejos.
+    try:
+        from core.document_cache import invalidate_document
+        invalidate_document(instance_id, storage_filename)
+    except Exception:
+        pass
+
     return add_instance_document(
         instance_id,
         storage_filename=storage_filename,
@@ -557,7 +567,9 @@ def add_instance_document(
 
 
 def remove_instance_document(instance_id: str, doc_id: str) -> bool:
-    """Quita el documento del índice y borra el archivo del backend."""
+    """Quita el documento del índice y borra el archivo del backend.
+    Ciclo 17.18: también invalida el cache local del archivo si existe.
+    """
     inst = get_instance(instance_id)
     if inst is None:
         return False
@@ -567,6 +579,13 @@ def remove_instance_document(instance_id: str, doc_id: str) -> bool:
     storage = target.get("storage_filename", "")
     if storage:
         get_active_repository().delete_document_file(instance_id, storage)
+        # Limpiar cache para que próximas lecturas no devuelvan bytes
+        # de un archivo que ya no existe en el bucket.
+        try:
+            from core.document_cache import invalidate_document
+            invalidate_document(instance_id, storage)
+        except Exception:
+            pass
     inst.documents = [d for d in inst.documents if d.get("id") != doc_id]
     _save_instance(inst)
     return True
@@ -597,8 +616,11 @@ def get_instance_document_path(instance_id: str, doc_id: str) -> Optional[Path]:
         path = INSTANCES_DIR / instance_id / "documents" / storage
         return path if path.exists() else None
 
-    # Si es Supabase, descargamos a tempfile
-    data = repo.download_document_bytes(instance_id, storage)
+    # Si es Supabase, usamos el cache local (Ciclo 17.18) — no más
+    # re-descargas en cada rerun de Streamlit. La primera llamada baja
+    # del bucket y guarda; las siguientes salen de disco.
+    from core.document_cache import cached_download_bytes
+    data = cached_download_bytes(instance_id, storage)
     if data is None:
         return None
     import tempfile
@@ -616,6 +638,12 @@ def get_instance_document_bytes(instance_id: str, doc_id: str) -> Optional[bytes
     Devuelve los bytes del archivo del documento, leyéndolos del backend
     activo. Más eficiente que get_instance_document_path para servir
     descargas (evita el round-trip por tempfile en backend Supabase).
+
+    Ciclo 17.18: usa cache local en disco (core.document_cache). En el
+    backend Supabase, esto evita re-descargar el mismo archivo en cada
+    rerun de Streamlit. Antes, una sesión activa generaba GBs de
+    cached egress por re-descargas innecesarias. El cache hace HIT
+    desde disco mientras (instance_id, storage_filename) no cambien.
     """
     inst = get_instance(instance_id)
     if inst is None:
@@ -626,7 +654,9 @@ def get_instance_document_bytes(instance_id: str, doc_id: str) -> Optional[bytes
     storage = target.get("storage_filename", "")
     if not storage:
         return None
-    return get_active_repository().download_document_bytes(instance_id, storage)
+    # Lazy import para evitar circulares con document_cache.
+    from core.document_cache import cached_download_bytes
+    return cached_download_bytes(instance_id, storage)
 
 
 # =============================================================
