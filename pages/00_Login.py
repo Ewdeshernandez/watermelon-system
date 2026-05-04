@@ -528,6 +528,88 @@ with right_col:
         else:
             st.error(msg)
 
+    # =====================================================================
+    # Ciclo 17.16 — "Olvidé mi contraseña"
+    # =====================================================================
+    # Link discreto debajo del form de login. Al expandir, pide email y
+    # llama core.password_reset.request_reset. Por seguridad, NO revela
+    # si el email existe o no — siempre muestra mensaje genérico.
+    with st.expander("¿Olvidaste tu contraseña?", expanded=False):
+        _reset_email = st.text_input(
+            "Tu correo corporativo",
+            placeholder="nombre.apellido@sigasas.com",
+            key="wm_reset_email",
+            help="Te enviaremos un link para elegir nueva clave. Válido por 1 hora.",
+        ).strip().lower()
+        if st.button("Enviar link de recuperación",
+                     use_container_width=True,
+                     key="wm_reset_request_btn"):
+            if not _reset_email or "@" not in _reset_email:
+                st.error("Ingresá un email válido.")
+            else:
+                try:
+                    from core.password_reset import request_reset
+                    # Ciclo 17.16.3 — Detectar la URL base de la app
+                    # actual (importante para que el link del email
+                    # apunte a la app correcta, no a otra app del
+                    # mismo proyecto). Orden de prioridad:
+                    #   1. secret [app] base_url (manual override)
+                    #   2. st.context.headers Host (auto-detect)
+                    #   3. fallback: wm-home-final-2026
+                    _base_url = ""
+                    try:
+                        try:
+                            _base_url = str(
+                                (st.secrets.get("app", {}) or {}).get("base_url", "") or ""
+                            ).strip().rstrip("/")
+                        except Exception:
+                            _base_url = ""
+                        if not _base_url:
+                            try:
+                                _ctx = getattr(st, "context", None)
+                                _hdrs = getattr(_ctx, "headers", None) if _ctx else None
+                                _host = ""
+                                if _hdrs:
+                                    _host = (
+                                        _hdrs.get("Host", "")
+                                        or _hdrs.get("host", "")
+                                        or ""
+                                    )
+                                if _host:
+                                    # Asumimos https; cualquier app
+                                    # productiva está bajo https.
+                                    _scheme = "https"
+                                    if "localhost" in _host or "127.0.0.1" in _host:
+                                        _scheme = "http"
+                                    _base_url = f"{_scheme}://{_host}"
+                            except Exception:
+                                pass
+                        if not _base_url:
+                            _base_url = "https://wm-home-final-2026.streamlit.app"
+                    except Exception:
+                        _base_url = "https://wm-home-final-2026.streamlit.app"
+
+                    res = request_reset(_reset_email, base_url=_base_url)
+                    if res.get("ok"):
+                        st.success(
+                            "✓ " + res.get("message", "Si el email existe, "
+                            "recibirás instrucciones en breve.")
+                        )
+                        if res.get("_debug"):
+                            # Solo visible si hay un secret app.debug=true
+                            try:
+                                if st.secrets.get("app", {}).get("debug"):
+                                    st.caption(f"🔧 debug: {res['_debug']}")
+                            except Exception:
+                                pass
+                    else:
+                        st.error(
+                            "No se pudo iniciar el reset: "
+                            + res.get("error", "error desconocido")
+                        )
+                except Exception as e:
+                    st.error(f"Error inesperado: {e}")
+
     # Ciclo 17.6.3 — versión real desde core.version (deriva de
     # git tags, no hardcoded). Pinta un chip con el environment
     # coloreado para distinguir production / development a simple

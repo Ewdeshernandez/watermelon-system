@@ -7,7 +7,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from core.auth import require_login, render_user_menu
+from core.auth import require_login, render_user_menu, require_role
 
 
 # =========================================================
@@ -16,6 +16,8 @@ from core.auth import require_login, render_user_menu
 st.set_page_config(page_title="Watermelon System | Diagnostic", layout="wide")
 require_login()
 render_user_menu()
+# Ciclo 17.16 — Diagnostics es para staff, no clientes
+require_role(allowed_roles=("admin", "specialist"))
 
 
 # =========================================================

@@ -37,6 +37,51 @@ NAV_ITEMS = [
 ]
 
 
+# =============================================================
+# Ciclo 17.16 — Páginas restringidas para role=client
+# =============================================================
+# Los clientes externos NO deberían poder editar instancias, cargar
+# nuevos CSVs ni hacer diagnostics. Solo ven módulos de visualización
+# y el archivo histórico de Reports (read-only). Estas páginas se
+# OCULTAN del menú lateral Y tienen un guard al inicio que tira
+# "acceso denegado" si role=client (defensa en profundidad).
+
+CLIENT_BLOCKED_PAGES = {
+    "pages/00_Machinery_Library.py",
+    "pages/01_Load_Data.py",
+    "pages/15_Diagnostics.py",
+    "pages/01b_Machine_Map.py",  # tiene comandos para editar el map
+}
+
+
+def is_page_allowed_for_role(page: str, role: str) -> bool:
+    """Devuelve True si el role puede acceder a la página."""
+    role = (role or "").strip().lower()
+    if role in ("admin", "specialist", "viewer"):
+        return True
+    if role == "client":
+        return page not in CLIENT_BLOCKED_PAGES
+    # default conservador: solo páginas no bloqueadas
+    return page not in CLIENT_BLOCKED_PAGES
+
+
+def require_role(allowed_roles: tuple = ("admin", "specialist")) -> None:
+    """Guard que pueden usar las páginas restringidas al inicio.
+    Si el role del usuario no está en `allowed_roles`, muestra error
+    y st.stop().
+    """
+    user = get_current_user() or {}
+    role = (user.get("role", "") or "").strip().lower()
+    if role not in allowed_roles:
+        st.error(
+            f"🚫 **Acceso denegado.** Esta sección requiere role "
+            f"`{' / '.join(allowed_roles)}`. Tu role actual es "
+            f"`{role or 'sin asignar'}`.\n\n"
+            "Si pensás que esto es un error, contactá al administrador."
+        )
+        st.stop()
+
+
 def make_password_hash(password: str, iterations: int = DEFAULT_ITERATIONS) -> str:
     salt = secrets.token_hex(16)
     digest = hashlib.pbkdf2_hmac(
@@ -446,11 +491,15 @@ def render_user_menu() -> None:
         st.markdown('<div class="wm-side-section">Navegación</div>', unsafe_allow_html=True)
         st.markdown('<div class="wm-nav-wrap"></div>', unsafe_allow_html=True)
 
-        # Ciclo 17.14 — Filtrar nav según role.
-        # client: vista limitada (sin Load Data, Reports edit, Library edit, etc.)
-        #   Eso lo aplicamos en 17.16. Por ahora client ve el menú completo.
-        # admin/specialist: menú completo + botón Admin Panel para admin
+        # Ciclo 17.16 — Filtrar nav según role.
+        # client: vista limitada (sin Load Data, Machinery Library,
+        #   Diagnostics, Machine Map). Reports lo ven pero la página
+        #   tiene su propio modo "solo lectura" para client.
+        # specialist/admin: menú completo + botón Admin Panel para admin
+        _user_role = (user.get("role", "") or "").strip().lower()
         for item in NAV_ITEMS:
+            if not is_page_allowed_for_role(item["page"], _user_role):
+                continue  # ocultar del sidebar
             if st.button(item["label"], use_container_width=True, key=f"nav_{item['page']}"):
                 st.switch_page(item["page"])
 
@@ -471,6 +520,48 @@ def render_user_menu() -> None:
         st.markdown('<div class="wm-side-divider"></div>', unsafe_allow_html=True)
         st.markdown('<div class="wm-logout-spacer"></div>', unsafe_allow_html=True)
         st.markdown('<div class="wm-logout-label">Sesión</div>', unsafe_allow_html=True)
+
+        # Ciclo 17.16 — Cambiar mi password (visible para todos los roles
+        # excepto los del sistema legacy hardcoded, que cambian via secrets).
+        if st.session_state.get("auth_source") == "supabase":
+            with st.popover("🔑  Cambiar mi password", use_container_width=True):
+                st.markdown("**Elegí una nueva contraseña**")
+                _new = st.text_input(
+                    "Nueva password (mín. 8 chars)",
+                    type="password",
+                    key="wm_self_pwd_new",
+                )
+                _confirm = st.text_input(
+                    "Confirmar",
+                    type="password",
+                    key="wm_self_pwd_confirm",
+                )
+                if st.button("Cambiar", key="wm_self_pwd_submit",
+                             type="primary", use_container_width=True):
+                    if not _new or len(_new) < 8:
+                        st.error("Mínimo 8 caracteres.")
+                    elif _new != _confirm:
+                        st.error("Las dos passwords no coinciden.")
+                    else:
+                        try:
+                            from core.supabase_auth import reset_user_password
+                            uid = st.session_state.get("auth_user_id", "")
+                            if not uid:
+                                st.error("No tengo tu user_id de sesión.")
+                            else:
+                                res = reset_user_password(uid, _new)
+                                if res.get("ok"):
+                                    st.success(
+                                        "✓ Password cambiada. Tu sesión "
+                                        "actual sigue activa hasta que "
+                                        "cierres."
+                                    )
+                                    st.session_state.pop("wm_self_pwd_new", None)
+                                    st.session_state.pop("wm_self_pwd_confirm", None)
+                                else:
+                                    st.error(f"Falló: {res.get('error', 'error')}")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
 
         if st.button("Cerrar sesión", use_container_width=True, key="logout_button"):
             logout()

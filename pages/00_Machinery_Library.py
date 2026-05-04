@@ -34,7 +34,7 @@ from typing import Any, Dict, List
 import pandas as pd
 import streamlit as st
 
-from core.auth import require_login, render_user_menu
+from core.auth import require_login, render_user_menu, require_role
 from core.bearing_calculations import compute_all_derived
 from core.document_vault import CAPTURED_PARAMETER_FIELDS, DOCUMENT_TYPES
 from core.instance_selector import render_instance_selector
@@ -56,6 +56,8 @@ from core.ui_theme import apply_watermelon_page_style, page_header
 
 st.set_page_config(page_title="Watermelon System | Machinery Library", layout="wide")
 require_login()
+# Ciclo 17.16 — Machinery Library es para staff
+require_role(allowed_roles=("admin", "specialist"))
 apply_watermelon_page_style()
 
 
