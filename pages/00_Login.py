@@ -549,18 +549,42 @@ with right_col:
             else:
                 try:
                     from core.password_reset import request_reset
-                    # Detectar la URL base de la app actual
+                    # Ciclo 17.16.3 — Detectar la URL base de la app
+                    # actual (importante para que el link del email
+                    # apunte a la app correcta, no a otra app del
+                    # mismo proyecto). Orden de prioridad:
+                    #   1. secret [app] base_url (manual override)
+                    #   2. st.context.headers Host (auto-detect)
+                    #   3. fallback: wm-home-final-2026
                     _base_url = ""
                     try:
-                        from streamlit.runtime.scriptrunner import get_script_run_ctx
-                        # Streamlit no expone fácilmente la URL pública;
-                        # usamos un secret opcional o el default conocido.
                         try:
-                            _base_url = (
-                                st.secrets.get("app", {}).get("base_url", "")
-                                or "https://wm-home-final-2026.streamlit.app"
-                            )
+                            _base_url = str(
+                                (st.secrets.get("app", {}) or {}).get("base_url", "") or ""
+                            ).strip().rstrip("/")
                         except Exception:
+                            _base_url = ""
+                        if not _base_url:
+                            try:
+                                _ctx = getattr(st, "context", None)
+                                _hdrs = getattr(_ctx, "headers", None) if _ctx else None
+                                _host = ""
+                                if _hdrs:
+                                    _host = (
+                                        _hdrs.get("Host", "")
+                                        or _hdrs.get("host", "")
+                                        or ""
+                                    )
+                                if _host:
+                                    # Asumimos https; cualquier app
+                                    # productiva está bajo https.
+                                    _scheme = "https"
+                                    if "localhost" in _host or "127.0.0.1" in _host:
+                                        _scheme = "http"
+                                    _base_url = f"{_scheme}://{_host}"
+                            except Exception:
+                                pass
+                        if not _base_url:
                             _base_url = "https://wm-home-final-2026.streamlit.app"
                     except Exception:
                         _base_url = "https://wm-home-final-2026.streamlit.app"
