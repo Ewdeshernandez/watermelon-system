@@ -292,27 +292,52 @@ def send_email(
     Returns:
         {"ok": True, "backend": "smtp"|"graph", "to": ...}
         o {"ok": False, "error": "mensaje"}
+
+    Ciclo 17.16.1: SIEMPRE logea a stderr el resultado (ok o falla)
+    para que aparezca en los logs de Streamlit Cloud y se pueda
+    diagnosticar problemas de envío que antes quedaban silenciosos.
     """
+    import sys as _sys
     if not to or "@" not in to:
-        return {"ok": False, "error": f"Email inválido: {to!r}"}
+        msg = f"Email inválido: {to!r}"
+        print(f"[WM_EMAIL] FAIL · validation · {msg}", file=_sys.stderr, flush=True)
+        return {"ok": False, "error": msg}
 
     status = get_email_backend_status()
     if not status["configured"]:
+        print(f"[WM_EMAIL] FAIL · no_backend · {status['details']}",
+              file=_sys.stderr, flush=True)
         return {"ok": False, "error": status["details"]}
 
-    if status["backend"] == "smtp":
-        return _send_via_smtp(
+    backend = status["backend"]
+    print(f"[WM_EMAIL] sending via {backend} · to={to} · subject={subject!r}",
+          file=_sys.stderr, flush=True)
+
+    if backend == "smtp":
+        result = _send_via_smtp(
             to=to, subject=subject,
             body_text=body_text, body_html=body_html,
             attachments=attachments,
         )
-    if status["backend"] == "graph":
-        return _send_via_graph(
+    elif backend == "graph":
+        result = _send_via_graph(
             to=to, subject=subject,
             body_text=body_text, body_html=body_html,
             attachments=attachments,
         )
-    return {"ok": False, "error": "Backend desconocido."}
+    else:
+        result = {"ok": False, "error": "Backend desconocido."}
+
+    if result.get("ok"):
+        print(f"[WM_EMAIL] OK · {backend} · to={to}", file=_sys.stderr, flush=True)
+    else:
+        # CRÍTICO: si falla, imprimimos el error completo a stderr para
+        # que aparezca en logs de Cloud y se pueda diagnosticar.
+        err = result.get("error", "?")
+        print(f"[WM_EMAIL] FAIL · {backend} · to={to} · ERROR: {err}",
+              file=_sys.stderr, flush=True)
+
+    return result
 
 
 def send_password_reset_email(

@@ -221,14 +221,23 @@ def request_reset(
         return {"ok": False, "error": f"Error invocando email_sender: {e}"}
 
     if not send_res.get("ok"):
-        # Igual devolvemos ok=True al usuario, pero log del problema para admin
+        # Igual devolvemos ok=True al usuario por seguridad, pero
+        # logueamos el error completo a stderr para que aparezca en
+        # los logs de Streamlit Cloud y el admin pueda diagnosticar.
+        import sys as _sys
+        err_full = send_res.get("error", "?")
+        print(
+            f"[WM_RESET] email_send_failed · email={email_norm} · "
+            f"backend_error: {err_full}",
+            file=_sys.stderr, flush=True,
+        )
         return {
-            "ok": True,  # cara al usuario
+            "ok": True,  # cara al usuario (anti-enumeration)
             "message": (
                 "Si el email está registrado, recibirás instrucciones para "
                 "restablecer tu contraseña en los próximos minutos."
             ),
-            "_debug": f"email_send_failed: {send_res.get('error', '?')}",
+            "_debug": f"email_send_failed: {err_full}",
         }
 
     return {
