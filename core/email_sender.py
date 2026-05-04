@@ -50,8 +50,60 @@ from typing import Any, Dict, List, Optional, Tuple
 # CONFIG / DETECCIÓN DE BACKEND
 # =============================================================
 
+def _safe_subdict(parent: Any, key: str) -> Dict[str, Any]:
+    """Devuelve un subdict de `parent[key]` aunque parent sea un AttrDict
+    de Streamlit Cloud (que no se convierte limpio a dict puro con
+    dict()). Ciclo 17.16.1 fix: en Streamlit Cloud, st.secrets es un
+    AttrDict y st.secrets['email'] devuelve OTRO AttrDict, no un dict
+    puro — por eso isinstance(x, dict) daba False y todo el chequeo
+    de backends fallaba con "no_backend" aunque el TOML estuviera bien.
+    """
+    if parent is None:
+        return {}
+    try:
+        sub = parent[key]
+    except (KeyError, TypeError):
+        try:
+            sub = parent.get(key)  # AttrDict tiene .get
+        except Exception:
+            sub = None
+    if sub is None:
+        return {}
+    # Convertir a dict puro recursivamente
+    try:
+        return {k: sub[k] for k in sub}
+    except Exception:
+        try:
+            return dict(sub)
+        except Exception:
+            return {}
+
+
+def _read_secret_section(*path: str) -> Dict[str, Any]:
+    """Lee una sección anidada de st.secrets como dict puro.
+    Ej: _read_secret_section('email', 'graph') → contenido de [email.graph].
+    Devuelve dict vacío si no existe o si st no está disponible.
+    """
+    try:
+        import streamlit as st  # type: ignore
+        if not hasattr(st, "secrets"):
+            return {}
+        node: Any = st.secrets
+        for k in path:
+            sub = _safe_subdict(node, k)
+            if not sub:
+                return {}
+            node = sub
+        return node if isinstance(node, dict) else {}
+    except Exception:
+        return {}
+
+
 def _get_secrets() -> Dict[str, Any]:
-    """Lee st.secrets si está disponible, sino dict vacío."""
+    """Compat: lee st.secrets como dict si está disponible.
+    Solo usado por código viejo — los nuevos accesos usan
+    _read_secret_section() que es más robusto en Cloud.
+    """
     try:
         import streamlit as st  # type: ignore
         return dict(st.secrets) if hasattr(st, "secrets") else {}
@@ -62,22 +114,20 @@ def _get_secrets() -> Dict[str, Any]:
 def get_email_backend_status() -> Dict[str, Any]:
     """Devuelve qué backend está configurado y si tiene los campos
     mínimos necesarios. Útil para mostrar diagnóstico en admin panel.
-    """
-    secrets = _get_secrets()
-    email_cfg = secrets.get("email", {}) or {}
 
-    smtp = email_cfg.get("smtp") if isinstance(email_cfg, dict) else None
-    graph = email_cfg.get("graph") if isinstance(email_cfg, dict) else None
+    Ciclo 17.16.1: usa _read_secret_section() para evitar el bug del
+    AttrDict de Streamlit Cloud que rompía el isinstance(x, dict) check.
+    """
+    smtp = _read_secret_section("email", "smtp")
+    graph = _read_secret_section("email", "graph")
 
     smtp_ok = bool(
-        smtp and isinstance(smtp, dict)
-        and smtp.get("host") and smtp.get("port")
+        smtp.get("host") and smtp.get("port")
         and smtp.get("username") and smtp.get("password")
         and smtp.get("from_email")
     )
     graph_ok = bool(
-        graph and isinstance(graph, dict)
-        and graph.get("tenant_id") and graph.get("client_id")
+        graph.get("tenant_id") and graph.get("client_id")
         and graph.get("client_secret") and graph.get("from_email")
     )
 
@@ -121,8 +171,7 @@ def _send_via_smtp(
     attachments: Optional[List[Tuple[str, bytes, str]]] = None,
 ) -> Dict[str, Any]:
     """Envía email vía SMTP (Office 365, Gmail, etc.)."""
-    secrets = _get_secrets()
-    cfg = (secrets.get("email", {}) or {}).get("smtp", {}) or {}
+    cfg = _read_secret_section("email", "smtp")
     host = cfg.get("host", "")
     port = int(cfg.get("port", 587) or 587)
     starttls = bool(cfg.get("starttls", True))
@@ -193,8 +242,7 @@ def _send_via_graph(
     Requiere que la App Registration en Azure AD tenga el permiso
     'Mail.Send' (Application permission) con consent del admin del tenant.
     """
-    secrets = _get_secrets()
-    cfg = (secrets.get("email", {}) or {}).get("graph", {}) or {}
+    cfg = _read_secret_section("email", "graph")
     tenant_id = cfg.get("tenant_id", "")
     client_id = cfg.get("client_id", "")
     client_secret = cfg.get("client_secret", "")
