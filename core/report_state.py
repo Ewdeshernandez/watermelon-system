@@ -118,6 +118,109 @@ def get_user_drafts_dir(email: Optional[str] = None) -> Path:
     return d
 
 
+# =============================================================
+# Ciclo 17.17 — Image storage refactor
+# =============================================================
+# Bug crítico que matamos acá:
+#   Antes: cada imagen se persistía como base64 INLINE dentro del
+#   report_state.json. Con 50 imágenes el JSON pesaba 67MB, con
+#   100 imágenes >130MB. Streamlit Cloud (1GB RAM) no aguantaba:
+#     - json.dump tardaba 10-30s y bloqueaba el rerun
+#     - si el usuario hacía algo mid-write → crash → JSON corrupto
+#     - json.loads al cargar reventaba la RAM
+#     - reportes perdidos en cada caída
+#
+# Ahora: cada imagen vive como PNG suelto en
+#   data/users/{slug}/report_images/{item_id}.png
+# y el JSON solo guarda `image_file` (el nombre del PNG).
+#
+# Beneficios:
+#   - JSON queda en KBs en vez de MBs → write atómico real
+#   - load no carga 100MB de strings de una vez
+#   - una imagen corrupta no rompe el reporte entero
+#   - reportes y drafts comparten el mismo image pool por item_id
+#
+# Migración transparente: cuando se carga un JSON con
+# `image_bytes_b64` (formato viejo), restore_report_items decodifica
+# los bytes, escribe el PNG a disco y deja `image_file` apuntando
+# al nuevo archivo. La próxima vez que se guarde el reporte, el
+# `image_bytes_b64` legacy se va y queda solo `image_file`.
+# =============================================================
+
+def get_user_images_dir(email: Optional[str] = None) -> Path:
+    """Path a la carpeta donde viven los PNGs sueltos del usuario.
+    Compartida entre el reporte actual y todos los drafts: si un
+    item con id X aparece en current y en draft, ambos refieren al
+    mismo PNG (deduplicación natural por item_id).
+    """
+    d = get_user_data_dir(email) / "report_images"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _safe_item_id(raw: Any) -> str:
+    """Sanitiza un item id para usarlo como nombre de archivo.
+    Solo deja [A-Za-z0-9_-], colapsa repetidos, recorta a 120 chars.
+    """
+    s = str(raw or "").strip()
+    s = re.sub(r"[^A-Za-z0-9_-]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s[:120] or "item"
+
+
+def _atomic_write_png(target: Path, data: bytes) -> None:
+    """Escribe `data` como PNG a `target` ATÓMICAMENTE (igual que el
+    helper de JSON pero binario): tmp file → fsync → os.replace.
+    Si crashea mid-write, el archivo final queda intacto en su
+    versión previa (o no existe si era nuevo).
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp_fd, tmp_name = tempfile.mkstemp(
+        prefix=target.stem + ".",
+        suffix=".png.tmp",
+        dir=str(target.parent),
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(tmp_fd, "wb") as f:
+            f.write(data)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except Exception:
+                pass
+        os.replace(str(tmp_path), str(target))
+    except Exception:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
+        raise
+
+
+def _resolve_images_dir(images_dir: Optional[Path],
+                          email: Optional[str]) -> Optional[Path]:
+    """Devuelve el dir de imágenes a usar. Si el caller lo pasa, lo
+    respeta; si no, intenta resolverlo desde el email (o el activo).
+    Si no se puede resolver (ej. corriendo standalone sin sesión),
+    devuelve None y el caller cae a base64 inline para no perder datos.
+    """
+    if images_dir is not None:
+        try:
+            images_dir.mkdir(parents=True, exist_ok=True)
+            return images_dir
+        except Exception:
+            return None
+    try:
+        e = email if email is not None else _current_owner_email()
+        if not e:
+            return None
+        return get_user_images_dir(e)
+    except Exception:
+        return None
+
+
 def _maybe_migrate_legacy_to_user(email: str) -> None:
     """Si existe el report_state.json legacy global Y NO existe el del
     usuario actual, lo movemos al espacio del usuario.
@@ -181,73 +284,198 @@ def _safe_slug(text: Any) -> str:
     return raw or "draft"
 
 
-def sanitize_report_items(items: Any) -> List[Dict[str, Any]]:
+def sanitize_report_items(items: Any, *,
+                            email: Optional[str] = None,
+                            images_dir: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Convierte la lista de items en memoria al formato persistible en JSON.
+
+    Ciclo 17.17: las imágenes ya NO se guardan como base64 inline. Se
+    escriben como PNG sueltos en `data/users/{slug}/report_images/` y
+    el JSON solo guarda `image_file` (el nombre del PNG, relativo a esa
+    carpeta). Esto baja el JSON de 67MB a unos pocos KB con 50 imágenes.
+
+    Args:
+        items:        lista de items en memoria (con `image_bytes` bytes
+                      o `image_bytes_b64` legacy o `image_file` ya migrado)
+        email:        owner del reporte. Se usa para resolver el dir de
+                      imágenes. Si no se pasa, intenta el activo de sesión.
+        images_dir:   override explícito de la carpeta de PNGs. Útil para
+                      tests o exports a archivos arbitrarios.
+
+    Returns:
+        Lista de dicts JSON-serializables. Cada item con imagen tiene
+        `image_file` apuntando al PNG. Solo cae a `image_bytes_b64` si
+        no pudo escribir el PNG (fallback anti-pérdida de datos).
+    """
     out: List[Dict[str, Any]] = []
 
     if not isinstance(items, list):
         return out
 
+    resolved_dir = _resolve_images_dir(images_dir, email)
+
     for idx, item in enumerate(items):
         if not isinstance(item, dict):
             continue
 
-        out.append(
-            {
-                "id": str(item.get("id") or f"report_item_{idx+1}"),
-                "type": str(item.get("type") or "figure"),
-                "title": str(item.get("title") or f"Figura {idx+1}"),
-                "notes": str(item.get("notes") or ""),
-                "signal_id": str(item.get("signal_id") or ""),
-                "machine": str(item.get("machine") or ""),
-                "point": str(item.get("point") or ""),
-                "variable": str(item.get("variable") or ""),
-                "timestamp": str(item.get("timestamp") or ""),
-                "image_bytes_b64": _encode_image_bytes(item.get("image_bytes")),
-            }
-        )
+        item_id = str(item.get("id") or f"report_item_{idx+1}")
+        rec: Dict[str, Any] = {
+            "id":        item_id,
+            "type":      str(item.get("type") or "figure"),
+            "title":     str(item.get("title") or f"Figura {idx+1}"),
+            "notes":     str(item.get("notes") or ""),
+            "signal_id": str(item.get("signal_id") or ""),
+            "machine":   str(item.get("machine") or ""),
+            "point":     str(item.get("point") or ""),
+            "variable":  str(item.get("variable") or ""),
+            "timestamp": str(item.get("timestamp") or ""),
+        }
+
+        # Resolver bytes de la imagen, vengan en cualquiera de los 3
+        # formatos posibles (in-memory, b64 legacy, o image_file persistido)
+        raw_bytes: Optional[bytes] = None
+        rb = item.get("image_bytes")
+        if isinstance(rb, (bytes, bytearray)) and len(rb) > 0:
+            raw_bytes = bytes(rb)
+        elif item.get("image_bytes_b64"):
+            decoded = _decode_image_bytes(item.get("image_bytes_b64"))
+            if decoded:
+                raw_bytes = decoded
+
+        # Caso 1: tenemos bytes Y carpeta de imágenes → PNG suelto
+        if raw_bytes is not None and resolved_dir is not None:
+            try:
+                fname = _safe_item_id(item_id) + ".png"
+                _atomic_write_png(resolved_dir / fname, raw_bytes)
+                rec["image_file"] = fname
+            except Exception:
+                # Fallback duro: si el PNG no se pudo escribir, dejamos
+                # el b64 inline para no perder la imagen. Mejor un JSON
+                # gordo que un reporte sin imagen.
+                rec["image_bytes_b64"] = _encode_image_bytes(raw_bytes)
+
+        # Caso 2: tenemos bytes pero NO hay carpeta resoluble (corrida
+        # standalone sin sesión Streamlit, o destino arbitrario)
+        elif raw_bytes is not None:
+            rec["image_bytes_b64"] = _encode_image_bytes(raw_bytes)
+
+        # Caso 3: el item ya viene con image_file (cargado y re-serializado
+        # sin tocar la imagen) → preservar el path tal cual
+        elif item.get("image_file"):
+            rec["image_file"] = str(item["image_file"])
+
+        out.append(rec)
 
     return out
 
 
-def restore_report_items(items: Any) -> List[Dict[str, Any]]:
+def restore_report_items(items: Any, *,
+                           email: Optional[str] = None,
+                           images_dir: Optional[Path] = None,
+                           migrate_legacy: bool = True) -> List[Dict[str, Any]]:
+    """Inverso de sanitize_report_items: reconstruye los items en
+    memoria desde lo persistido en el JSON.
+
+    Ciclo 17.17:
+      - Si el item tiene `image_file` (formato nuevo) → leer PNG de disco
+      - Si tiene `image_bytes_b64` (legacy) → decodificar Y MIGRAR
+        escribiendo el PNG, dejando `image_file` apuntando al nuevo
+        archivo. La próxima vez que se persista, el b64 desaparece.
+      - Mantiene la API: devuelve `image_bytes` cargado en memoria,
+        igual que antes, para que los consumers (pages/16_Reports.py,
+        etc.) no necesiten cambiar.
+
+    Args:
+        items:           lista de items leídos del JSON
+        email:           owner del reporte (resuelve images_dir)
+        images_dir:      override explícito de la carpeta de PNGs
+        migrate_legacy:  si True (default), reescribe los b64 legacy
+                         como PNGs sueltos durante la carga
+    """
     out: List[Dict[str, Any]] = []
 
     if not isinstance(items, list):
         return out
 
+    resolved_dir = _resolve_images_dir(images_dir, email)
+
     for idx, item in enumerate(items):
         if not isinstance(item, dict):
             continue
 
-        out.append(
-            {
-                "id": str(item.get("id") or f"report_item_{idx+1}"),
-                "type": str(item.get("type") or "figure"),
-                "title": str(item.get("title") or f"Figura {idx+1}"),
-                "notes": str(item.get("notes") or ""),
-                "signal_id": str(item.get("signal_id") or ""),
-                "machine": str(item.get("machine") or ""),
-                "point": str(item.get("point") or ""),
-                "variable": str(item.get("variable") or ""),
-                "timestamp": str(item.get("timestamp") or ""),
-                "figure": None,
-                "image_bytes": _decode_image_bytes(item.get("image_bytes_b64")),
-            }
-        )
+        item_id = str(item.get("id") or f"report_item_{idx+1}")
+        rec: Dict[str, Any] = {
+            "id":         item_id,
+            "type":       str(item.get("type") or "figure"),
+            "title":      str(item.get("title") or f"Figura {idx+1}"),
+            "notes":      str(item.get("notes") or ""),
+            "signal_id":  str(item.get("signal_id") or ""),
+            "machine":    str(item.get("machine") or ""),
+            "point":      str(item.get("point") or ""),
+            "variable":   str(item.get("variable") or ""),
+            "timestamp":  str(item.get("timestamp") or ""),
+            "figure":     None,
+            "image_bytes": None,
+            "image_file":  "",
+        }
+
+        # 1) Formato nuevo: image_file → leer PNG del disco
+        img_file = str(item.get("image_file") or "").strip()
+        if img_file and resolved_dir is not None:
+            png_path = resolved_dir / img_file
+            if png_path.exists():
+                try:
+                    rec["image_bytes"] = png_path.read_bytes()
+                    rec["image_file"] = img_file
+                    out.append(rec)
+                    continue
+                except Exception:
+                    # Si el PNG está corrupto/ilegible, caemos al fallback
+                    # de b64 (si existe en el mismo item) o queda sin imagen.
+                    pass
+
+        # 2) Legacy: image_bytes_b64 inline → decodificar
+        b64 = item.get("image_bytes_b64")
+        if b64:
+            decoded = _decode_image_bytes(b64)
+            if decoded is not None:
+                rec["image_bytes"] = decoded
+                # MIGRACIÓN AUTOMÁTICA: persistir como PNG suelto para
+                # que la próxima save() ya no traiga el b64 gordo.
+                if migrate_legacy and resolved_dir is not None:
+                    try:
+                        fname = _safe_item_id(item_id) + ".png"
+                        _atomic_write_png(resolved_dir / fname, decoded)
+                        rec["image_file"] = fname
+                    except Exception:
+                        # Migración no crítica — la imagen ya está cargada
+                        # en memoria, simplemente seguirá viviendo en b64
+                        # hasta el próximo intento.
+                        pass
+
+        out.append(rec)
 
     return out
 
 
-def _serialize_state(*, items: Any, meta: Any) -> Dict[str, Any]:
+def _serialize_state(*, items: Any, meta: Any,
+                       email: Optional[str] = None,
+                       images_dir: Optional[Path] = None) -> Dict[str, Any]:
     return {
-        "items": sanitize_report_items(items),
+        "items": sanitize_report_items(items, email=email, images_dir=images_dir),
         "meta": meta if isinstance(meta, dict) else {},
     }
 
 
-def _restore_state(raw: Dict[str, Any]) -> Dict[str, Any]:
+def _restore_state(raw: Dict[str, Any],
+                     email: Optional[str] = None,
+                     images_dir: Optional[Path] = None) -> Dict[str, Any]:
     return {
-        "items": restore_report_items(raw.get("items", [])),
+        "items": restore_report_items(
+            raw.get("items", []),
+            email=email,
+            images_dir=images_dir,
+        ),
         "meta": raw.get("meta", {}) if isinstance(raw.get("meta", {}), dict) else {},
     }
 
@@ -371,12 +599,17 @@ def save_report_state(*, items: Any, meta: Any,
     target = _resolve_state_file(filename, email)
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    payload = _serialize_state(items=items, meta=meta)
+    # Ciclo 17.17: pasamos el email para que sanitize sepa dónde escribir
+    # los PNGs sueltos (data/users/{slug}/report_images/). Si el caller
+    # pasó un filename arbitrario (caso draft o export) Y no pasó email,
+    # caemos al activo de sesión.
+    effective_email = email if email is not None else _current_owner_email()
+    payload = _serialize_state(items=items, meta=meta, email=effective_email)
     # Inyectar metadata interna del save (útil para debugging)
     payload["_save_meta"] = {
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "n_items": len(payload.get("items", [])),
-        "owner_email": (email if email is not None else _current_owner_email()) or "",
+        "owner_email": effective_email or "",
     }
     _rotate_backups(target)
     _atomic_write_json(target, payload)
@@ -409,7 +642,7 @@ def load_report_state(*, filename: Path | None = None,
     # Intento principal
     try:
         raw = json.loads(target.read_text(encoding="utf-8"))
-        result = _restore_state(raw)
+        result = _restore_state(raw, email=e)
         # No agregamos _recovered_from porque cargó normal
         return result
     except Exception as primary_err:
@@ -420,7 +653,7 @@ def load_report_state(*, filename: Path | None = None,
                 continue
             try:
                 raw = json.loads(bk.read_text(encoding="utf-8"))
-                result = _restore_state(raw)
+                result = _restore_state(raw, email=e)
                 # Marcar de dónde se recuperó para que la UI avise
                 result["_recovered_from"] = bk.name
                 result["_recovered_at"] = datetime.now().isoformat(timespec="seconds")
@@ -659,9 +892,15 @@ def list_report_drafts(email: Optional[str] = None) -> List[str]:
 
 def save_named_report_draft(*, draft_name: Any, items: Any, meta: Any,
                               email: Optional[str] = None) -> str:
-    """Guarda un draft nombrado. Ciclo 17.15: en el espacio del usuario."""
+    """Guarda un draft nombrado. Ciclo 17.15: en el espacio del usuario.
+    Ciclo 17.17: las imágenes se persisten como PNG sueltos en el image
+    pool compartido del usuario (data/users/{slug}/report_images/), no
+    inline en el JSON. Si dos drafts comparten un item por id, comparten
+    también el PNG (deduplicación natural).
+    """
     target = _draft_path(draft_name, email)
-    payload = _serialize_state(items=items, meta=meta)
+    effective_email = email if email is not None else _current_owner_email()
+    payload = _serialize_state(items=items, meta=meta, email=effective_email)
     target.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str),
                       encoding="utf-8")
     return target.stem
