@@ -528,6 +528,64 @@ with right_col:
         else:
             st.error(msg)
 
+    # =====================================================================
+    # Ciclo 17.16 — "Olvidé mi contraseña"
+    # =====================================================================
+    # Link discreto debajo del form de login. Al expandir, pide email y
+    # llama core.password_reset.request_reset. Por seguridad, NO revela
+    # si el email existe o no — siempre muestra mensaje genérico.
+    with st.expander("¿Olvidaste tu contraseña?", expanded=False):
+        _reset_email = st.text_input(
+            "Tu correo corporativo",
+            placeholder="nombre.apellido@sigasas.com",
+            key="wm_reset_email",
+            help="Te enviaremos un link para elegir nueva clave. Válido por 1 hora.",
+        ).strip().lower()
+        if st.button("Enviar link de recuperación",
+                     use_container_width=True,
+                     key="wm_reset_request_btn"):
+            if not _reset_email or "@" not in _reset_email:
+                st.error("Ingresá un email válido.")
+            else:
+                try:
+                    from core.password_reset import request_reset
+                    # Detectar la URL base de la app actual
+                    _base_url = ""
+                    try:
+                        from streamlit.runtime.scriptrunner import get_script_run_ctx
+                        # Streamlit no expone fácilmente la URL pública;
+                        # usamos un secret opcional o el default conocido.
+                        try:
+                            _base_url = (
+                                st.secrets.get("app", {}).get("base_url", "")
+                                or "https://wm-home-final-2026.streamlit.app"
+                            )
+                        except Exception:
+                            _base_url = "https://wm-home-final-2026.streamlit.app"
+                    except Exception:
+                        _base_url = "https://wm-home-final-2026.streamlit.app"
+
+                    res = request_reset(_reset_email, base_url=_base_url)
+                    if res.get("ok"):
+                        st.success(
+                            "✓ " + res.get("message", "Si el email existe, "
+                            "recibirás instrucciones en breve.")
+                        )
+                        if res.get("_debug"):
+                            # Solo visible si hay un secret app.debug=true
+                            try:
+                                if st.secrets.get("app", {}).get("debug"):
+                                    st.caption(f"🔧 debug: {res['_debug']}")
+                            except Exception:
+                                pass
+                    else:
+                        st.error(
+                            "No se pudo iniciar el reset: "
+                            + res.get("error", "error desconocido")
+                        )
+                except Exception as e:
+                    st.error(f"Error inesperado: {e}")
+
     # Ciclo 17.6.3 — versión real desde core.version (deriva de
     # git tags, no hardcoded). Pinta un chip con el environment
     # coloreado para distinguir production / development a simple

@@ -32,7 +32,7 @@ from typing import Any, Dict, List
 import pandas as pd
 import streamlit as st
 
-from core.auth import require_login, render_user_menu
+from core.auth import require_login, render_user_menu, require_role
 
 from core.instance_selector import render_instance_selector
 from core.instance_state import (
@@ -56,6 +56,8 @@ from core.ui_theme import apply_watermelon_page_style, page_header
 st.set_page_config(page_title="Watermelon System | Machine Map", layout="wide")
 require_login()
 render_user_menu()
+# Ciclo 17.16 — Machine Map es para staff
+require_role(allowed_roles=("admin", "specialist"))
 apply_watermelon_page_style()
 
 

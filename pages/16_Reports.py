@@ -393,6 +393,131 @@ _owner_of_this_report = (_merged_meta.get("owner_email") or _wm_my_email).strip(
 _is_my_own = (_owner_of_this_report == _wm_my_email) or not _owner_of_this_report
 _can_inspect_others = _wm_my_role in ("admin", "specialist")
 
+# =====================================================================
+# Ciclo 17.16 — Modo CLIENT: solo archivo histórico, sin editor
+# =====================================================================
+# Si el role es 'client', no debería poder editar reportes — solo ver
+# los PDFs archivados que están marcados shared_with_client. Renderizamos
+# una vista limitada y st.stop() para no ejecutar todo el editor.
+if _wm_my_role == "client":
+    st.markdown(
+        f"""
+        <div style="background:linear-gradient(135deg,#0f172a,#1e293b);
+                    color:white;padding:20px 28px;border-radius:14px;
+                    margin-bottom:18px;">
+          <div style="font-size:11px;font-weight:800;letter-spacing:0.18em;
+                      text-transform:uppercase;color:#a5b4fc;">
+            🔐 Acceso de cliente — Solo lectura
+          </div>
+          <div style="font-size:22px;font-weight:800;margin:6px 0;">
+            📚 Archivo histórico de reportes
+          </div>
+          <div style="color:rgba(226,232,240,0.85);font-size:13px;">
+            Bienvenido <b>{_wm_my_email}</b>. Acá podés consultar y descargar
+            los reportes técnicos que SIGASAS compartió con vos.
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    _stats = get_archive_stats()
+    ck1, ck2 = st.columns(2)
+    with ck1:
+        st.metric("Reportes disponibles", _stats["total"])
+    with ck2:
+        st.metric("Espacio total", _stats["total_size_human"])
+
+    cf1, cf2, cf3 = st.columns(3)
+    with cf1:
+        _cf_client = st.text_input("Filtrar por cliente",
+                                    placeholder="ej. Parex",
+                                    key="wm_cli_arch_client").strip()
+    with cf2:
+        _cf_asset = st.text_input("Filtrar por activo",
+                                   placeholder="ej. C-200C",
+                                   key="wm_cli_arch_asset").strip()
+    with cf3:
+        _cf_year = st.selectbox(
+            "Año",
+            options=["(todos)"] + [str(y) for y in range(datetime.now().year, 2023, -1)],
+            index=0, key="wm_cli_arch_year",
+        )
+    _cli_from = ""; _cli_to = ""
+    if _cf_year and _cf_year != "(todos)":
+        _cli_from = f"{_cf_year}-01-01"
+        _cli_to = f"{_cf_year}-12-31"
+
+    _cli_archived = list_archived_reports(
+        viewer_email=_wm_my_email,
+        viewer_role=_wm_my_role,
+        client_filter=_cf_client,
+        asset_filter=_cf_asset,
+        date_from=_cli_from,
+        date_to=_cli_to,
+        limit=100,
+    )
+    if not _cli_archived:
+        st.info(
+            "📭 No hay reportes compartidos contigo todavía. "
+            "Cuando SIGASAS publique un nuevo análisis, aparecerá acá."
+        )
+    else:
+        st.caption(f"📋 {len(_cli_archived)} reporte(s) disponibles")
+        for sc in _cli_archived:
+            rm = sc.get("report_meta", {}) or {}
+            _aid = sc.get("archive_id", "")
+            _client = rm.get("client", "—")
+            _asset = rm.get("asset_class") or rm.get("instance_tag") or "—"
+            _sev = rm.get("executive_severity", "")
+            _date = sc.get("archived_at", "")[:16]
+            _size = sc.get("size_human", "")
+            st.markdown(
+                f"""
+                <div style="background:white;border:1px solid #e6ebf2;
+                            border-radius:12px;padding:14px 18px;margin-bottom:8px;">
+                  <div style="display:flex;justify-content:space-between;
+                              align-items:center;">
+                    <div>
+                      <div style="font-weight:800;color:#0f172a;font-size:15px;">
+                        {_client} · {_asset}
+                      </div>
+                      <div style="color:#475569;font-size:12px;margin-top:2px;">
+                        Publicado {_date} · {_size}
+                      </div>
+                    </div>
+                    <div>
+                      {f'<span style="background:#fee2e2;color:#b91c1c;padding:4px 10px;border-radius:999px;font-size:10px;font-weight:800;">{_sev}</span>' if _sev else ''}
+                    </div>
+                  </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            _pb = get_archived_pdf_bytes(_aid, viewer_email=_wm_my_email,
+                                           viewer_role=_wm_my_role)
+            if _pb:
+                st.download_button(
+                    "⬇️  Descargar este reporte",
+                    data=_pb,
+                    file_name=f"{_aid.split('/')[-1]}.pdf",
+                    mime="application/pdf",
+                    key=f"cli_dl_{_aid}",
+                    use_container_width=True,
+                )
+
+    st.divider()
+    st.caption(
+        "💡 ¿Necesitás un reporte que no aparece acá? Contactá a tu "
+        "especialista SIGASAS para solicitar la publicación."
+    )
+    st.stop()
+
+
+# =====================================================================
+# Resto del page (editor + archivo) solo se ejecuta para admin/specialist
+# =====================================================================
+
 # Selector solo si admin/specialist Y hay al menos otro usuario con estado
 if _can_inspect_others:
     _all_users = list_all_users_with_state()

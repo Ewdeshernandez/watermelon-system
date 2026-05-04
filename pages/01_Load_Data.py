@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from core.auth import require_login, render_user_menu
+from core.auth import require_login, render_user_menu, require_role
 
 require_login()
 render_user_menu()
+# Ciclo 17.16 — Load Data está restringido para role=client
+require_role(allowed_roles=("admin", "specialist"))
 
 import base64
 import csv
