@@ -83,7 +83,22 @@ apply_theme()
 _user = get_current_user() or {}
 _full_name = _user.get("full_name", "") or _user.get("username", "")
 
-_greet = get_personalized_greeting(_full_name)
+# Ciclo 17.24.5 — detectar timezone del browser del usuario.
+# st.context.timezone (Streamlit 1.31+) devuelve un string IANA tipo
+# "America/Bogota" basado en el browser. Si está disponible, calculamos
+# el reloj en la zona del usuario. Si no (versión vieja o falla),
+# fallback a la hora del server (UTC en Streamlit Cloud).
+_user_tz = ""
+try:
+    _ctx = getattr(st, "context", None)
+    if _ctx is not None:
+        _tz_attr = getattr(_ctx, "timezone", None)
+        if _tz_attr:
+            _user_tz = str(_tz_attr).strip()
+except Exception:
+    _user_tz = ""
+
+_greet = get_personalized_greeting(_full_name, tz_name=_user_tz)
 _fleet = compute_fleet_status()
 _health = get_system_health()
 # Ciclo 17.15 — activity feed filtrable por usuario
@@ -620,110 +635,6 @@ st.markdown(
 # (lo muestra como bloque de código en pantalla, no como HTML). Los
 # comentarios de explicación van como comentarios Python, fuera del
 # st.markdown.
-#
-# El reloj LIVE se inyecta abajo en su propio st.markdown separado
-# (igual al patrón del Cmd+K que funciona desde Ciclo 17.13). El script
-# accede a window.parent.document porque Streamlit corre en iframe.
-
-# Ciclo 17.24.2 — Reloj LIVE con auto-zona-horaria del browser.
-# IMPORTANTE: este st.markdown está SEPARADO del hero (sigue el patrón
-# del Cmd+K del Ciclo 17.13 que funciona desde hace meses). NO mezclar
-# scripts con HTML grande en el mismo st.markdown — Streamlit lo
-# sanitiza y rompe todo. Este bloque es chico y aislado, no se sanitiza.
-#
-# El script accede a window.parent.document porque Streamlit corre
-# dentro de un iframe, mientras los elementos con id viven en el
-# documento padre. Refresca cada 30 segundos.
-st.markdown(
-    """
-    <script>
-    (function() {
-        function pad(n) { return String(n).padStart(2, '0'); }
-        function fmtClock(d) {
-            let h = d.getHours();
-            const m = pad(d.getMinutes());
-            const ampm = h >= 12 ? 'pm' : 'am';
-            h = h % 12;
-            if (h === 0) h = 12;
-            return h + ':' + m + ' ' + ampm;
-        }
-        function shiftFor(h) {
-            if (h >= 6 && h < 14)  return {emoji:'☀️',  text:'TURNO MAÑANA',  end:14, nextEmoji:'🌇', nextText:'tarde'};
-            if (h >= 14 && h < 22) return {emoji:'🌇', text:'TURNO TARDE',   end:22, nextEmoji:'🌙', nextText:'noche'};
-            return {emoji:'🌙', text:'TURNO NOCHE', end: (h >= 22 ? 30 : 6), nextEmoji:'☀️', nextText:'mañana'};
-        }
-        function dateLong(d) {
-            const dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
-            const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-            return dias[d.getDay()] + ' · ' + pad(d.getDate()) + ' ' + meses[d.getMonth()] + ' ' + d.getFullYear();
-        }
-        function nextShiftStr(d) {
-            const h = d.getHours();
-            const m = d.getMinutes();
-            const s = shiftFor(h);
-            const nowMins = h * 60 + m;
-            let endMins = s.end * 60;
-            if (endMins <= nowMins) endMins += 24 * 60;
-            const diff = endMins - nowMins;
-            const dh = Math.floor(diff / 60);
-            const dm = diff % 60;
-            const dur = dh > 0 ? (dh + 'h ' + dm + 'min') : (dm + ' min');
-            return 'próximo turno ' + s.nextEmoji + ' ' + s.nextText + ' en ' + dur;
-        }
-        function relativeTime(isoStr) {
-            if (!isoStr) return '';
-            const then = new Date(isoStr);
-            if (isNaN(then)) return '';
-            const diffSec = Math.max(0, (Date.now() - then.getTime()) / 1000);
-            if (diffSec < 60)        return 'hace un instante';
-            if (diffSec < 3600)      return 'hace ' + Math.floor(diffSec / 60) + ' min';
-            if (diffSec < 86400)     return 'hace ' + Math.floor(diffSec / 3600) + ' h';
-            if (diffSec < 86400 * 7) return 'hace ' + Math.floor(diffSec / 86400) + ' días';
-            const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-            return then.getDate() + ' ' + meses[then.getMonth()] + ' ' + then.getFullYear();
-        }
-        function getDoc() {
-            // Streamlit corre en iframe; los IDs viven en el documento padre.
-            try { return window.parent.document; } catch(e) { return document; }
-        }
-        function tick() {
-            const doc = getDoc();
-            const d = new Date();
-            const h = d.getHours();
-            const cl = doc.getElementById('wm-clock-live');
-            const sh = doc.getElementById('wm-shift-live');
-            const dt = doc.getElementById('wm-date-live');
-            const ns = doc.getElementById('wm-next-shift');
-            if (cl) cl.textContent = fmtClock(d);
-            if (sh) {
-                const s = shiftFor(h);
-                sh.textContent = s.emoji + ' ' + s.text;
-            }
-            if (dt) dt.textContent = dateLong(d);
-            if (ns) ns.textContent = nextShiftStr(d);
-            // Último reporte: tiempo relativo
-            const lr = doc.querySelector('.wmh-last-report');
-            if (lr) {
-                const at = lr.getAttribute('data-archived-at');
-                const asset = lr.getAttribute('data-asset') || 'reporte';
-                const rel = relativeTime(at);
-                const txtEl = lr.querySelector('.wmh-lr-text');
-                if (txtEl && rel) txtEl.textContent = 'último reporte: ' + asset + ' · ' + rel;
-            }
-        }
-        // Re-engancha tras rerender de Streamlit (igual al patrón del Cmd+K)
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', tick);
-        } else {
-            tick();
-        }
-        setTimeout(tick, 800);
-        setInterval(tick, 30000);
-    })();
-    </script>
-    """,
-    unsafe_allow_html=True,
-)
 
 
 # =============================================================

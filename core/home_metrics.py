@@ -39,19 +39,39 @@ REPORT_STATE_FILE = DATA_DIR / "report_state.json"
 def get_personalized_greeting(
     full_name: str = "",
     now: Optional[datetime] = None,
+    tz_name: str = "",
 ) -> Dict[str, str]:
     """Devuelve saludo + turno + fecha legible.
 
+    Ciclo 17.24.5: si se pasa `tz_name` (string IANA tipo
+    "America/Bogota", "America/Los_Angeles"), la hora se calcula
+    en esa timezone. Si no, usa la hora local del server (que en
+    Streamlit Cloud es UTC). El formato del reloj es 12h con am/pm
+    en minúsculas (ej. "4:40 pm").
+
     Returns:
         {
-          "greeting":  "Buenos días, Ewdes",
-          "shift":     "Turno día",
+          "greeting":   "Buenas tardes, Ewdes",
+          "shift":      "Turno tarde",
           "shift_emoji": "☀️",
-          "date_long": "domingo · 03 may 2026",
-          "time_hhmm": "13:54",
+          "date_long":  "martes · 05 may 2026",
+          "time_hhmm":  "4:40 pm",     ← 12h con am/pm
         }
     """
-    now = now or datetime.now()
+    if now is None:
+        # Si nos pasaron tz, calculamos UTC y convertimos
+        if tz_name:
+            try:
+                from zoneinfo import ZoneInfo
+                from datetime import timezone as _tz
+                _utc_now = datetime.now(_tz.utc)
+                now = _utc_now.astimezone(ZoneInfo(tz_name))
+            except Exception:
+                # Si la tz es inválida o zoneinfo no está, fallback al server
+                now = datetime.now()
+        else:
+            now = datetime.now()
+
     hour = now.hour
 
     # Saludo
@@ -79,6 +99,13 @@ def get_personalized_greeting(
     month = MONTHS_ES[now.month - 1]
     date_long = f"{weekday} · {now.day:02d} {month} {now.year}"
 
+    # Formato 12h con am/pm (Ciclo 17.24.5)
+    h12 = hour % 12
+    if h12 == 0:
+        h12 = 12
+    ampm = "pm" if hour >= 12 else "am"
+    time_hhmm = f"{h12}:{now.minute:02d} {ampm}"
+
     name = (full_name or "").strip().split()[0] if full_name else ""
     greeting = f"{greet}, {name}" if name else greet
 
@@ -87,7 +114,7 @@ def get_personalized_greeting(
         "shift": shift,
         "shift_emoji": shift_emoji,
         "date_long": date_long,
-        "time_hhmm": now.strftime("%H:%M"),
+        "time_hhmm": time_hhmm,
     }
 
 
