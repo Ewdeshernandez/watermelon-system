@@ -553,7 +553,9 @@ else:
     _status_dot, _status_color, _status_text = "⬤", "#10b981", f"{_total} activo(s) monitoreado(s) · sin alertas críticas"
 
 
-# Ciclo 17.24 — Último reporte archivado (para mostrar en el hero)
+# Ciclo 17.24 — Último reporte archivado (para mostrar en el hero).
+# Ciclo 17.24.1 hotfix: tiempo relativo calculado en Python (no JS) porque
+# Streamlit no permite <script> dentro de st.markdown.
 _last_report_line = ""
 try:
     from core.reports_archive import list_archived_reports
@@ -566,16 +568,36 @@ try:
         _last = _archived[0]
         _archived_at_iso = _last.get("archived_at", "") or ""
         _last_asset = _last.get("asset_name", "") or _last.get("client_name", "") or "reporte"
-        # Pasamos el ISO al frontend; JS calcula el "hace Xh" relativo
-        # respecto a la hora del browser del usuario
-        _last_report_line = (
-            f'<div class="wmh-last-report" '
-            f'data-archived-at="{_archived_at_iso}" '
-            f'data-asset="{_last_asset}">'
-            f'<span class="wmh-lr-icon">📄</span> '
-            f'<span class="wmh-lr-text">cargando último reporte…</span>'
-            f'</div>'
-        )
+        # Calcular tiempo relativo en Python (server-side)
+        _rel = ""
+        try:
+            _then = datetime.fromisoformat(_archived_at_iso.replace("Z", "+00:00"))
+            if _then.tzinfo is None:
+                # Asumir hora local del server si no hay TZ
+                _diff = (datetime.now() - _then).total_seconds()
+            else:
+                from datetime import timezone as _tz
+                _diff = (datetime.now(_tz.utc) - _then).total_seconds()
+            _diff = max(0, _diff)
+            if _diff < 60:
+                _rel = "hace un instante"
+            elif _diff < 3600:
+                _rel = f"hace {int(_diff // 60)} min"
+            elif _diff < 86400:
+                _rel = f"hace {int(_diff // 3600)} h"
+            elif _diff < 86400 * 7:
+                _rel = f"hace {int(_diff // 86400)} días"
+            else:
+                _rel = _then.strftime("%d %b %Y").lower()
+        except Exception:
+            _rel = ""
+        if _rel:
+            _last_report_line = (
+                f'<div class="wmh-last-report">'
+                f'<span class="wmh-lr-icon">📄</span> '
+                f'<span class="wmh-lr-text">último reporte: {_last_asset} · {_rel}</span>'
+                f'</div>'
+            )
 except Exception:
     pass
 
@@ -593,92 +615,15 @@ st.markdown(
             {_last_report_line}
         </div>
         <div class="wmh-hero-right">
-            <!-- Ciclo 17.24 — Reloj LIVE en JavaScript del browser:
-                 detecta automáticamente la zona horaria del usuario
-                 (Bogotá, California, Tokyo, donde sea que abra la app),
-                 muestra formato 12h con am/pm y se actualiza cada 30s. -->
-            <div class="wmh-clock" id="wm-clock-live">--:-- --</div>
-            <div class="wmh-shift" id="wm-shift-live">{_greet['shift_emoji']} {_greet['shift']}</div>
-            <div class="wmh-date" id="wm-date-live">{_greet['date_long']}</div>
-            <div class="wmh-next-shift" id="wm-next-shift">próximo turno: —</div>
+            <!-- Ciclo 17.24.1 hotfix: revertimos el reloj LIVE en JS porque
+                 Streamlit st.markdown sanitiza <script> y rompía todo el
+                 hero (se renderizaba como texto). Volvemos a server-side.
+                 La hora se calcula en Python con la zona del server. -->
+            <div class="wmh-clock">{_greet['time_hhmm']}</div>
+            <div class="wmh-shift">{_greet['shift_emoji']} {_greet['shift']}</div>
+            <div class="wmh-date">{_greet['date_long']}</div>
         </div>
     </div>
-    <script>
-    (function() {{
-        function pad(n) {{ return String(n).padStart(2, '0'); }}
-        function fmtClock(d) {{
-            let h = d.getHours();
-            const m = pad(d.getMinutes());
-            const ampm = h >= 12 ? 'pm' : 'am';
-            h = h % 12;
-            if (h === 0) h = 12;
-            return h + ':' + m + ' ' + ampm;
-        }}
-        function shiftFor(h) {{
-            if (h >= 6 && h < 14)  return {{emoji:'☀️',  text:'TURNO MAÑANA',  end:14, nextEmoji:'🌇', nextText:'tarde'}};
-            if (h >= 14 && h < 22) return {{emoji:'🌇', text:'TURNO TARDE',   end:22, nextEmoji:'🌙', nextText:'noche'}};
-            return {{emoji:'🌙', text:'TURNO NOCHE', end: (h >= 22 ? 30 : 6), nextEmoji:'☀️', nextText:'mañana'}};
-        }}
-        function dateLong(d) {{
-            const dias = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'];
-            const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-            return dias[d.getDay()] + ' · ' + pad(d.getDate()) + ' ' + meses[d.getMonth()] + ' ' + d.getFullYear();
-        }}
-        function nextShiftStr(d) {{
-            const h = d.getHours();
-            const m = d.getMinutes();
-            const s = shiftFor(h);
-            // Minutos hasta fin del turno actual = inicio del próximo
-            const nowMins = h * 60 + m;
-            let endMins = s.end * 60;
-            if (endMins <= nowMins) endMins += 24 * 60;
-            const diff = endMins - nowMins;
-            const dh = Math.floor(diff / 60);
-            const dm = diff % 60;
-            const dur = dh > 0 ? (dh + 'h ' + dm + 'min') : (dm + ' min');
-            return 'próximo turno ' + s.nextEmoji + ' ' + s.nextText + ' en ' + dur;
-        }}
-        function relativeTime(isoStr) {{
-            if (!isoStr) return '';
-            const then = new Date(isoStr);
-            if (isNaN(then)) return '';
-            const diffSec = Math.max(0, (Date.now() - then.getTime()) / 1000);
-            if (diffSec < 60)        return 'hace un instante';
-            if (diffSec < 3600)      return 'hace ' + Math.floor(diffSec / 60) + ' min';
-            if (diffSec < 86400)     return 'hace ' + Math.floor(diffSec / 3600) + ' h';
-            if (diffSec < 86400 * 7) return 'hace ' + Math.floor(diffSec / 86400) + ' días';
-            // Más de 1 semana → fecha corta
-            const meses = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
-            return then.getDate() + ' ' + meses[then.getMonth()] + ' ' + then.getFullYear();
-        }}
-        function tick() {{
-            const d = new Date();
-            const h = d.getHours();
-            const cl = document.getElementById('wm-clock-live');
-            const sh = document.getElementById('wm-shift-live');
-            const dt = document.getElementById('wm-date-live');
-            const ns = document.getElementById('wm-next-shift');
-            if (cl) cl.textContent = fmtClock(d);
-            if (sh) {{
-                const s = shiftFor(h);
-                sh.textContent = s.emoji + ' ' + s.text;
-            }}
-            if (dt) dt.textContent = dateLong(d);
-            if (ns) ns.textContent = nextShiftStr(d);
-            // Último reporte: tiempo relativo
-            const lr = document.querySelector('.wmh-last-report');
-            if (lr) {{
-                const at = lr.getAttribute('data-archived-at');
-                const asset = lr.getAttribute('data-asset') || 'reporte';
-                const rel = relativeTime(at);
-                const txtEl = lr.querySelector('.wmh-lr-text');
-                if (txtEl) txtEl.textContent = rel ? ('último reporte: ' + asset + ' · ' + rel) : 'sin reportes archivados aún';
-            }}
-        }}
-        tick();
-        setInterval(tick, 30000);
-    }})();
-    </script>
     """,
     unsafe_allow_html=True,
 )
