@@ -1191,7 +1191,10 @@ def queue_waveform_to_report(record: SignalRecord, fig: go.Figure, panel_title: 
             "title": panel_title,
             "notes": build_waveform_report_notes(text_diag),
             "signal_id": record.signal_id,
-            "figure": go.Figure(fig),
+            # Ciclo 17.19 OOM fix — NO guardar el go.Figure en session_state
+            # (cada figure pesa 20-100 MB, con 5 gráficas revienta los 1 GB
+            # de Streamlit Cloud). image_bytes alcanza para mostrar el panel.
+            "figure": None,
             "image_bytes": image_bytes,
             "machine": record.machine,
             "point": record.point,

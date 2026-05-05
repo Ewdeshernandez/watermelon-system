@@ -656,6 +656,16 @@ def build_orbit_pairs(signals: dict) -> List[OrbitPair]:
 
 
 def queue_orbit_to_report(pair: OrbitPair, fig: go.Figure, panel_title: str, result) -> None:
+    # Ciclo 17.19 HOTFIX OOM: NO guardar el go.Figure en session_state.
+    # Cada figure de Orbit pesa 20-100 MB en memoria (incluye todos los
+    # datos del trace). Con 5 figuras → 250-500 MB → Streamlit Cloud
+    # (1 GB RAM) revienta. En su lugar, generamos el PNG bytes una sola
+    # vez y guardamos solo eso. La UI de Reports cae al fallback de
+    # st.image() — pierde el zoom interactivo de Plotly pero no se cae.
+    try:
+        _png_bytes, _ = build_export_png_bytes(fig)
+    except Exception:
+        _png_bytes = None
     append_report_item_and_persist(
         {
             "id": make_export_state_key(
@@ -672,7 +682,8 @@ def queue_orbit_to_report(pair: OrbitPair, fig: go.Figure, panel_title: str, res
             "title": panel_title,
             "notes": "",
             "signal_id": f"{pair.x_name}|{pair.y_name}",
-            "figure": go.Figure(fig),
+            "figure": None,                # OOM fix — ya no guardamos el Plotly object
+            "image_bytes": _png_bytes,     # PNG estático para el fallback de Reports
             "machine": result.probe_state.get("machine_name", ""),
             "point": f"{pair.x_name} + {pair.y_name}",
             "variable": "Orbit",
