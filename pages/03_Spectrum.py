@@ -1850,7 +1850,10 @@ def queue_spectrum_to_report(
             "title": panel_title,
             "notes": report_notes or "Interpretación técnica pendiente para este espectro.",
             "signal_id": primary.signal_id,
-            "figure": go.Figure(fig),
+            # Ciclo 17.19 OOM fix — NO guardar el go.Figure en session_state
+            # (cada figure pesa 20-100 MB, con 5 gráficas revienta los 1 GB
+            # de Streamlit Cloud). image_bytes alcanza para mostrar el panel.
+            "figure": None,
             "image_bytes": image_bytes,
             "machine": primary.machine,
             "point": primary.point,
@@ -2655,7 +2658,10 @@ def queue_compare_to_report(
             "title": report_title,
             "notes": report_notes or "Comparación espectral pendiente de interpretación técnica.",
             "signal_id": f"{record_a.signal_id}__{record_b.signal_id}",
-            "figure": go.Figure(compare_fig),
+            # Ciclo 17.19 OOM fix — NO guardar el go.Figure en session_state
+            # (cada figure pesa 20-100 MB, con 5 gráficas revienta los 1 GB
+            # de Streamlit Cloud). image_bytes alcanza para mostrar el panel.
+            "figure": None,
             "image_bytes": image_bytes,
             "machine": f"{record_a.machine} vs {record_b.machine}",
             "point": f"{record_a.point} vs {record_b.point}",
