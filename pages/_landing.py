@@ -621,12 +621,6 @@ st.markdown(
             {_last_report_line}
         </div>
         <div class="wmh-hero-right">
-            <!-- Ciclo 17.24.2 — Reloj con IDs estables: el HTML arranca
-                 con valor SERVER-SIDE (Python) como fallback inicial. Un
-                 st.markdown SEPARADO (al final del archivo) inyecta el
-                 <script> que reemplaza estos valores con la hora REAL
-                 del browser del usuario via Date(). El script separado
-                 NO se sanitiza porque está aislado del HTML grande. -->
             <div class="wmh-clock" id="wm-clock-live">{_greet['time_hhmm']}</div>
             <div class="wmh-shift" id="wm-shift-live">{_greet['shift_emoji']} {_greet['shift']}</div>
             <div class="wmh-date" id="wm-date-live">{_greet['date_long']}</div>
@@ -636,6 +630,16 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+# Ciclo 17.24.3 — IMPORTANTE: NO meter comentarios HTML <!-- ... --> con
+# la palabra "<script>" adentro dentro del bloque markdown del hero.
+# Streamlit los interpreta como código y rompe TODO el render del hero
+# (lo muestra como bloque de código en pantalla, no como HTML). Los
+# comentarios de explicación van como comentarios Python, fuera del
+# st.markdown.
+#
+# El reloj LIVE se inyecta abajo en su propio st.markdown separado
+# (igual al patrón del Cmd+K que funciona desde Ciclo 17.13). El script
+# accede a window.parent.document porque Streamlit corre en iframe.
 
 # Ciclo 17.24.2 — Reloj LIVE con auto-zona-horaria del browser.
 # IMPORTANTE: este st.markdown está SEPARADO del hero (sigue el patrón
