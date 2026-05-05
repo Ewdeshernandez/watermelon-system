@@ -528,7 +528,10 @@ def render_user_menu() -> None:
         # Ciclo 17.22 — Card de usuario movido al fondo del sidebar (Opción A).
         # Acá arranca DIRECTO la navegación. La identidad del usuario va abajo
         # como avatar mini, junto a "Cambiar mi password" y "Cerrar sesión".
-        st.markdown('<div class="wm-side-section">Navegación</div>', unsafe_allow_html=True)
+        #
+        # Ciclo 17.23 — Sacamos el header "Navegación" (Linear/Notion/Stripe
+        # tampoco lo ponen): los botones SON la navegación, no necesitan
+        # título que lo diga. El divider de arriba ya da separación visual.
         st.markdown('<div class="wm-nav-wrap"></div>', unsafe_allow_html=True)
 
         # Ciclo 17.16 — Filtrar nav según role.
