@@ -252,6 +252,57 @@ def _show_authenticated_layout_tweaks() -> None:
             margin-bottom: 0.8rem;
         }
 
+        /* Ciclo 17.22 — Avatar mini al fondo del sidebar (Opción A UX).
+           Reemplaza el wm-user-card grande de arriba: identidad accesible
+           pero sin ocupar 25% del scroll inicial del sidebar. */
+        .wm-user-mini {
+            display: flex;
+            align-items: center;
+            gap: 0.65rem;
+            padding: 0.55rem 0.4rem 0.65rem 0.4rem;
+            margin-bottom: 0.35rem;
+            border-radius: 12px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.10);
+        }
+        .wm-user-mini-avatar {
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #38bdf8 0%, #0ea5e9 100%);
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.95rem;
+            flex-shrink: 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+            letter-spacing: 0;
+        }
+        .wm-user-mini-text {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-width: 0;
+        }
+        .wm-user-mini-name {
+            font-weight: 600;
+            font-size: 0.92rem;
+            color: rgba(255,255,255,0.96);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.15;
+        }
+        .wm-user-mini-role {
+            font-size: 0.72rem;
+            color: rgba(255,255,255,0.66);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            margin-top: 1px;
+        }
+
         .wm-user-line {
             color: rgba(255,255,255,0.97);
             font-size: 0.92rem;
@@ -474,21 +525,13 @@ def render_user_menu() -> None:
         st.markdown('<div class="wm-side-brand">Watermelon</div>', unsafe_allow_html=True)
         st.markdown('<div class="wm-side-divider"></div>', unsafe_allow_html=True)
 
-        st.markdown('<div class="wm-side-section">Sesión</div>', unsafe_allow_html=True)
-        st.markdown(
-            f"""
-            <div class="wm-user-card">
-                <div class="wm-user-line"><b>Usuario:</b> {user.get('username', '-')}</div>
-                <div class="wm-user-line"><b>Nombre:</b> {user.get('full_name', '-')}</div>
-                <div class="wm-user-line"><b>Correo:</b> {user.get('email', '-')}</div>
-                <div class="wm-user-line"><b>Rol:</b> {user.get('role', 'viewer')}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        st.markdown('<div class="wm-side-divider"></div>', unsafe_allow_html=True)
-        st.markdown('<div class="wm-side-section">Navegación</div>', unsafe_allow_html=True)
+        # Ciclo 17.22 — Card de usuario movido al fondo del sidebar (Opción A).
+        # Acá arranca DIRECTO la navegación. La identidad del usuario va abajo
+        # como avatar mini, junto a "Cambiar mi password" y "Cerrar sesión".
+        #
+        # Ciclo 17.23 — Sacamos el header "Navegación" (Linear/Notion/Stripe
+        # tampoco lo ponen): los botones SON la navegación, no necesitan
+        # título que lo diga. El divider de arriba ya da separación visual.
         st.markdown('<div class="wm-nav-wrap"></div>', unsafe_allow_html=True)
 
         # Ciclo 17.16 — Filtrar nav según role.
@@ -520,6 +563,26 @@ def render_user_menu() -> None:
         st.markdown('<div class="wm-side-divider"></div>', unsafe_allow_html=True)
         st.markdown('<div class="wm-logout-spacer"></div>', unsafe_allow_html=True)
         st.markdown('<div class="wm-logout-label">Sesión</div>', unsafe_allow_html=True)
+
+        # Ciclo 17.22 — Avatar mini con identidad del usuario (Opción A UX).
+        # Reemplaza el card grande de arriba. El email completo aparece como
+        # tooltip al hover sobre el bloque (atributo title=).
+        _full_name = (user.get("full_name") or user.get("email") or "?").strip()
+        _email = user.get("email", "") or user.get("username", "") or ""
+        _role = (user.get("role", "") or "viewer").lower()
+        _initial = (_full_name[:1] if _full_name else "?").upper()
+        st.markdown(
+            f"""
+            <div class="wm-user-mini" title="{_email}">
+                <div class="wm-user-mini-avatar">{_initial}</div>
+                <div class="wm-user-mini-text">
+                    <div class="wm-user-mini-name">{_full_name}</div>
+                    <div class="wm-user-mini-role">{_role}</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         # Ciclo 17.16 — Cambiar mi password (visible para todos los roles
         # excepto los del sistema legacy hardcoded, que cambian via secrets).
