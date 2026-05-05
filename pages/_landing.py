@@ -610,23 +610,7 @@ except Exception:
 
 st.markdown(
     f"""
-    <div class="wmh-hero">
-        <div class="wmh-hero-left">
-            <span class="wmh-pill">🍉 Watermelon · Industrial Vibration Intelligence</span>
-            <div class="wmh-greeting">{_greet['greeting']}</div>
-            <div class="wmh-status-line">
-                <span class="dot" style="background:{_status_color};"></span>
-                {_status_text}
-            </div>
-            {_last_report_line}
-        </div>
-        <div class="wmh-hero-right">
-            <div class="wmh-clock" id="wm-clock-live">{_greet['time_hhmm']}</div>
-            <div class="wmh-shift" id="wm-shift-live">{_greet['shift_emoji']} {_greet['shift']}</div>
-            <div class="wmh-date" id="wm-date-live">{_greet['date_long']}</div>
-            <div class="wmh-next-shift" id="wm-next-shift">&nbsp;</div>
-        </div>
-    </div>
+    <div class="wmh-hero"><div class="wmh-hero-left"><span class="wmh-pill">🍉 Watermelon · Industrial Vibration Intelligence</span><div class="wmh-greeting">{_greet['greeting']}</div><div class="wmh-status-line"><span class="dot" style="background:{_status_color};"></span>{_status_text}</div>{_last_report_line}</div><div class="wmh-hero-right"><div class="wmh-clock" id="wm-clock-live">{_greet['time_hhmm']}</div><div class="wmh-shift" id="wm-shift-live">{_greet['shift_emoji']} {_greet['shift']}</div><div class="wmh-date" id="wm-date-live">{_greet['date_long']}</div><div class="wmh-next-shift" id="wm-next-shift">&nbsp;</div></div></div>
     """,
     unsafe_allow_html=True,
 )
