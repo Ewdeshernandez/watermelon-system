@@ -314,15 +314,22 @@ class OperationalRecord:
 #      FIT*Flow, Hz para *Freq
 
 # Tag → familia (substrings, en orden de prioridad)
+# Ciclo 17.25 — VFD/VSD/Freq van a SPEED (RPM) por default. Históricamente
+# los reclasificábamos como "frequency" + Hz, pero los datos de operación
+# de VFDs típicamente reportan VELOCIDAD (rpm), no frecuencia eléctrica.
+# Solo si el nombre contiene "_hz", "hertz" explícito → frequency. El
+# usuario que tenga datos en Hz reales debe nombrar la columna con "_Hz".
 _OP_FAMILY_PATTERNS: List[Tuple[Tuple[str, ...], str]] = [
     # Pressure (PT_, PI_, "press") — chequear primero porque "PT" es muy específico
     (("pt_", "pi_", "press", "pressure"),                 "pressure"),
     # Flow (FIT_, FI_, FT_, "flow", AGA3)
     (("fit_", "fi_", "ft_", "flow", "aga3"),              "flow"),
-    # Frequency / VFD speed (Hz, *Freq, VFD_, VSD_)
-    (("freq", "vfd", "vsd", " hz", "_hz"),                "frequency"),
-    # Speed / RPM
-    (("rpm", "speed", "_n_", "_rev"),                     "speed"),
+    # Frequency con HZ EXPLÍCITO en el nombre (típico de redes 50/60Hz).
+    # NO incluir "freq", "vfd", "vsd" acá — esos van a speed por default.
+    ((" hz", "_hz", "hz_", "hertz"),                      "frequency"),
+    # Speed / RPM (incluye VFD/VSD/Freq que típicamente reportan velocidad
+    # del motor, no frecuencia eléctrica). Default unit: rpm.
+    (("rpm", "speed", "_n_", "_rev", "vfd", "vsd", "freq"), "speed"),
     # Power / Load (MW, kW)
     (("mw", "kw", "power", "load", "_kva"),               "power"),
     # Temperature (TIT_, TE_, TI_, T48, T3, "temp")
@@ -4523,10 +4530,41 @@ def queue_trend_to_report(
     correlation_report_block = ""
     correlation_payload: Dict[str, Any] = {}
     lag_payload: Dict[str, Any] = {}
+    ranking_payload: List[Dict[str, Any]] = []
+    ranking_summary = ""
 
+    # Ciclo 17.25 — IMPORTANTE: cuando hay >1 operacional, primero rankeamos
+    # TODAS por correlación con la vibración, y elegimos como primary la
+    # MÁS CORRELACIONADA (no la primera del CSV). Antes solo se analizaba
+    # operational_records[0] y se ignoraba el resto del análisis principal.
     if records and operational_records:
         primary_trend = records[0]
+
+        # Default: si hay solo 1 operacional o el ranking falla, usar la primera
         primary_operational = operational_records[0]
+
+        # Si hay múltiples operacionales, rankear y elegir la TOP por score
+        if len(operational_records) > 1:
+            ranking_df = build_operational_variable_ranking(
+                trend_record=primary_trend,
+                operational_records=operational_records,
+                metric_key=metric_key,
+            )
+            if not ranking_df.empty:
+                ranking_summary = build_operational_variable_ranking_summary(ranking_df)
+                ranking_payload = ranking_df.to_dict(orient="records")
+                # El ranking ya viene ordenado por score descendente; el TOP-1
+                # es la operacional más correlacionada con la vibración.
+                # Buscamos el OperationalRecord correspondiente por nombre.
+                top_var_name = str(ranking_df.iloc[0].get("Variable", "")).strip()
+                if top_var_name:
+                    _matched = next(
+                        (r for r in operational_records
+                         if str(r.variable).strip() == top_var_name),
+                        None,
+                    )
+                    if _matched is not None:
+                        primary_operational = _matched
 
         correlation_report_block = build_operational_correlation_report_block(
             trend_record=primary_trend,
@@ -4562,19 +4600,6 @@ def queue_trend_to_report(
             "direction": lag_info.get("direction"),
             "interpretation": lag_info.get("interpretation"),
         }
-
-    ranking_payload: List[Dict[str, Any]] = []
-    ranking_summary = ""
-
-    if records and len(operational_records) > 1:
-        ranking_df = build_operational_variable_ranking(
-            trend_record=records[0],
-            operational_records=operational_records,
-            metric_key=metric_key,
-        )
-        if not ranking_df.empty:
-            ranking_summary = build_operational_variable_ranking_summary(ranking_df)
-            ranking_payload = ranking_df.to_dict(orient="records")
 
     drift_summary: Dict[str, Any] = {}
     drift_details: List[Dict[str, Any]] = []
