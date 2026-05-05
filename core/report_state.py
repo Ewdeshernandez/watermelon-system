@@ -376,14 +376,21 @@ def restore_report_items(items: Any, *,
     """Inverso de sanitize_report_items: reconstruye los items en
     memoria desde lo persistido en el JSON.
 
-    Ciclo 17.17:
-      - Si el item tiene `image_file` (formato nuevo) → leer PNG de disco
-      - Si tiene `image_bytes_b64` (legacy) → decodificar Y MIGRAR
-        escribiendo el PNG, dejando `image_file` apuntando al nuevo
-        archivo. La próxima vez que se persista, el b64 desaparece.
-      - Mantiene la API: devuelve `image_bytes` cargado en memoria,
-        igual que antes, para que los consumers (pages/16_Reports.py,
-        etc.) no necesiten cambiar.
+    Ciclo 17.20 ULTRA-IMPORTANTE — LAZY LOADING:
+      Antes esta función cargaba TODOS los image_bytes de TODOS los
+      items en memoria al hacer load_report_state. Con 10 items de
+      ~1MB cada uno, eso son 10MB constantes en st.session_state que
+      se replican en cada rerun. Más reportlab cargando todo de una
+      al generar el PDF → 50-100 MB transitorios → OOM en Streamlit
+      Cloud (1 GB).
+
+      Ahora devuelve `image_bytes = None` y `image_file = "ruta.png"`.
+      Los consumers (Reports render, PDF generation) deben usar
+      `read_item_image_bytes(item)` para leer el PNG desde disco SOLO
+      cuando lo van a usar.
+
+      Esto baja la memoria de session_state de ~20MB a ~50KB con 10
+      imágenes y elimina los crashes con muchas imágenes.
 
     Args:
         items:           lista de items leídos del JSON
@@ -398,6 +405,10 @@ def restore_report_items(items: Any, *,
         return out
 
     resolved_dir = _resolve_images_dir(images_dir, email)
+    # Guardamos también el path absoluto del images_dir en cada item para
+    # que `read_item_image_bytes` pueda resolverlo sin necesidad de saber
+    # el email del owner (útil para drafts y exports cross-context).
+    resolved_dir_str = str(resolved_dir) if resolved_dir is not None else ""
 
     for idx, item in enumerate(items):
         if not isinstance(item, dict):
@@ -405,57 +416,107 @@ def restore_report_items(items: Any, *,
 
         item_id = str(item.get("id") or f"report_item_{idx+1}")
         rec: Dict[str, Any] = {
-            "id":         item_id,
-            "type":       str(item.get("type") or "figure"),
-            "title":      str(item.get("title") or f"Figura {idx+1}"),
-            "notes":      str(item.get("notes") or ""),
-            "signal_id":  str(item.get("signal_id") or ""),
-            "machine":    str(item.get("machine") or ""),
-            "point":      str(item.get("point") or ""),
-            "variable":   str(item.get("variable") or ""),
-            "timestamp":  str(item.get("timestamp") or ""),
-            "figure":     None,
-            "image_bytes": None,
-            "image_file":  "",
+            "id":               item_id,
+            "type":             str(item.get("type") or "figure"),
+            "title":            str(item.get("title") or f"Figura {idx+1}"),
+            "notes":            str(item.get("notes") or ""),
+            "signal_id":        str(item.get("signal_id") or ""),
+            "machine":          str(item.get("machine") or ""),
+            "point":            str(item.get("point") or ""),
+            "variable":         str(item.get("variable") or ""),
+            "timestamp":        str(item.get("timestamp") or ""),
+            "figure":           None,
+            "image_bytes":      None,             # LAZY — leer con read_item_image_bytes
+            "image_file":       "",
+            "_images_dir":      resolved_dir_str,  # privado: para resolver el path
         }
 
-        # 1) Formato nuevo: image_file → leer PNG del disco
+        # 1) Formato nuevo: image_file → registramos path, NO cargamos bytes
         img_file = str(item.get("image_file") or "").strip()
         if img_file and resolved_dir is not None:
             png_path = resolved_dir / img_file
             if png_path.exists():
-                try:
-                    rec["image_bytes"] = png_path.read_bytes()
-                    rec["image_file"] = img_file
-                    out.append(rec)
-                    continue
-                except Exception:
-                    # Si el PNG está corrupto/ilegible, caemos al fallback
-                    # de b64 (si existe en el mismo item) o queda sin imagen.
-                    pass
+                rec["image_file"] = img_file
+                # NO leemos los bytes acá. Se leen on-demand via
+                # read_item_image_bytes() solo cuando se renderiza.
+                out.append(rec)
+                continue
 
-        # 2) Legacy: image_bytes_b64 inline → decodificar
+        # 2) Legacy: image_bytes_b64 inline → MIGRAR a PNG y dejar lazy
         b64 = item.get("image_bytes_b64")
         if b64:
             decoded = _decode_image_bytes(b64)
             if decoded is not None:
-                rec["image_bytes"] = decoded
-                # MIGRACIÓN AUTOMÁTICA: persistir como PNG suelto para
-                # que la próxima save() ya no traiga el b64 gordo.
+                # Si podemos migrar a PNG, lo hacemos y NO mantenemos
+                # los bytes en memoria. Si no, último recurso: bytes
+                # inmediatos para no perder la imagen.
                 if migrate_legacy and resolved_dir is not None:
                     try:
                         fname = _safe_item_id(item_id) + ".png"
                         _atomic_write_png(resolved_dir / fname, decoded)
                         rec["image_file"] = fname
+                        out.append(rec)
+                        continue
                     except Exception:
-                        # Migración no crítica — la imagen ya está cargada
-                        # en memoria, simplemente seguirá viviendo en b64
-                        # hasta el próximo intento.
                         pass
+                # Fallback: mantener bytes (legacy sin migrar)
+                rec["image_bytes"] = decoded
 
         out.append(rec)
 
     return out
+
+
+def read_item_image_bytes(item: Dict[str, Any]) -> Optional[bytes]:
+    """Lee los bytes de la imagen de un report item ON-DEMAND.
+
+    Ciclo 17.20: este es el accessor lazy que reemplaza el acceso
+    directo a `item["image_bytes"]`. Lee el PNG desde disco solo
+    cuando se llama, evitando mantener todos los bytes en memoria.
+
+    Soporta los 3 formatos:
+      1. item["image_bytes"] ya tiene bytes (legacy o caller que
+         acaba de generar la imagen) → devolver directo
+      2. item["image_file"] + item["_images_dir"] → leer PNG
+      3. ninguno → None
+
+    Args:
+        item: dict del report item
+
+    Returns:
+        bytes del PNG, o None si no se pudo obtener.
+    """
+    if not isinstance(item, dict):
+        return None
+
+    # Caso 1: ya tiene bytes en memoria (item recién creado por un
+    # módulo, antes del primer load_report_state)
+    rb = item.get("image_bytes")
+    if isinstance(rb, (bytes, bytearray)) and len(rb) > 0:
+        return bytes(rb)
+
+    # Caso 2: lazy desde disco
+    img_file = str(item.get("image_file") or "").strip()
+    if not img_file:
+        return None
+
+    # Resolver el dir de imágenes — primero del propio item, después
+    # del usuario activo
+    images_dir_str = str(item.get("_images_dir") or "").strip()
+    if images_dir_str:
+        png_path = Path(images_dir_str) / img_file
+    else:
+        try:
+            png_path = get_user_images_dir() / img_file
+        except Exception:
+            return None
+
+    if not png_path.exists():
+        return None
+    try:
+        return png_path.read_bytes()
+    except Exception:
+        return None
 
 
 def _serialize_state(*, items: Any, meta: Any,
@@ -861,6 +922,18 @@ def append_report_item_and_persist(item: Dict[str, Any]) -> bool:
             items=st.session_state["report_items"],
             meta=st.session_state.get("report_meta", {}) or {},
         )
+        # Ciclo 17.20: después del save, recargamos los items en forma
+        # LAZY (image_bytes → None, image_file → path al PNG ya escrito).
+        # Esto libera la memoria de los image_bytes inmediatamente, sin
+        # esperar al próximo rerun. Crítico para evitar OOM cuando se
+        # envían muchas imágenes al reporte en la misma sesión.
+        try:
+            _persisted = load_report_state()
+            _lazy_items = _persisted.get("items", [])
+            if isinstance(_lazy_items, list):
+                st.session_state["report_items"] = _lazy_items
+        except Exception:
+            pass  # no bloqueante — el save ya fue exitoso
         return True
     except Exception:
         # La memoria ya está actualizada, lo único que falla es

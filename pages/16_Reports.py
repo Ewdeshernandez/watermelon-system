@@ -37,6 +37,7 @@ from core.report_state import (
     list_all_users_with_state,
     load_named_report_draft,
     load_report_state,
+    read_item_image_bytes,   # Ciclo 17.20 — lazy loading de PNGs
     save_named_report_draft,
     save_report_state,
 )
@@ -727,7 +728,8 @@ def _normalize_report_items(raw_items: Any) -> List[Dict[str, Any]]:
             continue
 
         fig = item.get("figure")
-        image_bytes = item.get("image_bytes")
+        # Ciclo 17.20 lazy loading: leer PNG desde disco solo cuando se necesite
+        image_bytes = read_item_image_bytes(item)
         safe_fig = None
 
         if fig is not None:
@@ -2567,9 +2569,9 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         figure_render_error = None
 
         # En cloud SOLO usamos image_bytes ya preparados desde el módulo origen.
-        if item.get("image_bytes") is not None:
-            png_bytes = item["image_bytes"]
-        else:
+        # Ciclo 17.20: lazy load — leer PNG desde disco si no está en memoria.
+        png_bytes = read_item_image_bytes(item)
+        if png_bytes is None:
             figure_render_error = "La figura no traía image_bytes pre-renderizados"
 
         caption = f"Figura {idx}. {item.get('title') or f'Figura {idx}'}"
@@ -3747,11 +3749,17 @@ for _spec in _section_specs:
                 st.error(f"No se pudo auto-redactar: {_exc}")
 
     # Textarea full-width
+    # Ciclo 17.20 fix: NO podemos pasar value= si _wkey ya está en
+    # st.session_state (Streamlit revienta con "widget created with
+    # default value but also had its value set via Session State API"
+    # → "Oh no" en producción). Inicializamos session_state ANTES de
+    # crear el widget, sin value=.
+    if _wkey not in st.session_state:
+        st.session_state[_wkey] = meta.get(_key, "") or ""
     meta[_key] = st.text_area(
         label=_spec["label"],
         label_visibility="collapsed",
         key=_wkey,
-        value=meta.get(_key, ""),
         height=_spec["height"],
         placeholder=_spec["placeholder"],
     )
@@ -3801,11 +3809,16 @@ else:
                 config={"displaylogo": False},
                 key=f"report_plot_{item['id']}",
             )
-        elif item.get("image_bytes") is not None:
-            st.image(
-                item["image_bytes"],
-                use_container_width=True,
-            )
+        else:
+            # Ciclo 17.20 lazy: leer PNG desde disco SOLO ahora, no antes.
+            # Esto evita tener N image_bytes simultáneos en session_state
+            # cuando hay muchas figuras (causaba OOM en Streamlit Cloud).
+            _img_bytes = read_item_image_bytes(item)
+            if _img_bytes is not None:
+                st.image(
+                    _img_bytes,
+                    use_container_width=True,
+                )
 
         new_notes = st.text_area(
             f"Interpretación técnica de la figura {index}",

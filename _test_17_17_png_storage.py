@@ -137,18 +137,34 @@ def t1_json_size_drop() -> None:
         f"Esperaba {n_items} items cargados, encontré {len(loaded_items)}"
     )
 
+    # Ciclo 17.20: ahora image_bytes se lee LAZY via read_item_image_bytes
     mismatches = 0
     for it in loaded_items:
         iid = it["id"]
-        ib = it.get("image_bytes")
+        # Verificar que el item tenga image_file (formato lazy)
+        if not it.get("image_file"):
+            print(f"  ✗ item {iid} sin image_file en disco")
+            mismatches += 1
+            continue
+        # Leer bytes lazy desde disco
+        ib = rs.read_item_image_bytes(it)
         if not ib:
-            print(f"  ✗ item {iid} sin image_bytes")
+            print(f"  ✗ item {iid} read_item_image_bytes devolvió None")
             mismatches += 1
             continue
         h = _hash(ib)
         if h != expected_hashes.get(iid):
             print(f"  ✗ item {iid} hash mismatch: {h} != {expected_hashes.get(iid)}")
             mismatches += 1
+
+    # Verificación adicional 17.20: image_bytes NO debería estar cargado
+    # en memoria del item (debe ser lazy)
+    in_memory = sum(1 for it in loaded_items if it.get("image_bytes") is not None)
+    assert in_memory == 0, (
+        f"{in_memory} items tienen image_bytes en memoria — el lazy loading "
+        f"del 17.20 no está funcionando, todos deberían cargarse desde disco "
+        f"on-demand vía read_item_image_bytes()"
+    )
 
     assert mismatches == 0, f"{mismatches} items con bytes corruptos en el round-trip"
     print(f"  ✓ {n_items}/{n_items} items con bytes idénticos al original")
@@ -200,11 +216,15 @@ def t2_legacy_migration() -> None:
     assert len(items) == 1, f"esperaba 1 item, encontré {len(items)}"
 
     it = items[0]
-    assert it.get("image_bytes"), "el item legacy quedó sin image_bytes"
-    assert _hash(it["image_bytes"]) == expected_hash, "los bytes del legacy no matchean"
+    # Ciclo 17.20: la migración legacy ahora va directo a image_file (lazy)
+    # — no carga los bytes en memoria si pudo escribir el PNG.
     assert it.get("image_file"), (
         "después de la carga legacy debería estar poblado image_file (migración)"
     )
+    # Leer los bytes lazy y verificar hash
+    bytes_lazy = rs.read_item_image_bytes(it)
+    assert bytes_lazy, "read_item_image_bytes no devolvió bytes después de migración"
+    assert _hash(bytes_lazy) == expected_hash, "los bytes del legacy migrado no matchean"
 
     # Verificar que el PNG existe en disco
     images_dir = rs.get_user_images_dir(TEST_EMAIL)
@@ -262,9 +282,12 @@ def t3_idempotence_no_image() -> None:
     assert len(its) == 2
     text_it = next(i for i in its if i["id"] == "text_only_001")
     img_it  = next(i for i in its if i["id"] == "with_image_001")
-    assert text_it.get("image_bytes") is None
-    assert img_it.get("image_bytes") is not None
-    print("  ✓ Round-trip preserva diferenciación texto vs figura")
+    # Ciclo 17.20: image_bytes es lazy, verificamos image_file
+    assert not text_it.get("image_file"), "item de texto no debería tener image_file"
+    assert img_it.get("image_file"), "item de figura debería tener image_file"
+    assert rs.read_item_image_bytes(text_it) is None
+    assert rs.read_item_image_bytes(img_it) is not None
+    print("  ✓ Round-trip preserva diferenciación texto vs figura (lazy load)")
     print()
 
 
