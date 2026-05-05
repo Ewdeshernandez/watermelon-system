@@ -631,9 +631,9 @@ def render_user_menu() -> None:
             st.switch_page("pages/00_Login.py")
 
         # Ciclo 17.7 — versión del sistema al pie del sidebar.
-        # Sutil, monoespaciada, color tenue para no competir con la
-        # navegación pero permitir trazabilidad del build (la versión
-        # se autoderiva de git tags vía core.version).
+        # Ciclo 17.24 — versión LIMPIA: solo el dot del entorno + número.
+        # El env y el commit hash quedan como tooltip al hover, así no
+        # contaminan visualmente pero siguen accesibles para troubleshoot.
         try:
             from core.version import get_version_info as _gvi
             _v = _gvi()
@@ -644,18 +644,20 @@ def render_user_menu() -> None:
                 "development": "#0ea5e9",
             }.get(_env, "#94a3b8")
             _commit_part = f" · {_v['commit']}" if _v.get("commit") else ""
+            _tooltip = f"{_env}{_commit_part}".strip(" ·")
             st.markdown(
                 f"""
-                <div style="margin-top:0.7rem;padding-top:0.6rem;
+                <div title="{_tooltip}"
+                     style="margin-top:0.7rem;padding-top:0.6rem;
                             border-top:1px solid rgba(15,23,42,0.06);
                             font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-                            font-size:0.68rem;color:#94a3b8;line-height:1.5;
-                            text-align:center;">
-                    <span style="color:#475569;font-weight:700;">{_v['version']}</span>
-                    <span style="display:inline-block;width:6px;height:6px;
+                            font-size:0.72rem;color:#94a3b8;line-height:1.5;
+                            text-align:center;cursor:default;">
+                    <span style="display:inline-block;width:7px;height:7px;
                                  border-radius:999px;background:{_env_color};
-                                 margin:0 0.25rem;vertical-align:middle;"></span>
-                    <span>{_env}{_commit_part}</span>
+                                 margin-right:0.4rem;vertical-align:middle;
+                                 box-shadow:0 0 6px {_env_color}66;"></span>
+                    <span style="color:#475569;font-weight:600;">{_v['version']}</span>
                 </div>
                 """,
                 unsafe_allow_html=True,
