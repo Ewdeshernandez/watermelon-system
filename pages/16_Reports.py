@@ -147,6 +147,10 @@ from core.ai_diagnostic import (  # Ciclo 17.26 P5+ — síntesis ejecutiva AI
     generate_executive_summary,
     is_ai_available,
 )
+from core.ai_runcompare import (  # Ciclo 17.28 — Run-vs-Run comparison
+    find_previous_report,
+    generate_run_comparison,
+)
 
 
 st.set_page_config(page_title="Watermelon System | Reports", layout="wide")
@@ -2278,6 +2282,57 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         elif executive_text:
             story.append(Paragraph(_paragraph_safe(executive_text), styles["WMBody"]))
         story.append(Spacer(1, 0.30 * cm))
+
+        # Ciclo 17.28 — Si el especialista generó la comparación
+        # Run-vs-Run, agregamos una nueva sección 'EVOLUCIÓN DESDE
+        # LA ÚLTIMA CORRIDA' después del Resumen Ejecutivo. Esto
+        # contextualiza al lector con el delta mecánico antes de que
+        # entre al detalle de las figuras individuales.
+        run_comparison_md = (meta.get("ai_run_comparison") or "").strip()
+        if run_comparison_md:
+            story.append(PageBreak())
+            story.append(Paragraph(
+                "EVOLUCIÓN DESDE LA ÚLTIMA CORRIDA", styles["WMTOC1"]
+            ))
+            # Caption con metadata de comparación: contra qué reporte
+            # comparamos y cuántos días transcurrieron.
+            run_meta = meta.get("ai_run_comparison_meta") or {}
+            prev_consec = str(run_meta.get("prev_consecutive", "") or "")
+            prev_date = str(run_meta.get("prev_archived_at", "") or "")
+            days_elapsed = run_meta.get("days_elapsed")
+            cmp_caption_bits: List[str] = []
+            if prev_consec:
+                cmp_caption_bits.append(f"Reporte previo: {prev_consec}")
+            if prev_date:
+                cmp_caption_bits.append(f"Archivado: {prev_date}")
+            if days_elapsed is not None:
+                cmp_caption_bits.append(
+                    f"Intervalo: {days_elapsed} días operativos"
+                )
+            if cmp_caption_bits:
+                _cmp_caption_style = ParagraphStyle(
+                    name="WMRunCmpCaption",
+                    parent=styles["Normal"],
+                    fontName=PDF_FONT_REGULAR,
+                    fontSize=9.5,
+                    leading=12,
+                    alignment=TA_LEFT,
+                    textColor=colors.HexColor("#475569"),
+                    spaceAfter=10,
+                )
+                story.append(Paragraph(
+                    " · ".join(cmp_caption_bits),
+                    _cmp_caption_style,
+                ))
+            # Render del delta forense con los estilos clínicos
+            # (mismo parser que usamos para Síntesis Ejecutiva AI)
+            run_cmp_flowables = _render_ai_clinical_flowables(
+                run_comparison_md, styles
+            )
+            for fl in run_cmp_flowables:
+                story.append(fl)
+            story.append(Spacer(1, 0.30 * cm))
+
         story.append(PageBreak())
 
     # ============================================================
@@ -3271,6 +3326,198 @@ if _exec_stored is not None:
                 st.session_state["wm_ai_exec_summary"] = None
                 st.rerun()
 
+# =============================================================
+# Ciclo 17.28 — AI Run-vs-Run Comparison
+# =============================================================
+# Cuando el reporte actual corresponde a un activo que ya tiene
+# reportes archivados, ofrecemos generar el "delta forense" — una
+# narrativa de evolución mecánica que compara el reporte actual
+# contra el último archivado del mismo instance_id. Aparece como
+# botón separado (al lado del de Síntesis Ejecutiva), con preview
+# expandible y se inyecta al PDF como sección 'EVOLUCIÓN DESDE LA
+# ÚLTIMA CORRIDA' después del Resumen Ejecutivo.
+_runcmp_iid = (meta.get("instance_id") or "").strip()
+_runcmp_itag = (meta.get("instance_tag") or "").strip()
+
+# Buscar reporte anterior una sola vez por sesión por activo
+_runcmp_prev_key = f"wm_ai_runcmp_prev_{_runcmp_iid or _runcmp_itag}"
+if _runcmp_prev_key not in st.session_state:
+    try:
+        st.session_state[_runcmp_prev_key] = find_previous_report(
+            viewer_email=_wm_my_email,
+            viewer_role=_wm_my_role,
+            instance_id=_runcmp_iid,
+            instance_tag=_runcmp_itag,
+            before_date=(meta.get("report_date") or
+                         datetime.now().strftime("%Y-%m-%d"))[:10],
+        )
+    except Exception:
+        st.session_state[_runcmp_prev_key] = None
+
+_runcmp_prev = st.session_state.get(_runcmp_prev_key)
+
+# UI del botón Run-vs-Run + render del resultado
+_runcmp_disabled = (
+    not is_ai_available()
+    or len(items) == 0
+    or _runcmp_prev is None
+)
+_runcmp_help = None
+if not is_ai_available():
+    _runcmp_help = (
+        "AI no disponible. Configurá [anthropic] api_key en los secrets."
+    )
+elif len(items) == 0:
+    _runcmp_help = "Agregá figuras al reporte primero."
+elif _runcmp_prev is None:
+    if not _runcmp_iid and not _runcmp_itag:
+        _runcmp_help = (
+            "No hay activo seleccionado en el meta del reporte. "
+            "Activá una instancia desde Machinery Library."
+        )
+    else:
+        _runcmp_help = (
+            f"No se encontró un reporte anterior archivado del activo "
+            f"'{_runcmp_itag or _runcmp_iid}'. Este es el primer reporte "
+            f"de este activo, o el anterior aún no está archivado."
+        )
+
+_runcmp_label_btn = "🔄 Comparar con reporte anterior"
+if _runcmp_prev:
+    _prev_consec = (_runcmp_prev.get("report_meta", {}) or {}).get(
+        "consecutive", ""
+    )
+    _prev_date = _runcmp_prev.get("archived_at", "")[:10]
+    if _prev_consec or _prev_date:
+        _runcmp_label_btn = (
+            f"🔄 Comparar con reporte anterior "
+            f"({_prev_consec or _prev_date})"
+        )
+
+_runcmp_btn_cols = st.columns([2.4, 3.6])
+with _runcmp_btn_cols[0]:
+    if st.button(
+        _runcmp_label_btn,
+        key="wm_ai_runcmp_btn",
+        use_container_width=True,
+        disabled=_runcmp_disabled,
+        help=_runcmp_help,
+        type="primary" if not _runcmp_disabled else "secondary",
+    ):
+        with st.spinner(
+            "🔄 Claude comparando con el reporte anterior... (8-20 seg)"
+        ):
+            try:
+                _runcmp_result = generate_run_comparison(
+                    _runcmp_prev,
+                    current_meta=meta,
+                    current_items=items,
+                    use_cache=True,
+                )
+            except Exception as exc:
+                _runcmp_result = {
+                    "ok": False,
+                    "markdown": (
+                        f"_⚠️ Error inesperado:_\n\n```\n"
+                        f"{type(exc).__name__}: {exc}\n```"
+                    ),
+                    "error": str(exc)[:500],
+                    "model": "",
+                    "cached": False,
+                    "fallback_used": False,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cost_usd": 0.0,
+                    "prev_archive_id": "",
+                    "prev_archived_at": "",
+                    "prev_consecutive": "",
+                    "days_elapsed": None,
+                }
+        st.session_state["wm_ai_runcmp_result"] = _runcmp_result
+
+with _runcmp_btn_cols[1]:
+    if _runcmp_prev is not None:
+        _prev_meta = _runcmp_prev.get("report_meta", {}) or {}
+        _prev_sev = _prev_meta.get("executive_severity", "—")
+        _prev_iid = _prev_meta.get("instance_tag", "")
+        _prev_date_disp = _runcmp_prev.get("archived_at", "")[:10]
+        st.caption(
+            f"Reporte anterior detectado: **{_prev_meta.get('consecutive', '—')}** · "
+            f"{_prev_date_disp} · Severidad anterior: **{_prev_sev}** · "
+            f"Activo: {_prev_iid or 'N/A'}"
+        )
+
+# Render del resultado del run-compare
+_runcmp_stored = st.session_state.get("wm_ai_runcmp_result")
+if _runcmp_stored is not None:
+    with st.expander(
+        "🔄 Evolución desde la última corrida (vista previa, va al PDF)",
+        expanded=True,
+    ):
+        if _runcmp_stored.get("ok"):
+            if _runcmp_stored.get("fallback_used"):
+                st.info(
+                    "ℹ️ Esta comparación se generó con el modelo de "
+                    "respaldo (Haiku 4.5). Calidad ligeramente menor."
+                )
+            _days = _runcmp_stored.get("days_elapsed")
+            _prev_consec_disp = _runcmp_stored.get("prev_consecutive", "")
+            if _days is not None and _prev_consec_disp:
+                st.caption(
+                    f"📅 Comparado contra reporte **{_prev_consec_disp}** "
+                    f"({_days} días atrás)"
+                )
+            st.markdown(_runcmp_stored.get("markdown", ""))
+            _model_used_rc = str(_runcmp_stored.get("model", "") or "")
+            _cost_rc = _runcmp_stored.get("cost_usd", 0.0)
+            _rc_btn_cols = st.columns([1, 1, 5])
+            with _rc_btn_cols[0]:
+                if st.button(
+                    "🔄 Regenerar",
+                    key="wm_ai_runcmp_regen",
+                    use_container_width=True,
+                ):
+                    with st.spinner("Regenerando..."):
+                        try:
+                            _rc_new = generate_run_comparison(
+                                _runcmp_prev,
+                                current_meta=meta,
+                                current_items=items,
+                                use_cache=False,
+                            )
+                            st.session_state["wm_ai_runcmp_result"] = _rc_new
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Error: {exc}")
+            with _rc_btn_cols[1]:
+                if st.button(
+                    "🗑 Descartar",
+                    key="wm_ai_runcmp_clear",
+                    use_container_width=True,
+                ):
+                    st.session_state["wm_ai_runcmp_result"] = None
+                    st.rerun()
+            with _rc_btn_cols[2]:
+                _fb_tag_rc = (
+                    " · ⚠️ modelo de respaldo"
+                    if _runcmp_stored.get("fallback_used") else ""
+                )
+                st.caption(
+                    f"Modelo: `{_model_used_rc}` · "
+                    f"Tokens: {_runcmp_stored.get('input_tokens', 0)} → "
+                    f"{_runcmp_stored.get('output_tokens', 0)} · "
+                    f"Costo: ~${_cost_rc:.4f}{_fb_tag_rc}"
+                )
+        else:
+            st.error(
+                _runcmp_stored.get(
+                    "markdown", "Error al generar comparación run-vs-run."
+                )
+            )
+            if st.button("🔄 Reintentar", key="wm_ai_runcmp_retry"):
+                st.session_state["wm_ai_runcmp_result"] = None
+                st.rerun()
+
 pdf_ready = len(items) > 0
 pdf_error = None
 pdf_bytes: Optional[bytes] = None
@@ -3372,6 +3619,31 @@ with ga3:
                 ).strip()
             else:
                 meta["ai_executive_summary"] = ""
+
+            # Ciclo 17.28 — Si el especialista generó la comparación
+            # Run-vs-Run, inyectamos el markdown + metadata para que
+            # el PDF agregue la sección 'EVOLUCIÓN DESDE LA ÚLTIMA
+            # CORRIDA' después del RESUMEN EJECUTIVO.
+            _runcmp_for_pdf = st.session_state.get("wm_ai_runcmp_result")
+            if (_runcmp_for_pdf
+                    and _runcmp_for_pdf.get("ok")
+                    and _runcmp_for_pdf.get("markdown")):
+                meta["ai_run_comparison"] = str(
+                    _runcmp_for_pdf.get("markdown", "")
+                ).strip()
+                meta["ai_run_comparison_meta"] = {
+                    "prev_consecutive": _runcmp_for_pdf.get(
+                        "prev_consecutive", ""
+                    ),
+                    "prev_archived_at": _runcmp_for_pdf.get(
+                        "prev_archived_at", ""
+                    ),
+                    "days_elapsed": _runcmp_for_pdf.get("days_elapsed"),
+                }
+            else:
+                meta["ai_run_comparison"] = ""
+                meta["ai_run_comparison_meta"] = {}
+
             pdf_bytes = _build_pdf_bytes(meta, items)
             st.session_state["report_pdf_bytes"] = pdf_bytes
             st.session_state["report_pdf_error"] = None
