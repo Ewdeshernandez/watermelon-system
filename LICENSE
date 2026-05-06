@@ -1,0 +1,165 @@
+PROPRIETARY SOFTWARE LICENSE
+Watermelon System — Industrial Vibration Intelligence Platform
+
+Copyright (c) 2024-2026 SIGA SAS / Ewdes Hernandez
+All Rights Reserved.
+
+================================================================================
+ENGLISH (controlling version)
+================================================================================
+
+1. OWNERSHIP
+
+This software, including all source code, documentation, configuration files,
+data schemas, machine learning prompts, AI integration logic, report templates,
+PDF generation logic, and all associated assets (the "Software"), is the
+exclusive proprietary and confidential property of SIGA SAS, a company
+incorporated in the Republic of Colombia, and its sole authorized representative
+Ewdes Hernandez.
+
+2. NO LICENSE GRANTED
+
+NO LICENSE, EXPRESS OR IMPLIED, IS GRANTED to any party by virtue of the
+Software being publicly visible on a hosted code repository (such as GitHub).
+Public visibility of the source code is solely for the purpose of operational
+deployment to authorized hosting providers (including Streamlit Community Cloud)
+and DOES NOT constitute open-source publication, public domain dedication,
+or permission to use the Software in any way.
+
+3. PROHIBITED ACTIVITIES
+
+The following are STRICTLY PROHIBITED without prior written authorization
+signed by an authorized officer of SIGA SAS:
+
+  (a) Copying, cloning, downloading, or storing the Software or any portion
+      thereof for any purpose other than transient viewing in a web browser;
+
+  (b) Deploying, hosting, executing, or otherwise running the Software (or
+      any derivative or modified version thereof) on any server, cloud
+      platform, container, virtual machine, or local environment;
+
+  (c) Modifying, adapting, translating, porting, or creating derivative works
+      based on the Software;
+
+  (d) Distributing, sublicensing, selling, renting, leasing, or transferring
+      the Software or any portion thereof to any third party;
+
+  (e) Reverse engineering, decompiling, disassembling, or otherwise attempting
+      to derive proprietary algorithms, machine learning prompts, AI workflows,
+      or business logic embedded in the Software;
+
+  (f) Removing, altering, or obscuring any copyright, trademark, or other
+      proprietary notices contained in the Software;
+
+  (g) Using the Software, in whole or in part, to build, train, evaluate, or
+      benchmark any competing product, service, or AI system;
+
+  (h) Using the name "Watermelon System", "Watermelon", the watermelon logo,
+      or any associated branding to identify any service, product, or
+      deployment not officially operated by SIGA SAS.
+
+4. AUTHORIZED USE
+
+Use of the Software is authorized exclusively through the hosted production
+deployment operated by SIGA SAS at its official domain(s) and Streamlit Cloud
+URL(s), and only by users holding valid credentials issued directly by SIGA
+SAS. Possession of the source code does NOT grant any right of use.
+
+5. THIRD-PARTY DEPENDENCIES
+
+The Software incorporates third-party open-source libraries, each governed by
+its respective license (Streamlit, NumPy, Pandas, Plotly, ReportLab, Anthropic
+SDK, Supabase Python client, etc.). The terms of those licenses apply only to
+their respective components and do NOT extend to the Software as a whole nor
+diminish the proprietary rights of SIGA SAS over the original code, integration
+logic, prompts, business logic, and assets created by SIGA SAS.
+
+6. INTELLECTUAL PROPERTY ENFORCEMENT
+
+Unauthorized use of the Software constitutes copyright infringement under:
+
+  - Colombian Law 23 of 1982 (Ley sobre Derechos de Autor) and Decision 351
+    of the Andean Community;
+  - The Berne Convention for the Protection of Literary and Artistic Works;
+  - The WIPO Copyright Treaty;
+  - The U.S. Digital Millennium Copyright Act (DMCA) where applicable;
+  - Equivalent intellectual property statutes in any jurisdiction where
+    infringement occurs.
+
+SIGA SAS reserves the right to pursue all available civil and criminal
+remedies, including but not limited to injunctive relief, monetary damages,
+disgorgement of profits, statutory damages, attorney fees, and DMCA takedown
+notices against any infringing deployment, hosting provider, or distributor.
+
+7. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL
+SIGA SAS OR ITS REPRESENTATIVES BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING
+FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.
+
+8. GOVERNING LAW AND JURISDICTION
+
+This License shall be governed by and construed in accordance with the laws
+of the Republic of Colombia. Any dispute arising out of or in connection with
+this License shall be subject to the exclusive jurisdiction of the courts of
+Bogotá, D.C., Colombia, without prejudice to SIGA SAS's right to seek
+injunctive or interim relief in any other jurisdiction where infringement
+occurs.
+
+9. LICENSING INQUIRIES
+
+For commercial licensing, partnership, OEM, or evaluation requests, contact:
+
+  SIGA SAS
+  Attn: Ewdes Hernandez
+  Email: ehernandez@sigasas.com
+  Country: Colombia
+
+================================================================================
+ESPAÑOL (versión informativa, prevalece la versión en inglés)
+================================================================================
+
+LICENCIA DE SOFTWARE PROPIETARIO
+Watermelon System — Plataforma de Inteligencia de Vibraciones Industriales
+
+Copyright (c) 2024-2026 SIGA SAS / Ewdes Hernandez
+Todos los derechos reservados.
+
+Este software es propiedad exclusiva, propietaria y confidencial de SIGA SAS.
+La visibilidad pública del código fuente en repositorios alojados (como GitHub)
+NO constituye publicación de código abierto, dedicación al dominio público,
+ni autorización para uso de ningún tipo.
+
+QUEDA ESTRICTAMENTE PROHIBIDO, sin autorización previa por escrito firmada
+por un representante autorizado de SIGA SAS:
+
+  - Copiar, clonar o almacenar el Software con cualquier fin distinto a la
+    visualización transitoria en navegador;
+  - Desplegar, hospedar o ejecutar el Software en cualquier servidor,
+    plataforma cloud, contenedor o entorno local;
+  - Modificar, adaptar, traducir o crear obras derivadas;
+  - Distribuir, sublicenciar, vender, arrendar o transferir el Software;
+  - Realizar ingeniería inversa, descompilar o desensamblar el Software;
+  - Usar el Software para construir, entrenar o evaluar productos competidores;
+  - Usar el nombre "Watermelon System", "Watermelon" o el logo asociado
+    para identificar servicios no operados oficialmente por SIGA SAS.
+
+El uso autorizado se limita exclusivamente al despliegue de producción
+operado por SIGA SAS en sus dominios oficiales, y únicamente por usuarios
+que posean credenciales válidas emitidas directamente por SIGA SAS.
+
+El uso no autorizado constituye infracción de derechos de autor bajo la
+Ley 23 de 1982 de Colombia, la Decisión 351 de la Comunidad Andina, el
+Convenio de Berna y demás tratados internacionales aplicables. SIGA SAS
+se reserva el derecho de ejercer todas las acciones civiles y penales
+disponibles.
+
+Consultas de licenciamiento: ehernandez@sigasas.com
+
+================================================================================
+END OF LICENSE
+================================================================================

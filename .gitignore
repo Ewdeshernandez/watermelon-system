@@ -49,6 +49,18 @@ data/asset_metadata/
 # --- Asset Instances (Ciclo 8: datos por máquina física, NO commitear) ---
 data/instances/
 
+# --- Usuarios fallback locales (NO commitear, contienen hashes) ---
+data/users/
+
+# --- Caches y estados runtime de IA / briefings ---
+data/cache/
+data/briefings/
+data/password_reset_tokens/
+data/ai_diagnostic_stats.json
+
+# --- Worktrees / agentes locales ---
+.claude/
+
 # --- Document Vault SEEDS (manuales de fábrica, SÍ commitear) ---
 # Esta carpeta contiene PDFs de referencia (manuales OEM, reportes
 # históricos del cliente) que viven en el repo y sobreviven cualquier
