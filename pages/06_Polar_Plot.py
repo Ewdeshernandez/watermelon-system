@@ -2638,12 +2638,12 @@ def render_polar_panel(
         st.session_state[ai_state_key_pol] = None
 
     with st.expander(
-        "🧠 Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        "Interpretación clínica AI · Diagnóstico Cat IV asistido",
         expanded=False,
     ):
         if not is_ai_available():
             st.info(
-                "🔑 **AI Diagnóstico no disponible.** Falta configurar "
+                "**AI Diagnóstico no disponible.** Falta configurar "
                 "`[anthropic] api_key` en los secrets de Streamlit."
             )
         else:
@@ -2651,9 +2651,9 @@ def render_polar_panel(
             ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
             with ai_btn_col1:
                 gen_clicked_pol = st.button(
-                    "🧠 Generar diagnóstico AI"
+                    "Generar diagnóstico AI"
                     if stored_pol is None
-                    else "🧠 Diagnóstico generado",
+                    else "Diagnóstico generado",
                     key=f"ai_gen_btn_pol_{export_state_key}",
                     use_container_width=True,
                     type="primary" if stored_pol is None else "secondary",
@@ -2661,7 +2661,7 @@ def render_polar_panel(
                 )
             with ai_btn_col2:
                 regen_clicked_pol = st.button(
-                    "🔄 Regenerar",
+                    "Regenerar",
                     key=f"ai_regen_btn_pol_{export_state_key}",
                     use_container_width=True,
                     disabled=stored_pol is None,
@@ -2720,7 +2720,7 @@ def render_polar_panel(
                     "trend": {},
                 }
 
-                with st.spinner("🧠 Claude analizando la respuesta polar... (5-15 seg)"):
+                with st.spinner("Claude analizando la respuesta polar... (5-15 seg)"):
                     try:
                         result_pol = generate_ai_diagnostic(
                             ai_payload_pol,
@@ -2731,7 +2731,7 @@ def render_polar_panel(
                         result_pol = {
                             "ok": False,
                             "markdown": (
-                                f"_⚠️ Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"_Error inesperado al generar diagnóstico AI:_\n\n"
                                 f"```\n{type(exc).__name__}: {exc}\n```"
                             ),
                             "error": str(exc)[:500],
@@ -2750,7 +2750,7 @@ def render_polar_panel(
                 if stored_pol.get("ok"):
                     if stored_pol.get("fallback_used"):
                         st.info(
-                            "ℹ️ Diagnóstico generado con modelo de respaldo "
+                            "Diagnóstico generado con modelo de respaldo "
                             "(Haiku 4.5)."
                         )
                     st.markdown(stored_pol.get("markdown", ""))
@@ -2764,7 +2764,7 @@ def render_polar_panel(
                         + stored_pol.get("output_tokens", 0) * out_p_pol
                     ) / 1_000_000
                     fallback_tag_pol = (
-                        " · ⚠️ modelo de respaldo"
+                        " · modelo de respaldo"
                         if stored_pol.get("fallback_used") else ""
                     )
                     st.caption(
@@ -3177,7 +3177,7 @@ def main() -> None:
                         height=70,
                     )
                     if st.button(
-                        "💾 Guardar snapshot Polar",
+                        "Guardar snapshot Polar",
                         type="primary",
                         width="stretch",
                         key=f"wm_polar_snap_save_{_polar_inst_id}",
@@ -3263,7 +3263,7 @@ def main() -> None:
                     _polar_lbl_to_key[l] for l in _picked if l in _polar_lbl_to_key
                 ]
                 if not _selected_polar_cmp_ids:
-                    st.caption("ℹ️ _Solo se mostrará la corrida actual._")
+                    st.caption("_Solo se mostrará la corrida actual._")
                 else:
                     st.caption(
                         f"Se superpondrán **{len(_selected_polar_cmp_ids)}** "
@@ -3291,14 +3291,14 @@ def main() -> None:
 
                 if _legacy_count > 0:
                     st.warning(
-                        f"⚠️ {_legacy_count} snapshot(s) viejos sin "
+                        f"{_legacy_count} snapshot(s) viejos sin "
                         f"trayectoria completa — solo muestran el operating "
                         f"point en el polar. Para ver el loop completo, "
                         f"resnapshoteá cargando esa corrida y volviendo a "
                         f"guardar."
                     )
 
-                with st.expander(f"🗂️ Gestionar snapshots Polar ({len(_polar_existing_snaps)})"):
+                with st.expander(f"️ Gestionar snapshots Polar ({len(_polar_existing_snaps)})"):
                     if _legacy_count > 0:
                         if st.button(
                             f"🧹 Borrar los {_legacy_count} snapshot(s) sin trayectoria",
@@ -3328,8 +3328,8 @@ def main() -> None:
                         cols_h = st.columns([4, 1])
                         _has_traj = _snap_has_trail.get(s["snapshot_id"], False)
                         _traj_chip = (
-                            "🟢 con trayectoria" if _has_traj
-                            else "🟡 solo punto Op (legacy)"
+                            "con trayectoria" if _has_traj
+                            else "solo punto Op (legacy)"
                         )
                         cols_h[0].markdown(
                             f"**{s['corrida_label'][:30]}** · {_traj_chip}  \n"
@@ -3337,7 +3337,7 @@ def main() -> None:
                             f"{s.get('operating_speed_rpm', 0):.0f} rpm_"
                         )
                         if cols_h[1].button(
-                            "🗑️",
+                            "️",
                             key=f"wm_polar_del_{s['snapshot_id']}",
                             help="Borrar este snapshot",
                         ):
@@ -3426,9 +3426,9 @@ def main() -> None:
 
                     _diag_parts = []
                     if _phase_class == "shift_critical":
-                        _diag_parts.append("⚠️ Shift fase crítico (>60°)")
+                        _diag_parts.append("Shift fase crítico (>60°)")
                     elif _phase_class == "shift_major":
-                        _diag_parts.append("⚠️ Shift fase mayor (≥30°)")
+                        _diag_parts.append("Shift fase mayor (≥30°)")
                     elif _phase_class == "shift_minor":
                         _diag_parts.append("Shift fase menor (10–30°)")
                     elif _phase_class == "stable":
@@ -3457,7 +3457,7 @@ def main() -> None:
                     })
 
             if _cmp_rows:
-                st.markdown("### 📈 Comparativo Polar — vs corridas anteriores")
+                st.markdown("### Comparativo Polar — vs corridas anteriores")
                 _n_snaps = len(_snap_meta_by_id)
                 if _n_snaps == 1:
                     _only = list(_snap_meta_by_id.values())[0]

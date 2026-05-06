@@ -440,7 +440,7 @@ def generate_rul_estimate(
     """
     if not is_ai_available():
         return _empty_rul_response(
-            "_⚠️ AI no disponible — falta configurar `[anthropic] api_key`._"
+            "_AI no disponible — falta configurar `[anthropic] api_key`._"
         )
 
     progression = _compute_severity_progression(history)
@@ -467,7 +467,7 @@ def generate_rul_estimate(
 
     client = _get_client()
     if client is None:
-        return _empty_rul_response("_⚠️ No se pudo inicializar el cliente._")
+        return _empty_rul_response("_No se pudo inicializar el cliente._")
 
     user_msg = _build_rul_user_message(
         history, current_meta, current_items, progression
@@ -531,12 +531,12 @@ def generate_rul_estimate(
     if response is None:
         err = str(last_exc) if last_exc else "unknown"
         if "overloaded" in err.lower() or "529" in err:
-            msg = ("_⚠️ Servidores Claude sobrecargados. "
+            msg = ("_Servidores Claude sobrecargados. "
                    "Esperá 5-10 min y reintentá._")
         elif "timeout" in err.lower() or "timed out" in err.lower():
-            msg = "_⚠️ Timeout de conexión. Verificá tu red y reintentá._"
+            msg = "_Timeout de conexión. Verificá tu red y reintentá._"
         else:
-            msg = f"_⚠️ Error generando RUL:_\n\n```\n{err}\n```"
+            msg = f"_Error generando RUL:_\n\n```\n{err}\n```"
         return _empty_rul_response(
             msg, error=err[:500], fallback_used=fallback_used,
         )

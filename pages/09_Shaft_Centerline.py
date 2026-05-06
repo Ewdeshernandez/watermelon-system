@@ -1873,12 +1873,12 @@ def render_scl_panel(
         st.session_state[ai_state_key_scl] = None
 
     with st.expander(
-        "🧠 Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        "Interpretación clínica AI · Diagnóstico Cat IV asistido",
         expanded=False,
     ):
         if not is_ai_available():
             st.info(
-                "🔑 **AI Diagnóstico no disponible.** Falta configurar "
+                "**AI Diagnóstico no disponible.** Falta configurar "
                 "`[anthropic] api_key` en los secrets de Streamlit."
             )
         else:
@@ -1886,9 +1886,9 @@ def render_scl_panel(
             ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
             with ai_btn_col1:
                 gen_clicked_scl = st.button(
-                    "🧠 Generar diagnóstico AI"
+                    "Generar diagnóstico AI"
                     if stored_scl is None
-                    else "🧠 Diagnóstico generado",
+                    else "Diagnóstico generado",
                     key=f"ai_gen_btn_scl_{panel_index}_{item['id']}",
                     use_container_width=True,
                     type="primary" if stored_scl is None else "secondary",
@@ -1896,7 +1896,7 @@ def render_scl_panel(
                 )
             with ai_btn_col2:
                 regen_clicked_scl = st.button(
-                    "🔄 Regenerar",
+                    "Regenerar",
                     key=f"ai_regen_btn_scl_{panel_index}_{item['id']}",
                     use_container_width=True,
                     disabled=stored_scl is None,
@@ -1940,7 +1940,7 @@ def render_scl_panel(
                     "trend": {},
                 }
 
-                with st.spinner("🧠 Claude analizando el shaft centerline... (5-15 seg)"):
+                with st.spinner("Claude analizando el shaft centerline... (5-15 seg)"):
                     try:
                         result_scl = generate_ai_diagnostic(
                             ai_payload_scl,
@@ -1951,7 +1951,7 @@ def render_scl_panel(
                         result_scl = {
                             "ok": False,
                             "markdown": (
-                                f"_⚠️ Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"_Error inesperado al generar diagnóstico AI:_\n\n"
                                 f"```\n{type(exc).__name__}: {exc}\n```"
                             ),
                             "error": str(exc)[:500],
@@ -1970,7 +1970,7 @@ def render_scl_panel(
                 if stored_scl.get("ok"):
                     if stored_scl.get("fallback_used"):
                         st.info(
-                            "ℹ️ Diagnóstico generado con modelo de respaldo "
+                            "Diagnóstico generado con modelo de respaldo "
                             "(Haiku 4.5)."
                         )
                     st.markdown(stored_scl.get("markdown", ""))
@@ -1984,7 +1984,7 @@ def render_scl_panel(
                         + stored_scl.get("output_tokens", 0) * out_p_scl
                     ) / 1_000_000
                     fallback_tag_scl = (
-                        " · ⚠️ modelo de respaldo"
+                        " · modelo de respaldo"
                         if stored_scl.get("fallback_used") else ""
                     )
                     st.caption(
@@ -2885,10 +2885,10 @@ def main():
                     st.caption("_(No hay CSVs SCL cargados todavía.)_")
                 else:
                     st.warning(
-                        f"⚠️ {len(parsed_items)} CSV(s) SCL cargado(s) "
+                        f"{len(parsed_items)} CSV(s) SCL cargado(s) "
                         f"pero ninguno matchea sensores del Sensor Map."
                     )
-                    with st.expander("🔍 Diagnóstico — CSVs vs patterns"):
+                    with st.expander("Diagnóstico — CSVs vs patterns"):
                         _dr = []
                         for it in parsed_items:
                             m = it.get("meta") or {}
@@ -2939,7 +2939,7 @@ def main():
                         height=70,
                     )
                     if st.button(
-                        "💾 Guardar snapshot SCL",
+                        "Guardar snapshot SCL",
                         type="primary", width="stretch",
                         key=f"wm_scl_snap_save_{_scl_inst_id}",
                     ):
@@ -3016,7 +3016,7 @@ def main():
 
                 # Lista borrar
                 with st.expander(
-                    f"🗂️ Gestionar snapshots SCL ({len(_scl_existing_snaps)})"
+                    f"️ Gestionar snapshots SCL ({len(_scl_existing_snaps)})"
                 ):
                     for s in _scl_existing_snaps:
                         cols_h = st.columns([4, 1])
@@ -3026,7 +3026,7 @@ def main():
                             f"{s.get('operating_speed_rpm', 0):.0f} rpm_"
                         )
                         if cols_h[1].button(
-                            "🗑️",
+                            "️",
                             key=f"wm_scl_del_{s['snapshot_id']}",
                             help="Borrar este snapshot",
                         ):
@@ -3081,15 +3081,15 @@ def main():
 
                     _diag = []
                     if _ecc_class == "migration_critical":
-                        _diag.append("⚠️ Migración crítica (>25% clearance)")
+                        _diag.append("Migración crítica (>25% clearance)")
                     elif _ecc_class == "migration_major":
-                        _diag.append("⚠️ Migración mayor (>15% clearance)")
+                        _diag.append("Migración mayor (>15% clearance)")
                     elif _ecc_class == "migration_minor":
                         _diag.append("Migración menor")
                     elif _ecc_class == "stable":
                         _diag.append("Eccentricity estable")
                     if _att_class == "shift_critical":
-                        _diag.append("⚠️ Shift attitude crítico (≥30°)")
+                        _diag.append("Shift attitude crítico (≥30°)")
                     elif _att_class == "shift_major":
                         _diag.append("Shift attitude mayor")
 
@@ -3109,7 +3109,7 @@ def main():
                     })
 
             if _cmp_rows:
-                st.markdown("### 📈 Comparativo SCL — vs corridas anteriores")
+                st.markdown("### Comparativo SCL — vs corridas anteriores")
                 st.caption(
                     "Migración del centerline del muñón entre corridas. "
                     "Cambio de eccentricity ratio o shift de attitude angle "

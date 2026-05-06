@@ -4064,7 +4064,7 @@ with st.sidebar:
             _earl = str(_hist_summary.get("earliest", "") or "").split("T")[0]
             _late = str(_hist_summary.get("latest", "") or "").split("T")[0]
             _tot_files = int(_hist_summary.get("total_files", 0) or 0)
-            _resumen_txt = f"📊 {_n_corr} corrida(s) archivada(s) · {_tot_files} CSV total"
+            _resumen_txt = f"{_n_corr} corrida(s) archivada(s) · {_tot_files} CSV total"
             if _earl and _late:
                 _resumen_txt += f" · rango: {_earl} → {_late}"
             st.caption(_resumen_txt)
@@ -4171,7 +4171,7 @@ with st.sidebar:
                     cols = st.columns([0.78, 0.22])
                     cols[0].caption(f"• {_corrida_label_fmt(_meta)}")
                     if cols[1].button(
-                        "🗑",
+                        "",
                         key=f"wm_trend_hist_del_{_cid}",
                         help=f"Borrar corrida {_cid}",
                     ):
@@ -4773,12 +4773,12 @@ with st.sidebar:
         _fam_label = {
             "pressure": "🔵 Presiones",
             "temperature": "🟠 Temperaturas",
-            "flow": "🟢 Flujos",
-            "frequency": "🟡 Frecuencia/VFD",
+            "flow": "Flujos",
+            "frequency": "Frecuencia/VFD",
             "speed": "⚙️ Velocidad",
-            "power": "⚡ Potencia",
-            "vibration": "📊 Vibración",
-            "generic": "📂 Otros",
+            "power": "Potencia",
+            "vibration": "Vibración",
+            "generic": "Otros",
         }
         _qp_cols = st.columns(2)
         _qp_idx = 0
@@ -5201,12 +5201,12 @@ def render_trend_panel(
         st.session_state[ai_state_key_tr] = None
 
     with st.expander(
-        "🧠 Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        "Interpretación clínica AI · Diagnóstico Cat IV asistido",
         expanded=False,
     ):
         if not is_ai_available():
             st.info(
-                "🔑 **AI Diagnóstico no disponible.** Falta configurar "
+                "**AI Diagnóstico no disponible.** Falta configurar "
                 "`[anthropic] api_key` en los secrets de Streamlit. El "
                 "diagnóstico técnico determinístico contiene toda la "
                 "evidencia ISO/API necesaria."
@@ -5221,9 +5221,9 @@ def render_trend_panel(
             ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
             with ai_btn_col1:
                 gen_clicked_tr = st.button(
-                    "🧠 Generar diagnóstico AI"
+                    "Generar diagnóstico AI"
                     if stored_tr is None
-                    else "🧠 Diagnóstico generado",
+                    else "Diagnóstico generado",
                     key=f"ai_gen_btn_tr_{export_state_key}",
                     use_container_width=True,
                     type="primary" if stored_tr is None else "secondary",
@@ -5231,7 +5231,7 @@ def render_trend_panel(
                 )
             with ai_btn_col2:
                 regen_clicked_tr = st.button(
-                    "🔄 Regenerar",
+                    "Regenerar",
                     key=f"ai_regen_btn_tr_{export_state_key}",
                     use_container_width=True,
                     disabled=stored_tr is None,
@@ -5334,7 +5334,7 @@ def render_trend_panel(
                     },
                 }
 
-                with st.spinner("🧠 Claude analizando la tendencia... (5-15 seg)"):
+                with st.spinner("Claude analizando la tendencia... (5-15 seg)"):
                     try:
                         result_tr = generate_ai_diagnostic(
                             ai_payload_tr,
@@ -5345,7 +5345,7 @@ def render_trend_panel(
                         result_tr = {
                             "ok": False,
                             "markdown": (
-                                f"_⚠️ Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"_Error inesperado al generar diagnóstico AI:_\n\n"
                                 f"```\n{type(exc).__name__}: {exc}\n```"
                             ),
                             "error": str(exc)[:500],
@@ -5364,7 +5364,7 @@ def render_trend_panel(
                 if stored_tr.get("ok"):
                     if stored_tr.get("fallback_used"):
                         st.info(
-                            "ℹ️ Diagnóstico generado con modelo de respaldo "
+                            "Diagnóstico generado con modelo de respaldo "
                             "(Haiku 4.5). Podés regenerar más tarde cuando "
                             "Sonnet recupere capacidad."
                         )
@@ -5379,7 +5379,7 @@ def render_trend_panel(
                         + stored_tr.get("output_tokens", 0) * out_p_tr
                     ) / 1_000_000
                     fallback_tag_tr = (
-                        " · ⚠️ modelo de respaldo"
+                        " · modelo de respaldo"
                         if stored_tr.get("fallback_used") else ""
                     )
                     st.caption(
@@ -5478,7 +5478,7 @@ def render_trend_panel(
                 notes_override=ai_notes_override_tr,
             )
             ai_extra_tr = (
-                " · 🧠 con Diagnóstico AI"
+                " · con Diagnóstico AI"
                 if ai_notes_override_tr else ""
             )
             if image_ok:

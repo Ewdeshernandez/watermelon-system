@@ -435,14 +435,14 @@ if _rec_from and not st.session_state.get("wm_report_recovery_dismissed"):
     _rec_n = st.session_state.get("wm_report_recovered_n_items", 0)
     _rec_at = st.session_state.get("wm_report_recovered_at", "")
     st.warning(
-        f"⚠️ **Tu reporte se recuperó de un backup automático.** "
+        f"**Tu reporte se recuperó de un backup automático.** "
         f"El archivo principal tenía un problema (probablemente "
         f"Streamlit se interrumpió mientras guardaba) y restauramos "
         f"desde **`{_rec_from}`** con **{_rec_n} items**.\n\n"
-        f"📌 **Por favor revisá** que estén todos los items que esperabas. "
+        f"**Por favor revisá** que estén todos los items que esperabas. "
         f"Si falta algo del último ratito, puede haberse perdido entre el "
         f"último guardado exitoso y la corrupción.",
-        icon="🔄",
+        icon="",
     )
     if st.button("Entendido — descartar este aviso",
                  key="wm_report_recovery_dismiss"):
@@ -452,15 +452,15 @@ if _rec_from and not st.session_state.get("wm_report_recovery_dismissed"):
 
 if _load_err and not st.session_state.get("wm_report_load_err_dismissed"):
     st.error(
-        f"🚨 **No pude cargar tu reporte ni desde backups.** "
+        f"**No pude cargar tu reporte ni desde backups.** "
         f"El archivo `data/report_state.json` y todos sus backups (.bak.1 a "
         f".bak.{5}) están corruptos o ilegibles.\n\n"
         f"**Error técnico:** `{_load_err[:200]}`\n\n"
-        f"📌 **Acción sugerida:** revisá manualmente la carpeta "
+        f"**Acción sugerida:** revisá manualmente la carpeta "
         f"`data/` por si hay algún archivo recuperable. Si no, vas a tener "
         f"que reconstruir el reporte desde cero. Esto NO debería volver a "
         f"pasar — el sistema nuevo guarda 5 backups rotativos.",
-        icon="🚨",
+        icon="",
     )
     if st.button("Entendido — empezar reporte limpio",
                  key="wm_report_load_err_dismiss"):
@@ -571,7 +571,7 @@ if _wm_my_role == "client":
             "Cuando SIGASAS publique un nuevo análisis, aparecerá acá."
         )
     else:
-        st.caption(f"📋 {len(_cli_archived)} reporte(s) disponibles")
+        st.caption(f"{len(_cli_archived)} reporte(s) disponibles")
         for sc in _cli_archived:
             rm = sc.get("report_meta", {}) or {}
             _aid = sc.get("archive_id", "")
@@ -606,7 +606,7 @@ if _wm_my_role == "client":
                                            viewer_role=_wm_my_role)
             if _pb:
                 st.download_button(
-                    "⬇️  Descargar este reporte",
+                    "Descargar este reporte",
                     data=_pb,
                     file_name=f"{_aid.split('/')[-1]}.pdf",
                     mime="application/pdf",
@@ -616,7 +616,7 @@ if _wm_my_role == "client":
 
     st.divider()
     st.caption(
-        "💡 ¿Necesitás un reporte que no aparece acá? Contactá a tu "
+        "¿Necesitás un reporte que no aparece acá? Contactá a tu "
         "especialista SIGASAS para solicitar la publicación."
     )
     st.stop()
@@ -635,7 +635,7 @@ if _can_inspect_others:
     ]
     if _other_users:
         with st.expander(
-            "🔍 Inspeccionar el reporte de otro especialista (read-only)",
+            "Inspeccionar el reporte de otro especialista (read-only)",
             expanded=False,
         ):
             _opts = ["(mi propio reporte)"] + [
@@ -678,13 +678,13 @@ if not _is_my_own and _owner_of_this_report:
     bcols = st.columns([0.7, 0.3])
     with bcols[0]:
         st.warning(
-            f"👁️ **Estás viendo el reporte de `{_owner_of_this_report}` "
+            f"️ **Estás viendo el reporte de `{_owner_of_this_report}` "
             f"en modo SOLO LECTURA.** Cualquier cambio que hagas no se va a "
             f"guardar. Para editarlo, usá el botón 'Duplicar a mi reporte'.",
-            icon="🔒",
+            icon="",
         )
     with bcols[1]:
-        if st.button("📋  Duplicar a mi reporte",
+        if st.button("Duplicar a mi reporte",
                      use_container_width=True,
                      key="wm_dup_to_mine",
                      type="primary"):
@@ -3288,14 +3288,14 @@ with ga4:
             "antes de generar la síntesis ejecutiva."
         )
     if st.button(
-        "🧠 Generar Síntesis Ejecutiva AI",
+        "Generar Síntesis Ejecutiva AI",
         use_container_width=True,
         disabled=_ai_exec_disabled,
         type="primary" if not _ai_exec_disabled else "secondary",
         help=_ai_exec_help,
         key="wm_ai_exec_btn",
     ):
-        with st.spinner("🧠 Claude leyendo todas las figuras y sintetizando... (8-20 seg)"):
+        with st.spinner("Claude leyendo todas las figuras y sintetizando... (8-20 seg)"):
             try:
                 _exec_result = generate_executive_summary(
                     items, meta=meta, use_cache=True
@@ -3304,7 +3304,7 @@ with ga4:
                 _exec_result = {
                     "ok": False,
                     "markdown": (
-                        f"_⚠️ Error inesperado:_\n\n```\n"
+                        f"_Error inesperado:_\n\n```\n"
                         f"{type(exc).__name__}: {exc}\n```"
                     ),
                     "error": str(exc)[:500],
@@ -3319,13 +3319,13 @@ with ga4:
 _exec_stored = st.session_state.get("wm_ai_exec_summary")
 if _exec_stored is not None:
     with st.expander(
-        "🧠 Síntesis Ejecutiva AI (vista previa, va al inicio del PDF)",
+        "Síntesis Ejecutiva AI (vista previa, va al inicio del PDF)",
         expanded=True,
     ):
         if _exec_stored.get("ok"):
             if _exec_stored.get("fallback_used"):
                 st.info(
-                    "ℹ️ Generado con modelo de respaldo (Haiku 4.5). "
+                    "Generado con modelo de respaldo (Haiku 4.5). "
                     "Podés regenerar más tarde cuando Sonnet recupere capacidad."
                 )
             st.markdown(_exec_stored.get("markdown", ""))
@@ -3341,11 +3341,11 @@ if _exec_stored is not None:
             _exec_btn_cols = st.columns([1, 1, 5])
             with _exec_btn_cols[0]:
                 if st.button(
-                    "🔄 Regenerar",
+                    "Regenerar",
                     key="wm_ai_exec_regen",
                     use_container_width=True,
                 ):
-                    with st.spinner("🧠 Regenerando síntesis..."):
+                    with st.spinner("Regenerando síntesis..."):
                         try:
                             _exec_new = generate_executive_summary(
                                 items, meta=meta, use_cache=False
@@ -3356,7 +3356,7 @@ if _exec_stored is not None:
                             st.error(f"Error: {exc}")
             with _exec_btn_cols[1]:
                 if st.button(
-                    "🗑 Descartar",
+                    "Descartar",
                     key="wm_ai_exec_clear",
                     use_container_width=True,
                     help="Vuelve al resumen ejecutivo determinístico legacy.",
@@ -3365,7 +3365,7 @@ if _exec_stored is not None:
                     st.rerun()
             with _exec_btn_cols[2]:
                 _fb_tag = (
-                    " · ⚠️ modelo de respaldo"
+                    " · modelo de respaldo"
                     if _exec_stored.get("fallback_used") else ""
                 )
                 st.caption(
@@ -3378,7 +3378,7 @@ if _exec_stored is not None:
             st.error(
                 _exec_stored.get("markdown", "Error al generar síntesis ejecutiva.")
             )
-            if st.button("🔄 Reintentar", key="wm_ai_exec_retry"):
+            if st.button("Reintentar", key="wm_ai_exec_retry"):
                 st.session_state["wm_ai_exec_summary"] = None
                 st.rerun()
 
@@ -3438,7 +3438,7 @@ elif _runcmp_prev is None:
             f"de este activo, o el anterior aún no está archivado."
         )
 
-_runcmp_label_btn = "🔄 Comparar con reporte anterior"
+_runcmp_label_btn = "Comparar con reporte anterior"
 if _runcmp_prev:
     _prev_consec = (_runcmp_prev.get("report_meta", {}) or {}).get(
         "consecutive", ""
@@ -3446,7 +3446,7 @@ if _runcmp_prev:
     _prev_date = _runcmp_prev.get("archived_at", "")[:10]
     if _prev_consec or _prev_date:
         _runcmp_label_btn = (
-            f"🔄 Comparar con reporte anterior "
+            f"Comparar con reporte anterior "
             f"({_prev_consec or _prev_date})"
         )
 
@@ -3461,7 +3461,7 @@ with _runcmp_btn_cols[0]:
         type="primary" if not _runcmp_disabled else "secondary",
     ):
         with st.spinner(
-            "🔄 Claude comparando con el reporte anterior... (8-20 seg)"
+            "Claude comparando con el reporte anterior... (8-20 seg)"
         ):
             try:
                 _runcmp_result = generate_run_comparison(
@@ -3474,7 +3474,7 @@ with _runcmp_btn_cols[0]:
                 _runcmp_result = {
                     "ok": False,
                     "markdown": (
-                        f"_⚠️ Error inesperado:_\n\n```\n"
+                        f"_Error inesperado:_\n\n```\n"
                         f"{type(exc).__name__}: {exc}\n```"
                     ),
                     "error": str(exc)[:500],
@@ -3507,20 +3507,20 @@ with _runcmp_btn_cols[1]:
 _runcmp_stored = st.session_state.get("wm_ai_runcmp_result")
 if _runcmp_stored is not None:
     with st.expander(
-        "🔄 Evolución desde la última corrida (vista previa, va al PDF)",
+        "Evolución desde la última corrida (vista previa, va al PDF)",
         expanded=True,
     ):
         if _runcmp_stored.get("ok"):
             if _runcmp_stored.get("fallback_used"):
                 st.info(
-                    "ℹ️ Esta comparación se generó con el modelo de "
+                    "Esta comparación se generó con el modelo de "
                     "respaldo (Haiku 4.5). Calidad ligeramente menor."
                 )
             _days = _runcmp_stored.get("days_elapsed")
             _prev_consec_disp = _runcmp_stored.get("prev_consecutive", "")
             if _days is not None and _prev_consec_disp:
                 st.caption(
-                    f"📅 Comparado contra reporte **{_prev_consec_disp}** "
+                    f"Comparado contra reporte **{_prev_consec_disp}** "
                     f"({_days} días atrás)"
                 )
             st.markdown(_runcmp_stored.get("markdown", ""))
@@ -3529,7 +3529,7 @@ if _runcmp_stored is not None:
             _rc_btn_cols = st.columns([1, 1, 5])
             with _rc_btn_cols[0]:
                 if st.button(
-                    "🔄 Regenerar",
+                    "Regenerar",
                     key="wm_ai_runcmp_regen",
                     use_container_width=True,
                 ):
@@ -3547,7 +3547,7 @@ if _runcmp_stored is not None:
                             st.error(f"Error: {exc}")
             with _rc_btn_cols[1]:
                 if st.button(
-                    "🗑 Descartar",
+                    "Descartar",
                     key="wm_ai_runcmp_clear",
                     use_container_width=True,
                 ):
@@ -3555,7 +3555,7 @@ if _runcmp_stored is not None:
                     st.rerun()
             with _rc_btn_cols[2]:
                 _fb_tag_rc = (
-                    " · ⚠️ modelo de respaldo"
+                    " · modelo de respaldo"
                     if _runcmp_stored.get("fallback_used") else ""
                 )
                 st.caption(
@@ -3570,7 +3570,7 @@ if _runcmp_stored is not None:
                     "markdown", "Error al generar comparación run-vs-run."
                 )
             )
-            if st.button("🔄 Reintentar", key="wm_ai_runcmp_retry"):
+            if st.button("Reintentar", key="wm_ai_runcmp_retry"):
                 st.session_state["wm_ai_runcmp_result"] = None
                 st.rerun()
 
@@ -3625,10 +3625,10 @@ elif len(_rul_history) == 0:
             f"percentiles)."
         )
 
-_rul_label_btn = "🔮 Estimar Vida Útil Restante (RUL)"
+_rul_label_btn = "Estimar Vida Útil Restante (RUL)"
 if _rul_history:
     _rul_label_btn = (
-        f"🔮 Estimar Vida Útil Restante "
+        f"Estimar Vida Útil Restante "
         f"({len(_rul_history)} reportes históricos)"
     )
 
@@ -3643,7 +3643,7 @@ with _rul_btn_cols[0]:
         type="primary" if not _rul_disabled else "secondary",
     ):
         with st.spinner(
-            "🔮 Claude analizando trayectoria histórica y proyectando "
+            "Claude analizando trayectoria histórica y proyectando "
             "vida útil... (10-25 seg)"
         ):
             try:
@@ -3657,7 +3657,7 @@ with _rul_btn_cols[0]:
                 _rul_result = {
                     "ok": False,
                     "markdown": (
-                        f"_⚠️ Error inesperado:_\n\n```\n"
+                        f"_Error inesperado:_\n\n```\n"
                         f"{type(exc).__name__}: {exc}\n```"
                     ),
                     "error": str(exc)[:500],
@@ -3679,9 +3679,9 @@ with _rul_btn_cols[1]:
         _rul_min = (_rul_history[0].get("archived_at", "") or "")[:10]
         _rul_max = (_rul_history[-1].get("archived_at", "") or "")[:10]
         _rul_quality = (
-            "✅ Suficiente para percentiles"
+            "Suficiente para percentiles"
             if _rul_n >= MIN_HISTORY_FOR_RUL
-            else f"⚠️ Análisis cualitativo solamente (mínimo {MIN_HISTORY_FOR_RUL} reportes para percentiles)"
+            else f"Análisis cualitativo solamente (mínimo {MIN_HISTORY_FOR_RUL} reportes para percentiles)"
         )
         st.caption(
             f"Historia detectada: **{_rul_n} reportes** entre "
@@ -3692,20 +3692,20 @@ with _rul_btn_cols[1]:
 _rul_stored = st.session_state.get("wm_ai_rul_result")
 if _rul_stored is not None:
     with st.expander(
-        "🔮 Proyección de vida útil restante (vista previa, va al PDF)",
+        "Proyección de vida útil restante (vista previa, va al PDF)",
         expanded=True,
     ):
         if _rul_stored.get("ok"):
             if _rul_stored.get("fallback_used"):
                 st.info(
-                    "ℹ️ Esta proyección se generó con el modelo de "
+                    "Esta proyección se generó con el modelo de "
                     "respaldo (Haiku 4.5). Calidad ligeramente menor."
                 )
             _n_h = _rul_stored.get("n_history", 0)
             _days_cov = _rul_stored.get("history_days_covered", 0)
             _mono = _rul_stored.get("monotonic", False)
             st.caption(
-                f"📊 Base estadística: {_n_h} reportes · "
+                f"Base estadística: {_n_h} reportes · "
                 f"{_days_cov} días cubiertos · "
                 f"Trayectoria monotónica: {'sí' if _mono else 'no (requiere validación)'}"
             )
@@ -3715,7 +3715,7 @@ if _rul_stored is not None:
             _rul_btn_cols2 = st.columns([1, 1, 5])
             with _rul_btn_cols2[0]:
                 if st.button(
-                    "🔄 Regenerar",
+                    "Regenerar",
                     key="wm_ai_rul_regen",
                     use_container_width=True,
                 ):
@@ -3733,7 +3733,7 @@ if _rul_stored is not None:
                             st.error(f"Error: {exc}")
             with _rul_btn_cols2[1]:
                 if st.button(
-                    "🗑 Descartar",
+                    "Descartar",
                     key="wm_ai_rul_clear",
                     use_container_width=True,
                 ):
@@ -3741,7 +3741,7 @@ if _rul_stored is not None:
                     st.rerun()
             with _rul_btn_cols2[2]:
                 _fb_tag_rul = (
-                    " · ⚠️ modelo de respaldo"
+                    " · modelo de respaldo"
                     if _rul_stored.get("fallback_used") else ""
                 )
                 st.caption(
@@ -3756,7 +3756,7 @@ if _rul_stored is not None:
                     "markdown", "Error al generar proyección RUL."
                 )
             )
-            if st.button("🔄 Reintentar", key="wm_ai_rul_retry"):
+            if st.button("Reintentar", key="wm_ai_rul_retry"):
                 st.session_state["wm_ai_rul_result"] = None
                 st.rerun()
 
@@ -3782,7 +3782,7 @@ except Exception:
     _active_id = None
     _active_inst = None
 
-with st.expander("📋 Auto-fill desde activo monitoreado", expanded=True):
+with st.expander("Auto-fill desde activo monitoreado", expanded=True):
     if _active_inst is None:
         st.warning(
             "No hay activo monitoreado activo. Anda a Machinery Library "
@@ -3830,7 +3830,7 @@ with st.expander("📋 Auto-fill desde activo monitoreado", expanded=True):
             elif inst_sch:
                 # La instancia tiene schematic_png pero el meta no se rellenó
                 st.warning(
-                    f"⚠️ El activo tiene schematic_png={inst_sch[:20]}... "
+                    f"El activo tiene schematic_png={inst_sch[:20]}... "
                     f"pero el meta del reporte no lo tomó. Click en "
                     f"'Reset auto-fill' abajo para forzar recarga."
                 )
@@ -3955,7 +3955,7 @@ if pdf_bytes is not None:
     dl_cols = st.columns([0.5, 0.5])
     with dl_cols[0]:
         st.download_button(
-            "⬇️  Descargar PDF",
+            "Descargar PDF",
             data=pdf_bytes,
             file_name=(meta.get("consecutive") or "watermelon_report").replace(" ", "_") + ".pdf",
             mime="application/pdf",
@@ -3967,12 +3967,12 @@ if pdf_bytes is not None:
         _can_archive = _is_my_own and _wm_my_role in ("admin", "specialist")
         if not _can_archive:
             st.button(
-                "📦  Archivar reporte",
+                "Archivar reporte",
                 disabled=True, use_container_width=True,
                 help="Solo el autor del reporte puede archivarlo.",
             )
         else:
-            with st.popover("📦  Archivar reporte", use_container_width=True):
+            with st.popover("Archivar reporte", use_container_width=True):
                 st.markdown("**Archivar copia inmutable del PDF**")
                 st.caption(
                     "Una vez archivado, el PDF queda guardado de forma permanente "
@@ -5122,13 +5122,13 @@ _archived = list_archived_reports(
 )
 
 st.caption(
-    f"📋 Mostrando **{len(_archived)}** reportes archivados visibles para tu role "
+    f"Mostrando **{len(_archived)}** reportes archivados visibles para tu role "
     f"(`{_wm_my_role}`)"
 )
 
 if not _archived:
     st.info(
-        "📦 No hay reportes archivados que coincidan con tus filtros. "
+        "No hay reportes archivados que coincidan con tus filtros. "
         "Cuando generes un PDF y le des 'Archivar reporte', aparecerá acá."
     )
 else:
@@ -5155,7 +5155,7 @@ else:
                       </div>
                       <div style="color:#475569;font-size:12px;margin-top:2px;">
                         {_owner} · {_date} · {_size}
-                        {' · 🌐 compartido con cliente' if _shared else ''}
+                        {' · compartido con cliente' if _shared else ''}
                       </div>
                       <div style="margin-top:4px;font-size:11px;color:#64748b;
                                   font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
@@ -5178,7 +5178,7 @@ else:
                 )
                 if _pdf_b:
                     st.download_button(
-                        "⬇️  Descargar PDF",
+                        "Descargar PDF",
                         data=_pdf_b,
                         file_name=f"{_aid.split('/')[-1]}.pdf",
                         mime="application/pdf",
@@ -5186,7 +5186,7 @@ else:
                         use_container_width=True,
                     )
                 else:
-                    st.button("⬇️  Descargar PDF", disabled=True,
+                    st.button("Descargar PDF", disabled=True,
                               key=f"dl_dis_{_aid}", use_container_width=True)
             with ac2:
                 # Toggle compartir con cliente (solo owner o admin)
@@ -5194,7 +5194,7 @@ else:
                               or _wm_my_role == "admin")
                 if _can_share:
                     if _shared:
-                        if st.button("🔒  Despublicar",
+                        if st.button("Despublicar",
                                      key=f"unsh_{_aid}",
                                      use_container_width=True):
                             r = share_with_client(_aid, False,
@@ -5205,7 +5205,7 @@ else:
                             else:
                                 st.error(r.get("error"))
                     else:
-                        if st.button("🌐  Compartir",
+                        if st.button("Compartir",
                                      key=f"sh_{_aid}",
                                      use_container_width=True):
                             r = share_with_client(_aid, True,
@@ -5220,7 +5220,7 @@ else:
                 _can_del = (_owner.lower() == _wm_my_email
                             or _wm_my_role == "admin")
                 if _can_del:
-                    with st.popover("🗑️  Eliminar", use_container_width=True):
+                    with st.popover("️  Eliminar", use_container_width=True):
                         st.warning(f"Vas a eliminar: `{_aid}`")
                         if st.button("Confirmar eliminación",
                                      key=f"del_{_aid}",

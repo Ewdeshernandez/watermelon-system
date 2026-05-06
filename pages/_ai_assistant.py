@@ -60,7 +60,7 @@ _user_role = (_user.get("role") or "").strip().lower()
 # Solo admin + specialist por ahora. client puede liberarse después.
 if _user_role not in ("admin", "specialist"):
     st.error(
-        "🔒 Acceso restringido. El AI Assistant está disponible para roles "
+        "Acceso restringido. El AI Assistant está disponible para roles "
         "**admin** y **specialist**. Si tu rol es client, contactá al "
         "especialista responsable de tu activo."
     )
@@ -99,7 +99,7 @@ st.markdown(
             Watermelon System · AI Assistant
         </div>
         <div style='font-size:1.6rem; font-weight:700; margin-top:4px;'>
-            🧠 Consultá tu archivo histórico en lenguaje natural
+            Consultá tu archivo histórico en lenguaje natural
         </div>
         <div style='font-size:0.95rem; color:#cbd5e1; margin-top:6px;'>
             Hacé preguntas sobre los reportes archivados de tus activos.
@@ -113,7 +113,7 @@ st.markdown(
 
 if not is_ai_available():
     st.warning(
-        "🔑 **AI no disponible.** Falta configurar `[anthropic] api_key` "
+        "**AI no disponible.** Falta configurar `[anthropic] api_key` "
         "en los secrets de Streamlit Cloud. Mientras tanto, el archivo "
         "histórico sigue accesible desde **Reports → Archivo histórico** "
         "(navegación tradicional con filtros)."
@@ -164,7 +164,7 @@ with st.sidebar:
     st.caption(f"Tokens IN: {_in_total:,} · OUT: {_out_total:,}")
     st.caption(f"Costo acumulado: **~${_cost_total:.4f}**")
 
-    if st.button("🗑 Limpiar conversación", use_container_width=True,
+    if st.button("Limpiar conversación", use_container_width=True,
                  disabled=_n_turns == 0):
         st.session_state["wm_aiq_history"] = []
         st.session_state["wm_aiq_total_cost"] = 0.0
@@ -183,7 +183,7 @@ with st.sidebar:
 # INFO DE ARCHIVO ACCESIBLE
 # =============================================================
 
-with st.expander("📂 Archivo accesible para tu rol", expanded=False):
+with st.expander("Archivo accesible para tu rol", expanded=False):
     try:
         _all_reports = list_archived_reports(
             viewer_email=_user_email,
@@ -197,7 +197,7 @@ with st.expander("📂 Archivo accesible para tu rol", expanded=False):
     if not _all_reports:
         st.info(
             "No hay reportes archivados accesibles para tu rol. Cuando "
-            "el especialista archive un reporte desde Reports → 📦 "
+            "el especialista archive un reporte desde Reports → "
             "Archivar reporte, va a aparecer acá y vas a poder "
             "consultarlo."
         )
@@ -232,7 +232,7 @@ def _render_assistant_turn(turn: Dict[str, Any]) -> None:
     """Renderiza una respuesta del assistant: markdown + reportes citados."""
     if turn.get("fallback_used"):
         st.info(
-            "ℹ️ Esta respuesta se generó con el modelo de respaldo "
+            "Esta respuesta se generó con el modelo de respaldo "
             "(Haiku 4.5). Calidad ligeramente menor."
         )
     md = turn.get("markdown", "")
@@ -241,7 +241,7 @@ def _render_assistant_turn(turn: Dict[str, Any]) -> None:
     # Reportes citados — botones de descarga
     refs: List[Dict[str, str]] = turn.get("reports_referenced", []) or []
     if refs:
-        with st.expander(f"📑 Reportes citados ({len(refs)})", expanded=True):
+        with st.expander(f"Reportes citados ({len(refs)})", expanded=True):
             for ref in refs:
                 aid = ref.get("archive_id", "")
                 consec = ref.get("consecutive", "")
@@ -279,7 +279,7 @@ def _render_assistant_turn(turn: Dict[str, Any]) -> None:
                     if _pdf_bytes:
                         _fname_safe = (consec or aid.replace("/", "_"))[:40]
                         st.download_button(
-                            "⬇ PDF",
+                            "Descargar PDF",
                             data=_pdf_bytes,
                             file_name=f"{_fname_safe}.pdf",
                             mime="application/pdf",
@@ -288,7 +288,7 @@ def _render_assistant_turn(turn: Dict[str, Any]) -> None:
                         )
                     else:
                         st.button(
-                            "⬇ PDF",
+                            "Descargar PDF",
                             disabled=True,
                             key=f"wm_aiq_dl_dis_{aid}_{turn.get('turn_id', '')}",
                             use_container_width=True,
@@ -302,7 +302,7 @@ def _render_assistant_turn(turn: Dict[str, Any]) -> None:
     _cost = turn.get("cost_usd", 0.0)
     _n_in_ctx = turn.get("n_reports_in_context", 0)
     _fb = turn.get("fallback_used", False)
-    _fb_tag = " · ⚠️ modelo de respaldo" if _fb else ""
+    _fb_tag = " · modelo de respaldo" if _fb else ""
     st.caption(
         f"Modelo: `{_model}` · Reportes en contexto: {_n_in_ctx} · "
         f"Tokens: {_tokens_in:,} → {_tokens_out:,} · "
@@ -352,7 +352,7 @@ if _question_to_process:
 
     # 3) Llamar a Claude
     with st.chat_message("assistant"):
-        with st.spinner("🧠 Buscando en el archivo y sintetizando... (5-30 seg)"):
+        with st.spinner("Buscando en el archivo y sintetizando... (5-30 seg)"):
             try:
                 _qa_result = query_archive(
                     _question_to_process,
@@ -365,7 +365,7 @@ if _question_to_process:
                 _qa_result = {
                     "ok": False,
                     "markdown": (
-                        f"_⚠️ Error inesperado:_\n\n```\n"
+                        f"_Error inesperado:_\n\n```\n"
                         f"{type(exc).__name__}: {exc}\n```"
                     ),
                     "reports_referenced": [],

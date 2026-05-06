@@ -1691,7 +1691,7 @@ with st.sidebar:
         key=f"wm_sp_max_cpm_input_{current_family}",
     )
     st.session_state[family_key] = float(max_cpm)
-    st.caption(f"📊 Auto-rango: {scale_reason}")
+    st.caption(f"Auto-rango: {scale_reason}")
 
     y_axis_mode = st.selectbox(
         "Y-axis scale",
@@ -2226,7 +2226,7 @@ def render_spectrum_panel(
             "CONDICIÓN ACEPTABLE": "#16a34a",
         }.get(sev, "#475569")
         with st.expander(
-            f"🔬 Diagnóstico avanzado · {cat_iv_diag.get('headline', '')}",
+            f"Diagnóstico avanzado · {cat_iv_diag.get('headline', '')}",
             expanded=True,
         ):
             st.markdown(
@@ -2261,12 +2261,12 @@ def render_spectrum_panel(
         st.session_state[ai_state_key] = None
 
     with st.expander(
-        "🧠 Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        "Interpretación clínica AI · Diagnóstico Cat IV asistido",
         expanded=False,
     ):
         if not is_ai_available():
             st.info(
-                "🔑 **AI Diagnóstico no disponible.** Falta configurar "
+                "**AI Diagnóstico no disponible.** Falta configurar "
                 "`[anthropic] api_key` en los secrets de Streamlit. Mientras "
                 "tanto, el diagnóstico técnico determinístico de arriba contiene "
                 "toda la evidencia ISO/API necesaria."
@@ -2277,9 +2277,9 @@ def render_spectrum_panel(
             ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
             with ai_btn_col1:
                 gen_clicked = st.button(
-                    "🧠 Generar diagnóstico AI"
+                    "Generar diagnóstico AI"
                     if stored is None
-                    else "🧠 Diagnóstico generado",
+                    else "Diagnóstico generado",
                     key=f"ai_gen_btn_{export_state_key}",
                     use_container_width=True,
                     type="primary" if stored is None else "secondary",
@@ -2287,7 +2287,7 @@ def render_spectrum_panel(
                 )
             with ai_btn_col2:
                 regen_clicked = st.button(
-                    "🔄 Regenerar",
+                    "Regenerar",
                     key=f"ai_regen_btn_{export_state_key}",
                     use_container_width=True,
                     disabled=stored is None,
@@ -2373,7 +2373,7 @@ def render_spectrum_panel(
                         str(bearing_diagnostic_text)[:1500]
                     )
 
-                with st.spinner("🧠 Claude analizando el espectro... (5-15 seg)"):
+                with st.spinner("Claude analizando el espectro... (5-15 seg)"):
                     try:
                         result = generate_ai_diagnostic(
                             ai_payload,
@@ -2384,7 +2384,7 @@ def render_spectrum_panel(
                         result = {
                             "ok": False,
                             "markdown": (
-                                f"_⚠️ Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"_Error inesperado al generar diagnóstico AI:_\n\n"
                                 f"```\n{type(exc).__name__}: {exc}\n```"
                             ),
                             "error": str(exc)[:500],
@@ -2405,7 +2405,7 @@ def render_spectrum_panel(
                     # nunca en el PDF al cliente).
                     if stored.get("fallback_used"):
                         st.info(
-                            "ℹ️ Este diagnóstico se generó con el modelo de "
+                            "Este diagnóstico se generó con el modelo de "
                             "respaldo (Haiku 4.5) porque el modelo principal "
                             "(Sonnet 4.5) estaba sobrecargado. La calidad es "
                             "ligeramente menor. Podés regenerar más tarde "
@@ -2423,7 +2423,7 @@ def render_spectrum_panel(
                         + stored.get("output_tokens", 0) * out_p
                     ) / 1_000_000
                     fallback_tag = (
-                        " · ⚠️ modelo de respaldo"
+                        " · modelo de respaldo"
                         if stored.get("fallback_used") else ""
                     )
                     st.caption(
@@ -2573,7 +2573,7 @@ def render_spectrum_panel(
                 report_notes=spectrum_report_notes,
             )
             ai_extra = (
-                " · 🧠 con Diagnóstico AI"
+                " · con Diagnóstico AI"
                 if ai_stored and ai_stored.get("ok") else ""
             )
             st.success(f"Spectrum enviado al reporte{ai_extra}")
