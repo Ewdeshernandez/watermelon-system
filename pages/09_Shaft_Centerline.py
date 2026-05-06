@@ -30,6 +30,10 @@ from core.scl_diagnostics import (
     detect_lift_off_speed,
 )
 from core.ui_theme import apply_watermelon_page_style, page_header
+from core.ai_diagnostic import (  # Ciclo 17.26: interpretación clínica AI
+    generate_ai_diagnostic,
+    is_ai_available,
+)
 
 
 # ============================================================
@@ -1861,12 +1865,191 @@ def render_scl_panel(
         notes = _build_scl_report_notes(text_diag)
     export_fig = _add_scl_export_footer(fig, text_diag)
 
+    # ------------------------------------------------------------
+    # Ciclo 17.26 — Interpretación clínica AI (Shaft Centerline)
+    # ------------------------------------------------------------
+    ai_state_key_scl = f"wm_ai_diag_scl_{panel_index}_{item['id']}"
+    if ai_state_key_scl not in st.session_state:
+        st.session_state[ai_state_key_scl] = None
+
+    with st.expander(
+        "🧠 Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        expanded=False,
+    ):
+        if not is_ai_available():
+            st.info(
+                "🔑 **AI Diagnóstico no disponible.** Falta configurar "
+                "`[anthropic] api_key` en los secrets de Streamlit."
+            )
+        else:
+            stored_scl = st.session_state.get(ai_state_key_scl)
+            ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
+            with ai_btn_col1:
+                gen_clicked_scl = st.button(
+                    "🧠 Generar diagnóstico AI"
+                    if stored_scl is None
+                    else "🧠 Diagnóstico generado",
+                    key=f"ai_gen_btn_scl_{panel_index}_{item['id']}",
+                    use_container_width=True,
+                    type="primary" if stored_scl is None else "secondary",
+                    disabled=stored_scl is not None and stored_scl.get("ok", False),
+                )
+            with ai_btn_col2:
+                regen_clicked_scl = st.button(
+                    "🔄 Regenerar",
+                    key=f"ai_regen_btn_scl_{panel_index}_{item['id']}",
+                    use_container_width=True,
+                    disabled=stored_scl is None,
+                )
+            with ai_btn_col3:
+                st.caption(
+                    "Claude Sonnet 4.5 · ~$0.015 por diagnóstico · "
+                    "cacheado 30 días si no regenerás."
+                )
+
+            should_call_scl = bool(gen_clicked_scl) and (stored_scl is None)
+            should_regen_scl = bool(regen_clicked_scl) and (stored_scl is not None)
+
+            if should_call_scl or should_regen_scl:
+                # Payload SCL: eccentricity, attitude angle, lift-off
+                # speed, clearance, posición del muñón.
+                ai_payload_scl: Dict[str, Any] = {
+                    "machine": {
+                        "tag": str(machine or ""),
+                        "punto_medicion": str(point or ""),
+                        "punto_acoplado": str(paired_point or ""),
+                        "clearance_center_mode": str(clearance_center_mode or ""),
+                    },
+                    "norm": {
+                        "headline_tecnico": str(text_diag.get("headline", "") or "") if text_diag else "",
+                        "cat_iv_headline": str(
+                            cat_iv_text_diag.get("headline", "") or ""
+                        ) if cat_iv_text_diag else "",
+                    },
+                    "technical": {
+                        "diagnostic_detail": str(
+                            cat_iv_text_diag.get("detail", "") or ""
+                        )[:1500] if cat_iv_text_diag else "",
+                        "diagnostic_action": str(
+                            cat_iv_text_diag.get("action", "") or ""
+                        )[:1500] if cat_iv_text_diag else "",
+                        "legacy_notes": str(
+                            _build_scl_report_notes(text_diag)
+                        )[:1000] if text_diag else "",
+                    },
+                    "trend": {},
+                }
+
+                with st.spinner("🧠 Claude analizando el shaft centerline... (5-15 seg)"):
+                    try:
+                        result_scl = generate_ai_diagnostic(
+                            ai_payload_scl,
+                            module_type="shaft_centerline",
+                            use_cache=not should_regen_scl,
+                        )
+                    except Exception as exc:
+                        result_scl = {
+                            "ok": False,
+                            "markdown": (
+                                f"_⚠️ Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"```\n{type(exc).__name__}: {exc}\n```"
+                            ),
+                            "error": str(exc)[:500],
+                            "model": "",
+                            "cached": False,
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "fallback_used": False,
+                            "fallback_reason": "",
+                            "generated_at": "",
+                        }
+                st.session_state[ai_state_key_scl] = result_scl
+                stored_scl = result_scl
+
+            if stored_scl is not None:
+                if stored_scl.get("ok"):
+                    if stored_scl.get("fallback_used"):
+                        st.info(
+                            "ℹ️ Diagnóstico generado con modelo de respaldo "
+                            "(Haiku 4.5)."
+                        )
+                    st.markdown(stored_scl.get("markdown", ""))
+                    model_used_scl = str(stored_scl.get("model", "") or "")
+                    if model_used_scl.startswith("claude-haiku"):
+                        in_p_scl, out_p_scl = 1.0, 5.0
+                    else:
+                        in_p_scl, out_p_scl = 3.0, 15.0
+                    cost_usd_scl = (
+                        stored_scl.get("input_tokens", 0) * in_p_scl
+                        + stored_scl.get("output_tokens", 0) * out_p_scl
+                    ) / 1_000_000
+                    fallback_tag_scl = (
+                        " · ⚠️ modelo de respaldo"
+                        if stored_scl.get("fallback_used") else ""
+                    )
+                    st.caption(
+                        f"Modelo: `{model_used_scl}` · "
+                        f"Tokens: {stored_scl.get('input_tokens', 0)} → "
+                        f"{stored_scl.get('output_tokens', 0)} · "
+                        f"Costo: ~${cost_usd_scl:.4f} · "
+                        f"{'(cacheado)' if stored_scl.get('cached') else '(generado nuevo)'}"
+                        f"{fallback_tag_scl}"
+                    )
+                else:
+                    st.error(
+                        stored_scl.get("markdown", "Error al generar diagnóstico AI.")
+                    )
+
     b1, b2 = st.columns(2)
     with b1:
         png_bytes, png_error = build_export_png_bytes(export_fig)
         if st.button("Enviar panel a reporte", key=f"scl_report_btn_{panel_index}_{item['id']}"):
-            push_report_item(title=title, notes=notes, image_bytes=png_bytes)
-            st.success("Panel individual enviado al reporte.")
+            # Ciclo 17.26 — armar bloque AI si está generado
+            ai_stored_for_scl_report = st.session_state.get(ai_state_key_scl)
+            final_notes_scl = notes
+            if (ai_stored_for_scl_report
+                    and ai_stored_for_scl_report.get("ok")
+                    and ai_stored_for_scl_report.get("markdown")):
+                ai_md_scl = str(
+                    ai_stored_for_scl_report.get("markdown", "")
+                ).strip()
+                if ai_md_scl:
+                    quant_lines_scl: List[str] = ["Parámetro|Valor"]
+                    if machine:
+                        quant_lines_scl.append(f"Máquina|{machine}")
+                    if point:
+                        quant_lines_scl.append(f"Punto X|{point}")
+                    if paired_point:
+                        quant_lines_scl.append(f"Punto Y|{paired_point}")
+                    if clearance_center_mode:
+                        quant_lines_scl.append(
+                            f"Modo de referencia|{clearance_center_mode}"
+                        )
+                    if cat_iv_text_diag:
+                        cat_iv_headline_scl = str(
+                            cat_iv_text_diag.get("headline", "") or ""
+                        ).strip()
+                        if cat_iv_headline_scl:
+                            quant_lines_scl.append(
+                                f"Diagnóstico Cat IV|{cat_iv_headline_scl}"
+                            )
+
+                    final_notes_scl = (
+                        "<<<WM_AI_BLOCK>>>\n"
+                        + "\n".join(quant_lines_scl)
+                        + "\n<<<WM_AI_NARRATIVE>>>\n"
+                        + ai_md_scl
+                    )
+            push_report_item(
+                title=title, notes=final_notes_scl, image_bytes=png_bytes
+            )
+            ai_extra_scl = (
+                " (con Diagnóstico AI)"
+                if final_notes_scl != notes else ""
+            )
+            st.success(
+                f"Panel individual enviado al reporte{ai_extra_scl}."
+            )
     with b2:
         if png_bytes is not None:
             st.download_button(
