@@ -34,6 +34,10 @@ NAV_ITEMS = [
     {"label": "Phase Analysis", "page": "pages/13_Phase_Analysis.py"},
     {"label": "Diagnostics", "page": "pages/15_Diagnostics.py"},
     {"label": "Reports", "page": "pages/16_Reports.py"},
+    # Ciclo 17.27 — AI Assistant: Q&A en lenguaje natural sobre el
+    # archivo histórico de reportes. Solo admin + specialist por
+    # ahora; client se evalúa en una iteración futura.
+    {"label": "🧠 AI Assistant", "page": "pages/_ai_assistant.py"},
 ]
 
 
@@ -51,6 +55,11 @@ CLIENT_BLOCKED_PAGES = {
     "pages/01_Load_Data.py",
     "pages/15_Diagnostics.py",
     "pages/01b_Machine_Map.py",  # tiene comandos para editar el map
+    # Ciclo 17.27 — AI Assistant queda restringido a admin/specialist
+    # en su versión inicial. Cuando expongamos Q&A para clientes,
+    # se removerá de esta lista y se ajustará la página para
+    # filtrar consultas a "shared_with_client=True" únicamente.
+    "pages/_ai_assistant.py",
 }
 
 
