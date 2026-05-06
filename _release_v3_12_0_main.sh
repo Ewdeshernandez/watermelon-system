@@ -125,6 +125,15 @@ echo "         - Headers de pages/_ai_assistant.py + _monthly_briefing.py"
 echo "         - Mensajes de error/warning de los wrappers AI"
 echo "         - Software internacional, presentación profesional"
 echo ""
+echo "  17.33  Eliminación de módulos deadweight:"
+echo "         - pages/13_Phase_Analysis.py BORRADO (sin uso real)"
+echo "         - pages/15_Diagnostics.py BORRADO (reemplazado por"
+echo "           AI Assistant + Machinery Library con filtros)"
+echo "         - Cards Críticos/Atención del Home redirigen a"
+echo "           Machinery Library con filtro de severidad"
+echo "         - Quick Action 'Diagnostics' reemplazado por"
+echo "           'AI Assistant' en el strip del Home"
+echo ""
 echo "Estado actual:"
 git log dev --oneline -1 | sed 's/^/  dev:  /'
 git log main --oneline -1 | sed 's/^/  main: /'
@@ -150,14 +159,26 @@ for v in v3_4_2 v3_4_3 v3_4_4 v3_4_5 v3_4_6 v3_4_7 v3_4_8 v3_4_9 \
     git checkout HEAD -- "_release_${v}_main.sh" 2>/dev/null || true
 done
 
+# Ciclo 17.33 — eliminar módulos legacy deadweight. Si los archivos
+# todavía existen en el filesystem (no fueron borrados antes), los
+# pasamos por git rm para que la eliminación quede en el commit.
+for f in pages/13_Phase_Analysis.py pages/15_Diagnostics.py; do
+    if [ -f "$f" ]; then
+        git rm -f "$f" 2>/dev/null || rm -f "$f"
+        echo "  · Eliminado del repo: $f"
+    fi
+done
+
 if ! git diff --quiet || ! git diff --staged --quiet; then
     # Agregamos los archivos del 17.31 (Briefing Mensual) + los del
-    # 17.32 (cleanup de emojis del UI) en el mismo commit. Son cambios
+    # 17.32 (cleanup de emojis del UI) + los del 17.33 (eliminación
+    # de Phase Analysis y Diagnostics) en el mismo commit. Son cambios
     # coordinados en este release.
     git add core/ai_briefing.py \
             core/briefing_monthly_pdf.py \
             pages/_monthly_briefing.py \
             core/auth.py \
+            pages/_landing.py \
             pages/_ai_assistant.py \
             pages/02_Time_Waveforms.py \
             pages/03_Spectrum.py \
@@ -172,7 +193,7 @@ if ! git diff --quiet || ! git diff --staged --quiet; then
             core/ai_runcompare.py \
             core/ai_rul.py \
             _release_v3_12_0_main.sh
-    git commit -m "feat(17.31 + 17.32): Briefing Mensual + UX cleanup (sin emojis)
+    git commit -m "feat(17.31 + 17.32 + 17.33): Briefing Mensual + UX cleanup + módulos deadweight removidos
 
 Nueva página '📨 Briefing Mensual' (admin + specialist) que genera
 un PDF de 1 página con el estado consolidado del cliente durante
