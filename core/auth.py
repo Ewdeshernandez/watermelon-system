@@ -37,7 +37,11 @@ NAV_ITEMS = [
     # Ciclo 17.27 — AI Assistant: Q&A en lenguaje natural sobre el
     # archivo histórico de reportes. Solo admin + specialist por
     # ahora; client se evalúa en una iteración futura.
-    {"label": "🧠 AI Assistant", "page": "pages/_ai_assistant.py"},
+    {"label": "AI Assistant", "page": "pages/_ai_assistant.py"},
+    # Ciclo 17.31 — Briefing Mensual Ejecutivo. Genera y envía por
+    # email al VP del cliente el PDF de 1 página con el estado
+    # consolidado del portafolio. Solo admin + specialist.
+    {"label": "Briefing Mensual", "page": "pages/_monthly_briefing.py"},
 ]
 
 
@@ -60,6 +64,11 @@ CLIENT_BLOCKED_PAGES = {
     # se removerá de esta lista y se ajustará la página para
     # filtrar consultas a "shared_with_client=True" únicamente.
     "pages/_ai_assistant.py",
+    # Ciclo 17.31 — Briefing Mensual: solo admin/specialist generan
+    # y envían briefings al cliente. El cliente no debe poder
+    # acceder a la herramienta de generación (ve los briefings que
+    # le llegan por email pero no los genera él mismo).
+    "pages/_monthly_briefing.py",
 }
 
 

@@ -454,14 +454,14 @@ def generate_run_comparison(
         }
     """
     if not prev_sidecar:
-        return _empty_runcompare("_⚠️ No hay reporte anterior para comparar._")
+        return _empty_runcompare("_No hay reporte anterior para comparar._")
     if not current_items:
         return _empty_runcompare(
-            "_⚠️ El reporte actual no tiene figuras para comparar._"
+            "_El reporte actual no tiene figuras para comparar._"
         )
     if not is_ai_available():
         return _empty_runcompare(
-            "_⚠️ AI no disponible — falta configurar `[anthropic] api_key`._"
+            "_AI no disponible — falta configurar `[anthropic] api_key`._"
         )
 
     prev_archive_id = prev_sidecar.get("archive_id", "")
@@ -496,7 +496,7 @@ def generate_run_comparison(
     # Llamada con retry + fallback
     client = _get_client()
     if client is None:
-        return _empty_runcompare("_⚠️ No se pudo inicializar el cliente._")
+        return _empty_runcompare("_No se pudo inicializar el cliente._")
 
     user_msg = _build_runcompare_user_message(
         prev_sidecar, current_meta, current_items
@@ -561,12 +561,12 @@ def generate_run_comparison(
     if response is None:
         err = str(last_exc) if last_exc else "unknown"
         if "overloaded" in err.lower() or "529" in err:
-            msg = ("_⚠️ Servidores Claude sobrecargados. "
+            msg = ("_Servidores Claude sobrecargados. "
                    "Esperá 5-10 min y reintentá._")
         elif "timeout" in err.lower() or "timed out" in err.lower():
-            msg = "_⚠️ Timeout de conexión. Verificá tu red y reintentá._"
+            msg = "_Timeout de conexión. Verificá tu red y reintentá._"
         else:
-            msg = f"_⚠️ Error generando comparación:_\n\n```\n{err}\n```"
+            msg = f"_Error generando comparación:_\n\n```\n{err}\n```"
         return _empty_runcompare(
             msg,
             prev_archive_id=prev_archive_id,

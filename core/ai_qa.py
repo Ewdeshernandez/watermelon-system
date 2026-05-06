@@ -476,7 +476,7 @@ def query_archive(
 
     if not is_ai_available():
         return _empty_qa_response(
-            "_⚠️ AI no disponible — falta configurar `[anthropic] api_key` en "
+            "_AI no disponible — falta configurar `[anthropic] api_key` en "
             "los secrets de Streamlit, o no está instalado el paquete "
             "`anthropic`._"
         )
@@ -532,7 +532,7 @@ def query_archive(
     # 5) Llamada a Claude con retry + fallback
     client = _get_client()
     if client is None:
-        return _empty_qa_response("_⚠️ No se pudo inicializar el cliente._")
+        return _empty_qa_response("_No se pudo inicializar el cliente._")
 
     user_msg = _build_qa_user_message(
         question, sidecars, include_pdf_text=use_pdf_text
@@ -596,12 +596,12 @@ def query_archive(
     if response is None:
         err = str(last_exc) if last_exc else "unknown"
         if "overloaded" in err.lower() or "529" in err:
-            msg = ("_⚠️ Servidores Claude sobrecargados. Esperá 5-10 min y "
+            msg = ("_Servidores Claude sobrecargados. Esperá 5-10 min y "
                    "reintentá._")
         elif "timeout" in err.lower() or "timed out" in err.lower():
-            msg = "_⚠️ Timeout de conexión. Verificá tu red y reintentá._"
+            msg = "_Timeout de conexión. Verificá tu red y reintentá._"
         else:
-            msg = f"_⚠️ Error consultando archivo:_\n\n```\n{err}\n```"
+            msg = f"_Error consultando archivo:_\n\n```\n{err}\n```"
         return _empty_qa_response(
             msg, n_archive=n_archive, error=err[:500],
             fallback_used=fallback_used,

@@ -486,7 +486,7 @@ def generate_ai_diagnostic(
         return {
             "ok": False,
             "markdown": (
-                "_⚠️ AI Diagnóstico no está disponible — falta configurar "
+                "_AI Diagnóstico no está disponible — falta configurar "
                 "la API key de Anthropic en `[anthropic] api_key` de "
                 "Streamlit secrets, o no está instalado el paquete `anthropic`._"
             ),
@@ -514,7 +514,7 @@ def generate_ai_diagnostic(
     if client is None:
         return {
             "ok": False,
-            "markdown": "_⚠️ No se pudo inicializar el cliente de Anthropic._",
+            "markdown": "_No se pudo inicializar el cliente de Anthropic._",
             "error": "client_init_failed",
             "model": "",
             "cached": False,
@@ -662,7 +662,7 @@ def generate_ai_diagnostic(
         # Haiku como fallback y también falló, el problema es persistente.
         if "overloaded" in err_str.lower() or "529" in err_str:
             user_msg_err = (
-                "_⚠️ Tanto el modelo principal (Sonnet 4.5) como el de "
+                "_Tanto el modelo principal (Sonnet 4.5) como el de "
                 "respaldo (Haiku 4.5) están sobrecargados en este momento "
                 "(evento poco frecuente, alto tráfico global en la "
                 "infraestructura de Anthropic). Esperá 5-10 minutos y "
@@ -672,7 +672,7 @@ def generate_ai_diagnostic(
                 or "timeout" in err_str.lower()
                 or "interrupted" in err_str.lower()):
             user_msg_err = (
-                "_⚠️ La conexión con Claude API tardó más del límite "
+                "_La conexión con Claude API tardó más del límite "
                 "configurado. El sistema reintentó automáticamente con "
                 "modelo principal y de respaldo, pero la red continúa "
                 "lenta. Verificá tu conexión a internet o esperá 1-2 "
@@ -680,23 +680,23 @@ def generate_ai_diagnostic(
             )
         elif "rate limit" in err_str.lower() or "429" in err_str:
             user_msg_err = (
-                "_⚠️ Límite de requests por minuto alcanzado. Esperá 30 "
+                "_Límite de requests por minuto alcanzado. Esperá 30 "
                 "segundos y volvé a intentar._"
             )
         elif "401" in err_str or "authentication" in err_str.lower():
             user_msg_err = (
-                "_⚠️ La API key de Anthropic no es válida o fue revocada. "
+                "_La API key de Anthropic no es válida o fue revocada. "
                 "Generá una nueva en console.anthropic.com → API Keys y "
                 "actualizala en `[anthropic] api_key` de los secrets._"
             )
         elif "credit" in err_str.lower() or "billing" in err_str.lower():
             user_msg_err = (
-                "_⚠️ Saldo de API insuficiente. Revisar saldo en "
+                "_Saldo de API insuficiente. Revisar saldo en "
                 "console.anthropic.com → Settings → Billing._"
             )
         else:
             user_msg_err = (
-                f"_⚠️ Error al consultar Claude API:_\n\n```\n{err_str}\n```"
+                f"_Error al consultar Claude API:_\n\n```\n{err_str}\n```"
             )
         return {
             "ok": False,
@@ -984,7 +984,7 @@ def generate_executive_summary(
         return {
             "ok": False,
             "markdown": (
-                "_⚠️ No hay figuras en el reporte para sintetizar. "
+                "_No hay figuras en el reporte para sintetizar. "
                 "Agregá al menos una figura desde Spectrum, Trends, "
                 "Bode u otro módulo y volvé a intentar._"
             ),
@@ -1002,7 +1002,7 @@ def generate_executive_summary(
         return {
             "ok": False,
             "markdown": (
-                "_⚠️ AI no disponible — falta configurar `[anthropic] "
+                "_AI no disponible — falta configurar `[anthropic] "
                 "api_key` en st.secrets, o falta el paquete anthropic._"
             ),
             "error": "ai_not_available",
@@ -1034,7 +1034,7 @@ def generate_executive_summary(
     if client is None:
         return {
             "ok": False,
-            "markdown": "_⚠️ No se pudo inicializar el cliente Anthropic._",
+            "markdown": "_No se pudo inicializar el cliente Anthropic._",
             "error": "client_init_failed",
             "model": "",
             "cached": False,
@@ -1132,17 +1132,17 @@ def generate_executive_summary(
         err_str = str(last_exception) if last_exception else "unknown"
         if "overloaded" in err_str.lower() or "529" in err_str:
             user_err = (
-                "_⚠️ Servidores Claude sobrecargados (Sonnet y Haiku). "
+                "_Servidores Claude sobrecargados (Sonnet y Haiku). "
                 "Esperá 5-10 minutos y reintentá._"
             )
         elif "timeout" in err_str.lower() or "timed out" in err_str.lower():
             user_err = (
-                "_⚠️ Timeout de conexión con Claude. Verificá tu red y "
+                "_Timeout de conexión con Claude. Verificá tu red y "
                 "reintentá._"
             )
         else:
             user_err = (
-                f"_⚠️ Error generando síntesis ejecutiva:_\n\n"
+                f"_Error generando síntesis ejecutiva:_\n\n"
                 f"```\n{err_str}\n```"
             )
         return {

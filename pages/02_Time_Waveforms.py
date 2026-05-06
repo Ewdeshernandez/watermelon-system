@@ -1541,7 +1541,7 @@ def render_waveform_panel(
             "CONDICIÓN ACEPTABLE": "#16a34a",
         }.get(sev, "#475569")
         with st.expander(
-            f"🔬 Diagnóstico avanzado · {cat_iv_wf_diag.get('headline', '')}",
+            f"Diagnóstico avanzado · {cat_iv_wf_diag.get('headline', '')}",
             expanded=True,
         ):
             st.markdown(
@@ -1611,12 +1611,12 @@ def render_waveform_panel(
         st.session_state[ai_state_key] = None
 
     with st.expander(
-        "🧠 Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        "Interpretación clínica AI · Diagnóstico Cat IV asistido",
         expanded=False,
     ):
         if not is_ai_available():
             st.info(
-                "🔑 **AI Diagnóstico no disponible.** Falta configurar "
+                "**AI Diagnóstico no disponible.** Falta configurar "
                 "`[anthropic] api_key` en los secrets de Streamlit. El "
                 "diagnóstico técnico determinístico de arriba contiene "
                 "toda la evidencia ISO/API necesaria."
@@ -1626,9 +1626,9 @@ def render_waveform_panel(
             ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
             with ai_btn_col1:
                 gen_clicked = st.button(
-                    "🧠 Generar diagnóstico AI"
+                    "Generar diagnóstico AI"
                     if stored is None
-                    else "🧠 Diagnóstico generado",
+                    else "Diagnóstico generado",
                     key=f"ai_gen_btn_wf_{export_state_key}",
                     use_container_width=True,
                     type="primary" if stored is None else "secondary",
@@ -1636,7 +1636,7 @@ def render_waveform_panel(
                 )
             with ai_btn_col2:
                 regen_clicked = st.button(
-                    "🔄 Regenerar",
+                    "Regenerar",
                     key=f"ai_regen_btn_wf_{export_state_key}",
                     use_container_width=True,
                     disabled=stored is None,
@@ -1712,7 +1712,7 @@ def render_waveform_panel(
                         ][:6],
                     }
 
-                with st.spinner("🧠 Claude analizando la forma de onda... (5-15 seg)"):
+                with st.spinner("Claude analizando la forma de onda... (5-15 seg)"):
                     try:
                         result = generate_ai_diagnostic(
                             ai_payload,
@@ -1723,7 +1723,7 @@ def render_waveform_panel(
                         result = {
                             "ok": False,
                             "markdown": (
-                                f"_⚠️ Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"_Error inesperado al generar diagnóstico AI:_\n\n"
                                 f"```\n{type(exc).__name__}: {exc}\n```"
                             ),
                             "error": str(exc)[:500],
@@ -1742,7 +1742,7 @@ def render_waveform_panel(
                 if stored.get("ok"):
                     if stored.get("fallback_used"):
                         st.info(
-                            "ℹ️ Este diagnóstico se generó con el modelo de "
+                            "Este diagnóstico se generó con el modelo de "
                             "respaldo (Haiku 4.5) porque el modelo principal "
                             "(Sonnet 4.5) estaba sobrecargado. La calidad es "
                             "ligeramente menor. Podés regenerar más tarde."
@@ -1758,7 +1758,7 @@ def render_waveform_panel(
                         + stored.get("output_tokens", 0) * out_p
                     ) / 1_000_000
                     fallback_tag = (
-                        " · ⚠️ modelo de respaldo"
+                        " · modelo de respaldo"
                         if stored.get("fallback_used") else ""
                     )
                     st.caption(
@@ -1904,7 +1904,7 @@ def render_waveform_panel(
             )
 
             ai_extra = (
-                " · 🧠 con Diagnóstico AI"
+                " · con Diagnóstico AI"
                 if ai_notes_override else ""
             )
             if png_bytes_for_report is not None:
@@ -2109,7 +2109,7 @@ else:
 
 # Ciclo 12.2 — sección 'Análisis automático de forma de onda' eliminada.
 # Las 8 métricas (RMS, Peak, CF, Kurtosis, Mean, Std, Skewness, P2P) y los
-# transitorios ahora viven DENTRO del expander '🔬 Diagnóstico avanzado'
+# transitorios ahora viven DENTRO del expander 'Diagnóstico avanzado'
 # por panel, junto a la narrativa que las usa. La sección suelta había
 # quedado huérfana: mostraba números pero no llegaban al reporte ni se
 # correlacionaban con findings.
