@@ -13,6 +13,11 @@ import streamlit as st
 from core.auth import require_login, render_user_menu
 from core.orbit import compute_orbit
 from core.report_state import append_report_item_and_persist
+from core.ai_diagnostic import (  # Ciclo 17.26: interpretación clínica AI
+    generate_ai_diagnostic,
+    is_ai_available,
+)
+from typing import Any, Dict  # Ciclo 17.26 — para el payload del AI
 
 st.set_page_config(page_title="Watermelon System | Orbit Analysis", layout="wide")
 
@@ -655,17 +660,32 @@ def build_orbit_pairs(signals: dict) -> List[OrbitPair]:
     return pairs
 
 
-def queue_orbit_to_report(pair: OrbitPair, fig: go.Figure, panel_title: str, result) -> None:
+def queue_orbit_to_report(
+    pair: OrbitPair,
+    fig: go.Figure,
+    panel_title: str,
+    result,
+    notes_override: Optional[str] = None,
+) -> None:
     # Ciclo 17.19 HOTFIX OOM: NO guardar el go.Figure en session_state.
     # Cada figure de Orbit pesa 20-100 MB en memoria (incluye todos los
     # datos del trace). Con 5 figuras → 250-500 MB → Streamlit Cloud
     # (1 GB RAM) revienta. En su lugar, generamos el PNG bytes una sola
     # vez y guardamos solo eso. La UI de Reports cae al fallback de
     # st.image() — pierde el zoom interactivo de Plotly pero no se cae.
+    #
+    # Ciclo 17.26 — notes_override: si viene con contenido, se usa como
+    # notas (típicamente bloque AI con marcador <<<WM_AI_BLOCK>>>). El
+    # PDF render lo detecta y lo estiliza con fuentes clínicas nativas.
     try:
         _png_bytes, _ = build_export_png_bytes(fig)
     except Exception:
         _png_bytes = None
+    final_notes = (
+        notes_override
+        if notes_override is not None and notes_override.strip()
+        else ""
+    )
     append_report_item_and_persist(
         {
             "id": make_export_state_key(
@@ -680,7 +700,7 @@ def queue_orbit_to_report(pair: OrbitPair, fig: go.Figure, panel_title: str, res
             ),
             "type": "orbit",
             "title": panel_title,
-            "notes": "",
+            "notes": final_notes,
             "signal_id": f"{pair.x_name}|{pair.y_name}",
             "figure": None,                # OOM fix — ya no guardamos el Plotly object
             "image_bytes": _png_bytes,     # PNG estático para el fallback de Reports
@@ -767,6 +787,148 @@ def render_orbit_panel(
         key=f"wm_orbit_plot_{export_state_key}",
     )
 
+    # ------------------------------------------------------------
+    # Ciclo 17.26 — Interpretación clínica AI (Orbit)
+    # ------------------------------------------------------------
+    ai_state_key_orb = f"wm_ai_diag_orbit_{export_state_key}"
+    if ai_state_key_orb not in st.session_state:
+        st.session_state[ai_state_key_orb] = None
+
+    with st.expander(
+        "🧠 Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        expanded=False,
+    ):
+        if not is_ai_available():
+            st.info(
+                "🔑 **AI Diagnóstico no disponible.** Falta configurar "
+                "`[anthropic] api_key` en los secrets de Streamlit."
+            )
+        else:
+            stored_orb = st.session_state.get(ai_state_key_orb)
+            ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
+            with ai_btn_col1:
+                gen_clicked_orb = st.button(
+                    "🧠 Generar diagnóstico AI"
+                    if stored_orb is None
+                    else "🧠 Diagnóstico generado",
+                    key=f"ai_gen_btn_orb_{export_state_key}",
+                    use_container_width=True,
+                    type="primary" if stored_orb is None else "secondary",
+                    disabled=stored_orb is not None and stored_orb.get("ok", False),
+                )
+            with ai_btn_col2:
+                regen_clicked_orb = st.button(
+                    "🔄 Regenerar",
+                    key=f"ai_regen_btn_orb_{export_state_key}",
+                    use_container_width=True,
+                    disabled=stored_orb is None,
+                )
+            with ai_btn_col3:
+                st.caption(
+                    "Claude Sonnet 4.5 · ~$0.015 por diagnóstico · "
+                    "cacheado 30 días si no regenerás."
+                )
+
+            should_call_orb = bool(gen_clicked_orb) and (stored_orb is None)
+            should_regen_orb = bool(regen_clicked_orb) and (stored_orb is not None)
+
+            if should_call_orb or should_regen_orb:
+                # Construir payload con datos de la órbita: amplitudes
+                # X/Y, dirección de precesión, traversal, modo de filtro.
+                _diag = result.diagnostics or {}
+                _x_pkpk = float(_diag.get("x_wf_amp_pkpk") or 0.0)
+                _y_pkpk = float(_diag.get("y_wf_amp_pkpk") or 0.0)
+                _x_harm = float(_diag.get("x_harmonic_amplitude_mean") or 0.0)
+                _y_harm = float(_diag.get("y_harmonic_amplitude_mean") or 0.0)
+                _ratio = (_y_pkpk / _x_pkpk) if _x_pkpk > 0 else 0.0
+
+                ai_payload_orb: Dict[str, Any] = {
+                    "machine": {
+                        "tag": str(result.probe_state.get("machine_name", "") or ""),
+                        "punto_medicion": f"{pair.x_name} + {pair.y_name}",
+                        "rotation": str(machine_rotation),
+                        "rpm": float(_diag.get("rpm") or 0.0),
+                        "timestamp": str(result.probe_state.get("timestamp", "") or ""),
+                    },
+                    "norm": {
+                        "filter_mode": str(ui_filter_mode),
+                    },
+                    "technical": {
+                        "amplitud_X_pkpk_waveform": round(_x_pkpk, 4),
+                        "amplitud_Y_pkpk_waveform": round(_y_pkpk, 4),
+                        "amplitud_X_armonica_filtrada": round(_x_harm, 4),
+                        "amplitud_Y_armonica_filtrada": round(_y_harm, 4),
+                        "ratio_Y_sobre_X": round(_ratio, 3),
+                        "direccion_precesion": str(result.precession or ""),
+                        "traversal": str(result.traversal or ""),
+                        "samples_per_revolution": int(result.samples_per_rev or 0),
+                        "revoluciones_disponibles": int(
+                            result.revolutions_available or 0
+                        ),
+                    },
+                    "trend": {},
+                }
+
+                with st.spinner("🧠 Claude analizando la órbita... (5-15 seg)"):
+                    try:
+                        result_orb = generate_ai_diagnostic(
+                            ai_payload_orb,
+                            module_type="orbit",
+                            use_cache=not should_regen_orb,
+                        )
+                    except Exception as exc:
+                        result_orb = {
+                            "ok": False,
+                            "markdown": (
+                                f"_⚠️ Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"```\n{type(exc).__name__}: {exc}\n```"
+                            ),
+                            "error": str(exc)[:500],
+                            "model": "",
+                            "cached": False,
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "fallback_used": False,
+                            "fallback_reason": "",
+                            "generated_at": "",
+                        }
+                st.session_state[ai_state_key_orb] = result_orb
+                stored_orb = result_orb
+
+            if stored_orb is not None:
+                if stored_orb.get("ok"):
+                    if stored_orb.get("fallback_used"):
+                        st.info(
+                            "ℹ️ Diagnóstico generado con modelo de respaldo "
+                            "(Haiku 4.5)."
+                        )
+                    st.markdown(stored_orb.get("markdown", ""))
+                    model_used_orb = str(stored_orb.get("model", "") or "")
+                    if model_used_orb.startswith("claude-haiku"):
+                        in_p_orb, out_p_orb = 1.0, 5.0
+                    else:
+                        in_p_orb, out_p_orb = 3.0, 15.0
+                    cost_usd_orb = (
+                        stored_orb.get("input_tokens", 0) * in_p_orb
+                        + stored_orb.get("output_tokens", 0) * out_p_orb
+                    ) / 1_000_000
+                    fallback_tag_orb = (
+                        " · ⚠️ modelo de respaldo"
+                        if stored_orb.get("fallback_used") else ""
+                    )
+                    st.caption(
+                        f"Modelo: `{model_used_orb}` · "
+                        f"Tokens: {stored_orb.get('input_tokens', 0)} → "
+                        f"{stored_orb.get('output_tokens', 0)} · "
+                        f"Costo: ~${cost_usd_orb:.4f} · "
+                        f"{'(cacheado)' if stored_orb.get('cached') else '(generado nuevo)'}"
+                        f"{fallback_tag_orb}"
+                    )
+                else:
+                    st.error(
+                        stored_orb.get("markdown", "Error al generar diagnóstico AI.")
+                    )
+
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
@@ -799,8 +961,66 @@ def render_orbit_panel(
 
     with col_report:
         if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
-            queue_orbit_to_report(pair, fig, panel_title, result)
-            st.success("Orbit enviada al reporte")
+            # Ciclo 17.26 — armar bloque AI si está generado
+            ai_stored_for_orb_report = st.session_state.get(
+                f"wm_ai_diag_orbit_{export_state_key}"
+            )
+            ai_notes_override_orb: Optional[str] = None
+            if (ai_stored_for_orb_report
+                    and ai_stored_for_orb_report.get("ok")
+                    and ai_stored_for_orb_report.get("markdown")):
+                ai_md_orb = str(
+                    ai_stored_for_orb_report.get("markdown", "")
+                ).strip()
+                if ai_md_orb:
+                    quant_lines_orb: List[str] = ["Parámetro|Valor"]
+                    _diag_rep = result.diagnostics or {}
+                    _rpm_orb = float(_diag_rep.get("rpm") or 0.0)
+                    if _rpm_orb > 0:
+                        quant_lines_orb.append(
+                            f"Velocidad de giro|{_rpm_orb:.0f} RPM"
+                        )
+                    _x_p = float(_diag_rep.get("x_wf_amp_pkpk") or 0.0)
+                    _y_p = float(_diag_rep.get("y_wf_amp_pkpk") or 0.0)
+                    if _x_p > 0:
+                        quant_lines_orb.append(
+                            f"Amplitud X (peak-to-peak)|{_x_p:.3f}"
+                        )
+                    if _y_p > 0:
+                        quant_lines_orb.append(
+                            f"Amplitud Y (peak-to-peak)|{_y_p:.3f}"
+                        )
+                    if result.precession:
+                        quant_lines_orb.append(
+                            f"Dirección de precesión|{result.precession}"
+                        )
+                    if result.traversal:
+                        quant_lines_orb.append(
+                            f"Sentido de traversal|{result.traversal}"
+                        )
+                    quant_lines_orb.append(
+                        f"Modo de filtro|{ui_filter_mode}"
+                    )
+                    quant_lines_orb.append(
+                        f"Punto de medición|{pair.x_name} + {pair.y_name}"
+                    )
+
+                    ai_notes_override_orb = (
+                        "<<<WM_AI_BLOCK>>>\n"
+                        + "\n".join(quant_lines_orb)
+                        + "\n<<<WM_AI_NARRATIVE>>>\n"
+                        + ai_md_orb
+                    )
+
+            queue_orbit_to_report(
+                pair, fig, panel_title, result,
+                notes_override=ai_notes_override_orb,
+            )
+            ai_extra_orb = (
+                " · 🧠 con Diagnóstico AI"
+                if ai_notes_override_orb else ""
+            )
+            st.success(f"Orbit enviada al reporte{ai_extra_orb}")
 
     panel_error = st.session_state.wm_orbit_export_store[export_state_key]["error"]
     if panel_error:

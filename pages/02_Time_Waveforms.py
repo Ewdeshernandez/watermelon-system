@@ -20,6 +20,10 @@ from core.waveform_diagnostics import (
     build_waveform_report_notes,
     build_waveform_diagnostics_rotordyn,  # Ciclo 12: Cat IV completo
 )
+from core.ai_diagnostic import (  # Ciclo 17.26: interpretación clínica AI
+    generate_ai_diagnostic,
+    is_ai_available,
+)
 from core.waveform_metrics import compute_metrics_batch, compute_waveform_metrics
 from core.waveform_insights import generate_batch_insights
 from core.waveform_impacts import detect_impacts_batch, detect_impacts
@@ -1175,7 +1179,28 @@ if not records_all:
     st.stop()
 
 
-def queue_waveform_to_report(record: SignalRecord, fig: go.Figure, panel_title: str, text_diag: Dict[str, str], image_bytes: Optional[bytes] = None) -> None:
+def queue_waveform_to_report(
+    record: SignalRecord,
+    fig: go.Figure,
+    panel_title: str,
+    text_diag: Dict[str, str],
+    image_bytes: Optional[bytes] = None,
+    notes_override: Optional[str] = None,
+) -> None:
+    """Encola la figura de waveform al reporte.
+
+    Ciclo 17.26: si `notes_override` viene con contenido, reemplaza la
+    narrativa determinística construida por build_waveform_report_notes.
+    Esto se usa cuando el especialista generó diagnóstico AI; el bloque
+    AI (con marcador <<<WM_AI_BLOCK>>>) toma el lugar de la narrativa
+    Cat IV automática para evitar duplicación, y el PDF lo renderiza
+    con estilos clínicos nativos.
+    """
+    final_notes = (
+        notes_override
+        if notes_override is not None and notes_override.strip()
+        else build_waveform_report_notes(text_diag)
+    )
     append_report_item_and_persist(
         {
             "id": make_export_state_key(
@@ -1189,7 +1214,7 @@ def queue_waveform_to_report(record: SignalRecord, fig: go.Figure, panel_title: 
             ),
             "type": "waveform",
             "title": panel_title,
-            "notes": build_waveform_report_notes(text_diag),
+            "notes": final_notes,
             "signal_id": record.signal_id,
             # Ciclo 17.19 OOM fix — NO guardar el go.Figure en session_state
             # (cada figure pesa 20-100 MB, con 5 gráficas revienta los 1 GB
@@ -1573,6 +1598,183 @@ def render_waveform_panel(
                     + " · ".join(f.get("headline", "") for f in findings)
                 )
 
+    # ------------------------------------------------------------
+    # Ciclo 17.26 — Interpretación clínica AI (opción C híbrido)
+    # ------------------------------------------------------------
+    # Mismo patrón que Spectrum: el AI complementa el Cat IV
+    # determinístico. Cuando el especialista lo genera, el bloque
+    # AI reemplaza la narrativa determinística en el PDF (suprimida
+    # vía marcadores <<<WM_AI_BLOCK>>>) y se acompaña de tabla
+    # cuantitativa de evidencia con métricas tiempo-dominio.
+    ai_state_key = f"wm_ai_diag_waveform_{export_state_key}"
+    if ai_state_key not in st.session_state:
+        st.session_state[ai_state_key] = None
+
+    with st.expander(
+        "🧠 Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        expanded=False,
+    ):
+        if not is_ai_available():
+            st.info(
+                "🔑 **AI Diagnóstico no disponible.** Falta configurar "
+                "`[anthropic] api_key` en los secrets de Streamlit. El "
+                "diagnóstico técnico determinístico de arriba contiene "
+                "toda la evidencia ISO/API necesaria."
+            )
+        else:
+            stored = st.session_state.get(ai_state_key)
+            ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
+            with ai_btn_col1:
+                gen_clicked = st.button(
+                    "🧠 Generar diagnóstico AI"
+                    if stored is None
+                    else "🧠 Diagnóstico generado",
+                    key=f"ai_gen_btn_wf_{export_state_key}",
+                    use_container_width=True,
+                    type="primary" if stored is None else "secondary",
+                    disabled=stored is not None and stored.get("ok", False),
+                )
+            with ai_btn_col2:
+                regen_clicked = st.button(
+                    "🔄 Regenerar",
+                    key=f"ai_regen_btn_wf_{export_state_key}",
+                    use_container_width=True,
+                    disabled=stored is None,
+                    help="Fuerza una nueva llamada a Claude (ignora cache).",
+                )
+            with ai_btn_col3:
+                st.caption(
+                    "Claude Sonnet 4.5 · ~$0.015 por diagnóstico · "
+                    "cacheado 30 días si no regenerás."
+                )
+
+            should_call = bool(gen_clicked) and (stored is None)
+            should_regen = bool(regen_clicked) and (stored is not None)
+
+            if should_call or should_regen:
+                # Construir payload con métricas tiempo-dominio.
+                # Las variables ya están en scope si cat_iv_wf_diag existe;
+                # caemos a defaults seguros si no.
+                _struct_local: Dict[str, Any] = {}
+                if cat_iv_wf_diag is not None:
+                    _struct_local = cat_iv_wf_diag.get("structured") or {}
+                _metrics = _struct_local.get("metrics") or {}
+                _impacts_local = _struct_local.get("impacts") or {}
+
+                ai_payload: Dict[str, Any] = {
+                    "machine": {
+                        "tag": str(getattr(prepared, "machine", "") or ""),
+                        "punto_medicion": str(getattr(prepared, "point", "") or ""),
+                        "variable": str(getattr(prepared, "variable", "") or ""),
+                        "rpm_nominal": float(getattr(prepared, "rpm", 0.0) or 0.0),
+                        "timestamp": str(getattr(prepared, "timestamp", "") or ""),
+                        "signal_name": str(getattr(prepared, "name", "") or ""),
+                    },
+                    "norm": {
+                        "headline_tecnico": str(text_diag.get("headline", "") or "") if text_diag else "",
+                        "zona_actual": (
+                            str(cat_iv_wf_diag.get("severity_global", "") or "")
+                            if cat_iv_wf_diag else ""
+                        ),
+                    },
+                    "technical": {
+                        "metricas_tiempo_dominio": {
+                            "rms": round(float(_metrics.get("rms", 0.0) or 0.0), 6),
+                            "peak": round(float(_metrics.get("peak", 0.0) or 0.0), 6),
+                            "peak_to_peak": round(float(_metrics.get("peak_to_peak", 0.0) or 0.0), 6),
+                            "crest_factor": round(float(_metrics.get("crest_factor", 0.0) or 0.0), 4),
+                            "kurtosis": round(float(_metrics.get("kurtosis", 0.0) or 0.0), 4),
+                            "skewness": round(float(_metrics.get("skewness", 0.0) or 0.0), 4),
+                            "mean": round(float(_metrics.get("mean", 0.0) or 0.0), 6),
+                            "std": round(float(_metrics.get("std", 0.0) or 0.0), 6),
+                        },
+                        "transitorios": {
+                            "cantidad": int(_impacts_local.get("count", 0) or 0),
+                            "threshold_dinamico": round(
+                                float(_impacts_local.get("threshold", 0.0) or 0.0), 6
+                            ),
+                        },
+                        "narrativa_tecnica": str(
+                            text_diag.get("narrative", "") if text_diag else ""
+                        )[:1500],
+                    },
+                    "trend": {},
+                }
+
+                if cat_iv_wf_diag is not None:
+                    ai_payload["technical"]["diagnostico_avanzado"] = {
+                        "headline": str(cat_iv_wf_diag.get("headline", "") or ""),
+                        "detail": str(cat_iv_wf_diag.get("detail", "") or "")[:1500],
+                        "action": str(cat_iv_wf_diag.get("action", "") or "")[:1500],
+                        "findings": [
+                            str(f.get("headline", "") or "")
+                            for f in (cat_iv_wf_diag.get("findings") or [])
+                        ][:6],
+                    }
+
+                with st.spinner("🧠 Claude analizando la forma de onda... (5-15 seg)"):
+                    try:
+                        result = generate_ai_diagnostic(
+                            ai_payload,
+                            module_type="waveform",
+                            use_cache=not should_regen,
+                        )
+                    except Exception as exc:
+                        result = {
+                            "ok": False,
+                            "markdown": (
+                                f"_⚠️ Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"```\n{type(exc).__name__}: {exc}\n```"
+                            ),
+                            "error": str(exc)[:500],
+                            "model": "",
+                            "cached": False,
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "fallback_used": False,
+                            "fallback_reason": "",
+                            "generated_at": "",
+                        }
+                st.session_state[ai_state_key] = result
+                stored = result
+
+            if stored is not None:
+                if stored.get("ok"):
+                    if stored.get("fallback_used"):
+                        st.info(
+                            "ℹ️ Este diagnóstico se generó con el modelo de "
+                            "respaldo (Haiku 4.5) porque el modelo principal "
+                            "(Sonnet 4.5) estaba sobrecargado. La calidad es "
+                            "ligeramente menor. Podés regenerar más tarde."
+                        )
+                    st.markdown(stored.get("markdown", ""))
+                    model_used = str(stored.get("model", "") or "")
+                    if model_used.startswith("claude-haiku"):
+                        in_p, out_p = 1.0, 5.0
+                    else:
+                        in_p, out_p = 3.0, 15.0
+                    cost_usd = (
+                        stored.get("input_tokens", 0) * in_p
+                        + stored.get("output_tokens", 0) * out_p
+                    ) / 1_000_000
+                    fallback_tag = (
+                        " · ⚠️ modelo de respaldo"
+                        if stored.get("fallback_used") else ""
+                    )
+                    st.caption(
+                        f"Modelo: `{model_used}` · "
+                        f"Tokens: {stored.get('input_tokens', 0)} → "
+                        f"{stored.get('output_tokens', 0)} · "
+                        f"Costo: ~${cost_usd:.4f} · "
+                        f"{'(cacheado)' if stored.get('cached') else '(generado nuevo)'}"
+                        f"{fallback_tag} · "
+                        f"{stored.get('generated_at', '')}"
+                    )
+                else:
+                    st.error(
+                        stored.get("markdown", "Error al generar diagnóstico AI.")
+                    )
+
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
@@ -1628,18 +1830,92 @@ def render_waveform_panel(
             else:
                 _diag_for_report = text_diag
 
+            # Ciclo 17.26 — si hay diagnóstico AI generado, construir el
+            # bloque <<<WM_AI_BLOCK>>> con tabla cuantitativa de evidencia
+            # (métricas tiempo-dominio) + AI markdown. Esto reemplaza la
+            # narrativa Cat IV determinística en el PDF (suprimida vía
+            # marcador), evitando duplicación.
+            ai_stored_for_report = st.session_state.get(
+                f"wm_ai_diag_waveform_{export_state_key}"
+            )
+            ai_notes_override: Optional[str] = None
+            if (ai_stored_for_report
+                    and ai_stored_for_report.get("ok")
+                    and ai_stored_for_report.get("markdown")):
+                ai_md_for_report = str(
+                    ai_stored_for_report.get("markdown", "")
+                ).strip()
+                if ai_md_for_report:
+                    # Tabla cuantitativa: métricas tiempo-dominio principales
+                    quant_lines: List[str] = ["Parámetro|Valor"]
+                    rpm_val = float(getattr(prepared, "rpm", 0.0) or 0.0)
+                    if rpm_val > 0:
+                        quant_lines.append(f"Velocidad de giro|{rpm_val:.0f} RPM")
+                    _struct_rep = (
+                        cat_iv_wf_diag.get("structured")
+                        if cat_iv_wf_diag else {}
+                    ) or {}
+                    _m_rep = _struct_rep.get("metrics") or {}
+                    _i_rep = _struct_rep.get("impacts") or {}
+                    _rms_v = float(_m_rep.get("rms", 0.0) or 0.0)
+                    _peak_v = float(_m_rep.get("peak", 0.0) or 0.0)
+                    _p2p_v = float(_m_rep.get("peak_to_peak", 0.0) or 0.0)
+                    _cf_v = float(_m_rep.get("crest_factor", 0.0) or 0.0)
+                    _kurt_v = float(_m_rep.get("kurtosis", 0.0) or 0.0)
+                    if _rms_v > 0:
+                        quant_lines.append(f"RMS|{_rms_v:.4f}")
+                    if _peak_v > 0:
+                        quant_lines.append(f"Peak|{_peak_v:.4f}")
+                    if _p2p_v > 0:
+                        quant_lines.append(f"Peak-to-Peak|{_p2p_v:.4f}")
+                    if _cf_v > 0:
+                        quant_lines.append(f"Crest Factor|{_cf_v:.3f}")
+                    if _kurt_v != 0:
+                        quant_lines.append(f"Kurtosis|{_kurt_v:.3f}")
+                    _impacts_count_v = int(_i_rep.get("count", 0) or 0)
+                    if _impacts_count_v > 0:
+                        quant_lines.append(
+                            f"Transitorios detectados|{_impacts_count_v}"
+                        )
+                    if cat_iv_wf_diag is not None:
+                        sev_v = str(
+                            cat_iv_wf_diag.get("severity_global", "") or ""
+                        ).strip()
+                        if sev_v:
+                            quant_lines.append(f"Severidad ISO/API|{sev_v}")
+                    pt_v = str(getattr(prepared, "point", "") or "").strip()
+                    if pt_v:
+                        quant_lines.append(f"Punto de medición|{pt_v}")
+
+                    ai_notes_override = (
+                        "<<<WM_AI_BLOCK>>>\n"
+                        + "\n".join(quant_lines)
+                        + "\n<<<WM_AI_NARRATIVE>>>\n"
+                        + ai_md_for_report
+                    )
+
             queue_waveform_to_report(
                 prepared,
                 fig,
                 panel_title,
                 _diag_for_report,
                 image_bytes=png_bytes_for_report,
+                notes_override=ai_notes_override,
             )
 
+            ai_extra = (
+                " · 🧠 con Diagnóstico AI"
+                if ai_notes_override else ""
+            )
             if png_bytes_for_report is not None:
-                st.success("Waveform enviado al reporte con imagen PNG.")
+                st.success(
+                    f"Waveform enviado al reporte con imagen PNG{ai_extra}."
+                )
             else:
-                st.warning(f"Waveform enviado al reporte sin PNG. Detalle: {png_error_for_report}")
+                st.warning(
+                    f"Waveform enviado al reporte sin PNG{ai_extra}. "
+                    f"Detalle: {png_error_for_report}"
+                )
 
     panel_error = st.session_state.wm_export_store[export_state_key]["error"]
     if panel_error:

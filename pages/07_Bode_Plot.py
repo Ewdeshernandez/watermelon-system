@@ -45,6 +45,10 @@ from core.rotordynamics import (
 )
 from core.module_patterns import export_report_row, helper_card, panel_card
 from core.ui_theme import apply_watermelon_page_style, draw_top_strip, page_header
+from core.ai_diagnostic import (  # Ciclo 17.26: interpretación clínica AI
+    generate_ai_diagnostic,
+    is_ai_available,
+)
 
 
 # ============================================================
@@ -1119,18 +1123,29 @@ def queue_bode_to_report(
     title: str,
     text_diag: Dict[str, str],
     image_bytes: Optional[bytes] = None,
+    notes_override: Optional[str] = None,
 ) -> None:
+    """Encola la figura Bode al reporte. Ciclo 17.26: si
+    `notes_override` viene con contenido (típicamente bloque AI con
+    marcador <<<WM_AI_BLOCK>>>), reemplaza la narrativa
+    determinística de _build_bode_report_notes."""
     ensure_report_state()
 
     if image_bytes is None:
         image_bytes = build_export_png_bytes(fig, text_diag)[0]
+
+    final_notes = (
+        notes_override
+        if notes_override is not None and notes_override.strip()
+        else _build_bode_report_notes(text_diag)
+    )
 
     append_report_item_and_persist(
         {
             "id": f"report-bode-{meta.get('Machine Name','')}-{meta.get('Point Name','')}-{title}",
             "type": "bode",
             "title": title,
-            "notes": _build_bode_report_notes(text_diag),
+            "notes": final_notes,
             "signal_id": meta.get("Point Name", ""),
             "image_bytes": image_bytes,
             "machine": meta.get("Machine Name", ""),
@@ -1838,6 +1853,193 @@ def render_bode_panel(
         f"{cursor_a_rpm}::{cursor_b_rpm}"
     )
 
+    # ------------------------------------------------------------
+    # Ciclo 17.26 — Interpretación clínica AI (Bode)
+    # ------------------------------------------------------------
+    ai_state_key_bode = f"wm_ai_diag_bode_{export_state_key}"
+    if ai_state_key_bode not in st.session_state:
+        st.session_state[ai_state_key_bode] = None
+
+    with st.expander(
+        "🧠 Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        expanded=False,
+    ):
+        if not is_ai_available():
+            st.info(
+                "🔑 **AI Diagnóstico no disponible.** Falta configurar "
+                "`[anthropic] api_key` en los secrets de Streamlit."
+            )
+        else:
+            stored_bode = st.session_state.get(ai_state_key_bode)
+            ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
+            with ai_btn_col1:
+                gen_clicked_bode = st.button(
+                    "🧠 Generar diagnóstico AI"
+                    if stored_bode is None
+                    else "🧠 Diagnóstico generado",
+                    key=f"ai_gen_btn_bode_{export_state_key}",
+                    use_container_width=True,
+                    type="primary" if stored_bode is None else "secondary",
+                    disabled=stored_bode is not None and stored_bode.get("ok", False),
+                )
+            with ai_btn_col2:
+                regen_clicked_bode = st.button(
+                    "🔄 Regenerar",
+                    key=f"ai_regen_btn_bode_{export_state_key}",
+                    use_container_width=True,
+                    disabled=stored_bode is None,
+                )
+            with ai_btn_col3:
+                st.caption(
+                    "Claude Sonnet 4.5 · ~$0.015 por diagnóstico · "
+                    "cacheado 30 días si no regenerás."
+                )
+
+            should_call_bode = bool(gen_clicked_bode) and (stored_bode is None)
+            should_regen_bode = bool(regen_clicked_bode) and (stored_bode is not None)
+
+            if should_call_bode or should_regen_bode:
+                # Payload Bode: amplitud máxima, velocidades críticas con
+                # Q-factor y separation margin, modo de fase.
+                _crit_speeds_payload_bode: List[Dict[str, Any]] = []
+                try:
+                    for _cs in (bode_diag.get("critical_speeds", []) or [])[:5]:
+                        _crit_speeds_payload_bode.append({
+                            "rpm": float(_cs.get("rpm", 0) or 0),
+                            "amp": float(_cs.get("amp", 0) or 0),
+                            "q_factor": float(_cs.get("q_factor", 0) or 0),
+                            "phase_delta": float(_cs.get("phase_delta", 0) or 0),
+                        })
+                except Exception:
+                    pass
+
+                ai_payload_bode: Dict[str, Any] = {
+                    "machine": {
+                        "tag": str(meta.get("Machine Name", "") or ""),
+                        "punto_medicion": str(meta.get("Point Name", "") or ""),
+                        "variable": str(meta.get("Variable", "") or ""),
+                        "timestamp": "",
+                    },
+                    "norm": {
+                        "headline_tecnico": str(text_diag.get("headline", "") or ""),
+                        "phase_mode": str(phase_mode),
+                        "y_unit": str(y_unit or ""),
+                    },
+                    "technical": {
+                        "max_amplitude": round(
+                            float(bode_diag.get("max_amp", 0.0) or 0.0), 4
+                        ),
+                        "health_score": round(
+                            float(bode_diag.get("score", 0.0) or 0.0), 2
+                        ),
+                        "candidate_count": int(
+                            bode_diag.get("candidate_count", 0) or 0
+                        ),
+                        "rpm_min": int(display_df["rpm"].min()) if len(display_df) else 0,
+                        "rpm_max": int(display_df["rpm"].max()) if len(display_df) else 0,
+                        "critical_speeds": _crit_speeds_payload_bode,
+                        "diagnostic_detail": str(text_diag.get("detail", "") or "")[:1500],
+                        "diagnostic_action": str(text_diag.get("action", "") or "")[:1500],
+                    },
+                    "trend": {},
+                }
+
+                with st.spinner("🧠 Claude analizando el diagrama Bode... (5-15 seg)"):
+                    try:
+                        result_bode = generate_ai_diagnostic(
+                            ai_payload_bode,
+                            module_type="bode",
+                            use_cache=not should_regen_bode,
+                        )
+                    except Exception as exc:
+                        result_bode = {
+                            "ok": False,
+                            "markdown": (
+                                f"_⚠️ Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"```\n{type(exc).__name__}: {exc}\n```"
+                            ),
+                            "error": str(exc)[:500],
+                            "model": "",
+                            "cached": False,
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "fallback_used": False,
+                            "fallback_reason": "",
+                            "generated_at": "",
+                        }
+                st.session_state[ai_state_key_bode] = result_bode
+                stored_bode = result_bode
+
+            if stored_bode is not None:
+                if stored_bode.get("ok"):
+                    if stored_bode.get("fallback_used"):
+                        st.info(
+                            "ℹ️ Diagnóstico generado con modelo de respaldo "
+                            "(Haiku 4.5)."
+                        )
+                    st.markdown(stored_bode.get("markdown", ""))
+                    model_used_bode = str(stored_bode.get("model", "") or "")
+                    if model_used_bode.startswith("claude-haiku"):
+                        in_p_bode, out_p_bode = 1.0, 5.0
+                    else:
+                        in_p_bode, out_p_bode = 3.0, 15.0
+                    cost_usd_bode = (
+                        stored_bode.get("input_tokens", 0) * in_p_bode
+                        + stored_bode.get("output_tokens", 0) * out_p_bode
+                    ) / 1_000_000
+                    fallback_tag_bode = (
+                        " · ⚠️ modelo de respaldo"
+                        if stored_bode.get("fallback_used") else ""
+                    )
+                    st.caption(
+                        f"Modelo: `{model_used_bode}` · "
+                        f"Tokens: {stored_bode.get('input_tokens', 0)} → "
+                        f"{stored_bode.get('output_tokens', 0)} · "
+                        f"Costo: ~${cost_usd_bode:.4f} · "
+                        f"{'(cacheado)' if stored_bode.get('cached') else '(generado nuevo)'}"
+                        f"{fallback_tag_bode}"
+                    )
+                else:
+                    st.error(
+                        stored_bode.get("markdown", "Error al generar diagnóstico AI.")
+                    )
+
+    def _build_bode_ai_block_for_report() -> Optional[str]:
+        ai_stored_local = st.session_state.get(ai_state_key_bode)
+        if not (ai_stored_local
+                and ai_stored_local.get("ok")
+                and ai_stored_local.get("markdown")):
+            return None
+        ai_md_local = str(ai_stored_local.get("markdown", "")).strip()
+        if not ai_md_local:
+            return None
+        quant_lines_bode: List[str] = ["Parámetro|Valor"]
+        if len(display_df):
+            quant_lines_bode.append(
+                f"Rango de velocidad|{int(display_df['rpm'].min())}–"
+                f"{int(display_df['rpm'].max())} RPM"
+            )
+        _max_amp_bode = float(bode_diag.get("max_amp", 0.0) or 0.0)
+        if _max_amp_bode > 0:
+            quant_lines_bode.append(
+                f"Amplitud máxima|{_max_amp_bode:.3f} {y_unit}".strip()
+            )
+        _score_bode = float(bode_diag.get("score", 0.0) or 0.0)
+        if _score_bode > 0:
+            quant_lines_bode.append(f"Health score|{_score_bode:.1f}")
+        _cand_bode = int(bode_diag.get("candidate_count", 0) or 0)
+        quant_lines_bode.append(f"Velocidades críticas detectadas|{_cand_bode}")
+        quant_lines_bode.append(f"Modo de fase|{phase_mode}")
+        _pt_bode = str(meta.get("Point Name", "") or "").strip()
+        if _pt_bode:
+            quant_lines_bode.append(f"Punto de medición|{_pt_bode}")
+        return (
+            "<<<WM_AI_BLOCK>>>\n"
+            + "\n".join(quant_lines_bode)
+            + "\n<<<WM_AI_NARRATIVE>>>\n"
+            + ai_md_local
+        )
+
     export_report_row(
         export_key=export_state_key,
         fig=fig,
@@ -1848,6 +2050,7 @@ def render_bode_panel(
             title,
             text_diag,
             image_bytes=build_export_png_bytes(fig, text_diag)[0],
+            notes_override=_build_bode_ai_block_for_report(),
         ),
         file_name=f"{item['file_stem']}_bode_hd.png",
     )

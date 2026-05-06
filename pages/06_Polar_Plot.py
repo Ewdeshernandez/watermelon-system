@@ -37,6 +37,10 @@ from core.module_patterns import export_report_row, helper_card, panel_card
 from core.profile_state import render_profile_selector  # legacy compat
 from core.instance_selector import render_instance_selector
 from core.report_state import append_report_item_and_persist
+from core.ai_diagnostic import (  # Ciclo 17.26: interpretación clínica AI
+    generate_ai_diagnostic,
+    is_ai_available,
+)
 from core.rotordynamics import (
     detect_critical_speeds,
     evaluate_api684_margin,
@@ -1145,14 +1149,24 @@ def queue_polar_to_report(
     title: str,
     text_diag: Dict[str, str],
     image_bytes: Optional[bytes] = None,
+    notes_override: Optional[str] = None,
 ) -> None:
+    """Encola la figura Polar al reporte. Ciclo 17.26: si
+    `notes_override` viene con contenido (típicamente bloque AI con
+    marcadores <<<WM_AI_BLOCK>>>), reemplaza la narrativa
+    determinística de _build_polar_report_notes."""
     ensure_report_state()
+    final_notes = (
+        notes_override
+        if notes_override is not None and notes_override.strip()
+        else _build_polar_report_notes(text_diag)
+    )
     append_report_item_and_persist(
         {
             "id": f"report-polar-{meta.get('Machine Name','')}-{meta.get('Point Name','')}-{title}",
             "type": "polar",
             "title": title,
-            "notes": _build_polar_report_notes(text_diag),
+            "notes": final_notes,
             "signal_id": meta.get("Point Name", ""),
             "image_bytes": image_bytes,
             "machine": meta.get("Machine Name", ""),
@@ -2616,6 +2630,193 @@ def render_polar_panel(
         f"{cursor_a_speed}::{cursor_b_speed}"
     )
 
+    # ------------------------------------------------------------
+    # Ciclo 17.26 — Interpretación clínica AI (Polar)
+    # ------------------------------------------------------------
+    ai_state_key_pol = f"wm_ai_diag_polar_{export_state_key}"
+    if ai_state_key_pol not in st.session_state:
+        st.session_state[ai_state_key_pol] = None
+
+    with st.expander(
+        "🧠 Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        expanded=False,
+    ):
+        if not is_ai_available():
+            st.info(
+                "🔑 **AI Diagnóstico no disponible.** Falta configurar "
+                "`[anthropic] api_key` en los secrets de Streamlit."
+            )
+        else:
+            stored_pol = st.session_state.get(ai_state_key_pol)
+            ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
+            with ai_btn_col1:
+                gen_clicked_pol = st.button(
+                    "🧠 Generar diagnóstico AI"
+                    if stored_pol is None
+                    else "🧠 Diagnóstico generado",
+                    key=f"ai_gen_btn_pol_{export_state_key}",
+                    use_container_width=True,
+                    type="primary" if stored_pol is None else "secondary",
+                    disabled=stored_pol is not None and stored_pol.get("ok", False),
+                )
+            with ai_btn_col2:
+                regen_clicked_pol = st.button(
+                    "🔄 Regenerar",
+                    key=f"ai_regen_btn_pol_{export_state_key}",
+                    use_container_width=True,
+                    disabled=stored_pol is None,
+                )
+            with ai_btn_col3:
+                st.caption(
+                    "Claude Sonnet 4.5 · ~$0.015 por diagnóstico · "
+                    "cacheado 30 días si no regenerás."
+                )
+
+            should_call_pol = bool(gen_clicked_pol) and (stored_pol is None)
+            should_regen_pol = bool(regen_clicked_pol) and (stored_pol is not None)
+
+            if should_call_pol or should_regen_pol:
+                # Payload Polar: amplitud máxima, velocidades críticas
+                # detectadas, semáforo, score de salud, contexto del modo.
+                _crit_speeds_payload: List[Dict[str, Any]] = []
+                try:
+                    for _cs in (pro_overlay_criticals or [])[:5]:
+                        _crit_speeds_payload.append({
+                            "rpm": float(_cs.get("rpm", 0) or 0),
+                            "amp": float(_cs.get("amp", 0) or 0),
+                            "q_factor": float(_cs.get("q_factor", 0) or 0),
+                            "phase_delta": float(_cs.get("phase_delta", 0) or 0),
+                        })
+                except Exception:
+                    pass
+
+                ai_payload_pol: Dict[str, Any] = {
+                    "machine": {
+                        "tag": str(meta.get("Machine Name", "") or ""),
+                        "punto_medicion": str(meta.get("Point Name", "") or ""),
+                        "variable": str(meta.get("Variable", "") or ""),
+                        "rpm_operativa": float(operating_rpm or 0.0),
+                        "rotation_direction": str(rotation_direction),
+                    },
+                    "norm": {
+                        "headline_tecnico": str(text_diag.get("headline", "") or ""),
+                        "semaforo": str(semaforo_status or ""),
+                        "amp_unit": str(amp_unit or ""),
+                    },
+                    "technical": {
+                        "max_amplitude": round(
+                            float(polar_diag.get("max_amp", 0.0) or 0.0), 4
+                        ),
+                        "health_score": round(
+                            float(polar_diag.get("score", 0.0) or 0.0), 2
+                        ),
+                        "candidate_count": int(
+                            polar_diag.get("candidate_count", 0) or 0
+                        ),
+                        "critical_speeds": _crit_speeds_payload,
+                        "diagnostic_detail": str(text_diag.get("detail", "") or "")[:1500],
+                        "diagnostic_action": str(text_diag.get("action", "") or "")[:1500],
+                    },
+                    "trend": {},
+                }
+
+                with st.spinner("🧠 Claude analizando la respuesta polar... (5-15 seg)"):
+                    try:
+                        result_pol = generate_ai_diagnostic(
+                            ai_payload_pol,
+                            module_type="polar",
+                            use_cache=not should_regen_pol,
+                        )
+                    except Exception as exc:
+                        result_pol = {
+                            "ok": False,
+                            "markdown": (
+                                f"_⚠️ Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"```\n{type(exc).__name__}: {exc}\n```"
+                            ),
+                            "error": str(exc)[:500],
+                            "model": "",
+                            "cached": False,
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "fallback_used": False,
+                            "fallback_reason": "",
+                            "generated_at": "",
+                        }
+                st.session_state[ai_state_key_pol] = result_pol
+                stored_pol = result_pol
+
+            if stored_pol is not None:
+                if stored_pol.get("ok"):
+                    if stored_pol.get("fallback_used"):
+                        st.info(
+                            "ℹ️ Diagnóstico generado con modelo de respaldo "
+                            "(Haiku 4.5)."
+                        )
+                    st.markdown(stored_pol.get("markdown", ""))
+                    model_used_pol = str(stored_pol.get("model", "") or "")
+                    if model_used_pol.startswith("claude-haiku"):
+                        in_p_pol, out_p_pol = 1.0, 5.0
+                    else:
+                        in_p_pol, out_p_pol = 3.0, 15.0
+                    cost_usd_pol = (
+                        stored_pol.get("input_tokens", 0) * in_p_pol
+                        + stored_pol.get("output_tokens", 0) * out_p_pol
+                    ) / 1_000_000
+                    fallback_tag_pol = (
+                        " · ⚠️ modelo de respaldo"
+                        if stored_pol.get("fallback_used") else ""
+                    )
+                    st.caption(
+                        f"Modelo: `{model_used_pol}` · "
+                        f"Tokens: {stored_pol.get('input_tokens', 0)} → "
+                        f"{stored_pol.get('output_tokens', 0)} · "
+                        f"Costo: ~${cost_usd_pol:.4f} · "
+                        f"{'(cacheado)' if stored_pol.get('cached') else '(generado nuevo)'}"
+                        f"{fallback_tag_pol}"
+                    )
+                else:
+                    st.error(
+                        stored_pol.get("markdown", "Error al generar diagnóstico AI.")
+                    )
+
+    # Helper para construir el bloque AI cuando se envía a reporte
+    def _build_polar_ai_block_for_report() -> Optional[str]:
+        ai_stored_local = st.session_state.get(ai_state_key_pol)
+        if not (ai_stored_local
+                and ai_stored_local.get("ok")
+                and ai_stored_local.get("markdown")):
+            return None
+        ai_md_local = str(ai_stored_local.get("markdown", "")).strip()
+        if not ai_md_local:
+            return None
+        quant_lines_pol: List[str] = ["Parámetro|Valor"]
+        if operating_rpm:
+            quant_lines_pol.append(
+                f"Velocidad operativa|{float(operating_rpm):.0f} RPM"
+            )
+        _max_amp = float(polar_diag.get("max_amp", 0.0) or 0.0)
+        if _max_amp > 0:
+            quant_lines_pol.append(
+                f"Amplitud máxima|{_max_amp:.3f} {amp_unit}".strip()
+            )
+        _score = float(polar_diag.get("score", 0.0) or 0.0)
+        if _score > 0:
+            quant_lines_pol.append(f"Health score|{_score:.1f}")
+        _candidates = int(polar_diag.get("candidate_count", 0) or 0)
+        quant_lines_pol.append(f"Velocidades críticas detectadas|{_candidates}")
+        if semaforo_status:
+            quant_lines_pol.append(f"Semáforo|{semaforo_status}")
+        _pt = str(meta.get("Point Name", "") or "").strip()
+        if _pt:
+            quant_lines_pol.append(f"Punto de medición|{_pt}")
+        return (
+            "<<<WM_AI_BLOCK>>>\n"
+            + "\n".join(quant_lines_pol)
+            + "\n<<<WM_AI_NARRATIVE>>>\n"
+            + ai_md_local
+        )
+
     export_report_row(
         export_key=export_state_key,
         fig=fig,
@@ -2626,6 +2827,7 @@ def render_polar_panel(
             title,
             text_diag,
             image_bytes=build_export_png_bytes(fig, text_diag)[0],
+            notes_override=_build_polar_ai_block_for_report(),
         ),
         file_name=f"{item['file_stem']}_polar_hd.png",
     )

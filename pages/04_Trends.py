@@ -22,6 +22,10 @@ from core.instance_state import get_instance as _get_instance_for_threshold
 from core.report_state import append_report_item_and_persist, ensure_report_state_loaded
 from core.sensor_map import resolve_sensor_for_point
 from core.trend_diagnostics import build_trend_report_narrative as build_trend_report_narrative_core
+from core.ai_diagnostic import (  # Ciclo 17.26: interpretación clínica AI
+    generate_ai_diagnostic,
+    is_ai_available,
+)
 from core.trend_history import (
     delete_trend_corrida,
     list_corridas_summary,
@@ -4423,7 +4427,17 @@ def queue_trend_to_report(
     metric_key: str,
     operational_records: Optional[List[OperationalRecord]] = None,
     operational_only_mode: bool = False,
+    notes_override: Optional[str] = None,
 ) -> Tuple[bool, Optional[str]]:
+    """Encola la figura de trend al reporte.
+
+    Ciclo 17.26: si `notes_override` viene con contenido, reemplaza la
+    narrativa determinística (ejecutiva + correlación + drift +
+    behavior). Esto se usa cuando hay diagnóstico AI generado; el
+    bloque AI con marcador <<<WM_AI_BLOCK>>> toma el lugar de la
+    narrativa Cat IV automática para evitar duplicación, y el PDF lo
+    renderiza con estilos clínicos nativos.
+    """
     operational_records = operational_records or []
 
     # Ciclo 17.5 — el asset context ya viene auto-derivado de la
@@ -4640,6 +4654,13 @@ def queue_trend_to_report(
     # 🔥 FIX DEFINITIVO DEL REPORTE
     # ============================================================
     narrative = final_report_cleanup(narrative)
+
+    # Ciclo 17.26 — si el especialista generó diagnóstico AI, su bloque
+    # toma el lugar de la narrativa determinística (autodiag + correlation
+    # + drift + behavior). El marcador <<<WM_AI_BLOCK>>> hace que el PDF
+    # render lo trate como bloque clínico estilizado y suprima el resto.
+    if notes_override is not None and notes_override.strip():
+        narrative = notes_override.strip()
 
     image_bytes, image_error = build_export_png_bytes(fig=fig)
 
@@ -5167,6 +5188,214 @@ def render_trend_panel(
         key=f"wm_trends_plot_{export_state_key}",
     )
 
+    # ------------------------------------------------------------
+    # Ciclo 17.26 — Interpretación clínica AI (Trends)
+    # ------------------------------------------------------------
+    # Se posiciona justo antes de los botones de Export para que el
+    # flujo natural sea: ver gráfico → generar AI → enviar a reporte.
+    # Si el AI está generado al momento del envío, el bloque AI
+    # reemplaza la narrativa determinística (autodiag + correlation +
+    # drift + behavior) en el PDF.
+    ai_state_key_tr = f"wm_ai_diag_trends_{export_state_key}"
+    if ai_state_key_tr not in st.session_state:
+        st.session_state[ai_state_key_tr] = None
+
+    with st.expander(
+        "🧠 Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        expanded=False,
+    ):
+        if not is_ai_available():
+            st.info(
+                "🔑 **AI Diagnóstico no disponible.** Falta configurar "
+                "`[anthropic] api_key` en los secrets de Streamlit. El "
+                "diagnóstico técnico determinístico contiene toda la "
+                "evidencia ISO/API necesaria."
+            )
+        elif not panel_records and not panel_operational_records:
+            st.caption(
+                "Cargá señales de tendencia u operativas para habilitar "
+                "el diagnóstico AI."
+            )
+        else:
+            stored_tr = st.session_state.get(ai_state_key_tr)
+            ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
+            with ai_btn_col1:
+                gen_clicked_tr = st.button(
+                    "🧠 Generar diagnóstico AI"
+                    if stored_tr is None
+                    else "🧠 Diagnóstico generado",
+                    key=f"ai_gen_btn_tr_{export_state_key}",
+                    use_container_width=True,
+                    type="primary" if stored_tr is None else "secondary",
+                    disabled=stored_tr is not None and stored_tr.get("ok", False),
+                )
+            with ai_btn_col2:
+                regen_clicked_tr = st.button(
+                    "🔄 Regenerar",
+                    key=f"ai_regen_btn_tr_{export_state_key}",
+                    use_container_width=True,
+                    disabled=stored_tr is None,
+                )
+            with ai_btn_col3:
+                st.caption(
+                    "Claude Sonnet 4.5 · ~$0.015 por diagnóstico · "
+                    "cacheado 30 días si no regenerás."
+                )
+
+            should_call_tr = bool(gen_clicked_tr) and (stored_tr is None)
+            should_regen_tr = bool(regen_clicked_tr) and (stored_tr is not None)
+
+            if should_call_tr or should_regen_tr:
+                # Construir payload con info de la tendencia + correlación
+                # operacional + drift + thresholds. La idea: que el AI
+                # interprete el comportamiento temporal y lo correlacione
+                # con la operación de la máquina.
+                _machine_label_tr = ""
+                _point_label_tr = ""
+                if panel_records:
+                    _machine_label_tr = str(getattr(panel_records[0], "machine", "") or "")
+                    _point_label_tr = " | ".join(
+                        [getattr(r, "point_clean", "") for r in panel_records[:3]]
+                    )
+                elif panel_operational_records:
+                    _machine_label_tr = str(getattr(panel_operational_records[0], "machine", "") or "")
+                    _point_label_tr = " | ".join(
+                        [getattr(r, "variable", "") for r in panel_operational_records[:3]]
+                    )
+
+                # Autodiagnóstico ya disponible: lo recomputamos para
+                # capturarlo en el payload (poco costoso).
+                _payload_autodiag: Dict[str, Any] = {}
+                try:
+                    if panel_records and not operational_only_mode:
+                        _payload_autodiag = build_trend_autodiagnostic(
+                            panel_records,
+                            metric_key,
+                            warning_value=float(warning_value) if (warning_enabled and warning_value is not None) else None,
+                            danger_value=float(danger_value) if (danger_enabled and danger_value is not None) else None,
+                            operational_records=panel_operational_records,
+                        )
+                except Exception:
+                    _payload_autodiag = {}
+
+                # Estadísticas básicas de los records
+                _stats_per_record: List[Dict[str, Any]] = []
+                for r in (panel_records or [])[:8]:
+                    try:
+                        _vals = getattr(r, "values_for_metric", None)
+                        if _vals is not None and hasattr(_vals, "__call__"):
+                            arr = _vals(metric_key)
+                        else:
+                            arr = None
+                        if arr is not None and len(arr) > 0:
+                            arr_np = np.asarray(arr, dtype=float)
+                            arr_np = arr_np[np.isfinite(arr_np)]
+                            if arr_np.size > 0:
+                                _stats_per_record.append({
+                                    "tag": str(getattr(r, "point_clean", "") or ""),
+                                    "n_samples": int(arr_np.size),
+                                    "min": round(float(arr_np.min()), 4),
+                                    "max": round(float(arr_np.max()), 4),
+                                    "mean": round(float(arr_np.mean()), 4),
+                                    "std": round(float(arr_np.std()), 4),
+                                    "last_value": round(float(arr_np[-1]), 4),
+                                })
+                    except Exception:
+                        continue
+
+                ai_payload_tr: Dict[str, Any] = {
+                    "machine": {
+                        "tag": _machine_label_tr,
+                        "puntos_medicion": _point_label_tr,
+                        "metric": metric_key,
+                        "n_records": len(panel_records or []),
+                        "n_operational": len(panel_operational_records or []),
+                    },
+                    "norm": {
+                        "warning_threshold": float(warning_value) if (warning_enabled and warning_value is not None) else None,
+                        "danger_threshold": float(danger_value) if (danger_enabled and danger_value is not None) else None,
+                        "threshold_source": str(
+                            (st.session_state.get("wm_tr_threshold_source", {}) or {}).get("source", "")
+                        ),
+                    },
+                    "technical": {
+                        "stats_por_signal": _stats_per_record,
+                        "autodiag_headline": str(_payload_autodiag.get("headline", "") or ""),
+                        "autodiag_status": str(_payload_autodiag.get("status_label", "") or ""),
+                        "autodiag_prose": [
+                            str(p) for p in (_payload_autodiag.get("prose", []) or [])
+                        ][:6],
+                        "autodiag_recommendations": [
+                            str(r) for r in (_payload_autodiag.get("recommendations", []) or [])
+                        ][:6],
+                    },
+                    "trend": {
+                        "operational_only": bool(operational_only_mode),
+                    },
+                }
+
+                with st.spinner("🧠 Claude analizando la tendencia... (5-15 seg)"):
+                    try:
+                        result_tr = generate_ai_diagnostic(
+                            ai_payload_tr,
+                            module_type="trends",
+                            use_cache=not should_regen_tr,
+                        )
+                    except Exception as exc:
+                        result_tr = {
+                            "ok": False,
+                            "markdown": (
+                                f"_⚠️ Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"```\n{type(exc).__name__}: {exc}\n```"
+                            ),
+                            "error": str(exc)[:500],
+                            "model": "",
+                            "cached": False,
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "fallback_used": False,
+                            "fallback_reason": "",
+                            "generated_at": "",
+                        }
+                st.session_state[ai_state_key_tr] = result_tr
+                stored_tr = result_tr
+
+            if stored_tr is not None:
+                if stored_tr.get("ok"):
+                    if stored_tr.get("fallback_used"):
+                        st.info(
+                            "ℹ️ Diagnóstico generado con modelo de respaldo "
+                            "(Haiku 4.5). Podés regenerar más tarde cuando "
+                            "Sonnet recupere capacidad."
+                        )
+                    st.markdown(stored_tr.get("markdown", ""))
+                    model_used_tr = str(stored_tr.get("model", "") or "")
+                    if model_used_tr.startswith("claude-haiku"):
+                        in_p_tr, out_p_tr = 1.0, 5.0
+                    else:
+                        in_p_tr, out_p_tr = 3.0, 15.0
+                    cost_usd_tr = (
+                        stored_tr.get("input_tokens", 0) * in_p_tr
+                        + stored_tr.get("output_tokens", 0) * out_p_tr
+                    ) / 1_000_000
+                    fallback_tag_tr = (
+                        " · ⚠️ modelo de respaldo"
+                        if stored_tr.get("fallback_used") else ""
+                    )
+                    st.caption(
+                        f"Modelo: `{model_used_tr}` · "
+                        f"Tokens: {stored_tr.get('input_tokens', 0)} → "
+                        f"{stored_tr.get('output_tokens', 0)} · "
+                        f"Costo: ~${cost_usd_tr:.4f} · "
+                        f"{'(cacheado)' if stored_tr.get('cached') else '(generado nuevo)'}"
+                        f"{fallback_tag_tr} · "
+                        f"{stored_tr.get('generated_at', '')}"
+                    )
+                else:
+                    st.error(
+                        stored_tr.get("markdown", "Error al generar diagnóstico AI.")
+                    )
+
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
     left_pad, col_export1, col_export2, col_report, col_bode, right_pad = st.columns([1.6, 1.2, 1.2, 1.2, 1.3, 1.5])
 
@@ -5193,6 +5422,52 @@ def render_trend_panel(
 
     with col_report:
         if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
+            # Ciclo 17.26 — armar bloque AI si está generado
+            ai_stored_for_tr_report = st.session_state.get(
+                f"wm_ai_diag_trends_{export_state_key}"
+            )
+            ai_notes_override_tr: Optional[str] = None
+            if (ai_stored_for_tr_report
+                    and ai_stored_for_tr_report.get("ok")
+                    and ai_stored_for_tr_report.get("markdown")):
+                ai_md_tr = str(
+                    ai_stored_for_tr_report.get("markdown", "")
+                ).strip()
+                if ai_md_tr:
+                    quant_lines_tr: List[str] = ["Parámetro|Valor"]
+                    quant_lines_tr.append(f"Métrica analizada|{metric_key}")
+                    if panel_records:
+                        quant_lines_tr.append(
+                            f"Señales de tendencia|{len(panel_records)}"
+                        )
+                    if panel_operational_records:
+                        quant_lines_tr.append(
+                            f"Variables operativas|{len(panel_operational_records)}"
+                        )
+                    _thr_meta_tr = st.session_state.get(
+                        "wm_tr_threshold_source", {}
+                    ) or {}
+                    if warning_enabled and warning_value is not None:
+                        quant_lines_tr.append(
+                            f"Umbral Warning|{float(warning_value):.3f}"
+                        )
+                    if danger_enabled and danger_value is not None:
+                        quant_lines_tr.append(
+                            f"Umbral Danger|{float(danger_value):.3f}"
+                        )
+                    _src_tr = (_thr_meta_tr.get("source") or "").strip()
+                    if _src_tr and _src_tr not in ("default", "n/a"):
+                        quant_lines_tr.append(
+                            f"Fuente de setpoints|{_src_tr}"
+                        )
+
+                    ai_notes_override_tr = (
+                        "<<<WM_AI_BLOCK>>>\n"
+                        + "\n".join(quant_lines_tr)
+                        + "\n<<<WM_AI_NARRATIVE>>>\n"
+                        + ai_md_tr
+                    )
+
             image_ok, image_error = queue_trend_to_report(
                 panel_records,
                 fig,
@@ -5200,9 +5475,14 @@ def render_trend_panel(
                 metric_key,
                 operational_records=panel_operational_records,
                 operational_only_mode=operational_only_mode,
+                notes_override=ai_notes_override_tr,
+            )
+            ai_extra_tr = (
+                " · 🧠 con Diagnóstico AI"
+                if ai_notes_override_tr else ""
             )
             if image_ok:
-                st.success("Trend enviado al reporte")
+                st.success(f"Trend enviado al reporte{ai_extra_tr}")
             else:
                 st.error(image_error or "No fue posible enviar el trend al reporte.")
 
