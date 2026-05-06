@@ -38,6 +38,7 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -46,6 +47,17 @@ from typing import Any, Dict, List, Optional, Tuple
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
 ARCHIVE_ROOT = DATA_DIR / "reports_archive"
+
+# Ciclo 17.29 CRÍTICO — Persistencia vía Supabase Storage.
+# Streamlit Cloud usa contenedores efímeros: cada redeploy borra
+# data/reports_archive/. Antes de este fix, todos los reportes
+# archivados se perdían en cada redeploy. Ahora los subimos a
+# Supabase Storage en un bucket dedicado, y los restauramos al
+# filesystem en cold start.
+ARCHIVE_BUCKET_NAME = "reports-archive"
+_SUPABASE_CLIENT_CACHE: Any = None
+_SUPABASE_CLIENT_TRIED: bool = False
+_SYNC_FROM_DONE: bool = False  # Para llamar sync_from_supabase 1 vez por proceso
 
 
 # =============================================================
@@ -74,6 +86,309 @@ def _human_size(n: int) -> str:
             return f"{fn:.1f} {unit}"
         fn /= 1024
     return f"{fn:.1f} TB"
+
+
+# =============================================================
+# SUPABASE STORAGE — persistencia entre redeploys (Ciclo 17.29)
+# =============================================================
+# Streamlit Cloud usa contenedores efímeros. Cada redeploy borra el
+# filesystem local. Para que los reportes archivados sobrevivan,
+# los persistimos en un bucket Supabase Storage dedicado.
+#
+# El usuario debe crear el bucket UNA VEZ en Supabase Dashboard:
+#   Storage → New bucket → Name: 'reports-archive' → Public: NO
+#   Las RLS policies se manejan con la service_key (admin).
+#
+# Layout en Supabase:
+#   reports-archive/{owner_slug}/{YYYY}/{MM}/{file_slug}.pdf
+#   reports-archive/{owner_slug}/{YYYY}/{MM}/{file_slug}.json
+#
+# Mismo layout que filesystem local → 1:1 mapping del archive_id.
+
+def _get_archive_supabase_client() -> Any:
+    """Devuelve un cliente Supabase para el bucket de archivo.
+    None si supabase no está configurado o el SDK no está instalado.
+    Cached lazy: 1 build por proceso."""
+    global _SUPABASE_CLIENT_CACHE, _SUPABASE_CLIENT_TRIED
+    if _SUPABASE_CLIENT_TRIED:
+        return _SUPABASE_CLIENT_CACHE
+    _SUPABASE_CLIENT_TRIED = True
+    try:
+        import streamlit as st
+        if "supabase" not in st.secrets:
+            return None
+        cfg = st.secrets["supabase"]
+        url = (cfg.get("url", "") or "").strip()
+        key = (cfg.get("service_key", "") or "").strip()
+        if not url or not key:
+            return None
+        from supabase import create_client
+        _SUPABASE_CLIENT_CACHE = create_client(url, key)
+        return _SUPABASE_CLIENT_CACHE
+    except Exception as exc:
+        print(
+            f"[WM_ARCHIVE] No se pudo inicializar cliente Supabase: {exc}",
+            file=sys.stderr, flush=True,
+        )
+        return None
+
+
+def _supabase_path_for(archive_id: str, suffix: str) -> str:
+    """Convierte archive_id en path dentro del bucket.
+    archive_id = 'owner_slug/YYYY/MM/file_slug' → path = 'owner_slug/YYYY/MM/file_slug.pdf'."""
+    return f"{archive_id}{suffix}"
+
+
+def _upload_to_supabase(
+    archive_id: str,
+    pdf_bytes: bytes,
+    sidecar_dict: Dict[str, Any],
+) -> bool:
+    """Sube PDF + sidecar JSON a Supabase Storage. Idempotente (upsert).
+    Devuelve True si ambos uploads fueron OK."""
+    client = _get_archive_supabase_client()
+    if client is None:
+        return False
+    try:
+        bucket = client.storage.from_(ARCHIVE_BUCKET_NAME)
+        pdf_path = _supabase_path_for(archive_id, ".pdf")
+        json_path = _supabase_path_for(archive_id, ".json")
+        bucket.upload(
+            pdf_path, pdf_bytes,
+            {"upsert": "true", "content-type": "application/pdf"},
+        )
+        sidecar_bytes = json.dumps(
+            sidecar_dict, indent=2, ensure_ascii=False, default=str
+        ).encode("utf-8")
+        bucket.upload(
+            json_path, sidecar_bytes,
+            {"upsert": "true", "content-type": "application/json"},
+        )
+        print(
+            f"[WM_ARCHIVE] Supabase upload OK: {archive_id} "
+            f"({_human_size(len(pdf_bytes))})",
+            file=sys.stderr, flush=True,
+        )
+        return True
+    except Exception as exc:
+        print(
+            f"[WM_ARCHIVE] Supabase upload FAIL para {archive_id}: {exc}",
+            file=sys.stderr, flush=True,
+        )
+        return False
+
+
+def _download_from_supabase(archive_id: str) -> Tuple[Optional[bytes], Optional[Dict[str, Any]]]:
+    """Baja PDF + sidecar desde Supabase. Devuelve (pdf_bytes, sidecar_dict)
+    o (None, None) si no se pudo bajar."""
+    client = _get_archive_supabase_client()
+    if client is None:
+        return None, None
+    try:
+        bucket = client.storage.from_(ARCHIVE_BUCKET_NAME)
+        pdf_bytes = bucket.download(_supabase_path_for(archive_id, ".pdf"))
+        sidecar_raw = bucket.download(_supabase_path_for(archive_id, ".json"))
+        sidecar_dict = (
+            json.loads(sidecar_raw.decode("utf-8"))
+            if sidecar_raw else None
+        )
+        return pdf_bytes, sidecar_dict
+    except Exception as exc:
+        print(
+            f"[WM_ARCHIVE] Supabase download FAIL para {archive_id}: {exc}",
+            file=sys.stderr, flush=True,
+        )
+        return None, None
+
+
+def _delete_from_supabase(archive_id: str) -> bool:
+    """Borra PDF + sidecar de Supabase. Idempotente."""
+    client = _get_archive_supabase_client()
+    if client is None:
+        return False
+    try:
+        bucket = client.storage.from_(ARCHIVE_BUCKET_NAME)
+        bucket.remove([
+            _supabase_path_for(archive_id, ".pdf"),
+            _supabase_path_for(archive_id, ".json"),
+        ])
+        return True
+    except Exception as exc:
+        print(
+            f"[WM_ARCHIVE] Supabase delete FAIL para {archive_id}: {exc}",
+            file=sys.stderr, flush=True,
+        )
+        return False
+
+
+def _list_supabase_archive_files() -> List[str]:
+    """Lista todos los .json (sidecars) del bucket. Devuelve archive_ids
+    sin extensión. Recorre la jerarquía owner/YYYY/MM/file."""
+    client = _get_archive_supabase_client()
+    if client is None:
+        return []
+    out: List[str] = []
+    try:
+        bucket = client.storage.from_(ARCHIVE_BUCKET_NAME)
+        # Walk: list by depth. Supabase no expone rglob; iteramos por nivel.
+        owners_resp = bucket.list("", {"limit": 1000})
+        owners = [
+            o["name"] for o in (owners_resp or [])
+            if o.get("name") and not o["name"].startswith(".")
+        ]
+        for owner in owners:
+            try:
+                years_resp = bucket.list(owner, {"limit": 100})
+            except Exception:
+                continue
+            years = [
+                y["name"] for y in (years_resp or [])
+                if y.get("name") and y["name"].isdigit()
+            ]
+            for year in years:
+                try:
+                    months_resp = bucket.list(
+                        f"{owner}/{year}", {"limit": 100}
+                    )
+                except Exception:
+                    continue
+                months = [
+                    m["name"] for m in (months_resp or [])
+                    if m.get("name") and m["name"].isdigit()
+                ]
+                for month in months:
+                    try:
+                        files_resp = bucket.list(
+                            f"{owner}/{year}/{month}", {"limit": 1000}
+                        )
+                    except Exception:
+                        continue
+                    for f in (files_resp or []):
+                        nm = f.get("name", "")
+                        if nm.endswith(".json"):
+                            archive_id = (
+                                f"{owner}/{year}/{month}/"
+                                f"{nm[:-len('.json')]}"
+                            )
+                            out.append(archive_id)
+        return out
+    except Exception as exc:
+        print(
+            f"[WM_ARCHIVE] Supabase list FAIL: {exc}",
+            file=sys.stderr, flush=True,
+        )
+        return []
+
+
+def sync_archive_from_supabase(*, force: bool = False) -> Dict[str, int]:
+    """Restaura el archivo histórico desde Supabase al filesystem
+    local. Llamada en cold start (lazy, una vez por proceso).
+
+    Args:
+        force: si True, re-baja todo aunque ya exista localmente.
+               Default False = solo baja archive_ids ausentes.
+
+    Returns:
+        {"downloaded": int, "skipped": int, "failed": int}
+    """
+    global _SYNC_FROM_DONE
+    if _SYNC_FROM_DONE and not force:
+        return {"downloaded": 0, "skipped": 0, "failed": 0,
+                "already_synced": True}
+
+    client = _get_archive_supabase_client()
+    if client is None:
+        _SYNC_FROM_DONE = True
+        return {"downloaded": 0, "skipped": 0, "failed": 0,
+                "supabase_unavailable": True}
+
+    archive_ids = _list_supabase_archive_files()
+    stats = {"downloaded": 0, "skipped": 0, "failed": 0}
+
+    for aid in archive_ids:
+        local_pdf = ARCHIVE_ROOT / f"{aid}.pdf"
+        local_json = ARCHIVE_ROOT / f"{aid}.json"
+        if (not force and local_pdf.exists() and local_json.exists()):
+            stats["skipped"] += 1
+            continue
+        pdf_bytes, sidecar_dict = _download_from_supabase(aid)
+        if pdf_bytes is None or sidecar_dict is None:
+            stats["failed"] += 1
+            continue
+        try:
+            local_pdf.parent.mkdir(parents=True, exist_ok=True)
+            local_pdf.write_bytes(pdf_bytes)
+            local_json.write_text(
+                json.dumps(sidecar_dict, indent=2, ensure_ascii=False,
+                           default=str),
+                encoding="utf-8",
+            )
+            stats["downloaded"] += 1
+        except Exception as exc:
+            print(
+                f"[WM_ARCHIVE] Falló escritura local de {aid}: {exc}",
+                file=sys.stderr, flush=True,
+            )
+            stats["failed"] += 1
+
+    _SYNC_FROM_DONE = True
+    if stats["downloaded"] > 0 or stats["failed"] > 0:
+        print(
+            f"[WM_ARCHIVE] sync_from_supabase: {stats}",
+            file=sys.stderr, flush=True,
+        )
+    return stats
+
+
+def sync_archive_to_supabase(*, force: bool = False) -> Dict[str, int]:
+    """Sube todos los reportes locales que NO están en Supabase. Útil
+    para migrar archivos existentes la primera vez que se configura el
+    bucket. Idempotente.
+
+    Args:
+        force: si True, re-sube todo aunque ya esté en Supabase.
+
+    Returns: {"uploaded": int, "skipped": int, "failed": int}.
+    """
+    client = _get_archive_supabase_client()
+    if client is None:
+        return {"uploaded": 0, "skipped": 0, "failed": 0,
+                "supabase_unavailable": True}
+
+    if not ARCHIVE_ROOT.exists():
+        return {"uploaded": 0, "skipped": 0, "failed": 0}
+
+    remote_ids = set(_list_supabase_archive_files()) if not force else set()
+    stats = {"uploaded": 0, "skipped": 0, "failed": 0}
+
+    for sidecar_path in ARCHIVE_ROOT.rglob("*.json"):
+        try:
+            sc = json.loads(sidecar_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        archive_id = sc.get("archive_id", "")
+        if not archive_id:
+            continue
+        pdf_path = sidecar_path.with_suffix(".pdf")
+        if not pdf_path.exists():
+            continue
+        if not force and archive_id in remote_ids:
+            stats["skipped"] += 1
+            continue
+        try:
+            pdf_bytes = pdf_path.read_bytes()
+            ok = _upload_to_supabase(archive_id, pdf_bytes, sc)
+            if ok:
+                stats["uploaded"] += 1
+            else:
+                stats["failed"] += 1
+        except Exception:
+            stats["failed"] += 1
+    print(
+        f"[WM_ARCHIVE] sync_to_supabase: {stats}",
+        file=sys.stderr, flush=True,
+    )
+    return stats
 
 
 # =============================================================
@@ -184,6 +499,15 @@ def archive_report_pdf(
         encoding="utf-8",
     )
 
+    # Ciclo 17.29 CRÍTICO — Subir a Supabase Storage para que sobreviva
+    # al próximo redeploy de Streamlit Cloud. Si Supabase no está
+    # configurado o falla, el archivo local sigue válido pero quedará
+    # vulnerable a pérdida en el próximo redeploy. El upload es
+    # best-effort: no bloquea el archivado local.
+    supabase_uploaded = _upload_to_supabase(
+        sidecar["archive_id"], pdf_bytes, sidecar
+    )
+
     return {
         "ok": True,
         "archive_id": sidecar["archive_id"],
@@ -191,6 +515,7 @@ def archive_report_pdf(
         "meta_path": str(meta_path),
         "size_bytes": len(pdf_bytes),
         "size_human": _human_size(len(pdf_bytes)),
+        "supabase_uploaded": supabase_uploaded,
     }
 
 
@@ -250,6 +575,14 @@ def list_archived_reports(
         Lista de sidecars que el viewer puede ver, ordenados por
         archived_at desc.
     """
+    # Ciclo 17.29 CRÍTICO — En cold start (filesystem efímero recién
+    # restaurado por Streamlit Cloud), el archive local está vacío.
+    # Sincronizamos desde Supabase Storage la primera vez que se
+    # llama esta función por proceso. Subsecuentes llamadas usan
+    # filesystem (rápido). Idempotente.
+    if not _SYNC_FROM_DONE:
+        sync_archive_from_supabase()
+
     if not ARCHIVE_ROOT.exists():
         return []
 
@@ -314,8 +647,32 @@ def get_archived_pdf_bytes(
     """
     pdf_path = ARCHIVE_ROOT / f"{archive_id}.pdf"
     sidecar_path = ARCHIVE_ROOT / f"{archive_id}.json"
+
+    # Ciclo 17.29 — Si los archivos no están localmente (cold start o
+    # primer acceso desde un proceso reciente), intentar bajar de
+    # Supabase. Cubre el caso de un viewer que pidió un archive_id
+    # antes de que sync_archive_from_supabase corriera por list_*.
     if not pdf_path.exists() or not sidecar_path.exists():
+        pdf_bytes_remote, sc_remote = _download_from_supabase(archive_id)
+        if pdf_bytes_remote and sc_remote:
+            # Validar permisos contra el sidecar bajado
+            if viewer_email or viewer_role:
+                if not _can_view(viewer_email, viewer_role, sc_remote):
+                    return None
+            # Persistir local para futuros accesos
+            try:
+                pdf_path.parent.mkdir(parents=True, exist_ok=True)
+                pdf_path.write_bytes(pdf_bytes_remote)
+                sidecar_path.write_text(
+                    json.dumps(sc_remote, indent=2, ensure_ascii=False,
+                               default=str),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
+            return pdf_bytes_remote
         return None
+
     try:
         sc = json.loads(sidecar_path.read_text(encoding="utf-8"))
     except Exception:
@@ -367,6 +724,9 @@ def delete_archived_report(
         if pdf_path.exists():
             pdf_path.unlink()
         sidecar_path.unlink()
+        # Ciclo 17.29 — borrar también de Supabase Storage para que
+        # no resucite en el próximo cold start.
+        _delete_from_supabase(archive_id)
         return {"ok": True}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -399,6 +759,15 @@ def share_with_client(
     sc["shared_changed_by"] = viewer_email
     sidecar_path.write_text(json.dumps(sc, indent=2, ensure_ascii=False, default=str),
                              encoding="utf-8")
+    # Ciclo 17.29 — re-subir el sidecar actualizado a Supabase (el PDF
+    # no cambió pero el sidecar sí; lo subimos junto para mantenerlo
+    # consistente entre filesystem y bucket).
+    pdf_path = ARCHIVE_ROOT / f"{archive_id}.pdf"
+    if pdf_path.exists():
+        try:
+            _upload_to_supabase(archive_id, pdf_path.read_bytes(), sc)
+        except Exception:
+            pass
     return {"ok": True, "shared": bool(shared)}
 
 

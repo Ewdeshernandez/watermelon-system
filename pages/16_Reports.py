@@ -151,6 +151,11 @@ from core.ai_runcompare import (  # Ciclo 17.28 — Run-vs-Run comparison
     find_previous_report,
     generate_run_comparison,
 )
+from core.ai_rul import (  # Ciclo 17.30 — RUL Predictivo
+    find_asset_history,
+    generate_rul_estimate,
+    MIN_HISTORY_FOR_RUL,
+)
 
 
 st.set_page_config(page_title="Watermelon System | Reports", layout="wide")
@@ -2333,6 +2338,57 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 story.append(fl)
             story.append(Spacer(1, 0.30 * cm))
 
+        # Ciclo 17.30 — Proyección de Vida Útil Restante (RUL)
+        # Si el especialista generó la estimación, agregamos otra
+        # sección después de la Evolución. El cliente VP / Mantto
+        # ve el horizonte de intervención sugerido.
+        rul_estimate_md = (meta.get("ai_rul_estimate") or "").strip()
+        if rul_estimate_md:
+            story.append(PageBreak())
+            story.append(Paragraph(
+                "PROYECCIÓN DE VIDA ÚTIL RESTANTE", styles["WMTOC1"]
+            ))
+            rul_meta_dict = meta.get("ai_rul_meta") or {}
+            rul_n = int(rul_meta_dict.get("n_history", 0) or 0)
+            rul_days = int(rul_meta_dict.get("history_days_covered", 0) or 0)
+            rul_mono = bool(rul_meta_dict.get("monotonic", False))
+            rul_first_sev = str(rul_meta_dict.get("first_severity", "") or "")
+            rul_last_sev = str(rul_meta_dict.get("last_severity", "") or "")
+            rul_caption_bits: List[str] = []
+            if rul_n > 0:
+                rul_caption_bits.append(f"Base estadística: {rul_n} reportes")
+            if rul_days > 0:
+                rul_caption_bits.append(f"Cubriendo {rul_days} días operativos")
+            if rul_first_sev and rul_last_sev:
+                rul_caption_bits.append(
+                    f"Trayectoria: {rul_first_sev} → {rul_last_sev}"
+                )
+            rul_caption_bits.append(
+                "Monotónica" if rul_mono
+                else "No-monotónica (validación operativa requerida)"
+            )
+            if rul_caption_bits:
+                _rul_caption_style = ParagraphStyle(
+                    name="WMRulCaption",
+                    parent=styles["Normal"],
+                    fontName=PDF_FONT_REGULAR,
+                    fontSize=9.5,
+                    leading=12,
+                    alignment=TA_LEFT,
+                    textColor=colors.HexColor("#475569"),
+                    spaceAfter=10,
+                )
+                story.append(Paragraph(
+                    " · ".join(rul_caption_bits),
+                    _rul_caption_style,
+                ))
+            rul_flowables = _render_ai_clinical_flowables(
+                rul_estimate_md, styles
+            )
+            for fl in rul_flowables:
+                story.append(fl)
+            story.append(Spacer(1, 0.30 * cm))
+
         story.append(PageBreak())
 
     # ============================================================
@@ -3518,6 +3574,192 @@ if _runcmp_stored is not None:
                 st.session_state["wm_ai_runcmp_result"] = None
                 st.rerun()
 
+# =============================================================
+# Ciclo 17.30 — AI RUL Predictivo (Remaining Useful Life)
+# =============================================================
+# Estima cuántos días operativos le quedan al activo antes de cruzar
+# a la próxima zona de severidad (típicamente CRÍTICA / zona D ISO
+# 20816). Requiere al menos 3 reportes históricos del mismo activo
+# para emitir percentiles cuantitativos; con menos, el AI emite
+# análisis cualitativo y declara "datos insuficientes".
+_rul_iid = (meta.get("instance_id") or "").strip()
+_rul_itag = (meta.get("instance_tag") or "").strip()
+
+# Cargar la historia del activo una vez por sesión
+_rul_history_key = f"wm_ai_rul_history_{_rul_iid or _rul_itag}"
+if _rul_history_key not in st.session_state:
+    try:
+        st.session_state[_rul_history_key] = find_asset_history(
+            viewer_email=_wm_my_email,
+            viewer_role=_wm_my_role,
+            instance_id=_rul_iid,
+            instance_tag=_rul_itag,
+            limit=30,
+        )
+    except Exception:
+        st.session_state[_rul_history_key] = []
+
+_rul_history = st.session_state.get(_rul_history_key) or []
+
+_rul_disabled = (
+    not is_ai_available()
+    or len(items) == 0
+    or len(_rul_history) < 1
+)
+_rul_help = None
+if not is_ai_available():
+    _rul_help = "AI no disponible. Configurá [anthropic] api_key."
+elif len(items) == 0:
+    _rul_help = "Agregá figuras al reporte primero."
+elif len(_rul_history) == 0:
+    if not _rul_iid and not _rul_itag:
+        _rul_help = (
+            "Activá una instancia desde Machinery Library para "
+            "habilitar el análisis predictivo."
+        )
+    else:
+        _rul_help = (
+            f"Sin historial archivado del activo "
+            f"'{_rul_itag or _rul_iid}'. La proyección RUL requiere "
+            f"al menos un reporte previo (idealmente 3+ para "
+            f"percentiles)."
+        )
+
+_rul_label_btn = "🔮 Estimar Vida Útil Restante (RUL)"
+if _rul_history:
+    _rul_label_btn = (
+        f"🔮 Estimar Vida Útil Restante "
+        f"({len(_rul_history)} reportes históricos)"
+    )
+
+_rul_btn_cols = st.columns([2.4, 3.6])
+with _rul_btn_cols[0]:
+    if st.button(
+        _rul_label_btn,
+        key="wm_ai_rul_btn",
+        use_container_width=True,
+        disabled=_rul_disabled,
+        help=_rul_help,
+        type="primary" if not _rul_disabled else "secondary",
+    ):
+        with st.spinner(
+            "🔮 Claude analizando trayectoria histórica y proyectando "
+            "vida útil... (10-25 seg)"
+        ):
+            try:
+                _rul_result = generate_rul_estimate(
+                    _rul_history,
+                    current_meta=meta,
+                    current_items=items,
+                    use_cache=True,
+                )
+            except Exception as exc:
+                _rul_result = {
+                    "ok": False,
+                    "markdown": (
+                        f"_⚠️ Error inesperado:_\n\n```\n"
+                        f"{type(exc).__name__}: {exc}\n```"
+                    ),
+                    "error": str(exc)[:500],
+                    "model": "",
+                    "cached": False,
+                    "fallback_used": False,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cost_usd": 0.0,
+                    "n_history": 0,
+                    "history_days_covered": 0,
+                    "monotonic": False,
+                }
+        st.session_state["wm_ai_rul_result"] = _rul_result
+
+with _rul_btn_cols[1]:
+    if _rul_history:
+        _rul_n = len(_rul_history)
+        _rul_min = (_rul_history[0].get("archived_at", "") or "")[:10]
+        _rul_max = (_rul_history[-1].get("archived_at", "") or "")[:10]
+        _rul_quality = (
+            "✅ Suficiente para percentiles"
+            if _rul_n >= MIN_HISTORY_FOR_RUL
+            else f"⚠️ Análisis cualitativo solamente (mínimo {MIN_HISTORY_FOR_RUL} reportes para percentiles)"
+        )
+        st.caption(
+            f"Historia detectada: **{_rul_n} reportes** entre "
+            f"{_rul_min} y {_rul_max}. {_rul_quality}"
+        )
+
+# Render del resultado RUL
+_rul_stored = st.session_state.get("wm_ai_rul_result")
+if _rul_stored is not None:
+    with st.expander(
+        "🔮 Proyección de vida útil restante (vista previa, va al PDF)",
+        expanded=True,
+    ):
+        if _rul_stored.get("ok"):
+            if _rul_stored.get("fallback_used"):
+                st.info(
+                    "ℹ️ Esta proyección se generó con el modelo de "
+                    "respaldo (Haiku 4.5). Calidad ligeramente menor."
+                )
+            _n_h = _rul_stored.get("n_history", 0)
+            _days_cov = _rul_stored.get("history_days_covered", 0)
+            _mono = _rul_stored.get("monotonic", False)
+            st.caption(
+                f"📊 Base estadística: {_n_h} reportes · "
+                f"{_days_cov} días cubiertos · "
+                f"Trayectoria monotónica: {'sí' if _mono else 'no (requiere validación)'}"
+            )
+            st.markdown(_rul_stored.get("markdown", ""))
+            _model_used_rul = str(_rul_stored.get("model", "") or "")
+            _cost_rul = _rul_stored.get("cost_usd", 0.0)
+            _rul_btn_cols2 = st.columns([1, 1, 5])
+            with _rul_btn_cols2[0]:
+                if st.button(
+                    "🔄 Regenerar",
+                    key="wm_ai_rul_regen",
+                    use_container_width=True,
+                ):
+                    with st.spinner("Regenerando..."):
+                        try:
+                            _rul_new = generate_rul_estimate(
+                                _rul_history,
+                                current_meta=meta,
+                                current_items=items,
+                                use_cache=False,
+                            )
+                            st.session_state["wm_ai_rul_result"] = _rul_new
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Error: {exc}")
+            with _rul_btn_cols2[1]:
+                if st.button(
+                    "🗑 Descartar",
+                    key="wm_ai_rul_clear",
+                    use_container_width=True,
+                ):
+                    st.session_state["wm_ai_rul_result"] = None
+                    st.rerun()
+            with _rul_btn_cols2[2]:
+                _fb_tag_rul = (
+                    " · ⚠️ modelo de respaldo"
+                    if _rul_stored.get("fallback_used") else ""
+                )
+                st.caption(
+                    f"Modelo: `{_model_used_rul}` · "
+                    f"Tokens: {_rul_stored.get('input_tokens', 0)} → "
+                    f"{_rul_stored.get('output_tokens', 0)} · "
+                    f"Costo: ~${_cost_rul:.4f}{_fb_tag_rul}"
+                )
+        else:
+            st.error(
+                _rul_stored.get(
+                    "markdown", "Error al generar proyección RUL."
+                )
+            )
+            if st.button("🔄 Reintentar", key="wm_ai_rul_retry"):
+                st.session_state["wm_ai_rul_result"] = None
+                st.rerun()
+
 pdf_ready = len(items) > 0
 pdf_error = None
 pdf_bytes: Optional[bytes] = None
@@ -3643,6 +3885,29 @@ with ga3:
             else:
                 meta["ai_run_comparison"] = ""
                 meta["ai_run_comparison_meta"] = {}
+
+            # Ciclo 17.30 — Si el especialista generó la proyección RUL,
+            # inyectamos al meta para que el PDF agregue la sección
+            # 'PROYECCIÓN DE VIDA ÚTIL RESTANTE' después de Evolución.
+            _rul_for_pdf = st.session_state.get("wm_ai_rul_result")
+            if (_rul_for_pdf
+                    and _rul_for_pdf.get("ok")
+                    and _rul_for_pdf.get("markdown")):
+                meta["ai_rul_estimate"] = str(
+                    _rul_for_pdf.get("markdown", "")
+                ).strip()
+                meta["ai_rul_meta"] = {
+                    "n_history": _rul_for_pdf.get("n_history", 0),
+                    "history_days_covered": _rul_for_pdf.get(
+                        "history_days_covered", 0
+                    ),
+                    "monotonic": _rul_for_pdf.get("monotonic", False),
+                    "first_severity": _rul_for_pdf.get("first_severity", ""),
+                    "last_severity": _rul_for_pdf.get("last_severity", ""),
+                }
+            else:
+                meta["ai_rul_estimate"] = ""
+                meta["ai_rul_meta"] = {}
 
             pdf_bytes = _build_pdf_bytes(meta, items)
             st.session_state["report_pdf_bytes"] = pdf_bytes
