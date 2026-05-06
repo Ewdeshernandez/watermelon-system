@@ -22,4 +22,11 @@ supabase>=2.0.0
 streamlit-image-coordinates>=0.1.7
 # Pillow para overlay de markers + texto sobre el schematic_png
 Pillow>=10.0.0
+# Ciclo 17.26: AI Diagnóstico con Claude API. Generación de
+# interpretación clínica + recomendaciones en español natural a
+# partir de los hallazgos técnicos de cada análisis (Spectrum,
+# Waveforms, Trends, Bode, Polar, Orbit). Si st.secrets[anthropic]
+# no está configurado, el botón "🧠 Diagnóstico AI" aparece deshabilitado
+# pero el resto del sistema funciona normal.
+anthropic>=0.39.0
 # rebuild trigger
