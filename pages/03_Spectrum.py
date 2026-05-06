@@ -21,6 +21,10 @@ from core.spectrum_diagnostics import (
     build_spectrum_report_notes,
     build_spectrum_diagnostics_rotordyn,  # Ciclo 11: Cat IV completo
 )
+from core.ai_diagnostic import (  # Ciclo 17.26: interpretación clínica AI
+    generate_ai_diagnostic,
+    is_ai_available,
+)
 from core.spectrum_scale import suggest_max_cpm_for_unit  # Ciclo 11.1: auto-escala
 from core.bearing_catalog import (
     build_bearing_fault_overlay_from_catalog,
@@ -2243,6 +2247,199 @@ def render_spectrum_panel(
                     )
                 )
 
+    # ------------------------------------------------------------
+    # Ciclo 17.26 — Interpretación clínica AI (opción C híbrido)
+    # ------------------------------------------------------------
+    # El bloque técnico determinístico de arriba sigue siendo la
+    # evidencia auditable del reporte. Este bloque AGREGA una
+    # interpretación clínica generada por Claude (Cat IV ISO 18436-2
+    # simulado) con análisis cualitativo, causas raíz probables y
+    # recomendaciones priorizadas. NO reemplaza el técnico — lo
+    # complementa para el especialista.
+    ai_state_key = f"wm_ai_diag_spectrum_{export_state_key}"
+    if ai_state_key not in st.session_state:
+        st.session_state[ai_state_key] = None
+
+    with st.expander(
+        "🧠 Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        expanded=False,
+    ):
+        if not is_ai_available():
+            st.info(
+                "🔑 **AI Diagnóstico no disponible.** Falta configurar "
+                "`[anthropic] api_key` en los secrets de Streamlit. Mientras "
+                "tanto, el diagnóstico técnico determinístico de arriba contiene "
+                "toda la evidencia ISO/API necesaria."
+            )
+        else:
+            stored = st.session_state.get(ai_state_key)
+
+            ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
+            with ai_btn_col1:
+                gen_clicked = st.button(
+                    "🧠 Generar diagnóstico AI"
+                    if stored is None
+                    else "🧠 Diagnóstico generado",
+                    key=f"ai_gen_btn_{export_state_key}",
+                    use_container_width=True,
+                    type="primary" if stored is None else "secondary",
+                    disabled=stored is not None and stored.get("ok", False),
+                )
+            with ai_btn_col2:
+                regen_clicked = st.button(
+                    "🔄 Regenerar",
+                    key=f"ai_regen_btn_{export_state_key}",
+                    use_container_width=True,
+                    disabled=stored is None,
+                    help="Fuerza una nueva llamada a Claude (ignora el cache).",
+                )
+            with ai_btn_col3:
+                st.caption(
+                    "Claude Sonnet 4.5 · ~$0.015 por diagnóstico · "
+                    "cacheado 30 días si no regenerás."
+                )
+
+            should_call = bool(gen_clicked) and (stored is None)
+            should_regen = bool(regen_clicked) and (stored is not None)
+
+            if should_call or should_regen:
+                # Construir payload con todo lo que ya tenemos en scope.
+                ai_peaks: List[Dict[str, Any]] = []
+                for hp in (all_harmonic_points or [])[:8]:
+                    try:
+                        ai_peaks.append({
+                            "orden": f"{int(hp.order)}X",
+                            "freq_cpm": round(float(hp.freq_cpm), 1),
+                            "amp_peak": round(float(hp.amp_peak), 4),
+                        })
+                    except Exception:
+                        continue
+
+                amp_unit_text = amplitude_unit_text(
+                    primary.amplitude_unit, amplitude_mode
+                )
+
+                ai_payload: Dict[str, Any] = {
+                    "machine": {
+                        "tag": str(getattr(primary, "machine", "") or ""),
+                        "punto_medicion": str(getattr(primary, "point", "") or ""),
+                        "variable": str(getattr(primary, "variable", "") or ""),
+                        "rpm_nominal": float(getattr(primary, "rpm", 0.0) or 0.0),
+                        "timestamp": str(getattr(primary, "timestamp", "") or ""),
+                        "signal_name": str(getattr(primary, "name", "") or ""),
+                    },
+                    "norm": {
+                        "headline_tecnico": str(text_diag.get("headline", "") or ""),
+                        "zona_actual": (
+                            str(cat_iv_diag.get("severity_global", "") or "")
+                            if cat_iv_diag else ""
+                        ),
+                    },
+                    "technical": {
+                        "overall_rms": (
+                            round(float(overall_spec_rms), 4)
+                            if overall_spec_rms is not None else None
+                        ),
+                        "amplitud_unidad": amp_unit_text,
+                        "one_x_amp": (
+                            round(float(one_x_display_amp), 4)
+                            if one_x_display_amp is not None else None
+                        ),
+                        "one_x_freq_cpm": (
+                            round(float(one_x_display_freq_cpm), 1)
+                            if one_x_display_freq_cpm is not None else None
+                        ),
+                        "picos_armonicos": ai_peaks,
+                        "narrativa_tecnica": str(
+                            text_diag.get("narrative", "") or ""
+                        )[:1500],
+                    },
+                    "trend": {},
+                }
+
+                if cat_iv_diag is not None:
+                    ai_payload["technical"]["diagnostico_avanzado"] = {
+                        "headline": str(cat_iv_diag.get("headline", "") or ""),
+                        "detail": str(cat_iv_diag.get("detail", "") or "")[:1500],
+                        "action": str(cat_iv_diag.get("action", "") or "")[:1500],
+                        "findings": [
+                            str(f.get("headline", "") or "")
+                            for f in (cat_iv_diag.get("findings") or [])
+                        ][:6],
+                    }
+
+                if enable_bearing_faults and bearing_diagnostic_text:
+                    ai_payload["technical"]["bearing_assessment"] = (
+                        str(bearing_diagnostic_text)[:1500]
+                    )
+
+                with st.spinner("🧠 Claude analizando el espectro... (5-15 seg)"):
+                    try:
+                        result = generate_ai_diagnostic(
+                            ai_payload,
+                            module_type="spectrum",
+                            use_cache=not should_regen,
+                        )
+                    except Exception as exc:
+                        result = {
+                            "ok": False,
+                            "markdown": (
+                                f"_⚠️ Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"```\n{type(exc).__name__}: {exc}\n```"
+                            ),
+                            "error": str(exc)[:500],
+                            "model": "",
+                            "cached": False,
+                            "input_tokens": 0,
+                            "output_tokens": 0,
+                            "generated_at": "",
+                        }
+                st.session_state[ai_state_key] = result
+                stored = result
+
+            # Render del resultado almacenado
+            if stored is not None:
+                if stored.get("ok"):
+                    # Banner discreto si el resultado vino del modelo de
+                    # fallback. Es info para vos/especialista (no aparece
+                    # nunca en el PDF al cliente).
+                    if stored.get("fallback_used"):
+                        st.info(
+                            "ℹ️ Este diagnóstico se generó con el modelo de "
+                            "respaldo (Haiku 4.5) porque el modelo principal "
+                            "(Sonnet 4.5) estaba sobrecargado. La calidad es "
+                            "ligeramente menor. Podés regenerar más tarde "
+                            "cuando Sonnet recupere capacidad."
+                        )
+                    st.markdown(stored.get("markdown", ""))
+                    # Pricing depende del modelo que efectivamente respondió.
+                    model_used = str(stored.get("model", "") or "")
+                    if model_used.startswith("claude-haiku"):
+                        in_p, out_p = 1.0, 5.0
+                    else:
+                        in_p, out_p = 3.0, 15.0
+                    cost_usd = (
+                        stored.get("input_tokens", 0) * in_p
+                        + stored.get("output_tokens", 0) * out_p
+                    ) / 1_000_000
+                    fallback_tag = (
+                        " · ⚠️ modelo de respaldo"
+                        if stored.get("fallback_used") else ""
+                    )
+                    st.caption(
+                        f"Modelo: `{model_used}` · "
+                        f"Tokens: {stored.get('input_tokens', 0)} → "
+                        f"{stored.get('output_tokens', 0)} · "
+                        f"Costo: ~${cost_usd:.4f} · "
+                        f"{'(cacheado)' if stored.get('cached') else '(generado nuevo)'}"
+                        f"{fallback_tag} · "
+                        f"{stored.get('generated_at', '')}"
+                    )
+                else:
+                    st.error(
+                        stored.get("markdown", "Error al generar diagnóstico AI.")
+                    )
+
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
 
@@ -2301,6 +2498,73 @@ def render_spectrum_panel(
             if not spectrum_report_notes.strip():
                 spectrum_report_notes = "Interpretación técnica pendiente para este espectro."
 
+            # Ciclo 17.26 — Voz única firmada: cuando hay diagnóstico AI,
+            # el bloque AI MANDA. Reemplazamos enteramente la narrativa
+            # determinística (Cat IV / legacy) por:
+            #   1. Tabla cuantitativa de evidencia (overall, 1X, RPM, zona)
+            #   2. Marcador <<<WM_AI_NARRATIVE>>>
+            #   3. Markdown del AI
+            # El cliente lee texto continuo de un especialista, sin marcas
+            # "AI" ni duplicación con la narrativa determinística. La data
+            # numérica queda en la tabla anexa como evidencia auditable.
+            ai_stored = st.session_state.get(
+                f"wm_ai_diag_spectrum_{export_state_key}"
+            )
+            if ai_stored and ai_stored.get("ok") and ai_stored.get("markdown"):
+                ai_md = str(ai_stored.get("markdown", "")).strip()
+                if ai_md:
+                    # Construir filas de la tabla cuantitativa de evidencia.
+                    quant_lines: List[str] = ["Parámetro|Valor"]
+                    amp_unit_text_local = amplitude_unit_text(
+                        primary.amplitude_unit, amplitude_mode
+                    )
+                    rpm_val = float(getattr(primary, "rpm", 0.0) or 0.0)
+                    if rpm_val > 0:
+                        quant_lines.append(
+                            f"Velocidad de giro|{rpm_val:.0f} RPM"
+                        )
+                    # Bug fix v3.5.4: Overall se calculaba como RMS-Parseval
+                    # pero se mostraba con la unidad del modo de display
+                    # (mil pp si amplitude_mode = Peak-to-Peak), mezclando
+                    # un valor RMS con una unidad peak-peak. Ahora convertimos
+                    # el RMS al modo de display antes de mostrarlo, así el
+                    # número y la unidad concuerdan y son consistentes con
+                    # el resto del espectro (1X, 2X, etc., que ya están en
+                    # el modo de display).
+                    if overall_spec_rms is not None:
+                        overall_display_val = convert_rms_to_mode(
+                            overall_spec_rms, amplitude_mode
+                        )
+                        if overall_display_val is not None:
+                            quant_lines.append(
+                                f"Overall|"
+                                f"{format_number(overall_display_val, 3)} "
+                                f"{amp_unit_text_local}".strip()
+                            )
+                    if (one_x_display_amp is not None
+                            and one_x_display_freq_cpm is not None):
+                        quant_lines.append(
+                            f"1X|"
+                            f"{format_number(one_x_display_amp, 3)} "
+                            f"{amp_unit_text_local} @ "
+                            f"{format_number(one_x_display_freq_cpm, 0)} CPM".strip()
+                        )
+                    if cat_iv_diag is not None:
+                        sev = str(cat_iv_diag.get("severity_global", "") or "").strip()
+                        if sev:
+                            quant_lines.append(f"Severidad ISO/API|{sev}")
+                    # Punto de medición si está disponible
+                    pt = str(getattr(primary, "point", "") or "").strip()
+                    if pt:
+                        quant_lines.append(f"Punto de medición|{pt}")
+
+                    spectrum_report_notes = (
+                        "<<<WM_AI_BLOCK>>>\n"
+                        + "\n".join(quant_lines)
+                        + "\n<<<WM_AI_NARRATIVE>>>\n"
+                        + ai_md
+                    )
+
             queue_spectrum_to_report(
                 primary,
                 fig,
@@ -2308,7 +2572,11 @@ def render_spectrum_panel(
                 image_bytes=png_bytes_for_report,
                 report_notes=spectrum_report_notes,
             )
-            st.success("Spectrum enviado al reporte")
+            ai_extra = (
+                " · 🧠 con Diagnóstico AI"
+                if ai_stored and ai_stored.get("ok") else ""
+            )
+            st.success(f"Spectrum enviado al reporte{ai_extra}")
 
 
 def summarize_compare_signal(

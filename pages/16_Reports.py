@@ -1002,6 +1002,276 @@ def _split_notes_and_summary_table(notes: str) -> Tuple[str, Optional[List[List[
     return main_text, rows
 
 
+# =============================================================================
+# Ciclo 17.26 — Bloque clínico AI: parser markdown → ReportLab nativo
+# =============================================================================
+# El módulo AI emite un diagnóstico en markdown. El reporte al cliente NO
+# debe mostrar marcas "AI" ni markdown crudo (### o **bold**); debe leerse
+# como un informe técnico continuo firmado por el especialista. Estos
+# helpers parsean el markdown del AI y lo convierten en flowables nativos
+# de ReportLab (Paragraphs con estilos clínicos, listas con sangría
+# francesa, negritas e itálicas inline).
+#
+# Convención de marcador en `notes`:
+#   <<<WM_AI_BLOCK>>>          ← inicio absoluto: a partir de acá se
+#                                suprime la narrativa determinística y
+#                                manda la voz del AI.
+#   Parámetro|Valor            ← (opcional) tabla cuantitativa de evidencia.
+#   Overall|0.30 mil pp          Una fila por línea, separadas por '|'.
+#   1X|1.13 mil pp @ 3601 CPM    El parser intenta tabularizar todo lo que
+#   ...                          esté entre WM_AI_BLOCK y WM_AI_NARRATIVE.
+#   <<<WM_AI_NARRATIVE>>>      ← desde acá hasta el fin del bloque va el
+#   ### Hallazgos principales    markdown del AI.
+#   - bullet ...
+# =============================================================================
+
+_WM_AI_BLOCK_MARKER = "<<<WM_AI_BLOCK>>>"
+_WM_AI_NARRATIVE_MARKER = "<<<WM_AI_NARRATIVE>>>"
+
+
+def _md_inline_to_rl(text: str) -> str:
+    """Convierte markdown inline (**bold**, *italic*, `code`) a inline-tags
+    compatibles con ReportLab Paragraph. Escapa el resto de manera segura."""
+    import re as _re
+    escaped = (
+        (text or "")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
+    # **bold**
+    escaped = _re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", escaped)
+    # *italic* (single asterisks, no overlap with **)
+    escaped = _re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<i>\1</i>", escaped)
+    # `code` → fuente monoespaciada
+    escaped = _re.sub(r"`([^`]+)`", r'<font name="Courier">\1</font>', escaped)
+    return escaped
+
+
+def _split_ai_clinical_block(
+    notes: str,
+) -> Tuple[str, Optional[List[List[str]]], Optional[str]]:
+    """Si `notes` contiene el marcador <<<WM_AI_BLOCK>>>, separa en:
+      - pre_block_text: texto previo al marcador (debería estar vacío en el
+        flujo nuevo; se conserva por defensa para casos legacy donde el
+        especialista escribió notas manuales antes de generar el AI).
+      - quant_rows: matriz [[col1, col2, ...], ...] derivada de las líneas
+        'A|B' entre WM_AI_BLOCK y WM_AI_NARRATIVE. None si no hay tabla.
+      - ai_md: markdown del AI desde <<<WM_AI_NARRATIVE>>> al final.
+
+    Si no hay marcador, devuelve (notes, None, None) y el caller renderiza
+    de la forma legacy (un solo Paragraph WMFigureText)."""
+    if not notes or _WM_AI_BLOCK_MARKER not in notes:
+        return notes, None, None
+
+    pre, after_block = notes.split(_WM_AI_BLOCK_MARKER, 1)
+
+    if _WM_AI_NARRATIVE_MARKER in after_block:
+        quant_part, ai_part = after_block.split(_WM_AI_NARRATIVE_MARKER, 1)
+    else:
+        quant_part = ""
+        ai_part = after_block
+
+    # Parsear tabla cuantitativa (líneas con '|')
+    quant_rows: List[List[str]] = []
+    for line in quant_part.strip().splitlines():
+        if "|" in line:
+            cells = [c.strip() for c in line.split("|")]
+            if len(cells) >= 2 and any(c for c in cells):
+                quant_rows.append(cells)
+    quant_or_none: Optional[List[List[str]]] = (
+        quant_rows if len(quant_rows) >= 2 else None
+    )
+
+    return pre.rstrip(), quant_or_none, ai_part.strip()
+
+
+def _render_ai_clinical_flowables(
+    ai_md: str,
+    styles,
+) -> List[Any]:
+    """Parsea el markdown del AI a flowables ReportLab nativos.
+
+    Bloques soportados:
+      ### Heading       → Paragraph WMClinicalHeading
+      - bullet          → Paragraph WMClinicalBullet con '• ' y sangría
+      1. numbered       → Paragraph WMClinicalNumbered con número en
+                           negrita y sangría francesa
+      párrafo regular   → Paragraph WMClinicalBody
+      ---               → Spacer
+      línea en blanco   → ignorada (los Paragraphs ya tienen spaceAfter)
+    Inline:
+      **bold**, *italic*, `code` (vía _md_inline_to_rl).
+    """
+    import re as _re
+    flowables: List[Any] = []
+
+    if not ai_md:
+        return flowables
+
+    lines = ai_md.splitlines()
+    n = len(lines)
+    i = 0
+
+    while i < n:
+        stripped = lines[i].strip()
+
+        # Línea en blanco
+        if not stripped:
+            i += 1
+            continue
+
+        # Heading ### / ## / #
+        if stripped.startswith("###"):
+            head_txt = stripped.lstrip("#").strip()
+            flowables.append(Paragraph(
+                _md_inline_to_rl(head_txt), styles["WMClinicalHeading"]
+            ))
+            i += 1
+            continue
+        if stripped.startswith("##"):
+            head_txt = stripped.lstrip("#").strip()
+            flowables.append(Paragraph(
+                _md_inline_to_rl(head_txt), styles["WMClinicalHeading"]
+            ))
+            i += 1
+            continue
+
+        # Regla horizontal
+        if stripped in ("---", "***", "___"):
+            flowables.append(Spacer(1, 0.18 * cm))
+            i += 1
+            continue
+
+        # Bullet list (- / * / +)
+        if _re.match(r"^[-*+]\s+", stripped):
+            while i < n and _re.match(r"^[-*+]\s+", lines[i].strip()):
+                content = _re.sub(r"^[-*+]\s+", "", lines[i].strip())
+                # Continuación: líneas que no son block-starters
+                j = i + 1
+                while j < n:
+                    nxt = lines[j].strip()
+                    if not nxt:
+                        break
+                    if _re.match(r"^[-*+]\s+", nxt):
+                        break
+                    if _re.match(r"^\d+\.\s+", nxt):
+                        break
+                    if nxt.startswith("#"):
+                        break
+                    if nxt in ("---", "***", "___"):
+                        break
+                    content += " " + nxt
+                    j += 1
+                flowables.append(Paragraph(
+                    "•&nbsp;&nbsp;" + _md_inline_to_rl(content),
+                    styles["WMClinicalBullet"],
+                ))
+                i = j
+            continue
+
+        # Numbered list (1. 2. 3. ...)
+        if _re.match(r"^\d+\.\s+", stripped):
+            while i < n and _re.match(r"^\d+\.\s+", lines[i].strip()):
+                m = _re.match(r"^(\d+)\.\s+(.*)", lines[i].strip())
+                if not m:
+                    break
+                num = m.group(1)
+                content = m.group(2)
+                j = i + 1
+                while j < n:
+                    nxt = lines[j].strip()
+                    if not nxt:
+                        break
+                    if _re.match(r"^[-*+]\s+", nxt):
+                        break
+                    if _re.match(r"^\d+\.\s+", nxt):
+                        break
+                    if nxt.startswith("#"):
+                        break
+                    if nxt in ("---", "***", "___"):
+                        break
+                    content += " " + nxt
+                    j += 1
+                flowables.append(Paragraph(
+                    f"<b>{num}.</b>&nbsp;&nbsp;{_md_inline_to_rl(content)}",
+                    styles["WMClinicalNumbered"],
+                ))
+                i = j
+            continue
+
+        # Párrafo regular: acumular hasta blank o block-starter
+        para = stripped
+        j = i + 1
+        while j < n:
+            nxt = lines[j].strip()
+            if not nxt:
+                break
+            if nxt.startswith("#"):
+                break
+            if _re.match(r"^[-*+]\s+", nxt):
+                break
+            if _re.match(r"^\d+\.\s+", nxt):
+                break
+            if nxt in ("---", "***", "___"):
+                break
+            para += " " + nxt
+            j += 1
+        flowables.append(Paragraph(
+            _md_inline_to_rl(para), styles["WMClinicalBody"]
+        ))
+        i = j
+
+    return flowables
+
+
+def _render_quant_evidence_table(
+    rows: List[List[str]],
+    styles,
+    usable_width: float,
+) -> Any:
+    """Construye una tabla compacta de evidencia cuantitativa para acompañar
+    el diagnóstico clínico. Header oscuro, 2-4 filas con los números
+    relevantes (overall, 1X, RPM, severidad ISO, etc.)."""
+    if not rows or len(rows) < 2:
+        return None
+    n_cols = max(len(r) for r in rows)
+    # Distribución: primera columna 35%, resto reparten 65%
+    if n_cols >= 2:
+        col_w = [
+            usable_width * 0.32,
+        ] + [
+            (usable_width * 0.66) / (n_cols - 1),
+        ] * (n_cols - 1)
+    else:
+        col_w = [usable_width]
+
+    header = [Paragraph(_paragraph_safe(c), styles["WMTableHeader"]) for c in rows[0]]
+    body = [
+        [Paragraph(_paragraph_safe(c), styles["WMTableCell"]) for c in r]
+        for r in rows[1:]
+    ]
+    tbl = Table([header] + body, colWidths=col_w, repeatRows=1)
+    tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0f172a")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("FONTNAME", (0, 0), (-1, 0), PDF_FONT_BOLD),
+        ("FONTNAME", (0, 1), (-1, -1), PDF_FONT_REGULAR),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.4),
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+        ("TOPPADDING", (0, 0), (-1, 0), 6),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+        ("TOPPADDING", (0, 1), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 5),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.HexColor("#f1f5f9"), colors.white]),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
+    ]))
+    return tbl
+
+
 def _render_notes_flowables(
     notes_main: str,
     styles,
@@ -1012,10 +1282,44 @@ def _render_notes_flowables(
     Construye la secuencia de flowables para el bloque de notas de una figura:
     el texto principal como Paragraph y, si aplica, el RESUMEN como Table
     nativa de ReportLab con cabecera coloreada y zebra striping.
+
+    Ciclo 17.26 — si las notas contienen el marcador <<<WM_AI_BLOCK>>>, se
+    suprime la narrativa determinística previa, se renderiza la tabla
+    cuantitativa de evidencia (si viene) y luego el bloque clínico del AI
+    parseado como flowables nativos. El cliente lee texto continuo de
+    especialista, sin marcas de "AI" ni markdown crudo.
     """
     flowables: List[Any] = []
 
-    if notes_main.strip():
+    # Detección del bloque clínico AI (Ciclo 17.26).
+    pre_text, quant_rows, ai_md = _split_ai_clinical_block(notes_main)
+
+    if ai_md is not None:
+        # AI presente → manda. La narrativa determinística previa se
+        # descarta. Solo conservamos el `pre_text` si realmente trae
+        # notas manuales del especialista (no la narrativa Cat IV
+        # autogenerada — que también se descarta porque el AI ya hizo
+        # ese trabajo y mejor).
+        # En el flujo nuevo `pre_text` viene vacío.
+        if quant_rows:
+            tbl = _render_quant_evidence_table(quant_rows, styles, usable_width)
+            if tbl is not None:
+                flowables.append(tbl)
+                flowables.append(Spacer(1, 0.30 * cm))
+
+        ai_flows = _render_ai_clinical_flowables(ai_md, styles)
+        flowables.extend(ai_flows)
+        flowables.append(Spacer(1, 0.20 * cm))
+
+        # Si después del bloque AI hay un --- RESUMEN --- legacy, se
+        # renderiza igual abajo (manteniendo compat con flujos viejos).
+        if summary_table and len(summary_table) >= 1:
+            # Se cae al render de summary_table de abajo, mismo código
+            pass
+        else:
+            return flowables
+
+    elif notes_main.strip():
         flowables.append(Paragraph(_paragraph_safe(notes_main), styles["WMFigureText"]))
 
     if summary_table and len(summary_table) >= 1:
@@ -1113,6 +1417,56 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     styles.add(ParagraphStyle(name="WMSignLine", parent=styles["Normal"], fontName=PDF_FONT_REGULAR, fontSize=9.6, leading=12, alignment=TA_CENTER, textColor=colors.HexColor("#111827"), spaceAfter=2))
     styles.add(ParagraphStyle(name="WMTableCell", parent=styles["Normal"], fontName=PDF_FONT_REGULAR, fontSize=8.4, leading=11, alignment=TA_LEFT, textColor=colors.HexColor("#111827")))
     styles.add(ParagraphStyle(name="WMTableHeader", parent=styles["Normal"], fontName=PDF_FONT_BOLD, fontSize=8.5, leading=11, alignment=TA_LEFT, textColor=colors.HexColor("#ffffff")))
+
+    # Ciclo 17.26 — estilos del bloque clínico (renderiza el markdown del
+    # módulo AI como ReportLab nativo: headers, párrafos justificados,
+    # bullets con sangría francesa, listas numeradas). El cliente lee
+    # texto continuo de un especialista; no ve markdown crudo.
+    styles.add(ParagraphStyle(
+        name="WMClinicalHeading",
+        parent=styles["Normal"],
+        fontName=PDF_FONT_BOLD,
+        fontSize=10.6,
+        leading=14,
+        alignment=TA_LEFT,
+        textColor=colors.HexColor("#0f172a"),
+        spaceBefore=8,
+        spaceAfter=4,
+    ))
+    styles.add(ParagraphStyle(
+        name="WMClinicalBody",
+        parent=styles["BodyText"],
+        fontName=PDF_FONT_REGULAR,
+        fontSize=10.2,
+        leading=14.8,
+        alignment=TA_JUSTIFY,
+        textColor=colors.HexColor("#111827"),
+        spaceAfter=8,
+    ))
+    styles.add(ParagraphStyle(
+        name="WMClinicalBullet",
+        parent=styles["BodyText"],
+        fontName=PDF_FONT_REGULAR,
+        fontSize=10.2,
+        leading=14.6,
+        alignment=TA_JUSTIFY,
+        textColor=colors.HexColor("#111827"),
+        leftIndent=14,
+        firstLineIndent=-14,
+        spaceAfter=5,
+    ))
+    styles.add(ParagraphStyle(
+        name="WMClinicalNumbered",
+        parent=styles["BodyText"],
+        fontName=PDF_FONT_REGULAR,
+        fontSize=10.2,
+        leading=14.6,
+        alignment=TA_JUSTIFY,
+        textColor=colors.HexColor("#111827"),
+        leftIndent=18,
+        firstLineIndent=-18,
+        spaceAfter=5,
+    ))
 
     # Ciclo 10A.4 — estilos para entradas que SÍ entran al TOC.
     # Visualmente idénticos a WMSection / WMFigureCaption respectivamente,
