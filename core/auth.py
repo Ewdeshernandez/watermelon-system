@@ -30,9 +30,11 @@ NAV_ITEMS = [
     {"label": "Orbit Analysis", "page": "pages/05_Orbit_Analysis.py"},
     {"label": "Polar Plot", "page": "pages/06_Polar_Plot.py"},
     {"label": "Bode Plot", "page": "pages/07_Bode_Plot.py"},
-    {"label": "Shaft Centerline", "page": "pages/09_Shaft_Centerline.py"},  # ✅ FIX
-    {"label": "Phase Analysis", "page": "pages/13_Phase_Analysis.py"},
-    {"label": "Diagnostics", "page": "pages/15_Diagnostics.py"},
+    {"label": "Shaft Centerline", "page": "pages/09_Shaft_Centerline.py"},
+    # Ciclo 17.33 — eliminados Phase Analysis y Diagnostics: módulos
+    # legacy sin AI integrado, sin uso real. Diagnostics se reemplaza
+    # por AI Assistant (Q&A sobre archivo) + el flujo Machinery Library
+    # → severidad para inspección de activos críticos.
     {"label": "Reports", "page": "pages/16_Reports.py"},
     # Ciclo 17.27 — AI Assistant: Q&A en lenguaje natural sobre el
     # archivo histórico de reportes. Solo admin + specialist por
@@ -57,7 +59,7 @@ NAV_ITEMS = [
 CLIENT_BLOCKED_PAGES = {
     "pages/00_Machinery_Library.py",
     "pages/01_Load_Data.py",
-    "pages/15_Diagnostics.py",
+    # pages/15_Diagnostics.py removido del producto en Ciclo 17.33.
     "pages/01b_Machine_Map.py",  # tiene comandos para editar el map
     # Ciclo 17.27 — AI Assistant queda restringido a admin/specialist
     # en su versión inicial. Cuando expongamos Q&A para clientes,

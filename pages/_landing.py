@@ -821,20 +821,23 @@ with k2:
         "requieren intervención",
         _spark_svg(_spark_dang, "#ef4444"),
     ), unsafe_allow_html=True)
-    # Ciclo 17.24 — card clickable: navega a Diagnostics
+    # Ciclo 17.32 — Diagnostics fue eliminado del producto. Redirigimos
+    # al Machinery Library con filtro por severidad para que el usuario
+    # pueda inspeccionar y atender los activos críticos desde ahí.
     if st.button("Ver críticos →", key="kpi_btn_danger", use_container_width=True):
-        st.session_state["wm_diag_filter_severity"] = "danger"
-        st.switch_page("pages/15_Diagnostics.py")
+        st.session_state["wm_lib_filter_status"] = "danger"
+        st.switch_page("pages/00_Machinery_Library.py")
 with k3:
     st.markdown(_kpi_card(
         "warning", "En atención", _warn,
         "vigilancia o config pendiente",
         _spark_svg(_spark_warn, "#f59e0b"),
     ), unsafe_allow_html=True)
-    # Ciclo 17.24 — card clickable: navega a Diagnostics
+    # Ciclo 17.32 — Diagnostics fue eliminado del producto. Redirigimos
+    # al Machinery Library con filtro por severidad warning.
     if st.button("Ver en atención →", key="kpi_btn_warning", use_container_width=True):
-        st.session_state["wm_diag_filter_severity"] = "warning"
-        st.switch_page("pages/15_Diagnostics.py")
+        st.session_state["wm_lib_filter_status"] = "warning"
+        st.switch_page("pages/00_Machinery_Library.py")
 with k4:
     _heal_or_unk = _heal if _heal > 0 else _unk
     _heal_label = "Saludables" if _heal > 0 else "Sin clasificar"
@@ -858,18 +861,21 @@ with k4:
 # QUICK ACTIONS
 # =============================================================
 st.markdown(
-    '<div class="wmh-sec">⚡ Acciones rápidas <div class="bar"></div></div>',
+    '<div class="wmh-sec">Acciones rápidas <div class="bar"></div></div>',
     unsafe_allow_html=True,
 )
 
+# Ciclo 17.32 — Diagnostics removido. Reemplazado por AI Assistant
+# como punto de entrada al stack de inteligencia conversacional sobre
+# el archivo histórico.
 qa_cols = st.columns(6)
 _QUICK = [
-    ("📤  Cargar CSV",    "pages/01_Load_Data.py",          "page"),
-    ("📈  Trends",        "pages/04_Trends.py",             "page"),
-    ("📚  Machinery Lib", "pages/00_Machinery_Library.py",  "page"),
-    ("🔬  Diagnostics",   "pages/15_Diagnostics.py",        "page"),
-    ("📄  Reports",       "pages/16_Reports.py",            "page"),
-    ("📰  Briefing día",  "_briefing_action",               "briefing"),
+    ("Cargar CSV",       "pages/01_Load_Data.py",          "page"),
+    ("Trends",           "pages/04_Trends.py",             "page"),
+    ("Machinery Lib",    "pages/00_Machinery_Library.py",  "page"),
+    ("AI Assistant",     "pages/_ai_assistant.py",         "page"),
+    ("Reports",          "pages/16_Reports.py",            "page"),
+    ("Briefing del día", "_briefing_action",               "briefing"),
 ]
 for col, (label, target, kind) in zip(qa_cols, _QUICK):
     with col:
