@@ -757,10 +757,460 @@ def generate_ai_diagnostic(
     return result
 
 
+# =============================================================
+# SÍNTESIS EJECUTIVA AI (Ciclo 17.26 P5+)
+# =============================================================
+# Mientras `generate_ai_diagnostic` interpreta UNA figura,
+# `generate_executive_summary` interpreta el REPORTE COMPLETO:
+# lee todas las figuras y produce el "RESUMEN EJECUTIVO" que va
+# al inicio del PDF. Esta es la síntesis cross-figura que un
+# especialista senior haría tras leer todo el documento.
+# =============================================================
+
+_EXEC_PROMPT_VERSION = "v1_exec_synthesis_2026_05"
+
+_SYSTEM_PROMPT_EXECUTIVE = """\
+Eres un especialista de análisis de vibraciones Cat IV ISO 18436-2
+senior con 25 años de experiencia, encargado de redactar el RESUMEN
+EJECUTIVO de un reporte completo de monitoreo en línea. Vas a recibir
+el contenido sintetizado de múltiples figuras del reporte (espectros,
+formas de onda, tendencias, polar, bode, órbitas, shaft centerline);
+cada figura ya viene con su interpretación clínica cuando aplica.
+
+Tu trabajo es SÍNTESIS CRUZADA: identificar cuándo varias figuras
+convergen en la misma causa raíz mecánica, priorizar el conjunto de
+hallazgos al nivel ejecutivo, y emitir las recomendaciones
+estratégicas para el operador del activo. NO repitas el detalle de
+cada figura — eso ya está en las páginas siguientes del reporte. Acá
+solo síntesis y prioridad.
+
+ESTRUCTURA OBLIGATORIA DE LA RESPUESTA (sin emojis, sin caracteres
+ornamentales):
+
+PÁRRAFO 1 — SITUACIÓN GLOBAL (~80-110 palabras):
+Empezá directo, sin header. Describí en prosa continua el estado del
+activo o tren de máquinas: cuál es la severidad global conforme a
+ISO 20816 según las figuras analizadas, cuántas figuras convergen en
+la misma conclusión, qué nivel de criticidad operativa implica el
+conjunto. Mencioná el tren / la máquina principal por su tag.
+
+### Hallazgos raíz consolidados
+
+Tres a cinco bullets numerados (1., 2., 3., ...) con frase-tesis en
+negrita al inicio. Cuando varias figuras apuntan al mismo origen
+mecánico (ej: desbalance evidenciado por Spectrum + Bode + Polar),
+AGRUPALOS en un solo hallazgo raíz; no listes redundantemente. Cada
+hallazgo cita las figuras que lo evidencian (ej: "evidenciado por
+Spectrum 1, Bode 2 y Polar de generador NDE"). Identificá la causa
+raíz probable y las hipótesis alternativas a discriminar si las hay.
+
+### Recomendaciones ejecutivas priorizadas
+
+Dos a tres recomendaciones numeradas (1., 2., 3.) cada una iniciando
+con la clasificación de prioridad en negrita seguida de la etiqueta
+semántica:
+
+**Prioridad P1 — CRÍTICA.** [acción ejecutiva]. Horizonte sugerido:
+[descripción no contractual]. Norma de respaldo: [referencia con
+cláusula].
+
+Las recomendaciones acá son DE NIVEL EJECUTIVO (orden de
+mantenimiento, ventana de parada programada, intervención
+correctiva, monitoreo aumentado del tren), NO detalles técnicos
+granulares (eso ya está en cada figura del reporte). Citá normas
+con cláusula cuando exista (API 670, API 684, ISO 20816, ISO
+21940-12, ISO 17359, etc.).
+
+CIERRE — DECLARACIÓN DE GOBERNANZA:
+
+Cerrá con el siguiente párrafo único, exacto, en una sola línea
+cada oración, sin reformular:
+
+El presente resumen ejecutivo se emite conforme a la metodología Cat IV ISO 18436-2 y debe ser validado por el especialista responsable antes de su uso operativo.
+
+La planificación operativa, ventanas de intervención y asignación de recursos son responsabilidad del operador del activo conforme a su sistema de gestión de integridad.
+
+REGLAS DE VOZ Y ESTILO:
+
+- Voz pasiva técnica. "Se observa", "se concluye", "se recomienda".
+  No primera persona. No segunda persona.
+- Sin emojis. Sin caracteres ornamentales.
+- Máximo 380 palabras totales. El cliente lee esto en 90 segundos.
+- NO repitas valores numéricos crudos (overall, picos, etc.) salvo
+  cuando son indispensables para la severidad. Esos números están
+  en las tablas cuantitativas de cada figura.
+- Citá normas con cláusula numérica cuando exista. Si no recordás
+  la cláusula exacta, cita la norma sin cláusula antes que inventar.
+- Si la data es insuficiente para conclusión definitiva, declaralo
+  explícitamente en la situación global, no en los hallazgos.
+"""
+
+
+def _strip_ai_markers(notes_text: str) -> Tuple[str, str]:
+    """Si las notas contienen marcadores <<<WM_AI_BLOCK>>>...,
+    devuelve (quant_summary_text, ai_narrative). Si no hay
+    marcadores, devuelve ("", notes_text crudo).
+    Helper para que el AI executive vea solo el contenido limpio."""
+    if not notes_text or "<<<WM_AI_BLOCK>>>" not in notes_text:
+        return "", notes_text or ""
+    after_block = notes_text.split("<<<WM_AI_BLOCK>>>", 1)[1]
+    if "<<<WM_AI_NARRATIVE>>>" in after_block:
+        quant_part, ai_part = after_block.split("<<<WM_AI_NARRATIVE>>>", 1)
+    else:
+        quant_part = ""
+        ai_part = after_block
+    # Quant table en formato pipe → texto resumido
+    quant_summary_lines: List[str] = []
+    for line in quant_part.strip().splitlines():
+        if "|" in line:
+            cells = [c.strip() for c in line.split("|")]
+            if len(cells) >= 2 and cells[0] and cells[0] != "Parámetro":
+                quant_summary_lines.append(f"{cells[0]}: {cells[1]}")
+    return ("; ".join(quant_summary_lines), ai_part.strip())
+
+
+def _build_executive_user_message(
+    items: List[Dict[str, Any]],
+    meta: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Compone el mensaje user a partir de los items del reporte.
+    Cada figura se resume en pocas líneas con su contexto."""
+    lines: List[str] = []
+
+    if meta:
+        lines.append("# Contexto del reporte")
+        for key in ("client", "machine_train", "report_title", "consecutive",
+                    "report_date", "service_period"):
+            val = str((meta.get(key) or "")).strip()
+            if val:
+                lines.append(f"- **{key}**: {val}")
+        lines.append("")
+
+    lines.append(f"# Figuras analizadas ({len(items)} total)")
+    lines.append("")
+
+    for idx, item in enumerate(items, 1):
+        i_type = str(item.get("type", "") or "").upper()
+        i_title = str(item.get("title", "") or "")
+        i_machine = str(item.get("machine", "") or "")
+        i_point = str(item.get("point", "") or "")
+        i_variable = str(item.get("variable", "") or "")
+        i_notes = str(item.get("notes", "") or "")
+
+        quant_sum, ai_narr = _strip_ai_markers(i_notes)
+
+        lines.append(f"## Figura {idx} — {i_type} · {i_title}")
+        if i_machine:
+            lines.append(f"- Máquina: {i_machine}")
+        if i_point:
+            lines.append(f"- Punto: {i_point}")
+        if i_variable:
+            lines.append(f"- Variable: {i_variable}")
+        if quant_sum:
+            lines.append(f"- Datos cuantitativos: {quant_sum}")
+
+        # La narrativa puede ser muy larga; cortamos a ~1500 chars por figura
+        narrative_for_ai = (ai_narr or i_notes).strip()[:1500]
+        if narrative_for_ai:
+            lines.append("")
+            lines.append("Interpretación de la figura:")
+            lines.append(narrative_for_ai)
+        lines.append("")
+
+    lines.append("---")
+    lines.append(
+        "Por favor, generá el RESUMEN EJECUTIVO del reporte completo "
+        "siguiendo el formato establecido (situación global, hallazgos "
+        "raíz consolidados, recomendaciones ejecutivas priorizadas, "
+        "cierre de gobernanza)."
+    )
+    return "\n".join(lines)
+
+
+def _executive_payload_hash(
+    items: List[Dict[str, Any]],
+    meta: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Hash determinístico del executive summary.
+    Incluye _EXEC_PROMPT_VERSION y _PROMPT_VERSION para autoinvalidar."""
+    blob = {
+        "version": _EXEC_PROMPT_VERSION,
+        "diag_version": _PROMPT_VERSION,
+        "model": _get_model_name(),
+        "n_items": len(items),
+        "items": [
+            {
+                "type": i.get("type"),
+                "title": i.get("title"),
+                "notes_hash": hashlib.sha256(
+                    str(i.get("notes", "") or "").encode("utf-8")
+                ).hexdigest()[:16],
+            }
+            for i in items
+        ],
+        "meta": {
+            k: meta.get(k) if meta else ""
+            for k in ("client", "machine_train", "consecutive", "report_date")
+        },
+    }
+    j = json.dumps(blob, sort_keys=True, default=str, ensure_ascii=False)
+    return hashlib.sha256(j.encode("utf-8")).hexdigest()[:32]
+
+
+def generate_executive_summary(
+    items: List[Dict[str, Any]],
+    meta: Optional[Dict[str, Any]] = None,
+    *,
+    use_cache: bool = True,
+    cache_ttl_seconds: int = DEFAULT_CACHE_TTL_SECONDS,
+    max_tokens: int = 2048,
+) -> Dict[str, Any]:
+    """Genera la síntesis ejecutiva AI del reporte completo.
+
+    Args:
+        items: lista de report_items (cada uno con type, title, notes,
+               machine, point, etc.). Usa el contenido de notes para
+               sintetizar; si las notas tienen marcadores
+               <<<WM_AI_BLOCK>>>, los strippea para usar solo la
+               narrativa limpia.
+        meta:  metadata del reporte (client, machine_train, consecutive,
+               etc.) para que la síntesis tenga contexto.
+        use_cache, cache_ttl_seconds, max_tokens: como en
+               generate_ai_diagnostic.
+
+    Returns: dict con ok/markdown/model/tokens/costo/cached/etc.
+    """
+    if not items:
+        return {
+            "ok": False,
+            "markdown": (
+                "_⚠️ No hay figuras en el reporte para sintetizar. "
+                "Agregá al menos una figura desde Spectrum, Trends, "
+                "Bode u otro módulo y volvé a intentar._"
+            ),
+            "error": "no_items",
+            "model": "",
+            "cached": False,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "fallback_used": False,
+            "fallback_reason": "",
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    if not is_ai_available():
+        return {
+            "ok": False,
+            "markdown": (
+                "_⚠️ AI no disponible — falta configurar `[anthropic] "
+                "api_key` en st.secrets, o falta el paquete anthropic._"
+            ),
+            "error": "ai_not_available",
+            "model": "",
+            "cached": False,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "fallback_used": False,
+            "fallback_reason": "",
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    # Cache HIT
+    h = _executive_payload_hash(items, meta)
+    cache_subdir = CACHE_DIR / "executive"
+    cache_path = cache_subdir / f"{h}.json"
+    if use_cache and cache_path.exists():
+        try:
+            age = time.time() - cache_path.stat().st_mtime
+            if age <= cache_ttl_seconds:
+                cached_data = json.loads(cache_path.read_text(encoding="utf-8"))
+                _bump_stats(0, 0, cached_data.get("model", ""), cached=True)
+                return {**cached_data, "cached": True}
+        except Exception:
+            pass
+
+    # Llamada real a Claude (con retry + fallback heredado)
+    client = _get_client()
+    if client is None:
+        return {
+            "ok": False,
+            "markdown": "_⚠️ No se pudo inicializar el cliente Anthropic._",
+            "error": "client_init_failed",
+            "model": "",
+            "cached": False,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "fallback_used": False,
+            "fallback_reason": "",
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    user_msg = _build_executive_user_message(items, meta)
+    primary_model = _get_model_name()
+
+    _RETRYABLE_HTTP_CODES_EXEC = (429, 502, 503, 529)
+    _MAX_RETRIES_EXEC = 3
+
+    def _is_retryable_exc(exc: Exception) -> Tuple[bool, Optional[int]]:
+        err_str = str(exc); err_low = err_str.lower()
+        exc_type_name = type(exc).__name__
+        status_code = getattr(exc, "status_code", None)
+        if status_code is None:
+            for code in _RETRYABLE_HTTP_CODES_EXEC:
+                if (f"Error code: {code}" in err_str
+                        or f"'{code}'" in err_str
+                        or f'"{code}"' in err_str):
+                    status_code = code; break
+        if status_code in _RETRYABLE_HTTP_CODES_EXEC:
+            return (True, status_code)
+        if any(s in exc_type_name for s in (
+                "APITimeoutError", "APIConnectionError",
+                "TimeoutException", "ConnectTimeout", "ReadTimeout",
+                "ConnectionError")):
+            return (True, 408)
+        if "timed out" in err_low or "timeout" in err_low or "interrupted" in err_low:
+            return (True, 408)
+        return (False, status_code)
+
+    def _try_exec_call(model_name: str, label: str):
+        last_exc = None
+        for attempt in range(_MAX_RETRIES_EXEC):
+            try:
+                print(
+                    f"[WM_AI_EXEC] CALL · {label} · n_items={len(items)} · "
+                    f"hash={h[:8]} · model={model_name} · "
+                    f"attempt={attempt + 1}/{_MAX_RETRIES_EXEC}",
+                    file=sys.stderr, flush=True,
+                )
+                resp = client.messages.create(
+                    model=model_name,
+                    max_tokens=max_tokens,
+                    system=_SYSTEM_PROMPT_EXECUTIVE,
+                    messages=[{"role": "user", "content": user_msg}],
+                )
+                return resp, None
+            except Exception as exc:
+                last_exc = exc
+                is_retry, st_code = _is_retryable_exc(exc)
+                if is_retry and attempt < _MAX_RETRIES_EXEC - 1:
+                    wait_s = 2 ** attempt
+                    print(
+                        f"[WM_AI_EXEC] RETRY · {label} · status={st_code} · "
+                        f"wait={wait_s}s",
+                        file=sys.stderr, flush=True,
+                    )
+                    time.sleep(wait_s)
+                    continue
+                print(
+                    f"[WM_AI_EXEC] FAIL · {label} · {str(exc)[:200]}",
+                    file=sys.stderr, flush=True,
+                )
+                return None, exc
+        return None, last_exc
+
+    response, last_exception = _try_exec_call(primary_model, "primary")
+    fallback_used = False
+    used_model = primary_model
+
+    if response is None and last_exception is not None:
+        is_retry, _ = _is_retryable_exc(last_exception)
+        is_already_fallback = primary_model.startswith("claude-haiku")
+        if is_retry and not is_already_fallback:
+            print(
+                f"[WM_AI_EXEC] FALLBACK · primario {primary_model} agotado, "
+                f"intentando con {FALLBACK_MODEL}",
+                file=sys.stderr, flush=True,
+            )
+            response, last_exception = _try_exec_call(
+                FALLBACK_MODEL, "fallback-haiku"
+            )
+            if response is not None:
+                fallback_used = True
+                used_model = FALLBACK_MODEL
+
+    if response is None:
+        err_str = str(last_exception) if last_exception else "unknown"
+        if "overloaded" in err_str.lower() or "529" in err_str:
+            user_err = (
+                "_⚠️ Servidores Claude sobrecargados (Sonnet y Haiku). "
+                "Esperá 5-10 minutos y reintentá._"
+            )
+        elif "timeout" in err_str.lower() or "timed out" in err_str.lower():
+            user_err = (
+                "_⚠️ Timeout de conexión con Claude. Verificá tu red y "
+                "reintentá._"
+            )
+        else:
+            user_err = (
+                f"_⚠️ Error generando síntesis ejecutiva:_\n\n"
+                f"```\n{err_str}\n```"
+            )
+        return {
+            "ok": False,
+            "markdown": user_err,
+            "error": err_str[:500],
+            "model": used_model,
+            "cached": False,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "fallback_used": fallback_used,
+            "fallback_reason": "",
+            "generated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+
+    try:
+        markdown = response.content[0].text
+    except Exception:
+        markdown = "_(no text in response)_"
+    in_tok = getattr(response.usage, "input_tokens", 0) if response.usage else 0
+    out_tok = getattr(response.usage, "output_tokens", 0) if response.usage else 0
+
+    if used_model.startswith("claude-haiku"):
+        in_p, out_p = 1.0, 5.0
+    else:
+        in_p, out_p = 3.0, 15.0
+    cost_usd = (in_tok * in_p + out_tok * out_p) / 1_000_000
+
+    print(
+        f"[WM_AI_EXEC] OK · model={used_model} · in={in_tok} · "
+        f"out={out_tok} · ~${cost_usd:.4f}"
+        f"{' · FALLBACK' if fallback_used else ''}",
+        file=sys.stderr, flush=True,
+    )
+
+    result = {
+        "ok": True,
+        "markdown": markdown,
+        "error": "",
+        "model": used_model,
+        "cached": False,
+        "input_tokens": in_tok,
+        "output_tokens": out_tok,
+        "fallback_used": fallback_used,
+        "fallback_reason": "",
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+    if use_cache:
+        try:
+            cache_subdir.mkdir(parents=True, exist_ok=True)
+            cache_path.write_text(
+                json.dumps(result, indent=2, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+    _bump_stats(in_tok, out_tok, used_model, cached=False)
+
+    return result
+
+
 __all__ = [
     "generate_ai_diagnostic",
+    "generate_executive_summary",
     "is_ai_available",
     "clear_diagnostic_cache",
     "get_ai_stats",
     "DEFAULT_MODEL",
+    "FALLBACK_MODEL",
 ]

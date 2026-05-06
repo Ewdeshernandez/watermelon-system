@@ -143,6 +143,10 @@ from core.reports_archive import (
     share_with_client,
     get_archive_stats,
 )
+from core.ai_diagnostic import (  # Ciclo 17.26 P5+ — síntesis ejecutiva AI
+    generate_executive_summary,
+    is_ai_available,
+)
 
 
 st.set_page_config(page_title="Watermelon System | Reports", layout="wide")
@@ -2035,7 +2039,13 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
         except Exception:
             pass
 
-    if executive_text:
+    # Ciclo 17.26 P5+ — Si hay síntesis ejecutiva AI generada, manda
+    # ese contenido para el bloque RESUMEN EJECUTIVO. Se renderiza con
+    # los estilos clínicos (markdown → ReportLab nativo) en lugar del
+    # Paragraph plano del flujo legacy.
+    ai_executive_md = (meta.get("ai_executive_summary") or "").strip()
+
+    if executive_text or ai_executive_md:
         story.append(Paragraph("RESUMEN EJECUTIVO", styles["WMTOC1"]))
 
         # Cinta de severidad: usamos SIEMPRE la live (live wins).
@@ -2252,7 +2262,21 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
             except Exception:
                 pass
 
-        story.append(Paragraph(_paragraph_safe(executive_text), styles["WMBody"]))
+        # Ciclo 17.26 P5+ — Si hay síntesis ejecutiva AI, la
+        # renderizamos con estilos clínicos (markdown → flowables
+        # ReportLab nativos: headings, bullets numerados con sangría,
+        # negritas reales, párrafos justificados). Se ve como un
+        # informe técnico profesional, no como markdown plano.
+        # Si no hay AI, fallback al executive_text legacy en un
+        # único Paragraph (comportamiento anterior).
+        if ai_executive_md:
+            ai_exec_flowables = _render_ai_clinical_flowables(
+                ai_executive_md, styles
+            )
+            for fl in ai_exec_flowables:
+                story.append(fl)
+        elif executive_text:
+            story.append(Paragraph(_paragraph_safe(executive_text), styles["WMBody"]))
         story.append(Spacer(1, 0.30 * cm))
         story.append(PageBreak())
 
@@ -3133,6 +3157,120 @@ with ga2:
         _clear_all_items()
         st.rerun()
 
+# Ciclo 17.26 P5+ — Síntesis Ejecutiva AI
+# El botón vive en ga4 para no chocar con los 3 botones existentes.
+# El resultado se persiste en session_state['wm_ai_exec_summary'] y
+# se inyecta a meta['ai_executive_summary'] justo antes de
+# _build_pdf_bytes para que el PDF render lo use en lugar del
+# resumen ejecutivo determinístico.
+with ga4:
+    _ai_exec_disabled = (len(items) == 0) or (not is_ai_available())
+    _ai_exec_help = None
+    if not is_ai_available():
+        _ai_exec_help = (
+            "AI no disponible. Configurá [anthropic] api_key en los "
+            "secrets de Streamlit para habilitar."
+        )
+    elif len(items) == 0:
+        _ai_exec_help = (
+            "Agregá al menos una figura desde Spectrum, Trends, etc. "
+            "antes de generar la síntesis ejecutiva."
+        )
+    if st.button(
+        "🧠 Generar Síntesis Ejecutiva AI",
+        use_container_width=True,
+        disabled=_ai_exec_disabled,
+        type="primary" if not _ai_exec_disabled else "secondary",
+        help=_ai_exec_help,
+        key="wm_ai_exec_btn",
+    ):
+        with st.spinner("🧠 Claude leyendo todas las figuras y sintetizando... (8-20 seg)"):
+            try:
+                _exec_result = generate_executive_summary(
+                    items, meta=meta, use_cache=True
+                )
+            except Exception as exc:
+                _exec_result = {
+                    "ok": False,
+                    "markdown": (
+                        f"_⚠️ Error inesperado:_\n\n```\n"
+                        f"{type(exc).__name__}: {exc}\n```"
+                    ),
+                    "error": str(exc)[:500],
+                    "model": "",
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "fallback_used": False,
+                }
+        st.session_state["wm_ai_exec_summary"] = _exec_result
+
+# Mostrar el resultado de la síntesis ejecutiva si está generado
+_exec_stored = st.session_state.get("wm_ai_exec_summary")
+if _exec_stored is not None:
+    with st.expander(
+        "🧠 Síntesis Ejecutiva AI (vista previa, va al inicio del PDF)",
+        expanded=True,
+    ):
+        if _exec_stored.get("ok"):
+            if _exec_stored.get("fallback_used"):
+                st.info(
+                    "ℹ️ Generado con modelo de respaldo (Haiku 4.5). "
+                    "Podés regenerar más tarde cuando Sonnet recupere capacidad."
+                )
+            st.markdown(_exec_stored.get("markdown", ""))
+            _model_used_exec = str(_exec_stored.get("model", "") or "")
+            if _model_used_exec.startswith("claude-haiku"):
+                _in_p_exec, _out_p_exec = 1.0, 5.0
+            else:
+                _in_p_exec, _out_p_exec = 3.0, 15.0
+            _cost_exec = (
+                _exec_stored.get("input_tokens", 0) * _in_p_exec
+                + _exec_stored.get("output_tokens", 0) * _out_p_exec
+            ) / 1_000_000
+            _exec_btn_cols = st.columns([1, 1, 5])
+            with _exec_btn_cols[0]:
+                if st.button(
+                    "🔄 Regenerar",
+                    key="wm_ai_exec_regen",
+                    use_container_width=True,
+                ):
+                    with st.spinner("🧠 Regenerando síntesis..."):
+                        try:
+                            _exec_new = generate_executive_summary(
+                                items, meta=meta, use_cache=False
+                            )
+                            st.session_state["wm_ai_exec_summary"] = _exec_new
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Error: {exc}")
+            with _exec_btn_cols[1]:
+                if st.button(
+                    "🗑 Descartar",
+                    key="wm_ai_exec_clear",
+                    use_container_width=True,
+                    help="Vuelve al resumen ejecutivo determinístico legacy.",
+                ):
+                    st.session_state["wm_ai_exec_summary"] = None
+                    st.rerun()
+            with _exec_btn_cols[2]:
+                _fb_tag = (
+                    " · ⚠️ modelo de respaldo"
+                    if _exec_stored.get("fallback_used") else ""
+                )
+                st.caption(
+                    f"Modelo: `{_model_used_exec}` · "
+                    f"Tokens: {_exec_stored.get('input_tokens', 0)} → "
+                    f"{_exec_stored.get('output_tokens', 0)} · "
+                    f"Costo: ~${_cost_exec:.4f}{_fb_tag}"
+                )
+        else:
+            st.error(
+                _exec_stored.get("markdown", "Error al generar síntesis ejecutiva.")
+            )
+            if st.button("🔄 Reintentar", key="wm_ai_exec_retry"):
+                st.session_state["wm_ai_exec_summary"] = None
+                st.rerun()
+
 pdf_ready = len(items) > 0
 pdf_error = None
 pdf_bytes: Optional[bytes] = None
@@ -3222,6 +3360,18 @@ with st.expander("📋 Auto-fill desde activo monitoreado", expanded=True):
 with ga3:
     if st.button("Preparar PDF", use_container_width=True, disabled=not pdf_ready):
         try:
+            # Ciclo 17.26 P5+ — Si el especialista generó síntesis
+            # ejecutiva AI, la inyectamos al meta para que el PDF la
+            # use en el bloque RESUMEN EJECUTIVO.
+            _exec_for_pdf = st.session_state.get("wm_ai_exec_summary")
+            if (_exec_for_pdf
+                    and _exec_for_pdf.get("ok")
+                    and _exec_for_pdf.get("markdown")):
+                meta["ai_executive_summary"] = str(
+                    _exec_for_pdf.get("markdown", "")
+                ).strip()
+            else:
+                meta["ai_executive_summary"] = ""
             pdf_bytes = _build_pdf_bytes(meta, items)
             st.session_state["report_pdf_bytes"] = pdf_bytes
             st.session_state["report_pdf_error"] = None
