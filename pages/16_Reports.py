@@ -156,6 +156,9 @@ from core.ai_rul import (  # Ciclo 17.30 — RUL Predictivo
     generate_rul_estimate,
     MIN_HISTORY_FOR_RUL,
 )
+from core.ai_patterns import (  # Ciclo 17.34 — Pattern Memory
+    find_similar_patterns,
+)
 
 
 st.set_page_config(page_title="Watermelon System | Reports", layout="wide")
@@ -2389,6 +2392,90 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                 story.append(fl)
             story.append(Spacer(1, 0.30 * cm))
 
+        # Ciclo 17.34 — Patrones reconocidos en archivo histórico.
+        # Si el especialista buscó patterns y hubo matches, agregamos
+        # nueva sección. Cada match es un mini-bloque con badge de
+        # similarity score + contexto + resolución del caso histórico.
+        patterns_matches = meta.get("ai_patterns_matches") or []
+        if patterns_matches:
+            story.append(PageBreak())
+            story.append(Paragraph(
+                "PATRONES RECONOCIDOS EN ARCHIVO HISTÓRICO",
+                styles["WMTOC1"],
+            ))
+            patterns_meta = meta.get("ai_patterns_meta") or {}
+            n_searched = int(patterns_meta.get("n_history_searched", 0) or 0)
+            global_p = str(patterns_meta.get("global_assessment", "") or "")
+            _pat_caption_style = ParagraphStyle(
+                name="WMPatCaption",
+                parent=styles["Normal"],
+                fontName=PDF_FONT_REGULAR,
+                fontSize=9.5,
+                leading=12,
+                alignment=TA_LEFT,
+                textColor=colors.HexColor("#475569"),
+                spaceAfter=8,
+            )
+            if n_searched > 0:
+                story.append(Paragraph(
+                    f"Archivo histórico searcheado: {n_searched} reportes "
+                    f"accesibles. Memoria institucional aplicada al caso "
+                    f"actual.",
+                    _pat_caption_style,
+                ))
+            if global_p:
+                _pat_assessment_style = ParagraphStyle(
+                    name="WMPatAssessment",
+                    parent=styles["WMClinicalBody"],
+                    fontName=PDF_FONT_BOLD,
+                    spaceAfter=10,
+                )
+                story.append(Paragraph(
+                    _paragraph_safe(global_p),
+                    _pat_assessment_style,
+                ))
+            for idx, m in enumerate(patterns_matches[:5], 1):
+                score = int(m.get("similarity_score", 0) or 0)
+                band = str(m.get("similarity_band", "") or "")
+                color_hex = str(m.get("similarity_color", "#475569") or "#475569")
+                consec = str(m.get("consecutive", "") or "")
+                date_p = str(m.get("date", "") or "")
+                asset_p = str(m.get("asset", "") or "")
+                sev_p = str(m.get("severity", "") or "")
+                rationale = str(m.get("rationale", "") or "")
+                resolution = str(m.get("resolution_summary", "") or "")
+                applicability = str(m.get("applicability", "") or "")
+
+                # Header del match: badge de score + identificadores
+                header_html = (
+                    f"<font color='{color_hex}'><b>{score}% · {band}</b></font>"
+                    f" &nbsp;·&nbsp; <b>{consec or 'reporte'}</b> · "
+                    f"{date_p} · {asset_p} · severidad {sev_p}"
+                )
+                story.append(Paragraph(
+                    header_html, styles["WMClinicalHeading"]
+                ))
+                if rationale:
+                    story.append(Paragraph(
+                        f"<b>Por qué son similares:</b> "
+                        f"{_paragraph_safe(rationale)}",
+                        styles["WMClinicalBody"],
+                    ))
+                if resolution and "no documentada" not in resolution.lower():
+                    story.append(Paragraph(
+                        f"<b>Resolución del caso histórico:</b> "
+                        f"{_paragraph_safe(resolution)}",
+                        styles["WMClinicalBody"],
+                    ))
+                if applicability:
+                    story.append(Paragraph(
+                        f"<b>Aplicabilidad al caso actual:</b> "
+                        f"{_paragraph_safe(applicability)}",
+                        styles["WMClinicalBody"],
+                    ))
+                story.append(Spacer(1, 0.12 * cm))
+            story.append(Spacer(1, 0.20 * cm))
+
         story.append(PageBreak())
 
     # ============================================================
@@ -3760,6 +3847,214 @@ if _rul_stored is not None:
                 st.session_state["wm_ai_rul_result"] = None
                 st.rerun()
 
+# =============================================================
+# Ciclo 17.34 — Pattern Memory (memoria institucional)
+# =============================================================
+# Busca en TODO el archivo histórico accesible patrones mecánicos
+# similares al reporte que se está preparando — sin importar que
+# sean del mismo activo o cliente. Convierte el archivo en un
+# cerebro colectivo: cada reporte que se archiva suma valor a
+# todos los próximos análisis.
+_patterns_disabled = (
+    not is_ai_available()
+    or len(items) == 0
+)
+_patterns_help = None
+if not is_ai_available():
+    _patterns_help = "AI no disponible. Configurá [anthropic] api_key."
+elif len(items) == 0:
+    _patterns_help = "Agregá figuras al reporte primero."
+
+_patterns_btn_cols = st.columns([2.4, 3.6])
+with _patterns_btn_cols[0]:
+    if st.button(
+        "Buscar patrones similares en archivo histórico",
+        key="wm_ai_patterns_btn",
+        use_container_width=True,
+        disabled=_patterns_disabled,
+        help=_patterns_help,
+        type="primary" if not _patterns_disabled else "secondary",
+    ):
+        with st.spinner(
+            "Claude buscando patrones mecánicos similares en el "
+            "archivo histórico... (10-25 seg)"
+        ):
+            try:
+                _patterns_result = find_similar_patterns(
+                    current_meta=meta,
+                    current_items=items,
+                    viewer_email=_wm_my_email,
+                    viewer_role=_wm_my_role,
+                    top_k=5,
+                    use_cache=True,
+                )
+            except Exception as exc:
+                _patterns_result = {
+                    "ok": False,
+                    "matches": [],
+                    "global_assessment": (
+                        f"_Error inesperado:_\n\n```\n"
+                        f"{type(exc).__name__}: {exc}\n```"
+                    ),
+                    "n_history_searched": 0,
+                    "model": "",
+                    "cached": False,
+                    "fallback_used": False,
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "cost_usd": 0.0,
+                }
+        st.session_state["wm_ai_patterns_result"] = _patterns_result
+
+with _patterns_btn_cols[1]:
+    st.caption(
+        "Reconoce patrones mecánicos similares en otros reportes "
+        "archivados (mismo cliente, otros activos). Memoria "
+        "institucional: cada reporte que archivás suma valor a los "
+        "próximos análisis."
+    )
+
+# Render del resultado
+_patterns_stored = st.session_state.get("wm_ai_patterns_result")
+if _patterns_stored is not None:
+    with st.expander(
+        "Patrones reconocidos en archivo histórico (vista previa, va al PDF)",
+        expanded=True,
+    ):
+        if _patterns_stored.get("ok"):
+            if _patterns_stored.get("fallback_used"):
+                st.info(
+                    "Resultados generados con modelo de respaldo "
+                    "(Haiku 4.5). Calidad ligeramente menor."
+                )
+            _n_hist_p = _patterns_stored.get("n_history_searched", 0)
+            _global_p = _patterns_stored.get("global_assessment", "")
+            st.caption(
+                f"Archivo searcheado: {_n_hist_p} reportes accesibles."
+            )
+            if _global_p:
+                st.markdown(f"**{_global_p}**")
+            _matches_p = _patterns_stored.get("matches", []) or []
+            if not _matches_p:
+                st.info(
+                    "No se identificaron patrones con similitud "
+                    "significativa (>40%) en el archivo accesible. "
+                    "Esto puede ser un caso novel para el programa "
+                    "de monitoreo, o el archivo necesita más reportes "
+                    "comparables."
+                )
+            else:
+                for i, m in enumerate(_matches_p, 1):
+                    _score = m.get("similarity_score", 0)
+                    _band = m.get("similarity_band", "")
+                    _color = m.get("similarity_color", "#475569")
+                    _consec = m.get("consecutive", "")
+                    _date = m.get("date", "")
+                    _asset = m.get("asset", "")
+                    _sev = m.get("severity", "")
+                    _rationale = m.get("rationale", "")
+                    _resolution = m.get("resolution_summary", "")
+                    _applicability = m.get("applicability", "")
+                    _archive_id = m.get("archive_id", "")
+                    # Header del match con badge de score
+                    st.markdown(
+                        f"<div style='padding:10px 14px; "
+                        f"border-radius:8px; background:#f8fafc; "
+                        f"border-left:5px solid {_color}; "
+                        f"margin-bottom:6px;'>"
+                        f"<span style='display:inline-block; "
+                        f"padding:3px 10px; border-radius:999px; "
+                        f"background:{_color}; color:white; "
+                        f"font-weight:700; font-size:0.85rem; "
+                        f"margin-right:10px;'>"
+                        f"{_score}% · {_band}</span>"
+                        f"<b>{_consec or 'reporte'}</b> · {_date}"
+                        f" · {_asset} · severidad {_sev}"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                    if _rationale:
+                        st.markdown(f"**Por qué son similares:** {_rationale}")
+                    if _resolution and _resolution != "(resolución no documentada en el archivo)":
+                        st.markdown(f"**Resolución del caso histórico:** {_resolution}")
+                    if _applicability:
+                        st.markdown(f"**Aplicabilidad al caso actual:** {_applicability}")
+                    # Botón de descarga del PDF citado
+                    try:
+                        from core.reports_archive import get_archived_pdf_bytes
+                        _ref_pdf = get_archived_pdf_bytes(
+                            archive_id=_archive_id,
+                            viewer_email=_wm_my_email,
+                            viewer_role=_wm_my_role,
+                        )
+                    except Exception:
+                        _ref_pdf = None
+                    if _ref_pdf:
+                        _safe_fname = (_consec or _archive_id.replace("/", "_"))[:40]
+                        st.download_button(
+                            f"Descargar PDF del caso histórico",
+                            data=_ref_pdf,
+                            file_name=f"{_safe_fname}.pdf",
+                            mime="application/pdf",
+                            key=f"wm_pat_dl_{_archive_id}_{i}",
+                            use_container_width=False,
+                        )
+                    if i < len(_matches_p):
+                        st.markdown("---")
+            # Caption final con metadata técnica
+            _model_used_p = str(_patterns_stored.get("model", "") or "")
+            _cost_p = _patterns_stored.get("cost_usd", 0.0)
+            _fb_tag_p = (
+                " · modelo de respaldo"
+                if _patterns_stored.get("fallback_used") else ""
+            )
+            _patterns_btn_cols2 = st.columns([1, 1, 5])
+            with _patterns_btn_cols2[0]:
+                if st.button(
+                    "Regenerar",
+                    key="wm_ai_patterns_regen",
+                    use_container_width=True,
+                ):
+                    with st.spinner("Regenerando..."):
+                        try:
+                            _new = find_similar_patterns(
+                                current_meta=meta,
+                                current_items=items,
+                                viewer_email=_wm_my_email,
+                                viewer_role=_wm_my_role,
+                                top_k=5,
+                                use_cache=False,
+                            )
+                            st.session_state["wm_ai_patterns_result"] = _new
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"Error: {exc}")
+            with _patterns_btn_cols2[1]:
+                if st.button(
+                    "Descartar",
+                    key="wm_ai_patterns_clear",
+                    use_container_width=True,
+                ):
+                    st.session_state["wm_ai_patterns_result"] = None
+                    st.rerun()
+            with _patterns_btn_cols2[2]:
+                st.caption(
+                    f"Modelo: `{_model_used_p}` · "
+                    f"Tokens: {_patterns_stored.get('input_tokens', 0)} → "
+                    f"{_patterns_stored.get('output_tokens', 0)} · "
+                    f"Costo: ~${_cost_p:.4f}{_fb_tag_p}"
+                )
+        else:
+            st.error(
+                _patterns_stored.get(
+                    "global_assessment",
+                    "Error al buscar patrones similares.",
+                )
+            )
+            if st.button("Reintentar", key="wm_ai_patterns_retry"):
+                st.session_state["wm_ai_patterns_result"] = None
+                st.rerun()
+
 pdf_ready = len(items) > 0
 pdf_error = None
 pdf_bytes: Optional[bytes] = None
@@ -3908,6 +4203,29 @@ with ga3:
             else:
                 meta["ai_rul_estimate"] = ""
                 meta["ai_rul_meta"] = {}
+
+            # Ciclo 17.34 — Si el especialista buscó patrones similares
+            # en archivo histórico, inyectamos los matches al meta para
+            # que el PDF agregue la sección 'PATRONES RECONOCIDOS EN
+            # ARCHIVO HISTÓRICO' después de RUL.
+            _patterns_for_pdf = st.session_state.get("wm_ai_patterns_result")
+            if (_patterns_for_pdf
+                    and _patterns_for_pdf.get("ok")
+                    and _patterns_for_pdf.get("matches")):
+                meta["ai_patterns_matches"] = _patterns_for_pdf.get(
+                    "matches", []
+                )
+                meta["ai_patterns_meta"] = {
+                    "n_history_searched": _patterns_for_pdf.get(
+                        "n_history_searched", 0
+                    ),
+                    "global_assessment": _patterns_for_pdf.get(
+                        "global_assessment", ""
+                    ),
+                }
+            else:
+                meta["ai_patterns_matches"] = []
+                meta["ai_patterns_meta"] = {}
 
             pdf_bytes = _build_pdf_bytes(meta, items)
             st.session_state["report_pdf_bytes"] = pdf_bytes
