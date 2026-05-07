@@ -36,6 +36,10 @@ NAV_ITEMS = [
     # por AI Assistant (Q&A sobre archivo) + el flujo Machinery Library
     # → severidad para inspección de activos críticos.
     {"label": "Reports", "page": "pages/16_Reports.py"},
+    # Ciclo 18.2 — Importers & Plantillas LATAM hub.
+    # Página NUEVA, no toca ninguna existente. Solo admin + specialist
+    # (importar data sensible es operación restringida).
+    {"label": "Importers & Plantillas", "page": "pages/17_Importers.py"},
     # Ciclo 17.27 — AI Assistant: Q&A en lenguaje natural sobre el
     # archivo histórico de reportes. Solo admin + specialist por
     # ahora; client se evalúa en una iteración futura.
@@ -61,6 +65,8 @@ CLIENT_BLOCKED_PAGES = {
     "pages/01_Load_Data.py",
     # pages/15_Diagnostics.py removido del producto en Ciclo 17.33.
     "pages/01b_Machine_Map.py",  # tiene comandos para editar el map
+    # Ciclo 18.2 — Importers no para client (sube data y crea activos)
+    "pages/17_Importers.py",
     # Ciclo 17.27 — AI Assistant queda restringido a admin/specialist
     # en su versión inicial. Cuando expongamos Q&A para clientes,
     # se removerá de esta lista y se ajustará la página para

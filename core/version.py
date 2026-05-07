@@ -56,8 +56,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = PROJECT_ROOT / "VERSION"
 
 # Hardcoded fallback — bump al hacer release si no hay git disponible.
-_FALLBACK_VERSION = "v3.0.8"
-_FALLBACK_RELEASE_NAME = "Trend module clase mundial + Reports saneados"
+# Ciclo 18.2: subido a v3.15.0 (estaba en v3.0.8 desde release inicial,
+# lo que combinado con un override WM_VERSION viejo en Streamlit Cloud
+# mostraba versiones obsoletas/incorrectas).
+_FALLBACK_VERSION = "v3.15.0"
+_FALLBACK_RELEASE_NAME = "Industrial Plumbing + Importers UI Hub"
 _GIT_TIMEOUT_SEC = 2.0
 
 
@@ -189,16 +192,24 @@ def get_version_info() -> Dict[str, str]:
         commits_ahead = ""
         is_dirty = False
 
-    # Resolver versión por prioridad
+    # Resolver versión por prioridad.
+    #
+    # Ciclo 18.2 hotfix — VERSION file PROMOVIDO sobre git_latest_tag.
+    # Razón: Streamlit Cloud hace shallow clone que pierde tags v3.x
+    # del repo, dejando solo tags antiguos visibles (v2.1, v2.5...).
+    # El archivo VERSION es source of truth declarativa: vos lo
+    # escribís en cada release y siempre gana.
+    #
+    # El env var WM_VERSION sigue siendo override total para casos
+    # ops (containers stripped sin git ni VERSION file).
     if env_version:
         version = _normalize_version(env_version)
+    elif file_version:
+        version = _normalize_version(file_version)
     elif git_latest_tag:
-        # Tag semver más alto del repo (ej. v3.0.8 aunque estemos en dev)
         version = _normalize_version(git_latest_tag)
     elif git_desc:
         version = _normalize_version(git_desc)
-    elif file_version:
-        version = _normalize_version(file_version)
     else:
         version = _FALLBACK_VERSION
 
