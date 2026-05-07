@@ -1,0 +1,453 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "last_updated": "2026-05-07",
+    "description": "Catálogo de plantillas de máquinas comunes en O&G, generación y petroquímica LATAM. Pre-carga set-points por norma, rodamientos típicos, esquema de sensores recomendado y velocidades nominales.",
+    "units": {
+      "rpm": "rev/min",
+      "power": "kW",
+      "shaft_displacement": "um_pp",
+      "casing_velocity": "mm/s RMS"
+    },
+    "norm_codes": "Compatibles con core/iso_thresholds.py — ISO_20816_x, API_61x, etc.",
+    "convention": "Cada plantilla es seed; el usuario puede sobrescribir set-points por activo."
+  },
+
+  "templates": [
+    {
+      "id": "solar_centaur_40",
+      "label": "Solar Centaur 40 — Gas turbine 3.5 MW",
+      "manufacturer": "Solar Turbines",
+      "model": "Centaur 40",
+      "category": "gas_turbine",
+      "application": ["mechanical_drive", "power_generation"],
+      "rated_power_kw": [3000, 4000],
+      "operating_rpm_nominal": 14951,
+      "operating_rpm_range": [13500, 15500],
+      "bearing_type": "plain",
+      "iso_norm_recommended": "ISO_20816_4",
+      "iso_class_recommended": "class_iv",
+      "api_norm_recommended": "API_616",
+      "common_bearings": ["plain_journal_tilting_pad"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["NDE_horiz", "NDE_vert", "DE_horiz", "DE_vert"],
+        "casing_velocity": ["bearing_caps"],
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "Turbina industrial liviana. Frecuencia 1X = 249 Hz. Vigilar 2X (acople), subsynchronous (whirl), pala-pasante NX (donde N = # de palas)."
+    },
+    {
+      "id": "solar_centaur_50",
+      "label": "Solar Centaur 50 — Gas turbine 4.6 MW",
+      "manufacturer": "Solar Turbines",
+      "model": "Centaur 50",
+      "category": "gas_turbine",
+      "application": ["mechanical_drive", "power_generation"],
+      "rated_power_kw": [4400, 4800],
+      "operating_rpm_nominal": 16500,
+      "operating_rpm_range": [15000, 16800],
+      "bearing_type": "plain",
+      "iso_norm_recommended": "ISO_20816_4",
+      "iso_class_recommended": "class_iv",
+      "api_norm_recommended": "API_616",
+      "common_bearings": ["plain_journal_tilting_pad"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["NDE_horiz", "NDE_vert", "DE_horiz", "DE_vert"],
+        "casing_velocity": ["bearing_caps"],
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "Hermana mayor del Centaur 40. Muy común en estaciones de bombeo y gas en Colombia, México, Argentina."
+    },
+    {
+      "id": "solar_taurus_60",
+      "label": "Solar Taurus 60 — Gas turbine 5.7 MW",
+      "manufacturer": "Solar Turbines",
+      "model": "Taurus 60",
+      "category": "gas_turbine",
+      "application": ["mechanical_drive", "power_generation"],
+      "rated_power_kw": [5500, 5900],
+      "operating_rpm_nominal": 14951,
+      "operating_rpm_range": [13500, 15500],
+      "bearing_type": "plain",
+      "iso_norm_recommended": "ISO_20816_4",
+      "iso_class_recommended": "class_iv",
+      "api_norm_recommended": "API_616",
+      "common_bearings": ["plain_journal_tilting_pad"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["NDE_horiz", "NDE_vert", "DE_horiz", "DE_vert"],
+        "casing_velocity": ["bearing_caps"],
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "1X = 249 Hz. Misma plataforma constructiva del Centaur 40 con compresor escalado."
+    },
+    {
+      "id": "solar_mars_100",
+      "label": "Solar Mars 100 — Gas turbine 11.2 MW",
+      "manufacturer": "Solar Turbines",
+      "model": "Mars 100",
+      "category": "gas_turbine",
+      "application": ["mechanical_drive", "power_generation"],
+      "rated_power_kw": [10500, 11500],
+      "operating_rpm_nominal": 8568,
+      "operating_rpm_range": [7800, 9000],
+      "bearing_type": "plain",
+      "iso_norm_recommended": "ISO_20816_4",
+      "iso_class_recommended": "class_iv",
+      "api_norm_recommended": "API_616",
+      "common_bearings": ["plain_journal_tilting_pad", "thrust_kingsbury"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["NDE_horiz", "NDE_vert", "DE_horiz", "DE_vert"],
+        "casing_velocity": ["bearing_caps", "compressor_inlet", "compressor_discharge"],
+        "thrust_position": "axial",
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "1X = 142.8 Hz. Ojo con seal rub (subsynchronous), oil whirl (~0.45X), inestabilidad de cojinete plano. Curvas Bode obligatorias en arranque/paro."
+    },
+    {
+      "id": "siemens_sgt_400",
+      "label": "Siemens SGT-400 — Gas turbine 12.9–14.3 MW",
+      "manufacturer": "Siemens Energy",
+      "model": "SGT-400",
+      "category": "gas_turbine",
+      "application": ["mechanical_drive", "power_generation"],
+      "rated_power_kw": [12000, 14500],
+      "operating_rpm_nominal": 9500,
+      "operating_rpm_range": [8500, 10500],
+      "bearing_type": "plain",
+      "iso_norm_recommended": "ISO_20816_4",
+      "iso_class_recommended": "class_iv",
+      "api_norm_recommended": "API_616",
+      "common_bearings": ["plain_journal_tilting_pad", "thrust_kingsbury"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["NDE_horiz", "NDE_vert", "DE_horiz", "DE_vert"],
+        "casing_velocity": ["bearing_caps"],
+        "thrust_position": "axial",
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "Twin-shaft turbine. Vigilar gas generator (HP) vs power turbine (LP) por separado. Cada eje tiene su propia firma 1X y críticas."
+    },
+    {
+      "id": "siemens_sgt_700",
+      "label": "Siemens SGT-700 — Gas turbine 33 MW",
+      "manufacturer": "Siemens Energy",
+      "model": "SGT-700",
+      "category": "gas_turbine",
+      "application": ["mechanical_drive", "power_generation"],
+      "rated_power_kw": [30000, 34000],
+      "operating_rpm_nominal": 6500,
+      "operating_rpm_range": [6000, 7000],
+      "bearing_type": "plain",
+      "iso_norm_recommended": "ISO_20816_2",
+      "iso_class_recommended": "group2",
+      "api_norm_recommended": "API_616",
+      "common_bearings": ["plain_journal_tilting_pad", "thrust_kingsbury"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["NDE_horiz", "NDE_vert", "DE_horiz", "DE_vert"],
+        "casing_velocity": ["bearing_caps"],
+        "thrust_position": "axial",
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "Turbina mediana muy presente en O&G LATAM. Single-shaft. Operación nominal 6500 RPM. ISO 20816-2 grupo 2 aplica para evaluación de cojinetes planos."
+    },
+    {
+      "id": "ge_frame_5",
+      "label": "GE Frame 5 — Heavy duty gas turbine 26 MW",
+      "manufacturer": "GE Vernova",
+      "model": "MS5001/Frame 5",
+      "category": "gas_turbine",
+      "application": ["mechanical_drive", "power_generation"],
+      "rated_power_kw": [20000, 30000],
+      "operating_rpm_nominal": 5100,
+      "operating_rpm_range": [4800, 5300],
+      "bearing_type": "plain",
+      "iso_norm_recommended": "ISO_20816_2",
+      "iso_class_recommended": "group2",
+      "api_norm_recommended": "API_616",
+      "common_bearings": ["plain_journal_elliptical", "thrust_kingsbury"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["NDE_horiz", "NDE_vert", "DE_horiz", "DE_vert"],
+        "casing_velocity": ["turbine_casing", "compressor_casing"],
+        "thrust_position": "axial",
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "Heavy duty veterano. Single-shaft. Muy común en cogeneración LATAM."
+    },
+    {
+      "id": "ge_frame_7ea",
+      "label": "GE Frame 7EA — Heavy duty gas turbine 85 MW",
+      "manufacturer": "GE Vernova",
+      "model": "MS7001EA/Frame 7EA",
+      "category": "gas_turbine",
+      "application": ["power_generation"],
+      "rated_power_kw": [80000, 90000],
+      "operating_rpm_nominal": 3600,
+      "operating_rpm_range": [3500, 3700],
+      "bearing_type": "plain",
+      "iso_norm_recommended": "ISO_20816_2",
+      "iso_class_recommended": "group2",
+      "api_norm_recommended": "API_616",
+      "common_bearings": ["plain_journal_tilting_pad", "thrust_kingsbury_dual"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["bearing1_xy", "bearing2_xy", "bearing3_xy"],
+        "casing_velocity": ["turbine_casing", "compressor_casing"],
+        "thrust_position": "axial_dual",
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "Frame 7 a 60 Hz. Operación 3600 RPM 1X = 60 Hz. Críticas típicas alrededor de 1900-2100 RPM. Margen API 684 ≥ 15%."
+    },
+    {
+      "id": "brush_turbogen_54mw",
+      "label": "Brush Turbogenerator 54 MW",
+      "manufacturer": "Brush",
+      "model": "DAX-class 54 MW",
+      "category": "turbogenerator",
+      "application": ["power_generation"],
+      "rated_power_kw": [50000, 60000],
+      "operating_rpm_nominal": 3600,
+      "operating_rpm_range": [3580, 3620],
+      "bearing_type": "plain",
+      "iso_norm_recommended": "ISO_20816_2",
+      "iso_class_recommended": "group2",
+      "api_norm_recommended": "API_546",
+      "common_bearings": ["plain_journal_elliptical", "thrust_kingsbury"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["bearing1_xy", "bearing2_xy"],
+        "casing_velocity": ["bearing_caps"],
+        "thrust_position": "axial",
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "Turbogenerador 60 Hz, 2 polos. Caso histórico Watermelon — perfil base de validación. ISO 20816-2 grupo 2 a 3600 RPM."
+    },
+    {
+      "id": "solar_c30_centrif_compressor",
+      "label": "Solar C30 — Centrifugal compressor",
+      "manufacturer": "Solar Turbines",
+      "model": "C30 / C33",
+      "category": "centrifugal_compressor",
+      "application": ["gas_compression"],
+      "rated_power_kw": [3000, 5000],
+      "operating_rpm_nominal": 14000,
+      "operating_rpm_range": [10000, 18000],
+      "bearing_type": "plain",
+      "iso_norm_recommended": "ISO_20816_3",
+      "iso_class_recommended": "group_rigid_intermediate",
+      "api_norm_recommended": "API_617",
+      "common_bearings": ["plain_journal_tilting_pad"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["DE_horiz", "DE_vert", "NDE_horiz", "NDE_vert"],
+        "casing_velocity": ["bearing_caps"],
+        "thrust_position": "axial",
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "Compresor de proceso. Bode obligatorio en commissioning. Ojo con surge (instabilidad subsynchronous) y choke. API 684 separación ≥ 15-20%."
+    },
+    {
+      "id": "atlascopco_zh_centrif",
+      "label": "Atlas Copco ZH — Centrifugal air compressor",
+      "manufacturer": "Atlas Copco",
+      "model": "ZH series",
+      "category": "centrifugal_compressor",
+      "application": ["air_compression"],
+      "rated_power_kw": [200, 1500],
+      "operating_rpm_nominal": 25000,
+      "operating_rpm_range": [20000, 30000],
+      "bearing_type": "rolling",
+      "iso_norm_recommended": "ISO_20816_3",
+      "iso_class_recommended": "group_small_rigid",
+      "api_norm_recommended": "API_672",
+      "common_bearings": ["angular_contact_high_speed"],
+      "sensor_layout": {
+        "casing_velocity": ["motor_casing", "gearbox_casing", "compressor_casing"],
+        "tachometer": "1_per_rev"
+      },
+      "notes": "Compresor con caja multiplicadora. Vibrar en velocidades pinion/wheel. Análisis de envolvente útil para detectar wear en piñones."
+    },
+    {
+      "id": "ariel_kbb_recip",
+      "label": "Ariel KBB — Reciprocating gas compressor",
+      "manufacturer": "Ariel",
+      "model": "KBB series",
+      "category": "reciprocating_compressor",
+      "application": ["gas_compression"],
+      "rated_power_kw": [400, 2200],
+      "operating_rpm_nominal": 1200,
+      "operating_rpm_range": [900, 1500],
+      "bearing_type": "plain",
+      "iso_norm_recommended": "ISO_20816_8",
+      "iso_class_recommended": "vci_2",
+      "api_norm_recommended": "API_618",
+      "common_bearings": ["plain_journal", "crosshead_pin", "crank_pin_roller"],
+      "sensor_layout": {
+        "frame_velocity": ["frame_top", "frame_side"],
+        "crosshead_acceleration": ["each_cylinder"],
+        "rod_drop": ["each_cylinder"],
+        "valve_temperature": ["each_valve"]
+      },
+      "notes": "ISO 20816-8 mide en estructura del frame, no en eje. RPM lentos. Análisis de impactos en crosshead y rod drop son los KPIs. Espectro 1X-NX raramente útil; mejor envolvente y kurtosis temporal."
+    },
+    {
+      "id": "burckhardt_recip",
+      "label": "Burckhardt Process — Reciprocating compressor",
+      "manufacturer": "Burckhardt Compression",
+      "model": "Process series",
+      "category": "reciprocating_compressor",
+      "application": ["gas_compression"],
+      "rated_power_kw": [500, 5000],
+      "operating_rpm_nominal": 600,
+      "operating_rpm_range": [400, 750],
+      "bearing_type": "plain",
+      "iso_norm_recommended": "ISO_20816_8",
+      "iso_class_recommended": "vci_3",
+      "api_norm_recommended": "API_618",
+      "common_bearings": ["plain_journal_split", "crosshead_pin"],
+      "sensor_layout": {
+        "frame_velocity": ["frame_top", "frame_side"],
+        "crosshead_acceleration": ["each_cylinder"],
+        "rod_drop": ["each_cylinder"]
+      },
+      "notes": "Compresor pesado de baja velocidad. Crítico en plantas de aire / hidrógeno. Bajas RPM exigen sensores de aceleración con respuesta a baja frecuencia."
+    },
+    {
+      "id": "sulzer_zsk_pump",
+      "label": "Sulzer ZSK — Multistage centrifugal pump",
+      "manufacturer": "Sulzer",
+      "model": "ZSK / SMD",
+      "category": "centrifugal_pump",
+      "application": ["water_injection", "produced_water"],
+      "rated_power_kw": [200, 4000],
+      "operating_rpm_nominal": 3600,
+      "operating_rpm_range": [2950, 3600],
+      "bearing_type": "rolling",
+      "iso_norm_recommended": "ISO_10816_7",
+      "iso_class_recommended": "category_ii",
+      "api_norm_recommended": "API_610",
+      "common_bearings": ["angular_contact", "deep_groove_ball", "thrust_ball"],
+      "sensor_layout": {
+        "casing_velocity": ["pump_de", "pump_nde", "motor_de", "motor_nde"]
+      },
+      "notes": "Bomba multietapa. Frecuencia de paso de álabe (BPF) = N_blades × RPM. Vigilar cavitación (banda ancha 1-10 kHz) y degradación de impulsor."
+    },
+    {
+      "id": "goulds_3700_pump",
+      "label": "Goulds 3700 — API 610 process pump",
+      "manufacturer": "Goulds Pumps",
+      "model": "3700",
+      "category": "centrifugal_pump",
+      "application": ["process_fluid_transfer"],
+      "rated_power_kw": [50, 1500],
+      "operating_rpm_nominal": 3600,
+      "operating_rpm_range": [1800, 3600],
+      "bearing_type": "rolling",
+      "iso_norm_recommended": "ISO_10816_7",
+      "iso_class_recommended": "category_ii",
+      "api_norm_recommended": "API_610",
+      "common_bearings": ["deep_groove_ball_6309", "angular_contact_7311"],
+      "sensor_layout": {
+        "casing_velocity": ["pump_de", "pump_nde"]
+      },
+      "notes": "Bomba API estándar muy difundida en refinerías LATAM. BPF típico 5-8X. Vigilar misalignment (2X), holgura (múltiples armónicos), bearing faults (envelope)."
+    },
+    {
+      "id": "weg_w22_motor_lv",
+      "label": "WEG W22 — Low voltage induction motor",
+      "manufacturer": "WEG",
+      "model": "W22",
+      "category": "electric_motor",
+      "application": ["industrial_drive"],
+      "rated_power_kw": [0.75, 500],
+      "operating_rpm_nominal": 1780,
+      "operating_rpm_range": [1480, 3580],
+      "bearing_type": "rolling",
+      "iso_norm_recommended": "ISO_20816_3",
+      "iso_class_recommended": "group_small",
+      "api_norm_recommended": null,
+      "common_bearings": ["deep_groove_ball_6209", "deep_groove_ball_6311"],
+      "sensor_layout": {
+        "casing_velocity": ["motor_de", "motor_nde"]
+      },
+      "notes": "Motor LV brasileño/argentino muy común. 4 polos a 60 Hz = 1780 RPM nominal. Para análisis MCSA/ESA se complementa con corriente de fase."
+    },
+    {
+      "id": "abb_ami_motor_hv",
+      "label": "ABB AMI — High voltage induction motor",
+      "manufacturer": "ABB",
+      "model": "AMI series",
+      "category": "electric_motor",
+      "application": ["compressor_drive", "pump_drive"],
+      "rated_power_kw": [500, 15000],
+      "operating_rpm_nominal": 1780,
+      "operating_rpm_range": [990, 3580],
+      "bearing_type": "rolling",
+      "iso_norm_recommended": "ISO_20816_3",
+      "iso_class_recommended": "group_medium_large",
+      "api_norm_recommended": "API_541",
+      "common_bearings": ["deep_groove_ball_large", "sleeve_journal"],
+      "sensor_layout": {
+        "casing_velocity": ["motor_de", "motor_nde"],
+        "proximity_probes_xy": ["motor_de_xy", "motor_nde_xy"]
+      },
+      "notes": "Motor HV >1500 kW frecuentemente en cojinete plano. Ahí aplica ISO 20816-3 sleeve. Sidebands 1X ± 2×slip indican problemas eléctricos."
+    },
+    {
+      "id": "siemens_simotics_hv",
+      "label": "Siemens SIMOTICS HV — High voltage motor",
+      "manufacturer": "Siemens",
+      "model": "SIMOTICS HV",
+      "category": "electric_motor",
+      "application": ["compressor_drive", "pump_drive"],
+      "rated_power_kw": [200, 20000],
+      "operating_rpm_nominal": 1780,
+      "operating_rpm_range": [594, 3580],
+      "bearing_type": "rolling",
+      "iso_norm_recommended": "ISO_20816_3",
+      "iso_class_recommended": "group_medium_large",
+      "api_norm_recommended": "API_541",
+      "common_bearings": ["deep_groove_ball", "cylindrical_roller", "sleeve_journal"],
+      "sensor_layout": {
+        "casing_velocity": ["motor_de", "motor_nde"],
+        "proximity_probes_xy": ["motor_de_xy", "motor_nde_xy"]
+      },
+      "notes": "Motor HV competidor del ABB AMI. Configuración VFD frecuente — usar order tracking con velocidad sintetizada del drive."
+    },
+    {
+      "id": "tlt_centrifugal_fan",
+      "label": "TLT-Turbo — Centrifugal fan / blower",
+      "manufacturer": "TLT-Turbo",
+      "model": "Variable",
+      "category": "fan_blower",
+      "application": ["combustion_air", "flue_gas", "fluidized_bed"],
+      "rated_power_kw": [50, 5000],
+      "operating_rpm_nominal": 1500,
+      "operating_rpm_range": [600, 3000],
+      "bearing_type": "rolling",
+      "iso_norm_recommended": "ISO_14694",
+      "iso_class_recommended": "BV-3",
+      "api_norm_recommended": "API_673",
+      "common_bearings": ["spherical_roller_22000_series", "deep_groove_ball"],
+      "sensor_layout": {
+        "casing_velocity": ["fan_de", "fan_nde", "motor_de", "motor_nde"]
+      },
+      "notes": "Tirador de combustión y FD/ID en plantas. ISO 14694 categoriza por aplicación (BV-1 a BV-5). 1X dominante por desbalance / acumulación de polvo en álabes."
+    },
+    {
+      "id": "howden_axial_fan",
+      "label": "Howden — Axial fan",
+      "manufacturer": "Howden",
+      "model": "Axial variable pitch",
+      "category": "fan_blower",
+      "application": ["forced_draft", "induced_draft"],
+      "rated_power_kw": [300, 15000],
+      "operating_rpm_nominal": 990,
+      "operating_rpm_range": [600, 1800],
+      "bearing_type": "rolling",
+      "iso_norm_recommended": "ISO_14694",
+      "iso_class_recommended": "BV-3",
+      "api_norm_recommended": "API_673",
+      "common_bearings": ["spherical_roller", "thrust_spherical"],
+      "sensor_layout": {
+        "casing_velocity": ["fan_de", "fan_nde", "motor_de", "motor_nde"]
+      },
+      "notes": "Fan grande de tiro. Pitch variable significa señal 1X estable pero NX (paso de álabe) cambia con carga. BPF = N_blades × RPM, vigilar para detectar pala defectuosa."
+    }
+  ]
+}
