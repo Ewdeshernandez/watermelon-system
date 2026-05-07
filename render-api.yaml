@@ -1,0 +1,32 @@
+# Config Render para el servicio HTTP API público de Watermelon.
+# Este config crea un web service SEPARADO del Streamlit app —
+# convive sin conflicto con wm-home-final-2026.streamlit.app.
+#
+# Para usar:
+#   1. Render dashboard → New → Web Service
+#   2. Connect repo: watermelon-system
+#   3. Render detecta este render-api.yaml y precarga config
+#   4. Confirmar:
+#        Branch: main
+#        Build:  pip install -r requirements-api-minimal.txt
+#        Start:  uvicorn api.app:app --host 0.0.0.0 --port $PORT
+#   5. Agregar env vars (Secrets):
+#        WATERMELON_API_KEYS = watermelon-bot-key-2026
+#      (cualquier UUID — el bot la usará para autenticarse)
+#   6. Deploy → URL queda como https://watermelon-api-XYZ.onrender.com
+
+services:
+  - type: web
+    name: watermelon-api
+    runtime: python
+    plan: free
+    branch: main
+    rootDir: .
+    buildCommand: pip install -r requirements-api-minimal.txt
+    startCommand: uvicorn api.app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /v1/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: WATERMELON_API_KEYS
+        sync: false   # configurar manualmente en dashboard (secret)
