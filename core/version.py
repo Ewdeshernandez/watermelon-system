@@ -56,8 +56,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 VERSION_FILE = PROJECT_ROOT / "VERSION"
 
 # Hardcoded fallback — bump al hacer release si no hay git disponible.
-_FALLBACK_VERSION = "v3.0.8"
-_FALLBACK_RELEASE_NAME = "Trend module clase mundial + Reports saneados"
+# Ciclo 18.2: subido a v3.15.0 (estaba en v3.0.8 desde release inicial,
+# lo que combinado con un override WM_VERSION viejo en Streamlit Cloud
+# mostraba versiones obsoletas/incorrectas).
+_FALLBACK_VERSION = "v3.15.0"
+_FALLBACK_RELEASE_NAME = "Industrial Plumbing + Importers UI Hub"
 _GIT_TIMEOUT_SEC = 2.0
 
 
