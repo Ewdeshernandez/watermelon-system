@@ -217,6 +217,60 @@ def list_templates_by_manufacturer(manufacturer: str) -> List[MachineTemplate]:
     return [t for t in list_templates() if mfg in t.manufacturer.lower()]
 
 
+def suggest_profile_key_for_template(template_id: str) -> Optional[str]:
+    """
+    Devuelve el `profile_key` de `core.machine_profiles.PROFILES` que
+    mejor calza con la plantilla. Pensado para que la UI auto-seleccione
+    el profile cuando el usuario crea un activo desde plantilla.
+
+    Heurística simple por categoría + RPM:
+      gas_turbine                → siemens_sgt400 / sgt300 / steam_turbine_*
+      turbogenerator             → brush_turbogenerator_54mw_3600
+      reciprocating_compressor   → reciprocating_compressor
+      centrifugal_pump           → pump_horizontal_multistage / vertical
+      electric_motor             → motor_2pole / 4pole / 6pole / vfd (por RPM)
+      otros (centrífugos, fans)  → custom_manual
+
+    El usuario SIEMPRE puede cambiar la sugerencia en el dropdown.
+    """
+    t = get_template(template_id)
+    if t is None:
+        return None
+
+    cat = (t.category or "").lower()
+    rpm = float(t.operating_rpm_nominal or 0.0)
+    label_low = t.label.lower()
+
+    if cat == "gas_turbine":
+        if rpm >= 14000:
+            return "siemens_sgt400"
+        if rpm >= 8000:
+            return "siemens_sgt300"
+        return "steam_turbine_medium_3600"
+
+    if cat == "turbogenerator":
+        return "brush_turbogenerator_54mw_3600"
+
+    if cat == "reciprocating_compressor":
+        return "reciprocating_compressor"
+
+    if cat == "centrifugal_pump":
+        if "vertical" in label_low:
+            return "pump_vertical_multistage"
+        return "pump_horizontal_multistage"
+
+    if cat == "electric_motor":
+        if rpm >= 4000:
+            return "motor_vfd_highspeed"
+        if rpm >= 3000:
+            return "motor_2pole_60hz"
+        if rpm >= 1500:
+            return "motor_4pole_60hz"
+        return "motor_6pole_60hz"
+
+    return "custom_manual"
+
+
 def suggest_norm_for_template(template_id: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Devuelve (norm_code, class_code) recomendado para la plantilla.
@@ -286,6 +340,7 @@ __all__ = [
     "list_templates_by_category",
     "list_templates_by_manufacturer",
     "suggest_norm_for_template",
+    "suggest_profile_key_for_template",
     "template_to_legacy_profile",
     "get_catalog_metadata",
     "reload_catalog",
