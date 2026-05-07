@@ -47,6 +47,7 @@ from core.machine_templates import (
     list_categories,
     list_templates,
     list_templates_by_category,
+    suggest_profile_key_for_template,
 )
 
 
@@ -299,9 +300,103 @@ with tab_templates:
         st.markdown("**Notas técnicas**")
         st.info(t.notes)
 
+    # =========================================================
+    # Ciclo 18.3 — Crear activo desde esta plantilla
+    # =========================================================
     st.markdown("---")
-    st.caption(
-        "Para crear un activo en Machinery Library con esta plantilla, "
-        "copiá el ID `" + t.id + "` y pégalo en el formulario de creación. "
-        "(El wiring directo desde aquí llega en el Ciclo 18.3.)"
-    )
+    with st.expander("➕ Crear activo desde esta plantilla", expanded=False):
+        from core.instance_state import create_instance, get_instance
+        from core.machine_profiles import PROFILES as MACHINE_PROFILES
+
+        st.caption(
+            "Auto-rellena los campos con los valores de la plantilla. "
+            "Podés editar todo antes de guardar — la plantilla es solo una "
+            "sugerencia, no una camisa de fuerza."
+        )
+
+        suggested_profile = suggest_profile_key_for_template(t.id) or "custom_manual"
+        all_profiles = sorted(MACHINE_PROFILES.keys())
+        try:
+            default_idx = all_profiles.index(suggested_profile)
+        except ValueError:
+            default_idx = 0
+
+        # Notas pre-llenadas con la metadata clave de la plantilla
+        prefilled_notes_lines = [
+            f"Plantilla base: {t.label}",
+            f"Fabricante: {t.manufacturer}",
+            f"RPM nominal: {t.operating_rpm_nominal:,.0f}" if t.operating_rpm_nominal else "",
+            f"Norma ISO recomendada: {t.iso_norm_recommended} ({t.iso_class_recommended})" if t.iso_norm_recommended else "",
+            f"Norma API: {t.api_norm_recommended}" if t.api_norm_recommended else "",
+            f"Rodamientos típicos: {', '.join(t.common_bearings)}" if t.common_bearings else "",
+            "",
+            t.notes or "",
+        ]
+        prefilled_notes = "\n".join(line for line in prefilled_notes_lines if line is not None)
+
+        with st.form(f"create_from_template_{t.id}", clear_on_submit=False):
+            col_a, col_b = st.columns(2)
+            with col_a:
+                inst_id_in = st.text_input(
+                    "ID del activo (slug único)",
+                    placeholder=f"{t.id}_planta_x",
+                    help="Solo letras, números, guiones y guiones bajos.",
+                )
+                tag_in = st.text_input(
+                    "Tag interno del cliente",
+                    placeholder="C200C, Mars-1, etc.",
+                )
+            with col_b:
+                profile_in = st.selectbox(
+                    "Profile (familia técnica)",
+                    options=all_profiles,
+                    index=default_idx,
+                    format_func=lambda pk: f"{MACHINE_PROFILES[pk].label}",
+                    help="Sugerido a partir de la categoría y RPM de la plantilla. Editable.",
+                )
+                serial_in = st.text_input(
+                    "Número de serie OEM",
+                    placeholder="GE-12345-A",
+                )
+
+            location_in = st.text_input(
+                "Ubicación física",
+                placeholder="Ej: Planta La Belleza, Plato, Magdalena",
+            )
+            notes_in = st.text_area(
+                "Notas",
+                value=prefilled_notes,
+                height=160,
+            )
+
+            submitted = st.form_submit_button(
+                "✅ Crear activo",
+                type="primary",
+                use_container_width=True,
+            )
+
+            if submitted:
+                clean_id = inst_id_in.strip()
+                if not clean_id:
+                    st.error("El ID es obligatorio.")
+                elif get_instance(clean_id) is not None:
+                    st.error(f"Ya existe un activo con ID '{clean_id}'. Elegí otro.")
+                else:
+                    try:
+                        inst = create_instance(
+                            instance_id=clean_id,
+                            profile_key=profile_in,
+                            tag=tag_in.strip(),
+                            serial_number=serial_in.strip(),
+                            location=location_in.strip(),
+                            notes=notes_in.strip(),
+                            seed_from_profile=True,
+                        )
+                        st.success(
+                            f"✅ Activo '{inst.instance_id}' creado desde plantilla "
+                            f"'{t.label}'. Profile: {profile_in}. "
+                            f"Lo encontrás en Machinery Library."
+                        )
+                        st.session_state["wm_active_instance_id"] = inst.instance_id
+                    except Exception as e:
+                        st.error(f"No se pudo crear el activo: {e}")
