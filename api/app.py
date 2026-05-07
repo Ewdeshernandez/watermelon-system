@@ -56,11 +56,16 @@ def _require_fastapi():
         )
 
 
-def _api_key_dependency(authorization: Optional[str] = None):
+def _api_key_dependency(authorization: Optional[str] = (Header(default=None, alias="Authorization") if _FASTAPI_AVAILABLE else None)):
     """
     Validador de API key. Acepta:
       - Authorization: Bearer <key>
       - Authorization: <key>           (sin prefijo, también válido)
+
+    Hotfix v3.18.1: anotación Header(alias="Authorization") explícita.
+    Sin esto, FastAPI trataba el parámetro como query param y nunca
+    leía el header, devolviendo 401 'Missing Authorization header' en
+    todas las llamadas autenticadas.
     """
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
