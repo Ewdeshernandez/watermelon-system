@@ -192,16 +192,24 @@ def get_version_info() -> Dict[str, str]:
         commits_ahead = ""
         is_dirty = False
 
-    # Resolver versión por prioridad
+    # Resolver versión por prioridad.
+    #
+    # Ciclo 18.2 hotfix — VERSION file PROMOVIDO sobre git_latest_tag.
+    # Razón: Streamlit Cloud hace shallow clone que pierde tags v3.x
+    # del repo, dejando solo tags antiguos visibles (v2.1, v2.5...).
+    # El archivo VERSION es source of truth declarativa: vos lo
+    # escribís en cada release y siempre gana.
+    #
+    # El env var WM_VERSION sigue siendo override total para casos
+    # ops (containers stripped sin git ni VERSION file).
     if env_version:
         version = _normalize_version(env_version)
+    elif file_version:
+        version = _normalize_version(file_version)
     elif git_latest_tag:
-        # Tag semver más alto del repo (ej. v3.0.8 aunque estemos en dev)
         version = _normalize_version(git_latest_tag)
     elif git_desc:
         version = _normalize_version(git_desc)
-    elif file_version:
-        version = _normalize_version(file_version)
     else:
         version = _FALLBACK_VERSION
 
