@@ -29,18 +29,22 @@ from typing import Any, Dict, List, Optional
 # de api/app.py). Esto permite que api/services.py y api/auth.py
 # permanezcan testeables sin instalar FastAPI.
 try:
-    from fastapi import Depends, FastAPI, HTTPException, Header, Query, Response
+    from fastapi import Body, Depends, FastAPI, HTTPException, Header, Query, Response
     from fastapi.responses import JSONResponse
+    from pydantic import BaseModel, Field
     _FASTAPI_AVAILABLE = True
 except ImportError:
     _FASTAPI_AVAILABLE = False
     FastAPI = None  # type: ignore
+    Body = None  # type: ignore
     Depends = None  # type: ignore
     HTTPException = None  # type: ignore
     Header = None  # type: ignore
     Query = None  # type: ignore
     Response = None  # type: ignore
     JSONResponse = None  # type: ignore
+    BaseModel = object  # type: ignore
+    Field = lambda *a, **k: None  # type: ignore
 
 
 from api.auth import is_valid_api_key, hash_for_log
@@ -48,6 +52,41 @@ from api import services
 
 
 log = logging.getLogger("watermelon.api")
+
+
+# =============================================================================
+# Pydantic models — definidos a nivel módulo para que FastAPI pueda resolver
+# los type hints en `payload: LiveIngestPayload = Body(...)`.
+# =============================================================================
+
+if _FASTAPI_AVAILABLE:
+
+    class LiveReadingItem(BaseModel):
+        """Una lectura individual enviada por el collector."""
+        variable: str = Field(..., description="Nombre de la variable, ej. '1YV VEL CRF'")
+        metric: str = Field(..., description="Direct | Gap | BiasVoltage | 1X_Ampl | 1X_Phase | 2X_Ampl | 2X_Phase")
+        value: Optional[float] = Field(None, description="Valor numérico; null si fallo de comm")
+        unit: Optional[str] = Field(None, description="Unidad nativa, ej. 'in/s pk', 'mil pp', 'V DC', 'deg', 'rpm'")
+        sensor_label: Optional[str] = Field(None, description="Label industrial del sensor del WM Sensor Map, ej. '1Y_V'")
+        register: Optional[int] = Field(None, description="Modbus register address (debug)")
+        quality: Optional[str] = Field("good", description="good | stale | overrange | comm_fail")
+        captured_at: Optional[str] = Field(None, description="ISO8601; si null usa el del payload base")
+        metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+    class LiveIngestPayload(BaseModel):
+        """Payload completo: 1 batch del collector."""
+        instance_id: str = Field(..., description="ID del activo en WM, ej. 'tes1'")
+        captured_at: str = Field(..., description="Timestamp ISO8601 base del batch")
+        readings: List[LiveReadingItem] = Field(..., min_length=1, max_length=200)
+        metadata: Optional[Dict[str, Any]] = Field(
+            default_factory=dict,
+            description="Info del collector: version, host, modbus byte order, etc.",
+        )
+
+else:
+    # Stubs para que el módulo importe sin FastAPI (tests)
+    LiveReadingItem = object  # type: ignore
+    LiveIngestPayload = object  # type: ignore
 
 
 def _require_fastapi():
@@ -310,6 +349,66 @@ def create_app() -> "FastAPI":
                 "Content-Disposition": f'attachment; filename="{filename}"',
             },
         )
+
+    # =========================================================
+    # Live Ingestion (Tier 0 A — Ciclo 23.1)
+    # ---------------------------------------------------------
+    # Endpoint POST /v1/ingest/live: recibe lecturas en tiempo real
+    # desde wm-collector (Bently 3500/92 Modbus) e inserta en
+    # Supabase tabla live_readings. Auth: Bearer API key.
+    # =========================================================
+    @app.post("/v1/ingest/live", tags=["ingest"],
+              summary="Ingesta de lecturas en tiempo real (Tier 0 A)")
+    def ingest_live(
+        payload: LiveIngestPayload = Body(...),
+        api_key_hash: str = Depends(_api_key_dependency),
+    ):
+        from core.live_readings import LiveReading, ingest_batch
+        from datetime import datetime as _dt
+        from datetime import timezone as _tz
+
+        if not payload.readings:
+            return {"ingested": 0, "instance_id": payload.instance_id}
+
+        # captured_at base — si una reading no trae el suyo, usamos el del payload
+        base_time_str = payload.captured_at
+        try:
+            base_time = _dt.fromisoformat(base_time_str.replace("Z", "+00:00"))
+        except Exception:
+            base_time = _dt.now(tz=_tz.utc)
+
+        rows: List[LiveReading] = []
+        for r in payload.readings:
+            try:
+                rt = (
+                    _dt.fromisoformat(r.captured_at.replace("Z", "+00:00"))
+                    if r.captured_at else base_time
+                )
+            except Exception:
+                rt = base_time
+            rows.append(LiveReading(
+                instance_id=payload.instance_id,
+                sensor_label=r.sensor_label,
+                variable=r.variable,
+                metric=r.metric,
+                value=r.value,
+                unit=r.unit,
+                captured_at=rt,
+                register=r.register,
+                quality=r.quality or "good",
+                metadata=r.metadata or {},
+            ))
+
+        n = ingest_batch(rows)
+        log.info(
+            "ingest_live: instance=%s sent=%d inserted=%d caller_hash=%s",
+            payload.instance_id, len(rows), n, api_key_hash,
+        )
+        return {
+            "ingested": n,
+            "instance_id": payload.instance_id,
+            "received": len(rows),
+        }
 
     # =========================================================
     # Manejo global de errores

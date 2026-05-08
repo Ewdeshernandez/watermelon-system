@@ -1,0 +1,10 @@
+{
+    "_comment": "Watermelon Collector config - copiar a wm_collector.config.json y editar",
+    "api_url": "https://watermelon-api-bpv4.onrender.com",
+    "api_key": "watermelon-collector-tes1-2026",
+    "modbus_map": "C:\\watermelon\\collector\\modbus_maps\\tes1.json",
+    "buffer_db": "C:\\watermelon\\collector\\buffer.sqlite",
+    "log_dir": "C:\\watermelon\\collector\\logs",
+    "host_label": "TES1-WINSRV",
+    "api_timeout_sec": 15
+}
