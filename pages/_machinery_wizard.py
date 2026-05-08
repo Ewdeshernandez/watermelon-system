@@ -279,16 +279,24 @@ def _build_full_sensor_map(state: Dict[str, Any]) -> List[Dict[str, Any]]:
 
 def _build_reciprocating_sensor_map(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Sensor map para compresor reciprocante (API 618 / ISO 20816-8):
-      - Driver (motor): mapa estándar según su instrumentación
-      - Compresor:
-        · 1 velocímetro frame top (radial)
-        · 1 velocímetro frame side (lateral)
-        · 1 acelerómetro crosshead por cilindro
-        · 1 rod drop por cilindro (opcional)
-      - Keyphasor opcional en coupling
+    Sensor map para compresor reciprocante (API 618 / ISO 20816-8) con
+    coordenadas físicas (x_pct, y_pct) coherentes con el schematic
+    generado en core.recip_schematic.
     """
+    from core.recip_schematic import sensor_default_position
     from core.sensor_map import new_sensor
+
+    n_cylinders_state = int(state.get("cylinders_count", 4))
+    n_motor_planes_state = int(state.get("driver_planes", 2))
+
+    def _with_position(sensor: Dict[str, Any]) -> Dict[str, Any]:
+        x_pct, y_pct = sensor_default_position(
+            sensor, n_cylinders=n_cylinders_state,
+            n_motor_planes=n_motor_planes_state,
+        )
+        sensor["x_pct"] = float(x_pct)
+        sensor["y_pct"] = float(y_pct)
+        return sensor
 
     sensors: List[Dict[str, Any]] = []
     plane_idx = 1
@@ -302,43 +310,43 @@ def _build_reciprocating_sensor_map(state: Dict[str, Any]) -> List[Dict[str, Any
 
         if driver_instr == "proximity_xy":
             for direction, side_xy in (("X", "R"), ("Y", "L")):
-                sensors.append(new_sensor(
+                sensors.append(_with_position(new_sensor(
                     plane=plane_idx, plane_label=plane_label, side=side_xy,
                     angle_deg=45.0, direction=direction,
                     sensor_type="proximity", unit_native="mil pp",
                     alarm=float(state.get("proximity_alarm_mil_pp", 4.0)),
                     danger=float(state.get("proximity_danger_mil_pp", 6.0)),
                     csv_match_pattern=f"*motor*{side}*{direction}*",
-                ))
+                )))
         else:  # axial_accel u otro
-            sensors.append(new_sensor(
+            sensors.append(_with_position(new_sensor(
                 plane=plane_idx, plane_label=plane_label, side="T",
                 angle_deg=0.0, direction="RAD",
                 sensor_type="accelerometer", unit_native="g rms",
                 alarm=float(state.get("accel_alarm_g", 4.5)),
                 danger=float(state.get("accel_danger_g", 9.0)),
                 csv_match_pattern=f"*motor*{side}*",
-            ))
+            )))
         plane_idx += 1
 
     # 2. Frame del compresor — 2 velocímetros (top + side)
     frame_plane = plane_idx
-    sensors.append(new_sensor(
+    sensors.append(_with_position(new_sensor(
         plane=frame_plane, plane_label="Frame top", side="T",
         angle_deg=0.0, direction="RAD",
         sensor_type="velometer", unit_native="mm/s rms",
         alarm=float(state.get("velocity_alarm_mm_s", 4.5)),
         danger=float(state.get("velocity_danger_mm_s", 11.2)),
         csv_match_pattern="*frame*top*",
-    ))
-    sensors.append(new_sensor(
+    )))
+    sensors.append(_with_position(new_sensor(
         plane=frame_plane, plane_label="Frame side", side="L",
         angle_deg=90.0, direction="RAD",
         sensor_type="velometer", unit_native="mm/s rms",
         alarm=float(state.get("velocity_alarm_mm_s", 4.5)),
         danger=float(state.get("velocity_danger_mm_s", 11.2)),
         csv_match_pattern="*frame*side*",
-    ))
+    )))
     plane_idx += 1
 
     # 3. Crosshead accelerometer + rod drop por cilindro
@@ -347,33 +355,33 @@ def _build_reciprocating_sensor_map(state: Dict[str, Any]) -> List[Dict[str, Any
     for c in range(1, n_cyl + 1):
         cyl_label = f"Cilindro {c}"
         # Crosshead acelerómetro
-        sensors.append(new_sensor(
+        sensors.append(_with_position(new_sensor(
             plane=plane_idx, plane_label=cyl_label, side="T",
             angle_deg=0.0, direction="RAD",
             sensor_type="accelerometer", unit_native="g pk",
             alarm=float(state.get("accel_alarm_g", 4.5)),
             danger=float(state.get("accel_danger_g", 9.0)),
             csv_match_pattern=f"*crosshead*cyl{c}*",
-        ))
+        )))
         # Rod drop (opcional)
         if include_rod_drop:
-            sensors.append(new_sensor(
+            sensors.append(_with_position(new_sensor(
                 plane=plane_idx, plane_label=f"{cyl_label} rod drop", side="B",
                 angle_deg=270.0, direction="Z",
                 sensor_type="proximity", unit_native="mil pp",
                 alarm=15.0, danger=25.0,  # típicos rod drop
                 csv_match_pattern=f"*rod*drop*cyl{c}*",
-            ))
+            )))
         plane_idx += 1
 
-    # 4. Keyphasor opcional (en el motor, no en el compresor)
+    # 4. Keyphasor opcional
     if state.get("include_keyphasor"):
-        sensors.append(new_sensor(
+        sensors.append(_with_position(new_sensor(
             plane=plane_idx, plane_label="Keyphasor", side="",
             angle_deg=0.0, direction="",
             sensor_type="keyphasor", unit_native="",
             csv_match_pattern="*kphgen*, *keyph*, *kp*",
-        ))
+        )))
 
     return sensors
 
@@ -403,6 +411,28 @@ def _execute_creation(state: Dict[str, Any]) -> None:
     if not sensors:
         sensors = _build_full_sensor_map(state)
 
+    # 2b. Para reciprocantes, generar y persistir el schematic_png
+    schematic_png_filename = ""
+    if state.get("category") == "reciprocating_compressor":
+        try:
+            from core.recip_schematic import generate_recip_png
+            from core.instance_repository import get_active_repository
+            png_bytes = generate_recip_png(
+                n_cylinders=int(state.get("cylinders_count", 4)),
+                n_motor_planes=int(state.get("driver_planes", 2)),
+                motor_label=state.get("driver_type") or "Motor",
+                compressor_label=state.get("driven_type") or "Compresor",
+            )
+            if png_bytes:
+                schematic_png_filename = "schematic_recip.png"
+                repo = get_active_repository()
+                repo.upload_document_bytes(inst_id, schematic_png_filename, png_bytes)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "No pude persistir schematic recip: %s", e
+            )
+
     # 3. Persistir header extendido + sensores
     update_instance_header(
         instance_id=inst_id,
@@ -421,6 +451,7 @@ def _execute_creation(state: Dict[str, Any]) -> None:
         iso_norm_code=state.get("iso_norm_code", ""),
         iso_norm_class=state.get("iso_norm_class", ""),
         sensors=sensors,
+        schematic_png=schematic_png_filename,
     )
 
 
@@ -874,52 +905,27 @@ elif current == 4:
     else:
         import pandas as pd
 
-        df_sensors = pd.DataFrame([
-            {
-                "plane_label": s.get("plane_label", ""),
-                "side": s.get("side", "L"),
-                "angle_deg": s.get("angle_deg", 45.0),
-                "direction": s.get("direction", "Y"),
-                "sensor_type": s.get("sensor_type", "proximity"),
-                "unit_native": s.get("unit_native", ""),
-                "alarm": s.get("alarm", 0.0),
-                "danger": s.get("danger", 0.0),
-                "csv_match_pattern": s.get("csv_match_pattern", ""),
-            }
-            for s in sensors_override
-        ])
+        # ===== Visual editor (click-to-place) — solo para reciprocantes =====
+        is_recip = state.get("category") == "reciprocating_compressor"
+        if is_recip:
+            tab_visual, tab_table = st.tabs([
+                "🎨 Editor visual (click para reposicionar)",
+                "📋 Tabla de sensores",
+            ])
 
-        edited = st.data_editor(
-            df_sensors,
-            num_rows="dynamic",
-            use_container_width=True,
-            column_config={
-                "plane_label": st.column_config.TextColumn("Plano", width="medium"),
-                "side": st.column_config.SelectboxColumn(
-                    "Lado", options=["L", "R", "T", "B", ""], width="small",
-                ),
-                "angle_deg": st.column_config.NumberColumn(
-                    "Ángulo (°)", min_value=0.0, max_value=360.0, step=15.0,
-                    width="small",
-                ),
-                "direction": st.column_config.SelectboxColumn(
-                    "Dirección", options=["X", "Y", "Z", "RAD", "AX", ""],
-                    width="small",
-                ),
-                "sensor_type": st.column_config.SelectboxColumn(
-                    "Tipo",
-                    options=["proximity", "accelerometer", "velometer", "keyphasor"],
-                    width="medium",
-                ),
-                "unit_native": st.column_config.TextColumn("Unidad", width="small"),
-                "alarm": st.column_config.NumberColumn("Alarm", width="small"),
-                "danger": st.column_config.NumberColumn("Danger", width="small"),
-                "csv_match_pattern": st.column_config.TextColumn(
-                    "Pattern CSV (opcional)", width="medium",
-                ),
-            },
-            key="wiz_sensors_editor",
-        )
+            with tab_visual:
+                st.caption(
+                    "Hacé click sobre la imagen para mover el sensor seleccionado a "
+                    "esa posición. El esquema se genera según N cilindros + N "
+                    "cojinetes del motor."
+                )
+                _render_recip_visual_editor(state, sensors_override)
+
+            with tab_table:
+                _render_sensors_table_editor(state, sensors_override)
+        else:
+            _render_sensors_table_editor(state, sensors_override)
+        edited = state.get("_wizard_table_edited", None)
 
         col_actions = st.columns([1, 1, 2])
         with col_actions[0]:
@@ -937,10 +943,10 @@ elif current == 4:
     with col_nav[2]:
         if st.button("Siguiente →", type="primary", use_container_width=True,
                      key="wiz_step4_next"):
-            # Persistir el DataFrame editado al state
-            if state.get("sensors_override"):
-                edited_records = edited.to_dict(orient="records")
-                # Re-merger con keys que el editor no muestra (plane, x_pct, y_pct, notes)
+            # Al avanzar, persistir lo que esté en _wizard_table_edited si vino del editor de tabla
+            edited_df = state.get("_wizard_table_edited")
+            if edited_df is not None and state.get("sensors_override"):
+                edited_records = edited_df.to_dict(orient="records")
                 originals_by_idx = {i: s for i, s in enumerate(state["sensors_override"])}
                 final_sensors = []
                 for i, row in enumerate(edited_records):
@@ -960,7 +966,6 @@ elif current == 4:
                 state["sensors_override"] = final_sensors
             _go_next()
             st.rerun()
-
 
 # =============================================================
 # PASO 5 — Unidades & setpoints
@@ -1190,6 +1195,161 @@ elif current == 6:
                 st.balloons()
             except Exception as e:
                 st.error(f"❌ Error al crear el activo: {e}")
+
+
+# =============================================================
+# Helpers de UI (al final para no romper la cadena de elifs)
+# =============================================================
+
+def _render_sensors_table_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) -> None:
+    """Render del data_editor de pandas con la lista de sensores."""
+    import pandas as pd
+    df_sensors = pd.DataFrame([
+        {
+            "plane_label": s.get("plane_label", ""),
+            "side": s.get("side", "L"),
+            "angle_deg": s.get("angle_deg", 45.0),
+            "direction": s.get("direction", "Y"),
+            "sensor_type": s.get("sensor_type", "proximity"),
+            "unit_native": s.get("unit_native", ""),
+            "alarm": s.get("alarm", 0.0),
+            "danger": s.get("danger", 0.0),
+            "csv_match_pattern": s.get("csv_match_pattern", ""),
+        }
+        for s in sensors
+    ])
+
+    edited = st.data_editor(
+        df_sensors,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "plane_label": st.column_config.TextColumn("Plano", width="medium"),
+            "side": st.column_config.SelectboxColumn(
+                "Lado", options=["L", "R", "T", "B", ""], width="small",
+            ),
+            "angle_deg": st.column_config.NumberColumn(
+                "Ángulo (°)", min_value=0.0, max_value=360.0, step=15.0,
+                width="small",
+            ),
+            "direction": st.column_config.SelectboxColumn(
+                "Dirección", options=["X", "Y", "Z", "RAD", "AX", ""],
+                width="small",
+            ),
+            "sensor_type": st.column_config.SelectboxColumn(
+                "Tipo",
+                options=["proximity", "accelerometer", "velometer", "keyphasor"],
+                width="medium",
+            ),
+            "unit_native": st.column_config.TextColumn("Unidad", width="small"),
+            "alarm": st.column_config.NumberColumn("Alarm", width="small"),
+            "danger": st.column_config.NumberColumn("Danger", width="small"),
+            "csv_match_pattern": st.column_config.TextColumn(
+                "Pattern CSV (opcional)", width="medium",
+            ),
+        },
+        key="wiz_sensors_editor",
+    )
+    state["_wizard_table_edited"] = edited
+
+
+def _render_recip_visual_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) -> None:
+    """Editor visual: click sobre la imagen para reposicionar el sensor seleccionado."""
+    from core.recip_schematic import generate_recip_png
+
+    try:
+        from streamlit_image_coordinates import streamlit_image_coordinates
+        _HAS_COORDS = True
+    except ImportError:
+        _HAS_COORDS = False
+
+    n_cyl = int(state.get("cylinders_count", 4))
+    n_motor = int(state.get("driver_planes", 2))
+
+    png_bytes = generate_recip_png(
+        n_cylinders=n_cyl, n_motor_planes=n_motor,
+        has_distance_piece=True,
+        motor_label=state.get("driver_type") or "Motor",
+        compressor_label=state.get("driven_type") or "Compresor",
+    )
+    if not png_bytes:
+        st.warning("Pillow no está disponible — no puedo generar el schematic.")
+        return
+
+    from PIL import Image, ImageDraw, ImageFont
+    import io as _io
+    base_img = Image.open(_io.BytesIO(png_bytes)).convert("RGBA")
+    width, height = base_img.size
+
+    overlay = base_img.copy()
+    draw = ImageDraw.Draw(overlay)
+    try:
+        font_marker = ImageFont.truetype("Arial.ttf", 16)
+    except Exception:
+        font_marker = ImageFont.load_default()
+
+    color_by_type = {
+        "proximity": "#ef4444",
+        "accelerometer": "#a855f7",
+        "velometer": "#3b82f6",
+        "keyphasor": "#f59e0b",
+    }
+
+    selected_idx = state.get("_wiz_selected_sensor_idx", -1)
+
+    for idx, s in enumerate(sensors):
+        x_pct = float(s.get("x_pct") or 50.0)
+        y_pct = float(s.get("y_pct") or 50.0)
+        x = int(width * x_pct / 100)
+        y = int(height * y_pct / 100)
+        c = color_by_type.get(s.get("sensor_type", ""), "#64748b")
+        r = 11
+        if idx == selected_idx:
+            draw.ellipse((x - r - 4, y - r - 4, x + r + 4, y + r + 4),
+                         outline="#000000", width=3)
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=c, outline="#ffffff", width=2)
+        draw.text((x - 5, y - 9), str(idx + 1), fill="#ffffff", font=font_marker)
+
+    col_img, col_list = st.columns([3, 2])
+
+    with col_img:
+        if _HAS_COORDS:
+            coords = streamlit_image_coordinates(
+                overlay, key="wiz_recip_canvas",
+                width=min(width, 1100),
+            )
+            if coords and selected_idx >= 0:
+                rendered_w = coords.get("width", width)
+                rendered_h = coords.get("height", height)
+                cx = coords.get("x", 0)
+                cy = coords.get("y", 0)
+                new_x_pct = (cx / rendered_w) * 100
+                new_y_pct = (cy / rendered_h) * 100
+                sensors[selected_idx]["x_pct"] = round(new_x_pct, 1)
+                sensors[selected_idx]["y_pct"] = round(new_y_pct, 1)
+                state["sensors_override"] = sensors
+                state["_wiz_selected_sensor_idx"] = -1
+                st.rerun()
+        else:
+            st.image(overlay)
+            st.caption("(streamlit_image_coordinates no disponible — solo visualización)")
+
+    with col_list:
+        st.markdown("**Sensores** (click para seleccionar y reposicionar)")
+        for idx, s in enumerate(sensors):
+            label = s.get("plane_label", "")
+            stype = s.get("sensor_type", "")
+            xp = s.get("x_pct", 50.0)
+            yp = s.get("y_pct", 50.0)
+            sel_str = "🎯 " if idx == selected_idx else ""
+            btn_label = f"{sel_str}#{idx+1} · {label} · {stype} ({xp:.0f}%, {yp:.0f}%)"
+            if st.button(btn_label, key=f"wiz_sel_sensor_{idx}",
+                         use_container_width=True):
+                state["_wiz_selected_sensor_idx"] = idx
+                st.rerun()
+        if st.button("❌ Deseleccionar", key="wiz_deselect_sensor"):
+            state["_wiz_selected_sensor_idx"] = -1
+            st.rerun()
 
 
 # =============================================================
