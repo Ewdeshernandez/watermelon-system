@@ -280,9 +280,22 @@ def list_archived_assets(limit: int = 200) -> List[Dict[str, Any]]:
 
     seen: Dict[str, Dict[str, Any]] = {}
     for r in reports:
-        asset = (r.get("asset") or r.get("instance_id") or "").strip()
+        # Hotfix v3.19.2 — los campos del activo viven en report_meta
+        # (no en top-level del sidecar). Probar varias claves típicas.
+        rm = r.get("report_meta") if isinstance(r.get("report_meta"), dict) else {}
+        rm = rm or {}
+        asset = (
+            rm.get("instance_tag")
+            or rm.get("train_description")
+            or rm.get("asset_class")
+            or rm.get("instance_id")
+            or r.get("asset")
+            or r.get("instance_id")
+            or ""
+        ).strip()
         if not asset:
             continue
+        client = (rm.get("client") or r.get("client") or "").strip()
         key = asset.lower()
         if key in seen:
             seen[key]["report_count"] += 1
@@ -294,7 +307,7 @@ def list_archived_assets(limit: int = 200) -> List[Dict[str, Any]]:
         else:
             seen[key] = {
                 "asset": asset,
-                "client": r.get("client", ""),
+                "client": client,
                 "report_count": 1,
                 "latest_report_date": r.get("archived_at", ""),
                 "latest_archive_id": r.get("archive_id", ""),
@@ -321,19 +334,24 @@ def list_reports_for_asset(asset: str, limit: int = 50) -> List[Dict[str, Any]]:
         limit=int(limit),
     )
 
-    return [
-        {
+    out = []
+    for r in reports:
+        rm = r.get("report_meta") if isinstance(r.get("report_meta"), dict) else {}
+        rm = rm or {}
+        out.append({
             "archive_id": r.get("archive_id", ""),
-            "asset": r.get("asset", ""),
-            "client": r.get("client", ""),
-            "title": r.get("title", ""),
+            "asset": (
+                rm.get("instance_tag") or rm.get("train_description")
+                or rm.get("asset_class") or r.get("asset") or ""
+            ),
+            "client": rm.get("client") or r.get("client", ""),
+            "title": rm.get("train_description") or r.get("title", ""),
             "archived_at": r.get("archived_at", ""),
             "owner_email": r.get("owner_email", ""),
             "size_bytes": r.get("size_bytes"),
             "shared_with_client": r.get("shared_with_client", False),
-        }
-        for r in reports
-    ]
+        })
+    return out
 
 
 def get_latest_report_pdf(asset: str) -> Optional[Dict[str, Any]]:
@@ -373,7 +391,16 @@ def get_latest_report_pdf(asset: str) -> Optional[Dict[str, Any]]:
     if pdf_bytes is None:
         return None
 
-    filename = (latest.get("title") or archive_id.split("/")[-1] or "report") + ".pdf"
+    rm_latest = latest.get("report_meta") if isinstance(latest.get("report_meta"), dict) else {}
+    rm_latest = rm_latest or {}
+    title = (
+        rm_latest.get("instance_tag")
+        or rm_latest.get("train_description")
+        or latest.get("title")
+        or archive_id.split("/")[-1]
+        or "report"
+    )
+    filename = title + ".pdf"
     return {
         "archive_id": archive_id,
         "filename": filename,
