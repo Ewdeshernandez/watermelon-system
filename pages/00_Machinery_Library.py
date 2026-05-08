@@ -775,6 +775,86 @@ def render_sensor_map_section(instance_id: str) -> None:
             "o configurá sensor por sensor manualmente con el editor de abajo."
         )
 
+    # ============================================================
+    # Ciclo 22.2b — Resumen visual + validación de coherencia
+    # ============================================================
+    if inst.sensors:
+        _EXPECTED_UNITS = {
+            "proximity":     ["mil pp", "µm pp", "mm pp"],
+            "velocity":      ["mm/s RMS", "mm/s peak", "in/s RMS", "in/s peak"],
+            "velometer":     ["mm/s RMS", "mm/s peak", "in/s RMS", "in/s peak"],
+            "accelerometer": ["g RMS", "g peak", "g pk", "m/s² RMS", "m/s² peak"],
+            "keyphasor":     ["", "pulses/rev"],
+        }
+        _type_emojis = {
+            "proximity":     "🎯",
+            "velocity":      "📊",
+            "velometer":     "📊",
+            "accelerometer": "⚡",
+            "keyphasor":     "🔑",
+        }
+
+        type_counts: Dict[str, int] = {}
+        unit_inconsistencies: List[Dict[str, Any]] = []
+        for _s in inst.sensors:
+            _stype = (_s.get("sensor_type") or "").strip().lower()
+            type_counts[_stype] = type_counts.get(_stype, 0) + 1
+            _unit = (_s.get("unit_native") or "").strip()
+            _expected = _EXPECTED_UNITS.get(_stype, [])
+            # Comparar normalizado (lower) para que "g rms" == "g RMS"
+            _expected_lower = [e.lower() for e in _expected]
+            if _expected_lower and _unit.lower() not in _expected_lower:
+                unit_inconsistencies.append({
+                    "label": (_s.get("plane_label") or "").strip()
+                             or f"plano {_s.get('plane', '?')}",
+                    "type": _stype or "—",
+                    "unit": _unit or "(vacío)",
+                    "expected": _expected,
+                })
+
+        # Chips de resumen
+        chip_html_list = []
+        for k, v in sorted(type_counts.items()):
+            emoji = _type_emojis.get(k, "📡")
+            chip_html_list.append(
+                f'<span style="display:inline-block;padding:4px 11px;'
+                f'background:#eff6ff;color:#1e40af;border:1px solid #bfdbfe;'
+                f'border-radius:999px;font-size:12px;font-weight:600;'
+                f'margin-right:6px;margin-bottom:4px;">'
+                f'{emoji} {v} {k or "?"}</span>'
+            )
+        chip_html_list.append(
+            f'<span style="display:inline-block;padding:4px 11px;'
+            f'background:#f1f5f9;color:#334155;border:1px solid #e2e8f0;'
+            f'border-radius:999px;font-size:12px;font-weight:600;'
+            f'margin-right:6px;margin-bottom:4px;">'
+            f'📊 Total: {len(inst.sensors)}</span>'
+        )
+        st.markdown(
+            f'<div style="margin:10px 0;">{"".join(chip_html_list)}</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Validación de coherencia (el bug de C-200-C)
+        if unit_inconsistencies:
+            with st.expander(
+                f"⚠️ {len(unit_inconsistencies)} sensor(es) con unidad incoherente "
+                f"con su tipo · click para revisar",
+                expanded=True,
+            ):
+                st.markdown(
+                    "Estos sensores tienen un mismatch entre **tipo** y **unidad** "
+                    "configurada. Puede causar que Tabular List muestre la unidad "
+                    "del CSV en lugar de la configurada (bug histórico C-200-C). "
+                    "Corregilos en el editor de abajo eligiendo una unidad coherente."
+                )
+                for inc in unit_inconsistencies:
+                    st.markdown(
+                        f"- **`{inc['label']}`** · tipo **`{inc['type']}`** + "
+                        f"unidad **`{inc['unit']}`** → debería ser: "
+                        f"`{', '.join(inc['expected'])}`"
+                    )
+
     # Editor in-place del mapa
     df_sensors = pd.DataFrame(inst.sensors)
     if df_sensors.empty:
