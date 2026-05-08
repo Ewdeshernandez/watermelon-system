@@ -1162,11 +1162,51 @@ def render_sensor_map_section(instance_id: str) -> None:
                 or _infer_machine_kind(inst.asset_class)
                 or "generator"
             )
-            _diag_png = render_sensor_map_diagram(
-                inst.sensors,
-                train_label=_train_lbl,
-                driver_label=_drv_lbl,
-                driven_label=_dvn_lbl,
+
+            # Ciclo 21.4 v3 — Si es compresor reciprocante, usar el
+            # schematic boxer nuevo (cilindros opuestos, acople con
+            # flanges). El render genérico dibujaba todo en línea.
+            _is_recip = (
+                _dvn_kind == "recip_compressor"
+                or any("cilindro" in (s.get("plane_label", "") or "").lower()
+                       for s in (inst.sensors or []))
+            )
+            _diag_png = None
+            if _is_recip:
+                try:
+                    from core.recip_schematic import generate_recip_png
+                    import re as _re_recip
+                    _cyl_nums = set()
+                    _motor_planes_set = set()
+                    for s in (inst.sensors or []):
+                        lbl = (s.get("plane_label", "") or "").lower()
+                        if "cilindro" in lbl and "rod drop" not in lbl:
+                            _m = _re_recip.search(r"cilindro\s*(\d+)", lbl)
+                            if _m:
+                                _cyl_nums.add(int(_m.group(1)))
+                        if "motor" in lbl:
+                            _motor_planes_set.add(s.get("plane", 0))
+                    _n_cyl = max(_cyl_nums) if _cyl_nums else 4
+                    _n_motor = max(len(_motor_planes_set), 2)
+                    _diag_png = generate_recip_png(
+                        n_cylinders=_n_cyl,
+                        n_motor_planes=_n_motor,
+                        motor_label=_drv_lbl,
+                        compressor_label=_dvn_lbl,
+                    )
+                except Exception as _re_err:
+                    import logging as _lg
+                    _lg.getLogger(__name__).warning(
+                        "Fallo recip_schematic, fallback a render genérico: %s",
+                        _re_err,
+                    )
+
+            if not _diag_png:
+                _diag_png = render_sensor_map_diagram(
+                    inst.sensors,
+                    train_label=_train_lbl,
+                    driver_label=_drv_lbl,
+                    driven_label=_dvn_lbl,
                 driver_kind=_drv_kind,
                 driven_kind=_dvn_kind,
             )
