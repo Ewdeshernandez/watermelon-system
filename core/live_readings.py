@@ -239,6 +239,47 @@ def history_for_metric(
         return []
 
 
+def recent_history_all_direct(
+    instance_id: str,
+    n_per_sensor: int = 30,
+) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Devuelve {sensor_label: [{captured_at, value}, ...]} con el histórico
+    Direct reciente de cada sensor en UNA SOLA query (vs N queries).
+
+    Útil para sparklines en Live Monitoring sin penalizar latencia.
+    """
+    client = _get_supabase_client()
+    if client is None:
+        return {}
+    try:
+        resp = (
+            client.table(_TABLE)
+            .select("sensor_label,variable,value,unit,captured_at")
+            .eq("instance_id", instance_id)
+            .eq("metric", "Direct")
+            .order("captured_at", desc=True)
+            .limit(max(n_per_sensor * 30, 500))
+            .execute()
+        )
+        rows = list(getattr(resp, "data", []) or [])
+        out: Dict[str, List[Dict[str, Any]]] = {}
+        for r in rows:
+            label = r.get("sensor_label")
+            if not label:
+                continue
+            slot = out.setdefault(label, [])
+            if len(slot) < n_per_sensor:
+                slot.append(r)
+        # cronológico ascendente para sparklines (izq=viejo, der=reciente)
+        for label in out:
+            out[label] = list(reversed(out[label]))
+        return out
+    except Exception as e:
+        log.warning("recent_history_all_direct failed: %s", e)
+        return {}
+
+
 def count_for_instance(instance_id: str) -> int:
     """Conteo total de readings de un activo (debug / health)."""
     client = _get_supabase_client()
@@ -265,5 +306,6 @@ __all__ = [
     "ingest_batch",
     "latest_for_instance",
     "history_for_metric",
+    "recent_history_all_direct",
     "count_for_instance",
 ]
