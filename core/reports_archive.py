@@ -36,6 +36,7 @@ API pública:
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import sys
@@ -108,20 +109,44 @@ def _human_size(n: int) -> str:
 def _get_archive_supabase_client() -> Any:
     """Devuelve un cliente Supabase para el bucket de archivo.
     None si supabase no está configurado o el SDK no está instalado.
-    Cached lazy: 1 build por proceso."""
+    Cached lazy: 1 build por proceso.
+
+    Resolución de credenciales (Ciclo 19 hotfix):
+      1. st.secrets["supabase"] (cuando corre dentro de Streamlit Cloud)
+      2. Variables de entorno SUPABASE_URL + SUPABASE_SERVICE_KEY
+         (necesario para que la API REST en Render acceda al archivo
+         sin Streamlit en el proceso).
+    """
     global _SUPABASE_CLIENT_CACHE, _SUPABASE_CLIENT_TRIED
     if _SUPABASE_CLIENT_TRIED:
         return _SUPABASE_CLIENT_CACHE
     _SUPABASE_CLIENT_TRIED = True
+
+    url = ""
+    key = ""
+
+    # Fuente 1: st.secrets (Streamlit)
     try:
         import streamlit as st
-        if "supabase" not in st.secrets:
-            return None
-        cfg = st.secrets["supabase"]
-        url = (cfg.get("url", "") or "").strip()
-        key = (cfg.get("service_key", "") or "").strip()
-        if not url or not key:
-            return None
+        if "supabase" in st.secrets:
+            cfg = st.secrets["supabase"]
+            url = (cfg.get("url", "") or "").strip()
+            key = (cfg.get("service_key", "") or "").strip()
+    except Exception:
+        pass
+
+    # Fuente 2: env vars (API REST en Render, sin Streamlit)
+    if not url or not key:
+        url = url or os.environ.get("SUPABASE_URL", "").strip()
+        key = key or (
+            os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
+            or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        )
+
+    if not url or not key:
+        return None
+
+    try:
         from supabase import create_client
         _SUPABASE_CLIENT_CACHE = create_client(url, key)
         return _SUPABASE_CLIENT_CACHE
