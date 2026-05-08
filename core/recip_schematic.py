@@ -255,10 +255,9 @@ def generate_recip_png(
     draw.text(pct_to_xy(cx1 + 2, shaft_y_pct + 2),
               "cigüeñal", fill="#475569", font=font_sm)
 
-    # Footer label
-    draw.text((width - 280, height - 22),
-              f"{n_cylinders} cilindros · {n_motor_planes} cojinetes motor",
-              fill="#64748b", font=font_sm)
+    # Footer label removido (Ciclo 21.4 v4) — se superponía con los
+    # cilindros inferiores en algunos layouts. La info de cilindros y
+    # cojinetes ya queda visible en los labels de los componentes.
 
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
