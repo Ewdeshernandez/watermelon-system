@@ -35,6 +35,13 @@ from core.live_readings import (
     latest_for_instance,
     recent_history_all_direct,
 )
+from core.severity import (
+    CLASS_LABELS,
+    detect_asset_class,
+    compute_severity as _core_compute_severity,
+    family_from as _family_from,
+    thresholds_for,
+)
 from core.ui_theme import apply_watermelon_page_style, page_header
 
 st.set_page_config(page_title="Watermelon System | Live Monitoring", layout="wide")
@@ -269,76 +276,48 @@ def _staleness_color(seconds_old: float) -> str:
     return "#ef4444"
 
 
-# ISO 20816-3 / API 670 fallback
-_ISO_FALLBACK = {
-    ("Velocity",     "in/s pk"):  (0.39, 0.61),
-    ("Velocity",     "mm/s pk"):  (10.0, 15.5),
-    ("Velocity",     "mm/s rms"): (4.5,  7.1),
-    ("Velocity",     "in/s rms"): (0.18, 0.28),
-    ("Acceleration", "g pk"):     (2.0,  5.0),
-    ("Acceleration", "g rms"):    (1.4,  3.5),
-    ("Proximity",    "mil pp"):   (2.5,  4.0),
-    ("Proximity",    "µm pp"):    (63.0, 100.0),
-    ("Proximity",    "um pp"):    (63.0, 100.0),
-}
-
-
-def _family_from(sensor_type: str, unit: str) -> str:
-    s = (sensor_type or "").lower()
-    u = (unit or "").lower()
-    if s == "velocity" or "mm/s" in u or "in/s" in u:
-        return "Velocity"
-    if s == "accelerometer":
-        return "Acceleration"
-    if "g " in u or u.strip() in ("g", "g pk", "g rms"):
-        return "Acceleration"
-    if s == "proximity" or "mil" in u or "µm" in u or "um pp" in u:
-        return "Proximity"
-    return ""
-
-
+# Severity computation se delega 100% a core.severity (asset-class aware,
+# OEM thresholds para LM6000 / Frame 9 / SGT, transparencia de fuente).
 def compute_severity(
     value: Optional[float],
     sensor_match: Optional[Dict[str, Any]],
     unit: str,
+    instance_obj: Any = None,
     sensor_type_hint: str = "",
-) -> Tuple[str, str, str]:
-    """
-    Devuelve (label, fg_color, bg_color).
-    Status: Normal / Alarma / Danger / Sin Norma / No Data
-    """
-    if value is None:
-        return ("No Data", "#475569", "#f1f5f9")
+) -> Dict[str, Any]:
+    """Pasa a core.severity.compute_severity con instance context."""
+    return _core_compute_severity(
+        value=value,
+        sensor_match=sensor_match,
+        unit=unit,
+        instance_obj=instance_obj,
+        sensor_type_hint=sensor_type_hint,
+    )
 
-    alarm = float((sensor_match or {}).get("alarm", 0) or 0)
-    danger = float((sensor_match or {}).get("danger", 0) or 0)
 
-    if alarm <= 0 or danger <= 0:
-        family = _family_from(
-            sensor_type_hint or (sensor_match or {}).get("sensor_type", ""),
-            unit,
-        )
-        u_norm = (unit or "").lower().strip()
-        if (family, u_norm) in _ISO_FALLBACK:
-            a, d = _ISO_FALLBACK[(family, u_norm)]
-            if alarm <= 0:
-                alarm = a
-            if danger <= 0:
-                danger = d
+# ============================================================
+# Timezone — convertir UTC del backend a hora local del cliente
+# ============================================================
 
-    if alarm <= 0 and danger <= 0:
-        return ("Sin Norma", "#92400e", "#fef3c7")
+# Default a Colombia (donde están la mayoría de clientes actuales).
+# A futuro mover a la metadata del instance (instance.timezone).
+DEFAULT_TZ_NAME = "America/Bogota"
 
+
+def _local_tz():
     try:
-        v = float(value)
+        from zoneinfo import ZoneInfo
+        return ZoneInfo(DEFAULT_TZ_NAME)
     except Exception:
-        return ("No Data", "#475569", "#f1f5f9")
+        return timezone.utc
 
-    if danger > 0 and v >= danger:
-        return ("Danger", "#991b1b", "#fee2e2")
-    if alarm > 0 and v >= alarm:
-        return ("Alarma", "#92400e", "#fef3c7")
-    return ("Normal", "#166534", "#dcfce7")
+
+def _to_local(ts) -> Any:
+    """Convierte un Timestamp / datetime UTC a hora local del cliente."""
+    try:
+        return pd.to_datetime(ts, utc=True).tz_convert(_local_tz())
+    except Exception:
+        return ts
 
 
 def status_pill_html(status: str, fg: str, bg: str) -> str:
@@ -459,7 +438,8 @@ def render_sensor_map_hero(
     sensor_lookup: Dict[str, Dict[str, Any]],
 ) -> bool:
     """
-    Render del schematic con sensor dots vivos. Devuelve True si renderizó.
+    Render del schematic con sensor dots vivos + value badge SIEMPRE
+    visible (no solo en hover). Devuelve True si renderizó.
     """
     if instance_obj is None or not instance_obj.schematic_png:
         return False
@@ -483,18 +463,19 @@ def render_sensor_map_hero(
             continue
         unit = r.get("unit") or ""
         sensor_match = sensor_lookup.get(lbl)
-        status, fg, bg = compute_severity(r.get("value"), sensor_match, unit)
+        sev = compute_severity(r.get("value"), sensor_match, unit, instance_obj)
         try:
             val_num = float(r.get("value"))
-            val_str = f"{val_num:.3f}"
+            val_str = f"{val_num:.2f}"
         except Exception:
             val_str = "—"
         readings_by_sensor[lbl] = {
             "value": val_str,
             "unit": unit,
-            "status": status,
-            "fg": fg,
-            "bg": bg,
+            "status": sev["status"],
+            "fg": sev["fg"], "bg": sev["bg"],
+            "alarm": sev["alarm"], "danger": sev["danger"],
+            "source": sev["source"],
         }
 
     # Build SVG dots
@@ -517,37 +498,66 @@ def render_sensor_map_hero(
             continue
         info = readings_by_sensor.get(label, {})
         status = info.get("status", "No Data")
-        # Colors in SVG (stronger than the bg of pills)
+
         if status == "Danger":
-            fill = "#ef4444"; ring = "#fff"
-            anim = '<animate attributeName="r" values="2.0;3.0;2.0" dur="1.2s" repeatCount="indefinite"/>'
+            fill = "#ef4444"; anim = '<animate attributeName="r" values="2.0;3.0;2.0" dur="1.2s" repeatCount="indefinite"/>'
+            badge_bg = "rgba(239,68,68,0.95)"; badge_fg = "#ffffff"
         elif status == "Alarma":
-            fill = "#f59e0b"; ring = "#fff"
-            anim = '<animate attributeName="opacity" values="1;0.55;1" dur="1.6s" repeatCount="indefinite"/>'
+            fill = "#f59e0b"; anim = '<animate attributeName="opacity" values="1;0.55;1" dur="1.6s" repeatCount="indefinite"/>'
+            badge_bg = "rgba(245,158,11,0.95)"; badge_fg = "#ffffff"
         elif status == "Normal":
-            fill = "#22c55e"; ring = "#fff"
-            anim = ""
+            fill = "#22c55e"; anim = ""
+            badge_bg = "rgba(15,23,42,0.92)"; badge_fg = "#dcfce7"
         elif status == "Sin Norma":
-            fill = "#94a3b8"; ring = "#fff"
-            anim = ""
+            fill = "#94a3b8"; anim = ""
+            badge_bg = "rgba(15,23,42,0.92)"; badge_fg = "#fde68a"
         else:
-            fill = "#64748b"; ring = "#fff"
-            anim = ""
+            fill = "#64748b"; anim = ""
+            badge_bg = "rgba(15,23,42,0.92)"; badge_fg = "#cbd5e1"
 
         cx = float(x_pct)
         cy = float(y_pct)
         val_str = info.get("value", "—")
         unit = info.get("unit", "")
-        title = f"{label} · {val_str} {unit} · {status}"
+        title = (
+            f"{label} | {val_str} {unit} | {status} | "
+            f"alarm={info.get('alarm', 0):.2f}/danger={info.get('danger', 0):.2f} "
+            f"({info.get('source', 'n/a')})"
+        )
 
-        # Outer halo + inner dot. Halo translucent for visibility on busy schematics.
+        # ===== Badge siempre visible =====
+        # SVG viewBox 0..100, así que el ancho del badge se calcula en
+        # unidades del viewBox. Aproximamos: un char ≈ 1.6 unidades a font-size 2.4.
+        text_inside = f"{label} {val_str}{unit}"
+        badge_w = max(18.0, len(text_inside) * 1.4)
+        badge_h = 4.6
+        # Posición del badge: arriba-derecha del dot, sin tapar.
+        bx = cx + 1.8
+        by = cy - badge_h - 1.6
+        # Si está cerca del borde derecho, voltear a la izquierda.
+        if bx + badge_w > 99:
+            bx = cx - badge_w - 1.8
+
         dots_svg_parts.append(
             f'<g><title>{title}</title>'
-            f'<circle cx="{cx}" cy="{cy}" r="3.6" fill="{fill}" fill-opacity="0.18" stroke="{fill}" stroke-width="0.4" stroke-opacity="0.6"/>'
-            f'<circle cx="{cx}" cy="{cy}" r="2.2" fill="{fill}" stroke="{ring}" stroke-width="0.7">{anim}</circle>'
-            f'<text x="{cx}" y="{cy - 4}" text-anchor="middle" font-size="2.2" font-weight="700" '
-            f'font-family="SF Mono, monospace" fill="#0f172a" '
-            f'style="paint-order:stroke;stroke:white;stroke-width:0.8;">{label}</text>'
+            # Halo
+            f'<circle cx="{cx}" cy="{cy}" r="3.4" fill="{fill}" fill-opacity="0.18" '
+            f'stroke="{fill}" stroke-width="0.4" stroke-opacity="0.6"/>'
+            # Dot
+            f'<circle cx="{cx}" cy="{cy}" r="1.9" fill="{fill}" stroke="white" '
+            f'stroke-width="0.6">{anim}</circle>'
+            # Línea conectando dot ↔ badge
+            f'<line x1="{cx}" y1="{cy - 1.9}" x2="{bx + (badge_w if bx < cx else 0):.1f}" '
+            f'y2="{by + badge_h:.1f}" stroke="{fill}" stroke-width="0.25" stroke-opacity="0.55"/>'
+            # Badge background (rounded)
+            f'<rect x="{bx:.1f}" y="{by:.1f}" width="{badge_w:.1f}" height="{badge_h}" '
+            f'rx="0.8" fill="{badge_bg}" stroke="{fill}" stroke-width="0.3"/>'
+            # Badge text
+            f'<text x="{bx + badge_w/2:.1f}" y="{by + badge_h - 1.4:.1f}" '
+            f'text-anchor="middle" font-size="2.4" font-weight="700" '
+            f'font-family="SF Mono, Menlo, monospace" fill="{badge_fg}">'
+            f'{text_inside}'
+            f'</text>'
             f'</g>'
         )
 
@@ -606,12 +616,30 @@ def render_asset_header(instance_obj, instance_id: str) -> None:
             sub_parts.append(f"📍 {instance_obj.client}")
     sub_html = " · ".join(sub_parts) if sub_parts else ""
 
+    # Asset class chip — transparencia de qué thresholds OEM se aplican
+    asset_class = detect_asset_class(instance_obj)
+    class_label = CLASS_LABELS.get(asset_class, "—")
+    class_color = {
+        "aero_turbine":       ("#dbeafe", "#1e40af"),  # azul
+        "industrial_turbine": ("#dcfce7", "#166534"),  # verde
+        "recip_compressor":   ("#fef3c7", "#92400e"),  # ámbar
+        "rotating_general":   ("#f1f5f9", "#475569"),  # neutro
+    }.get(asset_class, ("#f1f5f9", "#475569"))
+
     st.markdown(
         textwrap.dedent(
             f"""
             <div style="display:flex;align-items:center;gap:14px;margin-top:4px;flex-wrap:wrap;">
                 <div class="wm-asset-title">{title_text}</div>
                 <span class="wm-live-badge"><span class="wm-live-dot"></span>LIVE</span>
+                <span style="
+                    display:inline-flex;align-items:center;gap:5px;
+                    padding:4px 11px;border-radius:999px;
+                    background:{class_color[0]};color:{class_color[1]};
+                    font-weight:800;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;
+                " title="Thresholds aplicados según esta clase de activo">
+                    🛡️ {class_label}
+                </span>
             </div>
             <div class="wm-asset-sub" style="margin-bottom:10px;">{sub_html}</div>
             """
@@ -754,6 +782,7 @@ def render_kpi_strip(
 def compute_rendered_rows(
     latest: List[Dict[str, Any]],
     sensor_lookup: Dict[str, Dict[str, Any]],
+    instance_obj: Any = None,
 ) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
     direct_rows = [
         r for r in latest
@@ -767,8 +796,8 @@ def compute_rendered_rows(
         sensor_label = r.get("sensor_label") or "—"
         sensor_match = sensor_lookup.get(sensor_label)
         unit = r.get("unit") or ""
-        status, fg, bg = compute_severity(r.get("value"), sensor_match, unit)
-        summary[status] = summary.get(status, 0) + 1
+        sev = compute_severity(r.get("value"), sensor_match, unit, instance_obj)
+        summary[sev["status"]] = summary.get(sev["status"], 0) + 1
         rendered.append({
             "sensor_label": sensor_label,
             "plane_label": (sensor_match or {}).get("plane_label", ""),
@@ -777,9 +806,11 @@ def compute_rendered_rows(
             "unit": unit,
             "age": _format_age(r.get("captured_at", "")),
             "quality": r.get("quality") or "good",
-            "status": status, "fg": fg, "bg": bg,
+            "status": sev["status"], "fg": sev["fg"], "bg": sev["bg"],
+            "alarm_used": sev["alarm"], "danger_used": sev["danger"],
+            "threshold_source": sev["source"],
             "_sort_key": (
-                {"Danger": 0, "Alarma": 1, "Sin Norma": 2, "Normal": 3, "No Data": 4}.get(status, 9),
+                {"Danger": 0, "Alarma": 1, "Sin Norma": 2, "Normal": 3, "No Data": 4}.get(sev["status"], 9),
                 sensor_label,
             ),
         })
@@ -1015,6 +1046,7 @@ def render_history_chart(
     instance_id: str,
     latest: List[Dict[str, Any]],
     sensor_lookup: Dict[str, Dict[str, Any]],
+    instance_obj: Any = None,
 ) -> None:
     direct_rows = [
         r for r in latest
@@ -1039,7 +1071,9 @@ def render_history_chart(
         return
 
     df = pd.DataFrame(rows)
-    df["captured_at"] = pd.to_datetime(df["captured_at"])
+    # CRITICAL: convertir UTC del backend a hora local del cliente.
+    # Sin esto el chart muestra timestamps "futuristas" (UTC interpretado como local).
+    df["captured_at"] = pd.to_datetime(df["captured_at"], utc=True).dt.tz_convert(_local_tz())
     df = df.sort_values(by="captured_at").reset_index(drop=True)
 
     c1, c2, c3, c4 = st.columns(4)
@@ -1048,18 +1082,16 @@ def render_history_chart(
     with c3: st.metric("Promedio", f"{df['value'].mean():.3f}")
     with c4: st.metric("Σ Lecturas", f"{len(df):,}")
 
-    # Severity bands using thresholds from sensor map (or ISO fallback)
+    # Severity bands con asset class awareness (no más fallback ISO genérico)
     sensor_match = sensor_lookup.get(sensor_lbl)
     sample_unit = direct_rows[idx].get("unit", "") if idx < len(direct_rows) else ""
-    alarm = float((sensor_match or {}).get("alarm", 0) or 0)
-    danger = float((sensor_match or {}).get("danger", 0) or 0)
-    if alarm <= 0 or danger <= 0:
-        family = _family_from((sensor_match or {}).get("sensor_type", ""), sample_unit)
-        u_norm = (sample_unit or "").lower().strip()
-        if (family, u_norm) in _ISO_FALLBACK:
-            a, d = _ISO_FALLBACK[(family, u_norm)]
-            if alarm <= 0: alarm = a
-            if danger <= 0: danger = d
+    sev_sample = compute_severity(
+        df["value"].iloc[-1] if len(df) else None,
+        sensor_match, sample_unit, instance_obj=instance_obj,
+    )
+    alarm = sev_sample["alarm"]
+    danger = sev_sample["danger"]
+    threshold_source = sev_sample["source"]
 
     # Plotly chart con bandas
     try:
@@ -1153,7 +1185,7 @@ def main() -> None:
         )
         return
 
-    rendered_rows, severity_summary = compute_rendered_rows(latest, sensor_lookup)
+    rendered_rows, severity_summary = compute_rendered_rows(latest, sensor_lookup, instance_obj)
 
     # Alarm strip prominente arriba si hay danger
     render_alarm_strip(rendered_rows)
@@ -1200,7 +1232,7 @@ def main() -> None:
         render_diagnostic_table(latest)
 
     with tab_hist:
-        render_history_chart(instance_id, latest, sensor_lookup)
+        render_history_chart(instance_id, latest, sensor_lookup, instance_obj)
         st.markdown("---")
         total = count_for_instance(instance_id)
         st.caption(f"Total readings históricas almacenadas para `{instance_id}`: **{total:,}**")
