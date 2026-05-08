@@ -138,6 +138,52 @@ def reload_registry() -> None:
     _load_registry.cache_clear()
 
 
+def save_registry(data: Dict[str, Any]) -> None:
+    """
+    Persiste el registry a disco. Usado por el Admin UI (Ciclo 20B).
+    Escribe atómicamente (tmp file + rename) para evitar corrupciones
+    si el proceso muere mid-write. Limpia la lru_cache después.
+
+    Args:
+        data: dict completo con keys 'admins', 'specialists', 'clients'.
+              _meta se genera/preserva automáticamente.
+
+    Raises:
+        ValueError si la estructura es inválida.
+    """
+    if not isinstance(data, dict):
+        raise ValueError("Registry data debe ser dict")
+
+    # Validación básica
+    for key in ("admins", "specialists", "clients"):
+        val = data.get(key, [])
+        if not isinstance(val, list):
+            raise ValueError(f"'{key}' debe ser lista, recibido {type(val).__name__}")
+
+    # Preservar _meta y bumpear last_updated
+    from datetime import datetime
+    raw = _load_registry()
+    meta = dict(raw.get("_meta", {}))
+    meta["last_updated"] = datetime.now().strftime("%Y-%m-%d")
+    meta.setdefault("version", "1.0.0")
+
+    payload = {
+        "_meta": meta,
+        "admins": list(data.get("admins", [])),
+        "specialists": list(data.get("specialists", [])),
+        "clients": list(data.get("clients", [])),
+    }
+
+    REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = REGISTRY_PATH.with_suffix(".json.tmp")
+    tmp_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    tmp_path.replace(REGISTRY_PATH)
+    reload_registry()
+
+
 # =============================================================
 # API pública
 # =============================================================
@@ -297,4 +343,5 @@ __all__ = [
     "resolve_by_api_key",
     "filter_matches",
     "reload_registry",
+    "save_registry",
 ]

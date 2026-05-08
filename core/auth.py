@@ -40,6 +40,8 @@ NAV_ITEMS = [
     # Página NUEVA, no toca ninguna existente. Solo admin + specialist
     # (importar data sensible es operación restringida).
     {"label": "Importers & Plantillas", "page": "pages/17_Importers.py"},
+    # Ciclo 20B — Admin de clientes/roles (solo admin)
+    {"label": "Admin · Clientes", "page": "pages/_admin_clients.py"},
     # Ciclo 17.27 — AI Assistant: Q&A en lenguaje natural sobre el
     # archivo histórico de reportes. Solo admin + specialist por
     # ahora; client se evalúa en una iteración futura.
@@ -67,6 +69,8 @@ CLIENT_BLOCKED_PAGES = {
     "pages/01b_Machine_Map.py",  # tiene comandos para editar el map
     # Ciclo 18.2 — Importers no para client (sube data y crea activos)
     "pages/17_Importers.py",
+    # Ciclo 20B — Admin de clientes solo admin (specialists tampoco)
+    "pages/_admin_clients.py",
     # Ciclo 17.27 — AI Assistant queda restringido a admin/specialist
     # en su versión inicial. Cuando expongamos Q&A para clientes,
     # se removerá de esta lista y se ajustará la página para
