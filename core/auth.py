@@ -40,6 +40,8 @@ NAV_ITEMS = [
     # Página NUEVA, no toca ninguna existente. Solo admin + specialist
     # (importar data sensible es operación restringida).
     {"label": "Importers & Plantillas", "page": "pages/17_Importers.py"},
+    # Ciclo 21 — Wizard guiado para crear activos (admin + specialist)
+    {"label": "🧙 Crear activo (wizard)", "page": "pages/_machinery_wizard.py"},
     # Ciclo 20B — Admin de clientes/roles (solo admin)
     {"label": "Admin · Clientes", "page": "pages/_admin_clients.py"},
     # Ciclo 17.27 — AI Assistant: Q&A en lenguaje natural sobre el
@@ -71,6 +73,8 @@ CLIENT_BLOCKED_PAGES = {
     "pages/17_Importers.py",
     # Ciclo 20B — Admin de clientes solo admin (specialists tampoco)
     "pages/_admin_clients.py",
+    # Ciclo 21 — Wizard de activos no para client (solo admin/specialist crean)
+    "pages/_machinery_wizard.py",
     # Ciclo 17.27 — AI Assistant queda restringido a admin/specialist
     # en su versión inicial. Cuando expongamos Q&A para clientes,
     # se removerá de esta lista y se ajustará la página para
