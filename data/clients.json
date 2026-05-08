@@ -1,0 +1,63 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "last_updated": "2026-05-07",
+    "description": "Registry multi-tenant de Watermelon System. Define admins, specialists y clientes con sus accesos (WhatsApp + API key) y filtros de visibilidad. Editar este archivo es la forma OFICIAL de gestionar accesos hasta que llegue el Admin UI (Ciclo 20B). Cada cambio queda versionado en git.",
+    "convention": {
+      "phone_format": "Sin '+' inicial, sin espacios. Ej: '573008888883'.",
+      "match_strings": "Substrings (case-insensitive) que deben aparecer en report_meta.client / instance_tag / asset_class / train_description del sidecar para que un reporte sea visible para ese cliente.",
+      "asset_tags": "Lista informativa de tags de activos del cliente (no afecta filtrado, sirve para UI y onboarding)."
+    }
+  },
+
+  "admins": [
+    {
+      "name": "Ewdes Hernández",
+      "email": "ehernandez@sigasas.com",
+      "whatsapp_numbers": ["573008888883"]
+    }
+  ],
+
+  "specialists": [
+    {
+      "name": "Jessica Suarez",
+      "email": "jsuarez@sigasas.com",
+      "whatsapp_numbers": ["573106776206"]
+    },
+    {
+      "name": "Natalia Lopez",
+      "email": "nlopez@sigasas.com",
+      "whatsapp_numbers": ["573219826271"]
+    }
+  ],
+
+  "clients": [
+    {
+      "id": "ecopetrol_magnex",
+      "display_name": "Ecopetrol — Magnex",
+      "match_strings": ["ecopetrol", "magnex"],
+      "asset_tags": ["TES1", "TES3"],
+      "whatsapp_numbers": [],
+      "api_key": "",
+      "owner_emails": []
+    },
+    {
+      "id": "parex",
+      "display_name": "Parex Resources",
+      "match_strings": ["parex"],
+      "asset_tags": ["SGT300A", "SGT300B", "C-200-C"],
+      "whatsapp_numbers": [],
+      "api_key": "",
+      "owner_emails": []
+    },
+    {
+      "id": "refoenergy",
+      "display_name": "Refoenergy",
+      "match_strings": ["refoenergy", "refo"],
+      "asset_tags": [],
+      "whatsapp_numbers": [],
+      "api_key": "",
+      "owner_emails": []
+    }
+  ]
+}
