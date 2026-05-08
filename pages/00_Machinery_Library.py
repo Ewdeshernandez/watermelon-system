@@ -1846,6 +1846,149 @@ def render_machinery_grid() -> None:
 
 
 # ============================================================
+# Ciclo 22.2a — GRID MODERNO (cards con severidad + chips + schematic)
+# ============================================================
+
+_SEVERITY_CONFIG = {
+    "CRÍTICA":            ("#dc2626", "#fef2f2", "🔴"),
+    "ACCIÓN REQUERIDA":   ("#dc2626", "#fef2f2", "🟠"),
+    "ATENCIÓN":           ("#f59e0b", "#fffbeb", "🟡"),
+    "VIGILANCIA":         ("#3b82f6", "#eff6ff", "🔵"),
+    "CONDICIÓN ACEPTABLE": ("#10b981", "#f0fdf4", "🟢"),
+}
+
+
+def _render_machinery_card_v2(inst: Any, inst_id: str) -> None:
+    """Card moderno individual (Ciclo 22.2a)."""
+    import textwrap
+    from base64 import b64encode
+
+    tag = inst.tag or inst_id
+    driver = " ".join(p for p in [inst.driver_manufacturer, inst.driver_model] if p) or ""
+    driven = " ".join(p for p in [inst.driven_manufacturer, inst.driven_model] if p) or ""
+    title = driver if not driven else f"{driver} → {driven}"
+
+    severity = (inst.last_executive_severity or "").upper().strip()
+    sev_color, sev_bg, sev_icon = _SEVERITY_CONFIG.get(
+        severity, ("#64748b", "#f1f5f9", "⚪"),
+    )
+    sev_label = severity or "SIN ANÁLISIS"
+
+    # Schematic embebido
+    schematic_html = ""
+    if inst.schematic_png:
+        try:
+            png = get_instance_document_bytes(inst_id, inst.schematic_png)
+            if png:
+                b64 = b64encode(png).decode("ascii")
+                schematic_html = (
+                    f'<img src="data:image/png;base64,{b64}" '
+                    f'style="width:100%;height:130px;object-fit:contain;'
+                    f'background:#f9fafb;border-radius:8px;'
+                    f'border:1px solid #e5e7eb;margin-bottom:10px;" />'
+                )
+        except Exception:
+            schematic_html = ""
+
+    if not schematic_html:
+        schematic_html = (
+            '<div style="width:100%;height:130px;background:linear-gradient(135deg,'
+            '#f1f5f9 0%,#e2e8f0 100%);border-radius:8px;display:flex;'
+            'align-items:center;justify-content:center;margin-bottom:10px;'
+            'font-size:42px;border:1px dashed #cbd5e1;">⚙️</div>'
+        )
+
+    # Chips de metadata
+    chips = []
+    if inst.client:
+        chips.append(("👤", inst.client))
+    if inst.site or inst.location:
+        chips.append(("📍", inst.site or inst.location))
+    if inst.nominal_rpm and inst.nominal_rpm > 0:
+        chips.append(("⚡", f"{int(inst.nominal_rpm):,} RPM"))
+    if inst.nominal_power_mw and inst.nominal_power_mw > 0:
+        chips.append(("🔋", f"{inst.nominal_power_mw:.1f} MW"))
+
+    chips_html = "".join(
+        f'<span style="display:inline-flex;align-items:center;gap:3px;'
+        f'padding:2px 8px;background:#f3f4f6;border-radius:999px;'
+        f'font-size:11px;color:#475569;margin-right:4px;margin-bottom:4px;'
+        f'border:1px solid #e5e7eb;">{icon} {text}</span>'
+        for icon, text in chips
+    )
+    if not chips_html:
+        chips_html = '<span style="font-size:11px;color:#94a3b8;">(sin metadata)</span>'
+
+    n_sensors = len(inst.sensors or [])
+    n_docs = len(inst.documents or [])
+
+    is_active = st.session_state.get("wm_active_instance_id") == inst_id
+
+    # Card HTML — toda la pieza visual en un único st.markdown para evitar
+    # gaps entre elementos.
+    card_html = textwrap.dedent(f"""\
+    <div style="border:{'2px solid #3b82f6' if is_active else '1px solid #e5e7eb'};
+                border-radius:12px;padding:14px;background:white;
+                box-shadow:0 1px 3px rgba(0,0,0,0.05);margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="font-weight:800;color:#0f172a;font-size:16px;letter-spacing:-0.01em;">{tag}</div>
+        <span style="background:{sev_bg};color:{sev_color};padding:3px 9px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;border:1px solid {sev_color}33;">{sev_icon} {sev_label}</span>
+      </div>
+      {schematic_html}
+      <div style="font-size:13px;color:#1f2937;font-weight:600;margin-bottom:8px;line-height:1.3;">{title or "(sin tren definido)"}</div>
+      <div style="margin-bottom:10px;">{chips_html}</div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;border-top:1px solid #f1f5f9;padding-top:8px;">
+        <span>📡 {n_sensors} sensores</span>
+        <span>📄 {n_docs} docs</span>
+      </div>
+    </div>
+    """)
+    st.markdown(card_html, unsafe_allow_html=True)
+
+    if is_active:
+        st.success("✓ ACTIVA", icon="🟢")
+    else:
+        st.button(
+            "Activar →",
+            key=f"activate_v2_{inst_id}",
+            on_click=_set_active_instance,
+            args=(inst_id,),
+            use_container_width=True,
+        )
+
+
+def render_machinery_grid_v2() -> None:
+    """
+    Grid moderno de máquinas (Ciclo 22.2a).
+    Cards con severidad coloreada, chips de metadata, schematic embebido.
+    """
+    instances = list_instances()
+    if not instances:
+        return
+
+    st.markdown("### 🏭 Máquinas registradas")
+    st.caption(
+        f"{len(instances)} máquina(s) en el sistema. "
+        "Click en cualquier card para activarla en todos los módulos de análisis."
+    )
+
+    cards_per_row = 3
+    for i in range(0, len(instances), cards_per_row):
+        cols = st.columns(cards_per_row, gap="medium")
+        for j, col in enumerate(cols):
+            if i + j >= len(instances):
+                continue
+            inst_id = instances[i + j].get("instance_id", "")
+            inst = get_instance(inst_id)
+            if inst is None:
+                continue
+            with col:
+                _render_machinery_card_v2(inst, inst_id)
+
+    st.markdown("---")
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -1870,7 +2013,10 @@ def main() -> None:
     instance_id = state.get("instance_id")
 
     # Ciclo 14a — Grid de cards de TODAS las máquinas registradas (cockpit)
-    render_machinery_grid()
+    # Ciclo 22.2a — Nuevo grid moderno por defecto.
+    # El antiguo render_machinery_grid() se mantiene como fallback
+    # legacy en caso de necesitar rollback.
+    render_machinery_grid_v2()
 
     # Sección siempre visible: crear instancia nueva
     render_create_instance_section()
