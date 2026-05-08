@@ -64,8 +64,8 @@ st.set_page_config(
 # Estado del wizard en session_state
 # =============================================================
 
-WIZ_KEY = "wm_wizard_state_v1"
-TOTAL_STEPS = 5
+WIZ_KEY = "wm_wizard_state_v2"
+TOTAL_STEPS = 6
 
 
 def _wizard_state() -> Dict[str, Any]:
@@ -91,6 +91,15 @@ def _default_state() -> Dict[str, Any]:
         "driven_bearing_kind": "rolling",
         "driven_bearing_model": "",
         "coupling_class": "flexible",
+        # Gearbox intermedio (Ciclo 21.2)
+        "include_gearbox": False,
+        "gearbox_type": "",
+        "gearbox_planes": 2,
+        "gearbox_bearing_kind": "rolling",
+        "gearbox_bearing_model": "",
+        "gearbox_instrumentation": "axial_accel",
+        # Override de sensores (Ciclo 21.1) — se llena en el paso 4
+        "sensors_override": None,
         # Paso 3
         "driver_instrumentation": "proximity_xy",
         "driven_instrumentation": "proximity_xy",
@@ -151,6 +160,113 @@ def _slug_default(state: Dict[str, Any]) -> str:
     return seed.strip("_")[:40]
 
 
+def _build_full_sensor_map(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Construye el mapa completo de sensores. Si include_gearbox está activo,
+    extiende el mapa estándar driver/driven agregando sensores de gearbox
+    en el medio (HSS = high speed shaft, LSS = low speed shaft).
+    """
+    from core.sensor_map import new_sensor
+
+    # Mapa estándar driver + driven (sin gearbox por ahora)
+    sensors = generate_standard_sensor_map(
+        driver_planes=int(state.get("driver_planes", 2)),
+        driver_instrumentation=state.get("driver_instrumentation", "proximity_xy"),
+        driven_planes=int(state.get("driven_planes", 2)),
+        driven_instrumentation=state.get("driven_instrumentation", "proximity_xy"),
+        include_keyphasor=bool(state.get("include_keyphasor", True)),
+        proximity_alarm_mil_pp=float(state.get("proximity_alarm_mil_pp", 4.0)),
+        proximity_danger_mil_pp=float(state.get("proximity_danger_mil_pp", 6.0)),
+        accel_alarm_g_rms=float(state.get("accel_alarm_g", 4.5)),
+        accel_danger_g_rms=float(state.get("accel_danger_g", 9.0)),
+        velocity_alarm_mm_s=float(state.get("velocity_alarm_mm_s", 4.5)),
+        velocity_danger_mm_s=float(state.get("velocity_danger_mm_s", 11.2)),
+    )
+
+    # Si NO hay gearbox, devolver tal cual
+    if not state.get("include_gearbox"):
+        return sensors
+
+    # Insertar sensores del gearbox entre driver y driven
+    # Tomamos como base la cantidad de planos de driver para offset
+    driver_planes = int(state.get("driver_planes", 2))
+    gearbox_planes = int(state.get("gearbox_planes", 2))
+    gearbox_instrum = state.get("gearbox_instrumentation", "axial_accel")
+
+    gearbox_sensors: List[Dict[str, Any]] = []
+    for i in range(gearbox_planes):
+        plane_idx = driver_planes + i + 1
+        if i == 0:
+            label = "HSS gearbox"
+        elif i == gearbox_planes - 1:
+            label = "LSS gearbox"
+        else:
+            label = f"Intermedio {i} gearbox"
+
+        if gearbox_instrum == "proximity_xy":
+            # Par X-Y a 45°
+            for direction, side in (("X", "R"), ("Y", "L")):
+                gearbox_sensors.append(new_sensor(
+                    plane=plane_idx, plane_label=label, side=side,
+                    angle_deg=45.0, direction=direction,
+                    sensor_type="proximity", unit_native="mil pp",
+                    alarm=float(state.get("proximity_alarm_mil_pp", 4.0)),
+                    danger=float(state.get("proximity_danger_mil_pp", 6.0)),
+                    csv_match_pattern=f"*gear*{label.replace(' ', '_')}*",
+                ))
+        elif gearbox_instrum == "accel_plus_velocity":
+            gearbox_sensors.append(new_sensor(
+                plane=plane_idx, plane_label=label, side="T",
+                angle_deg=0.0, direction="RAD",
+                sensor_type="accelerometer", unit_native="g rms",
+                alarm=float(state.get("accel_alarm_g", 4.5)),
+                danger=float(state.get("accel_danger_g", 9.0)),
+                csv_match_pattern=f"*gear*acc*{label.replace(' ', '_')}*",
+            ))
+            gearbox_sensors.append(new_sensor(
+                plane=plane_idx, plane_label=label, side="T",
+                angle_deg=0.0, direction="RAD",
+                sensor_type="velometer", unit_native="mm/s rms",
+                alarm=float(state.get("velocity_alarm_mm_s", 4.5)),
+                danger=float(state.get("velocity_danger_mm_s", 11.2)),
+                csv_match_pattern=f"*gear*vel*{label.replace(' ', '_')}*",
+            ))
+        else:  # axial_accel (default)
+            gearbox_sensors.append(new_sensor(
+                plane=plane_idx, plane_label=label, side="T",
+                angle_deg=0.0, direction="RAD",
+                sensor_type="accelerometer", unit_native="g rms",
+                alarm=float(state.get("accel_alarm_g", 4.5)),
+                danger=float(state.get("accel_danger_g", 9.0)),
+                csv_match_pattern=f"*gear*{label.replace(' ', '_')}*",
+            ))
+
+    # Insertar gearbox después de driver (antes de driven y keyphasor)
+    # Identificamos el primer índice de driven para insertar
+    insert_idx = 0
+    for idx, s in enumerate(sensors):
+        plane_label = s.get("plane_label", "")
+        if "driven" in plane_label.lower():
+            insert_idx = idx
+            break
+    if insert_idx == 0:
+        # Si no encontramos driven, insertamos antes del keyphasor o al final
+        for idx, s in enumerate(sensors):
+            if s.get("sensor_type") == "keyphasor":
+                insert_idx = idx
+                break
+        else:
+            insert_idx = len(sensors)
+
+    # Re-numerar planes de los sensores driven/keyphasor después del gearbox
+    plane_offset = gearbox_planes
+    for s in sensors[insert_idx:]:
+        s["plane"] = int(s.get("plane", 0)) + plane_offset
+
+    sensors = sensors[:insert_idx] + gearbox_sensors + sensors[insert_idx:]
+    return sensors
+
+
 def _execute_creation(state: Dict[str, Any]) -> None:
     """Crea instance + persiste sensors + parámetros base."""
     inst_id = (state["instance_id"] or "").strip()
@@ -170,20 +286,11 @@ def _execute_creation(state: Dict[str, Any]) -> None:
         seed_from_profile=True,
     )
 
-    # 2. Generar sensores
-    sensors = generate_standard_sensor_map(
-        driver_planes=int(state.get("driver_planes", 2)),
-        driver_instrumentation=state.get("driver_instrumentation", "proximity_xy"),
-        driven_planes=int(state.get("driven_planes", 2)),
-        driven_instrumentation=state.get("driven_instrumentation", "proximity_xy"),
-        include_keyphasor=bool(state.get("include_keyphasor", True)),
-        proximity_alarm_mil_pp=float(state.get("proximity_alarm_mil_pp", 4.0)),
-        proximity_danger_mil_pp=float(state.get("proximity_danger_mil_pp", 6.0)),
-        accel_alarm_g_rms=float(state.get("accel_alarm_g", 4.5)),
-        accel_danger_g_rms=float(state.get("accel_danger_g", 9.0)),
-        velocity_alarm_mm_s=float(state.get("velocity_alarm_mm_s", 4.5)),
-        velocity_danger_mm_s=float(state.get("velocity_danger_mm_s", 11.2)),
-    )
+    # 2. Sensores: usar el override del paso 4 si existe (editado por user),
+    #    si no, regenerar el mapa estándar (incluyendo gearbox si aplica).
+    sensors = state.get("sensors_override")
+    if not sensors:
+        sensors = _build_full_sensor_map(state)
 
     # 3. Persistir header extendido + sensores
     update_instance_header(
@@ -221,11 +328,12 @@ current = state["step"]
 
 # Stepper visual
 step_labels = [
-    "1 · Tipo de máquina",
-    "2 · Tren mecánico",
+    "1 · Tipo",
+    "2 · Tren",
     "3 · Instrumentación",
-    "4 · Unidades & setpoints",
-    "5 · Datos del activo",
+    "4 · Editar sensores",
+    "5 · Unidades & setpoints",
+    "6 · Datos del activo",
 ]
 step_cols = st.columns(TOTAL_STEPS)
 for i, (col, label) in enumerate(zip(step_cols, step_labels), start=1):
@@ -412,6 +520,55 @@ elif current == 2:
             )
 
     st.markdown("---")
+
+    # ===== Gearbox opcional (Ciclo 21.2) =====
+    state["include_gearbox"] = st.checkbox(
+        "⚙️ Incluir gearbox / multiplicador entre driver y driven",
+        value=bool(state.get("include_gearbox", False)),
+        help="Activá si hay una caja reductora/multiplicadora intermedia "
+             "(ej: turbina + gearbox + generador, motor + reductor + bomba).",
+        key="wiz_include_gearbox",
+    )
+
+    if state["include_gearbox"]:
+        with st.container(border=True):
+            st.markdown("### Gearbox / Caja reductora")
+            gc1, gc2 = st.columns(2)
+            with gc1:
+                state["gearbox_type"] = st.text_input(
+                    "Tipo / fabricante (opcional)",
+                    value=state.get("gearbox_type", ""),
+                    placeholder="Ej: Lufkin, Voith, Flender",
+                    key="wiz_gearbox_type",
+                )
+                state["gearbox_planes"] = st.number_input(
+                    "Cojinetes del gearbox",
+                    min_value=2, max_value=6,
+                    value=int(state.get("gearbox_planes", 2)),
+                    help="Típico 2 (HSS = high speed shaft + LSS = low speed shaft). "
+                         "Hasta 4 si tiene piñones intermedios.",
+                    key="wiz_gearbox_planes",
+                )
+            with gc2:
+                state["gearbox_bearing_kind"] = st.radio(
+                    "Tipo de cojinete del gearbox",
+                    options=["plain", "rolling"],
+                    format_func=lambda k: {"plain": "🧱 Plano",
+                                           "rolling": "⚙️ Rodamiento"}[k],
+                    index=["plain", "rolling"].index(
+                        state.get("gearbox_bearing_kind", "rolling")
+                    ),
+                    horizontal=True,
+                    key="wiz_gearbox_bearing_kind",
+                )
+                if state["gearbox_bearing_kind"] == "rolling":
+                    state["gearbox_bearing_model"] = st.text_input(
+                        "Modelo de rodamiento típico (opcional)",
+                        value=state.get("gearbox_bearing_model", ""),
+                        placeholder="Ej: SKF NU 220, Timken 32220",
+                        key="wiz_gearbox_bearing_model",
+                    )
+
     st.markdown("### Acople")
     state["coupling_class"] = st.radio(
         "Tipo de acople",
@@ -481,6 +638,21 @@ elif current == 3:
             key="wiz_driven_instrum",
         )
 
+    # ===== Instrumentación del gearbox (Ciclo 21.2) =====
+    if state.get("include_gearbox"):
+        st.markdown("### Gearbox — instrumentación")
+        state["gearbox_instrumentation"] = st.radio(
+            "Tipo de sensores en el gearbox",
+            options=list(instrum_options.keys()),
+            format_func=lambda k: instrum_options[k],
+            index=list(instrum_options.keys()).index(
+                state.get("gearbox_instrumentation", "axial_accel")
+            ),
+            help="Lo más común en gearboxes industriales es axial_accel "
+                 "(acelerómetro carcasa por cojinete).",
+            key="wiz_gearbox_instrum",
+        )
+
     st.markdown("---")
     st.markdown("### Referencia 1X (keyphasor)")
     state["include_keyphasor"] = st.checkbox(
@@ -500,17 +672,11 @@ elif current == 3:
         key="wiz_channels",
     )
 
-    # Preview rápido del mapa
+    # Preview rápido del mapa (incluye gearbox)
     with st.expander("👁️ Vista previa del mapa de sensores que se va a generar",
                      expanded=True):
         try:
-            preview = generate_standard_sensor_map(
-                driver_planes=state["driver_planes"],
-                driver_instrumentation=state["driver_instrumentation"],
-                driven_planes=state["driven_planes"],
-                driven_instrumentation=state["driven_instrumentation"],
-                include_keyphasor=state["include_keyphasor"],
-            )
+            preview = _build_full_sensor_map(state)
             st.markdown(f"**Total de sensores:** {len(preview)}")
             for s in preview:
                 plane = s.get("plane_label", f"plano {s.get('plane', '?')}")
@@ -528,16 +694,124 @@ elif current == 3:
     with col_nav[2]:
         if st.button("Siguiente →", type="primary", use_container_width=True,
                      key="wiz_step3_next"):
+            # Generar el mapa final ANTES de ir al editor del paso 4
+            state["sensors_override"] = _build_full_sensor_map(state)
             _go_next()
             st.rerun()
 
 
 # =============================================================
-# PASO 4 — Unidades & setpoints
+# PASO 4 — Editor de sensores generados (Ciclo 21.1)
 # =============================================================
 
 elif current == 4:
-    st.subheader("Paso 4 · Unidades y setpoints")
+    st.subheader("Paso 4 · Ajustar sensores generados")
+    st.caption(
+        "El sistema generó automáticamente el mapa basado en lo que elegiste. "
+        "Acá podés cambiar lados, ángulos, tipos, unidades, setpoints y patrones "
+        "de match al CSV. Si todo está bien, dale Siguiente."
+    )
+
+    sensors_override = state.get("sensors_override")
+    if not sensors_override:
+        st.warning("No hay sensores generados. Volvé al paso 3.")
+    else:
+        import pandas as pd
+
+        df_sensors = pd.DataFrame([
+            {
+                "plane_label": s.get("plane_label", ""),
+                "side": s.get("side", "L"),
+                "angle_deg": s.get("angle_deg", 45.0),
+                "direction": s.get("direction", "Y"),
+                "sensor_type": s.get("sensor_type", "proximity"),
+                "unit_native": s.get("unit_native", ""),
+                "alarm": s.get("alarm", 0.0),
+                "danger": s.get("danger", 0.0),
+                "csv_match_pattern": s.get("csv_match_pattern", ""),
+            }
+            for s in sensors_override
+        ])
+
+        edited = st.data_editor(
+            df_sensors,
+            num_rows="dynamic",
+            use_container_width=True,
+            column_config={
+                "plane_label": st.column_config.TextColumn("Plano", width="medium"),
+                "side": st.column_config.SelectboxColumn(
+                    "Lado", options=["L", "R", "T", "B", ""], width="small",
+                ),
+                "angle_deg": st.column_config.NumberColumn(
+                    "Ángulo (°)", min_value=0.0, max_value=360.0, step=15.0,
+                    width="small",
+                ),
+                "direction": st.column_config.SelectboxColumn(
+                    "Dirección", options=["X", "Y", "Z", "RAD", "AX", ""],
+                    width="small",
+                ),
+                "sensor_type": st.column_config.SelectboxColumn(
+                    "Tipo",
+                    options=["proximity", "accelerometer", "velometer", "keyphasor"],
+                    width="medium",
+                ),
+                "unit_native": st.column_config.TextColumn("Unidad", width="small"),
+                "alarm": st.column_config.NumberColumn("Alarm", width="small"),
+                "danger": st.column_config.NumberColumn("Danger", width="small"),
+                "csv_match_pattern": st.column_config.TextColumn(
+                    "Pattern CSV (opcional)", width="medium",
+                ),
+            },
+            key="wiz_sensors_editor",
+        )
+
+        col_actions = st.columns([1, 1, 2])
+        with col_actions[0]:
+            if st.button("🔄 Regenerar desde paso 3",
+                         help="Descarta cambios y reconstruye el mapa estándar",
+                         key="wiz_regen_sensors"):
+                state["sensors_override"] = _build_full_sensor_map(state)
+                st.rerun()
+
+    col_nav = st.columns([1, 2, 1])
+    with col_nav[0]:
+        if st.button("← Atrás", use_container_width=True, key="wiz_step4_prev"):
+            _go_prev()
+            st.rerun()
+    with col_nav[2]:
+        if st.button("Siguiente →", type="primary", use_container_width=True,
+                     key="wiz_step4_next"):
+            # Persistir el DataFrame editado al state
+            if state.get("sensors_override"):
+                edited_records = edited.to_dict(orient="records")
+                # Re-merger con keys que el editor no muestra (plane, x_pct, y_pct, notes)
+                originals_by_idx = {i: s for i, s in enumerate(state["sensors_override"])}
+                final_sensors = []
+                for i, row in enumerate(edited_records):
+                    base = dict(originals_by_idx.get(i, {}))
+                    base.update({
+                        "plane_label": row.get("plane_label", ""),
+                        "side": row.get("side", "L"),
+                        "angle_deg": float(row.get("angle_deg", 45.0)),
+                        "direction": row.get("direction", "Y"),
+                        "sensor_type": row.get("sensor_type", "proximity"),
+                        "unit_native": row.get("unit_native", ""),
+                        "alarm": float(row.get("alarm", 0.0)),
+                        "danger": float(row.get("danger", 0.0)),
+                        "csv_match_pattern": row.get("csv_match_pattern", ""),
+                    })
+                    final_sensors.append(base)
+                state["sensors_override"] = final_sensors
+            _go_next()
+            st.rerun()
+
+
+# =============================================================
+# PASO 5 — Unidades & setpoints
+# =============================================================
+
+elif current == 5:
+    st.subheader("Paso 5 · Unidades y setpoints")
     st.caption(
         "Define las unidades en que reporta cada tipo de sensor, y los niveles "
         "alarm/danger. Estos valores son la fuente de verdad — Tabular List, "
@@ -633,22 +907,22 @@ elif current == 4:
 
     col_nav = st.columns([1, 2, 1])
     with col_nav[0]:
-        if st.button("← Atrás", use_container_width=True, key="wiz_step4_prev"):
+        if st.button("← Atrás", use_container_width=True, key="wiz_step5_prev"):
             _go_prev()
             st.rerun()
     with col_nav[2]:
         if st.button("Siguiente →", type="primary", use_container_width=True,
-                     key="wiz_step4_next"):
+                     key="wiz_step5_next"):
             _go_next()
             st.rerun()
 
 
 # =============================================================
-# PASO 5 — Datos del activo + crear
+# PASO 6 — Datos del activo + crear
 # =============================================================
 
-elif current == 5:
-    st.subheader("Paso 5 · Datos del activo")
+elif current == 6:
+    st.subheader("Paso 6 · Datos del activo")
     st.caption("Última info y creamos.")
 
     col_l, col_r = st.columns(2)
@@ -743,7 +1017,7 @@ elif current == 5:
 
     col_nav = st.columns([1, 2, 1])
     with col_nav[0]:
-        if st.button("← Atrás", use_container_width=True, key="wiz_step5_prev"):
+        if st.button("← Atrás", use_container_width=True, key="wiz_step6_prev"):
             _go_prev()
             st.rerun()
     with col_nav[2]:
