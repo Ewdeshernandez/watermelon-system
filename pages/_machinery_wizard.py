@@ -64,7 +64,7 @@ st.set_page_config(
 # Estado del wizard en session_state
 # =============================================================
 
-WIZ_KEY = "wm_wizard_state_v2"
+WIZ_KEY = "wm_wizard_state_v3"
 TOTAL_STEPS = 6
 
 
@@ -98,6 +98,9 @@ def _default_state() -> Dict[str, Any]:
         "gearbox_bearing_kind": "rolling",
         "gearbox_bearing_model": "",
         "gearbox_instrumentation": "axial_accel",
+        # Reciprocantes (Ciclo 21.3)
+        "cylinders_count": 4,        # 2 / 4 / 6 / 8
+        "include_rod_drop": True,    # 1 sensor de rod drop por cilindro
         # Override de sensores (Ciclo 21.1) — se llena en el paso 4
         "sensors_override": None,
         # Paso 3
@@ -162,13 +165,20 @@ def _slug_default(state: Dict[str, Any]) -> str:
 
 def _build_full_sensor_map(state: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Construye el mapa completo de sensores. Si include_gearbox está activo,
-    extiende el mapa estándar driver/driven agregando sensores de gearbox
-    en el medio (HSS = high speed shaft, LSS = low speed shaft).
+    Construye el mapa completo de sensores. Soporta:
+      - turbomáquina estándar (driver + driven con cojinetes radiales)
+      - tren con gearbox intermedio (HSS + LSS)
+      - compresor reciprocante (frame velocity + crosshead accel + rod drop)
     """
     from core.sensor_map import new_sensor
 
-    # Mapa estándar driver + driven (sin gearbox por ahora)
+    is_recip = state.get("category") == "reciprocating_compressor"
+
+    # ===== Caso reciprocante =====
+    if is_recip:
+        return _build_reciprocating_sensor_map(state)
+
+    # ===== Caso estándar turbomáquina =====
     sensors = generate_standard_sensor_map(
         driver_planes=int(state.get("driver_planes", 2)),
         driver_instrumentation=state.get("driver_instrumentation", "proximity_xy"),
@@ -264,6 +274,107 @@ def _build_full_sensor_map(state: Dict[str, Any]) -> List[Dict[str, Any]]:
         s["plane"] = int(s.get("plane", 0)) + plane_offset
 
     sensors = sensors[:insert_idx] + gearbox_sensors + sensors[insert_idx:]
+    return sensors
+
+
+def _build_reciprocating_sensor_map(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Sensor map para compresor reciprocante (API 618 / ISO 20816-8):
+      - Driver (motor): mapa estándar según su instrumentación
+      - Compresor:
+        · 1 velocímetro frame top (radial)
+        · 1 velocímetro frame side (lateral)
+        · 1 acelerómetro crosshead por cilindro
+        · 1 rod drop por cilindro (opcional)
+      - Keyphasor opcional en coupling
+    """
+    from core.sensor_map import new_sensor
+
+    sensors: List[Dict[str, Any]] = []
+    plane_idx = 1
+
+    # 1. Driver (motor eléctrico) — usa su instrumentación normal
+    driver_planes = int(state.get("driver_planes", 2))
+    driver_instr = state.get("driver_instrumentation", "axial_accel")
+    for i in range(driver_planes):
+        side = "DE" if i == 0 else "NDE" if i == 1 else f"P{i+1}"
+        plane_label = f"{side} motor"
+
+        if driver_instr == "proximity_xy":
+            for direction, side_xy in (("X", "R"), ("Y", "L")):
+                sensors.append(new_sensor(
+                    plane=plane_idx, plane_label=plane_label, side=side_xy,
+                    angle_deg=45.0, direction=direction,
+                    sensor_type="proximity", unit_native="mil pp",
+                    alarm=float(state.get("proximity_alarm_mil_pp", 4.0)),
+                    danger=float(state.get("proximity_danger_mil_pp", 6.0)),
+                    csv_match_pattern=f"*motor*{side}*{direction}*",
+                ))
+        else:  # axial_accel u otro
+            sensors.append(new_sensor(
+                plane=plane_idx, plane_label=plane_label, side="T",
+                angle_deg=0.0, direction="RAD",
+                sensor_type="accelerometer", unit_native="g rms",
+                alarm=float(state.get("accel_alarm_g", 4.5)),
+                danger=float(state.get("accel_danger_g", 9.0)),
+                csv_match_pattern=f"*motor*{side}*",
+            ))
+        plane_idx += 1
+
+    # 2. Frame del compresor — 2 velocímetros (top + side)
+    frame_plane = plane_idx
+    sensors.append(new_sensor(
+        plane=frame_plane, plane_label="Frame top", side="T",
+        angle_deg=0.0, direction="RAD",
+        sensor_type="velometer", unit_native="mm/s rms",
+        alarm=float(state.get("velocity_alarm_mm_s", 4.5)),
+        danger=float(state.get("velocity_danger_mm_s", 11.2)),
+        csv_match_pattern="*frame*top*",
+    ))
+    sensors.append(new_sensor(
+        plane=frame_plane, plane_label="Frame side", side="L",
+        angle_deg=90.0, direction="RAD",
+        sensor_type="velometer", unit_native="mm/s rms",
+        alarm=float(state.get("velocity_alarm_mm_s", 4.5)),
+        danger=float(state.get("velocity_danger_mm_s", 11.2)),
+        csv_match_pattern="*frame*side*",
+    ))
+    plane_idx += 1
+
+    # 3. Crosshead accelerometer + rod drop por cilindro
+    n_cyl = int(state.get("cylinders_count", 4))
+    include_rod_drop = bool(state.get("include_rod_drop", True))
+    for c in range(1, n_cyl + 1):
+        cyl_label = f"Cilindro {c}"
+        # Crosshead acelerómetro
+        sensors.append(new_sensor(
+            plane=plane_idx, plane_label=cyl_label, side="T",
+            angle_deg=0.0, direction="RAD",
+            sensor_type="accelerometer", unit_native="g pk",
+            alarm=float(state.get("accel_alarm_g", 4.5)),
+            danger=float(state.get("accel_danger_g", 9.0)),
+            csv_match_pattern=f"*crosshead*cyl{c}*",
+        ))
+        # Rod drop (opcional)
+        if include_rod_drop:
+            sensors.append(new_sensor(
+                plane=plane_idx, plane_label=f"{cyl_label} rod drop", side="B",
+                angle_deg=270.0, direction="Z",
+                sensor_type="proximity", unit_native="mil pp",
+                alarm=15.0, danger=25.0,  # típicos rod drop
+                csv_match_pattern=f"*rod*drop*cyl{c}*",
+            ))
+        plane_idx += 1
+
+    # 4. Keyphasor opcional (en el motor, no en el compresor)
+    if state.get("include_keyphasor"):
+        sensors.append(new_sensor(
+            plane=plane_idx, plane_label="Keyphasor", side="",
+            angle_deg=0.0, direction="",
+            sensor_type="keyphasor", unit_native="",
+            csv_match_pattern="*kphgen*, *keyph*, *kp*",
+        ))
+
     return sensors
 
 
@@ -489,35 +600,67 @@ elif current == 2:
                 key="wiz_driver_bearing_model",
             )
 
+    is_recip = state.get("category") == "reciprocating_compressor"
+
     with col_r:
-        st.markdown("### Driven (accionada)")
-        state["driven_type"] = st.text_input(
-            "Tipo / descripción",
-            value=state.get("driven_type") or state.get("driven_model") or "",
-            placeholder="Ej: Generador Brush 54MW, Compresor Ariel KBK/4",
-            key="wiz_driven_type",
-        )
-        state["driven_planes"] = st.number_input(
-            "Cantidad de cojinetes (planos de medición)",
-            min_value=1, max_value=6,
-            value=int(state.get("driven_planes", 2) or 2),
-            key="wiz_driven_planes",
-        )
-        state["driven_bearing_kind"] = st.radio(
-            "Tipo de cojinete",
-            options=["plain", "rolling"],
-            format_func=lambda k: {"plain": "🧱 Cojinete plano (fluid film)",
-                                   "rolling": "⚙️ Rodamiento (rolling element)"}[k],
-            index=["plain", "rolling"].index(state.get("driven_bearing_kind", "rolling")),
-            key="wiz_driven_bearing_kind",
-        )
-        if state["driven_bearing_kind"] == "rolling":
-            state["driven_bearing_model"] = st.text_input(
-                "Modelo de rodamiento típico (opcional)",
-                value=state.get("driven_bearing_model", ""),
-                placeholder="Ej: SKF 6319, NU 220",
-                key="wiz_driven_bearing_model",
+        if is_recip:
+            st.markdown("### Driven · Compresor reciprocante")
+            state["driven_type"] = st.text_input(
+                "Modelo / fabricante",
+                value=state.get("driven_type") or state.get("driven_model") or "",
+                placeholder="Ej: Ariel KBK/4, Burckhardt Process, Dresser-Rand HOS",
+                key="wiz_driven_type",
             )
+            state["cylinders_count"] = st.select_slider(
+                "Número de cilindros",
+                options=[2, 4, 6, 8],
+                value=int(state.get("cylinders_count", 4) or 4),
+                help="Frecuencia 1X = RPM/60; cada cilindro suma armónicos según "
+                     "configuración (single/double-acting, etapas).",
+                key="wiz_recip_cylinders",
+            )
+            state["include_rod_drop"] = st.checkbox(
+                "Incluir sensores de rod drop (1 por cilindro)",
+                value=bool(state.get("include_rod_drop", True)),
+                help="Detección de desgaste de packing/rider band. Estándar API 618.",
+                key="wiz_recip_rod_drop",
+            )
+            # En reciprocantes el "driven_planes" representa frame planes (top + side)
+            state["driven_planes"] = 2
+            state["driven_bearing_kind"] = "plain"
+            st.caption(
+                "ℹ️ En reciprocantes los sensores van en el frame del compresor "
+                "y en cada crosshead, no en cojinetes radiales. ISO 20816-8."
+            )
+        else:
+            st.markdown("### Driven (accionada)")
+            state["driven_type"] = st.text_input(
+                "Tipo / descripción",
+                value=state.get("driven_type") or state.get("driven_model") or "",
+                placeholder="Ej: Generador Brush 54MW, Compresor Ariel KBK/4",
+                key="wiz_driven_type",
+            )
+            state["driven_planes"] = st.number_input(
+                "Cantidad de cojinetes (planos de medición)",
+                min_value=1, max_value=6,
+                value=int(state.get("driven_planes", 2) or 2),
+                key="wiz_driven_planes",
+            )
+            state["driven_bearing_kind"] = st.radio(
+                "Tipo de cojinete",
+                options=["plain", "rolling"],
+                format_func=lambda k: {"plain": "🧱 Cojinete plano (fluid film)",
+                                       "rolling": "⚙️ Rodamiento (rolling element)"}[k],
+                index=["plain", "rolling"].index(state.get("driven_bearing_kind", "rolling")),
+                key="wiz_driven_bearing_kind",
+            )
+            if state["driven_bearing_kind"] == "rolling":
+                state["driven_bearing_model"] = st.text_input(
+                    "Modelo de rodamiento típico (opcional)",
+                    value=state.get("driven_bearing_model", ""),
+                    placeholder="Ej: SKF 6319, NU 220",
+                    key="wiz_driven_bearing_model",
+                )
 
     st.markdown("---")
 
@@ -627,16 +770,29 @@ elif current == 3:
         )
 
     with col_r:
-        st.markdown("### Driven — instrumentación")
-        state["driven_instrumentation"] = st.radio(
-            "Tipo de sensores en el driven",
-            options=list(instrum_options.keys()),
-            format_func=lambda k: instrum_options[k],
-            index=list(instrum_options.keys()).index(
-                state.get("driven_instrumentation", "proximity_xy")
-            ),
-            key="wiz_driven_instrum",
-        )
+        is_recip = state.get("category") == "reciprocating_compressor"
+        if is_recip:
+            st.markdown("### Driven · Compresor reciprocante")
+            st.info(
+                "**Instrumentación API 618 / ISO 20816-8:**\n"
+                "- 1 velocímetro frame top (radial)\n"
+                "- 1 velocímetro frame side (lateral)\n"
+                f"- 1 acelerómetro crosshead × {state.get('cylinders_count', 4)} cilindros\n"
+                + (f"- 1 rod drop × {state.get('cylinders_count', 4)} cilindros\n"
+                   if state.get("include_rod_drop", True) else "")
+            )
+            state["driven_instrumentation"] = "reciprocating"
+        else:
+            st.markdown("### Driven — instrumentación")
+            state["driven_instrumentation"] = st.radio(
+                "Tipo de sensores en el driven",
+                options=list(instrum_options.keys()),
+                format_func=lambda k: instrum_options[k],
+                index=list(instrum_options.keys()).index(
+                    state.get("driven_instrumentation", "proximity_xy")
+                ) if state.get("driven_instrumentation") in instrum_options else 0,
+                key="wiz_driven_instrum",
+            )
 
     # ===== Instrumentación del gearbox (Ciclo 21.2) =====
     if state.get("include_gearbox"):
