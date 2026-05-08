@@ -28,6 +28,7 @@ tenga que hacer las cuentas a mano.
 
 from __future__ import annotations
 
+import textwrap
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -41,7 +42,6 @@ from core.instance_selector import render_instance_selector
 from core.instance_state import (
     add_uploaded_file_to_instance,
     compose_train_description,
-    create_instance,
     delete_instance,
     get_instance,
     get_instance_document_bytes,
@@ -50,7 +50,9 @@ from core.instance_state import (
     update_instance_header,
     update_instance_parameters_bulk,
 )
-from core.machine_profiles import PROFILES as MACHINE_PROFILES, get_profile
+# Ciclo 22.3 — `create_instance` y `PROFILES` ya no se importan acá: el
+# único camino de creación es el wizard (pages/_machinery_wizard.py).
+from core.machine_profiles import get_profile
 from core.ui_theme import apply_watermelon_page_style, page_header
 
 
@@ -91,89 +93,61 @@ def _format_date(iso_str: str) -> str:
 # ============================================================
 
 def render_create_instance_section() -> None:
-    """Formulario inline para crear una nueva instancia."""
-    with st.expander("➕ Crear nueva instancia de activo", expanded=False):
-        st.caption(
-            "Una instancia representa una máquina física específica que estás "
-            "monitoreando. Por ejemplo, si tienes dos turbogeneradores Brush "
-            "del mismo modelo, cada uno es una instancia distinta. La instancia "
-            "agrupa parámetros, manuales y reportes específicos de esa unidad."
-        )
+    """
+    Ciclo 22.3 — CTA único al asistente.
 
-        with st.form("create_instance_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                inst_id = st.text_input(
-                    "ID de la instancia (slug único)",
-                    placeholder="brush_tes1",
-                    help=(
-                        "Identificador interno único, usá solo letras, números, "
-                        "guiones bajos y guiones. Ejemplo: brush_tes1, "
-                        "siemens_sgt300_planta_b, motor_2pol_a."
-                    ),
-                )
-                tag = st.text_input(
-                    "Tag interno del cliente",
-                    placeholder="TES1",
-                    help="Tag/código corto que el cliente usa para esta máquina.",
-                )
-
-            with col2:
-                profile_options = sorted(MACHINE_PROFILES.keys())
-                profile_labels = {
-                    pk: f"{MACHINE_PROFILES[pk].label}" for pk in profile_options
-                }
-                selected_profile = st.selectbox(
-                    "Profile (familia / tipo de máquina)",
-                    options=profile_options,
-                    format_func=lambda pk: profile_labels.get(pk, pk),
-                    help=(
-                        "Familia técnica del activo. Define qué normas ISO/API "
-                        "aplican y qué módulos son relevantes. Si el profile "
-                        "tiene seed (Ciclo 7), los parámetros base se "
-                        "pre-llenan automáticamente."
-                    ),
-                )
-                serial = st.text_input(
-                    "Número de serie OEM",
-                    placeholder="Ej: GE-12345-A",
-                )
-
-            location = st.text_input(
-                "Ubicación física",
-                placeholder="Ej: Planta Térmica Atlántico, Cartagena",
+    El form legacy inline se eliminó. El wizard guiado de 6 pasos
+    (`pages/_machinery_wizard.py`) es el único camino para crear
+    activos: garantiza que toda nueva máquina arranca con tren
+    coherente, sensor map auto-generado, y parámetros capturados
+    sembrados desde el profile. Esto elimina la fuente principal
+    de instancias mal configuradas (sin sensores, sin profile coherente).
+    """
+    st.markdown(
+        textwrap.dedent(
+            """
+            <div style="
+                background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+                border: 1px solid #bfd8ff;
+                border-radius: 18px;
+                padding: 18px 22px;
+                box-shadow: 0 8px 22px rgba(37, 99, 235, 0.06);
+                margin: 8px 0 14px 0;
+                display: flex;
+                gap: 16px;
+                align-items: center;
+                flex-wrap: wrap;
+            ">
+                <div style="font-size: 38px; line-height: 1;">🧙</div>
+                <div style="flex: 1; min-width: 240px;">
+                    <div style="font-weight: 800; color: #1e3a8a; font-size: 16px; margin-bottom: 2px;">
+                        Crear nueva máquina con asistente
+                    </div>
+                    <div style="color: #475569; font-size: 13px; line-height: 1.45;">
+                        Wizard guiado de 6 pasos: profile → tren → operación →
+                        soportes y sensores → sensor map → parámetros sembrados.
+                        Todas las máquinas nuevas arrancan correctamente configuradas.
+                    </div>
+                </div>
+            </div>
+            """
+        ).strip(),
+        unsafe_allow_html=True,
+    )
+    if st.button(
+        "🧙 Abrir asistente de creación",
+        key="wm_open_wizard_cta",
+        use_container_width=True,
+        type="primary",
+    ):
+        try:
+            st.switch_page("pages/_machinery_wizard.py")
+        except Exception as _e:
+            st.error(
+                f"No se pudo abrir el asistente automáticamente "
+                f"({type(_e).__name__}). Andá a la barra lateral → "
+                f"'🧙 Crear activo (wizard)'."
             )
-            notes = st.text_area(
-                "Notas libres",
-                placeholder="Información adicional sobre esta instancia (cliente, contrato, etc.)",
-                height=70,
-            )
-
-            submitted = st.form_submit_button("Crear instancia", width="stretch")
-
-            if submitted:
-                if not inst_id.strip():
-                    st.error("El ID es obligatorio.")
-                    return
-                if get_instance(inst_id.strip()) is not None:
-                    st.error(f"Ya existe una instancia con ID '{inst_id.strip()}'. Elegí otro.")
-                    return
-                inst = create_instance(
-                    instance_id=inst_id.strip(),
-                    profile_key=selected_profile,
-                    tag=tag.strip(),
-                    serial_number=serial.strip(),
-                    location=location.strip(),
-                    notes=notes.strip(),
-                    seed_from_profile=True,
-                )
-                st.success(
-                    f"Instancia '{inst.instance_id}' creada. "
-                    f"Profile: {profile_labels.get(selected_profile)}. "
-                    f"Parámetros heredados del seed: {len(inst.captured_parameters)}."
-                )
-                st.session_state["wm_active_instance_id"] = inst.instance_id
-                st.rerun()
 
 
 def render_instance_header(state: Dict[str, Any]) -> None:
@@ -2285,8 +2259,9 @@ def main() -> None:
 
     if not instance_id:
         st.info(
-            "No hay máquina activa. Creá una desde el formulario de arriba "
-            "o seleccioná una desde el grid de máquinas (sidebar)."
+            "No hay máquina activa. Tocá **🧙 Abrir asistente de creación** "
+            "arriba para crear una nueva, o seleccioná una desde el grid "
+            "de máquinas / sidebar."
         )
         return
 
