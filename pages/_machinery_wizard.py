@@ -1342,13 +1342,17 @@ elif current == 6:
                      key="wiz_create"):
             try:
                 _execute_creation(state)
+                # Globitos PRIMERO (antes del reset y del success).
+                # Si reseteamos antes, st.balloons a veces queda "stuck"
+                # porque el rerun lo cancela.
+                st.balloons()
+                created_id = state['instance_id']
+                _reset_wizard()
                 st.success(
-                    f"✅ Activo '{state['instance_id']}' creado correctamente. "
+                    f"✅ Activo '{created_id}' creado correctamente. "
                     f"Sensores generados automáticamente. "
                     f"Lo encontrás en Machinery Library."
                 )
-                _reset_wizard()
-                st.balloons()
             except Exception as e:
                 st.error(f"❌ Error al crear el activo: {e}")
 
