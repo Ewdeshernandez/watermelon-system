@@ -448,6 +448,98 @@
         "casing_velocity": ["fan_de", "fan_nde", "motor_de", "motor_nde"]
       },
       "notes": "Fan grande de tiro. Pitch variable significa señal 1X estable pero NX (paso de álabe) cambia con carga. BPF = N_blades × RPM, vigilar para detectar pala defectuosa."
+    },
+    {
+      "id": "ge_lm6000_brush_turbogen",
+      "label": "GE LM6000 + Brush — Turbogenerador aeroderivate ~45 MW",
+      "manufacturer": "GE Vernova / Brush",
+      "model": "LM6000 PC/PD/PF + Brush DAX",
+      "category": "turbogenerator",
+      "application": ["power_generation", "cogeneration"],
+      "rated_power_kw": [42000, 50000],
+      "operating_rpm_nominal": 3600,
+      "operating_rpm_range": [3580, 3620],
+      "bearing_type": "mixed",
+      "iso_norm_recommended": "ISO_20816_2",
+      "iso_class_recommended": "group2",
+      "api_norm_recommended": "API_616",
+      "common_bearings": ["rolling_high_speed_gas_gen", "plain_journal_power_turbine", "plain_journal_generator"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["pt_de_xy", "pt_nde_xy", "gen_de_xy", "gen_nde_xy"],
+        "casing_velocity": ["gas_gen_trf", "gas_gen_crf"],
+        "thrust_position": "axial",
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "Turbina aeroderivate de origen aeronáutico (basada en CF6-80C). 2 ejes (gas generator HP + power turbine LP). Generador Brush sincronizado a 3600 RPM. Caso TES1/TES3 LATAM. Vigilar críticas en gas generator y separación de núcleos."
+    },
+    {
+      "id": "ge_lm5000_brush_turbogen",
+      "label": "GE LM5000 + Brush — Turbogenerador aeroderivate ~33 MW",
+      "manufacturer": "GE Vernova / Brush",
+      "model": "LM5000 + Brush DAX",
+      "category": "turbogenerator",
+      "application": ["power_generation", "cogeneration", "mechanical_drive"],
+      "rated_power_kw": [30000, 35000],
+      "operating_rpm_nominal": 3600,
+      "operating_rpm_range": [3580, 3620],
+      "bearing_type": "mixed",
+      "iso_norm_recommended": "ISO_20816_2",
+      "iso_class_recommended": "group2",
+      "api_norm_recommended": "API_616",
+      "common_bearings": ["rolling_high_speed_gas_gen", "plain_journal_power_turbine", "plain_journal_generator"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["pt_de_xy", "pt_nde_xy", "gen_de_xy", "gen_nde_xy"],
+        "casing_velocity": ["gas_gen_trf", "gas_gen_crf"],
+        "thrust_position": "axial",
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "Predecesor de la LM6000, basada en CF6-50. Aeroderivate dual-shaft. Operación 3600 RPM en power turbine + generador. Setup similar a LM6000 pero menor potencia."
+    },
+    {
+      "id": "tm2500_brush_turbogen",
+      "label": "TM2500 + generador — Turbogenerador móvil ~25 MW",
+      "manufacturer": "GE Vernova / Brush",
+      "model": "TM2500 (basada en LM2500) + Brush",
+      "category": "turbogenerator",
+      "application": ["power_generation", "emergency_power", "peaking"],
+      "rated_power_kw": [22000, 28000],
+      "operating_rpm_nominal": 3600,
+      "operating_rpm_range": [3580, 3620],
+      "bearing_type": "mixed",
+      "iso_norm_recommended": "ISO_20816_2",
+      "iso_class_recommended": "group2",
+      "api_norm_recommended": "API_616",
+      "common_bearings": ["rolling_high_speed_gas_gen", "plain_journal_power_turbine", "plain_journal_generator"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["pt_de_xy", "pt_nde_xy", "gen_de_xy", "gen_nde_xy"],
+        "casing_velocity": ["gas_gen_casing"],
+        "thrust_position": "axial",
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "Unidad móvil/skid montada. Aeroderivate de la LM2500. Caso típico: emergencia, peaking, o cogeneración temporal. Operación 3600 RPM. Diagnóstico clave: separación gas-gen vs power-turbine, detección de sub-síncronos en aero core."
+    },
+    {
+      "id": "siemens_sgt300_gearbox_brush_turbogen",
+      "label": "Siemens SGT-300 + Gearbox planetario + Generador",
+      "manufacturer": "Siemens Energy / Brush",
+      "model": "SGT-300 + planetary gearbox + Brush DAX",
+      "category": "turbogenerator",
+      "application": ["power_generation", "cogeneration"],
+      "rated_power_kw": [7000, 9000],
+      "operating_rpm_nominal": 14010,
+      "operating_rpm_range": [13500, 14500],
+      "bearing_type": "plain",
+      "iso_norm_recommended": "ISO_20816_2",
+      "iso_class_recommended": "group2",
+      "api_norm_recommended": "API_616",
+      "common_bearings": ["plain_journal_tilting_pad", "thrust_kingsbury", "planetary_gearbox_bearings"],
+      "sensor_layout": {
+        "proximity_probes_xy": ["sgt_de_xy", "sgt_nde_xy", "gear_hss_xy", "gear_lss_xy", "gen_de_xy", "gen_nde_xy"],
+        "casing_velocity": ["gear_casing"],
+        "thrust_position": "axial",
+        "keyphasor": "1_per_rev"
+      },
+      "notes": "Single-shaft 14000 RPM con gearbox planetario reduciendo a 3600/1800 RPM en el generador. Tres elementos en el tren (turbina + gearbox + generador). Vigilar críticas del gearbox y dinámicas del planetary stage."
     }
   ]
 }
