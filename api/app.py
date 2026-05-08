@@ -62,11 +62,6 @@ def _api_key_dependency(authorization: Optional[str] = (Header(default=None, ali
     Validador de API key. Acepta:
       - Authorization: Bearer <key>
       - Authorization: <key>           (sin prefijo, también válido)
-
-    Hotfix v3.18.1: anotación Header(alias="Authorization") explícita.
-    Sin esto, FastAPI trataba el parámetro como query param y nunca
-    leía el header, devolviendo 401 'Missing Authorization header' en
-    todas las llamadas autenticadas.
     """
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing Authorization header")
@@ -76,6 +71,52 @@ def _api_key_dependency(authorization: Optional[str] = (Header(default=None, ali
     if not is_valid_api_key(token):
         raise HTTPException(status_code=401, detail="Invalid API key")
     return hash_for_log(token)
+
+
+def _scope_dependency(
+    authorization: Optional[str] = (Header(default=None, alias="Authorization") if _FASTAPI_AVAILABLE else None),
+    x_caller_phone: Optional[str] = (Header(default=None, alias="X-Caller-Phone") if _FASTAPI_AVAILABLE else None),
+):
+    """
+    Resuelve el scope del caller para multi-tenant ACL (Ciclo 20A).
+
+    Reglas:
+      1. La key Authorization debe ser válida (Bearer admin key o
+         api_key de un cliente registrado).
+      2. Si el caller resuelve a admin (típicamente el bot WhatsApp)
+         Y vino X-Caller-Phone, se hace una segunda resolución:
+            - Si phone matchea registry → ese scope manda
+            - Si phone NO matchea → 403 (rechaza phone desconocido)
+      3. Si el caller resuelve a client por api_key, X-Caller-Phone
+         se ignora (no hay escalación de privilegios cross-cliente).
+      4. Caller unknown → 401.
+    """
+    from core.clients import resolve_by_api_key, resolve_by_phone
+
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    token = authorization.strip()
+    if token.lower().startswith("bearer "):
+        token = token[7:].strip()
+    if not is_valid_api_key(token):
+        # Antes de rechazar, ¿coincide con api_key de algún cliente?
+        scope_by_key = resolve_by_api_key(token, admin_keys=[])
+        if scope_by_key.is_authorized:
+            return scope_by_key
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    scope_by_key = resolve_by_api_key(token)
+    # Si la key es admin y vino phone → resolver scope real por phone
+    if scope_by_key.role == "admin" and x_caller_phone:
+        scope_by_phone = resolve_by_phone(x_caller_phone)
+        if not scope_by_phone.is_authorized:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Phone {x_caller_phone} not registered in clients.json",
+            )
+        return scope_by_phone
+
+    return scope_by_key
 
 
 def create_app() -> "FastAPI":
@@ -206,33 +247,39 @@ def create_app() -> "FastAPI":
         return services.get_bearing_overlay(model=model, rpm=rpm, harmonics=harmonics)
 
     # =========================================================
-    # Assets & Reports (Ciclo 19 — WhatsApp Asset Query)
+    # Assets & Reports (Ciclo 19 + 20A multi-tenant ACL)
     # =========================================================
     @app.get("/v1/assets", tags=["assets"],
-             summary="Lista activos con reportes archivados")
+             summary="Lista activos con reportes archivados (filtra por scope)")
     def assets_list(
         limit: int = Query(default=200, ge=1, le=1000),
-        api_key_hash: str = Depends(_api_key_dependency),
+        scope=Depends(_scope_dependency),
     ):
-        return {"items": services.list_archived_assets(limit=limit)}
+        return {
+            "scope": scope.as_dict(),
+            "items": services.list_archived_assets(limit=limit, scope=scope),
+        }
 
     @app.get("/v1/assets/{asset}/reports", tags=["assets"],
-             summary="Reportes archivados de un activo")
+             summary="Reportes archivados de un activo (con ACL)")
     def asset_reports(
         asset: str,
         limit: int = Query(default=50, ge=1, le=500),
-        api_key_hash: str = Depends(_api_key_dependency),
+        scope=Depends(_scope_dependency),
     ):
-        return {"items": services.list_reports_for_asset(asset=asset, limit=limit)}
+        return {
+            "scope": scope.as_dict(),
+            "items": services.list_reports_for_asset(asset=asset, limit=limit, scope=scope),
+        }
 
     @app.get("/v1/assets/{asset}/reports/latest/pdf", tags=["assets"],
-             summary="PDF binario del último reporte de un activo",
+             summary="PDF binario del último reporte (ACL aplicado)",
              response_class=Response if _FASTAPI_AVAILABLE else None)
     def asset_latest_report_pdf(
         asset: str,
-        api_key_hash: str = Depends(_api_key_dependency),
+        scope=Depends(_scope_dependency),
     ):
-        out = services.get_latest_report_pdf(asset)
+        out = services.get_latest_report_pdf(asset, scope=scope)
         if out is None:
             raise HTTPException(status_code=404, detail="No reports found for asset")
         filename = out["filename"]
