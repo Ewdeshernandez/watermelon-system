@@ -456,6 +456,162 @@ def _execute_creation(state: Dict[str, Any]) -> None:
 
 
 # =============================================================
+# Helpers de UI — DEFINIDOS ANTES de los pasos para que existan
+# cuando los bloques `elif current == 4:` los llamen.
+# =============================================================
+
+def _render_sensors_table_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) -> None:
+    """Render del data_editor de pandas con la lista de sensores."""
+    import pandas as pd
+    df_sensors = pd.DataFrame([
+        {
+            "plane_label": s.get("plane_label", ""),
+            "side": s.get("side", "L"),
+            "angle_deg": s.get("angle_deg", 45.0),
+            "direction": s.get("direction", "Y"),
+            "sensor_type": s.get("sensor_type", "proximity"),
+            "unit_native": s.get("unit_native", ""),
+            "alarm": s.get("alarm", 0.0),
+            "danger": s.get("danger", 0.0),
+            "csv_match_pattern": s.get("csv_match_pattern", ""),
+        }
+        for s in sensors
+    ])
+
+    edited = st.data_editor(
+        df_sensors,
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "plane_label": st.column_config.TextColumn("Plano", width="medium"),
+            "side": st.column_config.SelectboxColumn(
+                "Lado", options=["L", "R", "T", "B", ""], width="small",
+            ),
+            "angle_deg": st.column_config.NumberColumn(
+                "Ángulo (°)", min_value=0.0, max_value=360.0, step=15.0,
+                width="small",
+            ),
+            "direction": st.column_config.SelectboxColumn(
+                "Dirección", options=["X", "Y", "Z", "RAD", "AX", ""],
+                width="small",
+            ),
+            "sensor_type": st.column_config.SelectboxColumn(
+                "Tipo",
+                options=["proximity", "accelerometer", "velometer", "keyphasor"],
+                width="medium",
+            ),
+            "unit_native": st.column_config.TextColumn("Unidad", width="small"),
+            "alarm": st.column_config.NumberColumn("Alarm", width="small"),
+            "danger": st.column_config.NumberColumn("Danger", width="small"),
+            "csv_match_pattern": st.column_config.TextColumn(
+                "Pattern CSV (opcional)", width="medium",
+            ),
+        },
+        key="wiz_sensors_editor",
+    )
+    state["_wizard_table_edited"] = edited
+
+
+def _render_recip_visual_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) -> None:
+    """Editor visual: click sobre la imagen para reposicionar el sensor seleccionado."""
+    from core.recip_schematic import generate_recip_png
+
+    try:
+        from streamlit_image_coordinates import streamlit_image_coordinates
+        _HAS_COORDS = True
+    except ImportError:
+        _HAS_COORDS = False
+
+    n_cyl = int(state.get("cylinders_count", 4))
+    n_motor = int(state.get("driver_planes", 2))
+
+    png_bytes = generate_recip_png(
+        n_cylinders=n_cyl, n_motor_planes=n_motor,
+        has_distance_piece=True,
+        motor_label=state.get("driver_type") or "Motor",
+        compressor_label=state.get("driven_type") or "Compresor",
+    )
+    if not png_bytes:
+        st.warning("Pillow no está disponible — no puedo generar el schematic.")
+        return
+
+    from PIL import Image, ImageDraw, ImageFont
+    import io as _io
+    base_img = Image.open(_io.BytesIO(png_bytes)).convert("RGBA")
+    width, height = base_img.size
+
+    overlay = base_img.copy()
+    draw = ImageDraw.Draw(overlay)
+    try:
+        font_marker = ImageFont.truetype("Arial.ttf", 16)
+    except Exception:
+        font_marker = ImageFont.load_default()
+
+    color_by_type = {
+        "proximity": "#ef4444",
+        "accelerometer": "#a855f7",
+        "velometer": "#3b82f6",
+        "keyphasor": "#f59e0b",
+    }
+
+    selected_idx = state.get("_wiz_selected_sensor_idx", -1)
+
+    for idx, s in enumerate(sensors):
+        x_pct = float(s.get("x_pct") or 50.0)
+        y_pct = float(s.get("y_pct") or 50.0)
+        x = int(width * x_pct / 100)
+        y = int(height * y_pct / 100)
+        c = color_by_type.get(s.get("sensor_type", ""), "#64748b")
+        r = 11
+        if idx == selected_idx:
+            draw.ellipse((x - r - 4, y - r - 4, x + r + 4, y + r + 4),
+                         outline="#000000", width=3)
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=c, outline="#ffffff", width=2)
+        draw.text((x - 5, y - 9), str(idx + 1), fill="#ffffff", font=font_marker)
+
+    col_img, col_list = st.columns([3, 2])
+
+    with col_img:
+        if _HAS_COORDS:
+            coords = streamlit_image_coordinates(
+                overlay, key="wiz_recip_canvas",
+                width=min(width, 1100),
+            )
+            if coords and selected_idx >= 0:
+                rendered_w = coords.get("width", width)
+                rendered_h = coords.get("height", height)
+                cx = coords.get("x", 0)
+                cy = coords.get("y", 0)
+                new_x_pct = (cx / rendered_w) * 100
+                new_y_pct = (cy / rendered_h) * 100
+                sensors[selected_idx]["x_pct"] = round(new_x_pct, 1)
+                sensors[selected_idx]["y_pct"] = round(new_y_pct, 1)
+                state["sensors_override"] = sensors
+                state["_wiz_selected_sensor_idx"] = -1
+                st.rerun()
+        else:
+            st.image(overlay)
+            st.caption("(streamlit_image_coordinates no disponible — solo visualización)")
+
+    with col_list:
+        st.markdown("**Sensores** (click para seleccionar y reposicionar)")
+        for idx, s in enumerate(sensors):
+            label = s.get("plane_label", "")
+            stype = s.get("sensor_type", "")
+            xp = s.get("x_pct", 50.0)
+            yp = s.get("y_pct", 50.0)
+            sel_str = "🎯 " if idx == selected_idx else ""
+            btn_label = f"{sel_str}#{idx+1} · {label} · {stype} ({xp:.0f}%, {yp:.0f}%)"
+            if st.button(btn_label, key=f"wiz_sel_sensor_{idx}",
+                         use_container_width=True):
+                state["_wiz_selected_sensor_idx"] = idx
+                st.rerun()
+        if st.button("❌ Deseleccionar", key="wiz_deselect_sensor"):
+            state["_wiz_selected_sensor_idx"] = -1
+            st.rerun()
+
+
+# =============================================================
 # Header del wizard
 # =============================================================
 
@@ -1195,161 +1351,6 @@ elif current == 6:
                 st.balloons()
             except Exception as e:
                 st.error(f"❌ Error al crear el activo: {e}")
-
-
-# =============================================================
-# Helpers de UI (al final para no romper la cadena de elifs)
-# =============================================================
-
-def _render_sensors_table_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) -> None:
-    """Render del data_editor de pandas con la lista de sensores."""
-    import pandas as pd
-    df_sensors = pd.DataFrame([
-        {
-            "plane_label": s.get("plane_label", ""),
-            "side": s.get("side", "L"),
-            "angle_deg": s.get("angle_deg", 45.0),
-            "direction": s.get("direction", "Y"),
-            "sensor_type": s.get("sensor_type", "proximity"),
-            "unit_native": s.get("unit_native", ""),
-            "alarm": s.get("alarm", 0.0),
-            "danger": s.get("danger", 0.0),
-            "csv_match_pattern": s.get("csv_match_pattern", ""),
-        }
-        for s in sensors
-    ])
-
-    edited = st.data_editor(
-        df_sensors,
-        num_rows="dynamic",
-        use_container_width=True,
-        column_config={
-            "plane_label": st.column_config.TextColumn("Plano", width="medium"),
-            "side": st.column_config.SelectboxColumn(
-                "Lado", options=["L", "R", "T", "B", ""], width="small",
-            ),
-            "angle_deg": st.column_config.NumberColumn(
-                "Ángulo (°)", min_value=0.0, max_value=360.0, step=15.0,
-                width="small",
-            ),
-            "direction": st.column_config.SelectboxColumn(
-                "Dirección", options=["X", "Y", "Z", "RAD", "AX", ""],
-                width="small",
-            ),
-            "sensor_type": st.column_config.SelectboxColumn(
-                "Tipo",
-                options=["proximity", "accelerometer", "velometer", "keyphasor"],
-                width="medium",
-            ),
-            "unit_native": st.column_config.TextColumn("Unidad", width="small"),
-            "alarm": st.column_config.NumberColumn("Alarm", width="small"),
-            "danger": st.column_config.NumberColumn("Danger", width="small"),
-            "csv_match_pattern": st.column_config.TextColumn(
-                "Pattern CSV (opcional)", width="medium",
-            ),
-        },
-        key="wiz_sensors_editor",
-    )
-    state["_wizard_table_edited"] = edited
-
-
-def _render_recip_visual_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) -> None:
-    """Editor visual: click sobre la imagen para reposicionar el sensor seleccionado."""
-    from core.recip_schematic import generate_recip_png
-
-    try:
-        from streamlit_image_coordinates import streamlit_image_coordinates
-        _HAS_COORDS = True
-    except ImportError:
-        _HAS_COORDS = False
-
-    n_cyl = int(state.get("cylinders_count", 4))
-    n_motor = int(state.get("driver_planes", 2))
-
-    png_bytes = generate_recip_png(
-        n_cylinders=n_cyl, n_motor_planes=n_motor,
-        has_distance_piece=True,
-        motor_label=state.get("driver_type") or "Motor",
-        compressor_label=state.get("driven_type") or "Compresor",
-    )
-    if not png_bytes:
-        st.warning("Pillow no está disponible — no puedo generar el schematic.")
-        return
-
-    from PIL import Image, ImageDraw, ImageFont
-    import io as _io
-    base_img = Image.open(_io.BytesIO(png_bytes)).convert("RGBA")
-    width, height = base_img.size
-
-    overlay = base_img.copy()
-    draw = ImageDraw.Draw(overlay)
-    try:
-        font_marker = ImageFont.truetype("Arial.ttf", 16)
-    except Exception:
-        font_marker = ImageFont.load_default()
-
-    color_by_type = {
-        "proximity": "#ef4444",
-        "accelerometer": "#a855f7",
-        "velometer": "#3b82f6",
-        "keyphasor": "#f59e0b",
-    }
-
-    selected_idx = state.get("_wiz_selected_sensor_idx", -1)
-
-    for idx, s in enumerate(sensors):
-        x_pct = float(s.get("x_pct") or 50.0)
-        y_pct = float(s.get("y_pct") or 50.0)
-        x = int(width * x_pct / 100)
-        y = int(height * y_pct / 100)
-        c = color_by_type.get(s.get("sensor_type", ""), "#64748b")
-        r = 11
-        if idx == selected_idx:
-            draw.ellipse((x - r - 4, y - r - 4, x + r + 4, y + r + 4),
-                         outline="#000000", width=3)
-        draw.ellipse((x - r, y - r, x + r, y + r), fill=c, outline="#ffffff", width=2)
-        draw.text((x - 5, y - 9), str(idx + 1), fill="#ffffff", font=font_marker)
-
-    col_img, col_list = st.columns([3, 2])
-
-    with col_img:
-        if _HAS_COORDS:
-            coords = streamlit_image_coordinates(
-                overlay, key="wiz_recip_canvas",
-                width=min(width, 1100),
-            )
-            if coords and selected_idx >= 0:
-                rendered_w = coords.get("width", width)
-                rendered_h = coords.get("height", height)
-                cx = coords.get("x", 0)
-                cy = coords.get("y", 0)
-                new_x_pct = (cx / rendered_w) * 100
-                new_y_pct = (cy / rendered_h) * 100
-                sensors[selected_idx]["x_pct"] = round(new_x_pct, 1)
-                sensors[selected_idx]["y_pct"] = round(new_y_pct, 1)
-                state["sensors_override"] = sensors
-                state["_wiz_selected_sensor_idx"] = -1
-                st.rerun()
-        else:
-            st.image(overlay)
-            st.caption("(streamlit_image_coordinates no disponible — solo visualización)")
-
-    with col_list:
-        st.markdown("**Sensores** (click para seleccionar y reposicionar)")
-        for idx, s in enumerate(sensors):
-            label = s.get("plane_label", "")
-            stype = s.get("sensor_type", "")
-            xp = s.get("x_pct", 50.0)
-            yp = s.get("y_pct", 50.0)
-            sel_str = "🎯 " if idx == selected_idx else ""
-            btn_label = f"{sel_str}#{idx+1} · {label} · {stype} ({xp:.0f}%, {yp:.0f}%)"
-            if st.button(btn_label, key=f"wiz_sel_sensor_{idx}",
-                         use_container_width=True):
-                state["_wiz_selected_sensor_idx"] = idx
-                st.rerun()
-        if st.button("❌ Deseleccionar", key="wiz_deselect_sensor"):
-            state["_wiz_selected_sensor_idx"] = -1
-            st.rerun()
 
 
 # =============================================================
