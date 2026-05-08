@@ -11,3 +11,6 @@ uvicorn[standard]>=0.27.0
 pydantic>=2.0.0
 numpy>=1.24.0
 pandas>=2.0.0
+# Ciclo 19: la API necesita Supabase para acceder al archivo de reportes
+# (mismo bucket que usa la app Streamlit).
+supabase>=2.0.0
