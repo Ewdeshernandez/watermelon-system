@@ -36,31 +36,36 @@ except ImportError:
 
 
 # Layout constants (unidades = % del ancho/alto del canvas)
+# Ciclo 21.4 v2: eliminada pieza distancia, acople = 3 líneas verticales,
+# cilindros todos arriba alineados (estilo Ariel KBK / Burckhardt real).
 LAYOUT = {
-    "motor_x_pct":   (4, 32),     # rect motor: x_left a x_right en %
-    "motor_y_pct":   (35, 75),    # rect motor: y_top a y_bottom en %
-    "distance_x_pct": (33, 42),
-    "distance_y_pct": (40, 70),
-    "compressor_x_pct": (43, 96),
-    "compressor_y_pct": (40, 80),
-    "cylinder_y_pct":   (15, 38),  # cuadrados arriba del cuerpo
-    "shaft_y_pct":      57,         # línea cigüeñal
+    "motor_x_pct":   (5, 35),
+    "motor_y_pct":   (40, 78),
+    "coupling_x_pct": (36, 41),
+    "compressor_x_pct": (42, 96),
+    "compressor_y_pct": (50, 78),
+    "cylinder_y_pct":   (20, 48),  # cilindros arriba — más altos
+    "shaft_y_pct":      59,
 }
 
 
 def generate_recip_png(
     n_cylinders: int,
     n_motor_planes: int = 2,
-    has_distance_piece: bool = True,
+    has_distance_piece: bool = False,  # deprecated — siempre acople directo
     motor_label: str = "Motor",
     compressor_label: str = "Compresor",
     width: int = 1400,
-    height: int = 500,
-    bg_color: str = "#ffffff",
+    height: int = 520,
+    bg_color: str = "#fafbfc",
 ) -> bytes:
     """
     Genera un PNG con el dibujo del tren reciprocante.
-    Devuelve bytes PNG. Si PIL no está disponible, devuelve b"".
+    Layout estilo Ariel KBK / Burckhardt real:
+      - Motor a la izquierda (rectángulo con tapas)
+      - Acople directo (3 líneas verticales)
+      - Compresor con cilindros TODOS ARRIBA alineados
+      - Cigüeñal interno al cuerpo del compresor
     """
     if not _HAS_PIL:
         return b""
@@ -69,11 +74,16 @@ def generate_recip_png(
     draw = ImageDraw.Draw(img)
 
     try:
-        font_big = ImageFont.truetype("Arial.ttf", 28)
-        font_med = ImageFont.truetype("Arial.ttf", 18)
-        font_sm = ImageFont.truetype("Arial.ttf", 14)
+        font_big = ImageFont.truetype("Arial Bold.ttf", 26)
     except Exception:
-        font_big = ImageFont.load_default()
+        try:
+            font_big = ImageFont.truetype("Arial.ttf", 26)
+        except Exception:
+            font_big = ImageFont.load_default()
+    try:
+        font_med = ImageFont.truetype("Arial.ttf", 17)
+        font_sm = ImageFont.truetype("Arial.ttf", 13)
+    except Exception:
         font_med = font_big
         font_sm = font_big
 
@@ -83,83 +93,124 @@ def generate_recip_png(
     def pct_box(x1, x2, y1, y2):
         return (*pct_to_xy(x1, y1), *pct_to_xy(x2, y2))
 
-    # ===== MOTOR =====
+    # ===== MOTOR (cuerpo principal + tapas DE/NDE) =====
     mx1, mx2 = LAYOUT["motor_x_pct"]
     my1, my2 = LAYOUT["motor_y_pct"]
-    draw.rectangle(pct_box(mx1, mx2, my1, my2),
+    # Tapa DE (izquierda, más oscura)
+    cap_w = (mx2 - mx1) * 0.06
+    draw.rectangle(pct_box(mx1, mx1 + cap_w, my1 - 2, my2 + 2),
+                   fill="#93c5fd", outline="#1e3a8a", width=2)
+    # Tapa NDE (derecha)
+    draw.rectangle(pct_box(mx2 - cap_w, mx2, my1 - 2, my2 + 2),
+                   fill="#93c5fd", outline="#1e3a8a", width=2)
+    # Cuerpo principal
+    draw.rectangle(pct_box(mx1 + cap_w, mx2 - cap_w, my1, my2),
                    fill="#dbeafe", outline="#1e40af", width=3)
-    # Label motor
-    label_xy = pct_to_xy((mx1 + mx2) / 2 - 4, my1 - 8)
-    draw.text(label_xy, motor_label, fill="#1e40af", font=font_big)
 
-    # Cojinetes del motor (círculos numerados)
+    # Aletas / nervaduras decorativas en el cuerpo del motor
+    body_x1 = mx1 + cap_w + 1
+    body_x2 = mx2 - cap_w - 1
+    fin_count = 5
+    for i in range(1, fin_count + 1):
+        fx = body_x1 + (body_x2 - body_x1) * i / (fin_count + 1)
+        draw.line([pct_to_xy(fx, my1 + 2), pct_to_xy(fx, my2 - 2)],
+                  fill="#60a5fa", width=2)
+
+    # Label motor
+    draw.text(pct_to_xy(mx1 + 2, my1 - 8), motor_label, fill="#1e3a8a", font=font_big)
+
+    # Cojinetes del motor (círculos numerados — solo los configurados)
     motor_centerline_y = (my1 + my2) / 2
-    bearing_spacing = (mx2 - mx1 - 6) / max(n_motor_planes, 1)
-    for i in range(n_motor_planes):
-        bx_pct = mx1 + 3 + bearing_spacing * (i + 0.5)
+    bearing_xs = []
+    if n_motor_planes == 1:
+        bearing_xs = [(mx1 + mx2) / 2]
+    elif n_motor_planes == 2:
+        bearing_xs = [mx1 + (mx2 - mx1) * 0.30, mx1 + (mx2 - mx1) * 0.70]
+    else:
+        for i in range(n_motor_planes):
+            bearing_xs.append(mx1 + (mx2 - mx1) * (0.18 + 0.64 * i / max(n_motor_planes - 1, 1)))
+    for i, bx_pct in enumerate(bearing_xs):
         bx, by = pct_to_xy(bx_pct, motor_centerline_y)
-        r = 18
+        r = 17
         draw.ellipse((bx - r, by - r, bx + r, by + r),
                      fill="#ffffff", outline="#1e40af", width=2)
-        draw.text((bx - 6, by - 12), str(i + 1), fill="#1e40af", font=font_med)
-        # Label below
+        draw.text((bx - 5, by - 11), str(i + 1), fill="#1e40af", font=font_med)
         side = "DE" if i == 0 else ("NDE" if i == 1 else f"P{i+1}")
-        draw.text((bx - 14, by + r + 6), side, fill="#475569", font=font_sm)
+        draw.text((bx - 11, by + r + 5), side, fill="#475569", font=font_sm)
 
-    # ===== PIEZA DE DISTANCIA =====
-    if has_distance_piece:
-        dx1, dx2 = LAYOUT["distance_x_pct"]
-        dy1, dy2 = LAYOUT["distance_y_pct"]
-        draw.rectangle(pct_box(dx1, dx2, dy1, dy2),
-                       fill="#fef3c7", outline="#a16207", width=2)
-        draw.text(pct_to_xy(dx1 + 0.5, dy2 + 1),
-                  "Pieza\ndistancia", fill="#a16207", font=font_sm)
+    # ===== ACOPLE (3 líneas verticales) =====
+    coup_x1, coup_x2 = LAYOUT["coupling_x_pct"]
+    coup_center = (coup_x1 + coup_x2) / 2
+    shaft_y = LAYOUT["shaft_y_pct"]
+    coup_top_y = shaft_y - 5
+    coup_bot_y = shaft_y + 5
+    for off_pct in (-1.0, 0.0, 1.0):
+        cx, _ = pct_to_xy(coup_center + off_pct, 0)
+        cy_top = pct_to_xy(0, coup_top_y)[1]
+        cy_bot = pct_to_xy(0, coup_bot_y)[1]
+        draw.line([(cx, cy_top), (cx, cy_bot)], fill="#475569", width=3)
+    # Texto "Acople" debajo
+    draw.text(pct_to_xy(coup_center - 2.5, coup_bot_y + 2),
+              "Acople", fill="#64748b", font=font_sm)
 
-    # ===== COMPRESOR =====
+    # ===== COMPRESOR (cuerpo + frame del cigüeñal) =====
     cx1, cx2 = LAYOUT["compressor_x_pct"]
     cy1, cy2 = LAYOUT["compressor_y_pct"]
+    # Frame del compresor
     draw.rectangle(pct_box(cx1, cx2, cy1, cy2),
                    fill="#dcfce7", outline="#15803d", width=3)
-    label_cxy = pct_to_xy((cx1 + cx2) / 2 - 5, cy1 - 8)
-    draw.text(label_cxy, compressor_label, fill="#15803d", font=font_big)
 
-    # ===== CILINDROS =====
+    # Label compresor
+    draw.text(pct_to_xy(cx1 + 2, cy1 - 8), compressor_label,
+              fill="#14532d", font=font_big)
+
+    # ===== CILINDROS — TODOS ARRIBA, ALINEADOS =====
     cyl_y1_pct, cyl_y2_pct = LAYOUT["cylinder_y_pct"]
-    cyl_h = (cyl_y2_pct - cyl_y1_pct)
-    cyl_w_pct = (cx2 - cx1) / (n_cylinders + 1) * 0.8
+    # Width disponible para cilindros: cx1 + 2% a cx2 - 2%
+    cyl_zone_x1 = cx1 + 2
+    cyl_zone_x2 = cx2 - 2
+    cyl_total_w = cyl_zone_x2 - cyl_zone_x1
+    cyl_w_pct = cyl_total_w / n_cylinders * 0.85
     for c in range(n_cylinders):
-        cx_center_pct = cx1 + (c + 1) * (cx2 - cx1) / (n_cylinders + 1)
+        cx_center_pct = cyl_zone_x1 + (c + 0.5) * cyl_total_w / n_cylinders
         cx_left = cx_center_pct - cyl_w_pct / 2
         cx_right = cx_center_pct + cyl_w_pct / 2
+        # Cilindro: rectángulo con redondeo simulado por dos rectángulos
         draw.rectangle(pct_box(cx_left, cx_right, cyl_y1_pct, cyl_y2_pct),
                        fill="#ffffff", outline="#15803d", width=2)
-        # Label C1, C2, ...
-        lbl_xy = pct_to_xy(cx_center_pct - 1, cyl_y1_pct + cyl_h / 2 - 1)
-        draw.text(lbl_xy, f"C{c+1}", fill="#15803d", font=font_med)
-        # Línea descendente al cigüeñal (cuello de cilindro)
-        shaft_y = LAYOUT["shaft_y_pct"]
+        # Tope del cilindro (válvulas) — barra superior
+        draw.rectangle(pct_box(cx_left - 0.3, cx_right + 0.3,
+                               cyl_y1_pct - 1.5, cyl_y1_pct + 1),
+                       fill="#bbf7d0", outline="#15803d", width=1)
+        # Label centrado
+        cyl_h = cyl_y2_pct - cyl_y1_pct
+        lbl_xy = pct_to_xy(cx_center_pct - 1.2, cyl_y1_pct + cyl_h / 2 - 1.3)
+        draw.text(lbl_xy, f"C{c+1}", fill="#14532d", font=font_med)
+        # Conexión vertical al cuerpo del compresor (cuello pistón)
         line_top_xy = pct_to_xy(cx_center_pct, cyl_y2_pct)
-        line_bot_xy = pct_to_xy(cx_center_pct, shaft_y)
-        draw.line([line_top_xy, line_bot_xy], fill="#15803d", width=3)
+        line_bot_xy = pct_to_xy(cx_center_pct, cy1 + 1)
+        draw.line([line_top_xy, line_bot_xy], fill="#15803d", width=2)
 
-    # ===== CIGÜEÑAL (línea horizontal central) =====
+    # ===== CIGÜEÑAL (línea horizontal interna al frame del compresor) =====
     shaft_y_pct = LAYOUT["shaft_y_pct"]
-    sx1, _ = pct_to_xy(mx2, shaft_y_pct)
-    sx2, _ = pct_to_xy(cx1, shaft_y_pct)
+    sx_motor, _ = pct_to_xy(mx2, shaft_y_pct)
+    sx_comp, _ = pct_to_xy(cx1, shaft_y_pct)
     sy = pct_to_xy(0, shaft_y_pct)[1]
-    draw.line([(sx1, sy), (sx2, sy)], fill="#1e293b", width=4)
-    # Acople (líneas verticales en el medio de la pieza distancia)
-    if has_distance_piece:
-        dx1, dx2 = LAYOUT["distance_x_pct"]
-        coup_x = (dx1 + dx2) / 2
-        cy_top, cy_bot = pct_to_xy(coup_x, shaft_y_pct - 4)[1], pct_to_xy(coup_x, shaft_y_pct + 4)[1]
-        cx_pos, _ = pct_to_xy(coup_x, 0)
-        for off in (-3, 0, 3):
-            draw.line([(cx_pos + off, cy_top), (cx_pos + off, cy_bot)],
-                      fill="#475569", width=2)
+    # Eje motor → acople
+    draw.line([(sx_motor, sy), pct_to_xy(coup_x1, shaft_y_pct)],
+              fill="#1e293b", width=4)
+    # Eje acople → compresor
+    draw.line([pct_to_xy(coup_x2, shaft_y_pct), (sx_comp, sy)],
+              fill="#1e293b", width=4)
+    # Cigüeñal dentro del compresor (línea más gruesa horizontal)
+    sx_in1 = pct_to_xy(cx1 + 1, shaft_y_pct)
+    sx_in2 = pct_to_xy(cx2 - 1, shaft_y_pct)
+    draw.line([sx_in1, sx_in2], fill="#0f172a", width=5)
+    draw.text(pct_to_xy(cx1 + 2, shaft_y_pct + 2),
+              "cigüeñal", fill="#475569", font=font_sm)
 
     # Footer label
-    draw.text((width - 250, height - 24),
+    draw.text((width - 280, height - 22),
               f"{n_cylinders} cilindros · {n_motor_planes} cojinetes motor",
               fill="#64748b", font=font_sm)
 
@@ -220,7 +271,7 @@ def sensor_default_position(
 
     # Keyphasor en el acople
     if sensor_type == "keyphasor":
-        dx1, dx2 = LAYOUT["distance_x_pct"]
+        dx1, dx2 = LAYOUT["coupling_x_pct"]
         return ((dx1 + dx2) / 2, LAYOUT["shaft_y_pct"] - 8)
 
     # Default: centro
