@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import sys
+import textwrap
 from datetime import date, datetime
 from io import BytesIO
 from pathlib import Path
@@ -5462,32 +5463,29 @@ else:
         _size = sc.get("size_human", "")
 
         with st.container():
-            st.markdown(
-                f"""
-                <div style="background:white;border:1px solid #e6ebf2;
-                            border-radius:12px;padding:14px 18px;margin-bottom:8px;">
-                  <div style="display:flex;justify-content:space-between;align-items:center;">
-                    <div>
-                      <div style="font-weight:800;color:#0f172a;font-size:15px;">
-                        {_client} · {_asset}
-                      </div>
-                      <div style="color:#475569;font-size:12px;margin-top:2px;">
-                        {_owner} · {_date} · {_size}
-                        {' · compartido con cliente' if _shared else ''}
-                      </div>
-                      <div style="margin-top:4px;font-size:11px;color:#64748b;
-                                  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">
-                        ID: {_aid}
-                      </div>
-                    </div>
-                    <div>
-                      {f'<span style="background:#fee2e2;color:#b91c1c;padding:4px 10px;border-radius:999px;font-size:10px;font-weight:800;">{_sev}</span>' if _sev else ''}
-                    </div>
-                  </div>
+            # Hotfix v3.21.1: el f-string con indentación de 16+ espacios hacía que
+            # Streamlit/CommonMark tratara las líneas internas como bloques de código,
+            # mostrando los <div> como texto crudo. textwrap.dedent normaliza la
+            # indentación al mínimo común (0 acá) y el HTML se renderiza limpio.
+            _shared_str = " · compartido con cliente" if _shared else ""
+            _sev_pill = (
+                f'<span style="background:#fee2e2;color:#b91c1c;'
+                f'padding:4px 10px;border-radius:999px;font-size:10px;'
+                f'font-weight:800;">{_sev}</span>'
+            ) if _sev else ""
+            _card_html = textwrap.dedent(f"""\
+            <div style="background:white;border:1px solid #e6ebf2;border-radius:12px;padding:14px 18px;margin-bottom:8px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <div style="font-weight:800;color:#0f172a;font-size:15px;">{_client} · {_asset}</div>
+                  <div style="color:#475569;font-size:12px;margin-top:2px;">{_owner} · {_date} · {_size}{_shared_str}</div>
+                  <div style="margin-top:4px;font-size:11px;color:#64748b;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">ID: {_aid}</div>
                 </div>
-                """,
-                unsafe_allow_html=True,
-            )
+                <div>{_sev_pill}</div>
+              </div>
+            </div>
+            """)
+            st.markdown(_card_html, unsafe_allow_html=True)
             ac1, ac2, ac3 = st.columns([0.5, 0.25, 0.25])
             with ac1:
                 # Descarga directa
