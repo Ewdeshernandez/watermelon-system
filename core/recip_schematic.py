@@ -36,16 +36,17 @@ except ImportError:
 
 
 # Layout constants (unidades = % del ancho/alto del canvas)
-# Ciclo 21.4 v2: eliminada pieza distancia, acople = 3 líneas verticales,
-# cilindros todos arriba alineados (estilo Ariel KBK / Burckhardt real).
+# Ciclo 21.4 v3: cilindros HORIZONTALMENTE OPUESTOS (boxer style Ariel
+# KBK/KBT, Burckhardt) + acople con flanges y bulones.
 LAYOUT = {
-    "motor_x_pct":   (5, 35),
-    "motor_y_pct":   (40, 78),
-    "coupling_x_pct": (36, 41),
+    "motor_x_pct":   (5, 33),
+    "motor_y_pct":   (38, 70),
+    "coupling_x_pct": (34, 41),     # zona del acople (más ancha para flanges)
     "compressor_x_pct": (42, 96),
-    "compressor_y_pct": (50, 78),
-    "cylinder_y_pct":   (20, 48),  # cilindros arriba — más altos
-    "shaft_y_pct":      59,
+    "compressor_y_pct": (45, 63),    # frame del compresor más angosto (centro)
+    "cylinder_top_y_pct":    (10, 38),  # cilindros opuestos arriba
+    "cylinder_bottom_y_pct": (70, 98),  # cilindros opuestos abajo (espejo)
+    "shaft_y_pct":      54,
 }
 
 
@@ -138,20 +139,38 @@ def generate_recip_png(
         side = "DE" if i == 0 else ("NDE" if i == 1 else f"P{i+1}")
         draw.text((bx - 11, by + r + 5), side, fill="#475569", font=font_sm)
 
-    # ===== ACOPLE (3 líneas verticales) =====
+    # ===== ACOPLE (2 flanges con bulones — estilo gear coupling real) =====
     coup_x1, coup_x2 = LAYOUT["coupling_x_pct"]
-    coup_center = (coup_x1 + coup_x2) / 2
     shaft_y = LAYOUT["shaft_y_pct"]
-    coup_top_y = shaft_y - 5
-    coup_bot_y = shaft_y + 5
-    for off_pct in (-1.0, 0.0, 1.0):
-        cx, _ = pct_to_xy(coup_center + off_pct, 0)
-        cy_top = pct_to_xy(0, coup_top_y)[1]
-        cy_bot = pct_to_xy(0, coup_bot_y)[1]
-        draw.line([(cx, cy_top), (cx, cy_bot)], fill="#475569", width=3)
+    flange_w_pct = 1.6
+    flange_h_pct = 12  # altura de los flanges
+    flange_y1 = shaft_y - flange_h_pct / 2
+    flange_y2 = shaft_y + flange_h_pct / 2
+    coup_center = (coup_x1 + coup_x2) / 2
+
+    # Flange izquierdo (lado motor)
+    fl_x1 = coup_center - 2.5
+    fl_x2 = fl_x1 + flange_w_pct
+    draw.rectangle(pct_box(fl_x1, fl_x2, flange_y1, flange_y2),
+                   fill="#cbd5e1", outline="#334155", width=2)
+    # Flange derecho (lado compresor)
+    fr_x1 = coup_center + 0.9
+    fr_x2 = fr_x1 + flange_w_pct
+    draw.rectangle(pct_box(fr_x1, fr_x2, flange_y1, flange_y2),
+                   fill="#cbd5e1", outline="#334155", width=2)
+    # Bulones — 4 puntos en cada flange
+    for fl_xc in [(fl_x1 + fl_x2) / 2, (fr_x1 + fr_x2) / 2]:
+        for off_y_pct in (-3.5, -1.2, 1.2, 3.5):
+            bx, by = pct_to_xy(fl_xc, shaft_y + off_y_pct)
+            draw.ellipse((bx - 2, by - 2, bx + 2, by + 2), fill="#1e293b")
+    # Conector central entre flanges (gear teeth simulation)
+    mid_x1 = fl_x2
+    mid_x2 = fr_x1
+    draw.rectangle(pct_box(mid_x1, mid_x2, shaft_y - 2, shaft_y + 2),
+                   fill="#94a3b8", outline="#334155", width=1)
     # Texto "Acople" debajo
-    draw.text(pct_to_xy(coup_center - 2.5, coup_bot_y + 2),
-              "Acople", fill="#64748b", font=font_sm)
+    draw.text(pct_to_xy(coup_center - 2.0, flange_y2 + 1),
+              "Acople", fill="#475569", font=font_sm)
 
     # ===== COMPRESOR (cuerpo + frame del cigüeñal) =====
     cx1, cx2 = LAYOUT["compressor_x_pct"]
@@ -164,32 +183,59 @@ def generate_recip_png(
     draw.text(pct_to_xy(cx1 + 2, cy1 - 8), compressor_label,
               fill="#14532d", font=font_big)
 
-    # ===== CILINDROS — TODOS ARRIBA, ALINEADOS =====
-    cyl_y1_pct, cyl_y2_pct = LAYOUT["cylinder_y_pct"]
-    # Width disponible para cilindros: cx1 + 2% a cx2 - 2%
-    cyl_zone_x1 = cx1 + 2
-    cyl_zone_x2 = cx2 - 2
-    cyl_total_w = cyl_zone_x2 - cyl_zone_x1
-    cyl_w_pct = cyl_total_w / n_cylinders * 0.85
-    for c in range(n_cylinders):
-        cx_center_pct = cyl_zone_x1 + (c + 0.5) * cyl_total_w / n_cylinders
+    # ===== CILINDROS — HORIZONTALMENTE OPUESTOS (boxer/Ariel KBK style) =====
+    # Convención: cilindros impares (1, 3, 5, 7) ARRIBA; pares (2, 4, 6, 8) ABAJO,
+    # alineados en pares por posición x.
+    cyl_top_y1, cyl_top_y2 = LAYOUT["cylinder_top_y_pct"]
+    cyl_bot_y1, cyl_bot_y2 = LAYOUT["cylinder_bottom_y_pct"]
+    n_pairs = (n_cylinders + 1) // 2  # n=4 → 2 pares; n=3 → 2 pares (último arriba solo)
+
+    cyl_zone_x1 = cx1 + 3
+    cyl_zone_x2 = cx2 - 3
+    cyl_zone_w = cyl_zone_x2 - cyl_zone_x1
+    pair_w = cyl_zone_w / n_pairs
+    cyl_w_pct = pair_w * 0.55  # ancho de cada cilindro
+
+    def _draw_cylinder(cx_center_pct: float, cy_y1: float, cy_y2: float,
+                       label: str, is_top: bool):
         cx_left = cx_center_pct - cyl_w_pct / 2
         cx_right = cx_center_pct + cyl_w_pct / 2
-        # Cilindro: rectángulo con redondeo simulado por dos rectángulos
-        draw.rectangle(pct_box(cx_left, cx_right, cyl_y1_pct, cyl_y2_pct),
+        draw.rectangle(pct_box(cx_left, cx_right, cy_y1, cy_y2),
                        fill="#ffffff", outline="#15803d", width=2)
-        # Tope del cilindro (válvulas) — barra superior
-        draw.rectangle(pct_box(cx_left - 0.3, cx_right + 0.3,
-                               cyl_y1_pct - 1.5, cyl_y1_pct + 1),
-                       fill="#bbf7d0", outline="#15803d", width=1)
+        # Tope (cabeza del cilindro con válvulas) — del lado externo
+        if is_top:
+            draw.rectangle(pct_box(cx_left - 0.3, cx_right + 0.3,
+                                   cy_y1 - 1.5, cy_y1 + 1),
+                           fill="#bbf7d0", outline="#15803d", width=1)
+        else:
+            draw.rectangle(pct_box(cx_left - 0.3, cx_right + 0.3,
+                                   cy_y2 - 1, cy_y2 + 1.5),
+                           fill="#bbf7d0", outline="#15803d", width=1)
         # Label centrado
-        cyl_h = cyl_y2_pct - cyl_y1_pct
-        lbl_xy = pct_to_xy(cx_center_pct - 1.2, cyl_y1_pct + cyl_h / 2 - 1.3)
-        draw.text(lbl_xy, f"C{c+1}", fill="#14532d", font=font_med)
-        # Conexión vertical al cuerpo del compresor (cuello pistón)
-        line_top_xy = pct_to_xy(cx_center_pct, cyl_y2_pct)
-        line_bot_xy = pct_to_xy(cx_center_pct, cy1 + 1)
+        cyl_h = cy_y2 - cy_y1
+        lbl_xy = pct_to_xy(cx_center_pct - 1.2, cy_y1 + cyl_h / 2 - 1.3)
+        draw.text(lbl_xy, label, fill="#14532d", font=font_med)
+        # Conexión al frame (cuello del pistón)
+        if is_top:
+            line_top_xy = pct_to_xy(cx_center_pct, cy_y2)
+            line_bot_xy = pct_to_xy(cx_center_pct, cy1 + 0.5)
+        else:
+            line_top_xy = pct_to_xy(cx_center_pct, cy2 - 0.5)
+            line_bot_xy = pct_to_xy(cx_center_pct, cy_y1)
         draw.line([line_top_xy, line_bot_xy], fill="#15803d", width=2)
+
+    for pair_idx in range(n_pairs):
+        cx_center = cyl_zone_x1 + (pair_idx + 0.5) * pair_w
+        # Cilindro impar (arriba) — siempre presente si pair_idx < ceil(n/2)
+        cyl_top_num = pair_idx * 2 + 1
+        if cyl_top_num <= n_cylinders:
+            _draw_cylinder(cx_center, cyl_top_y1, cyl_top_y2,
+                           f"C{cyl_top_num}", is_top=True)
+        # Cilindro par (abajo) — espejo
+        cyl_bot_num = pair_idx * 2 + 2
+        if cyl_bot_num <= n_cylinders:
+            _draw_cylinder(cx_center, cyl_bot_y1, cyl_bot_y2,
+                           f"C{cyl_bot_num}", is_top=False)
 
     # ===== CIGÜEÑAL (línea horizontal interna al frame del compresor) =====
     shaft_y_pct = LAYOUT["shaft_y_pct"]
@@ -252,22 +298,36 @@ def sensor_default_position(
     if "frame side" in plane_label:
         return (cx1 + 2, (cy1 + cy2) / 2)
 
-    # Crosshead / cilindro
+    # Crosshead / cilindro — config boxer (opuestos)
     if "cilindro" in plane_label or "crosshead" in plane_label:
-        # Extraer número del cilindro
         import re
         m = re.search(r"cilindro\s*(\d+)", plane_label)
         if not m:
             m = re.search(r"(\d+)", plane_label)
         cyl_num = int(m.group(1)) if m else 1
         cyl_num = max(1, min(cyl_num, n_cylinders))
-        cx_center = cx1 + cyl_num * (cx2 - cx1) / (n_cylinders + 1)
+        # Boxer: par arriba (impar) + abajo (par)
+        n_pairs = (n_cylinders + 1) // 2
+        pair_idx = (cyl_num - 1) // 2
+        cyl_zone_x1 = cx1 + 3
+        cyl_zone_w = (cx2 - 3) - cyl_zone_x1
+        pair_w = cyl_zone_w / max(n_pairs, 1)
+        cx_center = cyl_zone_x1 + (pair_idx + 0.5) * pair_w
+        is_top = (cyl_num % 2 == 1)  # impar arriba
         if "rod drop" in plane_label:
-            # debajo del cigüeñal
-            return (cx_center, LAYOUT["shaft_y_pct"] + 8)
+            # rod drop al lado del cigüeñal
+            if is_top:
+                return (cx_center, LAYOUT["shaft_y_pct"] - 3)
+            else:
+                return (cx_center, LAYOUT["shaft_y_pct"] + 3)
         else:
-            # crosshead: justo bajo el cuadrado del cilindro
-            return (cx_center, cyl_y2 + 4)
+            # crosshead: justo entre el cilindro y el frame
+            if is_top:
+                cyl_y_top1, cyl_y_top2 = LAYOUT["cylinder_top_y_pct"]
+                return (cx_center, cyl_y_top2 + 3)
+            else:
+                cyl_y_bot1, cyl_y_bot2 = LAYOUT["cylinder_bottom_y_pct"]
+                return (cx_center, cyl_y_bot1 - 3)
 
     # Keyphasor en el acople
     if sensor_type == "keyphasor":
