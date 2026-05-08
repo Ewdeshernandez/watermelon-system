@@ -28,6 +28,7 @@ tenga que hacer las cuentas a mano.
 
 from __future__ import annotations
 
+import textwrap
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -41,7 +42,6 @@ from core.instance_selector import render_instance_selector
 from core.instance_state import (
     add_uploaded_file_to_instance,
     compose_train_description,
-    create_instance,
     delete_instance,
     get_instance,
     get_instance_document_bytes,
@@ -50,7 +50,9 @@ from core.instance_state import (
     update_instance_header,
     update_instance_parameters_bulk,
 )
-from core.machine_profiles import PROFILES as MACHINE_PROFILES, get_profile
+# Ciclo 22.3 — `create_instance` y `PROFILES` ya no se importan acá: el
+# único camino de creación es el wizard (pages/_machinery_wizard.py).
+from core.machine_profiles import get_profile
 from core.ui_theme import apply_watermelon_page_style, page_header
 
 
@@ -91,89 +93,61 @@ def _format_date(iso_str: str) -> str:
 # ============================================================
 
 def render_create_instance_section() -> None:
-    """Formulario inline para crear una nueva instancia."""
-    with st.expander("➕ Crear nueva instancia de activo", expanded=False):
-        st.caption(
-            "Una instancia representa una máquina física específica que estás "
-            "monitoreando. Por ejemplo, si tienes dos turbogeneradores Brush "
-            "del mismo modelo, cada uno es una instancia distinta. La instancia "
-            "agrupa parámetros, manuales y reportes específicos de esa unidad."
-        )
+    """
+    Ciclo 22.3 — CTA único al asistente.
 
-        with st.form("create_instance_form", clear_on_submit=True):
-            col1, col2 = st.columns(2)
-            with col1:
-                inst_id = st.text_input(
-                    "ID de la instancia (slug único)",
-                    placeholder="brush_tes1",
-                    help=(
-                        "Identificador interno único, usá solo letras, números, "
-                        "guiones bajos y guiones. Ejemplo: brush_tes1, "
-                        "siemens_sgt300_planta_b, motor_2pol_a."
-                    ),
-                )
-                tag = st.text_input(
-                    "Tag interno del cliente",
-                    placeholder="TES1",
-                    help="Tag/código corto que el cliente usa para esta máquina.",
-                )
-
-            with col2:
-                profile_options = sorted(MACHINE_PROFILES.keys())
-                profile_labels = {
-                    pk: f"{MACHINE_PROFILES[pk].label}" for pk in profile_options
-                }
-                selected_profile = st.selectbox(
-                    "Profile (familia / tipo de máquina)",
-                    options=profile_options,
-                    format_func=lambda pk: profile_labels.get(pk, pk),
-                    help=(
-                        "Familia técnica del activo. Define qué normas ISO/API "
-                        "aplican y qué módulos son relevantes. Si el profile "
-                        "tiene seed (Ciclo 7), los parámetros base se "
-                        "pre-llenan automáticamente."
-                    ),
-                )
-                serial = st.text_input(
-                    "Número de serie OEM",
-                    placeholder="Ej: GE-12345-A",
-                )
-
-            location = st.text_input(
-                "Ubicación física",
-                placeholder="Ej: Planta Térmica Atlántico, Cartagena",
+    El form legacy inline se eliminó. El wizard guiado de 6 pasos
+    (`pages/_machinery_wizard.py`) es el único camino para crear
+    activos: garantiza que toda nueva máquina arranca con tren
+    coherente, sensor map auto-generado, y parámetros capturados
+    sembrados desde el profile. Esto elimina la fuente principal
+    de instancias mal configuradas (sin sensores, sin profile coherente).
+    """
+    st.markdown(
+        textwrap.dedent(
+            """
+            <div style="
+                background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+                border: 1px solid #bfd8ff;
+                border-radius: 18px;
+                padding: 18px 22px;
+                box-shadow: 0 8px 22px rgba(37, 99, 235, 0.06);
+                margin: 8px 0 14px 0;
+                display: flex;
+                gap: 16px;
+                align-items: center;
+                flex-wrap: wrap;
+            ">
+                <div style="font-size: 38px; line-height: 1;">🧙</div>
+                <div style="flex: 1; min-width: 240px;">
+                    <div style="font-weight: 800; color: #1e3a8a; font-size: 16px; margin-bottom: 2px;">
+                        Crear nueva máquina con asistente
+                    </div>
+                    <div style="color: #475569; font-size: 13px; line-height: 1.45;">
+                        Wizard guiado de 6 pasos: profile → tren → operación →
+                        soportes y sensores → sensor map → parámetros sembrados.
+                        Todas las máquinas nuevas arrancan correctamente configuradas.
+                    </div>
+                </div>
+            </div>
+            """
+        ).strip(),
+        unsafe_allow_html=True,
+    )
+    if st.button(
+        "🧙 Abrir asistente de creación",
+        key="wm_open_wizard_cta",
+        use_container_width=True,
+        type="primary",
+    ):
+        try:
+            st.switch_page("pages/_machinery_wizard.py")
+        except Exception as _e:
+            st.error(
+                f"No se pudo abrir el asistente automáticamente "
+                f"({type(_e).__name__}). Andá a la barra lateral → "
+                f"'🧙 Crear activo (wizard)'."
             )
-            notes = st.text_area(
-                "Notas libres",
-                placeholder="Información adicional sobre esta instancia (cliente, contrato, etc.)",
-                height=70,
-            )
-
-            submitted = st.form_submit_button("Crear instancia", width="stretch")
-
-            if submitted:
-                if not inst_id.strip():
-                    st.error("El ID es obligatorio.")
-                    return
-                if get_instance(inst_id.strip()) is not None:
-                    st.error(f"Ya existe una instancia con ID '{inst_id.strip()}'. Elegí otro.")
-                    return
-                inst = create_instance(
-                    instance_id=inst_id.strip(),
-                    profile_key=selected_profile,
-                    tag=tag.strip(),
-                    serial_number=serial.strip(),
-                    location=location.strip(),
-                    notes=notes.strip(),
-                    seed_from_profile=True,
-                )
-                st.success(
-                    f"Instancia '{inst.instance_id}' creada. "
-                    f"Profile: {profile_labels.get(selected_profile)}. "
-                    f"Parámetros heredados del seed: {len(inst.captured_parameters)}."
-                )
-                st.session_state["wm_active_instance_id"] = inst.instance_id
-                st.rerun()
 
 
 def render_instance_header(state: Dict[str, Any]) -> None:
@@ -1543,47 +1517,158 @@ def render_documents_section(instance_id: str) -> None:
         )
         return
 
-    df = pd.DataFrame([
-        {
-            "Título": d.get("title", d.get("filename", "—")),
-            "Tipo": DOCUMENT_TYPES.get(d.get("document_type", "other"), d.get("document_type", "—")),
-            "Archivo": d.get("filename", "—"),
-            "Tamaño": _bytes_to_human(int(d.get("size_bytes", 0))),
-            "Subido": _format_date(d.get("uploaded_at", "")),
-            "Tags": ", ".join(d.get("tags", [])) if d.get("tags") else "—",
-        }
-        for d in docs
-    ])
-    st.dataframe(df, width="stretch", hide_index=True)
+    # ----- Ciclo 22.2d — filtros + grid de cards -----
+    type_emoji = {
+        "manual_oem":     "📕",
+        "datasheet":      "📊",
+        "drawing":        "📐",
+        "certificate":    "🏆",
+        "report":         "📄",
+        "photo":          "📷",
+        "schematic":      "🗺️",
+        "maintenance":    "🛠️",
+        "other":          "📎",
+    }
 
-    st.markdown("**Acciones**")
+    def _icon_for_doc(d: Dict[str, Any]) -> str:
+        dtype = d.get("document_type", "other")
+        if dtype in type_emoji:
+            return type_emoji[dtype]
+        ext = (d.get("filename", "").rsplit(".", 1)[-1] or "").lower()
+        if ext in ("png", "jpg", "jpeg", "gif", "webp"):
+            return "🖼️"
+        if ext == "pdf":
+            return "📕"
+        if ext in ("xlsx", "xls", "csv"):
+            return "📊"
+        if ext in ("dwg", "dxf"):
+            return "📐"
+        return "📎"
+
+    # Filtros
+    fcol1, fcol2 = st.columns([1, 2])
+    with fcol1:
+        type_options = ["Todos"] + sorted({
+            DOCUMENT_TYPES.get(d.get("document_type", "other"),
+                              d.get("document_type", "—"))
+            for d in docs
+        })
+        sel_type = st.selectbox(
+            "Filtrar por tipo",
+            options=type_options,
+            key=f"docs_type_filter_{instance_id}",
+        )
+    with fcol2:
+        search_q = st.text_input(
+            "Buscar por título / descripción / tag",
+            key=f"docs_search_{instance_id}",
+            placeholder="ej: rebabbiting, manual, octubre",
+        ).strip().lower()
+
+    # Aplicar filtros
+    filtered = []
     for d in docs:
-        with st.expander(f"📄 {d.get('title') or d.get('filename')}"):
-            col1, col2, col3 = st.columns([2, 1, 1])
-            with col1:
-                st.caption(d.get("description", "") or "_(sin descripción)_")
-                if d.get("tags"):
-                    st.caption("Tags: " + ", ".join(d["tags"]))
-                st.caption(f"ID interno: `{d.get('id')}`")
-            with col2:
-                # Bytes streaming-friendly: funciona igual con backend Local
-                # o Supabase sin diferencias de UX para el usuario.
-                file_bytes = get_instance_document_bytes(instance_id, d["id"])
-                if file_bytes is not None:
-                    st.download_button(
-                        "Descargar",
-                        data=file_bytes,
-                        file_name=d.get("filename", "document"),
-                        key=f"dl_{instance_id}_{d['id']}",
-                        width="stretch",
-                    )
-                else:
-                    st.caption("Archivo no disponible")
-            with col3:
-                if st.button("Eliminar", key=f"del_{instance_id}_{d['id']}", width="stretch"):
-                    remove_instance_document(instance_id, d["id"])
-                    st.success(f"Documento '{d.get('title')}' eliminado.")
-                    st.rerun()
+        if sel_type != "Todos":
+            d_type_label = DOCUMENT_TYPES.get(
+                d.get("document_type", "other"),
+                d.get("document_type", "—"),
+            )
+            if d_type_label != sel_type:
+                continue
+        if search_q:
+            haystack = " ".join([
+                d.get("title", ""),
+                d.get("filename", ""),
+                d.get("description", ""),
+                " ".join(d.get("tags", []) or []),
+            ]).lower()
+            if search_q not in haystack:
+                continue
+        filtered.append(d)
+
+    st.caption(
+        f"Mostrando {len(filtered)} de {len(docs)} documento(s)."
+    )
+
+    if not filtered:
+        st.info("Ningún documento coincide con el filtro.")
+        return
+
+    # Grid de cards (3 columnas)
+    cards_per_row = 3
+    for i in range(0, len(filtered), cards_per_row):
+        cols = st.columns(cards_per_row, gap="medium")
+        for j, col in enumerate(cols):
+            if i + j >= len(filtered):
+                continue
+            d = filtered[i + j]
+            with col:
+                _render_doc_card(instance_id, d, _icon_for_doc(d))
+
+
+def _render_doc_card(instance_id: str, d: Dict[str, Any], icon: str) -> None:
+    """Card individual de documento (Ciclo 22.2d)."""
+    import textwrap as _tw
+    title = d.get("title") or d.get("filename") or "—"
+    filename = d.get("filename", "—")
+    size = _bytes_to_human(int(d.get("size_bytes", 0)))
+    uploaded = _format_date(d.get("uploaded_at", ""))
+    description = d.get("description") or ""
+    tags = d.get("tags", []) or []
+
+    tags_html = "".join(
+        f'<span style="display:inline-block;padding:1px 7px;background:#eef2ff;'
+        f'color:#3730a3;border-radius:999px;font-size:10px;margin:1px 2px;">{t}</span>'
+        for t in tags
+    )
+
+    card_html = _tw.dedent(f"""\
+    <div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px;background:white;margin-bottom:6px;">
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
+        <div style="font-size:28px;line-height:1;flex-shrink:0;">{icon}</div>
+        <div style="min-width:0;flex:1;">
+          <div style="font-weight:700;color:#0f172a;font-size:13px;line-height:1.25;
+                     overflow:hidden;text-overflow:ellipsis;display:-webkit-box;
+                     -webkit-line-clamp:2;-webkit-box-orient:vertical;">{title}</div>
+          <div style="color:#64748b;font-size:11px;margin-top:2px;">{filename}</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:#475569;margin-bottom:6px;min-height:30px;
+                 overflow:hidden;text-overflow:ellipsis;display:-webkit-box;
+                 -webkit-line-clamp:2;-webkit-box-orient:vertical;">
+        {description or '<span style="color:#94a3b8;">_(sin descripción)_</span>'}
+      </div>
+      <div style="margin-bottom:6px;">{tags_html}</div>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:#94a3b8;
+                 border-top:1px solid #f1f5f9;padding-top:6px;">
+        <span>📦 {size}</span>
+        <span>📅 {uploaded}</span>
+      </div>
+    </div>
+    """)
+    st.markdown(card_html, unsafe_allow_html=True)
+
+    # Acciones
+    bcol1, bcol2 = st.columns(2)
+    with bcol1:
+        file_bytes = get_instance_document_bytes(instance_id, d["id"])
+        if file_bytes is not None:
+            st.download_button(
+                "📥 Descargar",
+                data=file_bytes,
+                file_name=d.get("filename", "document"),
+                key=f"dl_v2_{instance_id}_{d['id']}",
+                use_container_width=True,
+            )
+        else:
+            st.caption("⚠️ no disponible")
+    with bcol2:
+        if st.button("🗑️ Eliminar",
+                     key=f"del_v2_{instance_id}_{d['id']}",
+                     use_container_width=True):
+            remove_instance_document(instance_id, d["id"])
+            st.success(f"'{d.get('title')}' eliminado.")
+            st.rerun()
 
 
 def render_upload_section(instance_id: str) -> None:
@@ -1647,8 +1732,22 @@ def render_upload_section(instance_id: str) -> None:
                 st.error("No fue posible cargar el documento.")
 
 
+_CATEGORY_ICONS = {
+    "Identificación":           "🆔",
+    "Cojinete - geometría":     "🔩",
+    "Cojinete - rodamiento":    "⚙️",
+    "Cojinete - cargas":        "⚖️",
+    "Cojinete - tolerancias":   "📐",
+    "Operación":                "⚡",
+    "Rotor":                    "🌀",
+    "Acople":                   "🔗",
+    "Lubricación":              "💧",
+    "Otros":                    "📋",
+}
+
+
 def render_captured_parameters_section(instance_id: str) -> None:
-    """Form de parámetros estructurados con auto-cálculos en vivo."""
+    """Form de parámetros estructurados con auto-cálculos en vivo (Ciclo 22.2c)."""
     inst = get_instance(instance_id)
     if inst is None:
         return
@@ -1662,6 +1761,60 @@ def render_captured_parameters_section(instance_id: str) -> None:
     )
 
     current_values = dict(inst.captured_parameters)
+
+    # ----- Ciclo 22.2c — Indicador de completitud por categoría -----
+    by_cat_count: Dict[str, Dict[str, int]] = {}
+    for field_key, field_def in CAPTURED_PARAMETER_FIELDS.items():
+        cat = field_def.get("category", "Otros")
+        cell = by_cat_count.setdefault(cat, {"filled": 0, "total": 0})
+        cell["total"] += 1
+        v = current_values.get(field_key)
+        is_filled = (
+            v is not None
+            and (not isinstance(v, str) or v.strip() != "")
+        )
+        if is_filled:
+            cell["filled"] += 1
+
+    total_filled = sum(c["filled"] for c in by_cat_count.values())
+    total_fields = sum(c["total"] for c in by_cat_count.values())
+    overall_pct = int(100 * total_filled / total_fields) if total_fields else 0
+
+    # Barra de progreso global
+    bar_color = "#10b981" if overall_pct >= 80 else "#f59e0b" if overall_pct >= 40 else "#ef4444"
+    st.markdown(
+        f'<div style="margin:8px 0;">'
+        f'<div style="display:flex;justify-content:space-between;font-size:12px;'
+        f'color:#475569;font-weight:600;margin-bottom:4px;">'
+        f'<span>Completitud del activo</span>'
+        f'<span style="color:{bar_color};">{total_filled}/{total_fields} campos · {overall_pct}%</span>'
+        f'</div>'
+        f'<div style="background:#f1f5f9;border-radius:999px;height:8px;overflow:hidden;">'
+        f'<div style="background:{bar_color};height:100%;width:{overall_pct}%;'
+        f'border-radius:999px;transition:width .3s;"></div>'
+        f'</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # Chips por categoría
+    chip_pieces = []
+    for cat in sorted(by_cat_count.keys()):
+        cell = by_cat_count[cat]
+        cat_pct = int(100 * cell["filled"] / cell["total"]) if cell["total"] else 0
+        cat_color = "#10b981" if cat_pct >= 80 else "#f59e0b" if cat_pct >= 40 else "#94a3b8"
+        cat_bg = f"{cat_color}1a"  # alpha
+        icon = _CATEGORY_ICONS.get(cat, "📋")
+        chip_pieces.append(
+            f'<span style="display:inline-block;padding:3px 10px;'
+            f'background:{cat_bg};color:{cat_color};border:1px solid {cat_color}55;'
+            f'border-radius:999px;font-size:11px;font-weight:600;'
+            f'margin-right:5px;margin-bottom:5px;">'
+            f'{icon} {cat} · {cell["filled"]}/{cell["total"]}</span>'
+        )
+    st.markdown(
+        f'<div style="margin:8px 0 14px;">{"".join(chip_pieces)}</div>',
+        unsafe_allow_html=True,
+    )
 
     # Panel de auto-cálculos en vivo (solo lectura)
     derived = compute_all_derived(current_values)
@@ -1724,8 +1877,11 @@ def render_captured_parameters_section(instance_id: str) -> None:
 
     with st.form("captured_params_form"):
         for category in sorted(by_category.keys()):
+            cell = by_cat_count.get(category, {"filled": 0, "total": 0})
+            cat_pct = int(100 * cell["filled"] / cell["total"]) if cell["total"] else 0
+            cat_icon = _CATEGORY_ICONS.get(category, "📋")
             with st.expander(
-                f"📋 {category}",
+                f"{cat_icon} {category} — {cell['filled']}/{cell['total']} ({cat_pct}%)",
                 expanded=(category in ("Cojinete - geometría", "Identificación")),
             ):
                 fields = by_category[category]
@@ -2103,8 +2259,9 @@ def main() -> None:
 
     if not instance_id:
         st.info(
-            "No hay máquina activa. Creá una desde el formulario de arriba "
-            "o seleccioná una desde el grid de máquinas (sidebar)."
+            "No hay máquina activa. Tocá **🧙 Abrir asistente de creación** "
+            "arriba para crear una nueva, o seleccioná una desde el grid "
+            "de máquinas / sidebar."
         )
         return
 

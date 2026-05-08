@@ -22,6 +22,10 @@ NAV_ITEMS = [
     {"label": "Machinery Library", "page": "pages/00_Machinery_Library.py"},
     {"label": "Load Data", "page": "pages/01_Load_Data.py"},
     {"label": "Tabular List", "page": "pages/01__Tabular_List.py"},
+    # Ciclo 23.1 — Live Monitoring (Tier 0 A): valores en tiempo real
+    # desde wm-collector → Modbus 3500/92 → Supabase live_readings.
+    # Diferenciador estratégico vs System1/AMS Suite (vectores 1X/2X gratis).
+    {"label": "🔴 Live Monitoring", "page": "pages/02_Live_Monitoring.py"},
     # Ciclo 15.1 — Machine Map (heatmap de severidad por sensor)
     {"label": "Machine Map", "page": "pages/01b_Machine_Map.py"},
     {"label": "Time Waveforms", "page": "pages/02_Time_Waveforms.py"},

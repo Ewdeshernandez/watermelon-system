@@ -135,8 +135,51 @@ def sensor_label(sensor: Dict[str, Any]) -> str:
     return f"{plane}_{direction or '?'}_{letter}"
 
 
+def unit_to_family(unit_native: str) -> str:
+    """
+    Ciclo 22.1 — Infiere familia de medida (Tabular) desde unit_native.
+
+    unit_native es la fuente de verdad de qué se está midiendo realmente:
+      - "mm/s RMS", "mm/s 0-pk", "in/s rms", "ips" → Velocity
+      - "g RMS", "g peak", "g pk", "m/s²", "m/s2" → Acceleration
+      - "mil pp", "µm pp", "um pp", "mil p-p"     → Proximity
+      - "pulses/rev", "pulses/r"                  → Phase Reference
+
+    Si la unidad no se reconoce, devuelve cadena vacía para que el caller
+    decida el fallback (típico: caer a sensor_type vía _TYPE_TO_FAMILY).
+    """
+    u = str(unit_native or "").lower().strip()
+    if not u:
+        return ""
+    # Velocity primero — "mm/s" puede contener "m/s" si chequeamos accel antes
+    if "mm/s" in u or "in/s" in u or u == "ips" or u.startswith("ips"):
+        return "Velocity"
+    # Acceleration: g, g rms, g peak, g pk, m/s², m/s2
+    if u == "g" or u.startswith("g ") or u.endswith(" g") or "g rms" in u or "g pk" in u or "g peak" in u or "g pp" in u or "m/s²" in u or "m/s2" in u:
+        return "Acceleration"
+    # Proximity: mil, µm, um (displacement)
+    if "mil" in u or "µm" in u or "um pp" in u or u in ("um", "µm"):
+        return "Proximity"
+    # Keyphasor
+    if "pulse" in u or "rev" in u and "/" in u:
+        return "Phase Reference"
+    return ""
+
+
 def sensor_unit_family(sensor: Dict[str, Any]) -> str:
-    """Devuelve la familia de medida en el lenguaje de Tabular List."""
+    """
+    Devuelve la familia de medida en el lenguaje de Tabular List.
+
+    Ciclo 22.1 — Prioridad: unit_native > sensor_type. Si el sensor está
+    declarado como 'accelerometer' pero su unit_native es 'mm/s RMS' (caso
+    real C-200-C), la familia debe ser Velocity, no Acceleration. La unit
+    es la fuente de verdad porque define cómo se interpreta y convierte
+    el dato. Esto elimina el bug donde Tabular caía a CSV legacy por
+    incoherencia type↔unit.
+    """
+    fam_from_unit = unit_to_family(sensor.get("unit_native", ""))
+    if fam_from_unit:
+        return fam_from_unit
     return _TYPE_TO_FAMILY.get(
         str(sensor.get("sensor_type", "") or "").lower(),
         "Auto",
@@ -783,6 +826,7 @@ __all__ = [
     "new_sensor",
     "sensor_label",
     "sensor_unit_family",
+    "unit_to_family",
     "resolve_sensor_for_point",
     "generate_standard_sensor_map",
 ]

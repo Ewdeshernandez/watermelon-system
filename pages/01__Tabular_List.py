@@ -626,26 +626,45 @@ def build_table_dataframe(
                 sensor_label_str = sensor_label(sensor_match)
 
         if sensor_match is not None:
-            # Usar valores granulares del sensor del mapa (Ciclo 14c.3)
+            # =====================================================
+            # Ciclo 22.1 — UNIT_NATIVE ES LA FUENTE DE VERDAD
+            # -----------------------------------------------------
+            # Cuando hay match con un sensor del mapa, el builder
+            # NUNCA cae a CSV legacy. Toda la fila se construye con
+            # los valores del sensor: unit_native manda sobre
+            # sensor_type cuando hay incoherencia (ej. C-200-C
+            # tiene sensor_type="accelerometer" pero unit_native=
+            # "mm/s RMS" → la familia real es Velocity).
+            # =====================================================
             sensor_type = str(sensor_match.get("sensor_type", "")).lower()
-            criterion_row = (
-                "API 670 + ISO 7919-3 / ISO 20816-3" if sensor_type == "proximity"
-                else "ISO 20816-3"
-            )
-            alarm_row = float(sensor_match.get("alarm", 0.0) or 0.0)
-            danger_row = float(sensor_match.get("danger", 0.0) or 0.0)
-            family_row = sensor_unit_family(sensor_match)
-            # Inferir el modo (RMS / 0-Peak / Peak-to-Peak) desde la
-            # unit_native del sensor para que las conversiones de RMS
-            # a display sean correctas. "g peak" → 0-Peak, "mil pp" →
-            # Peak-to-Peak, "mm/s RMS" → RMS.
             _unit_lower = str(sensor_match.get("unit_native", "")).lower()
+
+            # 1) Family — unit_native primero, sensor_type fallback
+            family_row = sensor_unit_family(sensor_match)
+
+            # 2) Overall Mode — desde unit_native (RMS/0-Peak/Peak-to-Peak)
             if "pp" in _unit_lower or "p-p" in _unit_lower or "peak-to-peak" in _unit_lower:
                 overall_mode_row = "Peak-to-Peak"
             elif "peak" in _unit_lower or "pk" in _unit_lower:
                 overall_mode_row = "0-Peak"
             else:
                 overall_mode_row = "RMS"
+
+            # 3) Criterion — proximity (API 670 + ISO 7919-3) sólo si
+            #    REALMENTE es displacement (mil/µm). Si el sensor está
+            #    marcado proximity pero la unit dice mm/s, NO aplicamos
+            #    API 670 — usamos ISO 20816-3 que rige velocity/accel.
+            _is_displacement_unit = ("mil" in _unit_lower or "µm" in _unit_lower
+                                     or "um pp" in _unit_lower or _unit_lower in ("um", "µm"))
+            criterion_row = (
+                "API 670 + ISO 7919-3 / ISO 20816-3"
+                if (sensor_type == "proximity" and _is_displacement_unit)
+                else "ISO 20816-3"
+            )
+
+            # 4) Setpoints individuales del sensor
+            alarm_row = float(sensor_match.get("alarm", 0.0) or 0.0)
+            danger_row = float(sensor_match.get("danger", 0.0) or 0.0)
         elif config_mode == "Criterion by Machine":
             machine_cfg = machine_settings.get(rec.machine, {})
             criterion_row = machine_cfg.get("criterion", criterion_default)
@@ -684,13 +703,24 @@ def build_table_dataframe(
         a10 = convert_pp_to_display(a10_pp, overall_mode_row)
         a20 = convert_pp_to_display(a20_pp, overall_mode_row)
 
-        # Ciclo 14c.3 — Unit Full: cuando hay sensor match, usamos
-        # directamente la unit_native del sensor (ej. "g peak", "mil pp").
-        # Cuando no, construimos legacy con `amplitude_unit + display_suffix`.
-        if sensor_match is not None and sensor_match.get("unit_native"):
-            unit_full = str(sensor_match["unit_native"]).strip()
-            unit_legacy = unit_full
+        # Ciclo 22.1 — Unit Full: si hubo sensor match, SIEMPRE respetamos
+        # el sensor (unit_native). NUNCA caemos a CSV legacy en ese caso,
+        # porque el CSV puede traer una unidad genérica del DCS que no
+        # refleja la cadena de calibración real (ej. Bently transmite
+        # mil pp en VT que físicamente miden mm/s).
+        if sensor_match is not None:
+            _u = str(sensor_match.get("unit_native", "") or "").strip()
+            if _u:
+                unit_full = _u
+                unit_legacy = _u
+            else:
+                # unit_native vacío: derivar desde sensor_type + display_mode
+                from core.sensor_map import _DEFAULT_UNIT_BY_TYPE  # type: ignore
+                _stype = str(sensor_match.get("sensor_type", "")).lower()
+                unit_legacy = _DEFAULT_UNIT_BY_TYPE.get(_stype, "")
+                unit_full = unit_legacy or display_suffix(overall_mode_row)
         else:
+            # Sin sensor map: comportamiento legacy CSV
             _suffix = display_suffix(overall_mode_row)
             unit_legacy = str(rec.amplitude_unit or "").strip()
             unit_full = f"{unit_legacy} {_suffix}".strip() if unit_legacy else _suffix
