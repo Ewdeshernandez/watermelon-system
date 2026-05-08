@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional
 # de api/app.py). Esto permite que api/services.py y api/auth.py
 # permanezcan testeables sin instalar FastAPI.
 try:
-    from fastapi import Depends, FastAPI, HTTPException, Header, Query
+    from fastapi import Depends, FastAPI, HTTPException, Header, Query, Response
     from fastapi.responses import JSONResponse
     _FASTAPI_AVAILABLE = True
 except ImportError:
@@ -39,6 +39,7 @@ except ImportError:
     HTTPException = None  # type: ignore
     Header = None  # type: ignore
     Query = None  # type: ignore
+    Response = None  # type: ignore
     JSONResponse = None  # type: ignore
 
 
@@ -203,6 +204,65 @@ def create_app() -> "FastAPI":
         api_key_hash: str = Depends(_api_key_dependency),
     ):
         return services.get_bearing_overlay(model=model, rpm=rpm, harmonics=harmonics)
+
+    # =========================================================
+    # Assets & Reports (Ciclo 19 — WhatsApp Asset Query)
+    # =========================================================
+    @app.get("/v1/assets", tags=["assets"],
+             summary="Lista activos con reportes archivados")
+    def assets_list(
+        limit: int = Query(default=200, ge=1, le=1000),
+        api_key_hash: str = Depends(_api_key_dependency),
+    ):
+        return {"items": services.list_archived_assets(limit=limit)}
+
+    @app.get("/v1/assets/{asset}/reports", tags=["assets"],
+             summary="Reportes archivados de un activo")
+    def asset_reports(
+        asset: str,
+        limit: int = Query(default=50, ge=1, le=500),
+        api_key_hash: str = Depends(_api_key_dependency),
+    ):
+        return {"items": services.list_reports_for_asset(asset=asset, limit=limit)}
+
+    @app.get("/v1/assets/{asset}/reports/latest/pdf", tags=["assets"],
+             summary="PDF binario del último reporte de un activo",
+             response_class=Response if _FASTAPI_AVAILABLE else None)
+    def asset_latest_report_pdf(
+        asset: str,
+        api_key_hash: str = Depends(_api_key_dependency),
+    ):
+        out = services.get_latest_report_pdf(asset)
+        if out is None:
+            raise HTTPException(status_code=404, detail="No reports found for asset")
+        filename = out["filename"]
+        return Response(
+            content=out["pdf_bytes"],
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "X-Archive-Id": out["archive_id"],
+            },
+        )
+
+    @app.get("/v1/reports/{archive_id:path}/pdf", tags=["assets"],
+             summary="PDF binario por archive_id directo",
+             response_class=Response if _FASTAPI_AVAILABLE else None)
+    def report_by_id_pdf(
+        archive_id: str,
+        api_key_hash: str = Depends(_api_key_dependency),
+    ):
+        out = services.get_report_pdf_by_id(archive_id)
+        if out is None:
+            raise HTTPException(status_code=404, detail="Report not found")
+        filename = out["filename"]
+        return Response(
+            content=out["pdf_bytes"],
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
 
     # =========================================================
     # Manejo global de errores
