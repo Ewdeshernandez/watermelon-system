@@ -330,6 +330,8 @@ def _build_reciprocating_sensor_map(state: Dict[str, Any]) -> List[Dict[str, Any
         plane_idx += 1
 
     # 2. Frame del compresor — 2 velocímetros (top + side)
+    # Patterns más permisivos (Ciclo 22.1a): cubren más variantes de naming
+    # de Bently Nevada, CSI 2140, ADRE, etc.
     frame_plane = plane_idx
     sensors.append(_with_position(new_sensor(
         plane=frame_plane, plane_label="Frame top", side="T",
@@ -337,7 +339,7 @@ def _build_reciprocating_sensor_map(state: Dict[str, Any]) -> List[Dict[str, Any
         sensor_type="velometer", unit_native="mm/s rms",
         alarm=float(state.get("velocity_alarm_mm_s", 4.5)),
         danger=float(state.get("velocity_danger_mm_s", 11.2)),
-        csv_match_pattern="*frame*top*",
+        csv_match_pattern="*frame*top*, *ftop*, *frame*tope*",
     )))
     sensors.append(_with_position(new_sensor(
         plane=frame_plane, plane_label="Frame side", side="L",
@@ -345,7 +347,7 @@ def _build_reciprocating_sensor_map(state: Dict[str, Any]) -> List[Dict[str, Any
         sensor_type="velometer", unit_native="mm/s rms",
         alarm=float(state.get("velocity_alarm_mm_s", 4.5)),
         danger=float(state.get("velocity_danger_mm_s", 11.2)),
-        csv_match_pattern="*frame*side*",
+        csv_match_pattern="*frame*side*, *frame*lat*, *fside*",
     )))
     plane_idx += 1
 
@@ -354,23 +356,31 @@ def _build_reciprocating_sensor_map(state: Dict[str, Any]) -> List[Dict[str, Any
     include_rod_drop = bool(state.get("include_rod_drop", True))
     for c in range(1, n_cyl + 1):
         cyl_label = f"Cilindro {c}"
-        # Crosshead acelerómetro
+        # Crosshead acelerómetro — pattern OR cubre múltiples órdenes y abreviaciones
+        crosshead_pat = (
+            f"*crosshead*cyl{c}*, *cyl{c}*crosshead*, *crosshead*c{c}*, "
+            f"*c{c}*crosshead*, *acc*cyl{c}*, *acel*c{c}*, *cylinder{c}*acc*"
+        )
         sensors.append(_with_position(new_sensor(
             plane=plane_idx, plane_label=cyl_label, side="T",
             angle_deg=0.0, direction="RAD",
             sensor_type="accelerometer", unit_native="g pk",
             alarm=float(state.get("accel_alarm_g", 4.5)),
             danger=float(state.get("accel_danger_g", 9.0)),
-            csv_match_pattern=f"*crosshead*cyl{c}*",
+            csv_match_pattern=crosshead_pat,
         )))
         # Rod drop (opcional)
         if include_rod_drop:
+            rd_pat = (
+                f"*rod*drop*cyl{c}*, *roddrop*{c}*, *rd*cyl{c}*, "
+                f"*rod*{c}*, *rd*c{c}*"
+            )
             sensors.append(_with_position(new_sensor(
                 plane=plane_idx, plane_label=f"{cyl_label} rod drop", side="B",
                 angle_deg=270.0, direction="Z",
                 sensor_type="proximity", unit_native="mil pp",
-                alarm=15.0, danger=25.0,  # típicos rod drop
-                csv_match_pattern=f"*rod*drop*cyl{c}*",
+                alarm=15.0, danger=25.0,
+                csv_match_pattern=rd_pat,
             )))
         plane_idx += 1
 
