@@ -281,7 +281,9 @@ def sensor_default_position(
     my_center = sum(LAYOUT["motor_y_pct"]) / 2
     cx1, cx2 = LAYOUT["compressor_x_pct"]
     cy1, cy2 = LAYOUT["compressor_y_pct"]
-    cyl_y1, cyl_y2 = LAYOUT["cylinder_y_pct"]
+    # Layout boxer: cilindros impares arriba, pares abajo
+    cyl_y1_top, cyl_y2_top = LAYOUT["cylinder_top_y_pct"]
+    cyl_y1_bot, cyl_y2_bot = LAYOUT["cylinder_bottom_y_pct"]
 
     # Motor
     if "motor" in plane_label:
