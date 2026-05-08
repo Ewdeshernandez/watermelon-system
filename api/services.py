@@ -264,12 +264,17 @@ _API_VIEWER_EMAIL = "api@watermelon-system"
 _API_VIEWER_ROLE = "admin"
 
 
-def list_archived_assets(limit: int = 200) -> List[Dict[str, Any]]:
+def list_archived_assets(limit: int = 200, scope=None) -> List[Dict[str, Any]]:
     """
     Devuelve la lista de activos únicos que tienen reportes archivados.
-    Útil para que un cliente API o el bot WhatsApp sepan qué activos
-    pueden consultarse.
+
+    Args:
+        limit: máximo de activos.
+        scope: CallerScope (opcional). Si scope.role=="client", filtra
+               por los match_strings de ese cliente. Admin/specialist
+               ven todo. None equivale a admin (compat retro).
     """
+    from core.clients import filter_matches
     from core.reports_archive import list_archived_reports
 
     reports = list_archived_reports(
@@ -277,6 +282,13 @@ def list_archived_assets(limit: int = 200) -> List[Dict[str, Any]]:
         viewer_role=_API_VIEWER_ROLE,
         limit=max(int(limit) * 5, 200),  # cap mayor para deduplicar
     )
+
+    # Aplicar filtro por scope (Ciclo 20A multi-tenant ACL)
+    if scope is not None and not scope.sees_everything:
+        reports = [
+            r for r in reports
+            if filter_matches(r.get("report_meta") or {}, scope)
+        ]
 
     seen: Dict[str, Dict[str, Any]] = {}
     for r in reports:
@@ -317,11 +329,12 @@ def list_archived_assets(limit: int = 200) -> List[Dict[str, Any]]:
     return out[:limit]
 
 
-def list_reports_for_asset(asset: str, limit: int = 50) -> List[Dict[str, Any]]:
+def list_reports_for_asset(asset: str, limit: int = 50, scope=None) -> List[Dict[str, Any]]:
     """
     Lista los reportes archivados de un activo específico (por nombre).
-    Devuelve metadata sin los bytes del PDF (para no inflar la respuesta).
+    Aplica filtro por scope (cliente solo ve los suyos).
     """
+    from core.clients import filter_matches
     from core.reports_archive import list_archived_reports
 
     if not asset:
@@ -333,6 +346,12 @@ def list_reports_for_asset(asset: str, limit: int = 50) -> List[Dict[str, Any]]:
         asset_filter=asset,
         limit=int(limit),
     )
+
+    if scope is not None and not scope.sees_everything:
+        reports = [
+            r for r in reports
+            if filter_matches(r.get("report_meta") or {}, scope)
+        ]
 
     out = []
     for r in reports:
@@ -354,15 +373,12 @@ def list_reports_for_asset(asset: str, limit: int = 50) -> List[Dict[str, Any]]:
     return out
 
 
-def get_latest_report_pdf(asset: str) -> Optional[Dict[str, Any]]:
+def get_latest_report_pdf(asset: str, scope=None) -> Optional[Dict[str, Any]]:
     """
-    Devuelve metadata + bytes del último reporte archivado para un activo.
-    Útil para que el bot WhatsApp pueda enviarlo como documento.
-
-    Returns:
-        dict con keys: archive_id, filename, pdf_bytes (bytes), metadata
-        o None si no existe ningún reporte para el activo.
+    Devuelve metadata + bytes del último reporte archivado para un activo,
+    respetando ACL multi-tenant: cliente solo accede a los suyos.
     """
+    from core.clients import filter_matches
     from core.reports_archive import get_archived_pdf_bytes, list_archived_reports
 
     if not asset:
@@ -372,8 +388,14 @@ def get_latest_report_pdf(asset: str) -> Optional[Dict[str, Any]]:
         viewer_email=_API_VIEWER_EMAIL,
         viewer_role=_API_VIEWER_ROLE,
         asset_filter=asset,
-        limit=1,
+        limit=10,  # traemos varios y filtramos por ACL
     )
+
+    if scope is not None and not scope.sees_everything:
+        reports = [
+            r for r in reports
+            if filter_matches(r.get("report_meta") or {}, scope)
+        ]
 
     if not reports:
         return None
