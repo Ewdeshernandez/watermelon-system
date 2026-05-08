@@ -253,6 +253,160 @@ def list_bearings_summary(limit: int = 200) -> List[Dict[str, Any]]:
     return out
 
 
+# =============================================================
+# Asset & Report queries (Ciclo 19 — WhatsApp Asset Query)
+# =============================================================
+
+# Viewer "API admin" — los endpoints de la API REST consumen el archivo
+# como un usuario admin global. Si en el futuro se quiere ACL por
+# API key, se reemplaza por una resolución dinámica.
+_API_VIEWER_EMAIL = "api@watermelon-system"
+_API_VIEWER_ROLE = "admin"
+
+
+def list_archived_assets(limit: int = 200) -> List[Dict[str, Any]]:
+    """
+    Devuelve la lista de activos únicos que tienen reportes archivados.
+    Útil para que un cliente API o el bot WhatsApp sepan qué activos
+    pueden consultarse.
+    """
+    from core.reports_archive import list_archived_reports
+
+    reports = list_archived_reports(
+        viewer_email=_API_VIEWER_EMAIL,
+        viewer_role=_API_VIEWER_ROLE,
+        limit=max(int(limit) * 5, 200),  # cap mayor para deduplicar
+    )
+
+    seen: Dict[str, Dict[str, Any]] = {}
+    for r in reports:
+        asset = (r.get("asset") or r.get("instance_id") or "").strip()
+        if not asset:
+            continue
+        key = asset.lower()
+        if key in seen:
+            seen[key]["report_count"] += 1
+            existing_date = seen[key].get("latest_report_date", "")
+            current_date = r.get("archived_at", "")
+            if current_date > existing_date:
+                seen[key]["latest_report_date"] = current_date
+                seen[key]["latest_archive_id"] = r.get("archive_id", "")
+        else:
+            seen[key] = {
+                "asset": asset,
+                "client": r.get("client", ""),
+                "report_count": 1,
+                "latest_report_date": r.get("archived_at", ""),
+                "latest_archive_id": r.get("archive_id", ""),
+            }
+
+    out = sorted(seen.values(), key=lambda x: x["asset"].lower())
+    return out[:limit]
+
+
+def list_reports_for_asset(asset: str, limit: int = 50) -> List[Dict[str, Any]]:
+    """
+    Lista los reportes archivados de un activo específico (por nombre).
+    Devuelve metadata sin los bytes del PDF (para no inflar la respuesta).
+    """
+    from core.reports_archive import list_archived_reports
+
+    if not asset:
+        return []
+
+    reports = list_archived_reports(
+        viewer_email=_API_VIEWER_EMAIL,
+        viewer_role=_API_VIEWER_ROLE,
+        asset_filter=asset,
+        limit=int(limit),
+    )
+
+    return [
+        {
+            "archive_id": r.get("archive_id", ""),
+            "asset": r.get("asset", ""),
+            "client": r.get("client", ""),
+            "title": r.get("title", ""),
+            "archived_at": r.get("archived_at", ""),
+            "owner_email": r.get("owner_email", ""),
+            "size_bytes": r.get("size_bytes"),
+            "shared_with_client": r.get("shared_with_client", False),
+        }
+        for r in reports
+    ]
+
+
+def get_latest_report_pdf(asset: str) -> Optional[Dict[str, Any]]:
+    """
+    Devuelve metadata + bytes del último reporte archivado para un activo.
+    Útil para que el bot WhatsApp pueda enviarlo como documento.
+
+    Returns:
+        dict con keys: archive_id, filename, pdf_bytes (bytes), metadata
+        o None si no existe ningún reporte para el activo.
+    """
+    from core.reports_archive import get_archived_pdf_bytes, list_archived_reports
+
+    if not asset:
+        return None
+
+    reports = list_archived_reports(
+        viewer_email=_API_VIEWER_EMAIL,
+        viewer_role=_API_VIEWER_ROLE,
+        asset_filter=asset,
+        limit=1,
+    )
+
+    if not reports:
+        return None
+
+    latest = reports[0]
+    archive_id = latest.get("archive_id", "")
+    if not archive_id:
+        return None
+
+    pdf_bytes = get_archived_pdf_bytes(
+        archive_id,
+        viewer_email=_API_VIEWER_EMAIL,
+        viewer_role=_API_VIEWER_ROLE,
+    )
+    if pdf_bytes is None:
+        return None
+
+    filename = (latest.get("title") or archive_id.split("/")[-1] or "report") + ".pdf"
+    return {
+        "archive_id": archive_id,
+        "filename": filename,
+        "pdf_bytes": pdf_bytes,
+        "metadata": latest,
+    }
+
+
+def get_report_pdf_by_id(archive_id: str) -> Optional[Dict[str, Any]]:
+    """Devuelve PDF bytes + metadata por archive_id directo."""
+    from core.reports_archive import get_archived_metadata, get_archived_pdf_bytes
+
+    if not archive_id:
+        return None
+
+    pdf_bytes = get_archived_pdf_bytes(
+        archive_id,
+        viewer_email=_API_VIEWER_EMAIL,
+        viewer_role=_API_VIEWER_ROLE,
+    )
+    if pdf_bytes is None:
+        return None
+
+    metadata = get_archived_metadata(archive_id) or {}
+    filename = (metadata.get("title") or archive_id.split("/")[-1] or "report") + ".pdf"
+    return {
+        "archive_id": archive_id,
+        "filename": filename,
+        "pdf_bytes": pdf_bytes,
+        "metadata": metadata,
+    }
+
+
 def get_bearing_overlay(model: str, rpm: float, harmonics: int = 3) -> Dict[str, Any]:
     """
     Cálculo de frecuencias de falla para un rodamiento dado a una RPM.
