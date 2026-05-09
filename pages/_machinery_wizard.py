@@ -647,13 +647,16 @@ st.caption(
 state = _wizard_state()
 current = state["step"]
 
-# Stepper visual
+# Stepper visual.
+# Ciclo 23.6 — orden corregido: primero unidades & setpoints, después editor
+# de sensores (así el editor ya muestra los setpoints OEM elegidos por el
+# usuario y no hay que ir-volver entre pasos).
 step_labels = [
     "1 · Tipo",
     "2 · Tren",
     "3 · Instrumentación",
-    "4 · Editar sensores",
-    "5 · Unidades & setpoints",
+    "4 · Unidades & setpoints",
+    "5 · Editar sensores",
     "6 · Datos del activo",
 ]
 step_cols = st.columns(TOTAL_STEPS)
@@ -1060,102 +1063,28 @@ elif current == 3:
     with col_nav[2]:
         if st.button("Siguiente →", type="primary", use_container_width=True,
                      key="wiz_step3_next"):
-            # Generar el mapa final ANTES de ir al editor del paso 4
-            state["sensors_override"] = _build_full_sensor_map(state)
+            # Ciclo 23.6 — el mapa ya NO se genera acá. Se genera al pasar
+            # del nuevo paso 4 (Unidades & setpoints) al nuevo paso 5
+            # (Editor de sensores) para que los setpoints elegidos por el
+            # usuario se apliquen desde la primera renderización del editor.
             _go_next()
             st.rerun()
 
 
 # =============================================================
-# PASO 4 — Editor de sensores generados (Ciclo 21.1)
+# PASO 4 — Unidades & setpoints (orden corregido Ciclo 23.6)
+# Antes era el paso 5. Lo movimos antes del editor de sensores
+# para que el editor muestre los setpoints reales elegidos por el
+# usuario desde la primera renderización (no defaults ISO).
 # =============================================================
 
 elif current == 4:
-    st.subheader("Paso 4 · Ajustar sensores generados")
-    st.caption(
-        "El sistema generó automáticamente el mapa basado en lo que elegiste. "
-        "Acá podés cambiar lados, ángulos, tipos, unidades, setpoints y patrones "
-        "de match al CSV. Si todo está bien, dale Siguiente."
-    )
-
-    sensors_override = state.get("sensors_override")
-    if not sensors_override:
-        st.warning("No hay sensores generados. Volvé al paso 3.")
-    else:
-        import pandas as pd
-
-        # ===== Visual editor (click-to-place) — solo para reciprocantes =====
-        is_recip = state.get("category") == "reciprocating_compressor"
-        if is_recip:
-            tab_visual, tab_table = st.tabs([
-                "🎨 Editor visual (click para reposicionar)",
-                "📋 Tabla de sensores",
-            ])
-
-            with tab_visual:
-                st.caption(
-                    "Hacé click sobre la imagen para mover el sensor seleccionado a "
-                    "esa posición. El esquema se genera según N cilindros + N "
-                    "cojinetes del motor."
-                )
-                _render_recip_visual_editor(state, sensors_override)
-
-            with tab_table:
-                _render_sensors_table_editor(state, sensors_override)
-        else:
-            _render_sensors_table_editor(state, sensors_override)
-        edited = state.get("_wizard_table_edited", None)
-
-        col_actions = st.columns([1, 1, 2])
-        with col_actions[0]:
-            if st.button("🔄 Regenerar desde paso 3",
-                         help="Descarta cambios y reconstruye el mapa estándar",
-                         key="wiz_regen_sensors"):
-                state["sensors_override"] = _build_full_sensor_map(state)
-                st.rerun()
-
-    col_nav = st.columns([1, 2, 1])
-    with col_nav[0]:
-        if st.button("← Atrás", use_container_width=True, key="wiz_step4_prev"):
-            _go_prev()
-            st.rerun()
-    with col_nav[2]:
-        if st.button("Siguiente →", type="primary", use_container_width=True,
-                     key="wiz_step4_next"):
-            # Al avanzar, persistir lo que esté en _wizard_table_edited si vino del editor de tabla
-            edited_df = state.get("_wizard_table_edited")
-            if edited_df is not None and state.get("sensors_override"):
-                edited_records = edited_df.to_dict(orient="records")
-                originals_by_idx = {i: s for i, s in enumerate(state["sensors_override"])}
-                final_sensors = []
-                for i, row in enumerate(edited_records):
-                    base = dict(originals_by_idx.get(i, {}))
-                    base.update({
-                        "plane_label": row.get("plane_label", ""),
-                        "side": row.get("side", "L"),
-                        "angle_deg": float(row.get("angle_deg", 45.0)),
-                        "direction": row.get("direction", "Y"),
-                        "sensor_type": row.get("sensor_type", "proximity"),
-                        "unit_native": row.get("unit_native", ""),
-                        "alarm": float(row.get("alarm", 0.0)),
-                        "danger": float(row.get("danger", 0.0)),
-                        "csv_match_pattern": row.get("csv_match_pattern", ""),
-                    })
-                    final_sensors.append(base)
-                state["sensors_override"] = final_sensors
-            _go_next()
-            st.rerun()
-
-# =============================================================
-# PASO 5 — Unidades & setpoints
-# =============================================================
-
-elif current == 5:
-    st.subheader("Paso 5 · Unidades y setpoints")
+    st.subheader("Paso 4 · Unidades y setpoints")
     st.caption(
         "Define las unidades en que reporta cada tipo de sensor, y los niveles "
         "alarm/danger. Estos valores son la fuente de verdad — Tabular List, "
-        "Trends y Reports los respetan."
+        "Trends y Reports los respetan. En el siguiente paso podrás ajustar "
+        "sensor por sensor si alguno tiene umbrales distintos al estándar."
     )
 
     col_a, col_b, col_c = st.columns(3)
@@ -1247,17 +1176,25 @@ elif current == 5:
 
     col_nav = st.columns([1, 2, 1])
     with col_nav[0]:
-        if st.button("← Atrás", use_container_width=True, key="wiz_step5_prev"):
+        if st.button("← Atrás", use_container_width=True, key="wiz_step4_prev"):
             _go_prev()
             st.rerun()
     with col_nav[2]:
         if st.button("Siguiente →", type="primary", use_container_width=True,
-                     key="wiz_step5_next"):
-            # FIX: aplicar las unidades + setpoints elegidos en este paso
-            # a la lista sensors_override existente. Antes este paso solo
-            # guardaba en state pero NUNCA propagaba los valores a los
-            # sensores — por eso quedaban con los defaults ISO genéricos.
+                     key="wiz_step4_next"):
+            # Ciclo 23.6 — al pasar de Unidades & setpoints (nuevo paso 4) al
+            # editor de sensores (nuevo paso 5):
+            #   1) Si todavía no hay sensores_override, construirlo con
+            #      _build_full_sensor_map (que ya lee las unidades / setpoints
+            #      de state).
+            #   2) Si ya existe (usuario volvió desde paso 5 a re-ajustar
+            #      setpoints), recorrer la lista actual y propagar las
+            #      nuevas unidades + alarm/danger por familia, preservando
+            #      los demás campos (lados, ángulos, csv_match_pattern, etc.).
             sensors_list = state.get("sensors_override") or []
+            if not sensors_list:
+                sensors_list = _build_full_sensor_map(state)
+
             disp_unit = state.get("displacement_unit", "mil pp")
             vel_unit = state.get("velocity_unit", "mm/s pk")
             acc_unit = state.get("acceleration_unit", "g pk")
@@ -1285,6 +1222,113 @@ elif current == 5:
                 # keyphasor: no toca setpoints (es referencia, no medición)
             state["sensors_override"] = sensors_list
 
+            _go_next()
+            st.rerun()
+
+
+# =============================================================
+# PASO 5 — Editor de sensores generados (orden corregido Ciclo 23.6)
+# Sensores ya vienen con unidades y setpoints del paso 4. Acá el
+# usuario puede ajustar sensor por sensor (lados, ángulos, csv match
+# pattern). Si cambia setpoints/unidades por sensor, esos overrides
+# se respetan (no se sobreescriben con los del paso 4).
+# =============================================================
+
+elif current == 5:
+    st.subheader("Paso 5 · Ajustar sensores generados")
+    st.caption(
+        "Sensores generados con las unidades y setpoints del paso anterior. "
+        "Acá podés ajustar individualmente lados, ángulos, tipos, unidades y "
+        "patrones de match al CSV. Si un sensor tiene umbrales distintos al "
+        "estándar (ej. un canal calibrado distinto), editalo en la tabla."
+    )
+
+    sensors_override = state.get("sensors_override")
+    if not sensors_override:
+        st.warning("No hay sensores generados. Volvé al paso 4 (unidades) y dale Siguiente.")
+    else:
+        import pandas as pd
+
+        # Editor visual click-to-place solo para reciprocantes
+        is_recip = state.get("category") == "reciprocating_compressor"
+        if is_recip:
+            tab_visual, tab_table = st.tabs([
+                "🎨 Editor visual (click para reposicionar)",
+                "📋 Tabla de sensores",
+            ])
+            with tab_visual:
+                st.caption(
+                    "Hacé click sobre la imagen para mover el sensor seleccionado a "
+                    "esa posición. El esquema se genera según N cilindros + N "
+                    "cojinetes del motor."
+                )
+                _render_recip_visual_editor(state, sensors_override)
+            with tab_table:
+                _render_sensors_table_editor(state, sensors_override)
+        else:
+            _render_sensors_table_editor(state, sensors_override)
+
+        col_actions = st.columns([1, 1, 2])
+        with col_actions[0]:
+            if st.button("🔄 Regenerar desde paso 4",
+                         help="Descarta cambios y reconstruye el mapa con las unidades del paso 4",
+                         key="wiz_regen_sensors"):
+                state["sensors_override"] = _build_full_sensor_map(state)
+                # Aplicar los setpoints del paso 4 al nuevo mapa
+                disp_unit = state.get("displacement_unit", "mil pp")
+                vel_unit = state.get("velocity_unit", "mm/s pk")
+                acc_unit = state.get("acceleration_unit", "g pk")
+                prox_alarm = float(state.get("proximity_alarm_mil_pp", 4.0))
+                prox_danger = float(state.get("proximity_danger_mil_pp", 6.0))
+                vel_alarm = float(state.get("velocity_alarm_mm_s", 4.5))
+                vel_danger = float(state.get("velocity_danger_mm_s", 11.2))
+                acc_alarm = float(state.get("accel_alarm_g", 4.5))
+                acc_danger = float(state.get("accel_danger_g", 9.0))
+                for s in state["sensors_override"]:
+                    stype = (s.get("sensor_type") or "").lower()
+                    if stype == "proximity":
+                        s["unit_native"] = disp_unit
+                        s["alarm"] = prox_alarm
+                        s["danger"] = prox_danger
+                    elif stype in ("velocity", "velometer"):
+                        s["unit_native"] = vel_unit
+                        s["alarm"] = vel_alarm
+                        s["danger"] = vel_danger
+                    elif stype == "accelerometer":
+                        s["unit_native"] = acc_unit
+                        s["alarm"] = acc_alarm
+                        s["danger"] = acc_danger
+                st.rerun()
+
+    col_nav = st.columns([1, 2, 1])
+    with col_nav[0]:
+        if st.button("← Atrás", use_container_width=True, key="wiz_step5_prev"):
+            _go_prev()
+            st.rerun()
+    with col_nav[2]:
+        if st.button("Siguiente →", type="primary", use_container_width=True,
+                     key="wiz_step5_next"):
+            # Persistir edits del data_editor antes de avanzar.
+            edited_df = state.get("_wizard_table_edited")
+            if edited_df is not None and state.get("sensors_override"):
+                edited_records = edited_df.to_dict(orient="records")
+                originals_by_idx = {i: s for i, s in enumerate(state["sensors_override"])}
+                final_sensors = []
+                for i, row in enumerate(edited_records):
+                    base = dict(originals_by_idx.get(i, {}))
+                    base.update({
+                        "plane_label": row.get("plane_label", ""),
+                        "side": row.get("side", "L"),
+                        "angle_deg": float(row.get("angle_deg", 45.0)),
+                        "direction": row.get("direction", "Y"),
+                        "sensor_type": row.get("sensor_type", "proximity"),
+                        "unit_native": row.get("unit_native", ""),
+                        "alarm": float(row.get("alarm", 0.0)),
+                        "danger": float(row.get("danger", 0.0)),
+                        "csv_match_pattern": row.get("csv_match_pattern", ""),
+                    })
+                    final_sensors.append(base)
+                state["sensors_override"] = final_sensors
             _go_next()
             st.rerun()
 
