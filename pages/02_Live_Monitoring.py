@@ -526,28 +526,42 @@ def render_sensor_map_hero(
             f"({info.get('source', 'n/a')})"
         )
 
-        # ===== Diseño limpio: dot + label minúsculo arriba (sin recuadro)
-        # El valor numérico vive en la tabla "Canales en Vivo" y en el
-        # tooltip del hover. El esquema es para conciencia espacial
-        # (¿dónde físicamente está el sensor en alarma?), no para mostrar
-        # números encima del activo.
+        # ===== Diseño System1: label + valor compacto al lado del dot
+        # Sin recuadros gigantes (esos eran horribles). Solo texto con
+        # halo blanco (paint-order:stroke) que se lee sobre cualquier
+        # fondo del render. Inspirado en cómo Bently System1 etiqueta
+        # cada sensor con su valor numérico junto al dot.
+        if status != "No Data" and val_str != "—":
+            inline_text = f"{label} {val_str}"
+        else:
+            inline_text = label
+
         dots_svg_parts.append(
             f'<g><title>{title}</title>'
-            # Halo translúcido (color por severidad)
+            # Halo translúcido del color del estado
             f'<circle cx="{cx}" cy="{cy}" r="2.6" fill="{fill}" fill-opacity="0.20" '
             f'stroke="{fill}" stroke-width="0.25" stroke-opacity="0.45"/>'
-            # Dot principal con borde blanco para contraste sobre cualquier fondo
+            # Dot interno con borde blanco
             f'<circle cx="{cx}" cy="{cy}" r="1.4" fill="{fill}" stroke="white" '
             f'stroke-width="0.55">{anim}</circle>'
-            # Label discreto del sensor (solo el code, sin valor) — texto
-            # con paint-order:stroke para que se lea sobre cualquier fondo.
-            f'<text x="{cx}" y="{cy - 3.2}" text-anchor="middle" '
-            f'font-size="1.7" font-weight="700" '
+            # Texto inline "label valor" arriba del dot
+            f'<text x="{cx}" y="{cy - 3.4}" text-anchor="middle" '
+            f'font-size="1.85" font-weight="800" '
             f'font-family="SF Mono, Menlo, Consolas, monospace" '
-            f'fill="#0f172a" letter-spacing="-0.05" '
-            f'style="paint-order:stroke;stroke:white;stroke-width:0.55;'
-            f'stroke-linejoin:round;">{label}</text>'
-            f'</g>'
+            f'fill="{fill}" letter-spacing="-0.04" '
+            f'style="paint-order:stroke;stroke:white;stroke-width:0.7;'
+            f'stroke-linejoin:round;">{inline_text}</text>'
+            # Unidad chica debajo del label (si hay valor real)
+            + (
+                f'<text x="{cx}" y="{cy + 4.2}" text-anchor="middle" '
+                f'font-size="1.3" font-weight="500" '
+                f'font-family="SF Mono, Menlo, monospace" '
+                f'fill="#475569" letter-spacing="-0.03" '
+                f'style="paint-order:stroke;stroke:white;stroke-width:0.55;'
+                f'stroke-linejoin:round;">{unit}</text>'
+                if (status != "No Data" and unit) else ''
+            )
+            + '</g>'
         )
 
     if not has_position:
@@ -682,10 +696,16 @@ def render_alarm_strip(rendered_rows: List[Dict[str, Any]]) -> None:
 # KPIs
 # ============================================================
 
-def render_kpi_strip(
+def render_status_bar(
     latest: List[Dict[str, Any]],
     severity_summary: Dict[str, int],
 ) -> None:
+    """
+    Status bar fina (1 línea) con KPIs separados por divisores. Reemplaza
+    las 4 cards gigantes que ocupaban demasiado espacio y se veían tipo
+    'PowerPoint'. Inspirada en Emerson AMS Machine Works + breadcrumb
+    pattern de aplicaciones SCADA modernas.
+    """
     direct_rows = [r for r in latest if r.get("metric") == "Direct"]
     speed_row = next(
         (r for r in latest if (r.get("variable") or "").lower().startswith("velocidad")),
@@ -693,8 +713,8 @@ def render_kpi_strip(
     )
     speed_val = speed_row.get("value") if speed_row else None
     speed_txt = f"{float(speed_val):.0f}" if speed_val is not None else "—"
-
     n_direct = len(direct_rows)
+
     if latest:
         min_age = min(_seconds_since(r["captured_at"]) for r in latest)
         age_txt = _format_age(
@@ -708,60 +728,62 @@ def render_kpi_strip(
     n_alarm = severity_summary.get("Alarma", 0)
     n_danger = severity_summary.get("Danger", 0)
     alarms_total = n_alarm + n_danger
-    alarms_color = "#22c55e" if alarms_total == 0 else ("#f59e0b" if n_danger == 0 else "#ef4444")
-    alarms_sub = (
-        "Todo en zona normal" if alarms_total == 0
-        else f"{n_alarm} alarma{'s' if n_alarm != 1 else ''} · {n_danger} danger"
+    if alarms_total == 0:
+        alarms_color = "#22c55e"
+        alarms_text = "Sin alarmas"
+    elif n_danger == 0:
+        alarms_color = "#f59e0b"
+        alarms_text = f"{n_alarm} alarma{'s' if n_alarm != 1 else ''}"
+    else:
+        alarms_color = "#ef4444"
+        alarms_text = f"{n_danger} danger · {n_alarm} alarma{'s' if n_alarm != 1 else ''}"
+
+    st.markdown(
+        textwrap.dedent(
+            f"""
+            <div style="
+                display: flex;
+                align-items: center;
+                gap: 28px;
+                padding: 10px 16px;
+                margin: 4px 0 16px 0;
+                background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+                border: 1px solid #e2e8f0;
+                border-radius: 10px;
+                font-size: 13px;
+                color: #0f172a;
+                flex-wrap: wrap;
+            ">
+                <span style="display:inline-flex;align-items:center;gap:6px;">
+                    <span style="color:#64748b;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;font-size:10px;">Velocidad</span>
+                    <span style="font-weight:800;font-variant-numeric:tabular-nums;">{speed_txt}</span>
+                    <span style="color:#94a3b8;font-size:11px;">rpm</span>
+                </span>
+                <span style="color:#cbd5e1;">·</span>
+                <span style="display:inline-flex;align-items:center;gap:6px;">
+                    <span style="color:#64748b;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;font-size:10px;">Sensores</span>
+                    <span style="font-weight:800;">{n_direct}</span>
+                    <span style="color:#94a3b8;font-size:11px;">activos</span>
+                </span>
+                <span style="color:#cbd5e1;">·</span>
+                <span style="display:inline-flex;align-items:center;gap:6px;">
+                    <span style="color:#64748b;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;font-size:10px;">Última lectura</span>
+                    <span style="font-weight:800;color:{age_color};">hace {age_txt}</span>
+                </span>
+                <span style="color:#cbd5e1;">·</span>
+                <span style="display:inline-flex;align-items:center;gap:6px;">
+                    <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{alarms_color};"></span>
+                    <span style="font-weight:700;color:{alarms_color};">{alarms_text}</span>
+                </span>
+            </div>
+            """
+        ).strip(),
+        unsafe_allow_html=True,
     )
 
-    cols = st.columns(4, gap="medium")
-    with cols[0]:
-        st.markdown(
-            f"""
-            <div class="wm-kpi-card">
-                <div class="wm-kpi-icon">⚡</div>
-                <div class="wm-kpi-label">Velocidad</div>
-                <div class="wm-kpi-value">{speed_txt} <span style="font-size:13px;color:#64748b;">rpm</span></div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with cols[1]:
-        st.markdown(
-            f"""
-            <div class="wm-kpi-card">
-                <div class="wm-kpi-icon">📡</div>
-                <div class="wm-kpi-label">Sensores reportando</div>
-                <div class="wm-kpi-value">{n_direct}</div>
-                <div class="wm-kpi-sub">canales Direct activos</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with cols[2]:
-        st.markdown(
-            f"""
-            <div class="wm-kpi-card">
-                <div class="wm-kpi-icon">⏱️</div>
-                <div class="wm-kpi-label">Última lectura</div>
-                <div class="wm-kpi-value" style="color:{age_color};">hace {age_txt}</div>
-                <div class="wm-kpi-sub">poll cada ~10s</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-    with cols[3]:
-        st.markdown(
-            f"""
-            <div class="wm-kpi-card">
-                <div class="wm-kpi-icon">🚨</div>
-                <div class="wm-kpi-label">Alarmas activas</div>
-                <div class="wm-kpi-value" style="color:{alarms_color};">{alarms_total}</div>
-                <div class="wm-kpi-sub">{alarms_sub}</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+
+# Compatibilidad con código que aún llame a render_kpi_strip
+render_kpi_strip = render_status_bar
 
 
 # ============================================================
