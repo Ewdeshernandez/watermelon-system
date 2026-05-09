@@ -604,9 +604,36 @@ def _render_visual_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) 
 
     selected_idx = state.get("_wiz_selected_sensor_idx", -1)
 
+    # Si los sensores no tienen x_pct/y_pct seteados, computamos defaults
+    # heurísticos según el plano + dirección para que el primer render
+    # tenga sensores ya distribuidos lógicamente sobre el activo (no todos
+    # apilados en 50%, 50%).
+    if not is_recip:
+        from core.train_schematic import sensor_default_position as _train_default_pos
+    n_d_planes = int(state.get("driver_planes", 2))
+    n_dn_planes = int(state.get("driven_planes", 2))
+
     for idx, s in enumerate(sensors):
-        x_pct = float(s.get("x_pct") or 50.0)
-        y_pct = float(s.get("y_pct") or 50.0)
+        # Resolver coordenadas iniciales si están en None / faltantes
+        raw_x = s.get("x_pct")
+        raw_y = s.get("y_pct")
+        if raw_x is None or raw_y is None:
+            if not is_recip:
+                dx, dy = _train_default_pos(s, n_d_planes, n_dn_planes)
+            else:
+                dx, dy = 50.0, 50.0
+            if raw_x is None:
+                s["x_pct"] = dx
+            if raw_y is None:
+                s["y_pct"] = dy
+        try:
+            x_pct = float(s.get("x_pct") or 50.0)
+        except Exception:
+            x_pct = 50.0
+        try:
+            y_pct = float(s.get("y_pct") or 50.0)
+        except Exception:
+            y_pct = 50.0
         x = int(width * x_pct / 100)
         y = int(height * y_pct / 100)
         c = color_by_type.get(s.get("sensor_type", ""), "#64748b")
@@ -644,10 +671,19 @@ def _render_visual_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) 
     with col_list:
         st.markdown("**Sensores** (click para seleccionar y reposicionar)")
         for idx, s in enumerate(sensors):
-            label = s.get("plane_label", "")
-            stype = s.get("sensor_type", "")
-            xp = s.get("x_pct", 50.0)
-            yp = s.get("y_pct", 50.0)
+            label = s.get("plane_label", "") or ""
+            stype = s.get("sensor_type", "") or ""
+            # Defensive: dict.get(key, default) NO usa default cuando el key
+            # existe con valor None (caso normal cuando _build_full_sensor_map
+            # no setea x_pct/y_pct iniciales). Forzamos float con fallback.
+            try:
+                xp = float(s.get("x_pct") or 50.0)
+            except Exception:
+                xp = 50.0
+            try:
+                yp = float(s.get("y_pct") or 50.0)
+            except Exception:
+                yp = 50.0
             sel_str = "🎯 " if idx == selected_idx else ""
             btn_label = f"{sel_str}#{idx+1} · {label} · {stype} ({xp:.0f}%, {yp:.0f}%)"
             if st.button(btn_label, key=f"wiz_sel_sensor_{idx}",
