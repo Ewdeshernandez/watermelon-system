@@ -380,16 +380,18 @@ def recip_compressor_boxer_2cyl(
       - Shaft entra por la izquierda (acoplado al motor con coupling rígido).
     """
     W, H = 360, 240
+    # cy fijo en 100 para que el shaft quede colineal con driver + coupling
+    # (todos los iconos del catálogo comparten esa convención).
+    cy = y_offset + 100
+    crank_h = 50
+    crank_y = cy - crank_h / 2
     crank_x = x_offset + 110
     crank_w = 140
-    crank_h = 50
-    crank_y = y_offset + (H - crank_h) / 2
-    cy = crank_y + crank_h / 2  # centro vertical = línea del cigüeñal
     stroke = COLORS["driven_stroke"]
 
     # Posiciones de los cilindros (centrados horizontalmente sobre el crank)
     cyl_cx = crank_x + crank_w / 2
-    cyl_length = 70
+    cyl_length = 60   # ajustado a 60 para que cilindros queden dentro del viewBox
     cyl_bore = 40
     c1_cy = crank_y - 10           # extremo inferior del cilindro arriba
     c2_cy = crank_y + crank_h + 10  # extremo superior del cilindro abajo
@@ -457,17 +459,18 @@ def recip_compressor_boxer_4cyl(
       - 4 acelerómetros crosshead — uno por cilindro (API 618).
     """
     W, H = 420, 240
+    # cy fijo en 100 para alinear con shaft del driver + coupling.
+    cy = y_offset + 100
+    crank_h = 50
+    crank_y = cy - crank_h / 2
     crank_x = x_offset + 90
     crank_w = 240
-    crank_h = 50
-    crank_y = y_offset + (H - crank_h) / 2
-    cy = crank_y + crank_h / 2  # línea del cigüeñal
     stroke = COLORS["driven_stroke"]
 
     # Posiciones de los 4 cilindros (2 pares: izq y der)
     cyl_left_cx = crank_x + 60
     cyl_right_cx = crank_x + crank_w - 60
-    cyl_length = 70
+    cyl_length = 60   # ajustado para que cilindros queden dentro del viewBox H=240
     cyl_bore = 36
     top_cy = crank_y - 10           # extremo inferior de cilindro arriba
     bot_cy = crank_y + crank_h + 10  # extremo superior de cilindro abajo
