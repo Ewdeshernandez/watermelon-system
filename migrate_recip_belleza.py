@@ -65,12 +65,13 @@ def main() -> int:
     # HNP de Hyundai usa rodamientos rolling
     target_drv = "electric_motor_rolling"
     target_drvn = "recip_compressor_boxer_4cyl"
-    target_coupling = inst.coupling_class or "rigid"  # recip suele ser rigid
+    target_coupling = "rigid"  # Ariel KBK/4 acopla cigüeñal con rígido al motor
     target_tag = "C200C"  # corrección de typo CR200C -> C200C
 
     needs_update = (
         inst.driver_icon_key != target_drv
         or inst.driven_icon_key != target_drvn
+        or inst.coupling_class != target_coupling
         or inst.tag != target_tag
     )
     if not needs_update:

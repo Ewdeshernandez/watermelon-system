@@ -280,6 +280,201 @@ def crankshaft_box(
     return "".join(parts)
 
 
+def crankcase_recip_box(
+    x: float,
+    y: float,
+    w: float,
+    h: float,
+    role: str = "driven",
+) -> str:
+    """
+    Crankcase de compresor reciprocante con detalle técnico real.
+    Inspirado en Ariel JGM/KBK: caja con flange superior bolted, cigüeñal
+    interno con throws visibles, mounting feet inferiores.
+    """
+    if role == "driver":
+        fill = COLORS["driver_fill"]
+        stroke = COLORS["driver_stroke"]
+    else:
+        fill = COLORS["driven_fill"]
+        stroke = COLORS["driven_stroke"]
+    parts: List[str] = []
+    # Caja principal con esquinas redondeadas
+    parts.append(
+        f'<rect x="{x:.1f}" y="{y:.1f}" width="{w:.1f}" height="{h:.1f}" '
+        f'rx="3" fill="{fill}" stroke="{stroke}" stroke-width="2.5"/>'
+    )
+    # Flange superior (banda con bolts)
+    flange_h = 8
+    parts.append(
+        f'<rect x="{x + 2:.1f}" y="{y + 1:.1f}" width="{w - 4:.1f}" height="{flange_h:.1f}" '
+        f'fill="{stroke}" fill-opacity="0.22"/>'
+    )
+    parts.append(
+        f'<line x1="{x + 4:.1f}" y1="{y + flange_h + 1:.1f}" x2="{x + w - 4:.1f}" y2="{y + flange_h + 1:.1f}" '
+        f'stroke="{stroke}" stroke-width="0.8" stroke-opacity="0.55"/>'
+    )
+    # Bolts en flange superior — equidistantes
+    n_bolts = max(6, int(w / 30))
+    for i in range(n_bolts):
+        bolt_x = x + 8 + (w - 16) * i / (n_bolts - 1)
+        parts.append(
+            f'<circle cx="{bolt_x:.1f}" cy="{y + flange_h / 2 + 1:.1f}" r="1.3" '
+            f'fill="white" stroke="{stroke}" stroke-width="0.5"/>'
+        )
+    # Línea del cigüeñal central (más visible que la versión simple)
+    cy = y + h / 2
+    parts.append(
+        f'<line x1="{x + 10:.1f}" y1="{cy:.1f}" x2="{x + w - 10:.1f}" y2="{cy:.1f}" '
+        f'stroke="{stroke}" stroke-width="1.6" stroke-opacity="0.7"/>'
+    )
+    # Mounting feet (pequeños bloques en cada esquina inferior)
+    foot_w = 14
+    foot_h = 5
+    parts.append(
+        f'<rect x="{x - 3:.1f}" y="{y + h - 1:.1f}" width="{foot_w:.1f}" height="{foot_h:.1f}" '
+        f'fill="{stroke}" fill-opacity="0.85"/>'
+    )
+    parts.append(
+        f'<rect x="{x + w - foot_w + 3:.1f}" y="{y + h - 1:.1f}" width="{foot_w:.1f}" height="{foot_h:.1f}" '
+        f'fill="{stroke}" fill-opacity="0.85"/>'
+    )
+    return "".join(parts)
+
+
+def cylinder_vertical_recip(
+    cx: float,
+    cy: float,
+    length: float,
+    bore: float,
+    role: str = "driven",
+    label: str = "",
+    direction: str = "up",
+) -> str:
+    """
+    Cilindro vertical de compresor reciprocante con detalle técnico real:
+    cabeza con válvulas suction+discharge, flange base con bolts, bore
+    central indicado, bolts laterales en la cabeza.
+
+    cy = punto de junta con crankcase (extremo del cilindro que toca al crank).
+    direction = "up" → cilindro crece hacia arriba desde cy.
+    direction = "down" → cilindro crece hacia abajo desde cy.
+    """
+    if role == "driver":
+        fill = COLORS["driver_fill"]
+        stroke = COLORS["driver_stroke"]
+    else:
+        fill = COLORS["driven_fill"]
+        stroke = COLORS["driven_stroke"]
+
+    half_b = bore / 2
+    flange_w = bore + 14
+    head_h = 14
+    base_flange_h = 7
+    bolt_r = 1.3
+    parts: List[str] = []
+
+    if direction == "up":
+        # Flange base (donde el cilindro apoya sobre el crankcase)
+        parts.append(
+            f'<rect x="{cx - flange_w / 2:.1f}" y="{cy - base_flange_h:.1f}" '
+            f'width="{flange_w:.1f}" height="{base_flange_h:.1f}" '
+            f'fill="{stroke}" fill-opacity="0.85"/>'
+        )
+        # 2 bolts laterales del flange base
+        for bx_off in (-flange_w / 2 + 4, flange_w / 2 - 4):
+            parts.append(
+                f'<circle cx="{cx + bx_off:.1f}" cy="{cy - base_flange_h / 2:.1f}" '
+                f'r="{bolt_r}" fill="white"/>'
+            )
+        # Cuerpo del cilindro
+        body_h = length - head_h - base_flange_h
+        body_top = cy - length + head_h
+        parts.append(
+            f'<rect x="{cx - half_b:.1f}" y="{body_top:.1f}" '
+            f'width="{bore:.1f}" height="{body_h:.1f}" rx="2" '
+            f'fill="{fill}" stroke="{stroke}" stroke-width="2"/>'
+        )
+        # Línea central representando el bore (eje del pistón)
+        parts.append(
+            f'<line x1="{cx:.1f}" y1="{body_top + 4:.1f}" x2="{cx:.1f}" y2="{body_top + body_h - 4:.1f}" '
+            f'stroke="{stroke}" stroke-width="0.9" stroke-dasharray="3,2" stroke-opacity="0.4"/>'
+        )
+        # Cabeza superior con válvulas
+        head_y = cy - length
+        parts.append(
+            f'<rect x="{cx - flange_w / 2:.1f}" y="{head_y:.1f}" '
+            f'width="{flange_w:.1f}" height="{head_h:.1f}" rx="2" '
+            f'fill="{stroke}" fill-opacity="0.92"/>'
+        )
+        # 2 válvulas (suction + discharge)
+        for vx_off in (-flange_w / 4, flange_w / 4):
+            parts.append(
+                f'<circle cx="{cx + vx_off:.1f}" cy="{head_y + head_h / 2:.1f}" '
+                f'r="{head_h / 2.8:.1f}" fill="white" stroke="{stroke}" stroke-width="1.2"/>'
+            )
+        # 4 bolts en cabeza (esquinas)
+        for bx_off in (-flange_w / 2 + 3, flange_w / 2 - 3):
+            for by_off in (2, head_h - 2):
+                parts.append(
+                    f'<circle cx="{cx + bx_off:.1f}" cy="{head_y + by_off:.1f}" '
+                    f'r="{bolt_r}" fill="white"/>'
+                )
+    else:  # direction == "down"
+        # Flange base
+        parts.append(
+            f'<rect x="{cx - flange_w / 2:.1f}" y="{cy:.1f}" '
+            f'width="{flange_w:.1f}" height="{base_flange_h:.1f}" '
+            f'fill="{stroke}" fill-opacity="0.85"/>'
+        )
+        for bx_off in (-flange_w / 2 + 4, flange_w / 2 - 4):
+            parts.append(
+                f'<circle cx="{cx + bx_off:.1f}" cy="{cy + base_flange_h / 2:.1f}" '
+                f'r="{bolt_r}" fill="white"/>'
+            )
+        # Cuerpo
+        body_h = length - head_h - base_flange_h
+        body_top = cy + base_flange_h
+        parts.append(
+            f'<rect x="{cx - half_b:.1f}" y="{body_top:.1f}" '
+            f'width="{bore:.1f}" height="{body_h:.1f}" rx="2" '
+            f'fill="{fill}" stroke="{stroke}" stroke-width="2"/>'
+        )
+        parts.append(
+            f'<line x1="{cx:.1f}" y1="{body_top + 4:.1f}" x2="{cx:.1f}" y2="{body_top + body_h - 4:.1f}" '
+            f'stroke="{stroke}" stroke-width="0.9" stroke-dasharray="3,2" stroke-opacity="0.4"/>'
+        )
+        # Cabeza inferior con válvulas
+        head_y = body_top + body_h
+        parts.append(
+            f'<rect x="{cx - flange_w / 2:.1f}" y="{head_y:.1f}" '
+            f'width="{flange_w:.1f}" height="{head_h:.1f}" rx="2" '
+            f'fill="{stroke}" fill-opacity="0.92"/>'
+        )
+        for vx_off in (-flange_w / 4, flange_w / 4):
+            parts.append(
+                f'<circle cx="{cx + vx_off:.1f}" cy="{head_y + head_h / 2:.1f}" '
+                f'r="{head_h / 2.8:.1f}" fill="white" stroke="{stroke}" stroke-width="1.2"/>'
+            )
+        for bx_off in (-flange_w / 2 + 3, flange_w / 2 - 3):
+            for by_off in (2, head_h - 2):
+                parts.append(
+                    f'<circle cx="{cx + bx_off:.1f}" cy="{head_y + by_off:.1f}" '
+                    f'r="{bolt_r}" fill="white"/>'
+                )
+
+    if label:
+        ly = (cy - length / 2) if direction == "up" else (cy + length / 2)
+        parts.append(
+            f'<text x="{cx:.1f}" y="{ly + 3:.1f}" text-anchor="middle" '
+            f'font-size="9" font-weight="800" fill="{stroke}" '
+            f'font-family="SF Mono, monospace" '
+            f'style="paint-order:stroke;stroke:white;stroke-width:2.2;stroke-linejoin:round;">'
+            f'{label}</text>'
+        )
+    return "".join(parts)
+
+
 def axial_marker(x: float, y: float, role: str = "driver") -> str:
     """Pequeño marker triangular para sensor axial (thrust)."""
     color = COLORS["driver_stroke"] if role == "driver" else COLORS["driven_stroke"]

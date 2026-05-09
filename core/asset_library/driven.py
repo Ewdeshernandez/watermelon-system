@@ -12,7 +12,8 @@ from typing import Any, Dict, Tuple
 
 from core.asset_library.primitives import (
     COLORS, shaft_line, bearing_circle, machine_body, cooling_fins,
-    cylinder_horizontal, label_top, side_label, crankshaft_box,
+    cylinder_horizontal, cylinder_vertical, cylinder_vertical_recip,
+    label_top, side_label, crankshaft_box, crankcase_recip_box,
 )
 
 
@@ -371,45 +372,64 @@ def recip_compressor_boxer_2cyl(
     x_offset: float = 0,
     y_offset: float = 0,
 ) -> Tuple[str, Dict[str, Any]]:
-    """Compresor reciprocante 2 cilindros horizontalmente opuestos."""
-    W, H = 360, 200
-    crank_x = x_offset + 130
-    crank_w = 100
-    crank_h = 70
-    crank_y = y_offset + 65
-    cy = crank_y + crank_h / 2
+    """
+    Compresor reciprocante 2 cilindros boxer (verticalmente opuestos).
+    Geometría tipo Ariel JGE-2 / Burckhardt 2P:
+      - Cigüeñal sale por el centro horizontal del crankcase.
+      - C1 vertical apuntando arriba, C2 vertical apuntando abajo, opuestos.
+      - Shaft entra por la izquierda (acoplado al motor con coupling rígido).
+    """
+    W, H = 360, 240
+    crank_x = x_offset + 110
+    crank_w = 140
+    crank_h = 50
+    crank_y = y_offset + (H - crank_h) / 2
+    cy = crank_y + crank_h / 2  # centro vertical = línea del cigüeñal
     stroke = COLORS["driven_stroke"]
 
+    # Posiciones de los cilindros (centrados horizontalmente sobre el crank)
+    cyl_cx = crank_x + crank_w / 2
+    cyl_length = 70
+    cyl_bore = 40
+    c1_cy = crank_y - 10           # extremo inferior del cilindro arriba
+    c2_cy = crank_y + crank_h + 10  # extremo superior del cilindro abajo
+
     parts = [
-        crankshaft_box(crank_x, crank_y, crank_w, crank_h, "driven"),
-        # Cilindro izquierdo
-        cylinder_horizontal(
-            cx=x_offset + 70, cy=cy, length=110, bore=36,
-            role="driven", label="C1",
+        # Eje entra por la izquierda al centro del crankcase (acople rígido al motor)
+        shaft_line(x_offset, cy, crank_x, cy),
+        # Crankcase central con detalle: flange con bolts + mounting feet + cigüeñal
+        crankcase_recip_box(crank_x, crank_y, crank_w, crank_h, "driven"),
+        # Bielas (connecting rods) verticales — más anchas, con cabeza de biela visible
+        f'<rect x="{cyl_cx - 3:.1f}" y="{c1_cy:.1f}" width="6" height="{cy - c1_cy:.1f}" '
+        f'fill="{stroke}" fill-opacity="0.85"/>',
+        f'<rect x="{cyl_cx - 3:.1f}" y="{cy:.1f}" width="6" height="{c2_cy - cy:.1f}" '
+        f'fill="{stroke}" fill-opacity="0.85"/>',
+        # C1 — cilindro arriba con cabeza+válvulas+flange detallado
+        cylinder_vertical_recip(
+            cx=cyl_cx, cy=c1_cy, length=cyl_length, bore=cyl_bore,
+            role="driven", label="C1", direction="up",
         ),
-        # Cilindro derecho
-        cylinder_horizontal(
-            cx=x_offset + 290, cy=cy, length=110, bore=36,
-            role="driven", label="C2",
+        # C2 — cilindro abajo con cabeza+válvulas+flange detallado
+        cylinder_vertical_recip(
+            cx=cyl_cx, cy=c2_cy, length=cyl_length, bore=cyl_bore,
+            role="driven", label="C2", direction="down",
         ),
-        # Líneas de bielas (rod) entre cilindros y crankcase
-        f'<line x1="{x_offset + 125:.1f}" y1="{cy:.1f}" x2="{crank_x + 4:.1f}" '
-        f'y2="{cy:.1f}" stroke="{stroke}" stroke-width="2"/>',
-        f'<line x1="{crank_x + crank_w - 4:.1f}" y1="{cy:.1f}" x2="{x_offset + 235:.1f}" '
-        f'y2="{cy:.1f}" stroke="{stroke}" stroke-width="2"/>',
-        # Eje principal entra por la izquierda (desde el coupling)
-        shaft_line(x_offset, cy, crank_x + 6, cy),
-        # Bearings principales del cigüeñal (DE = lado coupling, NDE = otro lado)
-        bearing_circle(crank_x + 12, cy, r=12, label="DE", color="driven"),
-        bearing_circle(crank_x + crank_w - 12, cy, r=12, label="NDE", color="driven"),
-        label_top(x_offset + W / 2, y_offset + 24, label, "driven"),
-        f'<text x="{x_offset + W / 2:.1f}" y="{y_offset + H - 8:.1f}" text-anchor="middle" '
+        # Bearings del cigüeñal (DE = lado coupling, NDE = lado opuesto)
+        bearing_circle(crank_x + 14, cy, r=11, label="DE", color="driven"),
+        bearing_circle(crank_x + crank_w - 14, cy, r=11, label="NDE", color="driven"),
+        # Label arriba (encima de C1)
+        label_top(x_offset + W / 2, y_offset + 16, label, "driven"),
+        # Subtitle abajo
+        f'<text x="{x_offset + W / 2:.1f}" y="{y_offset + H - 6:.1f}" text-anchor="middle" '
         f'font-size="9" fill="{COLORS["text_muted"]}" font-family="-apple-system, sans-serif">'
         f'Recip compressor · 2-cyl boxer · API 618</text>',
     ]
     anchors = {
-        "DE":  (crank_x + 12, cy),
-        "NDE": (crank_x + crank_w - 12, cy),
+        "DE":  (crank_x + 14, cy),
+        "NDE": (crank_x + crank_w - 14, cy),
+        # Anchors de crosshead — para acelerómetros API 618 sobre cada cilindro
+        "C1": (cyl_cx, c1_cy - cyl_length / 2),
+        "C2": (cyl_cx, c2_cy + cyl_length / 2),
         "shaft_in": (x_offset, cy),
         "viewbox_w": W,
         "viewbox_h": H,
@@ -427,62 +447,77 @@ def recip_compressor_boxer_4cyl(
     y_offset: float = 0,
 ) -> Tuple[str, Dict[str, Any]]:
     """
-    Compresor reciprocante 4 cilindros horizontalmente opuestos.
-    Convención boxer: 2 cilindros arriba (C1, C3) + 2 abajo (C2, C4).
+    Compresor reciprocante 4 cilindros boxer (Ariel JGM-4 / KBK/4 / Burckhardt 4P).
+
+    Geometría real del Ariel KBK/4:
+      - Cigüeñal sale por el centro horizontal del crankcase.
+      - Pareja izquierda: C1 arriba + C2 abajo (verticalmente opuestos).
+      - Pareja derecha:   C3 arriba + C4 abajo (verticalmente opuestos).
+      - Shaft entra por la izquierda con acople rígido al motor eléctrico.
+      - 4 acelerómetros crosshead — uno por cilindro (API 618).
     """
-    W, H = 360, 200
-    crank_x = x_offset + 130
-    crank_w = 100
-    crank_h = 70
-    crank_y = y_offset + 65
-    cy = crank_y + crank_h / 2
+    W, H = 420, 240
+    crank_x = x_offset + 90
+    crank_w = 240
+    crank_h = 50
+    crank_y = y_offset + (H - crank_h) / 2
+    cy = crank_y + crank_h / 2  # línea del cigüeñal
     stroke = COLORS["driven_stroke"]
 
+    # Posiciones de los 4 cilindros (2 pares: izq y der)
+    cyl_left_cx = crank_x + 60
+    cyl_right_cx = crank_x + crank_w - 60
+    cyl_length = 70
+    cyl_bore = 36
+    top_cy = crank_y - 10           # extremo inferior de cilindro arriba
+    bot_cy = crank_y + crank_h + 10  # extremo superior de cilindro abajo
+
     parts = [
-        crankshaft_box(crank_x, crank_y, crank_w, crank_h, "driven"),
-        # 4 cilindros: 2 izquierda (top + bottom), 2 derecha (top + bottom)
-        # Lado izquierdo top (C1)
-        cylinder_horizontal(
-            cx=x_offset + 70, cy=cy - 22, length=100, bore=28,
-            role="driven", label="C1",
+        # Eje entra por la izquierda al centro del crankcase (acople rígido al motor)
+        shaft_line(x_offset, cy, crank_x, cy),
+        # Crankcase central con detalle: flange con bolts + mounting feet + cigüeñal
+        crankcase_recip_box(crank_x, crank_y, crank_w, crank_h, "driven"),
+        # Bielas (rods) verticales con grosor — pareja izquierda
+        f'<rect x="{cyl_left_cx - 3:.1f}" y="{top_cy:.1f}" width="6" height="{cy - top_cy:.1f}" fill="{stroke}" fill-opacity="0.85"/>',
+        f'<rect x="{cyl_left_cx - 3:.1f}" y="{cy:.1f}" width="6" height="{bot_cy - cy:.1f}" fill="{stroke}" fill-opacity="0.85"/>',
+        # Pareja derecha
+        f'<rect x="{cyl_right_cx - 3:.1f}" y="{top_cy:.1f}" width="6" height="{cy - top_cy:.1f}" fill="{stroke}" fill-opacity="0.85"/>',
+        f'<rect x="{cyl_right_cx - 3:.1f}" y="{cy:.1f}" width="6" height="{bot_cy - cy:.1f}" fill="{stroke}" fill-opacity="0.85"/>',
+        # 4 cilindros con detalle técnico (cabeza+válvulas+flange+bolts)
+        cylinder_vertical_recip(
+            cx=cyl_left_cx, cy=top_cy, length=cyl_length, bore=cyl_bore,
+            role="driven", label="C1", direction="up",
         ),
-        # Lado izquierdo bottom (C2)
-        cylinder_horizontal(
-            cx=x_offset + 70, cy=cy + 22, length=100, bore=28,
-            role="driven", label="C2",
+        cylinder_vertical_recip(
+            cx=cyl_left_cx, cy=bot_cy, length=cyl_length, bore=cyl_bore,
+            role="driven", label="C2", direction="down",
         ),
-        # Lado derecho top (C3)
-        cylinder_horizontal(
-            cx=x_offset + 290, cy=cy - 22, length=100, bore=28,
-            role="driven", label="C3",
+        cylinder_vertical_recip(
+            cx=cyl_right_cx, cy=top_cy, length=cyl_length, bore=cyl_bore,
+            role="driven", label="C3", direction="up",
         ),
-        # Lado derecho bottom (C4)
-        cylinder_horizontal(
-            cx=x_offset + 290, cy=cy + 22, length=100, bore=28,
-            role="driven", label="C4",
+        cylinder_vertical_recip(
+            cx=cyl_right_cx, cy=bot_cy, length=cyl_length, bore=cyl_bore,
+            role="driven", label="C4", direction="down",
         ),
-        # Líneas de biela (4)
-        f'<line x1="{x_offset + 120:.1f}" y1="{cy - 22:.1f}" x2="{crank_x + 4:.1f}" y2="{cy - 5:.1f}" '
-        f'stroke="{stroke}" stroke-width="1.8"/>',
-        f'<line x1="{x_offset + 120:.1f}" y1="{cy + 22:.1f}" x2="{crank_x + 4:.1f}" y2="{cy + 5:.1f}" '
-        f'stroke="{stroke}" stroke-width="1.8"/>',
-        f'<line x1="{crank_x + crank_w - 4:.1f}" y1="{cy - 5:.1f}" x2="{x_offset + 240:.1f}" y2="{cy - 22:.1f}" '
-        f'stroke="{stroke}" stroke-width="1.8"/>',
-        f'<line x1="{crank_x + crank_w - 4:.1f}" y1="{cy + 5:.1f}" x2="{x_offset + 240:.1f}" y2="{cy + 22:.1f}" '
-        f'stroke="{stroke}" stroke-width="1.8"/>',
-        # Eje principal
-        shaft_line(x_offset, cy, crank_x + 6, cy),
-        # Bearings principales
-        bearing_circle(crank_x + 12, cy, r=12, label="DE", color="driven"),
-        bearing_circle(crank_x + crank_w - 12, cy, r=12, label="NDE", color="driven"),
-        label_top(x_offset + W / 2, y_offset + 24, label, "driven"),
-        f'<text x="{x_offset + W / 2:.1f}" y="{y_offset + H - 8:.1f}" text-anchor="middle" '
+        # Bearings del cigüeñal
+        bearing_circle(crank_x + 14, cy, r=11, label="DE", color="driven"),
+        bearing_circle(crank_x + crank_w - 14, cy, r=11, label="NDE", color="driven"),
+        # Label arriba
+        label_top(x_offset + W / 2, y_offset + 16, label, "driven"),
+        # Subtitle abajo
+        f'<text x="{x_offset + W / 2:.1f}" y="{y_offset + H - 6:.1f}" text-anchor="middle" '
         f'font-size="9" fill="{COLORS["text_muted"]}" font-family="-apple-system, sans-serif">'
-        f'Recip compressor · 4-cyl boxer · API 618</text>',
+        f'Recip compressor · 4-cyl boxer (Ariel KBK/4 style) · API 618</text>',
     ]
     anchors = {
-        "DE":  (crank_x + 12, cy),
-        "NDE": (crank_x + crank_w - 12, cy),
+        "DE":  (crank_x + 14, cy),
+        "NDE": (crank_x + crank_w - 14, cy),
+        # Anchors de crosshead — uno por cilindro para acelerómetros API 618
+        "C1": (cyl_left_cx, top_cy - cyl_length / 2),
+        "C2": (cyl_left_cx, bot_cy + cyl_length / 2),
+        "C3": (cyl_right_cx, top_cy - cyl_length / 2),
+        "C4": (cyl_right_cx, bot_cy + cyl_length / 2),
         "shaft_in": (x_offset, cy),
         "viewbox_w": W,
         "viewbox_h": H,
