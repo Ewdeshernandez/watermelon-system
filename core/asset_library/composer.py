@@ -55,11 +55,24 @@ def _render_sensor_dot(
     unit: str = "",
     status: str = "Normal",
     title: str = "",
+    text_above: bool = True,
 ) -> str:
-    """SVG de un sensor dot con texto inline 'LABEL VALOR' arriba."""
+    """
+    SVG de un sensor dot con texto 'LABEL VALOR' inline. Por default el
+    texto va arriba del dot; si `text_above=False` el texto va debajo
+    (caso típico: probetas X/Y ortogonales API 670 — la Y arriba, la X
+    abajo, ambas en el mismo cojinete pero textos no apilados).
+    """
     color = SEVERITY_COLORS.get(status, "#64748b")
     anim = SEVERITY_ANIM.get(status, "")
     inline = f"{label} {value}".strip() if value and value != "—" else label
+
+    if text_above:
+        text_y = cy - 12
+        unit_y = cy + 18
+    else:
+        text_y = cy + 16
+        unit_y = cy + 26  # debajo del label, si hay unidad
 
     parts = [
         f'<g><title>{title or label}</title>',
@@ -69,8 +82,8 @@ def _render_sensor_dot(
         # Dot principal
         f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" fill="{color}" stroke="white" '
         f'stroke-width="1.8">{anim}</circle>',
-        # Texto inline arriba
-        f'<text x="{cx:.1f}" y="{cy - 12:.1f}" text-anchor="middle" '
+        # Texto inline (arriba o abajo según text_above)
+        f'<text x="{cx:.1f}" y="{text_y:.1f}" text-anchor="middle" '
         f'font-size="9" font-weight="800" font-family="SF Mono, Menlo, monospace" '
         f'fill="{color}" letter-spacing="-0.04" '
         f'style="paint-order:stroke;stroke:white;stroke-width:2.5;stroke-linejoin:round;">'
@@ -78,7 +91,7 @@ def _render_sensor_dot(
     ]
     if unit and value and value != "—":
         parts.append(
-            f'<text x="{cx:.1f}" y="{cy + 18:.1f}" text-anchor="middle" '
+            f'<text x="{cx:.1f}" y="{unit_y:.1f}" text-anchor="middle" '
             f'font-size="7" font-weight="600" font-family="SF Mono, monospace" '
             f'fill="#475569" '
             f'style="paint-order:stroke;stroke:white;stroke-width:2;stroke-linejoin:round;">'
@@ -175,16 +188,25 @@ def compose_train(
             continue
         cx, cy = pos
 
-        # Offset horizontal si hay múltiples sensores en el mismo anchor
+        # Resolver layout cuando hay múltiples sensores en el mismo anchor.
+        # Caso típico API 670: probetas proximity X/Y a 90° en el mismo
+        # cojinete, o pares accel+velocímetro. Para que los labels NO se
+        # apilen unos sobre otros:
+        #   N=1 → tal cual (texto arriba)
+        #   N=2 → primer sensor texto ARRIBA, segundo texto ABAJO,
+        #         ambos compartiendo el mismo dot (sin offset horizontal).
+        #   N>=3 → distribución horizontal con texto arriba (cascada).
         key = (side, anchor_name)
         n_total = counts[key]
-        if n_total > 1:
+        text_above = True
+        if n_total == 2:
             idx = seen.get(key, 0)
             seen[key] = idx + 1
-            # Distribuir uniformemente alrededor del anchor: idx 0 a la
-            # izquierda, idx 1 a la derecha (típico X/Y), más en cascada
-            # si hay más de 2.
-            spread = 18  # px de separación entre dots
+            text_above = (idx == 0)  # primer sensor arriba, segundo abajo
+        elif n_total >= 3:
+            idx = seen.get(key, 0)
+            seen[key] = idx + 1
+            spread = 22  # px de separación entre dots cuando hay 3+
             offset_x = (idx - (n_total - 1) / 2) * spread
             cx = cx + offset_x
 
@@ -196,6 +218,7 @@ def compose_train(
                 unit=s.get("unit", ""),
                 status=s.get("status", "Normal"),
                 title=s.get("title", ""),
+                text_above=text_above,
             )
         )
 

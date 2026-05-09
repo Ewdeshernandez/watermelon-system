@@ -1361,13 +1361,8 @@ def render_history_chart(
 # ============================================================
 
 def main() -> None:
-    page_header(
-        title="Live Monitoring",
-        subtitle=(
-            "Real-time machine health · 10s polling · synchronous 1X/2X vectors · "
-            "ISO 20816 / API 670 compliant."
-        ),
-    )
+    # Header limpio sin subtítulo redundante (Ciclo 23.15)
+    page_header(title="Live Monitoring")
 
     from core.instance_state import list_instances, get_instance
     instances = list_instances()
@@ -1375,12 +1370,47 @@ def main() -> None:
         st.info("No hay activos registrados aún. Andá a Machinery Library para crear uno.")
         return
 
-    options = sorted([i.get("instance_id", "") for i in instances if i.get("instance_id")])
+    # Build mapping instance_id → display label "TAG · Cliente"
+    inst_meta = {i.get("instance_id"): i for i in instances if i.get("instance_id")}
+    options = sorted(inst_meta.keys())
     default_idx = options.index("tes1") if "tes1" in options else 0
+
+    def _fmt_option(iid: str) -> str:
+        meta = inst_meta.get(iid, {})
+        tag = meta.get("tag", "") or iid.upper()
+        client = meta.get("client", "")
+        if client:
+            return f"{tag}  ·  {client}"
+        return tag
+
+    # Top bar — selector de activo + auto-refresh, en card industrial
+    st.markdown(
+        textwrap.dedent("""
+        <style>
+        .wm-asset-picker-row { display: flex; align-items: center; gap: 14px;
+            padding: 12px 16px; margin: 8px 0 18px 0;
+            background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 100%);
+            border: 1px solid #c7d9eb; border-radius: 14px;
+            box-shadow: 0 6px 18px rgba(15,23,42,0.05);
+        }
+        .wm-asset-picker-row .wm-picker-label {
+            font-size: 10px; color: #64748b; font-weight: 800;
+            text-transform: uppercase; letter-spacing: 0.1em;
+        }
+        </style>
+        """).strip(),
+        unsafe_allow_html=True,
+    )
 
     top_left, top_right = st.columns([3, 1])
     with top_left:
-        instance_id = st.selectbox("Activo", options, index=default_idx, key="live_asset_v3")
+        instance_id = st.selectbox(
+            "🎛️ Activo monitoreado",
+            options,
+            index=default_idx,
+            key="live_asset_v3",
+            format_func=_fmt_option,
+        )
     with top_right:
         auto_refresh = st.toggle(
             "⟳ Auto-refresh 10s", value=False, key="live_autorefresh_v3",

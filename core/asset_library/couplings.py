@@ -51,10 +51,6 @@ def coupling_flexible(
         ],
         # Eje atravesando todo el coupling
         shaft_line(x_offset, cy, x_offset + W, cy),
-        # Label abajo
-        f'<text x="{x_offset + W / 2:.1f}" y="{y_offset + H - 14:.1f}" text-anchor="middle" '
-        f'font-size="9" font-weight="600" fill="{stroke}" '
-        f'font-family="-apple-system, sans-serif">{label}</text>',
     ]
     anchors = {
         "shaft_in": (x_offset, cy),
@@ -90,9 +86,6 @@ def coupling_rigid(
         f'stroke="{stroke}" stroke-width="1.5"/>',
         # Eje
         shaft_line(x_offset, cy, x_offset + W, cy),
-        f'<text x="{x_offset + W / 2:.1f}" y="{y_offset + H - 14:.1f}" text-anchor="middle" '
-        f'font-size="9" font-weight="600" fill="{stroke}" '
-        f'font-family="-apple-system, sans-serif">{label}</text>',
     ]
     anchors = {
         "shaft_in": (x_offset, cy),
