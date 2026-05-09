@@ -1361,8 +1361,9 @@ def render_history_chart(
 # ============================================================
 
 def main() -> None:
-    # Header limpio sin subtítulo redundante (Ciclo 23.15)
-    page_header(title="Live Monitoring")
+    # Header limpio sin subtítulo redundante (Ciclo 23.15).
+    # subtitle="" porque page_header requiere el kwarg pero no queremos texto.
+    page_header(title="Live Monitoring", subtitle="")
 
     from core.instance_state import list_instances, get_instance
     instances = list_instances()
