@@ -42,6 +42,27 @@ from core.asset_library.catalog import (
 )
 
 
+_NON_ANCHOR_KEYS = {"viewbox_w", "viewbox_h", "shaft_in", "shaft_out"}
+
+
+def available_anchors(icon_key: str) -> List[str]:
+    """
+    Devuelve la lista de anchors físicos disponibles para un icono dado.
+
+    Se filtran las claves de metadata (viewbox_w/h, shaft_in/out) — solo
+    quedan las que realmente representan puntos de montaje de sensor
+    (DE, NDE, TRF, CRF, etc.). Útil para poblar dropdowns en el wizard
+    cuando el especialista asigna manualmente cada sensor a un anchor.
+    """
+    if not icon_key:
+        return []
+    try:
+        _svg, anchors = get_icon(icon_key)
+    except Exception:
+        return []
+    return sorted(k for k in anchors.keys() if k not in _NON_ANCHOR_KEYS)
+
+
 def get_icon(
     icon_key: str,
     label: str = "",
@@ -74,4 +95,5 @@ __all__ = [
     "list_by_category",
     "get_asset_meta",
     "get_icon",
+    "available_anchors",
 ]

@@ -662,19 +662,233 @@ def _render_sensors_table_editor(state: Dict[str, Any], sensors: List[Dict[str, 
     state["_wizard_table_edited"] = edited
 
 
+def _infer_icon_side_anchor(
+    sensor: Dict[str, Any],
+    drv_icon_key: str,
+    drvn_icon_key: str,
+) -> tuple:
+    """
+    Heurística Bently / API 670 para mapear un sensor del wizard a
+    (icon_side, icon_anchor) del SVG library:
+
+      plane_label contains "driver/motor/turbina/engine"  → driver
+      plane_label contains "driven/compresor/generador/bomba/frame/cilindro" → driven
+      plane==1 / "DE"   → DE  (TRF en aero-derivative)
+      plane==2 / "NDE"  → NDE (CRF en aero-derivative)
+      plane==3 driven   → DE driven
+      plane==4 driven   → NDE driven
+
+    Devuelve ('', '') si no se pudo inferir → el especialista lo asigna
+    manualmente con los selectboxes del editor.
+    """
+    plane_l = ((sensor.get("plane_label") or "")).lower()
+    plane_num = int(sensor.get("plane") or 0)
+    is_aero = "aero" in (drv_icon_key or "").lower()
+
+    side = ""
+    if any(t in plane_l for t in ("driver", "motor", "turbina", "engine")):
+        side = "driver"
+    elif any(t in plane_l for t in (
+        "driven", "compresor", "compressor", "generador", "generator",
+        "bomba", "pump", "frame", "cilindro", "cylinder",
+    )):
+        side = "driven"
+    elif plane_num in (1, 2):
+        side = "driver"
+    elif plane_num >= 3:
+        side = "driven"
+
+    anchor = ""
+    if "nde" in plane_l:
+        anchor = "CRF" if (side == "driver" and is_aero) else "NDE"
+    elif "de" in plane_l:
+        anchor = "TRF" if (side == "driver" and is_aero) else "DE"
+    elif plane_num == 1:
+        anchor = "TRF" if is_aero else "DE"
+    elif plane_num == 2:
+        anchor = "CRF" if is_aero else "NDE"
+    elif plane_num == 3:
+        anchor = "DE"
+    elif plane_num == 4:
+        anchor = "NDE"
+
+    return side, anchor
+
+
+def _autopopulate_icon_anchors(
+    state: Dict[str, Any],
+    sensors: List[Dict[str, Any]],
+) -> None:
+    """Llena icon_side / icon_anchor en cada sensor que no los tenga."""
+    drv = state.get("driver_icon_key", "")
+    drvn = state.get("driven_icon_key", "")
+    if not drv or not drvn:
+        return
+    for s in sensors:
+        if s.get("icon_side") and s.get("icon_anchor"):
+            continue
+        side, anchor = _infer_icon_side_anchor(s, drv, drvn)
+        if side:
+            s.setdefault("icon_side", side)
+            if not s.get("icon_side"):
+                s["icon_side"] = side
+        if anchor:
+            s.setdefault("icon_anchor", anchor)
+            if not s.get("icon_anchor"):
+                s["icon_anchor"] = anchor
+
+
+def _render_visual_editor_library(
+    state: Dict[str, Any],
+    sensors: List[Dict[str, Any]],
+) -> None:
+    """
+    Editor visual SVG basado en core.asset_library (Ciclo 23.13).
+
+    Para cada sensor, el especialista elige (icon_side, icon_anchor)
+    en dos selectboxes — los anchors disponibles dependen del icon_key
+    del lado elegido. El SVG del tren se redibuja con los sensor dots
+    en sus anchors físicos. Lo que queda persistido es lo que después
+    Live Monitoring rinde idéntico, sin click-to-place de coordenadas
+    arbitrarias.
+    """
+    from core.asset_library import available_anchors
+    from core.asset_library.composer import compose_train
+
+    drv = state.get("driver_icon_key", "")
+    drvn = state.get("driven_icon_key", "")
+    drv_anchors = available_anchors(drv)
+    drvn_anchors = available_anchors(drvn)
+
+    # Auto-poblar para sensores nuevos (idempotente)
+    _autopopulate_icon_anchors(state, sensors)
+
+    col_svg, col_list = st.columns([3, 2])
+
+    with col_svg:
+        # Build sensors_with_status para el preview
+        s_for_svg = []
+        from core.sensor_map import sensor_label as _sensor_label_fn
+        for s in sensors:
+            side = (s.get("icon_side") or "").strip()
+            anchor = (s.get("icon_anchor") or "").strip()
+            if not side or not anchor:
+                continue
+            try:
+                lbl = _sensor_label_fn(s)
+            except Exception:
+                lbl = s.get("plane_label", "?")
+            s_for_svg.append({
+                "label": lbl, "side": side, "anchor": anchor,
+                "status": "Sin Norma",  # sin readings live en el wizard
+                "value": "", "unit": "",
+                "title": f"{lbl} · {s.get('sensor_type','')}",
+            })
+
+        try:
+            svg = compose_train(
+                driver_key=drv,
+                driven_key=drvn,
+                driver_label=state.get("driver_type") or "Driver",
+                driven_label=state.get("driven_type") or "Driven",
+                coupling=state.get("coupling_class", "flexible"),
+                sensors_with_status=s_for_svg,
+            )
+            st.markdown(
+                f'<div style="background:#ffffff;border:1px solid #e2e8f0;'
+                f'border-radius:10px;padding:14px;">{svg}</div>',
+                unsafe_allow_html=True,
+            )
+        except Exception as e:
+            st.warning(f"No se pudo generar el SVG library: {e}")
+
+        n_mapped = len(s_for_svg)
+        n_total = len(sensors)
+        st.caption(
+            f"📍 **{n_mapped} de {n_total}** sensores asignados a un anchor. "
+            "Los no asignados no aparecen en el preview ni en Live Monitoring."
+        )
+        if st.button("🪄 Auto-asignar todos por heurística (Bently / API 670)",
+                     key="wiz_lib_autoassign", use_container_width=True):
+            for s in sensors:
+                side, anchor = _infer_icon_side_anchor(s, drv, drvn)
+                if side:
+                    s["icon_side"] = side
+                if anchor:
+                    s["icon_anchor"] = anchor
+            state["sensors_override"] = sensors
+            st.rerun()
+
+    with col_list:
+        st.markdown("**Asignación de cada sensor a un cojinete físico**")
+        st.caption(
+            "Side = en qué máquina del tren (driver / driven). "
+            "Anchor = qué cojinete físico del icono (DE, NDE, TRF, CRF...)."
+        )
+
+        for idx, s in enumerate(sensors):
+            try:
+                from core.sensor_map import sensor_label as _slbl
+                label = _slbl(s)
+            except Exception:
+                label = s.get("plane_label", f"sensor {idx+1}")
+            stype = s.get("sensor_type", "")
+
+            with st.container(border=True):
+                st.markdown(f"**#{idx+1} · {label}** · `{stype}`")
+                c1, c2 = st.columns(2)
+                with c1:
+                    side_options = ["", "driver", "driven", "coupling"]
+                    side_cur = (s.get("icon_side") or "").strip()
+                    side_idx = side_options.index(side_cur) if side_cur in side_options else 0
+                    side_pick = st.selectbox(
+                        "Side", side_options, index=side_idx,
+                        key=f"wiz_lib_side_{idx}",
+                        label_visibility="collapsed",
+                        format_func=lambda x: x or "— side —",
+                    )
+                    s["icon_side"] = side_pick
+
+                with c2:
+                    if side_pick == "driver":
+                        anch_options = [""] + drv_anchors
+                    elif side_pick == "driven":
+                        anch_options = [""] + drvn_anchors
+                    else:
+                        anch_options = [""]
+                    anch_cur = (s.get("icon_anchor") or "").strip()
+                    anch_idx = anch_options.index(anch_cur) if anch_cur in anch_options else 0
+                    anch_pick = st.selectbox(
+                        "Anchor", anch_options, index=anch_idx,
+                        key=f"wiz_lib_anchor_{idx}",
+                        label_visibility="collapsed",
+                        format_func=lambda x: x or "— anchor —",
+                    )
+                    s["icon_anchor"] = anch_pick
+
+        state["sensors_override"] = sensors
+
+
 def _render_visual_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) -> None:
     """
-    Editor visual del sensor map: click sobre la imagen para reposicionar
-    el sensor seleccionado. Funciona para CUALQUIER categoría:
+    Editor visual del sensor map.
+
+    Ciclo 23.13 — Si la instancia tiene driver_icon_key + driven_icon_key,
+    se rinde el SVG vectorial del library con dropdowns side/anchor por
+    sensor. Si no, fallback al PNG legacy con click-to-place.
 
       - reciprocating_compressor → core.recip_schematic.generate_recip_png
-        (motor + acople + compresor con cilindros opuestos boxer)
       - turbomachinery / motor_pump / generic → core.train_schematic.generate_train_png
-        (driver + acople + driven con cojinetes numerados)
 
     Antes (pre Ciclo 23.8) este editor solo se mostraba para recip,
     dejando a los demás activos sin posicionamiento visual de sensores.
     """
+    # Camino preferido: SVG library (System1-style)
+    if state.get("driver_icon_key") and state.get("driven_icon_key"):
+        _render_visual_editor_library(state, sensors)
+        return
+
+    # Fallback legacy: PNG generado + click-to-place de x_pct/y_pct
     try:
         from streamlit_image_coordinates import streamlit_image_coordinates
         _HAS_COORDS = True
