@@ -253,8 +253,17 @@ def list_instances() -> List[Dict[str, Any]]:
 
 
 def get_instance(instance_id: str) -> Optional[Instance]:
-    """Devuelve la Instance completa o None si no existe."""
-    data = get_active_repository().load_instance(instance_id)
+    """
+    Devuelve la Instance completa o None si no existe.
+
+    Slugifica el id de entrada — esto evita que un caller que pase un id
+    sin slugificar (ej. 'TES 1' con espacio) busque algo que no existe
+    (la instancia se persistió como 'tes_1'). Antes este desalineamiento
+    causaba que update_instance_header fallara silenciosamente y los
+    sensores del wizard no se guardaran.
+    """
+    inst_id = _slugify(instance_id)
+    data = get_active_repository().load_instance(inst_id)
     if data is None:
         return None
     return Instance.from_dict(data)
@@ -312,9 +321,18 @@ def update_instance_header(
     Acepta todos los campos del Ciclo 14a vía kwargs — sólo se actualizan
     los que se pasan; los demás quedan intactos. Pasar None para un campo
     es no-op (no lo actualiza), pasar "" o 0 SÍ lo actualiza al valor vacío.
+
+    Nota: get_instance() ya slugifica internamente, así que aceptamos
+    cualquier formato de instance_id (con espacios, mayúsculas, etc.)
+    y resolvemos al activo correcto.
     """
     inst = get_instance(instance_id)
     if inst is None:
+        import logging
+        logging.getLogger(__name__).warning(
+            "update_instance_header: instance_id '%s' (slugified='%s') no existe — actualización ignorada.",
+            instance_id, _slugify(instance_id),
+        )
         return False
 
     # Campos legacy (Ciclo 8) + extendidos (Ciclo 14a) + sensores (Ciclo 14c.1)

@@ -398,15 +398,20 @@ def _build_reciprocating_sensor_map(state: Dict[str, Any]) -> List[Dict[str, Any
 
 def _execute_creation(state: Dict[str, Any]) -> None:
     """Crea instance + persiste sensors + parámetros base."""
-    inst_id = (state["instance_id"] or "").strip()
-    if not inst_id:
+    inst_id_raw = (state["instance_id"] or "").strip()
+    if not inst_id_raw:
         raise ValueError("El ID del activo es obligatorio.")
-    if get_instance(inst_id) is not None:
-        raise ValueError(f"Ya existe un activo con ID '{inst_id}'.")
+    if get_instance(inst_id_raw) is not None:
+        raise ValueError(f"Ya existe un activo con ID '{inst_id_raw}'.")
 
-    # 1. Crear instance base
+    # 1. Crear instance base.
+    # IMPORTANTE: create_instance slugifica internamente (ej. 'TES 1' → 'tes_1').
+    # Tomamos el id REAL post-slugify del Instance retornado, que es el que
+    # quedó persistido. Si seguimos usando inst_id_raw, todas las operaciones
+    # posteriores (update_instance_header, etc.) buscarían un id que no existe
+    # y fallarían en silencio — por eso los sensores no se guardaban.
     inst = create_instance(
-        instance_id=inst_id,
+        instance_id=inst_id_raw,
         profile_key=state.get("profile_key", "custom_manual"),
         tag=state.get("tag", ""),
         serial_number="",
@@ -414,6 +419,8 @@ def _execute_creation(state: Dict[str, Any]) -> None:
         notes=state.get("notes", ""),
         seed_from_profile=True,
     )
+    inst_id = inst.instance_id  # ← ID realmente persistido (post-slugify)
+    state["instance_id"] = inst_id  # ← actualizar state para que el mensaje de éxito muestre el slug real
 
     # 2. Sensores: usar el override del paso 4 si existe (editado por user),
     #    si no, regenerar el mapa estándar (incluyendo gearbox si aplica).
