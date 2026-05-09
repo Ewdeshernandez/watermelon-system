@@ -39,7 +39,9 @@ def main() -> int:
     target = {
         "driver_icon_key": "gas_turbine_aero",
         "driven_icon_key": "generator_synchronous",
-        "coupling_class": "flexible",
+        # Verificado en campo (Termosuria) — TES1 tiene acople rígido,
+        # no flexible disc-pack como suele ser en otros LM6000.
+        "coupling_class": "rigid",
     }
 
     print("=" * 60)

@@ -601,31 +601,13 @@ def render_sensor_map_library(
         st.caption(f"(Asset library no pudo rendir: {e}) — cayendo al PNG legacy.")
         return False
 
-    legend = (
-        '<div class="wm-map-legend">'
-        '<span><span class="lg-dot" style="background:#22c55e;"></span>Normal</span>'
-        '<span><span class="lg-dot" style="background:#f59e0b;"></span>Alarma</span>'
-        '<span><span class="lg-dot" style="background:#ef4444;"></span>Danger</span>'
-        '<span><span class="lg-dot" style="background:#94a3b8;"></span>Sin Norma</span>'
-        '<span style="margin-left:auto;color:#94a3b8;text-transform:none;letter-spacing:0;">'
-        f'{len(sensors_with_status)} sensores mapeados'
-        '</span>'
-        '</div>'
-    )
-
-    st.markdown(
-        textwrap.dedent(
-            f"""
-            <div class="wm-map-hero">
-                <div class="wm-map-frame" style="padding:18px;">
-                    {svg}
-                </div>
-                {legend}
-            </div>
-            """
-        ).strip(),
-        unsafe_allow_html=True,
-    )
+    # Render limpio sin frame ni legend redundante (Ciclo 23.14):
+    # - Sin recuadro blanco con borde alrededor (estaba feo).
+    # - Sin legend con normal/alarma/danger debajo (los colores se entienden
+    #   por contexto + tooltip por sensor; redundante con la tabla de abajo).
+    # - Sin contador "N sensores mapeados" (información ya visible en otras
+    #   secciones de la página).
+    st.markdown(svg, unsafe_allow_html=True)
     return True
 
 

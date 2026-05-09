@@ -146,7 +146,17 @@ def compose_train(
         200,
     )
 
-    # Sensor dots overlayados
+    # Sensor dots overlayados.
+    # Si dos sensores caen en el mismo (side, anchor) — caso típico de
+    # probetas de proximidad ortogonales X/Y a 90° en API 670, o pares
+    # acelerómetro+velocímetro en el mismo cojinete — los desplazamos
+    # horizontalmente para que ambos labels queden legibles.
+    counts: Dict[Tuple[str, str], int] = {}
+    for s in sensors_with_status:
+        key = (s.get("side", "driver"), s.get("anchor", "DE"))
+        counts[key] = counts.get(key, 0) + 1
+    seen: Dict[Tuple[str, str], int] = {}
+
     dots_svg_parts: List[str] = []
     for s in sensors_with_status:
         side = s.get("side", "driver")
@@ -164,6 +174,20 @@ def compose_train(
         if not pos or not isinstance(pos, tuple):
             continue
         cx, cy = pos
+
+        # Offset horizontal si hay múltiples sensores en el mismo anchor
+        key = (side, anchor_name)
+        n_total = counts[key]
+        if n_total > 1:
+            idx = seen.get(key, 0)
+            seen[key] = idx + 1
+            # Distribuir uniformemente alrededor del anchor: idx 0 a la
+            # izquierda, idx 1 a la derecha (típico X/Y), más en cascada
+            # si hay más de 2.
+            spread = 18  # px de separación entre dots
+            offset_x = (idx - (n_total - 1) / 2) * spread
+            cx = cx + offset_x
+
         dots_svg_parts.append(
             _render_sensor_dot(
                 cx=cx, cy=cy,

@@ -193,9 +193,6 @@ def gas_turbine_aero(
 
         # Label
         label_top(x_offset + W / 2, y_offset + 24, label, "driver"),
-        f'<text x="{x_offset + W / 2:.1f}" y="{y_offset + H - 8:.1f}" text-anchor="middle" '
-        f'font-size="9" fill="{COLORS["text_muted"]}" font-family="-apple-system, sans-serif">'
-        f'Aero gas turbine · 2-shaft · OEM thresholds</text>',
     ]
     anchors = {
         "DE": (turb_end - 14, cy),       # TRF (lado output)

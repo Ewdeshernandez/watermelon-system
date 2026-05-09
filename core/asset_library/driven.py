@@ -29,15 +29,17 @@ def generator_synchronous(
     """Generador síncrono industrial (Brush, GE, Westinghouse)."""
     W, H = 340, 200
     body_x = x_offset + 30
-    body_y = y_offset + 45
+    body_y = y_offset + 55  # bajado de 45 a 55 para dejar más espacio al label arriba
     body_w = 260
-    body_h = 110
+    body_h = 100
     cy = y_offset + 100
     stroke = COLORS["driven_stroke"]
     fill = COLORS["driven_fill"]
     accent = COLORS["driven_accent"]
 
     parts = [
+        # Label arriba (Brush, GE, etc.) — primero para evitar choque con bus duct
+        label_top(x_offset + W / 2, y_offset + 16, label, "driven"),
         # Estator (cuerpo principal)
         f'<rect x="{body_x:.1f}" y="{body_y:.1f}" width="{body_w:.1f}" height="{body_h:.1f}" '
         f'rx="14" fill="{fill}" stroke="{stroke}" stroke-width="2.5"/>',
@@ -46,27 +48,24 @@ def generator_synchronous(
         f'rx="14" fill="{accent}" stroke="{stroke}" stroke-width="2"/>',
         f'<rect x="{body_x + body_w - 20:.1f}" y="{body_y:.1f}" width="20" height="{body_h:.1f}" '
         f'rx="14" fill="{accent}" stroke="{stroke}" stroke-width="2"/>',
-        # Slots del estator (6 líneas dentro del cuerpo)
+        # Slots del estator (líneas verticales dentro del cuerpo)
         *[
             f'<line x1="{body_x + 30 + i * 30:.1f}" y1="{body_y + 14:.1f}" '
             f'x2="{body_x + 30 + i * 30:.1f}" y2="{body_y + body_h - 14:.1f}" '
             f'stroke="{stroke}" stroke-width="1" stroke-opacity="0.5"/>'
             for i in range(7)
         ],
-        # Caja de bornes (bus duct) arriba
-        f'<rect x="{body_x + body_w / 2 - 50:.1f}" y="{body_y - 22:.1f}" width="100" height="22" '
-        f'rx="3" fill="{accent}" stroke="{stroke}" stroke-width="2"/>',
-        f'<text x="{body_x + body_w / 2:.1f}" y="{body_y - 7:.1f}" text-anchor="middle" '
-        f'font-size="9" font-weight="700" fill="{stroke}">BUS DUCT 13.8 kV</text>',
+        # Caja de bornes (bus duct) arriba — pegado al estator (sin gap),
+        # más compacto para no chocar con el title arriba.
+        f'<rect x="{body_x + body_w / 2 - 50:.1f}" y="{body_y - 16:.1f}" width="100" height="16" '
+        f'rx="2" fill="{accent}" stroke="{stroke}" stroke-width="2"/>',
+        f'<text x="{body_x + body_w / 2:.1f}" y="{body_y - 4:.1f}" text-anchor="middle" '
+        f'font-size="8" font-weight="700" fill="{stroke}">BUS DUCT 13.8 kV</text>',
         # Eje (entra por la izquierda desde el coupling)
         shaft_line(x_offset, cy, body_x + 6, cy),
         # Bearings DE (lado coupling, izquierda) y NDE (derecha)
         bearing_circle(body_x + 14, cy, r=13, label="DE", color="driven"),
         bearing_circle(body_x + body_w - 14, cy, r=13, label="NDE", color="driven"),
-        label_top(x_offset + W / 2, y_offset + 24, label, "driven"),
-        f'<text x="{x_offset + W / 2:.1f}" y="{y_offset + H - 8:.1f}" text-anchor="middle" '
-        f'font-size="9" fill="{COLORS["text_muted"]}" font-family="-apple-system, sans-serif">'
-        f'Synchronous generator · 3-phase · 60 Hz</text>',
     ]
     anchors = {
         "DE":  (body_x + 14, cy),
