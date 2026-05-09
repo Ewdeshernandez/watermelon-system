@@ -140,15 +140,15 @@ st.markdown(
             font-variant-numeric: tabular-nums;
         }
         table.wm-live-table thead tr {
-            background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+            background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
         }
         table.wm-live-table thead th {
             text-align: left;
-            color: #cbd5e1;
+            color: #1d4ed8;
             font-weight: 800; font-size: 10px;
             text-transform: uppercase; letter-spacing: 0.08em;
             padding: 11px 14px;
-            border-bottom: 1px solid #334155;
+            border-bottom: 2px solid #d9e8fb;
         }
         table.wm-live-table tbody td {
             padding: 11px 14px;
@@ -190,23 +190,24 @@ st.markdown(
             display: flex; align-items: center; justify-content: center;
         }
 
-        /* Machine Map hero */
+        /* Machine Map hero — limpio, sin marco oscuro tapando el activo */
         .wm-map-hero {
-            background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
-            border-radius: 18px;
-            padding: 14px;
-            box-shadow: 0 16px 36px rgba(15,23,42,0.18);
+            background: transparent;
+            border: none;
+            padding: 0;
         }
         .wm-map-frame {
             background: white;
-            border-radius: 12px;
+            border-radius: 14px;
             position: relative;
             overflow: hidden;
+            border: 1px solid #e5edf7;
+            box-shadow: 0 8px 22px rgba(15,23,42,0.06);
         }
         .wm-map-legend {
             display: flex; gap: 16px;
-            padding: 8px 4px 0;
-            font-size: 10px; color: #cbd5e1;
+            padding: 10px 4px 0;
+            font-size: 10px; color: #64748b;
             text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700;
         }
         .wm-map-legend .lg-dot {
@@ -1049,11 +1050,36 @@ def render_history_chart(
         (r.get("sensor_label") or "—", r.get("variable")) for r in direct_rows
     ])
     labels = [f"{s} — {v}" for (s, v) in options]
-    chosen = st.selectbox("Variable a graficar", labels, key="live_history_var_v3")
+
+    # Variable + range selector (Ciclo 23.9: el usuario pidió ver más historial)
+    col_var, col_range = st.columns([3, 1])
+    with col_var:
+        chosen = st.selectbox(
+            "Variable a graficar", labels, key="live_history_var_v3",
+        )
+    with col_range:
+        range_choice = st.selectbox(
+            "Rango", ["Última hora", "6 horas", "24 horas", "7 días", "Todo"],
+            index=1, key="live_history_range",
+            help="Cuanta historia traer del registro append-only en Supabase",
+        )
     idx = labels.index(chosen)
     sensor_lbl, var_name = options[idx]
 
-    rows = history_for_metric(instance_id, var_name, "Direct", limit=500)
+    # Cada poll del collector son ~10 s. Fórmula: 360 lecturas/h
+    # Caps generosos pero acotados para no crashear con asset que tenga 1M+ lecturas.
+    range_to_limit = {
+        "Última hora": 400,     # 1h × 360 lecturas + buffer
+        "6 horas":     2200,    # 6h × 360 + buffer
+        "24 horas":    9000,    # 24h × 360
+        "7 días":      62000,   # 7d × 360 × 24 ≈ 60.5k + buffer
+        "Todo":        200000,  # cap alto para no crashear; en activos con
+                                # +1M lecturas hay que paginar (TODO ciclo 24)
+    }
+    rows = history_for_metric(
+        instance_id, var_name, "Direct",
+        limit=range_to_limit.get(range_choice, 2200),
+    )
     if not rows:
         st.info("Sin histórico aún. Esperá unos minutos para que el collector acumule.")
         return
@@ -1209,9 +1235,45 @@ def main() -> None:
     ])
 
     with tab_curr:
+        # Filtros estilo legacy "monitoreo-estatico" (Plano + Tipo de sensor)
+        # Para activos con muchos sensores el usuario puede acotar la vista.
+        all_planes = sorted({
+            (r.get("plane_label") or "").strip() for r in rendered_rows if r.get("plane_label")
+        })
+        all_types = sorted({
+            r.get("status") for r in rendered_rows if r.get("status")
+        })
+        f1, f2 = st.columns([2, 1])
+        with f1:
+            sel_planes = st.multiselect(
+                "Filtrar por ubicación / plano",
+                options=all_planes, default=[],
+                key="live_filter_planes",
+                placeholder="Todos los planos" if all_planes else "Sin planos definidos",
+            )
+        with f2:
+            sel_status = st.multiselect(
+                "Filtrar por estado",
+                options=["Danger", "Alarma", "Normal", "Sin Norma", "No Data"],
+                default=[],
+                key="live_filter_status",
+                placeholder="Todos los estados",
+            )
+
+        filtered_rows = rendered_rows
+        if sel_planes:
+            filtered_rows = [r for r in filtered_rows if (r.get("plane_label") or "") in sel_planes]
+        if sel_status:
+            filtered_rows = [r for r in filtered_rows if r.get("status") in sel_status]
+
+        if sel_planes or sel_status:
+            st.caption(
+                f"Mostrando **{len(filtered_rows)}** de **{len(rendered_rows)}** sensores."
+            )
+
         # Trae historial para sparklines
         spark_data = recent_history_all_direct(instance_id, n_per_sensor=30)
-        render_channels_table(rendered_rows, spark_data)
+        render_channels_table(filtered_rows, spark_data)
 
     with tab_vec:
         render_vectors_phasors(latest)
