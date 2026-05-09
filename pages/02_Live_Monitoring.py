@@ -953,7 +953,7 @@ def render_asset_header(
             }}
             .wm-kpi-grid {{
                 display: grid;
-                grid-template-columns: repeat(4, 1fr);
+                grid-template-columns: repeat(3, 1fr);
                 gap: 12px;
             }}
             .wm-kpi-tile {{
@@ -996,10 +996,6 @@ def render_asset_header(
                     <div class="wm-kpi-tile">
                         <div class="wm-kpi-tile-label">⚙ Velocidad</div>
                         <div class="wm-kpi-tile-value">{speed_txt}<span class="wm-kpi-tile-unit">rpm</span></div>
-                    </div>
-                    <div class="wm-kpi-tile">
-                        <div class="wm-kpi-tile-label">📡 Sensores Activos</div>
-                        <div class="wm-kpi-tile-value">{n_direct}<span class="wm-kpi-tile-unit">canales</span></div>
                     </div>
                     <div class="wm-kpi-tile">
                         <div class="wm-kpi-tile-label">⏱ Última Lectura</div>
@@ -1566,19 +1562,50 @@ def main() -> None:
             return f"{tag}  ·  {client}"
         return tag
 
-    # Top bar — selector de activo + auto-refresh, en card industrial
+    # Top bar — selector de activo + auto-refresh con look industrial
+    # estilo SCADA / control room (Ciclo 23.17). Sin etiqueta arriba del
+    # selectbox (CSS oculta el label nativo de Streamlit), reemplazada
+    # por header propio con icono + texto profesional.
     st.markdown(
         textwrap.dedent("""
         <style>
-        .wm-asset-picker-row { display: flex; align-items: center; gap: 14px;
-            padding: 12px 16px; margin: 8px 0 18px 0;
-            background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 100%);
-            border: 1px solid #c7d9eb; border-radius: 14px;
-            box-shadow: 0 6px 18px rgba(15,23,42,0.05);
+        /* Header industrial sobre el selectbox */
+        .wm-picker-header {
+            display: flex; align-items: center; gap: 10px;
+            margin: 8px 0 6px 0;
         }
-        .wm-asset-picker-row .wm-picker-label {
-            font-size: 10px; color: #64748b; font-weight: 800;
-            text-transform: uppercase; letter-spacing: 0.1em;
+        .wm-picker-header-icon {
+            width: 32px; height: 32px; border-radius: 9px;
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            display: flex; align-items: center; justify-content: center;
+            color: white; font-size: 16px; font-weight: 900;
+            box-shadow: 0 4px 10px rgba(30,64,175,0.25);
+        }
+        .wm-picker-header-text { display: flex; flex-direction: column; }
+        .wm-picker-header-title {
+            font-size: 13px; font-weight: 800; color: #0f172a;
+            letter-spacing: -0.01em; line-height: 1.1;
+        }
+        .wm-picker-header-sub {
+            font-size: 10px; color: #64748b; font-weight: 600;
+            text-transform: uppercase; letter-spacing: 0.08em;
+        }
+        /* Esconder label nativo del selectbox (lo reemplazamos por wm-picker-header) */
+        div[data-testid="stSelectbox"] label[data-testid="stWidgetLabel"] {
+            display: none !important;
+        }
+        /* Selectbox con look industrial */
+        div[data-testid="stSelectbox"] > div > div {
+            background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 100%);
+            border: 1.5px solid #c7d9eb;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(15,23,42,0.05);
+            padding: 4px 8px;
+            min-height: 46px;
+        }
+        div[data-testid="stSelectbox"] > div > div:hover {
+            border-color: #3b82f6;
+            box-shadow: 0 4px 14px rgba(59,130,246,0.15);
         }
         </style>
         """).strip(),
@@ -1587,12 +1614,25 @@ def main() -> None:
 
     top_left, top_right = st.columns([3, 1])
     with top_left:
+        st.markdown(
+            textwrap.dedent("""
+            <div class="wm-picker-header">
+                <div class="wm-picker-header-icon">🛰</div>
+                <div class="wm-picker-header-text">
+                    <div class="wm-picker-header-title">Activo monitoreado</div>
+                    <div class="wm-picker-header-sub">Real-time · ISO 20816 / API 670</div>
+                </div>
+            </div>
+            """).strip(),
+            unsafe_allow_html=True,
+        )
         instance_id = st.selectbox(
-            "🎛️ Activo monitoreado",
+            "Activo",   # label oculto por CSS
             options,
             index=default_idx,
             key="live_asset_v3",
             format_func=_fmt_option,
+            label_visibility="collapsed",
         )
     with top_right:
         auto_refresh = st.toggle(
