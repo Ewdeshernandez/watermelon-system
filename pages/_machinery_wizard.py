@@ -450,9 +450,15 @@ def _execute_creation(state: Dict[str, Any]) -> None:
                 "No pude persistir schematic recip: %s", e
             )
 
-    # 3. Persistir header extendido + sensores
+    # 3. Persistir header extendido + sensores.
+    # Defense in depth: pasamos tag/notes/location aunque create_instance ya
+    # los haya guardado, así si algo se reinicializa intermedio queda igual.
     update_instance_header(
         instance_id=inst_id,
+        tag=state.get("tag", ""),
+        location=state.get("location", ""),
+        notes=state.get("notes", ""),
+        profile_key=state.get("profile_key", "custom_manual"),
         client=state.get("client", ""),
         site=state.get("site", ""),
         asset_class=state.get("asset_class", "") or state.get("driver_type", ""),
@@ -1247,6 +1253,38 @@ elif current == 5:
     with col_nav[2]:
         if st.button("Siguiente →", type="primary", use_container_width=True,
                      key="wiz_step5_next"):
+            # FIX: aplicar las unidades + setpoints elegidos en este paso
+            # a la lista sensors_override existente. Antes este paso solo
+            # guardaba en state pero NUNCA propagaba los valores a los
+            # sensores — por eso quedaban con los defaults ISO genéricos.
+            sensors_list = state.get("sensors_override") or []
+            disp_unit = state.get("displacement_unit", "mil pp")
+            vel_unit = state.get("velocity_unit", "mm/s pk")
+            acc_unit = state.get("acceleration_unit", "g pk")
+            prox_alarm = float(state.get("proximity_alarm_mil_pp", 4.0))
+            prox_danger = float(state.get("proximity_danger_mil_pp", 6.0))
+            vel_alarm = float(state.get("velocity_alarm_mm_s", 4.5))
+            vel_danger = float(state.get("velocity_danger_mm_s", 11.2))
+            acc_alarm = float(state.get("accel_alarm_g", 4.5))
+            acc_danger = float(state.get("accel_danger_g", 9.0))
+
+            for s in sensors_list:
+                stype = (s.get("sensor_type") or "").lower()
+                if stype == "proximity":
+                    s["unit_native"] = disp_unit
+                    s["alarm"] = prox_alarm
+                    s["danger"] = prox_danger
+                elif stype in ("velocity", "velometer"):
+                    s["unit_native"] = vel_unit
+                    s["alarm"] = vel_alarm
+                    s["danger"] = vel_danger
+                elif stype == "accelerometer":
+                    s["unit_native"] = acc_unit
+                    s["alarm"] = acc_alarm
+                    s["danger"] = acc_danger
+                # keyphasor: no toca setpoints (es referencia, no medición)
+            state["sensors_override"] = sensors_list
+
             _go_next()
             st.rerun()
 
