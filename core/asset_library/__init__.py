@@ -37,6 +37,7 @@ from core.asset_library.catalog import (
     ASSET_CATALOG,
     list_drivers,
     list_driven,
+    list_by_category,
     get_asset_meta,
 )
 
@@ -70,6 +71,7 @@ __all__ = [
     "ASSET_CATALOG",
     "list_drivers",
     "list_driven",
+    "list_by_category",
     "get_asset_meta",
     "get_icon",
 ]

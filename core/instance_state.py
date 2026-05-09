@@ -120,6 +120,15 @@ class Instance:
     # Ciclo 14a — Acople
     coupling_class: str = ""        # rigid | flexible | fluid
 
+    # Ciclo 23.13 — Iconografía 2D vectorial (asset library System1-style).
+    # Cuando el wizard graba estos keys, Live Monitoring + reportes pueden
+    # invocar core.asset_library.composer.compose_train(driver_icon_key,
+    # driven_icon_key, coupling_class) y dibujar el tren con sensor dots
+    # overlayados en los anchors correctos del icono. Si están vacíos,
+    # el sistema cae al PNG 3D legacy (compatibilidad hacia atrás).
+    driver_icon_key: str = ""       # ej. "gas_turbine_aero", "electric_motor_rolling"
+    driven_icon_key: str = ""       # ej. "generator_synchronous", "centrifugal_pump_multistage"
+
     # Ciclo 14a — Esquemático visual (PNG HD)
     schematic_png: str = ""         # storage_filename dentro del Document Vault de la instancia
                                     # (se resuelve via get_instance_document_bytes)
@@ -206,6 +215,9 @@ class Instance:
             trip_level=float(_f("trip_level", 0.0) or 0.0),
             setpoint_unit=_f("setpoint_unit"),
             coupling_class=_f("coupling_class"),
+            # Ciclo 23.13 — asset library 2D
+            driver_icon_key=_f("driver_icon_key"),
+            driven_icon_key=_f("driven_icon_key"),
             schematic_png=_f("schematic_png"),
             last_balance_date=_f("last_balance_date"),
             last_alignment_date=_f("last_alignment_date"),
@@ -346,6 +358,8 @@ def update_instance_header(
         "probe_x_orientation_deg", "probe_y_orientation_deg",
         "alert_level", "danger_level", "trip_level", "setpoint_unit",
         "coupling_class", "schematic_png",
+        # Ciclo 23.13 — asset library 2D
+        "driver_icon_key", "driven_icon_key",
         "last_balance_date", "last_alignment_date", "last_overhaul_date",
         "commissioning_date",
         "sensors",

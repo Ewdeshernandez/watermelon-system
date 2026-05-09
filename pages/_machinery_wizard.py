@@ -86,6 +86,9 @@ def _default_state() -> Dict[str, Any]:
         "driver_planes": 2,
         "driver_bearing_kind": "plain",  # plain / rolling
         "driver_bearing_model": "",
+        # Ciclo 23.13 — iconografía 2D vectorial (asset library)
+        "driver_icon_key": "",
+        "driven_icon_key": "",
         "driven_type": "",
         "driven_planes": 2,
         "driven_bearing_kind": "rolling",
@@ -471,6 +474,9 @@ def _execute_creation(state: Dict[str, Any]) -> None:
         nominal_power_mw=float(state.get("nominal_power_mw", 0.0)),
         nominal_rpm=float(state.get("nominal_rpm", 0.0)),
         coupling_class=state.get("coupling_class", "flexible"),
+        # Ciclo 23.13 — iconografía 2D vectorial (asset library)
+        driver_icon_key=state.get("driver_icon_key", ""),
+        driven_icon_key=state.get("driven_icon_key", ""),
         iso_norm_code=state.get("iso_norm_code", ""),
         iso_norm_class=state.get("iso_norm_class", ""),
         sensors=sensors,
@@ -482,6 +488,127 @@ def _execute_creation(state: Dict[str, Any]) -> None:
 # Helpers de UI — DEFINIDOS ANTES de los pasos para que existan
 # cuando los bloques `elif current == 4:` los llamen.
 # =============================================================
+
+def _render_icon_picker(
+    state: Dict[str, Any],
+    role: str,        # 'driver' | 'driven'
+    state_key: str,   # 'driver_icon_key' | 'driven_icon_key'
+    column,
+) -> Optional[Dict[str, Any]]:
+    """
+    Selector visual del icono del activo (Ciclo 23.13).
+
+    Usa core.asset_library.list_by_category() para mostrar dropdowns
+    estilo System1 / Emerson AMS — primero categoría, después icono
+    específico, con OEM examples y pre-fill de planos / cojinete.
+
+    Devuelve la metadata del icono seleccionado (o None si no eligió).
+    """
+    try:
+        from core.asset_library import list_by_category, get_asset_meta
+    except ImportError:
+        return None
+
+    by_cat = list_by_category(role=role)  # {"Motores eléctricos": [...], ...}
+    if not by_cat:
+        return None
+
+    with column:
+        st.markdown(f"**Icono visual** ({role})")
+        # Construir lista plana ordenada por categoría
+        categories = sorted(by_cat.keys())
+
+        # Dropdown 1: categoría
+        cat_options = ["— Sin icono —"] + categories
+        current_key = state.get(state_key, "")
+        current_meta = get_asset_meta(current_key) if current_key else None
+        current_cat = current_meta.get("category") if current_meta else "— Sin icono —"
+        if current_cat not in cat_options:
+            current_cat = "— Sin icono —"
+
+        cat_pick = st.selectbox(
+            f"Categoría",
+            options=cat_options,
+            index=cat_options.index(current_cat),
+            key=f"wiz_icon_cat_{role}",
+        )
+
+        if cat_pick == "— Sin icono —":
+            state[state_key] = ""
+            return None
+
+        # Dropdown 2: icono específico dentro de la categoría
+        items = by_cat.get(cat_pick, [])
+        item_keys = [it["key"] for it in items]
+        item_labels = {
+            it["key"]: f"{it['default_label']}  ·  {', '.join(it.get('oem_examples', [])[:2])}"
+            for it in items
+        }
+
+        # Default al item actual si está en esa categoría, si no al primero
+        default_idx = item_keys.index(current_key) if current_key in item_keys else 0
+
+        icon_pick = st.selectbox(
+            f"Modelo",
+            options=item_keys,
+            format_func=lambda k: item_labels.get(k, k),
+            index=default_idx,
+            key=f"wiz_icon_pick_{role}",
+        )
+
+        # Persistir + retornar metadata
+        state[state_key] = icon_pick
+        meta = get_asset_meta(icon_pick)
+
+        # Pre-fill liviano: si el textfield del nombre está vacío, pre-llenar
+        # con el primer OEM example. Si el user ya escribió algo lo respetamos.
+        if meta:
+            type_field = f"{role}_type"
+            if not (state.get(type_field) or "").strip():
+                ex = meta.get("oem_examples") or []
+                state[type_field] = ex[0] if ex else meta.get("default_label", "")
+            # Pre-fill planes y bearing_kind solo si están en defaults vírgenes
+            planes_field = f"{role}_planes"
+            if int(state.get(planes_field, 2)) in (2,) and meta.get("typical_planes"):
+                state[planes_field] = int(meta["typical_planes"])
+            bearing_field = f"{role}_bearing_kind"
+            support_type = meta.get("support_type", "")
+            if support_type == "fluid_film":
+                state[bearing_field] = "plain"
+            elif support_type == "rolling_element":
+                state[bearing_field] = "rolling"
+
+        return meta
+
+
+def _render_train_preview(state: Dict[str, Any]) -> None:
+    """
+    Preview SVG en vivo del tren acoplado armado con la asset library.
+    Se renderiza solo si el user eligió ambos iconos (driver + driven).
+    """
+    drv = state.get("driver_icon_key", "")
+    drvn = state.get("driven_icon_key", "")
+    if not drv or not drvn:
+        return
+    try:
+        from core.asset_library.composer import compose_train
+        svg = compose_train(
+            driver_key=drv,
+            driven_key=drvn,
+            driver_label=state.get("driver_type", "") or "Driver",
+            driven_label=state.get("driven_type", "") or "Driven",
+            coupling=state.get("coupling_class", "flexible"),
+            sensors_with_status=[],
+        )
+        st.markdown("**Preview del tren acoplado**")
+        st.markdown(
+            f'<div style="background:#ffffff;border:1px solid #e2e8f0;'
+            f'border-radius:10px;padding:14px;">{svg}</div>',
+            unsafe_allow_html=True,
+        )
+    except Exception as e:
+        st.caption(f"(Preview no disponible: {e})")
+
 
 def _render_sensors_table_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) -> None:
     """Render del data_editor de pandas con la lista de sensores."""
@@ -846,6 +973,8 @@ elif current == 2:
 
     with col_l:
         st.markdown("### Driver (motriz)")
+        # Selector visual de icono (asset library System1-style)
+        _render_icon_picker(state, role="driver", state_key="driver_icon_key", column=col_l)
         state["driver_type"] = st.text_input(
             "Tipo / descripción",
             value=state.get("driver_type") or state.get("driver_model") or "",
@@ -879,6 +1008,8 @@ elif current == 2:
     with col_r:
         if is_recip:
             st.markdown("### Driven · Compresor reciprocante")
+            # Selector visual de icono (asset library System1-style)
+            _render_icon_picker(state, role="driven", state_key="driven_icon_key", column=col_r)
             state["driven_type"] = st.text_input(
                 "Modelo / fabricante",
                 value=state.get("driven_type") or state.get("driven_model") or "",
@@ -908,6 +1039,8 @@ elif current == 2:
             )
         else:
             st.markdown("### Driven (accionada)")
+            # Selector visual de icono (asset library System1-style)
+            _render_icon_picker(state, role="driven", state_key="driven_icon_key", column=col_r)
             state["driven_type"] = st.text_input(
                 "Tipo / descripción",
                 value=state.get("driven_type") or state.get("driven_model") or "",
@@ -999,6 +1132,17 @@ elif current == 2:
         horizontal=True,
         key="wiz_coupling",
     )
+
+    # Preview SVG del tren acoplado (Ciclo 23.13) — solo si el usuario eligió
+    # ambos iconos. Si no, mostramos un hint para que use los selectores.
+    st.markdown("---")
+    if state.get("driver_icon_key") and state.get("driven_icon_key"):
+        _render_train_preview(state)
+    else:
+        st.caption(
+            "💡 Elegí icono visual del driver y driven arriba para ver el "
+            "preview del tren acoplado completo (estilo System1 / AMS)."
+        )
 
     col_nav = st.columns([1, 2, 1])
     with col_nav[0]:
