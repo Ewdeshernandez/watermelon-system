@@ -429,7 +429,209 @@ def phasor_svg(amp: Optional[float], phase: Optional[float], max_amp: float, col
 
 
 # ============================================================
-# Hero — Live Sensor Map (schematic + dots por severidad)
+# Hero — Live Sensor Map vía Asset Library 2D (Ciclo 23.13)
+# ============================================================
+# Cuando la instancia tiene driver_icon_key + driven_icon_key, rinde
+# el tren acoplado completo usando core.asset_library.composer en vez
+# del PNG 3D legacy. Es lo que Bently System1 / Emerson AMS hacen:
+# iconografía 2D vectorial curada por tipo de máquina + sensor dots
+# en los anchors físicos correctos (DE / NDE / TRF / CRF).
+# ============================================================
+
+def _infer_side_anchor(
+    sensor_label: str,
+    sensor_match: Optional[Dict[str, Any]],
+    instance_obj: Any,
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Mapea (sensor_label, sensor_dict) → (side, anchor) para el composer.
+
+    Override explícito: si el sensor tiene icon_side / icon_anchor, los usa.
+    Si no, aplica heurística por convención industrial Bently / API 670:
+      - Label empieza con "1" → bearing #1 = DE del driver (TRF en aero)
+      - Label empieza con "2" → bearing #2 = NDE del driver (CRF en aero)
+      - Label empieza con "3" → bearing #3 = DE del driven
+      - Label empieza con "4" → bearing #4 = NDE del driven
+    Fallback a plane_label matching si label no empieza con dígito.
+
+    Devuelve (None, None) si no se pudo mapear → sensor se omite del SVG.
+    """
+    # 1. Override explícito (futuro Commit 4 — wizard editor)
+    if sensor_match:
+        s_side = sensor_match.get("icon_side")
+        s_anchor = sensor_match.get("icon_anchor")
+        if s_side and s_anchor:
+            return s_side, s_anchor
+
+    drv_key = (getattr(instance_obj, "driver_icon_key", "") or "").lower()
+    is_aero = "aero" in drv_key
+    label_l = (sensor_label or "").strip().lower()
+    plane_l = ((sensor_match or {}).get("plane_label") or "").lower()
+
+    # 2. Convención Bently — primer carácter del label es el bearing #
+    if label_l and label_l[0].isdigit():
+        bearing_num = int(label_l[0])
+        if bearing_num == 1:
+            return "driver", ("TRF" if is_aero else "DE")
+        if bearing_num == 2:
+            return "driver", ("CRF" if is_aero else "NDE")
+        if bearing_num == 3:
+            return "driven", "DE"
+        if bearing_num == 4:
+            return "driven", "NDE"
+        # 5+ → ignoramos (solo soportamos hasta gen NDE)
+        return None, None
+
+    # 3. Fallback por plane_label (sensores generados por wizard)
+    side: Optional[str] = None
+    anchor: Optional[str] = None
+    if any(t in plane_l for t in ("driver", "motor", "turbina", "engine")):
+        side = "driver"
+    elif any(t in plane_l for t in (
+        "driven", "compresor", "compressor", "generador", "generator",
+        "bomba", "pump", "frame", "cilindro", "cylinder",
+    )):
+        side = "driven"
+
+    if "nde" in plane_l:
+        anchor = "CRF" if (side == "driver" and is_aero) else "NDE"
+    elif "de" in plane_l:
+        anchor = "TRF" if (side == "driver" and is_aero) else "DE"
+
+    if side and anchor:
+        return side, anchor
+    return None, None
+
+
+def _build_library_sensors(
+    latest: List[Dict[str, Any]],
+    sensor_lookup: Dict[str, Dict[str, Any]],
+    instance_obj: Any,
+) -> List[Dict[str, Any]]:
+    """
+    Construye la lista sensors_with_status para compose_train() a partir
+    de las lecturas live y los sensores configurados de la instancia.
+    Solo incluye sensores que se pudieron mapear a (side, anchor).
+    """
+    out: List[Dict[str, Any]] = []
+    seen_anchors: set = set()  # evitar 2 sensores apilados en el mismo dot
+
+    for r in latest:
+        if r.get("metric") != "Direct":
+            continue
+        if (r.get("variable") or "").lower().startswith("velocidad"):
+            continue
+        lbl = r.get("sensor_label")
+        if not lbl:
+            continue
+        sensor_match = sensor_lookup.get(lbl)
+        side, anchor = _infer_side_anchor(lbl, sensor_match, instance_obj)
+        if not side or not anchor:
+            continue
+        # Si ya hay un sensor en este anchor, lo dejamos pasar igual —
+        # el composer renderiza ambos textos, solo el dot queda overlapped.
+        # (Caso típico: 1Y_V y 1X_V están en el mismo cojinete pero ortogonales)
+        unit = r.get("unit") or ""
+        sev = compute_severity(r.get("value"), sensor_match, unit, instance_obj)
+        try:
+            val_str = f"{float(r.get('value')):.2f}"
+        except Exception:
+            val_str = "—"
+        title = (
+            f"{lbl} | {val_str} {unit} | {sev['status']} | "
+            f"alarm={sev['alarm']:.2f} / danger={sev['danger']:.2f} ({sev['source']})"
+        )
+        out.append({
+            "label": lbl,
+            "side": side,
+            "anchor": anchor,
+            "status": sev["status"],
+            "value": val_str,
+            "unit": unit,
+            "title": title,
+        })
+        seen_anchors.add((side, anchor))
+    return out
+
+
+def render_sensor_map_library(
+    instance_obj: Any,
+    latest: List[Dict[str, Any]],
+    sensor_lookup: Dict[str, Dict[str, Any]],
+) -> bool:
+    """
+    Renderiza el tren acoplado vía core.asset_library.composer.
+
+    Devuelve True si pudo (la instancia tiene driver_icon_key + driven_icon_key),
+    False si no hay icon_keys configuradas → caller debe usar fallback PNG.
+    """
+    drv_key = getattr(instance_obj, "driver_icon_key", "") or ""
+    drvn_key = getattr(instance_obj, "driven_icon_key", "") or ""
+    if not drv_key or not drvn_key:
+        return False
+
+    try:
+        from core.asset_library.composer import compose_train
+    except ImportError:
+        return False
+
+    sensors_with_status = _build_library_sensors(latest, sensor_lookup, instance_obj)
+
+    drv_label = (
+        f"{instance_obj.driver_manufacturer} {instance_obj.driver_model}".strip()
+        or instance_obj.driver_model
+        or "Driver"
+    )
+    drvn_label = (
+        f"{instance_obj.driven_manufacturer} {instance_obj.driven_model}".strip()
+        or instance_obj.driven_model
+        or "Driven"
+    )
+
+    try:
+        svg = compose_train(
+            driver_key=drv_key,
+            driven_key=drvn_key,
+            driver_label=drv_label,
+            driven_label=drvn_label,
+            coupling=getattr(instance_obj, "coupling_class", "") or "flexible",
+            sensors_with_status=sensors_with_status,
+        )
+    except Exception as e:
+        st.caption(f"(Asset library no pudo rendir: {e}) — cayendo al PNG legacy.")
+        return False
+
+    legend = (
+        '<div class="wm-map-legend">'
+        '<span><span class="lg-dot" style="background:#22c55e;"></span>Normal</span>'
+        '<span><span class="lg-dot" style="background:#f59e0b;"></span>Alarma</span>'
+        '<span><span class="lg-dot" style="background:#ef4444;"></span>Danger</span>'
+        '<span><span class="lg-dot" style="background:#94a3b8;"></span>Sin Norma</span>'
+        '<span style="margin-left:auto;color:#94a3b8;text-transform:none;letter-spacing:0;">'
+        f'{len(sensors_with_status)} sensores mapeados'
+        '</span>'
+        '</div>'
+    )
+
+    st.markdown(
+        textwrap.dedent(
+            f"""
+            <div class="wm-map-hero">
+                <div class="wm-map-frame" style="padding:18px;">
+                    {svg}
+                </div>
+                {legend}
+            </div>
+            """
+        ).strip(),
+        unsafe_allow_html=True,
+    )
+    return True
+
+
+# ============================================================
+# Hero LEGACY — Live Sensor Map (PNG 3D + dots por severidad)
+# Solo se usa cuando la instancia NO tiene driver_icon_key/driven_icon_key.
 # ============================================================
 
 def render_sensor_map_hero(
@@ -1231,8 +1433,17 @@ def main() -> None:
 
     st.markdown("&nbsp;", unsafe_allow_html=True)
 
-    # Hero — Machine Map (schematic + dots) si tiene; si no, fallback
-    has_map = render_sensor_map_hero(instance_obj, instance_id, latest, sensor_lookup)
+    # Hero — Machine Map.
+    # Prioridad (Ciclo 23.13):
+    #   1) Asset library 2D vectorial (System1 / Emerson AMS-style) si la
+    #      instancia tiene driver_icon_key + driven_icon_key configurados.
+    #      Sensor dots se posicionan en los anchors físicos del icono
+    #      (DE / NDE / TRF / CRF) por convención Bently / API 670.
+    #   2) PNG 3D legacy con overlay x_pct/y_pct si no hay icon_keys.
+    #   3) PNG plano sin overlay si tampoco hay coordenadas.
+    has_map = render_sensor_map_library(instance_obj, latest, sensor_lookup)
+    if not has_map:
+        has_map = render_sensor_map_hero(instance_obj, instance_id, latest, sensor_lookup)
     if not has_map and instance_obj is not None and instance_obj.schematic_png:
         # Tiene schematic pero sin posiciones — render sin overlay
         try:
