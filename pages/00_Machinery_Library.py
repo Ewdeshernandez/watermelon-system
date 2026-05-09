@@ -1197,82 +1197,154 @@ def render_sensor_map_section(instance_id: str) -> None:
             "ISO 20816-1 driver→driven) y vista polar por plano con sondas en sus "
             "ángulos físicos. R/L vistos desde el extremo del driver, 0° arriba."
         )
-        try:
-            from core.sensor_diagram import render_sensor_map_diagram, _infer_machine_kind
-            _train_lbl = compose_train_description(inst) or ""
-            _drv_lbl = " ".join(p for p in [inst.driver_manufacturer, inst.driver_model] if p) or "Driver"
-            _dvn_lbl = " ".join(p for p in [inst.driven_manufacturer, inst.driven_model] if p) or "Driven"
-            # Ciclo 17.5.11 — inferimos kind del driver y driven a
-            # partir de su label combinado con el asset_class. Esto
-            # hace que el silhouette dibuje motor en vez de turbina,
-            # compresor recip en vez de generador, etc.
-            _drv_kind = (
-                _infer_machine_kind(_drv_lbl)
-                or _infer_machine_kind(inst.asset_class)
-                or "turbine"
-            )
-            _dvn_kind = (
-                _infer_machine_kind(_dvn_lbl)
-                or _infer_machine_kind(inst.asset_class)
-                or "generator"
-            )
 
-            # Ciclo 21.4 v3 — Si es compresor reciprocante, usar el
-            # schematic boxer nuevo (cilindros opuestos, acople con
-            # flanges). El render genérico dibujaba todo en línea.
-            _is_recip = (
-                _dvn_kind == "recip_compressor"
-                or any("cilindro" in (s.get("plane_label", "") or "").lower()
-                       for s in (inst.sensors or []))
-            )
-            _diag_png = None
-            if _is_recip:
-                try:
-                    from core.recip_schematic import generate_recip_png
-                    import re as _re_recip
-                    _cyl_nums = set()
-                    _motor_planes_set = set()
-                    for s in (inst.sensors or []):
-                        lbl = (s.get("plane_label", "") or "").lower()
-                        if "cilindro" in lbl and "rod drop" not in lbl:
-                            _m = _re_recip.search(r"cilindro\s*(\d+)", lbl)
-                            if _m:
-                                _cyl_nums.add(int(_m.group(1)))
-                        if "motor" in lbl:
-                            _motor_planes_set.add(s.get("plane", 0))
-                    _n_cyl = max(_cyl_nums) if _cyl_nums else 4
-                    _n_motor = max(len(_motor_planes_set), 2)
-                    _diag_png = generate_recip_png(
-                        n_cylinders=_n_cyl,
-                        n_motor_planes=_n_motor,
-                        motor_label=_drv_lbl,
-                        compressor_label=_dvn_lbl,
-                    )
-                except Exception as _re_err:
-                    import logging as _lg
-                    _lg.getLogger(__name__).warning(
-                        "Fallo recip_schematic, fallback a render genérico: %s",
-                        _re_err,
-                    )
-
-            if not _diag_png:
-                _diag_png = render_sensor_map_diagram(
-                    inst.sensors,
-                    train_label=_train_lbl,
-                    driver_label=_drv_lbl,
-                    driven_label=_dvn_lbl,
-                driver_kind=_drv_kind,
-                driven_kind=_dvn_kind,
-            )
-            if _diag_png:
-                st.image(_diag_png, use_container_width=True)
-            else:
-                st.warning(
-                    "No se pudo renderizar el diagrama. "
-                    "Verificá que matplotlib esté disponible en el entorno."
+        # Ciclo 23.13 — Si la instancia tiene driver_icon_key + driven_icon_key
+        # configurados (wizard >= v3.31.14), preferimos el SVG vectorial de
+        # core.asset_library en lugar del diagrama legacy de rectángulos.
+        # Mismo render que Live Monitoring + Wizard editor, así el especialista
+        # ve el mismo activo en las 3 pantallas.
+        _used_library = False
+        _drv_icon_key = getattr(inst, "driver_icon_key", "") or ""
+        _drvn_icon_key = getattr(inst, "driven_icon_key", "") or ""
+        if _drv_icon_key and _drvn_icon_key:
+            try:
+                from core.asset_library.composer import compose_train
+                from core.sensor_map import sensor_label as _slbl_lib
+                _drv_lbl_lib = " ".join(p for p in [
+                    inst.driver_manufacturer, inst.driver_model,
+                ] if p) or "Driver"
+                _dvn_lbl_lib = " ".join(p for p in [
+                    inst.driven_manufacturer, inst.driven_model,
+                ] if p) or "Driven"
+                _s_for_svg = []
+                for s in (inst.sensors or []):
+                    _side = (s.get("icon_side") or "").strip()
+                    _anchor = (s.get("icon_anchor") or "").strip()
+                    if not _side or not _anchor:
+                        continue
+                    try:
+                        _lbl = _slbl_lib(s)
+                    except Exception:
+                        _lbl = s.get("plane_label", "?")
+                    _s_for_svg.append({
+                        "label": _lbl,
+                        "side": _side,
+                        "anchor": _anchor,
+                        "status": "Sin Norma",  # sin readings live en este contexto
+                        "value": "",
+                        "unit": "",
+                        "title": f"{_lbl} · {s.get('sensor_type','')}",
+                    })
+                _svg_lib = compose_train(
+                    driver_key=_drv_icon_key,
+                    driven_key=_drvn_icon_key,
+                    driver_label=_drv_lbl_lib,
+                    driven_label=_dvn_lbl_lib,
+                    coupling=getattr(inst, "coupling_class", "") or "flexible",
+                    sensors_with_status=_s_for_svg,
                 )
-        except Exception as e:
-            st.warning(f"Error al renderizar diagrama: {e}")
+                st.markdown(
+                    f'<div style="background:#ffffff;border:1px solid #e2e8f0;'
+                    f'border-radius:10px;padding:14px;">{_svg_lib}</div>',
+                    unsafe_allow_html=True,
+                )
+                _n_total = len(inst.sensors or [])
+                _n_mapped = len(_s_for_svg)
+                if _n_mapped < _n_total:
+                    st.caption(
+                        f"📍 **{_n_mapped} de {_n_total}** sensores asignados a un anchor del icono. "
+                        f"Los {_n_total - _n_mapped} restantes no aparecen — asignales side/anchor "
+                        f"en el wizard (Step 5 · Editor visual)."
+                    )
+                else:
+                    st.caption(
+                        f"📍 {_n_mapped} sensores · todos asignados a su cojinete físico."
+                    )
+                _used_library = True
+            except Exception as _lib_e:
+                import logging as _lg_lib
+                _lg_lib.getLogger(__name__).warning(
+                    "Asset library no pudo rendir, fallback a diagrama legacy: %s",
+                    _lib_e,
+                )
+
+        if not _used_library:
+            try:
+                from core.sensor_diagram import render_sensor_map_diagram, _infer_machine_kind
+                _train_lbl = compose_train_description(inst) or ""
+                _drv_lbl = " ".join(p for p in [inst.driver_manufacturer, inst.driver_model] if p) or "Driver"
+                _dvn_lbl = " ".join(p for p in [inst.driven_manufacturer, inst.driven_model] if p) or "Driven"
+                # Ciclo 17.5.11 — inferimos kind del driver y driven a
+                # partir de su label combinado con el asset_class. Esto
+                # hace que el silhouette dibuje motor en vez de turbina,
+                # compresor recip en vez de generador, etc.
+                _drv_kind = (
+                    _infer_machine_kind(_drv_lbl)
+                    or _infer_machine_kind(inst.asset_class)
+                    or "turbine"
+                )
+                _dvn_kind = (
+                    _infer_machine_kind(_dvn_lbl)
+                    or _infer_machine_kind(inst.asset_class)
+                    or "generator"
+                )
+
+                # Ciclo 21.4 v3 — Si es compresor reciprocante, usar el
+                # schematic boxer nuevo (cilindros opuestos, acople con
+                # flanges). El render genérico dibujaba todo en línea.
+                _is_recip = (
+                    _dvn_kind == "recip_compressor"
+                    or any("cilindro" in (s.get("plane_label", "") or "").lower()
+                           for s in (inst.sensors or []))
+                )
+                _diag_png = None
+                if _is_recip:
+                    try:
+                        from core.recip_schematic import generate_recip_png
+                        import re as _re_recip
+                        _cyl_nums = set()
+                        _motor_planes_set = set()
+                        for s in (inst.sensors or []):
+                            lbl = (s.get("plane_label", "") or "").lower()
+                            if "cilindro" in lbl and "rod drop" not in lbl:
+                                _m = _re_recip.search(r"cilindro\s*(\d+)", lbl)
+                                if _m:
+                                    _cyl_nums.add(int(_m.group(1)))
+                            if "motor" in lbl:
+                                _motor_planes_set.add(s.get("plane", 0))
+                        _n_cyl = max(_cyl_nums) if _cyl_nums else 4
+                        _n_motor = max(len(_motor_planes_set), 2)
+                        _diag_png = generate_recip_png(
+                            n_cylinders=_n_cyl,
+                            n_motor_planes=_n_motor,
+                            motor_label=_drv_lbl,
+                            compressor_label=_dvn_lbl,
+                        )
+                    except Exception as _re_err:
+                        import logging as _lg
+                        _lg.getLogger(__name__).warning(
+                            "Fallo recip_schematic, fallback a render genérico: %s",
+                            _re_err,
+                        )
+
+                if not _diag_png:
+                    _diag_png = render_sensor_map_diagram(
+                        inst.sensors,
+                        train_label=_train_lbl,
+                        driver_label=_drv_lbl,
+                        driven_label=_dvn_lbl,
+                        driver_kind=_drv_kind,
+                        driven_kind=_dvn_kind,
+                    )
+                if _diag_png:
+                    st.image(_diag_png, use_container_width=True)
+                else:
+                    st.warning(
+                        "No se pudo renderizar el diagrama. "
+                        "Verificá que matplotlib esté disponible en el entorno."
+                    )
+            except Exception as e:
+                st.warning(f"Error al renderizar diagrama: {e}")
 
         # ============================================================
         # Ciclo 15.2 — Click-to-place sobre el schematic_png real
