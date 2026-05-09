@@ -58,44 +58,58 @@ def _render_sensor_dot(
     text_above: bool = True,
 ) -> str:
     """
-    SVG de un sensor dot con texto 'LABEL VALOR' inline. Por default el
-    texto va arriba del dot; si `text_above=False` el texto va debajo
-    (caso típico: probetas X/Y ortogonales API 670 — la Y arriba, la X
-    abajo, ambas en el mismo cojinete pero textos no apilados).
+    SVG de un sensor dot con label + valor + unidad apilados con buena
+    separación vertical. La unidad va en una "pill" con fondo claro para
+    destacar y separarla del valor (legibilidad System1/AMS-style).
+
+    text_above: si True, etiqueta arriba del dot; si False, abajo
+    (caso típico probetas X/Y ortogonales API 670).
     """
     color = SEVERITY_COLORS.get(status, "#64748b")
     anim = SEVERITY_ANIM.get(status, "")
-    inline = f"{label} {value}".strip() if value and value != "—" else label
+    has_value = bool(value) and value != "—"
+    inline = f"{label} {value}".strip() if has_value else label
 
+    # Separación vertical mejorada (Ciclo 23.16):
+    # text_above=True:  text @ cy-16,  unit @ cy-28 (más arriba que el label)
+    # text_above=False: text @ cy+18,  unit @ cy+30 (debajo del label)
     if text_above:
-        text_y = cy - 12
-        unit_y = cy + 18
+        text_y = cy - 16
+        unit_y = cy - 28
     else:
-        text_y = cy + 16
-        unit_y = cy + 26  # debajo del label, si hay unidad
+        text_y = cy + 20
+        unit_y = cy + 32
 
     parts = [
         f'<g><title>{title or label}</title>',
-        # Halo
-        f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="9" fill="{color}" '
-        f'fill-opacity="0.18" stroke="{color}" stroke-width="0.8" stroke-opacity="0.55"/>',
-        # Dot principal
-        f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" fill="{color}" stroke="white" '
-        f'stroke-width="1.8">{anim}</circle>',
-        # Texto inline (arriba o abajo según text_above)
+        # Halo (círculo translúcido alrededor del dot — efecto de glow)
+        f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="10" fill="{color}" '
+        f'fill-opacity="0.22" stroke="{color}" stroke-width="1" stroke-opacity="0.6"/>',
+        # Dot principal con borde blanco grueso
+        f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5.5" fill="{color}" stroke="white" '
+        f'stroke-width="2">{anim}</circle>',
+        # Texto LABEL + VALOR con halo blanco grueso para legibilidad
         f'<text x="{cx:.1f}" y="{text_y:.1f}" text-anchor="middle" '
-        f'font-size="9" font-weight="800" font-family="SF Mono, Menlo, monospace" '
+        f'font-size="10" font-weight="800" font-family="SF Mono, Menlo, monospace" '
         f'fill="{color}" letter-spacing="-0.04" '
-        f'style="paint-order:stroke;stroke:white;stroke-width:2.5;stroke-linejoin:round;">'
+        f'style="paint-order:stroke;stroke:white;stroke-width:3.5;stroke-linejoin:round;">'
         f'{inline}</text>',
     ]
-    if unit and value and value != "—":
+    if unit and has_value:
+        # Estimar ancho de la pill según largo de la unidad
+        pill_w = max(28, len(unit) * 4.2 + 8)
+        pill_h = 9
         parts.append(
-            f'<text x="{cx:.1f}" y="{unit_y:.1f}" text-anchor="middle" '
-            f'font-size="7" font-weight="600" font-family="SF Mono, monospace" '
-            f'fill="#475569" '
-            f'style="paint-order:stroke;stroke:white;stroke-width:2;stroke-linejoin:round;">'
-            f'{unit}</text>'
+            # Pill background
+            f'<rect x="{cx - pill_w / 2:.1f}" y="{unit_y - pill_h + 2:.1f}" '
+            f'width="{pill_w:.1f}" height="{pill_h:.1f}" rx="4" '
+            f'fill="white" stroke="{color}" stroke-width="0.8" stroke-opacity="0.6"/>'
+        )
+        parts.append(
+            # Unidad text
+            f'<text x="{cx:.1f}" y="{unit_y - 1:.1f}" text-anchor="middle" '
+            f'font-size="7" font-weight="700" font-family="SF Mono, monospace" '
+            f'fill="#475569" letter-spacing="0.03">{unit}</text>'
         )
     parts.append('</g>')
     return "".join(parts)

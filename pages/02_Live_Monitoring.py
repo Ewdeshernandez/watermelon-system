@@ -788,47 +788,229 @@ def render_sensor_map_hero(
 # Header & Alarm strip
 # ============================================================
 
-def render_asset_header(instance_obj, instance_id: str) -> None:
+def render_asset_header(
+    instance_obj,
+    instance_id: str,
+    latest: Optional[List[Dict[str, Any]]] = None,
+    severity_summary: Optional[Dict[str, int]] = None,
+) -> None:
+    """
+    Asset banner card industrial — Ciclo 23.16.
+
+    Reemplaza el header simple por una card grande estilo control room:
+      - Title del activo (TES1) con tag + asset class
+      - LIVE badge + status overall (Normal/Atención/Crítica) en grande
+      - Driver / Driven / Cliente / Sitio en chips
+      - 4 KPIs en grilla: velocidad, sensores activos, última lectura,
+        alarmas (con color por severidad)
+    """
     title_text = instance_id
     if instance_obj is not None and instance_obj.tag and instance_obj.tag != instance_id:
         title_text = f"{instance_obj.tag} · {instance_id}"
 
-    sub_parts: List[str] = []
-    if instance_obj is not None:
-        if instance_obj.driver_model:
-            sub_parts.append(instance_obj.driver_model)
-        if instance_obj.driven_model:
-            sub_parts.append(instance_obj.driven_model)
-        if instance_obj.client:
-            sub_parts.append(f"📍 {instance_obj.client}")
-    sub_html = " · ".join(sub_parts) if sub_parts else ""
-
-    # Asset class chip — transparencia de qué thresholds OEM se aplican
+    # Asset class chip
     asset_class = detect_asset_class(instance_obj)
     class_label = CLASS_LABELS.get(asset_class, "—")
     class_color = {
-        "aero_turbine":       ("#dbeafe", "#1e40af"),  # azul
-        "industrial_turbine": ("#dcfce7", "#166534"),  # verde
-        "recip_compressor":   ("#fef3c7", "#92400e"),  # ámbar
-        "rotating_general":   ("#f1f5f9", "#475569"),  # neutro
+        "aero_turbine":       ("#dbeafe", "#1e40af"),
+        "industrial_turbine": ("#dcfce7", "#166534"),
+        "recip_compressor":   ("#fef3c7", "#92400e"),
+        "rotating_general":   ("#f1f5f9", "#475569"),
     }.get(asset_class, ("#f1f5f9", "#475569"))
+
+    # Status overall — derivado del severity_summary
+    summary = severity_summary or {}
+    n_danger = summary.get("Danger", 0)
+    n_alarm = summary.get("Alarma", 0)
+    if n_danger > 0:
+        status_label = "CRÍTICA"
+        status_fg = "#7f1d1d"
+        status_bg = "linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)"
+        status_border = "#ef4444"
+        status_icon = "🚨"
+    elif n_alarm > 0:
+        status_label = "ATENCIÓN"
+        status_fg = "#92400e"
+        status_bg = "linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)"
+        status_border = "#f59e0b"
+        status_icon = "⚠️"
+    else:
+        status_label = "OPERACIÓN NORMAL"
+        status_fg = "#14532d"
+        status_bg = "linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)"
+        status_border = "#22c55e"
+        status_icon = "✓"
+
+    # KPIs
+    direct_rows = [r for r in (latest or []) if r.get("metric") == "Direct"]
+    speed_row = next(
+        (r for r in (latest or []) if (r.get("variable") or "").lower().startswith("velocidad")),
+        None,
+    )
+    speed_val = speed_row.get("value") if speed_row else None
+    speed_txt = f"{float(speed_val):.0f}" if speed_val is not None else "—"
+    n_direct = len(direct_rows)
+
+    if latest:
+        min_age_seconds = min(_seconds_since(r["captured_at"]) for r in latest)
+        oldest_row = min(latest, key=lambda r: _seconds_since(r["captured_at"]))
+        age_txt = _format_age(oldest_row["captured_at"])
+        age_color = _staleness_color(min_age_seconds)
+    else:
+        age_txt = "—"
+        age_color = "#94a3b8"
+
+    if n_danger + n_alarm == 0:
+        alarms_txt = "0"
+        alarms_color = "#16a34a"
+    else:
+        alarms_txt = f"{n_danger + n_alarm}"
+        alarms_color = "#ef4444" if n_danger else "#f59e0b"
+
+    # Chips (driver, driven, cliente, sitio)
+    chip_items: List[str] = []
+    if instance_obj is not None:
+        if instance_obj.driver_model:
+            mfr = (instance_obj.driver_manufacturer or "").strip()
+            mdl = instance_obj.driver_model.strip()
+            chip_items.append(
+                f'<span class="wm-asset-chip">'
+                f'<span class="wm-chip-key">DRIVER</span>'
+                f'<span class="wm-chip-val">{(mfr + " " + mdl).strip()}</span>'
+                f'</span>'
+            )
+        if instance_obj.driven_model:
+            mfr = (instance_obj.driven_manufacturer or "").strip()
+            mdl = instance_obj.driven_model.strip()
+            chip_items.append(
+                f'<span class="wm-asset-chip">'
+                f'<span class="wm-chip-key">DRIVEN</span>'
+                f'<span class="wm-chip-val">{(mfr + " " + mdl).strip()}</span>'
+                f'</span>'
+            )
+        if instance_obj.client:
+            chip_items.append(
+                f'<span class="wm-asset-chip">'
+                f'<span class="wm-chip-key">CLIENTE</span>'
+                f'<span class="wm-chip-val">{instance_obj.client}</span>'
+                f'</span>'
+            )
+        if instance_obj.site:
+            chip_items.append(
+                f'<span class="wm-asset-chip">'
+                f'<span class="wm-chip-key">SITIO</span>'
+                f'<span class="wm-chip-val">{instance_obj.site}</span>'
+                f'</span>'
+            )
+    chips_html = "".join(chip_items)
 
     st.markdown(
         textwrap.dedent(
             f"""
-            <div style="display:flex;align-items:center;gap:14px;margin-top:4px;flex-wrap:wrap;">
-                <div class="wm-asset-title">{title_text}</div>
-                <span class="wm-live-badge"><span class="wm-live-dot"></span>LIVE</span>
-                <span style="
-                    display:inline-flex;align-items:center;gap:5px;
-                    padding:4px 11px;border-radius:999px;
-                    background:{class_color[0]};color:{class_color[1]};
-                    font-weight:800;font-size:10px;letter-spacing:0.06em;text-transform:uppercase;
-                " title="Thresholds aplicados según esta clase de activo">
-                    🛡️ {class_label}
-                </span>
+            <style>
+            .wm-asset-banner {{
+                background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 60%, #e6f0fb 100%);
+                border: 1px solid #c7d9eb;
+                border-radius: 18px;
+                padding: 18px 22px;
+                margin: 4px 0 18px 0;
+                box-shadow: 0 14px 32px rgba(15,23,42,0.07);
+            }}
+            .wm-asset-banner-top {{
+                display: flex; align-items: center; gap: 14px;
+                flex-wrap: wrap; margin-bottom: 12px;
+            }}
+            .wm-asset-banner-title {{
+                font-size: 30px; font-weight: 900; color: #0f172a;
+                letter-spacing: -0.02em; line-height: 1;
+            }}
+            .wm-status-pill-big {{
+                display: inline-flex; align-items: center; gap: 8px;
+                padding: 8px 18px; border-radius: 14px;
+                background: {status_bg}; color: {status_fg};
+                font-weight: 900; font-size: 12px; letter-spacing: 0.1em;
+                text-transform: uppercase;
+                border: 2px solid {status_border};
+                box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+            }}
+            .wm-asset-banner-chips {{
+                display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;
+            }}
+            .wm-asset-chip {{
+                display: inline-flex; gap: 8px; align-items: center;
+                background: white;
+                border: 1px solid #dbe5f0;
+                border-radius: 10px;
+                padding: 6px 12px;
+                font-size: 12px;
+            }}
+            .wm-asset-chip .wm-chip-key {{
+                color: #64748b; font-weight: 800; letter-spacing: 0.08em;
+                font-size: 9px; text-transform: uppercase;
+            }}
+            .wm-asset-chip .wm-chip-val {{
+                color: #0f172a; font-weight: 700;
+            }}
+            .wm-kpi-grid {{
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 12px;
+            }}
+            .wm-kpi-tile {{
+                background: white;
+                border: 1px solid #e5edf7;
+                border-radius: 12px;
+                padding: 12px 14px;
+                box-shadow: 0 4px 10px rgba(15,23,42,0.04);
+            }}
+            .wm-kpi-tile .wm-kpi-tile-label {{
+                font-size: 9px; color: #64748b; font-weight: 800;
+                text-transform: uppercase; letter-spacing: 0.1em;
+                margin-bottom: 4px;
+            }}
+            .wm-kpi-tile .wm-kpi-tile-value {{
+                font-size: 26px; font-weight: 900; color: #0f172a;
+                line-height: 1; font-variant-numeric: tabular-nums;
+            }}
+            .wm-kpi-tile .wm-kpi-tile-unit {{
+                font-size: 11px; color: #94a3b8; margin-left: 4px;
+                font-weight: 700;
+            }}
+            </style>
+            <div class="wm-asset-banner">
+                <div class="wm-asset-banner-top">
+                    <div class="wm-asset-banner-title">{title_text}</div>
+                    <span class="wm-live-badge"><span class="wm-live-dot"></span>LIVE</span>
+                    <span style="
+                        display:inline-flex;align-items:center;gap:5px;
+                        padding:5px 12px;border-radius:999px;
+                        background:{class_color[0]};color:{class_color[1]};
+                        font-weight:800;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;
+                    ">🛡️ {class_label}</span>
+                    <div style="margin-left:auto;">
+                        <span class="wm-status-pill-big">{status_icon} {status_label}</span>
+                    </div>
+                </div>
+                <div class="wm-asset-banner-chips">{chips_html}</div>
+                <div class="wm-kpi-grid">
+                    <div class="wm-kpi-tile">
+                        <div class="wm-kpi-tile-label">⚙ Velocidad</div>
+                        <div class="wm-kpi-tile-value">{speed_txt}<span class="wm-kpi-tile-unit">rpm</span></div>
+                    </div>
+                    <div class="wm-kpi-tile">
+                        <div class="wm-kpi-tile-label">📡 Sensores Activos</div>
+                        <div class="wm-kpi-tile-value">{n_direct}<span class="wm-kpi-tile-unit">canales</span></div>
+                    </div>
+                    <div class="wm-kpi-tile">
+                        <div class="wm-kpi-tile-label">⏱ Última Lectura</div>
+                        <div class="wm-kpi-tile-value" style="color:{age_color};">hace {age_txt}</div>
+                    </div>
+                    <div class="wm-kpi-tile">
+                        <div class="wm-kpi-tile-label">🔔 Alarmas</div>
+                        <div class="wm-kpi-tile-value" style="color:{alarms_color};">{alarms_txt}<span class="wm-kpi-tile-unit">activas</span></div>
+                    </div>
+                </div>
             </div>
-            <div class="wm-asset-sub" style="margin-bottom:10px;">{sub_html}</div>
             """
         ).strip(),
         unsafe_allow_html=True,
@@ -1425,9 +1607,9 @@ def main() -> None:
     sensor_lookup = _build_sensor_lookup(instance_obj)
     latest = latest_for_instance(instance_id)
 
-    render_asset_header(instance_obj, instance_id)
-
     if not latest:
+        # Si no hay datos, igual mostramos el header sin KPIs
+        render_asset_header(instance_obj, instance_id)
         st.warning(
             "**Sin datos en tiempo real para este activo.** Verificá:\n"
             "1. Tabla `live_readings` creada en Supabase.\n"
@@ -1438,13 +1620,13 @@ def main() -> None:
 
     rendered_rows, severity_summary = compute_rendered_rows(latest, sensor_lookup, instance_obj)
 
+    # Asset banner card industrial — incluye title, status, chips OEM
+    # y los 4 KPIs (velocidad, sensores, última lectura, alarmas).
+    # Reemplaza el header simple + status_bar separado de v3.31.21.
+    render_asset_header(instance_obj, instance_id, latest, severity_summary)
+
     # Alarm strip prominente arriba si hay danger
     render_alarm_strip(rendered_rows)
-
-    # KPIs
-    render_kpi_strip(latest, severity_summary)
-
-    st.markdown("&nbsp;", unsafe_allow_html=True)
 
     # Hero — Machine Map.
     # Prioridad (Ciclo 23.13):
