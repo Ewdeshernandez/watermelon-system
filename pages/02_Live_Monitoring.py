@@ -499,21 +499,21 @@ def render_sensor_map_hero(
         info = readings_by_sensor.get(label, {})
         status = info.get("status", "No Data")
 
+        # Color por severidad — sin recuadros con texto encima del esquema.
+        # Inspiración: System1 / AMS Suite usan dots clean y panel separado
+        # para los valores (no etiquetas pegadas al render del activo).
         if status == "Danger":
-            fill = "#ef4444"; anim = '<animate attributeName="r" values="2.0;3.0;2.0" dur="1.2s" repeatCount="indefinite"/>'
-            badge_bg = "rgba(239,68,68,0.95)"; badge_fg = "#ffffff"
+            fill = "#ef4444"
+            anim = '<animate attributeName="r" values="1.8;2.6;1.8" dur="1.2s" repeatCount="indefinite"/>'
         elif status == "Alarma":
-            fill = "#f59e0b"; anim = '<animate attributeName="opacity" values="1;0.55;1" dur="1.6s" repeatCount="indefinite"/>'
-            badge_bg = "rgba(245,158,11,0.95)"; badge_fg = "#ffffff"
+            fill = "#f59e0b"
+            anim = '<animate attributeName="opacity" values="1;0.55;1" dur="1.6s" repeatCount="indefinite"/>'
         elif status == "Normal":
             fill = "#22c55e"; anim = ""
-            badge_bg = "rgba(15,23,42,0.92)"; badge_fg = "#dcfce7"
         elif status == "Sin Norma":
             fill = "#94a3b8"; anim = ""
-            badge_bg = "rgba(15,23,42,0.92)"; badge_fg = "#fde68a"
         else:
             fill = "#64748b"; anim = ""
-            badge_bg = "rgba(15,23,42,0.92)"; badge_fg = "#cbd5e1"
 
         cx = float(x_pct)
         cy = float(y_pct)
@@ -525,39 +525,27 @@ def render_sensor_map_hero(
             f"({info.get('source', 'n/a')})"
         )
 
-        # ===== Badge siempre visible =====
-        # SVG viewBox 0..100, así que el ancho del badge se calcula en
-        # unidades del viewBox. Aproximamos: un char ≈ 1.6 unidades a font-size 2.4.
-        text_inside = f"{label} {val_str}{unit}"
-        badge_w = max(18.0, len(text_inside) * 1.4)
-        badge_h = 4.6
-        # Posición del badge: arriba-derecha del dot, sin tapar.
-        bx = cx + 1.8
-        by = cy - badge_h - 1.6
-        # Si está cerca del borde derecho, voltear a la izquierda.
-        if bx + badge_w > 99:
-            bx = cx - badge_w - 1.8
-
+        # ===== Diseño limpio: dot + label minúsculo arriba (sin recuadro)
+        # El valor numérico vive en la tabla "Canales en Vivo" y en el
+        # tooltip del hover. El esquema es para conciencia espacial
+        # (¿dónde físicamente está el sensor en alarma?), no para mostrar
+        # números encima del activo.
         dots_svg_parts.append(
             f'<g><title>{title}</title>'
-            # Halo
-            f'<circle cx="{cx}" cy="{cy}" r="3.4" fill="{fill}" fill-opacity="0.18" '
-            f'stroke="{fill}" stroke-width="0.4" stroke-opacity="0.6"/>'
-            # Dot
-            f'<circle cx="{cx}" cy="{cy}" r="1.9" fill="{fill}" stroke="white" '
-            f'stroke-width="0.6">{anim}</circle>'
-            # Línea conectando dot ↔ badge
-            f'<line x1="{cx}" y1="{cy - 1.9}" x2="{bx + (badge_w if bx < cx else 0):.1f}" '
-            f'y2="{by + badge_h:.1f}" stroke="{fill}" stroke-width="0.25" stroke-opacity="0.55"/>'
-            # Badge background (rounded)
-            f'<rect x="{bx:.1f}" y="{by:.1f}" width="{badge_w:.1f}" height="{badge_h}" '
-            f'rx="0.8" fill="{badge_bg}" stroke="{fill}" stroke-width="0.3"/>'
-            # Badge text
-            f'<text x="{bx + badge_w/2:.1f}" y="{by + badge_h - 1.4:.1f}" '
-            f'text-anchor="middle" font-size="2.4" font-weight="700" '
-            f'font-family="SF Mono, Menlo, monospace" fill="{badge_fg}">'
-            f'{text_inside}'
-            f'</text>'
+            # Halo translúcido (color por severidad)
+            f'<circle cx="{cx}" cy="{cy}" r="2.6" fill="{fill}" fill-opacity="0.20" '
+            f'stroke="{fill}" stroke-width="0.25" stroke-opacity="0.45"/>'
+            # Dot principal con borde blanco para contraste sobre cualquier fondo
+            f'<circle cx="{cx}" cy="{cy}" r="1.4" fill="{fill}" stroke="white" '
+            f'stroke-width="0.55">{anim}</circle>'
+            # Label discreto del sensor (solo el code, sin valor) — texto
+            # con paint-order:stroke para que se lea sobre cualquier fondo.
+            f'<text x="{cx}" y="{cy - 3.2}" text-anchor="middle" '
+            f'font-size="1.7" font-weight="700" '
+            f'font-family="SF Mono, Menlo, Consolas, monospace" '
+            f'fill="#0f172a" letter-spacing="-0.05" '
+            f'style="paint-order:stroke;stroke:white;stroke-width:0.55;'
+            f'stroke-linejoin:round;">{label}</text>'
             f'</g>'
         )
 
