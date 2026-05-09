@@ -535,25 +535,50 @@ def _render_sensors_table_editor(state: Dict[str, Any], sensors: List[Dict[str, 
     state["_wizard_table_edited"] = edited
 
 
-def _render_recip_visual_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) -> None:
-    """Editor visual: click sobre la imagen para reposicionar el sensor seleccionado."""
-    from core.recip_schematic import generate_recip_png
+def _render_visual_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) -> None:
+    """
+    Editor visual del sensor map: click sobre la imagen para reposicionar
+    el sensor seleccionado. Funciona para CUALQUIER categoría:
 
+      - reciprocating_compressor → core.recip_schematic.generate_recip_png
+        (motor + acople + compresor con cilindros opuestos boxer)
+      - turbomachinery / motor_pump / generic → core.train_schematic.generate_train_png
+        (driver + acople + driven con cojinetes numerados)
+
+    Antes (pre Ciclo 23.8) este editor solo se mostraba para recip,
+    dejando a los demás activos sin posicionamiento visual de sensores.
+    """
     try:
         from streamlit_image_coordinates import streamlit_image_coordinates
         _HAS_COORDS = True
     except ImportError:
         _HAS_COORDS = False
 
-    n_cyl = int(state.get("cylinders_count", 4))
-    n_motor = int(state.get("driver_planes", 2))
+    category = state.get("category", "")
+    is_recip = category == "reciprocating_compressor"
 
-    png_bytes = generate_recip_png(
-        n_cylinders=n_cyl, n_motor_planes=n_motor,
-        has_distance_piece=True,
-        motor_label=state.get("driver_type") or "Motor",
-        compressor_label=state.get("driven_type") or "Compresor",
-    )
+    if is_recip:
+        from core.recip_schematic import generate_recip_png
+        n_cyl = int(state.get("cylinders_count", 4))
+        n_motor = int(state.get("driver_planes", 2))
+        png_bytes = generate_recip_png(
+            n_cylinders=n_cyl, n_motor_planes=n_motor,
+            has_distance_piece=True,
+            motor_label=state.get("driver_type") or "Motor",
+            compressor_label=state.get("driven_type") or "Compresor",
+        )
+    else:
+        # Tren acoplado genérico (turbo, motor+bomba, motor+generador, etc.)
+        from core.train_schematic import generate_train_png
+        n_d = int(state.get("driver_planes", 2))
+        n_dn = int(state.get("driven_planes", 2))
+        png_bytes = generate_train_png(
+            driver_label=state.get("driver_type") or "Driver",
+            driven_label=state.get("driven_type") or "Driven",
+            n_driver_planes=n_d,
+            n_driven_planes=n_dn,
+        )
+
     if not png_bytes:
         st.warning("Pillow no está disponible — no puedo generar el schematic.")
         return
@@ -1249,23 +1274,29 @@ elif current == 5:
     else:
         import pandas as pd
 
-        # Editor visual click-to-place solo para reciprocantes
-        is_recip = state.get("category") == "reciprocating_compressor"
-        if is_recip:
-            tab_visual, tab_table = st.tabs([
-                "🎨 Editor visual (click para reposicionar)",
-                "📋 Tabla de sensores",
-            ])
-            with tab_visual:
+        # Ciclo 23.8 — Editor visual click-to-place para TODAS las categorías.
+        # Antes solo aparecía para reciprocating_compressor, dejando a las
+        # demás máquinas sin posicionamiento visual.
+        tab_visual, tab_table = st.tabs([
+            "🎨 Editor visual (click para reposicionar)",
+            "📋 Tabla de sensores",
+        ])
+        with tab_visual:
+            is_recip = state.get("category") == "reciprocating_compressor"
+            if is_recip:
                 st.caption(
                     "Hacé click sobre la imagen para mover el sensor seleccionado a "
                     "esa posición. El esquema se genera según N cilindros + N "
                     "cojinetes del motor."
                 )
-                _render_recip_visual_editor(state, sensors_override)
-            with tab_table:
-                _render_sensors_table_editor(state, sensors_override)
-        else:
+            else:
+                st.caption(
+                    "Hacé click sobre la imagen para mover el sensor seleccionado a "
+                    "esa posición. El esquema muestra el tren acoplado driver + "
+                    "acople + driven con los cojinetes numerados."
+                )
+            _render_visual_editor(state, sensors_override)
+        with tab_table:
             _render_sensors_table_editor(state, sensors_override)
 
         col_actions = st.columns([1, 1, 2])
