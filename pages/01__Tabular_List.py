@@ -1269,17 +1269,76 @@ if _active_instance.sensors:
                     _active_instance.driven_manufacturer,
                     _active_instance.driven_model,
                 ] if p) or "Driven"
-                _mini_png = _mini_render(
-                    _active_instance.sensors,
-                    train_label="",
-                    driver_label=_drv_lbl,
-                    driven_label=_dvn_lbl,
-                    severity_by_label=_sev_by_label,
-                    figure_width_in=11.0,
-                    compact=True,
-                )
-                if _mini_png:
-                    st.image(_mini_png, use_container_width=True)
+
+                # Ciclo 23.13 — preferir SVG vectorial library si la instancia
+                # tiene driver_icon_key + driven_icon_key configurados. Mismo
+                # render que Live Monitoring + Machinery Library + Wizard editor.
+                _used_lib_mini = False
+                _drv_icon = getattr(_active_instance, "driver_icon_key", "") or ""
+                _drvn_icon = getattr(_active_instance, "driven_icon_key", "") or ""
+                if _drv_icon and _drvn_icon:
+                    try:
+                        from core.asset_library.composer import compose_train as _compose_lib
+                        from core.sensor_map import sensor_label as _slbl_lib
+                        _status_map = {
+                            "normal": "Normal",
+                            "alarm": "Alarma",
+                            "danger": "Danger",
+                            "no_data": "No Data",
+                        }
+                        _s_for_svg = []
+                        for _s in (_active_instance.sensors or []):
+                            _side = (_s.get("icon_side") or "").strip()
+                            _anchor = (_s.get("icon_anchor") or "").strip()
+                            if not _side or not _anchor:
+                                continue
+                            try:
+                                _lbl = _slbl_lib(_s)
+                            except Exception:
+                                _lbl = _s.get("plane_label", "?")
+                            _raw_status = _sev_by_label.get(_lbl, "no_data")
+                            _s_for_svg.append({
+                                "label": _lbl,
+                                "side": _side,
+                                "anchor": _anchor,
+                                "status": _status_map.get(_raw_status, "Sin Norma"),
+                                "value": "",
+                                "unit": "",
+                                "title": _lbl,
+                            })
+                        _svg_mini = _compose_lib(
+                            driver_key=_drv_icon,
+                            driven_key=_drvn_icon,
+                            driver_label=_drv_lbl,
+                            driven_label=_dvn_lbl,
+                            coupling=getattr(_active_instance, "coupling_class", "") or "flexible",
+                            sensors_with_status=_s_for_svg,
+                        )
+                        st.markdown(
+                            f'<div style="background:#ffffff;border:1px solid #e2e8f0;'
+                            f'border-radius:10px;padding:14px;">{_svg_mini}</div>',
+                            unsafe_allow_html=True,
+                        )
+                        _used_lib_mini = True
+                    except Exception as _lib_mini_e:
+                        import logging as _lg_mini
+                        _lg_mini.getLogger(__name__).warning(
+                            "asset library mini render failed, fallback PNG: %s",
+                            _lib_mini_e,
+                        )
+
+                if not _used_lib_mini:
+                    _mini_png = _mini_render(
+                        _active_instance.sensors,
+                        train_label="",
+                        driver_label=_drv_lbl,
+                        driven_label=_dvn_lbl,
+                        severity_by_label=_sev_by_label,
+                        figure_width_in=11.0,
+                        compact=True,
+                    )
+                    if _mini_png:
+                        st.image(_mini_png, use_container_width=True)
             except Exception as _mini_e:
                 st.caption(f"_(no se pudo renderizar el mini-diagrama: {_mini_e})_")
 
