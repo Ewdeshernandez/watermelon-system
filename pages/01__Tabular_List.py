@@ -1297,8 +1297,10 @@ if _active_instance.sensors:
                             except Exception:
                                 _lbl = _s.get("plane_label", "?")
                             _raw_status = _sev_by_label.get(_lbl, "no_data")
+                            # Display label sin underscore para el SVG (Ciclo 23.18)
+                            _display_lbl = _lbl.replace("_", "")
                             _s_for_svg.append({
-                                "label": _lbl,
+                                "label": _display_lbl,
                                 "side": _side,
                                 "anchor": _anchor,
                                 "status": _status_map.get(_raw_status, "Sin Norma"),

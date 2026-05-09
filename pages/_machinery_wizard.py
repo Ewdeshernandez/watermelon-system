@@ -778,8 +778,10 @@ def _render_visual_editor_library(
                 lbl = _sensor_label_fn(s)
             except Exception:
                 lbl = s.get("plane_label", "?")
+            # Display label sin underscore para el SVG (Ciclo 23.18) — '2Y_A' → '2YA'.
+            display_lbl = lbl.replace("_", "")
             s_for_svg.append({
-                "label": lbl, "side": side, "anchor": anchor,
+                "label": display_lbl, "side": side, "anchor": anchor,
                 "status": "Sin Norma",  # sin readings live en el wizard
                 "value": "", "unit": "",
                 "title": f"{lbl} · {s.get('sensor_type','')}",

@@ -541,8 +541,11 @@ def _build_library_sensors(
             f"{lbl} | {val_str} {unit} | {sev['status']} | "
             f"alarm={sev['alarm']:.2f} / danger={sev['danger']:.2f} ({sev['source']})"
         )
+        # Display label sin underscore (Ciclo 23.18) — '2Y_A' → '2YA'.
+        # NO afecta CSV matches ni el sensor_lookup, que siguen usando lbl original.
+        display_label = lbl.replace("_", "")
         out.append({
-            "label": lbl,
+            "label": display_label,
             "side": side,
             "anchor": anchor,
             "status": sev["status"],
