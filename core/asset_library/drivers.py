@@ -145,98 +145,174 @@ def gas_turbine_aero(
     combustor_red = "#dc2626"  # rojo combustor
     combustor_dark = "#7f1d1d" # rojo oscuro borde
 
-    # Coordenadas (más compactas que v3.31.27 anterior)
-    intake_x1 = x_offset + 10
-    intake_x2 = x_offset + 50
-    comp_x1 = x_offset + 50
-    comp_x2 = x_offset + 155
-    crf_x = x_offset + 165          # banda CRF
-    comb_x1 = x_offset + 175
-    comb_x2 = x_offset + 200
-    pt_x1 = x_offset + 210          # power turbine start
-    pt_x2 = x_offset + 295
-    trf_x = x_offset + 305          # banda TRF
-    outlet_x1 = x_offset + 315
-    outlet_x2 = x_offset + 345
+    # ========================================================
+    # GEOMETRÍA INSPIRADA EN CUTAWAY GE LM6000 (Ciclo 23.22)
+    # ========================================================
+    # NO copia la imagen GE (copyright). Solo usa proporciones reales:
+    #   intake angosto → LP fan AMPLIO → HP compressor que se angosta →
+    #   CRF (zona angosta del medio) → combustor compacto → HP turbine
+    #   expande → LP turbine (PT) ancha → TRF → outlet cone converge.
+    #
+    # Convención de bearings (Bently/API 670, ya validada con specialist):
+    #   1Y/1X (CRF, NDE, lado libre) = primer bearing accesible al
+    #     inicio del LP fan area
+    #   2Y/2X (TRF, DE, lado coupling) = al final de la LP turbine,
+    #     antes del outlet/coupling
+    # ========================================================
 
-    # Radios verticales en cada estación
-    r_intake_in = 18    # diámetro angosto al inlet (bell mouth small)
-    r_intake_out = 35   # bell-mouth se abre hacia el compresor
-    r_comp_in = 35
-    r_comp_out = 50     # compresor expande
-    r_crf = 50
-    r_comb = 58         # combustor más ancho (cuerpo cilíndrico)
-    r_pt_in = 50
-    r_pt_out = 38       # power turbine converge
-    r_trf = 38
-    r_outlet_in = 38
-    r_outlet_out = 14   # outlet cone converge a shaft
+    intake_x1 = x_offset + 5      # bell-mouth muy a la izquierda
+    intake_x2 = x_offset + 32     # bell-mouth se abre
+    lp_fan_x = x_offset + 75      # LP fan/booster (zona más amplia)
+    crf_x = x_offset + 90         # banda CRF (lado libre, NDE)
+    hp_comp_x1 = x_offset + 105   # HP compressor empieza a angostarse
+    hp_comp_x2 = x_offset + 175   # HP comp end (zona angosta)
+    comb_x1 = x_offset + 185      # combustor compacto
+    comb_x2 = x_offset + 215
+    hp_turb_x = x_offset + 235    # HP turbine expande
+    lp_turb_x1 = x_offset + 250   # LP turbine (power turbine)
+    lp_turb_x2 = x_offset + 300
+    trf_x = x_offset + 312        # banda TRF (lado coupling, DE)
+    outlet_x2 = x_offset + 350    # outlet converge al shaft
+
+    # Radios verticales (proporciones reales LM6000)
+    r_intake_in = 12      # bell-mouth angosto al inlet
+    r_intake_out = 50     # bell-mouth se abre amplio (LP fan starts)
+    r_lp_fan = 52         # LP fan/booster — sección MÁS ANCHA del activo
+    r_crf = 48            # CRF (justo donde HP comp empieza a angostarse)
+    r_hp_comp_in = 46     # HP comp entrada
+    r_hp_comp_out = 32    # HP comp converge — zona más angosta del medio
+    r_comb = 38           # combustor ligeramente más ancho que HP out
+    r_hp_turb = 44        # HP turbine expande (recibe combustor)
+    r_lp_turb_in = 46     # LP turbine empieza
+    r_lp_turb_out = 48    # LP turbine sale ligeramente más ancha (PT)
+    r_trf = 40            # TRF zona
+    r_outlet = 14         # outlet converge al shaft
+
+    # SILUETA CONTINUA — path único de izq a der (top), después reverso
+    # por simetría (bottom). Esto da una forma fluida sin gaps.
+    body_path = (
+        # === TOP edge (izq a der) ===
+        f'M {intake_x1:.1f},{cy - r_intake_in:.1f} '
+        f'L {intake_x2:.1f},{cy - r_intake_out:.1f} '         # bell-mouth se abre
+        f'L {lp_fan_x:.1f},{cy - r_lp_fan:.1f} '              # LP fan amplio
+        f'L {crf_x:.1f},{cy - r_crf:.1f} '                    # CRF zona
+        f'L {hp_comp_x1:.1f},{cy - r_hp_comp_in:.1f} '
+        f'L {hp_comp_x2:.1f},{cy - r_hp_comp_out:.1f} '       # HP comp angosto
+        f'L {comb_x1:.1f},{cy - r_comb:.1f} '                 # combustor compacto
+        f'L {comb_x2:.1f},{cy - r_comb:.1f} '
+        f'L {hp_turb_x:.1f},{cy - r_hp_turb:.1f} '            # HP turbine expande
+        f'L {lp_turb_x1:.1f},{cy - r_lp_turb_in:.1f} '
+        f'L {lp_turb_x2:.1f},{cy - r_lp_turb_out:.1f} '       # LP turbine
+        f'L {trf_x:.1f},{cy - r_trf:.1f} '                    # TRF
+        f'L {outlet_x2:.1f},{cy - r_outlet:.1f} '             # outlet converge
+        # === RIGHT edge (vertical) ===
+        f'L {outlet_x2:.1f},{cy + r_outlet:.1f} '
+        # === BOTTOM edge (der a izq, reverso) ===
+        f'L {trf_x:.1f},{cy + r_trf:.1f} '
+        f'L {lp_turb_x2:.1f},{cy + r_lp_turb_out:.1f} '
+        f'L {lp_turb_x1:.1f},{cy + r_lp_turb_in:.1f} '
+        f'L {hp_turb_x:.1f},{cy + r_hp_turb:.1f} '
+        f'L {comb_x2:.1f},{cy + r_comb:.1f} '
+        f'L {comb_x1:.1f},{cy + r_comb:.1f} '
+        f'L {hp_comp_x2:.1f},{cy + r_hp_comp_out:.1f} '
+        f'L {hp_comp_x1:.1f},{cy + r_hp_comp_in:.1f} '
+        f'L {crf_x:.1f},{cy + r_crf:.1f} '
+        f'L {lp_fan_x:.1f},{cy + r_lp_fan:.1f} '
+        f'L {intake_x2:.1f},{cy + r_intake_out:.1f} '
+        f'L {intake_x1:.1f},{cy + r_intake_in:.1f} '
+        f'Z'
+    )
+
+    # Overlay HP compressor — tono más oscuro para diferenciar la zona
+    hp_comp_overlay = (
+        f'M {hp_comp_x1:.1f},{cy - r_hp_comp_in:.1f} '
+        f'L {hp_comp_x2:.1f},{cy - r_hp_comp_out:.1f} '
+        f'L {hp_comp_x2:.1f},{cy + r_hp_comp_out:.1f} '
+        f'L {hp_comp_x1:.1f},{cy + r_hp_comp_in:.1f} Z'
+    )
+
+    # Overlay LP turbine (PT) — tono diferente al body
+    lp_turb_overlay = (
+        f'M {hp_turb_x:.1f},{cy - r_hp_turb:.1f} '
+        f'L {lp_turb_x1:.1f},{cy - r_lp_turb_in:.1f} '
+        f'L {lp_turb_x2:.1f},{cy - r_lp_turb_out:.1f} '
+        f'L {trf_x:.1f},{cy - r_trf:.1f} '
+        f'L {trf_x:.1f},{cy + r_trf:.1f} '
+        f'L {lp_turb_x2:.1f},{cy + r_lp_turb_out:.1f} '
+        f'L {lp_turb_x1:.1f},{cy + r_lp_turb_in:.1f} '
+        f'L {hp_turb_x:.1f},{cy + r_hp_turb:.1f} Z'
+    )
+
+    # Aliases para el resto del código que usa nombres viejos
+    compressor_overlay = hp_comp_overlay
+    pt_overlay = lp_turb_overlay
+    r_comb = r_comb  # mantenemos
+    r_pt_max = r_lp_turb_in  # alias para código existente
+
+    # Gradient ID único basado en x_offset para evitar colisiones cuando se
+    # rinden múltiples turbinas en una misma página.
+    grad_id = f"turbgrad_{int(x_offset)}_{int(y_offset)}"
 
     parts = [
-        # ================ Bell-mouth intake (izquierda) ================
-        # Forma trapezoidal con esquinas redondeadas — angosto a wide
-        f'<path d="M {intake_x1:.1f},{cy - r_intake_in:.1f} '
-        f'L {intake_x2:.1f},{cy - r_intake_out:.1f} '
-        f'L {intake_x2:.1f},{cy + r_intake_out:.1f} '
-        f'L {intake_x1:.1f},{cy + r_intake_in:.1f} Z" '
-        f'fill="{body_light}" stroke="{body_outline}" stroke-width="1.5" stroke-linejoin="round"/>',
+        # Defs: gradient lineal (claro arriba → medio abajo) para 3D-feel
+        f'<defs>'
+        f'<linearGradient id="{grad_id}" x1="0%" y1="0%" x2="0%" y2="100%">'
+        f'<stop offset="0%" stop-color="#ffffff"/>'
+        f'<stop offset="40%" stop-color="{body_light}"/>'
+        f'<stop offset="100%" stop-color="{body_mid}"/>'
+        f'</linearGradient>'
+        f'</defs>',
 
-        # ================ Compressor section ================
-        # Trapecio horizontal, expande r_comp_in a r_comp_out
-        f'<path d="M {comp_x1:.1f},{cy - r_comp_in:.1f} '
-        f'L {comp_x2:.1f},{cy - r_comp_out:.1f} '
-        f'L {comp_x2:.1f},{cy + r_comp_out:.1f} '
-        f'L {comp_x1:.1f},{cy + r_comp_in:.1f} Z" '
-        f'fill="{body_mid}" stroke="{body_outline}" stroke-width="1.5" stroke-linejoin="round"/>',
-        # Bumps de etapas — pequeñas líneas horizontales sutiles (no álabes)
+        # Cuerpo único — silueta continua con gradient 3D
+        f'<path d="{body_path}" fill="url(#{grad_id})" stroke="{body_outline}" '
+        f'stroke-width="1.5" stroke-linejoin="round"/>',
+
+        # Overlay compresor — fill medio para diferenciar la zona
+        f'<path d="{compressor_overlay}" fill="{body_mid}" stroke="none" opacity="0.85"/>',
+        # Marcas de etapas de compresor (sutiles)
         *[
-            f'<line x1="{comp_x1 + 6 + i * 18:.1f}" y1="{cy - (r_comp_in + (r_comp_out - r_comp_in) * (i * 18) / (comp_x2 - comp_x1)):.1f}" '
-            f'x2="{comp_x1 + 6 + i * 18:.1f}" y2="{cy + (r_comp_in + (r_comp_out - r_comp_in) * (i * 18) / (comp_x2 - comp_x1)):.1f}" '
-            f'stroke="{body_outline}" stroke-width="0.5" stroke-opacity="0.4"/>'
+            f'<line x1="{intake_x2 + 8 + i * 14:.1f}" '
+            f'y1="{cy - (r_intake_out + (r_crf - r_intake_out) * (8 + i * 14) / (crf_x - intake_x2)):.1f}" '
+            f'x2="{intake_x2 + 8 + i * 14:.1f}" '
+            f'y2="{cy + (r_intake_out + (r_crf - r_intake_out) * (8 + i * 14) / (crf_x - intake_x2)):.1f}" '
+            f'stroke="{body_outline}" stroke-width="0.5" stroke-opacity="0.35"/>'
+            for i in range(7)
+        ],
+
+        # Overlay power turbine
+        f'<path d="{pt_overlay}" fill="{body_mid}" stroke="none" opacity="0.85"/>',
+        *[
+            f'<line x1="{comb_x2 + 18 + i * 13:.1f}" '
+            f'y1="{cy - (r_pt_max - (r_pt_max - r_trf) * (8 + i * 13) / (trf_x - comb_x2 - 10)):.1f}" '
+            f'x2="{comb_x2 + 18 + i * 13:.1f}" '
+            f'y2="{cy + (r_pt_max - (r_pt_max - r_trf) * (8 + i * 13) / (trf_x - comb_x2 - 10)):.1f}" '
+            f'stroke="{body_outline}" stroke-width="0.5" stroke-opacity="0.35"/>'
             for i in range(6)
         ],
 
-        # ================ CRF banda azul (bearing 1 / NDE) ================
-        f'<rect x="{crf_x - 5:.1f}" y="{cy - r_crf - 4:.1f}" width="10" height="{2 * r_crf + 8:.1f}" '
-        f'fill="{bearing_band}" stroke="{bearing_dark}" stroke-width="1" rx="2"/>',
-
-        # ================ Combustor — banda roja gruesa ================
-        f'<rect x="{comb_x1:.1f}" y="{cy - r_comb:.1f}" width="{comb_x2 - comb_x1:.1f}" height="{2 * r_comb:.1f}" '
-        f'fill="{combustor_red}" stroke="{combustor_dark}" stroke-width="1.2" rx="3"/>',
-        # Líneas verticales sutiles para indicar combustor cans
+        # Combustor — banda roja embebida en la silueta (no sobresale)
+        f'<rect x="{comb_x1:.1f}" y="{cy - r_comb + 1:.1f}" '
+        f'width="{comb_x2 - comb_x1:.1f}" height="{2 * r_comb - 2:.1f}" '
+        f'fill="{combustor_red}" stroke="{combustor_dark}" stroke-width="0.8"/>',
+        # Combustor cans (3 líneas verticales sutiles)
         *[
-            f'<line x1="{comb_x1 + 5 + i * 7:.1f}" y1="{cy - r_comb + 4:.1f}" '
-            f'x2="{comb_x1 + 5 + i * 7:.1f}" y2="{cy + r_comb - 4:.1f}" '
-            f'stroke="{combustor_dark}" stroke-width="0.6" stroke-opacity="0.5"/>'
+            f'<line x1="{comb_x1 + (comb_x2 - comb_x1) * (0.25 + i * 0.25):.1f}" '
+            f'y1="{cy - r_comb + 5:.1f}" '
+            f'x2="{comb_x1 + (comb_x2 - comb_x1) * (0.25 + i * 0.25):.1f}" '
+            f'y2="{cy + r_comb - 5:.1f}" '
+            f'stroke="{combustor_dark}" stroke-width="0.7" stroke-opacity="0.55"/>'
             for i in range(3)
         ],
 
-        # ================ Power turbine ================
-        # Trapecio convergente
-        f'<path d="M {pt_x1:.1f},{cy - r_pt_in:.1f} '
-        f'L {pt_x2:.1f},{cy - r_pt_out:.1f} '
-        f'L {pt_x2:.1f},{cy + r_pt_out:.1f} '
-        f'L {pt_x1:.1f},{cy + r_pt_in:.1f} Z" '
-        f'fill="{body_mid}" stroke="{body_outline}" stroke-width="1.5" stroke-linejoin="round"/>',
-        # Bumps de etapas (sutiles)
-        *[
-            f'<line x1="{pt_x1 + 6 + i * 16:.1f}" y1="{cy - (r_pt_in - (r_pt_in - r_pt_out) * (i * 16) / (pt_x2 - pt_x1)):.1f}" '
-            f'x2="{pt_x1 + 6 + i * 16:.1f}" y2="{cy + (r_pt_in - (r_pt_in - r_pt_out) * (i * 16) / (pt_x2 - pt_x1)):.1f}" '
-            f'stroke="{body_outline}" stroke-width="0.5" stroke-opacity="0.4"/>'
-            for i in range(5)
-        ],
+        # Banda CRF azul (bearing 1 / NDE) — encima del body
+        f'<rect x="{crf_x - 5:.1f}" y="{cy - r_crf - 4:.1f}" width="10" '
+        f'height="{2 * r_crf + 8:.1f}" fill="{bearing_band}" stroke="{bearing_dark}" '
+        f'stroke-width="1" rx="2"/>',
 
-        # ================ TRF banda azul (bearing 2 / DE) ================
-        f'<rect x="{trf_x - 5:.1f}" y="{cy - r_trf - 4:.1f}" width="10" height="{2 * r_trf + 8:.1f}" '
-        f'fill="{bearing_band}" stroke="{bearing_dark}" stroke-width="1" rx="2"/>',
-
-        # ================ Outlet cone ================
-        # Cono convergente al shaft
-        f'<path d="M {outlet_x1:.1f},{cy - r_outlet_in:.1f} '
-        f'L {outlet_x2:.1f},{cy - r_outlet_out:.1f} '
-        f'L {outlet_x2:.1f},{cy + r_outlet_out:.1f} '
-        f'L {outlet_x1:.1f},{cy + r_outlet_in:.1f} Z" '
-        f'fill="{body_light}" stroke="{body_outline}" stroke-width="1.5" stroke-linejoin="round"/>',
+        # Banda TRF azul (bearing 2 / DE) — encima del body
+        f'<rect x="{trf_x - 5:.1f}" y="{cy - r_trf - 4:.1f}" width="10" '
+        f'height="{2 * r_trf + 8:.1f}" fill="{bearing_band}" stroke="{bearing_dark}" '
+        f'stroke-width="1" rx="2"/>',
 
         # Eje sale por la derecha
         shaft_line(outlet_x2, cy, x_offset + W, cy),

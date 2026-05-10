@@ -52,7 +52,19 @@ def generator_synchronous(
     # Stator slots
     slot_xs = [body_x + 30 + i * 22 for i in range(9)]
 
+    # Gradient ID único — evita colisiones si hay múltiples generadores
+    gen_grad_id = f"gengrad_{int(x_offset)}_{int(y_offset)}"
+
     parts = [
+        # Defs: linear gradient (claro arriba → medio abajo) para 3D-feel
+        f'<defs>'
+        f'<linearGradient id="{gen_grad_id}" x1="0%" y1="0%" x2="0%" y2="100%">'
+        f'<stop offset="0%" stop-color="#ffffff"/>'
+        f'<stop offset="40%" stop-color="{body_light}"/>'
+        f'<stop offset="100%" stop-color="{body_mid}"/>'
+        f'</linearGradient>'
+        f'</defs>',
+
         # Label arriba
         label_top(x_offset + W / 2, y_offset + 16, label, "driven"),
 
@@ -62,9 +74,9 @@ def generator_synchronous(
         f'<text x="{body_x + body_w / 2:.1f}" y="{body_y - 3:.1f}" text-anchor="middle" '
         f'font-size="8" font-weight="700" fill="#475569">BUS DUCT 13.8 kV</text>',
 
-        # Cilindro principal — esquinas redondeadas suaves (rx=10), no semicírculos
+        # Cilindro principal con gradient 3D — esquinas redondeadas suaves
         f'<rect x="{body_x:.1f}" y="{body_y:.1f}" width="{body_w:.1f}" height="{body_h:.1f}" '
-        f'rx="10" fill="{body_light}" stroke="{body_outline}" stroke-width="1.5"/>',
+        f'rx="10" fill="url(#{gen_grad_id})" stroke="{body_outline}" stroke-width="1.5"/>',
 
         # Stator slots — líneas verticales internas
         *[
