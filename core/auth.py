@@ -222,20 +222,21 @@ def _show_authenticated_layout_tweaks() -> None:
             display: none !important;
         }
 
-        /* ===== SIDEBAR EXPANDED — Ciclo 23.38 "international" upgrade =====
-           Antes: 320px width, bright blue gradient (#67b7ff→#1f6fd1).
-           Resultado: bloated, look "app móvil", compite con contenido.
-           Ahora: 256px (Linear/Notion/Stripe standard), navy dark slate
-           con subtle blue tint para mantener identidad de marca pero
-           profesional enterprise. */
+        /* ===== SIDEBAR EXPANDED — Ciclo 23.39 "Royal blue" =====
+           Iteraciones:
+             Original:  bright blue #67b7ff→#1f6fd1 (consumer/app-móvil, bloated)
+             23.38:     dark slate #0f172a→#1e293b (funeral, sin personalidad)
+             23.39:     Royal blue #1e3a8a→#2563eb (sweet spot, enterprise alive)
+           256px width (Linear/Notion/Stripe standard), navy → royal blue
+           con radial accent — look LinkedIn/Microsoft Azure premium. */
         section[data-testid="stSidebar"][aria-expanded="true"] {
             width: 256px !important;
             min-width: 256px !important;
             max-width: 256px !important;
             background:
-                radial-gradient(circle at 0% 0%, rgba(33,71,140,0.45) 0%, transparent 55%),
-                linear-gradient(180deg, #0f172a 0%, #1e293b 50%, #0f172a 100%) !important;
-            border-right: 1px solid rgba(148,163,184,0.14);
+                radial-gradient(circle at 0% 0%, rgba(59,130,246,0.30) 0%, transparent 55%),
+                linear-gradient(180deg, #1e3a8a 0%, #2563eb 60%, #1e3a8a 100%) !important;
+            border-right: 1px solid rgba(255,255,255,0.10);
         }
 
         section[data-testid="stSidebar"][aria-expanded="true"] > div {
