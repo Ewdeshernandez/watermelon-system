@@ -132,18 +132,36 @@ def _render_sparkline(
     color: str,
     width: float = 64,
     height: float = 18,
+    value_num: Optional[float] = None,
+    danger: Optional[float] = None,
 ) -> str:
     """
-    Onda sinusoidal decorativa (Ciclo 23.35) — el usuario prefiere el
-    look limpio de la sin wave. La data real se ve en el zoom panel.
-    Card sin borde grueso, sin frame visual fuerte — flota sobre el
-    fondo y signaling solo por color por severidad.
+    Onda sinusoidal data-driven (Ciclo 23.51) — la AMPLITUD de la onda
+    refleja qué tan cerca está el valor del danger threshold. Un sensor
+    en Normal (value bajo) muestra una onda casi plana. Un sensor cerca
+    de Alarma muestra una onda mediana. Un sensor en Danger muestra una
+    onda casi llenando el box.
+
+    Esto es signature visual: el operador puede leer el estado del
+    activo a 1 metro de distancia mirando SHAPES, no leyendo números.
+    Diferenciador real vs System1/Bently/Emerson (que solo muestran
+    barras o números planos).
+
+    Si no hay value_num/danger útiles, fallback a onda mediana (50%).
     """
     if not values or len(values) < 2:
         return ""
+    # Amplitud data-driven
+    max_amplitude = (height - 6) / 2
+    if value_num is not None and danger and danger > 0:
+        # ratio 0..1.2 (post-danger sigue creciendo levemente para visual feedback)
+        ratio = min(1.2, max(0.18, value_num / danger))
+    else:
+        ratio = 0.5  # fallback decorativo
+    amplitude = max_amplitude * ratio
+    # Frecuencia: constante por ahora. Future: ratio = RPM / 3600.
     n_cycles = 3
     n_points = 36
-    amplitude = (height - 6) / 2
     y_center = height / 2
     pts = []
     for i in range(n_points):
@@ -198,26 +216,27 @@ def _render_sensor_dot(
     has_value = bool(value) and value != "—"
     inline = f"{label} {value}".strip() if has_value else label
 
-    # Layout vertical extendido para hospedar sparkline + threshold bar.
-    # Ciclo 23.25: separación aumentada para dejar respiro entre las
-    # decoraciones (recuadro sparkline) y el cuerpo del equipo.
-    # text_above=True:  spark @ cy-90, threshold @ cy-55, text @ cy-32, unit @ cy-18
-    # text_above=False: text @ cy+28, unit @ cy+42, threshold @ cy+58, spark @ cy+90
+    # Layout vertical extendido (Ciclo 23.51) — TODO subido ~15px más
+    # para que los valores numéricos floten CLARAMENTE arriba/abajo del
+    # cuerpo del equipo, sin tocarlo. User feedback: "saquemos los
+    # valores del dibujo para dejar el equipo más limpio".
+    # text_above=True:  spark @ cy-105, threshold @ cy-72, text @ cy-45, unit @ cy-30
+    # text_above=False: text @ cy+42, unit @ cy+58, threshold @ cy+78, spark @ cy+110
     has_spark = spark_values is not None and len(spark_values) >= 2
     has_threshold = (
         alarm is not None and danger is not None
         and alarm > 0 and danger > alarm
     )
     if text_above:
-        text_y = cy - 32 if (has_spark or has_threshold) else cy - 16
-        unit_y = cy - 18 if (has_spark or has_threshold) else cy - 28
-        threshold_y = cy - 55
-        spark_y = cy - 90
+        text_y = cy - 45 if (has_spark or has_threshold) else cy - 16
+        unit_y = cy - 30 if (has_spark or has_threshold) else cy - 28
+        threshold_y = cy - 72
+        spark_y = cy - 105
     else:
-        text_y = cy + 28 if (has_spark or has_threshold) else cy + 20
-        unit_y = cy + 42 if (has_spark or has_threshold) else cy + 32
-        threshold_y = cy + 58
-        spark_y = cy + 92
+        text_y = cy + 42 if (has_spark or has_threshold) else cy + 20
+        unit_y = cy + 58 if (has_spark or has_threshold) else cy + 32
+        threshold_y = cy + 78
+        spark_y = cy + 110
 
     # Click-to-drill (Ciclo 23.26) — wrapper SVG <a> con href absoluto.
     # Iteraciones previas:
@@ -286,13 +305,17 @@ def _render_sensor_dot(
                 color=color,
             )
         )
-    # Sparkline (Ciclo 23.23) — tendencia rápida sin ir a la tabla
+    # Sparkline data-driven (Ciclo 23.51) — amplitud de la onda
+    # sinusoidal proporcional al value_num/danger ratio. Operador lee
+    # SHAPES en vez de números a 1 metro de distancia.
     if has_spark:
         parts.append(
             _render_sparkline(
                 cx=cx, cy=spark_y,
                 values=spark_values,
                 color=color,
+                value_num=value_num,
+                danger=danger,
             )
         )
     parts.append(close_tag)
