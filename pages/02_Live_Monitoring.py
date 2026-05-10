@@ -527,6 +527,11 @@ def _build_library_sensors(
     out: List[Dict[str, Any]] = []
     seen_anchors: set = set()  # evitar 2 sensores apilados en el mismo dot
 
+    # Stale threshold (Ciclo 23.34): si una lectura tiene más de 60s
+    # sin actualizar, se considera "stale" y se renderiza grayscale en el
+    # diagrama. El operador ve de un vistazo qué sensores no están vivos.
+    STALE_AGE_SECONDS = 60.0
+
     for r in latest:
         if r.get("metric") != "Direct":
             continue
@@ -590,6 +595,15 @@ def _build_library_sensors(
         from urllib.parse import quote as _urlquote
         link = f"/Live_Monitoring?sensor={_urlquote(lbl)}"
 
+        # Stale check (Ciclo 23.34) — captured_at viene en ISO. Si
+        # _seconds_since() falla por any razón, asumimos NO stale (no
+        # ocultamos datos por error de parseo).
+        try:
+            age_sec = _seconds_since(r.get("captured_at"))
+            is_stale = age_sec > STALE_AGE_SECONDS
+        except Exception:
+            is_stale = False
+
         out.append({
             "label": display_label,
             "side": side,
@@ -604,6 +618,7 @@ def _build_library_sensors(
             "value_num": val_num,
             "link": link,
             "sensor_label": lbl,  # para que zoom panel pueda lookupear
+            "is_stale": is_stale,
         })
         seen_anchors.add((side, anchor))
     return out

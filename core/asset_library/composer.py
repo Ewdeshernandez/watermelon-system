@@ -39,11 +39,14 @@ from core.asset_library.couplings import (
 
 
 SEVERITY_COLORS = {
-    "Danger":    "#ef4444",
-    "Alarma":    "#f59e0b",
-    "Normal":    "#22c55e",
-    "Sin Norma": "#94a3b8",
-    "No Data":   "#64748b",
+    # Ciclo 23.34 — bumped Normal del #22c55e (contrast 2.5:1 sobre blanco,
+    # FAIL WCAG AA) a #15803d (forest green, contrast 4.7:1 PASS WCAG AA).
+    # Resto de severidades ya cumplen contrast.
+    "Danger":    "#dc2626",   # red-600 (era #ef4444 red-500)
+    "Alarma":    "#b45309",   # amber-700 (era #f59e0b amber-500)
+    "Normal":    "#15803d",   # green-700 (era #22c55e green-500)
+    "Sin Norma": "#475569",   # slate-600 (era #94a3b8 slate-400)
+    "No Data":   "#334155",   # slate-700 (era #64748b slate-500)
 }
 
 SEVERITY_ANIM = {
@@ -60,13 +63,16 @@ def _render_threshold_bar(
     danger: Optional[float],
     color: str,
     width: float = 64,
-    height: float = 5,
+    height: float = 7,
 ) -> str:
     """
-    Mini barra horizontal verde/amarillo/rojo con marker del valor actual.
-    Da contexto visual de qué tan cerca está el sensor de los thresholds.
-    Se compone en (cx, cy) centrado en X.
-    Si no hay alarm/danger útiles, devuelve string vacío.
+    Barra horizontal continua con 3 zonas (verde/amarillo/rojo) sin
+    bordes ni separadores visibles — solo color (Ciclo 23.35).
+    Marker del valor actual: triangulito chiquito sobre la barra
+    apuntando hacia abajo, sin halo agresivo.
+
+    User feedback v3.31.42 → "dejar una sola barra con colores sin
+    dividirlas con líneas, solo con colores sin marco".
     """
     if alarm is None or danger is None or alarm <= 0 or danger <= 0 or alarm >= danger:
         return ""
@@ -77,24 +83,44 @@ def _render_threshold_bar(
     danger_w = max(0.0, width - norm_w - alarm_w)
     x0 = cx - width / 2
     y0 = cy - height / 2
+
     parts = [
-        # Zona normal (verde claro)
-        f'<rect x="{x0:.1f}" y="{y0:.1f}" width="{norm_w:.1f}" height="{height:.1f}" '
-        f'rx="2" fill="#dcfce7"/>',
-        # Zona alarma (amarillo claro)
-        f'<rect x="{x0 + norm_w:.1f}" y="{y0:.1f}" width="{alarm_w:.1f}" height="{height:.1f}" '
-        f'fill="#fef3c7"/>',
-        # Zona danger (rojo claro)
-        f'<rect x="{x0 + norm_w + alarm_w:.1f}" y="{y0:.1f}" width="{danger_w:.1f}" '
-        f'height="{height:.1f}" rx="2" fill="#fee2e2"/>',
+        # Zonas continuas SIN strokes — solo colores. Las esquinas
+        # redondeadas solo en los extremos (izq de verde, der de rojo)
+        # para feel pill cohesivo.
+        # Zona normal (verde) — esquina izq redondeada
+        f'<path d="M {x0+3:.1f} {y0:.1f} '
+        f'L {x0+norm_w:.1f} {y0:.1f} '
+        f'L {x0+norm_w:.1f} {y0+height:.1f} '
+        f'L {x0+3:.1f} {y0+height:.1f} '
+        f'Q {x0:.1f} {y0+height:.1f} {x0:.1f} {y0+height-3:.1f} '
+        f'L {x0:.1f} {y0+3:.1f} '
+        f'Q {x0:.1f} {y0:.1f} {x0+3:.1f} {y0:.1f} Z" '
+        f'fill="#22c55e"/>',
+        # Zona alarma (amber) — sin esquinas
+        f'<rect x="{x0+norm_w:.1f}" y="{y0:.1f}" width="{alarm_w:.1f}" '
+        f'height="{height:.1f}" fill="#f59e0b"/>',
+        # Zona danger (red) — esquina der redondeada
+        f'<path d="M {x0+norm_w+alarm_w:.1f} {y0:.1f} '
+        f'L {x0+width-3:.1f} {y0:.1f} '
+        f'Q {x0+width:.1f} {y0:.1f} {x0+width:.1f} {y0+3:.1f} '
+        f'L {x0+width:.1f} {y0+height-3:.1f} '
+        f'Q {x0+width:.1f} {y0+height:.1f} {x0+width-3:.1f} {y0+height:.1f} '
+        f'L {x0+norm_w+alarm_w:.1f} {y0+height:.1f} Z" '
+        f'fill="#ef4444"/>',
     ]
-    # Marker del valor actual
+
+    # Marker — triangulito apuntando hacia abajo desde arriba de la barra.
+    # Mucho más sutil que las dos líneas con halo de la versión anterior.
     if value is not None and value >= 0:
         marker_pos = min(width, max(0.0, width * (value / scale_max)))
+        mx = x0 + marker_pos
         parts.append(
-            f'<line x1="{x0 + marker_pos:.1f}" y1="{y0 - 2:.1f}" '
-            f'x2="{x0 + marker_pos:.1f}" y2="{y0 + height + 2:.1f}" '
-            f'stroke="#0f172a" stroke-width="1.6" stroke-linecap="round"/>'
+            f'<polygon points="'
+            f'{mx-3:.1f},{y0-4:.1f} '
+            f'{mx+3:.1f},{y0-4:.1f} '
+            f'{mx:.1f},{y0:.1f}" '
+            f'fill="#0f172a"/>'
         )
     return "".join(parts)
 
@@ -105,25 +131,19 @@ def _render_sparkline(
     values: List[float],
     color: str,
     width: float = 64,
-    height: float = 22,
+    height: float = 18,
 ) -> str:
     """
-    Decorative sinusoidal waveform (Ciclo 23.26).
-
-    El usuario pidió cambiar la sparkline ruidosa de data real por una
-    forma de onda sinusoidal pura — más limpia y signaling visual. La
-    data real cruda sigue disponible en el zoom panel cuando hace click
-    en un sensor.
-
-    El color refleja severidad (Normal=verde, Alarma=ámbar, Danger=rojo).
-    `values` se acepta por compat pero no se usa para el shape — solo
-    sirve como flag (vacío → no renderiza).
+    Onda sinusoidal decorativa (Ciclo 23.35) — el usuario prefiere el
+    look limpio de la sin wave. La data real se ve en el zoom panel.
+    Card sin borde grueso, sin frame visual fuerte — flota sobre el
+    fondo y signaling solo por color por severidad.
     """
     if not values or len(values) < 2:
         return ""
     n_cycles = 3
-    n_points = 32
-    amplitude = (height - 8) / 2
+    n_points = 36
+    amplitude = (height - 6) / 2
     y_center = height / 2
     pts = []
     for i in range(n_points):
@@ -134,16 +154,12 @@ def _render_sparkline(
     pts_str = " ".join(pts)
     x0 = cx - width / 2
     y0 = cy - height / 2
-    # Ciclo 23.27: removido pointer-events="none" — bloqueaba clicks en
-    # la card sinusoidal porque hacía que el hit-test pasara por debajo
-    # al SVG background en vez de bubble al <a> wrapper. Sin este atributo
-    # los clicks sobre la sparkline activan el link.
     return (
         f'<g transform="translate({x0:.1f},{y0:.1f})">'
-        f'<rect width="{width:.1f}" height="{height:.1f}" rx="4" '
-        f'fill="white" stroke="{color}" stroke-width="0.8" opacity="0.95"/>'
+        f'<rect width="{width:.1f}" height="{height:.1f}" rx="9" '
+        f'fill="white" stroke="{color}" stroke-width="1" opacity="0.92"/>'
         f'<polyline points="{pts_str}" fill="none" stroke="{color}" '
-        f'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
+        f'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>'
         f'</g>'
     )
 
@@ -162,6 +178,7 @@ def _render_sensor_dot(
     danger: Optional[float] = None,
     value_num: Optional[float] = None,
     link: Optional[str] = None,
+    is_stale: bool = False,
 ) -> str:
     """
     SVG de un sensor dot con:
@@ -213,14 +230,18 @@ def _render_sensor_dot(
     # El path absoluto sortea el base href; <a> es respetado por el
     # sanitizer; el browser navega normalmente y Streamlit detecta el
     # cambio de URL → rerun → query_params lee `sensor`.
-    # Ciclo 23.31 — DESISTIMOS del click directo en SVG. Probamos:
-    #   v3.31.31 <a href relativo>     → roto por base href
-    #   v3.31.32 <g onclick=>          → stripped por sanitizer
-    #   v3.31.34 <a href absoluto>     → routing rarísimo, saca de página
-    #   v3.31.37 components.html + JS  → iframe sandbox bloquea window.top
-    # Solución final: SVG read-only + botones tipo pill nativos de
-    # Streamlit abajo del diagrama (en main()). 100% reliable.
-    open_tag = f'<g><title>{title or label}</title>'
+    # Ciclo 23.31 — SVG read-only (drilldown via dropdown nativo Streamlit).
+    # Ciclo 23.34 — agregado stale data signaling: si el sensor lleva más
+    # de N segundos sin reportar, aplicamos filter wm-stale (grayscale +
+    # opacity reducida) para que el operador vea de un vistazo que esa
+    # lectura no es actual.
+    if is_stale:
+        open_tag = (
+            f'<g filter="url(#wm-stale)">'
+            f'<title>{title or label} — DATA STALE</title>'
+        )
+    else:
+        open_tag = f'<g><title>{title or label}</title>'
     close_tag = '</g>'
 
     parts = [
@@ -451,6 +472,7 @@ def compose_train(
                 danger=s.get("danger"),
                 value_num=s.get("value_num"),
                 link=s.get("link"),
+                is_stale=bool(s.get("is_stale")),
             )
         )
         # Calcular bbox del overlay clickeable. Cubrimos toda la zona
@@ -484,6 +506,16 @@ def compose_train(
         '<defs>'
         '<filter id="wm-shadow" x="-10%" y="-10%" width="120%" height="130%">'
         '<feDropShadow dx="0" dy="3" stdDeviation="2.5" flood-opacity="0.18"/>'
+        '</filter>'
+        # Ciclo 23.34 — filter para sensores stale (data vieja). Convierte
+        # colores a grayscale via feColorMatrix + reduce opacity. Aplicado
+        # en _render_sensor_dot cuando is_stale=True.
+        '<filter id="wm-stale">'
+        '<feColorMatrix type="matrix" values="'
+        '0.33 0.33 0.33 0 0 '
+        '0.33 0.33 0.33 0 0 '
+        '0.33 0.33 0.33 0 0 '
+        '0 0 0 0.45 0"/>'
         '</filter>'
         '<pattern id="wm-grid" width="22" height="22" patternUnits="userSpaceOnUse">'
         '<path d="M 22 0 L 0 0 0 22" fill="none" stroke="#e2e8f0" stroke-width="0.5"/>'
