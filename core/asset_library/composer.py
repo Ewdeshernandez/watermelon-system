@@ -216,26 +216,27 @@ def _render_sensor_dot(
     has_value = bool(value) and value != "—"
     inline = f"{label} {value}".strip() if has_value else label
 
-    # Layout vertical extendido (Ciclo 23.51) — TODO subido ~15px más
-    # para que los valores numéricos floten CLARAMENTE arriba/abajo del
-    # cuerpo del equipo, sin tocarlo. User feedback: "saquemos los
-    # valores del dibujo para dejar el equipo más limpio".
-    # text_above=True:  spark @ cy-105, threshold @ cy-72, text @ cy-45, unit @ cy-30
-    # text_above=False: text @ cy+42, unit @ cy+58, threshold @ cy+78, spark @ cy+110
+    # Layout vertical extendido (Ciclo 23.52) — fix CRITICO:
+    # ANCHOR del sensor está en CENTRO del body (cy=100 in icon coords).
+    # Body radius es 48-52 → body top edge en cy-48 a cy-52.
+    # ANTES: text_y=cy-45 caía DENTRO del body (45 < 48). Por eso "tocaba".
+    # AHORA: text_y=cy-75, unit_y=cy-60 → ambos por encima de cy-52
+    # con buffer de 8-10px. Equipo queda limpio sin etiquetas encima.
+    # Mismo patrón mirror para text_above=False.
     has_spark = spark_values is not None and len(spark_values) >= 2
     has_threshold = (
         alarm is not None and danger is not None
         and alarm > 0 and danger > alarm
     )
     if text_above:
-        text_y = cy - 45 if (has_spark or has_threshold) else cy - 16
-        unit_y = cy - 30 if (has_spark or has_threshold) else cy - 28
-        threshold_y = cy - 72
-        spark_y = cy - 105
+        text_y = cy - 75 if (has_spark or has_threshold) else cy - 16
+        unit_y = cy - 60 if (has_spark or has_threshold) else cy - 28
+        threshold_y = cy - 90
+        spark_y = cy - 110
     else:
-        text_y = cy + 42 if (has_spark or has_threshold) else cy + 20
-        unit_y = cy + 58 if (has_spark or has_threshold) else cy + 32
-        threshold_y = cy + 78
+        text_y = cy + 60 if (has_spark or has_threshold) else cy + 20
+        unit_y = cy + 75 if (has_spark or has_threshold) else cy + 32
+        threshold_y = cy + 90
         spark_y = cy + 110
 
     # Click-to-drill (Ciclo 23.26) — wrapper SVG <a> con href absoluto.
@@ -419,7 +420,9 @@ def compose_train(
         )
         for s in sensors_with_status
     )
-    vert_pad = 105 if needs_decoration_pad else 0
+    # Ciclo 23.52: bumped 105 → 130 para acomodar el nuevo layout que
+    # mantiene los valores claramente arriba/abajo del body sin tocar.
+    vert_pad = 130 if needs_decoration_pad else 0
     total_h = base_h + 2 * vert_pad
 
     # Sensor dots overlayados.
