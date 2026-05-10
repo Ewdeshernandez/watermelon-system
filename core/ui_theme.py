@@ -75,8 +75,15 @@ def apply_watermelon_page_style() -> None:
             font-weight:600;
         }
 
-        section.main div[data-testid="stButton"] > button,
-        section.main div[data-testid="stDownloadButton"] > button {
+        /* Ciclo 23.50 (bugfix) — los selectores de abajo antes usaban
+           `section.main` que en algunas versiones de Streamlit aplica al
+           ROOT de la app y leaks al sidebar (haciendo que los botones
+           slim del sidebar se rompan en páginas que llaman
+           apply_watermelon_page_style). Ahora scopeamos explícitamente
+           con `:not([data-testid="stSidebar"] *)` para garantizar que
+           SOLO afecta botones del contenido principal, nunca del sidebar. */
+        section.main div[data-testid="stButton"]:not([data-testid="stSidebar"] *) > button,
+        section.main div[data-testid="stDownloadButton"]:not([data-testid="stSidebar"] *) > button {
             min-height: 52px;
             border-radius: 16px;
             font-weight: 700;
@@ -87,12 +94,34 @@ def apply_watermelon_page_style() -> None:
             transition: all 0.18s ease;
         }
 
-        section.main div[data-testid="stButton"] > button:hover,
-        section.main div[data-testid="stDownloadButton"] > button:hover {
+        section.main div[data-testid="stButton"]:not([data-testid="stSidebar"] *) > button:hover,
+        section.main div[data-testid="stDownloadButton"]:not([data-testid="stSidebar"] *) > button:hover {
             border-color: #93c5fd !important;
             background: linear-gradient(180deg, #ffffff 0%, #f3f8ff 100%) !important;
             color: #1d4ed8 !important;
             box-shadow: 0 12px 24px rgba(37, 99, 235, 0.12);
+        }
+
+        /* Garantía adicional: aunque algún CSS leakeara al sidebar,
+           reafirmamos el slim ahí explícitamente con higher specificity
+           que mantiene el look navy/transparent del Home. */
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+            min-height: 2.35rem !important;
+            border-radius: 8px !important;
+            background: transparent !important;
+            border: 1px solid transparent !important;
+            color: rgba(241, 245, 249, 0.85) !important;
+            font-weight: 500 !important;
+            font-size: 0.84rem !important;
+            padding: 0.5rem 0.8rem !important;
+            box-shadow: none !important;
+            text-align: left !important;
+            justify-content: flex-start !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
+            background: rgba(255,255,255,0.08) !important;
+            border-color: rgba(255,255,255,0.10) !important;
+            color: #ffffff !important;
         }
         </style>
         """,
