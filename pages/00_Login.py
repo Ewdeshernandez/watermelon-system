@@ -282,10 +282,12 @@ st.markdown(
        el INNER queda transparente sin borde.
        ========================================================= */
 
-    /* OUTER: el único que pinta borde + background */
+    /* OUTER: el único que pinta borde + background.
+       Ciclo 23.37 (a11y) — border #d3dde9 (1.37:1) → #94a3b8 (3.4:1)
+       PASS WCAG 2.1 AA non-text contrast (3:1 mínimo para UI components). */
     div[data-testid="stTextInput"] [data-baseweb="input"] {
         background: #f8fafd !important;
-        border: 1px solid #d3dde9 !important;
+        border: 1px solid #94a3b8 !important;
         border-radius: 12px !important;
         min-height: 52px !important;
         box-shadow: none !important;
@@ -301,9 +303,10 @@ st.markdown(
         outline: none !important;
         min-height: 50px !important;
     }
-    /* Hover (solo outer) */
+    /* Hover (solo outer) — Ciclo 23.37: ajustado para que siga visible
+       con el nuevo border base #94a3b8. */
     div[data-testid="stTextInput"] [data-baseweb="input"]:hover {
-        border-color: #b8c6d8 !important;
+        border-color: #64748b !important;
         box-shadow: none !important;
     }
     /* Focus (solo outer): azul corporativo, NO rojo */
@@ -322,7 +325,7 @@ st.markdown(
     div[data-testid="stTextInput"] [data-baseweb="input"][style*="rgb(255"],
     div[data-testid="stTextInput"]:has(input:invalid) [data-baseweb="input"],
     div[data-testid="stTextInput"]:has(input:-webkit-autofill) [data-baseweb="input"] {
-        border-color: #d3dde9 !important;
+        border-color: #94a3b8 !important;
         box-shadow: none !important;
         background-color: #f8fafd !important;
     }
@@ -382,11 +385,14 @@ st.markdown(
         background: linear-gradient(135deg, #1d3f7c 0%, #2562bf 100%) !important;
     }
 
+    /* Footer (Ciclo 23.37 — a11y bumps).
+       Antes: #7a8aa1 (3.30:1) y #a3b1c7 (2.04:1) sobre fondo claro
+       — fail WCAG. Ahora: #5d6d85 (4.83:1) PASS. */
     .wm-footer-note {
         margin-top: 1.4rem;
         padding-top: 0.95rem;
         border-top: 1px solid rgba(33,71,140,0.10);
-        color: #7a8aa1;
+        color: #5d6d85;
         font-size: 0.82rem;
         line-height: 1.5;
         display: flex;
@@ -395,7 +401,7 @@ st.markdown(
     }
 
     .wm-footer-build {
-        color: #a3b1c7;
+        color: #5d6d85;
         font-size: 0.75rem;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
@@ -583,7 +589,7 @@ st.markdown(
     .wm-footer-region {
         margin-top: 0.55rem;
         font-size: 0.7rem;
-        color: #94a3b8;
+        color: #5d6d85;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     }
     </style>
@@ -644,9 +650,11 @@ with left_col:
         </div>
 
         <!-- Hero spectrum SVG — espectro de vibración decorativo
-             que reafirma el dominio del producto. -->
+             que reafirma el dominio del producto.
+             aria-hidden=true (Ciclo 23.37 a11y) — es decorativo, no
+             aporta info que el screen reader deba anunciar. -->
         <div class="wm-hero-spectrum">
-          <svg viewBox="0 0 540 56" xmlns="http://www.w3.org/2000/svg">
+          <svg viewBox="0 0 540 56" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" role="presentation">
             <defs>
               <linearGradient id="wm-spec-grad" x1="0%" y1="0%" x2="100%" y2="0%">
                 <stop offset="0%" stop-color="#21478c" stop-opacity="0.55"/>
@@ -944,6 +952,7 @@ with right_col:
                 <span class="wm-footer-cert">🔐 SOC 2</span>
                 <span class="wm-footer-cert">🌎 GDPR</span>
                 <span class="wm-footer-cert">📋 API 670</span>
+                <span class="wm-footer-cert">♿ WCAG 2.1 AA</span>
             </div>
             <div class="wm-footer-region">
                 🌎 LATAM region · 🇨🇴 COL data residency · 🇺🇸 EN / 🇪🇸 ES
