@@ -27,10 +27,15 @@ API:
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.asset_library import get_icon
-from core.asset_library.couplings import coupling_flexible, coupling_rigid
+from core.asset_library.couplings import (
+    coupling_flexible,
+    coupling_rigid,
+    coupling_rigid_quill,
+)
 
 
 SEVERITY_COLORS = {
@@ -47,6 +52,102 @@ SEVERITY_ANIM = {
 }
 
 
+def _render_threshold_bar(
+    cx: float,
+    cy: float,
+    value: Optional[float],
+    alarm: Optional[float],
+    danger: Optional[float],
+    color: str,
+    width: float = 64,
+    height: float = 5,
+) -> str:
+    """
+    Mini barra horizontal verde/amarillo/rojo con marker del valor actual.
+    Da contexto visual de qué tan cerca está el sensor de los thresholds.
+    Se compone en (cx, cy) centrado en X.
+    Si no hay alarm/danger útiles, devuelve string vacío.
+    """
+    if alarm is None or danger is None or alarm <= 0 or danger <= 0 or alarm >= danger:
+        return ""
+    # Escala: 0 → 1.2 * danger (deja un poco de espacio post-danger)
+    scale_max = danger * 1.2
+    norm_w = width * (alarm / scale_max)
+    alarm_w = width * ((danger - alarm) / scale_max)
+    danger_w = max(0.0, width - norm_w - alarm_w)
+    x0 = cx - width / 2
+    y0 = cy - height / 2
+    parts = [
+        # Zona normal (verde claro)
+        f'<rect x="{x0:.1f}" y="{y0:.1f}" width="{norm_w:.1f}" height="{height:.1f}" '
+        f'rx="2" fill="#dcfce7"/>',
+        # Zona alarma (amarillo claro)
+        f'<rect x="{x0 + norm_w:.1f}" y="{y0:.1f}" width="{alarm_w:.1f}" height="{height:.1f}" '
+        f'fill="#fef3c7"/>',
+        # Zona danger (rojo claro)
+        f'<rect x="{x0 + norm_w + alarm_w:.1f}" y="{y0:.1f}" width="{danger_w:.1f}" '
+        f'height="{height:.1f}" rx="2" fill="#fee2e2"/>',
+    ]
+    # Marker del valor actual
+    if value is not None and value >= 0:
+        marker_pos = min(width, max(0.0, width * (value / scale_max)))
+        parts.append(
+            f'<line x1="{x0 + marker_pos:.1f}" y1="{y0 - 2:.1f}" '
+            f'x2="{x0 + marker_pos:.1f}" y2="{y0 + height + 2:.1f}" '
+            f'stroke="#0f172a" stroke-width="1.6" stroke-linecap="round"/>'
+        )
+    return "".join(parts)
+
+
+def _render_sparkline(
+    cx: float,
+    cy: float,
+    values: List[float],
+    color: str,
+    width: float = 64,
+    height: float = 22,
+) -> str:
+    """
+    Decorative sinusoidal waveform (Ciclo 23.26).
+
+    El usuario pidió cambiar la sparkline ruidosa de data real por una
+    forma de onda sinusoidal pura — más limpia y signaling visual. La
+    data real cruda sigue disponible en el zoom panel cuando hace click
+    en un sensor.
+
+    El color refleja severidad (Normal=verde, Alarma=ámbar, Danger=rojo).
+    `values` se acepta por compat pero no se usa para el shape — solo
+    sirve como flag (vacío → no renderiza).
+    """
+    if not values or len(values) < 2:
+        return ""
+    n_cycles = 3
+    n_points = 32
+    amplitude = (height - 8) / 2
+    y_center = height / 2
+    pts = []
+    for i in range(n_points):
+        t = i / (n_points - 1)
+        x = t * (width - 6) + 3
+        y = y_center - amplitude * math.sin(2 * math.pi * n_cycles * t)
+        pts.append(f"{x:.2f},{y:.2f}")
+    pts_str = " ".join(pts)
+    x0 = cx - width / 2
+    y0 = cy - height / 2
+    # Ciclo 23.27: removido pointer-events="none" — bloqueaba clicks en
+    # la card sinusoidal porque hacía que el hit-test pasara por debajo
+    # al SVG background en vez de bubble al <a> wrapper. Sin este atributo
+    # los clicks sobre la sparkline activan el link.
+    return (
+        f'<g transform="translate({x0:.1f},{y0:.1f})">'
+        f'<rect width="{width:.1f}" height="{height:.1f}" rx="4" '
+        f'fill="white" stroke="{color}" stroke-width="0.8" opacity="0.95"/>'
+        f'<polyline points="{pts_str}" fill="none" stroke="{color}" '
+        f'stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
+        f'</g>'
+    )
+
+
 def _render_sensor_dot(
     cx: float,
     cy: float,
@@ -56,32 +157,74 @@ def _render_sensor_dot(
     status: str = "Normal",
     title: str = "",
     text_above: bool = True,
+    spark_values: Optional[List[float]] = None,
+    alarm: Optional[float] = None,
+    danger: Optional[float] = None,
+    value_num: Optional[float] = None,
+    link: Optional[str] = None,
 ) -> str:
     """
-    SVG de un sensor dot con label + valor + unidad apilados con buena
-    separación vertical. La unidad va en una "pill" con fondo claro para
-    destacar y separarla del valor (legibilidad System1/AMS-style).
+    SVG de un sensor dot con:
+      - halo + dot principal con animation por severidad
+      - label + valor + unidad con stroke blanco para legibilidad
+      - threshold bar (verde/amarillo/rojo + marker) — Ciclo 23.23
+      - sparkline mini de tendencia — Ciclo 23.23
 
-    text_above: si True, etiqueta arriba del dot; si False, abajo
-    (caso típico probetas X/Y ortogonales API 670).
+    text_above: si True, sparkline+threshold+texto arriba del dot;
+    si False, debajo (caso típico probetas X/Y ortogonales API 670).
+
+    spark_values: últimas N lecturas para la sparkline (None = no se renderiza).
+    alarm/danger/value_num: para la threshold bar (None = no se renderiza).
     """
     color = SEVERITY_COLORS.get(status, "#64748b")
     anim = SEVERITY_ANIM.get(status, "")
     has_value = bool(value) and value != "—"
     inline = f"{label} {value}".strip() if has_value else label
 
-    # Separación vertical mejorada (Ciclo 23.16):
-    # text_above=True:  text @ cy-16,  unit @ cy-28 (más arriba que el label)
-    # text_above=False: text @ cy+18,  unit @ cy+30 (debajo del label)
+    # Layout vertical extendido para hospedar sparkline + threshold bar.
+    # Ciclo 23.25: separación aumentada para dejar respiro entre las
+    # decoraciones (recuadro sparkline) y el cuerpo del equipo.
+    # text_above=True:  spark @ cy-90, threshold @ cy-55, text @ cy-32, unit @ cy-18
+    # text_above=False: text @ cy+28, unit @ cy+42, threshold @ cy+58, spark @ cy+90
+    has_spark = spark_values is not None and len(spark_values) >= 2
+    has_threshold = (
+        alarm is not None and danger is not None
+        and alarm > 0 and danger > alarm
+    )
     if text_above:
-        text_y = cy - 16
-        unit_y = cy - 28
+        text_y = cy - 32 if (has_spark or has_threshold) else cy - 16
+        unit_y = cy - 18 if (has_spark or has_threshold) else cy - 28
+        threshold_y = cy - 55
+        spark_y = cy - 90
     else:
-        text_y = cy + 20
-        unit_y = cy + 32
+        text_y = cy + 28 if (has_spark or has_threshold) else cy + 20
+        unit_y = cy + 42 if (has_spark or has_threshold) else cy + 32
+        threshold_y = cy + 58
+        spark_y = cy + 92
+
+    # Click-to-drill (Ciclo 23.26) — wrapper SVG <a> con href absoluto.
+    # Iteraciones previas:
+    #   v3.31.31: <a href="?sensor=X"> — se rompía con base href de
+    #             Streamlit, mandaba al usuario al home.
+    #   v3.31.32: <g onclick="window.location.search=..."> — onclick
+    #             quedaba sin disparar (Streamlit lo strip o el SVG no
+    #             propaga el evento al window).
+    # Esta iteración: SVG <a> con href absoluto "/Live_Monitoring?sensor=X".
+    # El path absoluto sortea el base href; <a> es respetado por el
+    # sanitizer; el browser navega normalmente y Streamlit detecta el
+    # cambio de URL → rerun → query_params lee `sensor`.
+    # Ciclo 23.31 — DESISTIMOS del click directo en SVG. Probamos:
+    #   v3.31.31 <a href relativo>     → roto por base href
+    #   v3.31.32 <g onclick=>          → stripped por sanitizer
+    #   v3.31.34 <a href absoluto>     → routing rarísimo, saca de página
+    #   v3.31.37 components.html + JS  → iframe sandbox bloquea window.top
+    # Solución final: SVG read-only + botones tipo pill nativos de
+    # Streamlit abajo del diagrama (en main()). 100% reliable.
+    open_tag = f'<g><title>{title or label}</title>'
+    close_tag = '</g>'
 
     parts = [
-        f'<g><title>{title or label}</title>',
+        open_tag,
         # Halo (círculo translúcido alrededor del dot — efecto de glow)
         f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="10" fill="{color}" '
         f'fill-opacity="0.22" stroke="{color}" stroke-width="1" stroke-opacity="0.6"/>',
@@ -111,7 +254,27 @@ def _render_sensor_dot(
             f'font-size="7" font-weight="700" font-family="SF Mono, monospace" '
             f'fill="#475569" letter-spacing="0.03">{unit}</text>'
         )
-    parts.append('</g>')
+    # Threshold bar (Ciclo 23.23) — contexto visual de qué tan cerca está
+    # el valor de los setpoints alarm/danger.
+    if has_threshold:
+        parts.append(
+            _render_threshold_bar(
+                cx=cx, cy=threshold_y,
+                value=value_num,
+                alarm=alarm, danger=danger,
+                color=color,
+            )
+        )
+    # Sparkline (Ciclo 23.23) — tendencia rápida sin ir a la tabla
+    if has_spark:
+        parts.append(
+            _render_sparkline(
+                cx=cx, cy=spark_y,
+                values=spark_values,
+                color=color,
+            )
+        )
+    parts.append(close_tag)
     return "".join(parts)
 
 
@@ -123,7 +286,8 @@ def compose_train(
     coupling: str = "flexible",
     sensors_with_status: Optional[List[Dict[str, Any]]] = None,
     bg_color: str = "#ffffff",
-) -> str:
+    return_overlays: bool = False,
+) -> Any:
     """
     Compone un SVG con el tren acoplado completo.
 
@@ -136,6 +300,10 @@ def compose_train(
             "value":  "0.78",         # valor numérico (string)
             "unit":   "in/s pk",      # opcional
             "title":  "tooltip text", # opcional, default = label
+            "spark_values": [...],    # opcional, últimas N lecturas para sparkline
+            "alarm": 3.5,             # opcional, setpoint alarm para threshold bar
+            "danger": 5.0,            # opcional, setpoint danger para threshold bar
+            "value_num": 2.33,        # opcional, valor numérico para marker en threshold bar
         }
 
     Devuelve un SVG completo (no <g>) listo para insertar en HTML.
@@ -143,14 +311,34 @@ def compose_train(
     if sensors_with_status is None:
         sensors_with_status = []
 
-    # Generar driver
-    driver_svg, driver_anchors = get_icon(driver_key, label=driver_label, x_offset=0, y_offset=0)
+    # Generar driver — Ciclo 23.28: usamos label=" " (single space) para
+    # suprimir el label interno SIN disparar el fallback de get_icon
+    # (que con "" mete default_label del catálogo). El texto " " produce
+    # un <text> con un espacio — invisible. Renderizamos el título limpio
+    # externamente en titles_layer a y=100 (entre sparkline bottom y
+    # body top).
+    driver_svg, driver_anchors = get_icon(driver_key, label=" ", x_offset=0, y_offset=0)
     driver_w = driver_anchors.get("viewbox_w", 320)
 
-    # Coupling
-    coupling_w = 80 if coupling == "flexible" else 60
+    # Coupling — Ciclo 23.23: detectar tren aero-derivative (gas_turbine_aero)
+    # con coupling rigid → usar quill-shaft style (LM6000 real-world).
+    # User-specified explicit "rigid_quill" también soportado.
+    is_aero_rigid = (
+        driver_key == "gas_turbine_aero"
+        and coupling in ("rigid", "rigid_quill")
+    )
+    if coupling == "rigid_quill" or is_aero_rigid:
+        coupling_w = 70
+    elif coupling == "flexible":
+        coupling_w = 80
+    else:
+        coupling_w = 60
     coupling_x = driver_w
-    if coupling == "rigid":
+    if coupling == "rigid_quill" or is_aero_rigid:
+        coupling_svg, coupling_anchors = coupling_rigid_quill(
+            x_offset=coupling_x, y_offset=0, width=coupling_w,
+        )
+    elif coupling == "rigid":
         coupling_svg, coupling_anchors = coupling_rigid(
             x_offset=coupling_x, y_offset=0, width=coupling_w,
         )
@@ -159,19 +347,36 @@ def compose_train(
             x_offset=coupling_x, y_offset=0, width=coupling_w,
         )
 
-    # Driven
+    # Driven — mismo patrón: " " para suprimir interno sin fallback.
     driven_x = coupling_x + coupling_w
     driven_svg, driven_anchors = get_icon(
-        driven_key, label=driven_label, x_offset=driven_x, y_offset=0,
+        driven_key, label=" ", x_offset=driven_x, y_offset=0,
     )
     driven_w = driven_anchors.get("viewbox_w", 320)
 
     total_w = driver_w + coupling_w + driven_w
-    total_h = max(
+    base_h = max(
         driver_anchors.get("viewbox_h", 200),
         driven_anchors.get("viewbox_h", 200),
         200,
     )
+
+    # Padding vertical (Ciclo 23.24) — si los sensores traen sparkline o
+    # threshold bar, las decoraciones extienden ~72px por encima/debajo del
+    # dot. Sin padding las cards quedan tocando el equipo o salen del
+    # viewBox. Calculamos pad solo si hace falta.
+    needs_decoration_pad = any(
+        (s.get("spark_values") and len(s.get("spark_values", []))) >= 2
+        or (
+            s.get("alarm") is not None
+            and s.get("danger") is not None
+            and (s.get("alarm") or 0) > 0
+            and (s.get("danger") or 0) > (s.get("alarm") or 0)
+        )
+        for s in sensors_with_status
+    )
+    vert_pad = 105 if needs_decoration_pad else 0
+    total_h = base_h + 2 * vert_pad
 
     # Sensor dots overlayados.
     # Si dos sensores caen en el mismo (side, anchor) — caso típico de
@@ -185,6 +390,10 @@ def compose_train(
     seen: Dict[Tuple[str, str], int] = {}
 
     dots_svg_parts: List[str] = []
+    # Overlays (Ciclo 23.32): por cada sensor calculamos el bbox (en %
+    # del viewBox) de la sparkline para que el caller pueda dibujar
+    # `<a>` HTML transparentes encima → clickeable real.
+    overlays: List[Dict[str, Any]] = []
     for s in sensors_with_status:
         side = s.get("side", "driver")
         anchor_name = s.get("anchor", "DE")
@@ -201,6 +410,10 @@ def compose_train(
         if not pos or not isinstance(pos, tuple):
             continue
         cx, cy = pos
+        # Aplicar padding vertical: anchors vienen del coord system del icono
+        # (0..base_h). El equipo se shifta abajo por vert_pad, así que los
+        # dots también deben shiftarse para quedar en su anchor físico.
+        cy = cy + vert_pad
 
         # Resolver layout cuando hay múltiples sensores en el mismo anchor.
         # Caso típico API 670: probetas proximity X/Y a 90° en el mismo
@@ -233,17 +446,101 @@ def compose_train(
                 status=s.get("status", "Normal"),
                 title=s.get("title", ""),
                 text_above=text_above,
+                spark_values=s.get("spark_values"),
+                alarm=s.get("alarm"),
+                danger=s.get("danger"),
+                value_num=s.get("value_num"),
+                link=s.get("link"),
             )
+        )
+        # Calcular bbox del overlay clickeable. Cubrimos toda la zona
+        # "decorada" del sensor: sparkline + threshold + texto + dot.
+        # Eso es más ergonómico que solo el rect de la sparkline.
+        # Range vertical:
+        #   text_above=True:  spark top @ cy-101, dot bottom @ cy+8 → range cy-101..cy+10
+        #   text_above=False: dot top @ cy-10, spark bottom @ cy+103
+        if text_above:
+            y_min = cy - 101
+            y_max = cy + 10
+        else:
+            y_min = cy - 10
+            y_max = cy + 103
+        x_min = cx - 32
+        x_max = cx + 32
+        sensor_lbl_for_link = s.get("sensor_label") or s.get("label") or ""
+        overlays.append({
+            "sensor_label": sensor_lbl_for_link,
+            "x_pct": (x_min / total_w) * 100 if total_w else 0,
+            "y_pct": (y_min / total_h) * 100 if total_h else 0,
+            "w_pct": ((x_max - x_min) / total_w) * 100 if total_w else 0,
+            "h_pct": ((y_max - y_min) / total_h) * 100 if total_h else 0,
+        })
+
+    # Defs globales (Ciclo 23.23) — drop-shadow filter aplicable a equipos
+    # para dar profundidad. Se aplica via filter="url(#wm-shadow)" en la
+    # capa de driver+coupling+driven. ID con prefijo wm- para evitar
+    # colisiones con defs internos de cada icono.
+    defs_block = (
+        '<defs>'
+        '<filter id="wm-shadow" x="-10%" y="-10%" width="120%" height="130%">'
+        '<feDropShadow dx="0" dy="3" stdDeviation="2.5" flood-opacity="0.18"/>'
+        '</filter>'
+        '<pattern id="wm-grid" width="22" height="22" patternUnits="userSpaceOnUse">'
+        '<path d="M 22 0 L 0 0 0 22" fill="none" stroke="#e2e8f0" stroke-width="0.5"/>'
+        '</pattern>'
+        '</defs>'
+    )
+    # Background grid sutil — feel de plano técnico
+    bg_layer = (
+        f'<rect x="0" y="0" width="{total_w:.0f}" height="{total_h:.0f}" '
+        f'fill="url(#wm-grid)" opacity="0.4"/>'
+    )
+    # Equipo + coupling envueltos en filter de sombra + translate para
+    # vertical padding (Ciclo 23.24). El padding empuja el equipo hacia
+    # abajo dentro del viewBox para dejar headroom para sparklines.
+    equipment_layer = (
+        f'<g filter="url(#wm-shadow)" transform="translate(0,{vert_pad})">'
+        f'{driver_svg}{coupling_svg}{driven_svg}'
+        f'</g>'
+    )
+
+    # Titles externos (Ciclo 23.28) — re-introducidos en y=100, posición
+    # SAFE entre el bottom de las sparklines (~y=86) y el top del body
+    # del equipo (~y=115). Antes los probé en y=22 (muy arriba, lejos
+    # del equipo) y eliminados (chocaba con el fallback de get_icon).
+    # Ahora el icono se le pasa label=" " para no duplicar.
+    titles_layer = ""
+    if driver_label:
+        cx = driver_w / 2
+        titles_layer += (
+            f'<text x="{cx:.1f}" y="100" text-anchor="middle" '
+            f'font-size="14" font-weight="800" fill="#1e3a8a" '
+            f'font-family="-apple-system, Segoe UI, Roboto, sans-serif">'
+            f'{driver_label}</text>'
+        )
+    if driven_label:
+        cx = driver_w + coupling_w + driven_w / 2
+        titles_layer += (
+            f'<text x="{cx:.1f}" y="100" text-anchor="middle" '
+            f'font-size="14" font-weight="800" fill="#14532d" '
+            f'font-family="-apple-system, Segoe UI, Roboto, sans-serif">'
+            f'{driven_label}</text>'
         )
 
     full_svg = (
         f'<svg xmlns="http://www.w3.org/2000/svg" '
+        f'xmlns:xlink="http://www.w3.org/1999/xlink" '
         f'viewBox="0 0 {total_w:.0f} {total_h:.0f}" '
         f'style="background:{bg_color};width:100%;height:auto;display:block;">'
-        f'{driver_svg}{coupling_svg}{driven_svg}'
+        f'{defs_block}'
+        f'{bg_layer}'
+        f'{titles_layer}'
+        f'{equipment_layer}'
         f'{"".join(dots_svg_parts)}'
         f'</svg>'
     )
+    if return_overlays:
+        return full_svg, overlays
     return full_svg
 
 

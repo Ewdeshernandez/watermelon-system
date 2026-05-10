@@ -513,11 +513,16 @@ def _build_library_sensors(
     latest: List[Dict[str, Any]],
     sensor_lookup: Dict[str, Dict[str, Any]],
     instance_obj: Any,
+    spark_data: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Construye la lista sensors_with_status para compose_train() a partir
     de las lecturas live y los sensores configurados de la instancia.
     Solo incluye sensores que se pudieron mapear a (side, anchor).
+
+    spark_data (Ciclo 23.23): dict opcional sensor_label → [{value: ...}, ...]
+    para alimentar la sparkline mini al lado del dot. Si None, los dots
+    se renderizan sin sparkline (back-compat).
     """
     out: List[Dict[str, Any]] = []
     seen_anchors: set = set()  # evitar 2 sensores apilados en el mismo dot
@@ -540,8 +545,10 @@ def _build_library_sensors(
         unit = r.get("unit") or ""
         sev = compute_severity(r.get("value"), sensor_match, unit, instance_obj)
         try:
-            val_str = f"{float(r.get('value')):.2f}"
+            val_num = float(r.get("value"))
+            val_str = f"{val_num:.2f}"
         except Exception:
+            val_num = None
             val_str = "—"
         title = (
             f"{lbl} | {val_str} {unit} | {sev['status']} | "
@@ -550,6 +557,39 @@ def _build_library_sensors(
         # Display label sin underscore (Ciclo 23.18) — '2Y_A' → '2YA'.
         # NO afecta CSV matches ni el sensor_lookup, que siguen usando lbl original.
         display_label = lbl.replace("_", "")
+
+        # Sparkline values (Ciclo 23.23) — extraer last N readings de spark_data
+        spark_values: Optional[List[float]] = None
+        if spark_data:
+            history = spark_data.get(lbl, [])
+            extracted = [h.get("value") for h in history if h.get("value") is not None]
+            try:
+                spark_values = [float(v) for v in extracted]
+                if len(spark_values) < 2:
+                    spark_values = None
+            except Exception:
+                spark_values = None
+
+        # Threshold setpoints (Ciclo 23.23) — solo si compute_severity devolvió
+        # alarm/danger reales (>0). compute_severity garantiza floats pero
+        # con 0 si no hay setpoint, así que filtramos.
+        alarm_val = sev.get("alarm")
+        danger_val = sev.get("danger")
+        if alarm_val is not None and danger_val is not None:
+            try:
+                alarm_val = float(alarm_val)
+                danger_val = float(danger_val)
+                if alarm_val <= 0 or danger_val <= alarm_val:
+                    alarm_val, danger_val = None, None
+            except Exception:
+                alarm_val, danger_val = None, None
+
+        # Click-to-drill link (Ciclo 23.26) — path ABSOLUTO para sortear
+        # el base href de Streamlit que rompía URLs relativas. La página
+        # `02_Live_Monitoring.py` se sirve en `/Live_Monitoring`.
+        from urllib.parse import quote as _urlquote
+        link = f"/Live_Monitoring?sensor={_urlquote(lbl)}"
+
         out.append({
             "label": display_label,
             "side": side,
@@ -558,6 +598,12 @@ def _build_library_sensors(
             "value": val_str,
             "unit": unit,
             "title": title,
+            "spark_values": spark_values,
+            "alarm": alarm_val,
+            "danger": danger_val,
+            "value_num": val_num,
+            "link": link,
+            "sensor_label": lbl,  # para que zoom panel pueda lookupear
         })
         seen_anchors.add((side, anchor))
     return out
@@ -567,12 +613,17 @@ def render_sensor_map_library(
     instance_obj: Any,
     latest: List[Dict[str, Any]],
     sensor_lookup: Dict[str, Dict[str, Any]],
+    spark_data: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> bool:
     """
     Renderiza el tren acoplado vía core.asset_library.composer.
 
     Devuelve True si pudo (la instancia tiene driver_icon_key + driven_icon_key),
     False si no hay icon_keys configuradas → caller debe usar fallback PNG.
+
+    spark_data (Ciclo 23.23): opcional, sensor_label → list of reading dicts,
+    se forwardea a _build_library_sensors para alimentar las sparklines de
+    los dots.
     """
     drv_key = getattr(instance_obj, "driver_icon_key", "") or ""
     drvn_key = getattr(instance_obj, "driven_icon_key", "") or ""
@@ -584,18 +635,49 @@ def render_sensor_map_library(
     except ImportError:
         return False
 
-    sensors_with_status = _build_library_sensors(latest, sensor_lookup, instance_obj)
+    sensors_with_status = _build_library_sensors(
+        latest, sensor_lookup, instance_obj, spark_data=spark_data,
+    )
 
-    drv_label = (
-        f"{instance_obj.driver_manufacturer} {instance_obj.driver_model}".strip()
-        or instance_obj.driver_model
-        or "Driver"
-    )
-    drvn_label = (
-        f"{instance_obj.driven_manufacturer} {instance_obj.driven_model}".strip()
-        or instance_obj.driven_model
-        or "Driven"
-    )
+    # Titles cortos y limpios (Ciclo 23.26) — el manufacturer/model
+    # crudo de la instance trae duplicados ("GE Vernova / Brush GE
+    # LM6000") que se ven feos en el SVG. Detectamos asset class y
+    # generamos prefijos consistentes ("Turbina", "Generador", etc.).
+    def _clean_model(text: str) -> str:
+        if not text:
+            return ""
+        # Stripear prefijos repetidos del manufacturer (ej "GE LM6000" → "LM6000"
+        # cuando manufacturer ya dice "GE")
+        return text.strip()
+
+    drv_prefix_map = {
+        "gas_turbine_aero": "Turbina",
+        "gas_turbine_industrial": "Turbina",
+        "steam_turbine": "Turbina vapor",
+        "electric_motor_sleeve": "Motor",
+        "electric_motor_rolling": "Motor",
+        "recip_engine_8cyl_inline": "Motor recip.",
+        "recip_engine_16cyl_inline": "Motor recip.",
+    }
+    drvn_prefix_map = {
+        "generator_synchronous": "Generador",
+        "centrifugal_compressor": "Compresor",
+        "recip_compressor": "Compresor recip.",
+        "pump_centrifugal": "Bomba",
+        "gearbox": "Gearbox",
+    }
+
+    drv_prefix = drv_prefix_map.get(drv_key, "")
+    drvn_prefix = drvn_prefix_map.get(drvn_key, "")
+
+    drv_model = _clean_model(instance_obj.driver_model or "")
+    drvn_mfr = (instance_obj.driven_manufacturer or "").strip()
+    drvn_model = _clean_model(instance_obj.driven_model or "")
+
+    drv_label = f"{drv_prefix} {drv_model}".strip() if drv_prefix else (drv_model or "Driver")
+    # Para driven preferimos manufacturer (Brush, Westinghouse) sobre model
+    drvn_main = drvn_mfr or drvn_model
+    drvn_label = f"{drvn_prefix} {drvn_main}".strip() if drvn_prefix else (drvn_main or "Driven")
 
     try:
         svg = compose_train(
@@ -610,12 +692,10 @@ def render_sensor_map_library(
         st.caption(f"(Asset library no pudo rendir: {e}) — cayendo al PNG legacy.")
         return False
 
-    # Render limpio sin frame ni legend redundante (Ciclo 23.14):
-    # - Sin recuadro blanco con borde alrededor (estaba feo).
-    # - Sin legend con normal/alarma/danger debajo (los colores se entienden
-    #   por contexto + tooltip por sensor; redundante con la tabla de abajo).
-    # - Sin contador "N sensores mapeados" (información ya visible en otras
-    #   secciones de la página).
+    # Ciclo 23.33 — SVG display puro. El click directo en SVG no es
+    # viable en Streamlit (browser full-reload pierde session_state →
+    # auth falla → redirect a login). Drill-down se hace via selectbox
+    # discreto debajo del diagrama (usa st.rerun interno, mantiene auth).
     st.markdown(svg, unsafe_allow_html=True)
     return True
 
@@ -794,6 +874,252 @@ def render_sensor_map_hero(
 
 
 # ============================================================
+# Sensor Zoom Panel — click-to-drill desde el diagrama
+# ============================================================
+
+def render_sensor_zoom_panel(
+    selected_sensor: str,
+    latest: List[Dict[str, Any]],
+    sensor_lookup: Dict[str, Dict[str, Any]],
+    instance_obj: Any,
+    spark_data: Dict[str, List[Dict[str, Any]]],
+) -> None:
+    """
+    Card focalizado para un sensor (Ciclo 23.24).
+
+    Se dispara cuando el URL trae `?sensor=<lbl>` (de un click en el
+    diagrama). Muestra:
+      - Header con label + valor + status + thresholds
+      - Mini trend chart con la data ya fetcheada en spark_data
+      - Botones de cerrar y links a otras pages (Spectrum, Orbit)
+    """
+    match = next(
+        (r for r in latest
+         if r.get("sensor_label") == selected_sensor and r.get("metric") == "Direct"),
+        None,
+    )
+    if not match:
+        # Sensor no existe en latest — limpiar query param y avisar
+        st.warning(
+            f"Sensor `{selected_sensor}` no tiene lectura activa. "
+            "Click otro dot del diagrama o ✕ para cerrar."
+        )
+        if st.button("✕ Cerrar selección", key="zoom_close_orphan"):
+            st.query_params.clear()
+            st.rerun()
+        return
+
+    sensor_match = sensor_lookup.get(selected_sensor)
+    unit = match.get("unit") or ""
+    sev = compute_severity(match.get("value"), sensor_match, unit, instance_obj)
+    try:
+        val_str = f"{float(match.get('value')):.3f}"
+    except Exception:
+        val_str = "—"
+
+    display_label = selected_sensor.replace("_", "")
+    status = sev["status"]
+    alarm = sev.get("alarm") or 0
+    danger = sev.get("danger") or 0
+
+    # Color por severidad — paleta aligned con el composer
+    color_map = {
+        "Normal":    ("#22c55e", "#dcfce7"),
+        "Alarma":    ("#f59e0b", "#fef3c7"),
+        "Danger":    ("#ef4444", "#fee2e2"),
+        "Sin Norma": ("#94a3b8", "#f1f5f9"),
+        "No Data":   ("#64748b", "#e2e8f0"),
+    }
+    fg, bg = color_map.get(status, ("#64748b", "#e2e8f0"))
+
+    threshold_txt = ""
+    if alarm > 0 and danger > alarm:
+        threshold_txt = f"alarm {alarm:.2f} · danger {danger:.2f}"
+
+    st.markdown(
+        textwrap.dedent(
+            f"""
+            <style>
+            .wm-zoom-card {{
+                border: 2px solid {fg};
+                border-radius: 14px;
+                padding: 14px 18px; margin: 14px 0 10px 0;
+                background: {bg};
+                box-shadow: 0 8px 24px rgba(15,23,42,0.10);
+            }}
+            .wm-zoom-header {{
+                display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
+            }}
+            .wm-zoom-label {{
+                font-size: 22px; font-weight: 900;
+                font-family: SF Mono, Menlo, monospace;
+                color: {fg}; letter-spacing: -0.01em;
+            }}
+            .wm-zoom-value {{
+                font-size: 32px; font-weight: 900; color: #0f172a;
+                font-variant-numeric: tabular-nums;
+            }}
+            .wm-zoom-unit {{
+                font-size: 13px; font-weight: 700; color: #475569;
+                margin-left: 4px;
+            }}
+            .wm-zoom-status {{
+                background: {fg}; color: white;
+                padding: 4px 12px; border-radius: 99px;
+                font-size: 11px; font-weight: 800;
+                letter-spacing: 0.1em; text-transform: uppercase;
+            }}
+            .wm-zoom-thresholds {{
+                font-size: 11px; color: #475569;
+                margin-left: auto;
+                font-family: SF Mono, monospace;
+            }}
+            </style>
+            <div class="wm-zoom-card">
+                <div class="wm-zoom-header">
+                    <span class="wm-zoom-label">📍 {display_label}</span>
+                    <span class="wm-zoom-value">{val_str}<span class="wm-zoom-unit">{unit}</span></span>
+                    <span class="wm-zoom-status">{status}</span>
+                    <span class="wm-zoom-thresholds">{threshold_txt}</span>
+                </div>
+            </div>
+            """
+        ).strip(),
+        unsafe_allow_html=True,
+    )
+
+    # Selector de gráfico (Ciclo 23.29) — incluye Tendencia + Vectores
+    # 1X/2X + Gap + placeholders de Spectrum/Waveform/Orbit. Lo que ya
+    # tiene data se muestra inline; lo que falta queda como roadmap.
+    sel_col, close_col = st.columns([5, 1])
+    with sel_col:
+        chart_type = st.selectbox(
+            "Tipo de gráfico",
+            options=[
+                "📈 Tendencia (últimos 30 puntos)",
+                "🎯 Vector 1X (amplitud + fase)",
+                "🎯 Vector 2X (amplitud + fase)",
+                "📐 Gap (DC voltage prox probe)",
+                "🔍 Espectro (próximamente)",
+                "🌊 Forma de onda (próximamente)",
+                "🌀 Orbit (próximamente)",
+                "📊 Cascade / Waterfall (próximamente)",
+            ],
+            index=0,
+            key=f"zoom_chart_type_{selected_sensor}",
+            label_visibility="collapsed",
+        )
+    with close_col:
+        if st.button("✕ Cerrar", key="zoom_close", use_container_width=True):
+            st.query_params.clear()
+            st.rerun()
+
+    if "Tendencia" in chart_type:
+        history = spark_data.get(selected_sensor, [])
+        values_raw = [h.get("value") for h in history if h.get("value") is not None]
+        try:
+            values = [float(v) for v in values_raw]
+        except Exception:
+            values = []
+        if values:
+            try:
+                import pandas as pd
+                df = pd.DataFrame({display_label: values})
+                st.line_chart(df, height=200, color=fg)
+            except Exception:
+                st.caption(
+                    "Valores recientes: "
+                    + ", ".join(f"{v:.2f}" for v in values[:10])
+                )
+        else:
+            st.caption("Sin historial reciente para trend chart.")
+    elif "Vector 1X" in chart_type or "Vector 2X" in chart_type:
+        prefix = "1X" if "1X" in chart_type else "2X"
+        ampl_row = next(
+            (r for r in latest
+             if r.get("sensor_label") == selected_sensor and r.get("metric") == f"{prefix}_Ampl"),
+            None,
+        )
+        phase_row = next(
+            (r for r in latest
+             if r.get("sensor_label") == selected_sensor and r.get("metric") == f"{prefix}_Phase"),
+            None,
+        )
+        if ampl_row is None and phase_row is None:
+            st.warning(
+                f"`{display_label}` no envía vectores {prefix}. Solo proximity "
+                f"probes con módulo vibration monitor de Bently 3500 generan "
+                f"datos vectoriales sincrónicos. Verificá módulo y configuración."
+            )
+        else:
+            try:
+                amp = float(ampl_row.get("value")) if ampl_row else None
+            except Exception:
+                amp = None
+            try:
+                phase = float(phase_row.get("value")) if phase_row else None
+            except Exception:
+                phase = None
+            unit = (ampl_row or {}).get("unit") or "—"
+            cA, cB, cC = st.columns([1, 1, 2])
+            with cA:
+                st.metric(f"Amplitud {prefix}", f"{amp:.3f} {unit}" if amp is not None else "—")
+            with cB:
+                st.metric(f"Fase {prefix}", f"{phase:.1f}°" if phase is not None else "—")
+            with cC:
+                if amp is not None and phase is not None:
+                    phasor_html = phasor_svg(amp, phase, max_amp=max(amp * 1.5, 1.0), color=fg, size=140)
+                    st.markdown(
+                        f'<div style="display:flex;justify-content:center;">{phasor_html}</div>',
+                        unsafe_allow_html=True,
+                    )
+        st.caption(
+            f"Vector {prefix} sincrónico — fundamental para Polar Plot, Bode "
+            f"y diagnóstico de balanceo/desalineamiento."
+        )
+    elif "Gap" in chart_type:
+        # Gap voltage del prox probe — viene como reading aparte con
+        # nombre/metric tipo "Gap" o sensor_label sufijo "_Gap".
+        gap_row = next(
+            (r for r in latest
+             if r.get("sensor_label") == selected_sensor
+             and "gap" in (r.get("metric") or "").lower()),
+            None,
+        )
+        if not gap_row:
+            # Fallback: buscar otro sensor con sufijo Gap
+            gap_label = f"{selected_sensor}_Gap"
+            gap_row = next(
+                (r for r in latest if r.get("sensor_label") == gap_label),
+                None,
+            )
+        if gap_row:
+            try:
+                gap_val = float(gap_row.get("value"))
+                gap_unit = gap_row.get("unit") or "V DC"
+                st.metric(f"Gap {display_label}", f"{gap_val:.2f} {gap_unit}")
+                st.caption(
+                    "Gap = voltaje DC del prox probe → distancia probe-shaft. "
+                    "Rango típico Bently 3500: -7 a -11 V DC. Fuera de eso → "
+                    "probe descalibrado o shaft desplazado."
+                )
+            except Exception:
+                st.warning("Lectura de Gap inválida.")
+        else:
+            st.info(
+                f"`{display_label}` no envía Gap voltage como reading separado. "
+                f"En Bently 3500 esto suele estar en `OK` channel o Buffer Out "
+                f"del módulo. Pronto: lectura directa desde collector."
+            )
+    else:
+        # Placeholder para tipos que faltan (Spectrum, Waveform, Orbit, Cascade)
+        st.info(
+            f"**{chart_type}** — esta vista todavía no está integrada en el "
+            f"zoom panel. Pronto se integra inline para `{display_label}`."
+        )
+
+
+# ============================================================
 # Header & Alarm strip
 # ============================================================
 
@@ -876,146 +1202,142 @@ def render_asset_header(
         alarms_txt = f"{n_danger + n_alarm}"
         alarms_color = "#ef4444" if n_danger else "#f59e0b"
 
-    # Chips (driver, driven, cliente, sitio)
+    # Chips (driver, driven, cliente, sitio) — compact inline pills
     chip_items: List[str] = []
     if instance_obj is not None:
         if instance_obj.driver_model:
             mfr = (instance_obj.driver_manufacturer or "").strip()
             mdl = instance_obj.driver_model.strip()
             chip_items.append(
-                f'<span class="wm-asset-chip">'
-                f'<span class="wm-chip-key">DRIVER</span>'
-                f'<span class="wm-chip-val">{(mfr + " " + mdl).strip()}</span>'
-                f'</span>'
+                f'<span class="wm-bar-chip"><b>DRIVER</b>{(mfr + " " + mdl).strip()}</span>'
             )
         if instance_obj.driven_model:
             mfr = (instance_obj.driven_manufacturer or "").strip()
             mdl = instance_obj.driven_model.strip()
             chip_items.append(
-                f'<span class="wm-asset-chip">'
-                f'<span class="wm-chip-key">DRIVEN</span>'
-                f'<span class="wm-chip-val">{(mfr + " " + mdl).strip()}</span>'
-                f'</span>'
+                f'<span class="wm-bar-chip"><b>DRIVEN</b>{(mfr + " " + mdl).strip()}</span>'
             )
         if instance_obj.client:
             chip_items.append(
-                f'<span class="wm-asset-chip">'
-                f'<span class="wm-chip-key">CLIENTE</span>'
-                f'<span class="wm-chip-val">{instance_obj.client}</span>'
-                f'</span>'
+                f'<span class="wm-bar-chip"><b>CLIENTE</b>{instance_obj.client}</span>'
             )
         if instance_obj.site:
             chip_items.append(
-                f'<span class="wm-asset-chip">'
-                f'<span class="wm-chip-key">SITIO</span>'
-                f'<span class="wm-chip-val">{instance_obj.site}</span>'
-                f'</span>'
+                f'<span class="wm-bar-chip"><b>SITIO</b>{instance_obj.site}</span>'
             )
     chips_html = "".join(chip_items)
 
+    # Asset banner compacto (Ciclo 23.23) — barra oscura de 1 línea con
+    # título + KPIs inline + status pill. Reemplaza la card grande de
+    # Ciclo 23.16 que ocupaba 1/3 de la pantalla. Diagrama es protagonista.
     st.markdown(
         textwrap.dedent(
             f"""
             <style>
-            .wm-asset-banner {{
-                background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 60%, #e6f0fb 100%);
-                border: 1px solid #c7d9eb;
-                border-radius: 18px;
-                padding: 18px 22px;
-                margin: 4px 0 18px 0;
-                box-shadow: 0 14px 32px rgba(15,23,42,0.07);
-            }}
-            .wm-asset-banner-top {{
-                display: flex; align-items: center; gap: 14px;
-                flex-wrap: wrap; margin-bottom: 12px;
-            }}
-            .wm-asset-banner-title {{
-                font-size: 30px; font-weight: 900; color: #0f172a;
-                letter-spacing: -0.02em; line-height: 1;
-            }}
-            .wm-status-pill-big {{
-                display: inline-flex; align-items: center; gap: 8px;
-                padding: 8px 18px; border-radius: 14px;
-                background: {status_bg}; color: {status_fg};
-                font-weight: 900; font-size: 12px; letter-spacing: 0.1em;
-                text-transform: uppercase;
-                border: 2px solid {status_border};
-                box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-            }}
-            .wm-asset-banner-chips {{
-                display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;
-            }}
-            .wm-asset-chip {{
-                display: inline-flex; gap: 8px; align-items: center;
-                background: white;
-                border: 1px solid #dbe5f0;
-                border-radius: 10px;
-                padding: 6px 12px;
-                font-size: 12px;
-            }}
-            .wm-asset-chip .wm-chip-key {{
-                color: #64748b; font-weight: 800; letter-spacing: 0.08em;
-                font-size: 9px; text-transform: uppercase;
-            }}
-            .wm-asset-chip .wm-chip-val {{
-                color: #0f172a; font-weight: 700;
-            }}
-            .wm-kpi-grid {{
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 12px;
-            }}
-            .wm-kpi-tile {{
-                background: white;
-                border: 1px solid #e5edf7;
+            .wm-asset-bar {{
+                background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
                 border-radius: 12px;
-                padding: 12px 14px;
-                box-shadow: 0 4px 10px rgba(15,23,42,0.04);
+                padding: 12px 18px;
+                margin: 4px 0 8px 0;
+                display: flex; align-items: center; gap: 14px;
+                flex-wrap: wrap;
+                box-shadow: 0 6px 18px rgba(15,23,42,0.18);
             }}
-            .wm-kpi-tile .wm-kpi-tile-label {{
-                font-size: 9px; color: #64748b; font-weight: 800;
-                text-transform: uppercase; letter-spacing: 0.1em;
-                margin-bottom: 4px;
+            .wm-bar-live {{
+                display: inline-flex; align-items: center; gap: 7px;
+                color: #f1f5f9; font-weight: 800; font-size: 12px;
+                letter-spacing: 0.18em;
             }}
-            .wm-kpi-tile .wm-kpi-tile-value {{
-                font-size: 26px; font-weight: 900; color: #0f172a;
-                line-height: 1; font-variant-numeric: tabular-nums;
+            .wm-bar-live-dot {{
+                width: 8px; height: 8px; border-radius: 50%;
+                background: #ef4444;
+                animation: wm-pulse 1.4s ease-in-out infinite;
+                box-shadow: 0 0 8px rgba(239,68,68,0.7);
             }}
-            .wm-kpi-tile .wm-kpi-tile-unit {{
-                font-size: 11px; color: #94a3b8; margin-left: 4px;
-                font-weight: 700;
+            @keyframes wm-pulse {{
+                0%, 100% {{ opacity: 1; }}
+                50% {{ opacity: 0.35; }}
+            }}
+            .wm-bar-divider {{
+                width: 1px; height: 32px; background: #334155;
+            }}
+            .wm-bar-title-block {{
+                display: flex; flex-direction: column; gap: 2px;
+            }}
+            .wm-bar-title {{
+                font-size: 22px; font-weight: 900; color: #f8fafc;
+                letter-spacing: -0.01em; line-height: 1;
+            }}
+            .wm-bar-class {{
+                font-size: 10px; color: #94a3b8; font-weight: 600;
+                letter-spacing: 0.12em; text-transform: uppercase;
+            }}
+            .wm-bar-kpi {{
+                display: flex; flex-direction: column; gap: 2px;
+                background: #1e293b; border: 1px solid #334155;
+                border-radius: 8px; padding: 6px 12px; min-width: 90px;
+            }}
+            .wm-bar-kpi-label {{
+                font-size: 9px; color: #64748b; font-weight: 700;
+                letter-spacing: 0.1em; text-transform: uppercase;
+            }}
+            .wm-bar-kpi-value {{
+                font-size: 16px; font-weight: 800; color: #f1f5f9;
+                font-variant-numeric: tabular-nums; line-height: 1.1;
+            }}
+            .wm-bar-kpi-unit {{
+                font-size: 10px; color: #94a3b8;
+                font-weight: 600; margin-left: 2px;
+            }}
+            .wm-bar-status {{
+                margin-left: auto;
+                display: inline-flex; align-items: center; gap: 7px;
+                padding: 8px 16px; border-radius: 18px;
+                background: {status_bg}; color: {status_fg};
+                font-weight: 800; font-size: 11px;
+                letter-spacing: 0.12em; text-transform: uppercase;
+                border: 1.5px solid {status_border};
+                box-shadow: 0 3px 8px rgba(0,0,0,0.18);
+            }}
+            .wm-bar-chips {{
+                display: flex; gap: 6px; flex-wrap: wrap;
+                margin: 0 0 12px 0;
+            }}
+            .wm-bar-chip {{
+                background: white; border: 1px solid #dbe5f0;
+                border-radius: 7px; padding: 4px 10px;
+                font-size: 11px; color: #0f172a; font-weight: 700;
+            }}
+            .wm-bar-chip b {{
+                color: #64748b; font-size: 9px; font-weight: 800;
+                letter-spacing: 0.1em; margin-right: 6px;
+                text-transform: uppercase;
             }}
             </style>
-            <div class="wm-asset-banner">
-                <div class="wm-asset-banner-top">
-                    <div class="wm-asset-banner-title">{title_text}</div>
-                    <span class="wm-live-badge"><span class="wm-live-dot"></span>LIVE</span>
-                    <span style="
-                        display:inline-flex;align-items:center;gap:5px;
-                        padding:5px 12px;border-radius:999px;
-                        background:{class_color[0]};color:{class_color[1]};
-                        font-weight:800;font-size:10px;letter-spacing:0.08em;text-transform:uppercase;
-                    ">🛡️ {class_label}</span>
-                    <div style="margin-left:auto;">
-                        <span class="wm-status-pill-big">{status_icon} {status_label}</span>
-                    </div>
+            <div class="wm-asset-bar">
+                <span class="wm-bar-live">
+                    <span class="wm-bar-live-dot"></span>LIVE
+                </span>
+                <div class="wm-bar-divider"></div>
+                <div class="wm-bar-title-block">
+                    <div class="wm-bar-title">{title_text}</div>
+                    <div class="wm-bar-class">{class_label} · ISO 20816 / API 670</div>
                 </div>
-                <div class="wm-asset-banner-chips">{chips_html}</div>
-                <div class="wm-kpi-grid">
-                    <div class="wm-kpi-tile">
-                        <div class="wm-kpi-tile-label">⚙ Velocidad</div>
-                        <div class="wm-kpi-tile-value">{speed_txt}<span class="wm-kpi-tile-unit">rpm</span></div>
-                    </div>
-                    <div class="wm-kpi-tile">
-                        <div class="wm-kpi-tile-label">⏱ Última Lectura</div>
-                        <div class="wm-kpi-tile-value" style="color:{age_color};">hace {age_txt}</div>
-                    </div>
-                    <div class="wm-kpi-tile">
-                        <div class="wm-kpi-tile-label">🔔 Alarmas</div>
-                        <div class="wm-kpi-tile-value" style="color:{alarms_color};">{alarms_txt}<span class="wm-kpi-tile-unit">activas</span></div>
-                    </div>
+                <div class="wm-bar-kpi">
+                    <span class="wm-bar-kpi-label">VELOCIDAD</span>
+                    <span class="wm-bar-kpi-value">{speed_txt}<span class="wm-bar-kpi-unit">rpm</span></span>
                 </div>
+                <div class="wm-bar-kpi">
+                    <span class="wm-bar-kpi-label">ÚLTIMA LECTURA</span>
+                    <span class="wm-bar-kpi-value" style="color:{age_color};">hace {age_txt}</span>
+                </div>
+                <div class="wm-bar-kpi">
+                    <span class="wm-bar-kpi-label">ALARMAS</span>
+                    <span class="wm-bar-kpi-value" style="color:{alarms_color};">{alarms_txt}</span>
+                </div>
+                <span class="wm-bar-status">{status_icon} {status_label}</span>
             </div>
+            <div class="wm-bar-chips">{chips_html}</div>
             """
         ).strip(),
         unsafe_allow_html=True,
@@ -1669,9 +1991,13 @@ def main() -> None:
 
     rendered_rows, severity_summary = compute_rendered_rows(latest, sensor_lookup, instance_obj)
 
-    # Asset banner card industrial — incluye title, status, chips OEM
-    # y los 4 KPIs (velocidad, sensores, última lectura, alarmas).
-    # Reemplaza el header simple + status_bar separado de v3.31.21.
+    # Spark data se trae ANTES del diagrama (Ciclo 23.23) para alimentar
+    # las sparklines mini al lado de cada sensor dot. La misma data se
+    # reusa abajo en tab_curr para la tabla de canales — sin doble fetch.
+    spark_data = recent_history_all_direct(instance_id, n_per_sensor=30)
+
+    # Asset banner compacto — barra oscura de 1 línea con título + KPIs
+    # inline + status pill. Reemplaza la card grande que dominaba la pantalla.
     render_asset_header(instance_obj, instance_id, latest, severity_summary)
 
     # Alarm strip prominente arriba si hay danger
@@ -1685,9 +2011,71 @@ def main() -> None:
     #      (DE / NDE / TRF / CRF) por convención Bently / API 670.
     #   2) PNG 3D legacy con overlay x_pct/y_pct si no hay icon_keys.
     #   3) PNG plano sin overlay si tampoco hay coordenadas.
-    has_map = render_sensor_map_library(instance_obj, latest, sensor_lookup)
+    has_map = render_sensor_map_library(
+        instance_obj, latest, sensor_lookup, spark_data=spark_data,
+    )
     if not has_map:
         has_map = render_sensor_map_hero(instance_obj, instance_id, latest, sensor_lookup)
+
+    # Sensor selection (Ciclo 23.33) — selectbox discreto debajo del
+    # diagrama. Razón técnica para no usar click directo en SVG:
+    # Streamlit + browser full-reload pierde session_state → auth falla
+    # → redirect a login. El selectbox usa st.rerun() interno que
+    # mantiene el websocket de la sesión vivo.
+    direct_labels = sorted({
+        r.get("sensor_label") for r in latest
+        if r.get("metric") == "Direct" and r.get("sensor_label")
+    })
+    selected_sensor = st.query_params.get("sensor")
+
+    if direct_labels:
+        st.markdown(
+            textwrap.dedent("""
+            <style>
+            /* Selectbox más discreto para drill-down */
+            div[data-testid="stSelectbox"]:has(input[aria-label="drilldown_select"]) > div > div {
+                background: #f8fafc;
+                border: 1.5px solid #94a3b8;
+                border-radius: 999px;
+                padding: 2px 10px;
+                font-size: 13px;
+            }
+            </style>
+            """).strip(),
+            unsafe_allow_html=True,
+        )
+        sel_options = ["🔍 Análisis detallado — picker un sensor…"] + direct_labels
+        try:
+            sel_idx = sel_options.index(selected_sensor) if selected_sensor in direct_labels else 0
+        except ValueError:
+            sel_idx = 0
+        new_sel = st.selectbox(
+            "drilldown_select",
+            options=sel_options,
+            index=sel_idx,
+            key="live_sensor_drilldown",
+            format_func=lambda x: x.replace("_", "") if x in direct_labels else x,
+            label_visibility="collapsed",
+        )
+        new_value = new_sel if new_sel != "🔍 Análisis detallado — picker un sensor…" else None
+        if new_value != selected_sensor:
+            if new_value:
+                st.query_params["sensor"] = new_value
+            else:
+                st.query_params.clear()
+            st.rerun()
+        selected_sensor = new_value
+
+    # Zoom panel — si hay sensor seleccionado, render del card focalizado
+    # con trend chart + selector de tipo de gráfico.
+    if selected_sensor:
+        render_sensor_zoom_panel(
+            selected_sensor=selected_sensor,
+            latest=latest,
+            sensor_lookup=sensor_lookup,
+            instance_obj=instance_obj,
+            spark_data=spark_data,
+        )
     if not has_map and instance_obj is not None and instance_obj.schematic_png:
         # Tiene schematic pero sin posiciones — render sin overlay
         try:
@@ -1704,53 +2092,16 @@ def main() -> None:
 
     st.markdown("&nbsp;", unsafe_allow_html=True)
 
-    tab_curr, tab_vec, tab_diag, tab_hist = st.tabs([
-        "📊 Canales en Vivo",
+    # Tabs (Ciclo 23.26): se quitó "Canales en Vivo" porque el diagrama
+    # ya muestra valor + sparkline + threshold por sensor, y al hacer
+    # click se abre el zoom panel. La tabla con filtros era redundante.
+    # Se mantienen Vectores 1X/2X (info no visible en el diagrama),
+    # Diagnostic (criterios ISO/API) y Tendencia (vista detallada).
+    tab_vec, tab_diag, tab_hist = st.tabs([
         "🎯 Vectores 1X/2X",
         "🩺 Diagnostic",
         "📈 Tendencia",
     ])
-
-    with tab_curr:
-        # Filtros estilo legacy "monitoreo-estatico" (Plano + Tipo de sensor)
-        # Para activos con muchos sensores el usuario puede acotar la vista.
-        all_planes = sorted({
-            (r.get("plane_label") or "").strip() for r in rendered_rows if r.get("plane_label")
-        })
-        all_types = sorted({
-            r.get("status") for r in rendered_rows if r.get("status")
-        })
-        f1, f2 = st.columns([2, 1])
-        with f1:
-            sel_planes = st.multiselect(
-                "Filtrar por ubicación / plano",
-                options=all_planes, default=[],
-                key="live_filter_planes",
-                placeholder="Todos los planos" if all_planes else "Sin planos definidos",
-            )
-        with f2:
-            sel_status = st.multiselect(
-                "Filtrar por estado",
-                options=["Danger", "Alarma", "Normal", "Sin Norma", "No Data"],
-                default=[],
-                key="live_filter_status",
-                placeholder="Todos los estados",
-            )
-
-        filtered_rows = rendered_rows
-        if sel_planes:
-            filtered_rows = [r for r in filtered_rows if (r.get("plane_label") or "") in sel_planes]
-        if sel_status:
-            filtered_rows = [r for r in filtered_rows if r.get("status") in sel_status]
-
-        if sel_planes or sel_status:
-            st.caption(
-                f"Mostrando **{len(filtered_rows)}** de **{len(rendered_rows)}** sensores."
-            )
-
-        # Trae historial para sparklines
-        spark_data = recent_history_all_direct(instance_id, n_per_sensor=30)
-        render_channels_table(filtered_rows, spark_data)
 
     with tab_vec:
         render_vectors_phasors(latest)
