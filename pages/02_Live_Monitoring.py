@@ -447,16 +447,20 @@ def _infer_side_anchor(
     Mapea (sensor_label, sensor_dict) → (side, anchor) para el composer.
 
     Override explícito: si el sensor tiene icon_side / icon_anchor, los usa.
-    Si no, aplica heurística por convención industrial Bently / API 670:
-      - Label empieza con "1" → bearing #1 = DE del driver (TRF en aero)
-      - Label empieza con "2" → bearing #2 = NDE del driver (CRF en aero)
-      - Label empieza con "3" → bearing #3 = DE del driven
-      - Label empieza con "4" → bearing #4 = NDE del driven
+    Si no, aplica heurística por convención industrial Bently / API 670 —
+    la numeración de bearings va del lado LIBRE del driver hacia el
+    generador (corregido en Ciclo 23.19):
+      - Label empieza con "1" → bearing #1 = NDE del driver / CRF (aero)
+        = lado libre, intake del compresor
+      - Label empieza con "2" → bearing #2 = DE del driver / TRF (aero)
+        = lado coupling, output de la turbina
+      - Label empieza con "3" → bearing #3 = DE del driven (lado coupling)
+      - Label empieza con "4" → bearing #4 = NDE del driven (lado libre)
     Fallback a plane_label matching si label no empieza con dígito.
 
     Devuelve (None, None) si no se pudo mapear → sensor se omite del SVG.
     """
-    # 1. Override explícito (futuro Commit 4 — wizard editor)
+    # 1. Override explícito (wizard editor)
     if sensor_match:
         s_side = sensor_match.get("icon_side")
         s_anchor = sensor_match.get("icon_anchor")
@@ -468,17 +472,19 @@ def _infer_side_anchor(
     label_l = (sensor_label or "").strip().lower()
     plane_l = ((sensor_match or {}).get("plane_label") or "").lower()
 
-    # 2. Convención Bently — primer carácter del label es el bearing #
+    # 2. Convención Bently — primer carácter del label es el bearing #.
+    # Numeración: desde el extremo LIBRE del driver hasta el extremo libre
+    # del driven (cuenta a lo largo del tren mecánico).
     if label_l and label_l[0].isdigit():
         bearing_num = int(label_l[0])
         if bearing_num == 1:
-            return "driver", ("TRF" if is_aero else "DE")
+            return "driver", ("CRF" if is_aero else "NDE")  # lado libre
         if bearing_num == 2:
-            return "driver", ("CRF" if is_aero else "NDE")
+            return "driver", ("TRF" if is_aero else "DE")   # lado coupling
         if bearing_num == 3:
-            return "driven", "DE"
+            return "driven", "DE"                            # lado coupling
         if bearing_num == 4:
-            return "driven", "NDE"
+            return "driven", "NDE"                           # lado libre
         # 5+ → ignoramos (solo soportamos hasta gen NDE)
         return None, None
 

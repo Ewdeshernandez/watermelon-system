@@ -669,14 +669,16 @@ def _infer_icon_side_anchor(
 ) -> tuple:
     """
     Heurística Bently / API 670 para mapear un sensor del wizard a
-    (icon_side, icon_anchor) del SVG library:
+    (icon_side, icon_anchor) del SVG library. Corregida en Ciclo 23.19
+    para reflejar la convención real: bearings se numeran desde el
+    extremo libre del driver hacia el generador.
 
       plane_label contains "driver/motor/turbina/engine"  → driver
       plane_label contains "driven/compresor/generador/bomba/frame/cilindro" → driven
-      plane==1 / "DE"   → DE  (TRF en aero-derivative)
-      plane==2 / "NDE"  → NDE (CRF en aero-derivative)
-      plane==3 driven   → DE driven
-      plane==4 driven   → NDE driven
+      plane==1  → driver / NDE  (CRF en aero-derivative) = lado libre
+      plane==2  → driver / DE   (TRF en aero-derivative) = lado coupling
+      plane==3  → driven / DE   = lado coupling
+      plane==4  → driven / NDE  = lado libre
 
     Devuelve ('', '') si no se pudo inferir → el especialista lo asigna
     manualmente con los selectboxes del editor.
@@ -704,9 +706,9 @@ def _infer_icon_side_anchor(
     elif "de" in plane_l:
         anchor = "TRF" if (side == "driver" and is_aero) else "DE"
     elif plane_num == 1:
-        anchor = "TRF" if is_aero else "DE"
+        anchor = "CRF" if is_aero else "NDE"  # lado libre
     elif plane_num == 2:
-        anchor = "CRF" if is_aero else "NDE"
+        anchor = "TRF" if is_aero else "DE"   # lado coupling
     elif plane_num == 3:
         anchor = "DE"
     elif plane_num == 4:
