@@ -222,13 +222,20 @@ def _show_authenticated_layout_tweaks() -> None:
             display: none !important;
         }
 
-        /* ===== SIDEBAR EXPANDED ===== */
+        /* ===== SIDEBAR EXPANDED — Ciclo 23.38 "international" upgrade =====
+           Antes: 320px width, bright blue gradient (#67b7ff→#1f6fd1).
+           Resultado: bloated, look "app móvil", compite con contenido.
+           Ahora: 256px (Linear/Notion/Stripe standard), navy dark slate
+           con subtle blue tint para mantener identidad de marca pero
+           profesional enterprise. */
         section[data-testid="stSidebar"][aria-expanded="true"] {
-            width: 320px !important;
-            min-width: 320px !important;
-            max-width: 320px !important;
-            background: linear-gradient(180deg, #67b7ff 0%, #4298ee 48%, #1f6fd1 100%) !important;
-            border-right: 1px solid rgba(255,255,255,0.14);
+            width: 256px !important;
+            min-width: 256px !important;
+            max-width: 256px !important;
+            background:
+                radial-gradient(circle at 0% 0%, rgba(33,71,140,0.45) 0%, transparent 55%),
+                linear-gradient(180deg, #0f172a 0%, #1e293b 50%, #0f172a 100%) !important;
+            border-right: 1px solid rgba(148,163,184,0.14);
         }
 
         section[data-testid="stSidebar"][aria-expanded="true"] > div {
@@ -353,35 +360,41 @@ def _show_authenticated_layout_tweaks() -> None:
             margin-bottom: 0.65rem;
         }
 
+        /* Ciclo 23.38 — Sidebar nav buttons slim "international" style.
+           Antes: 50px alto, 16px fuente, blanco con sombra → look "iPad app".
+           Ahora: 38px alto, 13.5px fuente, translucent dark → look Linear/Notion. */
         div[data-testid="stSidebar"] div[data-testid="stButton"] {
-            margin-bottom: 0.62rem !important;
+            margin-bottom: 0.22rem !important;
         }
 
         div[data-testid="stSidebar"] div[data-testid="stButton"] > button {
             width: 100% !important;
-            min-height: 3.1rem !important;
-            border-radius: 18px !important;
-            border: 1px solid rgba(209, 223, 241, 0.95) !important;
-            background: rgba(255,255,255,0.96) !important;
-            color: #0f172a !important;
-            font-weight: 600 !important;
-            font-size: 1rem !important;
+            min-height: 2.35rem !important;
+            border-radius: 8px !important;
+            border: 1px solid transparent !important;
+            background: transparent !important;
+            color: rgba(241, 245, 249, 0.85) !important;
+            font-weight: 500 !important;
+            font-size: 0.84rem !important;
+            letter-spacing: 0.005em !important;
             text-align: left !important;
             justify-content: flex-start !important;
-            padding: 0.85rem 1rem !important;
-            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.06) !important;
-            transition: all 0.18s ease !important;
+            padding: 0.5rem 0.8rem !important;
+            box-shadow: none !important;
+            transition: all 0.15s ease !important;
         }
 
         div[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
-            background: #ffffff !important;
-            border-color: #ffffff !important;
-            box-shadow: 0 10px 20px rgba(15, 23, 42, 0.10) !important;
+            background: rgba(255,255,255,0.08) !important;
+            border-color: rgba(255,255,255,0.10) !important;
+            color: #ffffff !important;
         }
 
         div[data-testid="stSidebar"] div[data-testid="stButton"] > button:focus,
         div[data-testid="stSidebar"] div[data-testid="stButton"] > button:focus-visible {
-            box-shadow: 0 0 0 2px rgba(255,255,255,0.22) !important;
+            background: rgba(255,255,255,0.10) !important;
+            border-color: rgba(96,165,250,0.45) !important;
+            box-shadow: 0 0 0 2px rgba(96,165,250,0.18) !important;
             outline: none !important;
         }
 
@@ -389,10 +402,49 @@ def _show_authenticated_layout_tweaks() -> None:
         div[data-testid="stSidebar"] div[data-testid="stButton"] > button p,
         div[data-testid="stSidebar"] div[data-testid="stButton"] > button span,
         div[data-testid="stSidebar"] div[data-testid="stButton"] > button div {
-            color: #0f172a !important;
-            fill: #0f172a !important;
+            color: inherit !important;
+            fill: inherit !important;
             opacity: 1 !important;
-            font-weight: 600 !important;
+            font-weight: 500 !important;
+        }
+
+        /* Brand mark + section labels en el sidebar slim */
+        .wm-side-brand {
+            font-size: 1.15rem !important;
+            font-weight: 700 !important;
+            letter-spacing: -0.02em !important;
+            color: #f8fafc !important;
+            margin: 0.2rem 0 1rem 0 !important;
+        }
+        .wm-side-section {
+            font-size: 0.66rem !important;
+            font-weight: 800 !important;
+            text-transform: uppercase;
+            letter-spacing: 0.12em !important;
+            color: rgba(241,245,249,0.55) !important;
+            margin: 1rem 0 0.5rem 0 !important;
+            padding-left: 0.2rem;
+        }
+        .wm-side-divider {
+            height: 1px;
+            background: rgba(255,255,255,0.10) !important;
+            margin: 0.7rem 0 !important;
+        }
+        /* User mini card más compacto */
+        .wm-user-mini {
+            padding: 0.45rem 0.4rem !important;
+            border-radius: 9px !important;
+        }
+        .wm-user-mini-avatar {
+            width: 28px !important;
+            height: 28px !important;
+            font-size: 0.82rem !important;
+        }
+        .wm-user-mini-name {
+            font-size: 0.82rem !important;
+        }
+        .wm-user-mini-role {
+            font-size: 0.62rem !important;
         }
 
         .wm-logout-spacer {

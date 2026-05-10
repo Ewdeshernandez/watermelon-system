@@ -10,30 +10,24 @@ def apply_theme():
         color: #0f172a;
     }
 
-    /* ===== SIDEBAR ===== */
-    section[data-testid="stSidebar"] {
-        background: linear-gradient(180deg, #4FA3FF 0%, #1E6EDC 100%);
-        padding-top: 20px;
-    }
-
+    /* ===== SIDEBAR ===== Ciclo 23.38 — paleta navy dark
+       (consistente con el upgrade del sidebar en core/auth.py).
+       Reglas básicas; el detail styling vive en auth.py. */
     section[data-testid="stSidebar"] * {
-        color: white !important;
+        color: #f1f5f9;
         font-weight: 500;
     }
-
-    /* Botones sidebar (nav) */
     .stSidebar button {
         background: transparent;
         border: none;
         text-align: left;
-        padding: 12px 10px;
-        border-radius: 10px;
-        font-size: 15px;
-        transition: 0.2s;
+        padding: 0.5rem 0.8rem;
+        border-radius: 8px;
+        font-size: 0.84rem;
+        transition: 0.15s;
     }
-
     .stSidebar button:hover {
-        background: rgba(255,255,255,0.15);
+        background: rgba(255,255,255,0.08);
     }
 
     /* ===== HEADER LIMPIO ===== */

@@ -178,6 +178,28 @@ st.markdown(
         width: 4px; border-radius: 22px 0 0 22px;
         opacity: 0.85;
     }
+    /* Ciclo 23.38 — barrido oscilográfico sutil arriba del hero.
+       Da un toque "live signal" sin distraer. Animación lenta para
+       que no fatigue (15s loop). */
+    .wmh-hero::after {
+        content: "";
+        position: absolute;
+        top: 0; left: 0; right: 0;
+        height: 1px;
+        background: linear-gradient(90deg,
+            transparent 0%,
+            rgba(96,165,250,0) 20%,
+            rgba(96,165,250,0.6) 50%,
+            rgba(96,165,250,0) 80%,
+            transparent 100%);
+        animation: wmh-hero-scan 15s linear infinite;
+        opacity: 0.5;
+        pointer-events: none;
+    }
+    @keyframes wmh-hero-scan {
+        0%   { transform: translateX(-100%); }
+        100% { transform: translateX(100%); }
+    }
     .wmh-hero-left { flex: 1 1 60%; min-width: 320px; }
     .wmh-hero-right { flex: 0 0 auto; text-align: right; min-width: 240px; }
 
@@ -223,6 +245,13 @@ st.markdown(
         border-radius: 50%;
         margin: 0 6px 0 4px;
         vertical-align: middle;
+        animation: wmh-status-pulse 1.8s ease-in-out infinite;
+    }
+    /* Ciclo 23.38 — pulse animado en el status dot del hero.
+       Si hay activos en atención/danger, transmite urgencia visual. */
+    @keyframes wmh-status-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+        50%      { box-shadow: 0 0 0 6px rgba(255,255,255,0); opacity: 0.55; }
     }
 
     /* Ciclo 17.24 — Línea "Último reporte: hace 2h" debajo del status,
@@ -274,14 +303,24 @@ st.markdown(
         margin-top: 2px;
     }
 
-    /* ───── KPI BAND ───── */
+    /* ───── KPI BAND ───── Ciclo 23.38 — international upgrade
+       Antes: 36px valores, hover sin lift, sin micro-animaciones.
+       Ahora: 44px valores con tabular-nums, hover lift + glow,
+       border-top accent más visible, micro-trend más prominente. */
     .wmh-kpi {
         background: #ffffff;
         border: 1px solid #e6ebf2;
-        border-radius: 14px;
-        padding: 16px 18px;
+        border-radius: 16px;
+        padding: 18px 20px;
         box-shadow: 0 2px 8px rgba(15,23,42,0.04);
         height: 100%;
+        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+        position: relative;
+    }
+    .wmh-kpi:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 16px 36px rgba(15,23,42,0.10);
+        border-color: #cbd5e1;
     }
     .wmh-kpi-label {
         font-size: 10px;
@@ -289,19 +328,21 @@ st.markdown(
         letter-spacing: 0.16em;
         text-transform: uppercase;
         color: #64748b;
-        margin-bottom: 8px;
+        margin-bottom: 10px;
     }
     .wmh-kpi-value {
-        font-size: 36px;
+        font-size: 44px;
         font-weight: 800;
         line-height: 1;
-        letter-spacing: -0.02em;
+        letter-spacing: -0.03em;
         color: #0f172a;
+        font-variant-numeric: tabular-nums;
     }
     .wmh-kpi-sub {
         font-size: 11px;
         color: #94a3b8;
-        margin-top: 4px;
+        margin-top: 6px;
+        line-height: 1.4;
     }
     .wmh-kpi-spark { margin-top: 10px; }
     .wmh-kpi.danger  .wmh-kpi-value { color: #dc2626; }
@@ -311,6 +352,13 @@ st.markdown(
     .wmh-kpi.warning { border-top: 3px solid #f59e0b; }
     .wmh-kpi.healthy { border-top: 3px solid #10b981; }
     .wmh-kpi.total   { border-top: 3px solid #0ea5e9; }
+
+    /* Border accent más gordo y con glow sutil para que la card "tipo"
+       (danger/warning/healthy/total) se lea a 1 metro de distancia. */
+    .wmh-kpi.danger  { border-top-width: 4px; box-shadow: 0 2px 8px rgba(239,68,68,0.06); }
+    .wmh-kpi.warning { border-top-width: 4px; box-shadow: 0 2px 8px rgba(245,158,11,0.06); }
+    .wmh-kpi.healthy { border-top-width: 4px; box-shadow: 0 2px 8px rgba(16,185,129,0.06); }
+    .wmh-kpi.total   { border-top-width: 4px; box-shadow: 0 2px 8px rgba(14,165,233,0.06); }
 
     /* Ciclo 17.24 — Botón "Ver →" debajo de cada card KPI.
        Estilo "link sutil": sin fondo ni borde, texto pequeño con
@@ -422,14 +470,43 @@ st.markdown(
         max-width: 130px;
     }
 
-    /* ───── OMNIBOX (Cmd+K visual) ───── */
+    /* ───── OMNIBOX (Cmd+K visual) ───── Ciclo 23.38 — más prominente.
+       Border + box-shadow más marcados, focus-within accent, Cmd+K
+       badge a la derecha del input (estilo Linear/Notion). */
     .wmh-omni-wrap {
         background: #ffffff;
-        border: 1px solid #e6ebf2;
+        border: 1px solid #cbd5e1;
         border-radius: 14px;
-        padding: 8px 14px 8px 14px;
+        padding: 8px 14px;
         margin-bottom: 22px;
-        box-shadow: 0 4px 14px rgba(15,23,42,0.05);
+        box-shadow: 0 6px 18px rgba(15,23,42,0.07);
+        transition: border-color 0.18s ease, box-shadow 0.18s ease;
+        position: relative;
+    }
+    .wmh-omni-wrap:focus-within {
+        border-color: #2563eb;
+        box-shadow: 0 8px 24px rgba(37,99,235,0.14);
+    }
+    .wmh-omni-wrap::after {
+        content: "⌘ K";
+        position: absolute;
+        right: 18px;
+        top: 50%;
+        transform: translateY(-50%);
+        padding: 3px 8px;
+        background: #f1f5f9;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11px;
+        font-weight: 700;
+        color: #64748b;
+        letter-spacing: 0.03em;
+        pointer-events: none;
+        line-height: 1;
+    }
+    .wmh-omni-wrap:focus-within::after {
+        opacity: 0;
     }
     .wmh-omni-hint {
         font-size: 11px;
