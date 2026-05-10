@@ -26,50 +26,67 @@ def generator_synchronous(
     x_offset: float = 0,
     y_offset: float = 0,
 ) -> Tuple[str, Dict[str, Any]]:
-    """Generador síncrono industrial (Brush, GE, Westinghouse)."""
-    W, H = 340, 200
-    body_x = x_offset + 30
-    body_y = y_offset + 55  # bajado de 45 a 55 para dejar más espacio al label arriba
-    body_w = 260
-    body_h = 100
+    """
+    Generador síncrono industrial estilo Bently System1 (Ciclo 23.20).
+    Cilindro horizontal compacto con esquinas redondeadas (no semicírculos),
+    bandas azules verticales en bearings DE/NDE, bus duct gris sutil arriba.
+    """
+    W, H = 320, 200
     cy = y_offset + 100
-    stroke = COLORS["driven_stroke"]
-    fill = COLORS["driven_fill"]
-    accent = COLORS["driven_accent"]
+
+    # Paleta neutral System1-style
+    body_light = "#f1f5f9"
+    body_mid = "#e2e8f0"
+    body_outline = "#64748b"
+    body_dark = "#94a3b8"
+    bearing_band = "#3b82f6"
+    bearing_dark = "#1e40af"
+
+    body_x = x_offset + 25
+    body_y = y_offset + 55
+    body_w = 250
+    body_h = 100
+    de_x = body_x + 16          # banda DE (lado coupling, izq)
+    nde_x = body_x + body_w - 16  # banda NDE (lado libre, der)
+
+    # Stator slots
+    slot_xs = [body_x + 30 + i * 22 for i in range(9)]
 
     parts = [
-        # Label arriba (Brush, GE, etc.) — primero para evitar choque con bus duct
+        # Label arriba
         label_top(x_offset + W / 2, y_offset + 16, label, "driven"),
-        # Estator (cuerpo principal)
+
+        # Bus duct (caja de bornes)
+        f'<rect x="{body_x + body_w / 2 - 45:.1f}" y="{body_y - 13:.1f}" width="90" height="13" '
+        f'rx="2" fill="{body_mid}" stroke="{body_outline}" stroke-width="1"/>',
+        f'<text x="{body_x + body_w / 2:.1f}" y="{body_y - 3:.1f}" text-anchor="middle" '
+        f'font-size="8" font-weight="700" fill="#475569">BUS DUCT 13.8 kV</text>',
+
+        # Cilindro principal — esquinas redondeadas suaves (rx=10), no semicírculos
         f'<rect x="{body_x:.1f}" y="{body_y:.1f}" width="{body_w:.1f}" height="{body_h:.1f}" '
-        f'rx="14" fill="{fill}" stroke="{stroke}" stroke-width="2.5"/>',
-        # Tapas DE/NDE
-        f'<rect x="{body_x:.1f}" y="{body_y:.1f}" width="20" height="{body_h:.1f}" '
-        f'rx="14" fill="{accent}" stroke="{stroke}" stroke-width="2"/>',
-        f'<rect x="{body_x + body_w - 20:.1f}" y="{body_y:.1f}" width="20" height="{body_h:.1f}" '
-        f'rx="14" fill="{accent}" stroke="{stroke}" stroke-width="2"/>',
-        # Slots del estator (líneas verticales dentro del cuerpo)
+        f'rx="10" fill="{body_light}" stroke="{body_outline}" stroke-width="1.5"/>',
+
+        # Stator slots — líneas verticales internas
         *[
-            f'<line x1="{body_x + 30 + i * 30:.1f}" y1="{body_y + 14:.1f}" '
-            f'x2="{body_x + 30 + i * 30:.1f}" y2="{body_y + body_h - 14:.1f}" '
-            f'stroke="{stroke}" stroke-width="1" stroke-opacity="0.5"/>'
-            for i in range(7)
+            f'<line x1="{x:.1f}" y1="{body_y + 16:.1f}" x2="{x:.1f}" y2="{body_y + body_h - 16:.1f}" '
+            f'stroke="{body_dark}" stroke-width="0.7" stroke-opacity="0.6"/>'
+            for x in slot_xs
         ],
-        # Caja de bornes (bus duct) arriba — pegado al estator (sin gap),
-        # más compacto para no chocar con el title arriba.
-        f'<rect x="{body_x + body_w / 2 - 50:.1f}" y="{body_y - 16:.1f}" width="100" height="16" '
-        f'rx="2" fill="{accent}" stroke="{stroke}" stroke-width="2"/>',
-        f'<text x="{body_x + body_w / 2:.1f}" y="{body_y - 4:.1f}" text-anchor="middle" '
-        f'font-size="8" font-weight="700" fill="{stroke}">BUS DUCT 13.8 kV</text>',
-        # Eje (entra por la izquierda desde el coupling)
-        shaft_line(x_offset, cy, body_x + 6, cy),
-        # Bearings DE (lado coupling, izquierda) y NDE (derecha)
-        bearing_circle(body_x + 14, cy, r=13, label="DE", color="driven"),
-        bearing_circle(body_x + body_w - 14, cy, r=13, label="NDE", color="driven"),
+
+        # Banda azul DE (bearing lado coupling)
+        f'<rect x="{de_x - 5:.1f}" y="{body_y - 4:.1f}" width="10" height="{body_h + 8:.1f}" '
+        f'fill="{bearing_band}" stroke="{bearing_dark}" stroke-width="1" rx="2"/>',
+
+        # Banda azul NDE (bearing lado libre)
+        f'<rect x="{nde_x - 5:.1f}" y="{body_y - 4:.1f}" width="10" height="{body_h + 8:.1f}" '
+        f'fill="{bearing_band}" stroke="{bearing_dark}" stroke-width="1" rx="2"/>',
+
+        # Eje entra por la izquierda
+        shaft_line(x_offset, cy, body_x, cy),
     ]
     anchors = {
-        "DE":  (body_x + 14, cy),
-        "NDE": (body_x + body_w - 14, cy),
+        "DE":  (de_x, cy),
+        "NDE": (nde_x, cy),
         "shaft_in": (x_offset, cy),
         "viewbox_w": W,
         "viewbox_h": H,

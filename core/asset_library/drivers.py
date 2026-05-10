@@ -123,82 +123,133 @@ def gas_turbine_aero(
     y_offset: float = 0,
 ) -> Tuple[str, Dict[str, Any]]:
     """
-    Turbina aero-derivativa con compresor (compressor section, izquierda)
-    + combustor + turbina (turbine section, derecha). Bearing locations:
-    CRF (Compressor Rear Frame) y TRF (Turbine Rear Frame).
-    """
-    W, H = 380, 200
-    body_y = y_offset + 50
-    body_h = 100
-    cy = y_offset + 100
-    fill = COLORS["driver_fill"]
-    accent = COLORS["driver_accent"]
-    stroke = COLORS["driver_stroke"]
+    Turbina aero-derivativa estilo Bently System1 (Ciclo 23.20).
+    Silueta compacta sin álabes-rayados, con secciones definidas por
+    fills sutiles. Bandas azules en bearings (CRF, TRF) y banda roja
+    en combustor crítico.
 
-    # Compresor (izquierda) — cuerpo cónico desde fan hasta combustor
-    fan_x = x_offset + 25
-    comp_end = x_offset + 165
-    # Combustor central
-    comb_start = x_offset + 175
-    comb_end = x_offset + 200
-    # Turbina (derecha)
-    turb_end = x_offset + 350
+    Layout (de izq a der):
+      Bell-mouth intake → Compressor cone → CRF (banda azul) →
+      Combustor (banda roja) → Power turbine cone → TRF (banda azul) →
+      Outlet cone → Shaft out.
+    """
+    W, H = 360, 200
+    cy = y_offset + 100
+
+    # Paleta neutral System1-style
+    body_light = "#f1f5f9"     # gris claro (fondo)
+    body_mid = "#cbd5e1"       # gris medio (sombras + cuerpo principal)
+    body_outline = "#64748b"   # gris outline
+    bearing_band = "#3b82f6"   # azul vivo bearings
+    bearing_dark = "#1e40af"   # azul oscuro borde
+    combustor_red = "#dc2626"  # rojo combustor
+    combustor_dark = "#7f1d1d" # rojo oscuro borde
+
+    # Coordenadas (más compactas que v3.31.27 anterior)
+    intake_x1 = x_offset + 10
+    intake_x2 = x_offset + 50
+    comp_x1 = x_offset + 50
+    comp_x2 = x_offset + 155
+    crf_x = x_offset + 165          # banda CRF
+    comb_x1 = x_offset + 175
+    comb_x2 = x_offset + 200
+    pt_x1 = x_offset + 210          # power turbine start
+    pt_x2 = x_offset + 295
+    trf_x = x_offset + 305          # banda TRF
+    outlet_x1 = x_offset + 315
+    outlet_x2 = x_offset + 345
+
+    # Radios verticales en cada estación
+    r_intake_in = 18    # diámetro angosto al inlet (bell mouth small)
+    r_intake_out = 35   # bell-mouth se abre hacia el compresor
+    r_comp_in = 35
+    r_comp_out = 50     # compresor expande
+    r_crf = 50
+    r_comb = 58         # combustor más ancho (cuerpo cilíndrico)
+    r_pt_in = 50
+    r_pt_out = 38       # power turbine converge
+    r_trf = 38
+    r_outlet_in = 38
+    r_outlet_out = 14   # outlet cone converge a shaft
 
     parts = [
-        # Compresor — trapecio (de pequeño a grande)
-        f'<polygon points="'
-        f'{fan_x:.1f},{cy - 30:.1f} '
-        f'{comp_end:.1f},{cy - 50:.1f} '
-        f'{comp_end:.1f},{cy + 50:.1f} '
-        f'{fan_x:.1f},{cy + 30:.1f}'
-        f'" fill="{accent}" stroke="{stroke}" stroke-width="2.5"/>',
+        # ================ Bell-mouth intake (izquierda) ================
+        # Forma trapezoidal con esquinas redondeadas — angosto a wide
+        f'<path d="M {intake_x1:.1f},{cy - r_intake_in:.1f} '
+        f'L {intake_x2:.1f},{cy - r_intake_out:.1f} '
+        f'L {intake_x2:.1f},{cy + r_intake_out:.1f} '
+        f'L {intake_x1:.1f},{cy + r_intake_in:.1f} Z" '
+        f'fill="{body_light}" stroke="{body_outline}" stroke-width="1.5" stroke-linejoin="round"/>',
 
-        # Aletas del compresor (vertical lines)
+        # ================ Compressor section ================
+        # Trapecio horizontal, expande r_comp_in a r_comp_out
+        f'<path d="M {comp_x1:.1f},{cy - r_comp_in:.1f} '
+        f'L {comp_x2:.1f},{cy - r_comp_out:.1f} '
+        f'L {comp_x2:.1f},{cy + r_comp_out:.1f} '
+        f'L {comp_x1:.1f},{cy + r_comp_in:.1f} Z" '
+        f'fill="{body_mid}" stroke="{body_outline}" stroke-width="1.5" stroke-linejoin="round"/>',
+        # Bumps de etapas — pequeñas líneas horizontales sutiles (no álabes)
         *[
-            f'<line x1="{fan_x + 15 + i * 20:.1f}" y1="{cy - 28 + i * 1:.1f}" '
-            f'x2="{fan_x + 15 + i * 20:.1f}" y2="{cy + 28 - i * 1:.1f}" '
-            f'stroke="{stroke}" stroke-width="0.8" stroke-opacity="0.5"/>'
-            for i in range(7)
+            f'<line x1="{comp_x1 + 6 + i * 18:.1f}" y1="{cy - (r_comp_in + (r_comp_out - r_comp_in) * (i * 18) / (comp_x2 - comp_x1)):.1f}" '
+            f'x2="{comp_x1 + 6 + i * 18:.1f}" y2="{cy + (r_comp_in + (r_comp_out - r_comp_in) * (i * 18) / (comp_x2 - comp_x1)):.1f}" '
+            f'stroke="{body_outline}" stroke-width="0.5" stroke-opacity="0.4"/>'
+            for i in range(6)
         ],
 
-        # Combustor (cylinder marrón/ámbar)
-        f'<rect x="{comb_start:.1f}" y="{cy - 55:.1f}" width="{comb_end - comb_start:.1f}" '
-        f'height="110" fill="{COLORS["coupling_fill"]}" stroke="{COLORS["coupling_stroke"]}" '
-        f'stroke-width="2.5" rx="4"/>',
-        f'<text x="{(comb_start + comb_end) / 2:.1f}" y="{cy + 70:.1f}" text-anchor="middle" '
-        f'font-size="8" font-weight="600" fill="{COLORS["coupling_stroke"]}">COMB</text>',
+        # ================ CRF banda azul (bearing 1 / NDE) ================
+        f'<rect x="{crf_x - 5:.1f}" y="{cy - r_crf - 4:.1f}" width="10" height="{2 * r_crf + 8:.1f}" '
+        f'fill="{bearing_band}" stroke="{bearing_dark}" stroke-width="1" rx="2"/>',
 
-        # Turbina — trapecio (de grande a chico)
-        f'<polygon points="'
-        f'{comb_end:.1f},{cy - 50:.1f} '
-        f'{turb_end:.1f},{cy - 30:.1f} '
-        f'{turb_end:.1f},{cy + 30:.1f} '
-        f'{comb_end:.1f},{cy + 50:.1f}'
-        f'" fill="{fill}" stroke="{stroke}" stroke-width="2.5"/>',
-        # Aletas de la turbina
+        # ================ Combustor — banda roja gruesa ================
+        f'<rect x="{comb_x1:.1f}" y="{cy - r_comb:.1f}" width="{comb_x2 - comb_x1:.1f}" height="{2 * r_comb:.1f}" '
+        f'fill="{combustor_red}" stroke="{combustor_dark}" stroke-width="1.2" rx="3"/>',
+        # Líneas verticales sutiles para indicar combustor cans
         *[
-            f'<line x1="{comb_end + 10 + i * 20:.1f}" y1="{cy - 48 + i * 2:.1f}" '
-            f'x2="{comb_end + 10 + i * 20:.1f}" y2="{cy + 48 - i * 2:.1f}" '
-            f'stroke="{stroke}" stroke-width="0.8" stroke-opacity="0.5"/>'
-            for i in range(7)
+            f'<line x1="{comb_x1 + 5 + i * 7:.1f}" y1="{cy - r_comb + 4:.1f}" '
+            f'x2="{comb_x1 + 5 + i * 7:.1f}" y2="{cy + r_comb - 4:.1f}" '
+            f'stroke="{combustor_dark}" stroke-width="0.6" stroke-opacity="0.5"/>'
+            for i in range(3)
         ],
+
+        # ================ Power turbine ================
+        # Trapecio convergente
+        f'<path d="M {pt_x1:.1f},{cy - r_pt_in:.1f} '
+        f'L {pt_x2:.1f},{cy - r_pt_out:.1f} '
+        f'L {pt_x2:.1f},{cy + r_pt_out:.1f} '
+        f'L {pt_x1:.1f},{cy + r_pt_in:.1f} Z" '
+        f'fill="{body_mid}" stroke="{body_outline}" stroke-width="1.5" stroke-linejoin="round"/>',
+        # Bumps de etapas (sutiles)
+        *[
+            f'<line x1="{pt_x1 + 6 + i * 16:.1f}" y1="{cy - (r_pt_in - (r_pt_in - r_pt_out) * (i * 16) / (pt_x2 - pt_x1)):.1f}" '
+            f'x2="{pt_x1 + 6 + i * 16:.1f}" y2="{cy + (r_pt_in - (r_pt_in - r_pt_out) * (i * 16) / (pt_x2 - pt_x1)):.1f}" '
+            f'stroke="{body_outline}" stroke-width="0.5" stroke-opacity="0.4"/>'
+            for i in range(5)
+        ],
+
+        # ================ TRF banda azul (bearing 2 / DE) ================
+        f'<rect x="{trf_x - 5:.1f}" y="{cy - r_trf - 4:.1f}" width="10" height="{2 * r_trf + 8:.1f}" '
+        f'fill="{bearing_band}" stroke="{bearing_dark}" stroke-width="1" rx="2"/>',
+
+        # ================ Outlet cone ================
+        # Cono convergente al shaft
+        f'<path d="M {outlet_x1:.1f},{cy - r_outlet_in:.1f} '
+        f'L {outlet_x2:.1f},{cy - r_outlet_out:.1f} '
+        f'L {outlet_x2:.1f},{cy + r_outlet_out:.1f} '
+        f'L {outlet_x1:.1f},{cy + r_outlet_in:.1f} Z" '
+        f'fill="{body_light}" stroke="{body_outline}" stroke-width="1.5" stroke-linejoin="round"/>',
 
         # Eje sale por la derecha
-        shaft_line(turb_end - 4, cy, x_offset + W, cy),
+        shaft_line(outlet_x2, cy, x_offset + W, cy),
 
-        # Bearings: CRF (compressor rear frame, lado combustor del compresor)
-        bearing_circle(comp_end - 14, cy, r=12, label="CRF", color="driver"),
-        # TRF (turbine rear frame, lado salida de la turbina)
-        bearing_circle(turb_end - 14, cy, r=12, label="TRF", color="driver"),
-
-        # Label
+        # Label arriba
         label_top(x_offset + W / 2, y_offset + 24, label, "driver"),
     ]
+
     anchors = {
-        "DE": (turb_end - 14, cy),       # TRF (lado output)
-        "NDE": (comp_end - 14, cy),       # CRF (lado intake)
-        "TRF": (turb_end - 14, cy),
-        "CRF": (comp_end - 14, cy),
+        "DE": (trf_x, cy),     # TRF (lado output / coupling)
+        "NDE": (crf_x, cy),    # CRF (lado intake / libre)
+        "TRF": (trf_x, cy),
+        "CRF": (crf_x, cy),
         "shaft_out": (x_offset + W, cy),
         "viewbox_w": W,
         "viewbox_h": H,
