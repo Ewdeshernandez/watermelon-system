@@ -154,11 +154,14 @@ def gas_turbine_aero(
     trf_x = x_offset + 295     # banda TRF
     outlet_x2 = x_offset + 345
 
-    # Radios verticales en cada estación
+    # Radios verticales en cada estación.
+    # Ciclo 23.21 — combustor mantiene la altura del compresor (r=50) en
+    # vez de sobresalir (era 58). Eso evita el abultamiento visual del
+    # rect rojo arriba y abajo del cuerpo.
     r_intake_in = 16     # bell-mouth angosto
     r_intake_out = 38    # bell-mouth se abre
     r_crf = 50           # compresor max
-    r_comb = 58          # combustor más ancho
+    r_comb = 50          # combustor mismo radio (embebido, no sobresale)
     r_pt_max = 50        # power turbine entry
     r_trf = 36           # power turbine exit
     r_outlet = 14        # outlet converge a shaft
@@ -205,9 +208,22 @@ def gas_turbine_aero(
         f'L {comb_x2 + 10:.1f},{cy + r_pt_max:.1f} Z'
     )
 
+    # Gradient ID único basado en x_offset para evitar colisiones cuando se
+    # rinden múltiples turbinas en una misma página.
+    grad_id = f"turbgrad_{int(x_offset)}_{int(y_offset)}"
+
     parts = [
-        # Cuerpo único — silueta continua de toda la turbina (gris claro)
-        f'<path d="{body_path}" fill="{body_light}" stroke="{body_outline}" '
+        # Defs: gradient lineal (claro arriba → medio abajo) para 3D-feel
+        f'<defs>'
+        f'<linearGradient id="{grad_id}" x1="0%" y1="0%" x2="0%" y2="100%">'
+        f'<stop offset="0%" stop-color="#ffffff"/>'
+        f'<stop offset="40%" stop-color="{body_light}"/>'
+        f'<stop offset="100%" stop-color="{body_mid}"/>'
+        f'</linearGradient>'
+        f'</defs>',
+
+        # Cuerpo único — silueta continua con gradient 3D
+        f'<path d="{body_path}" fill="url(#{grad_id})" stroke="{body_outline}" '
         f'stroke-width="1.5" stroke-linejoin="round"/>',
 
         # Overlay compresor — fill medio para diferenciar la zona
