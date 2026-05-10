@@ -1245,6 +1245,7 @@ def render_asset_header(
     # Asset banner compacto (Ciclo 23.23) — barra oscura de 1 línea con
     # título + KPIs inline + status pill. Reemplaza la card grande de
     # Ciclo 23.16 que ocupaba 1/3 de la pantalla. Diagrama es protagonista.
+    # Ciclo 23.49 — STICKY: la barra se queda visible al scrollear.
     st.markdown(
         textwrap.dedent(
             f"""
@@ -1257,6 +1258,9 @@ def render_asset_header(
                 display: flex; align-items: center; gap: 14px;
                 flex-wrap: wrap;
                 box-shadow: 0 6px 18px rgba(15,23,42,0.18);
+                position: sticky;
+                top: 56px;
+                z-index: 50;
             }}
             .wm-bar-live {{
                 display: inline-flex; align-items: center; gap: 7px;
@@ -2032,6 +2036,60 @@ def main() -> None:
     if not has_map:
         has_map = render_sensor_map_hero(instance_obj, instance_id, latest, sensor_lookup)
 
+    # Inline severity legend (Ciclo 23.49) — debajo del diagrama, hace
+    # el SVG self-documenting. Usuario nuevo entiende los colores sin
+    # tutorial. Render solo si tenemos diagrama vectorial.
+    if has_map:
+        st.markdown(
+            textwrap.dedent("""
+            <style>
+            .wm-legend-row {
+                display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+                padding: 8px 14px; margin: 4px 0 16px 0;
+                font-size: 11px; color: #475569;
+                background: rgba(255,255,255,0.6);
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+                font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
+            }
+            .wm-legend-label {
+                font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+                color: #64748b; font-size: 10px;
+            }
+            .wm-legend-item {
+                display: inline-flex; align-items: center; gap: 5px;
+                font-weight: 600;
+            }
+            .wm-legend-dot {
+                width: 10px; height: 10px; border-radius: 50%;
+                border: 1.5px solid white;
+                box-shadow: 0 0 0 1px rgba(15,23,42,0.10);
+            }
+            .wm-legend-spark {
+                width: 28px; height: 10px;
+                border-radius: 3px;
+                background: linear-gradient(90deg, #86efac 0%, #86efac 70%, #fcd34d 70%, #fcd34d 88%, #fca5a5 88%, #fca5a5 100%);
+                border: 1px solid rgba(15,23,42,0.10);
+            }
+            .wm-legend-stale {
+                width: 14px; height: 14px; border-radius: 50%;
+                background: #94a3b8;
+                filter: grayscale(1);
+                opacity: 0.6;
+            }
+            </style>
+            <div class="wm-legend-row">
+                <span class="wm-legend-label">Leyenda</span>
+                <span class="wm-legend-item"><span class="wm-legend-dot" style="background:#15803d;"></span>Normal</span>
+                <span class="wm-legend-item"><span class="wm-legend-dot" style="background:#b45309;"></span>Alarma</span>
+                <span class="wm-legend-item"><span class="wm-legend-dot" style="background:#dc2626;"></span>Danger</span>
+                <span class="wm-legend-item"><span class="wm-legend-stale"></span>Stale (sin lectura > 60s)</span>
+                <span class="wm-legend-item"><span class="wm-legend-spark"></span>Threshold bar (verde→rojo escala alarm/danger)</span>
+            </div>
+            """).strip(),
+            unsafe_allow_html=True,
+        )
+
     # Sensor selection (Ciclo 23.33) — selectbox discreto debajo del
     # diagrama. Razón técnica para no usar click directo en SVG:
     # Streamlit + browser full-reload pierde session_state → auth falla
@@ -2091,6 +2149,44 @@ def main() -> None:
             instance_obj=instance_obj,
             spark_data=spark_data,
         )
+    elif direct_labels:
+        # Empty state polish (Ciclo 23.49) — sin sensor seleccionado
+        # mostramos un hint sutil con icono + arrow apuntando al dropdown.
+        # Mejor que vacío silencioso; enseña la affordance al usuario nuevo.
+        st.markdown(
+            textwrap.dedent("""
+            <style>
+            .wm-zoom-hint {
+                display: flex; align-items: center; gap: 12px;
+                margin: 14px 0 18px 0; padding: 14px 18px;
+                background: linear-gradient(135deg, #f0f7ff 0%, #e6f0fb 100%);
+                border: 1px dashed #c7d9eb;
+                border-radius: 12px;
+                color: #475569;
+                font-size: 13px;
+                font-style: italic;
+            }
+            .wm-zoom-hint-icon {
+                font-size: 22px;
+                opacity: 0.6;
+                animation: wm-zoom-bounce 2s ease-in-out infinite;
+            }
+            @keyframes wm-zoom-bounce {
+                0%, 100% { transform: translateY(0); }
+                50%      { transform: translateY(-3px); }
+            }
+            .wm-zoom-hint b { color: #1e40af; font-style: normal; font-weight: 700; }
+            </style>
+            <div class="wm-zoom-hint">
+                <span class="wm-zoom-hint-icon">⤴</span>
+                <span>
+                    <b>Análisis detallado:</b> seleccioná un sensor en el dropdown de arriba
+                    para ver tendencia, vectores 1X/2X, gap voltage y más.
+                </span>
+            </div>
+            """).strip(),
+            unsafe_allow_html=True,
+        )
     if not has_map and instance_obj is not None and instance_obj.schematic_png:
         # Tiene schematic pero sin posiciones — render sin overlay
         try:
@@ -2136,10 +2232,46 @@ def main() -> None:
         if st.button("🔄 Refrescar ahora", key="live_refresh_v3", use_container_width=True):
             st.rerun()
     with c2:
-        st.caption(
-            f"📅 Sync local: {datetime.now().strftime('%H:%M:%S')} · "
-            "Engine: Watermelon System · ISO 20816-3 / API 670"
-        )
+        # Ciclo 23.49 — countdown JS al footer cuando auto-refresh está ON.
+        # El meta refresh hace el rerun automático cada 10s; el span con
+        # data-attr le dice a JS de cuántos segundos cuentar regresivo.
+        if auto_refresh:
+            st.markdown(
+                textwrap.dedent(f"""
+                <div style="font-size:12px;color:#475569;font-family:ui-monospace,Menlo,monospace;display:flex;gap:14px;align-items:center;">
+                    <span>📅 Sync local: <b>{datetime.now().strftime('%H:%M:%S')}</b></span>
+                    <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:#dcfce7;color:#15803d;font-weight:700;font-size:11px;">
+                        <span style="width:6px;height:6px;border-radius:50%;background:#15803d;animation:wm-cd-pulse 1.4s ease-in-out infinite;"></span>
+                        AUTO-REFRESH ON · próximo refresh en <span id="wm-cd">10</span>s
+                    </span>
+                    <span style="color:#94a3b8;">Engine: Watermelon System · ISO 20816-3 / API 670</span>
+                </div>
+                <style>
+                @keyframes wm-cd-pulse {{
+                    0%, 100% {{ opacity: 1; }}
+                    50% {{ opacity: 0.4; }}
+                }}
+                </style>
+                <script>
+                (function() {{
+                    let n = 10;
+                    const el = document.getElementById('wm-cd');
+                    if (!el) return;
+                    const interval = setInterval(() => {{
+                        n -= 1;
+                        if (n <= 0) {{ clearInterval(interval); return; }}
+                        el.textContent = n;
+                    }}, 1000);
+                }})();
+                </script>
+                """).strip(),
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption(
+                f"📅 Sync local: {datetime.now().strftime('%H:%M:%S')} · "
+                "Engine: Watermelon System · ISO 20816-3 / API 670"
+            )
 
     if auto_refresh:
         st.markdown('<meta http-equiv="refresh" content="10">', unsafe_allow_html=True)
