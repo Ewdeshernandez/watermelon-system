@@ -14,49 +14,98 @@ DEFAULT_ITERATIONS = 260000
 DEFAULT_SESSION_TIMEOUT_MINUTES = 480
 
 
-NAV_ITEMS = [
-    {"label": "Home", "page": "pages/_landing.py"},
-    # Ciclo 14a — Machinery Library queda como segundo del menú, justo
-    # después de Home: el flujo correcto es seleccionar primero la máquina
-    # activa y después cargar sus CSVs en Load Data.
-    {"label": "Machinery Library", "page": "pages/00_Machinery_Library.py"},
-    {"label": "Load Data", "page": "pages/01_Load_Data.py"},
-    {"label": "Tabular List", "page": "pages/01__Tabular_List.py"},
-    # Ciclo 23.1 — Live Monitoring (Tier 0 A): valores en tiempo real
-    # desde wm-collector → Modbus 3500/92 → Supabase live_readings.
-    # Diferenciador estratégico vs System1/AMS Suite (vectores 1X/2X gratis).
-    {"label": "🔴 Live Monitoring", "page": "pages/02_Live_Monitoring.py"},
-    # Ciclo 15.1 — Machine Map (heatmap de severidad por sensor)
-    {"label": "Machine Map", "page": "pages/01b_Machine_Map.py"},
-    {"label": "Time Waveforms", "page": "pages/02_Time_Waveforms.py"},
-    {"label": "Spectrum", "page": "pages/03_Spectrum.py"},
-    {"label": "Trends", "page": "pages/04_Trends.py"},
-    {"label": "Orbit Analysis", "page": "pages/05_Orbit_Analysis.py"},
-    {"label": "Polar Plot", "page": "pages/06_Polar_Plot.py"},
-    {"label": "Bode Plot", "page": "pages/07_Bode_Plot.py"},
-    {"label": "Shaft Centerline", "page": "pages/09_Shaft_Centerline.py"},
-    # Ciclo 17.33 — eliminados Phase Analysis y Diagnostics: módulos
-    # legacy sin AI integrado, sin uso real. Diagnostics se reemplaza
-    # por AI Assistant (Q&A sobre archivo) + el flujo Machinery Library
-    # → severidad para inspección de activos críticos.
-    {"label": "Reports", "page": "pages/16_Reports.py"},
-    # Ciclo 18.2 — Importers & Plantillas LATAM hub.
-    # Página NUEVA, no toca ninguna existente. Solo admin + specialist
-    # (importar data sensible es operación restringida).
-    {"label": "Importers & Plantillas", "page": "pages/17_Importers.py"},
-    # Ciclo 21 — Wizard guiado para crear activos (admin + specialist)
-    {"label": "🧙 Crear activo (wizard)", "page": "pages/_machinery_wizard.py"},
-    # Ciclo 20B — Admin de clientes/roles (solo admin)
-    {"label": "Admin · Clientes", "page": "pages/_admin_clients.py"},
-    # Ciclo 17.27 — AI Assistant: Q&A en lenguaje natural sobre el
-    # archivo histórico de reportes. Solo admin + specialist por
-    # ahora; client se evalúa en una iteración futura.
-    {"label": "AI Assistant", "page": "pages/_ai_assistant.py"},
-    # Ciclo 17.31 — Briefing Mensual Ejecutivo. Genera y envía por
-    # email al VP del cliente el PDF de 1 página con el estado
-    # consolidado del portafolio. Solo admin + specialist.
-    {"label": "Briefing Mensual", "page": "pages/_monthly_briefing.py"},
+# =============================================================
+# Ciclo 23.40 — Navegación agrupada por dominio del análisis
+# vibracional. Reemplaza la lista plana NAV_ITEMS por NAV_GROUPS
+# (lista de secciones), espejando la organización de System1 / AMS
+# y reduciendo carga cognitiva en sidebars con 15+ páginas.
+#
+# Iconos: Unicode geométricos (◉ ▣ ⊕ etc.) — peso cero, look "engineering
+# CAD instrument" en vez de emojis rainbow consumer-app.
+# =============================================================
+
+NAV_GROUPS = [
+    {
+        "section": "Overview",
+        "items": [
+            {"label": "◉  Home", "page": "pages/_landing.py"},
+            # Machinery Library segundo: flujo correcto es seleccionar
+            # primero la máquina y después cargar CSVs en Load Data.
+            {"label": "▣  Machinery Library", "page": "pages/00_Machinery_Library.py"},
+            {"label": "▤  Tabular List", "page": "pages/01__Tabular_List.py"},
+        ],
+    },
+    {
+        "section": "Ingest",
+        "items": [
+            {"label": "⤓  Load Data", "page": "pages/01_Load_Data.py"},
+            # Ciclo 18.2 — Importers & Plantillas LATAM hub
+            {"label": "⇪  Importers & Plantillas", "page": "pages/17_Importers.py"},
+            # Ciclo 21 — Wizard guiado para crear activos
+            {"label": "✦  Crear activo (wizard)", "page": "pages/_machinery_wizard.py"},
+        ],
+    },
+    {
+        "section": "Live Operations",
+        "items": [
+            # Ciclo 23.1 — Live Monitoring (Tier 0 A): vectores 1X/2X live.
+            # Diferenciador vs System1/AMS Suite. 🔴 se queda como signature
+            # signaling "live data here".
+            {"label": "🔴  Live Monitoring", "page": "pages/02_Live_Monitoring.py"},
+            # Ciclo 15.1 — Machine Map (heatmap de severidad por sensor)
+            {"label": "⌖  Machine Map", "page": "pages/01b_Machine_Map.py"},
+        ],
+    },
+    {
+        "section": "Time Domain",
+        "items": [
+            {"label": "∿  Time Waveforms", "page": "pages/02_Time_Waveforms.py"},
+        ],
+    },
+    {
+        "section": "Frequency Domain",
+        "items": [
+            {"label": "▥  Spectrum", "page": "pages/03_Spectrum.py"},
+        ],
+    },
+    {
+        "section": "Rotordynamics",
+        "items": [
+            {"label": "⊕  Orbit Analysis", "page": "pages/05_Orbit_Analysis.py"},
+            {"label": "◔  Polar Plot", "page": "pages/06_Polar_Plot.py"},
+            {"label": "⌭  Bode Plot", "page": "pages/07_Bode_Plot.py"},
+            {"label": "─  Shaft Centerline", "page": "pages/09_Shaft_Centerline.py"},
+        ],
+    },
+    {
+        "section": "Trends & AI",
+        "items": [
+            {"label": "📈  Trends", "page": "pages/04_Trends.py"},
+            # Ciclo 17.27 — AI Assistant Q&A sobre archivo histórico
+            {"label": "✧  AI Assistant", "page": "pages/_ai_assistant.py"},
+            # Ciclo 17.31 — Briefing Mensual Ejecutivo PDF al VP cliente
+            {"label": "✉  Briefing Mensual", "page": "pages/_monthly_briefing.py"},
+        ],
+    },
+    {
+        "section": "Reports",
+        "items": [
+            # Ciclo 17.33 — eliminados Phase Analysis y Diagnostics legacy
+            {"label": "⎙  Reports", "page": "pages/16_Reports.py"},
+        ],
+    },
+    {
+        "section": "Administration",
+        "items": [
+            # Ciclo 20B — Admin de clientes/roles (solo admin)
+            {"label": "◇  Admin · Clientes", "page": "pages/_admin_clients.py"},
+        ],
+    },
 ]
+
+# Backward-compat: lista plana derivada de los grupos. Cualquier código
+# legacy que importe NAV_ITEMS sigue funcionando.
+NAV_ITEMS = [item for g in NAV_GROUPS for item in g["items"]]
 
 
 # =============================================================
@@ -625,17 +674,33 @@ def render_user_menu() -> None:
         # título que lo diga. El divider de arriba ya da separación visual.
         st.markdown('<div class="wm-nav-wrap"></div>', unsafe_allow_html=True)
 
-        # Ciclo 17.16 — Filtrar nav según role.
-        # client: vista limitada (sin Load Data, Machinery Library,
-        #   Diagnostics, Machine Map). Reports lo ven pero la página
-        #   tiene su propio modo "solo lectura" para client.
-        # specialist/admin: menú completo + botón Admin Panel para admin
+        # Ciclo 23.40 — Render nav AGRUPADO por dominio.
+        # Iteración: por cada grupo, primero filtramos qué items son
+        # visibles para el role actual. Si el grupo queda con 0 items
+        # visibles (caso típico: client no ve "Ingest" ni "Administration"),
+        # NO emitimos el header de la sección — evita "Section sin items"
+        # que se ve mal.
+        # client: vista limitada; specialist/admin: menú completo.
         _user_role = (user.get("role", "") or "").strip().lower()
-        for item in NAV_ITEMS:
-            if not is_page_allowed_for_role(item["page"], _user_role):
-                continue  # ocultar del sidebar
-            if st.button(item["label"], use_container_width=True, key=f"nav_{item['page']}"):
-                st.switch_page(item["page"])
+
+        for group in NAV_GROUPS:
+            visible_items = [
+                it for it in group["items"]
+                if is_page_allowed_for_role(it["page"], _user_role)
+            ]
+            if not visible_items:
+                continue  # toda la sección oculta para este role → skip header
+            st.markdown(
+                f'<div class="wm-side-section">{group["section"]}</div>',
+                unsafe_allow_html=True,
+            )
+            for item in visible_items:
+                if st.button(
+                    item["label"],
+                    use_container_width=True,
+                    key=f"nav_{item['page']}",
+                ):
+                    st.switch_page(item["page"])
 
         # Ciclo 17.14 — Botón "Admin Panel" SOLO para admin único
         if user.get("is_admin"):
