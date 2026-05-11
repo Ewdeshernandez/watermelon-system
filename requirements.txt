@@ -29,8 +29,9 @@ Pillow>=10.0.0
 # no está configurado, el botón "🧠 Diagnóstico AI" aparece deshabilitado
 # pero el resto del sistema funciona normal.
 anthropic>=0.39.0
-# Ciclo 23.62: cairosvg removido (system libs en Streamlit Cloud causaban
-# 'Error installing requirements'). PNG export queda deshabilitado hasta
-# encontrar una alternativa zero-system-deps (resvg-py, o vía chromium
-# que ya está en packages.txt). SVG vectorial sigue funcionando.
+# Ciclo 23.63: PNG export del diagrama Live Monitoring via resvg-py.
+# Es un binding Python sobre resvg (Rust). Se distribuye como wheels
+# precompilados → NO requiere libcairo, libpango ni ningún apt package.
+# Reactivamos el botón PNG 4K que había quedado gris en v3.31.62.
+resvg-py>=0.1.6
 # rebuild trigger

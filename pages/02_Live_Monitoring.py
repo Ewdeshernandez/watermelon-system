@@ -725,17 +725,32 @@ def render_sensor_map_library(
 
 @st.cache_data(show_spinner=False, ttl=300, max_entries=8)
 def _svg_to_png_hd(svg_str: str, width: int = 4000) -> Optional[bytes]:
-    """Convierte SVG → PNG de alta resolución usando cairosvg.
+    """Convierte SVG → PNG de alta resolución.
 
-    Devuelve None si cairosvg no está disponible (ej. system libs faltantes
-    en el entorno). Cacheado 5 min para que el botón download no re-renderee
-    cada click (el SVG es idéntico hasta que cambian los valores live).
+    Intenta resvg-py primero (Rust, zero apt deps, wheels precompilados).
+    Fallback a cairosvg si está disponible. Devuelve None si nada funciona.
+    Cacheado 5 min para que el botón download no re-renderee cada click
+    (el SVG es idéntico hasta que cambian los valores live).
     """
+    # Path A: resvg-py (Ciclo 23.63 — preferido por zero system deps)
+    try:
+        import resvg_py
+        # resvg_py.svg_to_bytes acepta svg_string + resolución del output
+        png_list = resvg_py.svg_to_bytes(
+            svg_string=svg_str,
+            resolution=width,
+        )
+        # La API devuelve list[int] (bytes serialized) o bytes según versión
+        if isinstance(png_list, (bytes, bytearray)):
+            return bytes(png_list)
+        if isinstance(png_list, list):
+            return bytes(png_list)
+    except Exception:
+        pass
+
+    # Path B: cairosvg fallback (si algún día se reinstalan system libs)
     try:
         import cairosvg
-    except Exception:
-        return None
-    try:
         return cairosvg.svg2png(
             bytestring=svg_str.encode("utf-8"),
             output_width=width,
