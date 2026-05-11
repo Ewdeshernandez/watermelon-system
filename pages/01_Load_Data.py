@@ -925,6 +925,157 @@ if invalid_files:
 
 
 # =====================================================================
+# Ciclo 23.82 — Snapshot guardado a Live Monitoring (un solo click)
+# =====================================================================
+# Después de parsear los CSVs, ofrecer al especialista guardar
+# automáticamente los 4 tipos de análisis (Waveform, Spectrum, Orbit,
+# Tabular) en el histórico de la instancia. El cliente los ve después
+# en Live Monitoring sin hacer nada.
+#
+# Defaults conservadores: FFT con Hanning, sin avg; orbit auto-detecta
+# pares X/Y por sensor label; 1X/2X vectors solo se computan si el
+# especialista provee la velocidad rotacional.
+
+if valid_files and _active_instance_id:
+    from core.snapshot_batch_builder import build_all_snapshots_from_parsed_files
+
+    SAVE_FUNCTIONS_MAP = {
+        "waveform": ("core.waveform_history", "save_waveform_snapshot"),
+        "spectrum": ("core.spectrum_history", "save_spectrum_snapshot"),
+        "orbit":    ("core.orbit_history",    "save_orbit_snapshot"),
+        "tabular":  ("core.tabular_history",  "save_tabular_snapshot"),
+    }
+
+    with st.expander(
+        f"💾 Guardar como snapshot para Live Monitoring ({len(valid_files)} CSVs)",
+        expanded=False,
+    ):
+        st.markdown(
+            f"<div style='font-size:12px;color:#475569;margin-bottom:8px;'>"
+            f"Guarda automáticamente los 4 tipos de análisis al histórico del activo "
+            f"<code>{_active_instance_id}</code>. El cliente los ve después en Live "
+            f"Monitoring sin que tenga que cargar nada. Rotación LRU: máx 10 snapshots "
+            f"por tipo, el más viejo se reemplaza al insertar el #11.</div>",
+            unsafe_allow_html=True,
+        )
+
+        ck_cols = st.columns(4)
+        with ck_cols[0]:
+            save_wf = st.checkbox("📈 Waveform", value=True, key="snap_save_wf")
+        with ck_cols[1]:
+            save_sp = st.checkbox("🔍 Spectrum", value=True, key="snap_save_sp")
+        with ck_cols[2]:
+            save_or = st.checkbox("🌀 Orbit", value=True, key="snap_save_or",
+                                  help="Solo si se detectan pares X/Y por filename.")
+        with ck_cols[3]:
+            save_tb = st.checkbox("📋 Tabular", value=True, key="snap_save_tb")
+
+        snap_label = st.text_input(
+            "Label de la corrida (opcional)",
+            placeholder="ej. Inspección mañana, Post-mantenimiento, Baseline...",
+            key="snap_corrida_label",
+        )
+        snap_notes = st.text_area(
+            "Notas (opcional)",
+            placeholder="Observaciones del especialista sobre esta corrida",
+            key="snap_corrida_notes",
+            height=72,
+        )
+        snap_rpm = st.number_input(
+            "Velocidad rotacional (RPM) — opcional, requerido para vectores 1X/2X",
+            min_value=0.0,
+            max_value=30000.0,
+            value=0.0,
+            step=10.0,
+            key="snap_corrida_rpm",
+            help=(
+                "Si la conoces, mejora la calidad de Spectrum/Orbit/Tabular "
+                "(computa amplitudes a 1X y 2X de la frecuencia fundamental)."
+            ),
+        )
+
+        if st.button(
+            "✓ Guardar todo y continuar al procesamiento",
+            type="primary",
+            use_container_width=True,
+            key="snap_save_confirm",
+        ):
+            rpm = float(snap_rpm) if snap_rpm > 0 else None
+            n_saved = 0
+            n_failed = 0
+            errors: list = []
+
+            with st.spinner("Construyendo payloads de los 4 tipos..."):
+                try:
+                    payloads = build_all_snapshots_from_parsed_files(
+                        valid_files, rotational_speed_rpm=rpm,
+                    )
+                except Exception as e:
+                    st.error(f"Error armando payloads: {e}")
+                    payloads = None
+
+            if payloads is not None:
+                import importlib
+                save_map = {
+                    "waveform": save_wf, "spectrum": save_sp,
+                    "orbit": save_or, "tabular": save_tb,
+                }
+                for stype, enabled in save_map.items():
+                    if not enabled:
+                        continue
+                    payload = payloads.get(stype, {})
+                    # Skip si payload está vacío (ej. orbit sin pares X/Y)
+                    items = (
+                        payload.get("sensors_data")
+                        or payload.get("bearings_data")
+                        or payload.get("channels_data")
+                        or []
+                    )
+                    if not items:
+                        errors.append(f"{stype}: sin datos para guardar")
+                        continue
+                    try:
+                        module_path, fn_name = SAVE_FUNCTIONS_MAP[stype]
+                        mod = importlib.import_module(module_path)
+                        save_fn = getattr(mod, fn_name)
+                        sid = save_fn(
+                            instance_id=_active_instance_id,
+                            **payload,
+                            corrida_label=snap_label or "",
+                            notes=snap_notes or "",
+                            operating_speed_rpm=rpm,
+                        )
+                        if sid:
+                            n_saved += 1
+                            errors.append(f"✓ {stype}: {sid}")
+                        else:
+                            n_failed += 1
+                            errors.append(f"✗ {stype}: save devolvió None")
+                    except Exception as e:
+                        n_failed += 1
+                        errors.append(f"✗ {stype}: {e}")
+
+                if n_saved > 0:
+                    st.success(
+                        f"✓ {n_saved} snapshot(s) guardado(s) para "
+                        f"`{_active_instance_id}` — ya visibles en Live Monitoring."
+                    )
+                if n_failed > 0:
+                    st.warning(
+                        f"⚠ {n_failed} tipo(s) no se guardaron. Ver detalles abajo."
+                    )
+                with st.expander("Detalles del guardado"):
+                    for line in errors:
+                        st.text(line)
+elif valid_files and not _active_instance_id:
+    st.info(
+        "💡 **Tip**: si seleccionás un activo en Machinery Library, podrás guardar "
+        "estos análisis automáticamente al histórico para que aparezcan en Live "
+        "Monitoring."
+    )
+
+
+# =====================================================================
 # Ciclo 14b — Machine Diagnostic Context AUTO-DERIVADO de la instancia
 # =====================================================================
 # El contexto de máquina (asset_type, machine_configuration, primary,
