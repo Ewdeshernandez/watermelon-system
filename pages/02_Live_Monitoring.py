@@ -713,7 +713,84 @@ def render_sensor_map_library(
     # auth falla → redirect a login). Drill-down se hace via selectbox
     # discreto debajo del diagrama (usa st.rerun interno, mantiene auth).
     st.markdown(svg, unsafe_allow_html=True)
+
+    # Ciclo 23.61 — Exportador HD. Botones de descarga debajo del diagrama
+    # para que el operador pueda mandar el snapshot por WhatsApp, email, o
+    # ponerlo en un reporte/PPT. SVG raw (vectorial, infinita resolución) +
+    # PNG 4K (cairosvg si está disponible). El timestamp queda en el nombre
+    # del archivo para auditoría.
+    _render_export_bar(svg, getattr(instance_obj, "instance_id", "asset"))
     return True
+
+
+@st.cache_data(show_spinner=False, ttl=300, max_entries=8)
+def _svg_to_png_hd(svg_str: str, width: int = 4000) -> Optional[bytes]:
+    """Convierte SVG → PNG de alta resolución usando cairosvg.
+
+    Devuelve None si cairosvg no está disponible (ej. system libs faltantes
+    en el entorno). Cacheado 5 min para que el botón download no re-renderee
+    cada click (el SVG es idéntico hasta que cambian los valores live).
+    """
+    try:
+        import cairosvg
+    except Exception:
+        return None
+    try:
+        return cairosvg.svg2png(
+            bytestring=svg_str.encode("utf-8"),
+            output_width=width,
+        )
+    except Exception:
+        return None
+
+
+def _render_export_bar(svg: str, instance_id: str) -> None:
+    """Barra de exportación debajo del SVG — SVG raw + PNG 4K."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M")
+    safe_id = (instance_id or "asset").replace("/", "_").replace(" ", "_")
+
+    exp_cols = st.columns([2, 2, 1, 5])
+    with exp_cols[0]:
+        st.download_button(
+            label="📐 SVG vectorial",
+            data=svg.encode("utf-8"),
+            file_name=f"{safe_id}_diagram_{ts}.svg",
+            mime="image/svg+xml",
+            use_container_width=True,
+            help=(
+                "Descarga el diagrama como SVG. Vectorial (escala infinita), "
+                "ideal para reportes técnicos y edición en Illustrator/Inkscape."
+            ),
+            key=f"export_svg_{safe_id}",
+        )
+    with exp_cols[1]:
+        png_bytes = _svg_to_png_hd(svg, width=4000)
+        if png_bytes:
+            st.download_button(
+                label="🖼 PNG 4K",
+                data=png_bytes,
+                file_name=f"{safe_id}_diagram_{ts}.png",
+                mime="image/png",
+                use_container_width=True,
+                help=(
+                    "Descarga PNG de 4000 px de ancho. Ideal para WhatsApp, "
+                    "email, PowerPoint, Slack."
+                ),
+                key=f"export_png_{safe_id}",
+            )
+        else:
+            st.button(
+                "🖼 PNG 4K (no disponible)",
+                disabled=True,
+                use_container_width=True,
+                help=(
+                    "cairosvg no está instalado. Reinstala dependencias del "
+                    "servidor (requirements.txt + packages.txt)."
+                ),
+                key=f"export_png_disabled_{safe_id}",
+            )
+    with exp_cols[2]:
+        st.caption(f"📅 {ts}")
 
 
 # ============================================================
