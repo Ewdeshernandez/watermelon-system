@@ -113,9 +113,9 @@ def _format_time_ago(ts_str: str) -> str:
 # =============================================================
 
 def _inject_css_once():
-    if st.session_state.get("_wm_recent_css_injected"):
+    if st.session_state.get("_wm_recent_css_injected_v2"):
         return
-    st.session_state["_wm_recent_css_injected"] = True
+    st.session_state["_wm_recent_css_injected_v2"] = True
     st.markdown(
         """
         <style>
@@ -127,16 +127,14 @@ def _inject_css_once():
             font-size: 16px; font-weight: 800; color: #0f172a;
             letter-spacing: -0.01em;
         }
-        .wm-recent-sub {
-            font-size: 11px; color: #64748b;
-            font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
-        }
+        /* Ciclo 23.90 — Cards minimalistas con visual SVG */
         .wm-recent-card {
             background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
             border: 1.5px solid #e2e8f0;
             border-radius: 12px;
-            padding: 14px 16px;
-            min-height: 130px;
+            padding: 14px;
+            min-height: 160px;
+            display: flex; flex-direction: column;
             transition: all 0.15s ease;
         }
         .wm-recent-card:hover {
@@ -149,31 +147,32 @@ def _inject_css_once():
             border-style: dashed;
             opacity: 0.6;
         }
-        .wm-recent-card-head {
-            display: flex; align-items: center; gap: 8px;
-            margin-bottom: 6px;
+        .wm-recent-row {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 8px;
         }
-        .wm-recent-card-icon { font-size: 18px; }
-        .wm-recent-card-title {
+        .wm-recent-label {
             font-size: 13px; font-weight: 800; color: #0f172a;
+            display: flex; align-items: center; gap: 6px;
         }
-        .wm-recent-card-ago {
-            margin-left: auto;
+        .wm-recent-ago {
             font-size: 11px; color: #64748b;
             font-family: ui-monospace, SF Mono, monospace;
         }
-        .wm-recent-card-label {
-            font-size: 12px; color: #334155;
-            margin-bottom: 6px;
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        .wm-recent-visual {
+            flex: 1;
+            display: flex; align-items: center; justify-content: center;
+            margin: 4px 0;
         }
-        .wm-recent-card-stats {
+        .wm-recent-meta {
             font-size: 11px; color: #64748b;
-            font-variant-numeric: tabular-nums;
+            text-align: center;
+            margin-bottom: 4px;
         }
         .wm-recent-empty-msg {
             font-size: 11px; color: #94a3b8;
-            font-style: italic;
+            font-style: italic; text-align: center;
+            padding: 20px 8px;
         }
         .wm-recent-sev-Normal  { color: #15803d; font-weight: 700; }
         .wm-recent-sev-Alarma  { color: #b45309; font-weight: 700; }
@@ -182,6 +181,47 @@ def _inject_css_once():
         """,
         unsafe_allow_html=True,
     )
+
+
+# Mini-SVGs por tipo de análisis — visual rápido del contenido
+_TYPE_SVG = {
+    "waveform": (
+        '<svg viewBox="0 0 80 32" width="80" height="32">'
+        '<path d="M0 16 Q5 4, 10 16 T20 16 T30 16 T40 16 T50 16 T60 16 T70 16 T80 16" '
+        'fill="none" stroke="#2563eb" stroke-width="1.5"/>'
+        '</svg>'
+    ),
+    "spectrum": (
+        '<svg viewBox="0 0 80 32" width="80" height="32">'
+        '<line x1="5"  y1="32" x2="5"  y2="20" stroke="#2563eb" stroke-width="2"/>'
+        '<line x1="12" y1="32" x2="12" y2="8"  stroke="#2563eb" stroke-width="2"/>'
+        '<line x1="19" y1="32" x2="19" y2="22" stroke="#2563eb" stroke-width="2"/>'
+        '<line x1="26" y1="32" x2="26" y2="14" stroke="#2563eb" stroke-width="2"/>'
+        '<line x1="33" y1="32" x2="33" y2="24" stroke="#2563eb" stroke-width="2"/>'
+        '<line x1="40" y1="32" x2="40" y2="12" stroke="#2563eb" stroke-width="2"/>'
+        '<line x1="47" y1="32" x2="47" y2="26" stroke="#2563eb" stroke-width="2"/>'
+        '<line x1="54" y1="32" x2="54" y2="18" stroke="#2563eb" stroke-width="2"/>'
+        '<line x1="61" y1="32" x2="61" y2="28" stroke="#2563eb" stroke-width="2"/>'
+        '<line x1="68" y1="32" x2="68" y2="22" stroke="#2563eb" stroke-width="2"/>'
+        '<line x1="75" y1="32" x2="75" y2="26" stroke="#2563eb" stroke-width="2"/>'
+        '</svg>'
+    ),
+    "orbit": (
+        '<svg viewBox="0 0 80 32" width="60" height="32">'
+        '<ellipse cx="40" cy="16" rx="22" ry="12" fill="none" '
+        'stroke="#2563eb" stroke-width="1.5"/>'
+        '<circle cx="40" cy="16" r="2" fill="#2563eb"/>'
+        '</svg>'
+    ),
+    "tabular": (
+        '<svg viewBox="0 0 80 32" width="80" height="32">'
+        '<rect x="2"  y="6"  width="76" height="5" rx="1" fill="#cbd5e1"/>'
+        '<rect x="2"  y="14" width="76" height="3" rx="1" fill="#e2e8f0"/>'
+        '<rect x="2"  y="20" width="76" height="3" rx="1" fill="#e2e8f0"/>'
+        '<rect x="2"  y="26" width="76" height="3" rx="1" fill="#e2e8f0"/>'
+        '</svg>'
+    ),
+}
 
 
 # =============================================================
@@ -369,80 +409,71 @@ def render_recent_analyses_section(instance_id: str) -> None:
 
 
 def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance_id: str) -> None:
-    """Renderiza una card individual + botón Ver detalle."""
+    """Card minimalista — Ciclo 23.90:
+       solo icon + label + ago + mini-SVG + count compact + botón abrir."""
     if meta is None:
         st.markdown(
             f"<div class='wm-recent-card empty'>"
-            f"<div class='wm-recent-card-head'>"
-            f"<span class='wm-recent-card-icon'>{atype['icon']}</span>"
-            f"<span class='wm-recent-card-title'>{atype['label']}</span>"
+            f"<div class='wm-recent-row'>"
+            f"<span class='wm-recent-label'>{atype['icon']} {atype['label']}</span>"
             f"</div>"
-            f"<div class='wm-recent-empty-msg'>Sin snapshots todavía. "
-            f"Subí CSVs en Load Data y elegí 'Guardar para Live Monitoring'.</div>"
+            f"<div class='wm-recent-empty-msg'>Sin snapshots todavía</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
         return
 
     ago = _format_time_ago(meta.get("timestamp", ""))
-    label = meta.get("corrida_label", "") or "(sin label)"
 
-    # Stats compact por tipo
+    # Count compact por tipo
     if atype["key"] == "tabular":
         worst = meta.get("worst_severity", "")
         sev_class = f"wm-recent-sev-{worst}" if worst in ("Normal", "Alarma", "Danger") else ""
-        stats = (
+        count_html = (
             f"<span class='{sev_class}'>{worst or '—'}</span> · "
-            f"{meta.get('n_channels', 0)} canales · "
-            f"{meta.get('n_danger', 0)}D / {meta.get('n_alarm', 0)}A / "
-            f"{meta.get('n_normal', 0)}N"
+            f"{meta.get('n_channels', 0)} canales"
         )
     elif atype["key"] == "orbit":
-        stats = (
-            f"{meta.get('n_bearings', 0)} cojinete(s)"
-        )
-        labels = meta.get("bearing_labels", [])
-        if labels:
-            stats += f" · {', '.join(labels[:3])}"
+        count_html = f"{meta.get('n_bearings', 0)} cojinete(s)"
     else:
-        stats = f"{meta.get('n_sensors', 0)} sensor(es)"
-        labels = meta.get("sensor_labels", [])
-        if labels:
-            stats += f" · {', '.join(labels[:4])}"
-        if len(labels) > 4:
-            stats += "…"
+        count_html = f"{meta.get('n_sensors', 0)} sensores"
+
+    svg = _TYPE_SVG.get(atype["key"], "")
 
     st.markdown(
         f"<div class='wm-recent-card'>"
-        f"<div class='wm-recent-card-head'>"
-        f"<span class='wm-recent-card-icon'>{atype['icon']}</span>"
-        f"<span class='wm-recent-card-title'>{atype['label']}</span>"
-        f"<span class='wm-recent-card-ago'>{ago}</span>"
+        f"<div class='wm-recent-row'>"
+        f"<span class='wm-recent-label'>{atype['icon']} {atype['label']}</span>"
+        f"<span class='wm-recent-ago'>{ago}</span>"
         f"</div>"
-        f"<div class='wm-recent-card-label'>{label}</div>"
-        f"<div class='wm-recent-card-stats'>{stats}</div>"
+        f"<div class='wm-recent-visual'>{svg}</div>"
+        f"<div class='wm-recent-meta'>{count_html}</div>"
         f"</div>",
         unsafe_allow_html=True,
     )
 
-    # Ciclo 23.89 — Waveform redirige al módulo dedicado.
-    # Bug previo: st.link_button abre nueva tab → pierde session → redirige
-    # a login → home. Fix: usar markdown anchor con target=_self (misma tab,
-    # mantiene session) y SIN event handlers JS (Streamlit los sanitiza).
+    # Ciclo 23.90 — Waveform abre módulo dedicado vía st.button + st.switch_page.
+    # `<a href>` con session auth no funciona en Streamlit Cloud (siempre va a
+    # login). switch_page mantiene la sesión.
     if atype["key"] == "waveform":
         snap_id = meta.get("snapshot_id", "")
-        link_url = f"/Time_Waveforms?snapshot={snap_id}&instance={instance_id}"
-        st.markdown(
-            f"<a href='{link_url}' target='_self' "
-            f"style='display:block;text-align:center;width:100%;"
-            f"padding:9px 12px;margin-top:6px;background:#2563eb;"
-            f"color:white;border-radius:8px;text-decoration:none;"
-            f"font-weight:600;font-size:13px;"
-            f"font-family:-apple-system,BlinkMacSystemFont,sans-serif;"
-            f"box-shadow:0 1px 2px rgba(0,0,0,0.06);'>"
-            f"📊 Abrir en Time Waveforms</a>",
-            unsafe_allow_html=True,
-        )
+        if st.button(
+            f"📊 Abrir",
+            key=f"wm_open_{atype['key']}_{snap_id}",
+            use_container_width=True,
+            type="primary",
+        ):
+            # Pre-set en session_state — Time Waveforms lo lee al cargar
+            st.session_state["_pending_snapshot_load"] = {
+                "snapshot_id": snap_id,
+                "instance_id": instance_id,
+                "snapshot_type": "waveform",
+            }
+            try:
+                st.switch_page("pages/02_Time_Waveforms.py")
+            except Exception:
+                # Fallback si switch_page falla (Streamlit muy viejo)
+                st.error("No se pudo navegar a Time Waveforms. Refrescá la página.")
     else:
         # Otros tipos: preview inline (próxima version los migra a redirect)
         if st.button(

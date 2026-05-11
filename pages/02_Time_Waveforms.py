@@ -46,26 +46,37 @@ st.set_page_config(page_title="Watermelon System | Waveform", layout="wide")
 require_login()
 render_user_menu()
 
-# Ciclo 23.87 — Hidratación desde snapshot histórico vía URL params.
-# Live Monitoring → card "Forma de onda" → "Abrir en Time Waveforms"
-# llega aquí con `?snapshot=waveform_20260511_222442&instance=tes1`.
-# Cargamos el snapshot al session_state["signals"] ANTES de que corra
-# load_signals_from_session() abajo, así el módulo procesa la data del
-# snapshot sin que el especialista tenga que volver a subir CSVs.
+# Ciclo 23.87+ — Hidratación desde snapshot histórico.
+# Dos paths posibles para llegar acá con snapshot pre-cargado:
+#   (a) st.switch_page() seteó session_state["_pending_snapshot_load"]
+#       (path principal — usado desde Live Monitoring → cards)
+#   (b) URL params ?snapshot=X&instance=Y (path legacy / shareable URL)
+# Cualquiera de los dos funciona — el path (a) preserva la sesión auth.
 try:
     from core.snapshot_hydrator import (
         consume_pending_snapshot_url,
         hydrate_waveform_snapshot,
         render_snapshot_loaded_banner,
     )
-    _snap_params = consume_pending_snapshot_url()
-    if _snap_params is not None:
-        _inst_id, _snap_id = _snap_params
+    _snap_inst, _snap_id = None, None
+
+    # Path (a): session_state pre-set por switch_page
+    _pending = st.session_state.pop("_pending_snapshot_load", None)
+    if _pending and _pending.get("snapshot_type") == "waveform":
+        _snap_inst = _pending.get("instance_id")
+        _snap_id = _pending.get("snapshot_id")
+
+    # Path (b): URL params (fallback)
+    if _snap_id is None:
+        _snap_params = consume_pending_snapshot_url()
+        if _snap_params is not None:
+            _snap_inst, _snap_id = _snap_params
+
+    if _snap_id and _snap_inst:
         # Solo hidratar si el snapshot solicitado es DISTINTO al ya cargado
-        # (evita re-hidratar en cada rerun de Streamlit y perder edits del usuario)
         _already = st.session_state.get("_loaded_from_snapshot", {})
         if _already.get("snapshot_id") != _snap_id:
-            hydrate_waveform_snapshot(_inst_id, _snap_id)
+            hydrate_waveform_snapshot(_snap_inst, _snap_id)
     render_snapshot_loaded_banner()
 except Exception as _e:
     # Falla silenciosa — la hidratación es opcional, módulo sigue normal
