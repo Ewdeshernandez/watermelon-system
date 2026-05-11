@@ -1043,12 +1043,10 @@ def render_sensor_zoom_panel(
             st.rerun()
 
     if "Tendencia" in chart_type:
-        # Rich trend (Ciclo 23.57) — toma toda la historia del backend, no solo
-        # las últimas 30 lecturas. Plotly con severity bands + datetime axis +
-        # Y-axis con la unidad del sensor (g pk / in/s pk / mil pp / etc).
-        # Compite directo con Bently System1 Trend Plot.
-        sensor_match = sensor_lookup.get(selected_sensor)
-        # Buscar variable + unit del sensor seleccionado
+        # Rich trend (Ciclo 23.58) — multi-sensor + paginación.
+        # System1 Trend Plot competitor. Línea fina sin markers (clase),
+        # severity bands del sensor primario, Y-axis con unidad de vibración,
+        # X-axis datetime, retención larga (meses/años) vía paginación PostgREST.
         sensor_row = next(
             (r for r in latest
              if r.get("sensor_label") == selected_sensor and r.get("metric") == "Direct"),
@@ -1059,6 +1057,36 @@ def render_sensor_zoom_panel(
         else:
             var_name = sensor_row.get("variable", "")
             sensor_unit = sensor_row.get("unit", "")
+            inst_id = instance_obj.instance_id if hasattr(instance_obj, "instance_id") else ""
+
+            # Multi-sensor selector — solo sensores con la MISMA variable/unidad
+            # del primario (no mezclamos g pk con mil pp en un solo eje).
+            compatible = [
+                r.get("sensor_label")
+                for r in latest
+                if r.get("metric") == "Direct"
+                and r.get("variable") == var_name
+                and r.get("unit") == sensor_unit
+                and r.get("sensor_label")
+            ]
+            compatible = sorted(set([s for s in compatible if s]))
+            if not compatible:
+                compatible = [selected_sensor]
+
+            default_picks = [selected_sensor] if selected_sensor in compatible else compatible[:1]
+            picked = st.multiselect(
+                f"Sensores en la tendencia · variable `{var_name}` · unidad `{sensor_unit}`",
+                options=compatible,
+                default=default_picks,
+                key=f"zoom_trend_multi_{selected_sensor}",
+                help=(
+                    "Solo sensores con la misma variable y unidad que el primario, "
+                    "para mantener un eje Y consistente."
+                ),
+            )
+            if not picked:
+                picked = default_picks
+
             range_to_limit = {
                 "Última hora": 400,
                 "6 horas":     2200,
@@ -1069,43 +1097,123 @@ def render_sensor_zoom_panel(
             }
             limit = range_to_limit.get(range_choice, 2200)
 
-            try:
-                rows = history_for_metric(
-                    instance_obj.instance_id if hasattr(instance_obj, "instance_id") else "",
-                    var_name, "Direct", limit=limit,
-                )
-            except Exception:
-                rows = []
+            def _fetch_paginated(inst, var, met, total_limit, page_size=1000):
+                """Paginación manual — PostgREST cap default es 1000 rows.
+                Para rangos largos (7d/30d/Todo) iteramos en chunks."""
+                from core.live_readings import history_for_metric as _hfm
+                # Fast path: pedimos directo y vemos si el server devuelve <=1000
+                first = _hfm(inst, var, met, limit=min(total_limit, page_size))
+                if len(first) < page_size or total_limit <= page_size:
+                    return first[:total_limit]
+                # Slow path: hay más datos. Iteramos usando captured_at del
+                # último row como cursor (paginación por keyset, sin offset).
+                from core.live_readings import _get_supabase_client, _TABLE
+                client = _get_supabase_client()
+                if client is None:
+                    return first
+                acc = list(first)
+                while len(acc) < total_limit:
+                    oldest_cursor = acc[-1].get("captured_at")
+                    if not oldest_cursor:
+                        break
+                    try:
+                        resp = (
+                            client.table(_TABLE)
+                            .select("captured_at,value,unit,quality")
+                            .eq("instance_id", inst)
+                            .eq("variable", var)
+                            .eq("metric", met)
+                            .lt("captured_at", oldest_cursor)
+                            .order("captured_at", desc=True)
+                            .limit(min(page_size, total_limit - len(acc)))
+                            .execute()
+                        )
+                        chunk = list(getattr(resp, "data", []) or [])
+                    except Exception:
+                        break
+                    if not chunk:
+                        break
+                    acc.extend(chunk)
+                    if len(chunk) < page_size:
+                        break
+                return acc
 
-            if not rows:
+            # Recolectar series por sensor — cada sensor tiene su propio
+            # variable/Direct row en latest, pero el query usa solo variable/metric.
+            # Para discriminar sensores físicos distintos, usamos sensor_label
+            # en core (live_readings ya filtra por instance_id + variable + metric).
+            # Cada sensor_label en la misma instance comparte variable/metric;
+            # asumimos que cada sensor tiene su propia variable única en `latest`.
+            # En la práctica del schema actual, sensor_label coincide con variable
+            # para Direct (3X, 3Y, etc → variable matches sensor_label).
+            # Si esto cambia, este bloque necesita ajuste.
+            series_by_sensor = {}
+            for s in picked:
+                # Resolver variable real del sensor s
+                s_row = next(
+                    (r for r in latest
+                     if r.get("sensor_label") == s and r.get("metric") == "Direct"),
+                    None,
+                )
+                if not s_row:
+                    continue
+                s_var = s_row.get("variable", s)
+                try:
+                    rows = _fetch_paginated(inst_id, s_var, "Direct", limit)
+                except Exception:
+                    rows = []
+                if rows:
+                    series_by_sensor[s] = rows
+
+            if not series_by_sensor:
                 st.info(
-                    "Sin historial todavía para este sensor. Esperá unos minutos "
+                    "Sin historial todavía para estos sensores. Esperá unos minutos "
                     "para que el collector acumule lecturas."
                 )
             else:
                 import pandas as pd
-                df_trend = pd.DataFrame(rows)
-                df_trend["captured_at"] = pd.to_datetime(
-                    df_trend["captured_at"], utc=True
-                ).dt.tz_convert(_local_tz())
-                df_trend = df_trend.sort_values(by="captured_at").reset_index(drop=True)
+                frames = []
+                for s, rows in series_by_sensor.items():
+                    dfx = pd.DataFrame(rows)
+                    dfx["sensor_label"] = s
+                    dfx["captured_at"] = pd.to_datetime(
+                        dfx["captured_at"], utc=True
+                    ).dt.tz_convert(_local_tz())
+                    frames.append(dfx)
+                df_trend = pd.concat(frames, ignore_index=True).sort_values(
+                    by="captured_at"
+                ).reset_index(drop=True)
 
-                # KPIs (Mín / Máx / Promedio / Σ)
+                # KPIs sobre el sensor primario (selected_sensor)
+                primary_df = df_trend[df_trend["sensor_label"] == selected_sensor]
+                if primary_df.empty:
+                    primary_df = df_trend
                 c1, c2, c3, c4 = st.columns(4)
-                with c1: st.metric("Mín", f"{df_trend['value'].min():.3f} {sensor_unit}")
-                with c2: st.metric("Máx", f"{df_trend['value'].max():.3f} {sensor_unit}")
-                with c3: st.metric("Promedio", f"{df_trend['value'].mean():.3f} {sensor_unit}")
+                with c1: st.metric("Mín", f"{primary_df['value'].min():.3f} {sensor_unit}")
+                with c2: st.metric("Máx", f"{primary_df['value'].max():.3f} {sensor_unit}")
+                with c3: st.metric("Promedio", f"{primary_df['value'].mean():.3f} {sensor_unit}")
                 with c4: st.metric("Σ Lecturas", f"{len(df_trend):,}")
 
-                # Severity bands desde compute_severity (asset-class aware)
                 alarm_val = alarm if alarm > 0 else 0
                 danger_val = danger if danger > 0 else 0
 
                 try:
                     import plotly.graph_objects as go
+                    # Paleta para multi-sensor (suficientes colores y todos
+                    # con contraste decente sobre fondo blanco/bands suaves)
+                    palette = [
+                        "#1d4ed8",  # blue-700
+                        "#b45309",  # amber-700
+                        "#15803d",  # green-700
+                        "#7c3aed",  # violet-600
+                        "#dc2626",  # red-600
+                        "#0e7490",  # cyan-700
+                        "#be185d",  # pink-700
+                        "#525252",  # neutral-600
+                    ]
                     fig = go.Figure()
 
-                    # Bands
+                    # Bands (sensor primario)
                     if danger_val > 0:
                         y_max = max(df_trend["value"].max(), danger_val) * 1.10
                         fig.add_hrect(
@@ -1132,44 +1240,58 @@ def render_sensor_zoom_panel(
                             annotation=dict(font=dict(color="#166534", size=11)),
                         )
 
-                    # Línea del sensor (color por severidad actual)
-                    fig.add_trace(go.Scatter(
-                        x=df_trend["captured_at"],
-                        y=df_trend["value"],
-                        mode="lines+markers",
-                        line=dict(color=fg, width=2),
-                        marker=dict(size=3),
-                        name=f"{display_label} {var_name}",
-                        hovertemplate=(
-                            f"<b>{display_label}</b><br>"
-                            "%{x|%Y-%m-%d %H:%M:%S}<br>"
-                            f"%{{y:.3f}} {sensor_unit}<extra></extra>"
-                        ),
-                    ))
+                    # Trace por sensor — line-only, fino, sin markers
+                    for idx, s in enumerate(picked):
+                        sub = df_trend[df_trend["sensor_label"] == s]
+                        if sub.empty:
+                            continue
+                        color = fg if s == selected_sensor else palette[idx % len(palette)]
+                        # Render del primario un poco más grueso para destacar
+                        line_w = 1.8 if s == selected_sensor else 1.2
+                        fig.add_trace(go.Scatter(
+                            x=sub["captured_at"],
+                            y=sub["value"],
+                            mode="lines",
+                            line=dict(color=color, width=line_w),
+                            name=s,
+                            hovertemplate=(
+                                f"<b>{s}</b><br>"
+                                "%{x|%Y-%m-%d %H:%M:%S}<br>"
+                                f"%{{y:.3f}} {sensor_unit}<extra></extra>"
+                            ),
+                        ))
 
                     fig.update_layout(
                         margin=dict(l=10, r=10, t=30, b=10),
-                        height=380,
+                        height=400,
                         plot_bgcolor="white",
                         xaxis=dict(
                             showgrid=True, gridcolor="#f1f5f9",
                             title="",
-                            tickformat="%d %b\n%H:%M",  # ej: "10 May\n14:30"
+                            tickformat="%d %b\n%H:%M",
                         ),
                         yaxis=dict(
                             showgrid=True, gridcolor="#f1f5f9",
                             title=f"{var_name} ({sensor_unit})" if sensor_unit else var_name,
                         ),
-                        showlegend=False,
+                        showlegend=len(picked) > 1,
+                        legend=dict(
+                            orientation="h",
+                            yanchor="bottom", y=1.02,
+                            xanchor="right", x=1,
+                            bgcolor="rgba(255,255,255,0.85)",
+                            bordercolor="#e2e8f0", borderwidth=1,
+                        ),
                         hovermode="x unified",
                     )
                     st.plotly_chart(fig, use_container_width=True)
                 except Exception as e:
-                    # Fallback simple
                     st.caption(f"(plotly fallback: {e})")
-                    df_chart = df_trend.set_index("captured_at")[["value"]]
-                    df_chart.columns = [f"{display_label} — {var_name}"]
-                    st.line_chart(df_chart, height=340)
+                    pivot = df_trend.pivot_table(
+                        index="captured_at", columns="sensor_label",
+                        values="value", aggfunc="last",
+                    )
+                    st.line_chart(pivot, height=340)
     elif "Vector 1X" in chart_type or "Vector 2X" in chart_type:
         prefix = "1X" if "1X" in chart_type else "2X"
         ampl_row = next(
@@ -2410,15 +2532,9 @@ def main() -> None:
         except Exception:
             pass
 
-    # Ciclo 23.57 — Single drilldown point. Eliminamos las tabs
-    # "Vectores 1X/2X" y "Tendencia" porque duplicaban funcionalidad
-    # del zoom panel y dividían la atención del usuario. Ahora TODO el
-    # análisis per-sensor (trend, 1X, 2X, gap, etc) se hace inline en
-    # el zoom panel — sensor seleccionado + tipo de chart = single
-    # source of truth. Diagnostic (whole-asset) queda en un expander
-    # discreto al final, no es per-sensor entonces no entra al zoom.
-    with st.expander("🩺 Diagnostic — criterios ISO/API por sensor", expanded=False):
-        render_diagnostic_table(latest)
+    # Ciclo 23.58 — Diagnostic eliminado (redundante con gap/bias voltage
+    # ya presente en los gráficos del zoom panel). Single source of truth:
+    # todo el análisis per-sensor pasa por el panel de zoom.
 
     # Total de readings históricas almacenadas (info útil para el operador)
     total = count_for_instance(instance_id)
