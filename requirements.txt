@@ -29,12 +29,10 @@ Pillow>=10.0.0
 # no está configurado, el botón "🧠 Diagnóstico AI" aparece deshabilitado
 # pero el resto del sistema funciona normal.
 anthropic>=0.39.0
-# Ciclo 23.63: PNG export del diagrama Live Monitoring via resvg-py.
-# Es un binding Python sobre resvg (Rust). Se distribuye como wheels
-# precompilados → NO requiere libcairo, libpango ni ningún apt package.
-resvg-py>=0.1.6
-# Ciclo 23.65: svglib REMOVIDO. svglib>=1.5 trae rlpycairo → pycairo →
-# requiere libcairo en el sistema, exactamente lo que cairosvg ya nos
-# rompió. Si resvg-py falla, el botón PNG queda en "no disponible" pero
-# la app NO crashea (try/except en _svg_to_png_hd cubre los 3 paths).
+# Ciclo 23.66: PNG export removido por completo. Probamos cairosvg (libcairo
+# system lib falta), svglib (rlpycairo → pycairo → libcairo), y resvg-py
+# (wheel se instala pero falla en runtime con nuestro SVG). El SVG vectorial
+# cubre el 95% del caso de uso real (PowerPoint, Keynote, Word, email todos
+# lo soportan nativamente). Si más adelante necesitamos PNG inline, el camino
+# correcto es render client-side via canvas (browser hace el trabajo).
 # rebuild trigger
