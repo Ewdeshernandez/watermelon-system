@@ -1003,15 +1003,15 @@ def render_sensor_zoom_panel(
         unsafe_allow_html=True,
     )
 
-    # Selector de gráfico (Ciclo 23.29) — incluye Tendencia + Vectores
-    # 1X/2X + Gap + placeholders de Spectrum/Waveform/Orbit. Lo que ya
-    # tiene data se muestra inline; lo que falta queda como roadmap.
-    sel_col, close_col = st.columns([5, 1])
+    # Selector de gráfico (Ciclo 23.57 — single drilldown point).
+    # Las tabs Vectores/Tendencia se consolidaron acá. Trend ahora con
+    # severity bands + Y-axis unit + X-axis datetime + range selector.
+    sel_col, range_col, close_col = st.columns([3, 2, 1])
     with sel_col:
         chart_type = st.selectbox(
             "Tipo de gráfico",
             options=[
-                "📈 Tendencia (últimos 30 puntos)",
+                "📈 Tendencia",
                 "🎯 Vector 1X (amplitud + fase)",
                 "🎯 Vector 2X (amplitud + fase)",
                 "📐 Gap (DC voltage prox probe)",
@@ -1024,30 +1024,152 @@ def render_sensor_zoom_panel(
             key=f"zoom_chart_type_{selected_sensor}",
             label_visibility="collapsed",
         )
+    with range_col:
+        if "Tendencia" in chart_type:
+            range_choice = st.selectbox(
+                "Rango",
+                ["Última hora", "6 horas", "24 horas", "7 días", "30 días", "Todo"],
+                index=1,
+                key=f"zoom_range_{selected_sensor}",
+                label_visibility="collapsed",
+                help="Cuanta historia traer del registro append-only en Supabase",
+            )
+        else:
+            range_choice = "6 horas"
+            st.empty()
     with close_col:
         if st.button("✕ Cerrar", key="zoom_close", use_container_width=True):
             st.query_params.clear()
             st.rerun()
 
     if "Tendencia" in chart_type:
-        history = spark_data.get(selected_sensor, [])
-        values_raw = [h.get("value") for h in history if h.get("value") is not None]
-        try:
-            values = [float(v) for v in values_raw]
-        except Exception:
-            values = []
-        if values:
-            try:
-                import pandas as pd
-                df = pd.DataFrame({display_label: values})
-                st.line_chart(df, height=200, color=fg)
-            except Exception:
-                st.caption(
-                    "Valores recientes: "
-                    + ", ".join(f"{v:.2f}" for v in values[:10])
-                )
+        # Rich trend (Ciclo 23.57) — toma toda la historia del backend, no solo
+        # las últimas 30 lecturas. Plotly con severity bands + datetime axis +
+        # Y-axis con la unidad del sensor (g pk / in/s pk / mil pp / etc).
+        # Compite directo con Bently System1 Trend Plot.
+        sensor_match = sensor_lookup.get(selected_sensor)
+        # Buscar variable + unit del sensor seleccionado
+        sensor_row = next(
+            (r for r in latest
+             if r.get("sensor_label") == selected_sensor and r.get("metric") == "Direct"),
+            None,
+        )
+        if not sensor_row:
+            st.warning(f"Sensor `{display_label}` no tiene lecturas Direct en latest.")
         else:
-            st.caption("Sin historial reciente para trend chart.")
+            var_name = sensor_row.get("variable", "")
+            sensor_unit = sensor_row.get("unit", "")
+            range_to_limit = {
+                "Última hora": 400,
+                "6 horas":     2200,
+                "24 horas":    9000,
+                "7 días":      62000,
+                "30 días":     270000,
+                "Todo":        500000,
+            }
+            limit = range_to_limit.get(range_choice, 2200)
+
+            try:
+                rows = history_for_metric(
+                    instance_obj.instance_id if hasattr(instance_obj, "instance_id") else "",
+                    var_name, "Direct", limit=limit,
+                )
+            except Exception:
+                rows = []
+
+            if not rows:
+                st.info(
+                    "Sin historial todavía para este sensor. Esperá unos minutos "
+                    "para que el collector acumule lecturas."
+                )
+            else:
+                import pandas as pd
+                df_trend = pd.DataFrame(rows)
+                df_trend["captured_at"] = pd.to_datetime(
+                    df_trend["captured_at"], utc=True
+                ).dt.tz_convert(_local_tz())
+                df_trend = df_trend.sort_values(by="captured_at").reset_index(drop=True)
+
+                # KPIs (Mín / Máx / Promedio / Σ)
+                c1, c2, c3, c4 = st.columns(4)
+                with c1: st.metric("Mín", f"{df_trend['value'].min():.3f} {sensor_unit}")
+                with c2: st.metric("Máx", f"{df_trend['value'].max():.3f} {sensor_unit}")
+                with c3: st.metric("Promedio", f"{df_trend['value'].mean():.3f} {sensor_unit}")
+                with c4: st.metric("Σ Lecturas", f"{len(df_trend):,}")
+
+                # Severity bands desde compute_severity (asset-class aware)
+                alarm_val = alarm if alarm > 0 else 0
+                danger_val = danger if danger > 0 else 0
+
+                try:
+                    import plotly.graph_objects as go
+                    fig = go.Figure()
+
+                    # Bands
+                    if danger_val > 0:
+                        y_max = max(df_trend["value"].max(), danger_val) * 1.10
+                        fig.add_hrect(
+                            y0=danger_val, y1=y_max,
+                            fillcolor="#fee2e2", opacity=0.50, line_width=0,
+                            annotation_text="Danger",
+                            annotation_position="top right",
+                            annotation=dict(font=dict(color="#991b1b", size=11)),
+                        )
+                    if alarm_val > 0 and danger_val > alarm_val:
+                        fig.add_hrect(
+                            y0=alarm_val, y1=danger_val,
+                            fillcolor="#fef3c7", opacity=0.50, line_width=0,
+                            annotation_text="Alarma",
+                            annotation_position="top right",
+                            annotation=dict(font=dict(color="#92400e", size=11)),
+                        )
+                    if alarm_val > 0:
+                        fig.add_hrect(
+                            y0=0, y1=alarm_val,
+                            fillcolor="#dcfce7", opacity=0.40, line_width=0,
+                            annotation_text="Normal",
+                            annotation_position="bottom right",
+                            annotation=dict(font=dict(color="#166534", size=11)),
+                        )
+
+                    # Línea del sensor (color por severidad actual)
+                    fig.add_trace(go.Scatter(
+                        x=df_trend["captured_at"],
+                        y=df_trend["value"],
+                        mode="lines+markers",
+                        line=dict(color=fg, width=2),
+                        marker=dict(size=3),
+                        name=f"{display_label} {var_name}",
+                        hovertemplate=(
+                            f"<b>{display_label}</b><br>"
+                            "%{x|%Y-%m-%d %H:%M:%S}<br>"
+                            f"%{{y:.3f}} {sensor_unit}<extra></extra>"
+                        ),
+                    ))
+
+                    fig.update_layout(
+                        margin=dict(l=10, r=10, t=30, b=10),
+                        height=380,
+                        plot_bgcolor="white",
+                        xaxis=dict(
+                            showgrid=True, gridcolor="#f1f5f9",
+                            title="",
+                            tickformat="%d %b\n%H:%M",  # ej: "10 May\n14:30"
+                        ),
+                        yaxis=dict(
+                            showgrid=True, gridcolor="#f1f5f9",
+                            title=f"{var_name} ({sensor_unit})" if sensor_unit else var_name,
+                        ),
+                        showlegend=False,
+                        hovermode="x unified",
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    # Fallback simple
+                    st.caption(f"(plotly fallback: {e})")
+                    df_chart = df_trend.set_index("captured_at")[["value"]]
+                    df_chart.columns = [f"{display_label} — {var_name}"]
+                    st.line_chart(df_chart, height=340)
     elif "Vector 1X" in chart_type or "Vector 2X" in chart_type:
         prefix = "1X" if "1X" in chart_type else "2X"
         ampl_row = next(
@@ -2288,30 +2410,22 @@ def main() -> None:
         except Exception:
             pass
 
-    st.markdown("&nbsp;", unsafe_allow_html=True)
-
-    # Tabs (Ciclo 23.26): se quitó "Canales en Vivo" porque el diagrama
-    # ya muestra valor + sparkline + threshold por sensor, y al hacer
-    # click se abre el zoom panel. La tabla con filtros era redundante.
-    # Se mantienen Vectores 1X/2X (info no visible en el diagrama),
-    # Diagnostic (criterios ISO/API) y Tendencia (vista detallada).
-    tab_vec, tab_diag, tab_hist = st.tabs([
-        "🎯 Vectores 1X/2X",
-        "🩺 Diagnostic",
-        "📈 Tendencia",
-    ])
-
-    with tab_vec:
-        render_vectors_phasors(latest)
-
-    with tab_diag:
+    # Ciclo 23.57 — Single drilldown point. Eliminamos las tabs
+    # "Vectores 1X/2X" y "Tendencia" porque duplicaban funcionalidad
+    # del zoom panel y dividían la atención del usuario. Ahora TODO el
+    # análisis per-sensor (trend, 1X, 2X, gap, etc) se hace inline en
+    # el zoom panel — sensor seleccionado + tipo de chart = single
+    # source of truth. Diagnostic (whole-asset) queda en un expander
+    # discreto al final, no es per-sensor entonces no entra al zoom.
+    with st.expander("🩺 Diagnostic — criterios ISO/API por sensor", expanded=False):
         render_diagnostic_table(latest)
 
-    with tab_hist:
-        render_history_chart(instance_id, latest, sensor_lookup, instance_obj)
-        st.markdown("---")
-        total = count_for_instance(instance_id)
-        st.caption(f"Total readings históricas almacenadas para `{instance_id}`: **{total:,}**")
+    # Total de readings históricas almacenadas (info útil para el operador)
+    total = count_for_instance(instance_id)
+    st.caption(
+        f"📦 Total readings históricas almacenadas para `{instance_id}`: "
+        f"**{total:,}** (retención: meses/años en Supabase)"
+    )
 
     st.markdown("---")
     c1, c2 = st.columns([1, 4])
