@@ -424,9 +424,12 @@ def compose_train(
         )
         for s in sensors_with_status
     )
-    # Ciclo 23.53: bumped 130 → 140 para acomodar bottom decorations
-    # bajadas (sparkline bottom edge ahora a cy+134, necesita pad de 140).
-    vert_pad = 140 if needs_decoration_pad else 0
+    # Ciclo 23.56: vert_pad 140 → 70. Antes había ~80px de espacio
+    # vacío arriba (entre el dark header bar y los títulos del equipo)
+    # y otros 40px abajo (entre las sparklines bottom y el legend).
+    # Con 70 los títulos arrancan en y=22, sparklines top a y=51,
+    # body top a y=120 → equipo ocupa el centro del viewBox sin gaps.
+    vert_pad = 70 if needs_decoration_pad else 0
     total_h = base_h + 2 * vert_pad
 
     # Sensor dots overlayados.
@@ -566,26 +569,27 @@ def compose_train(
         f'</g>'
     )
 
-    # Titles externos (Ciclo 23.28) — re-introducidos en y=100, posición
-    # SAFE entre el bottom de las sparklines (~y=86) y el top del body
-    # del equipo (~y=115). Antes los probé en y=22 (muy arriba, lejos
-    # del equipo) y eliminados (chocaba con el fallback de get_icon).
-    # Ahora el icono se le pasa label=" " para no duplicar.
+    # Titles externos (Ciclo 23.56) — SUBIDOS de y=100 a y=22 (top).
+    # Antes había ~80px de espacio vacío entre el dark header bar y los
+    # títulos del equipo, perdido. Ahora título y sparklines se acomodan
+    # arriba del todo, equipo crece, layout denso pro.
     titles_layer = ""
     if driver_label:
         cx = driver_w / 2
         titles_layer += (
-            f'<text x="{cx:.1f}" y="100" text-anchor="middle" '
-            f'font-size="14" font-weight="800" fill="#1e3a8a" '
-            f'font-family="-apple-system, Segoe UI, Roboto, sans-serif">'
+            f'<text x="{cx:.1f}" y="22" text-anchor="middle" '
+            f'font-size="15" font-weight="800" fill="#1e3a8a" '
+            f'font-family="-apple-system, Segoe UI, Roboto, sans-serif" '
+            f'letter-spacing="0.005em">'
             f'{driver_label}</text>'
         )
     if driven_label:
         cx = driver_w + coupling_w + driven_w / 2
         titles_layer += (
-            f'<text x="{cx:.1f}" y="100" text-anchor="middle" '
-            f'font-size="14" font-weight="800" fill="#14532d" '
-            f'font-family="-apple-system, Segoe UI, Roboto, sans-serif">'
+            f'<text x="{cx:.1f}" y="22" text-anchor="middle" '
+            f'font-size="15" font-weight="800" fill="#14532d" '
+            f'font-family="-apple-system, Segoe UI, Roboto, sans-serif" '
+            f'letter-spacing="0.005em">'
             f'{driven_label}</text>'
         )
 
