@@ -630,6 +630,7 @@ def render_sensor_map_library(
     latest: List[Dict[str, Any]],
     sensor_lookup: Dict[str, Dict[str, Any]],
     spark_data: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    severity_summary: Optional[Dict[str, int]] = None,
 ) -> bool:
     """
     Renderiza el tren acoplado vía core.asset_library.composer.
@@ -719,22 +720,27 @@ def render_sensor_map_library(
     # ponerlo en un reporte/PPT. SVG raw (vectorial, infinita resolución) +
     # PNG 4K (cairosvg si está disponible). El timestamp queda en el nombre
     # del archivo para auditoría.
-    _render_export_bar(svg, getattr(instance_obj, "instance_id", "asset"))
+    _render_export_bar(svg, instance_obj, latest, severity_summary)
     return True
 
 
-def _render_export_bar(svg: str, instance_id: str) -> None:
+def _render_export_bar(
+    svg: str,
+    instance_obj: Any,
+    latest: Optional[List[Dict[str, Any]]] = None,
+    severity_summary: Optional[Dict[str, int]] = None,
+) -> None:
     """Barra de exportación — popover discreto debajo del SVG.
 
-    Ciclo 23.67: agregamos share por WhatsApp y Email vía render
-    client-side del PNG + upload a Supabase Storage (bucket diagram-shares
-    creado en data/storage_diagram_shares_setup.sql).
-
-    El SVG download sigue siendo el path principal (instantáneo, sin red).
-    Los botones de share dependen de tener anon_key configurado.
+    Ciclo 23.68 Fase 3: el caption del share es rico (RPM, alarmas, sensores).
+    El upload sigue siendo client-side (JS dibuja canvas y POST a Storage).
     """
+    instance_id = getattr(instance_obj, "instance_id", "asset")
     ts = datetime.now().strftime("%Y%m%d_%H%M")
     safe_id = (instance_id or "asset").replace("/", "_").replace(" ", "_")
+
+    # Construir metadata para el caption rico del WhatsApp/Email
+    meta = _build_share_meta(instance_obj, latest, severity_summary)
 
     # CSS para que el popover trigger sea pequeño y alineado a la derecha
     st.markdown("""
@@ -780,7 +786,7 @@ def _render_export_bar(svg: str, instance_id: str) -> None:
                 )
 
                 # Share buttons (WhatsApp + Email) — render client-side
-                _render_share_html(svg, safe_id, ts)
+                _render_share_html(svg, safe_id, ts, meta)
 
                 st.markdown(
                     "<div style='font-size:11px;color:#475569;margin-top:10px;line-height:1.5;'>"
@@ -803,7 +809,75 @@ def _render_export_bar(svg: str, instance_id: str) -> None:
             )
 
 
-def _render_share_html(svg: str, safe_id: str, ts: str) -> None:
+def _build_share_meta(
+    instance_obj: Any,
+    latest: Optional[List[Dict[str, Any]]],
+    severity_summary: Optional[Dict[str, int]],
+) -> Dict[str, Any]:
+    """Extrae metadata útil del activo para enriquecer el caption del share."""
+    instance_id = getattr(instance_obj, "instance_id", "asset")
+
+    # Asset title — usa el "tag" si existe, sino fallback al instance_id
+    meta_tag = getattr(instance_obj, "tag", None) or instance_id
+    driver_model = (getattr(instance_obj, "driver_model", "") or "").strip()
+    driven_mfr = (getattr(instance_obj, "driven_manufacturer", "") or "").strip()
+    driven_model = (getattr(instance_obj, "driven_model", "") or "").strip()
+    driven_part = driven_mfr or driven_model
+
+    train_str = ""
+    if driver_model and driven_part:
+        train_str = f"{driver_model} ↔ {driven_part}"
+    elif driver_model:
+        train_str = driver_model
+    elif driven_part:
+        train_str = driven_part
+
+    # Velocidad (rpm) — busca fila con variable Velocidad
+    speed_txt = None
+    if latest:
+        speed_row = next(
+            (r for r in latest if (r.get("variable") or "").lower().startswith("velocidad")),
+            None,
+        )
+        if speed_row and speed_row.get("value") is not None:
+            try:
+                speed_txt = f"{float(speed_row['value']):.0f} rpm"
+            except Exception:
+                speed_txt = None
+
+    # Sensores direct + severity counts
+    n_direct = 0
+    if latest:
+        n_direct = len([r for r in latest if r.get("metric") == "Direct"])
+
+    sev = severity_summary or {}
+    n_alarm = int(sev.get("alarm", 0) or 0)
+    n_danger = int(sev.get("danger", 0) or 0)
+
+    if n_danger > 0:
+        status_label = f"⚠ DANGER ({n_danger})"
+    elif n_alarm > 0:
+        status_label = f"⚠ ALARMA ({n_alarm})"
+    else:
+        status_label = "✓ NORMAL"
+
+    return {
+        "tag": meta_tag,
+        "train": train_str,
+        "speed": speed_txt or "—",
+        "n_sensors": n_direct,
+        "n_alarm": n_alarm,
+        "n_danger": n_danger,
+        "status": status_label,
+    }
+
+
+def _render_share_html(
+    svg: str,
+    safe_id: str,
+    ts: str,
+    meta: Optional[Dict[str, Any]] = None,
+) -> None:
     """Embed HTML+JS para compartir el diagrama por WhatsApp / Email.
 
     El JS hace:
@@ -832,18 +906,33 @@ def _render_share_html(svg: str, safe_id: str, ts: str) -> None:
     # backslashes, gradients, todo. base64 esquiva todo eso.
     svg_b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
 
+    # Metadata para el caption rico (default seguro si no se pasó)
+    m = meta or {}
+    meta_tag    = (m.get("tag") or safe_id).replace("`", "'")
+    meta_train  = (m.get("train") or "").replace("`", "'")
+    meta_speed  = (m.get("speed") or "—").replace("`", "'")
+    meta_status = (m.get("status") or "—").replace("`", "'")
+    meta_n_sens = int(m.get("n_sensors") or 0)
+    meta_n_alm  = int(m.get("n_alarm") or 0)
+    meta_n_dan  = int(m.get("n_danger") or 0)
+
+    # Tamaño máximo del PNG antes de upload (5MB = bucket limit)
+    max_size = 5 * 1024 * 1024
+
     html = f"""
     <style>
+        .wm-share-root {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }}
         .wm-share-row {{
             display: flex; gap: 8px; margin: 8px 0 4px 0;
         }}
         .wm-share-btn {{
-            flex: 1; padding: 8px 12px; font-size: 13px;
+            flex: 1; padding: 9px 12px; font-size: 13px;
             border-radius: 8px; border: 1.5px solid #c7d9eb;
             background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 100%);
             color: #1e40af; font-weight: 600; cursor: pointer;
             display: flex; align-items: center; justify-content: center; gap: 6px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             transition: all 0.15s;
         }}
         .wm-share-btn:hover:not(:disabled) {{
@@ -851,52 +940,118 @@ def _render_share_html(svg: str, safe_id: str, ts: str) -> None:
             box-shadow: 0 2px 6px rgba(37,99,235,0.15);
             transform: translateY(-1px);
         }}
-        .wm-share-btn:disabled {{
-            opacity: 0.5; cursor: wait;
-        }}
+        .wm-share-btn:disabled {{ opacity: 0.5; cursor: wait; }}
         .wm-share-status {{
             font-size: 11px; color: #64748b;
             font-family: ui-monospace, Menlo, monospace;
-            margin-top: 4px; min-height: 14px;
+            margin-top: 6px; min-height: 14px;
         }}
-        .wm-share-status.ok    {{ color: #15803d; }}
-        .wm-share-status.error {{ color: #b91c1c; }}
+        .wm-share-status.busy {{ color: #1e40af; font-weight: 600; }}
+        .wm-share-status.error {{ color: #b91c1c; font-weight: 600; }}
+        .wm-share-success {{
+            display: none;
+            background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
+            border: 1.5px solid #22c55e;
+            border-radius: 10px;
+            padding: 10px 12px;
+            margin-top: 8px;
+        }}
+        .wm-share-success.show {{ display: block; }}
+        .wm-share-success-title {{
+            font-size: 12px; font-weight: 800; color: #14532d;
+            text-transform: uppercase; letter-spacing: 0.08em;
+            display: flex; align-items: center; gap: 6px;
+        }}
+        .wm-share-success-url {{
+            font-size: 11px; color: #166534;
+            font-family: ui-monospace, Menlo, monospace;
+            word-break: break-all;
+            background: white; padding: 6px 8px;
+            border: 1px solid #86efac; border-radius: 6px;
+            margin-top: 6px;
+        }}
+        .wm-share-copy {{
+            margin-top: 6px; padding: 5px 10px; font-size: 11px;
+            background: #15803d; color: white; border: none;
+            border-radius: 6px; cursor: pointer; font-weight: 600;
+        }}
+        .wm-share-copy:hover {{ background: #166534; }}
+        .wm-share-copy.copied {{ background: #052e16; }}
     </style>
 
-    <div class="wm-share-row">
-        <button class="wm-share-btn" id="wm-share-wa" onclick="wmShare('whatsapp')">
-            📱 WhatsApp
-        </button>
-        <button class="wm-share-btn" id="wm-share-em" onclick="wmShare('email')">
-            📧 Email
-        </button>
+    <div class="wm-share-root">
+        <div class="wm-share-row">
+            <button class="wm-share-btn" id="wm-share-wa" onclick="wmShare('whatsapp')">
+                📱 WhatsApp
+            </button>
+            <button class="wm-share-btn" id="wm-share-em" onclick="wmShare('email')">
+                📧 Email
+            </button>
+        </div>
+        <div class="wm-share-status" id="wm-share-status"></div>
+        <div class="wm-share-success" id="wm-share-success">
+            <div class="wm-share-success-title">✓ Snapshot publicado</div>
+            <div class="wm-share-success-url" id="wm-share-url"></div>
+            <button class="wm-share-copy" id="wm-share-copy">📋 Copiar link</button>
+        </div>
     </div>
-    <div class="wm-share-status" id="wm-share-status"></div>
 
     <script>
     (function() {{
-        const SVG_B64 = "{svg_b64}";
-        const SUPABASE_URL = "{supabase_url}";
-        const ANON_KEY = "{anon_key}";
-        const BUCKET = "{bucket}";
-        const INSTANCE_ID = "{safe_id}";
-        const TS = "{ts}";
+        const SVG_B64       = "{svg_b64}";
+        const SUPABASE_URL  = "{supabase_url}";
+        const ANON_KEY      = "{anon_key}";
+        const BUCKET        = "{bucket}";
+        const INSTANCE_ID   = "{safe_id}";
+        const TS            = "{ts}";
+        const MAX_SIZE      = {max_size};
 
-        const statusEl = document.getElementById('wm-share-status');
-        const btnWa = document.getElementById('wm-share-wa');
-        const btnEm = document.getElementById('wm-share-em');
+        const META = {{
+            tag:      "{meta_tag}",
+            train:    "{meta_train}",
+            speed:    "{meta_speed}",
+            status:   "{meta_status}",
+            n_sens:   {meta_n_sens},
+            n_alarm:  {meta_n_alm},
+            n_danger: {meta_n_dan},
+        }};
+
+        const statusEl  = document.getElementById('wm-share-status');
+        const successEl = document.getElementById('wm-share-success');
+        const urlEl     = document.getElementById('wm-share-url');
+        const copyBtn   = document.getElementById('wm-share-copy');
+        const btnWa     = document.getElementById('wm-share-wa');
+        const btnEm     = document.getElementById('wm-share-em');
 
         function setStatus(msg, cls) {{
             statusEl.textContent = msg;
             statusEl.className = 'wm-share-status' + (cls ? ' ' + cls : '');
         }}
-
-        function setDisabled(v) {{
-            btnWa.disabled = v;
-            btnEm.disabled = v;
+        function setDisabled(v) {{ btnWa.disabled = v; btnEm.disabled = v; }}
+        function showSuccess(url) {{
+            urlEl.textContent = url;
+            successEl.classList.add('show');
+            copyBtn.classList.remove('copied');
+            copyBtn.textContent = '📋 Copiar link';
+        }}
+        function hideSuccess() {{
+            successEl.classList.remove('show');
         }}
 
-        // SVG (base64) → PNG Blob via canvas
+        function buildCaption(publicUrl) {{
+            const lines = [`🛰 Watermelon — ${{META.tag}}`];
+            if (META.train) lines.push(`⚙ ${{META.train}}`);
+            const k = [];
+            if (META.speed && META.speed !== '—') k.push(`⚡ ${{META.speed}}`);
+            if (META.n_sens > 0) k.push(`📡 ${{META.n_sens}} sensores`);
+            if (k.length) lines.push(k.join(' · '));
+            lines.push(`📊 ${{META.status}}`);
+            lines.push(`📅 ${{TS}}`);
+            lines.push('');
+            lines.push(`🔗 ${{publicUrl}}`);
+            return lines.join('\\n');
+        }}
+
         async function svgToPngBlob(width) {{
             const svgStr = atob(SVG_B64);
             const blob = new Blob([svgStr], {{type: 'image/svg+xml;charset=utf-8'}});
@@ -924,7 +1079,6 @@ def _render_share_html(svg: str, safe_id: str, ts: str) -> None:
             }}
         }}
 
-        // Sube el PNG a Supabase Storage y devuelve la URL pública
         async function uploadToSupabase(pngBlob) {{
             const rand = Math.random().toString(36).slice(2, 10);
             const path = `${{INSTANCE_ID}}_${{TS}}_${{rand}}.png`;
@@ -948,18 +1102,25 @@ def _render_share_html(svg: str, safe_id: str, ts: str) -> None:
 
         window.wmShare = async function(target) {{
             setDisabled(true);
-            setStatus('⏳ Generando PNG 4K…', '');
+            hideSuccess();
+            setStatus('⏳ Generando PNG 4K…', 'busy');
             try {{
                 const pngBlob = await svgToPngBlob(4000);
-                setStatus('⬆ Subiendo a Supabase…', '');
+                if (pngBlob.size > MAX_SIZE) {{
+                    throw new Error(
+                        `PNG demasiado grande (${{(pngBlob.size/1024/1024).toFixed(1)}} MB > 5 MB). ` +
+                        `Reducí resolución del diagrama o usá el SVG.`
+                    );
+                }}
+                setStatus(`⬆ Subiendo ${{(pngBlob.size/1024).toFixed(0)}} KB a Supabase…`, 'busy');
                 const publicUrl = await uploadToSupabase(pngBlob);
-                setStatus('✓ Snapshot subido. Abriendo…', 'ok');
-                const caption =
-                    `Diagrama Watermelon — ${{INSTANCE_ID}} — ${{TS}}\\n${{publicUrl}}`;
+                setStatus('', '');
+                showSuccess(publicUrl);
+                const caption = buildCaption(publicUrl);
                 if (target === 'whatsapp') {{
                     window.open(`https://wa.me/?text=${{encodeURIComponent(caption)}}`, '_blank');
                 }} else {{
-                    const subject = encodeURIComponent(`Diagrama Watermelon — ${{INSTANCE_ID}}`);
+                    const subject = encodeURIComponent(`Diagrama Watermelon — ${{META.tag}}`);
                     const body = encodeURIComponent(caption);
                     window.open(`mailto:?subject=${{subject}}&body=${{body}}`, '_blank');
                 }}
@@ -970,10 +1131,26 @@ def _render_share_html(svg: str, safe_id: str, ts: str) -> None:
                 setDisabled(false);
             }}
         }};
+
+        // Copiar link al clipboard
+        copyBtn.addEventListener('click', async () => {{
+            const url = urlEl.textContent;
+            try {{
+                await navigator.clipboard.writeText(url);
+                copyBtn.textContent = '✓ Copiado';
+                copyBtn.classList.add('copied');
+                setTimeout(() => {{
+                    copyBtn.textContent = '📋 Copiar link';
+                    copyBtn.classList.remove('copied');
+                }}, 2000);
+            }} catch (e) {{
+                copyBtn.textContent = '✗ No se pudo copiar';
+            }}
+        }});
     }})();
     </script>
     """
-    components.html(html, height=110, scrolling=False)
+    components.html(html, height=220, scrolling=False)
 
 
 # ============================================================
@@ -2606,7 +2783,8 @@ def main() -> None:
     #   2) PNG 3D legacy con overlay x_pct/y_pct si no hay icon_keys.
     #   3) PNG plano sin overlay si tampoco hay coordenadas.
     has_map = render_sensor_map_library(
-        instance_obj, latest, sensor_lookup, spark_data=spark_data,
+        instance_obj, latest, sensor_lookup,
+        spark_data=spark_data, severity_summary=severity_summary,
     )
     if not has_map:
         has_map = render_sensor_map_hero(instance_obj, instance_id, latest, sensor_lookup)
