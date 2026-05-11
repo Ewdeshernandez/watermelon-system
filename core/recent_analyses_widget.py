@@ -1,0 +1,512 @@
+"""
+core.recent_analyses_widget
+============================
+
+Sección "📊 Últimos análisis" para Live Monitoring (Ciclo 23.83).
+
+Muestra al cliente final una vista de los últimos snapshots disponibles
+del activo activo (Waveform, Spectrum, Orbit, Tabular). Cada tipo
+aparece como una card compacta con metadata + botón "Ver detalle"
+que despliega el plot completo inline.
+
+El cliente NO necesita ir a Load Data ni a los módulos individuales —
+ve directamente lo último que el especialista subió.
+
+API pública:
+
+    render_recent_analyses_section(instance_id)
+
+Estilo: cards en grid 4 columnas con icono, timestamp relativo,
+label de corrida, count de sensores, severidad worst-case.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+import streamlit as st
+
+
+# =============================================================
+# Tipos de análisis y sus list_X_snapshots
+# =============================================================
+
+ANALYSIS_TYPES = [
+    {
+        "key": "waveform",
+        "icon": "📈",
+        "label": "Forma de onda",
+        "module": "core.waveform_history",
+        "list_fn": "list_waveform_snapshots",
+        "load_fn": "load_waveform_snapshot",
+        "render_fn": "_render_waveform_detail",
+        "data_key": "sensors",
+    },
+    {
+        "key": "spectrum",
+        "icon": "🔍",
+        "label": "Espectro",
+        "module": "core.spectrum_history",
+        "list_fn": "list_spectrum_snapshots",
+        "load_fn": "load_spectrum_snapshot",
+        "render_fn": "_render_spectrum_detail",
+        "data_key": "sensors",
+    },
+    {
+        "key": "orbit",
+        "icon": "🌀",
+        "label": "Órbita",
+        "module": "core.orbit_history",
+        "list_fn": "list_orbit_snapshots",
+        "load_fn": "load_orbit_snapshot",
+        "render_fn": "_render_orbit_detail",
+        "data_key": "bearings",
+    },
+    {
+        "key": "tabular",
+        "icon": "📋",
+        "label": "Tabular",
+        "module": "core.tabular_history",
+        "list_fn": "list_tabular_snapshots",
+        "load_fn": "load_tabular_snapshot",
+        "render_fn": "_render_tabular_detail",
+        "data_key": "channels",
+    },
+]
+
+
+# =============================================================
+# Helpers de tiempo
+# =============================================================
+
+def _parse_timestamp(ts_str: str) -> Optional[datetime]:
+    if not ts_str:
+        return None
+    try:
+        return datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _format_time_ago(ts_str: str) -> str:
+    dt = _parse_timestamp(ts_str)
+    if dt is None:
+        return "—"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    delta_sec = (datetime.now(timezone.utc) - dt).total_seconds()
+    if delta_sec < 60:
+        return f"hace {int(delta_sec)} s"
+    if delta_sec < 3600:
+        return f"hace {int(delta_sec / 60)} min"
+    if delta_sec < 86400:
+        return f"hace {int(delta_sec / 3600)} h"
+    days = int(delta_sec / 86400)
+    if days < 30:
+        return f"hace {days} d"
+    return dt.strftime("%d %b")
+
+
+# =============================================================
+# CSS
+# =============================================================
+
+def _inject_css_once():
+    if st.session_state.get("_wm_recent_css_injected"):
+        return
+    st.session_state["_wm_recent_css_injected"] = True
+    st.markdown(
+        """
+        <style>
+        .wm-recent-header {
+            display: flex; align-items: baseline; gap: 12px;
+            margin: 18px 0 10px 0;
+        }
+        .wm-recent-title {
+            font-size: 16px; font-weight: 800; color: #0f172a;
+            letter-spacing: -0.01em;
+        }
+        .wm-recent-sub {
+            font-size: 11px; color: #64748b;
+            font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+        }
+        .wm-recent-card {
+            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
+            border: 1.5px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 14px 16px;
+            min-height: 130px;
+            transition: all 0.15s ease;
+        }
+        .wm-recent-card:hover {
+            border-color: #94a3b8;
+            box-shadow: 0 4px 12px rgba(15,23,42,0.06);
+        }
+        .wm-recent-card.empty {
+            background: #f8fafc;
+            border-color: #e2e8f0;
+            border-style: dashed;
+            opacity: 0.6;
+        }
+        .wm-recent-card-head {
+            display: flex; align-items: center; gap: 8px;
+            margin-bottom: 6px;
+        }
+        .wm-recent-card-icon { font-size: 18px; }
+        .wm-recent-card-title {
+            font-size: 13px; font-weight: 800; color: #0f172a;
+        }
+        .wm-recent-card-ago {
+            margin-left: auto;
+            font-size: 11px; color: #64748b;
+            font-family: ui-monospace, SF Mono, monospace;
+        }
+        .wm-recent-card-label {
+            font-size: 12px; color: #334155;
+            margin-bottom: 6px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .wm-recent-card-stats {
+            font-size: 11px; color: #64748b;
+            font-variant-numeric: tabular-nums;
+        }
+        .wm-recent-empty-msg {
+            font-size: 11px; color: #94a3b8;
+            font-style: italic;
+        }
+        .wm-recent-sev-Normal  { color: #15803d; font-weight: 700; }
+        .wm-recent-sev-Alarma  { color: #b45309; font-weight: 700; }
+        .wm-recent-sev-Danger  { color: #b91c1c; font-weight: 700; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+# =============================================================
+# Render helpers para cada tipo de detalle
+# =============================================================
+
+def _render_waveform_detail(payload: Dict[str, Any]) -> None:
+    """Plot Plotly de los waveforms del snapshot."""
+    sensors = payload.get("sensors", [])
+    if not sensors:
+        st.info("Sin sensores en este snapshot.")
+        return
+    try:
+        import plotly.graph_objects as go
+        fig = go.Figure()
+        for s in sensors[:8]:  # max 8 traces
+            t = s.get("time", [])
+            v = s.get("values", [])
+            if not t or not v:
+                continue
+            fig.add_trace(go.Scatter(
+                x=t, y=v, mode="lines",
+                line=dict(width=1.2),
+                name=s.get("sensor_label", ""),
+                hovertemplate=f"<b>{s.get('sensor_label', '')}</b><br>"
+                              f"t=%{{x:.4f}}s, y=%{{y:.4f}} {s.get('unit', '')}<extra></extra>",
+            ))
+        fig.update_layout(
+            height=380,
+            margin=dict(l=10, r=10, t=20, b=10),
+            plot_bgcolor="white",
+            xaxis=dict(title="Tiempo (s)", showgrid=True, gridcolor="#f1f5f9"),
+            yaxis=dict(title="Amplitud", showgrid=True, gridcolor="#f1f5f9"),
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Tabla de métricas
+        rows = []
+        for s in sensors:
+            m = s.get("metrics", {}) or {}
+            rows.append({
+                "Sensor": s.get("sensor_label", ""),
+                "Peak": f"{m.get('peak', 0):.3f}",
+                "P2P": f"{m.get('peak_to_peak', 0):.3f}",
+                "RMS": f"{m.get('rms', 0):.3f}",
+                "Crest": f"{m.get('crest_factor', 0):.2f}",
+                "Kurtosis": f"{m.get('kurtosis', 0):.2f}",
+                "Unidad": s.get("unit", ""),
+            })
+        st.dataframe(rows, use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.error(f"Error renderizando waveform: {e}")
+
+
+def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
+    sensors = payload.get("sensors", [])
+    if not sensors:
+        st.info("Sin sensores en este snapshot.")
+        return
+    try:
+        import plotly.graph_objects as go
+        fig = go.Figure()
+        for s in sensors[:6]:  # max 6 traces — espectros se solapan feos con más
+            f = s.get("freqs", [])
+            a = s.get("amps", [])
+            if not f or not a:
+                continue
+            fig.add_trace(go.Scatter(
+                x=f, y=a, mode="lines",
+                line=dict(width=1.0),
+                name=s.get("sensor_label", ""),
+                hovertemplate=f"<b>{s.get('sensor_label', '')}</b><br>"
+                              f"%{{x:.1f}} Hz, %{{y:.4f}} {s.get('amp_unit', '')}<extra></extra>",
+            ))
+        fig.update_layout(
+            height=380,
+            margin=dict(l=10, r=10, t=20, b=10),
+            plot_bgcolor="white",
+            xaxis=dict(title="Frecuencia (Hz)", showgrid=True, gridcolor="#f1f5f9"),
+            yaxis=dict(title="Amplitud", showgrid=True, gridcolor="#f1f5f9"),
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Top peaks
+        for s in sensors[:3]:
+            peaks = s.get("peaks", [])
+            if not peaks:
+                continue
+            st.caption(
+                f"**{s.get('sensor_label', '')}** — top peaks: " +
+                " · ".join([f"{p['freq']:.1f} Hz ({p['amp']:.3f})" for p in peaks[:5]])
+            )
+    except Exception as e:
+        st.error(f"Error renderizando spectrum: {e}")
+
+
+def _render_orbit_detail(payload: Dict[str, Any]) -> None:
+    bearings = payload.get("bearings", [])
+    if not bearings:
+        st.info("Sin órbitas en este snapshot.")
+        return
+    try:
+        import plotly.graph_objects as go
+        cols = st.columns(min(len(bearings), 3))
+        for idx, b in enumerate(bearings):
+            with cols[idx % len(cols)]:
+                fig = go.Figure()
+                x = b.get("x_values", [])
+                y = b.get("y_values", [])
+                if not x or not y:
+                    st.warning(f"{b.get('bearing_label', '')}: sin datos")
+                    continue
+                fig.add_trace(go.Scatter(
+                    x=x, y=y, mode="lines",
+                    line=dict(width=1.2, color="#2563eb"),
+                    name="orbit",
+                    hoverinfo="skip",
+                ))
+                fig.update_layout(
+                    title=dict(
+                        text=f"<b>{b.get('bearing_label', '')}</b>",
+                        font=dict(size=12),
+                    ),
+                    height=300,
+                    margin=dict(l=10, r=10, t=30, b=10),
+                    plot_bgcolor="white",
+                    xaxis=dict(
+                        title=f"X ({b.get('x_sensor_label', '')})",
+                        showgrid=True, gridcolor="#f1f5f9",
+                        zeroline=True, zerolinecolor="#cbd5e1",
+                        scaleanchor="y", scaleratio=1,
+                    ),
+                    yaxis=dict(
+                        title=f"Y ({b.get('y_sensor_label', '')})",
+                        showgrid=True, gridcolor="#f1f5f9",
+                        zeroline=True, zerolinecolor="#cbd5e1",
+                    ),
+                    showlegend=False,
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                v1x = b.get("vector_1x", {}) or {}
+                if v1x.get("amp_x"):
+                    st.caption(
+                        f"1X X: {v1x.get('amp_x', 0):.3f} · "
+                        f"Y: {v1x.get('amp_y', 0):.3f}"
+                    )
+    except Exception as e:
+        st.error(f"Error renderizando orbit: {e}")
+
+
+def _render_tabular_detail(payload: Dict[str, Any]) -> None:
+    channels = payload.get("channels", [])
+    if not channels:
+        st.info("Sin canales en este snapshot.")
+        return
+    rows = []
+    for c in channels:
+        rows.append({
+            "Sensor": c.get("sensor_label", ""),
+            "Direct": f"{c.get('direct', 0):.3f}",
+            "Unidad": c.get("direct_unit", ""),
+            "1X amp": f"{c.get('vector_1x_amp', 0):.3f}",
+            "2X amp": f"{c.get('vector_2x_amp', 0):.3f}",
+            "Gap (V)": f"{c.get('gap_voltage'):.2f}" if c.get("gap_voltage") is not None else "—",
+            "Severidad": c.get("severity", "") or "—",
+            "Zona ISO": c.get("iso_zone", "") or "—",
+        })
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
+_RENDER_FUNCTIONS = {
+    "_render_waveform_detail": _render_waveform_detail,
+    "_render_spectrum_detail": _render_spectrum_detail,
+    "_render_orbit_detail":    _render_orbit_detail,
+    "_render_tabular_detail":  _render_tabular_detail,
+}
+
+
+# =============================================================
+# Función principal
+# =============================================================
+
+def render_recent_analyses_section(instance_id: str) -> None:
+    """Renderiza la sección '📊 Últimos análisis' debajo del diagrama.
+
+    Muestra 4 cards (Waveform, Spectrum, Orbit, Tabular) con metadata
+    del snapshot más reciente. Click "Ver detalle" despliega el plot
+    completo inline.
+    """
+    if not instance_id:
+        return
+
+    _inject_css_once()
+    import importlib
+
+    # Header de sección
+    st.markdown(
+        f"<div class='wm-recent-header'>"
+        f"<span class='wm-recent-title'>📊 Últimos análisis del activo</span>"
+        f"<span class='wm-recent-sub'>Histórico · LRU 10 max · Supabase Storage</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    # Fetch metadata de los 4 tipos
+    metadata_by_type: Dict[str, Optional[Dict[str, Any]]] = {}
+    for atype in ANALYSIS_TYPES:
+        try:
+            mod = importlib.import_module(atype["module"])
+            list_fn = getattr(mod, atype["list_fn"])
+            snaps = list_fn(instance_id, limit=1)
+            metadata_by_type[atype["key"]] = snaps[0] if snaps else None
+        except Exception:
+            metadata_by_type[atype["key"]] = None
+
+    # Render cards en 4 columnas
+    cols = st.columns(4)
+    for idx, atype in enumerate(ANALYSIS_TYPES):
+        with cols[idx]:
+            meta = metadata_by_type[atype["key"]]
+            _render_card(atype, meta, instance_id)
+
+
+def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance_id: str) -> None:
+    """Renderiza una card individual + botón Ver detalle."""
+    if meta is None:
+        st.markdown(
+            f"<div class='wm-recent-card empty'>"
+            f"<div class='wm-recent-card-head'>"
+            f"<span class='wm-recent-card-icon'>{atype['icon']}</span>"
+            f"<span class='wm-recent-card-title'>{atype['label']}</span>"
+            f"</div>"
+            f"<div class='wm-recent-empty-msg'>Sin snapshots todavía. "
+            f"Subí CSVs en Load Data y elegí 'Guardar para Live Monitoring'.</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    ago = _format_time_ago(meta.get("timestamp", ""))
+    label = meta.get("corrida_label", "") or "(sin label)"
+
+    # Stats compact por tipo
+    if atype["key"] == "tabular":
+        worst = meta.get("worst_severity", "")
+        sev_class = f"wm-recent-sev-{worst}" if worst in ("Normal", "Alarma", "Danger") else ""
+        stats = (
+            f"<span class='{sev_class}'>{worst or '—'}</span> · "
+            f"{meta.get('n_channels', 0)} canales · "
+            f"{meta.get('n_danger', 0)}D / {meta.get('n_alarm', 0)}A / "
+            f"{meta.get('n_normal', 0)}N"
+        )
+    elif atype["key"] == "orbit":
+        stats = (
+            f"{meta.get('n_bearings', 0)} cojinete(s)"
+        )
+        labels = meta.get("bearing_labels", [])
+        if labels:
+            stats += f" · {', '.join(labels[:3])}"
+    else:
+        stats = f"{meta.get('n_sensors', 0)} sensor(es)"
+        labels = meta.get("sensor_labels", [])
+        if labels:
+            stats += f" · {', '.join(labels[:4])}"
+        if len(labels) > 4:
+            stats += "…"
+
+    st.markdown(
+        f"<div class='wm-recent-card'>"
+        f"<div class='wm-recent-card-head'>"
+        f"<span class='wm-recent-card-icon'>{atype['icon']}</span>"
+        f"<span class='wm-recent-card-title'>{atype['label']}</span>"
+        f"<span class='wm-recent-card-ago'>{ago}</span>"
+        f"</div>"
+        f"<div class='wm-recent-card-label'>{label}</div>"
+        f"<div class='wm-recent-card-stats'>{stats}</div>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+    if st.button(
+        f"Ver detalle",
+        key=f"wm_recent_detail_{atype['key']}_{instance_id}",
+        use_container_width=True,
+    ):
+        st.session_state[f"_wm_recent_expanded_{atype['key']}"] = True
+
+    if st.session_state.get(f"_wm_recent_expanded_{atype['key']}"):
+        _render_detail_expander(atype, meta, instance_id)
+
+
+def _render_detail_expander(atype: Dict[str, Any], meta: Dict[str, Any], instance_id: str) -> None:
+    """Carga el snapshot completo y lo renderiza inline."""
+    import importlib
+    try:
+        mod = importlib.import_module(atype["module"])
+        load_fn = getattr(mod, atype["load_fn"])
+        payload = load_fn(instance_id, meta["snapshot_id"])
+    except Exception as e:
+        st.error(f"Error cargando snapshot: {e}")
+        return
+
+    if payload is None:
+        st.warning("Snapshot no encontrado.")
+        return
+
+    st.markdown(f"### {atype['icon']} {atype['label']} — `{meta['snapshot_id']}`")
+    if meta.get("corrida_label"):
+        st.caption(f"📌 {meta['corrida_label']}")
+    if meta.get("notes"):
+        st.caption(f"📝 {meta['notes']}")
+    if meta.get("operating_speed_rpm"):
+        st.caption(f"⚙ {meta['operating_speed_rpm']:.0f} RPM")
+
+    render_fn = _RENDER_FUNCTIONS.get(atype["render_fn"])
+    if render_fn:
+        render_fn(payload)
+
+    if st.button("✕ Cerrar detalle", key=f"wm_recent_close_{atype['key']}"):
+        st.session_state[f"_wm_recent_expanded_{atype['key']}"] = False
+        st.rerun()
+
+
+__all__ = ["render_recent_analyses_section"]

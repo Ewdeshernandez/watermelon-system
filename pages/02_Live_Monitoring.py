@@ -2984,6 +2984,17 @@ def main() -> None:
             unsafe_allow_html=True,
         )
 
+    # Ciclo 23.83 — Sección "📊 Últimos análisis" para el cliente.
+    # Muestra cards con los snapshots más recientes (Waveform, Spectrum,
+    # Orbit, Tabular) que el especialista subió desde Load Data.
+    try:
+        from core.recent_analyses_widget import render_recent_analyses_section
+        render_recent_analyses_section(instance_id)
+    except Exception as e:
+        # Falla silenciosa — la sección es opcional, no debe romper la página
+        import logging
+        logging.warning("recent_analyses_widget failed: %s", e)
+
     # Sensor selection (Ciclo 23.33) — selectbox discreto debajo del
     # diagrama. Razón técnica para no usar click directo en SVG:
     # Streamlit + browser full-reload pierde session_state → auth falla
