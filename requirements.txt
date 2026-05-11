@@ -33,9 +33,8 @@ anthropic>=0.39.0
 # Es un binding Python sobre resvg (Rust). Se distribuye como wheels
 # precompilados → NO requiere libcairo, libpango ni ningún apt package.
 resvg-py>=0.1.6
-# Ciclo 23.64: svglib como fallback secundario para PNG export.
-# Pure-Python, usa Pillow internamente (Pillow ya está arriba). renderPM
-# rinde SVG sin requerir libcairo. Si resvg-py falla en runtime esta es
-# la red de seguridad antes de mostrar "no disponible".
-svglib>=1.5.0
+# Ciclo 23.65: svglib REMOVIDO. svglib>=1.5 trae rlpycairo → pycairo →
+# requiere libcairo en el sistema, exactamente lo que cairosvg ya nos
+# rompió. Si resvg-py falla, el botón PNG queda en "no disponible" pero
+# la app NO crashea (try/except en _svg_to_png_hd cubre los 3 paths).
 # rebuild trigger
