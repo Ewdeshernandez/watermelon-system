@@ -727,28 +727,47 @@ def render_sensor_map_library(
 def _svg_to_png_hd(svg_str: str, width: int = 4000) -> Optional[bytes]:
     """Convierte SVG → PNG de alta resolución.
 
-    Intenta resvg-py primero (Rust, zero apt deps, wheels precompilados).
-    Fallback a cairosvg si está disponible. Devuelve None si nada funciona.
-    Cacheado 5 min para que el botón download no re-renderee cada click
-    (el SVG es idéntico hasta que cambian los valores live).
+    Cascada de estrategias:
+      1. resvg-py (Rust, mejor calidad)
+      2. svglib + reportlab.renderPM (pure-Python, usa Pillow)
+      3. cairosvg (requiere system libs)
+    Devuelve None si nada funciona. Cacheado 5 min.
     """
-    # Path A: resvg-py (Ciclo 23.63 — preferido por zero system deps)
+    # Path A: resvg-py — Rust, preferido por calidad
     try:
         import resvg_py
-        # resvg_py.svg_to_bytes acepta svg_string + resolución del output
-        png_list = resvg_py.svg_to_bytes(
+        out = resvg_py.svg_to_bytes(
             svg_string=svg_str,
             resolution=width,
         )
-        # La API devuelve list[int] (bytes serialized) o bytes según versión
-        if isinstance(png_list, (bytes, bytearray)):
-            return bytes(png_list)
-        if isinstance(png_list, list):
-            return bytes(png_list)
+        if isinstance(out, (bytes, bytearray)):
+            return bytes(out)
+        if isinstance(out, list) and out:
+            return bytes(out)
     except Exception:
         pass
 
-    # Path B: cairosvg fallback (si algún día se reinstalan system libs)
+    # Path B: svglib (Ciclo 23.64) — pure-Python, usa Pillow
+    try:
+        import io
+        from svglib.svglib import svg2rlg
+        from reportlab.graphics import renderPM
+        drawing = svg2rlg(io.StringIO(svg_str))
+        if drawing is None:
+            raise RuntimeError("svg2rlg returned None")
+        # Escalar drawing al ancho deseado
+        if drawing.width:
+            scale = width / float(drawing.width)
+            drawing.scale(scale, scale)
+            drawing.width *= scale
+            drawing.height *= scale
+        buf = io.BytesIO()
+        renderPM.drawToFile(drawing, buf, fmt="PNG")
+        return buf.getvalue()
+    except Exception:
+        pass
+
+    # Path C: cairosvg (sólo si system libs presentes)
     try:
         import cairosvg
         return cairosvg.svg2png(
@@ -760,52 +779,83 @@ def _svg_to_png_hd(svg_str: str, width: int = 4000) -> Optional[bytes]:
 
 
 def _render_export_bar(svg: str, instance_id: str) -> None:
-    """Barra de exportación debajo del SVG — SVG raw + PNG 4K."""
+    """Barra de exportación — popover discreto debajo del SVG."""
     ts = datetime.now().strftime("%Y%m%d_%H%M")
     safe_id = (instance_id or "asset").replace("/", "_").replace(" ", "_")
 
-    exp_cols = st.columns([2, 2, 1, 5])
-    with exp_cols[0]:
-        st.download_button(
-            label="📐 SVG vectorial",
-            data=svg.encode("utf-8"),
-            file_name=f"{safe_id}_diagram_{ts}.svg",
-            mime="image/svg+xml",
-            use_container_width=True,
-            help=(
-                "Descarga el diagrama como SVG. Vectorial (escala infinita), "
-                "ideal para reportes técnicos y edición en Illustrator/Inkscape."
-            ),
-            key=f"export_svg_{safe_id}",
-        )
-    with exp_cols[1]:
-        png_bytes = _svg_to_png_hd(svg, width=4000)
-        if png_bytes:
-            st.download_button(
-                label="🖼 PNG 4K",
-                data=png_bytes,
-                file_name=f"{safe_id}_diagram_{ts}.png",
-                mime="image/png",
-                use_container_width=True,
-                help=(
-                    "Descarga PNG de 4000 px de ancho. Ideal para WhatsApp, "
-                    "email, PowerPoint, Slack."
-                ),
-                key=f"export_png_{safe_id}",
-            )
-        else:
-            st.button(
-                "🖼 PNG 4K (no disponible)",
-                disabled=True,
-                use_container_width=True,
-                help=(
-                    "cairosvg no está instalado. Reinstala dependencias del "
-                    "servidor (requirements.txt + packages.txt)."
-                ),
-                key=f"export_png_disabled_{safe_id}",
-            )
-    with exp_cols[2]:
-        st.caption(f"📅 {ts}")
+    # CSS para que el popover trigger sea pequeño y alineado a la derecha
+    st.markdown("""
+    <style>
+    .wm-export-row {
+        display: flex; justify-content: flex-end;
+        margin: 6px 0 2px 0;
+    }
+    .wm-export-ts {
+        font-size: 11px; color: #94a3b8;
+        font-family: ui-monospace, Menlo, monospace;
+        align-self: center; margin-right: 10px;
+    }
+    /* Compactar el popover trigger */
+    div[data-testid="stPopover"] button {
+        padding: 4px 12px !important;
+        font-size: 12px !important;
+        min-height: 30px !important;
+        border-radius: 8px !important;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    right_cols = st.columns([7, 2])
+    with right_cols[1]:
+        try:
+            with st.popover("📥 Exportar diagrama", use_container_width=True):
+                st.caption(f"Snapshot: **{ts}**")
+                st.download_button(
+                    label="📐 SVG vectorial (.svg)",
+                    data=svg.encode("utf-8"),
+                    file_name=f"{safe_id}_diagram_{ts}.svg",
+                    mime="image/svg+xml",
+                    use_container_width=True,
+                    help="Vectorial, escala infinita. Para reportes e Illustrator/Inkscape.",
+                    key=f"export_svg_{safe_id}",
+                )
+                png_bytes = _svg_to_png_hd(svg, width=4000)
+                if png_bytes:
+                    st.download_button(
+                        label="🖼 PNG 4K (.png)",
+                        data=png_bytes,
+                        file_name=f"{safe_id}_diagram_{ts}.png",
+                        mime="image/png",
+                        use_container_width=True,
+                        help="4000 px wide. Para WhatsApp, email, PowerPoint, Slack.",
+                        key=f"export_png_{safe_id}",
+                    )
+                else:
+                    st.caption(
+                        "_PNG 4K no disponible — usa el SVG y convertí con "
+                        "Inkscape o https://svgtopng.com._"
+                    )
+        except AttributeError:
+            # Streamlit < 1.32 no tiene popover → fallback a botones inline chicos
+            cols2 = st.columns(2)
+            with cols2[0]:
+                st.download_button(
+                    "📐 SVG", data=svg.encode("utf-8"),
+                    file_name=f"{safe_id}_diagram_{ts}.svg",
+                    mime="image/svg+xml", use_container_width=True,
+                    key=f"export_svg_{safe_id}",
+                )
+            with cols2[1]:
+                png_bytes = _svg_to_png_hd(svg, width=4000)
+                if png_bytes:
+                    st.download_button(
+                        "🖼 PNG 4K", data=png_bytes,
+                        file_name=f"{safe_id}_diagram_{ts}.png",
+                        mime="image/png", use_container_width=True,
+                        key=f"export_png_{safe_id}",
+                    )
+                else:
+                    st.caption("_PNG no disponible_")
 
 
 # ============================================================

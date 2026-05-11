@@ -32,6 +32,10 @@ anthropic>=0.39.0
 # Ciclo 23.63: PNG export del diagrama Live Monitoring via resvg-py.
 # Es un binding Python sobre resvg (Rust). Se distribuye como wheels
 # precompilados → NO requiere libcairo, libpango ni ningún apt package.
-# Reactivamos el botón PNG 4K que había quedado gris en v3.31.62.
 resvg-py>=0.1.6
+# Ciclo 23.64: svglib como fallback secundario para PNG export.
+# Pure-Python, usa Pillow internamente (Pillow ya está arriba). renderPM
+# rinde SVG sin requerir libcairo. Si resvg-py falla en runtime esta es
+# la red de seguridad antes de mostrar "no disponible".
+svglib>=1.5.0
 # rebuild trigger
