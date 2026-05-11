@@ -426,15 +426,38 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
         unsafe_allow_html=True,
     )
 
-    if st.button(
-        f"Ver detalle",
-        key=f"wm_recent_detail_{atype['key']}_{instance_id}",
-        use_container_width=True,
-    ):
-        st.session_state[f"_wm_recent_expanded_{atype['key']}"] = True
+    # Ciclo 23.87 — Waveform redirige al módulo dedicado (Time Waveforms)
+    # con URL params para que se renderice con UX completa. Los otros
+    # tipos siguen con el preview inline hasta v3.31.88+.
+    if atype["key"] == "waveform":
+        snap_id = meta.get("snapshot_id", "")
+        # Link como HTML anchor (st.link_button puede no estar disponible en
+        # todas las versions de Streamlit). target="_self" mantiene la
+        # sesión y el session_state.
+        link_url = f"/Time_Waveforms?snapshot={snap_id}&instance={instance_id}"
+        st.markdown(
+            f"<a href='{link_url}' target='_self' style='"
+            f"display:flex;align-items:center;justify-content:center;"
+            f"width:100%;padding:8px 12px;margin-top:4px;"
+            f"background:#2563eb;color:white;border-radius:8px;"
+            f"text-decoration:none;font-weight:600;font-size:13px;"
+            f"transition:background 0.15s;'"
+            f"onmouseover=\"this.style.background='#1d4ed8'\""
+            f"onmouseout=\"this.style.background='#2563eb'\">"
+            f"📊 Abrir en Time Waveforms</a>",
+            unsafe_allow_html=True,
+        )
+    else:
+        # Otros tipos: preview inline (próxima version los migra a redirect)
+        if st.button(
+            f"Ver detalle",
+            key=f"wm_recent_detail_{atype['key']}_{instance_id}",
+            use_container_width=True,
+        ):
+            st.session_state[f"_wm_recent_expanded_{atype['key']}"] = True
 
-    if st.session_state.get(f"_wm_recent_expanded_{atype['key']}"):
-        _render_detail_expander(atype, meta, instance_id)
+        if st.session_state.get(f"_wm_recent_expanded_{atype['key']}"):
+            _render_detail_expander(atype, meta, instance_id)
 
 
 def _render_detail_expander(atype: Dict[str, Any], meta: Dict[str, Any], instance_id: str) -> None:
