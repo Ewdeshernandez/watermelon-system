@@ -12,7 +12,8 @@ Diferenciador clave vs el legacy de la industria (System1, AMS, @ptitude):
   * **Phasor mini-charts** del 1X (vector amplitud + fase) por proximity.
   * **Severidad ISO/API** con fallback automático cuando faltan thresholds.
   * **Alarm strip** prominente cuando hay sensores en danger.
-  * Auto-refresh 10s opcional.
+  * Refresh manual con botón (auto-refresh removido en v3.31.59 — ruido en
+    análisis profundo, el operador refresca cuando lo necesita).
 
 Nada de marcas externas en el copy — el diferenciador es nuestro pipeline.
 """
@@ -1003,18 +1004,23 @@ def render_sensor_zoom_panel(
         unsafe_allow_html=True,
     )
 
-    # Selector de gráfico (Ciclo 23.57 — single drilldown point).
-    # Las tabs Vectores/Tendencia se consolidaron acá. Trend ahora con
-    # severity bands + Y-axis unit + X-axis datetime + range selector.
+    # Selector de gráfico (Ciclo 23.59 — Tendencia universal).
+    # TODO el análisis es tendencia: Direct, 1X amp, 1X fase, 2X amp, 2X fase,
+    # Gap. Cada métrica usa el mismo framework de plot (multi-sensor + bands +
+    # paginación). Phasor / Polar plot quedan para más adelante.
+    CHART_TYPE_TO_METRIC = {
+        "📈 Tendencia · Direct":       "Direct",
+        "📈 Tendencia · 1X amplitud":  "1X_Ampl",
+        "📈 Tendencia · 1X fase":      "1X_Phase",
+        "📈 Tendencia · 2X amplitud":  "2X_Ampl",
+        "📈 Tendencia · 2X fase":      "2X_Phase",
+        "📈 Tendencia · Gap":          "Gap",
+    }
     sel_col, range_col, close_col = st.columns([3, 2, 1])
     with sel_col:
         chart_type = st.selectbox(
             "Tipo de gráfico",
-            options=[
-                "📈 Tendencia",
-                "🎯 Vector 1X (amplitud + fase)",
-                "🎯 Vector 2X (amplitud + fase)",
-                "📐 Gap (DC voltage prox probe)",
+            options=list(CHART_TYPE_TO_METRIC.keys()) + [
                 "🔍 Espectro (próximamente)",
                 "🌊 Forma de onda (próximamente)",
                 "🌀 Orbit (próximamente)",
@@ -1025,7 +1031,7 @@ def render_sensor_zoom_panel(
             label_visibility="collapsed",
         )
     with range_col:
-        if "Tendencia" in chart_type:
+        if chart_type in CHART_TYPE_TO_METRIC:
             range_choice = st.selectbox(
                 "Rango",
                 ["Última hora", "6 horas", "24 horas", "7 días", "30 días", "Todo"],
@@ -1042,50 +1048,106 @@ def render_sensor_zoom_panel(
             st.query_params.clear()
             st.rerun()
 
-    if "Tendencia" in chart_type:
-        # Rich trend (Ciclo 23.58) — multi-sensor + paginación.
-        # System1 Trend Plot competitor. Línea fina sin markers (clase),
-        # severity bands del sensor primario, Y-axis con unidad de vibración,
-        # X-axis datetime, retención larga (meses/años) vía paginación PostgREST.
-        sensor_row = next(
-            (r for r in latest
-             if r.get("sensor_label") == selected_sensor and r.get("metric") == "Direct"),
-            None,
-        )
-        if not sensor_row:
-            st.warning(f"Sensor `{display_label}` no tiene lecturas Direct en latest.")
-        else:
-            var_name = sensor_row.get("variable", "")
-            sensor_unit = sensor_row.get("unit", "")
-            inst_id = instance_obj.instance_id if hasattr(instance_obj, "instance_id") else ""
+    if chart_type in CHART_TYPE_TO_METRIC:
+        # Tendencia universal (Ciclo 23.59) — funciona para Direct, 1X/2X
+        # amplitud, 1X/2X fase, y Gap. Mismo framework: multi-sensor con
+        # checkbox, paginación, severity bands (solo aplican para Direct),
+        # X-axis datetime, Y-axis con unidad real de la metric.
+        target_metric = CHART_TYPE_TO_METRIC[chart_type]
+        inst_id = instance_obj.instance_id if hasattr(instance_obj, "instance_id") else ""
 
-            # Multi-sensor selector — solo sensores con la MISMA variable/unidad
-            # del primario (no mezclamos g pk con mil pp en un solo eje).
-            compatible = [
-                r.get("sensor_label")
-                for r in latest
-                if r.get("metric") == "Direct"
-                and r.get("variable") == var_name
-                and r.get("unit") == sensor_unit
-                and r.get("sensor_label")
-            ]
-            compatible = sorted(set([s for s in compatible if s]))
-            if not compatible:
-                compatible = [selected_sensor]
+        # Todos los sensores de la instance que tienen al menos una lectura
+        # de la metric seleccionada (latest).
+        all_sensors_for_metric = sorted({
+            r.get("sensor_label")
+            for r in latest
+            if r.get("metric") == target_metric and r.get("sensor_label")
+        })
 
-            default_picks = [selected_sensor] if selected_sensor in compatible else compatible[:1]
-            picked = st.multiselect(
-                f"Sensores en la tendencia · variable `{var_name}` · unidad `{sensor_unit}`",
-                options=compatible,
-                default=default_picks,
-                key=f"zoom_trend_multi_{selected_sensor}",
-                help=(
-                    "Solo sensores con la misma variable y unidad que el primario, "
-                    "para mantener un eje Y consistente."
-                ),
+        if not all_sensors_for_metric:
+            st.info(
+                f"Ningún sensor de este activo envía la métrica `{target_metric}` "
+                f"todavía. Verificá la configuración del collector o probá otro tipo "
+                f"de gráfico."
             )
+        else:
+            # Sensor primario para el chart (color de severidad + KPIs + bands)
+            primary = selected_sensor if selected_sensor in all_sensors_for_metric else all_sensors_for_metric[0]
+            primary_row = next(
+                (r for r in latest
+                 if r.get("sensor_label") == primary and r.get("metric") == target_metric),
+                None,
+            ) or {}
+            sensor_unit = primary_row.get("unit", "")
+            metric_label = chart_type.replace("📈 Tendencia · ", "")
+
+            # Checkbox grid de sensores — todos los disponibles para la metric.
+            # CSS override para que NO use el rojo nativo de Streamlit.
+            st.markdown("""
+            <style>
+            /* Override del check rojo de Streamlit a azul royal */
+            div[data-testid="stCheckbox"] label > div:first-child > div:first-child > div[aria-checked="true"] {
+                background-color: #2563eb !important;
+                border-color: #2563eb !important;
+            }
+            div[data-testid="stCheckbox"] label > div:first-child > div:first-child > div {
+                border-color: #94a3b8;
+            }
+            .wm-sensor-pickbar {
+                background: #f8fafc;
+                border: 1px solid #e2e8f0;
+                border-radius: 10px;
+                padding: 10px 14px;
+                margin: 4px 0 12px 0;
+            }
+            </style>
+            """, unsafe_allow_html=True)
+
+            # Init session_state para checkboxes (default: solo primary marcado)
+            sensors_key = f"zoom_trend_sensors_{selected_sensor}_{target_metric}"
+            if sensors_key not in st.session_state:
+                st.session_state[sensors_key] = {primary: True}
+            sensor_state = st.session_state[sensors_key]
+
+            st.markdown('<div class="wm-sensor-pickbar">', unsafe_allow_html=True)
+            with st.container():
+                top_row = st.columns([6, 1, 1])
+                with top_row[0]:
+                    n_active = sum(1 for s in all_sensors_for_metric if sensor_state.get(s, s == primary))
+                    st.caption(
+                        f"🎚 **Sensores en gráfico** · {n_active}/{len(all_sensors_for_metric)} activos · "
+                        f"metric `{target_metric}` · unidad `{sensor_unit or '—'}`"
+                    )
+                with top_row[1]:
+                    if st.button("✓ Todos", key=f"all_{sensors_key}", use_container_width=True):
+                        for s in all_sensors_for_metric:
+                            st.session_state[sensors_key][s] = True
+                        st.rerun()
+                with top_row[2]:
+                    if st.button("✗ Solo 1", key=f"clear_{sensors_key}", use_container_width=True):
+                        st.session_state[sensors_key] = {primary: True}
+                        st.rerun()
+
+                # Grid de checkboxes (4 columnas)
+                n_cols = 4
+                cols = st.columns(n_cols)
+                for i, s in enumerate(all_sensors_for_metric):
+                    with cols[i % n_cols]:
+                        current = sensor_state.get(s, s == primary)
+                        new_val = st.checkbox(
+                            s, value=current,
+                            key=f"chk_{sensors_key}_{s}",
+                        )
+                        if new_val != current:
+                            st.session_state[sensors_key][s] = new_val
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            picked = [
+                s for s in all_sensors_for_metric
+                if st.session_state[sensors_key].get(s, s == primary)
+            ]
             if not picked:
-                picked = default_picks
+                picked = [primary]
 
             range_to_limit = {
                 "Última hora": 400,
@@ -1098,15 +1160,11 @@ def render_sensor_zoom_panel(
             limit = range_to_limit.get(range_choice, 2200)
 
             def _fetch_paginated(inst, var, met, total_limit, page_size=1000):
-                """Paginación manual — PostgREST cap default es 1000 rows.
-                Para rangos largos (7d/30d/Todo) iteramos en chunks."""
+                """Paginación manual — PostgREST cap default es 1000 rows."""
                 from core.live_readings import history_for_metric as _hfm
-                # Fast path: pedimos directo y vemos si el server devuelve <=1000
                 first = _hfm(inst, var, met, limit=min(total_limit, page_size))
                 if len(first) < page_size or total_limit <= page_size:
                     return first[:total_limit]
-                # Slow path: hay más datos. Iteramos usando captured_at del
-                # último row como cursor (paginación por keyset, sin offset).
                 from core.live_readings import _get_supabase_client, _TABLE
                 client = _get_supabase_client()
                 if client is None:
@@ -1138,28 +1196,19 @@ def render_sensor_zoom_panel(
                         break
                 return acc
 
-            # Recolectar series por sensor — cada sensor tiene su propio
-            # variable/Direct row en latest, pero el query usa solo variable/metric.
-            # Para discriminar sensores físicos distintos, usamos sensor_label
-            # en core (live_readings ya filtra por instance_id + variable + metric).
-            # Cada sensor_label en la misma instance comparte variable/metric;
-            # asumimos que cada sensor tiene su propia variable única en `latest`.
-            # En la práctica del schema actual, sensor_label coincide con variable
-            # para Direct (3X, 3Y, etc → variable matches sensor_label).
-            # Si esto cambia, este bloque necesita ajuste.
+            # Recolectar series por sensor — resolver variable real desde latest
             series_by_sensor = {}
             for s in picked:
-                # Resolver variable real del sensor s
                 s_row = next(
                     (r for r in latest
-                     if r.get("sensor_label") == s and r.get("metric") == "Direct"),
+                     if r.get("sensor_label") == s and r.get("metric") == target_metric),
                     None,
                 )
                 if not s_row:
                     continue
                 s_var = s_row.get("variable", s)
                 try:
-                    rows = _fetch_paginated(inst_id, s_var, "Direct", limit)
+                    rows = _fetch_paginated(inst_id, s_var, target_metric, limit)
                 except Exception:
                     rows = []
                 if rows:
@@ -1167,8 +1216,8 @@ def render_sensor_zoom_panel(
 
             if not series_by_sensor:
                 st.info(
-                    "Sin historial todavía para estos sensores. Esperá unos minutos "
-                    "para que el collector acumule lecturas."
+                    f"Sin historial todavía para los sensores seleccionados en `{target_metric}`. "
+                    "Esperá unos minutos para que el collector acumule lecturas."
                 )
             else:
                 import pandas as pd
@@ -1184,37 +1233,30 @@ def render_sensor_zoom_panel(
                     by="captured_at"
                 ).reset_index(drop=True)
 
-                # KPIs sobre el sensor primario (selected_sensor)
-                primary_df = df_trend[df_trend["sensor_label"] == selected_sensor]
+                # KPIs sobre el sensor primario (3 columnas, sin Σ Lecturas)
+                primary_df = df_trend[df_trend["sensor_label"] == primary]
                 if primary_df.empty:
                     primary_df = df_trend
-                c1, c2, c3, c4 = st.columns(4)
-                with c1: st.metric("Mín", f"{primary_df['value'].min():.3f} {sensor_unit}")
-                with c2: st.metric("Máx", f"{primary_df['value'].max():.3f} {sensor_unit}")
-                with c3: st.metric("Promedio", f"{primary_df['value'].mean():.3f} {sensor_unit}")
-                with c4: st.metric("Σ Lecturas", f"{len(df_trend):,}")
+                c1, c2, c3 = st.columns(3)
+                with c1: st.metric(f"Mín · {primary}", f"{primary_df['value'].min():.3f} {sensor_unit}")
+                with c2: st.metric(f"Máx · {primary}", f"{primary_df['value'].max():.3f} {sensor_unit}")
+                with c3: st.metric(f"Promedio · {primary}", f"{primary_df['value'].mean():.3f} {sensor_unit}")
 
-                alarm_val = alarm if alarm > 0 else 0
-                danger_val = danger if danger > 0 else 0
+                # Severity bands solo aplican para Direct (los thresholds están en
+                # término de amplitud Direct, no de fase ni de gap voltage).
+                show_bands = target_metric == "Direct"
+                alarm_val = alarm if (alarm > 0 and show_bands) else 0
+                danger_val = danger if (danger > 0 and show_bands) else 0
 
                 try:
                     import plotly.graph_objects as go
-                    # Paleta para multi-sensor (suficientes colores y todos
-                    # con contraste decente sobre fondo blanco/bands suaves)
                     palette = [
-                        "#1d4ed8",  # blue-700
-                        "#b45309",  # amber-700
-                        "#15803d",  # green-700
-                        "#7c3aed",  # violet-600
-                        "#dc2626",  # red-600
-                        "#0e7490",  # cyan-700
-                        "#be185d",  # pink-700
-                        "#525252",  # neutral-600
+                        "#1d4ed8", "#b45309", "#15803d", "#7c3aed",
+                        "#dc2626", "#0e7490", "#be185d", "#525252",
                     ]
                     fig = go.Figure()
 
-                    # Bands (sensor primario)
-                    if danger_val > 0:
+                    if show_bands and danger_val > 0:
                         y_max = max(df_trend["value"].max(), danger_val) * 1.10
                         fig.add_hrect(
                             y0=danger_val, y1=y_max,
@@ -1223,7 +1265,7 @@ def render_sensor_zoom_panel(
                             annotation_position="top right",
                             annotation=dict(font=dict(color="#991b1b", size=11)),
                         )
-                    if alarm_val > 0 and danger_val > alarm_val:
+                    if show_bands and alarm_val > 0 and danger_val > alarm_val:
                         fig.add_hrect(
                             y0=alarm_val, y1=danger_val,
                             fillcolor="#fef3c7", opacity=0.50, line_width=0,
@@ -1231,7 +1273,7 @@ def render_sensor_zoom_panel(
                             annotation_position="top right",
                             annotation=dict(font=dict(color="#92400e", size=11)),
                         )
-                    if alarm_val > 0:
+                    if show_bands and alarm_val > 0:
                         fig.add_hrect(
                             y0=0, y1=alarm_val,
                             fillcolor="#dcfce7", opacity=0.40, line_width=0,
@@ -1240,14 +1282,12 @@ def render_sensor_zoom_panel(
                             annotation=dict(font=dict(color="#166534", size=11)),
                         )
 
-                    # Trace por sensor — line-only, fino, sin markers
                     for idx, s in enumerate(picked):
                         sub = df_trend[df_trend["sensor_label"] == s]
                         if sub.empty:
                             continue
-                        color = fg if s == selected_sensor else palette[idx % len(palette)]
-                        # Render del primario un poco más grueso para destacar
-                        line_w = 1.8 if s == selected_sensor else 1.2
+                        color = fg if s == primary else palette[idx % len(palette)]
+                        line_w = 1.8 if s == primary else 1.2
                         fig.add_trace(go.Scatter(
                             x=sub["captured_at"],
                             y=sub["value"],
@@ -1263,7 +1303,7 @@ def render_sensor_zoom_panel(
 
                     fig.update_layout(
                         margin=dict(l=10, r=10, t=30, b=10),
-                        height=400,
+                        height=420,
                         plot_bgcolor="white",
                         xaxis=dict(
                             showgrid=True, gridcolor="#f1f5f9",
@@ -1272,7 +1312,7 @@ def render_sensor_zoom_panel(
                         ),
                         yaxis=dict(
                             showgrid=True, gridcolor="#f1f5f9",
-                            title=f"{var_name} ({sensor_unit})" if sensor_unit else var_name,
+                            title=f"{metric_label} ({sensor_unit})" if sensor_unit else metric_label,
                         ),
                         showlegend=len(picked) > 1,
                         legend=dict(
@@ -1292,86 +1332,8 @@ def render_sensor_zoom_panel(
                         values="value", aggfunc="last",
                     )
                     st.line_chart(pivot, height=340)
-    elif "Vector 1X" in chart_type or "Vector 2X" in chart_type:
-        prefix = "1X" if "1X" in chart_type else "2X"
-        ampl_row = next(
-            (r for r in latest
-             if r.get("sensor_label") == selected_sensor and r.get("metric") == f"{prefix}_Ampl"),
-            None,
-        )
-        phase_row = next(
-            (r for r in latest
-             if r.get("sensor_label") == selected_sensor and r.get("metric") == f"{prefix}_Phase"),
-            None,
-        )
-        if ampl_row is None and phase_row is None:
-            st.warning(
-                f"`{display_label}` no envía vectores {prefix}. Solo proximity "
-                f"probes con módulo vibration monitor de Bently 3500 generan "
-                f"datos vectoriales sincrónicos. Verificá módulo y configuración."
-            )
-        else:
-            try:
-                amp = float(ampl_row.get("value")) if ampl_row else None
-            except Exception:
-                amp = None
-            try:
-                phase = float(phase_row.get("value")) if phase_row else None
-            except Exception:
-                phase = None
-            unit = (ampl_row or {}).get("unit") or "—"
-            cA, cB, cC = st.columns([1, 1, 2])
-            with cA:
-                st.metric(f"Amplitud {prefix}", f"{amp:.3f} {unit}" if amp is not None else "—")
-            with cB:
-                st.metric(f"Fase {prefix}", f"{phase:.1f}°" if phase is not None else "—")
-            with cC:
-                if amp is not None and phase is not None:
-                    phasor_html = phasor_svg(amp, phase, max_amp=max(amp * 1.5, 1.0), color=fg, size=140)
-                    st.markdown(
-                        f'<div style="display:flex;justify-content:center;">{phasor_html}</div>',
-                        unsafe_allow_html=True,
-                    )
-        st.caption(
-            f"Vector {prefix} sincrónico — fundamental para Polar Plot, Bode "
-            f"y diagnóstico de balanceo/desalineamiento."
-        )
-    elif "Gap" in chart_type:
-        # Gap voltage del prox probe — viene como reading aparte con
-        # nombre/metric tipo "Gap" o sensor_label sufijo "_Gap".
-        gap_row = next(
-            (r for r in latest
-             if r.get("sensor_label") == selected_sensor
-             and "gap" in (r.get("metric") or "").lower()),
-            None,
-        )
-        if not gap_row:
-            # Fallback: buscar otro sensor con sufijo Gap
-            gap_label = f"{selected_sensor}_Gap"
-            gap_row = next(
-                (r for r in latest if r.get("sensor_label") == gap_label),
-                None,
-            )
-        if gap_row:
-            try:
-                gap_val = float(gap_row.get("value"))
-                gap_unit = gap_row.get("unit") or "V DC"
-                st.metric(f"Gap {display_label}", f"{gap_val:.2f} {gap_unit}")
-                st.caption(
-                    "Gap = voltaje DC del prox probe → distancia probe-shaft. "
-                    "Rango típico Bently 3500: -7 a -11 V DC. Fuera de eso → "
-                    "probe descalibrado o shaft desplazado."
-                )
-            except Exception:
-                st.warning("Lectura de Gap inválida.")
-        else:
-            st.info(
-                f"`{display_label}` no envía Gap voltage como reading separado. "
-                f"En Bently 3500 esto suele estar en `OK` channel o Buffer Out "
-                f"del módulo. Pronto: lectura directa desde collector."
-            )
     else:
-        # Placeholder para tipos que faltan (Spectrum, Waveform, Orbit, Cascade)
+        # Placeholder para Espectro / Waveform / Orbit / Cascade
         st.info(
             f"**{chart_type}** — esta vista todavía no está integrada en el "
             f"zoom panel. Pronto se integra inline para `{display_label}`."
@@ -2292,33 +2254,29 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    top_left, top_right = st.columns([3, 1])
-    with top_left:
-        st.markdown(
-            textwrap.dedent("""
-            <div class="wm-picker-header">
-                <div class="wm-picker-header-icon">🛰</div>
-                <div class="wm-picker-header-text">
-                    <div class="wm-picker-header-title">Activo monitoreado</div>
-                    <div class="wm-picker-header-sub">Real-time · ISO 20816 / API 670</div>
-                </div>
+    # Header industrial sin auto-refresh (Ciclo 23.59 — el operador refresca
+    # con el botón cuando lo necesita; el meta-refresh era ruido en el flujo
+    # de análisis profundo).
+    st.markdown(
+        textwrap.dedent("""
+        <div class="wm-picker-header">
+            <div class="wm-picker-header-icon">🛰</div>
+            <div class="wm-picker-header-text">
+                <div class="wm-picker-header-title">Activo monitoreado</div>
+                <div class="wm-picker-header-sub">Real-time · ISO 20816 / API 670</div>
             </div>
-            """).strip(),
-            unsafe_allow_html=True,
-        )
-        instance_id = st.selectbox(
-            "Activo",   # label oculto por CSS
-            options,
-            index=default_idx,
-            key="live_asset_v3",
-            format_func=_fmt_option,
-            label_visibility="collapsed",
-        )
-    with top_right:
-        auto_refresh = st.toggle(
-            "⟳ Auto-refresh 10s", value=False, key="live_autorefresh_v3",
-            help="Recarga automática cada 10 segundos.",
-        )
+        </div>
+        """).strip(),
+        unsafe_allow_html=True,
+    )
+    instance_id = st.selectbox(
+        "Activo",   # label oculto por CSS
+        options,
+        index=default_idx,
+        key="live_asset_v3",
+        format_func=_fmt_option,
+        label_visibility="collapsed",
+    )
 
     if not instance_id:
         return
@@ -2549,49 +2507,10 @@ def main() -> None:
         if st.button("🔄 Refrescar ahora", key="live_refresh_v3", use_container_width=True):
             st.rerun()
     with c2:
-        # Ciclo 23.49 — countdown JS al footer cuando auto-refresh está ON.
-        # El meta refresh hace el rerun automático cada 10s; el span con
-        # data-attr le dice a JS de cuántos segundos cuentar regresivo.
-        if auto_refresh:
-            st.markdown(
-                textwrap.dedent(f"""
-                <div style="font-size:12px;color:#475569;font-family:ui-monospace,Menlo,monospace;display:flex;gap:14px;align-items:center;">
-                    <span>📅 Sync local: <b>{datetime.now().strftime('%H:%M:%S')}</b></span>
-                    <span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;background:#dcfce7;color:#15803d;font-weight:700;font-size:11px;">
-                        <span style="width:6px;height:6px;border-radius:50%;background:#15803d;animation:wm-cd-pulse 1.4s ease-in-out infinite;"></span>
-                        AUTO-REFRESH ON · próximo refresh en <span id="wm-cd">10</span>s
-                    </span>
-                    <span style="color:#94a3b8;">Engine: Watermelon System · ISO 20816-3 / API 670</span>
-                </div>
-                <style>
-                @keyframes wm-cd-pulse {{
-                    0%, 100% {{ opacity: 1; }}
-                    50% {{ opacity: 0.4; }}
-                }}
-                </style>
-                <script>
-                (function() {{
-                    let n = 10;
-                    const el = document.getElementById('wm-cd');
-                    if (!el) return;
-                    const interval = setInterval(() => {{
-                        n -= 1;
-                        if (n <= 0) {{ clearInterval(interval); return; }}
-                        el.textContent = n;
-                    }}, 1000);
-                }})();
-                </script>
-                """).strip(),
-                unsafe_allow_html=True,
-            )
-        else:
-            st.caption(
-                f"📅 Sync local: {datetime.now().strftime('%H:%M:%S')} · "
-                "Engine: Watermelon System · ISO 20816-3 / API 670"
-            )
-
-    if auto_refresh:
-        st.markdown('<meta http-equiv="refresh" content="10">', unsafe_allow_html=True)
+        st.caption(
+            f"📅 Sync local: {datetime.now().strftime('%H:%M:%S')} · "
+            "Engine: Watermelon System · ISO 20816-3 / API 670"
+        )
 
 
 if __name__ == "__main__":
