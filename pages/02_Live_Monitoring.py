@@ -1771,6 +1771,16 @@ def render_history_chart(
     sensor_lookup: Dict[str, Dict[str, Any]],
     instance_obj: Any = None,
 ) -> None:
+    """
+    Trend chart multi-sensor (Ciclo 23.56) — el usuario puede overlayar
+    1..N sensores sobre el mismo gráfico con colores por sensor.
+    Refactor del antiguo single-sensor select. Compite directamente con
+    el "Trend Plot" de Bently System1 (que también permite multi).
+
+    Severity bands se muestran SOLO si todos los sensores seleccionados
+    comparten el mismo alarm/danger (e.g. todos g pk con misma norma).
+    En selección mixta de unidades, bands se omiten.
+    """
     direct_rows = [
         r for r in latest
         if r.get("metric") == "Direct"
@@ -1785,103 +1795,179 @@ def render_history_chart(
     ])
     labels = [f"{s} — {v}" for (s, v) in options]
 
-    # Variable + range selector (Ciclo 23.9: el usuario pidió ver más historial)
+    # Multi-sensor selector (Ciclo 23.56)
     col_var, col_range = st.columns([3, 1])
     with col_var:
-        chosen = st.selectbox(
-            "Variable a graficar", labels, key="live_history_var_v3",
+        chosen_labels = st.multiselect(
+            "📈 Sensores a graficar (1 o varios — overlay)",
+            labels,
+            default=labels[:1],  # por defecto el primero
+            key="live_history_vars_multi",
+            help="Seleccioná uno o varios sensores. Útil para comparar 1YA vs 2YA, "
+                 "o ver patrones cross-sensor de un eventos de carga.",
         )
     with col_range:
         range_choice = st.selectbox(
             "Rango", ["Última hora", "6 horas", "24 horas", "7 días", "Todo"],
             index=1, key="live_history_range",
-            help="Cuanta historia traer del registro append-only en Supabase",
+            help="Cuánto historial traer del registro append-only en Supabase",
         )
-    idx = labels.index(chosen)
-    sensor_lbl, var_name = options[idx]
 
-    # Cada poll del collector son ~10 s. Fórmula: 360 lecturas/h
-    # Caps generosos pero acotados para no crashear con asset que tenga 1M+ lecturas.
-    range_to_limit = {
-        "Última hora": 400,     # 1h × 360 lecturas + buffer
-        "6 horas":     2200,    # 6h × 360 + buffer
-        "24 horas":    9000,    # 24h × 360
-        "7 días":      62000,   # 7d × 360 × 24 ≈ 60.5k + buffer
-        "Todo":        200000,  # cap alto para no crashear; en activos con
-                                # +1M lecturas hay que paginar (TODO ciclo 24)
-    }
-    rows = history_for_metric(
-        instance_id, var_name, "Direct",
-        limit=range_to_limit.get(range_choice, 2200),
-    )
-    if not rows:
-        st.info("Sin histórico aún. Esperá unos minutos para que el collector acumule.")
+    if not chosen_labels:
+        st.info("Seleccioná al menos 1 sensor para ver tendencia.")
         return
 
-    df = pd.DataFrame(rows)
-    # CRITICAL: convertir UTC del backend a hora local del cliente.
-    # Sin esto el chart muestra timestamps "futuristas" (UTC interpretado como local).
-    df["captured_at"] = pd.to_datetime(df["captured_at"], utc=True).dt.tz_convert(_local_tz())
-    df = df.sort_values(by="captured_at").reset_index(drop=True)
+    # Caps de lecturas por sensor (cada poll del collector son ~10 s, 360/h)
+    range_to_limit = {
+        "Última hora": 400,
+        "6 horas":     2200,
+        "24 horas":    9000,
+        "7 días":      62000,
+        "Todo":        200000,
+    }
+    limit = range_to_limit.get(range_choice, 2200)
 
+    # Fetch data por sensor — guardamos por label
+    sensor_data: List[Dict[str, Any]] = []
+    for chosen in chosen_labels:
+        idx = labels.index(chosen)
+        sensor_lbl, var_name = options[idx]
+        rows = history_for_metric(
+            instance_id, var_name, "Direct", limit=limit,
+        )
+        if not rows:
+            continue
+        df_one = pd.DataFrame(rows)
+        df_one["captured_at"] = pd.to_datetime(
+            df_one["captured_at"], utc=True
+        ).dt.tz_convert(_local_tz())
+        df_one = df_one.sort_values(by="captured_at").reset_index(drop=True)
+        # Compute severity para este sensor
+        sensor_match = sensor_lookup.get(sensor_lbl)
+        sample_unit = direct_rows[idx].get("unit", "")
+        sev = compute_severity(
+            df_one["value"].iloc[-1] if len(df_one) else None,
+            sensor_match, sample_unit, instance_obj=instance_obj,
+        )
+        sensor_data.append({
+            "label": sensor_lbl,
+            "var": var_name,
+            "display": chosen,
+            "unit": sample_unit,
+            "df": df_one,
+            "alarm": sev.get("alarm", 0),
+            "danger": sev.get("danger", 0),
+        })
+
+    if not sensor_data:
+        st.info("Sin histórico aún en ningún sensor seleccionado.")
+        return
+
+    # KPIs combinados (sobre TODOS los sensores)
+    all_values = pd.concat([sd["df"]["value"] for sd in sensor_data])
+    total_readings = sum(len(sd["df"]) for sd in sensor_data)
     c1, c2, c3, c4 = st.columns(4)
-    with c1: st.metric("Mín", f"{df['value'].min():.3f}")
-    with c2: st.metric("Máx", f"{df['value'].max():.3f}")
-    with c3: st.metric("Promedio", f"{df['value'].mean():.3f}")
-    with c4: st.metric("Σ Lecturas", f"{len(df):,}")
+    with c1: st.metric("Mín (global)", f"{all_values.min():.3f}")
+    with c2: st.metric("Máx (global)", f"{all_values.max():.3f}")
+    with c3: st.metric("Promedio (global)", f"{all_values.mean():.3f}")
+    with c4: st.metric("Σ Lecturas", f"{total_readings:,}")
 
-    # Severity bands con asset class awareness (no más fallback ISO genérico)
-    sensor_match = sensor_lookup.get(sensor_lbl)
-    sample_unit = direct_rows[idx].get("unit", "") if idx < len(direct_rows) else ""
-    sev_sample = compute_severity(
-        df["value"].iloc[-1] if len(df) else None,
-        sensor_match, sample_unit, instance_obj=instance_obj,
+    # Decidir si mostramos bandas: solo si todos comparten unit + alarm + danger
+    units = {sd["unit"] for sd in sensor_data}
+    alarms = {sd["alarm"] for sd in sensor_data}
+    dangers = {sd["danger"] for sd in sensor_data}
+    show_bands = (
+        len(sensor_data) >= 1
+        and len(units) == 1
+        and len(alarms) == 1
+        and len(dangers) == 1
+        and sensor_data[0]["alarm"] > 0
+        and sensor_data[0]["danger"] > sensor_data[0]["alarm"]
     )
-    alarm = sev_sample["alarm"]
-    danger = sev_sample["danger"]
-    threshold_source = sev_sample["source"]
 
-    # Plotly chart con bandas
+    # Plotly chart multi-trace
     try:
         import plotly.graph_objects as go
+
         fig = go.Figure()
-        # Bandas
-        if danger > 0:
-            fig.add_hrect(y0=danger, y1=max(df["value"].max(), danger) * 1.05,
-                          fillcolor="#fee2e2", opacity=0.5, line_width=0,
+
+        # Bandas (solo en caso compatible)
+        if show_bands:
+            alarm = sensor_data[0]["alarm"]
+            danger = sensor_data[0]["danger"]
+            y_max = max(all_values.max(), danger * 1.1)
+            fig.add_hrect(y0=danger, y1=y_max * 1.05,
+                          fillcolor="#fee2e2", opacity=0.45, line_width=0,
                           annotation_text="Danger", annotation_position="top right",
                           annotation=dict(font=dict(color="#991b1b", size=10)))
-        if alarm > 0 and danger > alarm:
             fig.add_hrect(y0=alarm, y1=danger,
-                          fillcolor="#fef3c7", opacity=0.5, line_width=0,
+                          fillcolor="#fef3c7", opacity=0.45, line_width=0,
                           annotation_text="Alarma", annotation_position="top right",
                           annotation=dict(font=dict(color="#92400e", size=10)))
-        if alarm > 0:
             fig.add_hrect(y0=0, y1=alarm,
-                          fillcolor="#dcfce7", opacity=0.4, line_width=0,
+                          fillcolor="#dcfce7", opacity=0.35, line_width=0,
                           annotation_text="Normal", annotation_position="bottom right",
                           annotation=dict(font=dict(color="#166534", size=10)))
-        # Línea principal
-        fig.add_trace(go.Scatter(
-            x=df["captured_at"], y=df["value"],
-            mode="lines+markers", line=dict(color="#1e40af", width=2),
-            marker=dict(size=4),
-            name=f"{sensor_lbl} {var_name}",
-        ))
+
+        # Paleta corporativa (navy + accent variants — coherente con el design system)
+        palette = [
+            "#1e40af", "#15803d", "#b45309", "#dc2626",
+            "#7c3aed", "#0891b2", "#be185d", "#475569",
+        ]
+        for i, sd in enumerate(sensor_data):
+            color = palette[i % len(palette)]
+            fig.add_trace(go.Scatter(
+                x=sd["df"]["captured_at"],
+                y=sd["df"]["value"],
+                mode="lines+markers",
+                line=dict(color=color, width=2),
+                marker=dict(size=4),
+                name=sd["display"],
+                hovertemplate=(
+                    f"<b>{sd['label']} {sd['var']}</b><br>"
+                    "%{x|%Y-%m-%d %H:%M:%S}<br>"
+                    f"%{{y:.3f}} {sd['unit']}<extra></extra>"
+                ),
+            ))
+
+        # Y-axis title: si todos comparten unit, mostrar; sino "valor"
+        y_title = list(units)[0] if len(units) == 1 else "valor"
+
         fig.update_layout(
-            margin=dict(l=10, r=10, t=10, b=10),
-            height=360,
+            margin=dict(l=10, r=10, t=30, b=10),
+            height=420,
             plot_bgcolor="white",
-            xaxis=dict(showgrid=True, gridcolor="#f1f5f9"),
-            yaxis=dict(showgrid=True, gridcolor="#f1f5f9", title=sample_unit),
-            showlegend=False,
+            xaxis=dict(showgrid=True, gridcolor="#f1f5f9", title=""),
+            yaxis=dict(showgrid=True, gridcolor="#f1f5f9", title=y_title),
+            showlegend=True,
+            legend=dict(
+                orientation="h",
+                yanchor="bottom", y=1.02,
+                xanchor="right", x=1,
+                font=dict(size=11),
+            ),
+            hovermode="x unified",
         )
         st.plotly_chart(fig, use_container_width=True)
-    except Exception:
-        # fallback a st.line_chart si plotly falla
-        df_chart = df.set_index("captured_at")[["value"]]
-        df_chart.columns = [f"{sensor_lbl} — {var_name}"]
-        st.line_chart(df_chart, height=320)
+
+        # Caption si bands omitidas
+        if not show_bands and len(sensor_data) > 1:
+            mixed_units = ", ".join(sorted(units))
+            st.caption(
+                f"📐 Bandas de severidad omitidas — los sensores seleccionados "
+                f"tienen unidades mixtas ({mixed_units}) o thresholds distintos. "
+                f"Seleccioná sensores del mismo tipo (todos `g pk`, todos `in/s pk`, "
+                f"todos `mil pp`) para ver las bandas."
+            )
+    except Exception as e:
+        # Fallback a st.line_chart si plotly falla
+        st.caption(f"(plotly no disponible — fallback: {e})")
+        combined = pd.DataFrame()
+        for sd in sensor_data:
+            df_one = sd["df"].set_index("captured_at")[["value"]].copy()
+            df_one.columns = [sd["display"]]
+            combined = combined.join(df_one, how="outer") if not combined.empty else df_one
+        st.line_chart(combined, height=380)
 
 
 # ============================================================
@@ -2039,13 +2125,14 @@ def main() -> None:
     # Inline severity legend (Ciclo 23.49) — debajo del diagrama, hace
     # el SVG self-documenting. Usuario nuevo entiende los colores sin
     # tutorial. Render solo si tenemos diagrama vectorial.
+    # Ciclo 23.56: margen negativo arriba para tightear gap dibujo-legend.
     if has_map:
         st.markdown(
             textwrap.dedent("""
             <style>
             .wm-legend-row {
                 display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-                padding: 8px 14px; margin: 4px 0 16px 0;
+                padding: 8px 14px; margin: -8px 0 12px 0;
                 font-size: 11px; color: #475569;
                 background: rgba(255,255,255,0.6);
                 border: 1px solid #e2e8f0;
