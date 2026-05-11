@@ -234,10 +234,14 @@ def _render_sensor_dot(
         threshold_y = cy - 90
         spark_y = cy - 110
     else:
-        text_y = cy + 60 if (has_spark or has_threshold) else cy + 20
-        unit_y = cy + 75 if (has_spark or has_threshold) else cy + 32
-        threshold_y = cy + 90
-        spark_y = cy + 110
+        # Ciclo 23.53 — bottom positions bajadas 15px más para
+        # simetría con top (ambos lados con 25px clearance del body
+        # edge). User feedback: "faltaria bajar un poco mas las de
+        # abajo si las ves".
+        text_y = cy + 75 if (has_spark or has_threshold) else cy + 20
+        unit_y = cy + 90 if (has_spark or has_threshold) else cy + 32
+        threshold_y = cy + 105
+        spark_y = cy + 125
 
     # Click-to-drill (Ciclo 23.26) — wrapper SVG <a> con href absoluto.
     # Iteraciones previas:
@@ -420,9 +424,9 @@ def compose_train(
         )
         for s in sensors_with_status
     )
-    # Ciclo 23.52: bumped 105 → 130 para acomodar el nuevo layout que
-    # mantiene los valores claramente arriba/abajo del body sin tocar.
-    vert_pad = 130 if needs_decoration_pad else 0
+    # Ciclo 23.53: bumped 130 → 140 para acomodar bottom decorations
+    # bajadas (sparkline bottom edge ahora a cy+134, necesita pad de 140).
+    vert_pad = 140 if needs_decoration_pad else 0
     total_h = base_h + 2 * vert_pad
 
     # Sensor dots overlayados.
