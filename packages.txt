@@ -1,5 +1,1 @@
 chromium
-# Ciclo 23.61: system libs requeridas por cairosvg para SVG → PNG HD
-libcairo2
-libpango-1.0-0
-libpangocairo-1.0-0

@@ -29,9 +29,8 @@ Pillow>=10.0.0
 # no está configurado, el botón "🧠 Diagnóstico AI" aparece deshabilitado
 # pero el resto del sistema funciona normal.
 anthropic>=0.39.0
-# Ciclo 23.61: exportador HD del diagrama de Live Monitoring.
-# cairosvg convierte el SVG vectorial generado por composer.py a PNG
-# de alta resolución (4000px wide) para reportes, WhatsApp, email, PPT.
-# Requiere libcairo2 + libpango1.0-0 en packages.txt (system libs).
-cairosvg>=2.7.0
+# Ciclo 23.62: cairosvg removido (system libs en Streamlit Cloud causaban
+# 'Error installing requirements'). PNG export queda deshabilitado hasta
+# encontrar una alternativa zero-system-deps (resvg-py, o vía chromium
+# que ya está en packages.txt). SVG vectorial sigue funcionando.
 # rebuild trigger
