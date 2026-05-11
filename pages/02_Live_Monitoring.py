@@ -245,10 +245,30 @@ st.markdown(
 # HELPERS — tiempo, severidad, formato
 # ============================================================
 
-def _format_age(captured_at_iso: str) -> str:
-    try:
-        captured = datetime.fromisoformat(captured_at_iso.replace("Z", "+00:00"))
-    except Exception:
+def _parse_captured_at(captured_at: Any) -> Optional[datetime]:
+    """Parsea captured_at sea string ISO o datetime obj (Ciclo 23.75).
+
+    El cache anti-flicker puede tener datetime objects ya parseados
+    desde una sesión previa. Acepta ambos formatos.
+    """
+    if captured_at is None:
+        return None
+    if isinstance(captured_at, datetime):
+        # Asegurar timezone (UTC) si viene naive
+        if captured_at.tzinfo is None:
+            return captured_at.replace(tzinfo=timezone.utc)
+        return captured_at
+    if isinstance(captured_at, str):
+        try:
+            return datetime.fromisoformat(captured_at.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    return None
+
+
+def _format_age(captured_at: Any) -> str:
+    captured = _parse_captured_at(captured_at)
+    if captured is None:
         return "—"
     delta = (datetime.now(timezone.utc) - captured).total_seconds()
     if delta < 0:
@@ -262,12 +282,11 @@ def _format_age(captured_at_iso: str) -> str:
     return f"{int(delta / 86400)} d"
 
 
-def _seconds_since(captured_at_iso: str) -> float:
-    try:
-        captured = datetime.fromisoformat(captured_at_iso.replace("Z", "+00:00"))
-        return (datetime.now(timezone.utc) - captured).total_seconds()
-    except Exception:
+def _seconds_since(captured_at: Any) -> float:
+    captured = _parse_captured_at(captured_at)
+    if captured is None:
         return 999999.0
+    return (datetime.now(timezone.utc) - captured).total_seconds()
 
 
 def _staleness_color(seconds_old: float) -> str:
@@ -528,10 +547,12 @@ def _build_library_sensors(
     out: List[Dict[str, Any]] = []
     seen_anchors: set = set()  # evitar 2 sensores apilados en el mismo dot
 
-    # Stale threshold (Ciclo 23.34): si una lectura tiene más de 60s
-    # sin actualizar, se considera "stale" y se renderiza grayscale en el
-    # diagrama. El operador ve de un vistazo qué sensores no están vivos.
-    STALE_AGE_SECONDS = 60.0
+    # Stale threshold (Ciclo 23.75): subido de 60s → 180s. El collector
+    # industrial típicamente pollea cada 60-90 segundos; con latencia de
+    # red + ventana de procesamiento en Supabase, las lecturas "vivas"
+    # pueden tener edad de 60-120s sin estar realmente caídas. Threshold
+    # 180s (3 min) cubre el caso normal y deja claro el caso patológico.
+    STALE_AGE_SECONDS = 180.0
 
     for r in latest:
         if r.get("metric") != "Direct":
