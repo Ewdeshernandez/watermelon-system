@@ -189,51 +189,11 @@ def _inject_css_once():
 # =============================================================
 
 def _render_waveform_detail(payload: Dict[str, Any]) -> None:
-    """Plot Plotly de los waveforms del snapshot."""
-    sensors = payload.get("sensors", [])
-    if not sensors:
-        st.info("Sin sensores en este snapshot.")
-        return
+    """Plot del waveform snapshot — Ciclo 23.86 usa render reusable
+    con estilo idéntico al módulo Time Waveforms (un subplot por sensor)."""
     try:
-        import plotly.graph_objects as go
-        fig = go.Figure()
-        for s in sensors[:8]:  # max 8 traces
-            t = s.get("time", [])
-            v = s.get("values", [])
-            if not t or not v:
-                continue
-            fig.add_trace(go.Scatter(
-                x=t, y=v, mode="lines",
-                line=dict(width=1.2),
-                name=s.get("sensor_label", ""),
-                hovertemplate=f"<b>{s.get('sensor_label', '')}</b><br>"
-                              f"t=%{{x:.4f}}s, y=%{{y:.4f}} {s.get('unit', '')}<extra></extra>",
-            ))
-        fig.update_layout(
-            height=380,
-            margin=dict(l=10, r=10, t=20, b=10),
-            plot_bgcolor="white",
-            xaxis=dict(title="Tiempo (s)", showgrid=True, gridcolor="#f1f5f9"),
-            yaxis=dict(title="Amplitud", showgrid=True, gridcolor="#f1f5f9"),
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        )
-        st.plotly_chart(fig, use_container_width=True)
-
-        # Tabla de métricas
-        rows = []
-        for s in sensors:
-            m = s.get("metrics", {}) or {}
-            rows.append({
-                "Sensor": s.get("sensor_label", ""),
-                "Peak": f"{m.get('peak', 0):.3f}",
-                "P2P": f"{m.get('peak_to_peak', 0):.3f}",
-                "RMS": f"{m.get('rms', 0):.3f}",
-                "Crest": f"{m.get('crest_factor', 0):.2f}",
-                "Kurtosis": f"{m.get('kurtosis', 0):.2f}",
-                "Unidad": s.get("unit", ""),
-            })
-        st.dataframe(rows, use_container_width=True, hide_index=True)
+        from core.waveform_render import render_snapshot_waveforms
+        render_snapshot_waveforms(payload)
     except Exception as e:
         st.error(f"Error renderizando waveform: {e}")
 
