@@ -148,21 +148,36 @@ def consume_pending_snapshot_url() -> Optional[Tuple[str, str]]:
 
 
 def render_snapshot_loaded_banner() -> None:
-    """Banner para mostrar al inicio de una página cuando se vino desde
-    un snapshot histórico. Avisa al especialista que está viendo data
-    archivada, no carga reciente."""
+    """Header limpio cuando se vino desde un snapshot histórico.
+
+    Ciclo 23.91 — Simplificado: el cliente solo necesita saber qué máquina
+    y qué fecha. La metadata interna (snapshot_id, n_signals) queda oculta.
+    """
     info = st.session_state.get("_loaded_from_snapshot")
     if not info:
         return
-    corrida = info.get("corrida_label", "") or "(sin label)"
-    ts = info.get("timestamp", "")
-    inst = info.get("instance_id", "")
-    n = info.get("n_signals", 0)
-    st.info(
-        f"📌 **Mostrando snapshot histórico** — `{info.get('snapshot_id')}` · "
-        f"{n} señales · activo `{inst}`\n\n"
-        f"Corrida: **{corrida}** · Capturado: {ts}\n\n"
-        f"_Para cargar nuevos CSVs, ve a **Load Data**._"
+    inst = info.get("instance_id", "") or ""
+    ts_raw = info.get("timestamp", "") or ""
+
+    # Format fecha amigable: "2026-05-11T22:24:42" → "11 May 2026 · 22:24"
+    fecha = ts_raw
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+        meses = ["Ene", "Feb", "Mar", "Abr", "May", "Jun",
+                 "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"]
+        fecha = f"{dt.day} {meses[dt.month - 1]} {dt.year} · {dt.hour:02d}:{dt.minute:02d}"
+    except Exception:
+        pass
+
+    st.markdown(
+        f"<div style='font-size:22px;font-weight:800;color:#0f172a;"
+        f"margin:8px 0 4px 0;letter-spacing:-0.01em;'>"
+        f"📈 Formas de onda — {inst.upper()}"
+        f"</div>"
+        f"<div style='font-size:13px;color:#64748b;margin-bottom:14px;"
+        f"font-weight:600;'>{fecha}</div>",
+        unsafe_allow_html=True,
     )
 
 

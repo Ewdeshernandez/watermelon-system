@@ -425,18 +425,13 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
 
     ago = _format_time_ago(meta.get("timestamp", ""))
 
-    # Count compact por tipo
+    # Ciclo 23.91 — solo mostrar severidad si es Alarma/Danger (Tabular).
+    # Para los otros tipos no mostramos meta — solo el visual SVG habla.
+    meta_html = ""
     if atype["key"] == "tabular":
         worst = meta.get("worst_severity", "")
-        sev_class = f"wm-recent-sev-{worst}" if worst in ("Normal", "Alarma", "Danger") else ""
-        count_html = (
-            f"<span class='{sev_class}'>{worst or '—'}</span> · "
-            f"{meta.get('n_channels', 0)} canales"
-        )
-    elif atype["key"] == "orbit":
-        count_html = f"{meta.get('n_bearings', 0)} cojinete(s)"
-    else:
-        count_html = f"{meta.get('n_sensors', 0)} sensores"
+        if worst in ("Alarma", "Danger"):
+            meta_html = f"<span class='wm-recent-sev-{worst}'>{worst}</span>"
 
     svg = _TYPE_SVG.get(atype["key"], "")
 
@@ -447,7 +442,7 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
         f"<span class='wm-recent-ago'>{ago}</span>"
         f"</div>"
         f"<div class='wm-recent-visual'>{svg}</div>"
-        f"<div class='wm-recent-meta'>{count_html}</div>"
+        f"{f'<div class=wm-recent-meta>{meta_html}</div>' if meta_html else ''}"
         f"</div>",
         unsafe_allow_html=True,
     )

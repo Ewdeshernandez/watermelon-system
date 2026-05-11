@@ -1577,10 +1577,15 @@ def render_waveform_panel(
             "ATENCIÓN": "#f59e0b", "VIGILANCIA": "#84cc16",
             "CONDICIÓN ACEPTABLE": "#16a34a",
         }.get(sev, "#475569")
-        with st.expander(
-            f"Diagnóstico avanzado · {cat_iv_wf_diag.get('headline', '')}",
-            expanded=True,
-        ):
+        # Ciclo 23.91 — modo cliente: si se vino desde snapshot histórico,
+        # NO renderizamos el bloque diagnóstico avanzado (es nuestra IP).
+        # El cliente solo ve el plot del waveform, no la inteligencia.
+        _is_client_view = bool(st.session_state.get("_loaded_from_snapshot"))
+        if not _is_client_view:
+          with st.expander(
+              f"Diagnóstico avanzado · {cat_iv_wf_diag.get('headline', '')}",
+              expanded=True,
+          ):
             st.markdown(
                 f"<div style='display:inline-block; padding:6px 14px; "
                 f"border-radius:999px; background:{sev_color}; color:white; "
@@ -1647,7 +1652,11 @@ def render_waveform_panel(
     if ai_state_key not in st.session_state:
         st.session_state[ai_state_key] = None
 
-    with st.expander(
+    # Ciclo 23.91 — modo cliente: AI también queda oculto (es la "salsa
+    # secreta" — la inteligencia diagnostica que diferencia Watermelon).
+    _is_client_view_ai = bool(st.session_state.get("_loaded_from_snapshot"))
+    if not _is_client_view_ai:
+     with st.expander(
         "Interpretación clínica AI · Diagnóstico Cat IV asistido",
         expanded=False,
     ):
