@@ -427,26 +427,30 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
     )
 
     # Ciclo 23.87 — Waveform redirige al módulo dedicado (Time Waveforms)
-    # con URL params para que se renderice con UX completa. Los otros
-    # tipos siguen con el preview inline hasta v3.31.88+.
+    # con URL params para que se renderice con UX completa.
+    # Ciclo 23.88 — fix: uso st.link_button nativo en vez de HTML inline
+    # (Streamlit sanitiza event handlers JS, mostrando el HTML como texto).
     if atype["key"] == "waveform":
         snap_id = meta.get("snapshot_id", "")
-        # Link como HTML anchor (st.link_button puede no estar disponible en
-        # todas las versions de Streamlit). target="_self" mantiene la
-        # sesión y el session_state.
         link_url = f"/Time_Waveforms?snapshot={snap_id}&instance={instance_id}"
-        st.markdown(
-            f"<a href='{link_url}' target='_self' style='"
-            f"display:flex;align-items:center;justify-content:center;"
-            f"width:100%;padding:8px 12px;margin-top:4px;"
-            f"background:#2563eb;color:white;border-radius:8px;"
-            f"text-decoration:none;font-weight:600;font-size:13px;"
-            f"transition:background 0.15s;'"
-            f"onmouseover=\"this.style.background='#1d4ed8'\""
-            f"onmouseout=\"this.style.background='#2563eb'\">"
-            f"📊 Abrir en Time Waveforms</a>",
-            unsafe_allow_html=True,
-        )
+        try:
+            st.link_button(
+                "📊 Abrir en Time Waveforms",
+                url=link_url,
+                use_container_width=True,
+                type="primary",
+            )
+        except (AttributeError, TypeError):
+            # Streamlit < 1.30 — fallback a markdown puro (sin JS)
+            st.markdown(
+                f"<a href='{link_url}' target='_self' "
+                f"style='display:block;text-align:center;width:100%;"
+                f"padding:8px 12px;margin-top:4px;background:#2563eb;"
+                f"color:white;border-radius:8px;text-decoration:none;"
+                f"font-weight:600;font-size:13px;'>"
+                f"📊 Abrir en Time Waveforms</a>",
+                unsafe_allow_html=True,
+            )
     else:
         # Otros tipos: preview inline (próxima version los migra a redirect)
         if st.button(
