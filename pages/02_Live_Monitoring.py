@@ -1039,16 +1039,20 @@ def _render_share_html(
         }}
 
         function buildCaption(publicUrl) {{
-            const lines = [`🛰 Watermelon — ${{META.tag}}`];
-            if (META.train) lines.push(`⚙ ${{META.train}}`);
+            // Ciclo 23.69: WhatsApp Web no renderiza emojis decorativos
+            // (satellite, gear, lightning, antenna…) y los muestra como cuadros.
+            // Caption profesional con texto limpio + un solo ✓/⚠ del status
+            // (esos sí están en todas las fuentes Unicode core).
+            const lines = [`Watermelon — ${{META.tag}}`];
+            if (META.train) lines.push(META.train);
             const k = [];
-            if (META.speed && META.speed !== '—') k.push(`⚡ ${{META.speed}}`);
-            if (META.n_sens > 0) k.push(`📡 ${{META.n_sens}} sensores`);
-            if (k.length) lines.push(k.join(' · '));
-            lines.push(`📊 ${{META.status}}`);
-            lines.push(`📅 ${{TS}}`);
+            if (META.speed && META.speed !== '—') k.push(META.speed);
+            if (META.n_sens > 0) k.push(`${{META.n_sens}} sensores`);
+            if (k.length) lines.push(k.join('  ·  '));
+            lines.push(`Estado: ${{META.status}}`);
+            lines.push(`Snapshot: ${{TS}}`);
             lines.push('');
-            lines.push(`🔗 ${{publicUrl}}`);
+            lines.push(publicUrl);
             return lines.join('\\n');
         }}
 
