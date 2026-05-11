@@ -908,12 +908,27 @@ def _render_share_html(
     # backslashes, gradients, todo. base64 esquiva todo eso.
     svg_b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
 
-    # Metadata para el caption rico (default seguro si no se pasó)
+    # Ciclo 23.71 — fix XSS: usar json.dumps para serializar strings que
+    # van inyectados como literales JS. El .replace("`","'") anterior no
+    # bloqueaba ", ', \, ni saltos de línea. Audit encontró que un
+    # instance_obj.tag tipo `TES1";alert(1)//` rompía el script. json.dumps
+    # genera un literal JS válido y seguro: "TES1\";alert(1)//".
+    import json
+    def _js(s) -> str:
+        """Serializa un string Python a un literal JS seguro."""
+        return json.dumps(s if s is not None else "")
+
     m = meta or {}
-    meta_tag    = (m.get("tag") or safe_id).replace("`", "'")
-    meta_train  = (m.get("train") or "").replace("`", "'")
-    meta_speed  = (m.get("speed") or "—").replace("`", "'")
-    meta_status = (m.get("status") or "—").replace("`", "'")
+    meta_tag_js    = _js(m.get("tag") or safe_id)
+    meta_train_js  = _js(m.get("train") or "")
+    meta_speed_js  = _js(m.get("speed") or "—")
+    meta_status_js = _js(m.get("status") or "—")
+    svg_b64_js     = _js(svg_b64)
+    supabase_url_js = _js(supabase_url)
+    anon_key_js    = _js(anon_key)
+    bucket_js      = _js(bucket)
+    safe_id_js     = _js(safe_id)
+    ts_js          = _js(ts)
     meta_n_sens = int(m.get("n_sensors") or 0)
     meta_n_alm  = int(m.get("n_alarm") or 0)
     meta_n_dan  = int(m.get("n_danger") or 0)
@@ -1000,19 +1015,21 @@ def _render_share_html(
 
     <script>
     (function() {{
-        const SVG_B64       = "{svg_b64}";
-        const SUPABASE_URL  = "{supabase_url}";
-        const ANON_KEY      = "{anon_key}";
-        const BUCKET        = "{bucket}";
-        const INSTANCE_ID   = "{safe_id}";
-        const TS            = "{ts}";
+        // Ciclo 23.71 — strings serializados con json.dumps en Python para
+        // ser seguros contra XSS (chars problemáticos quedan escapados).
+        const SVG_B64       = {svg_b64_js};
+        const SUPABASE_URL  = {supabase_url_js};
+        const ANON_KEY      = {anon_key_js};
+        const BUCKET        = {bucket_js};
+        const INSTANCE_ID   = {safe_id_js};
+        const TS            = {ts_js};
         const MAX_SIZE      = {max_size};
 
         const META = {{
-            tag:      "{meta_tag}",
-            train:    "{meta_train}",
-            speed:    "{meta_speed}",
-            status:   "{meta_status}",
+            tag:      {meta_tag_js},
+            train:    {meta_train_js},
+            speed:    {meta_speed_js},
+            status:   {meta_status_js},
             n_sens:   {meta_n_sens},
             n_alarm:  {meta_n_alm},
             n_danger: {meta_n_dan},
@@ -1062,15 +1079,22 @@ def _render_share_html(
             const svgStr = atob(SVG_B64);
             const blob = new Blob([svgStr], {{type: 'image/svg+xml;charset=utf-8'}});
             const url = URL.createObjectURL(blob);
+            const img = new Image();
+            let canvas = null;
             try {{
-                const img = new Image();
-                await new Promise((resolve, reject) => {{
-                    img.onload = resolve;
-                    img.onerror = () => reject(new Error('SVG no se pudo cargar como imagen'));
-                    img.src = url;
-                }});
+                // Ciclo 23.71 (N3) — timeout 30s previene cuelgue por SVG patológico
+                await Promise.race([
+                    new Promise((resolve, reject) => {{
+                        img.onload = resolve;
+                        img.onerror = () => reject(new Error('SVG no se pudo cargar como imagen'));
+                        img.src = url;
+                    }}),
+                    new Promise((_, rej) =>
+                        setTimeout(() => rej(new Error('Timeout cargando SVG (30s)')), 30000)
+                    ),
+                ]);
                 const aspect = img.naturalHeight / img.naturalWidth;
-                const canvas = document.createElement('canvas');
+                canvas = document.createElement('canvas');
                 canvas.width = width;
                 canvas.height = Math.round(width * aspect);
                 const ctx = canvas.getContext('2d');
@@ -1082,6 +1106,9 @@ def _render_share_html(
                 }});
             }} finally {{
                 URL.revokeObjectURL(url);
+                // Cleanup explícito (N2) — liberar buffers grandes
+                if (canvas) {{ canvas.width = 0; canvas.height = 0; }}
+                img.src = "";
             }}
         }}
 
@@ -1123,12 +1150,34 @@ def _render_share_html(
                 setStatus('', '');
                 showSuccess(publicUrl);
                 const caption = buildCaption(publicUrl);
+                // Ciclo 23.71 (C4) — Safari 17+ y Firefox 121+ bloquean
+                // window.open() desde iframe sandbox. Intentar primero abrir,
+                // si devuelve null fallback a copiar caption al clipboard.
+                let urlToOpen;
                 if (target === 'whatsapp') {{
-                    window.open(`https://wa.me/?text=${{encodeURIComponent(caption)}}`, '_blank');
+                    urlToOpen = `https://wa.me/?text=${{encodeURIComponent(caption)}}`;
                 }} else {{
                     const subject = encodeURIComponent(`Diagrama Watermelon — ${{META.tag}}`);
                     const body = encodeURIComponent(caption);
-                    window.open(`mailto:?subject=${{subject}}&body=${{body}}`, '_blank');
+                    urlToOpen = `mailto:?subject=${{subject}}&body=${{body}}`;
+                }}
+                const win = window.open(urlToOpen, '_blank');
+                if (!win) {{
+                    // Sandbox bloqueó la apertura — fallback: copiar al clipboard
+                    try {{
+                        await navigator.clipboard.writeText(caption);
+                        setStatus(
+                            '⚠ El navegador bloqueó abrir la ventana — ' +
+                            'caption copiado al portapapeles, pegalo manualmente.',
+                            'busy'
+                        );
+                    }} catch (cbe) {{
+                        setStatus(
+                            '⚠ El navegador bloqueó abrir la ventana y no se pudo ' +
+                            'copiar. Usá el link de arriba.',
+                            'error'
+                        );
+                    }}
                 }}
             }} catch (e) {{
                 console.error('wmShare error:', e);
@@ -1592,18 +1641,33 @@ def render_sensor_zoom_panel(
             if not picked:
                 picked = [primary]
 
+            # Ciclo 23.71 (W8) — limit "Todo" reducido de 500k a 50k. 500k
+            # filas son ~100s de fetches secuenciales y luego congelan
+            # plotly + browser. 50k cubre 30+ días con 1 lectura/min.
             range_to_limit = {
                 "Última hora": 400,
                 "6 horas":     2200,
                 "24 horas":    9000,
                 "7 días":      62000,
-                "30 días":     270000,
-                "Todo":        500000,
+                "30 días":     150000,
+                "Todo":        50000,
             }
             limit = range_to_limit.get(range_choice, 2200)
+            if limit > 20000:
+                st.caption(
+                    f"⚠ Rango grande ({limit:,} lecturas max) — la carga "
+                    f"puede tardar 30s+. Si el browser se traba, usá 24h o 7d."
+                )
 
             def _fetch_paginated(inst, var, met, total_limit, page_size=1000):
-                """Paginación manual — PostgREST cap default es 1000 rows."""
+                """Paginación keyset compuesta (Ciclo 23.71).
+
+                Antes paginábamos solo por `captured_at < oldest_cursor`,
+                pero si dos filas comparten timestamp exacto (collector
+                escribe N sensores en mismo batch), las del borde se
+                perdían. Ahora usamos `(captured_at, id)` como cursor
+                compuesto vía PostgREST `.or_(...)`.
+                """
                 from core.live_readings import history_for_metric as _hfm
                 first = _hfm(inst, var, met, limit=min(total_limit, page_size))
                 if len(first) < page_size or total_limit <= page_size:
@@ -1614,20 +1678,40 @@ def render_sensor_zoom_panel(
                     return first
                 acc = list(first)
                 while len(acc) < total_limit:
-                    oldest_cursor = acc[-1].get("captured_at")
+                    last_row = acc[-1]
+                    oldest_cursor = last_row.get("captured_at")
+                    oldest_id = last_row.get("id")
                     if not oldest_cursor:
+                        # Ciclo 23.71 (C3) — antes cortaba silenciosamente;
+                        # ahora avisamos al operador que el dataset puede
+                        # estar truncado por un timestamp nulo en un row.
+                        st.caption(
+                            f"⚠ Paginación cortada en {len(acc):,} filas "
+                            f"(fila con captured_at nulo)."
+                        )
                         break
                     try:
-                        resp = (
+                        q = (
                             client.table(_TABLE)
-                            .select("captured_at,value,unit,quality")
+                            .select("id,captured_at,value,unit,quality")
                             .eq("instance_id", inst)
                             .eq("variable", var)
                             .eq("metric", met)
-                            .lt("captured_at", oldest_cursor)
-                            .order("captured_at", desc=True)
-                            .limit(min(page_size, total_limit - len(acc)))
-                            .execute()
+                        )
+                        # Keyset compuesto: (captured_at < cursor)
+                        #              OR (captured_at = cursor AND id < oldest_id)
+                        if oldest_id is not None:
+                            q = q.or_(
+                                f"captured_at.lt.{oldest_cursor},"
+                                f"and(captured_at.eq.{oldest_cursor},id.lt.{oldest_id})"
+                            )
+                        else:
+                            q = q.lt("captured_at", oldest_cursor)
+                        resp = (
+                            q.order("captured_at", desc=True)
+                             .order("id", desc=True)
+                             .limit(min(page_size, total_limit - len(acc)))
+                             .execute()
                         )
                         chunk = list(getattr(resp, "data", []) or [])
                     except Exception:
@@ -2728,15 +2812,28 @@ def main() -> None:
     sensor_lookup = _build_sensor_lookup(instance_obj)
     latest = latest_for_instance(instance_id)
 
-    # Anti-flicker cache (Ciclo 23.60) — Supabase REST a veces devuelve []
-    # por timeouts transitorios o reconexión. Si tenemos un snapshot reciente
-    # en session_state lo reusamos para no mostrar el warning catastrófico
-    # cada vez que parpadea la red. TTL = 5 min; pasado eso sí asumimos
-    # que el activo no tiene datos.
+    # Anti-flicker cache (Ciclo 23.60, hardened 23.71) — Supabase REST a
+    # veces devuelve [] por timeouts transitorios o reconexión. Si tenemos
+    # un snapshot reciente en session_state lo reusamos para no mostrar el
+    # warning catastrófico cada vez que parpadea la red. TTL = 5 min.
+    # LRU cap a 5 instances para que el cache no crezca sin límite en
+    # sesiones largas que recorren muchos activos.
+    CACHE_MAX_ENTRIES = 5
     cache_key = f"wm_latest_cache_{instance_id}"
+    cache_index_key = "_wm_cache_keys"
     now_ts = datetime.now().timestamp()
+
     if latest:
         st.session_state[cache_key] = {"data": latest, "ts": now_ts}
+        # LRU eviction
+        keys = st.session_state.get(cache_index_key, [])
+        if instance_id in keys:
+            keys.remove(instance_id)
+        keys.append(instance_id)
+        while len(keys) > CACHE_MAX_ENTRIES:
+            old = keys.pop(0)
+            st.session_state.pop(f"wm_latest_cache_{old}", None)
+        st.session_state[cache_index_key] = keys
         using_cache = False
         cache_age = 0.0
     else:

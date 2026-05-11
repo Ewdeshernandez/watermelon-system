@@ -218,6 +218,12 @@ def history_for_metric(
     """
     Devuelve histórico ordenado descendiente por captured_at.
     Útil para gráficos de tendencia.
+
+    Ciclo 23.71 — `id` se selecciona también para permitir paginación
+    keyset compuesta `(captured_at desc, id desc)` que sobrevive a
+    timestamps duplicados (el collector escribe N sensores en mismo
+    batch con el mismo captured_at). Sin id, la paginación perdía
+    filas silenciosamente en bordes de page.
     """
     client = _get_supabase_client()
     if client is None:
@@ -225,11 +231,12 @@ def history_for_metric(
     try:
         resp = (
             client.table(_TABLE)
-            .select("captured_at,value,unit,quality")
+            .select("id,captured_at,value,unit,quality")
             .eq("instance_id", instance_id)
             .eq("variable", variable)
             .eq("metric", metric)
             .order("captured_at", desc=True)
+            .order("id", desc=True)
             .limit(limit)
             .execute()
         )
