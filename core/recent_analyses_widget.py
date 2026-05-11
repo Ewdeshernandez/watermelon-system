@@ -341,11 +341,10 @@ def render_recent_analyses_section(instance_id: str) -> None:
     _inject_css_once()
     import importlib
 
-    # Header de sección
+    # Header de sección — Ciclo 23.89: simplificado, menos verboso.
     st.markdown(
         f"<div class='wm-recent-header'>"
-        f"<span class='wm-recent-title'>📊 Últimos análisis del activo</span>"
-        f"<span class='wm-recent-sub'>Histórico · LRU 10 max · Supabase Storage</span>"
+        f"<span class='wm-recent-title'>📊 Última data</span>"
         f"</div>",
         unsafe_allow_html=True,
     )
@@ -426,31 +425,24 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
         unsafe_allow_html=True,
     )
 
-    # Ciclo 23.87 — Waveform redirige al módulo dedicado (Time Waveforms)
-    # con URL params para que se renderice con UX completa.
-    # Ciclo 23.88 — fix: uso st.link_button nativo en vez de HTML inline
-    # (Streamlit sanitiza event handlers JS, mostrando el HTML como texto).
+    # Ciclo 23.89 — Waveform redirige al módulo dedicado.
+    # Bug previo: st.link_button abre nueva tab → pierde session → redirige
+    # a login → home. Fix: usar markdown anchor con target=_self (misma tab,
+    # mantiene session) y SIN event handlers JS (Streamlit los sanitiza).
     if atype["key"] == "waveform":
         snap_id = meta.get("snapshot_id", "")
         link_url = f"/Time_Waveforms?snapshot={snap_id}&instance={instance_id}"
-        try:
-            st.link_button(
-                "📊 Abrir en Time Waveforms",
-                url=link_url,
-                use_container_width=True,
-                type="primary",
-            )
-        except (AttributeError, TypeError):
-            # Streamlit < 1.30 — fallback a markdown puro (sin JS)
-            st.markdown(
-                f"<a href='{link_url}' target='_self' "
-                f"style='display:block;text-align:center;width:100%;"
-                f"padding:8px 12px;margin-top:4px;background:#2563eb;"
-                f"color:white;border-radius:8px;text-decoration:none;"
-                f"font-weight:600;font-size:13px;'>"
-                f"📊 Abrir en Time Waveforms</a>",
-                unsafe_allow_html=True,
-            )
+        st.markdown(
+            f"<a href='{link_url}' target='_self' "
+            f"style='display:block;text-align:center;width:100%;"
+            f"padding:9px 12px;margin-top:6px;background:#2563eb;"
+            f"color:white;border-radius:8px;text-decoration:none;"
+            f"font-weight:600;font-size:13px;"
+            f"font-family:-apple-system,BlinkMacSystemFont,sans-serif;"
+            f"box-shadow:0 1px 2px rgba(0,0,0,0.06);'>"
+            f"📊 Abrir en Time Waveforms</a>",
+            unsafe_allow_html=True,
+        )
     else:
         # Otros tipos: preview inline (próxima version los migra a redirect)
         if st.button(
