@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import textwrap
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -2234,22 +2234,70 @@ def _render_machinery_card_v2(inst: Any, inst_id: str) -> None:
 
     is_active = st.session_state.get("wm_active_instance_id") == inst_id
 
-    # Card HTML — toda la pieza visual en un único st.markdown para evitar
-    # gaps entre elementos.
+    # Card HTML (Ciclo 23.54 polish) — hover lift + accent ring para
+    # active, footer separado con icons monocromos en vez de emojis
+    # rainbow. Look enterprise SaaS, no consumer-app.
     card_html = textwrap.dedent(f"""\
-    <div style="border:{'2px solid #3b82f6' if is_active else '1px solid #e5e7eb'};
-                border-radius:12px;padding:14px;background:white;
-                box-shadow:0 1px 3px rgba(0,0,0,0.05);margin-bottom:8px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-        <div style="font-weight:800;color:#0f172a;font-size:16px;letter-spacing:-0.01em;">{tag}</div>
+    <style>
+    .wmlib-card {{
+        border-radius: 14px;
+        padding: 16px;
+        background: white;
+        margin-bottom: 8px;
+        transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+        height: 100%;
+        position: relative;
+    }}
+    .wmlib-card:hover {{
+        transform: translateY(-2px);
+        box-shadow: 0 14px 28px rgba(15,23,42,0.10);
+        border-color: #cbd5e1;
+    }}
+    .wmlib-card.is-active {{
+        border: 2px solid #2563eb !important;
+        box-shadow: 0 8px 24px rgba(37,99,235,0.18);
+    }}
+    .wmlib-card.is-active::before {{
+        content: ""; position: absolute;
+        top: 0; left: 0; bottom: 0; width: 4px;
+        background: linear-gradient(180deg, #2563eb 0%, #1e40af 100%);
+        border-radius: 14px 0 0 14px;
+    }}
+    .wmlib-card-head {{
+        display: flex; justify-content: space-between;
+        align-items: center; margin-bottom: 10px;
+    }}
+    .wmlib-card-tag {{
+        font-weight: 800; color: #0f172a;
+        font-size: 17px; letter-spacing: -0.01em;
+    }}
+    .wmlib-card-title {{
+        font-size: 13px; color: #1f2937;
+        font-weight: 600; margin-bottom: 10px;
+        line-height: 1.35;
+    }}
+    .wmlib-card-footer {{
+        display: flex; justify-content: space-between;
+        font-size: 11px; color: #64748b;
+        border-top: 1px solid #f1f5f9;
+        padding-top: 10px; margin-top: 10px;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }}
+    .wmlib-card-footer b {{ color: #0f172a; font-weight: 800; }}
+    </style>
+    <div class="wmlib-card{' is-active' if is_active else ''}"
+         style="border:{'2px solid #2563eb' if is_active else '1px solid #e6ebf2'};
+                box-shadow:{'0 8px 24px rgba(37,99,235,0.18)' if is_active else '0 1px 3px rgba(15,23,42,0.04)'};">
+      <div class="wmlib-card-head">
+        <div class="wmlib-card-tag">{tag}</div>
         <span style="background:{sev_bg};color:{sev_color};padding:3px 9px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;border:1px solid {sev_color}33;">{sev_icon} {sev_label}</span>
       </div>
       {schematic_html}
-      <div style="font-size:13px;color:#1f2937;font-weight:600;margin-bottom:8px;line-height:1.3;">{title or "(sin tren definido)"}</div>
-      <div style="margin-bottom:10px;">{chips_html}</div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;border-top:1px solid #f1f5f9;padding-top:8px;">
-        <span>📡 {n_sensors} sensores</span>
-        <span>📄 {n_docs} docs</span>
+      <div class="wmlib-card-title">{title or "(sin tren definido)"}</div>
+      <div style="margin-bottom:6px;">{chips_html}</div>
+      <div class="wmlib-card-footer">
+        <span>◉ <b>{n_sensors}</b> sensores</span>
+        <span>⎙ <b>{n_docs}</b> docs</span>
       </div>
     </div>
     """)
@@ -2269,29 +2317,195 @@ def _render_machinery_card_v2(inst: Any, inst_id: str) -> None:
 
 def render_machinery_grid_v2() -> None:
     """
-    Grid moderno de máquinas (Ciclo 22.2a).
-    Cards con severidad coloreada, chips de metadata, schematic embebido.
+    Grid moderno de máquinas (Ciclo 22.2a + 23.54 international polish).
+
+    Iteraciones:
+      22.2a: Cards con severidad coloreada, chips de metadata, schematic.
+      23.54: + Header refinado con count badges, search box, filtros por
+             cliente y severidad, sort, hover states, density mejorada.
+             Target: superar System1/Bently en first impression de la
+             librería de máquinas.
     """
     instances = list_instances()
     if not instances:
         return
 
-    st.markdown("### 🏭 Máquinas registradas")
-    st.caption(
-        f"{len(instances)} máquina(s) en el sistema. "
-        "Click en cualquier card para activarla en todos los módulos de análisis."
+    # Cargamos los Instance objects una vez para extraer metadata para
+    # filtros y para render. Cache en local list para no re-llamar
+    # get_instance() en el loop de cards.
+    inst_pairs: List[Tuple[str, Any]] = []
+    for meta in instances:
+        iid = meta.get("instance_id", "")
+        if not iid:
+            continue
+        inst = get_instance(iid)
+        if inst is not None:
+            inst_pairs.append((iid, inst))
+
+    if not inst_pairs:
+        return
+
+    # Header refinado (Ciclo 23.54) — small caps + count badges en vez
+    # del 🏭 emoji "consumer-app". Look enterprise SaaS.
+    total_machines = len(inst_pairs)
+    total_sensors = sum(len(inst.sensors or []) for _, inst in inst_pairs)
+    total_docs = sum(len(inst.documents or []) for _, inst in inst_pairs)
+
+    st.markdown(
+        textwrap.dedent(f"""
+        <style>
+        .wmlib-header-row {{
+            display: flex; align-items: baseline;
+            justify-content: space-between; flex-wrap: wrap;
+            gap: 10px; margin: 8px 0 6px 0;
+        }}
+        .wmlib-header-title {{
+            font-size: 12px; font-weight: 800;
+            letter-spacing: 0.18em; text-transform: uppercase;
+            color: #475569;
+        }}
+        .wmlib-header-counts {{
+            display: inline-flex; gap: 14px; align-items: center;
+            font-size: 11px; color: #64748b;
+            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        }}
+        .wmlib-header-counts b {{ color: #0f172a; font-weight: 800; }}
+        .wmlib-header-counts .sep {{ color: #cbd5e1; }}
+        .wmlib-filter-bar {{
+            background: white;
+            border: 1px solid #e6ebf2;
+            border-radius: 12px;
+            padding: 10px 14px;
+            margin: 8px 0 18px 0;
+            box-shadow: 0 2px 8px rgba(15,23,42,0.04);
+        }}
+        .wmlib-filter-hint {{
+            font-size: 11px; color: #94a3b8;
+            margin-top: 6px;
+            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        }}
+        </style>
+        <div class="wmlib-header-row">
+            <span class="wmlib-header-title">Máquinas registradas</span>
+            <span class="wmlib-header-counts">
+                <span><b>{total_machines}</b> máquinas</span>
+                <span class="sep">·</span>
+                <span><b>{total_sensors}</b> sensores</span>
+                <span class="sep">·</span>
+                <span><b>{total_docs}</b> docs</span>
+            </span>
+        </div>
+        """).strip(),
+        unsafe_allow_html=True,
     )
 
+    # ─── Filtros (Ciclo 23.54) ─────────────────────────────────
+    # Search + cliente + severidad. Auto-derivamos las opciones de
+    # cliente de los instances cargados — no hay que mantener lista.
+    all_clients = sorted({
+        (inst.client or "").strip() for _, inst in inst_pairs
+        if (inst.client or "").strip()
+    })
+    all_sites = sorted({
+        (inst.site or inst.location or "").strip() for _, inst in inst_pairs
+        if (inst.site or inst.location or "").strip()
+    })
+    all_severities = sorted({
+        (inst.last_executive_severity or "SIN ANÁLISIS").upper().strip()
+        for _, inst in inst_pairs
+    })
+
+    f1, f2, f3, f4 = st.columns([3, 2, 2, 1.2])
+    with f1:
+        search_q = st.text_input(
+            "Buscar",
+            placeholder="🔍 Buscar máquina, modelo, cliente, sitio…",
+            key="wmlib_search",
+            label_visibility="collapsed",
+        ).strip().lower()
+    with f2:
+        sel_clients = st.multiselect(
+            "Cliente",
+            options=all_clients,
+            default=[],
+            key="wmlib_filter_client",
+            placeholder="Todos los clientes" if all_clients else "Sin clientes",
+            label_visibility="collapsed",
+        )
+    with f3:
+        sel_severities = st.multiselect(
+            "Severidad",
+            options=all_severities,
+            default=[],
+            key="wmlib_filter_sev",
+            placeholder="Todas las severidades",
+            label_visibility="collapsed",
+        )
+    with f4:
+        sort_by = st.selectbox(
+            "Ordenar",
+            options=["A → Z", "Z → A", "Más sensores", "Menos sensores"],
+            index=0,
+            key="wmlib_sort",
+            label_visibility="collapsed",
+        )
+
+    # Aplicar filtros
+    def _matches(iid: str, inst: Any) -> bool:
+        if sel_clients and (inst.client or "").strip() not in sel_clients:
+            return False
+        if sel_severities:
+            sev = (inst.last_executive_severity or "SIN ANÁLISIS").upper().strip()
+            if sev not in sel_severities:
+                return False
+        if search_q:
+            haystack = " ".join([
+                iid, inst.tag or "",
+                inst.driver_manufacturer or "", inst.driver_model or "",
+                inst.driven_manufacturer or "", inst.driven_model or "",
+                inst.client or "", inst.site or "", inst.location or "",
+            ]).lower()
+            if search_q not in haystack:
+                return False
+        return True
+
+    filtered = [(iid, inst) for iid, inst in inst_pairs if _matches(iid, inst)]
+
+    # Sort
+    if sort_by == "A → Z":
+        filtered.sort(key=lambda p: (p[1].tag or p[0]).lower())
+    elif sort_by == "Z → A":
+        filtered.sort(key=lambda p: (p[1].tag or p[0]).lower(), reverse=True)
+    elif sort_by == "Más sensores":
+        filtered.sort(key=lambda p: -len(p[1].sensors or []))
+    elif sort_by == "Menos sensores":
+        filtered.sort(key=lambda p: len(p[1].sensors or []))
+
+    # Si los filtros activos redujeron el set, mostrar contador
+    if len(filtered) != len(inst_pairs):
+        st.markdown(
+            f'<div class="wmlib-filter-hint">'
+            f'Mostrando <b>{len(filtered)}</b> de <b>{len(inst_pairs)}</b> máquinas. '
+            f'<a href="#" onclick="window.location.reload();return false;">Limpiar filtros</a> ↻'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    if not filtered:
+        st.info(
+            "No hay máquinas que coincidan con los filtros aplicados. "
+            "Probá ajustar el search o limpiar los filtros."
+        )
+        st.markdown("---")
+        return
+
     cards_per_row = 3
-    for i in range(0, len(instances), cards_per_row):
+    for i in range(0, len(filtered), cards_per_row):
         cols = st.columns(cards_per_row, gap="medium")
         for j, col in enumerate(cols):
-            if i + j >= len(instances):
+            if i + j >= len(filtered):
                 continue
-            inst_id = instances[i + j].get("instance_id", "")
-            inst = get_instance(inst_id)
-            if inst is None:
-                continue
+            inst_id, inst = filtered[i + j]
             with col:
                 _render_machinery_card_v2(inst, inst_id)
 
