@@ -2995,6 +2995,15 @@ def main() -> None:
         import logging
         logging.warning("recent_analyses_widget failed: %s", e)
 
+    # Ciclo 23.84 — Sección "📦 Exportar histórico" para envío al cliente.
+    # Permite generar ZIP local o subir + enviar link por email.
+    try:
+        from core.history_export_widget import render_history_export_section
+        render_history_export_section(instance_id, instance_obj)
+    except Exception as e:
+        import logging
+        logging.warning("history_export_widget failed: %s", e)
+
     # Sensor selection (Ciclo 23.33) — selectbox discreto debajo del
     # diagrama. Razón técnica para no usar click directo en SVG:
     # Streamlit + browser full-reload pierde session_state → auth falla
