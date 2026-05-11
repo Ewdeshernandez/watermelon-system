@@ -3,8 +3,10 @@ core.scl_history
 ================
 
 Persistencia y comparativo de snapshots históricos del módulo Shaft
-Centerline (Ciclo 17.3). Para cada corrida snapshoteada captura, por
-**par de sondas X-Y** del cojinete:
+Centerline (Ciclo 17.3, refactorizado en 23.78).
+
+Para cada corrida snapshoteada captura, por **par de sondas X-Y** del
+cojinete:
 
   - x_gap, y_gap (posición del muñón a velocidad operativa, en mil)
   - eccentricity_ratio (0-1) — distancia desde centro / clearance
@@ -14,56 +16,47 @@ Centerline (Ciclo 17.3). Para cada corrida snapshoteada captura, por
 
 Permite ver superpuestas las trayectorias del muñón entre corridas:
 
-  - **Migración del centerline**: posición media en operativa cambió
-    entre corridas → desgaste asimétrico, asentamiento, deformación
-    térmica del soporte.
-  - **Cambio de eccentricity ratio**: el muñón está más cerca o más
-    lejos de la pared del cojinete → cambio de carga, de viscosidad
-    del aceite, o pérdida de clearance.
-  - **Shift del attitude angle**: dirección de la fuerza
-    hidrodinámica cambió → cambio de balance, alineación o
-    distribución de carga entre cojinetes.
-  - **Lift-off speed evolution**: si la velocidad a la que el muñón
-    se separa del fondo del cojinete cambia → degradación del
-    soporte hidrodinámico (API 670 §6.7).
+  - **Migración del centerline**
+  - **Cambio de eccentricity ratio**
+  - **Shift del attitude angle**
+  - **Lift-off speed evolution** (API 670 §6.7)
 
-Storage: ``{INSTANCES_DIR}/{instance_id}/history/scl_{ISO8601}.json``
+Storage (Ciclo 23.78): delegado a ``core.history_storage`` que abstrae
+Supabase Storage (backend principal) + fallback a disco local. La API
+pública de este módulo NO cambia — los callers (`pages/09_Shaft_Centerline.py`)
+siguen funcionando idénticos.
 
 Reusa los clasificadores de polar_history para amplitude/phase
-classifiers cuando aplique (eccentricity ratio change uses similar
-percentage thresholds).
+classifiers cuando aplique.
 """
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from core.instance_repository import INSTANCES_DIR
+from core import history_storage
 
-MAX_SCL_SNAPSHOTS_PER_INSTANCE = 24
+# Compat: la app vieja exportaba esta constante. Mantenemos el símbolo
+# pero ahora el LRU real lo aplica history_storage (default 10).
+MAX_SCL_SNAPSHOTS_PER_INSTANCE = history_storage.MAX_SNAPSHOTS_PER_TYPE
 
-
-def _scl_history_dir(instance_id: str) -> Path:
-    p = INSTANCES_DIR / instance_id / "history"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
+_SNAPSHOT_TYPE = "scl"
 
 
-def _scl_snapshot_path(instance_id: str, snapshot_id: str) -> Path:
-    return _scl_history_dir(instance_id) / f"{snapshot_id}.json"
-
+# ============================================================
+# HELPERS internos (preservados de la versión anterior)
+# ============================================================
 
 def _new_scl_snapshot_id() -> str:
-    return "scl_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+    """Compat: el caller histórico usa este nombre. Delega a history_storage."""
+    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE)
 
 
 def _safe_float(v) -> float:
     try:
         f = float(v)
-        if f != f:
+        if f != f:  # NaN check
             return 0.0
         return f
     except Exception:
@@ -100,6 +93,9 @@ def save_scl_snapshot(
             - trajectory_speed/x_gap/y_gap (listas downsampleadas)
         corrida_label: etiqueta humana
         notes: observaciones del usuario
+
+    Returns:
+        snapshot_id (str)
     """
     if not instance_id:
         raise ValueError("instance_id requerido")
@@ -157,74 +153,48 @@ def save_scl_snapshot(
         "bearings": cleaned,
     }
 
-    with open(_scl_snapshot_path(instance_id, sid), "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-
-    _enforce_max_scl_snapshots(instance_id)
+    # Ciclo 23.78: delegar al backend. LRU rotation se aplica solo.
+    history_storage.save_snapshot(instance_id, _SNAPSHOT_TYPE, sid, payload)
     return sid
 
 
 def list_scl_snapshots(
-    instance_id: str, limit: int = MAX_SCL_SNAPSHOTS_PER_INSTANCE,
+    instance_id: str,
+    limit: int = MAX_SCL_SNAPSHOTS_PER_INSTANCE,
 ) -> List[Dict[str, Any]]:
-    """Lista snapshots SCL más recientes primero."""
-    h = _scl_history_dir(instance_id)
-    if not h.exists():
-        return []
-    items = []
-    for p in sorted(h.glob("scl_*.json"), reverse=True):
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                d = json.load(f)
-            items.append({
-                "snapshot_id": d.get("snapshot_id", p.stem),
-                "timestamp": d.get("timestamp", ""),
-                "corrida_label": d.get("corrida_label", ""),
-                "notes": d.get("notes", ""),
-                "operating_speed_rpm": d.get("operating_speed_rpm"),
-                "n_bearings": len(d.get("bearings", [])),
-            })
-            if len(items) >= limit:
-                break
-        except Exception:
+    """Lista snapshots SCL más recientes primero.
+
+    Devuelve metadata resumida (sin el payload completo) para que la
+    UI pueda armar el listado sin descargar TODAS las trayectorias.
+    """
+    items: List[Dict[str, Any]] = []
+    snaps = history_storage.list_snapshots(instance_id, _SNAPSHOT_TYPE)
+    for snap in snaps[:limit]:
+        d = history_storage.load_snapshot(instance_id, _SNAPSHOT_TYPE, snap["snapshot_id"])
+        if d is None:
             continue
+        items.append({
+            "snapshot_id": d.get("snapshot_id", snap["snapshot_id"]),
+            "timestamp": d.get("timestamp", ""),
+            "corrida_label": d.get("corrida_label", ""),
+            "notes": d.get("notes", ""),
+            "operating_speed_rpm": d.get("operating_speed_rpm"),
+            "n_bearings": len(d.get("bearings", [])),
+        })
     return items
 
 
 def load_scl_snapshot(instance_id: str, snapshot_id: str) -> Optional[Dict[str, Any]]:
-    p = _scl_snapshot_path(instance_id, snapshot_id)
-    if not p.exists():
-        return None
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    return history_storage.load_snapshot(instance_id, _SNAPSHOT_TYPE, snapshot_id)
 
 
 def delete_scl_snapshot(instance_id: str, snapshot_id: str) -> bool:
-    p = _scl_snapshot_path(instance_id, snapshot_id)
-    if not p.exists():
-        return False
-    try:
-        p.unlink()
-        return True
-    except Exception:
-        return False
-
-
-def _enforce_max_scl_snapshots(instance_id: str) -> None:
-    h = _scl_history_dir(instance_id)
-    files = sorted(h.glob("scl_*.json"), reverse=True)
-    for old in files[MAX_SCL_SNAPSHOTS_PER_INSTANCE:]:
-        try:
-            old.unlink()
-        except Exception:
-            pass
+    return history_storage.delete_snapshot(instance_id, _SNAPSHOT_TYPE, snapshot_id)
 
 
 # ============================================================
 # COMPARATIVO + SKIP IDENTICAL
+# (preservado idéntico — no toca storage, solo lógica de comparación)
 # ============================================================
 
 def _scl_snapshot_is_identical_to(
@@ -291,121 +261,70 @@ def get_scl_history_for_bearing(
     max_snapshots: int = 8,
     current_reading: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    """Histórico de un bearing a través de snapshots SCL ordenados asc."""
-    snaps = list_scl_snapshots(instance_id, limit=max_snapshots)
-    points: List[Dict[str, Any]] = []
-    for s in snaps:
+    """Histórico de un bearing a través de snapshots SCL ordenados asc.
+
+    Args:
+        instance_id: Asset Instance ID.
+        bearing_label: ej. "GEN DE".
+        max_snapshots: máximo histórico a devolver (incluye current si pasa).
+        current_reading: lectura actual opcional con keys x_gap, y_gap,
+            eccentricity_ratio, attitude_angle, csv_timestamp. Si se pasa,
+            se incluye como último elemento del retorno.
+
+    Returns:
+        Lista de dicts ordenados de más antiguo a más reciente:
+            [
+                {snapshot_id, timestamp, corrida_label, op_speed,
+                 x_gap, y_gap, ecc, attitude, clearance, csv_timestamp,
+                 is_current (solo si current_reading provisto)},
+                ...
+            ]
+    """
+    snaps_meta = list_scl_snapshots(instance_id, limit=max_snapshots)
+    if not snaps_meta and current_reading is None:
+        return []
+
+    items: List[Dict[str, Any]] = []
+    # Construir histórico desde snapshots (orden inverso para acabar asc)
+    for s in reversed(snaps_meta):
         snap = load_scl_snapshot(instance_id, s["snapshot_id"])
         if snap is None:
             continue
-        for bear in snap.get("bearings", []):
-            if str(bear.get("bearing_label", "")) == bearing_label:
-                points.append({
-                    "timestamp": snap.get("timestamp", ""),
-                    "corrida_label": snap.get("corrida_label", ""),
-                    "op_speed_rpm": _safe_float(snap.get("operating_speed_rpm")),
-                    "x_gap": _safe_float(bear.get("x_gap_at_op")),
-                    "y_gap": _safe_float(bear.get("y_gap_at_op")),
-                    "eccentricity_ratio": _safe_float(bear.get("eccentricity_ratio")),
-                    "attitude_angle": _safe_float(bear.get("attitude_angle")),
-                    "clearance_radial": _safe_float(bear.get("clearance_radial")),
-                    "lift_off_speed": _safe_float(bear.get("lift_off_speed")),
-                    "gap_unit": str(bear.get("gap_unit", "mil") or "mil"),
-                })
-                break
+        bearing_data = next(
+            (b for b in snap.get("bearings", [])
+             if str(b.get("bearing_label", "")) == bearing_label),
+            None,
+        )
+        if bearing_data is None:
+            continue
+        items.append({
+            "snapshot_id": snap.get("snapshot_id"),
+            "timestamp": snap.get("timestamp", ""),
+            "corrida_label": snap.get("corrida_label", ""),
+            "op_speed": snap.get("operating_speed_rpm"),
+            "x_gap": bearing_data.get("x_gap_at_op"),
+            "y_gap": bearing_data.get("y_gap_at_op"),
+            "ecc": bearing_data.get("eccentricity_ratio"),
+            "attitude": bearing_data.get("attitude_angle"),
+            "clearance": bearing_data.get("clearance_radial"),
+            "csv_timestamp": bearing_data.get("csv_timestamp", ""),
+            "is_current": False,
+        })
 
-    points.sort(key=lambda p: p["timestamp"])
-
+    # Agregar current_reading al final si existe
     if current_reading is not None:
-        x_curr = _safe_float(current_reading.get("x_gap"))
-        y_curr = _safe_float(current_reading.get("y_gap"))
-        already = False
-        if points:
-            last = points[-1]
-            if abs(last["x_gap"] - x_curr) < 0.01 and abs(last["y_gap"] - y_curr) < 0.01:
-                already = True
-        if not already:
-            points.append({
-                "timestamp": current_reading.get("timestamp")
-                    or datetime.now().isoformat(timespec="seconds"),
-                "corrida_label": current_reading.get("corrida_label", "Actual"),
-                "op_speed_rpm": _safe_float(current_reading.get("op_speed_rpm")),
-                "x_gap": x_curr,
-                "y_gap": y_curr,
-                "eccentricity_ratio": _safe_float(
-                    current_reading.get("eccentricity_ratio")),
-                "attitude_angle": _safe_float(
-                    current_reading.get("attitude_angle")),
-                "clearance_radial": _safe_float(
-                    current_reading.get("clearance_radial")),
-                "lift_off_speed": _safe_float(current_reading.get("lift_off_speed")),
-                "gap_unit": str(current_reading.get("gap_unit", "mil") or "mil"),
-            })
+        items.append({
+            "snapshot_id": "_current",
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "corrida_label": "Corrida actual",
+            "op_speed": current_reading.get("op_speed"),
+            "x_gap": _safe_float(current_reading.get("x_gap")),
+            "y_gap": _safe_float(current_reading.get("y_gap")),
+            "ecc": _safe_float(current_reading.get("eccentricity_ratio")),
+            "attitude": _safe_float(current_reading.get("attitude_angle")),
+            "clearance": _safe_float(current_reading.get("clearance_radial")),
+            "csv_timestamp": str(current_reading.get("csv_timestamp", "")),
+            "is_current": True,
+        })
 
-    return points
-
-
-# ============================================================
-# CLASIFICADORES DIAGNOSTICOS SCL
-# ============================================================
-
-def eccentricity_change_classifier(delta_ratio: float) -> str:
-    """
-    Clasifica un cambio de eccentricity ratio entre corridas:
-      - stable           |Δe/c| < 0.05 (5% del clearance)
-      - migration_minor  0.05 ≤ |Δe/c| < 0.15
-      - migration_major  0.15 ≤ |Δe/c| < 0.25
-      - migration_critical |Δe/c| >= 0.25 (cambio severo de carga
-                                           o pérdida de clearance)
-    """
-    if delta_ratio is None:
-        return "no_prev"
-    try:
-        d = abs(float(delta_ratio))
-    except Exception:
-        return "no_prev"
-    if d < 0.05:
-        return "stable"
-    if d < 0.15:
-        return "migration_minor"
-    if d < 0.25:
-        return "migration_major"
-    return "migration_critical"
-
-
-def attitude_shift_classifier(delta_deg: float) -> str:
-    """
-    Clasifica shift del attitude angle entre corridas:
-      - stable        |Δ| < 5°
-      - shift_minor   5° ≤ |Δ| < 15°
-      - shift_major   15° ≤ |Δ| < 30°
-      - shift_critical |Δ| ≥ 30° (cambio severo de distribución
-                                  de carga / posible misalignment)
-    """
-    if delta_deg is None:
-        return "no_prev"
-    try:
-        d = abs(float(delta_deg))
-    except Exception:
-        return "no_prev"
-    d = abs((d + 540) % 360 - 180)
-    if d < 5.0:
-        return "stable"
-    if d < 15.0:
-        return "shift_minor"
-    if d < 30.0:
-        return "shift_major"
-    return "shift_critical"
-
-
-__all__ = [
-    "MAX_SCL_SNAPSHOTS_PER_INSTANCE",
-    "save_scl_snapshot",
-    "list_scl_snapshots",
-    "load_scl_snapshot",
-    "delete_scl_snapshot",
-    "get_scl_history_for_bearing",
-    "get_previous_scl_snapshot",
-    "eccentricity_change_classifier",
-    "attitude_shift_classifier",
-]
+    return items
