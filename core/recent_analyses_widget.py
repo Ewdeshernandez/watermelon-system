@@ -147,17 +147,18 @@ def _inject_css_once():
             border-style: dashed;
             opacity: 0.6;
         }
-        .wm-recent-row {
-            display: flex; align-items: center; justify-content: space-between;
-            margin-bottom: 8px;
-        }
+        /* Ciclo 23.92 — label + ago en líneas separadas (antes
+           se pegaban con flex en cards angostas) */
         .wm-recent-label {
             font-size: 13px; font-weight: 800; color: #0f172a;
-            display: flex; align-items: center; gap: 6px;
+            display: block;
+            margin-bottom: 2px;
         }
         .wm-recent-ago {
             font-size: 11px; color: #64748b;
             font-family: ui-monospace, SF Mono, monospace;
+            display: block;
+            margin-bottom: 8px;
         }
         .wm-recent-visual {
             flex: 1;
@@ -437,10 +438,8 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
 
     st.markdown(
         f"<div class='wm-recent-card'>"
-        f"<div class='wm-recent-row'>"
         f"<span class='wm-recent-label'>{atype['icon']} {atype['label']}</span>"
         f"<span class='wm-recent-ago'>{ago}</span>"
-        f"</div>"
         f"<div class='wm-recent-visual'>{svg}</div>"
         f"{f'<div class=wm-recent-meta>{meta_html}</div>' if meta_html else ''}"
         f"</div>",

@@ -1823,6 +1823,18 @@ def render_waveform_panel(
 
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
+    # Ciclo 23.92 — modo cliente: ocultar botones export internos.
+    # Prepare PNG HD / Download PNG HD / Enviar a Reporte son features
+    # del especialista. Si vino desde snapshot histórico, escondemos con CSS.
+    _is_client_view_exp = bool(st.session_state.get("_loaded_from_snapshot"))
+    if _is_client_view_exp:
+        # CSS que esconde la fila siguiente de columns (los 3 botones)
+        st.markdown(
+            "<style>.wm-export-actions ~ div[data-testid='stHorizontalBlock'] "
+            "{ display:none !important; }</style>",
+            unsafe_allow_html=True,
+        )
+
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
 
     with col_export1:

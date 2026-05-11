@@ -148,10 +148,12 @@ def consume_pending_snapshot_url() -> Optional[Tuple[str, str]]:
 
 
 def render_snapshot_loaded_banner() -> None:
-    """Header limpio cuando se vino desde un snapshot histórico.
+    """Header cuando se vino desde un snapshot histórico.
 
-    Ciclo 23.91 — Simplificado: el cliente solo necesita saber qué máquina
-    y qué fecha. La metadata interna (snapshot_id, n_signals) queda oculta.
+    Ciclo 23.92:
+      • Botón "← Volver a Live Monitoring" arriba (st.switch_page)
+      • Logo SVG sinusoide pura inline
+      • Título + fecha amigable
     """
     info = st.session_state.get("_loaded_from_snapshot")
     if not info:
@@ -170,13 +172,41 @@ def render_snapshot_loaded_banner() -> None:
     except Exception:
         pass
 
+    # Botón de volver a Live Monitoring (arriba del header)
+    col_back, _ = st.columns([1, 5])
+    with col_back:
+        if st.button(
+            "← Live Monitoring",
+            key="_wm_return_live_monitoring",
+            use_container_width=True,
+        ):
+            # Limpiar snapshot state al volver
+            st.session_state.pop("_loaded_from_snapshot", None)
+            st.session_state.pop("signals", None)
+            try:
+                st.switch_page("pages/02_Live_Monitoring.py")
+            except Exception:
+                st.error("No se pudo volver. Refrescá la página.")
+
+    # Header con logo SVG sinusoidal puro + título + fecha
+    sinusoid_svg = (
+        '<svg viewBox="0 0 100 32" width="100" height="32" '
+        'style="vertical-align:middle;margin-right:10px;">'
+        '<path d="M0 16 Q6.25 0, 12.5 16 T25 16 T37.5 16 T50 16 T62.5 16 '
+        'T75 16 T87.5 16 T100 16" '
+        'fill="none" stroke="#2563eb" stroke-width="2.5"/>'
+        '</svg>'
+    )
+
     st.markdown(
-        f"<div style='font-size:22px;font-weight:800;color:#0f172a;"
-        f"margin:8px 0 4px 0;letter-spacing:-0.01em;'>"
-        f"📈 Formas de onda — {inst.upper()}"
+        f"<div style='display:flex;align-items:center;"
+        f"margin:14px 0 4px 0;'>"
+        f"{sinusoid_svg}"
+        f"<span style='font-size:24px;font-weight:800;color:#0f172a;"
+        f"letter-spacing:-0.01em;'>Formas de onda — {inst.upper()}</span>"
         f"</div>"
         f"<div style='font-size:13px;color:#64748b;margin-bottom:14px;"
-        f"font-weight:600;'>{fecha}</div>",
+        f"font-weight:600;padding-left:2px;'>{fecha}</div>",
         unsafe_allow_html=True,
     )
 
