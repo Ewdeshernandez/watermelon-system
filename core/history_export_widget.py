@@ -199,7 +199,15 @@ def render_history_export_section(
                 ts = datetime.now().strftime("%Y%m%d_%H%M")
                 safe_id = (instance_id or "asset").replace("/", "_").replace(" ", "_")
                 size_kb = len(zip_bytes) / 1024
-                st.success(f"✓ ZIP listo: {size_kb:.1f} KB")
+                # Polish v3.31.85: warning si está cerca del 5 MB del bucket
+                if size_kb > 4000:
+                    st.warning(
+                        f"⚠ ZIP grande: {size_kb:.0f} KB. El bucket Supabase "
+                        f"acepta hasta 5 MB. Si vas a enviar al cliente, "
+                        f"considerá descargar local y compartir por otro medio."
+                    )
+                else:
+                    st.success(f"✓ ZIP listo: {size_kb:.1f} KB")
                 st.download_button(
                     label=f"⬇ {safe_id}_history_{ts}.zip",
                     data=zip_bytes,
