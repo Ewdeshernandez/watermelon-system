@@ -826,7 +826,9 @@ def _build_share_meta(
 
     train_str = ""
     if driver_model and driven_part:
-        train_str = f"{driver_model} ↔ {driven_part}"
+        # Separador " / " es universal en cualquier fuente. El ↔ rompía
+        # en WhatsApp Web (no estaba en la fuente del cliente).
+        train_str = f"{driver_model} / {driven_part}"
     elif driver_model:
         train_str = driver_model
     elif driven_part:
