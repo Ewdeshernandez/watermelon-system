@@ -1,17 +1,27 @@
 """
-Watermelon System — Bearing clearance calculator (Ciclo 23.72).
+Watermelon System — Bearing clearance calculator (Ciclo 23.72, scope re-aclarado 23.74).
 
 Calcula el clearance boundary diametral y radial de un cojinete radial
-(tilting pad o sleeve) a partir del diámetro del eje, con rule-of-thumb
-API 616 / API 670 cuando no hay datasheet del fabricante.
+(tilting pad o sleeve) usando rule-of-thumb API 616 / API 670 — ÚNICO
+camino disponible cuando no se tiene datasheet del fabricante.
+
+NOTA IMPORTANTE (Ciclo 23.74):
+Para el módulo SCL principal (pages/09_Shaft_Centerline.py + core/scl_diagnostics.py)
+la fuente preferida del clearance es `derive_radial_clearance_from_vault()`,
+que prioriza datos OEM capturados del datasheet del fabricante (en
+core/document_vault.py) sobre cualquier rule-of-thumb.
+
+Este módulo (`bearing_clearance`) queda como:
+  • Helper standalone para cálculos rápidos sin necesitar Streamlit
+  • Pre-relleno en el wizard de creación de activos cuando NO hay datasheet
+  • Soporte de preload explícito (tilting pad), no cubierto por la heurística
+    actual del vault path
 
 Output usado por:
-  • Shaft Centerline Plot (SCL) — radio del círculo de clearance boundary
-  • Orbit Plot — referencia secundaria
-  • Wizard de creación de activos — pre-relleno de Cb / Ca cuando el
-    usuario no tiene el datasheet del fabricante a mano
-  • Alarm preload — thresholds 1A / 1B en displacement (mil pp, μm pp)
-    a partir de % del assembled clearance (API 670 §6.10)
+  • Wizard de creación de activos — pre-relleno de Cb / Ca
+  • Alarm preload — thresholds en displacement (mil pp, μm pp) a partir
+    de % del assembled clearance (API 670 §6.10)
+  • Reportes técnicos que necesiten justificar el cálculo rule-of-thumb
 
 Fuentes / convenciones:
   • API 616 5th (gas turbines) y 617 8th (compressors) sugieren para

@@ -724,173 +724,6 @@ def render_sensor_map_library(
     return True
 
 
-def _render_scl_plot(
-    selected_sensor: str,
-    instance_obj: Any,
-    latest: List[Dict[str, Any]],
-    sensor_lookup: Dict[str, Dict[str, Any]],
-    instance_id: str = "",
-) -> None:
-    """Renderiza un Shaft Centerline Plot (SCL) para el bearing del sensor primario.
-
-    Ciclo 23.73 — usa core/bearing_clearance.py + core/scl_composer.py.
-
-    Detecta el bearing pair (X/Y) a partir del label del sensor primario
-    (convención: 1XD/1YD → BRG#1, 3XD/3YD → BRG#3, etc). Si el sensor
-    primario es un acelerómetro (1YA, 2YA) o velocity (1YV), avisa que
-    necesita proximity probes con metric Gap.
-
-    Cold reference voltage: por ahora auto-calibración usando el promedio
-    histórico del gap voltage (eje recién instalado debería estar cerca
-    del centro estadístico). En v3.31.74 viene el wizard para configurar
-    cold ref manualmente.
-    """
-    from core.scl_composer import (
-        compose_shaft_centerline_plot, detect_bearing_pair,
-        position_from_gap_voltages,
-    )
-    from core.bearing_clearance import compute_bearing_clearance, manual_clearance
-    from core.live_readings import history_for_metric
-
-    # 1. Detectar bearing pair (X/Y) a partir del sensor primario
-    pair = detect_bearing_pair(selected_sensor)
-    if pair is None:
-        st.warning(
-            f"**SCL plot requiere proximity probes (displacement)** — el sensor "
-            f"`{selected_sensor}` no es un displacement probe (convención `NXD`/`NYD`). "
-            f"Para Shaft Centerline necesitás un par X/Y de proximity probes con "
-            f"metric `Gap` configurado en el collector."
-        )
-        return
-    x_label, y_label, bearing_n = pair
-
-    # 2. Verificar que tenemos gap voltage en latest
-    gap_x_row = next(
-        (r for r in latest
-         if r.get("sensor_label") == x_label and (r.get("metric") or "").lower() == "gap"),
-        None,
-    )
-    gap_y_row = next(
-        (r for r in latest
-         if r.get("sensor_label") == y_label and (r.get("metric") or "").lower() == "gap"),
-        None,
-    )
-    if gap_x_row is None or gap_y_row is None:
-        st.warning(
-            f"**SCL plot requiere lecturas Gap** — el bearing #{bearing_n} no envía "
-            f"`Gap` voltage para `{x_label}` y `{y_label}`.\n\n"
-            f"Verificá:\n"
-            f"1. El collector está extrayendo gap voltage del módulo Bently 3500.\n"
-            f"2. Las lecturas se ingieren con `metric='Gap'`.\n"
-            f"3. Los sensor labels `{x_label}` y `{y_label}` existen en `live_readings`."
-        )
-        return
-
-    try:
-        gap_x_now = float(gap_x_row.get("value"))
-        gap_y_now = float(gap_y_row.get("value"))
-    except Exception:
-        st.warning("Lectura de Gap voltage inválida (no numérica).")
-        return
-
-    # 3. Resolver shaft diameter y bearing type desde instance_obj
-    # MVP: leer de attributes si existen, sino default 100 mm tilting_pad
-    shaft_dia_attr = f"bearing_{bearing_n}_shaft_dia_mm"
-    bearing_type_attr = f"bearing_{bearing_n}_type"
-    ca_override_attr = f"bearing_{bearing_n}_ca_um_pp"
-    cold_ref_x_attr = f"bearing_{bearing_n}_cold_ref_x_v"
-    cold_ref_y_attr = f"bearing_{bearing_n}_cold_ref_y_v"
-
-    shaft_dia_mm = getattr(instance_obj, shaft_dia_attr, None) or 100.0
-    bearing_type = getattr(instance_obj, bearing_type_attr, None) or "tilting_pad"
-    ca_override = getattr(instance_obj, ca_override_attr, None)
-
-    if ca_override:
-        clearance = manual_clearance(shaft_dia_mm, ca_override, bearing_type)
-    else:
-        clearance = compute_bearing_clearance(
-            shaft_dia_mm=shaft_dia_mm,
-            bearing_type=bearing_type,
-            preload=0.4, rule="typical",
-        )
-
-    # 4. Resolver cold reference voltage
-    # Si el instance_obj tiene attributes configurados, usarlos.
-    # Sino, auto-calibrar usando el promedio histórico de gap voltage.
-    cold_ref_x_v = getattr(instance_obj, cold_ref_x_attr, None)
-    cold_ref_y_v = getattr(instance_obj, cold_ref_y_attr, None)
-    auto_calibrated = False
-    if cold_ref_x_v is None or cold_ref_y_v is None:
-        # Auto-calibración: promedio de últimas 200 lecturas
-        try:
-            x_hist = history_for_metric(instance_id, x_label, "Gap", limit=200)
-            y_hist = history_for_metric(instance_id, y_label, "Gap", limit=200)
-            if x_hist and y_hist:
-                cold_ref_x_v = sum(float(r["value"]) for r in x_hist) / len(x_hist)
-                cold_ref_y_v = sum(float(r["value"]) for r in y_hist) / len(y_hist)
-                auto_calibrated = True
-            else:
-                cold_ref_x_v = gap_x_now
-                cold_ref_y_v = gap_y_now
-                auto_calibrated = True
-        except Exception:
-            cold_ref_x_v = gap_x_now
-            cold_ref_y_v = gap_y_now
-            auto_calibrated = True
-
-    # 5. Calcular posición actual del shaft
-    pos_x_um, pos_y_um = position_from_gap_voltages(
-        gap_x_now, gap_y_now, cold_ref_x_v, cold_ref_y_v,
-    )
-
-    # 6. Trayectoria histórica (últimas 100 lecturas)
-    history_xy: List[tuple] = []
-    try:
-        x_hist = history_for_metric(instance_id, x_label, "Gap", limit=100)
-        y_hist = history_for_metric(instance_id, y_label, "Gap", limit=100)
-        # Match by captured_at — asumimos que las lecturas X/Y vienen juntas
-        x_by_ts = {r["captured_at"]: float(r["value"]) for r in x_hist
-                   if r.get("value") is not None}
-        y_by_ts = {r["captured_at"]: float(r["value"]) for r in y_hist
-                   if r.get("value") is not None}
-        common_ts = sorted(set(x_by_ts) & set(y_by_ts))
-        for ts in common_ts[-100:]:
-            hx, hy = position_from_gap_voltages(
-                x_by_ts[ts], y_by_ts[ts], cold_ref_x_v, cold_ref_y_v,
-            )
-            history_xy.append((hx, hy))
-    except Exception:
-        history_xy = []
-
-    # 7. Tabla de info + render
-    info_cols = st.columns([1, 1, 1, 1])
-    with info_cols[0]:
-        st.metric("Cb (machined)", f"{clearance.bore_clearance_um_pp:.0f} μm pp")
-    with info_cols[1]:
-        st.metric("Ca (assembled)", f"{clearance.assembled_clearance_um_pp:.0f} μm pp")
-    with info_cols[2]:
-        st.metric("Alarm (40% Ca)", f"{clearance.alarm_um_pp:.0f} μm pp")
-    with info_cols[3]:
-        st.metric("Danger (60% Ca)", f"{clearance.danger_um_pp:.0f} μm pp")
-
-    if auto_calibrated:
-        st.caption(
-            f"⚠ Cold reference auto-calibrado (promedio histórico). "
-            f"Para calibración manual, configurá `{cold_ref_x_attr}` y "
-            f"`{cold_ref_y_attr}` en el wizard del activo (próximo update)."
-        )
-
-    fig = compose_shaft_centerline_plot(
-        clearance=clearance,
-        position_x_um=pos_x_um,
-        position_y_um=pos_y_um,
-        history=history_xy,
-        bearing_label=f"BRG #{bearing_n}",
-        show_alarm_rings=True,
-    )
-    st.plotly_chart(fig, use_container_width=True)
-
-
 def _render_export_bar(
     svg: str,
     instance_obj: Any,
@@ -1675,18 +1508,21 @@ def render_sensor_zoom_panel(
         "📈 Tendencia · 2X fase":      "2X_Phase",
         "📈 Tendencia · Gap":          "Gap",
     }
-    # Ciclo 23.73 — Shaft Centerline Plot (SCL) integrado
-    SCL_CHART_LABEL = "📍 Shaft Centerline (SCL)"
+    # Ciclo 23.74 — SCL eliminado del zoom panel (era flow incorrecto:
+    # asumía datos live de Supabase, pero el módulo SCL real es CSV-based
+    # y vive en pages/09_Shaft_Centerline.py con scl_diagnostics avanzados.
+    # Mantenemos solo Tendencias acá; análisis especializado va a su
+    # propio módulo dedicado.
     sel_col, range_col, close_col = st.columns([3, 2, 1])
     with sel_col:
         chart_type = st.selectbox(
             "Tipo de gráfico",
             options=list(CHART_TYPE_TO_METRIC.keys()) + [
-                SCL_CHART_LABEL,
                 "🔍 Espectro (próximamente)",
                 "🌊 Forma de onda (próximamente)",
                 "🌀 Orbit (próximamente)",
                 "📊 Cascade / Waterfall (próximamente)",
+                "📍 Shaft Centerline → ver módulo dedicado",
             ],
             index=0,
             key=f"zoom_chart_type_{selected_sensor}",
@@ -2029,11 +1865,15 @@ def render_sensor_zoom_panel(
                         values="value", aggfunc="last",
                     )
                     st.line_chart(pivot, height=340)
-    elif chart_type == SCL_CHART_LABEL:
-        # Ciclo 23.73 — Shaft Centerline Plot (SCL)
-        _render_scl_plot(
-            selected_sensor, instance_obj, latest, sensor_lookup,
-            instance_id=instance_obj.instance_id if hasattr(instance_obj, "instance_id") else "",
+    elif chart_type.startswith("📍 Shaft Centerline"):
+        # Ciclo 23.74 — SCL es CSV-based, vive en módulo dedicado
+        st.info(
+            "**Shaft Centerline Plot** se construye desde archivos CSV "
+            "uploaded — no desde lecturas live. Andá al módulo dedicado:\n\n"
+            "🛰 **Time Domain → Shaft Centerline** (sidebar)\n\n"
+            "Ahí subís el CSV del análisis y obtenés el plot completo con "
+            "clearance boundary Cat IV, anillos de excentricidad, attitude "
+            "angle, eccentricity ratio, y comparación entre fechas."
         )
     else:
         # Placeholder para Espectro / Waveform / Orbit / Cascade
