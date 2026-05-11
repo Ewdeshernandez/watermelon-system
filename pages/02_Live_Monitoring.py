@@ -2285,8 +2285,29 @@ def main() -> None:
     sensor_lookup = _build_sensor_lookup(instance_obj)
     latest = latest_for_instance(instance_id)
 
+    # Anti-flicker cache (Ciclo 23.60) — Supabase REST a veces devuelve []
+    # por timeouts transitorios o reconexión. Si tenemos un snapshot reciente
+    # en session_state lo reusamos para no mostrar el warning catastrófico
+    # cada vez que parpadea la red. TTL = 5 min; pasado eso sí asumimos
+    # que el activo no tiene datos.
+    cache_key = f"wm_latest_cache_{instance_id}"
+    now_ts = datetime.now().timestamp()
+    if latest:
+        st.session_state[cache_key] = {"data": latest, "ts": now_ts}
+        using_cache = False
+        cache_age = 0.0
+    else:
+        cached = st.session_state.get(cache_key)
+        if cached and (now_ts - cached.get("ts", 0)) < 300:  # 5 min TTL
+            latest = cached["data"]
+            using_cache = True
+            cache_age = now_ts - cached["ts"]
+        else:
+            using_cache = False
+            cache_age = 0.0
+
     if not latest:
-        # Si no hay datos, igual mostramos el header sin KPIs
+        # Sin datos y sin cache reciente → activo no configurado o caído
         render_asset_header(instance_obj, instance_id)
         st.warning(
             "**Sin datos en tiempo real para este activo.** Verificá:\n"
@@ -2295,6 +2316,12 @@ def main() -> None:
             "3. El collector usa el mismo `instance_id`."
         )
         return
+
+    if using_cache:
+        st.caption(
+            f"⏳ Reintentando conexión con Supabase — mostrando última lectura "
+            f"válida (hace {int(cache_age)}s). Refrescá si persiste."
+        )
 
     rendered_rows, severity_summary = compute_rendered_rows(latest, sensor_lookup, instance_obj)
 
@@ -2493,13 +2520,6 @@ def main() -> None:
     # Ciclo 23.58 — Diagnostic eliminado (redundante con gap/bias voltage
     # ya presente en los gráficos del zoom panel). Single source of truth:
     # todo el análisis per-sensor pasa por el panel de zoom.
-
-    # Total de readings históricas almacenadas (info útil para el operador)
-    total = count_for_instance(instance_id)
-    st.caption(
-        f"📦 Total readings históricas almacenadas para `{instance_id}`: "
-        f"**{total:,}** (retención: meses/años en Supabase)"
-    )
 
     st.markdown("---")
     c1, c2 = st.columns([1, 4])
