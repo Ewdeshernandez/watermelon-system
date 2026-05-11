@@ -726,11 +726,12 @@ def render_sensor_map_library(
 def _render_export_bar(svg: str, instance_id: str) -> None:
     """Barra de exportación — popover discreto debajo del SVG.
 
-    Ciclo 23.66: PNG nativo abandonado tras 3 intentos fallidos (cairosvg
-    necesita libcairo, svglib trae rlpycairo, resvg-py falla en runtime con
-    nuestro SVG complejo). SVG vectorial cubre 95% del caso de uso real.
-    Para PNG, sugerimos al usuario convertirlo localmente con Inkscape o
-    online con cloudconvert.com / svgtopng.com.
+    Ciclo 23.67: agregamos share por WhatsApp y Email vía render
+    client-side del PNG + upload a Supabase Storage (bucket diagram-shares
+    creado en data/storage_diagram_shares_setup.sql).
+
+    El SVG download sigue siendo el path principal (instantáneo, sin red).
+    Los botones de share dependen de tener anon_key configurado.
     """
     ts = datetime.now().strftime("%Y%m%d_%H%M")
     safe_id = (instance_id or "asset").replace("/", "_").replace(" ", "_")
@@ -777,13 +778,16 @@ def _render_export_bar(svg: str, instance_id: str) -> None:
                     key=f"export_svg_{safe_id}",
                     type="primary",
                 )
+
+                # Share buttons (WhatsApp + Email) — render client-side
+                _render_share_html(svg, safe_id, ts)
+
                 st.markdown(
                     "<div style='font-size:11px;color:#475569;margin-top:10px;line-height:1.5;'>"
-                    "💡 <b>¿Necesitás PNG?</b> Abrí el SVG en "
+                    "💡 <b>¿Necesitás PNG local?</b> Abrí el SVG en "
                     "<a href='https://inkscape.org' target='_blank' rel='noopener'>Inkscape</a> "
-                    "(gratis) o <a href='https://cloudconvert.com/svg-to-png' target='_blank' "
-                    "rel='noopener'>cloudconvert.com</a> y exportá a PNG en la "
-                    "resolución que prefieras."
+                    "o <a href='https://cloudconvert.com/svg-to-png' target='_blank' "
+                    "rel='noopener'>cloudconvert.com</a>."
                     "</div>",
                     unsafe_allow_html=True,
                 )
@@ -797,6 +801,179 @@ def _render_export_bar(svg: str, instance_id: str) -> None:
                 use_container_width=True,
                 key=f"export_svg_{safe_id}",
             )
+
+
+def _render_share_html(svg: str, safe_id: str, ts: str) -> None:
+    """Embed HTML+JS para compartir el diagrama por WhatsApp / Email.
+
+    El JS hace:
+      1. Decodifica el SVG (inyectado en base64 para evitar escape hell)
+      2. Lo dibuja en un canvas 4000px wide
+      3. canvas.toBlob → PNG bytes
+      4. POST a Supabase Storage con anon_key
+      5. Construye URL pública y abre wa.me/ o mailto:
+
+    Si la config de Supabase no está, los botones aparecen pero deshabilitados.
+    """
+    from core.share_helpers import get_storage_share_config
+    import base64
+    import streamlit.components.v1 as components
+
+    cfg = get_storage_share_config()
+    if cfg is None:
+        st.caption(
+            "_📱 Share por WhatsApp/Email no disponible — falta configurar_ "
+            "`anon_key` _en Streamlit secrets._"
+        )
+        return
+
+    supabase_url, anon_key, bucket = cfg
+    # Encodear el SVG para meterlo seguro en JS — el SVG tiene quotes,
+    # backslashes, gradients, todo. base64 esquiva todo eso.
+    svg_b64 = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+
+    html = f"""
+    <style>
+        .wm-share-row {{
+            display: flex; gap: 8px; margin: 8px 0 4px 0;
+        }}
+        .wm-share-btn {{
+            flex: 1; padding: 8px 12px; font-size: 13px;
+            border-radius: 8px; border: 1.5px solid #c7d9eb;
+            background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 100%);
+            color: #1e40af; font-weight: 600; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; gap: 6px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            transition: all 0.15s;
+        }}
+        .wm-share-btn:hover:not(:disabled) {{
+            border-color: #2563eb;
+            box-shadow: 0 2px 6px rgba(37,99,235,0.15);
+            transform: translateY(-1px);
+        }}
+        .wm-share-btn:disabled {{
+            opacity: 0.5; cursor: wait;
+        }}
+        .wm-share-status {{
+            font-size: 11px; color: #64748b;
+            font-family: ui-monospace, Menlo, monospace;
+            margin-top: 4px; min-height: 14px;
+        }}
+        .wm-share-status.ok    {{ color: #15803d; }}
+        .wm-share-status.error {{ color: #b91c1c; }}
+    </style>
+
+    <div class="wm-share-row">
+        <button class="wm-share-btn" id="wm-share-wa" onclick="wmShare('whatsapp')">
+            📱 WhatsApp
+        </button>
+        <button class="wm-share-btn" id="wm-share-em" onclick="wmShare('email')">
+            📧 Email
+        </button>
+    </div>
+    <div class="wm-share-status" id="wm-share-status"></div>
+
+    <script>
+    (function() {{
+        const SVG_B64 = "{svg_b64}";
+        const SUPABASE_URL = "{supabase_url}";
+        const ANON_KEY = "{anon_key}";
+        const BUCKET = "{bucket}";
+        const INSTANCE_ID = "{safe_id}";
+        const TS = "{ts}";
+
+        const statusEl = document.getElementById('wm-share-status');
+        const btnWa = document.getElementById('wm-share-wa');
+        const btnEm = document.getElementById('wm-share-em');
+
+        function setStatus(msg, cls) {{
+            statusEl.textContent = msg;
+            statusEl.className = 'wm-share-status' + (cls ? ' ' + cls : '');
+        }}
+
+        function setDisabled(v) {{
+            btnWa.disabled = v;
+            btnEm.disabled = v;
+        }}
+
+        // SVG (base64) → PNG Blob via canvas
+        async function svgToPngBlob(width) {{
+            const svgStr = atob(SVG_B64);
+            const blob = new Blob([svgStr], {{type: 'image/svg+xml;charset=utf-8'}});
+            const url = URL.createObjectURL(blob);
+            try {{
+                const img = new Image();
+                await new Promise((resolve, reject) => {{
+                    img.onload = resolve;
+                    img.onerror = () => reject(new Error('SVG no se pudo cargar como imagen'));
+                    img.src = url;
+                }});
+                const aspect = img.naturalHeight / img.naturalWidth;
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = Math.round(width * aspect);
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                return await new Promise((res, rej) => {{
+                    canvas.toBlob(b => b ? res(b) : rej(new Error('toBlob falló')), 'image/png');
+                }});
+            }} finally {{
+                URL.revokeObjectURL(url);
+            }}
+        }}
+
+        // Sube el PNG a Supabase Storage y devuelve la URL pública
+        async function uploadToSupabase(pngBlob) {{
+            const rand = Math.random().toString(36).slice(2, 10);
+            const path = `${{INSTANCE_ID}}_${{TS}}_${{rand}}.png`;
+            const endpoint = `${{SUPABASE_URL}}/storage/v1/object/${{BUCKET}}/${{path}}`;
+            const resp = await fetch(endpoint, {{
+                method: 'POST',
+                headers: {{
+                    'Authorization': `Bearer ${{ANON_KEY}}`,
+                    'apikey': ANON_KEY,
+                    'Content-Type': 'image/png',
+                    'x-upsert': 'true',
+                }},
+                body: pngBlob,
+            }});
+            if (!resp.ok) {{
+                const txt = await resp.text();
+                throw new Error(`Upload ${{resp.status}}: ${{txt.slice(0,120)}}`);
+            }}
+            return `${{SUPABASE_URL}}/storage/v1/object/public/${{BUCKET}}/${{path}}`;
+        }}
+
+        window.wmShare = async function(target) {{
+            setDisabled(true);
+            setStatus('⏳ Generando PNG 4K…', '');
+            try {{
+                const pngBlob = await svgToPngBlob(4000);
+                setStatus('⬆ Subiendo a Supabase…', '');
+                const publicUrl = await uploadToSupabase(pngBlob);
+                setStatus('✓ Snapshot subido. Abriendo…', 'ok');
+                const caption =
+                    `Diagrama Watermelon — ${{INSTANCE_ID}} — ${{TS}}\\n${{publicUrl}}`;
+                if (target === 'whatsapp') {{
+                    window.open(`https://wa.me/?text=${{encodeURIComponent(caption)}}`, '_blank');
+                }} else {{
+                    const subject = encodeURIComponent(`Diagrama Watermelon — ${{INSTANCE_ID}}`);
+                    const body = encodeURIComponent(caption);
+                    window.open(`mailto:?subject=${{subject}}&body=${{body}}`, '_blank');
+                }}
+            }} catch (e) {{
+                console.error('wmShare error:', e);
+                setStatus('✗ ' + (e.message || 'Error desconocido'), 'error');
+            }} finally {{
+                setDisabled(false);
+            }}
+        }};
+    }})();
+    </script>
+    """
+    components.html(html, height=110, scrolling=False)
 
 
 # ============================================================
