@@ -45,30 +45,22 @@ Funciones:
 
 from __future__ import annotations
 
-import json
 import math
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from core.instance_repository import INSTANCES_DIR
+# Ciclo 23.79: storage delegado a history_storage (Supabase Storage + gzip
+# + LRU). API pública preservada al 100%.
+from core import history_storage
 
+_SNAPSHOT_TYPE = "polar"
 
-MAX_POLAR_SNAPSHOTS_PER_INSTANCE = 24
-
-
-def _polar_history_dir(instance_id: str) -> Path:
-    p = INSTANCES_DIR / instance_id / "history"
-    p.mkdir(parents=True, exist_ok=True)
-    return p
-
-
-def _polar_snapshot_path(instance_id: str, snapshot_id: str) -> Path:
-    return _polar_history_dir(instance_id) / f"{snapshot_id}.json"
+# Compat exportada — el LRU real lo aplica history_storage (default 10).
+MAX_POLAR_SNAPSHOTS_PER_INSTANCE = history_storage.MAX_SNAPSHOTS_PER_TYPE
 
 
 def _new_polar_snapshot_id() -> str:
-    return "polar_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE)
 
 
 def _safe_float(v) -> float:
@@ -176,10 +168,8 @@ def save_polar_snapshot(
         "sensors": cleaned,
     }
 
-    with open(_polar_snapshot_path(instance_id, sid), "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
-
-    _enforce_max_polar_snapshots(instance_id)
+    # Ciclo 23.79: storage delegado al backend (LRU automático).
+    history_storage.save_snapshot(instance_id, _SNAPSHOT_TYPE, sid, payload)
     return sid
 
 
@@ -188,59 +178,29 @@ def list_polar_snapshots(
 ) -> List[Dict[str, Any]]:
     """Lista snapshots Polar más recientes primero, con metadata
     resumida (sin sensors detallados, para eficiencia)."""
-    h = _polar_history_dir(instance_id)
-    if not h.exists():
-        return []
-    items = []
-    for p in sorted(h.glob("polar_*.json"), reverse=True):
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                d = json.load(f)
-            items.append({
-                "snapshot_id": d.get("snapshot_id", p.stem),
-                "timestamp": d.get("timestamp", ""),
-                "corrida_label": d.get("corrida_label", ""),
-                "notes": d.get("notes", ""),
-                "operating_speed_rpm": d.get("operating_speed_rpm"),
-                "n_sensors": len(d.get("sensors", [])),
-            })
-            if len(items) >= limit:
-                break
-        except Exception:
+    items: List[Dict[str, Any]] = []
+    snaps = history_storage.list_snapshots(instance_id, _SNAPSHOT_TYPE)
+    for snap in snaps[:limit]:
+        d = history_storage.load_snapshot(instance_id, _SNAPSHOT_TYPE, snap["snapshot_id"])
+        if d is None:
             continue
+        items.append({
+            "snapshot_id": d.get("snapshot_id", snap["snapshot_id"]),
+            "timestamp": d.get("timestamp", ""),
+            "corrida_label": d.get("corrida_label", ""),
+            "notes": d.get("notes", ""),
+            "operating_speed_rpm": d.get("operating_speed_rpm"),
+            "n_sensors": len(d.get("sensors", [])),
+        })
     return items
 
 
 def load_polar_snapshot(instance_id: str, snapshot_id: str) -> Optional[Dict[str, Any]]:
-    p = _polar_snapshot_path(instance_id, snapshot_id)
-    if not p.exists():
-        return None
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    return history_storage.load_snapshot(instance_id, _SNAPSHOT_TYPE, snapshot_id)
 
 
 def delete_polar_snapshot(instance_id: str, snapshot_id: str) -> bool:
-    p = _polar_snapshot_path(instance_id, snapshot_id)
-    if not p.exists():
-        return False
-    try:
-        p.unlink()
-        return True
-    except Exception:
-        return False
-
-
-def _enforce_max_polar_snapshots(instance_id: str) -> None:
-    h = _polar_history_dir(instance_id)
-    files = sorted(h.glob("polar_*.json"), reverse=True)
-    for old in files[MAX_POLAR_SNAPSHOTS_PER_INSTANCE:]:
-        try:
-            old.unlink()
-        except Exception:
-            pass
+    return history_storage.delete_snapshot(instance_id, _SNAPSHOT_TYPE, snapshot_id)
 
 
 # ============================================================
