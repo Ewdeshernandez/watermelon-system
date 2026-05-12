@@ -53,7 +53,11 @@ if st.session_state.get("_loaded_from_snapshot"):
     st.markdown(
         """
         <style>
-        /* Modo cliente — ocultar controles técnicos del sidebar */
+        /* Ciclo 23.97 — Modo cliente: ocultar controles técnicos del sidebar.
+           IMPORTANTE: cada selector tiene `section[data-testid="stSidebar"]`
+           para evitar afectar headers/elementos del main content. Antes el
+           `h1, h2, h3, h4` no estaba scoped → escondía headers en TODA la
+           página, incluido el botón Volver y elementos del banner. */
         section[data-testid="stSidebar"] [data-testid="stSelectbox"],
         section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
         section[data-testid="stSidebar"] [data-testid="stNumberInput"],
@@ -64,8 +68,19 @@ if st.session_state.get("_loaded_from_snapshot"):
         section[data-testid="stSidebar"] h1,
         section[data-testid="stSidebar"] h2,
         section[data-testid="stSidebar"] h3,
-        section[data-testid="stSidebar"] h4 {
+        section[data-testid="stSidebar"] h4,
+        section[data-testid="stSidebar"] [data-testid="stMarkdown"]:not(:first-child) {
             display: none !important;
+        }
+        /* Sidebar — limpiar el aspecto vacío que queda en client mode */
+        section[data-testid="stSidebar"] [data-testid="stButton"]:not(.wm-keep-sidebar-btn) {
+            display: none !important;
+        }
+        section[data-testid="stSidebar"] {
+            background: #f8fafc !important;
+        }
+        section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+            gap: 0 !important;
         }
         /* Ocultar botones export PNG / Reporte (3 botones en row) */
         .wm-export-actions {
@@ -74,41 +89,44 @@ if st.session_state.get("_loaded_from_snapshot"):
         .wm-export-actions + div[data-testid="stHorizontalBlock"] {
             display: none !important;
         }
-        /* Botón Volver — premium internacional (gradient + shadow + transition) */
+        /* Botón "← Volver a Live Monitoring" — premium clase mundial.
+           Gradient azul royal saturado + shadow rica + transición cubic-bezier
+           + ring focus + lift effect. Inspirado en Linear/Vercel/Stripe. */
         .wm-return-btn-wrap {
             display: inline-block;
-            margin: 8px 0 18px 0;
+            margin: 12px 0 6px 0;
         }
         .wm-return-btn-wrap [data-testid="stButton"] button {
-            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
-            color: #1e40af !important;
-            border: 1px solid #cbd5e1 !important;
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%) !important;
+            color: white !important;
+            border: none !important;
             border-radius: 10px !important;
-            font-weight: 600 !important;
+            font-weight: 700 !important;
             font-size: 13px !important;
-            letter-spacing: -0.005em !important;
-            padding: 7px 18px !important;
-            min-height: 36px !important;
-            transition: all 0.18s cubic-bezier(.4,0,.2,1) !important;
+            letter-spacing: 0.01em !important;
+            padding: 9px 20px !important;
+            min-height: 40px !important;
+            transition: all 0.2s cubic-bezier(.4,0,.2,1) !important;
             box-shadow:
-                0 1px 2px rgba(15,23,42,0.04),
-                0 0 0 0 rgba(37,99,235,0) !important;
+                0 1px 2px rgba(30,64,175,0.20),
+                0 2px 8px rgba(30,64,175,0.15),
+                inset 0 1px 0 rgba(255,255,255,0.20) !important;
             white-space: nowrap !important;
         }
         .wm-return-btn-wrap [data-testid="stButton"] button:hover {
-            background: linear-gradient(180deg, #f0f7ff 0%, #e0eaff 100%) !important;
-            border-color: #2563eb !important;
-            color: #1e3a8a !important;
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%) !important;
             box-shadow:
-                0 2px 8px rgba(37,99,235,0.12),
-                0 0 0 3px rgba(37,99,235,0.08) !important;
+                0 4px 12px rgba(30,64,175,0.30),
+                0 0 0 4px rgba(59,130,246,0.18),
+                inset 0 1px 0 rgba(255,255,255,0.25) !important;
             transform: translateY(-1px) !important;
         }
         .wm-return-btn-wrap [data-testid="stButton"] button:active {
             transform: translateY(0) !important;
             box-shadow:
-                0 1px 2px rgba(15,23,42,0.06),
-                0 0 0 3px rgba(37,99,235,0.10) !important;
+                0 1px 2px rgba(30,64,175,0.25),
+                0 0 0 4px rgba(59,130,246,0.20),
+                inset 0 1px 2px rgba(0,0,0,0.10) !important;
         }
         /* Cursores sincronizados — sliders más finos y pro */
         [data-testid="stSlider"] [data-baseweb="slider"] {
@@ -2179,8 +2197,14 @@ with st.sidebar:
             step=float(max_duration / 1000.0) if max_duration > 0 else 0.001,
         )
 
-    # Ciclo 23.95 — modo cliente usa cursores sincronizados del banner.
-    # Skipear este bloque para evitar conflictos / sobreescribir valores.
+    # Ciclo 23.97 — fix NameError. Inicializar cursor_a/cursor_b SIEMPRE
+    # desde session_state (con clamp al rango t_min/t_max), porque
+    # render_waveform_panel los usa siempre. En client mode los slider del
+    # banner ya escribieron session_state — solo leemos. En specialist mode
+    # los inputs del sidebar los actualizan.
+    cursor_a = float(min(max(st.session_state.wm_cursor_a, t_min), t_max))
+    cursor_b = float(min(max(st.session_state.wm_cursor_b, t_min), t_max))
+
     _is_client_view_cursors = bool(st.session_state.get("_loaded_from_snapshot"))
     if not _is_client_view_cursors:
         st.markdown("### Cursors")
@@ -2189,7 +2213,7 @@ with st.sidebar:
             "Cursor A (s)",
             min_value=float(t_min),
             max_value=float(t_max),
-            value=float(min(max(st.session_state.wm_cursor_a, t_min), t_max)),
+            value=cursor_a,
             step=float(max((t_max - t_min) / 1000.0, 1e-6)),
             format="%.4f",
         )
@@ -2198,7 +2222,7 @@ with st.sidebar:
             "Cursor B (s)",
             min_value=float(t_min),
             max_value=float(t_max),
-            value=float(min(max(st.session_state.wm_cursor_b, t_min), t_max)),
+            value=cursor_b,
             step=float(max((t_max - t_min) / 1000.0, 1e-6)),
             format="%.4f",
         )
