@@ -1065,11 +1065,14 @@ if valid_files and _active_instance_id:
                         f"⚠ {n_failed} tipo(s) no se guardaron. Ver detalles abajo."
                     )
 
-                # Ciclo 23.116 — Si orbit falló, diagnóstico explícito:
-                # mostrar qué sensor_labels detectó el sistema y cuáles
-                # matchearon el patrón X/Y. Permite al usuario entender
-                # por qué no se construyeron pares.
-                orbit_failed = any("✗ orbit" in e for e in errors)
+                # Ciclo 23.116/117 — Si orbit falló (cualquier motivo),
+                # mostrar diagnóstico explícito con sensor_labels detectados.
+                # Bug fix: el pre-flight check emite "orbit: sin datos para
+                # guardar" SIN el "✗", así que también debemos engancharlo.
+                orbit_failed = any(
+                    ("✗ orbit" in e) or ("orbit: sin datos" in e)
+                    for e in errors
+                )
                 if orbit_failed:
                     from core.snapshot_batch_builder import (
                         _extract_sensor_label,
