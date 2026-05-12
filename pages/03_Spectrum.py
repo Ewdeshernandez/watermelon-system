@@ -1741,30 +1741,41 @@ if _is_client_view_sidebar:
         infer_amplitude_unit(primary_for_defaults.metadata or {}),
         amplitude_mode,
     )
-    suggested_max_cpm, scale_reason = suggest_max_cpm_for_unit(
-        primary_unit_text, rpm=primary_for_defaults.rpm,
-    )
     from core.spectrum_scale import classify_amplitude_quantity
     current_family = classify_amplitude_quantity(primary_unit_text)
     family_key = f"wm_sp_max_cpm_family_{current_family}"
-    if family_key not in st.session_state:
-        st.session_state[family_key] = suggested_max_cpm
-    max_cpm = float(max(1000.0, st.session_state[family_key]))
+
+    # Ciclo 23.111 — Modo cliente: max_cpm fijo por familia, override del
+    # auto-suggest. Reglas del cliente (sensor limitado en este caso):
+    #   * displacement  → 60,000 CPM
+    #   * velocity      → 30,000 CPM (sensor limitado)
+    #   * acceleration  → 60,000 CPM (sensor limitado)
+    _CLIENT_MAX_CPM = {
+        "displacement": 60000.0,
+        "velocity":     30000.0,
+        "acceleration": 60000.0,
+    }
+    max_cpm = _CLIENT_MAX_CPM.get(current_family, 60000.0)
+    suggested_max_cpm = max_cpm
+    scale_reason = f"Cliente · {current_family} → {int(max_cpm):,} CPM"
+    st.session_state[family_key] = max_cpm
 
     y_axis_mode = "Auto"
     y_axis_manual_max: Optional[float] = None
     fill_area = True
-    annotate_peak = True
+    # Ciclo 23.111 — Cliente: espectro limpio, sin anotaciones de peak
+    # ni armónicas (1X/2X/3X). Esas herramientas son del analista.
+    annotate_peak = False
     show_right_info_box = True
     enable_compare_mode = False
     compare_fill_area = False
     enable_trend_mode = False
 
-    show_harmonics = True
-    harmonic_count = 8
+    show_harmonics = False  # ← cliente NO ve líneas/labels de armónicas
+    harmonic_count = 0
     harmonic_band_fraction = 0.12
-    show_harmonic_amplitudes = True
-    harmonic_label_mode = "1X + Top 3"
+    show_harmonic_amplitudes = False
+    harmonic_label_mode = "1X only"
 
     bearing_catalog_options = list_bearing_catalog_options()
     enable_bearing_faults = False
