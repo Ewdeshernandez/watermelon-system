@@ -1064,6 +1064,61 @@ if valid_files and _active_instance_id:
                     st.warning(
                         f"⚠ {n_failed} tipo(s) no se guardaron. Ver detalles abajo."
                     )
+
+                # Ciclo 23.116 — Si orbit falló, diagnóstico explícito:
+                # mostrar qué sensor_labels detectó el sistema y cuáles
+                # matchearon el patrón X/Y. Permite al usuario entender
+                # por qué no se construyeron pares.
+                orbit_failed = any("✗ orbit" in e for e in errors)
+                if orbit_failed:
+                    from core.snapshot_batch_builder import (
+                        _extract_sensor_label,
+                        _extract_axis_and_bearing_key,
+                    )
+                    diag_rows = []
+                    for pf in valid_files:
+                        if not pf.get("is_valid"):
+                            continue
+                        label = _extract_sensor_label(pf)
+                        parsed = _extract_axis_and_bearing_key(label)
+                        if parsed is not None:
+                            diag_rows.append({
+                                "file": pf.get("file_name", ""),
+                                "sensor_label": label,
+                                "bearing_key": parsed[0],
+                                "axis": parsed[1],
+                                "match": "✓",
+                            })
+                        else:
+                            diag_rows.append({
+                                "file": pf.get("file_name", ""),
+                                "sensor_label": label,
+                                "bearing_key": "—",
+                                "axis": "—",
+                                "match": "✗ no X/Y",
+                            })
+                    st.error(
+                        "**Orbit no se pudo guardar.** Para construir órbitas "
+                        "necesito DOS sensores en el MISMO plano (uno X, uno Y), "
+                        "ej. `3XD` + `3YD` o `VE5808 (X)` + `VE5808 (Y)`. "
+                        "Abajo está el diagnóstico de cómo identifiqué tus archivos:"
+                    )
+                    import pandas as pd
+                    st.dataframe(
+                        pd.DataFrame(diag_rows),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                    matched = [r for r in diag_rows if r["match"] == "✓"]
+                    n_x = sum(1 for r in matched if r["axis"] == "X")
+                    n_y = sum(1 for r in matched if r["axis"] == "Y")
+                    bearings = sorted(set(r["bearing_key"] for r in matched))
+                    st.caption(
+                        f"Detectados: {n_x} eje X · {n_y} eje Y · "
+                        f"bearings únicos: {bearings or '(ninguno)'}. "
+                        f"Para emparejar, ambos ejes deben compartir el mismo `bearing_key`."
+                    )
+
                 with st.expander("Detalles del guardado"):
                     for line in errors:
                         st.text(line)
