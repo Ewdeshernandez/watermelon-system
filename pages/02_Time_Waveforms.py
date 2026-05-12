@@ -50,35 +50,22 @@ render_user_menu()
 # Esto esconde sidebar controles + botones export + cualquier elemento
 # marcado con clase `wm-internal-only`.
 if st.session_state.get("_loaded_from_snapshot"):
-    # Ciclo 23.99 — Modo cliente: CSS + JS separados.
-    # CSS via st.markdown (sí funciona, los <style> sí se respetan).
-    # JS via components.html con window.parent.document (porque st.markdown
-    # SANITIZA <script> tags y por eso v3.31.98 no enganchó el gradient).
+    # Ciclo 23.100 — Modo cliente:
+    #   * Sidebar DEBE verse normal (con sus pills blancas) — NO se oculta.
+    #   * Botón Volver se renderiza ahora como `st.page_link` (componente nativo
+    #     que sí tiene `[data-testid="stPageLink"]` y permite CSS predecible).
+    #   * Export buttons se ocultan con CSS por clase wrapper + JS de respaldo.
     st.markdown(
         """
         <style>
-        /* Ciclo 23.99 — Modo cliente: ocultar SIDEBAR ENTERO.
-           El cliente no debe ver Home / Machinery Library / Tabular List /
-           Load Data / Importers / Crear activo / Live Monitoring / etc. */
-        section[data-testid="stSidebar"],
-        [data-testid="stSidebarCollapseButton"],
-        [data-testid="collapsedControl"] {
-            display: none !important;
-            width: 0 !important;
-            visibility: hidden !important;
-        }
-        /* Reclama el espacio horizontal del sidebar oculto */
-        [data-testid="stAppViewContainer"] > section:nth-of-type(2) {
-            margin-left: 0 !important;
-            padding-left: 1rem !important;
-            max-width: 100% !important;
-        }
-        /* Ocultar botones export PNG / Reporte */
+        /* Modo cliente: ocultar botones export PNG / Reporte */
         .wm-export-actions {
             display: none !important;
         }
-        /* Botón Volver — la clase la aplica el JS de components.html abajo */
-        .wm-return-btn-applied button {
+        /* Botón Volver (st.page_link) — gradient azul royal */
+        [data-testid="stPageLink"] a,
+        [data-testid="stPageLink-NavLink"] a,
+        a[data-testid="stPageLink-NavLink"] {
             background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%) !important;
             color: white !important;
             border: none !important;
@@ -87,19 +74,26 @@ if st.session_state.get("_loaded_from_snapshot"):
             font-size: 13px !important;
             padding: 9px 22px !important;
             min-height: 40px !important;
+            display: inline-flex !important;
+            align-items: center !important;
+            gap: 6px !important;
+            text-decoration: none !important;
             box-shadow:
                 0 1px 2px rgba(30,64,175,0.25),
                 0 4px 12px rgba(30,64,175,0.18),
                 inset 0 1px 0 rgba(255,255,255,0.20) !important;
             transition: all 0.2s cubic-bezier(.4,0,.2,1) !important;
             white-space: nowrap !important;
+            width: fit-content !important;
         }
-        .wm-return-btn-applied button p,
-        .wm-return-btn-applied button span,
-        .wm-return-btn-applied button div {
+        [data-testid="stPageLink"] a *,
+        [data-testid="stPageLink-NavLink"] a * {
             color: white !important;
+            fill: white !important;
         }
-        .wm-return-btn-applied button:hover {
+        [data-testid="stPageLink"] a:hover,
+        [data-testid="stPageLink-NavLink"] a:hover,
+        a[data-testid="stPageLink-NavLink"]:hover {
             background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%) !important;
             box-shadow:
                 0 6px 16px rgba(30,64,175,0.32),
@@ -107,40 +101,24 @@ if st.session_state.get("_loaded_from_snapshot"):
                 inset 0 1px 0 rgba(255,255,255,0.25) !important;
             transform: translateY(-1px) !important;
         }
-        .wm-return-btn-applied button:active {
-            transform: translateY(0) !important;
-        }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # JS en components.html — único path que ejecuta scripts en Streamlit.
-    # Usa window.parent.document para alcanzar el DOM real (no el iframe).
+    # JS de respaldo: ocultar export buttons + agregar clase al page_link
+    # si Streamlit no respeta data-testid (algunas versiones cambian el nombre)
     import streamlit.components.v1 as _components
-
     _components.html(
         """
         <script>
         (function() {
-          function applyClientHooks() {
+          function hideExports() {
             try {
               const doc = window.parent.document;
               if (!doc) return;
               doc.querySelectorAll('button').forEach(b => {
                 const t = (b.innerText || b.textContent || '').trim();
-                // 1) Botón Volver — aplicar clase para que el gradient enganche
-                if (t.indexOf('Volver a Live Monitoring') !== -1) {
-                  let p = b;
-                  for (let i = 0; i < 6 && p; i++) {
-                    if (p.matches && p.matches('[data-testid="stButton"]')) {
-                      p.classList.add('wm-return-btn-applied');
-                      break;
-                    }
-                    p = p.parentElement;
-                  }
-                }
-                // 2) Esconder export buttons (Prepare/Download PNG HD, Enviar a Reporte)
                 if (t === 'Prepare PNG HD' || t === 'Download PNG HD' || t === 'Enviar a Reporte') {
                   let p = b;
                   for (let i = 0; i < 8 && p; i++) {
@@ -155,8 +133,8 @@ if st.session_state.get("_loaded_from_snapshot"):
               });
             } catch (e) { /* silencio */ }
           }
-          applyClientHooks();
-          const it = setInterval(applyClientHooks, 400);
+          hideExports();
+          const it = setInterval(hideExports, 500);
           setTimeout(() => clearInterval(it), 30000);
         })();
         </script>
@@ -1073,28 +1051,34 @@ def build_waveform_figure(
     cursor_a = cursor_a_s * x_scale
     cursor_b = cursor_b_s * x_scale
 
-    fig.add_vline(
-        x=cursor_a,
-        line_width=1.15,
-        line_dash="dash",
-        line_color="#374151",
-        annotation_text="A",
-        annotation_position="top left",
-        annotation_font_color="#111827",
-        annotation_font_size=11,
-    )
+    # Ciclo 23.100 — En modo cliente NO dibujar las vlines A/B ni sus labels.
+    # El cliente solo debe ver la forma de onda limpia, sin marcadores de
+    # cursor (eso es UX interna de análisis).
+    _is_client_for_lines = bool(st.session_state.get("_loaded_from_snapshot"))
 
-    if show_cursor_b:
+    if not _is_client_for_lines:
         fig.add_vline(
-            x=cursor_b,
+            x=cursor_a,
             line_width=1.15,
             line_dash="dash",
-            line_color="#6b7280",
-            annotation_text="B",
-            annotation_position="top right",
+            line_color="#374151",
+            annotation_text="A",
+            annotation_position="top left",
             annotation_font_color="#111827",
             annotation_font_size=11,
         )
+
+        if show_cursor_b:
+            fig.add_vline(
+                x=cursor_b,
+                line_width=1.15,
+                line_dash="dash",
+                line_color="#6b7280",
+                annotation_text="B",
+                annotation_position="top right",
+                annotation_font_color="#111827",
+                annotation_font_size=11,
+            )
 
     amp_pp_text = f"{format_number(summary.get('Peak-Peak'), 3)} {amp_unit} p-p".strip()
 

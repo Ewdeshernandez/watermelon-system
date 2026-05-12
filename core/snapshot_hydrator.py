@@ -211,21 +211,32 @@ def render_snapshot_loaded_banner() -> None:
     logo_b64 = _get_watermelon_logo_b64()
 
     # ── Row 1: Botón Volver (izq) + Tag activo / cliente (der) ──
+    # Ciclo 23.100 — Usamos st.page_link (no st.button) porque:
+    #   1) tiene `[data-testid="stPageLink"]` estable → CSS engancha el gradient
+    #   2) preserva sesión auth (navegación interna multipage)
+    #   3) no requiere JS para estilizarlo
+    # La limpieza de `_loaded_from_snapshot` se hace de forma diferida
+    # (al volver a Live Monitoring, si el usuario carga otro snapshot, el
+    # nuevo `_pending_snapshot_load` reemplaza el estado anterior).
     row1_left, row1_right = st.columns([2, 4])
     with row1_left:
-        st.markdown('<div class="wm-return-btn-wrap">', unsafe_allow_html=True)
-        if st.button(
-            "← Volver a Live Monitoring",
-            key="_wm_return_live_monitoring",
-            use_container_width=False,
-        ):
-            st.session_state.pop("_loaded_from_snapshot", None)
-            st.session_state.pop("signals", None)
-            try:
-                st.switch_page("pages/02_Live_Monitoring.py")
-            except Exception:
-                st.error("No se pudo volver. Refrescá la página.")
-        st.markdown('</div>', unsafe_allow_html=True)
+        try:
+            st.page_link(
+                "pages/02_Live_Monitoring.py",
+                label="← Volver a Live Monitoring",
+            )
+        except Exception:
+            # Fallback para versiones de Streamlit sin st.page_link
+            if st.button(
+                "← Volver a Live Monitoring",
+                key="_wm_return_live_monitoring",
+            ):
+                st.session_state.pop("_loaded_from_snapshot", None)
+                st.session_state.pop("signals", None)
+                try:
+                    st.switch_page("pages/02_Live_Monitoring.py")
+                except Exception:
+                    st.error("No se pudo volver. Refrescá la página.")
     with row1_right:
         client_html = (
             f"<span style='color:#94a3b8;'>·</span>"
