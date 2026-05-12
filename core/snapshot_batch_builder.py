@@ -321,10 +321,21 @@ def _extract_axis_and_bearing_key(label: str) -> Optional[Tuple[str, str]]:
 
 
 def _detect_xy_pairs(parsed_files: List[Dict[str, Any]]) -> List[Tuple[Dict[str, Any], Dict[str, Any], str]]:
-    """Detecta pares X/Y por sensor_label. Devuelve [(x_pf, y_pf, bearing_label)]."""
-    pairs = []
-    indexed: Dict[str, Tuple[Dict[str, Any], str]] = {}  # bearing_key → (pf, axis)
+    """Detecta pares X/Y por sensor_label. Devuelve [(x_pf, y_pf, bearing_label)].
 
+    Estrategia en 2 pasos:
+      Paso 1 — match exacto: mismo bearing_key con X y Y.
+               Ej. "3XD" + "3YD" → ("3", X) + ("3", Y) → par.
+      Paso 2 — consecutivos: para sensores que quedaron solos, si sus
+               bearing_keys terminan en dígitos y son números consecutivos
+               (n, n+1) con ejes complementarios, también es par. Convención
+               común en plantas: par 5807Y + 5808X = mismo cojinete físico,
+               solo que cada canal tiene su propio número de tag.
+    """
+    pairs = []
+
+    # Clasificar todos los signals por (bearing_key, axis)
+    by_key: Dict[str, List[Tuple[Dict[str, Any], str]]] = {}
     for pf in parsed_files:
         if not pf.get("is_valid"):
             continue
@@ -333,22 +344,52 @@ def _detect_xy_pairs(parsed_files: List[Dict[str, Any]]) -> List[Tuple[Dict[str,
         if parsed is None:
             continue
         bearing_key, axis = parsed
+        by_key.setdefault(bearing_key, []).append((pf, axis))
 
-        # Bucket por bearing_key
-        if bearing_key in indexed:
-            other_pf, other_axis = indexed[bearing_key]
-            if axis != other_axis:
-                bearing_label = f"BRG {bearing_key}"
-                if axis == "X":
-                    pairs.append((pf, other_pf, bearing_label))
-                else:
-                    pairs.append((other_pf, pf, bearing_label))
-                indexed.pop(bearing_key)
-            else:
-                # Mismo eje, sobreescribir
-                indexed[bearing_key] = (pf, axis)
+    # Paso 1: match exacto por bearing_key
+    unpaired: List[Tuple[str, Dict[str, Any], str]] = []
+    for bearing_key, items in by_key.items():
+        axes_present = {ax for _, ax in items}
+        if "X" in axes_present and "Y" in axes_present:
+            x_pf = next(pf for pf, ax in items if ax == "X")
+            y_pf = next(pf for pf, ax in items if ax == "Y")
+            pairs.append((x_pf, y_pf, f"BRG {bearing_key}"))
         else:
-            indexed[bearing_key] = (pf, axis)
+            for pf, ax in items:
+                unpaired.append((bearing_key, pf, ax))
+
+    # Paso 2: consecutive matching para unpaired (mismo cojinete, números
+    # de canal correlativos como 5807Y + 5808X, 5809Y + 5810X)
+    def _numeric_tail(key: str) -> Optional[int]:
+        m = re.search(r"(\d+)\s*$", key or "")
+        return int(m.group(1)) if m else None
+
+    sortable = []
+    for bk, pf, ax in unpaired:
+        tail = _numeric_tail(bk)
+        if tail is not None:
+            sortable.append((tail, bk, pf, ax))
+
+    sortable.sort(key=lambda t: t[0])
+
+    used_indices: set = set()
+    for i, (tail_a, bk_a, pf_a, ax_a) in enumerate(sortable):
+        if i in used_indices:
+            continue
+        for j in range(i + 1, len(sortable)):
+            if j in used_indices:
+                continue
+            tail_b, bk_b, pf_b, ax_b = sortable[j]
+            # Números consecutivos y ejes complementarios
+            if abs(tail_b - tail_a) == 1 and ax_a != ax_b:
+                x_pf = pf_a if ax_a == "X" else pf_b
+                y_pf = pf_b if ax_a == "X" else pf_a
+                # Label combinado: "BRG VE5807+VE5808"
+                pair_label = f"BRG {bk_a}+{bk_b}"
+                pairs.append((x_pf, y_pf, pair_label))
+                used_indices.add(i)
+                used_indices.add(j)
+                break
 
     return pairs
 
