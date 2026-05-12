@@ -172,11 +172,13 @@ def render_snapshot_loaded_banner() -> None:
     except Exception:
         pass
 
-    # Botón de volver a Live Monitoring (arriba del header)
+    # Botón de volver a Live Monitoring — estilo internacional aplicado
+    # vía CSS `.wm-return-btn-wrap` (injected en Time Waveforms client view).
+    st.markdown('<div class="wm-return-btn-wrap">', unsafe_allow_html=True)
     col_back, _ = st.columns([1, 5])
     with col_back:
         if st.button(
-            "← Live Monitoring",
+            "←  Volver a Live Monitoring",
             key="_wm_return_live_monitoring",
             use_container_width=True,
         ):
@@ -187,6 +189,7 @@ def render_snapshot_loaded_banner() -> None:
                 st.switch_page("pages/02_Live_Monitoring.py")
             except Exception:
                 st.error("No se pudo volver. Refrescá la página.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     # Header con logo SVG sinusoidal puro + título + fecha
     sinusoid_svg = (

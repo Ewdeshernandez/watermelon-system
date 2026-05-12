@@ -46,6 +46,56 @@ st.set_page_config(page_title="Watermelon System | Waveform", layout="wide")
 require_login()
 render_user_menu()
 
+# Ciclo 23.93 — Inyecta CSS de modo cliente AL INICIO si vino desde snapshot.
+# Esto esconde sidebar controles + botones export + cualquier elemento
+# marcado con clase `wm-internal-only`.
+if st.session_state.get("_loaded_from_snapshot"):
+    st.markdown(
+        """
+        <style>
+        /* Modo cliente — ocultar controles técnicos del sidebar */
+        section[data-testid="stSidebar"] [data-testid="stSelectbox"],
+        section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
+        section[data-testid="stSidebar"] [data-testid="stNumberInput"],
+        section[data-testid="stSidebar"] [data-testid="stTextInput"],
+        section[data-testid="stSidebar"] [data-testid="stCheckbox"],
+        section[data-testid="stSidebar"] [data-testid="stRadio"],
+        section[data-testid="stSidebar"] [data-testid="stSlider"],
+        section[data-testid="stSidebar"] h1,
+        section[data-testid="stSidebar"] h2,
+        section[data-testid="stSidebar"] h3,
+        section[data-testid="stSidebar"] h4 {
+            display: none !important;
+        }
+        /* Ocultar botones export PNG / Reporte (3 botones en row) */
+        .wm-export-actions {
+            display: none !important;
+        }
+        .wm-export-actions + div[data-testid="stHorizontalBlock"] {
+            display: none !important;
+        }
+        /* Botón volver — estilo internacional */
+        .wm-return-btn-wrap [data-testid="stButton"] button {
+            background: white !important;
+            color: #475569 !important;
+            border: 1.5px solid #cbd5e1 !important;
+            border-radius: 10px !important;
+            font-weight: 600 !important;
+            font-size: 13px !important;
+            padding: 8px 16px !important;
+            transition: all 0.15s !important;
+            box-shadow: 0 1px 2px rgba(15,23,42,0.04) !important;
+        }
+        .wm-return-btn-wrap [data-testid="stButton"] button:hover {
+            border-color: #2563eb !important;
+            color: #2563eb !important;
+            box-shadow: 0 2px 6px rgba(37,99,235,0.10) !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
 # Ciclo 23.87+ — Hidratación desde snapshot histórico.
 # Dos paths posibles para llegar acá con snapshot pre-cargado:
 #   (a) st.switch_page() seteó session_state["_pending_snapshot_load"]
@@ -1545,7 +1595,9 @@ def render_waveform_panel(
     summary_diag = build_measurement_summary(prepared)
     text_diag = generate_waveform_diagnostic(prepared, summary_diag)
 
-    st.info(text_diag["narrative"])
+    # Ciclo 23.93 — Modo cliente: ocultar narrativa diagnóstica (es IP).
+    if not bool(st.session_state.get("_loaded_from_snapshot")):
+        st.info(text_diag["narrative"])
 
     # Ciclo 12 — Diagnóstico Cat IV completo: extiende el text_diag
     # legacy con detectores de modulación AM (Hilbert), asimetría
