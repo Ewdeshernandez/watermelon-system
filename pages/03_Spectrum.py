@@ -3776,6 +3776,28 @@ elif enable_trend_mode:
     )
 else:
     for panel_index, primary in enumerate(selected_records):
+        # Ciclo 23.112 — En cliente, max_cpm es POR PANEL (cada sensor tiene
+        # su propia unidad: displacement→60k, velocity→30k sensor-limited,
+        # acceleration→60k sensor-limited). El max_cpm global está fijado al
+        # primario y no aplica al resto.
+        _panel_max_cpm = max_cpm
+        if st.session_state.get("_loaded_from_snapshot"):
+            try:
+                from core.spectrum_scale import classify_amplitude_quantity
+                _panel_unit_text = amplitude_unit_text(
+                    infer_amplitude_unit(primary.metadata or {}),
+                    amplitude_mode,
+                )
+                _panel_family = classify_amplitude_quantity(_panel_unit_text)
+                _PANEL_MAX_CPM = {
+                    "displacement": 60000.0,
+                    "velocity":     30000.0,
+                    "acceleration": 60000.0,
+                }
+                _panel_max_cpm = _PANEL_MAX_CPM.get(_panel_family, 60000.0)
+            except Exception:
+                pass
+
         render_spectrum_panel(
             primary=primary,
             panel_index=panel_index,
@@ -3786,7 +3808,7 @@ else:
             zero_padding=zero_padding,
             high_res_display=high_res_display,
             high_res_factor=high_res_factor,
-            max_cpm=max_cpm,
+            max_cpm=_panel_max_cpm,
             y_axis_mode=y_axis_mode,
             y_axis_manual_max=y_axis_manual_max,
             fill_area=fill_area,
