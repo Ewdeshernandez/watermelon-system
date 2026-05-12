@@ -210,61 +210,220 @@ def render_snapshot_loaded_banner() -> None:
     client_label = _resolve_client_label(inst)
     logo_b64 = _get_watermelon_logo_b64()
 
-    # ── Row 1: Botón Volver (izq) + Tag activo / cliente (der) ──
-    # Ciclo 23.104 — Volvemos a st.button + st.switch_page porque <a href>
-    # hace full reload y kicks-out al usuario (pierde sesión Streamlit).
-    # Para el ESTILO usamos un truco: insertamos un <span id="..."> ANTES
-    # del botón y la CSS usa el adjacent sibling (`+`) sobre el contenedor.
-    # Como Streamlit envuelve cada st.markdown/st.button en su propio div
-    # hermano, el "+" sí funciona DOM-wise (es entre stMarkdown + stButton).
-    row1_left, row1_right = st.columns([2, 4])
-    with row1_left:
-        st.markdown(
-            """
-            <style>
-            /* Marker invisible que precede al botón Volver. La CSS usa el
-               selector general sibling (~) para enganchar el siguiente
-               stButton sin importar cuántos divs Streamlit meta entre medio. */
-            #wm-return-btn-marker { display: none; }
-            #wm-return-btn-marker ~ div [data-testid="stButton"] button,
-            #wm-return-btn-marker + div [data-testid="stButton"] button {
-                background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%) !important;
-                color: #ffffff !important;
-                border: none !important;
-                border-radius: 10px !important;
-                font-weight: 700 !important;
-                font-size: 13px !important;
-                padding: 9px 22px !important;
-                min-height: 40px !important;
-                box-shadow:
-                    0 1px 2px rgba(30,64,175,0.25),
-                    0 4px 12px rgba(30,64,175,0.18),
-                    inset 0 1px 0 rgba(255,255,255,0.20) !important;
-                transition: all 0.2s cubic-bezier(.4,0,.2,1) !important;
-                white-space: nowrap !important;
-            }
-            #wm-return-btn-marker ~ div [data-testid="stButton"] button p,
-            #wm-return-btn-marker ~ div [data-testid="stButton"] button span,
-            #wm-return-btn-marker ~ div [data-testid="stButton"] button div {
-                color: #ffffff !important;
-            }
-            #wm-return-btn-marker ~ div [data-testid="stButton"] button:hover {
-                background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%) !important;
-                box-shadow:
-                    0 6px 16px rgba(30,64,175,0.32),
-                    0 0 0 4px rgba(59,130,246,0.20),
-                    inset 0 1px 0 rgba(255,255,255,0.25) !important;
-                transform: translateY(-1px) !important;
-            }
-            </style>
-            <span id="wm-return-btn-marker"></span>
-            """,
-            unsafe_allow_html=True,
-        )
+    # ════════════════════════════════════════════════════════════════════
+    # Ciclo 23.106 — HERO CARD clase mundial estilo System1/AMS.
+    # Una sola card blanca elevada con:
+    #   * Top bar: botón Volver (gradient azul royal, via type="primary")
+    #               + breadcrumb del cliente + tag del activo
+    #   * Hero: logo grande + título + subtitle con fecha
+    #   * Meta strip: 3 metric cards con líneas divisorias (sensores / medición / estado)
+    # ════════════════════════════════════════════════════════════════════
+
+    # 1) Inyectar TODA la CSS de la hero card (una sola vez)
+    st.markdown(
+        """
+        <style>
+        /* ── HERO CARD container ── */
+        .wm-hero {
+            background: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
+            border: 1px solid #e2e8f0;
+            border-radius: 16px;
+            padding: 0;
+            margin: 4px 0 18px 0;
+            box-shadow:
+                0 1px 2px rgba(15,23,42,0.04),
+                0 4px 14px rgba(15,23,42,0.06),
+                0 0 0 1px rgba(255,255,255,0.6) inset;
+            overflow: hidden;
+        }
+        .wm-hero-topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 22px 8px 22px;
+            gap: 18px;
+            min-height: 56px;
+        }
+        .wm-hero-breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .wm-hero-tag {
+            display: inline-flex;
+            align-items: center;
+            font-size: 12px;
+            font-weight: 800;
+            color: #ffffff;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            padding: 5px 12px;
+            border-radius: 7px;
+            box-shadow:
+                0 1px 2px rgba(30,64,175,0.25),
+                0 3px 8px rgba(30,64,175,0.18);
+        }
+        .wm-hero-dot {
+            color: #cbd5e1;
+            font-weight: 700;
+        }
+        .wm-hero-client {
+            font-size: 12px;
+            font-weight: 600;
+            color: #475569;
+            letter-spacing: 0.02em;
+        }
+        /* ── HERO main (logo + título) ── */
+        .wm-hero-main {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            padding: 4px 22px 18px 22px;
+        }
+        .wm-hero-logo {
+            width: 52px;
+            height: 52px;
+            flex-shrink: 0;
+            border-radius: 12px;
+            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow:
+                0 1px 2px rgba(30,64,175,0.2),
+                0 4px 10px rgba(30,64,175,0.15);
+        }
+        .wm-hero-logo img {
+            width: 38px;
+            height: 38px;
+            object-fit: contain;
+            filter: drop-shadow(0 1px 2px rgba(0,0,0,0.10));
+        }
+        .wm-hero-titles {
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        .wm-hero-title {
+            font-size: 24px;
+            font-weight: 800;
+            color: #0f172a;
+            letter-spacing: -0.02em;
+            line-height: 1.15;
+        }
+        .wm-hero-subtitle {
+            font-size: 13px;
+            color: #64748b;
+            font-weight: 600;
+            margin-top: 2px;
+            letter-spacing: 0.005em;
+        }
+        /* ── META strip (3 metric cards) ── */
+        .wm-hero-meta {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0;
+            border-top: 1px solid #e2e8f0;
+            background: #f8fafc;
+        }
+        .wm-hero-meta-item {
+            display: flex;
+            flex-direction: column;
+            padding: 12px 22px;
+            border-right: 1px solid #e2e8f0;
+        }
+        .wm-hero-meta-item:last-child { border-right: 0; }
+        .wm-hero-meta-label {
+            font-size: 10px;
+            font-weight: 800;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.10em;
+        }
+        .wm-hero-meta-value {
+            font-size: 15px;
+            font-weight: 800;
+            color: #0f172a;
+            margin-top: 3px;
+            letter-spacing: -0.01em;
+        }
+        .wm-hero-meta-value.is-green { color: #15803d; }
+        .wm-hero-meta-value .dot {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: #16a34a;
+            margin-right: 6px;
+            box-shadow: 0 0 0 3px rgba(22,163,74,0.18);
+            vertical-align: middle;
+            position: relative;
+            top: -1px;
+        }
+
+        /* ── BOTÓN Volver (Streamlit st.button con type="primary") ──
+           Selectores múltiples para máxima compatibilidad: */
+        #wm-return-btn-host button,
+        #wm-return-btn-host + div button,
+        #wm-return-btn-host ~ div [data-testid="stButton"] button,
+        div[data-testid="stButton"]:has(button p:where(.wm-return-btn-text)) button,
+        button[data-testid="baseButton-primary"]:has(p.wm-return-btn-text),
+        button[kind="primary"]:has(p.wm-return-btn-text) {
+            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%) !important;
+            color: #ffffff !important;
+            border: none !important;
+            border-radius: 9px !important;
+            font-weight: 700 !important;
+            font-size: 12.5px !important;
+            padding: 8px 18px !important;
+            min-height: 36px !important;
+            height: 36px !important;
+            line-height: 1 !important;
+            white-space: nowrap !important;
+            box-shadow:
+                0 1px 2px rgba(30,64,175,0.30),
+                0 4px 12px rgba(30,64,175,0.20),
+                inset 0 1px 0 rgba(255,255,255,0.22) !important;
+            transition: all 0.2s cubic-bezier(.4,0,.2,1) !important;
+        }
+        #wm-return-btn-host ~ div [data-testid="stButton"] button p,
+        #wm-return-btn-host ~ div [data-testid="stButton"] button span {
+            color: #ffffff !important;
+            font-weight: 700 !important;
+        }
+        #wm-return-btn-host ~ div [data-testid="stButton"] button:hover {
+            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%) !important;
+            box-shadow:
+                0 6px 16px rgba(30,64,175,0.34),
+                0 0 0 4px rgba(59,130,246,0.20),
+                inset 0 1px 0 rgba(255,255,255,0.28) !important;
+            transform: translateY(-1px) !important;
+        }
+        #wm-return-btn-host ~ div [data-testid="stButton"] button:active {
+            transform: translateY(0) !important;
+        }
+        /* El span marker no debe consumir espacio */
+        #wm-return-btn-host { display: block; height: 0; overflow: hidden; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # 2) Renderizar la hero card visualmente: necesitamos meter el botón
+    #    DENTRO de la card. Truco: dividimos el render en columnas.
+    #    Top bar = col_btn (botón Streamlit) + col_meta (HTML breadcrumb+tag)
+    #    luego HTML para hero-main + meta strip.
+
+    col_btn, col_meta = st.columns([2, 5])
+    with col_btn:
+        # Span host para que el sibling selector de CSS enganche al botón
+        st.markdown('<span id="wm-return-btn-host"></span>', unsafe_allow_html=True)
         if st.button(
             "← Volver a Live Monitoring",
             key="_wm_return_live_monitoring",
-            use_container_width=False,
+            type="primary",
         ):
             st.session_state.pop("_loaded_from_snapshot", None)
             st.session_state.pop("signals", None)
@@ -272,56 +431,54 @@ def render_snapshot_loaded_banner() -> None:
                 st.switch_page("pages/02_Live_Monitoring.py")
             except Exception:
                 st.error("No se pudo volver. Refrescá la página.")
-    with row1_right:
+
+    with col_meta:
         client_html = (
-            f"<span style='color:#94a3b8;'>·</span>"
-            f"<span style='color:#475569;font-size:12px;font-weight:600;"
-            f"letter-spacing:0.04em;margin-left:8px;'>{client_label}</span>"
+            f"<span class='wm-hero-dot'>·</span>"
+            f"<span class='wm-hero-client'>{client_label}</span>"
             if client_label else ""
         )
         st.markdown(
-            f"<div style='display:flex;align-items:center;justify-content:flex-end;"
-            f"gap:10px;padding-top:10px;'>"
-            f"<span style='font-size:13px;font-weight:800;color:#0f172a;"
-            f"letter-spacing:0.05em;text-transform:uppercase;"
-            f"background:linear-gradient(135deg,#1e40af 0%,#3b82f6 100%);"
-            f"color:white;padding:5px 12px;border-radius:8px;"
-            f"box-shadow:0 2px 6px rgba(30,64,175,0.20);'>{inst.upper()}</span>"
+            f"<div class='wm-hero-breadcrumb' style='justify-content:flex-end; padding-top:6px;'>"
+            f"<span class='wm-hero-tag'>{inst.upper()}</span>"
             f"{client_html}"
             f"</div>",
             unsafe_allow_html=True,
         )
 
-    # ── Row 2: Logo + Título + Meta ──
-    logo_html = (
-        f"<img src='data:image/png;base64,{logo_b64}' "
-        f"style='width:56px;height:56px;object-fit:contain;"
-        f"margin-right:18px;flex-shrink:0;'/>"
+    # 3) Hero main (logo + título) + meta strip — todo HTML en un solo bloque
+    logo_inner = (
+        f"<img src='data:image/png;base64,{logo_b64}' alt='Watermelon System'/>"
         if logo_b64 else
-        '<div style="width:56px;height:56px;margin-right:18px;flex-shrink:0;'
-        'border-radius:14px;background:linear-gradient(135deg,#1e40af,#3b82f6);"></div>'
+        '<div style="width:38px;height:38px;background:white;border-radius:9px;opacity:0.9;"></div>'
     )
 
     st.markdown(
-        f"<div style='display:flex;align-items:center;margin:10px 0 4px 0;'>"
-        f"{logo_html}"
-        f"<div>"
-        f"<div style='font-size:26px;font-weight:800;color:#0f172a;"
-        f"letter-spacing:-0.015em;line-height:1.1;'>"
-        f"Análisis de Formas de Onda</div>"
-        f"<div style='font-size:13px;color:#64748b;font-weight:600;"
-        f"margin-top:4px;letter-spacing:0.01em;'>"
-        f"{fecha}"
-        f"<span style='color:#cbd5e1;margin:0 6px;'>·</span>"
-        f"{n_signals} sensores"
-        f"<span style='color:#cbd5e1;margin:0 6px;'>·</span>"
-        f"<span style='color:#16a34a;'>✓ Operación normal</span>"
-        f"</div>"
-        f"</div>"
-        f"</div>"
-        f"<hr style='border:0;height:1px;"
-        f"background:linear-gradient(90deg,transparent,#cbd5e1 20%,#cbd5e1 80%,transparent);"
-        f"margin:14px 0 8px 0;'/>",
+        f"""
+        <div class='wm-hero'>
+            <div class='wm-hero-main' style='padding-top:14px;'>
+                <div class='wm-hero-logo'>{logo_inner}</div>
+                <div class='wm-hero-titles'>
+                    <div class='wm-hero-title'>Análisis de Formas de Onda</div>
+                    <div class='wm-hero-subtitle'>{fecha}</div>
+                </div>
+            </div>
+            <div class='wm-hero-meta'>
+                <div class='wm-hero-meta-item'>
+                    <div class='wm-hero-meta-label'>Sensores</div>
+                    <div class='wm-hero-meta-value'>{n_signals} activos</div>
+                </div>
+                <div class='wm-hero-meta-item'>
+                    <div class='wm-hero-meta-label'>Medición</div>
+                    <div class='wm-hero-meta-value'>Snapshot histórico</div>
+                </div>
+                <div class='wm-hero-meta-item'>
+                    <div class='wm-hero-meta-label'>Estado</div>
+                    <div class='wm-hero-meta-value is-green'><span class='dot'></span>Operación normal</div>
+                </div>
+            </div>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
