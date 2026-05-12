@@ -110,9 +110,9 @@ if st.session_state.get("_loaded_from_snapshot"):
                 0 1px 2px rgba(15,23,42,0.06),
                 0 0 0 3px rgba(37,99,235,0.10) !important;
         }
-        /* Reducir ancho del column wrapper para que el botón no se estire */
-        .wm-return-btn-wrap [data-testid="column"] {
-            max-width: 240px !important;
+        /* Cursores sincronizados — sliders más finos y pro */
+        [data-testid="stSlider"] [data-baseweb="slider"] {
+            padding-top: 4px !important;
         }
         </style>
         """,
@@ -130,6 +130,7 @@ try:
         consume_pending_snapshot_url,
         hydrate_waveform_snapshot,
         render_snapshot_loaded_banner,
+        render_synchronized_cursors_controls,
     )
     _snap_inst, _snap_id = None, None
 
@@ -151,6 +152,10 @@ try:
         if _already.get("snapshot_id") != _snap_id:
             hydrate_waveform_snapshot(_snap_inst, _snap_id)
     render_snapshot_loaded_banner()
+    # Ciclo 23.95 — cursores A/B sincronizados en el header (client view).
+    # Mueven cursor en TODAS las waveforms al mismo tiempo. Solo aparece
+    # si hay signals cargadas (vino de snapshot).
+    render_synchronized_cursors_controls()
 except Exception as _e:
     # Falla silenciosa — la hidratación es opcional, módulo sigue normal
     import logging
@@ -2174,36 +2179,40 @@ with st.sidebar:
             step=float(max_duration / 1000.0) if max_duration > 0 else 0.001,
         )
 
-    st.markdown("### Cursors")
+    # Ciclo 23.95 — modo cliente usa cursores sincronizados del banner.
+    # Skipear este bloque para evitar conflictos / sobreescribir valores.
+    _is_client_view_cursors = bool(st.session_state.get("_loaded_from_snapshot"))
+    if not _is_client_view_cursors:
+        st.markdown("### Cursors")
 
-    cursor_a = st.number_input(
-        "Cursor A (s)",
-        min_value=float(t_min),
-        max_value=float(t_max),
-        value=float(min(max(st.session_state.wm_cursor_a, t_min), t_max)),
-        step=float(max((t_max - t_min) / 1000.0, 1e-6)),
-        format="%.4f",
-    )
+        cursor_a = st.number_input(
+            "Cursor A (s)",
+            min_value=float(t_min),
+            max_value=float(t_max),
+            value=float(min(max(st.session_state.wm_cursor_a, t_min), t_max)),
+            step=float(max((t_max - t_min) / 1000.0, 1e-6)),
+            format="%.4f",
+        )
 
-    cursor_b = st.number_input(
-        "Cursor B (s)",
-        min_value=float(t_min),
-        max_value=float(t_max),
-        value=float(min(max(st.session_state.wm_cursor_b, t_min), t_max)),
-        step=float(max((t_max - t_min) / 1000.0, 1e-6)),
-        format="%.4f",
-    )
+        cursor_b = st.number_input(
+            "Cursor B (s)",
+            min_value=float(t_min),
+            max_value=float(t_max),
+            value=float(min(max(st.session_state.wm_cursor_b, t_min), t_max)),
+            step=float(max((t_max - t_min) / 1000.0, 1e-6)),
+            format="%.4f",
+        )
 
-    col_ca, col_cb = st.columns(2)
-    with col_ca:
-        if st.button("A = left", use_container_width=True):
-            cursor_a = t_min
-    with col_cb:
-        if st.button("B = right", use_container_width=True):
-            cursor_b = t_max
+        col_ca, col_cb = st.columns(2)
+        with col_ca:
+            if st.button("A = left", use_container_width=True):
+                cursor_a = t_min
+        with col_cb:
+            if st.button("B = right", use_container_width=True):
+                cursor_b = t_max
 
-    st.session_state.wm_cursor_a = cursor_a
-    st.session_state.wm_cursor_b = cursor_b
+        st.session_state.wm_cursor_a = cursor_a
+        st.session_state.wm_cursor_b = cursor_b
 
 
 # ------------------------------------------------------------
