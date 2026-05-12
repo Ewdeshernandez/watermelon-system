@@ -151,22 +151,50 @@ def hydrate_spectrum_snapshot(instance_id: str, snapshot_id: str) -> bool:
         return False
     target_label = (spec_payload.get("corrida_label") or "").strip()
 
-    # 2) Buscar waveform snapshot con el mismo corrida_label
+    # 2) Buscar waveform snapshot con estrategias en cascada
     try:
         wf_snaps = list_waveform_snapshots(instance_id) or []
     except Exception:
         wf_snaps = []
 
     matching_wf_id = None
-    for ws in wf_snaps:
-        if (ws.get("corrida_label") or "").strip() == target_label and target_label:
-            matching_wf_id = ws.get("snapshot_id")
-            break
+    # 2a) Match exacto por corrida_label
+    if target_label and wf_snaps:
+        for ws in wf_snaps:
+            if (ws.get("corrida_label") or "").strip() == target_label:
+                matching_wf_id = ws.get("snapshot_id")
+                break
+
+    # 2b) Match por proximidad de timestamp (±10 min) si falló 2a
+    if not matching_wf_id and wf_snaps:
+        spec_ts_raw = spec_payload.get("timestamp", "")
+        try:
+            from datetime import datetime, timedelta
+            spec_dt = datetime.fromisoformat(spec_ts_raw.replace("Z", "+00:00"))
+            best = None
+            best_diff = None
+            for ws in wf_snaps:
+                ws_ts = ws.get("timestamp", "")
+                try:
+                    ws_dt = datetime.fromisoformat(ws_ts.replace("Z", "+00:00"))
+                    diff = abs((ws_dt - spec_dt).total_seconds())
+                    if best_diff is None or diff < best_diff:
+                        best_diff = diff
+                        best = ws.get("snapshot_id")
+                except Exception:
+                    continue
+            # Solo aceptar si está dentro de 10 minutos (mismo Load Data run)
+            if best and best_diff is not None and best_diff <= 600:
+                matching_wf_id = best
+        except Exception:
+            pass
+
+    # 2c) Último recurso: el waveform más reciente del activo
+    if not matching_wf_id and wf_snaps:
+        matching_wf_id = wf_snaps[0].get("snapshot_id")
 
     if not matching_wf_id:
-        # Sin pareja waveform → no podemos render Spectrum completo.
-        # Marcamos session_state con la info del spectrum directamente,
-        # y el módulo Spectrum mostrará el preview simple (peaks + plot).
+        # NINGÚN waveform disponible para este instance — fallback solo banner
         st.session_state["_loaded_from_snapshot"] = {
             "snapshot_id": snapshot_id,
             "instance_id": instance_id,
@@ -174,7 +202,7 @@ def hydrate_spectrum_snapshot(instance_id: str, snapshot_id: str) -> bool:
             "timestamp": spec_payload.get("timestamp", ""),
             "n_signals": len(spec_payload.get("sensors", [])),
             "module_title": "Análisis Espectral",
-            "spectrum_payload": spec_payload,  # fallback rendering
+            "spectrum_payload": spec_payload,
             "no_waveform_pair": True,
         }
         return True
@@ -434,13 +462,16 @@ def render_snapshot_loaded_banner() -> None:
         }
 
         /* ── BOTÓN Volver (Streamlit st.button con type="primary") ──
-           Selectores múltiples para máxima compatibilidad: */
+           En cliente el ÚNICO primary button visible es Volver, así que
+           podemos pisar `button[kind="primary"]` globalmente. */
+        section.main button[kind="primary"],
+        section[data-testid="stMain"] button[kind="primary"],
+        div[data-testid="stMainBlockContainer"] button[kind="primary"],
+        button[kind="primary"],
+        button[data-testid="stBaseButton-primary"],
         #wm-return-btn-host button,
         #wm-return-btn-host + div button,
-        #wm-return-btn-host ~ div [data-testid="stButton"] button,
-        div[data-testid="stButton"]:has(button p:where(.wm-return-btn-text)) button,
-        button[data-testid="baseButton-primary"]:has(p.wm-return-btn-text),
-        button[kind="primary"]:has(p.wm-return-btn-text) {
+        #wm-return-btn-host ~ div [data-testid="stButton"] button {
             background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%) !important;
             color: #ffffff !important;
             border: none !important;
@@ -458,12 +489,16 @@ def render_snapshot_loaded_banner() -> None:
                 inset 0 1px 0 rgba(255,255,255,0.22) !important;
             transition: all 0.2s cubic-bezier(.4,0,.2,1) !important;
         }
-        #wm-return-btn-host ~ div [data-testid="stButton"] button p,
-        #wm-return-btn-host ~ div [data-testid="stButton"] button span {
+        button[kind="primary"] p,
+        button[kind="primary"] span,
+        button[kind="primary"] div,
+        button[data-testid="stBaseButton-primary"] p,
+        button[data-testid="stBaseButton-primary"] span {
             color: #ffffff !important;
             font-weight: 700 !important;
         }
-        #wm-return-btn-host ~ div [data-testid="stButton"] button:hover {
+        button[kind="primary"]:hover,
+        button[data-testid="stBaseButton-primary"]:hover {
             background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%) !important;
             box-shadow:
                 0 6px 16px rgba(30,64,175,0.34),
@@ -471,7 +506,8 @@ def render_snapshot_loaded_banner() -> None:
                 inset 0 1px 0 rgba(255,255,255,0.28) !important;
             transform: translateY(-1px) !important;
         }
-        #wm-return-btn-host ~ div [data-testid="stButton"] button:active {
+        button[kind="primary"]:active,
+        button[data-testid="stBaseButton-primary"]:active {
             transform: translateY(0) !important;
         }
         /* El span marker no debe consumir espacio */
