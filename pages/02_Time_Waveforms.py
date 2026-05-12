@@ -174,6 +174,47 @@ def apply_page_style() -> None:
            pone render_user_menu() → sidebar se veía gris con pills blancas.
            Quitándolo, el sidebar hereda el mismo look que Live Monitoring. */
 
+        /* Ciclo 23.105 — Re-asegurar el estilo transparent de los botones
+           de la nav del sidebar. core/auth.py usa `div[data-testid="stSidebar"]`
+           pero en Streamlit moderno el sidebar es `section`, así que la regla
+           original no engancha en este módulo. Replico la regla con `section`. */
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+            background: transparent !important;
+            color: rgba(241, 245, 249, 0.85) !important;
+            border: 1px solid transparent !important;
+            border-radius: 8px !important;
+            font-weight: 500 !important;
+            font-size: 0.84rem !important;
+            letter-spacing: 0.005em !important;
+            text-align: left !important;
+            justify-content: flex-start !important;
+            padding: 0.5rem 0.8rem !important;
+            min-height: 2.35rem !important;
+            box-shadow: none !important;
+            transition: all 0.15s ease !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
+            background: rgba(255,255,255,0.08) !important;
+            border-color: rgba(255,255,255,0.10) !important;
+            color: #ffffff !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button:focus,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button:focus-visible {
+            background: rgba(255,255,255,0.10) !important;
+            border-color: rgba(96,165,250,0.45) !important;
+            box-shadow: 0 0 0 2px rgba(96,165,250,0.18) !important;
+            outline: none !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button *,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button p,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button span,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button div {
+            color: inherit !important;
+            fill: inherit !important;
+            opacity: 1 !important;
+            font-weight: 500 !important;
+        }
+
         div[data-testid="stNumberInput"] input {
             font-family: monospace;
         }
