@@ -126,6 +126,73 @@ def hydrate_waveform_snapshot(instance_id: str, snapshot_id: str) -> bool:
 
 
 # =============================================================
+# SPECTRUM HYDRATION (Ciclo 23.107)
+# =============================================================
+
+def hydrate_spectrum_snapshot(instance_id: str, snapshot_id: str) -> bool:
+    """Hidrata `signals` para Spectrum desde el waveform pareado.
+
+    Spectrum recibe time-domain en `st.session_state["signals"]` y computa
+    FFT internamente. El snapshot de spectrum solo guarda freqs/amps ya
+    procesados — no sirve directo. Truco: usamos `corrida_label` como join.
+    Cada Load Data guarda waveform + spectrum + orbit + tabular con la
+    misma etiqueta, así que basta con encontrar el waveform_snapshot que
+    comparte `corrida_label` con este spectrum_snapshot e hidratar desde ese.
+    """
+    try:
+        from core.spectrum_history import load_spectrum_snapshot, list_spectrum_snapshots
+        from core.waveform_history import list_waveform_snapshots
+    except Exception:
+        return False
+
+    # 1) Cargar metadata del spectrum snapshot para sacar corrida_label
+    spec_payload = load_spectrum_snapshot(instance_id, snapshot_id)
+    if not spec_payload:
+        return False
+    target_label = (spec_payload.get("corrida_label") or "").strip()
+
+    # 2) Buscar waveform snapshot con el mismo corrida_label
+    try:
+        wf_snaps = list_waveform_snapshots(instance_id) or []
+    except Exception:
+        wf_snaps = []
+
+    matching_wf_id = None
+    for ws in wf_snaps:
+        if (ws.get("corrida_label") or "").strip() == target_label and target_label:
+            matching_wf_id = ws.get("snapshot_id")
+            break
+
+    if not matching_wf_id:
+        # Sin pareja waveform → no podemos render Spectrum completo.
+        # Marcamos session_state con la info del spectrum directamente,
+        # y el módulo Spectrum mostrará el preview simple (peaks + plot).
+        st.session_state["_loaded_from_snapshot"] = {
+            "snapshot_id": snapshot_id,
+            "instance_id": instance_id,
+            "corrida_label": target_label,
+            "timestamp": spec_payload.get("timestamp", ""),
+            "n_signals": len(spec_payload.get("sensors", [])),
+            "module_title": "Análisis Espectral",
+            "spectrum_payload": spec_payload,  # fallback rendering
+            "no_waveform_pair": True,
+        }
+        return True
+
+    # 3) Hidratar via el waveform helper (re-usa toda la lógica probada)
+    ok = hydrate_waveform_snapshot(instance_id, matching_wf_id)
+    if not ok:
+        return False
+
+    # 4) Override el module_title para que el banner diga "Espectral"
+    info = st.session_state.get("_loaded_from_snapshot", {})
+    info["module_title"] = "Análisis Espectral"
+    info["spectrum_snapshot_id"] = snapshot_id
+    st.session_state["_loaded_from_snapshot"] = info
+    return True
+
+
+# =============================================================
 # URL PARAM HELPER
 # =============================================================
 
@@ -195,6 +262,9 @@ def render_snapshot_loaded_banner() -> None:
     inst = info.get("instance_id", "") or ""
     ts_raw = info.get("timestamp", "") or ""
     n_signals = info.get("n_signals", 0)
+    # Ciclo 23.107 — título dinámico según el módulo activo. Si el hydrator
+    # no lo seteó (default), usamos "Análisis de Formas de Onda" por bw-compat.
+    module_title = (info.get("module_title") or "Análisis de Formas de Onda").strip()
 
     # Fecha amigable
     fecha = ts_raw
@@ -459,7 +529,7 @@ def render_snapshot_loaded_banner() -> None:
             <div class='wm-hero-main' style='padding-top:14px;'>
                 <div class='wm-hero-logo'>{logo_inner}</div>
                 <div class='wm-hero-titles'>
-                    <div class='wm-hero-title'>Análisis de Formas de Onda</div>
+                    <div class='wm-hero-title'>{module_title}</div>
                     <div class='wm-hero-subtitle'>{fecha}</div>
                 </div>
             </div>

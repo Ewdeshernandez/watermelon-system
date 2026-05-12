@@ -58,6 +58,83 @@ require_login()
 render_user_menu()
 
 # ============================================================
+# Ciclo 23.107 — Modo cliente: hidratación desde snapshot histórico
+# ============================================================
+# Si el usuario llegó a esta página clickeando una card de "Espectro" en
+# Live Monitoring, session_state["_pending_snapshot_load"] está seteado.
+# Hidratamos `signals` desde el waveform pareado (mismo corrida_label) y
+# mostramos el banner pro al tope.
+try:
+    from core.snapshot_hydrator import (
+        consume_pending_snapshot_url,
+        hydrate_spectrum_snapshot,
+        render_snapshot_loaded_banner,
+    )
+    _snap_inst, _snap_id = None, None
+    _pending = st.session_state.pop("_pending_snapshot_load", None)
+    if _pending and _pending.get("snapshot_type") == "spectrum":
+        _snap_inst = _pending.get("instance_id")
+        _snap_id = _pending.get("snapshot_id")
+    if _snap_id is None:
+        _snap_params = consume_pending_snapshot_url()
+        if _snap_params is not None:
+            _snap_inst, _snap_id = _snap_params
+
+    if _snap_id and _snap_inst:
+        _already = st.session_state.get("_loaded_from_snapshot", {})
+        if _already.get("spectrum_snapshot_id") != _snap_id:
+            hydrate_spectrum_snapshot(_snap_inst, _snap_id)
+    render_snapshot_loaded_banner()
+except Exception as _e:
+    import logging
+    logging.warning("spectrum snapshot hydration failed: %s", _e)
+
+# Inyectar CSS específica de modo cliente (hide export buttons del body)
+if st.session_state.get("_loaded_from_snapshot"):
+    st.markdown(
+        """
+        <style>
+        .wm-export-actions { display: none !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    import streamlit.components.v1 as _components
+    _components.html(
+        """
+        <script>
+        (function() {
+          const HIDE_BUTTONS = ['Prepare PNG HD','Download PNG HD','Enviar a Reporte'];
+          function hideExports() {
+            try {
+              const doc = window.parent.document;
+              if (!doc) return;
+              doc.querySelectorAll('button').forEach(b => {
+                const t = (b.innerText || b.textContent || '').trim();
+                if (HIDE_BUTTONS.indexOf(t) !== -1) {
+                  let p = b;
+                  for (let i = 0; i < 8 && p; i++) {
+                    if (p.matches && p.matches('[data-testid="stHorizontalBlock"]')) {
+                      p.style.display = 'none';
+                      return;
+                    }
+                    p = p.parentElement;
+                  }
+                  b.style.display = 'none';
+                }
+              });
+            } catch (e) {}
+          }
+          hideExports();
+          const it = setInterval(hideExports, 500);
+          setTimeout(() => clearInterval(it), 30000);
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+# ============================================================
 # WATERMELON SYSTEM — SPECTRUM VIEWER
 # Premium harmonic annotation line
 # ============================================================
@@ -80,9 +157,36 @@ def apply_page_style() -> None:
             background-color: #f3f4f6;
         }
 
-        section[data-testid="stSidebar"] {
-            background: #e5e7eb;
-            border-right: 1px solid #cbd5e1;
+        /* Ciclo 23.107 — NO override del background del sidebar (heredamos
+           royal blue de render_user_menu). Mismo fix que Waveform 23.104. */
+
+        /* Forzar buttons del sidebar transparentes — auth.py usa selector
+           `div[data-testid="stSidebar"]` que no engancha en Streamlit moderno
+           (es `section`). Replicamos con el selector correcto. */
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+            background: transparent !important;
+            color: rgba(241, 245, 249, 0.85) !important;
+            border: 1px solid transparent !important;
+            border-radius: 8px !important;
+            font-weight: 500 !important;
+            font-size: 0.84rem !important;
+            text-align: left !important;
+            justify-content: flex-start !important;
+            padding: 0.5rem 0.8rem !important;
+            min-height: 2.35rem !important;
+            box-shadow: none !important;
+            transition: all 0.15s ease !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
+            background: rgba(255,255,255,0.08) !important;
+            border-color: rgba(255,255,255,0.10) !important;
+            color: #ffffff !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button *,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button p,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button span {
+            color: inherit !important;
+            font-weight: 500 !important;
         }
 
         div[data-testid="stNumberInput"] input {
@@ -2213,12 +2317,19 @@ def render_spectrum_panel(
         if rows:
             import pandas as pd
             st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-    st.info(text_diag["narrative"])
+
+    # Ciclo 23.107 — Modo cliente: ocultar IP interna (narrativa Cat IV,
+    # diagnóstico avanzado, AI clínico, export buttons). El cliente solo
+    # ve el espectro + helper chips + bearing validation.
+    _is_client_view = bool(st.session_state.get("_loaded_from_snapshot"))
+
+    if not _is_client_view:
+        st.info(text_diag["narrative"])
 
     # Ciclo 11 — Bloque Cat IV con narrativa profunda + recomendaciones
     # numeradas con normas citadas. Aparece como expander expanded por
     # default para que el usuario lo vea de inmediato.
-    if cat_iv_diag is not None:
+    if cat_iv_diag is not None and not _is_client_view:
         sev = cat_iv_diag.get("severity_global", "VIGILANCIA")
         sev_color = {
             "CRÍTICA": "#dc2626", "ACCIÓN REQUERIDA": "#ea580c",
@@ -2260,10 +2371,13 @@ def render_spectrum_panel(
     if ai_state_key not in st.session_state:
         st.session_state[ai_state_key] = None
 
-    with st.expander(
+    # Ciclo 23.107 — Modo cliente: skipea TODO el bloque AI (es IP interna).
+    _is_client_view_ai = bool(st.session_state.get("_loaded_from_snapshot"))
+    if (not _is_client_view_ai):
+      with st.expander(
         "Interpretación clínica AI · Diagnóstico Cat IV asistido",
         expanded=False,
-    ):
+      ):
         if not is_ai_available():
             st.info(
                 "**AI Diagnóstico no disponible.** Falta configurar "
@@ -2439,6 +2553,12 @@ def render_spectrum_panel(
                     st.error(
                         stored.get("markdown", "Error al generar diagnóstico AI.")
                     )
+
+    # Ciclo 23.107 — Modo cliente: ocultar export buttons (Prepare/Download
+    # PNG HD + Enviar a Reporte) — son para el especialista, no el cliente.
+    _is_client_view_exp = bool(st.session_state.get("_loaded_from_snapshot"))
+    if _is_client_view_exp:
+        return  # Skipea el resto del render_panel — fin del flujo cliente
 
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])

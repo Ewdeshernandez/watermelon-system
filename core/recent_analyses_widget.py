@@ -445,10 +445,14 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
         unsafe_allow_html=True,
     )
 
-    # Ciclo 23.90 — Waveform abre módulo dedicado vía st.button + st.switch_page.
-    # `<a href>` con session auth no funciona en Streamlit Cloud (siempre va a
-    # login). switch_page mantiene la sesión.
-    if atype["key"] == "waveform":
+    # Ciclo 23.90/23.107 — Waveform & Spectrum abren módulo dedicado vía
+    # st.button + st.switch_page (switch_page mantiene la sesión, `<a href>`
+    # con session auth no funciona en Streamlit Cloud — siempre va a login).
+    _REDIRECT_TARGETS = {
+        "waveform": "pages/02_Time_Waveforms.py",
+        "spectrum": "pages/03_Spectrum.py",
+    }
+    if atype["key"] in _REDIRECT_TARGETS:
         snap_id = meta.get("snapshot_id", "")
         if st.button(
             f"📊 Abrir",
@@ -456,17 +460,16 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
             use_container_width=True,
             type="primary",
         ):
-            # Pre-set en session_state — Time Waveforms lo lee al cargar
+            # Pre-set en session_state — la page lo lee al cargar
             st.session_state["_pending_snapshot_load"] = {
                 "snapshot_id": snap_id,
                 "instance_id": instance_id,
-                "snapshot_type": "waveform",
+                "snapshot_type": atype["key"],
             }
             try:
-                st.switch_page("pages/02_Time_Waveforms.py")
+                st.switch_page(_REDIRECT_TARGETS[atype["key"]])
             except Exception:
-                # Fallback si switch_page falla (Streamlit muy viejo)
-                st.error("No se pudo navegar a Time Waveforms. Refrescá la página.")
+                st.error(f"No se pudo navegar a {atype['label']}. Refrescá la página.")
     else:
         # Otros tipos: preview inline (próxima version los migra a redirect)
         if st.button(
