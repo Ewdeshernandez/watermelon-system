@@ -211,32 +211,65 @@ def render_snapshot_loaded_banner() -> None:
     logo_b64 = _get_watermelon_logo_b64()
 
     # ── Row 1: Botón Volver (izq) + Tag activo / cliente (der) ──
-    # Ciclo 23.100 — Usamos st.page_link (no st.button) porque:
-    #   1) tiene `[data-testid="stPageLink"]` estable → CSS engancha el gradient
-    #   2) preserva sesión auth (navegación interna multipage)
-    #   3) no requiere JS para estilizarlo
-    # La limpieza de `_loaded_from_snapshot` se hace de forma diferida
-    # (al volver a Live Monitoring, si el usuario carga otro snapshot, el
-    # nuevo `_pending_snapshot_load` reemplaza el estado anterior).
+    # Ciclo 23.101 — Render directo con <a href>. st.page_link y st.button
+    # ambos fallan en agarrar el gradient por CSS porque Streamlit aplica
+    # estilos con alta especificidad. Con <a> raw + clase propia controlamos
+    # 100% el aspecto. Navegación same-origin preserva el session cookie de
+    # Streamlit, así que el login se mantiene.
     row1_left, row1_right = st.columns([2, 4])
     with row1_left:
-        try:
-            st.page_link(
-                "pages/02_Live_Monitoring.py",
-                label="← Volver a Live Monitoring",
-            )
-        except Exception:
-            # Fallback para versiones de Streamlit sin st.page_link
-            if st.button(
-                "← Volver a Live Monitoring",
-                key="_wm_return_live_monitoring",
-            ):
-                st.session_state.pop("_loaded_from_snapshot", None)
-                st.session_state.pop("signals", None)
-                try:
-                    st.switch_page("pages/02_Live_Monitoring.py")
-                except Exception:
-                    st.error("No se pudo volver. Refrescá la página.")
+        st.markdown(
+            """
+            <style>
+            .wm-return-btn {
+                display: inline-flex !important;
+                align-items: center !important;
+                gap: 6px !important;
+                background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%) !important;
+                color: #ffffff !important;
+                border: none !important;
+                border-radius: 10px !important;
+                font-weight: 700 !important;
+                font-size: 13px !important;
+                font-family: "Source Sans Pro", -apple-system, BlinkMacSystemFont, sans-serif !important;
+                padding: 9px 22px !important;
+                line-height: 1.2 !important;
+                text-decoration: none !important;
+                white-space: nowrap !important;
+                box-shadow:
+                    0 1px 2px rgba(30,64,175,0.25),
+                    0 4px 12px rgba(30,64,175,0.18),
+                    inset 0 1px 0 rgba(255,255,255,0.20) !important;
+                transition: all 0.2s cubic-bezier(.4,0,.2,1) !important;
+                margin-top: 8px !important;
+                cursor: pointer !important;
+            }
+            .wm-return-btn:hover {
+                background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%) !important;
+                box-shadow:
+                    0 6px 16px rgba(30,64,175,0.32),
+                    0 0 0 4px rgba(59,130,246,0.20),
+                    inset 0 1px 0 rgba(255,255,255,0.25) !important;
+                transform: translateY(-1px) !important;
+                color: #ffffff !important;
+                text-decoration: none !important;
+            }
+            .wm-return-btn:active {
+                transform: translateY(0) !important;
+            }
+            .wm-return-btn:visited,
+            .wm-return-btn:link,
+            .wm-return-btn:focus {
+                color: #ffffff !important;
+                text-decoration: none !important;
+            }
+            </style>
+            <a href="/Live_Monitoring" target="_self" class="wm-return-btn">
+                ← Volver a Live Monitoring
+            </a>
+            """,
+            unsafe_allow_html=True,
+        )
     with row1_right:
         client_html = (
             f"<span style='color:#94a3b8;'>·</span>"
