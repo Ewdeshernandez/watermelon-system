@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -1150,9 +1151,11 @@ if len(signals) < 2:
     st.warning("Orbit necesita mínimo dos señales cargadas.")
     st.stop()
 
-# Ciclo 23.114 — En cliente: filtrar signals a SOLO desplazamiento.
-# Las órbitas solo se construyen entre canales ortogonales de desplazamiento
-# (ej. 3XD + 3YD, 4XD + 4YD). Velocity y acceleration no se orbitalizan.
+# Ciclo 23.114/115 — En cliente: filtrar signals a SOLO desplazamiento.
+# Las órbitas solo se construyen entre canales ortogonales de desplazamiento.
+# Estrategia lenient: clasificamos por unit Y por sensor label (sufijo D).
+# Si el filtro nos deja 0 displacement, NO filtramos (mejor mostrar algo
+# que mostrar nada — el cliente decide visualmente).
 _is_client_view_orbit = bool(st.session_state.get("_loaded_from_snapshot"))
 if _is_client_view_orbit:
     try:
@@ -1160,18 +1163,25 @@ if _is_client_view_orbit:
         filtered_signals = {}
         for name, sig in signals.items():
             md = getattr(sig, "metadata", {}) or {}
-            unit = str(md.get("Amplitude Unit", "") or md.get("Y Axis Unit", "") or md.get("unit", "")).lower()
-            family = classify_amplitude_quantity(unit)
-            if family == "displacement":
+            unit = str(
+                md.get("Amplitude Unit", "")
+                or md.get("Y Axis Unit", "")
+                or md.get("unit", "")
+                or ""
+            ).lower()
+            family = classify_amplitude_quantity(unit) if unit else "unknown"
+            # Heurística sobre sensor label: nombres tipo "3XD", "VE5808-D" sugieren
+            # displacement aunque no haya unit explícita.
+            label_upper = str(md.get("Point", "") or name).upper()
+            label_says_disp = bool(re.search(r"[XY]D\b|[XY]_D\b|\(D\)|DISP", label_upper))
+            if family == "displacement" or label_says_disp:
                 filtered_signals[name] = sig
+
         if filtered_signals:
             signals = filtered_signals
+        # else: no filtramos — mantener `signals` original (lenient fallback)
     except Exception:
-        pass  # si falla la clasificación, mostramos todo (mejor que vacío)
-
-    if len(signals) < 2:
-        st.warning("No hay suficientes canales de desplazamiento (XD/YD) para construir órbitas.")
-        st.stop()
+        pass  # si falla la clasificación, mantener signals original
 
 pairs = build_orbit_pairs(signals)
 if not pairs:
