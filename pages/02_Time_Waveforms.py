@@ -50,81 +50,35 @@ render_user_menu()
 # Esto esconde sidebar controles + botones export + cualquier elemento
 # marcado con clase `wm-internal-only`.
 if st.session_state.get("_loaded_from_snapshot"):
-    # Ciclo 23.101 — Modo cliente:
-    #   * Sidebar nav DEBE verse normal (NO tocar las pills de Home/Machinery/etc).
-    #   * Controles de ANÁLISIS dentro del sidebar (selectbox/multiselect/slider/
-    #     checkbox/etc) → ocultar (IP interna).
-    #   * Headers de las secciones internas (Input Interpretation / Signal Selection
-    #     / View Controls / Time Window / Cursors) → ocultar vía JS por texto
-    #     (CSS no puede matchear texto de h-elements, y un selector h3 global
-    #     escondería también los headers de la nav si fuesen del mismo tipo).
-    #   * Export buttons → ocultar.
+    # Ciclo 23.103 — Modo cliente:
+    #   * Sidebar de ANÁLISIS no se renderiza en absoluto (vía rama if/else
+    #     más abajo donde están los `with st.sidebar:`). Eso es 100% confiable.
+    #   * Solo queda el hide de los export buttons (Prepare/Download PNG HD,
+    #     Enviar a Reporte) que están en el body, vía CSS por clase wrapper.
     st.markdown(
         """
         <style>
-        /* Ocultar controles de análisis dentro del sidebar (no afectan la nav
-           porque la nav usa botones/links, no form controls) */
-        section[data-testid="stSidebar"] [data-testid="stSelectbox"],
-        section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
-        section[data-testid="stSidebar"] [data-testid="stNumberInput"],
-        section[data-testid="stSidebar"] [data-testid="stTextInput"],
-        section[data-testid="stSidebar"] [data-testid="stCheckbox"],
-        section[data-testid="stSidebar"] [data-testid="stRadio"],
-        section[data-testid="stSidebar"] [data-testid="stSlider"] {
-            display: none !important;
-        }
-        /* Ocultar botones export PNG / Reporte */
-        .wm-export-actions {
-            display: none !important;
-        }
+        .wm-export-actions { display: none !important; }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # JS via components.html para esconder por TEXTO (headers de análisis +
-    # botones A=left/B=right + export buttons). Usa window.parent.document
-    # porque st.markdown SANITIZA <script>.
+    # JS de respaldo: si el wrapper .wm-export-actions no envuelve a los
+    # botones (porque Streamlit los renderiza como hermanos), JS los oculta
+    # buscándolos por texto.
     import streamlit.components.v1 as _components
     _components.html(
         """
         <script>
         (function() {
-          const HIDE_HEADERS = [
-            'Input Interpretation',
-            'Signal Selection',
-            'View Controls',
-            'Time Window',
-            'Cursors',
-          ];
           const HIDE_BUTTONS = [
-            'A = left', 'B = right',
             'Prepare PNG HD', 'Download PNG HD', 'Enviar a Reporte',
           ];
-          function applyClientHooks() {
+          function hideExports() {
             try {
               const doc = window.parent.document;
               if (!doc) return;
-              // Esconder section headers internos del sidebar por texto
-              const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
-              if (sidebar) {
-                sidebar.querySelectorAll('h1,h2,h3,h4,h5,h6,p,strong').forEach(el => {
-                  const t = (el.innerText || el.textContent || '').trim();
-                  if (HIDE_HEADERS.some(h => t === h || t.startsWith(h))) {
-                    // Subir al stMarkdown wrapper para esconder todo el bloque
-                    let p = el;
-                    for (let i = 0; i < 5 && p; i++) {
-                      if (p.matches && p.matches('[data-testid="stMarkdown"]')) {
-                        p.style.display = 'none';
-                        return;
-                      }
-                      p = p.parentElement;
-                    }
-                    el.style.display = 'none';
-                  }
-                });
-              }
-              // Esconder botones por texto (A=left, B=right, export)
               doc.querySelectorAll('button').forEach(b => {
                 const t = (b.innerText || b.textContent || '').trim();
                 if (HIDE_BUTTONS.indexOf(t) !== -1) {
@@ -141,8 +95,8 @@ if st.session_state.get("_loaded_from_snapshot"):
               });
             } catch (e) { /* silencio */ }
           }
-          applyClientHooks();
-          const it = setInterval(applyClientHooks, 400);
+          hideExports();
+          const it = setInterval(hideExports, 500);
           setTimeout(() => clearInterval(it), 30000);
         })();
         </script>
@@ -1317,14 +1271,21 @@ if "report_items" not in st.session_state:
 # ------------------------------------------------------------
 # Sidebar
 # ------------------------------------------------------------
-with st.sidebar:
-    st.markdown("### Input Interpretation")
+# Ciclo 23.102 — En modo cliente NO renderizar controles de análisis.
+# CSS/JS no enganchaba consistentemente (Streamlit sanitiza style/script en
+# ciertos casos), así que skipeamos el render desde Python con defaults
+# razonables. Confiable 100%.
+if st.session_state.get("_loaded_from_snapshot"):
+    input_time_mode = "Auto"
+else:
+    with st.sidebar:
+        st.markdown("### Input Interpretation")
 
-    input_time_mode = st.selectbox(
-        "Incoming time vector",
-        ["Auto", "Milliseconds", "Seconds"],
-        index=0,
-    )
+        input_time_mode = st.selectbox(
+            "Incoming time vector",
+            ["Auto", "Milliseconds", "Seconds"],
+            index=0,
+        )
 
 
 # ------------------------------------------------------------
@@ -2132,111 +2093,127 @@ def render_waveform_panel(
 # ------------------------------------------------------------
 # Sidebar controls
 # ------------------------------------------------------------
-with st.sidebar:
-    st.markdown("### Signal Selection")
+# Ciclo 23.102 — Sidebar de análisis: skipeamos el render entero en cliente
+# (defaults sensatos para todas las variables computadas).
+_is_client_view_sidebar2 = bool(st.session_state.get("_loaded_from_snapshot"))
 
-    signal_name_map = {r.name: r.signal_id for r in records_all}
-    signal_names = list(signal_name_map.keys())
-    valid_ids = {r.signal_id for r in records_all}
+# Pre-computamos lo que NO depende de widgets — se usa en ambos paths.
+signal_name_map = {r.name: r.signal_id for r in records_all}
+signal_names = list(signal_name_map.keys())
+valid_ids = {r.signal_id for r in records_all}
+current_ids = [sid for sid in st.session_state.wm_selected_signal_ids if sid in valid_ids]
+if not current_ids:
+    current_ids = [r.signal_id for r in records_all]
+    st.session_state.wm_selected_signal_ids = current_ids
+default_names = [r.name for r in records_all if r.signal_id in current_ids]
 
-    current_ids = [sid for sid in st.session_state.wm_selected_signal_ids if sid in valid_ids]
-    if not current_ids:
-        current_ids = [r.signal_id for r in records_all]
-        st.session_state.wm_selected_signal_ids = current_ids
-
-    default_names = [r.name for r in records_all if r.signal_id in current_ids]
-
-    selected_names = st.multiselect(
-        "Waveforms to display",
-        options=signal_names,
-        default=default_names,
-    )
-
-    st.session_state.wm_selected_signal_ids = [
-        signal_name_map[name] for name in selected_names if name in signal_name_map
-    ]
-
-    st.markdown("### View Controls")
-
-    waveform_view_mode = st.selectbox(
-        "Waveform view",
-        ["Raw", "1X filtered", "2X filtered"],
-        index=0,
-    )
-
-    normalization_mode = st.selectbox(
-        "Normalization",
-        ["None", "Remove mean", "Z-score", "Peak normalize"],
-        index=1,
-    )
-
-    x_axis_unit = st.selectbox(
-        "Time display",
-        ["ms", "s"],
-        index=0,
-    )
-
-    y_scale_mode = st.selectbox(
-        "Y-axis scale",
-        ["Auto", "Manual"],
-        index=0,
-    )
-
-    show_cycle_start_markers = st.checkbox("Show cycle start markers", value=True)
-
-    default_source_id = (
-        st.session_state.wm_selected_signal_ids[0]
-        if st.session_state.wm_selected_signal_ids
-        else records_all[0].signal_id
-    )
+if _is_client_view_sidebar2:
+    # ── Defaults en modo cliente — no renderiza nada en el sidebar ──
+    selected_names = list(default_names)
+    st.session_state.wm_selected_signal_ids = list(current_ids)
+    waveform_view_mode = "Raw"
+    normalization_mode = "Remove mean"
+    x_axis_unit = "ms"
+    y_scale_mode = "Auto"
+    show_cycle_start_markers = True
+    default_source_id = current_ids[0]
     primary_raw_for_unit = next(r for r in records_all if r.signal_id == default_source_id)
-    default_y_limit = float(np.max(np.abs(primary_raw_for_unit.amplitude))) if primary_raw_for_unit.amplitude.size else 1.0
-
+    default_y_limit = (
+        float(np.max(np.abs(primary_raw_for_unit.amplitude)))
+        if primary_raw_for_unit.amplitude.size else 1.0
+    )
     y_limit_abs = None
-    if y_scale_mode == "Manual":
-        y_limit_abs = st.number_input(
-            f"Y limit (± {primary_raw_for_unit.amplitude_unit or 'amp'})",
-            value=float(default_y_limit),
-            min_value=0.01,
-            format="%.2f",
-        )
-
-    show_cursor_b = st.checkbox("Show Cursor B", value=True)
-    show_right_info_box = st.checkbox("Show info box", value=True)
-
-    # Ciclo 23.99 — Modo cliente: mantener info box (Waveform Overall +
-    # Crest Factor SON vitales para el cliente) pero ocultar SOLO las filas
-    # Cursor A/B Basic. La supresión de las filas se hace dentro de
-    # build_waveform_figure leyendo _loaded_from_snapshot.
-
-    st.markdown("### Time Window")
-
+    show_cursor_b = True
+    show_right_info_box = True
     max_duration = max(primary_raw_for_unit.duration_s, 1e-9)
-
-    window_mode = st.radio("Window mode", ["Full signal", "Custom window"], index=0)
-
-    if window_mode == "Full signal":
-        t_min = 0.0
-        t_max = max_duration
-    else:
-        t_min, t_max = st.slider(
-            "Time window (s)",
-            min_value=0.0,
-            max_value=float(max_duration),
-            value=(0.0, float(max_duration)),
-            step=float(max_duration / 1000.0) if max_duration > 0 else 0.001,
-        )
-
-    # Ciclo 23.97 — fix NameError. Inicializar cursor_a/cursor_b SIEMPRE
-    # desde session_state (con clamp al rango t_min/t_max), porque
-    # render_waveform_panel los usa siempre. En client mode los slider del
-    # banner ya escribieron session_state — solo leemos. En specialist mode
-    # los inputs del sidebar los actualizan.
+    window_mode = "Full signal"
+    t_min = 0.0
+    t_max = max_duration
     cursor_a = float(min(max(st.session_state.wm_cursor_a, t_min), t_max))
     cursor_b = float(min(max(st.session_state.wm_cursor_b, t_min), t_max))
+else:
+    with st.sidebar:
+        st.markdown("### Signal Selection")
 
-    _is_client_view_cursors = bool(st.session_state.get("_loaded_from_snapshot"))
-    if not _is_client_view_cursors:
+        selected_names = st.multiselect(
+            "Waveforms to display",
+            options=signal_names,
+            default=default_names,
+        )
+
+        st.session_state.wm_selected_signal_ids = [
+            signal_name_map[name] for name in selected_names if name in signal_name_map
+        ]
+
+        st.markdown("### View Controls")
+
+        waveform_view_mode = st.selectbox(
+            "Waveform view",
+            ["Raw", "1X filtered", "2X filtered"],
+            index=0,
+        )
+
+        normalization_mode = st.selectbox(
+            "Normalization",
+            ["None", "Remove mean", "Z-score", "Peak normalize"],
+            index=1,
+        )
+
+        x_axis_unit = st.selectbox(
+            "Time display",
+            ["ms", "s"],
+            index=0,
+        )
+
+        y_scale_mode = st.selectbox(
+            "Y-axis scale",
+            ["Auto", "Manual"],
+            index=0,
+        )
+
+        show_cycle_start_markers = st.checkbox("Show cycle start markers", value=True)
+
+        default_source_id = (
+            st.session_state.wm_selected_signal_ids[0]
+            if st.session_state.wm_selected_signal_ids
+            else records_all[0].signal_id
+        )
+        primary_raw_for_unit = next(r for r in records_all if r.signal_id == default_source_id)
+        default_y_limit = float(np.max(np.abs(primary_raw_for_unit.amplitude))) if primary_raw_for_unit.amplitude.size else 1.0
+
+        y_limit_abs = None
+        if y_scale_mode == "Manual":
+            y_limit_abs = st.number_input(
+                f"Y limit (± {primary_raw_for_unit.amplitude_unit or 'amp'})",
+                value=float(default_y_limit),
+                min_value=0.01,
+                format="%.2f",
+            )
+
+        show_cursor_b = st.checkbox("Show Cursor B", value=True)
+        show_right_info_box = st.checkbox("Show info box", value=True)
+
+        st.markdown("### Time Window")
+
+        max_duration = max(primary_raw_for_unit.duration_s, 1e-9)
+
+        window_mode = st.radio("Window mode", ["Full signal", "Custom window"], index=0)
+
+        if window_mode == "Full signal":
+            t_min = 0.0
+            t_max = max_duration
+        else:
+            t_min, t_max = st.slider(
+                "Time window (s)",
+                min_value=0.0,
+                max_value=float(max_duration),
+                value=(0.0, float(max_duration)),
+                step=float(max_duration / 1000.0) if max_duration > 0 else 0.001,
+            )
+
+        cursor_a = float(min(max(st.session_state.wm_cursor_a, t_min), t_max))
+        cursor_b = float(min(max(st.session_state.wm_cursor_b, t_min), t_max))
+
         st.markdown("### Cursors")
 
         cursor_a = st.number_input(
