@@ -50,76 +50,84 @@ render_user_menu()
 # Esto esconde sidebar controles + botones export + cualquier elemento
 # marcado con clase `wm-internal-only`.
 if st.session_state.get("_loaded_from_snapshot"):
-    # Ciclo 23.100 — Modo cliente:
-    #   * Sidebar DEBE verse normal (con sus pills blancas) — NO se oculta.
-    #   * Botón Volver se renderiza ahora como `st.page_link` (componente nativo
-    #     que sí tiene `[data-testid="stPageLink"]` y permite CSS predecible).
-    #   * Export buttons se ocultan con CSS por clase wrapper + JS de respaldo.
+    # Ciclo 23.101 — Modo cliente:
+    #   * Sidebar nav DEBE verse normal (NO tocar las pills de Home/Machinery/etc).
+    #   * Controles de ANÁLISIS dentro del sidebar (selectbox/multiselect/slider/
+    #     checkbox/etc) → ocultar (IP interna).
+    #   * Headers de las secciones internas (Input Interpretation / Signal Selection
+    #     / View Controls / Time Window / Cursors) → ocultar vía JS por texto
+    #     (CSS no puede matchear texto de h-elements, y un selector h3 global
+    #     escondería también los headers de la nav si fuesen del mismo tipo).
+    #   * Export buttons → ocultar.
     st.markdown(
         """
         <style>
-        /* Modo cliente: ocultar botones export PNG / Reporte */
-        .wm-export-actions {
+        /* Ocultar controles de análisis dentro del sidebar (no afectan la nav
+           porque la nav usa botones/links, no form controls) */
+        section[data-testid="stSidebar"] [data-testid="stSelectbox"],
+        section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
+        section[data-testid="stSidebar"] [data-testid="stNumberInput"],
+        section[data-testid="stSidebar"] [data-testid="stTextInput"],
+        section[data-testid="stSidebar"] [data-testid="stCheckbox"],
+        section[data-testid="stSidebar"] [data-testid="stRadio"],
+        section[data-testid="stSidebar"] [data-testid="stSlider"] {
             display: none !important;
         }
-        /* Botón Volver (st.page_link) — gradient azul royal */
-        [data-testid="stPageLink"] a,
-        [data-testid="stPageLink-NavLink"] a,
-        a[data-testid="stPageLink-NavLink"] {
-            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%) !important;
-            color: white !important;
-            border: none !important;
-            border-radius: 10px !important;
-            font-weight: 700 !important;
-            font-size: 13px !important;
-            padding: 9px 22px !important;
-            min-height: 40px !important;
-            display: inline-flex !important;
-            align-items: center !important;
-            gap: 6px !important;
-            text-decoration: none !important;
-            box-shadow:
-                0 1px 2px rgba(30,64,175,0.25),
-                0 4px 12px rgba(30,64,175,0.18),
-                inset 0 1px 0 rgba(255,255,255,0.20) !important;
-            transition: all 0.2s cubic-bezier(.4,0,.2,1) !important;
-            white-space: nowrap !important;
-            width: fit-content !important;
-        }
-        [data-testid="stPageLink"] a *,
-        [data-testid="stPageLink-NavLink"] a * {
-            color: white !important;
-            fill: white !important;
-        }
-        [data-testid="stPageLink"] a:hover,
-        [data-testid="stPageLink-NavLink"] a:hover,
-        a[data-testid="stPageLink-NavLink"]:hover {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%) !important;
-            box-shadow:
-                0 6px 16px rgba(30,64,175,0.32),
-                0 0 0 4px rgba(59,130,246,0.20),
-                inset 0 1px 0 rgba(255,255,255,0.25) !important;
-            transform: translateY(-1px) !important;
+        /* Ocultar botones export PNG / Reporte */
+        .wm-export-actions {
+            display: none !important;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
-    # JS de respaldo: ocultar export buttons + agregar clase al page_link
-    # si Streamlit no respeta data-testid (algunas versiones cambian el nombre)
+    # JS via components.html para esconder por TEXTO (headers de análisis +
+    # botones A=left/B=right + export buttons). Usa window.parent.document
+    # porque st.markdown SANITIZA <script>.
     import streamlit.components.v1 as _components
     _components.html(
         """
         <script>
         (function() {
-          function hideExports() {
+          const HIDE_HEADERS = [
+            'Input Interpretation',
+            'Signal Selection',
+            'View Controls',
+            'Time Window',
+            'Cursors',
+          ];
+          const HIDE_BUTTONS = [
+            'A = left', 'B = right',
+            'Prepare PNG HD', 'Download PNG HD', 'Enviar a Reporte',
+          ];
+          function applyClientHooks() {
             try {
               const doc = window.parent.document;
               if (!doc) return;
+              // Esconder section headers internos del sidebar por texto
+              const sidebar = doc.querySelector('section[data-testid="stSidebar"]');
+              if (sidebar) {
+                sidebar.querySelectorAll('h1,h2,h3,h4,h5,h6,p,strong').forEach(el => {
+                  const t = (el.innerText || el.textContent || '').trim();
+                  if (HIDE_HEADERS.some(h => t === h || t.startsWith(h))) {
+                    // Subir al stMarkdown wrapper para esconder todo el bloque
+                    let p = el;
+                    for (let i = 0; i < 5 && p; i++) {
+                      if (p.matches && p.matches('[data-testid="stMarkdown"]')) {
+                        p.style.display = 'none';
+                        return;
+                      }
+                      p = p.parentElement;
+                    }
+                    el.style.display = 'none';
+                  }
+                });
+              }
+              // Esconder botones por texto (A=left, B=right, export)
               doc.querySelectorAll('button').forEach(b => {
                 const t = (b.innerText || b.textContent || '').trim();
-                if (t === 'Prepare PNG HD' || t === 'Download PNG HD' || t === 'Enviar a Reporte') {
+                if (HIDE_BUTTONS.indexOf(t) !== -1) {
                   let p = b;
                   for (let i = 0; i < 8 && p; i++) {
                     if (p.matches && p.matches('[data-testid="stHorizontalBlock"]')) {
@@ -133,8 +141,8 @@ if st.session_state.get("_loaded_from_snapshot"):
               });
             } catch (e) { /* silencio */ }
           }
-          hideExports();
-          const it = setInterval(hideExports, 500);
+          applyClientHooks();
+          const it = setInterval(applyClientHooks, 400);
           setTimeout(() => clearInterval(it), 30000);
         })();
         </script>
