@@ -25,6 +25,79 @@ require_login()
 render_user_menu()
 
 # ============================================================
+# Ciclo 23.114 — Modo cliente: hidratación desde snapshot histórico
+# ============================================================
+try:
+    from core.snapshot_hydrator import (
+        consume_pending_snapshot_url,
+        hydrate_orbit_snapshot,
+        render_snapshot_loaded_banner,
+    )
+    _snap_inst, _snap_id = None, None
+    _pending = st.session_state.pop("_pending_snapshot_load", None)
+    if _pending and _pending.get("snapshot_type") == "orbit":
+        _snap_inst = _pending.get("instance_id")
+        _snap_id = _pending.get("snapshot_id")
+    if _snap_id is None:
+        _snap_params = consume_pending_snapshot_url()
+        if _snap_params is not None:
+            _snap_inst, _snap_id = _snap_params
+
+    if _snap_id and _snap_inst:
+        _already = st.session_state.get("_loaded_from_snapshot", {})
+        if _already.get("orbit_snapshot_id") != _snap_id:
+            hydrate_orbit_snapshot(_snap_inst, _snap_id)
+    render_snapshot_loaded_banner()
+except Exception as _e:
+    import logging
+    logging.warning("orbit snapshot hydration failed: %s", _e)
+
+# CSS + JS para esconder export buttons en cliente
+if st.session_state.get("_loaded_from_snapshot"):
+    st.markdown(
+        """
+        <style>
+        .wm-export-actions { display: none !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    import streamlit.components.v1 as _components
+    _components.html(
+        """
+        <script>
+        (function() {
+          const HIDE_BUTTONS = ['Prepare PNG HD','Download PNG HD','Enviar a Reporte'];
+          function hideExports() {
+            try {
+              const doc = window.parent.document;
+              if (!doc) return;
+              doc.querySelectorAll('button').forEach(b => {
+                const t = (b.innerText || b.textContent || '').trim();
+                if (HIDE_BUTTONS.indexOf(t) !== -1) {
+                  let p = b;
+                  for (let i = 0; i < 8 && p; i++) {
+                    if (p.matches && p.matches('[data-testid="stHorizontalBlock"]')) {
+                      p.style.display = 'none';
+                      return;
+                    }
+                    p = p.parentElement;
+                  }
+                  b.style.display = 'none';
+                }
+              });
+            } catch (e) {}
+          }
+          hideExports();
+          const it = setInterval(hideExports, 500);
+          setTimeout(() => clearInterval(it), 30000);
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+# ============================================================
 # WATERMELON SYSTEM — ORBIT ANALYSIS
 # ============================================================
 
@@ -44,9 +117,34 @@ def apply_page_style():
             background-color: #f3f4f6;
         }
 
-        section[data-testid="stSidebar"] {
-            background: #e5e7eb;
-            border-right: 1px solid #cbd5e1;
+        /* Ciclo 23.114 — NO override del background del sidebar.
+           Sidebar hereda royal blue de render_user_menu. */
+
+        /* Sidebar buttons transparentes (auth.py usa div, Streamlit moderno usa section) */
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+            background: transparent !important;
+            color: rgba(241, 245, 249, 0.85) !important;
+            border: 1px solid transparent !important;
+            border-radius: 8px !important;
+            font-weight: 500 !important;
+            font-size: 0.84rem !important;
+            text-align: left !important;
+            justify-content: flex-start !important;
+            padding: 0.5rem 0.8rem !important;
+            min-height: 2.35rem !important;
+            box-shadow: none !important;
+            transition: all 0.15s ease !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
+            background: rgba(255,255,255,0.08) !important;
+            border-color: rgba(255,255,255,0.10) !important;
+            color: #ffffff !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button *,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button p,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button span {
+            color: inherit !important;
+            font-weight: 500 !important;
         }
 
         div[data-testid="stNumberInput"] input {
@@ -794,10 +892,13 @@ def render_orbit_panel(
     if ai_state_key_orb not in st.session_state:
         st.session_state[ai_state_key_orb] = None
 
-    with st.expander(
+    # Ciclo 23.114 — Modo cliente: skipea todo el bloque AI (IP interna)
+    _is_client_view_ai_orb = bool(st.session_state.get("_loaded_from_snapshot"))
+    if (not _is_client_view_ai_orb):
+      with st.expander(
         "Interpretación clínica AI · Diagnóstico Cat IV asistido",
         expanded=False,
-    ):
+      ):
         if not is_ai_available():
             st.info(
                 "**AI Diagnóstico no disponible.** Falta configurar "
@@ -929,6 +1030,11 @@ def render_orbit_panel(
                         stored_orb.get("markdown", "Error al generar diagnóstico AI.")
                     )
 
+    # Ciclo 23.114 — Modo cliente: skipea export buttons del panel
+    _is_client_view_exp_orb = bool(st.session_state.get("_loaded_from_snapshot"))
+    if _is_client_view_exp_orb:
+        return  # fin del render_orbit_panel para cliente
+
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
@@ -1044,6 +1150,29 @@ if len(signals) < 2:
     st.warning("Orbit necesita mínimo dos señales cargadas.")
     st.stop()
 
+# Ciclo 23.114 — En cliente: filtrar signals a SOLO desplazamiento.
+# Las órbitas solo se construyen entre canales ortogonales de desplazamiento
+# (ej. 3XD + 3YD, 4XD + 4YD). Velocity y acceleration no se orbitalizan.
+_is_client_view_orbit = bool(st.session_state.get("_loaded_from_snapshot"))
+if _is_client_view_orbit:
+    try:
+        from core.spectrum_scale import classify_amplitude_quantity
+        filtered_signals = {}
+        for name, sig in signals.items():
+            md = getattr(sig, "metadata", {}) or {}
+            unit = str(md.get("Amplitude Unit", "") or md.get("Y Axis Unit", "") or md.get("unit", "")).lower()
+            family = classify_amplitude_quantity(unit)
+            if family == "displacement":
+                filtered_signals[name] = sig
+        if filtered_signals:
+            signals = filtered_signals
+    except Exception:
+        pass  # si falla la clasificación, mostramos todo (mejor que vacío)
+
+    if len(signals) < 2:
+        st.warning("No hay suficientes canales de desplazamiento (XD/YD) para construir órbitas.")
+        st.stop()
+
 pairs = build_orbit_pairs(signals)
 if not pairs:
     st.warning("No fue posible construir pares X/Y para órbitas.")
@@ -1052,7 +1181,17 @@ if not pairs:
 pair_label_map = {pair.label: pair for pair in pairs}
 pair_labels = list(pair_label_map.keys())
 
-with st.sidebar:
+# Ciclo 23.114 — Skip sidebar render en cliente. Defaults sensatos.
+if _is_client_view_orbit:
+    valid_labels = pair_labels  # cliente ve TODAS las órbitas posibles
+    st.session_state.wm_orbit_selected_labels = pair_labels
+    selected_labels = list(pair_labels)
+    ui_filter_mode = "Direct"  # sin filtro 1X/2X — vista cruda
+    machine_rotation = "CCW"
+    scale_mode = "Auto"
+    manual_scale_value = 2.0
+else:
+  with st.sidebar:
     st.markdown("### Orbit Processing")
 
     valid_labels = [label for label in st.session_state.wm_orbit_selected_labels if label in pair_label_map]

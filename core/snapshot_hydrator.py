@@ -286,6 +286,117 @@ def hydrate_spectrum_snapshot(instance_id: str, snapshot_id: str) -> bool:
 
 
 # =============================================================
+# ORBIT HYDRATION (Ciclo 23.114)
+# =============================================================
+
+def hydrate_orbit_snapshot(instance_id: str, snapshot_id: str) -> bool:
+    """Hidrata `signals` para Orbit desde el waveform pareado.
+
+    Orbit construye órbitas a partir de pares X-Y de WAVEFORMS (time-domain
+    displacement). El orbit_history guarda metadata + magnitudes calculadas
+    pero la curva paramétrica (X(t), Y(t)) viene del waveform crudo.
+    Truco igual a spectrum: matching por `corrida_label` con waveform.
+    """
+    try:
+        from core.orbit_history import load_orbit_snapshot
+        from core.waveform_history import list_waveform_snapshots
+    except Exception:
+        return False
+
+    orb_payload = load_orbit_snapshot(instance_id, snapshot_id)
+    if not orb_payload:
+        return False
+    target_label = (orb_payload.get("corrida_label") or "").strip()
+
+    # Buscar waveform snapshot pareado (cascada igual que spectrum)
+    try:
+        wf_snaps = list_waveform_snapshots(instance_id) or []
+    except Exception:
+        wf_snaps = []
+
+    matching_wf_id = None
+    if target_label and wf_snaps:
+        for ws in wf_snaps:
+            if (ws.get("corrida_label") or "").strip() == target_label:
+                matching_wf_id = ws.get("snapshot_id")
+                break
+
+    if not matching_wf_id and wf_snaps:
+        # Proximity timestamp ±10min
+        orb_ts_raw = orb_payload.get("timestamp", "")
+        try:
+            from datetime import datetime
+            orb_dt = datetime.fromisoformat(orb_ts_raw.replace("Z", "+00:00"))
+            best = None
+            best_diff = None
+            for ws in wf_snaps:
+                try:
+                    ws_dt = datetime.fromisoformat(ws.get("timestamp", "").replace("Z", "+00:00"))
+                    diff = abs((ws_dt - orb_dt).total_seconds())
+                    if best_diff is None or diff < best_diff:
+                        best_diff = diff
+                        best = ws.get("snapshot_id")
+                except Exception:
+                    continue
+            if best and best_diff is not None and best_diff <= 600:
+                matching_wf_id = best
+        except Exception:
+            pass
+
+    if not matching_wf_id and wf_snaps:
+        matching_wf_id = wf_snaps[0].get("snapshot_id")
+
+    if not matching_wf_id:
+        st.session_state["_loaded_from_snapshot"] = {
+            "snapshot_id": snapshot_id,
+            "instance_id": instance_id,
+            "corrida_label": target_label,
+            "timestamp": orb_payload.get("timestamp", ""),
+            "n_signals": len(orb_payload.get("bearings", [])),
+            "module_title": "Análisis de Órbitas",
+            "orbit_payload": orb_payload,
+            "no_waveform_pair": True,
+        }
+        return True
+
+    ok = hydrate_waveform_snapshot(instance_id, matching_wf_id)
+    if not ok:
+        return False
+
+    # Override info para banner orbit
+    info = st.session_state.get("_loaded_from_snapshot", {})
+    info["module_title"] = "Análisis de Órbitas"
+    info["orbit_snapshot_id"] = snapshot_id
+    st.session_state["_loaded_from_snapshot"] = info
+
+    # RPM cascade (igual que spectrum)
+    rpm_value = None
+    try:
+        v = orb_payload.get("operating_speed_rpm")
+        if v and float(v) > 0:
+            rpm_value = float(v)
+    except (TypeError, ValueError):
+        pass
+    if not rpm_value:
+        try:
+            from core.instance_state import get_instance
+            inst_obj = get_instance(instance_id)
+            v = getattr(inst_obj, "nominal_rpm", None) if inst_obj else None
+            if v and float(v) > 0:
+                rpm_value = float(v)
+        except Exception:
+            pass
+    if rpm_value:
+        signals = st.session_state.get("signals", {})
+        for sig in signals.values():
+            md = getattr(sig, "metadata", None)
+            if isinstance(md, dict) and not md.get("RPM"):
+                md["RPM"] = rpm_value
+
+    return True
+
+
+# =============================================================
 # URL PARAM HELPER
 # =============================================================
 
