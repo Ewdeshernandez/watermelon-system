@@ -53,11 +53,7 @@ if st.session_state.get("_loaded_from_snapshot"):
     st.markdown(
         """
         <style>
-        /* Ciclo 23.97 — Modo cliente: ocultar controles técnicos del sidebar.
-           IMPORTANTE: cada selector tiene `section[data-testid="stSidebar"]`
-           para evitar afectar headers/elementos del main content. Antes el
-           `h1, h2, h3, h4` no estaba scoped → escondía headers en TODA la
-           página, incluido el botón Volver y elementos del banner. */
+        /* Ciclo 23.97 — Modo cliente: ocultar controles técnicos del sidebar */
         section[data-testid="stSidebar"] [data-testid="stSelectbox"],
         section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
         section[data-testid="stSidebar"] [data-testid="stNumberInput"],
@@ -68,71 +64,86 @@ if st.session_state.get("_loaded_from_snapshot"):
         section[data-testid="stSidebar"] h1,
         section[data-testid="stSidebar"] h2,
         section[data-testid="stSidebar"] h3,
-        section[data-testid="stSidebar"] h4,
-        section[data-testid="stSidebar"] [data-testid="stMarkdown"]:not(:first-child) {
+        section[data-testid="stSidebar"] h4 {
             display: none !important;
         }
-        /* Sidebar — limpiar el aspecto vacío que queda en client mode */
-        section[data-testid="stSidebar"] [data-testid="stButton"]:not(.wm-keep-sidebar-btn) {
-            display: none !important;
-        }
-        section[data-testid="stSidebar"] {
-            background: #f8fafc !important;
-        }
-        section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
-            gap: 0 !important;
-        }
-        /* Ocultar botones export PNG / Reporte (3 botones en row) */
+        /* Ocultar botones export PNG / Reporte */
         .wm-export-actions {
             display: none !important;
         }
         .wm-export-actions + div[data-testid="stHorizontalBlock"] {
             display: none !important;
         }
-        /* Botón "← Volver a Live Monitoring" — premium clase mundial.
-           Gradient azul royal saturado + shadow rica + transición cubic-bezier
-           + ring focus + lift effect. Inspirado en Linear/Vercel/Stripe. */
-        .wm-return-btn-wrap {
-            display: inline-block;
-            margin: 12px 0 6px 0;
-        }
-        .wm-return-btn-wrap [data-testid="stButton"] button {
+        /* Botón Volver — estilo aplicado por JS abajo (CSS no enganchaba
+           porque st.markdown(div) no envuelve al button siguiente).
+           Esta clase la usa el JS como target. */
+        .wm-return-btn-applied button {
             background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%) !important;
             color: white !important;
             border: none !important;
             border-radius: 10px !important;
             font-weight: 700 !important;
             font-size: 13px !important;
-            letter-spacing: 0.01em !important;
-            padding: 9px 20px !important;
+            padding: 9px 22px !important;
             min-height: 40px !important;
-            transition: all 0.2s cubic-bezier(.4,0,.2,1) !important;
             box-shadow:
-                0 1px 2px rgba(30,64,175,0.20),
-                0 2px 8px rgba(30,64,175,0.15),
+                0 1px 2px rgba(30,64,175,0.25),
+                0 4px 12px rgba(30,64,175,0.18),
                 inset 0 1px 0 rgba(255,255,255,0.20) !important;
+            transition: all 0.2s cubic-bezier(.4,0,.2,1) !important;
             white-space: nowrap !important;
         }
-        .wm-return-btn-wrap [data-testid="stButton"] button:hover {
+        .wm-return-btn-applied button:hover {
             background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%) !important;
             box-shadow:
-                0 4px 12px rgba(30,64,175,0.30),
-                0 0 0 4px rgba(59,130,246,0.18),
+                0 6px 16px rgba(30,64,175,0.32),
+                0 0 0 4px rgba(59,130,246,0.20),
                 inset 0 1px 0 rgba(255,255,255,0.25) !important;
             transform: translateY(-1px) !important;
         }
-        .wm-return-btn-wrap [data-testid="stButton"] button:active {
+        .wm-return-btn-applied button:active {
             transform: translateY(0) !important;
-            box-shadow:
-                0 1px 2px rgba(30,64,175,0.25),
-                0 0 0 4px rgba(59,130,246,0.20),
-                inset 0 1px 2px rgba(0,0,0,0.10) !important;
-        }
-        /* Cursores sincronizados — sliders más finos y pro */
-        [data-testid="stSlider"] [data-baseweb="slider"] {
-            padding-top: 4px !important;
         }
         </style>
+
+        <script>
+        (function() {
+          function styleReturnBtn() {
+            try {
+              const doc = window.parent.document;
+              doc.querySelectorAll('button').forEach(b => {
+                const t = (b.innerText || '').trim();
+                if (t.includes('Volver a Live Monitoring')) {
+                  // Subir al stButton wrapper y agregar la clase target
+                  let p = b;
+                  for (let i = 0; i < 5 && p; i++) {
+                    if (p.matches && p.matches('[data-testid="stButton"]')) {
+                      p.classList.add('wm-return-btn-applied');
+                      break;
+                    }
+                    p = p.parentElement;
+                  }
+                }
+                // Hide export buttons también acá (consolidamos JS hooks)
+                if (t === 'Prepare PNG HD' || t === 'Download PNG HD' || t === 'Enviar a Reporte') {
+                  let p = b;
+                  for (let i = 0; i < 8 && p; i++) {
+                    if (p.matches && p.matches('[data-testid="stHorizontalBlock"]')) {
+                      p.style.display = 'none';
+                      return;
+                    }
+                    p = p.parentElement;
+                  }
+                  b.style.display = 'none';
+                }
+              });
+            } catch (e) {}
+          }
+          styleReturnBtn();
+          const it = setInterval(styleReturnBtn, 500);
+          setTimeout(() => clearInterval(it), 30000);
+        })();
+        </script>
         """,
         unsafe_allow_html=True,
     )
@@ -170,10 +181,9 @@ try:
         if _already.get("snapshot_id") != _snap_id:
             hydrate_waveform_snapshot(_snap_inst, _snap_id)
     render_snapshot_loaded_banner()
-    # Ciclo 23.95 — cursores A/B sincronizados en el header (client view).
-    # Mueven cursor en TODAS las waveforms al mismo tiempo. Solo aparece
-    # si hay signals cargadas (vino de snapshot).
-    render_synchronized_cursors_controls()
+    # Ciclo 23.98 — cursores sincronizados removidos del banner (el cliente
+    # los quiere fuera de esta vista). Si más adelante los quieres habilitar:
+    # render_synchronized_cursors_controls()
 except Exception as _e:
     # Falla silenciosa — la hidratación es opcional, módulo sigue normal
     import logging
@@ -2178,6 +2188,13 @@ with st.sidebar:
 
     show_cursor_b = st.checkbox("Show Cursor B", value=True)
     show_right_info_box = st.checkbox("Show info box", value=True)
+
+    # Ciclo 23.98 — Modo cliente: ocultar el right info box del plot
+    # (Waveform Overall, Crest Factor, Cursor A/B Basic) y Cursor B
+    # — el cliente solo ve la forma de onda limpia.
+    if st.session_state.get("_loaded_from_snapshot"):
+        show_right_info_box = False
+        show_cursor_b = False
 
     st.markdown("### Time Window")
 
