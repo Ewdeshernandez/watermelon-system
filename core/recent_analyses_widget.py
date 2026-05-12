@@ -127,13 +127,12 @@ def _inject_css_once():
             font-size: 16px; font-weight: 800; color: #0f172a;
             letter-spacing: -0.01em;
         }
-        /* Ciclo 23.90 — Cards minimalistas con visual SVG */
+        /* Ciclo 23.94 — Cards compactas y refinadas */
         .wm-recent-card {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-            border: 1.5px solid #e2e8f0;
-            border-radius: 12px;
-            padding: 14px;
-            min-height: 160px;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 10px 12px;
             display: flex; flex-direction: column;
             transition: all 0.15s ease;
         }
@@ -161,9 +160,9 @@ def _inject_css_once():
             margin-bottom: 8px;
         }
         .wm-recent-visual {
-            flex: 1;
             display: flex; align-items: center; justify-content: center;
-            margin: 4px 0;
+            margin: 2px 0 4px 0;
+            opacity: 0.85;
         }
         .wm-recent-meta {
             font-size: 11px; color: #64748b;

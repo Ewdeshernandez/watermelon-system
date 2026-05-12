@@ -74,22 +74,45 @@ if st.session_state.get("_loaded_from_snapshot"):
         .wm-export-actions + div[data-testid="stHorizontalBlock"] {
             display: none !important;
         }
-        /* Botón volver — estilo internacional */
+        /* Botón Volver — premium internacional (gradient + shadow + transition) */
+        .wm-return-btn-wrap {
+            display: inline-block;
+            margin: 8px 0 18px 0;
+        }
         .wm-return-btn-wrap [data-testid="stButton"] button {
-            background: white !important;
-            color: #475569 !important;
-            border: 1.5px solid #cbd5e1 !important;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+            color: #1e40af !important;
+            border: 1px solid #cbd5e1 !important;
             border-radius: 10px !important;
             font-weight: 600 !important;
             font-size: 13px !important;
-            padding: 8px 16px !important;
-            transition: all 0.15s !important;
-            box-shadow: 0 1px 2px rgba(15,23,42,0.04) !important;
+            letter-spacing: -0.005em !important;
+            padding: 7px 18px !important;
+            min-height: 36px !important;
+            transition: all 0.18s cubic-bezier(.4,0,.2,1) !important;
+            box-shadow:
+                0 1px 2px rgba(15,23,42,0.04),
+                0 0 0 0 rgba(37,99,235,0) !important;
+            white-space: nowrap !important;
         }
         .wm-return-btn-wrap [data-testid="stButton"] button:hover {
+            background: linear-gradient(180deg, #f0f7ff 0%, #e0eaff 100%) !important;
             border-color: #2563eb !important;
-            color: #2563eb !important;
-            box-shadow: 0 2px 6px rgba(37,99,235,0.10) !important;
+            color: #1e3a8a !important;
+            box-shadow:
+                0 2px 8px rgba(37,99,235,0.12),
+                0 0 0 3px rgba(37,99,235,0.08) !important;
+            transform: translateY(-1px) !important;
+        }
+        .wm-return-btn-wrap [data-testid="stButton"] button:active {
+            transform: translateY(0) !important;
+            box-shadow:
+                0 1px 2px rgba(15,23,42,0.06),
+                0 0 0 3px rgba(37,99,235,0.10) !important;
+        }
+        /* Reducir ancho del column wrapper para que el botón no se estire */
+        .wm-return-btn-wrap [data-testid="column"] {
+            max-width: 240px !important;
         }
         </style>
         """,
@@ -1875,16 +1898,42 @@ def render_waveform_panel(
 
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
-    # Ciclo 23.92 — modo cliente: ocultar botones export internos.
-    # Prepare PNG HD / Download PNG HD / Enviar a Reporte son features
-    # del especialista. Si vino desde snapshot histórico, escondemos con CSS.
+    # Ciclo 23.94 — modo cliente: JS en components.html esconde botones
+    # export por contenido de texto. CSS puro no funciona (no hay :contains).
     _is_client_view_exp = bool(st.session_state.get("_loaded_from_snapshot"))
     if _is_client_view_exp:
-        # CSS que esconde la fila siguiente de columns (los 3 botones)
-        st.markdown(
-            "<style>.wm-export-actions ~ div[data-testid='stHorizontalBlock'] "
-            "{ display:none !important; }</style>",
-            unsafe_allow_html=True,
+        import streamlit.components.v1 as _components
+        _components.html(
+            """
+            <script>
+            (function() {
+              const TARGETS = ['Prepare PNG HD', 'Download PNG HD', 'Enviar a Reporte'];
+              function hideBtns() {
+                try {
+                  const doc = window.parent.document;
+                  doc.querySelectorAll('button').forEach(b => {
+                    const t = (b.innerText || '').trim();
+                    if (TARGETS.includes(t)) {
+                      let p = b;
+                      for (let i = 0; i < 8 && p; i++) {
+                        if (p.matches && p.matches('[data-testid="stHorizontalBlock"]')) {
+                          p.style.display = 'none';
+                          return;
+                        }
+                        p = p.parentElement;
+                      }
+                      b.style.display = 'none';
+                    }
+                  });
+                } catch (e) {}
+              }
+              hideBtns();
+              const it = setInterval(hideBtns, 600);
+              setTimeout(() => clearInterval(it), 30000);
+            })();
+            </script>
+            """,
+            height=0,
         )
 
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([2.0, 1.2, 1.2, 1.2, 2.0])
