@@ -1705,24 +1705,78 @@ if not records_all:
 # ------------------------------------------------------------
 # Sidebar controls
 # ------------------------------------------------------------
-with st.sidebar:
+# Ciclo 23.110 — En modo cliente NO renderizar los controles de análisis.
+# CSS/JS no enganchan consistentemente en Streamlit Cloud, así que
+# skipeamos el render desde Python con defaults razonables. Igual approach
+# que pages/02_Time_Waveforms.py v3.31.103.
+_is_client_view_sidebar = bool(st.session_state.get("_loaded_from_snapshot"))
+
+# Pre-compute lo que NO depende de widgets (sirve para ambos paths)
+signal_name_map = {r.name: r.signal_id for r in records_all}
+signal_names = list(signal_name_map.keys())
+valid_ids = {r.signal_id for r in records_all}
+current_ids = [sid for sid in st.session_state.wm_sp_selected_signal_ids if sid in valid_ids]
+if not current_ids:
+    current_ids = [r.signal_id for r in records_all]
+    st.session_state.wm_sp_selected_signal_ids = current_ids
+default_names = [r.name for r in records_all if r.signal_id in current_ids]
+
+if _is_client_view_sidebar:
+    # ── Defaults para modo cliente — no renderizar nada en el sidebar ──
+    selected_names = list(default_names)
+    st.session_state.wm_sp_selected_signal_ids = list(current_ids)
+
+    window_name = "Hanning"
+    amplitude_mode = "Peak-to-Peak"
+    remove_dc = True
+    detrend = True
+    zero_padding = True
+    high_res_display = True
+    high_res_factor = 8
+
+    default_source_id = current_ids[0]
+    primary_for_defaults = next(r for r in records_all if r.signal_id == default_source_id)
+
+    primary_unit_text = amplitude_unit_text(
+        infer_amplitude_unit(primary_for_defaults.metadata or {}),
+        amplitude_mode,
+    )
+    suggested_max_cpm, scale_reason = suggest_max_cpm_for_unit(
+        primary_unit_text, rpm=primary_for_defaults.rpm,
+    )
+    from core.spectrum_scale import classify_amplitude_quantity
+    current_family = classify_amplitude_quantity(primary_unit_text)
+    family_key = f"wm_sp_max_cpm_family_{current_family}"
+    if family_key not in st.session_state:
+        st.session_state[family_key] = suggested_max_cpm
+    max_cpm = float(max(1000.0, st.session_state[family_key]))
+
+    y_axis_mode = "Auto"
+    y_axis_manual_max: Optional[float] = None
+    fill_area = True
+    annotate_peak = True
+    show_right_info_box = True
+    enable_compare_mode = False
+    compare_fill_area = False
+    enable_trend_mode = False
+
+    show_harmonics = True
+    harmonic_count = 8
+    harmonic_band_fraction = 0.12
+    show_harmonic_amplitudes = True
+    harmonic_label_mode = "1X + Top 3"
+
+    bearing_catalog_options = list_bearing_catalog_options()
+    enable_bearing_faults = False
+    bearing_calc_mode = "Catalog"
+    bearing_model = bearing_catalog_options[0] if bearing_catalog_options else None
+    bearing_nb = 8
+    bearing_manual_rpm = float(primary_for_defaults.rpm) if primary_for_defaults.rpm and primary_for_defaults.rpm > 0 else 1490.0
+    bearing_harmonic_count = 3
+    bearing_tolerance_pct = 3.0
+else:
+  with st.sidebar:
     st.markdown("### Signal Selection")
-
-    signal_name_map = {r.name: r.signal_id for r in records_all}
-    signal_names = list(signal_name_map.keys())
-
-    valid_ids = {r.signal_id for r in records_all}
-    current_ids = [sid for sid in st.session_state.wm_sp_selected_signal_ids if sid in valid_ids]
-
-    # Auto-select all (Ciclo 11.1): si el usuario no tiene selección activa,
-    # mostrar TODAS las señales cargadas en lugar de solo la primera. Igual
-    # que el patrón ya implementado en Bode (Ciclo 2-B). Le ahorra al usuario
-    # el clic repetitivo de seleccionar uno por uno cuando carga 3+ CSVs.
-    if not current_ids:
-        current_ids = [r.signal_id for r in records_all]
-        st.session_state.wm_sp_selected_signal_ids = current_ids
-
-    default_names = [r.name for r in records_all if r.signal_id in current_ids]
 
     selected_names = st.multiselect(
         "Spectra to display",
