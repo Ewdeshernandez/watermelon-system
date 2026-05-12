@@ -217,6 +217,26 @@ def hydrate_spectrum_snapshot(instance_id: str, snapshot_id: str) -> bool:
     info["module_title"] = "Análisis Espectral"
     info["spectrum_snapshot_id"] = snapshot_id
     st.session_state["_loaded_from_snapshot"] = info
+
+    # 5) Ciclo 23.108 — RPM patch. Si el spectrum payload tiene
+    # operating_speed_rpm y los signals no la tienen (waveform pareado
+    # no la guardó), inyectamos en cada signal.metadata["RPM"].
+    spec_rpm = spec_payload.get("operating_speed_rpm")
+    if spec_rpm:
+        try:
+            spec_rpm_f = float(spec_rpm)
+            if spec_rpm_f > 0:
+                signals = st.session_state.get("signals", {})
+                for sig in signals.values():
+                    md = getattr(sig, "metadata", None)
+                    if isinstance(md, dict):
+                        # Solo overridear si el waveform no la tenía
+                        current = md.get("RPM")
+                        if not current:
+                            md["RPM"] = spec_rpm_f
+        except (TypeError, ValueError):
+            pass
+
     return True
 
 

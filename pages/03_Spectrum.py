@@ -1472,30 +1472,45 @@ def build_spectrum_figure(
     )
 
     if show_right_info_box:
-        rows = [
-            (
-                "1X Frequency",
-                f"{format_number(one_x_display_freq_cpm, 1)} CPM" if one_x_display_freq_cpm is not None else "—",
-            ),
-            (
-                f"1X Amplitude ({amplitude_mode_label(amplitude_mode)})",
-                f"{format_number(one_x_display_amp, 3)} {display_unit_text}".strip() if one_x_display_amp is not None else "—",
-            ),
-            (
-                f"Spectrum O/All ({amplitude_mode_label(amplitude_mode)})",
-                f"{format_number(overall_spec_display, 3)} {display_unit_text}".strip()
-                if overall_spec_display is not None
-                else "—",
-            ),
-            (
-                "Real Resolution",
-                f"{format_number(real_resolution_cpm, 2)} CPM" if real_resolution_cpm is not None else "—",
-            ),
-            (
-                "Display Grid",
-                f"{format_number(resolution_cpm, 2)} CPM" if resolution_cpm is not None else "—",
-            ),
-        ]
+        # Ciclo 23.108 — Modo cliente: del info box derecho solo se queda
+        # `Spectrum O/All`. Las filas 1X Freq/Amp y Real Resolution/Display
+        # Grid son metadata técnica de análisis — IP interna.
+        _is_client_for_box = bool(st.session_state.get("_loaded_from_snapshot"))
+
+        if _is_client_for_box:
+            rows = [
+                (
+                    f"Spectrum O/All ({amplitude_mode_label(amplitude_mode)})",
+                    f"{format_number(overall_spec_display, 3)} {display_unit_text}".strip()
+                    if overall_spec_display is not None
+                    else "—",
+                ),
+            ]
+        else:
+            rows = [
+                (
+                    "1X Frequency",
+                    f"{format_number(one_x_display_freq_cpm, 1)} CPM" if one_x_display_freq_cpm is not None else "—",
+                ),
+                (
+                    f"1X Amplitude ({amplitude_mode_label(amplitude_mode)})",
+                    f"{format_number(one_x_display_amp, 3)} {display_unit_text}".strip() if one_x_display_amp is not None else "—",
+                ),
+                (
+                    f"Spectrum O/All ({amplitude_mode_label(amplitude_mode)})",
+                    f"{format_number(overall_spec_display, 3)} {display_unit_text}".strip()
+                    if overall_spec_display is not None
+                    else "—",
+                ),
+                (
+                    "Real Resolution",
+                    f"{format_number(real_resolution_cpm, 2)} CPM" if real_resolution_cpm is not None else "—",
+                ),
+                (
+                    "Display Grid",
+                    f"{format_number(resolution_cpm, 2)} CPM" if resolution_cpm is not None else "—",
+                ),
+            ]
         _draw_right_info_box(fig, rows)
 
     grid_step = 1000.0
@@ -2261,25 +2276,29 @@ def render_spectrum_panel(
         key=f"wm_spectrum_plot_{export_state_key}",
     )
 
-    helper_title = f"Spectrum Diagnostic Helper · Panel {panel_index + 1}"
-    helper_subtitle = text_diag["headline"]
+    # Ciclo 23.108 — Modo cliente: NO mostrar el Diagnostic Helper card
+    # (es IP interna con semáforo/harmonics/headline diagnóstico).
+    _is_client_view_helper = bool(st.session_state.get("_loaded_from_snapshot"))
+    if not _is_client_view_helper:
+        helper_title = f"Spectrum Diagnostic Helper · Panel {panel_index + 1}"
+        helper_subtitle = text_diag["headline"]
 
-    st.markdown("")
+        st.markdown("")
 
-    helper_cols = [
-        (f"Semáforo: {semaforo_status}", semaforo_color),
-        (f"1X Amp: {format_number(one_x_display_amp, 3)} {amplitude_unit_text(primary.amplitude_unit, amplitude_mode)}".strip(), None),
-        (f"Overall: {format_number(overall_spec_rms, 3)} {amplitude_unit_text(primary.amplitude_unit, amplitude_mode)}".strip(), None),
-        (f"Peak Freq: {format_number(spectrum.peak_freq_cpm, 1)} CPM", None),
-        (f"Harmonics: {len(all_harmonic_points)}", None),
-    ]
+        helper_cols = [
+            (f"Semáforo: {semaforo_status}", semaforo_color),
+            (f"1X Amp: {format_number(one_x_display_amp, 3)} {amplitude_unit_text(primary.amplitude_unit, amplitude_mode)}".strip(), None),
+            (f"Overall: {format_number(overall_spec_rms, 3)} {amplitude_unit_text(primary.amplitude_unit, amplitude_mode)}".strip(), None),
+            (f"Peak Freq: {format_number(spectrum.peak_freq_cpm, 1)} CPM", None),
+            (f"Harmonics: {len(all_harmonic_points)}", None),
+        ]
 
-    from core.module_patterns import helper_card
-    helper_card(
-        title=helper_title,
-        subtitle=helper_subtitle,
-        chips=helper_cols,
-    )
+        from core.module_patterns import helper_card
+        helper_card(
+            title=helper_title,
+            subtitle=helper_subtitle,
+            chips=helper_cols,
+        )
 
     
 
