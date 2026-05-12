@@ -50,33 +50,34 @@ render_user_menu()
 # Esto esconde sidebar controles + botones export + cualquier elemento
 # marcado con clase `wm-internal-only`.
 if st.session_state.get("_loaded_from_snapshot"):
+    # Ciclo 23.99 — Modo cliente: CSS + JS separados.
+    # CSS via st.markdown (sí funciona, los <style> sí se respetan).
+    # JS via components.html con window.parent.document (porque st.markdown
+    # SANITIZA <script> tags y por eso v3.31.98 no enganchó el gradient).
     st.markdown(
         """
         <style>
-        /* Ciclo 23.97 — Modo cliente: ocultar controles técnicos del sidebar */
-        section[data-testid="stSidebar"] [data-testid="stSelectbox"],
-        section[data-testid="stSidebar"] [data-testid="stMultiSelect"],
-        section[data-testid="stSidebar"] [data-testid="stNumberInput"],
-        section[data-testid="stSidebar"] [data-testid="stTextInput"],
-        section[data-testid="stSidebar"] [data-testid="stCheckbox"],
-        section[data-testid="stSidebar"] [data-testid="stRadio"],
-        section[data-testid="stSidebar"] [data-testid="stSlider"],
-        section[data-testid="stSidebar"] h1,
-        section[data-testid="stSidebar"] h2,
-        section[data-testid="stSidebar"] h3,
-        section[data-testid="stSidebar"] h4 {
+        /* Ciclo 23.99 — Modo cliente: ocultar SIDEBAR ENTERO.
+           El cliente no debe ver Home / Machinery Library / Tabular List /
+           Load Data / Importers / Crear activo / Live Monitoring / etc. */
+        section[data-testid="stSidebar"],
+        [data-testid="stSidebarCollapseButton"],
+        [data-testid="collapsedControl"] {
             display: none !important;
+            width: 0 !important;
+            visibility: hidden !important;
+        }
+        /* Reclama el espacio horizontal del sidebar oculto */
+        [data-testid="stAppViewContainer"] > section:nth-of-type(2) {
+            margin-left: 0 !important;
+            padding-left: 1rem !important;
+            max-width: 100% !important;
         }
         /* Ocultar botones export PNG / Reporte */
         .wm-export-actions {
             display: none !important;
         }
-        .wm-export-actions + div[data-testid="stHorizontalBlock"] {
-            display: none !important;
-        }
-        /* Botón Volver — estilo aplicado por JS abajo (CSS no enganchaba
-           porque st.markdown(div) no envuelve al button siguiente).
-           Esta clase la usa el JS como target. */
+        /* Botón Volver — la clase la aplica el JS de components.html abajo */
         .wm-return-btn-applied button {
             background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%) !important;
             color: white !important;
@@ -93,6 +94,11 @@ if st.session_state.get("_loaded_from_snapshot"):
             transition: all 0.2s cubic-bezier(.4,0,.2,1) !important;
             white-space: nowrap !important;
         }
+        .wm-return-btn-applied button p,
+        .wm-return-btn-applied button span,
+        .wm-return-btn-applied button div {
+            color: white !important;
+        }
         .wm-return-btn-applied button:hover {
             background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%) !important;
             box-shadow:
@@ -105,18 +111,28 @@ if st.session_state.get("_loaded_from_snapshot"):
             transform: translateY(0) !important;
         }
         </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
+    # JS en components.html — único path que ejecuta scripts en Streamlit.
+    # Usa window.parent.document para alcanzar el DOM real (no el iframe).
+    import streamlit.components.v1 as _components
+
+    _components.html(
+        """
         <script>
         (function() {
-          function styleReturnBtn() {
+          function applyClientHooks() {
             try {
               const doc = window.parent.document;
+              if (!doc) return;
               doc.querySelectorAll('button').forEach(b => {
-                const t = (b.innerText || '').trim();
-                if (t.includes('Volver a Live Monitoring')) {
-                  // Subir al stButton wrapper y agregar la clase target
+                const t = (b.innerText || b.textContent || '').trim();
+                // 1) Botón Volver — aplicar clase para que el gradient enganche
+                if (t.indexOf('Volver a Live Monitoring') !== -1) {
                   let p = b;
-                  for (let i = 0; i < 5 && p; i++) {
+                  for (let i = 0; i < 6 && p; i++) {
                     if (p.matches && p.matches('[data-testid="stButton"]')) {
                       p.classList.add('wm-return-btn-applied');
                       break;
@@ -124,7 +140,7 @@ if st.session_state.get("_loaded_from_snapshot"):
                     p = p.parentElement;
                   }
                 }
-                // Hide export buttons también acá (consolidamos JS hooks)
+                // 2) Esconder export buttons (Prepare/Download PNG HD, Enviar a Reporte)
                 if (t === 'Prepare PNG HD' || t === 'Download PNG HD' || t === 'Enviar a Reporte') {
                   let p = b;
                   for (let i = 0; i < 8 && p; i++) {
@@ -137,15 +153,15 @@ if st.session_state.get("_loaded_from_snapshot"):
                   b.style.display = 'none';
                 }
               });
-            } catch (e) {}
+            } catch (e) { /* silencio */ }
           }
-          styleReturnBtn();
-          const it = setInterval(styleReturnBtn, 500);
+          applyClientHooks();
+          const it = setInterval(applyClientHooks, 400);
           setTimeout(() => clearInterval(it), 30000);
         })();
         </script>
         """,
-        unsafe_allow_html=True,
+        height=0,
     )
 
 # Ciclo 23.87+ — Hidratación desde snapshot histórico.
@@ -1091,25 +1107,32 @@ def build_waveform_figure(
     )
 
     if show_right_info_box:
+        # Ciclo 23.99 — Modo cliente: mantener Waveform Overall + Crest Factor
+        # (son críticos), pero NO mostrar las filas Cursor A/B Basic.
+        _is_client_for_box = bool(st.session_state.get("_loaded_from_snapshot"))
+
         rows = [
             (
                 "Waveform Overall (rms)",
                 f"{format_number(summary.get('RMS'), 3)} {amp_unit}".strip(),
             ),
             ("Crest Factor", format_number(summary.get("Crest Factor"), 2)),
-            (
-                "Cursor A (Basic)",
-                f"{format_number(cursor.get('Cursor A y'), 3)} {amp_unit}".strip(),
-            ),
         ]
 
-        if show_cursor_b:
+        if not _is_client_for_box:
             rows.append(
                 (
-                    "Cursor B (Basic)",
-                    f"{format_number(cursor.get('Cursor B y'), 3)} {amp_unit}".strip(),
+                    "Cursor A (Basic)",
+                    f"{format_number(cursor.get('Cursor A y'), 3)} {amp_unit}".strip(),
                 )
             )
+            if show_cursor_b:
+                rows.append(
+                    (
+                        "Cursor B (Basic)",
+                        f"{format_number(cursor.get('Cursor B y'), 3)} {amp_unit}".strip(),
+                    )
+                )
 
         _draw_right_info_box(fig, rows)
 
@@ -2189,12 +2212,10 @@ with st.sidebar:
     show_cursor_b = st.checkbox("Show Cursor B", value=True)
     show_right_info_box = st.checkbox("Show info box", value=True)
 
-    # Ciclo 23.98 — Modo cliente: ocultar el right info box del plot
-    # (Waveform Overall, Crest Factor, Cursor A/B Basic) y Cursor B
-    # — el cliente solo ve la forma de onda limpia.
-    if st.session_state.get("_loaded_from_snapshot"):
-        show_right_info_box = False
-        show_cursor_b = False
+    # Ciclo 23.99 — Modo cliente: mantener info box (Waveform Overall +
+    # Crest Factor SON vitales para el cliente) pero ocultar SOLO las filas
+    # Cursor A/B Basic. La supresión de las filas se hace dentro de
+    # build_waveform_figure leyendo _loaded_from_snapshot.
 
     st.markdown("### Time Window")
 
