@@ -65,6 +65,18 @@ def hydrate_waveform_snapshot(instance_id: str, snapshot_id: str) -> bool:
         return False
 
     operating_rpm = payload.get("operating_speed_rpm")
+    # Ciclo 23.109 — Fallback a instance.nominal_rpm si el snapshot no la tiene
+    if not operating_rpm:
+        try:
+            from core.instance_state import get_instance
+            inst_obj = get_instance(instance_id)
+            if inst_obj is not None:
+                v = getattr(inst_obj, "nominal_rpm", None)
+                if v and float(v) > 0:
+                    operating_rpm = float(v)
+        except Exception:
+            pass
+
     corrida_label = payload.get("corrida_label", "")
     snapshot_timestamp = payload.get("timestamp", "")
 
@@ -218,24 +230,57 @@ def hydrate_spectrum_snapshot(instance_id: str, snapshot_id: str) -> bool:
     info["spectrum_snapshot_id"] = snapshot_id
     st.session_state["_loaded_from_snapshot"] = info
 
-    # 5) Ciclo 23.108 — RPM patch. Si el spectrum payload tiene
-    # operating_speed_rpm y los signals no la tienen (waveform pareado
-    # no la guardó), inyectamos en cada signal.metadata["RPM"].
-    spec_rpm = spec_payload.get("operating_speed_rpm")
-    if spec_rpm:
+    # 5) Ciclo 23.109 — RPM cascade: si el spectrum payload trae
+    # operating_speed_rpm la usamos; sino, intentamos sacarla del waveform
+    # payload; sino, del instance.nominal_rpm como último fallback.
+    rpm_value = None
+
+    # 5a) Spectrum payload
+    try:
+        v = spec_payload.get("operating_speed_rpm")
+        if v:
+            v_f = float(v)
+            if v_f > 0:
+                rpm_value = v_f
+    except (TypeError, ValueError):
+        pass
+
+    # 5b) Waveform payload (cargamos ligero solo si necesitamos)
+    if not rpm_value:
         try:
-            spec_rpm_f = float(spec_rpm)
-            if spec_rpm_f > 0:
-                signals = st.session_state.get("signals", {})
-                for sig in signals.values():
-                    md = getattr(sig, "metadata", None)
-                    if isinstance(md, dict):
-                        # Solo overridear si el waveform no la tenía
-                        current = md.get("RPM")
-                        if not current:
-                            md["RPM"] = spec_rpm_f
-        except (TypeError, ValueError):
+            from core.waveform_history import load_waveform_snapshot
+            wf_payload = load_waveform_snapshot(instance_id, matching_wf_id) or {}
+            v = wf_payload.get("operating_speed_rpm")
+            if v:
+                v_f = float(v)
+                if v_f > 0:
+                    rpm_value = v_f
+        except Exception:
             pass
+
+    # 5c) Instance.nominal_rpm (fallback)
+    if not rpm_value:
+        try:
+            from core.instance_state import get_instance
+            inst_obj = get_instance(instance_id)
+            if inst_obj is not None:
+                v = getattr(inst_obj, "nominal_rpm", None)
+                if v:
+                    v_f = float(v)
+                    if v_f > 0:
+                        rpm_value = v_f
+        except Exception:
+            pass
+
+    # Inyectar en signals.metadata si tenemos RPM y los signals no la traen
+    if rpm_value:
+        signals = st.session_state.get("signals", {})
+        for sig in signals.values():
+            md = getattr(sig, "metadata", None)
+            if isinstance(md, dict):
+                current = md.get("RPM")
+                if not current:
+                    md["RPM"] = rpm_value
 
     return True
 
