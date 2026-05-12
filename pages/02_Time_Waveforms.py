@@ -168,10 +168,11 @@ def apply_page_style() -> None:
             background-color: #f3f4f6;
         }
 
-        section[data-testid="stSidebar"] {
-            background: #e5e7eb;
-            border-right: 1px solid #cbd5e1;
-        }
+        /* Ciclo 23.104 — NO override del background del sidebar.
+           El módulo Waveform tenía background:#e5e7eb (gris claro), un
+           legado del estilo viejo. Eso pisa el royal blue gradient que
+           pone render_user_menu() → sidebar se veía gris con pills blancas.
+           Quitándolo, el sidebar hereda el mismo look que Live Monitoring. */
 
         div[data-testid="stNumberInput"] input {
             font-family: monospace;

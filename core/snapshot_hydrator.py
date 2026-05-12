@@ -211,65 +211,67 @@ def render_snapshot_loaded_banner() -> None:
     logo_b64 = _get_watermelon_logo_b64()
 
     # ── Row 1: Botón Volver (izq) + Tag activo / cliente (der) ──
-    # Ciclo 23.101 — Render directo con <a href>. st.page_link y st.button
-    # ambos fallan en agarrar el gradient por CSS porque Streamlit aplica
-    # estilos con alta especificidad. Con <a> raw + clase propia controlamos
-    # 100% el aspecto. Navegación same-origin preserva el session cookie de
-    # Streamlit, así que el login se mantiene.
+    # Ciclo 23.104 — Volvemos a st.button + st.switch_page porque <a href>
+    # hace full reload y kicks-out al usuario (pierde sesión Streamlit).
+    # Para el ESTILO usamos un truco: insertamos un <span id="..."> ANTES
+    # del botón y la CSS usa el adjacent sibling (`+`) sobre el contenedor.
+    # Como Streamlit envuelve cada st.markdown/st.button en su propio div
+    # hermano, el "+" sí funciona DOM-wise (es entre stMarkdown + stButton).
     row1_left, row1_right = st.columns([2, 4])
     with row1_left:
         st.markdown(
             """
             <style>
-            .wm-return-btn {
-                display: inline-flex !important;
-                align-items: center !important;
-                gap: 6px !important;
+            /* Marker invisible que precede al botón Volver. La CSS usa el
+               selector general sibling (~) para enganchar el siguiente
+               stButton sin importar cuántos divs Streamlit meta entre medio. */
+            #wm-return-btn-marker { display: none; }
+            #wm-return-btn-marker ~ div [data-testid="stButton"] button,
+            #wm-return-btn-marker + div [data-testid="stButton"] button {
                 background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 50%, #1e40af 100%) !important;
                 color: #ffffff !important;
                 border: none !important;
                 border-radius: 10px !important;
                 font-weight: 700 !important;
                 font-size: 13px !important;
-                font-family: "Source Sans Pro", -apple-system, BlinkMacSystemFont, sans-serif !important;
                 padding: 9px 22px !important;
-                line-height: 1.2 !important;
-                text-decoration: none !important;
-                white-space: nowrap !important;
+                min-height: 40px !important;
                 box-shadow:
                     0 1px 2px rgba(30,64,175,0.25),
                     0 4px 12px rgba(30,64,175,0.18),
                     inset 0 1px 0 rgba(255,255,255,0.20) !important;
                 transition: all 0.2s cubic-bezier(.4,0,.2,1) !important;
-                margin-top: 8px !important;
-                cursor: pointer !important;
+                white-space: nowrap !important;
             }
-            .wm-return-btn:hover {
+            #wm-return-btn-marker ~ div [data-testid="stButton"] button p,
+            #wm-return-btn-marker ~ div [data-testid="stButton"] button span,
+            #wm-return-btn-marker ~ div [data-testid="stButton"] button div {
+                color: #ffffff !important;
+            }
+            #wm-return-btn-marker ~ div [data-testid="stButton"] button:hover {
                 background: linear-gradient(135deg, #3b82f6 0%, #2563eb 50%, #1d4ed8 100%) !important;
                 box-shadow:
                     0 6px 16px rgba(30,64,175,0.32),
                     0 0 0 4px rgba(59,130,246,0.20),
                     inset 0 1px 0 rgba(255,255,255,0.25) !important;
                 transform: translateY(-1px) !important;
-                color: #ffffff !important;
-                text-decoration: none !important;
-            }
-            .wm-return-btn:active {
-                transform: translateY(0) !important;
-            }
-            .wm-return-btn:visited,
-            .wm-return-btn:link,
-            .wm-return-btn:focus {
-                color: #ffffff !important;
-                text-decoration: none !important;
             }
             </style>
-            <a href="/Live_Monitoring" target="_self" class="wm-return-btn">
-                ← Volver a Live Monitoring
-            </a>
+            <span id="wm-return-btn-marker"></span>
             """,
             unsafe_allow_html=True,
         )
+        if st.button(
+            "← Volver a Live Monitoring",
+            key="_wm_return_live_monitoring",
+            use_container_width=False,
+        ):
+            st.session_state.pop("_loaded_from_snapshot", None)
+            st.session_state.pop("signals", None)
+            try:
+                st.switch_page("pages/02_Live_Monitoring.py")
+            except Exception:
+                st.error("No se pudo volver. Refrescá la página.")
     with row1_right:
         client_html = (
             f"<span style='color:#94a3b8;'>·</span>"
