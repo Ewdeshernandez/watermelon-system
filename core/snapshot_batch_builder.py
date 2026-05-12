@@ -278,36 +278,77 @@ def build_spectrum_payload(parsed_files: List[Dict[str, Any]]) -> Dict[str, Any]
 # ORBIT PAYLOAD (detección automática de pares X/Y)
 # =============================================================
 
+def _extract_axis_and_bearing_key(label: str) -> Optional[Tuple[str, str]]:
+    """Extrae (bearing_key, axis) de un sensor label.
+
+    Soporta múltiples formatos comunes:
+      "1XD"        → ("1", "X")
+      "3YD"        → ("3", "Y")
+      "2X"         → ("2", "X")
+      "VE5808 (Y)" → ("VE5808", "Y")
+      "VE5808-X"   → ("VE5808", "X")
+      "TES1-3XD"   → ("TES1-3", "X")
+      "Bearing 1 X"→ ("Bearing 1", "X")
+      "5808X"      → ("5808", "X")
+
+    Estrategia: busca un X o Y "axis-like" en el label y devuelve el resto
+    como bearing_key.
+    """
+    label = (label or "").strip()
+    if not label:
+        return None
+
+    # Pattern 1: "(X)" o "(Y)" al final → bearing_key = todo lo previo trimmeado
+    m = re.search(r"^(.*?)\s*\(([XY])\)\s*$", label, re.IGNORECASE)
+    if m:
+        key = m.group(1).strip()
+        if key:
+            return (key, m.group(2).upper())
+
+    # Pattern 2: token tipo "1XD", "3YD", "2X", "5808Y" → (digits, X/Y)
+    m = re.match(r"^(.+?)([XY])(?:[ADVHN])?\s*$", label.upper())
+    if m:
+        key = m.group(1).strip().rstrip("-_ ")
+        if key:
+            return (key, m.group(2))
+
+    # Pattern 3: X/Y como sufijo separado por -/_/espacio → "BRG-3-X"
+    m = re.match(r"^(.+?)[\-_ ]([XY])(?:[ADVHN])?\s*$", label, re.IGNORECASE)
+    if m:
+        return (m.group(1).strip(), m.group(2).upper())
+
+    return None
+
+
 def _detect_xy_pairs(parsed_files: List[Dict[str, Any]]) -> List[Tuple[Dict[str, Any], Dict[str, Any], str]]:
     """Detecta pares X/Y por sensor_label. Devuelve [(x_pf, y_pf, bearing_label)]."""
     pairs = []
-    indexed: Dict[str, Tuple[Dict[str, Any], str]] = {}  # bearing_n → (pf, axis)
+    indexed: Dict[str, Tuple[Dict[str, Any], str]] = {}  # bearing_key → (pf, axis)
 
     for pf in parsed_files:
         if not pf.get("is_valid"):
             continue
         label = _extract_sensor_label(pf)
-        # Match pattern: 1XD, 2YD, 3X, 4Y, 1X_D, etc.
-        m = re.match(r"^(\d+)([XY])", label.upper())
-        if not m:
+        parsed = _extract_axis_and_bearing_key(label)
+        if parsed is None:
             continue
-        bearing_n = m.group(1)
-        axis = m.group(2)
-        # Bucket por bearing
-        key = bearing_n
-        if key in indexed:
-            other_pf, other_axis = indexed[key]
+        bearing_key, axis = parsed
+
+        # Bucket por bearing_key
+        if bearing_key in indexed:
+            other_pf, other_axis = indexed[bearing_key]
             if axis != other_axis:
+                bearing_label = f"BRG {bearing_key}"
                 if axis == "X":
-                    pairs.append((pf, other_pf, f"BRG #{bearing_n}"))
+                    pairs.append((pf, other_pf, bearing_label))
                 else:
-                    pairs.append((other_pf, pf, f"BRG #{bearing_n}"))
-                indexed.pop(key)
+                    pairs.append((other_pf, pf, bearing_label))
+                indexed.pop(bearing_key)
             else:
                 # Mismo eje, sobreescribir
-                indexed[key] = (pf, axis)
+                indexed[bearing_key] = (pf, axis)
         else:
-            indexed[key] = (pf, axis)
+            indexed[bearing_key] = (pf, axis)
 
     return pairs
 
