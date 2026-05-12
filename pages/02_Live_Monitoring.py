@@ -2847,7 +2847,36 @@ def main() -> None:
 
     instance_obj = get_instance(instance_id)
     sensor_lookup = _build_sensor_lookup(instance_obj)
+
+    # Ciclo 23.96 — Pre-warm de Supabase REST en primera carga de la
+    # sesión. Supabase Free tier tiene cold start de 2-3s en el primer
+    # request. Sin pre-warm, el cliente ve el warning catastrófico al
+    # entrar a Live Monitoring. Esto hace un ping silencioso UNA VEZ
+    # por sesión para que el cliente esté listo cuando llegue al query
+    # real abajo.
+    if not st.session_state.get("_wm_supabase_prewarmed"):
+        try:
+            from core.live_readings import _get_supabase_client, _TABLE
+            _prewarm_client = _get_supabase_client()
+            if _prewarm_client is not None:
+                _prewarm_client.table(_TABLE).select("instance_id").limit(1).execute()
+        except Exception:
+            pass  # falla silenciosa, el retry abajo lo cubre
+        st.session_state["_wm_supabase_prewarmed"] = True
+
     latest = latest_for_instance(instance_id)
+
+    # Ciclo 23.96 — Retry inline si el primer query devuelve []. Cubre
+    # el caso donde el pre-warm no terminó el cold start a tiempo.
+    # 2 intentos extra con 0.7s entre cada uno = max 1.4s antes de
+    # caer al cache anti-flicker o al warning.
+    if not latest:
+        import time
+        for _retry_n in range(2):
+            time.sleep(0.7)
+            latest = latest_for_instance(instance_id)
+            if latest:
+                break
 
     # Anti-flicker cache (Ciclo 23.60, hardened 23.71) — Supabase REST a
     # veces devuelve [] por timeouts transitorios o reconexión. Si tenemos
@@ -2884,15 +2913,55 @@ def main() -> None:
             cache_age = 0.0
 
     if not latest:
-        # Sin datos y sin cache reciente → activo no configurado o caído
+        # Ciclo 23.96 — Mensaje friendly para el cliente (no debug técnico).
+        # Si después de pre-warm + 2 retries + cache check sigue vacío,
+        # mostrar un estado de carga elegante con retry button.
         render_asset_header(instance_obj, instance_id)
-        st.warning(
-            "**Sin datos en tiempo real para este activo.** Verificá:\n"
-            "1. Tabla `live_readings` creada en Supabase.\n"
-            "2. wm-collector corriendo en el PC de planta.\n"
-            "3. El collector usa el mismo `instance_id`."
-        )
+        retry_count = st.session_state.get(f"_wm_load_retry_{instance_id}", 0)
+        if retry_count < 3:
+            st.session_state[f"_wm_load_retry_{instance_id}"] = retry_count + 1
+            st.markdown(
+                "<div style='background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%);"
+                "border:1.5px solid #93c5fd;border-radius:12px;padding:20px 24px;"
+                "margin:18px 0;display:flex;align-items:center;gap:14px;'>"
+                "<div style='font-size:24px;'>⏳</div>"
+                "<div>"
+                "<div style='font-size:15px;font-weight:700;color:#1e3a8a;'>"
+                "Conectando con base de datos...</div>"
+                "<div style='font-size:12px;color:#475569;margin-top:4px;'>"
+                "Cargando lecturas en tiempo real del activo. Espere un momento.</div>"
+                "</div>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            import time
+            time.sleep(1.0)
+            st.rerun()
+        else:
+            # Después de N retries sin éxito, sí mostrar el warning con info técnica
+            st.markdown(
+                "<div style='background:linear-gradient(135deg,#fef9c3 0%,#fde68a 100%);"
+                "border:1.5px solid #fbbf24;border-radius:12px;padding:20px 24px;"
+                "margin:18px 0;'>"
+                "<div style='font-size:15px;font-weight:700;color:#92400e;"
+                "margin-bottom:8px;'>"
+                "⚠ No se pudo conectar con los sensores en este momento</div>"
+                "<div style='font-size:12px;color:#78350f;line-height:1.6;'>"
+                "Esto puede deberse a una desconexión temporal de la base de datos "
+                "o del PC de planta. Intenta nuevamente en unos segundos."
+                "</div>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            col_retry, _ = st.columns([1, 4])
+            with col_retry:
+                if st.button("🔄 Reintentar", use_container_width=True, type="primary"):
+                    st.session_state.pop(f"_wm_load_retry_{instance_id}", None)
+                    st.rerun()
         return
+
+    # Si llegamos hasta acá con data exitosa, resetear el retry counter
+    st.session_state.pop(f"_wm_load_retry_{instance_id}", None)
 
     if using_cache:
         st.caption(
