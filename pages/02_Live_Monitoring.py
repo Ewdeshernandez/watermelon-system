@@ -2782,8 +2782,30 @@ def main() -> None:
         return Instance.from_dict(data)
 
     instances = list_instances()
+
+    # Ciclo 23.130 — Scoping por client: si el usuario es role=client,
+    # filtrar instances a las que tiene acceso (basado en owner_emails
+    # del cliente en data/clients.json + asset_tags).
+    _current_role = (st.session_state.get("auth_role", "") or "").strip().lower()
+    _current_email = (st.session_state.get("auth_email", "")
+                      or st.session_state.get("username", "")
+                      or "").strip().lower()
+    if _current_role == "client" and _current_email:
+        try:
+            from core.clients import filter_instances_for_email
+            instances = filter_instances_for_email(instances, _current_email)
+        except Exception:
+            pass
+
     if not instances:
-        st.info("No hay activos registrados aún. Andá a Machinery Library para crear uno.")
+        if _current_role == "client":
+            st.warning(
+                "No tenés activos asignados en tu cuenta. Contactá a tu "
+                "specialist de Watermelon para que te asigne los activos "
+                "del contrato."
+            )
+        else:
+            st.info("No hay activos registrados aún. Andá a Machinery Library para crear uno.")
         return
 
     # Build mapping instance_id → display label "TAG · Cliente"

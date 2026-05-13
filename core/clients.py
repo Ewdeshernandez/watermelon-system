@@ -226,6 +226,46 @@ def get_client_by_id(client_id: str) -> Optional[Client]:
     return None
 
 
+def get_client_for_email(email: str) -> Optional[Client]:
+    """Devuelve el Client cuyo owner_emails contiene el email dado.
+
+    Returns None si el email no está asignado a ningún cliente — útil
+    para detectar usuarios role=client que no tienen asset_tags
+    asignados (caso fallback: ven nada o todo, el caller decide).
+    """
+    target = (email or "").strip().lower()
+    if not target:
+        return None
+    for c in list_clients():
+        if target in c.owner_emails:
+            return c
+    return None
+
+
+def filter_instances_for_email(instances: List[Dict[str, Any]],
+                                email: str) -> List[Dict[str, Any]]:
+    """Filtra una lista de instances dict por los asset_tags del cliente
+    al que pertenece `email`.
+
+    - Si el email NO está en ningún owner_emails → devuelve [] (cliente
+      sin assets asignados).
+    - Si el cliente tiene asset_tags=[] → devuelve [] (no le asignaron
+      activos todavía).
+    - Si el email pertenece a un cliente con asset_tags configurados →
+      filtra instances cuyo `tag` (case-insensitive) está en asset_tags.
+    """
+    c = get_client_for_email(email)
+    if c is None or not c.asset_tags:
+        return []
+    allowed_tags_lc = {t.strip().lower() for t in c.asset_tags if t}
+    out = []
+    for inst in instances:
+        tag = str(inst.get("tag", "") or inst.get("instance_id", "")).strip().lower()
+        if tag in allowed_tags_lc:
+            out.append(inst)
+    return out
+
+
 def resolve_by_phone(phone: str) -> CallerScope:
     """
     Resuelve un número WhatsApp contra el registry. Returns CallerScope

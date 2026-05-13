@@ -141,8 +141,27 @@ CLIENT_BLOCKED_PAGES = {
 }
 
 
+# Ciclo 23.130 — Páginas accesibles para el cliente pero OCULTAS del nav.
+# El cliente puede llegar a estos módulos vía st.switch_page (redirect
+# desde las cards de Live Monitoring → hero banner pro) pero no aparecen
+# como entradas en el sidebar. Diseño: el nav del cliente queda con solo
+# Home + Live Monitoring + Reports — clase mundial enterprise, menos
+# saturado que el menú completo del analista.
+CLIENT_HIDE_FROM_NAV = {
+    "pages/01__Tabular_List.py",
+    "pages/02_Time_Waveforms.py",
+    "pages/03_Spectrum.py",
+    "pages/05_Orbit_Analysis.py",
+    "pages/06_Polar_Plot.py",
+    "pages/07_Bode_Plot.py",
+    "pages/09_Shaft_Centerline.py",
+    "pages/04_Trends.py",
+}
+
+
 def is_page_allowed_for_role(page: str, role: str) -> bool:
-    """Devuelve True si el role puede acceder a la página."""
+    """Devuelve True si el role puede ACCEDER a la página (incluye
+    acceso vía st.switch_page redirect). No afecta visibilidad en nav."""
     role = (role or "").strip().lower()
     if role in ("admin", "specialist", "viewer"):
         return True
@@ -150,6 +169,23 @@ def is_page_allowed_for_role(page: str, role: str) -> bool:
         return page not in CLIENT_BLOCKED_PAGES
     # default conservador: solo páginas no bloqueadas
     return page not in CLIENT_BLOCKED_PAGES
+
+
+def is_page_visible_in_nav_for_role(page: str, role: str) -> bool:
+    """Devuelve True si la página debe APARECER en el sidebar nav.
+
+    Cliente: solo Home + Live Monitoring + Reports en el menú lateral;
+    los módulos de análisis se acceden vía las cards de Live Monitoring
+    (redirect con switch_page).
+    Admin/specialist/viewer: ven todo lo que `is_page_allowed_for_role`
+    permite.
+    """
+    role = (role or "").strip().lower()
+    if role == "client":
+        if page in CLIENT_BLOCKED_PAGES or page in CLIENT_HIDE_FROM_NAV:
+            return False
+        return True
+    return is_page_allowed_for_role(page, role)
 
 
 def require_role(allowed_roles: tuple = ("admin", "specialist")) -> None:
@@ -684,9 +720,12 @@ def render_user_menu() -> None:
         _user_role = (user.get("role", "") or "").strip().lower()
 
         for group in NAV_GROUPS:
+            # Ciclo 23.130 — usar is_page_visible_in_nav_for_role para que
+            # los módulos de análisis del cliente (accesibles vía redirect)
+            # NO aparezcan en el sidebar — solo Home + Live Monitoring + Reports.
             visible_items = [
                 it for it in group["items"]
-                if is_page_allowed_for_role(it["page"], _user_role)
+                if is_page_visible_in_nav_for_role(it["page"], _user_role)
             ]
             if not visible_items:
                 continue  # toda la sección oculta para este role → skip header
