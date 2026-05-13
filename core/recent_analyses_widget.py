@@ -452,6 +452,7 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
         "waveform": "pages/02_Time_Waveforms.py",
         "spectrum": "pages/03_Spectrum.py",
         "orbit":    "pages/05_Orbit_Analysis.py",
+        "tabular":  "pages/01__Tabular_List.py",
     }
     if atype["key"] in _REDIRECT_TARGETS:
         snap_id = meta.get("snapshot_id", "")

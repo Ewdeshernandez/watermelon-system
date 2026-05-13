@@ -397,6 +397,115 @@ def hydrate_orbit_snapshot(instance_id: str, snapshot_id: str) -> bool:
 
 
 # =============================================================
+# TABULAR HYDRATION (Ciclo 23.120)
+# =============================================================
+
+def hydrate_tabular_snapshot(instance_id: str, snapshot_id: str) -> bool:
+    """Hidrata `signals` para Tabular desde el waveform pareado.
+
+    Tabular construye la tabla de análisis a partir de FFT + bearing
+    diagnostics sobre los waveforms. El tabular_history guarda metadata
+    + valores ya computados pero la tabla rica del módulo se recalcula
+    desde waveforms. Matching por corrida_label con waveform.
+    """
+    try:
+        from core.tabular_history import load_tabular_snapshot
+        from core.waveform_history import list_waveform_snapshots
+    except Exception:
+        return False
+
+    tab_payload = load_tabular_snapshot(instance_id, snapshot_id)
+    if not tab_payload:
+        return False
+    target_label = (tab_payload.get("corrida_label") or "").strip()
+
+    # Cascada igual que spectrum/orbit
+    try:
+        wf_snaps = list_waveform_snapshots(instance_id) or []
+    except Exception:
+        wf_snaps = []
+
+    matching_wf_id = None
+    if target_label and wf_snaps:
+        for ws in wf_snaps:
+            if (ws.get("corrida_label") or "").strip() == target_label:
+                matching_wf_id = ws.get("snapshot_id")
+                break
+
+    if not matching_wf_id and wf_snaps:
+        tab_ts_raw = tab_payload.get("timestamp", "")
+        try:
+            from datetime import datetime
+            tab_dt = datetime.fromisoformat(tab_ts_raw.replace("Z", "+00:00"))
+            best = None
+            best_diff = None
+            for ws in wf_snaps:
+                try:
+                    ws_dt = datetime.fromisoformat(ws.get("timestamp", "").replace("Z", "+00:00"))
+                    diff = abs((ws_dt - tab_dt).total_seconds())
+                    if best_diff is None or diff < best_diff:
+                        best_diff = diff
+                        best = ws.get("snapshot_id")
+                except Exception:
+                    continue
+            if best and best_diff is not None and best_diff <= 600:
+                matching_wf_id = best
+        except Exception:
+            pass
+
+    if not matching_wf_id and wf_snaps:
+        matching_wf_id = wf_snaps[0].get("snapshot_id")
+
+    if not matching_wf_id:
+        st.session_state["_loaded_from_snapshot"] = {
+            "snapshot_id": snapshot_id,
+            "instance_id": instance_id,
+            "corrida_label": target_label,
+            "timestamp": tab_payload.get("timestamp", ""),
+            "n_signals": len(tab_payload.get("channels", [])),
+            "module_title": "Análisis Tabular",
+            "tabular_payload": tab_payload,
+            "no_waveform_pair": True,
+        }
+        return True
+
+    ok = hydrate_waveform_snapshot(instance_id, matching_wf_id)
+    if not ok:
+        return False
+
+    info = st.session_state.get("_loaded_from_snapshot", {})
+    info["module_title"] = "Análisis Tabular"
+    info["tabular_snapshot_id"] = snapshot_id
+    st.session_state["_loaded_from_snapshot"] = info
+
+    # RPM cascade
+    rpm_value = None
+    try:
+        v = tab_payload.get("operating_speed_rpm")
+        if v and float(v) > 0:
+            rpm_value = float(v)
+    except (TypeError, ValueError):
+        pass
+    if not rpm_value:
+        try:
+            from core.instance_state import get_instance
+            inst_obj = get_instance(instance_id)
+            v = getattr(inst_obj, "nominal_rpm", None) if inst_obj else None
+            if v and float(v) > 0:
+                rpm_value = float(v)
+        except Exception:
+            pass
+    if rpm_value:
+        signals = st.session_state.get("signals", {})
+        for sig in signals.values():
+            md = getattr(sig, "metadata", None)
+            if isinstance(md, dict) and not md.get("RPM"):
+                md["RPM"] = rpm_value
+
+    return True
+
+
+# =============================================================
 # URL PARAM HELPER
 # =============================================================
 

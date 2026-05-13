@@ -24,6 +24,119 @@ st.set_page_config(page_title="Watermelon System | Tabular List", layout="wide")
 require_login()
 render_user_menu()
 
+# ============================================================
+# Ciclo 23.120 — Modo cliente: hidratación desde snapshot histórico
+# ============================================================
+try:
+    from core.snapshot_hydrator import (
+        consume_pending_snapshot_url,
+        hydrate_tabular_snapshot,
+        render_snapshot_loaded_banner,
+    )
+    _snap_inst, _snap_id = None, None
+    _pending = st.session_state.pop("_pending_snapshot_load", None)
+    if _pending and _pending.get("snapshot_type") == "tabular":
+        _snap_inst = _pending.get("instance_id")
+        _snap_id = _pending.get("snapshot_id")
+    if _snap_id is None:
+        _snap_params = consume_pending_snapshot_url()
+        if _snap_params is not None:
+            _snap_inst, _snap_id = _snap_params
+
+    if _snap_id and _snap_inst:
+        _already = st.session_state.get("_loaded_from_snapshot", {})
+        if _already.get("tabular_snapshot_id") != _snap_id:
+            hydrate_tabular_snapshot(_snap_inst, _snap_id)
+    render_snapshot_loaded_banner()
+except Exception as _e:
+    import logging
+    logging.warning("tabular snapshot hydration failed: %s", _e)
+
+# CSS para esconder IP interna del módulo Tabular en cliente
+if st.session_state.get("_loaded_from_snapshot"):
+    st.markdown(
+        """
+        <style>
+        /* Esconder banner verde 'Tabular List · TAG' + criterio + Alert/Danger
+           (es metadata técnica de análisis, no para cliente). */
+        section[data-testid="stMain"] div[data-testid="stContainer"]:has(h3:where(:contains("🟢 Tabular List"))) {
+            display: none !important;
+        }
+        /* Diagnostic narrative box (text_diag.headline + narrative) */
+        .wm-diagnostic-body, .wm-diagnostic-headline,
+        div:has(> .wm-diagnostic-body) {
+            display: none !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    # JS para esconder por TEXTO (más confiable que CSS :has en algunos navegadores)
+    import streamlit.components.v1 as _components_tab
+    _components_tab.html(
+        """
+        <script>
+        (function() {
+          const HIDE_HEADINGS = [
+            '🟢 Tabular List',
+            'Override criterio',
+            'Guardar corrida actual',
+            'Gestionar snapshots',
+          ];
+          const HIDE_BUTTONS = ['Prepare PNG HD','Download PNG HD','Enviar a Reporte'];
+          function applyHides() {
+            try {
+              const doc = window.parent.document;
+              if (!doc) return;
+              // Esconder expanders / containers por texto del summary
+              doc.querySelectorAll('summary, h1, h2, h3, h4, h5, p').forEach(el => {
+                const t = (el.innerText || el.textContent || '').trim();
+                for (const h of HIDE_HEADINGS) {
+                  if (t.includes(h)) {
+                    // Subir hasta stExpander o stVerticalBlock y esconder
+                    let p = el;
+                    for (let i = 0; i < 8 && p; i++) {
+                      if (p.matches && (
+                        p.matches('details') ||
+                        p.matches('[data-testid="stExpander"]') ||
+                        p.matches('[data-testid="stContainer"]')
+                      )) {
+                        p.style.display = 'none';
+                        return;
+                      }
+                      p = p.parentElement;
+                    }
+                    el.style.display = 'none';
+                    return;
+                  }
+                }
+              });
+              // Esconder export buttons
+              doc.querySelectorAll('button').forEach(b => {
+                const t = (b.innerText || b.textContent || '').trim();
+                if (HIDE_BUTTONS.indexOf(t) !== -1) {
+                  let p = b;
+                  for (let i = 0; i < 8 && p; i++) {
+                    if (p.matches && p.matches('[data-testid="stHorizontalBlock"]')) {
+                      p.style.display = 'none';
+                      return;
+                    }
+                    p = p.parentElement;
+                  }
+                  b.style.display = 'none';
+                }
+              });
+            } catch (e) {}
+          }
+          applyHides();
+          const it = setInterval(applyHides, 500);
+          setTimeout(() => clearInterval(it), 30000);
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOGO_PATH = PROJECT_ROOT / "assets" / "watermelon_logo.png"
 
@@ -40,9 +153,33 @@ def apply_page_style() -> None:
             background-color: #f3f4f6;
         }
 
-        section[data-testid="stSidebar"] {
-            background: #e5e7eb;
-            border-right: 1px solid #cbd5e1;
+        /* Ciclo 23.120 — NO override del background del sidebar (royal blue de auth.py) */
+
+        /* Transparent sidebar buttons (auth.py usa div, Streamlit moderno usa section) */
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+            background: transparent !important;
+            color: rgba(241, 245, 249, 0.85) !important;
+            border: 1px solid transparent !important;
+            border-radius: 8px !important;
+            font-weight: 500 !important;
+            font-size: 0.84rem !important;
+            text-align: left !important;
+            justify-content: flex-start !important;
+            padding: 0.5rem 0.8rem !important;
+            min-height: 2.35rem !important;
+            box-shadow: none !important;
+            transition: all 0.15s ease !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
+            background: rgba(255,255,255,0.08) !important;
+            border-color: rgba(255,255,255,0.10) !important;
+            color: #ffffff !important;
+        }
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button *,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button p,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button span {
+            color: inherit !important;
+            font-weight: 500 !important;
         }
 
         section.main div[data-testid="stButton"] > button,
@@ -1148,7 +1285,12 @@ if _active_instance is None:
 _defaults = derive_tabular_defaults(_active_instance)
 
 # Banner verde arriba con info del criterio + thresholds + sources
-with st.container(border=True):
+# Ciclo 23.120 — En cliente NO se muestra (es IP de análisis con criterios,
+# alert/danger thresholds y sources). El hero card del banner de snapshot
+# ya da contexto al cliente.
+_is_client_view_tab = bool(st.session_state.get("_loaded_from_snapshot"))
+if not _is_client_view_tab:
+  with st.container(border=True):
     bcols = st.columns([1.0, 3.5])
     with bcols[0]:
         if _active_instance.schematic_png:
@@ -1797,7 +1939,8 @@ helper_card(
     ],
 )
 
-render_tabular_narrative_box(text_diag["headline"], text_diag["narrative"])
+if not st.session_state.get("_loaded_from_snapshot"):
+    render_tabular_narrative_box(text_diag["headline"], text_diag["narrative"])
 
 st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
 
