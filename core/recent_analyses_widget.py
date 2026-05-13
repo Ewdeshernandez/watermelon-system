@@ -416,16 +416,38 @@ def render_recent_analyses_section(instance_id: str) -> None:
     _inject_css_once()
     import importlib
 
-    # Fetch metadata de los 4 tipos PRIMERO para sacar el conteo total
-    metadata_by_type: Dict[str, Optional[Dict[str, Any]]] = {}
-    for atype in ANALYSIS_TYPES:
-        try:
-            mod = importlib.import_module(atype["module"])
-            list_fn = getattr(mod, atype["list_fn"])
-            snaps = list_fn(instance_id, limit=1)
-            metadata_by_type[atype["key"]] = snaps[0] if snaps else None
-        except Exception:
-            metadata_by_type[atype["key"]] = None
+    # Ciclo 23.128 — PERFORMANCE FIX. Las cards solo necesitan saber:
+    #   (a) si hay al menos 1 snapshot del tipo (para Abrir/Sin datos)
+    #   (b) el snapshot_id del más reciente (para el redirect)
+    # No necesitan timestamp/corrida_label/worst_severity (las quitamos en
+    # v3.31.126). Antes llamábamos list_*_snapshots(limit=1) que DESCARGA
+    # el JSON gzipped completo desde Supabase Storage por cada tipo —
+    # 4 downloads secuenciales = 4-8s en Supabase Free tier.
+    # Ahora: usamos history_storage.list_snapshots directo que solo lista
+    # archivos del bucket (1 API call rápido, sin downloads). Cache en
+    # session_state con TTL 60s para reruns y navegación.
+    _cache_key = f"_wm_recent_meta_cache_v2_{instance_id}"
+    _now_ts = datetime.now(timezone.utc).timestamp()
+    _cached = st.session_state.get(_cache_key)
+    if _cached and (_now_ts - _cached.get("ts", 0)) < 60:
+        metadata_by_type = _cached["data"]
+    else:
+        from core import history_storage as _hs
+        metadata_by_type: Dict[str, Optional[Dict[str, Any]]] = {}
+        for atype in ANALYSIS_TYPES:
+            try:
+                # FAST PATH: solo list de archivos en el bucket
+                snaps_list = _hs.list_snapshots(instance_id, atype["key"])
+                if snaps_list:
+                    # snaps_list[0] es el más reciente (ordenado desc por snapshot_id)
+                    metadata_by_type[atype["key"]] = {
+                        "snapshot_id": snaps_list[0].get("snapshot_id", ""),
+                    }
+                else:
+                    metadata_by_type[atype["key"]] = None
+            except Exception:
+                metadata_by_type[atype["key"]] = None
+        st.session_state[_cache_key] = {"data": metadata_by_type, "ts": _now_ts}
 
     # Ciclo 23.126 — Sin header "ÚLTIMA DATA". Los labels de cada card
     # son auto-descriptivos. Menos chrome, más data.
