@@ -1,0 +1,108 @@
+name: Purge live_readings (semanal)
+
+# Ciclo 23.137 — Auto-purge semanal de la tabla live_readings.
+# Por qué: el collector industrial mete data en tiempo real (~30 rows/seg
+# en operación normal). Sin purga, la tabla crece a millones de filas y
+# la view `latest_live_reading` (DISTINCT ON) hace timeout en Supabase
+# Free tier — Live Monitoring queda en blanco para el cliente.
+#
+# Trigger:
+#   - schedule: domingos 3:00 AM UTC (= 10pm Colombia sábado, fuera de horario)
+#   - workflow_dispatch: trigger manual desde GitHub UI cuando quieras
+
+on:
+  schedule:
+    - cron: '0 3 * * 0'   # cada domingo a las 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: 'Borrar rows más viejas que N horas'
+        required: false
+        default: '24'
+      batch:
+        description: 'Batch size (default 1000, bajar si timeoutea)'
+        required: false
+        default: '1000'
+      only:
+        description: 'Solo este instance_id (vacío = todos)'
+        required: false
+        default: ''
+
+jobs:
+  purge:
+    name: Purge old live_readings
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install supabase client
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install supabase
+
+      - name: Verify Supabase secrets
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_KEY" ]; then
+            echo "::error::Faltan secrets SUPABASE_URL y/o SUPABASE_SERVICE_KEY en GitHub repo settings."
+            exit 1
+          fi
+          echo "✓ Secrets OK"
+
+      - name: Verify (antes del purge)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          # Lista instances con conteo. Sin error si falla — diagnóstico
+          python scripts/verify_live_readings.py tes1 tes3 || true
+
+      - name: Run purge
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          # Args from workflow_dispatch inputs (con defaults para schedule)
+          HOURS="${{ github.event.inputs.hours }}"
+          BATCH="${{ github.event.inputs.batch }}"
+          ONLY="${{ github.event.inputs.only }}"
+          HOURS="${HOURS:-24}"
+          BATCH="${BATCH:-1000}"
+
+          if [ -n "$ONLY" ]; then
+            python scripts/purge_old_live_readings.py --only "$ONLY" --hours "$HOURS" --batch "$BATCH"
+          else
+            python scripts/purge_old_live_readings.py --hours "$HOURS" --batch "$BATCH"
+          fi
+
+      - name: Verify (después del purge)
+        if: always()
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          python scripts/verify_live_readings.py tes1 tes3 || true
+
+      - name: Notify failure (creates issue)
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const today = new Date().toISOString().split('T')[0];
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Purge live_readings falló — ${today}`,
+              body: `El cron job de purga semanal falló en run [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}).\n\nRevisar los logs del workflow para detalles. Si Supabase está caído, reintentar manual con \`workflow_dispatch\`.`,
+              labels: ['ops', 'purge-fail', 'urgent'],
+            });
