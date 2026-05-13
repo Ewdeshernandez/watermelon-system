@@ -2749,7 +2749,38 @@ def main() -> None:
     # subtitle="" porque page_header requiere el kwarg pero no queremos texto.
     page_header(title="Live Monitoring", subtitle="")
 
-    from core.instance_state import list_instances, get_instance
+    # Ciclo 23.129 — PERFORMANCE: cachear list_instances + get_instance.
+    # Cada navegación re-ejecuta el script → Postgres queries sin cache.
+    # Las instances cambian solo por wizard/edit (raro), 5min TTL es OK.
+    from core.instance_state import (
+        list_instances as _raw_list_instances,
+        get_instance as _raw_get_instance,
+    )
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cached_list_instances():
+        return _raw_list_instances()
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cached_get_instance(_id: str):
+        inst = _raw_get_instance(_id)
+        if inst is None:
+            return None
+        # Devolvemos el dict para que cache_data pueda serializar; reconstruimos
+        # el Instance object en el caller.
+        from dataclasses import asdict
+        return asdict(inst)
+
+    def list_instances():
+        return _cached_list_instances()
+
+    def get_instance(_id: str):
+        from core.instance_state import Instance
+        data = _cached_get_instance(_id)
+        if data is None:
+            return None
+        return Instance.from_dict(data)
+
     instances = list_instances()
     if not instances:
         st.info("No hay activos registrados aún. Andá a Machinery Library para crear uno.")
@@ -2864,7 +2895,15 @@ def main() -> None:
             pass  # falla silenciosa, el retry abajo lo cubre
         st.session_state["_wm_supabase_prewarmed"] = True
 
-    latest = latest_for_instance(instance_id)
+    # Ciclo 23.129 — Cache latest_for_instance con TTL 15s para evitar
+    # re-pegar Supabase en reruns inmediatos (ej. click en card → rerun).
+    # 15s es lo suficientemente fresco para datos live y elimina
+    # múltiples roundtrips por minuto.
+    @st.cache_data(ttl=15, show_spinner=False)
+    def _cached_latest_for_instance(_iid: str):
+        return latest_for_instance(_iid)
+
+    latest = _cached_latest_for_instance(instance_id)
 
     # Ciclo 23.96 — Retry inline si el primer query devuelve []. Cubre
     # el caso donde el pre-warm no terminó el cold start a tiempo.
@@ -2874,8 +2913,12 @@ def main() -> None:
         import time
         for _retry_n in range(2):
             time.sleep(0.7)
+            # En retry usamos la versión sin cache para forzar fresh fetch
             latest = latest_for_instance(instance_id)
             if latest:
+                # Refresh el cache con el resultado bueno
+                _cached_latest_for_instance.clear()
+                latest = _cached_latest_for_instance(instance_id)
                 break
 
     # Anti-flicker cache (Ciclo 23.60, hardened 23.71) — Supabase REST a
