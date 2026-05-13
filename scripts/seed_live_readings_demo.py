@@ -50,10 +50,12 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Permite importar core/* cuando se corre desde la raíz del proyecto
-_HERE = Path(__file__).resolve().parent
-_ROOT = _HERE.parent
-sys.path.insert(0, str(_ROOT))
+# Ciclo 23.134 — fix shadow del package `supabase` por la carpeta ./supabase
+# en la raíz del repo (que contiene SQL migrations). Si corremos desde la
+# raíz, sys.path[0]='' (cwd) y Python encuentra ./supabase ANTES que el
+# package real. Eliminamos esa entrada del sys.path antes del import.
+_CWD_LIKE = {"", os.getcwd(), str(Path(__file__).resolve().parent.parent)}
+sys.path = [p for p in sys.path if p not in _CWD_LIKE]
 
 
 # =============================================================
