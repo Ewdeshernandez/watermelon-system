@@ -138,31 +138,21 @@ def _inject_css_once():
             letter-spacing: 0.02em;
         }
 
-        /* Cards */
+        /* Cards — compactas, sin caja blanca grande */
         .wm-recent-card {
-            background: #ffffff;
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 14px 14px 12px 14px;
+            background: transparent;
+            border: none;
+            border-radius: 0;
+            padding: 6px 4px 0 4px;
             display: flex; flex-direction: column;
-            gap: 0;
-            transition: all 0.18s cubic-bezier(.4,0,.2,1);
-            min-height: 130px;
+            gap: 4px;
+            transition: opacity 0.15s ease;
         }
         .wm-recent-card:hover {
-            border-color: #cbd5e1;
-            box-shadow:
-                0 1px 2px rgba(15,23,42,0.04),
-                0 6px 14px rgba(15,23,42,0.06);
-            transform: translateY(-1px);
+            opacity: 0.88;
         }
         .wm-recent-card.empty {
-            background: #fafbfc;
-            border-color: #e2e8f0;
-            border-style: dashed;
-            min-height: 130px;
-            justify-content: center;
-            align-items: center;
+            opacity: 0.45;
         }
 
         /* Ciclo 23.126 — Label row: solo el label, centrado, sin icon/ago */
@@ -176,12 +166,11 @@ def _inject_css_once():
             line-height: 1.2;
         }
 
-        /* SVG visual */
+        /* SVG visual — compacto, sin margin grande */
         .wm-recent-visual {
             display: flex; align-items: center; justify-content: center;
-            margin: 12px 0 8px 0;
-            opacity: 0.78;
-            min-height: 36px;
+            margin: 2px 0 6px 0;
+            opacity: 0.85;
         }
         .wm-recent-meta {
             font-size: 10.5px; color: #64748b;
@@ -189,8 +178,9 @@ def _inject_css_once():
             margin-bottom: 4px;
         }
         .wm-recent-empty-msg {
-            font-size: 11.5px; color: #94a3b8;
+            font-size: 11px; color: #94a3b8;
             font-style: italic; text-align: center;
+            padding: 6px 0 2px 0;
         }
 
         /* Severity chips for tabular */
@@ -198,28 +188,25 @@ def _inject_css_once():
         .wm-recent-sev-Alarma  { color: #b45309; font-weight: 700; font-size: 10.5px; }
         .wm-recent-sev-Danger  { color: #b91c1c; font-weight: 700; font-size: 10.5px; }
 
-        /* ── Botones "Abrir" — estilo discreto outlined ── */
-        /* Aplica al st.button con type="secondary" dentro del recent block */
+        /* ── Botones "Abrir" — texto link discreto sin caja ── */
         .wm-recent-btn-host + div [data-testid="stButton"] button {
-            background: #ffffff !important;
+            background: transparent !important;
             color: #1e40af !important;
-            border: 1px solid #dbeafe !important;
-            border-radius: 8px !important;
+            border: none !important;
+            border-radius: 0 !important;
             font-size: 12px !important;
             font-weight: 700 !important;
             letter-spacing: 0.02em !important;
-            padding: 6px 14px !important;
-            min-height: 32px !important;
-            height: 32px !important;
-            box-shadow: 0 1px 0 rgba(30,64,175,0.04) !important;
-            transition: all 0.15s ease !important;
+            padding: 2px 4px !important;
+            min-height: 22px !important;
+            height: auto !important;
+            box-shadow: none !important;
+            transition: color 0.15s ease, transform 0.15s ease !important;
         }
         .wm-recent-btn-host + div [data-testid="stButton"] button:hover {
-            background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%) !important;
-            border-color: #93c5fd !important;
+            background: transparent !important;
             color: #1e3a8a !important;
-            transform: translateY(-1px);
-            box-shadow: 0 4px 10px rgba(30,64,175,0.10) !important;
+            transform: translateX(2px);
         }
         .wm-recent-btn-host + div [data-testid="stButton"] button p {
             color: inherit !important;
