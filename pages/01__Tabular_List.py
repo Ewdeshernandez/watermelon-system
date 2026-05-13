@@ -1647,7 +1647,10 @@ with st.sidebar:
         st.warning("Danger debería ser mayor o igual que Alarm.")
 
 # Banner de override fuera del sidebar (visible para el usuario)
-if _override_active:
+# Ciclo 23.123 — En cliente NO se muestra (es info técnica de analista,
+# y además el JS de hide solo afectaba el texto interno dejando la
+# cajita amarilla huérfana con solo el ⚠️).
+if _override_active and not st.session_state.get("_loaded_from_snapshot"):
     st.warning(
         f"⚠️ **Override criterio activo** — "
         f"Criterion: {criterion_text} · Family: {measurement_family} · "
