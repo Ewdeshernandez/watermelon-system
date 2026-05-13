@@ -133,23 +133,68 @@ def render_history_export_section(
     except Exception:
         total = 0
 
+    # Ciclo 23.124 — Header minimal: title uppercase + meta count
     st.markdown(
-        "<div style='display:flex;align-items:baseline;gap:12px;margin:18px 0 8px 0;'>"
-        "<span style='font-size:15px;font-weight:800;color:#0f172a;'>"
-        "📦 Exportar histórico del activo</span>"
-        f"<span style='font-size:11px;color:#64748b;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;'>"
-        f"{total} snapshot(s) disponibles</span>"
-        "</div>",
+        f"""
+        <style>
+        .wm-export-header {{
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 12px; margin: 24px 0 10px 0;
+        }}
+        .wm-export-title {{
+            font-size: 13px; font-weight: 800; color: #0f172a;
+            letter-spacing: 0.06em; text-transform: uppercase;
+        }}
+        .wm-export-meta {{
+            font-size: 11px; color: #94a3b8;
+            font-family: ui-monospace, SF Mono, monospace;
+            letter-spacing: 0.02em;
+        }}
+        /* Botones outlined consistentes con las cards de Última data */
+        .wm-export-btn-host + div [data-testid="stButton"] button,
+        .wm-export-btn-host + div [data-testid="stPopover"] button {{
+            background: #ffffff !important;
+            color: #1e40af !important;
+            border: 1px solid #dbeafe !important;
+            border-radius: 8px !important;
+            font-size: 12px !important;
+            font-weight: 700 !important;
+            letter-spacing: 0.02em !important;
+            padding: 7px 14px !important;
+            min-height: 34px !important;
+            box-shadow: 0 1px 0 rgba(30,64,175,0.04) !important;
+            transition: all 0.15s ease !important;
+        }}
+        .wm-export-btn-host + div [data-testid="stButton"] button:hover,
+        .wm-export-btn-host + div [data-testid="stPopover"] button:hover {{
+            background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%) !important;
+            border-color: #93c5fd !important;
+            color: #1e3a8a !important;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 10px rgba(30,64,175,0.10) !important;
+        }}
+        .wm-export-btn-host {{ display: block; height: 0; overflow: hidden; }}
+        </style>
+        <div class='wm-export-header'>
+            <span class='wm-export-title'>HISTÓRICO DEL ACTIVO</span>
+            <span class='wm-export-meta'>{total} snapshots</span>
+        </div>
+        """,
         unsafe_allow_html=True,
     )
 
     if total == 0:
         st.caption(
-            "_Sin snapshots todavía para exportar. Subí CSVs en Load Data y "
-            "elegí 'Guardar para Live Monitoring' para empezar a construir el histórico._"
+            "_Sin snapshots todavía. Subí CSVs en Load Data → Guardar para "
+            "Live Monitoring._"
         )
         return
 
+    # Marker antes de las columnas de botones — engancha la CSS de hijos
+    st.markdown(
+        '<span class="wm-export-btn-host"></span>',
+        unsafe_allow_html=True,
+    )
     cols = st.columns([1, 1, 4])
 
     # Modo 1 — Descargar ZIP local
@@ -312,12 +357,10 @@ def render_history_export_section(
                         else:
                             st.error("No se pudo subir el ZIP a Supabase.")
 
-    with cols[2]:
-        st.caption(
-            "💡 **Tip**: el cliente recibe un ZIP con todos los snapshots descomprimidos "
-            "como JSON legibles, listos para abrir en cualquier editor o reimportar a "
-            "Watermelon System."
-        )
+    # Ciclo 23.124 — quitamos el caption verboso "Tip: el cliente recibe..."
+    # — no aporta para el analista, distrae visualmente. La info de qué
+    # contiene el ZIP ya está en el popover de "Descargar ZIP".
+    pass  # cols[2] queda vacío como spacer
 
 
 __all__ = ["render_history_export_section"]

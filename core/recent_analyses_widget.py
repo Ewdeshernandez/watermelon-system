@@ -113,70 +113,125 @@ def _format_time_ago(ts_str: str) -> str:
 # =============================================================
 
 def _inject_css_once():
-    if st.session_state.get("_wm_recent_css_injected_v2"):
+    if st.session_state.get("_wm_recent_css_injected_v3"):
         return
-    st.session_state["_wm_recent_css_injected_v2"] = True
+    st.session_state["_wm_recent_css_injected_v3"] = True
     st.markdown(
         """
         <style>
+        /* ── Ciclo 23.124 — Sección "Última data" rediseñada
+           Estilo Linear/Notion/Bently System1: minimalista, tipografía clara,
+           jerarquía visual real. ── */
+
+        /* Section header (Última data + meta count) */
         .wm-recent-header {
-            display: flex; align-items: baseline; gap: 12px;
-            margin: 18px 0 10px 0;
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 12px; margin: 22px 0 12px 0;
         }
         .wm-recent-title {
-            font-size: 16px; font-weight: 800; color: #0f172a;
-            letter-spacing: -0.01em;
+            font-size: 13px; font-weight: 800; color: #0f172a;
+            letter-spacing: 0.06em; text-transform: uppercase;
         }
-        /* Ciclo 23.94 — Cards compactas y refinadas */
+        .wm-recent-title-meta {
+            font-size: 11px; color: #94a3b8;
+            font-family: ui-monospace, SF Mono, "Cascadia Code", monospace;
+            letter-spacing: 0.02em;
+        }
+
+        /* Cards */
         .wm-recent-card {
-            background: white;
+            background: #ffffff;
             border: 1px solid #e5e7eb;
-            border-radius: 10px;
-            padding: 10px 12px;
+            border-radius: 12px;
+            padding: 14px 14px 12px 14px;
             display: flex; flex-direction: column;
-            transition: all 0.15s ease;
+            gap: 0;
+            transition: all 0.18s cubic-bezier(.4,0,.2,1);
+            min-height: 130px;
         }
         .wm-recent-card:hover {
-            border-color: #94a3b8;
-            box-shadow: 0 4px 12px rgba(15,23,42,0.06);
+            border-color: #cbd5e1;
+            box-shadow:
+                0 1px 2px rgba(15,23,42,0.04),
+                0 6px 14px rgba(15,23,42,0.06);
+            transform: translateY(-1px);
         }
         .wm-recent-card.empty {
-            background: #f8fafc;
+            background: #fafbfc;
             border-color: #e2e8f0;
             border-style: dashed;
-            opacity: 0.6;
+            min-height: 130px;
+            justify-content: center;
+            align-items: center;
         }
-        /* Ciclo 23.92 — label + ago en líneas separadas (antes
-           se pegaban con flex en cards angostas) */
+
+        /* Card top row: icon + label · ago timestamp */
+        .wm-recent-toprow {
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 8px;
+        }
         .wm-recent-label {
-            font-size: 13px; font-weight: 800; color: #0f172a;
-            display: block;
-            margin-bottom: 2px;
+            font-size: 13px; font-weight: 700; color: #0f172a;
+            letter-spacing: -0.005em;
+            display: inline-flex; align-items: center; gap: 6px;
+            line-height: 1.2;
         }
         .wm-recent-ago {
-            font-size: 11px; color: #64748b;
-            font-family: ui-monospace, SF Mono, monospace;
-            display: block;
-            margin-bottom: 8px;
+            font-size: 10.5px; color: #94a3b8;
+            font-family: ui-monospace, SF Mono, "Cascadia Code", monospace;
+            letter-spacing: 0.01em;
+            white-space: nowrap;
         }
+
+        /* SVG visual */
         .wm-recent-visual {
             display: flex; align-items: center; justify-content: center;
-            margin: 2px 0 4px 0;
-            opacity: 0.85;
+            margin: 12px 0 8px 0;
+            opacity: 0.78;
+            min-height: 36px;
         }
         .wm-recent-meta {
-            font-size: 11px; color: #64748b;
+            font-size: 10.5px; color: #64748b;
             text-align: center;
             margin-bottom: 4px;
         }
         .wm-recent-empty-msg {
-            font-size: 11px; color: #94a3b8;
+            font-size: 11.5px; color: #94a3b8;
             font-style: italic; text-align: center;
-            padding: 20px 8px;
         }
-        .wm-recent-sev-Normal  { color: #15803d; font-weight: 700; }
-        .wm-recent-sev-Alarma  { color: #b45309; font-weight: 700; }
-        .wm-recent-sev-Danger  { color: #b91c1c; font-weight: 700; }
+
+        /* Severity chips for tabular */
+        .wm-recent-sev-Normal  { color: #15803d; font-weight: 700; font-size: 10.5px; }
+        .wm-recent-sev-Alarma  { color: #b45309; font-weight: 700; font-size: 10.5px; }
+        .wm-recent-sev-Danger  { color: #b91c1c; font-weight: 700; font-size: 10.5px; }
+
+        /* ── Botones "Abrir" — estilo discreto outlined ── */
+        /* Aplica al st.button con type="secondary" dentro del recent block */
+        .wm-recent-btn-host + div [data-testid="stButton"] button {
+            background: #ffffff !important;
+            color: #1e40af !important;
+            border: 1px solid #dbeafe !important;
+            border-radius: 8px !important;
+            font-size: 12px !important;
+            font-weight: 700 !important;
+            letter-spacing: 0.02em !important;
+            padding: 6px 14px !important;
+            min-height: 32px !important;
+            height: 32px !important;
+            box-shadow: 0 1px 0 rgba(30,64,175,0.04) !important;
+            transition: all 0.15s ease !important;
+        }
+        .wm-recent-btn-host + div [data-testid="stButton"] button:hover {
+            background: linear-gradient(180deg, #f8fbff 0%, #eef6ff 100%) !important;
+            border-color: #93c5fd !important;
+            color: #1e3a8a !important;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 10px rgba(30,64,175,0.10) !important;
+        }
+        .wm-recent-btn-host + div [data-testid="stButton"] button p {
+            color: inherit !important;
+        }
+        .wm-recent-btn-host { display: block; height: 0; overflow: hidden; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -381,15 +436,7 @@ def render_recent_analyses_section(instance_id: str) -> None:
     _inject_css_once()
     import importlib
 
-    # Header de sección — Ciclo 23.89: simplificado, menos verboso.
-    st.markdown(
-        f"<div class='wm-recent-header'>"
-        f"<span class='wm-recent-title'>📊 Última data</span>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-
-    # Fetch metadata de los 4 tipos
+    # Fetch metadata de los 4 tipos PRIMERO para sacar el conteo total
     metadata_by_type: Dict[str, Optional[Dict[str, Any]]] = {}
     for atype in ANALYSIS_TYPES:
         try:
@@ -399,6 +446,18 @@ def render_recent_analyses_section(instance_id: str) -> None:
             metadata_by_type[atype["key"]] = snaps[0] if snaps else None
         except Exception:
             metadata_by_type[atype["key"]] = None
+
+    # Header con conteo discreto a la derecha
+    n_with_data = sum(1 for v in metadata_by_type.values() if v is not None)
+    st.markdown(
+        f"<div class='wm-recent-header'>"
+        f"<span class='wm-recent-title'>ÚLTIMA DATA</span>"
+        f"<span class='wm-recent-title-meta'>"
+        f"{n_with_data} / {len(ANALYSIS_TYPES)} disponibles"
+        f"</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
 
     # Render cards en 4 columnas
     cols = st.columns(4)
@@ -414,10 +473,11 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
     if meta is None:
         st.markdown(
             f"<div class='wm-recent-card empty'>"
-            f"<div class='wm-recent-row'>"
-            f"<span class='wm-recent-label'>{atype['icon']} {atype['label']}</span>"
-            f"</div>"
-            f"<div class='wm-recent-empty-msg'>Sin snapshots todavía</div>"
+            f"  <div class='wm-recent-toprow'>"
+            f"    <span class='wm-recent-label'>{atype['icon']} {atype['label']}</span>"
+            f"    <span class='wm-recent-ago'>—</span>"
+            f"  </div>"
+            f"  <div class='wm-recent-empty-msg'>Sin snapshots todavía</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
@@ -437,17 +497,19 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
 
     st.markdown(
         f"<div class='wm-recent-card'>"
-        f"<span class='wm-recent-label'>{atype['icon']} {atype['label']}</span>"
-        f"<span class='wm-recent-ago'>{ago}</span>"
-        f"<div class='wm-recent-visual'>{svg}</div>"
-        f"{f'<div class=wm-recent-meta>{meta_html}</div>' if meta_html else ''}"
+        f"  <div class='wm-recent-toprow'>"
+        f"    <span class='wm-recent-label'>{atype['icon']} {atype['label']}</span>"
+        f"    <span class='wm-recent-ago'>{ago}</span>"
+        f"  </div>"
+        f"  <div class='wm-recent-visual'>{svg}</div>"
+        f"  {f'<div class=wm-recent-meta>{meta_html}</div>' if meta_html else ''}"
         f"</div>",
         unsafe_allow_html=True,
     )
 
-    # Ciclo 23.90/23.107 — Waveform & Spectrum abren módulo dedicado vía
-    # st.button + st.switch_page (switch_page mantiene la sesión, `<a href>`
-    # con session auth no funciona en Streamlit Cloud — siempre va a login).
+    # Ciclo 23.90/23.107/23.124 — Waveform & Spectrum & Orbit & Tabular abren
+    # módulo dedicado vía st.button + st.switch_page (switch_page mantiene
+    # la sesión; `<a href>` con session auth no funciona en Streamlit Cloud).
     _REDIRECT_TARGETS = {
         "waveform": "pages/02_Time_Waveforms.py",
         "spectrum": "pages/03_Spectrum.py",
@@ -456,11 +518,16 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
     }
     if atype["key"] in _REDIRECT_TARGETS:
         snap_id = meta.get("snapshot_id", "")
+        # Span marker para que la CSS enganche el siguiente stButton
+        st.markdown(
+            '<span class="wm-recent-btn-host"></span>',
+            unsafe_allow_html=True,
+        )
         if st.button(
-            f"📊 Abrir",
+            "Abrir  →",
             key=f"wm_open_{atype['key']}_{snap_id}",
             use_container_width=True,
-            type="primary",
+            type="secondary",
         ):
             # Pre-set en session_state — la page lo lee al cargar
             st.session_state["_pending_snapshot_load"] = {
