@@ -1927,19 +1927,22 @@ except Exception as _hist_e:
     st.caption(f"_(Histórico no disponible: {_hist_e})_")
 
 
-helper_card(
-    title="Autoanálisis Tabular List",
-    subtitle=text_diag["headline"],
-    chips=[
-        (f"Semáforo: {text_diag['status']}", text_diag["color"]),
-        (f"Normal: {text_diag['normal_count']}", None),
-        (f"Alarm: {text_diag['alarm_count']}", None),
-        (f"Danger: {text_diag['danger_count']}", None),
-        (f"Firma dominante: {text_diag['primary_pattern']}", None),
-    ],
-)
-
+# Ciclo 23.121 — Helper card "Autoanálisis Tabular List" + narrative box:
+# en cliente NO se muestran (redundante con KPI cards del Machine Map vista
+# rápida + la columna STATUS de la tabla; además usa lenguaje técnico de
+# analista: Semáforo, ATENCIÓN, "firma tipo desbalance").
 if not st.session_state.get("_loaded_from_snapshot"):
+    helper_card(
+        title="Autoanálisis Tabular List",
+        subtitle=text_diag["headline"],
+        chips=[
+            (f"Semáforo: {text_diag['status']}", text_diag["color"]),
+            (f"Normal: {text_diag['normal_count']}", None),
+            (f"Alarm: {text_diag['alarm_count']}", None),
+            (f"Danger: {text_diag['danger_count']}", None),
+            (f"Firma dominante: {text_diag['primary_pattern']}", None),
+        ],
+    )
     render_tabular_narrative_box(text_diag["headline"], text_diag["narrative"])
 
 st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
