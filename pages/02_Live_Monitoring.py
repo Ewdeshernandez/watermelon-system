@@ -582,8 +582,18 @@ def _build_library_sensors(
             f"alarm={sev['alarm']:.2f} / danger={sev['danger']:.2f} ({sev['source']})"
         )
         # Display label sin underscore (Ciclo 23.18) — '2Y_A' → '2YA'.
-        # NO afecta CSV matches ni el sensor_lookup, que siguen usando lbl original.
-        display_label = lbl.replace("_", "")
+        # Ciclo 23.139 — quitar también " (C)" / " (c)" del display porque
+        # los labels largos tipo "1VT6831 (C) CRF" tapan el cuerpo del
+        # equipo en el SVG. El "(C)" significa Casing pero ya queda
+        # implícito en el sufijo CRF/TRF. NO afecta CSV matches ni el
+        # sensor_lookup, que siguen usando lbl original.
+        display_label = (
+            lbl.replace("_", "")
+               .replace(" (C) ", " ")
+               .replace(" (c) ", " ")
+               .replace("(C) ", "")
+               .replace("(c) ", "")
+        ).strip()
 
         # Sparkline values (Ciclo 23.23) — extraer last N readings de spark_data
         spark_values: Optional[List[float]] = None

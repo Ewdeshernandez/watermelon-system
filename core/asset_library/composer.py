@@ -494,7 +494,10 @@ def compose_train(
         elif n_total >= 3:
             idx = seen.get(key, 0)
             seen[key] = idx + 1
-            spread = 55  # px de separación entre dots cuando hay 3+
+            # Ciclo 23.139 — spread 55 era demasiado: primer sensor caía
+            # fuera del viewBox del icono. 32 mantiene los 3 dots dentro
+            # del shape para iconos típicos (~180-250px wide del body).
+            spread = 32
             offset_x = (idx - (n_total - 1) / 2) * spread
             cx = cx + offset_x
             text_above = (idx % 2 == 0)  # zig-zag vertical
