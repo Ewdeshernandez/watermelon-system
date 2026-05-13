@@ -141,6 +141,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOGO_PATH = PROJECT_ROOT / "assets" / "watermelon_logo.png"
 
 
+class _SkipTrainDiagram(Exception):
+    """Sentinel para skipear el render del diagrama del tren en modo cliente
+    sin que el except Exception genérico lo capture como error."""
+    pass
+
+
 def apply_page_style() -> None:
     st.markdown(
         """
@@ -1402,7 +1408,15 @@ if _active_instance.sensors:
                     _mini_df["Status"].astype(str),
                 )
             )
+            # Ciclo 23.122 — Cliente: skipea el diagrama del tren de máquinas
+            # + link a "Ver Machine Map completo". Las KPI cards de arriba ya
+            # son suficientes; el diagrama tarda en renderizar y no aporta
+            # info adicional para el cliente.
+            _skip_train_diag_client = bool(st.session_state.get("_loaded_from_snapshot"))
             try:
+                # Cliente: skipea TODO el bloque del diagrama silenciosamente
+                if _skip_train_diag_client:
+                    raise _SkipTrainDiagram()
                 _drv_lbl = " ".join(p for p in [
                     _active_instance.driver_manufacturer,
                     _active_instance.driver_model,
@@ -1483,19 +1497,23 @@ if _active_instance.sensors:
                     )
                     if _mini_png:
                         st.image(_mini_png, use_container_width=True)
+            except _SkipTrainDiagram:
+                pass  # cliente: skipea silenciosamente
             except Exception as _mini_e:
                 st.caption(f"_(no se pudo renderizar el mini-diagrama: {_mini_e})_")
 
-            _link_cols = st.columns([3, 1])
-            with _link_cols[1]:
-                try:
-                    st.page_link(
-                        "pages/01b_Machine_Map.py",
-                        label="Ver Machine Map completo →",
-                        icon="🗺️",
-                    )
-                except Exception:
-                    st.caption("Machine Map completo disponible en el menú lateral.")
+            # Ver Machine Map completo — solo para analista
+            if not _skip_train_diag_client:
+                _link_cols = st.columns([3, 1])
+                with _link_cols[1]:
+                    try:
+                        st.page_link(
+                            "pages/01b_Machine_Map.py",
+                            label="Ver Machine Map completo →",
+                            icon="🗺️",
+                        )
+                    except Exception:
+                        st.caption("Machine Map completo disponible en el menú lateral.")
     except Exception as _mini_outer_e:
         # No queremos que un fallo del mini-map rompa el Tabular.
         st.caption(f"_(mini Machine Map no disponible: {_mini_outer_e})_")
