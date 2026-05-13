@@ -1938,11 +1938,20 @@ def render_asset_header(
         "rotating_general":   ("#f1f5f9", "#475569"),
     }.get(asset_class, ("#f1f5f9", "#475569"))
 
-    # Status overall — derivado del severity_summary
+    # Status overall — derivado del severity_summary + presencia de data
     summary = severity_summary or {}
     n_danger = summary.get("Danger", 0)
     n_alarm = summary.get("Alarma", 0)
-    if n_danger > 0:
+    # Ciclo 23.132 — Si NO hay latest readings → estado "SIN DATOS"
+    # (no mostrar "OPERACIÓN NORMAL" en verde cuando realmente no hay
+    # señal del activo — eso es engañoso para el cliente).
+    if not latest:
+        status_label = "SIN DATOS"
+        status_fg = "#475569"
+        status_bg = "linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%)"
+        status_border = "#94a3b8"
+        status_icon = "○"
+    elif n_danger > 0:
         status_label = "CRÍTICA"
         status_fg = "#7f1d1d"
         status_bg = "linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)"
