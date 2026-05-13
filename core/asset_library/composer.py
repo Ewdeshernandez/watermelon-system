@@ -476,7 +476,14 @@ def compose_train(
         #   N=1 → tal cual (texto arriba)
         #   N=2 → primer sensor texto ARRIBA, segundo texto ABAJO,
         #         ambos compartiendo el mismo dot (sin offset horizontal).
-        #   N>=3 → distribución horizontal con texto arriba (cascada).
+        #   N>=3 → Ciclo 23.138: distribución horizontal CON ALTERNANCIA
+        #         vertical de los labels para evitar overlap. Labels largos
+        #         ("1VT6831 (C) CRF" + "1YV" + "1YA") con spread 22px se
+        #         amontonaban. Ahora spread=55px + alternar arriba/abajo:
+        #         idx 0 (izq) → arriba
+        #         idx 1 (mid) → abajo
+        #         idx 2 (der) → arriba
+        #         idx 3       → abajo, etc.
         key = (side, anchor_name)
         n_total = counts[key]
         text_above = True
@@ -487,9 +494,10 @@ def compose_train(
         elif n_total >= 3:
             idx = seen.get(key, 0)
             seen[key] = idx + 1
-            spread = 22  # px de separación entre dots cuando hay 3+
+            spread = 55  # px de separación entre dots cuando hay 3+
             offset_x = (idx - (n_total - 1) / 2) * spread
             cx = cx + offset_x
+            text_above = (idx % 2 == 0)  # zig-zag vertical
 
         dots_svg_parts.append(
             _render_sensor_dot(
