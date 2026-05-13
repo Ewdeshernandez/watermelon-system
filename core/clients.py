@@ -242,6 +242,50 @@ def get_client_for_email(email: str) -> Optional[Client]:
     return None
 
 
+def assign_client_to_email(client_id: str, email: str) -> bool:
+    """Agrega `email` a owner_emails del cliente `client_id` en clients.json.
+
+    Returns True si se hizo el cambio (escrito y registry refrescado).
+    Si el email ya estaba presente o el client_id no existe, devuelve False.
+    """
+    target_id = (client_id or "").strip()
+    target_email = (email or "").strip().lower()
+    if not target_id or not target_email:
+        return False
+
+    if not REGISTRY_PATH.exists():
+        return False
+    try:
+        with REGISTRY_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return False
+
+    clients = data.get("clients") or []
+    touched = False
+    for c in clients:
+        if str(c.get("id", "")).strip() == target_id:
+            existing = [str(e).strip().lower() for e in (c.get("owner_emails") or [])]
+            if target_email in existing:
+                return False  # ya estaba — no-op
+            c["owner_emails"] = (c.get("owner_emails") or []) + [target_email]
+            touched = True
+            break
+
+    if not touched:
+        return False
+
+    try:
+        with REGISTRY_PATH.open("w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+    except OSError:
+        return False
+
+    reload_registry()
+    return True
+
+
 def filter_instances_for_email(instances: List[Dict[str, Any]],
                                 email: str) -> List[Dict[str, Any]]:
     """Filtra una lista de instances dict por los asset_tags del cliente

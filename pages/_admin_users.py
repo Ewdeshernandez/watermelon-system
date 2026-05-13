@@ -349,6 +349,42 @@ with st.expander("Abrir formulario de creación", expanded=False):
                 key="new_user_pwd",
                 help="Esta password temporal se la entregás al usuario. Él podrá cambiarla en su próximo login.",
             )
+
+        # Ciclo 23.131 — Si role=client, mostrar dropdown para asignar a
+        # un cliente del registry (data/clients.json). El email se agrega
+        # automáticamente al owner_emails de ese cliente.
+        _client_target_id: str = ""
+        if new_role == "client":
+            try:
+                from core.clients import list_clients
+                _all_clients = list_clients()
+                _client_options = [(c.id, c.display_name) for c in _all_clients]
+                if _client_options:
+                    _opt_labels = ["(no asignar todavía)"] + [
+                        f"{disp}  ·  {cid}" for cid, disp in _client_options
+                    ]
+                    _opt_ids = [""] + [cid for cid, _ in _client_options]
+                    _sel = st.selectbox(
+                        "Asignar al cliente",
+                        options=range(len(_opt_labels)),
+                        format_func=lambda i: _opt_labels[i],
+                        index=0,
+                        key="new_user_client_target",
+                        help=(
+                            "Selecciona el cliente del registry al que pertenece "
+                            "este usuario. El email se agregará automáticamente al "
+                            "owner_emails de ese cliente, y así Live Monitoring + "
+                            "Reports filtrarán por sus asset_tags."
+                        ),
+                    )
+                    _client_target_id = _opt_ids[_sel]
+                else:
+                    st.caption(
+                        "_(no hay clientes en el registry — agregá uno en data/clients.json)_"
+                    )
+            except Exception as _e:
+                st.caption(f"_(error cargando clientes: {_e})_")
+
         submitted = st.form_submit_button("Crear usuario", type="primary",
                                            use_container_width=True)
 
@@ -363,10 +399,33 @@ with st.expander("Abrir formulario de creación", expanded=False):
                 full_name=new_full_name, role=new_role,
             )
             if result.get("ok"):
+                # Si role=client + asignación elegida, agregar email a
+                # owner_emails del cliente seleccionado en clients.json
+                _assigned_msg = ""
+                if new_role == "client" and _client_target_id:
+                    try:
+                        from core.clients import assign_client_to_email
+                        if assign_client_to_email(_client_target_id, new_email):
+                            _assigned_msg = (
+                                f"\n\n✓ Asignado al cliente "
+                                f"**{_client_target_id}** — el usuario verá "
+                                "solo los activos de ese cliente en Live "
+                                "Monitoring."
+                            )
+                        else:
+                            _assigned_msg = (
+                                f"\n\n⚠ No se pudo asignar al cliente "
+                                f"`{_client_target_id}` automáticamente — "
+                                "editá `data/clients.json` manual y agregá "
+                                f"`{new_email}` a su `owner_emails`."
+                            )
+                    except Exception as _ae:
+                        _assigned_msg = f"\n\n⚠ Error asignando cliente: {_ae}"
                 st.success(
                     f"✓ Usuario **{new_email}** creado como **{new_role}**.\n\n"
                     f"**Password temporal: `{new_pwd}`** "
                     "→ entregale esta password al usuario para su primer login."
+                    + _assigned_msg
                 )
                 # Limpiar cache para que la lista se refresque + nueva password sugerida
                 st.session_state.pop("_admin_users_cache", None)

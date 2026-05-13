@@ -99,11 +99,14 @@ except Exception:
     _user_tz = ""
 
 _greet = get_personalized_greeting(_full_name, tz_name=_user_tz)
-_fleet = compute_fleet_status()
-_health = get_system_health()
 # Ciclo 17.15 — activity feed filtrable por usuario
 _my_email = (_user.get("email", "") or "").strip().lower()
 _my_role  = (_user.get("role", "")  or "").strip().lower()
+
+# Ciclo 23.131 — Scoping: si role=client, pasar email para filtrar
+# fleet por asset_tags del cliente registrado en clients.json.
+_fleet = compute_fleet_status(client_email=_my_email if _my_role == "client" else "")
+_health = get_system_health()
 
 # Toggle para admin/specialist: "Mi actividad" vs "Toda la actividad"
 # Default: "toda" para admin (ven movimiento del equipo entero), "mía"
@@ -942,18 +945,25 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Ciclo 17.32 — Diagnostics removido. Reemplazado por AI Assistant
-# como punto de entrada al stack de inteligencia conversacional sobre
-# el archivo histórico.
-qa_cols = st.columns(6)
-_QUICK = [
-    ("Cargar CSV",       "pages/01_Load_Data.py",          "page"),
-    ("Trends",           "pages/04_Trends.py",             "page"),
-    ("Machinery Lib",    "pages/00_Machinery_Library.py",  "page"),
-    ("AI Assistant",     "pages/_ai_assistant.py",         "page"),
-    ("Reports",          "pages/16_Reports.py",            "page"),
-    ("Briefing del día", "_briefing_action",               "briefing"),
-]
+# Ciclo 17.32 — Diagnostics removido. Reemplazado por AI Assistant.
+# Ciclo 23.131 — Acciones rápidas filtradas por role. El cliente solo
+# debe ver Live Monitoring + Reports (las otras son IP interna o
+# herramientas de analista).
+if _my_role == "client":
+    _QUICK = [
+        ("Live Monitoring", "pages/02_Live_Monitoring.py", "page"),
+        ("Reports",         "pages/16_Reports.py",         "page"),
+    ]
+else:
+    _QUICK = [
+        ("Cargar CSV",       "pages/01_Load_Data.py",          "page"),
+        ("Trends",           "pages/04_Trends.py",             "page"),
+        ("Machinery Lib",    "pages/00_Machinery_Library.py",  "page"),
+        ("AI Assistant",     "pages/_ai_assistant.py",         "page"),
+        ("Reports",          "pages/16_Reports.py",            "page"),
+        ("Briefing del día", "_briefing_action",               "briefing"),
+    ]
+qa_cols = st.columns(len(_QUICK))
 for col, (label, target, kind) in zip(qa_cols, _QUICK):
     with col:
         if st.button(label, use_container_width=True, key=f"qa_{target}"):

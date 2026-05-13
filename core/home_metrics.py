@@ -241,8 +241,14 @@ def _humanize_age(iso_ts: str, now: Optional[datetime] = None) -> str:
     return f"hace {days // 365} años"
 
 
-def compute_fleet_status() -> Dict[str, Any]:
+def compute_fleet_status(client_email: str = "") -> Dict[str, Any]:
     """Computa el estado completo de la flota.
+
+    Args:
+        client_email: si se provee y pertenece a un cliente registrado
+            en clients.json (role=client), filtra las instances por los
+            asset_tags configurados para ese cliente. Para admin/specialist
+            dejar en blanco para ver toda la flota.
 
     Returns:
         {
@@ -257,6 +263,15 @@ def compute_fleet_status() -> Dict[str, Any]:
         return {"total": 0, "by_severity": {}, "instances": []}
 
     summaries = list_instances() or []
+
+    # Ciclo 23.131 — Scoping por client_email cuando el caller es role=client.
+    # Filtra summaries por asset_tags del cliente registrado en data/clients.json.
+    if client_email:
+        try:
+            from core.clients import filter_instances_for_email
+            summaries = filter_instances_for_email(summaries, client_email)
+        except Exception:
+            pass
     healths: List[InstanceHealth] = []
     counts = {"healthy": 0, "warning": 0, "danger": 0, "unknown": 0}
 

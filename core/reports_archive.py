@@ -552,7 +552,8 @@ def _can_view(viewer_email: str, viewer_role: str, sidecar: Dict[str, Any]) -> b
     """Reglas de visibilidad por role:
        admin       → TODO
        specialist  → suyos + de otros @sigasas.com
-       client      → solo shared_with_client=True
+       client      → shared_with_client=True  OR  match_strings/asset_tags
+                     coinciden con el cliente al que pertenece el viewer.
        (otros)     → solo suyos
     """
     role = (viewer_role or "").strip().lower()
@@ -567,7 +568,43 @@ def _can_view(viewer_email: str, viewer_role: str, sidecar: Dict[str, Any]) -> b
             return True
         return owner.endswith("@sigasas.com")
     if role == "client":
-        return bool(sidecar.get("shared_with_client"))
+        # Ciclo 23.131 — Visibilidad ampliada:
+        # (a) flag explícito shared_with_client, O
+        # (b) el reporte matchea con los match_strings/asset_tags del
+        #     cliente al que pertenece el viewer (auto-share por scope).
+        if bool(sidecar.get("shared_with_client")):
+            return True
+        try:
+            from core.clients import get_client_for_email
+            c = get_client_for_email(viewer)
+            if c is None:
+                return False
+            rm = (sidecar.get("report_meta") or {})
+            # Texto donde buscamos match: client / instance_tag /
+            # asset_class / train_description / asset
+            haystacks = [
+                str(rm.get("client", "")),
+                str(rm.get("instance_tag", "")),
+                str(rm.get("asset", "")),
+                str(rm.get("asset_class", "")),
+                str(rm.get("train_description", "")),
+                str(sidecar.get("client", "")),
+                str(sidecar.get("asset", "")),
+            ]
+            haystack_lc = " ".join(haystacks).lower()
+            # Match por match_strings (substring case-insensitive)
+            for s in c.match_strings:
+                s_lc = str(s).strip().lower()
+                if s_lc and s_lc in haystack_lc:
+                    return True
+            # Match por asset_tags (TES1, TES3, etc.)
+            for t in c.asset_tags:
+                t_lc = str(t).strip().lower()
+                if t_lc and t_lc in haystack_lc:
+                    return True
+            return False
+        except Exception:
+            return False
     # Default conservador
     return owner == viewer
 
