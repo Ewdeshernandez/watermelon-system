@@ -47,15 +47,22 @@ import argparse
 import os
 import random
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-# Ciclo 23.134 — fix shadow del package `supabase` por la carpeta ./supabase
-# en la raíz del repo (que contiene SQL migrations). Si corremos desde la
-# raíz, sys.path[0]='' (cwd) y Python encuentra ./supabase ANTES que el
-# package real. Eliminamos esa entrada del sys.path antes del import.
-_CWD_LIKE = {"", os.getcwd(), str(Path(__file__).resolve().parent.parent)}
-sys.path = [p for p in sys.path if p not in _CWD_LIKE]
+# Ciclo 23.135 — Workaround robusto: si existe ./supabase/ en el cwd o en
+# el script-dir, Python lo confunde con el package real (supabase==2.29.0).
+# Hacemos chdir a una carpeta temporal ANTES de cualquier import de supabase
+# para que Python no encuentre la carpeta sombreadora. Restauramos el cwd
+# después del import.
+_ORIGINAL_CWD = os.getcwd()
+_SHADOW_DIR = Path(_ORIGINAL_CWD) / "supabase"
+if _SHADOW_DIR.exists():
+    os.chdir(tempfile.gettempdir())
+    # También limpiar el script-dir si está en sys.path[0]
+    _script_dir = str(Path(__file__).resolve().parent)
+    sys.path = [p for p in sys.path if p != _script_dir and p != _ORIGINAL_CWD]
 
 
 # =============================================================
@@ -121,8 +128,16 @@ def get_client():
         sys.exit(1)
 
     try:
-        from supabase import create_client
-        return create_client(url, key)
+        from supabase import create_client  # noqa
+        client = create_client(url, key)
+        # Restaurar cwd después del import (ver header del script — workaround
+        # del shadow). Cualquier path relativo en código posterior usa el cwd
+        # original del usuario.
+        try:
+            os.chdir(_ORIGINAL_CWD)
+        except Exception:
+            pass
+        return client
     except Exception as e:
         print(f"ERROR creando Supabase client: {e}", file=sys.stderr)
         sys.exit(1)

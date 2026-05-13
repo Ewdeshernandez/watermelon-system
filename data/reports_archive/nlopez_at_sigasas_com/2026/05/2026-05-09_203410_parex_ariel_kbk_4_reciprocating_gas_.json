@@ -1,0 +1,27 @@
+{
+  "archive_id": "nlopez_at_sigasas_com/2026/05/2026-05-09_203410_parex_ariel_kbk_4_reciprocating_gas_",
+  "owner_email": "nlopez@sigasas.com",
+  "owner_slug": "nlopez_at_sigasas_com",
+  "archived_at": "2026-05-09T20:34:10",
+  "year": "2026",
+  "month": "05",
+  "size_bytes": 628137,
+  "size_human": "613.4 KB",
+  "shared_with_client": false,
+  "extra_notes": "",
+  "report_meta": {
+    "client": "Parex",
+    "site": "",
+    "asset_class": "Ariel KBK/4 — Reciprocating gas compressor",
+    "asset_model": "HYUNDAI ELECTRIC HNP2 503-68E — Induction Motor ",
+    "train_description": "Motor de inducción HYUNDAI HNP2 503-68E acoplado a compresor reciprocante ARIEL CORPORATION KBK/4",
+    "instance_tag": "",
+    "instance_id": "",
+    "report_date": "2026-05-09",
+    "consecutive": "SIGA-REP-TEC-WM-C200C-006",
+    "executive_summary": "",
+    "executive_severity": "",
+    "prepared_by": "Natalia A. López C.",
+    "reviewed_by": "Ewdes Hernández"
+  }
+}
