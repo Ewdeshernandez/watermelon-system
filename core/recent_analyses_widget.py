@@ -35,8 +35,8 @@ import streamlit as st
 ANALYSIS_TYPES = [
     {
         "key": "waveform",
-        "icon": "📈",
-        "label": "Forma de onda",
+        "icon": "",   # Ciclo 23.126 — sin emoji, el SVG visual ya identifica el tipo
+        "label": "Forma de Onda",
         "module": "core.waveform_history",
         "list_fn": "list_waveform_snapshots",
         "load_fn": "load_waveform_snapshot",
@@ -45,7 +45,7 @@ ANALYSIS_TYPES = [
     },
     {
         "key": "spectrum",
-        "icon": "🔍",
+        "icon": "",
         "label": "Espectro",
         "module": "core.spectrum_history",
         "list_fn": "list_spectrum_snapshots",
@@ -55,7 +55,7 @@ ANALYSIS_TYPES = [
     },
     {
         "key": "orbit",
-        "icon": "🌀",
+        "icon": "",
         "label": "Órbita",
         "module": "core.orbit_history",
         "list_fn": "list_orbit_snapshots",
@@ -65,8 +65,8 @@ ANALYSIS_TYPES = [
     },
     {
         "key": "tabular",
-        "icon": "📋",
-        "label": "Tabular",
+        "icon": "",
+        "label": "Tabular List",
         "module": "core.tabular_history",
         "list_fn": "list_tabular_snapshots",
         "load_fn": "load_tabular_snapshot",
@@ -165,22 +165,15 @@ def _inject_css_once():
             align-items: center;
         }
 
-        /* Card top row: icon + label · ago timestamp */
-        .wm-recent-toprow {
-            display: flex; align-items: center; justify-content: space-between;
-            gap: 8px;
+        /* Ciclo 23.126 — Label row: solo el label, centrado, sin icon/ago */
+        .wm-recent-label-row {
+            display: flex; align-items: center; justify-content: center;
         }
         .wm-recent-label {
-            font-size: 13px; font-weight: 700; color: #0f172a;
+            font-size: 13.5px; font-weight: 700; color: #0f172a;
             letter-spacing: -0.005em;
-            display: inline-flex; align-items: center; gap: 6px;
+            text-align: center;
             line-height: 1.2;
-        }
-        .wm-recent-ago {
-            font-size: 10.5px; color: #94a3b8;
-            font-family: ui-monospace, SF Mono, "Cascadia Code", monospace;
-            letter-spacing: 0.01em;
-            white-space: nowrap;
         }
 
         /* SVG visual */
@@ -447,17 +440,8 @@ def render_recent_analyses_section(instance_id: str) -> None:
         except Exception:
             metadata_by_type[atype["key"]] = None
 
-    # Header con conteo discreto a la derecha
-    n_with_data = sum(1 for v in metadata_by_type.values() if v is not None)
-    st.markdown(
-        f"<div class='wm-recent-header'>"
-        f"<span class='wm-recent-title'>ÚLTIMA DATA</span>"
-        f"<span class='wm-recent-title-meta'>"
-        f"{n_with_data} / {len(ANALYSIS_TYPES)} disponibles"
-        f"</span>"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+    # Ciclo 23.126 — Sin header "ÚLTIMA DATA". Los labels de cada card
+    # son auto-descriptivos. Menos chrome, más data.
 
     # Render cards en 4 columnas
     cols = st.columns(4)
@@ -473,9 +457,8 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
     if meta is None:
         st.markdown(
             f"<div class='wm-recent-card empty'>"
-            f"  <div class='wm-recent-toprow'>"
-            f"    <span class='wm-recent-label'>{atype['icon']} {atype['label']}</span>"
-            f"    <span class='wm-recent-ago'>—</span>"
+            f"  <div class='wm-recent-label-row'>"
+            f"    <span class='wm-recent-label'>{atype['label']}</span>"
             f"  </div>"
             f"  <div class='wm-recent-empty-msg'>Sin snapshots todavía</div>"
             f"</div>",
@@ -497,9 +480,8 @@ def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance
 
     st.markdown(
         f"<div class='wm-recent-card'>"
-        f"  <div class='wm-recent-toprow'>"
-        f"    <span class='wm-recent-label'>{atype['icon']} {atype['label']}</span>"
-        f"    <span class='wm-recent-ago'>{ago}</span>"
+        f"  <div class='wm-recent-label-row'>"
+        f"    <span class='wm-recent-label'>{atype['label']}</span>"
         f"  </div>"
         f"  <div class='wm-recent-visual'>{svg}</div>"
         f"  {f'<div class=wm-recent-meta>{meta_html}</div>' if meta_html else ''}"
