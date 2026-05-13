@@ -2927,21 +2927,10 @@ def main() -> None:
 
     latest = _cached_latest_for_instance(instance_id)
 
-    # Ciclo 23.96 — Retry inline si el primer query devuelve []. Cubre
-    # el caso donde el pre-warm no terminó el cold start a tiempo.
-    # 2 intentos extra con 0.7s entre cada uno = max 1.4s antes de
-    # caer al cache anti-flicker o al warning.
-    if not latest:
-        import time
-        for _retry_n in range(2):
-            time.sleep(0.7)
-            # En retry usamos la versión sin cache para forzar fresh fetch
-            latest = latest_for_instance(instance_id)
-            if latest:
-                # Refresh el cache con el resultado bueno
-                _cached_latest_for_instance.clear()
-                latest = _cached_latest_for_instance(instance_id)
-                break
+    # Ciclo 23.132 — Eliminado retry loop con time.sleep(0.7) ×2 que
+    # bloqueaba 1.4s adicionales. El pre-warm + cache TTL 15s es suficiente
+    # para evitar empty cold-start hits. Si el query inicial devuelve []
+    # caemos al empty state friendly abajo (sin bloquear el render).
 
     # Anti-flicker cache (Ciclo 23.60, hardened 23.71) — Supabase REST a
     # veces devuelve [] por timeouts transitorios o reconexión. Si tenemos
@@ -2978,51 +2967,43 @@ def main() -> None:
             cache_age = 0.0
 
     if not latest:
-        # Ciclo 23.96 — Mensaje friendly para el cliente (no debug técnico).
-        # Si después de pre-warm + 2 retries + cache check sigue vacío,
-        # mostrar un estado de carga elegante con retry button.
+        # Ciclo 23.132 — Sin live readings disponibles. Render INMEDIATO
+        # de la página con un empty state amigable + cards de snapshots
+        # históricos al final. NO bloquear con time.sleep + st.rerun loop
+        # (eso causaba 3-6s de "Conectando..." que dañaba la credibilidad).
+        # El collector activo subirá lecturas — el usuario refresca manual.
         render_asset_header(instance_obj, instance_id)
-        retry_count = st.session_state.get(f"_wm_load_retry_{instance_id}", 0)
-        if retry_count < 3:
-            st.session_state[f"_wm_load_retry_{instance_id}"] = retry_count + 1
-            st.markdown(
-                "<div style='background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%);"
-                "border:1.5px solid #93c5fd;border-radius:12px;padding:20px 24px;"
-                "margin:18px 0;display:flex;align-items:center;gap:14px;'>"
-                "<div style='font-size:24px;'>⏳</div>"
-                "<div>"
-                "<div style='font-size:15px;font-weight:700;color:#1e3a8a;'>"
-                "Conectando con base de datos...</div>"
-                "<div style='font-size:12px;color:#475569;margin-top:4px;'>"
-                "Cargando lecturas en tiempo real del activo. Espere un momento.</div>"
-                "</div>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-            import time
-            time.sleep(1.0)
-            st.rerun()
-        else:
-            # Después de N retries sin éxito, sí mostrar el warning con info técnica
-            st.markdown(
-                "<div style='background:linear-gradient(135deg,#fef9c3 0%,#fde68a 100%);"
-                "border:1.5px solid #fbbf24;border-radius:12px;padding:20px 24px;"
-                "margin:18px 0;'>"
-                "<div style='font-size:15px;font-weight:700;color:#92400e;"
-                "margin-bottom:8px;'>"
-                "⚠ No se pudo conectar con los sensores en este momento</div>"
-                "<div style='font-size:12px;color:#78350f;line-height:1.6;'>"
-                "Esto puede deberse a una desconexión temporal de la base de datos "
-                "o del PC de planta. Intenta nuevamente en unos segundos."
-                "</div>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
-            col_retry, _ = st.columns([1, 4])
-            with col_retry:
-                if st.button("🔄 Reintentar", use_container_width=True, type="primary"):
-                    st.session_state.pop(f"_wm_load_retry_{instance_id}", None)
-                    st.rerun()
+        st.markdown(
+            "<div style='background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%);"
+            "border:1px solid #cbd5e1;border-radius:12px;padding:20px 24px;"
+            "margin:18px 0;display:flex;align-items:center;gap:14px;'>"
+            "<div style='font-size:22px;'>📡</div>"
+            "<div style='flex:1;'>"
+            "<div style='font-size:14px;font-weight:700;color:#0f172a;'>"
+            "Sin lecturas en tiempo real ahora mismo</div>"
+            "<div style='font-size:12px;color:#64748b;margin-top:4px;line-height:1.5;'>"
+            "El collector enviará nuevas mediciones automáticamente. "
+            "Mientras tanto, abajo está el histórico de análisis disponible."
+            "</div>"
+            "</div>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        col_retry, _ = st.columns([1, 5])
+        with col_retry:
+            if st.button("Reintentar conexión", use_container_width=True):
+                _cached_latest_for_instance.clear()
+                st.session_state.pop(f"_wm_load_retry_{instance_id}", None)
+                st.rerun()
+
+        # Aún sin live data, mostramos las cards de snapshots históricos
+        # — el cliente puede entrar a un análisis previo en lugar de
+        # quedarse mirando una pantalla bloqueada.
+        try:
+            from core.recent_analyses_widget import render_recent_analyses_section
+            render_recent_analyses_section(instance_id)
+        except Exception:
+            pass
         return
 
     # Si llegamos hasta acá con data exitosa, resetear el retry counter
