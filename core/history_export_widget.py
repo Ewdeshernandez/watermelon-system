@@ -201,13 +201,13 @@ def render_history_export_section(
     with cols[0]:
         try:
             zip_popover = st.popover(
-                "📥 Descargar ZIP",
+                "Descargar ZIP",
                 use_container_width=True,
                 help="Genera ZIP con manifest + diagrama + todos los snapshots",
             )
             use_popover = True
         except AttributeError:
-            zip_popover = st.expander("📥 Descargar ZIP")
+            zip_popover = st.expander("Descargar ZIP")
             use_popover = False
 
         with zip_popover:
@@ -266,12 +266,12 @@ def render_history_export_section(
     with cols[1]:
         try:
             send_popover = st.popover(
-                "📧 Enviar al cliente",
+                "Enviar al cliente",
                 use_container_width=True,
                 help="Sube el ZIP a Supabase Storage temporal y abre tu cliente de email con el link",
             )
         except AttributeError:
-            send_popover = st.expander("📧 Enviar al cliente")
+            send_popover = st.expander("Enviar al cliente")
 
         with send_popover:
             client_email = st.text_input(
@@ -344,14 +344,16 @@ def render_history_export_section(
                                 f"?subject={urllib.parse.quote(subject)}"
                                 f"&body={urllib.parse.quote(body)}"
                             )
-                            st.success("✓ ZIP subido. URL generada:")
+                            st.success("ZIP subido · URL generada")
                             st.code(url, language=None)
                             st.markdown(
                                 f"<a href='{mailto}' target='_blank' style='"
                                 f"display:inline-block;padding:8px 16px;"
-                                f"background:#2563eb;color:white;border-radius:8px;"
-                                f"text-decoration:none;font-weight:600;font-size:13px;'>"
-                                f"📧 Abrir cliente de email</a>",
+                                f"background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);"
+                                f"color:white;border-radius:8px;"
+                                f"text-decoration:none;font-weight:700;font-size:12.5px;"
+                                f"letter-spacing:0.02em;'>"
+                                f"Abrir cliente de email  →</a>",
                                 unsafe_allow_html=True,
                             )
                         else:
