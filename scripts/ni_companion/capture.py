@@ -129,7 +129,8 @@ def main() -> int:
     parser.add_argument("--fs", type=float, default=5120,
                         help="Sample rate Hz (se redondea a valor válido NI-9234)")
     parser.add_argument("--duration", type=float, default=2.0,
-                        help="Duration en segundos")
+                        help="Duration en segundos. EMA: 1-2 seg. OMA: 60-300 seg "
+                             "(ISO 20816 + Brincker 2001 — mínimo 60s para SVD estable)")
     parser.add_argument("--averages", type=int, default=5,
                         help="N° de impactos a promediar (modo EMA)")
     parser.add_argument("--trigger-channel", type=int, default=0,

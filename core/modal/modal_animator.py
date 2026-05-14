@@ -337,6 +337,132 @@ def build_mac_matrix_plot(
     return fig
 
 
+def build_campbell_diagram(
+    natural_frequencies_hz: List[float],
+    natural_freq_labels: Optional[List[str]] = None,
+    rpm_min: float = 0.0,
+    rpm_max: float = 4000.0,
+    operating_rpm: Optional[float] = None,
+    n_orders: int = 6,
+    classification: Optional[List[str]] = None,
+    title: str = "Diagrama de Campbell",
+):
+    """
+    Genera el Diagrama de Campbell — cruza modos identificados vs velocidad
+    operativa para identificar velocidades críticas (intersecciones modo ↔ orden).
+
+    Estándar en rotodinámica (API 684 §1.6).
+
+    Args:
+        natural_frequencies_hz: lista de frecuencias naturales identificadas (Hz)
+        natural_freq_labels: etiquetas opcionales ("Modo 1", "Modo 2", ...)
+        rpm_min, rpm_max: rango de velocidad operativa a mostrar
+        operating_rpm: si se da, dibuja vline destacada en esa velocidad
+        n_orders: número de armónicas a dibujar (1×, 2×, ..., N×)
+        classification: lista paralela a natural_frequencies_hz con
+          "natural" | "harmonic" | "spurious" para colorear
+
+    Returns:
+        plotly Figure con líneas horizontales (modos) + líneas inclinadas (órdenes)
+    """
+    try:
+        import plotly.graph_objects as go
+        import numpy as _np
+    except ImportError as exc:
+        raise ImportError("plotly requerido") from exc
+
+    if natural_freq_labels is None:
+        natural_freq_labels = [f"Modo {i+1}" for i in range(len(natural_frequencies_hz))]
+    if classification is None:
+        classification = ["natural"] * len(natural_frequencies_hz)
+
+    fig = go.Figure()
+
+    rpm_range = _np.linspace(rpm_min, rpm_max, 50)
+    # Órdenes de velocidad — líneas inclinadas (y = order * rpm/60)
+    for order in range(1, n_orders + 1):
+        y_order = order * rpm_range / 60.0
+        fig.add_trace(go.Scatter(
+            x=rpm_range, y=y_order,
+            mode="lines",
+            name=f"{order}× rpm",
+            line=dict(color="#6B7280", width=1, dash="dot"),
+            hovertemplate=f"{order}× rpm<br>%{{x:.0f}} rpm → %{{y:.1f}} Hz<extra></extra>",
+        ))
+        # Etiqueta al final de cada línea
+        fig.add_annotation(
+            x=rpm_max * 0.97, y=y_order[-1],
+            text=f"{order}×", showarrow=False,
+            font=dict(size=10, color="#6B7280"),
+        )
+
+    # Líneas horizontales = modos identificados
+    class_colors = {
+        "natural": "#16a34a",
+        "harmonic": "#dc2626",
+        "spurious": "#9ca3af",
+    }
+    for fn, label, cls in zip(natural_frequencies_hz, natural_freq_labels, classification):
+        color = class_colors.get(cls, "#0F7FB0")
+        fig.add_trace(go.Scatter(
+            x=[rpm_min, rpm_max], y=[fn, fn],
+            mode="lines",
+            name=f"{label} · {fn:.1f} Hz",
+            line=dict(color=color, width=2),
+            hovertemplate=f"{label}<br>fn = {fn:.2f} Hz<extra></extra>",
+        ))
+
+    # Línea vertical en operating speed (si se da)
+    if operating_rpm and rpm_min <= operating_rpm <= rpm_max:
+        fig.add_vline(
+            x=operating_rpm,
+            line=dict(color="#D89B22", width=2, dash="dash"),
+            annotation_text=f"Operativa: {operating_rpm:.0f} rpm",
+            annotation_position="top",
+            annotation_font_color="#D89B22",
+        )
+
+    # Detectar intersecciones (velocidades críticas)
+    # Para cada modo natural, encontrar dónde cruza con cada orden
+    critical_speeds = []
+    for fn, label, cls in zip(natural_frequencies_hz, natural_freq_labels, classification):
+        if cls != "natural":
+            continue
+        for order in range(1, n_orders + 1):
+            # y = order * rpm/60 = fn → rpm = 60 * fn / order
+            critical_rpm = 60.0 * fn / order
+            if rpm_min <= critical_rpm <= rpm_max:
+                critical_speeds.append((critical_rpm, fn, order, label))
+                fig.add_trace(go.Scatter(
+                    x=[critical_rpm], y=[fn],
+                    mode="markers",
+                    marker=dict(color="#dc2626", size=10, symbol="x",
+                                 line=dict(width=2, color="#7f1d1d")),
+                    name=f"Crítica {critical_rpm:.0f} rpm",
+                    showlegend=False,
+                    hovertemplate=(f"<b>Velocidad crítica</b><br>"
+                                     f"{critical_rpm:.0f} rpm<br>"
+                                     f"{label} cruza con {order}× rpm<br>"
+                                     f"fn = {fn:.2f} Hz<extra></extra>"),
+                ))
+
+    fig.update_layout(
+        title=title,
+        xaxis_title="Velocidad operativa (rpm)",
+        yaxis_title="Frecuencia (Hz)",
+        height=500,
+        template="plotly_white",
+        margin=dict(l=60, r=40, t=70, b=50),
+        showlegend=True,
+        legend=dict(orientation="h", y=-0.18, x=0),
+        hovermode="closest",
+    )
+    fig.update_xaxes(range=[rpm_min, rpm_max])
+    fig.update_yaxes(range=[0, max(natural_frequencies_hz) * 1.3 if natural_frequencies_hz else 200])
+
+    return fig, critical_speeds
+
+
 def build_arrows_3d_wireframe(
     mode_shape: np.ndarray,
     channel_positions_3d: Sequence[tuple],   # [(x, y, z), ...]

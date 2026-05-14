@@ -924,10 +924,18 @@ with tab_oma:
                     f"{tdms_oma.channels[0].duration_s:.1f}s" if tdms_oma.channels else "—")
         mc4.metric("Fs", f"{tdms_oma.sample_rate_hz:.0f} Hz")
 
-        if (tdms_oma.channels[0].duration_s if tdms_oma.channels else 0) < 10:
+        _record_dur = (tdms_oma.channels[0].duration_s if tdms_oma.channels else 0)
+        if _record_dur < 30:
             st.warning(
-                "⚠ Duración del record < 10 segundos. OMA recomienda mínimo 30-60s "
-                "para buena resolución frecuencial y SVD estable."
+                f"⚠ Duración del record {_record_dur:.0f} s. **OMA requiere ≥ 60s** "
+                "para SVD estable y damping confiable (ISO 20816 + Brincker 2001). "
+                "Resultados con < 30s deben tratarse como preliminares."
+            )
+        elif _record_dur < 60:
+            st.info(
+                f"ℹ Duración del record {_record_dur:.0f} s. Para resultados "
+                "robustos OMA recomienda **60-300s**. Estás en zona aceptable "
+                "pero damping puede tener varianza alta."
             )
 
         col_o1, col_o2, col_o3, col_o4 = st.columns(4)
@@ -1166,6 +1174,74 @@ with tab_3d:
             mac, labels, title="AutoMAC", use_3d=view_3d,
         )
         st.plotly_chart(fig_mac, use_container_width=True)
+
+        # ─── Diagrama de Campbell — API 684 §1.6 ──────────────────────
+        st.markdown("### Diagrama de Campbell · API 684 §1.6")
+        st.caption(
+            "Cruza los modos naturales identificados (líneas horizontales) "
+            "contra las armónicas de velocidad operativa (líneas inclinadas 1×, 2×, ...). "
+            "Las **intersecciones marcadas con X roja** son velocidades críticas — "
+            "puntos donde una armónica excita un modo natural."
+        )
+
+        col_c1, col_c2, col_c3 = st.columns(3)
+        with col_c1:
+            camp_rpm_min = st.number_input("RPM mín", value=0, step=100,
+                                              key="camp_rpm_min")
+        with col_c2:
+            camp_rpm_max = st.number_input("RPM máx", value=4000, step=500,
+                                              key="camp_rpm_max")
+        with col_c3:
+            camp_op_rpm = st.number_input("Velocidad operativa (rpm)",
+                                            value=3600, step=100,
+                                            key="camp_op_rpm",
+                                            help="Si está dentro del rango, se "
+                                            "marca con vline ámbar")
+
+        natural_modes_for_camp = [m for m in fdd.modes
+                                     if m.classification == "natural"]
+        if natural_modes_for_camp:
+            from core.modal.modal_animator import build_campbell_diagram
+            fig_camp, crit_speeds = build_campbell_diagram(
+                natural_frequencies_hz=[m.natural_frequency_hz
+                                          for m in natural_modes_for_camp],
+                natural_freq_labels=[f"Modo {m.mode_number}"
+                                       for m in natural_modes_for_camp],
+                rpm_min=float(camp_rpm_min),
+                rpm_max=float(camp_rpm_max),
+                operating_rpm=float(camp_op_rpm) if camp_op_rpm > 0 else None,
+                n_orders=6,
+                classification=[m.classification for m in natural_modes_for_camp],
+                title="Diagrama de Campbell — Modos naturales vs Velocidad operativa",
+            )
+            st.plotly_chart(fig_camp, use_container_width=True)
+
+            if crit_speeds:
+                st.markdown("**Velocidades críticas detectadas:**")
+                import pandas as pd
+                df_crit = pd.DataFrame([
+                    {
+                        "Velocidad crítica (rpm)": round(rpm, 0),
+                        "Modo": label,
+                        "Frecuencia (Hz)": round(fn, 2),
+                        "Orden": f"{order}× rpm",
+                        "Estado": "⚠ DENTRO de rango operativo" if (
+                            camp_op_rpm > 0
+                            and abs(rpm - camp_op_rpm) / max(camp_op_rpm, 1) < 0.10
+                        ) else "Fuera de rango operativo cercano",
+                    }
+                    for rpm, fn, order, label in crit_speeds
+                ])
+                st.dataframe(df_crit, use_container_width=True, hide_index=True)
+            else:
+                st.success(
+                    "✓ Ningún cruce modo natural ↔ armónica en la banda "
+                    f"{camp_rpm_min}-{camp_rpm_max} rpm."
+                )
+        else:
+            st.info("Sin modos naturales clasificados — no hay datos para Campbell.")
+
+        st.divider()
 
         # Detección automática de redundantes
         redundants = detect_redundant_modes(fdd.modes, threshold=0.7)
