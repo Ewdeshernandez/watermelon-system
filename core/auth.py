@@ -88,6 +88,15 @@ NAV_GROUPS = [
         ],
     },
     {
+        "section": "Modal Analysis",
+        "items": [
+            # Ciclo 23.147 — Módulo Modal (EMA + OMA + FEA) bajo ISO 7626 / ISO 20816
+            # / API 684. Solo admin/specialist — bloqueado para cliente en
+            # CLIENT_BLOCKED_PAGES. Reemplaza dependencia del software Artemis Modal.
+            {"label": "🌐  Modal Analysis", "page": "pages/18_Modal_Analysis.py"},
+        ],
+    },
+    {
         "section": "Reports",
         "items": [
             # Ciclo 17.33 — eliminados Phase Analysis y Diagnostics legacy
