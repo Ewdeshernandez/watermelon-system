@@ -159,6 +159,184 @@ def build_arrows_2d_layout(
     return fig
 
 
+def build_complexity_polar_plot(
+    mode_shape,
+    channel_names: List[str],
+    mode_label: str = "",
+):
+    """
+    Complexity Polar Plot estilo Artemis (Figura 10).
+
+    Cada componente del mode shape se dibuja como vector radial en el plano
+    complejo (Real horizontal, Imag vertical). Si todos los vectores son
+    colineales (apuntan en la misma dirección o opuestas), el modo es real.
+    Si están dispersos, el modo es complejo.
+
+    Cumple ISO 7626-6 §7.2 — visualización geométrica del MPC.
+
+    Args:
+        mode_shape: vector complejo (N_DOFs,) — np.ndarray
+        channel_names: etiquetas
+        mode_label: título descriptivo
+    """
+    try:
+        import plotly.graph_objects as go
+        import numpy as _np
+    except ImportError as exc:
+        raise ImportError("plotly requerido") from exc
+
+    phi = _np.asarray(mode_shape, dtype=complex).flatten()
+    # Normalizar al máximo módulo para escala consistente
+    max_mag = float(_np.abs(phi).max())
+    if max_mag > 0:
+        phi = phi / max_mag
+
+    fig = go.Figure()
+    # Círculo unidad de referencia
+    theta = _np.linspace(0, 2 * _np.pi, 100)
+    fig.add_trace(go.Scatter(
+        x=_np.cos(theta), y=_np.sin(theta),
+        mode="lines",
+        line=dict(color="#cbd5e1", width=1, dash="dot"),
+        showlegend=False, hoverinfo="skip",
+    ))
+    # Ejes Real e Imag
+    fig.add_shape(type="line", x0=-1.1, x1=1.1, y0=0, y1=0,
+                   line=dict(color="#94a3b8", width=1))
+    fig.add_shape(type="line", x0=0, x1=0, y0=-1.1, y1=1.1,
+                   line=dict(color="#94a3b8", width=1))
+
+    # Cada componente del mode shape como vector desde origen
+    for i, (val, name) in enumerate(zip(phi, channel_names)):
+        re = float(_np.real(val))
+        im = float(_np.imag(val))
+        fig.add_annotation(
+            x=re, y=im, ax=0, ay=0,
+            xref="x", yref="y", axref="x", ayref="y",
+            arrowhead=3, arrowsize=1.5, arrowwidth=2,
+            arrowcolor="#1AAEE5", showarrow=True, text="",
+        )
+        # Etiqueta al final del vector
+        offset = 0.08
+        norm = (re ** 2 + im ** 2) ** 0.5
+        if norm > 1e-3:
+            xt = re * (1 + offset / norm)
+            yt = im * (1 + offset / norm)
+        else:
+            xt, yt = re, im
+        fig.add_annotation(
+            x=xt, y=yt, text=name,
+            showarrow=False, font=dict(size=10, color="#0F1E3D"),
+        )
+
+    fig.update_layout(
+        title=mode_label or "Complexity Polar Plot — mode shape vectors",
+        xaxis=dict(title="Re(φ)", range=[-1.3, 1.3],
+                    zeroline=True, gridcolor="#e2e8f0",
+                    scaleanchor="y", scaleratio=1),
+        yaxis=dict(title="Im(φ)", range=[-1.3, 1.3],
+                    zeroline=True, gridcolor="#e2e8f0"),
+        height=460, template="plotly_white",
+        margin=dict(l=50, r=50, t=70, b=40),
+        showlegend=False,
+    )
+    return fig
+
+
+def build_mac_matrix_plot(
+    mac_matrix,
+    mode_labels: List[str],
+    title: str = "AutoMAC Matrix",
+    use_3d: bool = True,
+):
+    """
+    Visualización de la matriz MAC.
+
+    Si use_3d=True → barras 3D (estilo Figura 9 Artemis).
+    Si use_3d=False → heatmap 2D (más rápido y siempre legible).
+
+    Args:
+        mac_matrix: numpy array (N, N) con valores MAC ∈ [0, 1]
+        mode_labels: etiquetas de cada modo (e.g. "21.77 Hz")
+        title: título
+        use_3d: usar bar chart 3D estilo Artemis
+
+    Returns:
+        plotly Figure
+    """
+    try:
+        import plotly.graph_objects as go
+        import numpy as _np
+    except ImportError as exc:
+        raise ImportError("plotly requerido") from exc
+
+    M = _np.asarray(mac_matrix)
+    n = M.shape[0]
+
+    if use_3d and n > 1:
+        # Bar3d via Mesh3d cubes — más complejo pero replica visual Artemis
+        # Versión simplificada: surface plot 3D estilo "stem"
+        x_grid, y_grid = _np.meshgrid(_np.arange(n), _np.arange(n))
+        fig = go.Figure()
+        # Cada barra como Mesh3d cube
+        for i in range(n):
+            for j in range(n):
+                z_val = float(M[i, j])
+                if z_val < 0.05:
+                    continue  # skip barras muy bajas para legibilidad
+                fig.add_trace(go.Mesh3d(
+                    x=[i-0.4, i+0.4, i+0.4, i-0.4, i-0.4, i+0.4, i+0.4, i-0.4],
+                    y=[j-0.4, j-0.4, j+0.4, j+0.4, j-0.4, j-0.4, j+0.4, j+0.4],
+                    z=[0, 0, 0, 0, z_val, z_val, z_val, z_val],
+                    i=[0, 0, 0, 1, 4, 4, 4, 5, 5, 6, 6, 7],
+                    j=[1, 2, 3, 2, 5, 6, 7, 6, 1, 7, 2, 3],
+                    k=[2, 3, 4, 3, 6, 7, 0, 7, 6, 4, 3, 4],
+                    intensity=[z_val] * 8,
+                    colorscale="Jet",
+                    cmin=0, cmax=1,
+                    showscale=(i == 0 and j == 0),
+                    opacity=0.95,
+                    hovertemplate=(
+                        f"<b>Mode {i+1} vs Mode {j+1}</b><br>"
+                        f"{mode_labels[i] if i < len(mode_labels) else ''} vs "
+                        f"{mode_labels[j] if j < len(mode_labels) else ''}<br>"
+                        f"MAC = {z_val:.3f}<extra></extra>"
+                    ),
+                ))
+        fig.update_layout(
+            title=title,
+            scene=dict(
+                xaxis=dict(title="Mode i",
+                            tickvals=list(range(n)),
+                            ticktext=mode_labels[:n]),
+                yaxis=dict(title="Mode j",
+                            tickvals=list(range(n)),
+                            ticktext=mode_labels[:n]),
+                zaxis=dict(title="MAC", range=[0, 1]),
+                camera=dict(eye=dict(x=1.5, y=1.5, z=1.2)),
+            ),
+            height=600,
+            template="plotly_white",
+            margin=dict(l=20, r=20, t=70, b=20),
+        )
+    else:
+        # 2D heatmap fallback
+        fig = go.Figure(data=go.Heatmap(
+            z=M, x=mode_labels[:n], y=mode_labels[:n],
+            colorscale="Jet", zmin=0, zmax=1,
+            text=_np.round(M, 2), texttemplate="%{text}",
+            textfont=dict(size=10),
+            hovertemplate="Mode %{y} vs Mode %{x}<br>MAC = %{z:.3f}<extra></extra>",
+        ))
+        fig.update_layout(
+            title=title,
+            xaxis_title="Mode j", yaxis_title="Mode i",
+            height=500, template="plotly_white",
+            margin=dict(l=80, r=20, t=70, b=80),
+        )
+    return fig
+
+
 def build_arrows_3d_wireframe(
     mode_shape: np.ndarray,
     channel_positions_3d: Sequence[tuple],   # [(x, y, z), ...]

@@ -455,6 +455,92 @@ def run_oma(
     return result
 
 
+def compute_mac_matrix(modes: List[OMAMode]) -> np.ndarray:
+    """
+    Compute Modal Assurance Criterion (MAC) matrix entre todos los modos.
+
+    MAC(i, j) = |φ_i^H · φ_j|² / ((φ_i^H · φ_i) (φ_j^H · φ_j))
+
+    Interpretación:
+      · MAC = 1 → mode shapes idénticos (mismo modo identificado dos veces)
+      · MAC = 0 → completamente ortogonales (linealmente independientes)
+      · MAC > 0.7 off-diagonal → modos REDUNDANTES (eliminar uno)
+
+    Norma aplicable:
+      · ISO 7626-6 §6.5 — Validación entre orders consecutivos
+      · API 684 §1.6 — Correlación EMA vs FEA
+
+    Args:
+        modes: lista de OMAMode con mode_shape complejo
+
+    Returns:
+        Matriz cuadrada (N, N) con valores MAC entre cada par de modos.
+        Diagonal siempre = 1.0
+    """
+    n = len(modes)
+    mac = np.zeros((n, n))
+    for i in range(n):
+        phi_i = np.asarray(modes[i].mode_shape, dtype=complex).flatten()
+        for j in range(n):
+            phi_j = np.asarray(modes[j].mode_shape, dtype=complex).flatten()
+            num = abs(np.vdot(phi_i, phi_j)) ** 2  # |φ_i^H · φ_j|²
+            denom = float(np.vdot(phi_i, phi_i).real * np.vdot(phi_j, phi_j).real)
+            mac[i, j] = num / max(denom, 1e-30)
+    return mac
+
+
+def compute_cross_mac(
+    modes_a: List[OMAMode],
+    modes_b: List[OMAMode],
+) -> np.ndarray:
+    """
+    Cross-MAC entre dos sets de modos (e.g. EMA vs OMA, o experimental vs FEA).
+
+    MAC alto en la diagonal → mismos modos físicos identificados por
+    diferentes métodos. Validación cruzada esencial bajo API 684.
+
+    Args:
+        modes_a, modes_b: dos listas de OMAMode
+
+    Returns:
+        Matriz (len(a), len(b)) con MAC cruzado.
+    """
+    na = len(modes_a)
+    nb = len(modes_b)
+    mac = np.zeros((na, nb))
+    for i in range(na):
+        phi_i = np.asarray(modes_a[i].mode_shape, dtype=complex).flatten()
+        for j in range(nb):
+            phi_j = np.asarray(modes_b[j].mode_shape, dtype=complex).flatten()
+            if phi_i.size != phi_j.size:
+                continue
+            num = abs(np.vdot(phi_i, phi_j)) ** 2
+            denom = float(np.vdot(phi_i, phi_i).real * np.vdot(phi_j, phi_j).real)
+            mac[i, j] = num / max(denom, 1e-30)
+    return mac
+
+
+def detect_redundant_modes(
+    modes: List[OMAMode],
+    threshold: float = 0.7,
+) -> List[Tuple[int, int, float]]:
+    """
+    Identifica pares de modos con MAC off-diagonal > threshold (redundantes).
+
+    Returns:
+        Lista de tuplas (idx_i, idx_j, mac_value) — pares de índices que
+        son linealmente dependientes (probable duplicación).
+    """
+    mac = compute_mac_matrix(modes)
+    n = mac.shape[0]
+    duplicates = []
+    for i in range(n):
+        for j in range(i + 1, n):
+            if mac[i, j] > threshold:
+                duplicates.append((i, j, float(mac[i, j])))
+    return duplicates
+
+
 def detect_harmonic_modes(
     modes: List[OMAMode],
     operating_rpm: float,

@@ -1118,6 +1118,7 @@ with tab_3d:
         from core.modal.modal_animator import (
             build_bar_chart_mode_shape,
             build_arrows_3d_wireframe,
+            build_complexity_polar_plot,
         )
 
         # ─── Nivel 1: Bar chart ──────────────────────────────────────
@@ -1130,6 +1131,65 @@ with tab_3d:
                           f"ζ = {mode_sel.damping_ratio_pct:.3f}%"),
         )
         st.plotly_chart(fig_bar, use_container_width=True)
+
+        # ─── Complexity Polar Plot — estilo Artemis Fig 10 ────────────
+        st.markdown(f"### Complexity Polar Plot · ISO 7626-6 §7.2")
+        st.caption(
+            "Cada flecha es un componente del mode shape en el plano complejo. "
+            "**Vectores colineales** (alineados en 0° o 180°) = modo natural real. "
+            "**Vectores dispersos** = modo complejo o espurio."
+        )
+        fig_pol = build_complexity_polar_plot(
+            mode_shape=mode_sel.mode_shape,
+            channel_names=fdd.channel_names,
+            mode_label=(f"Modo {mode_sel.mode_number} · "
+                          f"{mode_sel.natural_frequency_hz:.2f} Hz · "
+                          f"MPC complexity = {mode_sel.complexity_pct:.1f}% · "
+                          f"clase: {mode_sel.classification}"),
+        )
+        st.plotly_chart(fig_pol, use_container_width=True)
+
+        # ─── AutoMAC Matrix — estilo Artemis Fig 9 ─────────────────────
+        st.markdown("### AutoMAC Matrix · ISO 7626-6 §6.5 + API 684 §1.6")
+        st.caption(
+            "Correlación entre modos identificados. Diagonal = 1 (siempre). "
+            "**Off-diagonal > 0.7** indica modos redundantes (mismo modo "
+            "identificado 2 veces — uno debería eliminarse)."
+        )
+
+        from core.modal.oma_engine import compute_mac_matrix, detect_redundant_modes
+        mac = compute_mac_matrix(fdd.modes)
+        labels = [f"{m.natural_frequency_hz:.1f} Hz" for m in fdd.modes]
+
+        from core.modal.modal_animator import build_mac_matrix_plot
+        col_v1, col_v2 = st.columns([3, 1])
+        with col_v1:
+            view_3d = st.toggle("Vista 3D (estilo Artemis)",
+                                  value=False, key="mac_3d_toggle")
+        fig_mac = build_mac_matrix_plot(
+            mac, labels, title="AutoMAC", use_3d=view_3d,
+        )
+        st.plotly_chart(fig_mac, use_container_width=True)
+
+        # Detección automática de redundantes
+        redundants = detect_redundant_modes(fdd.modes, threshold=0.7)
+        if redundants:
+            st.warning(
+                f"⚠ **{len(redundants)} pares de modos linealmente dependientes "
+                f"(MAC > 0.7):**\n\n"
+                + "\n".join([
+                    f"- Modo {i+1} ({fdd.modes[i].natural_frequency_hz:.1f} Hz) ↔ "
+                    f"Modo {j+1} ({fdd.modes[j].natural_frequency_hz:.1f} Hz) → "
+                    f"MAC = {mac_val:.3f}"
+                    for i, j, mac_val in redundants
+                ])
+                + "\n\nConsidera eliminar el de menor confianza."
+            )
+        else:
+            st.success(
+                "✓ Todos los modos identificados son linealmente independientes "
+                "(off-diagonal MAC < 0.7). Set modal limpio."
+            )
 
         # ─── Nivel 2: Flechas 3D — requiere position_3d en sensores ──
         st.markdown(f"### Nivel 2 — Flechas 3D sobre layout del activo")
