@@ -293,239 +293,235 @@ with tab_acq:
                     "ℹ Datos operacionales listos para FDD. Cambia al **Tab OMA** "
                     "para identificar modos naturales sin necesidad de martillo."
                 )
-                st.stop()
-
-            # Detección automática de martillo (EMA mode)
-            hammer = tdms.detect_hammer_channel()
-            responses = tdms.response_channels()
-
-            if hammer is None:
-                if not is_ema_tdms:
-                    st.warning(
-                        "⚠ TDMS sin metadata de mode (`ema_triggered` o "
-                        "`oma_continuous`). No se pudo determinar si es EMA u OMA. "
-                        "Si es OMA, procesa con FDD en el Tab OMA."
-                    )
-                else:
-                    st.warning(
-                        "⚠ No se detectó canal de martillo automáticamente. "
-                        "ISO 7626-5 requiere un input claro. Verifica que el "
-                        "primer canal sea el martillo con sensitivity baja "
-                        "(~2.4 mV/N) o nombre 'Hammer'/'Martillo'."
-                    )
-                st.stop()
-
-            st.success(
-                f"🔨 Martillo detectado: **{hammer.name}** "
-                f"(kurtosis {hammer.kurtosis:.1f}, "
-                f"peak/RMS {hammer.peak_to_rms:.1f}, "
-                f"sens {hammer.sensitivity_mv_per_eu} mV/{hammer.units})"
-            )
-
-            # Selector de canal de respuesta
-            resp_names = [r.name for r in responses]
-            if not resp_names:
-                st.error("No hay canales de respuesta — el TDMS solo tiene martillo.")
-                st.stop()
-            resp_pick = st.selectbox(
-                "Canal de respuesta a analizar",
-                resp_names, key="tdms_resp_pick",
-            )
-            resp = next(r for r in responses if r.name == resp_pick)
-
-            # Calcular FRF + coherencia
-            nperseg = min(1024, hammer.data.size // 4)
-            frf = compute_frf_h1(
-                input_signal=hammer.data,
-                output_signal=resp.data,
-                sample_rate_hz=tdms.sample_rate_hz,
-                nperseg=nperseg,
-            )
-
-            # Validar conforme ISO 7626-5
-            report = build_compliance_report(
-                input_signal=hammer.data,
-                output_signal=resp.data,
-                coherence=frf.coherence,
-                coherence_frequencies_hz=frf.frequencies_hz,
-                sample_rate_hz=tdms.sample_rate_hz,
-                f_target_hz=f_target,
-                n_averages=tdms.n_averages or 1,
-                coherence_threshold=coh_thr,
-                test_setup_name=f"{hammer.name} → {resp.name}",
-            )
-
-            # ============================================================
-            # CHECKLIST ISO 7626-5 (banner superior)
-            # ============================================================
-            st.markdown("### ISO 7626-5 · Validación del ensayo")
-            if report.overall_pass:
-                st.markdown(
-                    f'<div style="background:#dcfce7;border:1.5px solid #16a34a;'
-                    f'border-radius:8px;padding:14px 18px;">'
-                    f'<div style="font-weight:800;color:#14532d;font-size:18px;">'
-                    f'✓ Ensayo conforme ISO 7626-5</div>'
-                    f'<div style="color:#166534;font-size:13px;margin-top:4px;">'
-                    f'{report.n_passed}/{report.n_total} checks aprobados</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-            elif report.has_fails:
-                st.markdown(
-                    f'<div style="background:#fee2e2;border:1.5px solid #dc2626;'
-                    f'border-radius:8px;padding:14px 18px;">'
-                    f'<div style="font-weight:800;color:#7f1d1d;font-size:18px;">'
-                    f'✗ Ensayo NO conforme ISO 7626-5</div>'
-                    f'<div style="color:#991b1b;font-size:13px;margin-top:4px;">'
-                    f'{report.n_passed}/{report.n_total} checks aprobados · revisar fallos</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
+                # Ciclo 23.159 — NO usar st.stop() aquí: detendría TODOS los tabs
+                # (OMA, Mode Shapes, FEA). En su lugar, marcamos flag para skipear
+                # el resto del flujo EMA y dejar que los demás tabs renderen.
+                _skip_ema_validation = True
             else:
-                st.markdown(
-                    f'<div style="background:#fef3c7;border:1.5px solid #d97706;'
-                    f'border-radius:8px;padding:14px 18px;">'
-                    f'<div style="font-weight:800;color:#78350f;font-size:18px;">'
-                    f'⚠ Ensayo con observaciones</div>'
-                    f'<div style="color:#92400e;font-size:13px;margin-top:4px;">'
-                    f'{report.n_passed}/{report.n_total} checks · revisar warnings</div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
+                _skip_ema_validation = False
+
+            # Detección automática de martillo (EMA mode) — solo si no es OMA
+            if not _skip_ema_validation:
+                hammer = tdms.detect_hammer_channel()
+                responses = tdms.response_channels()
+
+                if hammer is None:
+                    if not is_ema_tdms:
+                        st.warning(
+                            "⚠ TDMS sin metadata de mode. Si es OMA, procesa "
+                            "con FDD en el Tab OMA."
+                        )
+                    else:
+                        st.warning(
+                            "⚠ No se detectó canal de martillo automáticamente. "
+                            "ISO 7626-5 requiere un input claro. Verifica que el "
+                            "primer canal sea el martillo con sensitivity baja "
+                            "(~2.4 mV/N) o nombre 'Hammer'/'Martillo'."
+                        )
+                    _skip_ema_validation = True
+
+            if not _skip_ema_validation:
+                st.success(
+                    f"🔨 Martillo detectado: **{hammer.name}** "
+                    f"(kurtosis {hammer.kurtosis:.1f}, "
+                    f"peak/RMS {hammer.peak_to_rms:.1f}, "
+                    f"sens {hammer.sensitivity_mv_per_eu} mV/{hammer.units})"
                 )
 
-            # Tabla de checks
-            check_cols = st.columns(len(report.checks))
-            for col, check in zip(check_cols, report.checks):
-                with col:
-                    if check.severity == "ok":
-                        bg, fg, icon = "#dcfce7", "#14532d", "✓"
-                    elif check.severity == "warning":
-                        bg, fg, icon = "#fef3c7", "#78350f", "⚠"
-                    else:
-                        bg, fg, icon = "#fee2e2", "#7f1d1d", "✗"
-                    st.markdown(
-                        f'<div style="background:{bg};border-radius:8px;'
-                        f'padding:10px 12px;min-height:80px;">'
-                        f'<div style="color:{fg};font-weight:700;font-size:13px;">'
-                        f'{icon} {check.title}</div>'
-                        f'<div style="color:{fg};font-size:11px;margin-top:4px;'
-                        f'opacity:0.85;">{check.norm_ref}</div>'
-                        f'</div>',
-                        unsafe_allow_html=True,
+                # Selector de canal de respuesta
+                resp_names = [r.name for r in responses]
+                if not resp_names:
+                    st.error("No hay canales de respuesta — el TDMS solo tiene martillo.")
+                else:
+                    resp_pick = st.selectbox(
+                        "Canal de respuesta a analizar",
+                        resp_names, key="tdms_resp_pick",
+                    )
+                    resp = next(r for r in responses if r.name == resp_pick)
+
+                    # Calcular FRF + coherencia
+                    nperseg = min(1024, hammer.data.size // 4)
+                    frf = compute_frf_h1(
+                        input_signal=hammer.data,
+                        output_signal=resp.data,
+                        sample_rate_hz=tdms.sample_rate_hz,
+                        nperseg=nperseg,
                     )
 
-            # Expander con detalles
-            with st.expander("📋 Ver detalle de cada check", expanded=False):
-                for c in report.checks:
-                    icon = "✓" if c.passed else ("⚠" if c.severity == "warning" else "✗")
-                    st.markdown(f"**{icon} {c.title}** · `{c.norm_ref}`")
-                    st.caption(c.detail)
-                    st.divider()
+                    # Validar conforme ISO 7626-5
+                    report = build_compliance_report(
+                        input_signal=hammer.data,
+                        output_signal=resp.data,
+                        coherence=frf.coherence,
+                        coherence_frequencies_hz=frf.frequencies_hz,
+                        sample_rate_hz=tdms.sample_rate_hz,
+                        f_target_hz=f_target,
+                        n_averages=tdms.n_averages or 1,
+                        coherence_threshold=coh_thr,
+                        test_setup_name=f"{hammer.name} → {resp.name}",
+                    )
 
-            # ============================================================
-            # PANEL DE 6 PLOTS — Input / Output / FRF / Coherencia
-            # ============================================================
-            st.markdown(f"### Panel ISO 7626-5 · {hammer.name} → {resp.name}")
+                    # CHECKLIST ISO 7626-5 (banner superior)
+                    st.markdown("### ISO 7626-5 · Validación del ensayo")
+                    if report.overall_pass:
+                        st.markdown(
+                            f'<div style="background:#dcfce7;border:1.5px solid #16a34a;'
+                            f'border-radius:8px;padding:14px 18px;">'
+                            f'<div style="font-weight:800;color:#14532d;font-size:18px;">'
+                            f'✓ Ensayo conforme ISO 7626-5</div>'
+                            f'<div style="color:#166534;font-size:13px;margin-top:4px;">'
+                            f'{report.n_passed}/{report.n_total} checks aprobados</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                    elif report.has_fails:
+                        st.markdown(
+                            f'<div style="background:#fee2e2;border:1.5px solid #dc2626;'
+                            f'border-radius:8px;padding:14px 18px;">'
+                            f'<div style="font-weight:800;color:#7f1d1d;font-size:18px;">'
+                            f'✗ Ensayo NO conforme ISO 7626-5</div>'
+                            f'<div style="color:#991b1b;font-size:13px;margin-top:4px;">'
+                            f'{report.n_passed}/{report.n_total} checks aprobados · revisar fallos</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f'<div style="background:#fef3c7;border:1.5px solid #d97706;'
+                            f'border-radius:8px;padding:14px 18px;">'
+                            f'<div style="font-weight:800;color:#78350f;font-size:18px;">'
+                            f'⚠ Ensayo con observaciones</div>'
+                            f'<div style="color:#92400e;font-size:13px;margin-top:4px;">'
+                            f'{report.n_passed}/{report.n_total} checks · revisar warnings</div>'
+                            f'</div>',
+                            unsafe_allow_html=True,
+                        )
 
-            from plotly.subplots import make_subplots
+                    # Tabla de checks
+                    check_cols = st.columns(len(report.checks))
+                    for col, check in zip(check_cols, report.checks):
+                        with col:
+                            if check.severity == "ok":
+                                bg, fg, icon = "#dcfce7", "#14532d", "✓"
+                            elif check.severity == "warning":
+                                bg, fg, icon = "#fef3c7", "#78350f", "⚠"
+                            else:
+                                bg, fg, icon = "#fee2e2", "#7f1d1d", "✗"
+                            st.markdown(
+                                f'<div style="background:{bg};border-radius:8px;'
+                                f'padding:10px 12px;min-height:80px;">'
+                                f'<div style="color:{fg};font-weight:700;font-size:13px;">'
+                                f'{icon} {check.title}</div>'
+                                f'<div style="color:{fg};font-size:11px;margin-top:4px;'
+                                f'opacity:0.85;">{check.norm_ref}</div>'
+                                f'</div>',
+                                unsafe_allow_html=True,
+                            )
 
-            fig = make_subplots(
-                rows=3, cols=2,
-                subplot_titles=(
-                    f"Input — {hammer.name} (tiempo)",
-                    f"Input — {hammer.name} (espectro)",
-                    f"Response — {resp.name} (tiempo)",
-                    f"Response — {resp.name} (espectro)",
-                    "FRF — Magnitud + Fase",
-                    "Coherencia γ²(f)",
-                ),
-                vertical_spacing=0.10,
-                horizontal_spacing=0.08,
-            )
+                    # Expander con detalles
+                    with st.expander("📋 Ver detalle de cada check", expanded=False):
+                        for c in report.checks:
+                            icon = "✓" if c.passed else ("⚠" if c.severity == "warning" else "✗")
+                            st.markdown(f"**{icon} {c.title}** · `{c.norm_ref}`")
+                            st.caption(c.detail)
+                            st.divider()
 
-            # Input tiempo (row 1, col 1)
-            fig.add_trace(go.Scatter(
-                x=hammer.time_s, y=hammer.data, mode="lines",
-                name="Input time", line=dict(color="#0F1E3D", width=1),
-                showlegend=False,
-            ), row=1, col=1)
-            fig.update_xaxes(title_text="Tiempo (s)", row=1, col=1)
-            fig.update_yaxes(title_text=f"{hammer.units}", row=1, col=1)
+                    # PANEL DE 6 PLOTS — Input / Output / FRF / Coherencia
+                    st.markdown(f"### Panel ISO 7626-5 · {hammer.name} → {resp.name}")
 
-            # Input espectro (row 1, col 2)
-            from scipy.signal import welch as _welch
-            f_in, psd_in = _welch(hammer.data, fs=tdms.sample_rate_hz,
-                                    nperseg=nperseg)
-            fig.add_trace(go.Scatter(
-                x=f_in, y=10 * np.log10(np.maximum(psd_in, 1e-30)),
-                mode="lines", name="Input spec",
-                line=dict(color="#0F1E3D", width=1),
-                showlegend=False,
-            ), row=1, col=2)
-            fig.add_vline(x=f_target, line=dict(color="#D89B22", dash="dash"),
-                           row=1, col=2)
-            fig.update_xaxes(title_text="Frecuencia (Hz)", row=1, col=2)
-            fig.update_yaxes(title_text=f"PSD (dB ref {hammer.units}²/Hz)", row=1, col=2)
+                    from plotly.subplots import make_subplots
 
-            # Response tiempo (row 2, col 1)
-            fig.add_trace(go.Scatter(
-                x=resp.time_s, y=resp.data, mode="lines",
-                name="Response time", line=dict(color="#1AAEE5", width=1),
-                showlegend=False,
-            ), row=2, col=1)
-            fig.update_xaxes(title_text="Tiempo (s)", row=2, col=1)
-            fig.update_yaxes(title_text=f"{resp.units}", row=2, col=1)
+                    fig = make_subplots(
+                        rows=3, cols=2,
+                        subplot_titles=(
+                            f"Input — {hammer.name} (tiempo)",
+                            f"Input — {hammer.name} (espectro)",
+                            f"Response — {resp.name} (tiempo)",
+                            f"Response — {resp.name} (espectro)",
+                            "FRF — Magnitud + Fase",
+                            "Coherencia γ²(f)",
+                        ),
+                        vertical_spacing=0.10,
+                        horizontal_spacing=0.08,
+                    )
 
-            # Response espectro (row 2, col 2)
-            f_out, psd_out = _welch(resp.data, fs=tdms.sample_rate_hz,
-                                      nperseg=nperseg)
-            fig.add_trace(go.Scatter(
-                x=f_out, y=10 * np.log10(np.maximum(psd_out, 1e-30)),
-                mode="lines", name="Response spec",
-                line=dict(color="#1AAEE5", width=1),
-                showlegend=False,
-            ), row=2, col=2)
-            fig.update_xaxes(title_text="Frecuencia (Hz)", row=2, col=2)
-            fig.update_yaxes(title_text=f"PSD (dB ref {resp.units}²/Hz)", row=2, col=2)
+                    fig.add_trace(go.Scatter(
+                        x=hammer.time_s, y=hammer.data, mode="lines",
+                        name="Input time", line=dict(color="#0F1E3D", width=1),
+                        showlegend=False,
+                    ), row=1, col=1)
+                    fig.update_xaxes(title_text="Tiempo (s)", row=1, col=1)
+                    fig.update_yaxes(title_text=f"{hammer.units}", row=1, col=1)
 
-            # FRF magnitud (row 3, col 1)
-            mag_db = 20 * np.log10(np.maximum(frf.magnitude, 1e-30))
-            fig.add_trace(go.Scatter(
-                x=frf.frequencies_hz, y=mag_db, mode="lines",
-                name="FRF Mag", line=dict(color="#0F7FB0", width=1.5),
-                showlegend=False,
-            ), row=3, col=1)
-            fig.update_xaxes(title_text="Frecuencia (Hz)", row=3, col=1)
-            fig.update_yaxes(title_text="Magnitud (dB)", row=3, col=1)
+                    from scipy.signal import welch as _welch
+                    f_in, psd_in = _welch(hammer.data, fs=tdms.sample_rate_hz,
+                                            nperseg=nperseg)
+                    fig.add_trace(go.Scatter(
+                        x=f_in, y=10 * np.log10(np.maximum(psd_in, 1e-30)),
+                        mode="lines", name="Input spec",
+                        line=dict(color="#0F1E3D", width=1),
+                        showlegend=False,
+                    ), row=1, col=2)
+                    fig.add_vline(x=f_target, line=dict(color="#D89B22", dash="dash"),
+                                   row=1, col=2)
+                    fig.update_xaxes(title_text="Frecuencia (Hz)", row=1, col=2)
+                    fig.update_yaxes(title_text=f"PSD (dB ref {hammer.units}²/Hz)", row=1, col=2)
 
-            # Coherencia (row 3, col 2)
-            fig.add_trace(go.Scatter(
-                x=frf.frequencies_hz, y=frf.coherence, mode="lines",
-                name="γ²", line=dict(color="#16a34a", width=1.5),
-                showlegend=False,
-            ), row=3, col=2)
-            fig.add_hline(y=coh_thr, line=dict(color="#D89B22", dash="dash"),
-                           row=3, col=2)
-            fig.update_xaxes(title_text="Frecuencia (Hz)", row=3, col=2)
-            fig.update_yaxes(title_text="γ² (0-1)", row=3, col=2,
-                              range=[0, 1.05])
+                    fig.add_trace(go.Scatter(
+                        x=resp.time_s, y=resp.data, mode="lines",
+                        name="Response time", line=dict(color="#1AAEE5", width=1),
+                        showlegend=False,
+                    ), row=2, col=1)
+                    fig.update_xaxes(title_text="Tiempo (s)", row=2, col=1)
+                    fig.update_yaxes(title_text=f"{resp.units}", row=2, col=1)
 
-            fig.update_layout(
-                height=750,
-                showlegend=False,
-                template="plotly_white",
-                margin=dict(l=60, r=20, t=50, b=40),
-            )
-            st.plotly_chart(fig, use_container_width=True)
+                    f_out, psd_out = _welch(resp.data, fs=tdms.sample_rate_hz,
+                                              nperseg=nperseg)
+                    fig.add_trace(go.Scatter(
+                        x=f_out, y=10 * np.log10(np.maximum(psd_out, 1e-30)),
+                        mode="lines", name="Response spec",
+                        line=dict(color="#1AAEE5", width=1),
+                        showlegend=False,
+                    ), row=2, col=2)
+                    fig.update_xaxes(title_text="Frecuencia (Hz)", row=2, col=2)
+                    fig.update_yaxes(title_text=f"PSD (dB ref {resp.units}²/Hz)", row=2, col=2)
 
-            # Persistir FRF para uso en Tab EMA
-            st.session_state["modal_tdms_frf"] = frf
-            st.session_state["modal_tdms_pair"] = (hammer.name, resp.name)
-            st.caption(
-                f"📊 FRF computada via estimador {frf.estimator} · "
-                f"{frf.n_averages} segmentos Welch · ventana {frf.window} · "
-                f"nperseg = {nperseg}. Disponible en Tab EMA para identificación modal."
-            )
+                    mag_db = 20 * np.log10(np.maximum(frf.magnitude, 1e-30))
+                    fig.add_trace(go.Scatter(
+                        x=frf.frequencies_hz, y=mag_db, mode="lines",
+                        name="FRF Mag", line=dict(color="#0F7FB0", width=1.5),
+                        showlegend=False,
+                    ), row=3, col=1)
+                    fig.update_xaxes(title_text="Frecuencia (Hz)", row=3, col=1)
+                    fig.update_yaxes(title_text="Magnitud (dB)", row=3, col=1)
+
+                    fig.add_trace(go.Scatter(
+                        x=frf.frequencies_hz, y=frf.coherence, mode="lines",
+                        name="γ²", line=dict(color="#16a34a", width=1.5),
+                        showlegend=False,
+                    ), row=3, col=2)
+                    fig.add_hline(y=coh_thr, line=dict(color="#D89B22", dash="dash"),
+                                   row=3, col=2)
+                    fig.update_xaxes(title_text="Frecuencia (Hz)", row=3, col=2)
+                    fig.update_yaxes(title_text="γ² (0-1)", row=3, col=2,
+                                      range=[0, 1.05])
+
+                    fig.update_layout(
+                        height=750,
+                        showlegend=False,
+                        template="plotly_white",
+                        margin=dict(l=60, r=20, t=50, b=40),
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    # Persistir FRF para uso en Tab EMA
+                    st.session_state["modal_tdms_frf"] = frf
+                    st.session_state["modal_tdms_pair"] = (hammer.name, resp.name)
+                    st.caption(
+                        f"📊 FRF computada via estimador {frf.estimator} · "
+                        f"{frf.n_averages} segmentos Welch · ventana {frf.window} · "
+                        f"nperseg = {nperseg}. Disponible en Tab EMA para identificación modal."
+                    )
 
     # -------- Legacy Artemis --------
     else:
