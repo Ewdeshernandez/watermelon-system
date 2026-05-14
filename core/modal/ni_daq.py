@@ -253,7 +253,10 @@ def capture(
     progress = on_progress or (lambda f, s: None)
     progress(0.0, "Iniciando captura")
 
-    if config.mode == "simulated":
+    # Ciclo 23.158 — Aceptar simulated_ema / simulated_oma (variantes que
+    # preservan el sub-modo para el TDMS metadata, sin romper compat con
+    # "simulated" plano legacy).
+    if config.mode == "simulated" or config.mode.startswith("simulated_"):
         return _capture_simulated(config, progress)
     if config.mode == "ema_triggered":
         return _capture_ema(config, progress)
@@ -449,7 +452,14 @@ def _capture_simulated(config: AcquisitionConfig, progress: Callable) -> Path:
 
     rng = np.random.default_rng(seed=42)
 
-    if config.mode == "simulated" and config.trigger_channel is not None:
+    # Ciclo 23.158 — Bifurcación clara EMA vs OMA en simulado.
+    # · simulated_ema o trigger_channel is not None → simular impacto + respuesta
+    # · simulated_oma o sin trigger → simular respuesta a ruido blanco (sistema 3-DOF)
+    _is_ema_sim = (
+        config.mode == "simulated_ema"
+        or (config.mode == "simulated" and config.trigger_channel is not None)
+    )
+    if _is_ema_sim:
         # Simular EMA: martillo + respuesta
         modes = [(50.0, 0.02), (120.0, 0.015)]
         for ch_idx, ch in enumerate(config.channels):
