@@ -184,19 +184,30 @@ with tab_acq:
             for i in range(4):
                 st.checkbox(f"Ch{i} habilitado", value=True, key=f"ni_ch_{i}_en")
 
-        st.warning(
-            "⚠ Captura live requiere companion script local con `nidaqmx` instalado. "
-            "Esta UI valida config y dispara el script via `scripts/ni_companion/capture.py`. "
-            "Streamlit Cloud no tiene hardware NI conectado."
+        modal_status_banner(
+            title="Captura local requerida — Streamlit Cloud no tiene hardware NI",
+            detail=(
+                "Para ejecutar la captura conecta el NI cDAQ-9234 a tu laptop con el "
+                "driver NI-DAQmx instalado y corre el companion script con la "
+                "configuración de arriba. El archivo .tdms generado se sube en la "
+                "opción 'Importar .tdms existente'."
+            ),
+            severity="info",
         )
-        st.code(
-            "python scripts/ni_companion/capture.py \\\n"
-            "    --mode oma --output ./run1.tdms \\\n"
-            "    --fs 10240 --duration 120 \\\n"
-            "    --channels 1YA:0:IEPE:100 \\\n"
-            "    --channels 2YA:1:IEPE:100",
-            language="bash",
-        )
+
+        with st.expander("▸ Comando del companion script (avanzado)", expanded=False):
+            st.caption(
+                "Comando equivalente a la configuración seleccionada arriba. "
+                "Cópialo en tu terminal local — requiere `pip install nidaqmx npTDMS`."
+            )
+            st.code(
+                "python scripts/ni_companion/capture.py \\\n"
+                "    --mode oma --output ./run1.tdms \\\n"
+                "    --fs 10240 --duration 120 \\\n"
+                "    --channels 1YA:0:IEPE:100 \\\n"
+                "    --channels 2YA:1:IEPE:100",
+                language="bash",
+            )
 
     # -------- TDMS existente --------
     elif acq_mode.startswith("📁"):
