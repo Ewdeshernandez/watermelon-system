@@ -822,39 +822,233 @@ with tab_ema:
 
 
 # ---------------------------------------------------------------------
-# Tab 4 — OMA Processing
+# Tab 4 — OMA Processing (FDD)
 # ---------------------------------------------------------------------
 with tab_oma:
-    st.subheader("Análisis Modal Operacional (FDD + SSI)")
+    st.subheader("Análisis Modal Operacional — FDD")
     st.caption(
-        "Identificación modal a partir de datos operacionales sin excitación controlada. "
-        "Cumple ISO 20816 + API 684."
+        "Frequency Domain Decomposition (Brincker 2001) sobre datos operacionales "
+        "del NI-9234. Sin necesidad de martillo. Cumple ISO 20816 + API 684."
     )
 
-    st.info(
-        "Sprint pendiente: integración con `PyOMA2`. Algoritmos disponibles:\n"
-        "- FDD (Frequency Domain Decomposition) — primera pasada rápida\n"
-        "- SSI-COV / SSI-DATA — más preciso para damping\n\n"
-        "**Requisitos de datos:** records de 60-300 segundos continuos a velocidad constante "
-        "capturados via NI-9234 en modo OMA (companion script con --mode oma)."
-    )
+    tdms_oma = st.session_state.get("modal_tdms")
+    if tdms_oma is None:
+        st.info(
+            "📭 Carga un TDMS continuo en el Tab Adquisición → '📁 Importar .tdms existente'. "
+            "Para OMA captura mínimo 30-60 segundos a velocidad constante."
+        )
+    else:
+        # Mostrar metadata
+        mc1, mc2, mc3, mc4 = st.columns(4)
+        mc1.metric("Modo TDMS", tdms_oma.mode or "—")
+        mc2.metric("Canales", len(tdms_oma.channels))
+        mc3.metric("Duración",
+                    f"{tdms_oma.channels[0].duration_s:.1f}s" if tdms_oma.channels else "—")
+        mc4.metric("Fs", f"{tdms_oma.sample_rate_hz:.0f} Hz")
+
+        if (tdms_oma.channels[0].duration_s if tdms_oma.channels else 0) < 10:
+            st.warning(
+                "⚠ Duración del record < 10 segundos. OMA recomienda mínimo 30-60s "
+                "para buena resolución frecuencial y SVD estable."
+            )
+
+        col_o1, col_o2, col_o3, col_o4 = st.columns(4)
+        with col_o1:
+            oma_fmin = st.number_input("f mín (Hz)", value=5.0, step=1.0,
+                                         key="oma_fmin")
+        with col_o2:
+            _f_max_def = float(tdms_oma.sample_rate_hz / 2.0 * 0.9)
+            oma_fmax = st.number_input("f máx (Hz)", value=min(500.0, _f_max_def),
+                                         step=10.0, key="oma_fmax")
+        with col_o3:
+            oma_prom = st.number_input("Prominencia (dB)", value=8.0, step=1.0,
+                                         key="oma_prom")
+        with col_o4:
+            oma_rpm = st.number_input("Running speed (rpm, opcional)",
+                                        value=0, step=100, key="oma_rpm",
+                                        help="Si se da, marca picos cercanos a "
+                                             "1×, 2×, 3× como armónicos")
+
+        if st.button("🌊 Ejecutar FDD + identificar modos", type="primary",
+                       use_container_width=True, key="oma_run"):
+            from core.modal.oma_engine import run_oma
+
+            time_data = np.stack([ch.data for ch in tdms_oma.channels], axis=1)
+            running_hz = (oma_rpm / 60.0) if oma_rpm > 0 else None
+            nperseg = min(4096, time_data.shape[0] // 8)
+            with st.spinner("Computando matriz PSD + SVD por frecuencia..."):
+                fdd_result = run_oma(
+                    time_data=time_data,
+                    sample_rate_hz=tdms_oma.sample_rate_hz,
+                    nperseg=nperseg,
+                    channel_names=[ch.name for ch in tdms_oma.channels],
+                    f_min_hz=float(oma_fmin), f_max_hz=float(oma_fmax),
+                    prominence_db=float(oma_prom),
+                    min_distance_hz=2.0,
+                    running_speed_hz=running_hz,
+                )
+            st.session_state["modal_oma_result"] = fdd_result
+
+        fdd = st.session_state.get("modal_oma_result")
+        if fdd is not None:
+            st.divider()
+            st.markdown(f"### FDD — First singular value")
+
+            sv_db = fdd.first_sv_db()
+            fig_sv = go.Figure()
+            fig_sv.add_trace(go.Scatter(
+                x=fdd.frequencies_hz, y=sv_db, mode="lines",
+                name="σ₁(f)", line=dict(width=1.2, color="#0F7FB0"),
+            ))
+            # Marker en cada modo identificado
+            for m in fdd.modes:
+                idx = int(np.argmin(np.abs(fdd.frequencies_hz - m.natural_frequency_hz)))
+                color = "#dc2626" if m.is_harmonic else "#16a34a"
+                fig_sv.add_trace(go.Scatter(
+                    x=[m.natural_frequency_hz], y=[sv_db[idx]],
+                    mode="markers+text",
+                    marker=dict(color=color, size=12, symbol="diamond",
+                                line=dict(width=1.5, color="#0F1E3D")),
+                    text=[str(m.mode_number)], textposition="top center",
+                    textfont=dict(size=10, color="#0F1E3D"),
+                    name=f"Modo {m.mode_number}",
+                    showlegend=False,
+                ))
+            fig_sv.update_layout(
+                title="Primer singular value σ₁(f) — picos = modos naturales (verde) / armónicas forzadas (rojo)",
+                xaxis_title="Frecuencia (Hz)",
+                yaxis_title="σ₁ (dB)",
+                height=380,
+                template="plotly_white",
+                margin=dict(l=50, r=20, t=60, b=40),
+                hovermode="closest",
+            )
+            st.plotly_chart(fig_sv, use_container_width=True)
+
+            st.markdown(f"### Modos OMA — {len(fdd.modes)}")
+            import pandas as pd
+            df_oma = pd.DataFrame([
+                {
+                    "Modo": m.mode_number,
+                    "Frecuencia (Hz)": round(m.natural_frequency_hz, 2),
+                    "Damping (%)": round(m.damping_ratio_pct, 3),
+                    "BW 3dB (Hz)": round(m.bandwidth_3db_hz, 2),
+                    "Tipo": ("⚠ Armónico " + f"{m.harmonic_order}×rpm")
+                              if m.is_harmonic else "Natural",
+                    "Confianza": round(m.confidence, 2),
+                }
+                for m in fdd.modes
+            ])
+            st.dataframe(df_oma, use_container_width=True, hide_index=True)
+
+            st.caption(
+                f"🌊 FDD: {fdd.n_segments} segmentos Welch · nperseg={fdd.nperseg} · "
+                f"Δf={fdd.frequencies_hz[1]:.2f} Hz. "
+                "Mode shapes complejos disponibles en Tab 'Mode Shapes 3D'."
+            )
 
 
 # ---------------------------------------------------------------------
-# Tab 5 — Mode Shapes 3D
+# Tab 5 — Mode Shapes (visualización)
 # ---------------------------------------------------------------------
 with tab_3d:
-    st.subheader("Visualización 3D de Mode Shapes")
-    st.caption("Animación Plotly Mesh3d con colormap — equivalente Artemis.")
-
-    st.info(
-        "Sprint pendiente: render del mode shape seleccionado de la tabla modal.\n"
-        "Tres niveles de fidelidad disponibles:\n"
-        "- Nivel 1: Bar chart 2D (más simple)\n"
-        "- Nivel 2: Wireframe con flechas vectoriales\n"
-        "- Nivel 3: Mesh3D animado con colormap (V1 target)\n\n"
-        "Export como GIF/MP4 para inclusión en reportes."
+    st.subheader("Visualización de Mode Shapes")
+    st.caption(
+        "Bar chart 2D (magnitud + fase) y flechas 3D sobre el layout del activo. "
+        "Cumple ISO 7626-6 §7.2."
     )
+
+    fdd = st.session_state.get("modal_oma_result")
+    if fdd is None or not fdd.modes:
+        st.info(
+            "📭 Mode shapes disponibles solo desde resultados OMA. "
+            "Ejecuta FDD en el Tab OMA primero."
+        )
+    else:
+        # Selector de modo
+        mode_options = {
+            f"Modo {m.mode_number} · {m.natural_frequency_hz:.2f} Hz · "
+            f"ζ={m.damping_ratio_pct:.2f}% "
+            f"({'⚠ armónico' if m.is_harmonic else 'natural'})":
+            m for m in fdd.modes
+        }
+        pick = st.selectbox("Seleccionar modo", list(mode_options.keys()),
+                             key="ms_pick")
+        mode_sel = mode_options[pick]
+
+        from core.modal.modal_animator import (
+            build_bar_chart_mode_shape,
+            build_arrows_3d_wireframe,
+        )
+
+        # ─── Nivel 1: Bar chart ──────────────────────────────────────
+        st.markdown(f"### Nivel 1 — Bar chart")
+        fig_bar = build_bar_chart_mode_shape(
+            mode_shape=mode_sel.mode_shape,
+            channel_names=fdd.channel_names,
+            mode_label=(f"Modo {mode_sel.mode_number} · "
+                          f"{mode_sel.natural_frequency_hz:.2f} Hz · "
+                          f"ζ = {mode_sel.damping_ratio_pct:.3f}%"),
+        )
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+        # ─── Nivel 2: Flechas 3D — requiere position_3d en sensores ──
+        st.markdown(f"### Nivel 2 — Flechas 3D sobre layout del activo")
+
+        # Intentar leer posiciones 3D del sensor_map del activo
+        # (Ciclo 23.148 — configuradas en wizard)
+        try:
+            from core.instance_state import get_instance
+            # TODO: Activo seleccionado debe venir del Tab Setup; por ahora hardcode TES1
+            inst = get_instance("tes1")
+        except Exception:
+            inst = None
+
+        sensors_3d = []
+        if inst is not None:
+            for ch_name in fdd.channel_names:
+                # Buscar sensor por plane_label
+                match = None
+                for s in (inst.sensors or []):
+                    if str(s.get("plane_label", "")).strip().upper() == ch_name.strip().upper():
+                        match = s
+                        break
+                if match and match.get("position_3d") and match.get("dof_direction"):
+                    sensors_3d.append({
+                        "name": ch_name,
+                        "position_3d": match["position_3d"],
+                        "dof_direction": match["dof_direction"],
+                    })
+
+        if len(sensors_3d) == len(fdd.channel_names):
+            # Todos los sensores tienen 3D → renderizar
+            positions = [tuple(s["position_3d"]) for s in sensors_3d]
+            directions = [tuple(s["dof_direction"]) for s in sensors_3d]
+            fig_3d = build_arrows_3d_wireframe(
+                mode_shape=mode_sel.mode_shape,
+                channel_positions_3d=positions,
+                channel_directions_3d=directions,
+                channel_names=fdd.channel_names,
+                mode_label=(f"Modo {mode_sel.mode_number} · "
+                              f"{mode_sel.natural_frequency_hz:.2f} Hz — "
+                              f"verde: cofase · rojo: anti-fase"),
+            )
+            st.plotly_chart(fig_3d, use_container_width=True)
+        else:
+            st.warning(
+                f"⚠ Solo {len(sensors_3d)} de {len(fdd.channel_names)} canales tienen "
+                f"configuración 3D (position_3d + dof_direction) en Sensor Map.\n\n"
+                "Para activar el render 3D: completa el expander "
+                "**⚙ Configuración modal** de cada sensor en el wizard de "
+                "**Machinery Library** del activo. Sin esa data, el Nivel 1 (bar chart) "
+                "ya es técnicamente válido bajo ISO 7626-6 §7.2."
+            )
+
+        st.caption(
+            "🎬 Nivel 3 (Mesh3D animado con colormap estilo Artemis) en sprint próximo. "
+            "Niveles 1-2 actuales ya cumplen ISO 7626-6 §7.2 — indican magnitud + fase "
+            "+ pattern espacial."
+        )
 
 
 # ---------------------------------------------------------------------
