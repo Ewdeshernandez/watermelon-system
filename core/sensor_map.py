@@ -67,6 +67,38 @@ _DEFAULT_UNIT_BY_TYPE = {
 }
 
 
+# =============================================================
+# Ciclo 23.148 — Defaults para análisis modal (EMA / OMA)
+# =============================================================
+# Sensitivity típica de los sensores estandarizados en SIGA. Se aplican
+# como default cuando no se especifica explícitamente en el wizard.
+#
+#   · Wilcoxon acelerómetro:  100 mV/g (IEPE)
+#   · Bently 3300/3500 prox:  200 mV/mil (AC con DC blocker)
+#   · Velocímetro tipo VS:    100 mV/(in/s) (depende del modelo)
+#   · PCB martillo modal:     2.4 mV/N (IEPE)
+#
+# Coupling típico:
+#   · IEPE: acelerómetros y martillo modal (NI-9234 suministra 2 mA)
+#   · AC:   probetas Bently con bias DC quitado (DC blocker)
+#   · DC:   medición directa (raro en vibración)
+# =============================================================
+
+_DEFAULT_SENSITIVITY_BY_TYPE = {
+    "proximity": 200.0,      # mV/mil — Bently 3300/3500
+    "velocity": 100.0,       # mV/(in/s) — VS típico
+    "accelerometer": 100.0,  # mV/g — Wilcoxon
+    "keyphasor": 0.0,        # no aplica
+}
+
+_DEFAULT_COUPLING_BY_TYPE = {
+    "proximity": "AC",
+    "velocity": "IEPE",
+    "accelerometer": "IEPE",
+    "keyphasor": "DC",
+}
+
+
 def new_sensor(
     *,
     plane: int = 1,
@@ -82,6 +114,14 @@ def new_sensor(
     notes: str = "",
     x_pct: Optional[float] = None,
     y_pct: Optional[float] = None,
+    # Ciclo 23.148 — Campos para módulo Modal Analysis (EMA / OMA).
+    # Todos opcionales. Si quedan en None / "" el sistema modal SKIP el
+    # sensor (no lo usa en EMA/OMA). El resto del sistema (Live Monitoring,
+    # Spectrum, Orbit, etc.) sigue funcionando igual.
+    sensitivity_mv_per_eu: Optional[float] = None,
+    coupling: str = "",
+    position_3d: Optional[List[float]] = None,    # [x, y, z] metros
+    dof_direction: Optional[List[float]] = None,  # vector unitario [dx, dy, dz]
 ) -> Dict[str, Any]:
     """
     Constructor de un sensor con defaults razonables.
@@ -94,6 +134,36 @@ def new_sensor(
     lugar de usar el turbomachinery generico. Si quedan en None, el
     sistema cae al render generico — retro-compatible con sensor maps
     creados antes del 15.2.
+
+    Ciclo 23.148 — Agregados 4 campos opcionales para soporte del módulo
+    Modal Analysis (EMA + OMA bajo ISO 7626 / ISO 20816 / API 684):
+
+      · sensitivity_mv_per_eu: float | None
+          Sensibilidad del transductor en mV/EU (e.g. 100 para Wilcoxon
+          100 mV/g, 200 para Bently 200 mV/mil, 2.4 para PCB martillo).
+          Si None, los helpers (get_sensitivity_for_modal) aplican el
+          default por sensor_type.
+
+      · coupling: str
+          "IEPE" | "AC" | "DC" — Modo de acoplamiento al DAQ NI-9234.
+          IEPE para accel/martillo, AC para prox Bently con DC blocker.
+
+      · position_3d: [x, y, z] en metros
+          Posición del sensor en el frame del activo (origen típico:
+          centro del crankcase, X axial driver→driven). Si None, el
+          sensor NO se usa para análisis modal 3D pero sigue funcionando
+          para Live Monitoring / Spectrum / Orbit.
+
+      · dof_direction: [dx, dy, dz] vector unitario
+          Dirección del eje sensible del transductor. Para "1YA" (Y-axis
+          accelerometer) sería [0, 1, 0]. Si None, no usable en modal.
+
+    Retrocompatibilidad
+    -------------------
+    Cualquier código existente que llame `new_sensor()` sin los nuevos
+    parámetros sigue funcionando exactamente igual — los defaults son
+    None / "". Y cualquier código que lea sensor_map.get(...) sobre estos
+    campos recibe None (ya estándar en el codebase).
     """
     if not unit_native:
         unit_native = _DEFAULT_UNIT_BY_TYPE.get(sensor_type, "")
@@ -111,7 +181,81 @@ def new_sensor(
         "notes": notes,
         "x_pct": x_pct,
         "y_pct": y_pct,
+        # Modal fields (Ciclo 23.148)
+        "sensitivity_mv_per_eu": sensitivity_mv_per_eu,
+        "coupling": coupling,
+        "position_3d": list(position_3d) if position_3d else None,
+        "dof_direction": list(dof_direction) if dof_direction else None,
     }
+
+
+# =============================================================
+# Ciclo 23.148 — Helpers para soporte Modal Analysis
+# =============================================================
+
+def get_sensitivity_for_modal(sensor: Dict[str, Any]) -> float:
+    """
+    Devuelve la sensitivity efectiva (mV/EU) de un sensor para uso modal.
+
+    Si el sensor tiene `sensitivity_mv_per_eu` configurado explícitamente,
+    se usa ese valor. Si no, se aplica el default por sensor_type:
+      · accelerometer → 100 (Wilcoxon)
+      · proximity     → 200 (Bently)
+      · velocity      → 100 (VS típico)
+
+    Returns:
+        Sensitivity en mV/EU (siempre > 0 para sensores reales)
+    """
+    raw = sensor.get("sensitivity_mv_per_eu")
+    if raw is not None:
+        try:
+            v = float(raw)
+            if v > 0:
+                return v
+        except (TypeError, ValueError):
+            pass
+    sensor_type = str(sensor.get("sensor_type", "") or "").lower()
+    return _DEFAULT_SENSITIVITY_BY_TYPE.get(sensor_type, 100.0)
+
+
+def get_coupling_for_modal(sensor: Dict[str, Any]) -> str:
+    """
+    Devuelve el coupling del sensor ("IEPE" | "AC" | "DC") para configuración
+    del NI-9234. Si no está explícito, aplica default por sensor_type.
+    """
+    raw = str(sensor.get("coupling", "") or "").strip().upper()
+    if raw in ("IEPE", "AC", "DC"):
+        return raw
+    sensor_type = str(sensor.get("sensor_type", "") or "").lower()
+    return _DEFAULT_COUPLING_BY_TYPE.get(sensor_type, "AC")
+
+
+def has_modal_3d_config(sensor: Dict[str, Any]) -> bool:
+    """
+    Verifica si un sensor tiene position_3d y dof_direction configurados
+    válidamente — requisito para incluirlo en análisis modal 3D.
+    """
+    pos = sensor.get("position_3d")
+    dof = sensor.get("dof_direction")
+    if not pos or not dof:
+        return False
+    if not isinstance(pos, (list, tuple)) or len(pos) != 3:
+        return False
+    if not isinstance(dof, (list, tuple)) or len(dof) != 3:
+        return False
+    try:
+        # dof_direction debe ser vector no-cero
+        return sum(float(v) ** 2 for v in dof) > 1e-9
+    except (TypeError, ValueError):
+        return False
+
+
+def modal_ready_sensors(sensors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Filtra una lista de sensores devolviendo solo los que tienen
+    configuración 3D completa para análisis modal.
+    """
+    return [s for s in (sensors or []) if has_modal_3d_config(s)]
 
 
 def sensor_label(sensor: Dict[str, Any]) -> str:

@@ -740,6 +740,139 @@ def _autopopulate_icon_anchors(
                 s["icon_anchor"] = anchor
 
 
+# =====================================================================
+# Ciclo 23.148 — Editor de configuración modal por sensor
+# =====================================================================
+# Expander opcional dentro del editor visual del wizard que permite al
+# analista capturar los 4 campos requeridos para análisis modal (EMA/OMA):
+#
+#   · sensitivity_mv_per_eu  (mV/EU) — sensibilidad del transductor
+#   · coupling               (IEPE/AC/DC) — modo de acoplamiento al NI-9234
+#   · position_3d            ([x, y, z] metros) — pos. en frame del activo
+#   · dof_direction          ([dx, dy, dz] unitario) — eje sensible
+#
+# Defaults inteligentes por sensor_type:
+#   · accelerometer (Wilcoxon): 100 mV/g · IEPE
+#   · proximity     (Bently)  : 200 mV/mil · AC
+#   · velocity      (VS)      : 100 mV/(in/s) · IEPE
+#
+# Si el analista no toca el expander, los campos quedan vacíos y el
+# sistema modal SKIPS el sensor (no se rompe nada).
+# =====================================================================
+
+def _render_modal_config_expander(
+    s: Dict[str, Any],
+    idx: int,
+    sensor_type: str,
+) -> None:
+    """Editor inline de la configuración modal de un sensor."""
+    from core.sensor_map import (
+        _DEFAULT_SENSITIVITY_BY_TYPE,
+        _DEFAULT_COUPLING_BY_TYPE,
+    )
+
+    _has_modal = bool(
+        s.get("sensitivity_mv_per_eu") is not None
+        or s.get("coupling")
+        or s.get("position_3d")
+        or s.get("dof_direction")
+    )
+    _expander_title = (
+        "⚙ Configuración modal · capturada ✓"
+        if _has_modal
+        else "⚙ Configuración modal (opcional · para EMA / OMA)"
+    )
+
+    with st.expander(_expander_title, expanded=False):
+        st.caption(
+            "Requerido solo si vas a usar este sensor en el módulo Modal Analysis. "
+            "Si lo dejas vacío, el sensor sigue funcionando para Live Monitoring, "
+            "Spectrum y Orbit como siempre."
+        )
+
+        # Defaults
+        _sens_default = _DEFAULT_SENSITIVITY_BY_TYPE.get(sensor_type.lower(), 100.0)
+        _coup_default = _DEFAULT_COUPLING_BY_TYPE.get(sensor_type.lower(), "AC")
+
+        # Sensitivity + coupling
+        mc1, mc2 = st.columns(2)
+        with mc1:
+            _cur_sens = s.get("sensitivity_mv_per_eu")
+            sens_val = st.number_input(
+                "Sensitivity (mV/EU)",
+                min_value=0.0,
+                max_value=10000.0,
+                value=float(_cur_sens) if _cur_sens is not None else float(_sens_default),
+                step=10.0,
+                key=f"wiz_modal_sens_{idx}",
+                help="Wilcoxon accel: 100 mV/g · Bently prox: 200 mV/mil · PCB martillo: 2.4 mV/N",
+            )
+            # Solo guardamos si el valor difiere significativamente de None;
+            # si el analista lo dejó en el default y NO completó posición 3D,
+            # asumimos que no quiere configurar modal (no contaminamos data)
+            if sens_val > 0:
+                s["sensitivity_mv_per_eu"] = float(sens_val)
+
+        with mc2:
+            _coup_opts = ["", "IEPE", "AC", "DC"]
+            _cur_coup = (s.get("coupling") or _coup_default).upper()
+            _coup_idx = _coup_opts.index(_cur_coup) if _cur_coup in _coup_opts else 0
+            coup_pick = st.selectbox(
+                "Coupling al NI-9234",
+                _coup_opts,
+                index=_coup_idx,
+                key=f"wiz_modal_coup_{idx}",
+                format_func=lambda x: x or "— ninguno —",
+                help="IEPE: accel / martillo · AC: Bently con DC blocker · DC: medición directa",
+            )
+            if coup_pick:
+                s["coupling"] = coup_pick
+
+        # Position 3D
+        st.markdown("**Posición 3D del sensor** — origen: centro crankcase · X axial driver→driven")
+        _pos = s.get("position_3d") or [0.0, 0.0, 0.0]
+        pc1, pc2, pc3 = st.columns(3)
+        with pc1:
+            px = st.number_input("x (m)", value=float(_pos[0]),
+                                 step=0.1, key=f"wiz_modal_px_{idx}")
+        with pc2:
+            py = st.number_input("y (m)", value=float(_pos[1]),
+                                 step=0.1, key=f"wiz_modal_py_{idx}")
+        with pc3:
+            pz = st.number_input("z (m)", value=float(_pos[2]),
+                                 step=0.1, key=f"wiz_modal_pz_{idx}")
+        # Solo guardar si al menos una coord es no-cero (gesto explícito del usuario)
+        if abs(px) + abs(py) + abs(pz) > 1e-9:
+            s["position_3d"] = [float(px), float(py), float(pz)]
+
+        # DOF direction
+        st.markdown("**Dirección DOF** — vector unitario del eje sensible")
+        _dof = s.get("dof_direction") or [0.0, 1.0, 0.0]  # default Y
+        dc1, dc2, dc3 = st.columns(3)
+        with dc1:
+            dx = st.number_input("dx", value=float(_dof[0]), step=0.1,
+                                 min_value=-1.0, max_value=1.0,
+                                 key=f"wiz_modal_dx_{idx}")
+        with dc2:
+            dy = st.number_input("dy", value=float(_dof[1]), step=0.1,
+                                 min_value=-1.0, max_value=1.0,
+                                 key=f"wiz_modal_dy_{idx}")
+        with dc3:
+            dz = st.number_input("dz", value=float(_dof[2]), step=0.1,
+                                 min_value=-1.0, max_value=1.0,
+                                 key=f"wiz_modal_dz_{idx}")
+        if abs(dx) + abs(dy) + abs(dz) > 1e-9:
+            s["dof_direction"] = [float(dx), float(dy), float(dz)]
+
+        # Hint de inferencia automática por convención de naming
+        _plbl = str(s.get("plane_label", "")).upper()
+        if not s.get("dof_direction"):
+            if "YA" in _plbl or "YV" in _plbl:
+                st.caption("💡 Convención: sensor con 'Y' → `dof_direction` típico [0, 1, 0]")
+            elif "XA" in _plbl or "XV" in _plbl:
+                st.caption("💡 Convención: sensor con 'X' → `dof_direction` típico [1, 0, 0]")
+
+
 def _render_visual_editor_library(
     state: Dict[str, Any],
     sensors: List[Dict[str, Any]],
@@ -869,6 +1002,11 @@ def _render_visual_editor_library(
                         format_func=lambda x: x or "— anchor —",
                     )
                     s["icon_anchor"] = anch_pick
+
+                # Ciclo 23.148 — Configuración modal opcional por sensor.
+                # Si está vacía, el sistema modal SKIP este sensor (no se rompe nada).
+                # Si está completa, queda disponible para EMA / OMA / 3D animación.
+                _render_modal_config_expander(s, idx, stype)
 
         state["sensors_override"] = sensors
 
