@@ -567,7 +567,13 @@ def _build_library_sensors(
     se renderizan sin sparkline (back-compat).
     """
     out: List[Dict[str, Any]] = []
-    seen_anchors: set = set()  # evitar 2 sensores apilados en el mismo dot
+    # Ciclo 23.143 — Dedupe duro por (side, anchor). Max 2 sensores por anchor.
+    # Permite el caso N=2 (accelerometer + velocity, o X + Y ortogonales)
+    # pero descarta sensores REDUNDANTES que solo agregan ruido visual
+    # (ej. 1VT6831 cuando ya hay 1YA + 1YV en el mismo cojinete CRF).
+    # El composer en N=2 ya renderiza arriba+abajo limpio.
+    anchor_count: Dict[Tuple[str, str], int] = {}
+    MAX_PER_ANCHOR = 2
 
     # Stale threshold (Ciclo 23.75): subido de 60s → 180s. El collector
     # industrial típicamente pollea cada 60-90 segundos; con latencia de
@@ -588,9 +594,13 @@ def _build_library_sensors(
         side, anchor = _infer_side_anchor(lbl, sensor_match, instance_obj)
         if not side or not anchor:
             continue
-        # Si ya hay un sensor en este anchor, lo dejamos pasar igual —
-        # el composer renderiza ambos textos, solo el dot queda overlapped.
-        # (Caso típico: 1Y_V y 1X_V están en el mismo cojinete pero ortogonales)
+        # Ciclo 23.143 — Skip si ya hay 2+ sensores en este anchor.
+        # Caso típico: 1YA + 1YV + 1VT6831 en CRF → solo los primeros 2.
+        # El 3ro es redundante y satura el SVG visualmente.
+        akey = (side, anchor)
+        if anchor_count.get(akey, 0) >= MAX_PER_ANCHOR:
+            continue
+        anchor_count[akey] = anchor_count.get(akey, 0) + 1
         unit = r.get("unit") or ""
         sev = compute_severity(r.get("value"), sensor_match, unit, instance_obj)
         try:
@@ -674,7 +684,6 @@ def _build_library_sensors(
             "sensor_label": lbl,  # para que zoom panel pueda lookupear
             "is_stale": is_stale,
         })
-        seen_anchors.add((side, anchor))
     return out
 
 
