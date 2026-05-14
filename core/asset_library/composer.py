@@ -494,13 +494,35 @@ def compose_train(
         elif n_total >= 3:
             idx = seen.get(key, 0)
             seen[key] = idx + 1
-            # Ciclo 23.139 — spread 55 era demasiado: primer sensor caía
-            # fuera del viewBox del icono. 32 mantiene los 3 dots dentro
-            # del shape para iconos típicos (~180-250px wide del body).
-            spread = 32
-            offset_x = (idx - (n_total - 1) / 2) * spread
-            cx = cx + offset_x
-            text_above = (idx % 2 == 0)  # zig-zag vertical
+            # Ciclo 23.142 — Layout TOWER + LATERAL para N=3+ sensores en
+            # el mismo anchor. Antes (v3.31.139) usábamos spread horizontal
+            # uniforme — 1YA y 1YV quedaban desalineadas horizontalmente.
+            # Ahora:
+            #   idx 0 → centro, ARRIBA (primer sensor del bearing, ej. 1YA)
+            #   idx 1 → centro, ABAJO (mismo bearing axial Y, ej. 1YV)
+            #   idx 2 → lateral derecha, ARRIBA (3er sensor casing, ej. 1VT6831)
+            #   idx 3 → lateral izquierda, ABAJO (4to sensor)
+            #   idx 4+ → fallback spread horizontal con más separación
+            if idx == 0:
+                # primer sensor: centro arriba
+                text_above = True
+            elif idx == 1:
+                # segundo sensor: centro abajo (alineado verticalmente con idx 0)
+                text_above = False
+            elif idx == 2:
+                # tercero: lateral der, arriba
+                cx = cx + 48
+                text_above = True
+            elif idx == 3:
+                # cuarto: lateral izq, abajo
+                cx = cx - 48
+                text_above = False
+            else:
+                # 5+: cascada horizontal con offset mayor
+                spread = 40
+                offset_x = (idx - 2) * spread  # idx 4 → +80, idx 5 → +120, etc.
+                cx = cx + offset_x
+                text_above = (idx % 2 == 0)
 
         dots_svg_parts.append(
             _render_sensor_dot(
