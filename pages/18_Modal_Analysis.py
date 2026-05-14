@@ -222,15 +222,80 @@ with tab_acq:
             mc3.metric("Canales", len(tdms.channels))
             mc4.metric("Promedios", tdms.n_averages or "—")
 
-            # Detección automática de martillo
+            # Ciclo 23.155 — Bifurcación EMA vs OMA según mode del TDMS.
+            # ISO 7626-5 SOLO aplica a EMA (impact hammer). Para OMA aplica
+            # ISO 20816 — sin requerir martillo. Detectamos el mode y dirigimos
+            # al usuario al tab correcto.
+            tdms_mode = (tdms.mode or "").lower()
+            is_oma_tdms = "oma" in tdms_mode or "continuous" in tdms_mode
+            is_ema_tdms = "ema" in tdms_mode or "triggered" in tdms_mode
+
+            if is_oma_tdms:
+                st.markdown(
+                    f'<div style="background:#dbeafe;border:1.5px solid #2563eb;'
+                    f'border-radius:8px;padding:14px 18px;">'
+                    f'<div style="font-weight:800;color:#1e3a8a;font-size:16px;">'
+                    f'🌊 TDMS modo OMA detectado</div>'
+                    f'<div style="color:#1e40af;font-size:13px;margin-top:4px;">'
+                    f'Operational Modal Analysis — sin martillo, evaluado bajo '
+                    f'<b>ISO 20816</b> (no ISO 7626-5). Procesa con FDD en el '
+                    f'<b>Tab OMA →</b>.'
+                    f'</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+                # Preview rápido: time-domain de cada canal
+                st.markdown("### Preview canales operacionales")
+                from plotly.subplots import make_subplots
+                n_show = len(tdms.channels)
+                fig_prev = make_subplots(
+                    rows=n_show, cols=1,
+                    subplot_titles=[f"{ch.name} ({ch.units})"
+                                     for ch in tdms.channels],
+                    vertical_spacing=0.06,
+                    shared_xaxes=True,
+                )
+                for i, ch in enumerate(tdms.channels, 1):
+                    # Decimar para velocidad si el record es muy largo
+                    step = max(1, ch.n_samples // 5000)
+                    fig_prev.add_trace(go.Scatter(
+                        x=ch.time_s[::step], y=ch.data[::step],
+                        mode="lines", showlegend=False,
+                        line=dict(width=1, color="#1AAEE5"),
+                    ), row=i, col=1)
+                    fig_prev.update_yaxes(title_text=ch.units, row=i, col=1)
+                fig_prev.update_xaxes(title_text="Tiempo (s)",
+                                        row=n_show, col=1)
+                fig_prev.update_layout(
+                    height=max(280, 150 * n_show),
+                    template="plotly_white",
+                    margin=dict(l=50, r=20, t=40, b=40),
+                )
+                st.plotly_chart(fig_prev, use_container_width=True)
+                st.caption(
+                    "ℹ Datos operacionales listos para FDD. Cambia al **Tab OMA** "
+                    "para identificar modos naturales sin necesidad de martillo."
+                )
+                st.stop()
+
+            # Detección automática de martillo (EMA mode)
             hammer = tdms.detect_hammer_channel()
             responses = tdms.response_channels()
 
             if hammer is None:
-                st.warning(
-                    "⚠ No se detectó canal de martillo automáticamente. "
-                    "El validador ISO 7626-5 requiere un input claro."
-                )
+                if not is_ema_tdms:
+                    st.warning(
+                        "⚠ TDMS sin metadata de mode (`ema_triggered` o "
+                        "`oma_continuous`). No se pudo determinar si es EMA u OMA. "
+                        "Si es OMA, procesa con FDD en el Tab OMA."
+                    )
+                else:
+                    st.warning(
+                        "⚠ No se detectó canal de martillo automáticamente. "
+                        "ISO 7626-5 requiere un input claro. Verifica que el "
+                        "primer canal sea el martillo con sensitivity baja "
+                        "(~2.4 mV/N) o nombre 'Hammer'/'Martillo'."
+                    )
                 st.stop()
 
             st.success(
