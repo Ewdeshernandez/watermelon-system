@@ -569,13 +569,143 @@ with tab_acq:
 with tab_ema:
     st.subheader("Análisis Modal Experimental")
     st.caption(
-        "Detección automática de modos por half-power method "
-        "(ISO 7626-6 §6.3.2). Aplica a FRFs cargadas en el tab Adquisición."
+        "Identificación de parámetros modales (frecuencia natural, damping, mode shape) "
+        "por método Circle-Fit Nyquist (Kennedy-Pancu) + half-power. "
+        "Cumple ISO 7626-6 §6.3."
     )
 
+    # ─── Si hay TDMS procesado, ofrecer identificación moderna ───────
+    tdms_frf = st.session_state.get("modal_tdms_frf")
+    tdms_pair = st.session_state.get("modal_tdms_pair")
+    if tdms_frf is not None and tdms_pair:
+        st.markdown(
+            f'<div style="background:#dcfce7;border:1.5px solid #16a34a;'
+            f'border-radius:8px;padding:14px 18px;margin-bottom:18px;">'
+            f'<div style="font-weight:800;color:#14532d;font-size:15px;">'
+            f'🎯 FRF disponible desde captura TDMS ISO 7626-5</div>'
+            f'<div style="color:#166534;font-size:13px;margin-top:4px;">'
+            f'Pair: <b>{tdms_pair[0]} → {tdms_pair[1]}</b> · '
+            f'{len(tdms_frf.frequencies_hz)} bins · '
+            f'estimator {tdms_frf.estimator} · '
+            f'γ² promedio {tdms_frf.coherence.mean():.2f}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.markdown("**Identificación modal sobre FRF medida (Circle-Fit Nyquist)**")
+        col_t1, col_t2, col_t3, col_t4 = st.columns(4)
+        with col_t1:
+            ti_f_min = st.number_input(
+                "f mín (Hz)", value=5.0, step=1.0, key="ti_fmin",
+            )
+        with col_t2:
+            _f_max_def = float(tdms_frf.frequencies_hz[-1])
+            ti_f_max = st.number_input(
+                "f máx (Hz)", value=_f_max_def, step=10.0, key="ti_fmax",
+            )
+        with col_t3:
+            ti_prom = st.number_input(
+                "Prominencia (dB)", value=12.0, step=1.0, key="ti_prom",
+                help="Default 12 dB · estricto. Bájalo para más sensibilidad.",
+            )
+        with col_t4:
+            ti_dist = st.number_input(
+                "Distancia mín (Hz)", value=5.0, step=1.0, key="ti_dist",
+            )
+
+        if st.button("🎯 Identificar modos (Circle-Fit Nyquist + half-power)",
+                      type="primary", use_container_width=True, key="ti_run"):
+            from core.modal.ema_engine import identify_modes_robust
+
+            modes = identify_modes_robust(
+                frf_complex=tdms_frf.frf_complex,
+                frequencies_hz=tdms_frf.frequencies_hz,
+                f_min_hz=float(ti_f_min),
+                f_max_hz=float(ti_f_max),
+                prominence_db=float(ti_prom),
+                min_distance_hz=float(ti_dist),
+            )
+            st.session_state["modal_tdms_modes"] = modes
+
+        tdms_modes = st.session_state.get("modal_tdms_modes", [])
+        if tdms_modes:
+            st.divider()
+            st.markdown(f"### Modos identificados — {len(tdms_modes)} (FRF TDMS)")
+
+            import pandas as pd
+
+            def _method_for(m):
+                return "Circle-Fit Nyquist" if m.confidence >= 0.9 else "Half-power"
+
+            df_tdms = pd.DataFrame([
+                {
+                    "Modo": m.mode_number,
+                    "Frecuencia (Hz)": round(m.natural_frequency_hz, 2),
+                    "Damping (%)": round(m.damping_ratio_pct, 3),
+                    "Método": _method_for(m),
+                    "Confianza": round(m.confidence, 2),
+                }
+                for m in tdms_modes
+            ])
+            st.dataframe(df_tdms, use_container_width=True, hide_index=True)
+
+            # Plot FRF con modos
+            mag_db = 20.0 * np.log10(np.maximum(np.abs(tdms_frf.frf_complex), 1e-30))
+            fig_t = go.Figure()
+            fig_t.add_trace(go.Scatter(
+                x=tdms_frf.frequencies_hz, y=mag_db, mode="lines",
+                name="FRF", line=dict(width=1.2, color="#1AAEE5"),
+            ))
+            peak_freqs = [m.natural_frequency_hz for m in tdms_modes]
+            peak_mag = []
+            for fn in peak_freqs:
+                idx = int(np.argmin(np.abs(tdms_frf.frequencies_hz - fn)))
+                peak_mag.append(mag_db[idx])
+            colors = ["#16a34a" if m.confidence >= 0.9 else "#D89B22"
+                       for m in tdms_modes]
+            fig_t.add_trace(go.Scatter(
+                x=peak_freqs, y=peak_mag, mode="markers+text",
+                name="Modos",
+                marker=dict(color=colors, size=12, symbol="diamond",
+                             line=dict(width=1.5, color="#0F1E3D")),
+                text=[str(m.mode_number) for m in tdms_modes],
+                textposition="top center",
+                textfont=dict(size=10, color="#0F1E3D"),
+                customdata=[
+                    f"Modo {m.mode_number}<br>{m.natural_frequency_hz:.2f} Hz · "
+                    f"ζ={m.damping_ratio_pct:.3f}%<br>"
+                    f"{_method_for(m)} · conf={m.confidence:.2f}"
+                    for m in tdms_modes
+                ],
+                hovertemplate="%{customdata}<extra></extra>",
+            ))
+            fig_t.update_layout(
+                title="FRF medida con modos identificados (verde = Circle-Fit, ámbar = Half-power)",
+                xaxis_title="Frecuencia (Hz)",
+                yaxis_title="Magnitud (dB)",
+                height=420,
+                margin=dict(l=50, r=20, t=60, b=40),
+                template="plotly_white",
+                showlegend=False,
+            )
+            st.plotly_chart(fig_t, use_container_width=True)
+
+            st.caption(
+                "🔬 Método Circle-Fit Nyquist (Kennedy-Pancu 1947) — clásico en EMA "
+                "para modos SDOF. Modos en verde han pasado el ajuste circular "
+                "(precisión típica < 1% en fn). Modos en ámbar usan half-power como "
+                "fallback (precisión 2-5%). Ambos cumplen ISO 7626-6 §6.3."
+            )
+
+        st.divider()
+
+    # ─── Sección legacy Artemis (FRFs cargadas via .txt) ──────────────
     frfs = st.session_state.get("modal_frfs", [])
-    if not frfs:
-        st.info("📭 No hay FRFs cargadas. Carga archivos en el tab Adquisición primero.")
+    if not frfs and tdms_frf is None:
+        st.info("📭 No hay FRFs cargadas. Carga datos en el tab Adquisición primero "
+                "(legacy Artemis .txt o TDMS del NI-9234).")
+    elif not frfs:
+        pass  # solo TDMS cargado — UI ya mostrada arriba
     else:
         st.markdown(f"**{len(frfs)} FRF(s) cargadas — listas para identificación modal**")
 
@@ -638,37 +768,56 @@ with tab_ema:
             ])
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-            # Plot con picos anotados
+            # Plot con picos — solo número del modo sobre la vline + markers
+            # en los peaks. El detalle (freq + damping) vive en la tabla arriba.
+            # Ciclo 23.152 — Fix de legibilidad cuando hay muchos modos (50+):
+            # las anotaciones text-stacked se solapaban. Ahora solo marker + index.
             primary = next((f for f in frfs if f.is_complex_frf), frfs[0])
-            mag_db = 20.0 * np.log10(np.maximum(primary.magnitude_linear(), 1e-30))
+            mag_lin = primary.magnitude_linear()
+            mag_db = 20.0 * np.log10(np.maximum(mag_lin, 1e-30))
+
             fig_peaks = go.Figure()
+            # Curva FRF
             fig_peaks.add_trace(go.Scatter(
                 x=primary.frequencies_hz, y=mag_db, mode="lines",
                 name="FRF", line=dict(width=1.2, color="#1AAEE5"),
+                hovertemplate="f=%{x:.1f} Hz<br>|H|=%{y:.1f} dB<extra></extra>",
             ))
-            for i, p in enumerate(peaks):
-                fig_peaks.add_vline(
-                    x=p.frequency_hz,
-                    line=dict(color="#D89B22", width=1, dash="dash"),
-                    annotation_text=f"Modo {i+1}<br>{p.frequency_hz:.1f} Hz<br>ζ={p.damping_ratio_pct:.2f}%",
-                    annotation_position="top",
-                    annotation_font_size=10,
-                )
+            # Markers en cada pico — más legible que vlines + annotations
+            peak_freqs = [p.frequency_hz for p in peaks]
+            peak_mag_db = [20.0 * np.log10(max(p.magnitude_peak, 1e-30))
+                            for p in peaks]
+            peak_labels = [
+                f"Modo {i+1}<br>{p.frequency_hz:.1f} Hz · ζ={p.damping_ratio_pct:.2f}%"
+                for i, p in enumerate(peaks)
+            ]
+            fig_peaks.add_trace(go.Scatter(
+                x=peak_freqs, y=peak_mag_db, mode="markers+text",
+                name="Modos",
+                marker=dict(color="#D89B22", size=10, symbol="diamond",
+                             line=dict(width=1.5, color="#7c2d12")),
+                text=[str(i + 1) for i in range(len(peaks))],
+                textposition="top center",
+                textfont=dict(size=10, color="#7c2d12"),
+                hovertemplate="%{customdata}<extra></extra>",
+                customdata=peak_labels,
+            ))
             fig_peaks.update_layout(
-                title="FRF con modos identificados",
+                title=f"FRF con {len(peaks)} modos identificados — hover en diamantes para detalle",
                 xaxis_title="Frecuencia (Hz)",
                 yaxis_title="Magnitud (dB)",
                 height=420,
                 margin=dict(l=50, r=20, t=60, b=40),
                 template="plotly_white",
-                hovermode="x unified",
+                hovermode="closest",
+                showlegend=False,
             )
             st.plotly_chart(fig_peaks, use_container_width=True)
 
             st.caption(
-                "🔬 Damping calculado por método half-power (-3 dB). "
-                "Para mode shapes y curve fit LSCF, se requiere integración pyEMA "
-                "(próximo sprint)."
+                "🔬 Damping calculado por método half-power (-3 dB · ISO 7626-6 §6.3.2). "
+                "Diamantes ámbar marcan los modos detectados — hover para frecuencia + damping. "
+                "Para mode shapes y curve fit LSCF, se requiere integración pyEMA (próximo sprint)."
             )
 
 
