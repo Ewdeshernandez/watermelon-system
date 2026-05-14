@@ -97,7 +97,7 @@ def compute_frf_h1(
     sample_rate_hz: float,
     nperseg: int = 1024,
     noverlap: Optional[int] = None,
-    window: str = "hanning",
+    window: str = "hann",
 ) -> FRFResult:
     """
     Calcula FRF usando estimador H1 = Sxy / Sxx.
@@ -161,7 +161,7 @@ def compute_frf_h2(
     sample_rate_hz: float,
     nperseg: int = 1024,
     noverlap: Optional[int] = None,
-    window: str = "hanning",
+    window: str = "hann",
 ) -> FRFResult:
     """
     Calcula FRF usando estimador H2 = Syy / Syx*.
