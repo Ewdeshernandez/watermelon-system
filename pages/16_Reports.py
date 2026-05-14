@@ -533,23 +533,17 @@ if _wm_my_role == "client":
         unsafe_allow_html=True,
     )
 
-    _stats = get_archive_stats()
-    ck1, ck2 = st.columns(2)
-    with ck1:
-        st.metric("Reportes disponibles", _stats["total"])
-    with ck2:
-        st.metric("Espacio total", _stats["total_size_human"])
-
-    cf1, cf2, cf3 = st.columns(3)
+    # Ciclo 23.144 — Vista cliente minimalista:
+    # Removidos: métricas "Reportes disponibles" + "Espacio total" (info interna SIGA,
+    # no aporta al cliente). Filtro "por cliente" también removido — el cliente ya
+    # está scopeado a su propio match_strings, filtrar por sí mismo es redundante.
+    # Quedan solo filtros útiles: por activo + por año.
+    cf1, cf2 = st.columns([2, 1])
     with cf1:
-        _cf_client = st.text_input("Filtrar por cliente",
-                                    placeholder="ej. Parex",
-                                    key="wm_cli_arch_client").strip()
-    with cf2:
         _cf_asset = st.text_input("Filtrar por activo",
                                    placeholder="ej. C-200C",
                                    key="wm_cli_arch_asset").strip()
-    with cf3:
+    with cf2:
         _cf_year = st.selectbox(
             "Año",
             options=["(todos)"] + [str(y) for y in range(datetime.now().year, 2023, -1)],
@@ -563,7 +557,7 @@ if _wm_my_role == "client":
     _cli_archived = list_archived_reports(
         viewer_email=_wm_my_email,
         viewer_role=_wm_my_role,
-        client_filter=_cf_client,
+        client_filter="",  # cliente no filtra por cliente — ya está scopeado por backend
         asset_filter=_cf_asset,
         date_from=_cli_from,
         date_to=_cli_to,
@@ -584,24 +578,33 @@ if _wm_my_role == "client":
             _sev = rm.get("executive_severity", "")
             _date = sc.get("archived_at", "")[:16]
             _size = sc.get("size_human", "")
+
+            # Ciclo 23.144 — Fix render `</div>` literal en cliente:
+            # La f-string anidada {f'<span...>' if _sev else ''} dentro del
+            # f"""...""" triple-quoted producía un bug donde el `</div>` del
+            # contenedor derecho aparecía como texto literal. Solución:
+            # construir el badge fuera del template y embedearlo como variable
+            # simple. Si no hay severidad, simplemente omitimos el span.
+            _sev_badge = (
+                f'<span style="background:#fee2e2;color:#b91c1c;'
+                f'padding:4px 10px;border-radius:999px;font-size:10px;'
+                f'font-weight:800;">{_sev}</span>'
+                if _sev else ""
+            )
             st.markdown(
                 f"""
                 <div style="background:white;border:1px solid #e6ebf2;
-                            border-radius:12px;padding:14px 18px;margin-bottom:8px;">
-                  <div style="display:flex;justify-content:space-between;
-                              align-items:center;">
-                    <div>
-                      <div style="font-weight:800;color:#0f172a;font-size:15px;">
-                        {_client} · {_asset}
-                      </div>
-                      <div style="color:#475569;font-size:12px;margin-top:2px;">
-                        Publicado {_date} · {_size}
-                      </div>
+                            border-radius:12px;padding:14px 18px;margin-bottom:8px;
+                            display:flex;justify-content:space-between;align-items:center;">
+                  <div>
+                    <div style="font-weight:800;color:#0f172a;font-size:15px;">
+                      {_client} · {_asset}
                     </div>
-                    <div>
-                      {f'<span style="background:#fee2e2;color:#b91c1c;padding:4px 10px;border-radius:999px;font-size:10px;font-weight:800;">{_sev}</span>' if _sev else ''}
+                    <div style="color:#475569;font-size:12px;margin-top:2px;">
+                      Publicado {_date} · {_size}
                     </div>
                   </div>
+                  <div>{_sev_badge}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
