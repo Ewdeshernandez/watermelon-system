@@ -31,8 +31,8 @@ from __future__ import annotations
 import streamlit as st
 
 # Auth + layout reusables del sistema Watermelon
-from core.auth import require_login, render_user_menu, is_page_allowed_for_role
-from core.page_header import page_header
+from core.auth import require_login, render_user_menu, get_current_user, is_page_allowed_for_role
+from core.ui_theme import page_header
 
 
 # =====================================================================
@@ -44,22 +44,20 @@ st.set_page_config(
     layout="wide",
 )
 
-# Auth (solo admin/specialist por ahora — cliente NO ve modal)
-session = require_login()
-_my_email = (session.get("email") or "").lower()
-_my_role = (session.get("role") or "").lower()
+# Auth — modal es interno SIGA, ya bloqueado a client en CLIENT_BLOCKED_PAGES
+require_login()
+render_user_menu()
 
+_user = get_current_user() or {}
+_my_role = str(_user.get("role", "")).lower()
 if not is_page_allowed_for_role("pages/18_Modal_Analysis.py", _my_role):
     st.error("Tu rol no tiene acceso a este módulo.")
     st.stop()
 
-render_user_menu(current_page="pages/18_Modal_Analysis.py")
-
 # Header internacional
 page_header(
-    icon="🌐",
-    title="Modal Analysis",
-    subtitle="EMA · OMA · FEA — Análisis modal experimental y operacional bajo ISO 7626 / ISO 20816 / API 684",
+    "Modal Analysis",
+    "EMA · OMA · FEA — Análisis modal experimental y operacional bajo ISO 7626 / ISO 20816 / API 684",
 )
 
 

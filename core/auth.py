@@ -138,6 +138,11 @@ CLIENT_BLOCKED_PAGES = {
     # acceder a la herramienta de generación (ve los briefings que
     # le llegan por email pero no los genera él mismo).
     "pages/_monthly_briefing.py",
+    # Ciclo 23.146 — Modal Analysis es trabajo interno SIGA (EMA + OMA + FEA
+    # bajo ISO 7626 / ISO 20816 / API 684). El cliente no debe ver el módulo
+    # de adquisición ni los curve fits — solo recibe el reporte final modal
+    # integrado en Reports.
+    "pages/18_Modal_Analysis.py",
 }
 
 
