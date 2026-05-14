@@ -456,6 +456,46 @@ def find_meta(metadata: Dict[str, Any], candidates: List[str]) -> Any:
     return None
 
 
+def infer_sensor_kind(point: str = "", variable: str = "") -> str:
+    """
+    Ciclo 23.145 — Infiere tipo de sensor desde el nombre del punto / variable.
+    Devuelve: "displacement" | "velocity" | "acceleration" | "unknown".
+
+    Convenciones de naming usadas en planta (Bently 3500 + collector TES1):
+    · Acelerómetro:   *ACEL*, *ACCEL*, *YA, *XA  (ej. 1YA, 2YA, "CRF ACEL")
+    · Velocímetro:    *VEL*, *YV, *XV            (ej. 1YV, 2YV)
+    · Desplazamiento: VE5xxx, VT*, *PROX*, *DISP* (Bently proximity probes)
+    """
+    import re as _re
+    s = f"{point} {variable}".upper()
+    s_clean = s.replace(" ", "")
+
+    # Acelerómetro — patrones específicos
+    if "ACEL" in s or "ACCEL" in s:
+        return "acceleration"
+    if _re.search(r"\b\d*[YX]A\b", s):
+        return "acceleration"
+
+    # Velocímetro
+    if _re.search(r"\b\d*[YX]V\b", s):
+        return "velocity"
+    if "VEL" in s and "VELOC" not in s.replace("VELOCITY", "VEL"):
+        # Evitar falsos positivos como "VELOCITY UNIT" — ya cubierto si "VEL" está
+        return "velocity"
+    if _re.search(r"\bVS\d", s):
+        return "velocity"
+
+    # Desplazamiento (proximity probes Bently)
+    if "PROX" in s or "DISP" in s or "MIL" in s:
+        return "displacement"
+    if _re.search(r"VE\d{3,}", s_clean) or _re.search(r"\bVT\d", s):
+        return "displacement"
+    if _re.search(r"\d{4}\s*[YX]\b", s):  # ej. 5807Y, 5808X
+        return "displacement"
+
+    return "unknown"
+
+
 def infer_amplitude_unit(metadata: Dict[str, Any]) -> str:
     y_axis_unit = find_meta(
         metadata,
@@ -479,6 +519,19 @@ def infer_amplitude_unit(metadata: Dict[str, Any]) -> str:
         return "ips"
     if "g" in variable and "pk" not in variable:
         return "g"
+
+    # Ciclo 23.145 — Fallback final por convención de naming del sensor.
+    # Cuando el collector no inyecta Y-Axis Unit ni Variable estandarizada,
+    # inferimos por el nombre del punto/canal (1YA, VE5809, etc.).
+    point_raw = str(find_meta(metadata, ["Point", "point", "Point Name", "point name", "channel"]) or "")
+    var_raw = str(find_meta(metadata, ["Variable", "variable"]) or "")
+    kind = infer_sensor_kind(point_raw, var_raw)
+    if kind == "acceleration":
+        return "G"
+    if kind == "velocity":
+        return "in/s"
+    if kind == "displacement":
+        return "mil"
     return ""
 
 
@@ -1084,7 +1137,17 @@ def build_waveform_figure(
                 annotation_font_size=11,
             )
 
-    amp_pp_text = f"{format_number(summary.get('Peak-Peak'), 3)} {amp_unit} p-p".strip()
+    # Ciclo 23.145 — Convención de unidades por tipo de sensor:
+    # · Desplazamiento (mil): se reporta peak-to-peak (p-p)
+    # · Velocidad (in/s) y Aceleración (G): convención industria — pk (0→peak),
+    #   valor = pp / 2  (norma vibration analysis / API 670 / Bently)
+    _wf_kind = infer_sensor_kind(record.point, record.variable)
+    _pp_val = summary.get("Peak-Peak")
+    if _wf_kind in ("velocity", "acceleration") and _pp_val is not None:
+        _pk_val = _pp_val / 2.0
+        amp_pp_text = f"{format_number(_pk_val, 3)} {amp_unit} pk".strip()
+    else:
+        amp_pp_text = f"{format_number(_pp_val, 3)} {amp_unit} p-p".strip()
 
     _draw_top_strip(
         fig=fig,

@@ -395,6 +395,37 @@ def find_meta(metadata: Dict[str, Any], candidates: List[str]) -> Any:
                 return v
     return None
 
+def infer_sensor_kind(point: str = "", variable: str = "") -> str:
+    """
+    Ciclo 23.145 — Espejo del helper en pages/02_Time_Waveforms.py.
+    Devuelve: "displacement" | "velocity" | "acceleration" | "unknown".
+    """
+    import re as _re
+    s = f"{point} {variable}".upper()
+    s_clean = s.replace(" ", "")
+
+    if "ACEL" in s or "ACCEL" in s:
+        return "acceleration"
+    if _re.search(r"\b\d*[YX]A\b", s):
+        return "acceleration"
+
+    if _re.search(r"\b\d*[YX]V\b", s):
+        return "velocity"
+    if "VEL" in s and "VELOC" not in s.replace("VELOCITY", "VEL"):
+        return "velocity"
+    if _re.search(r"\bVS\d", s):
+        return "velocity"
+
+    if "PROX" in s or "DISP" in s or "MIL" in s:
+        return "displacement"
+    if _re.search(r"VE\d{3,}", s_clean) or _re.search(r"\bVT\d", s):
+        return "displacement"
+    if _re.search(r"\d{4}\s*[YX]\b", s):
+        return "displacement"
+
+    return "unknown"
+
+
 def infer_amplitude_unit(metadata: Dict[str, Any]) -> str:
     y_axis_unit = find_meta(
         metadata,
@@ -418,6 +449,17 @@ def infer_amplitude_unit(metadata: Dict[str, Any]) -> str:
         return "ips"
     if "g" in variable and "pk" not in variable:
         return "g"
+
+    # Ciclo 23.145 — Fallback por convención de naming del sensor.
+    point_raw = str(find_meta(metadata, ["Point", "point", "Point Name", "point name", "channel"]) or "")
+    var_raw = str(find_meta(metadata, ["Variable", "variable"]) or "")
+    kind = infer_sensor_kind(point_raw, var_raw)
+    if kind == "acceleration":
+        return "G"
+    if kind == "velocity":
+        return "in/s"
+    if kind == "displacement":
+        return "mil"
     return ""
 
 def convert_input_time_to_seconds(raw_time: np.ndarray) -> Tuple[np.ndarray, str]:
