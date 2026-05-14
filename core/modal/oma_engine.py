@@ -67,6 +67,107 @@ class OMAMode:
     is_harmonic: bool = False
     harmonic_order: Optional[int] = None  # 1, 2, 3... × running speed
     confidence: float = 1.0
+    complexity_pct: float = 0.0  # 0 = real (natural), 100 = totalmente complejo (espurio)
+    classification: str = "natural"  # "natural" | "harmonic" | "spurious"
+
+
+def modal_complexity_mpc(mode_shape: np.ndarray) -> float:
+    """
+    Calcula el Modal Phase Collinearity (MPC) y devuelve la complejidad en %.
+
+    MPC (Pappa & Eishan 1995) mide qué tan colineales son las fases del mode
+    shape complejo. Un modo natural real (damping proporcional, sistema
+    estable) tiene fases colineales → MPC ≈ 1 → complejidad ≈ 0%.
+
+    Un "modo" que es realmente una armónica forzada o ruido tiene fases
+    aleatorias → MPC ≈ 0 → complejidad ≈ 100%.
+
+    Fórmula:
+      S = [[Σ Re², Σ Re·Im], [Σ Re·Im, Σ Im²]]
+      eigvals λ₁ ≥ λ₂ ≥ 0
+      MPC = ((λ₁ - λ₂) / (λ₁ + λ₂))²
+      complexity_pct = (1 - MPC) × 100
+
+    Returns:
+        Complejidad en porcentaje (0 = puro real, 100 = fully complex)
+    """
+    phi = np.asarray(mode_shape, dtype=complex).flatten()
+    if phi.size == 0:
+        return 0.0
+    re = np.real(phi)
+    im = np.imag(phi)
+
+    sxx = float((re * re).sum())
+    syy = float((im * im).sum())
+    sxy = float((re * im).sum())
+
+    tr = sxx + syy
+    if tr < 1e-12:
+        return 0.0
+
+    det = sxx * syy - sxy ** 2
+    discr = max(tr ** 2 / 4.0 - det, 0.0)
+    lambda1 = tr / 2.0 + math.sqrt(discr)
+    lambda2 = tr / 2.0 - math.sqrt(discr)
+
+    if (lambda1 + lambda2) < 1e-12:
+        return 0.0
+    mpc = ((lambda1 - lambda2) / (lambda1 + lambda2)) ** 2
+    complexity_pct = max(0.0, min(100.0, (1.0 - mpc) * 100.0))
+    return float(complexity_pct)
+
+
+def classify_mode(
+    natural_frequency_hz: float,
+    complexity_pct: float,
+    running_speed_hz: Optional[float] = None,
+    harmonic_tol_pct: float = 0.5,
+    complexity_natural_threshold: float = 40.0,
+    complexity_spurious_threshold: float = 75.0,
+) -> Tuple[str, bool, Optional[int]]:
+    """
+    Clasifica un modo en natural / harmonic / spurious usando 2 criterios:
+      1. Complejidad modal (MPC) — > 75% = espurio
+      2. Coincidencia con armónicas de running speed (si se da)
+
+    Args:
+        natural_frequency_hz: fn identificada
+        complexity_pct: complejidad MPC (0-100)
+        running_speed_hz: velocidad operativa para detectar armónicas
+        harmonic_tol_pct: tolerancia para clasificar como armónica
+        complexity_natural_threshold: < este valor → claramente natural
+        complexity_spurious_threshold: > este valor → claramente espurio/harmonic
+
+    Returns:
+        (classification, is_harmonic, harmonic_order)
+        classification: "natural" | "harmonic" | "spurious"
+    """
+    is_harmonic = False
+    harmonic_order: Optional[int] = None
+    if running_speed_hz and running_speed_hz > 0:
+        for n in range(1, 16):
+            expected = n * running_speed_hz
+            if expected <= 0:
+                continue
+            diff_pct = abs(natural_frequency_hz - expected) / expected * 100.0
+            if diff_pct < harmonic_tol_pct:
+                is_harmonic = True
+                harmonic_order = n
+                break
+
+    # Lógica de clasificación combinada (criterio Artemis-like):
+    # - Complexity baja + no harmonic → natural (fn)
+    # - Complexity alta + harmonic → harmonic (Nx)
+    # - Complexity alta sin harmonic → spurious
+    # - Complexity media → natural pero con menos confianza
+    if is_harmonic and complexity_pct >= complexity_natural_threshold:
+        classification = "harmonic"
+    elif complexity_pct >= complexity_spurious_threshold:
+        classification = "spurious"
+    else:
+        classification = "natural"
+
+    return classification, is_harmonic, harmonic_order
 
 
 @dataclass
@@ -285,19 +386,24 @@ def detect_oma_modes(
         # Mode shape: primer singular vector en esta frecuencia
         mode_shape = fdd_result.mode_shapes_at_freq[:, 0, idx_full]
 
-        # Detección de armónicos
-        is_harmonic = False
-        harmonic_order = None
-        if running_speed_hz and running_speed_hz > 0:
-            for n in range(1, 11):
-                expected = n * running_speed_hz
-                if expected > f_max_hz:
-                    break
-                diff_pct = abs(fn - expected) / expected * 100.0
-                if diff_pct < harmonic_tol_pct:
-                    is_harmonic = True
-                    harmonic_order = n
-                    break
+        # Modal Complexity (MPC) — criterio Artemis para natural vs harmonic
+        complexity_pct = modal_complexity_mpc(mode_shape)
+
+        # Clasificación combinada: complexity + harmonic match
+        classification, is_harmonic, harmonic_order = classify_mode(
+            natural_frequency_hz=fn,
+            complexity_pct=complexity_pct,
+            running_speed_hz=running_speed_hz,
+            harmonic_tol_pct=harmonic_tol_pct,
+        )
+
+        # Confianza basada en clasificación
+        if classification == "natural":
+            conf = 0.95 if complexity_pct < 20 else 0.80
+        elif classification == "harmonic":
+            conf = 0.40  # confiable como harmonic, no como modo natural
+        else:  # spurious
+            conf = 0.15
 
         modes.append(OMAMode(
             mode_number=0,  # se asigna después
@@ -308,7 +414,9 @@ def detect_oma_modes(
             bandwidth_3db_hz=bw,
             is_harmonic=is_harmonic,
             harmonic_order=harmonic_order,
-            confidence=0.85 if not is_harmonic else 0.3,
+            confidence=conf,
+            complexity_pct=complexity_pct,
+            classification=classification,
         ))
 
     modes.sort(key=lambda m: m.natural_frequency_hz)

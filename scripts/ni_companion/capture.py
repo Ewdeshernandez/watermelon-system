@@ -181,10 +181,13 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    # Construir config
-    mode_internal = "simulated" if args.simulated else (
-        "ema_triggered" if args.mode == "ema" else "oma_continuous"
-    )
+    # Construir config — preservar EMA/OMA aunque sea simulado
+    # (Ciclo 23.156 — bug fix: antes ambos quedaban como "simulated" y la
+    # bifurcación en el Tab Adquisición no podía determinar EMA vs OMA.)
+    if args.simulated:
+        mode_internal = f"simulated_{args.mode}"  # simulated_ema o simulated_oma
+    else:
+        mode_internal = "ema_triggered" if args.mode == "ema" else "oma_continuous"
 
     config = AcquisitionConfig(
         mode=mode_internal,

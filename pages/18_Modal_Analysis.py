@@ -226,9 +226,26 @@ with tab_acq:
             # ISO 7626-5 SOLO aplica a EMA (impact hammer). Para OMA aplica
             # ISO 20816 — sin requerir martillo. Detectamos el mode y dirigimos
             # al usuario al tab correcto.
+            #
+            # Ciclo 23.156 — Heurística de fallback: si el mode no es claro,
+            # inferimos por presencia de un canal con kurtosis alta y baja
+            # sensitivity (martillo) vs todos similares (OMA).
             tdms_mode = (tdms.mode or "").lower()
             is_oma_tdms = "oma" in tdms_mode or "continuous" in tdms_mode
             is_ema_tdms = "ema" in tdms_mode or "triggered" in tdms_mode
+
+            # Fallback heurístico: si no hay martillo detectable, asumimos OMA
+            if not is_oma_tdms and not is_ema_tdms:
+                _hammer_test = tdms.detect_hammer_channel()
+                if _hammer_test is None:
+                    # Sin martillo → es OMA con altísima probabilidad
+                    is_oma_tdms = True
+                    st.caption(
+                        "ℹ TDMS sin metadata explícita de mode — detectado como OMA "
+                        "(sin canal de martillo identificable)."
+                    )
+                else:
+                    is_ema_tdms = True
 
             if is_oma_tdms:
                 st.markdown(
@@ -957,59 +974,116 @@ with tab_oma:
         fdd = st.session_state.get("modal_oma_result")
         if fdd is not None:
             st.divider()
-            st.markdown(f"### FDD — First singular value")
+            st.markdown("### FDD — Densidad espectral (Singular Values)")
 
-            sv_db = fdd.first_sv_db()
+            # Multi-SVD plot — equivalente al "Singular Values of Spectral Densities"
+            # de Artemis. SVD Line 1 (principal) + Line 2 + Line 3 si hay ≥ 3 canales.
             fig_sv = go.Figure()
-            fig_sv.add_trace(go.Scatter(
-                x=fdd.frequencies_hz, y=sv_db, mode="lines",
-                name="σ₁(f)", line=dict(width=1.2, color="#0F7FB0"),
-            ))
-            # Marker en cada modo identificado
+            svd_colors = ["#0F7FB0", "#dc2626", "#16a34a", "#a855f7"]
+            for k in range(min(fdd.n_channels, 3)):
+                sv_k_db = 10.0 * np.log10(np.maximum(fdd.singular_values[k, :], 1e-30))
+                fig_sv.add_trace(go.Scatter(
+                    x=fdd.frequencies_hz, y=sv_k_db,
+                    mode="lines",
+                    name=f"SVD Line {k+1}",
+                    line=dict(width=1.2 if k == 0 else 0.9,
+                              color=svd_colors[k % len(svd_colors)],
+                              dash="solid" if k == 0 else "dot"),
+                    opacity=1.0 if k == 0 else 0.6,
+                ))
+
+            # Markers de modos identificados con color según clasificación
+            sv1_db = fdd.first_sv_db()
+            class_colors = {
+                "natural": "#16a34a",
+                "harmonic": "#dc2626",
+                "spurious": "#9ca3af",
+            }
             for m in fdd.modes:
                 idx = int(np.argmin(np.abs(fdd.frequencies_hz - m.natural_frequency_hz)))
-                color = "#dc2626" if m.is_harmonic else "#16a34a"
+                label = "fn" if m.classification == "natural" else (
+                    f"{m.harmonic_order}×" if m.is_harmonic else "?"
+                )
                 fig_sv.add_trace(go.Scatter(
-                    x=[m.natural_frequency_hz], y=[sv_db[idx]],
+                    x=[m.natural_frequency_hz], y=[sv1_db[idx]],
                     mode="markers+text",
-                    marker=dict(color=color, size=12, symbol="diamond",
-                                line=dict(width=1.5, color="#0F1E3D")),
-                    text=[str(m.mode_number)], textposition="top center",
-                    textfont=dict(size=10, color="#0F1E3D"),
-                    name=f"Modo {m.mode_number}",
+                    marker=dict(color=class_colors.get(m.classification, "#0F1E3D"),
+                                size=11, symbol="diamond",
+                                line=dict(width=1.2, color="#0F1E3D")),
+                    text=[label], textposition="top center",
+                    textfont=dict(size=9, color="#0F1E3D"),
                     showlegend=False,
+                    hovertemplate=(
+                        f"Modo {m.mode_number}<br>"
+                        f"{m.natural_frequency_hz:.2f} Hz · ζ={m.damping_ratio_pct:.2f}%<br>"
+                        f"complexity={m.complexity_pct:.1f}%<br>"
+                        f"{m.classification}<extra></extra>"
+                    ),
                 ))
+
             fig_sv.update_layout(
-                title="Primer singular value σ₁(f) — picos = modos naturales (verde) / armónicas forzadas (rojo)",
+                title=("Singular Values of Spectral Densities — "
+                       "verde: modo natural (fn) · rojo: armónica (Nx) · gris: espurio"),
                 xaxis_title="Frecuencia (Hz)",
-                yaxis_title="σ₁ (dB)",
-                height=380,
+                yaxis_title="dB | (EU)² / Hz",
+                height=440,
                 template="plotly_white",
                 margin=dict(l=50, r=20, t=60, b=40),
                 hovermode="closest",
+                legend=dict(orientation="h", y=1.05, x=0.65),
             )
             st.plotly_chart(fig_sv, use_container_width=True)
 
-            st.markdown(f"### Modos OMA — {len(fdd.modes)}")
+            st.markdown(f"### Tabla modal OMA — {len(fdd.modes)} candidatos")
             import pandas as pd
+
+            def _note(m):
+                if m.classification == "harmonic":
+                    return f"{m.harmonic_order}×"
+                if m.classification == "spurious":
+                    return "espurio"
+                if m.is_harmonic:
+                    return f"{m.harmonic_order}×, fn"
+                return "fn"
+
             df_oma = pd.DataFrame([
                 {
                     "Modo": m.mode_number,
-                    "Frecuencia (Hz)": round(m.natural_frequency_hz, 2),
+                    "Frecuencia (Hz)": round(m.natural_frequency_hz, 3),
                     "Damping (%)": round(m.damping_ratio_pct, 3),
-                    "BW 3dB (Hz)": round(m.bandwidth_3db_hz, 2),
-                    "Tipo": ("⚠ Armónico " + f"{m.harmonic_order}×rpm")
-                              if m.is_harmonic else "Natural",
+                    "Complexity (%)": round(m.complexity_pct, 1),
+                    "Nota": _note(m),
                     "Confianza": round(m.confidence, 2),
                 }
                 for m in fdd.modes
             ])
-            st.dataframe(df_oma, use_container_width=True, hide_index=True)
 
+            def _style_row(row):
+                if row["Nota"] == "espurio":
+                    return ["background-color: #f3f4f6; color: #6b7280"] * len(row)
+                if "×" in str(row["Nota"]) and "fn" not in str(row["Nota"]):
+                    return ["background-color: #fee2e2"] * len(row)
+                return ["background-color: #dcfce7"] * len(row)
+
+            try:
+                st.dataframe(
+                    df_oma.style.apply(_style_row, axis=1),
+                    use_container_width=True, hide_index=True,
+                )
+            except Exception:
+                st.dataframe(df_oma, use_container_width=True, hide_index=True)
+
+            # Resumen de clasificación
+            n_natural = sum(1 for m in fdd.modes if m.classification == "natural")
+            n_harm = sum(1 for m in fdd.modes if m.classification == "harmonic")
+            n_sp = sum(1 for m in fdd.modes if m.classification == "spurious")
             st.caption(
-                f"🌊 FDD: {fdd.n_segments} segmentos Welch · nperseg={fdd.nperseg} · "
-                f"Δf={fdd.frequencies_hz[1]:.2f} Hz. "
-                "Mode shapes complejos disponibles en Tab 'Mode Shapes 3D'."
+                f"🌊 **FDD result:** {fdd.n_segments} segmentos Welch · "
+                f"nperseg={fdd.nperseg} · Δf={fdd.frequencies_hz[1]:.2f} Hz · "
+                f"📊 **{n_natural} modos naturales** + ⚠ {n_harm} armónicas + "
+                f"{n_sp} espurios · "
+                f"**Modal Complexity (MPC):** criterio Artemis-style — < 40% natural · "
+                f"> 75% harmonic/espurio. Mode shapes en Tab Mode Shapes."
             )
 
 
