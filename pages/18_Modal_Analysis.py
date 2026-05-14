@@ -41,6 +41,15 @@ from core.auth import (
     require_login, render_user_menu, get_current_user, is_page_allowed_for_role,
 )
 from core.ui_theme import page_header
+from core.modal.ui_components import (
+    modal_hero_card,
+    modal_footer_norms,
+    modal_kpi_row,
+    modal_section_header,
+    modal_plot_caption,
+    modal_status_banner,
+    modal_empty_state,
+)
 
 
 # =====================================================================
@@ -61,17 +70,47 @@ if not is_page_allowed_for_role("pages/18_Modal_Analysis.py", _my_role):
     st.error("Tu rol no tiene acceso a este módulo.")
     st.stop()
 
-page_header(
-    "Modal Analysis",
-    "EMA · OMA · FEA — Análisis modal experimental y operacional bajo ISO 7626 / ISO 20816 / API 684",
-)
-
-
 # =====================================================================
 # Session state — guardar FRFs cargados entre reruns
 # =====================================================================
 if "modal_frfs" not in st.session_state:
     st.session_state["modal_frfs"] = []  # list[ArtemisFRF | FRFResult]
+
+
+# =====================================================================
+# HERO global — siempre visible arriba
+# =====================================================================
+_tdms = st.session_state.get("modal_tdms")
+_active_method = "—"
+_record_info = ""
+_asset_name = "(sin activo seleccionado)"
+
+if _tdms is not None:
+    _mode = (_tdms.mode or "").lower()
+    if "oma" in _mode or "continuous" in _mode:
+        _active_method = "OMA"
+    elif "ema" in _mode or "triggered" in _mode:
+        _active_method = "EMA"
+    else:
+        _active_method = "—"
+    _dur = _tdms.channels[0].duration_s if _tdms.channels else 0
+    _record_info = (
+        f"{_dur:.0f}s @ {_tdms.sample_rate_hz:.0f} Hz · "
+        f"{len(_tdms.channels)} ch"
+    )
+
+# Si hay activo seleccionado en Setup, se podrá leer aquí
+_modal_inst_key = st.session_state.get("modal_inst", "")
+if _modal_inst_key and _modal_inst_key not in ("(seleccionar)", ""):
+    _asset_name = _modal_inst_key.upper()
+
+modal_hero_card(
+    asset_name=_asset_name,
+    client_name="",
+    station_name="",
+    method_active=_active_method,
+    record_info=_record_info,
+)
 
 
 # =====================================================================
@@ -911,9 +950,17 @@ with tab_oma:
 
     tdms_oma = st.session_state.get("modal_tdms")
     if tdms_oma is None:
-        st.info(
-            "📭 Carga un TDMS continuo en el Tab Adquisición → '📁 Importar .tdms existente'. "
-            "Para OMA captura mínimo 30-60 segundos a velocidad constante."
+        modal_empty_state(
+            icon="🌊",
+            title="Sin datos operacionales cargados",
+            description=(
+                "El análisis OMA requiere un archivo .tdms con captura continua "
+                "del NI-9234 — mínimo 60 segundos a velocidad constante (ISO 20816 + "
+                "Brincker 2001). Carga el archivo en el Tab Adquisición usando la "
+                "opción 'Importar .tdms existente'."
+            ),
+            cta_label="Cambia al Tab Adquisición",
+            norm_ref="ISO 20816 · FDD requirements",
         )
     else:
         # Mostrar metadata
@@ -977,8 +1024,26 @@ with tab_oma:
 
         fdd = st.session_state.get("modal_oma_result")
         if fdd is not None:
-            st.divider()
-            st.markdown("### FDD — Densidad espectral (Singular Values)")
+            # KPI row con resumen de clasificación
+            _n_natural = sum(1 for m in fdd.modes if m.classification == "natural")
+            _n_harm = sum(1 for m in fdd.modes if m.classification == "harmonic")
+            _n_sp = sum(1 for m in fdd.modes if m.classification == "spurious")
+            _avg_conf = (sum(m.confidence for m in fdd.modes) / max(len(fdd.modes), 1)) * 100
+            modal_kpi_row([
+                (str(_n_natural), "Modos naturales", "✓ identificados", "green"),
+                (str(_n_harm), "Armónicas", "× running speed", "red"),
+                (str(_n_sp), "Espurios",
+                 f"descartados MPC > 75%", "gray"),
+                (f"{_avg_conf:.0f}%", "Confianza promedio",
+                 "agregado por MPC + harm", "cyan"),
+            ])
+
+            modal_section_header(
+                title="Densidad espectral — Singular Values",
+                subtitle="Multi-SVD del PSD matrix · picos = modos naturales",
+                norm_ref="ISO 20816 · Brincker 2001",
+                icon="🌊",
+            )
 
             # Multi-SVD plot — equivalente al "Singular Values of Spectral Densities"
             # de Artemis. SVD Line 1 (principal) + Line 2 + Line 3 si hay ≥ 3 canales.
@@ -1077,17 +1142,16 @@ with tab_oma:
             except Exception:
                 st.dataframe(df_oma, use_container_width=True, hide_index=True)
 
-            # Resumen de clasificación
-            n_natural = sum(1 for m in fdd.modes if m.classification == "natural")
-            n_harm = sum(1 for m in fdd.modes if m.classification == "harmonic")
-            n_sp = sum(1 for m in fdd.modes if m.classification == "spurious")
-            st.caption(
-                f"🌊 **FDD result:** {fdd.n_segments} segmentos Welch · "
-                f"nperseg={fdd.nperseg} · Δf={fdd.frequencies_hz[1]:.2f} Hz · "
-                f"📊 **{n_natural} modos naturales** + ⚠ {n_harm} armónicas + "
-                f"{n_sp} espurios · "
-                f"**Modal Complexity (MPC):** criterio Artemis-style — < 40% natural · "
-                f"> 75% harmonic/espurio. Mode shapes en Tab Mode Shapes."
+            # Caption final
+            modal_plot_caption(
+                text=(
+                    f"FDD result: {fdd.n_segments} segmentos Welch · "
+                    f"nperseg = {fdd.nperseg} · "
+                    f"Δf = {fdd.frequencies_hz[1]:.2f} Hz. "
+                    "Mode shapes complejos disponibles en Tab Mode Shapes."
+                ),
+                norm_ref="ISO 20816 + ISO 7626-6 §6.4",
+                algorithm="FDD · Brincker, Zhang, Andersen 2001 · MPC Pappa & Eishan 1995",
             )
 
 
@@ -1326,22 +1390,45 @@ with tab_3d:
 # Tab 6 — FEA Compare
 # ---------------------------------------------------------------------
 with tab_fea:
-    st.subheader("Correlación EMA/OMA ↔ FEA")
-    st.caption("MAC matrix + recomendación de iteración del modelo.")
+    modal_section_header(
+        title="Correlación EMA / OMA ↔ FEA",
+        subtitle="Validación cruzada del modelo numérico contra resultados experimentales",
+        norm_ref="API 684 §1.6",
+        icon="🧮",
+    )
 
-    st.info(
-        "Sprint largo plazo: importer de modelos FEA (Ansys, Nastran, Abaqus output) y "
-        "cálculo de MAC (Modal Assurance Criterion) entre modos experimentales y FEA.\n\n"
-        "Sin norma única definida — se usa como input para iteración del modelo FEA "
-        "buscando coincidencia con resultados experimentales."
+    modal_empty_state(
+        icon="🧮",
+        title="Importer FEA en desarrollo",
+        description=(
+            "Cuando esté listo: subes el archivo de modos FEA (Ansys .rst, "
+            "Nastran .op2, Abaqus .odb o JSON con freq + mode shape) y "
+            "Watermelon calcula la matriz Cross-MAC entre tus modos "
+            "experimentales (EMA u OMA) y los modos del modelo. Resultado: "
+            "tabla de correlación + recomendación de iteración del modelo."
+        ),
+        cta_label="Disponible próximo sprint",
+        norm_ref="API 684 §1.6 — Rotor dynamics validation",
     )
 
 
 # =====================================================================
-# Footer normativo
+# Footer normativo permanente
 # =====================================================================
-st.divider()
-st.caption(
-    "**Marco normativo · ISO 7626-1..6 · ISO 20816 · API 684 · API 618 §7.9.4.2.5.3.2** — "
-    "Módulo Modal Analysis · v3.31.151"
+modal_footer_norms(
+    active_norms=[
+        "ISO 7626-1..6",
+        "ISO 20816",
+        "API 684",
+        "API 618 §7.9.4.2.5.3.2",
+    ],
+    algorithms=[
+        "Circle-Fit Nyquist (Kennedy-Pancu 1947)",
+        "FDD (Brincker, Zhang, Andersen 2001)",
+        "Modal Complexity MPC (Pappa & Eishan 1995)",
+        "AutoMAC (ISO 7626-6 §6.5)",
+        "Half-power method (ISO 7626-6 §6.3.2)",
+        "Diagrama de Campbell (API 684 §1.6)",
+    ],
+    version="v3.31.162",
 )
