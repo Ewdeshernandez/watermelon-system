@@ -21,17 +21,25 @@ Marco normativo
 · API 684 (rotor dynamics validation)
 · API 618 §7.9 (criterio separación modal)
 
-Estado: SCAFFOLD (v3.31.146)
-- Tabs renderizan estructura pero acciones requieren implementación
-- Importadores y motores en core/modal/ pendientes (NotImplementedError)
+Estado v3.31.151:
+- Tab Adquisición: Legacy Artemis funcional (parsea .txt + plot Bode + tabla picos)
+- Tab EMA: detección automática de modos con half-power damping
+- Tab OMA / Mode Shapes 3D / FEA: scaffold (próximo sprint)
 """
 
 from __future__ import annotations
 
+import io
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import plotly.graph_objects as go
 import streamlit as st
 
-# Auth + layout reusables del sistema Watermelon
-from core.auth import require_login, render_user_menu, get_current_user, is_page_allowed_for_role
+from core.auth import (
+    require_login, render_user_menu, get_current_user, is_page_allowed_for_role,
+)
 from core.ui_theme import page_header
 
 
@@ -44,7 +52,6 @@ st.set_page_config(
     layout="wide",
 )
 
-# Auth — modal es interno SIGA, ya bloqueado a client en CLIENT_BLOCKED_PAGES
 require_login()
 render_user_menu()
 
@@ -54,11 +61,17 @@ if not is_page_allowed_for_role("pages/18_Modal_Analysis.py", _my_role):
     st.error("Tu rol no tiene acceso a este módulo.")
     st.stop()
 
-# Header internacional
 page_header(
     "Modal Analysis",
     "EMA · OMA · FEA — Análisis modal experimental y operacional bajo ISO 7626 / ISO 20816 / API 684",
 )
+
+
+# =====================================================================
+# Session state — guardar FRFs cargados entre reruns
+# =====================================================================
+if "modal_frfs" not in st.session_state:
+    st.session_state["modal_frfs"] = []  # list[ArtemisFRF | FRFResult]
 
 
 # =====================================================================
@@ -98,9 +111,8 @@ with tab_setup:
     st.divider()
     st.markdown("**Mapeo de sensores → DOFs 3D**")
     st.info(
-        "Sprint pendiente: editor de tabla para asignar a cada sensor del Sensor Map "
-        "su posición 3D `[x, y, z]` y dirección DOF `[dx, dy, dz]`. "
-        "Inferencia automática desde icon_anchor 2D ya planificada."
+        "Configura sensitivities + posición 3D + DOF en el wizard de Machinery Library "
+        "(expander '⚙ Configuración modal' por sensor). Aquí solo se visualiza el resumen."
     )
 
 
@@ -115,8 +127,10 @@ with tab_acq:
         "Origen de datos",
         ["📡 Captura live NI-9234", "📁 Importar .tdms existente", "🔄 Legacy Artemis (.txt)"],
         horizontal=True,
+        key="acq_mode_radio",
     )
 
+    # -------- NI-9234 live --------
     if acq_mode.startswith("📡"):
         st.markdown("**Configuración de captura NI-9234**")
         col1, col2, col3 = st.columns(3)
@@ -133,45 +147,249 @@ with tab_acq:
 
         st.warning(
             "⚠ Captura live requiere companion script local con `nidaqmx` instalado. "
-            "Esta UI valida config y dispara el script via `scripts/ni_companion/capture.py`."
+            "Esta UI valida config y dispara el script via `scripts/ni_companion/capture.py`. "
+            "Streamlit Cloud no tiene hardware NI conectado."
         )
-        st.button("▶ Iniciar captura", type="primary", disabled=True, help="Sprint NI-DAQ")
+        st.code(
+            "python scripts/ni_companion/capture.py \\\n"
+            "    --mode oma --output ./run1.tdms \\\n"
+            "    --fs 10240 --duration 120 \\\n"
+            "    --channels 1YA:0:IEPE:100 \\\n"
+            "    --channels 2YA:1:IEPE:100",
+            language="bash",
+        )
 
+    # -------- TDMS existente --------
     elif acq_mode.startswith("📁"):
         st.markdown("**Subir archivo .tdms del NI**")
         st.file_uploader("Selecciona .tdms", type=["tdms"], key="tdms_up")
+        st.info("Sprint próximo: integrar tdms_importer.load_tdms() + procesamiento OMA")
 
+    # -------- Legacy Artemis --------
     else:
         st.markdown("**Importar exports legacy de Artemis Modal**")
-        st.file_uploader("Subir archivos .txt", type=["txt"], accept_multiple_files=True, key="art_up")
+
+        uploaded = st.file_uploader(
+            "Subir archivos .txt",
+            type=["txt"],
+            accept_multiple_files=True,
+            key="art_up",
+        )
+
         col_a, col_b = st.columns(2)
         with col_a:
-            st.number_input("Sample rate original (Hz)", value=2560, step=100, key="art_fs")
+            art_fs = st.number_input(
+                "Sample rate original (Hz)",
+                value=2560, step=100, min_value=10, key="art_fs",
+            )
         with col_b:
-            st.number_input("Bandwidth (Hz)", value=1280, step=100, key="art_bw")
+            art_bw = st.number_input(
+                "Bandwidth (Hz)",
+                value=1280, step=100, min_value=1, key="art_bw",
+            )
         st.caption(
             "El eje de frecuencia se reconstruye como Δf = bandwidth / (N_bins - 1). "
             "Artemis NO guarda el eje en los .txt — requerido completar manualmente."
         )
+
+        if uploaded and st.button("🔍 Procesar archivos Artemis",
+                                    type="primary", use_container_width=True,
+                                    key="art_process_btn"):
+            from core.modal.artemis_importer import load_artemis_file, detect_file_type
+
+            loaded = []
+            errors = []
+            for up in uploaded:
+                # Persistimos a temp path para leerlo con numpy
+                tmp = Path(f"/tmp/_modal_{up.name}")
+                tmp.write_bytes(up.read())
+                try:
+                    frf = load_artemis_file(
+                        tmp,
+                        sample_rate_hz=float(art_fs),
+                        bandwidth_hz=float(art_bw),
+                        channel_label=up.name.replace(".txt", "").replace(" (1)", "").strip(),
+                    )
+                    loaded.append(frf)
+                except (ValueError, OSError) as exc:
+                    errors.append(f"{up.name}: {exc}")
+
+            if loaded:
+                st.session_state["modal_frfs"] = loaded
+                st.success(
+                    f"✓ {len(loaded)} archivos procesados · "
+                    f"Δf = {loaded[0].df:.3f} Hz · "
+                    f"{loaded[0].n_bins} bins · "
+                    f"banda 0 → {loaded[0].frequencies_hz[-1]:.0f} Hz"
+                )
+            if errors:
+                for e in errors:
+                    st.error(e)
+
+        # Mostrar FRFs cargadas
+        frfs = st.session_state.get("modal_frfs", [])
+        if frfs:
+            st.divider()
+            st.markdown(f"### Plot Bode — {len(frfs)} canal(es) cargado(s)")
+
+            # Plot magnitud
+            fig_mag = go.Figure()
+            for frf in frfs:
+                mag = frf.magnitude_linear()
+                if mag.size == 0:
+                    continue
+                fig_mag.add_trace(go.Scatter(
+                    x=frf.frequencies_hz,
+                    y=20.0 * np.log10(np.maximum(mag, 1e-30)),
+                    mode="lines",
+                    name=frf.channel_label or frf.source_file,
+                    line=dict(width=1.2),
+                ))
+            fig_mag.update_layout(
+                title="Magnitud — dB",
+                xaxis_title="Frecuencia (Hz)",
+                yaxis_title="Magnitud (dB)",
+                height=380,
+                margin=dict(l=50, r=20, t=40, b=40),
+                template="plotly_white",
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig_mag, use_container_width=True)
+
+            # Plot fase si hay FRF complejas
+            any_complex = any(frf.is_complex_frf for frf in frfs)
+            if any_complex:
+                fig_phase = go.Figure()
+                for frf in frfs:
+                    phase = frf.phase_deg()
+                    if phase is None:
+                        continue
+                    fig_phase.add_trace(go.Scatter(
+                        x=frf.frequencies_hz,
+                        y=phase,
+                        mode="lines",
+                        name=frf.channel_label or frf.source_file,
+                        line=dict(width=1.2),
+                    ))
+                fig_phase.update_layout(
+                    title="Fase — grados",
+                    xaxis_title="Frecuencia (Hz)",
+                    yaxis_title="Fase (°)",
+                    height=280,
+                    margin=dict(l=50, r=20, t=40, b=40),
+                    template="plotly_white",
+                    hovermode="x unified",
+                )
+                st.plotly_chart(fig_phase, use_container_width=True)
 
 
 # ---------------------------------------------------------------------
 # Tab 3 — EMA Processing
 # ---------------------------------------------------------------------
 with tab_ema:
-    st.subheader("Análisis Modal Experimental (LSCF)")
+    st.subheader("Análisis Modal Experimental")
     st.caption(
-        "Curve fitting LSCF sobre FRFs medidas con martillo modal. "
-        "Cumple ISO 7626-5 (martillo) e ISO 7626-6 (curve fit)."
+        "Detección automática de modos por half-power method "
+        "(ISO 7626-6 §6.3.2). Aplica a FRFs cargadas en el tab Adquisición."
     )
 
-    st.info(
-        "Sprint pendiente: integración con `pyEMA`. La UI mostrará:\n"
-        "1. Selección de FRFs a procesar (desde adquisición previa)\n"
-        "2. Slider de model order (típico 30-80)\n"
-        "3. Stability diagram interactivo\n"
-        "4. Tabla modal: frecuencia · damping · complejidad por modo identificado"
-    )
+    frfs = st.session_state.get("modal_frfs", [])
+    if not frfs:
+        st.info("📭 No hay FRFs cargadas. Carga archivos en el tab Adquisición primero.")
+    else:
+        st.markdown(f"**{len(frfs)} FRF(s) cargadas — listas para identificación modal**")
+
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            ema_f_min = st.number_input("f mín (Hz)", value=5.0, step=1.0,
+                                          key="ema_fmin")
+        with col2:
+            _f_max_default = float(frfs[0].frequencies_hz[-1])
+            ema_f_max = st.number_input("f máx (Hz)", value=_f_max_default,
+                                          step=10.0, key="ema_fmax")
+        with col3:
+            ema_prom = st.number_input("Prominencia (dB)", value=6.0,
+                                         step=1.0, key="ema_prom",
+                                         help="Mínima altura del pico vs entorno")
+        with col4:
+            ema_dist = st.number_input("Distancia mín (Hz)", value=2.0,
+                                         step=0.5, key="ema_dist",
+                                         help="Separación mínima entre picos")
+
+        if st.button("🎯 Identificar modos", type="primary",
+                       use_container_width=True, key="ema_run_btn"):
+            from core.modal.frf_compute import detect_modal_peaks
+
+            # Selección de FRF principal — la primera de 2 columnas (FRF compleja)
+            # o la primera del listado si no hay FRF compleja
+            primary = next((f for f in frfs if f.is_complex_frf), frfs[0])
+            mag = primary.magnitude_linear()
+            if mag.size == 0:
+                st.error("La FRF seleccionada no tiene magnitud computable.")
+            else:
+                peaks = detect_modal_peaks(
+                    frequencies_hz=primary.frequencies_hz,
+                    magnitude=mag,
+                    coherence=None,  # Artemis exports no incluyen coherencia
+                    f_min_hz=float(ema_f_min),
+                    f_max_hz=float(ema_f_max),
+                    prominence_db=float(ema_prom),
+                    min_distance_hz=float(ema_dist),
+                )
+                st.session_state["modal_peaks"] = peaks
+
+        peaks = st.session_state.get("modal_peaks", [])
+        if peaks:
+            st.divider()
+            st.markdown(f"### Modos identificados — {len(peaks)}")
+
+            # Tabla modal
+            import pandas as pd
+            df = pd.DataFrame([
+                {
+                    "Modo": i + 1,
+                    "Frecuencia (Hz)": round(p.frequency_hz, 2),
+                    "Damping (%)": round(p.damping_ratio_pct, 3),
+                    "Bandwidth (Hz)": round(p.bandwidth_hz, 3),
+                    "Q factor": round(p.quality_factor, 1),
+                    "Magnitud peak": f"{p.magnitude_peak:.3e}",
+                }
+                for i, p in enumerate(peaks)
+            ])
+            st.dataframe(df, use_container_width=True, hide_index=True)
+
+            # Plot con picos anotados
+            primary = next((f for f in frfs if f.is_complex_frf), frfs[0])
+            mag_db = 20.0 * np.log10(np.maximum(primary.magnitude_linear(), 1e-30))
+            fig_peaks = go.Figure()
+            fig_peaks.add_trace(go.Scatter(
+                x=primary.frequencies_hz, y=mag_db, mode="lines",
+                name="FRF", line=dict(width=1.2, color="#1AAEE5"),
+            ))
+            for i, p in enumerate(peaks):
+                fig_peaks.add_vline(
+                    x=p.frequency_hz,
+                    line=dict(color="#D89B22", width=1, dash="dash"),
+                    annotation_text=f"Modo {i+1}<br>{p.frequency_hz:.1f} Hz<br>ζ={p.damping_ratio_pct:.2f}%",
+                    annotation_position="top",
+                    annotation_font_size=10,
+                )
+            fig_peaks.update_layout(
+                title="FRF con modos identificados",
+                xaxis_title="Frecuencia (Hz)",
+                yaxis_title="Magnitud (dB)",
+                height=420,
+                margin=dict(l=50, r=20, t=60, b=40),
+                template="plotly_white",
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig_peaks, use_container_width=True)
+
+            st.caption(
+                "🔬 Damping calculado por método half-power (-3 dB). "
+                "Para mode shapes y curve fit LSCF, se requiere integración pyEMA "
+                "(próximo sprint)."
+            )
 
 
 # ---------------------------------------------------------------------
@@ -188,9 +406,8 @@ with tab_oma:
         "Sprint pendiente: integración con `PyOMA2`. Algoritmos disponibles:\n"
         "- FDD (Frequency Domain Decomposition) — primera pasada rápida\n"
         "- SSI-COV / SSI-DATA — más preciso para damping\n\n"
-        "**Requisitos de datos:** records de 60-300 segundos continuos a velocidad constante. "
-        "Los CSVs de proximidad existentes (532 ms) NO son suficientes — necesita modo "
-        "'long acquisition' del NI-9234."
+        "**Requisitos de datos:** records de 60-300 segundos continuos a velocidad constante "
+        "capturados via NI-9234 en modo OMA (companion script con --mode oma)."
     )
 
 
@@ -227,10 +444,10 @@ with tab_fea:
 
 
 # =====================================================================
-# Footer normativo (siempre visible)
+# Footer normativo
 # =====================================================================
 st.divider()
 st.caption(
     "**Marco normativo · ISO 7626-1..6 · ISO 20816 · API 684 · API 618 §7.9.4.2.5.3.2** — "
-    "Módulo en fase scaffolding · v3.31.146"
+    "Módulo Modal Analysis · v3.31.151"
 )

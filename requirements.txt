@@ -22,6 +22,11 @@ supabase>=2.0.0
 streamlit-image-coordinates>=0.1.7
 # Pillow para overlay de markers + texto sobre el schematic_png
 Pillow>=10.0.0
+# Ciclo 23.151: npTDMS para módulo Modal Analysis — lee archivos .tdms
+# nativos del NI-9234 capturados via companion script (scripts/ni_companion/).
+# Open-source MIT license, mantenido activamente. NO requiere driver NI
+# del sistema instalado (eso solo se necesita en el companion local).
+npTDMS>=1.7.0
 # Ciclo 17.26: AI Diagnóstico con Claude API. Generación de
 # interpretación clínica + recomendaciones en español natural a
 # partir de los hallazgos técnicos de cada análisis (Spectrum,
