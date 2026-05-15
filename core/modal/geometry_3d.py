@@ -385,7 +385,7 @@ def build_geometry_figure(geom: ModalGeometry,
         ))
 
     # Layout
-    span = max(geom.shaft_end - geom.shaft_start, 100.0)
+    _span_for_layout = max(geom.shaft_end - geom.shaft_start, 100.0)
     fig.update_layout(
         scene=dict(
             xaxis=dict(title=f"X ({geom.units})", showgrid=True,
@@ -402,5 +402,178 @@ def build_geometry_figure(geom: ModalGeometry,
         margin=dict(l=0, r=0, t=40, b=0),
         height=560,
         paper_bgcolor="white",
+    )
+    return fig
+
+
+# ---------------------------------------------------------------------
+# Mode shape overlay sobre la geometria
+# ---------------------------------------------------------------------
+
+def build_geometry_with_mode_shape(
+    geom: "ModalGeometry",
+    mode_shape: Any,
+    channel_names: List[str],
+    mode_label: str = "",
+):
+    """
+    Construye una figura 3D con la geometria del activo + flechas de mode shape
+    coloreadas por fase (verde cofase / rojo anti-fase) en cada sensor que
+    haga match con un canal del FDD/EMA por nombre.
+
+    Args:
+        geom: ModalGeometry con sensores ya posicionados
+        mode_shape: array complejo (N_channels,) del modo a visualizar
+        channel_names: lista de nombres de canal del FDD result
+        mode_label: texto descriptivo del modo
+
+    Returns:
+        plotly.graph_objects.Figure
+    """
+    import numpy as np
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+
+    # 1) Bloques (estructura del tren) — opacidad mas baja para que las flechas
+    #    destaquen
+    for b in geom.blocks:
+        if b.shape == "cylinder":
+            xs, ys, zs, i, j, k = _cylinder_mesh(b.x_start, b.x_end, b.radius)
+        else:
+            xs, ys, zs, i, j, k = _box_mesh(b.x_start, b.x_end,
+                                              b.half_width, b.half_height)
+        fig.add_trace(go.Mesh3d(
+            x=xs, y=ys, z=zs, i=i, j=j, k=k,
+            color=b.color, opacity=max(b.opacity * 0.6, 0.15),
+            name=b.name, showlegend=False, hoverinfo="skip",
+            flatshading=True,
+        ))
+
+    # 2) Eje
+    xs, ys, zs, i, j, k = _cylinder_mesh(geom.shaft_start, geom.shaft_end,
+                                           geom.shaft_radius, n_theta=16)
+    fig.add_trace(go.Mesh3d(
+        x=xs, y=ys, z=zs, i=i, j=j, k=k,
+        color=geom.shaft_color, opacity=0.85,
+        name="Eje", showlegend=False, hoverinfo="skip",
+        flatshading=True,
+    ))
+
+    # 3) Matching geometria.sensors <-> channel_names (case-insensitive)
+    by_name: Dict[str, GeometrySensor] = {
+        s.name.strip().upper(): s for s in geom.sensors
+    }
+    arr = np.asarray(mode_shape, dtype=complex).flatten()
+
+    matched_positions: List[Tuple[float, float, float]] = []
+    matched_directions: List[Tuple[float, float, float]] = []
+    matched_signed_mag: List[float] = []
+    matched_names: List[str] = []
+    matched_phases_deg: List[float] = []
+
+    for idx, ch in enumerate(channel_names):
+        key = ch.strip().upper()
+        if key not in by_name or idx >= len(arr):
+            continue
+        s = by_name[key]
+        complex_val = complex(arr[idx])
+        amp = float(abs(complex_val))
+        phase_deg = float(math.degrees(math.atan2(complex_val.imag, complex_val.real)))
+        # Signo de proyeccion sobre el eje real (fase ~0° = positivo, ~180° = negativo)
+        sign = 1.0 if abs(phase_deg) <= 90.0 else -1.0
+        ux, uy, uz = _dof_to_vector(s.dof)
+        matched_positions.append((s.x, s.y, s.z))
+        matched_directions.append((ux * sign, uy * sign, uz * sign))
+        matched_signed_mag.append(amp * sign)
+        matched_names.append(s.name)
+        matched_phases_deg.append(phase_deg)
+
+    if not matched_positions:
+        # No matches — dejar la geometria sin flechas y un title de aviso
+        fig.update_layout(
+            title=dict(text=f"{mode_label}<br>"
+                              "<sub>Sin matches de sensor por nombre — revisa "
+                              "los sensores en Tab Setup → Geometría 3D</sub>",
+                       font=dict(size=14, color="#dc2626")),
+            scene=dict(aspectmode="data",
+                         camera=dict(eye=dict(x=1.4, y=1.2, z=0.9)),
+                         bgcolor="#f8fafc"),
+            margin=dict(l=0, r=0, t=70, b=0), height=560,
+            paper_bgcolor="white",
+        )
+        return fig
+
+    # Normalizacion para tamano de flecha proporcional a la amplitud del modo
+    span = max(geom.shaft_end - geom.shaft_start, 100.0)
+    max_abs = max(abs(m) for m in matched_signed_mag) or 1.0
+    base_arrow = span * 0.08
+    scale = [(base_arrow * abs(m) / max_abs) for m in matched_signed_mag]
+
+    # 4) Cones — verde (cofase, signo +) / rojo (anti-fase, signo -)
+    cone_x, cone_y, cone_z = [], [], []
+    cone_u, cone_v, cone_w = [], [], []
+    cone_color: List[str] = []
+    for (px, py, pz), (dx, dy, dz), m, sc in zip(
+        matched_positions, matched_directions, matched_signed_mag, scale
+    ):
+        cone_x.append(px); cone_y.append(py); cone_z.append(pz)
+        cone_u.append(dx * sc); cone_v.append(dy * sc); cone_w.append(dz * sc)
+        cone_color.append("#16a34a" if m >= 0 else "#dc2626")
+
+    # Cone admite colorscale por valor (u^2+v^2+w^2). Para forzar binario
+    # cofase/anti-fase, separo las flechas en 2 traces (verde + rojo).
+    for clr, label in [("#16a34a", "Cofase (+)"), ("#dc2626", "Anti-fase (−)")]:
+        idxs = [i for i, c in enumerate(cone_color) if c == clr]
+        if not idxs:
+            continue
+        fig.add_trace(go.Cone(
+            x=[cone_x[i] for i in idxs],
+            y=[cone_y[i] for i in idxs],
+            z=[cone_z[i] for i in idxs],
+            u=[cone_u[i] for i in idxs],
+            v=[cone_v[i] for i in idxs],
+            w=[cone_w[i] for i in idxs],
+            sizemode="absolute", sizeref=base_arrow,
+            colorscale=[[0, clr], [1, clr]],
+            showscale=False, name=label, showlegend=True,
+            hoverinfo="text",
+            text=[f"{matched_names[i]} · |φ|={abs(matched_signed_mag[i]):.3f} "
+                  f"· φ={matched_phases_deg[i]:.0f}°" for i in idxs],
+        ))
+
+    # 5) Labels de los sensores
+    fig.add_trace(go.Scatter3d(
+        x=[p[0] for p in matched_positions],
+        y=[p[1] for p in matched_positions],
+        z=[p[2] for p in matched_positions],
+        mode="text",
+        text=matched_names,
+        textposition="top center",
+        textfont=dict(size=11, color="#0F1E3D"),
+        showlegend=False, hoverinfo="skip",
+    ))
+
+    # Layout
+    fig.update_layout(
+        scene=dict(
+            xaxis=dict(title=f"X ({geom.units})", showgrid=True,
+                        gridcolor="#e5e7eb", zerolinecolor="#cbd5e1"),
+            yaxis=dict(title=f"Y ({geom.units})", showgrid=True,
+                        gridcolor="#e5e7eb", zerolinecolor="#cbd5e1"),
+            zaxis=dict(title=f"Z ({geom.units})", showgrid=True,
+                        gridcolor="#e5e7eb", zerolinecolor="#cbd5e1"),
+            aspectmode="data",
+            camera=dict(eye=dict(x=1.4, y=1.2, z=0.9)),
+            bgcolor="#f8fafc",
+        ),
+        title=dict(text=f"{mode_label}<br>"
+                          f"<sub>{len(matched_positions)}/{len(channel_names)} "
+                          "sensores con match · verde: cofase · rojo: anti-fase</sub>",
+                   font=dict(size=14, color="#0F1E3D")),
+        margin=dict(l=0, r=0, t=70, b=0),
+        height=560,
+        paper_bgcolor="white",
+        legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.05),
     )
     return fig
