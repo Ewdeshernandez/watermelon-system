@@ -99,15 +99,25 @@ if _tdms is not None:
         f"{len(_tdms.channels)} ch"
     )
 
-# Si hay activo seleccionado en Setup, se podrá leer aquí
+# Si hay activo seleccionado en Setup, leer su info completa para el Hero
+_asset_location = ""
 _modal_inst_key = st.session_state.get("modal_inst", "")
 if _modal_inst_key and _modal_inst_key not in ("(seleccionar)", ""):
-    _asset_name = _modal_inst_key.upper()
+    try:
+        from core.instance_state import get_instance as _get_inst
+        _inst_obj = _get_inst(_modal_inst_key)
+        if _inst_obj is not None:
+            _asset_name = (_inst_obj.tag or _modal_inst_key).upper()
+            _asset_location = getattr(_inst_obj, "location", "") or ""
+        else:
+            _asset_name = _modal_inst_key.upper()
+    except Exception:
+        _asset_name = _modal_inst_key.upper()
 
 modal_hero_card(
     asset_name=_asset_name,
     client_name="",
-    station_name="",
+    station_name=_asset_location,
     method_active=_active_method,
     record_info=_record_info,
 )
@@ -130,29 +140,207 @@ tab_setup, tab_acq, tab_ema, tab_oma, tab_3d, tab_fea = st.tabs([
 # Tab 1 — Setup
 # ---------------------------------------------------------------------
 with tab_setup:
-    st.subheader("Configuración del ensayo modal")
-    st.caption(
-        "Define la geometría 3D del activo y el mapeo de sensores a DOFs. "
-        "Cumple ISO 7626-6 §6 — documentación de DOFs y orientación espacial."
+    modal_section_header(
+        title="Configuración del ensayo modal",
+        subtitle="Selecciona el activo bajo análisis y revisa la configuración de sensores",
+        norm_ref="ISO 7626-6 §6",
+        icon="🛠",
     )
 
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.markdown("**Activo bajo análisis**")
-        st.selectbox("Instancia", ["(seleccionar)", "tes1", "tes3"], key="modal_inst")
-        st.caption("Reusa la jerarquía cliente → estación → activo de Machinery Library")
+    # Selector real de activos — lee Machinery Library
+    from core.instance_state import list_instances, get_instance
 
-    with col2:
-        st.markdown("**Geometría 3D**")
-        st.button("📂 Cargar geometría JSON", disabled=True, help="Sprint próximo")
-        st.button("➕ Crear geometría desde Machine Map", disabled=True, help="Sprint próximo")
+    try:
+        _all_insts = list_instances() or []
+    except Exception:
+        _all_insts = []
 
-    st.divider()
-    st.markdown("**Mapeo de sensores → DOFs 3D**")
-    st.info(
-        "Configura sensitivities + posición 3D + DOF en el wizard de Machinery Library "
-        "(expander '⚙ Configuración modal' por sensor). Aquí solo se visualiza el resumen."
-    )
+    if not _all_insts:
+        modal_empty_state(
+            icon="📭",
+            title="No hay activos registrados",
+            description=(
+                "El módulo Modal Analysis se ejecuta sobre activos definidos en "
+                "Machinery Library. Crea un activo primero usando el wizard "
+                "'Crear activo' en la barra lateral, configura los sensores y "
+                "vuelve aquí para ejecutar el análisis modal."
+            ),
+            cta_label="Ir a Machinery Library",
+            norm_ref="",
+        )
+    else:
+        # Construir opciones del selector con label legible
+        def _inst_label(entry):
+            tag = entry.get("tag") or entry.get("instance_id", "")
+            location = entry.get("location", "")
+            if location:
+                return f"{tag.upper()} · {location}"
+            return tag.upper()
+
+        _options = ["(seleccionar)"] + [e.get("instance_id", "") for e in _all_insts]
+        _labels_by_id = {
+            e.get("instance_id", ""): _inst_label(e) for e in _all_insts
+        }
+
+        col_sel, col_meta = st.columns([3, 2])
+        with col_sel:
+            picked_id = st.selectbox(
+                "Activo bajo análisis",
+                _options,
+                format_func=lambda x: _labels_by_id.get(x, x) if x != "(seleccionar)" else x,
+                key="modal_inst",
+            )
+
+        with col_meta:
+            st.caption(
+                f"📦 **{len(_all_insts)} activos** disponibles en Machinery Library"
+            )
+
+        # Si selecciona un activo, mostrar preview con sensores y geometría
+        if picked_id and picked_id != "(seleccionar)":
+            inst = get_instance(picked_id)
+            if inst is None:
+                modal_status_banner(
+                    title="Activo no encontrado",
+                    detail=f"No se pudo cargar la información de '{picked_id}'.",
+                    severity="fail",
+                )
+            else:
+                # Hero secundario del activo seleccionado
+                _location = getattr(inst, "location", "") or "(sin ubicación)"
+                _profile = getattr(inst, "profile_key", "") or "(genérico)"
+                _serial = getattr(inst, "serial_number", "") or "—"
+
+                st.markdown(
+                    f"""
+                    <div style="background:#F4F7FB; border-left:4px solid #1AAEE5;
+                                 padding:14px 18px; border-radius:6px;
+                                 margin-top:12px;">
+                        <div style="font-size:11px; font-weight:700; color:#0F7FB0;
+                                     letter-spacing:0.12em; text-transform:uppercase;">
+                            Activo seleccionado
+                        </div>
+                        <div style="font-size:18px; font-weight:800; color:#0F1E3D;
+                                     margin:4px 0;">
+                            {inst.tag or inst.instance_id}
+                        </div>
+                        <div style="font-size:12px; color:#6B7280;">
+                            📍 {_location} &nbsp;·&nbsp;
+                            🏷 Modelo: {_profile} &nbsp;·&nbsp;
+                            S/N: {_serial}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
+                # Análisis de sensores configurados
+                sensors = list(inst.sensors or [])
+                if not sensors:
+                    modal_status_banner(
+                        title="Activo sin sensores configurados",
+                        detail=(
+                            "Este activo no tiene sensores definidos en Machinery "
+                            "Library. Configura el sensor map antes de ejecutar "
+                            "el análisis modal."
+                        ),
+                        severity="warning",
+                    )
+                else:
+                    # Contadores por tipo
+                    n_accel = sum(1 for s in sensors
+                                    if s.get("sensor_type", "") == "accelerometer")
+                    n_prox = sum(1 for s in sensors
+                                   if s.get("sensor_type", "") == "proximity")
+                    n_vel = sum(1 for s in sensors
+                                  if s.get("sensor_type", "") == "velocity")
+                    n_other = len(sensors) - n_accel - n_prox - n_vel
+
+                    # Contadores de configuración modal 3D
+                    from core.sensor_map import has_modal_3d_config
+                    n_3d_ready = sum(1 for s in sensors if has_modal_3d_config(s))
+                    n_sens_only = sum(
+                        1 for s in sensors
+                        if s.get("sensitivity_mv_per_eu") is not None
+                        and not has_modal_3d_config(s)
+                    )
+
+                    modal_section_header(
+                        title="Sensores configurados",
+                        subtitle="Distribución por tipo y readiness para análisis modal 3D",
+                        norm_ref="ISO 7626-6 §6.2",
+                        icon="📡",
+                    )
+                    modal_kpi_row([
+                        (str(len(sensors)), "Total sensores",
+                         "registrados en Sensor Map", "navy"),
+                        (str(n_accel), "Acelerómetros",
+                         "Wilcoxon 100 mV/g típico", "cyan"),
+                        (str(n_prox), "Proximidad",
+                         "Bently 200 mV/mil típico", "amber"),
+                        (str(n_3d_ready), "Modal 3D ready",
+                         "con position_3d + DOF", "green"),
+                    ])
+
+                    # Status del activo para modal
+                    if n_3d_ready == len(sensors):
+                        modal_status_banner(
+                            title="Activo completamente configurado para análisis modal 3D",
+                            detail=(
+                                f"Todos los {len(sensors)} sensores tienen position_3d + "
+                                "dof_direction definidos. Mode shapes 3D animados disponibles."
+                            ),
+                            severity="ok",
+                        )
+                    elif n_3d_ready > 0:
+                        modal_status_banner(
+                            title=f"Configuración parcial — {n_3d_ready}/{len(sensors)} sensores 3D-ready",
+                            detail=(
+                                f"{len(sensors) - n_3d_ready} sensores carecen de position_3d "
+                                "o dof_direction. Bar chart 2D y MAC disponibles para todos, "
+                                "Flechas 3D solo para los sensores configurados."
+                            ),
+                            severity="warning",
+                        )
+                    else:
+                        modal_status_banner(
+                            title="Sin sensores con configuración modal 3D",
+                            detail=(
+                                "Para activar visualización 3D de mode shapes, completa "
+                                "el expander 'Configuración modal' de cada sensor en el "
+                                "wizard de Machinery Library. Mientras tanto, Bar chart 2D "
+                                "y AutoMAC siguen disponibles."
+                            ),
+                            severity="info",
+                        )
+
+                    # Tabla de sensores con tag de configuración
+                    with st.expander(f"▸ Lista de sensores ({len(sensors)})",
+                                       expanded=False):
+                        import pandas as pd
+                        _rows = []
+                        for s in sensors:
+                            _rows.append({
+                                "Plane": s.get("plane_label", "—"),
+                                "Tipo": s.get("sensor_type", "—"),
+                                "Dirección": s.get("direction", "—"),
+                                "Unidad": s.get("unit_native", "—"),
+                                "Sens (mV/EU)": (
+                                    f"{s.get('sensitivity_mv_per_eu'):.1f}"
+                                    if s.get("sensitivity_mv_per_eu") is not None
+                                    else "—"
+                                ),
+                                "Coupling": s.get("coupling") or "—",
+                                "3D config": "✓" if has_modal_3d_config(s) else "—",
+                            })
+                        st.dataframe(pd.DataFrame(_rows),
+                                      use_container_width=True, hide_index=True)
+
+        else:
+            st.info(
+                "👆 Selecciona un activo arriba para ver su configuración de sensores "
+                "y validar readiness para análisis modal."
+            )
 
 
 # ---------------------------------------------------------------------
