@@ -475,6 +475,263 @@ with tab_setup:
                 "y validar readiness para análisis modal."
             )
 
+    # =================================================================
+    # Sub-sección: Editor de Geometría 3D (estilo Artemis Modal)
+    # =================================================================
+    st.divider()
+    modal_section_header(
+        title="Geometría 3D del activo",
+        subtitle=(
+            "Dibuja el tren mecánico y posiciona los sensores con su dirección "
+            "DOF. La geometría se usa como soporte visual para las mode shapes "
+            "en Tab 5. Persistencia por activo o session-only en modo ad-hoc."
+        ),
+        norm_ref="ISO 7626-6 §6 · DOF y orientación espacial documentadas",
+    )
+
+    from core.modal.geometry_3d import (
+        ModalGeometry, GeometryBlock, GeometrySensor,
+        TEMPLATES, build_geometry_figure,
+        save_geometry, load_geometry,
+    )
+
+    # Resolver asset_id para persistencia (None si ad-hoc)
+    _geom_asset_id = ""
+    _adhoc_for_geom = st.session_state.get("modal_adhoc_meta")
+    _inst_key_for_geom = st.session_state.get("modal_inst", "")
+    if not _adhoc_for_geom and _inst_key_for_geom and _inst_key_for_geom != "(seleccionar)":
+        _geom_asset_id = _inst_key_for_geom
+
+    # Cargar geometría existente o inicializar
+    if "modal_geometry" not in st.session_state:
+        if _geom_asset_id:
+            _loaded = load_geometry(_geom_asset_id)
+            st.session_state["modal_geometry"] = (
+                _loaded if _loaded else TEMPLATES["motor_compressor"]()
+            )
+        else:
+            st.session_state["modal_geometry"] = TEMPLATES["motor_compressor"]()
+
+    geom: ModalGeometry = st.session_state["modal_geometry"]
+
+    # ----- Toolbar -----
+    col_t1, col_t2, col_t3, col_t4 = st.columns([2, 1, 1, 1])
+    with col_t1:
+        tpl_choice = st.selectbox(
+            "Cargar template",
+            options=["(mantener actual)",
+                      "motor_compressor", "turbine_generator", "pump_motor"],
+            format_func=lambda k: {
+                "(mantener actual)": "— Mantener configuración actual —",
+                "motor_compressor": "Motor + Compresor",
+                "turbine_generator": "Turbina + Generador",
+                "pump_motor": "Bomba + Motor",
+            }.get(k, k),
+            key="geom_tpl_choice",
+        )
+    with col_t2:
+        if st.button("Aplicar template", key="geom_apply_tpl",
+                       use_container_width=True,
+                       disabled=(tpl_choice == "(mantener actual)")):
+            st.session_state["modal_geometry"] = TEMPLATES[tpl_choice]()
+            st.rerun()
+    with col_t3:
+        if st.button("💾 Guardar", key="geom_save",
+                       use_container_width=True,
+                       disabled=not _geom_asset_id):
+            geom.asset_id = _geom_asset_id
+            try:
+                _p = save_geometry(geom)
+                st.toast(f"Geometría guardada: {_p.name}", icon="✅")
+            except Exception as exc:  # noqa: BLE001
+                st.toast(f"Error al guardar: {exc}", icon="⚠")
+    with col_t4:
+        if st.button("⬇ Export JSON", key="geom_export",
+                       use_container_width=True):
+            st.session_state["_geom_export_ready"] = geom.to_json()
+
+    if st.session_state.get("_geom_export_ready"):
+        st.download_button(
+            "Descargar geometry.json",
+            data=st.session_state["_geom_export_ready"],
+            file_name=f"{geom.asset_id or 'adhoc'}_geometry.json",
+            mime="application/json",
+            key="geom_download_btn",
+        )
+
+    if not _geom_asset_id:
+        st.caption(
+            "Modo ad-hoc — la geometría no se persiste, vive solo en esta sesión. "
+            "Para persistir, selecciona un activo registrado arriba o exporta el JSON."
+        )
+
+    # ----- Preview Plotly 3D -----
+    fig_geom = build_geometry_figure(geom)
+    st.plotly_chart(fig_geom, use_container_width=True)
+
+    # ----- Editor de bloques + sensores -----
+    col_edit_b, col_edit_s = st.columns(2)
+
+    with col_edit_b:
+        st.markdown("**Secciones del tren (bloques)**")
+        if geom.blocks:
+            import pandas as pd
+            df_b = pd.DataFrame([
+                {"Nombre": b.name, "Forma": b.shape,
+                 "x_start": b.x_start, "x_end": b.x_end,
+                 "R / hw,hh": (
+                     f"{b.radius:.0f}" if b.shape == "cylinder"
+                     else f"{b.half_width:.0f}, {b.half_height:.0f}"
+                 ),
+                 "Color": b.color}
+                for b in geom.blocks
+            ])
+            st.dataframe(df_b, hide_index=True, use_container_width=True)
+
+        with st.expander("➕ Agregar / editar bloque", expanded=False):
+            _action_b = st.radio("Acción", ["Agregar nuevo", "Editar existente",
+                                                "Eliminar"],
+                                  horizontal=True, key="geom_block_action")
+            if _action_b == "Editar existente" and geom.blocks:
+                _idx_b = st.selectbox("Bloque a editar",
+                                        options=list(range(len(geom.blocks))),
+                                        format_func=lambda i: geom.blocks[i].name,
+                                        key="geom_block_edit_idx")
+                _b_default = geom.blocks[_idx_b]
+            elif _action_b == "Eliminar" and geom.blocks:
+                _idx_b = st.selectbox("Bloque a eliminar",
+                                        options=list(range(len(geom.blocks))),
+                                        format_func=lambda i: geom.blocks[i].name,
+                                        key="geom_block_del_idx")
+                if st.button("Confirmar eliminación", key="geom_block_del_btn"):
+                    geom.blocks.pop(_idx_b)
+                    st.rerun()
+                _b_default = None
+            else:
+                _b_default = GeometryBlock(id=f"b{len(geom.blocks)+1}",
+                                            name="Nuevo bloque")
+
+            if _b_default is not None:
+                c1, c2 = st.columns(2)
+                with c1:
+                    _nm = st.text_input("Nombre", value=_b_default.name,
+                                          key="geom_b_name")
+                    _shape = st.selectbox("Forma", ["cylinder", "box"],
+                                            index=0 if _b_default.shape == "cylinder" else 1,
+                                            key="geom_b_shape")
+                    _x0 = st.number_input("x_start", value=float(_b_default.x_start),
+                                            step=10.0, key="geom_b_x0")
+                    _x1 = st.number_input("x_end", value=float(_b_default.x_end),
+                                            step=10.0, key="geom_b_x1")
+                with c2:
+                    if _shape == "cylinder":
+                        _r = st.number_input("Radio", value=float(_b_default.radius),
+                                               step=10.0, min_value=1.0,
+                                               key="geom_b_r")
+                        _hw, _hh = _r, _r
+                    else:
+                        _hw = st.number_input("half_width (Y)",
+                                                value=float(_b_default.half_width),
+                                                step=10.0, min_value=1.0,
+                                                key="geom_b_hw")
+                        _hh = st.number_input("half_height (Z)",
+                                                value=float(_b_default.half_height),
+                                                step=10.0, min_value=1.0,
+                                                key="geom_b_hh")
+                        _r = max(_hw, _hh)
+                    _color = st.color_picker("Color", value=_b_default.color,
+                                                key="geom_b_color")
+                    _op = st.slider("Opacidad", 0.1, 1.0, float(_b_default.opacity),
+                                      0.05, key="geom_b_op")
+
+                if st.button("✓ Aplicar al bloque", key="geom_b_apply",
+                                use_container_width=True):
+                    new_b = GeometryBlock(
+                        id=_b_default.id, name=_nm, shape=_shape,
+                        x_start=_x0, x_end=_x1,
+                        radius=_r, half_width=_hw, half_height=_hh,
+                        color=_color, opacity=_op,
+                    )
+                    if _action_b == "Editar existente":
+                        geom.blocks[_idx_b] = new_b
+                    else:
+                        geom.blocks.append(new_b)
+                    st.rerun()
+
+    with col_edit_s:
+        st.markdown("**Sensores con dirección DOF**")
+        if geom.sensors:
+            import pandas as pd
+            df_s = pd.DataFrame([
+                {"Nombre": s.name, "Tipo": s.sensor_type,
+                 "x": s.x, "y": s.y, "z": s.z, "DOF": s.dof}
+                for s in geom.sensors
+            ])
+            st.dataframe(df_s, hide_index=True, use_container_width=True)
+
+        with st.expander("➕ Agregar / editar sensor", expanded=False):
+            _action_s = st.radio("Acción", ["Agregar nuevo", "Editar existente",
+                                                "Eliminar"],
+                                  horizontal=True, key="geom_sensor_action")
+            if _action_s == "Editar existente" and geom.sensors:
+                _idx_s = st.selectbox("Sensor a editar",
+                                        options=list(range(len(geom.sensors))),
+                                        format_func=lambda i: geom.sensors[i].name,
+                                        key="geom_sensor_edit_idx")
+                _s_default = geom.sensors[_idx_s]
+            elif _action_s == "Eliminar" and geom.sensors:
+                _idx_s = st.selectbox("Sensor a eliminar",
+                                        options=list(range(len(geom.sensors))),
+                                        format_func=lambda i: geom.sensors[i].name,
+                                        key="geom_sensor_del_idx")
+                if st.button("Confirmar eliminación", key="geom_sensor_del_btn"):
+                    geom.sensors.pop(_idx_s)
+                    st.rerun()
+                _s_default = None
+            else:
+                _s_default = GeometrySensor(id=f"s{len(geom.sensors)+1}",
+                                              name=f"S{len(geom.sensors)+1}")
+
+            if _s_default is not None:
+                c1, c2 = st.columns(2)
+                with c1:
+                    _snm = st.text_input("Nombre", value=_s_default.name,
+                                           key="geom_s_name")
+                    _styp = st.selectbox("Tipo",
+                                           ["accelerometer", "proximity", "velocity"],
+                                           index=["accelerometer", "proximity", "velocity"].index(
+                                               _s_default.sensor_type
+                                               if _s_default.sensor_type in
+                                                  ["accelerometer", "proximity", "velocity"]
+                                               else "accelerometer"),
+                                           key="geom_s_type")
+                    _sdof = st.selectbox("DOF",
+                                           ["+X", "-X", "+Y", "-Y", "+Z", "-Z"],
+                                           index=["+X", "-X", "+Y", "-Y", "+Z", "-Z"].index(
+                                               _s_default.dof if _s_default.dof
+                                               in ["+X", "-X", "+Y", "-Y", "+Z", "-Z"]
+                                               else "+Y"),
+                                           key="geom_s_dof")
+                with c2:
+                    _sx = st.number_input("x", value=float(_s_default.x), step=10.0,
+                                            key="geom_s_x")
+                    _sy = st.number_input("y", value=float(_s_default.y), step=10.0,
+                                            key="geom_s_y")
+                    _sz = st.number_input("z", value=float(_s_default.z), step=10.0,
+                                            key="geom_s_z")
+
+                if st.button("✓ Aplicar al sensor", key="geom_s_apply",
+                                use_container_width=True):
+                    new_s = GeometrySensor(
+                        id=_s_default.id, name=_snm, sensor_type=_styp,
+                        x=_sx, y=_sy, z=_sz, dof=_sdof,
+                    )
+                    if _action_s == "Editar existente":
+                        geom.sensors[_idx_s] = new_s
+                    else:
+                        geom.sensors.append(new_s)
+                    st.rerun()
+
 
 # ---------------------------------------------------------------------
 # Tab 2 — Adquisición
@@ -497,29 +754,161 @@ with tab_acq:
     # -------- NI-9234 live --------
     if acq_mode.startswith("📡"):
         st.markdown("**Configuración de captura NI-9234**")
+
+        # --- Selector de modo (gobierna el resto del formulario) ---
+        ni_mode_sel = st.selectbox(
+            "Modo de ensayo",
+            ["EMA — Impact Hammer", "OMA — Continuous"],
+            key="ni_mode",
+            help=("EMA: impactos con martillo instrumentado, requiere ≥3 promedios. "
+                  "OMA: registro continuo bajo condiciones operacionales, "
+                  "requiere ≥ 2000 × T_low según Brincker & Ventura 2015."),
+        )
+        is_oma = ni_mode_sel.startswith("OMA")
+
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.selectbox("Modo", ["EMA — Impact Hammer", "OMA — Continuous"], key="ni_mode")
-            st.number_input("Sample rate (Hz)", value=5120, step=1024, key="ni_fs")
-        with col2:
-            st.number_input("Duración (s)", value=2.0, step=0.5, key="ni_dur")
-            st.number_input("N° promedios (EMA)", value=5, step=1, key="ni_avg")
-        with col3:
-            st.markdown("**Canales activos**")
-            for i in range(4):
-                st.checkbox(f"Ch{i} habilitado", value=True, key=f"ni_ch_{i}_en")
+            st.number_input("Sample rate (Hz)", value=5120, step=1024, key="ni_fs",
+                              min_value=1024, max_value=51200,
+                              help="NI-9234 acepta hasta 51.2 kS/s/ch. "
+                                   "Típico: 5120 Hz (banda útil 0–2 kHz).")
 
-        modal_status_banner(
-            title="Próximo paso · Captura con la unidad NI cDAQ-9234",
-            detail=(
-                "Conecta la unidad de adquisición al activo bajo análisis siguiendo "
-                "el procedimiento técnico SIGA. La configuración de canales y "
-                "sample rate definida arriba se aplica al ejecutar la captura. "
-                "Una vez generado el archivo de captura, súbelo en la opción "
-                "'Importar archivo de captura existente'."
-            ),
-            severity="info",
-        )
+        # --- Bifurcación EMA vs OMA con tiempos normativos ---
+        if is_oma:
+            # OMA: regla Brincker & Ventura 2015 — T_min ≥ 2000 × T_low
+            with col2:
+                fn_low_hz = st.number_input(
+                    "f_min de interés (Hz)",
+                    value=float(st.session_state.get("ni_fn_low", 5.0)),
+                    min_value=0.5, max_value=200.0, step=0.5,
+                    key="ni_fn_low",
+                    help=("Frecuencia natural más baja que esperas identificar. "
+                          "Define el tiempo mínimo de captura: "
+                          "T_min ≥ 2000 / f_min (Brincker & Ventura 2015)."),
+                )
+            with col3:
+                # T_min normativo según fn_low
+                _t_min_strict = 2000.0 / max(fn_low_hz, 0.1)   # 2000 × T_low (recomendado)
+                _t_min_floor  = 1000.0 / max(fn_low_hz, 0.1)   # 1000 × T_low (mínimo absoluto)
+                _t_default = max(120.0, _t_min_strict)
+                ni_dur = st.number_input(
+                    "Duración (s)",
+                    value=float(st.session_state.get("ni_dur", _t_default)),
+                    min_value=30.0, max_value=3600.0, step=30.0,
+                    key="ni_dur",
+                    help=f"T_min recomendado = 2000/f_min = {_t_min_strict:.0f} s. "
+                         f"T_min absoluto = 1000/f_min = {_t_min_floor:.0f} s.",
+                )
+                # avg no aplica para OMA — placeholder en session_state para mantener key
+                st.session_state["ni_avg"] = 1
+
+            # --- Diagnóstico normativo OMA ---
+            if ni_dur < _t_min_floor:
+                modal_status_banner(
+                    title=f"Duración insuficiente · {ni_dur:.0f} s < T_min absoluto {_t_min_floor:.0f} s",
+                    detail=(
+                        f"Para f_min = {fn_low_hz:.1f} Hz, la norma exige al menos "
+                        f"**1000 × T_low = {_t_min_floor:.0f} s**, recomendado "
+                        f"**2000 × T_low = {_t_min_strict:.0f} s** "
+                        "(Brincker & Ventura 2015 · ISO 18649). Con menos tiempo, "
+                        "el FDD pierde resolución espectral y los damping ratios "
+                        "tienen varianza inaceptable. **Aumenta la duración antes "
+                        "de iniciar la captura.**"
+                    ),
+                    severity="fail",
+                )
+                _can_capture = False
+            elif ni_dur < _t_min_strict:
+                modal_status_banner(
+                    title=f"Duración aceptable pero subóptima · {ni_dur:.0f} s",
+                    detail=(
+                        f"Cumples el piso 1000 × T_low ({_t_min_floor:.0f} s) pero "
+                        f"estás por debajo del recomendado 2000 × T_low "
+                        f"({_t_min_strict:.0f} s). Los modos se identificarán pero "
+                        "la incertidumbre en damping puede ser alta. "
+                        "Sube la duración si el activo lo permite."
+                    ),
+                    severity="warning",
+                )
+                _can_capture = True
+            else:
+                modal_status_banner(
+                    title=f"Duración conforme a norma · {ni_dur:.0f} s ≥ {_t_min_strict:.0f} s",
+                    detail=(
+                        f"Cumples 2000 × T_low para f_min = {fn_low_hz:.1f} Hz. "
+                        "Brincker & Ventura 2015 · ISO 18649."
+                    ),
+                    severity="ok",
+                )
+                _can_capture = True
+
+        else:
+            # EMA: ISO 7626-5 §6.3 — ≥3 promedios, duración 1–2 s por impacto
+            with col2:
+                ni_dur = st.number_input(
+                    "Duración por impacto (s)",
+                    value=float(st.session_state.get("ni_dur", 2.0)),
+                    min_value=0.5, max_value=10.0, step=0.5,
+                    key="ni_dur",
+                    help="Window suficiente para que la respuesta decaiga a < 1% "
+                         "del pico (evita leakage). Típico 1–2 s para máquinas industriales.",
+                )
+            with col3:
+                ni_avg = st.number_input(
+                    "N° de impactos a promediar",
+                    value=int(st.session_state.get("ni_avg", 5)),
+                    min_value=1, max_value=30, step=1,
+                    key="ni_avg",
+                    help="ISO 7626-5 §6.3: mínimo 3, recomendado 5–10. "
+                         "Más promedios → mejor relación señal/ruido.",
+                )
+                # fn_low no aplica para EMA — placeholder
+                st.session_state["ni_fn_low"] = 0.0
+
+            # --- Diagnóstico normativo EMA ---
+            if ni_avg < 3:
+                modal_status_banner(
+                    title=f"N° de impactos {ni_avg} insuficiente — norma exige ≥ 3",
+                    detail=(
+                        "ISO 7626-5 §6.3 requiere **mínimo 3 promedios** para "
+                        "estimación válida de FRF. Con un solo impacto no hay "
+                        "control de coherencia y los modos pueden ser ruido. "
+                        "Aumenta a 5–10 promedios antes de iniciar."
+                    ),
+                    severity="fail",
+                )
+                _can_capture = False
+            elif ni_avg < 5:
+                modal_status_banner(
+                    title=f"N° de impactos {ni_avg} cumple el mínimo · recomendado 5–10",
+                    detail=(
+                        "ISO 7626-5 §6.3 permite 3 promedios como piso pero "
+                        "recomienda 5–10 para reducir la varianza de la FRF. "
+                        "El checklist de coherencia post-captura será más exigente."
+                    ),
+                    severity="warning",
+                )
+                _can_capture = True
+            else:
+                modal_status_banner(
+                    title=f"Configuración EMA conforme a norma · {ni_avg} promedios × {ni_dur:.1f} s",
+                    detail=(
+                        "ISO 7626-5 §6.3 cumplido (≥ 5 promedios). Total estimado "
+                        f"de captura: ≈ {ni_avg * ni_dur:.0f} s + esperas entre impactos."
+                    ),
+                    severity="ok",
+                )
+                _can_capture = True
+
+        # --- Canales activos (común a ambos modos) ---
+        st.markdown("**Canales activos**")
+        col_chs = st.columns(4)
+        for i in range(4):
+            with col_chs[i]:
+                st.checkbox(f"Ch{i}", value=True, key=f"ni_ch_{i}_en")
+
+        # Persistir flag para el bloque del comando técnico
+        st.session_state["_modal_can_capture"] = _can_capture
 
         # Nota técnica para especialistas — accesible vía role admin/specialist.
         # Detalles de implementación NO se muestran al cliente.
@@ -532,12 +921,20 @@ with tab_acq:
                     "de adquisición. Esta sección solo es visible para usuarios "
                     "internos (admin/specialist)."
                 )
+                if not st.session_state.get("_modal_can_capture", True):
+                    st.error(
+                        "⚠ Configuración no conforme a norma. Ajusta los parámetros "
+                        "arriba antes de ejecutar la captura."
+                    )
+                _mode_token = "oma" if is_oma else "ema"
                 _cmd_lines = [
-                    f"--mode {st.session_state.get('ni_mode', 'EMA').lower().split()[0]}",
+                    f"--mode {_mode_token}",
                     f"--fs {int(st.session_state.get('ni_fs', 5120))}",
                     f"--duration {float(st.session_state.get('ni_dur', 2.0))}",
-                    "--output ./capture.tdms",
                 ]
+                if not is_oma:
+                    _cmd_lines.append(f"--averages {int(st.session_state.get('ni_avg', 5))}")
+                _cmd_lines.append("--output ./capture.tdms")
                 if _user_role == "admin":
                     st.code(" \\\n    ".join(["watermelon-modal-capture"] + _cmd_lines),
                              language="bash")
@@ -1318,23 +1715,55 @@ with tab_oma:
         mc4.metric("Fs", f"{tdms_oma.sample_rate_hz:.0f} Hz")
 
         _record_dur = (tdms_oma.channels[0].duration_s if tdms_oma.channels else 0)
-        if _record_dur < 30:
-            st.warning(
-                f"⚠ Duración del record {_record_dur:.0f} s. **OMA requiere ≥ 60s** "
-                "para SVD estable y damping confiable (ISO 20816 + Brincker 2001). "
-                "Resultados con < 30s deben tratarse como preliminares."
-            )
-        elif _record_dur < 60:
-            st.info(
-                f"ℹ Duración del record {_record_dur:.0f} s. Para resultados "
-                "robustos OMA recomienda **60-300s**. Estás en zona aceptable "
-                "pero damping puede tener varianza alta."
-            )
 
         col_o1, col_o2, col_o3, col_o4 = st.columns(4)
         with col_o1:
-            oma_fmin = st.number_input("f mín (Hz)", value=5.0, step=1.0,
-                                         key="oma_fmin")
+            oma_fmin = st.number_input(
+                "f mín (Hz)", value=5.0, step=1.0, key="oma_fmin",
+                help=("Frecuencia natural más baja a identificar. Define el "
+                      "tiempo mínimo del record: T_min ≥ 2000 / f_min "
+                      "(Brincker & Ventura 2015)."),
+            )
+
+        # --- Validación normativa del record contra fn_low ---
+        _t_min_strict_tdms = 2000.0 / max(float(oma_fmin), 0.1)
+        _t_min_floor_tdms  = 1000.0 / max(float(oma_fmin), 0.1)
+        if _record_dur > 0:
+            if _record_dur < _t_min_floor_tdms:
+                modal_status_banner(
+                    title=(f"Record {_record_dur:.0f} s < T_min absoluto "
+                             f"{_t_min_floor_tdms:.0f} s para f_min = {oma_fmin:.1f} Hz"),
+                    detail=(
+                        f"La norma exige al menos **1000 × T_low = "
+                        f"{_t_min_floor_tdms:.0f} s** y recomienda "
+                        f"**2000 × T_low = {_t_min_strict_tdms:.0f} s** "
+                        "(Brincker & Ventura 2015 · ISO 18649). El FDD se ejecutará "
+                        "pero los damping ratios pueden tener varianza > 30%. "
+                        "Para resultados de reporte, recapturar con más tiempo o "
+                        "subir el f_min si los modos bajos no son de interés."
+                    ),
+                    severity="fail",
+                )
+            elif _record_dur < _t_min_strict_tdms:
+                modal_status_banner(
+                    title=(f"Record {_record_dur:.0f} s acepta el piso normativo · "
+                             f"recomendado {_t_min_strict_tdms:.0f} s"),
+                    detail=(
+                        f"Para f_min = {oma_fmin:.1f} Hz cumples "
+                        f"1000 × T_low ({_t_min_floor_tdms:.0f} s) pero "
+                        f"estás por debajo del recomendado 2000 × T_low "
+                        f"({_t_min_strict_tdms:.0f} s). Identificación de modos OK, "
+                        "incertidumbre en damping moderada."
+                    ),
+                    severity="warning",
+                )
+            else:
+                modal_status_banner(
+                    title=(f"Record conforme a norma · {_record_dur:.0f} s ≥ "
+                             f"{_t_min_strict_tdms:.0f} s para f_min = {oma_fmin:.1f} Hz"),
+                    detail="Brincker & Ventura 2015 · ISO 18649 — cumplido.",
+                    severity="ok",
+                )
         with col_o2:
             _f_max_def = float(tdms_oma.sample_rate_hz / 2.0 * 0.9)
             oma_fmax = st.number_input("f máx (Hz)", value=min(500.0, _f_max_def),
@@ -1505,230 +1934,373 @@ with tab_oma:
 # Tab 5 — Mode Shapes (visualización)
 # ---------------------------------------------------------------------
 with tab_3d:
-    st.subheader("Visualización de Mode Shapes")
-    st.caption(
-        "Bar chart 2D (magnitud + fase) y flechas 3D sobre el layout del activo. "
-        "Cumple ISO 7626-6 §7.2."
+    modal_section_header(
+        title="Visualización de Mode Shapes",
+        subtitle="5 representaciones complementarias del mismo modo natural",
+        norm_ref="ISO 7626-6 §7.2",
+        icon="🎬",
     )
 
     fdd = st.session_state.get("modal_oma_result")
     if fdd is None or not fdd.modes:
-        st.info(
-            "📭 Mode shapes disponibles solo desde resultados OMA. "
-            "Ejecuta FDD en el Tab OMA primero."
+        modal_empty_state(
+            icon="🎬",
+            title="Sin modos identificados todavía",
+            description=(
+                "La visualización de mode shapes requiere haber ejecutado un "
+                "análisis modal en el Tab OMA (o futuro Tab EMA). Una vez "
+                "identificados los modos, regresa aquí para visualizar la "
+                "forma modal de cada uno desde 5 perspectivas: bar chart, "
+                "complexity polar, AutoMAC matrix, diagrama de Campbell y "
+                "flechas 3D sobre el activo."
+            ),
+            cta_label="Ve al Tab OMA y ejecuta FDD",
+            norm_ref="ISO 7626-6 §7.2",
         )
     else:
-        # Selector de modo
+        # ─── Selector global de modo (siempre arriba) ────────────────
         mode_options = {
             f"Modo {m.mode_number} · {m.natural_frequency_hz:.2f} Hz · "
-            f"ζ={m.damping_ratio_pct:.2f}% "
-            f"({'⚠ armónico' if m.is_harmonic else 'natural'})":
+            f"ζ={m.damping_ratio_pct:.2f}% · {m.classification}":
             m for m in fdd.modes
         }
-        pick = st.selectbox("Seleccionar modo", list(mode_options.keys()),
-                             key="ms_pick")
+        pick = st.selectbox(
+            "Modo bajo análisis",
+            list(mode_options.keys()),
+            key="ms_pick",
+            help=("Selecciona el modo natural a visualizar. Los expanders abajo "
+                  "se actualizan automáticamente con el modo seleccionado."),
+        )
         mode_sel = mode_options[pick]
+
+        # KPI row del modo seleccionado
+        _conf_color = {
+            "natural": "green",
+            "harmonic": "red",
+            "spurious": "gray",
+        }.get(mode_sel.classification, "navy")
+        modal_kpi_row([
+            (f"{mode_sel.natural_frequency_hz:.2f} Hz", "Frecuencia natural",
+             "del modo identificado", "cyan"),
+            (f"{mode_sel.damping_ratio_pct:.2f} %", "Damping ratio",
+             "factor de amortiguamiento", "navy"),
+            (f"{mode_sel.complexity_pct:.1f} %", "MPC complexity",
+             "< 40% real · > 75% espurio", "amber"),
+            (mode_sel.classification.upper(), "Clasificación",
+             f"confianza {mode_sel.confidence*100:.0f}%", _conf_color),
+        ])
 
         from core.modal.modal_animator import (
             build_bar_chart_mode_shape,
             build_arrows_3d_wireframe,
             build_complexity_polar_plot,
+            build_mac_matrix_plot,
+            build_campbell_diagram,
         )
-
-        # ─── Nivel 1: Bar chart ──────────────────────────────────────
-        st.markdown(f"### Nivel 1 — Bar chart")
-        fig_bar = build_bar_chart_mode_shape(
-            mode_shape=mode_sel.mode_shape,
-            channel_names=fdd.channel_names,
-            mode_label=(f"Modo {mode_sel.mode_number} · "
-                          f"{mode_sel.natural_frequency_hz:.2f} Hz · "
-                          f"ζ = {mode_sel.damping_ratio_pct:.3f}%"),
-        )
-        st.plotly_chart(fig_bar, use_container_width=True)
-
-        # ─── Complexity Polar Plot — estilo Artemis Fig 10 ────────────
-        st.markdown(f"### Complexity Polar Plot · ISO 7626-6 §7.2")
-        st.caption(
-            "Cada flecha es un componente del mode shape en el plano complejo. "
-            "**Vectores colineales** (alineados en 0° o 180°) = modo natural real. "
-            "**Vectores dispersos** = modo complejo o espurio."
-        )
-        fig_pol = build_complexity_polar_plot(
-            mode_shape=mode_sel.mode_shape,
-            channel_names=fdd.channel_names,
-            mode_label=(f"Modo {mode_sel.mode_number} · "
-                          f"{mode_sel.natural_frequency_hz:.2f} Hz · "
-                          f"MPC complexity = {mode_sel.complexity_pct:.1f}% · "
-                          f"clase: {mode_sel.classification}"),
-        )
-        st.plotly_chart(fig_pol, use_container_width=True)
-
-        # ─── AutoMAC Matrix — estilo Artemis Fig 9 ─────────────────────
-        st.markdown("### AutoMAC Matrix · ISO 7626-6 §6.5 + API 684 §1.6")
-        st.caption(
-            "Correlación entre modos identificados. Diagonal = 1 (siempre). "
-            "**Off-diagonal > 0.7** indica modos redundantes (mismo modo "
-            "identificado 2 veces — uno debería eliminarse)."
-        )
-
         from core.modal.oma_engine import compute_mac_matrix, detect_redundant_modes
-        mac = compute_mac_matrix(fdd.modes)
-        labels = [f"{m.natural_frequency_hz:.1f} Hz" for m in fdd.modes]
-
-        from core.modal.modal_animator import build_mac_matrix_plot
-        col_v1, col_v2 = st.columns([3, 1])
-        with col_v1:
-            view_3d = st.toggle("Vista 3D (estilo Artemis)",
-                                  value=False, key="mac_3d_toggle")
-        fig_mac = build_mac_matrix_plot(
-            mac, labels, title="AutoMAC", use_3d=view_3d,
-        )
-        st.plotly_chart(fig_mac, use_container_width=True)
-
-        # ─── Diagrama de Campbell — API 684 §1.6 ──────────────────────
-        st.markdown("### Diagrama de Campbell · API 684 §1.6")
-        st.caption(
-            "Cruza los modos naturales identificados (líneas horizontales) "
-            "contra las armónicas de velocidad operativa (líneas inclinadas 1×, 2×, ...). "
-            "Las **intersecciones marcadas con X roja** son velocidades críticas — "
-            "puntos donde una armónica excita un modo natural."
-        )
-
-        col_c1, col_c2, col_c3 = st.columns(3)
-        with col_c1:
-            camp_rpm_min = st.number_input("RPM mín", value=0, step=100,
-                                              key="camp_rpm_min")
-        with col_c2:
-            camp_rpm_max = st.number_input("RPM máx", value=4000, step=500,
-                                              key="camp_rpm_max")
-        with col_c3:
-            camp_op_rpm = st.number_input("Velocidad operativa (rpm)",
-                                            value=3600, step=100,
-                                            key="camp_op_rpm",
-                                            help="Si está dentro del rango, se "
-                                            "marca con vline ámbar")
-
-        natural_modes_for_camp = [m for m in fdd.modes
-                                     if m.classification == "natural"]
-        if natural_modes_for_camp:
-            from core.modal.modal_animator import build_campbell_diagram
-            fig_camp, crit_speeds = build_campbell_diagram(
-                natural_frequencies_hz=[m.natural_frequency_hz
-                                          for m in natural_modes_for_camp],
-                natural_freq_labels=[f"Modo {m.mode_number}"
-                                       for m in natural_modes_for_camp],
-                rpm_min=float(camp_rpm_min),
-                rpm_max=float(camp_rpm_max),
-                operating_rpm=float(camp_op_rpm) if camp_op_rpm > 0 else None,
-                n_orders=6,
-                classification=[m.classification for m in natural_modes_for_camp],
-                title="Diagrama de Campbell — Modos naturales vs Velocidad operativa",
-            )
-            st.plotly_chart(fig_camp, use_container_width=True)
-
-            if crit_speeds:
-                st.markdown("**Velocidades críticas detectadas:**")
-                import pandas as pd
-                df_crit = pd.DataFrame([
-                    {
-                        "Velocidad crítica (rpm)": round(rpm, 0),
-                        "Modo": label,
-                        "Frecuencia (Hz)": round(fn, 2),
-                        "Orden": f"{order}× rpm",
-                        "Estado": "⚠ DENTRO de rango operativo" if (
-                            camp_op_rpm > 0
-                            and abs(rpm - camp_op_rpm) / max(camp_op_rpm, 1) < 0.10
-                        ) else "Fuera de rango operativo cercano",
-                    }
-                    for rpm, fn, order, label in crit_speeds
-                ])
-                st.dataframe(df_crit, use_container_width=True, hide_index=True)
-            else:
-                st.success(
-                    "✓ Ningún cruce modo natural ↔ armónica en la banda "
-                    f"{camp_rpm_min}-{camp_rpm_max} rpm."
-                )
-        else:
-            st.info("Sin modos naturales clasificados — no hay datos para Campbell.")
 
         st.divider()
 
-        # Detección automática de redundantes
-        redundants = detect_redundant_modes(fdd.modes, threshold=0.7)
-        if redundants:
-            st.warning(
-                f"⚠ **{len(redundants)} pares de modos linealmente dependientes "
-                f"(MAC > 0.7):**\n\n"
-                + "\n".join([
-                    f"- Modo {i+1} ({fdd.modes[i].natural_frequency_hz:.1f} Hz) ↔ "
-                    f"Modo {j+1} ({fdd.modes[j].natural_frequency_hz:.1f} Hz) → "
-                    f"MAC = {mac_val:.3f}"
-                    for i, j, mac_val in redundants
-                ])
-                + "\n\nConsidera eliminar el de menor confianza."
+        # ═══════════════════════════════════════════════════════════════
+        # EXPANDER 1 — Nivel 1 Bar chart (abierto por default)
+        # ═══════════════════════════════════════════════════════════════
+        with st.expander(
+            "📊  Bar chart 2D — Magnitud + fase del mode shape  ·  ISO 7626-6 §7.2",
+            expanded=True,
+        ):
+            modal_plot_caption(
+                text=(
+                    "Magnitud (normalizada) y fase de cada componente del mode "
+                    "shape vector. Es la representación matemáticamente más "
+                    "directa y válida bajo norma."
+                ),
+                norm_ref="ISO 7626-6 §7.2",
+                algorithm="Mode shape vector complejo del FDD",
             )
-        else:
-            st.success(
-                "✓ Todos los modos identificados son linealmente independientes "
-                "(off-diagonal MAC < 0.7). Set modal limpio."
-            )
-
-        # ─── Nivel 2: Flechas 3D — requiere position_3d en sensores ──
-        st.markdown(f"### Nivel 2 — Flechas 3D sobre layout del activo")
-
-        # Intentar leer posiciones 3D del sensor_map del activo
-        # (Ciclo 23.148 — configuradas en wizard)
-        try:
-            from core.instance_state import get_instance
-            # TODO: Activo seleccionado debe venir del Tab Setup; por ahora hardcode TES1
-            inst = get_instance("tes1")
-        except Exception:
-            inst = None
-
-        sensors_3d = []
-        if inst is not None:
-            for ch_name in fdd.channel_names:
-                # Buscar sensor por plane_label
-                match = None
-                for s in (inst.sensors or []):
-                    if str(s.get("plane_label", "")).strip().upper() == ch_name.strip().upper():
-                        match = s
-                        break
-                if match and match.get("position_3d") and match.get("dof_direction"):
-                    sensors_3d.append({
-                        "name": ch_name,
-                        "position_3d": match["position_3d"],
-                        "dof_direction": match["dof_direction"],
-                    })
-
-        if len(sensors_3d) == len(fdd.channel_names):
-            # Todos los sensores tienen 3D → renderizar
-            positions = [tuple(s["position_3d"]) for s in sensors_3d]
-            directions = [tuple(s["dof_direction"]) for s in sensors_3d]
-            fig_3d = build_arrows_3d_wireframe(
+            fig_bar = build_bar_chart_mode_shape(
                 mode_shape=mode_sel.mode_shape,
-                channel_positions_3d=positions,
-                channel_directions_3d=directions,
                 channel_names=fdd.channel_names,
                 mode_label=(f"Modo {mode_sel.mode_number} · "
-                              f"{mode_sel.natural_frequency_hz:.2f} Hz — "
-                              f"verde: cofase · rojo: anti-fase"),
+                              f"{mode_sel.natural_frequency_hz:.2f} Hz · "
+                              f"ζ = {mode_sel.damping_ratio_pct:.3f}%"),
             )
-            st.plotly_chart(fig_3d, use_container_width=True)
-        else:
-            st.warning(
-                f"⚠ Solo {len(sensors_3d)} de {len(fdd.channel_names)} canales tienen "
-                f"configuración 3D (position_3d + dof_direction) en Sensor Map.\n\n"
-                "Para activar el render 3D: completa el expander "
-                "**⚙ Configuración modal** de cada sensor en el wizard de "
-                "**Machinery Library** del activo. Sin esa data, el Nivel 1 (bar chart) "
-                "ya es técnicamente válido bajo ISO 7626-6 §7.2."
+            st.plotly_chart(fig_bar, use_container_width=True)
+
+        # ═══════════════════════════════════════════════════════════════
+        # EXPANDER 2 — Complexity Polar Plot
+        # ═══════════════════════════════════════════════════════════════
+        with st.expander(
+            f"🎯  Complexity Polar Plot — MPC = {mode_sel.complexity_pct:.1f}%  ·  "
+            "Pappa & Eishan 1995",
+            expanded=False,
+        ):
+            modal_plot_caption(
+                text=(
+                    "Cada flecha es un componente del mode shape en el plano "
+                    "complejo. **Vectores colineales** (alineados en 0° o 180°) "
+                    "= modo natural real. **Vectores dispersos** = modo complejo "
+                    "o espurio. Equivalente Artemis Fig 10."
+                ),
+                norm_ref="ISO 7626-6 §7.2",
+                algorithm="Modal Phase Collinearity (Pappa & Eishan 1995)",
+            )
+            fig_pol = build_complexity_polar_plot(
+                mode_shape=mode_sel.mode_shape,
+                channel_names=fdd.channel_names,
+                mode_label=(f"Modo {mode_sel.mode_number} · "
+                              f"{mode_sel.natural_frequency_hz:.2f} Hz · "
+                              f"MPC complexity = {mode_sel.complexity_pct:.1f}% · "
+                              f"clase: {mode_sel.classification}"),
+            )
+            st.plotly_chart(fig_pol, use_container_width=True)
+
+        # ═══════════════════════════════════════════════════════════════
+        # EXPANDER 3 — AutoMAC Matrix
+        # ═══════════════════════════════════════════════════════════════
+        mac = compute_mac_matrix(fdd.modes)
+        labels = [f"{m.natural_frequency_hz:.1f} Hz" for m in fdd.modes]
+        redundants = detect_redundant_modes(fdd.modes, threshold=0.7)
+
+        _redundant_warning = f"  ·  ⚠ {len(redundants)} pares redundantes" if redundants else ""
+
+        with st.expander(
+            f"🔗  AutoMAC Matrix — Correlación entre modos{_redundant_warning}  ·  "
+            "ISO 7626-6 §6.5 + API 684 §1.6",
+            expanded=False,
+        ):
+            modal_plot_caption(
+                text=(
+                    "Modal Assurance Criterion entre cada par de modos. "
+                    "**Diagonal = 1** (siempre). **Off-diagonal > 0.7** "
+                    "indica modos redundantes (mismo modo identificado 2 veces "
+                    "— uno debería eliminarse). Equivalente Artemis Fig 9."
+                ),
+                norm_ref="ISO 7626-6 §6.5 · API 684 §1.6",
+                algorithm="AutoMAC matrix (Allemang & Brown 1982)",
+            )
+            view_3d = st.toggle("Vista 3D barras (estilo Artemis)",
+                                  value=False, key="mac_3d_toggle")
+            fig_mac = build_mac_matrix_plot(
+                mac, labels, title="AutoMAC", use_3d=view_3d,
+            )
+            st.plotly_chart(fig_mac, use_container_width=True)
+
+            # Diagnóstico de redundancia
+            if redundants:
+                modal_status_banner(
+                    title=f"{len(redundants)} pares de modos linealmente dependientes",
+                    detail=(
+                        "MAC off-diagonal > 0.7. Pares detectados: " +
+                        ", ".join([
+                            f"Modo {i+1} ({fdd.modes[i].natural_frequency_hz:.1f} Hz) ↔ "
+                            f"Modo {j+1} ({fdd.modes[j].natural_frequency_hz:.1f} Hz, "
+                            f"MAC={mac_val:.2f})"
+                            for i, j, mac_val in redundants[:5]
+                        ]) + ". Considera eliminar el de menor confianza."
+                    ),
+                    severity="warning",
+                )
+            else:
+                modal_status_banner(
+                    title="Set modal limpio — todos los modos son linealmente independientes",
+                    detail="Off-diagonal MAC < 0.7 en todos los pares.",
+                    severity="ok",
+                )
+
+        # ═══════════════════════════════════════════════════════════════
+        # EXPANDER 4 — Diagrama de Campbell
+        # ═══════════════════════════════════════════════════════════════
+        with st.expander(
+            "📈  Diagrama de Campbell — Velocidades críticas  ·  API 684 §1.6",
+            expanded=False,
+        ):
+            modal_plot_caption(
+                text=(
+                    "Cruza los modos naturales identificados (líneas horizontales) "
+                    "contra las armónicas de velocidad operativa "
+                    "(líneas inclinadas 1×, 2×, ...). Las **X rojas** son "
+                    "velocidades críticas — puntos donde una armónica excita "
+                    "un modo natural y puede causar resonancia."
+                ),
+                norm_ref="API 684 §1.6",
+                algorithm="Diagrama de Campbell — rotor dynamics estándar",
             )
 
+            col_c1, col_c2, col_c3 = st.columns(3)
+            with col_c1:
+                camp_rpm_min = st.number_input("RPM mín", value=0, step=100,
+                                                  key="camp_rpm_min")
+            with col_c2:
+                camp_rpm_max = st.number_input("RPM máx", value=4000, step=500,
+                                                  key="camp_rpm_max")
+            with col_c3:
+                camp_op_rpm = st.number_input("Velocidad operativa (rpm)",
+                                                value=3600, step=100,
+                                                key="camp_op_rpm")
+
+            natural_modes_for_camp = [m for m in fdd.modes
+                                         if m.classification == "natural"]
+            if natural_modes_for_camp:
+                fig_camp, crit_speeds = build_campbell_diagram(
+                    natural_frequencies_hz=[m.natural_frequency_hz
+                                              for m in natural_modes_for_camp],
+                    natural_freq_labels=[f"Modo {m.mode_number}"
+                                           for m in natural_modes_for_camp],
+                    rpm_min=float(camp_rpm_min),
+                    rpm_max=float(camp_rpm_max),
+                    operating_rpm=float(camp_op_rpm) if camp_op_rpm > 0 else None,
+                    n_orders=6,
+                    classification=[m.classification for m in natural_modes_for_camp],
+                    title="Diagrama de Campbell",
+                )
+                st.plotly_chart(fig_camp, use_container_width=True)
+
+                if crit_speeds:
+                    import pandas as pd
+                    df_crit = pd.DataFrame([
+                        {
+                            "Velocidad crítica (rpm)": round(rpm, 0),
+                            "Modo": label,
+                            "Frecuencia (Hz)": round(fn, 2),
+                            "Orden": f"{order}× rpm",
+                            "Estado": "⚠ DENTRO de rango operativo" if (
+                                camp_op_rpm > 0
+                                and abs(rpm - camp_op_rpm) / max(camp_op_rpm, 1) < 0.10
+                            ) else "Fuera de rango operativo cercano",
+                        }
+                        for rpm, fn, order, label in crit_speeds
+                    ])
+                    _n_dentro = sum(1 for r in crit_speeds
+                                       if camp_op_rpm > 0
+                                       and abs(r[0] - camp_op_rpm) / max(camp_op_rpm, 1) < 0.10)
+                    if _n_dentro > 0:
+                        modal_status_banner(
+                            title=f"{_n_dentro} velocidad(es) crítica(s) DENTRO del rango operativo",
+                            detail=(
+                                "El activo opera cerca de un cruce modo×armónica. "
+                                "Riesgo de amplificación resonante — revisar API 618 "
+                                "§7.9.4.2.5.3.2 (separación ≥ 10%)."
+                            ),
+                            severity="fail",
+                        )
+                    st.markdown("**Velocidades críticas detectadas:**")
+                    st.dataframe(df_crit, use_container_width=True, hide_index=True)
+                else:
+                    modal_status_banner(
+                        title="Sin velocidades críticas detectadas",
+                        detail=f"Ningún cruce modo natural ↔ armónica en la banda "
+                                 f"{camp_rpm_min}-{camp_rpm_max} rpm.",
+                        severity="ok",
+                    )
+            else:
+                st.info("Sin modos naturales clasificados — no hay datos para Campbell.")
+
+        # ═══════════════════════════════════════════════════════════════
+        # EXPANDER 5 — Nivel 2: Flechas 3D sobre activo
+        # ═══════════════════════════════════════════════════════════════
+        # Activo: 1) adhoc → no disponible, 2) registrado → leer sensores 3D
+        _adhoc_meta_for_3d = st.session_state.get("modal_adhoc_meta")
+        _inst_key_for_3d = st.session_state.get("modal_inst", "")
+        _inst_for_3d = None
+        if _adhoc_meta_for_3d:
+            _3d_status_label = "no disponible · modo ad-hoc sin Sensor Map"
+        elif _inst_key_for_3d and _inst_key_for_3d != "(seleccionar)":
+            try:
+                from core.instance_state import get_instance as _get_inst_3d
+                _inst_for_3d = _get_inst_3d(_inst_key_for_3d)
+                _3d_status_label = ""
+            except Exception:
+                _inst_for_3d = None
+                _3d_status_label = "no disponible · error cargando activo"
+        else:
+            _3d_status_label = "no disponible · sin activo en Setup"
+
+        with st.expander(
+            f"🌐  Flechas 3D sobre layout del activo {('· ' + _3d_status_label) if _3d_status_label else ''}",
+            expanded=False,
+        ):
+            modal_plot_caption(
+                text=(
+                    "Visualización 3D del mode shape sobre la geometría real "
+                    "del activo. Cada flecha indica la dirección de movimiento "
+                    "de un sensor en el modo seleccionado. Verde = cofase · "
+                    "rojo = anti-fase. Requiere position_3d + dof_direction "
+                    "configurados en Machinery Library para cada sensor."
+                ),
+                norm_ref="ISO 7626-6 §7.2",
+                algorithm="Plotly Cone3D + mode shape vector",
+            )
+
+            sensors_3d = []
+            if _inst_for_3d is not None:
+                for ch_name in fdd.channel_names:
+                    match = None
+                    for s in (_inst_for_3d.sensors or []):
+                        if str(s.get("plane_label", "")).strip().upper() == ch_name.strip().upper():
+                            match = s
+                            break
+                    if match and match.get("position_3d") and match.get("dof_direction"):
+                        sensors_3d.append({
+                            "name": ch_name,
+                            "position_3d": match["position_3d"],
+                            "dof_direction": match["dof_direction"],
+                        })
+
+            if _adhoc_meta_for_3d:
+                modal_status_banner(
+                    title="Mode Shapes 3D no disponible en modo ad-hoc",
+                    detail=(
+                        "El análisis modal ad-hoc usa solo metadata textual "
+                        "del equipo, no incluye geometría 3D ni mapeo de "
+                        "sensores. Los Niveles 1-4 (Bar chart · Polar · AutoMAC "
+                        "· Campbell) ya cumplen ISO 7626-6 §7.2 y son "
+                        "suficientes para un reporte modal técnicamente válido."
+                    ),
+                    severity="info",
+                )
+            elif _inst_for_3d is None:
+                modal_status_banner(
+                    title="Selecciona un activo en Tab Setup",
+                    detail=(
+                        "El render 3D requiere un activo registrado en "
+                        "Machinery Library con sensores configurados con "
+                        "position_3d + dof_direction."
+                    ),
+                    severity="info",
+                )
+            elif len(sensors_3d) == len(fdd.channel_names):
+                positions = [tuple(s["position_3d"]) for s in sensors_3d]
+                directions = [tuple(s["dof_direction"]) for s in sensors_3d]
+                fig_3d = build_arrows_3d_wireframe(
+                    mode_shape=mode_sel.mode_shape,
+                    channel_positions_3d=positions,
+                    channel_directions_3d=directions,
+                    channel_names=fdd.channel_names,
+                    mode_label=(f"Modo {mode_sel.mode_number} · "
+                                  f"{mode_sel.natural_frequency_hz:.2f} Hz — "
+                                  f"verde: cofase · rojo: anti-fase"),
+                )
+                st.plotly_chart(fig_3d, use_container_width=True)
+            else:
+                modal_status_banner(
+                    title=f"Configuración 3D parcial — {len(sensors_3d)}/{len(fdd.channel_names)} canales",
+                    detail=(
+                        "Completa el expander 'Configuración modal' de cada "
+                        "sensor en el wizard de Machinery Library para "
+                        "habilitar el render 3D. Mientras tanto los Niveles "
+                        "1-4 ya son técnicamente válidos bajo ISO 7626-6 §7.2."
+                    ),
+                    severity="warning",
+                )
+
+        # ═══════════════════════════════════════════════════════════════
+        # ROADMAP nota — Mesh3D animado (Sprint próximo)
+        # ═══════════════════════════════════════════════════════════════
         st.caption(
-            "🎬 Nivel 3 (Mesh3D animado con colormap estilo Artemis) en sprint próximo. "
-            "Niveles 1-2 actuales ya cumplen ISO 7626-6 §7.2 — indican magnitud + fase "
-            "+ pattern espacial."
+            "📅 **Roadmap próximo sprint:** Nivel 3 — Mesh3D animado con "
+            "colormap estilo Artemis. Los Niveles 1-2 actuales (bar chart + "
+            "flechas 3D) ya cumplen ISO 7626-6 §7.2 — el animated mesh es "
+            "feature visual, no requisito normativo."
         )
 
 
