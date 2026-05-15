@@ -516,40 +516,65 @@ with tab_setup:
     geom: ModalGeometry = st.session_state["modal_geometry"]
 
     # ----- Toolbar -----
-    col_t1, col_t2, col_t3, col_t4 = st.columns([2, 1, 1, 1])
+    # Callback de auto-aplicación del template al cambiar el selectbox
+    def _apply_template_on_change():
+        choice = st.session_state.get("geom_tpl_choice", "(mantener actual)")
+        if choice != "(mantener actual)" and choice in TEMPLATES:
+            st.session_state["modal_geometry"] = TEMPLATES[choice]()
+            st.session_state["_geom_just_applied"] = choice
+
+    col_t1, col_t2, col_t3 = st.columns([3, 1, 1])
     with col_t1:
         tpl_choice = st.selectbox(
-            "Cargar template",
+            "Cargar template (se aplica automáticamente al seleccionar)",
             options=["(mantener actual)",
                       "motor_compressor", "turbine_generator", "pump_motor"],
             format_func=lambda k: {
                 "(mantener actual)": "— Mantener configuración actual —",
-                "motor_compressor": "Motor + Compresor",
-                "turbine_generator": "Turbina + Generador",
-                "pump_motor": "Bomba + Motor",
+                "motor_compressor": "Motor + Compresor (6 sensores)",
+                "turbine_generator": "Turbina + Generador · LM6000+Brush (6 sensores)",
+                "pump_motor": "Bomba + Motor (4 sensores)",
             }.get(k, k),
             key="geom_tpl_choice",
+            on_change=_apply_template_on_change,
         )
     with col_t2:
-        if st.button("Aplicar template", key="geom_apply_tpl",
-                       use_container_width=True,
-                       disabled=(tpl_choice == "(mantener actual)")):
-            st.session_state["modal_geometry"] = TEMPLATES[tpl_choice]()
-            st.rerun()
-    with col_t3:
         if st.button("💾 Guardar", key="geom_save",
                        use_container_width=True,
-                       disabled=not _geom_asset_id):
+                       disabled=not _geom_asset_id,
+                       help=("Persiste a data/modal/geometries/<asset_id>.json. "
+                             "Disponible solo con activo registrado."
+                             if not _geom_asset_id else
+                             "Persiste a disco para este activo")):
             geom.asset_id = _geom_asset_id
             try:
                 _p = save_geometry(geom)
-                st.toast(f"Geometría guardada: {_p.name}", icon="✅")
+                st.toast(f"Geometría guardada en {_p.name}", icon="✅")
             except Exception as exc:  # noqa: BLE001
                 st.toast(f"Error al guardar: {exc}", icon="⚠")
-    with col_t4:
+    with col_t3:
         if st.button("⬇ Export JSON", key="geom_export",
-                       use_container_width=True):
+                       use_container_width=True,
+                       help="Descarga la geometría como JSON para reutilizarla "
+                            "o compartirla. Funciona en cualquier modo."):
             st.session_state["_geom_export_ready"] = geom.to_json()
+
+    # Feedback de aplicación del template
+    if st.session_state.pop("_geom_just_applied", None):
+        _label_map = {
+            "motor_compressor": "Motor + Compresor",
+            "turbine_generator": "Turbina + Generador (LM6000 + Brush)",
+            "pump_motor": "Bomba + Motor",
+        }
+        _applied = _label_map.get(
+            st.session_state.get("geom_tpl_choice", ""), "Template"
+        )
+        st.success(
+            f"✓ Template **{_applied}** aplicado · "
+            f"{len(geom.blocks)} bloques · {len(geom.sensors)} sensores. "
+            "Edita los nombres y posiciones abajo si necesitas ajustarlo a "
+            "tu activo real."
+        )
 
     if st.session_state.get("_geom_export_ready"):
         st.download_button(
@@ -562,8 +587,9 @@ with tab_setup:
 
     if not _geom_asset_id:
         st.caption(
-            "Modo ad-hoc — la geometría no se persiste, vive solo en esta sesión. "
-            "Para persistir, selecciona un activo registrado arriba o exporta el JSON."
+            "Modo ad-hoc — la geometría vive solo en esta sesión. "
+            "Para persistir entre sesiones, selecciona un activo registrado en "
+            "Tab Setup o usa **⬇ Export JSON** para guardarla externamente."
         )
 
     # ----- Preview Plotly 3D -----

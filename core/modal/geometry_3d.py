@@ -146,7 +146,12 @@ def load_geometry(asset_id: str) -> Optional[ModalGeometry]:
 # ---------------------------------------------------------------------
 
 def template_motor_compressor() -> ModalGeometry:
-    """Motor electrico + coupling + compresor centrifugo (gas process)."""
+    """Motor electrico + coupling + compresor centrifugo (gas process).
+
+    Layout industrial tipico:
+      - Motor: 2 acelerometros (DE = lado acople, NDE = lado libre)
+      - Compresor: 4 proxies ortogonales (CE = lado acople X+Y, NCE = lado libre X+Y)
+    """
     return ModalGeometry(
         name="Motor + Compresor",
         shaft_start=0.0,
@@ -165,52 +170,74 @@ def template_motor_compressor() -> ModalGeometry:
                           radius=300.0, color="#1AAEE5", opacity=0.30),
         ],
         sensors=[
-            GeometrySensor(id="s1", name="1YA", x=480.0, y=250.0, z=0.0, dof="+Y",
-                           sensor_type="accelerometer"),
-            GeometrySensor(id="s2", name="1XA", x=480.0, y=0.0, z=250.0, dof="+Z",
-                           sensor_type="accelerometer"),
-            GeometrySensor(id="s3", name="2YA", x=670.0, y=300.0, z=0.0, dof="+Y",
-                           sensor_type="accelerometer"),
-            GeometrySensor(id="s4", name="2XA", x=670.0, y=0.0, z=300.0, dof="+Z",
-                           sensor_type="accelerometer"),
-            GeometrySensor(id="s5", name="3YA", x=1570.0, y=300.0, z=0.0, dof="+Y",
-                           sensor_type="accelerometer"),
+            # Motor — 2 acelerometros (NDE + DE)
+            GeometrySensor(id="s1", name="MOT-NDE", x=30.0, y=250.0, z=0.0,
+                            dof="+Y", sensor_type="accelerometer"),
+            GeometrySensor(id="s2", name="MOT-DE",  x=470.0, y=250.0, z=0.0,
+                            dof="+Y", sensor_type="accelerometer"),
+            # Compresor — 4 proximidades ortogonales
+            GeometrySensor(id="s3", name="COMP-CE-Y",  x=700.0, y=300.0, z=0.0,
+                            dof="+Y", sensor_type="proximity"),
+            GeometrySensor(id="s4", name="COMP-CE-X",  x=700.0, y=0.0,   z=300.0,
+                            dof="+Z", sensor_type="proximity"),
+            GeometrySensor(id="s5", name="COMP-NCE-Y", x=1570.0, y=300.0, z=0.0,
+                            dof="+Y", sensor_type="proximity"),
+            GeometrySensor(id="s6", name="COMP-NCE-X", x=1570.0, y=0.0,   z=300.0,
+                            dof="+Z", sensor_type="proximity"),
         ],
     )
 
 
 def template_turbine_generator() -> ModalGeometry:
-    """Turbina de gas + coupling + generador."""
+    """Turbina de gas aeroderivada (LM6000) + coupling + generador (Brush).
+
+    Layout TES1 SIGA:
+      - Turbina: 2 acelerometros (CRF = lado libre, TRF = lado acople)
+      - Generador: 4 proxies ortogonales (CE X+Y lado acople, NCE X+Y lado libre)
+    """
     return ModalGeometry(
-        name="Turbina + Generador",
+        name="Turbina + Generador (LM6000 + Brush)",
         shaft_start=0.0,
         shaft_end=2200.0,
         shaft_radius=60.0,
         blocks=[
-            GeometryBlock(id="turbine", name="Turbina",
+            GeometryBlock(id="turbine", name="Turbina LM6000",
                           shape="cylinder", x_start=0.0, x_end=1000.0,
                           radius=380.0, color="#0F1E3D", opacity=0.30),
             GeometryBlock(id="coupling", name="Coupling",
                           shape="cylinder", x_start=1000.0, x_end=1150.0,
                           radius=100.0, color="#D89B22", opacity=0.55),
-            GeometryBlock(id="generator", name="Generador",
+            GeometryBlock(id="generator", name="Generador Brush",
                           shape="box", x_start=1150.0, x_end=2200.0,
                           half_width=320.0, half_height=350.0,
                           color="#1AAEE5", opacity=0.30),
         ],
         sensors=[
-            GeometrySensor(id="s1", name="TBE-Y", x=80.0, y=380.0, z=0.0, dof="+Y"),
-            GeometrySensor(id="s2", name="TBE-X", x=80.0, y=0.0, z=380.0, dof="+Z"),
-            GeometrySensor(id="s3", name="TBC-Y", x=950.0, y=380.0, z=0.0, dof="+Y"),
-            GeometrySensor(id="s4", name="GEN-DE-Y", x=1200.0, y=320.0, z=0.0, dof="+Y"),
-            GeometrySensor(id="s5", name="GEN-DE-X", x=1200.0, y=0.0, z=350.0, dof="+Z"),
-            GeometrySensor(id="s6", name="GEN-NDE-Y", x=2150.0, y=320.0, z=0.0, dof="+Y"),
+            # Turbina — 2 acelerometros (CRF lado libre + TRF lado acople)
+            GeometrySensor(id="s1", name="TRB-CRF", x=80.0,  y=380.0, z=0.0,
+                            dof="+Y", sensor_type="accelerometer"),
+            GeometrySensor(id="s2", name="TRB-TRF", x=950.0, y=380.0, z=0.0,
+                            dof="+Y", sensor_type="accelerometer"),
+            # Generador — 4 proxies ortogonales en ambos bearings
+            GeometrySensor(id="s3", name="GEN-CE-Y",  x=1200.0, y=320.0, z=0.0,
+                            dof="+Y", sensor_type="proximity"),
+            GeometrySensor(id="s4", name="GEN-CE-X",  x=1200.0, y=0.0,   z=350.0,
+                            dof="+Z", sensor_type="proximity"),
+            GeometrySensor(id="s5", name="GEN-NCE-Y", x=2150.0, y=320.0, z=0.0,
+                            dof="+Y", sensor_type="proximity"),
+            GeometrySensor(id="s6", name="GEN-NCE-X", x=2150.0, y=0.0,   z=350.0,
+                            dof="+Z", sensor_type="proximity"),
         ],
     )
 
 
 def template_pump_motor() -> ModalGeometry:
-    """Bomba centrifuga + coupling + motor electrico."""
+    """Motor electrico + coupling + bomba centrifuga.
+
+    Layout industrial tipico:
+      - Motor: 2 acelerometros (DE + NDE)
+      - Bomba: 2 proxies (DE Y + DE X)
+    """
     return ModalGeometry(
         name="Bomba + Motor",
         shaft_start=0.0,
@@ -229,10 +256,14 @@ def template_pump_motor() -> ModalGeometry:
                           radius=230.0, color="#1AAEE5", opacity=0.30),
         ],
         sensors=[
-            GeometrySensor(id="s1", name="MOT-Y", x=480.0, y=200.0, z=0.0, dof="+Y"),
-            GeometrySensor(id="s2", name="MOT-X", x=480.0, y=0.0, z=200.0, dof="+Z"),
-            GeometrySensor(id="s3", name="PMP-DE-Y", x=620.0, y=230.0, z=0.0, dof="+Y"),
-            GeometrySensor(id="s4", name="PMP-NDE-Y", x=1280.0, y=230.0, z=0.0, dof="+Y"),
+            GeometrySensor(id="s1", name="MOT-NDE",  x=30.0,  y=200.0, z=0.0,
+                            dof="+Y", sensor_type="accelerometer"),
+            GeometrySensor(id="s2", name="MOT-DE",   x=470.0, y=200.0, z=0.0,
+                            dof="+Y", sensor_type="accelerometer"),
+            GeometrySensor(id="s3", name="PMP-DE-Y", x=650.0, y=230.0, z=0.0,
+                            dof="+Y", sensor_type="proximity"),
+            GeometrySensor(id="s4", name="PMP-DE-X", x=650.0, y=0.0,   z=230.0,
+                            dof="+Z", sensor_type="proximity"),
         ],
     )
 
