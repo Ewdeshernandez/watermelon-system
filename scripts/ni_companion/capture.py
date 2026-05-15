@@ -128,11 +128,20 @@ def main() -> int:
     parser.add_argument("--output", type=Path, help="Output .tdms file")
     parser.add_argument("--fs", type=float, default=5120,
                         help="Sample rate Hz (se redondea a valor válido NI-9234)")
-    parser.add_argument("--duration", type=float, default=2.0,
-                        help="Duration en segundos. EMA: 1-2 seg. OMA: 60-300 seg "
-                             "(ISO 20816 + Brincker 2001 — mínimo 60s para SVD estable)")
+    parser.add_argument("--duration", type=float, default=None,
+                        help="Duration en segundos. "
+                             "EMA: 1-2 s tipico (default 2 s). "
+                             "OMA: T_min >= 2000/fn_low (Brincker & Ventura 2015). "
+                             "Default OMA: 200 s (asume fn_low ~10 Hz). "
+                             "Para fn_low menor, sube manualmente o usa --fn-low.")
+    parser.add_argument("--fn-low", type=float, default=None,
+                        help="OMA: frecuencia natural mas baja esperada (Hz). "
+                             "Si se da, valida duration >= 2000/fn_low y reescribe "
+                             "el default si --duration no se paso. Norma: "
+                             "Brincker & Ventura 2015, ISO 18649.")
     parser.add_argument("--averages", type=int, default=5,
-                        help="N° de impactos a promediar (modo EMA)")
+                        help="N de impactos a promediar (modo EMA). "
+                             "ISO 7626-5 §6.3: minimo 3, recomendado 5-10.")
     parser.add_argument("--trigger-channel", type=int, default=0,
                         help="Canal del martillo (modo EMA, 0..3)")
     parser.add_argument("--trigger-level", type=float, default=0.5,
@@ -182,6 +191,55 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
+    # -----------------------------------------------------------------
+    # Validacion normativa de tiempos
+    # EMA: ISO 7626-5 §6.3 — minimo 3 promedios
+    # OMA: Brincker & Ventura 2015 — T_min >= 2000/fn_low (recomendado),
+    #      piso 1000/fn_low
+    # -----------------------------------------------------------------
+    if args.mode == "ema":
+        if args.duration is None:
+            args.duration = 2.0  # default EMA
+        if args.averages < 3:
+            print(f"ERROR: --averages {args.averages} < 3. "
+                  f"ISO 7626-5 §6.3 exige minimo 3 promedios.", file=sys.stderr)
+            return 4
+        if args.averages < 5:
+            print(f"WARN: --averages {args.averages} cumple piso pero el "
+                  f"recomendado es 5-10 (ISO 7626-5 §6.3).", file=sys.stderr)
+    else:  # oma
+        if args.fn_low is not None and args.fn_low > 0:
+            t_min_strict = 2000.0 / args.fn_low
+            t_min_floor = 1000.0 / args.fn_low
+            if args.duration is None:
+                args.duration = max(120.0, t_min_strict)
+                print(f"INFO: --duration auto = {args.duration:.0f} s "
+                      f"(2000/fn_low={t_min_strict:.0f} s, fn_low={args.fn_low} Hz)",
+                      file=sys.stderr)
+            elif args.duration < t_min_floor:
+                print(f"ERROR: --duration {args.duration:.0f} s < piso absoluto "
+                      f"{t_min_floor:.0f} s para fn_low={args.fn_low} Hz "
+                      f"(Brincker & Ventura 2015). Norma exige >= 1000/fn_low, "
+                      f"recomendado >= 2000/fn_low = {t_min_strict:.0f} s.",
+                      file=sys.stderr)
+                return 5
+            elif args.duration < t_min_strict:
+                print(f"WARN: --duration {args.duration:.0f} s cumple piso "
+                      f"({t_min_floor:.0f} s) pero esta por debajo del "
+                      f"recomendado {t_min_strict:.0f} s (Brincker & Ventura 2015).",
+                      file=sys.stderr)
+        else:
+            if args.duration is None:
+                args.duration = 200.0  # default OMA conservador (~ fn_low=10 Hz)
+                print(f"INFO: --duration auto = 200 s (default OMA sin --fn-low). "
+                      f"Si fn_low < 10 Hz, pasar --fn-low para validar.",
+                      file=sys.stderr)
+            elif args.duration < 60:
+                print(f"WARN: --duration {args.duration:.0f} s puede ser "
+                      f"insuficiente para OMA. Sin --fn-low no puedo validar "
+                      f"contra norma. Para maquinaria industrial tipica "
+                      f"(fn_low ~5-10 Hz), recomendado 200-400 s.", file=sys.stderr)
+
     # Construir config — preservar EMA/OMA aunque sea simulado
     # (Ciclo 23.156 — bug fix: antes ambos quedaban como "simulated" y la
     # bifurcación en el Tab Adquisición no podía determinar EMA vs OMA.)
@@ -209,11 +267,17 @@ def main() -> int:
     print("=" * 60, file=sys.stderr)
     print(f"  Modo:      {args.mode}", file=sys.stderr)
     print(f"  Fs:        {args.fs} Hz", file=sys.stderr)
-    print(f"  Duración:  {args.duration} s", file=sys.stderr)
+    print(f"  Duracion:  {args.duration} s", file=sys.stderr)
     if args.mode == "ema":
-        print(f"  N° impactos: {args.averages}", file=sys.stderr)
+        print(f"  N impactos: {args.averages}  (norma: ISO 7626-5 §6.3, min 3)",
+              file=sys.stderr)
         print(f"  Trigger:   ch{args.trigger_channel} > {args.trigger_level} V",
               file=sys.stderr)
+    elif args.mode == "oma" and args.fn_low:
+        _tstrict = 2000.0 / args.fn_low
+        print(f"  fn_low:    {args.fn_low} Hz  (T_min recomendado {_tstrict:.0f} s)",
+              file=sys.stderr)
+        print(f"  Norma:     Brincker & Ventura 2015 / ISO 18649", file=sys.stderr)
     print(f"  Canales:   {len(channels)}", file=sys.stderr)
     for ch in channels:
         print(f"    ch{ch.channel_index}: {ch.name:<10} "

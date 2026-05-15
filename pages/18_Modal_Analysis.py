@@ -475,6 +475,263 @@ with tab_setup:
                 "y validar readiness para análisis modal."
             )
 
+    # =================================================================
+    # Sub-sección: Editor de Geometría 3D (estilo Artemis Modal)
+    # =================================================================
+    st.divider()
+    modal_section_header(
+        title="Geometría 3D del activo",
+        subtitle=(
+            "Dibuja el tren mecánico y posiciona los sensores con su dirección "
+            "DOF. La geometría se usa como soporte visual para las mode shapes "
+            "en Tab 5. Persistencia por activo o session-only en modo ad-hoc."
+        ),
+        norm_ref="ISO 7626-6 §6 · DOF y orientación espacial documentadas",
+    )
+
+    from core.modal.geometry_3d import (
+        ModalGeometry, GeometryBlock, GeometrySensor,
+        TEMPLATES, build_geometry_figure,
+        save_geometry, load_geometry,
+    )
+
+    # Resolver asset_id para persistencia (None si ad-hoc)
+    _geom_asset_id = ""
+    _adhoc_for_geom = st.session_state.get("modal_adhoc_meta")
+    _inst_key_for_geom = st.session_state.get("modal_inst", "")
+    if not _adhoc_for_geom and _inst_key_for_geom and _inst_key_for_geom != "(seleccionar)":
+        _geom_asset_id = _inst_key_for_geom
+
+    # Cargar geometría existente o inicializar
+    if "modal_geometry" not in st.session_state:
+        if _geom_asset_id:
+            _loaded = load_geometry(_geom_asset_id)
+            st.session_state["modal_geometry"] = (
+                _loaded if _loaded else TEMPLATES["motor_compressor"]()
+            )
+        else:
+            st.session_state["modal_geometry"] = TEMPLATES["motor_compressor"]()
+
+    geom: ModalGeometry = st.session_state["modal_geometry"]
+
+    # ----- Toolbar -----
+    col_t1, col_t2, col_t3, col_t4 = st.columns([2, 1, 1, 1])
+    with col_t1:
+        tpl_choice = st.selectbox(
+            "Cargar template",
+            options=["(mantener actual)",
+                      "motor_compressor", "turbine_generator", "pump_motor"],
+            format_func=lambda k: {
+                "(mantener actual)": "— Mantener configuración actual —",
+                "motor_compressor": "Motor + Compresor",
+                "turbine_generator": "Turbina + Generador",
+                "pump_motor": "Bomba + Motor",
+            }.get(k, k),
+            key="geom_tpl_choice",
+        )
+    with col_t2:
+        if st.button("Aplicar template", key="geom_apply_tpl",
+                       use_container_width=True,
+                       disabled=(tpl_choice == "(mantener actual)")):
+            st.session_state["modal_geometry"] = TEMPLATES[tpl_choice]()
+            st.rerun()
+    with col_t3:
+        if st.button("💾 Guardar", key="geom_save",
+                       use_container_width=True,
+                       disabled=not _geom_asset_id):
+            geom.asset_id = _geom_asset_id
+            try:
+                _p = save_geometry(geom)
+                st.toast(f"Geometría guardada: {_p.name}", icon="✅")
+            except Exception as exc:  # noqa: BLE001
+                st.toast(f"Error al guardar: {exc}", icon="⚠")
+    with col_t4:
+        if st.button("⬇ Export JSON", key="geom_export",
+                       use_container_width=True):
+            st.session_state["_geom_export_ready"] = geom.to_json()
+
+    if st.session_state.get("_geom_export_ready"):
+        st.download_button(
+            "Descargar geometry.json",
+            data=st.session_state["_geom_export_ready"],
+            file_name=f"{geom.asset_id or 'adhoc'}_geometry.json",
+            mime="application/json",
+            key="geom_download_btn",
+        )
+
+    if not _geom_asset_id:
+        st.caption(
+            "Modo ad-hoc — la geometría no se persiste, vive solo en esta sesión. "
+            "Para persistir, selecciona un activo registrado arriba o exporta el JSON."
+        )
+
+    # ----- Preview Plotly 3D -----
+    fig_geom = build_geometry_figure(geom)
+    st.plotly_chart(fig_geom, use_container_width=True)
+
+    # ----- Editor de bloques + sensores -----
+    col_edit_b, col_edit_s = st.columns(2)
+
+    with col_edit_b:
+        st.markdown("**Secciones del tren (bloques)**")
+        if geom.blocks:
+            import pandas as pd
+            df_b = pd.DataFrame([
+                {"Nombre": b.name, "Forma": b.shape,
+                 "x_start": b.x_start, "x_end": b.x_end,
+                 "R / hw,hh": (
+                     f"{b.radius:.0f}" if b.shape == "cylinder"
+                     else f"{b.half_width:.0f}, {b.half_height:.0f}"
+                 ),
+                 "Color": b.color}
+                for b in geom.blocks
+            ])
+            st.dataframe(df_b, hide_index=True, use_container_width=True)
+
+        with st.expander("➕ Agregar / editar bloque", expanded=False):
+            _action_b = st.radio("Acción", ["Agregar nuevo", "Editar existente",
+                                                "Eliminar"],
+                                  horizontal=True, key="geom_block_action")
+            if _action_b == "Editar existente" and geom.blocks:
+                _idx_b = st.selectbox("Bloque a editar",
+                                        options=list(range(len(geom.blocks))),
+                                        format_func=lambda i: geom.blocks[i].name,
+                                        key="geom_block_edit_idx")
+                _b_default = geom.blocks[_idx_b]
+            elif _action_b == "Eliminar" and geom.blocks:
+                _idx_b = st.selectbox("Bloque a eliminar",
+                                        options=list(range(len(geom.blocks))),
+                                        format_func=lambda i: geom.blocks[i].name,
+                                        key="geom_block_del_idx")
+                if st.button("Confirmar eliminación", key="geom_block_del_btn"):
+                    geom.blocks.pop(_idx_b)
+                    st.rerun()
+                _b_default = None
+            else:
+                _b_default = GeometryBlock(id=f"b{len(geom.blocks)+1}",
+                                            name="Nuevo bloque")
+
+            if _b_default is not None:
+                c1, c2 = st.columns(2)
+                with c1:
+                    _nm = st.text_input("Nombre", value=_b_default.name,
+                                          key="geom_b_name")
+                    _shape = st.selectbox("Forma", ["cylinder", "box"],
+                                            index=0 if _b_default.shape == "cylinder" else 1,
+                                            key="geom_b_shape")
+                    _x0 = st.number_input("x_start", value=float(_b_default.x_start),
+                                            step=10.0, key="geom_b_x0")
+                    _x1 = st.number_input("x_end", value=float(_b_default.x_end),
+                                            step=10.0, key="geom_b_x1")
+                with c2:
+                    if _shape == "cylinder":
+                        _r = st.number_input("Radio", value=float(_b_default.radius),
+                                               step=10.0, min_value=1.0,
+                                               key="geom_b_r")
+                        _hw, _hh = _r, _r
+                    else:
+                        _hw = st.number_input("half_width (Y)",
+                                                value=float(_b_default.half_width),
+                                                step=10.0, min_value=1.0,
+                                                key="geom_b_hw")
+                        _hh = st.number_input("half_height (Z)",
+                                                value=float(_b_default.half_height),
+                                                step=10.0, min_value=1.0,
+                                                key="geom_b_hh")
+                        _r = max(_hw, _hh)
+                    _color = st.color_picker("Color", value=_b_default.color,
+                                                key="geom_b_color")
+                    _op = st.slider("Opacidad", 0.1, 1.0, float(_b_default.opacity),
+                                      0.05, key="geom_b_op")
+
+                if st.button("✓ Aplicar al bloque", key="geom_b_apply",
+                                use_container_width=True):
+                    new_b = GeometryBlock(
+                        id=_b_default.id, name=_nm, shape=_shape,
+                        x_start=_x0, x_end=_x1,
+                        radius=_r, half_width=_hw, half_height=_hh,
+                        color=_color, opacity=_op,
+                    )
+                    if _action_b == "Editar existente":
+                        geom.blocks[_idx_b] = new_b
+                    else:
+                        geom.blocks.append(new_b)
+                    st.rerun()
+
+    with col_edit_s:
+        st.markdown("**Sensores con dirección DOF**")
+        if geom.sensors:
+            import pandas as pd
+            df_s = pd.DataFrame([
+                {"Nombre": s.name, "Tipo": s.sensor_type,
+                 "x": s.x, "y": s.y, "z": s.z, "DOF": s.dof}
+                for s in geom.sensors
+            ])
+            st.dataframe(df_s, hide_index=True, use_container_width=True)
+
+        with st.expander("➕ Agregar / editar sensor", expanded=False):
+            _action_s = st.radio("Acción", ["Agregar nuevo", "Editar existente",
+                                                "Eliminar"],
+                                  horizontal=True, key="geom_sensor_action")
+            if _action_s == "Editar existente" and geom.sensors:
+                _idx_s = st.selectbox("Sensor a editar",
+                                        options=list(range(len(geom.sensors))),
+                                        format_func=lambda i: geom.sensors[i].name,
+                                        key="geom_sensor_edit_idx")
+                _s_default = geom.sensors[_idx_s]
+            elif _action_s == "Eliminar" and geom.sensors:
+                _idx_s = st.selectbox("Sensor a eliminar",
+                                        options=list(range(len(geom.sensors))),
+                                        format_func=lambda i: geom.sensors[i].name,
+                                        key="geom_sensor_del_idx")
+                if st.button("Confirmar eliminación", key="geom_sensor_del_btn"):
+                    geom.sensors.pop(_idx_s)
+                    st.rerun()
+                _s_default = None
+            else:
+                _s_default = GeometrySensor(id=f"s{len(geom.sensors)+1}",
+                                              name=f"S{len(geom.sensors)+1}")
+
+            if _s_default is not None:
+                c1, c2 = st.columns(2)
+                with c1:
+                    _snm = st.text_input("Nombre", value=_s_default.name,
+                                           key="geom_s_name")
+                    _styp = st.selectbox("Tipo",
+                                           ["accelerometer", "proximity", "velocity"],
+                                           index=["accelerometer", "proximity", "velocity"].index(
+                                               _s_default.sensor_type
+                                               if _s_default.sensor_type in
+                                                  ["accelerometer", "proximity", "velocity"]
+                                               else "accelerometer"),
+                                           key="geom_s_type")
+                    _sdof = st.selectbox("DOF",
+                                           ["+X", "-X", "+Y", "-Y", "+Z", "-Z"],
+                                           index=["+X", "-X", "+Y", "-Y", "+Z", "-Z"].index(
+                                               _s_default.dof if _s_default.dof
+                                               in ["+X", "-X", "+Y", "-Y", "+Z", "-Z"]
+                                               else "+Y"),
+                                           key="geom_s_dof")
+                with c2:
+                    _sx = st.number_input("x", value=float(_s_default.x), step=10.0,
+                                            key="geom_s_x")
+                    _sy = st.number_input("y", value=float(_s_default.y), step=10.0,
+                                            key="geom_s_y")
+                    _sz = st.number_input("z", value=float(_s_default.z), step=10.0,
+                                            key="geom_s_z")
+
+                if st.button("✓ Aplicar al sensor", key="geom_s_apply",
+                                use_container_width=True):
+                    new_s = GeometrySensor(
+                        id=_s_default.id, name=_snm, sensor_type=_styp,
+                        x=_sx, y=_sy, z=_sz, dof=_sdof,
+                    )
+                    if _action_s == "Editar existente":
+                        geom.sensors[_idx_s] = new_s
+                    else:
+                        geom.sensors.append(new_s)
+                    st.rerun()
+
 
 # ---------------------------------------------------------------------
 # Tab 2 — Adquisición
@@ -497,29 +754,161 @@ with tab_acq:
     # -------- NI-9234 live --------
     if acq_mode.startswith("📡"):
         st.markdown("**Configuración de captura NI-9234**")
+
+        # --- Selector de modo (gobierna el resto del formulario) ---
+        ni_mode_sel = st.selectbox(
+            "Modo de ensayo",
+            ["EMA — Impact Hammer", "OMA — Continuous"],
+            key="ni_mode",
+            help=("EMA: impactos con martillo instrumentado, requiere ≥3 promedios. "
+                  "OMA: registro continuo bajo condiciones operacionales, "
+                  "requiere ≥ 2000 × T_low según Brincker & Ventura 2015."),
+        )
+        is_oma = ni_mode_sel.startswith("OMA")
+
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.selectbox("Modo", ["EMA — Impact Hammer", "OMA — Continuous"], key="ni_mode")
-            st.number_input("Sample rate (Hz)", value=5120, step=1024, key="ni_fs")
-        with col2:
-            st.number_input("Duración (s)", value=2.0, step=0.5, key="ni_dur")
-            st.number_input("N° promedios (EMA)", value=5, step=1, key="ni_avg")
-        with col3:
-            st.markdown("**Canales activos**")
-            for i in range(4):
-                st.checkbox(f"Ch{i} habilitado", value=True, key=f"ni_ch_{i}_en")
+            st.number_input("Sample rate (Hz)", value=5120, step=1024, key="ni_fs",
+                              min_value=1024, max_value=51200,
+                              help="NI-9234 acepta hasta 51.2 kS/s/ch. "
+                                   "Típico: 5120 Hz (banda útil 0–2 kHz).")
 
-        modal_status_banner(
-            title="Próximo paso · Captura con la unidad NI cDAQ-9234",
-            detail=(
-                "Conecta la unidad de adquisición al activo bajo análisis siguiendo "
-                "el procedimiento técnico SIGA. La configuración de canales y "
-                "sample rate definida arriba se aplica al ejecutar la captura. "
-                "Una vez generado el archivo de captura, súbelo en la opción "
-                "'Importar archivo de captura existente'."
-            ),
-            severity="info",
-        )
+        # --- Bifurcación EMA vs OMA con tiempos normativos ---
+        if is_oma:
+            # OMA: regla Brincker & Ventura 2015 — T_min ≥ 2000 × T_low
+            with col2:
+                fn_low_hz = st.number_input(
+                    "f_min de interés (Hz)",
+                    value=float(st.session_state.get("ni_fn_low", 5.0)),
+                    min_value=0.5, max_value=200.0, step=0.5,
+                    key="ni_fn_low",
+                    help=("Frecuencia natural más baja que esperas identificar. "
+                          "Define el tiempo mínimo de captura: "
+                          "T_min ≥ 2000 / f_min (Brincker & Ventura 2015)."),
+                )
+            with col3:
+                # T_min normativo según fn_low
+                _t_min_strict = 2000.0 / max(fn_low_hz, 0.1)   # 2000 × T_low (recomendado)
+                _t_min_floor  = 1000.0 / max(fn_low_hz, 0.1)   # 1000 × T_low (mínimo absoluto)
+                _t_default = max(120.0, _t_min_strict)
+                ni_dur = st.number_input(
+                    "Duración (s)",
+                    value=float(st.session_state.get("ni_dur", _t_default)),
+                    min_value=30.0, max_value=3600.0, step=30.0,
+                    key="ni_dur",
+                    help=f"T_min recomendado = 2000/f_min = {_t_min_strict:.0f} s. "
+                         f"T_min absoluto = 1000/f_min = {_t_min_floor:.0f} s.",
+                )
+                # avg no aplica para OMA — placeholder en session_state para mantener key
+                st.session_state["ni_avg"] = 1
+
+            # --- Diagnóstico normativo OMA ---
+            if ni_dur < _t_min_floor:
+                modal_status_banner(
+                    title=f"Duración insuficiente · {ni_dur:.0f} s < T_min absoluto {_t_min_floor:.0f} s",
+                    detail=(
+                        f"Para f_min = {fn_low_hz:.1f} Hz, la norma exige al menos "
+                        f"**1000 × T_low = {_t_min_floor:.0f} s**, recomendado "
+                        f"**2000 × T_low = {_t_min_strict:.0f} s** "
+                        "(Brincker & Ventura 2015 · ISO 18649). Con menos tiempo, "
+                        "el FDD pierde resolución espectral y los damping ratios "
+                        "tienen varianza inaceptable. **Aumenta la duración antes "
+                        "de iniciar la captura.**"
+                    ),
+                    severity="fail",
+                )
+                _can_capture = False
+            elif ni_dur < _t_min_strict:
+                modal_status_banner(
+                    title=f"Duración aceptable pero subóptima · {ni_dur:.0f} s",
+                    detail=(
+                        f"Cumples el piso 1000 × T_low ({_t_min_floor:.0f} s) pero "
+                        f"estás por debajo del recomendado 2000 × T_low "
+                        f"({_t_min_strict:.0f} s). Los modos se identificarán pero "
+                        "la incertidumbre en damping puede ser alta. "
+                        "Sube la duración si el activo lo permite."
+                    ),
+                    severity="warning",
+                )
+                _can_capture = True
+            else:
+                modal_status_banner(
+                    title=f"Duración conforme a norma · {ni_dur:.0f} s ≥ {_t_min_strict:.0f} s",
+                    detail=(
+                        f"Cumples 2000 × T_low para f_min = {fn_low_hz:.1f} Hz. "
+                        "Brincker & Ventura 2015 · ISO 18649."
+                    ),
+                    severity="ok",
+                )
+                _can_capture = True
+
+        else:
+            # EMA: ISO 7626-5 §6.3 — ≥3 promedios, duración 1–2 s por impacto
+            with col2:
+                ni_dur = st.number_input(
+                    "Duración por impacto (s)",
+                    value=float(st.session_state.get("ni_dur", 2.0)),
+                    min_value=0.5, max_value=10.0, step=0.5,
+                    key="ni_dur",
+                    help="Window suficiente para que la respuesta decaiga a < 1% "
+                         "del pico (evita leakage). Típico 1–2 s para máquinas industriales.",
+                )
+            with col3:
+                ni_avg = st.number_input(
+                    "N° de impactos a promediar",
+                    value=int(st.session_state.get("ni_avg", 5)),
+                    min_value=1, max_value=30, step=1,
+                    key="ni_avg",
+                    help="ISO 7626-5 §6.3: mínimo 3, recomendado 5–10. "
+                         "Más promedios → mejor relación señal/ruido.",
+                )
+                # fn_low no aplica para EMA — placeholder
+                st.session_state["ni_fn_low"] = 0.0
+
+            # --- Diagnóstico normativo EMA ---
+            if ni_avg < 3:
+                modal_status_banner(
+                    title=f"N° de impactos {ni_avg} insuficiente — norma exige ≥ 3",
+                    detail=(
+                        "ISO 7626-5 §6.3 requiere **mínimo 3 promedios** para "
+                        "estimación válida de FRF. Con un solo impacto no hay "
+                        "control de coherencia y los modos pueden ser ruido. "
+                        "Aumenta a 5–10 promedios antes de iniciar."
+                    ),
+                    severity="fail",
+                )
+                _can_capture = False
+            elif ni_avg < 5:
+                modal_status_banner(
+                    title=f"N° de impactos {ni_avg} cumple el mínimo · recomendado 5–10",
+                    detail=(
+                        "ISO 7626-5 §6.3 permite 3 promedios como piso pero "
+                        "recomienda 5–10 para reducir la varianza de la FRF. "
+                        "El checklist de coherencia post-captura será más exigente."
+                    ),
+                    severity="warning",
+                )
+                _can_capture = True
+            else:
+                modal_status_banner(
+                    title=f"Configuración EMA conforme a norma · {ni_avg} promedios × {ni_dur:.1f} s",
+                    detail=(
+                        "ISO 7626-5 §6.3 cumplido (≥ 5 promedios). Total estimado "
+                        f"de captura: ≈ {ni_avg * ni_dur:.0f} s + esperas entre impactos."
+                    ),
+                    severity="ok",
+                )
+                _can_capture = True
+
+        # --- Canales activos (común a ambos modos) ---
+        st.markdown("**Canales activos**")
+        col_chs = st.columns(4)
+        for i in range(4):
+            with col_chs[i]:
+                st.checkbox(f"Ch{i}", value=True, key=f"ni_ch_{i}_en")
+
+        # Persistir flag para el bloque del comando técnico
+        st.session_state["_modal_can_capture"] = _can_capture
 
         # Nota técnica para especialistas — accesible vía role admin/specialist.
         # Detalles de implementación NO se muestran al cliente.
@@ -532,12 +921,20 @@ with tab_acq:
                     "de adquisición. Esta sección solo es visible para usuarios "
                     "internos (admin/specialist)."
                 )
+                if not st.session_state.get("_modal_can_capture", True):
+                    st.error(
+                        "⚠ Configuración no conforme a norma. Ajusta los parámetros "
+                        "arriba antes de ejecutar la captura."
+                    )
+                _mode_token = "oma" if is_oma else "ema"
                 _cmd_lines = [
-                    f"--mode {st.session_state.get('ni_mode', 'EMA').lower().split()[0]}",
+                    f"--mode {_mode_token}",
                     f"--fs {int(st.session_state.get('ni_fs', 5120))}",
                     f"--duration {float(st.session_state.get('ni_dur', 2.0))}",
-                    "--output ./capture.tdms",
                 ]
+                if not is_oma:
+                    _cmd_lines.append(f"--averages {int(st.session_state.get('ni_avg', 5))}")
+                _cmd_lines.append("--output ./capture.tdms")
                 if _user_role == "admin":
                     st.code(" \\\n    ".join(["watermelon-modal-capture"] + _cmd_lines),
                              language="bash")
@@ -1318,23 +1715,55 @@ with tab_oma:
         mc4.metric("Fs", f"{tdms_oma.sample_rate_hz:.0f} Hz")
 
         _record_dur = (tdms_oma.channels[0].duration_s if tdms_oma.channels else 0)
-        if _record_dur < 30:
-            st.warning(
-                f"⚠ Duración del record {_record_dur:.0f} s. **OMA requiere ≥ 60s** "
-                "para SVD estable y damping confiable (ISO 20816 + Brincker 2001). "
-                "Resultados con < 30s deben tratarse como preliminares."
-            )
-        elif _record_dur < 60:
-            st.info(
-                f"ℹ Duración del record {_record_dur:.0f} s. Para resultados "
-                "robustos OMA recomienda **60-300s**. Estás en zona aceptable "
-                "pero damping puede tener varianza alta."
-            )
 
         col_o1, col_o2, col_o3, col_o4 = st.columns(4)
         with col_o1:
-            oma_fmin = st.number_input("f mín (Hz)", value=5.0, step=1.0,
-                                         key="oma_fmin")
+            oma_fmin = st.number_input(
+                "f mín (Hz)", value=5.0, step=1.0, key="oma_fmin",
+                help=("Frecuencia natural más baja a identificar. Define el "
+                      "tiempo mínimo del record: T_min ≥ 2000 / f_min "
+                      "(Brincker & Ventura 2015)."),
+            )
+
+        # --- Validación normativa del record contra fn_low ---
+        _t_min_strict_tdms = 2000.0 / max(float(oma_fmin), 0.1)
+        _t_min_floor_tdms  = 1000.0 / max(float(oma_fmin), 0.1)
+        if _record_dur > 0:
+            if _record_dur < _t_min_floor_tdms:
+                modal_status_banner(
+                    title=(f"Record {_record_dur:.0f} s < T_min absoluto "
+                             f"{_t_min_floor_tdms:.0f} s para f_min = {oma_fmin:.1f} Hz"),
+                    detail=(
+                        f"La norma exige al menos **1000 × T_low = "
+                        f"{_t_min_floor_tdms:.0f} s** y recomienda "
+                        f"**2000 × T_low = {_t_min_strict_tdms:.0f} s** "
+                        "(Brincker & Ventura 2015 · ISO 18649). El FDD se ejecutará "
+                        "pero los damping ratios pueden tener varianza > 30%. "
+                        "Para resultados de reporte, recapturar con más tiempo o "
+                        "subir el f_min si los modos bajos no son de interés."
+                    ),
+                    severity="fail",
+                )
+            elif _record_dur < _t_min_strict_tdms:
+                modal_status_banner(
+                    title=(f"Record {_record_dur:.0f} s acepta el piso normativo · "
+                             f"recomendado {_t_min_strict_tdms:.0f} s"),
+                    detail=(
+                        f"Para f_min = {oma_fmin:.1f} Hz cumples "
+                        f"1000 × T_low ({_t_min_floor_tdms:.0f} s) pero "
+                        f"estás por debajo del recomendado 2000 × T_low "
+                        f"({_t_min_strict_tdms:.0f} s). Identificación de modos OK, "
+                        "incertidumbre en damping moderada."
+                    ),
+                    severity="warning",
+                )
+            else:
+                modal_status_banner(
+                    title=(f"Record conforme a norma · {_record_dur:.0f} s ≥ "
+                             f"{_t_min_strict_tdms:.0f} s para f_min = {oma_fmin:.1f} Hz"),
+                    detail="Brincker & Ventura 2015 · ISO 18649 — cumplido.",
+                    severity="ok",
+                )
         with col_o2:
             _f_max_def = float(tdms_oma.sample_rate_hz / 2.0 * 0.9)
             oma_fmax = st.number_input("f máx (Hz)", value=min(500.0, _f_max_def),
