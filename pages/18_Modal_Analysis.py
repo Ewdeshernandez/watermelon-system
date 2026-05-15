@@ -801,14 +801,17 @@ with tab_acq:
                                    "Típico: 5120 Hz (banda útil 0–2 kHz).")
 
         # --- Bifurcación EMA vs OMA con tiempos normativos ---
+        # Usamos keys separados por modo (ni_fn_low_oma, ni_dur_oma, ni_dur_ema,
+        # ni_avg_ema) para que el switch entre modos no cause crashes por
+        # valores fuera del rango del widget del modo opuesto.
         if is_oma:
             # OMA: regla Brincker & Ventura 2015 — T_min ≥ 2000 × T_low
             with col2:
                 fn_low_hz = st.number_input(
                     "f_min de interés (Hz)",
-                    value=float(st.session_state.get("ni_fn_low", 5.0)),
+                    value=float(st.session_state.get("ni_fn_low_oma", 5.0)),
                     min_value=0.5, max_value=200.0, step=0.5,
-                    key="ni_fn_low",
+                    key="ni_fn_low_oma",
                     help=("Frecuencia natural más baja que esperas identificar. "
                           "Define el tiempo mínimo de captura: "
                           "T_min ≥ 2000 / f_min (Brincker & Ventura 2015)."),
@@ -820,14 +823,14 @@ with tab_acq:
                 _t_default = max(120.0, _t_min_strict)
                 ni_dur = st.number_input(
                     "Duración (s)",
-                    value=float(st.session_state.get("ni_dur", _t_default)),
+                    value=float(st.session_state.get("ni_dur_oma", _t_default)),
                     min_value=30.0, max_value=3600.0, step=30.0,
-                    key="ni_dur",
+                    key="ni_dur_oma",
                     help=f"T_min recomendado = 2000/f_min = {_t_min_strict:.0f} s. "
                          f"T_min absoluto = 1000/f_min = {_t_min_floor:.0f} s.",
                 )
-                # avg no aplica para OMA — placeholder en session_state para mantener key
-                st.session_state["ni_avg"] = 1
+            # avg no aplica para OMA
+            ni_avg = 1
 
             # --- Diagnóstico normativo OMA ---
             if ni_dur < _t_min_floor:
@@ -874,23 +877,23 @@ with tab_acq:
             with col2:
                 ni_dur = st.number_input(
                     "Duración por impacto (s)",
-                    value=float(st.session_state.get("ni_dur", 2.0)),
+                    value=float(st.session_state.get("ni_dur_ema", 2.0)),
                     min_value=0.5, max_value=10.0, step=0.5,
-                    key="ni_dur",
+                    key="ni_dur_ema",
                     help="Window suficiente para que la respuesta decaiga a < 1% "
                          "del pico (evita leakage). Típico 1–2 s para máquinas industriales.",
                 )
             with col3:
                 ni_avg = st.number_input(
                     "N° de impactos a promediar",
-                    value=int(st.session_state.get("ni_avg", 5)),
+                    value=int(st.session_state.get("ni_avg_ema", 5)),
                     min_value=1, max_value=30, step=1,
-                    key="ni_avg",
+                    key="ni_avg_ema",
                     help="ISO 7626-5 §6.3: mínimo 3, recomendado 5–10. "
                          "Más promedios → mejor relación señal/ruido.",
                 )
-                # fn_low no aplica para EMA — placeholder
-                st.session_state["ni_fn_low"] = 0.0
+            # fn_low no aplica para EMA
+            fn_low_hz = 0.0
 
             # --- Diagnóstico normativo EMA ---
             if ni_avg < 3:
@@ -954,13 +957,21 @@ with tab_acq:
                         "arriba antes de ejecutar la captura."
                     )
                 _mode_token = "oma" if is_oma else "ema"
+                _dur_key = "ni_dur_oma" if is_oma else "ni_dur_ema"
+                _dur_default = 200.0 if is_oma else 2.0
                 _cmd_lines = [
                     f"--mode {_mode_token}",
                     f"--fs {int(st.session_state.get('ni_fs', 5120))}",
-                    f"--duration {float(st.session_state.get('ni_dur', 2.0))}",
+                    f"--duration {float(st.session_state.get(_dur_key, _dur_default))}",
                 ]
-                if not is_oma:
-                    _cmd_lines.append(f"--averages {int(st.session_state.get('ni_avg', 5))}")
+                if is_oma:
+                    _cmd_lines.append(
+                        f"--fn-low {float(st.session_state.get('ni_fn_low_oma', 5.0))}"
+                    )
+                else:
+                    _cmd_lines.append(
+                        f"--averages {int(st.session_state.get('ni_avg_ema', 5))}"
+                    )
                 _cmd_lines.append("--output ./capture.tdms")
                 if _user_role == "admin":
                     st.code(" \\\n    ".join(["watermelon-modal-capture"] + _cmd_lines),
@@ -2278,6 +2289,14 @@ with tab_3d:
             if _geom_source == "modal_geometry":
                 # === Camino preferido: usa el editor de geometría ===
                 from core.modal.geometry_3d import build_geometry_with_mode_shape
+                # Toggle de animación — estilo Artemis Modal
+                _animate_ms = st.toggle(
+                    "🎞 Animación del mode shape (Artemis-style)",
+                    value=True, key="modeshape_animate_toggle",
+                    help="Las flechas oscilan según la fase del modo. Click ▶ Play "
+                         "en la esquina del plot, o usa el slider de fase para "
+                         "scrubbing manual.",
+                )
                 fig_3d = build_geometry_with_mode_shape(
                     geom=_geom_session,
                     mode_shape=mode_sel.mode_shape,
@@ -2285,6 +2304,9 @@ with tab_3d:
                     mode_label=(f"Modo {mode_sel.mode_number} · "
                                   f"{mode_sel.natural_frequency_hz:.2f} Hz · "
                                   f"ζ = {mode_sel.damping_ratio_pct:.3f}%"),
+                    animate=_animate_ms,
+                    n_frames=24,
+                    frame_duration_ms=70,
                 )
                 st.plotly_chart(fig_3d, use_container_width=True)
 

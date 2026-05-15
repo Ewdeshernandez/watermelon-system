@@ -446,17 +446,28 @@ def build_geometry_with_mode_shape(
     mode_shape: Any,
     channel_names: List[str],
     mode_label: str = "",
+    animate: bool = False,
+    n_frames: int = 24,
+    frame_duration_ms: int = 60,
 ):
     """
     Construye una figura 3D con la geometria del activo + flechas de mode shape
     coloreadas por fase (verde cofase / rojo anti-fase) en cada sensor que
     haga match con un canal del FDD/EMA por nombre.
 
+    Si animate=True, la figura incluye frames Plotly que oscilan las flechas
+    segun cos(phase + omega·t), equivalente a la animacion Artemis Modal donde
+    el mode shape se ve "pulsar" a la frecuencia del modo (frecuencia visual
+    es escalada, no la real).
+
     Args:
         geom: ModalGeometry con sensores ya posicionados
         mode_shape: array complejo (N_channels,) del modo a visualizar
         channel_names: lista de nombres de canal del FDD result
         mode_label: texto descriptivo del modo
+        animate: si True, agrega frames + Play button + slider de fase
+        n_frames: numero de frames por ciclo (default 24 = ~15 fps fluido)
+        frame_duration_ms: ms por frame (60 ms = ciclo de ~1.5 s a 24 frames)
 
     Returns:
         plotly.graph_objects.Figure
@@ -539,39 +550,85 @@ def build_geometry_with_mode_shape(
     span = max(geom.shaft_end - geom.shaft_start, 100.0)
     max_abs = max(abs(m) for m in matched_signed_mag) or 1.0
     base_arrow = span * 0.08
-    scale = [(base_arrow * abs(m) / max_abs) for m in matched_signed_mag]
 
-    # 4) Cones — verde (cofase, signo +) / rojo (anti-fase, signo -)
-    cone_x, cone_y, cone_z = [], [], []
-    cone_u, cone_v, cone_w = [], [], []
-    cone_color: List[str] = []
-    for (px, py, pz), (dx, dy, dz), m, sc in zip(
-        matched_positions, matched_directions, matched_signed_mag, scale
-    ):
-        cone_x.append(px); cone_y.append(py); cone_z.append(pz)
-        cone_u.append(dx * sc); cone_v.append(dy * sc); cone_w.append(dz * sc)
-        cone_color.append("#16a34a" if m >= 0 else "#dc2626")
+    # Para cada sensor i, el mode shape oscila como:
+    #   d_i(t) = |phi_i| * cos(phase_i + omega·t) * dof_dir
+    # En t=0 esto se reduce a la proyeccion sobre el eje real del componente
+    # complejo (que ya estaba siendo calculada como amp*sign). Generalizamos
+    # para soportar tanto el render estatico (t=0) como la animacion.
+    matched_amps = [float(abs(m)) for m in matched_signed_mag]
+    # phase_rad[i] es el angulo de la componente compleja
+    matched_phases_rad = [math.radians(p) for p in matched_phases_deg]
 
-    # Cone admite colorscale por valor (u^2+v^2+w^2). Para forzar binario
-    # cofase/anti-fase, separo las flechas en 2 traces (verde + rojo).
-    for clr, label in [("#16a34a", "Cofase (+)"), ("#dc2626", "Anti-fase (−)")]:
-        idxs = [i for i, c in enumerate(cone_color) if c == clr]
-        if not idxs:
-            continue
-        fig.add_trace(go.Cone(
-            x=[cone_x[i] for i in idxs],
-            y=[cone_y[i] for i in idxs],
-            z=[cone_z[i] for i in idxs],
-            u=[cone_u[i] for i in idxs],
-            v=[cone_v[i] for i in idxs],
-            w=[cone_w[i] for i in idxs],
+    def _cones_at_phase(theta_rad: float):
+        """Devuelve dos traces (cofase verde + anti-fase rojo) en el frame θ."""
+        cx_pos, cy_pos, cz_pos = [], [], []
+        cu_pos, cv_pos, cw_pos = [], [], []
+        tx_pos: List[str] = []
+        cx_neg, cy_neg, cz_neg = [], [], []
+        cu_neg, cv_neg, cw_neg = [], [], []
+        tx_neg: List[str] = []
+        for (px, py, pz), (ux, uy, uz), amp, ph_rad, name in zip(
+            matched_positions, matched_directions, matched_amps,
+            matched_phases_rad, matched_names
+        ):
+            # ux,uy,uz ya tienen el signo de la proyeccion en t=0.
+            # Eliminarlo: divide por el signo aplicado previamente.
+            # Pero ux,uy,uz fue construido como _dof_to_vector(s.dof) * sign(t=0).
+            # Para animacion, recuperamos el dof base y aplicamos cos(phase+theta).
+            # Reconstruimos: dir_dof = (ux,uy,uz) si abs(ph_rad)<=pi/2 (signo +)
+            #               (-ux,-uy,-uz) si abs(ph_rad)>pi/2 (signo -)
+            # i.e. dir_dof = (ux,uy,uz) / sign_t0  con sign_t0 = cos(ph_rad)>=0?+1:-1
+            sign_t0 = 1.0 if abs(math.cos(ph_rad)) >= 0 and math.cos(ph_rad) >= 0 else -1.0
+            # Reconstruccion exacta:
+            sign_t0 = 1.0 if math.cos(ph_rad) >= 0 else -1.0
+            dux = ux / sign_t0 if sign_t0 != 0 else ux
+            duy = uy / sign_t0 if sign_t0 != 0 else uy
+            duz = uz / sign_t0 if sign_t0 != 0 else uz
+            # Componente instantanea del mode shape en este frame:
+            disp = amp * math.cos(ph_rad + theta_rad)
+            sc = base_arrow * abs(disp) / max_abs
+            cu = dux * (1.0 if disp >= 0 else -1.0) * sc
+            cv = duy * (1.0 if disp >= 0 else -1.0) * sc
+            cw = duz * (1.0 if disp >= 0 else -1.0) * sc
+            label = (f"{name} · |phi|={amp:.3f} · phi={math.degrees(ph_rad):.0f}deg "
+                     f"· disp={disp:+.3f}")
+            if disp >= 0:
+                cx_pos.append(px); cy_pos.append(py); cz_pos.append(pz)
+                cu_pos.append(cu); cv_pos.append(cv); cw_pos.append(cw)
+                tx_pos.append(label)
+            else:
+                cx_neg.append(px); cy_neg.append(py); cz_neg.append(pz)
+                cu_neg.append(cu); cv_neg.append(cv); cw_neg.append(cw)
+                tx_neg.append(label)
+        # Crear traces — incluso si vacias, se agregan placeholders para que
+        # los indices en frames sean estables.
+        trace_pos = go.Cone(
+            x=cx_pos or [0], y=cy_pos or [0], z=cz_pos or [0],
+            u=cu_pos or [0], v=cv_pos or [0], w=cw_pos or [0],
             sizemode="absolute", sizeref=base_arrow,
-            colorscale=[[0, clr], [1, clr]],
-            showscale=False, name=label, showlegend=True,
-            hoverinfo="text",
-            text=[f"{matched_names[i]} · |φ|={abs(matched_signed_mag[i]):.3f} "
-                  f"· φ={matched_phases_deg[i]:.0f}°" for i in idxs],
-        ))
+            colorscale=[[0, "#16a34a"], [1, "#16a34a"]],
+            showscale=False, name="Cofase (+)", showlegend=True,
+            hoverinfo="text", text=tx_pos or [""],
+            visible=bool(cx_pos),
+        )
+        trace_neg = go.Cone(
+            x=cx_neg or [0], y=cy_neg or [0], z=cz_neg or [0],
+            u=cu_neg or [0], v=cv_neg or [0], w=cw_neg or [0],
+            sizemode="absolute", sizeref=base_arrow,
+            colorscale=[[0, "#dc2626"], [1, "#dc2626"]],
+            showscale=False, name="Anti-fase (−)", showlegend=True,
+            hoverinfo="text", text=tx_neg or [""],
+            visible=bool(cx_neg),
+        )
+        return trace_pos, trace_neg
+
+    # Trace inicial (theta=0)
+    cone_pos_0, cone_neg_0 = _cones_at_phase(0.0)
+    cone_pos_idx = len(fig.data)        # indice del trace cone positivo
+    cone_neg_idx = cone_pos_idx + 1
+    fig.add_trace(cone_pos_0)
+    fig.add_trace(cone_neg_0)
 
     # 5) Labels de los sensores
     fig.add_trace(go.Scatter3d(
@@ -603,8 +660,67 @@ def build_geometry_with_mode_shape(
                           "sensores con match · verde: cofase · rojo: anti-fase</sub>",
                    font=dict(size=14, color="#0F1E3D")),
         margin=dict(l=0, r=0, t=70, b=0),
-        height=560,
+        height=580 if animate else 560,
         paper_bgcolor="white",
         legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.05),
     )
+
+    # -------------------------------------------------------------------
+    # Animacion Artemis-style: las flechas pulsan oscilando con la fase
+    # del modo. Los bloques/eje/labels quedan estaticos; solo los 2 cones
+    # se reemplazan por frame (indices cone_pos_idx, cone_neg_idx).
+    # -------------------------------------------------------------------
+    if animate:
+        frames = []
+        for k in range(n_frames):
+            theta = 2.0 * math.pi * k / n_frames
+            cone_pos_k, cone_neg_k = _cones_at_phase(theta)
+            frames.append(go.Frame(
+                data=[cone_pos_k, cone_neg_k],
+                traces=[cone_pos_idx, cone_neg_idx],
+                name=f"{int(math.degrees(theta)):03d}",
+            ))
+        fig.frames = frames
+
+        # Play / Pause buttons + slider de fase manual
+        fig.update_layout(
+            updatemenus=[dict(
+                type="buttons",
+                showactive=False,
+                x=0.02, y=1.06, xanchor="left", yanchor="top",
+                bgcolor="#0F1E3D", bordercolor="#0F1E3D",
+                font=dict(color="white", size=12),
+                buttons=[
+                    dict(label="▶ Play",
+                          method="animate",
+                          args=[None, dict(
+                              frame=dict(duration=frame_duration_ms, redraw=True),
+                              fromcurrent=True, mode="immediate",
+                              transition=dict(duration=0),
+                          )]),
+                    dict(label="⏸ Pause",
+                          method="animate",
+                          args=[[None], dict(
+                              frame=dict(duration=0, redraw=False),
+                              mode="immediate",
+                              transition=dict(duration=0),
+                          )]),
+                ],
+            )],
+            sliders=[dict(
+                active=0, currentvalue=dict(prefix="Fase del modo: ", suffix="°"),
+                pad=dict(t=40, b=10),
+                len=0.78, x=0.18, xanchor="left",
+                steps=[
+                    dict(method="animate", label=f.name,
+                          args=[[f.name], dict(
+                              frame=dict(duration=0, redraw=True),
+                              mode="immediate",
+                              transition=dict(duration=0),
+                          )])
+                    for f in frames
+                ],
+            )],
+        )
+
     return fig
