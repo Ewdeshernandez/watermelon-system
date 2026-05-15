@@ -141,8 +141,16 @@ def modal_hero_card(
 def modal_footer_norms(
     active_norms: Optional[Sequence[str]] = None,
     algorithms: Optional[Sequence[str]] = None,
-    version: str = "v3.31.161",
+    version: Optional[str] = None,
 ) -> None:
+    # Lee VERSION dinámicamente desde core.version para que cada bump se
+    # refleje automáticamente. Cero hardcoding.
+    if version is None:
+        try:
+            from core.version import get_version_short
+            version = get_version_short()
+        except Exception:
+            version = "v?"
     """
     Footer permanente al final de la página con marco normativo.
 

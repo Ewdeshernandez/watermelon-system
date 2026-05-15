@@ -1455,5 +1455,5 @@ modal_footer_norms(
         "Half-power method (ISO 7626-6 §6.3.2)",
         "Diagrama de Campbell (API 684 §1.6)",
     ],
-    version="v3.31.162",
+    # version=None → lee VERSION dinámicamente vía core.version
 )
