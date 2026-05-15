@@ -164,7 +164,11 @@ with tab_acq:
 
     acq_mode = st.radio(
         "Origen de datos",
-        ["📡 Captura live NI-9234", "📁 Importar .tdms existente", "🔄 Legacy Artemis (.txt)"],
+        [
+            "📡 Captura en vivo con unidad de adquisición",
+            "📁 Importar archivo de captura existente",
+            "🔄 Importar datos legacy (.txt)",
+        ],
         horizontal=True,
         key="acq_mode_radio",
     )
@@ -185,29 +189,39 @@ with tab_acq:
                 st.checkbox(f"Ch{i} habilitado", value=True, key=f"ni_ch_{i}_en")
 
         modal_status_banner(
-            title="Captura local requerida — Streamlit Cloud no tiene hardware NI",
+            title="Próximo paso · Captura con la unidad NI cDAQ-9234",
             detail=(
-                "Para ejecutar la captura conecta el NI cDAQ-9234 a tu laptop con el "
-                "driver NI-DAQmx instalado y corre el companion script con la "
-                "configuración de arriba. El archivo .tdms generado se sube en la "
-                "opción 'Importar .tdms existente'."
+                "Conecta la unidad de adquisición al activo bajo análisis siguiendo "
+                "el procedimiento técnico SIGA. La configuración de canales y "
+                "sample rate definida arriba se aplica al ejecutar la captura. "
+                "Una vez generado el archivo de captura, súbelo en la opción "
+                "'Importar archivo de captura existente'."
             ),
             severity="info",
         )
 
-        with st.expander("▸ Comando del companion script (avanzado)", expanded=False):
-            st.caption(
-                "Comando equivalente a la configuración seleccionada arriba. "
-                "Cópialo en tu terminal local — requiere `pip install nidaqmx npTDMS`."
-            )
-            st.code(
-                "python scripts/ni_companion/capture.py \\\n"
-                "    --mode oma --output ./run1.tdms \\\n"
-                "    --fs 10240 --duration 120 \\\n"
-                "    --channels 1YA:0:IEPE:100 \\\n"
-                "    --channels 2YA:1:IEPE:100",
-                language="bash",
-            )
+        # Nota técnica para especialistas — accesible vía role admin/specialist.
+        # Detalles de implementación NO se muestran al cliente.
+        _user_role = (_user.get("role", "") or "").strip().lower()
+        if _user_role in ("admin", "specialist"):
+            with st.expander("▸ Comando del módulo de captura (técnico)",
+                              expanded=False):
+                st.caption(
+                    "Referencia técnica para el operador con acceso a la unidad "
+                    "de adquisición. Esta sección solo es visible para usuarios "
+                    "internos (admin/specialist)."
+                )
+                _cmd_lines = [
+                    f"--mode {st.session_state.get('ni_mode', 'EMA').lower().split()[0]}",
+                    f"--fs {int(st.session_state.get('ni_fs', 5120))}",
+                    f"--duration {float(st.session_state.get('ni_dur', 2.0))}",
+                    "--output ./capture.tdms",
+                ]
+                if _user_role == "admin":
+                    st.code(" \\\n    ".join(["watermelon-modal-capture"] + _cmd_lines),
+                             language="bash")
+                else:
+                    st.code(" \\\n    ".join(_cmd_lines), language="text")
 
     # -------- TDMS existente --------
     elif acq_mode.startswith("📁"):
