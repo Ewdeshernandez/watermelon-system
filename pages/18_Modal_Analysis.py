@@ -30,6 +30,7 @@ Estado v3.31.151:
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -2198,25 +2199,42 @@ with tab_3d:
         # ═══════════════════════════════════════════════════════════════
         # EXPANDER 5 — Nivel 2: Flechas 3D sobre activo
         # ═══════════════════════════════════════════════════════════════
-        # Activo: 1) adhoc → no disponible, 2) registrado → leer sensores 3D
+        # Prioridad de fuentes de geometría:
+        #   1) modal_geometry en session_state (editor de Tab Setup) — preferido
+        #   2) Sensor Map del activo registrado (fallback legacy)
+        #   3) Sin geometría → mensaje informativo
+        _geom_session = st.session_state.get("modal_geometry")
         _adhoc_meta_for_3d = st.session_state.get("modal_adhoc_meta")
         _inst_key_for_3d = st.session_state.get("modal_inst", "")
         _inst_for_3d = None
-        if _adhoc_meta_for_3d:
-            _3d_status_label = "no disponible · modo ad-hoc sin Sensor Map"
-        elif _inst_key_for_3d and _inst_key_for_3d != "(seleccionar)":
-            try:
-                from core.instance_state import get_instance as _get_inst_3d
-                _inst_for_3d = _get_inst_3d(_inst_key_for_3d)
-                _3d_status_label = ""
-            except Exception:
-                _inst_for_3d = None
-                _3d_status_label = "no disponible · error cargando activo"
+        _geom_source = "none"  # "modal_geometry" | "sensor_map" | "none"
+
+        # Fuente preferida: editor de geometría
+        if _geom_session is not None and getattr(_geom_session, "sensors", None):
+            _geom_source = "modal_geometry"
+            _3d_status_label = (f"geometría editada · "
+                                  f"{len(_geom_session.sensors)} sensores")
         else:
-            _3d_status_label = "no disponible · sin activo en Setup"
+            # Fallback: Sensor Map del activo registrado
+            if _adhoc_meta_for_3d:
+                _3d_status_label = "no disponible · modo ad-hoc sin geometría"
+            elif _inst_key_for_3d and _inst_key_for_3d != "(seleccionar)":
+                try:
+                    from core.instance_state import get_instance as _get_inst_3d
+                    _inst_for_3d = _get_inst_3d(_inst_key_for_3d)
+                    if _inst_for_3d:
+                        _geom_source = "sensor_map"
+                        _3d_status_label = "Sensor Map (legacy fallback)"
+                    else:
+                        _3d_status_label = "no disponible · activo sin sensores"
+                except Exception:
+                    _inst_for_3d = None
+                    _3d_status_label = "no disponible · error cargando activo"
+            else:
+                _3d_status_label = "no disponible · sin activo en Setup"
 
         with st.expander(
-            f"🌐  Flechas 3D sobre layout del activo {('· ' + _3d_status_label) if _3d_status_label else ''}",
+            f"🌐  Flechas 3D sobre layout del activo · {_3d_status_label}",
             expanded=False,
         ):
             modal_plot_caption(
@@ -2224,15 +2242,54 @@ with tab_3d:
                     "Visualización 3D del mode shape sobre la geometría real "
                     "del activo. Cada flecha indica la dirección de movimiento "
                     "de un sensor en el modo seleccionado. Verde = cofase · "
-                    "rojo = anti-fase. Requiere position_3d + dof_direction "
-                    "configurados en Machinery Library para cada sensor."
+                    "rojo = anti-fase. Fuente preferida: editor de geometría "
+                    "en Tab Setup. Fallback: Sensor Map del activo."
                 ),
                 norm_ref="ISO 7626-6 §7.2",
-                algorithm="Plotly Cone3D + mode shape vector",
+                algorithm="Plotly Cone3D + mode shape vector (phase-signed)",
             )
 
-            sensors_3d = []
-            if _inst_for_3d is not None:
+            if _geom_source == "modal_geometry":
+                # === Camino preferido: usa el editor de geometría ===
+                from core.modal.geometry_3d import build_geometry_with_mode_shape
+                fig_3d = build_geometry_with_mode_shape(
+                    geom=_geom_session,
+                    mode_shape=mode_sel.mode_shape,
+                    channel_names=fdd.channel_names,
+                    mode_label=(f"Modo {mode_sel.mode_number} · "
+                                  f"{mode_sel.natural_frequency_hz:.2f} Hz · "
+                                  f"ζ = {mode_sel.damping_ratio_pct:.3f}%"),
+                )
+                st.plotly_chart(fig_3d, use_container_width=True)
+
+                # Diagnóstico de matching
+                _ch_set = {n.strip().upper() for n in fdd.channel_names}
+                _geom_set = {s.name.strip().upper() for s in _geom_session.sensors}
+                _matched = _ch_set & _geom_set
+                _missing = _ch_set - _geom_set
+                if _missing:
+                    modal_status_banner(
+                        title=f"{len(_missing)} canal(es) sin sensor en geometría",
+                        detail=(
+                            f"Matchearon {len(_matched)}/{len(_ch_set)} canales "
+                            f"con sensores de la geometría. Sin match: "
+                            f"{', '.join(sorted(_missing)[:8])}"
+                            f"{' …' if len(_missing) > 8 else ''}. "
+                            "Agrega o renombra sensores en Tab Setup → "
+                            "Geometría 3D para cubrir todos los canales."
+                        ),
+                        severity="warning",
+                    )
+                else:
+                    modal_status_banner(
+                        title=f"Match 100% · todos los {len(_ch_set)} canales en geometría",
+                        detail="Las flechas representan fielmente el mode shape completo.",
+                        severity="ok",
+                    )
+
+            elif _geom_source == "sensor_map" and _inst_for_3d is not None:
+                # === Camino legacy: Sensor Map ===
+                sensors_3d = []
                 for ch_name in fdd.channel_names:
                     match = None
                     for s in (_inst_for_3d.sensors or []):
@@ -2246,51 +2303,62 @@ with tab_3d:
                             "dof_direction": match["dof_direction"],
                         })
 
-            if _adhoc_meta_for_3d:
+                if len(sensors_3d) == len(fdd.channel_names):
+                    positions = [tuple(s["position_3d"]) for s in sensors_3d]
+                    directions = [tuple(s["dof_direction"]) for s in sensors_3d]
+                    fig_3d = build_arrows_3d_wireframe(
+                        mode_shape=mode_sel.mode_shape,
+                        channel_positions_3d=positions,
+                        channel_directions_3d=directions,
+                        channel_names=fdd.channel_names,
+                        mode_label=(f"Modo {mode_sel.mode_number} · "
+                                      f"{mode_sel.natural_frequency_hz:.2f} Hz — "
+                                      f"verde: cofase · rojo: anti-fase"),
+                    )
+                    st.plotly_chart(fig_3d, use_container_width=True)
+                    modal_status_banner(
+                        title="Usando Sensor Map (sin geometría editada)",
+                        detail=(
+                            "Para una visualización más rica con bloques del "
+                            "tren mecánico (motor, coupling, casing), construye "
+                            "la geometría en Tab Setup → Geometría 3D."
+                        ),
+                        severity="info",
+                    )
+                else:
+                    modal_status_banner(
+                        title=f"Configuración 3D parcial — {len(sensors_3d)}/{len(fdd.channel_names)} canales",
+                        detail=(
+                            "Completa el expander 'Configuración modal' de cada "
+                            "sensor en Machinery Library o construye la "
+                            "geometría en Tab Setup → Geometría 3D."
+                        ),
+                        severity="warning",
+                    )
+
+            elif _adhoc_meta_for_3d:
                 modal_status_banner(
-                    title="Mode Shapes 3D no disponible en modo ad-hoc",
+                    title="Modo ad-hoc · construye la geometría 3D para activar las flechas",
                     detail=(
-                        "El análisis modal ad-hoc usa solo metadata textual "
-                        "del equipo, no incluye geometría 3D ni mapeo de "
-                        "sensores. Los Niveles 1-4 (Bar chart · Polar · AutoMAC "
-                        "· Campbell) ya cumplen ISO 7626-6 §7.2 y son "
-                        "suficientes para un reporte modal técnicamente válido."
+                        "Sin activo registrado, no hay Sensor Map. Pero "
+                        "puedes ir a Tab Setup → 'Geometría 3D del activo', "
+                        "aplicar un template (motor+compresor, turbina+gen, "
+                        "bomba+motor) o construirla manualmente, y las flechas "
+                        "3D se activan inmediatamente con el match por nombre "
+                        "de canal. Los Niveles 1-4 ya cumplen ISO 7626-6 §7.2."
                     ),
                     severity="info",
                 )
-            elif _inst_for_3d is None:
-                modal_status_banner(
-                    title="Selecciona un activo en Tab Setup",
-                    detail=(
-                        "El render 3D requiere un activo registrado en "
-                        "Machinery Library con sensores configurados con "
-                        "position_3d + dof_direction."
-                    ),
-                    severity="info",
-                )
-            elif len(sensors_3d) == len(fdd.channel_names):
-                positions = [tuple(s["position_3d"]) for s in sensors_3d]
-                directions = [tuple(s["dof_direction"]) for s in sensors_3d]
-                fig_3d = build_arrows_3d_wireframe(
-                    mode_shape=mode_sel.mode_shape,
-                    channel_positions_3d=positions,
-                    channel_directions_3d=directions,
-                    channel_names=fdd.channel_names,
-                    mode_label=(f"Modo {mode_sel.mode_number} · "
-                                  f"{mode_sel.natural_frequency_hz:.2f} Hz — "
-                                  f"verde: cofase · rojo: anti-fase"),
-                )
-                st.plotly_chart(fig_3d, use_container_width=True)
             else:
                 modal_status_banner(
-                    title=f"Configuración 3D parcial — {len(sensors_3d)}/{len(fdd.channel_names)} canales",
+                    title="Selecciona un activo o construye la geometría",
                     detail=(
-                        "Completa el expander 'Configuración modal' de cada "
-                        "sensor en el wizard de Machinery Library para "
-                        "habilitar el render 3D. Mientras tanto los Niveles "
-                        "1-4 ya son técnicamente válidos bajo ISO 7626-6 §7.2."
+                        "Para activar las flechas 3D: (a) selecciona un activo "
+                        "registrado en Tab Setup con sensores 3D configurados, "
+                        "o (b) construye la geometría manualmente en Tab Setup → "
+                        "Geometría 3D del activo."
                     ),
-                    severity="warning",
+                    severity="info",
                 )
 
         # ═══════════════════════════════════════════════════════════════
@@ -2311,23 +2379,297 @@ with tab_fea:
     modal_section_header(
         title="Correlación EMA / OMA ↔ FEA",
         subtitle="Validación cruzada del modelo numérico contra resultados experimentales",
-        norm_ref="API 684 §1.6",
+        norm_ref="API 684 §1.6 · MAC ≥ 0.7 + Δf ≤ 10%",
         icon="🧮",
     )
 
-    modal_empty_state(
-        icon="🧮",
-        title="Importer FEA en desarrollo",
-        description=(
-            "Cuando esté listo: subes el archivo de modos FEA (Ansys .rst, "
-            "Nastran .op2, Abaqus .odb o JSON con freq + mode shape) y "
-            "Watermelon calcula la matriz Cross-MAC entre tus modos "
-            "experimentales (EMA u OMA) y los modos del modelo. Resultado: "
-            "tabla de correlación + recomendación de iteración del modelo."
-        ),
-        cta_label="Disponible próximo sprint",
-        norm_ref="API 684 §1.6 — Rotor dynamics validation",
+    from core.modal.fea_compare import (
+        load_fea_json,
+        compute_fea_experimental_cross_mac,
+        pair_modes,
+        build_cross_mac_heatmap,
+        example_fea_payload,
     )
+
+    # ----- Resolver fuente experimental -----
+    fdd_for_fea = st.session_state.get("fdd_result")
+    peaks_for_fea = st.session_state.get("modal_peaks", [])
+
+    exp_source = None
+    exp_label = None
+    exp_freqs: list = []
+    exp_shapes: list = []
+    exp_channels: list = []
+    exp_mode_labels: list = []
+
+    if fdd_for_fea and getattr(fdd_for_fea, "modes", None):
+        exp_source = "oma"
+        exp_label = "OMA · FDD result"
+        exp_freqs = [m.natural_frequency_hz for m in fdd_for_fea.modes]
+        exp_shapes = [m.mode_shape for m in fdd_for_fea.modes]
+        exp_channels = list(fdd_for_fea.channel_names)
+        exp_mode_labels = [f"M{m.mode_number} ({m.natural_frequency_hz:.1f} Hz)"
+                            for m in fdd_for_fea.modes]
+    elif peaks_for_fea:
+        # EMA peaks no tienen mode_shape multi-canal nativo aún — solo freq.
+        # En ese caso solo podemos hacer correlación de frecuencias, no MAC.
+        exp_source = "ema_freq_only"
+        exp_label = "EMA · solo frecuencias (sin shapes multi-canal)"
+        exp_freqs = [p.frequency_hz for p in peaks_for_fea]
+        exp_shapes = []
+        exp_channels = []
+        exp_mode_labels = [f"P{i+1} ({p.frequency_hz:.1f} Hz)"
+                            for i, p in enumerate(peaks_for_fea)]
+
+    if exp_source is None:
+        modal_empty_state(
+            icon="🧮",
+            title="Sin modos experimentales para comparar",
+            description=(
+                "Necesitas haber corrido al menos un análisis experimental "
+                "antes de comparar contra FEA: corre el FDD en Tab OMA "
+                "(preferido — entrega mode shapes multi-canal) o detecta "
+                "picos en Tab EMA. Luego vuelve a este tab y sube tu JSON FEA."
+            ),
+            cta_label="Cambia a Tab OMA o Tab EMA",
+            norm_ref="API 684 §1.6",
+        )
+    else:
+        col_src1, col_src2, col_src3 = st.columns(3)
+        col_src1.metric("Fuente experimental", exp_label)
+        col_src2.metric("Modos experimentales", len(exp_freqs))
+        col_src3.metric("Canales", len(exp_channels) if exp_channels else "—")
+
+        st.divider()
+        st.markdown("**1 · Sube el archivo FEA**")
+        st.caption(
+            "Formato JSON Watermelon — exporta desde ANSYS/Nastran/Abaqus con "
+            "`freq_hz` + `mode_shape` + `dof_names` que coincidan con los canales "
+            "de tu identificación experimental. Soporta shapes reales o complejos."
+        )
+
+        col_up, col_tpl = st.columns([2, 1])
+        with col_up:
+            fea_up = st.file_uploader(
+                "JSON FEA", type=["json"], key="fea_json_up",
+                help="Roadmap próximo: parsers nativos .rst (Ansys), "
+                     ".op2 (Nastran), .odb (Abaqus). Hoy solo JSON.",
+            )
+        with col_tpl:
+            if exp_channels:
+                tpl_json = json.dumps(example_fea_payload(exp_channels), indent=2)
+            else:
+                tpl_json = json.dumps(example_fea_payload(
+                    [f"DOF{i+1}" for i in range(5)]), indent=2)
+            st.download_button(
+                "⬇ Template JSON",
+                data=tpl_json,
+                file_name="fea_template.json",
+                mime="application/json",
+                use_container_width=True,
+                help="Descarga un template con tus canales experimentales "
+                     "ya rellenados — solo edita freqs y shapes con tus "
+                     "valores reales del FEA.",
+            )
+
+        fea_result = None
+        if fea_up is not None:
+            try:
+                fea_result = load_fea_json(fea_up.getvalue().decode("utf-8"))
+                st.session_state["fea_result"] = fea_result
+            except Exception as exc:  # noqa: BLE001
+                modal_status_banner(
+                    title=f"Error al parsear el JSON FEA",
+                    detail=str(exc),
+                    severity="fail",
+                )
+                fea_result = None
+        elif st.session_state.get("fea_result"):
+            fea_result = st.session_state["fea_result"]
+            st.caption(f"Usando FEA previamente cargado: **{fea_result.model_name}**")
+
+        if fea_result is not None:
+            st.divider()
+            st.markdown("**2 · Resumen del modelo FEA**")
+            mc1, mc2, mc3, mc4 = st.columns(4)
+            mc1.metric("Modelo", fea_result.model_name[:30])
+            mc2.metric("Software", fea_result.software[:20])
+            mc3.metric("Modos FEA", fea_result.n_modes)
+            _fmin, _fmax = fea_result.freq_range
+            mc4.metric("Banda FEA", f"{_fmin:.1f} – {_fmax:.1f} Hz")
+
+            st.divider()
+            st.markdown("**3 · Configuración de correlación**")
+            col_cfg1, col_cfg2 = st.columns(2)
+            with col_cfg1:
+                mac_thr = st.number_input(
+                    "Umbral MAC para validez",
+                    value=0.70, min_value=0.5, max_value=0.95, step=0.05,
+                    help="API 684 §1.6 / Ewins: MAC ≥ 0.7 indica forma "
+                         "correlacionada. Estándar industrial.",
+                )
+            with col_cfg2:
+                freq_tol = st.number_input(
+                    "Tolerancia Δf (%)",
+                    value=10.0, min_value=2.0, max_value=30.0, step=1.0,
+                    help="API 684 §1.6: |Δf|/f_exp ≤ 10% es aceptable para "
+                         "validación de rotor dynamics. < 5% es excelente.",
+                )
+
+            st.divider()
+            st.markdown("**4 · Resultados**")
+
+            # ----- Caso OMA: Cross-MAC completo -----
+            if exp_source == "oma":
+                # Validar que los DOF names del FEA cubren los canales exp
+                _exp_set = {c.strip().upper() for c in exp_channels}
+                _fea_set = {n.strip().upper() for n in fea_result.dof_names}
+                _missing = _exp_set - _fea_set
+                if _missing:
+                    modal_status_banner(
+                        title=f"FEA no cubre {len(_missing)} canal(es) experimental(es)",
+                        detail=(
+                            f"Canales sin DOF en el modelo FEA: "
+                            f"{', '.join(sorted(_missing)[:10])}"
+                            f"{' …' if len(_missing) > 10 else ''}. "
+                            "Revisa tu export FEA — los DOF deben coincidir "
+                            "con los canales medidos. Mientras tanto se "
+                            "muestra solo la correlación de frecuencias."
+                        ),
+                        severity="warning",
+                    )
+                    mac = None
+                else:
+                    mac = compute_fea_experimental_cross_mac(
+                        fea_modes=fea_result.modes,
+                        fea_dof_names=fea_result.dof_names,
+                        exp_mode_shapes=exp_shapes,
+                        exp_dof_names=exp_channels,
+                    )
+
+                if mac is not None:
+                    # Heatmap
+                    fea_labels = [f"FEA M{m.mode_number} ({m.freq_hz:.1f} Hz)"
+                                   for m in fea_result.modes]
+                    fig_mac = build_cross_mac_heatmap(
+                        mac=mac,
+                        fea_labels=fea_labels,
+                        exp_labels=exp_mode_labels,
+                        title="Cross-MAC FEA ↔ Experimental (OMA)",
+                    )
+                    st.plotly_chart(fig_mac, use_container_width=True)
+
+                    # Pareo
+                    pairs = pair_modes(
+                        mac_matrix=mac,
+                        fea_freqs=[m.freq_hz for m in fea_result.modes],
+                        exp_freqs=exp_freqs,
+                        mac_threshold=float(mac_thr),
+                        freq_tolerance_pct=float(freq_tol),
+                    )
+                    st.markdown("**Pareo modo FEA ↔ experimental**")
+                    import pandas as pd
+                    status_label = {
+                        "valid": "✓ Válido",
+                        "shape_only": "≈ Forma OK · freq fuera",
+                        "freq_only": "≈ Freq OK · forma débil",
+                        "weak": "✗ Débil",
+                        "no_match": "✗ Sin match",
+                    }
+                    df_pairs = pd.DataFrame([
+                        {
+                            "FEA": f"M{p['fea_mode']} ({p['fea_freq']:.2f} Hz)",
+                            "Exp": (f"M{p['exp_mode']} ({p['exp_freq']:.2f} Hz)"
+                                     if p["exp_mode"] else "—"),
+                            "MAC": f"{p['mac']:.3f}",
+                            "Δf (%)": (f"{p['delta_freq_pct']:.1f}"
+                                        if p["delta_freq_pct"] is not None else "—"),
+                            "Estado": status_label.get(p["status"], p["status"]),
+                        }
+                        for p in pairs
+                    ])
+                    st.dataframe(df_pairs, hide_index=True,
+                                  use_container_width=True)
+
+                    # Banner de diagnóstico global
+                    n_valid = sum(1 for p in pairs if p["status"] == "valid")
+                    n_total = len(pairs)
+                    if n_total == 0:
+                        pass
+                    elif n_valid == n_total:
+                        modal_status_banner(
+                            title=f"Modelo FEA validado · {n_valid}/{n_total} modos "
+                                    "con MAC ≥ umbral y Δf ≤ tolerancia",
+                            detail=(
+                                "Todos los modos FEA tienen contraparte experimental "
+                                "con correlación válida. El modelo se considera apto "
+                                "para predicción de rotor dynamics bajo API 684 §1.6."
+                            ),
+                            severity="ok",
+                        )
+                    elif n_valid >= n_total * 0.7:
+                        modal_status_banner(
+                            title=f"Modelo FEA aceptable · {n_valid}/{n_total} modos válidos",
+                            detail=(
+                                "La mayoría de modos correlacionan, pero hay modos "
+                                "individuales con forma débil o frecuencia fuera de "
+                                "tolerancia. Revisar masas/rigideces locales del "
+                                "modelo para los pares marcados 'shape_only' o "
+                                "'freq_only'."
+                            ),
+                            severity="warning",
+                        )
+                    else:
+                        modal_status_banner(
+                            title=f"Modelo FEA requiere iteración · solo {n_valid}/{n_total} válidos",
+                            detail=(
+                                "Más del 30% de modos FEA no correlacionan. "
+                                "Posibles causas: condiciones de borde mal definidas, "
+                                "masas concentradas faltantes, malla insuficiente en "
+                                "zonas críticas, o material properties incorrectas. "
+                                "Re-iterar el modelo antes de usar para predicción."
+                            ),
+                            severity="fail",
+                        )
+
+            # ----- Caso EMA: solo frecuencias -----
+            if exp_source == "ema_freq_only":
+                modal_status_banner(
+                    title="Comparación limitada a frecuencias (EMA sin mode shapes multi-canal)",
+                    detail=(
+                        "Los peaks del Tab EMA actual no incluyen mode shapes "
+                        "multi-canal — solo frecuencias y damping. Para Cross-MAC "
+                        "completo, corre el flujo FDD en Tab OMA o usa el sprint "
+                        "futuro EMA-LSCF con mode shapes."
+                    ),
+                    severity="info",
+                )
+                # Tabla simple de match por frecuencia
+                import pandas as pd
+                rows = []
+                used = set()
+                for fm in fea_result.modes:
+                    best_j, best_delta = -1, 9e9
+                    for j, ef in enumerate(exp_freqs):
+                        if j in used:
+                            continue
+                        d = abs(fm.freq_hz - ef) / max(ef, 1e-6) * 100.0
+                        if d < best_delta:
+                            best_delta = d; best_j = j
+                    if best_j < 0:
+                        rows.append({"FEA": f"M{fm.mode_number} ({fm.freq_hz:.2f} Hz)",
+                                       "Exp": "—", "Δf (%)": "—", "Estado": "✗ Sin match"})
+                        continue
+                    used.add(best_j)
+                    ok = best_delta <= float(freq_tol)
+                    rows.append({
+                        "FEA": f"M{fm.mode_number} ({fm.freq_hz:.2f} Hz)",
+                        "Exp": f"P{best_j+1} ({exp_freqs[best_j]:.2f} Hz)",
+                        "Δf (%)": f"{best_delta:.1f}",
+                        "Estado": "✓ Freq OK" if ok else "✗ Freq fuera",
+                    })
+                st.dataframe(pd.DataFrame(rows), hide_index=True,
+                              use_container_width=True)
 
 
 # =====================================================================
