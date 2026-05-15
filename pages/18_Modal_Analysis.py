@@ -99,24 +99,36 @@ if _tdms is not None:
         f"{len(_tdms.channels)} ch"
     )
 
-# Si hay activo seleccionado en Setup, leer su info completa para el Hero
+# Hero global lee EITHER:
+#   1. Metadata ad-hoc del Tab Setup (cliente externo / one-off)
+#   2. Instancia de Machinery Library (activo registrado)
+#   3. Vacío si nada configurado
 _asset_location = ""
-_modal_inst_key = st.session_state.get("modal_inst", "")
-if _modal_inst_key and _modal_inst_key not in ("(seleccionar)", ""):
-    try:
-        from core.instance_state import get_instance as _get_inst
-        _inst_obj = _get_inst(_modal_inst_key)
-        if _inst_obj is not None:
-            _asset_name = (_inst_obj.tag or _modal_inst_key).upper()
-            _asset_location = getattr(_inst_obj, "location", "") or ""
-        else:
+_asset_client = ""
+_adhoc_meta = st.session_state.get("modal_adhoc_meta") or {}
+
+if _adhoc_meta.get("tag"):
+    # Modo ad-hoc tiene prioridad si está configurado
+    _asset_name = _adhoc_meta["tag"].upper()
+    _asset_client = _adhoc_meta.get("client", "")
+    _asset_location = _adhoc_meta.get("station", "")
+else:
+    _modal_inst_key = st.session_state.get("modal_inst", "")
+    if _modal_inst_key and _modal_inst_key not in ("(seleccionar)", ""):
+        try:
+            from core.instance_state import get_instance as _get_inst
+            _inst_obj = _get_inst(_modal_inst_key)
+            if _inst_obj is not None:
+                _asset_name = (_inst_obj.tag or _modal_inst_key).upper()
+                _asset_location = getattr(_inst_obj, "location", "") or ""
+            else:
+                _asset_name = _modal_inst_key.upper()
+        except Exception:
             _asset_name = _modal_inst_key.upper()
-    except Exception:
-        _asset_name = _modal_inst_key.upper()
 
 modal_hero_card(
     asset_name=_asset_name,
-    client_name="",
+    client_name=_asset_client,
     station_name=_asset_location,
     method_active=_active_method,
     record_info=_record_info,
@@ -142,10 +154,129 @@ tab_setup, tab_acq, tab_ema, tab_oma, tab_3d, tab_fea = st.tabs([
 with tab_setup:
     modal_section_header(
         title="Configuración del ensayo modal",
-        subtitle="Selecciona el activo bajo análisis y revisa la configuración de sensores",
+        subtitle="Selecciona o registra el activo bajo análisis",
         norm_ref="ISO 7626-6 §6",
         icon="🛠",
     )
+
+    # ─── Modo dual: activo registrado vs análisis ad-hoc ──────────────
+    # Ad-hoc cubre clientes que solo contratan análisis modal puntual sin
+    # registrar el activo en Machinery Library (consultoría one-off, equipo
+    # externo, comisionamiento previo a monitoreo). Bureau Veritas / DNV / SIGA
+    # usan este patrón frecuentemente.
+    setup_mode = st.radio(
+        "Origen del activo",
+        [
+            "📦 Activo registrado en Machinery Library",
+            "🎯 Análisis ad-hoc — equipo externo / one-off",
+        ],
+        horizontal=False,
+        key="modal_setup_mode",
+        help=(
+            "Activo registrado: usa la configuración de sensores ya definida "
+            "(Sensor Map). Ad-hoc: ingresa metadata manualmente, útil para "
+            "clientes que solo contratan análisis modal puntual sin monitoreo "
+            "continuo."
+        ),
+    )
+    st.divider()
+
+    # ─── MODO AD-HOC ──────────────────────────────────────────────────
+    if setup_mode.startswith("🎯"):
+        st.markdown("**Datos del activo (análisis puntual)**")
+        st.caption(
+            "Completa la metadata mínima del equipo bajo análisis. "
+            "Estos datos aparecerán en el Hero del módulo y en el reporte final."
+        )
+
+        col_a, col_b = st.columns(2)
+        with col_a:
+            adhoc_tag = st.text_input(
+                "Nombre / Tag del equipo *",
+                value=st.session_state.get("modal_adhoc_tag", ""),
+                placeholder="e.g. Motor GE LM6000 — Pad 2",
+                key="modal_adhoc_tag",
+            )
+            adhoc_client = st.text_input(
+                "Cliente",
+                value=st.session_state.get("modal_adhoc_client", ""),
+                placeholder="e.g. MAGNEX, PAREX, Ecopetrol",
+                key="modal_adhoc_client",
+            )
+        with col_b:
+            adhoc_station = st.text_input(
+                "Estación / Ubicación",
+                value=st.session_state.get("modal_adhoc_station", ""),
+                placeholder="e.g. La Belleza, Isla 6, Termosuria",
+                key="modal_adhoc_station",
+            )
+            adhoc_model = st.text_input(
+                "Modelo / Tipo",
+                value=st.session_state.get("modal_adhoc_model", ""),
+                placeholder="e.g. Turbogenerador aeroderivado 45 MW",
+                key="modal_adhoc_model",
+            )
+
+        adhoc_notes = st.text_area(
+            "Notas técnicas (opcional)",
+            value=st.session_state.get("modal_adhoc_notes", ""),
+            placeholder="Condiciones de operación, motivo del análisis, "
+                         "observaciones del cliente...",
+            key="modal_adhoc_notes",
+            height=68,
+        )
+
+        if adhoc_tag:
+            # Guardar como pseudo-instance en session_state
+            st.session_state["modal_adhoc_meta"] = {
+                "tag": adhoc_tag,
+                "client": adhoc_client,
+                "station": adhoc_station,
+                "model": adhoc_model,
+                "notes": adhoc_notes,
+            }
+            # Limpiar el selector de registrado para evitar conflicto
+            if st.session_state.get("modal_inst") not in (None, "(seleccionar)", ""):
+                st.session_state["modal_inst"] = "(seleccionar)"
+
+            modal_status_banner(
+                title=f"Análisis ad-hoc configurado · {adhoc_tag}",
+                detail=(
+                    f"Activo registrado para esta sesión de análisis modal. "
+                    f"{('Cliente: ' + adhoc_client + ' · ') if adhoc_client else ''}"
+                    f"{('Ubicación: ' + adhoc_station + ' · ') if adhoc_station else ''}"
+                    f"{('Modelo: ' + adhoc_model) if adhoc_model else ''}"
+                ),
+                severity="ok",
+            )
+
+            modal_status_banner(
+                title="Análisis ad-hoc — limitaciones de configuración",
+                detail=(
+                    "Sin Sensor Map predefinido, el módulo Modal usa la "
+                    "configuración de canales del archivo de captura "
+                    "(.tdms) cargado en Adquisición. Las funcionalidades "
+                    "**Bar chart 2D**, **Complexity Polar**, **AutoMAC**, "
+                    "**Diagrama de Campbell** y todo el análisis EMA/OMA están "
+                    "disponibles. La visualización **Mode Shapes 3D con flechas "
+                    "sobre el activo** requiere position_3d configurado en "
+                    "Machinery Library — no disponible en modo ad-hoc."
+                ),
+                severity="info",
+            )
+        else:
+            st.info(
+                "👆 Ingresa al menos el **Nombre / Tag del equipo** para "
+                "habilitar el análisis modal en modo ad-hoc."
+            )
+
+        # Salir del Tab Setup ya — no continuar con flujo de Machinery Library
+        st.stop() if False else None  # noop - solo para claridad
+
+    # ─── MODO ACTIVO REGISTRADO ──────────────────────────────────────
+    # Limpiar metadata ad-hoc cuando se vuelve a modo registrado
+    if st.session_state.get("modal_adhoc_meta"):
+        st.session_state.pop("modal_adhoc_meta", None)
 
     # Selector real de activos — lee Machinery Library
     from core.instance_state import list_instances, get_instance
@@ -163,9 +294,11 @@ with tab_setup:
                 "El módulo Modal Analysis se ejecuta sobre activos definidos en "
                 "Machinery Library. Crea un activo primero usando el wizard "
                 "'Crear activo' en la barra lateral, configura los sensores y "
-                "vuelve aquí para ejecutar el análisis modal."
+                "vuelve aquí. O cambia al modo "
+                "**Análisis ad-hoc** arriba para registrar un equipo puntual sin "
+                "necesidad de crearlo en Machinery Library."
             ),
-            cta_label="Ir a Machinery Library",
+            cta_label="O usa modo Ad-hoc arriba ↑",
             norm_ref="",
         )
     else:

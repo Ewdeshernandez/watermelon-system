@@ -66,7 +66,7 @@ def modal_hero_card(
     """
     _subtitle_parts = []
     if client_name:
-        _subtitle_parts.append(client_name)
+        _subtitle_parts.append(f"<b>{client_name}</b>")
     if station_name:
         _subtitle_parts.append(station_name)
     subtitle = " · ".join(_subtitle_parts) if _subtitle_parts else "Modal Analysis"
