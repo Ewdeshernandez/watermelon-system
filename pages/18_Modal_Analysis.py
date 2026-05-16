@@ -2426,10 +2426,17 @@ with tab_3d:
                     show_ghost=_show_ghost,
                     colormap=_cmap,
                 )
-                st.plotly_chart(fig_3d, use_container_width=True,
-                                  config={"scrollZoom": True,
-                                          "displayModeBar": True,
-                                          "displaylogo": False})
+                # Key estable: Streamlit no recrea el chart entre reruns,
+                # asi uirevision puede preservar la posicion de camara que
+                # el usuario rotó manualmente.
+                st.plotly_chart(
+                    fig_3d,
+                    use_container_width=True,
+                    key=f"modeshape_3d_{mode_sel.mode_number}",
+                    config={"scrollZoom": True,
+                            "displayModeBar": True,
+                            "displaylogo": False},
+                )
 
                 # ===== Botones Descargar MP4 / GIF con header KPI integrado =====
                 # Helper: resolver nombre del activo de forma defensiva
