@@ -2463,77 +2463,118 @@ with tab_3d:
 
                 # ---- MP4 ----
                 if _gen_mp4:
-                    with st.spinner("Renderizando 60 frames + encoding H.264 "
-                                      "(2 ciclos = 8 s de video)… ~40 s"):
-                        from core.modal.geometry_3d import export_mode_shape_mp4
-                        try:
-                            _asset_lbl = _resolve_asset_name()
-                            _mp4_bytes = export_mode_shape_mp4(
-                                geom=_geom_session,
-                                mode_shape=mode_sel.mode_shape,
-                                channel_names=fdd.channel_names,
-                                mode_number=mode_sel.mode_number,
-                                freq_hz=_fn_hz,
-                                damping_pct=_zeta,
-                                running_rpm=_running_rpm_for_order,
-                                classification=_cls,
-                                mpc_pct=_mpc_pct,
-                                n_frames=60, fps=15, n_loops=2,
-                                width_px=1280, height_px=720,
-                                colormap=_cmap,
-                                show_ghost=_show_ghost,
-                                asset_name=_asset_lbl,
-                                quality=8,
-                            )
-                            st.session_state["_modeshape_mp4"] = _mp4_bytes
-                            st.session_state["_modeshape_mp4_filename"] = (
-                                f"modeshape_M{mode_sel.mode_number}_"
-                                f"{_fn_hz:.1f}Hz.mp4"
-                            )
-                            # Limpiar gif para que el download_button sea el nuevo
-                            st.session_state.pop("_modeshape_gif", None)
-                        except Exception as exc:  # noqa: BLE001
-                            st.error(
-                                f"No se pudo generar el MP4: {exc}. "
-                                "Verifica que imageio + imageio-ffmpeg "
-                                "+ kaleido + Pillow estén instalados."
-                            )
+                    from core.modal.geometry_3d import export_mode_shape_mp4
+                    _asset_lbl = _resolve_asset_name()
+                    _prog_bar = st.progress(0.0, text="Iniciando render…")
+                    def _on_progress(idx, total, stage):
+                        pct = idx / max(total, 1)
+                        if stage == "encoding":
+                            _prog_bar.progress(
+                                1.0,
+                                text=f"Encoding H.264 con ffmpeg… "
+                                       f"({total} frames listos)")
+                        else:
+                            _prog_bar.progress(
+                                pct,
+                                text=f"Frame {idx + 1}/{total} "
+                                       f"({pct*100:.0f}%) · plotly→PNG via kaleido")
+                    try:
+                        _mp4_bytes = export_mode_shape_mp4(
+                            geom=_geom_session,
+                            mode_shape=mode_sel.mode_shape,
+                            channel_names=fdd.channel_names,
+                            mode_number=mode_sel.mode_number,
+                            freq_hz=_fn_hz,
+                            damping_pct=_zeta,
+                            running_rpm=_running_rpm_for_order,
+                            classification=_cls,
+                            mpc_pct=_mpc_pct,
+                            n_frames=30, fps=12, n_loops=2,
+                            width_px=1280, height_px=720,
+                            colormap=_cmap,
+                            show_ghost=_show_ghost,
+                            asset_name=_asset_lbl,
+                            quality=8,
+                            progress_cb=_on_progress,
+                        )
+                        st.session_state["_modeshape_mp4"] = _mp4_bytes
+                        st.session_state["_modeshape_mp4_filename"] = (
+                            f"modeshape_M{mode_sel.mode_number}_"
+                            f"{_fn_hz:.1f}Hz.mp4"
+                        )
+                        st.session_state.pop("_modeshape_gif", None)
+                        _prog_bar.empty()
+                        st.success(
+                            f"✓ MP4 listo · "
+                            f"{len(_mp4_bytes) / 1024:.0f} KB. "
+                            "Click abajo para descargar."
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        _prog_bar.empty()
+                        import traceback
+                        st.error(
+                            f"**Error en MP4 export:** `{type(exc).__name__}: {exc}`"
+                        )
+                        with st.expander("Detalle técnico (traceback)"):
+                            st.code(traceback.format_exc(), language="text")
+                        st.info(
+                            "Causas comunes: (1) imageio-ffmpeg no descargó el "
+                            "binario, (2) kaleido falló al renderizar Plotly, "
+                            "(3) Streamlit Cloud out-of-memory. "
+                            "Prueba 'Generar GIF' como alternativa."
+                        )
 
                 # ---- GIF ----
                 if _gen_gif:
-                    with st.spinner("Renderizando 36 frames + ensamblando GIF… "
-                                      "(~25 s)"):
-                        from core.modal.geometry_3d import export_mode_shape_gif
-                        try:
-                            _asset_lbl = _resolve_asset_name()
-                            _gif_bytes = export_mode_shape_gif(
-                                geom=_geom_session,
-                                mode_shape=mode_sel.mode_shape,
-                                channel_names=fdd.channel_names,
-                                mode_number=mode_sel.mode_number,
-                                freq_hz=_fn_hz,
-                                damping_pct=_zeta,
-                                running_rpm=_running_rpm_for_order,
-                                classification=_cls,
-                                mpc_pct=_mpc_pct,
-                                n_frames=36,
-                                frame_duration_ms=280,
-                                width_px=1280, height_px=720,
-                                colormap=_cmap,
-                                show_ghost=_show_ghost,
-                                asset_name=_asset_lbl,
-                            )
-                            st.session_state["_modeshape_gif"] = _gif_bytes
-                            st.session_state["_modeshape_gif_filename"] = (
-                                f"modeshape_M{mode_sel.mode_number}_"
-                                f"{_fn_hz:.1f}Hz.gif"
-                            )
-                            st.session_state.pop("_modeshape_mp4", None)
-                        except Exception as exc:  # noqa: BLE001
-                            st.error(
-                                f"No se pudo generar el GIF: {exc}. "
-                                "Verifica que kaleido + Pillow estén instalados."
-                            )
+                    from core.modal.geometry_3d import export_mode_shape_gif
+                    _asset_lbl = _resolve_asset_name()
+                    _prog_bar_g = st.progress(0.0, text="Iniciando render GIF…")
+                    def _on_progress_g(idx, total, stage):
+                        pct = idx / max(total, 1)
+                        if stage == "encoding":
+                            _prog_bar_g.progress(
+                                1.0,
+                                text=f"Ensamblando GIF… ({total} frames listos)")
+                        else:
+                            _prog_bar_g.progress(
+                                pct,
+                                text=f"Frame {idx + 1}/{total} ({pct*100:.0f}%)")
+                    try:
+                        _gif_bytes = export_mode_shape_gif(
+                            geom=_geom_session,
+                            mode_shape=mode_sel.mode_shape,
+                            channel_names=fdd.channel_names,
+                            mode_number=mode_sel.mode_number,
+                            freq_hz=_fn_hz,
+                            damping_pct=_zeta,
+                            running_rpm=_running_rpm_for_order,
+                            classification=_cls,
+                            mpc_pct=_mpc_pct,
+                            n_frames=24,
+                            frame_duration_ms=280,
+                            width_px=1280, height_px=720,
+                            colormap=_cmap,
+                            show_ghost=_show_ghost,
+                            asset_name=_asset_lbl,
+                            progress_cb=_on_progress_g,
+                        )
+                        st.session_state["_modeshape_gif"] = _gif_bytes
+                        st.session_state["_modeshape_gif_filename"] = (
+                            f"modeshape_M{mode_sel.mode_number}_"
+                            f"{_fn_hz:.1f}Hz.gif"
+                        )
+                        st.session_state.pop("_modeshape_mp4", None)
+                        _prog_bar_g.empty()
+                        st.success(
+                            f"✓ GIF listo · "
+                            f"{len(_gif_bytes) / 1024:.0f} KB."
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        _prog_bar_g.empty()
+                        import traceback
+                        st.error(f"**Error en GIF export:** `{type(exc).__name__}: {exc}`")
+                        with st.expander("Detalle técnico"):
+                            st.code(traceback.format_exc(), language="text")
 
                 # ---- Download buttons (muestra el que esté listo) ----
                 with _exp_c3:

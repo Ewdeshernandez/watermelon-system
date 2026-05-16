@@ -1115,8 +1115,13 @@ def _render_mode_shape_frames(
     colormap: str,
     show_ghost: bool,
     asset_name: str,
+    progress_cb: Optional[Any] = None,
 ) -> List[Any]:
-    """Helper compartido: genera los frames PIL.Image con header KPI."""
+    """Helper compartido: genera los frames PIL.Image con header KPI.
+
+    progress_cb: opcional, callable(frame_idx, total_frames, stage_str)
+                 que se llama por cada frame para UI feedback.
+    """
     import io
     import math as _math
     import plotly.io as pio
@@ -1201,6 +1206,11 @@ def _render_mode_shape_frames(
     # Renderizar frames
     frames: List[Image.Image] = []
     for k in range(n_frames):
+        if progress_cb is not None:
+            try:
+                progress_cb(k, n_frames, "rendering")
+            except Exception:
+                pass
         theta = 2.0 * _math.pi * k / n_frames
         phase_deg = _math.degrees(theta)
         # Generar figura estatica en este theta — re-uso del builder con animate=False
@@ -1270,13 +1280,14 @@ def export_mode_shape_gif(
     running_rpm: float = 3600.0,
     classification: str = "natural",
     mpc_pct: float = 0.0,
-    n_frames: int = 36,
+    n_frames: int = 30,
     frame_duration_ms: int = 280,
     width_px: int = 1280,
     height_px: int = 720,
     colormap: str = "RdBu_r",
     show_ghost: bool = True,
     asset_name: str = "Activo",
+    progress_cb: Optional[Any] = None,
 ) -> bytes:
     """Renderiza GIF animado del mode shape con header KPI integrado."""
     import io
@@ -1287,6 +1298,7 @@ def export_mode_shape_gif(
         mpc_pct=mpc_pct, n_frames=n_frames,
         width_px=width_px, height_px=height_px, colormap=colormap,
         show_ghost=show_ghost, asset_name=asset_name,
+        progress_cb=progress_cb,
     )
     buf = io.BytesIO()
     frames[0].save(
@@ -1310,8 +1322,8 @@ def export_mode_shape_mp4(
     running_rpm: float = 3600.0,
     classification: str = "natural",
     mpc_pct: float = 0.0,
-    n_frames: int = 60,
-    fps: int = 15,
+    n_frames: int = 30,
+    fps: int = 12,
     n_loops: int = 2,
     width_px: int = 1280,
     height_px: int = 720,
@@ -1319,6 +1331,7 @@ def export_mode_shape_mp4(
     show_ghost: bool = True,
     asset_name: str = "Activo",
     quality: int = 8,
+    progress_cb: Optional[Any] = None,
 ) -> bytes:
     """Renderiza MP4 H.264 del mode shape con header KPI integrado.
 
@@ -1350,7 +1363,11 @@ def export_mode_shape_mp4(
         mpc_pct=mpc_pct, n_frames=n_frames,
         width_px=width_px, height_px=height_px, colormap=colormap,
         show_ghost=show_ghost, asset_name=asset_name,
+        progress_cb=progress_cb,
     )
+    if progress_cb is not None:
+        try: progress_cb(n_frames, n_frames, "encoding")
+        except Exception: pass
 
     # Convertir a numpy y repetir N veces para tener n_loops ciclos completos
     base_frames = [np.array(f) for f in frames]
