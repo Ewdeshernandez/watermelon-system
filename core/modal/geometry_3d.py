@@ -1036,14 +1036,15 @@ def build_geometry_with_mode_shape(
     # Agrega triad XYZ discreto en esquina (estilo Artemis Modal)
     _add_axis_triad(fig, geom)
 
-    # uirevision STRING constante en TODOS los componentes UI-related.
+    # uirevision en scene + layout top-level (NO en xaxis/yaxis/zaxis
+    # individuales — esa prop no existe en scene 3D axes y crashea).
     # Plotly compara: si uirevision NO cambia entre updates, preserva
     # la posición de cámara/zoom/pan que el usuario movió manualmente.
     fig.update_layout(
         scene=dict(
-            xaxis=dict(visible=False, uirevision="x-locked"),
-            yaxis=dict(visible=False, uirevision="y-locked"),
-            zaxis=dict(visible=False, uirevision="z-locked"),
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+            zaxis=dict(visible=False),
             aspectmode="data",
             dragmode="turntable",
             camera=dict(eye=dict(x=0.0, y=2.2, z=0.6),
@@ -1058,9 +1059,6 @@ def build_geometry_with_mode_shape(
         paper_bgcolor="white",
         legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.05),
         uirevision="modal-fig-locked",
-        # datarevision: si cambia, Plotly re-renderiza data pero NO layout
-        # → preserva camara aun con frames updates
-        datarevision=mode_label,
     )
 
     # -------------------------------------------------------------------
