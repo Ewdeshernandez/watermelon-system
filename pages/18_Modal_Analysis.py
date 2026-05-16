@@ -2420,13 +2420,82 @@ with tab_3d:
                                   f"{mode_sel.natural_frequency_hz:.2f} Hz · "
                                   f"ζ = {mode_sel.damping_ratio_pct:.3f}%"),
                     animate=_animate_ms,
-                    n_frames=36,
-                    frame_duration_ms=180,
+                    n_frames=48,
+                    frame_duration_ms=250,
                     show_arrows=_show_arrows,
                     show_ghost=_show_ghost,
                     colormap=_cmap,
                 )
-                st.plotly_chart(fig_3d, use_container_width=True)
+                st.plotly_chart(fig_3d, use_container_width=True,
+                                  config={"scrollZoom": True,
+                                          "displayModeBar": True,
+                                          "displaylogo": False})
+
+                # ===== Botón Descargar GIF con header KPI integrado =====
+                _gif_c1, _gif_c2 = st.columns([1, 3])
+                with _gif_c1:
+                    _gen_gif = st.button(
+                        "🎬 Generar GIF para cliente",
+                        key="modeshape_gen_gif",
+                        use_container_width=True,
+                        help="Renderiza un GIF animado del modo actual con "
+                             "el banner KPI integrado (Hz, CPM, ζ, MPC, clase). "
+                             "Listo para enviar por WhatsApp o email.",
+                    )
+                if _gen_gif:
+                    with st.spinner("Renderizando 36 frames + ensamblando GIF… "
+                                      "(~25 s, depende del tamaño del mesh)"):
+                        from core.modal.geometry_3d import export_mode_shape_gif
+                        try:
+                            # Asset name: del template/instancia o ad-hoc
+                            _asset_lbl = (
+                                _adhoc_for_3d.get("equipment_name", "Activo ad-hoc")
+                                if _adhoc_for_3d else
+                                (_inst_for_3d.display_name
+                                  if _inst_for_3d and hasattr(_inst_for_3d, "display_name")
+                                  else _geom_session.name)
+                            )
+                            _gif_bytes = export_mode_shape_gif(
+                                geom=_geom_session,
+                                mode_shape=mode_sel.mode_shape,
+                                channel_names=fdd.channel_names,
+                                mode_number=mode_sel.mode_number,
+                                freq_hz=_fn_hz,
+                                damping_pct=_zeta,
+                                running_rpm=_running_rpm_for_order,
+                                classification=_cls,
+                                mpc_pct=_mpc_pct,
+                                n_frames=36,
+                                frame_duration_ms=280,
+                                width_px=1280, height_px=720,
+                                colormap=_cmap,
+                                show_ghost=_show_ghost,
+                                asset_name=_asset_lbl,
+                            )
+                            st.session_state["_modeshape_gif"] = _gif_bytes
+                            st.session_state["_modeshape_gif_filename"] = (
+                                f"modeshape_M{mode_sel.mode_number}_"
+                                f"{_fn_hz:.1f}Hz.gif"
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            st.error(
+                                f"No se pudo generar el GIF: {exc}. "
+                                "Verifica que kaleido + Pillow estén instalados."
+                            )
+
+                if st.session_state.get("_modeshape_gif"):
+                    with _gif_c2:
+                        st.download_button(
+                            "⬇ Descargar GIF generado",
+                            data=st.session_state["_modeshape_gif"],
+                            file_name=st.session_state.get(
+                                "_modeshape_gif_filename",
+                                "modeshape.gif",
+                            ),
+                            mime="image/gif",
+                            use_container_width=True,
+                            type="primary",
+                        )
 
                 # Diagnóstico de matching
                 _ch_set = {n.strip().upper() for n in fdd.channel_names}

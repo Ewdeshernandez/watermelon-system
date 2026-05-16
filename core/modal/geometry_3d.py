@@ -613,6 +613,7 @@ def build_geometry_figure(geom: ModalGeometry,
             zaxis=dict(title=f"Z ({geom.units})", showgrid=True,
                         gridcolor="#e5e7eb", zerolinecolor="#cbd5e1"),
             aspectmode="data",
+            dragmode="turntable",
             camera=dict(eye=dict(x=0.0, y=2.2, z=0.6),
                           up=dict(x=0, y=0, z=1)),
             bgcolor="#f8fafc",
@@ -990,6 +991,7 @@ def build_geometry_with_mode_shape(
             zaxis=dict(title=f"Z ({geom.units})", showgrid=True,
                         gridcolor="#e5e7eb", zerolinecolor="#cbd5e1"),
             aspectmode="data",
+            dragmode="turntable",
             camera=dict(eye=dict(x=0.0, y=2.2, z=0.6),
                           up=dict(x=0, y=0, z=1)),
             bgcolor="#f8fafc",
@@ -1060,7 +1062,8 @@ def build_geometry_with_mode_shape(
                           args=[None, dict(
                               frame=dict(duration=frame_duration_ms, redraw=True),
                               fromcurrent=True, mode="immediate",
-                              transition=dict(duration=0),
+                              transition=dict(duration=frame_duration_ms // 2,
+                                                easing="linear"),
                           )]),
                     dict(label="⏸ Pause",
                           method="animate",
@@ -1089,3 +1092,136 @@ def build_geometry_with_mode_shape(
         )
 
     return fig
+
+
+# ---------------------------------------------------------------------
+# Export GIF animado con header KPI integrado (para enviar a cliente)
+# ---------------------------------------------------------------------
+
+def export_mode_shape_gif(
+    geom: "ModalGeometry",
+    mode_shape: Any,
+    channel_names: List[str],
+    mode_number: int,
+    freq_hz: float,
+    damping_pct: float,
+    running_rpm: float = 3600.0,
+    classification: str = "natural",
+    mpc_pct: float = 0.0,
+    n_frames: int = 36,
+    frame_duration_ms: int = 280,
+    width_px: int = 1280,
+    height_px: int = 720,
+    colormap: str = "RdBu_r",
+    show_ghost: bool = True,
+    asset_name: str = "Activo",
+) -> bytes:
+    """
+    Renderiza un GIF animado del mode shape con header KPI integrado.
+
+    Cada frame: header KPI (banner navy con Hz/CPM/zeta/MPC/clase) +
+    plot 3D del mesh deformado a phase=theta. Loop completo 0..360 grados.
+
+    Returns: bytes del GIF listo para st.download_button.
+    Requiere kaleido (PNG render) + Pillow (composicion + GIF assembly).
+    """
+    import io
+    import math as _math
+    import plotly.io as pio
+    from PIL import Image, ImageDraw, ImageFont
+
+    # Dimensiones del header
+    header_h = 110
+    plot_h = height_px - header_h
+
+    # Pre-compute KPIs constantes
+    fn_cpm = freq_hz * 60.0
+    order = fn_cpm / max(running_rpm, 1.0)
+    q_factor = 1.0 / (2 * max(damping_pct / 100.0, 1e-6))
+    cls_color = {"natural": "#16a34a",
+                  "harmonic": "#D89B22",
+                  "spurious": "#dc2626"}.get(classification, "#475569")
+
+    # Font setup (fallback a default si no encuentra)
+    try:
+        font_xl = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 28)
+        font_lg = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 22)
+        font_md = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 14)
+        font_sm = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 11)
+    except (OSError, IOError):
+        try:
+            font_xl = ImageFont.truetype("DejaVuSans-Bold.ttf", 28)
+            font_lg = ImageFont.truetype("DejaVuSans-Bold.ttf", 22)
+            font_md = ImageFont.truetype("DejaVuSans.ttf", 14)
+            font_sm = ImageFont.truetype("DejaVuSans.ttf", 11)
+        except (OSError, IOError):
+            font_xl = ImageFont.load_default()
+            font_lg = font_xl; font_md = font_xl; font_sm = font_xl
+
+    def _draw_header(canvas: Image.Image, phase_deg: float):
+        d = ImageDraw.Draw(canvas)
+        # Background gradient (simple navy)
+        d.rectangle([0, 0, width_px, header_h], fill="#0F1E3D")
+        # Logo / titulo izquierda
+        d.text((20, 14), "Watermelon Modal", font=font_md, fill="#1AAEE5")
+        d.text((20, 32), asset_name, font=font_lg, fill="white")
+        # KPI cards
+        x0 = 280
+        col_w = (width_px - x0 - 20) // 5
+        kpis = [
+            ("MODO", f"#{mode_number}", ""),
+            ("FRECUENCIA", f"{freq_hz:.2f} Hz",
+             f"{fn_cpm:,.0f} CPM · {order:.3f}× run"),
+            ("DAMPING", f"{damping_pct:.3f}%", f"Q = {q_factor:.1f}"),
+            ("MPC", f"{mpc_pct:.1f}%", "complejidad"),
+            ("CLASE", classification.upper(), f"fase {phase_deg:.0f}°"),
+        ]
+        for i, (lbl, val, sub) in enumerate(kpis):
+            x = x0 + i * col_w
+            d.text((x, 18), lbl, font=font_sm, fill="#94a3b8")
+            color = cls_color if i == 4 else "white"
+            d.text((x, 32), val, font=font_lg, fill=color)
+            if sub:
+                d.text((x, 64), sub, font=font_sm, fill="#94a3b8")
+            # Divider vertical
+            if i > 0:
+                d.line([(x - 10, 22), (x - 10, header_h - 18)],
+                        fill="#1e3a5f", width=1)
+        # Footer ribbon
+        d.rectangle([0, header_h - 4, width_px, header_h], fill="#1AAEE5")
+
+    # Renderizar frames
+    frames: List[Image.Image] = []
+    for k in range(n_frames):
+        theta = 2.0 * _math.pi * k / n_frames
+        phase_deg = _math.degrees(theta)
+        # Generar figura estatica en este theta — re-uso del builder con animate=False
+        # pero forzando el frame θ usando una copia complex rotada
+        import numpy as np
+        ms_rot = np.asarray(mode_shape, dtype=complex).flatten()
+        ms_rot = ms_rot * (np.cos(theta) + 1j * np.sin(theta))
+        # Render estatico en esta fase
+        fig = build_geometry_with_mode_shape(
+            geom=geom, mode_shape=ms_rot, channel_names=channel_names,
+            mode_label="", animate=False,
+            show_arrows=False, show_ghost=show_ghost, colormap=colormap,
+        )
+        # Quitar titulo y margenes
+        fig.update_layout(title=None, margin=dict(l=0, r=20, t=0, b=0),
+                           height=plot_h, width=width_px)
+        png_bytes = pio.to_image(fig, format="png",
+                                   width=width_px, height=plot_h, scale=1)
+        plot_img = Image.open(io.BytesIO(png_bytes))
+        # Composicion: header arriba + plot abajo
+        canvas = Image.new("RGB", (width_px, height_px), "white")
+        _draw_header(canvas, phase_deg)
+        canvas.paste(plot_img, (0, header_h))
+        frames.append(canvas)
+
+    # Ensamblar GIF
+    buf = io.BytesIO()
+    frames[0].save(
+        buf, format="GIF", save_all=True, append_images=frames[1:],
+        duration=frame_duration_ms, loop=0, optimize=False,
+    )
+    return buf.getvalue()
