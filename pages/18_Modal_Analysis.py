@@ -2463,8 +2463,8 @@ with tab_3d:
 
                 # ---- MP4 ----
                 if _gen_mp4:
-                    with st.spinner("Renderizando 48 frames + encoding H.264… "
-                                      "(~30 s, depende del tamaño del mesh)"):
+                    with st.spinner("Renderizando 60 frames + encoding H.264 "
+                                      "(2 ciclos = 8 s de video)… ~40 s"):
                         from core.modal.geometry_3d import export_mode_shape_mp4
                         try:
                             _asset_lbl = _resolve_asset_name()
@@ -2478,7 +2478,7 @@ with tab_3d:
                                 running_rpm=_running_rpm_for_order,
                                 classification=_cls,
                                 mpc_pct=_mpc_pct,
-                                n_frames=48, fps=12,
+                                n_frames=60, fps=15, n_loops=2,
                                 width_px=1280, height_px=720,
                                 colormap=_cmap,
                                 show_ghost=_show_ghost,

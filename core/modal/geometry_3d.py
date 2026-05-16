@@ -1150,15 +1150,31 @@ def _render_mode_shape_frames(
             font_xl = ImageFont.load_default()
             font_lg = font_xl; font_md = font_xl; font_sm = font_xl
 
+    # Truncar asset_name si es muy largo + escoger fuente adaptativa
+    _name_max = 28
+    _name_display = (asset_name[:_name_max - 1] + "…"
+                       if len(asset_name) > _name_max else asset_name)
+    # Si el nombre es muy largo usa la fuente mediana en lugar de la grande
+    try:
+        font_name = (font_lg if len(_name_display) <= 18
+                       else ImageFont.truetype(
+                           "/System/Library/Fonts/Helvetica.ttc", 16))
+    except (OSError, IOError):
+        try:
+            font_name = (font_lg if len(_name_display) <= 18
+                           else ImageFont.truetype("DejaVuSans.ttf", 16))
+        except (OSError, IOError):
+            font_name = font_lg
+
     def _draw_header(canvas: Image.Image, phase_deg: float):
         d = ImageDraw.Draw(canvas)
-        # Background gradient (simple navy)
+        # Background navy
         d.rectangle([0, 0, width_px, header_h], fill="#0F1E3D")
-        # Logo / titulo izquierda
+        # Logo brand izquierda (ancho fijo)
         d.text((20, 14), "Watermelon Modal", font=font_md, fill="#1AAEE5")
-        d.text((20, 32), asset_name, font=font_lg, fill="white")
-        # KPI cards
-        x0 = 280
+        d.text((20, 36), _name_display, font=font_name, fill="white")
+        # KPI cards arrancan en x=310 para dar mas espacio al nombre
+        x0 = 310
         col_w = (width_px - x0 - 20) // 5
         kpis = [
             ("MODO", f"#{mode_number}", ""),
@@ -1198,9 +1214,36 @@ def _render_mode_shape_frames(
             mode_label="", animate=False,
             show_arrows=False, show_ghost=show_ghost, colormap=colormap,
         )
-        # Quitar titulo y margenes
-        fig.update_layout(title=None, margin=dict(l=0, r=20, t=0, b=0),
-                           height=plot_h, width=width_px)
+        # Quitar titulo, ajustar margenes, y forzar axis labels grandes
+        # para que se vean en el render MP4/GIF (default Plotly es muy chico)
+        fig.update_layout(
+            title=None,
+            margin=dict(l=10, r=20, t=10, b=10),
+            height=plot_h, width=width_px,
+            scene=dict(
+                xaxis=dict(
+                    title=dict(text=f"X ({geom.units})",
+                                 font=dict(size=15, color="#0F1E3D")),
+                    tickfont=dict(size=12, color="#475569"),
+                    showgrid=True, gridcolor="#cbd5e1",
+                    zerolinecolor="#94a3b8",
+                ),
+                yaxis=dict(
+                    title=dict(text=f"Y ({geom.units})",
+                                 font=dict(size=15, color="#0F1E3D")),
+                    tickfont=dict(size=12, color="#475569"),
+                    showgrid=True, gridcolor="#cbd5e1",
+                    zerolinecolor="#94a3b8",
+                ),
+                zaxis=dict(
+                    title=dict(text=f"Z ({geom.units})",
+                                 font=dict(size=15, color="#0F1E3D")),
+                    tickfont=dict(size=12, color="#475569"),
+                    showgrid=True, gridcolor="#cbd5e1",
+                    zerolinecolor="#94a3b8",
+                ),
+            ),
+        )
         png_bytes = pio.to_image(fig, format="png",
                                    width=width_px, height=plot_h, scale=1)
         plot_img = Image.open(io.BytesIO(png_bytes))
@@ -1267,8 +1310,9 @@ def export_mode_shape_mp4(
     running_rpm: float = 3600.0,
     classification: str = "natural",
     mpc_pct: float = 0.0,
-    n_frames: int = 48,
-    fps: int = 12,
+    n_frames: int = 60,
+    fps: int = 15,
+    n_loops: int = 2,
     width_px: int = 1280,
     height_px: int = 720,
     colormap: str = "RdBu_r",
@@ -1282,7 +1326,10 @@ def export_mode_shape_mp4(
     H.264 yuv420p para maxima compatibilidad (WhatsApp, iPhone, Android, web).
 
     Args:
-        fps: frames por segundo (12 = ciclo de 4 segundos con 48 frames)
+        n_frames: frames por ciclo (60 = curva suave)
+        fps: frames por segundo (15 = ciclo de 4 s)
+        n_loops: cuantos ciclos completos repetir (2 = 8 s totales,
+                 loopea cleanly porque cada ciclo vuelve al frame 0)
         quality: 0-10, mayor=mejor calidad y mas peso (8 = optimo cliente)
 
     Returns: bytes del MP4 listo para st.download_button con mime=video/mp4.
@@ -1305,9 +1352,9 @@ def export_mode_shape_mp4(
         show_ghost=show_ghost, asset_name=asset_name,
     )
 
-    # Loop suave: agregamos los frames de nuevo invertidos para evitar
-    # el "salto" al volver al frame 0 (estilo Artemis MP4 ping-pong)
-    np_frames = [np.array(f) for f in frames]
+    # Convertir a numpy y repetir N veces para tener n_loops ciclos completos
+    base_frames = [np.array(f) for f in frames]
+    np_frames = base_frames * max(int(n_loops), 1)
     # Aseguramos dimensiones pares (H.264 requiere alturas y anchos pares)
     h, w = np_frames[0].shape[:2]
     if h % 2 or w % 2:
