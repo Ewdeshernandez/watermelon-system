@@ -2345,6 +2345,73 @@ with tab_3d:
                         help="Rojo cofase, azul anti-fase (RdBu_r). Artemis usa Jet.",
                     )
 
+                # ===== Banner KPI grande estilo System1/Artemis =====
+                _fn_hz = float(mode_sel.natural_frequency_hz)
+                _fn_cpm = _fn_hz * 60.0
+                _zeta = float(mode_sel.damping_ratio_pct)
+                _running_rpm_for_order = float(
+                    st.session_state.get("camp_op_rpm", 0) or 3600.0
+                )
+                _order = _fn_cpm / max(_running_rpm_for_order, 1.0)
+                _mpc_pct = float(getattr(mode_sel, "complexity_pct", 0.0))
+                _q_factor = 1.0 / (2 * max(_zeta / 100.0, 1e-6))
+                _cls = getattr(mode_sel, "classification", "natural")
+                _cls_color = {"natural": "#16a34a",
+                                "harmonic": "#D89B22",
+                                "spurious": "#dc2626"}.get(_cls, "#475569")
+                st.markdown(
+                    f"""
+                    <div style="background: linear-gradient(90deg, #0F1E3D 0%, #1e3a5f 100%);
+                                color: white; border-radius: 12px;
+                                padding: 14px 22px; margin: 14px 0;
+                                display: flex; gap: 28px; align-items: center;
+                                flex-wrap: wrap;">
+                      <div>
+                        <div style="font-size:10.5px; opacity:0.7; letter-spacing:1px;
+                                    text-transform: uppercase;">Modo identificado</div>
+                        <div style="font-size: 26px; font-weight: 700;">
+                            #{mode_sel.mode_number}</div>
+                      </div>
+                      <div style="border-left: 1px solid rgba(255,255,255,0.18);
+                                  padding-left: 22px;">
+                        <div style="font-size:10.5px; opacity:0.7; letter-spacing:1px;
+                                    text-transform: uppercase;">Frecuencia</div>
+                        <div style="font-size: 24px; font-weight: 600;">
+                            {_fn_hz:.2f} Hz</div>
+                        <div style="font-size: 12px; opacity:0.7;">
+                            {_fn_cpm:,.0f} CPM · {_order:.3f}× run</div>
+                      </div>
+                      <div style="border-left: 1px solid rgba(255,255,255,0.18);
+                                  padding-left: 22px;">
+                        <div style="font-size:10.5px; opacity:0.7; letter-spacing:1px;
+                                    text-transform: uppercase;">Damping ζ</div>
+                        <div style="font-size: 24px; font-weight: 600;">
+                            {_zeta:.3f}%</div>
+                        <div style="font-size: 12px; opacity:0.7;">
+                            Q = {_q_factor:.1f}</div>
+                      </div>
+                      <div style="border-left: 1px solid rgba(255,255,255,0.18);
+                                  padding-left: 22px;">
+                        <div style="font-size:10.5px; opacity:0.7; letter-spacing:1px;
+                                    text-transform: uppercase;">MPC</div>
+                        <div style="font-size: 24px; font-weight: 600;">
+                            {_mpc_pct:.1f}%</div>
+                        <div style="font-size: 12px; opacity:0.7;">
+                            complejidad</div>
+                      </div>
+                      <div style="border-left: 1px solid rgba(255,255,255,0.18);
+                                  padding-left: 22px;">
+                        <div style="font-size:10.5px; opacity:0.7; letter-spacing:1px;
+                                    text-transform: uppercase;">Clasificación</div>
+                        <div style="font-size: 18px; font-weight: 600; color:{_cls_color};">
+                            {_cls.upper()}</div>
+                        <div style="font-size: 12px; opacity:0.7;">MPC + harmonic check</div>
+                      </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
                 fig_3d = build_geometry_with_mode_shape(
                     geom=_geom_session,
                     mode_shape=mode_sel.mode_shape,
