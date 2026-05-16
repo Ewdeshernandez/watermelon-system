@@ -2448,13 +2448,20 @@ with tab_3d:
                         from core.modal.geometry_3d import export_mode_shape_gif
                         try:
                             # Asset name: del template/instancia o ad-hoc
-                            _asset_lbl = (
-                                _adhoc_for_3d.get("equipment_name", "Activo ad-hoc")
-                                if _adhoc_for_3d else
-                                (_inst_for_3d.display_name
-                                  if _inst_for_3d and hasattr(_inst_for_3d, "display_name")
-                                  else _geom_session.name)
-                            )
+                            # Defensive: el _adhoc_meta_for_3d puede no estar definido
+                            # si el button se evalua en una recarga parcial
+                            _adhoc_safe = st.session_state.get("modal_adhoc_meta")
+                            _inst_safe = _inst_for_3d
+                            if _adhoc_safe and isinstance(_adhoc_safe, dict):
+                                _asset_lbl = _adhoc_safe.get(
+                                    "equipment_name", "Activo ad-hoc"
+                                )
+                            elif _inst_safe is not None and hasattr(_inst_safe, "display_name"):
+                                _asset_lbl = _inst_safe.display_name
+                            else:
+                                _asset_lbl = (_geom_session.name
+                                                if _geom_session
+                                                else "Watermelon Modal")
                             _gif_bytes = export_mode_shape_gif(
                                 geom=_geom_session,
                                 mode_shape=mode_sel.mode_shape,
