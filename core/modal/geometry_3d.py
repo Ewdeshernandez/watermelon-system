@@ -518,6 +518,48 @@ def _build_mode_spline_by_mounting(
     return xs_uniq, ys_uniq, tans
 
 
+def _add_axis_triad(fig: Any, geom: "ModalGeometry") -> None:
+    """Agrega un pequeño triad XYZ en la esquina del scene 3D.
+
+    Estilo Artemis Modal: indicador discreto de orientacion sin ocupar espacio.
+    Tres flechas perpendiculares: X rojo, Y verde, Z azul.
+    """
+    import plotly.graph_objects as go
+    span = max(geom.shaft_end - geom.shaft_start, 100.0)
+    triad_size = span * 0.10
+    # Posicion en esquina inferior-izquierda del scene
+    cx = geom.shaft_start - span * 0.12
+    cy = -span * 0.18
+    cz = -span * 0.18
+    # X axis (rojo)
+    fig.add_trace(go.Scatter3d(
+        x=[cx, cx + triad_size], y=[cy, cy], z=[cz, cz],
+        mode="lines+text",
+        line=dict(color="#dc2626", width=5),
+        text=["", "X"], textposition="middle right",
+        textfont=dict(size=13, color="#dc2626"),
+        showlegend=False, hoverinfo="skip",
+    ))
+    # Y axis (verde)
+    fig.add_trace(go.Scatter3d(
+        x=[cx, cx], y=[cy, cy + triad_size], z=[cz, cz],
+        mode="lines+text",
+        line=dict(color="#16a34a", width=5),
+        text=["", "Y"], textposition="top center",
+        textfont=dict(size=13, color="#16a34a"),
+        showlegend=False, hoverinfo="skip",
+    ))
+    # Z axis (azul)
+    fig.add_trace(go.Scatter3d(
+        x=[cx, cx], y=[cy, cy], z=[cz, cz + triad_size],
+        mode="lines+text",
+        line=dict(color="#185FA5", width=5),
+        text=["", "Z"], textposition="top center",
+        textfont=dict(size=13, color="#185FA5"),
+        showlegend=False, hoverinfo="skip",
+    ))
+
+
 def _dof_to_vector(dof: str) -> Tuple[float, float, float]:
     mapping = {
         "+X": (1, 0, 0), "-X": (-1, 0, 0),
@@ -982,14 +1024,14 @@ def build_geometry_with_mode_shape(
                 f"capa carcasa: {n_casing} accel · capa eje: {n_shaft} prox · "
                 f"colormap: rojo = +amp, azul = −amp")
 
+    # Agrega triad XYZ discreto en esquina (estilo Artemis Modal)
+    _add_axis_triad(fig, geom)
+
     fig.update_layout(
         scene=dict(
-            xaxis=dict(title=f"X ({geom.units})", showgrid=True,
-                        gridcolor="#e5e7eb", zerolinecolor="#cbd5e1"),
-            yaxis=dict(title=f"Y ({geom.units})", showgrid=True,
-                        gridcolor="#e5e7eb", zerolinecolor="#cbd5e1"),
-            zaxis=dict(title=f"Z ({geom.units})", showgrid=True,
-                        gridcolor="#e5e7eb", zerolinecolor="#cbd5e1"),
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+            zaxis=dict(visible=False),
             aspectmode="data",
             dragmode="turntable",
             camera=dict(eye=dict(x=0.0, y=2.2, z=0.6),
@@ -1074,21 +1116,9 @@ def build_geometry_with_mode_shape(
                           )]),
                 ],
             )],
-            sliders=[dict(
-                active=0,
-                currentvalue=dict(prefix="Fase del modo: ", suffix="°"),
-                pad=dict(t=40, b=10),
-                len=0.78, x=0.18, xanchor="left",
-                steps=[
-                    dict(method="animate", label=f.name,
-                          args=[[f.name], dict(
-                              frame=dict(duration=0, redraw=True),
-                              mode="immediate",
-                              transition=dict(duration=0),
-                          )])
-                    for f in frames
-                ],
-            )],
+            # sliders=[] explicito — no mostrar el indicador de fase
+            # (estilo Artemis: solo Play/Pause, sin tick marks de timeline)
+            sliders=[],
         )
 
     return fig
@@ -1224,34 +1254,16 @@ def _render_mode_shape_frames(
             mode_label="", animate=False,
             show_arrows=False, show_ghost=show_ghost, colormap=colormap,
         )
-        # Quitar titulo, ajustar margenes, y forzar axis labels grandes
-        # para que se vean en el render MP4/GIF (default Plotly es muy chico)
+        # Quitar titulo y ejes (estilo Artemis: ejes invisibles, triad XYZ
+        # ya esta en la esquina via _add_axis_triad)
         fig.update_layout(
             title=None,
-            margin=dict(l=10, r=20, t=10, b=10),
+            margin=dict(l=0, r=0, t=0, b=0),
             height=plot_h, width=width_px,
             scene=dict(
-                xaxis=dict(
-                    title=dict(text=f"X ({geom.units})",
-                                 font=dict(size=15, color="#0F1E3D")),
-                    tickfont=dict(size=12, color="#475569"),
-                    showgrid=True, gridcolor="#cbd5e1",
-                    zerolinecolor="#94a3b8",
-                ),
-                yaxis=dict(
-                    title=dict(text=f"Y ({geom.units})",
-                                 font=dict(size=15, color="#0F1E3D")),
-                    tickfont=dict(size=12, color="#475569"),
-                    showgrid=True, gridcolor="#cbd5e1",
-                    zerolinecolor="#94a3b8",
-                ),
-                zaxis=dict(
-                    title=dict(text=f"Z ({geom.units})",
-                                 font=dict(size=15, color="#0F1E3D")),
-                    tickfont=dict(size=12, color="#475569"),
-                    showgrid=True, gridcolor="#cbd5e1",
-                    zerolinecolor="#94a3b8",
-                ),
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+                zaxis=dict(visible=False),
             ),
         )
         png_bytes = pio.to_image(fig, format="png",
