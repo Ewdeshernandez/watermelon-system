@@ -521,16 +521,25 @@ def _build_mode_spline_by_mounting(
 def _add_axis_triad(fig: Any, geom: "ModalGeometry") -> None:
     """Agrega un pequeño triad XYZ en la esquina del scene 3D.
 
-    Estilo Artemis Modal: indicador discreto de orientacion sin ocupar espacio.
-    Tres flechas perpendiculares: X rojo, Y verde, Z azul.
+    El offset se calcula sobre el radio max (no el span del shaft) para
+    NO distorsionar el aspect ratio del modelo. Aspectmode=data hace
+    autofit del bounding box: si el triad está muy lejos el modelo se
+    achica. Mantenemos un offset moderado relativo al radio transversal.
     """
     import plotly.graph_objects as go
-    span = max(geom.shaft_end - geom.shaft_start, 100.0)
-    triad_size = span * 0.12
-    # Posicion claramente FUERA del bounding box (no se solapa con bloques)
-    cx = geom.shaft_start - span * 0.30
-    cy = -span * 0.50
-    cz = -span * 0.35
+    # Radio max transversal del modelo
+    max_radial = max(
+        [b.radius for b in geom.blocks if b.shape == "cylinder"]
+        + [max(b.half_width, b.half_height) for b in geom.blocks if b.shape == "box"]
+        + [geom.shaft_radius, 100.0]
+    )
+    # Triad pequeno, escalado al radio max
+    triad_size = max_radial * 0.45
+    # Offset proporcional al radio (NO al span) — afuera del modelo en Y y Z
+    # pero sin afectar el aspect ratio extendido del shaft
+    cx = geom.shaft_start - max_radial * 0.5
+    cy = -max_radial * 1.6   # claramente fuera del bounding box transversal
+    cz = -max_radial * 1.3
     # X axis (rojo)
     fig.add_trace(go.Scatter3d(
         x=[cx, cx + triad_size], y=[cy, cy], z=[cz, cz],
@@ -1027,19 +1036,19 @@ def build_geometry_with_mode_shape(
     # Agrega triad XYZ discreto en esquina (estilo Artemis Modal)
     _add_axis_triad(fig, geom)
 
+    # uirevision STRING constante en TODOS los componentes UI-related.
+    # Plotly compara: si uirevision NO cambia entre updates, preserva
+    # la posición de cámara/zoom/pan que el usuario movió manualmente.
     fig.update_layout(
         scene=dict(
-            xaxis=dict(visible=False),
-            yaxis=dict(visible=False),
-            zaxis=dict(visible=False),
+            xaxis=dict(visible=False, uirevision="x-locked"),
+            yaxis=dict(visible=False, uirevision="y-locked"),
+            zaxis=dict(visible=False, uirevision="z-locked"),
             aspectmode="data",
             dragmode="turntable",
             camera=dict(eye=dict(x=0.0, y=2.2, z=0.6),
                           up=dict(x=0, y=0, z=1)),
             bgcolor="#f8fafc",
-            # uirevision constante: Plotly preserva la posición de cámara
-            # que el usuario rotó manualmente, NO la resetea cuando se
-            # ejecutan los frames de la animación.
             uirevision="modal-scene-locked",
         ),
         title=dict(text=f"{mode_label}<br><sub>{subtitle}</sub>",
@@ -1048,8 +1057,10 @@ def build_geometry_with_mode_shape(
         height=600 if animate else 560,
         paper_bgcolor="white",
         legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.05),
-        # uirevision top-level también, para que selección y zoom persistan
         uirevision="modal-fig-locked",
+        # datarevision: si cambia, Plotly re-renderiza data pero NO layout
+        # → preserva camara aun con frames updates
+        datarevision=mode_label,
     )
 
     # -------------------------------------------------------------------
@@ -1110,8 +1121,10 @@ def build_geometry_with_mode_shape(
                           args=[None, dict(
                               frame=dict(duration=frame_duration_ms, redraw=True),
                               fromcurrent=True, mode="immediate",
-                              transition=dict(duration=frame_duration_ms // 2,
-                                                easing="linear"),
+                              # transition=0 critico: si hay duracion >0,
+                              # Plotly hace un relayout intermedio que puede
+                              # pisar la cámara que el user rotó manual.
+                              transition=dict(duration=0),
                           )]),
                     dict(label="⏸ Pause",
                           method="animate",
