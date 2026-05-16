@@ -326,66 +326,90 @@ TEMPLATES: Dict[str, Any] = {
 # ---------------------------------------------------------------------
 
 def _cylinder_mesh(x0: float, x1: float, radius: float,
-                    n_theta: int = 24) -> Tuple[list, list, list, list, list, list]:
-    """Genera vertices (x,y,z) + faces (i,j,k) para un cilindro alineado a X."""
+                    n_theta: int = 28, n_x: int = 16
+                    ) -> Tuple[list, list, list, list, list, list]:
+    """Cilindro alineado a X subdividido en n_x anillos longitudinales.
+
+    Subdivision = mas vertices = la deformacion por spline luce como una
+    viga que flexiona suavemente, no como bloque que se inclina.
+    """
     import numpy as np
     theta = np.linspace(0, 2 * np.pi, n_theta, endpoint=False)
-    # bottom ring (x0) + top ring (x1) + 2 center points
+    x_levels = np.linspace(x0, x1, n_x + 1)
     xs, ys, zs = [], [], []
-    for t in theta:
-        ys.append(radius * math.cos(t))
-        zs.append(radius * math.sin(t))
-        xs.append(x0)
-    for t in theta:
-        ys.append(radius * math.cos(t))
-        zs.append(radius * math.sin(t))
-        xs.append(x1)
-    # centers
-    xs += [x0, x1]
+    # Generar n_x+1 anillos de n_theta vertices cada uno
+    for x_val in x_levels:
+        for t in theta:
+            xs.append(float(x_val))
+            ys.append(radius * math.cos(t))
+            zs.append(radius * math.sin(t))
+    n = n_theta
+    # Centros para los caps (solo extremos)
+    xs += [float(x_levels[0]), float(x_levels[-1])]
     ys += [0.0, 0.0]
     zs += [0.0, 0.0]
-    n = n_theta
-    c0, c1 = 2 * n, 2 * n + 1
+    c0 = (n_x + 1) * n
+    c1 = c0 + 1
     i, j, k = [], [], []
-    # side quads as 2 triangles
-    for a in range(n):
-        b = (a + 1) % n
-        i += [a, a]
-        j += [b, n + b]
-        k += [n + b, n + a]
-    # bottom cap
+    # Side quads entre anillos consecutivos (2 triangles por quad)
+    for ring in range(n_x):
+        base0 = ring * n
+        base1 = (ring + 1) * n
+        for a in range(n):
+            b = (a + 1) % n
+            i += [base0 + a, base0 + a]
+            j += [base0 + b, base1 + b]
+            k += [base1 + b, base1 + a]
+    # Cap bottom (anillo 0)
     for a in range(n):
         b = (a + 1) % n
         i.append(a); j.append(b); k.append(c0)
-    # top cap
+    # Cap top (anillo n_x)
+    top_base = n_x * n
     for a in range(n):
         b = (a + 1) % n
-        i.append(n + a); j.append(c1); k.append(n + b)
+        i.append(top_base + a); j.append(c1); k.append(top_base + b)
     return xs, ys, zs, i, j, k
 
 
-def _box_mesh(x0: float, x1: float, hw: float,
-               hh: float) -> Tuple[list, list, list, list, list, list]:
-    """Caja rectangular alineada a X (ancho Y=±hw, alto Z=±hh).
+def _box_mesh(x0: float, x1: float, hw: float, hh: float,
+               n_x: int = 16) -> Tuple[list, list, list, list, list, list]:
+    """Caja rectangular alineada a X subdividida en n_x cross-sections.
 
-    8 vertices, 12 triangulos (2 por cara, 6 caras).
-    Vertice indexing:
-        0=(x0,-hw,-hh)  1=(x1,-hw,-hh)  2=(x1,+hw,-hh)  3=(x0,+hw,-hh)
-        4=(x0,-hw,+hh)  5=(x1,-hw,+hh)  6=(x1,+hw,+hh)  7=(x0,+hw,+hh)
+    Cada cross-section tiene 4 corner vertices (bottom-left, bottom-right,
+    top-right, top-left en orden 0,1,2,3). Las caras laterales se construyen
+    con quads entre cross-sections consecutivas. Caps solo en los extremos.
+
+    Subdivision = bending suave de la carcasa cuando se anima la deformacion.
     """
-    xs = [x0, x1, x1, x0, x0, x1, x1, x0]
-    ys = [-hw, -hw, hw, hw, -hw, -hw, hw, hw]
-    zs = [-hh, -hh, -hh, -hh, hh, hh, hh, hh]
-    # 6 caras × 2 triangulos = 12 triangulos
-    # Bottom z=-hh: (0,1,2), (0,2,3)
-    # Top    z=+hh: (4,6,5), (4,7,6)
-    # Front  x=x1:  (1,5,6), (1,6,2)
-    # Back   x=x0:  (0,3,7), (0,7,4)
-    # Left   y=-hw: (0,4,5), (0,5,1)
-    # Right  y=+hw: (3,2,6), (3,6,7)
-    i = [0, 0, 4, 4, 1, 1, 0, 0, 0, 0, 3, 3]
-    j = [1, 2, 6, 7, 5, 6, 3, 7, 4, 5, 2, 6]
-    k = [2, 3, 5, 6, 6, 2, 7, 4, 5, 1, 6, 7]
+    import numpy as np
+    x_levels = np.linspace(x0, x1, n_x + 1)
+    xs, ys, zs = [], [], []
+    # 4 corner vertices por cross-section
+    # Orden: 0=(-hw,-hh) 1=(+hw,-hh) 2=(+hw,+hh) 3=(-hw,+hh)
+    corners = [(-hw, -hh), (+hw, -hh), (+hw, +hh), (-hw, +hh)]
+    for x_val in x_levels:
+        for (y, z) in corners:
+            xs.append(float(x_val)); ys.append(y); zs.append(z)
+    i, j, k = [], [], []
+    # Side faces: 4 caras laterales (bottom, right, top, left), cada una
+    # subdividida en n_x quads (2 triangles cada uno)
+    for sec in range(n_x):
+        b0 = sec * 4         # cross-section sec
+        b1 = (sec + 1) * 4   # siguiente cross-section
+        # 4 quads laterales (entre vertices a y a+1)
+        for a in range(4):
+            an = (a + 1) % 4
+            # Quad (b0+a, b0+an, b1+an, b1+a) → 2 triangles
+            i += [b0 + a, b0 + a]
+            j += [b0 + an, b1 + an]
+            k += [b1 + an, b1 + a]
+    # Caps en los extremos (cross-section 0 y n_x)
+    # Cap inicial: 2 triangles (0,1,2), (0,2,3)
+    i += [0, 0]; j += [1, 2]; k += [2, 3]
+    # Cap final: 2 triangles
+    last = n_x * 4
+    i += [last, last]; j += [last + 2, last + 3]; k += [last + 1, last + 2]
     return xs, ys, zs, i, j, k
 
 
@@ -527,7 +551,7 @@ def build_geometry_figure(geom: ModalGeometry,
 
     # 2) Eje (shaft) — cilindro fino centrado
     xs, ys, zs, i, j, k = _cylinder_mesh(geom.shaft_start, geom.shaft_end,
-                                           geom.shaft_radius, n_theta=16)
+                                           geom.shaft_radius, n_theta=20, n_x=24)
     fig.add_trace(go.Mesh3d(
         x=xs, y=ys, z=zs, i=i, j=j, k=k,
         color=geom.shaft_color, opacity=0.95,
@@ -772,7 +796,7 @@ def build_geometry_with_mode_shape(
 
     # Shaft (cilindro central) — siempre kind="shaft"
     xs, ys, zs, ii, jj, kk = _cylinder_mesh(geom.shaft_start, geom.shaft_end,
-                                              geom.shaft_radius, n_theta=16)
+                                              geom.shaft_radius, n_theta=20, n_x=24)
     shaft_base = (xs, ys, zs, ii, jj, kk, "shaft",
                    geom.shaft_color, 0.85, "Eje")
 
@@ -811,13 +835,26 @@ def build_geometry_with_mode_shape(
     block_trace_indices = []
     for idx, (xs0, ys0, zs0, ii, jj, kk, kind, color, opacity, name) in enumerate(block_meshes_base):
         new_x, new_y, new_z, intensity = _displace_mesh(xs0, ys0, zs0, kind, 0.0)
+        # Mostrar colorbar SOLO en el primer trace (escala global compartida)
+        _show_cb = (idx == 0)
         fig.add_trace(go.Mesh3d(
             x=new_x, y=new_y, z=new_z, i=ii, j=jj, k=kk,
             intensity=intensity, intensitymode="vertex",
             colorscale=colormap, cmin=-int_max, cmax=int_max,
-            showscale=False, opacity=0.92,
+            showscale=_show_cb,
+            colorbar=dict(
+                title=dict(text="Δ desplaz.<br>(visual)",
+                            font=dict(size=11, color="#0F1E3D")),
+                thickness=14, len=0.55, x=1.02, xanchor="left",
+                tickfont=dict(size=10, color="#0F1E3D"),
+                outlinewidth=0,
+            ) if _show_cb else None,
+            opacity=0.94,
             name=name, showlegend=False, hoverinfo="skip",
             flatshading=False,
+            lighting=dict(ambient=0.45, diffuse=0.85, specular=0.35,
+                            roughness=0.55, fresnel=0.15),
+            lightposition=dict(x=2000, y=2500, z=2500),
         ))
         block_trace_indices.append(len(fig.data) - 1)
 
@@ -831,6 +868,9 @@ def build_geometry_with_mode_shape(
         showscale=False, opacity=1.0,
         name=name, showlegend=False, hoverinfo="skip",
         flatshading=False,
+        lighting=dict(ambient=0.5, diffuse=0.9, specular=0.5,
+                        roughness=0.4, fresnel=0.2),
+        lightposition=dict(x=2000, y=2500, z=2500),
     ))
     shaft_trace_idx = len(fig.data) - 1
 
