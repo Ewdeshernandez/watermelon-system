@@ -604,13 +604,12 @@ with tab_setup:
         if geom.blocks:
             import pandas as pd
             df_b = pd.DataFrame([
-                {"Nombre": b.name, "Forma": b.shape,
+                {"Nombre": b.name, "Forma": b.shape, "Capa": b.kind,
                  "x_start": b.x_start, "x_end": b.x_end,
                  "R / hw,hh": (
                      f"{b.radius:.0f}" if b.shape == "cylinder"
                      else f"{b.half_width:.0f}, {b.half_height:.0f}"
-                 ),
-                 "Color": b.color}
+                 )}
                 for b in geom.blocks
             ])
             st.dataframe(df_b, hide_index=True, use_container_width=True)
@@ -670,6 +669,18 @@ with tab_setup:
                                                 key="geom_b_color")
                     _op = st.slider("Opacidad", 0.1, 1.0, float(_b_default.opacity),
                                       0.05, key="geom_b_op")
+                    _kind_opts = ["casing", "shaft", "coupling"]
+                    _kind = st.selectbox(
+                        "Capa de deformación",
+                        _kind_opts,
+                        index=_kind_opts.index(
+                            _b_default.kind if _b_default.kind in _kind_opts
+                            else "casing"
+                        ),
+                        key="geom_b_kind",
+                        help=("casing: deforma con accels · shaft: deforma "
+                              "con proxies · coupling: estático o interpolado"),
+                    )
 
                 if st.button("✓ Aplicar al bloque", key="geom_b_apply",
                                 use_container_width=True):
@@ -677,7 +688,7 @@ with tab_setup:
                         id=_b_default.id, name=_nm, shape=_shape,
                         x_start=_x0, x_end=_x1,
                         radius=_r, half_width=_hw, half_height=_hh,
-                        color=_color, opacity=_op,
+                        color=_color, opacity=_op, kind=_kind,
                     )
                     if _action_b == "Editar existente":
                         geom.blocks[_idx_b] = new_b
@@ -691,6 +702,7 @@ with tab_setup:
             import pandas as pd
             df_s = pd.DataFrame([
                 {"Nombre": s.name, "Tipo": s.sensor_type,
+                 "Mounting": s.effective_mounting(),
                  "x": s.x, "y": s.y, "z": s.z, "DOF": s.dof}
                 for s in geom.sensors
             ])
@@ -746,12 +758,25 @@ with tab_setup:
                                             key="geom_s_y")
                     _sz = st.number_input("z", value=float(_s_default.z), step=10.0,
                                             key="geom_s_z")
+                    _mnt_opts = ["(auto)", "casing", "shaft_proximity"]
+                    _cur_mnt = _s_default.mounting if _s_default.mounting in _mnt_opts else "(auto)"
+                    _mnt_sel = st.selectbox(
+                        "Mounting (qué mide)",
+                        _mnt_opts,
+                        index=_mnt_opts.index(_cur_mnt),
+                        key="geom_s_mounting",
+                        help=("Auto = inferido del tipo (accel/vel → casing, "
+                              "proximity → shaft_proximity). Override manual si "
+                              "tienes un caso especial."),
+                    )
+                    _mnt_final = "" if _mnt_sel == "(auto)" else _mnt_sel
 
                 if st.button("✓ Aplicar al sensor", key="geom_s_apply",
                                 use_container_width=True):
                     new_s = GeometrySensor(
                         id=_s_default.id, name=_snm, sensor_type=_styp,
                         x=_sx, y=_sy, z=_sz, dof=_sdof,
+                        mounting=_mnt_final,
                     )
                     if _action_s == "Editar existente":
                         geom.sensors[_idx_s] = new_s
