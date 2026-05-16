@@ -1095,36 +1095,28 @@ def build_geometry_with_mode_shape(
 
 
 # ---------------------------------------------------------------------
-# Export GIF animado con header KPI integrado (para enviar a cliente)
+# Export animado con header KPI integrado (para enviar a cliente)
+# Soporta GIF (universal) y MP4 H.264 (mejor calidad/peso, profesional)
 # ---------------------------------------------------------------------
 
-def export_mode_shape_gif(
+def _render_mode_shape_frames(
     geom: "ModalGeometry",
     mode_shape: Any,
     channel_names: List[str],
     mode_number: int,
     freq_hz: float,
     damping_pct: float,
-    running_rpm: float = 3600.0,
-    classification: str = "natural",
-    mpc_pct: float = 0.0,
-    n_frames: int = 36,
-    frame_duration_ms: int = 280,
-    width_px: int = 1280,
-    height_px: int = 720,
-    colormap: str = "RdBu_r",
-    show_ghost: bool = True,
-    asset_name: str = "Activo",
-) -> bytes:
-    """
-    Renderiza un GIF animado del mode shape con header KPI integrado.
-
-    Cada frame: header KPI (banner navy con Hz/CPM/zeta/MPC/clase) +
-    plot 3D del mesh deformado a phase=theta. Loop completo 0..360 grados.
-
-    Returns: bytes del GIF listo para st.download_button.
-    Requiere kaleido (PNG render) + Pillow (composicion + GIF assembly).
-    """
+    running_rpm: float,
+    classification: str,
+    mpc_pct: float,
+    n_frames: int,
+    width_px: int,
+    height_px: int,
+    colormap: str,
+    show_ghost: bool,
+    asset_name: str,
+) -> List[Any]:
+    """Helper compartido: genera los frames PIL.Image con header KPI."""
     import io
     import math as _math
     import plotly.io as pio
@@ -1218,10 +1210,127 @@ def export_mode_shape_gif(
         canvas.paste(plot_img, (0, header_h))
         frames.append(canvas)
 
-    # Ensamblar GIF
+    return frames
+
+
+# ---------------------------------------------------------------------
+# Export GIF (universal, soporta WhatsApp/email/cualquier visor)
+# ---------------------------------------------------------------------
+
+def export_mode_shape_gif(
+    geom: "ModalGeometry",
+    mode_shape: Any,
+    channel_names: List[str],
+    mode_number: int,
+    freq_hz: float,
+    damping_pct: float,
+    running_rpm: float = 3600.0,
+    classification: str = "natural",
+    mpc_pct: float = 0.0,
+    n_frames: int = 36,
+    frame_duration_ms: int = 280,
+    width_px: int = 1280,
+    height_px: int = 720,
+    colormap: str = "RdBu_r",
+    show_ghost: bool = True,
+    asset_name: str = "Activo",
+) -> bytes:
+    """Renderiza GIF animado del mode shape con header KPI integrado."""
+    import io
+    frames = _render_mode_shape_frames(
+        geom=geom, mode_shape=mode_shape, channel_names=channel_names,
+        mode_number=mode_number, freq_hz=freq_hz, damping_pct=damping_pct,
+        running_rpm=running_rpm, classification=classification,
+        mpc_pct=mpc_pct, n_frames=n_frames,
+        width_px=width_px, height_px=height_px, colormap=colormap,
+        show_ghost=show_ghost, asset_name=asset_name,
+    )
     buf = io.BytesIO()
     frames[0].save(
         buf, format="GIF", save_all=True, append_images=frames[1:],
         duration=frame_duration_ms, loop=0, optimize=False,
     )
     return buf.getvalue()
+
+
+# ---------------------------------------------------------------------
+# Export MP4 H.264 (profesional, mejor calidad/peso, ideal cliente)
+# ---------------------------------------------------------------------
+
+def export_mode_shape_mp4(
+    geom: "ModalGeometry",
+    mode_shape: Any,
+    channel_names: List[str],
+    mode_number: int,
+    freq_hz: float,
+    damping_pct: float,
+    running_rpm: float = 3600.0,
+    classification: str = "natural",
+    mpc_pct: float = 0.0,
+    n_frames: int = 48,
+    fps: int = 12,
+    width_px: int = 1280,
+    height_px: int = 720,
+    colormap: str = "RdBu_r",
+    show_ghost: bool = True,
+    asset_name: str = "Activo",
+    quality: int = 8,
+) -> bytes:
+    """Renderiza MP4 H.264 del mode shape con header KPI integrado.
+
+    Usa imageio + imageio-ffmpeg (binarios ffmpeg auto-descargados al install).
+    H.264 yuv420p para maxima compatibilidad (WhatsApp, iPhone, Android, web).
+
+    Args:
+        fps: frames por segundo (12 = ciclo de 4 segundos con 48 frames)
+        quality: 0-10, mayor=mejor calidad y mas peso (8 = optimo cliente)
+
+    Returns: bytes del MP4 listo para st.download_button con mime=video/mp4.
+    """
+    import io
+    import tempfile
+    import os
+    import numpy as np
+    try:
+        import imageio.v2 as imageio  # type: ignore[import-untyped]
+    except ImportError:
+        import imageio  # type: ignore[import-untyped]
+
+    frames = _render_mode_shape_frames(
+        geom=geom, mode_shape=mode_shape, channel_names=channel_names,
+        mode_number=mode_number, freq_hz=freq_hz, damping_pct=damping_pct,
+        running_rpm=running_rpm, classification=classification,
+        mpc_pct=mpc_pct, n_frames=n_frames,
+        width_px=width_px, height_px=height_px, colormap=colormap,
+        show_ghost=show_ghost, asset_name=asset_name,
+    )
+
+    # Loop suave: agregamos los frames de nuevo invertidos para evitar
+    # el "salto" al volver al frame 0 (estilo Artemis MP4 ping-pong)
+    np_frames = [np.array(f) for f in frames]
+    # Aseguramos dimensiones pares (H.264 requiere alturas y anchos pares)
+    h, w = np_frames[0].shape[:2]
+    if h % 2 or w % 2:
+        new_h = h - (h % 2); new_w = w - (w % 2)
+        np_frames = [f[:new_h, :new_w] for f in np_frames]
+
+    # Escribir MP4 a tempfile (ffmpeg necesita path, no stream)
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tf:
+        tmp_path = tf.name
+    try:
+        imageio.mimwrite(
+            tmp_path, np_frames,
+            fps=fps,
+            codec="libx264",
+            quality=quality,
+            macro_block_size=1,    # evita warnings de divisibilidad
+            pixelformat="yuv420p", # maxima compatibilidad
+        )
+        with open(tmp_path, "rb") as f:
+            data = f.read()
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+    return data

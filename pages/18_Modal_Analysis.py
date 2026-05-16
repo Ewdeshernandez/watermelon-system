@@ -2431,37 +2431,81 @@ with tab_3d:
                                           "displayModeBar": True,
                                           "displaylogo": False})
 
-                # ===== Botón Descargar GIF con header KPI integrado =====
-                _gif_c1, _gif_c2 = st.columns([1, 3])
-                with _gif_c1:
+                # ===== Botones Descargar MP4 / GIF con header KPI integrado =====
+                # Helper: resolver nombre del activo de forma defensiva
+                def _resolve_asset_name():
+                    _adhoc_safe = st.session_state.get("modal_adhoc_meta")
+                    if _adhoc_safe and isinstance(_adhoc_safe, dict):
+                        return _adhoc_safe.get("equipment_name", "Activo ad-hoc")
+                    if _inst_for_3d is not None and hasattr(_inst_for_3d, "display_name"):
+                        return _inst_for_3d.display_name
+                    return (_geom_session.name if _geom_session
+                            else "Watermelon Modal")
+
+                _exp_c1, _exp_c2, _exp_c3 = st.columns([1.2, 1.2, 2.6])
+                with _exp_c1:
+                    _gen_mp4 = st.button(
+                        "🎥 Generar Video MP4",
+                        key="modeshape_gen_mp4",
+                        use_container_width=True,
+                        type="primary",
+                        help="MP4 H.264 (mejor calidad, ~2-5 MB, compatible "
+                             "WhatsApp/iPhone/Android). Render ~30 s.",
+                    )
+                with _exp_c2:
                     _gen_gif = st.button(
-                        "🎬 Generar GIF para cliente",
+                        "🖼 Generar GIF",
                         key="modeshape_gen_gif",
                         use_container_width=True,
-                        help="Renderiza un GIF animado del modo actual con "
-                             "el banner KPI integrado (Hz, CPM, ζ, MPC, clase). "
-                             "Listo para enviar por WhatsApp o email.",
+                        help="GIF animado (alternativa universal, ~5-10 MB). "
+                             "Render ~25 s.",
                     )
+
+                # ---- MP4 ----
+                if _gen_mp4:
+                    with st.spinner("Renderizando 48 frames + encoding H.264… "
+                                      "(~30 s, depende del tamaño del mesh)"):
+                        from core.modal.geometry_3d import export_mode_shape_mp4
+                        try:
+                            _asset_lbl = _resolve_asset_name()
+                            _mp4_bytes = export_mode_shape_mp4(
+                                geom=_geom_session,
+                                mode_shape=mode_sel.mode_shape,
+                                channel_names=fdd.channel_names,
+                                mode_number=mode_sel.mode_number,
+                                freq_hz=_fn_hz,
+                                damping_pct=_zeta,
+                                running_rpm=_running_rpm_for_order,
+                                classification=_cls,
+                                mpc_pct=_mpc_pct,
+                                n_frames=48, fps=12,
+                                width_px=1280, height_px=720,
+                                colormap=_cmap,
+                                show_ghost=_show_ghost,
+                                asset_name=_asset_lbl,
+                                quality=8,
+                            )
+                            st.session_state["_modeshape_mp4"] = _mp4_bytes
+                            st.session_state["_modeshape_mp4_filename"] = (
+                                f"modeshape_M{mode_sel.mode_number}_"
+                                f"{_fn_hz:.1f}Hz.mp4"
+                            )
+                            # Limpiar gif para que el download_button sea el nuevo
+                            st.session_state.pop("_modeshape_gif", None)
+                        except Exception as exc:  # noqa: BLE001
+                            st.error(
+                                f"No se pudo generar el MP4: {exc}. "
+                                "Verifica que imageio + imageio-ffmpeg "
+                                "+ kaleido + Pillow estén instalados."
+                            )
+
+                # ---- GIF ----
                 if _gen_gif:
                     with st.spinner("Renderizando 36 frames + ensamblando GIF… "
-                                      "(~25 s, depende del tamaño del mesh)"):
+                                      "(~25 s)"):
                         from core.modal.geometry_3d import export_mode_shape_gif
                         try:
-                            # Asset name: del template/instancia o ad-hoc
-                            # Defensive: el _adhoc_meta_for_3d puede no estar definido
-                            # si el button se evalua en una recarga parcial
-                            _adhoc_safe = st.session_state.get("modal_adhoc_meta")
-                            _inst_safe = _inst_for_3d
-                            if _adhoc_safe and isinstance(_adhoc_safe, dict):
-                                _asset_lbl = _adhoc_safe.get(
-                                    "equipment_name", "Activo ad-hoc"
-                                )
-                            elif _inst_safe is not None and hasattr(_inst_safe, "display_name"):
-                                _asset_lbl = _inst_safe.display_name
-                            else:
-                                _asset_lbl = (_geom_session.name
-                                                if _geom_session
-                                                else "Watermelon Modal")
+                            _asset_lbl = _resolve_asset_name()
                             _gif_bytes = export_mode_shape_gif(
                                 geom=_geom_session,
                                 mode_shape=mode_sel.mode_shape,
@@ -2484,24 +2528,33 @@ with tab_3d:
                                 f"modeshape_M{mode_sel.mode_number}_"
                                 f"{_fn_hz:.1f}Hz.gif"
                             )
+                            st.session_state.pop("_modeshape_mp4", None)
                         except Exception as exc:  # noqa: BLE001
                             st.error(
                                 f"No se pudo generar el GIF: {exc}. "
                                 "Verifica que kaleido + Pillow estén instalados."
                             )
 
-                if st.session_state.get("_modeshape_gif"):
-                    with _gif_c2:
+                # ---- Download buttons (muestra el que esté listo) ----
+                with _exp_c3:
+                    if st.session_state.get("_modeshape_mp4"):
+                        st.download_button(
+                            "⬇ Descargar Video MP4 generado",
+                            data=st.session_state["_modeshape_mp4"],
+                            file_name=st.session_state.get(
+                                "_modeshape_mp4_filename", "modeshape.mp4"),
+                            mime="video/mp4",
+                            use_container_width=True,
+                            type="primary",
+                        )
+                    elif st.session_state.get("_modeshape_gif"):
                         st.download_button(
                             "⬇ Descargar GIF generado",
                             data=st.session_state["_modeshape_gif"],
                             file_name=st.session_state.get(
-                                "_modeshape_gif_filename",
-                                "modeshape.gif",
-                            ),
+                                "_modeshape_gif_filename", "modeshape.gif"),
                             mime="image/gif",
                             use_container_width=True,
-                            type="primary",
                         )
 
                 # Diagnóstico de matching

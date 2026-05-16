@@ -22,6 +22,11 @@ supabase>=2.0.0
 streamlit-image-coordinates>=0.1.7
 # Pillow para overlay de markers + texto sobre el schematic_png
 Pillow>=10.0.0
+# imageio + ffmpeg bundleado para exportar MP4 H.264 desde el modulo Modal
+# (export de mode shapes animados para enviar a cliente via WhatsApp/email)
+# imageio-ffmpeg trae los binarios ffmpeg auto-descargados al install
+imageio>=2.31.0
+imageio-ffmpeg>=0.4.9
 # Ciclo 23.151: npTDMS para módulo Modal Analysis — lee archivos .tdms
 # nativos del NI-9234 capturados via companion script (scripts/ni_companion/).
 # Open-source MIT license, mantenido activamente. NO requiere driver NI
