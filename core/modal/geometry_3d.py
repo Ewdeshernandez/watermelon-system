@@ -526,11 +526,11 @@ def _add_axis_triad(fig: Any, geom: "ModalGeometry") -> None:
     """
     import plotly.graph_objects as go
     span = max(geom.shaft_end - geom.shaft_start, 100.0)
-    triad_size = span * 0.10
-    # Posicion en esquina inferior-izquierda del scene
-    cx = geom.shaft_start - span * 0.12
-    cy = -span * 0.18
-    cz = -span * 0.18
+    triad_size = span * 0.12
+    # Posicion claramente FUERA del bounding box (no se solapa con bloques)
+    cx = geom.shaft_start - span * 0.30
+    cy = -span * 0.50
+    cz = -span * 0.35
     # X axis (rojo)
     fig.add_trace(go.Scatter3d(
         x=[cx, cx + triad_size], y=[cy, cy], z=[cz, cz],
@@ -1037,6 +1037,10 @@ def build_geometry_with_mode_shape(
             camera=dict(eye=dict(x=0.0, y=2.2, z=0.6),
                           up=dict(x=0, y=0, z=1)),
             bgcolor="#f8fafc",
+            # uirevision constante: Plotly preserva la posición de cámara
+            # que el usuario rotó manualmente, NO la resetea cuando se
+            # ejecutan los frames de la animación.
+            uirevision="modal-scene-locked",
         ),
         title=dict(text=f"{mode_label}<br><sub>{subtitle}</sub>",
                    font=dict(size=14, color="#0F1E3D")),
@@ -1044,6 +1048,8 @@ def build_geometry_with_mode_shape(
         height=600 if animate else 560,
         paper_bgcolor="white",
         legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.05),
+        # uirevision top-level también, para que selección y zoom persistan
+        uirevision="modal-fig-locked",
     )
 
     # -------------------------------------------------------------------
