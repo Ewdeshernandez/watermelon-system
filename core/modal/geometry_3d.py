@@ -366,14 +366,26 @@ def _cylinder_mesh(x0: float, x1: float, radius: float,
 
 def _box_mesh(x0: float, x1: float, hw: float,
                hh: float) -> Tuple[list, list, list, list, list, list]:
-    """Caja rectangular alineada a X (Y=hw, Z=hh)."""
+    """Caja rectangular alineada a X (ancho Y=±hw, alto Z=±hh).
+
+    8 vertices, 12 triangulos (2 por cara, 6 caras).
+    Vertice indexing:
+        0=(x0,-hw,-hh)  1=(x1,-hw,-hh)  2=(x1,+hw,-hh)  3=(x0,+hw,-hh)
+        4=(x0,-hw,+hh)  5=(x1,-hw,+hh)  6=(x1,+hw,+hh)  7=(x0,+hw,+hh)
+    """
     xs = [x0, x1, x1, x0, x0, x1, x1, x0]
     ys = [-hw, -hw, hw, hw, -hw, -hw, hw, hw]
     zs = [-hh, -hh, -hh, -hh, hh, hh, hh, hh]
-    # 12 triangles (2 per face)
-    i = [0, 0, 1, 1, 4, 4, 5, 5, 0, 0, 2, 2]
-    j = [1, 2, 2, 5, 5, 7, 6, 1, 4, 7, 3, 7]
-    k = [2, 3, 5, 6, 6, 4, 7, 0, 7, 4, 7, 6]
+    # 6 caras × 2 triangulos = 12 triangulos
+    # Bottom z=-hh: (0,1,2), (0,2,3)
+    # Top    z=+hh: (4,6,5), (4,7,6)
+    # Front  x=x1:  (1,5,6), (1,6,2)
+    # Back   x=x0:  (0,3,7), (0,7,4)
+    # Left   y=-hw: (0,4,5), (0,5,1)
+    # Right  y=+hw: (3,2,6), (3,6,7)
+    i = [0, 0, 4, 4, 1, 1, 0, 0, 0, 0, 3, 3]
+    j = [1, 2, 6, 7, 5, 6, 3, 7, 4, 5, 2, 6]
+    k = [2, 3, 5, 6, 6, 2, 7, 4, 5, 1, 6, 7]
     return xs, ys, zs, i, j, k
 
 
@@ -577,7 +589,8 @@ def build_geometry_figure(geom: ModalGeometry,
             zaxis=dict(title=f"Z ({geom.units})", showgrid=True,
                         gridcolor="#e5e7eb", zerolinecolor="#cbd5e1"),
             aspectmode="data",
-            camera=dict(eye=dict(x=1.4, y=1.2, z=0.9)),
+            camera=dict(eye=dict(x=0.0, y=2.2, z=0.6),
+                          up=dict(x=0, y=0, z=1)),
             bgcolor="#f8fafc",
         ),
         title=dict(text=geom.name, font=dict(size=14, color="#0F1E3D")),
@@ -692,8 +705,9 @@ def build_geometry_with_mode_shape(
                 max_disp = max(max_disp, abs(_eval_spline(mnt, axis, float(x))))
 
     span = max(geom.shaft_end - geom.shaft_start, 100.0)
-    # Deformacion visual: hasta 8% del span del shaft (factor de escala estetica)
-    deform_scale = (span * 0.08) / max_disp if max_disp > 1e-9 else 0.0
+    # Deformacion visual: hasta 18% del span — exageracion estetica para que
+    # la flexion sea claramente visible (Artemis usa ~20% por default)
+    deform_scale = (span * 0.18) / max_disp if max_disp > 1e-9 else 0.0
 
     def _kind_to_mounting(kind: str) -> str:
         """Mapea kind del bloque a mounting de sensores que lo deforman."""
@@ -754,7 +768,7 @@ def build_geometry_with_mode_shape(
         new_x, new_y, new_z = _displace_mesh(xs0, ys0, zs0, kind, 0.0)
         fig.add_trace(go.Mesh3d(
             x=new_x, y=new_y, z=new_z, i=ii, j=jj, k=kk,
-            color=color, opacity=max(opacity * 0.6, 0.15),
+            color=color, opacity=max(opacity * 0.85, 0.40),
             name=name, showlegend=False, hoverinfo="skip",
             flatshading=True,
         ))
@@ -781,7 +795,8 @@ def build_geometry_with_mode_shape(
                               "los sensores en Tab Setup → Geometría 3D</sub>",
                        font=dict(size=14, color="#dc2626")),
             scene=dict(aspectmode="data",
-                         camera=dict(eye=dict(x=1.4, y=1.2, z=0.9)),
+                         camera=dict(eye=dict(x=0.0, y=2.2, z=0.6),
+                          up=dict(x=0, y=0, z=1)),
                          bgcolor="#f8fafc"),
             margin=dict(l=0, r=0, t=70, b=0), height=560,
             paper_bgcolor="white",
@@ -789,7 +804,8 @@ def build_geometry_with_mode_shape(
         return fig
 
     max_amp = max(matched_amps) or 1.0
-    base_arrow = span * 0.08
+    # Flechas mas chicas (3%) para no opacar los bloques deformados
+    base_arrow = span * 0.03
 
     # -------------------------------------------------------------------
     # Paso 5: Flechas (cones) — coloreadas verde/rojo segun fase instantanea
@@ -877,7 +893,8 @@ def build_geometry_with_mode_shape(
             zaxis=dict(title=f"Z ({geom.units})", showgrid=True,
                         gridcolor="#e5e7eb", zerolinecolor="#cbd5e1"),
             aspectmode="data",
-            camera=dict(eye=dict(x=1.4, y=1.2, z=0.9)),
+            camera=dict(eye=dict(x=0.0, y=2.2, z=0.6),
+                          up=dict(x=0, y=0, z=1)),
             bgcolor="#f8fafc",
         ),
         title=dict(text=f"{mode_label}<br><sub>{subtitle}</sub>",
@@ -904,7 +921,7 @@ def build_geometry_with_mode_shape(
                 new_x, new_y, new_z = _displace_mesh(xs0, ys0, zs0, kind, theta)
                 frame_data.append(go.Mesh3d(
                     x=new_x, y=new_y, z=new_z, i=ii, j=jj, k=kk,
-                    color=color, opacity=max(opacity * 0.6, 0.15),
+                    color=color, opacity=max(opacity * 0.85, 0.40),
                     name=name, showlegend=False, hoverinfo="skip",
                     flatshading=True,
                 ))
