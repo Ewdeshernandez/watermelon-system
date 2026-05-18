@@ -519,27 +519,26 @@ def _build_mode_spline_by_mounting(
 
 
 def _add_axis_triad(fig: Any, geom: "ModalGeometry") -> None:
-    """Agrega un pequeño triad XYZ en la esquina del scene 3D.
+    """Agrega un triad XYZ MUY lejos del modelo en una esquina clara.
 
-    El offset se calcula sobre el radio max (no el span del shaft) para
-    NO distorsionar el aspect ratio del modelo. Aspectmode=data hace
-    autofit del bounding box: si el triad está muy lejos el modelo se
-    achica. Mantenemos un offset moderado relativo al radio transversal.
+    Aspectmode=data hace autofit del bounding box: si el triad esta muy
+    lejos el modelo se ve mas pequeno PERO el triad queda visualmente
+    separado en una esquina del viewport, que es lo que queremos.
+    Trade-off intencional: claridad visual > modelo grande.
     """
     import plotly.graph_objects as go
-    # Radio max transversal del modelo
     max_radial = max(
         [b.radius for b in geom.blocks if b.shape == "cylinder"]
         + [max(b.half_width, b.half_height) for b in geom.blocks if b.shape == "box"]
         + [geom.shaft_radius, 100.0]
     )
-    # Triad pequeno, escalado al radio max
-    triad_size = max_radial * 0.45
-    # Offset proporcional al radio (NO al span) — afuera del modelo en Y y Z
-    # pero sin afectar el aspect ratio extendido del shaft
-    cx = geom.shaft_start - max_radial * 0.5
-    cy = -max_radial * 1.6   # claramente fuera del bounding box transversal
-    cz = -max_radial * 1.3
+    triad_size = max_radial * 0.40
+    # Posicion MUY lejos del modelo — esquina inferior-izquierda-anterior.
+    # Para TES1 (max_radial=380): cx=-1140, cy=-1520, cz=-1140.
+    # El modelo queda en el centro del view, el triad en la esquina, claros.
+    cx = geom.shaft_start - max_radial * 3.0
+    cy = -max_radial * 4.0
+    cz = -max_radial * 3.0
     # X axis (rojo)
     fig.add_trace(go.Scatter3d(
         x=[cx, cx + triad_size], y=[cy, cy], z=[cz, cz],
@@ -692,6 +691,7 @@ def build_geometry_with_mode_shape(
     show_arrows: bool = False,
     show_ghost: bool = True,
     colormap: str = "RdBu_r",
+    apply_default_camera: bool = True,
 ):
     """
     Construye una figura 3D con la geometria del activo + flechas de mode shape
@@ -1036,22 +1036,26 @@ def build_geometry_with_mode_shape(
     # Agrega triad XYZ discreto en esquina (estilo Artemis Modal)
     _add_axis_triad(fig, geom)
 
-    # uirevision en scene + layout top-level (NO en xaxis/yaxis/zaxis
-    # individuales — esa prop no existe en scene 3D axes y crashea).
-    # Plotly compara: si uirevision NO cambia entre updates, preserva
-    # la posición de cámara/zoom/pan que el usuario movió manualmente.
+    # SOLO aplicar camera default si es la primera carga.
+    # Si apply_default_camera=False, Plotly conserva la posicion que el
+    # usuario haya rotado manualmente — fix real al "camera reset al Play".
+    scene_dict: Dict[str, Any] = dict(
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        zaxis=dict(visible=False),
+        aspectmode="data",
+        dragmode="turntable",
+        bgcolor="#f8fafc",
+        uirevision="modal-scene-locked",
+    )
+    if apply_default_camera:
+        scene_dict["camera"] = dict(
+            eye=dict(x=0.0, y=2.2, z=0.6),
+            up=dict(x=0, y=0, z=1),
+        )
+
     fig.update_layout(
-        scene=dict(
-            xaxis=dict(visible=False),
-            yaxis=dict(visible=False),
-            zaxis=dict(visible=False),
-            aspectmode="data",
-            dragmode="turntable",
-            camera=dict(eye=dict(x=0.0, y=2.2, z=0.6),
-                          up=dict(x=0, y=0, z=1)),
-            bgcolor="#f8fafc",
-            uirevision="modal-scene-locked",
-        ),
+        scene=scene_dict,
         title=dict(text=f"{mode_label}<br><sub>{subtitle}</sub>",
                    font=dict(size=14, color="#0F1E3D")),
         margin=dict(l=0, r=0, t=70, b=0),
