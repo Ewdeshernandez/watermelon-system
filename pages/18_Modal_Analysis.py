@@ -2412,6 +2412,14 @@ with tab_3d:
                     unsafe_allow_html=True,
                 )
 
+                # Cámara default SOLO la primera vez en esta sesión.
+                # Después, NO se pasa camera config → Plotly conserva
+                # la posición que el usuario rotó manualmente.
+                _cam_key = f"_modal_3d_cam_applied_{mode_sel.mode_number}"
+                _apply_cam = not st.session_state.get(_cam_key, False)
+                if _apply_cam:
+                    st.session_state[_cam_key] = True
+
                 fig_3d = build_geometry_with_mode_shape(
                     geom=_geom_session,
                     mode_shape=mode_sel.mode_shape,
@@ -2425,6 +2433,7 @@ with tab_3d:
                     show_arrows=_show_arrows,
                     show_ghost=_show_ghost,
                     colormap=_cmap,
+                    apply_default_camera=_apply_cam,
                 )
                 # Key estable: Streamlit no recrea el chart entre reruns,
                 # asi uirevision puede preservar la posicion de camara que
