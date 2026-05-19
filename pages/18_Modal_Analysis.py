@@ -3722,25 +3722,149 @@ with tab_reports:
                         st.code(_tb.format_exc(), language="text")
 
         # =================================================================
-        # SECCION C — Análisis IA (pago, como otros módulos)
+        # SECCION C — Análisis IA interpretativo (paid, via Anthropic)
         # =================================================================
         st.divider()
         st.markdown("### 🤖 C · Análisis IA interpretativo")
         st.caption(
-            "Narrativa interpretativa generada por LLM con contexto modal. "
-            "Feature pago — usa la misma cuota AI del cliente que aplica "
-            "en Spectrum/SCL/Polar/Waveform."
+            "Narrativa interpretativa generada por Claude con contexto modal "
+            "completo. Misma cuota AI que usan Spectrum/SCL/Polar/Waveform. "
+            "Caching local 30 días para evitar costos repetidos."
         )
-        modal_status_banner(
-            title="Próximamente en Fase 4 (v3.31.198)",
-            detail=(
-                "Integración con el módulo AI existente. El cliente con "
-                "subscripción AI activa podrá generar narrativa de los "
-                "modos identificados, recomendaciones de operación, y "
-                "comparación con literatura científica."
-            ),
-            severity="info",
+
+        from core.ai_diagnostic import (
+            generate_ai_diagnostic,
+            is_ai_available,
         )
+
+        if not _has_oma:
+            modal_status_banner(
+                title="IA requiere modos OMA",
+                detail="Corre el FDD en Tab OMA antes de generar el análisis IA.",
+                severity="info",
+            )
+        elif not is_ai_available():
+            modal_status_banner(
+                title="IA no configurada",
+                detail=(
+                    "El módulo AI requiere `[anthropic] api_key` en "
+                    "Streamlit secrets + paquete `anthropic` instalado. "
+                    "Contacta al admin para habilitar."
+                ),
+                severity="warning",
+            )
+        else:
+            _ac_c1, _ac_c2 = st.columns([2, 1])
+            with _ac_c1:
+                _ai_operator_notes = st.text_area(
+                    "Notas del operador (contexto opcional)",
+                    value="", height=100,
+                    key="_modal_ai_operator_notes",
+                    help=("Contexto que la IA debe considerar: condiciones "
+                          "de operación, eventos recientes, sospechas, etc. "
+                          "Mejora la calidad del análisis."),
+                )
+            with _ac_c2:
+                _ai_use_cache = st.toggle(
+                    "Usar caché si existe",
+                    value=True, key="_modal_ai_use_cache",
+                    help="30 días TTL · evita costos repetidos para misma data.",
+                )
+                _ai_running = st.number_input(
+                    "Running rpm",
+                    value=int(st.session_state.get(
+                        "_modal_auto_running_rpm", 3600)),
+                    min_value=100, max_value=20000, step=100,
+                    key="_modal_ai_running_rpm",
+                )
+
+            if st.button(
+                "🤖 Generar análisis IA modal",
+                key="rep_gen_ai",
+                type="primary",
+                use_container_width=True,
+            ):
+                with st.spinner("Llamando a Claude · puede tomar 15-30s…"):
+                    from core.modal.modal_report import (
+                        build_modal_ai_payload,
+                    )
+                    _asset_lbl_c = (
+                        st.session_state.get("modal_adhoc_meta",
+                                              {}).get("equipment_name",
+                                                       "Activo ad-hoc")
+                        if st.session_state.get("modal_adhoc_meta")
+                        else st.session_state.get("modal_inst", "Activo")
+                    )
+                    _payload = build_modal_ai_payload(
+                        fdd_result=_fdd_for_rep,
+                        asset_name=str(_asset_lbl_c),
+                        method="OMA",
+                        running_rpm=float(_ai_running),
+                        operator_notes=_ai_operator_notes or "",
+                    )
+                    _ai_result = generate_ai_diagnostic(
+                        payload=_payload,
+                        module_type="modal",
+                        use_cache=_ai_use_cache,
+                    )
+                    st.session_state["_modal_ai_result"] = _ai_result
+
+            # Mostrar resultado IA si existe
+            _ai_res = st.session_state.get("_modal_ai_result")
+            if _ai_res:
+                if not _ai_res.get("ok"):
+                    modal_status_banner(
+                        title=f"Error IA: {_ai_res.get('error', 'unknown')}",
+                        detail=_ai_res.get("markdown", ""),
+                        severity="fail",
+                    )
+                else:
+                    _ai_kc1, _ai_kc2, _ai_kc3 = st.columns(3)
+                    _ai_kc1.metric(
+                        "Modelo", _ai_res.get("model", "n/a"),
+                    )
+                    _ai_kc2.metric(
+                        "Tokens in/out",
+                        (f"{_ai_res.get('input_tokens', 0):,} / "
+                          f"{_ai_res.get('output_tokens', 0):,}"),
+                    )
+                    _ai_kc3.metric(
+                        "Cache hit",
+                        "✓ Sí" if _ai_res.get("cached") else "✗ No (nuevo)",
+                    )
+                    st.divider()
+                    st.markdown(_ai_res.get("markdown", ""))
+                    st.divider()
+                    if st.button(
+                        "📄 Inyectar análisis IA al reporte",
+                        key="rep_send_ai",
+                        type="primary",
+                        use_container_width=True,
+                    ):
+                        from core.modal.modal_report import (
+                            build_ai_diagnostic_report_item,
+                            append_modal_items_to_report,
+                        )
+                        try:
+                            _ai_item = build_ai_diagnostic_report_item(
+                                ai_result=_ai_res,
+                                asset_name=str(_asset_lbl_c)
+                                            if "_asset_lbl_c" in dir()
+                                            else "Activo",
+                                method="OMA",
+                            )
+                            _n_ai = append_modal_items_to_report([_ai_item])
+                            st.success(
+                                f"✓ Análisis IA agregado al reporte como "
+                                "1 figura PNG (header navy + texto en notes)."
+                            )
+                        except Exception as _exc:  # noqa: BLE001
+                            import traceback as _tb
+                            st.error(
+                                f"Error: `{type(_exc).__name__}: {_exc}`"
+                            )
+                            with st.expander("Detalle técnico"):
+                                st.code(_tb.format_exc(), language="text")
 
 
 # =====================================================================
