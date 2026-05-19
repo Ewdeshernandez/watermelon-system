@@ -62,6 +62,37 @@ st.set_page_config(
     layout="wide",
 )
 
+# =====================================================================
+# v3.31.200 — Capturar traceback real en producción
+# =====================================================================
+# Cuando Streamlit Cloud kill-ea el proceso por OOM, no hay traceback
+# en logs (solo "Oh no"). Pero si la excepción es Python pura, este
+# hook la imprime al stdout (visible en logs Streamlit Cloud) ANTES de
+# que Streamlit la atrape y muestre "Oh no". Así diagnosticamos el
+# próximo crash si no es OOM puro.
+# =====================================================================
+import sys as _sys
+import traceback as _tb
+import logging as _logging
+
+_logger = _logging.getLogger("watermelon.modal")
+_logger.setLevel(_logging.ERROR)
+
+def _modal_excepthook(exc_type, exc_value, exc_tb):
+    """Imprime traceback completo a stdout para Streamlit Cloud logs."""
+    print("=" * 80, flush=True)
+    print(f"[MODAL FATAL] {exc_type.__name__}: {exc_value}", flush=True)
+    print("=" * 80, flush=True)
+    _tb.print_exception(exc_type, exc_value, exc_tb)
+    print("=" * 80, flush=True)
+    # Delega al handler default de Streamlit para que muestre "Oh no" con el error
+    _sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+# Solo instalar una vez por sesión (Streamlit hace muchos reruns)
+if not getattr(_sys, "_watermelon_modal_excepthook_installed", False):
+    _sys.excepthook = _modal_excepthook
+    _sys._watermelon_modal_excepthook_installed = True
+
 require_login()
 render_user_menu()
 
