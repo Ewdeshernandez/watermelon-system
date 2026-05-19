@@ -693,6 +693,8 @@ def build_geometry_with_mode_shape(
     colormap: str = "RdBu_r",
     apply_default_camera: bool = True,
     phase_offset_rad: float = 0.0,
+    camera_eye: Optional[Dict[str, float]] = None,
+    camera_up: Optional[Dict[str, float]] = None,
 ):
     """
     Construye una figura 3D con la geometria del activo + flechas de mode shape
@@ -1041,33 +1043,30 @@ def build_geometry_with_mode_shape(
     # Agrega triad XYZ discreto en esquina (estilo Artemis Modal)
     _add_axis_triad(fig, geom)
 
-    # SOLO aplicar camera default si es la primera carga.
-    # Si apply_default_camera=False, Plotly conserva la posicion que el
-    # usuario haya rotado manualmente — fix real al "camera reset al Play".
-    scene_dict: Dict[str, Any] = dict(
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-        zaxis=dict(visible=False),
-        aspectmode="data",
-        dragmode="turntable",
-        bgcolor="#f8fafc",
-        uirevision="modal-scene-locked",
-    )
-    if apply_default_camera:
-        scene_dict["camera"] = dict(
-            eye=dict(x=0.0, y=2.2, z=0.6),
-            up=dict(x=0, y=0, z=1),
-        )
+    # Camera EXPLÍCITA en cada render usando los presets seleccionados.
+    # Si apply_default_camera=True usa la vista lateral. Sino usa el eye/up
+    # que el usuario haya seleccionado via preset buttons.
+    # Plotly redraw durante Play reaffirma esta camera → el video corre
+    # desde el plano elegido sin saltarse.
+    _eye = camera_eye if camera_eye is not None else dict(x=0.0, y=2.2, z=0.6)
+    _up = camera_up if camera_up is not None else dict(x=0, y=0, z=1)
 
     fig.update_layout(
-        scene=scene_dict,
+        scene=dict(
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+            zaxis=dict(visible=False),
+            aspectmode="data",
+            dragmode="turntable",
+            bgcolor="#f8fafc",
+            camera=dict(eye=_eye, up=_up),
+        ),
         title=dict(text=f"{mode_label}<br><sub>{subtitle}</sub>",
                    font=dict(size=14, color="#0F1E3D")),
         margin=dict(l=0, r=0, t=70, b=0),
         height=600 if animate else 560,
         paper_bgcolor="white",
         legend=dict(orientation="h", x=0.5, xanchor="center", y=-0.05),
-        uirevision="modal-fig-locked",
     )
 
     # -------------------------------------------------------------------
