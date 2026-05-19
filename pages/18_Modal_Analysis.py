@@ -2319,10 +2319,13 @@ with tab_3d:
                 # Controles de visualización
                 _ms_c1, _ms_c2, _ms_c3, _ms_c4 = st.columns([1, 1, 1, 1.5])
                 with _ms_c1:
+                    # v3.31.199 HOTFIX: animación OFF default — agrega 20
+                    # frames × N traces que pesan ~5x lo del plot estático
                     _animate_ms = st.toggle(
                         "🎞 Animar",
-                        value=True, key="modeshape_animate_toggle",
-                        help="Oscila el modo a lo largo del tiempo. Click ▶ Play en el plot.",
+                        value=False, key="modeshape_animate_toggle",
+                        help=("Genera N frames para Play. ⚠ Aumenta uso de "
+                              "memoria — actívalo solo cuando lo necesites."),
                     )
                 with _ms_c2:
                     _show_arrows = st.toggle(
@@ -2332,11 +2335,13 @@ with tab_3d:
                              "heatmap del mesh (estilo Artemis).",
                     )
                 with _ms_c3:
+                    # v3.31.199 HOTFIX: ghost OFF default — agrega 4 traces
+                    # extra pesados que duplican consumo de memoria del browser
                     _show_ghost = st.toggle(
                         "Ghost original",
-                        value=True, key="modeshape_ghost_toggle",
+                        value=False, key="modeshape_ghost_toggle",
                         help="Overlay semi-transparente del estado sin deformar "
-                             "para comparar.",
+                             "para comparar. ⚠ Aumenta uso de memoria.",
                     )
                 with _ms_c4:
                     _cmap = st.selectbox(
@@ -2487,6 +2492,9 @@ with tab_3d:
 
                 _selected = _PRESETS[st.session_state[_cam_preset_key]]
 
+                # v3.31.199 HOTFIX: reducidos a 20 frames (era 48) y ghost
+                # OFF por default para bajar consumo memoria browser.
+                # Si el usuario quiere mas detalle hace click en toggles.
                 fig_3d = build_geometry_with_mode_shape(
                     geom=_geom_session,
                     mode_shape=mode_sel.mode_shape,
@@ -2495,8 +2503,8 @@ with tab_3d:
                                   f"{mode_sel.natural_frequency_hz:.2f} Hz · "
                                   f"ζ = {mode_sel.damping_ratio_pct:.3f}%"),
                     animate=_animate_ms,
-                    n_frames=48,
-                    frame_duration_ms=250,
+                    n_frames=20,
+                    frame_duration_ms=200,
                     show_arrows=_show_arrows,
                     show_ghost=_show_ghost,
                     colormap=_cmap,
