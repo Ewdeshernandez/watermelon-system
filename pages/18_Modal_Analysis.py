@@ -2678,6 +2678,101 @@ with tab_3d:
                             use_container_width=True,
                         )
 
+                # ===== Botón Enviar a Reporte Watermelon =====
+                st.divider()
+                modal_section_header(
+                    title="Inyectar al Reporte Watermelon",
+                    subtitle=(
+                        "Genera snapshots PNG de todos los modos identificados + "
+                        "AutoMAC + tabla resumen y los agrega a tu reporte "
+                        "actual. Se renderizan al PDF estándar SIGA junto al "
+                        "resto de figuras."
+                    ),
+                    norm_ref="ISO 7626-6 §8 · Documentación modal",
+                )
+
+                _rep_c1, _rep_c2 = st.columns([2, 3])
+                with _rep_c1:
+                    _include_non_natural = st.toggle(
+                        "Incluir harmonic/spurious (avanzado)",
+                        value=False,
+                        key=f"modal_report_inc_non_nat_{mode_sel.mode_number}",
+                        help=(
+                            "Por default solo se inyectan modos naturales "
+                            "(physical modes del activo). Activar para "
+                            "incluir también las armónicas de velocidad "
+                            "(1×, 2×, ...) y modos espurios. Útil para "
+                            "auditoría o reportes técnicos avanzados."
+                        ),
+                    )
+                with _rep_c2:
+                    _natural_count = sum(
+                        1 for m in fdd.modes
+                        if getattr(m, "classification", "natural") == "natural"
+                    )
+                    _total_count = len(fdd.modes)
+                    _will_inject = (_total_count if _include_non_natural
+                                       else _natural_count)
+                    st.caption(
+                        f"Se inyectarán **{_will_inject}** modos × 3 plots "
+                        f"({_will_inject * 3} figuras de modos) + AutoMAC "
+                        f"heatmap + tabla resumen = "
+                        f"**{_will_inject * 3 + 2} items** al reporte."
+                    )
+
+                if st.button(
+                    "📄 Enviar todos los modos al Reporte",
+                    key=f"modal_send_report_{mode_sel.mode_number}",
+                    type="primary",
+                    use_container_width=True,
+                    help="El reporte queda guardado en tu sesión. Visualízalo "
+                         "y descarga el PDF desde la página Reports.",
+                ):
+                    from core.modal.modal_report import (
+                        build_modal_report_items,
+                        append_modal_items_to_report,
+                    )
+                    _rep_prog = st.progress(0.0, text="Generando snapshots…")
+
+                    def _rep_cb(idx, total, stage):
+                        _pct = idx / max(total, 1)
+                        _rep_prog.progress(
+                            min(_pct, 1.0),
+                            text=f"{stage} ({idx + 1}/{total})",
+                        )
+
+                    try:
+                        _asset_lbl_rep = _resolve_asset_name()
+                        _new_items = build_modal_report_items(
+                            fdd_result=fdd,
+                            geom=_geom_session,
+                            include_non_natural=_include_non_natural,
+                            asset_name=_asset_lbl_rep,
+                            method="OMA",
+                            running_rpm=_running_rpm_for_order,
+                            colormap=_cmap,
+                            camera_eye=_selected["eye"],
+                            camera_up=_selected["up"],
+                            progress_cb=_rep_cb,
+                        )
+                        _n_added = append_modal_items_to_report(_new_items)
+                        _rep_prog.empty()
+                        st.success(
+                            f"✓ **{_n_added} items** agregados al reporte. "
+                            "Ve a **Reports** (sidebar) → "
+                            "verás todas las figuras modales listadas para "
+                            "incluir en el PDF final."
+                        )
+                    except Exception as _exc:  # noqa: BLE001
+                        _rep_prog.empty()
+                        import traceback as _tb
+                        st.error(
+                            f"Error generando snapshots: "
+                            f"`{type(_exc).__name__}: {_exc}`"
+                        )
+                        with st.expander("Detalle técnico"):
+                            st.code(_tb.format_exc(), language="text")
+
                 # Diagnóstico de matching
                 _ch_set = {n.strip().upper() for n in fdd.channel_names}
                 _geom_set = {s.name.strip().upper() for s in _geom_session.sensors}
