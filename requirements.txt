@@ -1,6 +1,8 @@
 numpy
 pandas
-streamlit
+# Pin streamlit a la versión deployada en Cloud (1.57.0). Sin pin un
+# point bump silencioso puede cambiar comportamiento. Probado bueno.
+streamlit==1.57.0
 scipy
 # matplotlib es requerido por core/sensor_diagram.py (turbomachinery
 # silhouette + polar per plane) y por core/plot_export.py.
@@ -9,7 +11,12 @@ scipy
 # nunca pierda el diagrama del Sensor Map.
 matplotlib>=3.7.0
 plotly==6.1.1
-kaleido==1.0.0
+# kaleido v0.2.1 = último release con binario estático (~50 MB). Los 1.x
+# spawnean Chromium subprocess (200-400 MB) y revientan el límite RAM 1GB
+# de Streamlit Cloud → OOM kill sin traceback Python ("Oh no" pelado).
+# v3.31.200 hotfix: forzar 0.2.1 hasta que migremos a render server-side
+# en infra propia. Probado-bueno con plotly 6.1.1.
+kaleido==0.2.1
 reportlab>=4.0.0
 # Ciclo 9: persistencia real del Vault contra Supabase (Postgres + Storage).
 # Si st.secrets[supabase] no está configurado, la app cae a filesystem
