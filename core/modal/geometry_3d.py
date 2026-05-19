@@ -692,6 +692,7 @@ def build_geometry_with_mode_shape(
     show_ghost: bool = True,
     colormap: str = "RdBu_r",
     apply_default_camera: bool = True,
+    phase_offset_rad: float = 0.0,
 ):
     """
     Construye una figura 3D con la geometria del activo + flechas de mode shape
@@ -722,11 +723,15 @@ def build_geometry_with_mode_shape(
 
     # -------------------------------------------------------------------
     # Paso 1: Matching sensores <-> channel_names + datos por mounting
+    # phase_offset_rad permite rotar el mode_shape complejo para Streamlit-
+    # side animation (cada frame = phase distinta, sin Plotly frames).
     # -------------------------------------------------------------------
     by_name: Dict[str, GeometrySensor] = {
         s.name.strip().upper(): s for s in geom.sensors
     }
     arr = np.asarray(mode_shape, dtype=complex).flatten()
+    if phase_offset_rad != 0.0:
+        arr = arr * (math.cos(phase_offset_rad) + 1j * math.sin(phase_offset_rad))
 
     matched_positions: List[Tuple[float, float, float]] = []
     matched_directions: List[Tuple[float, float, float]] = []
