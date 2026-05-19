@@ -326,7 +326,7 @@ TEMPLATES: Dict[str, Any] = {
 # ---------------------------------------------------------------------
 
 def _cylinder_mesh(x0: float, x1: float, radius: float,
-                    n_theta: int = 28, n_x: int = 16
+                    n_theta: int = 16, n_x: int = 8
                     ) -> Tuple[list, list, list, list, list, list]:
     """Cilindro alineado a X subdividido en n_x anillos longitudinales.
 
@@ -373,7 +373,7 @@ def _cylinder_mesh(x0: float, x1: float, radius: float,
 
 
 def _box_mesh(x0: float, x1: float, hw: float, hh: float,
-               n_x: int = 16) -> Tuple[list, list, list, list, list, list]:
+               n_x: int = 8) -> Tuple[list, list, list, list, list, list]:
     """Caja rectangular alineada a X subdividida en n_x cross-sections.
 
     Cada cross-section tiene 4 corner vertices (bottom-left, bottom-right,
@@ -601,7 +601,7 @@ def build_geometry_figure(geom: ModalGeometry,
 
     # 2) Eje (shaft) — cilindro fino centrado
     xs, ys, zs, i, j, k = _cylinder_mesh(geom.shaft_start, geom.shaft_end,
-                                           geom.shaft_radius, n_theta=20, n_x=24)
+                                           geom.shaft_radius, n_theta=12, n_x=10)
     fig.add_trace(go.Mesh3d(
         x=xs, y=ys, z=zs, i=i, j=j, k=k,
         color=geom.shaft_color, opacity=0.95,
@@ -855,7 +855,7 @@ def build_geometry_with_mode_shape(
 
     # Shaft (cilindro central) — siempre kind="shaft"
     xs, ys, zs, ii, jj, kk = _cylinder_mesh(geom.shaft_start, geom.shaft_end,
-                                              geom.shaft_radius, n_theta=20, n_x=24)
+                                              geom.shaft_radius, n_theta=12, n_x=10)
     shaft_base = (xs, ys, zs, ii, jj, kk, "shaft",
                    geom.shaft_color, 0.85, "Eje")
 
