@@ -139,13 +139,14 @@ modal_hero_card(
 # =====================================================================
 # Tabs
 # =====================================================================
-tab_setup, tab_acq, tab_ema, tab_oma, tab_3d, tab_fea = st.tabs([
+tab_setup, tab_acq, tab_ema, tab_oma, tab_3d, tab_fea, tab_reports = st.tabs([
     "🛠 Setup",
     "📥 Adquisición",
     "🔨 EMA",
     "🌊 OMA",
     "🎬 Mode Shapes 3D",
     "🧮 FEA Compare",
+    "📊 Reports",
 ])
 
 
@@ -3181,6 +3182,324 @@ with tab_fea:
                     })
                 st.dataframe(pd.DataFrame(rows), hide_index=True,
                               use_container_width=True)
+
+
+# ---------------------------------------------------------------------
+# Tab 7 — Reports (selector granular + auto-análisis + IA)
+# ---------------------------------------------------------------------
+with tab_reports:
+    modal_section_header(
+        title="Reports — selector granular + análisis",
+        subtitle=(
+            "Elige qué figuras enviar al reporte SIGA. Análisis "
+            "automático normativo + opcional IA interpretativa."
+        ),
+        norm_ref="ISO 7626-6 §8 · Documentación modal",
+        icon="📊",
+    )
+
+    # Detectar si hay análisis previo disponible
+    _fdd_for_rep = st.session_state.get("fdd_result")
+    _peaks_for_rep = st.session_state.get("modal_peaks", [])
+    _geom_for_rep = st.session_state.get("modal_geometry")
+    _fea_for_rep = st.session_state.get("fea_result")
+
+    _has_oma = bool(_fdd_for_rep and getattr(_fdd_for_rep, "modes", None))
+    _has_ema = bool(_peaks_for_rep)
+    _has_geom = bool(_geom_for_rep)
+    _has_fea = bool(_fea_for_rep)
+
+    if not (_has_oma or _has_ema):
+        modal_empty_state(
+            icon="📊",
+            title="Sin análisis modal cargado",
+            description=(
+                "Para usar esta sección necesitas haber corrido al menos un "
+                "análisis: EMA en Tab EMA o FDD en Tab OMA. Después vuelve "
+                "aquí y podrás seleccionar qué figuras enviar al reporte."
+            ),
+            cta_label="Cambia a Tab EMA o Tab OMA",
+            norm_ref="ISO 7626-6 §8",
+        )
+    else:
+        # =================================================================
+        # SECCION A — Selector granular de figuras
+        # =================================================================
+        st.markdown("### 📋 A · Selector de figuras a inyectar")
+        st.caption(
+            "Tilda qué figuras del análisis modal querés enviar al reporte. "
+            "Cada figura se renderiza como PNG y se appendea al sistema "
+            "Reports estándar (sale en el PDF SIGA final)."
+        )
+
+        # Sub-checkbox: por modo natural (1 row por modo) + globales
+        _all_selections: Dict[str, bool] = {}
+
+        if _has_oma:
+            _natural_modes_rep = [
+                m for m in _fdd_for_rep.modes
+                if getattr(m, "classification", "natural") == "natural"
+            ]
+            _non_natural_count = len(_fdd_for_rep.modes) - len(_natural_modes_rep)
+
+            with st.expander(
+                f"🌊 OMA · {len(_natural_modes_rep)} modos naturales "
+                f"({_non_natural_count} no-naturales)",
+                expanded=True,
+            ):
+                # Bulk controls
+                _bulk_c1, _bulk_c2, _bulk_c3 = st.columns([1, 1, 2])
+                with _bulk_c1:
+                    if st.button("✓ Todos", key="rep_sel_all_oma",
+                                   use_container_width=True):
+                        for m in _natural_modes_rep:
+                            for sfx in ("3d", "bar", "polar"):
+                                st.session_state[
+                                    f"_rep_sel_m{m.mode_number}_{sfx}"
+                                ] = True
+                        st.session_state["_rep_sel_automac"] = True
+                        st.session_state["_rep_sel_summary"] = True
+                        st.rerun()
+                with _bulk_c2:
+                    if st.button("✗ Ninguno", key="rep_sel_none_oma",
+                                   use_container_width=True):
+                        for m in _natural_modes_rep:
+                            for sfx in ("3d", "bar", "polar"):
+                                st.session_state[
+                                    f"_rep_sel_m{m.mode_number}_{sfx}"
+                                ] = False
+                        st.session_state["_rep_sel_automac"] = False
+                        st.session_state["_rep_sel_summary"] = False
+                        st.rerun()
+                with _bulk_c3:
+                    _include_non_nat_rep = st.toggle(
+                        "Incluir harmonic/spurious",
+                        value=False, key="_rep_include_non_nat",
+                        help="Off por default — solo modos físicos.",
+                    )
+
+                if _include_non_nat_rep:
+                    _natural_modes_rep = list(_fdd_for_rep.modes)
+
+                # Headers de tabla
+                st.markdown(
+                    "<div style='display:grid; grid-template-columns: 2fr 1fr 1fr 1fr; "
+                    "gap:8px; padding:6px 0; border-bottom:1px solid #e5e7eb; "
+                    "font-size:11px; color:#64748b; text-transform:uppercase;'>"
+                    "<div>Modo</div><div style='text-align:center;'>3D snapshot</div>"
+                    "<div style='text-align:center;'>Bar chart</div>"
+                    "<div style='text-align:center;'>Polar complexity</div>"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+
+                # Una row por modo
+                for m in _natural_modes_rep:
+                    _row_c1, _row_c2, _row_c3, _row_c4 = st.columns(
+                        [2, 1, 1, 1]
+                    )
+                    with _row_c1:
+                        _cls = getattr(m, "classification", "natural")
+                        _cls_emoji = {"natural": "🟢", "harmonic": "🟡",
+                                        "spurious": "🔴"}.get(_cls, "⚪")
+                        st.markdown(
+                            f"**M{m.mode_number}** · "
+                            f"{m.natural_frequency_hz:.2f} Hz · "
+                            f"ζ={m.damping_ratio_pct:.2f}% {_cls_emoji}"
+                        )
+                    with _row_c2:
+                        _sel_3d = st.checkbox(
+                            "", value=True,
+                            key=f"_rep_sel_m{m.mode_number}_3d",
+                            label_visibility="collapsed",
+                        )
+                    with _row_c3:
+                        _sel_bar = st.checkbox(
+                            "", value=True,
+                            key=f"_rep_sel_m{m.mode_number}_bar",
+                            label_visibility="collapsed",
+                        )
+                    with _row_c4:
+                        _sel_pol = st.checkbox(
+                            "", value=True,
+                            key=f"_rep_sel_m{m.mode_number}_polar",
+                            label_visibility="collapsed",
+                        )
+                    _all_selections[f"m{m.mode_number}_3d"] = _sel_3d
+                    _all_selections[f"m{m.mode_number}_bar"] = _sel_bar
+                    _all_selections[f"m{m.mode_number}_polar"] = _sel_pol
+
+                st.divider()
+                # Globales
+                st.markdown("**Bloques globales:**")
+                _gc1, _gc2 = st.columns(2)
+                with _gc1:
+                    _sel_mac = st.checkbox(
+                        "🔗 AutoMAC heatmap matrix",
+                        value=True,
+                        key="_rep_sel_automac",
+                        help="MAC entre todos los modos · ISO 7626-6 §6.5",
+                    )
+                    _all_selections["automac"] = _sel_mac
+                with _gc2:
+                    _sel_sum = st.checkbox(
+                        "📑 Tabla resumen modal",
+                        value=True,
+                        key="_rep_sel_summary",
+                        help="Tabla con freq/CPM/ζ/Q/MPC/clase de todos los modos",
+                    )
+                    _all_selections["summary"] = _sel_sum
+
+        if _has_ema:
+            with st.expander(
+                f"🔨 EMA · {len(_peaks_for_rep)} peaks identificados",
+                expanded=False,
+            ):
+                st.info(
+                    "Fase 2 (v3.31.196): aquí aparecerán las FRFs Bode, "
+                    "el stability diagram LSCF y la tabla de peaks EMA."
+                )
+
+        if _has_fea:
+            with st.expander(
+                f"🧮 FEA Compare · {_fea_for_rep.n_modes} modos FEA",
+                expanded=False,
+            ):
+                st.info(
+                    "Fase 2 (v3.31.196): aquí aparecerá el Cross-MAC "
+                    "heatmap FEA↔Experimental + tabla de pareo."
+                )
+
+        # ----- Resumen + Acción -----
+        st.divider()
+        _n_selected = sum(1 for v in _all_selections.values() if v)
+        _ac1, _ac2 = st.columns([3, 2])
+        with _ac1:
+            st.metric("Figuras seleccionadas", _n_selected)
+        with _ac2:
+            _send_disabled = (_n_selected == 0)
+            if st.button(
+                f"📄 Inyectar {_n_selected} figuras al reporte",
+                key="rep_send_selected",
+                type="primary",
+                use_container_width=True,
+                disabled=_send_disabled,
+            ):
+                from core.modal.modal_report import (
+                    build_modal_report_items,
+                    append_modal_items_to_report,
+                )
+                _prog = st.progress(0.0, text="Generando snapshots…")
+
+                def _cb_sel(idx, total, stage):
+                    _prog.progress(
+                        min(idx / max(total, 1), 1.0),
+                        text=f"{stage} ({idx + 1}/{total})",
+                    )
+
+                try:
+                    _asset_lbl_r = (
+                        st.session_state.get("modal_adhoc_meta",
+                                              {}).get("equipment_name",
+                                                       "Activo ad-hoc")
+                        if st.session_state.get("modal_adhoc_meta")
+                        else st.session_state.get("modal_inst", "Activo")
+                    )
+                    # Build ALL items (luego filtramos por checkbox)
+                    _all_items = build_modal_report_items(
+                        fdd_result=_fdd_for_rep,
+                        geom=_geom_for_rep,
+                        include_non_natural=_include_non_nat_rep,
+                        asset_name=str(_asset_lbl_r),
+                        method="OMA",
+                        progress_cb=_cb_sel,
+                    )
+                    # Filtrar según selecciones
+                    _filtered = []
+                    for it in _all_items:
+                        _t = it.get("type", "")
+                        _kept = False
+                        if _t == "modal_3d":
+                            # Match by mode number in title (M1, M2...)
+                            for m in _natural_modes_rep:
+                                if (f"Modo {m.mode_number}" in it["title"]
+                                    and _all_selections.get(
+                                        f"m{m.mode_number}_3d")):
+                                    _kept = True; break
+                        elif _t == "modal_bar":
+                            for m in _natural_modes_rep:
+                                if (f"Modo {m.mode_number}" in it["title"]
+                                    and _all_selections.get(
+                                        f"m{m.mode_number}_bar")):
+                                    _kept = True; break
+                        elif _t == "modal_polar":
+                            for m in _natural_modes_rep:
+                                if (f"Modo {m.mode_number}" in it["title"]
+                                    and _all_selections.get(
+                                        f"m{m.mode_number}_polar")):
+                                    _kept = True; break
+                        elif _t == "modal_automac":
+                            _kept = bool(_all_selections.get("automac"))
+                        elif _t == "modal_summary_table":
+                            _kept = bool(_all_selections.get("summary"))
+                        if _kept:
+                            _filtered.append(it)
+                    _n_added = append_modal_items_to_report(_filtered)
+                    _prog.empty()
+                    st.success(
+                        f"✓ {_n_added} figuras agregadas al reporte. "
+                        "Ve a **Reports** (sidebar) para revisar y "
+                        "generar el PDF."
+                    )
+                except Exception as _exc:  # noqa: BLE001
+                    _prog.empty()
+                    import traceback as _tb
+                    st.error(
+                        f"Error: `{type(_exc).__name__}: {_exc}`"
+                    )
+                    with st.expander("Detalle técnico"):
+                        st.code(_tb.format_exc(), language="text")
+
+        # =================================================================
+        # SECCION B — Auto-análisis normativo (rule-based)
+        # =================================================================
+        st.divider()
+        st.markdown("### 🧠 B · Auto-análisis normativo")
+        st.caption(
+            "Análisis basado en reglas (ISO 7626 + API 684 + API 618). "
+            "Sin IA — texto generado deterministico desde los datos modales."
+        )
+        modal_status_banner(
+            title="Próximamente en Fase 2 (v3.31.196)",
+            detail=(
+                "Generador de análisis normativo automático: clasificación "
+                "de modos, detección de cruces con armónicas, evaluación de "
+                "redundancia MAC, separación API 618 §7.9.4.2.5.3.2, "
+                "validación MPC. El texto se inyecta como bloque al reporte."
+            ),
+            severity="info",
+        )
+
+        # =================================================================
+        # SECCION C — Análisis IA (pago, como otros módulos)
+        # =================================================================
+        st.divider()
+        st.markdown("### 🤖 C · Análisis IA interpretativo")
+        st.caption(
+            "Narrativa interpretativa generada por LLM con contexto modal. "
+            "Feature pago — usa la misma cuota AI del cliente que aplica "
+            "en Spectrum/SCL/Polar/Waveform."
+        )
+        modal_status_banner(
+            title="Próximamente en Fase 4 (v3.31.198)",
+            detail=(
+                "Integración con el módulo AI existente. El cliente con "
+                "subscripción AI activa podrá generar narrativa de los "
+                "modos identificados, recomendaciones de operación, y "
+                "comparación con literatura científica."
+            ),
+            severity="info",
+        )
 
 
 # =====================================================================
