@@ -32,7 +32,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import plotly.graph_objects as go
@@ -2904,7 +2904,7 @@ with tab_fea:
     )
 
     # ----- Resolver fuente experimental -----
-    fdd_for_fea = st.session_state.get("fdd_result")
+    fdd_for_fea = st.session_state.get("modal_oma_result")
     peaks_for_fea = st.session_state.get("modal_peaks", [])
 
     exp_source = None
@@ -3199,7 +3199,7 @@ with tab_reports:
     )
 
     # Detectar si hay análisis previo disponible
-    _fdd_for_rep = st.session_state.get("fdd_result")
+    _fdd_for_rep = st.session_state.get("modal_oma_result")
     _peaks_for_rep = st.session_state.get("modal_peaks", [])
     _geom_for_rep = st.session_state.get("modal_geometry")
     _fea_for_rep = st.session_state.get("fea_result")
@@ -3350,25 +3350,99 @@ with tab_reports:
                     )
                     _all_selections["summary"] = _sel_sum
 
-        if _has_ema:
+        # Setup — geometría 3D estática + tablas
+        if _has_geom:
             with st.expander(
-                f"🔨 EMA · {len(_peaks_for_rep)} peaks identificados",
+                f"🛠 Setup · Geometría 3D ({len(_geom_for_rep.blocks)} bloques "
+                f"+ {len(_geom_for_rep.sensors)} sensores)",
                 expanded=False,
             ):
-                st.info(
-                    "Fase 2 (v3.31.196): aquí aparecerán las FRFs Bode, "
-                    "el stability diagram LSCF y la tabla de peaks EMA."
+                _sel_setup_geom = st.checkbox(
+                    "🌐 Snapshot 3D del activo (sin deformar)",
+                    value=True, key="_rep_sel_setup_geom",
                 )
+                _sel_setup_blk = st.checkbox(
+                    "📋 Tabla de bloques mecánicos",
+                    value=True, key="_rep_sel_setup_blocks",
+                )
+                _sel_setup_sen = st.checkbox(
+                    "📋 Tabla de sensores instrumentados",
+                    value=True, key="_rep_sel_setup_sensors",
+                )
+                _all_selections["setup_geom"] = _sel_setup_geom
+                _all_selections["setup_blocks"] = _sel_setup_blk
+                _all_selections["setup_sensors"] = _sel_setup_sen
 
+        # Adquisición — waveforms TDMS
+        _tdms_for_rep = st.session_state.get("modal_tdms")
+        if _tdms_for_rep and getattr(_tdms_for_rep, "channels", None):
+            _n_ch = len(_tdms_for_rep.channels)
+            with st.expander(
+                f"📥 Adquisición · {_n_ch} waveforms TDMS",
+                expanded=False,
+            ):
+                _sel_acq_all = st.checkbox(
+                    f"📈 Waveforms time-series ({_n_ch} canales)",
+                    value=False, key="_rep_sel_acq_waveforms",
+                    help=("Cada canal se renderiza como un plot tiempo-vs-amplitud "
+                          "downsamplado a max 5000 puntos."),
+                )
+                _all_selections["acq_waveforms"] = _sel_acq_all
+
+        # EMA — FRF + peaks
+        if _has_ema or st.session_state.get("modal_frfs"):
+            _frfs_count = len(st.session_state.get("modal_frfs", []))
+            with st.expander(
+                f"🔨 EMA · {_frfs_count} FRFs + "
+                f"{len(_peaks_for_rep)} peaks identificados",
+                expanded=False,
+            ):
+                _sel_ema_frf = st.checkbox(
+                    "📊 FRF Bode con peaks marcados",
+                    value=bool(_peaks_for_rep),
+                    key="_rep_sel_ema_frf",
+                    help="Magnitud (dB) vs frecuencia con peaks de modos.",
+                )
+                _sel_ema_tbl = st.checkbox(
+                    "📋 Tabla de peaks EMA",
+                    value=bool(_peaks_for_rep),
+                    key="_rep_sel_ema_table",
+                    help="Freq, damping, bandwidth, Q por peak.",
+                )
+                _all_selections["ema_frf"] = _sel_ema_frf
+                _all_selections["ema_table"] = _sel_ema_tbl
+
+        # OMA — SVD plot del FDD
+        if _has_oma:
+            with st.expander(
+                f"🌊 OMA · FDD SVD plot",
+                expanded=False,
+            ):
+                _sel_oma_svd = st.checkbox(
+                    "📈 First Singular Value plot (FDD)",
+                    value=True, key="_rep_sel_oma_svd",
+                    help=("Plot del 1st SV del cross-spectrum con los modos "
+                          "identificados marcados (verde natural, amarillo "
+                          "harmonic, rojo spurious)."),
+                )
+                _all_selections["oma_svd"] = _sel_oma_svd
+
+        # FEA Compare — Cross-MAC + pareo
         if _has_fea:
             with st.expander(
                 f"🧮 FEA Compare · {_fea_for_rep.n_modes} modos FEA",
                 expanded=False,
             ):
-                st.info(
-                    "Fase 2 (v3.31.196): aquí aparecerá el Cross-MAC "
-                    "heatmap FEA↔Experimental + tabla de pareo."
+                _sel_fea_mac = st.checkbox(
+                    "🔥 Cross-MAC heatmap (FEA ↔ Experimental)",
+                    value=True, key="_rep_sel_fea_mac",
                 )
+                _sel_fea_pair = st.checkbox(
+                    "📋 Tabla de pareo de modos",
+                    value=True, key="_rep_sel_fea_pairing",
+                )
+                _all_selections["fea_mac"] = _sel_fea_mac
+                _all_selections["fea_pairing"] = _sel_fea_pair
 
         # ----- Resumen + Acción -----
         st.divider()
@@ -3405,46 +3479,120 @@ with tab_reports:
                         if st.session_state.get("modal_adhoc_meta")
                         else st.session_state.get("modal_inst", "Activo")
                     )
-                    # Build ALL items (luego filtramos por checkbox)
-                    _all_items = build_modal_report_items(
-                        fdd_result=_fdd_for_rep,
-                        geom=_geom_for_rep,
-                        include_non_natural=_include_non_nat_rep,
-                        asset_name=str(_asset_lbl_r),
-                        method="OMA",
-                        progress_cb=_cb_sel,
-                    )
-                    # Filtrar según selecciones
-                    _filtered = []
-                    for it in _all_items:
-                        _t = it.get("type", "")
-                        _kept = False
-                        if _t == "modal_3d":
-                            # Match by mode number in title (M1, M2...)
-                            for m in _natural_modes_rep:
-                                if (f"Modo {m.mode_number}" in it["title"]
-                                    and _all_selections.get(
-                                        f"m{m.mode_number}_3d")):
-                                    _kept = True; break
-                        elif _t == "modal_bar":
-                            for m in _natural_modes_rep:
-                                if (f"Modo {m.mode_number}" in it["title"]
-                                    and _all_selections.get(
-                                        f"m{m.mode_number}_bar")):
-                                    _kept = True; break
-                        elif _t == "modal_polar":
-                            for m in _natural_modes_rep:
-                                if (f"Modo {m.mode_number}" in it["title"]
-                                    and _all_selections.get(
-                                        f"m{m.mode_number}_polar")):
-                                    _kept = True; break
-                        elif _t == "modal_automac":
-                            _kept = bool(_all_selections.get("automac"))
-                        elif _t == "modal_summary_table":
-                            _kept = bool(_all_selections.get("summary"))
-                        if _kept:
-                            _filtered.append(it)
-                    _n_added = append_modal_items_to_report(_filtered)
+                    _asset_lbl_r = str(_asset_lbl_r)
+                    _aggregated: List[Dict[str, Any]] = []
+
+                    # --- Modal (mode shapes + AutoMAC + summary) ---
+                    if _has_oma:
+                        _all_items = build_modal_report_items(
+                            fdd_result=_fdd_for_rep,
+                            geom=_geom_for_rep,
+                            include_non_natural=_include_non_nat_rep,
+                            asset_name=_asset_lbl_r,
+                            method="OMA",
+                            progress_cb=_cb_sel,
+                        )
+                        for it in _all_items:
+                            _t = it.get("type", "")
+                            _kept = False
+                            if _t == "modal_3d":
+                                for m in _natural_modes_rep:
+                                    if (f"Modo {m.mode_number}" in it["title"]
+                                        and _all_selections.get(
+                                            f"m{m.mode_number}_3d")):
+                                        _kept = True; break
+                            elif _t == "modal_bar":
+                                for m in _natural_modes_rep:
+                                    if (f"Modo {m.mode_number}" in it["title"]
+                                        and _all_selections.get(
+                                            f"m{m.mode_number}_bar")):
+                                        _kept = True; break
+                            elif _t == "modal_polar":
+                                for m in _natural_modes_rep:
+                                    if (f"Modo {m.mode_number}" in it["title"]
+                                        and _all_selections.get(
+                                            f"m{m.mode_number}_polar")):
+                                        _kept = True; break
+                            elif _t == "modal_automac":
+                                _kept = bool(_all_selections.get("automac"))
+                            elif _t == "modal_summary_table":
+                                _kept = bool(_all_selections.get("summary"))
+                            if _kept:
+                                _aggregated.append(it)
+
+                    # --- Setup ---
+                    if (_all_selections.get("setup_geom")
+                        or _all_selections.get("setup_blocks")
+                        or _all_selections.get("setup_sensors")):
+                        from core.modal.modal_report import build_setup_items
+                        _setup_items = build_setup_items(
+                            _geom_for_rep, _asset_lbl_r
+                        )
+                        for it in _setup_items:
+                            _t = it.get("type", "")
+                            if (_t == "modal_setup_geometry"
+                                and _all_selections.get("setup_geom")):
+                                _aggregated.append(it)
+                            elif (_t == "modal_setup_blocks"
+                                  and _all_selections.get("setup_blocks")):
+                                _aggregated.append(it)
+                            elif (_t == "modal_setup_sensors"
+                                  and _all_selections.get("setup_sensors")):
+                                _aggregated.append(it)
+
+                    # --- Adquisición ---
+                    if _all_selections.get("acq_waveforms"):
+                        from core.modal.modal_report import (
+                            build_acquisition_items)
+                        _tdms_for_rep_x = st.session_state.get("modal_tdms")
+                        _acq_items = build_acquisition_items(
+                            _tdms_for_rep_x, _asset_lbl_r,
+                        )
+                        _aggregated.extend(_acq_items)
+
+                    # --- EMA ---
+                    if (_all_selections.get("ema_frf")
+                        or _all_selections.get("ema_table")):
+                        from core.modal.modal_report import build_ema_items
+                        _ema_items = build_ema_items(
+                            st.session_state.get("modal_frfs", []),
+                            _peaks_for_rep,
+                            _asset_lbl_r,
+                        )
+                        for it in _ema_items:
+                            _t = it.get("type", "")
+                            if (_t == "modal_ema_frf"
+                                and _all_selections.get("ema_frf")):
+                                _aggregated.append(it)
+                            elif (_t == "modal_ema_peaks_table"
+                                  and _all_selections.get("ema_table")):
+                                _aggregated.append(it)
+
+                    # --- OMA SVD ---
+                    if _all_selections.get("oma_svd"):
+                        from core.modal.modal_report import build_oma_items
+                        _oma_items = build_oma_items(
+                            _fdd_for_rep, _asset_lbl_r,
+                        )
+                        _aggregated.extend(_oma_items)
+
+                    # --- FEA Compare ---
+                    if (_all_selections.get("fea_mac")
+                        or _all_selections.get("fea_pairing")):
+                        from core.modal.modal_report import build_fea_items
+                        _fea_items = build_fea_items(
+                            _fea_for_rep, _fdd_for_rep, _asset_lbl_r,
+                        )
+                        for it in _fea_items:
+                            _t = it.get("type", "")
+                            if (_t == "modal_fea_cross_mac"
+                                and _all_selections.get("fea_mac")):
+                                _aggregated.append(it)
+                            elif (_t == "modal_fea_pairing"
+                                  and _all_selections.get("fea_pairing")):
+                                _aggregated.append(it)
+
+                    _n_added = append_modal_items_to_report(_aggregated)
                     _prog.empty()
                     st.success(
                         f"✓ {_n_added} figuras agregadas al reporte. "
