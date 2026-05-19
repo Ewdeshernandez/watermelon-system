@@ -2425,13 +2425,25 @@ with tab_3d:
                         "label": "🔍 Lateral",
                         "eye": dict(x=0.0, y=2.4, z=0.4),
                         "up": dict(x=0, y=0, z=1),
-                        "help": "Vista de lado — ideal para flexión vertical",
+                        "help": "Vista de lado A — flexión vertical clásica",
+                    },
+                    "lateral_opp": {
+                        "label": "↩ Lat. opuesto",
+                        "eye": dict(x=0.0, y=-2.4, z=0.4),
+                        "up": dict(x=0, y=0, z=1),
+                        "help": "Vista lateral espejo (lado opuesto)",
                     },
                     "frontal": {
                         "label": "👁 Frontal",
                         "eye": dict(x=2.4, y=0.0, z=0.4),
                         "up": dict(x=0, y=0, z=1),
-                        "help": "Vista frontal por el extremo del shaft",
+                        "help": "Vista por el extremo libre del shaft",
+                    },
+                    "posterior": {
+                        "label": "👀 Posterior",
+                        "eye": dict(x=-2.4, y=0.0, z=0.4),
+                        "up": dict(x=0, y=0, z=1),
+                        "help": "Vista por el extremo opuesto del shaft",
                     },
                     "superior": {
                         "label": "⬇ Superior",
@@ -2444,6 +2456,12 @@ with tab_3d:
                         "eye": dict(x=1.6, y=1.6, z=1.2),
                         "up": dict(x=0, y=0, z=1),
                         "help": "Vista 3D balanceada — clásica",
+                    },
+                    "diagonal": {
+                        "label": "🎯 Vista 3/4",
+                        "eye": dict(x=1.8, y=1.2, z=0.6),
+                        "up": dict(x=0, y=0, z=1),
+                        "help": "Diagonal frontal-lateral baja",
                     },
                 }
 
