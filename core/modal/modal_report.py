@@ -747,3 +747,212 @@ def build_fea_items(fea_result: Any, fdd_result: Any,
     except Exception:  # noqa: BLE001
         pass
     return items
+
+
+# ====================================================================
+# Helper Fase 4: payload + item para análisis IA
+# ====================================================================
+
+def build_modal_ai_payload(
+    fdd_result: Any,
+    *,
+    asset_name: str = "Activo",
+    method: str = "OMA",
+    running_rpm: float = 3600.0,
+    operator_notes: str = "",
+) -> Dict[str, Any]:
+    """Construye payload para generate_ai_diagnostic con contexto modal."""
+    if not fdd_result or not getattr(fdd_result, "modes", None):
+        return {}
+
+    all_modes = list(fdd_result.modes)
+    natural_modes = [
+        m for m in all_modes
+        if getattr(m, "classification", "natural") == "natural"
+    ]
+
+    # Modos en formato estructurado para IA
+    modes_data = []
+    for m in all_modes:
+        modes_data.append({
+            "mode_number": int(m.mode_number),
+            "freq_hz": round(float(m.natural_frequency_hz), 3),
+            "freq_cpm": round(float(m.natural_frequency_hz) * 60.0, 1),
+            "order_running": round(
+                float(m.natural_frequency_hz) * 60.0 / max(running_rpm, 1.0),
+                3,
+            ),
+            "damping_pct": round(float(m.damping_ratio_pct), 3),
+            "Q_factor": round(
+                1.0 / (2 * max(float(m.damping_ratio_pct) / 100.0, 1e-6)),
+                1,
+            ),
+            "complexity_mpc_pct": round(
+                float(getattr(m, "complexity_pct", 0.0)), 1,
+            ),
+            "classification": getattr(m, "classification", "natural"),
+        })
+
+    # MAC matrix para naturales
+    mac_info = {}
+    if len(natural_modes) >= 2:
+        try:
+            from core.modal.oma_engine import compute_mac_matrix
+            mac = compute_mac_matrix(natural_modes)
+            n = mac.shape[0]
+            redundant_pairs = []
+            for i in range(n):
+                for j in range(i + 1, n):
+                    if mac[i, j] > 0.7:
+                        redundant_pairs.append({
+                            "mode_i": natural_modes[i].mode_number,
+                            "mode_j": natural_modes[j].mode_number,
+                            "mac": round(float(mac[i, j]), 3),
+                        })
+            mac_info = {
+                "n_modes_evaluated": int(n),
+                "redundant_pairs_count": len(redundant_pairs),
+                "redundant_pairs": redundant_pairs[:10],
+            }
+        except Exception:  # noqa: BLE001
+            pass
+
+    return {
+        "machine": {
+            "asset": asset_name,
+            "running_speed_rpm": running_rpm,
+            "method": method,
+        },
+        "norm": {
+            "primary": "ISO 7626-1..6 (Modal analysis)",
+            "operating_vibration": "ISO 20816",
+            "rotor_dynamics": "API 684 §1.6",
+            "compressor_separation": "API 618 §7.9.4.2.5.3.2",
+        },
+        "technical": {
+            "method": method,
+            "modes_total": len(all_modes),
+            "modes_natural": len(natural_modes),
+            "modes_harmonic": sum(
+                1 for m in all_modes
+                if getattr(m, "classification", "natural") == "harmonic"
+            ),
+            "modes_spurious": sum(
+                1 for m in all_modes
+                if getattr(m, "classification", "natural") == "spurious"
+            ),
+            "modes": modes_data,
+            "automac_analysis": mac_info,
+            "running_speed_rpm": running_rpm,
+            "running_speed_hz": round(running_rpm / 60.0, 2),
+            "frequency_band": (
+                f"{fdd_result.frequencies_hz[0]:.1f} - "
+                f"{fdd_result.frequencies_hz[-1]:.1f} Hz"
+                if hasattr(fdd_result, "frequencies_hz") else "n/a"
+            ),
+        },
+        "trend": {},
+        "operator_notes": operator_notes,
+    }
+
+
+def build_ai_diagnostic_report_item(
+    ai_result: Dict[str, Any],
+    asset_name: str = "Activo",
+    method: str = "OMA",
+) -> Dict[str, Any]:
+    """Convierte resultado de generate_ai_diagnostic a item del reporte.
+
+    Render un PNG header navy con el título + la primera linea del markdown
+    como teaser. El markdown completo va al campo 'notes' del item.
+    """
+    import io
+    import uuid
+    from PIL import Image, ImageDraw, ImageFont
+
+    markdown = ai_result.get("markdown", "")
+    model = ai_result.get("model", "unknown")
+    cached = ai_result.get("cached", False)
+    tokens_in = ai_result.get("input_tokens", 0)
+    tokens_out = ai_result.get("output_tokens", 0)
+
+    # Render header PNG nicely formatted
+    width_px = 1280
+    height_px = 280
+    canvas = Image.new("RGB", (width_px, height_px), "white")
+    d = ImageDraw.Draw(canvas)
+
+    try:
+        font_brand = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 14)
+        font_title = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 24)
+        font_body = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 13)
+        font_meta = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 11)
+    except (OSError, IOError):
+        font_brand = ImageFont.load_default()
+        font_title = font_brand; font_body = font_brand; font_meta = font_brand
+
+    # Header navy
+    d.rectangle([0, 0, width_px, 90], fill="#0F1E3D")
+    d.text((20, 14), "Watermelon Modal · Análisis IA", font=font_brand,
+           fill="#1AAEE5")
+    d.text((20, 34), f"Diagnóstico interpretativo IA · {asset_name}",
+           font=font_title, fill="white")
+    d.text((20, 70), f"Método: {method} · modelo {model}"
+                      + (" · CACHE HIT" if cached else ""),
+           font=font_meta, fill="#94a3b8")
+    d.rectangle([0, 86, width_px, 90], fill="#1AAEE5")
+
+    # Primer párrafo del markdown como teaser (max 8 lineas)
+    teaser_lines = []
+    for line in markdown.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        teaser_lines.append(line)
+        if len(teaser_lines) >= 8:
+            break
+
+    y = 110
+    for line in teaser_lines:
+        wrapped = []
+        cur = ""
+        for w in line.split():
+            try:
+                bbox = font_body.getbbox((cur + " " + w).strip())
+                width_w = bbox[2] - bbox[0]
+            except AttributeError:
+                width_w = len((cur + " " + w).strip()) * 7
+            if width_w <= width_px - 40 or not cur:
+                cur = (cur + " " + w).strip()
+            else:
+                wrapped.append(cur); cur = w
+        if cur: wrapped.append(cur)
+        for wl in wrapped:
+            d.text((20, y), wl, font=font_body, fill="#0F1E3D")
+            y += 18
+            if y > height_px - 30:
+                break
+        if y > height_px - 30:
+            break
+
+    d.text((20, height_px - 22),
+           f"Texto completo en notes · tokens in={tokens_in} out={tokens_out}",
+           font=font_meta, fill="#64748b")
+
+    buf = io.BytesIO()
+    canvas.save(buf, format="PNG", optimize=True)
+    png_bytes = buf.getvalue()
+
+    return {
+        "id": f"modal_ai_{uuid.uuid4().hex[:12]}",
+        "type": "modal_ai_diagnostic",
+        "title": f"Análisis IA modal · {asset_name}",
+        "notes": markdown,
+        "signal_id": "",
+        "machine": asset_name,
+        "point": "Análisis modal",
+        "variable": "IA interpretativa",
+        "timestamp": "",
+        "figure": None,
+        "image_bytes": png_bytes,
+    }
