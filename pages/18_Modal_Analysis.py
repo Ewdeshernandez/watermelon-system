@@ -3467,18 +3467,111 @@ with tab_reports:
         st.markdown("### 🧠 B · Auto-análisis normativo")
         st.caption(
             "Análisis basado en reglas (ISO 7626 + API 684 + API 618). "
-            "Sin IA — texto generado deterministico desde los datos modales."
+            "Sin IA — texto generado determinístico desde los datos modales."
         )
-        modal_status_banner(
-            title="Próximamente en Fase 2 (v3.31.196)",
-            detail=(
-                "Generador de análisis normativo automático: clasificación "
-                "de modos, detección de cruces con armónicas, evaluación de "
-                "redundancia MAC, separación API 618 §7.9.4.2.5.3.2, "
-                "validación MPC. El texto se inyecta como bloque al reporte."
-            ),
-            severity="info",
-        )
+
+        if not _has_oma:
+            modal_status_banner(
+                title="Auto-análisis requiere modos OMA",
+                detail="Corre el FDD en Tab OMA para activar esta sección.",
+                severity="info",
+            )
+        else:
+            from core.modal.auto_analysis import (
+                analyze_modal_results,
+                build_analysis_report_item,
+            )
+
+            # Parámetros configurables
+            _ab_c1, _ab_c2, _ab_c3 = st.columns(3)
+            with _ab_c1:
+                _ab_running = st.number_input(
+                    "Running speed (rpm)",
+                    value=int(st.session_state.get(
+                        "_modal_auto_running_rpm", 3600)),
+                    min_value=100, max_value=20000, step=100,
+                    key="_modal_auto_running_rpm",
+                    help="Para evaluar cruces con armónicas",
+                )
+            with _ab_c2:
+                _ab_mac_thr = st.number_input(
+                    "Umbral MAC redundancia",
+                    value=0.70, min_value=0.5, max_value=0.95, step=0.05,
+                    key="_modal_auto_mac_thr",
+                )
+            with _ab_c3:
+                _ab_mpc_thr = st.number_input(
+                    "Umbral MPC alto (%)",
+                    value=30.0, min_value=10.0, max_value=70.0, step=5.0,
+                    key="_modal_auto_mpc_thr",
+                )
+
+            # Ejecutar análisis
+            _findings = analyze_modal_results(
+                fdd_result=_fdd_for_rep,
+                running_rpm=float(_ab_running),
+                mac_threshold=float(_ab_mac_thr),
+                mpc_complex_threshold_pct=float(_ab_mpc_thr),
+                method="OMA",
+            )
+
+            # Resumen estadístico
+            _n_fail = sum(1 for f in _findings if f.severity == "fail")
+            _n_warn = sum(1 for f in _findings if f.severity == "warning")
+            _n_ok = sum(1 for f in _findings if f.severity == "ok")
+            _n_info = sum(1 for f in _findings if f.severity == "info")
+
+            _kc1, _kc2, _kc3, _kc4 = st.columns(4)
+            _kc1.metric("Conformes ✓", _n_ok)
+            _kc2.metric("Advertencias ⚠", _n_warn)
+            _kc3.metric("Críticos ✗", _n_fail)
+            _kc4.metric("Informativos ℹ", _n_info)
+
+            # Render findings
+            for _f in _findings:
+                modal_status_banner(
+                    title=_f.title,
+                    detail=(_f.text + (f" · Norma: {_f.norm_ref}"
+                                          if _f.norm_ref else "")),
+                    severity=_f.severity,
+                )
+
+            # Botón inyectar al reporte
+            st.divider()
+            if st.button(
+                f"📄 Inyectar auto-análisis ({len(_findings)} hallazgos) "
+                "al reporte",
+                key="rep_send_auto_analysis",
+                type="primary",
+                use_container_width=True,
+            ):
+                from core.modal.modal_report import append_modal_items_to_report
+                try:
+                    _asset_lbl_b = (
+                        st.session_state.get("modal_adhoc_meta",
+                                              {}).get("equipment_name",
+                                                       "Activo ad-hoc")
+                        if st.session_state.get("modal_adhoc_meta")
+                        else st.session_state.get("modal_inst", "Activo")
+                    )
+                    _auto_item = build_analysis_report_item(
+                        findings=_findings,
+                        asset_name=str(_asset_lbl_b),
+                        method="OMA",
+                    )
+                    _n = append_modal_items_to_report([_auto_item])
+                    st.success(
+                        f"✓ Auto-análisis ({len(_findings)} hallazgos) "
+                        "agregado al reporte como 1 figura PNG. "
+                        "Ve a Reports (sidebar) para revisarlo."
+                    )
+                except Exception as _exc:  # noqa: BLE001
+                    import traceback as _tb
+                    st.error(
+                        f"Error: `{type(_exc).__name__}: {_exc}`"
+                    )
+                    with st.expander("Detalle técnico"):
+                        st.code(_tb.format_exc(), language="text")
 
         # =================================================================
         # SECCION C — Análisis IA (pago, como otros módulos)
