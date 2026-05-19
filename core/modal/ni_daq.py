@@ -1,37 +1,61 @@
 """
-core/modal/ni_daq.py — Adquisición con tarjeta NI-9234
-=======================================================
+core/modal/ni_daq.py — Adquisición con maleta cDAQ-9178 + NI-9234
+==================================================================
 
 Wrapper sobre `nidaqmx` (driver oficial NI Python) para capturar datos
-del módulo NI-9234 en dos modos:
+de una maleta con chasis NI cDAQ-9178 (8 slots USB 2.0) poblada con
+hasta 8 módulos NI-9234 → **32 canales simultáneos** numerados como
+puertos BNC 1..32 en el frente de la maleta.
+
+Hardware soportado (v3.31.201+)
+-------------------------------
+· Chasis: NI cDAQ-9178 (8 slots, USB)
+· Módulos: 1 a 8× NI-9234 (4 ch IEPE/AC/DC c/u, 24-bit, ±5V)
+· Total: hasta 32 canales simultáneos muestreados
+· Sincronización: sample clock compartido del chasis (auto)
+· Cumple ATEX Ex II 3G / UL Class I Div 2 → apto rotating equipment
+
+Naming convention NI-DAQmx
+--------------------------
+El driver NI nombra los canales físicos como `{chassis}Mod{slot}/ai{idx}`:
+  cDAQ1Mod1/ai0..ai3   (slot 1 → BNC 1..4)
+  cDAQ1Mod2/ai0..ai3   (slot 2 → BNC 5..8)
+  ...
+  cDAQ1Mod8/ai0..ai3   (slot 8 → BNC 29..32)
+
+El operador piensa en **BNC port (1..32)** — el número impreso en el
+frente de la maleta. La conversión a (slot, channel_index) es interna:
+  slot  = (bnc_port - 1) // 4 + 1   →  1..8
+  idx   = (bnc_port - 1) % 4         →  0..3
 
 Modo EMA — Impact Hammer Test (ISO 7626-5)
 -------------------------------------------
 Captura sincronizada de impacto + respuesta:
-  · Canal 0: martillo modal (input, trigger)
-  · Canales 1-3: acelerómetros respuesta (output)
+  · 1 canal martillo (trigger)
+  · N canales acelerómetros respuesta (1..31)
   · Trigger: por nivel en canal de fuerza (e.g. > 0.5 N)
-  · Ventana: rectangular en input (force window), exponencial en output
   · Duración: 1-2 segundos típico
   · Promediado: 5-10 impactos para reducir ruido aleatorio
 
 Modo OMA — Operational Modal Analysis (ISO 20816)
 --------------------------------------------------
 Captura continua durante operación normal:
-  · 4 canales sincronizados (acelerómetros o proximidad)
+  · Hasta 32 canales sincronizados (acelerómetros / proximidad / mix)
   · Sin trigger — adquisición continua streaming
-  · Duración: 60-300 segundos a velocidad constante
+  · Duración: 60-300+ segundos a velocidad constante
   · Sample rate: 5-10 kHz (configurable hasta 51.2 kHz)
-  · Output: archivo .tdms para procesamiento posterior con SSI/FDD
+  · TDMS escrito **chunk-por-chunk** (RAM constante ~5 MB para evitar
+    OOM en captura 32ch × 300s × 5120 Hz que serían ~390 MB en RAM)
 
 Modo Simulated (para development sin hardware)
 -----------------------------------------------
-Genera data sintética que imita lo que devolvería el NI-9234. Útil para
-probar el pipeline modal end-to-end sin tarjeta conectada. Activable con
-`AcquisitionConfig.mode = "simulated"` o flag `--simulated` en el companion.
+Genera data sintética que imita lo que devolvería la maleta real. Útil
+para probar el pipeline modal end-to-end sin chasis conectado. Activable
+con `AcquisitionConfig.mode = "simulated_ema"` o `"simulated_oma"`
+o flag `--simulated` en el companion.
 
-NI-9234 specs
--------------
+NI-9234 specs (por módulo)
+--------------------------
 · 4 canales analógicos simultáneos
 · 24-bit resolución
 · Sample rate: 1.652 kHz to 51.2 kHz (16 valores discretos)
@@ -86,35 +110,110 @@ _NI9234_VALID_RATES = [
 
 @dataclass
 class ChannelConfig:
-    """Configuración de un canal del NI-9234."""
-    channel_index: int  # 0..3 para NI-9234
+    """
+    Configuración de un canal del NI-9234 dentro de la maleta cDAQ-9178.
+
+    Identificación del canal físico
+    -------------------------------
+    Hay dos maneras de identificar un canal y son mutuamente convertibles:
+
+    1. **bnc_port (1..32)** — el número impreso en el frente de la maleta.
+       Es lo que el operador ve. RECOMENDADO.
+
+    2. **module_slot (1..8) + channel_index (0..3)** — direccionamiento
+       NI-DAQmx nativo. El driver lo necesita así internamente.
+
+    Si pasas `bnc_port`, los otros dos se computan auto. Si pasas
+    `channel_index` solo (sin bnc_port) — modo legacy v3.31.200-, asume
+    `module_slot=1` (backward compat para single-module 4-canal).
+
+    Ejemplo:
+        ChannelConfig(bnc_port=5, name="1YA", coupling="IEPE",
+                      sensitivity_mv_per_eu=100.0, units="g")
+        # → module_slot=2, channel_index=0 (Mod2/ai0)
+
+        ChannelConfig(bnc_port=32, name="2YV", coupling="IEPE",
+                      sensitivity_mv_per_eu=100.0)
+        # → module_slot=8, channel_index=3 (Mod8/ai3)
+    """
     name: str           # Etiqueta del sensor (e.g. "1YA", "Hammer")
     coupling: str       # "IEPE", "AC", "DC"
     sensitivity_mv_per_eu: float  # 100.0 para Wilcoxon, 200.0 para Bently
+
+    # Identificación del canal físico — pasa bnc_port o channel_index
+    bnc_port: Optional[int] = None      # 1..32 (RECOMENDADO)
+    channel_index: int = 0              # 0..3 dentro del módulo (legacy)
+    module_slot: int = 1                # 1..8 dentro del chasis
+
     units: str = "g"    # "g", "mil", "N"
     voltage_range: float = 5.0  # ±V
+
+    def __post_init__(self) -> None:
+        """Normaliza bnc_port ↔ (module_slot, channel_index) post-init."""
+        if self.bnc_port is not None:
+            if not (1 <= self.bnc_port <= 32):
+                raise ValueError(
+                    f"bnc_port={self.bnc_port} fuera de rango [1..32]. "
+                    f"Maleta cDAQ-9178 + 8× NI-9234 soporta máximo 32 canales."
+                )
+            # Computa slot e idx desde bnc_port
+            self.module_slot = (self.bnc_port - 1) // 4 + 1
+            self.channel_index = (self.bnc_port - 1) % 4
+        else:
+            # Modo legacy: solo channel_index dado → asume Mod1
+            if not (0 <= self.channel_index <= 3):
+                raise ValueError(
+                    f"channel_index={self.channel_index} fuera de rango [0..3]."
+                )
+            if not (1 <= self.module_slot <= 8):
+                raise ValueError(
+                    f"module_slot={self.module_slot} fuera de rango [1..8]."
+                )
+            # Computa bnc_port para que esté siempre disponible
+            self.bnc_port = (self.module_slot - 1) * 4 + self.channel_index + 1
 
 
 @dataclass
 class AcquisitionConfig:
     """Configuración de una sesión de captura."""
-    mode: str  # "ema_triggered" | "oma_continuous" | "simulated"
+    mode: str  # "ema_triggered" | "oma_continuous" | "simulated_ema" | "simulated_oma"
     sample_rate_hz: float  # típico 5120 Hz para EMA, 10240 Hz para OMA
-    duration_s: float       # 1-2 seg EMA, 60-300 seg OMA
+    duration_s: float       # 1-2 seg EMA, 60-300+ seg OMA
     channels: List[ChannelConfig] = field(default_factory=list)
 
-    # Device chassis (e.g. "cDAQ1Mod1"). Si None, se autodetecta el primer
-    # NI-9234 disponible.
+    # Chasis del NI-DAQmx (típicamente "cDAQ1" para una sola maleta
+    # conectada). Si hay varias maletas, usar "cDAQ2", "cDAQ3", etc.
+    # discover_ni9234_modules() ayuda a identificar cuál está conectado.
+    chassis_name: str = "cDAQ1"
+
+    # DEPRECATED v3.31.201: usar chassis_name. Mantenido por backward
+    # compat — si se da, se interpreta como chassis_name (extrayendo el
+    # prefix hasta antes de "Mod" si tiene formato legacy "cDAQ1Mod1").
     device_name: Optional[str] = None
 
     # Solo para modo EMA:
-    trigger_channel: Optional[int] = None  # canal del martillo (e.g. 0)
+    trigger_channel: Optional[int] = None  # bnc_port del martillo (1..32)
     trigger_level_V: float = 0.5
     pre_trigger_samples: int = 100
     n_averages: int = 5  # número de impactos a promediar
 
+    # Streaming OMA: chunk size en segundos. Default 1s = buen balance
+    # entre overhead de I/O y RAM. Bajar a 0.5s si la captura tiene
+    # muchísimos canales (>16) y el disco es lento.
+    oma_chunk_seconds: float = 1.0
+
     # Output path del .tdms generado
     output_tdms_path: Optional[Path] = None
+
+    def __post_init__(self) -> None:
+        """Normaliza device_name legacy → chassis_name moderno."""
+        if self.device_name and self.chassis_name == "cDAQ1":
+            # Extrae el chasis del formato legacy "cDAQ1Mod1" → "cDAQ1"
+            legacy = self.device_name
+            if "Mod" in legacy:
+                self.chassis_name = legacy.split("Mod")[0]
+            else:
+                self.chassis_name = legacy
 
 
 def _nearest_valid_rate(requested: float) -> int:
@@ -127,9 +226,48 @@ def _expected_samples(config: AcquisitionConfig) -> int:
     return int(round(config.sample_rate_hz * config.duration_s))
 
 
+def _build_phys_channel(chassis_name: str, ch: ChannelConfig) -> str:
+    """
+    Construye el nombre físico NI-DAQmx para un ChannelConfig.
+
+    Ejemplo:
+        chassis_name="cDAQ1", ch.bnc_port=5
+        → "cDAQ1Mod2/ai0"  (slot 2, channel index 0 dentro del módulo)
+
+        chassis_name="cDAQ1", ch.bnc_port=32
+        → "cDAQ1Mod8/ai3"  (slot 8, channel index 3)
+    """
+    return f"{chassis_name}Mod{ch.module_slot}/ai{ch.channel_index}"
+
+
+def _resolve_trigger_phys(chassis_name: str,
+                            trigger_channel: int,
+                            channels: List[ChannelConfig]) -> str:
+    """
+    Construye el nombre físico del canal trigger para EMA.
+
+    `trigger_channel` puede ser:
+      · Un bnc_port (1..32) — preferido
+      · Un channel_index legacy (0..3) — para backward compat, asume Mod1
+    """
+    if trigger_channel >= 1 and trigger_channel <= 32:
+        # Asumimos bnc_port. Computa slot e idx directo.
+        slot = (trigger_channel - 1) // 4 + 1
+        idx = (trigger_channel - 1) % 4
+        return f"{chassis_name}Mod{slot}/ai{idx}"
+    elif 0 <= trigger_channel <= 3:
+        # Legacy: índice dentro de Mod1
+        return f"{chassis_name}Mod1/ai{trigger_channel}"
+    else:
+        raise ValueError(
+            f"trigger_channel={trigger_channel} fuera de rango. "
+            f"Usa bnc_port (1..32) o channel_index legacy (0..3)."
+        )
+
+
 def list_available_devices() -> List[Dict[str, str]]:
     """
-    Lista los chassis NI conectados al sistema con sus módulos.
+    Lista los chassis y módulos NI conectados al sistema.
 
     Returns:
         Lista de dicts {"name": str, "product_type": str, "serial": str}
@@ -138,7 +276,6 @@ def list_available_devices() -> List[Dict[str, str]]:
         ImportError si nidaqmx no está disponible
     """
     try:
-        import nidaqmx
         from nidaqmx.system import System
     except ImportError as exc:
         raise ImportError(
@@ -158,26 +295,123 @@ def list_available_devices() -> List[Dict[str, str]]:
     ]
 
 
+def discover_ni9234_modules(chassis_name: str = "cDAQ1") -> List[Dict]:
+    """
+    Detecta cuántos módulos NI-9234 hay instalados en el chasis y en qué slots.
+
+    Útil para validar que la maleta esté completa antes de configurar una
+    captura de 32 canales. Si solo hay 4 módulos instalados (slots 1-4),
+    el operador puede usar máximo BNC 1..16.
+
+    Args:
+        chassis_name: nombre del chasis (e.g. "cDAQ1"). Default "cDAQ1".
+
+    Returns:
+        Lista ordenada por slot:
+          [{"slot": 1, "device_name": "cDAQ1Mod1", "serial": "0x12345",
+            "bnc_range": (1, 4)},
+           {"slot": 2, "device_name": "cDAQ1Mod2", "serial": "0x12346",
+            "bnc_range": (5, 8)},
+           ...]
+        Vacío si no hay módulos 9234 detectados.
+
+    Raises:
+        ImportError si nidaqmx no está disponible
+    """
+    try:
+        from nidaqmx.system import System
+    except ImportError as exc:
+        raise ImportError(
+            "nidaqmx no está instalado. discover_ni9234_modules() solo "
+            "funciona en el laptop de captura con NI-DAQmx driver."
+        ) from exc
+
+    system = System.local()
+    modules = []
+    for dev in system.devices:
+        product = (dev.product_type or "").upper()
+        if "9234" not in product:
+            continue
+        # El driver NI nombra módulos como "cDAQ1Mod1", "cDAQ1Mod2"...
+        name = dev.name
+        if not name.startswith(chassis_name) or "Mod" not in name:
+            continue
+        try:
+            slot = int(name.split("Mod")[-1])
+        except (ValueError, IndexError):
+            continue
+        if not (1 <= slot <= 8):
+            continue
+        bnc_start = (slot - 1) * 4 + 1
+        bnc_end = bnc_start + 3
+        modules.append({
+            "slot": slot,
+            "device_name": name,
+            "product_type": dev.product_type,
+            "serial": str(dev.serial_num),
+            "bnc_range": (bnc_start, bnc_end),
+        })
+    return sorted(modules, key=lambda m: m["slot"])
+
+
+def validate_channels_against_hardware(
+    config: AcquisitionConfig,
+) -> Tuple[bool, List[str]]:
+    """
+    Verifica que todos los bnc_port del config tengan módulo físico instalado.
+
+    Útil pre-captura para evitar el error críptico de NI-DAQmx cuando se
+    pide un canal en un slot vacío.
+
+    Returns:
+        (ok, problems) — ok=True si todos los canales tienen hardware.
+        problems es lista de strings descriptivos de qué falta.
+    """
+    try:
+        modules = discover_ni9234_modules(config.chassis_name)
+    except ImportError:
+        # Sin driver no podemos validar. Asumimos OK (probablemente modo
+        # simulated en una máquina sin hardware).
+        return True, []
+
+    installed_slots = {m["slot"] for m in modules}
+    problems: List[str] = []
+    for ch in config.channels:
+        if ch.module_slot not in installed_slots:
+            problems.append(
+                f"Canal '{ch.name}' (BNC {ch.bnc_port}) requiere slot "
+                f"{ch.module_slot} pero ese slot está vacío. "
+                f"Slots con NI-9234: {sorted(installed_slots) or 'ninguno'}"
+            )
+    return len(problems) == 0, problems
+
+
 def self_test_channel(channel: ChannelConfig, sample_rate_hz: float = 5120,
-                       duration_s: float = 1.0) -> Dict:
+                       duration_s: float = 1.0,
+                       chassis_name: str = "cDAQ1") -> Dict:
     """
     Prueba rápida de un canal: captura 1 seg, devuelve estadísticas.
 
     Útil para validar conexión y sensibilidades antes de captura modal.
 
+    Args:
+        channel: ChannelConfig con bnc_port o (module_slot, channel_index)
+        sample_rate_hz: típico 5120 Hz
+        duration_s: típico 1 s
+        chassis_name: nombre del chasis (default "cDAQ1")
+
     Returns:
         dict {"mean_V": float, "rms_V": float, "peak_V": float,
-              "n_samples": int, "saturated": bool}
+              "n_samples": int, "saturated": bool, "phys_channel": str}
     """
     try:
         import nidaqmx
-        from nidaqmx.constants import TerminalConfiguration, AcquisitionType
+        from nidaqmx.constants import AcquisitionType
     except ImportError as exc:
         raise ImportError("nidaqmx requerido para self_test_channel") from exc
 
     n_samples = int(sample_rate_hz * duration_s)
-    device_name = "cDAQ1Mod1"  # asume primer módulo
-    phys_chan = f"{device_name}/ai{channel.channel_index}"
+    phys_chan = _build_phys_channel(chassis_name, channel)
 
     with nidaqmx.Task() as task:
         if channel.coupling.upper() == "IEPE":
@@ -220,6 +454,8 @@ def self_test_channel(channel: ChannelConfig, sample_rate_hz: float = 5120,
         "peak_V": float(np.abs(arr).max()),
         "n_samples": arr.size,
         "saturated": bool(np.abs(arr).max() >= channel.voltage_range * 0.95),
+        "phys_channel": phys_chan,
+        "bnc_port": channel.bnc_port,
     }
 
 
@@ -298,7 +534,7 @@ def _capture_ema(config: AcquisitionConfig, progress: Callable) -> Path:
     if config.trigger_channel is None:
         raise ValueError("trigger_channel requerido para modo ema_triggered")
 
-    device_name = config.device_name or "cDAQ1Mod1"
+    chassis = config.chassis_name
     n_samples = _expected_samples(config)
     accumulated: List[List[float]] = [[0.0] * n_samples for _ in config.channels]
 
@@ -308,7 +544,7 @@ def _capture_ema(config: AcquisitionConfig, progress: Callable) -> Path:
 
         with nidaqmx.Task() as task:
             for ch in config.channels:
-                phys = f"{device_name}/ai{ch.channel_index}"
+                phys = _build_phys_channel(chassis, ch)
                 if ch.coupling.upper() == "IEPE":
                     task.ai_channels.add_ai_accel_chan(
                         phys, sensitivity=ch.sensitivity_mv_per_eu,
@@ -327,7 +563,9 @@ def _capture_ema(config: AcquisitionConfig, progress: Callable) -> Path:
             )
 
             # Trigger analógico por nivel en el canal del martillo
-            trig_phys = f"{device_name}/ai{config.trigger_channel}"
+            trig_phys = _resolve_trigger_phys(
+                chassis, config.trigger_channel, config.channels,
+            )
             task.triggers.start_trigger.cfg_anlg_edge_start_trig(
                 trigger_source=trig_phys,
                 trigger_level=config.trigger_level_V,
@@ -360,34 +598,65 @@ def _capture_ema(config: AcquisitionConfig, progress: Callable) -> Path:
 
 def _capture_oma(config: AcquisitionConfig, progress: Callable) -> Path:
     """
-    Captura continua streaming para OMA.
+    Captura continua streaming para OMA con escritura TDMS incremental.
 
-    Workflow:
-      1. Configura todos los canales en modo continuous
-      2. Lee chunks de 1 segundo
-      3. Acumula en buffer + actualiza progreso
-      4. Al cumplir duration_s total, escribe TDMS
+    Diferencias vs versión legacy (4-canal, RAM completa):
+      · Usa TdmsWriter en context manager abierto durante toda la captura
+      · Escribe write_segment() cada chunk de N segundos (config.oma_chunk_seconds)
+      · RAM constante ~5 MB (solo el chunk actual), no crece con duration
+      · Soporta hasta 32 canales × cualquier duración sin OOM
+      · Si la captura falla a mitad, el TDMS queda parcial pero válido
+        (TdmsWriter cierra segmentos atómicamente — npTDMS puede leerlo)
+
+    Math de RAM:
+      Legacy: 32 ch × 300 s × 5120 Hz × 8 bytes = ~390 MB en RAM
+      Stream:  32 ch ×   1 s × 5120 Hz × 8 bytes = ~1.3 MB en RAM (constante)
     """
     try:
         import nidaqmx
         from nidaqmx.constants import AcquisitionType
         import numpy as np
+        from nptdms import TdmsWriter, ChannelObject, GroupObject, RootObject
     except ImportError as exc:
         raise ImportError(
-            "nidaqmx + numpy requeridos para captura OMA real. "
-            "Usa mode='simulated' para development sin hardware."
+            "nidaqmx + numpy + npTDMS requeridos para captura OMA real. "
+            "Usa mode='simulated_oma' para development sin hardware."
         ) from exc
 
-    device_name = config.device_name or "cDAQ1Mod1"
+    chassis = config.chassis_name
     fs = int(config.sample_rate_hz)
     total_samples = _expected_samples(config)
-    chunk_samples = fs  # 1 segundo por chunk
+    chunk_samples = max(int(config.oma_chunk_seconds * fs), 1)
 
-    buffers: List[List[float]] = [[] for _ in config.channels]
+    # Validar hardware presente antes de empezar (modo real)
+    ok, problems = validate_channels_against_hardware(config)
+    if not ok:
+        raise RuntimeError(
+            "Canales pedidos no tienen hardware instalado:\n  - "
+            + "\n  - ".join(problems)
+        )
 
-    with nidaqmx.Task() as task:
+    output_path = Path(config.output_tdms_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Metadata root + group escrito en el primer segmento
+    timestamp = datetime.now(timezone.utc).isoformat()
+    root = RootObject(properties={
+        "sample_rate_hz": float(config.sample_rate_hz),
+        "mode": config.mode,
+        "duration_s": float(config.duration_s),
+        "n_averages": int(config.n_averages),
+        "captured_at_utc": timestamp,
+        "chassis_name": chassis,
+        "n_channels": len(config.channels),
+        "streaming": True,
+        "chunk_seconds": float(config.oma_chunk_seconds),
+    })
+    group = GroupObject("Acquisition")
+
+    with nidaqmx.Task() as task, TdmsWriter(str(output_path)) as writer:
         for ch in config.channels:
-            phys = f"{device_name}/ai{ch.channel_index}"
+            phys = _build_phys_channel(chassis, ch)
             if ch.coupling.upper() == "IEPE":
                 task.ai_channels.add_ai_accel_chan(
                     phys, sensitivity=ch.sensitivity_mv_per_eu,
@@ -402,27 +671,58 @@ def _capture_oma(config: AcquisitionConfig, progress: Callable) -> Path:
         task.timing.cfg_samp_clk_timing(
             rate=fs,
             sample_mode=AcquisitionType.CONTINUOUS,
-            samps_per_chan=chunk_samples * 4,  # buffer interno generoso
+            # Buffer interno NI grande (4× chunk) para evitar overruns
+            # durante el write_segment() a disco
+            samps_per_chan=chunk_samples * 4,
         )
 
         task.start()
         collected = 0
+        first_segment = True
         while collected < total_samples:
             this_chunk = min(chunk_samples, total_samples - collected)
             data = task.read(number_of_samples_per_channel=this_chunk, timeout=30.0)
             if not isinstance(data[0], list):
-                data = [data]
-            for ch_idx, samples in enumerate(data):
-                buffers[ch_idx].extend(samples)
+                data = [data]  # caso 1-canal: nidaqmx devuelve flat list
+
+            # Construir ChannelObjects para este segmento
+            ch_objs = []
+            for ch_cfg, samples in zip(config.channels, data):
+                arr = np.asarray(samples, dtype=np.float32)  # float32 = 4 bytes
+                props = (
+                    {  # primer segmento lleva metadata del canal
+                        "module_slot": ch_cfg.module_slot,
+                        "channel_index": ch_cfg.channel_index,
+                        "bnc_port": ch_cfg.bnc_port,
+                        "coupling": ch_cfg.coupling,
+                        "sensitivity_mv_per_eu": float(ch_cfg.sensitivity_mv_per_eu),
+                        "units": ch_cfg.units,
+                        "voltage_range": float(ch_cfg.voltage_range),
+                        "wf_increment": 1.0 / float(config.sample_rate_hz),
+                        "wf_start_offset": 0.0,
+                    } if first_segment else {}
+                )
+                ch_objs.append(
+                    ChannelObject("Acquisition", ch_cfg.name, arr,
+                                   properties=props)
+                )
+
+            if first_segment:
+                writer.write_segment([root, group, *ch_objs])
+                first_segment = False
+            else:
+                writer.write_segment(ch_objs)
+
             collected += this_chunk
-            progress(collected / total_samples,
-                     f"OMA · {collected/fs:.1f} / {config.duration_s:.1f} s")
+            progress(
+                collected / total_samples,
+                f"OMA · {collected/fs:.1f}/{config.duration_s:.1f} s "
+                f"({len(config.channels)} ch streaming)"
+            )
         task.stop()
 
-    progress(0.95, "Escribiendo TDMS...")
-    _write_tdms(config, buffers)
-    progress(1.0, f"Listo · {total_samples} samples × {len(config.channels)} ch")
-    return config.output_tdms_path
+    progress(1.0, f"Listo · {total_samples} samples × {len(config.channels)} ch (TDMS streamed)")
+    return output_path
 
 
 # =====================================================================
@@ -459,11 +759,22 @@ def _capture_simulated(config: AcquisitionConfig, progress: Callable) -> Path:
         config.mode == "simulated_ema"
         or (config.mode == "simulated" and config.trigger_channel is not None)
     )
+    # Determinar qué canal es el martillo. trigger_channel puede ser:
+    #   · bnc_port (1..32) — comparar contra ch.bnc_port
+    #   · channel_index legacy (0..3) — comparar contra posición en lista
+    def _is_trigger_channel(ch_idx: int, ch: ChannelConfig) -> bool:
+        tc = config.trigger_channel
+        if tc is None:
+            return False
+        if 1 <= tc <= 32:
+            return ch.bnc_port == tc
+        return ch_idx == tc  # legacy
+
     if _is_ema_sim:
         # Simular EMA: martillo + respuesta
         modes = [(50.0, 0.02), (120.0, 0.015)]
         for ch_idx, ch in enumerate(config.channels):
-            if ch_idx == config.trigger_channel:
+            if _is_trigger_channel(ch_idx, ch):
                 # Martillo: impulso al t=0.05 seg con decaimiento rápido
                 impulse = np.zeros(n_samples)
                 t_impact = int(0.05 * fs)
@@ -538,8 +849,10 @@ def _write_tdms(config: AcquisitionConfig, data: List[List[float]]) -> None:
         "duration_s": float(config.duration_s),
         "n_averages": int(config.n_averages),
         "captured_at_utc": timestamp,
-        "device_name": config.device_name or "",
+        "chassis_name": config.chassis_name,
+        "device_name": config.device_name or "",  # legacy field
         "n_channels": len(config.channels),
+        "streaming": False,
     })
     group = GroupObject("Acquisition")
     channel_objs = []
@@ -547,7 +860,9 @@ def _write_tdms(config: AcquisitionConfig, data: List[List[float]]) -> None:
         ch_obj = ChannelObject(
             "Acquisition", ch_cfg.name, samples,
             properties={
+                "module_slot": ch_cfg.module_slot,
                 "channel_index": ch_cfg.channel_index,
+                "bnc_port": ch_cfg.bnc_port,
                 "coupling": ch_cfg.coupling,
                 "sensitivity_mv_per_eu": float(ch_cfg.sensitivity_mv_per_eu),
                 "units": ch_cfg.units,
