@@ -2412,40 +2412,91 @@ with tab_3d:
                     unsafe_allow_html=True,
                 )
 
-                # Cámara default SOLO la primera vez en esta sesión.
-                # Después, NO se pasa camera config → Plotly conserva
-                # la posición que el usuario rotó manualmente.
-                _cam_key = f"_modal_3d_cam_applied_{mode_sel.mode_number}"
-                _apply_cam = not st.session_state.get(_cam_key, False)
-                if _apply_cam:
-                    st.session_state[_cam_key] = True
+                # ===== Streamlit-side animation (resuelve camera reset) =====
+                # En vez de Plotly frames (que resetea camera al redraw),
+                # usamos st.fragment que rerenderiza solo este bloque cada
+                # 300ms. Cada frame es una Plotly figure estática con phase
+                # rotado. La uirevision preserva la cámara entre frames.
+                import math as _math
 
-                fig_3d = build_geometry_with_mode_shape(
-                    geom=_geom_session,
-                    mode_shape=mode_sel.mode_shape,
-                    channel_names=fdd.channel_names,
-                    mode_label=(f"Modo {mode_sel.mode_number} · "
-                                  f"{mode_sel.natural_frequency_hz:.2f} Hz · "
-                                  f"ζ = {mode_sel.damping_ratio_pct:.3f}%"),
-                    animate=_animate_ms,
-                    n_frames=48,
-                    frame_duration_ms=250,
-                    show_arrows=_show_arrows,
-                    show_ghost=_show_ghost,
-                    colormap=_cmap,
-                    apply_default_camera=_apply_cam,
-                )
-                # Key estable: Streamlit no recrea el chart entre reruns,
-                # asi uirevision puede preservar la posicion de camara que
-                # el usuario rotó manualmente.
-                st.plotly_chart(
-                    fig_3d,
-                    use_container_width=True,
-                    key=f"modeshape_3d_{mode_sel.mode_number}",
-                    config={"scrollZoom": True,
-                            "displayModeBar": True,
-                            "displaylogo": False},
-                )
+                _phase_key = f"_modal_phase_{mode_sel.mode_number}"
+                _play_key = f"_modal_playing_{mode_sel.mode_number}"
+                _cam_key = f"_modal_3d_cam_applied_{mode_sel.mode_number}"
+
+                if _phase_key not in st.session_state:
+                    st.session_state[_phase_key] = 0
+                if _play_key not in st.session_state:
+                    st.session_state[_play_key] = False
+
+                # Play / Pause como botones Streamlit
+                _btn_c1, _btn_c2, _btn_c3 = st.columns([1, 1, 4])
+                with _btn_c1:
+                    if st.button("▶ Play",
+                                   key=f"play_{mode_sel.mode_number}",
+                                   use_container_width=True,
+                                   type="primary" if not st.session_state[_play_key]
+                                                  else "secondary"):
+                        st.session_state[_play_key] = True
+                        st.rerun()
+                with _btn_c2:
+                    if st.button("⏸ Pause",
+                                   key=f"pause_{mode_sel.mode_number}",
+                                   use_container_width=True):
+                        st.session_state[_play_key] = False
+                        st.rerun()
+                with _btn_c3:
+                    _state_lbl = (
+                        "▶ playing — rota libremente, la cámara se mantiene"
+                        if st.session_state[_play_key] else "⏸ pausado"
+                    )
+                    st.caption(
+                        f"Fase actual: {st.session_state[_phase_key]}° · "
+                        f"{_state_lbl}"
+                    )
+
+                _is_playing = bool(st.session_state.get(_play_key))
+
+                @st.fragment(run_every=0.30 if _is_playing else None)
+                def _render_animated_chart():
+                    # Avanzar fase si está playing
+                    if st.session_state.get(_play_key):
+                        st.session_state[_phase_key] = (
+                            st.session_state[_phase_key] + 10
+                        ) % 360
+                    _phase_rad = _math.radians(
+                        st.session_state.get(_phase_key, 0)
+                    )
+
+                    # Camera default solo primera vez
+                    _apply_cam_local = not st.session_state.get(_cam_key, False)
+                    if _apply_cam_local:
+                        st.session_state[_cam_key] = True
+
+                    _fig = build_geometry_with_mode_shape(
+                        geom=_geom_session,
+                        mode_shape=mode_sel.mode_shape,
+                        channel_names=fdd.channel_names,
+                        mode_label=(f"Modo {mode_sel.mode_number} · "
+                                      f"{mode_sel.natural_frequency_hz:.2f} Hz · "
+                                      f"ζ = {mode_sel.damping_ratio_pct:.3f}%"),
+                        animate=False,   # NO usar Plotly frames
+                        show_arrows=_show_arrows,
+                        show_ghost=_show_ghost,
+                        colormap=_cmap,
+                        apply_default_camera=_apply_cam_local,
+                        phase_offset_rad=_phase_rad,
+                    )
+                    # Key estable + uirevision → cámara preservada
+                    st.plotly_chart(
+                        _fig,
+                        use_container_width=True,
+                        key=f"modeshape_3d_{mode_sel.mode_number}",
+                        config={"scrollZoom": True,
+                                "displayModeBar": True,
+                                "displaylogo": False},
+                    )
+
+                _render_animated_chart()
 
                 # ===== Botones Descargar MP4 / GIF con header KPI integrado =====
                 # Helper: resolver nombre del activo de forma defensiva
