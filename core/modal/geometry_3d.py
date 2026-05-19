@@ -1121,11 +1121,14 @@ def build_geometry_with_mode_shape(
                     dict(label="▶ Play",
                           method="animate",
                           args=[None, dict(
-                              frame=dict(duration=frame_duration_ms, redraw=True),
+                              # redraw=False: Plotly NO hace full redraw entre
+                              # frames, solo restyle de los atributos data.
+                              # → mesh vertices se actualizan SIN tocar layout
+                              # → camera del user se preserva.
+                              # Funciona con Mesh3d porque i/j/k connectivity
+                              # NO cambia entre frames (solo x/y/z).
+                              frame=dict(duration=frame_duration_ms, redraw=False),
                               fromcurrent=True, mode="immediate",
-                              # transition=0 critico: si hay duracion >0,
-                              # Plotly hace un relayout intermedio que puede
-                              # pisar la cámara que el user rotó manual.
                               transition=dict(duration=0),
                           )]),
                     dict(label="⏸ Pause",
