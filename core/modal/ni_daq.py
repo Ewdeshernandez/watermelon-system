@@ -612,23 +612,32 @@ def _capture_ema(config: AcquisitionConfig, progress: Callable) -> Path:
                 [np.asarray(d, dtype=np.float64) for d in raw]
             )  # shape (n_channels, n_samples_window)
 
-        # Software trigger en el canal del martillo
+        # Software trigger en el canal del martillo.
+        # v3.31.206 — Refactor: usar PEAK DETECTION en lugar de primer cruce
+        # de threshold. Razón: el martillo IEPE puede tener noise floor que
+        # cruza el threshold por ruido (offset DC, vibración ambiental) ANTES
+        # del impacto real, contaminando la alineación → el slice quedaba con
+        # el impacto al final, respuesta sin tiempo de decaer.
+        #
+        # Approach correcto: encontrar el sample donde |señal| es máximo →
+        # ese es el peak del impacto físico. Centrar el slice 4ms antes del
+        # peak garantiza que el impacto quede SIEMPRE al inicio del slice y
+        # la respuesta tenga toda la duration_s para decaer.
         hammer_signal = data_arr[trigger_idx_in_list]
-        # El martillo es IEPE — la señal está en EU (N en este caso).
-        # trigger_level_V se aplica como nivel de la señal directamente,
-        # interpretado en las mismas EU que el canal (N para el martillo).
         threshold = config.trigger_level_V
-        above = hammer_signal > threshold
-        crossings = np.where(np.diff(above.astype(int)) > 0)[0]
+        peak_value = float(np.abs(hammer_signal).max())
 
-        if len(crossings) == 0:
+        # Validar que sí hubo un golpe (peak > threshold). El threshold se
+        # interpreta en las EU del canal del martillo (N para PCB hammer).
+        if peak_value < threshold:
             failed_attempts.append(
                 f"Impacto {avg_idx + 1}: martillo NO superó {threshold} "
-                f"(peak observado: {np.abs(hammer_signal).max():.3f})"
+                f"(peak observado: {peak_value:.3f})"
             )
             continue
 
-        trigger_idx = int(crossings[0])
+        # Encontrar el sample del peak (impacto real)
+        trigger_idx = int(np.argmax(np.abs(hammer_signal)))
         start_idx = trigger_idx - pre_samples
         end_idx = start_idx + n_samples_per_impact
 
