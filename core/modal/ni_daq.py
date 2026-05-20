@@ -562,16 +562,25 @@ def _capture_ema(config: AcquisitionConfig, progress: Callable) -> Path:
                 samps_per_chan=n_samples,
             )
 
-            # Trigger analógico por nivel en el canal del martillo
+            # Trigger analógico por nivel en el canal del martillo.
+            # v3.31.204 fix — nidaqmx >= 1.0 cambió la API:
+            # · Antes: task.triggers.start_trigger.cfg_anlg_edge_start_trig(...)
+            #          task.triggers.start_trigger.pretrigger_samples = N
+            # · Ahora: task.triggers.reference_trigger.cfg_anlg_edge_ref_trig(
+            #          ..., pretrigger_samples=N) — TODO en una sola llamada.
+            # El reference_trigger es el patrón correcto para EMA porque permite
+            # capturar muestras ANTES del impacto (pretrigger window) además de
+            # después. start_trigger no soporta pretrigger samples directamente
+            # en la API moderna.
             trig_phys = _resolve_trigger_phys(
                 chassis, config.trigger_channel, config.channels,
             )
-            task.triggers.start_trigger.cfg_anlg_edge_start_trig(
+            task.triggers.reference_trigger.cfg_anlg_edge_ref_trig(
                 trigger_source=trig_phys,
+                pretrigger_samples=max(int(config.pre_trigger_samples), 2),
                 trigger_level=config.trigger_level_V,
                 trigger_slope=Slope.RISING,
             )
-            task.triggers.start_trigger.pretrigger_samples = config.pre_trigger_samples
 
             data = task.read(number_of_samples_per_channel=n_samples, timeout=30.0)
             if not isinstance(data[0], list):
