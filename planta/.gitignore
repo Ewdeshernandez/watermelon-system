@@ -1,6 +1,21 @@
-# Watermelon Planta — ignorar capturas locales
+# Watermelon Planta — ignorar archivos sensibles / locales
+
+# TDMS capturados localmente
 data/captures/*.tdms
 data/captures/.*
 
-# Streamlit cache local
+# Token JWT de auth (NO COMMITEAR — JWT del user logueado)
+data/.auth.json
+
+# SQLite de tracking de uploads (estado local)
+data/sync_state.db
+data/sync_state.db-journal
+data/sync_state.db-shm
+data/sync_state.db-wal
+
+# Streamlit secrets reales (mantener solo el .example)
 .streamlit/secrets.toml
+
+# Python cache
+__pycache__/
+*.pyc

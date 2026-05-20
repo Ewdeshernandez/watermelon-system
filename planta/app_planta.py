@@ -197,6 +197,128 @@ with cap_col2:
 
 st.divider()
 
+# ------------------------------------------------------------------
+# Sección SYNC con Watermelon Cloud (v3.31.209 — FASE B)
+# ------------------------------------------------------------------
+st.markdown("## ☁ Sincronización con Watermelon Cloud")
+
+try:
+    from auth_planta import current_user, login, logout
+    from sync_uploader import (
+        list_pending, list_uploaded, sync_all, get_sync_stats,
+    )
+    _SYNC_AVAILABLE = True
+except ImportError as _exc:
+    _SYNC_AVAILABLE = False
+    st.warning(
+        f"⚠ Módulo de sync no disponible: {_exc}\n\n"
+        f"Si querés sincronizar, instala supabase con: `pip install supabase`"
+    )
+
+if _SYNC_AVAILABLE:
+    _user = current_user()
+    _stats = get_sync_stats(_CAPTURES_DIR)
+
+    if _user is None:
+        # No logueado — mostrar formulario de login
+        with st.expander("🔐 Inicia sesión para sincronizar TDMS al Cloud",
+                          expanded=False):
+            st.caption(
+                "Una sola vez (necesitas internet ahora). Tu sesión queda "
+                "guardada y se renueva automáticamente cuando esté disponible."
+            )
+            with st.form("planta_login"):
+                _email = st.text_input("Email", placeholder="tu@email.com")
+                _pwd = st.text_input("Password", type="password")
+                if st.form_submit_button("Iniciar sesión", type="primary"):
+                    if not _email or not _pwd:
+                        st.error("Email y password requeridos")
+                    else:
+                        try:
+                            login(_email, _pwd)
+                            st.success("✓ Logueado. Recargando...")
+                            st.rerun()
+                        except RuntimeError as exc:
+                            st.error(f"Login falló: {exc}")
+
+        if _stats["pending"] > 0:
+            st.info(
+                f"📥 Tienes **{_stats['pending']} TDMS** "
+                f"({_stats['pending_mb']:.1f} MB) esperando ser subidos. "
+                f"Inicia sesión arriba para sincronizar."
+            )
+        else:
+            st.caption("No hay TDMS pendientes de sincronizar.")
+    else:
+        # Logueado — mostrar stats + botón sync
+        _login_col, _logout_col = st.columns([5, 1])
+        with _login_col:
+            st.success(f"✓ Logueado como **{_user['email']}**")
+        with _logout_col:
+            if st.button("Cerrar sesión", key="logout_btn"):
+                logout()
+                st.rerun()
+
+        _stat_col1, _stat_col2, _stat_col3 = st.columns(3)
+        _stat_col1.metric("Pendientes", _stats["pending"])
+        _stat_col2.metric("Ya en Cloud", _stats["uploaded"])
+        _stat_col3.metric("MB pendientes", f"{_stats['pending_mb']:.1f}")
+
+        if _stats["pending"] == 0:
+            st.info("🎉 Todo sincronizado — no hay TDMS pendientes")
+        else:
+            _pending_files = list_pending(_CAPTURES_DIR)
+            with st.expander(f"Ver los {len(_pending_files)} TDMS pendientes"):
+                for p in _pending_files[:50]:
+                    st.text(f"  · {p.name}  ({p.stat().st_size/(1024*1024):.2f} MB)")
+                if len(_pending_files) > 50:
+                    st.caption(f"...y {len(_pending_files) - 50} más")
+
+            if st.button(
+                f"🔄 **Sync ahora** — subir {_stats['pending']} TDMS al Cloud",
+                type="primary",
+                use_container_width=True,
+                key="sync_now_btn",
+            ):
+                _progress = st.progress(0.0, text="Iniciando sync...")
+                _status_area = st.empty()
+
+                def _on_file_done(idx, total, fname, msg):
+                    _progress.progress(idx / max(total, 1),
+                                        text=f"{idx}/{total} · {fname}")
+                    with _status_area.container():
+                        st.text(f"  {msg}")
+
+                with st.spinner("Subiendo TDMS al Cloud..."):
+                    result = sync_all(
+                        _CAPTURES_DIR,
+                        _user["email"],
+                        _user["access_token"],
+                        on_file_done=_on_file_done,
+                    )
+
+                _progress.empty()
+                if result["failed"] == 0:
+                    st.success(
+                        f"✓ **{result['uploaded']}/{result['total']} subidos** "
+                        f"exitosamente al Cloud."
+                    )
+                    st.balloons()
+                else:
+                    st.warning(
+                        f"⚠ {result['uploaded']} subidos · "
+                        f"{result['failed']} fallaron"
+                    )
+                    with st.expander("Ver errores"):
+                        for e in result["errors"]:
+                            st.error(f"**{e['file']}**: {e['error']}")
+                # Refrescar stats
+                import time as _t
+                _t.sleep(2)
+                st.rerun()
+
+st.divider()
+
 # Lista de capturas previas
 st.markdown("## 📂 Capturas previas en este equipo")
 captures = sorted(_CAPTURES_DIR.glob("*.tdms"),

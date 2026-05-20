@@ -1430,12 +1430,162 @@ with tab_acq:
 
     # -------- TDMS existente --------
     elif acq_mode.startswith("📁"):
-        st.markdown("**Subir archivo .tdms del NI-9234**")
-        st.caption(
-            "Carga el .tdms generado por el companion script o LabVIEW. "
-            "Watermelon ejecuta automáticamente el checklist ISO 7626-5 sobre el ensayo."
+        st.markdown("**Cargar archivo .tdms del NI-9234**")
+
+        # v3.31.209 — Fuente del TDMS: upload local vs Cloud (planta sync)
+        _tdms_source = st.radio(
+            "Fuente del archivo",
+            ["💾 Subir desde mi PC", "☁ Desde Watermelon Cloud (sync planta)"],
+            horizontal=True,
+            key="tdms_source",
+            help=(
+                "Cloud: muestra los TDMS que sincronizaste desde Watermelon "
+                "Planta Edition (laptop de planta). Requiere haber sincronizado "
+                "al menos un TDMS previamente."
+            ),
         )
-        tdms_up = st.file_uploader("Selecciona .tdms", type=["tdms"], key="tdms_up")
+
+        tdms_up = None
+
+        if _tdms_source.startswith("💾"):
+            st.caption(
+                "Carga el .tdms generado por el companion script, Watermelon "
+                "Planta o LabVIEW. Watermelon ejecuta automáticamente el "
+                "checklist ISO 7626-5 sobre el ensayo."
+            )
+            tdms_up = st.file_uploader(
+                "Selecciona .tdms", type=["tdms"], key="tdms_up",
+            )
+        else:
+            # ☁ Cloud — lista los TDMS del bucket modal-captures del user
+            st.caption(
+                "Estos son los TDMS que sincronizaste al Watermelon Cloud "
+                "desde Watermelon Planta Edition. Se listan los más recientes "
+                "primero."
+            )
+            try:
+                # Usar el cliente Supabase compartido del Watermelon Cloud
+                # (mismo helper que reports_archive.py para reusar cache)
+                from core.reports_archive import _get_supabase_client
+                _sb = _get_supabase_client()
+                if _sb is None:
+                    raise RuntimeError(
+                        "Cliente Supabase no inicializado. Verifica que "
+                        "st.secrets[supabase].service_key esté configurado en "
+                        "Streamlit Cloud."
+                    )
+                _user_email = _user.get("email", "")
+                if not _user_email:
+                    st.error("No se pudo determinar tu email. Re-loguéate.")
+                else:
+                    # Lista objetos en modal-captures/{email}/
+                    try:
+                        _objs = _sb.storage.from_("modal-captures").list(
+                            _user_email,
+                            options={
+                                "limit": 200,
+                                "sortBy": {"column": "created_at",
+                                            "order": "desc"},
+                            },
+                        )
+                    except Exception as _exc:
+                        # Bucket puede no existir todavía o sin policies
+                        _objs = []
+                        st.warning(
+                            f"No se pudo listar el bucket modal-captures: "
+                            f"{_exc}. Verifica que el bucket existe en "
+                            f"Supabase y que tienes las RLS policies aplicadas."
+                        )
+
+                    # Aplanar recursivamente las carpetas año/mes
+                    _all_tdms = []
+                    def _walk(prefix):
+                        try:
+                            items = _sb.storage.from_("modal-captures").list(
+                                prefix,
+                                options={"limit": 200,
+                                          "sortBy": {"column": "created_at",
+                                                      "order": "desc"}},
+                            )
+                        except Exception:
+                            return
+                        for item in items:
+                            name = item.get("name", "")
+                            if not name:
+                                continue
+                            # Carpeta (no tiene metadata) → recurse
+                            if item.get("id") is None:
+                                _walk(f"{prefix}/{name}")
+                            elif name.endswith(".tdms"):
+                                _all_tdms.append({
+                                    "full_path": f"{prefix}/{name}",
+                                    "name": name,
+                                    "created_at": item.get("created_at"),
+                                    "size": item.get("metadata", {}).get(
+                                        "size", 0
+                                    ),
+                                })
+
+                    _walk(_user_email)
+
+                    if not _all_tdms:
+                        st.info(
+                            f"No hay TDMS sincronizados para `{_user_email}`. "
+                            f"Para que aparezcan acá, abre Watermelon Planta "
+                            f"Edition en tu laptop de planta, captura algunos "
+                            f"datos y haz click en **'Sync ahora'** estando "
+                            f"online."
+                        )
+                    else:
+                        st.success(
+                            f"✓ **{len(_all_tdms)} TDMS** disponibles desde "
+                            f"Watermelon Planta"
+                        )
+                        _options = {
+                            f"{t['name']} ({t['size']/(1024*1024):.1f} MB · "
+                            f"{(t['created_at'] or 'N/A')[:19]})": t
+                            for t in _all_tdms
+                        }
+                        _selected_label = st.selectbox(
+                            "Selecciona un TDMS para procesar",
+                            options=list(_options.keys()),
+                            key="cloud_tdms_select",
+                        )
+                        _selected_meta = _options.get(_selected_label)
+
+                        if _selected_meta and st.button(
+                            "⬇ Cargar este TDMS",
+                            type="secondary",
+                            use_container_width=True,
+                            key="cloud_tdms_load_btn",
+                        ):
+                            with st.spinner(
+                                f"Descargando {_selected_meta['name']}..."
+                            ):
+                                _bytes = _sb.storage.from_(
+                                    "modal-captures"
+                                ).download(_selected_meta["full_path"])
+                                # Simular un file uploader file-like object
+                                import io
+                                class _CloudFile:
+                                    def __init__(self, name, data):
+                                        self.name = name
+                                        self._data = data
+                                    def read(self):
+                                        return self._data
+                                tdms_up = _CloudFile(
+                                    _selected_meta["name"], _bytes,
+                                )
+                                st.success(
+                                    f"✓ TDMS descargado del Cloud "
+                                    f"({len(_bytes)/(1024*1024):.1f} MB)"
+                                )
+            except Exception as _exc:  # noqa: BLE001
+                st.error(
+                    f"Error accediendo al Cloud: {_exc}. "
+                    f"Verifica que tu sesión es válida y que el bucket "
+                    f"`modal-captures` existe en Supabase."
+                )
 
         col_t1, col_t2 = st.columns(2)
         with col_t1:
