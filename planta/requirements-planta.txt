@@ -26,5 +26,10 @@ pandas>=2.0.0
 # Plotting (para mostrar previews de la captura en la UI)
 plotly>=5.18.0
 
-# HTTP para el sync uploader futuro (FASE B)
+# HTTP para futuros añadidos
 requests>=2.30.0
+
+# Supabase para sync uploader (FASE B v3.31.209)
+# Solo se necesita si vas a sincronizar TDMS al Watermelon Cloud.
+# Funciona sin esto si solo capturas offline.
+supabase>=2.0.0
