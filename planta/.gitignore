@@ -1,0 +1,6 @@
+# Watermelon Planta — ignorar capturas locales
+data/captures/*.tdms
+data/captures/.*
+
+# Streamlit cache local
+.streamlit/secrets.toml

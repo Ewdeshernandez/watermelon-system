@@ -1,0 +1,30 @@
+# Watermelon Planta Edition · Dependencias mínimas
+# ===================================================
+# Solo lo necesario para CAPTURAR en planta sin internet.
+# Sin Supabase, sin Anthropic, sin imageio-ffmpeg, sin reportlab, sin kaleido.
+# Total: ~80 MB vs ~500 MB del Watermelon completo.
+#
+# Instalación offline desde wheels/:
+#   pip install --no-index --find-links wheels/ -r requirements-planta.txt
+#
+# Instalación online (con internet):
+#   pip install -r requirements-planta.txt
+
+# Captura NI (REQUIRE NI-DAQmx driver instalado en el sistema)
+nidaqmx>=1.0.0
+
+# Lectura/escritura TDMS nativo NI
+npTDMS>=1.7.0
+
+# Streamlit para la UI
+streamlit>=1.40.0
+
+# Cómputo numérico
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Plotting (para mostrar previews de la captura en la UI)
+plotly>=5.18.0
+
+# HTTP para el sync uploader futuro (FASE B)
+requests>=2.30.0
