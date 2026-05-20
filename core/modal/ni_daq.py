@@ -507,23 +507,31 @@ def capture(
 
 def _capture_ema(config: AcquisitionConfig, progress: Callable) -> Path:
     """
-    Captura EMA con martillo modal.
+    Captura EMA con martillo modal usando SOFTWARE TRIGGER.
 
-    Workflow:
-      1. Configura todos los canales
-      2. Configura trigger por nivel en el canal del martillo
-      3. Para cada uno de N_averages impactos:
-         - Espera trigger
-         - Captura pre_trigger + duration samples
+    Por qué software trigger:
+    Los NI-9234 son ADCs sigma-delta — el hardware NO soporta analog
+    reference trigger (Status Code -200265 si se intenta). Es limitación
+    física del módulo. Solución estándar para EMA con NI-9234: capturar
+    continuamente y detectar el impacto en software.
+
+    Workflow (v3.31.205):
+      1. Configura todos los canales (sin trigger hardware)
+      2. Para cada uno de N_averages impactos:
+         - Captura FINITE de capture_window_factor × duration segundos
+           (3 segundos por default → el operador tiene tiempo de golpear)
+         - Lee todos los samples
+         - En software: busca el primer cruce ascendente del trigger_level
+           en el canal del martillo (identificado por bnc_port o índice)
+         - Extrae slice de [trigger_idx - pre_samples : + n_samples]
          - Acumula
-      4. Promedia los N_averages
+      3. Promedia solo sobre impactos exitosamente detectados
+      4. Si NINGÚN impacto se detectó → RuntimeError con hint diagnóstico
       5. Escribe TDMS con time-series promediado
     """
     try:
         import nidaqmx
-        from nidaqmx.constants import (
-            AcquisitionType, TerminalConfiguration, TriggerType, Slope,
-        )
+        from nidaqmx.constants import AcquisitionType
         import numpy as np
     except ImportError as exc:
         raise ImportError(
@@ -535,12 +543,42 @@ def _capture_ema(config: AcquisitionConfig, progress: Callable) -> Path:
         raise ValueError("trigger_channel requerido para modo ema_triggered")
 
     chassis = config.chassis_name
-    n_samples = _expected_samples(config)
-    accumulated: List[List[float]] = [[0.0] * n_samples for _ in config.channels]
+    n_samples_per_impact = _expected_samples(config)
+
+    # Capturamos 3× duration para dar ventana al operador para golpear
+    capture_window_factor = 3
+    n_samples_window = n_samples_per_impact * capture_window_factor
+
+    # Encontrar el índice del canal del martillo en config.channels
+    # trigger_channel puede ser bnc_port (1..32) o channel_index legacy (0..3)
+    trigger_idx_in_list: Optional[int] = None
+    tc = config.trigger_channel
+    for i, ch in enumerate(config.channels):
+        if tc is not None and 1 <= tc <= 32 and ch.bnc_port == tc:
+            trigger_idx_in_list = i
+            break
+        if tc is not None and 0 <= tc <= 3 and ch.channel_index == tc and ch.module_slot == 1:
+            trigger_idx_in_list = i
+            break
+    if trigger_idx_in_list is None:
+        raise ValueError(
+            f"trigger_channel={tc} no corresponde a ningún canal en --channels. "
+            f"Asegúrate de incluir el martillo en --channels con el mismo BNC."
+        )
+
+    pre_samples = max(int(config.pre_trigger_samples), 100)
+    accumulated = [np.zeros(n_samples_per_impact, dtype=np.float64)
+                   for _ in config.channels]
+    successful_impacts = 0
+    failed_attempts: List[str] = []
 
     for avg_idx in range(config.n_averages):
-        progress(avg_idx / config.n_averages,
-                 f"Impacto {avg_idx + 1}/{config.n_averages} — esperando trigger...")
+        progress(
+            avg_idx / config.n_averages,
+            f"Impacto {avg_idx + 1}/{config.n_averages} — "
+            f"golpea el martillo en los próximos "
+            f"{capture_window_factor * config.duration_s:.0f} s...",
+        )
 
         with nidaqmx.Task() as task:
             for ch in config.channels:
@@ -559,45 +597,94 @@ def _capture_ema(config: AcquisitionConfig, progress: Callable) -> Path:
             task.timing.cfg_samp_clk_timing(
                 rate=config.sample_rate_hz,
                 sample_mode=AcquisitionType.FINITE,
-                samps_per_chan=n_samples,
+                samps_per_chan=n_samples_window,
             )
 
-            # Trigger analógico por nivel en el canal del martillo.
-            # v3.31.204 fix — nidaqmx >= 1.0 cambió la API:
-            # · Antes: task.triggers.start_trigger.cfg_anlg_edge_start_trig(...)
-            #          task.triggers.start_trigger.pretrigger_samples = N
-            # · Ahora: task.triggers.reference_trigger.cfg_anlg_edge_ref_trig(
-            #          ..., pretrigger_samples=N) — TODO en una sola llamada.
-            # El reference_trigger es el patrón correcto para EMA porque permite
-            # capturar muestras ANTES del impacto (pretrigger window) además de
-            # después. start_trigger no soporta pretrigger samples directamente
-            # en la API moderna.
-            trig_phys = _resolve_trigger_phys(
-                chassis, config.trigger_channel, config.channels,
+            # SIN trigger hardware. Captura inmediatamente.
+            timeout = (n_samples_window / config.sample_rate_hz) + 10.0
+            raw = task.read(
+                number_of_samples_per_channel=n_samples_window, timeout=timeout,
             )
-            task.triggers.reference_trigger.cfg_anlg_edge_ref_trig(
-                trigger_source=trig_phys,
-                pretrigger_samples=max(int(config.pre_trigger_samples), 2),
-                trigger_level=config.trigger_level_V,
-                trigger_slope=Slope.RISING,
+            if not isinstance(raw[0], list):
+                raw = [raw]  # un solo canal
+
+            data_arr = np.array(
+                [np.asarray(d, dtype=np.float64) for d in raw]
+            )  # shape (n_channels, n_samples_window)
+
+        # Software trigger en el canal del martillo
+        hammer_signal = data_arr[trigger_idx_in_list]
+        # El martillo es IEPE — la señal está en EU (N en este caso).
+        # trigger_level_V se aplica como nivel de la señal directamente,
+        # interpretado en las mismas EU que el canal (N para el martillo).
+        threshold = config.trigger_level_V
+        above = hammer_signal > threshold
+        crossings = np.where(np.diff(above.astype(int)) > 0)[0]
+
+        if len(crossings) == 0:
+            failed_attempts.append(
+                f"Impacto {avg_idx + 1}: martillo NO superó {threshold} "
+                f"(peak observado: {np.abs(hammer_signal).max():.3f})"
             )
+            continue
 
-            data = task.read(number_of_samples_per_channel=n_samples, timeout=30.0)
-            if not isinstance(data[0], list):
-                data = [data]  # un solo canal
+        trigger_idx = int(crossings[0])
+        start_idx = trigger_idx - pre_samples
+        end_idx = start_idx + n_samples_per_impact
 
-            for ch_idx, samples in enumerate(data):
-                for i, v in enumerate(samples):
-                    accumulated[ch_idx][i] += v
+        if start_idx < 0:
+            failed_attempts.append(
+                f"Impacto {avg_idx + 1}: golpe demasiado pronto "
+                f"(antes de pre_trigger {pre_samples} samples). "
+                f"Espera un poquito antes de golpear."
+            )
+            continue
+        if end_idx > n_samples_window:
+            failed_attempts.append(
+                f"Impacto {avg_idx + 1}: golpe demasiado tarde "
+                f"(no cabe duration completa después del trigger). "
+                f"Golpea más temprano en la ventana."
+            )
+            continue
 
-    # Promediar
-    for ch_idx in range(len(accumulated)):
-        for i in range(n_samples):
-            accumulated[ch_idx][i] /= max(config.n_averages, 1)
+        # Acumular slice alineado al impacto
+        for ch_idx in range(len(config.channels)):
+            accumulated[ch_idx] += data_arr[ch_idx][start_idx:end_idx]
+        successful_impacts += 1
+
+    if successful_impacts == 0:
+        diag = "\n  - " + "\n  - ".join(failed_attempts) if failed_attempts else ""
+        raise RuntimeError(
+            f"No se detectaron impactos válidos en {config.n_averages} intentos.\n"
+            f"Posibles causas:\n"
+            f"  - Martillo no superó threshold={config.trigger_level_V}. "
+            f"Baja --trigger-level (ej: 0.1) o pega más fuerte.\n"
+            f"  - Sensibilidad del martillo mal configurada (--channels Hammer:BNC:IEPE:SENS)\n"
+            f"  - Martillo no conectado al BNC configurado en --trigger-bnc\n"
+            f"  - Tip del martillo muy blando para la estructura ensayada"
+            + diag
+        )
+
+    # Promediar solo sobre impactos exitosos
+    for ch_idx in range(len(config.channels)):
+        accumulated[ch_idx] /= float(successful_impacts)
+
+    if successful_impacts < config.n_averages:
+        progress(
+            0.92,
+            f"⚠ {successful_impacts}/{config.n_averages} impactos válidos. "
+            f"Continuando con promedios disponibles.",
+        )
 
     progress(0.95, "Escribiendo TDMS...")
-    _write_tdms(config, accumulated)
-    progress(1.0, f"Listo · {n_samples} samples × {len(config.channels)} ch")
+    # accumulated es lista de np.ndarray ahora (v3.31.205 software trigger)
+    # Convertir a lista de listas para _write_tdms (que acepta ambos por compat)
+    _write_tdms(config, [arr.tolist() for arr in accumulated])
+    progress(
+        1.0,
+        f"Listo · {n_samples_per_impact} samples × {len(config.channels)} ch · "
+        f"{successful_impacts} promedios válidos"
+    )
     return config.output_tdms_path
 
 
