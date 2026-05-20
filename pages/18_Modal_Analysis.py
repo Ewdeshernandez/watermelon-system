@@ -1235,6 +1235,180 @@ with tab_acq:
                     "resultante se sube luego en '📁 Importar archivo'."
                 )
 
+                # =====================================================
+                # v3.31.203 — Botón "Capturar ahora" (laptop local)
+                # =====================================================
+                # Alternativa al copy/paste del CLI: si nidaqmx está
+                # disponible en este equipo (laptop de planta con driver
+                # NI-DAQmx instalado), ofrecemos correr capture() directo
+                # desde Watermelon con progress bar. En Streamlit Cloud
+                # NI-DAQmx no existe → el bloque entero se esconde.
+                _nidaqmx_available = False
+                try:
+                    import nidaqmx as _nidaqmx_probe  # noqa: F401
+                    _nidaqmx_available = True
+                except ImportError:
+                    pass
+
+                if _nidaqmx_available:
+                    st.divider()
+                    st.markdown(
+                        "**🎙 Captura directa desde Watermelon · este equipo**"
+                    )
+                    st.caption(
+                        "Alternativa al comando técnico: ejecutar la captura "
+                        "ahora mismo desde este equipo sin pasar por terminal. "
+                        "Requiere maleta NI cDAQ-9178 conectada por USB y "
+                        "NI-DAQmx driver instalado (✓ detectado)."
+                    )
+
+                    _capture_disabled = (
+                        _n_enabled == 0
+                        or not st.session_state.get("_modal_can_capture", True)
+                    )
+
+                    if st.button(
+                        "🎙 Iniciar captura ahora",
+                        type="primary",
+                        disabled=_capture_disabled,
+                        key="ni_capture_now_btn",
+                        help=(
+                            "Ejecuta la captura inmediatamente. La UI se "
+                            "bloquea hasta que termine (típico EMA ~30s, "
+                            "OMA según --duration ~60-300s+). El TDMS se "
+                            "guarda en data/modal/captures/ con timestamp."
+                        ),
+                    ):
+                        from datetime import datetime as _dt
+                        from core.modal.ni_daq import (
+                            AcquisitionConfig as _AcqCfg,
+                            ChannelConfig as _ChCfg,
+                            capture as _ni_capture,
+                        )
+
+                        # Construir lista de ChannelConfig desde el grid
+                        _capture_channels = []
+                        for _r in _enabled_rows:
+                            _capture_channels.append(_ChCfg(
+                                bnc_port=int(_r["BNC"]),
+                                name=str(
+                                    _r.get("Nombre", f"Ch{_r['BNC']:02d}")
+                                ).strip(),
+                                coupling=str(
+                                    _r.get("Coupling", "IEPE")
+                                ).upper(),
+                                sensitivity_mv_per_eu=float(
+                                    _r.get("Sens (mV/EU)", 100.0)
+                                ),
+                                units=str(_r.get("Unidad", "g")),
+                            ))
+
+                        # Output path con timestamp
+                        _captures_dir = Path("data/modal/captures")
+                        _captures_dir.mkdir(parents=True, exist_ok=True)
+                        _ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+                        _out_path = (
+                            _captures_dir
+                            / f"capture_{_mode_token}_{_ts}.tdms"
+                        )
+
+                        # Build config — modo real (NO simulated; eso es
+                        # otra ruta en el código companion CLI)
+                        _capture_cfg = _AcqCfg(
+                            mode=(
+                                "ema_triggered" if not is_oma
+                                else "oma_continuous"
+                            ),
+                            sample_rate_hz=float(
+                                st.session_state.get("ni_fs", 5120)
+                            ),
+                            duration_s=float(
+                                st.session_state.get(_dur_key, _dur_default)
+                            ),
+                            channels=_capture_channels,
+                            chassis_name=_ni_chassis,
+                            trigger_channel=(
+                                _hammer_bnc
+                                if (not is_oma and _hammer_bnc is not None)
+                                else None
+                            ),
+                            n_averages=int(
+                                st.session_state.get("ni_avg_ema", 5)
+                            ),
+                            output_tdms_path=_out_path,
+                        )
+
+                        # Progress bar + callback
+                        _progress_bar = st.progress(0.0, text="Iniciando captura...")
+
+                        def _on_capture_progress(_p, _s):
+                            try:
+                                _progress_bar.progress(
+                                    min(max(_p, 0.0), 1.0), text=_s
+                                )
+                            except Exception:
+                                pass  # progress bar puede no existir si rerun
+
+                        try:
+                            with st.spinner(
+                                f"Capturando {len(_capture_channels)} canales "
+                                f"× {_capture_cfg.duration_s:.0f}s..."
+                            ):
+                                _result_path = _ni_capture(
+                                    _capture_cfg,
+                                    on_progress=_on_capture_progress,
+                                )
+                            _progress_bar.empty()
+                            st.success(
+                                f"✓ Captura completa: "
+                                f"`{_result_path.name}` en "
+                                f"`{_result_path.parent}/`"
+                            )
+                            st.session_state["_last_capture_path"] = str(
+                                _result_path
+                            )
+                        except Exception as _exc:  # noqa: BLE001
+                            _progress_bar.empty()
+                            st.error(f"✗ Captura falló: {_exc}")
+                            st.caption(
+                                "Verifica que la maleta esté conectada y los "
+                                "módulos instalados. Para diagnóstico corre "
+                                "`python scripts/ni_companion/capture.py "
+                                "--list-modules` en CLI."
+                            )
+
+                    # Auto-load: si hay captura reciente, ofrecer botón
+                    # para procesarla en este análisis sin tener que ir
+                    # al uploader.
+                    _last_capture = st.session_state.get(
+                        "_last_capture_path"
+                    )
+                    if _last_capture and Path(_last_capture).exists():
+                        if st.button(
+                            "📥 Cargar última captura en este análisis",
+                            key="auto_load_captured_tdms",
+                            help=(
+                                f"Procesa {Path(_last_capture).name} "
+                                "como si lo hubieras subido por '📁 "
+                                "Importar archivo'."
+                            ),
+                        ):
+                            from core.modal.tdms_importer import load_tdms
+                            try:
+                                _tdms_obj = load_tdms(Path(_last_capture))
+                                st.session_state["modal_tdms"] = _tdms_obj
+                                st.session_state["modal_tdms_settings"] = {
+                                    "f_target": 500.0,
+                                    "coh_thr": 0.8,
+                                }
+                                st.success(
+                                    "✓ TDMS cargado. Cambia el radio a "
+                                    "'📁 Importar archivo' para verlo "
+                                    "procesado contra ISO 7626-5."
+                                )
+                            except Exception as _exc:  # noqa: BLE001
+                                st.error(f"Error cargando TDMS: {_exc}")
+
     # -------- TDMS existente --------
     elif acq_mode.startswith("📁"):
         st.markdown("**Subir archivo .tdms del NI-9234**")
