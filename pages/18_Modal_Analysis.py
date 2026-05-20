@@ -987,12 +987,177 @@ with tab_acq:
                 )
                 _can_capture = True
 
-        # --- Canales activos (común a ambos modos) ---
-        st.markdown("**Canales activos**")
-        col_chs = st.columns(4)
-        for i in range(4):
-            with col_chs[i]:
-                st.checkbox(f"Ch{i}", value=True, key=f"ni_ch_{i}_en")
+        # --- Canales activos: grid 32 BNC con auto-discovery ---
+        # v3.31.202 — Reemplaza el grid hardcoded de 4 checkboxes por una
+        # tabla editable de 32 filas (1 por BNC port). Auto-detecta qué
+        # módulos NI-9234 están instalados en la maleta y pre-popula el
+        # default. Genera el comando --channels para el companion script.
+        st.markdown("**Canales activos · Maleta cDAQ-9178 (BNC 1..32)**")
+
+        # Auto-discovery del hardware (silencioso si no hay driver NI)
+        _ni_chassis = st.session_state.get("ni_chassis_name", "cDAQ1")
+        _installed_slots: set = set()
+        _discovery_msg = ""
+        try:
+            from core.modal.ni_daq import discover_ni9234_modules
+            _modules = discover_ni9234_modules(_ni_chassis)
+            _installed_slots = {m["slot"] for m in _modules}
+            if _modules:
+                _bnc_max = max(m["bnc_range"][1] for m in _modules)
+                _discovery_msg = (
+                    f"✓ Detectados {len(_modules)} NI-9234 en chasis '{_ni_chassis}' "
+                    f"→ BNC 1..{_bnc_max} disponibles"
+                )
+            else:
+                _discovery_msg = (
+                    f"⚠ No se detectó hardware NI-9234 en chasis '{_ni_chassis}'. "
+                    "Puedes configurar canales para captura remota, pero la "
+                    "ejecución se hará desde la laptop de planta vía companion."
+                )
+        except ImportError:
+            _discovery_msg = (
+                "ℹ NI-DAQmx no instalado en este equipo (normal en Streamlit Cloud). "
+                "Configura los canales aquí y ejecuta el comando técnico desde la "
+                "laptop de planta con el companion script."
+            )
+        except Exception as _exc:  # noqa: BLE001
+            _discovery_msg = f"⚠ Discovery falló: {_exc}"
+
+        st.caption(_discovery_msg)
+
+        # Plantilla default por modo: EMA reserva BNC 1 al martillo, OMA es
+        # todo acelerómetros Wilcoxon 100 mV/g.
+        import pandas as _pd
+        _default_rows = []
+        for _bnc in range(1, 33):
+            _slot = (_bnc - 1) // 4 + 1
+            _slot_installed = (_bnc <= len(_installed_slots) * 4
+                                if _installed_slots
+                                else True)  # si no hay discovery, mostrar todos
+            if not is_oma and _bnc == 1:
+                _default_rows.append({
+                    "BNC": _bnc, "Slot": _slot,
+                    "Habilitado": True, "Nombre": "Hammer",
+                    "Coupling": "IEPE", "Sens (mV/EU)": 2.4, "Unidad": "N",
+                    "HW": "✓" if _slot_installed else "—",
+                })
+            else:
+                _default_rows.append({
+                    "BNC": _bnc, "Slot": _slot,
+                    "Habilitado": _bnc <= 4 if not is_oma else _bnc <= 16,
+                    "Nombre": f"Ch{_bnc:02d}",
+                    "Coupling": "IEPE", "Sens (mV/EU)": 100.0, "Unidad": "g",
+                    "HW": "✓" if _slot_installed else "—",
+                })
+
+        # Usar session_state para preservar edits entre reruns. La key
+        # depende del modo para que cambiar EMA↔OMA no se "lleve" sensores
+        # configurados del otro modo.
+        _grid_key = f"ni_channel_grid_{'oma' if is_oma else 'ema'}"
+        if _grid_key not in st.session_state:
+            st.session_state[_grid_key] = _default_rows
+
+        _ch_df = _pd.DataFrame(st.session_state[_grid_key])
+
+        _edited = st.data_editor(
+            _ch_df,
+            key=f"ni_grid_editor_{'oma' if is_oma else 'ema'}",
+            hide_index=True,
+            use_container_width=True,
+            num_rows="fixed",  # exactamente 32 BNC, no se pueden agregar
+            column_config={
+                "BNC": st.column_config.NumberColumn(
+                    "BNC", help="Puerto BNC frontal de la maleta (1..32)",
+                    disabled=True, width="small",
+                ),
+                "Slot": st.column_config.NumberColumn(
+                    "Slot", help="Módulo NI-9234 (1..8) dentro del chasis",
+                    disabled=True, width="small",
+                ),
+                "Habilitado": st.column_config.CheckboxColumn(
+                    "✓", help="Marca para incluir este canal en la captura",
+                    width="small",
+                ),
+                "Nombre": st.column_config.TextColumn(
+                    "Sensor", help="Etiqueta del sensor (ej: 1YA, VE5807, Hammer)",
+                    max_chars=20, width="medium",
+                ),
+                "Coupling": st.column_config.SelectboxColumn(
+                    "Coupling", options=["IEPE", "AC", "DC"],
+                    help="IEPE para Wilcoxon, AC para Bently proximity, DC raro",
+                    width="small",
+                ),
+                "Sens (mV/EU)": st.column_config.NumberColumn(
+                    "Sens", help="Sensibilidad: 100 mV/g Wilcoxon, 200 mV/mil Bently, 2.4 mV/N hammer",
+                    min_value=0.1, max_value=10000.0, step=0.1, format="%.2f",
+                    width="small",
+                ),
+                "Unidad": st.column_config.SelectboxColumn(
+                    "EU", options=["g", "mil", "N", "ips", "mm/s"],
+                    help="Unidad de ingeniería del sensor",
+                    width="small",
+                ),
+                "HW": st.column_config.TextColumn(
+                    "HW", help="✓ = NI-9234 instalado en este slot, — = vacío",
+                    disabled=True, width="small",
+                ),
+            },
+        )
+        # Persistir edits para próximos reruns
+        st.session_state[_grid_key] = _edited.to_dict("records")
+
+        _enabled_rows = [r for r in st.session_state[_grid_key] if r.get("Habilitado")]
+        _n_enabled = len(_enabled_rows)
+
+        # KPI rápido + alertas
+        _kpi_col1, _kpi_col2, _kpi_col3 = st.columns(3)
+        _kpi_col1.metric("Canales habilitados", _n_enabled, delta=f"de 32 max")
+        _slots_used = sorted({r["Slot"] for r in _enabled_rows})
+        _kpi_col2.metric("Módulos requeridos", len(_slots_used),
+                          delta=f"slots {_slots_used}" if _slots_used else "—")
+        _ram_est_mb = (_n_enabled * float(st.session_state.get("ni_dur_oma", ni_dur))
+                        * float(st.session_state.get("ni_fs", 5120)) * 4) / (1024 * 1024)
+        _kpi_col3.metric("RAM streaming estimada", f"{_ram_est_mb:.0f} MB",
+                          help="Con streaming TDMS la RAM se mantiene ~5 MB constante "
+                               "sin importar la duración (esto es el tamaño total del "
+                               "TDMS final en disco, no la RAM durante captura).")
+
+        # Validación hardware vs slots requeridos
+        if _installed_slots and _slots_used:
+            _missing = [s for s in _slots_used if s not in _installed_slots]
+            if _missing:
+                modal_status_banner(
+                    title=f"⚠ Hardware faltante en {len(_missing)} slot(s)",
+                    detail=(
+                        f"Habilitaste canales en slots {_missing} pero esos módulos "
+                        f"NI-9234 no están instalados en el chasis. Slots con hardware: "
+                        f"{sorted(_installed_slots)}. **Antes de capturar:** o desactiva "
+                        f"esos canales o instala los módulos faltantes."
+                    ),
+                    severity="fail",
+                )
+                _can_capture = False
+
+        if _n_enabled == 0:
+            modal_status_banner(
+                title="Sin canales habilitados",
+                detail="Marca al menos un canal en la tabla para poder capturar.",
+                severity="warning",
+            )
+            _can_capture = False
+        elif not is_oma and not any(
+            r.get("Habilitado") and (r.get("Coupling") == "IEPE" and r.get("Sens (mV/EU)", 100) < 10)
+            for r in _enabled_rows
+        ):
+            modal_status_banner(
+                title="Modo EMA sin canal de martillo identificable",
+                detail=(
+                    "Para impact hammer testing necesitas al menos 1 canal con "
+                    "sensitivity baja (típicamente 2.4 mV/N para PCB modal hammer). "
+                    "Configura el martillo en BNC 1."
+                ),
+                severity="warning",
+            )
 
         # Persistir flag para el bloque del comando técnico
         st.session_state["_modal_can_capture"] = _can_capture
@@ -1018,6 +1183,7 @@ with tab_acq:
                 _dur_default = 200.0 if is_oma else 2.0
                 _cmd_lines = [
                     f"--mode {_mode_token}",
+                    f"--chassis {_ni_chassis}",
                     f"--fs {int(st.session_state.get('ni_fs', 5120))}",
                     f"--duration {float(st.session_state.get(_dur_key, _dur_default))}",
                 ]
@@ -1029,12 +1195,45 @@ with tab_acq:
                     _cmd_lines.append(
                         f"--averages {int(st.session_state.get('ni_avg_ema', 5))}"
                     )
-                _cmd_lines.append("--output ./capture.tdms")
+
+                # v3.31.202 — Generar --channels desde la tabla editable
+                # (antes hardcoded a 4 canales fijos). Detecta el martillo
+                # (sens < 10 mV/N en EMA) y lo pone como trigger-bnc.
+                _hammer_bnc = None
+                for _r in _enabled_rows:
+                    _coupling = _r.get("Coupling", "IEPE").upper()
+                    _sens = float(_r.get("Sens (mV/EU)", 100.0))
+                    _name = str(_r.get("Nombre", "")).strip() or f"Ch{_r['BNC']:02d}"
+                    _bnc = int(_r["BNC"])
+                    _cmd_lines.append(
+                        f"--channels {_name}:{_bnc}:{_coupling}:{_sens:g}"
+                    )
+                    if _hammer_bnc is None and _coupling == "IEPE" and _sens < 10:
+                        _hammer_bnc = _bnc
+
+                if not is_oma and _hammer_bnc is not None:
+                    _cmd_lines.insert(-len(_enabled_rows),
+                                       f"--trigger-bnc {_hammer_bnc}")
+                _cmd_lines.append(f"--output ./capture_{_mode_token}.tdms")
+
+                # Stats arriba del bloque para el operador
+                st.caption(
+                    f"📊 {len(_enabled_rows)} canales habilitados · "
+                    f"{len(_slots_used)} módulos NI-9234 requeridos · "
+                    f"modo {_mode_token.upper()}"
+                )
+
                 if _user_role == "admin":
-                    st.code(" \\\n    ".join(["watermelon-modal-capture"] + _cmd_lines),
+                    st.code(" \\\n    ".join(["python capture.py"] + _cmd_lines),
                              language="bash")
                 else:
                     st.code(" \\\n    ".join(_cmd_lines), language="text")
+
+                st.caption(
+                    "Copia y ejecuta este comando en la laptop de planta donde "
+                    "está conectada la maleta. NO requiere internet. El .tdms "
+                    "resultante se sube luego en '📁 Importar archivo'."
+                )
 
     # -------- TDMS existente --------
     elif acq_mode.startswith("📁"):
