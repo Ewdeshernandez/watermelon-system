@@ -625,8 +625,27 @@ with tab_setup:
         )
 
     # ----- Preview Plotly 3D -----
-    fig_geom = build_geometry_figure(geom)
-    st.plotly_chart(fig_geom, use_container_width=True)
+    # v3.31.208 — Envuelto en try/except defensivo. Si geom está vacía o
+    # malformada (típico al entrar al módulo sin seleccionar activo), antes
+    # crasheaba toda la página y los demás tabs (Adquisición, EMA, OMA)
+    # nunca renderizaban. Ahora muestra mensaje amigable y sigue.
+    try:
+        fig_geom = build_geometry_figure(geom)
+        st.plotly_chart(fig_geom, use_container_width=True)
+    except Exception as _exc_geom:  # noqa: BLE001
+        st.warning(
+            "⚠ No se pudo renderizar el preview 3D de la geometría. "
+            "Posibles causas:\n"
+            "1. No has seleccionado un activo o cargado una geometría.\n"
+            "2. La geometría no tiene bloques definidos todavía.\n"
+            "3. Hay un valor inválido en algún bloque.\n\n"
+            "**Soluciones:** ve a la sección de geometría arriba y "
+            "selecciona un activo registrado, o agrega bloques manualmente "
+            "en la sección de edición debajo. Los demás tabs (Adquisición, "
+            "EMA, OMA) sí están disponibles para usar."
+        )
+        with st.expander("Detalle técnico del error (para soporte)"):
+            st.code(f"{type(_exc_geom).__name__}: {_exc_geom}", language="text")
 
     # ----- Editor de bloques + sensores -----
     col_edit_b, col_edit_s = st.columns(2)
