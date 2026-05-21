@@ -13,6 +13,9 @@ data/sync_state.db-journal
 data/sync_state.db-shm
 data/sync_state.db-wal
 
+# Flag de onboarding (estado local, por usuario)
+data/.onboarded.flag
+
 # Streamlit secrets reales (mantener solo el .example)
 .streamlit/secrets.toml
 

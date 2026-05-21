@@ -49,27 +49,217 @@ st.set_page_config(
 _CAPTURES_DIR = Path(__file__).parent / "data" / "captures"
 _CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
-# Header con identidad de planta (visualmente distinto del Watermelon Cloud)
+# =====================================================================
+# Tema visual global (v3.31.214 — FASE E branding consistente)
+# Tipografía Inter / system fonts + colores SIGA + spacing pulido
+# =====================================================================
+st.markdown("""
+<style>
+    /* Tipografía consistente — Inter / SF Pro / Segoe */
+    html, body, [class*="css"] {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                      Inter, 'Helvetica Neue', sans-serif !important;
+    }
+    /* Botones primary con gradient SIGA (verde teal) */
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%) !important;
+        border: none !important;
+        box-shadow: 0 2px 8px rgba(15,118,110,0.25) !important;
+        font-weight: 600 !important;
+        transition: all 0.15s ease !important;
+    }
+    .stButton > button[kind="primary"]:hover {
+        transform: translateY(-1px) !important;
+        box-shadow: 0 4px 12px rgba(15,118,110,0.35) !important;
+    }
+    /* Metrics con borde sutil */
+    [data-testid="stMetric"] {
+        background: rgba(15,118,110,0.04) !important;
+        border-radius: 10px !important;
+        padding: 14px 16px !important;
+        border: 1px solid rgba(15,118,110,0.10) !important;
+    }
+    /* Quitar el "Made with Streamlit" footer default */
+    footer {visibility: hidden !important;}
+    /* Reducir padding top global */
+    .block-container {
+        padding-top: 2rem !important;
+        max-width: 1400px !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# =====================================================================
+# Header premium clase mundial (v3.31.214 — FASE E branding)
+# Diseño: gradient navy→teal + logo SVG inline + tagline + meta chips
+# =====================================================================
+_app_version = "v1.0.0"
+try:
+    _ver_file = _REPO_ROOT / "VERSION"
+    if _ver_file.exists():
+        _app_version = _ver_file.read_text().strip()
+except Exception:
+    pass
+
 st.markdown(
-    """
-    <div style="background:linear-gradient(135deg,#1e3a8a 0%,#0f766e 100%);
-                padding:24px 28px;border-radius:12px;color:white;
-                margin-bottom:24px;box-shadow:0 4px 18px rgba(0,0,0,0.15);">
-        <div style="display:flex;align-items:center;gap:14px;">
-            <div style="font-size:36px;">🍉</div>
-            <div>
-                <div style="font-size:24px;font-weight:800;letter-spacing:-0.3px;">
-                    Watermelon · Planta Edition
+    f"""
+    <div style="
+        background:linear-gradient(135deg,#1e3a8a 0%,#1e40af 45%,#0f766e 100%);
+        padding:28px 32px;border-radius:14px;color:white;
+        margin-bottom:24px;
+        box-shadow:0 6px 24px rgba(15,118,110,0.22),
+                   0 2px 8px rgba(30,58,138,0.18);
+        position:relative;overflow:hidden;">
+        <!-- Pattern decorativo sutil arriba derecha -->
+        <div style="position:absolute;top:-40px;right:-40px;
+                    width:200px;height:200px;border-radius:50%;
+                    background:radial-gradient(circle,
+                                                rgba(255,255,255,0.08) 0%,
+                                                rgba(255,255,255,0) 70%);
+                    pointer-events:none;"></div>
+        <!-- Logo inline + título -->
+        <div style="display:flex;align-items:center;gap:18px;position:relative;">
+            <svg width="56" height="56" viewBox="0 0 256 256"
+                 xmlns="http://www.w3.org/2000/svg"
+                 style="flex-shrink:0;
+                        filter:drop-shadow(0 2px 6px rgba(0,0,0,0.25));">
+                <defs>
+                    <linearGradient id="hdrRind" x1="0%" y1="100%"
+                                    x2="0%" y2="0%">
+                        <stop offset="0%" stop-color="#14532d"/>
+                        <stop offset="100%" stop-color="#4ade80"/>
+                    </linearGradient>
+                    <linearGradient id="hdrMeat" x1="0%" y1="100%"
+                                    x2="0%" y2="0%">
+                        <stop offset="0%" stop-color="#9f1239"/>
+                        <stop offset="100%" stop-color="#fda4af"/>
+                    </linearGradient>
+                </defs>
+                <circle cx="128" cy="128" r="124"
+                        fill="rgba(255,255,255,0.12)"/>
+                <g transform="translate(128 140)">
+                    <path d="M -88 0 A 88 88 0 0 0 88 0 L 80 0 A 80 80 0 0 1 -80 0 Z"
+                          fill="url(#hdrRind)"/>
+                    <path d="M -80 0 A 80 80 0 0 0 80 0 L 74 0 A 74 74 0 0 1 -74 0 Z"
+                          fill="#bbf7d0"/>
+                    <path d="M -74 0 A 74 74 0 0 0 74 0 Z"
+                          fill="url(#hdrMeat)"/>
+                    <ellipse cx="-40" cy="22" rx="4" ry="7"
+                             fill="#1f2937" transform="rotate(-15 -40 22)"/>
+                    <ellipse cx="-12" cy="38" rx="4" ry="7" fill="#1f2937"/>
+                    <ellipse cx="16" cy="36" rx="4" ry="7"
+                             fill="#1f2937" transform="rotate(8 16 36)"/>
+                    <ellipse cx="40" cy="22" rx="4" ry="7"
+                             fill="#1f2937" transform="rotate(15 40 22)"/>
+                </g>
+            </svg>
+            <div style="flex-grow:1;">
+                <div style="font-size:13px;font-weight:600;
+                            color:#a7f3d0;letter-spacing:3px;
+                            text-transform:uppercase;margin-bottom:2px;">
+                    SIGA GROUP · Modal Analysis Edition
                 </div>
-                <div style="font-size:13px;opacity:0.85;margin-top:2px;">
-                    Captura modal offline para hardware NI cDAQ-9178 + NI-9234
+                <div style="font-size:28px;font-weight:800;
+                            letter-spacing:-0.4px;line-height:1.1;">
+                    Watermelon Planta
                 </div>
+                <div style="font-size:13px;opacity:0.85;margin-top:6px;
+                            font-weight:400;">
+                    Captura modal offline · NI cDAQ-9178 + NI-9234 · ISO 7626 / 20816
+                </div>
+            </div>
+            <!-- Chip version a la derecha -->
+            <div style="background:rgba(255,255,255,0.15);
+                        border:1px solid rgba(255,255,255,0.25);
+                        border-radius:8px;padding:6px 12px;
+                        font-size:11px;font-weight:600;
+                        letter-spacing:1px;white-space:nowrap;
+                        backdrop-filter:blur(8px);">
+                {_app_version}
             </div>
         </div>
     </div>
     """,
     unsafe_allow_html=True,
 )
+
+# =====================================================================
+# Welcome Onboarding (v3.31.214 — FASE E3)
+# Se muestra SOLO la primera vez. Después se esconde con flag local.
+# =====================================================================
+_ONBOARD_FLAG = Path(__file__).parent / "data" / ".onboarded.flag"
+
+if not _ONBOARD_FLAG.exists():
+    st.markdown("""
+    <div style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);
+                border:2px solid #f59e0b;border-radius:12px;
+                padding:24px 28px;margin-bottom:24px;
+                box-shadow:0 4px 14px rgba(245,158,11,0.18);">
+        <div style="display:flex;align-items:center;gap:12px;
+                    margin-bottom:12px;">
+            <span style="font-size:28px;">👋</span>
+            <span style="font-size:20px;font-weight:800;color:#92400e;">
+                ¡Bienvenido a Watermelon Planta Edition!
+            </span>
+        </div>
+        <div style="color:#78350f;font-size:14px;line-height:1.6;
+                    margin-bottom:14px;">
+            Esta es la <b>primera vez</b> que abres la app.
+            Te dejamos 3 pasos breves para que empieces a capturar
+            análisis modal en menos de 5 minutos.
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);
+                    gap:14px;margin-top:18px;">
+            <div style="background:white;border-radius:10px;padding:14px;
+                        box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+                <div style="font-size:24px;margin-bottom:6px;">🔌</div>
+                <div style="font-weight:700;color:#1f2937;font-size:14px;">
+                    1. Conecta la maleta
+                </div>
+                <div style="font-size:12px;color:#64748b;margin-top:4px;">
+                    Conecta tu NI cDAQ-9178 al USB.
+                    Espera que el LED de power esté verde.
+                </div>
+            </div>
+            <div style="background:white;border-radius:10px;padding:14px;
+                        box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+                <div style="font-size:24px;margin-bottom:6px;">🎙</div>
+                <div style="font-weight:700;color:#1f2937;font-size:14px;">
+                    2. Captura tu primer ensayo
+                </div>
+                <div style="font-size:12px;color:#64748b;margin-top:4px;">
+                    Elige EMA o OMA abajo. Configura canales.
+                    Click "Iniciar captura".
+                </div>
+            </div>
+            <div style="background:white;border-radius:10px;padding:14px;
+                        box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+                <div style="font-size:24px;margin-bottom:6px;">☁</div>
+                <div style="font-weight:700;color:#1f2937;font-size:14px;">
+                    3. Sync al Cloud (opcional)
+                </div>
+                <div style="font-size:12px;color:#64748b;margin-top:4px;">
+                    Cuando tengas internet, login + "Sync ahora"
+                    para procesar en Watermelon Cloud.
+                </div>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    _onb_col1, _onb_col2 = st.columns([3, 1])
+    with _onb_col2:
+        if st.button("✓ Entendido", type="primary",
+                       use_container_width=True, key="dismiss_onboard"):
+            _ONBOARD_FLAG.parent.mkdir(parents=True, exist_ok=True)
+            _ONBOARD_FLAG.write_text("dismissed")
+            st.rerun()
+    with _onb_col1:
+        st.caption(
+            "Este mensaje no se mostrará otra vez. Si necesitas ayuda "
+            "después, consulta `README_PLANTA.txt` o contacta soporte@sigasas.com."
+        )
+    st.divider()
 
 # Estado del sistema
 col1, col2, col3 = st.columns(3)
@@ -347,3 +537,29 @@ else:
         f"Mostrando {min(len(captures), 20)} de {len(captures)} capturas. "
         f"Todas en `{_CAPTURES_DIR}`."
     )
+
+# =====================================================================
+# Footer corporativo (v3.31.214 — FASE E branding)
+# =====================================================================
+st.markdown(
+    f"""
+    <div style="margin-top:60px;padding-top:24px;
+                border-top:1px solid rgba(0,0,0,0.08);
+                display:flex;align-items:center;justify-content:space-between;
+                font-size:12px;color:#64748b;font-family:-apple-system,'Segoe UI',Inter,sans-serif;">
+        <div style="display:flex;align-items:center;gap:10px;">
+            <span style="display:inline-block;width:8px;height:8px;
+                         border-radius:50%;background:#0f766e;"></span>
+            <span><b style="color:#0f766e;">Watermelon Planta Edition</b>
+            &middot; {_app_version}</span>
+        </div>
+        <div style="opacity:0.85;">
+            © 2026 <b>SIGA GROUP S.A.S</b> &middot;
+            Modal Analysis ISO 7626 / 20816 &middot;
+            <a href="https://watermelonsys.net" target="_blank"
+               style="color:#0f766e;text-decoration:none;">watermelonsys.net</a>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
