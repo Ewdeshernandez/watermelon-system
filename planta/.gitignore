@@ -19,3 +19,11 @@ data/sync_state.db-wal
 # Python cache
 __pycache__/
 *.pyc
+
+# PyInstaller build artifacts (FASE C v3.31.213+)
+installer/build/
+installer/dist/
+installer/__pycache__/
+
+# Inno Setup compiled installer
+installer/Output/

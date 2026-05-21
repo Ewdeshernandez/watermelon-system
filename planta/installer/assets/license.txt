@@ -1,0 +1,129 @@
+LICENCIA DE USO · WATERMELON PLANTA EDITION
+=============================================
+
+Copyright © 2026 SIGA GROUP S.A.S
+Todos los derechos reservados.
+
+Versión: 1.0.0
+
+
+1. ACEPTACIÓN
+
+Al instalar y usar Watermelon Planta Edition (en adelante "el Software"),
+usted acepta los términos de esta licencia. Si no está de acuerdo, no
+instale ni use el Software.
+
+
+2. PROPIEDAD
+
+El Software, incluyendo código fuente, documentación, marca, logos y
+diseño, es propiedad exclusiva de SIGA GROUP S.A.S y está protegido por
+las leyes de propiedad intelectual de Colombia y tratados internacionales.
+
+
+3. LICENCIA OTORGADA
+
+SIGA GROUP otorga al licenciatario una licencia limitada, no exclusiva e
+intransferible para instalar y usar el Software en equipos autorizados
+bajo los términos de su contrato comercial con SIGA GROUP.
+
+
+4. RESTRICCIONES
+
+El licenciatario NO podrá:
+
+a) Copiar, modificar, distribuir o vender el Software a terceros sin
+   autorización expresa escrita de SIGA GROUP.
+
+b) Realizar ingeniería inversa, descompilar o desensamblar el Software,
+   salvo en la medida permitida por la ley aplicable.
+
+c) Eliminar o alterar los avisos de copyright, marcas registradas u
+   otras anotaciones de propiedad del Software.
+
+d) Usar el Software para fines ilegales o que violen derechos de terceros.
+
+
+5. DATOS Y PRIVACIDAD
+
+El Software puede capturar datos de vibración mediante hardware
+National Instruments. Estos datos son propiedad del licenciatario.
+SIGA GROUP no accede ni almacena datos del licenciatario sin su
+autorización expresa.
+
+Cuando el licenciatario opta por sincronizar capturas al Watermelon
+Cloud, los datos viajan cifrados (HTTPS/TLS) a infraestructura
+controlada por SIGA GROUP, bajo las políticas de privacidad descritas
+en https://watermelonsys.net/privacy.
+
+
+6. GARANTÍA Y RESPONSABILIDAD
+
+El Software se proporciona "TAL COMO ESTÁ", sin garantía de ningún tipo,
+expresa o implícita. SIGA GROUP no garantiza que el Software esté libre
+de errores ni que cumpla con todos los requisitos del licenciatario.
+
+En ningún caso SIGA GROUP será responsable por daños indirectos,
+incidentales, especiales o consecuentes derivados del uso o imposibilidad
+de uso del Software, incluyendo pero no limitado a pérdida de datos,
+ganancias o producción.
+
+La responsabilidad total de SIGA GROUP bajo esta licencia se limita al
+monto efectivamente pagado por el licenciatario por la licencia del
+Software durante los doce (12) meses anteriores al evento que dio origen
+a la reclamación.
+
+
+7. CUMPLIMIENTO NORMATIVO
+
+El Software implementa metodologías de análisis modal experimental (EMA)
+y operacional (OMA) conforme a:
+
+· ISO 7626-1 a 7626-6 (EMA)
+· ISO 20816 (vibración mecánica - mediciones operacionales)
+· ISO 18649 (estructuras - identificación modal)
+· API 684 (rotor dynamics)
+· API 618 §7.9 (criterio de separación modal)
+
+El uso del Software no exime al licenciatario de la responsabilidad
+profesional de validar técnicamente los resultados antes de tomar
+decisiones críticas (especialmente en aplicaciones de seguridad, ATEX,
+clase I div 2, plantas petroleras, etc.).
+
+
+8. TERMINACIÓN
+
+Esta licencia se mantiene vigente hasta su terminación. El licenciatario
+puede terminarla en cualquier momento desinstalando el Software.
+
+SIGA GROUP puede terminar esta licencia inmediatamente si el licenciatario
+incumple cualquier término. En caso de terminación, el licenciatario debe
+desinstalar y destruir todas las copias del Software.
+
+
+9. SOPORTE Y ACTUALIZACIONES
+
+El soporte técnico y las actualizaciones del Software están sujetas al
+contrato comercial vigente entre el licenciatario y SIGA GROUP.
+
+Para soporte técnico contactar:
+  Email:    soporte@sigasas.com
+  Web:      https://watermelonsys.net
+
+
+10. LEY APLICABLE Y JURISDICCIÓN
+
+Esta licencia se rige por las leyes de la República de Colombia.
+Cualquier disputa será resuelta en los tribunales competentes de Bogotá,
+Colombia.
+
+
+11. CONTACTO
+
+SIGA GROUP S.A.S
+Bogotá, Colombia
+soporte@sigasas.com
+https://watermelonsys.net
+
+
+Última actualización: Mayo 2026
