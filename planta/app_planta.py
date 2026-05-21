@@ -220,6 +220,18 @@ if _LIC.expires_soon:
     )
 
 # =====================================================================
+# Auto-update checker (v3.31.216 — FASE F)
+# Chequea GitHub Releases una vez por sesión + cache 24h.
+# Silencioso si no hay internet (Planta es offline-first).
+# =====================================================================
+try:
+    from updater import get_cached_check, render_update_banner
+    _UPDATE_INFO = get_cached_check(_app_version)
+    render_update_banner(_UPDATE_INFO)
+except ImportError:
+    _UPDATE_INFO = None  # updater es opcional, no romper si falta
+
+# =====================================================================
 # Welcome Onboarding (v3.31.214 — FASE E3)
 # Se muestra SOLO la primera vez. Después se esconde con flag local.
 # =====================================================================
@@ -372,6 +384,18 @@ with st.sidebar:
         f"ID:       {_LIC.license_id[:8]}...",
         language="text",
     )
+    st.divider()
+    st.markdown("**Actualizaciones**")
+    try:
+        from updater import render_update_check_button
+        render_update_check_button(_app_version)
+    except ImportError:
+        pass
+    st.caption(
+        "Chequeo automático cada 24h. Para deshabilitar: crea "
+        "el archivo `data/.no_updates.flag` y reinicia."
+    )
+
     st.divider()
     st.markdown("**Ayuda**")
     st.caption(
