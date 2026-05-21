@@ -142,12 +142,32 @@ def upload_one(
         _sys.path.insert(0, str(Path(__file__).parent))
         from auth_planta import _get_supabase_credentials  # type: ignore
     url, key = _get_supabase_credentials()
-    client = create_client(url, key)
 
-    # Importante: setear el JWT del user para que las RLS policies apliquen
-    # con SU identidad, no como anon
-    client.postgrest.auth(access_token)
-    client.storage.session.headers["Authorization"] = f"Bearer {access_token}"
+    # v3.31.210 fix — Para que las RLS policies de Storage reconozcan al user
+    # logueado (no como anon), el cliente debe inicializarse con headers
+    # custom que incluyan tanto la apikey como el Bearer token del JWT.
+    # La forma vieja (client.storage.session.headers[...]) NO funciona con las
+    # nuevas publishable keys (sb_publishable_*) ni con el storage3 moderno.
+    from supabase.client import ClientOptions  # type: ignore
+    options = ClientOptions(
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {access_token}",
+        }
+    )
+    client = create_client(url, key, options=options)
+    # Doble seguridad: también setear el session de auth del cliente para que
+    # postgrest y demás endpoints reconozcan al user
+    try:
+        client.auth.set_session(access_token, refresh_token="")
+    except Exception:
+        # set_session puede requerir refresh_token válido; si falla, los
+        # headers custom de ClientOptions siguen vigentes
+        pass
+    try:
+        client.postgrest.auth(access_token)
+    except Exception:
+        pass
 
     tdms_path = Path(tdms_path).resolve()
     if not tdms_path.exists():
