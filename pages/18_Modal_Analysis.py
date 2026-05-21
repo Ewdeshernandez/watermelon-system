@@ -1465,9 +1465,12 @@ with tab_acq:
             )
             try:
                 # Usar el cliente Supabase compartido del Watermelon Cloud
-                # (mismo helper que reports_archive.py para reusar cache)
-                from core.reports_archive import _get_supabase_client
-                _sb = _get_supabase_client()
+                # (mismo helper que reports_archive.py para reusar cache).
+                # v3.31.211 fix: nombre correcto es _get_archive_supabase_client
+                # (no _get_supabase_client como tenía antes — bug reportado en
+                # producción al cargar Tab Adquisición → Cloud sync).
+                from core.reports_archive import _get_archive_supabase_client
+                _sb = _get_archive_supabase_client()
                 if _sb is None:
                     raise RuntimeError(
                         "Cliente Supabase no inicializado. Verifica que "
