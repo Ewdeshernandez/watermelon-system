@@ -48,6 +48,7 @@ datas += [
     (str(_PLANTA_DIR / "app_planta.py"),                "planta"),
     (str(_PLANTA_DIR / "auth_planta.py"),                "planta"),
     (str(_PLANTA_DIR / "sync_uploader.py"),              "planta"),
+    (str(_PLANTA_DIR / "license_manager.py"),            "planta"),
     (str(_PLANTA_DIR / "pages" / "01_Captura_Modal.py"), "planta/pages"),
     # README y assets visibles al cliente
     (str(_PLANTA_DIR / "README_PLANTA.txt"),             "planta"),
@@ -107,6 +108,16 @@ hiddenimports += [
     "core.modal.ui_components",
     "auth_planta",
     "sync_uploader",
+    # Licencias (FASE D v3.31.215)
+    "license_manager",
+    "jwt",                       # PyJWT runtime
+    "jwt.algorithms",
+    "jwt.exceptions",
+    "cryptography.hazmat.primitives.asymmetric.rsa",
+    "cryptography.hazmat.primitives.asymmetric.padding",
+    "cryptography.hazmat.primitives.serialization",
+    "cryptography.hazmat.primitives.hashes",
+    "cryptography.hazmat.backends.openssl",
 ]
 
 # ============================================================

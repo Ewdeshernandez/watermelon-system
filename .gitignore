@@ -79,3 +79,17 @@ exports/
 *.pdf
 !docs/*.pdf
 !data/asset_documents_seed/**/*.pdf
+
+# --- Sistema de licencias RSA (FASE D) ---
+# CRÍTICO: la private_key.pem NUNCA debe llegar al repo.
+# Si se filtra, hay que regenerar TODAS las licencias emitidas y
+# hacer rebuild de Watermelon Planta con nueva public key.
+tools/.keys/
+tools/.keys/**
+tools/licenses_issued/
+tools/licenses_issued/**
+
+# --- Licencia activa del cliente (en Planta Edition) ---
+# El token va en planta/data/ del cliente final, NO del dev.
+planta/data/license.token
+planta/data/.license_cache.json
