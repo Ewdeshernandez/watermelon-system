@@ -93,3 +93,8 @@ tools/licenses_issued/**
 # El token va en planta/data/ del cliente final, NO del dev.
 planta/data/license.token
 planta/data/.license_cache.json
+
+# --- Cache del auto-updater (FASE F) ---
+# Local del cliente, no commitear.
+planta/data/.update_check_cache.json
+planta/data/.no_updates.flag

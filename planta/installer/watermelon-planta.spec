@@ -49,6 +49,7 @@ datas += [
     (str(_PLANTA_DIR / "auth_planta.py"),                "planta"),
     (str(_PLANTA_DIR / "sync_uploader.py"),              "planta"),
     (str(_PLANTA_DIR / "license_manager.py"),            "planta"),
+    (str(_PLANTA_DIR / "updater.py"),                    "planta"),
     (str(_PLANTA_DIR / "pages" / "01_Captura_Modal.py"), "planta/pages"),
     # README y assets visibles al cliente
     (str(_PLANTA_DIR / "README_PLANTA.txt"),             "planta"),
@@ -118,6 +119,9 @@ hiddenimports += [
     "cryptography.hazmat.primitives.serialization",
     "cryptography.hazmat.primitives.hashes",
     "cryptography.hazmat.backends.openssl",
+    # Auto-updater (FASE F v3.31.216)
+    "updater",
+    "urllib.request", "urllib.error", "urllib.parse",
 ]
 
 # ============================================================
