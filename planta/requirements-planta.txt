@@ -33,3 +33,8 @@ requests>=2.30.0
 # Solo se necesita si vas a sincronizar TDMS al Watermelon Cloud.
 # Funciona sin esto si solo capturas offline.
 supabase>=2.0.0
+
+# Verificación de licencias RSA-signed (FASE D v3.31.215)
+# OBLIGATORIO — la app no arranca sin license_manager.py funcional.
+pyjwt>=2.8.0
+cryptography>=41.0.0

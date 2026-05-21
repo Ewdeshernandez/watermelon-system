@@ -50,6 +50,30 @@ _CAPTURES_DIR = Path(__file__).parent / "data" / "captures"
 _CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
 # =====================================================================
+# Verificación de licencia (v3.31.215 — FASE D)
+# Bloquea la app si la licencia no es válida. Cachea en session_state
+# para no releer el disco en cada rerun.
+# =====================================================================
+try:
+    from license_manager import (
+        get_cached_license,
+        render_license_blocker,
+        render_license_status_chip,
+    )
+    _LIC = get_cached_license()
+    if not _LIC.valid:
+        # Mostrar pantalla bloqueante y detener toda la app
+        render_license_blocker(_LIC)
+        st.stop()
+except ImportError:
+    # license_manager.py debe existir siempre. Si no está, instalación corrupta.
+    st.error(
+        "⚠ Instalación corrupta: falta `license_manager.py`.\n\n"
+        "Contacta a SIGA GROUP para reinstalar Watermelon Planta."
+    )
+    st.stop()
+
+# =====================================================================
 # Tema visual global (v3.31.214 — FASE E branding consistente)
 # Tipografía Inter / system fonts + colores SIGA + spacing pulido
 # =====================================================================
@@ -182,6 +206,18 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# =====================================================================
+# Chip de status de licencia (v3.31.215 — FASE D)
+# =====================================================================
+render_license_status_chip(_LIC)
+if _LIC.expires_soon:
+    st.warning(
+        f"⚠ **Tu licencia vence en {_LIC.days_until_expiry} días** "
+        f"({_LIC.expires_at.strftime('%d/%m/%Y')}). "
+        f"Contacta a ehernandez@sigasas.com para renovar y evitar "
+        f"interrupciones en el servicio."
+    )
 
 # =====================================================================
 # Welcome Onboarding (v3.31.214 — FASE E3)
@@ -326,6 +362,17 @@ with st.sidebar:
     except (ImportError, AttributeError):
         st.code("npTDMS:     NO INSTALADO", language="text")
     st.divider()
+    st.markdown("**Licencia**")
+    st.code(
+        f"Cliente:  {_LIC.customer}\n"
+        f"Plan:     {_LIC.plan}\n"
+        f"Módulos:  {', '.join(_LIC.modules)}\n"
+        f"Canales:  hasta {_LIC.max_channels}\n"
+        f"Vence:    {_LIC.expires_at.strftime('%Y-%m-%d') if _LIC.expires_at else '—'}\n"
+        f"ID:       {_LIC.license_id[:8]}...",
+        language="text",
+    )
+    st.divider()
     st.markdown("**Ayuda**")
     st.caption(
         "Sigue los pasos en el README_PLANTA.txt del USB. "
@@ -358,9 +405,17 @@ with cap_col1:
         """,
         unsafe_allow_html=True,
     )
-    if st.button("▶ Iniciar captura EMA", type="primary",
-                  use_container_width=True, key="goto_ema"):
-        st.switch_page("pages/01_Captura_Modal.py")
+    if _LIC.has_module("ema"):
+        if st.button("▶ Iniciar captura EMA", type="primary",
+                      use_container_width=True, key="goto_ema"):
+            st.switch_page("pages/01_Captura_Modal.py")
+    else:
+        st.button(
+            "🔒 EMA no incluido en tu plan",
+            disabled=True, use_container_width=True, key="ema_locked",
+            help="Tu licencia no incluye EMA. Contacta a ehernandez@sigasas.com "
+                 "para upgrade.",
+        )
 
 with cap_col2:
     st.markdown(
@@ -380,10 +435,18 @@ with cap_col2:
         """,
         unsafe_allow_html=True,
     )
-    if st.button("▶ Iniciar captura OMA", type="primary",
-                  use_container_width=True, key="goto_oma"):
-        st.session_state["_planta_mode_preselect"] = "oma"
-        st.switch_page("pages/01_Captura_Modal.py")
+    if _LIC.has_module("oma"):
+        if st.button("▶ Iniciar captura OMA", type="primary",
+                      use_container_width=True, key="goto_oma"):
+            st.session_state["_planta_mode_preselect"] = "oma"
+            st.switch_page("pages/01_Captura_Modal.py")
+    else:
+        st.button(
+            "🔒 OMA no incluido en tu plan",
+            disabled=True, use_container_width=True, key="oma_locked",
+            help="Tu licencia no incluye OMA. Contacta a ehernandez@sigasas.com "
+                 "para upgrade a plan Pro o Enterprise.",
+        )
 
 st.divider()
 

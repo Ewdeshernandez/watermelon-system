@@ -101,9 +101,15 @@ Source: "..\.streamlit\secrets.toml.example"; \
     DestDir: "{app}\.streamlit"; \
     DestName: "secrets.toml.example"; Flags: ignoreversion
 
+; Instrucciones de activación de licencia — el cliente lee esto primero
+Source: "assets\LICENCIA_README.txt"; \
+    DestDir: "{app}\data"; Flags: ignoreversion
+
 [Dirs]
 ; Crear carpeta de capturas durante la instalación
 Name: "{app}\data\captures"; Permissions: users-modify
+; Carpeta data/ donde el cliente pega su license.token
+Name: "{app}\data"; Permissions: users-modify
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
@@ -114,7 +120,12 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
     Tasks: desktopicon
 
 [Run]
-; Mostrar README al terminar la instalación
+; Mostrar instrucciones de licencia al terminar la instalación
+Filename: "notepad.exe"; Parameters: """{app}\data\LICENCIA_README.txt"""; \
+    Description: "Ver instrucciones para activar tu licencia"; \
+    Flags: postinstall skipifsilent shellexec
+
+; Mostrar README operativo
 Filename: "notepad.exe"; Parameters: """{app}\README_PLANTA.txt"""; \
     Description: "Ver README de instalación"; \
     Flags: postinstall skipifsilent shellexec
