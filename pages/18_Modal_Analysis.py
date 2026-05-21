@@ -1557,8 +1557,8 @@ with tab_acq:
                         _selected_meta = _options.get(_selected_label)
 
                         if _selected_meta and st.button(
-                            "⬇ Cargar este TDMS",
-                            type="secondary",
+                            "⬇ Cargar y procesar este TDMS",
+                            type="primary",
                             use_container_width=True,
                             key="cloud_tdms_load_btn",
                         ):
@@ -1568,21 +1568,46 @@ with tab_acq:
                                 _bytes = _sb.storage.from_(
                                     "modal-captures"
                                 ).download(_selected_meta["full_path"])
-                                # Simular un file uploader file-like object
-                                import io
-                                class _CloudFile:
-                                    def __init__(self, name, data):
-                                        self.name = name
-                                        self._data = data
-                                    def read(self):
-                                        return self._data
-                                tdms_up = _CloudFile(
-                                    _selected_meta["name"], _bytes,
-                                )
-                                st.success(
-                                    f"✓ TDMS descargado del Cloud "
-                                    f"({len(_bytes)/(1024*1024):.1f} MB)"
-                                )
+                                # v3.31.212 fix — Cargar el TDMS YA al descargar
+                                # y guardar en session_state directamente, en
+                                # vez de esperar al botón "Procesar". El botón
+                                # 'Procesar' del modo file uploader hacía rerun
+                                # y perdía tdms_up porque era variable local.
+                                try:
+                                    from core.modal.tdms_importer import load_tdms
+                                    _tmp_cloud = Path(
+                                        f"/tmp/_cloud_{_selected_meta['name']}"
+                                    )
+                                    _tmp_cloud.write_bytes(_bytes)
+                                    _tdms_obj_cloud = load_tdms(_tmp_cloud)
+                                    st.session_state["modal_tdms"] = (
+                                        _tdms_obj_cloud
+                                    )
+                                    st.session_state["modal_tdms_settings"] = {
+                                        "f_target": float(
+                                            st.session_state.get(
+                                                "tdms_ftarget", 500.0
+                                            )
+                                        ),
+                                        "coh_thr": float(
+                                            st.session_state.get(
+                                                "tdms_coh", 0.8
+                                            )
+                                        ),
+                                    }
+                                    st.success(
+                                        f"✓ TDMS cargado del Cloud "
+                                        f"({len(_bytes)/(1024*1024):.1f} MB) "
+                                        f"— procesando..."
+                                    )
+                                    # Forzar rerun para que el resto del Tab
+                                    # vea el TDMS en session_state y renderice
+                                    # la validación ISO 7626-5
+                                    st.rerun()
+                                except Exception as _exc_load:
+                                    st.error(
+                                        f"Error cargando TDMS: {_exc_load}"
+                                    )
             except Exception as _exc:  # noqa: BLE001
                 st.error(
                     f"Error accediendo al Cloud: {_exc}. "
