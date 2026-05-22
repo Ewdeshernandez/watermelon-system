@@ -143,6 +143,10 @@ echo -e "${YELLOW}Streamlit logs abajo:${NC}"
 echo ""
 
 cd planta
+
+# Abrir el browser automáticamente en 3 segundos (en background)
+(sleep 3 && open "http://localhost:8501") &
+
 exec streamlit run app_planta.py \
     --server.port 8501 \
     --server.headless true \
