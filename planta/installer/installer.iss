@@ -49,9 +49,11 @@ DisableProgramGroupPage=yes
 ; License agreement mostrada en el wizard
 LicenseFile=assets\license.txt
 
-; Pre-install splash (opcional)
-WizardImageFile=compiler:WizModernImage-IS.bmp
-WizardSmallImageFile=compiler:WizModernSmallImage-IS.bmp
+; Pre-install splash (opcional) — comentado: en Inno Setup 6.4+ ya no
+; existen los archivos WizModernImage-IS.bmp. El wizard usa el default moderno
+; automáticamente cuando WizardStyle=modern (línea de abajo).
+; WizardImageFile=compiler:WizModernImage-IS.bmp
+; WizardSmallImageFile=compiler:WizModernSmallImage-IS.bmp
 
 ; Estilo del wizard
 WizardStyle=modern
