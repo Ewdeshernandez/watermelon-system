@@ -15,7 +15,7 @@ echo para correr Watermelon Planta. Tarda 1-2 minutos.
 echo.
 echo Pre-requisitos:
 echo   - Python 3.10+ instalado y en el PATH
-echo   - NI-DAQmx driver instalado (NI MAX debe verse en Start)
+echo   - Drivers de adquisicion Watermelon instalados
 echo.
 pause
 
@@ -71,13 +71,14 @@ echo ============================================================
 echo   INSTALACION COMPLETA
 echo ============================================================
 echo.
-echo Verificando que las librerias cargan correctamente...
-python -c "import streamlit; print('  streamlit:', streamlit.__version__)"
-python -c "import nidaqmx; print('  nidaqmx: ', nidaqmx.__version__)"
-python -c "import nptdms; print('  npTDMS:  ', nptdms.__version__)"
-python -c "import numpy; print('  numpy:   ', numpy.__version__)"
-python -c "import pandas; print('  pandas:  ', pandas.__version__)"
-python -c "import plotly; print('  plotly:  ', plotly.__version__)"
+echo Verificando integridad del sistema...
+python -c "import streamlit" 2>nul && echo   [OK] Interfaz grafica       || echo   [FAIL] Interfaz grafica
+python -c "import nidaqmx"  2>nul && echo   [OK] Adquisicion de datos  || echo   [FAIL] Adquisicion de datos
+python -c "import nptdms"   2>nul && echo   [OK] Formato de captura    || echo   [FAIL] Formato de captura
+python -c "import numpy"    2>nul && echo   [OK] Procesamiento numerico|| echo   [FAIL] Procesamiento numerico
+python -c "import pandas"   2>nul && echo   [OK] Manejo de datos       || echo   [FAIL] Manejo de datos
+python -c "import plotly"   2>nul && echo   [OK] Visualizacion         || echo   [FAIL] Visualizacion
+python -c "import jwt"      2>nul && echo   [OK] Sistema de licencias  || echo   [FAIL] Sistema de licencias
 
 echo.
 echo Listo! Ahora corre INICIAR.bat para abrir Watermelon Planta.

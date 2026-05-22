@@ -7,7 +7,7 @@ Edition. Reusa los componentes de core/modal/ del repo principal pero
 sin requerir auth ni Supabase.
 
 Flujo:
-1. Auto-discovery de la maleta NI (qué módulos están instalados)
+1. Auto-discovery de la maleta Watermelon (qué módulos están instalados)
 2. Selección modo EMA / OMA
 3. Parámetros normativos (fs, duración, trigger para EMA)
 4. Grid editable con N canales según hardware detectado
@@ -60,17 +60,21 @@ _chassis = "cDAQ1"
 try:
     _modules = discover_ni9234_modules(_chassis)
 except ImportError as exc:
-    st.error(f"NI-DAQmx no disponible: {exc}")
+    st.error(
+        f"Drivers de adquisición Watermelon no disponibles. "
+        f"Corre INSTALAR.bat y reinicia. (detalle técnico: {exc})"
+    )
     st.stop()
 except Exception as exc:
-    st.error(f"Discovery falló: {exc}")
+    st.error(f"Detección de la maleta falló: {exc}")
     _modules = []
 
 if not _modules:
     st.warning(
-        "⚠ No se detectaron módulos NI-9234 en chasis `cDAQ1`. "
-        "Verifica que la maleta esté conectada por USB y que aparezca "
-        "en NI MAX. Puedes seguir configurando pero NO podrás capturar."
+        "⚠ No se detectó la maleta Watermelon conectada. "
+        "Verifica que esté conectada por USB y que sus indicadores "
+        "estén encendidos. Puedes seguir configurando pero NO podrás "
+        "capturar."
     )
     _installed_slots = set()
     _max_bnc = 32
@@ -78,8 +82,8 @@ else:
     _installed_slots = {m["slot"] for m in _modules}
     _max_bnc = max(m["bnc_range"][1] for m in _modules)
     st.success(
-        f"✓ **{len(_modules)} módulo(s) NI-9234** en slots "
-        f"{sorted(_installed_slots)} → BNC 1..{_max_bnc} disponibles"
+        f"✓ **Maleta Watermelon conectada** "
+        f"→ BNC 1..{_max_bnc} disponibles ({_max_bnc} canales)"
     )
 
 # ------------------------------------------------------------------
@@ -115,7 +119,7 @@ with p_col1:
         value=int(st.session_state.get("planta_fs", 5120 if is_oma else 12800)),
         min_value=1024, max_value=51200, step=1024,
         key="planta_fs",
-        help="NI-9234 soporta hasta 51.2 kHz. Típico EMA 12800 Hz, OMA 5120 Hz.",
+        help="Hasta 51.2 kHz soportado. Típico EMA 12800 Hz, OMA 5120 Hz.",
     )
 
 if is_oma:
@@ -244,7 +248,7 @@ elif is_oma:
     kpi3.metric("Tamaño TDMS estimado", f"{_ram:.0f} MB")
 else:
     kpi3.metric("Martillo", "⚠ no detectado",
-                  help="Configura un canal con sens < 10 mV/N (típico PCB hammer)")
+                  help="Configura un canal con sensibilidad < 10 mV/N (típico martillo modal)")
 
 # Validaciones
 errors = []

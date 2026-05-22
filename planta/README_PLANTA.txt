@@ -1,15 +1,16 @@
 ============================================================
   WATERMELON PLANTA EDITION
-  Captura modal offline para hardware NI cDAQ-9178 + NI-9234
+  Captura modal offline · Sistema de adquisicion Watermelon
 ============================================================
 
-Este folder contiene una mini-app standalone que corre en una
-laptop de planta con la maleta NI conectada por USB. Permite al
-tecnico configurar canales y disparar capturas SIN INTERNET.
+Esta es una aplicacion standalone que corre en una laptop
+de planta con la maleta Watermelon conectada por USB.
+Permite al tecnico configurar canales y disparar capturas
+SIN INTERNET.
 
-Despues, cuando la laptop vuelva a tener conexion, los TDMS
-generados se pueden subir al Watermelon Cloud (manualmente por
-ahora; auto-sync viene en proximo release).
+Despues, cuando la laptop vuelva a tener conexion, los
+archivos generados se sincronizan automaticamente al
+Watermelon Cloud para procesamiento avanzado.
 
 
 ============================================================
@@ -19,18 +20,18 @@ ahora; auto-sync viene en proximo release).
 Ya instalados en este PC si seguiste el setup anterior:
   - Windows 10/11 64-bit
   - Python 3.10+ con "Add to PATH" marcado
-  - NI-DAQmx driver instalado (NI MAX detecta la maleta)
-  - Git for Windows (opcional)
+  - Drivers de adquisicion Watermelon instalados
+  - License token de Watermelon Planta (te lo entrega SIGA)
 
 
 ============================================================
   PASO 1 - INSTALAR
 ============================================================
 
-  1. Conecta la maleta NI cDAQ-9178 al USB del PC
-  2. Verifica que aparece en NI MAX como "cDAQ1"
+  1. Conecta la maleta Watermelon al USB del PC
+  2. Verifica que los indicadores de power esten encendidos
   3. Doble click en  INSTALAR.bat
-  4. Espera ~1-2 min mientras instala dependencias Python
+  4. Espera ~1-2 min mientras instala dependencias
   5. Cuando termine, te dice "INSTALACION COMPLETA"
 
 Si INSTALAR.bat da error sobre Python:
@@ -61,7 +62,7 @@ Si el browser NO abre solo:
 
   1. Verifica que en la parte superior dice:
        "Online" o "Offline" (no importa cual)
-       "N modulo(s) NI-9234 detectado(s)"
+       "Maleta Watermelon conectada"
        "N captura(s) guardada(s)"
 
   2. Selecciona el tipo de ensayo:
@@ -80,45 +81,41 @@ Si el browser NO abre solo:
        - Para OMA: espera a que termine los segundos
 
   5. Cuando termine, te dice "Captura completa" con un
-     mensaje verde y el nombre del archivo TDMS generado
+     mensaje verde y el nombre del archivo generado
 
 
 ============================================================
-  PASO 4 - SUBIR AL WATERMELON CLOUD
+  PASO 4 - SINCRONIZAR AL WATERMELON CLOUD
 ============================================================
 
 Cuando este PC vuelva a tener internet:
 
-  Opcion A - Manual (HOY):
-    1. Abre tu Mac o cualquier PC con internet
-    2. Abre  https://wm-home-final-2026.streamlit.app
-    3. Login con tu usuario
-    4. Sidebar: Modal Analysis
-    5. Pestana: Adquisicion
-    6. Radio: "Importar archivo de captura existente"
-    7. Sube el .tdms que esta en  planta\data\captures\
-    8. Watermelon Cloud procesa y muestra modos modales
+  1. En la pantalla principal de la app, abajo veras
+     la seccion "Sincronizacion con Watermelon Cloud"
 
-  Opcion B - Auto-sync (PROXIMO RELEASE):
-    En el siguiente sprint, esta app va a detectar cuando
-    vuelve el internet y subir automaticamente los TDMS
-    pendientes al Watermelon Cloud, sin que tengas que
-    hacer nada.
+  2. Inicia sesion con tu usuario y password
+     (la primera vez necesitas internet activo)
+
+  3. Click en "Sync ahora" — sube las capturas pendientes
+
+  4. Una vez en el Cloud, podes procesarlas con todas las
+     herramientas avanzadas (EMA, OMA, FEA, Mode Shapes 3D)
 
 
 ============================================================
   DONDE QUEDAN LOS ARCHIVOS
 ============================================================
 
-Todos los TDMS generados quedan en:
+Todos los archivos generados quedan en:
 
-   planta\data\captures\
+   data\captures\
 
 Nombrados con timestamp:
-   planta_ema_20260520_143055.tdms
-   planta_oma_20260520_150812.tdms
+   planta_ema_20260520_143055.<formato>
+   planta_oma_20260520_150812.<formato>
 
-Puedes copiarlos a un USB para llevarlos a oficina.
+Puedes copiarlos a un USB para llevarlos a oficina si
+preferis no usar el sync automatico.
 
 
 ============================================================
@@ -128,10 +125,18 @@ Puedes copiarlos a un USB para llevarlos a oficina.
 * "Python no se reconoce..."
   -> Reinstala Python 3.12 marcando "Add to PATH"
 
-* "Sin maleta NI conectada"
+* "Sin maleta Watermelon conectada"
   -> Verifica cable USB, cambia puerto USB
-  -> Abre NI MAX y mira si detecta la maleta
-  -> Si NI MAX la ve pero la app no, reinicia el PC
+  -> Verifica que los indicadores de power esten encendidos
+  -> Reinicia el PC si el problema persiste
+
+* "Drivers de adquisicion no detectados"
+  -> Corre INSTALAR.bat de nuevo
+  -> Si persiste, contacta soporte SIGA
+
+* "Licencia no valida"
+  -> Verifica que el archivo license.token este en data\
+  -> Si tu licencia vencio, contacta a SIGA para renovar
 
 * "Error de captura: ..."
   -> Verifica que los sensores esten bien conectados
@@ -147,13 +152,13 @@ Puedes copiarlos a un USB para llevarlos a oficina.
 
 
 ============================================================
-  SOPORTE
+  SOPORTE TECNICO
 ============================================================
 
 Para reportar problemas o pedir features nuevos:
 
-  Ewdes Hernandez
-  ehernandez@sigasas.com
+  SIGA GROUP S.A.S
+  Email:  ehernandez@sigasas.com
+  Web:    https://watermelonsys.net
 
-Repositorio del codigo:
-  https://github.com/Ewdeshernandez/watermelon-system
+(c) 2026 SIGA GROUP S.A.S — Todos los derechos reservados
