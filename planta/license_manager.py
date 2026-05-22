@@ -68,6 +68,23 @@ EXPIRY_WARNING_DAYS = 30  # Avisar al user cuando quedan ≤30 días
 
 ALL_MODULES = ["ema", "oma", "fea", "modes3d", "reports", "sync"]
 
+# ============================================================================
+# REVOCACIÓN ONLINE (FASE J v3.31.221)
+# ============================================================================
+# Endpoint público de SIGA que devuelve si una licencia fue revocada.
+# Planta llama acá al arrancar si hay internet — silencioso si no hay red.
+REVOCATION_CHECK_URL = (
+    "https://yxeqwkhybueelmkrdkgq.supabase.co/functions/v1/license-check"
+)
+REVOCATION_CHECK_TIMEOUT_S = 5  # No bloqueamos el arranque más de 5s
+# Cache local del último check exitoso (en data/.revocation_cache.json)
+REVOCATION_CACHE_FILENAME = ".revocation_cache.json"
+# Frecuencia: chequeamos online máximo 1 vez cada 24h
+REVOCATION_CHECK_INTERVAL_HOURS = 24
+# Grace periods: si no podemos validar en N días, qué hacer
+REVOCATION_GRACE_WARN_DAYS = 7    # Warning amarillo
+REVOCATION_GRACE_BLOCK_DAYS = 30  # Bloqueo total (evita ataque offline)
+
 
 # ============================================================================
 # DATA CLASS
@@ -91,6 +108,13 @@ class LicenseInfo:
     # Si valid=True pero quedan pocos días, este flag se prende
     expires_soon: bool = False
     days_until_expiry: int = 0
+    # Estado de revocación online (FASE J v3.31.221)
+    # Si valid=False y revoked=True, la causa fue revocación remota por SIGA
+    revoked: bool = False
+    revocation_reason: str = ""
+    # Si valid=True pero hace muchos días que no podemos validar online
+    revocation_stale_days: int = 0
+    revocation_stale_warning: bool = False
 
     def has_module(self, module_name: str) -> bool:
         """¿La licencia incluye este módulo? Ej: license.has_module('oma')."""
@@ -100,6 +124,10 @@ class LicenseInfo:
         """Serializable para st.session_state o caching."""
         return {
             "valid": self.valid,
+            "revoked": self.revoked,
+            "revocation_reason": self.revocation_reason,
+            "revocation_stale_days": self.revocation_stale_days,
+            "revocation_stale_warning": self.revocation_stale_warning,
             "customer": self.customer,
             "email": self.email,
             "plan": self.plan,
@@ -142,6 +170,148 @@ def _get_data_dir() -> Path:
 def get_license_path() -> Path:
     """Devuelve la ruta esperada del archivo license.token."""
     return _get_data_dir() / LICENSE_FILENAME
+
+
+def _get_revocation_cache_path() -> Path:
+    """Path del cache de revocación (en data/, gitignored)."""
+    return _get_data_dir() / REVOCATION_CACHE_FILENAME
+
+
+# ============================================================================
+# REVOCACIÓN ONLINE (FASE J v3.31.221)
+# ============================================================================
+
+def _read_revocation_cache() -> Optional[dict]:
+    """Lee el cache local. None si no existe o está corrupto."""
+    p = _get_revocation_cache_path()
+    if not p.exists():
+        return None
+    try:
+        import json
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _write_revocation_cache(license_id: str, status: str,
+                              reason: str = "") -> None:
+    """Guarda el resultado del último check exitoso."""
+    p = _get_revocation_cache_path()
+    try:
+        import json
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(
+            json.dumps({
+                "license_id": license_id,
+                "status": status,        # "active" o "revoked"
+                "reason": reason,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            }, indent=2),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass  # no es fatal
+
+
+def check_revocation_status(license_id: str) -> dict:
+    """
+    Chequea si la licencia fue revocada por SIGA.
+
+    Comportamiento:
+      1. Si hay cache reciente (<24h) → usa cache
+      2. Si no, llama al endpoint SIGA (timeout 5s)
+      3. Si endpoint responde "revoked" → cachea y devuelve revoked
+      4. Si endpoint responde "active" → cachea y devuelve active
+      5. Si endpoint falla (sin internet, server down) → usa cache viejo
+         o devuelve "unknown"
+
+    Returns:
+        {
+            "status": "active" | "revoked" | "unknown",
+            "reason": str,
+            "stale_days": int,       # días desde último check exitoso
+            "from_cache": bool,
+            "checked_online": bool,
+        }
+    """
+    cache = _read_revocation_cache()
+
+    # 1. Verificar si cache es del mismo license_id y reciente
+    if cache and cache.get("license_id") == license_id:
+        try:
+            cached_at = datetime.fromisoformat(cache["checked_at"])
+            age = datetime.now(timezone.utc) - cached_at
+            if age < timedelta(hours=REVOCATION_CHECK_INTERVAL_HOURS):
+                # Cache fresco — usarlo directo
+                return {
+                    "status": cache.get("status", "unknown"),
+                    "reason": cache.get("reason", ""),
+                    "stale_days": age.days,
+                    "from_cache": True,
+                    "checked_online": False,
+                }
+        except (KeyError, ValueError):
+            pass  # cache corrupto, ignorar
+
+    # 2. Hacer la request HTTP al endpoint SIGA
+    import urllib.parse
+    import urllib.request
+    import urllib.error
+    import json
+
+    url = (
+        f"{REVOCATION_CHECK_URL}?"
+        f"{urllib.parse.urlencode({'jti': license_id})}"
+    )
+
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={"User-Agent": "WatermelonPlanta-LicenseCheck"},
+        )
+        with urllib.request.urlopen(req, timeout=REVOCATION_CHECK_TIMEOUT_S) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        status = data.get("status", "unknown")
+        reason = data.get("reason", "")
+
+        # 3. Cachear el resultado
+        _write_revocation_cache(license_id, status, reason)
+
+        return {
+            "status": status,
+            "reason": reason,
+            "stale_days": 0,
+            "from_cache": False,
+            "checked_online": True,
+        }
+
+    except (urllib.error.URLError, urllib.error.HTTPError,
+            TimeoutError, ConnectionError, OSError,
+            json.JSONDecodeError, Exception):  # noqa: BLE001
+        # 4. Fallback al cache si lo hay (puede estar viejo)
+        if cache and cache.get("license_id") == license_id:
+            try:
+                cached_at = datetime.fromisoformat(cache["checked_at"])
+                age = datetime.now(timezone.utc) - cached_at
+                return {
+                    "status": cache.get("status", "unknown"),
+                    "reason": cache.get("reason", ""),
+                    "stale_days": age.days,
+                    "from_cache": True,
+                    "checked_online": False,
+                }
+            except (KeyError, ValueError):
+                pass
+
+        # Sin cache + sin internet — desconocido
+        return {
+            "status": "unknown",
+            "reason": "",
+            "stale_days": 0,
+            "from_cache": False,
+            "checked_online": False,
+        }
 
 
 # ============================================================================
@@ -307,6 +477,57 @@ def verify_license(token_path: Optional[Path] = None) -> LicenseInfo:
 
     days_left = (expires_at - now).days
     expires_soon = 0 <= days_left <= EXPIRY_WARNING_DAYS
+    license_id = str(payload.get("jti", ""))
+
+    # ------------------------------------------------------------------------
+    # 6. Verificar revocación online (FASE J v3.31.221)
+    # ------------------------------------------------------------------------
+    revocation_info = check_revocation_status(license_id) if license_id else {
+        "status": "unknown", "reason": "", "stale_days": 0,
+        "from_cache": False, "checked_online": False,
+    }
+
+    # Si SIGA la revocó explícitamente → invalidar la licencia
+    if revocation_info["status"] == "revoked":
+        return LicenseInfo(
+            valid=False,
+            revoked=True,
+            revocation_reason=revocation_info["reason"] or "Sin motivo especificado",
+            error_reason=(
+                f"Tu licencia fue revocada por SIGA GROUP.\n\n"
+                f"Motivo: {revocation_info['reason'] or 'No especificado'}\n\n"
+                f"Si crees que es un error, contacta a:\n"
+                f"  ehernandez@sigasas.com\n\n"
+                f"License ID: {license_id}"
+            ),
+            customer=str(payload.get("customer", "")),
+            email=str(payload.get("sub", "")),
+            license_id=license_id,
+        )
+
+    # Si llevamos demasiados días sin poder validar online → bloquear
+    if revocation_info["stale_days"] >= REVOCATION_GRACE_BLOCK_DAYS:
+        return LicenseInfo(
+            valid=False,
+            error_reason=(
+                f"No se ha podido validar tu licencia con SIGA GROUP en los "
+                f"últimos {revocation_info['stale_days']} días.\n\n"
+                f"Por seguridad, Watermelon Planta requiere conectarse a "
+                f"internet al menos una vez cada {REVOCATION_GRACE_BLOCK_DAYS} "
+                f"días para validar.\n\n"
+                f"Conecta este equipo a internet temporalmente para "
+                f"reactivar tu licencia."
+            ),
+            customer=str(payload.get("customer", "")),
+            email=str(payload.get("sub", "")),
+            license_id=license_id,
+        )
+
+    # Warning si llevamos varios días sin validar (no bloquea aún)
+    stale_warning = (
+        revocation_info["stale_days"] >= REVOCATION_GRACE_WARN_DAYS
+        and not revocation_info["checked_online"]
+    )
 
     return LicenseInfo(
         valid=True,
@@ -318,9 +539,11 @@ def verify_license(token_path: Optional[Path] = None) -> LicenseInfo:
         max_channels=max_channels,
         issued_at=issued_at,
         expires_at=expires_at,
-        license_id=str(payload.get("jti", "")),
+        license_id=license_id,
         expires_soon=expires_soon,
         days_until_expiry=days_left,
+        revocation_stale_days=revocation_info["stale_days"],
+        revocation_stale_warning=stale_warning,
     )
 
 
