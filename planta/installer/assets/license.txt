@@ -46,8 +46,8 @@ d) Usar el Software para fines ilegales o que violen derechos de terceros.
 
 5. DATOS Y PRIVACIDAD
 
-El Software puede capturar datos de vibración mediante hardware
-National Instruments. Estos datos son propiedad del licenciatario.
+El Software puede capturar datos de vibración mediante el sistema
+de adquisición Watermelon. Estos datos son propiedad del licenciatario.
 SIGA GROUP no accede ni almacena datos del licenciatario sin su
 autorización expresa.
 

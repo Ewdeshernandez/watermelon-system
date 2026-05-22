@@ -3,8 +3,8 @@ planta/app_planta.py — Watermelon Planta Edition · Entry Point
 ================================================================
 
 Mini-app Streamlit standalone para captura modal en planta sin internet.
-Diseñada para correr en laptop de campo con maleta NI cDAQ-9178 + NI-9234
-conectada por USB.
+Diseñada para correr en laptop de campo con la maleta Watermelon de
+adquisición de alta precisión conectada por USB.
 
 NO requiere:
 - Internet (todo el flujo es local)
@@ -15,8 +15,8 @@ NO requiere:
 
 SÍ requiere:
 - Python 3.10+ instalado en el PC
-- nidaqmx (driver NI-DAQmx instalado en sistema + pip)
-- npTDMS, numpy, pandas, streamlit, plotly
+- Drivers de adquisición Watermelon instalados en el sistema
+- numpy, pandas, streamlit, plotly
 
 Uso típico:
     streamlit run app_planta.py
@@ -189,7 +189,7 @@ st.markdown(
                 </div>
                 <div style="font-size:13px;opacity:0.85;margin-top:6px;
                             font-weight:400;">
-                    Captura modal offline · NI cDAQ-9178 + NI-9234 · ISO 7626 / 20816
+                    Captura modal offline · Sistema Watermelon de alta precisión · ISO 7626 / 20816
                 </div>
             </div>
             <!-- Chip version a la derecha -->
@@ -262,10 +262,10 @@ if not _ONBOARD_FLAG.exists():
                         box-shadow:0 1px 4px rgba(0,0,0,0.08);">
                 <div style="font-size:24px;margin-bottom:6px;">🔌</div>
                 <div style="font-weight:700;color:#1f2937;font-size:14px;">
-                    1. Conecta la maleta
+                    1. Conecta la maleta Watermelon
                 </div>
                 <div style="font-size:12px;color:#64748b;margin-top:4px;">
-                    Conecta tu NI cDAQ-9178 al USB.
+                    Conecta tu maleta Watermelon al puerto USB.
                     Espera que el LED de power esté verde.
                 </div>
             </div>
@@ -335,15 +335,17 @@ with col2:
         modules = discover_ni9234_modules("cDAQ1")
         if modules:
             st.success(
-                f"✓ **{len(modules)} módulo(s) NI-9234** detectado(s) "
+                f"✓ **Maleta Watermelon conectada** "
                 f"→ {len(modules)*4} canales disponibles"
             )
         else:
-            st.error("✗ Sin maleta NI conectada — verifica USB")
+            st.error("✗ Sin maleta Watermelon conectada — verifica USB")
     except ImportError:
-        st.error("✗ nidaqmx no instalado — corre INSTALAR.bat")
+        st.error(
+            "✗ Drivers de adquisición no detectados — corre INSTALAR.bat"
+        )
     except Exception as exc:
-        st.error(f"✗ Error discovery: {exc}")
+        st.error(f"✗ Error al detectar la maleta: {exc}")
 
 with col3:
     n_captures = len(list(_CAPTURES_DIR.glob("*.tdms")))
@@ -351,56 +353,170 @@ with col3:
 
 st.divider()
 
-# Sidebar con info técnica
+# =====================================================================
+# Sidebar industrial (v3.31.217 — FASE H: clase mundial sin hardware leak)
+# Estilo System1/AMS — branding + status sin nombres de libs/marcas
+# =====================================================================
+
+# Pre-computar status del sistema DAQ (silencioso, sin nombres de libs)
+_daq_status = "down"
+try:
+    from core.modal.ni_daq import discover_ni9234_modules as _disc
+    _mods = _disc("cDAQ1")
+    _daq_status = "ok" if _mods else "disconnected"
+    _daq_channels = len(_mods) * 4 if _mods else 0
+except ImportError:
+    _daq_status = "no_drivers"
+    _daq_channels = 0
+except Exception:
+    _daq_status = "error"
+    _daq_channels = 0
+
+# Mapa de status a (label, color, dot)
+_DAQ_STATUS = {
+    "ok":           ("Operativo",         "#10b981", "●"),
+    "disconnected": ("Sin maleta",        "#f59e0b", "●"),
+    "no_drivers":   ("Drivers faltantes", "#ef4444", "●"),
+    "error":        ("Error del sistema", "#ef4444", "●"),
+    "down":         ("No disponible",     "#94a3b8", "○"),
+}
+_lbl, _col, _dot = _DAQ_STATUS[_daq_status]
+
 with st.sidebar:
-    st.markdown("### 🛠 Watermelon Planta")
-    st.caption(f"Carpeta de capturas: `{_CAPTURES_DIR}`")
-    st.divider()
-    st.markdown("**Versiones**")
-    try:
-        ver_file = _REPO_ROOT / "VERSION"
-        if ver_file.exists():
-            st.code(f"Watermelon: {ver_file.read_text().strip()}", language="text")
-    except Exception:
-        pass
-    try:
-        import nidaqmx
-        st.code(f"nidaqmx:    {nidaqmx.__version__}", language="text")
-    except (ImportError, AttributeError):
-        st.code("nidaqmx:    NO INSTALADO", language="text")
-    try:
-        import nptdms
-        st.code(f"npTDMS:     {nptdms.__version__}", language="text")
-    except (ImportError, AttributeError):
-        st.code("npTDMS:     NO INSTALADO", language="text")
-    st.divider()
-    st.markdown("**Licencia**")
-    st.code(
-        f"Cliente:  {_LIC.customer}\n"
-        f"Plan:     {_LIC.plan}\n"
-        f"Módulos:  {', '.join(_LIC.modules)}\n"
-        f"Canales:  hasta {_LIC.max_channels}\n"
-        f"Vence:    {_LIC.expires_at.strftime('%Y-%m-%d') if _LIC.expires_at else '—'}\n"
-        f"ID:       {_LIC.license_id[:8]}...",
-        language="text",
+    # --- Branding header del sidebar ---
+    st.markdown(
+        """
+        <div style="padding:12px 4px 16px 4px;border-bottom:1px solid rgba(0,0,0,0.08);
+                    margin-bottom:14px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <svg width="32" height="32" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg"
+                     style="flex-shrink:0;">
+                    <defs>
+                        <linearGradient id="sbBg" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#1e3a8a"/>
+                            <stop offset="100%" stop-color="#0f766e"/>
+                        </linearGradient>
+                    </defs>
+                    <circle cx="128" cy="128" r="120" fill="url(#sbBg)"/>
+                    <g transform="translate(128 140)">
+                        <path d="M -72 0 A 72 72 0 0 0 72 0 L 66 0 A 66 66 0 0 1 -66 0 Z" fill="#16a34a"/>
+                        <path d="M -66 0 A 66 66 0 0 0 66 0 Z" fill="#e11d48"/>
+                        <ellipse cx="-26" cy="22" rx="3.5" ry="6" fill="#1f2937"/>
+                        <ellipse cx="6"   cy="32" rx="3.5" ry="6" fill="#1f2937"/>
+                        <ellipse cx="32"  cy="22" rx="3.5" ry="6" fill="#1f2937"/>
+                    </g>
+                </svg>
+                <div>
+                    <div style="font-size:14px;font-weight:800;color:#0f766e;
+                                letter-spacing:0.3px;line-height:1.1;">
+                        Watermelon
+                    </div>
+                    <div style="font-size:10px;font-weight:600;color:#64748b;
+                                letter-spacing:2px;text-transform:uppercase;">
+                        Planta Edition
+                    </div>
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
+
+    # --- Status panel: maleta + canales + última captura ---
+    st.markdown("##### Estado del sistema")
+
+    _channels_str = (
+        f"{_daq_channels} canales disponibles" if _daq_channels > 0
+        else "—"
+    )
+    st.markdown(
+        f"""
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;
+                        padding:8px 12px;background:rgba(15,118,110,0.05);
+                        border-radius:8px;border-left:3px solid {_col};">
+                <div>
+                    <div style="font-size:11px;color:#64748b;font-weight:500;text-transform:uppercase;
+                                letter-spacing:1px;">Maleta Watermelon</div>
+                    <div style="font-size:13px;color:#1f2937;font-weight:700;">{_lbl}</div>
+                </div>
+                <div style="color:{_col};font-size:18px;line-height:1;">{_dot}</div>
+            </div>
+            <div style="padding:8px 12px;background:rgba(15,118,110,0.05);border-radius:8px;">
+                <div style="font-size:11px;color:#64748b;font-weight:500;text-transform:uppercase;
+                            letter-spacing:1px;">Capacidad</div>
+                <div style="font-size:13px;color:#1f2937;font-weight:700;">{_channels_str}</div>
+            </div>
+            <div style="padding:8px 12px;background:rgba(15,118,110,0.05);border-radius:8px;">
+                <div style="font-size:11px;color:#64748b;font-weight:500;text-transform:uppercase;
+                            letter-spacing:1px;">Capturas locales</div>
+                <div style="font-size:13px;color:#1f2937;font-weight:700;">
+                    {len(list(_CAPTURES_DIR.glob('*.tdms')))} archivos
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.divider()
-    st.markdown("**Actualizaciones**")
+
+    # --- Licencia (compacta sin license_id técnico) ---
+    st.markdown("##### Licencia")
+    _vence = (_LIC.expires_at.strftime('%d/%m/%Y')
+               if _LIC.expires_at else '—')
+    _modules_str = ', '.join(_LIC.modules).upper() if _LIC.modules else '—'
+    st.markdown(
+        f"""
+        <div style="padding:10px 12px;background:rgba(16,185,129,0.06);
+                    border-radius:8px;border-left:3px solid #10b981;
+                    margin-bottom:14px;">
+            <div style="font-size:13px;font-weight:700;color:#065f46;
+                        margin-bottom:6px;">
+                {_LIC.customer or '—'}
+            </div>
+            <div style="font-size:11px;color:#374151;line-height:1.5;">
+                Plan <b>{_LIC.plan_label or _LIC.plan or '—'}</b><br>
+                Módulos: <code style="font-size:10px;">{_modules_str}</code><br>
+                Vence {_vence}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.divider()
+
+    # --- Actualizaciones ---
+    st.markdown("##### Actualizaciones")
     try:
         from updater import render_update_check_button
         render_update_check_button(_app_version)
     except ImportError:
         pass
     st.caption(
-        "Chequeo automático cada 24h. Para deshabilitar: crea "
-        "el archivo `data/.no_updates.flag` y reinicia."
+        f"Versión actual: `{_app_version}` · "
+        "Chequeo cada 24h."
     )
 
     st.divider()
-    st.markdown("**Ayuda**")
-    st.caption(
-        "Sigue los pasos en el README_PLANTA.txt del USB. "
-        "Para reportar problemas: ehernandez@sigasas.com"
+
+    # --- Soporte ---
+    st.markdown("##### Soporte técnico")
+    st.markdown(
+        """
+        <div style="font-size:12px;color:#475569;line-height:1.6;">
+            <div>📧 <a href="mailto:ehernandez@sigasas.com"
+                       style="color:#0f766e;text-decoration:none;">
+                ehernandez@sigasas.com
+            </a></div>
+            <div>🌐 <a href="https://watermelonsys.net" target="_blank"
+                       style="color:#0f766e;text-decoration:none;">
+                watermelonsys.net
+            </a></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
 # Navegación principal
