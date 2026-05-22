@@ -33,9 +33,9 @@ if not exist "%ISCC%" (
 )
 
 REM Verificar que WatermelonPlanta.exe exista
-if not exist "..\dist\WatermelonPlanta.exe" (
+if not exist "dist\WatermelonPlanta.exe" (
     echo.
-    echo ERROR: No existe ..\dist\WatermelonPlanta.exe
+    echo ERROR: No existe dist\WatermelonPlanta.exe
     echo Corre primero build_exe.bat para generarlo.
     pause
     exit /b 1
@@ -60,7 +60,7 @@ echo   INSTALLER COMPLETO
 echo ============================================================
 echo.
 echo El installer profesional esta en:
-dir /b ..\dist\WatermelonPlantaSetup*.exe
+dir /b dist\WatermelonPlantaSetup*.exe
 echo.
 echo Este archivo lo puedes mandar a cualquier cliente.
 echo Doble click → wizard de instalacion profesional.
