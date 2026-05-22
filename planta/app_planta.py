@@ -110,6 +110,48 @@ st.markdown("""
         padding-top: 2rem !important;
         max-width: 1400px !important;
     }
+
+    /* ============================================================
+       SIDEBAR — clase mundial industrial (FASE H2 v3.31.218)
+       Background degradado sutil + tipografía premium + dividers
+       ============================================================ */
+    section[data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #fafbfc 0%, #f1f5f9 100%) !important;
+        border-right: 1px solid rgba(15,118,110,0.08) !important;
+    }
+    section[data-testid="stSidebar"] > div {
+        padding-top: 1.5rem !important;
+    }
+    section[data-testid="stSidebar"] h5 {
+        font-size: 10px !important;
+        font-weight: 700 !important;
+        letter-spacing: 2.5px !important;
+        text-transform: uppercase !important;
+        color: #475569 !important;
+        margin: 0 0 10px 4px !important;
+        padding-top: 4px !important;
+    }
+    section[data-testid="stSidebar"] hr {
+        margin: 16px 0 !important;
+        border-color: rgba(15,118,110,0.08) !important;
+    }
+    /* Pulse animation para status dot */
+    @keyframes wm-pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50%      { opacity: 0.55; transform: scale(1.15); }
+    }
+    .wm-pulse-dot {
+        animation: wm-pulse 1.6s ease-in-out infinite;
+        display: inline-block;
+    }
+    /* Botones de acceso rápido en sidebar */
+    section[data-testid="stSidebar"] .stButton > button {
+        border-radius: 8px !important;
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.3px !important;
+        transition: all 0.15s ease !important;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -382,38 +424,78 @@ _DAQ_STATUS = {
 }
 _lbl, _col, _dot = _DAQ_STATUS[_daq_status]
 
+_n_capturas = len(list(_CAPTURES_DIR.glob('*.tdms')))
+# Animación pulsante solo si el sistema está en falla — atrae la atención
+_dot_class = "wm-pulse-dot" if _daq_status in ("no_drivers", "error") else ""
+
+# Mini detalle textual del status (segunda línea bajo el label)
+_DAQ_HINT = {
+    "ok":           f"Listo · {_daq_channels} canales",
+    "disconnected": "Conecta por USB",
+    "no_drivers":   "Corre INSTALAR.bat",
+    "error":        "Reinicia el equipo",
+    "down":         "—",
+}
+_hint = _DAQ_HINT[_daq_status]
+
 with st.sidebar:
-    # --- Branding header del sidebar ---
+    # ================================================================
+    # 1. BRANDING HEADER — dark hero card con logo + identidad
+    # ================================================================
     st.markdown(
         """
-        <div style="padding:12px 4px 16px 4px;border-bottom:1px solid rgba(0,0,0,0.08);
-                    margin-bottom:14px;">
-            <div style="display:flex;align-items:center;gap:10px;">
-                <svg width="32" height="32" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg"
-                     style="flex-shrink:0;">
+        <div style="background:linear-gradient(135deg,#0f172a 0%,#1e3a8a 50%,#0f766e 100%);
+                    border-radius:12px;padding:16px;margin:-8px 0 18px 0;
+                    box-shadow:0 4px 14px rgba(15,118,110,0.18),
+                               inset 0 1px 0 rgba(255,255,255,0.1);
+                    position:relative;overflow:hidden;">
+            <!-- glow decorativo arriba derecha -->
+            <div style="position:absolute;top:-30px;right:-30px;width:120px;height:120px;
+                        border-radius:50%;
+                        background:radial-gradient(circle,
+                            rgba(255,255,255,0.15) 0%,
+                            rgba(255,255,255,0) 70%);
+                        pointer-events:none;"></div>
+            <div style="display:flex;align-items:center;gap:11px;position:relative;">
+                <svg width="42" height="42" viewBox="0 0 256 256"
+                     xmlns="http://www.w3.org/2000/svg"
+                     style="flex-shrink:0;
+                            filter:drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
                     <defs>
-                        <linearGradient id="sbBg" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stop-color="#1e3a8a"/>
-                            <stop offset="100%" stop-color="#0f766e"/>
+                        <linearGradient id="sbRind" x1="0%" y1="100%" x2="0%" y2="0%">
+                            <stop offset="0%" stop-color="#14532d"/>
+                            <stop offset="100%" stop-color="#4ade80"/>
+                        </linearGradient>
+                        <linearGradient id="sbMeat" x1="0%" y1="100%" x2="0%" y2="0%">
+                            <stop offset="0%" stop-color="#9f1239"/>
+                            <stop offset="100%" stop-color="#fb7185"/>
                         </linearGradient>
                     </defs>
-                    <circle cx="128" cy="128" r="120" fill="url(#sbBg)"/>
-                    <g transform="translate(128 140)">
-                        <path d="M -72 0 A 72 72 0 0 0 72 0 L 66 0 A 66 66 0 0 1 -66 0 Z" fill="#16a34a"/>
-                        <path d="M -66 0 A 66 66 0 0 0 66 0 Z" fill="#e11d48"/>
-                        <ellipse cx="-26" cy="22" rx="3.5" ry="6" fill="#1f2937"/>
-                        <ellipse cx="6"   cy="32" rx="3.5" ry="6" fill="#1f2937"/>
-                        <ellipse cx="32"  cy="22" rx="3.5" ry="6" fill="#1f2937"/>
+                    <circle cx="128" cy="128" r="120" fill="rgba(255,255,255,0.15)"/>
+                    <g transform="translate(128 142)">
+                        <path d="M -78 0 A 78 78 0 0 0 78 0 L 71 0 A 71 71 0 0 1 -71 0 Z"
+                              fill="url(#sbRind)"/>
+                        <path d="M -71 0 A 71 71 0 0 0 71 0 L 65 0 A 65 65 0 0 1 -65 0 Z"
+                              fill="#bbf7d0"/>
+                        <path d="M -65 0 A 65 65 0 0 0 65 0 Z" fill="url(#sbMeat)"/>
+                        <ellipse cx="-32" cy="20" rx="3.5" ry="6" fill="#1f2937"
+                                 transform="rotate(-15 -32 20)"/>
+                        <ellipse cx="-10" cy="32" rx="3.5" ry="6" fill="#1f2937"/>
+                        <ellipse cx="14"  cy="32" rx="3.5" ry="6" fill="#1f2937"
+                                 transform="rotate(8 14 32)"/>
+                        <ellipse cx="34"  cy="20" rx="3.5" ry="6" fill="#1f2937"
+                                 transform="rotate(15 34 20)"/>
                     </g>
                 </svg>
-                <div>
-                    <div style="font-size:14px;font-weight:800;color:#0f766e;
-                                letter-spacing:0.3px;line-height:1.1;">
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:15px;font-weight:800;color:#ffffff;
+                                letter-spacing:0.2px;line-height:1.1;">
                         Watermelon
                     </div>
-                    <div style="font-size:10px;font-weight:600;color:#64748b;
-                                letter-spacing:2px;text-transform:uppercase;">
-                        Planta Edition
+                    <div style="font-size:9px;font-weight:700;color:#a7f3d0;
+                                letter-spacing:2.5px;text-transform:uppercase;
+                                margin-top:3px;">
+                        Planta · Modal
                     </div>
                 </div>
             </div>
@@ -422,36 +504,64 @@ with st.sidebar:
         unsafe_allow_html=True,
     )
 
-    # --- Status panel: maleta + canales + última captura ---
+    # ================================================================
+    # 2. ESTADO DEL SISTEMA — health panel con dot pulsante
+    # ================================================================
     st.markdown("##### Estado del sistema")
 
-    _channels_str = (
-        f"{_daq_channels} canales disponibles" if _daq_channels > 0
-        else "—"
-    )
     st.markdown(
         f"""
-        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:14px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;
-                        padding:8px 12px;background:rgba(15,118,110,0.05);
-                        border-radius:8px;border-left:3px solid {_col};">
-                <div>
-                    <div style="font-size:11px;color:#64748b;font-weight:500;text-transform:uppercase;
-                                letter-spacing:1px;">Maleta Watermelon</div>
-                    <div style="font-size:13px;color:#1f2937;font-weight:700;">{_lbl}</div>
+        <div style="background:#ffffff;border-radius:10px;padding:14px;
+                    border:1px solid {_col}33;
+                    box-shadow:0 1px 3px rgba(0,0,0,0.04);
+                    margin-bottom:10px;position:relative;overflow:hidden;">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between;
+                        gap:8px;">
+                <div style="flex:1;min-width:0;">
+                    <div style="font-size:9px;color:#94a3b8;font-weight:700;
+                                text-transform:uppercase;letter-spacing:1.5px;
+                                margin-bottom:3px;">
+                        Maleta Watermelon
+                    </div>
+                    <div style="font-size:14px;color:#0f172a;font-weight:700;
+                                line-height:1.2;">
+                        {_lbl}
+                    </div>
+                    <div style="font-size:11px;color:#64748b;margin-top:2px;">
+                        {_hint}
+                    </div>
                 </div>
-                <div style="color:{_col};font-size:18px;line-height:1;">{_dot}</div>
+                <div style="color:{_col};font-size:22px;line-height:1;flex-shrink:0;
+                            margin-top:2px;" class="{_dot_class}">
+                    {_dot}
+                </div>
             </div>
-            <div style="padding:8px 12px;background:rgba(15,118,110,0.05);border-radius:8px;">
-                <div style="font-size:11px;color:#64748b;font-weight:500;text-transform:uppercase;
-                            letter-spacing:1px;">Capacidad</div>
-                <div style="font-size:13px;color:#1f2937;font-weight:700;">{_channels_str}</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;
+                    margin-bottom:14px;">
+            <div style="background:#ffffff;border-radius:8px;padding:10px;
+                        border:1px solid rgba(15,118,110,0.10);
+                        text-align:center;">
+                <div style="font-size:9px;color:#94a3b8;font-weight:700;
+                            text-transform:uppercase;letter-spacing:1.5px;">
+                    Canales
+                </div>
+                <div style="font-size:20px;font-weight:800;color:#0f766e;
+                            line-height:1.1;margin-top:4px;">
+                    {_daq_channels if _daq_channels else '—'}
+                </div>
             </div>
-            <div style="padding:8px 12px;background:rgba(15,118,110,0.05);border-radius:8px;">
-                <div style="font-size:11px;color:#64748b;font-weight:500;text-transform:uppercase;
-                            letter-spacing:1px;">Capturas locales</div>
-                <div style="font-size:13px;color:#1f2937;font-weight:700;">
-                    {len(list(_CAPTURES_DIR.glob('*.tdms')))} archivos
+            <div style="background:#ffffff;border-radius:8px;padding:10px;
+                        border:1px solid rgba(15,118,110,0.10);
+                        text-align:center;">
+                <div style="font-size:9px;color:#94a3b8;font-weight:700;
+                            text-transform:uppercase;letter-spacing:1.5px;">
+                    Capturas
+                </div>
+                <div style="font-size:20px;font-weight:800;color:#0f766e;
+                            line-height:1.1;margin-top:4px;">
+                    {_n_capturas}
                 </div>
             </div>
         </div>
@@ -461,24 +571,108 @@ with st.sidebar:
 
     st.divider()
 
-    # --- Licencia (compacta sin license_id técnico) ---
+    # ================================================================
+    # 3. ACCESO RÁPIDO — botones tipo Artemis para EMA/OMA/Sync
+    # ================================================================
+    st.markdown("##### Acceso rápido")
+
+    _qa1, _qa2 = st.columns(2)
+    with _qa1:
+        if _LIC.has_module("ema"):
+            if st.button("EMA", key="qa_ema", use_container_width=True,
+                          help="Captura con martillo modal"):
+                st.switch_page("pages/01_Captura_Modal.py")
+        else:
+            st.button("EMA 🔒", key="qa_ema_lock", use_container_width=True,
+                      disabled=True, help="No incluido en tu plan")
+    with _qa2:
+        if _LIC.has_module("oma"):
+            if st.button("OMA", key="qa_oma", use_container_width=True,
+                          help="Captura continua operacional"):
+                st.session_state["_planta_mode_preselect"] = "oma"
+                st.switch_page("pages/01_Captura_Modal.py")
+        else:
+            st.button("OMA 🔒", key="qa_oma_lock", use_container_width=True,
+                      disabled=True, help="No incluido en tu plan")
+
+    st.divider()
+
+    # ================================================================
+    # 4. LICENCIA — premium card con badge del plan
+    # ================================================================
     st.markdown("##### Licencia")
     _vence = (_LIC.expires_at.strftime('%d/%m/%Y')
                if _LIC.expires_at else '—')
-    _modules_str = ', '.join(_LIC.modules).upper() if _LIC.modules else '—'
+    _modules_str = ' · '.join(m.upper() for m in _LIC.modules) \
+        if _LIC.modules else '—'
+
+    # Badge color según plan
+    _PLAN_COLORS = {
+        "enterprise": ("#eab308", "rgba(234,179,8,0.10)"),  # dorado
+        "pro":        ("#0f766e", "rgba(15,118,110,0.10)"),
+        "basic":      ("#475569", "rgba(71,85,105,0.10)"),
+        "trial":      ("#3b82f6", "rgba(59,130,246,0.10)"),
+    }
+    _plan_col, _plan_bg = _PLAN_COLORS.get(_LIC.plan, ("#0f766e", "rgba(15,118,110,0.10)"))
+
     st.markdown(
         f"""
-        <div style="padding:10px 12px;background:rgba(16,185,129,0.06);
-                    border-radius:8px;border-left:3px solid #10b981;
-                    margin-bottom:14px;">
-            <div style="font-size:13px;font-weight:700;color:#065f46;
-                        margin-bottom:6px;">
+        <div style="background:#ffffff;border-radius:10px;padding:14px;
+                    border:1px solid rgba(15,118,110,0.10);
+                    box-shadow:0 1px 3px rgba(0,0,0,0.04);
+                    margin-bottom:14px;position:relative;overflow:hidden;">
+            <!-- Badge del plan en esquina top-right -->
+            <div style="position:absolute;top:10px;right:10px;
+                        background:{_plan_bg};color:{_plan_col};
+                        padding:3px 8px;border-radius:5px;
+                        font-size:9px;font-weight:800;letter-spacing:1.5px;
+                        text-transform:uppercase;
+                        border:1px solid {_plan_col}66;">
+                {_LIC.plan.upper() if _LIC.plan else '—'}
+            </div>
+            <div style="font-size:9px;color:#94a3b8;font-weight:700;
+                        text-transform:uppercase;letter-spacing:1.5px;
+                        margin-bottom:3px;">
+                Cliente
+            </div>
+            <div style="font-size:13px;color:#0f172a;font-weight:700;
+                        line-height:1.2;margin-bottom:10px;
+                        word-break:break-word;padding-right:60px;">
                 {_LIC.customer or '—'}
             </div>
-            <div style="font-size:11px;color:#374151;line-height:1.5;">
-                Plan <b>{_LIC.plan_label or _LIC.plan or '—'}</b><br>
-                Módulos: <code style="font-size:10px;">{_modules_str}</code><br>
-                Vence {_vence}
+            <div style="display:flex;justify-content:space-between;align-items:center;
+                        padding-top:10px;border-top:1px solid rgba(15,118,110,0.08);">
+                <div>
+                    <div style="font-size:9px;color:#94a3b8;font-weight:700;
+                                text-transform:uppercase;letter-spacing:1.2px;">
+                        Vence
+                    </div>
+                    <div style="font-size:12px;color:#0f172a;font-weight:600;">
+                        {_vence}
+                    </div>
+                </div>
+                <div style="text-align:right;">
+                    <div style="font-size:9px;color:#94a3b8;font-weight:700;
+                                text-transform:uppercase;letter-spacing:1.2px;">
+                        Canales
+                    </div>
+                    <div style="font-size:12px;color:#0f172a;font-weight:600;">
+                        hasta {_LIC.max_channels}
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top:10px;padding-top:10px;
+                        border-top:1px solid rgba(15,118,110,0.08);">
+                <div style="font-size:9px;color:#94a3b8;font-weight:700;
+                            text-transform:uppercase;letter-spacing:1.2px;
+                            margin-bottom:4px;">
+                    Módulos activos
+                </div>
+                <div style="font-size:10px;color:#0f766e;font-weight:600;
+                            font-family:'SF Mono',Menlo,Consolas,monospace;
+                            line-height:1.4;">
+                    {_modules_str}
+                </div>
             </div>
         </div>
         """,
@@ -487,33 +681,67 @@ with st.sidebar:
 
     st.divider()
 
-    # --- Actualizaciones ---
+    # ================================================================
+    # 5. ACTUALIZACIONES — botón compacto + caption
+    # ================================================================
     st.markdown("##### Actualizaciones")
     try:
         from updater import render_update_check_button
         render_update_check_button(_app_version)
     except ImportError:
         pass
-    st.caption(
-        f"Versión actual: `{_app_version}` · "
-        "Chequeo cada 24h."
-    )
 
     st.divider()
 
-    # --- Soporte ---
-    st.markdown("##### Soporte técnico")
+    # ================================================================
+    # 6. FOOTER — version chip + soporte
+    # ================================================================
     st.markdown(
-        """
-        <div style="font-size:12px;color:#475569;line-height:1.6;">
-            <div>📧 <a href="mailto:ehernandez@sigasas.com"
+        f"""
+        <div style="padding:14px 12px;background:#ffffff;border-radius:10px;
+                    border:1px solid rgba(15,118,110,0.10);
+                    box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+            <div style="display:flex;align-items:center;gap:8px;
+                        padding-bottom:10px;
+                        border-bottom:1px solid rgba(15,118,110,0.08);
+                        margin-bottom:10px;">
+                <span style="display:inline-block;width:8px;height:8px;
+                             border-radius:50%;background:#0f766e;
+                             box-shadow:0 0 0 3px rgba(15,118,110,0.18);"></span>
+                <span style="font-size:11px;color:#0f172a;font-weight:700;
+                             font-family:'SF Mono',Menlo,Consolas,monospace;">
+                    {_app_version}
+                </span>
+                <span style="font-size:9px;color:#94a3b8;font-weight:600;
+                             text-transform:uppercase;letter-spacing:1px;
+                             margin-left:auto;">
+                    Estable
+                </span>
+            </div>
+            <div style="font-size:10px;color:#475569;line-height:1.6;">
+                <div style="margin-bottom:3px;font-weight:700;color:#0f172a;
+                            font-size:11px;">
+                    Soporte SIGA
+                </div>
+                <div>
+                    <a href="mailto:ehernandez@sigasas.com"
                        style="color:#0f766e;text-decoration:none;">
-                ehernandez@sigasas.com
-            </a></div>
-            <div>🌐 <a href="https://watermelonsys.net" target="_blank"
+                        ehernandez@sigasas.com
+                    </a>
+                </div>
+                <div>
+                    <a href="https://watermelonsys.net" target="_blank"
                        style="color:#0f766e;text-decoration:none;">
-                watermelonsys.net
-            </a></div>
+                        watermelonsys.net
+                    </a>
+                </div>
+            </div>
+            <div style="margin-top:10px;padding-top:10px;
+                        border-top:1px solid rgba(15,118,110,0.08);
+                        font-size:9px;color:#94a3b8;text-align:center;
+                        letter-spacing:0.5px;">
+                © 2026 SIGA GROUP S.A.S
+            </div>
         </div>
         """,
         unsafe_allow_html=True,
