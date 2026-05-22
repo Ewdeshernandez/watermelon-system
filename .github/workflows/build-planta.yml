@@ -1,0 +1,229 @@
+name: Build Watermelon Planta Windows Installer
+
+# ============================================================
+# FASE K — CI/CD Automatizado para Watermelon Planta
+# ============================================================
+# Trigger:
+#   · Push a main que toque VERSION, planta/, core/modal/ o este workflow
+#   · Manualmente desde la UI de GitHub (Actions → Run workflow)
+#
+# Output:
+#   · Artifact descargable: WatermelonPlantaSetup-vX.Y.Z.exe (90 días)
+#   · GitHub Release publicado con el .exe como asset
+#
+# El auto-updater de Planta (planta/updater.py) automáticamente detecta
+# el nuevo Release y notifica a los clientes que actualicen.
+# ============================================================
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'VERSION'
+      - 'planta/**'
+      - 'core/modal/**'
+      - 'core/sensor_map.py'
+      - '.github/workflows/build-planta.yml'
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: 'Forzar creación de GitHub Release (default: true)'
+        required: false
+        default: 'true'
+        type: choice
+        options: ['true', 'false']
+
+jobs:
+  build:
+    name: Build Setup.exe en Windows
+    runs-on: windows-latest
+    permissions:
+      contents: write  # necesario para crear releases
+
+    steps:
+      # ------------------------------------------------------
+      # 1. Checkout del código
+      # ------------------------------------------------------
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      # ------------------------------------------------------
+      # 2. Leer VERSION del repo
+      # ------------------------------------------------------
+      - name: Leer version del repo
+        id: version
+        shell: pwsh
+        run: |
+          $raw = (Get-Content VERSION -Raw).Trim()
+          # Normalizar: si no tiene 'v' al principio, agregarla
+          if ($raw -notmatch '^v') { $raw = "v$raw" }
+          $clean = $raw -replace '^v', ''
+          echo "version=$raw" >> $env:GITHUB_OUTPUT
+          echo "clean=$clean" >> $env:GITHUB_OUTPUT
+          Write-Host "Version del repo: $raw (clean para Inno: $clean)"
+
+      # ------------------------------------------------------
+      # 3. Verificar si este tag ya tiene release publicado
+      #    (evita rebuilds innecesarios si VERSION no cambió)
+      # ------------------------------------------------------
+      - name: Check si release ya existe
+        id: release_check
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ steps.version.outputs.version }}"
+          $exists = (gh release view $tag --json tagName 2>$null) -ne $null
+          if ($exists) {
+            Write-Host "Release $tag YA existe — se sobreescribirá el asset"
+            echo "exists=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "Release $tag no existe — se creará nuevo"
+            echo "exists=false" >> $env:GITHUB_OUTPUT
+          }
+
+      # ------------------------------------------------------
+      # 4. Setup Python 3.12 + cache de pip
+      # ------------------------------------------------------
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: planta/requirements-planta.txt
+
+      # ------------------------------------------------------
+      # 5. Instalar dependencias Python (PyInstaller + planta)
+      # ------------------------------------------------------
+      - name: Install Python deps
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+          python -m pip install -r planta/requirements-planta.txt
+
+      # ------------------------------------------------------
+      # 6. Instalar Inno Setup vía Chocolatey
+      # ------------------------------------------------------
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress --version=6.4.0
+          # Verificar
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            throw "Inno Setup no se instaló correctamente"
+          }
+          Write-Host "Inno Setup OK: $iscc"
+
+      # ------------------------------------------------------
+      # 7. Build .exe portable con PyInstaller
+      # ------------------------------------------------------
+      - name: Build WatermelonPlanta.exe con PyInstaller
+        shell: pwsh
+        working-directory: planta/installer
+        run: |
+          python -m PyInstaller watermelon-planta.spec --clean --noconfirm
+          if (-not (Test-Path "dist/WatermelonPlanta.exe")) {
+            throw "WatermelonPlanta.exe no se generó"
+          }
+          $size = [math]::Round((Get-Item "dist/WatermelonPlanta.exe").Length / 1MB, 1)
+          Write-Host "✓ WatermelonPlanta.exe generado: $size MB"
+
+      # ------------------------------------------------------
+      # 8. Build installer profesional con Inno Setup
+      # ------------------------------------------------------
+      - name: Build Setup.exe con Inno Setup
+        shell: pwsh
+        working-directory: planta/installer
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          & $iscc installer.iss
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup falló con código $LASTEXITCODE"
+          }
+          $setup = Get-ChildItem dist/WatermelonPlantaSetup-*.exe | Select-Object -First 1
+          if (-not $setup) {
+            throw "WatermelonPlantaSetup-*.exe no se generó"
+          }
+          $size = [math]::Round($setup.Length / 1MB, 1)
+          Write-Host "✓ $($setup.Name) generado: $size MB"
+          echo "SETUP_PATH=planta/installer/$($setup.FullName.Substring($setup.FullName.IndexOf('dist')))" >> $env:GITHUB_ENV
+
+      # ------------------------------------------------------
+      # 9. Subir como artifact (siempre, accesible 90 días)
+      # ------------------------------------------------------
+      - name: Upload artifact (descargable desde GitHub Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: WatermelonPlantaSetup-${{ steps.version.outputs.version }}
+          path: planta/installer/dist/WatermelonPlantaSetup-*.exe
+          retention-days: 90
+
+      # ------------------------------------------------------
+      # 10. Crear GitHub Release con el setup como asset
+      # ------------------------------------------------------
+      - name: Publicar GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Watermelon Planta ${{ steps.version.outputs.version }}
+          body: |
+            # 🍉 Watermelon Planta Edition — ${{ steps.version.outputs.version }}
+
+            **Installer profesional para Windows 10/11 64-bit · SIGA GROUP S.A.S**
+
+            ---
+
+            ## Cómo instalar (cliente final)
+
+            1. Descargá `WatermelonPlantaSetup-${{ steps.version.outputs.version }}.exe` (abajo en **Assets**)
+            2. Doble click → wizard → **Next** → **Install** → **Finish**
+            3. Pegá tu archivo `license.token` (entregado por SIGA) en:
+               ```
+               C:\Program Files\WatermelonPlanta\data\
+               ```
+            4. Abrí **Watermelon Planta** desde el escritorio
+            5. Verificá que aparece el chip verde con el nombre de tu empresa
+
+            ## Cómo actualizar (cliente existente)
+
+            Si ya tenés una versión anterior instalada, descargá esta nueva,
+            doble click → reemplaza la instalación previa, tus archivos
+            `data/captures/` y `data/license.token` quedan intactos.
+
+            > El auto-updater dentro de la app te avisa automáticamente
+            > cuando hay una versión nueva disponible.
+
+            ---
+
+            ## Soporte
+
+            - 📧 ehernandez@sigasas.com
+            - 🌐 https://watermelonsys.net
+
+            ---
+
+            *Build automático generado por GitHub Actions desde commit `${{ github.sha }}`*
+          files: planta/installer/dist/WatermelonPlantaSetup-*.exe
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ------------------------------------------------------
+      # 11. Resumen final
+      # ------------------------------------------------------
+      - name: Resumen
+        shell: pwsh
+        run: |
+          Write-Host "============================================"
+          Write-Host "  ✓ BUILD COMPLETO"
+          Write-Host "============================================"
+          Write-Host ""
+          Write-Host "  Version: ${{ steps.version.outputs.version }}"
+          Write-Host "  Release: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.version }}"
+          Write-Host ""
+          Write-Host "  El installer está listo para entregar a clientes."
+          Write-Host "============================================"

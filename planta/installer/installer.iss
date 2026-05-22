@@ -23,7 +23,12 @@
 ;   Output\WatermelonPlantaSetup-v1.0.0.exe (~280 MB)
 
 #define MyAppName "Watermelon Planta Edition"
-#define MyAppVersion "1.0.0"
+; MyAppVersion se lee dinámicamente del archivo VERSION del repo (raíz del proyecto)
+; Ej: si VERSION dice "v3.31.230", MyAppVersion queda "3.31.230" (sin el "v")
+#define VersionFile FileOpen(SourcePath + "..\..\VERSION")
+#define VersionRaw Trim(FileRead(VersionFile))
+#expr FileClose(VersionFile)
+#define MyAppVersion StringChange(VersionRaw, "v", "")
 #define MyAppPublisher "SIGA GROUP S.A.S"
 #define MyAppURL "https://watermelonsys.net"
 #define MyAppExeName "WatermelonPlanta.exe"
