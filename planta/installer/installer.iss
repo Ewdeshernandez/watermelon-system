@@ -64,7 +64,10 @@ SolidCompression=yes
 ; Output
 OutputDir=..\dist
 OutputBaseFilename=WatermelonPlantaSetup-v{#MyAppVersion}
-SetupIconFile=assets\watermelon.ico
+; SetupIconFile comentado — se usará el icono default de Inno Setup hasta
+; que generemos un .ico profesional desde el SVG. El .exe instalado igual
+; tiene el icono de WatermelonPlanta.exe (también default por ahora).
+; SetupIconFile=assets\watermelon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 ; Requires Windows 10+
