@@ -752,7 +752,7 @@ def _autopopulate_icon_anchors(
 #   · dof_direction          ([dx, dy, dz] unitario) — eje sensible
 #
 # Defaults inteligentes por sensor_type:
-#   · accelerometer (Wilcoxon): 100 mV/g · IEPE
+#   · accelerometer (IEPE): 100 mV/g
 #   · proximity     (Bently)  : 200 mV/mil · AC
 #   · velocity      (VS)      : 100 mV/(in/s) · IEPE
 #
@@ -805,7 +805,7 @@ def _render_modal_config_expander(
                 value=float(_cur_sens) if _cur_sens is not None else float(_sens_default),
                 step=10.0,
                 key=f"wiz_modal_sens_{idx}",
-                help="Wilcoxon accel: 100 mV/g · Bently prox: 200 mV/mil · PCB martillo: 2.4 mV/N",
+                help="Acelerómetro IEPE: 100 mV/g · Sonda de proximidad: 200 mV/mil · Martillo modal: 2.4 mV/N",
             )
             # Solo guardamos si el valor difiere significativamente de None;
             # si el analista lo dejó en el default y NO completó posición 3D,
@@ -818,7 +818,7 @@ def _render_modal_config_expander(
             _cur_coup = (s.get("coupling") or _coup_default).upper()
             _coup_idx = _coup_opts.index(_cur_coup) if _cur_coup in _coup_opts else 0
             coup_pick = st.selectbox(
-                "Coupling al NI-9234",
+                "Coupling al sistema",
                 _coup_opts,
                 index=_coup_idx,
                 key=f"wiz_modal_coup_{idx}",
