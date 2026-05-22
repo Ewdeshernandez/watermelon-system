@@ -61,8 +61,8 @@ DisableWelcomePage=no
 Compression=lzma2/ultra64
 SolidCompression=yes
 
-; Output
-OutputDir=..\dist
+; Output — guardamos en installer\dist (al lado del .exe portable de PyInstaller)
+OutputDir=dist
 OutputBaseFilename=WatermelonPlantaSetup-v{#MyAppVersion}
 ; SetupIconFile comentado — se usará el icono default de Inno Setup hasta
 ; que generemos un .ico profesional desde el SVG. El .exe instalado igual
@@ -93,8 +93,8 @@ Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; \
     Flags: unchecked; OnlyBelowVersion: 6.1
 
 [Files]
-; El .exe principal (generado por PyInstaller)
-Source: "..\dist\WatermelonPlanta.exe"; DestDir: "{app}"; Flags: ignoreversion
+; El .exe principal (generado por PyInstaller en installer\dist\)
+Source: "dist\WatermelonPlanta.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 ; README operativo
 Source: "..\README_PLANTA.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
