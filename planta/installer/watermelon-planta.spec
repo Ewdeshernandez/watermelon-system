@@ -183,5 +183,10 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(_SPEC_DIR / "assets" / "watermelon.ico"),
+    # Icon custom — solo se aplica si existe el .ico, sino usa el default de Windows
+    icon=(
+        str(_SPEC_DIR / "assets" / "watermelon.ico")
+        if (_SPEC_DIR / "assets" / "watermelon.ico").exists()
+        else None
+    ),
 )
