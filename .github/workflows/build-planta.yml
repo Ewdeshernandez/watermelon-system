@@ -85,18 +85,26 @@ jobs:
           python -m pip install -r planta/requirements-planta.txt
 
       # ------------------------------------------------------
-      # 6. Instalar Inno Setup vía Chocolatey
+      # 6. Verificar / Instalar Inno Setup
+      #    GitHub Actions Windows típicamente ya viene con Inno Setup
+      #    preinstalado. Solo lo instalamos si no existe.
       # ------------------------------------------------------
-      - name: Install Inno Setup
+      - name: Verificar / Install Inno Setup
         shell: pwsh
         run: |
-          choco install innosetup -y --no-progress --version=6.4.0
-          # Verificar
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) {
-            throw "Inno Setup no se instaló correctamente"
+          if (Test-Path $iscc) {
+            Write-Host "✓ Inno Setup ya instalado en: $iscc"
+            $version = & $iscc /? | Select-String "Inno Setup" | Select-Object -First 1
+            Write-Host "  Version: $version"
+          } else {
+            Write-Host "Inno Setup no encontrado — instalando con Chocolatey..."
+            choco install innosetup -y --no-progress
+            if (-not (Test-Path $iscc)) {
+              throw "Inno Setup no se instaló correctamente"
+            }
+            Write-Host "✓ Inno Setup instalado en: $iscc"
           }
-          Write-Host "Inno Setup OK: $iscc"
 
       # ------------------------------------------------------
       # 7. Build .exe portable con PyInstaller
