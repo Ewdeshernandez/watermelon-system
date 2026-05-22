@@ -63,27 +63,9 @@ jobs:
           Write-Host "Version del repo: $raw (clean para Inno: $clean)"
 
       # ------------------------------------------------------
-      # 3. Verificar si este tag ya tiene release publicado
-      #    (evita rebuilds innecesarios si VERSION no cambió)
-      # ------------------------------------------------------
-      - name: Check si release ya existe
-        id: release_check
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $tag = "${{ steps.version.outputs.version }}"
-          $exists = (gh release view $tag --json tagName 2>$null) -ne $null
-          if ($exists) {
-            Write-Host "Release $tag YA existe — se sobreescribirá el asset"
-            echo "exists=true" >> $env:GITHUB_OUTPUT
-          } else {
-            Write-Host "Release $tag no existe — se creará nuevo"
-            echo "exists=false" >> $env:GITHUB_OUTPUT
-          }
-
-      # ------------------------------------------------------
-      # 4. Setup Python 3.12 + cache de pip
+      # 3. Setup Python 3.12 + cache de pip
+      #    (el check de release pre-existente lo eliminamos —
+      #    softprops/action-gh-release ya maneja el caso de update)
       # ------------------------------------------------------
       - name: Setup Python 3.12
         uses: actions/setup-python@v5
