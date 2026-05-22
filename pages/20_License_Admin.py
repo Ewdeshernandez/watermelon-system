@@ -2,28 +2,26 @@
 pages/20_License_Admin.py — Admin de licencias Watermelon Planta
 =================================================================
 
-Página INTERNA de SIGA. Permite ver y revocar licencias activas de
-Watermelon Planta Edition. La revocación se hace insertando el
-license_id en la tabla `revoked_licenses` de Supabase, y la próxima vez
-que Planta arranque con internet, recibe la señal de revocación y se
-bloquea.
+Página INTERNA de SIGA. Permite revocar y reactivar licencias activas de
+Watermelon Planta Edition desde el Cloud.
 
-Solo accesible para usuarios con `is_admin=True` y email @sigasas.com.
+Diseño:
+  · La tabla `revoked_licenses` en Supabase es la fuente de verdad de
+    qué licencias están revocadas.
+  · Esta UI permite:
+      1. Ver todas las licencias revocadas (con motivo y fecha)
+      2. Revocar una nueva licencia pegando su `license_id` (UUID)
+      3. Reactivar una licencia revocada (sacarla de la blacklist)
 
-Flujo típico:
-  1. SIGA detecta cliente moroso o malicioso
-  2. Abre esta página
-  3. Busca al cliente en la tabla "Licencias emitidas"
-  4. Click "Revocar" → escribe motivo → confirma
-  5. La próxima vez que el cliente abra Planta con internet → bloqueado
-  6. Si arrepiente, click "Reactivar" → borra de la blacklist
+El `license_id` lo obtenés del archivo `tools/licenses_issued/<cliente>/
+license.json` cuando emitís la licencia con `tools/license_issue.py`.
+
+Solo accesible para usuarios con role=admin y email @sigasas.com.
 """
 from __future__ import annotations
 
-import json
+import re
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import List, Dict, Any
 
 import streamlit as st
 
@@ -66,7 +64,7 @@ st.markdown(
             🔐 Admin de Licencias · Watermelon Planta
         </div>
         <div style="font-size:13px;opacity:0.85;margin-top:6px;">
-            Emisión, revocación y monitoreo de licencias activas
+            Revocación y reactivación de licencias activas
         </div>
     </div>
     """,
@@ -74,278 +72,235 @@ st.markdown(
 )
 
 # ============================================================
-# 3. Cargar licencias emitidas (desde tools/licenses_issued/)
+# 3. Helpers
 # ============================================================
-_REPO_ROOT = Path(__file__).resolve().parents[1]
-_LICENSES_DIR = _REPO_ROOT / "tools" / "licenses_issued"
 
-
-@st.cache_data(ttl=30)
-def _load_issued_licenses() -> List[Dict[str, Any]]:
-    """Lee todos los license.json del directorio interno de SIGA."""
-    if not _LICENSES_DIR.exists():
-        return []
-    licenses = []
-    for client_dir in sorted(_LICENSES_DIR.iterdir()):
-        if not client_dir.is_dir():
-            continue
-        json_path = client_dir / "license.json"
-        if not json_path.exists():
-            continue
-        try:
-            data = json.loads(json_path.read_text(encoding="utf-8"))
-            licenses.append(data)
-        except (json.JSONDecodeError, OSError):
-            continue
-    return licenses
+UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 
 
 @st.cache_data(ttl=15)
-def _load_revoked_licenses() -> Dict[str, dict]:
-    """Lee la tabla revoked_licenses de Supabase. Returns dict[license_id → row]."""
+def _load_revoked_licenses() -> list:
+    """Lee la tabla revoked_licenses de Supabase."""
+    sb = get_supabase_client()
+    if sb is None:
+        return []
     try:
-        sb = get_supabase_client()
         result = sb.table("revoked_licenses") \
-            .select("license_id, revoked_at, revoked_by, reason") \
+            .select("license_id, revoked_at, revoked_by, reason, "
+                    "customer, customer_email") \
+            .order("revoked_at", desc=True) \
             .execute()
-        return {row["license_id"]: row for row in (result.data or [])}
+        return list(result.data or [])
     except Exception as e:  # noqa: BLE001
         st.warning(f"No se pudo leer la tabla revoked_licenses: {e}")
-        return {}
+        return []
 
 
-_issued = _load_issued_licenses()
-_revoked_map = _load_revoked_licenses()
+_revoked = _load_revoked_licenses()
 
 # ============================================================
-# 4. KPI Bar
+# 4. KPI bar
 # ============================================================
-_n_total = len(_issued)
-_n_revoked = sum(1 for lic in _issued if lic.get("license_id") in _revoked_map)
-_n_expired = sum(
-    1 for lic in _issued
-    if lic.get("expires_at_utc")
-    and datetime.fromisoformat(lic["expires_at_utc"]) < datetime.now(timezone.utc)
+_k1, _k2 = st.columns(2)
+_k1.metric("🔒 Licencias revocadas", len(_revoked))
+_k2.metric(
+    "Endpoint heartbeat",
+    "✓ Activo",
+    help="https://yxeqwkhybueelmkrdkgq.supabase.co/functions/v1/license-check",
 )
-_n_active = _n_total - _n_revoked - _n_expired
-
-_k1, _k2, _k3, _k4 = st.columns(4)
-_k1.metric("Total emitidas", _n_total)
-_k2.metric("✓ Activas", _n_active)
-_k3.metric("⌛ Vencidas", _n_expired)
-_k4.metric("🔒 Revocadas", _n_revoked)
 
 st.divider()
 
 # ============================================================
-# 5. Tabla de licencias + acciones
+# 5. SECCIÓN A — Revocar nueva licencia
 # ============================================================
-st.markdown("### Licencias emitidas")
+st.markdown("### 🔒 Revocar una licencia")
+st.caption(
+    "Pegá el `license_id` (UUID) de la licencia que querés revocar. "
+    "Lo encontrás en `tools/licenses_issued/<cliente>/license.json` en "
+    "el equipo de SIGA donde se emitió, o en el archivo `license.token` "
+    "del cliente (segundo campo del JWT decodificado)."
+)
 
-if not _issued:
-    st.info(
-        f"No hay licencias emitidas todavía. Genera una con:\n\n"
-        f"```bash\npython tools/license_issue.py --customer \"<Cliente>\" "
-        f"--email \"<email>\" --plan pro\n```"
-    )
-    st.stop()
-
-# Filtros
-_f1, _f2, _f3 = st.columns([2, 1, 1])
-with _f1:
-    _search = st.text_input(
-        "🔍 Buscar por cliente / email / license_id",
-        key="lic_search",
-    ).lower().strip()
-with _f2:
-    _filter_status = st.selectbox(
-        "Estado",
-        ["Todos", "Activas", "Vencidas", "Revocadas"],
-        key="lic_filter_status",
-    )
-with _f3:
-    _filter_plan = st.selectbox(
-        "Plan",
-        ["Todos"] + sorted({lic.get("plan", "") for lic in _issued if lic.get("plan")}),
-        key="lic_filter_plan",
-    )
-
-
-def _classify(lic: dict) -> str:
-    if lic.get("license_id") in _revoked_map:
-        return "Revocadas"
-    try:
-        exp = datetime.fromisoformat(lic["expires_at_utc"])
-        if exp < datetime.now(timezone.utc):
-            return "Vencidas"
-    except (KeyError, ValueError):
-        pass
-    return "Activas"
-
-
-# Aplicar filtros
-_filtered = []
-for lic in _issued:
-    if _search:
-        haystack = " ".join([
-            str(lic.get("customer", "")),
-            str(lic.get("email", "")),
-            str(lic.get("license_id", "")),
-        ]).lower()
-        if _search not in haystack:
-            continue
-    status = _classify(lic)
-    if _filter_status != "Todos" and status != _filter_status:
-        continue
-    if _filter_plan != "Todos" and lic.get("plan") != _filter_plan:
-        continue
-    _filtered.append((lic, status))
-
-st.caption(f"Mostrando {len(_filtered)} de {len(_issued)} licencias")
-
-# ============================================================
-# 6. Render cada licencia como card con acciones
-# ============================================================
-
-_STATUS_COLORS = {
-    "Activas":   ("#10b981", "rgba(16,185,129,0.08)"),
-    "Vencidas":  ("#6b7280", "rgba(107,114,128,0.08)"),
-    "Revocadas": ("#ef4444", "rgba(239,68,68,0.08)"),
-}
-
-for lic, status in _filtered:
-    _lid = lic.get("license_id", "")
-    _is_revoked = _lid in _revoked_map
-    _rev = _revoked_map.get(_lid, {})
-    _col, _bg = _STATUS_COLORS[status]
-
-    with st.container():
-        st.markdown(
-            f"""
-            <div style="background:#ffffff;border-radius:10px;padding:16px;
-                        border:1px solid {_col}33;border-left:4px solid {_col};
-                        margin-bottom:14px;
-                        box-shadow:0 1px 3px rgba(0,0,0,0.04);">
-                <div style="display:flex;justify-content:space-between;align-items:flex-start;
-                            gap:16px;">
-                    <div style="flex:1;min-width:0;">
-                        <div style="display:flex;align-items:center;gap:10px;
-                                    margin-bottom:6px;">
-                            <span style="font-size:16px;font-weight:700;color:#0f172a;">
-                                {lic.get('customer', '—')}
-                            </span>
-                            <span style="background:{_bg};color:{_col};
-                                         padding:2px 8px;border-radius:5px;
-                                         font-size:10px;font-weight:700;
-                                         letter-spacing:1px;text-transform:uppercase;">
-                                {status}
-                            </span>
-                            <span style="background:rgba(15,118,110,0.08);color:#0f766e;
-                                         padding:2px 8px;border-radius:5px;
-                                         font-size:10px;font-weight:700;
-                                         letter-spacing:1px;text-transform:uppercase;">
-                                {lic.get('plan', '—')}
-                            </span>
-                        </div>
-                        <div style="font-size:12px;color:#475569;line-height:1.5;">
-                            📧 {lic.get('email', '—')}<br>
-                            📅 Emitida {lic.get('issued_at_utc', '—')[:10]} ·
-                            Vence {lic.get('expires_at_utc', '—')[:10]}<br>
-                            🔑 <code style="font-size:10px;">{_lid}</code><br>
-                            📦 {', '.join(lic.get('modules', [])).upper()} ·
-                            hasta {lic.get('max_channels', '—')} canales
-                            {f"<br>📝 <i>{lic.get('internal_notes')}</i>" if lic.get('internal_notes') else ""}
-                            {f"<br>🔒 <b style='color:#ef4444;'>REVOCADA</b> el {_rev.get('revoked_at','')[:10]} por {_rev.get('revoked_by','')} — <i>{_rev.get('reason','')}</i>" if _is_revoked else ""}
-                        </div>
-                    </div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+with st.form("revoke_form", clear_on_submit=True):
+    _r1, _r2 = st.columns(2)
+    with _r1:
+        _new_lid = st.text_input(
+            "License ID (UUID)",
+            placeholder="ej: 6b4a78cf-0f18-4b4f-b906-e0abf33d18ca",
+            key="new_revoke_lid",
+        )
+        _new_customer = st.text_input(
+            "Nombre del cliente",
+            placeholder="ej: Termoeléctrica Norte SAS",
+            key="new_revoke_customer",
+        )
+    with _r2:
+        _new_email = st.text_input(
+            "Email del cliente",
+            placeholder="ej: ingenieria@termonorte.com",
+            key="new_revoke_email",
+        )
+        _new_reason = st.text_input(
+            "Motivo (visible al cliente al ser bloqueado)",
+            placeholder="ej: Incumplimiento contractual — pago vencido 60 días",
+            key="new_revoke_reason",
         )
 
-        # Botones de acción
-        _b1, _b2, _b3 = st.columns([1, 1, 4])
-        if _is_revoked:
+    _confirm = st.checkbox(
+        "✓ Confirmo que esta acción bloqueará la app del cliente al "
+        "próximo arranque con internet",
+        key="new_revoke_confirm",
+    )
+
+    _submitted = st.form_submit_button("🔒 REVOCAR LICENCIA",
+                                         type="primary",
+                                         use_container_width=True)
+
+    if _submitted:
+        _lid_clean = _new_lid.strip().lower()
+        if not _lid_clean:
+            st.error("El License ID es obligatorio.")
+        elif not UUID_RE.match(_lid_clean):
+            st.error(
+                "El License ID no es un UUID válido. Debe tener formato:\n"
+                "  `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` (8-4-4-4-12 hex)"
+            )
+        elif not _new_reason.strip():
+            st.error("El motivo es obligatorio.")
+        elif not _confirm:
+            st.error("Tenés que marcar la confirmación.")
+        elif any(r.get("license_id") == _lid_clean for r in _revoked):
+            st.warning("Esta licencia ya está revocada. Usá la sección "
+                        "de abajo para reactivarla si querés.")
+        else:
+            try:
+                sb = get_supabase_client()
+                sb.table("revoked_licenses").insert({
+                    "license_id": _lid_clean,
+                    "revoked_by": _user_email,
+                    "reason": _new_reason.strip(),
+                    "customer": _new_customer.strip() or None,
+                    "customer_email": _new_email.strip() or None,
+                }).execute()
+                st.cache_data.clear()
+                st.success(
+                    f"✓ Licencia `{_lid_clean[:8]}...` REVOCADA. "
+                    f"La próxima vez que el cliente abra Watermelon Planta "
+                    f"con internet, será bloqueado con tu motivo."
+                )
+                st.rerun()
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Error al revocar: {e}")
+
+st.divider()
+
+# ============================================================
+# 6. SECCIÓN B — Licencias actualmente revocadas
+# ============================================================
+st.markdown("### 📋 Licencias actualmente revocadas")
+
+if not _revoked:
+    st.info(
+        "No hay ninguna licencia revocada en este momento. "
+        "Todas las licencias emitidas están activas (mientras no estén vencidas)."
+    )
+else:
+    st.caption(f"Total: {len(_revoked)} licencia(s) en blacklist")
+    for r in _revoked:
+        _lid = r.get("license_id", "")
+        _customer = r.get("customer") or "—"
+        _email = r.get("customer_email") or "—"
+        _reason = r.get("reason", "")
+        _revoked_at = r.get("revoked_at", "")[:10]
+        _revoked_by = r.get("revoked_by", "")
+
+        with st.container():
+            st.markdown(
+                f"""
+                <div style="background:#ffffff;border-radius:10px;padding:14px;
+                            border:1px solid rgba(239,68,68,0.25);
+                            border-left:4px solid #ef4444;
+                            margin-bottom:12px;
+                            box-shadow:0 1px 3px rgba(0,0,0,0.04);">
+                    <div style="display:flex;align-items:center;gap:10px;
+                                margin-bottom:8px;">
+                        <span style="background:rgba(239,68,68,0.10);
+                                     color:#ef4444;padding:2px 8px;
+                                     border-radius:5px;font-size:10px;
+                                     font-weight:800;letter-spacing:1px;
+                                     text-transform:uppercase;">
+                            🔒 Revocada
+                        </span>
+                        <span style="font-size:15px;font-weight:700;color:#0f172a;">
+                            {_customer}
+                        </span>
+                    </div>
+                    <div style="font-size:12px;color:#475569;line-height:1.6;">
+                        📧 {_email}<br>
+                        🔑 <code style="font-size:10px;">{_lid}</code><br>
+                        📅 Revocada el {_revoked_at} por {_revoked_by}<br>
+                        📝 <i>{_reason}</i>
+                    </div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+            _b1, _b2, _b3 = st.columns([1, 1, 4])
             with _b1:
                 if st.button("♻ Reactivar", key=f"reactivate_{_lid}",
-                              type="secondary", use_container_width=True):
+                              use_container_width=True):
                     try:
                         sb = get_supabase_client()
                         sb.table("revoked_licenses") \
                             .delete().eq("license_id", _lid).execute()
                         st.cache_data.clear()
-                        st.success(f"✓ Licencia {_lid[:8]}... reactivada")
+                        st.success(
+                            f"✓ Licencia `{_lid[:8]}...` reactivada. "
+                            f"Próximo arranque online del cliente → desbloqueado."
+                        )
                         st.rerun()
                     except Exception as e:  # noqa: BLE001
                         st.error(f"Error al reactivar: {e}")
-        else:
-            with _b1:
-                _show_revoke_form = st.checkbox(
-                    "🔒 Revocar",
-                    key=f"show_rev_{_lid}",
-                )
-            if _show_revoke_form:
-                with st.form(f"revoke_form_{_lid}", clear_on_submit=False):
-                    _reason = st.text_input(
-                        "Motivo de la revocación (visible al cliente)",
-                        placeholder="Ej: Incumplimiento contractual — pago vencido 60 días",
-                        key=f"reason_{_lid}",
-                    )
-                    _confirm = st.text_input(
-                        f"Escribe el nombre del cliente para confirmar: «{lic.get('customer', '')}»",
-                        key=f"confirm_{_lid}",
-                    )
-                    _submitted = st.form_submit_button("🔒 CONFIRMAR REVOCACIÓN",
-                                                         type="primary")
-                    if _submitted:
-                        if not _reason.strip():
-                            st.error("El motivo es obligatorio.")
-                        elif _confirm.strip() != lic.get("customer", "").strip():
-                            st.error("El nombre del cliente no coincide. Cancelado.")
-                        else:
-                            try:
-                                sb = get_supabase_client()
-                                sb.table("revoked_licenses").insert({
-                                    "license_id": _lid,
-                                    "revoked_by": _user_email,
-                                    "reason": _reason.strip(),
-                                    "customer": lic.get("customer"),
-                                    "customer_email": lic.get("email"),
-                                }).execute()
-                                st.cache_data.clear()
-                                st.success(
-                                    f"✓ Licencia REVOCADA. La próxima vez que el "
-                                    f"cliente abra Planta con internet, será bloqueado."
-                                )
-                                st.rerun()
-                            except Exception as e:  # noqa: BLE001
-                                st.error(f"Error al revocar: {e}")
 
 # ============================================================
-# 7. Footer info
+# 7. Footer con cómo funciona
 # ============================================================
 st.divider()
-with st.expander("ℹ Cómo funciona la revocación"):
+with st.expander("ℹ Cómo funciona el sistema de revocación"):
     st.markdown(
         """
-        **Flujo técnico de la revocación:**
+        **Flujo técnico:**
 
-        1. Cuando hacés click en "Revocar", el `license_id` se inserta en la tabla
-           `revoked_licenses` de Supabase con el motivo y tu email.
-        2. La Edge Function `license-check` lee de esa tabla.
-        3. Watermelon Planta del cliente chequea ese endpoint **al arrancar**,
-           con timeout de 5 segundos y máximo 1 vez cada 24h (cached).
+        1. Cuando hacés click en "Revocar", el `license_id` se inserta en la
+           tabla `revoked_licenses` de Supabase con el motivo y tu email.
+        2. La Edge Function `license-check` lee de esa tabla cada vez que
+           Watermelon Planta del cliente la consulta.
+        3. Planta chequea ese endpoint **al arrancar la app**, con timeout
+           de 5 segundos y máximo 1 vez cada 24h (cached localmente).
         4. Si el endpoint responde `revoked` → la app del cliente se bloquea
-           inmediatamente con tu motivo y email de contacto SIGA.
-        5. Si el cliente está offline → sigue funcionando hasta que se conecte.
-           Si pasan > 30 días sin poder validar → bloqueo automático por seguridad.
+           inmediatamente con tu motivo y el email de contacto SIGA.
+        5. Si el cliente está offline → sigue funcionando hasta que se
+           conecte. Si pasan **> 30 días sin poder validar** → bloqueo
+           automático por seguridad.
 
         **Reactivación:** click en ♻ borra el `license_id` de la blacklist.
-        Próximo arranque online del cliente → desbloqueado.
+        Próximo arranque online del cliente → desbloqueado en automático.
 
-        **No funciona si:**
-        - El cliente NUNCA conecta a internet (queda en grace period 30 días)
-        - El endpoint Supabase está caído (cliente queda en último estado conocido)
+        **Cómo obtener el `license_id`:**
+        - Cuando emitís una licencia con `tools/license_issue.py`, el output
+          imprime el `License ID`. También queda guardado en
+          `tools/licenses_issued/<cliente>/license.json` (campo `license_id`).
+        - Si solo tenés el `license.token` del cliente, podés decodificarlo
+          en https://jwt.io — el campo `jti` del payload es el `license_id`.
+
+        **Endpoint público:**
+        ```
+        https://yxeqwkhybueelmkrdkgq.supabase.co/functions/v1/license-check?jti=<license_id>
+        ```
         """
     )
