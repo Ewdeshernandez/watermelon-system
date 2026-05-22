@@ -401,9 +401,9 @@ with col1:
             return False
     online = _has_internet()
     if online:
-        st.success("🌐 **Online** · puedes sincronizar TDMS al Cloud")
+        st.success("🌐 **Online** · puedes sincronizar capturas al Cloud")
     else:
-        st.warning("📴 **Offline** · TDMS se guardan local, sync cuando vuelva la red")
+        st.warning("📴 **Offline** · capturas se guardan local, sync cuando vuelva la red")
 
 with col2:
     try:
@@ -866,7 +866,7 @@ with cap_col2:
             </div>
             <div style="font-size:13px;color:#475569;margin-top:6px;">
                 Captura continua bajo condiciones operacionales. Para
-                máquina rotando. Streaming TDMS hasta 32 canales.
+                máquina rotando. Streaming hasta 32 canales.
                 Conforme ISO 20816 / Brincker & Ventura 2015.
             </div>
         </div>
@@ -912,7 +912,7 @@ if _SYNC_AVAILABLE:
 
     if _user is None:
         # No logueado — mostrar formulario de login
-        with st.expander("🔐 Inicia sesión para sincronizar TDMS al Cloud",
+        with st.expander("🔐 Inicia sesión para sincronizar capturas al Cloud",
                           expanded=False):
             st.caption(
                 "Una sola vez (necesitas internet ahora). Tu sesión queda "
@@ -934,12 +934,12 @@ if _SYNC_AVAILABLE:
 
         if _stats["pending"] > 0:
             st.info(
-                f"📥 Tienes **{_stats['pending']} TDMS** "
+                f"📥 Tienes **{_stats['pending']} capturas** "
                 f"({_stats['pending_mb']:.1f} MB) esperando ser subidos. "
                 f"Inicia sesión arriba para sincronizar."
             )
         else:
-            st.caption("No hay TDMS pendientes de sincronizar.")
+            st.caption("No hay capturas pendientes de sincronizar.")
     else:
         # Logueado — mostrar stats + botón sync
         _login_col, _logout_col = st.columns([5, 1])
@@ -956,17 +956,18 @@ if _SYNC_AVAILABLE:
         _stat_col3.metric("MB pendientes", f"{_stats['pending_mb']:.1f}")
 
         if _stats["pending"] == 0:
-            st.info("🎉 Todo sincronizado — no hay TDMS pendientes")
+            st.info("🎉 Todo sincronizado — no hay capturas pendientes")
         else:
             _pending_files = list_pending(_CAPTURES_DIR)
-            with st.expander(f"Ver los {len(_pending_files)} TDMS pendientes"):
+            with st.expander(f"Ver las {len(_pending_files)} capturas pendientes"):
                 for p in _pending_files[:50]:
                     st.text(f"  · {p.name}  ({p.stat().st_size/(1024*1024):.2f} MB)")
                 if len(_pending_files) > 50:
                     st.caption(f"...y {len(_pending_files) - 50} más")
 
             if st.button(
-                f"🔄 **Sync ahora** — subir {_stats['pending']} TDMS al Cloud",
+                f"🔄 **Sync ahora** — subir {_stats['pending']} capturas al Cloud",
+
                 type="primary",
                 use_container_width=True,
                 key="sync_now_btn",
@@ -980,7 +981,7 @@ if _SYNC_AVAILABLE:
                     with _status_area.container():
                         st.text(f"  {msg}")
 
-                with st.spinner("Subiendo TDMS al Cloud..."):
+                with st.spinner("Subiendo capturas al Cloud..."):
                     result = sync_all(
                         _CAPTURES_DIR,
                         _user["email"],
