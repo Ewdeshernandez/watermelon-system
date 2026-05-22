@@ -98,3 +98,6 @@ planta/data/.license_cache.json
 # Local del cliente, no commitear.
 planta/data/.update_check_cache.json
 planta/data/.no_updates.flag
+
+# --- Cache de verificación de revocación (FASE J) ---
+planta/data/.revocation_cache.json
