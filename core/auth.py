@@ -108,6 +108,8 @@ NAV_GROUPS = [
         "items": [
             # Ciclo 20B — Admin de clientes/roles (solo admin)
             {"label": "◇  Admin · Clientes", "page": "pages/_admin_clients.py"},
+            # FASE J v3.31.221 — Admin de licencias Watermelon Planta (solo admin SIGA)
+            {"label": "🔐  Admin · Licencias Planta", "page": "pages/20_License_Admin.py"},
         ],
     },
 ]
@@ -152,6 +154,8 @@ CLIENT_BLOCKED_PAGES = {
     # de adquisición ni los curve fits — solo recibe el reporte final modal
     # integrado en Reports.
     "pages/18_Modal_Analysis.py",
+    # FASE J v3.31.221 — Admin licencias Planta es solo SIGA internal
+    "pages/20_License_Admin.py",
 }
 
 
