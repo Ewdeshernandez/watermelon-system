@@ -112,15 +112,18 @@ st.markdown("""
     }
 
     /* ============================================================
-       SIDEBAR — clase mundial industrial (FASE H2 v3.31.218)
-       Background degradado sutil + tipografía premium + dividers
+       SIDEBAR — clase mundial industrial (FASE H2.6 v3.31.219)
        ============================================================ */
     section[data-testid="stSidebar"] {
         background: linear-gradient(180deg, #fafbfc 0%, #f1f5f9 100%) !important;
         border-right: 1px solid rgba(15,118,110,0.08) !important;
     }
     section[data-testid="stSidebar"] > div {
-        padding-top: 1.5rem !important;
+        padding-top: 1rem !important;
+    }
+    /* OCULTAR la nav default de Streamlit (app planta / Captura Modal) */
+    section[data-testid="stSidebar"] [data-testid="stSidebarNav"] {
+        display: none !important;
     }
     section[data-testid="stSidebar"] h5 {
         font-size: 10px !important;
@@ -144,13 +147,44 @@ st.markdown("""
         animation: wm-pulse 1.6s ease-in-out infinite;
         display: inline-block;
     }
-    /* Botones de acceso rápido en sidebar */
+    /* Botones de acceso rápido en sidebar — premium gradient cards */
     section[data-testid="stSidebar"] .stButton > button {
+        border-radius: 10px !important;
+        font-size: 13px !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.4px !important;
+        transition: all 0.18s cubic-bezier(.4,0,.2,1) !important;
+        padding: 14px 12px !important;
+        background: linear-gradient(135deg, #ffffff 0%, #f0fdfa 100%) !important;
+        border: 1px solid rgba(15,118,110,0.20) !important;
+        color: #0f766e !important;
+        box-shadow: 0 1px 3px rgba(15,118,110,0.08),
+                    inset 0 1px 0 rgba(255,255,255,0.5) !important;
+        text-align: center !important;
+        line-height: 1.3 !important;
+    }
+    section[data-testid="stSidebar"] .stButton > button:hover:not(:disabled) {
+        background: linear-gradient(135deg, #0f766e 0%, #0d9488 100%) !important;
+        color: #ffffff !important;
+        border-color: #0f766e !important;
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 16px rgba(15,118,110,0.28),
+                    inset 0 1px 0 rgba(255,255,255,0.18) !important;
+    }
+    section[data-testid="stSidebar"] .stButton > button:disabled {
+        background: #f8fafc !important;
+        color: #94a3b8 !important;
+        border-color: rgba(148,163,184,0.25) !important;
+        box-shadow: none !important;
+    }
+    /* Page links en sidebar */
+    section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"] {
         border-radius: 8px !important;
-        font-size: 12px !important;
-        font-weight: 600 !important;
-        letter-spacing: 0.3px !important;
+        padding: 8px 12px !important;
         transition: all 0.15s ease !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stPageLink-NavLink"]:hover {
+        background: rgba(15,118,110,0.08) !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -572,28 +606,64 @@ with st.sidebar:
     st.divider()
 
     # ================================================================
-    # 3. ACCESO RÁPIDO — botones tipo Artemis para EMA/OMA/Sync
+    # 3. ACCESO RÁPIDO — cards Artemis con icono SVG + label + descripción
     # ================================================================
     st.markdown("##### Acceso rápido")
 
     _qa1, _qa2 = st.columns(2)
     with _qa1:
         if _LIC.has_module("ema"):
-            if st.button("EMA", key="qa_ema", use_container_width=True,
-                          help="Captura con martillo modal"):
+            if st.button("🔨  EMA", key="qa_ema",
+                          use_container_width=True,
+                          help="Captura sincronizada con martillo modal · ISO 7626-5"):
                 st.switch_page("pages/01_Captura_Modal.py")
         else:
-            st.button("EMA 🔒", key="qa_ema_lock", use_container_width=True,
-                      disabled=True, help="No incluido en tu plan")
+            st.button("🔒  EMA", key="qa_ema_lock",
+                      use_container_width=True, disabled=True,
+                      help="No incluido en tu plan — contacta a SIGA para upgrade")
     with _qa2:
         if _LIC.has_module("oma"):
-            if st.button("OMA", key="qa_oma", use_container_width=True,
-                          help="Captura continua operacional"):
+            if st.button("🌊  OMA", key="qa_oma",
+                          use_container_width=True,
+                          help="Captura continua bajo operación · ISO 20816"):
                 st.session_state["_planta_mode_preselect"] = "oma"
                 st.switch_page("pages/01_Captura_Modal.py")
         else:
-            st.button("OMA 🔒", key="qa_oma_lock", use_container_width=True,
-                      disabled=True, help="No incluido en tu plan")
+            st.button("🔒  OMA", key="qa_oma_lock",
+                      use_container_width=True, disabled=True,
+                      help="No incluido en tu plan — contacta a SIGA para upgrade")
+
+    # Sub-cards descriptivos debajo de los botones — explican qué hace cada uno
+    st.markdown(
+        """
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;
+                    margin-top:8px;margin-bottom:4px;">
+            <div style="padding:8px 10px;background:rgba(15,118,110,0.04);
+                        border-radius:6px;border-left:2px solid #0f766e;">
+                <div style="font-size:9px;color:#0f766e;font-weight:700;
+                            text-transform:uppercase;letter-spacing:1px;">
+                    Impact Hammer
+                </div>
+                <div style="font-size:10px;color:#475569;line-height:1.4;
+                            margin-top:2px;">
+                    Máquina parada · ISO 7626-5
+                </div>
+            </div>
+            <div style="padding:8px 10px;background:rgba(30,58,138,0.04);
+                        border-radius:6px;border-left:2px solid #1e3a8a;">
+                <div style="font-size:9px;color:#1e3a8a;font-weight:700;
+                            text-transform:uppercase;letter-spacing:1px;">
+                    Continuous
+                </div>
+                <div style="font-size:10px;color:#475569;line-height:1.4;
+                            margin-top:2px;">
+                    Máquina rotando · ISO 20816
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.divider()
 
