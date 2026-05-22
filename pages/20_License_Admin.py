@@ -28,7 +28,7 @@ from typing import List, Dict, Any
 import streamlit as st
 
 from core.auth import require_role
-from core.db import get_supabase_client
+from core.live_readings import _get_supabase_client as get_supabase_client
 
 st.set_page_config(
     page_title="Watermelon · Admin Licencias",
