@@ -50,6 +50,9 @@ datas += [
     (str(_PLANTA_DIR / "sync_uploader.py"),              "planta"),
     (str(_PLANTA_DIR / "license_manager.py"),            "planta"),
     (str(_PLANTA_DIR / "updater.py"),                    "planta"),
+    # Icono para el tray icon en runtime
+    (str(_SPEC_DIR / "assets" / "watermelon.ico"),
+        "planta/installer/assets"),
     (str(_PLANTA_DIR / "pages" / "01_Captura_Modal.py"), "planta/pages"),
     # README y assets visibles al cliente
     (str(_PLANTA_DIR / "README_PLANTA.txt"),             "planta"),
@@ -122,6 +125,9 @@ hiddenimports += [
     # Auto-updater (FASE F v3.31.216)
     "updater",
     "urllib.request", "urllib.error", "urllib.parse",
+    # Tray icon (FASE L v3.31.233 — sin pantalla negra)
+    "pystray", "pystray._base", "pystray._win32",
+    "PIL.Image", "PIL.ImageDraw", "PIL.ImageFont",
 ]
 
 # ============================================================
@@ -177,7 +183,9 @@ exe = EXE(
     upx=True,           # comprime el .exe (~30% reducción)
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,       # mantener console para que user vea errores
+    console=False,      # FASE L v3.31.233: sin ventana negra cmd.exe
+                        # Los logs van a data\logs\watermelon-YYYYMMDD.log
+                        # El user controla la app desde el tray icon
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

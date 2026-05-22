@@ -71,10 +71,8 @@ SolidCompression=yes
 ; Output — guardamos en installer\dist (al lado del .exe portable de PyInstaller)
 OutputDir=dist
 OutputBaseFilename=WatermelonPlantaSetup-v{#MyAppVersion}
-; SetupIconFile comentado — se usará el icono default de Inno Setup hasta
-; que generemos un .ico profesional desde el SVG. El .exe instalado igual
-; tiene el icono de WatermelonPlanta.exe (también default por ahora).
-; SetupIconFile=assets\watermelon.ico
+; Icono del Setup.exe (wizard) + del shortcut en el escritorio
+SetupIconFile=assets\watermelon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 
 ; Requires Windows 10+

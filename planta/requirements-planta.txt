@@ -38,3 +38,10 @@ supabase>=2.0.0
 # OBLIGATORIO — la app no arranca sin license_manager.py funcional.
 pyjwt>=2.8.0
 cryptography>=41.0.0
+
+# Tray icon para Windows (FASE L v3.31.233)
+# El launcher.py corre Streamlit en background y muestra un ícono en la
+# bandeja del sistema con menú Abrir/Salir. Esto elimina la ventana
+# negra cmd.exe que se veía antes.
+pystray>=0.19.5
+Pillow>=10.0.0  # ya viene con cairosvg/streamlit pero lo pinneamos
