@@ -1,27 +1,28 @@
 """
-core/modal/ni_daq.py — Adquisición con maleta cDAQ-9178 + NI-9234
-==================================================================
+core/modal/ni_daq.py — Backend de adquisición Watermelon
+=========================================================
 
-Wrapper sobre `nidaqmx` (driver oficial NI Python) para capturar datos
-de una maleta con chasis NI cDAQ-9178 (8 slots USB 2.0) poblada con
-hasta 8 módulos NI-9234 → **32 canales simultáneos** numerados como
-puertos BNC 1..32 en el frente de la maleta.
+Wrapper de la maleta Watermelon de adquisición multicanal — hasta
+**32 canales simultáneos** numerados como puertos BNC 1..32 en el
+frente de la maleta.
 
-Hardware soportado (v3.31.201+)
--------------------------------
-· Chasis: NI cDAQ-9178 (8 slots, USB)
-· Módulos: 1 a 8× NI-9234 (4 ch IEPE/AC/DC c/u, 24-bit, ±5V)
-· Total: hasta 32 canales simultáneos muestreados
-· Sincronización: sample clock compartido del chasis (auto)
-· Cumple ATEX Ex II 3G / UL Class I Div 2 → apto rotating equipment
+Capacidad del sistema
+---------------------
+· Hasta 32 canales analógicos simultáneos
+· Resolución 24-bit por canal
+· Sample rate hasta 51.2 kHz (16 valores discretos válidos)
+· Excitación IEPE / AC / DC configurable por canal
+· Rango ±5 V por canal
+· Sincronización via sample clock compartido del chasis
+· Apto para equipos rotativos (ATEX Ex II 3G / UL Class I Div 2)
 
-Naming convention NI-DAQmx
---------------------------
-El driver NI nombra los canales físicos como `{chassis}Mod{slot}/ai{idx}`:
-  cDAQ1Mod1/ai0..ai3   (slot 1 → BNC 1..4)
-  cDAQ1Mod2/ai0..ai3   (slot 2 → BNC 5..8)
+Naming convention interno
+-------------------------
+Cada canal físico se direcciona como `{chassis}Mod{slot}/ai{idx}`:
+  Mod1/ai0..ai3   (slot 1 → BNC 1..4)
+  Mod2/ai0..ai3   (slot 2 → BNC 5..8)
   ...
-  cDAQ1Mod8/ai0..ai3   (slot 8 → BNC 29..32)
+  Mod8/ai0..ai3   (slot 8 → BNC 29..32)
 
 El operador piensa en **BNC port (1..32)** — el número impreso en el
 frente de la maleta. La conversión a (slot, channel_index) es interna:
@@ -44,38 +45,28 @@ Captura continua durante operación normal:
   · Sin trigger — adquisición continua streaming
   · Duración: 60-300+ segundos a velocidad constante
   · Sample rate: 5-10 kHz (configurable hasta 51.2 kHz)
-  · TDMS escrito **chunk-por-chunk** (RAM constante ~5 MB para evitar
+  · Archivo escrito **chunk-por-chunk** (RAM constante ~5 MB para evitar
     OOM en captura 32ch × 300s × 5120 Hz que serían ~390 MB en RAM)
 
 Modo Simulated (para development sin hardware)
 -----------------------------------------------
 Genera data sintética que imita lo que devolvería la maleta real. Útil
-para probar el pipeline modal end-to-end sin chasis conectado. Activable
+para probar el pipeline modal end-to-end sin maleta conectada. Activable
 con `AcquisitionConfig.mode = "simulated_ema"` o `"simulated_oma"`
 o flag `--simulated` en el companion.
 
-NI-9234 specs (por módulo)
---------------------------
-· 4 canales analógicos simultáneos
-· 24-bit resolución
-· Sample rate: 1.652 kHz to 51.2 kHz (16 valores discretos)
-· Built-in IEPE excitation (configurable per canal)
-· Rango: ±5 V
-
 Sensor coupling
 ---------------
-· IEPE (acelerómetros Wilcoxon 100 mV/g): NI-9234 alimenta excitación 2 mA
-· AC con bias (Bently proximity 200 mV/mil): requiere PS externa -24 VDC,
-  conexión BNC → NI-9234 en modo AC coupled
+· IEPE (acelerómetros 100 mV/g): la maleta suministra excitación 2 mA
+· AC con bias (sondas de proximidad 200 mV/mil): requiere alimentación
+  externa, conexión BNC → maleta en modo AC coupled
 · DC: rara vez usado en vibración
 
-Dependencias
-------------
-nidaqmx — Driver Python oficial NI (requiere NI-DAQmx driver instalado en
-laptop de captura). Import lazy — el módulo se importa OK sin nidaqmx
-disponible; solo falla al llamar las funciones de captura real.
-
-  pip install nidaqmx npTDMS
+Dependencias internas
+---------------------
+Import lazy del backend driver — el módulo se importa OK sin drivers
+disponibles; solo falla al llamar las funciones de captura real (útil
+para entornos sin maleta como Cloud).
 
 Marco normativo
 ---------------
@@ -121,7 +112,7 @@ class ChannelConfig:
        Es lo que el operador ve. RECOMENDADO.
 
     2. **module_slot (1..8) + channel_index (0..3)** — direccionamiento
-       NI-DAQmx nativo. El driver lo necesita así internamente.
+       interno que el backend driver necesita.
 
     Si pasas `bnc_port`, los otros dos se computan auto. Si pasas
     `channel_index` solo (sin bnc_port) — modo legacy v3.31.200-, asume
@@ -138,7 +129,7 @@ class ChannelConfig:
     """
     name: str           # Etiqueta del sensor (e.g. "1YA", "Hammer")
     coupling: str       # "IEPE", "AC", "DC"
-    sensitivity_mv_per_eu: float  # 100.0 para Wilcoxon, 200.0 para Bently
+    sensitivity_mv_per_eu: float  # 100.0 acelerómetro IEPE, 200.0 sonda proximidad
 
     # Identificación del canal físico — pasa bnc_port o channel_index
     bnc_port: Optional[int] = None      # 1..32 (RECOMENDADO)
@@ -154,7 +145,7 @@ class ChannelConfig:
             if not (1 <= self.bnc_port <= 32):
                 raise ValueError(
                     f"bnc_port={self.bnc_port} fuera de rango [1..32]. "
-                    f"Maleta cDAQ-9178 + 8× NI-9234 soporta máximo 32 canales."
+                    f"La maleta Watermelon soporta máximo 32 canales."
                 )
             # Computa slot e idx desde bnc_port
             self.module_slot = (self.bnc_port - 1) // 4 + 1
@@ -279,9 +270,9 @@ def list_available_devices() -> List[Dict[str, str]]:
         from nidaqmx.system import System
     except ImportError as exc:
         raise ImportError(
-            "nidaqmx no está instalado. Ejecuta: pip install nidaqmx\n"
-            "Adicionalmente, el driver NI-DAQmx debe estar instalado en el sistema "
-            "(descarga gratuita en ni.com)."
+            "Drivers de adquisición Watermelon no disponibles en este equipo. "
+            "Esto es esperado en entornos sin maleta conectada (ej: modo Cloud). "
+            "Para captura local, corre INSTALAR.bat de Watermelon Planta."
         ) from exc
 
     system = System.local()

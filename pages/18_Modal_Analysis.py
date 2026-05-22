@@ -2,13 +2,13 @@
 pages/18_Modal_Analysis.py — Módulo de Análisis Modal Watermelon
 =================================================================
 
-Módulo nuevo para reemplazar Artemis Modal con stack nativo open-source.
-Implementa EMA + OMA + comparación con FEA.
+Stack modal nativo de Watermelon. Implementa EMA + OMA + comparación con FEA
+con todos los algoritmos in-house, sin dependencias de software de terceros.
 
 Tabs
 ----
 1. Setup           — Geometría 3D + sensor → DOF mapping
-2. Adquisición    — TDMS importer + NI-9234 live + Artemis legacy
+2. Adquisición    — Captura live + importer de archivos pre-grabados
 3. EMA Processing — FRF + LSCF + stability diagram
 4. OMA Processing — FDD + SSI
 5. Mode Shapes 3D — Animación Plotly Mesh3d + export GIF/MP4
@@ -20,11 +20,6 @@ Marco normativo
 · ISO 20816 (OMA)
 · API 684 (rotor dynamics validation)
 · API 618 §7.9 (criterio separación modal)
-
-Estado v3.31.151:
-- Tab Adquisición: Legacy Artemis funcional (parsea .txt + plot Bode + tabla picos)
-- Tab EMA: detección automática de modos con half-power damping
-- Tab OMA / Mode Shapes 3D / FEA: scaffold (próximo sprint)
 """
 
 from __future__ import annotations
@@ -106,7 +101,7 @@ if not is_page_allowed_for_role("pages/18_Modal_Analysis.py", _my_role):
 # Session state — guardar FRFs cargados entre reruns
 # =====================================================================
 if "modal_frfs" not in st.session_state:
-    st.session_state["modal_frfs"] = []  # list[ArtemisFRF | FRFResult]
+    st.session_state["modal_frfs"] = []  # list[LegacyFRF | FRFResult]
 
 
 # =====================================================================
@@ -441,7 +436,7 @@ with tab_setup:
                         (str(len(sensors)), "Total sensores",
                          "registrados en Sensor Map", "navy"),
                         (str(n_accel), "Acelerómetros",
-                         "Wilcoxon 100 mV/g típico", "cyan"),
+                         "Acelerómetro IEPE 100 mV/g típico", "cyan"),
                         (str(n_prox), "Proximidad",
                          "Bently 200 mV/mil típico", "amber"),
                         (str(n_3d_ready), "Modal 3D ready",
@@ -509,7 +504,7 @@ with tab_setup:
             )
 
     # =================================================================
-    # Sub-sección: Editor de Geometría 3D (estilo Artemis Modal)
+    # Sub-sección: Editor de Geometría 3D — visualización profesional
     # =================================================================
     st.divider()
     modal_section_header(
@@ -841,7 +836,7 @@ with tab_setup:
 # ---------------------------------------------------------------------
 with tab_acq:
     st.subheader("Adquisición de datos")
-    st.caption("Tres rutas: NI-9234 live, importar TDMS pre-capturado, o legacy Artemis.")
+    st.caption("Tres rutas: captura live desde la maleta, importar archivo pre-capturado, o importar FRFs legacy.")
 
     acq_mode = st.radio(
         "Origen de datos",
@@ -856,7 +851,7 @@ with tab_acq:
 
     # -------- NI-9234 live --------
     if acq_mode.startswith("📡"):
-        st.markdown("**Configuración de captura NI-9234**")
+        st.markdown("**Configuración de captura Watermelon**")
 
         # --- Selector de modo (gobierna el resto del formulario) ---
         ni_mode_sel = st.selectbox(
@@ -873,7 +868,7 @@ with tab_acq:
         with col1:
             st.number_input("Sample rate (Hz)", value=5120, step=1024, key="ni_fs",
                               min_value=1024, max_value=51200,
-                              help="NI-9234 acepta hasta 51.2 kS/s/ch. "
+                              help="El sistema acepta hasta 51.2 kS/s/ch. "
                                    "Típico: 5120 Hz (banda útil 0–2 kHz).")
 
         # --- Bifurcación EMA vs OMA con tiempos normativos ---
@@ -1011,7 +1006,7 @@ with tab_acq:
         # tabla editable de 32 filas (1 por BNC port). Auto-detecta qué
         # módulos NI-9234 están instalados en la maleta y pre-popula el
         # default. Genera el comando --channels para el companion script.
-        st.markdown("**Canales activos · Maleta cDAQ-9178 (BNC 1..32)**")
+        st.markdown("**Canales activos · Maleta Watermelon (BNC 1..32)**")
 
         # Auto-discovery del hardware (silencioso si no hay driver NI)
         _ni_chassis = st.session_state.get("ni_chassis_name", "cDAQ1")
@@ -1024,18 +1019,18 @@ with tab_acq:
             if _modules:
                 _bnc_max = max(m["bnc_range"][1] for m in _modules)
                 _discovery_msg = (
-                    f"✓ Detectados {len(_modules)} NI-9234 en chasis '{_ni_chassis}' "
+                    f"✓ Detectados {len(_modules)} módulos en la maleta '{_ni_chassis}' "
                     f"→ BNC 1..{_bnc_max} disponibles"
                 )
             else:
                 _discovery_msg = (
-                    f"⚠ No se detectó hardware NI-9234 en chasis '{_ni_chassis}'. "
+                    f"⚠ No se detectó la maleta Watermelon '{_ni_chassis}'. "
                     "Puedes configurar canales para captura remota, pero la "
                     "ejecución se hará desde la laptop de planta vía companion."
                 )
         except ImportError:
             _discovery_msg = (
-                "ℹ NI-DAQmx no instalado en este equipo (normal en Streamlit Cloud). "
+                "ℹ Drivers de adquisición Watermelon no disponibles en este equipo (esperado en modo Cloud). "
                 "Configura los canales aquí y ejecuta el comando técnico desde la "
                 "laptop de planta con el companion script."
             )
@@ -1045,7 +1040,7 @@ with tab_acq:
         st.caption(_discovery_msg)
 
         # Plantilla default por modo: EMA reserva BNC 1 al martillo, OMA es
-        # todo acelerómetros Wilcoxon 100 mV/g.
+        # todo acelerómetros IEPE 100 mV/g.
         import pandas as _pd
         _default_rows = []
         for _bnc in range(1, 33):
@@ -1090,7 +1085,7 @@ with tab_acq:
                     disabled=True, width="small",
                 ),
                 "Slot": st.column_config.NumberColumn(
-                    "Slot", help="Módulo NI-9234 (1..8) dentro del chasis",
+                    "Slot", help="Módulo (1..8) dentro de la maleta",
                     disabled=True, width="small",
                 ),
                 "Habilitado": st.column_config.CheckboxColumn(
@@ -1103,11 +1098,11 @@ with tab_acq:
                 ),
                 "Coupling": st.column_config.SelectboxColumn(
                     "Coupling", options=["IEPE", "AC", "DC"],
-                    help="IEPE para Wilcoxon, AC para Bently proximity, DC raro",
+                    help="IEPE para acelerómetros, AC para sondas de proximidad, DC raro",
                     width="small",
                 ),
                 "Sens (mV/EU)": st.column_config.NumberColumn(
-                    "Sens", help="Sensibilidad: 100 mV/g Wilcoxon, 200 mV/mil Bently, 2.4 mV/N hammer",
+                    "Sens", help="Sensibilidad: 100 mV/g acelerómetro, 200 mV/mil sonda de proximidad, 2.4 mV/N martillo modal",
                     min_value=0.1, max_value=10000.0, step=0.1, format="%.2f",
                     width="small",
                 ),
@@ -1117,7 +1112,7 @@ with tab_acq:
                     width="small",
                 ),
                 "HW": st.column_config.TextColumn(
-                    "HW", help="✓ = NI-9234 instalado en este slot, — = vacío",
+                    "HW", help="✓ = módulo instalado en este slot, — = vacío",
                     disabled=True, width="small",
                 ),
             },
@@ -1149,7 +1144,7 @@ with tab_acq:
                     title=f"⚠ Hardware faltante en {len(_missing)} slot(s)",
                     detail=(
                         f"Habilitaste canales en slots {_missing} pero esos módulos "
-                        f"NI-9234 no están instalados en el chasis. Slots con hardware: "
+                        f"módulos no están instalados en la maleta. Slots con módulos: "
                         f"{sorted(_installed_slots)}. **Antes de capturar:** o desactiva "
                         f"esos canales o instala los módulos faltantes."
                     ),
@@ -1238,7 +1233,7 @@ with tab_acq:
                 # Stats arriba del bloque para el operador
                 st.caption(
                     f"📊 {len(_enabled_rows)} canales habilitados · "
-                    f"{len(_slots_used)} módulos NI-9234 requeridos · "
+                    f"{len(_slots_used)} módulos requeridos · "
                     f"modo {_mode_token.upper()}"
                 )
 
@@ -1277,8 +1272,8 @@ with tab_acq:
                     st.caption(
                         "Alternativa al comando técnico: ejecutar la captura "
                         "ahora mismo desde este equipo sin pasar por terminal. "
-                        "Requiere maleta NI cDAQ-9178 conectada por USB y "
-                        "NI-DAQmx driver instalado (✓ detectado)."
+                        "Requiere maleta Watermelon conectada por USB y "
+                        "drivers de adquisición instalados (✓ detectado)."
                     )
 
                     _capture_disabled = (
@@ -1430,7 +1425,7 @@ with tab_acq:
 
     # -------- TDMS existente --------
     elif acq_mode.startswith("📁"):
-        st.markdown("**Cargar archivo .tdms del NI-9234**")
+        st.markdown("**Cargar archivo de captura (.tdms)**")
 
         # v3.31.209 — Fuente del TDMS: upload local vs Cloud (planta sync)
         _tdms_source = st.radio(
@@ -1970,9 +1965,9 @@ with tab_acq:
                         f"nperseg = {nperseg}. Disponible en Tab EMA para identificación modal."
                     )
 
-    # -------- Legacy Artemis --------
+    # -------- FRFs legacy (formato .txt) --------
     else:
-        st.markdown("**Importar exports legacy de Artemis Modal**")
+        st.markdown("**Importar FRFs legacy (.txt de software modal anterior)**")
 
         uploaded = st.file_uploader(
             "Subir archivos .txt",
@@ -1994,10 +1989,10 @@ with tab_acq:
             )
         st.caption(
             "El eje de frecuencia se reconstruye como Δf = bandwidth / (N_bins - 1). "
-            "Artemis NO guarda el eje en los .txt — requerido completar manualmente."
+            "Los archivos legacy NO guardan el eje — requerido completar manualmente."
         )
 
-        if uploaded and st.button("🔍 Procesar archivos Artemis",
+        if uploaded and st.button("🔍 Procesar archivos legacy",
                                     type="primary", use_container_width=True,
                                     key="art_process_btn"):
             from core.modal.artemis_importer import load_artemis_file, detect_file_type
@@ -2224,11 +2219,11 @@ with tab_ema:
 
         st.divider()
 
-    # ─── Sección legacy Artemis (FRFs cargadas via .txt) ──────────────
+    # ─── Sección FRFs legacy (cargadas via .txt) ──────────────────────
     frfs = st.session_state.get("modal_frfs", [])
     if not frfs and tdms_frf is None:
         st.info("📭 No hay FRFs cargadas. Carga datos en el tab Adquisición primero "
-                "(legacy Artemis .txt o TDMS del NI-9234).")
+                "(archivo legacy .txt o captura de la maleta Watermelon).")
     elif not frfs:
         pass  # solo TDMS cargado — UI ya mostrada arriba
     else:
@@ -2265,7 +2260,7 @@ with tab_ema:
                 peaks = detect_modal_peaks(
                     frequencies_hz=primary.frequencies_hz,
                     magnitude=mag,
-                    coherence=None,  # Artemis exports no incluyen coherencia
+                    coherence=None,  # los exports legacy no incluyen coherencia
                     f_min_hz=float(ema_f_min),
                     f_max_hz=float(ema_f_max),
                     prominence_db=float(ema_prom),
@@ -2353,7 +2348,7 @@ with tab_oma:
     st.subheader("Análisis Modal Operacional — FDD")
     st.caption(
         "Frequency Domain Decomposition (Brincker 2001) sobre datos operacionales "
-        "del NI-9234. Sin necesidad de martillo. Cumple ISO 20816 + API 684."
+        "del sistema. Sin necesidad de martillo. Cumple ISO 20816 + API 684."
     )
 
     tdms_oma = st.session_state.get("modal_tdms")
@@ -2363,7 +2358,7 @@ with tab_oma:
             title="Sin datos operacionales cargados",
             description=(
                 "El análisis OMA requiere un archivo .tdms con captura continua "
-                "del NI-9234 — mínimo 60 segundos a velocidad constante (ISO 20816 + "
+                "del sistema — mínimo 60 segundos a velocidad constante (ISO 20816 + "
                 "Brincker 2001). Carga el archivo en el Tab Adquisición usando la "
                 "opción 'Importar .tdms existente'."
             ),
@@ -2486,7 +2481,7 @@ with tab_oma:
             )
 
             # Multi-SVD plot — equivalente al "Singular Values of Spectral Densities"
-            # de Artemis. SVD Line 1 (principal) + Line 2 + Line 3 si hay ≥ 3 canales.
+            # estándar OMA. SVD Line 1 (principal) + Line 2 + Line 3 si hay ≥ 3 canales.
             fig_sv = go.Figure()
             svd_colors = ["#0F7FB0", "#dc2626", "#16a34a", "#a855f7"]
             for k in range(min(fdd.n_channels, 3)):
@@ -2704,7 +2699,7 @@ with tab_3d:
                     "Cada flecha es un componente del mode shape en el plano "
                     "complejo. **Vectores colineales** (alineados en 0° o 180°) "
                     "= modo natural real. **Vectores dispersos** = modo complejo "
-                    "o espurio. Equivalente Artemis Fig 10."
+                    "o espurio. Visualización estándar de complejidad modal."
                 ),
                 norm_ref="ISO 7626-6 §7.2",
                 algorithm="Modal Phase Collinearity (Pappa & Eishan 1995)",
@@ -2738,12 +2733,12 @@ with tab_3d:
                     "Modal Assurance Criterion entre cada par de modos. "
                     "**Diagonal = 1** (siempre). **Off-diagonal > 0.7** "
                     "indica modos redundantes (mismo modo identificado 2 veces "
-                    "— uno debería eliminarse). Equivalente Artemis Fig 9."
+                    "— uno debería eliminarse). Matriz AutoMAC estándar."
                 ),
                 norm_ref="ISO 7626-6 §6.5 · API 684 §1.6",
                 algorithm="AutoMAC matrix (Allemang & Brown 1982)",
             )
-            view_3d = st.toggle("Vista 3D barras (estilo Artemis)",
+            view_3d = st.toggle("Vista 3D barras (profesional)",
                                   value=False, key="mac_3d_toggle")
             fig_mac = build_mac_matrix_plot(
                 mac, labels, title="AutoMAC", use_3d=view_3d,
@@ -2933,7 +2928,7 @@ with tab_3d:
                         "Flechas DOF",
                         value=False, key="modeshape_arrows_toggle",
                         help="Muestra flechas Cone en cada sensor. Off = solo "
-                             "heatmap del mesh (estilo Artemis).",
+                             "heatmap del mesh (visualización Watermelon).",
                     )
                 with _ms_c3:
                     # v3.31.199 HOTFIX: ghost OFF default — agrega 4 traces
@@ -2949,10 +2944,10 @@ with tab_3d:
                         "Colormap",
                         ["RdBu_r", "RdYlBu_r", "Spectral_r", "Jet", "Viridis"],
                         index=0, key="modeshape_cmap",
-                        help="Rojo cofase, azul anti-fase (RdBu_r). Artemis usa Jet.",
+                        help="Rojo cofase, azul anti-fase (RdBu_r). Alternativa: Jet.",
                     )
 
-                # ===== Banner KPI grande estilo System1/Artemis =====
+                # ===== Banner KPI grande estilo industrial premium =====
                 _fn_hz = float(mode_sel.natural_frequency_hz)
                 _fn_cpm = _fn_hz * 60.0
                 _zeta = float(mode_sel.damping_ratio_pct)
@@ -3487,7 +3482,7 @@ with tab_3d:
         # ═══════════════════════════════════════════════════════════════
         st.caption(
             "📅 **Roadmap próximo sprint:** Nivel 3 — Mesh3D animado con "
-            "colormap estilo Artemis. Los Niveles 1-2 actuales (bar chart + "
+            "colormap profesional Watermelon. Los Niveles 1-2 actuales (bar chart + "
             "flechas 3D) ya cumplen ISO 7626-6 §7.2 — el animated mesh es "
             "feature visual, no requisito normativo."
         )

@@ -73,21 +73,21 @@ _DEFAULT_UNIT_BY_TYPE = {
 # Sensitivity típica de los sensores estandarizados en SIGA. Se aplican
 # como default cuando no se especifica explícitamente en el wizard.
 #
-#   · Wilcoxon acelerómetro:  100 mV/g (IEPE)
-#   · Bently 3300/3500 prox:  200 mV/mil (AC con DC blocker)
-#   · Velocímetro tipo VS:    100 mV/(in/s) (depende del modelo)
-#   · PCB martillo modal:     2.4 mV/N (IEPE)
+#   · Acelerómetro IEPE:      100 mV/g
+#   · Sonda de proximidad:    200 mV/mil (AC con DC blocker)
+#   · Velocímetro:            100 mV/(in/s) (depende del modelo)
+#   · Martillo modal:         2.4 mV/N (IEPE)
 #
 # Coupling típico:
-#   · IEPE: acelerómetros y martillo modal (NI-9234 suministra 2 mA)
-#   · AC:   probetas Bently con bias DC quitado (DC blocker)
+#   · IEPE: acelerómetros y martillo modal (excitación 2 mA)
+#   · AC:   sondas de proximidad con bias DC quitado (DC blocker)
 #   · DC:   medición directa (raro en vibración)
 # =============================================================
 
 _DEFAULT_SENSITIVITY_BY_TYPE = {
     "proximity": 200.0,      # mV/mil — Bently 3300/3500
     "velocity": 100.0,       # mV/(in/s) — VS típico
-    "accelerometer": 100.0,  # mV/g — Wilcoxon
+    "accelerometer": 100.0,  # mV/g — IEPE típico
     "keyphasor": 0.0,        # no aplica
 }
 
@@ -139,14 +139,15 @@ def new_sensor(
     Modal Analysis (EMA + OMA bajo ISO 7626 / ISO 20816 / API 684):
 
       · sensitivity_mv_per_eu: float | None
-          Sensibilidad del transductor en mV/EU (e.g. 100 para Wilcoxon
-          100 mV/g, 200 para Bently 200 mV/mil, 2.4 para PCB martillo).
-          Si None, los helpers (get_sensitivity_for_modal) aplican el
-          default por sensor_type.
+          Sensibilidad del transductor en mV/EU (e.g. 100 para acelerómetro
+          IEPE 100 mV/g, 200 para sonda de proximidad 200 mV/mil, 2.4 para
+          martillo modal). Si None, los helpers (get_sensitivity_for_modal)
+          aplican el default por sensor_type.
 
       · coupling: str
-          "IEPE" | "AC" | "DC" — Modo de acoplamiento al DAQ NI-9234.
-          IEPE para accel/martillo, AC para prox Bently con DC blocker.
+          "IEPE" | "AC" | "DC" — Modo de acoplamiento al sistema de adquisición.
+          IEPE para acelerómetros/martillo, AC para sondas de proximidad
+          con DC blocker.
 
       · position_3d: [x, y, z] en metros
           Posición del sensor en el frame del activo (origen típico:
@@ -199,9 +200,9 @@ def get_sensitivity_for_modal(sensor: Dict[str, Any]) -> float:
 
     Si el sensor tiene `sensitivity_mv_per_eu` configurado explícitamente,
     se usa ese valor. Si no, se aplica el default por sensor_type:
-      · accelerometer → 100 (Wilcoxon)
-      · proximity     → 200 (Bently)
-      · velocity      → 100 (VS típico)
+      · accelerometer → 100 (IEPE típico)
+      · proximity     → 200 (sonda típica)
+      · velocity      → 100 (velocímetro típico)
 
     Returns:
         Sensitivity en mV/EU (siempre > 0 para sensores reales)
