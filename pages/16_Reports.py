@@ -2177,13 +2177,59 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                             except Exception:
                                 pass
 
-                        # Ciclo 15.2 — INTENTAR primero el render sobre la
-                        # foto/dibujo REAL del activo si hay sensores con
-                        # coordenadas x_pct/y_pct configuradas. Si no, caer
-                        # al render generico turbomachinery silhouette.
-                        _re_png = None
+                        # Ciclo 17.35 (v3.31.242) — INVERSIÓN DE PRIORIDAD.
+                        # Antes: si había schematic_png en el Vault, se usaba
+                        # esa foto/dibujo como base y los sensores se
+                        # pintaban encima. Problema: las fotos viejas del
+                        # Vault son típicamente feas o desactualizadas y
+                        # tapaban al diagrama vivo que es clase mundial
+                        # (compresor Ariel KBK/4 4-cyl, motor Hyundai HNP2,
+                        # turbinas LM6000 dibujados con detalle realista).
+                        #
+                        # Ahora: render_sensor_map_diagram() es el CANON.
+                        # Solo se usa el schematic_png estático del Vault
+                        # como fallback de último recurso si el diagrama
+                        # vivo retorna None (caso rarísimo).
+                        _re_drv = " ".join(p for p in [
+                            getattr(_re_inst, "driver_manufacturer", ""),
+                            getattr(_re_inst, "driver_model", ""),
+                        ] if p) or "Driver"
+                        _re_dvn = " ".join(p for p in [
+                            getattr(_re_inst, "driven_manufacturer", ""),
+                            getattr(_re_inst, "driven_model", ""),
+                        ] if p) or "Driven"
+
+                        try:
+                            from core.sensor_diagram import _infer_machine_kind as _ifk
+                            _re_drv_kind = (
+                                _ifk(_re_drv) or _ifk(getattr(_re_inst, "asset_class", "")) or "turbine"
+                            )
+                            _re_dvn_kind = (
+                                _ifk(_re_dvn) or _ifk(getattr(_re_inst, "asset_class", "")) or "generator"
+                            )
+                        except Exception:
+                            _re_drv_kind = "turbine"
+                            _re_dvn_kind = "generator"
+
+                        # 1) Diagrama vivo (canon)
+                        _re_png = render_sensor_map_diagram(
+                            _re_inst.sensors,
+                            train_label="",
+                            driver_label=_re_drv,
+                            driven_label=_re_dvn,
+                            severity_by_label=_re_sev,
+                            overall_by_label=_re_overall,
+                            unit_by_label=_re_unit,
+                            driver_kind=_re_drv_kind,
+                            driven_kind=_re_dvn_kind,
+                            figure_width_in=11.5,
+                            compact=True,
+                        )
                         _used_real_schematic = False
-                        if _re_inst.schematic_png:
+
+                        # 2) Fallback de último recurso: foto del Vault
+                        # con overlays. Solo si el diagrama vivo falló.
+                        if _re_png is None and _re_inst.schematic_png:
                             try:
                                 _sch_bytes = get_instance_document_bytes(
                                     _re_inst.instance_id, _re_inst.schematic_png
@@ -2200,41 +2246,6 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
                                         _used_real_schematic = True
                             except Exception:
                                 pass
-
-                        _re_drv = " ".join(p for p in [
-                            getattr(_re_inst, "driver_manufacturer", ""),
-                            getattr(_re_inst, "driver_model", ""),
-                        ] if p) or "Driver"
-                        _re_dvn = " ".join(p for p in [
-                            getattr(_re_inst, "driven_manufacturer", ""),
-                            getattr(_re_inst, "driven_model", ""),
-                        ] if p) or "Driven"
-                        if _re_png is None:
-                            # Ciclo 17.5.11 — pasar kind para silhouette correcto
-                            try:
-                                from core.sensor_diagram import _infer_machine_kind as _ifk
-                                _re_drv_kind = (
-                                    _ifk(_re_drv) or _ifk(getattr(_re_inst, "asset_class", "")) or "turbine"
-                                )
-                                _re_dvn_kind = (
-                                    _ifk(_re_dvn) or _ifk(getattr(_re_inst, "asset_class", "")) or "generator"
-                                )
-                            except Exception:
-                                _re_drv_kind = "turbine"
-                                _re_dvn_kind = "generator"
-                            _re_png = render_sensor_map_diagram(
-                                _re_inst.sensors,
-                                train_label="",
-                                driver_label=_re_drv,
-                                driven_label=_re_dvn,
-                                severity_by_label=_re_sev,
-                                overall_by_label=_re_overall,
-                                unit_by_label=_re_unit,
-                                driver_kind=_re_drv_kind,
-                                driven_kind=_re_dvn_kind,
-                                figure_width_in=11.5,
-                                compact=True,
-                            )
                         if _re_png:
                             usable_w = A4[0] - doc.leftMargin - doc.rightMargin
                             target_w = min(15.0 * cm, usable_w)
