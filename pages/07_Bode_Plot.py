@@ -2726,10 +2726,28 @@ def main() -> None:
             st.caption(f"_(Histórico Bode no disponible: {_e})_")
 
         if _bode_hist_ok and _bode_inst_id:
-            _bode_existing_snaps = list_bode_snapshots(_bode_inst_id)
+            # Ciclo 17.34 (v3.31.240) — sensor isolation. Si el usuario
+            # tiene UN solo sensor cargado en pantalla, filtramos solo
+            # los snapshots de ese sensor (evita mezclar 1XA con 1YA
+            # cuando guardás snapshots single-sensor). Si hay varios
+            # sensores cargados (multi-sensor por diseño), mostramos
+            # todos los snapshots como antes.
+            _bode_filter_sensor = ""
+            if len(_bode_curr_readings) == 1:
+                _bode_filter_sensor = str(
+                    _bode_curr_readings[0].get("sensor_label") or ""
+                )
+            _bode_existing_snaps = list_bode_snapshots(
+                _bode_inst_id,
+                sensor_id=_bode_filter_sensor,
+            )
+            _bode_filter_hint = (
+                f" (filtrado por sensor **{_bode_filter_sensor}**)"
+                if _bode_filter_sensor else ""
+            )
             st.caption(
                 f"{len(_bode_existing_snaps)} snapshot(s) Bode guardado(s) "
-                f"para esta unidad."
+                f"para esta unidad{_bode_filter_hint}."
             )
 
             if not _bode_curr_readings:

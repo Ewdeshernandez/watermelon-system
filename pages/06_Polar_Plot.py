@@ -3140,10 +3140,26 @@ def main() -> None:
             st.caption(f"_(Histórico Polar no disponible: {_hist_e})_")
 
         if _polar_hist_ok and _polar_inst_id:
-            _polar_existing_snaps = list_polar_snapshots(_polar_inst_id)
+            # Ciclo 17.34 (v3.31.240) — sensor isolation. Si UN solo
+            # sensor está cargado actualmente, filtramos solo sus
+            # snapshots históricos (evita mezclar 1XA con 1YA).
+            # Multi-sensor → sin filtro, como antes.
+            _polar_filter_sensor = ""
+            if len(_polar_curr_readings) == 1:
+                _polar_filter_sensor = str(
+                    _polar_curr_readings[0].get("sensor_label") or ""
+                )
+            _polar_existing_snaps = list_polar_snapshots(
+                _polar_inst_id,
+                sensor_id=_polar_filter_sensor,
+            )
+            _polar_filter_hint = (
+                f" (filtrado por sensor **{_polar_filter_sensor}**)"
+                if _polar_filter_sensor else ""
+            )
             st.caption(
                 f"{len(_polar_existing_snaps)} snapshot(s) Polar guardado(s) "
-                f"para esta unidad."
+                f"para esta unidad{_polar_filter_hint}."
             )
 
             if not _polar_curr_readings:
