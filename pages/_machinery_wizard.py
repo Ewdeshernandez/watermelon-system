@@ -24,6 +24,14 @@ Solo admin + specialist pueden crear activos nuevos.
 
 from __future__ import annotations
 
+# v3.31.243 — set_page_config primero, sino el sidebar pierde estilos.
+import streamlit as st
+st.set_page_config(
+    page_title="Crear activo · Wizard — Watermelon",
+    page_icon="🧙",
+    layout="wide",
+)
+
 from core.auth import require_login, render_user_menu, require_role
 
 require_login()
@@ -33,8 +41,6 @@ require_role(allowed_roles=("admin", "specialist"))
 import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-
-import streamlit as st
 
 from core.instance_state import (
     create_instance,
@@ -51,13 +57,6 @@ from core.machine_templates import (
     suggest_profile_key_for_template,
 )
 from core.sensor_map import generate_standard_sensor_map
-
-
-st.set_page_config(
-    page_title="Crear activo · Wizard — Watermelon",
-    page_icon="🧙",
-    layout="wide",
-)
 
 
 # =============================================================

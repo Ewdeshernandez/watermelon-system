@@ -23,6 +23,14 @@ Dos tabs:
 
 from __future__ import annotations
 
+# v3.31.243 — set_page_config primero, sino el sidebar pierde estilos.
+import streamlit as st
+st.set_page_config(
+    page_title="Importadores & Plantillas — Watermelon",
+    page_icon="📥",
+    layout="wide",
+)
+
 from core.auth import require_login, render_user_menu, require_role
 
 require_login()
@@ -36,7 +44,6 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import streamlit as st
 
 from core.loaders.adre408 import parse_adre408
 from core.loaders.base import LoadedSignal, loaded_to_signal
@@ -48,13 +55,6 @@ from core.machine_templates import (
     list_templates,
     list_templates_by_category,
     suggest_profile_key_for_template,
-)
-
-
-st.set_page_config(
-    page_title="Importadores & Plantillas — Watermelon",
-    page_icon="📥",
-    layout="wide",
 )
 
 st.title("Importadores Universales & Plantillas LATAM")

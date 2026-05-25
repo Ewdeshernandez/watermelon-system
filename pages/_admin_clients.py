@@ -25,6 +25,14 @@ Cada cambio:
 
 from __future__ import annotations
 
+# v3.31.243 — set_page_config primero, sino el sidebar pierde estilos.
+import streamlit as st
+st.set_page_config(
+    page_title="Admin · Clientes & Roles — Watermelon",
+    page_icon="🔐",
+    layout="wide",
+)
+
 from core.auth import require_login, render_user_menu, require_role
 
 require_login()
@@ -35,7 +43,6 @@ import re
 from typing import Any, Dict, List
 
 import pandas as pd
-import streamlit as st
 
 from core.clients import (
     list_admins,
@@ -43,13 +50,6 @@ from core.clients import (
     list_specialists,
     reload_registry,
     save_registry,
-)
-
-
-st.set_page_config(
-    page_title="Admin · Clientes & Roles — Watermelon",
-    page_icon="🔐",
-    layout="wide",
 )
 
 st.title("Administración · Clientes, Specialists & Admins")

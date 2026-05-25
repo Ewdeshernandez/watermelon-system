@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+# v3.31.243 — set_page_config DEBE ir antes de render_user_menu(), si no
+# Streamlit resetea el CSS del sidebar y los items aparecen como cajas
+# blancas. Patrón canónico: import streamlit → set_page_config → auth.
+import streamlit as st
+
+st.set_page_config(page_title="Watermelon System | Load Data", layout="wide")
+
 from core.auth import require_login, render_user_menu, require_role
 
 require_login()
@@ -17,7 +24,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-import streamlit as st
 
 # Ciclo 14b — wire del selector de instancia activa en Load Data.
 # Cuando hay una máquina activa en Machinery Library, los CSVs que
@@ -30,8 +36,6 @@ from core.instance_state import get_instance, get_instance_document_bytes, compo
 # ============================================================
 # WATERMELON SYSTEM — LOAD DATA
 # ============================================================
-
-st.set_page_config(page_title="Watermelon System | Load Data", layout="wide")
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 LOGO_PATH = PROJECT_ROOT / "assets" / "watermelon_logo.png"

@@ -1,3 +1,7 @@
+# v3.31.243 — set_page_config primero, sino el sidebar pierde estilos.
+import streamlit as st
+st.set_page_config(layout="wide")
+
 from core.auth import require_login, render_user_menu
 
 require_login()
@@ -6,14 +10,10 @@ render_user_menu()
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
-import streamlit as st
 
 from core.order_tracking import analyze_order_tracking
 from core.ui.page_header import render_page_header
 from core.plot_export import export_plot_png
-
-
-st.set_page_config(layout="wide")
 
 render_page_header(
     title="Order Tracking",
