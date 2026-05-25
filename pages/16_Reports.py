@@ -3384,6 +3384,59 @@ with ga2:
         _clear_all_items()
         st.rerun()
 
+# Ciclo 17.32 (v3.31.237) — fingerprint de items + meta clave para
+# detectar cuando la síntesis AI cached quedó obsoleta. Se incluye:
+#   - id + type + signal_id + timestamp de cada item (orden estable),
+#   - severidad live actual,
+#   - report_date + instance_id (cambios de meta crítico).
+# El resultado es un sha1[:10] determinístico. Si el fingerprint actual
+# difiere del guardado en wm_ai_exec_summary, sabemos que la narrativa
+# AI no corresponde al estado actual del reporte y mostramos warning.
+def _compute_items_fingerprint(
+    _items: list,
+    _meta: dict,
+    _severity_live: str = "",
+) -> str:
+    import hashlib
+    import json as _json
+    sig = []
+    for _it in (_items or []):
+        if not isinstance(_it, dict):
+            continue
+        sig.append((
+            str(_it.get("id") or ""),
+            str(_it.get("type") or ""),
+            str(_it.get("signal_id") or ""),
+            str(_it.get("machine") or ""),
+            str(_it.get("point") or ""),
+            str(_it.get("variable") or ""),
+            str(_it.get("timestamp") or ""),
+        ))
+    sig.sort()  # orden estable independiente del orden de items
+    payload = {
+        "items": sig,
+        "severity_live": _severity_live or "",
+        "report_date": (_meta or {}).get("report_date", "")[:10],
+        "instance_id": (_meta or {}).get("instance_id", ""),
+        "consecutive": (_meta or {}).get("consecutive", ""),
+    }
+    blob = _json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha1(blob).hexdigest()[:10]
+
+
+# Severidad live actual (idéntico cálculo que en el PDF builder, simplificado).
+# Si no hay forma de calcularla, queda "" y el fingerprint solo dependerá de items+meta.
+def _read_severity_live() -> str:
+    try:
+        for known in ("CRÍTICA", "ACCIÓN REQUERIDA", "ATENCIÓN",
+                      "VIGILANCIA", "CONDICIÓN ACEPTABLE"):
+            if known in (meta.get("severity_live") or ""):
+                return known
+    except Exception:
+        pass
+    return ""
+
+
 # Ciclo 17.26 P5+ — Síntesis Ejecutiva AI
 # El botón vive en ga4 para no chocar con los 3 botones existentes.
 # El resultado se persiste en session_state['wm_ai_exec_summary'] y
@@ -3429,6 +3482,16 @@ with ga4:
                     "output_tokens": 0,
                     "fallback_used": False,
                 }
+        # Ciclo 17.32 — guardar fingerprint del estado en el momento de
+        # la generación. Si en un rerun futuro el fingerprint cambia
+        # (usuario agregó/quitó items, cambió severidad, etc.) la UI
+        # detectará la divergencia y avisará al usuario que regenere.
+        try:
+            _exec_result["fingerprint"] = _compute_items_fingerprint(
+                items, meta, _read_severity_live()
+            )
+        except Exception:
+            _exec_result["fingerprint"] = ""
         st.session_state["wm_ai_exec_summary"] = _exec_result
 
 # Mostrar el resultado de la síntesis ejecutiva si está generado
@@ -3444,6 +3507,29 @@ if _exec_stored is not None:
                     "Generado con modelo de respaldo (Haiku 4.5). "
                     "Podés regenerar más tarde cuando Sonnet recupere capacidad."
                 )
+            # Ciclo 17.32 (v3.31.237) — STALENESS CHECK.
+            # Comparar fingerprint guardado vs estado actual del reporte.
+            # Si difieren, la síntesis AI describe un estado que ya no
+            # corresponde (usuario agregó/quitó items, cambió severidad,
+            # cambió report_date, etc.). Mostramos warning prominente
+            # con CTA a Regenerar.
+            try:
+                _fp_now = _compute_items_fingerprint(
+                    items, meta, _read_severity_live()
+                )
+                _fp_saved = str(_exec_stored.get("fingerprint") or "")
+                _is_stale = bool(_fp_saved) and (_fp_saved != _fp_now)
+            except Exception:
+                _is_stale = False
+
+            if _is_stale:
+                st.warning(
+                    "⚠️ Esta síntesis fue generada con un estado anterior "
+                    "del reporte (items, severidad o fecha cambiaron). "
+                    "Hacé clic en **Regenerar** para que refleje el "
+                    "estado actual antes de exportar el PDF."
+                )
+
             st.markdown(_exec_stored.get("markdown", ""))
             _model_used_exec = str(_exec_stored.get("model", "") or "")
             if _model_used_exec.startswith("claude-haiku"):
@@ -3466,6 +3552,15 @@ if _exec_stored is not None:
                             _exec_new = generate_executive_summary(
                                 items, meta=meta, use_cache=False
                             )
+                            # Ciclo 17.32 — refresh fingerprint con estado actual.
+                            try:
+                                _exec_new["fingerprint"] = (
+                                    _compute_items_fingerprint(
+                                        items, meta, _read_severity_live()
+                                    )
+                                )
+                            except Exception:
+                                _exec_new["fingerprint"] = ""
                             st.session_state["wm_ai_exec_summary"] = _exec_new
                             st.rerun()
                         except Exception as exc:
