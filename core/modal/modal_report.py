@@ -319,16 +319,50 @@ def build_modal_report_items(
 # -------------------------------------------------------------------
 
 def append_modal_items_to_report(items: List[Dict[str, Any]]) -> int:
-    """Append items al session_state['report_items'] de Streamlit.
+    """Append items al session_state['report_items'] de Streamlit y
+    PERSISTIR a disco (Supabase Storage o local).
+
+    v3.31.238 (Ciclo 17.33) — Bug fix: antes solo escribíamos a
+    session_state. Si el usuario inyectaba modal items, navegaba a
+    otra página, y Streamlit Cloud reciclaba el process (cosa que
+    pasa por inactividad o redeploy), los items modal se evaporaban
+    antes de llegar a Reports. Ahora invocamos save_report_state()
+    igual que append_report_item_and_persist() en core/report_state.py,
+    así los items modal sobreviven recicles del proceso, cambios de
+    sesión y reloads del browser.
 
     Returns numero de items agregados.
     """
     import streamlit as st
     if not items:
         return 0
+
+    # Garantizar que el estado del reporte está hidratado antes de
+    # agregar (caso: usuario entra desde Modal Analysis sin haber
+    # tocado Reports en esta sesión — disco aún no fue leído).
+    try:
+        from core.report_state import ensure_report_state_loaded
+        ensure_report_state_loaded()
+    except Exception:
+        pass
+
     existing = list(st.session_state.get("report_items", []))
     existing.extend(items)
     st.session_state["report_items"] = existing
+
+    # Persistir a disco para que sobreviva al recicle del process.
+    try:
+        from core.report_state import save_report_state
+        save_report_state(
+            items=existing,
+            meta=st.session_state.get("report_meta", {}) or {},
+        )
+    except Exception:
+        # No bloqueante: el append a memoria ya tuvo éxito. El usuario
+        # podrá verlos si abre Reports en la misma sesión, aunque
+        # podrían perderse si el process recicla antes.
+        pass
+
     return len(items)
 
 
