@@ -2801,18 +2801,25 @@ def main() -> None:
 
     # Ciclo 23.129 — PERFORMANCE: cachear list_instances + get_instance.
     # Cada navegación re-ejecuta el script → Postgres queries sin cache.
-    # Las instances cambian solo por wizard/edit (raro), 5min TTL es OK.
+    #
+    # Ciclo 17.31 (v3.31.236) — antes el TTL era 5min puro. Si el usuario
+    # editaba la instance en Machinery Library (sube schematic nuevo,
+    # cambia sensors, etc.), Live Monitoring seguía mostrando data vieja
+    # hasta 5 min. Ahora pasamos get_instances_version() como argumento
+    # del cache: cualquier _save_instance() lo incrementa y Streamlit
+    # invalida la entry vieja automáticamente.
     from core.instance_state import (
         list_instances as _raw_list_instances,
         get_instance as _raw_get_instance,
+        get_instances_version,
     )
 
     @st.cache_data(ttl=300, show_spinner=False)
-    def _cached_list_instances():
+    def _cached_list_instances(_version: int):
         return _raw_list_instances()
 
     @st.cache_data(ttl=300, show_spinner=False)
-    def _cached_get_instance(_id: str):
+    def _cached_get_instance(_id: str, _version: int):
         inst = _raw_get_instance(_id)
         if inst is None:
             return None
@@ -2822,11 +2829,11 @@ def main() -> None:
         return asdict(inst)
 
     def list_instances():
-        return _cached_list_instances()
+        return _cached_list_instances(get_instances_version())
 
     def get_instance(_id: str):
         from core.instance_state import Instance
-        data = _cached_get_instance(_id)
+        data = _cached_get_instance(_id, get_instances_version())
         if data is None:
             return None
         return Instance.from_dict(data)

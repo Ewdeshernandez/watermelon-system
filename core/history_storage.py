@@ -47,6 +47,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -62,8 +63,11 @@ BUCKET_NAME = "instance-history"
 BACKUP_BUCKET_NAME = "instance-history-backups"
 MAX_SNAPSHOTS_PER_TYPE = 10  # Hot tier — LRU rotation kicks in al #11
 
-# snapshot_id valid pattern: type_YYYYMMDD_HHMMSS o variantes
-_SNAPSHOT_ID_PATTERN = re.compile(r"^[a-z_]+_\d{8}_\d{6}$")
+# snapshot_id valid pattern.
+#   Legacy (pre v3.31.236): type_YYYYMMDD_HHMMSS
+#   Actual  (v3.31.236+):    type_YYYYMMDD_HHMMSS_xxxxxx  (sufijo UUID short)
+# Ambos siguen siendo lexicográficamente ordenables por timestamp.
+_SNAPSHOT_ID_PATTERN = re.compile(r"^[a-z_]+_\d{8}_\d{6}(_[a-f0-9]{6,8})?$")
 
 # Tipos válidos de snapshot
 KNOWN_TYPES = (
@@ -497,10 +501,21 @@ def export_instance_as_zip_bytes(
 # =============================================================
 
 def new_snapshot_id(snapshot_type: str, now: Optional[datetime] = None) -> str:
-    """Helper para generar IDs consistentes: {type}_YYYYMMDD_HHMMSS."""
+    """Helper para generar IDs consistentes: {type}_YYYYMMDD_HHMMSS_xxxxxx.
+
+    Ciclo 17.31 (v3.31.236) — antes el formato era {type}_YYYYMMDD_HHMMSS.
+    Eso fallaba cuando dos saves caían en el mismo segundo (race entre dos
+    usuarios o doble click rápido en "Guardar snapshot"): el segundo save
+    SOBREESCRIBÍA el primero porque generaba exactamente el mismo path
+    ({instance}/{type}/{id}.json.gz). El sufijo UUID short (6 hex chars)
+    elimina la colisión sin romper sorting cronológico — el prefijo
+    timestamp sigue siendo lexicográficamente ordenable y la LRU
+    rotation sigue funcionando.
+    """
     _validate_type(snapshot_type)
     now = now or datetime.now()
-    return f"{snapshot_type}_{now.strftime('%Y%m%d_%H%M%S')}"
+    suffix = uuid.uuid4().hex[:6]
+    return f"{snapshot_type}_{now.strftime('%Y%m%d_%H%M%S')}_{suffix}"
 
 
 if __name__ == "__main__":

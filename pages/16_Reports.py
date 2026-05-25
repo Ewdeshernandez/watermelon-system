@@ -2061,6 +2061,31 @@ def _build_pdf_bytes(meta: Dict[str, str], items: List[Dict[str, Any]]) -> bytes
     # Paragraph plano del flujo legacy.
     ai_executive_md = (meta.get("ai_executive_summary") or "").strip()
 
+    # Ciclo 17.31 (v3.31.236) — DETECCIÓN DE MISMATCH AI vs LIVE.
+    # `needs_redraft` arriba solo regenera el texto AUTODRAFT (legacy).
+    # Pero `ai_executive_md` viene de meta["ai_executive_summary"] que
+    # se generó en otra sesión y puede tener severidad obsoleta.
+    # Si detectamos mismatch entre severidad LIVE y la del texto AI,
+    # blanqueamos `ai_executive_md` para forzar regeneración (caller
+    # mostrará warning + autodraft del legacy hasta que el usuario
+    # regenere la narrativa AI).
+    if ai_executive_md and severity_live:
+        ai_severity_detected = ""
+        for known in ("CRÍTICA", "ACCIÓN REQUERIDA", "ATENCIÓN",
+                      "VIGILANCIA", "CONDICIÓN ACEPTABLE"):
+            if known in ai_executive_md:
+                ai_severity_detected = known
+                break
+        if ai_severity_detected and ai_severity_detected != severity_live:
+            # Mismatch: la narrativa AI hablaba de otra severidad.
+            # Descartar el contenido AI y caer al texto legacy
+            # (ya regenerado arriba si needs_redraft).
+            try:
+                meta["ai_executive_summary_stale"] = ai_executive_md
+            except Exception:
+                pass
+            ai_executive_md = ""
+
     if executive_text or ai_executive_md:
         story.append(Paragraph("RESUMEN EJECUTIVO", styles["WMTOC1"]))
 
@@ -3485,9 +3510,25 @@ if _exec_stored is not None:
 # ÚLTIMA CORRIDA' después del Resumen Ejecutivo.
 _runcmp_iid = (meta.get("instance_id") or "").strip()
 _runcmp_itag = (meta.get("instance_tag") or "").strip()
+_runcmp_rdate = (meta.get("report_date") or
+                 datetime.now().strftime("%Y-%m-%d"))[:10]
 
-# Buscar reporte anterior una sola vez por sesión por activo
-_runcmp_prev_key = f"wm_ai_runcmp_prev_{_runcmp_iid or _runcmp_itag}"
+# Buscar reporte anterior una sola vez por sesión por activo.
+#
+# Ciclo 17.31 (v3.31.236) — antes la key era
+# `wm_ai_runcmp_prev_{instance_id}`. Eso causaba dos bugs:
+#   1. Si el usuario cambiaba la report_date en el meta del reporte
+#      actual, el cache seguía devolviendo el "reporte previo" calculado
+#      con la fecha vieja → comparación contra el reporte equivocado.
+#   2. Si el usuario navegaba entre instances dentro de la misma
+#      sesión, las keys eran únicas, pero al editar otros campos del
+#      meta (instance_tag) sin cambiar instance_id, el cache no se
+#      invalidaba.
+# Solución: incluir report_date + instance_tag en la key para que
+# cualquier cambio relevante fuerce un nuevo find_previous_report.
+_runcmp_prev_key = (
+    f"wm_ai_runcmp_prev_{_runcmp_iid}_{_runcmp_itag}_{_runcmp_rdate}"
+)
 if _runcmp_prev_key not in st.session_state:
     try:
         st.session_state[_runcmp_prev_key] = find_previous_report(
@@ -3495,8 +3536,7 @@ if _runcmp_prev_key not in st.session_state:
             viewer_role=_wm_my_role,
             instance_id=_runcmp_iid,
             instance_tag=_runcmp_itag,
-            before_date=(meta.get("report_date") or
-                         datetime.now().strftime("%Y-%m-%d"))[:10],
+            before_date=_runcmp_rdate,
         )
     except Exception:
         st.session_state[_runcmp_prev_key] = None

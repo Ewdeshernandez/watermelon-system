@@ -281,9 +281,36 @@ def get_instance(instance_id: str) -> Optional[Instance]:
     return Instance.from_dict(data)
 
 
+# Ciclo 17.31 (v3.31.236) — versión global de instances para cache busting
+# en Streamlit. Cada vez que cualquier writer toca una instance (crear,
+# update_header, add/remove doc, save sensors…), se incrementa este
+# contador. Live Monitoring y otras páginas lo usan como argumento
+# adicional de su @st.cache_data, así Streamlit invalida automáticamente
+# sin que tengamos que limpiar caches por nombre desde otra página.
+#
+# Vive en module-level (no en st.session_state) porque Streamlit Cloud
+# reusa el process Python entre reruns del mismo usuario. Cuando el
+# process se recicla el contador vuelve a 0 — eso está bien, porque el
+# cache @st.cache_data se vacía al mismo tiempo.
+_INSTANCES_VERSION: int = 0
+
+
+def get_instances_version() -> int:
+    """Counter que se incrementa con cada mutación de instance.
+    Usar como argumento extra en @st.cache_data para invalidación.
+    """
+    return _INSTANCES_VERSION
+
+
+def _bump_instances_version() -> None:
+    global _INSTANCES_VERSION
+    _INSTANCES_VERSION += 1
+
+
 def _save_instance(inst: Instance) -> None:
     """Persiste una Instance al backend activo."""
     get_active_repository().save_instance(asdict(inst))
+    _bump_instances_version()
 
 
 def create_instance(
@@ -666,6 +693,12 @@ def add_instance_document(
 def remove_instance_document(instance_id: str, doc_id: str) -> bool:
     """Quita el documento del índice y borra el archivo del backend.
     Ciclo 17.18: también invalida el cache local del archivo si existe.
+
+    Ciclo 17.31: si el doc borrado era el schematic_png activo, repromueve
+    la imagen más reciente disponible (o lo deja en None). Antes este puntero
+    quedaba colgando apuntando a un doc inexistente, lo que hacía que
+    get_instance_document_bytes() devolviera None y Reports cayera al
+    fallback de render_sensor_map_diagram() (= Machine Map en blanco).
     """
     inst = get_instance(instance_id)
     if inst is None:
@@ -684,6 +717,50 @@ def remove_instance_document(instance_id: str, doc_id: str) -> bool:
         except Exception:
             pass
     inst.documents = [d for d in inst.documents if d.get("id") != doc_id]
+
+    # Ciclo 17.31 — Cleanup de schematic_png si apuntaba a este doc.
+    if getattr(inst, "schematic_png", None) == doc_id:
+        # Buscar otra imagen candidata (misma regla que add_instance_document:
+        # "última imagen gana", priorizando schematic explícito).
+        _IMG_EXTS = (
+            ".png", ".jpg", ".jpeg", ".gif",
+            ".webp", ".svg", ".bmp", ".tiff",
+        )
+        _SCH_TYPES = ("schematic", "esquematico", "diagram")
+        _NON_SCH_TYPES = (
+            "manual", "datasheet", "report", "informe",
+            "photo", "foto", "logo", "certificate", "certificado",
+        )
+
+        def _is_candidate(doc: dict) -> bool:
+            dtype = (doc.get("document_type") or "").lower().strip()
+            # En el dict persistido el campo es "filename" (no "original_filename"
+            # como en el kwarg de add_instance_document) — chequear ambos.
+            fname = (
+                doc.get("original_filename")
+                or doc.get("filename")
+                or doc.get("storage_filename")
+                or ""
+            ).lower()
+            is_img = any(fname.endswith(ext) for ext in _IMG_EXTS)
+            if dtype in _SCH_TYPES:
+                return True
+            if is_img and dtype not in _NON_SCH_TYPES:
+                return True
+            return False
+
+        candidates = [d for d in inst.documents if _is_candidate(d)]
+        if candidates:
+            # Preferir uploaded_at más reciente; si no hay timestamp, último en lista.
+            candidates.sort(
+                key=lambda d: d.get("uploaded_at") or "",
+                reverse=True,
+            )
+            inst.schematic_png = candidates[0].get("id") or ""
+        else:
+            # Convención del dataclass: el campo es str, "" = vacío (no None).
+            inst.schematic_png = ""
+
     _save_instance(inst)
     return True
 
