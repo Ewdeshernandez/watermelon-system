@@ -577,6 +577,28 @@ def add_instance_document(
     """
     Indexa un documento ya persistido (vía repo.upload_document_bytes)
     en la metadata de la instancia. Devuelve el doc_id generado.
+
+    Ciclo 17.30 — Auto-promote del esquemático ("última imagen gana"):
+      Si el archivo subido es una imagen (PNG/JPG/SVG/...) o el
+      document_type es explícitamente schematic/diagram, se promueve a
+      inst.schematic_png automáticamente. La excepción son los tipos
+      explícitamente NO-schematic (manual, datasheet, report, photo,
+      logo, certificate) que jamás promueven aunque sean imágenes.
+
+      Bug que matamos:
+        Operadores subían una nueva foto/dibujo del activo (ej. compresor
+        C200C de Parex) con document_type='other' esperando que el
+        siguiente Reports la usara, pero inst.schematic_png seguía
+        apuntando al doc_id viejo porque solo se actualizaba al ir al
+        tab "Esquemático" y hacer "Actualizar metadata". Reports leía el
+        doc viejo y embebía la imagen anterior. Pérdida silenciosa del
+        último gráfico construido.
+
+      Si el usuario sube una imagen que NO quería como schematic, puede
+      revertir en 5 seg desde el tab "Esquemático" → selectbox. El costo
+      de pisar es mucho menor que el costo de perder el último gráfico
+      construido. Para evitar pisar el activo explícitamente, marcar el
+      document_type al subir (photo/logo/manual/...).
     """
     inst = get_instance(instance_id)
     if inst is None:
@@ -594,6 +616,49 @@ def add_instance_document(
         "uploaded_at": datetime.now().isoformat(timespec="seconds"),
     }
     inst.documents.append(record)
+
+    # Ciclo 17.30 — Auto-promote a schematic_png (ver docstring).
+    #
+    # Regla "última imagen gana": cualquier imagen subida pasa a ser el
+    # schematic activo del activo. Razón empírica: en producción, cuando
+    # un especialista sube una imagen al Vault de un activo (PNG/JPG/SVG),
+    # es porque quiere que esa imagen aparezca en el siguiente Reports.
+    # Los otros usos (manuales escaneados, fichas técnicas) prácticamente
+    # siempre vienen como PDF, no como imagen. Si el usuario igual sube
+    # una imagen que no quería como schematic, puede revertir en 5 seg
+    # desde el tab "Esquemático" → selectbox. El costo de pisar es
+    # mucho menor que el costo de perder el último gráfico construido.
+    #
+    # Excepción: document_type explícito 'manual', 'datasheet', 'report',
+    # 'photo', 'logo' NO promueve — son categorías donde el usuario
+    # marcó intención de NO usarlas como schematic.
+    _SCH_TYPES = ("schematic", "esquematico", "diagram")
+    _NON_SCH_TYPES = (
+        "manual", "datasheet", "report", "informe",
+        "photo", "foto", "logo", "certificate", "certificado",
+    )
+    _IMG_EXTS = (
+        ".png", ".jpg", ".jpeg", ".gif",
+        ".webp", ".svg", ".bmp", ".tiff",
+    )
+    dtype_norm = (document_type or "").lower().strip()
+    fname_lower = (original_filename or "").lower()
+    is_image = any(fname_lower.endswith(ext) for ext in _IMG_EXTS)
+    is_schematic_type = dtype_norm in _SCH_TYPES
+    is_explicit_non_schematic = dtype_norm in _NON_SCH_TYPES
+
+    should_promote = False
+    if is_schematic_type:
+        # Intención explícita — siempre promueve.
+        should_promote = True
+    elif is_image and not is_explicit_non_schematic:
+        # "Última imagen gana": cualquier imagen no marcada como
+        # manual/datasheet/photo/etc. se asume schematic.
+        should_promote = True
+
+    if should_promote:
+        inst.schematic_png = doc_id
+
     _save_instance(inst)
     return doc_id
 
