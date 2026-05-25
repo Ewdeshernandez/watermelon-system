@@ -52,10 +52,11 @@ def apply_page_style() -> None:
             background-color: #f3f4f6;
         }
 
-        section[data-testid="stSidebar"] {
-            background: #e5e7eb;
-            border-right: 1px solid #cbd5e1;
-        }
+        /* v3.31.241 — NO sobrescribir el sidebar acá.
+           El styling azul vivo del sidebar lo aplica
+           core/auth.py:_show_authenticated_layout_tweaks().
+           Antes esta página seteaba un fondo gris #e5e7eb
+           que rompía la coherencia visual con Home/ML/etc. */
 
         .wm-page-header {
             display: flex;

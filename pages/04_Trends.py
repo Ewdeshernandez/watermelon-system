@@ -50,10 +50,7 @@ def apply_page_style() -> None:
         <style>
         .main > div { padding-top: 0.18rem; }
         .stApp { background-color: #f3f4f6; }
-        section[data-testid="stSidebar"] {
-            background: #e5e7eb;
-            border-right: 1px solid #cbd5e1;
-        }
+        /* v3.31.241 — sidebar styling vive en core/auth.py, no acá. */
         div[data-testid="stNumberInput"] input,
         div[data-testid="stTextInput"] input,
         div[data-testid="stSelectbox"] div[data-baseweb="select"] > div {
