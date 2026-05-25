@@ -47,8 +47,8 @@ _SNAPSHOT_TYPE = "bode"
 MAX_BODE_SNAPSHOTS_PER_INSTANCE = history_storage.MAX_SNAPSHOTS_PER_TYPE
 
 
-def _new_bode_snapshot_id() -> str:
-    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE)
+def _new_bode_snapshot_id(sensor_id: str = "") -> str:
+    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE, sensor_id=sensor_id)
 
 
 def _safe_float(v) -> float:
@@ -72,6 +72,7 @@ def save_bode_snapshot(
     sensors_data: List[Dict[str, Any]],
     corrida_label: str = "",
     notes: str = "",
+    sensor_id: str = "",
 ) -> str:
     """
     Guarda un snapshot del estado Bode de la instancia.
@@ -94,7 +95,12 @@ def save_bode_snapshot(
     if not sensors_data:
         raise ValueError("sensors_data vacío")
 
-    sid = _new_bode_snapshot_id()
+    # Ciclo 17.34 (v3.31.239) — sensor_id explícito en el sid si el
+    # caller lo pasa, sino auto-inferir cuando sensors_data tiene 1 solo.
+    _inferred_sensor = sensor_id
+    if not _inferred_sensor and len(sensors_data) == 1:
+        _inferred_sensor = str(sensors_data[0].get("sensor_label") or "")
+    sid = _new_bode_snapshot_id(_inferred_sensor)
     ts_iso = datetime.now().isoformat(timespec="seconds")
     label = (corrida_label or "").strip() or ts_iso
 
@@ -156,11 +162,21 @@ def save_bode_snapshot(
 
 
 def list_bode_snapshots(
-    instance_id: str, limit: int = MAX_BODE_SNAPSHOTS_PER_INSTANCE,
+    instance_id: str,
+    limit: int = MAX_BODE_SNAPSHOTS_PER_INSTANCE,
+    *,
+    sensor_id: str = "",
 ) -> List[Dict[str, Any]]:
-    """Lista snapshots Bode más recientes primero."""
+    """Lista snapshots Bode más recientes primero.
+
+    Args:
+        sensor_id: si se pasa (v3.31.239+), filtra solo snapshots del
+                   sensor indicado. Vacío = devuelve todos (back-compat).
+    """
     items: List[Dict[str, Any]] = []
-    snaps = history_storage.list_snapshots(instance_id, _SNAPSHOT_TYPE)
+    snaps = history_storage.list_snapshots(
+        instance_id, _SNAPSHOT_TYPE, sensor_id=sensor_id,
+    )
     for snap in snaps[:limit]:
         d = history_storage.load_snapshot(instance_id, _SNAPSHOT_TYPE, snap["snapshot_id"])
         if d is None:

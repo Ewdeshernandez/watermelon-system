@@ -25,8 +25,8 @@ MAX_SPECTRUM_SNAPSHOTS_PER_INSTANCE = history_storage.MAX_SNAPSHOTS_PER_TYPE
 SNAPSHOT_MAX_BINS = 8_192  # típico es 6.4k, da margen
 
 
-def _new_spectrum_snapshot_id() -> str:
-    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE)
+def _new_spectrum_snapshot_id(sensor_id: str = "") -> str:
+    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE, sensor_id=sensor_id)
 
 
 def _safe_float(v) -> float:
@@ -54,6 +54,7 @@ def save_spectrum_snapshot(
     corrida_label: str = "",
     notes: str = "",
     operating_speed_rpm: Optional[float] = None,
+    sensor_id: str = "",
 ) -> str:
     """Guarda un snapshot de spectra FFT.
 
@@ -72,7 +73,11 @@ def save_spectrum_snapshot(
     if not sensors_data:
         raise ValueError("sensors_data vacío")
 
-    sid = _new_spectrum_snapshot_id()
+    # Ciclo 17.34 (v3.31.239) — sensor_id en sid.
+    _inferred_sensor = sensor_id
+    if not _inferred_sensor and len(sensors_data) == 1:
+        _inferred_sensor = str(sensors_data[0].get("sensor_label") or "")
+    sid = _new_spectrum_snapshot_id(_inferred_sensor)
     ts_iso = datetime.now().isoformat(timespec="seconds")
     label = (corrida_label or "").strip() or ts_iso
 
@@ -140,9 +145,14 @@ def save_spectrum_snapshot(
 def list_spectrum_snapshots(
     instance_id: str,
     limit: int = MAX_SPECTRUM_SNAPSHOTS_PER_INSTANCE,
+    *,
+    sensor_id: str = "",
 ) -> List[Dict[str, Any]]:
+    """sensor_id (v3.31.239+): filtra solo del sensor indicado."""
     items: List[Dict[str, Any]] = []
-    snaps = history_storage.list_snapshots(instance_id, _SNAPSHOT_TYPE)
+    snaps = history_storage.list_snapshots(
+        instance_id, _SNAPSHOT_TYPE, sensor_id=sensor_id,
+    )
     for snap in snaps[:limit]:
         d = history_storage.load_snapshot(instance_id, _SNAPSHOT_TYPE, snap["snapshot_id"])
         if d is None:

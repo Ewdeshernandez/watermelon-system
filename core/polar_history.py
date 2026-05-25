@@ -59,8 +59,8 @@ _SNAPSHOT_TYPE = "polar"
 MAX_POLAR_SNAPSHOTS_PER_INSTANCE = history_storage.MAX_SNAPSHOTS_PER_TYPE
 
 
-def _new_polar_snapshot_id() -> str:
-    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE)
+def _new_polar_snapshot_id(sensor_id: str = "") -> str:
+    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE, sensor_id=sensor_id)
 
 
 def _safe_float(v) -> float:
@@ -84,6 +84,7 @@ def save_polar_snapshot(
     sensors_data: List[Dict[str, Any]],
     corrida_label: str = "",
     notes: str = "",
+    sensor_id: str = "",
 ) -> str:
     """
     Guarda un snapshot del estado Polar de la instancia.
@@ -110,7 +111,11 @@ def save_polar_snapshot(
     if not sensors_data:
         raise ValueError("sensors_data vacío")
 
-    sid = _new_polar_snapshot_id()
+    # Ciclo 17.34 (v3.31.239) — sensor_id en sid si explícito o si solo hay 1.
+    _inferred_sensor = sensor_id
+    if not _inferred_sensor and len(sensors_data) == 1:
+        _inferred_sensor = str(sensors_data[0].get("sensor_label") or "")
+    sid = _new_polar_snapshot_id(_inferred_sensor)
     ts_iso = datetime.now().isoformat(timespec="seconds")
     label = (corrida_label or "").strip() or ts_iso
 
@@ -174,12 +179,20 @@ def save_polar_snapshot(
 
 
 def list_polar_snapshots(
-    instance_id: str, limit: int = MAX_POLAR_SNAPSHOTS_PER_INSTANCE,
+    instance_id: str,
+    limit: int = MAX_POLAR_SNAPSHOTS_PER_INSTANCE,
+    *,
+    sensor_id: str = "",
 ) -> List[Dict[str, Any]]:
     """Lista snapshots Polar más recientes primero, con metadata
-    resumida (sin sensors detallados, para eficiencia)."""
+    resumida (sin sensors detallados, para eficiencia).
+
+    sensor_id (v3.31.239+): si se pasa, filtra solo del sensor indicado.
+    """
     items: List[Dict[str, Any]] = []
-    snaps = history_storage.list_snapshots(instance_id, _SNAPSHOT_TYPE)
+    snaps = history_storage.list_snapshots(
+        instance_id, _SNAPSHOT_TYPE, sensor_id=sensor_id,
+    )
     for snap in snaps[:limit]:
         d = history_storage.load_snapshot(instance_id, _SNAPSHOT_TYPE, snap["snapshot_id"])
         if d is None:

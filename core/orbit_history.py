@@ -21,8 +21,10 @@ MAX_ORBIT_SNAPSHOTS_PER_INSTANCE = history_storage.MAX_SNAPSHOTS_PER_TYPE
 SNAPSHOT_MAX_SAMPLES = 4_096
 
 
-def _new_orbit_snapshot_id() -> str:
-    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE)
+def _new_orbit_snapshot_id(bearing_id: str = "") -> str:
+    # En Orbit el discriminador es el bearing (par X-Y), no un sensor único.
+    # Lo pasamos al backend reusando el segmento sensor_id del sid.
+    return history_storage.new_snapshot_id(_SNAPSHOT_TYPE, sensor_id=bearing_id)
 
 
 def _safe_float(v) -> float:
@@ -50,6 +52,7 @@ def save_orbit_snapshot(
     corrida_label: str = "",
     notes: str = "",
     operating_speed_rpm: Optional[float] = None,
+    bearing_id: str = "",
 ) -> str:
     """Guarda snapshot de orbits por bearing.
 
@@ -70,7 +73,11 @@ def save_orbit_snapshot(
     if not bearings_data:
         raise ValueError("bearings_data vacío")
 
-    sid = _new_orbit_snapshot_id()
+    # Ciclo 17.34 (v3.31.239) — bearing_id en sid si explícito o si solo hay 1.
+    _inferred_bearing = bearing_id
+    if not _inferred_bearing and len(bearings_data) == 1:
+        _inferred_bearing = str(bearings_data[0].get("bearing_label") or "")
+    sid = _new_orbit_snapshot_id(_inferred_bearing)
     ts_iso = datetime.now().isoformat(timespec="seconds")
     label = (corrida_label or "").strip() or ts_iso
 
@@ -135,9 +142,14 @@ def save_orbit_snapshot(
 def list_orbit_snapshots(
     instance_id: str,
     limit: int = MAX_ORBIT_SNAPSHOTS_PER_INSTANCE,
+    *,
+    bearing_id: str = "",
 ) -> List[Dict[str, Any]]:
+    """bearing_id (v3.31.239+): filtra solo del bearing indicado."""
     items: List[Dict[str, Any]] = []
-    snaps = history_storage.list_snapshots(instance_id, _SNAPSHOT_TYPE)
+    snaps = history_storage.list_snapshots(
+        instance_id, _SNAPSHOT_TYPE, sensor_id=bearing_id,
+    )
     for snap in snaps[:limit]:
         d = history_storage.load_snapshot(instance_id, _SNAPSHOT_TYPE, snap["snapshot_id"])
         if d is None:

@@ -65,9 +65,23 @@ MAX_SNAPSHOTS_PER_TYPE = 10  # Hot tier — LRU rotation kicks in al #11
 
 # snapshot_id valid pattern.
 #   Legacy (pre v3.31.236): type_YYYYMMDD_HHMMSS
-#   Actual  (v3.31.236+):    type_YYYYMMDD_HHMMSS_xxxxxx  (sufijo UUID short)
-# Ambos siguen siendo lexicográficamente ordenables por timestamp.
-_SNAPSHOT_ID_PATTERN = re.compile(r"^[a-z_]+_\d{8}_\d{6}(_[a-f0-9]{6,8})?$")
+#   v3.31.236+:              type_YYYYMMDD_HHMMSS_xxxxxx  (sufijo UUID short)
+#   v3.31.239+ (sensor-aware): type_<sensor_id>_YYYYMMDD_HHMMSS_xxxxxx
+#                              donde <sensor_id> es alfanumérico (1XA, 2YA, etc.)
+# Todos siguen ordenando cronológicamente por su parte timestamp.
+_SNAPSHOT_ID_PATTERN = re.compile(
+    r"^[a-z_]+(_[A-Za-z0-9]+)?_\d{8}_\d{6}(_[a-f0-9]{6,8})?$"
+)
+
+
+def _safe_sensor_segment(sensor_id: str) -> str:
+    """Sanitiza un sensor_id para usarlo en snapshot_id.
+    Sólo alfanuméricos. Vacío si la entrada es vacía/inválida.
+    """
+    s = str(sensor_id or "").strip()
+    # Reemplazar caracteres no alfanuméricos por nada (mantenemos compacto).
+    s = re.sub(r"[^A-Za-z0-9]+", "", s)
+    return s[:32]
 
 # Tipos válidos de snapshot
 KNOWN_TYPES = (
@@ -224,13 +238,29 @@ def _split_path(path: str) -> Tuple[str, str, str]:
 # CORE API — LIST
 # =============================================================
 
-def list_snapshots(instance_id: str, snapshot_type: str) -> List[Dict[str, Any]]:
+def list_snapshots(
+    instance_id: str,
+    snapshot_type: str,
+    *,
+    sensor_id: str = "",
+) -> List[Dict[str, Any]]:
     """Lista snapshots ordenados DESCENDENTE por snapshot_id (más nuevos primero).
+
+    Args:
+        instance_id, snapshot_type: keys de búsqueda.
+        sensor_id: si se pasa, filtra por sensor (v3.31.239+).
+                   Si vacío, devuelve TODOS los snapshots (back-compat).
+                   El matching se hace por prefijo del snapshot_id:
+                   `{snapshot_type}_{sensor_id}_…`.
+                   Snapshots legacy sin sensor_id en el sid quedan
+                   FUERA del filtro (útil si el caller quiere ver solo
+                   los del sensor actual y no contaminarse con datos
+                   ambiguos de antes).
 
     Returns list of dicts:
         {
-            "snapshot_id": "scl_20260511_153022",
-            "storage_path": "tes1/scl/scl_20260511_153022.json.gz",
+            "snapshot_id": "bode_1XA_20260511_153022_abcdef",
+            "storage_path": "tes1/bode/bode_1XA_20260511_153022_abcdef.json.gz",
             "size_bytes": 12345 (opcional, depende del backend)
         }
     """
@@ -241,6 +271,13 @@ def list_snapshots(instance_id: str, snapshot_type: str) -> List[Dict[str, Any]]
         items = _list_supabase(instance_id, snapshot_type)
     else:
         items = _list_local(instance_id, snapshot_type)
+
+    # Filtrado opcional por sensor_id (Ciclo 17.34, v3.31.239).
+    sensor_seg = _safe_sensor_segment(sensor_id)
+    if sensor_seg:
+        prefix = f"{snapshot_type}_{sensor_seg}_"
+        items = [it for it in items
+                 if str(it.get("snapshot_id", "")).startswith(prefix)]
 
     # Ordenar descendentemente por snapshot_id (= timestamp inverso)
     items.sort(key=lambda x: x["snapshot_id"], reverse=True)
@@ -500,22 +537,33 @@ def export_instance_as_zip_bytes(
 # UTILITY — id generation
 # =============================================================
 
-def new_snapshot_id(snapshot_type: str, now: Optional[datetime] = None) -> str:
-    """Helper para generar IDs consistentes: {type}_YYYYMMDD_HHMMSS_xxxxxx.
+def new_snapshot_id(
+    snapshot_type: str,
+    now: Optional[datetime] = None,
+    *,
+    sensor_id: str = "",
+) -> str:
+    """Helper para generar IDs consistentes.
 
-    Ciclo 17.31 (v3.31.236) — antes el formato era {type}_YYYYMMDD_HHMMSS.
-    Eso fallaba cuando dos saves caían en el mismo segundo (race entre dos
-    usuarios o doble click rápido en "Guardar snapshot"): el segundo save
-    SOBREESCRIBÍA el primero porque generaba exactamente el mismo path
-    ({instance}/{type}/{id}.json.gz). El sufijo UUID short (6 hex chars)
-    elimina la colisión sin romper sorting cronológico — el prefijo
-    timestamp sigue siendo lexicográficamente ordenable y la LRU
-    rotation sigue funcionando.
+    Formato:
+      - Sin sensor_id (default): {type}_{YYYYMMDD}_{HHMMSS}_{xxxxxx}
+      - Con sensor_id:           {type}_{sensor}_{YYYYMMDD}_{HHMMSS}_{xxxxxx}
+
+    Ciclo 17.31 (v3.31.236) — añadido sufijo UUID short anti-colisión.
+    Ciclo 17.34 (v3.31.239) — añadido sensor_id como segmento opcional
+    para que snapshots de sensores distintos del mismo instance se puedan
+    distinguir/filtrar sin descomprimir el payload. Módulos sensor-aware
+    (Bode, Polar, Spectrum, Waveform, Orbit) lo usan; SCL (bearings X-Y)
+    y Tabular (agregado) no lo necesitan y siguen con el formato corto.
     """
     _validate_type(snapshot_type)
     now = now or datetime.now()
     suffix = uuid.uuid4().hex[:6]
-    return f"{snapshot_type}_{now.strftime('%Y%m%d_%H%M%S')}_{suffix}"
+    sensor_seg = _safe_sensor_segment(sensor_id)
+    ts = now.strftime('%Y%m%d_%H%M%S')
+    if sensor_seg:
+        return f"{snapshot_type}_{sensor_seg}_{ts}_{suffix}"
+    return f"{snapshot_type}_{ts}_{suffix}"
 
 
 if __name__ == "__main__":
