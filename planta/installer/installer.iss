@@ -113,6 +113,17 @@ Source: "..\.streamlit\secrets.toml.example"; \
 Source: "assets\LICENCIA_README.txt"; \
     DestDir: "{app}\data"; Flags: ignoreversion
 
+; ---------------------------------------------------------------------
+; v3.31.247 — Bundled driver del fabricante (descargado por GitHub
+; Action desde Supabase Storage y extraído del ISO en CI). Va a la
+; carpeta temporal {tmp} del instalador, NO se queda en el disco del
+; cliente — se ejecuta durante el install y después Inno Setup lo borra.
+; ---------------------------------------------------------------------
+Source: "dependencies\driver-extracted\*"; \
+    DestDir: "{tmp}\driver-installer"; \
+    Flags: ignoreversion recursesubdirs createallsubdirs deleteafterinstall \
+    skipifsourcedoesntexist
+
 [Dirs]
 ; Crear carpeta de capturas durante la instalación
 Name: "{app}\data\captures"; Permissions: users-modify
@@ -128,6 +139,20 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; \
     Tasks: desktopicon
 
 [Run]
+; ---------------------------------------------------------------------
+; v3.31.247 — Instalar driver del fabricante PRIMERO (silencioso).
+; Solo si NO está ya instalado (detección en [Code] abajo).
+; Flags /qb = barra de progreso visible pero sin preguntas
+;       /norestart = NO reiniciar Windows en este punto (lo manejamos al
+;                    final del wizard de Watermelon para que el cliente
+;                    entienda por qué).
+; ---------------------------------------------------------------------
+Filename: "{tmp}\driver-installer\Install.exe"; \
+    Parameters: "/qb /norestart /ACCEPTEULAS"; \
+    StatusMsg: "Instalando driver de adquisición (10-15 min)..."; \
+    Check: NeedsDriverInstall and DriverInstallerExists; \
+    Flags: waituntilterminated
+
 ; Mostrar instrucciones de licencia al terminar la instalación
 Filename: "notepad.exe"; Parameters: """{app}\data\LICENCIA_README.txt"""; \
     Description: "Ver instrucciones para activar tu licencia"; \
@@ -144,18 +169,64 @@ Filename: "{app}\{#MyAppExeName}"; \
     Flags: nowait postinstall skipifsilent shellexec
 
 [Code]
+// =====================================================================
+// v3.31.247 — Detección del driver del fabricante.
+// Si ya está instalado (registry key del fabricante presente),
+// skipear la instalación del driver y solo instalar Watermelon.
+// =====================================================================
+function NeedsDriverInstall(): Boolean;
+var
+  Installed: Boolean;
+begin
+  // El driver del fabricante deja una key en el registry de Windows.
+  // Chequeamos esa key — si existe, ya está instalado.
+  // Path típico: HKLM\SOFTWARE\National Instruments\NI-DAQmx\CurrentVersion
+  Installed := RegKeyExists(HKLM, 'SOFTWARE\National Instruments\NI-DAQmx\CurrentVersion') or
+               RegKeyExists(HKLM, 'SOFTWARE\WOW6432Node\National Instruments\NI-DAQmx\CurrentVersion');
+  if Installed then begin
+    Log('Driver del fabricante ya instalado — skipeando instalación.');
+    Result := False;
+  end else begin
+    Log('Driver del fabricante NO detectado — se instalará.');
+    Result := True;
+  end;
+end;
+
+// Helper: chequear que el installer del driver EXISTE en el bundle.
+// (Si CI no lo descargó por alguna razón, no fallar el wizard entero —
+//  solo se skipea la instalación del driver con un warning al final.)
+function DriverInstallerExists(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{tmp}\driver-installer\Install.exe'));
+  if not Result then begin
+    Log('WARNING: Install.exe del driver no está en el bundle — skipeando.');
+  end;
+end;
+
 function InitializeSetup(): Boolean;
 begin
   Result := True;
-  // Aquí podemos agregar checks pre-install: driver de adquisición, etc.
-  // Por ahora solo retornamos True.
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then begin
-    // Aquí podríamos copiar secrets.toml.example → secrets.toml
-    // si no existe ya, para que el user solo tenga que editarlo.
-    // Por ahora se deja al user hacerlo manual.
+    // v3.31.247 — Si instalamos el driver, recordar al user reiniciar
+    // Windows. El driver del fabricante es de kernel, requiere reboot
+    // para que Windows reconozca la maleta cuando se conecte.
+    if NeedsDriverInstall() then begin
+      MsgBox(
+        'IMPORTANTE: Reiniciá Windows antes de conectar la maleta de ' +
+        'adquisición.' + #13#10 + #13#10 +
+        'El driver acaba de instalarse y necesita reinicio para que ' +
+        'Windows reconozca el hardware.' + #13#10 + #13#10 +
+        'Después del reinicio:' + #13#10 +
+        '  1. Conectá la maleta por USB' + #13#10 +
+        '  2. Esperá que Windows la detecte (LED verde)' + #13#10 +
+        '  3. Abrí Watermelon Planta desde el escritorio',
+        mbInformation,
+        MB_OK
+      );
+    end;
   end;
 end;

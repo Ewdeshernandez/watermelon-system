@@ -107,6 +107,75 @@ jobs:
           }
 
       # ------------------------------------------------------
+      # 6.5. (v3.31.247) Descargar driver del fabricante desde Supabase
+      #      Para el bundled installer "Full". El ISO se mantiene cacheado
+      #      entre builds — solo se baja cuando cambia DRIVER_VERSION.
+      # ------------------------------------------------------
+      - name: Cache driver del fabricante (ISO ~3.5 GB)
+        id: cache-driver
+        uses: actions/cache@v4
+        with:
+          path: planta/installer/dependencies/driver.iso
+          key: driver-iso-${{ env.DRIVER_VERSION }}
+        env:
+          # Bumpear este valor para forzar re-descarga (ej. cuando subamos
+          # un .iso nuevo a Supabase con versión más nueva del driver).
+          DRIVER_VERSION: "26.3.0"
+
+      - name: Descargar driver desde Supabase (si no está en cache)
+        if: steps.cache-driver.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $url = "${{ secrets.SUPABASE_URL }}/storage/v1/object/watermelon-planta-deps/ni-daqmx_26.3.0_offline.iso"
+          $headers = @{
+            "Authorization" = "Bearer ${{ secrets.SUPABASE_SERVICE_KEY }}"
+            "apikey"        = "${{ secrets.SUPABASE_SERVICE_KEY }}"
+          }
+          New-Item -ItemType Directory -Force -Path "planta/installer/dependencies" | Out-Null
+          $out = "planta/installer/dependencies/driver.iso"
+          Write-Host "Descargando driver desde Supabase Storage..."
+          Invoke-WebRequest -Uri $url -Headers $headers -OutFile $out -UseBasicParsing
+          $size = [math]::Round((Get-Item $out).Length / 1MB, 1)
+          Write-Host "✓ Driver descargado: $size MB"
+
+      - name: Extraer contenido del ISO con 7zip
+        shell: pwsh
+        run: |
+          $iso = "planta/installer/dependencies/driver.iso"
+          $extractDir = "planta/installer/dependencies/driver-extracted"
+          if (-not (Test-Path $iso)) {
+            throw "ISO no encontrado en $iso"
+          }
+          # 7zip viene preinstalado en runners de Windows
+          $sevenZip = "C:\Program Files\7-Zip\7z.exe"
+          if (-not (Test-Path $sevenZip)) {
+            Write-Host "7zip no encontrado, instalando con Chocolatey..."
+            choco install 7zip -y --no-progress
+          }
+          New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+          & $sevenZip x $iso "-o$extractDir" -y
+          if ($LASTEXITCODE -ne 0) {
+            throw "Extracción del ISO falló con código $LASTEXITCODE"
+          }
+          # Buscar el Install.exe principal (puede estar en raíz o en subdirectorio)
+          $installer = Get-ChildItem -Path $extractDir -Recurse -Filter "Install.exe" |
+                       Select-Object -First 1
+          if (-not $installer) {
+            Write-Host "WARNING: Install.exe no encontrado, buscando setup.exe..."
+            $installer = Get-ChildItem -Path $extractDir -Recurse -Filter "setup.exe" |
+                         Select-Object -First 1
+          }
+          if (-not $installer) {
+            throw "No se encontró Install.exe ni setup.exe en el ISO extraído"
+          }
+          Write-Host "✓ Driver installer encontrado: $($installer.FullName)"
+          # Copiar el path al GitHub env para que Inno Setup lo pueda leer
+          $relPath = $installer.FullName.Substring((Get-Location).Path.Length + 1)
+          echo "DRIVER_INSTALLER_PATH=$relPath" >> $env:GITHUB_ENV
+          $totalSize = (Get-ChildItem $extractDir -Recurse | Measure-Object Length -Sum).Sum
+          Write-Host "✓ Tamaño total extraído: $([math]::Round($totalSize / 1GB, 2)) GB"
+
+      # ------------------------------------------------------
       # 7. Build .exe portable con PyInstaller
       # ------------------------------------------------------
       - name: Build WatermelonPlanta.exe con PyInstaller
