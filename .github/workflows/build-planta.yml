@@ -217,51 +217,80 @@ jobs:
       # ------------------------------------------------------
       - name: Upload .exe Full a Supabase Storage
         id: upload-installer
-        shell: pwsh
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: |
-          $setup = Get-ChildItem planta/installer/dist/WatermelonPlantaSetup-*.exe |
-                   Select-Object -First 1
-          if (-not $setup) {
-            throw "WatermelonPlantaSetup-*.exe no encontrado en dist/"
-          }
-          $fileName = $setup.Name
-          $fileSize = [math]::Round($setup.Length / 1MB, 1)
-          Write-Host "Subiendo $fileName ($fileSize MB) a Supabase Storage..."
+          set -e
+          # Buscar el .exe generado por Inno Setup
+          SETUP_PATH=$(find planta/installer/dist -name "WatermelonPlantaSetup-*.exe" -type f | head -1)
+          if [ -z "$SETUP_PATH" ]; then
+            echo "ERROR: WatermelonPlantaSetup-*.exe no encontrado en dist/"
+            ls -la planta/installer/dist/ || true
+            exit 1
+          fi
 
-          # Upload con curl (más confiable que Invoke-WebRequest para archivos grandes)
-          $url = "${{ secrets.SUPABASE_URL }}/storage/v1/object/watermelon-planta-deps/installers/$fileName"
-          $result = & curl.exe --silent --show-error --fail `
-            -X POST `
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_KEY }}" `
-            -H "apikey: ${{ secrets.SUPABASE_SERVICE_KEY }}" `
-            -H "Content-Type: application/octet-stream" `
-            -H "x-upsert: true" `
-            --data-binary "@$($setup.FullName)" `
-            $url
-          if ($LASTEXITCODE -ne 0) {
-            throw "Upload a Supabase falló con código $LASTEXITCODE: $result"
-          }
-          Write-Host "✓ Upload OK: $result"
+          FILENAME=$(basename "$SETUP_PATH")
+          FILESIZE_BYTES=$(stat -c%s "$SETUP_PATH" 2>/dev/null || stat -f%z "$SETUP_PATH")
+          FILESIZE_MB=$(echo "scale=1; $FILESIZE_BYTES / 1048576" | bc)
 
-          # Generar signed URL válida por 90 días para que clientes descarguen
-          $signedUrlBody = '{"expiresIn": 7776000}'  # 90 días en segundos
-          $signedResp = & curl.exe --silent --show-error --fail `
-            -X POST `
-            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_KEY }}" `
-            -H "apikey: ${{ secrets.SUPABASE_SERVICE_KEY }}" `
-            -H "Content-Type: application/json" `
-            -d $signedUrlBody `
-            "${{ secrets.SUPABASE_URL }}/storage/v1/object/sign/watermelon-planta-deps/installers/$fileName"
-          if ($LASTEXITCODE -ne 0) {
-            throw "Signed URL generation falló: $signedResp"
-          }
-          # Parsear JSON response: {"signedURL": "/object/sign/..."}
-          $signed = $signedResp | ConvertFrom-Json
-          $fullSignedUrl = "${{ secrets.SUPABASE_URL }}/storage/v1$($signed.signedURL)"
-          Write-Host "✓ Signed URL generada (válida 90 días)"
-          echo "DOWNLOAD_URL=$fullSignedUrl" >> $env:GITHUB_ENV
-          echo "INSTALLER_NAME=$fileName" >> $env:GITHUB_ENV
-          echo "INSTALLER_SIZE_MB=$fileSize" >> $env:GITHUB_ENV
+          echo "============================================"
+          echo "  Archivo a subir:"
+          echo "  Path:  $SETUP_PATH"
+          echo "  Name:  $FILENAME"
+          echo "  Size:  $FILESIZE_MB MB ($FILESIZE_BYTES bytes)"
+          echo "============================================"
+
+          # 1) Upload del .exe al bucket privado
+          UPLOAD_URL="${SUPABASE_URL}/storage/v1/object/watermelon-planta-deps/installers/${FILENAME}"
+          echo "Subiendo a Supabase Storage..."
+          HTTP_CODE=$(curl --silent --show-error \
+            --write-out "%{http_code}" \
+            --output /tmp/upload_response.json \
+            -X POST \
+            -H "Authorization: Bearer ${SUPABASE_KEY}" \
+            -H "apikey: ${SUPABASE_KEY}" \
+            -H "Content-Type: application/octet-stream" \
+            -H "x-upsert: true" \
+            --data-binary "@${SETUP_PATH}" \
+            "${UPLOAD_URL}")
+
+          echo "HTTP code: $HTTP_CODE"
+          echo "Response body:"
+          cat /tmp/upload_response.json
+          echo ""
+
+          if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
+            echo "ERROR: Upload falló con HTTP $HTTP_CODE"
+            exit 1
+          fi
+          echo "✓ Upload OK"
+
+          # 2) Generar signed URL válida 90 días
+          SIGN_URL="${SUPABASE_URL}/storage/v1/object/sign/watermelon-planta-deps/installers/${FILENAME}"
+          SIGNED_RESPONSE=$(curl --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer ${SUPABASE_KEY}" \
+            -H "apikey: ${SUPABASE_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"expiresIn": 7776000}' \
+            "${SIGN_URL}")
+          echo "Signed URL response: $SIGNED_RESPONSE"
+
+          # Parsear el JSON con Python (más robusto que jq que puede no estar)
+          SIGNED_PATH=$(echo "$SIGNED_RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin).get('signedURL', ''))")
+          if [ -z "$SIGNED_PATH" ]; then
+            echo "ERROR: Signed URL no se generó"
+            exit 1
+          fi
+          FULL_SIGNED_URL="${SUPABASE_URL}/storage/v1${SIGNED_PATH}"
+          echo "✓ Signed URL generada (válida 90 días)"
+
+          # Exportar variables al siguiente step
+          echo "DOWNLOAD_URL=${FULL_SIGNED_URL}" >> $GITHUB_ENV
+          echo "INSTALLER_NAME=${FILENAME}" >> $GITHUB_ENV
+          echo "INSTALLER_SIZE_MB=${FILESIZE_MB}" >> $GITHUB_ENV
 
       # ------------------------------------------------------
       # 10. Crear GitHub Release (SIN asset, solo body con link a Supabase)
