@@ -35,7 +35,7 @@ Siguientes builds: ~10 min.
 
 1. Windows 10/11 64-bit con admin
 2. Python 3.10-3.12 con "Add to PATH"
-3. NI-DAQmx (para que los imports de nidaqmx no fallen al buildear)
+3. Driver de adquisición del fabricante (para que los imports nativos no fallen al buildear)
 4. Inno Setup 6+ (free: https://jrsoftware.org/isdl.php)
 5. Todas las dependencias del repo:
      cd planta
@@ -129,7 +129,7 @@ El cliente:
   5. Doble click al ícono → Watermelon Planta arranca
 
 NO requiere instalar Python, ni dependencias, ni nada extra.
-SÍ requiere NI-DAQmx driver (eso es separado, una vez por PC).
+SÍ requiere driver de adquisición del fabricante (eso es separado, una vez por PC).
 
 
 ============================================================

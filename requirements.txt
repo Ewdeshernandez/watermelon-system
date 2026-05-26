@@ -35,9 +35,9 @@ Pillow>=10.0.0
 imageio>=2.31.0
 imageio-ffmpeg>=0.4.9
 # Ciclo 23.151: npTDMS para módulo Modal Analysis — lee archivos .tdms
-# nativos del NI-9234 capturados via companion script (scripts/ni_companion/).
-# Open-source MIT license, mantenido activamente. NO requiere driver NI
-# del sistema instalado (eso solo se necesita en el companion local).
+# nativos del hardware de captura. Open-source MIT license, mantenido
+# activamente. NO requiere driver del fabricante instalado (eso solo se
+# necesita en el companion local de captura).
 npTDMS>=1.7.0
 # Ciclo 17.26: AI Diagnóstico con Claude API. Generación de
 # interpretación clínica + recomendaciones en español natural a

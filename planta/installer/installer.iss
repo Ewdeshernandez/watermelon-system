@@ -147,7 +147,7 @@ Filename: "{app}\{#MyAppExeName}"; \
 function InitializeSetup(): Boolean;
 begin
   Result := True;
-  // Aquí podemos agregar checks pre-install: NI-DAQmx driver, Python, etc.
+  // Aquí podemos agregar checks pre-install: driver de adquisición, etc.
   // Por ahora solo retornamos True.
 end;
 

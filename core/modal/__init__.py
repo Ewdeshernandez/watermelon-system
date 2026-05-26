@@ -27,18 +27,18 @@ FEA — Finite Element Analysis:
 
 Hardware estandarizado
 ----------------------
-· NI cDAQ-9234 — 4 canales, 24-bit, hasta 51.2 kHz, IEPE built-in
-· Acelerómetros Wilcoxon — 100 mV/g (IEPE)
-· Probetas de proximidad Bently 3300/3500 — 200 mV/mil (requiere PS -24 VDC)
-· Martillo modal (e.g. PCB 086C03)
+· Maleta de adquisición Watermelon — multi-canal, 24-bit, hasta 51.2 kHz, IEPE built-in
+· Acelerómetros IEPE estándar — 100 mV/g
+· Probetas de proximidad estándar — 200 mV/mil (requiere PS -24 VDC)
+· Martillo modal
 
 Estructura del módulo
 ---------------------
 geometry_3d       — Wireframe 3D (nodes + edges + faces) en JSON nativo
 sensor_3d_mapping — Mapea sensor_map.plane_label → nodo geometría + DOF
-tdms_importer     — Lee archivos .tdms nativos de NI-9234 (npTDMS)
+tdms_importer     — Lee archivos .tdms nativos del hardware de captura (npTDMS)
 artemis_importer  — Lee exports legacy de Artemis Modal (.txt) — compat
-ni_daq            — Adquisición live NI-9234 (EMA triggered + OMA continuous)
+ni_daq            — Adquisición live del hardware (EMA triggered + OMA continuous)
 signal_scaling    — Aplica sensitivities (mV/g, mV/mil) → engineering units
 frf_compute       — Cálculo FRF: H1, H2 estimators + coherencia (scipy.signal)
 ema_engine        — Curve fitting LSCF + stability diagram (pyEMA wrapper)

@@ -10,10 +10,10 @@
 # Instalación online (con internet):
 #   pip install -r requirements-planta.txt
 
-# Captura NI (REQUIRE NI-DAQmx driver instalado en el sistema)
+# Captura de adquisición (requiere driver del fabricante instalado)
 nidaqmx>=1.0.0
 
-# Lectura/escritura TDMS nativo NI
+# Lectura/escritura formato TDMS
 npTDMS>=1.7.0
 
 # Streamlit para la UI

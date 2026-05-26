@@ -185,6 +185,13 @@ jobs:
             > El auto-updater dentro de la app te avisa automáticamente
             > cuando hay una versión nueva disponible.
 
+            ## Drivers de adquisición
+
+            El hardware de adquisición requiere su driver del fabricante
+            instalado en el PC. SIGA provee este driver junto con la maleta
+            de adquisición Watermelon — instalalo una sola vez antes de
+            usar Watermelon Planta.
+
             ---
 
             ## Soporte
