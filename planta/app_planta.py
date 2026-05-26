@@ -50,32 +50,14 @@ _CAPTURES_DIR = Path(__file__).parent / "data" / "captures"
 _CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
 # =====================================================================
-# Verificación de licencia (v3.31.215 — FASE D)
-# Bloquea la app si la licencia no es válida. Cachea en session_state
-# para no releer el disco en cada rerun.
-# =====================================================================
-try:
-    from license_manager import (
-        get_cached_license,
-        render_license_blocker,
-        render_license_status_chip,
-    )
-    _LIC = get_cached_license()
-    if not _LIC.valid:
-        # Mostrar pantalla bloqueante y detener toda la app
-        render_license_blocker(_LIC)
-        st.stop()
-except ImportError:
-    # license_manager.py debe existir siempre. Si no está, instalación corrupta.
-    st.error(
-        "⚠ Instalación corrupta: falta `license_manager.py`.\n\n"
-        "Contacta a SIGA GROUP para reinstalar Watermelon Planta."
-    )
-    st.stop()
-
-# =====================================================================
 # Tema visual global (v3.31.214 — FASE E branding consistente)
 # Tipografía Inter / system fonts + colores SIGA + spacing pulido
+#
+# v3.31.246 — MOVIDO antes del check de licencia para que la pantalla
+# bloqueante de licencia inválida también herede el styling. Antes el
+# st.stop() del bloqueador cortaba la ejecución y la pantalla salía con
+# look default de Streamlit (header "Deploy" visible, sin sidebar azul,
+# tipografía cruda). Cliente reportó visual "horrible y asqueroso".
 # =====================================================================
 st.markdown("""
 <style>
@@ -188,6 +170,34 @@ st.markdown("""
     }
 </style>
 """, unsafe_allow_html=True)
+
+# =====================================================================
+# Verificación de licencia (v3.31.215 — FASE D)
+# Bloquea la app si la licencia no es válida. Cachea en session_state
+# para no releer el disco en cada rerun.
+#
+# v3.31.246 — Este bloque se ejecuta DESPUÉS del CSS global para que
+# la pantalla bloqueante de licencia inválida salga con sidebar azul,
+# tipografía Inter y "Deploy" oculto.
+# =====================================================================
+try:
+    from license_manager import (
+        get_cached_license,
+        render_license_blocker,
+        render_license_status_chip,
+    )
+    _LIC = get_cached_license()
+    if not _LIC.valid:
+        # Mostrar pantalla bloqueante y detener toda la app
+        render_license_blocker(_LIC)
+        st.stop()
+except ImportError:
+    # license_manager.py debe existir siempre. Si no está, instalación corrupta.
+    st.error(
+        "⚠ Instalación corrupta: falta `license_manager.py`.\n\n"
+        "Contacta a SIGA GROUP para reinstalar Watermelon Planta."
+    )
+    st.stop()
 
 # =====================================================================
 # Header premium clase mundial (v3.31.214 — FASE E branding)
