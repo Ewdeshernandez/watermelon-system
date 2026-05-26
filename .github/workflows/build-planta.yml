@@ -232,8 +232,9 @@ jobs:
           fi
 
           FILENAME=$(basename "$SETUP_PATH")
-          FILESIZE_BYTES=$(stat -c%s "$SETUP_PATH" 2>/dev/null || stat -f%z "$SETUP_PATH")
-          FILESIZE_MB=$(echo "scale=1; $FILESIZE_BYTES / 1048576" | bc)
+          FILESIZE_BYTES=$(stat -c%s "$SETUP_PATH" 2>/dev/null || stat -f%z "$SETUP_PATH" 2>/dev/null || wc -c < "$SETUP_PATH")
+          # v3.31.250: python3 en vez de bc (bc no está en Windows runners)
+          FILESIZE_MB=$(python3 -c "print(f'{${FILESIZE_BYTES}/1048576:.1f}')")
 
           echo "============================================"
           echo "  Archivo a subir:"
