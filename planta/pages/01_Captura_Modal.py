@@ -27,11 +27,11 @@ import streamlit as st
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT))
 
-from core.modal.ni_daq import (  # noqa: E402
+from core.modal.acq_backend import (  # noqa: E402
     AcquisitionConfig,
     ChannelConfig,
     capture as ni_capture,
-    discover_ni9234_modules,
+    discover_acq_modules,
 )
 
 st.set_page_config(
@@ -58,7 +58,7 @@ st.markdown(
 # ------------------------------------------------------------------
 _chassis = "cDAQ1"
 try:
-    _modules = discover_ni9234_modules(_chassis)
+    _modules = discover_acq_modules(_chassis)
 except ImportError as exc:
     st.error(
         f"Drivers de adquisición Watermelon no disponibles. "
@@ -347,7 +347,7 @@ else:
 if _enabled:
     with st.expander("▸ Comando CLI equivalente (para reproducir desde Terminal)"):
         cmd_parts = [
-            f"python scripts\\ni_companion\\capture.py",
+            f"python scripts\\capture_companion\\capture.py",
             f"--mode {'oma' if is_oma else 'ema'}",
             f"--chassis {_chassis}",
             f"--fs {int(fs)}",

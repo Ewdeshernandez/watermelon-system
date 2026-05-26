@@ -746,7 +746,7 @@ def _autopopulate_icon_anchors(
 # analista capturar los 4 campos requeridos para análisis modal (EMA/OMA):
 #
 #   · sensitivity_mv_per_eu  (mV/EU) — sensibilidad del transductor
-#   · coupling               (IEPE/AC/DC) — modo de acoplamiento al NI-9234
+#   · coupling               (IEPE/AC/DC) — modo de acoplamiento al módulo de adquisición
 #   · position_3d            ([x, y, z] metros) — pos. en frame del activo
 #   · dof_direction          ([dx, dy, dz] unitario) — eje sensible
 #

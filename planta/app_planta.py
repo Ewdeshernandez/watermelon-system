@@ -407,8 +407,8 @@ with col1:
 
 with col2:
     try:
-        from core.modal.ni_daq import discover_ni9234_modules
-        modules = discover_ni9234_modules("cDAQ1")
+        from core.modal.acq_backend import discover_acq_modules
+        modules = discover_acq_modules("cDAQ1")
         if modules:
             st.success(
                 f"✓ **Maleta Watermelon conectada** "
@@ -437,7 +437,7 @@ st.divider()
 # Pre-computar status del sistema DAQ (silencioso, sin nombres de libs)
 _daq_status = "down"
 try:
-    from core.modal.ni_daq import discover_ni9234_modules as _disc
+    from core.modal.acq_backend import discover_acq_modules as _disc
     _mods = _disc("cDAQ1")
     _daq_status = "ok" if _mods else "disconnected"
     _daq_channels = len(_mods) * 4 if _mods else 0

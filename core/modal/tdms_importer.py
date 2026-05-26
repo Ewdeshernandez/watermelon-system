@@ -1,15 +1,15 @@
 """
-core/modal/tdms_importer.py — Lector de archivos .tdms del NI-9234
+core/modal/tdms_importer.py — Lector de archivos .tdms del módulo de adquisición
 ===================================================================
 
 Importa archivos TDMS nativos generados por LabVIEW SignalExpress o
-nuestro propio companion script (`scripts/ni_companion/capture.py`) que
-captura data del NI-9234.
+nuestro propio companion script (`scripts/capture_companion/capture.py`) que
+captura data del módulo de adquisición.
 
 Implementación
 --------------
 Usa `npTDMS` (open-source MIT) para parseo. La librería NO requiere driver
-NI-DAQmx — el TDMS es un formato binario portable que cualquier sistema
+driver del fabricante — el TDMS es un formato binario portable que cualquier sistema
 puede leer/escribir.
 
 Estructura TDMS esperada

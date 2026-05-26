@@ -849,7 +849,7 @@ with tab_acq:
         key="acq_mode_radio",
     )
 
-    # -------- NI-9234 live --------
+    # -------- módulo de adquisición live --------
     if acq_mode.startswith("📡"):
         st.markdown("**Configuración de captura Watermelon**")
 
@@ -1004,7 +1004,7 @@ with tab_acq:
         # --- Canales activos: grid 32 BNC con auto-discovery ---
         # v3.31.202 — Reemplaza el grid hardcoded de 4 checkboxes por una
         # tabla editable de 32 filas (1 por BNC port). Auto-detecta qué
-        # módulos NI-9234 están instalados en la maleta y pre-popula el
+        # módulos módulo de adquisición están instalados en la maleta y pre-popula el
         # default. Genera el comando --channels para el companion script.
         st.markdown("**Canales activos · Maleta Watermelon (BNC 1..32)**")
 
@@ -1013,8 +1013,8 @@ with tab_acq:
         _installed_slots: set = set()
         _discovery_msg = ""
         try:
-            from core.modal.ni_daq import discover_ni9234_modules
-            _modules = discover_ni9234_modules(_ni_chassis)
+            from core.modal.acq_backend import discover_acq_modules
+            _modules = discover_acq_modules(_ni_chassis)
             _installed_slots = {m["slot"] for m in _modules}
             if _modules:
                 _bnc_max = max(m["bnc_range"][1] for m in _modules)
@@ -1254,9 +1254,9 @@ with tab_acq:
                 # =====================================================
                 # Alternativa al copy/paste del CLI: si nidaqmx está
                 # disponible en este equipo (laptop de planta con driver
-                # NI-DAQmx instalado), ofrecemos correr capture() directo
+                # driver del fabricante instalado), ofrecemos correr capture() directo
                 # desde Watermelon con progress bar. En Streamlit Cloud
-                # NI-DAQmx no existe → el bloque entero se esconde.
+                # driver del fabricante no existe → el bloque entero se esconde.
                 _nidaqmx_available = False
                 try:
                     import nidaqmx as _nidaqmx_probe  # noqa: F401
@@ -1294,7 +1294,7 @@ with tab_acq:
                         ),
                     ):
                         from datetime import datetime as _dt
-                        from core.modal.ni_daq import (
+                        from core.modal.acq_backend import (
                             AcquisitionConfig as _AcqCfg,
                             ChannelConfig as _ChCfg,
                             capture as _ni_capture,
@@ -1387,7 +1387,7 @@ with tab_acq:
                             st.caption(
                                 "Verifica que la maleta esté conectada y los "
                                 "módulos instalados. Para diagnóstico corre "
-                                "`python scripts/ni_companion/capture.py "
+                                "`python scripts/capture_companion/capture.py "
                                 "--list-modules` en CLI."
                             )
 

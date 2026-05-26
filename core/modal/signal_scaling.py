@@ -2,7 +2,7 @@
 core/modal/signal_scaling.py — Escalado de señales crudas a unidades de ingeniería
 ==================================================================================
 
-Convierte voltajes crudos del NI-9234 (Volts) a unidades de ingeniería
+Convierte voltajes crudos del módulo de adquisición (Volts) a unidades de ingeniería
 correspondientes al sensor (g, mil, in/s, N, etc.) aplicando la
 sensibilidad nominal del transductor.
 
@@ -24,7 +24,7 @@ Notas
   de 50 mil). El bias se debe filtrar (DC blocker o substracción de la media)
   antes de aplicar la sensitivity para obtener desplazamiento dinámico.
 
-· Para acelerómetros IEPE: el NI-9234 suministra la corriente IEPE (2 mA) y
+· Para acelerómetros IEPE: el módulo de adquisición suministra la corriente IEPE (2 mA) y
   el bias de ~12 V se filtra internamente. La señal es directa.
 
 Norma aplicable

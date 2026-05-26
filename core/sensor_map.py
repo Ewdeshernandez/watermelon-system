@@ -222,7 +222,7 @@ def get_sensitivity_for_modal(sensor: Dict[str, Any]) -> float:
 def get_coupling_for_modal(sensor: Dict[str, Any]) -> str:
     """
     Devuelve el coupling del sensor ("IEPE" | "AC" | "DC") para configuración
-    del NI-9234. Si no está explícito, aplica default por sensor_type.
+    del módulo de adquisición. Si no está explícito, aplica default por sensor_type.
     """
     raw = str(sensor.get("coupling", "") or "").strip().upper()
     if raw in ("IEPE", "AC", "DC"):

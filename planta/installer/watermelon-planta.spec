@@ -102,7 +102,7 @@ hiddenimports += [
     "httpx", "websockets", "h2", "hpack", "hyperframe",
     "pydantic", "pydantic_core",
     "jiter", "rich", "cryptography",
-    "core.modal.ni_daq",
+    "core.modal.acq_backend",
     "core.modal.tdms_importer",
     "core.modal.frf_compute",
     "core.modal.iso7626_validator",

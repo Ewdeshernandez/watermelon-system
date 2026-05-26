@@ -38,7 +38,7 @@ geometry_3d       — Wireframe 3D (nodes + edges + faces) en JSON nativo
 sensor_3d_mapping — Mapea sensor_map.plane_label → nodo geometría + DOF
 tdms_importer     — Lee archivos .tdms nativos del hardware de captura (npTDMS)
 artemis_importer  — Lee exports legacy de Artemis Modal (.txt) — compat
-ni_daq            — Adquisición live del hardware (EMA triggered + OMA continuous)
+acq_backend       — Adquisición live del hardware (EMA triggered + OMA continuous)
 signal_scaling    — Aplica sensitivities (mV/g, mV/mil) → engineering units
 frf_compute       — Cálculo FRF: H1, H2 estimators + coherencia (scipy.signal)
 ema_engine        — Curve fitting LSCF + stability diagram (pyEMA wrapper)
@@ -54,7 +54,7 @@ __all__ = [
     "sensor_3d_mapping",
     "tdms_importer",
     "artemis_importer",
-    "ni_daq",
+    "acq_backend",
     "signal_scaling",
     "frf_compute",
     "ema_engine",
