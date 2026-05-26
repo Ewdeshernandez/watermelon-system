@@ -318,6 +318,23 @@ def render_sensor_map_diagram(
         driver_set = set(driver_planes)
         driven_planes = sorted([p for p in all_planes if p not in driver_set])
 
+    # Ciclo 17.36 (v3.31.251) — Post-corrección semántica.
+    # Caso real C200C Parex: sensores con label "Cilindro X" se asignaban
+    # al motor por la heurística de mediana, cuando lógicamente pertenecen
+    # SIEMPRE al compresor (driven). Forzamos: si un sensor menciona
+    # "cilindro"/"cylinder" en su plane_label, su plano va a driven.
+    _cyl_planes_in_driver = set()
+    for s in sensors:
+        plane_label_lc = str(s.get("plane_label", "")).lower()
+        if "cilindro" in plane_label_lc or "cylinder" in plane_label_lc:
+            plane_num = int(s.get("plane", 0) or 0)
+            if plane_num > 0 and plane_num in driver_planes:
+                _cyl_planes_in_driver.add(plane_num)
+    if _cyl_planes_in_driver:
+        driver_planes = sorted(p for p in driver_planes
+                                if p not in _cyl_planes_in_driver)
+        driven_planes = sorted(set(driven_planes) | _cyl_planes_in_driver)
+
     keyphasor_sensors = [s for s in sensors if (s.get("sensor_type") or "").lower() == "keyphasor"]
 
     n_planes_total = len(driver_planes) + len(driven_planes)
@@ -578,18 +595,38 @@ def render_sensor_map_diagram(
         # Ciclo 17.5.16 — diseño simple, sin cilindros horizontales.
 
         # ---------- Detectar cuántos cilindros hay ----------
-        cyl_planes = [
-            int(s.get("plane", 0))
-            for s in sensors
-            if int(s.get("plane", 0)) in driven_planes
-            and "cilindro" in str(s.get("plane_label", "")).lower()
-        ]
-        cyl_planes = sorted(set(cyl_planes))
-        if not cyl_planes and len(driven_planes) >= 3:
-            cyl_planes = list(driven_planes[1:-1])
-        if not cyl_planes:
-            cyl_planes = [driven_planes[len(driven_planes) // 2]] if driven_planes else []
-        n_cyl = max(1, len(cyl_planes))
+        # Ciclo 17.36 (v3.31.251) — antes contábamos planos únicos donde
+        # aparecía "cilindro", pero eso fallaba en compresores donde varios
+        # cilindros comparten un plano (Ariel KBK/4: 4 cilindros en 2-3
+        # planos → contaba 2 en lugar de 4). Ahora extraemos el NÚMERO de
+        # cilindro del label (regex "Cilindro N" / "Cylinder N") y usamos
+        # el máximo encontrado como n_cyl real.
+        import re as _re_cyl
+        _cyl_numbers = set()
+        for s in sensors:
+            if int(s.get("plane", 0)) in driven_planes:
+                _plane_label_lc = str(s.get("plane_label", "")).lower()
+                if "cilindro" in _plane_label_lc or "cylinder" in _plane_label_lc:
+                    _match = _re_cyl.search(r"(?:cilindro|cylinder)\s*(\d+)",
+                                              _plane_label_lc)
+                    if _match:
+                        _cyl_numbers.add(int(_match.group(1)))
+        if _cyl_numbers:
+            # Usar el número máximo encontrado (e.g. si vemos "Cilindro 4",
+            # el compresor tiene al menos 4 cilindros).
+            n_cyl = max(_cyl_numbers)
+        else:
+            # Fallback: heurística por planos (lógica legacy).
+            cyl_planes = sorted({
+                int(s.get("plane", 0))
+                for s in sensors
+                if int(s.get("plane", 0)) in driven_planes
+            })
+            if not cyl_planes and len(driven_planes) >= 3:
+                cyl_planes = list(driven_planes[1:-1])
+            n_cyl = max(1, len(cyl_planes))
+        # Clamp razonable — un recip compressor típico es 1, 2, 3, 4, 6 u 8 cyl.
+        n_cyl = max(1, min(n_cyl, 8))
 
         # ---------- Caja central horizontal con cigüeñal ----------
         crank_h = 0.55
