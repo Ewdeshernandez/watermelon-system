@@ -210,19 +210,63 @@ jobs:
           echo "SETUP_PATH=planta/installer/$($setup.FullName.Substring($setup.FullName.IndexOf('dist')))" >> $env:GITHUB_ENV
 
       # ------------------------------------------------------
-      # 9. Subir como artifact (siempre, accesible 90 días)
+      # 9. Upload .exe Full a Supabase Storage
+      #    (v3.31.248) GitHub Releases tiene límite de 2 GB por asset.
+      #    Nuestro .exe Full pesa ~3.6 GB (Watermelon + driver embebido).
+      #    Por eso lo hosteamos en Supabase Storage privado.
       # ------------------------------------------------------
-      - name: Upload artifact (descargable desde GitHub Actions)
-        uses: actions/upload-artifact@v4
-        with:
-          name: WatermelonPlantaSetup-${{ steps.version.outputs.version }}
-          path: planta/installer/dist/WatermelonPlantaSetup-*.exe
-          retention-days: 90
+      - name: Upload .exe Full a Supabase Storage
+        id: upload-installer
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem planta/installer/dist/WatermelonPlantaSetup-*.exe |
+                   Select-Object -First 1
+          if (-not $setup) {
+            throw "WatermelonPlantaSetup-*.exe no encontrado en dist/"
+          }
+          $fileName = $setup.Name
+          $fileSize = [math]::Round($setup.Length / 1MB, 1)
+          Write-Host "Subiendo $fileName ($fileSize MB) a Supabase Storage..."
+
+          # Upload con curl (más confiable que Invoke-WebRequest para archivos grandes)
+          $url = "${{ secrets.SUPABASE_URL }}/storage/v1/object/watermelon-planta-deps/installers/$fileName"
+          $result = & curl.exe --silent --show-error --fail `
+            -X POST `
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_KEY }}" `
+            -H "apikey: ${{ secrets.SUPABASE_SERVICE_KEY }}" `
+            -H "Content-Type: application/octet-stream" `
+            -H "x-upsert: true" `
+            --data-binary "@$($setup.FullName)" `
+            $url
+          if ($LASTEXITCODE -ne 0) {
+            throw "Upload a Supabase falló con código $LASTEXITCODE: $result"
+          }
+          Write-Host "✓ Upload OK: $result"
+
+          # Generar signed URL válida por 90 días para que clientes descarguen
+          $signedUrlBody = '{"expiresIn": 7776000}'  # 90 días en segundos
+          $signedResp = & curl.exe --silent --show-error --fail `
+            -X POST `
+            -H "Authorization: Bearer ${{ secrets.SUPABASE_SERVICE_KEY }}" `
+            -H "apikey: ${{ secrets.SUPABASE_SERVICE_KEY }}" `
+            -H "Content-Type: application/json" `
+            -d $signedUrlBody `
+            "${{ secrets.SUPABASE_URL }}/storage/v1/object/sign/watermelon-planta-deps/installers/$fileName"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Signed URL generation falló: $signedResp"
+          }
+          # Parsear JSON response: {"signedURL": "/object/sign/..."}
+          $signed = $signedResp | ConvertFrom-Json
+          $fullSignedUrl = "${{ secrets.SUPABASE_URL }}/storage/v1$($signed.signedURL)"
+          Write-Host "✓ Signed URL generada (válida 90 días)"
+          echo "DOWNLOAD_URL=$fullSignedUrl" >> $env:GITHUB_ENV
+          echo "INSTALLER_NAME=$fileName" >> $env:GITHUB_ENV
+          echo "INSTALLER_SIZE_MB=$fileSize" >> $env:GITHUB_ENV
 
       # ------------------------------------------------------
-      # 10. Crear GitHub Release con el setup como asset
+      # 10. Crear GitHub Release (SIN asset, solo body con link a Supabase)
       # ------------------------------------------------------
-      - name: Publicar GitHub Release
+      - name: Publicar GitHub Release con link a Supabase
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.version }}
@@ -234,32 +278,50 @@ jobs:
 
             ---
 
+            ## 📥 Descargar instalador
+
+            **Archivo**: `${{ env.INSTALLER_NAME }}` (~${{ env.INSTALLER_SIZE_MB }} MB)
+
+            👉 **[DESCARGA DIRECTA](${{ env.DOWNLOAD_URL }})** 👈
+
+            > _Link válido por 90 días desde el build. Si caduca, contactá
+            > soporte para uno nuevo._
+
+            ---
+
             ## Cómo instalar (cliente final)
 
-            1. Descargá `WatermelonPlantaSetup-${{ steps.version.outputs.version }}.exe` (abajo en **Assets**)
-            2. Doble click → wizard → **Next** → **Install** → **Finish**
-            3. Pegá tu archivo `license.token` (entregado por SIGA) en:
-               ```
-               C:\Program Files\WatermelonPlanta\data\
-               ```
-            4. Abrí **Watermelon Planta** desde el escritorio
-            5. Verificá que aparece el chip verde con el nombre de tu empresa
+            1. Click en el link de descarga de arriba (baja ~3.5 GB).
+            2. Doble click al `.exe` descargado.
+            3. Wizard: **Next → Acepto licencia → Install → Finish**.
+            4. Durante la instalación verás "Instalando driver de adquisición
+               (10-15 min)..." — esperá, es normal.
+            5. Cuando termine, una ventana te pedirá **reiniciar Windows**.
+               Hacelo (importante).
+            6. Después del reinicio:
+               - Conectá la maleta por USB.
+               - Pegá tu `license.token` en `C:\Program Files\WatermelonPlanta\data\`.
+               - Doble click al ícono Watermelon Planta del escritorio.
 
             ## Cómo actualizar (cliente existente)
 
-            Si ya tenés una versión anterior instalada, descargá esta nueva,
-            doble click → reemplaza la instalación previa, tus archivos
-            `data/captures/` y `data/license.token` quedan intactos.
+            Bajá el nuevo `.exe`, doble click → reemplaza la instalación previa,
+            tus archivos `data/captures/` y `data/license.token` quedan intactos.
 
-            > El auto-updater dentro de la app te avisa automáticamente
-            > cuando hay una versión nueva disponible.
+            > El auto-updater dentro de la app te avisa automáticamente cuando
+            > hay una versión nueva disponible.
 
-            ## Drivers de adquisición
+            ---
 
-            El hardware de adquisición requiere su driver del fabricante
-            instalado en el PC. SIGA provee este driver junto con la maleta
-            de adquisición Watermelon — instalalo una sola vez antes de
-            usar Watermelon Planta.
+            ## ¿Qué incluye este installer?
+
+            - ✅ Watermelon Planta Edition (app principal)
+            - ✅ Driver de adquisición del fabricante (auto-instalado silencioso)
+            - ✅ Detección inteligente: si ya tenés el driver, se skipea
+            - ✅ Validación de licencia
+            - ✅ Auto-updater integrado
+
+            **No necesitás instalar nada más por separado.**
 
             ---
 
@@ -271,10 +333,9 @@ jobs:
             ---
 
             *Build automático generado por GitHub Actions desde commit `${{ github.sha }}`*
-          files: planta/installer/dist/WatermelonPlantaSetup-*.exe
           draft: false
           prerelease: false
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
