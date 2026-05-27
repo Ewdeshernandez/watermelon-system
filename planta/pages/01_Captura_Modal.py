@@ -59,22 +59,58 @@ st.markdown(
 _chassis = "cDAQ1"
 try:
     _modules = discover_acq_modules(_chassis)
-except ImportError as exc:
-    st.error(
-        f"Drivers de adquisición Watermelon no disponibles. "
-        f"Corre INSTALAR.bat y reinicia. (detalle técnico: {exc})"
+except ImportError:
+    # v3.31.256 — Driver de adquisición no instalado. Mensaje sanitizado
+    # (sin nombres del fabricante ni detalles técnicos crudos) + visual
+    # premium tipo card que guía al cliente sin asustarlo.
+    st.markdown(
+        """
+        <div style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);
+                    border:1px solid #f59e0b;border-radius:14px;
+                    padding:24px 28px;margin:18px 0;
+                    box-shadow:0 4px 14px rgba(245,158,11,0.18);">
+            <div style="display:flex;align-items:center;gap:12px;
+                        margin-bottom:10px;">
+                <div style="font-size:22px;">🔧</div>
+                <div style="font-size:12px;font-weight:800;letter-spacing:1.5px;
+                            text-transform:uppercase;color:#92400e;">
+                    Componente de adquisición pendiente
+                </div>
+            </div>
+            <div style="font-size:15px;color:#78350f;line-height:1.55;
+                        font-weight:500;margin-bottom:8px;">
+                El módulo de adquisición Watermelon necesario para capturar
+                datos no se completó durante la instalación.
+            </div>
+            <div style="font-size:13px;color:#92400e;line-height:1.5;
+                        margin-top:14px;
+                        background:rgba(255,255,255,0.55);
+                        padding:12px 14px;border-radius:8px;
+                        border-left:3px solid #f59e0b;">
+                <b>Solución:</b> reinstala Watermelon Planta usando el
+                instalador completo más reciente. Si el problema persiste,
+                contacta a soporte: <b>ehernandez@sigasas.com</b>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
     st.stop()
-except Exception as exc:
-    st.error(f"Detección de la maleta falló: {exc}")
+except Exception:
+    # No exponer la excepción cruda al cliente — solo log genérico
+    st.warning(
+        "⚠ No se pudo detectar el equipo de adquisición. "
+        "Verifica que esté conectado por USB y que sus indicadores "
+        "estén encendidos. Si el problema persiste, contacta a soporte."
+    )
     _modules = []
 
 if not _modules:
-    st.warning(
-        "⚠ No se detectó la maleta Watermelon conectada. "
-        "Verifica que esté conectada por USB y que sus indicadores "
-        "estén encendidos. Puedes seguir configurando pero NO podrás "
-        "capturar."
+    st.info(
+        "📡 Equipo de adquisición no detectado. Conecta el equipo "
+        "Watermelon por USB y espera a que los indicadores enciendan. "
+        "Puedes seguir configurando, pero la captura solo funcionará "
+        "con el equipo conectado."
     )
     _installed_slots = set()
     _max_bnc = 32
@@ -82,7 +118,7 @@ else:
     _installed_slots = {m["slot"] for m in _modules}
     _max_bnc = max(m["bnc_range"][1] for m in _modules)
     st.success(
-        f"✓ **Maleta Watermelon conectada** "
+        f"✓ **Equipo Watermelon conectado** "
         f"→ BNC 1..{_max_bnc} disponibles ({_max_bnc} canales)"
     )
 

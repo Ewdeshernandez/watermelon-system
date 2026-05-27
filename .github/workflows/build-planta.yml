@@ -169,8 +169,41 @@ jobs:
             throw "No se encontró Install.exe ni setup.exe en el ISO extraído"
           }
           Write-Host "✓ Driver installer encontrado: $($installer.FullName)"
-          # Copiar el path al GitHub env para que Inno Setup lo pueda leer
-          $relPath = $installer.FullName.Substring((Get-Location).Path.Length + 1)
+
+          # =============================================================
+          # v3.31.256 — CRÍTICO: FLATTEN del directorio extraído.
+          # Algunos ISOs se extraen con un subdirectorio top-level (ej.
+          # 'driver-extracted/nidaqmx_26.3.0/Install.exe'). El installer.iss
+          # busca '{tmp}\driver-installer\Install.exe' en el ROOT — si el
+          # Install.exe está en un subdir, NUNCA se ejecuta y el driver
+          # nunca se instala (sin error visible). Aplanar = mover todo el
+          # contenido del subdir al root de driver-extracted/.
+          # =============================================================
+          $extractRoot = (Get-Item $extractDir).FullName
+          $installerDir = $installer.Directory.FullName
+          if ($installerDir -ne $extractRoot) {
+            Write-Host "Install.exe está en subdir: $installerDir"
+            Write-Host "Aplanando: moviendo contenido a $extractRoot"
+            Get-ChildItem -Path $installerDir -Force | ForEach-Object {
+              $destPath = Join-Path $extractRoot $_.Name
+              if (Test-Path $destPath) {
+                Remove-Item $destPath -Recurse -Force -ErrorAction SilentlyContinue
+              }
+              Move-Item -Path $_.FullName -Destination $extractRoot -Force
+            }
+            # Eliminar el subdir ahora vacío
+            Remove-Item -Path $installerDir -Recurse -Force -ErrorAction SilentlyContinue
+            # Verificar que Install.exe quedó en el root
+            if (-not (Test-Path "$extractRoot\Install.exe")) {
+              throw "Install.exe NO quedó en el root despues del flatten"
+            }
+            Write-Host "✓ Install.exe ahora en root: $extractRoot\Install.exe"
+          } else {
+            Write-Host "✓ Install.exe ya estaba en el root, no hace falta flatten"
+          }
+
+          # Copiar el path al GitHub env (legacy, ya no se usa pero queda)
+          $relPath = "dependencies\driver-extracted\Install.exe"
           echo "DRIVER_INSTALLER_PATH=$relPath" >> $env:GITHUB_ENV
           $totalSize = (Get-ChildItem $extractDir -Recurse | Measure-Object Length -Sum).Sum
           Write-Host "✓ Tamaño total extraído: $([math]::Round($totalSize / 1GB, 2)) GB"

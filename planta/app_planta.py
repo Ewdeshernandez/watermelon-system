@@ -324,57 +324,85 @@ except ImportError:
 _ONBOARD_FLAG = Path(__file__).parent / "data" / ".onboarded.flag"
 
 if not _ONBOARD_FLAG.exists():
+    # v3.31.256 — Onboarding industrial/sobrio (antes amber juguetón).
+    # Estilo coherente con el header SIGA (navy/teal) en vez de naranja.
     st.markdown("""
-    <div style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);
-                border:2px solid #f59e0b;border-radius:12px;
-                padding:24px 28px;margin-bottom:24px;
-                box-shadow:0 4px 14px rgba(245,158,11,0.18);">
-        <div style="display:flex;align-items:center;gap:12px;
-                    margin-bottom:12px;">
-            <span style="font-size:28px;">👋</span>
-            <span style="font-size:20px;font-weight:800;color:#92400e;">
-                ¡Bienvenido a Watermelon Planta Edition!
-            </span>
-        </div>
-        <div style="color:#78350f;font-size:14px;line-height:1.6;
+    <div style="background:linear-gradient(135deg,#f8fafc 0%,#f0fdfa 100%);
+                border:1px solid rgba(15,118,110,0.18);border-radius:14px;
+                padding:24px 28px;margin-bottom:20px;
+                box-shadow:0 2px 8px rgba(15,23,42,0.05);">
+        <div style="display:flex;align-items:center;gap:14px;
                     margin-bottom:14px;">
-            Esta es la <b>primera vez</b> que abres la app.
-            Te dejamos 3 pasos breves para que empieces a capturar
-            análisis modal en menos de 5 minutos.
+            <div style="width:42px;height:42px;border-radius:50%;
+                        background:linear-gradient(135deg,#0f766e 0%,#0d9488 100%);
+                        display:flex;align-items:center;justify-content:center;
+                        color:white;font-size:20px;flex-shrink:0;">✦</div>
+            <div>
+                <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;
+                            text-transform:uppercase;color:#0f766e;">
+                    Primera ejecución
+                </div>
+                <div style="font-size:17px;font-weight:700;color:#0f172a;
+                            margin-top:2px;">
+                    Bienvenido a Watermelon Planta Edition
+                </div>
+            </div>
+        </div>
+        <div style="color:#475569;font-size:13.5px;line-height:1.55;
+                    margin-bottom:16px;">
+            Tres pasos para empezar a capturar análisis modal:
         </div>
         <div style="display:grid;grid-template-columns:repeat(3,1fr);
-                    gap:14px;margin-top:18px;">
-            <div style="background:white;border-radius:10px;padding:14px;
-                        box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-                <div style="font-size:24px;margin-bottom:6px;">🔌</div>
-                <div style="font-weight:700;color:#1f2937;font-size:14px;">
-                    1. Conecta la maleta Watermelon
+                    gap:12px;">
+            <div style="background:white;border:1px solid #e2e8f0;
+                        border-radius:10px;padding:14px;">
+                <div style="display:flex;align-items:center;gap:8px;
+                            margin-bottom:8px;">
+                    <div style="width:22px;height:22px;border-radius:50%;
+                                background:#0f766e;color:white;font-size:11px;
+                                font-weight:700;display:flex;
+                                align-items:center;justify-content:center;">1</div>
+                    <div style="font-weight:700;color:#0f172a;font-size:13.5px;">
+                        Conecta el equipo
+                    </div>
                 </div>
-                <div style="font-size:12px;color:#64748b;margin-top:4px;">
-                    Conecta tu maleta Watermelon al puerto USB.
-                    Espera que el LED de power esté verde.
-                </div>
-            </div>
-            <div style="background:white;border-radius:10px;padding:14px;
-                        box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-                <div style="font-size:24px;margin-bottom:6px;">🎙</div>
-                <div style="font-weight:700;color:#1f2937;font-size:14px;">
-                    2. Captura tu primer ensayo
-                </div>
-                <div style="font-size:12px;color:#64748b;margin-top:4px;">
-                    Elige EMA o OMA abajo. Configura canales.
-                    Click "Iniciar captura".
+                <div style="font-size:12px;color:#64748b;line-height:1.45;">
+                    Conecta el equipo Watermelon al puerto USB y espera a
+                    que los indicadores enciendan.
                 </div>
             </div>
-            <div style="background:white;border-radius:10px;padding:14px;
-                        box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-                <div style="font-size:24px;margin-bottom:6px;">☁</div>
-                <div style="font-weight:700;color:#1f2937;font-size:14px;">
-                    3. Sync al Cloud (opcional)
+            <div style="background:white;border:1px solid #e2e8f0;
+                        border-radius:10px;padding:14px;">
+                <div style="display:flex;align-items:center;gap:8px;
+                            margin-bottom:8px;">
+                    <div style="width:22px;height:22px;border-radius:50%;
+                                background:#0f766e;color:white;font-size:11px;
+                                font-weight:700;display:flex;
+                                align-items:center;justify-content:center;">2</div>
+                    <div style="font-weight:700;color:#0f172a;font-size:13.5px;">
+                        Captura tu ensayo
+                    </div>
                 </div>
-                <div style="font-size:12px;color:#64748b;margin-top:4px;">
-                    Cuando tengas internet, login + "Sync ahora"
-                    para procesar en Watermelon Cloud.
+                <div style="font-size:12px;color:#64748b;line-height:1.45;">
+                    Selecciona modo EMA u OMA, configura los canales y
+                    dispara la adquisición.
+                </div>
+            </div>
+            <div style="background:white;border:1px solid #e2e8f0;
+                        border-radius:10px;padding:14px;">
+                <div style="display:flex;align-items:center;gap:8px;
+                            margin-bottom:8px;">
+                    <div style="width:22px;height:22px;border-radius:50%;
+                                background:#0f766e;color:white;font-size:11px;
+                                font-weight:700;display:flex;
+                                align-items:center;justify-content:center;">3</div>
+                    <div style="font-weight:700;color:#0f172a;font-size:13.5px;">
+                        Sincroniza al Cloud
+                    </div>
+                </div>
+                <div style="font-size:12px;color:#64748b;line-height:1.45;">
+                    Cuando tengas internet, autentícate y sube las capturas
+                    para procesarlas en Watermelon Cloud.
                 </div>
             </div>
         </div>
@@ -383,15 +411,14 @@ if not _ONBOARD_FLAG.exists():
 
     _onb_col1, _onb_col2 = st.columns([3, 1])
     with _onb_col2:
-        if st.button("✓ Entendido", type="primary",
+        if st.button("Entendido", type="primary",
                        use_container_width=True, key="dismiss_onboard"):
             _ONBOARD_FLAG.parent.mkdir(parents=True, exist_ok=True)
             _ONBOARD_FLAG.write_text("dismissed")
             st.rerun()
     with _onb_col1:
         st.caption(
-            "Este mensaje no se mostrará otra vez. Si necesitas ayuda "
-            "después, consulta `README_PLANTA.txt` o contacta soporte@sigasas.com."
+            "Este mensaje no volverá a aparecer. Para soporte: ehernandez@sigasas.com"
         )
     st.divider()
 
@@ -421,17 +448,20 @@ with col2:
         modules = discover_acq_modules("cDAQ1")
         if modules:
             st.success(
-                f"✓ **Maleta Watermelon conectada** "
+                f"✓ **Equipo Watermelon conectado** "
                 f"→ {len(modules)*4} canales disponibles"
             )
         else:
-            st.error("✗ Sin maleta Watermelon conectada — verifica USB")
+            st.warning("⚠ Equipo Watermelon no detectado — verifica USB")
     except ImportError:
-        st.error(
-            "✗ Drivers de adquisición no detectados — corre INSTALAR.bat"
+        # v3.31.256 — Sanitizado. Antes decía "INSTALAR.bat" (concepto
+        # interno) y exponía info que asustaba al cliente final.
+        st.warning(
+            "⚠ Componente de adquisición pendiente — reinstala el instalador "
+            "completo más reciente"
         )
-    except Exception as exc:
-        st.error(f"✗ Error al detectar la maleta: {exc}")
+    except Exception:
+        st.warning("⚠ No se pudo detectar el equipo. Verifica USB y reinicia.")
 
 with col3:
     n_captures = len(list(_CAPTURES_DIR.glob("*.tdms")))
@@ -460,11 +490,11 @@ except Exception:
 
 # Mapa de status a (label, color, dot)
 _DAQ_STATUS = {
-    "ok":           ("Operativo",         "#10b981", "●"),
-    "disconnected": ("Sin maleta",        "#f59e0b", "●"),
-    "no_drivers":   ("Drivers faltantes", "#ef4444", "●"),
-    "error":        ("Error del sistema", "#ef4444", "●"),
-    "down":         ("No disponible",     "#94a3b8", "○"),
+    "ok":           ("Operativo",            "#10b981", "●"),
+    "disconnected": ("Equipo no conectado",  "#f59e0b", "●"),
+    "no_drivers":   ("Componente pendiente", "#f59e0b", "●"),
+    "error":        ("Reinicia el equipo",   "#f59e0b", "●"),
+    "down":         ("No disponible",        "#94a3b8", "○"),
 }
 _lbl, _col, _dot = _DAQ_STATUS[_daq_status]
 
@@ -476,7 +506,7 @@ _dot_class = "wm-pulse-dot" if _daq_status in ("no_drivers", "error") else ""
 _DAQ_HINT = {
     "ok":           f"Listo · {_daq_channels} canales",
     "disconnected": "Conecta por USB",
-    "no_drivers":   "Corre INSTALAR.bat",
+    "no_drivers":   "Reinstala el instalador completo",
     "error":        "Reinicia el equipo",
     "down":         "—",
 }
