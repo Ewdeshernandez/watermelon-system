@@ -401,7 +401,19 @@ def render_sensor_map_diagram(
     n_drv = max(1, len(driver_planes))
     n_dvn = max(1, len(driven_planes))
     drv_w = 2.6 + 0.55 * (n_drv - 1)
-    dvn_w = 2.6 + 0.55 * (n_dvn - 1)
+    # Ciclo 17.5.17 (v3.31.253) — Para recip compressors necesitamos
+    # más ancho: 2 columnas de cilindros + 2 bearings a los extremos del
+    # cigüeñal. Sin esto, las cajas de cilindros y los bearings se
+    # amontonan en el centro del diagrama.
+    _is_recip_driven_pre = any(
+        ("cilindro" in str(s.get("plane_label", "")).lower() or
+         "cylinder" in str(s.get("plane_label", "")).lower())
+        for s in sensors if int(s.get("plane", 0)) in driven_planes
+    )
+    if _is_recip_driven_pre:
+        dvn_w = 5.2 + 0.40 * max(0, n_dvn - 4)
+    else:
+        dvn_w = 2.6 + 0.55 * (n_dvn - 1)
     coupling_w = 0.55
     total_w = drv_w + coupling_w + dvn_w
     x_start = 5.0 - total_w / 2.0  # centrar
@@ -589,48 +601,74 @@ def render_sensor_map_diagram(
     dvn_top_y = rotor_y + 1.50  # default para etiqueta
 
     if dvn_kind_resolved == "recip_compressor":
-        # --- Compresor reciprocante MINIMAL:
-        #     Caja central con cigüeñal + 2 cajas arriba (1, 3) + 2 cajas
-        #     abajo (2, 4). Pedido explícitamente por el usuario.
-        # Ciclo 17.5.16 — diseño simple, sin cilindros horizontales.
+        # --- Compresor reciprocante con ASIGNACIÓN SEMÁNTICA:
+        #     Caja central con cigüeñal + 2 bearings a los EXTREMOS del
+        #     cigüeñal (DE/NDE) + cajas de cilindros arriba/abajo con
+        #     DATA REAL de su plano.
+        # Ciclo 17.5.17 (v3.31.253) — refactor: el anterior dibujo
+        # tenía las cajas de cilindros como DECORATIVAS (labels "1","2",
+        # "3","4" hardcoded) y los bearings se dibujaban con loop
+        # ordinal en la línea central, AMONTONADOS sobre el cigüeñal.
+        # Ahora cada plano se clasifica por su plane_label:
+        #   - "Cilindro N" / "Cylinder N" → caja vertical del cilindro N
+        #   - "Cigüeñal" / "Crankshaft"   → bearing a un extremo del
+        #     crankcase (DE = acople, NDE = libre)
 
-        # ---------- Detectar cuántos cilindros hay ----------
-        # Ciclo 17.36 (v3.31.251) — antes contábamos planos únicos donde
-        # aparecía "cilindro", pero eso fallaba en compresores donde varios
-        # cilindros comparten un plano (Ariel KBK/4: 4 cilindros en 2-3
-        # planos → contaba 2 en lugar de 4). Ahora extraemos el NÚMERO de
-        # cilindro del label (regex "Cilindro N" / "Cylinder N") y usamos
-        # el máximo encontrado como n_cyl real.
         import re as _re_cyl
-        _cyl_numbers = set()
-        for s in sensors:
-            if int(s.get("plane", 0)) in driven_planes:
-                _plane_label_lc = str(s.get("plane_label", "")).lower()
-                if "cilindro" in _plane_label_lc or "cylinder" in _plane_label_lc:
-                    _match = _re_cyl.search(r"(?:cilindro|cylinder)\s*(\d+)",
-                                              _plane_label_lc)
-                    if _match:
-                        _cyl_numbers.add(int(_match.group(1)))
-        if _cyl_numbers:
-            # Usar el número máximo encontrado (e.g. si vemos "Cilindro 4",
-            # el compresor tiene al menos 4 cilindros).
-            n_cyl = max(_cyl_numbers)
+
+        # ---------- Clasificación semántica plano→rol ----------
+        # _recip_role[plane_num] = ("cyl", N) | ("bearing", "DE"|"NDE"|None)
+        _recip_role: dict = {}
+        for _p in driven_planes:
+            _p_sensors = [s for s in sensors if int(s.get("plane", 0)) == _p]
+            _p_labels = " | ".join(
+                str(s.get("plane_label", "")).lower() for s in _p_sensors
+            )
+            _m_cyl = _re_cyl.search(r"(?:cilindro|cylinder)\s*(\d+)", _p_labels)
+            if _m_cyl:
+                _recip_role[_p] = ("cyl", int(_m_cyl.group(1)))
+                continue
+            # Bearing — intentar inferir el lado
+            _side = None
+            if any(k in _p_labels for k in ["acople", "coupling", "(de)", " de "]):
+                _side = "DE"
+            elif any(k in _p_labels for k in ["libre", "outboard", "(nde)", " nde"]):
+                _side = "NDE"
+            _recip_role[_p] = ("bearing", _side)
+
+        # Resolver bearings sin lado: el plano de menor número = DE
+        # (más cerca del coupling con driver a la izquierda); el mayor
+        # = NDE (extremo libre).
+        _unresolved = sorted([
+            p for p, (k, side) in _recip_role.items()
+            if k == "bearing" and side is None
+        ])
+        _has_de = any(
+            s == "DE" for k, s in _recip_role.values() if k == "bearing"
+        )
+        _has_nde = any(
+            s == "NDE" for k, s in _recip_role.values() if k == "bearing"
+        )
+        if _unresolved and not _has_de:
+            _recip_role[_unresolved[0]] = ("bearing", "DE")
+            _unresolved = _unresolved[1:]
+        if _unresolved and not _has_nde:
+            _recip_role[_unresolved[-1]] = ("bearing", "NDE")
+            _unresolved = _unresolved[:-1]
+
+        # Detectar n_cyl real (máximo cilindro numerado, fallback a 4)
+        _cyl_assignments = {
+            n: p for p, (k, n) in _recip_role.items() if k == "cyl"
+        }
+        if _cyl_assignments:
+            n_cyl = max(max(_cyl_assignments.keys()), 1)
         else:
-            # Fallback: heurística por planos (lógica legacy).
-            cyl_planes = sorted({
-                int(s.get("plane", 0))
-                for s in sensors
-                if int(s.get("plane", 0)) in driven_planes
-            })
-            if not cyl_planes and len(driven_planes) >= 3:
-                cyl_planes = list(driven_planes[1:-1])
-            n_cyl = max(1, len(cyl_planes))
-        # Clamp razonable — un recip compressor típico es 1, 2, 3, 4, 6 u 8 cyl.
+            n_cyl = 4  # default razonable
         n_cyl = max(1, min(n_cyl, 8))
 
         # ---------- Caja central horizontal con cigüeñal ----------
         crank_h = 0.55
-        crank_pad = 0.30
+        crank_pad = 0.55  # más espacio para los bearings a los extremos
         crank_left = dvn_left + crank_pad
         crank_right = dvn_right - crank_pad
         crank_w = crank_right - crank_left
@@ -658,28 +696,29 @@ def render_sensor_map_diagram(
                     [rotor_y - cs_r * 0.78, rotor_y + cs_r * 0.78],
                     color="white", linewidth=1.6, alpha=0.95, zorder=4)
         ax_top.text(
-            cs_cx, rotor_y - crank_h - 0.10, "cigüeñal",
-            fontsize=8, fontstyle="italic",
-            color=_COLOR_DRIVEN, ha="center", va="top",
-            alpha=0.85, zorder=4,
+            cs_cx, rotor_y + 0.05, "cigüeñal",
+            fontsize=7, fontstyle="italic",
+            color=_COLOR_DRIVEN, ha="center", va="bottom",
+            alpha=0.75, zorder=4,
         )
 
-        # ---------- 2 cajas arriba + 2 cajas abajo ----------
-        # box dimensions
-        box_w = min(0.85, crank_w / 3.2)
-        box_h = 0.55
-        gap = 0.22
+        # ---------- Cajas de cilindros (con DATA real) ----------
+        # box dimensions — más altas para acomodar header + valores
+        box_w = min(1.45, crank_w / 2.3)
+        box_h = 1.00
+        gap = 0.35
 
         # Posiciones X: una a la izquierda y otra a la derecha del
         # cigüeñal central
-        x_left  = crank_left + crank_w * 0.22 - box_w / 2.0
-        x_right = crank_left + crank_w * 0.78 - box_w / 2.0
+        x_left  = crank_left + crank_w * 0.30 - box_w / 2.0
+        x_right = crank_left + crank_w * 0.70 - box_w / 2.0
 
         # Posiciones Y
         y_top = rotor_y + crank_h + gap
         y_bot = rotor_y - crank_h - gap - box_h
 
-        def _draw_cyl_box(x_left_box: float, y_btm: float, label: str) -> None:
+        def _draw_cyl_box(x_left_box: float, y_btm: float, cyl_n: int,
+                          data_plane=None) -> None:
             # Vástago/conector entre el crankcase y la caja
             stem_x = x_left_box + box_w / 2.0
             if y_btm > rotor_y:  # caja arriba
@@ -694,40 +733,138 @@ def render_sensor_map_diagram(
                     [y_btm + box_h, rotor_y - crank_h],
                     color=_COLOR_DRIVEN, linewidth=1.4, alpha=0.55, zorder=2,
                 )
-            # Caja con borde
-            ax_top.add_patch(mpatches.FancyBboxPatch(
-                (x_left_box, y_btm),
-                box_w, box_h,
-                boxstyle="round,pad=0.01,rounding_size=0.04",
-                facecolor=_COLOR_DRIVEN, alpha=0.34,
-                edgecolor=_COLOR_DRIVEN, linewidth=1.7, zorder=3,
-            ))
-            # Número del cilindro grande en el centro
+
+            # Color de fondo según peor severidad del plano
+            if data_plane is not None and severity_by_label:
+                _plane_s = [
+                    s for s in sensors
+                    if int(s.get("plane", 0)) == data_plane
+                ]
+                _worst = _worst_status_for_plane(_plane_s, severity_by_label)
+                _face = _COLOR_SEVERITY.get(_worst, "white")
+            else:
+                _face = "white"
+
+            # Caja con borde — si hay severidad, fondo coloreado
+            if _face != "white":
+                ax_top.add_patch(mpatches.FancyBboxPatch(
+                    (x_left_box, y_btm),
+                    box_w, box_h,
+                    boxstyle="round,pad=0.01,rounding_size=0.04",
+                    facecolor=_face, alpha=0.85,
+                    edgecolor=_COLOR_DRIVEN, linewidth=1.7, zorder=3,
+                ))
+                _text_color = "white"
+                _val_color_override = "white"
+            else:
+                ax_top.add_patch(mpatches.FancyBboxPatch(
+                    (x_left_box, y_btm),
+                    box_w, box_h,
+                    boxstyle="round,pad=0.01,rounding_size=0.04",
+                    facecolor=_COLOR_DRIVEN, alpha=0.20,
+                    edgecolor=_COLOR_DRIVEN, linewidth=1.7, zorder=3,
+                ))
+                _text_color = _COLOR_DRIVEN
+                _val_color_override = None
+
+            # Header: "Cil N · P{plane}"
+            header = f"Cil {cyl_n}"
+            if data_plane is not None:
+                header += f" · P{data_plane}"
             ax_top.text(
-                stem_x, y_btm + box_h / 2.0, label,
-                fontsize=15, fontweight="bold",
-                color=_COLOR_DRIVEN, ha="center", va="center",
-                zorder=5,
+                stem_x, y_btm + box_h - 0.08, header,
+                fontsize=8.5, fontweight="bold",
+                color=_text_color, ha="center", va="top", zorder=5,
             )
 
-        # Asignación según N (siempre 1,3 arriba; 2,4 abajo)
-        if n_cyl >= 4:
-            _draw_cyl_box(x_left,  y_top, "1")
-            _draw_cyl_box(x_left,  y_bot, "2")
-            _draw_cyl_box(x_right, y_top, "3")
-            _draw_cyl_box(x_right, y_bot, "4")
-        elif n_cyl == 3:
-            _draw_cyl_box(x_left,  y_top, "1")
-            _draw_cyl_box(x_left,  y_bot, "2")
-            _draw_cyl_box(x_right, y_top, "3")
-        elif n_cyl == 2:
-            _draw_cyl_box(x_left,  y_top, "1")
-            _draw_cyl_box(x_right, y_top, "2")
-        else:  # n_cyl == 1
-            _draw_cyl_box(cs_cx - box_w / 2.0, y_top, "1")
+            # Valores de sensores del plano (uno por línea)
+            if data_plane is not None and overall_by_label:
+                from core.sensor_map import sensor_label as _slabel
+                _plane_box_s = [
+                    s for s in sensors
+                    if int(s.get("plane", 0)) == data_plane
+                ]
+                _lines = []
+                for s in _plane_box_s:
+                    if str(s.get("sensor_type", "")).lower() == "keyphasor":
+                        continue
+                    lbl = _slabel(s)
+                    ov = overall_by_label.get(lbl)
+                    if ov is None:
+                        continue
+                    unit = ""
+                    if unit_by_label and lbl in unit_by_label:
+                        unit = str(unit_by_label[lbl] or "").strip()
+                    if _val_color_override is not None:
+                        vc = _val_color_override
+                    elif severity_by_label and lbl in severity_by_label:
+                        sv = severity_by_label[lbl]
+                        vc = _COLOR_SEVERITY.get(sv, _COLOR_TEXT)
+                    else:
+                        vc = _COLOR_TEXT
+                    try:
+                        ov_f = float(ov)
+                    except Exception:
+                        ov_f = 0.0
+                    txt = f"{lbl}: {ov_f:.2f}"
+                    if unit:
+                        txt += f" {unit}"
+                    _lines.append((txt, vc))
+
+                _line_y = y_btm + box_h - 0.26
+                for txt, vc in _lines[:4]:
+                    ax_top.text(
+                        stem_x, _line_y, txt,
+                        fontsize=6.2, ha="center", va="top",
+                        color=vc, fontweight="bold", zorder=5,
+                    )
+                    _line_y -= 0.13
+            elif data_plane is None:
+                # Sin data — solo el número grande (slot vacío)
+                ax_top.text(
+                    stem_x, y_btm + box_h / 2.0, str(cyl_n),
+                    fontsize=15, fontweight="bold",
+                    color=_text_color, ha="center", va="center",
+                    alpha=0.45, zorder=5,
+                )
+
+        # Mapa de posiciones físicas por número de cilindro
+        # Convención: 1,2 lado coupling (izquierda); 3,4 lado libre (derecha)
+        # 1,3 arriba; 2,4 abajo
+        _cyl_positions = {
+            1: (x_left,  y_top),
+            2: (x_left,  y_bot),
+            3: (x_right, y_top),
+            4: (x_right, y_bot),
+        }
+
+        # Dibujar TODOS los cilindros (1..min(n_cyl,4)) — con data
+        # si tenemos asignación; sin data (slot vacío) si no.
+        for _cyl_n in range(1, min(n_cyl, 4) + 1):
+            if _cyl_n in _cyl_positions:
+                _bx, _by = _cyl_positions[_cyl_n]
+                _data_plane = _cyl_assignments.get(_cyl_n)
+                _draw_cyl_box(_bx, _by, _cyl_n, data_plane=_data_plane)
+
+        # ---------- Posiciones de bearings DE/NDE (a los extremos
+        #            del crankcase) ----------
+        # Estas posiciones se pasan al loop de bearings al final para
+        # NO usar el espaciado ordinal genérico (que amontonaba sobre
+        # el cigüeñal). Las llaves son los plane_num correspondientes.
+        recip_bearing_positions = {}
+        for _p, (_k, _side) in _recip_role.items():
+            if _k == "bearing":
+                if _side == "DE":
+                    recip_bearing_positions[_p] = crank_left
+                elif _side == "NDE":
+                    recip_bearing_positions[_p] = crank_right
+        # Cualquier bearing aún no posicionado va al centro inferior
+        for _p, (_k, _side) in _recip_role.items():
+            if _k == "bearing" and _p not in recip_bearing_positions:
+                recip_bearing_positions[_p] = cs_cx
 
         # Etiqueta del driven arriba de las cajas superiores
-        dvn_top_y = y_top + box_h + 0.20
+        dvn_top_y = y_top + box_h + 0.25
 
     elif dvn_kind_resolved == "centrif_compressor":
         # --- Compresor centrífugo: voluta tipo snail
@@ -945,9 +1082,23 @@ def render_sensor_map_diagram(
         _draw_bearing(p, bx)
 
     # Cojinetes del driven
-    for i, p in enumerate(driven_planes):
-        bx = dvn_x + (i + 0.5) * (dvn_w / n_dvn)
-        _draw_bearing(p, bx)
+    # Ciclo 17.5.17 (v3.31.253) — Para recip compressors, los bearings
+    # van a los EXTREMOS del cigüeñal (no espaciados ordinalmente sobre
+    # el centro). Los planos clasificados como cilindros NO se dibujan
+    # aquí — ya están en sus cajas verticales arriba/abajo.
+    _recip_bearing_positions_local = locals().get(
+        "recip_bearing_positions", None
+    )
+    if (dvn_kind_resolved == "recip_compressor"
+            and _recip_bearing_positions_local):
+        # Solo dibujar los planos que están clasificados como bearings.
+        # Los cilindros ya fueron renderizados como cajas con data.
+        for p, bx in _recip_bearing_positions_local.items():
+            _draw_bearing(p, bx)
+    else:
+        for i, p in enumerate(driven_planes):
+            bx = dvn_x + (i + 0.5) * (dvn_w / n_dvn)
+            _draw_bearing(p, bx)
 
     # Coupling label
     ax_top.text(coup_x, rotor_y - 1.10, "Coupling", fontsize=7, ha="center", va="top",
