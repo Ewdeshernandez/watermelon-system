@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -554,6 +554,11 @@ def verify_license(token_path: Optional[Path] = None) -> LicenseInfo:
 def render_license_blocker(info: LicenseInfo) -> None:
     """
     Pantalla bloqueante cuando la licencia es inválida.
+
+    v3.31.255 — Rediseño completo clase mundial (tipo Adobe/Autodesk).
+    Hero card con gradient, logo SVG, mensaje claro, ruta del archivo
+    y contacto. Sin st.error feo, sin markdown crudo.
+
     Llamar al inicio de app_planta.py:
 
         info = verify_license()
@@ -562,25 +567,219 @@ def render_license_blocker(info: LicenseInfo) -> None:
             st.stop()
     """
     import streamlit as st
+    import html as _html
 
     expected_path = get_license_path()
 
-    st.error("Licencia no válida — Watermelon Planta bloqueado")
-    st.markdown(f"### {info.error_reason}")
-
-    st.markdown("---")
-
-    st.markdown("#### ¿Dónde poner el archivo `license.token`?")
-    st.code(str(expected_path), language="text")
-
-    st.markdown("#### ¿No tienes tu licencia?")
+    # Ocultar TODO el chrome de Streamlit en esta pantalla — solo el card
     st.markdown(
         """
-- **Cliente nuevo:** Contacta a SIGA GROUP para tu cotización y licencia.
-- **Cliente existente:** Revisa tu email — la licencia fue enviada como
-  archivo adjunto llamado `license.token`.
-- **Soporte técnico:** ehernandez@sigasas.com
-        """
+        <style>
+            [data-testid="stHeader"] {display: none !important;}
+            [data-testid="stToolbar"] {display: none !important;}
+            section[data-testid="stSidebar"] {display: none !important;}
+            .block-container {
+                max-width: 720px !important;
+                padding-top: 4rem !important;
+                padding-bottom: 2rem !important;
+            }
+            footer {visibility: hidden !important;}
+            #MainMenu {visibility: hidden !important;}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    _reason = _html.escape(info.error_reason or "Licencia no encontrada o inválida")
+    _path = _html.escape(str(expected_path))
+
+    st.markdown(
+        f"""
+        <div style="
+            background:linear-gradient(135deg,#1e3a8a 0%,#1e40af 45%,#0f766e 100%);
+            border-radius:20px;
+            padding:40px 44px 36px;
+            color:white;
+            box-shadow:0 12px 40px rgba(15,118,110,0.28),
+                       0 4px 16px rgba(30,58,138,0.22);
+            position:relative;
+            overflow:hidden;
+            margin-bottom:24px;">
+            <!-- Pattern decorativo -->
+            <div style="position:absolute;top:-60px;right:-60px;
+                        width:240px;height:240px;border-radius:50%;
+                        background:radial-gradient(circle,
+                                                    rgba(255,255,255,0.10) 0%,
+                                                    rgba(255,255,255,0) 70%);
+                        pointer-events:none;"></div>
+            <!-- Logo + título -->
+            <div style="display:flex;align-items:center;gap:18px;
+                        position:relative;margin-bottom:24px;">
+                <svg width="48" height="48" viewBox="0 0 256 256"
+                     xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;">
+                    <defs>
+                        <linearGradient id="wmg" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stop-color="#f97316"/>
+                            <stop offset="100%" stop-color="#ef4444"/>
+                        </linearGradient>
+                    </defs>
+                    <circle cx="128" cy="128" r="100"
+                            fill="url(#wmg)" opacity="0.95"/>
+                    <circle cx="128" cy="128" r="100"
+                            fill="none" stroke="white"
+                            stroke-width="6" opacity="0.85"/>
+                    <path d="M48 128 Q128 60 208 128"
+                          fill="none" stroke="white"
+                          stroke-width="5" opacity="0.7"/>
+                </svg>
+                <div>
+                    <div style="font-size:22px;font-weight:800;
+                                letter-spacing:-0.3px;line-height:1.1;">
+                        Watermelon Planta Edition
+                    </div>
+                    <div style="font-size:12px;opacity:0.75;
+                                letter-spacing:1.2px;text-transform:uppercase;
+                                margin-top:4px;font-weight:600;">
+                        SIGA GROUP · Análisis de Vibraciones Industrial
+                    </div>
+                </div>
+            </div>
+            <!-- Mensaje principal -->
+            <div style="background:rgba(0,0,0,0.18);
+                        border:1px solid rgba(255,255,255,0.12);
+                        border-radius:12px;padding:20px 22px;
+                        position:relative;">
+                <div style="display:flex;align-items:center;gap:10px;
+                            margin-bottom:8px;">
+                    <div style="width:10px;height:10px;border-radius:50%;
+                                background:#fbbf24;
+                                box-shadow:0 0 12px rgba(251,191,36,0.6);"></div>
+                    <div style="font-size:11px;font-weight:700;
+                                letter-spacing:1.8px;text-transform:uppercase;
+                                color:#fbbf24;">
+                        Acceso bloqueado · Licencia requerida
+                    </div>
+                </div>
+                <div style="font-size:16px;font-weight:600;line-height:1.45;
+                            color:white;">
+                    {_reason}
+                </div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Card de instrucciones
+    st.markdown(
+        f"""
+        <div style="
+            background:white;
+            border:1px solid #e2e8f0;
+            border-radius:14px;
+            padding:24px 26px;
+            box-shadow:0 1px 3px rgba(0,0,0,0.04),
+                       0 4px 12px rgba(15,23,42,0.05);
+            margin-bottom:18px;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;
+                        text-transform:uppercase;color:#0f766e;
+                        margin-bottom:14px;">
+                Activar licencia
+            </div>
+            <div style="font-size:15px;color:#0f172a;line-height:1.55;
+                        margin-bottom:18px;font-weight:500;">
+                Copia tu archivo <code style="background:#f1f5f9;
+                padding:2px 7px;border-radius:5px;font-size:13px;
+                color:#0f766e;font-weight:600;">license.token</code>
+                en la siguiente ubicación y reinicia la aplicación:
+            </div>
+            <div style="background:#0f172a;color:#5eead4;
+                        padding:14px 18px;border-radius:10px;
+                        font-family:'SF Mono','Consolas','Monaco',monospace;
+                        font-size:13px;word-break:break-all;
+                        border-left:3px solid #14b8a6;">
+                {_path}
+            </div>
+        </div>
+
+        <div style="
+            background:#f8fafc;
+            border:1px solid #e2e8f0;
+            border-radius:14px;
+            padding:22px 26px;">
+            <div style="font-size:11px;font-weight:700;letter-spacing:1.5px;
+                        text-transform:uppercase;color:#475569;
+                        margin-bottom:14px;">
+                ¿Necesitas ayuda?
+            </div>
+            <div style="display:grid;grid-template-columns:1fr;gap:12px;">
+                <div style="display:flex;align-items:flex-start;gap:12px;
+                            padding:12px 14px;background:white;
+                            border:1px solid #e2e8f0;border-radius:10px;">
+                    <div style="font-size:18px;flex-shrink:0;">📧</div>
+                    <div>
+                        <div style="font-size:11px;color:#64748b;
+                                    font-weight:600;letter-spacing:0.5px;
+                                    text-transform:uppercase;">
+                            Soporte técnico
+                        </div>
+                        <div style="font-size:14px;color:#0f172a;
+                                    font-weight:600;margin-top:2px;">
+                            <a href="mailto:ehernandez@sigasas.com"
+                               style="color:#0f766e;text-decoration:none;">
+                                ehernandez@sigasas.com
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex;align-items:flex-start;gap:12px;
+                            padding:12px 14px;background:white;
+                            border:1px solid #e2e8f0;border-radius:10px;">
+                    <div style="font-size:18px;flex-shrink:0;">🏢</div>
+                    <div>
+                        <div style="font-size:11px;color:#64748b;
+                                    font-weight:600;letter-spacing:0.5px;
+                                    text-transform:uppercase;">
+                            Cliente nuevo
+                        </div>
+                        <div style="font-size:14px;color:#0f172a;
+                                    margin-top:2px;line-height:1.45;">
+                            Contacta a SIGA GROUP para tu cotización y la
+                            generación de tu licencia personalizada.
+                        </div>
+                    </div>
+                </div>
+                <div style="display:flex;align-items:flex-start;gap:12px;
+                            padding:12px 14px;background:white;
+                            border:1px solid #e2e8f0;border-radius:10px;">
+                    <div style="font-size:18px;flex-shrink:0;">📨</div>
+                    <div>
+                        <div style="font-size:11px;color:#64748b;
+                                    font-weight:600;letter-spacing:0.5px;
+                                    text-transform:uppercase;">
+                            Cliente existente
+                        </div>
+                        <div style="font-size:14px;color:#0f172a;
+                                    margin-top:2px;line-height:1.45;">
+                            Revisa tu correo — la licencia fue enviada como
+                            archivo adjunto llamado
+                            <code style="background:#f1f5f9;padding:1px 6px;
+                            border-radius:4px;font-size:12px;color:#0f766e;
+                            font-weight:600;">license.token</code>.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align:center;margin-top:24px;
+                    font-size:11px;color:#94a3b8;
+                    letter-spacing:1.2px;text-transform:uppercase;
+                    font-weight:600;">
+            © SIGA GROUP S.A.S · Watermelon System
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
 
