@@ -276,30 +276,63 @@ jobs:
           echo "  Size:  $FILESIZE_MB MB ($FILESIZE_BYTES bytes)"
           echo "============================================"
 
-          # 1) Upload del .exe al bucket privado
+          # 1) Upload del .exe al bucket privado — con retry + backoff
+          # v3.31.257 — Supabase Storage devuelve HTTP 502 inconsistente
+          # en uploads de 3.5 GB (timeout del gateway). Reintentamos 4
+          # veces con backoff exponencial: 30s, 60s, 120s, 240s.
           UPLOAD_URL="${SUPABASE_URL}/storage/v1/object/watermelon-planta-deps/installers/${FILENAME}"
-          echo "Subiendo a Supabase Storage..."
-          HTTP_CODE=$(curl --silent --show-error \
-            --write-out "%{http_code}" \
-            --output /tmp/upload_response.json \
-            -X POST \
-            -H "Authorization: Bearer ${SUPABASE_KEY}" \
-            -H "apikey: ${SUPABASE_KEY}" \
-            -H "Content-Type: application/octet-stream" \
-            -H "x-upsert: true" \
-            --data-binary "@${SETUP_PATH}" \
-            "${UPLOAD_URL}")
+          HTTP_CODE=""
+          UPLOAD_OK="false"
 
-          echo "HTTP code: $HTTP_CODE"
-          echo "Response body:"
-          cat /tmp/upload_response.json
-          echo ""
+          for ATTEMPT in 1 2 3 4; do
+            echo ""
+            echo "============================================"
+            echo "  Upload attempt $ATTEMPT of 4"
+            echo "============================================"
+            START_TS=$(date +%s)
 
-          if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
-            echo "ERROR: Upload falló con HTTP $HTTP_CODE"
+            HTTP_CODE=$(curl --silent --show-error \
+              --write-out "%{http_code}" \
+              --output /tmp/upload_response.json \
+              --connect-timeout 30 \
+              --max-time 1800 \
+              --tcp-nodelay \
+              -X POST \
+              -H "Authorization: Bearer ${SUPABASE_KEY}" \
+              -H "apikey: ${SUPABASE_KEY}" \
+              -H "Content-Type: application/octet-stream" \
+              -H "x-upsert: true" \
+              --data-binary "@${SETUP_PATH}" \
+              "${UPLOAD_URL}") || HTTP_CODE="000"
+
+            END_TS=$(date +%s)
+            ELAPSED=$((END_TS - START_TS))
+
+            echo "HTTP code: $HTTP_CODE (elapsed ${ELAPSED}s)"
+            echo "Response body:"
+            cat /tmp/upload_response.json 2>/dev/null || echo "(empty)"
+            echo ""
+
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+              UPLOAD_OK="true"
+              echo "✓ Upload OK en intento $ATTEMPT"
+              break
+            fi
+
+            if [ "$ATTEMPT" -lt 4 ]; then
+              # Backoff exponencial: 30, 60, 120 segundos
+              SLEEP_SEC=$((30 * (2 ** (ATTEMPT - 1))))
+              echo "✗ Fallo HTTP $HTTP_CODE. Reintentando en ${SLEEP_SEC}s..."
+              sleep $SLEEP_SEC
+            fi
+          done
+
+          if [ "$UPLOAD_OK" != "true" ]; then
+            echo "ERROR: Upload falló con HTTP $HTTP_CODE después de 4 intentos"
+            echo "Esto puede ser un problema temporal de Supabase Storage."
+            echo "Re-correr el workflow puede ayudar (Re-run all jobs)."
             exit 1
           fi
-          echo "✓ Upload OK"
 
           # 2) Generar signed URL válida 90 días
           SIGN_URL="${SUPABASE_URL}/storage/v1/object/sign/watermelon-planta-deps/installers/${FILENAME}"
