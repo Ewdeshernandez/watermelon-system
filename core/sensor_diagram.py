@@ -992,7 +992,10 @@ def render_sensor_map_diagram(
         return "white" if face != "white" else _COLOR_BEARING
 
     # Helper: dibuja un cojinete + numero + chips de tipo + label de plano.
-    def _draw_bearing(plane_num: int, bx: float):
+    # Ciclo 17.38 (v3.31.254) — skip_plane_label: para bearings recip
+    # (cigüeñal DE/NDE) la posición física ya implica el rol, no
+    # necesitamos el label largo que amontona el SVG.
+    def _draw_bearing(plane_num: int, bx: float, skip_plane_label: bool = False):
         face = _bearing_facecolor_for_plane(plane_num)
         ax_top.add_patch(mpatches.Circle(
             (bx, rotor_y), bearing_radius, facecolor=face,
@@ -1028,13 +1031,16 @@ def render_sensor_map_diagram(
         else:
             label_y_top = rotor_y - bearing_radius - 0.10
 
-        # Plane label normalizada (sin tokens del tipo de sensor)
-        plane_lbl = _plane_display_label(plane_sensors)
-        if plane_lbl:
-            ax_top.text(bx, label_y_top, plane_lbl,
-                        fontsize=7.2, ha="center", va="top",
-                        color=_COLOR_TEXT, alpha=0.85, fontweight="bold")
-            label_y_top -= 0.18
+        # Plane label normalizada (sin tokens del tipo de sensor).
+        # Para recip bearings (cigüeñal DE/NDE) se omite porque la
+        # posición física a los extremos del crankcase ya implica el rol.
+        if not skip_plane_label:
+            plane_lbl = _plane_display_label(plane_sensors)
+            if plane_lbl:
+                ax_top.text(bx, label_y_top, plane_lbl,
+                            fontsize=7.2, ha="center", va="top",
+                            color=_COLOR_TEXT, alpha=0.85, fontweight="bold")
+                label_y_top -= 0.18
 
         # Ciclo 15.2.1 — listar TODOS los sensores del plano con sus
         # valores Overall coloreados por severidad propia. Asi en TRF/CRF
@@ -1093,8 +1099,11 @@ def render_sensor_map_diagram(
             and _recip_bearing_positions_local):
         # Solo dibujar los planos que están clasificados como bearings.
         # Los cilindros ya fueron renderizados como cajas con data.
+        # skip_plane_label=True para no amontonar texto largo del label
+        # ("Cigüeñal Compresor") sobre las cajas de cilindros vecinas;
+        # la posición física (extremo del crank) ya implica el rol.
         for p, bx in _recip_bearing_positions_local.items():
-            _draw_bearing(p, bx)
+            _draw_bearing(p, bx, skip_plane_label=True)
     else:
         for i, p in enumerate(driven_planes):
             bx = dvn_x + (i + 0.5) * (dvn_w / n_dvn)

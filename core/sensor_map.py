@@ -503,6 +503,18 @@ def resolve_sensor_for_point(
             if lbl in point_norm:
                 return sensor
 
+        # 1b. (Ciclo 17.38 / v3.31.254) — Substring del label COMPACTO
+        # sin underscore. sensor_label() devuelve "6Y_A" / "8Y_V" pero
+        # los Point names del CSV usan el formato compacto "6YA"/"8YV"
+        # (ej. "6YA Compresor", "8YV Compresor"). Esto resuelve el caso
+        # C200C Parex donde planes 6/7/8 y 2YV caían al fallback que
+        # los asignaba al sensor equivocado, dejando esos planos en
+        # gris/sin-datos en el Machine Map aunque Tabular sí tenía data.
+        for sensor in candidates:
+            lbl_compact = sensor_label(sensor).lower().replace("_", "")
+            if lbl_compact and lbl_compact in point_norm:
+                return sensor
+
         # 2. Substring del plane_label completo (ej. "TRF (LM6000)")
         for sensor in candidates:
             plbl = _normalize_for_match(sensor.get("plane_label", ""))
