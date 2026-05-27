@@ -344,6 +344,13 @@ def _pattern_matches(pattern_text: str, target_norm: str) -> bool:
     - Si pattern_text tiene comas, se splitea y matchea CUALQUIERA (OR).
     - Si una entrada contiene ``*`` o ``?``, se usa fnmatch (glob).
     - Si no, se usa substring case-insensitive.
+    - Ciclo 17.37 (v3.31.252) — FALLBACK orden-independiente: si el
+      substring directo falla y el pattern tiene 2+ palabras, chequea
+      que TODAS las palabras del pattern estén presentes en el target
+      (sin importar el orden). Resuelve el caso real C200C Parex donde
+      pattern='1YA NDE motor' y Point del CSV='1YA Motor NDE' — mismas
+      palabras, orden distinto. Antes fallaba el substring directo y
+      caía a tie-break por tokens que asignaba sensores al equivocado.
     """
     if not pattern_text:
         return False
@@ -355,8 +362,18 @@ def _pattern_matches(pattern_text: str, target_norm: str) -> bool:
             if fnmatch.fnmatch(target_norm, token):
                 return True
         else:
+            # Match #1: substring directo (orden importa)
             if token in target_norm:
                 return True
+            # Match #2 (v3.31.252): todas las palabras del pattern en
+            # el target, independiente del orden. Solo activo si el
+            # pattern tiene 2+ palabras (un pattern de 1 palabra ya
+            # cubre el caso con el substring directo de arriba).
+            pattern_words = [w for w in re.split(r"\s+", token) if w]
+            if len(pattern_words) >= 2:
+                target_words_set = set(re.split(r"\s+", target_norm))
+                if all(pw in target_words_set for pw in pattern_words):
+                    return True
     return False
 
 
