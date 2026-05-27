@@ -114,15 +114,34 @@ _SENSOR_TYPE_TOKENS_TO_STRIP = (
 
 
 def _normalize_plane_label(raw: str) -> str:
-    """Quita tokens de tipo de sensor y normaliza espacios."""
+    """Quita tokens de tipo de sensor y normaliza espacios.
+
+    Ciclo 17.40 (v3.31.258) — También strippea:
+      - El prefijo del sensor ID ('1YV', '2YA', '6Y_V') porque ya
+        aparece arriba del bearing y en los renglones de valores.
+      - Palabras genéricas del equipo ('motor', 'compresor', 'compressor',
+        'generador', 'turbina') que se repiten en cada bearing del
+        mismo lado y amontonan el SVG.
+    """
+    import re as _re_lbl
     txt = (raw or "").strip()
     if not txt:
         return ""
+    # Quitar prefijo del sensor ID si está al inicio: '1YV ', '2YA ',
+    # '6Y_V ', '3X_A ', etc.
+    txt = _re_lbl.sub(r"^\d+[xy]?_?[avdr]\s+", "", txt, flags=_re_lbl.IGNORECASE)
     # Comparar tokens en lowercase pero conservar el casing original.
     parts = txt.split()
     keep = []
+    _GENERIC_EQUIPMENT_TOKENS = {
+        "motor", "compresor", "compressor", "generador", "generator",
+        "turbina", "turbine", "bomba", "pump", "gearbox", "reductor",
+    }
     for tok in parts:
-        if tok.lower().rstrip(".:,") in _SENSOR_TYPE_TOKENS_TO_STRIP:
+        _tok_lc = tok.lower().rstrip(".:,()")
+        if _tok_lc in _SENSOR_TYPE_TOKENS_TO_STRIP:
+            continue
+        if _tok_lc in _GENERIC_EQUIPMENT_TOKENS:
             continue
         keep.append(tok)
     cleaned = " ".join(keep).strip(" -·_/")

@@ -515,6 +515,33 @@ def resolve_sensor_for_point(
             if lbl_compact and lbl_compact in point_norm:
                 return sensor
 
+        # 1c. (Ciclo 17.39 / v3.31.258) — Match por PLANO + LETRA DE TIPO
+        # extraídos directamente del Point del CSV. Cubre el caso real
+        # C200C donde el sensor está configurado con direction='RADIAL'
+        # → sensor_label() devuelve "1_RAD_V" → compact "1radv" → NO
+        # matchea contra "1YV Motor" (que tiene direction='Y' en el CSV).
+        # Sólo necesitamos {plane + tipo}; la direction del CSV puede
+        # diferir de la del sensor (axial vs radial) sin afectar el
+        # mapping plano→sensor.
+        # Formato del Point: '{N}{Y|X|opt}{A|V|D}{resto}' — ej:
+        #   '6YA Compresor' → plane=6, letter=A → accelerometer
+        #   '2YV Motor'     → plane=2, letter=V → velocity
+        _m_pt = re.match(r"^(\d+)\s*([xy])?\s*([avd])\b", point_norm)
+        if _m_pt:
+            _plane_csv = int(_m_pt.group(1))
+            _letter_csv = _m_pt.group(3).upper()
+            _type_csv = {
+                "A": "accelerometer",
+                "V": "velocity",
+                "D": "proximity",
+            }.get(_letter_csv)
+            if _type_csv:
+                for sensor in candidates:
+                    if (int(sensor.get("plane", 0) or 0) == _plane_csv
+                            and str(sensor.get("sensor_type", "")).lower()
+                            == _type_csv):
+                        return sensor
+
         # 2. Substring del plane_label completo (ej. "TRF (LM6000)")
         for sensor in candidates:
             plbl = _normalize_for_match(sensor.get("plane_label", ""))
