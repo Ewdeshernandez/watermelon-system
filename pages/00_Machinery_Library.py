@@ -2345,6 +2345,33 @@ def render_machinery_grid_v2() -> None:
     if not inst_pairs:
         return
 
+    # Ciclo 23.55 (v3.31.260) — Auto-filtrar instancias "vacías" /
+    # placeholders. Caso típico: la instancia "(default)" creada por
+    # el sistema al iniciar la cuenta antes del primer wizard. Si
+    # cumple las 4 condiciones (sin sensores, sin docs, sin cliente,
+    # sin tren), no la mostramos en el listado — es ruido visual.
+    def _is_empty_placeholder(inst: Any) -> bool:
+        no_sensors = not (inst.sensors or [])
+        no_docs = not (inst.documents or [])
+        no_client = not (inst.client or "").strip()
+        no_train = (
+            not (inst.driver_manufacturer or "").strip()
+            and not (inst.driver_model or "").strip()
+            and not (inst.driven_manufacturer or "").strip()
+            and not (inst.driven_model or "").strip()
+        )
+        return no_sensors and no_docs and no_client and no_train
+
+    inst_pairs = [(iid, inst) for iid, inst in inst_pairs
+                  if not _is_empty_placeholder(inst)]
+
+    if not inst_pairs:
+        st.info(
+            "No hay máquinas registradas todavía. Tocá "
+            "**🧙 Abrir asistente de creación** abajo para crear la primera."
+        )
+        return
+
     # Header refinado (Ciclo 23.54) — small caps + count badges en vez
     # del 🏭 emoji "consumer-app". Look enterprise SaaS.
     total_machines = len(inst_pairs)
@@ -2499,17 +2526,240 @@ def render_machinery_grid_v2() -> None:
         st.markdown("---")
         return
 
-    cards_per_row = 3
-    for i in range(0, len(filtered), cards_per_row):
-        cols = st.columns(cards_per_row, gap="medium")
-        for j, col in enumerate(cols):
-            if i + j >= len(filtered):
-                continue
-            inst_id, inst = filtered[i + j]
-            with col:
-                _render_machinery_card_v2(inst, inst_id)
+    # Ciclo 23.55 (v3.31.260) — Tabla minimalista internacional
+    # (reemplaza el grid de cards con imágenes grandes que ocupaban
+    # demasiado espacio vertical). Look enterprise SaaS tipo
+    # System1/AMS/Linear — densidad alta, escaneable de un vistazo.
+    # Las imágenes/schematic siguen accesibles dentro del detalle de
+    # cada máquina al activarla.
+    _render_machinery_table(filtered)
 
     st.markdown("---")
+
+
+def _render_machinery_table(filtered: List[Tuple[str, Any]]) -> None:
+    """Tabla compacta de máquinas — densidad enterprise SaaS.
+
+    Columnas: Activo | Cliente · Sitio | Tren | Sensores | Severidad | Acción
+    """
+    if not filtered:
+        return
+
+    # CSS de la tabla (una sola vez)
+    st.markdown("""
+    <style>
+    .wmlib-table {
+        background: white;
+        border: 1px solid #e6ebf2;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(15,23,42,0.04);
+        margin-bottom: 8px;
+    }
+    .wmlib-row {
+        display: grid;
+        grid-template-columns: 1.4fr 1.6fr 2.2fr 0.7fr 1.1fr 0.8fr;
+        gap: 14px;
+        padding: 12px 18px;
+        align-items: center;
+        border-bottom: 1px solid #f1f5f9;
+        transition: background 0.12s ease;
+    }
+    .wmlib-row:last-child { border-bottom: none; }
+    .wmlib-row:hover { background: #f8fafc; }
+    .wmlib-row.is-active {
+        background: linear-gradient(90deg, rgba(37,99,235,0.06), transparent);
+        border-left: 3px solid #2563eb;
+        padding-left: 15px;
+    }
+    .wmlib-row.is-header {
+        background: #f8fafc;
+        border-bottom: 1px solid #e6ebf2;
+        font-size: 10px;
+        font-weight: 800;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #64748b;
+        padding: 10px 18px;
+    }
+    .wmlib-row.is-header:hover { background: #f8fafc; }
+    .wmlib-tag {
+        font-size: 14px;
+        font-weight: 800;
+        color: #0f172a;
+        letter-spacing: -0.01em;
+        line-height: 1.2;
+    }
+    .wmlib-sub {
+        font-size: 11px;
+        color: #94a3b8;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        margin-top: 2px;
+    }
+    .wmlib-client {
+        font-size: 13px;
+        color: #0f172a;
+        font-weight: 600;
+    }
+    .wmlib-site {
+        font-size: 11px;
+        color: #64748b;
+        margin-top: 2px;
+    }
+    .wmlib-train {
+        font-size: 12px;
+        color: #1f2937;
+        line-height: 1.35;
+    }
+    .wmlib-count {
+        font-size: 13px;
+        font-weight: 800;
+        color: #0f172a;
+        font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    .wmlib-count-sub {
+        font-size: 10px;
+        color: #94a3b8;
+        margin-top: 1px;
+    }
+    .wmlib-sev-badge {
+        display: inline-block;
+        padding: 3px 9px;
+        border-radius: 999px;
+        font-size: 10px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        line-height: 1.3;
+        white-space: nowrap;
+    }
+    .wmlib-dim {
+        color: #cbd5e1;
+        font-style: italic;
+        font-size: 12px;
+    }
+    /* Botón Activar/Abrir compacto que matchea la altura de fila */
+    div[data-testid="stHorizontalBlock"] .wmlib-action-cell button {
+        min-height: 30px !important;
+        padding: 4px 12px !important;
+        font-size: 12px !important;
+        font-weight: 600 !important;
+        border-radius: 7px !important;
+    }
+    </style>
+    <div class="wmlib-table">
+      <div class="wmlib-row is-header">
+        <div>Activo</div>
+        <div>Cliente · Sitio</div>
+        <div>Tren</div>
+        <div style="text-align:right;">Sensores</div>
+        <div>Severidad</div>
+        <div style="text-align:right;">Acción</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Render fila por fila con st.columns (necesario para botones interactivos)
+    for inst_id, inst in filtered:
+        _render_machinery_row(inst, inst_id)
+
+
+def _render_machinery_row(inst: Any, inst_id: str) -> None:
+    """Una fila de la tabla minimalista."""
+    tag = inst.tag or inst_id
+    client = (inst.client or "").strip()
+    site = (inst.site or inst.location or "").strip()
+
+    driver = " ".join(p for p in [inst.driver_manufacturer, inst.driver_model] if p) or ""
+    driven = " ".join(p for p in [inst.driven_manufacturer, inst.driven_model] if p) or ""
+    if driver and driven:
+        train = f"{driver} → {driven}"
+    else:
+        train = driver or driven or ""
+
+    severity = (inst.last_executive_severity or "").upper().strip()
+    sev_color, sev_bg, _ = _SEVERITY_CONFIG.get(
+        severity, ("#94a3b8", "#f1f5f9", ""),
+    )
+    sev_label = severity or "Sin análisis"
+
+    n_sensors = len(inst.sensors or [])
+    n_docs = len(inst.documents or [])
+
+    is_active = st.session_state.get("wm_active_instance_id") == inst_id
+
+    # Columnas: 1.4 | 1.6 | 2.2 | 0.7 | 1.1 | 0.8  (mismas proporciones del header CSS)
+    c1, c2, c3, c4, c5, c6 = st.columns([1.4, 1.6, 2.2, 0.7, 1.1, 0.8])
+
+    with c1:
+        active_dot = (
+            '<span style="display:inline-block;width:6px;height:6px;'
+            'border-radius:50%;background:#2563eb;margin-right:6px;'
+            'vertical-align:middle;"></span>' if is_active else ''
+        )
+        st.markdown(
+            f'<div class="wmlib-tag">{active_dot}{tag}</div>'
+            f'<div class="wmlib-sub">{inst_id[:12]}{"…" if len(inst_id) > 12 else ""}</div>',
+            unsafe_allow_html=True,
+        )
+
+    with c2:
+        if client:
+            site_str = (
+                f'<div class="wmlib-site">{site}</div>' if site else ''
+            )
+            st.markdown(
+                f'<div class="wmlib-client">{client}</div>{site_str}',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown('<span class="wmlib-dim">—</span>', unsafe_allow_html=True)
+
+    with c3:
+        if train:
+            st.markdown(
+                f'<div class="wmlib-train">{train}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<span class="wmlib-dim">sin tren definido</span>',
+                unsafe_allow_html=True,
+            )
+
+    with c4:
+        st.markdown(
+            f'<div style="text-align:right;">'
+            f'<div class="wmlib-count">{n_sensors}</div>'
+            f'<div class="wmlib-count-sub">{n_docs} docs</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    with c5:
+        st.markdown(
+            f'<span class="wmlib-sev-badge" '
+            f'style="background:{sev_bg};color:{sev_color};'
+            f'border:1px solid {sev_color}33;">{sev_label}</span>',
+            unsafe_allow_html=True,
+        )
+
+    with c6:
+        if is_active:
+            st.markdown(
+                '<div style="text-align:right;font-size:11px;font-weight:800;'
+                'color:#2563eb;letter-spacing:0.05em;text-transform:uppercase;">'
+                '● Activa</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.button(
+                "Abrir →",
+                key=f"open_row_{inst_id}",
+                on_click=_set_active_instance,
+                args=(inst_id,),
+                use_container_width=True,
+            )
 
 
 # ============================================================
