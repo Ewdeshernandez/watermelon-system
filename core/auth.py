@@ -467,11 +467,11 @@ def _show_authenticated_layout_tweaks() -> None:
         /* Ciclo 23.38 — Sidebar nav buttons slim "international" style.
            Antes: 50px alto, 16px fuente, blanco con sombra → look "iPad app".
            Ahora: 38px alto, 13.5px fuente, translucent dark → look Linear/Notion. */
-        div[data-testid="stSidebar"] div[data-testid="stButton"] {
+        section[data-testid="stSidebar"] div[data-testid="stButton"] {
             margin-bottom: 0.22rem !important;
         }
 
-        div[data-testid="stSidebar"] div[data-testid="stButton"] > button {
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button {
             width: 100% !important;
             min-height: 2.35rem !important;
             border-radius: 8px !important;
@@ -488,24 +488,24 @@ def _show_authenticated_layout_tweaks() -> None:
             transition: all 0.15s ease !important;
         }
 
-        div[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
             background: rgba(255,255,255,0.08) !important;
             border-color: rgba(255,255,255,0.10) !important;
             color: #ffffff !important;
         }
 
-        div[data-testid="stSidebar"] div[data-testid="stButton"] > button:focus,
-        div[data-testid="stSidebar"] div[data-testid="stButton"] > button:focus-visible {
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button:focus,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button:focus-visible {
             background: rgba(255,255,255,0.10) !important;
             border-color: rgba(96,165,250,0.45) !important;
             box-shadow: 0 0 0 2px rgba(96,165,250,0.18) !important;
             outline: none !important;
         }
 
-        div[data-testid="stSidebar"] div[data-testid="stButton"] > button *,
-        div[data-testid="stSidebar"] div[data-testid="stButton"] > button p,
-        div[data-testid="stSidebar"] div[data-testid="stButton"] > button span,
-        div[data-testid="stSidebar"] div[data-testid="stButton"] > button div {
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button *,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button p,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button span,
+        section[data-testid="stSidebar"] div[data-testid="stButton"] > button div {
             color: inherit !important;
             fill: inherit !important;
             opacity: 1 !important;
