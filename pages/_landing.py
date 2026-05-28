@@ -156,17 +156,15 @@ st.markdown(
         padding-bottom: 2.0rem !important;
     }
 
-    /* ───── HERO ───── */
+    /* ───── HERO (v3.31.265 — minimalista enterprise) ───── */
     .wmh-hero {
-        border-radius: 22px;
-        padding: 26px 34px;
-        margin-bottom: 22px;
-        background:
-            radial-gradient(circle at 12% 10%, rgba(74,222,128,0.10) 0%, transparent 35%),
-            radial-gradient(circle at 92% 90%, rgba(248,113,113,0.10) 0%, transparent 38%),
-            linear-gradient(135deg, #0b1426 0%, #0f1d36 50%, #0b1426 100%);
-        border: 1px solid rgba(148,163,184,0.16);
-        box-shadow: 0 18px 60px rgba(15,23,42,0.22);
+        border-radius: 14px;
+        padding: 22px 28px;
+        margin-bottom: 20px;
+        background: linear-gradient(135deg, #0b1426 0%, #0f1d36 100%);
+        border: 1px solid rgba(148,163,184,0.12);
+        border-left: 4px solid #10b981; /* acento color de estado */
+        box-shadow: 0 4px 16px rgba(15,23,42,0.10);
         color: #f8fafc;
         display: flex;
         align-items: center;
@@ -175,34 +173,10 @@ st.markdown(
         flex-wrap: wrap;
         position: relative;
     }
-    .wmh-hero::before {
-        content: "";
-        position: absolute; left: 0; top: 0; bottom: 0;
-        width: 4px; border-radius: 22px 0 0 22px;
-        opacity: 0.85;
-    }
-    /* Ciclo 23.38 — barrido oscilográfico sutil arriba del hero.
-       Da un toque "live signal" sin distraer. Animación lenta para
-       que no fatigue (15s loop). */
-    .wmh-hero::after {
-        content: "";
-        position: absolute;
-        top: 0; left: 0; right: 0;
-        height: 1px;
-        background: linear-gradient(90deg,
-            transparent 0%,
-            rgba(96,165,250,0) 20%,
-            rgba(96,165,250,0.6) 50%,
-            rgba(96,165,250,0) 80%,
-            transparent 100%);
-        animation: wmh-hero-scan 15s linear infinite;
-        opacity: 0.5;
-        pointer-events: none;
-    }
-    @keyframes wmh-hero-scan {
-        0%   { transform: translateX(-100%); }
-        100% { transform: translateX(100%); }
-    }
+    /* ::before / ::after removidos en v3.31.265 — el scan animado y
+       los radial-gradients sobrecargados se quitan para un look mas
+       sobrio tipo System1/AMS. El border-left coloreado ya da el
+       acento de estado sin necesidad de capas extra. */
     .wmh-hero-left { flex: 1 1 60%; min-width: 320px; }
     .wmh-hero-right { flex: 0 0 auto; text-align: right; min-width: 240px; }
 
@@ -306,38 +280,38 @@ st.markdown(
         margin-top: 2px;
     }
 
-    /* ───── KPI BAND ───── Ciclo 23.38 — international upgrade
-       Antes: 36px valores, hover sin lift, sin micro-animaciones.
-       Ahora: 44px valores con tabular-nums, hover lift + glow,
-       border-top accent más visible, micro-trend más prominente. */
+    /* ───── KPI BAND (v3.31.265 — flat / minimal) ─────
+       Antes: cards con hover lift +3px, glow shadows, border-top 4px,
+       value 44px. Look "dashboard hackathon".
+       Ahora: cards flat sin lift, border-top 2px sutil, value 32px
+       tabular-nums, hover solo cambia border-color. Look enterprise
+       enterprise tipo Linear/Notion/AMS. */
     .wmh-kpi {
         background: #ffffff;
         border: 1px solid #e6ebf2;
-        border-radius: 16px;
-        padding: 18px 20px;
-        box-shadow: 0 2px 8px rgba(15,23,42,0.04);
+        border-radius: 10px;
+        padding: 16px 18px;
+        box-shadow: none;
         height: 100%;
-        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+        transition: border-color 0.15s ease;
         position: relative;
     }
     .wmh-kpi:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 16px 36px rgba(15,23,42,0.10);
         border-color: #cbd5e1;
     }
     .wmh-kpi-label {
         font-size: 10px;
         font-weight: 800;
-        letter-spacing: 0.16em;
+        letter-spacing: 0.14em;
         text-transform: uppercase;
         color: #64748b;
-        margin-bottom: 10px;
+        margin-bottom: 8px;
     }
     .wmh-kpi-value {
-        font-size: 44px;
+        font-size: 32px;
         font-weight: 800;
         line-height: 1;
-        letter-spacing: -0.03em;
+        letter-spacing: -0.02em;
         color: #0f172a;
         font-variant-numeric: tabular-nums;
     }
@@ -347,21 +321,18 @@ st.markdown(
         margin-top: 6px;
         line-height: 1.4;
     }
-    .wmh-kpi-spark { margin-top: 10px; }
+    .wmh-kpi-spark {
+        margin-top: 8px;
+        opacity: 0.55; /* sparkline mas tenue, no compete con el value */
+    }
     .wmh-kpi.danger  .wmh-kpi-value { color: #dc2626; }
     .wmh-kpi.warning .wmh-kpi-value { color: #d97706; }
     .wmh-kpi.healthy .wmh-kpi-value { color: #059669; }
-    .wmh-kpi.danger  { border-top: 3px solid #ef4444; }
-    .wmh-kpi.warning { border-top: 3px solid #f59e0b; }
-    .wmh-kpi.healthy { border-top: 3px solid #10b981; }
-    .wmh-kpi.total   { border-top: 3px solid #0ea5e9; }
-
-    /* Border accent más gordo y con glow sutil para que la card "tipo"
-       (danger/warning/healthy/total) se lea a 1 metro de distancia. */
-    .wmh-kpi.danger  { border-top-width: 4px; box-shadow: 0 2px 8px rgba(239,68,68,0.06); }
-    .wmh-kpi.warning { border-top-width: 4px; box-shadow: 0 2px 8px rgba(245,158,11,0.06); }
-    .wmh-kpi.healthy { border-top-width: 4px; box-shadow: 0 2px 8px rgba(16,185,129,0.06); }
-    .wmh-kpi.total   { border-top-width: 4px; box-shadow: 0 2px 8px rgba(14,165,233,0.06); }
+    /* Border-top accent fino (2px) — discreto pero leible */
+    .wmh-kpi.danger  { border-top: 2px solid #ef4444; }
+    .wmh-kpi.warning { border-top: 2px solid #f59e0b; }
+    .wmh-kpi.healthy { border-top: 2px solid #10b981; }
+    .wmh-kpi.total   { border-top: 2px solid #0ea5e9; }
 
     /* Ciclo 17.24 — Botón "Ver →" debajo de cada card KPI.
        Estilo "link sutil": sin fondo ni borde, texto pequeño con
@@ -620,8 +591,8 @@ st.markdown(
 st.markdown(
     f"""
     <style>
-    .wmh-hero {{ background: {_HERO_BG} !important; }}
-    .wmh-hero::before {{ background: {_ACCENT_COLOR}; }}
+    .wmh-hero {{ background: {_HERO_BG} !important;
+                  border-left-color: {_ACCENT_COLOR} !important; }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -859,81 +830,159 @@ with left:
             "Ve a **Machinery Library → Crear nueva instancia** para empezar."
         )
     else:
-        # Grid 3 columnas, máximo 9 cards visibles
-        # Cada card incluye Health Score gauge SVG (Ciclo 17.12 Nivel 3)
+        # v3.31.265 — Tabla compacta minimalista (reemplaza grid de
+        # cards 3×N con gauges grandes). Look enterprise tipo
+        # System1/AMS — densidad alta, escaneable de un vistazo.
+        # Health score se muestra como número + dot coloreado, sin gauge.
+        st.markdown("""
+        <style>
+        .wmh-asset-table {
+            background: white;
+            border: 1px solid #e6ebf2;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        .wmh-asset-row {
+            display: grid;
+            grid-template-columns: 1.6fr 1.6fr 0.7fr 1.1fr 1.1fr;
+            gap: 14px;
+            padding: 12px 18px;
+            align-items: center;
+            border-bottom: 1px solid #f1f5f9;
+            transition: background 0.12s ease;
+        }
+        .wmh-asset-row:last-child { border-bottom: none; }
+        .wmh-asset-row:hover { background: #f8fafc; }
+        .wmh-asset-row.is-header {
+            background: #f8fafc;
+            font-size: 10px;
+            font-weight: 800;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: #64748b;
+            padding: 10px 18px;
+        }
+        .wmh-asset-row.is-header:hover { background: #f8fafc; }
+        .wmh-row-tag {
+            font-size: 14px;
+            font-weight: 800;
+            color: #0f172a;
+            letter-spacing: -0.01em;
+        }
+        .wmh-row-loc {
+            font-size: 11px;
+            color: #94a3b8;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            margin-top: 2px;
+        }
+        .wmh-row-class {
+            font-size: 12px;
+            color: #1f2937;
+            line-height: 1.35;
+        }
+        .wmh-row-meta {
+            font-size: 11px;
+            color: #94a3b8;
+            margin-top: 2px;
+        }
+        .wmh-row-score {
+            font-size: 18px;
+            font-weight: 800;
+            font-variant-numeric: tabular-nums;
+            color: #0f172a;
+            text-align: right;
+        }
+        .wmh-row-score-sub {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            text-align: right;
+            margin-top: 1px;
+        }
+        .wmh-row-sev-pill {
+            font-size: 10px;
+            font-weight: 800;
+            padding: 3px 10px;
+            border-radius: 999px;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+        </style>
+        <div class="wmh-asset-table">
+          <div class="wmh-asset-row is-header">
+            <div>Activo</div>
+            <div>Tren</div>
+            <div style="text-align:right;">Health</div>
+            <div>Estado</div>
+            <div style="text-align:right;">Acción</div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
         instances = _fleet["instances"][:9]
-        for row_start in range(0, len(instances), 3):
-            cols = st.columns(3, gap="medium")
-            for col, inst in zip(cols, instances[row_start:row_start + 3]):
-                with col:
-                    sev_class = inst.severity
-                    asset_line = inst.asset_class or inst.profile_key or "—"
-                    loc_line = inst.location or "sin ubicación"
+        for inst in instances:
+            sev_class = inst.severity
+            asset_line = inst.asset_class or inst.profile_key or "—"
+            loc_line = inst.location or "sin ubicación"
 
-                    # Calcular health score (carga la instancia full)
+            # Health score (carga la instancia full)
+            try:
+                from core.instance_state import get_instance
+                _full = get_instance(inst.instance_id)
+                if _full is not None:
+                    _hs_data = {
+                        "tag": inst.tag,
+                        "iso_norm_code": getattr(_full, "iso_norm_code", "") or "",
+                        "last_balance_date": getattr(_full, "last_balance_date", "") or "",
+                        "documents": getattr(_full, "documents", []) or [],
+                        "setpoint_warning_override": getattr(_full, "setpoint_warning_override", 0.0) or 0.0,
+                        "setpoint_danger_override": getattr(_full, "setpoint_danger_override", 0.0) or 0.0,
+                        "override_justification": getattr(_full, "override_justification", "") or "",
+                    }
+                    _hs = compute_health_score(_hs_data)
+                else:
+                    _hs = compute_health_score({"tag": inst.tag, "iso_norm_code": "",
+                                                 "last_balance_date": "", "documents": []})
+            except Exception:
+                _hs = compute_health_score({"tag": inst.tag, "iso_norm_code": "",
+                                             "last_balance_date": "", "documents": []})
+
+            # Fila con st.columns (necesario para botón interactivo)
+            c1, c2, c3, c4, c5 = st.columns([1.6, 1.6, 0.7, 1.1, 1.1])
+            with c1:
+                st.markdown(
+                    f'<div class="wmh-row-tag">{inst.severity_dot} {inst.tag}</div>'
+                    f'<div class="wmh-row-loc">📍 {loc_line}</div>',
+                    unsafe_allow_html=True,
+                )
+            with c2:
+                st.markdown(
+                    f'<div class="wmh-row-class">{asset_line}</div>'
+                    f'<div class="wmh-row-meta">{inst.n_documents} docs · {inst.last_seen_human}</div>',
+                    unsafe_allow_html=True,
+                )
+            with c3:
+                st.markdown(
+                    f'<div class="wmh-row-score" style="color:{_hs.color};">{_hs.score}</div>'
+                    f'<div class="wmh-row-score-sub" style="color:{_hs.color};">{_hs.band_label}</div>',
+                    unsafe_allow_html=True,
+                )
+            with c4:
+                st.markdown(
+                    f'<span class="wmh-row-sev-pill wmh-sev-pill {sev_class}">'
+                    f'{inst.severity_label}</span>',
+                    unsafe_allow_html=True,
+                )
+            with c5:
+                if st.button("Abrir →", key=f"asset_open_{inst.instance_id}",
+                             use_container_width=True):
+                    st.session_state["wm_active_instance"] = inst.instance_id
                     try:
-                        from core.instance_state import get_instance
-                        _full = get_instance(inst.instance_id)
-                        if _full is not None:
-                            _hs_data = {
-                                "tag": inst.tag,
-                                "iso_norm_code": getattr(_full, "iso_norm_code", "") or "",
-                                "last_balance_date": getattr(_full, "last_balance_date", "") or "",
-                                "documents": getattr(_full, "documents", []) or [],
-                                "setpoint_warning_override": getattr(_full, "setpoint_warning_override", 0.0) or 0.0,
-                                "setpoint_danger_override": getattr(_full, "setpoint_danger_override", 0.0) or 0.0,
-                                "override_justification": getattr(_full, "override_justification", "") or "",
-                            }
-                            _hs = compute_health_score(_hs_data)
-                        else:
-                            _hs = compute_health_score({"tag": inst.tag, "iso_norm_code": "",
-                                                         "last_balance_date": "", "documents": []})
+                        st.switch_page("pages/00_Machinery_Library.py")
                     except Exception:
-                        _hs = compute_health_score({"tag": inst.tag, "iso_norm_code": "",
-                                                     "last_balance_date": "", "documents": []})
-
-                    _gauge_html = render_score_gauge(_hs.score, _hs.color, size=110)
-                    _band_html = (
-                        f'<div class="wmh-gauge-band" style="color:{_hs.color};">'
-                        f'{_hs.band_label}</div>'
-                    )
-
-                    # IMPORTANTE: HTML colapsado a sin saltos internos
-                    # para que el markdown parser de Streamlit no corte
-                    # el bloque HTML por blank lines y muestre crudo.
-                    _card_html = (
-                        f'<div class="wmh-asset">'
-                        f'<div class="wmh-asset-head">'
-                        f'<span class="wmh-asset-tag">{inst.severity_dot} {inst.tag}</span>'
-                        f'<span class="wmh-sev-pill {sev_class}">{inst.severity_label}</span>'
-                        f'</div>'
-                        f'<div class="wmh-asset-class">{asset_line}</div>'
-                        f'<div class="wmh-gauge-wrap">{_gauge_html}{_band_html}'
-                        f'<div class="wmh-gauge-tip">{_hs.one_liner}</div>'
-                        f'</div>'
-                        f'<div class="wmh-asset-meta">'
-                        f'📍 {loc_line} · 📁 {inst.n_documents} docs · 🕒 {inst.last_seen_human}'
-                        f'</div>'
-                        f'</div>'
-                    )
-                    st.markdown(_card_html, unsafe_allow_html=True)
-                    bcols = st.columns(2)
-                    with bcols[0]:
-                        if st.button("Trends", key=f"asset_tr_{inst.instance_id}",
-                                     use_container_width=True):
-                            st.session_state["wm_active_instance"] = inst.instance_id
-                            try:
-                                st.switch_page("pages/04_Trends.py")
-                            except Exception:
-                                pass
-                    with bcols[1]:
-                        if st.button("Editar", key=f"asset_ed_{inst.instance_id}",
-                                     use_container_width=True):
-                            st.session_state["wm_active_instance"] = inst.instance_id
-                            try:
-                                st.switch_page("pages/00_Machinery_Library.py")
-                            except Exception:
-                                pass
+                        pass
 
         if _fleet["total"] > 9:
             st.caption(f"+ {_fleet['total'] - 9} activos más en Machinery Library →")
