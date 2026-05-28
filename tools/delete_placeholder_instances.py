@@ -32,10 +32,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 def _is_placeholder(meta: dict, full=None) -> tuple[bool, str]:
-    """Retorna (es_placeholder, razón)."""
+    """Retorna (es_placeholder, razón).
+
+    v3.31.262 — CONSERVADOR: solo flagueamos como placeholder si:
+      (a) tag literal '(default)' / 'default' — son creadas por sistema,
+          siempre seguras de borrar.
+      O
+      (b) Tag vacío Y totalmente vacía (sin sensores, docs, cliente, tren).
+          NO basta tag vacío solo — algunas instancias reales tienen tag
+          vacío pero data real.
+    """
     tag = (meta.get("tag") or "").strip()
-    if tag in ("", "(default)", "default", "(sin tren)", "(sin nombre)"):
-        return True, f"tag literal '{tag or '(vacío)'}'"
+
+    # Caso (a): tag literal '(default)' o 'default' — siempre safe
+    if tag in ("(default)", "default", "(sin tren)", "(sin nombre)"):
+        return True, f"tag literal '{tag}' (creada por sistema)"
 
     if full is None:
         return False, ""
@@ -49,8 +60,21 @@ def _is_placeholder(meta: dict, full=None) -> tuple[bool, str]:
         and not (getattr(full, "driven_manufacturer", "") or "").strip()
         and not (getattr(full, "driven_model", "") or "").strip()
     )
-    if no_sensors and no_docs and no_client and no_train:
-        return True, "totalmente vacía (sin sensores/docs/cliente/tren)"
+    n_sensors = len(getattr(full, "sensors", None) or [])
+    n_docs = len(getattr(full, "documents", None) or [])
+    client = (getattr(full, "client", "") or "").strip() or "(sin cliente)"
+
+    # Caso (b): tag vacío + totalmente vacía
+    if not tag and no_sensors and no_docs and no_client and no_train:
+        return True, "tag vacío Y sin sensores/docs/cliente/tren"
+
+    # Si tag vacío pero tiene algo de data → NO es placeholder, alertar al user
+    if not tag:
+        return False, (
+            f"⚠ tag vacío PERO tiene data ({n_sensors} sensores, "
+            f"{n_docs} docs, cliente={client!r}) — NO se borra. "
+            "Si querés borrarla, abrila desde el UI y borrá manualmente."
+        )
 
     return False, ""
 
@@ -77,6 +101,7 @@ def main() -> int:
     print()
 
     candidates = []
+    warnings_empty_tag = []
     for meta in summaries:
         iid = meta.get("instance_id", "")
         if not iid:
@@ -88,9 +113,18 @@ def main() -> int:
         is_ph, reason = _is_placeholder(meta, full)
         if is_ph:
             candidates.append((iid, meta.get("tag", "(?)"), reason))
+        elif reason and reason.startswith("⚠"):
+            warnings_empty_tag.append((iid, meta.get("tag", ""), reason))
+
+    if warnings_empty_tag:
+        print("⚠ INSTANCIAS CON TAG VACÍO PERO CON DATA — NO se borran:")
+        for iid, tag, reason in warnings_empty_tag:
+            print(f"  • id={iid[:30]:30s}  {reason}")
+        print("  (Si querés borrar alguna, hacelo desde el UI con confianza.)")
+        print()
 
     if not candidates:
-        print("✓ No hay instancias placeholder para borrar. Todo limpio.")
+        print("✓ No hay instancias placeholder seguras para borrar. Todo limpio.")
         return 0
 
     mode = "APLICADO" if args.apply else "DRY-RUN"
