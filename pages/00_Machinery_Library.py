@@ -2345,15 +2345,18 @@ def render_machinery_grid_v2() -> None:
     if not inst_pairs:
         return
 
-    # Ciclo 23.55 (v3.31.260/261) — Auto-filtrar instancias placeholder.
-    # Caso típico: la instancia "(default)" creada por el sistema al
-    # iniciar la cuenta. La filtramos por:
-    #   - Tag literal "(default)" / "default" / vacío
-    #   - O las 4 condiciones de "totalmente vacía"
+    # Ciclo 23.55 (v3.31.260/263) — Auto-filtrar instancias placeholder.
+    # CONSERVADOR: solo filtramos por tag LITERAL "(default)" (creada
+    # por sistema) o si TODAS las 4 condiciones de vacía se cumplen.
+    # NO filtramos por tag vacío solo — algunas instancias reales como
+    # 'tes1' (Ecopetrol-Magnex con 9 sensores) tienen tag vacío pero
+    # data real y monitoreo en línea.
     def _is_placeholder_instance(inst: Any) -> bool:
         tag = (inst.tag or "").strip()
-        if tag in ("", "(default)", "default", "(sin tren)", "(sin nombre)"):
+        # Solo tags LITERALES del sistema
+        if tag in ("(default)", "default", "(sin tren)", "(sin nombre)"):
             return True
+        # O totalmente vacía (incluye tag vacío + sin nada más)
         no_sensors = not (inst.sensors or [])
         no_docs = not (inst.documents or [])
         no_client = not (inst.client or "").strip()

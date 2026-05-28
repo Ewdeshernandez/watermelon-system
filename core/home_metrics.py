@@ -273,16 +273,16 @@ def compute_fleet_status(client_email: str = "") -> Dict[str, Any]:
         except Exception:
             pass
 
-    # Ciclo 23.55b (v3.31.261) — Filtrar instancias placeholder.
-    # La instancia "(default)" creada automáticamente al iniciar la
-    # cuenta (o cualquier otra con tag vacío/literal) es ruido visual
-    # en la Home y en las métricas de la flota. La filtramos.
+    # Ciclo 23.55b (v3.31.261/263) — Filtrar SOLO la instancia "(default)"
+    # creada automáticamente por el sistema. CONSERVADOR: NO filtrar
+    # por tag vacío solo (algunas instancias reales como 'tes1' tienen
+    # tag vacío pero data real con sensores y monitoreo en línea).
+    # Solo el tag literal "(default)" / variantes obvias son seguras.
     def _is_placeholder_summary(s: Dict[str, Any]) -> bool:
         tag = (s.get("tag") or "").strip()
-        # Tag literal "(default)" o variantes vacías
-        if tag in ("", "(default)", "default", "(sin tren)", "(sin nombre)"):
-            return True
-        return False
+        # Solo tags LITERALES creados por el sistema. Tag vacío
+        # NO es suficiente.
+        return tag in ("(default)", "default", "(sin tren)", "(sin nombre)")
 
     summaries = [s for s in summaries if not _is_placeholder_summary(s)]
     healths: List[InstanceHealth] = []
