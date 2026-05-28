@@ -272,6 +272,19 @@ def compute_fleet_status(client_email: str = "") -> Dict[str, Any]:
             summaries = filter_instances_for_email(summaries, client_email)
         except Exception:
             pass
+
+    # Ciclo 23.55b (v3.31.261) — Filtrar instancias placeholder.
+    # La instancia "(default)" creada automáticamente al iniciar la
+    # cuenta (o cualquier otra con tag vacío/literal) es ruido visual
+    # en la Home y en las métricas de la flota. La filtramos.
+    def _is_placeholder_summary(s: Dict[str, Any]) -> bool:
+        tag = (s.get("tag") or "").strip()
+        # Tag literal "(default)" o variantes vacías
+        if tag in ("", "(default)", "default", "(sin tren)", "(sin nombre)"):
+            return True
+        return False
+
+    summaries = [s for s in summaries if not _is_placeholder_summary(s)]
     healths: List[InstanceHealth] = []
     counts = {"healthy": 0, "warning": 0, "danger": 0, "unknown": 0}
 

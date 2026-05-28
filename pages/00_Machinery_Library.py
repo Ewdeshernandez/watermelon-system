@@ -2345,12 +2345,15 @@ def render_machinery_grid_v2() -> None:
     if not inst_pairs:
         return
 
-    # Ciclo 23.55 (v3.31.260) — Auto-filtrar instancias "vacías" /
-    # placeholders. Caso típico: la instancia "(default)" creada por
-    # el sistema al iniciar la cuenta antes del primer wizard. Si
-    # cumple las 4 condiciones (sin sensores, sin docs, sin cliente,
-    # sin tren), no la mostramos en el listado — es ruido visual.
-    def _is_empty_placeholder(inst: Any) -> bool:
+    # Ciclo 23.55 (v3.31.260/261) — Auto-filtrar instancias placeholder.
+    # Caso típico: la instancia "(default)" creada por el sistema al
+    # iniciar la cuenta. La filtramos por:
+    #   - Tag literal "(default)" / "default" / vacío
+    #   - O las 4 condiciones de "totalmente vacía"
+    def _is_placeholder_instance(inst: Any) -> bool:
+        tag = (inst.tag or "").strip()
+        if tag in ("", "(default)", "default", "(sin tren)", "(sin nombre)"):
+            return True
         no_sensors = not (inst.sensors or [])
         no_docs = not (inst.documents or [])
         no_client = not (inst.client or "").strip()
@@ -2363,7 +2366,7 @@ def render_machinery_grid_v2() -> None:
         return no_sensors and no_docs and no_client and no_train
 
     inst_pairs = [(iid, inst) for iid, inst in inst_pairs
-                  if not _is_empty_placeholder(inst)]
+                  if not _is_placeholder_instance(inst)]
 
     if not inst_pairs:
         st.info(
