@@ -718,126 +718,18 @@ st.markdown(
 
 
 # =============================================================
-# OMNIBOX (Ciclo 17.12 — Nivel 3)
+# OMNIBOX (Ciclo 17.12 — Nivel 3) — REMOVIDO en v3.31.264
 # =============================================================
-# Búsqueda global fuzzy contra: instancias del Vault, drafts de
-# reportes y normas ISO/API. Resultados live debajo.
-# Si la query está vacía → no muestra nada (no satura el home).
-st.markdown('<div class="wmh-omni-wrap">', unsafe_allow_html=True)
-_omni_q = st.text_input(
-    label="Búsqueda global",
-    placeholder="🔍  Buscar activo, reporte o norma — ej. \"TES1\", \"ISO 20816\", \"684\", \"balanceo\"… (Cmd+K)",
-    key="wmh_omnibox_q",
-    label_visibility="collapsed",
-)
-st.markdown(
-    '<div class="wmh-omni-hint">tip: tipea ≥2 caracteres · '
-    'enter para buscar · click en un resultado para ir directo · '
-    '<b>Cmd+K</b> (o Ctrl+K) para enfocar desde cualquier lugar</div>',
-    unsafe_allow_html=True,
-)
+# La barra de búsqueda global ocupaba demasiado espacio visual en el
+# Home. Acá ya queda removida — el usuario navega via sidebar o KPIs.
+# Si en algún momento volvemos a necesitar búsqueda global, se puede
+# implementar como modal/dialog accesible con Cmd+K sin ocupar layout
+# permanente.
+_omni_q = ""  # placeholder para que el código siguiente no falle
 
-# Ciclo 17.13 — Cmd+K real: hotkey global que enfoca el omnibox
-# sin necesidad de instalar streamlit-shortcuts. Inyecta JS inline
-# que escucha keydown en el iframe parent y enfoca el text_input
-# por su placeholder (que sirve de selector estable).
-st.markdown(
-    """
-    <script>
-    (function() {
-        function attachOmniHotkey() {
-            // Streamlit corre dentro de iframe; intentar window.parent también.
-            const targets = [window];
-            try { if (window.parent && window.parent !== window) targets.push(window.parent); } catch(e){}
-            const focusOmni = function() {
-                // Selector: input cuyo placeholder empiece con el lupa+texto
-                let nodes = document;
-                try { nodes = window.parent.document; } catch(e){}
-                const el = nodes.querySelector('input[placeholder^="\\u{1F50D}"]');
-                if (el) { el.focus(); el.select && el.select(); return true; }
-                return false;
-            };
-            const handler = function(ev) {
-                const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-                const cmdK = (isMac ? ev.metaKey : ev.ctrlKey) && (ev.key === 'k' || ev.key === 'K');
-                if (cmdK) {
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                    focusOmni();
-                }
-            };
-            targets.forEach(function(t) {
-                try { t.addEventListener('keydown', handler, true); } catch(e){}
-            });
-        }
-        // Re-enganchar tras rerender de Streamlit
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', attachOmniHotkey);
-        } else {
-            attachOmniHotkey();
-        }
-        setTimeout(attachOmniHotkey, 800);
-    })();
-    </script>
-    """,
-    unsafe_allow_html=True,
-)
-
-if _omni_q and len(_omni_q.strip()) >= 2:
-    _hits = omnibox_search(_omni_q, limit=8)
-    if not _hits:
-        st.markdown(
-            '<div class="wmh-omni-results">'
-            '<div style="padding:10px;color:#94a3b8;font-size:13px;">'
-            'Sin resultados para esa búsqueda.</div></div>',
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown('<div class="wmh-omni-results">', unsafe_allow_html=True)
-        for i, h in enumerate(_hits):
-            kcol = kind_color(h.kind)
-            klabel = kind_label(h.kind).upper()
-            cols = st.columns([0.07, 0.78, 0.15])
-            with cols[0]:
-                st.markdown(
-                    f'<div style="font-size:18px;text-align:center;'
-                    f'padding-top:6px;">{h.icon}</div>',
-                    unsafe_allow_html=True,
-                )
-            with cols[1]:
-                st.markdown(
-                    f'<div style="line-height:1.25;padding-top:4px;">'
-                    f'<div style="color:#0f172a;font-weight:700;font-size:13px;">{h.title}</div>'
-                    f'<div style="color:#94a3b8;font-size:11px;'
-                    f'font-family:ui-monospace,SFMono-Regular,Menlo,monospace;">'
-                    f'{h.subtitle}</div></div>',
-                    unsafe_allow_html=True,
-                )
-            with cols[2]:
-                _btn_key = f"omni_hit_{i}_{h.kind}_{h.payload.get('instance_id','') or h.payload.get('draft_name','') or h.payload.get('norm_code','')}"
-                _btn_label = "Abrir →"
-                if st.button(_btn_label, key=_btn_key, use_container_width=True):
-                    if h.kind == "instance":
-                        st.session_state["wm_active_instance"] = h.payload.get("instance_id", "")
-                    elif h.kind == "report":
-                        st.session_state["wm_active_draft_name"] = h.payload.get("draft_name", "")
-                    elif h.kind == "norm":
-                        st.session_state["wm_omnibox_focus_norm"] = h.payload.get("norm_code", "")
-                    if h.target_page:
-                        try:
-                            st.switch_page(h.target_page)
-                        except Exception:
-                            pass
-            # Pill kind small
-            st.markdown(
-                f'<div style="margin:-4px 0 6px 38px;">'
-                f'<span class="wmh-omni-hit-kind" style="background:{kcol}1A;color:{kcol};">'
-                f'{klabel}</span></div>',
-                unsafe_allow_html=True,
-            )
-        st.markdown('</div>', unsafe_allow_html=True)
-
-st.markdown('</div>', unsafe_allow_html=True)
+# v3.31.264 — Search JS hotkey + results loop removidos (junto con la
+# barra visible arriba). El home queda sin búsqueda global, foco en
+# KPIs + activos + actividad reciente.
 
 
 # =============================================================
@@ -938,74 +830,15 @@ with k4:
 
 
 # =============================================================
-# QUICK ACTIONS
+# QUICK ACTIONS — REMOVIDO en v3.31.264
 # =============================================================
-st.markdown(
-    '<div class="wmh-sec">Acciones rápidas <div class="bar"></div></div>',
-    unsafe_allow_html=True,
-)
-
-# Ciclo 17.32 — Diagnostics removido. Reemplazado por AI Assistant.
-# Ciclo 23.131 — Acciones rápidas filtradas por role. El cliente solo
-# debe ver Live Monitoring + Reports (las otras son IP interna o
-# herramientas de analista).
-if _my_role == "client":
-    _QUICK = [
-        ("Live Monitoring", "pages/02_Live_Monitoring.py", "page"),
-        ("Reports",         "pages/16_Reports.py",         "page"),
-    ]
-else:
-    _QUICK = [
-        ("Cargar CSV",       "pages/01_Load_Data.py",          "page"),
-        ("Trends",           "pages/04_Trends.py",             "page"),
-        ("Machinery Lib",    "pages/00_Machinery_Library.py",  "page"),
-        ("AI Assistant",     "pages/_ai_assistant.py",         "page"),
-        ("Reports",          "pages/16_Reports.py",            "page"),
-        ("Briefing del día", "_briefing_action",               "briefing"),
-    ]
-qa_cols = st.columns(len(_QUICK))
-for col, (label, target, kind) in zip(qa_cols, _QUICK):
-    with col:
-        if st.button(label, use_container_width=True, key=f"qa_{target}"):
-            if kind == "briefing":
-                # Ciclo 17.13 — Genera el PDF del día al instante.
-                # Snapshot, comparativo vs ayer, top 3, vencimientos.
-                try:
-                    with st.spinner("Generando briefing del día…"):
-                        _pdf_b, _pdf_p = generate_and_save_briefing()
-                    st.session_state["wm_briefing_pdf_bytes"] = _pdf_b
-                    st.session_state["wm_briefing_pdf_path"] = str(_pdf_p)
-                    st.session_state["wm_briefing_pdf_at"] = datetime.now().strftime("%H:%M")
-                except Exception as _e:
-                    st.session_state["wm_briefing_pdf_bytes"] = None
-                    st.session_state["wm_briefing_pdf_error"] = str(_e)
-            else:
-                try:
-                    st.switch_page(target)
-                except Exception:
-                    st.warning(f"No pude abrir {target}")
-
-# Download del briefing si recién se generó
-_brief_bytes = st.session_state.get("wm_briefing_pdf_bytes")
-_brief_err = st.session_state.get("wm_briefing_pdf_error")
-if _brief_err:
-    st.error(f"No pude generar el briefing: {_brief_err}")
-    st.session_state.pop("wm_briefing_pdf_error", None)
-elif _brief_bytes:
-    _at = st.session_state.get("wm_briefing_pdf_at", "")
-    _date_str = datetime.now().strftime("%Y-%m-%d")
-    st.success(
-        f"✓ Briefing diario listo (generado {_at}). "
-        f"Tamaño {len(_brief_bytes)/1024:.1f} KB."
-    )
-    st.download_button(
-        label=f"⬇️  Descargar briefing_{_date_str}.pdf",
-        data=_brief_bytes,
-        file_name=f"briefing_{_date_str}.pdf",
-        mime="application/pdf",
-        use_container_width=True,
-        key="wm_briefing_dl",
-    )
+# Los 6 botones de acciones rápidas (Cargar CSV, Trends, Machinery
+# Lib, AI Assistant, Reports, Briefing del día) eran redundantes con
+# el sidebar que ya tiene todas esas opciones. Quitarlas hace el Home
+# más minimalista, look enterprise (Baker / Emerson AMS).
+#
+# El briefing del día sigue accesible desde Reports. Si se necesita
+# como atajo, agregar entrada en sidebar (no en el Home grid).
 
 
 # =============================================================
