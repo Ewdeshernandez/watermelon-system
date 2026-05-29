@@ -2432,6 +2432,71 @@ def render_machinery_grid_v2() -> None:
         unsafe_allow_html=True,
     )
 
+    # ─── Fleet condition cockpit (Ciclo 23.56) ─────────────────
+    # KPI strip con colores ISO 20816 (Vigilancia / Atención /
+    # Crítico). Da lectura de flota de un vistazo — el lenguaje que
+    # usan System1 / AMS para diferenciarse de una simple tabla.
+    def _sevn(i: Any) -> str:
+        return (i.last_executive_severity or "").upper().strip()
+
+    n_watch = sum(1 for _, i in inst_pairs if _sevn(i) == "VIGILANCIA")
+    n_warn = sum(1 for _, i in inst_pairs if _sevn(i) == "ATENCIÓN")
+    n_crit = sum(
+        1 for _, i in inst_pairs
+        if _sevn(i) in ("CRÍTICA", "ACCIÓN REQUERIDA")
+    )
+
+    st.markdown(
+        textwrap.dedent(f"""
+        <style>
+        .wmlib-kpis {{
+            display: grid; grid-template-columns: repeat(5, 1fr);
+            gap: 10px; margin: 4px 0 16px 0;
+        }}
+        .wmlib-kpi {{
+            border-radius: 12px; padding: 12px 14px; background: white;
+            border: 1px solid #e6ebf2;
+            box-shadow: 0 1px 3px rgba(15,23,42,0.04);
+        }}
+        .wmlib-kpi.accent {{ border-left-width: 4px; border-left-style: solid; }}
+        .wmlib-kpi .lbl {{
+            font-size: 10px; font-weight: 800; letter-spacing: 0.1em;
+            text-transform: uppercase; color: #94a3b8;
+        }}
+        .wmlib-kpi .val {{
+            font-size: 26px; font-weight: 800; line-height: 1.1; margin-top: 3px;
+            font-family: ui-monospace, "SF Mono", Menlo, monospace;
+        }}
+        @media (max-width: 640px) {{
+            .wmlib-kpis {{ grid-template-columns: repeat(2, 1fr); }}
+        }}
+        </style>
+        <div class="wmlib-kpis">
+          <div class="wmlib-kpi">
+            <div class="lbl">Activos</div>
+            <div class="val" style="color:#0f172a;">{total_machines}</div>
+          </div>
+          <div class="wmlib-kpi">
+            <div class="lbl">Sensores</div>
+            <div class="val" style="color:#0f172a;">{total_sensors}</div>
+          </div>
+          <div class="wmlib-kpi accent" style="border-left-color:#3b82f6;">
+            <div class="lbl">Vigilancia</div>
+            <div class="val" style="color:#3b82f6;">{n_watch}</div>
+          </div>
+          <div class="wmlib-kpi accent" style="border-left-color:#f59e0b;">
+            <div class="lbl">Atención</div>
+            <div class="val" style="color:#f59e0b;">{n_warn}</div>
+          </div>
+          <div class="wmlib-kpi accent" style="border-left-color:#dc2626;">
+            <div class="lbl">Crítico</div>
+            <div class="val" style="color:#dc2626;">{n_crit}</div>
+          </div>
+        </div>
+        """).strip(),
+        unsafe_allow_html=True,
+    )
+
     # ─── Filtros (Ciclo 23.54) ─────────────────────────────────
     # Search + cliente + severidad. Auto-derivamos las opciones de
     # cliente de los instances cargados — no hay que mantener lista.
@@ -2669,6 +2734,28 @@ def _render_machinery_table(filtered: List[Tuple[str, Any]]) -> None:
     for inst_id, inst in filtered:
         _render_machinery_row(inst, inst_id)
 
+    # Leyenda de severidad ISO 20816 — explica el código de color de las
+    # bandas laterales y los badges, alineado con el cockpit de KPIs.
+    st.markdown(
+        '<div style="display:flex;flex-wrap:wrap;gap:16px;margin:10px 2px 0;'
+        'font-size:11px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;">'
+        + "".join(
+            f'<span><span style="display:inline-block;width:9px;height:9px;'
+            f'border-radius:2px;background:{c};margin-right:5px;'
+            f'vertical-align:middle;"></span>{lbl}</span>'
+            for c, lbl in [
+                ("#10b981", "Condición aceptable"),
+                ("#3b82f6", "Vigilancia"),
+                ("#f59e0b", "Atención"),
+                ("#dc2626", "Crítico / acción requerida"),
+                ("#94a3b8", "Sin análisis"),
+            ]
+        )
+        + '<span style="margin-left:auto;font-style:italic;">ISO 20816</span>'
+        + '</div>',
+        unsafe_allow_html=True,
+    )
+
 
 def _render_machinery_row(inst: Any, inst_id: str) -> None:
     """Una fila de la tabla minimalista."""
@@ -2703,9 +2790,13 @@ def _render_machinery_row(inst: Any, inst_id: str) -> None:
             'border-radius:50%;background:#2563eb;margin-right:6px;'
             'vertical-align:middle;"></span>' if is_active else ''
         )
+        # Banda de severidad a la izquierda (ISO 20816) — cue de color
+        # que permite escanear el estado de toda la flota verticalmente.
         st.markdown(
+            f'<div style="border-left:4px solid {sev_color};padding-left:10px;">'
             f'<div class="wmlib-tag">{active_dot}{tag}</div>'
-            f'<div class="wmlib-sub">{inst_id[:12]}{"…" if len(inst_id) > 12 else ""}</div>',
+            f'<div class="wmlib-sub">{inst_id[:12]}{"…" if len(inst_id) > 12 else ""}</div>'
+            f'</div>',
             unsafe_allow_html=True,
         )
 
@@ -2722,9 +2813,21 @@ def _render_machinery_row(inst: Any, inst_id: str) -> None:
             st.markdown('<span class="wmlib-dim">—</span>', unsafe_allow_html=True)
 
     with c3:
-        if train:
+        train_parts = [p for p in [driver, driven] if p]
+        if train_parts:
+            sep = (
+                '<span style="color:#cbd5e1;font-size:11px;'
+                'margin:0 3px;vertical-align:middle;">→</span>'
+            )
+            chips = sep.join(
+                f'<span style="display:inline-block;padding:2px 8px;'
+                f'background:#f3f4f6;border:1px solid #e5e7eb;border-radius:6px;'
+                f'font-size:11px;color:#334155;margin:1px 0;'
+                f'font-family:ui-monospace,\'SF Mono\',Menlo,monospace;">{p}</span>'
+                for p in train_parts
+            )
             st.markdown(
-                f'<div class="wmlib-train">{train}</div>',
+                f'<div class="wmlib-train">{chips}</div>',
                 unsafe_allow_html=True,
             )
         else:
@@ -2736,7 +2839,10 @@ def _render_machinery_row(inst: Any, inst_id: str) -> None:
     with c4:
         st.markdown(
             f'<div style="text-align:right;">'
-            f'<div class="wmlib-count">{n_sensors}</div>'
+            f'<div class="wmlib-count">'
+            f'<span style="display:inline-block;width:7px;height:7px;'
+            f'border-radius:50%;background:{sev_color};margin-right:5px;'
+            f'vertical-align:middle;"></span>{n_sensors}</div>'
             f'<div class="wmlib-count-sub">{n_docs} docs</div>'
             f'</div>',
             unsafe_allow_html=True,
