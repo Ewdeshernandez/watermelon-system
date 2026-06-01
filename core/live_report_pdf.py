@@ -256,3 +256,47 @@ def generate_live_report_pdf(
 
     doc.build(story)
     return buf.getvalue()
+
+
+def render_trend_png(sensor_series: List[Dict[str, Any]],
+                     alarm: float = 0.0, danger: float = 0.0,
+                     y_title: str = "valor") -> Optional[bytes]:
+    """Renderiza el gráfico de tendencia a PNG para embeber en el PDF.
+
+    sensor_series: lista de {label, x (lista datetime), y (lista float), color}
+    Devuelve PNG bytes o None si kaleido/plotly no están disponibles
+    (degradación graceful — el PDF se genera igual sin la tendencia).
+    """
+    try:
+        import plotly.graph_objects as go
+    except Exception:
+        return None
+    try:
+        fig = go.Figure()
+        if danger > 0:
+            fig.add_hline(y=danger, line=dict(color="#dc2626", width=1.2, dash="dash"),
+                          annotation_text="Danger ", annotation_position="left",
+                          annotation=dict(font=dict(color="#dc2626", size=9)))
+        if alarm > 0:
+            fig.add_hline(y=alarm, line=dict(color="#d97706", width=1.2, dash="dash"),
+                          annotation_text="Alarma ", annotation_position="left",
+                          annotation=dict(font=dict(color="#d97706", size=9)))
+        for s in sensor_series:
+            fig.add_trace(go.Scatter(
+                x=s.get("x", []), y=s.get("y", []), mode="lines",
+                line=dict(color=s.get("color", "#1e40af"), width=1.6, shape="spline", smoothing=0.6),
+                name=s.get("label", ""),
+            ))
+        fig.update_layout(
+            height=320, width=1000, plot_bgcolor="white", paper_bgcolor="white",
+            margin=dict(l=55, r=20, t=30, b=30),
+            font=dict(size=11, color="#475569"),
+            xaxis=dict(showgrid=True, gridcolor="#f1f5f9", showline=True, linecolor="#e5edf7"),
+            yaxis=dict(showgrid=True, gridcolor="#f1f5f9", title=y_title,
+                       showline=True, linecolor="#e5edf7"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1,
+                        font=dict(size=10), bgcolor="rgba(0,0,0,0)"),
+        )
+        return fig.to_image(format="png", scale=2)
+    except Exception:
+        return None

@@ -2018,6 +2018,112 @@ def health_gauge_svg(score: Optional[int], color: str, size: int = 86) -> str:
     )
 
 
+def _build_live_report_pdf(
+    instance_id: str, instance_obj: Any,
+    latest: List[Dict[str, Any]],
+    rendered_rows: List[Dict[str, Any]],
+    severity_summary: Dict[str, int],
+    spark_data: Dict[str, List[Dict[str, Any]]],
+) -> Optional[bytes]:
+    """Arma el reporte ejecutivo PDF desde el estado actual del Live Monitoring."""
+    try:
+        from core.live_report_pdf import generate_live_report_pdf, render_trend_png
+    except Exception:
+        return None
+
+    # Health + KPIs
+    score, zone, zcolor = compute_health_score(severity_summary, latest)
+    speed_row = next((r for r in latest if (r.get("variable") or "").lower().startswith("velocidad")), None)
+    speed_txt = f"{float(speed_row['value']):.0f} rpm" if speed_row and speed_row.get("value") is not None else "—"
+    n_danger = severity_summary.get("Danger", 0)
+    n_alarm = severity_summary.get("Alarma", 0)
+    status = "Crítica" if n_danger else ("Atención" if n_alarm else "Operación normal")
+    last_txt = "—"
+    if latest:
+        try:
+            oldest = min(latest, key=lambda r: _seconds_since(r["captured_at"]))
+            last_txt = f"hace {_format_age(oldest['captured_at'])}"
+        except Exception:
+            pass
+    health = {"score": score, "zone": zone, "color": zcolor}
+    kpis = {"speed": speed_txt, "status": status, "alarms": n_danger + n_alarm, "last": last_txt}
+
+    # Canales con 1X/2X
+    vec: Dict[str, Dict[str, Any]] = {}
+    for r in latest:
+        s, m = r.get("sensor_label"), r.get("metric")
+        if s and m in ("1X_Ampl", "1X_Phase", "2X_Ampl", "2X_Phase"):
+            vec.setdefault(s, {})[m] = r.get("value")
+
+    def _a(v):
+        try:
+            return f"{float(v):.3f}" if v is not None and float(v) >= 1e-4 else "—"
+        except Exception:
+            return "—"
+
+    def _p(a, p):
+        try:
+            if a is None or float(a) < 1e-4 or p is None or abs(float(p)) < 1e-30:
+                return "—"
+            return f"{float(p):.0f}°"
+        except Exception:
+            return "—"
+
+    channels = []
+    for r in rendered_rows:
+        sl = r["sensor_label"]
+        v = vec.get(sl, {})
+        try:
+            val = f"{float(r['value']):.3f}" if r["value"] is not None else "—"
+        except Exception:
+            val = "—"
+        channels.append({
+            "sensor_label": sl, "plane_label": r.get("plane_label") or "—",
+            "value": val, "unit": r["unit"], "status": r["status"],
+            "x1_amp": _a(v.get("1X_Ampl")), "x1_ph": _p(v.get("1X_Ampl"), v.get("1X_Phase")),
+            "x2_amp": _a(v.get("2X_Ampl")), "x2_ph": _p(v.get("2X_Ampl"), v.get("2X_Phase")),
+        })
+
+    # Eventos
+    _slookup = _build_sensor_lookup(instance_obj)
+    ev = detect_severity_events(spark_data, _slookup, instance_obj, max_events=8)
+    events = [{"sensor_label": e["sensor_label"], "to": e["to"], "value": e["value"],
+               "unit": e["unit"], "age": _format_age(e.get("captured_at", "")), "rising": e["rising"]}
+              for e in ev]
+
+    # Tendencia PNG — los canales que comparten unidad (mismo grupo del overview)
+    trend_png = None
+    try:
+        by_unit: Dict[str, List[str]] = {}
+        for r in rendered_rows:
+            by_unit.setdefault(r["unit"], []).append(r["sensor_label"])
+        if by_unit:
+            unit_grp = max(by_unit.values(), key=len)[:4]
+            palette = ["#1e40af", "#0891b2", "#7c3aed", "#be185d"]
+            series = []
+            for i, sl in enumerate(unit_grp):
+                hist = spark_data.get(sl, [])
+                xs = [h.get("captured_at") for h in hist if h.get("value") is not None]
+                ys = [h.get("value") for h in hist if h.get("value") is not None]
+                if len(ys) >= 2:
+                    series.append({"label": sl, "x": xs, "y": ys, "color": palette[i % len(palette)]})
+            if series:
+                rr0 = next((r for r in rendered_rows if r["sensor_label"] in unit_grp), None)
+                trend_png = render_trend_png(
+                    series,
+                    alarm=rr0.get("alarm_used", 0) or 0 if rr0 else 0,
+                    danger=rr0.get("danger_used", 0) or 0 if rr0 else 0,
+                    y_title=rr0["unit"] if rr0 else "valor",
+                )
+    except Exception:
+        trend_png = None
+
+    try:
+        return generate_live_report_pdf(instance_id, instance_obj, health, kpis, channels, events, trend_png)
+    except Exception:
+        return None
+
+
 @st.fragment(run_every=10)
 def _live_header_fragment(instance_obj, instance_id: str, sensor_lookup: Dict[str, Any]) -> None:
     """Fragment auto-refrescante (10s) de la barra de estado en vivo.
@@ -3470,6 +3576,33 @@ def main() -> None:
     # huérfana, solo accesible per-sensor en el zoom). Es la vista que un
     # analista de Bently/System1 mira primero: ¿la vibración sube o está
     # estable? Multi-canal overlay. Expander abierto por defecto.
+    # Ciclo 23.146 — Reporte ejecutivo PDF (1 página, branding SIGA) con
+    # los valores ACTUALES del activo: salud, tendencia, tabla API 670 y
+    # eventos. Es la entrega premium al cliente — el "executive summary"
+    # que pelea contra los reportes rígidos de Emerson/Bently.
+    col_rep, _sp = st.columns([1.4, 4])
+    with col_rep:
+        if st.button("📄 Descargar reporte PDF", use_container_width=True,
+                     key=f"live_pdf_{instance_id}",
+                     help="Reporte ejecutivo de 1 página con el estado actual del activo"):
+            with st.spinner("Generando reporte ejecutivo…"):
+                pdf_bytes = _build_live_report_pdf(
+                    instance_id, instance_obj, latest,
+                    rendered_rows, severity_summary, spark_data,
+                )
+            if pdf_bytes:
+                _stamp = datetime.now().strftime("%Y%m%d_%H%M")
+                st.download_button(
+                    "Descargar PDF listo ✓",
+                    data=pdf_bytes,
+                    file_name=f"Reporte_{instance_id}_{_stamp}.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                    key=f"live_pdf_dl_{instance_id}",
+                )
+            else:
+                st.error("No se pudo generar el reporte. Verificá que haya lecturas activas.")
+
     # Ciclo 23.142 — Event List estilo System1: registro cronológico de
     # cruces de umbral (Normal→Alarma→Danger) por canal en la ventana
     # reciente. Da contexto temporal: no solo "está en alarma" sino
