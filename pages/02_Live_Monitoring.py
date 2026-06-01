@@ -2430,6 +2430,97 @@ render_kpi_strip = render_status_bar
 # Tabla principal — Valores Actuales (con sparklines y location)
 # ============================================================
 
+def detect_severity_events(
+    spark_data: Dict[str, List[Dict[str, Any]]],
+    sensor_lookup: Dict[str, Dict[str, Any]],
+    instance_obj: Any = None,
+    max_events: int = 12,
+) -> List[Dict[str, Any]]:
+    """Detecta transiciones de severidad por canal (Event List estilo System1).
+
+    Recorre el histórico reciente de cada sensor en orden cronológico y
+    registra cuándo cambió de estado (Normal→Alarma, Alarma→Danger, etc.).
+    Devuelve los eventos más recientes ordenados desc por tiempo.
+    """
+    rank = {"Normal": 0, "Sin Norma": 0, "No Data": 0, "Alarma": 1, "Danger": 2}
+    events: List[Dict[str, Any]] = []
+    for sensor_label, history in (spark_data or {}).items():
+        if not history or len(history) < 2:
+            continue
+        sensor_match = sensor_lookup.get(sensor_label)
+        prev_status: Optional[str] = None
+        for h in history:  # cronológico ascendente (viejo→reciente)
+            val = h.get("value")
+            unit = h.get("unit") or ""
+            if val is None:
+                continue
+            sev = compute_severity(val, sensor_match, unit, instance_obj)
+            status = sev["status"]
+            if prev_status is not None and rank.get(status, 0) != rank.get(prev_status, 0):
+                # Solo registramos cruces hacia/desde alarma o danger
+                if rank.get(status, 0) > 0 or rank.get(prev_status, 0) > 0:
+                    rising = rank.get(status, 0) > rank.get(prev_status, 0)
+                    events.append({
+                        "sensor_label": sensor_label,
+                        "from": prev_status,
+                        "to": status,
+                        "rising": rising,
+                        "value": val,
+                        "unit": unit,
+                        "captured_at": h.get("captured_at"),
+                        "fg": sev["fg"],
+                        "bg": sev["bg"],
+                    })
+            prev_status = status
+    events.sort(key=lambda e: e.get("captured_at") or "", reverse=True)
+    return events[:max_events]
+
+
+def render_event_timeline(events: List[Dict[str, Any]]) -> None:
+    """Franja cronológica de eventos de severidad — estilo System1 Event List."""
+    if not events:
+        st.markdown(
+            '<div style="display:flex;align-items:center;gap:10px;padding:10px 16px;'
+            'background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;'
+            'margin:4px 0 12px 0;font-size:12px;color:#166534;">'
+            '<span style="font-size:15px;">✓</span>'
+            'Sin eventos de alarma en la ventana reciente — operación estable.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+        return
+    rows = []
+    for e in events:
+        age = _format_age(e.get("captured_at", ""))
+        arrow = "↑" if e["rising"] else "↓"
+        arrow_color = "#dc2626" if e["rising"] else "#16a34a"
+        to_label = e["to"]
+        try:
+            val_txt = f"{float(e['value']):,.3f} {e['unit']}"
+        except Exception:
+            val_txt = "—"
+        rows.append(
+            f'<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;'
+            f'border-bottom:1px solid #f1f5f9;font-size:12px;">'
+            f'<span style="font-size:14px;color:{arrow_color};font-weight:800;width:14px;">{arrow}</span>'
+            f'<span style="font-family:monospace;font-weight:700;color:#0f172a;min-width:52px;">{e["sensor_label"]}</span>'
+            f'<span style="padding:2px 9px;border-radius:12px;background:{e["bg"]};color:{e["fg"]};'
+            f'font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;">{to_label}</span>'
+            f'<span style="color:#475569;font-family:monospace;">{val_txt}</span>'
+            f'<span style="margin-left:auto;color:#94a3b8;font-size:11px;">hace {age}</span>'
+            f'</div>'
+        )
+    st.markdown(
+        '<div style="background:#fff;border:1px solid #e5edf7;border-radius:12px;'
+        'overflow:hidden;margin:4px 0 12px 0;">'
+        '<div style="padding:9px 14px;background:linear-gradient(180deg,#f8fafc,#eef2f7);'
+        'border-bottom:2px solid #d9e8fb;font-size:10px;font-weight:800;color:#1d4ed8;'
+        'text-transform:uppercase;letter-spacing:0.08em;">Registro de eventos · últimos cruces de umbral</div>'
+        + "".join(rows) + '</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def compute_rendered_rows(
     latest: List[Dict[str, Any]],
     sensor_lookup: Dict[str, Dict[str, Any]],
@@ -3346,6 +3437,18 @@ def main() -> None:
     # huérfana, solo accesible per-sensor en el zoom). Es la vista que un
     # analista de Bently/System1 mira primero: ¿la vibración sube o está
     # estable? Multi-canal overlay. Expander abierto por defecto.
+    # Ciclo 23.142 — Event List estilo System1: registro cronológico de
+    # cruces de umbral (Normal→Alarma→Danger) por canal en la ventana
+    # reciente. Da contexto temporal: no solo "está en alarma" sino
+    # "entró en alarma hace 12 min".
+    try:
+        events = detect_severity_events(spark_data, sensor_lookup, instance_obj)
+        with st.expander("🔔 Registro de eventos — cruces de umbral", expanded=True):
+            render_event_timeline(events)
+    except Exception as e:
+        import logging
+        logging.warning("event timeline (overview) failed: %s", e)
+
     try:
         with st.expander("📈 Tendencia overall — vibración en el tiempo", expanded=True):
             render_history_chart(instance_id, latest, sensor_lookup, instance_obj)
