@@ -55,7 +55,6 @@ def generate_live_report_pdf(
     channels: List[Dict[str, Any]],
     events: List[Dict[str, Any]],
     trend_png: Optional[bytes] = None,
-    train_png: Optional[bytes] = None,
 ) -> bytes:
     """Genera el PDF ejecutivo de 1 página. Devuelve bytes.
 
@@ -102,7 +101,7 @@ def generate_live_report_pdf(
 
     # ---------- Header ----------
     logo_cell = ""
-    logo_path = Path(__file__).resolve().parent.parent / "assets" / "siga_logo.png"
+    logo_path = Path(__file__).resolve().parent.parent / "assets" / "watermelon_logo.png"
     header_left = []
     tag = getattr(instance_obj, "tag", "") or instance_id
     driver = " ".join(p for p in [getattr(instance_obj, "driver_manufacturer", ""),
@@ -123,7 +122,7 @@ def generate_live_report_pdf(
 
     if logo_path.exists():
         try:
-            logo_cell = Image(str(logo_path), width=3.2 * cm, height=3.2 * cm * 0.32)
+            logo_cell = Image(str(logo_path), width=3.6 * cm, height=3.6 * cm * 0.494)
             logo_cell.hAlign = "RIGHT"
         except Exception:
             logo_cell = ""
@@ -167,14 +166,6 @@ def generate_live_report_pdf(
     story.append(kpi_tbl)
     story.append(Paragraph(f"Zona ISO: {zone}", st_meta))
     story.append(Spacer(1, 6))
-
-    # ---------- Diagrama del tren (si hay PNG) ----------
-    if train_png:
-        try:
-            story.append(Image(BytesIO(train_png), width=18 * cm, height=4.3 * cm))
-            story.append(Spacer(1, 2))
-        except Exception:
-            pass
 
     # ---------- Tendencia (si hay PNG) ----------
     if trend_png:
@@ -311,69 +302,3 @@ def render_trend_png(sensor_series: List[Dict[str, Any]],
         return None
 
 
-def render_train_png(driver_label: str, driven_label: str,
-                     channels: List[Dict[str, Any]]) -> Optional[bytes]:
-    """Esquema horizontal del tren (driver → coupling → driven) con dots de
-    severidad por sensor, dibujado en plotly (nativo, funciona en Render sin
-    libcairo). channels: [{sensor_label, plane_label, status, side}] donde
-    side ∈ {'driver','driven'}. Devuelve PNG o None.
-    """
-    try:
-        import plotly.graph_objects as go
-    except Exception:
-        return None
-    try:
-        fig = go.Figure()
-        # Cuerpos: driver (izq) y driven (der) como rectángulos redondeados
-        def _body(x0, x1, color, label):
-            fig.add_shape(type="rect", x0=x0, y0=-0.55, x1=x1, y1=0.55,
-                          line=dict(color="#cbd5e1", width=1.2), fillcolor=color)
-            fig.add_annotation(x=(x0+x1)/2, y=0.78, text=f"<b>{label}</b>", showarrow=False,
-                               font=dict(size=13, color="#1e3a8a"))
-        _body(0.3, 3.7, "#eef2f7", driver_label or "Driver")
-        _body(6.3, 9.7, "#eef2f7", driven_label or "Driven")
-        # Coupling
-        fig.add_shape(type="rect", x0=4.4, y0=-0.18, x1=5.6, y1=0.18,
-                      line=dict(color="#92400e", width=1), fillcolor="#b45309")
-        # Eje
-        fig.add_shape(type="line", x0=3.7, y0=0, x1=6.3, y1=0,
-                      line=dict(color="#334155", width=3))
-
-        # Posiciones de sensores: driver bearings 1,2 / driven 3,4
-        # X aproximado de cada bearing
-        bx = {"1": 1.3, "2": 3.2, "3": 6.8, "4": 8.7}
-        cmap = {"Danger": "#E24B4A", "Alarma": "#EF9F27", "Normal": "#1D9E75"}
-        placed = {}
-        for c in channels:
-            sl = c.get("sensor_label", "")
-            num = sl[0] if sl and sl[0].isdigit() else None
-            if num not in bx:
-                continue
-            x = bx[num]
-            # alternar arriba/abajo por dirección X/Y para no encimar
-            updown = 1 if ("Y" in sl.upper()) else -1
-            key = (num, updown)
-            y = updown * (0.55 + 0.32 * (placed.get(key, 0) + 1))
-            placed[key] = placed.get(key, 0) + 1
-            color = cmap.get(c.get("status", "Normal"), "#1D9E75")
-            fig.add_trace(go.Scatter(
-                x=[x], y=[y], mode="markers+text",
-                marker=dict(size=15, color=color, line=dict(color="white", width=2)),
-                text=[f"{sl.replace('_','')}"], textposition="middle right",
-                textfont=dict(size=9, color="#0f172a", family="monospace"),
-                hoverinfo="skip", showlegend=False,
-            ))
-            # línea fina del dot al eje del bearing
-            fig.add_shape(type="line", x0=x, y0=updown*0.55, x1=x, y1=y,
-                          line=dict(color="#cbd5e1", width=1))
-
-        fig.update_layout(
-            height=240, width=1000, plot_bgcolor="white", paper_bgcolor="white",
-            margin=dict(l=10, r=10, t=30, b=10),
-            xaxis=dict(visible=False, range=[-0.2, 10.6]),
-            yaxis=dict(visible=False, range=[-2.2, 2.2]),
-            showlegend=False,
-        )
-        return fig.to_image(format="png", scale=2)
-    except Exception:
-        return None

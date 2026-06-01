@@ -2027,7 +2027,7 @@ def _build_live_report_pdf(
 ) -> Optional[bytes]:
     """Arma el reporte ejecutivo PDF desde el estado actual del Live Monitoring."""
     try:
-        from core.live_report_pdf import generate_live_report_pdf, render_trend_png, render_train_png
+        from core.live_report_pdf import generate_live_report_pdf, render_trend_png
     except Exception:
         return None
 
@@ -2085,9 +2085,14 @@ def _build_live_report_pdf(
         })
 
     # Eventos
+    def _ev_val(v):
+        try:
+            return f"{float(v):.2f}"
+        except Exception:
+            return "—"
     _slookup = _build_sensor_lookup(instance_obj)
     ev = detect_severity_events(spark_data, _slookup, instance_obj, max_events=8)
-    events = [{"sensor_label": e["sensor_label"], "to": e["to"], "value": e["value"],
+    events = [{"sensor_label": e["sensor_label"], "to": e["to"], "value": _ev_val(e["value"]),
                "unit": e["unit"], "age": _format_age(e.get("captured_at", "")), "rising": e["rising"]}
               for e in ev]
 
@@ -2118,20 +2123,9 @@ def _build_live_report_pdf(
     except Exception:
         trend_png = None
 
-    # Diagrama del tren (esquema plotly con dots de severidad)
-    train_png = None
-    try:
-        drv_lbl = (getattr(instance_obj, "driver_model", "") or "Driver").strip()
-        drvn_lbl = (getattr(instance_obj, "driven_model", "") or "Driven").strip()
-        train_channels = [{"sensor_label": r["sensor_label"], "status": r["status"]}
-                          for r in rendered_rows]
-        train_png = render_train_png(drv_lbl, drvn_lbl, train_channels)
-    except Exception:
-        train_png = None
-
     try:
         return generate_live_report_pdf(instance_id, instance_obj, health, kpis,
-                                        channels, events, trend_png, train_png)
+                                        channels, events, trend_png)
     except Exception:
         return None
 
