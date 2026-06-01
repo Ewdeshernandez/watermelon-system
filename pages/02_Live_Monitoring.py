@@ -2634,11 +2634,13 @@ def render_channels_table(
 def render_api670_table(
     rendered_rows: List[Dict[str, Any]],
     latest: List[Dict[str, Any]],
+    spark_data: Optional[Dict[str, List[Dict[str, Any]]]] = None,
 ) -> None:
-    """Tabla densa API 670: por canal, Overall + descomposición 1X/2X
-    (amplitud ∠ fase). 1X = desbalance, 2X = desalineamiento — lenguaje
-    estándar de System1/AMS. Combina las filas Direct con las 1X/2X.
+    """Tabla densa API 670: por canal, Overall + tendencia + descomposición
+    1X/2X (amplitud ∠ fase). 1X = desbalance, 2X = desalineamiento —
+    lenguaje estándar de System1/AMS. Combina las filas Direct con las 1X/2X.
     """
+    spark_data = spark_data or {}
     # Indexar componentes síncronas por sensor
     vec: Dict[str, Dict[str, Any]] = {}
     for r in latest:
@@ -2671,6 +2673,11 @@ def render_api670_table(
         except Exception:
             val = "—"
         row_class = "row-alarm" if r["status"] == "Alarma" else ("row-danger" if r["status"] == "Danger" else "")
+        # Sparkline de tendencia embebida (mismo dato que el sensor map)
+        hist = spark_data.get(sl, [])
+        svals = [h.get("value") for h in hist if h.get("value") is not None]
+        scolor = "#ef4444" if r["status"] == "Danger" else ("#f59e0b" if r["status"] == "Alarma" else "#3b82f6")
+        spark = sparkline_svg(svals, color=scolor, width=70, height=20) if len(svals) >= 2 else "—"
         body.append(
             f'<tr class="{row_class}">'
             f'<td>{status_pill_html(r["status"], r["fg"], r["bg"])}</td>'
@@ -2678,6 +2685,7 @@ def render_api670_table(
             f'<td class="col-mono">{r.get("plane_label") or "—"}</td>'
             f'<td class="col-num">{val}</td>'
             f'<td class="col-mono">{r["unit"]}</td>'
+            f'<td>{spark}</td>'
             f'<td class="col-num">{_amp(v.get("1X_Ampl"))}</td>'
             f'<td class="col-mono">{_ph(v.get("1X_Ampl"), v.get("1X_Phase"))}</td>'
             f'<td class="col-num">{_amp(v.get("2X_Ampl"))}</td>'
@@ -2690,7 +2698,7 @@ def render_api670_table(
     table_html = (
         '<table class="wm-live-table"><thead><tr>'
         '<th>Estado</th><th>Canal</th><th>Ubicación</th>'
-        '<th style="text-align:right;">Overall</th><th>Unit</th>'
+        '<th style="text-align:right;">Overall</th><th>Unit</th><th>Tendencia</th>'
         '<th style="text-align:right;">1X ampl</th><th>1X fase</th>'
         '<th style="text-align:right;">2X ampl</th><th>2X fase</th>'
         '</tr></thead><tbody>' + "\n".join(body) + '</tbody></table>'
@@ -2885,16 +2893,30 @@ def render_history_chart(
     ])
     labels = [f"{s} — {v}" for (s, v) in options]
 
-    # Multi-sensor selector (Ciclo 23.56)
+    # Multi-sensor selector (Ciclo 23.56; default mejorado 23.143)
+    # Default: hasta 4 canales que comparten la MISMA unidad (overlay
+    # comparable, ej. todos los desplazamientos mil pp del generador), en
+    # vez de 1 solo. Da una vista cross-canal inmediata estilo System1.
+    def _default_labels() -> List[str]:
+        by_unit: Dict[str, List[str]] = {}
+        for (s, v), lbl in zip(options, labels):
+            u = next((r.get("unit", "") for r in direct_rows
+                      if (r.get("sensor_label") or "—") == s and r.get("variable") == v), "")
+            by_unit.setdefault(u, []).append(lbl)
+        # el grupo de unidad más numeroso, hasta 4
+        best = max(by_unit.values(), key=len) if by_unit else labels[:1]
+        return best[:4] if best else labels[:1]
+
     col_var, col_range = st.columns([3, 1])
     with col_var:
         chosen_labels = st.multiselect(
             "📈 Sensores a graficar (1 o varios — overlay)",
             labels,
-            default=labels[:1],  # por defecto el primero
+            default=_default_labels(),
             key="live_history_vars_multi",
             help="Seleccioná uno o varios sensores. Útil para comparar 1YA vs 2YA, "
-                 "o ver patrones cross-sensor de un eventos de carga.",
+                 "o ver patrones cross-sensor de un evento de carga. Por defecto "
+                 "se muestran los canales que comparten unidad para overlay comparable.",
         )
     with col_range:
         range_choice = st.selectbox(
@@ -3460,7 +3482,7 @@ def main() -> None:
     # analista (desbalance vs desalineamiento) que pelea con System1/AMS.
     try:
         with st.expander("📋 Canales — Overall + vectores 1X / 2X (API 670)", expanded=False):
-            render_api670_table(rendered_rows, latest)
+            render_api670_table(rendered_rows, latest, spark_data)
     except Exception as e:
         import logging
         logging.warning("render_api670_table (overview) failed: %s", e)
