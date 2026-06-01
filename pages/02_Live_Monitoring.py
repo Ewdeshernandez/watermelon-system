@@ -3015,10 +3015,10 @@ def render_history_chart(
                           fillcolor="#ef4444", opacity=0.05, line_width=0, layer="below")
             # Líneas de umbral punteadas
             fig.add_hline(y=danger, line=dict(color="#dc2626", width=1.2, dash="dash"),
-                          annotation_text="  Danger", annotation_position="right",
+                          annotation_text="Danger ", annotation_position="left",
                           annotation=dict(font=dict(color="#dc2626", size=10, family="monospace")))
             fig.add_hline(y=alarm, line=dict(color="#d97706", width=1.2, dash="dash"),
-                          annotation_text="  Alarma", annotation_position="right",
+                          annotation_text="Alarma ", annotation_position="left",
                           annotation=dict(font=dict(color="#d97706", size=10, family="monospace")))
 
         # Paleta corporativa (navy + accent variants — coherente con el design system)
@@ -3045,7 +3045,7 @@ def render_history_chart(
         y_title = list(units)[0] if len(units) == 1 else "valor"
 
         fig.update_layout(
-            margin=dict(l=10, r=60, t=30, b=10),
+            margin=dict(l=60, r=20, t=40, b=10),
             height=420,
             plot_bgcolor="white",
             paper_bgcolor="white",
@@ -3067,7 +3067,7 @@ def render_history_chart(
             hovermode="x unified",
         )
         st.plotly_chart(fig, use_container_width=True,
-                        config={"displaylogo": False,
+                        config={"displaylogo": False, "displayModeBar": "hover",
                                 "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"]})
 
         # Caption si bands omitidas
