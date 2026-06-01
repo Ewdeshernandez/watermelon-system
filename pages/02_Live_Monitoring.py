@@ -3634,14 +3634,14 @@ def main() -> None:
     # "entró en alarma hace 12 min".
     try:
         events = detect_severity_events(spark_data, sensor_lookup, instance_obj)
-        with st.expander("Registro de eventos — cruces de umbral", expanded=True):
+        with st.expander("Registro de eventos — cruces de umbral", expanded=False):
             render_event_timeline(events)
     except Exception as e:
         import logging
         logging.warning("event timeline (overview) failed: %s", e)
 
     try:
-        with st.expander("Tendencia overall — vibración en el tiempo", expanded=True):
+        with st.expander("Tendencia overall — vibración en el tiempo", expanded=False):
             render_history_chart(instance_id, latest, sensor_lookup, instance_obj)
     except Exception as e:
         import logging
@@ -3656,25 +3656,21 @@ def main() -> None:
         import logging
         logging.warning("render_api670_table (overview) failed: %s", e)
 
-    # Ciclo 23.83 — Sección "📊 Últimos análisis" para el cliente.
-    # Muestra cards con los snapshots más recientes (Waveform, Spectrum,
-    # Orbit, Tabular) que el especialista subió desde Load Data.
+    # Ciclo 23.148 — Análisis avanzado (Forma de onda · Espectro · Órbita)
+    # dentro de un desplegable colapsado por defecto, para mantener el
+    # overview limpio y minimalista. (Se quitó "Tabular List" por ser
+    # redundante con la tabla de Canales API 670, y la sección de
+    # HISTÓRICO/ZIP/Enviar al cliente por no aportar — el envío al cliente
+    # se hará desde el reporte ejecutivo PDF.)
     try:
         from core.recent_analyses_widget import render_recent_analyses_section
-        render_recent_analyses_section(instance_id)
+        with st.expander("Análisis avanzado — Forma de onda · Espectro · Órbita",
+                         expanded=False):
+            render_recent_analyses_section(instance_id)
     except Exception as e:
         # Falla silenciosa — la sección es opcional, no debe romper la página
         import logging
         logging.warning("recent_analyses_widget failed: %s", e)
-
-    # Ciclo 23.84 — Sección "📦 Exportar histórico" para envío al cliente.
-    # Permite generar ZIP local o subir + enviar link por email.
-    try:
-        from core.history_export_widget import render_history_export_section
-        render_history_export_section(instance_id, instance_obj)
-    except Exception as e:
-        import logging
-        logging.warning("history_export_widget failed: %s", e)
 
     # Sensor selection (Ciclo 23.33) — selectbox discreto debajo del
     # diagrama. Razón técnica para no usar click directo en SVG:

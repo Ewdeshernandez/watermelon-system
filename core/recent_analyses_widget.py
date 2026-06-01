@@ -63,16 +63,8 @@ ANALYSIS_TYPES = [
         "render_fn": "_render_orbit_detail",
         "data_key": "bearings",
     },
-    {
-        "key": "tabular",
-        "icon": "",
-        "label": "Tabular List",
-        "module": "core.tabular_history",
-        "list_fn": "list_tabular_snapshots",
-        "load_fn": "load_tabular_snapshot",
-        "render_fn": "_render_tabular_detail",
-        "data_key": "channels",
-    },
+    # Ciclo 23.148 — "Tabular List" se quitó: es redundante con la tabla
+    # "Canales — Overall + vectores 1X/2X (API 670)" del overview.
 ]
 
 
@@ -452,8 +444,8 @@ def render_recent_analyses_section(instance_id: str) -> None:
     # Ciclo 23.126 — Sin header "ÚLTIMA DATA". Los labels de cada card
     # son auto-descriptivos. Menos chrome, más data.
 
-    # Render cards en 4 columnas
-    cols = st.columns(4)
+    # Render cards (una columna por tipo de análisis)
+    cols = st.columns(len(ANALYSIS_TYPES))
     for idx, atype in enumerate(ANALYSIS_TYPES):
         with cols[idx]:
             meta = metadata_by_type[atype["key"]]
