@@ -1855,41 +1855,61 @@ def render_sensor_zoom_panel(
 
                 try:
                     import plotly.graph_objects as go
+                    # Paleta corporativa IDÉNTICA a la tendencia overall del
+                    # overview (coherencia del design system).
                     palette = [
-                        "#1d4ed8", "#b45309", "#15803d", "#7c3aed",
-                        "#dc2626", "#0e7490", "#be185d", "#525252",
+                        "#1e40af", "#0891b2", "#7c3aed", "#be185d",
+                        "#15803d", "#b45309", "#475569", "#dc2626",
                     ]
                     fig = go.Figure()
 
+                    # Umbrales: línea punteada + tinte muy sutil de la zona
+                    # danger, etiquetas a la IZQUIERDA — mismo estilo que la
+                    # tendencia overall.
                     if show_bands and danger_val > 0:
                         y_max = max(df_trend["value"].max(), danger_val) * 1.08
                         fig.add_hrect(
-                            y0=danger_val, y1=y_max,
+                            y0=danger_val, y1=y_max * 1.05,
                             fillcolor="#ef4444", opacity=0.05, line_width=0, layer="below",
                         )
                         fig.add_hline(
                             y=danger_val, line=dict(color="#dc2626", width=1.2, dash="dash"),
-                            annotation_text="  Danger", annotation_position="right",
-                            annotation=dict(font=dict(color="#dc2626", size=10, family="monospace")),
+                            annotation_text="Danger", annotation_position="top left",
+                            annotation=dict(font=dict(color="#dc2626", size=10, family="monospace"), xshift=-44),
                         )
                     if show_bands and alarm_val > 0 and danger_val > alarm_val:
                         fig.add_hline(
                             y=alarm_val, line=dict(color="#d97706", width=1.2, dash="dash"),
-                            annotation_text="  Alarma", annotation_position="right",
-                            annotation=dict(font=dict(color="#d97706", size=10, family="monospace")),
+                            annotation_text="Alarma", annotation_position="top left",
+                            annotation=dict(font=dict(color="#d97706", size=10, family="monospace"), xshift=-44),
                         )
 
+                    # Downsampling por buckets de tiempo (mediana, ~240 pts) —
+                    # misma técnica que la tendencia overall para evitar el "blob".
+                    TARGET_POINTS = 240
+
+                    def _downsample_zoom(d_in):
+                        if len(d_in) <= TARGET_POINTS:
+                            return d_in
+                        d = d_in.set_index("captured_at").sort_index()
+                        span = d.index.max() - d.index.min()
+                        secs = max(span.total_seconds(), 1.0)
+                        bucket = max(int(secs / TARGET_POINTS), 1)
+                        agg = d["value"].resample(f"{bucket}s").median().dropna()
+                        return agg.reset_index()
+
                     for idx, s in enumerate(picked):
-                        sub = df_trend[df_trend["sensor_label"] == s]
+                        sub = df_trend[df_trend["sensor_label"] == s][["captured_at", "value"]]
                         if sub.empty:
                             continue
                         color = fg if s == primary else palette[idx % len(palette)]
-                        line_w = 1.8 if s == primary else 1.2
+                        line_w = 1.8 if s == primary else 1.4
+                        ds = _downsample_zoom(sub)
                         fig.add_trace(go.Scatter(
-                            x=sub["captured_at"],
-                            y=sub["value"],
+                            x=ds["captured_at"],
+                            y=ds["value"],
                             mode="lines",
-                            line=dict(color=color, width=line_w),
+                            line=dict(color=color, width=line_w, shape="spline", smoothing=0.6),
                             name=s,
                             hovertemplate=(
                                 f"<b>{s}</b><br>"
@@ -1898,30 +1918,33 @@ def render_sensor_zoom_panel(
                             ),
                         ))
 
+                    y_title = f"{metric_label} ({sensor_unit})" if sensor_unit else metric_label
                     fig.update_layout(
-                        margin=dict(l=10, r=10, t=30, b=10),
+                        margin=dict(l=60, r=20, t=40, b=10),
                         height=420,
                         plot_bgcolor="white",
-                        xaxis=dict(
-                            showgrid=True, gridcolor="#f1f5f9",
-                            title="",
-                            tickformat="%d %b\n%H:%M",
-                        ),
-                        yaxis=dict(
-                            showgrid=True, gridcolor="#f1f5f9",
-                            title=f"{metric_label} ({sensor_unit})" if sensor_unit else metric_label,
-                        ),
+                        paper_bgcolor="white",
+                        font=dict(family="-apple-system, system-ui, sans-serif", size=11, color="#475569"),
+                        xaxis=dict(showgrid=True, gridcolor="#f1f5f9", title="",
+                                   showline=True, linecolor="#e5edf7", zeroline=False,
+                                   tickformat="%d %b\n%H:%M"),
+                        yaxis=dict(showgrid=True, gridcolor="#f1f5f9",
+                                   title=dict(text=y_title, font=dict(family="monospace", size=11)),
+                                   showline=True, linecolor="#e5edf7", zeroline=False,
+                                   tickfont=dict(family="monospace")),
                         showlegend=len(picked) > 1,
                         legend=dict(
                             orientation="h",
                             yanchor="bottom", y=1.02,
                             xanchor="right", x=1,
-                            bgcolor="rgba(255,255,255,0.85)",
-                            bordercolor="#e2e8f0", borderwidth=1,
+                            font=dict(size=11),
+                            bgcolor="rgba(0,0,0,0)",
                         ),
                         hovermode="x unified",
                     )
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True,
+                                    config={"displaylogo": False, "displayModeBar": "hover",
+                                            "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"]})
                 except Exception as e:
                     st.caption(f"(plotly fallback: {e})")
                     pivot = df_trend.pivot_table(
@@ -3687,13 +3710,20 @@ def main() -> None:
         st.markdown(
             textwrap.dedent("""
             <style>
-            /* Selectbox más discreto para drill-down */
+            /* Drill-down selectbox con el MISMO estilo de caja que los
+               expanders de arriba (Análisis avanzado, Canales, etc.):
+               rectángulo, borde gris claro, radio 8px, fondo blanco. */
             div[data-testid="stSelectbox"]:has(input[aria-label="drilldown_select"]) > div > div {
-                background: #f8fafc;
-                border: 1.5px solid #94a3b8;
-                border-radius: 999px;
-                padding: 2px 10px;
-                font-size: 13px;
+                background: #ffffff;
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+                padding: 8px 14px;
+                font-size: 15px;
+                color: #0f172a;
+                transition: border-color 0.15s ease;
+            }
+            div[data-testid="stSelectbox"]:has(input[aria-label="drilldown_select"]) > div > div:hover {
+                border-color: #cbd5e1;
             }
             </style>
             """).strip(),
