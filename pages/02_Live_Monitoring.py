@@ -2016,6 +2016,30 @@ def health_gauge_svg(score: Optional[int], color: str, size: int = 86) -> str:
     )
 
 
+@st.fragment(run_every=10)
+def _live_header_fragment(instance_obj, instance_id: str, sensor_lookup: Dict[str, Any]) -> None:
+    """Fragment auto-refrescante (10s) de la barra de estado en vivo.
+
+    Re-consulta latest_for_instance + recomputa severidad/health y re-dibuja
+    SOLO el header (gauge salud + KPIs + última lectura), sin recargar el
+    resto de la página ni perder el drill-down. Da la sensación "viva" tipo
+    System1/AMS: el contador "hace Xs" y el gauge tickean solos.
+
+    Nota: usa la función no-cacheada latest_for_instance directamente para
+    que cada tick traiga el dato fresco (el cache TTL=15s del overview es
+    para evitar doble-fetch en el render inicial, no para el fragment).
+    """
+    try:
+        latest = latest_for_instance(instance_id)
+    except Exception:
+        latest = None
+    if latest:
+        _rows, _summary = compute_rendered_rows(latest, sensor_lookup, instance_obj)
+    else:
+        _summary = None
+    render_asset_header(instance_obj, instance_id, latest, _summary)
+
+
 def render_asset_header(
     instance_obj,
     instance_id: str,
@@ -3236,7 +3260,14 @@ def main() -> None:
 
     # Asset banner compacto — barra oscura de 1 línea con título + KPIs
     # inline + status pill. Reemplaza la card grande que dominaba la pantalla.
-    render_asset_header(instance_obj, instance_id, latest, severity_summary)
+    #
+    # Ciclo 23.141 — st.fragment con run_every=10s: la barra de estado
+    # (gauge de salud + velocidad + última lectura + alarmas) se re-consulta
+    # y re-renderiza SOLA cada 10s sin recargar toda la página. Esto da la
+    # señal "viva" tipo Bently/System1 (el contador de última lectura y el
+    # gauge tickean en tiempo real) con riesgo mínimo: el fragment está
+    # acotado al header, no toca el sensor map ni el drill-down.
+    _live_header_fragment(instance_obj, instance_id, sensor_lookup)
 
     # Alarm strip prominente arriba si hay danger
     render_alarm_strip(rendered_rows)
