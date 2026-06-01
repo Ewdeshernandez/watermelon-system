@@ -3707,98 +3707,43 @@ def main() -> None:
     selected_sensor = st.query_params.get("sensor")
 
     if direct_labels:
-        st.markdown(
-            textwrap.dedent("""
-            <style>
-            /* Drill-down selectbox con el MISMO estilo de caja que los
-               expanders de arriba (Análisis avanzado, Canales, etc.):
-               rectángulo, borde gris claro, radio 8px, fondo blanco. */
-            div[data-testid="stSelectbox"]:has(input[aria-label="drilldown_select"]) > div > div {
-                background: #ffffff;
-                border: 1px solid #e2e8f0;
-                border-radius: 8px;
-                padding: 8px 14px;
-                font-size: 15px;
-                color: #0f172a;
-                transition: border-color 0.15s ease;
-            }
-            div[data-testid="stSelectbox"]:has(input[aria-label="drilldown_select"]) > div > div:hover {
-                border-color: #cbd5e1;
-            }
-            </style>
-            """).strip(),
-            unsafe_allow_html=True,
-        )
-        sel_options = ["🔍 Análisis detallado — picker un sensor…"] + direct_labels
-        try:
-            sel_idx = sel_options.index(selected_sensor) if selected_sensor in direct_labels else 0
-        except ValueError:
-            sel_idx = 0
-        new_sel = st.selectbox(
-            "drilldown_select",
-            options=sel_options,
-            index=sel_idx,
-            key="live_sensor_drilldown",
-            format_func=lambda x: x.replace("_", "") if x in direct_labels else x,
-            label_visibility="collapsed",
-        )
-        new_value = new_sel if new_sel != "🔍 Análisis detallado — picker un sensor…" else None
-        if new_value != selected_sensor:
-            if new_value:
-                st.query_params["sensor"] = new_value
-            else:
-                st.query_params.clear()
-            st.rerun()
-        selected_sensor = new_value
+        # Expander idéntico a los demás (Registro de eventos, Tendencia,
+        # Canales, Análisis avanzado). Se abre solo si ya hay un sensor
+        # seleccionado vía query param; adentro va el picker + el zoom panel.
+        with st.expander("Análisis detallado — por sensor",
+                         expanded=bool(selected_sensor)):
+            sel_options = ["Elegí un sensor…"] + direct_labels
+            try:
+                sel_idx = sel_options.index(selected_sensor) if selected_sensor in direct_labels else 0
+            except ValueError:
+                sel_idx = 0
+            new_sel = st.selectbox(
+                "drilldown_select",
+                options=sel_options,
+                index=sel_idx,
+                key="live_sensor_drilldown",
+                format_func=lambda x: x.replace("_", "") if x in direct_labels else x,
+                label_visibility="collapsed",
+            )
+            new_value = new_sel if new_sel != "Elegí un sensor…" else None
+            if new_value != selected_sensor:
+                if new_value:
+                    st.query_params["sensor"] = new_value
+                else:
+                    st.query_params.clear()
+                st.rerun()
+            selected_sensor = new_value
 
-    # Zoom panel — si hay sensor seleccionado, render del card focalizado
-    # con trend chart + selector de tipo de gráfico.
-    if selected_sensor:
-        render_sensor_zoom_panel(
-            selected_sensor=selected_sensor,
-            latest=latest,
-            sensor_lookup=sensor_lookup,
-            instance_obj=instance_obj,
-            spark_data=spark_data,
-        )
-    elif direct_labels:
-        # Empty state polish (Ciclo 23.49) — sin sensor seleccionado
-        # mostramos un hint sutil con icono + arrow apuntando al dropdown.
-        # Mejor que vacío silencioso; enseña la affordance al usuario nuevo.
-        st.markdown(
-            textwrap.dedent("""
-            <style>
-            .wm-zoom-hint {
-                display: flex; align-items: center; gap: 12px;
-                margin: 16px 0 24px 0; padding: 14px 18px;
-                background: #f8fbff;
-                border: 1px dashed #c7d9eb;
-                border-radius: 8px;
-                color: #475569;
-                font-size: 13px;
-                font-style: italic;
-            }
-            .wm-zoom-hint-icon {
-                font-size: 22px;
-                opacity: 0.6;
-                animation: wm-zoom-bounce 2s ease-in-out infinite;
-            }
-            @keyframes wm-zoom-bounce {
-                0%, 100% { transform: translateY(0); }
-                50%      { transform: translateY(-3px); }
-            }
-            .wm-zoom-hint b { color: #1e40af; font-style: normal; font-weight: 700; }
-            </style>
-            <div class="wm-zoom-hint">
-                <span class="wm-zoom-hint-icon">⤴</span>
-                <span>
-                    <b>Análisis detallado:</b> seleccioná un sensor en el dropdown de arriba
-                    para ver tendencia, vectores 1X/2X, gap voltage y más.
-                </span>
-            </div>
-            """).strip(),
-            unsafe_allow_html=True,
-        )
+            # Zoom panel inline — trend chart + selector de tipo de gráfico.
+            if selected_sensor:
+                render_sensor_zoom_panel(
+                    selected_sensor=selected_sensor,
+                    latest=latest,
+                    sensor_lookup=sensor_lookup,
+                    instance_obj=instance_obj,
+                    spark_data=spark_data,
+                )
+
     if not has_map and instance_obj is not None and instance_obj.schematic_png:
         # Tiene schematic pero sin posiciones — render sin overlay
         try:
