@@ -1949,6 +1949,73 @@ def render_sensor_zoom_panel(
 # Header & Alarm strip
 # ============================================================
 
+def compute_health_score(
+    severity_summary: Optional[Dict[str, int]],
+    latest: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[Optional[int], str, str]:
+    """Health score 0-100 del activo (lenguaje gerencial estilo AMS/System1).
+
+    Pondera los canales por su peor severidad: Normal no penaliza, Alarma
+    (ISO zona C) penaliza medio, Danger (zona D) penaliza fuerte. Devuelve
+    (score, label_zona, color_hex). score None si no hay data.
+
+    Equivalencia ISO 20816 aproximada:
+      90-100 → Zona A (Normal)    · verde
+      75-89  → Zona B (Vigilancia)· verde-azul
+      50-74  → Zona C (Alerta)    · ámbar
+      0-49   → Zona D (Peligro)   · rojo
+    """
+    if not latest:
+        return None, "Sin datos", "#94a3b8"
+    s = severity_summary or {}
+    n_normal = s.get("Normal", 0)
+    n_alarm = s.get("Alarma", 0)
+    n_danger = s.get("Danger", 0)
+    n_eval = n_normal + n_alarm + n_danger
+    if n_eval == 0:
+        return None, "Sin norma", "#94a3b8"
+    # Penalización: cada alarma resta hasta 18 pts proporcional, cada danger 45.
+    penalty = (n_alarm * 18 + n_danger * 45) / n_eval
+    score = int(round(max(0.0, 100.0 - penalty)))
+    if n_danger > 0:
+        score = min(score, 49)
+    elif n_alarm > 0:
+        score = min(score, 74)
+    if score >= 90:
+        return score, "Zona A · Normal", "#1D9E75"
+    if score >= 75:
+        return score, "Zona B · Vigilancia", "#1D9E75"
+    if score >= 50:
+        return score, "Zona C · Alerta", "#EF9F27"
+    return score, "Zona D · Peligro", "#E24B4A"
+
+
+def health_gauge_svg(score: Optional[int], color: str, size: int = 86) -> str:
+    """Arco de salud 0-100 estilo gauge AMS. Compacto para la barra de estado."""
+    r = size / 2 - 9
+    cx = cy = size / 2
+    import math as _m
+    circ = 2 * _m.pi * r
+    frac = (score or 0) / 100.0
+    offset = circ * (1 - frac)
+    val_txt = str(score) if score is not None else "—"
+    return (
+        f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" '
+        f'role="img" aria-label="Salud del activo {val_txt} de 100" '
+        f'style="display:block;">'
+        f'<circle cx="{cx}" cy="{cy}" r="{r:.1f}" fill="none" stroke="#334155" stroke-width="7"/>'
+        f'<circle cx="{cx}" cy="{cy}" r="{r:.1f}" fill="none" stroke="{color}" '
+        f'stroke-width="7" stroke-linecap="round" '
+        f'stroke-dasharray="{circ:.1f}" stroke-dashoffset="{offset:.1f}" '
+        f'transform="rotate(-90 {cx} {cy})"/>'
+        f'<text x="{cx}" y="{cy - 1}" text-anchor="middle" font-size="22" '
+        f'font-weight="800" fill="#f1f5f9" font-family="monospace">{val_txt}</text>'
+        f'<text x="{cx}" y="{cy + 13}" text-anchor="middle" font-size="8" '
+        f'fill="#94a3b8" font-weight="700">/ 100</text>'
+        f'</svg>'
+    )
+
+
 def render_asset_header(
     instance_obj,
     instance_id: str,
@@ -2062,6 +2129,22 @@ def render_asset_header(
             )
     chips_html = "".join(chip_items)
 
+    # Health score gauge (Ciclo 23.140) — score único 0-100 estilo AMS /
+    # System1 para lectura gerencial inmediata. Se intercala antes del
+    # status pill en la barra oscura.
+    _score, _zone, _zcolor = compute_health_score(severity_summary, latest)
+    health_block = (
+        f'<div style="display:flex; align-items:center; gap:10px; '
+        f'background:#1e293b; border:1px solid #334155; border-radius:10px; '
+        f'padding:5px 12px 5px 8px;">'
+        f'{health_gauge_svg(_score, _zcolor)}'
+        f'<div style="display:flex; flex-direction:column; gap:2px;">'
+        f'<span style="font-size:9px; color:#64748b; font-weight:700; '
+        f'letter-spacing:0.1em; text-transform:uppercase;">Salud activo</span>'
+        f'<span style="font-size:12px; color:{_zcolor}; font-weight:800;">{_zone}</span>'
+        f'</div></div>'
+    )
+
     # Asset banner compacto (Ciclo 23.23) — barra oscura de 1 línea con
     # título + KPIs inline + status pill. Reemplaza la card grande de
     # Ciclo 23.16 que ocupaba 1/3 de la pantalla. Diagrama es protagonista.
@@ -2174,6 +2257,7 @@ def render_asset_header(
                     <span class="wm-bar-kpi-label">ALARMAS</span>
                     <span class="wm-bar-kpi-value" style="color:{alarms_color};">{alarms_txt}</span>
                 </div>
+                {health_block}
                 <span class="wm-bar-status">{status_icon} {status_label}</span>
             </div>
             <div class="wm-bar-chips">{chips_html}</div>
@@ -2431,6 +2515,77 @@ def render_channels_table(
 # ============================================================
 # Vectores 1X / 2X — phasor cards
 # ============================================================
+
+def render_api670_table(
+    rendered_rows: List[Dict[str, Any]],
+    latest: List[Dict[str, Any]],
+) -> None:
+    """Tabla densa API 670: por canal, Overall + descomposición 1X/2X
+    (amplitud ∠ fase). 1X = desbalance, 2X = desalineamiento — lenguaje
+    estándar de System1/AMS. Combina las filas Direct con las 1X/2X.
+    """
+    # Indexar componentes síncronas por sensor
+    vec: Dict[str, Dict[str, Any]] = {}
+    for r in latest:
+        s = r.get("sensor_label")
+        m = r.get("metric")
+        if not s or m not in ("1X_Ampl", "1X_Phase", "2X_Ampl", "2X_Phase"):
+            continue
+        vec.setdefault(s, {})[m] = r.get("value")
+
+    def _amp(a):
+        try:
+            return f"{float(a):.3f}" if a is not None and float(a) >= 1e-4 else "—"
+        except Exception:
+            return "—"
+
+    def _ph(a, p):
+        try:
+            if a is None or float(a) < 1e-4 or p is None or abs(float(p)) < 1e-30:
+                return "—"
+            return f"{float(p):.0f}°"
+        except Exception:
+            return "—"
+
+    body = []
+    for r in rendered_rows:
+        sl = r["sensor_label"]
+        v = vec.get(sl, {})
+        try:
+            val = f"{float(r['value']):,.3f}" if r["value"] is not None else "—"
+        except Exception:
+            val = "—"
+        row_class = "row-alarm" if r["status"] == "Alarma" else ("row-danger" if r["status"] == "Danger" else "")
+        body.append(
+            f'<tr class="{row_class}">'
+            f'<td>{status_pill_html(r["status"], r["fg"], r["bg"])}</td>'
+            f'<td><b>{sl}</b></td>'
+            f'<td class="col-mono">{r.get("plane_label") or "—"}</td>'
+            f'<td class="col-num">{val}</td>'
+            f'<td class="col-mono">{r["unit"]}</td>'
+            f'<td class="col-num">{_amp(v.get("1X_Ampl"))}</td>'
+            f'<td class="col-mono">{_ph(v.get("1X_Ampl"), v.get("1X_Phase"))}</td>'
+            f'<td class="col-num">{_amp(v.get("2X_Ampl"))}</td>'
+            f'<td class="col-mono">{_ph(v.get("2X_Ampl"), v.get("2X_Phase"))}</td>'
+            f'</tr>'
+        )
+    if not body:
+        st.info("Sin canales para mostrar.")
+        return
+    table_html = (
+        '<table class="wm-live-table"><thead><tr>'
+        '<th>Estado</th><th>Canal</th><th>Ubicación</th>'
+        '<th style="text-align:right;">Overall</th><th>Unit</th>'
+        '<th style="text-align:right;">1X ampl</th><th>1X fase</th>'
+        '<th style="text-align:right;">2X ampl</th><th>2X fase</th>'
+        '</tr></thead><tbody>' + "\n".join(body) + '</tbody></table>'
+    )
+    st.markdown(table_html, unsafe_allow_html=True)
+    st.caption(
+        "1X = componente síncrona (desbalance) · 2X = segunda armónica "
+        "(desalineamiento / soltura) · convención API 670."
+    )
+
 
 def render_vectors_phasors(latest: List[Dict[str, Any]]) -> None:
     by_sensor: Dict[str, Dict[str, Any]] = {}
@@ -3155,6 +3310,26 @@ def main() -> None:
             """).strip(),
             unsafe_allow_html=True,
         )
+
+    # Ciclo 23.140 — Tendencia overall RMS en el OVERVIEW (antes estaba
+    # huérfana, solo accesible per-sensor en el zoom). Es la vista que un
+    # analista de Bently/System1 mira primero: ¿la vibración sube o está
+    # estable? Multi-canal overlay. Expander abierto por defecto.
+    try:
+        with st.expander("📈 Tendencia overall — vibración en el tiempo", expanded=True):
+            render_history_chart(instance_id, latest, sensor_lookup, instance_obj)
+    except Exception as e:
+        import logging
+        logging.warning("render_history_chart (overview) failed: %s", e)
+
+    # Ciclo 23.140 — Tabla API 670: Overall + 1X/2X por canal. Vista de
+    # analista (desbalance vs desalineamiento) que pelea con System1/AMS.
+    try:
+        with st.expander("📋 Canales — Overall + vectores 1X / 2X (API 670)", expanded=False):
+            render_api670_table(rendered_rows, latest)
+    except Exception as e:
+        import logging
+        logging.warning("render_api670_table (overview) failed: %s", e)
 
     # Ciclo 23.83 — Sección "📊 Últimos análisis" para el cliente.
     # Muestra cards con los snapshots más recientes (Waveform, Spectrum,
