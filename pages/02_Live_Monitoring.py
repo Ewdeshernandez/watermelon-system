@@ -87,11 +87,11 @@ st.markdown(
         .wm-live-badge {
             display: inline-flex; align-items: center; gap: 6px;
             padding: 4px 12px;
-            border-radius: 999px;
-            background: linear-gradient(135deg, #fef2f2 0%, #fff7ed 100%);
-            border: 1px solid #fecaca;
+            border-radius: 6px;
+            background: #fef2f2;
+            border: 1px solid #fca5a5;
             color: #991b1b;
-            font-weight: 800; font-size: 11px; letter-spacing: 0.08em;
+            font-weight: 700; font-size: 11px; letter-spacing: 0.08em;
             text-transform: uppercase;
         }
         .wm-asset-title {
@@ -103,11 +103,10 @@ st.markdown(
             font-variant-numeric: tabular-nums;
         }
         .wm-kpi-card {
-            background: linear-gradient(135deg, #ffffff 0%, #f8fbff 100%);
-            border: 1px solid #dbe5f0;
-            border-radius: 16px;
+            background: #ffffff;
+            border: 1px solid #e5edf7;
+            border-radius: 8px;
             padding: 14px 18px;
-            box-shadow: 0 8px 22px rgba(15,23,42,0.04);
             min-height: 100px;
         }
         .wm-kpi-icon { font-size: 18px; margin-bottom: 4px; }
@@ -136,16 +135,16 @@ st.markdown(
             border-collapse: separate; border-spacing: 0;
             font-size: 13px;
             background: #ffffff;
-            border-radius: 14px; overflow: hidden;
+            border-radius: 8px; overflow: hidden;
             border: 1px solid #e5edf7;
             font-variant-numeric: tabular-nums;
         }
         table.wm-live-table thead tr {
-            background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+            background: #f8fafc;
         }
         table.wm-live-table thead th {
             text-align: left;
-            color: #1d4ed8;
+            color: #475569;
             font-weight: 800; font-size: 10px;
             text-transform: uppercase; letter-spacing: 0.08em;
             padding: 11px 14px;
@@ -173,12 +172,11 @@ st.markdown(
 
         /* Alarm strip */
         .wm-alarm-strip {
-            background: linear-gradient(90deg, #7f1d1d 0%, #991b1b 50%, #7f1d1d 100%);
+            background: #991b1b;
             color: #fee2e2;
-            border-radius: 14px;
+            border-radius: 8px;
             padding: 12px 18px;
             margin-bottom: 14px;
-            box-shadow: 0 12px 28px rgba(127,29,29,0.25);
             display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
             font-weight: 700;
         }
@@ -2080,26 +2078,26 @@ def render_asset_header(
     if not latest:
         status_label = "SIN DATOS"
         status_fg = "#475569"
-        status_bg = "linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%)"
-        status_border = "#94a3b8"
+        status_bg = "#f1f5f9"
+        status_border = "#cbd5e1"
         status_icon = "○"
     elif n_danger > 0:
         status_label = "CRÍTICA"
-        status_fg = "#7f1d1d"
-        status_bg = "linear-gradient(135deg, #fee2e2 0%, #fecaca 100%)"
-        status_border = "#ef4444"
-        status_icon = "🚨"
+        status_fg = "#991b1b"
+        status_bg = "#fef2f2"
+        status_border = "#fca5a5"
+        status_icon = "●"
     elif n_alarm > 0:
         status_label = "ATENCIÓN"
         status_fg = "#92400e"
-        status_bg = "linear-gradient(135deg, #fef3c7 0%, #fde68a 100%)"
-        status_border = "#f59e0b"
-        status_icon = "⚠️"
+        status_bg = "#fffbeb"
+        status_border = "#fcd34d"
+        status_icon = "▲"
     else:
         status_label = "OPERACIÓN NORMAL"
-        status_fg = "#14532d"
-        status_bg = "linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)"
-        status_border = "#22c55e"
+        status_fg = "#166534"
+        status_bg = "#f0fdf4"
+        status_border = "#86efac"
         status_icon = "✓"
 
     # KPIs
@@ -2178,13 +2176,13 @@ def render_asset_header(
             f"""
             <style>
             .wm-asset-bar {{
-                background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-                border-radius: 12px;
+                background: #0f172a;
+                border-radius: 8px;
                 padding: 12px 18px;
                 margin: 4px 0 8px 0;
                 display: flex; align-items: center; gap: 14px;
                 flex-wrap: wrap;
-                box-shadow: 0 6px 18px rgba(15,23,42,0.18);
+                border: 1px solid #1e293b;
                 position: sticky;
                 top: 56px;
                 z-index: 50;
@@ -2238,12 +2236,11 @@ def render_asset_header(
             .wm-bar-status {{
                 margin-left: auto;
                 display: inline-flex; align-items: center; gap: 7px;
-                padding: 8px 16px; border-radius: 18px;
+                padding: 7px 14px; border-radius: 6px;
                 background: {status_bg}; color: {status_fg};
-                font-weight: 800; font-size: 11px;
-                letter-spacing: 0.12em; text-transform: uppercase;
-                border: 1.5px solid {status_border};
-                box-shadow: 0 3px 8px rgba(0,0,0,0.18);
+                font-weight: 700; font-size: 11px;
+                letter-spacing: 0.1em; text-transform: uppercase;
+                border: 1px solid {status_border};
             }}
             .wm-bar-chips {{
                 display: flex; gap: 6px; flex-wrap: wrap;
@@ -2513,8 +2510,8 @@ def render_event_timeline(events: List[Dict[str, Any]]) -> None:
     st.markdown(
         '<div style="background:#fff;border:1px solid #e5edf7;border-radius:12px;'
         'overflow:hidden;margin:4px 0 12px 0;">'
-        '<div style="padding:9px 14px;background:linear-gradient(180deg,#f8fafc,#eef2f7);'
-        'border-bottom:2px solid #d9e8fb;font-size:10px;font-weight:800;color:#1d4ed8;'
+        '<div style="padding:9px 14px;background:#f8fafc;'
+        'border-bottom:1px solid #e5edf7;font-size:10px;font-weight:700;color:#475569;'
         'text-transform:uppercase;letter-spacing:0.08em;">Registro de eventos · últimos cruces de umbral</div>'
         + "".join(rows) + '</div>',
         unsafe_allow_html=True,
@@ -3465,14 +3462,14 @@ def main() -> None:
     # "entró en alarma hace 12 min".
     try:
         events = detect_severity_events(spark_data, sensor_lookup, instance_obj)
-        with st.expander("🔔 Registro de eventos — cruces de umbral", expanded=True):
+        with st.expander("Registro de eventos — cruces de umbral", expanded=True):
             render_event_timeline(events)
     except Exception as e:
         import logging
         logging.warning("event timeline (overview) failed: %s", e)
 
     try:
-        with st.expander("📈 Tendencia overall — vibración en el tiempo", expanded=True):
+        with st.expander("Tendencia overall — vibración en el tiempo", expanded=True):
             render_history_chart(instance_id, latest, sensor_lookup, instance_obj)
     except Exception as e:
         import logging
@@ -3481,7 +3478,7 @@ def main() -> None:
     # Ciclo 23.140 — Tabla API 670: Overall + 1X/2X por canal. Vista de
     # analista (desbalance vs desalineamiento) que pelea con System1/AMS.
     try:
-        with st.expander("📋 Canales — Overall + vectores 1X / 2X (API 670)", expanded=False):
+        with st.expander("Canales — Overall + vectores 1X / 2X (API 670)", expanded=False):
             render_api670_table(rendered_rows, latest, spark_data)
     except Exception as e:
         import logging
@@ -3625,7 +3622,7 @@ def main() -> None:
     st.markdown("---")
     c1, c2 = st.columns([1, 4])
     with c1:
-        if st.button("🔄 Refrescar ahora", key="live_refresh_v3", use_container_width=True):
+        if st.button("Refrescar ahora", key="live_refresh_v3", use_container_width=True):
             st.rerun()
     with c2:
         st.caption(
