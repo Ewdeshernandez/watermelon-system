@@ -3127,11 +3127,11 @@ def render_history_chart(
                           fillcolor="#ef4444", opacity=0.05, line_width=0, layer="below")
             # Líneas de umbral punteadas
             fig.add_hline(y=danger, line=dict(color="#dc2626", width=1.2, dash="dash"),
-                          annotation_text="Danger ", annotation_position="left",
-                          annotation=dict(font=dict(color="#dc2626", size=10, family="monospace")))
+                          annotation_text="Danger", annotation_position="top left",
+                          annotation=dict(font=dict(color="#dc2626", size=10, family="monospace"), xshift=-44))
             fig.add_hline(y=alarm, line=dict(color="#d97706", width=1.2, dash="dash"),
-                          annotation_text="Alarma ", annotation_position="left",
-                          annotation=dict(font=dict(color="#d97706", size=10, family="monospace")))
+                          annotation_text="Alarma", annotation_position="top left",
+                          annotation=dict(font=dict(color="#d97706", size=10, family="monospace"), xshift=-44))
 
         # Downsampling por buckets de tiempo (Ciclo 23.145) — clave para
         # que NO se vea un "blob" de color. Con miles de lecturas crudas las

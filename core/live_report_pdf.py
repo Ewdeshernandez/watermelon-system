@@ -85,18 +85,18 @@ def generate_live_report_pdf(
     story: List[Any] = []
 
     mono = "Courier"
-    st_title = ParagraphStyle("t", fontName="Helvetica-Bold", fontSize=17,
-                              textColor=colors.HexColor(_NAVY), spaceAfter=1, leading=20)
-    st_sub = ParagraphStyle("s", fontName="Helvetica", fontSize=9,
-                            textColor=colors.HexColor(_SLATE), spaceAfter=1)
-    st_meta = ParagraphStyle("m", fontName="Courier", fontSize=8,
-                             textColor=colors.HexColor(_MUTE))
-    st_section = ParagraphStyle("sec", fontName="Helvetica-Bold", fontSize=9,
-                                textColor=colors.HexColor(_SLATE), spaceBefore=10,
-                                spaceAfter=5, leading=11)
-    st_cell = ParagraphStyle("c", fontName="Helvetica", fontSize=8,
+    st_title = ParagraphStyle("t", fontName="Helvetica-Bold", fontSize=20,
+                              textColor=colors.HexColor(_NAVY), spaceAfter=2, leading=23)
+    st_sub = ParagraphStyle("s", fontName="Helvetica", fontSize=10.5,
+                            textColor=colors.HexColor(_SLATE), spaceAfter=1, leading=13)
+    st_meta = ParagraphStyle("m", fontName="Courier", fontSize=8.5,
+                             textColor=colors.HexColor(_MUTE), leading=11)
+    st_section = ParagraphStyle("sec", fontName="Helvetica-Bold", fontSize=11,
+                                textColor=colors.HexColor(_SLATE), spaceBefore=8,
+                                spaceAfter=4, leading=13)
+    st_cell = ParagraphStyle("c", fontName="Helvetica", fontSize=9,
                              textColor=colors.HexColor(_NAVY))
-    st_cellnum = ParagraphStyle("cn", fontName="Courier", fontSize=8,
+    st_cellnum = ParagraphStyle("cn", fontName="Courier", fontSize=9,
                                 textColor=colors.HexColor(_NAVY), alignment=TA_RIGHT)
 
     # ---------- Header ----------
@@ -144,10 +144,10 @@ def generate_live_report_pdf(
     hcolor = colors.HexColor(health.get("color", _MUTE))
 
     def _kpi(label, value, vcolor=None):
-        lab = ParagraphStyle("kl", fontName="Helvetica-Bold", fontSize=7,
+        lab = ParagraphStyle("kl", fontName="Helvetica-Bold", fontSize=8,
                              textColor=colors.HexColor(_MUTE))
-        val = ParagraphStyle("kv", fontName="Courier-Bold", fontSize=16,
-                             textColor=vcolor or colors.HexColor(_NAVY), leading=18)
+        val = ParagraphStyle("kv", fontName="Courier-Bold", fontSize=14,
+                             textColor=vcolor or colors.HexColor(_NAVY), leading=16)
         return [Paragraph(label.upper(), lab), Paragraph(str(value), val)]
 
     kpi_tbl = Table([[
@@ -171,12 +171,32 @@ def generate_live_report_pdf(
     if trend_png:
         try:
             story.append(Paragraph("Tendencia overall", st_section))
-            img = Image(BytesIO(trend_png), width=18 * cm, height=6 * cm)
+            img = Image(BytesIO(trend_png), width=18 * cm, height=5.3 * cm)
             story.append(img)
         except Exception:
             pass
 
     # ---------- Tabla de canales ----------
+    # El reporte es de UNA hoja (gerencial). Si hay muchos canales, se
+    # priorizan por severidad (Danger > Alarma > Normal) y se muestran los
+    # 10 más críticos, con nota al pie indicando cuántos quedaron fuera.
+    _MAX_CH = 9
+
+    def _sev_rank(c):
+        s = (c.get("status") or "").lower()
+        if "danger" in s or "crít" in s or "crit" in s:
+            return 0
+        if "alarma" in s or "alert" in s:
+            return 1
+        return 2
+
+    total_ch = len(channels)
+    if total_ch > _MAX_CH:
+        channels = sorted(channels, key=_sev_rank)[:_MAX_CH]
+        ch_truncated = total_ch - _MAX_CH
+    else:
+        ch_truncated = 0
+
     story.append(Paragraph("Canales — Overall + vectores 1X / 2X (API 670)", st_section))
     head = ["Estado", "Canal", "Ubicación", "Overall", "Unit", "1X ampl", "1X °", "2X ampl", "2X °"]
     data = [head]
@@ -201,32 +221,34 @@ def generate_live_report_pdf(
                                   1.7*cm, 1.3*cm, 1.7*cm, 1.3*cm])
     base_style = [
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, 0), 7),
+        ("FONTSIZE", (0, 0), (-1, 0), 8.5),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor(_SLATE)),
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f8fafc")),
         ("FONTNAME", (1, 1), (-1, -1), "Courier"),
         ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 1), (-1, -1), 7.5),
-        ("FONTSIZE", (0, 1), (0, -1), 6),
+        ("FONTSIZE", (0, 1), (-1, -1), 9),
+        ("FONTSIZE", (0, 1), (0, -1), 7.5),
         ("ALIGN", (3, 0), (-1, -1), "RIGHT"),
         ("ALIGN", (0, 0), (2, -1), "LEFT"),
         ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor(_LINE)),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
     ]
     ctbl.setStyle(TableStyle(base_style + row_styles))
     story.append(ctbl)
-    story.append(Paragraph(
-        "1X = componente síncrona (desbalance) · 2X = segunda armónica (desalineamiento / soltura)",
-        st_meta))
+    meta_txt = "1X = componente síncrona (desbalance) · 2X = segunda armónica (desalineamiento / soltura)"
+    if ch_truncated:
+        meta_txt += (f" · Mostrando {_MAX_CH} de {total_ch} canales "
+                     f"(priorizados por severidad)")
+    story.append(Paragraph(meta_txt, st_meta))
 
     # ---------- Eventos ----------
     if events:
         story.append(Paragraph("Registro de eventos — cruces de umbral", st_section))
         ev_data = [["", "Canal", "Estado", "Valor", "Hace"]]
         ev_styles = []
-        for i, e in enumerate(events[:8], start=1):
+        for i, e in enumerate(events[:6], start=1):
             arrow = "▲" if e.get("rising") else "▼"
             acolor = _RED if e.get("rising") else _GREEN
             ev_data.append([arrow, e.get("sensor_label", "—"), e.get("to", "—"),
@@ -235,7 +257,7 @@ def generate_live_report_pdf(
         etbl = Table(ev_data, colWidths=[0.7*cm, 2.0*cm, 2.2*cm, 3.5*cm, 2.5*cm])
         etbl.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor(_MUTE)),
             ("FONTNAME", (1, 1), (-1, -1), "Courier"),
             ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor(_LINE)),
@@ -247,7 +269,7 @@ def generate_live_report_pdf(
     # ---------- Footer ----------
     story.append(Spacer(1, 10))
     story.append(HRFlowable(width="100%", thickness=0.4, color=colors.HexColor(_LINE)))
-    foot = ParagraphStyle("f", fontName="Helvetica", fontSize=7,
+    foot = ParagraphStyle("f", fontName="Helvetica", fontSize=8,
                           textColor=colors.HexColor(_MUTE), alignment=TA_CENTER)
     story.append(Spacer(1, 4))
     story.append(Paragraph(
@@ -275,12 +297,12 @@ def render_trend_png(sensor_series: List[Dict[str, Any]],
         fig = go.Figure()
         if danger > 0:
             fig.add_hline(y=danger, line=dict(color="#dc2626", width=1.2, dash="dash"),
-                          annotation_text="Danger ", annotation_position="left",
-                          annotation=dict(font=dict(color="#dc2626", size=9)))
+                          annotation_text="Danger", annotation_position="top left",
+                          annotation=dict(font=dict(color="#dc2626", size=9), xshift=-44))
         if alarm > 0:
             fig.add_hline(y=alarm, line=dict(color="#d97706", width=1.2, dash="dash"),
-                          annotation_text="Alarma ", annotation_position="left",
-                          annotation=dict(font=dict(color="#d97706", size=9)))
+                          annotation_text="Alarma", annotation_position="top left",
+                          annotation=dict(font=dict(color="#d97706", size=9), xshift=-44))
         for s in sensor_series:
             fig.add_trace(go.Scatter(
                 x=s.get("x", []), y=s.get("y", []), mode="lines",
