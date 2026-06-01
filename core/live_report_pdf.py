@@ -146,8 +146,8 @@ def generate_live_report_pdf(
     def _kpi(label, value, vcolor=None):
         lab = ParagraphStyle("kl", fontName="Helvetica-Bold", fontSize=8,
                              textColor=colors.HexColor(_MUTE))
-        val = ParagraphStyle("kv", fontName="Courier-Bold", fontSize=14,
-                             textColor=vcolor or colors.HexColor(_NAVY), leading=16)
+        val = ParagraphStyle("kv", fontName="Courier-Bold", fontSize=12,
+                             textColor=vcolor or colors.HexColor(_NAVY), leading=14)
         return [Paragraph(label.upper(), lab), Paragraph(str(value), val)]
 
     kpi_tbl = Table([[
