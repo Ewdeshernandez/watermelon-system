@@ -61,9 +61,9 @@ st.markdown(
         """
         <style>
         @keyframes wm-live-pulse {
-            0%   { box-shadow: 0 0 0 0 rgba(239,68,68,0.55); transform: scale(1); }
-            70%  { box-shadow: 0 0 0 10px rgba(239,68,68,0);  transform: scale(1.05); }
-            100% { box-shadow: 0 0 0 0 rgba(239,68,68,0);    transform: scale(1); }
+            0%   { box-shadow: 0 0 0 0 rgba(239,68,68,0.35); }
+            70%  { box-shadow: 0 0 0 6px rgba(239,68,68,0); }
+            100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
         }
         @keyframes wm-dot-danger {
             0%   { r: 1.5; opacity: 1; }
@@ -123,10 +123,22 @@ st.markdown(
         .wm-status-pill {
             display: inline-block;
             padding: 3px 10px;
-            border-radius: 999px;
-            font-weight: 800; font-size: 10px; letter-spacing: 0.08em;
+            border-radius: 6px;
+            font-weight: 700; font-size: 10px; letter-spacing: 0.08em;
             text-transform: uppercase;
             min-width: 60px; text-align: center;
+        }
+
+        /* Mono + tabular-nums en TODA cifra de st.metric — sensación de
+           instrumento de medición, columnas alineadas (Ciclo 23.144). */
+        div[data-testid="stMetricValue"] {
+            font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace !important;
+            font-variant-numeric: tabular-nums;
+            font-weight: 700 !important;
+        }
+        div[data-testid="stMetricLabel"] {
+            text-transform: uppercase; letter-spacing: 0.06em;
+            font-size: 10px !important; color: #64748b !important;
         }
 
         /* Tabla industrial densa */
@@ -811,7 +823,7 @@ def _render_export_bar(
         min-height: 32px !important;
         border-radius: 8px !important;
         border: 1.5px solid #c7d9eb !important;
-        background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 100%) !important;
+        background: #f8fbff !important;
         color: #1e40af !important;
         font-weight: 600 !important;
     }
@@ -1007,7 +1019,7 @@ def _render_share_html(
         .wm-share-btn {{
             flex: 1; padding: 9px 12px; font-size: 13px;
             border-radius: 8px; border: 1.5px solid #c7d9eb;
-            background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 100%);
+            background: #f8fbff;
             color: #1e40af; font-weight: 600; cursor: pointer;
             display: flex; align-items: center; justify-content: center; gap: 6px;
             transition: all 0.15s;
@@ -1027,8 +1039,8 @@ def _render_share_html(
         .wm-share-status.error {{ color: #b91c1c; font-weight: 600; }}
         .wm-share-success {{
             display: none;
-            background: linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%);
-            border: 1.5px solid #22c55e;
+            background: #f0fdf4;
+            border: 1px solid #86efac;
             border-radius: 10px;
             padding: 10px 12px;
             margin-top: 8px;
@@ -2193,14 +2205,13 @@ def render_asset_header(
                 letter-spacing: 0.18em;
             }}
             .wm-bar-live-dot {{
-                width: 8px; height: 8px; border-radius: 50%;
+                width: 7px; height: 7px; border-radius: 50%;
                 background: #ef4444;
-                animation: wm-pulse 1.4s ease-in-out infinite;
-                box-shadow: 0 0 8px rgba(239,68,68,0.7);
+                animation: wm-pulse 2.4s ease-in-out infinite;
             }}
             @keyframes wm-pulse {{
                 0%, 100% {{ opacity: 1; }}
-                50% {{ opacity: 0.35; }}
+                50% {{ opacity: 0.55; }}
             }}
             .wm-bar-divider {{
                 width: 1px; height: 32px; background: #334155;
@@ -2384,9 +2395,9 @@ def render_status_bar(
                 gap: 28px;
                 padding: 10px 16px;
                 margin: 4px 0 16px 0;
-                background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
-                border: 1px solid #e2e8f0;
-                border-radius: 10px;
+                background: #f8fafc;
+                border: 1px solid #e5edf7;
+                border-radius: 8px;
                 font-size: 13px;
                 color: #0f172a;
                 flex-wrap: wrap;
@@ -3180,10 +3191,10 @@ def main() -> None:
             margin: 8px 0 6px 0;
         }
         .wm-picker-header-icon {
-            width: 32px; height: 32px; border-radius: 9px;
-            background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+            width: 32px; height: 32px; border-radius: 8px;
+            background: #1e40af;
             display: flex; align-items: center; justify-content: center;
-            color: white; font-size: 16px; font-weight: 900;
+            color: white; font-size: 16px; font-weight: 700;
             box-shadow: 0 4px 10px rgba(30,64,175,0.25);
         }
         .wm-picker-header-text { display: flex; flex-direction: column; }
@@ -3201,7 +3212,7 @@ def main() -> None:
         }
         /* Selectbox con look industrial */
         div[data-testid="stSelectbox"] > div > div {
-            background: linear-gradient(135deg, #ffffff 0%, #f0f7ff 100%);
+            background: #f8fbff;
             border: 1.5px solid #c7d9eb;
             border-radius: 12px;
             box-shadow: 0 4px 12px rgba(15,23,42,0.05);
@@ -3320,17 +3331,20 @@ def main() -> None:
         # El collector activo subirá lecturas — el usuario refresca manual.
         render_asset_header(instance_obj, instance_id)
         st.markdown(
-            "<div style='background:linear-gradient(180deg,#f8fafc 0%,#eef2f7 100%);"
-            "border:1px solid #cbd5e1;border-radius:12px;padding:20px 24px;"
-            "margin:18px 0;display:flex;align-items:center;gap:14px;'>"
-            "<div style='font-size:22px;'>📡</div>"
-            "<div style='flex:1;'>"
-            "<div style='font-size:14px;font-weight:700;color:#0f172a;'>"
+            "<div style='background:#ffffff;"
+            "border:1px solid #e5edf7;border-radius:8px;padding:32px 24px;"
+            "margin:24px 0;display:flex;flex-direction:column;align-items:center;"
+            "gap:10px;text-align:center;'>"
+            "<svg width='34' height='34' viewBox='0 0 24 24' fill='none' "
+            "stroke='#94a3b8' stroke-width='1.4' stroke-linecap='round' "
+            "stroke-linejoin='round' aria-hidden='true'>"
+            "<path d='M2 12a10 10 0 0 1 10-10'/><path d='M5.6 12a6 6 0 0 1 6-6'/>"
+            "<circle cx='12' cy='12' r='1.6' fill='#94a3b8' stroke='none'/></svg>"
+            "<div style='font-size:14px;font-weight:600;color:#0f172a;'>"
             "Sin lecturas en tiempo real ahora mismo</div>"
-            "<div style='font-size:12px;color:#64748b;margin-top:4px;line-height:1.5;'>"
+            "<div style='font-size:12px;color:#64748b;line-height:1.6;max-width:420px;'>"
             "El collector enviará nuevas mediciones automáticamente. "
             "Mientras tanto, abajo está el histórico de análisis disponible."
-            "</div>"
             "</div>"
             "</div>",
             unsafe_allow_html=True,
@@ -3572,10 +3586,10 @@ def main() -> None:
             <style>
             .wm-zoom-hint {
                 display: flex; align-items: center; gap: 12px;
-                margin: 14px 0 18px 0; padding: 14px 18px;
-                background: linear-gradient(135deg, #f0f7ff 0%, #e6f0fb 100%);
+                margin: 16px 0 24px 0; padding: 14px 18px;
+                background: #f8fbff;
                 border: 1px dashed #c7d9eb;
-                border-radius: 12px;
+                border-radius: 8px;
                 color: #475569;
                 font-size: 13px;
                 font-style: italic;
