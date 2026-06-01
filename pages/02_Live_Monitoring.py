@@ -2027,7 +2027,7 @@ def _build_live_report_pdf(
 ) -> Optional[bytes]:
     """Arma el reporte ejecutivo PDF desde el estado actual del Live Monitoring."""
     try:
-        from core.live_report_pdf import generate_live_report_pdf, render_trend_png
+        from core.live_report_pdf import generate_live_report_pdf, render_trend_png, render_train_png
     except Exception:
         return None
 
@@ -2057,7 +2057,7 @@ def _build_live_report_pdf(
 
     def _a(v):
         try:
-            return f"{float(v):.3f}" if v is not None and float(v) >= 1e-4 else "—"
+            return f"{float(v):.2f}" if v is not None and float(v) >= 1e-4 else "—"
         except Exception:
             return "—"
 
@@ -2074,7 +2074,7 @@ def _build_live_report_pdf(
         sl = r["sensor_label"]
         v = vec.get(sl, {})
         try:
-            val = f"{float(r['value']):.3f}" if r["value"] is not None else "—"
+            val = f"{float(r['value']):.2f}" if r["value"] is not None else "—"
         except Exception:
             val = "—"
         channels.append({
@@ -2118,8 +2118,20 @@ def _build_live_report_pdf(
     except Exception:
         trend_png = None
 
+    # Diagrama del tren (esquema plotly con dots de severidad)
+    train_png = None
     try:
-        return generate_live_report_pdf(instance_id, instance_obj, health, kpis, channels, events, trend_png)
+        drv_lbl = (getattr(instance_obj, "driver_model", "") or "Driver").strip()
+        drvn_lbl = (getattr(instance_obj, "driven_model", "") or "Driven").strip()
+        train_channels = [{"sensor_label": r["sensor_label"], "status": r["status"]}
+                          for r in rendered_rows]
+        train_png = render_train_png(drv_lbl, drvn_lbl, train_channels)
+    except Exception:
+        train_png = None
+
+    try:
+        return generate_live_report_pdf(instance_id, instance_obj, health, kpis,
+                                        channels, events, trend_png, train_png)
     except Exception:
         return None
 
