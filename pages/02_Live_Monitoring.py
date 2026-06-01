@@ -1862,29 +1862,21 @@ def render_sensor_zoom_panel(
                     fig = go.Figure()
 
                     if show_bands and danger_val > 0:
-                        y_max = max(df_trend["value"].max(), danger_val) * 1.10
+                        y_max = max(df_trend["value"].max(), danger_val) * 1.08
                         fig.add_hrect(
                             y0=danger_val, y1=y_max,
-                            fillcolor="#fee2e2", opacity=0.50, line_width=0,
-                            annotation_text="Danger",
-                            annotation_position="top right",
-                            annotation=dict(font=dict(color="#991b1b", size=11)),
+                            fillcolor="#ef4444", opacity=0.05, line_width=0, layer="below",
+                        )
+                        fig.add_hline(
+                            y=danger_val, line=dict(color="#dc2626", width=1.2, dash="dash"),
+                            annotation_text="  Danger", annotation_position="right",
+                            annotation=dict(font=dict(color="#dc2626", size=10, family="monospace")),
                         )
                     if show_bands and alarm_val > 0 and danger_val > alarm_val:
-                        fig.add_hrect(
-                            y0=alarm_val, y1=danger_val,
-                            fillcolor="#fef3c7", opacity=0.50, line_width=0,
-                            annotation_text="Alarma",
-                            annotation_position="top right",
-                            annotation=dict(font=dict(color="#92400e", size=11)),
-                        )
-                    if show_bands and alarm_val > 0:
-                        fig.add_hrect(
-                            y0=0, y1=alarm_val,
-                            fillcolor="#dcfce7", opacity=0.40, line_width=0,
-                            annotation_text="Normal",
-                            annotation_position="bottom right",
-                            annotation=dict(font=dict(color="#166534", size=11)),
+                        fig.add_hline(
+                            y=alarm_val, line=dict(color="#d97706", width=1.2, dash="dash"),
+                            annotation_text="  Alarma", annotation_position="right",
+                            annotation=dict(font=dict(color="#d97706", size=10, family="monospace")),
                         )
 
                     for idx, s in enumerate(picked):
@@ -3011,37 +3003,36 @@ def render_history_chart(
 
         fig = go.Figure()
 
-        # Bandas (solo en caso compatible)
+        # Umbrales como LÍNEAS PUNTEADAS (no rellenos opacos) — convención
+        # System1/AMS. Líneas finas horizontales con etiqueta a la derecha,
+        # mucho más limpias y legibles que las bandas de color rellenas.
         if show_bands:
             alarm = sensor_data[0]["alarm"]
             danger = sensor_data[0]["danger"]
-            y_max = max(all_values.max(), danger * 1.1)
+            y_max = max(all_values.max(), danger * 1.08)
+            # Sombreado MUY sutil solo de la zona danger (apenas un tinte)
             fig.add_hrect(y0=danger, y1=y_max * 1.05,
-                          fillcolor="#fee2e2", opacity=0.45, line_width=0,
-                          annotation_text="Danger", annotation_position="top right",
-                          annotation=dict(font=dict(color="#991b1b", size=10)))
-            fig.add_hrect(y0=alarm, y1=danger,
-                          fillcolor="#fef3c7", opacity=0.45, line_width=0,
-                          annotation_text="Alarma", annotation_position="top right",
-                          annotation=dict(font=dict(color="#92400e", size=10)))
-            fig.add_hrect(y0=0, y1=alarm,
-                          fillcolor="#dcfce7", opacity=0.35, line_width=0,
-                          annotation_text="Normal", annotation_position="bottom right",
-                          annotation=dict(font=dict(color="#166534", size=10)))
+                          fillcolor="#ef4444", opacity=0.05, line_width=0, layer="below")
+            # Líneas de umbral punteadas
+            fig.add_hline(y=danger, line=dict(color="#dc2626", width=1.2, dash="dash"),
+                          annotation_text="  Danger", annotation_position="right",
+                          annotation=dict(font=dict(color="#dc2626", size=10, family="monospace")))
+            fig.add_hline(y=alarm, line=dict(color="#d97706", width=1.2, dash="dash"),
+                          annotation_text="  Alarma", annotation_position="right",
+                          annotation=dict(font=dict(color="#d97706", size=10, family="monospace")))
 
         # Paleta corporativa (navy + accent variants — coherente con el design system)
         palette = [
-            "#1e40af", "#15803d", "#b45309", "#dc2626",
-            "#7c3aed", "#0891b2", "#be185d", "#475569",
+            "#1e40af", "#0891b2", "#7c3aed", "#be185d",
+            "#15803d", "#b45309", "#475569", "#dc2626",
         ]
         for i, sd in enumerate(sensor_data):
             color = palette[i % len(palette)]
             fig.add_trace(go.Scatter(
                 x=sd["df"]["captured_at"],
                 y=sd["df"]["value"],
-                mode="lines+markers",
-                line=dict(color=color, width=2),
-                marker=dict(size=4),
+                mode="lines",
+                line=dict(color=color, width=1.4, shape="linear"),
                 name=sd["display"],
                 hovertemplate=(
                     f"<b>{sd['label']} {sd['var']}</b><br>"
@@ -3054,21 +3045,30 @@ def render_history_chart(
         y_title = list(units)[0] if len(units) == 1 else "valor"
 
         fig.update_layout(
-            margin=dict(l=10, r=10, t=30, b=10),
+            margin=dict(l=10, r=60, t=30, b=10),
             height=420,
             plot_bgcolor="white",
-            xaxis=dict(showgrid=True, gridcolor="#f1f5f9", title=""),
-            yaxis=dict(showgrid=True, gridcolor="#f1f5f9", title=y_title),
+            paper_bgcolor="white",
+            font=dict(family="-apple-system, system-ui, sans-serif", size=11, color="#475569"),
+            xaxis=dict(showgrid=True, gridcolor="#f1f5f9", title="",
+                       showline=True, linecolor="#e5edf7", zeroline=False),
+            yaxis=dict(showgrid=True, gridcolor="#f1f5f9",
+                       title=dict(text=y_title, font=dict(family="monospace", size=11)),
+                       showline=True, linecolor="#e5edf7", zeroline=False,
+                       tickfont=dict(family="monospace")),
             showlegend=True,
             legend=dict(
                 orientation="h",
                 yanchor="bottom", y=1.02,
                 xanchor="right", x=1,
                 font=dict(size=11),
+                bgcolor="rgba(0,0,0,0)",
             ),
             hovermode="x unified",
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True,
+                        config={"displaylogo": False,
+                                "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"]})
 
         # Caption si bands omitidas
         if not show_bands and len(sensor_data) > 1:
