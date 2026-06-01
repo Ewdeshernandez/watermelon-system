@@ -2047,12 +2047,16 @@ def _build_live_report_pdf(
     rendered_rows: List[Dict[str, Any]],
     severity_summary: Dict[str, int],
     spark_data: Dict[str, List[Dict[str, Any]]],
-) -> Optional[bytes]:
-    """Arma el reporte ejecutivo PDF desde el estado actual del Live Monitoring."""
+) -> Tuple[Optional[bytes], Dict[str, Any]]:
+    """Arma el reporte ejecutivo PDF desde el estado actual del Live Monitoring.
+
+    Devuelve (pdf_bytes, meta) donde meta = {instance_id, status, score,
+    zone, alarms} para reusar en el mensaje de envío al cliente. En caso de
+    fallo devuelve (None, {})."""
     try:
         from core.live_report_pdf import generate_live_report_pdf, render_trend_png
     except Exception:
-        return None
+        return None, {}
 
     # Health + KPIs
     score, zone, zcolor = compute_health_score(severity_summary, latest)
@@ -2070,6 +2074,8 @@ def _build_live_report_pdf(
             pass
     health = {"score": score, "zone": zone, "color": zcolor}
     kpis = {"speed": speed_txt, "status": status, "alarms": n_danger + n_alarm, "last": last_txt}
+    meta = {"instance_id": instance_id, "status": status, "score": score,
+            "zone": zone, "alarms": n_danger + n_alarm}
 
     # Canales con 1X/2X
     vec: Dict[str, Dict[str, Any]] = {}
@@ -2147,10 +2153,11 @@ def _build_live_report_pdf(
         trend_png = None
 
     try:
-        return generate_live_report_pdf(instance_id, instance_obj, health, kpis,
-                                        channels, events, trend_png)
+        pdf_bytes = generate_live_report_pdf(instance_id, instance_obj, health, kpis,
+                                             channels, events, trend_png)
+        return pdf_bytes, meta
     except Exception:
-        return None
+        return None, {}
 
 
 @st.fragment(run_every=10)
@@ -3628,13 +3635,13 @@ def main() -> None:
     # los valores ACTUALES del activo: salud, tendencia, tabla API 670 y
     # eventos. Es la entrega premium al cliente — el "executive summary"
     # que pelea contra los reportes rígidos de Emerson/Bently.
-    col_rep, _sp = st.columns([1.4, 4])
+    col_rep, col_send, _sp = st.columns([1.4, 1.4, 3])
     with col_rep:
         if st.button("📄 Descargar reporte PDF", use_container_width=True,
                      key=f"live_pdf_{instance_id}",
                      help="Reporte ejecutivo de 1 página con el estado actual del activo"):
             with st.spinner("Generando reporte ejecutivo…"):
-                pdf_bytes = _build_live_report_pdf(
+                pdf_bytes, _meta = _build_live_report_pdf(
                     instance_id, instance_obj, latest,
                     rendered_rows, severity_summary, spark_data,
                 )
@@ -3650,6 +3657,51 @@ def main() -> None:
                 )
             else:
                 st.error("No se pudo generar el reporte. Verificá que haya lecturas activas.")
+
+    # Ciclo 23.150 — Envío manual al cliente (email + WhatsApp). Reusa el
+    # mismo builder del PDF y el orquestador core.report_delivery. El destino
+    # (email/WhatsApp) se configura por activo en Machinery Library → tab
+    # "Envío al cliente". Es la versión testeable de la Fase 1; el envío
+    # automático programado lo hará el cron headless.
+    with col_send:
+        try:
+            from core.report_delivery import available_channels
+            _avail = available_channels(instance_obj)
+        except Exception:
+            _avail = {"email": False, "whatsapp": False}
+        _can_send = _avail.get("email") or _avail.get("whatsapp")
+        if st.button("📨 Enviar al cliente", use_container_width=True,
+                     key=f"live_send_{instance_id}", disabled=not _can_send,
+                     help=("Envía el reporte por email y/o WhatsApp al destinatario "
+                           "configurado en Machinery Library." if _can_send else
+                           "Configurá email o WhatsApp del cliente en Machinery "
+                           "Library → Envío al cliente.")):
+            with st.spinner("Generando y enviando reporte…"):
+                pdf_bytes, _meta = _build_live_report_pdf(
+                    instance_id, instance_obj, latest,
+                    rendered_rows, severity_summary, spark_data,
+                )
+                if not pdf_bytes:
+                    st.error("No se pudo generar el reporte. Verificá que haya lecturas activas.")
+                else:
+                    from core.report_delivery import deliver_report
+                    res = deliver_report(instance_obj, pdf_bytes, _meta)
+                    _em = res.get("email")
+                    _wa = res.get("whatsapp")
+                    if _em is not None:
+                        if _em.get("ok"):
+                            st.success(f"✓ Email enviado a {instance_obj.client_email}")
+                        else:
+                            st.error(f"Email: {_em.get('error', 'falló')}")
+                    if _wa is not None:
+                        if _wa.get("ok"):
+                            st.success(f"✓ WhatsApp enviado a {instance_obj.whatsapp_number}")
+                        else:
+                            st.error(f"WhatsApp: {_wa.get('error', 'falló')}")
+                    if not res.get("any_ok") and _em is None and _wa is None:
+                        st.warning(res.get("error", "No se envió por ningún canal."))
+        if not _can_send:
+            st.caption("⚙ Configurá el destinatario en Machinery Library.")
 
     # Ciclo 23.142 — Event List estilo System1: registro cronológico de
     # cruces de umbral (Normal→Alarma→Danger) por canal en la ventana

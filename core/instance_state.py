@@ -165,6 +165,16 @@ class Instance:
     last_executive_summary: str = ""    # frase ejecutiva resumen
     last_report_date: str = ""          # ISO timestamp del último PDF
 
+    # Ciclo 23.150 — Envío automático del reporte ejecutivo al cliente.
+    # Config por activo: a quién, por qué canal y cuándo. El cron headless
+    # (Render Cron Job) lee report_send_enabled + day/hour para decidir el
+    # envío programado; el botón manual en Live Monitoring usa email/whatsapp.
+    client_email: str = ""              # destinatario del reporte por email
+    whatsapp_number: str = ""           # E.164 sin '+', ej. "573001234567"
+    report_send_enabled: bool = False   # activar envío automático programado
+    report_send_day: int = 0            # día de la semana 0=Lunes … 6=Domingo
+    report_send_hour: int = 6           # hora local 0-23 del envío
+
     # Datos capturados ad-hoc (legacy, sigue funcionando)
     captured_parameters: Dict[str, Any] = field(default_factory=dict)
     documents: List[Dict[str, Any]] = field(default_factory=list)
@@ -233,6 +243,12 @@ class Instance:
             last_executive_severity=_f("last_executive_severity"),
             last_executive_summary=_f("last_executive_summary"),
             last_report_date=_f("last_report_date"),
+            # Ciclo 23.150 — envío automático
+            client_email=_f("client_email"),
+            whatsapp_number=_f("whatsapp_number"),
+            report_send_enabled=bool(_f("report_send_enabled", False)),
+            report_send_day=int(_f("report_send_day", 0) or 0),
+            report_send_hour=int(_f("report_send_hour", 6) or 6),
             captured_parameters=dict(data.get("captured_parameters", {}) or {}),
             documents=list(data.get("documents", []) or []),
             created_at=_f("created_at"),
@@ -396,6 +412,9 @@ def update_instance_header(
         "override_justification",
         # Ciclo 17.13 — severidad ejecutiva persistida
         "last_executive_severity", "last_executive_summary", "last_report_date",
+        # Ciclo 23.150 — envío automático del reporte
+        "client_email", "whatsapp_number", "report_send_enabled",
+        "report_send_day", "report_send_hour",
     }
     for key, val in kwargs.items():
         if key in allowed and val is not None:

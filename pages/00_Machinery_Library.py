@@ -197,9 +197,11 @@ def render_instance_header(state: Dict[str, Any]) -> None:
             pass
 
     with st.expander("Editar metadata completa de esta instancia", expanded=False):
-        tab_id, tab_train, tab_op, tab_sup, tab_pr, tab_set, tab_norm, tab_mnt, tab_sch = st.tabs([
+        (tab_id, tab_train, tab_op, tab_sup, tab_pr, tab_set, tab_norm,
+         tab_mnt, tab_sch, tab_envio) = st.tabs([
             "Identificación", "Tren acoplado", "Operación", "Soportes",
             "Sondas", "Setpoints", "Norma ISO", "Mantenimiento", "Esquemático",
+            "Envío al cliente",
         ])
 
         with st.form(f"edit_header_{instance_id}"):
@@ -516,11 +518,58 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                         "más abajo y volvé acá."
                     )
 
+            with tab_envio:
+                st.caption(
+                    "Configurá a quién y cuándo se envía automáticamente el "
+                    "**reporte ejecutivo de condición** (1 página, PDF). Se envía "
+                    "por email y/o WhatsApp en el día y hora elegidos. También "
+                    "podés enviarlo manualmente desde Live Monitoring."
+                )
+                _DOW = ["Lunes", "Martes", "Miércoles", "Jueves",
+                        "Viernes", "Sábado", "Domingo"]
+                ev1, ev2 = st.columns(2)
+                with ev1:
+                    new_client_email = st.text_input(
+                        "Email del cliente", value=inst.client_email or "",
+                        help="Destinatario del PDF. Ej. mantenimiento@cliente.com",
+                    )
+                with ev2:
+                    new_whatsapp_number = st.text_input(
+                        "WhatsApp del cliente", value=inst.whatsapp_number or "",
+                        help="Con código de país, sin '+'. Ej. 573001234567",
+                    )
+                new_report_enabled = st.checkbox(
+                    "Activar envío automático programado",
+                    value=bool(getattr(inst, "report_send_enabled", False)),
+                    help="Si está activo, el sistema envía el reporte solo en el día y hora elegidos.",
+                )
+                ev3, ev4 = st.columns(2)
+                with ev3:
+                    new_report_day = st.selectbox(
+                        "Día de envío",
+                        options=list(range(7)),
+                        index=int(getattr(inst, "report_send_day", 0) or 0),
+                        format_func=lambda i: _DOW[i],
+                    )
+                with ev4:
+                    new_report_hour = st.number_input(
+                        "Hora de envío (0-23, hora local)",
+                        value=int(getattr(inst, "report_send_hour", 6) or 6),
+                        min_value=0, max_value=23, step=1,
+                    )
+                if not (inst.client_email or inst.whatsapp_number):
+                    st.info("Cargá al menos un email o un WhatsApp para poder enviar.")
+
             saved = st.form_submit_button("💾 Actualizar metadata completa", width="stretch")
             if saved:
                 update_instance_header(
                     instance_id,
                     tag=new_tag.strip(),
+                    client_email=new_client_email.strip(),
+                    whatsapp_number=new_whatsapp_number.strip().replace("+", "").replace(" ", ""),
+                    report_send_enabled=bool(new_report_enabled),
+                    report_send_day=int(new_report_day),
+                    report_send_hour=int(new_report_hour),
                     client=new_client.strip(),
                     site=new_site.strip(),
                     asset_class=new_asset_class.strip(),
