@@ -3021,6 +3021,24 @@ def render_history_chart(
                           annotation_text="  Alarma", annotation_position="right",
                           annotation=dict(font=dict(color="#d97706", size=10, family="monospace")))
 
+        # Downsampling por buckets de tiempo (Ciclo 23.145) — clave para
+        # que NO se vea un "blob" de color. Con miles de lecturas crudas las
+        # líneas se amontonan y forman manchas. System1/AMS agregan la serie
+        # en buckets y muestran una línea de tendencia suave. Apuntamos a
+        # ~240 puntos por canal: ancho de bucket = rango_temporal / 240.
+        TARGET_POINTS = 240
+
+        def _downsample(df_one: pd.DataFrame) -> pd.DataFrame:
+            if len(df_one) <= TARGET_POINTS:
+                return df_one
+            d = df_one.set_index("captured_at").sort_index()
+            span = d.index.max() - d.index.min()
+            secs = max(span.total_seconds(), 1.0)
+            bucket = max(int(secs / TARGET_POINTS), 1)
+            # mediana por bucket = robusto a outliers, traza limpia
+            agg = (d["value"].resample(f"{bucket}s").median().dropna())
+            return agg.reset_index().rename(columns={"value": "value"})
+
         # Paleta corporativa (navy + accent variants — coherente con el design system)
         palette = [
             "#1e40af", "#0891b2", "#7c3aed", "#be185d",
@@ -3028,11 +3046,12 @@ def render_history_chart(
         ]
         for i, sd in enumerate(sensor_data):
             color = palette[i % len(palette)]
+            ds = _downsample(sd["df"])
             fig.add_trace(go.Scatter(
-                x=sd["df"]["captured_at"],
-                y=sd["df"]["value"],
+                x=ds["captured_at"],
+                y=ds["value"],
                 mode="lines",
-                line=dict(color=color, width=1.4, shape="linear"),
+                line=dict(color=color, width=1.6, shape="spline", smoothing=0.6),
                 name=sd["display"],
                 hovertemplate=(
                     f"<b>{sd['label']} {sd['var']}</b><br>"
