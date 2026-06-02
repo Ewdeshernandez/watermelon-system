@@ -453,9 +453,10 @@ def get_semaforo_status(max_util_pct: float) -> Tuple[str, str]:
 
 
 def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[str]]:
+    # Ciclo 23.155 — anti-OOM: vía core.plot_export.fig_to_png_bytes (decima + scale=1).
     try:
-        png = pio.to_image(fig, format="png", width=1800, height=1100, scale=2)
-        return png, None
+        from core.plot_export import fig_to_png_bytes
+        return fig_to_png_bytes(fig, width=1800, height=1100, scale=1)
     except Exception as e:
         return None, str(e)
 

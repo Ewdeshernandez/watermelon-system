@@ -1340,82 +1340,15 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     return fig
 
 
-def _downsample_fig_for_export(fig: go.Figure, max_pts: int = 4000) -> go.Figure:
-    """Devuelve una figura LIVIANA para exportar a PNG sin reventar memoria.
-
-    Ciclo 23.154 — FIX CRÍTICO (502/OOM, confirmado por Render: "Ran out of
-    memory, used over 2GB"). El waveform crudo puede tener decenas de miles de
-    puntos × varias señales; pasarlo a kaleido dispara un pico de memoria que
-    mata el worker. Por cada traza con datos:
-      * decima por ENVOLVENTE MIN-MAX (preserva picos +/- — peak, crest,
-        transitorios), a ~max_pts puntos.
-      * reconstruye una traza MÍNIMA (solo x/y/mode/name/color/fill) en vez de
-        copiar el trace completo (evita duplicar las arrays grandes).
-    Las trazas sin datos (markers de layout van aparte) se copian tal cual.
-    """
-    import numpy as np
-    new = go.Figure(layout=fig.layout)
-    for tr in fig.data:
-        x = getattr(tr, "x", None)
-        y = getattr(tr, "y", None)
-        try:
-            n = len(x) if x is not None else 0
-        except Exception:
-            n = 0
-        if x is None or y is None or n == 0:
-            new.add_trace(tr)  # nada que decimar (ej. trazas auxiliares)
-            continue
-        try:
-            xi = np.asarray(x)
-            yi = np.asarray(y, dtype=float)
-            if n > max_pts:
-                n_blocks = max(1, max_pts // 2)
-                step = int(np.ceil(n / n_blocks))
-                xs, ys = [], []
-                for s in range(0, n, step):
-                    blk_y = yi[s:s + step]
-                    blk_x = xi[s:s + step]
-                    if blk_y.size == 0:
-                        continue
-                    for i in sorted({int(np.argmin(blk_y)), int(np.argmax(blk_y))}):
-                        xs.append(blk_x[i]); ys.append(blk_y[i])
-            else:
-                xs, ys = list(xi), list(yi)
-            # Traza mínima: conservar solo lo visual esencial.
-            line = getattr(tr, "line", None)
-            color = getattr(line, "color", None) if line is not None else None
-            new.add_trace(go.Scatter(
-                x=xs, y=ys,
-                mode=getattr(tr, "mode", None) or "lines",
-                name=getattr(tr, "name", None),
-                line=dict(color=color) if color else None,
-                fill=getattr(tr, "fill", None),
-                showlegend=getattr(tr, "showlegend", None),
-                hoverinfo="skip",
-            ))
-        except Exception:
-            new.add_trace(tr)  # fallback defensivo
-    return new
-
-
 def build_export_png_bytes(
     fig: go.Figure,
 ) -> Tuple[Optional[bytes], Optional[str]]:
+    # Ciclo 23.155 — anti-OOM unificado: usa el helper compartido
+    # core.plot_export.fig_to_png_bytes (decima por envolvente min-max +
+    # scale=1). Mismo blindaje que el resto de los módulos de export.
     try:
-        import plotly.io as pio
-
-        safe_fig = _downsample_fig_for_export(fig)
-        # scale=1 (no 2): a 1600×900 el PNG del reporte se ve nítido y kaleido
-        # usa ~4× menos memoria de raster. Prioridad: no reventar el worker.
-        png_bytes = pio.to_image(
-            safe_fig,
-            format="png",
-            width=1600,
-            height=900,
-            scale=1,
-        )
-        return png_bytes, None
-
+        from core.plot_export import fig_to_png_bytes
+        return fig_to_png_bytes(fig, width=1600, height=900, scale=1)
     except Exception as e:
         return None, str(e)
 

@@ -1711,17 +1711,14 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
 def build_export_png_bytes(
     fig: go.Figure,
 ) -> Tuple[Optional[bytes], Optional[str]]:
+    # Ciclo 23.155 — anti-OOM: antes renderizaba a 4200×2200 scale=2 (raster
+    # gigante) sobre el espectro crudo → mataba el worker en Render. Ahora pasa
+    # por core.plot_export.fig_to_png_bytes (decima + scale=1).
     try:
         export_fig = _build_export_safe_figure(fig)
         export_fig = _scale_export_figure(export_fig)
-
-        png_bytes = export_fig.to_image(
-            format="png",
-            width=4200,
-            height=2200,
-            scale=2,
-        )
-        return png_bytes, None
+        from core.plot_export import fig_to_png_bytes
+        return fig_to_png_bytes(export_fig, width=2400, height=1260, scale=1)
     except Exception as e:
         return None, str(e)
 
@@ -3137,7 +3134,9 @@ def _build_trend_image(fig: go.Figure):
             plot_bgcolor="#ffffff",
             font=dict(color="#0f172a"),
         )
-        return export_fig.to_image(format="png", width=2200, height=1100, scale=2)
+        # Ciclo 23.155 — anti-OOM: vía helper compartido (decima + scale=1).
+        from core.plot_export import fig_to_png_bytes
+        return fig_to_png_bytes(export_fig, width=2200, height=1100, scale=1)[0]
     except Exception:
         return None
 

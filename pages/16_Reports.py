@@ -973,7 +973,10 @@ def _figure_png_bytes(fig: go.Figure) -> bytes:
         plot_bgcolor="#f8fafc",
         font=dict(color="#0f172a"),
     )
-    return export_fig.to_image(format="png", width=2400, height=1250, scale=2)
+    # Ciclo 23.155 — anti-OOM: vía helper compartido (decima + scale=1).
+    from core.plot_export import fig_to_png_bytes
+    png, _ = fig_to_png_bytes(export_fig, width=2400, height=1250, scale=1)
+    return png or b""
 
 
 def _fit_image_dimensions(img_bytes: bytes, max_width: float, max_height: float) -> Tuple[float, float]:

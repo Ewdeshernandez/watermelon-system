@@ -693,11 +693,13 @@ def _scale_export_figure(export_fig):
 
 
 def build_export_png_bytes(fig):
+    # Ciclo 23.155 — anti-OOM: la órbita cruda (x/y) a 4200×2200 scale=2
+    # podía reventar el worker. Pasa por core.plot_export.fig_to_png_bytes.
     try:
         export_fig = _build_export_safe_figure(fig)
         export_fig = _scale_export_figure(export_fig)
-        png_bytes = export_fig.to_image(format="png", width=4200, height=2200, scale=2)
-        return png_bytes, None
+        from core.plot_export import fig_to_png_bytes
+        return fig_to_png_bytes(export_fig, width=2400, height=1260, scale=1)
     except Exception as e:
         return None, str(e)
 

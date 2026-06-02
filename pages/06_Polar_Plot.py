@@ -1138,7 +1138,9 @@ def build_export_png_bytes(fig: go.Figure, text_diag: Dict[str, str]) -> Tuple[O
         export_fig = _build_export_safe_figure(fig)
         export_fig = _scale_export_figure(export_fig)
         # Imagen limpia: el diagnóstico va debajo en el reporte, no incrustado en el PNG.
-        return export_fig.to_image(format="png", width=4300, height=2900, scale=2), None
+        # Ciclo 23.155 — anti-OOM: vía core.plot_export.fig_to_png_bytes (decima + scale=1).
+        from core.plot_export import fig_to_png_bytes
+        return fig_to_png_bytes(export_fig, width=2400, height=1620, scale=1)
     except Exception as e:
         return None, str(e)
 
@@ -1311,7 +1313,9 @@ def build_export_png_bytes(fig: go.Figure, text_diag: Dict[str, str]) -> Tuple[O
     try:
         export_fig = _build_export_safe_figure(fig)
         export_fig = _scale_export_figure(export_fig)
-        return export_fig.to_image(format="png", width=4300, height=2450, scale=2), None
+        # Ciclo 23.155 — anti-OOM: vía core.plot_export.fig_to_png_bytes (decima + scale=1).
+        from core.plot_export import fig_to_png_bytes
+        return fig_to_png_bytes(export_fig, width=2400, height=1360, scale=1)
     except Exception as e:
         return None, str(e)
 

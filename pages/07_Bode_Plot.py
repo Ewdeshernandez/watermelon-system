@@ -1109,10 +1109,13 @@ def _build_bode_report_notes(text_diag: Dict[str, str]) -> str:
 
 
 def build_export_png_bytes(fig: go.Figure, text_diag: Dict[str, str]) -> Tuple[Optional[bytes], Optional[str]]:
+    # Ciclo 23.155 — anti-OOM: pasa por core.plot_export.fig_to_png_bytes
+    # (decima + scale=1) en vez de 4300×2200 scale=2.
     try:
         export_fig = _build_export_safe_figure(fig)
         export_fig = _scale_export_figure(export_fig)
-        return export_fig.to_image(format="png", width=4300, height=2200, scale=2), None
+        from core.plot_export import fig_to_png_bytes
+        return fig_to_png_bytes(export_fig, width=2400, height=1260, scale=1)
     except Exception as e:
         return None, str(e)
 

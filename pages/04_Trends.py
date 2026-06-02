@@ -3714,14 +3714,16 @@ def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[st
             title_font=dict(size=30),
         )
 
-        # 5. Render PNG via kaleido — con engine explícito
-        png_bytes = export_fig.to_image(
-            format="png",
-            width=export_w,
-            height=export_h,
-            scale=2,
-            engine="kaleido",
+        # 5. Render PNG via kaleido — Ciclo 23.155 anti-OOM: pasa por
+        #    core.plot_export.fig_to_png_bytes (decima trazas densas + scale=1
+        #    en vez de scale=2 → ~4× menos raster). Antes 4900×2200 scale=2
+        #    podía reventar el worker en Render ("used over 2GB").
+        from core.plot_export import fig_to_png_bytes
+        png_bytes, _png_err = fig_to_png_bytes(
+            export_fig, width=export_w, height=export_h, scale=1
         )
+        if _png_err:
+            return None, f"Error generando PNG HD: {_png_err}"
 
         # 6. Validar que no devuelva bytes vacíos
         if not png_bytes or len(png_bytes) < 1000:
