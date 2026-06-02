@@ -187,10 +187,43 @@ def ingest_batch(readings: List[LiveReading]) -> int:
         return 0
 
 
+def _latest_from_table(client, instance_id: str, scan_limit: int = 1500) -> List[Dict[str, Any]]:
+    """Fallback: deriva el último valor de cada (variable, metric) leyendo
+    directo de la tabla `live_readings` (indexada por captured_at), sin pasar
+    por la vista `latest_live_reading`. La vista agrega sobre toda la tabla y
+    puede pasarse del statement_timeout de Supabase (error 57014); esta query
+    en cambio es liviana (order + limit sobre índice). Toma las filas más
+    recientes y se queda con la primera ocurrencia de cada (variable, metric).
+    """
+    resp = (
+        client.table(_TABLE)
+        .select("*")
+        .eq("instance_id", instance_id)
+        .order("captured_at", desc=True)
+        .order("id", desc=True)
+        .limit(scan_limit)
+        .execute()
+    )
+    rows = list(getattr(resp, "data", []) or [])
+    seen = set()
+    out: List[Dict[str, Any]] = []
+    for r in rows:
+        key = (r.get("variable"), r.get("metric"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    out.sort(key=lambda r: (r.get("variable") or ""))
+    return out
+
+
 def latest_for_instance(instance_id: str) -> List[Dict[str, Any]]:
     """
     Devuelve los valores actuales (último valor de cada variable+metric)
-    de una instancia. Lee del view `latest_live_reading`.
+    de una instancia. Intenta la vista `latest_live_reading` (rápida cuando
+    Supabase la resuelve a tiempo) y, si falla/se pasa del statement_timeout,
+    cae a `_latest_from_table` (deriva lo mismo desde la tabla, indexado).
+    Esto blinda el cron de envíos y el botón manual ante timeouts de la vista.
     """
     client = _get_supabase_client()
     if client is None:
@@ -205,8 +238,12 @@ def latest_for_instance(instance_id: str) -> List[Dict[str, Any]]:
         )
         return list(getattr(resp, "data", []) or [])
     except Exception as e:
-        log.warning("latest_for_instance failed: %s", e)
-        return []
+        log.warning("latest_for_instance view failed (%s) — fallback a live_readings", e)
+        try:
+            return _latest_from_table(client, instance_id)
+        except Exception as e2:
+            log.warning("latest_for_instance fallback failed: %s", e2)
+            return []
 
 
 def history_for_metric(
