@@ -1235,6 +1235,38 @@ def _scl_compare_diagnostic(records: List[Dict[str, Any]]) -> Dict[str, str]:
     }
 
 
+def _mils_to_gap_unit(value_mils: Optional[float], gap_unit: str) -> Optional[float]:
+    """Convierte un clearance radial expresado en MILS a la unidad del gap de
+    los datos (la misma en la que vienen las posiciones del muñón del CSV).
+
+    Ciclo 23.153 — FIX crítico de unidades. El clearance del Vault SIEMPRE se
+    deriva en mils, pero las máquinas con sondas en MICRAS (ej. SGT300A/B de
+    Parex, configuradas en µm) traen las posiciones en µm. Si no se convierte,
+    el eccentricity ratio, attitude angle, lift-off y el círculo de clearance
+    salen mal (ej. Cd 0.127 mm = 127 µm se graficaba como 5 µm = 5 mils).
+        1 mil = 25.4 µm = 0.0254 mm.
+    """
+    if value_mils is None:
+        return None
+    u = (gap_unit or "mil").strip().lower()
+    if u in ("um", "µm", "μm", "micron", "microns", "micra", "micras",
+             "micrometer", "micrometro", "micrómetro", "mic"):
+        return float(value_mils) * 25.4
+    if u == "mm":
+        return float(value_mils) * 0.0254
+    return float(value_mils)  # 'mil' o desconocido → asumir mils
+
+
+def _amp_unit_label(gap_unit: str) -> str:
+    """Etiqueta legible de unidad pico-pico para la narrativa diagnóstica."""
+    u = (gap_unit or "mil").strip().lower()
+    if u in ("um", "µm", "μm", "micron", "microns", "micra", "micras", "mic"):
+        return "µm pp"
+    if u == "mm":
+        return "mm pp"
+    return "mil pp"
+
+
 def render_scl_panel(
     item: Dict[str, Any],
     panel_index: int,
@@ -1321,6 +1353,13 @@ def render_scl_panel(
         x_plot = display_df["x_gap"].to_numpy(dtype=float)
         y_plot = display_df["y_gap"].to_numpy(dtype=float)
 
+    # Ciclo 23.153 — FIX de unidades: el clearance del Vault viene en MILS,
+    # pero x_plot/y_plot están en la unidad del gap del CSV (µm en SGT300A/B
+    # de Parex). Convertir a la MISMA unidad antes de usarlo como clearance,
+    # o eccentricity/attitude/lift-off/círculo salen mal.
+    _gap_unit_data = meta.get("Gap Unit", "mil")
+    vault_cr_in_gap_unit = _mils_to_gap_unit(vault_clearance_radial_mil, _gap_unit_data)
+
     # Resolver clearance — prioridad:
     #   1. Manual (el usuario siempre puede sobrescribir desde sidebar)
     #   2. Vault (smart default cuando hay datos físicos del cojinete)
@@ -1336,13 +1375,13 @@ def render_scl_panel(
             manual_center_y=manual_center_y,
         )
         boundary["source"] = "manual (sidebar)"
-    elif vault_clearance_radial_mil is not None:
+    elif vault_cr_in_gap_unit is not None:
         boundary = resolve_clearance_boundary(
             x=x_plot, y=y_plot,
             mode="Manual",  # internamente usamos Manual con valores del Vault
             center_mode=clearance_center_mode,
-            manual_cx=float(vault_clearance_radial_mil),
-            manual_cy=float(vault_clearance_radial_mil),
+            manual_cx=float(vault_cr_in_gap_unit),
+            manual_cy=float(vault_cr_in_gap_unit),
             manual_center_x=manual_center_x,
             manual_center_y=manual_center_y,
         )
@@ -1820,7 +1859,7 @@ def render_scl_panel(
             ),
             document_reference=vault_doc_ref,
             lift_off_rpm=lift_off_rpm,
-            amp_unit="mil pp",
+            amp_unit=_amp_unit_label(gap_unit),
             clearance_reference_frame=clearance_center_mode or "",
             bearing_center_x=float(boundary["center_x"]),
             bearing_center_y=float(boundary["center_y"]),
@@ -2121,6 +2160,11 @@ def render_scl_compare_section(
         all_x = np.concatenate([df["x_plot"].to_numpy(dtype=float) for df in valid_dfs])
         all_y = np.concatenate([df["y_plot"].to_numpy(dtype=float) for df in valid_dfs])
 
+        # Ciclo 23.153 — FIX de unidades también en el comparativo: convertir
+        # el clearance del Vault (mils) a la unidad del gap de los datos.
+        _gap_unit_cmp = (items[0].get("meta", {}) or {}).get("Gap Unit", "mil") if items else "mil"
+        vault_cr_cmp = _mils_to_gap_unit(vault_clearance_radial_mil, _gap_unit_cmp)
+
         # Misma lógica de prioridad que el panel individual:
         # Manual > Vault > Auto heurístico
         if clearance_mode == "Manual":
@@ -2131,12 +2175,12 @@ def render_scl_compare_section(
                 manual_center_x=manual_center_x, manual_center_y=manual_center_y,
             )
             boundary["source"] = "manual (sidebar)"
-        elif vault_clearance_radial_mil is not None:
+        elif vault_cr_cmp is not None:
             boundary = resolve_clearance_boundary(
                 x=all_x, y=all_y, mode="Manual",
                 center_mode=clearance_center_mode,
-                manual_cx=float(vault_clearance_radial_mil),
-                manual_cy=float(vault_clearance_radial_mil),
+                manual_cx=float(vault_cr_cmp),
+                manual_cy=float(vault_cr_cmp),
                 manual_center_x=manual_center_x, manual_center_y=manual_center_y,
             )
             boundary["source"] = f"Vault ({cr_source})"
