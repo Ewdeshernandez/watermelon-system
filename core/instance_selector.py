@@ -141,13 +141,13 @@ def render_instance_selector(module_name: str = "module") -> Dict[str, Any]:
 
     st.markdown("### Activo monitoreado")
 
-    # Badge del backend activo (Local efímero vs Supabase persistente)
+    # Minimalista (Ciclo 23.156): solo avisamos si el backend es LOCAL (riesgo
+    # real de pérdida de datos). Cuando Supabase está activo no mostramos nada
+    # — era ruido en la sidebar sin valor para el usuario.
     backend = get_active_backend_name()
-    if backend == "supabase":
-        st.caption("☁️ Persistencia Supabase activa — los datos sobreviven cualquier redeploy.")
-    else:
+    if backend != "supabase":
         st.caption(
-            "💾 Storage local — los datos se pierden en redeploy de Streamlit Cloud. "
+            "💾 Storage local — los datos se pierden en redeploy. "
             "Configurá Supabase en secrets para persistencia real."
         )
 
@@ -250,8 +250,9 @@ def render_instance_selector(module_name: str = "module") -> Dict[str, Any]:
     else:
         st.caption(f"{extras_str}")
 
-    if not is_applicable:
-        st.warning(applicability_message)
+    # Ciclo 23.156 — quitado el cuadro naranja de "applicability" (ruido sin
+    # valor para el usuario; el concepto es interno). is_applicable se sigue
+    # devolviendo en el dict por si algún módulo lo necesita.
 
     return {
         "instance_id": inst.instance_id,

@@ -3023,8 +3023,8 @@ def main() -> None:
         active_custom_thresholds = instance_state["custom_thresholds"]
         active_profile_label = instance_state["profile_label"]
 
-        if not instance_state["is_applicable"]:
-            st.warning(instance_state["applicability_message"])
+        # Ciclo 23.156 — quitado el cuadro de applicability (ruido). El flag
+        # is_applicable se sigue usando arriba (use_rotordyn_pro).
 
     selected_ids = [sid for sid in st.session_state.wm_polar_selected_ids if sid in id_to_item]
 

@@ -2635,8 +2635,7 @@ def main():
         active_profile_label = instance_state["profile_label"]
         active_operating_rpm = instance_state["operating_rpm"]
 
-        if not instance_state["is_applicable"]:
-            st.warning(instance_state["applicability_message"])
+        # Ciclo 23.156 — quitado el cuadro de applicability (ruido sin valor).
 
         # Lookup del Vault PER-INSTANCIA (no per-profile)
         vault_params = dict(instance_state.get("captured_parameters", {}))
