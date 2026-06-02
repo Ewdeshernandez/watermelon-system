@@ -818,9 +818,88 @@ with k4:
 left, right = st.columns([2, 1], gap="large")
 
 
+def _render_fleet_map(instances) -> bool:
+    """Mapa de Colombia con los activos en su ubicación geográfica (legacy
+    location), coloreados por severidad: verde=normal, amarillo=atención,
+    rojo=crítico, gris=sin datos/norma. Devuelve True si pintó al menos uno."""
+    import math
+    import plotly.graph_objects as go
+    from core.geo_colombia import geocode
+
+    sev_color = {"healthy": "#10b981", "warning": "#f59e0b",
+                 "danger": "#ef4444", "unknown": "#94a3b8"}
+    sev_text = {"healthy": "Normal", "warning": "Atención",
+                "danger": "Crítico", "unknown": "Sin datos"}
+
+    pts = []
+    seen: dict = {}
+    for inst in instances:
+        coord = geocode(getattr(inst, "location", "") or "")
+        if coord is None:
+            continue
+        lat, lon = coord
+        key = (round(lat, 2), round(lon, 2))
+        k = seen.get(key, 0)
+        seen[key] = k + 1
+        if k > 0:  # separar dots que caen en la misma ciudad
+            ang = k * 2.39996
+            rad = 0.16 * ((k + 1) // 2)
+            lat += rad * math.cos(ang)
+            lon += rad * math.sin(ang)
+        sev = getattr(inst, "severity", "unknown")
+        sev = sev if sev in sev_color else "unknown"
+        pts.append((lat, lon, sev, getattr(inst, "tag", "") or inst.instance_id,
+                    getattr(inst, "location", "") or "sin ubicación"))
+
+    if not pts:
+        return False
+
+    fig = go.Figure()
+    for sev in ("healthy", "warning", "danger", "unknown"):
+        sub = [p for p in pts if p[2] == sev]
+        if not sub:
+            continue
+        # halo
+        fig.add_trace(go.Scattergeo(
+            lat=[p[0] for p in sub], lon=[p[1] for p in sub], mode="markers",
+            marker=dict(size=30, color=sev_color[sev], opacity=0.16),
+            hoverinfo="skip", showlegend=False,
+        ))
+        # dot
+        fig.add_trace(go.Scattergeo(
+            lat=[p[0] for p in sub], lon=[p[1] for p in sub], mode="markers",
+            marker=dict(size=14, color=sev_color[sev],
+                        line=dict(width=1.6, color="white")),
+            name=sev_text[sev],
+            text=[f"<b>{p[3]}</b><br>{sev_text[sev]}<br>📍 {p[4]}" for p in sub],
+            hovertemplate="%{text}<extra></extra>",
+        ))
+
+    fig.update_geos(
+        scope="south america",
+        lataxis_range=[-4.6, 13.6], lonaxis_range=[-80.0, -66.0],
+        showland=True, landcolor="#eef3f8",
+        showocean=True, oceancolor="#d8e8fb",
+        showcountries=True, countrycolor="#c3cedb", countrywidth=1.0,
+        showcoastlines=True, coastlinecolor="#aebccd",
+        showlakes=False, bgcolor="rgba(0,0,0,0)", resolution=50,
+    )
+    fig.update_layout(
+        margin=dict(l=0, r=0, t=0, b=0), height=500,
+        paper_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", yanchor="bottom", y=0.0, xanchor="center",
+                    x=0.5, bgcolor="rgba(255,255,255,0.75)",
+                    bordercolor="#e6ebf2", borderwidth=1, font=dict(size=11)),
+        showlegend=True,
+    )
+    st.plotly_chart(fig, use_container_width=True,
+                    config={"displayModeBar": False, "scrollZoom": False})
+    return True
+
+
 with left:
     st.markdown(
-        '<div class="wmh-sec">🛡️ Activos en monitoreo <div class="bar"></div></div>',
+        '<div class="wmh-sec">🗺️ Flota en Colombia <div class="bar"></div></div>',
         unsafe_allow_html=True,
     )
 
@@ -830,6 +909,20 @@ with left:
             "Ve a **Machinery Library → Crear nueva instancia** para empezar."
         )
     else:
+        # Mapa de flota en Colombia (protagonista del Home). Si no se pudo
+        # geolocalizar ningún activo, igual mostramos el detalle abajo.
+        _map_ok = _render_fleet_map(_fleet["instances"])
+        if _map_ok:
+            st.caption(
+                "🟢 Normal · 🟡 Atención · 🔴 Crítico · ⚪ Sin datos — "
+                "ubicación según el campo del activo."
+            )
+        st.markdown(
+            '<div class="wmh-sec" style="margin-top:14px;">📋 Detalle de activos'
+            ' <div class="bar"></div></div>',
+            unsafe_allow_html=True,
+        )
+
         # v3.31.265 — Tabla compacta minimalista (reemplaza grid de
         # cards 3×N con gauges grandes). Look enterprise tipo
         # System1/AMS — densidad alta, escaneable de un vistazo.
