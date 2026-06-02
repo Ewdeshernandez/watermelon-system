@@ -289,8 +289,8 @@ st.markdown(
     .wmh-kpi {
         background: #ffffff;
         border: 1px solid #e6ebf2;
-        border-radius: 10px;
-        padding: 16px 18px;
+        border-radius: 9px;
+        padding: 10px 13px;
         box-shadow: none;
         height: 100%;
         transition: border-color 0.15s ease;
@@ -300,15 +300,15 @@ st.markdown(
         border-color: #cbd5e1;
     }
     .wmh-kpi-label {
-        font-size: 10px;
+        font-size: 9.5px;
         font-weight: 800;
-        letter-spacing: 0.14em;
+        letter-spacing: 0.12em;
         text-transform: uppercase;
         color: #64748b;
-        margin-bottom: 8px;
+        margin-bottom: 3px;
     }
     .wmh-kpi-value {
-        font-size: 32px;
+        font-size: 22px;
         font-weight: 800;
         line-height: 1;
         letter-spacing: -0.02em;
@@ -316,14 +316,14 @@ st.markdown(
         font-variant-numeric: tabular-nums;
     }
     .wmh-kpi-sub {
-        font-size: 11px;
+        font-size: 10px;
         color: #94a3b8;
-        margin-top: 6px;
-        line-height: 1.4;
+        margin-top: 3px;
+        line-height: 1.35;
     }
     .wmh-kpi-spark {
-        margin-top: 8px;
-        opacity: 0.55; /* sparkline mas tenue, no compete con el value */
+        margin-top: 4px;
+        opacity: 0.5; /* sparkline mas tenue, no compete con el value */
     }
     .wmh-kpi.danger  .wmh-kpi-value { color: #dc2626; }
     .wmh-kpi.warning .wmh-kpi-value { color: #d97706; }
@@ -706,7 +706,7 @@ _omni_q = ""  # placeholder para que el código siguiente no falle
 # =============================================================
 # KPI BAND (4 cards con sparkline)
 # =============================================================
-def _spark_svg(values: list, color: str = "#0ea5e9", width: int = 140, height: int = 32) -> str:
+def _spark_svg(values: list, color: str = "#0ea5e9", width: int = 120, height: int = 18) -> str:
     """Genera un sparkline SVG inline a partir de una lista de ints."""
     if not values:
         return ""
