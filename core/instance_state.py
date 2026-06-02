@@ -172,8 +172,13 @@ class Instance:
     client_email: str = ""              # destinatario del reporte por email
     whatsapp_number: str = ""           # E.164 sin '+', ej. "573001234567"
     report_send_enabled: bool = False   # activar envío automático programado
-    report_send_day: int = 0            # día de la semana 0=Lunes … 6=Domingo
-    report_send_hour: int = 6           # hora local 0-23 del envío
+    report_send_day: int = 0            # (legacy single) día 0=Lunes … 6=Domingo
+    report_send_hour: int = 6           # (legacy single) hora local 0-23
+    # Ciclo 23.152 — múltiples días y horas de envío programado. Listas de
+    # int. Si están vacías, se cae a los campos single de arriba (back-compat).
+    # El envío sale en cada combinación (cualquier day ∈ days y hour ∈ hours).
+    report_send_days: List[int] = field(default_factory=list)   # ej. [0, 3]
+    report_send_hours: List[int] = field(default_factory=list)  # ej. [6, 18]
 
     # Ciclo 23.151 — Envío automático POR ALARMA (Fase 3). Cuando un canal
     # cruza a Alarma/Danger, se manda el reporte. alarm_alert_level guarda el
@@ -257,6 +262,8 @@ class Instance:
             report_send_enabled=bool(_f("report_send_enabled", False)),
             report_send_day=int(_f("report_send_day", 0) or 0),
             report_send_hour=int(_f("report_send_hour", 6) or 6),
+            report_send_days=[int(x) for x in (data.get("report_send_days") or [])],
+            report_send_hours=[int(x) for x in (data.get("report_send_hours") or [])],
             alarm_send_enabled=bool(_f("alarm_send_enabled", False)),
             alarm_alert_level=int(_f("alarm_alert_level", 0) or 0),
             captured_parameters=dict(data.get("captured_parameters", {}) or {}),
@@ -425,6 +432,7 @@ def update_instance_header(
         # Ciclo 23.150 — envío automático del reporte
         "client_email", "whatsapp_number", "report_send_enabled",
         "report_send_day", "report_send_hour",
+        "report_send_days", "report_send_hours",
         # Ciclo 23.151 — envío por alarma
         "alarm_send_enabled", "alarm_alert_level",
     }

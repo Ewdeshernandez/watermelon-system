@@ -56,16 +56,23 @@ def _now_local() -> datetime:
 
 
 def _is_due(inst, now: datetime) -> bool:
-    """¿Coincide AHORA con el día/hora programados del activo?"""
+    """¿Coincide AHORA con algún día Y alguna hora programados del activo?
+
+    Soporta múltiples días y horas (report_send_days / report_send_hours).
+    Si esas listas están vacías, cae a los campos single (back-compat)."""
     if not getattr(inst, "report_send_enabled", False):
         return False
     try:
-        day = int(getattr(inst, "report_send_day", 0) or 0)
-        hour = int(getattr(inst, "report_send_hour", 6) or 6)
+        days = [int(x) for x in (getattr(inst, "report_send_days", None) or [])]
+        if not days:
+            days = [int(getattr(inst, "report_send_day", 0) or 0)]
+        hours = [int(x) for x in (getattr(inst, "report_send_hours", None) or [])]
+        if not hours:
+            hours = [int(getattr(inst, "report_send_hour", 6) or 6)]
     except Exception:
         return False
     # weekday(): Lunes=0 … Domingo=6 (coincide con nuestra convención)
-    return now.weekday() == day and now.hour == hour
+    return now.weekday() in days and now.hour in hours
 
 
 def _has_recipient(inst) -> bool:

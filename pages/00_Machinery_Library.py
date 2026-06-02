@@ -530,32 +530,40 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                 ev1, ev2 = st.columns(2)
                 with ev1:
                     new_client_email = st.text_input(
-                        "Email del cliente", value=inst.client_email or "",
-                        help="Destinatario del PDF. Ej. mantenimiento@cliente.com",
+                        "Email(s) del cliente", value=inst.client_email or "",
+                        help="Uno o varios, separados por COMA. "
+                             "Ej. jefe@cliente.com, mantenimiento@cliente.com",
                     )
                 with ev2:
                     new_whatsapp_number = st.text_input(
-                        "WhatsApp del cliente", value=inst.whatsapp_number or "",
-                        help="Con código de país, sin '+'. Ej. 573001234567",
+                        "WhatsApp(s) del cliente", value=inst.whatsapp_number or "",
+                        help="Uno o varios separados por COMA. Con código de país, sin '+'. "
+                             "Ej. 573001234567, 573009998877",
                     )
                 new_report_enabled = st.checkbox(
                     "Activar envío automático programado",
                     value=bool(getattr(inst, "report_send_enabled", False)),
-                    help="Si está activo, el sistema envía el reporte solo en el día y hora elegidos.",
+                    help="Si está activo, el sistema envía el reporte solo en los días y horas elegidos.",
                 )
+                # Defaults: usar listas nuevas si existen, sino el campo single (back-compat)
+                _def_days = [int(x) for x in (getattr(inst, "report_send_days", None) or [])] \
+                    or [int(getattr(inst, "report_send_day", 0) or 0)]
+                _def_hours = [int(x) for x in (getattr(inst, "report_send_hours", None) or [])] \
+                    or [int(getattr(inst, "report_send_hour", 6) or 6)]
                 ev3, ev4 = st.columns(2)
                 with ev3:
-                    new_report_day = st.selectbox(
-                        "Día de envío",
+                    new_report_days = st.multiselect(
+                        "Días de envío (uno o varios)",
                         options=list(range(7)),
-                        index=int(getattr(inst, "report_send_day", 0) or 0),
+                        default=[d for d in _def_days if 0 <= d <= 6],
                         format_func=lambda i: _DOW[i],
                     )
                 with ev4:
-                    new_report_hour = st.number_input(
-                        "Hora de envío (0-23, hora local)",
-                        value=int(getattr(inst, "report_send_hour", 6) or 6),
-                        min_value=0, max_value=23, step=1,
+                    new_report_hours = st.multiselect(
+                        "Horas de envío (0-23, hora local — una o varias)",
+                        options=list(range(24)),
+                        default=[h for h in _def_hours if 0 <= h <= 23],
+                        format_func=lambda h: f"{h:02d}:00",
                     )
                 st.divider()
                 new_alarm_enabled = st.checkbox(
@@ -577,8 +585,11 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     client_email=new_client_email.strip(),
                     whatsapp_number=new_whatsapp_number.strip().replace("+", "").replace(" ", ""),
                     report_send_enabled=bool(new_report_enabled),
-                    report_send_day=int(new_report_day),
-                    report_send_hour=int(new_report_hour),
+                    report_send_days=sorted(int(d) for d in new_report_days),
+                    report_send_hours=sorted(int(h) for h in new_report_hours),
+                    # back-compat: el primer día/hora también en los campos single
+                    report_send_day=int(sorted(new_report_days)[0]) if new_report_days else 0,
+                    report_send_hour=int(sorted(new_report_hours)[0]) if new_report_hours else 6,
                     alarm_send_enabled=bool(new_alarm_enabled),
                     client=new_client.strip(),
                     site=new_site.strip(),

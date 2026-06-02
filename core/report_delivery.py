@@ -36,11 +36,22 @@ def _pdf_filename(tag: str) -> str:
     return f"Reporte_{safe}_{datetime.now().strftime('%Y%m%d')}.pdf"
 
 
+def _split_recipients(raw: str) -> list:
+    """Separa varios destinatarios en un solo campo. Acepta coma, punto y
+    coma, salto de línea o espacios como separador. Ej:
+    'a@x.com, b@y.com' o '573001; 573002' → lista de strings limpios."""
+    import re
+    if not raw:
+        return []
+    parts = re.split(r"[,;\n\r\t ]+", str(raw))
+    return [p.strip() for p in parts if p.strip()]
+
+
 def available_channels(instance_obj: Any) -> Dict[str, bool]:
-    """Qué canales tienen destinatario cargado en el activo."""
-    email = (getattr(instance_obj, "client_email", "") or "").strip()
-    wa = (getattr(instance_obj, "whatsapp_number", "") or "").strip()
-    return {"email": bool(email and "@" in email), "whatsapp": bool(wa)}
+    """Qué canales tienen al menos un destinatario cargado en el activo."""
+    emails = [e for e in _split_recipients(getattr(instance_obj, "client_email", "")) if "@" in e]
+    nums = _split_recipients(getattr(instance_obj, "whatsapp_number", ""))
+    return {"email": bool(emails), "whatsapp": bool(nums)}
 
 
 def deliver_report(
@@ -82,10 +93,10 @@ def deliver_report(
         short_msg = ("⚠ *AVISO AUTOMÁTICO POR CONDICIÓN* — se detectó un cruce de "
                      "umbral en el activo.\n\n") + short_msg
 
-    # ---- Email ----
+    # ---- Email (uno o varios, separados por coma) ----
     if "email" in channels:
-        to = (getattr(instance_obj, "client_email", "") or "").strip()
-        if not (to and "@" in to):
+        emails = [e for e in _split_recipients(getattr(instance_obj, "client_email", "")) if "@" in e]
+        if not emails:
             result["email"] = {"ok": False, "error": "Email del cliente no configurado."}
         else:
             try:
@@ -97,18 +108,24 @@ def deliver_report(
                 if alert:
                     html = ("<p style='margin:0 0 8px;color:#b91c1c;font-weight:700;'>"
                             "⚠ Aviso automático por condición — cruce de umbral detectado.</p>") + html
-                result["email"] = send_email(
-                    to=to, subject=subject,
-                    body_text=short_msg, body_html=html,
-                    attachments=[(filename, pdf_bytes, "application/pdf")],
-                )
+                attachments = [(filename, pdf_bytes, "application/pdf")]
+                oks, fails = [], []
+                for to in emails:
+                    r = send_email(to=to, subject=subject, body_text=short_msg,
+                                   body_html=html, attachments=attachments)
+                    if r.get("ok"):
+                        oks.append(to)
+                    else:
+                        fails.append(f"{to}: {r.get('error', '?')}")
+                result["email"] = {"ok": bool(oks), "sent": oks, "failed": fails,
+                                   "error": (None if oks else "; ".join(fails))}
             except Exception as e:
                 result["email"] = {"ok": False, "error": f"email falló: {e}"}
 
-    # ---- WhatsApp ----
+    # ---- WhatsApp (uno o varios, separados por coma) ----
     if "whatsapp" in channels:
-        to = (getattr(instance_obj, "whatsapp_number", "") or "").strip()
-        if not to:
+        numbers = _split_recipients(getattr(instance_obj, "whatsapp_number", ""))
+        if not numbers:
             result["whatsapp"] = {"ok": False, "error": "WhatsApp del cliente no configurado."}
         else:
             try:
@@ -120,10 +137,16 @@ def deliver_report(
                     f"{status}" + (f" (Salud {score}/100)" if score is not None else ""),
                     datetime.now().strftime("%d/%m/%Y %H:%M"),
                 ]
-                result["whatsapp"] = send_report_document(
-                    to=to, pdf_bytes=pdf_bytes, filename=filename,
-                    caption=short_msg, body_params=body_params,
-                )
+                oks, fails = [], []
+                for to in numbers:
+                    r = send_report_document(to=to, pdf_bytes=pdf_bytes, filename=filename,
+                                             caption=short_msg, body_params=body_params)
+                    if r.get("ok"):
+                        oks.append(to)
+                    else:
+                        fails.append(f"{to}: {r.get('error', '?')}")
+                result["whatsapp"] = {"ok": bool(oks), "sent": oks, "failed": fails,
+                                      "error": (None if oks else "; ".join(fails))}
             except Exception as e:
                 result["whatsapp"] = {"ok": False, "error": f"whatsapp falló: {e}"}
 
