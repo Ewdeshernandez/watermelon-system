@@ -557,6 +557,15 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                         value=int(getattr(inst, "report_send_hour", 6) or 6),
                         min_value=0, max_value=23, step=1,
                     )
+                st.divider()
+                new_alarm_enabled = st.checkbox(
+                    "Avisar automáticamente por alarma / peligro",
+                    value=bool(getattr(inst, "alarm_send_enabled", False)),
+                    help="Si está activo, manda el reporte apenas un canal cruza a "
+                         "Alarma o Danger (revisión cada 15 min). Un aviso por episodio: "
+                         "no repite hasta que el activo se normaliza o empeora.",
+                )
+
                 if not (inst.client_email or inst.whatsapp_number):
                     st.info("Cargá al menos un email o un WhatsApp para poder enviar.")
 
@@ -570,6 +579,7 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     report_send_enabled=bool(new_report_enabled),
                     report_send_day=int(new_report_day),
                     report_send_hour=int(new_report_hour),
+                    alarm_send_enabled=bool(new_alarm_enabled),
                     client=new_client.strip(),
                     site=new_site.strip(),
                     asset_class=new_asset_class.strip(),

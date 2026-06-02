@@ -175,6 +175,14 @@ class Instance:
     report_send_day: int = 0            # día de la semana 0=Lunes … 6=Domingo
     report_send_hour: int = 6           # hora local 0-23 del envío
 
+    # Ciclo 23.151 — Envío automático POR ALARMA (Fase 3). Cuando un canal
+    # cruza a Alarma/Danger, se manda el reporte. alarm_alert_level guarda el
+    # nivel ya avisado (0=Normal, 1=Alarma, 2=Danger) para "1 aviso por
+    # episodio": solo se reenvía si el nivel EMPEORA; se resetea a 0 al
+    # normalizarse. Lo gestiona el cron de alarmas (scripts/send_alarm_reports).
+    alarm_send_enabled: bool = False    # activar aviso automático por alarma/peligro
+    alarm_alert_level: int = 0          # nivel ya avisado (0/1/2) — estado interno
+
     # Datos capturados ad-hoc (legacy, sigue funcionando)
     captured_parameters: Dict[str, Any] = field(default_factory=dict)
     documents: List[Dict[str, Any]] = field(default_factory=list)
@@ -249,6 +257,8 @@ class Instance:
             report_send_enabled=bool(_f("report_send_enabled", False)),
             report_send_day=int(_f("report_send_day", 0) or 0),
             report_send_hour=int(_f("report_send_hour", 6) or 6),
+            alarm_send_enabled=bool(_f("alarm_send_enabled", False)),
+            alarm_alert_level=int(_f("alarm_alert_level", 0) or 0),
             captured_parameters=dict(data.get("captured_parameters", {}) or {}),
             documents=list(data.get("documents", []) or []),
             created_at=_f("created_at"),
@@ -415,6 +425,8 @@ def update_instance_header(
         # Ciclo 23.150 — envío automático del reporte
         "client_email", "whatsapp_number", "report_send_enabled",
         "report_send_day", "report_send_hour",
+        # Ciclo 23.151 — envío por alarma
+        "alarm_send_enabled", "alarm_alert_level",
     }
     for key, val in kwargs.items():
         if key in allowed and val is not None:

@@ -48,8 +48,12 @@ def deliver_report(
     pdf_bytes: bytes,
     meta: Optional[Dict[str, Any]] = None,
     channels: Optional[Iterable[str]] = None,
+    alert: bool = False,
 ) -> Dict[str, Any]:
-    """Envía el PDF por los canales pedidos. Ver docstring del módulo."""
+    """Envía el PDF por los canales pedidos. Ver docstring del módulo.
+
+    alert=True marca el envío como disparado por alarma: antepone "⚠ ALERTA"
+    al asunto del email y una línea de aviso al mensaje (email y WhatsApp)."""
     meta = meta or {}
     instance_id = meta.get("instance_id", "") or getattr(instance_obj, "instance_id", "")
     status = meta.get("status", "—")
@@ -74,6 +78,9 @@ def deliver_report(
 
     filename = _pdf_filename(tag)
     short_msg = build_short_message(instance_obj, instance_id, status, score, alarms)
+    if alert:
+        short_msg = ("⚠ *AVISO AUTOMÁTICO POR CONDICIÓN* — se detectó un cruce de "
+                     "umbral en el activo.\n\n") + short_msg
 
     # ---- Email ----
     if "email" in channels:
@@ -84,7 +91,12 @@ def deliver_report(
             try:
                 from core.email_sender import send_email
                 subject = build_email_subject(instance_obj, instance_id, status)
+                if alert:
+                    subject = "⚠ ALERTA — " + subject
                 html = build_email_html(instance_obj, instance_id, status, score, alarms)
+                if alert:
+                    html = ("<p style='margin:0 0 8px;color:#b91c1c;font-weight:700;'>"
+                            "⚠ Aviso automático por condición — cruce de umbral detectado.</p>") + html
                 result["email"] = send_email(
                     to=to, subject=subject,
                     body_text=short_msg, body_html=html,

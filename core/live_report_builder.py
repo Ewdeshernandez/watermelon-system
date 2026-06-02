@@ -195,6 +195,33 @@ def _detect_severity_events(
 # Armado del PDF (espejo de _build_live_report_pdf de la página)
 # =============================================================
 
+def current_severity_level(
+    instance_id: str,
+    instance_obj: Any = None,
+) -> Tuple[int, str, Dict[str, int]]:
+    """Nivel de severidad ACTUAL del activo SIN armar el PDF (barato — solo
+    lee latest + computa severidad). Para el cron de alarmas, que chequea cada
+    15 min y solo arma el PDF si hay que avisar.
+
+    Devuelve (level, status, summary):
+        level: 0 = Normal / Sin datos · 1 = Alarma · 2 = Danger
+    """
+    from core.live_readings import latest_for_instance
+    if instance_obj is None:
+        from core.instance_state import get_instance
+        instance_obj = get_instance(instance_id)
+    latest = latest_for_instance(instance_id) or []
+    if not latest:
+        return 0, "Sin datos", {}
+    sensor_lookup = _build_sensor_lookup(instance_obj)
+    _, summary = _compute_rendered_rows(latest, sensor_lookup, instance_obj)
+    if summary.get("Danger", 0):
+        return 2, "Crítica", summary
+    if summary.get("Alarma", 0):
+        return 1, "Atención", summary
+    return 0, "Operación normal", summary
+
+
 def build_report_for_instance(
     instance_id: str,
     instance_obj: Any = None,
@@ -321,4 +348,4 @@ def build_report_for_instance(
         return None, meta
 
 
-__all__ = ["build_report_for_instance"]
+__all__ = ["build_report_for_instance", "current_severity_level"]
