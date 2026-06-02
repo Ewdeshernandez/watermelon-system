@@ -1340,14 +1340,62 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     return fig
 
 
+def _downsample_fig_for_export(fig: go.Figure, max_pts: int = 6000) -> go.Figure:
+    """Devuelve una COPIA de la figura con las trazas densas decimadas.
+
+    Ciclo 23.154 — FIX CRÍTICO (502/OOM). El waveform crudo puede tener
+    decenas de miles de puntos por traza; renderizarlo a PNG con kaleido a
+    3200×1800 dispara un pico de memoria que mata el worker en Render (502)
+    y se pierde la sesión. Para el PNG del reporte no se necesitan todos los
+    puntos: a 3200px de ancho, ~6000 puntos por traza se ven idénticos.
+    Usa decimación min-max por bloques para PRESERVAR picos (clave en
+    vibración: peak, crest factor, transitorios).
+    """
+    import numpy as np
+    new = go.Figure(layout=fig.layout)
+    for tr in fig.data:
+        x = getattr(tr, "x", None)
+        y = getattr(tr, "y", None)
+        try:
+            n = len(x) if x is not None else 0
+        except Exception:
+            n = 0
+        if x is not None and y is not None and n > max_pts:
+            try:
+                xi = np.asarray(x)
+                yi = np.asarray(y, dtype=float)
+                # min-max envelope: por cada bloque tomamos el mín y el máx
+                # (preserva picos positivos y negativos del waveform).
+                n_blocks = max(1, max_pts // 2)
+                step = int(np.ceil(n / n_blocks))
+                xs, ys = [], []
+                for s in range(0, n, step):
+                    blk_y = yi[s:s + step]
+                    blk_x = xi[s:s + step]
+                    if blk_y.size == 0:
+                        continue
+                    i_min = int(np.argmin(blk_y))
+                    i_max = int(np.argmax(blk_y))
+                    for i in sorted({i_min, i_max}):
+                        xs.append(blk_x[i]); ys.append(blk_y[i])
+                tr = tr.__class__(tr.to_plotly_json())
+                tr.x = xs
+                tr.y = ys
+            except Exception:
+                pass  # si algo falla, dejamos la traza original
+        new.add_trace(tr)
+    return new
+
+
 def build_export_png_bytes(
     fig: go.Figure,
 ) -> Tuple[Optional[bytes], Optional[str]]:
     try:
         import plotly.io as pio
 
+        safe_fig = _downsample_fig_for_export(fig)
         png_bytes = pio.to_image(
-            fig,
+            safe_fig,
             format="png",
             width=1600,
             height=900,
