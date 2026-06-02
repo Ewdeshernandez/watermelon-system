@@ -1340,16 +1340,18 @@ def _scale_export_figure(export_fig: go.Figure) -> go.Figure:
     return fig
 
 
-def _downsample_fig_for_export(fig: go.Figure, max_pts: int = 6000) -> go.Figure:
-    """Devuelve una COPIA de la figura con las trazas densas decimadas.
+def _downsample_fig_for_export(fig: go.Figure, max_pts: int = 4000) -> go.Figure:
+    """Devuelve una figura LIVIANA para exportar a PNG sin reventar memoria.
 
-    Ciclo 23.154 — FIX CRÍTICO (502/OOM). El waveform crudo puede tener
-    decenas de miles de puntos por traza; renderizarlo a PNG con kaleido a
-    3200×1800 dispara un pico de memoria que mata el worker en Render (502)
-    y se pierde la sesión. Para el PNG del reporte no se necesitan todos los
-    puntos: a 3200px de ancho, ~6000 puntos por traza se ven idénticos.
-    Usa decimación min-max por bloques para PRESERVAR picos (clave en
-    vibración: peak, crest factor, transitorios).
+    Ciclo 23.154 — FIX CRÍTICO (502/OOM, confirmado por Render: "Ran out of
+    memory, used over 2GB"). El waveform crudo puede tener decenas de miles de
+    puntos × varias señales; pasarlo a kaleido dispara un pico de memoria que
+    mata el worker. Por cada traza con datos:
+      * decima por ENVOLVENTE MIN-MAX (preserva picos +/- — peak, crest,
+        transitorios), a ~max_pts puntos.
+      * reconstruye una traza MÍNIMA (solo x/y/mode/name/color/fill) en vez de
+        copiar el trace completo (evita duplicar las arrays grandes).
+    Las trazas sin datos (markers de layout van aparte) se copian tal cual.
     """
     import numpy as np
     new = go.Figure(layout=fig.layout)
@@ -1360,12 +1362,13 @@ def _downsample_fig_for_export(fig: go.Figure, max_pts: int = 6000) -> go.Figure
             n = len(x) if x is not None else 0
         except Exception:
             n = 0
-        if x is not None and y is not None and n > max_pts:
-            try:
-                xi = np.asarray(x)
-                yi = np.asarray(y, dtype=float)
-                # min-max envelope: por cada bloque tomamos el mín y el máx
-                # (preserva picos positivos y negativos del waveform).
+        if x is None or y is None or n == 0:
+            new.add_trace(tr)  # nada que decimar (ej. trazas auxiliares)
+            continue
+        try:
+            xi = np.asarray(x)
+            yi = np.asarray(y, dtype=float)
+            if n > max_pts:
                 n_blocks = max(1, max_pts // 2)
                 step = int(np.ceil(n / n_blocks))
                 xs, ys = [], []
@@ -1374,16 +1377,24 @@ def _downsample_fig_for_export(fig: go.Figure, max_pts: int = 6000) -> go.Figure
                     blk_x = xi[s:s + step]
                     if blk_y.size == 0:
                         continue
-                    i_min = int(np.argmin(blk_y))
-                    i_max = int(np.argmax(blk_y))
-                    for i in sorted({i_min, i_max}):
+                    for i in sorted({int(np.argmin(blk_y)), int(np.argmax(blk_y))}):
                         xs.append(blk_x[i]); ys.append(blk_y[i])
-                tr = tr.__class__(tr.to_plotly_json())
-                tr.x = xs
-                tr.y = ys
-            except Exception:
-                pass  # si algo falla, dejamos la traza original
-        new.add_trace(tr)
+            else:
+                xs, ys = list(xi), list(yi)
+            # Traza mínima: conservar solo lo visual esencial.
+            line = getattr(tr, "line", None)
+            color = getattr(line, "color", None) if line is not None else None
+            new.add_trace(go.Scatter(
+                x=xs, y=ys,
+                mode=getattr(tr, "mode", None) or "lines",
+                name=getattr(tr, "name", None),
+                line=dict(color=color) if color else None,
+                fill=getattr(tr, "fill", None),
+                showlegend=getattr(tr, "showlegend", None),
+                hoverinfo="skip",
+            ))
+        except Exception:
+            new.add_trace(tr)  # fallback defensivo
     return new
 
 
@@ -1394,12 +1405,14 @@ def build_export_png_bytes(
         import plotly.io as pio
 
         safe_fig = _downsample_fig_for_export(fig)
+        # scale=1 (no 2): a 1600×900 el PNG del reporte se ve nítido y kaleido
+        # usa ~4× menos memoria de raster. Prioridad: no reventar el worker.
         png_bytes = pio.to_image(
             safe_fig,
             format="png",
             width=1600,
             height=900,
-            scale=2,
+            scale=1,
         )
         return png_bytes, None
 
