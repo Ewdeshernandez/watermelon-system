@@ -550,21 +550,34 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     or [int(getattr(inst, "report_send_day", 0) or 0)]
                 _def_hours = [int(x) for x in (getattr(inst, "report_send_hours", None) or [])] \
                     or [int(getattr(inst, "report_send_hour", 6) or 6)]
-                ev3, ev4 = st.columns(2)
-                with ev3:
-                    new_report_days = st.multiselect(
-                        "Días de envío (uno o varios)",
-                        options=list(range(7)),
-                        default=[d for d in _def_days if 0 <= d <= 6],
-                        format_func=lambda i: _DOW[i],
-                    )
-                with ev4:
-                    new_report_hours = st.multiselect(
-                        "Horas de envío (0-23, hora local — una o varias)",
-                        options=list(range(24)),
-                        default=[h for h in _def_hours if 0 <= h <= 23],
-                        format_func=lambda h: f"{h:02d}:00",
-                    )
+
+                # Días como CHECKBOXES (no st.multiselect: dentro de st.form +
+                # st.tabs el multiselect tiene un bug de Streamlit que resetea
+                # la pestaña al seleccionar). Las casillas funcionan estable.
+                st.markdown("**Días de envío** (marcá uno o varios)")
+                _abbr = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+                _dcols = st.columns(7)
+                new_report_days = []
+                for _i in range(7):
+                    with _dcols[_i]:
+                        if st.checkbox(_abbr[_i], value=(_i in _def_days),
+                                       key=f"rsday_{instance_id}_{_i}"):
+                            new_report_days.append(_i)
+
+                new_report_hours_raw = st.text_input(
+                    "Horas de envío (0-23, hora local — una o varias, separadas por coma)",
+                    value=", ".join(str(h) for h in _def_hours),
+                    help="Ej. 6, 18  → manda a las 06:00 y a las 18:00.",
+                )
+                new_report_hours = []
+                for _tok in new_report_hours_raw.replace(";", " ").replace(",", " ").split():
+                    try:
+                        _hv = int(_tok)
+                        if 0 <= _hv <= 23:
+                            new_report_hours.append(_hv)
+                    except ValueError:
+                        pass
+                new_report_hours = sorted(set(new_report_hours))
                 st.divider()
                 new_alarm_enabled = st.checkbox(
                     "Avisar automáticamente por alarma / peligro",
