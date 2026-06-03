@@ -942,21 +942,45 @@ def _render_fleet_map(instances) -> bool:
     import streamlit.components.v1 as _components
     fig_json = fig.to_json()
     html = """
-    <div id="wmglobe" style="width:100%;height:620px;"></div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"></script>
+    <div id="wmglobe" style="width:100%;height:620px;display:flex;
+         align-items:center;justify-content:center;color:#94a3b8;
+         font-family:-apple-system,system-ui,sans-serif;font-size:13px;">🌎 Cargando globo…</div>
     <script>
+    (function(){
       var FIG = __FIG__;
-      var gd = document.getElementById('wmglobe');
-      Plotly.newPlot(gd, FIG.data, FIG.layout,
-                     {displayModeBar:false, scrollZoom:false, responsive:true});
-      var lon = -74, spin = true;
-      gd.addEventListener('mouseenter', function(){ spin = false; });
-      gd.addEventListener('mouseleave', function(){ spin = true; });
-      setInterval(function(){
-        if(!spin) return;
-        lon -= 0.22; if (lon < -360) { lon += 360; }
-        Plotly.relayout(gd, {'geo.projection.rotation': {lon: lon, lat: 10, roll: 0}});
-      }, 60);
+      function draw(){
+        var gd = document.getElementById('wmglobe');
+        gd.innerHTML = '';
+        Plotly.newPlot(gd, FIG.data, FIG.layout,
+                       {displayModeBar:false, scrollZoom:false, responsive:true});
+        var lon = -74, spin = true;
+        gd.addEventListener('mouseenter', function(){ spin = false; });
+        gd.addEventListener('mouseleave', function(){ spin = true; });
+        setInterval(function(){
+          if(!spin) return;
+          lon -= 0.22; if (lon < -360) { lon += 360; }
+          Plotly.relayout(gd, {'geo.projection.rotation': {lon: lon, lat: 10, roll: 0}});
+        }, 60);
+      }
+      function load(src, cb, err){
+        var s = document.createElement('script');
+        s.src = src; s.onload = cb; s.onerror = err;
+        document.head.appendChild(s);
+      }
+      if (window.Plotly) { draw(); }
+      else {
+        // bundle geo (1.2MB, rápido) con fallback al completo. CDN oficial
+        // cdn.plot.ly (el de cdnjs daba 404 para esta versión → globo vacío).
+        load('https://cdn.plot.ly/plotly-geo-2.35.2.min.js',
+          draw,
+          function(){
+            load('https://cdn.plot.ly/plotly-2.35.2.min.js',
+              draw,
+              function(){ document.getElementById('wmglobe').innerHTML =
+                          'No se pudo cargar el globo. Refrescá la página.'; });
+          });
+      }
+    })();
     </script>
     """.replace("__FIG__", fig_json)
     _components.html(html, height=640)
