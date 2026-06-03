@@ -3331,6 +3331,20 @@ def main() -> None:
     options = sorted(inst_meta.keys())
     default_idx = options.index("tes1") if "tes1" in options else 0
 
+    # Deep-link desde el globo del Home: ?instance=<id> preselecciona el
+    # activo (consume-once: borramos el query param para no fijarlo en reruns
+    # y que el usuario pueda cambiar el selector). v3.31.310
+    try:
+        _qp_inst = st.query_params.get("instance")
+    except Exception:
+        _qp_inst = None
+    if _qp_inst and _qp_inst in options:
+        st.session_state["live_asset_v3"] = _qp_inst
+        try:
+            del st.query_params["instance"]
+        except Exception:
+            pass
+
     def _fmt_option(iid: str) -> str:
         meta = inst_meta.get(iid, {})
         tag = meta.get("tag", "") or iid.upper()

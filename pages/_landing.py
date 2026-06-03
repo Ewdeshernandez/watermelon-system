@@ -735,56 +735,9 @@ def _spark_svg(values: list, color: str = "#0ea5e9", width: int = 120, height: i
     )
 
 
-_spark_total   = activity_sparkline(7)
-_spark_dang    = severity_sparkline("danger", 7)
-_spark_warn    = severity_sparkline("warning", 7)
-_spark_heal    = severity_sparkline("healthy", 7)
-
-
-def _kpi_card(klass: str, label: str, value: int, sub: str, spark_html: str,
-              href: str = "/Machinery_Library") -> str:
-    # Card envuelta en <a target="_self">: toda la tarjeta es clickable y
-    # navega a Machinery Library (sin el botón/flecha feo debajo). v3.31.309
-    return f"""
-    <a class="wmh-kpi-link" href="{href}" target="_self">
-      <div class="wmh-kpi {klass}">
-        <div class="wmh-kpi-label">{label}</div>
-        <div class="wmh-kpi-value">{value}</div>
-        <div class="wmh-kpi-sub">{sub}</div>
-        <div class="wmh-kpi-spark">{spark_html}</div>
-      </div>
-    </a>
-    """
-
-
-k1, k2, k3, k4 = st.columns(4)
-with k1:
-    st.markdown(_kpi_card(
-        "total", "Activos en flota", _total,
-        "vault local · monitoreados",
-        _spark_svg(_spark_total, "#0ea5e9"),
-    ), unsafe_allow_html=True)
-with k2:
-    st.markdown(_kpi_card(
-        "danger", "Críticos", _dang,
-        "requieren intervención",
-        _spark_svg(_spark_dang, "#ef4444"),
-    ), unsafe_allow_html=True)
-with k3:
-    st.markdown(_kpi_card(
-        "warning", "En atención", _warn,
-        "vigilancia o config pendiente",
-        _spark_svg(_spark_warn, "#f59e0b"),
-    ), unsafe_allow_html=True)
-with k4:
-    _heal_or_unk = _heal if _heal > 0 else _unk
-    _heal_label = "Saludables" if _heal > 0 else "Sin clasificar"
-    _heal_sub = "norma asignada · baseline OK" if _heal > 0 else "asignar norma en Library"
-    st.markdown(_kpi_card(
-        "healthy" if _heal > 0 else "total", _heal_label, _heal_or_unk,
-        _heal_sub,
-        _spark_svg(_spark_heal if _heal > 0 else _spark_total, "#10b981" if _heal > 0 else "#94a3b8"),
-    ), unsafe_allow_html=True)
+# v3.31.310 — Tira de KPIs (Activos/Críticos/En atención/Sin clasificar)
+# RETIRADA: no entregaba info accionable (el globo ya muestra todo por color)
+# y robaba protagonismo al mapa. El globo es el héroe del Home.
 
 
 # =============================================================
@@ -883,6 +836,9 @@ def _render_fleet_map(instances) -> bool:
         "lat": p[0], "lng": p[1], "color": sev_color[p[2]],
         "sev": sev_text[p[2]], "tag": p[3], "loc": p[4],
         "train": p[5], "health": (str(p[6]) if p[6] is not None else "—"),
+        # iid = instance_id (vacío en demos). live = tiene datos en vivo
+        # (proxy: severidad real, NO gris) → solo esos son clickables.
+        "iid": p[7], "live": bool(p[7]) and p[2] in ("healthy", "warning", "danger"),
     } for p in pts]
     points_json = _json.dumps(points)
 
@@ -913,10 +869,21 @@ def _render_fleet_map(instances) -> bool:
             + 'padding:6px 9px;border-radius:6px;border:1px solid #24496e;'
             + 'font:12px -apple-system,system-ui,sans-serif;">'
             + '<b>'+d.tag+'</b><br>'+d.train+'<br>'+d.sev+' · Salud '+d.health
-            + '<br>📍 '+d.loc+'</div>'; })
+            + '<br>📍 '+d.loc
+            + (d.live ? '<br><span style="color:#7ec8ff;">▸ Click: monitoreo en vivo</span>' : '')
+            + '</div>'; })
           .ringsData(PTS).ringLat('lat').ringLng('lng')
           .ringColor(function(d){ return function(){ return d.color; }; })
-          .ringMaxRadius(3.4).ringPropagationSpeed(1.6).ringRepeatPeriod(1300);
+          .ringMaxRadius(3.4).ringPropagationSpeed(1.6).ringRepeatPeriod(1300)
+          .onPointClick(function(d){
+            // Click en activo CON datos en vivo → abre su Live Monitoring.
+            // Navega la ventana principal (no el iframe del componente).
+            if (d && d.live && d.iid) {
+              var url = '/Live_Monitoring?instance=' + encodeURIComponent(d.iid);
+              try { window.top.location.href = url; }
+              catch(e){ window.parent.location.href = url; }
+            }
+          });
         world.pointOfView({lat:15, lng:-85, altitude:2.2}, 0);
         var c = world.controls();
         c.autoRotate = true; c.autoRotateSpeed = 0.55; c.enableZoom = false;
