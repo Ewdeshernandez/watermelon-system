@@ -815,7 +815,10 @@ with k4:
 # =============================================================
 # ACTIVE ASSETS GRID + ACTIVITY FEED
 # =============================================================
-left, right = st.columns([2, 1], gap="large")
+# v3.31.298 — Mapa como PROTAGONISTA: full width. La actividad reciente pasa
+# abajo (full width también). Ambos contenedores se apilan verticalmente.
+left = st.container()
+right = st.container()
 
 
 def _render_fleet_map(instances) -> bool:
@@ -831,6 +834,23 @@ def _render_fleet_map(instances) -> bool:
     sev_text = {"healthy": "Normal", "warning": "Atención",
                 "danger": "Crítico", "unknown": "Sin datos"}
 
+    from core.instance_state import get_instance
+    from core.health_score import compute_health_score
+
+    def _health_score(inst):
+        try:
+            _f = get_instance(inst.instance_id)
+            data = {
+                "tag": getattr(inst, "tag", ""),
+                "iso_norm_code": (getattr(_f, "iso_norm_code", "") or "") if _f else "",
+                "last_balance_date": (getattr(_f, "last_balance_date", "") or "") if _f else "",
+                "documents": (getattr(_f, "documents", []) or []) if _f else [],
+            }
+            return compute_health_score(data).score
+        except Exception:
+            return None
+
+    # (lat, lon, sev, tag, location, train, health, instance_id)
     pts = []
     seen: dict = {}
     for inst in instances:
@@ -848,8 +868,21 @@ def _render_fleet_map(instances) -> bool:
             lon += rad * math.sin(ang)
         sev = getattr(inst, "severity", "unknown")
         sev = sev if sev in sev_color else "unknown"
+        train = getattr(inst, "asset_class", "") or getattr(inst, "profile_key", "") or "—"
         pts.append((lat, lon, sev, getattr(inst, "tag", "") or inst.instance_id,
-                    getattr(inst, "location", "") or "sin ubicación"))
+                    getattr(inst, "location", "") or "sin ubicación", train,
+                    _health_score(inst), inst.instance_id))
+
+    # Vitrinas comerciales (DEMO, NO reales) — muestran alcance en las Américas
+    # mientras crece la flota real. Quitar/editar esta lista cuando haya
+    # activos reales en esas ubicaciones.
+    DEMO_ASSETS = [
+        (29.7604, -95.3698, "healthy", "HOU-GT1", "Houston, Texas (EE.UU.)",
+         "Nuovo Pignone — Turbogenerador 54 MW", 88, ""),
+        (17.9892, -92.9281, "healthy", "VHA-GT1", "Villahermosa, Tabasco (México)",
+         "GE LM6000 — Turbogenerador 45 MW", 90, ""),
+    ]
+    pts.extend(DEMO_ASSETS)
 
     if not pts:
         return False
@@ -861,39 +894,38 @@ def _render_fleet_map(instances) -> bool:
             continue
         lats = [p[0] for p in sub]
         lons = [p[1] for p in sub]
+        cdata = [[p[3], sev_text[sev], p[4], p[5],
+                  (str(p[6]) if p[6] is not None else "—"), p[7]] for p in sub]
         # glow en 2 capas (efecto "faro" sobre el mapa oscuro)
         fig.add_trace(go.Scattergeo(
             lat=lats, lon=lons, mode="markers",
-            marker=dict(size=44, color=sev_color[sev], opacity=0.14),
-            hoverinfo="skip", showlegend=False,
-        ))
+            marker=dict(size=44, color=sev_color[sev], opacity=0.13),
+            hoverinfo="skip", showlegend=False))
         fig.add_trace(go.Scattergeo(
             lat=lats, lon=lons, mode="markers",
-            marker=dict(size=26, color=sev_color[sev], opacity=0.28),
-            hoverinfo="skip", showlegend=False,
-        ))
-        # dot principal
+            marker=dict(size=26, color=sev_color[sev], opacity=0.27),
+            hoverinfo="skip", showlegend=False))
+        # dot principal (con customdata para el click)
         fig.add_trace(go.Scattergeo(
             lat=lats, lon=lons, mode="markers",
-            marker=dict(size=15, color=sev_color[sev],
+            marker=dict(size=14, color=sev_color[sev],
                         line=dict(width=2.0, color="#ffffff")),
-            name=sev_text[sev],
-            text=[f"<b>{p[3]}</b><br>{sev_text[sev]}<br>📍 {p[4]}" for p in sub],
-            hovertemplate="%{text}<extra></extra>",
-        ))
+            name=sev_text[sev], customdata=cdata,
+            hovertemplate=("<b>%{customdata[0]}</b><br>%{customdata[3]}<br>"
+                           "%{customdata[1]} · Salud %{customdata[4]}<br>"
+                           "📍 %{customdata[2]}<extra></extra>")))
 
-    # Look OSCURO premium tipo centro de control — los dots de color saltan.
+    # Look OSCURO premium — toda América (Canadá → Argentina).
     fig.update_geos(
-        scope="south america",
-        lataxis_range=[-4.6, 13.6], lonaxis_range=[-80.0, -66.0],
         showland=True, landcolor="#16304a",
         showocean=True, oceancolor="#0a1f35",
-        showcountries=True, countrycolor="#3a5f86", countrywidth=1.0,
+        showcountries=True, countrycolor="#3a5f86", countrywidth=0.8,
         showcoastlines=True, coastlinecolor="#46688c",
-        showlakes=False, bgcolor="rgba(0,0,0,0)", resolution=50,
+        lataxis_range=[-56, 64], lonaxis_range=[-140, -33],
+        showlakes=False, bgcolor="rgba(0,0,0,0)", resolution=110,
     )
     fig.update_layout(
-        margin=dict(l=0, r=0, t=0, b=0), height=500,
+        margin=dict(l=0, r=0, t=0, b=0), height=600,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
         legend=dict(orientation="h", yanchor="bottom", y=0.01, xanchor="center",
                     x=0.5, bgcolor="rgba(10,31,53,0.72)",
@@ -901,14 +933,45 @@ def _render_fleet_map(instances) -> bool:
                     font=dict(size=11, color="#e2e8f0")),
         showlegend=True,
     )
-    st.plotly_chart(fig, use_container_width=True,
-                    config={"displayModeBar": False, "scrollZoom": False})
+    event = st.plotly_chart(fig, use_container_width=True, on_select="rerun",
+                            key="wm_fleet_map",
+                            config={"displayModeBar": False, "scrollZoom": False})
+
+    # Click en un dot → tarjeta con estado / salud del activo.
+    try:
+        _sel = event.get("selection") if isinstance(event, dict) else getattr(event, "selection", None)
+        _sp = (_sel or {}).get("points", []) if _sel else []
+    except Exception:
+        _sp = []
+    if _sp:
+        cd = _sp[0].get("customdata") or []
+        if cd:
+            _tag, _sevt, _loc, _train, _health, _iid = (list(cd) + [""] * 6)[:6]
+            _col = {"Normal": "#10b981", "Atención": "#f59e0b",
+                    "Crítico": "#ef4444", "Sin datos": "#94a3b8"}.get(_sevt, "#94a3b8")
+            st.markdown(
+                f'<div style="background:#0b1f35;border:1px solid rgba(148,163,184,0.25);'
+                f'border-left:4px solid {_col};border-radius:10px;padding:12px 16px;'
+                f'margin-top:8px;color:#e2e8f0;">'
+                f'<div style="font-size:15px;font-weight:800;">{_tag}'
+                f' <span style="color:{_col};font-size:12px;font-weight:700;">· {_sevt}</span></div>'
+                f'<div style="font-size:12px;color:#94a3b8;margin-top:2px;">{_train}</div>'
+                f'<div style="font-size:12px;margin-top:5px;">Salud: '
+                f'<b style="color:{_col};">{_health}</b> &nbsp;·&nbsp; 📍 {_loc}</div>'
+                f'</div>', unsafe_allow_html=True)
+            if _iid:
+                if st.button("Abrir activo →", key="map_open_asset"):
+                    st.session_state["wm_active_instance"] = _iid
+                    try:
+                        st.switch_page("pages/00_Machinery_Library.py")
+                    except Exception:
+                        pass
     return True
 
 
 with left:
     st.markdown(
-        '<div class="wmh-sec">🗺️ Flota en Colombia <div class="bar"></div></div>',
+        '<div class="wmh-sec">🗺️ Flota en las Américas <div class="bar"></div></div>',
         unsafe_allow_html=True,
     )
 
@@ -918,34 +981,14 @@ with left:
             "Ve a **Machinery Library → Crear nueva instancia** para empezar."
         )
     else:
-        # Mapa de flota en Colombia (protagonista del Home). Si no se pudo
-        # geolocalizar ningún activo, igual mostramos el detalle abajo.
+        # Mapa de flota (protagonista del Home, full width). Click en un
+        # activo despliega su estado/salud debajo del mapa.
         _map_ok = _render_fleet_map(_fleet["instances"])
         if _map_ok:
             st.caption(
-                "🟢 Normal · 🟡 Atención · 🔴 Crítico · ⚪ Sin datos — "
-                "ubicación según el campo del activo."
+                "🟢 Normal · 🟡 Atención · 🔴 Crítico · ⚪ Sin datos · "
+                "hacé click en un activo para ver su estado y salud."
             )
-        # Selector compacto para abrir un activo (reemplaza la tabla grande:
-        # el mapa ya muestra la flota; el detalle completo vive en Machinery
-        # Library). Más minimalista.
-        _insts_open = _fleet["instances"]
-        _open_map = {
-            f"{getattr(_i, 'severity_dot', '')} {getattr(_i, 'tag', '') or _i.instance_id}"
-            f" · {getattr(_i, 'location', '') or 's/ubic.'}": _i.instance_id
-            for _i in _insts_open
-        }
-        _oc1, _oc2 = st.columns([3, 1])
-        with _oc1:
-            _sel_open = st.selectbox("Abrir un activo", list(_open_map.keys()),
-                                     label_visibility="collapsed")
-        with _oc2:
-            if st.button("Abrir →", use_container_width=True, key="home_open_asset"):
-                st.session_state["wm_active_instance"] = _open_map.get(_sel_open, "")
-                try:
-                    st.switch_page("pages/00_Machinery_Library.py")
-                except Exception:
-                    pass
 
         # v3.31.265 — Tabla compacta minimalista (reemplaza grid de
         # cards 3×N con gauges grandes). Look enterprise tipo
