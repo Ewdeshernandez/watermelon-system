@@ -901,11 +901,10 @@ def _render_fleet_map(instances) -> bool:
 
     import streamlit.components.v1 as _components
     html = """
-    <div id="wmwrap" style="width:100%;max-width:700px;height:620px;margin:0 auto;
-         border-radius:18px;overflow:hidden;
-         background:radial-gradient(circle at 58% 40%, #0c2138 0%, #060d18 60%, #03060d 100%);">
+    <div id="wmwrap" style="width:100%;max-width:720px;height:620px;margin:0 auto;
+         background:transparent;">
       <div id="wmglobe" style="width:100%;height:100%;display:flex;align-items:center;
-           justify-content:center;color:#7f9bbb;font-family:-apple-system,system-ui,sans-serif;
+           justify-content:center;color:#64748b;font-family:-apple-system,system-ui,sans-serif;
            font-size:13px;">🌎 Cargando globo 3D…</div>
     </div>
     <script>
@@ -918,11 +917,11 @@ def _render_fleet_map(instances) -> bool:
         var world = Globe()(el)
           .width(w).height(620)
           .backgroundColor('rgba(0,0,0,0)')
-          .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-dark.jpg')
+          .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
           .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
-          .showAtmosphere(true).atmosphereColor('#4a90c8').atmosphereAltitude(0.16)
+          .showAtmosphere(true).atmosphereColor('#7ec8ff').atmosphereAltitude(0.22)
           .pointsData(PTS).pointLat('lat').pointLng('lng').pointColor('color')
-          .pointAltitude(0.03).pointRadius(0.35)
+          .pointAltitude(0.04).pointRadius(0.42)
           .pointLabel(function(d){ return '<div style="background:#0b1f33;color:#e2e8f0;'
             + 'padding:6px 9px;border-radius:6px;border:1px solid #24496e;'
             + 'font:12px -apple-system,system-ui,sans-serif;">'
