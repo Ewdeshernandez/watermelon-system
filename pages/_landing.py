@@ -942,8 +942,8 @@ def _render_fleet_map(instances) -> bool:
     import streamlit.components.v1 as _components
     fig_json = fig.to_json()
     html = """
-    <div id="wmglobe" style="width:100%;height:620px;display:flex;
-         align-items:center;justify-content:center;color:#94a3b8;
+    <div id="wmglobe" style="width:100%;max-width:660px;height:620px;margin:0 auto;
+         display:flex;align-items:center;justify-content:center;color:#94a3b8;
          font-family:-apple-system,system-ui,sans-serif;font-size:13px;">🌎 Cargando globo…</div>
     <script>
     (function(){
@@ -951,6 +951,7 @@ def _render_fleet_map(instances) -> bool:
       function draw(){
         var gd = document.getElementById('wmglobe');
         gd.innerHTML = '';
+        gd.style.display = 'block';
         Plotly.newPlot(gd, FIG.data, FIG.layout,
                        {displayModeBar:false, scrollZoom:false, responsive:true});
         var lon = -74, spin = true;
