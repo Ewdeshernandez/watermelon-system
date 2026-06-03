@@ -158,13 +158,13 @@ st.markdown(
 
     /* ───── HERO (v3.31.265 — minimalista enterprise) ───── */
     .wmh-hero {
-        border-radius: 14px;
-        padding: 22px 28px;
-        margin-bottom: 20px;
+        border-radius: 12px;
+        padding: 12px 20px;
+        margin-bottom: 14px;
         background: linear-gradient(135deg, #0b1426 0%, #0f1d36 100%);
         border: 1px solid rgba(148,163,184,0.12);
-        border-left: 4px solid #10b981; /* acento color de estado */
-        box-shadow: 0 4px 16px rgba(15,23,42,0.10);
+        border-left: 3px solid #10b981; /* acento color de estado */
+        box-shadow: 0 2px 10px rgba(15,23,42,0.08);
         color: #f8fafc;
         display: flex;
         align-items: center;
@@ -182,33 +182,33 @@ st.markdown(
 
     .wmh-pill {
         display: inline-block;
-        padding: 5px 12px;
+        padding: 3px 10px;
         border-radius: 999px;
         background: rgba(255,255,255,0.07);
         border: 1px solid rgba(255,255,255,0.14);
         color: rgba(248,250,252,0.85);
-        font-size: 10px;
+        font-size: 9px;
         font-weight: 700;
-        letter-spacing: 0.18em;
+        letter-spacing: 0.16em;
         text-transform: uppercase;
-        margin-bottom: 10px;
+        margin-bottom: 6px;
     }
     .wmh-title {
-        font-size: 36px;
+        font-size: 24px;
         font-weight: 800;
         line-height: 1.05;
         letter-spacing: -0.02em;
-        margin: 0 0 6px 0;
+        margin: 0 0 3px 0;
         background: linear-gradient(90deg, #f8fafc 0%, #cbd5e1 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
     }
     .wmh-greeting {
-        font-size: 18px;
+        font-size: 14px;
         font-weight: 600;
         color: #e2e8f0;
-        margin: 4px 0 2px 0;
+        margin: 2px 0 1px 0;
     }
     .wmh-status-line {
         font-size: 13px;
@@ -260,7 +260,7 @@ st.markdown(
 
     .wmh-clock {
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size: 38px;
+        font-size: 26px;
         font-weight: 700;
         color: #f8fafc;
         line-height: 1;
@@ -859,37 +859,46 @@ def _render_fleet_map(instances) -> bool:
         sub = [p for p in pts if p[2] == sev]
         if not sub:
             continue
-        # halo
+        lats = [p[0] for p in sub]
+        lons = [p[1] for p in sub]
+        # glow en 2 capas (efecto "faro" sobre el mapa oscuro)
         fig.add_trace(go.Scattergeo(
-            lat=[p[0] for p in sub], lon=[p[1] for p in sub], mode="markers",
-            marker=dict(size=30, color=sev_color[sev], opacity=0.16),
+            lat=lats, lon=lons, mode="markers",
+            marker=dict(size=44, color=sev_color[sev], opacity=0.14),
             hoverinfo="skip", showlegend=False,
         ))
-        # dot
         fig.add_trace(go.Scattergeo(
-            lat=[p[0] for p in sub], lon=[p[1] for p in sub], mode="markers",
-            marker=dict(size=14, color=sev_color[sev],
-                        line=dict(width=1.6, color="white")),
+            lat=lats, lon=lons, mode="markers",
+            marker=dict(size=26, color=sev_color[sev], opacity=0.28),
+            hoverinfo="skip", showlegend=False,
+        ))
+        # dot principal
+        fig.add_trace(go.Scattergeo(
+            lat=lats, lon=lons, mode="markers",
+            marker=dict(size=15, color=sev_color[sev],
+                        line=dict(width=2.0, color="#ffffff")),
             name=sev_text[sev],
             text=[f"<b>{p[3]}</b><br>{sev_text[sev]}<br>📍 {p[4]}" for p in sub],
             hovertemplate="%{text}<extra></extra>",
         ))
 
+    # Look OSCURO premium tipo centro de control — los dots de color saltan.
     fig.update_geos(
         scope="south america",
         lataxis_range=[-4.6, 13.6], lonaxis_range=[-80.0, -66.0],
-        showland=True, landcolor="#eef3f8",
-        showocean=True, oceancolor="#d8e8fb",
-        showcountries=True, countrycolor="#c3cedb", countrywidth=1.0,
-        showcoastlines=True, coastlinecolor="#aebccd",
+        showland=True, landcolor="#16304a",
+        showocean=True, oceancolor="#0a1f35",
+        showcountries=True, countrycolor="#3a5f86", countrywidth=1.0,
+        showcoastlines=True, coastlinecolor="#46688c",
         showlakes=False, bgcolor="rgba(0,0,0,0)", resolution=50,
     )
     fig.update_layout(
         margin=dict(l=0, r=0, t=0, b=0), height=500,
-        paper_bgcolor="rgba(0,0,0,0)",
-        legend=dict(orientation="h", yanchor="bottom", y=0.0, xanchor="center",
-                    x=0.5, bgcolor="rgba(255,255,255,0.75)",
-                    bordercolor="#e6ebf2", borderwidth=1, font=dict(size=11)),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", yanchor="bottom", y=0.01, xanchor="center",
+                    x=0.5, bgcolor="rgba(10,31,53,0.72)",
+                    bordercolor="rgba(148,163,184,0.25)", borderwidth=1,
+                    font=dict(size=11, color="#e2e8f0")),
         showlegend=True,
     )
     st.plotly_chart(fig, use_container_width=True,
@@ -917,11 +926,26 @@ with left:
                 "🟢 Normal · 🟡 Atención · 🔴 Crítico · ⚪ Sin datos — "
                 "ubicación según el campo del activo."
             )
-        st.markdown(
-            '<div class="wmh-sec" style="margin-top:14px;">📋 Detalle de activos'
-            ' <div class="bar"></div></div>',
-            unsafe_allow_html=True,
-        )
+        # Selector compacto para abrir un activo (reemplaza la tabla grande:
+        # el mapa ya muestra la flota; el detalle completo vive en Machinery
+        # Library). Más minimalista.
+        _insts_open = _fleet["instances"]
+        _open_map = {
+            f"{getattr(_i, 'severity_dot', '')} {getattr(_i, 'tag', '') or _i.instance_id}"
+            f" · {getattr(_i, 'location', '') or 's/ubic.'}": _i.instance_id
+            for _i in _insts_open
+        }
+        _oc1, _oc2 = st.columns([3, 1])
+        with _oc1:
+            _sel_open = st.selectbox("Abrir un activo", list(_open_map.keys()),
+                                     label_visibility="collapsed")
+        with _oc2:
+            if st.button("Abrir →", use_container_width=True, key="home_open_asset"):
+                st.session_state["wm_active_instance"] = _open_map.get(_sel_open, "")
+                try:
+                    st.switch_page("pages/00_Machinery_Library.py")
+                except Exception:
+                    pass
 
         # v3.31.265 — Tabla compacta minimalista (reemplaza grid de
         # cards 3×N con gauges grandes). Look enterprise tipo
@@ -1003,18 +1027,12 @@ with left:
             text-transform: uppercase;
         }
         </style>
-        <div class="wmh-asset-table">
-          <div class="wmh-asset-row is-header">
-            <div>Activo</div>
-            <div>Tren</div>
-            <div style="text-align:right;">Health</div>
-            <div>Estado</div>
-            <div style="text-align:right;">Acción</div>
-          </div>
-        </div>
         """, unsafe_allow_html=True)
 
-        instances = _fleet["instances"][:9]
+        # Tabla de detalle desactivada (v3.31.297) — reemplazada por el mapa
+        # + el selector "Abrir un activo" de arriba. El detalle por máquina
+        # vive en Machinery Library.
+        instances = []
         for inst in instances:
             sev_class = inst.severity
             asset_line = inst.asset_class or inst.profile_key or "—"
