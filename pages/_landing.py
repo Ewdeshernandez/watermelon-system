@@ -289,26 +289,28 @@ st.markdown(
     .wmh-kpi {
         background: #ffffff;
         border: 1px solid #e6ebf2;
-        border-radius: 9px;
-        padding: 10px 13px;
+        border-radius: 8px;
+        padding: 8px 11px;
         box-shadow: none;
         height: 100%;
-        transition: border-color 0.15s ease;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
         position: relative;
+        cursor: pointer;  /* toda la card es clickable (sin botón debajo) */
     }
     .wmh-kpi:hover {
         border-color: #cbd5e1;
+        box-shadow: 0 1px 6px rgba(15,23,42,0.06);
     }
     .wmh-kpi-label {
-        font-size: 9.5px;
+        font-size: 9px;
         font-weight: 800;
-        letter-spacing: 0.12em;
+        letter-spacing: 0.11em;
         text-transform: uppercase;
         color: #64748b;
-        margin-bottom: 3px;
+        margin-bottom: 2px;
     }
     .wmh-kpi-value {
-        font-size: 22px;
+        font-size: 19px;
         font-weight: 800;
         line-height: 1;
         letter-spacing: -0.02em;
@@ -316,15 +318,17 @@ st.markdown(
         font-variant-numeric: tabular-nums;
     }
     .wmh-kpi-sub {
-        font-size: 10px;
+        font-size: 9.5px;
         color: #94a3b8;
-        margin-top: 3px;
-        line-height: 1.35;
+        margin-top: 2px;
+        line-height: 1.3;
     }
     .wmh-kpi-spark {
-        margin-top: 4px;
+        margin-top: 3px;
         opacity: 0.5; /* sparkline mas tenue, no compete con el value */
     }
+    /* La card va envuelta en <a>; quitamos subrayado/color de link */
+    a.wmh-kpi-link, a.wmh-kpi-link:hover { text-decoration: none; color: inherit; }
     .wmh-kpi.danger  .wmh-kpi-value { color: #dc2626; }
     .wmh-kpi.warning .wmh-kpi-value { color: #d97706; }
     .wmh-kpi.healthy .wmh-kpi-value { color: #059669; }
@@ -737,14 +741,19 @@ _spark_warn    = severity_sparkline("warning", 7)
 _spark_heal    = severity_sparkline("healthy", 7)
 
 
-def _kpi_card(klass: str, label: str, value: int, sub: str, spark_html: str) -> str:
+def _kpi_card(klass: str, label: str, value: int, sub: str, spark_html: str,
+              href: str = "/Machinery_Library") -> str:
+    # Card envuelta en <a target="_self">: toda la tarjeta es clickable y
+    # navega a Machinery Library (sin el botón/flecha feo debajo). v3.31.309
     return f"""
-    <div class="wmh-kpi {klass}">
+    <a class="wmh-kpi-link" href="{href}" target="_self">
+      <div class="wmh-kpi {klass}">
         <div class="wmh-kpi-label">{label}</div>
         <div class="wmh-kpi-value">{value}</div>
         <div class="wmh-kpi-sub">{sub}</div>
         <div class="wmh-kpi-spark">{spark_html}</div>
-    </div>
+      </div>
+    </a>
     """
 
 
@@ -755,32 +764,18 @@ with k1:
         "vault local · monitoreados",
         _spark_svg(_spark_total, "#0ea5e9"),
     ), unsafe_allow_html=True)
-    # Ciclo 17.24 — card clickable: navega a Machinery Library
-    if st.button("Ver flota →", key="kpi_btn_total", use_container_width=True):
-        st.switch_page("pages/00_Machinery_Library.py")
 with k2:
     st.markdown(_kpi_card(
         "danger", "Críticos", _dang,
         "requieren intervención",
         _spark_svg(_spark_dang, "#ef4444"),
     ), unsafe_allow_html=True)
-    # Ciclo 17.32 — Diagnostics fue eliminado del producto. Redirigimos
-    # al Machinery Library con filtro por severidad para que el usuario
-    # pueda inspeccionar y atender los activos críticos desde ahí.
-    if st.button("Ver críticos →", key="kpi_btn_danger", use_container_width=True):
-        st.session_state["wm_lib_filter_status"] = "danger"
-        st.switch_page("pages/00_Machinery_Library.py")
 with k3:
     st.markdown(_kpi_card(
         "warning", "En atención", _warn,
         "vigilancia o config pendiente",
         _spark_svg(_spark_warn, "#f59e0b"),
     ), unsafe_allow_html=True)
-    # Ciclo 17.32 — Diagnostics fue eliminado del producto. Redirigimos
-    # al Machinery Library con filtro por severidad warning.
-    if st.button("Ver en atención →", key="kpi_btn_warning", use_container_width=True):
-        st.session_state["wm_lib_filter_status"] = "warning"
-        st.switch_page("pages/00_Machinery_Library.py")
 with k4:
     _heal_or_unk = _heal if _heal > 0 else _unk
     _heal_label = "Saludables" if _heal > 0 else "Sin clasificar"
@@ -790,14 +785,6 @@ with k4:
         _heal_sub,
         _spark_svg(_spark_heal if _heal > 0 else _spark_total, "#10b981" if _heal > 0 else "#94a3b8"),
     ), unsafe_allow_html=True)
-    # Ciclo 17.24 — card clickable: navega a Machinery Library
-    _btn_label = "Ver saludables →" if _heal > 0 else "Asignar normas →"
-    if st.button(_btn_label, key="kpi_btn_heal", use_container_width=True):
-        if _heal > 0:
-            st.session_state["wm_lib_filter_status"] = "healthy"
-        else:
-            st.session_state["wm_lib_filter_status"] = "unclassified"
-        st.switch_page("pages/00_Machinery_Library.py")
 
 
 # =============================================================
@@ -901,7 +888,7 @@ def _render_fleet_map(instances) -> bool:
 
     import streamlit.components.v1 as _components
     html = """
-    <div id="wmwrap" style="width:100%;max-width:720px;height:620px;margin:0 auto;
+    <div id="wmwrap" style="width:100%;max-width:880px;height:700px;margin:0 auto;
          background:transparent;">
       <div id="wmglobe" style="width:100%;height:100%;display:flex;align-items:center;
            justify-content:center;color:#64748b;font-family:-apple-system,system-ui,sans-serif;
@@ -913,9 +900,9 @@ def _render_fleet_map(instances) -> bool:
       function draw(){
         var el = document.getElementById('wmglobe');
         el.innerHTML = '';
-        var w = el.clientWidth || 700;
+        var w = el.clientWidth || 880;
         var world = Globe()(el)
-          .width(w).height(620)
+          .width(w).height(700)
           .backgroundColor('rgba(0,0,0,0)')
           .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg')
           .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
@@ -936,7 +923,7 @@ def _render_fleet_map(instances) -> bool:
         // Pausa el giro al pasar el mouse para poder leer / hacer hover.
         el.addEventListener('mouseenter', function(){ c.autoRotate = false; });
         el.addEventListener('mouseleave', function(){ c.autoRotate = true; });
-        window.addEventListener('resize', function(){ world.width(el.clientWidth || 700); });
+        window.addEventListener('resize', function(){ world.width(el.clientWidth || 880); });
       }
       function load(src, cb, err){
         var s = document.createElement('script');
@@ -958,13 +945,14 @@ def _render_fleet_map(instances) -> bool:
     })();
     </script>
     """.replace("__PTS__", points_json)
-    _components.html(html, height=648)
+    _components.html(html, height=728)
     return True
 
 
 with left:
     st.markdown(
-        '<div class="wmh-sec">🗺️ Flota en las Américas <div class="bar"></div></div>',
+        '<div class="wmh-sec" style="font-size:13px;color:#334155;margin:14px 0 6px 0;">'
+        '🌎 Flota en las Américas <div class="bar"></div></div>',
         unsafe_allow_html=True,
     )
 
