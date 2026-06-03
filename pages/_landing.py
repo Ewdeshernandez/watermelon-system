@@ -932,46 +932,34 @@ def _render_fleet_map(instances) -> bool:
     fig.update_layout(
         margin=dict(l=0, r=0, t=0, b=0), height=620,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        dragmode="pan",  # arrastrar = girar el globo
-        legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="center",
-                    x=0.5, bgcolor="rgba(10,31,53,0.72)",
-                    bordercolor="rgba(148,163,184,0.25)", borderwidth=1,
-                    font=dict(size=11, color="#e2e8f0")),
-        showlegend=True,
+        showlegend=False,  # la leyenda va en el caption de abajo (sin recuadro)
     )
-    event = st.plotly_chart(fig, use_container_width=True, on_select="rerun",
-                            key="wm_fleet_map",
-                            config={"displayModeBar": False, "scrollZoom": False})
 
-    # Click en un dot → tarjeta con estado / salud del activo.
-    try:
-        _sel = event.get("selection") if isinstance(event, dict) else getattr(event, "selection", None)
-        _sp = (_sel or {}).get("points", []) if _sel else []
-    except Exception:
-        _sp = []
-    if _sp:
-        cd = _sp[0].get("customdata") or []
-        if cd:
-            _tag, _sevt, _loc, _train, _health, _iid = (list(cd) + [""] * 6)[:6]
-            _col = {"Normal": "#10b981", "Atención": "#f59e0b",
-                    "Crítico": "#ef4444", "Sin datos": "#94a3b8"}.get(_sevt, "#94a3b8")
-            st.markdown(
-                f'<div style="background:#0b1f35;border:1px solid rgba(148,163,184,0.25);'
-                f'border-left:4px solid {_col};border-radius:10px;padding:12px 16px;'
-                f'margin-top:8px;color:#e2e8f0;">'
-                f'<div style="font-size:15px;font-weight:800;">{_tag}'
-                f' <span style="color:{_col};font-size:12px;font-weight:700;">· {_sevt}</span></div>'
-                f'<div style="font-size:12px;color:#94a3b8;margin-top:2px;">{_train}</div>'
-                f'<div style="font-size:12px;margin-top:5px;">Salud: '
-                f'<b style="color:{_col};">{_health}</b> &nbsp;·&nbsp; 📍 {_loc}</div>'
-                f'</div>', unsafe_allow_html=True)
-            if _iid:
-                if st.button("Abrir activo →", key="map_open_asset"):
-                    st.session_state["wm_active_instance"] = _iid
-                    try:
-                        st.switch_page("pages/00_Machinery_Library.py")
-                    except Exception:
-                        pass
+    # AUTO-SPIN: embebemos el globo como componente HTML con plotly.js + un
+    # setInterval que rota la longitud (giro continuo). st.plotly_chart no
+    # permite la rotación por JS. El hover muestra estado/salud y el giro se
+    # PAUSA al pasar el mouse para poder leer.
+    import streamlit.components.v1 as _components
+    fig_json = fig.to_json()
+    html = """
+    <div id="wmglobe" style="width:100%;height:620px;"></div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.35.2/plotly.min.js"></script>
+    <script>
+      var FIG = __FIG__;
+      var gd = document.getElementById('wmglobe');
+      Plotly.newPlot(gd, FIG.data, FIG.layout,
+                     {displayModeBar:false, scrollZoom:false, responsive:true});
+      var lon = -74, spin = true;
+      gd.addEventListener('mouseenter', function(){ spin = false; });
+      gd.addEventListener('mouseleave', function(){ spin = true; });
+      setInterval(function(){
+        if(!spin) return;
+        lon -= 0.22; if (lon < -360) { lon += 360; }
+        Plotly.relayout(gd, {'geo.projection.rotation': {lon: lon, lat: 10, roll: 0}});
+      }, 60);
+    </script>
+    """.replace("__FIG__", fig_json)
+    _components.html(html, height=640)
     return True
 
 
