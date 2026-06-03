@@ -962,7 +962,8 @@ def _render_fleet_map(instances) -> bool:
           setInterval(function(){
             if(!spin) return;
             lon -= 0.22; if (lon < -360) { lon += 360; }
-            Plotly.relayout(gd, {'geo.projection.rotation': {lon: lon, lat: 15, roll: 0}});
+            // Solo la longitud (atributo puntual) → evita el flash/redibujado total.
+            Plotly.relayout(gd, 'geo.projection.rotation.lon', lon);
           }, 60);
         }, 3000);
       }
@@ -1008,8 +1009,7 @@ with left:
         _map_ok = _render_fleet_map(_fleet["instances"])
         if _map_ok:
             st.caption(
-                "🟢 Normal · 🟡 Atención · 🔴 Crítico · ⚪ Sin datos · "
-                "click en un activo para ver su estado · 🌎 arrastrá para girar el globo."
+                "🟢 Normal · 🟡 Atención · 🔴 Crítico · ⚪ Sin datos"
             )
 
         # v3.31.265 — Tabla compacta minimalista (reemplaza grid de
