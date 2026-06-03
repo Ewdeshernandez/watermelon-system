@@ -919,7 +919,7 @@ def _render_fleet_map(instances) -> bool:
     # centro de control espacial. Rotable con el mouse (arrastrar = girar).
     fig.update_geos(
         projection=dict(type="orthographic",
-                        rotation=dict(lon=-74, lat=10, roll=0), scale=1.0),
+                        rotation=dict(lon=-85, lat=15, roll=0), scale=1.0),
         showland=True, landcolor="#16324c",
         showocean=True, oceancolor="#0a2236",
         showcountries=True, countrycolor="#37597e", countrywidth=0.7,
@@ -954,14 +954,17 @@ def _render_fleet_map(instances) -> bool:
         gd.style.display = 'block';
         Plotly.newPlot(gd, FIG.data, FIG.layout,
                        {displayModeBar:false, scrollZoom:false, responsive:true});
-        var lon = -74, spin = true;
+        var lon = -85, spin = true;
         gd.addEventListener('mouseenter', function(){ spin = false; });
         gd.addEventListener('mouseleave', function(){ spin = true; });
-        setInterval(function(){
-          if(!spin) return;
-          lon -= 0.22; if (lon < -360) { lon += 360; }
-          Plotly.relayout(gd, {'geo.projection.rotation': {lon: lon, lat: 10, roll: 0}});
-        }, 60);
+        // Arranca mostrando las Américas (flota) y espera 3s antes de girar.
+        setTimeout(function(){
+          setInterval(function(){
+            if(!spin) return;
+            lon -= 0.22; if (lon < -360) { lon += 360; }
+            Plotly.relayout(gd, {'geo.projection.rotation': {lon: lon, lat: 15, roll: 0}});
+          }, 60);
+        }, 3000);
       }
       function load(src, cb, err){
         var s = document.createElement('script');
