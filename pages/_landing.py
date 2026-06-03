@@ -922,11 +922,14 @@ def _render_fleet_map(instances) -> bool:
                         rotation=dict(lon=-85, lat=15, roll=0), scale=1.0),
         showland=True, landcolor="#16324c",
         showocean=True, oceancolor="#0a2236",
-        showcountries=True, countrycolor="#37597e", countrywidth=0.7,
+        # Sin fronteras de países ni grilla: son miles de paths que se
+        # redibujan en cada giro y causan el parpadeo. Dejamos solo la
+        # silueta de continentes (coastlines) + marco → look intacto, sin flash.
+        showcountries=False,
         showcoastlines=True, coastlinecolor="#4d709a",
         showframe=True, framecolor="#2c4a6b", framewidth=1.2,
-        lataxis=dict(showgrid=True, gridcolor="rgba(125,165,205,0.12)", gridwidth=0.5),
-        lonaxis=dict(showgrid=True, gridcolor="rgba(125,165,205,0.12)", gridwidth=0.5),
+        lataxis=dict(showgrid=False),
+        lonaxis=dict(showgrid=False),
         showlakes=False, bgcolor="rgba(0,0,0,0)", resolution=110,
     )
     fig.update_layout(
