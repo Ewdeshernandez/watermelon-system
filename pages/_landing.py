@@ -954,18 +954,24 @@ def _render_fleet_map(instances) -> bool:
         gd.style.display = 'block';
         Plotly.newPlot(gd, FIG.data, FIG.layout,
                        {displayModeBar:false, scrollZoom:false, responsive:true});
-        var lon = -85, spin = true;
+        var lon = -85, spin = true, busy = false;
         gd.addEventListener('mouseenter', function(){ spin = false; });
         gd.addEventListener('mouseleave', function(){ spin = true; });
+        // requestAnimationFrame + candado 'busy': NO arranca el siguiente giro
+        // hasta que el anterior terminó de dibujar → elimina el parpadeo por
+        // redibujos encimados. Solo actualiza la longitud (atributo puntual).
+        function tick(){
+          if (spin && !busy) {
+            busy = true;
+            lon -= 0.35; if (lon < -360) { lon += 360; }
+            Plotly.relayout(gd, 'geo.projection.rotation.lon', lon)
+                  .then(function(){ busy = false; })
+                  .catch(function(){ busy = false; });
+          }
+          requestAnimationFrame(tick);
+        }
         // Arranca mostrando las Américas (flota) y espera 3s antes de girar.
-        setTimeout(function(){
-          setInterval(function(){
-            if(!spin) return;
-            lon -= 0.22; if (lon < -360) { lon += 360; }
-            // Solo la longitud (atributo puntual) → evita el flash/redibujado total.
-            Plotly.relayout(gd, 'geo.projection.rotation.lon', lon);
-          }, 60);
-        }, 3000);
+        setTimeout(function(){ requestAnimationFrame(tick); }, 3000);
       }
       function load(src, cb, err){
         var s = document.createElement('script');
