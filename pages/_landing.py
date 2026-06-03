@@ -915,19 +915,25 @@ def _render_fleet_map(instances) -> bool:
                            "%{customdata[1]} · Salud %{customdata[4]}<br>"
                            "📍 %{customdata[2]}<extra></extra>")))
 
-    # Look OSCURO premium — toda América (Canadá → Argentina).
+    # GLOBO 3D (proyección orthográfica) orientado a las Américas — look de
+    # centro de control espacial. Rotable con el mouse (arrastrar = girar).
     fig.update_geos(
-        showland=True, landcolor="#16304a",
-        showocean=True, oceancolor="#0a1f35",
-        showcountries=True, countrycolor="#3a5f86", countrywidth=0.8,
-        showcoastlines=True, coastlinecolor="#46688c",
-        lataxis_range=[-56, 64], lonaxis_range=[-140, -33],
+        projection=dict(type="orthographic",
+                        rotation=dict(lon=-74, lat=10, roll=0), scale=1.0),
+        showland=True, landcolor="#16324c",
+        showocean=True, oceancolor="#0a2236",
+        showcountries=True, countrycolor="#37597e", countrywidth=0.7,
+        showcoastlines=True, coastlinecolor="#4d709a",
+        showframe=True, framecolor="#2c4a6b", framewidth=1.2,
+        lataxis=dict(showgrid=True, gridcolor="rgba(125,165,205,0.12)", gridwidth=0.5),
+        lonaxis=dict(showgrid=True, gridcolor="rgba(125,165,205,0.12)", gridwidth=0.5),
         showlakes=False, bgcolor="rgba(0,0,0,0)", resolution=110,
     )
     fig.update_layout(
-        margin=dict(l=0, r=0, t=0, b=0), height=600,
+        margin=dict(l=0, r=0, t=0, b=0), height=620,
         paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        legend=dict(orientation="h", yanchor="bottom", y=0.01, xanchor="center",
+        dragmode="pan",  # arrastrar = girar el globo
+        legend=dict(orientation="h", yanchor="bottom", y=0.02, xanchor="center",
                     x=0.5, bgcolor="rgba(10,31,53,0.72)",
                     bordercolor="rgba(148,163,184,0.25)", borderwidth=1,
                     font=dict(size=11, color="#e2e8f0")),
@@ -987,7 +993,7 @@ with left:
         if _map_ok:
             st.caption(
                 "🟢 Normal · 🟡 Atención · 🔴 Crítico · ⚪ Sin datos · "
-                "hacé click en un activo para ver su estado y salud."
+                "click en un activo para ver su estado · 🌎 arrastrá para girar el globo."
             )
 
         # v3.31.265 — Tabla compacta minimalista (reemplaza grid de
