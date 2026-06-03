@@ -887,117 +887,79 @@ def _render_fleet_map(instances) -> bool:
     if not pts:
         return False
 
-    fig = go.Figure()
-    for sev in ("healthy", "warning", "danger", "unknown"):
-        sub = [p for p in pts if p[2] == sev]
-        if not sub:
-            continue
-        lats = [p[0] for p in sub]
-        lons = [p[1] for p in sub]
-        cdata = [[p[3], sev_text[sev], p[4], p[5],
-                  (str(p[6]) if p[6] is not None else "—"), p[7]] for p in sub]
-        # glow en 2 capas (efecto "faro" sobre el mapa oscuro)
-        fig.add_trace(go.Scattergeo(
-            lat=lats, lon=lons, mode="markers",
-            marker=dict(size=44, color=sev_color[sev], opacity=0.13),
-            hoverinfo="skip", showlegend=False))
-        fig.add_trace(go.Scattergeo(
-            lat=lats, lon=lons, mode="markers",
-            marker=dict(size=26, color=sev_color[sev], opacity=0.27),
-            hoverinfo="skip", showlegend=False))
-        # dot principal (con customdata para el click)
-        fig.add_trace(go.Scattergeo(
-            lat=lats, lon=lons, mode="markers",
-            marker=dict(size=14, color=sev_color[sev],
-                        line=dict(width=2.0, color="#ffffff")),
-            name=sev_text[sev], customdata=cdata,
-            hovertemplate=("<b>%{customdata[0]}</b><br>%{customdata[3]}<br>"
-                           "%{customdata[1]} · Salud %{customdata[4]}<br>"
-                           "📍 %{customdata[2]}<extra></extra>")))
+    # ---- GLOBO 3D WebGL (globe.gl / three.js) ----
+    # Renderizado por GPU → giro 100% fluido, SIN parpadeo (el de Plotly era
+    # SVG y redibujaba todo en cada frame). Tierra oscura sobre fondo espacial,
+    # puntos por severidad + anillos "sonar" animados. Arranca en las Américas.
+    import json as _json
+    points = [{
+        "lat": p[0], "lng": p[1], "color": sev_color[p[2]],
+        "sev": sev_text[p[2]], "tag": p[3], "loc": p[4],
+        "train": p[5], "health": (str(p[6]) if p[6] is not None else "—"),
+    } for p in pts]
+    points_json = _json.dumps(points)
 
-    # GLOBO 3D (proyección orthográfica) orientado a las Américas — look de
-    # centro de control espacial. Rotable con el mouse (arrastrar = girar).
-    fig.update_geos(
-        projection=dict(type="orthographic",
-                        rotation=dict(lon=-85, lat=15, roll=0), scale=1.0),
-        showland=True, landcolor="#16324c",
-        showocean=True, oceancolor="#0a2236",
-        # Sin fronteras de países ni grilla: son miles de paths que se
-        # redibujan en cada giro y causan el parpadeo. Dejamos solo la
-        # silueta de continentes (coastlines) + marco → look intacto, sin flash.
-        showcountries=False,
-        showcoastlines=True, coastlinecolor="#4d709a",
-        showframe=True, framecolor="#2c4a6b", framewidth=1.2,
-        lataxis=dict(showgrid=False),
-        lonaxis=dict(showgrid=False),
-        showlakes=False, bgcolor="rgba(0,0,0,0)", resolution=110,
-    )
-    fig.update_layout(
-        margin=dict(l=0, r=0, t=0, b=0), height=620,
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-        showlegend=False,  # la leyenda va en el caption de abajo (sin recuadro)
-    )
-
-    # AUTO-SPIN: embebemos el globo como componente HTML con plotly.js + un
-    # setInterval que rota la longitud (giro continuo). st.plotly_chart no
-    # permite la rotación por JS. El hover muestra estado/salud y el giro se
-    # PAUSA al pasar el mouse para poder leer.
     import streamlit.components.v1 as _components
-    fig_json = fig.to_json()
     html = """
-    <div id="wmglobe" style="width:100%;max-width:660px;height:620px;margin:0 auto;
-         display:flex;align-items:center;justify-content:center;color:#94a3b8;
-         font-family:-apple-system,system-ui,sans-serif;font-size:13px;">🌎 Cargando globo…</div>
+    <div id="wmwrap" style="width:100%;max-width:700px;height:620px;margin:0 auto;
+         border-radius:18px;overflow:hidden;
+         background:radial-gradient(circle at 58% 40%, #0c2138 0%, #060d18 60%, #03060d 100%);">
+      <div id="wmglobe" style="width:100%;height:100%;display:flex;align-items:center;
+           justify-content:center;color:#7f9bbb;font-family:-apple-system,system-ui,sans-serif;
+           font-size:13px;">🌎 Cargando globo 3D…</div>
+    </div>
     <script>
     (function(){
-      var FIG = __FIG__;
+      var PTS = __PTS__;
       function draw(){
-        var gd = document.getElementById('wmglobe');
-        gd.innerHTML = '';
-        gd.style.display = 'block';
-        Plotly.newPlot(gd, FIG.data, FIG.layout,
-                       {displayModeBar:false, scrollZoom:false, responsive:true});
-        var lon = -85, spin = true, busy = false;
-        gd.addEventListener('mouseenter', function(){ spin = false; });
-        gd.addEventListener('mouseleave', function(){ spin = true; });
-        // requestAnimationFrame + candado 'busy': NO arranca el siguiente giro
-        // hasta que el anterior terminó de dibujar → elimina el parpadeo por
-        // redibujos encimados. Solo actualiza la longitud (atributo puntual).
-        function tick(){
-          if (spin && !busy) {
-            busy = true;
-            lon -= 0.35; if (lon < -360) { lon += 360; }
-            Plotly.relayout(gd, 'geo.projection.rotation.lon', lon)
-                  .then(function(){ busy = false; })
-                  .catch(function(){ busy = false; });
-          }
-          requestAnimationFrame(tick);
-        }
-        // Arranca mostrando las Américas (flota) y espera 3s antes de girar.
-        setTimeout(function(){ requestAnimationFrame(tick); }, 3000);
+        var el = document.getElementById('wmglobe');
+        el.innerHTML = '';
+        var w = el.clientWidth || 700;
+        var world = Globe()(el)
+          .width(w).height(620)
+          .backgroundColor('rgba(0,0,0,0)')
+          .globeImageUrl('https://unpkg.com/three-globe/example/img/earth-dark.jpg')
+          .bumpImageUrl('https://unpkg.com/three-globe/example/img/earth-topology.png')
+          .showAtmosphere(true).atmosphereColor('#4a90c8').atmosphereAltitude(0.16)
+          .pointsData(PTS).pointLat('lat').pointLng('lng').pointColor('color')
+          .pointAltitude(0.03).pointRadius(0.35)
+          .pointLabel(function(d){ return '<div style="background:#0b1f33;color:#e2e8f0;'
+            + 'padding:6px 9px;border-radius:6px;border:1px solid #24496e;'
+            + 'font:12px -apple-system,system-ui,sans-serif;">'
+            + '<b>'+d.tag+'</b><br>'+d.train+'<br>'+d.sev+' · Salud '+d.health
+            + '<br>📍 '+d.loc+'</div>'; })
+          .ringsData(PTS).ringLat('lat').ringLng('lng')
+          .ringColor(function(d){ return function(){ return d.color; }; })
+          .ringMaxRadius(3.4).ringPropagationSpeed(1.6).ringRepeatPeriod(1300);
+        world.pointOfView({lat:15, lng:-85, altitude:2.2}, 0);
+        var c = world.controls();
+        c.autoRotate = true; c.autoRotateSpeed = 0.55; c.enableZoom = false;
+        // Pausa el giro al pasar el mouse para poder leer / hacer hover.
+        el.addEventListener('mouseenter', function(){ c.autoRotate = false; });
+        el.addEventListener('mouseleave', function(){ c.autoRotate = true; });
+        window.addEventListener('resize', function(){ world.width(el.clientWidth || 700); });
       }
       function load(src, cb, err){
         var s = document.createElement('script');
         s.src = src; s.onload = cb; s.onerror = err;
         document.head.appendChild(s);
       }
-      if (window.Plotly) { draw(); }
+      if (window.Globe) { draw(); }
       else {
-        // bundle geo (1.2MB, rápido) con fallback al completo. CDN oficial
-        // cdn.plot.ly (el de cdnjs daba 404 para esta versión → globo vacío).
-        load('https://cdn.plot.ly/plotly-geo-2.35.2.min.js',
+        // globe.gl standalone (incluye three.js). jsdelivr + fallback unpkg.
+        load('https://cdn.jsdelivr.net/npm/globe.gl',
           draw,
           function(){
-            load('https://cdn.plot.ly/plotly-2.35.2.min.js',
+            load('https://unpkg.com/globe.gl',
               draw,
               function(){ document.getElementById('wmglobe').innerHTML =
-                          'No se pudo cargar el globo. Refrescá la página.'; });
+                          'No se pudo cargar el globo 3D. Refrescá la página.'; });
           });
       }
     })();
     </script>
-    """.replace("__FIG__", fig_json)
-    _components.html(html, height=640)
+    """.replace("__PTS__", points_json)
+    _components.html(html, height=648)
     return True
 
 
