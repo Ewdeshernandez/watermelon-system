@@ -269,6 +269,10 @@ def apply_page_style() -> None:
 
 apply_page_style()
 
+from core.ui_theme import page_header as _wm_page_header  # hero compartido (v3.31.313)
+_wm_page_header("Time Waveform Analysis",
+                "Forma de onda en el tiempo · impactos, modulación y transitorios.")
+
 
 # ------------------------------------------------------------
 # Helpers

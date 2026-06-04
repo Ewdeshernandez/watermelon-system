@@ -195,6 +195,10 @@ def apply_page_style():
 
 apply_page_style()
 
+from core.ui_theme import page_header as _wm_page_header  # hero compartido (v3.31.313)
+_wm_page_header("Orbit Analysis",
+                "Órbita y forma del eje · precesión, holguras, rubs y condición de cojinetes.")
+
 
 def get_logo_base64(path: Path):
     if not path.exists():

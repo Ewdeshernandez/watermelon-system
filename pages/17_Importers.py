@@ -57,11 +57,12 @@ from core.machine_templates import (
     suggest_profile_key_for_template,
 )
 
-st.title("Importadores Universales & Plantillas LATAM")
-st.caption(
-    "Carga archivos de Emerson CSI 2140, Bently Nevada ADRE 408 o "
-    "Universal File Format (.uff/.unv). O elige una plantilla pre-cargada "
-    "de las 20 máquinas más comunes en O&G, generación y petroquímica LATAM."
+from core.ui_theme import page_header as _wm_page_header  # hero compartido (v3.31.313)
+_wm_page_header(
+    "Importadores & Plantillas LATAM",
+    "Carga archivos de Emerson CSI 2140, Bently Nevada ADRE 408 o Universal File "
+    "Format (.uff/.unv), o elige una plantilla pre-cargada de las 20 máquinas más "
+    "comunes en O&G, generación y petroquímica LATAM.",
 )
 
 

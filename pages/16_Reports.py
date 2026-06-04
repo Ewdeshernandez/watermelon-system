@@ -3367,10 +3367,11 @@ if not meta.get("reviewed_role"):
     meta["reviewed_role"] = "Revisión técnica"
 
 
-st.markdown('<div class="wm-page-title">Reports</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="wm-page-subtitle">Editor premium de entregables técnicos. Este módulo organiza figuras reales enviadas desde Spectrum, Waveform, Orbit y Tabular List, y exporta un PDF corporativo listo para cliente.</div>',
-    unsafe_allow_html=True,
+from core.ui_theme import page_header as _wm_page_header  # hero compartido (v3.31.313)
+_wm_page_header(
+    "Reports",
+    "Editor premium de entregables técnicos. Organiza figuras reales de Spectrum, "
+    "Waveform, Orbit y Tabular List, y exporta un PDF corporativo listo para cliente.",
 )
 
 c1, c2, c3, c4 = st.columns(4)

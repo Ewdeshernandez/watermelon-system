@@ -242,6 +242,10 @@ def apply_page_style() -> None:
 
 apply_page_style()
 
+from core.ui_theme import page_header as _wm_page_header  # hero compartido (v3.31.313)
+_wm_page_header("Spectrum Analysis",
+                "FFT y análisis espectral · frecuencias de falla (1X, 2X, BPFO, BPFI, GMF...).")
+
 # ------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------

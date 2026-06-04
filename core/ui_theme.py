@@ -130,8 +130,80 @@ def apply_watermelon_page_style() -> None:
 
 
 def page_header(title: str, subtitle: str) -> None:
-    st.markdown(f'<div class="wm-page-title">{title}</div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="wm-page-subtitle">{subtitle}</div>', unsafe_allow_html=True)
+    """Hero clase mundial estilo Home (v3.31.313) en TODA la app: saludo
+    personalizado con el nombre del usuario logueado + reloj + fecha + turno a
+    la derecha, identidad del módulo en el pill, y `subtitle` como línea de
+    estado. Si algo falla (sin sesión, etc.) cae al header simple sin romper."""
+    _g = None
+    try:
+        from core.auth import get_current_user
+        from core.home_metrics import get_personalized_greeting
+        _u = get_current_user() or {}
+        _name = _u.get("full_name", "") or _u.get("username", "")
+        _tz = ""
+        try:
+            _ctx = getattr(st, "context", None)
+            if _ctx is not None and getattr(_ctx, "timezone", None):
+                _tz = str(_ctx.timezone).strip()
+        except Exception:
+            _tz = ""
+        _g = get_personalized_greeting(_name, tz_name=_tz)
+    except Exception:
+        _g = None
+
+    if not _g:
+        st.markdown(f'<div class="wm-page-title">{title}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="wm-page-subtitle">{subtitle}</div>', unsafe_allow_html=True)
+        return
+
+    _night = _g.get("shift") == "Turno noche"
+    _accent = "#ef4444" if _night else "#10b981"
+    _bg = ("linear-gradient(135deg, #1a0a14 0%, #2a0e1f 100%)" if _night
+           else "linear-gradient(135deg, #0b1426 0%, #0f1d36 100%)")
+    st.markdown(
+        f"""
+        <style>
+        .wmh-hero {{
+            border-radius: 12px; padding: 12px 20px; margin: 2px 0 16px 0;
+            border: 1px solid rgba(148,163,184,0.12);
+            box-shadow: 0 2px 10px rgba(15,23,42,0.08);
+            color: #f8fafc; display: flex; align-items: center;
+            justify-content: space-between; gap: 28px; flex-wrap: wrap;
+        }}
+        .wmh-hero-left {{ flex: 1 1 60%; min-width: 320px; }}
+        .wmh-hero-right {{ flex: 0 0 auto; text-align: right; min-width: 200px; }}
+        .wmh-pill {{
+            display:inline-block; padding:3px 10px; border-radius:999px;
+            background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.14);
+            color:rgba(248,250,252,0.85); font-size:9px; font-weight:700;
+            letter-spacing:0.16em; text-transform:uppercase; margin-bottom:6px;
+        }}
+        .wmh-greeting {{ font-size:18px; font-weight:700; color:#f1f5f9;
+            margin:3px 0 2px 0; letter-spacing:-0.01em; }}
+        .wmh-status-line {{ font-size:13px; color:rgba(226,232,240,0.78); font-weight:500; }}
+        .wmh-status-line .dot {{ display:inline-block; width:8px; height:8px;
+            border-radius:50%; margin:0 6px 0 2px; vertical-align:middle; }}
+        .wmh-clock {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size:26px; font-weight:700; color:#f8fafc; line-height:1; letter-spacing:-0.02em; }}
+        .wmh-shift {{ font-size:11px; color:rgba(226,232,240,0.78); font-weight:600;
+            letter-spacing:0.12em; text-transform:uppercase; margin-top:6px; }}
+        .wmh-date {{ font-size:12px; color:rgba(226,232,240,0.55); margin-top:2px; }}
+        </style>
+        <div class="wmh-hero" style="background:{_bg}; border-left:3px solid {_accent};">
+          <div class="wmh-hero-left">
+            <span class="wmh-pill">🍉 Watermelon · {title}</span>
+            <div class="wmh-greeting">{_g['greeting']}</div>
+            <div class="wmh-status-line"><span class="dot" style="background:{_accent};"></span>{subtitle}</div>
+          </div>
+          <div class="wmh-hero-right">
+            <div class="wmh-clock">{_g['time_hhmm']}</div>
+            <div class="wmh-shift">{_g['shift_emoji']} {_g['shift']}</div>
+            <div class="wmh-date">{_g['date_long']}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def card(title: str, subtitle: str = "", meta_html: str = "", chips: Optional[Sequence[str]] = None) -> None:

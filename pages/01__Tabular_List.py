@@ -336,6 +336,10 @@ def apply_page_style() -> None:
 
 apply_page_style()
 
+from core.ui_theme import page_header as _wm_page_header  # hero compartido (v3.31.313)
+_wm_page_header("Tabular List",
+                "Vista tabular de señales y mediciones · valores 1X/2X, fase, RMS por canal.")
+
 
 def get_logo_base64(path: Path) -> Optional[str]:
     if not path.exists():

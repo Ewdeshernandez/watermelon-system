@@ -7,8 +7,8 @@ import streamlit as st
 
 st.set_page_config(page_title="Watermelon System | Load Data", layout="wide")
 
-from core.auth import require_login, render_user_menu, require_role, get_current_user
-from core.home_metrics import get_personalized_greeting
+from core.auth import require_login, render_user_menu, require_role
+from core.ui_theme import page_header
 
 require_login()
 render_user_menu()
@@ -746,67 +746,10 @@ def switch_to_time_waveforms() -> None:
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-# Header — hero IDÉNTICO al de Home (v3.31.312): saludo con el nombre del
-# usuario logueado, reloj, fecha y turno. El look clase mundial que tanto gustó.
-_ld_user = get_current_user() or {}
-_ld_name = _ld_user.get("full_name", "") or _ld_user.get("username", "")
-_ld_tz = ""
-try:
-    _ld_ctx = getattr(st, "context", None)
-    if _ld_ctx is not None and getattr(_ld_ctx, "timezone", None):
-        _ld_tz = str(_ld_ctx.timezone).strip()
-except Exception:
-    _ld_tz = ""
-_ld_greet = get_personalized_greeting(_ld_name, tz_name=_ld_tz)
-_ld_night = _ld_greet.get("shift") == "Turno noche"
-_ld_accent = "#ef4444" if _ld_night else "#10b981"
-_ld_bg = ("linear-gradient(135deg, #1a0a14 0%, #2a0e1f 100%)" if _ld_night
-          else "linear-gradient(135deg, #0b1426 0%, #0f1d36 100%)")
-
-st.markdown(
-    f"""
-    <style>
-    .wmh-hero {{
-        border-radius: 12px; padding: 12px 20px; margin: 2px 0 16px 0;
-        border: 1px solid rgba(148,163,184,0.12);
-        box-shadow: 0 2px 10px rgba(15,23,42,0.08);
-        color: #f8fafc; display: flex; align-items: center;
-        justify-content: space-between; gap: 28px; flex-wrap: wrap;
-    }}
-    .wmh-hero-left {{ flex: 1 1 60%; min-width: 320px; }}
-    .wmh-hero-right {{ flex: 0 0 auto; text-align: right; min-width: 200px; }}
-    .wmh-pill {{
-        display:inline-block; padding:3px 10px; border-radius:999px;
-        background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.14);
-        color:rgba(248,250,252,0.85); font-size:9px; font-weight:700;
-        letter-spacing:0.16em; text-transform:uppercase; margin-bottom:6px;
-    }}
-    .wmh-greeting {{ font-size:18px; font-weight:700; color:#f1f5f9;
-        margin:3px 0 2px 0; letter-spacing:-0.01em; }}
-    .wmh-status-line {{ font-size:13px; color:rgba(226,232,240,0.78); font-weight:500; }}
-    .wmh-status-line .dot {{ display:inline-block; width:8px; height:8px;
-        border-radius:50%; margin:0 6px 0 2px; vertical-align:middle; }}
-    .wmh-clock {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-        font-size:26px; font-weight:700; color:#f8fafc; line-height:1; letter-spacing:-0.02em; }}
-    .wmh-shift {{ font-size:11px; color:rgba(226,232,240,0.78); font-weight:600;
-        letter-spacing:0.12em; text-transform:uppercase; margin-top:6px; }}
-    .wmh-date {{ font-size:12px; color:rgba(226,232,240,0.55); margin-top:2px; }}
-    </style>
-    <div class="wmh-hero" style="background:{_ld_bg}; border-left:3px solid {_ld_accent};">
-      <div class="wmh-hero-left">
-        <span class="wmh-pill">🍉 Watermelon · Industrial Vibration Intelligence</span>
-        <div class="wmh-greeting">{_ld_greet['greeting']}</div>
-        <div class="wmh-status-line"><span class="dot" style="background:{_ld_accent};"></span>Load Vibration Data · subí tus CSV de vibración</div>
-      </div>
-      <div class="wmh-hero-right">
-        <div class="wmh-clock">{_ld_greet['time_hhmm']}</div>
-        <div class="wmh-shift">{_ld_greet['shift_emoji']} {_ld_greet['shift']}</div>
-        <div class="wmh-date">{_ld_greet['date_long']}</div>
-      </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+# Header — hero compartido estilo Home (v3.31.313). Una sola fuente de
+# verdad: core.ui_theme.page_header (saludo+nombre, reloj, fecha, turno).
+page_header("Load Vibration Data",
+            "Upload one or many CSV vibration files. Metadata is detected silently and the workflow stays clean.")
 
 
 # ------------------------------------------------------------
