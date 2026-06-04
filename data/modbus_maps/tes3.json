@@ -1,0 +1,285 @@
+{
+  "instance_id": "tes3",
+  "description": "Turbogenerador TES #3. Bently Nevada 3500/92 Modbus Gateway en planta (Ecopetrol). Servidor de sitio TES3-WINSRV, acceso remoto por ZeroTier.",
+  "modbus": {
+    "server_ip": "192.168.1.70",
+    "port": 502,
+    "unit_id": 1,
+    "registers_per_value": 2,
+    "byte_order": "ABCD",
+    "_byte_order_options": [
+      "ABCD = big-endian (default Bently)",
+      "CDAB = word-swapped",
+      "BADC = byte-swapped",
+      "DCBA = little-endian full"
+    ]
+  },
+  "poll_interval_seconds": 10,
+  "_units_note": "Unidades espejadas de TES1 (velocidad in/s pk, proximidad mil pp). CONFIRMAR contra el sistema legacy / la config del 3500 — si TES3 está en mm/s o µm, ajustar 'unit' aquí.",
+  "registers": {
+    "6001": {
+      "kind": "speed",
+      "variable": "Velocidad Generador",
+      "metric": "Direct",
+      "unit": "rpm",
+      "encoding": "float32"
+    },
+    "6005": {
+      "kind": "sensor",
+      "sensor_label": "1Y_V",
+      "plane": 1,
+      "direction": "Y",
+      "sensor_type": "velocity",
+      "location": "CRF",
+      "variable": "1YV VEL CRF",
+      "metric": "Direct",
+      "unit": "in/s pk",
+      "encoding": "float32",
+      "csv_match_pattern": "*1YV*VEL*CRF*, *CRF*VEL*"
+    },
+    "6007": {
+      "kind": "diagnostic",
+      "sensor_label": "1Y_V",
+      "variable": "1YV VEL CRF",
+      "metric": "BiasVoltage",
+      "unit": "V DC",
+      "encoding": "float32",
+      "notes": "Bias voltage del sensor de velocidad 1YV CRF — health del transducer"
+    },
+    "6013": {
+      "kind": "sensor",
+      "sensor_label": "2Y_V",
+      "plane": 2,
+      "direction": "Y",
+      "sensor_type": "velocity",
+      "location": "TRF",
+      "variable": "2YV VEL TRF",
+      "metric": "Direct",
+      "unit": "in/s pk",
+      "encoding": "float32",
+      "csv_match_pattern": "*2YV*VEL*TRF*, *TRF*VEL*"
+    },
+    "6015": {
+      "kind": "diagnostic",
+      "sensor_label": "2Y_V",
+      "variable": "2YV VEL TRF",
+      "metric": "BiasVoltage",
+      "unit": "V DC",
+      "encoding": "float32",
+      "notes": "Bias voltage del sensor de velocidad 2YV TRF — health del transducer"
+    },
+    "6037": {
+      "kind": "sensor",
+      "sensor_label": "3Y_D",
+      "plane": 3,
+      "direction": "Y",
+      "sensor_type": "proximity",
+      "location": "GEN_DE",
+      "variable": "3YD GEN DE",
+      "metric": "Direct",
+      "unit": "mil pp",
+      "encoding": "float32",
+      "csv_match_pattern": "*3YD*GEN*DE*, *GEN*DE*Y*"
+    },
+    "6039": {
+      "kind": "diagnostic",
+      "sensor_label": "3Y_D",
+      "variable": "3YD GEN DE",
+      "metric": "Gap",
+      "unit": "V DC",
+      "encoding": "float32",
+      "notes": "DC gap voltage del proximity probe — verifica posición del eje"
+    },
+    "6041": {
+      "kind": "vector",
+      "sensor_label": "3Y_D",
+      "variable": "3YD GEN DE",
+      "metric": "1X_Ampl",
+      "unit": "mil pp",
+      "encoding": "float32"
+    },
+    "6043": {
+      "kind": "vector",
+      "sensor_label": "3Y_D",
+      "variable": "3YD GEN DE",
+      "metric": "1X_Phase",
+      "unit": "deg",
+      "encoding": "float32"
+    },
+    "6045": {
+      "kind": "vector",
+      "sensor_label": "3Y_D",
+      "variable": "3YD GEN DE",
+      "metric": "2X_Ampl",
+      "unit": "mil pp",
+      "encoding": "float32"
+    },
+    "6047": {
+      "kind": "vector",
+      "sensor_label": "3Y_D",
+      "variable": "3YD GEN DE",
+      "metric": "2X_Phase",
+      "unit": "deg",
+      "encoding": "float32"
+    },
+    "6057": {
+      "kind": "sensor",
+      "sensor_label": "3X_D",
+      "plane": 3,
+      "direction": "X",
+      "sensor_type": "proximity",
+      "location": "GEN_DE",
+      "variable": "3XD GEN DE",
+      "metric": "Direct",
+      "unit": "mil pp",
+      "encoding": "float32",
+      "csv_match_pattern": "*3XD*GEN*DE*, *GEN*DE*X*"
+    },
+    "6059": {
+      "kind": "diagnostic",
+      "sensor_label": "3X_D",
+      "variable": "3XD GEN DE",
+      "metric": "Gap",
+      "unit": "V DC",
+      "encoding": "float32"
+    },
+    "6061": {
+      "kind": "vector",
+      "sensor_label": "3X_D",
+      "variable": "3XD GEN DE",
+      "metric": "1X_Ampl",
+      "unit": "mil pp",
+      "encoding": "float32"
+    },
+    "6063": {
+      "kind": "vector",
+      "sensor_label": "3X_D",
+      "variable": "3XD GEN DE",
+      "metric": "1X_Phase",
+      "unit": "deg",
+      "encoding": "float32"
+    },
+    "6065": {
+      "kind": "vector",
+      "sensor_label": "3X_D",
+      "variable": "3XD GEN DE",
+      "metric": "2X_Ampl",
+      "unit": "mil pp",
+      "encoding": "float32"
+    },
+    "6067": {
+      "kind": "vector",
+      "sensor_label": "3X_D",
+      "variable": "3XD GEN DE",
+      "metric": "2X_Phase",
+      "unit": "deg",
+      "encoding": "float32"
+    },
+    "6077": {
+      "kind": "sensor",
+      "sensor_label": "4Y_D",
+      "plane": 4,
+      "direction": "Y",
+      "sensor_type": "proximity",
+      "location": "GEN_NDE",
+      "variable": "4YD GEN NDE",
+      "metric": "Direct",
+      "unit": "mil pp",
+      "encoding": "float32",
+      "csv_match_pattern": "*4YD*GEN*NDE*, *GEN*NDE*Y*"
+    },
+    "6079": {
+      "kind": "diagnostic",
+      "sensor_label": "4Y_D",
+      "variable": "4YD GEN NDE",
+      "metric": "Gap",
+      "unit": "V DC",
+      "encoding": "float32"
+    },
+    "6081": {
+      "kind": "vector",
+      "sensor_label": "4Y_D",
+      "variable": "4YD GEN NDE",
+      "metric": "1X_Ampl",
+      "unit": "mil pp",
+      "encoding": "float32"
+    },
+    "6083": {
+      "kind": "vector",
+      "sensor_label": "4Y_D",
+      "variable": "4YD GEN NDE",
+      "metric": "1X_Phase",
+      "unit": "deg",
+      "encoding": "float32"
+    },
+    "6085": {
+      "kind": "vector",
+      "sensor_label": "4Y_D",
+      "variable": "4YD GEN NDE",
+      "metric": "2X_Ampl",
+      "unit": "mil pp",
+      "encoding": "float32"
+    },
+    "6087": {
+      "kind": "vector",
+      "sensor_label": "4Y_D",
+      "variable": "4YD GEN NDE",
+      "metric": "2X_Phase",
+      "unit": "deg",
+      "encoding": "float32"
+    },
+    "6097": {
+      "kind": "sensor",
+      "sensor_label": "4X_D",
+      "plane": 4,
+      "direction": "X",
+      "sensor_type": "proximity",
+      "location": "GEN_NDE",
+      "variable": "4XD GEN NDE",
+      "metric": "Direct",
+      "unit": "mil pp",
+      "encoding": "float32",
+      "csv_match_pattern": "*4XD*GEN*NDE*, *GEN*NDE*X*"
+    },
+    "6099": {
+      "kind": "diagnostic",
+      "sensor_label": "4X_D",
+      "variable": "4XD GEN NDE",
+      "metric": "Gap",
+      "unit": "V DC",
+      "encoding": "float32"
+    },
+    "6101": {
+      "kind": "vector",
+      "sensor_label": "4X_D",
+      "variable": "4XD GEN NDE",
+      "metric": "1X_Ampl",
+      "unit": "mil pp",
+      "encoding": "float32"
+    },
+    "6103": {
+      "kind": "vector",
+      "sensor_label": "4X_D",
+      "variable": "4XD GEN NDE",
+      "metric": "1X_Phase",
+      "unit": "deg",
+      "encoding": "float32"
+    },
+    "6105": {
+      "kind": "vector",
+      "sensor_label": "4X_D",
+      "variable": "4XD GEN NDE",
+      "metric": "2X_Ampl",
+      "unit": "mil pp",
+      "encoding": "float32"
+    },
+    "6107": {
+      "kind": "vector",
+      "sensor_label": "4X_D",
+      "variable": "4XD GEN NDE",
+      "metric": "2X_Phase",
+      "unit": "deg",
+      "encoding": "float32"
+    }
+  }
+}
