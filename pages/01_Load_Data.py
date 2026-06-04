@@ -745,35 +745,41 @@ def switch_to_time_waveforms() -> None:
 # ------------------------------------------------------------
 # Header
 # ------------------------------------------------------------
-logo_b64 = get_logo_base64(LOGO_PATH)
-
-if logo_b64:
-    st.markdown(
-        f"""
-        <div class="wm-page-header">
-            <img class="wm-page-logo" src="data:image/png;base64,{logo_b64}" />
-            <div>
-                <div class="wm-page-kicker">Watermelon System</div>
-                <div class="wm-page-title">Load Vibration Data</div>
-                <div class="wm-page-subtitle">Upload one or many CSV vibration files. Metadata is detected silently and the workflow stays clean.</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-else:
-    st.markdown(
-        """
-        <div class="wm-page-header">
-            <div>
-                <div class="wm-page-kicker">Watermelon System</div>
-                <div class="wm-page-title">Load Vibration Data</div>
-                <div class="wm-page-subtitle">Upload one or many CSV vibration files. Metadata is detected silently and the workflow stays clean.</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+# Hero oscuro minimalista, clonado del Home (v3.31.311). Reemplaza el header
+# con logo grande. Mismo look enterprise tipo System1/AMS que tanto gustó.
+st.markdown(
+    """
+    <style>
+    .wmld-hero {
+        border-radius: 12px; padding: 14px 22px; margin: 2px 0 16px 0;
+        background: linear-gradient(135deg, #0b1426 0%, #0f1d36 100%);
+        border: 1px solid rgba(148,163,184,0.12);
+        border-left: 3px solid #10b981;
+        box-shadow: 0 2px 10px rgba(15,23,42,0.08);
+        color: #f8fafc;
+    }
+    .wmld-pill {
+        display:inline-block; padding:3px 10px; border-radius:999px;
+        background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.14);
+        color:rgba(248,250,252,0.85); font-size:9px; font-weight:700;
+        letter-spacing:0.16em; text-transform:uppercase; margin-bottom:7px;
+    }
+    .wmld-title {
+        font-size:26px; font-weight:800; line-height:1.05; letter-spacing:-0.02em;
+        margin:0 0 4px 0;
+        background:linear-gradient(90deg,#f8fafc 0%,#cbd5e1 100%);
+        -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+    }
+    .wmld-sub { font-size:13px; color:rgba(226,232,240,0.78); font-weight:500; line-height:1.4; }
+    </style>
+    <div class="wmld-hero">
+        <div class="wmld-pill">Watermelon System · Ingesta</div>
+        <div class="wmld-title">Load Vibration Data</div>
+        <div class="wmld-sub">Upload one or many CSV vibration files. Metadata is detected silently and the workflow stays clean.</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # ------------------------------------------------------------
@@ -815,39 +821,27 @@ _client = _active_instance.client or "(sin cliente)"
 _site = _active_instance.site or _active_instance.location or ""
 _tag = _active_instance.tag or _active_instance.instance_id
 
+# Tira minimalista de máquina activa (v3.31.311 — sin la imagen grande del
+# equipo; el dato importante es a qué activo quedan vinculados los CSVs).
+_meta_bits = []
+if _active_instance.nominal_power_mw > 0:
+    _meta_bits.append(f"{_active_instance.nominal_power_mw:.0f} MW")
+if _active_instance.nominal_rpm > 0:
+    _meta_bits.append(f"{_active_instance.nominal_rpm:.0f} rpm")
+if _client:
+    _meta_bits.append(_client)
+if _site:
+    _meta_bits.append(_site)
+
 with st.container(border=True):
-    banner_cols = st.columns([1.0, 3.5])
-    with banner_cols[0]:
-        if _active_instance.schematic_png:
-            try:
-                _png = get_instance_document_bytes(
-                    _active_instance.instance_id,
-                    _active_instance.schematic_png,
-                )
-                if _png:
-                    st.image(_png, use_container_width=True)
-            except Exception:
-                pass
-    with banner_cols[1]:
-        st.markdown(f"### 🟢 Cargando CSVs para: **{_tag}**")
-        st.caption(_train_desc)
-        meta_bits = []
-        if _active_instance.nominal_power_mw > 0:
-            meta_bits.append(f"{_active_instance.nominal_power_mw:.0f} MW")
-        if _active_instance.nominal_rpm > 0:
-            meta_bits.append(f"{_active_instance.nominal_rpm:.0f} rpm")
-        if _client:
-            meta_bits.append(_client)
-        if _site:
-            meta_bits.append(_site)
-        if meta_bits:
-            st.caption(" · ".join(meta_bits))
-        st.caption(
-            "ℹ️ Los CSVs que subas a continuación quedarán etiquetados con "
-            f"`instance_id={_active_instance.instance_id}` y disponibles para "
-            "todos los módulos de análisis (Polar, Bode, SCL, Spectrum, "
-            "Time Waveforms, Trends) y para Reports."
-        )
+    st.markdown(f"🟢 **Cargando CSVs para {_tag}** — {_train_desc}")
+    if _meta_bits:
+        st.caption(" · ".join(_meta_bits))
+    st.caption(
+        "ℹ️ Los CSVs que subas quedarán etiquetados con "
+        f"`instance_id={_active_instance.instance_id}` y disponibles en todos los "
+        "módulos de análisis (Polar, Bode, SCL, Spectrum, Time Waveforms, Trends) y Reports."
+    )
 
 
 # ------------------------------------------------------------
