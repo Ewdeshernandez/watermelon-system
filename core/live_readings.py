@@ -283,6 +283,41 @@ def history_for_metric(
         return []
 
 
+def history_bucketed(
+    instance_id: str,
+    variable: str,
+    metric: str,
+    from_iso: str,
+    bucket: str,
+) -> List[Dict[str, Any]]:
+    """
+    Tendencia DOWNSAMPLED server-side vía RPC `trend_bucketed` (Ciclo 23.146).
+
+    Agrupa las lecturas en baldes de tiempo (`bucket`, ej. "1 hour", "1 day")
+    desde `from_iso`, devolviendo por balde: avg/min/max/n. Esto escala a
+    históricos de 1 año sin chocar con el cap de 1000 filas de PostgREST ni
+    traer millones de filas al browser. Devuelve [] si la RPC no existe aún
+    (el caller debe hacer fallback a history_for_metric).
+
+    Cada fila: {bucket, avg_val, min_val, max_val, n}.
+    """
+    client = _get_supabase_client()
+    if client is None:
+        return []
+    try:
+        resp = client.rpc("trend_bucketed", {
+            "p_instance": instance_id,
+            "p_variable": variable,
+            "p_metric": metric,
+            "p_from": from_iso,
+            "p_bucket": bucket,
+        }).execute()
+        return list(getattr(resp, "data", []) or [])
+    except Exception as e:
+        log.warning("history_bucketed failed (¿falta crear la función SQL?): %s", e)
+        return []
+
+
 def recent_history_all_direct(
     instance_id: str,
     n_per_sensor: int = 30,

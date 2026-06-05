@@ -3062,41 +3062,56 @@ def render_history_chart(
         )
     with col_range:
         range_choice = st.selectbox(
-            "Rango", ["Última hora", "6 horas", "24 horas", "7 días", "Todo"],
+            "Rango", ["Última hora", "6 horas", "24 horas", "7 días", "30 días", "1 año"],
             index=1, key="live_history_range",
-            help="Cuánto historial traer del registro append-only en Supabase",
+            help="Histórico de Supabase, downsampled server-side por intervalos (escala a 1 año)",
         )
 
     if not chosen_labels:
         st.info("Seleccioná al menos 1 sensor para ver tendencia.")
         return
 
-    # Caps de lecturas por sensor (cada poll del collector son ~10 s, 360/h)
-    range_to_limit = {
-        "Última hora": 400,
-        "6 horas":     2200,
-        "24 horas":    9000,
-        "7 días":      62000,
-        "Todo":        200000,
+    # Downsampling server-side (Ciclo 23.146) — cada rango usa un balde de
+    # tiempo (avg/min/max por intervalo) vía la función SQL trend_bucketed.
+    # Esto escala a 1 año sin chocar con el cap de 1000 filas de PostgREST ni
+    # colgar el browser. Devuelve ~120–365 puntos por sensor sin importar el
+    # rango. Min/Máx muestran el pico REAL del balde (no se pierden picos).
+    from datetime import timedelta as _td, datetime as _dtmod, timezone as _tzmod
+    range_cfg = {
+        "Última hora": (_td(hours=1),  "30 seconds"),
+        "6 horas":     (_td(hours=6),  "2 minutes"),
+        "24 horas":    (_td(hours=24), "10 minutes"),
+        "7 días":      (_td(days=7),   "1 hour"),
+        "30 días":     (_td(days=30),  "6 hours"),
+        "1 año":       (_td(days=365), "1 day"),
     }
-    limit = range_to_limit.get(range_choice, 2200)
+    _delta, _bucket = range_cfg.get(range_choice, (_td(hours=6), "2 minutes"))
+    _from_iso = (_dtmod.now(_tzmod.utc) - _delta).isoformat()
+
+    from core.live_readings import history_bucketed as _hbk
 
     # Fetch data por sensor — guardamos por label
     sensor_data: List[Dict[str, Any]] = []
     for chosen in chosen_labels:
         idx = labels.index(chosen)
         sensor_lbl, var_name = options[idx]
-        rows = history_for_metric(
-            instance_id, var_name, "Direct", limit=limit,
-        )
+        rows = _hbk(instance_id, var_name, "Direct", _from_iso, _bucket)
+        if not rows:
+            # Fallback (por si la función SQL aún no está creada): crudo cap 1000
+            raw = history_for_metric(instance_id, var_name, "Direct", limit=1000)
+            rows = [{"bucket": r.get("captured_at"), "avg_val": r.get("value"),
+                     "min_val": r.get("value"), "max_val": r.get("value"), "n": 1}
+                    for r in raw]
         if not rows:
             continue
         df_one = pd.DataFrame(rows)
         df_one["captured_at"] = pd.to_datetime(
-            df_one["captured_at"], utc=True
+            df_one["bucket"], utc=True
         ).dt.tz_convert(_local_tz())
-        df_one = df_one.sort_values(by="captured_at").reset_index(drop=True)
-        # Compute severity para este sensor
+        df_one["value"] = pd.to_numeric(df_one["avg_val"], errors="coerce")
+        df_one = df_one.dropna(subset=["value"]).sort_values(by="captured_at").reset_index(drop=True)
+        if df_one.empty:
+            continue
         sensor_match = sensor_lookup.get(sensor_lbl)
         sample_unit = direct_rows[idx].get("unit", "")
         sev = compute_severity(
@@ -3117,13 +3132,17 @@ def render_history_chart(
         st.info("Sin histórico aún en ningún sensor seleccionado.")
         return
 
-    # KPIs combinados (sobre TODOS los sensores)
-    all_values = pd.concat([sd["df"]["value"] for sd in sensor_data])
-    total_readings = sum(len(sd["df"]) for sd in sensor_data)
+    # KPIs combinados — Mín/Máx usan el pico REAL de cada balde (no se pierden
+    # al promediar); Σ = total de lecturas crudas agregadas.
+    _mins = pd.concat([pd.to_numeric(sd["df"]["min_val"], errors="coerce") for sd in sensor_data])
+    _maxs = pd.concat([pd.to_numeric(sd["df"]["max_val"], errors="coerce") for sd in sensor_data])
+    _avgs = pd.concat([sd["df"]["value"] for sd in sensor_data])
+    total_readings = int(sum(pd.to_numeric(sd["df"]["n"], errors="coerce").fillna(0).sum() for sd in sensor_data))
+    all_values = _maxs  # usado abajo para el y_max del gráfico
     c1, c2, c3, c4 = st.columns(4)
-    with c1: st.metric("Mín (global)", f"{all_values.min():.3f}")
-    with c2: st.metric("Máx (global)", f"{all_values.max():.3f}")
-    with c3: st.metric("Promedio (global)", f"{all_values.mean():.3f}")
+    with c1: st.metric("Mín (real)", f"{_mins.min():.3f}")
+    with c2: st.metric("Máx (real)", f"{_maxs.max():.3f}")
+    with c3: st.metric("Promedio", f"{_avgs.mean():.3f}")
     with c4: st.metric("Σ Lecturas", f"{total_readings:,}")
 
     # Decidir si mostramos bandas: solo si todos comparten unit + alarm + danger
