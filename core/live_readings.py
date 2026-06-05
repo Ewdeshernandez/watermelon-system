@@ -187,7 +187,7 @@ def ingest_batch(readings: List[LiveReading]) -> int:
         return 0
 
 
-def _latest_from_table(client, instance_id: str, scan_limit: int = 1500) -> List[Dict[str, Any]]:
+def _latest_from_table(client, instance_id: str, scan_limit: int = 400) -> List[Dict[str, Any]]:
     """Fallback: deriva el último valor de cada (variable, metric) leyendo
     directo de la tabla `live_readings` (indexada por captured_at), sin pasar
     por la vista `latest_live_reading`. La vista agrega sobre toda la tabla y
@@ -219,15 +219,27 @@ def _latest_from_table(client, instance_id: str, scan_limit: int = 1500) -> List
 
 def latest_for_instance(instance_id: str) -> List[Dict[str, Any]]:
     """
-    Devuelve los valores actuales (último valor de cada variable+metric)
-    de una instancia. Intenta la vista `latest_live_reading` (rápida cuando
-    Supabase la resuelve a tiempo) y, si falla/se pasa del statement_timeout,
-    cae a `_latest_from_table` (deriva lo mismo desde la tabla, indexado).
-    Esto blinda el cron de envíos y el botón manual ante timeouts de la vista.
+    Devuelve los valores actuales (último valor de cada variable+metric) de una
+    instancia.
+
+    PERF (Ciclo 23.152): va DIRECTO a la tabla `live_readings` indexada
+    (order captured_at desc + limit). Antes intentaba primero la vista
+    `latest_live_reading`, que agrega sobre TODA la tabla; con el volumen actual
+    (millones de filas) se pasa SIEMPRE del statement_timeout (error 57014), y
+    esperar ese timeout en CADA refresco de la barra en vivo hacía el módulo
+    lentísimo. La query a la tabla es O(limit) sobre el índice
+    `(instance_id, captured_at desc)`. La vista queda solo como último recurso.
     """
     client = _get_supabase_client()
     if client is None:
         return []
+    try:
+        rows = _latest_from_table(client, instance_id)
+        if rows:
+            return rows
+    except Exception as e:
+        log.warning("latest_for_instance table query failed (%s) — probando vista", e)
+    # Último recurso: la vista (puede timeoutear, pero por si la tabla falló)
     try:
         resp = (
             client.table(_VIEW)
@@ -237,13 +249,9 @@ def latest_for_instance(instance_id: str) -> List[Dict[str, Any]]:
             .execute()
         )
         return list(getattr(resp, "data", []) or [])
-    except Exception as e:
-        log.warning("latest_for_instance view failed (%s) — fallback a live_readings", e)
-        try:
-            return _latest_from_table(client, instance_id)
-        except Exception as e2:
-            log.warning("latest_for_instance fallback failed: %s", e2)
-            return []
+    except Exception as e2:
+        log.warning("latest_for_instance view fallback failed: %s", e2)
+        return []
 
 
 def history_for_metric(
