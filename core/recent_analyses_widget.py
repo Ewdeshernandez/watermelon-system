@@ -265,46 +265,107 @@ def _render_waveform_detail(payload: Dict[str, Any]) -> None:
         st.error(f"Error renderizando waveform: {e}")
 
 
+# Ciclo 23.150 — Espectro clase mundial (Fase 1): apilado por sensor (NO
+# encimado), color consistente por sensor, y cursores de orden 1X/2X/3X.
+# Paleta categórica fija (asignada por orden alfabético del label → estable
+# entre snapshots de la misma máquina).
+_SPEC_PALETTE = [
+    "#1D9E75", "#378ADD", "#7F77DD", "#D85A30",
+    "#D4537E", "#BA7517", "#0F6E56", "#185FA5",
+]
+
+
+def _spec_color(label: str, ordered_labels: List[str]) -> str:
+    try:
+        return _SPEC_PALETTE[ordered_labels.index(label) % len(_SPEC_PALETTE)]
+    except Exception:
+        return _SPEC_PALETTE[0]
+
+
+def _estimate_running_hz(sensors: List[Dict[str, Any]]) -> Optional[float]:
+    """Estima la frecuencia de giro (1X) desde el pico dominante global.
+    En máquinas a régimen el 1X suele ser el pico más alto. Devuelve None
+    si no hay picos confiables (entonces no se dibujan cursores de orden)."""
+    best_amp, best_hz = -1.0, None
+    for s in sensors:
+        peaks = s.get("peaks") or []
+        if not peaks:
+            continue
+        p = peaks[0]  # ya vienen ordenados por amplitud desc
+        try:
+            hz = float(p.get("freq", 0))
+            amp = float(p.get("amp", 0))
+        except Exception:
+            continue
+        if amp > best_amp and 3.0 <= hz <= 2000.0:
+            best_amp, best_hz = amp, hz
+    return best_hz
+
+
 def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
-    sensors = payload.get("sensors", [])
+    sensors = [s for s in payload.get("sensors", [])
+               if s.get("freqs") and s.get("amps")][:6]
     if not sensors:
         st.info("Sin sensores en este snapshot.")
         return
     try:
         import plotly.graph_objects as go
-        fig = go.Figure()
-        for s in sensors[:6]:  # max 6 traces — espectros se solapan feos con más
-            f = s.get("freqs", [])
-            a = s.get("amps", [])
-            if not f or not a:
-                continue
-            fig.add_trace(go.Scatter(
-                x=f, y=a, mode="lines",
-                line=dict(width=1.0),
-                name=s.get("sensor_label", ""),
-                hovertemplate=f"<b>{s.get('sensor_label', '')}</b><br>"
-                              f"%{{x:.1f}} Hz, %{{y:.4f}} {s.get('amp_unit', '')}<extra></extra>",
-            ))
-        fig.update_layout(
-            height=380,
-            margin=dict(l=10, r=10, t=20, b=10),
-            plot_bgcolor="white",
-            xaxis=dict(title="Frecuencia (Hz)", showgrid=True, gridcolor="#f1f5f9"),
-            yaxis=dict(title="Amplitud", showgrid=True, gridcolor="#f1f5f9"),
-            showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        from plotly.subplots import make_subplots
 
-        # Top peaks
-        for s in sensors[:3]:
-            peaks = s.get("peaks", [])
-            if not peaks:
-                continue
+        ordered = sorted({s.get("sensor_label", "") for s in sensors})
+        run_hz = _estimate_running_hz(sensors)
+        n = len(sensors)
+
+        fig = make_subplots(
+            rows=n, cols=1, shared_xaxes=True, vertical_spacing=0.05,
+            subplot_titles=[s.get("sensor_label", "") for s in sensors],
+        )
+        # Recolorear + alinear a la izquierda los títulos (etiqueta-chip por canal)
+        for ann, s in zip(fig.layout.annotations, sensors):
+            ann.font = dict(size=11,
+                            color=_spec_color(s.get("sensor_label", ""), ordered),
+                            family="ui-monospace, SFMono-Regular, Menlo, monospace")
+            ann.x = 0.0
+            ann.xanchor = "left"
+
+        for i, s in enumerate(sensors, start=1):
+            lbl = s.get("sensor_label", "")
+            unit = s.get("amp_unit", "")
+            color = _spec_color(lbl, ordered)
+            fig.add_trace(go.Scatter(
+                x=s["freqs"], y=s["amps"], mode="lines",
+                line=dict(width=1.2, color=color), showlegend=False,
+                hovertemplate=(f"<b>{lbl}</b><br>%{{x:.1f}} Hz · "
+                               f"%{{y:.4f}} {unit}<extra></extra>"),
+            ), row=i, col=1)
+            # Cursores de orden 1X / 2X / 3X (label solo en la primera fila)
+            if run_hz:
+                for k in (1, 2, 3):
+                    vkw = dict(x=run_hz * k, row=i, col=1,
+                               line=dict(color="#94a3b8", width=1, dash="dot"))
+                    if i == 1:
+                        vkw.update(annotation_text=f"{k}X",
+                                   annotation_position="top",
+                                   annotation_font=dict(size=9, color="#64748b"))
+                    fig.add_vline(**vkw)
+
+        fig.update_xaxes(showgrid=True, gridcolor="#f1f5f9", zeroline=False)
+        fig.update_xaxes(title_text="Frecuencia (Hz)", row=n, col=1)
+        fig.update_yaxes(showgrid=True, gridcolor="#f8fafc", zeroline=False)
+        fig.update_layout(
+            height=max(150, 118 * n),
+            margin=dict(l=46, r=14, t=22, b=34),
+            plot_bgcolor="white", paper_bgcolor="white",
+            font=dict(family="-apple-system, system-ui, sans-serif",
+                      size=10, color="#475569"),
+            showlegend=False,
+        )
+        if run_hz:
             st.caption(
-                f"**{s.get('sensor_label', '')}** — top peaks: " +
-                " · ".join([f"{p['freq']:.1f} Hz ({p['amp']:.3f})" for p in peaks[:5]])
+                f"Cursores de orden anclados a 1X ≈ {run_hz:.1f} Hz "
+                f"(~{run_hz * 60:.0f} rpm), estimado del pico dominante."
             )
+        st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.error(f"Error renderizando spectrum: {e}")
 
