@@ -1451,6 +1451,71 @@ def queue_waveform_to_report(
     )
 
 
+# ------------------------------------------------------------
+# Ciclo 23.151 — Vista OVERVIEW apilada multi-canal (clase mundial,
+# estilo System1): todas las formas de onda seleccionadas en una sola
+# figura compacta, un subplot por canal, eje de tiempo compartido y
+# color fijo por canal. El detalle grande sigue abajo.
+# ------------------------------------------------------------
+_WF_PALETTE = [
+    "#1D9E75", "#378ADD", "#7F77DD", "#D85A30",
+    "#D4537E", "#BA7517", "#0F6E56", "#185FA5",
+]
+
+
+def _wf_color(name: str, ordered: List[str]) -> str:
+    try:
+        return _WF_PALETTE[ordered.index(name) % len(_WF_PALETTE)]
+    except Exception:
+        return _WF_PALETTE[0]
+
+
+def render_waveform_overview(records: List["SignalRecord"]) -> None:
+    recs = [r for r in records if getattr(r, "time_s", None) is not None
+            and r.time_s.size > 2][:8]
+    if not recs:
+        st.info("Seleccioná al menos 1 canal para el overview.")
+        return
+    try:
+        from plotly.subplots import make_subplots
+        ordered = sorted({r.name for r in recs})
+        n = len(recs)
+        fig = make_subplots(
+            rows=n, cols=1, shared_xaxes=True, vertical_spacing=0.045,
+            subplot_titles=[r.name for r in recs],
+        )
+        for ann, r in zip(fig.layout.annotations, recs):
+            ann.font = dict(size=11, color=_wf_color(r.name, ordered),
+                            family="ui-monospace, SFMono-Regular, Menlo, monospace")
+            ann.x = 0.0
+            ann.xanchor = "left"
+        for i, r in enumerate(recs, start=1):
+            color = _wf_color(r.name, ordered)
+            fig.add_trace(go.Scattergl(
+                x=r.time_s, y=r.amplitude, mode="lines",
+                line=dict(width=1.0, color=color), showlegend=False,
+                hovertemplate=(f"<b>{r.name}</b><br>%{{x:.4f}} s · "
+                               f"%{{y:.4f}} {r.amplitude_unit}<extra></extra>"),
+            ), row=i, col=1)
+        fig.update_xaxes(showgrid=True, gridcolor="#f1f5f9", zeroline=False)
+        fig.update_xaxes(title_text="Tiempo (s)", row=n, col=1)
+        fig.update_yaxes(showgrid=True, gridcolor="#f8fafc",
+                         zeroline=True, zerolinecolor="#e2e8f0")
+        fig.update_layout(
+            height=max(150, 100 * n),
+            margin=dict(l=52, r=14, t=22, b=34),
+            plot_bgcolor="white", paper_bgcolor="white",
+            font=dict(family="-apple-system, system-ui, sans-serif",
+                      size=10, color="#475569"),
+            showlegend=False,
+        )
+        st.caption("Formas de onda apiladas, eje de tiempo compartido. "
+                   "Abajo, cada canal en detalle completo.")
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.warning(f"No se pudo renderizar el overview de formas de onda: {e}")
+
+
 def render_waveform_panel(
     primary: SignalRecord,
     panel_index: int,
@@ -2364,6 +2429,15 @@ if not selected_ids:
 
 selected_records = [next(r for r in records_all if r.signal_id == signal_id) for signal_id in selected_ids]
 logo_uri = get_logo_data_uri(LOGO_PATH)
+
+# Ciclo 23.151 — Overview apilado de TODOS los canales, arriba del detalle.
+if len(selected_records) >= 1:
+    with st.expander(
+        f"📈 Overview apilado — {len(selected_records)} canal(es)",
+        expanded=True,
+    ):
+        render_waveform_overview(selected_records)
+    st.markdown("---")
 
 for panel_index, primary in enumerate(selected_records):
     render_waveform_panel(

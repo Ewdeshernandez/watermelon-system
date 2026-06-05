@@ -817,6 +817,87 @@ def queue_orbit_to_report(
     )
 
 
+# ------------------------------------------------------------
+# Ciclo 23.151 — Vista OVERVIEW de órbitas (clase mundial, estilo
+# System1): grilla compacta con TODAS las órbitas seleccionadas, cuadradas
+# (X:Y 1:1), color fijo por par. El detalle grande sigue abajo.
+# ------------------------------------------------------------
+_ORB_PALETTE = [
+    "#1D9E75", "#378ADD", "#7F77DD", "#D85A30",
+    "#D4537E", "#BA7517", "#0F6E56", "#185FA5",
+]
+
+
+def _orb_color(label: str, ordered: List[str]) -> str:
+    try:
+        return _ORB_PALETTE[ordered.index(label) % len(_ORB_PALETTE)]
+    except Exception:
+        return _ORB_PALETTE[0]
+
+
+def render_orbit_overview(
+    pairs: List["OrbitPair"],
+    signals: dict,
+    *,
+    ui_filter_mode: str,
+    machine_rotation: str,
+) -> None:
+    prs = pairs[:6]
+    if not prs:
+        st.info("Seleccioná al menos 1 par X-Y para el overview.")
+        return
+    try:
+        ordered = sorted({p.label for p in prs})
+        ncols = min(len(prs), 3)
+        cols = st.columns(ncols)
+        for idx, pair in enumerate(prs):
+            with cols[idx % ncols]:
+                try:
+                    result = compute_orbit(
+                        signals[pair.x_name], signals[pair.y_name],
+                        filter_mode=ui_filter_mode,
+                        machine_rotation=machine_rotation,
+                        x_probe_angle_deg=45.0, x_probe_side="Right",
+                        y_probe_angle_deg=45.0, y_probe_side="Left",
+                    )
+                    color = _orb_color(pair.label, ordered)
+                    units = (result.probe_state or {}).get("units", "mil")
+                    fig = go.Figure()
+                    for seg_x, seg_y in zip(result.segment_x_open or [],
+                                            result.segment_y_open or []):
+                        fig.add_trace(go.Scattergl(
+                            x=seg_x, y=seg_y, mode="lines",
+                            line=dict(width=1.1, color=color),
+                            showlegend=False, hoverinfo="skip"))
+                    sp = getattr(result, "start_point", None)
+                    if sp is not None and len(sp) >= 2:
+                        fig.add_trace(go.Scatter(
+                            x=[sp[0]], y=[sp[1]], mode="markers",
+                            marker=dict(size=5, color=color),
+                            showlegend=False, hoverinfo="skip"))
+                    fig.update_layout(
+                        title=dict(text=f"<b>{pair.label}</b>",
+                                   font=dict(size=11, color=color)),
+                        height=230, margin=dict(l=8, r=8, t=30, b=8),
+                        plot_bgcolor="white", paper_bgcolor="white",
+                        font=dict(family="-apple-system, system-ui, sans-serif",
+                                  size=9, color="#475569"),
+                        showlegend=False,
+                        xaxis=dict(showgrid=True, gridcolor="#f1f5f9",
+                                   zeroline=True, zerolinecolor="#cbd5e1",
+                                   scaleanchor="y", scaleratio=1,
+                                   title=f"X ({units})"),
+                        yaxis=dict(showgrid=True, gridcolor="#f1f5f9",
+                                   zeroline=True, zerolinecolor="#cbd5e1",
+                                   title=f"Y ({units})"),
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.warning(f"{pair.label}: {e}")
+    except Exception as e:
+        st.warning(f"No se pudo renderizar el overview de órbitas: {e}")
+
+
 def render_orbit_panel(
     pair: OrbitPair,
     signals: dict,
@@ -1245,6 +1326,19 @@ if not selected_pairs:
     st.stop()
 
 logo_uri = get_logo_data_uri(LOGO_PATH)
+
+# Ciclo 23.151 — Overview de órbitas (grilla compacta) arriba del detalle.
+if len(selected_pairs) >= 1:
+    with st.expander(
+        f"🌀 Overview de órbitas — {len(selected_pairs)} par(es)",
+        expanded=True,
+    ):
+        render_orbit_overview(
+            selected_pairs, signals,
+            ui_filter_mode=ui_filter_mode,
+            machine_rotation=machine_rotation,
+        )
+    st.markdown("---")
 
 for panel_index, pair in enumerate(selected_pairs):
     render_orbit_panel(
