@@ -2093,6 +2093,121 @@ def queue_spectrum_to_report(
         }
     )
 
+
+# ------------------------------------------------------------
+# Ciclo 23.151 — Vista OVERVIEW apilada multi-canal (clase mundial,
+# estilo System1): todos los canales seleccionados en una sola figura
+# compacta, un subplot por canal, eje CPM compartido, color fijo por
+# canal y cursores de orden 1X/2X/3X. El detalle grande sigue abajo.
+# ------------------------------------------------------------
+_OV_PALETTE = [
+    "#1D9E75", "#378ADD", "#7F77DD", "#D85A30",
+    "#D4537E", "#BA7517", "#0F6E56", "#185FA5",
+]
+
+
+def _ov_color(name: str, ordered: List[str]) -> str:
+    try:
+        return _OV_PALETTE[ordered.index(name) % len(_OV_PALETTE)]
+    except Exception:
+        return _OV_PALETTE[0]
+
+
+def render_spectrum_overview(
+    records: List[SignalRecord],
+    *,
+    window_name: str,
+    amplitude_mode: str,
+    remove_dc: bool,
+    detrend: bool,
+    zero_padding: bool,
+    high_res_factor: int,
+    max_cpm: Optional[float],
+) -> None:
+    recs = [r for r in records if getattr(r, "time_s", None) is not None
+            and r.time_s.size > 2][:8]
+    if not recs:
+        st.info("Seleccioná al menos 1 canal para el overview.")
+        return
+    try:
+        from plotly.subplots import make_subplots
+        ordered = sorted({r.name for r in recs})
+        n = len(recs)
+        spectra = [
+            compute_spectrum_peak(
+                time_s=r.time_s, y=r.amplitude, window_name=window_name,
+                remove_dc=remove_dc, detrend=detrend, zero_padding=zero_padding,
+                high_res_factor=high_res_factor, min_peak_cpm=1.0,
+            )
+            for r in recs
+        ]
+        # 1X (CPM): rpm del primer canal con rpm>0; si no, pico dominante global.
+        one_x: Optional[float] = None
+        for r in recs:
+            if r.rpm and r.rpm > 0:
+                one_x = float(r.rpm)
+                break
+        if one_x is None:
+            best = -1.0
+            for sp in spectra:
+                if sp.peak_freq_cpm and (sp.peak_amp_peak or 0) > best:
+                    best = sp.peak_amp_peak or 0
+                    one_x = float(sp.peak_freq_cpm)
+
+        fig = make_subplots(
+            rows=n, cols=1, shared_xaxes=True, vertical_spacing=0.045,
+            subplot_titles=[r.name for r in recs],
+        )
+        for ann, r in zip(fig.layout.annotations, recs):
+            ann.font = dict(size=11, color=_ov_color(r.name, ordered),
+                            family="ui-monospace, SFMono-Regular, Menlo, monospace")
+            ann.x = 0.0
+            ann.xanchor = "left"
+
+        for i, (r, sp) in enumerate(zip(recs, spectra), start=1):
+            amp = convert_peak_to_mode(sp.amp_peak, amplitude_mode)
+            color = _ov_color(r.name, ordered)
+            fig.add_trace(go.Scatter(
+                x=sp.freq_cpm, y=amp, mode="lines",
+                line=dict(width=1.1, color=color), showlegend=False,
+                hovertemplate=(f"<b>{r.name}</b><br>%{{x:,.0f}} CPM · "
+                               f"%{{y:.4f}} {r.amplitude_unit}<extra></extra>"),
+            ), row=i, col=1)
+            if one_x:
+                for k in (1, 2, 3):
+                    if max_cpm and one_x * k > max_cpm:
+                        continue
+                    vkw = dict(x=one_x * k, row=i, col=1,
+                               line=dict(color="#94a3b8", width=1, dash="dot"))
+                    if i == 1:
+                        vkw.update(annotation_text=f"{k}X",
+                                   annotation_position="top",
+                                   annotation_font=dict(size=9, color="#64748b"))
+                    fig.add_vline(**vkw)
+
+        if max_cpm:
+            fig.update_xaxes(range=[0, max_cpm])
+        fig.update_xaxes(showgrid=True, gridcolor="#f1f5f9", zeroline=False)
+        fig.update_xaxes(title_text="Frecuencia (CPM)", row=n, col=1)
+        fig.update_yaxes(showgrid=True, gridcolor="#f8fafc", zeroline=False)
+        fig.update_layout(
+            height=max(150, 104 * n),
+            margin=dict(l=52, r=14, t=22, b=34),
+            plot_bgcolor="white", paper_bgcolor="white",
+            font=dict(family="-apple-system, system-ui, sans-serif",
+                      size=10, color="#475569"),
+            showlegend=False,
+        )
+        if one_x:
+            st.caption(
+                f"Cursores de orden anclados a 1X = {one_x:,.0f} CPM "
+                f"(~{one_x / 60:.0f} Hz). Abajo, cada canal en detalle completo."
+            )
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.warning(f"No se pudo renderizar el overview apilado: {e}")
+
+
 def render_spectrum_panel(
     primary: SignalRecord,
     panel_index: int,
@@ -3820,6 +3935,26 @@ elif enable_trend_mode:
         max_cpm=max_cpm,
     )
 else:
+    # Ciclo 23.151 — Overview apilado de TODOS los canales seleccionados, arriba
+    # del detalle por panel. Vista compacta estilo System1; el detalle grande
+    # sigue intacto debajo.
+    if len(selected_records) >= 1:
+        with st.expander(
+            f"📊 Overview apilado — {len(selected_records)} canal(es)",
+            expanded=True,
+        ):
+            render_spectrum_overview(
+                selected_records,
+                window_name=window_name,
+                amplitude_mode=amplitude_mode,
+                remove_dc=remove_dc,
+                detrend=detrend,
+                zero_padding=zero_padding,
+                high_res_factor=high_res_factor,
+                max_cpm=max_cpm,
+            )
+        st.markdown("---")
+
     for panel_index, primary in enumerate(selected_records):
         # Ciclo 23.112 — En cliente, max_cpm es POR PANEL (cada sensor tiene
         # su propia unidad: displacement→60k, velocity→30k sensor-limited,
