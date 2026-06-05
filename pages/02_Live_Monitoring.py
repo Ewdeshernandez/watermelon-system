@@ -3294,11 +3294,17 @@ def main() -> None:
         get_instances_version,
     )
 
-    @st.cache_data(ttl=300, show_spinner=False)
+    # Ciclo 23.147 — TTL bajado de 300s a 30s. La invalidación por
+    # get_instances_version() (contador module-level) no siempre agarra cambios
+    # de metadata hechos en OTRO proceso/redeploy (ej. cambiar el tag en
+    # Machinery Library quedaba 5 min desfasado en el header del Live). Con 30s
+    # cualquier cambio se refleja casi al toque; el costo es 1 lectura chica
+    # extra cada 30s.
+    @st.cache_data(ttl=30, show_spinner=False)
     def _cached_list_instances(_version: int):
         return _raw_list_instances()
 
-    @st.cache_data(ttl=300, show_spinner=False)
+    @st.cache_data(ttl=30, show_spinner=False)
     def _cached_get_instance(_id: str, _version: int):
         inst = _raw_get_instance(_id)
         if inst is None:
