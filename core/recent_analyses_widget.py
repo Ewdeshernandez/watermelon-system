@@ -345,8 +345,58 @@ def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
         from plotly.subplots import make_subplots
 
         ordered = sorted({s.get("sensor_label", "") for s in sensors})
-        run_cpm = _estimate_running_cpm(sensors)
         n = len(sensors)
+
+        # Ciclo 23.159 — AUTO-CALIBRACIÓN del eje de frecuencia. Algunos
+        # snapshots traen el eje mal escalado (CSV con tiempo en ms leído
+        # como s → frecuencias ÷1000; verificado en tes1: pico dominante a
+        # 0.0598 "Hz" con la máquina a 3600 rpm). Se compara el 1X esperado
+        # (operating_speed_rpm) contra el pico dominante y se corrige por
+        # décadas (×1, ×10, ... ×10000).
+        def _dominant_cpm_raw() -> Optional[float]:
+            best_a, best_c = -1.0, None
+            for s in sensors:
+                for p in (s.get("peaks") or [])[:1]:
+                    try:
+                        f = float(p.get("freq", 0))
+                        a = float(p.get("amp", 0))
+                    except Exception:
+                        continue
+                    is_cpm = str(s.get("freq_unit", "Hz") or "Hz").lower().startswith("c")
+                    cpm = f if is_cpm else f * 60.0
+                    if cpm > 0 and a > best_a:
+                        best_a, best_c = a, cpm
+            return best_c
+
+        _scale = 1.0
+        _dom = _dominant_cpm_raw()
+        try:
+            _rpm = float(payload.get("operating_speed_rpm") or 0)
+        except Exception:
+            _rpm = 0.0
+        if _rpm > 0 and _dom:
+            _ratio = _rpm / _dom
+            for _cand in (0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0):
+                if 0.85 <= _ratio / _cand <= 1.15:
+                    _scale = _cand
+                    break
+        elif _dom:
+            # Sin rpm de referencia: si todo el espectro cabe bajo 600 CPM
+            # (10 Hz) es físicamente implausible → asumir factor ms (×1000)
+            try:
+                _fmax_raw = max(max(_sensor_freqs_cpm(s)) for s in sensors)
+                if _fmax_raw < 600.0:
+                    _scale = 1000.0
+            except Exception:
+                pass
+
+        run_cpm = None
+        if _dom:
+            _cand_run = _dom * _scale
+            if 180.0 <= _cand_run <= 120000.0:
+                run_cpm = _cand_run
+        if run_cpm is None:
+            run_cpm = _estimate_running_cpm(sensors)
 
         fig = make_subplots(
             rows=n, cols=1, shared_xaxes=True, vertical_spacing=0.05,
@@ -368,7 +418,7 @@ def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
             fam = _unit_family(s.get("amp_unit", ""), s.get("sensor_label", ""))
             try:
                 m = max((a for f, a in zip(_sensor_freqs_cpm(s), s["amps"])
-                         if f <= _SPEC_FMAX_CPM), default=0.0)
+                         if f * _scale <= _SPEC_FMAX_CPM), default=0.0)
             except Exception:
                 m = 0.0
             fam_max[fam] = max(fam_max.get(fam, 0.0), float(m))
@@ -377,7 +427,7 @@ def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
             lbl = s.get("sensor_label", "")
             unit = s.get("amp_unit", "")
             color = _spec_color(lbl, ordered)
-            x_cpm = _sensor_freqs_cpm(s)
+            x_cpm = [f * _scale for f in _sensor_freqs_cpm(s)]
             fig.add_trace(go.Scatter(
                 x=x_cpm, y=s["amps"], mode="lines",
                 line=dict(width=1.2, color=color), showlegend=False,

@@ -161,6 +161,15 @@ def render_snapshot_waveforms(
         if not time_arr or not value_arr:
             continue
         unit = s.get("unit", "") or DEFAULT_AMP_UNIT_PLACEHOLDER
+        # Ciclo 23.159 — Auto-calibración: si la Fs implícita es < 50 Hz es
+        # físicamente implausible en vibraciones → el tiempo del CSV venía
+        # en ms leído como s. Convertir a segundos reales.
+        try:
+            _dur = float(time_arr[-1]) - float(time_arr[0])
+            if _dur > 0 and (len(time_arr) / _dur) < 50.0:
+                time_arr = [float(v) / 1000.0 for v in time_arr]
+        except Exception:
+            pass
 
         fig.add_trace(
             go.Scattergl(
