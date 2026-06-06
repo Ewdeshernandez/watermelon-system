@@ -125,13 +125,21 @@ def render_snapshot_waveforms(
     # Ciclo 23.156 — Escala Y COMÚN por familia (vel / acel / prox), estilo
     # System1/AMS: el máximo absoluto de la familia define el rango simétrico
     # de todos sus canales — amplitudes comparables a simple vista.
-    def _wf_family(unit: str) -> str:
+    def _wf_family(unit: str, label: str = "") -> str:
         u = (unit or "").lower()
         if "mm/s" in u or "in/s" in u or "ips" in u:
             return "vel"
         if u.strip().startswith("g") or "m/s2" in u or "m/s²" in u:
             return "acel"
         if "mil" in u or "µm" in u or "um" in u:
+            return "prox"
+        # Fallback por tokens del nombre (snapshots sin unidad)
+        t = (label or "").upper()
+        if "ACEL" in t or "ACC" in t:
+            return "acel"
+        if "VEL" in t or "VL" in t or "VT" in t:
+            return "vel"
+        if "VE" in t or "PROX" in t or "DESP" in t:
             return "prox"
         return u or "otro"
 
@@ -140,7 +148,7 @@ def render_snapshot_waveforms(
         vals = s.get("values") or []
         if not vals:
             continue
-        fam = _wf_family(s.get("unit", ""))
+        fam = _wf_family(s.get("unit", ""), s.get("sensor_label", ""))
         try:
             m = max(abs(float(v)) for v in vals)
         except Exception:
@@ -173,7 +181,7 @@ def render_snapshot_waveforms(
         )
 
         # Axis labels — solo bottom subplot lleva "Time (s)" para no saturar
-        _fm = _fam_absmax.get(_wf_family(unit), 0.0)
+        _fm = _fam_absmax.get(_wf_family(unit, s.get("sensor_label", "")), 0.0)
         fig.update_yaxes(
             range=[-_fm * 1.1, _fm * 1.1] if _fm > 0 else None,
             title=dict(
@@ -213,36 +221,65 @@ def render_snapshot_waveforms(
     st.plotly_chart(fig, use_container_width=True)
 
     if show_metrics_table:
-        st.markdown(
-            f"<div style='font-size:12px;color:{META_FONT_COLOR};margin-top:10px;"
-            f"font-weight:600;text-transform:uppercase;letter-spacing:0.08em;'>"
-            f"Métricas por sensor</div>",
-            unsafe_allow_html=True,
-        )
-        rows = []
-        for s in sensors:
+        # Ciclo 23.158 — Tabla minimalista clase mundial (HTML, sin Kurt/Fs).
+        # Pico = amplitud máxima · Pico-Pico = excursión total (máx−mín) ·
+        # RMS = energía promedio · Factor cresta = Pico/RMS (impulsividad).
+        _fam_color = {"vel": "#2563eb", "acel": "#d97706", "prox": "#7c3aed"}
+        _rows_html = ""
+        for idx, s in enumerate(sensors):
             m = s.get("metrics") or {}
-            rows.append({
-                "Sensor": _safe_label(s.get("sensor_label", "")),
-                "Peak":   _format_metric(m.get("peak")),
-                "P2P":    _format_metric(m.get("peak_to_peak")),
-                "RMS":    _format_metric(m.get("rms")),
-                "Crest":  _format_metric(m.get("crest_factor"), decimals=2),
-                "Kurt":   _format_metric(m.get("kurtosis"), decimals=2),
-                "Unidad": s.get("unit", "") or "",
-                "Fs (Hz)": _format_metric(s.get("sampling_rate_hz"), decimals=0),
-            })
-        st.dataframe(
-            rows,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Peak":  st.column_config.TextColumn(width="small"),
-                "P2P":   st.column_config.TextColumn(width="small"),
-                "RMS":   st.column_config.TextColumn(width="small"),
-                "Crest": st.column_config.TextColumn(width="small"),
-                "Kurt":  st.column_config.TextColumn(width="small"),
-            },
+            lbl = _safe_label(s.get("sensor_label", ""))
+            unit = s.get("unit", "") or "—"
+            fam = _wf_family(s.get("unit", ""), s.get("sensor_label", ""))
+            dot = _fam_color.get(fam, "#94a3b8")
+            bg = "#ffffff" if idx % 2 == 0 else "#f8fafc"
+            crest = m.get("crest_factor")
+            try:
+                crest_hi = crest is not None and float(crest) > 3.5
+            except Exception:
+                crest_hi = False
+            crest_style = "color:#b45309;font-weight:700;" if crest_hi else ""
+            _num = ("font-family:ui-monospace,SFMono-Regular,Menlo,monospace;"
+                    "text-align:right;padding:7px 14px;color:#334155;")
+            _rows_html += (
+                f"<tr style='background:{bg};'>"
+                f"<td style='padding:7px 14px;font-weight:600;color:#0f172a;"
+                f"white-space:nowrap;'>"
+                f"<span style='display:inline-block;width:8px;height:8px;"
+                f"border-radius:50%;background:{dot};margin-right:8px;'></span>"
+                f"{lbl}</td>"
+                f"<td style='{_num}'>{_format_metric(m.get('peak'))}</td>"
+                f"<td style='{_num}'>{_format_metric(m.get('peak_to_peak'))}</td>"
+                f"<td style='{_num}'>{_format_metric(m.get('rms'))}</td>"
+                f"<td style='{_num}{crest_style}'>"
+                f"{_format_metric(crest, decimals=2)}</td>"
+                f"<td style='padding:7px 14px;color:#64748b;'>{unit}</td>"
+                f"</tr>"
+            )
+        _th = ("padding:8px 14px;font-size:10px;font-weight:800;"
+               "letter-spacing:0.12em;text-transform:uppercase;"
+               "color:#64748b;text-align:right;border-bottom:2px solid #e2e8f0;")
+        _th_l = _th.replace("text-align:right", "text-align:left")
+        st.markdown(
+            f"""
+<div style='font-size:12px;color:{META_FONT_COLOR};margin:14px 0 6px 0;
+font-weight:700;text-transform:uppercase;letter-spacing:0.1em;'>Métricas por sensor</div>
+<table style='width:100%;border-collapse:collapse;font-size:13px;
+border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;'>
+<thead><tr style='background:#f1f5f9;'>
+<th style='{_th_l}'>Sensor</th><th style='{_th}'>Pico</th>
+<th style='{_th}'>Pico-Pico</th><th style='{_th}'>RMS</th>
+<th style='{_th}'>Factor cresta</th><th style='{_th_l}'>Unidad</th>
+</tr></thead><tbody>{_rows_html}</tbody></table>
+<div style='font-size:11px;color:#94a3b8;margin-top:6px;'>
+Pico = amplitud máxima · Pico-Pico = excursión total (máx−mín) ·
+RMS = energía vibratoria promedio · Factor cresta = Pico/RMS
+(&gt;3.5 sugiere impactos, p. ej. defecto de rodamiento) ·
+● <span style='color:#2563eb;'>velocidad</span>
+<span style='color:#d97706;'>aceleración</span>
+<span style='color:#7c3aed;'>proximidad</span></div>
+""",
+            unsafe_allow_html=True,
         )
 
 

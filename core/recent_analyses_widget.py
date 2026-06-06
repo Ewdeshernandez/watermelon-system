@@ -282,31 +282,33 @@ def _spec_color(label: str, ordered_labels: List[str]) -> str:
         return _SPEC_PALETTE[0]
 
 
-def _estimate_running_hz(sensors: List[Dict[str, Any]]) -> Optional[float]:
-    """Estima la frecuencia de giro (1X) desde el pico dominante global.
-    En máquinas a régimen el 1X suele ser el pico más alto. Devuelve None
-    si no hay picos confiables (entonces no se dibujan cursores de orden)."""
-    best_amp, best_hz = -1.0, None
+def _estimate_running_cpm(sensors: List[Dict[str, Any]]) -> Optional[float]:
+    """Estima la velocidad de giro (1X) EN CPM desde el pico dominante,
+    respetando freq_unit por sensor. None si no hay picos confiables."""
+    best_amp, best_cpm = -1.0, None
     for s in sensors:
         peaks = s.get("peaks") or []
         if not peaks:
             continue
+        is_cpm = str(s.get("freq_unit", "Hz") or "Hz").lower().startswith("c")
         p = peaks[0]  # ya vienen ordenados por amplitud desc
         try:
-            hz = float(p.get("freq", 0))
+            f = float(p.get("freq", 0))
             amp = float(p.get("amp", 0))
         except Exception:
             continue
-        if amp > best_amp and 3.0 <= hz <= 2000.0:
-            best_amp, best_hz = amp, hz
-    return best_hz
+        cpm = f if is_cpm else f * 60.0
+        if amp > best_amp and 180.0 <= cpm <= 120000.0:
+            best_amp, best_cpm = amp, cpm
+    return best_cpm
 
 
 _SPEC_FMAX_CPM = 60_000.0  # full-scale de frecuencia para estas máquinas
 
 
-def _unit_family(unit: str) -> str:
-    """Familia del canal por unidad: vel / acel / prox (para escala Y común)."""
+def _unit_family(unit: str, label: str = "") -> str:
+    """Familia del canal por unidad (o por tokens del label si no hay
+    unidad): vel / acel / prox — para escala Y común por familia."""
     u = (unit or "").lower()
     if "mm/s" in u or "in/s" in u or "ips" in u:
         return "vel"
@@ -314,7 +316,22 @@ def _unit_family(unit: str) -> str:
         return "acel"
     if "mil" in u or "µm" in u or "um" in u:
         return "prox"
+    # Fallback por tokens del nombre (snapshots sin unidad)
+    t = (label or "").upper()
+    if "ACEL" in t or "ACC" in t:
+        return "acel"
+    if "VEL" in t or "VL" in t or "VT" in t:
+        return "vel"
+    if "VE" in t or "PROX" in t or "DESP" in t:
+        return "prox"
     return u or "otro"
+
+
+def _sensor_freqs_cpm(s: Dict[str, Any]) -> List[float]:
+    """Frecuencias del sensor SIEMPRE en CPM, respetando freq_unit del
+    payload ('Hz' o 'CPM'). Bug v3.31.324: se multiplicaba ×60 siempre."""
+    is_cpm = str(s.get("freq_unit", "Hz") or "Hz").lower().startswith("c")
+    return list(s["freqs"]) if is_cpm else [f * 60.0 for f in s["freqs"]]
 
 
 def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
@@ -328,7 +345,7 @@ def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
         from plotly.subplots import make_subplots
 
         ordered = sorted({s.get("sensor_label", "") for s in sensors})
-        run_hz = _estimate_running_hz(sensors)
+        run_cpm = _estimate_running_cpm(sensors)
         n = len(sensors)
 
         fig = make_subplots(
@@ -348,10 +365,10 @@ def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
         # sus canales — estilo System1/AMS, comparables a simple vista.
         fam_max: Dict[str, float] = {}
         for s in sensors:
-            fam = _unit_family(s.get("amp_unit", ""))
+            fam = _unit_family(s.get("amp_unit", ""), s.get("sensor_label", ""))
             try:
-                m = max((a for f, a in zip(s["freqs"], s["amps"])
-                         if f * 60.0 <= _SPEC_FMAX_CPM), default=0.0)
+                m = max((a for f, a in zip(_sensor_freqs_cpm(s), s["amps"])
+                         if f <= _SPEC_FMAX_CPM), default=0.0)
             except Exception:
                 m = 0.0
             fam_max[fam] = max(fam_max.get(fam, 0.0), float(m))
@@ -360,20 +377,20 @@ def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
             lbl = s.get("sensor_label", "")
             unit = s.get("amp_unit", "")
             color = _spec_color(lbl, ordered)
-            x_cpm = [f * 60.0 for f in s["freqs"]]
+            x_cpm = _sensor_freqs_cpm(s)
             fig.add_trace(go.Scatter(
                 x=x_cpm, y=s["amps"], mode="lines",
                 line=dict(width=1.2, color=color), showlegend=False,
                 hovertemplate=(f"<b>{lbl}</b><br>%{{x:,.0f}} CPM · "
                                f"%{{y:.4f}} {unit}<extra></extra>"),
             ), row=i, col=1)
-            _fm = fam_max.get(_unit_family(unit), 0.0)
+            _fm = fam_max.get(_unit_family(unit, lbl), 0.0)
             if _fm > 0:
                 fig.update_yaxes(range=[0, _fm * 1.1], row=i, col=1)
             # Cursores de orden 1X / 2X / 3X (label solo en la primera fila)
-            if run_hz:
+            if run_cpm:
                 for k in (1, 2, 3):
-                    vkw = dict(x=run_hz * k * 60.0, row=i, col=1,
+                    vkw = dict(x=run_cpm * k, row=i, col=1,
                                line=dict(color="#94a3b8", width=1, dash="dot"))
                     if i == 1:
                         vkw.update(annotation_text=f"{k}X",
@@ -393,10 +410,10 @@ def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
                       size=10, color="#475569"),
             showlegend=False,
         )
-        if run_hz:
+        if run_cpm:
             st.caption(
-                f"Cursores 1X/2X/3X anclados a {run_hz * 60:,.0f} CPM "
-                f"(~{run_hz * 60:.0f} rpm) · Full-scale 60.000 CPM · "
+                f"Cursores 1X/2X/3X anclados a {run_cpm:,.0f} CPM "
+                f"(~{run_cpm:.0f} rpm) · Full-scale 60.000 CPM · "
                 f"Escala Y común por familia (vel / acel / prox)."
             )
         st.plotly_chart(fig, use_container_width=True)
