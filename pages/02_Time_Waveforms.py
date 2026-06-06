@@ -2430,6 +2430,21 @@ if not selected_ids:
 selected_records = [next(r for r in records_all if r.signal_id == signal_id) for signal_id in selected_ids]
 logo_uri = get_logo_data_uri(LOGO_PATH)
 
+# Ciclo 23.153 — Orden canónico: velocidad (1YV,2YV) → aceleración (1YA,2YA)
+# → proximidad (3XD,3YD,4XD,4YD).
+try:
+    from core.channel_order import channel_sort_key
+    selected_records = sorted(
+        selected_records,
+        key=lambda r: channel_sort_key(
+            getattr(r, "name", ""),
+            getattr(r, "amplitude_unit", ""),
+            f"{getattr(r, 'point', '')} {getattr(r, 'variable', '')}",
+        ),
+    )
+except Exception:
+    pass
+
 # Ciclo 23.151 — Overview apilado de TODOS los canales, arriba del detalle.
 if len(selected_records) >= 1:
     with st.expander(
@@ -2439,7 +2454,16 @@ if len(selected_records) >= 1:
         render_waveform_overview(selected_records)
     st.markdown("---")
 
-for panel_index, primary in enumerate(selected_records):
+# Ciclo 23.153 — MINIMALISMO: detalle por canal detrás de un toggle (OFF por
+# defecto). La vista abre solo con el overview; el detalle es a demanda.
+_show_detail_wf = st.toggle(
+    "🔬 Mostrar análisis detallado por canal",
+    value=False, key="waveform_show_detail",
+    help="Paneles completos por canal: cursores, métricas, export, reporte.",
+)
+_detail_records_wf = selected_records if _show_detail_wf else []
+
+for panel_index, primary in enumerate(_detail_records_wf):
     render_waveform_panel(
         primary=primary,
         panel_index=panel_index,

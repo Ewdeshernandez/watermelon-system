@@ -1340,7 +1340,16 @@ if len(selected_pairs) >= 1:
         )
     st.markdown("---")
 
-for panel_index, pair in enumerate(selected_pairs):
+# Ciclo 23.153 — MINIMALISMO: detalle por par detrás de un toggle (OFF por
+# defecto). La vista abre solo con la grilla overview; el detalle a demanda.
+_show_detail_orb = st.toggle(
+    "🔬 Mostrar análisis detallado por órbita",
+    value=False, key="orbit_show_detail",
+    help="Paneles completos por par X-Y: filtrado 1X, escala, export, reporte.",
+)
+_detail_pairs = selected_pairs if _show_detail_orb else []
+
+for panel_index, pair in enumerate(_detail_pairs):
     render_orbit_panel(
         pair=pair,
         signals=signals,

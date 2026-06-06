@@ -3935,6 +3935,21 @@ elif enable_trend_mode:
         max_cpm=max_cpm,
     )
 else:
+    # Ciclo 23.153 — Orden canónico de canales: velocidad (1YV,2YV) →
+    # aceleración (1YA,2YA) → proximidad (3XD,3YD,4XD,4YD).
+    try:
+        from core.channel_order import channel_sort_key
+        selected_records = sorted(
+            selected_records,
+            key=lambda r: channel_sort_key(
+                getattr(r, "name", ""),
+                getattr(r, "amplitude_unit", ""),
+                f"{getattr(r, 'point', '')} {getattr(r, 'variable', '')}",
+            ),
+        )
+    except Exception:
+        pass
+
     # Ciclo 23.151 — Overview apilado de TODOS los canales seleccionados, arriba
     # del detalle por panel. Vista compacta estilo System1; el detalle grande
     # sigue intacto debajo.
@@ -3955,7 +3970,19 @@ else:
             )
         st.markdown("---")
 
-    for panel_index, primary in enumerate(selected_records):
+    # Ciclo 23.153 — MINIMALISMO: los paneles detallados por canal quedan
+    # detrás de un toggle APAGADO por defecto. La vista abre solo con el
+    # overview (lo que ve el cliente); el analista activa el detalle a demanda.
+    # Bonus: la página carga mucho más rápido (no renderiza N paneles pesados).
+    _show_detail = st.toggle(
+        "🔬 Mostrar análisis detallado por canal",
+        value=False, key="spectrum_show_detail",
+        help="Paneles completos por canal: armónicos, fallas de rodamiento, "
+             "export, enviar a reporte.",
+    )
+    _detail_records = selected_records if _show_detail else []
+
+    for panel_index, primary in enumerate(_detail_records):
         # Ciclo 23.112 — En cliente, max_cpm es POR PANEL (cada sensor tiene
         # su propia unidad: displacement→60k, velocity→30k sensor-limited,
         # acceleration→60k sensor-limited). El max_cpm global está fijado al
