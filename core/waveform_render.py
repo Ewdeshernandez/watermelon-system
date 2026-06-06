@@ -59,10 +59,30 @@ def _format_metric(value: Any, decimals: int = 3) -> str:
         return "—"
 
 
+def _wf_family_global(unit: str, label: str = "") -> str:
+    """Familia del canal: vel / acel / prox — por unidad o tokens del label."""
+    u = (unit or "").lower()
+    if "mm/s" in u or "in/s" in u or "ips" in u:
+        return "vel"
+    if u.strip().startswith("g") or "m/s2" in u or "m/s²" in u:
+        return "acel"
+    if "mil" in u or "µm" in u or "um" in u:
+        return "prox"
+    t = (label or "").upper()
+    if "ACEL" in t or "ACC" in t:
+        return "acel"
+    if "VEL" in t or "VL" in t or "VT" in t:
+        return "vel"
+    if "VE" in t or "PROX" in t or "DESP" in t:
+        return "prox"
+    return u or "otro"
+
+
 def render_snapshot_waveforms(
     snapshot: Dict[str, Any],
     show_metrics_table: bool = True,
     max_sensors: int = 12,
+    fam_units: Optional[Dict[str, str]] = None,
 ) -> None:
     """Renderiza el contenido de un snapshot waveform con estilo del módulo
     original.
@@ -99,11 +119,22 @@ def render_snapshot_waveforms(
 
     n = len(sensors)
 
+    # Ciclo 23.160 — Resolver unidad por sensor: la del snapshot, o la de
+    # su familia desde datos en vivo (fam_units), o vacío.
+    fam_units = fam_units or {}
+
+    def _resolved_unit(s: Dict[str, Any]) -> str:
+        u = (s.get("unit", "") or "").strip()
+        if u:
+            return u
+        fam = _wf_family_global(s.get("unit", ""), s.get("sensor_label", ""))
+        return fam_units.get(fam, "")
+
     # Subplot titles incluyen métricas clave (peak/RMS) — match con look industrial
     subplot_titles = []
     for s in sensors:
         label = _safe_label(s.get("sensor_label", ""))
-        unit = s.get("unit", "") or ""
+        unit = _resolved_unit(s)
         metrics = s.get("metrics") or {}
         peak = _format_metric(metrics.get("peak"))
         rms = _format_metric(metrics.get("rms"))
@@ -125,23 +156,7 @@ def render_snapshot_waveforms(
     # Ciclo 23.156 — Escala Y COMÚN por familia (vel / acel / prox), estilo
     # System1/AMS: el máximo absoluto de la familia define el rango simétrico
     # de todos sus canales — amplitudes comparables a simple vista.
-    def _wf_family(unit: str, label: str = "") -> str:
-        u = (unit or "").lower()
-        if "mm/s" in u or "in/s" in u or "ips" in u:
-            return "vel"
-        if u.strip().startswith("g") or "m/s2" in u or "m/s²" in u:
-            return "acel"
-        if "mil" in u or "µm" in u or "um" in u:
-            return "prox"
-        # Fallback por tokens del nombre (snapshots sin unidad)
-        t = (label or "").upper()
-        if "ACEL" in t or "ACC" in t:
-            return "acel"
-        if "VEL" in t or "VL" in t or "VT" in t:
-            return "vel"
-        if "VE" in t or "PROX" in t or "DESP" in t:
-            return "prox"
-        return u or "otro"
+    _wf_family = _wf_family_global
 
     _fam_absmax: Dict[str, float] = {}
     for s in sensors:
@@ -160,7 +175,7 @@ def render_snapshot_waveforms(
         value_arr = s.get("values") or []
         if not time_arr or not value_arr:
             continue
-        unit = s.get("unit", "") or DEFAULT_AMP_UNIT_PLACEHOLDER
+        unit = _resolved_unit(s) or DEFAULT_AMP_UNIT_PLACEHOLDER
         # Ciclo 23.159 — Auto-calibración: si la Fs implícita es < 50 Hz es
         # físicamente implausible en vibraciones → el tiempo del CSV venía
         # en ms leído como s. Convertir a segundos reales.
@@ -238,7 +253,7 @@ def render_snapshot_waveforms(
         for idx, s in enumerate(sensors):
             m = s.get("metrics") or {}
             lbl = _safe_label(s.get("sensor_label", ""))
-            unit = s.get("unit", "") or "—"
+            unit = _resolved_unit(s) or "—"
             fam = _wf_family(s.get("unit", ""), s.get("sensor_label", ""))
             dot = _fam_color.get(fam, "#94a3b8")
             bg = "#ffffff" if idx % 2 == 0 else "#f8fafc"

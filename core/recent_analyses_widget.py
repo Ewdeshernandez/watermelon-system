@@ -255,12 +255,14 @@ _TYPE_SVG = {
 # Render helpers para cada tipo de detalle
 # =============================================================
 
-def _render_waveform_detail(payload: Dict[str, Any]) -> None:
+def _render_waveform_detail(payload: Dict[str, Any],
+                            fam_units: Optional[Dict[str, str]] = None) -> None:
     """Plot del waveform snapshot — Ciclo 23.86 usa render reusable
-    con estilo idéntico al módulo Time Waveforms (un subplot por sensor)."""
+    con estilo idéntico al módulo Time Waveforms (un subplot por sensor).
+    fam_units (Ciclo 23.160): unidades por familia desde datos en vivo."""
     try:
         from core.waveform_render import render_snapshot_waveforms
-        render_snapshot_waveforms(payload)
+        render_snapshot_waveforms(payload, fam_units=fam_units)
     except Exception as e:
         st.error(f"Error renderizando waveform: {e}")
 
@@ -334,12 +336,17 @@ def _sensor_freqs_cpm(s: Dict[str, Any]) -> List[float]:
     return list(s["freqs"]) if is_cpm else [f * 60.0 for f in s["freqs"]]
 
 
-def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
+def _render_spectrum_detail(payload: Dict[str, Any],
+                            fam_units: Optional[Dict[str, str]] = None) -> None:
+    """fam_units (Ciclo 23.160): {familia: unidad} resuelto desde los datos
+    en vivo del activo (ej. {"acel": "g pk", "vel": "in/s pk",
+    "prox": "mil pp"}) — fallback cuando el snapshot no trae amp_unit."""
     sensors = [s for s in payload.get("sensors", [])
                if s.get("freqs") and s.get("amps")][:12]
     if not sensors:
         st.info("Sin sensores en este snapshot.")
         return
+    fam_units = fam_units or {}
     try:
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
@@ -425,7 +432,8 @@ def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
 
         for i, s in enumerate(sensors, start=1):
             lbl = s.get("sensor_label", "")
-            unit = s.get("amp_unit", "")
+            _fam = _unit_family(s.get("amp_unit", ""), lbl)
+            unit = s.get("amp_unit", "") or fam_units.get(_fam, "")
             color = _spec_color(lbl, ordered)
             x_cpm = [f * _scale for f in _sensor_freqs_cpm(s)]
             fig.add_trace(go.Scatter(
@@ -434,9 +442,13 @@ def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
                 hovertemplate=(f"<b>{lbl}</b><br>%{{x:,.0f}} CPM · "
                                f"%{{y:.4f}} {unit}<extra></extra>"),
             ), row=i, col=1)
-            _fm = fam_max.get(_unit_family(unit, lbl), 0.0)
-            if _fm > 0:
-                fig.update_yaxes(range=[0, _fm * 1.1], row=i, col=1)
+            _fm = fam_max.get(_fam, 0.0)
+            fig.update_yaxes(
+                range=[0, _fm * 1.1] if _fm > 0 else None,
+                title=dict(text=unit or None,
+                           font=dict(size=9, color="#94a3b8")),
+                row=i, col=1,
+            )
             # Cursores de orden 1X / 2X / 3X (label solo en la primera fila)
             if run_cpm:
                 for k in (1, 2, 3):

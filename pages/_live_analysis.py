@@ -101,8 +101,34 @@ from core.recent_analyses_widget import (
     _render_orbit_detail,
     _render_spectrum_detail,
     _render_waveform_detail,
+    _unit_family,
     load_latest_payload,
 )
+
+
+def _get_fam_units(iid: str) -> dict:
+    """Ciclo 23.160 — {familia: unidad} desde los datos en vivo del activo
+    (ej. {"acel": "g pk", "vel": "in/s pk", "prox": "mil pp"}). Los snapshots
+    históricos no traen unidad; el sistema en vivo sí. Cache 5 min."""
+    _ck = f"_wm_la_fam_units_{iid}"
+    cached = st.session_state.get(_ck)
+    import time as _t
+    if cached and (_t.time() - cached.get("ts", 0)) < 300:
+        return cached["data"]
+    out: dict = {}
+    try:
+        from core.live_readings import latest_for_instance
+        for r in (latest_for_instance(iid) or []):
+            u = (r.get("unit") or "").strip()
+            if not u:
+                continue
+            fam = _unit_family(u)
+            out.setdefault(fam, u)
+    except Exception:
+        out = {}
+    st.session_state[_ck] = {"data": out, "ts": _t.time()}
+    return out
+
 
 _KEY_BY_VIEW = {
     _VIEWS[0]: ("spectrum", _render_spectrum_detail),
@@ -120,4 +146,8 @@ if not _payload:
         "Se genera desde Load Data / módulos de análisis."
     )
 else:
-    _render(_payload)
+    _fu = _get_fam_units(instance_id)
+    try:
+        _render(_payload, fam_units=_fu)
+    except TypeError:
+        _render(_payload)  # órbita no recibe fam_units
