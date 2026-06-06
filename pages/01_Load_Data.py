@@ -709,6 +709,10 @@ def apply_machine_context_to_parsed_files(
 def register_signals_to_session(parsed_files: List[Dict[str, Any]]) -> Tuple[int, List[str]]:
     # KEEP AS DICT to preserve compatibility with Time Waveforms and Spectrum
     st.session_state["signals"] = {}
+    # Ciclo 23.155 — Al cargar señales nuevas se sale del modo snapshot
+    # (vista cliente). Antes esto lo hacía el botón "Volver a Live
+    # Monitoring", que se eliminó.
+    st.session_state.pop("_loaded_from_snapshot", None)
 
     registered = 0
     errors: List[str] = []

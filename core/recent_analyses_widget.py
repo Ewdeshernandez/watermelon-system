@@ -511,17 +511,6 @@ def render_recent_analyses_section(instance_id: str) -> None:
     # minimalista; el analista además tiene link al módulo completo.
     # Los payloads se cachean en session_state por snapshot_id para no
     # re-descargar de Storage en cada rerun.
-    try:
-        from core.auth import get_current_user as _gcu
-        _viewer_role = ((_gcu() or {}).get("role") or "").lower()
-    except Exception:
-        _viewer_role = ""
-
-    _REDIRECT_TARGETS_UNIFIED = {
-        "waveform": "pages/02_Time_Waveforms.py",
-        "spectrum": "pages/03_Spectrum.py",
-        "orbit":    "pages/05_Orbit_Analysis.py",
-    }
     _UNIFIED_ORDER = ["spectrum", "waveform", "orbit"]
     _atype_by_key = {a["key"]: a for a in ANALYSIS_TYPES}
     _rendered_any = False
@@ -572,22 +561,6 @@ def render_recent_analyses_section(instance_id: str) -> None:
                 render_fn(payload)
             except Exception as e:
                 st.warning(f"No se pudo renderizar {atype['label']}: {e}")
-
-        # Link al módulo completo — SOLO analistas (el cliente no lo ve)
-        if _viewer_role != "client" and _key in _REDIRECT_TARGETS_UNIFIED:
-            if st.button(
-                f"Abrir {atype['label']} en módulo completo →",
-                key=f"wm_unified_open_{_key}_{_snap_id}",
-            ):
-                st.session_state["_pending_snapshot_load"] = {
-                    "snapshot_id": _snap_id,
-                    "instance_id": instance_id,
-                    "snapshot_type": _key,
-                }
-                try:
-                    st.switch_page(_REDIRECT_TARGETS_UNIFIED[_key])
-                except Exception:
-                    st.error("No se pudo navegar al módulo.")
 
     if not _rendered_any:
         st.info("Aún no hay snapshots de análisis para este activo. "
