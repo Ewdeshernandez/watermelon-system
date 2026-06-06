@@ -3776,15 +3776,24 @@ def main() -> None:
     # redundante con la tabla de Canales API 670, y la sección de
     # HISTÓRICO/ZIP/Enviar al cliente por no aportar — el envío al cliente
     # se hará desde el reporte ejecutivo PDF.)
+    # Ciclo 23.156 — Botón minimalista 🍉 que lleva a la página dedicada
+    # de Análisis Avanzado (selector Espectro / Onda / Órbita). Reemplaza
+    # el expander con todo apilado inline (pedido Ewdes: clase mundial).
     try:
-        from core.recent_analyses_widget import render_recent_analyses_section
-        with st.expander("🔬 Análisis avanzado — Espectro · Forma de onda · Órbita",
-                         expanded=False):
-            render_recent_analyses_section(instance_id)
+        _c_an1, _c_an2, _c_an3 = st.columns([2, 3, 2])
+        with _c_an2:
+            if st.button(
+                "🍉 Análisis avanzado",
+                key="wm_open_live_analysis",
+                use_container_width=True,
+                help="Espectro · Forma de onda · Órbita del último snapshot",
+            ):
+                st.session_state["_live_analysis_instance"] = instance_id
+                st.switch_page("pages/_live_analysis.py")
     except Exception as e:
         # Falla silenciosa — la sección es opcional, no debe romper la página
         import logging
-        logging.warning("recent_analyses_widget failed: %s", e)
+        logging.warning("live analysis button failed: %s", e)
 
     # Sensor selection (Ciclo 23.33) — selectbox discreto debajo del
     # diagrama. Razón técnica para no usar click directo en SVG:

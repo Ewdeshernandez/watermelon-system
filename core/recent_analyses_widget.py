@@ -302,9 +302,24 @@ def _estimate_running_hz(sensors: List[Dict[str, Any]]) -> Optional[float]:
     return best_hz
 
 
+_SPEC_FMAX_CPM = 60_000.0  # full-scale de frecuencia para estas máquinas
+
+
+def _unit_family(unit: str) -> str:
+    """Familia del canal por unidad: vel / acel / prox (para escala Y común)."""
+    u = (unit or "").lower()
+    if "mm/s" in u or "in/s" in u or "ips" in u:
+        return "vel"
+    if u.strip().startswith("g") or "m/s2" in u or "m/s²" in u:
+        return "acel"
+    if "mil" in u or "µm" in u or "um" in u:
+        return "prox"
+    return u or "otro"
+
+
 def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
     sensors = [s for s in payload.get("sensors", [])
-               if s.get("freqs") and s.get("amps")][:6]
+               if s.get("freqs") and s.get("amps")][:12]
     if not sensors:
         st.info("Sin sensores en este snapshot.")
         return
@@ -328,20 +343,37 @@ def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
             ann.x = 0.0
             ann.xanchor = "left"
 
+        # Escala Y COMÚN por familia (vel / acel / prox): el máximo de la
+        # familia dentro del rango 0–60k CPM define el full-scale de todos
+        # sus canales — estilo System1/AMS, comparables a simple vista.
+        fam_max: Dict[str, float] = {}
+        for s in sensors:
+            fam = _unit_family(s.get("amp_unit", ""))
+            try:
+                m = max((a for f, a in zip(s["freqs"], s["amps"])
+                         if f * 60.0 <= _SPEC_FMAX_CPM), default=0.0)
+            except Exception:
+                m = 0.0
+            fam_max[fam] = max(fam_max.get(fam, 0.0), float(m))
+
         for i, s in enumerate(sensors, start=1):
             lbl = s.get("sensor_label", "")
             unit = s.get("amp_unit", "")
             color = _spec_color(lbl, ordered)
+            x_cpm = [f * 60.0 for f in s["freqs"]]
             fig.add_trace(go.Scatter(
-                x=s["freqs"], y=s["amps"], mode="lines",
+                x=x_cpm, y=s["amps"], mode="lines",
                 line=dict(width=1.2, color=color), showlegend=False,
-                hovertemplate=(f"<b>{lbl}</b><br>%{{x:.1f}} Hz · "
+                hovertemplate=(f"<b>{lbl}</b><br>%{{x:,.0f}} CPM · "
                                f"%{{y:.4f}} {unit}<extra></extra>"),
             ), row=i, col=1)
+            _fm = fam_max.get(_unit_family(unit), 0.0)
+            if _fm > 0:
+                fig.update_yaxes(range=[0, _fm * 1.1], row=i, col=1)
             # Cursores de orden 1X / 2X / 3X (label solo en la primera fila)
             if run_hz:
                 for k in (1, 2, 3):
-                    vkw = dict(x=run_hz * k, row=i, col=1,
+                    vkw = dict(x=run_hz * k * 60.0, row=i, col=1,
                                line=dict(color="#94a3b8", width=1, dash="dot"))
                     if i == 1:
                         vkw.update(annotation_text=f"{k}X",
@@ -349,8 +381,9 @@ def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
                                    annotation_font=dict(size=9, color="#64748b"))
                     fig.add_vline(**vkw)
 
-        fig.update_xaxes(showgrid=True, gridcolor="#f1f5f9", zeroline=False)
-        fig.update_xaxes(title_text="Frecuencia (Hz)", row=n, col=1)
+        fig.update_xaxes(showgrid=True, gridcolor="#f1f5f9", zeroline=False,
+                         range=[0, _SPEC_FMAX_CPM])
+        fig.update_xaxes(title_text="Frecuencia (CPM)", row=n, col=1)
         fig.update_yaxes(showgrid=True, gridcolor="#f8fafc", zeroline=False)
         fig.update_layout(
             height=max(150, 118 * n),
@@ -362,8 +395,9 @@ def _render_spectrum_detail(payload: Dict[str, Any]) -> None:
         )
         if run_hz:
             st.caption(
-                f"Cursores de orden anclados a 1X ≈ {run_hz:.1f} Hz "
-                f"(~{run_hz * 60:.0f} rpm), estimado del pico dominante."
+                f"Cursores 1X/2X/3X anclados a {run_hz * 60:,.0f} CPM "
+                f"(~{run_hz * 60:.0f} rpm) · Full-scale 60.000 CPM · "
+                f"Escala Y común por familia (vel / acel / prox)."
             )
         st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
@@ -445,6 +479,49 @@ def _render_tabular_detail(payload: Dict[str, Any]) -> None:
             "Zona ISO": c.get("iso_zone", "") or "—",
         })
     st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
+def load_latest_payload(instance_id: str, analysis_key: str):
+    """Devuelve (payload, snapshot_id) del snapshot más reciente del tipo,
+    con cache en session_state y canales en orden canónico (vel→acel→prox).
+    Usado por pages/_live_analysis.py (vista Análisis Avanzado del cliente)."""
+    import importlib
+    atype = next((a for a in ANALYSIS_TYPES if a["key"] == analysis_key), None)
+    if not atype or not instance_id:
+        return None, ""
+    from core import history_storage as _hs
+    try:
+        snaps = _hs.list_snapshots(instance_id, analysis_key)
+    except Exception:
+        snaps = []
+    if not snaps:
+        return None, ""
+    snap_id = snaps[0].get("snapshot_id", "")
+    ck = f"_wm_unified_payload_{analysis_key}_{instance_id}_{snap_id}"
+    payload = st.session_state.get(ck)
+    if payload is None:
+        try:
+            mod = importlib.import_module(atype["module"])
+            payload = getattr(mod, atype["load_fn"])(instance_id, snap_id)
+            if payload:
+                st.session_state[ck] = payload
+        except Exception:
+            payload = None
+    if payload:
+        try:
+            from core.channel_order import channel_sort_key
+            dk = atype.get("data_key")
+            items = payload.get(dk) if dk else None
+            if isinstance(items, list) and items:
+                if dk == "sensors":
+                    payload[dk] = sorted(items, key=lambda s: channel_sort_key(
+                        s.get("sensor_label", ""),
+                        s.get("amp_unit", "") or s.get("unit", "")))
+                elif dk == "bearings":
+                    payload[dk] = sorted(items, key=lambda b: str(b.get("bearing_label", "")))
+        except Exception:
+            pass
+    return payload, snap_id
 
 
 _RENDER_FUNCTIONS = {

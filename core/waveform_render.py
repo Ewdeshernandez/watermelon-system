@@ -122,6 +122,31 @@ def render_snapshot_waveforms(
         shared_xaxes=False,
     )
 
+    # Ciclo 23.156 — Escala Y COMÚN por familia (vel / acel / prox), estilo
+    # System1/AMS: el máximo absoluto de la familia define el rango simétrico
+    # de todos sus canales — amplitudes comparables a simple vista.
+    def _wf_family(unit: str) -> str:
+        u = (unit or "").lower()
+        if "mm/s" in u or "in/s" in u or "ips" in u:
+            return "vel"
+        if u.strip().startswith("g") or "m/s2" in u or "m/s²" in u:
+            return "acel"
+        if "mil" in u or "µm" in u or "um" in u:
+            return "prox"
+        return u or "otro"
+
+    _fam_absmax: Dict[str, float] = {}
+    for s in sensors:
+        vals = s.get("values") or []
+        if not vals:
+            continue
+        fam = _wf_family(s.get("unit", ""))
+        try:
+            m = max(abs(float(v)) for v in vals)
+        except Exception:
+            m = 0.0
+        _fam_absmax[fam] = max(_fam_absmax.get(fam, 0.0), m)
+
     for i, s in enumerate(sensors, start=1):
         time_arr = s.get("time") or []
         value_arr = s.get("values") or []
@@ -148,7 +173,9 @@ def render_snapshot_waveforms(
         )
 
         # Axis labels — solo bottom subplot lleva "Time (s)" para no saturar
+        _fm = _fam_absmax.get(_wf_family(unit), 0.0)
         fig.update_yaxes(
+            range=[-_fm * 1.1, _fm * 1.1] if _fm > 0 else None,
             title=dict(
                 text=f"Amplitud ({unit})" if unit else "Amplitud",
                 font=dict(size=11, color=AXIS_FONT_COLOR),
