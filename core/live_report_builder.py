@@ -225,6 +225,7 @@ def current_severity_level(
 def build_report_for_instance(
     instance_id: str,
     instance_obj: Any = None,
+    alarm_focus: bool = False,
 ) -> Tuple[Optional[bytes], Dict[str, Any]]:
     """Genera el PDF ejecutivo del activo en forma headless.
 
@@ -313,13 +314,64 @@ def build_report_for_instance(
                "unit": e["unit"], "age": _format_age(e.get("captured_at", "")), "rising": e["rising"]}
               for e in ev]
 
-    # Tendencia PNG (canales que comparten unidad)
+    # Ciclo 23.157 — Reporte de ALARMA (alarm_focus=True, solo cron de
+    # alarmas): la tendencia muestra EXCLUSIVAMENTE los canales en
+    # Alarma/Danger, últimas 48 h (máx por bucket de 30 min vía RPC
+    # trend_bucketed), con sus límites de alarma/danger. El reporte
+    # programado mantiene la tendencia overall normal.
     trend_png = None
+    trend_title = "Tendencia overall"
+    if alarm_focus:
+        try:
+            from datetime import timedelta
+            from core.live_readings import history_bucketed
+            _alarm_rows = [r for r in rendered_rows
+                           if r.get("status") in ("Alarma", "Danger")]
+            if _alarm_rows:
+                _unit0 = _alarm_rows[0]["unit"]
+                _alarm_rows = [r for r in _alarm_rows if r["unit"] == _unit0][:4]
+                _var_by_sensor: Dict[str, str] = {}
+                for r in latest:
+                    if (r.get("sensor_label") and r.get("variable")
+                            and (r.get("metric") or "") == "Direct"):
+                        _var_by_sensor.setdefault(r["sensor_label"], r["variable"])
+                _from_iso = (datetime.now(timezone.utc)
+                             - timedelta(hours=48)).isoformat()
+                _palette = ["#dc2626", "#d97706", "#7c3aed", "#0891b2"]
+                _series = []
+                for i, rr in enumerate(_alarm_rows):
+                    _var = _var_by_sensor.get(rr["sensor_label"])
+                    if not _var:
+                        continue
+                    _b48 = history_bucketed(instance_id, _var, "Direct",
+                                            _from_iso, "30 minutes") or []
+                    xs = [b.get("bucket") for b in _b48
+                          if b.get("max_val") is not None]
+                    ys = [b.get("max_val") for b in _b48
+                          if b.get("max_val") is not None]
+                    if len(ys) >= 2:
+                        _series.append({"label": rr["sensor_label"], "x": xs,
+                                        "y": ys,
+                                        "color": _palette[i % len(_palette)]})
+                if _series:
+                    _rr0 = _alarm_rows[0]
+                    trend_png = render_trend_png(
+                        _series,
+                        alarm=(_rr0.get("alarm_used", 0) or 0),
+                        danger=(_rr0.get("danger_used", 0) or 0),
+                        y_title=f"{_unit0} (máx / 30 min)",
+                    )
+                    if trend_png:
+                        trend_title = "Canales en alarma — tendencia últimas 48 h"
+        except Exception:
+            trend_png = None
+
+    # Tendencia PNG (canales que comparten unidad) — programado o fallback
     try:
         by_unit: Dict[str, List[str]] = {}
         for r in rendered_rows:
             by_unit.setdefault(r["unit"], []).append(r["sensor_label"])
-        if by_unit:
+        if by_unit and trend_png is None:
             unit_grp = max(by_unit.values(), key=len)[:4]
             palette = ["#1e40af", "#0891b2", "#7c3aed", "#be185d"]
             series = []
@@ -338,11 +390,12 @@ def build_report_for_instance(
                     y_title=rr0["unit"] if rr0 else "valor",
                 )
     except Exception:
-        trend_png = None
+        pass  # no pisar una tendencia de alarma ya generada
 
     try:
         pdf_bytes = generate_live_report_pdf(instance_id, instance_obj, health, kpis,
-                                             channels, events, trend_png)
+                                             channels, events, trend_png,
+                                             trend_title=trend_title)
         return pdf_bytes, meta
     except Exception:
         return None, meta

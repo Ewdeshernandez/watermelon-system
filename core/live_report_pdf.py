@@ -55,6 +55,7 @@ def generate_live_report_pdf(
     channels: List[Dict[str, Any]],
     events: List[Dict[str, Any]],
     trend_png: Optional[bytes] = None,
+    trend_title: str = "Tendencia overall",
 ) -> bytes:
     """Genera el PDF ejecutivo de 1 página. Devuelve bytes.
 
@@ -111,7 +112,13 @@ def generate_live_report_pdf(
     train = f"{driver} → {driven}" if driver and driven else (driver or driven or "")
     client = getattr(instance_obj, "client", "") or ""
     site = getattr(instance_obj, "site", "") or getattr(instance_obj, "location", "") or ""
-    now_txt = datetime.now().strftime("%Y-%m-%d %H:%M")
+    # Ciclo 23.157 — Hora LOCAL del cliente (America/Bogota), no UTC del
+    # servidor. El reporte llegaba 2:00 AM mostrando "07:00" → desconfianza.
+    try:
+        from zoneinfo import ZoneInfo
+        now_txt = datetime.now(ZoneInfo("America/Bogota")).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        now_txt = datetime.now().strftime("%Y-%m-%d %H:%M")
 
     header_left.append(Paragraph(f"{tag} — Reporte de condición", st_title))
     header_left.append(Paragraph(train or "—", st_sub))
@@ -170,7 +177,7 @@ def generate_live_report_pdf(
     # ---------- Tendencia (si hay PNG) ----------
     if trend_png:
         try:
-            story.append(Paragraph("Tendencia overall", st_section))
+            story.append(Paragraph(trend_title, st_section))
             img = Image(BytesIO(trend_png), width=18 * cm, height=5.3 * cm)
             story.append(img)
         except Exception:
@@ -303,9 +310,30 @@ def render_trend_png(sensor_series: List[Dict[str, Any]],
             fig.add_hline(y=alarm, line=dict(color="#d97706", width=1.2, dash="dash"),
                           annotation_text="Alarma", annotation_position="top left",
                           annotation=dict(font=dict(color="#d97706", size=9), xshift=-44))
+        # Ciclo 23.157 — Eje de tiempo en hora LOCAL (America/Bogota).
+        # Los captured_at vienen en UTC desde Supabase.
+        def _to_local(xs):
+            from datetime import timezone as _tz
+            try:
+                from zoneinfo import ZoneInfo
+                _bog = ZoneInfo("America/Bogota")
+            except Exception:
+                return list(xs or [])
+            out = []
+            for v in xs or []:
+                try:
+                    dt = (datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+                          if not isinstance(v, datetime) else v)
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=_tz.utc)
+                    out.append(dt.astimezone(_bog).replace(tzinfo=None))
+                except Exception:
+                    out.append(v)
+            return out
+
         for s in sensor_series:
             fig.add_trace(go.Scatter(
-                x=s.get("x", []), y=s.get("y", []), mode="lines",
+                x=_to_local(s.get("x", [])), y=s.get("y", []), mode="lines",
                 line=dict(color=s.get("color", "#1e40af"), width=1.6, shape="spline", smoothing=0.6),
                 name=s.get("label", ""),
             ))

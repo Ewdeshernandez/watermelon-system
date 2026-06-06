@@ -17,6 +17,16 @@ from datetime import datetime
 from typing import Any, Dict
 
 
+def _now_local() -> datetime:
+    """Hora local del cliente (America/Bogota) — Ciclo 23.157.
+    El servidor corre en UTC; sin esto el correo decía 07:00 a las 2 AM."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/Bogota"))
+    except Exception:
+        return datetime.now()
+
+
 def _tag(instance_obj: Any, instance_id: str) -> str:
     return (getattr(instance_obj, "tag", "") or instance_id or "Activo").strip()
 
@@ -36,7 +46,7 @@ def _status_emoji(status: str) -> str:
 
 def build_email_subject(instance_obj: Any, instance_id: str, status: str) -> str:
     tag = _tag(instance_obj, instance_id)
-    fecha = datetime.now().strftime("%d/%m/%Y")
+    fecha = _now_local().strftime("%d/%m/%Y")
     return f"Reporte de condición — {tag} — {status} ({fecha})"
 
 
@@ -50,7 +60,7 @@ def build_short_message(
     """Mensaje corto para WhatsApp (caption) y cuerpo de texto del email."""
     tag = _tag(instance_obj, instance_id)
     client = _client(instance_obj)
-    fecha = datetime.now().strftime("%d/%m/%Y %H:%M")
+    fecha = _now_local().strftime("%d/%m/%Y %H:%M")
     emoji = _status_emoji(status)
 
     linea_activo = f"*{tag}*" + (f" — {client}" if client else "")
@@ -79,7 +89,7 @@ def build_email_html(
     """Cuerpo HTML simple y sobrio para el email (preferido por mail clients)."""
     tag = _tag(instance_obj, instance_id)
     client = _client(instance_obj)
-    fecha = datetime.now().strftime("%d/%m/%Y %H:%M")
+    fecha = _now_local().strftime("%d/%m/%Y %H:%M")
     emoji = _status_emoji(status)
     salud = f" · Salud <b>{score}/100</b>" if score is not None else ""
     alarma_block = (

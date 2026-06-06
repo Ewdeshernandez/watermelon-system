@@ -95,7 +95,10 @@ def process(only_instance: str = "", force: bool = False, dry_run: bool = False)
         if should_alert:
             log.info("→ %s: nivel %s (antes %s) — generando aviso…",
                      tag, _LEVEL_NAME.get(level, level), _LEVEL_NAME.get(stored, stored))
-            pdf_bytes, meta = build_report_for_instance(iid, inst)
+            # Ciclo 23.157 — alarm_focus: tendencia 48 h SOLO de los
+            # canales en alarma, con límites alarma/danger.
+            pdf_bytes, meta = build_report_for_instance(iid, inst,
+                                                        alarm_focus=True)
             if not pdf_bytes:
                 log.error("   %s: no se pudo generar el PDF (¿sin lecturas?).", tag)
                 errors += 1

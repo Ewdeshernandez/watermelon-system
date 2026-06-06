@@ -24,6 +24,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, Iterable, Optional
 
+
+def _now_local_str() -> str:
+    """Fecha-hora local del cliente (America/Bogota) — Ciclo 23.157."""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo("America/Bogota")).strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return datetime.now().strftime("%d/%m/%Y %H:%M")
+
 from core.report_message import (
     build_email_subject,
     build_short_message,
@@ -135,7 +144,7 @@ def deliver_report(
                 body_params = [
                     tag,
                     f"{status}" + (f" (Salud {score}/100)" if score is not None else ""),
-                    datetime.now().strftime("%d/%m/%Y %H:%M"),
+                    _now_local_str(),
                 ]
                 oks, fails = [], []
                 for to in numbers:
