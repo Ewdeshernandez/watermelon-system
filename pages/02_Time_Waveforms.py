@@ -2456,12 +2456,21 @@ if len(selected_records) >= 1:
 
 # Ciclo 23.153 — MINIMALISMO: detalle por canal detrás de un toggle (OFF por
 # defecto). La vista abre solo con el overview; el detalle es a demanda.
-_show_detail_wf = st.toggle(
-    "🔬 Mostrar análisis detallado por canal",
-    value=False, key="waveform_show_detail",
-    help="Paneles completos por canal: cursores, métricas, export, reporte.",
-)
-_detail_records_wf = selected_records if _show_detail_wf else []
+# Ciclo 23.154 — Toggle SOLO para analistas; el cliente ve solo el overview.
+try:
+    from core.auth import get_current_user as _gcu_role_wf
+    _viewer_role_wf = ((_gcu_role_wf() or {}).get("role") or "").lower()
+except Exception:
+    _viewer_role_wf = ""
+if _viewer_role_wf == "client":
+    _detail_records_wf = []
+else:
+    _show_detail_wf = st.toggle(
+        "🔬 Mostrar análisis detallado por canal",
+        value=False, key="waveform_show_detail",
+        help="Paneles completos por canal: cursores, métricas, export, reporte.",
+    )
+    _detail_records_wf = selected_records if _show_detail_wf else []
 
 for panel_index, primary in enumerate(_detail_records_wf):
     render_waveform_panel(

@@ -3778,7 +3778,7 @@ def main() -> None:
     # se hará desde el reporte ejecutivo PDF.)
     try:
         from core.recent_analyses_widget import render_recent_analyses_section
-        with st.expander("Análisis avanzado — Forma de onda · Espectro · Órbita",
+        with st.expander("🔬 Análisis avanzado — Espectro · Forma de onda · Órbita",
                          expanded=False):
             render_recent_analyses_section(instance_id)
     except Exception as e:

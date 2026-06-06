@@ -1342,12 +1342,21 @@ if len(selected_pairs) >= 1:
 
 # Ciclo 23.153 — MINIMALISMO: detalle por par detrás de un toggle (OFF por
 # defecto). La vista abre solo con la grilla overview; el detalle a demanda.
-_show_detail_orb = st.toggle(
-    "🔬 Mostrar análisis detallado por órbita",
-    value=False, key="orbit_show_detail",
-    help="Paneles completos por par X-Y: filtrado 1X, escala, export, reporte.",
-)
-_detail_pairs = selected_pairs if _show_detail_orb else []
+# Ciclo 23.154 — Toggle SOLO para analistas; el cliente ve solo la grilla.
+try:
+    from core.auth import get_current_user as _gcu_role_orb
+    _viewer_role_orb = ((_gcu_role_orb() or {}).get("role") or "").lower()
+except Exception:
+    _viewer_role_orb = ""
+if _viewer_role_orb == "client":
+    _detail_pairs = []
+else:
+    _show_detail_orb = st.toggle(
+        "🔬 Mostrar análisis detallado por órbita",
+        value=False, key="orbit_show_detail",
+        help="Paneles completos por par X-Y: filtrado 1X, escala, export, reporte.",
+    )
+    _detail_pairs = selected_pairs if _show_detail_orb else []
 
 for panel_index, pair in enumerate(_detail_pairs):
     render_orbit_panel(

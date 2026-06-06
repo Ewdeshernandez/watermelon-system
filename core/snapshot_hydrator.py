@@ -802,28 +802,11 @@ def render_snapshot_loaded_banner() -> None:
         unsafe_allow_html=True,
     )
 
-    # 2) Renderizar la hero card visualmente: necesitamos meter el botón
-    #    DENTRO de la card. Truco: dividimos el render en columnas.
-    #    Top bar = col_btn (botón Streamlit) + col_meta (HTML breadcrumb+tag)
-    #    luego HTML para hero-main + meta strip.
-
-    col_btn, col_meta = st.columns([2, 5])
-    with col_btn:
-        # Span host para que el sibling selector de CSS enganche al botón
-        st.markdown('<span id="wm-return-btn-host"></span>', unsafe_allow_html=True)
-        if st.button(
-            "← Volver a Live Monitoring",
-            key="_wm_return_live_monitoring",
-            type="primary",
-        ):
-            st.session_state.pop("_loaded_from_snapshot", None)
-            st.session_state.pop("signals", None)
-            try:
-                st.switch_page("pages/02_Live_Monitoring.py")
-            except Exception:
-                st.error("No se pudo volver. Refrescá la página.")
-
-    with col_meta:
+    # 2) Top bar de la card. Ciclo 23.154 — Se quitó el botón azul
+    #    "← Volver a Live Monitoring": redundante con la navegación del
+    #    sidebar y el header maestro (minimalismo, pedido Ewdes).
+    #    Queda solo el breadcrumb tag + cliente, alineado a la derecha.
+    if True:
         client_html = (
             f"<span class='wm-hero-dot'>·</span>"
             f"<span class='wm-hero-client'>{client_label}</span>"

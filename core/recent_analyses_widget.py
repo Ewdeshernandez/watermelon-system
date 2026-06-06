@@ -386,9 +386,12 @@ def _render_orbit_detail(payload: Dict[str, Any]) -> None:
                 if not x or not y:
                     st.warning(f"{b.get('bearing_label', '')}: sin datos")
                     continue
+                _orb_palette = ["#2563eb", "#059669", "#d97706", "#dc2626",
+                                "#7c3aed", "#0891b2"]
                 fig.add_trace(go.Scatter(
                     x=x, y=y, mode="lines",
-                    line=dict(width=1.2, color="#2563eb"),
+                    line=dict(width=1.2,
+                              color=_orb_palette[idx % len(_orb_palette)]),
                     name="orbit",
                     hoverinfo="skip",
                 ))
@@ -502,15 +505,93 @@ def render_recent_analyses_section(instance_id: str) -> None:
                 metadata_by_type[atype["key"]] = None
         st.session_state[_cache_key] = {"data": metadata_by_type, "ts": _now_ts}
 
-    # Ciclo 23.126 — Sin header "ÚLTIMA DATA". Los labels de cada card
-    # son auto-descriptivos. Menos chrome, más data.
+    # Ciclo 23.154 — PANEL UNIFICADO (pedido Ewdes): en vez de 3 cards con
+    # botón "Abrir", se renderizan DIRECTO las tres vistas en orden
+    # Espectro → Forma de onda → Órbita. El cliente lo ve todo de una,
+    # minimalista; el analista además tiene link al módulo completo.
+    # Los payloads se cachean en session_state por snapshot_id para no
+    # re-descargar de Storage en cada rerun.
+    try:
+        from core.auth import get_current_user as _gcu
+        _viewer_role = ((_gcu() or {}).get("role") or "").lower()
+    except Exception:
+        _viewer_role = ""
 
-    # Render cards (una columna por tipo de análisis)
-    cols = st.columns(len(ANALYSIS_TYPES))
-    for idx, atype in enumerate(ANALYSIS_TYPES):
-        with cols[idx]:
-            meta = metadata_by_type[atype["key"]]
-            _render_card(atype, meta, instance_id)
+    _REDIRECT_TARGETS_UNIFIED = {
+        "waveform": "pages/02_Time_Waveforms.py",
+        "spectrum": "pages/03_Spectrum.py",
+        "orbit":    "pages/05_Orbit_Analysis.py",
+    }
+    _UNIFIED_ORDER = ["spectrum", "waveform", "orbit"]
+    _atype_by_key = {a["key"]: a for a in ANALYSIS_TYPES}
+    _rendered_any = False
+    for _key in _UNIFIED_ORDER:
+        atype = _atype_by_key.get(_key)
+        meta = metadata_by_type.get(_key)
+        if not atype or not meta:
+            continue
+        _snap_id = meta.get("snapshot_id", "")
+        _pcache_key = f"_wm_unified_payload_{_key}_{instance_id}_{_snap_id}"
+        payload = st.session_state.get(_pcache_key)
+        if payload is None:
+            try:
+                mod = importlib.import_module(atype["module"])
+                load_fn = getattr(mod, atype["load_fn"])
+                payload = load_fn(instance_id, _snap_id)
+                if payload:
+                    st.session_state[_pcache_key] = payload
+            except Exception:
+                payload = None
+        if not payload:
+            continue
+
+        # Orden canónico de canales (velocidad → aceleración → proximidad)
+        try:
+            from core.channel_order import channel_sort_key
+            dk = atype.get("data_key")
+            items = payload.get(dk) if dk else None
+            if isinstance(items, list) and items:
+                if dk == "sensors":
+                    payload[dk] = sorted(items, key=lambda s: channel_sort_key(
+                        s.get("sensor_label", ""), s.get("amp_unit", "")))
+                elif dk == "bearings":
+                    payload[dk] = sorted(items, key=lambda b: str(b.get("bearing_label", "")))
+        except Exception:
+            pass
+
+        _rendered_any = True
+        st.markdown(
+            f"<div style='font-size:11px;font-weight:800;letter-spacing:0.14em;"
+            f"text-transform:uppercase;color:#475569;margin:14px 0 2px 0;'>"
+            f"{atype['label']}</div>",
+            unsafe_allow_html=True,
+        )
+        render_fn = _RENDER_FUNCTIONS.get(atype["render_fn"])
+        if render_fn:
+            try:
+                render_fn(payload)
+            except Exception as e:
+                st.warning(f"No se pudo renderizar {atype['label']}: {e}")
+
+        # Link al módulo completo — SOLO analistas (el cliente no lo ve)
+        if _viewer_role != "client" and _key in _REDIRECT_TARGETS_UNIFIED:
+            if st.button(
+                f"Abrir {atype['label']} en módulo completo →",
+                key=f"wm_unified_open_{_key}_{_snap_id}",
+            ):
+                st.session_state["_pending_snapshot_load"] = {
+                    "snapshot_id": _snap_id,
+                    "instance_id": instance_id,
+                    "snapshot_type": _key,
+                }
+                try:
+                    st.switch_page(_REDIRECT_TARGETS_UNIFIED[_key])
+                except Exception:
+                    st.error("No se pudo navegar al módulo.")
+
+    if not _rendered_any:
+        st.info("Aún no hay snapshots de análisis para este activo. "
+                "Cargá señales en Load Data para generarlos.")
 
 
 def _render_card(atype: Dict[str, Any], meta: Optional[Dict[str, Any]], instance_id: str) -> None:

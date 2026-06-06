@@ -3974,13 +3974,23 @@ else:
     # detrás de un toggle APAGADO por defecto. La vista abre solo con el
     # overview (lo que ve el cliente); el analista activa el detalle a demanda.
     # Bonus: la página carga mucho más rápido (no renderiza N paneles pesados).
-    _show_detail = st.toggle(
-        "🔬 Mostrar análisis detallado por canal",
-        value=False, key="spectrum_show_detail",
-        help="Paneles completos por canal: armónicos, fallas de rodamiento, "
-             "export, enviar a reporte.",
-    )
-    _detail_records = selected_records if _show_detail else []
+    # Ciclo 23.154 — El toggle de detalle es SOLO para analistas; el cliente
+    # ve únicamente el overview apilado (minimalismo, pedido Ewdes).
+    try:
+        from core.auth import get_current_user as _gcu_role
+        _viewer_role_sp = ((_gcu_role() or {}).get("role") or "").lower()
+    except Exception:
+        _viewer_role_sp = ""
+    if _viewer_role_sp == "client":
+        _detail_records = []
+    else:
+        _show_detail = st.toggle(
+            "🔬 Mostrar análisis detallado por canal",
+            value=False, key="spectrum_show_detail",
+            help="Paneles completos por canal: armónicos, fallas de rodamiento, "
+                 "export, enviar a reporte.",
+        )
+        _detail_records = selected_records if _show_detail else []
 
     for panel_index, primary in enumerate(_detail_records):
         # Ciclo 23.112 — En cliente, max_cpm es POR PANEL (cada sensor tiene
