@@ -472,12 +472,8 @@ def _render_spectrum_detail(payload: Dict[str, Any],
                       size=10, color="#475569"),
             showlegend=False,
         )
-        if run_cpm:
-            st.caption(
-                f"Cursores 1X/2X/3X anclados a {run_cpm:,.0f} CPM "
-                f"(~{run_cpm:.0f} rpm) · Full-scale 60.000 CPM · "
-                f"Escala Y común por familia (vel / acel / prox)."
-            )
+        # Ciclo 23.162 — Se quitó el caption técnico (pedido Ewdes): el eje
+        # ya comunica la frecuencia; el letrero no aportaba a la vista cliente.
         st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.error(f"Error renderizando spectrum: {e}")

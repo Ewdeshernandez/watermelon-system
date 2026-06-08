@@ -71,7 +71,13 @@ except Exception:
 # Selector de vista (derecha) + chip del activo (izquierda)
 # =============================================================
 
-_VIEWS = ["📊 Espectro", "🌊 Forma de onda", "🌀 Órbita"]
+# Ciclo 23.162 — Íconos Material (líneas monocromas, look industrial) en
+# vez de emojis. Espectro=barras FFT, Onda=línea temporal, Órbita=target.
+_VIEWS = [
+    ":material/equalizer: Espectro",
+    ":material/show_chart: Forma de onda",
+    ":material/track_changes: Órbita",
+]
 
 c_left, c_right = st.columns([3, 2])
 with c_left:
