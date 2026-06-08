@@ -10,6 +10,31 @@ def apply_watermelon_page_style() -> None:
     st.markdown(
         """
         <style>
+        /* ===== CHROME STREAMLIT OCULTO + LOADER SANDÍA =====
+           Ciclo 23.161 — feedback cliente (Juan Mora). Mismo tratamiento
+           que core/ui/theme.py para que aplique en TODOS los módulos
+           (Live Monitoring, análisis, etc.), no solo en Home. */
+        #MainMenu {visibility: hidden;}
+        [data-testid="stMainMenu"] {display: none !important;}
+        [data-testid="stToolbarActions"] {display: none !important;}
+        [data-testid="stDecoration"] {display: none !important;}
+        footer {visibility: hidden; height: 0;}
+        .stDeployButton {display: none !important;}
+        [data-testid="stStatusWidget"] svg,
+        [data-testid="stStatusWidget"] img {display: none !important;}
+        [data-testid="stStatusWidget"] > div:first-child::before {
+            content: "🍉"; font-size: 17px; display: inline-block;
+            animation: wmPulse 1s ease-in-out infinite; margin-right: 2px;
+        }
+        [data-testid="stSpinner"] svg {display: none !important;}
+        [data-testid="stSpinner"] > div::before {
+            content: "🍉"; font-size: 20px; display: inline-block;
+            animation: wmSpin 1.1s linear infinite; margin-right: 8px;
+        }
+        @keyframes wmPulse {0%,100%{transform:scale(1);opacity:1;}
+            50%{transform:scale(1.25);opacity:0.6;}}
+        @keyframes wmSpin {0%{transform:rotate(0deg);}100%{transform:rotate(360deg);}}
+
         .block-container {
             padding-top: 1.15rem;
             padding-bottom: 2.0rem;
@@ -134,6 +159,12 @@ def page_header(title: str, subtitle: str) -> None:
     personalizado con el nombre del usuario logueado + reloj + fecha + turno a
     la derecha, identidad del módulo en el pill, y `subtitle` como línea de
     estado. Si algo falla (sin sesión, etc.) cae al header simple sin romper."""
+    # Ciclo 23.161 — Asegurar chrome oculto + loader sandía en CUALQUIER
+    # módulo que use page_header (Reports, análisis, etc.).
+    try:
+        apply_watermelon_page_style()
+    except Exception:
+        pass
     _g = None
     try:
         from core.auth import get_current_user

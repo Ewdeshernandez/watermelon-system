@@ -71,6 +71,7 @@ st.set_page_config(
     page_title="Watermelon System",
     page_icon="🍉",
     layout="wide",
+    initial_sidebar_state="expanded",  # Ciclo 23.161 — feedback cliente: nav visible al entrar
 )
 
 require_login()

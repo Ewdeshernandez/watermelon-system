@@ -28,9 +28,13 @@ from core.auth import require_login, render_user_menu
 st.set_page_config(
     page_title="Watermelon System | Análisis Avanzado",
     layout="wide",
+    initial_sidebar_state="expanded",  # Ciclo 23.161 — nav visible al entrar
 )
 require_login()
 render_user_menu()
+
+from core.ui_theme import apply_watermelon_page_style
+apply_watermelon_page_style()
 
 # =============================================================
 # HEADER (hero maestro)

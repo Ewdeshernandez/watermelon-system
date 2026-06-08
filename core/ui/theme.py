@@ -30,6 +30,48 @@ def apply_theme():
         background: rgba(255,255,255,0.08);
     }
 
+    /* ===== CHROME STREAMLIT OCULTO ===== Ciclo 23.161 — feedback cliente
+       (Juan Mora): el menú de 3 puntos (theme/Print/Record screen/"Made
+       with Streamlit") no aporta y resta seriedad. Se oculta el toolbar,
+       el menú principal, el footer y el botón de deploy. */
+    #MainMenu {visibility: hidden;}
+    [data-testid="stMainMenu"] {display: none !important;}
+    [data-testid="stToolbarActions"] {display: none !important;}
+    [data-testid="stDecoration"] {display: none !important;}
+    header[data-testid="stHeader"] {background: transparent;}
+    footer {visibility: hidden; height: 0;}
+    .stDeployButton {display: none !important;}
+    #stDecoration {display: none !important;}
+
+    /* ===== LOADER SANDÍA ===== Ciclo 23.161 — feedback cliente: el ícono
+       nativo de "RUNNING" (bici / nadador) se reemplaza por una 🍉 que
+       late, tanto en el status widget (arriba derecha) como en st.spinner. */
+    [data-testid="stStatusWidget"] svg,
+    [data-testid="stStatusWidget"] img {display: none !important;}
+    [data-testid="stStatusWidget"] > div:first-child::before {
+        content: "🍉";
+        font-size: 17px;
+        display: inline-block;
+        animation: wmPulse 1s ease-in-out infinite;
+        margin-right: 2px;
+    }
+    [data-testid="stSpinner"] svg {display: none !important;}
+    [data-testid="stSpinner"] > div::before {
+        content: "🍉";
+        font-size: 20px;
+        display: inline-block;
+        animation: wmSpin 1.1s linear infinite;
+        margin-right: 8px;
+    }
+    @keyframes wmPulse {
+        0%, 100% {transform: scale(1); opacity: 1;}
+        50% {transform: scale(1.25); opacity: 0.6;}
+    }
+    @keyframes wmSpin {
+        0% {transform: rotate(0deg);}
+        100% {transform: rotate(360deg);}
+    }
+
     /* ===== HEADER LIMPIO ===== */
     .block-container {
         padding-top: 2rem;

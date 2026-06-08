@@ -45,7 +45,8 @@ from core.severity import (
 )
 from core.ui_theme import apply_watermelon_page_style, page_header
 
-st.set_page_config(page_title="Watermelon System | Live Monitoring", layout="wide")
+st.set_page_config(page_title="Watermelon System | Live Monitoring", layout="wide",
+                   initial_sidebar_state="expanded")  # Ciclo 23.161 — nav visible al entrar
 require_login()
 require_role(allowed_roles=("admin", "specialist", "client"))
 render_user_menu()
