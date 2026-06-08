@@ -529,10 +529,47 @@ def _render_orbit_detail(payload: Dict[str, Any]) -> None:
         st.error(f"Error renderizando orbit: {e}")
 
 
+_GEN_KW = ("GEN", "GENERAD", "GENERATOR", "BRUSH", "ALTERNAD", "DRIVEN")
+_TURB_KW = ("TRF", "CRF", "TURB", "TURBIN", "COMPRES", "COMP", "DRIVER",
+            "GAS GEN", "LM6000", "LM2500")
+
+
+def _bearing_section(bearing: Dict[str, Any], inst) -> Optional[str]:
+    """Clasifica un bearing de órbita como 'driver' (turbina) o 'driven'
+    (generador). Señales en orden: (1) keywords en los labels, (2) plano del
+    mapa de sondas del activo, (3) None si ambiguo."""
+    txt = (f"{bearing.get('bearing_label','')} {bearing.get('x_sensor_label','')} "
+           f"{bearing.get('y_sensor_label','')}").upper()
+    # 1) keyword directo (driver primero: 'GAS GEN' no debe contar como gen)
+    if any(k in txt for k in _TURB_KW):
+        return "driver"
+    if any(k in txt for k in _GEN_KW):
+        return "driven"
+    # 2) plano del mapa de sondas (ej. plane_label 'GEN DE', 'TRF (LM6000)')
+    try:
+        import re
+        sensors = getattr(inst, "sensors", []) or []
+        want = set(re.findall(r"\d+", txt))  # tokens numéricos de las sondas
+        for s in sensors:
+            if not isinstance(s, dict):
+                continue
+            slbl = str(s.get("sensor_label", "")) + " " + str(s.get("name", ""))
+            if want and want & set(re.findall(r"\d+", slbl)):
+                plane = str(s.get("plane_label", "")).upper()
+                if any(k in plane for k in _TURB_KW):
+                    return "driver"
+                if any(k in plane for k in _GEN_KW):
+                    return "driven"
+    except Exception:
+        pass
+    return None
+
+
 def _resolve_rotation(bearing: Dict[str, Any], inst) -> Optional[str]:
-    """Sentido de giro de un bearing según la config del activo. Devuelve
-    'CW'/'CCW' o None (auto). Clasifica generador/driven por keywords en los
-    labels; si el generador no tiene sentido propio, usa el de la turbina."""
+    """Sentido de giro ('CW'/'CCW' o None=auto) de un bearing según la config
+    del activo. Las órbitas vienen de sondas de proximidad que casi siempre
+    están en la máquina DRIVEN (generador) — por eso, si la sección es
+    ambigua, se asume driven."""
     if inst is None:
         return None
     rd = (getattr(inst, "rotation_driver", "") or "").upper().strip()
@@ -541,15 +578,14 @@ def _resolve_rotation(bearing: Dict[str, Any], inst) -> Optional[str]:
         rd = ""
     if rv not in ("CW", "CCW"):
         rv = ""
-    txt = (f"{bearing.get('bearing_label','')} {bearing.get('x_sensor_label','')} "
-           f"{bearing.get('y_sensor_label','')}").upper()
-    is_gen = any(k in txt for k in ("GENERAD", "GENERATOR", "BRUSH",
-                                    "ALTERNAD", "DRIVEN", "GEN DE", "GEN NDE"))
-    if rv and is_gen:
-        return rv
-    if rd:
-        return rd
-    return rv or None
+    if not rd and not rv:
+        return None  # nada configurado → auto
+
+    section = _bearing_section(bearing, inst)
+    if section == "driver":
+        return rd or rv or None
+    # 'driven' o ambiguo → generador (donde viven las órbitas)
+    return rv or rd or None
 
 
 def _probe_to_global(px, py, x_angle=45.0, x_side="Right",
