@@ -569,9 +569,35 @@ def _show_authenticated_layout_tweaks() -> None:
     )
 
 
+def _rehydrate_from_cookie() -> bool:
+    """Ciclo 23.163 — Reconstruye la sesión desde la cookie firmada cuando
+    `st.session_state` está vacío (refresh de página o reconexión del
+    websocket). Devuelve True si rehidrató una sesión válida."""
+    try:
+        from core import session_cookie
+        payload = session_cookie.restore()
+        if not payload:
+            return False
+        st.session_state["auth_ok"] = True
+        st.session_state["auth_username"] = payload.get("username", "") or payload.get("email", "")
+        st.session_state["auth_email"] = payload.get("email", "")
+        st.session_state["auth_full_name"] = payload.get("full_name", "") or payload.get("email", "")
+        st.session_state["auth_role"] = payload.get("role", "client")
+        st.session_state["auth_user_id"] = payload.get("user_id", "")
+        st.session_state["auth_is_admin"] = bool(payload.get("is_admin", False))
+        st.session_state["auth_source"] = payload.get("source", "supabase")
+        st.session_state["auth_expires_at"] = _now() + _session_timeout_seconds()
+        return True
+    except Exception:
+        return False
+
+
 def is_authenticated() -> bool:
     if not st.session_state.get("auth_ok", False):
-        return False
+        # Refresh / reconexión: la sesión en memoria se perdió pero la cookie
+        # firmada puede seguir vigente (hasta 6 h de inactividad).
+        if not _rehydrate_from_cookie():
+            return False
 
     expires_at = int(st.session_state.get("auth_expires_at", 0))
     if _now() >= expires_at:
@@ -622,6 +648,9 @@ def login(identifier: str, password: str) -> tuple[bool, str]:
                 st.session_state["auth_is_admin"] = bool(u.get("is_admin"))
                 st.session_state["auth_source"] = "supabase"
                 st.session_state["auth_expires_at"] = _now() + _session_timeout_seconds()
+                # La escritura de cookie se difiere a render_user_menu de la
+                # primera página (login hace switch_page y cortaría el iframe).
+                st.session_state["_wm_cookie_needs_write"] = True
                 return True, "Acceso concedido."
             # Si el error es "credenciales inválidas", NO caer al fallback —
             # significa que Supabase respondió pero no aceptó. Para evitar
@@ -655,8 +684,27 @@ def login(identifier: str, password: str) -> tuple[bool, str]:
     st.session_state["auth_is_admin"] = (user.get("role") == "admin")
     st.session_state["auth_source"] = "legacy"
     st.session_state["auth_expires_at"] = _now() + _session_timeout_seconds()
+    st.session_state["_wm_cookie_needs_write"] = True
 
     return True, "Acceso concedido."
+
+
+def _persist_session_cookie() -> None:
+    """Ciclo 23.163 — Escribe/renueva la cookie firmada con la sesión actual.
+    No setea el flag de tiempo (eso lo hace el caller, render_user_menu)."""
+    try:
+        from core import session_cookie
+        session_cookie.persist({
+            "email":     st.session_state.get("auth_email", ""),
+            "username":  st.session_state.get("auth_username", ""),
+            "full_name": st.session_state.get("auth_full_name", ""),
+            "role":      st.session_state.get("auth_role", ""),
+            "user_id":   st.session_state.get("auth_user_id", ""),
+            "is_admin":  bool(st.session_state.get("auth_is_admin", False)),
+            "source":    st.session_state.get("auth_source", "supabase"),
+        })
+    except Exception:
+        pass
 
 
 def logout(silent: bool = False) -> None:
@@ -676,6 +724,14 @@ def logout(silent: bool = False) -> None:
     for key in keys_to_remove:
         if key in st.session_state:
             del st.session_state[key]
+
+    # Ciclo 23.163 — borrar la cookie firmada para que el refresh no
+    # rehidrate una sesión ya cerrada.
+    try:
+        from core import session_cookie
+        session_cookie.clear()
+    except Exception:
+        pass
 
     if not silent:
         st.toast("Sesión cerrada")
@@ -712,6 +768,17 @@ def render_user_menu() -> None:
     user = get_current_user()
     if not user:
         return
+
+    # Ciclo 23.163 — Renovar la cookie de sesión en cada navegación (ventana
+    # deslizante de 6 h). Guarda de 5 min para no reescribir en cada rerun.
+    try:
+        _last = float(st.session_state.get("_wm_cookie_last_write", 0))
+        _needs = st.session_state.pop("_wm_cookie_needs_write", False)
+        if _needs or (_now() - _last) > 300:
+            _persist_session_cookie()
+            st.session_state["_wm_cookie_last_write"] = _now()
+    except Exception:
+        pass
 
     _show_authenticated_layout_tweaks()
 
