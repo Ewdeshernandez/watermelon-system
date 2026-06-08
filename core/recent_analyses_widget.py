@@ -486,10 +486,25 @@ def _render_orbit_detail(payload: Dict[str, Any]) -> None:
         return
     try:
         import numpy as np
+        # Ciclo 23.164 — El sentido de giro es ÚNICO para toda la máquina.
+        # Las órbitas ruidosas dan áreas con signo inconsistente por bearing,
+        # así que se decide UNA vez con la órbita de mayor |área| (la más
+        # elíptica = más confiable) y se aplica a todas.
+        _best_area, _machine_ccw = 0.0, True
+        for b in bearings:
+            px, py = b.get("x_values", []), b.get("y_values", [])
+            if not px or not py:
+                continue
+            nn = min(len(px), len(py))
+            H, V = _probe_to_global(px[:nn], py[:nn])
+            a = float(np.sum(H[:-1] * V[1:] - H[1:] * V[:-1]))
+            if abs(a) > abs(_best_area):
+                _best_area, _machine_ccw = a, (a >= 0)
+
         cols = st.columns(min(len(bearings), 2))
         for idx, b in enumerate(bearings):
             with cols[idx % len(cols)]:
-                _render_orbit_system1(b, payload, idx)
+                _render_orbit_system1(b, payload, idx, _machine_ccw)
     except Exception as e:
         st.error(f"Error renderizando orbit: {e}")
 
@@ -509,10 +524,12 @@ def _probe_to_global(px, py, x_angle=45.0, x_side="Right",
         return np.asarray(px, float), np.asarray(py, float)
 
 
-def _render_orbit_system1(b: Dict[str, Any], payload: Dict[str, Any], idx: int) -> None:
+def _render_orbit_system1(b: Dict[str, Any], payload: Dict[str, Any],
+                          idx: int, ccw: bool = True) -> None:
     """Órbita estilo Bently Nevada System1: marco físico (sondas rotadas a
-    45°), cuadro cuadrado centrado en 0, rejilla mil/div, cajas de sonda
-    X/Y, marca keyphasor, flecha de rotación y rpm."""
+    45°), cuadrado centrado en 0 que la órbita LLENA, rejilla discreta,
+    cajas de sonda X/Y, keyphasor, flecha de rotación (única de la máquina)
+    y rpm."""
     import numpy as np
     import plotly.graph_objects as go
 
@@ -524,25 +541,25 @@ def _render_orbit_system1(b: Dict[str, Any], payload: Dict[str, Any], idx: int) 
     n = min(len(px), len(py))
     px, py = px[:n], py[:n]
 
-    # 1) Rotar a marco físico (Y 45° Left, X 45° Right) como System1
+    # 1) Rotar a marco físico (Y 45° L, X 45° R) como System1
     H, V = _probe_to_global(px, py)
 
-    # 2) Escala simétrica centrada en 0 + división "nice" para rejilla mil/div
-    R = float(max(np.max(np.abs(H)), np.max(np.abs(V)), 1e-6)) * 1.15
-    raw_div = R / 5.0
+    # 2) Escala simétrica centrada en 0. 4 divisiones por lado y división
+    #    "nice" ajustada para que la órbita LLENE el cuadro (menos vacío).
+    R_data = float(max(np.max(np.abs(H)), np.max(np.abs(V)), 1e-6)) * 1.08
+    raw_div = R_data / 4.0
     mag = 10 ** np.floor(np.log10(raw_div))
     nice = next((m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw_div), 10 * mag)
-    R = nice * 5.0
+    R = nice * 4.0
     unit = b.get("amp_unit", "") or payload.get("amp_unit", "") or "mil pp"
 
     color = ["#1d4ed8", "#047857", "#b45309", "#b91c1c"][idx % 4]
     fig = go.Figure()
-    # Órbita
     fig.add_trace(go.Scattergl(
         x=H, y=V, mode="lines",
-        line=dict(width=1.1, color=color), hoverinfo="skip", showlegend=False,
+        line=dict(width=1.2, color=color), hoverinfo="skip", showlegend=False,
     ))
-    # Keyphasor (referencia 1/rev): primer punto de la muestra
+    # Keyphasor (referencia 1/rev): primer punto
     fig.add_trace(go.Scatter(
         x=[H[0]], y=[V[0]], mode="markers",
         marker=dict(symbol="triangle-up", size=9, color="#dc2626",
@@ -550,42 +567,41 @@ def _render_orbit_system1(b: Dict[str, Any], payload: Dict[str, Any], idx: int) 
         hoverinfo="skip", showlegend=False,
     ))
 
-    # 3) Cajas de sonda Y (sup-izq) y X (sup-der) — estilo System1
+    # 3) Cajas de sonda Y (sup-izq) y X (sup-der)
     box = dict(showarrow=False, font=dict(size=12, family="ui-monospace,monospace",
                color="#0f172a"), bgcolor="white", bordercolor="#0f172a",
                borderwidth=1, borderpad=3)
     fig.add_annotation(x=-R, y=R, xanchor="left", yanchor="top", text="<b>Y</b>", **box)
     fig.add_annotation(x=R, y=R, xanchor="right", yanchor="top", text="<b>X</b>", **box)
 
-    # 4) Flecha de rotación (sentido real desde el área firmada de la órbita)
-    area = float(np.sum(H[:-1] * V[1:] - H[1:] * V[:-1]))
-    ccw = area >= 0
+    # 4) Flecha de rotación — sentido ÚNICO de la máquina (no por bearing)
     r_arc = R * 0.74
     th = np.linspace(np.deg2rad(135), np.deg2rad(60), 24)
     ax_, ay_ = r_arc * np.cos(th), r_arc * np.sin(th)
     if not ccw:
         ax_ = ax_[::-1]; ay_ = ay_[::-1]
     fig.add_trace(go.Scatter(x=ax_, y=ay_, mode="lines",
-                  line=dict(width=1.6, color="#334155"), hoverinfo="skip", showlegend=False))
+                  line=dict(width=1.5, color="#475569"), hoverinfo="skip", showlegend=False))
     fig.add_annotation(x=ax_[-1], y=ay_[-1], ax=ax_[-3], ay=ay_[-3],
                        xref="x", yref="y", axref="x", ayref="y",
                        showarrow=True, arrowhead=2, arrowsize=1.4,
-                       arrowwidth=1.6, arrowcolor="#334155", text="")
+                       arrowwidth=1.5, arrowcolor="#475569", text="")
 
     # 5) RPM al pie
     rpm = payload.get("operating_speed_rpm")
-    rpm_txt = f"{float(rpm):.0f} rpm" if rpm else ""
-    if rpm_txt:
-        fig.add_annotation(x=R * 0.92, y=-R, xanchor="right", yanchor="bottom",
-                           showarrow=False, text=f"<b>{rpm_txt}</b>",
+    if rpm:
+        fig.add_annotation(x=R * 0.92, y=-R * 0.92, xanchor="right", yanchor="bottom",
+                           showarrow=False, text=f"<b>{float(rpm):.0f} rpm</b>",
                            font=dict(size=11, color="#475569"))
 
+    # Eje: rejilla discreta y suave; cruz central sutil (no plano cartesiano
+    # marcado). Borde del cuadro tenue.
     axis_common = dict(
-        range=[-R, R], dtick=nice, showgrid=True, gridcolor="#e2e8f0",
-        zeroline=True, zerolinecolor="#94a3b8", zerolinewidth=1.2,
-        showline=True, linecolor="#0f172a", linewidth=1, mirror=True,
-        ticks="outside", tickfont=dict(size=8, color="#94a3b8"),
-        title=dict(text=f"{nice:g} {unit} /div", font=dict(size=9, color="#94a3b8")),
+        range=[-R, R], dtick=nice, showgrid=True, gridcolor="#eef2f7",
+        zeroline=True, zerolinecolor="#cbd5e1", zerolinewidth=1,
+        showline=True, linecolor="#cbd5e1", linewidth=1, mirror=True,
+        ticks="outside", tickfont=dict(size=8, color="#b0bac9"),
+        title=dict(text=f"{nice:g} {unit} /div", font=dict(size=9, color="#b0bac9")),
     )
     fig.update_layout(
         height=340, margin=dict(l=40, r=20, t=8, b=34),
@@ -595,13 +611,13 @@ def _render_orbit_system1(b: Dict[str, Any], payload: Dict[str, Any], idx: int) 
         showlegend=False,
     )
 
-    # Header tipo System1
+    # Header — convención internacional: 45° L / 45° R (no Izq/Der)
     st.markdown(
         f"<div style='font-family:ui-monospace,monospace;font-size:11px;"
         f"font-weight:700;color:#0f172a;background:#f1f5f9;border:1px solid #cbd5e1;"
         f"border-radius:6px 6px 0 0;padding:4px 10px;'>"
-        f"{label} · Y {b.get('y_sensor_label','')} ∠45° Izq · "
-        f"X {b.get('x_sensor_label','')} ∠45° Der</div>",
+        f"{label} · Y {b.get('y_sensor_label','')} 45°L · "
+        f"X {b.get('x_sensor_label','')} 45°R</div>",
         unsafe_allow_html=True,
     )
     st.plotly_chart(fig, use_container_width=True,
