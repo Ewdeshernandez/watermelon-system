@@ -485,55 +485,127 @@ def _render_orbit_detail(payload: Dict[str, Any]) -> None:
         st.info("Sin órbitas en este snapshot.")
         return
     try:
-        import plotly.graph_objects as go
-        cols = st.columns(min(len(bearings), 3))
+        import numpy as np
+        cols = st.columns(min(len(bearings), 2))
         for idx, b in enumerate(bearings):
             with cols[idx % len(cols)]:
-                fig = go.Figure()
-                x = b.get("x_values", [])
-                y = b.get("y_values", [])
-                if not x or not y:
-                    st.warning(f"{b.get('bearing_label', '')}: sin datos")
-                    continue
-                _orb_palette = ["#2563eb", "#059669", "#d97706", "#dc2626",
-                                "#7c3aed", "#0891b2"]
-                fig.add_trace(go.Scatter(
-                    x=x, y=y, mode="lines",
-                    line=dict(width=1.2,
-                              color=_orb_palette[idx % len(_orb_palette)]),
-                    name="orbit",
-                    hoverinfo="skip",
-                ))
-                fig.update_layout(
-                    title=dict(
-                        text=f"<b>{b.get('bearing_label', '')}</b>",
-                        font=dict(size=12),
-                    ),
-                    height=300,
-                    margin=dict(l=10, r=10, t=30, b=10),
-                    plot_bgcolor="white",
-                    xaxis=dict(
-                        title=f"X ({b.get('x_sensor_label', '')})",
-                        showgrid=True, gridcolor="#f1f5f9",
-                        zeroline=True, zerolinecolor="#cbd5e1",
-                        scaleanchor="y", scaleratio=1,
-                    ),
-                    yaxis=dict(
-                        title=f"Y ({b.get('y_sensor_label', '')})",
-                        showgrid=True, gridcolor="#f1f5f9",
-                        zeroline=True, zerolinecolor="#cbd5e1",
-                    ),
-                    showlegend=False,
-                )
-                st.plotly_chart(fig, use_container_width=True)
-                v1x = b.get("vector_1x", {}) or {}
-                if v1x.get("amp_x"):
-                    st.caption(
-                        f"1X X: {v1x.get('amp_x', 0):.3f} · "
-                        f"Y: {v1x.get('amp_y', 0):.3f}"
-                    )
+                _render_orbit_system1(b, payload, idx)
     except Exception as e:
         st.error(f"Error renderizando orbit: {e}")
+
+
+def _probe_to_global(px, py, x_angle=45.0, x_side="Right",
+                     y_angle=45.0, y_side="Left"):
+    """Transforma lecturas de sondas (a 45°) al marco físico horizontal/
+    vertical — igual que System1. Reusa la geometría de core.orbit."""
+    import numpy as np
+    try:
+        from core.orbit import ProbeGeometry, _solve_global_xy
+        gx = ProbeGeometry(float(x_angle), x_side)
+        gy = ProbeGeometry(float(y_angle), y_side)
+        H, V = _solve_global_xy(np.asarray(px, float), np.asarray(py, float), gx, gy)
+        return np.asarray(H), np.asarray(V)
+    except Exception:
+        return np.asarray(px, float), np.asarray(py, float)
+
+
+def _render_orbit_system1(b: Dict[str, Any], payload: Dict[str, Any], idx: int) -> None:
+    """Órbita estilo Bently Nevada System1: marco físico (sondas rotadas a
+    45°), cuadro cuadrado centrado en 0, rejilla mil/div, cajas de sonda
+    X/Y, marca keyphasor, flecha de rotación y rpm."""
+    import numpy as np
+    import plotly.graph_objects as go
+
+    label = b.get("bearing_label", "")
+    px = b.get("x_values", []); py = b.get("y_values", [])
+    if not px or not py:
+        st.warning(f"{label}: sin datos")
+        return
+    n = min(len(px), len(py))
+    px, py = px[:n], py[:n]
+
+    # 1) Rotar a marco físico (Y 45° Left, X 45° Right) como System1
+    H, V = _probe_to_global(px, py)
+
+    # 2) Escala simétrica centrada en 0 + división "nice" para rejilla mil/div
+    R = float(max(np.max(np.abs(H)), np.max(np.abs(V)), 1e-6)) * 1.15
+    raw_div = R / 5.0
+    mag = 10 ** np.floor(np.log10(raw_div))
+    nice = next((m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw_div), 10 * mag)
+    R = nice * 5.0
+    unit = b.get("amp_unit", "") or payload.get("amp_unit", "") or "mil pp"
+
+    color = ["#1d4ed8", "#047857", "#b45309", "#b91c1c"][idx % 4]
+    fig = go.Figure()
+    # Órbita
+    fig.add_trace(go.Scattergl(
+        x=H, y=V, mode="lines",
+        line=dict(width=1.1, color=color), hoverinfo="skip", showlegend=False,
+    ))
+    # Keyphasor (referencia 1/rev): primer punto de la muestra
+    fig.add_trace(go.Scatter(
+        x=[H[0]], y=[V[0]], mode="markers",
+        marker=dict(symbol="triangle-up", size=9, color="#dc2626",
+                    line=dict(width=0.5, color="#7f1d1d")),
+        hoverinfo="skip", showlegend=False,
+    ))
+
+    # 3) Cajas de sonda Y (sup-izq) y X (sup-der) — estilo System1
+    box = dict(showarrow=False, font=dict(size=12, family="ui-monospace,monospace",
+               color="#0f172a"), bgcolor="white", bordercolor="#0f172a",
+               borderwidth=1, borderpad=3)
+    fig.add_annotation(x=-R, y=R, xanchor="left", yanchor="top", text="<b>Y</b>", **box)
+    fig.add_annotation(x=R, y=R, xanchor="right", yanchor="top", text="<b>X</b>", **box)
+
+    # 4) Flecha de rotación (sentido real desde el área firmada de la órbita)
+    area = float(np.sum(H[:-1] * V[1:] - H[1:] * V[:-1]))
+    ccw = area >= 0
+    r_arc = R * 0.74
+    th = np.linspace(np.deg2rad(135), np.deg2rad(60), 24)
+    ax_, ay_ = r_arc * np.cos(th), r_arc * np.sin(th)
+    if not ccw:
+        ax_ = ax_[::-1]; ay_ = ay_[::-1]
+    fig.add_trace(go.Scatter(x=ax_, y=ay_, mode="lines",
+                  line=dict(width=1.6, color="#334155"), hoverinfo="skip", showlegend=False))
+    fig.add_annotation(x=ax_[-1], y=ay_[-1], ax=ax_[-3], ay=ay_[-3],
+                       xref="x", yref="y", axref="x", ayref="y",
+                       showarrow=True, arrowhead=2, arrowsize=1.4,
+                       arrowwidth=1.6, arrowcolor="#334155", text="")
+
+    # 5) RPM al pie
+    rpm = payload.get("operating_speed_rpm")
+    rpm_txt = f"{float(rpm):.0f} rpm" if rpm else ""
+    if rpm_txt:
+        fig.add_annotation(x=R * 0.92, y=-R, xanchor="right", yanchor="bottom",
+                           showarrow=False, text=f"<b>{rpm_txt}</b>",
+                           font=dict(size=11, color="#475569"))
+
+    axis_common = dict(
+        range=[-R, R], dtick=nice, showgrid=True, gridcolor="#e2e8f0",
+        zeroline=True, zerolinecolor="#94a3b8", zerolinewidth=1.2,
+        showline=True, linecolor="#0f172a", linewidth=1, mirror=True,
+        ticks="outside", tickfont=dict(size=8, color="#94a3b8"),
+        title=dict(text=f"{nice:g} {unit} /div", font=dict(size=9, color="#94a3b8")),
+    )
+    fig.update_layout(
+        height=340, margin=dict(l=40, r=20, t=8, b=34),
+        plot_bgcolor="white", paper_bgcolor="white",
+        xaxis=dict(scaleanchor="y", scaleratio=1, **axis_common),
+        yaxis=dict(**axis_common),
+        showlegend=False,
+    )
+
+    # Header tipo System1
+    st.markdown(
+        f"<div style='font-family:ui-monospace,monospace;font-size:11px;"
+        f"font-weight:700;color:#0f172a;background:#f1f5f9;border:1px solid #cbd5e1;"
+        f"border-radius:6px 6px 0 0;padding:4px 10px;'>"
+        f"{label} · Y {b.get('y_sensor_label','')} ∠45° Izq · "
+        f"X {b.get('x_sensor_label','')} ∠45° Der</div>",
+        unsafe_allow_html=True,
+    )
+    st.plotly_chart(fig, use_container_width=True,
+                    config={"displayModeBar": False})
 
 
 def _render_tabular_detail(payload: Dict[str, Any]) -> None:
