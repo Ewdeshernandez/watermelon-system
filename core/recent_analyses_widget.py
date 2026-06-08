@@ -490,7 +490,7 @@ def _render_orbit_detail(payload: Dict[str, Any]) -> None:
         # Las órbitas ruidosas dan áreas con signo inconsistente por bearing,
         # así que se decide UNA vez con la órbita de mayor |área| (la más
         # elíptica = más confiable) y se aplica a todas.
-        _best_area, _machine_ccw = 0.0, True
+        _best_area, _machine_ccw, _rmax = 0.0, True, 1e-6
         for b in bearings:
             px, py = b.get("x_values", []), b.get("y_values", [])
             if not px or not py:
@@ -500,11 +500,19 @@ def _render_orbit_detail(payload: Dict[str, Any]) -> None:
             a = float(np.sum(H[:-1] * V[1:] - H[1:] * V[:-1]))
             if abs(a) > abs(_best_area):
                 _best_area, _machine_ccw = a, (a >= 0)
+            _rmax = max(_rmax, float(np.max(np.abs(H))), float(np.max(np.abs(V))))
+
+        # Escala COMPARTIDA por las dos órbitas (comparables a simple vista)
+        # y ajustada para que LLENEN el cuadro (~89%).
+        R = _rmax * 1.12
+        raw_div = R / 3.0
+        mag = 10 ** np.floor(np.log10(raw_div))
+        nice = next((m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw_div), 10 * mag)
 
         cols = st.columns(min(len(bearings), 2))
         for idx, b in enumerate(bearings):
             with cols[idx % len(cols)]:
-                _render_orbit_system1(b, payload, idx, _machine_ccw)
+                _render_orbit_system1(b, payload, idx, _machine_ccw, R, nice)
     except Exception as e:
         st.error(f"Error renderizando orbit: {e}")
 
@@ -525,11 +533,10 @@ def _probe_to_global(px, py, x_angle=45.0, x_side="Right",
 
 
 def _render_orbit_system1(b: Dict[str, Any], payload: Dict[str, Any],
-                          idx: int, ccw: bool = True) -> None:
+                          idx: int, ccw: bool, R: float, nice: float) -> None:
     """Órbita estilo Bently Nevada System1: marco físico (sondas rotadas a
-    45°), cuadrado centrado en 0 que la órbita LLENA, rejilla discreta,
-    cajas de sonda X/Y, keyphasor, flecha de rotación (única de la máquina)
-    y rpm."""
+    45°), escala COMPARTIDA por todas las órbitas (comparables), rejilla
+    discreta, keyphasor, flecha de rotación (única de la máquina) y rpm."""
     import numpy as np
     import plotly.graph_objects as go
 
@@ -541,16 +548,8 @@ def _render_orbit_system1(b: Dict[str, Any], payload: Dict[str, Any],
     n = min(len(px), len(py))
     px, py = px[:n], py[:n]
 
-    # 1) Rotar a marco físico (Y 45° L, X 45° R) como System1
+    # Rotar a marco físico (Y 45° L, X 45° R) como System1
     H, V = _probe_to_global(px, py)
-
-    # 2) Escala simétrica centrada en 0. 4 divisiones por lado y división
-    #    "nice" ajustada para que la órbita LLENE el cuadro (menos vacío).
-    R_data = float(max(np.max(np.abs(H)), np.max(np.abs(V)), 1e-6)) * 1.08
-    raw_div = R_data / 4.0
-    mag = 10 ** np.floor(np.log10(raw_div))
-    nice = next((m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw_div), 10 * mag)
-    R = nice * 4.0
     unit = b.get("amp_unit", "") or payload.get("amp_unit", "") or "mil pp"
 
     color = ["#1d4ed8", "#047857", "#b45309", "#b91c1c"][idx % 4]
@@ -567,16 +566,10 @@ def _render_orbit_system1(b: Dict[str, Any], payload: Dict[str, Any],
         hoverinfo="skip", showlegend=False,
     ))
 
-    # 3) Cajas de sonda Y (sup-izq) y X (sup-der)
-    box = dict(showarrow=False, font=dict(size=12, family="ui-monospace,monospace",
-               color="#0f172a"), bgcolor="white", bordercolor="#0f172a",
-               borderwidth=1, borderpad=3)
-    fig.add_annotation(x=-R, y=R, xanchor="left", yanchor="top", text="<b>Y</b>", **box)
-    fig.add_annotation(x=R, y=R, xanchor="right", yanchor="top", text="<b>X</b>", **box)
-
-    # 4) Flecha de rotación — sentido ÚNICO de la máquina (no por bearing)
+    # Flecha de rotación — sentido ÚNICO de la máquina. CCW = punta hacia la
+    # izquierda sobre el arco superior; CW = punta hacia la derecha.
     r_arc = R * 0.74
-    th = np.linspace(np.deg2rad(135), np.deg2rad(60), 24)
+    th = np.linspace(np.deg2rad(60), np.deg2rad(135), 24)  # base: der→izq = CCW
     ax_, ay_ = r_arc * np.cos(th), r_arc * np.sin(th)
     if not ccw:
         ax_ = ax_[::-1]; ay_ = ay_[::-1]
@@ -587,18 +580,17 @@ def _render_orbit_system1(b: Dict[str, Any], payload: Dict[str, Any],
                        showarrow=True, arrowhead=2, arrowsize=1.4,
                        arrowwidth=1.5, arrowcolor="#475569", text="")
 
-    # 5) RPM al pie
+    # RPM al pie
     rpm = payload.get("operating_speed_rpm")
     if rpm:
         fig.add_annotation(x=R * 0.92, y=-R * 0.92, xanchor="right", yanchor="bottom",
                            showarrow=False, text=f"<b>{float(rpm):.0f} rpm</b>",
                            font=dict(size=11, color="#475569"))
 
-    # Eje: rejilla discreta y suave; cruz central sutil (no plano cartesiano
-    # marcado). Borde del cuadro tenue.
+    # Eje: rejilla discreta y suave; SIN cruz central (pedido Ewdes).
     axis_common = dict(
         range=[-R, R], dtick=nice, showgrid=True, gridcolor="#eef2f7",
-        zeroline=True, zerolinecolor="#cbd5e1", zerolinewidth=1,
+        zeroline=False,
         showline=True, linecolor="#cbd5e1", linewidth=1, mirror=True,
         ticks="outside", tickfont=dict(size=8, color="#b0bac9"),
         title=dict(text=f"{nice:g} {unit} /div", font=dict(size=9, color="#b0bac9")),
