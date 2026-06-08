@@ -120,6 +120,13 @@ class Instance:
     # Ciclo 14a — Acople
     coupling_class: str = ""        # rigid | flexible | fluid
 
+    # Ciclo 23.165 — Sentido de giro por sección del tren (para órbitas).
+    # CW | CCW. La turbina (driver) y el generador (driven) pueden girar en
+    # sentidos distintos si hay caja reductora de por medio. Vacío = auto
+    # (se infiere del área de la órbita).
+    rotation_driver: str = ""       # turbina/driver: CW | CCW | ""
+    rotation_driven: str = ""       # generador/driven: CW | CCW | ""
+
     # Ciclo 23.13 — Iconografía 2D vectorial (asset library System1-style).
     # Cuando el wizard graba estos keys, Live Monitoring + reportes pueden
     # invocar core.asset_library.composer.compose_train(driver_icon_key,
@@ -238,6 +245,8 @@ class Instance:
             trip_level=float(_f("trip_level", 0.0) or 0.0),
             setpoint_unit=_f("setpoint_unit"),
             coupling_class=_f("coupling_class"),
+            rotation_driver=_f("rotation_driver"),
+            rotation_driven=_f("rotation_driven"),
             # Ciclo 23.13 — asset library 2D
             driver_icon_key=_f("driver_icon_key"),
             driven_icon_key=_f("driven_icon_key"),
@@ -418,6 +427,8 @@ def update_instance_header(
         "probe_x_orientation_deg", "probe_y_orientation_deg",
         "alert_level", "danger_level", "trip_level", "setpoint_unit",
         "coupling_class", "schematic_png",
+        # Ciclo 23.165 — sentido de giro por sección (órbitas)
+        "rotation_driver", "rotation_driven",
         # Ciclo 23.13 — asset library 2D
         "driver_icon_key", "driven_icon_key",
         "last_balance_date", "last_alignment_date", "last_overhaul_date",

@@ -243,6 +243,30 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                         index=["", "rigid", "flexible", "fluid"].index(inst.coupling_class) if inst.coupling_class in ["", "rigid", "flexible", "fluid"] else 0,
                     )
 
+                # Ciclo 23.165 — Sentido de giro por sección (órbitas).
+                # Turbina (driver) y generador (driven) pueden girar opuesto
+                # si hay caja reductora. Vacío = auto (se infiere de la órbita).
+                st.markdown("**Sentido de giro** "
+                            "<span style='color:#94a3b8;font-size:0.8rem'>"
+                            "(vista hacia el acople · usado en las órbitas)</span>",
+                            unsafe_allow_html=True)
+                _ROT = ["", "CW", "CCW"]
+                _ROT_LBL = {"": "Auto (inferir)", "CW": "CW — horario",
+                            "CCW": "CCW — antihorario"}
+                rg1, rg2 = st.columns(2)
+                with rg1:
+                    new_rot_driver = st.selectbox(
+                        "Turbina / driver",
+                        _ROT, format_func=lambda v: _ROT_LBL[v],
+                        index=_ROT.index(inst.rotation_driver) if getattr(inst, "rotation_driver", "") in _ROT else 0,
+                    )
+                with rg2:
+                    new_rot_driven = st.selectbox(
+                        "Generador / driven",
+                        _ROT, format_func=lambda v: _ROT_LBL[v],
+                        index=_ROT.index(inst.rotation_driven) if getattr(inst, "rotation_driven", "") in _ROT else 0,
+                    )
+
             with tab_op:
                 o1, o2 = st.columns(2)
                 with o1:
@@ -617,6 +641,8 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     driven_serial=new_dvn_ser.strip(),
                     nominal_power_mw=float(new_power),
                     coupling_class=new_coupling.strip(),
+                    rotation_driver=new_rot_driver,
+                    rotation_driven=new_rot_driven,
                     nominal_rpm=float(new_nom_rpm),
                     min_rpm=float(new_min_rpm),
                     max_rpm=float(new_max_rpm),

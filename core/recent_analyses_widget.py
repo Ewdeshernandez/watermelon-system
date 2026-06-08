@@ -509,12 +509,47 @@ def _render_orbit_detail(payload: Dict[str, Any]) -> None:
         mag = 10 ** np.floor(np.log10(raw_div))
         nice = next((m * mag for m in (1, 2, 2.5, 5, 10) if m * mag >= raw_div), 10 * mag)
 
+        # Ciclo 23.165 — Sentido de giro configurado en el activo (Machinery
+        # Library): por sección (turbina/driver vs generador/driven). Si está
+        # vacío, cae al cálculo automático del área.
+        _inst = None
+        try:
+            from core.instance_state import get_instance
+            _inst = get_instance(payload.get("instance_id", ""))
+        except Exception:
+            _inst = None
+
         cols = st.columns(min(len(bearings), 2))
         for idx, b in enumerate(bearings):
+            cfg = _resolve_rotation(b, _inst)
+            ccw = (cfg == "CCW") if cfg else _machine_ccw
             with cols[idx % len(cols)]:
-                _render_orbit_system1(b, payload, idx, _machine_ccw, R, nice)
+                _render_orbit_system1(b, payload, idx, ccw, R, nice, source=("config" if cfg else "auto"))
     except Exception as e:
         st.error(f"Error renderizando orbit: {e}")
+
+
+def _resolve_rotation(bearing: Dict[str, Any], inst) -> Optional[str]:
+    """Sentido de giro de un bearing según la config del activo. Devuelve
+    'CW'/'CCW' o None (auto). Clasifica generador/driven por keywords en los
+    labels; si el generador no tiene sentido propio, usa el de la turbina."""
+    if inst is None:
+        return None
+    rd = (getattr(inst, "rotation_driver", "") or "").upper().strip()
+    rv = (getattr(inst, "rotation_driven", "") or "").upper().strip()
+    if rd not in ("CW", "CCW"):
+        rd = ""
+    if rv not in ("CW", "CCW"):
+        rv = ""
+    txt = (f"{bearing.get('bearing_label','')} {bearing.get('x_sensor_label','')} "
+           f"{bearing.get('y_sensor_label','')}").upper()
+    is_gen = any(k in txt for k in ("GENERAD", "GENERATOR", "BRUSH",
+                                    "ALTERNAD", "DRIVEN", "GEN DE", "GEN NDE"))
+    if rv and is_gen:
+        return rv
+    if rd:
+        return rd
+    return rv or None
 
 
 def _probe_to_global(px, py, x_angle=45.0, x_side="Right",
@@ -533,7 +568,8 @@ def _probe_to_global(px, py, x_angle=45.0, x_side="Right",
 
 
 def _render_orbit_system1(b: Dict[str, Any], payload: Dict[str, Any],
-                          idx: int, ccw: bool, R: float, nice: float) -> None:
+                          idx: int, ccw: bool, R: float, nice: float,
+                          source: str = "auto") -> None:
     """Órbita estilo Bently Nevada System1: marco físico (sondas rotadas a
     45°), escala COMPARTIDA por todas las órbitas (comparables), rejilla
     discreta, keyphasor, flecha de rotación (única de la máquina) y rpm."""
@@ -603,13 +639,21 @@ def _render_orbit_system1(b: Dict[str, Any], payload: Dict[str, Any],
         showlegend=False,
     )
 
-    # Header — convención internacional: 45° L / 45° R (no Izq/Der)
+    # Header — convención internacional: 45° L / 45° R (no Izq/Der).
+    # Sentido de giro con marca de origen: ● config (verde) / ○ auto.
+    _rot = "CCW" if ccw else "CW"
+    _dot = ("#10b981" if source == "config" else "#94a3b8")
+    _src_lbl = "config" if source == "config" else "auto"
     st.markdown(
         f"<div style='font-family:ui-monospace,monospace;font-size:11px;"
         f"font-weight:700;color:#0f172a;background:#f1f5f9;border:1px solid #cbd5e1;"
-        f"border-radius:6px 6px 0 0;padding:4px 10px;'>"
-        f"{label} · Y {b.get('y_sensor_label','')} 45°L · "
-        f"X {b.get('x_sensor_label','')} 45°R</div>",
+        f"border-radius:6px 6px 0 0;padding:4px 10px;display:flex;"
+        f"justify-content:space-between;'>"
+        f"<span>{label} · Y {b.get('y_sensor_label','')} 45°L · "
+        f"X {b.get('x_sensor_label','')} 45°R</span>"
+        f"<span style='color:#475569;'>↻ {_rot} "
+        f"<span style='color:{_dot};'>●</span>"
+        f"<span style='color:#94a3b8;font-weight:500;'> {_src_lbl}</span></span></div>",
         unsafe_allow_html=True,
     )
     st.plotly_chart(fig, use_container_width=True,
