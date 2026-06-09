@@ -85,6 +85,8 @@ NAV_GROUPS = [
             {"label": "✧  AI Assistant", "page": "pages/_ai_assistant.py"},
             # Ciclo 17.31 — Briefing Mensual Ejecutivo PDF al VP cliente
             {"label": "✉  Briefing Mensual", "page": "pages/_monthly_briefing.py"},
+            # Ciclo 23.347 — Briefing por activo (Semanal/Mensual) figura-rico
+            {"label": "🍉  Briefing por activo", "page": "pages/_asset_briefing.py"},
         ],
     },
     {
@@ -149,6 +151,8 @@ CLIENT_BLOCKED_PAGES = {
     # acceder a la herramienta de generación (ve los briefings que
     # le llegan por email pero no los genera él mismo).
     "pages/_monthly_briefing.py",
+    # Ciclo 23.347 — Briefing por activo: herramienta del analista
+    "pages/_asset_briefing.py",
     # Ciclo 23.146 — Modal Analysis es trabajo interno SIGA (EMA + OMA + FEA
     # bajo ISO 7626 / ISO 20816 / API 684). El cliente no debe ver el módulo
     # de adquisición ni los curve fits — solo recibe el reporte final modal
