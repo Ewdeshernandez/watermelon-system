@@ -101,3 +101,8 @@ planta/data/.no_updates.flag
 
 # --- Cache de verificación de revocación (FASE J) ---
 planta/data/.revocation_cache.json
+
+# Watermelon Planta — driver runtime del fabricante (binario grande, no va al repo)
+planta/installer/dependencies/driver-extracted/
+planta/installer/dist/
+planta/installer/build/

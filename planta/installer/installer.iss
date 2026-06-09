@@ -160,17 +160,17 @@ Filename: "{tmp}\driver-installer\Install.exe"; \
 ; Watermelon habla con el driver directo via DAQmx — no necesita el
 ; Device Monitor (que solo abre el popup de "configurar/explorar").
 ; ---------------------------------------------------------------------
+; v3.31.340 — Silenciar SIEMPRE (antes solo si NUESTRO instalador instalaba
+; el driver; si el PC ya lo tenía, el popup quedaba vivo — caso reportado).
+; sc.exe/taskkill sobre un servicio inexistente es inofensivo (runhidden).
 Filename: "{sys}\sc.exe"; Parameters: "stop ""NIDeviceMonitor"""; \
     StatusMsg: "Configurando servicio de adquisición..."; \
-    Flags: runhidden waituntilterminated; \
-    Check: NeedsDriverInstall and DriverInstallerExists
+    Flags: runhidden waituntilterminated
 Filename: "{sys}\sc.exe"; Parameters: "config ""NIDeviceMonitor"" start= disabled"; \
-    Flags: runhidden waituntilterminated; \
-    Check: NeedsDriverInstall and DriverInstallerExists
+    Flags: runhidden waituntilterminated
 ; Por si quedó el proceso colgado
 Filename: "{sys}\taskkill.exe"; Parameters: "/F /IM nidevmon.exe /T"; \
-    Flags: runhidden waituntilterminated; \
-    Check: NeedsDriverInstall and DriverInstallerExists
+    Flags: runhidden waituntilterminated
 
 ; Mostrar instrucciones de licencia al terminar la instalación
 Filename: "notepad.exe"; Parameters: """{app}\data\LICENCIA_README.txt"""; \

@@ -41,6 +41,33 @@ if not exist "dist\WatermelonPlanta.exe" (
     exit /b 1
 )
 
+REM ==============================================================
+REM  v3.31.340 — GUARD paquete COMPLETO para venta. Si el driver del
+REM  equipo NO esta empacado, el instalador saldria sin controlador y el
+REM  cliente en una maquina NUEVA no podria capturar. No debe pasar en
+REM  silencio para un paquete turnkey.
+REM ==============================================================
+if not exist "dependencies\driver-extracted\Install.exe" (
+    echo.
+    echo ============================================================
+    echo   ATENCION - DRIVER DEL EQUIPO NO EMPACADO
+    echo ============================================================
+    echo.
+    echo No encontre: dependencies\driver-extracted\Install.exe
+    echo El instalador saldria SIN el controlador del equipo. En una
+    echo maquina NUEVA el cliente NO podria capturar.
+    echo.
+    echo Para un paquete de venta COMPLETO coloca el runtime del driver en
+    echo   dependencies\driver-extracted\   (ver dependencies\README_DRIVER.txt)
+    echo.
+    set /p _CONT="Continuar igual (solo build interno/pruebas)? [s/N]: "
+    if /I not "%_CONT%"=="s" (
+        echo Build cancelado. Empaca el driver y reintenta.
+        pause
+        exit /b 1
+    )
+)
+
 echo.
 echo Inno Setup encontrado: %ISCC%
 echo Build empezando...
