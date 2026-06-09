@@ -345,6 +345,53 @@ def discover_acq_modules(chassis_name: str = "cDAQ1") -> List[Dict]:
     return sorted(modules, key=lambda m: m["slot"])
 
 
+def diagnose_acquisition(chassis_name: str = "cDAQ1") -> Dict[str, object]:
+    """v3.31.339 — Autodiagnóstico NO-lanzante de la cadena de adquisición.
+
+    Distingue las 3 capas para que el operador sepa EXACTAMENTE qué falló,
+    en vez de un genérico "reinstala":
+
+      1. software_module: el paquete de captura quedó incluido en la app
+         (si False → el build del .exe está incompleto, hay que reinstalar
+         con el instalador completo).
+      2. equipment_driver: el controlador del equipo está instalado y carga
+         (si False con software_module True → falta instalar el driver del
+         equipo desde el instalador / NI MAX).
+      3. devices: módulos físicos detectados (si vacío con las dos anteriores
+         OK → el equipo no está conectado o encendido).
+
+    Mensajes SANITIZADOS (sin marcas del fabricante) — la app de planta es
+    visible al cliente.
+    """
+    out: Dict[str, object] = {
+        "software_module": False,
+        "equipment_driver": False,
+        "devices": [],
+        "detail": "",
+    }
+    # Capa 1 — paquete de software de captura presente en el bundle
+    try:
+        from nidaqmx.system import System  # noqa: F401
+        out["software_module"] = True
+    except Exception as exc:  # ImportError u otro al congelar incompleto
+        out["detail"] = f"software_module: {type(exc).__name__}"
+        return out
+    # Capa 2 — controlador del equipo instalado y cargable
+    try:
+        system = System.local()
+        _ = list(system.devices)  # fuerza la carga del driver runtime
+        out["equipment_driver"] = True
+    except Exception as exc:
+        out["detail"] = f"equipment_driver: {type(exc).__name__}"
+        return out
+    # Capa 3 — módulos físicos detectados
+    try:
+        out["devices"] = discover_acq_modules(chassis_name)
+    except Exception as exc:
+        out["detail"] = f"devices: {type(exc).__name__}"
+    return out
+
+
 def validate_channels_against_hardware(
     config: AcquisitionConfig,
 ) -> Tuple[bool, List[str]]:

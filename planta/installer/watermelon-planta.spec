@@ -76,10 +76,20 @@ datas += collect_data_files("plotly")
 # Importer metadata (necesario para que Streamlit detecte sus extensiones)
 datas += copy_metadata("streamlit")
 datas += copy_metadata("supabase")
-try:
-    datas += copy_metadata("nidaqmx")
-except Exception:  # noqa: BLE001
-    pass  # nidaqmx puede no tener metadata si es muy viejo
+
+# v3.31.339 — FIX bug "Componente de adquisición pendiente": el paquete de
+# adquisición y el de TDMS tienen un ÁRBOL de submódulos. Antes se listaban
+# 3 submódulos a mano → el .exe congelado quedaba incompleto y `import` fallaba
+# en campo. Ahora se colectan TODOS sus submódulos + data files + metadata.
+for _pkg in ("nidaqmx", "nptdms"):
+    try:
+        datas += collect_data_files(_pkg)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        datas += copy_metadata(_pkg)
+    except Exception:  # noqa: BLE001
+        pass
 
 # ============================================================
 # Hidden imports — módulos que PyInstaller no detecta automático
@@ -94,9 +104,13 @@ hiddenimports += collect_submodules("postgrest")
 hiddenimports += collect_submodules("realtime")
 hiddenimports += collect_submodules("supabase_auth")
 
+# v3.31.339 — Colectar el ÁRBOL COMPLETO de submódulos del paquete de
+# adquisición y de TDMS (antes solo 3 a mano → bundle incompleto → ImportError
+# en campo = "Componente de adquisición pendiente").
+hiddenimports += collect_submodules("nidaqmx")
+hiddenimports += collect_submodules("nptdms")
+
 hiddenimports += [
-    "nidaqmx", "nidaqmx.constants", "nidaqmx.system",
-    "nptdms", "nptdms.tdms",
     "numpy", "scipy", "scipy.signal",
     "toml", "pathlib", "sqlite3",
     "httpx", "websockets", "h2", "hpack", "hyperframe",
