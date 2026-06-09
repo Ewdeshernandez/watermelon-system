@@ -14,6 +14,15 @@ from typing import Any, Dict, List, Optional, Tuple
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = PROJECT_ROOT / "data"
 
+# Ciclo 23.169 — Raíz PERSISTENTE para los datos de usuario (reportes:
+# estado, drafts e imágenes). El filesystem de Render es efímero (se borra
+# en cada redeploy/reinicio), así que en producción se monta un DISCO
+# persistente y se setea la env var WM_PERSIST_DIR (ej. /var/data). Si está
+# definida, todo lo de data/users/ vive ahí y sobrevive reinicios. En local
+# (sin la var) sigue usando data/ del repo — comportamiento idéntico al actual.
+_PERSIST_ROOT = Path(os.environ["WM_PERSIST_DIR"]) if os.environ.get("WM_PERSIST_DIR") else DATA_DIR
+USERS_ROOT = _PERSIST_ROOT / "users"
+
 # Paths LEGACY (Ciclo <17.15) — globales, sin namespace por usuario.
 # Todavía se usan como fallback y para detectar/migrar estado viejo.
 _LEGACY_REPORT_STATE_FILE = DATA_DIR / "report_state.json"
@@ -101,7 +110,7 @@ def get_user_data_dir(email: Optional[str] = None) -> Path:
     """
     e = email if email is not None else _current_owner_email()
     slug = _email_slug(e or "anonymous")
-    d = DATA_DIR / "users" / slug
+    d = USERS_ROOT / slug
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -1004,7 +1013,7 @@ def list_all_users_with_state() -> List[Dict[str, Any]]:
     activos en el sistema".
     Devuelve [{email_slug, n_items, last_saved, n_drafts, total_size_bytes}].
     """
-    users_root = DATA_DIR / "users"
+    users_root = USERS_ROOT
     if not users_root.exists():
         return []
     out: List[Dict[str, Any]] = []
