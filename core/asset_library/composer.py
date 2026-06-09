@@ -443,6 +443,31 @@ def compose_train(
         counts[key] = counts.get(key, 0) + 1
     seen: Dict[Tuple[str, str], int] = {}
 
+    # Ciclo 23.342 — ANTI-OVERLAP horizontal. Cojinetes adyacentes con UN solo
+    # sensor (ej. CRF y TRF con sus velocímetros) tenían el texto SIEMPRE
+    # arriba; al estar cerca, sus labels largos se montaban ("1_RAD_V…2_RAD_V").
+    # Ahora se ALTERNAN arriba/abajo según su posición horizontal (izq→der), así
+    # los de un solo sensor nunca colisionan, sin importar el largo del label.
+    def _anchor_cx(side_: str, anchor_: str) -> Optional[float]:
+        a = (driver_anchors if side_ == "driver"
+             else driven_anchors if side_ == "driven"
+             else coupling_anchors if side_ == "coupling"
+             else driver_anchors)
+        p = a.get(anchor_)
+        return float(p[0]) if (p and isinstance(p, tuple)) else None
+
+    _singles: List[Tuple[float, Tuple[str, str]]] = []
+    for s in sensors_with_status:
+        k = (s.get("side", "driver"), s.get("anchor", "DE"))
+        if counts[k] == 1:  # un anchor con count==1 aparece exactamente una vez
+            cxv = _anchor_cx(*k)
+            if cxv is not None:
+                _singles.append((cxv, k))
+    _singles.sort(key=lambda t: t[0])
+    _single_above: Dict[Tuple[str, str], bool] = {
+        k: (i % 2 == 0) for i, (_, k) in enumerate(_singles)
+    }
+
     dots_svg_parts: List[str] = []
     # Overlays (Ciclo 23.32): por cada sensor calculamos el bbox (en %
     # del viewBox) de la sparkline para que el caller pueda dibujar
@@ -487,7 +512,10 @@ def compose_train(
         key = (side, anchor_name)
         n_total = counts[key]
         text_above = True
-        if n_total == 2:
+        if n_total == 1:
+            # Alternancia izq→der para no chocar con el cojinete vecino
+            text_above = _single_above.get(key, True)
+        elif n_total == 2:
             idx = seen.get(key, 0)
             seen[key] = idx + 1
             text_above = (idx == 0)  # primer sensor arriba, segundo abajo
