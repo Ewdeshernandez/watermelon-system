@@ -141,9 +141,10 @@ def fig_to_png_bytes(
 
 
 def export_plot_png(fig) -> Optional[bytes]:
-    """Compat (TSA / Order Tracking): devuelve solo los bytes del PNG, ahora
-    por el camino seguro (downsample + scale=1). Antes era to_image directo a
-    1920×1080 scale=2 → riesgo de OOM con datos densos."""
+    """Compat (TSA / Order Tracking): devuelve solo los bytes del PNG, por el
+    camino seguro (downsample + scale=1). NO subir scale: el raster a 2× puede
+    reventar el worker en Render (OOM histórico). La legibilidad se mejora
+    AGRANDANDO las fuentes de la figura, no la resolución."""
     return fig_to_png_bytes(fig, width=1920, height=1080, scale=1)[0]
 
 

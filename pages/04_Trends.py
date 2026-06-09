@@ -3683,6 +3683,20 @@ def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[st
 
         # 4. Construir figura HD
         export_fig = go.Figure(fig_dict)
+
+        # Ciclo 23.341 — LEGIBILIDAD del PDF sin tocar resolución (evita OOM).
+        # La imagen exportada mide ~4900px de ancho, pero las anotaciones (caja
+        # "Trend Information", info de cursores, labels Warning/Danger) vienen
+        # con fuente 10-12 de la vista de pantalla → microscópicas al exportar.
+        # Se escalan SOLO en el export ×2.6 para que se lean bien.
+        _ANN_SCALE = 2.6
+        for _ann in export_fig.layout.annotations:
+            try:
+                _sz = (_ann.font.size if (_ann.font and _ann.font.size) else 12)
+                _ann.font.size = round(float(_sz) * _ANN_SCALE)
+            except Exception:
+                pass
+
         has_secondary = "yaxis2" in fig_dict.get("layout", {})
         has_right_panel = any(
             (ann.get("xref") == "paper" and float(ann.get("x", 0) or 0) >= 0.83)
