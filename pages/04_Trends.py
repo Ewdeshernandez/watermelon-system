@@ -1021,62 +1021,91 @@ def _draw_top_strip(
 
 
 def _draw_right_info_box(fig: go.Figure, rows: List[Tuple[str, str]]) -> None:
-    panel_x0 = 0.834
-    panel_x1 = 0.976
+    # Ciclo 23.343 — Caja "Trend Information" en DOS columnas (A izquierda ·
+    # B derecha) y la fecha FUSIONADA debajo del valor (sin las filas sueltas
+    # "A Initial Date", "A Current Date", etc.). Más compacta y legible.
+
+    # 1) Parsear filas planas (title, value) → items (title, value, date):
+    #    cuando el title termina en "Date", su value se fusiona como fecha
+    #    del item anterior en vez de ocupar su propia fila.
+    items: List[Tuple[str, str, str]] = []
+    for title, value in rows:
+        t = title or ""
+        if t.strip().endswith("Date"):
+            if items:
+                _pt, _pv, _ = items[-1]
+                items[-1] = (_pt, _pv, value)
+            continue
+        items.append((t, value, ""))
+
+    # 2) Repartir en columnas: A → izquierda, B → derecha. Lo que no sea A/B
+    #    (raro) cae en la columna A.
+    def _is(prefix: str, it: Tuple[str, str, str]) -> bool:
+        return it[0].lstrip().startswith(prefix)
+    colA = [it for it in items if _is("A ", it)]
+    colB = [it for it in items if _is("B ", it)]
+    colA += [it for it in items if not (_is("A ", it) or _is("B ", it))]
+    n_rows_max = max(len(colA), len(colB), 1)
+
+    panel_x0, panel_x1 = 0.742, 0.992
     panel_y1 = 0.915
     header_h = 0.034
-    row_h = 0.058
-    panel_h = header_h + len(rows) * row_h + 0.018
+    item_h = 0.082
+    panel_h = header_h + n_rows_max * item_h + 0.016
     panel_y0 = panel_y1 - panel_h
+    mid_x = (panel_x0 + panel_x1) / 2.0
 
+    # Fondo
     fig.add_shape(
-        type="path",
-        xref="paper", yref="paper",
+        type="path", xref="paper", yref="paper",
         path=rounded_rect_path(panel_x0, panel_y0, panel_x1, panel_y1, 0.012),
         line=dict(color="rgba(0,0,0,0)", width=0),
-        fillcolor="rgba(255,255,255,0.72)",
-        layer="above",
+        fillcolor="rgba(255,255,255,0.72)", layer="above",
     )
-
+    # Header
     fig.add_shape(
-        type="path",
-        xref="paper", yref="paper",
+        type="path", xref="paper", yref="paper",
         path=rounded_rect_path(panel_x0, panel_y1 - header_h, panel_x1, panel_y1, 0.012),
         line=dict(color="rgba(0,0,0,0)", width=0),
-        fillcolor="rgba(147,197,253,0.94)",
-        layer="above",
+        fillcolor="rgba(147,197,253,0.94)", layer="above",
     )
-
     fig.add_annotation(
         xref="paper", yref="paper",
-        x=(panel_x0 + panel_x1) / 2.0, y=panel_y1 - header_h / 2.0,
+        x=mid_x, y=panel_y1 - header_h / 2.0,
         text="<b>Trend Information</b>",
         showarrow=False, xanchor="center", yanchor="middle",
         font=dict(size=11.4, color="#111827"),
     )
+    # Divisor vertical sutil entre columnas
+    fig.add_shape(
+        type="line", xref="paper", yref="paper",
+        x0=mid_x, x1=mid_x, y0=panel_y0 + 0.012, y1=panel_y1 - header_h - 0.006,
+        line=dict(color="rgba(15,23,42,0.12)", width=1), layer="above",
+    )
 
-    current_top = panel_y1 - header_h - 0.008
-    for title, value in rows:
-        title_y = current_top - 0.004
-        value_y = current_top - 0.030
+    def _render_col(items_col: List[Tuple[str, str, str]], x_left: float) -> None:
+        top = panel_y1 - header_h - 0.012
+        for title, value, date in items_col:
+            fig.add_annotation(
+                xref="paper", yref="paper", x=x_left, y=top,
+                xanchor="left", yanchor="top", text=f"<b>{title}</b>",
+                showarrow=False, font=dict(size=10.2, color="#111827"), align="left",
+            )
+            fig.add_annotation(
+                xref="paper", yref="paper", x=x_left, y=top - 0.024,
+                xanchor="left", yanchor="top", text=value,
+                showarrow=False, font=dict(size=10.2, color="#111827"), align="left",
+            )
+            if date:
+                fig.add_annotation(
+                    xref="paper", yref="paper", x=x_left, y=top - 0.046,
+                    xanchor="left", yanchor="top", text=date,
+                    showarrow=False, font=dict(size=9.2, color="#475569"), align="left",
+                )
+            top -= item_h
 
-        fig.add_annotation(
-            xref="paper", yref="paper",
-            x=panel_x0 + 0.030, y=title_y,
-            xanchor="left", yanchor="top",
-            text=f"<b>{title}</b>",
-            showarrow=False, font=dict(size=10.7, color="#111827"), align="left",
-        )
-
-        fig.add_annotation(
-            xref="paper", yref="paper",
-            x=panel_x0 + 0.030, y=value_y,
-            xanchor="left", yanchor="top",
-            text=value,
-            showarrow=False, font=dict(size=10.4, color="#111827"), align="left",
-        )
-
-        current_top -= row_h
+    _render_col(colA, panel_x0 + 0.012)
+    _render_col(colB, mid_x + 0.014)
 
 
 def get_metric_series(record: TrendRecord, metric_key: str) -> Tuple[pd.Series, str]:
