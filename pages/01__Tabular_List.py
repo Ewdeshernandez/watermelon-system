@@ -707,6 +707,22 @@ def order_amplitude_pp(record: SignalRecord, order: float) -> Optional[float]:
     return harmonic_fit_amplitude_pp(record.time_s, record.amplitude, freq_hz)
 
 
+# Ciclo 23.167 — Planos que NO comparten la velocidad del keyphasor
+# (rec.rpm). En máquinas de doble eje, los puntos del núcleo del gas
+# generator (CRF = Compressor Rotor Frame) giran a otra velocidad
+# (~10200 cpm vs 3600 del eje de potencia/generador), así que los órdenes
+# 0.5X/1X/2X referenciados a rec.rpm no representan su condición real.
+# Para esos puntos se reporta solo el Overall.
+_OFFSHAFT_TOKENS = ("CRF",)
+
+
+def _harmonics_apply_to_point(point: str) -> bool:
+    """False si el punto está en un eje con velocidad distinta a la del
+    keyphasor (ej. CRF en LM6000): no se calculan 0.5X/1X/2X, solo Overall."""
+    p = (point or "").upper()
+    return not any(tok in p for tok in _OFFSHAFT_TOKENS)
+
+
 def overall_status(value: Optional[float], alarm: float, danger: float) -> str:
     if value is None or not math.isfinite(value):
         return "No Data"
@@ -842,13 +858,21 @@ def build_table_dataframe(
         ov_rms = overall_rms(rec)
         ov_display = convert_rms_to_display(ov_rms, overall_mode_row)
 
-        a05_pp = order_amplitude_pp(rec, 0.5)
-        a10_pp = order_amplitude_pp(rec, 1.0)
-        a20_pp = order_amplitude_pp(rec, 2.0)
-
-        a05 = convert_pp_to_display(a05_pp, overall_mode_row)
-        a10 = convert_pp_to_display(a10_pp, overall_mode_row)
-        a20 = convert_pp_to_display(a20_pp, overall_mode_row)
+        # Ciclo 23.167 — Los armónicos (0.5X/1X/2X) se referencian a rec.rpm
+        # (velocidad del eje del keyphasor, ~3600 cpm). En máquinas de doble
+        # eje, los puntos CRF (Compressor Rotor Frame = núcleo del gas
+        # generator) giran a otra velocidad (~10200 cpm), así que esos órdenes
+        # NO corresponden a su fundamental real. Para esos puntos se muestra
+        # SOLO el Overall y se dejan en blanco los armónicos.
+        if _harmonics_apply_to_point(rec.point):
+            a05_pp = order_amplitude_pp(rec, 0.5)
+            a10_pp = order_amplitude_pp(rec, 1.0)
+            a20_pp = order_amplitude_pp(rec, 2.0)
+            a05 = convert_pp_to_display(a05_pp, overall_mode_row)
+            a10 = convert_pp_to_display(a10_pp, overall_mode_row)
+            a20 = convert_pp_to_display(a20_pp, overall_mode_row)
+        else:
+            a05 = a10 = a20 = None
 
         # Ciclo 22.1 — Unit Full: si hubo sensor match, SIEMPRE respetamos
         # el sensor (unit_native). NUNCA caemos a CSV legacy en ese caso,

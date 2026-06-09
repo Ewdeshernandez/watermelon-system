@@ -3386,6 +3386,41 @@ with c4:
 
 st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
 
+# =============================================================
+# Ciclo 23.168 — AUTO-GUARDADO cada 2 min (pedido Ewdes).
+# El estado ya se persiste en cada interacción; este fragment fuerza un
+# guardado periódico aunque el especialista esté inactivo, y muestra un
+# indicador con la hora del último guardado para dar tranquilidad. Si la
+# página se cae / cierra / se va el internet, al reentrar el reporte se
+# recupera automáticamente (load_report_state + backups rotativos).
+# 2 min (no 5): el reporte es trabajo "vital"; minimiza la pérdida y el
+# guardado es barato.
+# =============================================================
+@st.fragment(run_every="120s")
+def _wm_report_autosave_indicator() -> None:
+    import datetime as _dt
+    try:
+        save_report_state(items=st.session_state.get("report_items", []),
+                          meta=st.session_state.get("report_meta", {}))
+        _ts = _dt.datetime.now().strftime("%H:%M:%S")
+        st.session_state["_wm_report_autosave_ts"] = _ts
+        ok = True
+    except Exception:
+        ok = False
+    _ts = st.session_state.get("_wm_report_autosave_ts", "—")
+    _color = "#10b981" if ok else "#d97706"
+    _msg = "Autoguardado" if ok else "Reintentando guardado"
+    st.markdown(
+        f"<div style='display:inline-flex;align-items:center;gap:7px;"
+        f"font-size:12px;color:#475569;background:#f1f5f9;border:1px solid #e2e8f0;"
+        f"border-radius:8px;padding:5px 12px;margin-bottom:6px;'>"
+        f"<span style='width:8px;height:8px;border-radius:50%;background:{_color};'></span>"
+        f"💾 {_msg} cada 2 min · último: <b>{_ts}</b></div>",
+        unsafe_allow_html=True,
+    )
+
+_wm_report_autosave_indicator()
+
 st.markdown('<div class="wm-section-title">Acciones del reporte</div>', unsafe_allow_html=True)
 
 ga1, ga2, ga3, ga4 = st.columns([1.2, 1.2, 1.2, 3.4])
