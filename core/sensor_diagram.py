@@ -825,6 +825,16 @@ def render_sensor_map_diagram(
                         ov_f = float(ov)
                     except Exception:
                         ov_f = 0.0
+                    # Ciclo 23.348 — anti-amontonado: la unidad verbosa
+                    # ("g peak", "in/s peak") ensancha el texto y choca con el
+                    # plano vecino (CRF/TRF cercanos). Se compacta quitando el
+                    # "peak/pico" (se conserva pp por ser significativo) y se
+                    # reduce la fuente.
+                    if unit:
+                        _u = unit
+                        for _w in (" peak", " pico", " pk"):
+                            _u = _u.replace(_w, "")
+                        unit = _u.strip()
                     txt = f"{lbl}: {ov_f:.2f}"
                     if unit:
                         txt += f" {unit}"
@@ -834,10 +844,10 @@ def render_sensor_map_diagram(
                 for txt, vc in _lines[:4]:
                     ax_top.text(
                         stem_x, _line_y, txt,
-                        fontsize=6.2, ha="center", va="top",
+                        fontsize=5.4, ha="center", va="top",
                         color=vc, fontweight="bold", zorder=5,
                     )
-                    _line_y -= 0.13
+                    _line_y -= 0.125
             elif data_plane is None:
                 # Sin data — solo el número grande (slot vacío)
                 ax_top.text(
