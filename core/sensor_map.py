@@ -443,6 +443,16 @@ def resolve_sensor_for_point(
         direction_hint = "X"
     elif "(y)" in point_norm or " y " in f" {point_norm} " or point_norm.endswith(" y"):
         direction_hint = "Y"
+    # Formato compacto Bently/DCS "<plano><dir><tipo>" (1XD, 3YV, 4XA): la X/Y
+    # va PEGADA al número, así que la heurística de "(x)"/" x " no la detecta.
+    # Sin esto, el resolver no filtra por dirección y el tie-break por
+    # plano+tipo asigna la sonda equivocada → X y Y quedan invertidas en el
+    # Sensor Map / Resumen Ejecutivo (la Tabular se ve bien porque muestra el
+    # Point del origen, no la columna Sensor resuelta).
+    if not direction_hint:
+        _m_dir = re.search(r"\b\d+\s*([xy])\s*[adv]\b", point_norm)
+        if _m_dir:
+            direction_hint = _m_dir.group(1).upper()
 
     type_hint = ""
     # 1) Por SUBSTRING del Point name (más confiable, cubre VT Bently)
@@ -550,7 +560,20 @@ def resolve_sensor_for_point(
                 "V": "velocity",
                 "D": "proximity",
             }.get(_letter_csv)
+            _dir_csv = (_m_pt.group(2) or "").upper()
             if _type_csv:
+                # Si el Point trae dirección (X/Y), preferir el sensor de ESA
+                # dirección — evita que plano+tipo crucen X↔Y (1XD↔1YD).
+                if _dir_csv:
+                    for sensor in candidates:
+                        if (int(sensor.get("plane", 0) or 0) == _plane_csv
+                                and str(sensor.get("sensor_type", "")).lower()
+                                == _type_csv
+                                and str(sensor.get("direction", "")).upper()
+                                == _dir_csv):
+                            return sensor
+                # Fallback plano+tipo (cubre sensores radial/axial donde la
+                # dirección del CSV difiere de la del sensor — caso C200C).
                 for sensor in candidates:
                     if (int(sensor.get("plane", 0) or 0) == _plane_csv
                             and str(sensor.get("sensor_type", "")).lower()
