@@ -503,6 +503,14 @@ def _infer_side_anchor(
     label_l = (sensor_label or "").strip().lower()
     plane_l = ((sensor_match or {}).get("plane_label") or "").lower()
 
+    # 1.4 — Gearbox: sensores del cuerpo intermedio (wizard: 'HSS/LSS gearbox').
+    # Caen sobre el icono del gearbox (side='gearbox'); HSS = eje rápido
+    # (input/DE), LSS = eje lento (output/NDE).
+    if "gearbox" in plane_l or "reductor" in plane_l or "gearbox" in label_l:
+        if "lss" in plane_l or "lss" in label_l:
+            return "gearbox", "NDE"
+        return "gearbox", "DE"
+
     # 1.5 — Ciclo 23.141: PRIORIDAD AL SUFIJO EXPLÍCITO en el label.
     # Casos reales del cliente Ecopetrol Magnex con sensores casing:
     #   "1VT6831 (C) CRF"  empieza con "1" pero el TAG VT6831 está físicamente

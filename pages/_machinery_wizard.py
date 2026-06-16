@@ -917,11 +917,16 @@ def _render_visual_editor_library(
         # Build sensors_with_status para el preview
         s_for_svg = []
         from core.sensor_map import sensor_label as _sensor_label_fn
+        from core.sensor_map import gearbox_overlay_anchor as _gbx_ov
         for s in sensors:
             side = (s.get("icon_side") or "").strip()
             anchor = (s.get("icon_anchor") or "").strip()
             if not side or not anchor:
-                continue
+                _gov = _gbx_ov(s)
+                if _gov:
+                    side, anchor = _gov
+                else:
+                    continue
             try:
                 lbl = _sensor_label_fn(s)
             except Exception:

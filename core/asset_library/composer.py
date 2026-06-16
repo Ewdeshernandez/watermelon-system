@@ -441,7 +441,7 @@ def compose_train(
     # dot. Sin padding las cards quedan tocando el equipo o salen del
     # viewBox. Calculamos pad solo si hace falta.
     needs_decoration_pad = any(
-        (s.get("spark_values") and len(s.get("spark_values", []))) >= 2
+        len(s.get("spark_values") or []) >= 2
         or (
             s.get("alarm") is not None
             and s.get("danger") is not None

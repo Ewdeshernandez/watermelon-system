@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import fnmatch
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 # Mapeo tipo de sensor → familia de medida (para Tabular List)
@@ -278,6 +278,21 @@ def sensor_label(sensor: Dict[str, Any]) -> str:
     if direction in ("AXIAL", "AX"):
         return f"{plane}_AX_{letter}"
     return f"{plane}_{direction or '?'}_{letter}"
+
+
+def gearbox_overlay_anchor(sensor: Dict[str, Any]) -> Optional[Tuple[str, str]]:
+    """Si el sensor pertenece al gearbox (plane_label con 'gearbox'/'reductor'),
+    devuelve (side, anchor) para ubicar su dot sobre el icono del gearbox en
+    compose_train: HSS = eje rápido (input/DE), LSS = eje lento (output/NDE).
+    Devuelve None si no es un sensor de gearbox.
+
+    Pensado como fallback para las vistas que mapean por icon_side: los
+    sensores de gearbox no traen icon_side configurado, así que sin esto sus
+    dots se omitirían aunque el icono del gearbox sí se dibuje."""
+    pl = str(sensor.get("plane_label", "") or "").lower()
+    if "gearbox" in pl or "reductor" in pl:
+        return ("gearbox", "NDE" if "lss" in pl else "DE")
+    return None
 
 
 def unit_to_family(unit_native: str) -> str:

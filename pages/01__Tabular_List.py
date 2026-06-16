@@ -1470,12 +1470,17 @@ if _active_instance.sensors:
                             "danger": "Danger",
                             "no_data": "No Data",
                         }
+                        from core.sensor_map import gearbox_overlay_anchor as _gbx_ov
                         _s_for_svg = []
                         for _s in (_active_instance.sensors or []):
                             _side = (_s.get("icon_side") or "").strip()
                             _anchor = (_s.get("icon_anchor") or "").strip()
                             if not _side or not _anchor:
-                                continue
+                                _gov = _gbx_ov(_s)
+                                if _gov:
+                                    _side, _anchor = _gov
+                                else:
+                                    continue
                             try:
                                 _lbl = _slbl_lib(_s)
                             except Exception:

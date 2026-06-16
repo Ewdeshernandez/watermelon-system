@@ -354,9 +354,25 @@ def render_sensor_map_diagram(
                                 if p not in _cyl_planes_in_driver)
         driven_planes = sorted(set(driven_planes) | _cyl_planes_in_driver)
 
+    # Gearbox como TERCER grupo intermedio (turbina + gearbox + generador).
+    # El wizard inserta sensores con plane_label que contiene 'gearbox'
+    # (HSS/LSS/Intermedio). Los sacamos de driver/driven (donde el split por
+    # mediana los habría metido) para dibujarlos en su propio cuerpo central.
+    gearbox_planes = sorted({
+        int(s.get("plane", 0))
+        for s in sensors
+        if s.get("plane", 0) > 0
+        and ("gearbox" in str(s.get("plane_label", "")).lower()
+             or "reductor" in str(s.get("plane_label", "")).lower())
+    })
+    if gearbox_planes:
+        _gset = set(gearbox_planes)
+        driver_planes = [p for p in driver_planes if p not in _gset]
+        driven_planes = [p for p in driven_planes if p not in _gset]
+
     keyphasor_sensors = [s for s in sensors if (s.get("sensor_type") or "").lower() == "keyphasor"]
 
-    n_planes_total = len(driver_planes) + len(driven_planes)
+    n_planes_total = len(driver_planes) + len(gearbox_planes) + len(driven_planes)
     if n_planes_total == 0:
         return None
 
@@ -434,9 +450,15 @@ def render_sensor_map_diagram(
     else:
         dvn_w = 2.6 + 0.55 * (n_dvn - 1)
     coupling_w = 0.55
-    total_w = drv_w + coupling_w + dvn_w
+    n_gbx = len(gearbox_planes)
+    has_gbx = n_gbx > 0
+    gbx_w = (1.7 + 0.5 * (n_gbx - 1)) if has_gbx else 0.0
+    # Con gearbox: driver + acople + gearbox + acople + driven (dos acoples).
+    _gbx_segment = (gbx_w + coupling_w) if has_gbx else 0.0
+    total_w = drv_w + coupling_w + _gbx_segment + dvn_w
     x_start = 5.0 - total_w / 2.0  # centrar
-    dvn_x = x_start + drv_w + coupling_w
+    gbx_x = x_start + drv_w + coupling_w  # solo significativo si has_gbx
+    dvn_x = x_start + drv_w + coupling_w + _gbx_segment
 
     # Linea de centro del rotor (eje del tren). En el lateral los cojinetes
     # se posan EN esta linea — es la geometria correcta de un tren acoplado.
@@ -983,21 +1005,41 @@ def render_sensor_map_diagram(
                 fontsize=12, fontweight="bold", color=_COLOR_DRIVEN,
                 ha="center", va="center")
 
-    # ----- Coupling: disco flexible entre las dos maquinas -----
-    coup_x = x_start + drv_w + coupling_w / 2
-    # Dos discos verticales con tornilleria (puntos pequeños)
-    for _cx in (coup_x - 0.10, coup_x + 0.10):
+    # ----- Gearbox intermedio (si aplica): caja + engranajes + label -----
+    if has_gbx:
+        gb_h = 0.95
         ax_top.add_patch(mpatches.Rectangle(
-            (_cx - 0.04, rotor_y - 0.55), 0.08, 1.10,
-            facecolor="#cbd5e1", edgecolor="#475569", linewidth=1.0, zorder=3,
+            (gbx_x, rotor_y - gb_h), gbx_w, 2 * gb_h,
+            facecolor=_COLOR_DRIVEN, alpha=0.16,
+            edgecolor=_COLOR_DRIVEN, linewidth=1.6, zorder=1,
         ))
-    # Tornilleria (4 puntos por disco)
-    for _cx in (coup_x - 0.10, coup_x + 0.10):
-        for _by in (-0.40, -0.13, 0.13, 0.40):
+        for _gx in (gbx_x + gbx_w * 0.34, gbx_x + gbx_w * 0.66):
             ax_top.add_patch(mpatches.Circle(
-                (_cx, rotor_y + _by), 0.025,
-                facecolor="#0f172a", edgecolor="#0f172a", zorder=4,
+                (_gx, rotor_y), 0.32,
+                facecolor="none", edgecolor=_COLOR_DRIVEN,
+                linewidth=1.4, zorder=2,
             ))
+        ax_top.text(gbx_x + gbx_w / 2, rotor_y + gb_h + 0.30, "Gearbox / reductor",
+                    fontsize=10, fontweight="bold", color=_COLOR_DRIVEN,
+                    ha="center", va="center")
+
+    # ----- Coupling(s): disco flexible entre cuerpos (2 si hay gearbox) -----
+    coup_x = x_start + drv_w + coupling_w / 2
+    _coupling_centers = [coup_x]
+    if has_gbx:
+        _coupling_centers.append(gbx_x + gbx_w + coupling_w / 2)
+    for _ccx in _coupling_centers:
+        # Dos discos verticales con tornilleria (puntos pequeños)
+        for _cx in (_ccx - 0.10, _ccx + 0.10):
+            ax_top.add_patch(mpatches.Rectangle(
+                (_cx - 0.04, rotor_y - 0.55), 0.08, 1.10,
+                facecolor="#cbd5e1", edgecolor="#475569", linewidth=1.0, zorder=3,
+            ))
+            for _by in (-0.40, -0.13, 0.13, 0.40):
+                ax_top.add_patch(mpatches.Circle(
+                    (_cx, rotor_y + _by), 0.025,
+                    facecolor="#0f172a", edgecolor="#0f172a", zorder=4,
+                ))
 
     # Cojinetes coloreados por la peor severidad de los sensores en ese
     # plano (worst-of). En compact es la unica fuente de severidad. En
@@ -1138,6 +1180,12 @@ def render_sensor_map_diagram(
             bx = dvn_x + (i + 0.5) * (dvn_w / n_dvn)
             _draw_bearing(p, bx)
 
+    # Cojinetes del gearbox (cuerpo intermedio)
+    if has_gbx:
+        for i, p in enumerate(gearbox_planes):
+            bx = gbx_x + (i + 0.5) * (gbx_w / n_gbx)
+            _draw_bearing(p, bx)
+
     # Coupling label
     ax_top.text(coup_x, rotor_y - 1.10, "Coupling", fontsize=7, ha="center", va="top",
                 color=_COLOR_TEXT, alpha=0.75, style="italic")
@@ -1166,7 +1214,7 @@ def render_sensor_map_diagram(
     if compact:
         plane_axes_planes = []
     else:
-        plane_axes_planes = list(driver_planes) + list(driven_planes)
+        plane_axes_planes = list(driver_planes) + list(gearbox_planes) + list(driven_planes)
     cols = max(n_planes_total, 4)
     for i, plane_num in enumerate(plane_axes_planes):
         ax = fig.add_subplot(gs[1, i % cols])

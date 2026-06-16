@@ -1326,11 +1326,16 @@ def render_sensor_map_section(instance_id: str) -> None:
                     inst.driven_manufacturer, inst.driven_model,
                 ] if p) or "Driven"
                 _s_for_svg = []
+                from core.sensor_map import gearbox_overlay_anchor as _gbx_ov
                 for s in (inst.sensors or []):
                     _side = (s.get("icon_side") or "").strip()
                     _anchor = (s.get("icon_anchor") or "").strip()
                     if not _side or not _anchor:
-                        continue
+                        _gov = _gbx_ov(s)
+                        if _gov:
+                            _side, _anchor = _gov
+                        else:
+                            continue
                     try:
                         _lbl = _slbl_lib(s)
                     except Exception:
