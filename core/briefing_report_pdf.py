@@ -77,7 +77,8 @@ def generate_briefing_pdf(
     )
 
     from core.report_pdf_shell import (
-        BOLD, REGULAR, make_styles, paragraph_safe, render_report_pdf,
+        BOLD, REGULAR, make_styles, paragraph_safe, render_markdown_flowables,
+        render_report_pdf,
     )
 
     styles = make_styles()
@@ -136,15 +137,16 @@ def generate_briefing_pdf(
     body.append(Paragraph(f"Zona ISO 20816: {health.get('zone', '—')}", st_meta))
     body.append(Spacer(1, 6))
 
+    # El resumen puede venir como markdown del AI (###, **, listas): se
+    # renderiza nativo para que el cliente NO vea sintaxis cruda.
     if summary:
-        for para in [p for p in summary.split("\n") if p.strip()]:
-            body.append(Paragraph(paragraph_safe(para.strip()), st_body))
+        body.extend(render_markdown_flowables(summary, styles))
 
     # ---- Mapa de sensores ----
     if sensor_map_png:
         body.append(Paragraph("MAPA DE SENSORES", styles["WMTOC1"]))
         try:
-            img = Image(BytesIO(sensor_map_png), width=17.0 * cm, height=8.5 * cm,
+            img = Image(BytesIO(sensor_map_png), width=17.5 * cm, height=12.5 * cm,
                         kind="proportional")
             img.hAlign = "CENTER"
             body.append(img)
@@ -156,8 +158,7 @@ def generate_briefing_pdf(
     # ---- Diagnóstico ----
     if diagnosis:
         body.append(Paragraph("DIAGNÓSTICO", styles["WMTOC1"]))
-        for para in [p for p in diagnosis.split("\n") if p.strip()]:
-            body.append(Paragraph(paragraph_safe(para.strip()), st_body))
+        body.extend(render_markdown_flowables(diagnosis, styles))
 
     # ---- Recomendaciones ----
     if recommendations:

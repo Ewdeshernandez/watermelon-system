@@ -112,6 +112,91 @@ def paragraph_safe(text: str) -> str:
     return escaped
 
 
+def md_inline_to_rl(text: str) -> str:
+    """markdown inline (**bold**, *italic*, `code`) → tags de ReportLab."""
+    import re as _re
+    escaped = (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    escaped = _re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", escaped)
+    escaped = _re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"<i>\1</i>", escaped)
+    escaped = _re.sub(r"`([^`]+)`", r'<font name="Courier">\1</font>', escaped)
+    return escaped
+
+
+def render_markdown_flowables(md: str, styles) -> List[Any]:
+    """Parsea markdown (### heading, - bullets, 1. numbered, párrafos,
+    **bold**) a flowables ReportLab nativos. Así el cliente no ve `###` ni
+    `**` crudos. Mismo motor que el bloque clínico de Reports."""
+    import re as _re
+    out: List[Any] = []
+    if not md:
+        return out
+    lines = md.splitlines()
+    n = len(lines)
+    i = 0
+    while i < n:
+        stripped = lines[i].strip()
+        if not stripped:
+            i += 1
+            continue
+        if stripped.startswith("#"):
+            out.append(Paragraph(md_inline_to_rl(stripped.lstrip("#").strip()),
+                                  styles["WMClinicalHeading"]))
+            i += 1
+            continue
+        if stripped in ("---", "***", "___"):
+            out.append(Spacer(1, 0.18 * cm))
+            i += 1
+            continue
+        if _re.match(r"^[-*+]\s+", stripped):
+            while i < n and _re.match(r"^[-*+]\s+", lines[i].strip()):
+                content = _re.sub(r"^[-*+]\s+", "", lines[i].strip())
+                j = i + 1
+                while j < n:
+                    nxt = lines[j].strip()
+                    if (not nxt or _re.match(r"^[-*+]\s+", nxt)
+                            or _re.match(r"^\d+\.\s+", nxt) or nxt.startswith("#")
+                            or nxt in ("---", "***", "___")):
+                        break
+                    content += " " + nxt
+                    j += 1
+                out.append(Paragraph("•&nbsp;&nbsp;" + md_inline_to_rl(content),
+                                     styles["WMClinicalBullet"]))
+                i = j
+            continue
+        if _re.match(r"^\d+\.\s+", stripped):
+            while i < n and _re.match(r"^\d+\.\s+", lines[i].strip()):
+                m = _re.match(r"^(\d+)\.\s+(.*)", lines[i].strip())
+                if not m:
+                    break
+                num, content = m.group(1), m.group(2)
+                j = i + 1
+                while j < n:
+                    nxt = lines[j].strip()
+                    if (not nxt or _re.match(r"^[-*+]\s+", nxt)
+                            or _re.match(r"^\d+\.\s+", nxt) or nxt.startswith("#")
+                            or nxt in ("---", "***", "___")):
+                        break
+                    content += " " + nxt
+                    j += 1
+                out.append(Paragraph(f"<b>{num}.</b>&nbsp;&nbsp;{md_inline_to_rl(content)}",
+                                     styles["WMClinicalNumbered"]))
+                i = j
+            continue
+        # párrafo regular
+        para = stripped
+        j = i + 1
+        while j < n:
+            nxt = lines[j].strip()
+            if (not nxt or nxt.startswith("#") or _re.match(r"^[-*+]\s+", nxt)
+                    or _re.match(r"^\d+\.\s+", nxt) or nxt in ("---", "***", "___")):
+                break
+            para += " " + nxt
+            j += 1
+        out.append(Paragraph(md_inline_to_rl(para), styles["WMClinicalBody"]))
+        i = j
+    return out
+
+
 def make_styles():
     """Stylesheet idéntico al de Reports. Los headings que deban entrar al
     TOC usan WMTOC1 (nivel 0) / WMTOC2 (nivel 1)."""
@@ -125,6 +210,11 @@ def make_styles():
     styles.add(ParagraphStyle(name="WMFigureText", parent=styles["BodyText"], fontName=REGULAR, fontSize=10.2, leading=14.8, alignment=TA_JUSTIFY, textColor=colors.HexColor(_INK2), spaceAfter=16))
     styles.add(ParagraphStyle(name="WMTableCell", parent=styles["Normal"], fontName=REGULAR, fontSize=8.4, leading=11, alignment=TA_LEFT, textColor=colors.HexColor(_INK2)))
     styles.add(ParagraphStyle(name="WMTableHeader", parent=styles["Normal"], fontName=BOLD, fontSize=8.5, leading=11, alignment=TA_LEFT, textColor=colors.HexColor("#ffffff")))
+    # Estilos del bloque clínico (markdown del AI → ReportLab nativo)
+    styles.add(ParagraphStyle(name="WMClinicalHeading", parent=styles["Normal"], fontName=BOLD, fontSize=10.6, leading=14, alignment=TA_LEFT, textColor=colors.HexColor(_INK), spaceBefore=8, spaceAfter=4))
+    styles.add(ParagraphStyle(name="WMClinicalBody", parent=styles["BodyText"], fontName=REGULAR, fontSize=10.2, leading=14.8, alignment=TA_JUSTIFY, textColor=colors.HexColor(_INK2), spaceAfter=8))
+    styles.add(ParagraphStyle(name="WMClinicalBullet", parent=styles["BodyText"], fontName=REGULAR, fontSize=10.2, leading=14.6, alignment=TA_JUSTIFY, textColor=colors.HexColor(_INK2), leftIndent=14, firstLineIndent=-14, spaceAfter=5))
+    styles.add(ParagraphStyle(name="WMClinicalNumbered", parent=styles["BodyText"], fontName=REGULAR, fontSize=10.2, leading=14.6, alignment=TA_JUSTIFY, textColor=colors.HexColor(_INK2), leftIndent=18, firstLineIndent=-18, spaceAfter=5))
     # Entradas que SÍ van al TOC (visualmente = WMSection / WMFigureCaption)
     styles.add(ParagraphStyle(name="WMTOC1", parent=styles["WMSection"]))
     styles.add(ParagraphStyle(name="WMTOC2", parent=styles["WMFigureCaption"]))
@@ -336,11 +426,28 @@ def build_cover_flowables(meta: Dict[str, Any], styles) -> List[Any]:
             c.append(Paragraph(paragraph_safe(city), sig_city))
         return c
 
-    if prepared_by or reviewed_by:
+    if prepared_by and reviewed_by:
+        # Dos firmas → dos columnas paralelas centradas.
         sig_tbl = Table([[
             _cell("Preparado por:", prepared_by, prepared_role, prepared_city),
             _cell("Revisado por:", reviewed_by, reviewed_role, reviewed_city),
         ]], colWidths=[8.3 * cm, 8.3 * cm])
+        sig_tbl.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        sig_tbl.hAlign = "CENTER"
+        story.append(sig_tbl)
+        story.append(Spacer(1, 4.50 * cm))
+    elif prepared_by or reviewed_by:
+        # Una sola firma → columna ÚNICA centrada en la página (el nombre del
+        # especialista queda al centro, no corrido a la izquierda).
+        if prepared_by:
+            label, name, role, city = "Preparado por:", prepared_by, prepared_role, prepared_city
+        else:
+            label, name, role, city = "Revisado por:", reviewed_by, reviewed_role, reviewed_city
+        sig_tbl = Table([[_cell(label, name, role, city)]], colWidths=[11.0 * cm])
         sig_tbl.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4),
@@ -412,6 +519,6 @@ def render_report_pdf(meta: Dict[str, Any], body_flowables: List[Any]) -> bytes:
 
 __all__ = [
     "render_report_pdf", "make_styles", "build_cover_flowables",
-    "build_toc_flowables", "paragraph_safe", "REGULAR", "BOLD",
-    "WMDocTemplate", "WATERMELON_LOGO",
+    "build_toc_flowables", "paragraph_safe", "render_markdown_flowables",
+    "md_inline_to_rl", "REGULAR", "BOLD", "WMDocTemplate", "WATERMELON_LOGO",
 ]
