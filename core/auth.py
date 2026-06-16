@@ -83,9 +83,10 @@ NAV_GROUPS = [
             {"label": "📈  Trends", "page": "pages/04_Trends.py"},
             # Ciclo 17.27 — AI Assistant Q&A sobre archivo histórico
             {"label": "✧  AI Assistant", "page": "pages/_ai_assistant.py"},
-            # Ciclo 17.31 — Briefing Mensual Ejecutivo PDF al VP cliente
-            {"label": "✉  Briefing Mensual", "page": "pages/_monthly_briefing.py"},
-            # Ciclo 23.347 — Briefing por activo (Semanal/Mensual) figura-rico
+            # Ciclo 23.350 — "Briefing Mensual" retirado del nav: el nuevo
+            # "Briefing por activo" (Semanal/Mensual, figura-rico) lo reemplaza
+            # por completo. La página y su backend siguen en el repo por
+            # compat de cron/imports, pero ya no se exponen en el menú.
             {"label": "🍉  Briefing por activo", "page": "pages/_asset_briefing.py"},
         ],
     },
