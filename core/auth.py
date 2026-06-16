@@ -935,13 +935,13 @@ def render_user_menu() -> None:
                      style="margin-top:0.7rem;padding-top:0.6rem;
                             border-top:1px solid rgba(15,23,42,0.06);
                             font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
-                            font-size:0.72rem;color:#94a3b8;line-height:1.5;
+                            font-size:0.72rem;color:rgba(255,255,255,0.55);line-height:1.5;
                             text-align:center;cursor:default;">
                     <span style="display:inline-block;width:7px;height:7px;
                                  border-radius:999px;background:{_env_color};
                                  margin-right:0.4rem;vertical-align:middle;
                                  box-shadow:0 0 6px {_env_color}66;"></span>
-                    <span style="color:#475569;font-weight:600;">{_v['version']}</span>
+                    <span style="color:rgba(255,255,255,0.92);font-weight:600;">{_v['version']}</span>
                 </div>
                 """,
                 unsafe_allow_html=True,
