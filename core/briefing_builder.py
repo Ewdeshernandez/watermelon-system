@@ -165,13 +165,68 @@ def _ai_enhance(sections: Dict[str, Any], tag: str, period: str,
 # ---------------------------------------------------------------------------
 # 3) Builder por activo
 # ---------------------------------------------------------------------------
+def _render_sensor_map(instance_obj: Any, channels: List[Dict[str, Any]]) -> Optional[bytes]:
+    """Renderiza el Mapa de Sensores headless usando severidades LIVE (no la
+    sesión Streamlit). Devuelve PNG o None si no hay sensores / falla."""
+    try:
+        sensors = getattr(instance_obj, "sensors", None)
+        if not sensors:
+            return None
+        from core.sensor_diagram import render_sensor_map_diagram
+
+        _norm = {"alarma": "Alarm", "alert": "Alarm", "danger": "Danger",
+                 "crítica": "Danger", "critica": "Danger", "normal": "Normal"}
+        sev_by_label: Dict[str, str] = {}
+        overall_by_label: Dict[str, float] = {}
+        unit_by_label: Dict[str, str] = {}
+        for c in channels or []:
+            lbl = c.get("sensor_label")
+            if not lbl:
+                continue
+            sev_by_label[lbl] = _norm.get((c.get("status") or "").strip().lower(), "Normal")
+            try:
+                overall_by_label[lbl] = float(c.get("value"))
+            except Exception:
+                pass
+            if c.get("unit"):
+                unit_by_label[lbl] = c["unit"]
+
+        driver_label = (getattr(instance_obj, "driver_model", "") or "Driver").strip() or "Driver"
+        driven_label = (getattr(instance_obj, "driven_model", "") or "Driven").strip() or "Driven"
+        train_label = ""
+        try:
+            from core.instance_state import compose_train_description
+            train_label = compose_train_description(instance_obj) or ""
+        except Exception:
+            pass
+
+        return render_sensor_map_diagram(
+            sensors,
+            train_label=train_label,
+            driver_label=driver_label,
+            driven_label=driven_label,
+            severity_by_label=sev_by_label or None,
+            overall_by_label=overall_by_label or None,
+            unit_by_label=unit_by_label or None,
+        )
+    except Exception as e:
+        log.warning("briefing sensor map falló: %s", e)
+        return None
+
+
 def build_asset_briefing(
     instance_id: str,
     period_label: str = "Semanal",
     instance_obj: Any = None,
     use_ai: bool = True,
+    meta_extra: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[bytes], Dict[str, Any]]:
-    """Genera el PDF del briefing de un activo. Devuelve (pdf_bytes, meta)."""
+    """Genera el PDF del briefing de un activo. Devuelve (pdf_bytes, meta).
+
+    meta_extra: dict opcional con datos de portada (prepared_by, prepared_role,
+    prepared_city, reviewed_by, reviewed_role, reviewed_city, consecutive,
+    report_date). Lo pasa la UI con el usuario logueado; el cron lo deja vacío
+    (la portada simplemente omite el bloque de firmas)."""
     from core.instance_state import get_instance
     if instance_obj is None:
         instance_obj = get_instance(instance_id)
@@ -200,6 +255,18 @@ def build_asset_briefing(
         log.warning("briefing figures falló: %s", e)
         figures = {}
 
+    sensor_map_png = _render_sensor_map(instance_obj, data["channels"])
+
+    # meta de portada: train SIN cliente (el cliente va como línea propia del
+    # bloque del activo) + firmas/consecutivo que pase la UI.
+    train_bare = " ".join(p for p in [
+        getattr(instance_obj, "driver_model", "") or "",
+        "→", getattr(instance_obj, "driven_model", "") or "",
+    ] if p and p != "→") or ""
+    pdf_meta = {"train_description": train_bare, "client": client}
+    if meta_extra:
+        pdf_meta.update({k: v for k, v in meta_extra.items() if v})
+
     try:
         from core.briefing_report_pdf import generate_briefing_pdf
         pdf = generate_briefing_pdf(
@@ -211,6 +278,8 @@ def build_asset_briefing(
             diagnosis=sections["diagnosis"],
             recommendations=sections["recommendations"],
             channels=data["channels"],
+            sensor_map_png=sensor_map_png,
+            meta_extra=pdf_meta,
         )
     except Exception as e:
         log.error("briefing PDF falló para %s: %s", instance_id, e)
@@ -230,6 +299,7 @@ def build_asset_briefing(
 # ---------------------------------------------------------------------------
 def build_all_briefings(
     period_label: str = "Semanal", use_ai: bool = True,
+    meta_extra: Optional[Dict[str, Any]] = None,
 ) -> List[Tuple[str, Optional[bytes], Dict[str, Any]]]:
     """Genera el briefing de cada activo con datos. Devuelve lista de
     (instance_id, pdf_bytes|None, meta)."""
@@ -246,7 +316,8 @@ def build_all_briefings(
             continue
         try:
             obj = get_instance(iid)
-            pdf, meta = build_asset_briefing(iid, period_label, instance_obj=obj, use_ai=use_ai)
+            pdf, meta = build_asset_briefing(iid, period_label, instance_obj=obj,
+                                             use_ai=use_ai, meta_extra=meta_extra)
             out.append((iid, pdf, meta))
         except Exception as e:
             log.warning("briefing %s falló: %s", iid, e)

@@ -202,13 +202,24 @@ st.markdown("")
 # -----------------------------------------------------------------
 if st.button("📄  Generar briefing", type="primary", use_container_width=True):
     from core.briefing_builder import build_asset_briefing, build_all_briefings
+    # Portada profesional: firma "Preparado por" con el usuario logueado
+    # (mismo criterio que Reports). El revisor firma al validar.
+    _meta_extra = {}
+    try:
+        from core.auth import get_current_user
+        _u = get_current_user() or {}
+        _meta_extra["prepared_by"] = _u.get("full_name") or _u.get("username") or ""
+    except Exception:
+        pass
     results = []
     with st.spinner("Generando briefing(s)… (figuras + redacción + PDF)"):
         if _scope == "Todos los activos":
-            for iid, pdf, meta in build_all_briefings(_period, use_ai=_use_ai):
+            for iid, pdf, meta in build_all_briefings(_period, use_ai=_use_ai,
+                                                      meta_extra=_meta_extra):
                 results.append((iid, pdf, meta))
         elif _target_iid:
-            pdf, meta = build_asset_briefing(_target_iid, _period, use_ai=_use_ai)
+            pdf, meta = build_asset_briefing(_target_iid, _period, use_ai=_use_ai,
+                                             meta_extra=_meta_extra)
             results.append((_target_iid, pdf, meta))
         else:
             st.warning("Selecciona un activo.")
