@@ -167,6 +167,16 @@ ASSET_CATALOG: Dict[str, Dict[str, Any]] = {
         "builder": _dn.gearbox_parallel,
         "tags": ["gearbox", "parallel-shaft", "API 613"],
     },
+    "gearbox_inline": {
+        "role": "driven",  # va entre driver y driven en el tren
+        "category": "Reductores",
+        "default_label": "Gearbox / reductor",
+        "oem_examples": ["Allen Gears", "Lufkin", "Flender", "Renk"],
+        "support_type": "fluid_film",
+        "typical_planes": 2,  # In + Out sobre el centerline
+        "builder": _dn.gearbox_inline,
+        "tags": ["gearbox", "inline", "reductor", "API 613"],
+    },
     "recip_compressor_boxer_2cyl": {
         "role": "driven",
         "category": "Compresores reciprocantes",

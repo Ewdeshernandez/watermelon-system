@@ -587,7 +587,7 @@ def _gearbox_compose_kwargs(state: Dict[str, Any]) -> Dict[str, Any]:
         return {}
     label = (state.get("gearbox_type") or "").strip() or "Gearbox / reductor"
     return {
-        "gearbox_key": state.get("gearbox_icon_key") or "gearbox_parallel",
+        "gearbox_key": state.get("gearbox_icon_key") or "gearbox_inline",
         "gearbox_label": label,
         "coupling2": state.get("coupling_class", "flexible"),
     }

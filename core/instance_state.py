@@ -566,7 +566,7 @@ def detect_gearbox_kwargs(inst: Any) -> Dict[str, str]:
 
     if not label:
         return {}
-    return {"gearbox_key": "gearbox_parallel", "gearbox_label": label}
+    return {"gearbox_key": "gearbox_inline", "gearbox_label": label}
 
 
 def delete_instance(instance_id: str) -> bool:

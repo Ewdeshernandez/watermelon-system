@@ -392,6 +392,68 @@ def gearbox_parallel(
 
 
 # ============================================================
+# Gearbox INLINE (para esquema de tren: eje pasante por el centro)
+# ============================================================
+
+def gearbox_inline(
+    label: str = "Gearbox",
+    x_offset: float = 0,
+    y_offset: float = 0,
+) -> Tuple[str, Dict[str, Any]]:
+    """Caja reductora/multiplicadora con eje PASANTE por la línea de centro
+    (entrada y salida alineadas), dos engranajes engranados visibles.
+
+    A diferencia de gearbox_parallel (input arriba / output abajo, que en un
+    tren acoplado deja el eje 'quebrado' respecto a los acoples del centerline),
+    este icono mantiene In y Out sobre el eje central → el tren driver–gearbox–
+    driven queda perfectamente alineado en compose_train."""
+    W, H = 200, 200
+    body_x = x_offset + 26
+    body_w = 148
+    body_h = 92
+    body_y = (y_offset + 100) - body_h / 2
+    cy = y_offset + 100
+    stroke = COLORS["driven_stroke"]
+    fill = COLORS["driven_fill"]
+    accent = COLORS["driven_accent"]
+
+    parts = [
+        # Eje pasante sobre el centerline (conecta limpio con los acoples)
+        f'<line x1="{x_offset:.1f}" y1="{cy:.1f}" x2="{x_offset + W:.1f}" y2="{cy:.1f}" '
+        f'stroke="{COLORS["shaft"]}" stroke-width="4"/>',
+        # Cuerpo
+        f'<rect x="{body_x:.1f}" y="{body_y:.1f}" width="{body_w:.1f}" height="{body_h:.1f}" '
+        f'rx="10" fill="{fill}" stroke="{stroke}" stroke-width="2.5"/>',
+        # Engranaje grande (straddle del eje, hacia abajo)
+        f'<circle cx="{body_x + body_w * 0.52:.1f}" cy="{cy + 13:.1f}" r="28" '
+        f'fill="{accent}" stroke="{stroke}" stroke-width="2"/>',
+        # Engranaje chico engranado (hacia arriba)
+        f'<circle cx="{body_x + body_w * 0.52:.1f}" cy="{cy - 19:.1f}" r="17" '
+        f'fill="{accent}" stroke="{stroke}" stroke-width="2"/>',
+        # Bearings In (izq) y Out (der), AMBOS sobre el centerline
+        bearing_circle(body_x + 12, cy, r=10, label="In", color="driven"),
+        bearing_circle(body_x + body_w - 12, cy, r=10, label="Out", color="driven"),
+        label_top(x_offset + W / 2, y_offset + 24, label, "driven"),
+        f'<text x="{x_offset + W / 2:.1f}" y="{y_offset + H - 10:.1f}" text-anchor="middle" '
+        f'font-size="9" fill="{COLORS["text_muted"]}" font-family="-apple-system, sans-serif">'
+        f'Reductor · gearbox</text>',
+    ]
+    anchors = {
+        "DE":  (body_x + 12, cy),
+        "NDE": (body_x + body_w - 12, cy),
+        "input_DE":  (body_x + 12, cy),
+        "output_DE": (body_x + body_w - 12, cy),
+        "In":  (body_x + 12, cy),
+        "Out": (body_x + body_w - 12, cy),
+        "shaft_in":  (x_offset, cy),
+        "shaft_out": (x_offset + W, cy),
+        "viewbox_w": W,
+        "viewbox_h": H,
+    }
+    return "".join(parts), anchors
+
+
+# ============================================================
 # Recip compressor 2-cyl boxer opposed (Ariel JGE-2, Burckhardt 2P)
 # ============================================================
 
@@ -562,6 +624,7 @@ __all__ = [
     "centrifugal_pump_single",
     "centrifugal_pump_multistage",
     "gearbox_parallel",
+    "gearbox_inline",
     "recip_compressor_boxer_2cyl",
     "recip_compressor_boxer_4cyl",
 ]
