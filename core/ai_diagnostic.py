@@ -767,7 +767,7 @@ def generate_ai_diagnostic(
 # especialista senior haría tras leer todo el documento.
 # =============================================================
 
-_EXEC_PROMPT_VERSION = "v1_exec_synthesis_2026_05"
+_EXEC_PROMPT_VERSION = "v2_exec_synthesis_nomenclature_2026_06"
 
 _SYSTEM_PROMPT_EXECUTIVE = """\
 Eres un especialista de análisis de vibraciones Cat IV ISO 18436-2
@@ -776,6 +776,47 @@ EJECUTIVO de un reporte completo de monitoreo en línea. Vas a recibir
 el contenido sintetizado de múltiples figuras del reporte (espectros,
 formas de onda, tendencias, polar, bode, órbitas, shaft centerline);
 cada figura ya viene con su interpretación clínica cuando aplica.
+
+================================================================
+NOMENCLATURA Y CONTEXTO FÍSICO — REGLAS CRÍTICAS (NO VIOLAR)
+================================================================
+El payload puede incluir una sección "# Contexto de máquina y
+nomenclatura" con la identidad real del activo y los glosarios de
+planos y de canales. Esa sección es la ÚNICA fuente de verdad para
+interpretar tags. Si está presente, te ATÁS a ella literalmente. Si
+algún código no aparece en el glosario, decí "ubicación según
+configuración del activo" — NUNCA inventes su significado.
+
+1) ETIQUETA DE CANAL = DIRECCIÓN + MAGNITUD, no dos direcciones.
+   Un canal típico es "<plano><eje>_<magnitud>", ej. 2Y_A:
+     - El prefijo (X / Y) es la DIRECCIÓN radial de medición.
+     - El SUFIJO (_A, _V, _D) es la MAGNITUD medida, NO una dirección:
+         _A = Aceleración  (unidad g / g pk)
+         _V = Velocidad    (unidad in/s / mm/s)
+         _D = Desplazamiento (unidad mil pp / µm, sonda de proximidad)
+   PROHIBIDO leer "_A" como "axial". 2Y_A es "aceleración en el plano
+   2, dirección Y" — jamás "medición axial". La unidad confirma la
+   magnitud: si dice g/g pk es ACELERACIÓN. Solo llamá a algo "axial"
+   si el glosario marca ese canal explícitamente como axial.
+
+2) CÓDIGOS DE PLANO/UBICACIÓN = estación de medición (cojinete/frame),
+   NO un tipo de equipo. Ejemplos en turbinas aeroderivadas GE:
+   CRF = Compressor Rear Frame, TRF = Turbine Rear Frame,
+   GEN DE / GEN NDE = generador lado acople / lado libre.
+   PROHIBIDO expandir "TRF" como "transformador" o cualquier equipo
+   inexistente en el tren. Usá la ubicación tal cual la da el glosario.
+
+3) FÍSICA COHERENTE CON EL TIPO DE MÁQUINA. No propongas mecanismos de
+   falla imposibles para el activo declarado. En una turbina a gas
+   aeroderivada de acople directo NO hay cavitación (es de bombas) ni
+   defectos de engranajes si no existe caja multiplicadora. Antes de
+   nombrar un mecanismo, verificá que el tren declarado lo permita.
+
+4) Si solo hay un punto tabular en alarma (sin espectro/forma de
+   onda/órbita que converjan), limitate a: severidad localizada +
+   necesidad de adquisición complementaria. No infieras causa raíz
+   mecánica definitiva que la data no soporta.
+================================================================
 
 Tu trabajo es SÍNTESIS CRUZADA: identificar cuándo varias figuras
 convergen en la misma causa raíz mecánica, priorizar el conjunto de
@@ -886,6 +927,17 @@ def _build_executive_user_message(
                 lines.append(f"- **{key}**: {val}")
         lines.append("")
 
+        # Contexto de máquina + glosario de nomenclatura (identidad real del
+        # activo, planos y canales). Es la fuente de verdad que evita que la IA
+        # adivine tags (ej. _A=aceleración no "axial"; TRF=Turbine Rear Frame
+        # no "transformador"). Ver _SYSTEM_PROMPT_EXECUTIVE reglas críticas.
+        machine_ctx = str((meta.get("machine_context") or "")).strip()
+        if machine_ctx:
+            lines.append("# Contexto de máquina y nomenclatura")
+            lines.append("")
+            lines.append(machine_ctx)
+            lines.append("")
+
     lines.append(f"# Figuras analizadas ({len(items)} total)")
     lines.append("")
 
@@ -950,7 +1002,8 @@ def _executive_payload_hash(
         ],
         "meta": {
             k: meta.get(k) if meta else ""
-            for k in ("client", "machine_train", "consecutive", "report_date")
+            for k in ("client", "machine_train", "consecutive", "report_date",
+                      "machine_context")
         },
     }
     j = json.dumps(blob, sort_keys=True, default=str, ensure_ascii=False)

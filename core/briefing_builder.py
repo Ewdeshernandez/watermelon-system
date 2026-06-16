@@ -138,21 +138,192 @@ def _deterministic_sections(tag: str, period: str, data: Dict[str, Any]) -> Dict
     return {"summary": summary, "diagnosis": diagnosis, "recommendations": recs}
 
 
+# Expansión de códigos de plano/ubicación estándar (turbinas aeroderivadas GE
+# + tren de generación). Es un GLOSARIO para que la IA no invente significados
+# (ej. NO leer "TRF" como "transformador"). Si un código no está acá, se lista
+# tal cual con la nota de "ubicación configurada en el activo".
+_PLANE_GLOSSARY = {
+    "CRF": "Compressor Rear Frame (frame trasero del compresor de la turbina)",
+    "CFF": "Compressor Front Frame (frame delantero del compresor)",
+    "TRF": "Turbine Rear Frame (frame trasero de la turbina)",
+    "TMF": "Turbine Mid Frame (frame intermedio de la turbina)",
+    "GEN DE": "Generador — lado acople (Drive End)",
+    "GEN NDE": "Generador — lado libre (Non-Drive End)",
+    "DE": "Lado acople (Drive End)",
+    "NDE": "Lado libre (Non-Drive End)",
+}
+
+# Sufijo de canal → magnitud medida (NO es una dirección).
+_SUFFIX_GLOSSARY = {
+    "A": "Aceleración",
+    "V": "Velocidad",
+    "D": "Desplazamiento (sonda de proximidad)",
+}
+
+
+def _machine_context_block(instance_obj: Any, data: Dict[str, Any]) -> str:
+    """Arma el bloque de identidad de máquina + glosario de planos y canales
+    que se inyecta al prompt de la IA. Es la fuente de verdad que evita que la
+    IA adivine la nomenclatura."""
+    lines: List[str] = []
+
+    # --- Identidad real del activo ---
+    try:
+        from core.instance_state import compose_train_description
+        train_desc = (compose_train_description(instance_obj) or "").strip()
+    except Exception:
+        train_desc = ""
+    asset_class = (getattr(instance_obj, "asset_class", "") or "").strip()
+    drv = " ".join(p for p in [
+        getattr(instance_obj, "driver_manufacturer", "") or "",
+        getattr(instance_obj, "driver_model", "") or "",
+    ] if p).strip()
+    drvn = " ".join(p for p in [
+        getattr(instance_obj, "driven_manufacturer", "") or "",
+        getattr(instance_obj, "driven_model", "") or "",
+    ] if p).strip()
+    support = (getattr(instance_obj, "support_type", "") or "").strip()
+    rpm = getattr(instance_obj, "nominal_rpm", 0) or 0
+
+    lines.append("Identidad del activo (fuente de verdad — interpretá todo a partir de esto):")
+    if train_desc:
+        lines.append(f"- Tren: {train_desc}")
+    if asset_class:
+        lines.append(f"- Clase de activo: {asset_class}")
+    if drv:
+        lines.append(f"- Motriz (driver): {drv}")
+    if drvn:
+        lines.append(f"- Accionada (driven): {drvn}")
+    if rpm:
+        lines.append(f"- Velocidad nominal: {float(rpm):.0f} rpm")
+    if support:
+        lines.append(f"- Tipo de soporte: {support}")
+    lines.append("")
+
+    channels = data.get("channels", []) or []
+
+    # Config real de sensores del activo (fuente de verdad de producción):
+    # cada sensor trae direction (X/Y/RADIAL/AXIAL) y unit_native, y
+    # sensor_unit_family() deriva la magnitud (Acceleration/Velocity/Proximity).
+    # De acá sacamos el desglose autoritativo en vez de adivinar por el sufijo.
+    sensor_by_label: Dict[str, Any] = {}
+    try:
+        from core.live_report_builder import _build_sensor_lookup
+        sensor_by_label = _build_sensor_lookup(instance_obj) or {}
+    except Exception as e:
+        log.warning("sensor lookup para contexto IA falló: %s", e)
+
+    try:
+        from core.sensor_map import sensor_unit_family
+    except Exception:
+        sensor_unit_family = None  # type: ignore
+
+    _DIR_HUMAN = {
+        "X": "radial X (horizontal)",
+        "Y": "radial Y (vertical)",
+        "RADIAL": "radial", "RAD": "radial",
+        "AXIAL": "AXIAL", "AX": "AXIAL",
+    }
+    _FAMILY_HUMAN = {
+        "Acceleration": "Aceleración",
+        "Velocity": "Velocidad",
+        "Proximity": "Desplazamiento (sonda de proximidad)",
+        "Phase Reference": "Referencia de fase (keyphasor)",
+    }
+
+    # --- Glosario de planos presentes ---
+    planes = []
+    seen_p = set()
+    for c in channels:
+        pl = (c.get("plane_label") or "").strip()
+        if pl and pl not in seen_p and pl != "—":
+            seen_p.add(pl)
+            planes.append(pl)
+    if planes:
+        lines.append("Glosario de planos/ubicaciones (código = estación de medición, NO un equipo):")
+        for pl in planes:
+            exp = _PLANE_GLOSSARY.get(pl.upper())
+            lines.append(f"- {pl}: {exp or 'ubicación configurada en el activo'}")
+        lines.append("")
+
+    # --- Desglose autoritativo por canal (desde la config de producción) ---
+    lines.append(
+        "Desglose de canales desde la configuración del activo en producción. "
+        "La etiqueta es \"<plano><eje>_<letra de transductor>\": el eje (X/Y) es "
+        "la DIRECCIÓN y la letra (A/V/D) es solo el TIPO de transductor — NUNCA "
+        "es la dirección. Un canal AXIAL real se etiqueta \"<plano>_AX_<letra>\". "
+        "Usá dirección y magnitud tal como se listan acá:"
+    )
+    for c in channels:
+        lbl = (c.get("sensor_label") or "—").strip()
+        s = sensor_by_label.get(lbl)
+        direction = ""
+        magnitude = ""
+        if s is not None:
+            direction = _DIR_HUMAN.get(
+                str(s.get("direction", "") or "").strip().upper(), "")
+            if sensor_unit_family is not None:
+                try:
+                    fam = sensor_unit_family(s)
+                    magnitude = _FAMILY_HUMAN.get(fam, fam)
+                except Exception:
+                    magnitude = ""
+        # Fallback de magnitud por letra del sufijo si no hubo config
+        if not magnitude and "_" in lbl:
+            magnitude = _SUFFIX_GLOSSARY.get(lbl.rsplit("_", 1)[-1].upper(), "")
+        meta_bits = []
+        if direction:
+            meta_bits.append(f"dirección {direction}")
+        if magnitude:
+            meta_bits.append(f"magnitud {magnitude}")
+        meta_txt = f" — {', '.join(meta_bits)}" if meta_bits else ""
+        lines.append(
+            f"- {lbl} (plano {c.get('plane_label','—')}){meta_txt}: "
+            f"{c.get('value','—')} {c.get('unit','')} · {c.get('status','—')}"
+        )
+    lines.append("- Recordatorio: la letra \"_A\" es un acelerómetro (Aceleración), jamás \"axial\".")
+    lines.append("")
+
+    return "\n".join(lines).strip()
+
+
 def _ai_enhance(sections: Dict[str, Any], tag: str, period: str,
-                data: Dict[str, Any]) -> Dict[str, Any]:
+                data: Dict[str, Any], instance_obj: Any = None) -> Dict[str, Any]:
     """Mejora best-effort con IA. Si no hay credenciales o falla, deja el
     borrador determinístico intacto."""
     try:
         from core.ai_diagnostic import is_ai_available, generate_executive_summary
         if not is_ai_available():
             return sections
-        # Construir items mínimos para que la IA tenga contexto
+
+        # machine_train completo (no solo el tag) para que la IA sepa qué máquina es
+        machine_train = tag
+        if instance_obj is not None:
+            try:
+                from core.instance_state import compose_train_description
+                desc = (compose_train_description(instance_obj) or "").strip()
+                machine_train = f"{tag} — {desc}" if desc else tag
+            except Exception:
+                pass
+
+        # Bloque de contexto + glosario (la fuente de verdad anti-alucinación)
+        machine_ctx = ""
+        if instance_obj is not None:
+            try:
+                machine_ctx = _machine_context_block(instance_obj, data)
+            except Exception as e:
+                log.warning("machine_context falló: %s", e)
+
         items = [{
-            "type": "tabular", "title": f"Estado {tag}",
-            "machine": tag, "point": "",
+            "type": "tabular", "title": f"Estado tabular {tag}",
+            "machine": machine_train, "point": "",
             "notes": (sections["summary"] + "\n" + sections["diagnosis"]),
         }]
-        meta = {"machine_train": tag, "period": period}
+        meta = {
+            "machine_train": machine_train,
+            "period": period,
+            "machine_context": machine_ctx,
+        }
         res = generate_executive_summary(items, meta)
         if res.get("ok") and res.get("markdown"):
             sections = dict(sections)
@@ -235,7 +406,8 @@ def build_asset_briefing(
 
     sections = _deterministic_sections(tag, period_label, data)
     if use_ai:
-        sections = _ai_enhance(sections, tag, period_label, data)
+        sections = _ai_enhance(sections, tag, period_label, data,
+                               instance_obj=instance_obj)
 
     try:
         from core.briefing_figures import collect_asset_figures
