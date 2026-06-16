@@ -533,6 +533,42 @@ def compose_train_description(inst: Instance) -> str:
     return (inst.notes or "").strip()
 
 
+def detect_gearbox_kwargs(inst: Any) -> Dict[str, str]:
+    """Infiere si el tren tiene caja reductora/multiplicadora y devuelve los
+    kwargs de gearbox para core.asset_library.composer.compose_train.
+
+    El Instance no persiste el gearbox como campo estructurado, pero el wizard
+    inserta sensores con plane_label que contiene 'gearbox' (HSS/LSS/Intermedio
+    gearbox). Usamos eso como fuente de verdad; como respaldo, miramos
+    modelos/notas/descripción del tren.
+
+    Returns:
+        {"gearbox_key", "gearbox_label"} si hay gearbox, o {} si no
+        (en cuyo caso compose_train se comporta idéntico a antes).
+    """
+    sensors = getattr(inst, "sensors", None) or []
+    label = ""
+    for s in sensors:
+        pl = str((s.get("plane_label") if isinstance(s, dict) else "") or "").lower()
+        if "gearbox" in pl or "reductor" in pl or "multiplicad" in pl:
+            label = "Gearbox / reductor"
+            break
+
+    if not label:
+        blob = " ".join([
+            str(getattr(inst, "driver_model", "") or ""),
+            str(getattr(inst, "driven_model", "") or ""),
+            str(getattr(inst, "notes", "") or ""),
+            compose_train_description(inst) if hasattr(inst, "driver_model") else "",
+        ]).lower()
+        if "gearbox" in blob or "reductor" in blob or "multiplicad" in blob:
+            label = "Gearbox / reductor"
+
+    if not label:
+        return {}
+    return {"gearbox_key": "gearbox_parallel", "gearbox_label": label}
+
+
 def delete_instance(instance_id: str) -> bool:
     """Borra completamente una Instance del backend (metadata + documentos)."""
     return get_active_repository().delete_instance(instance_id)
@@ -910,4 +946,5 @@ __all__ = [
     "get_instance_document_bytes",
     "get_active_backend_name",
     "compose_train_description",
+    "detect_gearbox_kwargs",
 ]

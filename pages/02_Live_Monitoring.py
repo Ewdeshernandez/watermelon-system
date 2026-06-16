@@ -770,6 +770,7 @@ def render_sensor_map_library(
     drvn_label = f"{drvn_prefix} {drvn_main}".strip() if drvn_prefix else (drvn_main or "Driven")
 
     try:
+        from core.instance_state import detect_gearbox_kwargs as _gbx_kw
         svg = compose_train(
             driver_key=drv_key,
             driven_key=drvn_key,
@@ -777,6 +778,7 @@ def render_sensor_map_library(
             driven_label=drvn_label,
             coupling=getattr(instance_obj, "coupling_class", "") or "flexible",
             sensors_with_status=sensors_with_status,
+            **_gbx_kw(instance_obj),
         )
     except Exception as e:
         st.caption(f"(Asset library no pudo rendir: {e}) — cayendo al PNG legacy.")

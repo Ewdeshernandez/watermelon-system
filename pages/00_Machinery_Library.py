@@ -1346,6 +1346,7 @@ def render_sensor_map_section(instance_id: str) -> None:
                         "unit": "",
                         "title": f"{_lbl} · {s.get('sensor_type','')}",
                     })
+                from core.instance_state import detect_gearbox_kwargs as _gbx_kw
                 _svg_lib = compose_train(
                     driver_key=_drv_icon_key,
                     driven_key=_drvn_icon_key,
@@ -1353,6 +1354,7 @@ def render_sensor_map_section(instance_id: str) -> None:
                     driven_label=_dvn_lbl_lib,
                     coupling=getattr(inst, "coupling_class", "") or "flexible",
                     sensors_with_status=_s_for_svg,
+                    **_gbx_kw(inst),
                 )
                 st.markdown(
                     f'<div style="background:#ffffff;border:1px solid #e2e8f0;'

@@ -1492,6 +1492,7 @@ if _active_instance.sensors:
                                 "unit": "",
                                 "title": _lbl,
                             })
+                        from core.instance_state import detect_gearbox_kwargs as _gbx_kw
                         _svg_mini = _compose_lib(
                             driver_key=_drv_icon,
                             driven_key=_drvn_icon,
@@ -1499,6 +1500,7 @@ if _active_instance.sensors:
                             driven_label=_dvn_lbl,
                             coupling=getattr(_active_instance, "coupling_class", "") or "flexible",
                             sensors_with_status=_s_for_svg,
+                            **_gbx_kw(_active_instance),
                         )
                         st.markdown(
                             f'<div style="background:#ffffff;border:1px solid #e2e8f0;'
