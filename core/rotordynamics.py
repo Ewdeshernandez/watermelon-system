@@ -843,11 +843,17 @@ def iso_20816_zone_multipart(
     # Determinar umbrales
     if custom_thresholds is not None:
         ab, bc, cd = custom_thresholds
-    elif iso_part == "custom":
-        raise ValueError(
-            "iso_part='custom' requiere custom_thresholds=(AB, BC, CD)"
-        )
     else:
+        # Ciclo 23.349 — DEGRADAR en vez de tumbar el módulo. Si el activo usa
+        # perfil 'custom' pero no definió umbrales A/B/C/D (overrides vacíos),
+        # antes esto lanzaba ValueError y reventaba todo el Bode/Polar. Ahora
+        # cae a la parte ISO por defecto según el tipo de medición, para que la
+        # gráfica y el diagnóstico SÍ se generen.
+        if iso_part == "custom":
+            iso_part = ("20816-3" if measurement_type == "casing_velocity"
+                        else "20816-2")
+            if machine_group not in ("group1", "group2"):
+                machine_group = "group2"
         if iso_part not in ISO_PART_TABLES:
             raise ValueError(f"ISO part no soportada: {iso_part}")
 

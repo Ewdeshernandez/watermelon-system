@@ -443,14 +443,28 @@ def build_polar_diagnostics_rotordyn(
     # ISO 20816-2 zone para el peak global de la corrida
     peak_amp_csv = float(np.nanmax(amp)) if amp.size else 0.0
     peak_amp_um, conversion_note = _amp_unit_to_um_pp(peak_amp_csv, amp_unit)
-    iso_eval = iso_20816_zone_multipart(
-        amplitude=peak_amp_um,
-        iso_part=iso_part,
-        machine_group=machine_group,
-        measurement_type=measurement_type,
-        operating_speed_rpm=operating_rpm,
-        custom_thresholds=custom_thresholds,
-    )
+    # Ciclo 23.349 — Blindaje: si la clasificación ISO falla por config
+    # incompleta (perfil 'custom' sin umbrales, combinación de tabla no
+    # soportada, etc.), NO tumbar el módulo Bode/Polar. Se reintenta con un
+    # fallback dimensionalmente correcto (20816-2 shaft, µm pp) para que la
+    # gráfica y el resto del diagnóstico siempre se generen.
+    try:
+        iso_eval = iso_20816_zone_multipart(
+            amplitude=peak_amp_um,
+            iso_part=iso_part,
+            machine_group=machine_group,
+            measurement_type=measurement_type,
+            operating_speed_rpm=operating_rpm,
+            custom_thresholds=custom_thresholds,
+        )
+    except Exception:
+        iso_eval = iso_20816_zone_multipart(
+            amplitude=peak_amp_um,
+            iso_part="20816-2",
+            machine_group="group2",
+            measurement_type="shaft_displacement",
+            operating_speed_rpm=operating_rpm,
+        )
 
     # Evaluar API 684 para cada crítica
     api_evals = []
