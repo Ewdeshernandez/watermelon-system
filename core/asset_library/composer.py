@@ -336,6 +336,9 @@ def compose_train(
     sensors_with_status: Optional[List[Dict[str, Any]]] = None,
     bg_color: str = "#ffffff",
     return_overlays: bool = False,
+    gearbox_key: Optional[str] = None,
+    gearbox_label: str = "",
+    coupling2: Optional[str] = None,
 ) -> Any:
     """
     Compone un SVG con el tren acoplado completo.
@@ -369,44 +372,67 @@ def compose_train(
     driver_svg, driver_anchors = get_icon(driver_key, label=" ", x_offset=0, y_offset=0)
     driver_w = driver_anchors.get("viewbox_w", 320)
 
-    # Coupling — Ciclo 23.23: detectar tren aero-derivative (gas_turbine_aero)
-    # con coupling rigid → usar quill-shaft style (LM6000 real-world).
-    # User-specified explicit "rigid_quill" también soportado.
-    is_aero_rigid = (
-        driver_key == "gas_turbine_aero"
-        and coupling in ("rigid", "rigid_quill")
-    )
-    if coupling == "rigid_quill" or is_aero_rigid:
-        coupling_w = 70
-    elif coupling == "flexible":
-        coupling_w = 80
-    else:
-        coupling_w = 60
+    # Helper de acople — Ciclo 23.23: detecta tren aero-derivative
+    # (gas_turbine_aero) con coupling rigid → usa quill-shaft style (LM6000
+    # real-world). "rigid_quill" explícito también soportado. Centralizado acá
+    # porque ahora puede haber DOS acoples (driver→gearbox y gearbox→driven).
+    def _build_coupling(ctype: str, x: float):
+        is_aero_rigid = (
+            driver_key == "gas_turbine_aero"
+            and ctype in ("rigid", "rigid_quill")
+        )
+        if ctype == "rigid_quill" or is_aero_rigid:
+            w = 70
+            svg, anch = coupling_rigid_quill(x_offset=x, y_offset=0, width=w)
+        elif ctype == "rigid":
+            w = 60
+            svg, anch = coupling_rigid(x_offset=x, y_offset=0, width=w)
+        elif ctype == "flexible":
+            w = 80
+            svg, anch = coupling_flexible(x_offset=x, y_offset=0, width=w)
+        else:
+            w = 60
+            svg, anch = coupling_flexible(x_offset=x, y_offset=0, width=w)
+        return svg, anch, w
+
+    has_gearbox = bool(gearbox_key)
+
+    # Acople 1 (driver → siguiente: gearbox si hay, si no driven).
     coupling_x = driver_w
-    if coupling == "rigid_quill" or is_aero_rigid:
-        coupling_svg, coupling_anchors = coupling_rigid_quill(
-            x_offset=coupling_x, y_offset=0, width=coupling_w,
+    coupling_svg, coupling_anchors, coupling_w = _build_coupling(coupling, coupling_x)
+    cursor_x = coupling_x + coupling_w
+
+    # Gearbox intermedio (opcional) + acople 2 (gearbox → driven).
+    gearbox_svg = ""
+    gearbox_anchors: Dict[str, Any] = {}
+    gearbox_w = 0.0
+    coupling2_svg = ""
+    coupling2_anchors: Dict[str, Any] = {}
+    coupling2_w = 0.0
+    if has_gearbox:
+        gearbox_x = cursor_x
+        gearbox_svg, gearbox_anchors = get_icon(
+            gearbox_key, label=" ", x_offset=gearbox_x, y_offset=0,
         )
-    elif coupling == "rigid":
-        coupling_svg, coupling_anchors = coupling_rigid(
-            x_offset=coupling_x, y_offset=0, width=coupling_w,
+        gearbox_w = gearbox_anchors.get("viewbox_w", 260)
+        cursor_x = gearbox_x + gearbox_w
+        coupling2_svg, coupling2_anchors, coupling2_w = _build_coupling(
+            (coupling2 or coupling), cursor_x,
         )
-    else:
-        coupling_svg, coupling_anchors = coupling_flexible(
-            x_offset=coupling_x, y_offset=0, width=coupling_w,
-        )
+        cursor_x = cursor_x + coupling2_w
 
     # Driven — mismo patrón: " " para suprimir interno sin fallback.
-    driven_x = coupling_x + coupling_w
+    driven_x = cursor_x
     driven_svg, driven_anchors = get_icon(
         driven_key, label=" ", x_offset=driven_x, y_offset=0,
     )
     driven_w = driven_anchors.get("viewbox_w", 320)
 
-    total_w = driver_w + coupling_w + driven_w
+    total_w = driven_x + driven_w
     base_h = max(
         driver_anchors.get("viewbox_h", 200),
         driven_anchors.get("viewbox_h", 200),
+        gearbox_anchors.get("viewbox_h", 0) if has_gearbox else 0,
         200,
     )
 
@@ -451,6 +477,8 @@ def compose_train(
     def _anchor_cx(side_: str, anchor_: str) -> Optional[float]:
         a = (driver_anchors if side_ == "driver"
              else driven_anchors if side_ == "driven"
+             else gearbox_anchors if side_ == "gearbox"
+             else coupling2_anchors if side_ == "coupling2"
              else coupling_anchors if side_ == "coupling"
              else driver_anchors)
         p = a.get(anchor_)
@@ -480,6 +508,10 @@ def compose_train(
             anchors = driver_anchors
         elif side == "driven":
             anchors = driven_anchors
+        elif side == "gearbox":
+            anchors = gearbox_anchors
+        elif side == "coupling2":
+            anchors = coupling2_anchors
         elif side == "coupling":
             anchors = coupling_anchors
         else:
@@ -626,7 +658,7 @@ def compose_train(
     # abajo dentro del viewBox para dejar headroom para sparklines.
     equipment_layer = (
         f'<g filter="url(#wm-shadow)" transform="translate(0,{vert_pad})">'
-        f'{driver_svg}{coupling_svg}{driven_svg}'
+        f'{driver_svg}{coupling_svg}{gearbox_svg}{coupling2_svg}{driven_svg}'
         f'</g>'
     )
 
@@ -644,8 +676,17 @@ def compose_train(
             f'letter-spacing="0.005em">'
             f'{driver_label}</text>'
         )
+    if has_gearbox and gearbox_label:
+        cx = driver_w + coupling_w + gearbox_w / 2
+        titles_layer += (
+            f'<text x="{cx:.1f}" y="22" text-anchor="middle" '
+            f'font-size="13" font-weight="800" fill="#166534" '
+            f'font-family="-apple-system, Segoe UI, Roboto, sans-serif" '
+            f'letter-spacing="0.005em">'
+            f'{gearbox_label}</text>'
+        )
     if driven_label:
-        cx = driver_w + coupling_w + driven_w / 2
+        cx = driven_x + driven_w / 2
         titles_layer += (
             f'<text x="{cx:.1f}" y="22" text-anchor="middle" '
             f'font-size="15" font-weight="800" fill="#14532d" '

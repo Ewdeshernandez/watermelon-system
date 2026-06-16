@@ -580,6 +580,19 @@ def _render_icon_picker(
         return meta
 
 
+def _gearbox_compose_kwargs(state: Dict[str, Any]) -> Dict[str, Any]:
+    """Deriva los kwargs de gearbox para compose_train desde el estado del
+    wizard. Si no hay gearbox, devuelve {} (compose_train queda idéntico)."""
+    if not state.get("include_gearbox"):
+        return {}
+    label = (state.get("gearbox_type") or "").strip() or "Gearbox / reductor"
+    return {
+        "gearbox_key": state.get("gearbox_icon_key") or "gearbox_parallel",
+        "gearbox_label": label,
+        "coupling2": state.get("coupling_class", "flexible"),
+    }
+
+
 def _render_train_preview(state: Dict[str, Any]) -> None:
     """
     Preview SVG en vivo del tren acoplado armado con la asset library.
@@ -598,6 +611,7 @@ def _render_train_preview(state: Dict[str, Any]) -> None:
             driven_label=state.get("driven_type", "") or "Driven",
             coupling=state.get("coupling_class", "flexible"),
             sensors_with_status=[],
+            **_gearbox_compose_kwargs(state),
         )
         st.markdown("**Preview del tren acoplado**")
         st.markdown(
@@ -929,6 +943,7 @@ def _render_visual_editor_library(
                 driven_label=state.get("driven_type") or "Driven",
                 coupling=state.get("coupling_class", "flexible"),
                 sensors_with_status=s_for_svg,
+                **_gearbox_compose_kwargs(state),
             )
             st.markdown(
                 f'<div style="background:#ffffff;border:1px solid #e2e8f0;'
