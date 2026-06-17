@@ -288,7 +288,8 @@ def _machine_context_block(instance_obj: Any, data: Dict[str, Any]) -> str:
 
 
 def _ai_enhance(sections: Dict[str, Any], tag: str, period: str,
-                data: Dict[str, Any], instance_obj: Any = None) -> Dict[str, Any]:
+                data: Dict[str, Any], instance_obj: Any = None,
+                figures: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Mejora best-effort con IA. Si no hay credenciales o falla, deja el
     borrador determinístico intacto."""
     try:
@@ -314,11 +315,46 @@ def _ai_enhance(sections: Dict[str, Any], tag: str, period: str,
             except Exception as e:
                 log.warning("machine_context falló: %s", e)
 
+        # Análisis QUE YA ESTÁN en el reporte (figuras adjuntas). Sin esto la
+        # IA cree que solo hay un punto tabular y afirma "no hay espectros /
+        # forma de onda" y recomienda adquirir lo que el reporte ya incluye.
+        _FIG_DESC = {
+            "trend": "Tendencia overall en el tiempo",
+            "spectrum": "Espectro FFT por plano (generado desde la forma de onda cruda cargada en CSV)",
+            "waveform": "Forma de onda temporal por plano (CSV crudo cargado)",
+            "orbit": "Órbitas por cojinete",
+        }
+        present = [k for k in ("trend", "spectrum", "waveform", "orbit")
+                   if (figures or {}).get(k)]
+        if present:
+            _lines = ["", "Análisis YA INCLUIDOS en este reporte (figuras adjuntas):"]
+            for k in present:
+                _lines.append(f"- {_FIG_DESC[k]}")
+            _lines.append(
+                "REGLA: estos análisis SÍ están disponibles. NO afirmes "
+                "ausencia de espectros / forma de onda / análisis de fase si "
+                "aparecen arriba. NO recomiendes adquirir data que el reporte "
+                "ya contiene; las recomendaciones deben ser próximos pasos "
+                "diagnósticos sobre la data existente (correlación entre "
+                "figuras, seguimiento de tendencia, banda de frecuencia a "
+                "vigilar, etc.)."
+            )
+            machine_ctx = (machine_ctx + "\n" + "\n".join(_lines)).strip()
+
+        # Items: el estado tabular + un item por cada figura presente, para que
+        # la IA sintetice sabiendo que existen (aunque su contenido no venga
+        # interpretado, evita el contrasentido de "no hay espectros").
         items = [{
             "type": "tabular", "title": f"Estado tabular {tag}",
             "machine": machine_train, "point": "",
             "notes": (sections["summary"] + "\n" + sections["diagnosis"]),
         }]
+        for k in present:
+            items.append({
+                "type": k, "title": _FIG_DESC[k],
+                "machine": machine_train, "point": "",
+                "notes": f"Figura de {_FIG_DESC[k]} incluida en el reporte.",
+            })
         meta = {
             "machine_train": machine_train,
             "period": period,
@@ -404,17 +440,19 @@ def build_asset_briefing(
     if not data:
         return None, {"instance_id": instance_id, "status": "Sin datos", "ok": False}
 
-    sections = _deterministic_sections(tag, period_label, data)
-    if use_ai:
-        sections = _ai_enhance(sections, tag, period_label, data,
-                               instance_obj=instance_obj)
-
+    # Figuras PRIMERO: la IA necesita saber qué análisis ya trae el reporte
+    # (espectro/forma de onda/tendencia/órbita) para no afirmar que faltan.
     try:
         from core.briefing_figures import collect_asset_figures
         figures = collect_asset_figures(instance_id)
     except Exception as e:
         log.warning("briefing figures falló: %s", e)
         figures = {}
+
+    sections = _deterministic_sections(tag, period_label, data)
+    if use_ai:
+        sections = _ai_enhance(sections, tag, period_label, data,
+                               instance_obj=instance_obj, figures=figures)
 
     sensor_map_png = _render_sensor_map(instance_obj, data["channels"])
 
@@ -424,7 +462,19 @@ def build_asset_briefing(
         getattr(instance_obj, "driver_model", "") or "",
         "→", getattr(instance_obj, "driven_model", "") or "",
     ] if p and p != "→") or ""
-    pdf_meta = {"train_description": train_bare, "client": client}
+    # Fecha del reporte = momento exacto de generación (fecha + hora local).
+    # Antes la portada caía a solo-fecha; el usuario quiere el timestamp real.
+    from datetime import datetime as _dt
+    try:
+        from zoneinfo import ZoneInfo
+        _gen_ts = _dt.now(ZoneInfo("America/Bogota")).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        _gen_ts = _dt.now().strftime("%Y-%m-%d %H:%M")
+    pdf_meta = {
+        "train_description": train_bare,
+        "client": client,
+        "report_date": _gen_ts,  # meta_extra puede sobreescribir si la UI lo pasa
+    }
     if meta_extra:
         pdf_meta.update({k: v for k, v in meta_extra.items() if v})
 

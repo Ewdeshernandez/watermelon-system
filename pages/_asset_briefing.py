@@ -195,6 +195,19 @@ with st.container(border=True):
              "Si no, se usa el borrador determinístico (siempre funciona).",
     )
 
+    st.markdown('<div class="bf-label" style="margin-top:14px;">Revisado por (opcional)</div>',
+                unsafe_allow_html=True)
+    _reviewed_by = st.text_input(
+        "Revisado por", value="", key="briefing_reviewed_by",
+        label_visibility="collapsed",
+        placeholder="Nombre del revisor (aparece en la portada como 'Revisado por:')",
+    )
+    _reviewed_role = st.text_input(
+        "Cargo del revisor", value="", key="briefing_reviewed_role",
+        label_visibility="collapsed",
+        placeholder="Cargo del revisor (opcional, ej. Senior Condition Monitoring Engineer)",
+    )
+
 st.markdown("")
 
 # -----------------------------------------------------------------
@@ -211,6 +224,11 @@ if st.button("📄  Generar briefing", type="primary", use_container_width=True)
         _meta_extra["prepared_by"] = _u.get("full_name") or _u.get("username") or ""
     except Exception:
         pass
+    # Revisado por (opcional) — habilita el bloque "Revisado por:" en la portada
+    if (_reviewed_by or "").strip():
+        _meta_extra["reviewed_by"] = _reviewed_by.strip()
+        if (_reviewed_role or "").strip():
+            _meta_extra["reviewed_role"] = _reviewed_role.strip()
     results = []
     with st.spinner("Generando briefing(s)… (figuras + redacción + PDF)"):
         if _scope == "Todos los activos":
