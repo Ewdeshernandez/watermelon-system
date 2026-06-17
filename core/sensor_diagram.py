@@ -474,6 +474,10 @@ def render_sensor_map_diagram(
     gbx_x = x_start + drv_w + coupling_w  # solo significativo si has_gbx
     dvn_x = x_start + drv_w + coupling_w + _gbx_segment
 
+    # Ajustar el xlim al ancho REAL del tren. Con gearbox el tren puede pasar
+    # de 10 unidades y el xlim fijo (0,10) recortaba el generador a la derecha.
+    ax_top.set_xlim(min(0.0, x_start - 0.5), max(10.0, dvn_x + dvn_w + 0.5))
+
     # Linea de centro del rotor (eje del tren). En el lateral los cojinetes
     # se posan EN esta linea — es la geometria correcta de un tren acoplado.
     rotor_y = 2.0
