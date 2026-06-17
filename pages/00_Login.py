@@ -4,7 +4,8 @@ from pathlib import Path
 
 import streamlit as st
 
-from core.auth import is_authenticated, login as wm_login, render_login_shell
+from core.auth import is_authenticated, complete_otp_login, render_login_shell
+from core import auth_otp
 from core.version import get_version_info
 
 st.set_page_config(
@@ -793,126 +794,84 @@ with right_col:
         """
         <div class="wm-login-top">🔐 Secure access</div>
         <div class="wm-login-title">Ingresar</div>
-        <div class="wm-login-copy">Acceso con credenciales corporativas. Las sesiones quedan auditadas para trazabilidad.</div>
+        <div class="wm-login-copy">Acceso sin contraseña: te enviamos un código de un solo uso a tu correo registrado. Las sesiones quedan auditadas para trazabilidad.</div>
         <div class="wm-login-trust">
             <span class="icon">🛡</span>
-            <span>End-to-end encryption · TLS 1.3 · audit log</span>
+            <span>Código de un solo uso · sesión 1 h inactividad / 6 h máx · audit log</span>
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    with st.form("wm_login_form", clear_on_submit=False):
-        username = st.text_input(
-            "Correo corporativo",
-            placeholder="nombre.apellido@sigasas.com",
-            key="wm_login_username",
-            autocomplete="email",
-            help=(
-                "Para usuarios SIGASAS: tu correo @sigasas.com. "
-                "Para clientes: el correo registrado por tu administrador."
-            ),
-        )
+    # Aviso de sesión expirada (tope de inactividad / 6 h absoluto)
+    if st.session_state.pop("_wm_session_expired", False):
+        st.info("Tu sesión expiró por seguridad. Ingresá un nuevo código para continuar.")
 
-        password = st.text_input(
-            "Contraseña",
-            placeholder="••••••••••••",
-            type="password",
-            key="wm_login_password",
-            autocomplete="current-password",
-        )
+    _otp_step = st.session_state.get("otp_step", "email")
 
-        submit = st.form_submit_button("Iniciar sesión", use_container_width=True)
-
-    if submit:
-        ok, msg = wm_login(username.strip(), password)
-        if ok:
-            st.success(msg)
-            st.switch_page("pages/_landing.py")
-        else:
-            st.error(msg)
-
-    # =====================================================================
-    # Ciclo 17.16 — "Olvidé mi contraseña"
-    # =====================================================================
-    # Link discreto debajo del form de login. Al expandir, pide email y
-    # llama core.password_reset.request_reset. Por seguridad, NO revela
-    # si el email existe o no — siempre muestra mensaje genérico.
-    with st.expander("¿Olvidaste tu contraseña?", expanded=False):
-        _reset_email = st.text_input(
-            "Tu correo corporativo",
-            placeholder="nombre.apellido@sigasas.com",
-            key="wm_reset_email",
-            help="Te enviaremos un link para elegir nueva clave. Válido por 1 hora.",
-        ).strip().lower()
-        if st.button("Enviar link de recuperación",
-                     use_container_width=True,
-                     key="wm_reset_request_btn"):
-            if not _reset_email or "@" not in _reset_email:
-                st.error("Ingresá un email válido.")
+    # ── Paso 1: correo → enviar código ──────────────────────────────────
+    if _otp_step != "code":
+        with st.form("wm_otp_email_form", clear_on_submit=False):
+            _email_in = st.text_input(
+                "Correo corporativo",
+                placeholder="nombre.apellido@sigasas.com",
+                key="wm_otp_email",
+                autocomplete="email",
+                help=("Para SIGASAS: tu correo @sigasas.com. "
+                      "Para clientes: el correo registrado por tu administrador."),
+            )
+            _send = st.form_submit_button("Enviar código", use_container_width=True)
+        if _send:
+            _res = auth_otp.request_code((_email_in or "").strip().lower())
+            if _res.get("ok"):
+                st.session_state["otp_email"] = (_email_in or "").strip().lower()
+                st.session_state["otp_step"] = "code"
+                st.rerun()
             else:
-                try:
-                    from core.password_reset import request_reset
-                    # Ciclo 17.16.3 — Detectar la URL base de la app
-                    # actual (importante para que el link del email
-                    # apunte a la app correcta, no a otra app del
-                    # mismo proyecto). Orden de prioridad:
-                    #   1. secret [app] base_url (manual override)
-                    #   2. st.context.headers Host (auto-detect)
-                    #   3. fallback: wm-home-final-2026
-                    _base_url = ""
-                    try:
-                        try:
-                            _base_url = str(
-                                (st.secrets.get("app", {}) or {}).get("base_url", "") or ""
-                            ).strip().rstrip("/")
-                        except Exception:
-                            _base_url = ""
-                        if not _base_url:
-                            try:
-                                _ctx = getattr(st, "context", None)
-                                _hdrs = getattr(_ctx, "headers", None) if _ctx else None
-                                _host = ""
-                                if _hdrs:
-                                    _host = (
-                                        _hdrs.get("Host", "")
-                                        or _hdrs.get("host", "")
-                                        or ""
-                                    )
-                                if _host:
-                                    # Asumimos https; cualquier app
-                                    # productiva está bajo https.
-                                    _scheme = "https"
-                                    if "localhost" in _host or "127.0.0.1" in _host:
-                                        _scheme = "http"
-                                    _base_url = f"{_scheme}://{_host}"
-                            except Exception:
-                                pass
-                        if not _base_url:
-                            _base_url = "https://wm-home-final-2026.streamlit.app"
-                    except Exception:
-                        _base_url = "https://wm-home-final-2026.streamlit.app"
+                st.error(_res.get("error", "No se pudo enviar el código."))
 
-                    res = request_reset(_reset_email, base_url=_base_url)
-                    if res.get("ok"):
-                        st.success(
-                            "✓ " + res.get("message", "Si el email existe, "
-                            "recibirás instrucciones en breve.")
-                        )
-                        if res.get("_debug"):
-                            # Solo visible si hay un secret app.debug=true
-                            try:
-                                if st.secrets.get("app", {}).get("debug"):
-                                    st.caption(f"🔧 debug: {res['_debug']}")
-                            except Exception:
-                                pass
-                    else:
-                        st.error(
-                            "No se pudo iniciar el reset: "
-                            + res.get("error", "error desconocido")
-                        )
-                except Exception as e:
-                    st.error(f"Error inesperado: {e}")
+    # ── Paso 2: código → verificar e ingresar ───────────────────────────
+    else:
+        _masked = auth_otp.mask_email(st.session_state.get("otp_email", ""))
+        st.caption(f"Enviamos un código de 6 dígitos a {_masked}. Vence en "
+                   f"{auth_otp.OTP_TTL_SECONDS // 60} minutos.")
+        with st.form("wm_otp_code_form", clear_on_submit=False):
+            _code_in = st.text_input(
+                "Código de acceso",
+                placeholder="6 dígitos",
+                key="wm_otp_code",
+                max_chars=6,
+            )
+            _verify = st.form_submit_button("Verificar e ingresar",
+                                            use_container_width=True)
+        if _verify:
+            _res = auth_otp.submit_code(
+                st.session_state.get("otp_email", ""),
+                (_code_in or "").strip(),
+            )
+            if _res.get("ok"):
+                complete_otp_login(_res["user"])
+                for _k in ("otp_step", "otp_email"):
+                    st.session_state.pop(_k, None)
+                st.switch_page("pages/_landing.py")
+            else:
+                st.error(_res.get("error", "Código inválido."))
+
+        _c1, _c2 = st.columns(2)
+        with _c1:
+            if st.button("Reenviar código", use_container_width=True,
+                         key="wm_otp_resend"):
+                _res = auth_otp.request_code(st.session_state.get("otp_email", ""))
+                if _res.get("ok"):
+                    st.success("Te enviamos un código nuevo.")
+                else:
+                    st.error(_res.get("error", "No se pudo reenviar."))
+        with _c2:
+            if st.button("Usar otro correo", use_container_width=True,
+                         key="wm_otp_change_email"):
+                for _k in ("otp_step", "otp_email"):
+                    st.session_state.pop(_k, None)
+                st.rerun()
 
     # Ciclo 17.6.3 — versión real desde core.version (deriva de
     # git tags, no hardcoded). Pinta un chip con el environment

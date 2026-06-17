@@ -35,7 +35,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 COOKIE_NAME = "wm_session"
-TTL_SECONDS = 6 * 60 * 60  # 6 horas de inactividad (ventana deslizante)
+TTL_SECONDS = 60 * 60  # 1 hora de inactividad (ventana deslizante). El tope
+# absoluto de 6 h se controla aparte vía 'started_at' en el payload (core.auth).
 
 
 def _secret() -> bytes:
@@ -119,6 +120,9 @@ def persist(user: Dict[str, Any]) -> None:
             "user_id":   user.get("user_id", "") or user.get("id", ""),
             "is_admin":  bool(user.get("is_admin", False)),
             "source":    user.get("source", "supabase"),
+            # Inicio absoluto de la sesión: viaja en la cookie para que el tope
+            # de 6 h se respete aunque la sesión en memoria se haya perdido.
+            "started_at": int(user.get("started_at", 0) or 0),
         })
         _write_cookie(token, TTL_SECONDS)
     except Exception:

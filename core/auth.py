@@ -11,7 +11,12 @@ import streamlit as st
 
 PBKDF2_PREFIX = "pbkdf2_sha256"
 DEFAULT_ITERATIONS = 260000
-DEFAULT_SESSION_TIMEOUT_MINUTES = 480
+# Política de sesión (passwordless OTP):
+#   - Inactividad: 1 h (ventana deslizante; cada actividad la renueva).
+#   - Máximo absoluto: 6 h desde el login, aunque haya actividad continua →
+#     obliga a pedir un código nuevo.
+DEFAULT_SESSION_TIMEOUT_MINUTES = 60
+ABSOLUTE_SESSION_SECONDS = 6 * 60 * 60
 
 
 # =============================================================
@@ -595,6 +600,9 @@ def _rehydrate_from_cookie() -> bool:
         st.session_state["auth_user_id"] = payload.get("user_id", "")
         st.session_state["auth_is_admin"] = bool(payload.get("is_admin", False))
         st.session_state["auth_source"] = payload.get("source", "supabase")
+        # Tope absoluto: respetar el inicio original de sesión (viene en la
+        # cookie). Si ya pasó, is_authenticated lo cierra abajo.
+        st.session_state["auth_started_at"] = int(payload.get("started_at", 0)) or _now()
         st.session_state["auth_expires_at"] = _now() + _session_timeout_seconds()
         return True
     except Exception:
@@ -608,9 +616,17 @@ def is_authenticated() -> bool:
         if not _rehydrate_from_cookie():
             return False
 
+    # Tope absoluto de 6 h desde el login (aunque haya actividad continua).
+    started_at = int(st.session_state.get("auth_started_at", 0))
+    if started_at and (_now() - started_at) >= ABSOLUTE_SESSION_SECONDS:
+        logout(silent=True)
+        st.session_state["_wm_session_expired"] = True
+        return False
+
     expires_at = int(st.session_state.get("auth_expires_at", 0))
     if _now() >= expires_at:
         logout(silent=True)
+        st.session_state["_wm_session_expired"] = True
         return False
 
     st.session_state["auth_expires_at"] = _now() + _session_timeout_seconds()
@@ -656,7 +672,9 @@ def login(identifier: str, password: str) -> tuple[bool, str]:
                 st.session_state["auth_user_id"] = u.get("id", "")
                 st.session_state["auth_is_admin"] = bool(u.get("is_admin"))
                 st.session_state["auth_source"] = "supabase"
+                st.session_state["auth_started_at"] = _now()
                 st.session_state["auth_expires_at"] = _now() + _session_timeout_seconds()
+                st.session_state.pop("_wm_logged_out", None)
                 # La escritura de cookie se difiere a render_user_menu de la
                 # primera página (login hace switch_page y cortaría el iframe).
                 st.session_state["_wm_cookie_needs_write"] = True
@@ -692,10 +710,30 @@ def login(identifier: str, password: str) -> tuple[bool, str]:
     st.session_state["auth_user_id"] = ""
     st.session_state["auth_is_admin"] = (user.get("role") == "admin")
     st.session_state["auth_source"] = "legacy"
+    st.session_state["auth_started_at"] = _now()
     st.session_state["auth_expires_at"] = _now() + _session_timeout_seconds()
+    st.session_state.pop("_wm_logged_out", None)
     st.session_state["_wm_cookie_needs_write"] = True
 
     return True, "Acceso concedido."
+
+
+def complete_otp_login(user: Dict[str, Any]) -> None:
+    """Arma la sesión a partir del dict de usuario ya verificado por OTP
+    (core.auth_otp.submit_code). Equivalente a login() pero sin password."""
+    st.session_state["auth_ok"] = True
+    st.session_state["auth_email"] = user.get("email", "")
+    st.session_state["auth_username"] = user.get("email", "") or user.get("username", "")
+    st.session_state["auth_full_name"] = user.get("full_name", "") or user.get("email", "")
+    st.session_state["auth_role"] = user.get("role", "client")
+    st.session_state["auth_user_id"] = user.get("id", "") or ""
+    st.session_state["auth_is_admin"] = bool(user.get("is_admin"))
+    st.session_state["auth_source"] = user.get("source", "supabase")
+    st.session_state["auth_started_at"] = _now()
+    st.session_state["auth_expires_at"] = _now() + _session_timeout_seconds()
+    st.session_state.pop("_wm_logged_out", None)
+    st.session_state.pop("_wm_session_expired", None)
+    st.session_state["_wm_cookie_needs_write"] = True
 
 
 def _persist_session_cookie() -> None:
@@ -713,6 +751,9 @@ def _persist_session_cookie() -> None:
             "user_id":   st.session_state.get("auth_user_id", ""),
             "is_admin":  bool(st.session_state.get("auth_is_admin", False)),
             "source":    st.session_state.get("auth_source", "supabase"),
+            # Inicio absoluto: la cookie es deslizante (renueva inactividad)
+            # pero started_at se mantiene fijo para el tope de 6 h.
+            "started_at": int(st.session_state.get("auth_started_at", 0) or 0),
         })
     except Exception:
         pass
@@ -787,8 +828,9 @@ def render_user_menu() -> None:
     if not user:
         return
 
-    # Ciclo 23.163 — Renovar la cookie de sesión en cada navegación (ventana
-    # deslizante de 6 h). Guarda de 5 min para no reescribir en cada rerun.
+    # Renovar la cookie en cada navegación (ventana deslizante de 1 h de
+    # inactividad). Guarda de 5 min para no reescribir en cada rerun. El tope
+    # absoluto de 6 h se controla en is_authenticated vía auth_started_at.
     try:
         _last = float(st.session_state.get("_wm_cookie_last_write", 0))
         _needs = st.session_state.pop("_wm_cookie_needs_write", False)
