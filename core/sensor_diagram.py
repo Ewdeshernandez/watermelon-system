@@ -452,7 +452,21 @@ def render_sensor_map_diagram(
     coupling_w = 0.55
     n_gbx = len(gearbox_planes)
     has_gbx = n_gbx > 0
-    gbx_w = (1.7 + 0.5 * (n_gbx - 1)) if has_gbx else 0.0
+    # Ancho del gearbox proporcional a la DENSIDAD de sondas: un plano con
+    # muchos canales (ej. plano 4 con accel+vel+prox en X e Y = 6 sondas)
+    # necesita más separación horizontal entre planos para que los textos no
+    # se amontonen. Antes era fijo y los valores se montaban unos sobre otros.
+    if has_gbx:
+        _gbx_max_sensors = max(
+            (sum(1 for s in sensors
+                 if int(s.get("plane", 0) or 0) == p
+                 and str(s.get("sensor_type", "")).lower() != "keyphasor")
+             for p in gearbox_planes),
+            default=1,
+        )
+        gbx_w = max(1.9 * n_gbx, 1.3 * n_gbx + 0.28 * _gbx_max_sensors)
+    else:
+        gbx_w = 0.0
     # Con gearbox: driver + acople + gearbox + acople + driven (dos acoples).
     _gbx_segment = (gbx_w + coupling_w) if has_gbx else 0.0
     total_w = drv_w + coupling_w + _gbx_segment + dvn_w
@@ -1139,6 +1153,12 @@ def render_sensor_map_diagram(
                     val_color = _COLOR_SEVERITY.get(sv, _COLOR_TEXT)
                 else:
                     val_color = _COLOR_TEXT
+                # Unidad compacta: el "rms/peak/pico" alarga el texto y amontona
+                # los planos vecinos del gearbox; se conserva "pp" (significativo).
+                if unit:
+                    for _w in (" RMS", " rms", " peak", " pico", " pk", " p-p"):
+                        unit = unit.replace(_w, "")
+                    unit = unit.strip()
                 txt = f"{lbl}: {float(ov):.2f}"
                 if unit:
                     txt = f"{txt} {unit}"
@@ -1147,11 +1167,17 @@ def render_sensor_map_diagram(
             # Mas critico primero (justo debajo del cojinete)
             sensor_lines.sort(key=lambda t: -t[0])
 
+            # Densidad → fuente y espaciado adaptativos. Un plano con 5-6 sondas
+            # (gearbox) usa fuente más chica y líneas más juntas para no invadir
+            # el plano vecino ni salir del viewBox.
+            _n_lines = len(sensor_lines)
+            _fs = 6.5 if _n_lines <= 3 else (5.6 if _n_lines <= 5 else 5.0)
+            _step = 0.13 if _n_lines <= 3 else (0.115 if _n_lines <= 5 else 0.10)
             for _pct, txt, val_color in sensor_lines:
                 ax_top.text(bx, label_y_top, txt,
-                            fontsize=6.5, ha="center", va="top",
+                            fontsize=_fs, ha="center", va="top",
                             color=val_color, fontweight="bold")
-                label_y_top -= 0.13
+                label_y_top -= _step
 
     # Cojinetes del driver
     for i, p in enumerate(driver_planes):
