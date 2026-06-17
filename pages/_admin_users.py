@@ -340,14 +340,15 @@ with st.expander("Abrir formulario de creación", expanded=False):
             )
             new_role = _role_codes[new_role_idx]
 
-            # Generar password temporal sugerida
-            if "_new_user_temp_pwd" not in st.session_state:
-                st.session_state["_new_user_temp_pwd"] = generate_temp_password()
-            new_pwd = st.text_input(
-                "Password temporal (auto-generada — copiala antes de crear)",
-                value=st.session_state["_new_user_temp_pwd"],
-                key="new_user_pwd",
-                help="Esta password temporal se la entregás al usuario. Él podrá cambiarla en su próximo login.",
+            # Login passwordless por código (OTP al correo): el usuario NO usa
+            # contraseña. Supabase igual exige una al crear la cuenta, así que
+            # generamos una aleatoria internamente — nunca se muestra ni se
+            # entrega; el usuario ingresará siempre con un código a su correo.
+            new_pwd = generate_temp_password()
+            st.caption(
+                "🔑 Acceso **sin contraseña**: el usuario ingresará con un "
+                "código de un solo uso enviado a su correo. No hay que "
+                "entregarle ninguna clave."
             )
 
         # Ciclo 23.131 — Si role=client, mostrar dropdown para asignar a
@@ -423,11 +424,12 @@ with st.expander("Abrir formulario de creación", expanded=False):
                         _assigned_msg = f"\n\n⚠ Error asignando cliente: {_ae}"
                 st.success(
                     f"✓ Usuario **{new_email}** creado como **{new_role}**.\n\n"
-                    f"**Password temporal: `{new_pwd}`** "
-                    "→ entregale esta password al usuario para su primer login."
+                    f"El usuario ingresa **sin contraseña**: que entre a la app, "
+                    f"escriba **{new_email}** y reciba el código de acceso en su "
+                    "correo. No hay que entregarle ninguna clave."
                     + _assigned_msg
                 )
-                # Limpiar cache para que la lista se refresque + nueva password sugerida
+                # Limpiar cache para que la lista se refresque
                 st.session_state.pop("_admin_users_cache", None)
                 st.session_state.pop("_new_user_temp_pwd", None)
             else:
