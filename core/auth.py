@@ -579,6 +579,10 @@ def _rehydrate_from_cookie() -> bool:
     `st.session_state` está vacío (refresh de página o reconexión del
     websocket). Devuelve True si rehidrató una sesión válida."""
     try:
+        # No rehidratar si el usuario acaba de cerrar sesión en este mismo
+        # ciclo (la cookie del request aún no se limpió hasta recargar).
+        if st.session_state.get("_wm_logged_out"):
+            return False
         from core import session_cookie
         payload = session_cookie.restore()
         if not payload:
@@ -698,6 +702,8 @@ def _persist_session_cookie() -> None:
     """Ciclo 23.163 — Escribe/renueva la cookie firmada con la sesión actual.
     No setea el flag de tiempo (eso lo hace el caller, render_user_menu)."""
     try:
+        # Sesión nueva: limpiar el guard de logout para permitir rehidratación.
+        st.session_state.pop("_wm_logged_out", None)
         from core import session_cookie
         session_cookie.persist({
             "email":     st.session_state.get("auth_email", ""),
@@ -737,6 +743,13 @@ def logout(silent: bool = False) -> None:
         session_cookie.clear()
     except Exception:
         pass
+
+    # Guard: la cookie se borra por JS (cliente) pero restore() lee la cookie
+    # del REQUEST (st.context.cookies), que sigue presente hasta una recarga
+    # real del navegador. Sin este flag, el rerun post-logout rehidrata la
+    # sesión y manda al Home logueado. El flag bloquea la rehidratación; se
+    # limpia al iniciar sesión de nuevo y al recargar (session_state se vacía).
+    st.session_state["_wm_logged_out"] = True
 
     if not silent:
         st.toast("Sesión cerrada")
@@ -913,7 +926,27 @@ def render_user_menu() -> None:
 
         if st.button("Cerrar sesión", use_container_width=True, key="logout_button"):
             logout()
-            st.switch_page("pages/00_Login.py")
+            # Recarga REAL del navegador: borra la cookie en el cliente y carga
+            # un request limpio (sin cookie) → no rehidrata. st.switch_page no
+            # recargaba el navegador, así que la cookie del request seguía viva
+            # y la sesión volvía (te mandaba al Home logueado).
+            import streamlit.components.v1 as _components
+            try:
+                from core.session_cookie import COOKIE_NAME as _CK
+            except Exception:
+                _CK = "wm_session"
+            _components.html(
+                f"""<script>
+                try {{
+                    window.parent.document.cookie =
+                        "{_CK}=; path=/; max-age=0; SameSite=Lax; Secure";
+                }} catch (e) {{}}
+                try {{ window.parent.location.replace(window.parent.location.origin); }}
+                catch (e) {{ window.location.replace('/'); }}
+                </script>""",
+                height=0,
+            )
+            st.stop()
 
         # Ciclo 17.7 — versión del sistema al pie del sidebar.
         # Ciclo 17.24 — versión LIMPIA: solo el dot del entorno + número.
