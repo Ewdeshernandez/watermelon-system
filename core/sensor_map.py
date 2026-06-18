@@ -259,6 +259,27 @@ def modal_ready_sensors(sensors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return [s for s in (sensors or []) if has_modal_3d_config(s)]
 
 
+def _effective_direction(sensor: Dict[str, Any]) -> str:
+    """Dirección canónica de la sonda.
+
+    Si el campo `direction` es X o Y pero la ETIQUETA del plano codifica
+    explícitamente la otra (ej. plane_label='4XA gearbox starter' con
+    direction='Y' por un error de carga en Sondas), gana la etiqueta. Esto
+    evita colisiones de sensor_label (dos sondas con el mismo label → se
+    duplican y se pisan los valores en el Sensor Map / Resumen Ejecutivo).
+
+    Solo corrige conflictos X↔Y; sondas RADIAL/AXIAL/vacías se dejan intactas
+    (no rompe el caso C200C donde el CSV dice Y pero la sonda es radial)."""
+    d = str(sensor.get("direction", "") or "").strip().upper()
+    if d not in ("X", "Y"):
+        return d
+    pl = str(sensor.get("plane_label", "") or "").lower()
+    m = re.search(r"\b\d+\s*([xy])\s*[adv]\b", pl)
+    if m:
+        return m.group(1).upper()
+    return d
+
+
 def sensor_label(sensor: Dict[str, Any]) -> str:
     """
     Devuelve label industrial corto: ``1Y_D``, ``3X_A``, ``2_RAD_V``.
@@ -267,7 +288,7 @@ def sensor_label(sensor: Dict[str, Any]) -> str:
     es X / Y. Cuando es radial o axial, formato ``{plane}_{DIR}_{letter}``.
     """
     plane = int(sensor.get("plane", 0) or 0)
-    direction = str(sensor.get("direction", "") or "").strip().upper()
+    direction = _effective_direction(sensor)
     sensor_type = str(sensor.get("sensor_type", "") or "").lower()
     letter = _TYPE_TO_LETTER.get(sensor_type, "?")
 
@@ -488,10 +509,12 @@ def resolve_sensor_for_point(
         if filtered:
             universe = filtered
     if direction_hint:
+        # Usamos la dirección EFECTIVA (corrige Dir mal cargado vía etiqueta),
+        # si no, una sonda como 3YV con Dir=X crudo quedaría fuera del universo Y.
         filtered_dir = [
             s for s in universe
-            if str(s.get("direction", "")).upper() == direction_hint
-            or str(s.get("direction", "")).upper() in ("RADIAL", "AXIAL", "")
+            if _effective_direction(s) == direction_hint
+            or _effective_direction(s) in ("RADIAL", "AXIAL", "")
         ]
         # Solo aplicamos el filtro de dirección si quedan candidates;
         # un sensor radial no debería excluirse cuando el Point apunta
@@ -569,8 +592,7 @@ def resolve_sensor_for_point(
                         if (int(sensor.get("plane", 0) or 0) == _plane_csv
                                 and str(sensor.get("sensor_type", "")).lower()
                                 == _type_csv
-                                and str(sensor.get("direction", "")).upper()
-                                == _dir_csv):
+                                and _effective_direction(sensor) == _dir_csv):
                             return sensor
                 # Fallback plano+tipo (cubre sensores radial/axial donde la
                 # dirección del CSV difiere de la del sensor — caso C200C).
