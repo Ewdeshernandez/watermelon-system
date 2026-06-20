@@ -802,22 +802,12 @@ def require_login() -> None:
         return
 
     _hide_streamlit_navigation()
-    # Redirección ROBUSTA al login. `st.switch_page` desde una página interna
-    # (ej. _landing accedido directo tras logout + refresh) a veces NO navega y
-    # deja una página muerta con el warning "Debes iniciar sesión...". Forzamos
-    # una recarga real del navegador al root, que el router (00_Home) manda al
-    # login. Mismo mecanismo confiable que usamos en logout (components.html +
-    # st.stop()). No usamos switch_page acá para no depender de su navegación.
-    st.info("Redirigiendo al inicio de sesión…")
-    import streamlit.components.v1 as _components
-    _components.html(
-        """<script>
-        try { window.parent.location.replace(window.parent.location.origin); }
-        catch (e) { window.location.replace('/'); }
-        </script>""",
-        height=0,
-    )
-    st.stop()
+    # Redirige al login con la API nativa de Streamlit (server-side, confiable
+    # en 1.57 — la usa 00_Home y el botón de login). NO renderizamos warning
+    # antes: ese frame era lo que se veía como "bug" durante la transición.
+    # NO usar redirect por JS/components: el iframe no puede navegar el top sin
+    # gesto del usuario y deja la página congelada en "Redirigiendo…".
+    st.switch_page("pages/00_Login.py")
 
 
 def render_login_shell() -> None:
