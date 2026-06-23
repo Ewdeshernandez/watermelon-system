@@ -305,6 +305,15 @@ def _extract_axis_and_bearing_key(label: str) -> Optional[Tuple[str, str]]:
         if key:
             return (key, m.group(2).upper())
 
+    # Pattern 1b: token compacto "<plano><X|Y><tipo>" EN CUALQUIER PARTE del
+    # label, no solo al final. Cubre el formato real del cliente donde el eje
+    # va al inicio y la ubicación después: "3YD GENERADOR DE" → ("3","Y"),
+    # "4XD GENERADOR NDE" → ("4","X"), "1XD TURBINA DE" → ("1","X"). El
+    # bearing_key es el número de plano, así 3XD + 3YD emparejan.
+    m = re.search(r"\b(\d+)([XY])[ADVHN]?\b", label.upper())
+    if m:
+        return (m.group(1), m.group(2))
+
     # Pattern 2: token tipo "1XD", "3YD", "2X", "5808Y" → (digits, X/Y)
     m = re.match(r"^(.+?)([XY])(?:[ADVHN])?\s*$", label.upper())
     if m:
