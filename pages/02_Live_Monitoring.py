@@ -772,10 +772,24 @@ def render_sensor_map_library(
     drvn_mfr = (instance_obj.driven_manufacturer or "").strip()
     drvn_model = _clean_model(instance_obj.driven_model or "")
 
-    drv_label = f"{drv_prefix} {drv_model}".strip() if drv_prefix else (drv_model or "Driver")
+    def _with_prefix(prefix: str, text: str, fallback: str) -> str:
+        """Antepone el prefijo de clase (Turbina/Generador/…) SIN duplicar la
+        palabra cuando el modelo/fabricante ya empieza con ella (ej. prefijo
+        "Turbina" + modelo "TURBINA SGT300 B" → "TURBINA SGT300 B", no
+        "Turbina TURBINA SGT300 B")."""
+        text = (text or "").strip()
+        if not text:
+            return prefix or fallback
+        if not prefix:
+            return text
+        if text.lower().startswith(prefix.lower()):
+            return text
+        return f"{prefix} {text}".strip()
+
+    drv_label = _with_prefix(drv_prefix, drv_model, "Driver")
     # Para driven preferimos manufacturer (Brush, Westinghouse) sobre model
     drvn_main = drvn_mfr or drvn_model
-    drvn_label = f"{drvn_prefix} {drvn_main}".strip() if drvn_prefix else (drvn_main or "Driven")
+    drvn_label = _with_prefix(drvn_prefix, drvn_main, "Driven")
 
     try:
         from core.instance_state import detect_gearbox_kwargs as _gbx_kw

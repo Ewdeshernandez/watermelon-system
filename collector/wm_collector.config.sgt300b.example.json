@@ -1,0 +1,10 @@
+{
+    "_comment": "Watermelon Collector config SGT300B (Parex) - copiar a wm_collector.config.json en el servidor del sitio y editar si hace falta.",
+    "api_url": "https://watermelon-api-bpv4.onrender.com",
+    "api_key": "watermelon-collector-tes1-2026",
+    "modbus_map": "C:\\watermelon\\collector\\modbus_maps\\sgt300b.json",
+    "buffer_db": "C:\\watermelon\\collector\\buffer.sqlite",
+    "log_dir": "C:\\watermelon\\collector\\logs",
+    "host_label": "SGT300B-WINSRV",
+    "api_timeout_sec": 15
+}

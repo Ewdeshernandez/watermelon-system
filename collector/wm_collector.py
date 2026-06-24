@@ -263,12 +263,22 @@ def read_all_registers(
     tener huecos entre channels).
     """
     out: List[Tuple[RegisterDef, Optional[float], str]] = []
+    # pymodbus <=3.6 usa el kwarg `slave`; 3.7+ (3.13 en algunos servidores)
+    # lo renombró a `device_id`. Detectamos cuál soporta esta versión una vez.
+    import inspect
+    _unit_kw = "slave"
+    try:
+        _params = inspect.signature(client.read_holding_registers).parameters
+        if "device_id" in _params and "slave" not in _params:
+            _unit_kw = "device_id"
+    except (ValueError, TypeError):
+        pass
     for r in regs:
         try:
             resp = client.read_holding_registers(
                 address=r.address,
                 count=cfg.registers_per_value,
-                slave=cfg.unit_id,
+                **{_unit_kw: cfg.unit_id},
             )
             if resp.isError():  # type: ignore[attr-defined]
                 log.warning("Modbus error reg=%d: %s", r.address, resp)
