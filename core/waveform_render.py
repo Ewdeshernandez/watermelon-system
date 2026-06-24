@@ -138,8 +138,16 @@ def render_snapshot_waveforms(
         metrics = s.get("metrics") or {}
         peak = _format_metric(metrics.get("peak"))
         rms = _format_metric(metrics.get("rms"))
+        # Timestamp de CAPTURA del CSV (cuando se midió), junto al nombre del
+        # plano. Es la hora del instrumento tal como vino en el archivo.
+        _cts = _safe_label(str(s.get("csv_timestamp", "") or "").strip())
+        _ts_html = (
+            f"<span style='color:{TITLE_FONT_COLOR};font-size:11px;'>"
+            f"&nbsp;·&nbsp;🕒 {_cts}</span>" if _cts else ""
+        )
         title = (
-            f"<b style='color:{TITLE_FONT_COLOR};font-size:13px;'>{label}</b> "
+            f"<b style='color:{TITLE_FONT_COLOR};font-size:13px;'>{label}</b>"
+            f"{_ts_html} "
             f"<span style='color:{META_FONT_COLOR};font-size:11px;'>"
             f"&nbsp;&nbsp;Peak {peak} {unit} · RMS {rms} {unit}</span>"
         )

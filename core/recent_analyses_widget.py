@@ -405,9 +405,14 @@ def _render_spectrum_detail(payload: Dict[str, Any],
         if run_cpm is None:
             run_cpm = _estimate_running_cpm(sensors)
 
+        def _spec_title(s):
+            lbl = s.get("sensor_label", "")
+            cts = str(s.get("csv_timestamp", "") or "").strip()
+            return f"{lbl}  ·  🕒 {cts}" if cts else lbl
+
         fig = make_subplots(
             rows=n, cols=1, shared_xaxes=True, vertical_spacing=0.05,
-            subplot_titles=[s.get("sensor_label", "") for s in sensors],
+            subplot_titles=[_spec_title(s) for s in sensors],
         )
         # Recolorear + alinear a la izquierda los títulos (etiqueta-chip por canal)
         for ann, s in zip(fig.layout.annotations, sensors):
@@ -738,7 +743,15 @@ def list_snapshots_brief(instance_id: str, analysis_key: str):
         m = _re.search(r"(\d{8})_(\d{6})", sid)
         if m:
             try:
+                # El snapshot_id se genera en UTC (servidor Render). Convertimos
+                # a hora local Colombia para que coincida con la hora de carga.
                 d = _dt.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+                try:
+                    from zoneinfo import ZoneInfo
+                    d = d.replace(tzinfo=ZoneInfo("UTC")).astimezone(
+                        ZoneInfo("America/Bogota"))
+                except Exception:
+                    pass
                 label = d.strftime("%d/%m/%Y · %H:%M")
             except Exception:
                 pass
