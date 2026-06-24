@@ -716,28 +716,49 @@ def _render_tabular_detail(payload: Dict[str, Any]) -> None:
     st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
-def load_latest_payload(instance_id: str, analysis_key: str):
-    """Devuelve (payload, snapshot_id) del snapshot más reciente del tipo,
-    con cache en session_state y canales en orden canónico (vel→acel→prox).
-    Usado por pages/_live_analysis.py (vista Análisis Avanzado del cliente)."""
-    import importlib
-    atype = next((a for a in ANALYSIS_TYPES if a["key"] == analysis_key), None)
-    if not atype or not instance_id:
-        return None, ""
+def list_snapshots_brief(instance_id: str, analysis_key: str):
+    """Lista [{snapshot_id, date_label}] del tipo, más nuevos primero.
+    date_label se deriva del snapshot_id ('..._YYYYMMDD_HHMMSS...'). Liviano
+    (no descarga payloads). Para el selector de fecha del Análisis Avanzado."""
+    import re as _re
+    from datetime import datetime as _dt
+    if not instance_id or not analysis_key:
+        return []
     from core import history_storage as _hs
     try:
-        snaps = _hs.list_snapshots(instance_id, analysis_key)
+        snaps = _hs.list_snapshots(instance_id, analysis_key) or []
     except Exception:
-        snaps = []
-    if not snaps:
-        return None, ""
-    snap_id = snaps[0].get("snapshot_id", "")
-    ck = f"_wm_unified_payload_{analysis_key}_{instance_id}_{snap_id}"
+        return []
+    out = []
+    for s in snaps:
+        sid = s.get("snapshot_id", "")
+        if not sid:
+            continue
+        label = sid
+        m = _re.search(r"(\d{8})_(\d{6})", sid)
+        if m:
+            try:
+                d = _dt.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+                label = d.strftime("%d/%m/%Y · %H:%M")
+            except Exception:
+                pass
+        out.append({"snapshot_id": sid, "date_label": label})
+    return out
+
+
+def load_snapshot_payload(instance_id: str, analysis_key: str, snapshot_id: str):
+    """Carga el payload de UN snapshot específico, con cache en session_state
+    y canales en orden canónico (vel→acel→prox)."""
+    import importlib
+    atype = next((a for a in ANALYSIS_TYPES if a["key"] == analysis_key), None)
+    if not atype or not instance_id or not snapshot_id:
+        return None
+    ck = f"_wm_unified_payload_{analysis_key}_{instance_id}_{snapshot_id}"
     payload = st.session_state.get(ck)
     if payload is None:
         try:
             mod = importlib.import_module(atype["module"])
-            payload = getattr(mod, atype["load_fn"])(instance_id, snap_id)
+            payload = getattr(mod, atype["load_fn"])(instance_id, snapshot_id)
             if payload:
                 st.session_state[ck] = payload
         except Exception:
@@ -756,7 +777,17 @@ def load_latest_payload(instance_id: str, analysis_key: str):
                     payload[dk] = sorted(items, key=lambda b: str(b.get("bearing_label", "")))
         except Exception:
             pass
-    return payload, snap_id
+    return payload
+
+
+def load_latest_payload(instance_id: str, analysis_key: str):
+    """Devuelve (payload, snapshot_id) del snapshot más reciente del tipo.
+    Usado por pages/_live_analysis.py (vista Análisis Avanzado del cliente)."""
+    snaps = list_snapshots_brief(instance_id, analysis_key)
+    if not snaps:
+        return None, ""
+    snap_id = snaps[0]["snapshot_id"]
+    return load_snapshot_payload(instance_id, analysis_key, snap_id), snap_id
 
 
 _RENDER_FUNCTIONS = {

@@ -112,7 +112,8 @@ from core.recent_analyses_widget import (
     _render_spectrum_detail,
     _render_waveform_detail,
     _unit_family,
-    load_latest_payload,
+    list_snapshots_brief,
+    load_snapshot_payload,
 )
 
 
@@ -147,14 +148,46 @@ _KEY_BY_VIEW = {
 }
 _akey, _render = _KEY_BY_VIEW[_view]
 
-with st.spinner("Cargando snapshot…"):
-    _payload, _snap_id = load_latest_payload(instance_id, _akey)
-
-if not _payload:
+# =============================================================
+# Selector de FECHA (snapshot). Cada snapshot = una corrida/fecha con todos
+# sus canales. Permite ver, p.ej., todos los espectros del 12/04 y luego
+# cambiar al 15/05. Por defecto el más reciente.
+# =============================================================
+_snaps = list_snapshots_brief(instance_id, _akey)
+if not _snaps:
     st.info(
         "Aún no hay un snapshot de este tipo para el activo. "
         "Se genera desde Load Data / módulos de análisis."
     )
+    st.stop()
+
+_sid_options = [s["snapshot_id"] for s in _snaps]
+_label_by_sid = {s["snapshot_id"]: s["date_label"] for s in _snaps}
+
+_dc1, _dc2 = st.columns([2, 3])
+with _dc1:
+    _sel_sid = st.selectbox(
+        "📅 Fecha de la data",
+        _sid_options,
+        index=0,
+        format_func=lambda sid: _label_by_sid.get(sid, sid),
+        key=f"wm_la_snapdate_{_akey}_{instance_id}",
+        help="Cada fecha es una corrida guardada con todos sus canales. "
+             "Elegí la fecha que querés ver.",
+    )
+with _dc2:
+    st.markdown(
+        f"<div style='padding-top:30px;color:#475569;font-size:13px;'>"
+        f"Mostrando datos del <b>{_label_by_sid.get(_sel_sid, _sel_sid)}</b> "
+        f"· {len(_snaps)} fecha(s) disponible(s)</div>",
+        unsafe_allow_html=True,
+    )
+
+with st.spinner("Cargando snapshot…"):
+    _payload = load_snapshot_payload(instance_id, _akey, _sel_sid)
+
+if not _payload:
+    st.info("No se pudo cargar el snapshot seleccionado.")
 else:
     _fu = _get_fam_units(instance_id)
     try:
