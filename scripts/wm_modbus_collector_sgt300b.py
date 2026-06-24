@@ -134,8 +134,13 @@ def _read_block(client, start: int, end: int) -> dict:
     addr = start
     while addr <= end:
         count = min(120, end - addr + 1)
-        rr = client.read_holding_registers(addr + REGISTER_OFFSET, count=count,
-                                           slave=UNIT_ID)
+        # pymodbus 3.13+ usa device_id; versiones previas usan slave.
+        try:
+            rr = client.read_holding_registers(addr + REGISTER_OFFSET,
+                                               count=count, device_id=UNIT_ID)
+        except TypeError:
+            rr = client.read_holding_registers(addr + REGISTER_OFFSET,
+                                               count=count, slave=UNIT_ID)
         if rr.isError():
             raise IOError(f"Modbus error leyendo {addr}..{addr+count-1}: {rr}")
         for i, v in enumerate(rr.registers):
