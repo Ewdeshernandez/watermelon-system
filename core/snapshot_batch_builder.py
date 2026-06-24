@@ -129,6 +129,18 @@ def _extract_unit(parsed_file: Dict[str, Any]) -> str:
     return ""
 
 
+def _extract_timestamp(parsed_file: Dict[str, Any]) -> str:
+    """Estampa de tiempo de CAPTURA de la medición, desde la metadata del CSV
+    (fila 'Timestamp', ej. '2/27/2026 7:00:48 AM')."""
+    meta = parsed_file.get("metadata", {}) or {}
+    for key in ("Timestamp", "Time Stamp", "TimeStamp", "Date/Time",
+                "DateTime", "Date", "Fecha"):
+        v = meta.get(key)
+        if v and isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+
 def _extract_signal(parsed_file: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray]:
     """Devuelve (time_arr, values_arr) como numpy arrays float64."""
     df = parsed_file["dataframe"]
@@ -184,6 +196,7 @@ def build_waveform_payload(parsed_files: List[Dict[str, Any]]) -> Dict[str, Any]
             sensors_data.append({
                 "sensor_label": _extract_sensor_label(pf),
                 "csv_file": pf.get("file_name", ""),
+                "csv_timestamp": _extract_timestamp(pf),
                 "sampling_rate_hz": fs,
                 "duration_sec": duration,
                 "n_samples_raw": int(len(v)),
@@ -257,6 +270,7 @@ def build_spectrum_payload(parsed_files: List[Dict[str, Any]]) -> Dict[str, Any]
             sensors_data.append({
                 "sensor_label": _extract_sensor_label(pf),
                 "csv_file": pf.get("file_name", ""),
+                "csv_timestamp": _extract_timestamp(pf),
                 "amp_unit": _extract_unit(pf),
                 "freq_unit": "Hz",
                 "sampling_rate_hz": fs,
