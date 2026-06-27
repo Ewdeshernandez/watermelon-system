@@ -2185,7 +2185,6 @@ def _build_live_report_pdf(
         return None, {}
 
 
-@st.fragment(run_every=10)
 def _live_header_fragment(instance_obj, instance_id: str, sensor_lookup: Dict[str, Any]) -> None:
     """Fragment auto-refrescante (10s) de la barra de estado en vivo.
 
@@ -3482,6 +3481,19 @@ def main() -> None:
 
     instance_obj = get_instance(instance_id)
     sensor_lookup = _build_sensor_lookup(instance_obj)
+
+    # DEBUG TEMP (v3.31.378) — diagnosticar por qué SGT300B muestra TES1.
+    # Quitar una vez resuelto.
+    try:
+        from core.instance_repository import get_active_repository as _gar_dbg
+        st.caption(
+            f"🔧 DEBUG · sel_id={instance_id} · tag={getattr(instance_obj,'tag',None)}"
+            f" · driver={getattr(instance_obj,'driver_model',None)}"
+            f" · nsens={len(getattr(instance_obj,'sensors',[]) or [])}"
+            f" · backend={_gar_dbg().backend_name}"
+        )
+    except Exception as _e_dbg:
+        st.caption(f"🔧 DEBUG err: {_e_dbg}")
 
     # Ciclo 23.96 — Pre-warm de Supabase REST en primera carga de la
     # sesión. Supabase Free tier tiene cold start de 2-3s en el primer
