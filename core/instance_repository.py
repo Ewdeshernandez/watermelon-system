@@ -48,6 +48,7 @@ Public API:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -347,39 +348,60 @@ _REPOSITORY_CACHE: Optional[InstanceRepository] = None
 
 def _build_repository() -> InstanceRepository:
     """
-    Inspecciona st.secrets para decidir qué backend usar:
+    Decide el backend de instancias. Resuelve credenciales Supabase desde
+    DOS fuentes (igual que core/live_readings.py), en este orden:
 
-      Si existe st.secrets['supabase']['url'] y
-                st.secrets['supabase']['service_key'] → Supabase
-      Si no                                          → Local filesystem
+      1. Variables de entorno: SUPABASE_URL + SUPABASE_SERVICE_KEY
+         (o SUPABASE_SERVICE_ROLE_KEY). ← así está configurado en Render.
+      2. st.secrets['supabase'] (url + service_key).  ← Streamlit Cloud.
+
+    Si hay credenciales → Supabase. Si no → Local filesystem.
+
+    IMPORTANTE (fix v3.31.377): antes esto SOLO miraba st.secrets, que en
+    Render no existe (allí las credenciales van por env). Resultado: los
+    datos en vivo (live_readings, que sí lee env) salían de Supabase, pero
+    los ACTIVOS caían a archivos locales efímeros/desactualizados → el mismo
+    instance_id mostraba metadata vieja (ej. SGT300B con dibujo de TES1).
 
     Falla limpio: si Supabase está configurado pero la conexión inicial
-    falla (paquete no instalado, credenciales inválidas), cae a Local
-    con un warning visible en la sidebar.
+    falla, cae a Local con un warning visible en la sidebar.
     """
+    url = os.environ.get("SUPABASE_URL", "").strip()
+    key = (
+        os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
+        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    )
+    bucket = os.environ.get("SUPABASE_BUCKET", "").strip() or "instance-documents"
+
+    # Completar/override desde st.secrets si falta algo (Streamlit Cloud).
+    _st = None
     try:
         import streamlit as st
-        # st.secrets puede no existir si secrets.toml no está
+        _st = st
         if "supabase" in st.secrets:
             cfg = st.secrets["supabase"]
-            url = cfg.get("url", "").strip()
-            key = cfg.get("service_key", "").strip()
-            bucket = cfg.get("bucket", "instance-documents").strip()
-            if url and key:
-                try:
-                    return SupabaseRepository(url=url, service_key=key, bucket=bucket)
-                except Exception as e:
-                    # No pudo conectarse — log y caer a local
-                    try:
-                        st.sidebar.warning(
-                            f"Supabase configurado pero no accesible "
-                            f"({type(e).__name__}). Usando filesystem local."
-                        )
-                    except Exception:
-                        pass
+            url = url or str(cfg.get("url", "")).strip()
+            key = key or str(cfg.get("service_key", "")).strip()
+            _b = str(cfg.get("bucket", "")).strip()
+            if _b:
+                bucket = _b
     except Exception:
         # Streamlit no inicializado o secrets no disponibles
         pass
+
+    if url and key:
+        try:
+            return SupabaseRepository(url=url, service_key=key, bucket=bucket)
+        except Exception as e:
+            # No pudo conectarse — log y caer a local
+            if _st is not None:
+                try:
+                    _st.sidebar.warning(
+                        f"Supabase configurado pero no accesible "
+                        f"({type(e).__name__}). Usando filesystem local."
+                    )
+                except Exception:
+                    pass
 
     return LocalFilesystemRepository()
 
