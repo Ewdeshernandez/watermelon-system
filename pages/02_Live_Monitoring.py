@@ -3324,13 +3324,19 @@ def main() -> None:
     # Machinery Library quedaba 5 min desfasado en el header del Live). Con 30s
     # cualquier cambio se refleja casi al toque; el costo es 1 lectura chica
     # extra cada 30s.
+    # BUGFIX CRÍTICO (v3.31.378): los parámetros NO deben empezar con "_".
+    # Streamlit EXCLUYE de la clave de caché todo argumento que empiece con
+    # guion bajo (convención para args no-hasheables). Antes eran `_id` y
+    # `_version`, así que la caché ignoraba el id → devolvía SIEMPRE el primer
+    # activo cargado (TES1 default) para CUALQUIER selección. Sin underscore,
+    # el id y la versión entran en la clave y cachea por activo correctamente.
     @st.cache_data(ttl=30, show_spinner=False)
-    def _cached_list_instances(_version: int):
+    def _cached_list_instances(version: int):
         return _raw_list_instances()
 
     @st.cache_data(ttl=30, show_spinner=False)
-    def _cached_get_instance(_id: str, _version: int):
-        inst = _raw_get_instance(_id)
+    def _cached_get_instance(iid: str, version: int):
+        inst = _raw_get_instance(iid)
         if inst is None:
             return None
         # Devolvemos el dict para que cache_data pueda serializar; reconstruimos
@@ -3516,8 +3522,8 @@ def main() -> None:
     # 15s es lo suficientemente fresco para datos live y elimina
     # múltiples roundtrips por minuto.
     @st.cache_data(ttl=15, show_spinner=False)
-    def _cached_latest_for_instance(_iid: str):
-        return latest_for_instance(_iid)
+    def _cached_latest_for_instance(iid: str):
+        return latest_for_instance(iid)
 
     latest = _cached_latest_for_instance(instance_id)
 
