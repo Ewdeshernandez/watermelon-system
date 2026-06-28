@@ -385,6 +385,12 @@ def gearbox_parallel(
         "output_DE": (body_x + body_w - 14, cy + 10),
         "shaft_in": (x_offset, cy - 22),
         "shaft_out": (x_offset + W, cy + 10),
+        # Anclajes de sensores distribuidos (layout SGT300: 3 arriba, 2 abajo).
+        "GB_HSS":     (body_x + body_w * 0.15, cy - 72),  # 3YA/3YV (HSS)
+        "GB_PROX_T":  (body_x + body_w * 0.50, cy - 72),  # 4YD prox
+        "GB_BOMBA":   (body_x + body_w * 0.85, cy - 72),  # 4YV/4YA bomba
+        "GB_PROX_B":  (body_x + body_w * 0.38, cy + 72),  # 4XD prox
+        "GB_STARTER": (body_x + body_w * 0.62, cy + 72),  # 4XV/4XA starter
         "viewbox_w": W,
         "viewbox_h": H,
     }
@@ -447,6 +453,14 @@ def gearbox_inline(
         "Out": (body_x + body_w - 12, cy),
         "shaft_in":  (x_offset, cy),
         "shaft_out": (x_offset + W, cy),
+        # Anclajes de sensores distribuidos alrededor del gearbox
+        # (layout SGT300: 3 arriba, 2 abajo). HSS = eje rápido (entrada),
+        # accesorios bomba/starter en los costados, proximidad prox arriba/abajo.
+        "GB_HSS":     (body_x + body_w * 0.15, cy - 72),  # 3YA/3YV (HSS)
+        "GB_PROX_T":  (body_x + body_w * 0.50, cy - 72),  # 4YD prox
+        "GB_BOMBA":   (body_x + body_w * 0.85, cy - 72),  # 4YV/4YA bomba
+        "GB_PROX_B":  (body_x + body_w * 0.38, cy + 72),  # 4XD prox
+        "GB_STARTER": (body_x + body_w * 0.62, cy + 72),  # 4XV/4XA starter
         "viewbox_w": W,
         "viewbox_h": H,
     }

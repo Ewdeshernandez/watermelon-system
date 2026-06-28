@@ -517,9 +517,21 @@ def _infer_side_anchor(
         if any(k in var_u for k in (
             "GEARBOX", "REDUCTOR", "BOMBA", "STARTER", "ARRANCADOR", "PUMP",
         )):
-            # HSS (eje rápido, entrada desde turbina) = DE; LSS (eje lento,
-            # salida al generador) = NDE. Plano 3 = HSS, plano 4 = LSS.
-            return "gearbox", ("DE" if _d0 == "3" else "NDE")
+            # Layout SGT300 (mockup cliente): 3 grupos arriba, 2 abajo.
+            #   3YA/3YV  -> GB_HSS     (arriba-izq, eje rápido HSS)
+            #   4YD      -> GB_PROX_T  (arriba-centro, proximidad)
+            #   4YV/4YA  -> GB_BOMBA   (arriba-der, accesorio bomba)
+            #   4XD      -> GB_PROX_B  (abajo-izq, proximidad)
+            #   4XV/4XA  -> GB_STARTER (abajo-der, accesorio starter)
+            if "BOMBA" in var_u or "PUMP" in var_u:
+                return "gearbox", "GB_BOMBA"
+            if "STARTER" in var_u or "ARRANCADOR" in var_u:
+                return "gearbox", "GB_STARTER"
+            if _d0 == "3":
+                return "gearbox", "GB_HSS"
+            if "x" in label_l:
+                return "gearbox", "GB_PROX_B"
+            return "gearbox", "GB_PROX_T"
         if "GEN NDE" in var_u or "GENERADOR NDE" in var_u:
             return "driven", "NDE"
         if "GEN DE" in var_u or "GENERADOR DE" in var_u:
