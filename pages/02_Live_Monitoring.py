@@ -517,7 +517,9 @@ def _infer_side_anchor(
         if any(k in var_u for k in (
             "GEARBOX", "REDUCTOR", "BOMBA", "STARTER", "ARRANCADOR", "PUMP",
         )):
-            # Layout SGT300 (mockup cliente): 3 grupos arriba, 2 abajo.
+            # Layout SGT300 (mockup cliente): 3 grupos arriba, 2 abajo, sobre
+            # un gearbox ancho con dots COMPACTOS (sin sparkline/barra, ver
+            # _build_library_sensors). Sirve igual para SGT300A y SGT300B.
             #   3YA/3YV  -> GB_HSS     (arriba-izq, eje rápido HSS)
             #   4YD      -> GB_PROX_T  (arriba-centro, proximidad)
             #   4YV/4YA  -> GB_BOMBA   (arriba-der, accesorio bomba)
@@ -727,6 +729,15 @@ def _build_library_sensors(
             is_stale = age_sec > STALE_AGE_SECONDS
         except Exception:
             is_stale = False
+
+        # Gearbox: dots COMPACTOS — sin sparkline ni barra de umbral, que son
+        # las decoraciones que amontonaban los 5 grupos en el ícono. El color
+        # del dot + el valor en la etiqueta ya comunican severidad. Aplica
+        # igual a SGT300A y SGT300B. (v3.31.384)
+        if side == "gearbox":
+            spark_values = None
+            alarm_val = None
+            danger_val = None
 
         out.append({
             "label": display_label,

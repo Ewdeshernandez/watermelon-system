@@ -337,10 +337,10 @@ def gearbox_parallel(
     y_offset: float = 0,
 ) -> Tuple[str, Dict[str, Any]]:
     """Caja reductora paralela (input arriba, output abajo, o single-shaft)."""
-    W, H = 260, 200
+    W, H = 380, 200
     body_x = x_offset + 30
     body_y = y_offset + 50
-    body_w = 200
+    body_w = 320
     body_h = 100
     cy = y_offset + 100
     stroke = COLORS["driven_stroke"]
@@ -389,8 +389,8 @@ def gearbox_parallel(
         "GB_HSS":     (body_x + body_w * 0.15, cy - 72),  # 3YA/3YV (HSS)
         "GB_PROX_T":  (body_x + body_w * 0.50, cy - 72),  # 4YD prox
         "GB_BOMBA":   (body_x + body_w * 0.85, cy - 72),  # 4YV/4YA bomba
-        "GB_PROX_B":  (body_x + body_w * 0.38, cy + 72),  # 4XD prox
-        "GB_STARTER": (body_x + body_w * 0.62, cy + 72),  # 4XV/4XA starter
+        "GB_PROX_B":  (body_x + body_w * 0.28, cy + 72),  # 4XD prox
+        "GB_STARTER": (body_x + body_w * 0.70, cy + 72),  # 4XV/4XA starter
         "viewbox_w": W,
         "viewbox_h": H,
     }
@@ -413,9 +413,12 @@ def gearbox_inline(
     tren acoplado deja el eje 'quebrado' respecto a los acoples del centerline),
     este icono mantiene In y Out sobre el eje central → el tren driver–gearbox–
     driven queda perfectamente alineado en compose_train."""
-    W, H = 200, 200
-    body_x = x_offset + 26
-    body_w = 148
+    # Ancho ampliado (v3.31.384): el gearbox lleva hasta 5 grupos de sensores
+    # (3 arriba: HSS, prox, bomba · 2 abajo: prox, starter). Con 320px de ancho
+    # los dots compactos entran con aire en vez de amontonarse.
+    W, H = 320, 200
+    body_x = x_offset + 30
+    body_w = 260
     body_h = 92
     body_y = (y_offset + 100) - body_h / 2
     cy = y_offset + 100
@@ -440,9 +443,8 @@ def gearbox_inline(
         bearing_circle(body_x + 12, cy, r=10, label="In", color="driven"),
         bearing_circle(body_x + body_w - 12, cy, r=10, label="Out", color="driven"),
         label_top(x_offset + W / 2, y_offset + 24, label, "driven"),
-        f'<text x="{x_offset + W / 2:.1f}" y="{y_offset + H - 10:.1f}" text-anchor="middle" '
-        f'font-size="9" fill="{COLORS["text_muted"]}" font-family="-apple-system, sans-serif">'
-        f'Reductor · gearbox</text>',
+        # (Caption inferior "Reductor · gearbox" removido v3.31.384 — chocaba
+        #  con las etiquetas de los sensores de la fila de abajo.)
     ]
     anchors = {
         "DE":  (body_x + 12, cy),
@@ -459,8 +461,8 @@ def gearbox_inline(
         "GB_HSS":     (body_x + body_w * 0.15, cy - 72),  # 3YA/3YV (HSS)
         "GB_PROX_T":  (body_x + body_w * 0.50, cy - 72),  # 4YD prox
         "GB_BOMBA":   (body_x + body_w * 0.85, cy - 72),  # 4YV/4YA bomba
-        "GB_PROX_B":  (body_x + body_w * 0.38, cy + 72),  # 4XD prox
-        "GB_STARTER": (body_x + body_w * 0.62, cy + 72),  # 4XV/4XA starter
+        "GB_PROX_B":  (body_x + body_w * 0.28, cy + 72),  # 4XD prox
+        "GB_STARTER": (body_x + body_w * 0.70, cy + 72),  # 4XV/4XA starter
         "viewbox_w": W,
         "viewbox_h": H,
     }
