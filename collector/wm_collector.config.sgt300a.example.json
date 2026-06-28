@@ -1,0 +1,10 @@
+{
+    "_comment": "Watermelon Collector config SGT300A (Parex) - SEGUNDA instancia en el MISMO servidor que SGT300B. Copiar a wm_collector.config.sgt300a.json en C:\\watermelon\\collector\\ y registrar como servicio WatermelonCollectorSGT300A.",
+    "api_url": "https://watermelon-api-bpv4.onrender.com",
+    "api_key": "watermelon-collector-tes1-2026",
+    "modbus_map": "C:\\watermelon\\collector\\modbus_maps\\sgt300a.json",
+    "buffer_db": "C:\\watermelon\\collector\\buffer_sgt300a.sqlite",
+    "log_dir": "C:\\watermelon\\collector\\logs_sgt300a",
+    "host_label": "SGT300A-WINSRV",
+    "api_timeout_sec": 15
+}

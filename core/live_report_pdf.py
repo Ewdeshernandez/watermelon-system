@@ -99,6 +99,11 @@ def generate_live_report_pdf(
                              textColor=colors.HexColor(_NAVY))
     st_cellnum = ParagraphStyle("cn", fontName="Courier", fontSize=9,
                                 textColor=colors.HexColor(_NAVY), alignment=TA_RIGHT)
+    # Estilo chico para la columna "Ubicación": envuelve el texto en varias
+    # líneas DENTRO de la celda en vez de desbordarse sobre "Overall"
+    # (fix v3.31.381 — labels largos tipo "4YA gearbox bomba" se amontonaban).
+    st_loc = ParagraphStyle("loc", fontName="Helvetica", fontSize=7.6,
+                            leading=8.8, textColor=colors.HexColor(_NAVY))
 
     # ---------- Header ----------
     logo_cell = ""
@@ -213,7 +218,7 @@ def generate_live_report_pdf(
         data.append([
             (c.get("status") or "—"),
             c.get("sensor_label", "—"),
-            c.get("plane_label") or "—",
+            Paragraph(str(c.get("plane_label") or "—"), st_loc),
             c.get("value", "—"),
             c.get("unit", ""),
             c.get("x1_amp", "—"),
@@ -224,8 +229,8 @@ def generate_live_report_pdf(
         row_styles.append(("TEXTCOLOR", (0, i), (0, i), colors.HexColor(fg)))
         row_styles.append(("BACKGROUND", (0, i), (0, i), colors.HexColor(bg)))
 
-    ctbl = Table(data, colWidths=[1.9*cm, 1.6*cm, 2.3*cm, 1.9*cm, 1.5*cm,
-                                  1.7*cm, 1.3*cm, 1.7*cm, 1.3*cm])
+    ctbl = Table(data, colWidths=[1.7*cm, 1.5*cm, 3.6*cm, 1.8*cm, 1.5*cm,
+                                  1.6*cm, 1.2*cm, 1.6*cm, 1.2*cm])
     base_style = [
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, 0), 8.5),
