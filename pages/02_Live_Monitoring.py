@@ -473,6 +473,7 @@ def _infer_side_anchor(
     sensor_label: str,
     sensor_match: Optional[Dict[str, Any]],
     instance_obj: Any,
+    variable: str = "",
 ) -> Tuple[Optional[str], Optional[str]]:
     """
     Mapea (sensor_label, sensor_dict) → (side, anchor) para el composer.
@@ -502,6 +503,32 @@ def _infer_side_anchor(
     is_aero = "aero" in drv_key
     label_l = (sensor_label or "").strip().lower()
     plane_l = ((sensor_match or {}).get("plane_label") or "").lower()
+
+    # 1.2 — Ciclo 23.x: resolución por DESCRIPCIÓN de la variable del colector.
+    # Las lecturas live traen un nombre rico (ej. "3YV VEL Gearbox",
+    # "4YA ACCEL bomba", "5YD GEN DE", "1YD Turbina DE") que ubica el sensor
+    # en su equipo físico SIN depender de la heurística por dígito (que solo
+    # entendía trenes de 2 cuerpos, bearings 1-4). Crítico para trenes con
+    # gearbox + generador (planos 5/6) como SGT300 (Parex).
+    var_u = (variable or "").upper()
+    _d0 = label_l[0] if (label_l and label_l[0].isdigit()) else None
+    if var_u:
+        # Gearbox y sus accesorios montados (bomba, starter/arrancador).
+        if any(k in var_u for k in (
+            "GEARBOX", "REDUCTOR", "BOMBA", "STARTER", "ARRANCADOR", "PUMP",
+        )):
+            # HSS (eje rápido, entrada desde turbina) = DE; LSS (eje lento,
+            # salida al generador) = NDE. Plano 3 = HSS, plano 4 = LSS.
+            return "gearbox", ("DE" if _d0 == "3" else "NDE")
+        if "GEN NDE" in var_u or "GENERADOR NDE" in var_u:
+            return "driven", "NDE"
+        if "GEN DE" in var_u or "GENERADOR DE" in var_u:
+            return "driven", "DE"
+        if any(k in var_u for k in ("TURBINA", "DRIVER", "MOTOR", "ENGINE")):
+            if "NDE" in var_u:
+                return "driver", ("CRF" if is_aero else "NDE")
+            if "DE" in var_u:
+                return "driver", ("TRF" if is_aero else "DE")
 
     # 1.4 — Gearbox: sensores del cuerpo intermedio (wizard: 'HSS/LSS gearbox').
     # Caen sobre el icono del gearbox (side='gearbox'); HSS = eje rápido
@@ -610,7 +637,9 @@ def _build_library_sensors(
         if not lbl:
             continue
         sensor_match = sensor_lookup.get(lbl)
-        side, anchor = _infer_side_anchor(lbl, sensor_match, instance_obj)
+        side, anchor = _infer_side_anchor(
+            lbl, sensor_match, instance_obj, r.get("variable"),
+        )
         if not side or not anchor:
             continue
         # Ciclo 23.143 — Skip si ya hay 2+ sensores en este anchor.
@@ -3487,19 +3516,6 @@ def main() -> None:
 
     instance_obj = get_instance(instance_id)
     sensor_lookup = _build_sensor_lookup(instance_obj)
-
-    # DEBUG TEMP (v3.31.378) — diagnosticar por qué SGT300B muestra TES1.
-    # Quitar una vez resuelto.
-    try:
-        from core.instance_repository import get_active_repository as _gar_dbg
-        st.caption(
-            f"🔧 DEBUG · sel_id={instance_id} · tag={getattr(instance_obj,'tag',None)}"
-            f" · driver={getattr(instance_obj,'driver_model',None)}"
-            f" · nsens={len(getattr(instance_obj,'sensors',[]) or [])}"
-            f" · backend={_gar_dbg().backend_name}"
-        )
-    except Exception as _e_dbg:
-        st.caption(f"🔧 DEBUG err: {_e_dbg}")
 
     # Ciclo 23.96 — Pre-warm de Supabase REST en primera carga de la
     # sesión. Supabase Free tier tiene cold start de 2-3s en el primer
