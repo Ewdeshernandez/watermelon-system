@@ -85,6 +85,22 @@ jobs:
           python -m pip install -r planta/requirements-planta.txt
 
       # ------------------------------------------------------
+      # 5.5. (v3.31.385) PREFLIGHT: verificar que el componente de captura
+      #      IMPORTA en el entorno de build ANTES de PyInstaller.
+      #      Si nidaqmx/nptdms no importan aquí, collect_all() los omitiría
+      #      en silencio y el .exe saldría sin el componente de captura
+      #      (bug recurrente "componente de captura pendiente"). Mejor
+      #      fallar el build aquí, ruidosamente, que enviar un .exe roto.
+      # ------------------------------------------------------
+      - name: Preflight — verificar deps de captura
+        shell: pwsh
+        run: |
+          python -c "import nidaqmx; from nidaqmx.system import System; import nptdms; print('OK acq deps importables:', nidaqmx.__version__, nptdms.__version__)"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Las dependencias de captura (nidaqmx/nptdms) no importan en el build env. Abortando: el .exe saldria sin el componente de captura."
+          }
+
+      # ------------------------------------------------------
       # 6. Verificar / Instalar Inno Setup
       #    GitHub Actions Windows típicamente ya viene con Inno Setup
       #    preinstalado. Solo lo instalamos si no existe.

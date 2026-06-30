@@ -28,7 +28,7 @@ para que se incluyan en el bundle.
 import sys
 from pathlib import Path
 from PyInstaller.utils.hooks import (  # type: ignore
-    collect_data_files, collect_submodules, copy_metadata,
+    collect_data_files, collect_submodules, copy_metadata, collect_all,
 )
 
 # Path relativo desde el .spec hasta el root del repo
@@ -77,19 +77,40 @@ datas += collect_data_files("plotly")
 datas += copy_metadata("streamlit")
 datas += copy_metadata("supabase")
 
-# v3.31.339 — FIX bug "Componente de adquisición pendiente": el paquete de
-# adquisición y el de TDMS tienen un ÁRBOL de submódulos. Antes se listaban
-# 3 submódulos a mano → el .exe congelado quedaba incompleto y `import` fallaba
-# en campo. Ahora se colectan TODOS sus submódulos + data files + metadata.
+# ============================================================
+# v3.31.385 — FIX DE RAÍZ del bug recurrente "Componente de captura
+# pendiente". Causa: el bloque anterior usaba try/except: pass y
+# collect_submodules, que DEVUELVEN VACÍO EN SILENCIO si el paquete no
+# importa/no tiene metadata al congelar → el .exe salía SIN nidaqmx y el
+# build NO fallaba. En campo, `from nidaqmx.system import System` reventaba
+# (nidaqmx lee su versión vía importlib.metadata al importar → necesita su
+# dist-info empaquetado) y la app mostraba "componente de captura pendiente".
+#
+# Ahora se usa collect_all() (submódulos + datas + BINARIOS/DLL + metadata
+# en una sola llamada) y la colección es OBLIGATORIA: si recoge 0 módulos,
+# el build ABORTA RUIDOSAMENTE en vez de generar un .exe roto.
+# ============================================================
+binaries = []
+_acq_hiddenimports = []
 for _pkg in ("nidaqmx", "nptdms"):
-    try:
-        datas += collect_data_files(_pkg)
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        datas += copy_metadata(_pkg)
-    except Exception:  # noqa: BLE001
-        pass
+    _d, _b, _h = collect_all(_pkg)
+    if not _h and not _d:
+        raise SystemExit(
+            f"\n\n[watermelon-planta.spec] ABORTANDO BUILD: el paquete '{_pkg}' "
+            f"no se pudo colectar (0 módulos / 0 datas).\n"
+            f"Causa típica: '{_pkg}' no está instalado en el entorno de build, "
+            f"o no importa al congelar.\n"
+            f"Solución: en la máquina/CI de build ejecutá  "
+            f"`pip install -r planta/requirements-planta.txt`  y verificá  "
+            f"`python -c \"import {_pkg}\"`  ANTES de buildear.\n"
+            f"Sin esto el .exe sale sin el componente de captura "
+            f"(bug 'componente de captura pendiente').\n"
+        )
+    datas += _d
+    binaries += _b
+    _acq_hiddenimports += _h
+    print(f"[watermelon-planta.spec] OK colectado '{_pkg}': "
+          f"{len(_h)} submódulos, {len(_d)} datas, {len(_b)} binarios.")
 
 # ============================================================
 # Hidden imports — módulos que PyInstaller no detecta automático
@@ -104,11 +125,9 @@ hiddenimports += collect_submodules("postgrest")
 hiddenimports += collect_submodules("realtime")
 hiddenimports += collect_submodules("supabase_auth")
 
-# v3.31.339 — Colectar el ÁRBOL COMPLETO de submódulos del paquete de
-# adquisición y de TDMS (antes solo 3 a mano → bundle incompleto → ImportError
-# en campo = "Componente de adquisición pendiente").
-hiddenimports += collect_submodules("nidaqmx")
-hiddenimports += collect_submodules("nptdms")
+# v3.31.385 — submódulos de adquisición/TDMS ya colectados arriba con
+# collect_all() (obligatorio, aborta si falta). Solo los sumamos aquí.
+hiddenimports += _acq_hiddenimports
 
 hiddenimports += [
     "numpy", "scipy", "scipy.signal",
@@ -168,7 +187,7 @@ excludes = [
 a = Analysis(
     [str(_SPEC_DIR / "launcher.py")],
     pathex=[str(_REPO_ROOT), str(_PLANTA_DIR)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
