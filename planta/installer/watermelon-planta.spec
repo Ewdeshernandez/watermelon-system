@@ -113,6 +113,36 @@ for _pkg in ("nidaqmx", "nptdms"):
           f"{len(_h)} submódulos, {len(_d)} datas, {len(_b)} binarios.")
 
 # ============================================================
+# v3.31.386 — FIX REAL del "componente de captura pendiente".
+# Causa: nidaqmx/__init__.py hace  `__version__ = version("nidaqmx")`
+# (importlib.metadata) AL IMPORTAR. collect_all incluye la metadata solo
+# "best-effort"; si la dist-info NO quedó en el bundle, `import nidaqmx`
+# lanza PackageNotFoundError y muere → la app muestra "componente
+# pendiente" aunque los .py SÍ estén empaquetados (caso 385: archivos OK
+# pero import roto). Forzamos la metadata explícita + recursiva (también
+# la de las dependencias que leen su versión). OBLIGATORIO: si falla,
+# aborta el build en vez de generar un .exe roto.
+# ============================================================
+for _pkg in ("nidaqmx", "nptdms"):
+    try:
+        _md = copy_metadata(_pkg, recursive=True)
+    except Exception as _exc:
+        raise SystemExit(
+            f"\n\n[watermelon-planta.spec] ABORTANDO BUILD: no se pudo copiar "
+            f"la metadata de '{_pkg}' ({type(_exc).__name__}: {_exc}).\n"
+            f"Sin la metadata, `import {_pkg}` revienta en runtime con "
+            f"PackageNotFoundError → bug 'componente de captura pendiente'.\n"
+        )
+    if not _md:
+        raise SystemExit(
+            f"\n\n[watermelon-planta.spec] ABORTANDO BUILD: copy_metadata('{_pkg}') "
+            f"devolvió VACÍO. La dist-info no está instalada en el entorno de build. "
+            f"Ejecutá `pip install -r planta/requirements-planta.txt` antes de buildear.\n"
+        )
+    datas += _md
+    print(f"[watermelon-planta.spec] OK metadata '{_pkg}': {len(_md)} dist-info.")
+
+# ============================================================
 # Hidden imports — módulos que PyInstaller no detecta automático
 # ============================================================
 hiddenimports = []
@@ -131,6 +161,10 @@ hiddenimports += _acq_hiddenimports
 
 hiddenimports += [
     "numpy", "scipy", "scipy.signal",
+    # v3.31.386 — deps DURAS de nidaqmx que se importan a nivel módulo al
+    # cargar System (errors.py→deprecation, system.py→hightime, tzlocal).
+    # Si alguna falta, `from nidaqmx.system import System` revienta.
+    "hightime", "tzlocal", "deprecation",
     "toml", "pathlib", "sqlite3",
     "httpx", "websockets", "h2", "hpack", "hyperframe",
     "pydantic", "pydantic_core",

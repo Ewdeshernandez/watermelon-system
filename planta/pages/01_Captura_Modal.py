@@ -94,6 +94,18 @@ if not _dx.get("software_module"):
         """,
         unsafe_allow_html=True,
     )
+    # v3.31.386 — Mostrar el error REAL (tipo de excepción) que captura el
+    # diagnóstico, en vez de quedar a ciegas. Sanitizado: solo el nombre de
+    # la excepción (p.ej. PackageNotFoundError / ModuleNotFoundError), sin
+    # marcas del fabricante.
+    _det = str(_dx.get("detail") or "").strip()
+    if _det:
+        with st.expander("▸ Detalle técnico (enviar a soporte)"):
+            st.code(_det, language="text")
+            st.caption(
+                "Copia esta línea y envíala a soporte: indica EXACTAMENTE qué "
+                "falló al cargar el componente de captura."
+            )
     st.stop()
 
 if not _dx.get("equipment_driver"):
