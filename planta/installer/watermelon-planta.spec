@@ -70,6 +70,29 @@ if _CORE_MODAL.exists():
 # Streamlit static files (HTML/JS del frontend)
 datas += collect_data_files("streamlit")
 
+# ============================================================
+# v3.31.387 — FIX "Unable to preload CSS for .../DataFrame.*.css".
+# collect_data_files("streamlit") NO incluye de forma confiable todo el
+# árbol del frontend de Streamlit (carpeta static/, con los chunks por
+# componente como static/css/DataFrame.*.css que usa st.data_editor /
+# st.dataframe). Sin esos chunks, la grilla de canales (st.data_editor en
+# 01_Captura_Modal.py) rompe con "Unable to preload CSS" en el .exe.
+# Agregamos la carpeta static (y runtime) EXPLÍCITA. Aborta si no existe.
+# ============================================================
+import streamlit as _st_mod  # noqa: E402
+_ST_DIR = Path(_st_mod.__file__).resolve().parent
+for _sub in ("static", "runtime"):
+    _src = _ST_DIR / _sub
+    if not _src.exists():
+        raise SystemExit(
+            f"\n\n[watermelon-planta.spec] ABORTANDO BUILD: no se encontró "
+            f"'streamlit/{_sub}' en el entorno de build ({_src}). "
+            f"Sin el frontend completo, st.data_editor rompe con "
+            f"'Unable to preload CSS'.\n"
+        )
+    datas.append((str(_src), f"streamlit/{_sub}"))
+    print(f"[watermelon-planta.spec] OK incluida carpeta 'streamlit/{_sub}'.")
+
 # Plotly static (matplotlib data + plotly.js)
 datas += collect_data_files("plotly")
 
