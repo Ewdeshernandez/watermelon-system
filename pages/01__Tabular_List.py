@@ -650,13 +650,54 @@ def load_signals_from_session() -> List[SignalRecord]:
     return records
 
 
-def overall_rms(record: SignalRecord) -> Optional[float]:
+# Ciclo 23.168 — Overall en banda de analizador (10 Hz .. Fmax).
+# BUG previo: el overall era el RMS de TODA la forma de onda hasta Nyquist.
+# Las capturas de analizador se muestrean a 2.56×Fmax, así que la banda
+# Fmax..Nyquist (el ~22% superior) es BANDA DE GUARDA anti-aliasing y NO
+# debe entrar al overall. System1 calcula el overall solo 10 Hz..Fmax (el
+# pasa-altos de 10 Hz quita ski-slope/deriva de integración). Incluir la
+# guarda inflaba acel/vel — ej. TES1 CRF: el pico dominante de 1.9 g a
+# 1010 Hz caía justo en la guarda → 4.07 g pk (mal) vs 3.36 g pk (10-Fmax).
+_OVERALL_HP_HZ = 10.0
+_ANALYZER_OVERSAMPLE = 2.56
+
+
+def overall_rms(record: SignalRecord, family: Optional[str] = None) -> Optional[float]:
     x = record.amplitude
     if x.size < 2:
         return None
     finite = x[np.isfinite(x)]
     if finite.size < 2:
         return None
+
+    # Band-limit SOLO vibración (velocidad/aceleración). Proximidad
+    # (desplazamiento) mantiene el RMS completo: su contenido útil (1X/2X)
+    # está muy por debajo de Fmax y un HP de 10 Hz podría cortar el 1X de
+    # ejes lentos (< 600 rpm).
+    fam = (family or "").strip().lower()
+    if fam in ("velocity", "acceleration") and finite.size >= 16:
+        try:
+            t = record.time_s
+            if t is not None and getattr(t, "size", 0) >= finite.size:
+                dt = float(np.median(np.diff(np.asarray(t[:finite.size], dtype=float))))
+            elif record.sample_rate_hz:
+                dt = 1.0 / float(record.sample_rate_hz)
+            else:
+                dt = 0.0
+            if dt > 0 and math.isfinite(dt):
+                fs = 1.0 / dt
+                fmax = fs / _ANALYZER_OVERSAMPLE
+                n = finite.size
+                spec = np.fft.rfft(finite - np.mean(finite))  # quita DC
+                freqs = np.fft.rfftfreq(n, dt)
+                spec[(freqs < _OVERALL_HP_HZ) | (freqs > fmax)] = 0.0
+                banded = np.fft.irfft(spec, n=n)
+                val = float(np.sqrt(np.mean(banded ** 2)))
+                if math.isfinite(val):
+                    return val
+        except Exception:
+            pass  # cae al RMS completo de abajo
+
     val = float(np.sqrt(np.mean(np.square(finite))))
     return val if math.isfinite(val) else None
 
@@ -855,7 +896,7 @@ def build_table_dataframe(
             family_row = rec.measurement_family if family_mode == "Auto" else family_mode
             overall_mode_row = overall_mode
 
-        ov_rms = overall_rms(rec)
+        ov_rms = overall_rms(rec, family_row)
         ov_display = convert_rms_to_display(ov_rms, overall_mode_row)
 
         # Ciclo 23.167 — Los armónicos (0.5X/1X/2X) se referencian a rec.rpm
