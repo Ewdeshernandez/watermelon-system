@@ -242,8 +242,6 @@ else:  # EMA
 st.divider()
 st.markdown(f"### 📡 Canales · maleta `{_chassis}` (hasta {_max_bnc} BNC)")
 
-import pandas as pd
-
 _grid_key = f"planta_grid_{'oma' if is_oma else 'ema'}"
 if _grid_key not in st.session_state:
     _rows = []
@@ -264,39 +262,62 @@ if _grid_key not in st.session_state:
             })
     st.session_state[_grid_key] = _rows
 
-_df = pd.DataFrame(st.session_state[_grid_key])
-_edited = st.data_editor(
-    _df,
-    key=f"planta_grid_editor_{'oma' if is_oma else 'ema'}",
-    hide_index=True,
-    use_container_width=True,
-    num_rows="fixed",
-    column_config={
-        "BNC": st.column_config.NumberColumn(
-            "BNC", disabled=True, width="small",
-        ),
-        "Slot": st.column_config.NumberColumn(
-            "Slot", disabled=True, width="small",
-        ),
-        "Habilitado": st.column_config.CheckboxColumn(
-            "✓", width="small",
-        ),
-        "Nombre": st.column_config.TextColumn(
-            "Sensor", max_chars=20, width="medium",
-        ),
-        "Coupling": st.column_config.SelectboxColumn(
-            "Coupling", options=["IEPE", "AC", "DC"], width="small",
-        ),
-        "Sens (mV/EU)": st.column_config.NumberColumn(
-            "Sens", min_value=0.1, max_value=10000.0,
-            step=0.1, format="%.2f", width="small",
-        ),
-        "Unidad": st.column_config.SelectboxColumn(
-            "EU", options=["g", "mil", "N", "ips", "mm/s"], width="small",
-        ),
-    },
-)
-st.session_state[_grid_key] = _edited.to_dict("records")
+# v3.31.388 — Grilla de canales con WIDGETS SIMPLES (ya NO st.data_editor).
+# st.data_editor usa un componente con CSS lazy (DataFrame.*.css) + serialización
+# Apache Arrow que en el .exe empaquetado fallaba ("Unable to preload CSS" y
+# colgaba el servidor Streamlit). Con checkbox/text_input/selectbox/number_input
+# la grilla es 100% estable dentro del ejecutable y no depende de ese chunk.
+_mode_tok = "oma" if is_oma else "ema"
+_COUPLING_OPTS = ["IEPE", "AC", "DC"]
+_UNIT_OPTS = ["g", "mil", "N", "ips", "mm/s"]
+_COLW = [0.9, 0.6, 2.2, 1.2, 1.3, 1.0]
+
+_hc = st.columns(_COLW)
+_hc[0].caption("BNC · slot")
+_hc[1].caption("✓")
+_hc[2].caption("Sensor")
+_hc[3].caption("Coupling")
+_hc[4].caption("Sens (mV/EU)")
+_hc[5].caption("EU")
+
+_new_rows = []
+for _row in st.session_state[_grid_key]:
+    _bnc = int(_row["BNC"])
+    _slot = int(_row["Slot"])
+    _c = st.columns(_COLW)
+    _c[0].markdown(f"**{_bnc}** · s{_slot}")
+    _hab = _c[1].checkbox(
+        "Habilitado", value=bool(_row.get("Habilitado")),
+        key=f"pg_hab_{_mode_tok}_{_bnc}", label_visibility="collapsed",
+    )
+    _nom = _c[2].text_input(
+        "Sensor", value=str(_row.get("Nombre", f"Ch{_bnc:02d}")),
+        max_chars=20, key=f"pg_nom_{_mode_tok}_{_bnc}",
+        label_visibility="collapsed",
+    )
+    _cur_coup = str(_row.get("Coupling", "IEPE")).upper()
+    _coup = _c[3].selectbox(
+        "Coupling", _COUPLING_OPTS,
+        index=_COUPLING_OPTS.index(_cur_coup) if _cur_coup in _COUPLING_OPTS else 0,
+        key=f"pg_coup_{_mode_tok}_{_bnc}", label_visibility="collapsed",
+    )
+    _sens = _c[4].number_input(
+        "Sens", value=float(_row.get("Sens (mV/EU)", 100.0)),
+        min_value=0.1, max_value=10000.0, step=0.1, format="%.2f",
+        key=f"pg_sens_{_mode_tok}_{_bnc}", label_visibility="collapsed",
+    )
+    _cur_unit = str(_row.get("Unidad", "g"))
+    _unit = _c[5].selectbox(
+        "EU", _UNIT_OPTS,
+        index=_UNIT_OPTS.index(_cur_unit) if _cur_unit in _UNIT_OPTS else 0,
+        key=f"pg_unit_{_mode_tok}_{_bnc}", label_visibility="collapsed",
+    )
+    _new_rows.append({
+        "BNC": _bnc, "Slot": _slot, "Habilitado": bool(_hab),
+        "Nombre": _nom, "Coupling": _coup,
+        "Sens (mV/EU)": float(_sens), "Unidad": _unit,
+    })
+st.session_state[_grid_key] = _new_rows
 
 _enabled = [r for r in st.session_state[_grid_key] if r.get("Habilitado")]
 

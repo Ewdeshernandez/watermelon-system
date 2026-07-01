@@ -1062,19 +1062,18 @@ if not captures:
         "de arriba aparecerán acá."
     )
 else:
-    import pandas as pd
     from datetime import datetime
-    rows = []
+    # v3.31.388 — tabla en Markdown (ya NO st.dataframe) para no depender del
+    # componente DataFrame en el .exe (el mismo chunk de CSS que rompía en
+    # Captura Modal). Markdown se renderiza nativo, sin chunks lazy.
+    _md = "| Archivo | Tamaño (MB) | Fecha |\n| --- | --- | --- |\n"
     for cap in captures[:20]:  # mostrar últimos 20
         stat = cap.stat()
         size_mb = stat.st_size / (1024 * 1024)
         ts = datetime.fromtimestamp(stat.st_mtime)
-        rows.append({
-            "Archivo": cap.name,
-            "Tamaño (MB)": f"{size_mb:.2f}",
-            "Fecha": ts.strftime("%Y-%m-%d %H:%M:%S"),
-        })
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        _name = cap.name.replace("|", "\\|")
+        _md += f"| {_name} | {size_mb:.2f} | {ts.strftime('%Y-%m-%d %H:%M:%S')} |\n"
+    st.markdown(_md)
     st.caption(
         f"Mostrando {min(len(captures), 20)} de {len(captures)} capturas. "
         f"Todas en `{_CAPTURES_DIR}`."

@@ -81,17 +81,18 @@ datas += collect_data_files("streamlit")
 # ============================================================
 import streamlit as _st_mod  # noqa: E402
 _ST_DIR = Path(_st_mod.__file__).resolve().parent
-for _sub in ("static", "runtime"):
-    _src = _ST_DIR / _sub
-    if not _src.exists():
-        raise SystemExit(
-            f"\n\n[watermelon-planta.spec] ABORTANDO BUILD: no se encontró "
-            f"'streamlit/{_sub}' en el entorno de build ({_src}). "
-            f"Sin el frontend completo, st.data_editor rompe con "
-            f"'Unable to preload CSS'.\n"
-        )
-    datas.append((str(_src), f"streamlit/{_sub}"))
-    print(f"[watermelon-planta.spec] OK incluida carpeta 'streamlit/{_sub}'.")
+# SOLO 'static' (frontend, son datos). NO bundlear 'runtime' como datos: es
+# un paquete de CÓDIGO (ya va en el PYZ vía collect_submodules) y meterlo
+# como datos sueltos puede romper el arranque del servidor Streamlit
+# ("Streamlit server is not responding"). v3.31.388 revierte ese exceso.
+_ST_STATIC = _ST_DIR / "static"
+if not _ST_STATIC.exists():
+    raise SystemExit(
+        f"\n\n[watermelon-planta.spec] ABORTANDO BUILD: no se encontró "
+        f"'streamlit/static' en el entorno de build ({_ST_STATIC}).\n"
+    )
+datas.append((str(_ST_STATIC), "streamlit/static"))
+print("[watermelon-planta.spec] OK incluida carpeta 'streamlit/static'.")
 
 # Plotly static (matplotlib data + plotly.js)
 datas += collect_data_files("plotly")
