@@ -25,18 +25,22 @@ from datetime import datetime, timezone
 
 import streamlit as st
 
-from core.auth import require_role
+from core.auth import require_login, require_role
 from core.live_readings import _get_supabase_client as get_supabase_client
 
 st.set_page_config(
     page_title="Watermelon · Admin Licencias",
     page_icon="🔐",
     layout="wide",
+    initial_sidebar_state="expanded",  # nav azul visible al entrar
 )
 
 # ============================================================
 # 1. Auth — solo admin SIGA
 # ============================================================
+# require_login() autentica Y dibuja la barra azul lateral (nav). Sin esta
+# llamada el sidebar no se renderiza y "desaparece" al entrar a esta página.
+require_login()
 require_role(allowed_roles=("admin",))
 
 _user_email = st.session_state.get("auth_email", "")
