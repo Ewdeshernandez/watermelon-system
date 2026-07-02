@@ -410,6 +410,10 @@ def build_cover_flowables(meta: Dict[str, Any], styles) -> List[Any]:
     reviewed_by = (meta.get("reviewed_by") or "").strip()
     reviewed_role = (meta.get("reviewed_role") or "Machinery Diagnostic Champion").strip()
     reviewed_city = (meta.get("reviewed_city") or "Cajicá, Cundinamarca · Colombia").strip()
+    # Rótulos configurables (el briefing usa "Elaborado por:"/"Aprobado por:";
+    # los reportes clásicos conservan su default).
+    prepared_label = (meta.get("prepared_label") or "Preparado por:").strip()
+    reviewed_label = (meta.get("reviewed_label") or "Revisado por:").strip()
 
     sig_label = ParagraphStyle(name="WMSigLabel", parent=styles["Normal"], fontName=BOLD, fontSize=10.2, leading=13, alignment=TA_CENTER, textColor=colors.HexColor(_INK), spaceAfter=4)
     sig_name = ParagraphStyle(name="WMSigName", parent=styles["Normal"], fontName=BOLD, fontSize=11, leading=14, alignment=TA_CENTER, textColor=colors.HexColor(_INK), spaceAfter=2)
@@ -429,8 +433,8 @@ def build_cover_flowables(meta: Dict[str, Any], styles) -> List[Any]:
     if prepared_by and reviewed_by:
         # Dos firmas → dos columnas paralelas centradas.
         sig_tbl = Table([[
-            _cell("Preparado por:", prepared_by, prepared_role, prepared_city),
-            _cell("Revisado por:", reviewed_by, reviewed_role, reviewed_city),
+            _cell(prepared_label, prepared_by, prepared_role, prepared_city),
+            _cell(reviewed_label, reviewed_by, reviewed_role, reviewed_city),
         ]], colWidths=[8.3 * cm, 8.3 * cm])
         sig_tbl.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),
@@ -444,9 +448,9 @@ def build_cover_flowables(meta: Dict[str, Any], styles) -> List[Any]:
         # Una sola firma → columna ÚNICA centrada en la página (el nombre del
         # especialista queda al centro, no corrido a la izquierda).
         if prepared_by:
-            label, name, role, city = "Preparado por:", prepared_by, prepared_role, prepared_city
+            label, name, role, city = prepared_label, prepared_by, prepared_role, prepared_city
         else:
-            label, name, role, city = "Revisado por:", reviewed_by, reviewed_role, reviewed_city
+            label, name, role, city = reviewed_label, reviewed_by, reviewed_role, reviewed_city
         sig_tbl = Table([[_cell(label, name, role, city)]], colWidths=[11.0 * cm])
         sig_tbl.setStyle(TableStyle([
             ("VALIGN", (0, 0), (-1, -1), "TOP"),

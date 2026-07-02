@@ -494,6 +494,7 @@ def build_asset_briefing(
     instance_obj: Any = None,
     use_ai: bool = True,
     meta_extra: Optional[Dict[str, Any]] = None,
+    sections_override: Optional[Dict[str, str]] = None,
 ) -> Tuple[Optional[bytes], Dict[str, Any]]:
     """Genera el PDF del briefing de un activo. Devuelve (pdf_bytes, meta).
 
@@ -531,6 +532,15 @@ def build_asset_briefing(
     if use_ai:
         sections = _ai_enhance(sections, tag, period_label, data,
                                instance_obj=instance_obj, figures=figures)
+
+    # Override del flujo de APROBACIÓN: el especialista editó resumen y
+    # diagnóstico en la cola de revisión → esos textos mandan sobre lo
+    # generado (IA/determinístico).
+    if sections_override:
+        for k in ("summary", "diagnosis"):
+            v = (sections_override.get(k) or "").strip()
+            if v:
+                sections[k] = v
 
     # Recomendaciones GESTIONADAS por el especialista (persisten entre
     # reportes, con fecha de inicio). Si existen, MANDAN sobre el borrador
@@ -597,6 +607,84 @@ def build_asset_briefing(
 
 
 # ---------------------------------------------------------------------------
+# 3b) Borrador PENDIENTE para la cola de aprobación (lo llama el cron)
+# ---------------------------------------------------------------------------
+def build_asset_draft(
+    instance_id: str,
+    period_label: str = "Semanal",
+    instance_obj: Any = None,
+    use_ai: bool = True,
+) -> Dict[str, Any]:
+    """Genera las SECCIONES del briefing (resumen + diagnóstico, con IA
+    best-effort) y las deja como borrador PENDIENTE en la cola de revisión
+    (core.briefing_queue). NO genera PDF ni envía nada — eso ocurre cuando
+    el especialista aprueba.
+
+    Devuelve meta: {"instance_id","tag","ok","status",...}."""
+    from core.instance_state import get_instance
+    if instance_obj is None:
+        instance_obj = get_instance(instance_id)
+    tag = (getattr(instance_obj, "tag", None) or instance_id).upper()
+
+    data = _compute_asset_data(instance_id, instance_obj)
+    if not data:
+        return {"instance_id": instance_id, "tag": tag, "ok": False,
+                "status": "Sin datos"}
+
+    # Figuras solo como CONTEXTO de la IA (no se rasteriza PDF aquí).
+    try:
+        from core.briefing_figures import collect_asset_figures
+        figures = collect_asset_figures(instance_id, instance_obj)
+    except Exception as e:
+        log.warning("draft figures falló: %s", e)
+        figures = {}
+
+    sections = _deterministic_sections(tag, period_label, data)
+    if use_ai:
+        sections = _ai_enhance(sections, tag, period_label, data,
+                               instance_obj=instance_obj, figures=figures)
+
+    try:
+        from core.briefing_queue import new_pending_draft
+        ok = new_pending_draft(
+            instance_id, period_label,
+            summary=sections["summary"], diagnosis=sections["diagnosis"],
+            health=data["health"], kpis=data["kpis"],
+        )
+    except Exception as e:
+        log.error("draft queue falló para %s: %s", instance_id, e)
+        ok = False
+
+    return {"instance_id": instance_id, "tag": tag, "ok": ok,
+            "status": data["kpis"]["status"], "score": data["health"]["score"],
+            "alarms": data["kpis"]["alarms"], "period": period_label}
+
+
+def build_all_drafts(period_label: str = "Semanal",
+                     use_ai: bool = True) -> List[Dict[str, Any]]:
+    """Borrador pendiente para cada activo con datos (cron F4)."""
+    from core.instance_state import list_instances, get_instance
+    out: List[Dict[str, Any]] = []
+    try:
+        instances = list_instances() or []
+    except Exception as e:
+        log.error("build_all_drafts: list_instances falló: %s", e)
+        return out
+    for inst in instances:
+        iid = inst.get("instance_id") if isinstance(inst, dict) else getattr(inst, "instance_id", "")
+        if not iid:
+            continue
+        try:
+            obj = get_instance(iid)
+            out.append(build_asset_draft(iid, period_label, instance_obj=obj,
+                                         use_ai=use_ai))
+        except Exception as e:
+            log.warning("draft %s falló: %s", iid, e)
+            out.append({"instance_id": iid, "ok": False, "status": "Error"})
+    return out
+
+
+# ---------------------------------------------------------------------------
 # 4) Builder para TODOS los activos
 # ---------------------------------------------------------------------------
 def build_all_briefings(
@@ -627,4 +715,5 @@ def build_all_briefings(
     return out
 
 
-__all__ = ["build_asset_briefing", "build_all_briefings"]
+__all__ = ["build_asset_briefing", "build_all_briefings",
+           "build_asset_draft", "build_all_drafts"]

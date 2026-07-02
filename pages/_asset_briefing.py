@@ -146,6 +146,148 @@ st.markdown(
 )
 
 # -----------------------------------------------------------------
+# PENDIENTES DE APROBACIÓN — cola de revisión del especialista
+# -----------------------------------------------------------------
+# El cron del lunes deja aquí el BORRADOR de cada activo (resumen +
+# diagnóstico IA). El especialista edita, firma (Elaborado por /
+# Aprobado por) y al aprobar el PDF final se envía al cliente.
+try:
+    from core.auth import get_current_user as _gcu
+    _me = (_gcu() or {})
+    _me_name = _me.get("full_name") or _me.get("username") or ""
+except Exception:
+    _me_name = ""
+
+# Cola en session_state: N round-trips a Supabase solo al cargar la
+# página o al presionar Actualizar (no en cada rerun del editor).
+if "bfq_cache" not in st.session_state:
+    from core.briefing_queue import list_pending
+    st.session_state["bfq_cache"] = list_pending()
+_pending = st.session_state["bfq_cache"]
+
+_qh1, _qh2 = st.columns([4, 1])
+with _qh1:
+    st.markdown(
+        f'<div class="bf-label">Pendientes de aprobación '
+        f'<span class="bf-accent">·</span> {len(_pending)} borrador(es)</div>',
+        unsafe_allow_html=True,
+    )
+with _qh2:
+    if st.button("🔄 Actualizar", key="bfq_refresh", use_container_width=True):
+        from core.briefing_queue import list_pending
+        st.session_state["bfq_cache"] = list_pending()
+        st.rerun()
+
+if not _pending:
+    st.caption("No hay borradores pendientes. El cron del lunes 6am los deja "
+               "aquí automáticamente (también puedes generar uno manual abajo).")
+
+for _iid, _tag, _d in _pending:
+    with st.expander(
+        f"📝 {_tag} — Briefing {_d.get('period','Semanal')} · "
+        f"borrador del {(_d.get('created_at','') or '')[:16]} · "
+        f"{(_d.get('kpis') or {}).get('status','—')}",
+        expanded=(len(_pending) == 1),
+    ):
+        _sum = st.text_area(
+            "Resumen ejecutivo", value=_d.get("summary", ""),
+            key=f"bfq_sum_{_iid}", height=220,
+        )
+        _diag = st.text_area(
+            "Diagnóstico", value=_d.get("diagnosis", ""),
+            key=f"bfq_diag_{_iid}", height=140,
+        )
+        st.caption("Las **recomendaciones** se editan en el panel de abajo "
+                   "(selecciona este activo): persisten entre reportes con su "
+                   "fecha de inicio.")
+        _s1, _s2 = st.columns(2)
+        with _s1:
+            _elab = st.text_input("Elaborado por", value=_me_name,
+                                  key=f"bfq_elab_{_iid}")
+            _elab_rol = st.text_input("Cargo (elaboró)", value="",
+                                      key=f"bfq_elabr_{_iid}",
+                                      placeholder="opcional")
+        with _s2:
+            _aprb = st.text_input("Aprobado por", value="",
+                                  key=f"bfq_aprb_{_iid}",
+                                  placeholder="obligatorio para aprobar")
+            _aprb_rol = st.text_input("Cargo (aprobó)", value="",
+                                      key=f"bfq_aprbr_{_iid}",
+                                      placeholder="opcional")
+
+        _b1, _b2, _b3 = st.columns([1, 1, 1.4])
+        with _b1:
+            if st.button("💾 Guardar cambios", key=f"bfq_save_{_iid}",
+                         use_container_width=True):
+                from core.briefing_queue import update_draft
+                if update_draft(_iid, summary=_sum, diagnosis=_diag):
+                    from core.briefing_queue import list_pending
+                    st.session_state["bfq_cache"] = list_pending()
+                    st.success("Borrador guardado.")
+                else:
+                    st.error("No se pudo guardar el borrador.")
+        with _b2:
+            if st.button("👁 Vista previa PDF", key=f"bfq_prev_{_iid}",
+                         use_container_width=True):
+                with st.spinner("Generando vista previa…"):
+                    from core.briefing_builder import build_asset_briefing
+                    _pdf, _m = build_asset_briefing(
+                        _iid, _d.get("period", "Semanal"), use_ai=False,
+                        sections_override={"summary": _sum, "diagnosis": _diag},
+                        meta_extra={
+                            "prepared_by": _elab or _me_name,
+                            "reviewed_by": _aprb,
+                            "prepared_label": "Elaborado por:",
+                            "reviewed_label": "Aprobado por:",
+                        },
+                    )
+                st.session_state[f"bfq_pdf_{_iid}"] = _pdf
+        with _b3:
+            if st.button("✅ Aprobar y enviar al cliente", key=f"bfq_go_{_iid}",
+                         type="primary", use_container_width=True):
+                if not (_aprb or "").strip():
+                    st.error("Falta 'Aprobado por' — el briefing siempre debe "
+                             "llevar elaborado y aprobado.")
+                elif not (_elab or "").strip():
+                    st.error("Falta 'Elaborado por'.")
+                else:
+                    from core.briefing_queue import approve_and_send, update_draft
+                    update_draft(_iid, summary=_sum, diagnosis=_diag)
+                    with st.spinner("Aprobando, generando PDF final y "
+                                    "enviando al cliente…"):
+                        _res = approve_and_send(
+                            _iid, prepared_by=_elab, approved_by=_aprb,
+                            prepared_role=_elab_rol, approved_role=_aprb_rol,
+                            send=True,
+                        )
+                    if _res.get("ok"):
+                        _dv = _res.get("delivery") or {}
+                        if _dv.get("any_ok"):
+                            st.success(f"✅ {_tag} aprobado y ENVIADO al cliente.")
+                        else:
+                            st.warning(
+                                f"Aprobado, pero el envío falló o el activo no "
+                                f"tiene canales configurados: "
+                                f"{_dv.get('error', _dv)}. Descarga el PDF y "
+                                f"envíalo manualmente.")
+                        st.session_state[f"bfq_pdf_{_iid}"] = _res.get("pdf")
+                        from core.briefing_queue import list_pending
+                        st.session_state["bfq_cache"] = list_pending()
+                    else:
+                        st.error(f"No se pudo aprobar: {_res.get('error')}")
+
+        if st.session_state.get(f"bfq_pdf_{_iid}"):
+            st.download_button(
+                "⬇ Descargar PDF (última versión generada)",
+                data=st.session_state[f"bfq_pdf_{_iid}"],
+                file_name=f"Briefing_{_tag}_{_d.get('period','Semanal')}.pdf",
+                mime="application/pdf", key=f"bfq_dl_{_iid}",
+                use_container_width=True,
+            )
+
+st.markdown("")
+
+# -----------------------------------------------------------------
 # Panel de configuración
 # -----------------------------------------------------------------
 with st.container(border=True):
@@ -393,9 +535,27 @@ if st.button("📄  Generar briefing", type="primary", use_container_width=True)
                 use_container_width=True)
         st.markdown("")
 
+# Borrador manual → cola de aprobación (mismo flujo que el cron)
+if _scope == "Un activo" and _target_iid:
+    if st.button("📝 Generar BORRADOR y enviarlo a la cola de aprobación",
+                 key="bfq_manual", use_container_width=True):
+        from core.briefing_builder import build_asset_draft
+        with st.spinner("Generando borrador (datos + redacción IA)…"):
+            _m = build_asset_draft(_target_iid, _period, use_ai=_use_ai)
+        if _m.get("ok"):
+            from core.briefing_queue import list_pending
+            st.session_state["bfq_cache"] = list_pending()
+            st.success("Borrador en cola — revísalo arriba en "
+                       "'Pendientes de aprobación'.")
+            st.rerun()
+        else:
+            st.error(f"No se pudo crear el borrador: {_m.get('status','?')}")
+
 st.markdown(
-    '<div class="bf-foot">💡&nbsp;El briefing automático del <b>lunes 6am</b> '
-    'corre para todos los activos y se envía al especialista para revisión '
-    'antes de remitirlo al cliente.</div>',
+    '<div class="bf-foot">💡&nbsp;Flujo: el <b>lunes 6am</b> el sistema deja el '
+    'borrador de cada activo en <b>Pendientes de aprobación</b> → el '
+    'especialista lo revisa/edita → firma <b>Elaborado por</b> y '
+    '<b>Aprobado por</b> → al aprobar, el PDF final se envía automáticamente '
+    'al cliente por los canales del activo.</div>',
     unsafe_allow_html=True,
 )

@@ -7,11 +7,14 @@ que corre los LUNES 6:00 AM (hora Bogotá):
 
     schedule:  0 11 * * 1     (11:00 UTC = 06:00 America/Bogota, lunes)
 
-Qué hace:
-    1. Genera el briefing figura-rico de TODOS los activos con datos
-       (core.briefing_builder.build_all_briefings).
-    2. Envía los PDFs por email al ESPECIALISTA para que los revise y los
-       remita al cliente (no se mandan directo al cliente).
+Qué hace (v3.31.393 — flujo de APROBACIÓN):
+    1. Genera el BORRADOR del briefing de TODOS los activos con datos
+       (resumen + diagnóstico con IA) y lo deja PENDIENTE en la cola de
+       revisión (core.briefing_queue). NADA se envía al cliente aquí.
+    2. Notifica por email al ESPECIALISTA que hay borradores pendientes:
+       los revisa/edita/aprueba en la app ("Briefing por activo") y al
+       aprobar se firma (Elaborado por / Aprobado por) y AHÍ SÍ se envía
+       al cliente.
 
 El destinatario de revisión sale de la env var WM_BRIEFING_REVIEW_EMAIL
 (o el default abajo). Se puede pasar varios separados por coma.
@@ -61,19 +64,19 @@ def main() -> int:
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
-    from core.briefing_builder import build_asset_briefing, build_all_briefings
+    from core.briefing_builder import build_asset_draft, build_all_drafts
 
-    log.info("Generando briefings (%s)…", args.period)
+    log.info("Generando BORRADORES de briefing (%s) para la cola de revisión…",
+             args.period)
     if args.instance:
-        pdf, meta = build_asset_briefing(args.instance, args.period)
-        results = [(args.instance, pdf, meta)]
+        results = [build_asset_draft(args.instance, args.period)]
     else:
-        results = build_all_briefings(args.period)
+        results = build_all_drafts(args.period)
 
-    ok = [(iid, pdf, meta) for iid, pdf, meta in results if pdf]
-    log.info("Briefings generados: %d de %d activos.", len(ok), len(results))
+    ok = [m for m in results if m.get("ok")]
+    log.info("Borradores en cola: %d de %d activos.", len(ok), len(results))
     if not ok:
-        log.warning("Nada que enviar.")
+        log.warning("No quedó ningún borrador pendiente.")
         return 0
 
     recipients = _review_recipients(args.to)
@@ -81,42 +84,39 @@ def main() -> int:
         log.error("Sin destinatario de revisión (WM_BRIEFING_REVIEW_EMAIL).")
         return 1
 
-    # Adjuntar todos los PDFs en un solo correo de revisión
-    attachments = []
-    lines = []
-    for iid, pdf, meta in ok:
-        tag = meta.get("tag", iid)
-        fname = f"Briefing_{tag}_{args.period}.pdf"
-        attachments.append((fname, pdf, "application/pdf"))
-        lines.append(f"• {tag}: {meta.get('status','—')} · salud "
-                     f"{meta.get('score','—')} · {meta.get('alarms',0)} alarma(s)")
+    lines = [f"• {m.get('tag', m.get('instance_id'))}: {m.get('status','—')} · "
+             f"salud {m.get('score','—')} · {m.get('alarms',0)} alarma(s)"
+             for m in ok]
 
-    subject = f"Briefing {args.period} — {len(ok)} activo(s) · revisión"
+    subject = (f"Briefing {args.period} — {len(ok)} borrador(es) PENDIENTES "
+               f"de aprobación")
     body = (
-        f"Briefing {args.period} generado automáticamente para revisión del "
-        f"especialista antes de remitir al cliente.\n\n"
+        f"El briefing {args.period.lower()} quedó generado como BORRADOR y está "
+        f"pendiente de tu revisión y aprobación en la app "
+        f"(Briefing por activo → Pendientes de aprobación):\n\n"
         + "\n".join(lines) +
-        "\n\nRevisa los PDF adjuntos, ajusta diagnóstico/recomendaciones si hace "
-        "falta y reenvía al cliente.\n\n— Watermelon System")
+        "\n\nFlujo: revisa/edita resumen, diagnóstico y recomendaciones → "
+        "firma 'Elaborado por' y 'Aprobado por' → al aprobar, el PDF final se "
+        "envía automáticamente al cliente por los canales del activo.\n\n"
+        "— Watermelon System")
 
     if args.dry_run:
-        log.info("[DRY-RUN] No se envía. Destinatarios: %s · adjuntos: %d",
-                 recipients, len(attachments))
+        log.info("[DRY-RUN] No se notifica. Destinatarios: %s", recipients)
         return 0
 
     try:
         from core.email_sender import send_email
         sent = 0
         for to in recipients:
-            r = send_email(to, subject, body, attachments=attachments)
+            r = send_email(to, subject, body)
             if r and (r.get("ok") if isinstance(r, dict) else r):
                 sent += 1
-                log.info("Briefing enviado a %s", to)
+                log.info("Notificación enviada a %s", to)
             else:
-                log.error("Fallo enviando a %s: %s", to, r)
+                log.error("Fallo notificando a %s: %s", to, r)
         return 0 if sent else 1
     except Exception as e:
-        log.error("Envío falló: %s", e)
+        log.error("Notificación falló: %s", e)
         return 1
 
 
