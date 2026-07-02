@@ -168,8 +168,17 @@ with st.container(border=True):
         st.markdown('<div class="bf-label" style="margin-top:14px;">Activo</div>',
                     unsafe_allow_html=True)
         try:
-            from core.instance_state import list_instances
-            _rows = list_instances() or []
+            from core.instance_state import get_instances_version, list_instances
+
+            # Cachear la lista de activos: sin esto, CADA rerun (cada edición
+            # del data_editor de recomendaciones) hace un round-trip a
+            # Supabase y la página se siente lenta. Se invalida sola cuando
+            # alguien muta una instancia (get_instances_version).
+            @st.cache_data(show_spinner=False)
+            def _cached_instances(_v: int):
+                return list_instances() or []
+
+            _rows = _cached_instances(get_instances_version())
             _opts = []
             for r in _rows:
                 iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
@@ -233,7 +242,15 @@ if _scope == "Un activo" and _target_iid:
             '<span class="bf-accent">·</span> persisten entre reportes</div>',
             unsafe_allow_html=True,
         )
-        _recs = list_recommendations(_target_iid)
+        # Cargar de Supabase UNA sola vez por activo (session_state). Cada
+        # tecleo/edición del data_editor dispara un rerun de la página: si
+        # aquí se consultara Supabase en cada rerun, editar se vuelve lento.
+        # La edición vive en el estado del editor; Supabase solo se toca al
+        # Guardar (y ahí se refresca el caché).
+        _ss_recs = f"recs_cache_{_target_iid}"
+        if _ss_recs not in st.session_state:
+            st.session_state[_ss_recs] = list_recommendations(_target_iid)
+        _recs = st.session_state[_ss_recs]
 
         def _to_date(s):
             try:
@@ -276,6 +293,11 @@ if _scope == "Un activo" and _target_iid:
                         "started_at": _row.get("Fecha de inicio"),
                     })
                 if save_recommendations(_target_iid, _rows):
+                    # Refrescar el caché de sesión con lo persistido
+                    # (normalizado y ordenado por fecha) y resetear el
+                    # estado del editor para que muestre exactamente eso.
+                    st.session_state[_ss_recs] = list_recommendations(_target_iid)
+                    st.session_state.pop(f"recs_editor_{_target_iid}", None)
                     st.success("Recomendaciones guardadas.")
                     st.rerun()
                 else:
