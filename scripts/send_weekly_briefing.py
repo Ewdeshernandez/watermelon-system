@@ -62,9 +62,27 @@ def main() -> int:
     ap.add_argument("--instance", default="")
     ap.add_argument("--to", default="")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--check-schedule", action="store_true",
+                    help="Modo cron HORARIO ('0 * * * *'): solo genera si la "
+                         "hora/día actuales coinciden con la programación "
+                         "configurada en la app (briefing_schedule). El día, "
+                         "la hora y el periodo salen de esa config.")
     args = ap.parse_args()
 
     from core.briefing_builder import build_asset_draft, build_all_drafts
+
+    # Modo programado desde la UI (v3.31.401): la config vive en Supabase
+    # (captured_parameters). Si no es la hora, salir silencioso — este cron
+    # corre cada hora en punto.
+    if args.check_schedule:
+        from core.briefing_queue import get_schedule, schedule_due
+        cfg = get_schedule()
+        if not schedule_due(cfg):
+            log.info("Programación no coincide ahora (cfg=%s) — nada que hacer.",
+                     cfg)
+            return 0
+        args.period = cfg.get("period", "Semanal")
+        log.info("Programación COINCIDE (cfg=%s) → generando borradores.", cfg)
 
     log.info("Generando BORRADORES de briefing (%s) para la cola de revisión…",
              args.period)

@@ -213,6 +213,74 @@ def approve_and_send(instance_id: str, *,
     return out
 
 
+# ---------------------------------------------------------------------------
+# Programación automática (v3.31.401) — día(s) + hora en que el sistema
+# genera los borradores y los manda a la cola SOLO. Config GLOBAL, persistida
+# en captured_parameters de cada instancia (el cron corre headless en Render
+# sin disco compartido → Supabase es la única fuente común).
+#   {"enabled": bool, "days": [0..6] (0=Lunes), "hour": 0-23,
+#    "period": "Semanal"|"Mensual"}
+# ---------------------------------------------------------------------------
+SCHED_KEY = "briefing_schedule"
+
+
+def get_schedule() -> Dict[str, Any]:
+    """Config de programación (del primer activo que la tenga)."""
+    try:
+        from core.instance_state import list_instances, get_instance_parameters
+        for r in list_instances() or []:
+            iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
+            if not iid:
+                continue
+            cfg = get_instance_parameters(iid).get(SCHED_KEY)
+            if isinstance(cfg, dict):
+                return dict(cfg)
+    except Exception as e:
+        log.warning("get_schedule falló: %s", e)
+    return {"enabled": False, "days": [0], "hour": 5, "period": "Semanal"}
+
+
+def save_schedule(cfg: Dict[str, Any]) -> bool:
+    """Escribe la config en TODOS los activos (fuente común para el cron)."""
+    try:
+        from core.instance_state import list_instances, update_instance_parameter
+        clean = {
+            "enabled": bool(cfg.get("enabled")),
+            "days": sorted({int(d) for d in (cfg.get("days") or [0])
+                            if 0 <= int(d) <= 6}) or [0],
+            "hour": max(0, min(23, int(cfg.get("hour", 5)))),
+            "period": ("Mensual" if str(cfg.get("period", "")).lower().startswith("mensual")
+                       else "Semanal"),
+        }
+        ok_any = False
+        for r in list_instances() or []:
+            iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
+            if iid and update_instance_parameter(iid, SCHED_KEY, clean):
+                ok_any = True
+        return ok_any
+    except Exception as e:
+        log.warning("save_schedule falló: %s", e)
+        return False
+
+
+def schedule_due(cfg: Dict[str, Any], now: Optional[datetime] = None) -> bool:
+    """¿Coincide AHORA (hora Bogotá) con el día+hora programados?"""
+    if not cfg or not cfg.get("enabled"):
+        return False
+    if now is None:
+        try:
+            from zoneinfo import ZoneInfo
+            now = datetime.now(ZoneInfo("America/Bogota"))
+        except Exception:
+            now = datetime.now()
+    try:
+        days = [int(d) for d in (cfg.get("days") or [])]
+        return now.weekday() in days and now.hour == int(cfg.get("hour", -1))
+    except Exception:
+        return False
+
+
 __all__ = ["get_draft", "save_draft", "update_draft", "clear_draft",
            "new_pending_draft", "list_pending", "approve_and_send",
-           "STATUS_PENDING", "STATUS_APPROVED", "PARAM_KEY"]
+           "get_schedule", "save_schedule", "schedule_due",
+           "STATUS_PENDING", "STATUS_APPROVED", "PARAM_KEY", "SCHED_KEY"]

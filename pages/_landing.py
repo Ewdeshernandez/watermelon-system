@@ -109,6 +109,47 @@ _my_role  = (_user.get("role", "")  or "").strip().lower()
 _fleet = compute_fleet_status(client_email=_my_email if _my_role == "client" else "")
 _health = get_system_health()
 
+# =============================================================
+# ALERTA DE REPORTES PENDIENTES DE APROBACIÓN (v3.31.401)
+# Al entrar a la app, admin/specialist ven DE UNA si el sistema dejó
+# borradores esperando aprobación (cron programado o manual). Cache
+# 5 min para no escanear Supabase en cada visita al Home.
+# =============================================================
+if _my_role in ("admin", "specialist"):
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _pending_briefings_count() -> int:
+        try:
+            from core.briefing_queue import list_pending
+            return len(list_pending())
+        except Exception:
+            return 0
+
+    _n_pend = _pending_briefings_count()
+    if _n_pend > 0:
+        _al1, _al2 = st.columns([5, 1.3])
+        with _al1:
+            st.markdown(
+                f"""
+                <div style="background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 100%);
+                     border:1px solid #f59e0b;border-left:5px solid #f59e0b;
+                     border-radius:12px;padding:14px 18px;margin:4px 0 10px 0;
+                     box-shadow:0 2px 8px rgba(245,158,11,0.15);">
+                    <span style="font-weight:800;color:#92400e;font-size:15px;">
+                        🔔 {_n_pend} reporte(s) PENDIENTES de aprobación
+                    </span>
+                    <span style="color:#78350f;font-size:13px;">
+                        &nbsp;— el sistema los generó y esperan tu revisión,
+                        firma y envío al cliente.
+                    </span>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        with _al2:
+            if st.button("✅ Ir a aprobar", key="home_goto_briefing",
+                         type="primary", use_container_width=True):
+                st.switch_page("pages/_asset_briefing.py")
+
 # Toggle para admin/specialist: "Mi actividad" vs "Toda la actividad"
 # Default: "toda" para admin (ven movimiento del equipo entero), "mía"
 # para specialist (su trabajo). Client siempre ve solo la suya.

@@ -236,6 +236,59 @@ if st.button("📝  Generar reporte y enviarlo a APROBACIÓN",
                        f"abajo en 'Pendientes de aprobación'.")
 
 # -----------------------------------------------------------------
+# Programación AUTOMÁTICA (v3.31.401) — el sistema genera el reporte
+# el día y hora configurados y lo deja en la cola de aprobación solo.
+# La config vive en Supabase; el cron horario de Render la lee
+# (send_weekly_briefing.py --check-schedule).
+# -----------------------------------------------------------------
+with st.expander("⏰ Programación automática — generar y enviar a "
+                 "aprobación solo", expanded=False):
+    from core.briefing_queue import get_schedule, save_schedule
+
+    if "bfq_sched" not in st.session_state:
+        st.session_state["bfq_sched"] = get_schedule()
+    _cfg = st.session_state["bfq_sched"]
+
+    _DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes",
+             "Sábado", "Domingo"]
+    _en = st.toggle("Generación automática activa",
+                    value=bool(_cfg.get("enabled")), key="bfq_sched_en")
+    _sc1, _sc2, _sc3 = st.columns([2, 1, 1])
+    with _sc1:
+        _days_sel = st.multiselect(
+            "Día(s)", _DIAS,
+            default=[_DIAS[d] for d in (_cfg.get("days") or [0])
+                     if 0 <= int(d) <= 6],
+            key="bfq_sched_days")
+    with _sc2:
+        _hour_sel = st.selectbox(
+            "Hora (Bogotá)", list(range(24)),
+            index=int(_cfg.get("hour", 5)),
+            format_func=lambda h: f"{h:02d}:00", key="bfq_sched_hour")
+    with _sc3:
+        _per_sel = st.selectbox(
+            "Periodo", ["Semanal", "Mensual"],
+            index=(1 if str(_cfg.get("period", "")).startswith("Mensual") else 0),
+            key="bfq_sched_period")
+    if st.button("💾 Guardar programación", key="bfq_sched_save"):
+        _new_cfg = {
+            "enabled": _en,
+            "days": [_DIAS.index(d) for d in (_days_sel or ["Lunes"])],
+            "hour": int(_hour_sel),
+            "period": _per_sel,
+        }
+        if save_schedule(_new_cfg):
+            st.session_state["bfq_sched"] = _new_cfg
+            _dias_txt = ", ".join(_days_sel or ["Lunes"])
+            st.success(f"✅ Programado: {_dias_txt} a las {_hour_sel:02d}:00 "
+                       f"({_per_sel}). Los borradores llegarán solos a "
+                       f"'Pendientes de aprobación' y verás la alerta al "
+                       f"entrar a la app."
+                       if _en else "Programación guardada (desactivada).")
+        else:
+            st.error("No se pudo guardar la programación.")
+
+# -----------------------------------------------------------------
 # PENDIENTES DE APROBACIÓN — lista compacta (v3.31.399)
 # El módulo abre LIMPIO: arriba se crea el reporte nuevo; aquí abajo
 # solo se listan los pendientes. El detalle (recomendaciones editables
