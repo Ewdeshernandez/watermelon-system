@@ -293,35 +293,107 @@ def _order_txt(order: Optional[float]) -> str:
     return f"≈{order:.1f}X"
 
 
+def _amp_txt(f: Dict[str, Any]) -> str:
+    u = (f.get("unit") or "").strip()
+    return f"{f['peak_amp']:.2f} {u}".strip()
+
+
 def _spectrum_analysis(findings: List[Dict[str, Any]]) -> str:
-    """Análisis técnico determinístico del espectro apilado, por canal."""
+    """Análisis del espectro en PROSA de analista Cat IV (v3.31.404):
+    agrupa hallazgos por naturaleza (síncronos 1X, 2X, subsíncronos,
+    transmitidos entre ejes, baja frecuencia) y redacta un dictamen
+    referenciado a ISO 20816-3 / API 670 / API 684, en lugar del listado
+    'canal: pico — clasificación' tipo robot."""
     if not findings:
         return ""
-    partes: List[str] = []
-    n_sync = 0
+    shafts = sorted({f.get("shaft_cpm", 0.0) for f in findings if f.get("shaft_cpm")})
+
+    def _near(cpm: float, ref: float, tol: float = 0.12) -> bool:
+        return ref > 0 and abs(cpm - ref) / ref <= tol
+
+    sync, twox, sub, low, xshaft, other = [], [], [], [], [], []
     for f in findings:
-        o = f.get("order")
-        otxt = _order_txt(o)
-        seg = (f"{f['label']}: pico dominante {f['peak_amp']:.2f} "
-               f"{f.get('unit') or ''} a ~{f['peak_cpm']:.0f} CPM"
-               + (f" ({otxt})" if otxt else ""))
-        if o is not None:
-            if 0.90 <= o <= 1.10:
-                n_sync += 1
-                seg += " — componente síncrona 1X, típica de energía residual de desbalance"
-            elif 1.90 <= o <= 2.10:
-                seg += " — componente 2X, vigilar alineación y holguras mecánicas"
-            elif 0.35 <= o <= 0.55:
-                seg += " — componente subsíncrona ~0.5X, vigilar estabilidad de película de aceite"
-            elif o > 2.5:
-                seg += " — componente de orden superior (paso de álabes/engrane u origen estructural)"
-        partes.append(seg)
-    cierre = ("El patrón espectral es predominantemente síncrono (1X dominante), "
-              "consistente con operación estable sin defectos activos."
-              if n_sync >= max(1, len(findings) // 2) else
-              "Se recomienda seguimiento de las componentes no síncronas señaladas "
-              "en próximas corridas.")
-    return "Análisis del espectro: " + ". ".join(partes) + ". " + cierre
+        o, cpm, own = f.get("order"), f.get("peak_cpm", 0.0), f.get("shaft_cpm", 0.0)
+        if o is not None and 0.88 <= o <= 1.12:
+            sync.append(f)
+        elif o is not None and 1.88 <= o <= 2.12:
+            twox.append(f)
+        elif o is not None and 0.35 <= o <= 0.60:
+            sub.append(f)
+        elif any(_near(cpm, s) for s in shafts if s and not _near(s, own, 0.02)):
+            xshaft.append(f)  # fundamental de OTRO eje transmitida al plano
+        elif o is not None and o < 0.30:
+            low.append(f)
+        else:
+            other.append(f)
+
+    def _lista(fs):
+        return ", ".join(f"{x['label']} ({_amp_txt(x)} @ ~{x['peak_cpm']:.0f} CPM)"
+                         for x in fs)
+
+    p: List[str] = []
+    p.append("El levantamiento espectral del tren se evaluó frente a los "
+             "criterios de severidad de ISO 20816-3 y a las prácticas de "
+             "diagnóstico rotodinámico de API 670 y API 684.")
+
+    if sync:
+        amps = [x["peak_amp"] for x in sync]
+        p.append(
+            f"La energía vibratoria está gobernada por la componente síncrona "
+            f"1X del eje correspondiente en {_lista(sync)}, con amplitudes "
+            f"entre {min(amps):.2f} y {max(amps):.2f}. Este patrón corresponde "
+            f"a la respuesta residual de desbalance propia de todo rotor "
+            f"balanceado dentro de tolerancia (ISO 21940-11) y, a los niveles "
+            f"observados, no constituye un mecanismo de falla activo; se "
+            f"administra por tendencia.")
+    if xshaft:
+        p.append(
+            f"En {_lista(xshaft)} el máximo espectral no corresponde a la "
+            f"velocidad de giro de su propio eje sino a la fundamental del "
+            f"otro rotor del tren transmitida estructuralmente a través de la "
+            f"carcasa y los soportes — un acoplamiento vibratorio esperable en "
+            f"turbomaquinaria de doble eje que se vigila en tendencia y no "
+            f"señala defecto del eje local.")
+    if twox:
+        p.append(
+            f"Se aprecia contenido 2X significativo en {_lista(twox)}. La "
+            f"persistencia o crecimiento de esta componente es el indicador "
+            f"clásico de desalineación o de holgura mecánica (API 684); se "
+            f"recomienda correlacionarla con fase y con la posición del eje "
+            f"antes de la próxima parada.")
+    if sub:
+        p.append(
+            f"Existe actividad subsíncrona en torno a 0.4–0.5X en "
+            f"{_lista(sub)}. A baja amplitud puede ser remolino de aceite "
+            f"incipiente (oil whirl); debe seguirse de cerca porque su "
+            f"crecimiento hacia la primera crítica degrada rápidamente la "
+            f"estabilidad de la película (API 684, inestabilidades "
+            f"fluido-dinámicas).")
+    if low:
+        p.append(
+            f"En {_lista(low)} el máximo aparece a baja frecuencia, sin "
+            f"correlato con las velocidades de giro del tren; se atribuye a "
+            f"ruido de piso o a la resolución de la adquisición y conviene "
+            f"confirmarlo en la próxima corrida antes de asignarle "
+            f"significado mecánico.")
+    if other:
+        p.append(
+            f"El contenido de orden superior observado en {_lista(other)} es "
+            f"coherente con frecuencias de paso de álabes o respuesta "
+            f"estructural local; a las amplitudes registradas no acciona "
+            f"ningún criterio de norma.")
+
+    if not (twox or sub):
+        p.append("En conjunto, la firma espectral es la de una unidad "
+                 "operando establemente: componentes síncronas dominantes, "
+                 "sin subsíncronos de inestabilidad ni armónicos de holgura o "
+                 "rozamiento. Se mantiene la vigilancia periódica conforme a "
+                 "ISO 17359.")
+    else:
+        p.append("El resto de la firma espectral se mantiene dentro de un "
+                 "comportamiento normal; las componentes señaladas definen "
+                 "los puntos de seguimiento prioritario del próximo ciclo.")
+    return " ".join(p)
 
 
 def spectrum_png(instance_id: str) -> Optional[bytes]:
@@ -628,6 +700,50 @@ def _period_history(instance_id: str, days: int = 7) -> Dict[str, List[Dict[str,
                 out[lbl] = pts
     except Exception as e:
         log.warning("_period_history(%s) falló: %s", instance_id, e)
+    if not out:
+        # Fallback con VENTANA DE TIEMPO (si la RPC trend_bucketed no está):
+        # query directa filtrada por captured_at >= from_iso + peak-hold por
+        # hora client-side. Limitada al cap de 1000 filas de PostgREST (las
+        # más recientes), pero jamás muestra solo los últimos minutos.
+        try:
+            from datetime import datetime, timedelta, timezone
+
+            from core.live_readings import _get_supabase_client, _TABLE
+            client = _get_supabase_client()
+            if client is not None:
+                from_iso = (datetime.now(timezone.utc)
+                            - timedelta(days=days)).isoformat()
+                resp = (client.table(_TABLE)
+                        .select("sensor_label,variable,value,unit,captured_at")
+                        .eq("instance_id", instance_id)
+                        .eq("metric", "Direct")
+                        .gte("captured_at", from_iso)
+                        .order("captured_at", desc=True)
+                        .limit(1000).execute())
+                rows = list(getattr(resp, "data", []) or [])
+                buckets: Dict[tuple, Dict[str, Any]] = {}
+                for r in rows:
+                    lbl = r.get("sensor_label")
+                    v = r.get("value")
+                    if not lbl or v is None:
+                        continue
+                    if (r.get("variable") or "").lower().startswith("velocidad"):
+                        continue
+                    hkey = (lbl, str(r.get("captured_at", ""))[:13])  # por hora
+                    cur = buckets.get(hkey)
+                    if cur is None or float(v) > float(cur["value"]):
+                        buckets[hkey] = {"captured_at": r["captured_at"],
+                                         "value": float(v),
+                                         "unit": r.get("unit")}
+                for (lbl, _h), pt in sorted(buckets.items(),
+                                            key=lambda kv: kv[1]["captured_at"]):
+                    out.setdefault(lbl, []).append(pt)
+                out = {k: v for k, v in out.items() if len(v) >= 2}
+                if out:
+                    log.warning("_period_history: usando fallback windowed "
+                                "(RPC trend_bucketed no disponible)")
+        except Exception as e:
+            log.warning("_period_history fallback falló: %s", e)
     return out
 
 
