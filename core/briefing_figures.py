@@ -72,6 +72,57 @@ def _load_latest_snapshot(instance_id: str, key: str) -> Optional[Dict[str, Any]
         return None
 
 
+def _load_merged_snapshot(instance_id: str, key: str,
+                          max_snaps: int = 8) -> Optional[Dict[str, Any]]:
+    """Fusiona los últimos snapshots del tipo `key` en UN payload.
+
+    v3.31.399 — El snapshot MÁS RECIENTE suele traer solo los canales del
+    último análisis (ej. generador desde CSV Bently) y dejaba FUERA a la
+    turbina (CRF/TRF, analizada en otra corrida). Se recorren los últimos
+    `max_snaps` snapshots (nuevo→viejo) y se toma, por canal, su versión
+    más reciente. Así el apilado del briefing incluye TODOS los canales.
+    """
+    try:
+        from core import history_storage as hs
+        snaps = hs.list_snapshots(instance_id, key) or []
+        if not snaps:
+            return None
+        import importlib
+        mod_name, fn_name = {
+            "spectrum": ("core.spectrum_history", "load_spectrum_snapshot"),
+            "waveform": ("core.waveform_history", "load_waveform_snapshot"),
+            "orbit":    ("core.orbit_history", "load_orbit_snapshot"),
+        }[key]
+        load_fn = getattr(importlib.import_module(mod_name), fn_name)
+        coll_key = "bearings" if key == "orbit" else "sensors"
+        label_key = "bearing_label" if key == "orbit" else "sensor_label"
+        merged: Optional[Dict[str, Any]] = None
+        seen: set = set()
+        for smeta in snaps[:max_snaps]:
+            sid = smeta.get("snapshot_id", "")
+            try:
+                payload = load_fn(instance_id, sid)
+            except Exception:
+                payload = None
+            if not payload:
+                continue
+            if merged is None:
+                merged = {k: v for k, v in payload.items() if k != coll_key}
+                merged[coll_key] = []
+            for s in payload.get(coll_key, []) or []:
+                lbl = (s.get(label_key) or "").strip()
+                if not lbl or lbl in seen:
+                    continue
+                seen.add(lbl)
+                merged[coll_key].append(s)
+            if not merged.get("operating_speed_rpm") and payload.get("operating_speed_rpm"):
+                merged["operating_speed_rpm"] = payload["operating_speed_rpm"]
+        return merged
+    except Exception as e:
+        log.warning("briefing_figures: merge %s/%s falló: %s", instance_id, key, e)
+        return _load_latest_snapshot(instance_id, key)
+
+
 def _freqs_cpm(s: Dict[str, Any]) -> List[float]:
     is_cpm = str(s.get("freq_unit", "Hz") or "Hz").lower().startswith("c")
     return list(s["freqs"]) if is_cpm else [f * 60.0 for f in s["freqs"]]
@@ -104,7 +155,7 @@ def spectrum_bundle(instance_id: str) -> Dict[str, Any]:
     """{"png": bytes|None, "analysis": str} — figura del espectro apilado con
     marcadores 1X..5X por canal (referenciados al eje real de cada punto) +
     análisis técnico determinístico por canal."""
-    payload = _load_latest_snapshot(instance_id, "spectrum")
+    payload = _load_merged_snapshot(instance_id, "spectrum")
     if not payload:
         return {"png": None, "analysis": ""}
     sensors = [s for s in payload.get("sensors", [])
@@ -284,7 +335,7 @@ def spectrum_png(instance_id: str) -> Optional[bytes]:
 def waveform_bundle(instance_id: str) -> Dict[str, Any]:
     """{"png": bytes|None, "analysis": str} — forma de onda apilada + análisis
     determinístico por canal (amplitud pp y factor de cresta)."""
-    payload = _load_latest_snapshot(instance_id, "waveform")
+    payload = _load_merged_snapshot(instance_id, "waveform")
     if not payload:
         return {"png": None, "analysis": ""}
     sensors = [s for s in payload.get("sensors", [])
@@ -382,7 +433,7 @@ def waveform_png(instance_id: str) -> Optional[bytes]:
 def orbit_bundle(instance_id: str) -> Dict[str, Any]:
     """{"png": bytes|None, "analysis": str} — grilla de órbitas + análisis
     determinístico por cojinete (amplitud pp y forma de la órbita)."""
-    payload = _load_latest_snapshot(instance_id, "orbit")
+    payload = _load_merged_snapshot(instance_id, "orbit")
     if not payload:
         return {"png": None, "analysis": ""}
     bearings = [b for b in payload.get("bearings", [])

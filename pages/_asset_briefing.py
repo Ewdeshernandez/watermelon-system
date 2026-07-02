@@ -146,204 +146,6 @@ st.markdown(
 )
 
 # -----------------------------------------------------------------
-# PENDIENTES DE APROBACIÓN — cola de revisión del especialista
-# -----------------------------------------------------------------
-# El cron del lunes deja aquí el BORRADOR de cada activo (resumen +
-# diagnóstico IA). El especialista edita, firma (Elaborado por /
-# Aprobado por) y al aprobar el PDF final se envía al cliente.
-try:
-    from core.auth import get_current_user as _gcu
-    _me = (_gcu() or {})
-    _me_name = _me.get("full_name") or _me.get("username") or ""
-except Exception:
-    _me_name = ""
-
-# Cola en session_state: N round-trips a Supabase solo al cargar la
-# página o al presionar Actualizar (no en cada rerun del editor).
-if "bfq_cache" not in st.session_state:
-    from core.briefing_queue import list_pending
-    st.session_state["bfq_cache"] = list_pending()
-_pending = st.session_state["bfq_cache"]
-
-_qh1, _qh2 = st.columns([4, 1])
-with _qh1:
-    st.markdown(
-        f'<div class="bf-label">Pendientes de aprobación '
-        f'<span class="bf-accent">·</span> {len(_pending)} borrador(es)</div>',
-        unsafe_allow_html=True,
-    )
-with _qh2:
-    if st.button("🔄 Actualizar", key="bfq_refresh", use_container_width=True):
-        from core.briefing_queue import list_pending
-        st.session_state["bfq_cache"] = list_pending()
-        st.rerun()
-
-if not _pending:
-    st.caption("No hay borradores pendientes. El cron del lunes 6am los deja "
-               "aquí automáticamente (también puedes generar uno manual abajo).")
-
-for _iid, _tag, _d in _pending:
-    with st.expander(
-        f"📝 {_tag} — Briefing {_d.get('period','Semanal')} · "
-        f"borrador del {(_d.get('created_at','') or '')[:16]} · "
-        f"{(_d.get('kpis') or {}).get('status','—')}",
-        expanded=(len(_pending) == 1),
-    ):
-        # Resumen y diagnóstico: SOLO LECTURA. En el módulo de aprobación
-        # lo único editable son las recomendaciones — el contenido del
-        # reporte se genera automático y se aprueba tal cual.
-        _sum = _d.get("summary", "")
-        _diag = _d.get("diagnosis", "")
-        st.markdown('<div class="bf-label">Resumen ejecutivo (solo lectura)</div>',
-                    unsafe_allow_html=True)
-        with st.container(border=True, height=260):
-            st.markdown(_sum or "_(sin resumen)_")
-        st.markdown('<div class="bf-label">Diagnóstico (solo lectura)</div>',
-                    unsafe_allow_html=True)
-        with st.container(border=True, height=150):
-            st.markdown(_diag or "_(sin diagnóstico)_")
-
-        # Recomendaciones VIGENTES del activo (vienen del reporte anterior,
-        # traídas de una): edítalas aquí mismo; persisten con su fecha.
-        st.markdown("**Recomendaciones** (traídas del reporte anterior — "
-                    "edita, agrega o borra las que el cliente ya ejecutó):")
-        from datetime import date as _qdate
-
-        import pandas as _qpd
-
-        from core.briefing_recommendations import (
-            list_recommendations as _qlist,
-            save_recommendations as _qsave,
-        )
-        _q_ss = f"recs_cache_{_iid}"
-        if _q_ss not in st.session_state:
-            st.session_state[_q_ss] = _qlist(_iid)
-
-        def _q_to_date(s):
-            try:
-                return _qdate.fromisoformat(str(s)[:10])
-            except Exception:
-                return _qdate.today()
-
-        _qdf = _qpd.DataFrame(
-            [{"id": r["id"], "Recomendación": r["text"],
-              "Fecha de inicio": _q_to_date(r["started_at"])}
-             for r in st.session_state[_q_ss]],
-            columns=["id", "Recomendación", "Fecha de inicio"],
-        )
-        _qedited = st.data_editor(
-            _qdf, key=f"bfq_recs_{_iid}", num_rows="dynamic",
-            use_container_width=True, hide_index=True,
-            column_config={
-                "id": None,
-                "Recomendación": st.column_config.TextColumn(
-                    "Recomendación", width="large", required=True),
-                "Fecha de inicio": st.column_config.DateColumn(
-                    "Fecha de inicio", format="YYYY-MM-DD",
-                    default=_qdate.today()),
-            },
-        )
-        if st.button("💾 Guardar recomendaciones", key=f"bfq_recs_save_{_iid}"):
-            _qrows = [{"id": r.get("id") or "",
-                       "text": r.get("Recomendación") or "",
-                       "started_at": r.get("Fecha de inicio")}
-                      for _, r in _qedited.iterrows()]
-            if _qsave(_iid, _qrows):
-                st.session_state[_q_ss] = _qlist(_iid)
-                st.session_state.pop(f"bfq_recs_{_iid}", None)
-                st.session_state.pop(f"recs_editor_{_iid}", None)
-                st.success("Recomendaciones guardadas.")
-                st.rerun()
-            else:
-                st.error("No se pudieron guardar.")
-        _s1, _s2 = st.columns(2)
-        with _s1:
-            _elab = st.text_input("Elaborado por", value=_me_name,
-                                  key=f"bfq_elab_{_iid}")
-            _elab_rol = st.text_input("Cargo (elaboró)", value="",
-                                      key=f"bfq_elabr_{_iid}",
-                                      placeholder="opcional")
-        with _s2:
-            _aprb = st.text_input("Aprobado por", value="",
-                                  key=f"bfq_aprb_{_iid}",
-                                  placeholder="obligatorio para aprobar")
-            _aprb_rol = st.text_input("Cargo (aprobó)", value="",
-                                      key=f"bfq_aprbr_{_iid}",
-                                      placeholder="opcional")
-
-        _b2, _b3 = st.columns([1, 1.6])
-        with _b2:
-            if st.button("👁 Vista previa PDF", key=f"bfq_prev_{_iid}",
-                         use_container_width=True):
-                with st.spinner("Generando vista previa…"):
-                    from core.briefing_builder import build_asset_briefing
-                    _pdf, _m = build_asset_briefing(
-                        _iid, _d.get("period", "Semanal"), use_ai=False,
-                        sections_override={"summary": _sum, "diagnosis": _diag},
-                        meta_extra={
-                            "prepared_by": _elab or _me_name,
-                            "reviewed_by": _aprb,
-                            "prepared_label": "Elaborado por:",
-                            "reviewed_label": "Aprobado por:",
-                            "consecutive": _d.get("consecutive", ""),
-                        },
-                    )
-                st.session_state[f"bfq_pdf_{_iid}"] = _pdf
-        with _b3:
-            if st.button("✅ Aprobar y enviar al cliente", key=f"bfq_go_{_iid}",
-                         type="primary", use_container_width=True):
-                if not (_aprb or "").strip():
-                    st.error("Falta 'Aprobado por' — el briefing siempre debe "
-                             "llevar elaborado y aprobado.")
-                elif not (_elab or "").strip():
-                    st.error("Falta 'Elaborado por'.")
-                else:
-                    from core.briefing_queue import approve_and_send
-                    # Persistir la tabla de recomendaciones tal como está en
-                    # pantalla (lo ÚNICO editable en aprobación).
-                    try:
-                        _qsave(_iid, [{"id": r.get("id") or "",
-                                       "text": r.get("Recomendación") or "",
-                                       "started_at": r.get("Fecha de inicio")}
-                                      for _, r in _qedited.iterrows()])
-                        st.session_state[_q_ss] = _qlist(_iid)
-                    except Exception:
-                        pass
-                    with st.spinner("Aprobando, generando PDF final y "
-                                    "enviando al cliente…"):
-                        _res = approve_and_send(
-                            _iid, prepared_by=_elab, approved_by=_aprb,
-                            prepared_role=_elab_rol, approved_role=_aprb_rol,
-                            send=True,
-                        )
-                    if _res.get("ok"):
-                        _dv = _res.get("delivery") or {}
-                        if _dv.get("any_ok"):
-                            st.success(f"✅ {_tag} aprobado y ENVIADO al cliente.")
-                        else:
-                            st.warning(
-                                f"Aprobado, pero el envío falló o el activo no "
-                                f"tiene canales configurados: "
-                                f"{_dv.get('error', _dv)}. Descarga el PDF y "
-                                f"envíalo manualmente.")
-                        st.session_state[f"bfq_pdf_{_iid}"] = _res.get("pdf")
-                        from core.briefing_queue import list_pending
-                        st.session_state["bfq_cache"] = list_pending()
-                    else:
-                        st.error(f"No se pudo aprobar: {_res.get('error')}")
-
-        if st.session_state.get(f"bfq_pdf_{_iid}"):
-            st.download_button(
-                "⬇ Descargar PDF (última versión generada)",
-                data=st.session_state[f"bfq_pdf_{_iid}"],
-                file_name=f"Briefing_{_tag}_{_d.get('period','Semanal')}.pdf",
-                mime="application/pdf", key=f"bfq_dl_{_iid}",
-                use_container_width=True,
-            )
-
-st.markdown("")
-
-# -----------------------------------------------------------------
 # Panel de configuración
 # -----------------------------------------------------------------
 with st.container(border=True):
@@ -518,6 +320,232 @@ if _scope == "Un activo" and _target_iid:
             st.rerun()
         else:
             st.error(f"No se pudo crear el borrador: {_m.get('status','?')}")
+
+
+# -----------------------------------------------------------------
+# PENDIENTES DE APROBACIÓN — lista compacta (v3.31.399)
+# El módulo abre LIMPIO: arriba se crea el reporte nuevo; aquí abajo
+# solo se listan los pendientes. El detalle (recomendaciones editables
+# + firmas) se abre ÚNICAMENTE al presionar "Aprobar…" en una fila.
+# Render mínimo por rerun = página rápida.
+# -----------------------------------------------------------------
+st.markdown("")
+try:
+    from core.auth import get_current_user as _gcu
+    _me = (_gcu() or {})
+    _me_name = _me.get("full_name") or _me.get("username") or ""
+except Exception:
+    _me_name = ""
+
+if "bfq_cache" not in st.session_state:
+    from core.briefing_queue import list_pending
+    st.session_state["bfq_cache"] = list_pending()
+_pending = st.session_state["bfq_cache"]
+
+_qh1, _qh2 = st.columns([4, 1])
+with _qh1:
+    st.markdown(
+        f'<div class="bf-label">Pendientes de aprobación '
+        f'<span class="bf-accent">·</span> {len(_pending)} reporte(s)</div>',
+        unsafe_allow_html=True,
+    )
+with _qh2:
+    if st.button("🔄 Actualizar", key="bfq_refresh", use_container_width=True):
+        from core.briefing_queue import list_pending
+        st.session_state["bfq_cache"] = list_pending()
+        st.session_state.pop("bfq_open", None)
+        st.rerun()
+
+if not _pending:
+    st.caption("No hay reportes pendientes. El cron del lunes 6am los deja "
+               "aquí; también puedes crear uno arriba con "
+               "'Generar BORRADOR'.")
+
+_open_iid = st.session_state.get("bfq_open", "")
+
+for _iid, _tag, _d in _pending:
+    _r1, _r2 = st.columns([4, 1])
+    with _r1:
+        _st_txt = (_d.get("kpis") or {}).get("status", "—")
+        st.markdown(
+            f"""
+            <div class="bf-row" style="--bf-dot:#94a3b8;">
+                <span class="bf-dot"></span>
+                <div class="bf-row-main">
+                    <span class="bf-row-tag">{_tag}</span>
+                    &nbsp;<span class="bf-row-sev">· Reporte {_d.get('period','Semanal')}
+                    · {_st_txt}</span>
+                    <div class="bf-chips">
+                        <span class="bf-chip">{_d.get('consecutive','') or 'sin consecutivo'}</span>
+                        <span class="bf-chip">borrador {( _d.get('created_at','') or '')[:16]}</span>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    with _r2:
+        if _open_iid == _iid:
+            if st.button("✖ Cerrar", key=f"bfq_close_{_iid}",
+                         use_container_width=True):
+                st.session_state.pop("bfq_open", None)
+                st.rerun()
+        else:
+            if st.button("✅ Aprobar…", key=f"bfq_openbtn_{_iid}",
+                         use_container_width=True):
+                st.session_state["bfq_open"] = _iid
+                st.rerun()
+
+    if _open_iid != _iid:
+        st.markdown("")
+        continue
+
+    # ============= DETALLE — solo del reporte abierto =============
+    _sum = _d.get("summary", "")
+    _diag = _d.get("diagnosis", "")
+    with st.container(border=True):
+        with st.expander("👁 Resumen ejecutivo y diagnóstico (solo lectura)",
+                          expanded=False):
+            st.markdown(_sum or "_(sin resumen)_")
+            st.markdown("---")
+            st.markdown(_diag or "_(sin diagnóstico)_")
+
+        # Recomendaciones: lo ÚNICO editable en aprobación. Vienen del
+        # reporte anterior con su fecha. Carga perezosa (solo al abrir).
+        st.markdown("**Recomendaciones** (traídas del reporte anterior — "
+                    "edita, agrega o borra las que el cliente ya ejecutó):")
+        from datetime import date as _qdate
+
+        import pandas as _qpd
+
+        from core.briefing_recommendations import (
+            list_recommendations as _qlist,
+            save_recommendations as _qsave,
+        )
+        _q_ss = f"recs_cache_{_iid}"
+        if _q_ss not in st.session_state:
+            st.session_state[_q_ss] = _qlist(_iid)
+
+        def _q_to_date(s):
+            try:
+                return _qdate.fromisoformat(str(s)[:10])
+            except Exception:
+                return _qdate.today()
+
+        _qdf = _qpd.DataFrame(
+            [{"id": r["id"], "Recomendación": r["text"],
+              "Fecha de inicio": _q_to_date(r["started_at"])}
+             for r in st.session_state[_q_ss]],
+            columns=["id", "Recomendación", "Fecha de inicio"],
+        )
+        _qedited = st.data_editor(
+            _qdf, key=f"bfq_recs_{_iid}", num_rows="dynamic",
+            use_container_width=True, hide_index=True,
+            column_config={
+                "id": None,
+                "Recomendación": st.column_config.TextColumn(
+                    "Recomendación", width="large", required=True),
+                "Fecha de inicio": st.column_config.DateColumn(
+                    "Fecha de inicio", format="YYYY-MM-DD",
+                    default=_qdate.today()),
+            },
+        )
+
+        _s1, _s2 = st.columns(2)
+        with _s1:
+            _elab = st.text_input("Elaborado por", value=_me_name,
+                                  key=f"bfq_elab_{_iid}")
+            _elab_rol = st.text_input("Cargo (elaboró)", value="",
+                                      key=f"bfq_elabr_{_iid}",
+                                      placeholder="opcional")
+        with _s2:
+            _aprb = st.text_input("Aprobado por", value="",
+                                  key=f"bfq_aprb_{_iid}",
+                                  placeholder="obligatorio para aprobar")
+            _aprb_rol = st.text_input("Cargo (aprobó)", value="",
+                                      key=f"bfq_aprbr_{_iid}",
+                                      placeholder="opcional")
+
+        _b2, _b3 = st.columns([1, 1.6])
+        with _b2:
+            if st.button("👁 Vista previa PDF", key=f"bfq_prev_{_iid}",
+                         use_container_width=True):
+                # Persistir recomendaciones en pantalla antes de rasterizar
+                try:
+                    _qsave(_iid, [{"id": r.get("id") or "",
+                                   "text": r.get("Recomendación") or "",
+                                   "started_at": r.get("Fecha de inicio")}
+                                  for _, r in _qedited.iterrows()])
+                    st.session_state[_q_ss] = _qlist(_iid)
+                except Exception:
+                    pass
+                with st.spinner("Generando vista previa…"):
+                    from core.briefing_builder import build_asset_briefing
+                    _pdf, _m = build_asset_briefing(
+                        _iid, _d.get("period", "Semanal"), use_ai=False,
+                        sections_override={"summary": _sum, "diagnosis": _diag},
+                        meta_extra={
+                            "prepared_by": _elab or _me_name,
+                            "reviewed_by": _aprb,
+                            "prepared_label": "Elaborado por:",
+                            "reviewed_label": "Aprobado por:",
+                            "consecutive": _d.get("consecutive", ""),
+                        },
+                    )
+                st.session_state[f"bfq_pdf_{_iid}"] = _pdf
+        with _b3:
+            if st.button("✅ Aprobar y enviar al cliente", key=f"bfq_go_{_iid}",
+                         type="primary", use_container_width=True):
+                if not (_aprb or "").strip():
+                    st.error("Falta 'Aprobado por' — el reporte siempre debe "
+                             "llevar elaborado y aprobado.")
+                elif not (_elab or "").strip():
+                    st.error("Falta 'Elaborado por'.")
+                else:
+                    from core.briefing_queue import approve_and_send
+                    # Persistir la tabla de recomendaciones tal como está en
+                    # pantalla (lo ÚNICO editable en aprobación).
+                    try:
+                        _qsave(_iid, [{"id": r.get("id") or "",
+                                       "text": r.get("Recomendación") or "",
+                                       "started_at": r.get("Fecha de inicio")}
+                                      for _, r in _qedited.iterrows()])
+                        st.session_state[_q_ss] = _qlist(_iid)
+                    except Exception:
+                        pass
+                    with st.spinner("Aprobando, generando PDF final y "
+                                    "enviando al cliente…"):
+                        _res = approve_and_send(
+                            _iid, prepared_by=_elab, approved_by=_aprb,
+                            prepared_role=_elab_rol, approved_role=_aprb_rol,
+                            send=True,
+                        )
+                    if _res.get("ok"):
+                        _dv = _res.get("delivery") or {}
+                        if _dv.get("any_ok"):
+                            st.success(f"✅ {_tag} aprobado y ENVIADO al cliente.")
+                        else:
+                            st.warning(
+                                f"Aprobado, pero el envío falló o el activo no "
+                                f"tiene canales configurados: "
+                                f"{_dv.get('error', _dv)}. Descarga el PDF y "
+                                f"envíalo manualmente.")
+                        st.session_state[f"bfq_pdf_{_iid}"] = _res.get("pdf")
+                        st.session_state.pop("bfq_open", None)
+                        from core.briefing_queue import list_pending
+                        st.session_state["bfq_cache"] = list_pending()
+                    else:
+                        st.error(f"No se pudo aprobar: {_res.get('error')}")
+
+        if st.session_state.get(f"bfq_pdf_{_iid}"):
+            st.download_button(
+                "⬇ Descargar PDF (última versión generada)",
+                data=st.session_state[f"bfq_pdf_{_iid}"],
+                file_name=f"Reporte_{_tag}_{_d.get('period','Semanal')}.pdf",
+                mime="application/pdf", key=f"bfq_dl_{_iid}",
+                use_container_width=True,
+            )
+    st.markdown("")
 
 st.markdown(
     '<div class="bf-foot">💡&nbsp;Flujo: el <b>lunes 6am</b> el sistema deja el '
