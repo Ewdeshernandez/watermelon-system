@@ -211,18 +211,31 @@ def send_report_document(
                 "type": "body",
                 "parameters": [{"type": "text", "text": str(p)} for p in body_params],
             })
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": number,
-            "type": "template",
-            "template": {
-                "name": cfg["template_name"],
-                "language": {"code": cfg["template_lang"]},
-                "components": components,
-            },
-        }
-        res = _post_message(cfg, payload)
-        res["mode"] = "template"
+        # v3.31.410 — Resiliencia de idioma: la plantilla vive bajo UN código
+        # de idioma en Meta (la actual quedó con etiqueta "en" aunque el
+        # texto es español; Meta no permite duplicar el nombre en otro
+        # idioma). Si el envío falla con #132001 ("no existe en <lang>"),
+        # se reintenta automáticamente con el idioma alterno.
+        def _try_lang(lang: str) -> Dict[str, Any]:
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": number,
+                "type": "template",
+                "template": {
+                    "name": cfg["template_name"],
+                    "language": {"code": lang},
+                    "components": components,
+                },
+            }
+            r = _post_message(cfg, payload)
+            r["mode"] = "template"
+            r["template_lang_used"] = lang
+            return r
+
+        res = _try_lang(cfg["template_lang"])
+        if not res.get("ok") and "132001" in str(res.get("error", "")):
+            alt = "en" if cfg["template_lang"] != "en" else "es"
+            res = _try_lang(alt)
         return res
 
     # modo documento directo (ventana 24h)
