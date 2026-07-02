@@ -88,6 +88,8 @@ def generate_briefing_pdf(
     channels: Optional[List[Dict[str, Any]]] = None,
     sensor_map_png: Optional[bytes] = None,
     meta_extra: Optional[Dict[str, Any]] = None,
+    wf_history: Optional[List[Dict[str, Any]]] = None,
+    overall_history: Optional[Dict[str, Any]] = None,
 ) -> bytes:
     """Devuelve los bytes del PDF del briefing del activo, en formato pro."""
     from reportlab.lib import colors
@@ -140,10 +142,23 @@ def generate_briefing_pdf(
                              textColor=vcolor or colors.HexColor("#0f172a"), leading=15)
         return [Paragraph(label.upper(), lab), Paragraph(str(value), val)]
 
+    # SEMÁFORO del estado (el mismo de la app: verde CONDICIÓN ACEPTABLE /
+    # ámbar ATENCIÓN / rojo ACCIÓN REQUERIDA / gris Sin datos).
+    _status_txt = str(kpis.get("status", "—"))
+    _sl = _status_txt.lower()
+    if "crít" in _sl or "critic" in _sl or "acción" in _sl or "danger" in _sl:
+        _sem_color, _sem_label = _RED, "ACCIÓN REQUERIDA"
+    elif "atenc" in _sl or "alarma" in _sl or "alert" in _sl:
+        _sem_color, _sem_label = _AMBER, "ATENCIÓN"
+    elif "normal" in _sl or "aceptable" in _sl:
+        _sem_color, _sem_label = _GREEN, "CONDICIÓN ACEPTABLE"
+    else:
+        _sem_color, _sem_label = "#94a3b8", _status_txt.upper() or "SIN DATOS"
+
     body.append(Paragraph("RESUMEN EJECUTIVO", styles["WMTOC1"]))
     kpi_tbl = Table([[
         _kpi("Salud", health.get("score", "—"), hcolor),
-        _kpi("Estado", kpis.get("status", "—")),
+        _kpi("Estado", f"● {_sem_label}", colors.HexColor(_sem_color)),
         _kpi("Velocidad", kpis.get("speed", "—")),
         _kpi("Alarmas", kpis.get("alarms", 0),
              colors.HexColor(_RED) if kpis.get("alarms", 0) else colors.HexColor(_GREEN)),
@@ -281,6 +296,93 @@ def generate_briefing_pdf(
             "Overall según norma del punto · Los órdenes 0.5X/1X/2X se referencian "
             "al keyphasor; en puntos del gas generator (CRF, ~10200 cpm) no aplican "
             "y se reporta solo el Overall.", st_note_center))
+
+    # ---- Histórico Overall (últimos 10 días, pico diario, con semáforo) ----
+    if overall_history and overall_history.get("rows"):
+        _dates = overall_history["dates"]
+        _hd7 = ParagraphStyle("hd7", fontName=BOLD, fontSize=6.1,
+                              textColor=colors.HexColor("#1d4ed8"), leading=8)
+        _c7 = ParagraphStyle("c7", fontName="Courier", fontSize=6.6,
+                             textColor=colors.HexColor("#111827"), leading=8.5)
+        _cl7 = ParagraphStyle("cl7", fontName=REGULAR, fontSize=6.6,
+                              textColor=colors.HexColor("#111827"), leading=8.5)
+        _head = [Paragraph("PUNTO", _hd7)] + [Paragraph(d, _hd7) for d in _dates]
+        _data = [_head]
+        _cell_styles = []
+        for ri, row in enumerate(overall_history["rows"], start=1):
+            cells = [Paragraph(f"{row['label']} ({row.get('unit','')})", _cl7)]
+            for ci, d in enumerate(_dates, start=1):
+                v = (row.get("values") or {}).get(d)
+                cells.append(Paragraph(f"{v:.2f}" if v is not None else "—", _c7))
+                if v is not None:
+                    if row.get("danger", 0) > 0 and v >= row["danger"]:
+                        bg = _RED_BG
+                    elif row.get("alarm", 0) > 0 and v >= row["alarm"]:
+                        bg = _AMBER_BG
+                    else:
+                        bg = _GREEN_BG
+                    _cell_styles.append(
+                        ("BACKGROUND", (ci, ri), (ci, ri), colors.HexColor(bg)))
+            _data.append(cells)
+        _wdate = min(1.42, 14.0 / max(len(_dates), 1))
+        _htbl = Table(_data, colWidths=[2.8 * cm] + [_wdate * cm] * len(_dates),
+                      repeatRows=1)
+        _htbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor(_LINE)),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+        ] + _cell_styles))
+        body.append(KeepTogether([
+            Paragraph("Histórico Overall — pico diario, últimos 10 días",
+                      ParagraphStyle("WMTOC2", parent=styles["WMTOC2"],
+                                     alignment=TA_CENTER)),
+            _htbl,
+            Paragraph("Semáforo por celda: verde = condición aceptable · "
+                      "ámbar = sobre Alarma · rojo = sobre Danger.",
+                      ParagraphStyle("bfNoteC2", parent=st_cap,
+                                     alignment=TA_CENTER)),
+        ]))
+
+    # ---- Métricas de forma de onda (últimos snapshots) ----
+    if wf_history:
+        _hd8 = ParagraphStyle("hd8", fontName=BOLD, fontSize=6.6,
+                              textColor=colors.HexColor("#1d4ed8"), leading=8.5)
+        _c8 = ParagraphStyle("c8", fontName="Courier", fontSize=7,
+                             textColor=colors.HexColor("#111827"), leading=9)
+        _cl8 = ParagraphStyle("cl8", fontName=REGULAR, fontSize=7,
+                              textColor=colors.HexColor("#111827"), leading=9)
+        _wf_head = ["FECHA", "CANAL", "PK", "PK-PK", "RMS", "UNIDAD",
+                    "FACTOR CRESTA"]
+        _wdata = [[Paragraph(h, _hd8) for h in _wf_head]]
+        for r in wf_history[:80]:
+            _wdata.append([
+                Paragraph(r.get("fecha", "—"), _c8),
+                Paragraph(str(r.get("canal", "—")), _cl8),
+                Paragraph(f"{r.get('pk', 0):.3f}", _c8),
+                Paragraph(f"{r.get('pkpk', 0):.3f}", _c8),
+                Paragraph(f"{r.get('rms', 0):.3f}", _c8),
+                Paragraph(str(r.get("unit", "")), _cl8),
+                Paragraph(f"{r.get('crest', 0):.2f}", _c8),
+            ])
+        _wtbl = Table(_wdata, colWidths=[3.0 * cm, 3.2 * cm, 1.9 * cm, 1.9 * cm,
+                                         1.9 * cm, 2.0 * cm, 2.7 * cm],
+                      repeatRows=1)
+        _wtbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
+            ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor(_LINE)),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        body.append(Spacer(1, 8))
+        body.append(KeepTogether([
+            Paragraph("Métricas de forma de onda — últimos registros",
+                      ParagraphStyle("WMTOC2", parent=styles["WMTOC2"],
+                                     alignment=TA_CENTER)),
+            _wtbl,
+        ]))
 
     # ---- Figuras ----
     # Ciclo 23.170 — Tendencias SEPARADAS por sección (CRF-TRF, Generador, ...)

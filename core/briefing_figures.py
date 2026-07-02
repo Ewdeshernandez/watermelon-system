@@ -1047,6 +1047,64 @@ def _trend_analysis(section: str, series: List[Dict[str, Any]],
         return ""
 
 
+def waveform_history_table(instance_id: str,
+                           max_snaps: int = 10) -> List[Dict[str, Any]]:
+    """Métricas históricas de forma de onda (v3.31.408): una fila por
+    canal × snapshot con PK / PK-PK / RMS / unidad / factor de cresta,
+    de los últimos `max_snaps` snapshots (el LRU guarda máx 10).
+    Para la tabla 'Métricas de forma de onda' del reporte."""
+    import re
+
+    rows: List[Dict[str, Any]] = []
+    try:
+        import numpy as np
+
+        from core import history_storage as hs
+        from core.waveform_history import load_waveform_snapshot
+        snaps = (hs.list_snapshots(instance_id, "waveform") or [])[:max_snaps]
+        for smeta in snaps:
+            sid = smeta.get("snapshot_id", "")
+            m = re.search(r"(\d{8})_(\d{6})", sid)
+            fecha = ""
+            if m:
+                d, t = m.group(1), m.group(2)
+                fecha = f"{d[6:8]}/{d[4:6]}/{d[:4]} {t[:2]}:{t[2:4]}"
+            try:
+                payload = load_waveform_snapshot(instance_id, sid)
+            except Exception:
+                payload = None
+            if not payload:
+                continue
+            for s in payload.get("sensors", []) or []:
+                vals = s.get("values")
+                if not vals:
+                    continue
+                try:
+                    arr = np.asarray(vals, float)
+                    arr = arr[np.isfinite(arr)]
+                    if arr.size < 8:
+                        continue
+                    ac = arr - float(np.mean(arr))
+                    rms = float(np.sqrt(np.mean(ac ** 2)))
+                    pk = float(np.max(np.abs(ac)))
+                    rows.append({
+                        "fecha": fecha,
+                        "canal": s.get("sensor_label", "—"),
+                        "pk": pk,
+                        "pkpk": float(np.max(ac) - np.min(ac)),
+                        "rms": rms,
+                        "unit": s.get("amp_unit", "") or s.get("unit", ""),
+                        "crest": (pk / rms) if rms > 1e-12 else 0.0,
+                    })
+                except Exception:
+                    continue
+        rows.sort(key=lambda r: (r["canal"], r["fecha"]), reverse=False)
+        rows.sort(key=lambda r: r["canal"])
+    except Exception as e:
+        log.warning("waveform_history_table(%s) falló: %s", instance_id, e)
+    return rows
+
+
 def figures_available(instance_id: str) -> Dict[str, Any]:
     """Disponibilidad de figuras SIN renderizar nada (v3.31.400).
 

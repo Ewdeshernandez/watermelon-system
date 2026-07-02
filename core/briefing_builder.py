@@ -524,6 +524,57 @@ def _strip_ai_reco_block(md: str) -> str:
     return "\n".join(out).strip()
 
 
+def _overall_history_matrix(instance_id: str,
+                            channels: List[Dict[str, Any]],
+                            days: int = 10) -> Dict[str, Any]:
+    """Histórico del OVERALL por punto (v3.31.408): pico diario (peak-hold)
+    de los últimos `days` días vía RPC trend_bucketed. Para la matriz
+    'Histórico Overall' del reporte, con semáforo por celda vs alarm/danger.
+
+    Devuelve {"dates": ["24/06", ...], "rows": [{"label","unit","alarm",
+    "danger","values": {"24/06": 1.23, ...}}]} o {} si no hay datos."""
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        from core.live_readings import history_bucketed, latest_for_instance
+        latest = latest_for_instance(instance_id) or []
+        var_by_label = {r.get("sensor_label"): r.get("variable")
+                        for r in latest if r.get("metric") == "Direct"}
+        from_iso = (datetime.now(timezone.utc)
+                    - timedelta(days=days)).isoformat()
+        all_dates: set = set()
+        rows: List[Dict[str, Any]] = []
+        for c in channels or []:
+            lbl = c.get("sensor_label")
+            var = var_by_label.get(lbl)
+            if not lbl or not var:
+                continue
+            buckets = history_bucketed(instance_id, var, "Direct",
+                                       from_iso, "1 day") or []
+            vals: Dict[str, float] = {}
+            for b in buckets:
+                v = b.get("max_val", b.get("avg_val"))
+                d = str(b.get("bucket", ""))[:10]
+                if v is None or not d:
+                    continue
+                key = f"{d[8:10]}/{d[5:7]}"
+                vals[key] = float(v)
+                all_dates.add(d)
+            if vals:
+                rows.append({"label": c.get("plane_label") or lbl,
+                             "unit": c.get("unit", ""),
+                             "alarm": float(c.get("alarm", 0) or 0),
+                             "danger": float(c.get("danger", 0) or 0),
+                             "values": vals})
+        if not rows:
+            return {}
+        dates = [f"{d[8:10]}/{d[5:7]}" for d in sorted(all_dates)][-days:]
+        return {"dates": dates, "rows": rows}
+    except Exception as e:
+        log.warning("_overall_history_matrix(%s) falló: %s", instance_id, e)
+        return {}
+
+
 # ---------------------------------------------------------------------------
 # 3) Builder por activo
 # ---------------------------------------------------------------------------
@@ -648,6 +699,16 @@ def build_asset_briefing(
 
     sensor_map_png = _render_sensor_map(instance_obj, data["channels"])
 
+    # Tablas históricas (v3.31.408): métricas de forma de onda (últimos 10
+    # snapshots) + matriz de overall diario (últimos 10 días, semáforo).
+    try:
+        from core.briefing_figures import waveform_history_table
+        wf_history = waveform_history_table(instance_id)
+    except Exception as e:
+        log.warning("wf_history falló: %s", e)
+        wf_history = []
+    overall_history = _overall_history_matrix(instance_id, data["channels"])
+
     # meta de portada: train SIN cliente (el cliente va como línea propia del
     # bloque del activo) + firmas/consecutivo que pase la UI.
     train_bare = " ".join(p for p in [
@@ -701,6 +762,8 @@ def build_asset_briefing(
             channels=data["channels"],
             sensor_map_png=sensor_map_png,
             meta_extra=pdf_meta,
+            wf_history=wf_history,
+            overall_history=overall_history,
         )
     except Exception as e:
         log.error("briefing PDF falló para %s: %s", instance_id, e)
