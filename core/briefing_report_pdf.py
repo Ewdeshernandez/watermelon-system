@@ -183,10 +183,22 @@ def generate_briefing_pdf(
         body.extend(render_markdown_flowables(diagnosis, styles))
 
     # ---- Recomendaciones ----
+    # Acepta dos formatos:
+    #   • str  — borrador automático (legacy)
+    #   • dict — recomendación gestionada por el especialista:
+    #            {"text": ..., "started_at": "YYYY-MM-DD"}; la fecha de
+    #            inicio se muestra al final en gris opaco.
     if recommendations:
         body.append(Paragraph("RECOMENDACIONES", styles["WMTOC1"]))
         for i, rec in enumerate(recommendations, start=1):
-            body.append(Paragraph(f"{i}. {paragraph_safe(rec)}", st_body))
+            if isinstance(rec, dict):
+                txt = paragraph_safe(rec.get("text", ""))
+                fecha = _fecha_es(rec.get("started_at"))
+                line = (f"{i}. {txt} "
+                        f"<font color='#9ca3af' size='8.5'>({fecha})</font>")
+            else:
+                line = f"{i}. {paragraph_safe(rec)}"
+            body.append(Paragraph(line, st_body))
 
     # ---- Tabular List (espejo de la vista de la app) ----
     if channels:

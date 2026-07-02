@@ -532,6 +532,19 @@ def build_asset_briefing(
         sections = _ai_enhance(sections, tag, period_label, data,
                                instance_obj=instance_obj, figures=figures)
 
+    # Recomendaciones GESTIONADAS por el especialista (persisten entre
+    # reportes, con fecha de inicio). Si existen, MANDAN sobre el borrador
+    # automático: el sistema no inventa recomendaciones cuando el analista
+    # ya definió las suyas. Si no hay ninguna, cae al borrador determinístico
+    # (el cron nunca emite la sección vacía).
+    try:
+        from core.briefing_recommendations import list_recommendations
+        _stored = list_recommendations(instance_id)
+    except Exception as e:
+        log.warning("briefing recomendaciones falló (se usa borrador): %s", e)
+        _stored = []
+    recommendations = (_stored if _stored else sections["recommendations"])
+
     sensor_map_png = _render_sensor_map(instance_obj, data["channels"])
 
     # meta de portada: train SIN cliente (el cliente va como línea propia del
@@ -565,7 +578,7 @@ def build_asset_briefing(
             figures=figures,
             summary=sections["summary"],
             diagnosis=sections["diagnosis"],
-            recommendations=sections["recommendations"],
+            recommendations=recommendations,
             channels=data["channels"],
             sensor_map_png=sensor_map_png,
             meta_extra=pdf_meta,

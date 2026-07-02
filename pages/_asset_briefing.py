@@ -211,6 +211,85 @@ with st.container(border=True):
 st.markdown("")
 
 # -----------------------------------------------------------------
+# Recomendaciones del activo — gestionadas por el especialista
+# -----------------------------------------------------------------
+# Persisten entre reportes (captured_parameters de la instancia): el
+# briefing siguiente arranca con las mismas y solo se toca lo que cambió.
+# Cada una lleva su fecha de inicio (el PDF la muestra en gris opaco).
+# Cuando el cliente ejecuta una recomendación, se borra la fila. Si no
+# hay ninguna, el briefing cae al borrador automático.
+if _scope == "Un activo" and _target_iid:
+    from datetime import date as _date
+
+    import pandas as pd
+
+    from core.briefing_recommendations import (
+        list_recommendations, save_recommendations,
+    )
+
+    with st.container(border=True):
+        st.markdown(
+            '<div class="bf-label">Recomendaciones vigentes '
+            '<span class="bf-accent">·</span> persisten entre reportes</div>',
+            unsafe_allow_html=True,
+        )
+        _recs = list_recommendations(_target_iid)
+
+        def _to_date(s):
+            try:
+                return _date.fromisoformat(str(s)[:10])
+            except Exception:
+                return _date.today()
+
+        _df = pd.DataFrame(
+            [{"id": r["id"], "Recomendación": r["text"],
+              "Fecha de inicio": _to_date(r["started_at"])} for r in _recs],
+            columns=["id", "Recomendación", "Fecha de inicio"],
+        )
+        _edited = st.data_editor(
+            _df,
+            key=f"recs_editor_{_target_iid}",
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "id": None,  # oculto — identidad interna de la fila
+                "Recomendación": st.column_config.TextColumn(
+                    "Recomendación", width="large", required=True,
+                    help="Texto técnico tal como debe salir en el PDF."),
+                "Fecha de inicio": st.column_config.DateColumn(
+                    "Fecha de inicio", format="YYYY-MM-DD",
+                    default=_date.today(),
+                    help="Cuándo se emitió por primera vez. El PDF la "
+                         "muestra en gris al final de la recomendación."),
+            },
+        )
+        _c1, _c2 = st.columns([1, 2.4])
+        with _c1:
+            if st.button("💾  Guardar", key=f"recs_save_{_target_iid}",
+                         use_container_width=True):
+                _rows = []
+                for _, _row in _edited.iterrows():
+                    _rows.append({
+                        "id": _row.get("id") or "",
+                        "text": _row.get("Recomendación") or "",
+                        "started_at": _row.get("Fecha de inicio"),
+                    })
+                if save_recommendations(_target_iid, _rows):
+                    st.success("Recomendaciones guardadas.")
+                    st.rerun()
+                else:
+                    st.error("No se pudieron guardar. Reintenta.")
+        with _c2:
+            st.caption(
+                "➕ agrega filas abajo · 🗑 selecciona la fila y bórrala cuando "
+                "el cliente la ejecute · sin filas, el briefing usa el "
+                "borrador automático."
+            )
+
+st.markdown("")
+
+# -----------------------------------------------------------------
 # Generación
 # -----------------------------------------------------------------
 if st.button("📄  Generar briefing", type="primary", use_container_width=True):
