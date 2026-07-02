@@ -223,27 +223,26 @@ def approve_and_send(instance_id: str, *,
 # ---------------------------------------------------------------------------
 SCHED_KEY = "briefing_schedule"
 
+_DEFAULT_SCHED = {"enabled": False, "days": [0], "hour": 5, "period": "Semanal"}
 
-def get_schedule() -> Dict[str, Any]:
-    """Config de programación (del primer activo que la tenga)."""
+
+def get_schedule(instance_id: str) -> Dict[str, Any]:
+    """Config de programación DEL ACTIVO (v3.31.402 — por activo, ya no
+    global: cada equipo tiene su día/hora/periodo)."""
     try:
-        from core.instance_state import list_instances, get_instance_parameters
-        for r in list_instances() or []:
-            iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
-            if not iid:
-                continue
-            cfg = get_instance_parameters(iid).get(SCHED_KEY)
-            if isinstance(cfg, dict):
-                return dict(cfg)
+        from core.instance_state import get_instance_parameters
+        cfg = get_instance_parameters(instance_id).get(SCHED_KEY)
+        if isinstance(cfg, dict):
+            return dict(cfg)
     except Exception as e:
-        log.warning("get_schedule falló: %s", e)
-    return {"enabled": False, "days": [0], "hour": 5, "period": "Semanal"}
+        log.warning("get_schedule(%s) falló: %s", instance_id, e)
+    return dict(_DEFAULT_SCHED)
 
 
-def save_schedule(cfg: Dict[str, Any]) -> bool:
-    """Escribe la config en TODOS los activos (fuente común para el cron)."""
+def save_schedule(instance_id: str, cfg: Dict[str, Any]) -> bool:
+    """Guarda la programación del activo."""
     try:
-        from core.instance_state import list_instances, update_instance_parameter
+        from core.instance_state import update_instance_parameter
         clean = {
             "enabled": bool(cfg.get("enabled")),
             "days": sorted({int(d) for d in (cfg.get("days") or [0])
@@ -252,15 +251,28 @@ def save_schedule(cfg: Dict[str, Any]) -> bool:
             "period": ("Mensual" if str(cfg.get("period", "")).lower().startswith("mensual")
                        else "Semanal"),
         }
-        ok_any = False
+        return update_instance_parameter(instance_id, SCHED_KEY, clean)
+    except Exception as e:
+        log.warning("save_schedule(%s) falló: %s", instance_id, e)
+        return False
+
+
+def list_schedules() -> List[Tuple[str, str, Dict[str, Any]]]:
+    """[(instance_id, tag, cfg)] de todos los activos (para el cron)."""
+    out: List[Tuple[str, str, Dict[str, Any]]] = []
+    try:
+        from core.instance_state import list_instances, get_instance_parameters
         for r in list_instances() or []:
             iid = r.get("instance_id") if isinstance(r, dict) else getattr(r, "instance_id", "")
-            if iid and update_instance_parameter(iid, SCHED_KEY, clean):
-                ok_any = True
-        return ok_any
+            tag = (r.get("tag") if isinstance(r, dict) else getattr(r, "tag", "")) or iid
+            if not iid:
+                continue
+            cfg = get_instance_parameters(iid).get(SCHED_KEY)
+            if isinstance(cfg, dict):
+                out.append((iid, tag, dict(cfg)))
     except Exception as e:
-        log.warning("save_schedule falló: %s", e)
-        return False
+        log.warning("list_schedules falló: %s", e)
+    return out
 
 
 def schedule_due(cfg: Dict[str, Any], now: Optional[datetime] = None) -> bool:
@@ -282,5 +294,5 @@ def schedule_due(cfg: Dict[str, Any], now: Optional[datetime] = None) -> bool:
 
 __all__ = ["get_draft", "save_draft", "update_draft", "clear_draft",
            "new_pending_draft", "list_pending", "approve_and_send",
-           "get_schedule", "save_schedule", "schedule_due",
+           "get_schedule", "save_schedule", "list_schedules", "schedule_due",
            "STATUS_PENDING", "STATUS_APPROVED", "PARAM_KEY", "SCHED_KEY"]

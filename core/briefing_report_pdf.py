@@ -95,7 +95,8 @@ def generate_briefing_pdf(
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import cm
     from reportlab.platypus import (
-        HRFlowable, Image, KeepTogether, Paragraph, Spacer, Table, TableStyle,
+        HRFlowable, Image, KeepTogether, PageBreak, Paragraph, Spacer,
+        Table, TableStyle,
     )
 
     from core.report_pdf_shell import (
@@ -194,7 +195,10 @@ def generate_briefing_pdf(
     #            {"text": ..., "started_at": "YYYY-MM-DD"}; la fecha de
     #            inicio se muestra al final en gris opaco.
     if recommendations:
-        body.append(Paragraph("RECOMENDACIONES", styles["WMTOC1"]))
+        # Recomendaciones JUNTAS en una sola página (título incluido — sin
+        # títulos huérfanos). Si exceden una página completa, KeepTogether
+        # degrada y permite el corte.
+        _rec_block: List[Any] = [Paragraph("RECOMENDACIONES", styles["WMTOC1"])]
         for i, rec in enumerate(recommendations, start=1):
             if isinstance(rec, dict):
                 txt = paragraph_safe(rec.get("text", ""))
@@ -203,10 +207,14 @@ def generate_briefing_pdf(
                         f"<font color='#9ca3af' size='8.5'>({fecha})</font>")
             else:
                 line = f"{i}. {paragraph_safe(rec)}"
-            body.append(Paragraph(line, st_body))
+            _rec_block.append(Paragraph(line, st_body))
+        body.append(KeepTogether(_rec_block))
 
     # ---- Tabular List (espejo de la vista de la app) ----
+    # Arranca en PÁGINA NUEVA: las recomendaciones quedan solas en la suya
+    # y el título nunca queda huérfano al pie de página.
     if channels:
+        body.append(PageBreak())
         body.append(Paragraph("TABULAR LIST — CANALES (API 670 / ISO 20816-3)", styles["WMTOC1"]))
         st_cell = ParagraphStyle("c", fontName=REGULAR, fontSize=7,
                                  textColor=colors.HexColor("#111827"), leading=9)
@@ -241,7 +249,8 @@ def generate_briefing_pdf(
                 Paragraph(c.get("machine", tag), st_cell),
                 Paragraph(c.get("plane_label") or c.get("sensor_label", "—"), st_cell),
                 Paragraph(_rpm_txt(c.get("rpm")), st_cn),
-                Paragraph(c.get("family", "—"), st_cell),
+                Paragraph({"Acceleration": "Accel."}.get(
+                    c.get("family", "—"), c.get("family", "—")), st_cell),
                 Paragraph(_num(c.get("alarm")), st_cn),
                 Paragraph(_num(c.get("danger")), st_cn),
                 Paragraph(c.get("criterion", "ISO 20816-3"), st_cell),
@@ -266,10 +275,12 @@ def generate_briefing_pdf(
             ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
         ] + row_styles))
         body.append(ctbl)
+        st_note_center = ParagraphStyle("bfNoteC", parent=st_cap,
+                                        alignment=TA_CENTER)
         body.append(Paragraph(
             "Overall según norma del punto · Los órdenes 0.5X/1X/2X se referencian "
             "al keyphasor; en puntos del gas generator (CRF, ~10200 cpm) no aplican "
-            "y se reporta solo el Overall.", st_cap))
+            "y se reporta solo el Overall.", st_note_center))
 
     # ---- Figuras ----
     # Ciclo 23.170 — Tendencias SEPARADAS por sección (CRF-TRF, Generador, ...)
@@ -280,7 +291,10 @@ def generate_briefing_pdf(
         _trends = [{"section": "", "unit": "", "descr": "", "png": figures["trend"]}]
     _others = [k for k in ("spectrum", "waveform", "orbit") if (figures or {}).get(k)]
     if _trends or _others:
-        body.append(Paragraph("FIGURAS Y ANÁLISIS", styles["WMTOC1"]))
+        # El título de sección viaja DENTRO del bloque de la primera figura
+        # (KeepTogether) para que nunca quede huérfano al pie de una página.
+        _section_head: List[Any] = [Paragraph("FIGURAS Y ANÁLISIS",
+                                              styles["WMTOC1"])]
         _fecha = _fecha_es(meta.get("report_date"))
         _equipo = f"Unidad {tag}"
         _n = 0
@@ -295,7 +309,7 @@ def generate_briefing_pdf(
                                      alignment=TA_CENTER)
 
         def _add_fig(png, head, big_h, analysis: str = ""):
-            nonlocal _n
+            nonlocal _n, _section_head
             try:
                 img = Image(BytesIO(png), width=17.0 * cm, height=big_h,
                             kind="proportional")
@@ -309,12 +323,14 @@ def generate_briefing_pdf(
                 # página (para leer la figura y su interpretación sin saltar
                 # de hoja). Si el bloque no cabe, KeepTogether lo pasa entero
                 # a la página siguiente; solo si excede una página completa
-                # se permite el corte.
-                _block = [
+                # se permite el corte. El encabezado de sección va dentro del
+                # PRIMER bloque para no dejarlo huérfano.
+                _block = list(_section_head) + [
                     Paragraph(head, st_fig_head),
                     img,
                     Paragraph(_cap, st_cap_fig),
                 ]
+                _section_head = []
                 if analysis:
                     _block.append(Paragraph(paragraph_safe(analysis), st_analysis))
                 body.append(KeepTogether(_block))

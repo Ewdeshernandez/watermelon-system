@@ -626,49 +626,53 @@ def build_trend_figures(instance_id: str, instance_obj: Any = None,
         out: List[Dict[str, Any]] = []
         for sec in sorted(groups, key=_sec_sort):
             labels_all = groups[sec]
-            # Unidad dominante de la sección → figura consistente (eje + límites
-            # correctos). Evita mezclar p. ej. aceleración (g) con velocidad (in/s).
-            _us = [_label_unit(l) for l in labels_all if _label_unit(l)]
-            _dom_unit = max(set(_us), key=_us.count) if _us else ""
-            labels = [l for l in labels_all if not _dom_unit or _label_unit(l) == _dom_unit]
-            labels = sorted(
-                labels,
-                key=lambda k: -len([h for h in spark[k] if h.get("value") is not None]),
-            )[:6]  # máx 6 canales por figura para no saturar
-            series, alarms, dangers, units = [], [], [], []
-            for i, lbl in enumerate(labels):
-                hist = spark.get(lbl, [])
-                xs = [h.get("captured_at") for h in hist if h.get("value") is not None]
-                ys = [h.get("value") for h in hist if h.get("value") is not None]
-                if len(ys) < 2:
-                    continue
-                series.append({"label": lbl, "x": xs, "y": ys,
-                               "color": _PALETTE[i % len(_PALETTE)]})
-                s = lookup.get(lbl) or {}
-                try:
-                    if float(s.get("alarm", 0) or 0) > 0:
-                        alarms.append(float(s["alarm"]))
-                    if float(s.get("danger", 0) or 0) > 0:
-                        dangers.append(float(s["danger"]))
-                except Exception:
-                    pass
-                u = s.get("unit") or (hist[0].get("unit") if hist else "") or ""
-                if u:
-                    units.append(u)
-            if not series:
-                continue
-            unit = max(set(units), key=units.count) if units else "overall"
-            _alarm = max(alarms) if alarms else 0.0
-            png = render_trend_png(
-                series,
-                alarm=_alarm,
-                danger=(max(dangers) if dangers else 0.0),
-                y_title=unit,
-            )
-            if png:
-                out.append({"section": sec, "unit": unit,
-                            "descr": _unit_descr(unit), "png": png,
-                            "analysis": _trend_analysis(sec, series, _alarm, unit)})
+            # v3.31.402 — UNA figura POR UNIDAD dentro de la sección (antes
+            # solo la unidad dominante → la tendencia de ACELERACIÓN de
+            # CRF-TRF quedaba fuera cuando velocidad tenía más canales).
+            # Las unidades sin datos simplemente no generan figura.
+            by_unit: Dict[str, List[str]] = {}
+            for l in labels_all:
+                by_unit.setdefault(_label_unit(l) or "", []).append(l)
+            for unit_key in sorted(by_unit, key=lambda u: -len(by_unit[u])):
+                labels = sorted(
+                    by_unit[unit_key],
+                    key=lambda k: -len([h for h in spark[k]
+                                        if h.get("value") is not None]),
+                )[:6]  # máx 6 canales por figura para no saturar
+                series, alarms, dangers, units = [], [], [], []
+                for i, lbl in enumerate(labels):
+                    hist = spark.get(lbl, [])
+                    xs = [h.get("captured_at") for h in hist if h.get("value") is not None]
+                    ys = [h.get("value") for h in hist if h.get("value") is not None]
+                    if len(ys) < 2:
+                        continue
+                    series.append({"label": lbl, "x": xs, "y": ys,
+                                   "color": _PALETTE[i % len(_PALETTE)]})
+                    s = lookup.get(lbl) or {}
+                    try:
+                        if float(s.get("alarm", 0) or 0) > 0:
+                            alarms.append(float(s["alarm"]))
+                        if float(s.get("danger", 0) or 0) > 0:
+                            dangers.append(float(s["danger"]))
+                    except Exception:
+                        pass
+                    u = s.get("unit") or (hist[0].get("unit") if hist else "") or ""
+                    if u:
+                        units.append(u)
+                if not series:
+                    continue  # unidad sin datos → se omite
+                unit = max(set(units), key=units.count) if units else (unit_key or "overall")
+                _alarm = max(alarms) if alarms else 0.0
+                png = render_trend_png(
+                    series,
+                    alarm=_alarm,
+                    danger=(max(dangers) if dangers else 0.0),
+                    y_title=unit,
+                )
+                if png:
+                    out.append({"section": sec, "unit": unit,
+                                "descr": _unit_descr(unit), "png": png,
+                                "analysis": _trend_analysis(sec, series, _alarm, unit)})
         return out
     except Exception as e:
         log.warning("build_trend_figures: %s", e)

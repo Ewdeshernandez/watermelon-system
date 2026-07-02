@@ -71,25 +71,29 @@ def main() -> int:
 
     from core.briefing_builder import build_asset_draft, build_all_drafts
 
-    # Modo programado desde la UI (v3.31.401): la config vive en Supabase
-    # (captured_parameters). Si no es la hora, salir silencioso — este cron
-    # corre cada hora en punto.
+    # Modo programado desde la UI (v3.31.402 — POR ACTIVO): cada equipo tiene
+    # su propio día/hora/periodo en Supabase. Este cron corre cada hora en
+    # punto y genera SOLO los borradores de los activos cuya programación
+    # coincide con ahora.
     if args.check_schedule:
-        from core.briefing_queue import get_schedule, schedule_due
-        cfg = get_schedule()
-        if not schedule_due(cfg):
-            log.info("Programación no coincide ahora (cfg=%s) — nada que hacer.",
-                     cfg)
+        from core.briefing_queue import list_schedules, schedule_due
+        due = [(iid, tag, cfg) for iid, tag, cfg in list_schedules()
+               if schedule_due(cfg)]
+        if not due:
+            log.info("Ninguna programación coincide ahora — nada que hacer.")
             return 0
-        args.period = cfg.get("period", "Semanal")
-        log.info("Programación COINCIDE (cfg=%s) → generando borradores.", cfg)
-
-    log.info("Generando BORRADORES de briefing (%s) para la cola de revisión…",
-             args.period)
-    if args.instance:
-        results = [build_asset_draft(args.instance, args.period)]
+        results = []
+        for iid, tag, cfg in due:
+            log.info("Programación COINCIDE para %s (%s) → borrador %s.",
+                     tag, iid, cfg.get("period", "Semanal"))
+            results.append(build_asset_draft(iid, cfg.get("period", "Semanal")))
     else:
-        results = build_all_drafts(args.period)
+        log.info("Generando BORRADORES de briefing (%s) para la cola de "
+                 "revisión…", args.period)
+        if args.instance:
+            results = [build_asset_draft(args.instance, args.period)]
+        else:
+            results = build_all_drafts(args.period)
 
     ok = [m for m in results if m.get("ok")]
     log.info("Borradores en cola: %d de %d activos.", len(ok), len(results))
