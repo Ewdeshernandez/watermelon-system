@@ -262,7 +262,10 @@ def generate_briefing_pdf(
             fg, bg = _sev_colors(c.get("status", ""))
             data.append([
                 Paragraph(c.get("machine", tag), st_cell),
-                Paragraph(c.get("plane_label") or c.get("sensor_label", "—"), st_cell),
+                # plane_label "—" es truthy → caer explícitamente al sensor_label
+                Paragraph((c.get("plane_label")
+                           if c.get("plane_label") not in (None, "", "—")
+                           else c.get("sensor_label", "—")), st_cell),
                 Paragraph(_rpm_txt(c.get("rpm")), st_cn),
                 Paragraph({"Acceleration": "Accel."}.get(
                     c.get("family", "—"), c.get("family", "—")), st_cell),
@@ -292,10 +295,16 @@ def generate_briefing_pdf(
         body.append(ctbl)
         st_note_center = ParagraphStyle("bfNoteC", parent=st_cap,
                                         alignment=TA_CENTER)
-        body.append(Paragraph(
-            "Overall según norma del punto · Los órdenes 0.5X/1X/2X se referencian "
-            "al keyphasor; en puntos del gas generator (CRF, ~10200 cpm) no aplican "
-            "y se reporta solo el Overall.", st_note_center))
+        _note = "Overall según norma del punto."
+        # La aclaración del gas generator SOLO aplica a trenes con planos CRF
+        # (LM6000/TM2500) — en SGT300 y similares confundía al lector.
+        if any("CRF" in str(c.get("plane_label", "")).upper()
+               or "CRF" in str(c.get("sensor_label", "")).upper()
+               for c in channels):
+            _note = ("Overall según norma del punto · Los órdenes 0.5X/1X/2X se "
+                     "referencian al keyphasor; en puntos del gas generator "
+                     "(CRF, ~10200 cpm) no aplican y se reporta solo el Overall.")
+        body.append(Paragraph(_note, st_note_center))
 
     # ---- Histórico Overall (últimos 10 días, pico diario, con semáforo) ----
     if overall_history and overall_history.get("rows"):
@@ -459,10 +468,16 @@ def generate_briefing_pdf(
 
         for key in _others:
             cap = _FIG_CAPTIONS.get(key, key.title())
-            _add_fig(figures[key],
-                     cap,
-                     10.6 * cm if key in ("spectrum", "waveform") else 8.0 * cm,
-                     analysis=(figures.get(f"{key}_analysis") or ""))
+            _h = 10.6 * cm if key in ("spectrum", "waveform") else 8.0 * cm
+            # v3.31.412 — apilados troceados: si hay varias partes (>6
+            # canales), cada una es su propia figura "(parte i/n)"; el
+            # análisis va con la última parte.
+            _parts = figures.get(f"{key}_pngs") or [figures[key]]
+            for pi, part in enumerate(_parts, start=1):
+                _head = cap if len(_parts) == 1 else f"{cap} ({pi}/{len(_parts)})"
+                _an = (figures.get(f"{key}_analysis") or "") \
+                    if pi == len(_parts) else ""
+                _add_fig(part, _head, _h, analysis=_an)
 
     return render_report_pdf(meta, body)
 

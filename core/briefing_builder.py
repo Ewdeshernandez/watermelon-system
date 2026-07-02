@@ -505,6 +505,14 @@ def _strip_ai_reco_block(md: str) -> str:
     if not md:
         return md
     _STRIP_TOKENS = ("recomendacion", "recomendación", "hallazgo")
+    # Párrafos boilerplate de la IA que duplican el disclaimer del pie del
+    # reporte — se eliminan del resumen (v3.31.412).
+    _STRIP_PARAGRAPH_STARTS = (
+        "el presente resumen ejecutivo se emite",
+        "el presente briefing ejecutivo se emite",
+        "la planificación operativa",
+        "la planificacion operativa",
+    )
     out, skipping = [], False
     for ln in md.splitlines():
         s = ln.strip()
@@ -514,6 +522,8 @@ def _strip_ai_reco_block(md: str) -> str:
         if is_heading and any(t in low for t in _STRIP_TOKENS):
             skipping = True
             continue
+        if any(low.startswith(t) for t in _STRIP_PARAGRAPH_STARTS):
+            continue  # línea boilerplate — fuera
         if skipping:
             # Dentro del bloque: saltar blancos e items (1., -, •, **1.)
             import re as _re
@@ -561,7 +571,9 @@ def _overall_history_matrix(instance_id: str,
                 vals[key] = float(v)
                 all_dates.add(d)
             if vals:
-                rows.append({"label": c.get("plane_label") or lbl,
+                rows.append({"label": (c.get("plane_label")
+                                       if c.get("plane_label") not in (None, "", "—")
+                                       else lbl),
                              "unit": c.get("unit", ""),
                              "alarm": float(c.get("alarm", 0) or 0),
                              "danger": float(c.get("danger", 0) or 0),

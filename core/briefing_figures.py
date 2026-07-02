@@ -128,6 +128,71 @@ def _freqs_cpm(s: Dict[str, Any]) -> List[float]:
     return list(s["freqs"]) if is_cpm else [f * 60.0 for f in s["freqs"]]
 
 
+def _instance_rpm(instance_id: str) -> float:
+    """RPM de referencia del activo: nominal_rpm → velocidad LIVE (Modbus/
+    colector). SGT300B tiene nominal_rpm=0 pero reporta 1799 en vivo."""
+    try:
+        from core.instance_state import get_instance
+        r = float(getattr(get_instance(instance_id), "nominal_rpm", 0) or 0)
+        if r > 0:
+            return r
+    except Exception:
+        pass
+    try:
+        from core.live_readings import latest_for_instance
+        for row in latest_for_instance(instance_id) or []:
+            if (row.get("variable") or "").lower().startswith("velocidad") \
+                    and row.get("value"):
+                return float(row["value"])
+    except Exception:
+        pass
+    return 0.0
+
+
+def _filter_current_channels(instance_id: str,
+                             sensors: List[Dict[str, Any]],
+                             label_key: str = "sensor_label") -> List[Dict[str, Any]]:
+    """Filtra canales de snapshots que NO corresponden a la configuración
+    VIGENTE del activo (v3.31.412). El merge de snapshots puede resucitar
+    canales de nomenclaturas viejas o de análisis hechos con otro activo
+    seleccionado (caso real SGT300B: aparecían '3XD GENERATOR DE' con firma
+    de TES3). Criterio: el label del snapshot debe compartir ≥2 tokens con
+    algún plano/sensor de la config actual. Si el filtro dejara menos de la
+    mitad (nomenclatura CSV distinta, caso TES1), se conserva el set
+    original — el filtro solo actúa cuando hay mezcla evidente."""
+    import re as _re
+
+    def _toks(t: str) -> frozenset:
+        return frozenset(x for x in _re.sub(r"[^A-Z0-9 ]", " ",
+                                            str(t or "").upper()).split() if x)
+
+    try:
+        from core.instance_state import get_instance
+        from core.sensor_map import sensor_label as _slbl
+        inst = get_instance(instance_id)
+        cfg_tokens: List[frozenset] = []
+        for s in getattr(inst, "sensors", None) or []:
+            try:
+                cfg_tokens.append(_toks(s.get("plane_label", "")) |
+                                  _toks(_slbl(s)))
+            except Exception:
+                continue
+        if not cfg_tokens:
+            return sensors
+        kept = [s for s in sensors
+                if any(len(_toks(s.get(label_key, "")) & ct) >= 2
+                       for ct in cfg_tokens)]
+        if len(kept) >= max(2, len(sensors) // 2):
+            if len(kept) < len(sensors):
+                log.warning("briefing_figures: %d canal(es) de snapshots "
+                            "viejos/ajenos filtrados en %s",
+                            len(sensors) - len(kept), instance_id)
+            return kept
+        return sensors
+    except Exception:
+        return sensors
+
+
 def _sorted_sensors(sensors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     try:
         from core.channel_order import channel_sort_key
@@ -138,10 +203,10 @@ def _sorted_sensors(sensors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         return sensors
 
 
-def _png(fig) -> Optional[bytes]:
+def _png(fig, height: int = 900) -> Optional[bytes]:
     try:
         from core.plot_export import fig_to_png_bytes
-        png, err = fig_to_png_bytes(fig, width=1600, height=900, scale=1)
+        png, err = fig_to_png_bytes(fig, width=1600, height=height, scale=1)
         return png if not err else None
     except Exception as e:
         log.warning("briefing_figures: rasterizar falló: %s", e)
@@ -162,7 +227,8 @@ def spectrum_bundle(instance_id: str) -> Dict[str, Any]:
                if s.get("freqs") and s.get("amps")]
     if not sensors:
         return {"png": None, "analysis": ""}
-    sensors = _sorted_sensors(sensors)[:12]
+    sensors = _filter_current_channels(instance_id, sensors)
+    sensors = _sorted_sensors(sensors)[:16]
     try:
         import numpy as np
         import plotly.graph_objects as go
@@ -192,99 +258,138 @@ def spectrum_bundle(instance_id: str) -> Dict[str, Any]:
             _rpm = float(payload.get("operating_speed_rpm") or 0)
         except Exception:
             _rpm = 0.0
+        # RPM de referencia ANTES de calibrar (v3.31.412): la sanidad del eje
+        # necesita conocer la velocidad. Fallback: nominal_rpm del activo.
+        if _rpm <= 0:
+            _rpm = _instance_rpm(instance_id)
+
         if _rpm > 0 and _dom:
             _ratio = _rpm / _dom
-            for _c in (0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0):
+            # Décadas + factor 60 (Hz mal declarado como cpm y viceversa).
+            for _c in (0.001, 0.01, 0.1, 1.0, 10.0, 100.0, 1000.0, 10000.0,
+                       60.0, 600.0, 6000.0, 1 / 60.0, 1000.0 / 60.0):
                 if 0.85 <= _ratio / _c <= 1.15:
                     _scale = _c
                     break
-        elif _dom:
+        # SANIDAD por Fmax (v3.31.412): ningún espectro industrial termina
+        # por debajo de 2×1X (mínimo hay que ver el 2X). Si el Fmax del eje
+        # queda bajo ese piso es el bug de ms-leídos-como-s → ×1000.
+        # (Caso SGT300B: Fmax crudo 909 cpm con 1X real en 1799 cpm.)
+        if _scale == 1.0:
             try:
                 _fmax_raw = max(max(_freqs_cpm(s)) for s in sensors)
-                if _fmax_raw < 600.0:
+                _floor = max(600.0, 2.0 * _rpm if _rpm > 0 else 0.0)
+                if _fmax_raw < _floor:
                     _scale = 1000.0
+                    log.warning("spectrum_bundle(%s): Fmax %.0f cpm < piso "
+                                "%.0f — aplicando ×1000 (ms-as-s)",
+                                instance_id, _fmax_raw, _floor)
             except Exception:
                 pass
 
-        # Velocidad de referencia para los marcadores 1X..4X. Si el snapshot
-        # no trae operating_speed_rpm (caso TES3), caer a: (1) nominal_rpm
-        # del activo; (2) pico dominante ≈ 1X. Sin esto los canales no-CRF
-        # quedaban SIN marcadores.
-        if _rpm <= 0:
-            try:
-                from core.instance_state import get_instance
-                _rpm = float(getattr(get_instance(instance_id),
-                                     "nominal_rpm", 0) or 0)
-            except Exception:
-                _rpm = 0.0
         if _rpm <= 0 and _dom:
             _rpm = float(_dom) * _scale
 
-        fig = make_subplots(rows=n, cols=1, shared_xaxes=True,
-                            vertical_spacing=0.05,
-                            subplot_titles=[s.get("sensor_label", "") for s in sensors])
+        # v3.31.412 — EJE DE ALTA VELOCIDAD en trenes con gearbox: los canales
+        # de la TURBINA (lado rápido, ej. SGT300 ~14.2 krpm con generador a
+        # 1799) tienen su 1X en el pico dominante propio, no en el keyphasor.
+        # Si la mediana de los picos dominantes de los canales "TURBIN*" cae
+        # entre 2.5× y 20× la rpm base, esa es la velocidad de SU eje.
+        _shaft_override: Dict[str, float] = {}
+        try:
+            _doms = []
+            for s in sensors:
+                if "TURBIN" not in str(s.get("sensor_label", "")).upper():
+                    continue
+                _x = np.asarray([f * _scale for f in _freqs_cpm(s)], float)
+                _a = np.asarray(list(s["amps"]), float)
+                _m = _x > 300.0
+                if _m.any():
+                    _doms.append(float(_x[_m][int(np.argmax(_a[_m]))]))
+            if _doms and _rpm > 0:
+                _med = float(np.median(_doms))
+                if 2.5 * _rpm < _med < 20.0 * _rpm:
+                    for s in sensors:
+                        lbl_u = str(s.get("sensor_label", "")).upper()
+                        if "TURBIN" in lbl_u and "CRF" not in lbl_u:
+                            _shaft_override[s.get("sensor_label", "")] = _med
+        except Exception:
+            pass
+
         findings: List[Dict[str, Any]] = []
-        for i, s in enumerate(sensors, start=1):
-            lbl = s.get("sensor_label", "")
-            x_cpm = [f * _scale for f in _freqs_cpm(s)]
-            amps = list(s["amps"])
-            fig.add_trace(go.Scatter(
-                x=x_cpm, y=amps, mode="lines",
-                line=dict(width=1.1, color=_PALETTE[(i - 1) % len(_PALETTE)]),
-                showlegend=False), row=i, col=1)
+        pngs: List[bytes] = []
+        # v3.31.412 — máx 6 canales por figura: con 10-12 canales apilados en
+        # un solo PNG (altura fija) cada espectro quedaba de 1 mm, ilegible.
+        _CHUNK = 6
+        chunks = [sensors[i:i + _CHUNK] for i in range(0, len(sensors), _CHUNK)]
+        for chunk in chunks:
+            cn = len(chunk)
+            fig = make_subplots(rows=cn, cols=1, shared_xaxes=True,
+                                vertical_spacing=min(0.08, 0.3 / max(cn, 1)),
+                                subplot_titles=[s.get("sensor_label", "")
+                                                for s in chunk])
+            for i, s in enumerate(chunk, start=1):
+                lbl = s.get("sensor_label", "")
+                x_cpm = [f * _scale for f in _freqs_cpm(s)]
+                amps = list(s["amps"])
+                fig.add_trace(go.Scatter(
+                    x=x_cpm, y=amps, mode="lines",
+                    line=dict(width=1.1, color=_PALETTE[(i - 1) % len(_PALETTE)]),
+                    showlegend=False), row=i, col=1)
 
-            # Marcadores de armónicos 1X..5X — referenciados al eje REAL del
-            # punto (CRF → gas generator ~10200 cpm; resto → keyphasor).
-            shaft_cpm = _shaft_cpm_for_label(lbl, _rpm)
-            if shaft_cpm > 0:
-                for k in range(1, _N_HARMONICS + 1):
-                    xk = k * shaft_cpm
-                    if xk > _SPEC_FMAX_CPM:
-                        break
-                    fig.add_vline(
-                        x=xk, row=i, col=1, line_dash="dot", line_width=1,
-                        line_color="#94a3b8",
-                        annotation_text=f"{k}X",
-                        annotation_position="top right",
-                        annotation_font=dict(size=9, color="#64748b"))
+                # Marcadores 1X..4X — referenciados al eje REAL del punto.
+                shaft_cpm = _shaft_override.get(lbl) or \
+                    _shaft_cpm_for_label(lbl, _rpm)
+                if shaft_cpm > 0:
+                    for k in range(1, _N_HARMONICS + 1):
+                        xk = k * shaft_cpm
+                        if xk > _SPEC_FMAX_CPM:
+                            break
+                        fig.add_vline(
+                            x=xk, row=i, col=1, line_dash="dot", line_width=1,
+                            line_color="#94a3b8",
+                            annotation_text=f"{k}X",
+                            annotation_position="top right",
+                            annotation_font=dict(size=9, color="#64748b"))
 
-            # Hallazgo del canal: pico dominante (para el análisis)
-            try:
-                pk_cpm, pk_amp = None, None
-                pks = s.get("peaks") or []
-                if pks:
-                    _f = float(pks[0].get("freq", 0)); pk_amp = float(pks[0].get("amp", 0))
-                    is_cpm = str(s.get("freq_unit", "Hz") or "Hz").lower().startswith("c")
-                    pk_cpm = (_f if is_cpm else _f * 60.0) * _scale
-                else:
+                # Hallazgo del canal: pico dominante SIEMPRE desde los arrays
+                # (v3.31.412 — los 'peaks' del snapshot pueden venir ordenados
+                # por frecuencia y traer componentes casi-DC como primera
+                # entrada). Se ignoran los primeros 300 cpm (DC/leakage).
+                try:
                     _a = np.asarray(amps, float)
                     _x = np.asarray(x_cpm, float)
-                    _msk = _x > 0
+                    _msk = _x > 300.0
                     if _msk.any():
                         j = int(np.argmax(_a[_msk]))
-                        pk_cpm = float(_x[_msk][j]); pk_amp = float(_a[_msk][j])
-                if pk_cpm and pk_amp is not None:
-                    findings.append({
-                        "label": lbl, "peak_cpm": pk_cpm, "peak_amp": pk_amp,
-                        "unit": s.get("amp_unit", "") or s.get("unit", ""),
-                        "order": (pk_cpm / shaft_cpm) if shaft_cpm > 0 else None,
-                        "shaft_cpm": shaft_cpm,
-                    })
-            except Exception:
-                pass
+                        pk_cpm = float(_x[_msk][j])
+                        pk_amp = float(_a[_msk][j])
+                        findings.append({
+                            "label": lbl, "peak_cpm": pk_cpm, "peak_amp": pk_amp,
+                            "unit": s.get("amp_unit", "") or s.get("unit", ""),
+                            "order": (pk_cpm / shaft_cpm) if shaft_cpm > 0 else None,
+                            "shaft_cpm": shaft_cpm,
+                        })
+                except Exception:
+                    pass
 
-        fig.update_xaxes(range=[0, _SPEC_FMAX_CPM], showgrid=True,
-                         gridcolor="#eef2f7", zeroline=False)
-        fig.update_xaxes(title_text="Frecuencia (CPM)", row=n, col=1)
-        fig.update_yaxes(showgrid=True, gridcolor="#f8fafc", zeroline=False)
-        fig.update_layout(height=max(260, 150 * n), plot_bgcolor="white",
-                          paper_bgcolor="white", showlegend=False,
-                          margin=dict(l=60, r=20, t=28, b=44),
-                          font=dict(size=12, color="#334155"))
-        return {"png": _png(fig), "analysis": _spectrum_analysis(findings)}
+            fig.update_xaxes(range=[0, _SPEC_FMAX_CPM], showgrid=True,
+                             gridcolor="#eef2f7", zeroline=False)
+            fig.update_xaxes(title_text="Frecuencia (CPM)", row=cn, col=1)
+            fig.update_yaxes(showgrid=True, gridcolor="#f8fafc", zeroline=False)
+            _h = max(420, 170 * cn)
+            fig.update_layout(height=_h, plot_bgcolor="white",
+                              paper_bgcolor="white", showlegend=False,
+                              margin=dict(l=60, r=20, t=28, b=44),
+                              font=dict(size=12, color="#334155"))
+            p = _png(fig, height=_h)
+            if p:
+                pngs.append(p)
+        return {"png": (pngs[0] if pngs else None), "pngs": pngs,
+                "analysis": _spectrum_analysis(findings)}
     except Exception as e:
         log.warning("spectrum_bundle: %s", e)
-        return {"png": None, "analysis": ""}
+        return {"png": None, "pngs": [], "analysis": ""}
 
 
 def _order_txt(order: Optional[float]) -> str:
@@ -443,59 +548,70 @@ def waveform_bundle(instance_id: str) -> Dict[str, Any]:
                if s.get("time") and s.get("values")]
     if not sensors:
         return {"png": None, "analysis": ""}
-    sensors = _sorted_sensors(sensors)[:12]
+    sensors = _filter_current_channels(instance_id, sensors)
+    sensors = _sorted_sensors(sensors)[:16]
     try:
         import numpy as np
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
-        n = len(sensors)
-        fig = make_subplots(rows=n, cols=1, shared_xaxes=False,
-                            vertical_spacing=0.05,
-                            subplot_titles=[s.get("sensor_label", "") for s in sensors])
         findings: List[Dict[str, Any]] = []
-        for i, s in enumerate(sensors, start=1):
-            _t = list(s["time"])
-            # Auto-calibración: si la Fs implícita < 50 Hz es implausible →
-            # el tiempo venía en ms leído como s. Convertir a segundos.
-            try:
-                _dur = float(_t[-1]) - float(_t[0])
-                if _dur > 0 and (len(_t) / _dur) < 50.0:
-                    _t = [float(v) / 1000.0 for v in _t]
-            except Exception:
-                pass
-            _y = list(s["values"])
-            fig.add_trace(go.Scattergl(
-                x=_t, y=_y, mode="lines",
-                line=dict(width=1.0, color=_PALETTE[(i - 1) % len(_PALETTE)]),
-                showlegend=False), row=i, col=1)
-            # Hallazgo: pp + factor de cresta (impactividad)
-            try:
-                arr = np.asarray(_y, float)
-                arr = arr[np.isfinite(arr)]
-                if arr.size > 8:
-                    ac = arr - float(np.mean(arr))
-                    rms = float(np.sqrt(np.mean(ac ** 2)))
-                    pk = float(np.max(np.abs(ac)))
-                    findings.append({
-                        "label": s.get("sensor_label", ""),
-                        "pp": float(np.max(ac) - np.min(ac)),
-                        "crest": (pk / rms) if rms > 1e-12 else 0.0,
-                        "unit": s.get("amp_unit", "") or s.get("unit", ""),
-                    })
-            except Exception:
-                pass
-        fig.update_xaxes(title_text="Tiempo (s)", row=n, col=1)
-        fig.update_xaxes(showgrid=True, gridcolor="#eef2f7", zeroline=False)
-        fig.update_yaxes(showgrid=True, gridcolor="#f8fafc", zeroline=True,
-                         zerolinecolor="#cbd5e1")
-        fig.update_layout(height=max(260, 150 * n), plot_bgcolor="white",
-                          paper_bgcolor="white", showlegend=False,
-                          margin=dict(l=60, r=20, t=28, b=44),
-                          font=dict(size=12, color="#334155"))
-        return {"png": _png(fig), "analysis": _waveform_analysis(findings)}
+        pngs: List[bytes] = []
+        _CHUNK = 6  # v3.31.412 — máx 6 canales por figura (legibilidad)
+        chunks = [sensors[i:i + _CHUNK] for i in range(0, len(sensors), _CHUNK)]
+        for chunk in chunks:
+            cn = len(chunk)
+            fig = make_subplots(rows=cn, cols=1, shared_xaxes=False,
+                                vertical_spacing=min(0.08, 0.3 / max(cn, 1)),
+                                subplot_titles=[s.get("sensor_label", "")
+                                                for s in chunk])
+            for i, s in enumerate(chunk, start=1):
+                _t = list(s["time"])
+                # Auto-calibración: si la Fs implícita < 50 Hz es implausible →
+                # el tiempo venía en ms leído como s. Convertir a segundos.
+                try:
+                    _dur = float(_t[-1]) - float(_t[0])
+                    if _dur > 0 and (len(_t) / _dur) < 50.0:
+                        _t = [float(v) / 1000.0 for v in _t]
+                except Exception:
+                    pass
+                _y = list(s["values"])
+                fig.add_trace(go.Scattergl(
+                    x=_t, y=_y, mode="lines",
+                    line=dict(width=1.0, color=_PALETTE[(i - 1) % len(_PALETTE)]),
+                    showlegend=False), row=i, col=1)
+                # Hallazgo: pp + factor de cresta (impactividad)
+                try:
+                    arr = np.asarray(_y, float)
+                    arr = arr[np.isfinite(arr)]
+                    if arr.size > 8:
+                        ac = arr - float(np.mean(arr))
+                        rms = float(np.sqrt(np.mean(ac ** 2)))
+                        pk = float(np.max(np.abs(ac)))
+                        findings.append({
+                            "label": s.get("sensor_label", ""),
+                            "pp": float(np.max(ac) - np.min(ac)),
+                            "crest": (pk / rms) if rms > 1e-12 else 0.0,
+                            "unit": s.get("amp_unit", "") or s.get("unit", ""),
+                        })
+                except Exception:
+                    pass
+            fig.update_xaxes(title_text="Tiempo (s)", row=cn, col=1)
+            fig.update_xaxes(showgrid=True, gridcolor="#eef2f7", zeroline=False)
+            fig.update_yaxes(showgrid=True, gridcolor="#f8fafc", zeroline=True,
+                             zerolinecolor="#cbd5e1")
+            _h = max(420, 170 * cn)
+            fig.update_layout(height=_h, plot_bgcolor="white",
+                              paper_bgcolor="white", showlegend=False,
+                              margin=dict(l=60, r=20, t=28, b=44),
+                              font=dict(size=12, color="#334155"))
+            p = _png(fig, height=_h)
+            if p:
+                pngs.append(p)
+        return {"png": (pngs[0] if pngs else None), "pngs": pngs,
+                "analysis": _waveform_analysis(findings)}
     except Exception as e:
         log.warning("waveform_bundle: %s", e)
-        return {"png": None, "analysis": ""}
+        return {"png": None, "pngs": [], "analysis": ""}
 
 
 def _waveform_sentences(findings: List[Dict[str, Any]]) -> List[str]:
@@ -744,6 +860,13 @@ def _section_key(plane_label: str) -> str:
         return "Generador"
     if "GEARBOX" in p or "REDUCTOR" in p:
         return "Gearbox"
+    # v3.31.412 — SGT300B: los planos "1XD DE turbina", "2YD NDE turbina"...
+    # no matcheaban ningún token → cada plano generaba SU PROPIA figura de
+    # tendencia (9 figuras de 1 canal). Se agrupan bajo "Turbina".
+    if "TURBIN" in p:
+        return "Turbina"
+    if "BOMBA" in p or "PUMP" in p:
+        return "Bomba"
     return (plane_label or "Otros").strip() or "Otros"
 
 
@@ -1176,7 +1299,9 @@ def collect_asset_figures(instance_id: str,
         "trend":    (trends[0]["png"] if trends else trend_png(instance_id)),
         "trends":   trends,
         "spectrum": spec["png"], "spectrum_analysis": spec["analysis"],
+        "spectrum_pngs": spec.get("pngs") or [],
         "waveform": wave["png"], "waveform_analysis": wave["analysis"],
+        "waveform_pngs": wave.get("pngs") or [],
         "orbit":    orb["png"],  "orbit_analysis": orb["analysis"],
     }
 
