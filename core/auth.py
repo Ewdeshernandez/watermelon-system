@@ -928,47 +928,9 @@ def render_user_menu() -> None:
             unsafe_allow_html=True,
         )
 
-        # Ciclo 17.16 — Cambiar mi password (visible para todos los roles
-        # excepto los del sistema legacy hardcoded, que cambian via secrets).
-        if st.session_state.get("auth_source") == "supabase":
-            with st.popover("🔑  Cambiar mi password", use_container_width=True):
-                st.markdown("**Elegí una nueva contraseña**")
-                _new = st.text_input(
-                    "Nueva password (mín. 8 chars)",
-                    type="password",
-                    key="wm_self_pwd_new",
-                )
-                _confirm = st.text_input(
-                    "Confirmar",
-                    type="password",
-                    key="wm_self_pwd_confirm",
-                )
-                if st.button("Cambiar", key="wm_self_pwd_submit",
-                             type="primary", use_container_width=True):
-                    if not _new or len(_new) < 8:
-                        st.error("Mínimo 8 caracteres.")
-                    elif _new != _confirm:
-                        st.error("Las dos passwords no coinciden.")
-                    else:
-                        try:
-                            from core.supabase_auth import reset_user_password
-                            uid = st.session_state.get("auth_user_id", "")
-                            if not uid:
-                                st.error("No tengo tu user_id de sesión.")
-                            else:
-                                res = reset_user_password(uid, _new)
-                                if res.get("ok"):
-                                    st.success(
-                                        "✓ Password cambiada. Tu sesión "
-                                        "actual sigue activa hasta que "
-                                        "cierres."
-                                    )
-                                    st.session_state.pop("wm_self_pwd_new", None)
-                                    st.session_state.pop("wm_self_pwd_confirm", None)
-                                else:
-                                    st.error(f"Falló: {res.get('error', 'error')}")
-                        except Exception as e:
-                            st.error(f"Error: {e}")
+        # Ciclo 17.16 "Cambiar mi password" ELIMINADO (v3.31.411): el login
+        # ahora es passwordless por código OTP al correo — no existen
+        # passwords que cambiar. El menú queda solo con "Cerrar sesión".
 
         if st.button("Cerrar sesión", use_container_width=True, key="logout_button"):
             logout()
