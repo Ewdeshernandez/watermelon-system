@@ -204,123 +204,36 @@ with st.container(border=True):
              "Si no, se usa el borrador determinístico (siempre funciona).",
     )
 
-    st.markdown('<div class="bf-label" style="margin-top:14px;">Revisado por (opcional)</div>',
-                unsafe_allow_html=True)
-    _reviewed_by = st.text_input(
-        "Revisado por", value="", key="briefing_reviewed_by",
-        label_visibility="collapsed",
-        placeholder="Nombre del revisor (aparece en la portada como 'Revisado por:')",
-    )
-    _reviewed_role = st.text_input(
-        "Cargo del revisor", value="", key="briefing_reviewed_role",
-        label_visibility="collapsed",
-        placeholder="Cargo del revisor (opcional, ej. Senior Condition Monitoring Engineer)",
-    )
-
 st.markdown("")
 
 # -----------------------------------------------------------------
-# Generación
+# Generación — SOLO vía flujo de aprobación (v3.31.400)
+# No existe generación directa de PDF: todo reporte nace como BORRADOR
+# en la cola, se revisa (solo recomendaciones editables), se firma y al
+# aprobar se genera el PDF final y se envía al cliente.
 # -----------------------------------------------------------------
-# NOTA (v3.31.397): en ELABORACIÓN no se edita nada — el reporte se crea
-# automático (toma las recomendaciones vigentes del ciclo anterior con su
-# fecha) y se manda a la cola. La edición de recomendaciones vive ÚNICAMENTE
-# en "Pendientes de aprobación".
-if st.button("📄  Generar briefing", type="primary", use_container_width=True):
-    from core.briefing_builder import build_asset_briefing, build_all_briefings
-    # Portada profesional: firma "Preparado por" con el usuario logueado
-    # (mismo criterio que Reports). El revisor firma al validar.
-    _meta_extra = {}
-    try:
-        from core.auth import get_current_user
-        _u = get_current_user() or {}
-        _meta_extra["prepared_by"] = _u.get("full_name") or _u.get("username") or ""
-    except Exception:
-        pass
-    # Revisado por (opcional) — habilita el bloque "Revisado por:" en la portada
-    if (_reviewed_by or "").strip():
-        _meta_extra["reviewed_by"] = _reviewed_by.strip()
-        if (_reviewed_role or "").strip():
-            _meta_extra["reviewed_role"] = _reviewed_role.strip()
-    results = []
-    with st.spinner("Generando briefing(s)… (figuras + redacción + PDF)"):
+if st.button("📝  Generar reporte y enviarlo a APROBACIÓN",
+             type="primary", use_container_width=True, key="bfq_manual"):
+    from core.briefing_builder import build_asset_draft, build_all_drafts
+    _ms = []
+    with st.spinner("Generando borrador(es) — datos + redacción IA…"):
         if _scope == "Todos los activos":
-            for iid, pdf, meta in build_all_briefings(_period, use_ai=_use_ai,
-                                                      meta_extra=_meta_extra):
-                results.append((iid, pdf, meta))
+            _ms = build_all_drafts(_period, use_ai=_use_ai)
         elif _target_iid:
-            pdf, meta = build_asset_briefing(_target_iid, _period, use_ai=_use_ai,
-                                             meta_extra=_meta_extra)
-            results.append((_target_iid, pdf, meta))
+            _ms = [build_asset_draft(_target_iid, _period, use_ai=_use_ai)]
         else:
             st.warning("Selecciona un activo.")
-
-    _ok = [r for r in results if r[1]]
-    if results:
-        st.markdown("")
-        st.markdown(
-            f'<div class="bf-label" style="margin-top:6px;">'
-            f'Briefings generados <span class="bf-accent">·</span> '
-            f'{len(_ok)} de {len(results)}</div>',
-            unsafe_allow_html=True,
-        )
-
-    for iid, pdf, meta in results:
-        tag = meta.get("tag", iid)
-        if not pdf:
-            st.warning(f"**{tag}** — {meta.get('status', 'sin datos')} (no se generó)")
-            continue
-
-        _sev = meta.get("status", "—")
-        _dot, _soft = (
-            ("#dc2626", "rgba(220,38,38,0.16)") if "rít" in _sev else
-            ("#d97706", "rgba(217,119,6,0.16)") if "tenci" in _sev else
-            ("#10b981", "rgba(16,185,129,0.16)")
-        )
-        cc1, cc2 = st.columns([3.2, 1])
-        with cc1:
-            st.markdown(
-                f"""
-                <div class="bf-row" style="--bf-dot:{_dot};--bf-dot-soft:{_soft};">
-                    <span class="bf-dot"></span>
-                    <div class="bf-row-main">
-                        <span class="bf-row-tag">{tag}</span>
-                        &nbsp;<span class="bf-row-sev">· {_sev}</span>
-                        <div class="bf-chips">
-                            <span class="bf-chip">Salud {meta.get('score','—')}</span>
-                            <span class="bf-chip">{meta.get('alarms',0)} alarma(s)</span>
-                            <span class="bf-chip">{meta.get('n_figures',0)} figuras</span>
-                            <span class="bf-chip">{_period}</span>
-                        </div>
-                    </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-        with cc2:
-            st.download_button(
-                "⬇  Descargar PDF", data=pdf,
-                file_name=f"Briefing_{tag}_{_period}.pdf",
-                mime="application/pdf", key=f"dl_{iid}",
-                use_container_width=True)
-        st.markdown("")
-
-# Borrador manual → cola de aprobación (mismo flujo que el cron)
-if _scope == "Un activo" and _target_iid:
-    if st.button("📝 Generar BORRADOR y enviarlo a la cola de aprobación",
-                 key="bfq_manual", use_container_width=True):
-        from core.briefing_builder import build_asset_draft
-        with st.spinner("Generando borrador (datos + redacción IA)…"):
-            _m = build_asset_draft(_target_iid, _period, use_ai=_use_ai)
-        if _m.get("ok"):
+    if _ms:
+        _ok = [m for m in _ms if m.get("ok")]
+        _bad = [m for m in _ms if not m.get("ok")]
+        for m in _bad:
+            st.warning(f"{m.get('tag', m.get('instance_id'))}: "
+                       f"{m.get('status','?')} (no se creó borrador)")
+        if _ok:
             from core.briefing_queue import list_pending
             st.session_state["bfq_cache"] = list_pending()
-            st.success("Borrador en cola — revísalo arriba en "
-                       "'Pendientes de aprobación'.")
-            st.rerun()
-        else:
-            st.error(f"No se pudo crear el borrador: {_m.get('status','?')}")
-
+            st.success(f"✅ {len(_ok)} borrador(es) en la cola — apruébalos "
+                       f"abajo en 'Pendientes de aprobación'.")
 
 # -----------------------------------------------------------------
 # PENDIENTES DE APROBACIÓN — lista compacta (v3.31.399)

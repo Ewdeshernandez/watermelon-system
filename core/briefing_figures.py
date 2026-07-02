@@ -745,6 +745,32 @@ def _trend_analysis(section: str, series: List[Dict[str, Any]],
         return ""
 
 
+def figures_available(instance_id: str) -> Dict[str, Any]:
+    """Disponibilidad de figuras SIN renderizar nada (v3.31.400).
+
+    Para el BORRADOR de la cola de aprobación: la IA solo necesita saber QUÉ
+    análisis existen — rasterizar los PNG (kaleido) tomaba varios segundos
+    por figura y hacía lentísimo 'Generar borrador'. Devuelve booleans con
+    las mismas claves que collect_asset_figures."""
+    out = {"trend": False, "trends": [], "spectrum": False,
+           "waveform": False, "orbit": False}
+    try:
+        from core import history_storage as hs
+        for key in ("spectrum", "waveform", "orbit"):
+            try:
+                out[key] = bool(hs.list_snapshots(instance_id, key))
+            except Exception:
+                pass
+    except Exception as e:
+        log.warning("figures_available(%s): %s", instance_id, e)
+    try:
+        from core.live_readings import latest_for_instance
+        out["trend"] = bool(latest_for_instance(instance_id))
+    except Exception:
+        pass
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Orquestador F1
 # ---------------------------------------------------------------------------
@@ -771,6 +797,7 @@ def collect_asset_figures(instance_id: str,
     }
 
 
-__all__ = ["collect_asset_figures", "spectrum_png", "waveform_png",
+__all__ = ["collect_asset_figures", "figures_available",
+           "spectrum_png", "waveform_png",
            "orbit_png", "trend_png", "build_trend_figures",
            "spectrum_bundle", "waveform_bundle", "orbit_bundle"]

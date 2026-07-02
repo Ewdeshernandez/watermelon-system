@@ -738,10 +738,13 @@ def build_asset_draft(
         return {"instance_id": instance_id, "tag": tag, "ok": False,
                 "status": "Sin datos"}
 
-    # Figuras solo como CONTEXTO de la IA (no se rasteriza PDF aquí).
+    # Contexto de la IA: solo QUÉ figuras existen (booleans). NO se
+    # rasteriza nada aquí — eso tomaba varios segundos por figura (kaleido)
+    # y hacía lentísimo crear el borrador. Los PNG reales se generan al dar
+    # Vista previa / Aprobar en la cola. (v3.31.400)
     try:
-        from core.briefing_figures import collect_asset_figures
-        figures = collect_asset_figures(instance_id, instance_obj)
+        from core.briefing_figures import figures_available
+        figures = figures_available(instance_id)
     except Exception as e:
         log.warning("draft figures falló: %s", e)
         figures = {}
