@@ -606,9 +606,11 @@ def build_asset_briefing(
 
     # Figuras PRIMERO: la IA necesita saber qué análisis ya trae el reporte
     # (espectro/forma de onda/tendencia/órbita) para no afirmar que faltan.
+    # period_label define la ventana de la tendencia (7d Semanal / 30d Mensual).
     try:
         from core.briefing_figures import collect_asset_figures
-        figures = collect_asset_figures(instance_id, instance_obj)
+        figures = collect_asset_figures(instance_id, instance_obj,
+                                        period_label=period_label)
     except Exception as e:
         log.warning("briefing figures falló: %s", e)
         figures = {}

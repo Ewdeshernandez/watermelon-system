@@ -594,16 +594,60 @@ def _unit_descr(unit: str) -> str:
     return unit or ""
 
 
+def _period_history(instance_id: str, days: int = 7) -> Dict[str, List[Dict[str, Any]]]:
+    """Histórico Direct de TODO el periodo analizado (v3.31.403), downsampled
+    server-side vía RPC trend_bucketed (peak-hold: max por balde — es lo que
+    se evalúa contra alarma). La tendencia del reporte debe cubrir LA SEMANA
+    (o el mes) completa, no los últimos minutos del colector.
+
+    Devuelve {sensor_label: [{captured_at, value, unit}, ...]} o {} si la
+    RPC no está disponible (el caller cae al histórico reciente)."""
+    out: Dict[str, List[Dict[str, Any]]] = {}
+    try:
+        from datetime import datetime, timedelta, timezone
+
+        from core.live_readings import history_bucketed, latest_for_instance
+        latest = latest_for_instance(instance_id) or []
+        from_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+        bucket = "1 hour" if days <= 8 else "4 hours"
+        for r in latest:
+            if r.get("metric") != "Direct":
+                continue
+            if (r.get("variable") or "").lower().startswith("velocidad"):
+                continue
+            lbl, var = r.get("sensor_label"), r.get("variable")
+            if not lbl or not var:
+                continue
+            rows = history_bucketed(instance_id, var, "Direct", from_iso, bucket)
+            pts = [{"captured_at": b.get("bucket"),
+                    "value": b.get("max_val", b.get("avg_val")),
+                    "unit": r.get("unit")}
+                   for b in rows or [] if b.get("max_val") is not None
+                   or b.get("avg_val") is not None]
+            if len(pts) >= 2:
+                out[lbl] = pts
+    except Exception as e:
+        log.warning("_period_history(%s) falló: %s", instance_id, e)
+    return out
+
+
 def build_trend_figures(instance_id: str, instance_obj: Any = None,
-                        n_per_sensor: int = 60) -> List[Dict[str, Any]]:
+                        n_per_sensor: int = 60,
+                        period_days: int = 7) -> List[Dict[str, Any]]:
     """Tendencias SEPARADAS por sección (CRF-TRF, Generador, ...), cada una con
-    sus líneas de alarma/danger. Devuelve [{"section","unit","descr","png"}].
+    sus líneas de alarma/danger, cubriendo el PERIODO COMPLETO del reporte
+    (period_days). Devuelve [{"section","unit","descr","png","analysis"}].
     [] si algo falla (el caller cae al trend único como fallback)."""
     try:
         from core.live_readings import recent_history_all_direct
         from core.live_report_pdf import render_trend_png
         from core.live_report_builder import _build_sensor_lookup
-        spark = recent_history_all_direct(instance_id, n_per_sensor=n_per_sensor) or {}
+        # Periodo completo (RPC bucketed) → fallback al reciente si la RPC
+        # no existe o no devuelve datos.
+        spark = _period_history(instance_id, days=period_days)
+        if not spark:
+            spark = recent_history_all_direct(instance_id,
+                                              n_per_sensor=n_per_sensor) or {}
         if not spark:
             return []
         lookup = _build_sensor_lookup(instance_obj) if instance_obj is not None else {}
@@ -779,16 +823,19 @@ def figures_available(instance_id: str) -> Dict[str, Any]:
 # Orquestador F1
 # ---------------------------------------------------------------------------
 def collect_asset_figures(instance_id: str,
-                          instance_obj: Any = None) -> Dict[str, Any]:
+                          instance_obj: Any = None,
+                          period_label: str = "Semanal") -> Dict[str, Any]:
     """Devuelve PNGs (bytes) de las figuras disponibles del activo para el
     briefing + análisis técnico por figura. None por sección si no hay
     snapshot/datos. Headless.
 
     'trends' = lista de tendencias SEPARADAS por sección (con límites y
-               'analysis' por sección).
+               'analysis' por sección), cubriendo el PERIODO del reporte
+               (7 días Semanal / 30 días Mensual).
     'trend'  = PNG único (compat: lo usa la IA para saber que hay tendencia).
     '<key>_analysis' = texto de análisis determinístico de cada figura."""
-    trends = build_trend_figures(instance_id, instance_obj)
+    _days = 30 if str(period_label or "").lower().startswith("mensual") else 7
+    trends = build_trend_figures(instance_id, instance_obj, period_days=_days)
     spec = spectrum_bundle(instance_id)
     wave = waveform_bundle(instance_id)
     orb = orbit_bundle(instance_id)
