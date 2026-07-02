@@ -91,11 +91,11 @@ def generate_briefing_pdf(
 ) -> bytes:
     """Devuelve los bytes del PDF del briefing del activo, en formato pro."""
     from reportlab.lib import colors
-    from reportlab.lib.enums import TA_JUSTIFY, TA_RIGHT
+    from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_RIGHT
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import cm
     from reportlab.platypus import (
-        HRFlowable, Image, Paragraph, Spacer, Table, TableStyle,
+        HRFlowable, Image, KeepTogether, Paragraph, Spacer, Table, TableStyle,
     )
 
     from core.report_pdf_shell import (
@@ -164,6 +164,9 @@ def generate_briefing_pdf(
     if summary:
         body.extend(render_markdown_flowables(summary, styles))
 
+    # Caption de figura centrado (las imágenes van centradas con su caption)
+    st_cap_fig = ParagraphStyle("bfCapFig", parent=st_cap, alignment=TA_CENTER)
+
     # ---- Mapa de sensores ----
     if sensor_map_png:
         body.append(Paragraph("MAPA DE SENSORES", styles["WMTOC1"]))
@@ -171,9 +174,11 @@ def generate_briefing_pdf(
             img = Image(BytesIO(sensor_map_png), width=17.5 * cm, height=12.5 * cm,
                         kind="proportional")
             img.hAlign = "CENTER"
-            body.append(img)
-            body.append(Paragraph(
-                f"Figura — Mapa de sensores y severidad por plano · {tag}", st_cap))
+            body.append(KeepTogether([
+                img,
+                Paragraph(f"Figura — Mapa de sensores y severidad por plano · {tag}",
+                          st_cap_fig),
+            ]))
         except Exception:
             pass
 
@@ -283,21 +288,31 @@ def generate_briefing_pdf(
         st_analysis = ParagraphStyle("bfAnalysis", parent=styles["WMBody"],
                                      alignment=TA_JUSTIFY, spaceBefore=2,
                                      spaceAfter=10)
+        # Título de figura CENTRADO. Se clona con el MISMO name "WMTOC2" para
+        # que afterFlowable() del shell lo siga registrando en la TOC (la
+        # detección es por style.name).
+        st_fig_head = ParagraphStyle("WMTOC2", parent=styles["WMTOC2"],
+                                     alignment=TA_CENTER)
 
         def _add_fig(png, head, big_h, analysis: str = ""):
             nonlocal _n
-            body.append(Paragraph(head, styles["WMTOC2"]))
             try:
                 img = Image(BytesIO(png), width=17.0 * cm, height=big_h,
                             kind="proportional")
                 img.hAlign = "CENTER"
-                body.append(img)
                 _n += 1
                 _cap = f"Figura {_n}. {head}"
                 if _fecha:
                     _cap += f", {_fecha}"
                 _cap += f" · {_equipo}"
-                body.append(Paragraph(_cap, st_cap))
+                # Título + figura + caption SIEMPRE juntos en la misma página
+                # y centrados. El análisis fluye después (puede saltar de
+                # página sin romper el bloque visual).
+                body.append(KeepTogether([
+                    Paragraph(head, st_fig_head),
+                    img,
+                    Paragraph(_cap, st_cap_fig),
+                ]))
                 if analysis:
                     body.append(Paragraph(paragraph_safe(analysis), st_analysis))
             except Exception:

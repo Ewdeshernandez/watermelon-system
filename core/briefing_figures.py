@@ -612,37 +612,59 @@ def build_trend_figures(instance_id: str, instance_obj: Any = None,
 
 def _trend_analysis(section: str, series: List[Dict[str, Any]],
                     alarm: float, unit: str) -> str:
-    """Análisis determinístico de la tendencia de una sección: nivel máximo,
-    dirección (estable/ascendente/descendente) y margen respecto a alarma."""
+    """Análisis determinístico de la tendencia de una sección.
+
+    Criterios (v3.31.391):
+      • El nivel de referencia es la CRESTA MÁXIMA del periodo (no el último
+        punto), por canal.
+      • La dirección compara la cresta máxima del tramo INICIAL vs la del
+        tramo FINAL del canal con mayor nivel (>±15% = ascendente/descendente).
+      • El porcentaje vs alarma se reporta con signo correcto: margen bajo el
+        umbral, o EXCESO sobre el umbral cuando la cresta lo supera (nunca
+        "margen del 0%").
+    """
     try:
-        peak_last, peak_lbl = -1.0, ""
+        # Cresta máxima del periodo por canal → canal dominante
+        peak_val, peak_lbl, peak_ys = -1.0, "", []
+        for s in series:
+            ys = [float(v) for v in (s.get("y") or []) if v is not None]
+            if ys and max(ys) > peak_val:
+                peak_val, peak_lbl, peak_ys = max(ys), s.get("label", ""), ys
+        if peak_val < 0:
+            return ""
+
+        # Dirección: cresta del primer tercio vs cresta del último tercio
         direction = "estable"
-        longest = max(series, key=lambda s: len(s.get("y") or []))
-        ys = [float(v) for v in (longest.get("y") or []) if v is not None]
-        if len(ys) >= 6:
-            n3 = max(2, len(ys) // 3)
-            first, last = sum(ys[:n3]) / n3, sum(ys[-n3:]) / n3
-            ref = max(abs(first), 1e-9)
-            delta = (last - first) / ref
+        if len(peak_ys) >= 6:
+            n3 = max(2, len(peak_ys) // 3)
+            crest_ini = max(peak_ys[:n3])
+            crest_fin = max(peak_ys[-n3:])
+            delta = (crest_fin - crest_ini) / max(abs(crest_ini), 1e-9)
             if delta > 0.15:
                 direction = "ascendente"
             elif delta < -0.15:
                 direction = "descendente"
-        for s in series:
-            _ys = [float(v) for v in (s.get("y") or []) if v is not None]
-            if _ys and _ys[-1] > peak_last:
-                peak_last, peak_lbl = _ys[-1], s.get("label", "")
-        if peak_last < 0:
-            return ""
+
         txt = (f"Análisis de tendencia — {section}: comportamiento {direction} "
-               f"durante el periodo; nivel actual más alto {peak_last:.2f} {unit} "
+               f"durante el periodo; cresta máxima {peak_val:.2f} {unit} "
                f"en {peak_lbl}")
+        over_alarm = False
         if alarm > 0:
-            margin = max(0.0, (alarm - peak_last) / alarm * 100.0)
-            txt += (f", con margen del {margin:.0f}% respecto al umbral de "
-                    f"alarma ({alarm:g} {unit})")
+            if peak_val > alarm:
+                over_alarm = True
+                exceso = (peak_val - alarm) / alarm * 100.0
+                txt += (f", que SUPERA el umbral de alarma ({alarm:g} {unit}) "
+                        f"en {exceso:.0f}%")
+            else:
+                margen = (alarm - peak_val) / alarm * 100.0
+                txt += (f", con margen del {margen:.0f}% bajo el umbral de "
+                        f"alarma ({alarm:g} {unit})")
         txt += "."
-        if direction == "ascendente":
+        if over_alarm:
+            txt += (" El canal opera por encima del umbral: correlacionar con "
+                    "espectro y forma de onda, y dar seguimiento cercano hasta "
+                    "confirmar la causa.")
+        elif direction == "ascendente":
             txt += (" La pendiente ascendente amerita aumentar la frecuencia de "
                     "revisión y correlacionar con espectro y forma de onda.")
         else:
