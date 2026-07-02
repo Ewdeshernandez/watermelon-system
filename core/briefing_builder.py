@@ -498,18 +498,20 @@ def _period_range_str(period_label: str) -> str:
 
 
 def _strip_ai_reco_block(md: str) -> str:
-    """Quita del resumen IA el bloque de 'Recomendaciones ...' (encabezado +
-    items numerados/bullets): las recomendaciones del reporte son las del
-    especialista (sección propia) y no deben aparecer duplicadas."""
+    """Quita del resumen IA los bloques que duplican secciones propias del
+    reporte: 'Recomendaciones ...' (la sección la gestiona el especialista)
+    y 'Hallazgos raíz consolidados' (el detalle vive en el análisis de cada
+    figura). Elimina encabezado + items numerados/bullets del bloque."""
     if not md:
         return md
+    _STRIP_TOKENS = ("recomendacion", "recomendación", "hallazgo")
     out, skipping = [], False
     for ln in md.splitlines():
         s = ln.strip()
         low = s.lower()
         is_heading = (s.startswith("#")
                       or (s.startswith("**") and s.endswith("**") and len(s) > 4))
-        if is_heading and ("recomendacion" in low or "recomendación" in low):
+        if is_heading and any(t in low for t in _STRIP_TOKENS):
             skipping = True
             continue
         if skipping:

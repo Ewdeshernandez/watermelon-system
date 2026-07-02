@@ -155,6 +155,20 @@ def spectrum_bundle(instance_id: str) -> Dict[str, Any]:
             except Exception:
                 pass
 
+        # Velocidad de referencia para los marcadores 1X..4X. Si el snapshot
+        # no trae operating_speed_rpm (caso TES3), caer a: (1) nominal_rpm
+        # del activo; (2) pico dominante ≈ 1X. Sin esto los canales no-CRF
+        # quedaban SIN marcadores.
+        if _rpm <= 0:
+            try:
+                from core.instance_state import get_instance
+                _rpm = float(getattr(get_instance(instance_id),
+                                     "nominal_rpm", 0) or 0)
+            except Exception:
+                _rpm = 0.0
+        if _rpm <= 0 and _dom:
+            _rpm = float(_dom) * _scale
+
         fig = make_subplots(rows=n, cols=1, shared_xaxes=True,
                             vertical_spacing=0.05,
                             subplot_titles=[s.get("sensor_label", "") for s in sensors])
@@ -633,21 +647,27 @@ def _trend_analysis(section: str, series: List[Dict[str, Any]],
         if peak_val < 0:
             return ""
 
-        # Dirección: cresta del primer tercio vs cresta del último tercio
+        # Cresta más alta al INICIO vs cresta más alta al FINAL de la gráfica
+        # → porcentaje REAL de incremento/disminución del periodo.
         direction = "estable"
+        var_txt = ""
         if len(peak_ys) >= 6:
             n3 = max(2, len(peak_ys) // 3)
             crest_ini = max(peak_ys[:n3])
             crest_fin = max(peak_ys[-n3:])
-            delta = (crest_fin - crest_ini) / max(abs(crest_ini), 1e-9)
-            if delta > 0.15:
+            pct = (crest_fin - crest_ini) / max(abs(crest_ini), 1e-9) * 100.0
+            if pct > 15.0:
                 direction = "ascendente"
-            elif delta < -0.15:
+            elif pct < -15.0:
                 direction = "descendente"
+            var_txt = (f". Cresta inicial {crest_ini:.2f} {unit} vs cresta "
+                       f"final {crest_fin:.2f} {unit}: "
+                       + (f"incremento del {pct:.0f}%" if pct >= 0
+                          else f"disminución del {abs(pct):.0f}%"))
 
         txt = (f"Análisis de tendencia — {section}: comportamiento {direction} "
-               f"durante el periodo; cresta máxima {peak_val:.2f} {unit} "
-               f"en {peak_lbl}")
+               f"durante el periodo{var_txt}. Cresta máxima {peak_val:.2f} "
+               f"{unit} en {peak_lbl}")
         over_alarm = False
         if alarm > 0:
             if peak_val > alarm:

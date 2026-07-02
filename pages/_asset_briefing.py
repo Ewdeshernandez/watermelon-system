@@ -197,9 +197,60 @@ for _iid, _tag, _d in _pending:
             "Diagnóstico", value=_d.get("diagnosis", ""),
             key=f"bfq_diag_{_iid}", height=140,
         )
-        st.caption("Las **recomendaciones** se editan en el panel de abajo "
-                   "(selecciona este activo): persisten entre reportes con su "
-                   "fecha de inicio.")
+
+        # Recomendaciones VIGENTES del activo (vienen del reporte anterior,
+        # traídas de una): edítalas aquí mismo; persisten con su fecha.
+        st.markdown("**Recomendaciones** (traídas del reporte anterior — "
+                    "edita, agrega o borra las que el cliente ya ejecutó):")
+        from datetime import date as _qdate
+
+        import pandas as _qpd
+
+        from core.briefing_recommendations import (
+            list_recommendations as _qlist,
+            save_recommendations as _qsave,
+        )
+        _q_ss = f"recs_cache_{_iid}"
+        if _q_ss not in st.session_state:
+            st.session_state[_q_ss] = _qlist(_iid)
+
+        def _q_to_date(s):
+            try:
+                return _qdate.fromisoformat(str(s)[:10])
+            except Exception:
+                return _qdate.today()
+
+        _qdf = _qpd.DataFrame(
+            [{"id": r["id"], "Recomendación": r["text"],
+              "Fecha de inicio": _q_to_date(r["started_at"])}
+             for r in st.session_state[_q_ss]],
+            columns=["id", "Recomendación", "Fecha de inicio"],
+        )
+        _qedited = st.data_editor(
+            _qdf, key=f"bfq_recs_{_iid}", num_rows="dynamic",
+            use_container_width=True, hide_index=True,
+            column_config={
+                "id": None,
+                "Recomendación": st.column_config.TextColumn(
+                    "Recomendación", width="large", required=True),
+                "Fecha de inicio": st.column_config.DateColumn(
+                    "Fecha de inicio", format="YYYY-MM-DD",
+                    default=_qdate.today()),
+            },
+        )
+        if st.button("💾 Guardar recomendaciones", key=f"bfq_recs_save_{_iid}"):
+            _qrows = [{"id": r.get("id") or "",
+                       "text": r.get("Recomendación") or "",
+                       "started_at": r.get("Fecha de inicio")}
+                      for _, r in _qedited.iterrows()]
+            if _qsave(_iid, _qrows):
+                st.session_state[_q_ss] = _qlist(_iid)
+                st.session_state.pop(f"bfq_recs_{_iid}", None)
+                st.session_state.pop(f"recs_editor_{_iid}", None)
+                st.success("Recomendaciones guardadas.")
+                st.rerun()
+            else:
+                st.error("No se pudieron guardar.")
         _s1, _s2 = st.columns(2)
         with _s1:
             _elab = st.text_input("Elaborado por", value=_me_name,
@@ -254,6 +305,16 @@ for _iid, _tag, _d in _pending:
                 else:
                     from core.briefing_queue import approve_and_send, update_draft
                     update_draft(_iid, summary=_sum, diagnosis=_diag)
+                    # Persistir también la tabla de recomendaciones tal como
+                    # está en pantalla (por si no presionó Guardar).
+                    try:
+                        _qsave(_iid, [{"id": r.get("id") or "",
+                                       "text": r.get("Recomendación") or "",
+                                       "started_at": r.get("Fecha de inicio")}
+                                      for _, r in _qedited.iterrows()])
+                        st.session_state[_q_ss] = _qlist(_iid)
+                    except Exception:
+                        pass
                     with st.spinner("Aprobando, generando PDF final y "
                                     "enviando al cliente…"):
                         _res = approve_and_send(
