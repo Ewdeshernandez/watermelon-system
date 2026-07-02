@@ -12,6 +12,14 @@
 create index if not exists idx_live_readings_trend
   on public.live_readings (instance_id, variable, metric, captured_at);
 
+-- 1b) Índice COVERING (v3.31.407 — APLICADO EN PROD el 2026-07-02).
+-- El índice de arriba no basta: el agregado de 8 días leía ~100k filas del
+-- HEAP (18.7s → statement timeout de la API). Con INCLUDE (value) el plan
+-- es un Index Only Scan y la misma consulta baja a <1s.
+create index concurrently if not exists idx_live_readings_trend_cov
+  on public.live_readings (instance_id, variable, metric, captured_at)
+  include (value);
+
 -- 2) Función de downsampling por baldes de tiempo
 create or replace function public.trend_bucketed(
     p_instance text,
