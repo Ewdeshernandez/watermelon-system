@@ -704,6 +704,25 @@ def build_asset_briefing(
     try:
         from core.briefing_figures import waveform_history_table
         wf_history = waveform_history_table(instance_id)
+        # Los snapshots no guardan la unidad → completarla desde la config
+        # de canales: match por plane_label y fallback por tipo de medida.
+        _unit_by_family = {}
+        for c in data["channels"]:
+            _unit_by_family.setdefault(c.get("family", ""), c.get("unit", ""))
+        _unit_by_plane = {str(c.get("plane_label", "")).strip().upper():
+                          c.get("unit", "") for c in data["channels"]}
+        for r in wf_history:
+            if r.get("unit"):
+                continue
+            canal_up = str(r.get("canal", "")).upper()
+            r["unit"] = _unit_by_plane.get(canal_up, "")
+            if not r["unit"]:
+                if "ACEL" in canal_up or "ACCEL" in canal_up:
+                    r["unit"] = _unit_by_family.get("Acceleration", "g")
+                elif "VEL" in canal_up or "VT" in canal_up:
+                    r["unit"] = _unit_by_family.get("Velocity", "in/s")
+                else:
+                    r["unit"] = _unit_by_family.get("Proximity", "mil pp")
     except Exception as e:
         log.warning("wf_history falló: %s", e)
         wf_history = []

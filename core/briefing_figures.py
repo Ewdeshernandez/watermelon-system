@@ -1049,36 +1049,44 @@ def _trend_analysis(section: str, series: List[Dict[str, Any]],
 
 def waveform_history_table(instance_id: str,
                            max_snaps: int = 10) -> List[Dict[str, Any]]:
-    """Métricas históricas de forma de onda (v3.31.408): una fila por
-    canal × snapshot con PK / PK-PK / RMS / unidad / factor de cresta,
-    de los últimos `max_snaps` snapshots (el LRU guarda máx 10).
-    Para la tabla 'Métricas de forma de onda' del reporte."""
+    """Métricas de forma de onda INICIAL vs FINAL (v3.31.409): por cada
+    canal, SOLO dos filas — la forma de onda más antigua disponible (ej. el
+    lunes anterior) y la más reciente (la del día del reporte), con
+    PK / PK-PK / RMS / unidad / factor de cresta. Espejo de la tabla
+    comparativa del Reporte de Monitoreo en Línea. Dedup por (canal, fecha)
+    — los snapshots sensor-aware traían el mismo canal repetido."""
     import re
 
-    rows: List[Dict[str, Any]] = []
     try:
         import numpy as np
 
         from core import history_storage as hs
         from core.waveform_history import load_waveform_snapshot
         snaps = (hs.list_snapshots(instance_id, "waveform") or [])[:max_snaps]
+        by_canal: Dict[str, Dict[str, Dict[str, Any]]] = {}
         for smeta in snaps:
             sid = smeta.get("snapshot_id", "")
             m = re.search(r"(\d{8})_(\d{6})", sid)
-            fecha = ""
-            if m:
-                d, t = m.group(1), m.group(2)
-                fecha = f"{d[6:8]}/{d[4:6]}/{d[:4]} {t[:2]}:{t[2:4]}"
+            if not m:
+                continue
+            d, t = m.group(1), m.group(2)
+            sort_key = d + t
+            fecha = f"{d[6:8]}/{d[4:6]}/{d[:4]} {t[:2]}:{t[2:4]}"
             try:
                 payload = load_waveform_snapshot(instance_id, sid)
             except Exception:
                 payload = None
             if not payload:
                 continue
+            p_unit = (payload.get("amp_unit", "") or payload.get("unit", ""))
             for s in payload.get("sensors", []) or []:
                 vals = s.get("values")
+                canal = (s.get("sensor_label") or "—").strip()
                 if not vals:
                     continue
+                slot = by_canal.setdefault(canal, {})
+                if sort_key in slot:
+                    continue  # canal repetido en el mismo snapshot → dedup
                 try:
                     arr = np.asarray(vals, float)
                     arr = arr[np.isfinite(arr)]
@@ -1087,22 +1095,35 @@ def waveform_history_table(instance_id: str,
                     ac = arr - float(np.mean(arr))
                     rms = float(np.sqrt(np.mean(ac ** 2)))
                     pk = float(np.max(np.abs(ac)))
-                    rows.append({
+                    slot[sort_key] = {
                         "fecha": fecha,
-                        "canal": s.get("sensor_label", "—"),
+                        "canal": canal,
                         "pk": pk,
                         "pkpk": float(np.max(ac) - np.min(ac)),
                         "rms": rms,
-                        "unit": s.get("amp_unit", "") or s.get("unit", ""),
+                        "unit": (s.get("amp_unit", "") or s.get("unit", "")
+                                 or s.get("y_unit", "") or p_unit),
                         "crest": (pk / rms) if rms > 1e-12 else 0.0,
-                    })
+                    }
                 except Exception:
                     continue
-        rows.sort(key=lambda r: (r["canal"], r["fecha"]), reverse=False)
-        rows.sort(key=lambda r: r["canal"])
+
+        # Por canal: SOLO la más reciente (final) y la más antigua (inicial),
+        # más reciente primero (como la tabla comparativa de la casa).
+        rows: List[Dict[str, Any]] = []
+        for canal in sorted(by_canal):
+            slot = by_canal[canal]
+            if not slot:
+                continue
+            keys = sorted(slot)
+            newest, oldest = keys[-1], keys[0]
+            rows.append(slot[newest])
+            if oldest != newest:
+                rows.append(slot[oldest])
+        return rows
     except Exception as e:
         log.warning("waveform_history_table(%s) falló: %s", instance_id, e)
-    return rows
+        return []
 
 
 def figures_available(instance_id: str) -> Dict[str, Any]:
