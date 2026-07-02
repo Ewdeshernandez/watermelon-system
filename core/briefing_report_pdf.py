@@ -188,40 +188,71 @@ def generate_briefing_pdf(
         for i, rec in enumerate(recommendations, start=1):
             body.append(Paragraph(f"{i}. {paragraph_safe(rec)}", st_body))
 
-    # ---- Canales (Overall + 1X/2X) ----
+    # ---- Tabular List (espejo de la vista de la app) ----
     if channels:
-        body.append(Paragraph("CANALES — OVERALL + VECTORES 1X / 2X (API 670)", styles["WMTOC1"]))
-        st_cell = ParagraphStyle("c", fontName=REGULAR, fontSize=8.5,
-                                 textColor=colors.HexColor("#111827"), leading=11)
-        st_cn = ParagraphStyle("cn", fontName="Courier", fontSize=8.5,
-                               textColor=colors.HexColor("#111827"), leading=11)
-        st_hd = ParagraphStyle("hd", fontName=BOLD, fontSize=8.5,
-                               textColor=colors.HexColor("#0f172a"), leading=11)
-        head = ["Estado", "Canal", "Ubicación", "Overall", "Unit", "1X", "2X"]
+        body.append(Paragraph("TABULAR LIST — CANALES (API 670 / ISO 20816-3)", styles["WMTOC1"]))
+        st_cell = ParagraphStyle("c", fontName=REGULAR, fontSize=7,
+                                 textColor=colors.HexColor("#111827"), leading=9)
+        st_cn = ParagraphStyle("cn", fontName="Courier", fontSize=7,
+                               textColor=colors.HexColor("#111827"), leading=9)
+        st_hd = ParagraphStyle("hd", fontName=BOLD, fontSize=6.1,
+                               textColor=colors.HexColor("#1d4ed8"), leading=8)
+
+        def _num(v, digits=2):
+            try:
+                f = float(v)
+                return f"{f:.{digits}f}" if f > 0 else "—"
+            except Exception:
+                return "—"
+
+        def _rpm_txt(v):
+            try:
+                f = float(v)
+                return f"{f:.0f}" if f > 0 else "—"
+            except Exception:
+                return "—"
+
+        head = ["MACHINE", "POINT", "RPM", "FAMILY", "ALARM", "DANGER",
+                "CRITERION BASED", "STATUS", "OVERALL", "UNIT",
+                "0.5X", "1X", "2X"]
         data = [[Paragraph(h, st_hd) for h in head]]
         row_styles = []
+        _STATUS_COL = 7
         for i, c in enumerate(channels, start=1):
             fg, bg = _sev_colors(c.get("status", ""))
             data.append([
+                Paragraph(c.get("machine", tag), st_cell),
+                Paragraph(c.get("plane_label") or c.get("sensor_label", "—"), st_cell),
+                Paragraph(_rpm_txt(c.get("rpm")), st_cn),
+                Paragraph(c.get("family", "—"), st_cell),
+                Paragraph(_num(c.get("alarm")), st_cn),
+                Paragraph(_num(c.get("danger")), st_cn),
+                Paragraph(c.get("criterion", "ISO 20816-3"), st_cell),
                 Paragraph(c.get("status", "—"), st_cell),
-                Paragraph(c.get("sensor_label", "—"), st_cn),
-                Paragraph(c.get("plane_label", "—"), st_cell),
                 Paragraph(str(c.get("value", "—")), st_cn),
                 Paragraph(c.get("unit", ""), st_cell),
+                Paragraph(str(c.get("x05_amp", "—")), st_cn),
                 Paragraph(str(c.get("x1_amp", "—")), st_cn),
                 Paragraph(str(c.get("x2_amp", "—")), st_cn),
             ])
-            row_styles.append(("TEXTCOLOR", (0, i), (0, i), colors.HexColor(fg)))
-            row_styles.append(("BACKGROUND", (0, i), (0, i), colors.HexColor(bg)))
-        ctbl = Table(data, colWidths=[2.0 * cm, 2.4 * cm, 3.4 * cm, 2.2 * cm,
-                                      1.9 * cm, 2.0 * cm, 2.0 * cm])
+            row_styles.append(("TEXTCOLOR", (_STATUS_COL, i), (_STATUS_COL, i), colors.HexColor(fg)))
+            row_styles.append(("BACKGROUND", (_STATUS_COL, i), (_STATUS_COL, i), colors.HexColor(bg)))
+        ctbl = Table(data, colWidths=[1.45 * cm, 2.1 * cm, 1.0 * cm, 1.45 * cm,
+                                      1.05 * cm, 1.2 * cm, 2.35 * cm, 1.25 * cm,
+                                      1.35 * cm, 1.05 * cm, 0.85 * cm, 0.85 * cm,
+                                      0.85 * cm], repeatRows=1)
         ctbl.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#f1f5f9")),
             ("LINEBELOW", (0, 0), (-1, -1), 0.3, colors.HexColor(_LINE)),
             ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 3.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
         ] + row_styles))
         body.append(ctbl)
+        body.append(Paragraph(
+            "Overall según norma del punto · Los órdenes 0.5X/1X/2X se referencian "
+            "al keyphasor; en puntos del gas generator (CRF, ~10200 cpm) no aplican "
+            "y se reporta solo el Overall.", st_cap))
 
     # ---- Figuras ----
     # Ciclo 23.170 — Tendencias SEPARADAS por sección (CRF-TRF, Generador, ...)
@@ -237,7 +268,11 @@ def generate_briefing_pdf(
         _equipo = f"Unidad {tag}"
         _n = 0
 
-        def _add_fig(png, head, big_h):
+        st_analysis = ParagraphStyle("bfAnalysis", parent=styles["WMBody"],
+                                     alignment=TA_JUSTIFY, spaceBefore=2,
+                                     spaceAfter=10)
+
+        def _add_fig(png, head, big_h, analysis: str = ""):
             nonlocal _n
             body.append(Paragraph(head, styles["WMTOC2"]))
             try:
@@ -251,6 +286,8 @@ def generate_briefing_pdf(
                     _cap += f", {_fecha}"
                 _cap += f" · {_equipo}"
                 body.append(Paragraph(_cap, st_cap))
+                if analysis:
+                    body.append(Paragraph(paragraph_safe(analysis), st_analysis))
             except Exception:
                 pass
 
@@ -262,13 +299,15 @@ def generate_briefing_pdf(
                 head += f" — {sec}"
             if descr:
                 head += f" ({descr})"
-            _add_fig(t.get("png"), head, 6.2 * cm)
+            _add_fig(t.get("png"), head, 6.2 * cm,
+                     analysis=(t.get("analysis") or ""))
 
         for key in _others:
             cap = _FIG_CAPTIONS.get(key, key.title())
             _add_fig(figures[key],
                      cap,
-                     10.6 * cm if key in ("spectrum", "waveform") else 8.0 * cm)
+                     10.6 * cm if key in ("spectrum", "waveform") else 8.0 * cm,
+                     analysis=(figures.get(f"{key}_analysis") or ""))
 
     return render_report_pdf(meta, body)
 

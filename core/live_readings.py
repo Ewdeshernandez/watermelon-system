@@ -60,6 +60,7 @@ VALID_METRICS = {
     "Direct",        # overall RMS / 0-pk
     "Gap",           # DC gap voltage del proximity probe
     "BiasVoltage",   # health del transducer accel/velocity
+    "0.5X_Ampl",     # medio orden — magnitud (inestabilidad/oil whirl)
     "1X_Ampl",       # vector síncrono primer orden — magnitud
     "1X_Phase",      # vector síncrono primer orden — fase (deg)
     "2X_Ampl",       # segundo orden — magnitud

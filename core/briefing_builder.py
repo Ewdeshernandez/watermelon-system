@@ -27,6 +27,44 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # 1) Datos del activo (salud / KPIs / canales) — reusa live_report_builder
 # ---------------------------------------------------------------------------
+
+# Ciclo 23.167 (espejo de Tabular List) — planos que NO comparten la velocidad
+# del keyphasor. En máquinas de doble eje (LM6000), los puntos CRF pertenecen
+# al núcleo del gas generator que gira a ~10200 cpm, NO a los 3600 cpm del eje
+# de potencia/generador. La tabla del briefing debe mostrar la velocidad REAL
+# del eje de cada punto, y los órdenes 0.5X/1X/2X (referenciados al keyphasor
+# de 3600) no aplican a esos puntos → se dejan en blanco.
+_OFFSHAFT_RPM_CPM: Dict[str, float] = {"CRF": 10200.0}
+
+
+def _point_rpm(plane_label: str, sensor_label: str, base_rpm: float) -> float:
+    """RPM del eje al que pertenece el punto (CRF → gas generator)."""
+    blob = f"{plane_label or ''} {sensor_label or ''}".upper()
+    for tok, rpm in _OFFSHAFT_RPM_CPM.items():
+        if tok in blob:
+            return rpm
+    return base_rpm
+
+
+def _harmonics_apply(plane_label: str, sensor_label: str) -> bool:
+    """False si el punto está en un eje distinto al del keyphasor: los
+    órdenes 0.5X/1X/2X no representan su condición real (solo Overall)."""
+    blob = f"{plane_label or ''} {sensor_label or ''}".upper()
+    return not any(tok in blob for tok in _OFFSHAFT_RPM_CPM)
+
+
+def _channel_criterion(sensor_match: Optional[Dict[str, Any]], unit: str) -> str:
+    """Criterio normativo del punto (espejo de Tabular List Ciclo 22.1):
+    API 670 + ISO 7919-3 solo si el sensor es proximity Y la unidad es de
+    desplazamiento (mil/µm); todo lo demás rige por ISO 20816-3."""
+    stype = str((sensor_match or {}).get("sensor_type", "")).lower()
+    u = (unit or str((sensor_match or {}).get("unit_native", "") or "")).lower()
+    is_disp = ("mil" in u or "µm" in u or "um" in u.replace("µ", "u"))
+    if stype == "proximity" and is_disp:
+        return "API 670 + ISO 7919-3 / ISO 20816-3"
+    return "ISO 20816-3"
+
+
 def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[str, Any]]:
     from core.live_readings import latest_for_instance
     from core.live_report_builder import (
@@ -49,11 +87,11 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
     n_alarm = severity_summary.get("Alarma", 0)
     status = "Crítica" if n_danger else ("Atención" if n_alarm else "Operación normal")
 
-    # vectores 1X/2X
+    # vectores 0.5X/1X/2X
     vec: Dict[str, Dict[str, Any]] = {}
     for r in latest:
         s, m = r.get("sensor_label"), r.get("metric")
-        if s and m in ("1X_Ampl", "2X_Ampl"):
+        if s and m in ("0.5X_Ampl", "1X_Ampl", "2X_Ampl"):
             vec.setdefault(s, {})[m] = r.get("value")
 
     def _a(v):
@@ -62,18 +100,58 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
         except Exception:
             return "—"
 
+    # RPM base = velocidad live (keyphasor) o nominal del activo
+    base_rpm = 0.0
+    try:
+        if speed_row and speed_row.get("value") is not None:
+            base_rpm = float(speed_row["value"])
+    except Exception:
+        base_rpm = 0.0
+    if base_rpm <= 0:
+        try:
+            base_rpm = float(getattr(instance_obj, "nominal_rpm", 0) or 0)
+        except Exception:
+            base_rpm = 0.0
+
+    tag = (getattr(instance_obj, "tag", None) or instance_id).upper()
+
+    try:
+        from core.sensor_map import sensor_unit_family as _fam_fn
+    except Exception:
+        _fam_fn = None  # type: ignore
+
     channels = []
     for r in rendered_rows:
         sl = r["sensor_label"]
+        pl = r.get("plane_label") or "—"
         v = vec.get(sl, {})
         try:
             val = f"{float(r['value']):.2f}" if r["value"] is not None else "—"
         except Exception:
             val = "—"
+        sensor_match = sensor_lookup.get(sl)
+        family = ""
+        if _fam_fn is not None and sensor_match is not None:
+            try:
+                family = _fam_fn(sensor_match)
+            except Exception:
+                family = ""
+        if not family or family == "Auto":
+            u = (r["unit"] or "").lower()
+            family = ("Proximity" if ("mil" in u or "µm" in u or "um" in u)
+                      else "Acceleration" if u.startswith("g") else "Velocity")
+        harm_ok = _harmonics_apply(pl, sl)
         channels.append({
-            "sensor_label": sl, "plane_label": r.get("plane_label") or "—",
+            "machine": tag,
+            "sensor_label": sl, "plane_label": pl,
+            "rpm": _point_rpm(pl, sl, base_rpm),
+            "family": family,
+            "alarm": r.get("alarm_used", 0.0), "danger": r.get("danger_used", 0.0),
+            "criterion": _channel_criterion(sensor_match, r["unit"]),
             "value": val, "unit": r["unit"], "status": r["status"],
-            "x1_amp": _a(v.get("1X_Ampl")), "x2_amp": _a(v.get("2X_Ampl")),
+            "x05_amp": _a(v.get("0.5X_Ampl")) if harm_ok else "—",
+            "x1_amp": _a(v.get("1X_Ampl")) if harm_ok else "—",
+            "x2_amp": _a(v.get("2X_Ampl")) if harm_ok else "—",
         })
 
     return {
