@@ -36,7 +36,7 @@ _PALETTE = ["#1d4ed8", "#dc2626", "#059669", "#7c3aed", "#d97706", "#0891b2",
 # de potencia). Los marcadores de armónicos del espectro deben referenciarse
 # a la velocidad REAL del eje de cada canal.
 _OFFSHAFT_RPM_CPM = {"CRF": 10200.0}
-_N_HARMONICS = 5  # marcadores 1X..5X
+_N_HARMONICS = 4  # marcadores 1X..4X sobre cada espectro
 
 
 def _shaft_cpm_for_label(label: str, base_rpm: float) -> float:

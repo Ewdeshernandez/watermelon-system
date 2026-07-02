@@ -448,6 +448,81 @@ def _ai_enhance(sections: Dict[str, Any], tag: str, period: str,
 
 
 # ---------------------------------------------------------------------------
+# 2b) Portada: consecutivo por equipo + rango del periodo evaluado
+# ---------------------------------------------------------------------------
+_CONSEC_KEY = "briefing_consecutive"
+_CONSEC_PREFIX = "SIGA-REP-TEC-WM"
+
+
+def _tag_code(tag: str) -> str:
+    """Código corto del equipo para el consecutivo: 'TES 3 TM2500' → 'TES3'."""
+    toks = [t for t in str(tag or "").strip().upper().split() if t]
+    if not toks:
+        return "WM"
+    code = toks[0]
+    if len(toks) >= 2 and toks[1].isdigit():
+        code += toks[1]
+    return "".join(c for c in code if c.isalnum()) or "WM"
+
+
+def next_consecutive(instance_id: str, tag: str = "", claim: bool = False) -> str:
+    """Consecutivo del briefing del equipo: SIGA-REP-TEC-WM-<TAG>-<NNN>.
+
+    claim=False solo MUESTRA el siguiente número (previews / PDFs ad-hoc no
+    consumen numeración). claim=True lo consume (creación de borrador en la
+    cola — un número por ciclo de reporte)."""
+    n = 1
+    try:
+        from core.instance_state import (get_instance_parameters,
+                                         update_instance_parameter)
+        n = int(get_instance_parameters(instance_id).get(_CONSEC_KEY, 0) or 0) + 1
+        if claim:
+            update_instance_parameter(instance_id, _CONSEC_KEY, n)
+    except Exception as e:
+        log.warning("next_consecutive(%s) falló: %s", instance_id, e)
+    return f"{_CONSEC_PREFIX}-{_tag_code(tag or instance_id)}-{n:03d}"
+
+
+def _period_range_str(period_label: str) -> str:
+    """Rango real del periodo evaluado: últimos 7 días (Semanal) o 30 días
+    (Mensual), terminando hoy (Bogotá). Ej: '2026-06-25 – 2026-07-02'."""
+    from datetime import datetime, timedelta
+    try:
+        from zoneinfo import ZoneInfo
+        end = datetime.now(ZoneInfo("America/Bogota")).date()
+    except Exception:
+        end = datetime.now().date()
+    days = 30 if (period_label or "").lower().startswith("mensual") else 7
+    start = end - timedelta(days=days)
+    return f"{start.isoformat()} – {end.isoformat()}"
+
+
+def _strip_ai_reco_block(md: str) -> str:
+    """Quita del resumen IA el bloque de 'Recomendaciones ...' (encabezado +
+    items numerados/bullets): las recomendaciones del reporte son las del
+    especialista (sección propia) y no deben aparecer duplicadas."""
+    if not md:
+        return md
+    out, skipping = [], False
+    for ln in md.splitlines():
+        s = ln.strip()
+        low = s.lower()
+        is_heading = (s.startswith("#")
+                      or (s.startswith("**") and s.endswith("**") and len(s) > 4))
+        if is_heading and ("recomendacion" in low or "recomendación" in low):
+            skipping = True
+            continue
+        if skipping:
+            # Dentro del bloque: saltar blancos e items (1., -, •, **1.)
+            import re as _re
+            if not s or _re.match(r"^(\d+[\.\)]|[-•*]\s|\*\*\d)", s):
+                continue
+            skipping = False  # primera línea normal → terminó el bloque
+        out.append(ln)
+    return "\n".join(out).strip()
+
+
+# ---------------------------------------------------------------------------
 # 3) Builder por activo
 # ---------------------------------------------------------------------------
 def _render_sensor_map(instance_obj: Any, channels: List[Dict[str, Any]]) -> Optional[bytes]:
@@ -542,6 +617,10 @@ def build_asset_briefing(
             if v:
                 sections[k] = v
 
+    # Las recomendaciones que la IA mete dentro del resumen se ELIMINAN:
+    # duplican la sección RECOMENDACIONES (que gestiona el especialista).
+    sections["summary"] = _strip_ai_reco_block(sections.get("summary", ""))
+
     # Recomendaciones GESTIONADAS por el especialista (persisten entre
     # reportes, con fecha de inicio). Si existen, MANDAN sobre el borrador
     # automático: el sistema no inventa recomendaciones cuando el analista
@@ -575,6 +654,11 @@ def build_asset_briefing(
         "train_description": train_bare,
         "client": client,
         "report_date": _gen_ts,  # meta_extra puede sobreescribir si la UI lo pasa
+        # Portada: rango REAL del periodo evaluado + consecutivo del equipo.
+        # El consecutivo aquí es solo "peek" (no consume numeración); el
+        # definitivo viene en meta_extra desde la cola de aprobación.
+        "period": _period_range_str(period_label),
+        "consecutive": next_consecutive(instance_id, tag, claim=False),
     }
     if meta_extra:
         pdf_meta.update({k: v for k, v in meta_extra.items() if v})
@@ -644,12 +728,23 @@ def build_asset_draft(
         sections = _ai_enhance(sections, tag, period_label, data,
                                instance_obj=instance_obj, figures=figures)
 
+    # El resumen del borrador tampoco lleva el bloque de recomendaciones IA
+    sections["summary"] = _strip_ai_reco_block(sections.get("summary", ""))
+
     try:
-        from core.briefing_queue import new_pending_draft
+        from core.briefing_queue import new_pending_draft, get_draft
+        # Un consecutivo por CICLO de reporte: si ya hay borrador pendiente
+        # con número (re-corrida del cron), se conserva; si no, se reclama.
+        _prev = get_draft(instance_id) or {}
+        if _prev.get("status") == "pendiente" and _prev.get("consecutive"):
+            _consec = _prev["consecutive"]
+        else:
+            _consec = next_consecutive(instance_id, tag, claim=True)
         ok = new_pending_draft(
             instance_id, period_label,
             summary=sections["summary"], diagnosis=sections["diagnosis"],
             health=data["health"], kpis=data["kpis"],
+            consecutive=_consec,
         )
     except Exception as e:
         log.error("draft queue falló para %s: %s", instance_id, e)

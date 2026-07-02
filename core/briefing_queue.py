@@ -88,12 +88,14 @@ def clear_draft(instance_id: str) -> bool:
 def new_pending_draft(instance_id: str, period: str,
                       summary: str, diagnosis: str,
                       health: Optional[Dict[str, Any]] = None,
-                      kpis: Optional[Dict[str, Any]] = None) -> bool:
+                      kpis: Optional[Dict[str, Any]] = None,
+                      consecutive: str = "") -> bool:
     """Crea/reemplaza el borrador PENDIENTE del activo (lo llama el cron)."""
     return save_draft(instance_id, {
         "period": period, "created_at": _now_iso(),
         "status": STATUS_PENDING,
         "summary": summary or "", "diagnosis": diagnosis or "",
+        "consecutive": consecutive or "",
         "prepared_by": "", "prepared_role": "",
         "approved_by": "", "approved_role": "",
         "approved_at": "", "sent_at": "", "sent_result": "",
@@ -150,6 +152,15 @@ def approve_and_send(instance_id: str, *,
             "prepared_label": "Elaborado por:",
             "reviewed_label": "Aprobado por:",
         }
+        # Consecutivo definitivo: el reclamado al crear el borrador; si el
+        # borrador es viejo y no trae, se reclama uno nuevo aquí.
+        _consec = (draft.get("consecutive") or "").strip()
+        if not _consec:
+            from core.briefing_builder import next_consecutive
+            _consec = next_consecutive(instance_id,
+                                       getattr(inst, "tag", "") or "",
+                                       claim=True)
+        meta_extra["consecutive"] = _consec
         if (prepared_role or "").strip():
             meta_extra["prepared_role"] = prepared_role.strip()
         if (approved_role or "").strip():

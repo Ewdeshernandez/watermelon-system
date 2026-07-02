@@ -239,6 +239,7 @@ for _iid, _tag, _d in _pending:
                             "reviewed_by": _aprb,
                             "prepared_label": "Elaborado por:",
                             "reviewed_label": "Aprobado por:",
+                            "consecutive": _d.get("consecutive", ""),
                         },
                     )
                 st.session_state[f"bfq_pdf_{_iid}"] = _pdf
