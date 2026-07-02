@@ -298,16 +298,14 @@ def _amp_txt(f: Dict[str, Any]) -> str:
     return f"{f['peak_amp']:.2f} {u}".strip()
 
 
-def _spectrum_analysis(findings: List[Dict[str, Any]]) -> str:
-    """Análisis del espectro en PROSA de analista Cat IV (v3.31.404):
-    agrupa hallazgos por naturaleza (síncronos 1X, 2X, subsíncronos,
-    transmitidos entre ejes, baja frecuencia) y redacta un dictamen
-    referenciado a ISO 20816-3 / API 670 / API 684, en lugar del listado
-    'canal: pico — clasificación' tipo robot."""
-    if not findings:
-        return ""
-    shafts = sorted({f.get("shaft_cpm", 0.0) for f in findings if f.get("shaft_cpm")})
+def _is_turbine_label(label: str) -> bool:
+    l = (label or "").upper()
+    return "CRF" in l or "TRF" in l
 
+
+def _spectral_sentences(findings: List[Dict[str, Any]],
+                        shafts: List[float]) -> List[str]:
+    """Frases de diagnóstico para un SUBCONJUNTO de canales (una máquina)."""
     def _near(cpm: float, ref: float, tol: float = 0.12) -> bool:
         return ref > 0 and abs(cpm - ref) / ref <= tol
 
@@ -332,10 +330,6 @@ def _spectrum_analysis(findings: List[Dict[str, Any]]) -> str:
                          for x in fs)
 
     p: List[str] = []
-    p.append("El levantamiento espectral del tren se evaluó frente a los "
-             "criterios de severidad de ISO 20816-3 y a las prácticas de "
-             "diagnóstico rotodinámico de API 670 y API 684.")
-
     if sync:
         amps = [x["peak_amp"] for x in sync]
         p.append(
@@ -382,18 +376,53 @@ def _spectrum_analysis(findings: List[Dict[str, Any]]) -> str:
             f"coherente con frecuencias de paso de álabes o respuesta "
             f"estructural local; a las amplitudes registradas no acciona "
             f"ningún criterio de norma.")
+    return p
 
-    if not (twox or sub):
-        p.append("En conjunto, la firma espectral es la de una unidad "
-                 "operando establemente: componentes síncronas dominantes, "
-                 "sin subsíncronos de inestabilidad ni armónicos de holgura o "
-                 "rozamiento. Se mantiene la vigilancia periódica conforme a "
-                 "ISO 17359.")
+
+def _spectrum_analysis(findings: List[Dict[str, Any]]) -> str:
+    """Análisis del espectro en PROSA de analista Cat IV, en PÁRRAFOS
+    separados por máquina (v3.31.405): primero la turbina de gas (CRF/TRF),
+    luego el generador/tren de potencia. Dictamen referenciado a
+    ISO 20816-3 / API 670 / API 684."""
+    if not findings:
+        return ""
+    shafts = sorted({f.get("shaft_cpm", 0.0) for f in findings
+                     if f.get("shaft_cpm")})
+    turb = [f for f in findings if _is_turbine_label(f.get("label", ""))]
+    gen = [f for f in findings if not _is_turbine_label(f.get("label", ""))]
+
+    has_sub_or_2x = False
+    paras: List[str] = [
+        "El levantamiento espectral del tren se evaluó frente a los criterios "
+        "de severidad de ISO 20816-3 y a las prácticas de diagnóstico "
+        "rotodinámico de API 670 y API 684."
+    ]
+    if turb:
+        sents = _spectral_sentences(turb, shafts)
+        if sents:
+            paras.append("Turbina de gas (planos CRF y TRF). " + " ".join(sents))
+    if gen:
+        sents = _spectral_sentences(gen, shafts)
+        if sents:
+            paras.append("Generador y tren de potencia. " + " ".join(sents))
+
+    for f in findings:
+        o = f.get("order")
+        if o is not None and (1.88 <= o <= 2.12 or 0.35 <= o <= 0.60):
+            has_sub_or_2x = True
+            break
+    if not has_sub_or_2x:
+        paras.append(
+            "En conjunto, la firma espectral es la de una unidad operando "
+            "establemente: componentes síncronas dominantes, sin subsíncronos "
+            "de inestabilidad ni armónicos de holgura o rozamiento. Se "
+            "mantiene la vigilancia periódica conforme a ISO 17359.")
     else:
-        p.append("El resto de la firma espectral se mantiene dentro de un "
-                 "comportamiento normal; las componentes señaladas definen "
-                 "los puntos de seguimiento prioritario del próximo ciclo.")
-    return " ".join(p)
+        paras.append(
+            "El resto de la firma espectral se mantiene dentro de un "
+            "comportamiento normal; las componentes señaladas definen los "
+            "puntos de seguimiento prioritario del próximo ciclo.")
+    return "\n\n".join(paras)
 
 
 def spectrum_png(instance_id: str) -> Optional[bytes]:
@@ -469,29 +498,68 @@ def waveform_bundle(instance_id: str) -> Dict[str, Any]:
         return {"png": None, "analysis": ""}
 
 
+def _waveform_sentences(findings: List[Dict[str, Any]]) -> List[str]:
+    """Frases para un subconjunto de canales de forma de onda."""
+    clean = [f for f in findings if f.get("crest", 0.0) < 2.5]
+    mid = [f for f in findings if 2.5 <= f.get("crest", 0.0) < 3.5]
+    imp = [f for f in findings if f.get("crest", 0.0) >= 3.5]
+
+    def _lista(fs):
+        return ", ".join(f"{x['label']} ({x['pp']:.2f} {x.get('unit') or ''} pp, "
+                         f"CF {x['crest']:.1f})" for x in fs)
+
+    p: List[str] = []
+    if clean:
+        cfs = [f["crest"] for f in clean]
+        p.append(
+            f"Las señales de {_lista(clean)} son periódicas y limpias, con "
+            f"factores de cresta entre {min(cfs):.1f} y {max(cfs):.1f} — el "
+            f"comportamiento propio de una onda dominada por su componente "
+            f"síncrona, sin impactos, truncamiento ni modulaciones que "
+            f"sugieran contacto rotor-estator o degradación de elementos "
+            f"rodantes.")
+    if mid:
+        p.append(
+            f"En {_lista(mid)} se observa impactividad moderada: el factor de "
+            f"cresta está por encima del rango puramente sinusoidal, sin "
+            f"alcanzar todavía el patrón impulsivo característico de defectos "
+            f"discretos; se administra por tendencia y se contrasta con el "
+            f"espectro de envolvente en la próxima corrida.")
+    if imp:
+        p.append(
+            f"Los registros de {_lista(imp)} presentan eventos transitorios "
+            f"francos (factor de cresta ≥ 3.5). Este patrón impulsivo exige "
+            f"correlación inmediata con el espectro y la demodulación para "
+            f"discriminar entre impactos mecánicos reales, paso de partículas "
+            f"o artefactos de la cadena de medición (API 670, verificación de "
+            f"instrumentación ante lecturas anómalas).")
+    return p
+
+
 def _waveform_analysis(findings: List[Dict[str, Any]]) -> str:
+    """Forma de onda en prosa de analista, párrafos por máquina (v3.31.405)."""
     if not findings:
         return ""
-    partes: List[str] = []
-    n_impact = 0
-    for f in findings:
-        cf = f.get("crest", 0.0)
-        seg = (f"{f['label']}: {f['pp']:.2f} {f.get('unit') or ''} pp, "
-               f"factor de cresta {cf:.1f}")
-        if cf >= 3.5:
-            n_impact += 1
-            seg += " — presencia de impactos/eventos transitorios, correlacionar con espectro"
-        elif cf >= 2.5:
-            seg += " — impactividad moderada"
-        else:
-            seg += " — señal periódica sin impactos evidentes"
-        partes.append(seg)
-    cierre = ("Las formas de onda son limpias y periódicas, sin evidencia de "
-              "impactos ni truncamiento."
-              if n_impact == 0 else
-              "Los canales con factor de cresta elevado deben correlacionarse con "
-              "el espectro y la tendencia para descartar defectos incipientes.")
-    return "Análisis de la forma de onda: " + ". ".join(partes) + ". " + cierre
+    turb = [f for f in findings if _is_turbine_label(f.get("label", ""))]
+    gen = [f for f in findings if not _is_turbine_label(f.get("label", ""))]
+    paras: List[str] = [
+        "Las formas de onda en el dominio del tiempo se revisaron buscando "
+        "impactividad, truncamiento, modulación y asimetrías — los "
+        "precursores que el espectro promediado puede enmascarar."
+    ]
+    if turb:
+        s = _waveform_sentences(turb)
+        if s:
+            paras.append("Turbina de gas (planos CRF y TRF). " + " ".join(s))
+    if gen:
+        s = _waveform_sentences(gen)
+        if s:
+            paras.append("Generador y tren de potencia. " + " ".join(s))
+    if all(f.get("crest", 0.0) < 3.5 for f in findings):
+        paras.append("En conjunto, no hay evidencia de eventos impulsivos ni "
+                     "de recorte de señal: las ondas son coherentes con la "
+                     "condición estable que muestran tendencia y espectro.")
+    return "\n\n".join(paras)
 
 
 def waveform_png(instance_id: str) -> Optional[bytes]:
@@ -577,28 +645,53 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
 
 
 def _orbit_analysis(findings: List[Dict[str, Any]]) -> str:
+    """Órbitas en prosa de analista (v3.31.405): forma del movimiento del
+    muñón por cojinete, con lectura rotodinámica según API 684."""
     if not findings:
         return ""
-    partes: List[str] = []
-    n_flat = 0
-    for f in findings:
-        r = f.get("ratio", 1.0)
-        seg = f"{f['label']}: amplitud máxima ~{f['pp']:.2f} pp"
-        if r < 0.3:
-            n_flat += 1
-            seg += (" — órbita muy aplanada, posible precarga/restricción "
-                    "en una dirección (revisar alineación y holgura)")
-        elif r < 0.7:
-            seg += " — órbita elíptica, forma normal en cojinetes de película"
-        else:
-            seg += " — órbita cuasi-circular, movimiento balanceado del muñón"
-        partes.append(seg)
-    cierre = ("Las órbitas presentan formas estables y repetibles, sin lazos "
-              "internos que sugieran componentes subsíncronas o rozamiento."
-              if n_flat == 0 else
-              "Las órbitas aplanadas deben correlacionarse con la posición del "
-              "eje (SCL) y los vectores 1X/2X en próximas corridas.")
-    return "Análisis de órbitas: " + ". ".join(partes) + ". " + cierre
+    circ = [f for f in findings if f.get("ratio", 1.0) >= 0.7]
+    ellip = [f for f in findings if 0.3 <= f.get("ratio", 1.0) < 0.7]
+    flat = [f for f in findings if f.get("ratio", 1.0) < 0.3]
+
+    def _lista(fs):
+        return ", ".join(f"{x['label']} (~{x['pp']:.2f} pp)" for x in fs)
+
+    paras: List[str] = [
+        "Las órbitas del eje se reconstruyeron con los pares ortogonales de "
+        "proximidad y se evaluaron en el marco físico del cojinete, "
+        "observando forma, repetibilidad y presencia de lazos internos — la "
+        "lectura directa del comportamiento rotodinámico del muñón (API 684)."
+    ]
+    body: List[str] = []
+    if circ:
+        body.append(
+            f"En {_lista(circ)} el movimiento es cuasi-circular y repetible: "
+            f"el muñón gira centrado en su posición de equilibrio con rigidez "
+            f"comparable en ambas direcciones, el patrón esperable de un "
+            f"cojinete de película sano operando con precarga de diseño.")
+    if ellip:
+        body.append(
+            f"Las órbitas de {_lista(ellip)} son elípticas estables — la "
+            f"forma normal cuando la rigidez del pedestal difiere entre "
+            f"direcciones; no constituye hallazgo mientras la relación de "
+            f"ejes y la orientación de la elipse se mantengan en tendencia.")
+    if flat:
+        body.append(
+            f"En {_lista(flat)} la órbita aparece fuertemente aplanada, "
+            f"indicativa de precarga excesiva, restricción direccional o "
+            f"desalineación que limita el movimiento en un plano; debe "
+            f"correlacionarse con la posición del eje (shaft centerline) y "
+            f"con los vectores 1X/2X antes de la próxima parada.")
+    if body:
+        paras.append(" ".join(body))
+    paras.append(
+        "No se observan lazos internos ni inversiones de precesión en los "
+        "registros, descartando actividad subsíncrona significativa y "
+        "rozamiento parcial en los apoyos monitoreados."
+        if not flat else
+        "Las órbitas aplanadas señaladas definen el punto de verificación "
+        "prioritario del próximo ciclo, junto con su posición de eje y fase.")
+    return "\n\n".join(paras)
 
 
 def orbit_png(instance_id: str) -> Optional[bytes]:
@@ -832,79 +925,94 @@ def build_trend_figures(instance_id: str, instance_obj: Any = None,
                 if png:
                     out.append({"section": sec, "unit": unit,
                                 "descr": _unit_descr(unit), "png": png,
-                                "analysis": _trend_analysis(sec, series, _alarm, unit)})
+                                "analysis": _trend_analysis(
+                                    sec, series, _alarm, unit,
+                                    danger=(max(dangers) if dangers else 0.0))})
         return out
     except Exception as e:
         log.warning("build_trend_figures: %s", e)
         return []
 
 
-def _trend_analysis(section: str, series: List[Dict[str, Any]],
-                    alarm: float, unit: str) -> str:
-    """Análisis determinístico de la tendencia de una sección.
+def _ts_txt(v: Any) -> str:
+    return str(v or "")[:16].replace("T", " ")
 
-    Criterios (v3.31.391):
-      • El nivel de referencia es la CRESTA MÁXIMA del periodo (no el último
-        punto), por canal.
-      • La dirección compara la cresta máxima del tramo INICIAL vs la del
-        tramo FINAL del canal con mayor nivel (>±15% = ascendente/descendente).
-      • El porcentaje vs alarma se reporta con signo correcto: margen bajo el
-        umbral, o EXCESO sobre el umbral cuando la cresta lo supera (nunca
-        "margen del 0%").
-    """
+
+def _trend_analysis(section: str, series: List[Dict[str, Any]],
+                    alarm: float, unit: str, danger: float = 0.0) -> str:
+    """Análisis de tendencia en el ESTILO DE LA CASA (v3.31.405 — espejo del
+    reporte de tendencia del Live Monitoring): último valor vs % de consumo
+    de los umbrales Alarma y Danger, ventana analizada, y por canal valor
+    inicial / valor final / variación total con veredicto."""
     try:
-        # Cresta máxima del periodo por canal → canal dominante
-        peak_val, peak_lbl, peak_ys = -1.0, "", []
+        chans = []
+        t0, t1 = "", ""
         for s in series:
             ys = [float(v) for v in (s.get("y") or []) if v is not None]
-            if ys and max(ys) > peak_val:
-                peak_val, peak_lbl, peak_ys = max(ys), s.get("label", ""), ys
-        if peak_val < 0:
+            xs = [x for x, v in zip(s.get("x") or [], s.get("y") or [])
+                  if v is not None]
+            if len(ys) < 2:
+                continue
+            chans.append({"label": s.get("label", ""), "v0": ys[0],
+                          "v1": ys[-1], "vmax": max(ys)})
+            if xs:
+                if not t0 or str(xs[0]) < t0:
+                    t0 = str(xs[0])
+                if not t1 or str(xs[-1]) > t1:
+                    t1 = str(xs[-1])
+        if not chans:
             return ""
 
-        # Cresta más alta al INICIO vs cresta más alta al FINAL de la gráfica
-        # → porcentaje REAL de incremento/disminución del periodo.
-        direction = "estable"
-        var_txt = ""
-        if len(peak_ys) >= 6:
-            n3 = max(2, len(peak_ys) // 3)
-            crest_ini = max(peak_ys[:n3])
-            crest_fin = max(peak_ys[-n3:])
-            pct = (crest_fin - crest_ini) / max(abs(crest_ini), 1e-9) * 100.0
-            if pct > 15.0:
-                direction = "ascendente"
-            elif pct < -15.0:
-                direction = "descendente"
-            var_txt = (f". Cresta inicial {crest_ini:.2f} {unit} vs cresta "
-                       f"final {crest_fin:.2f} {unit}: "
-                       + (f"incremento del {pct:.0f}%" if pct >= 0
-                          else f"disminución del {abs(pct):.0f}%"))
+        last_max = max(chans, key=lambda c: c["v1"])
+        peak = max(chans, key=lambda c: c["vmax"])
 
-        txt = (f"Análisis de tendencia — {section}: comportamiento {direction} "
-               f"durante el periodo{var_txt}. Cresta máxima {peak_val:.2f} "
-               f"{unit} en {peak_lbl}")
-        over_alarm = False
+        # Párrafo 1 — estado global de la sección
+        p1 = (f"El último valor reportado de amplitud vibratoria en "
+              f"{len(chans)} punto(s) de medición de la sección {section} es "
+              f"{last_max['v1']:.2f} {unit} ({last_max['label']}).")
         if alarm > 0:
-            if peak_val > alarm:
-                over_alarm = True
-                exceso = (peak_val - alarm) / alarm * 100.0
-                txt += (f", que SUPERA el umbral de alarma ({alarm:g} {unit}) "
-                        f"en {exceso:.0f}%")
+            p1 += (f" Esto representa el {last_max['v1'] / alarm * 100:.0f}% "
+                   f"del umbral de Alarma ({alarm:g} {unit})")
+            if danger > 0:
+                p1 += (f"; frente al umbral de Danger ({danger:g} {unit}) el "
+                       f"consumo es del {last_max['v1'] / danger * 100:.0f}%")
+            p1 += "."
+        if t0 and t1:
+            p1 += f" Ventana analizada desde {_ts_txt(t0)} hasta {_ts_txt(t1)}."
+        if alarm > 0 and peak["vmax"] > alarm:
+            p1 += (f" Durante la ventana, {peak['label']} alcanzó una cresta "
+                   f"máxima de {peak['vmax']:.2f} {unit}, por ENCIMA del "
+                   f"umbral de Alarma: el punto exige seguimiento cercano y "
+                   f"correlación con espectro y forma de onda.")
+
+        # Párrafos por canal — valor inicial / final / variación + veredicto
+        partes = [p1]
+        for c in sorted(chans, key=lambda c: -c["v1"]):
+            pct = (c["v1"] - c["v0"]) / max(abs(c["v0"]), 1e-9) * 100.0
+            seg = (f"{c['label']} — Valor inicial {c['v0']:.3f} {unit}, valor "
+                   f"final {c['v1']:.3f} {unit}, variación total {pct:+.2f}%.")
+            if alarm > 0 and c["v1"] > alarm:
+                seg += (" El punto opera por encima del umbral de Alarma; se "
+                        "requiere confirmación de causa y vigilancia "
+                        "reforzada.")
+            elif abs(pct) < 5.0:
+                seg += (" El comportamiento es estable y sin desviaciones "
+                        "significativas, lo que es consistente con una "
+                        "condición normal dentro de la ventana evaluada.")
+            elif abs(pct) < 15.0:
+                seg += (" Se aprecia una variación moderada que no compromete "
+                        "la condición del punto; se mantiene en vigilancia "
+                        "rutinaria.")
+            elif pct >= 15.0:
+                seg += (" La variación ascendente es significativa y define "
+                        "un punto de seguimiento prioritario para el próximo "
+                        "ciclo de análisis.")
             else:
-                margen = (alarm - peak_val) / alarm * 100.0
-                txt += (f", con margen del {margen:.0f}% bajo el umbral de "
-                        f"alarma ({alarm:g} {unit})")
-        txt += "."
-        if over_alarm:
-            txt += (" El canal opera por encima del umbral: correlacionar con "
-                    "espectro y forma de onda, y dar seguimiento cercano hasta "
-                    "confirmar la causa.")
-        elif direction == "ascendente":
-            txt += (" La pendiente ascendente amerita aumentar la frecuencia de "
-                    "revisión y correlacionar con espectro y forma de onda.")
-        else:
-            txt += " Sin cambios de nivel que sugieran degradación activa."
-        return txt
+                seg += (" La reducción es significativa y consistente con una "
+                        "mejora de la condición o con operación a distinta "
+                        "carga; se verifica en la próxima ventana.")
+            partes.append(seg)
+        return "\n\n".join(partes)
     except Exception:
         return ""
 

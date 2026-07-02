@@ -332,7 +332,14 @@ def generate_briefing_pdf(
                 ]
                 _section_head = []
                 if analysis:
-                    _block.append(Paragraph(paragraph_safe(analysis), st_analysis))
+                    # El análisis viene en PÁRRAFOS (separados por línea en
+                    # blanco): turbina / generador / veredicto. Se renderiza
+                    # cada uno como Paragraph propio para dar aire al texto.
+                    for _para in str(analysis).split("\n\n"):
+                        _para = _para.strip()
+                        if _para:
+                            _block.append(Paragraph(paragraph_safe(_para),
+                                                    st_analysis))
                 body.append(KeepTogether(_block))
             except Exception:
                 pass
