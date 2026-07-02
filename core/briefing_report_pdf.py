@@ -42,6 +42,28 @@ _FIG_CAPTIONS = {
 }
 _FIG_ORDER = ["trend", "spectrum", "waveform", "orbit"]
 
+_MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+             "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+
+
+def _fecha_es(val) -> str:
+    """Fecha larga en español: '1 de julio de 2026'. Fallback: hoy."""
+    from datetime import datetime, date
+    d = None
+    try:
+        if isinstance(val, (datetime, date)):
+            d = val if isinstance(val, date) and not isinstance(val, datetime) else val.date() if isinstance(val, datetime) else val
+        elif val:
+            d = datetime.fromisoformat(str(val).replace("Z", "+00:00")).date()
+    except Exception:
+        d = None
+    if d is None:
+        d = date.today()
+    try:
+        return f"{d.day} de {_MESES_ES[d.month - 1]} de {d.year}"
+    except Exception:
+        return ""
+
 
 def _sev_colors(status: str):
     s = (status or "").lower()
@@ -202,23 +224,51 @@ def generate_briefing_pdf(
         body.append(ctbl)
 
     # ---- Figuras ----
-    figs_present = [k for k in _FIG_ORDER if (figures or {}).get(k)]
-    if figs_present:
+    # Ciclo 23.170 — Tendencias SEPARADAS por sección (CRF-TRF, Generador, ...)
+    # con líneas de alarma/danger, y caption numerado en español (figura,
+    # descripción, fecha, equipo). Fallback al trend único si no hay 'trends'.
+    _trends = (figures or {}).get("trends") or []
+    if not _trends and (figures or {}).get("trend"):
+        _trends = [{"section": "", "unit": "", "descr": "", "png": figures["trend"]}]
+    _others = [k for k in ("spectrum", "waveform", "orbit") if (figures or {}).get(k)]
+    if _trends or _others:
         body.append(Paragraph("FIGURAS Y ANÁLISIS", styles["WMTOC1"]))
-        for key in figs_present:
-            png = figures[key]
-            cap = _FIG_CAPTIONS.get(key, key.title())
-            body.append(Paragraph(cap, styles["WMTOC2"]))
+        _fecha = _fecha_es(meta.get("report_date"))
+        _equipo = f"Unidad {tag}"
+        _n = 0
+
+        def _add_fig(png, head, big_h):
+            nonlocal _n
+            body.append(Paragraph(head, styles["WMTOC2"]))
             try:
-                w = 17.0 * cm
-                h = (5.0 * cm if key == "trend" else
-                     10.6 * cm if key in ("spectrum", "waveform") else 8.0 * cm)
-                img = Image(BytesIO(png), width=w, height=h, kind="proportional")
+                img = Image(BytesIO(png), width=17.0 * cm, height=big_h,
+                            kind="proportional")
                 img.hAlign = "CENTER"
                 body.append(img)
-                body.append(Paragraph(f"Figura — {cap} · {tag}", st_cap))
+                _n += 1
+                _cap = f"Figura {_n}. {head}"
+                if _fecha:
+                    _cap += f", {_fecha}"
+                _cap += f" · {_equipo}"
+                body.append(Paragraph(_cap, st_cap))
             except Exception:
                 pass
+
+        for t in _trends:
+            sec = (t.get("section") or "").strip()
+            descr = (t.get("descr") or "").strip()
+            head = "Tendencia de vibración"
+            if sec:
+                head += f" — {sec}"
+            if descr:
+                head += f" ({descr})"
+            _add_fig(t.get("png"), head, 6.2 * cm)
+
+        for key in _others:
+            cap = _FIG_CAPTIONS.get(key, key.title())
+            _add_fig(figures[key],
+                     cap,
+                     10.6 * cm if key in ("spectrum", "waveform") else 8.0 * cm)
 
     return render_report_pdf(meta, body)
 

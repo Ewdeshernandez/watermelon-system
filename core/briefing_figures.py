@@ -298,13 +298,129 @@ def trend_png(instance_id: str, n_per_sensor: int = 60) -> Optional[bytes]:
 
 
 # ---------------------------------------------------------------------------
+# Tendencias SEPARADAS por sección (Ciclo 23.170) — CRF-TRF vs Generador, etc.
+# Cada figura lleva sus líneas de alarma/danger (según los umbrales del plano).
+# ---------------------------------------------------------------------------
+_SECTION_ORDER = ["CRF-TRF", "Generador", "Gearbox"]
+
+
+def _section_key(plane_label: str) -> str:
+    """Agrupa el plano en una sección para separar la tendencia."""
+    p = (plane_label or "").upper()
+    if "CRF" in p or "TRF" in p:
+        return "CRF-TRF"
+    if "GEN" in p or "GENERAD" in p:
+        return "Generador"
+    if "GEARBOX" in p or "REDUCTOR" in p:
+        return "Gearbox"
+    return (plane_label or "Otros").strip() or "Otros"
+
+
+def _unit_descr(unit: str) -> str:
+    """Descriptor de la variable a partir de la unidad (para el caption)."""
+    u = (unit or "").strip().lower()
+    if "in/s" in u or "mm/s" in u or "ips" in u:
+        return "velocidad"
+    if u == "g" or u.startswith("g ") or "g pk" in u or "g rms" in u:
+        return "aceleración"
+    if "mil" in u or "um" in u or "µm" in u or u == "mm":
+        return "desplazamiento"
+    return unit or ""
+
+
+def build_trend_figures(instance_id: str, instance_obj: Any = None,
+                        n_per_sensor: int = 60) -> List[Dict[str, Any]]:
+    """Tendencias SEPARADAS por sección (CRF-TRF, Generador, ...), cada una con
+    sus líneas de alarma/danger. Devuelve [{"section","unit","descr","png"}].
+    [] si algo falla (el caller cae al trend único como fallback)."""
+    try:
+        from core.live_readings import recent_history_all_direct
+        from core.live_report_pdf import render_trend_png
+        from core.live_report_builder import _build_sensor_lookup
+        spark = recent_history_all_direct(instance_id, n_per_sensor=n_per_sensor) or {}
+        if not spark:
+            return []
+        lookup = _build_sensor_lookup(instance_obj) if instance_obj is not None else {}
+        groups: Dict[str, List[str]] = {}
+        for lbl in spark:
+            s = lookup.get(lbl) or {}
+            groups.setdefault(_section_key(s.get("plane_label", "")), []).append(lbl)
+
+        def _sec_sort(k):
+            return (_SECTION_ORDER.index(k) if k in _SECTION_ORDER else 99, k)
+
+        def _label_unit(lbl):
+            s = lookup.get(lbl) or {}
+            u = s.get("unit")
+            if not u:
+                h = spark.get(lbl) or []
+                u = h[0].get("unit") if h else ""
+            return u or ""
+
+        out: List[Dict[str, Any]] = []
+        for sec in sorted(groups, key=_sec_sort):
+            labels_all = groups[sec]
+            # Unidad dominante de la sección → figura consistente (eje + límites
+            # correctos). Evita mezclar p. ej. aceleración (g) con velocidad (in/s).
+            _us = [_label_unit(l) for l in labels_all if _label_unit(l)]
+            _dom_unit = max(set(_us), key=_us.count) if _us else ""
+            labels = [l for l in labels_all if not _dom_unit or _label_unit(l) == _dom_unit]
+            labels = sorted(
+                labels,
+                key=lambda k: -len([h for h in spark[k] if h.get("value") is not None]),
+            )[:6]  # máx 6 canales por figura para no saturar
+            series, alarms, dangers, units = [], [], [], []
+            for i, lbl in enumerate(labels):
+                hist = spark.get(lbl, [])
+                xs = [h.get("captured_at") for h in hist if h.get("value") is not None]
+                ys = [h.get("value") for h in hist if h.get("value") is not None]
+                if len(ys) < 2:
+                    continue
+                series.append({"label": lbl, "x": xs, "y": ys,
+                               "color": _PALETTE[i % len(_PALETTE)]})
+                s = lookup.get(lbl) or {}
+                try:
+                    if float(s.get("alarm", 0) or 0) > 0:
+                        alarms.append(float(s["alarm"]))
+                    if float(s.get("danger", 0) or 0) > 0:
+                        dangers.append(float(s["danger"]))
+                except Exception:
+                    pass
+                u = s.get("unit") or (hist[0].get("unit") if hist else "") or ""
+                if u:
+                    units.append(u)
+            if not series:
+                continue
+            unit = max(set(units), key=units.count) if units else "overall"
+            png = render_trend_png(
+                series,
+                alarm=(max(alarms) if alarms else 0.0),
+                danger=(max(dangers) if dangers else 0.0),
+                y_title=unit,
+            )
+            if png:
+                out.append({"section": sec, "unit": unit,
+                            "descr": _unit_descr(unit), "png": png})
+        return out
+    except Exception as e:
+        log.warning("build_trend_figures: %s", e)
+        return []
+
+
+# ---------------------------------------------------------------------------
 # Orquestador F1
 # ---------------------------------------------------------------------------
-def collect_asset_figures(instance_id: str) -> Dict[str, Optional[bytes]]:
+def collect_asset_figures(instance_id: str,
+                          instance_obj: Any = None) -> Dict[str, Any]:
     """Devuelve PNGs (bytes) de las figuras disponibles del activo para el
-    briefing. None por sección si no hay snapshot/datos. Headless."""
+    briefing. None por sección si no hay snapshot/datos. Headless.
+
+    'trends' = lista de tendencias SEPARADAS por sección (con límites).
+    'trend'  = PNG único (compat: lo usa la IA para saber que hay tendencia)."""
+    trends = build_trend_figures(instance_id, instance_obj)
     return {
-        "trend":    trend_png(instance_id),
+        "trend":    (trends[0]["png"] if trends else trend_png(instance_id)),
+        "trends":   trends,
         "spectrum": spectrum_png(instance_id),
         "waveform": waveform_png(instance_id),
         "orbit":    orbit_png(instance_id),
@@ -312,4 +428,4 @@ def collect_asset_figures(instance_id: str) -> Dict[str, Optional[bytes]]:
 
 
 __all__ = ["collect_asset_figures", "spectrum_png", "waveform_png",
-           "orbit_png", "trend_png"]
+           "orbit_png", "trend_png", "build_trend_figures"]

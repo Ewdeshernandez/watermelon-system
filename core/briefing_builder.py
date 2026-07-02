@@ -444,7 +444,7 @@ def build_asset_briefing(
     # (espectro/forma de onda/tendencia/órbita) para no afirmar que faltan.
     try:
         from core.briefing_figures import collect_asset_figures
-        figures = collect_asset_figures(instance_id)
+        figures = collect_asset_figures(instance_id, instance_obj)
     except Exception as e:
         log.warning("briefing figures falló: %s", e)
         figures = {}
