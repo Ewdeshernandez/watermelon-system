@@ -108,7 +108,7 @@ def generate_briefing_pdf(
     # ---- meta de portada (firmas/consecutivo opcionales vía meta_extra) ----
     meta_extra = meta_extra or {}
     meta: Dict[str, Any] = {
-        "report_title": f"BRIEFING {period_label.upper()}",
+        "report_title": f"REPORTE {period_label.upper()}",
         "format_code": "WMS-FMT-002",
         "format_version": "1",
         "unit": tag,
@@ -167,17 +167,17 @@ def generate_briefing_pdf(
     # Caption de figura centrado (las imágenes van centradas con su caption)
     st_cap_fig = ParagraphStyle("bfCapFig", parent=st_cap, alignment=TA_CENTER)
 
-    # ---- Mapa de sensores ----
+    # ---- Estado actual del tren (esquemático del Resumen Ejecutivo) ----
+    # Reemplaza al Mapa de Sensores con polares: vista lateral compacta con
+    # cojinetes coloreados por severidad + Overall bajo cada plano.
     if sensor_map_png:
-        body.append(Paragraph("MAPA DE SENSORES", styles["WMTOC1"]))
         try:
-            img = Image(BytesIO(sensor_map_png), width=17.5 * cm, height=12.5 * cm,
+            img = Image(BytesIO(sensor_map_png), width=17.5 * cm, height=7.5 * cm,
                         kind="proportional")
             img.hAlign = "CENTER"
             body.append(KeepTogether([
                 img,
-                Paragraph(f"Figura — Mapa de sensores y severidad por plano · {tag}",
-                          st_cap_fig),
+                Paragraph(f"Figura — Estado actual del tren · {tag}", st_cap_fig),
             ]))
         except Exception:
             pass

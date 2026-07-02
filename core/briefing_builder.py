@@ -528,8 +528,10 @@ def _strip_ai_reco_block(md: str) -> str:
 # 3) Builder por activo
 # ---------------------------------------------------------------------------
 def _render_sensor_map(instance_obj: Any, channels: List[Dict[str, Any]]) -> Optional[bytes]:
-    """Renderiza el Mapa de Sensores headless usando severidades LIVE (no la
-    sesión Streamlit). Devuelve PNG o None si no hay sensores / falla."""
+    """Diagrama de ESTADO ACTUAL DEL TREN (el esquemático del Resumen
+    Ejecutivo): vista lateral compacta con cada cojinete coloreado por el
+    peor status del plano + Overall debajo. Reemplaza al Mapa de Sensores
+    con polares (v3.31.397). Headless — severidades LIVE."""
     try:
         sensors = getattr(instance_obj, "sensors", None)
         if not sensors:
@@ -539,29 +541,35 @@ def _render_sensor_map(instance_obj: Any, channels: List[Dict[str, Any]]) -> Opt
         _norm = {"alarma": "Alarm", "alert": "Alarm", "danger": "Danger",
                  "crítica": "Danger", "critica": "Danger", "normal": "Normal"}
         sev_by_label: Dict[str, str] = {}
+        overall_by_label: Dict[str, float] = {}
+        unit_by_label: Dict[str, str] = {}
         for c in channels or []:
             lbl = c.get("sensor_label")
             if not lbl:
                 continue
             sev_by_label[lbl] = _norm.get((c.get("status") or "").strip().lower(), "Normal")
+            try:
+                overall_by_label[lbl] = float(c.get("value"))
+            except Exception:
+                pass
+            if c.get("unit"):
+                unit_by_label[lbl] = c["unit"]
 
         driver_label = (getattr(instance_obj, "driver_model", "") or "Driver").strip() or "Driver"
         driven_label = (getattr(instance_obj, "driven_model", "") or "Driven").strip() or "Driven"
 
-        # NO pasamos overall_by_label/unit_by_label a propósito: las anotaciones
-        # numéricas bajo cada cojinete se amontonan cuando hay >1 sensor por
-        # plano. Los valores Overall ya viven en la tabla "Canales" del briefing,
-        # así que aquí el mapa queda limpio (solo color de severidad + label).
-        # train_label vacío para no repetir un subtítulo largo y desordenado.
         return render_sensor_map_diagram(
             sensors,
             train_label="",
             driver_label=driver_label,
             driven_label=driven_label,
             severity_by_label=sev_by_label or None,
+            compact=True,
+            overall_by_label=overall_by_label or None,
+            unit_by_label=unit_by_label or None,
         )
     except Exception as e:
-        log.warning("briefing sensor map falló: %s", e)
+        log.warning("briefing estado del tren falló: %s", e)
         return None
 
 

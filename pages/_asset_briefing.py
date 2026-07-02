@@ -189,14 +189,19 @@ for _iid, _tag, _d in _pending:
         f"{(_d.get('kpis') or {}).get('status','—')}",
         expanded=(len(_pending) == 1),
     ):
-        _sum = st.text_area(
-            "Resumen ejecutivo", value=_d.get("summary", ""),
-            key=f"bfq_sum_{_iid}", height=220,
-        )
-        _diag = st.text_area(
-            "Diagnóstico", value=_d.get("diagnosis", ""),
-            key=f"bfq_diag_{_iid}", height=140,
-        )
+        # Resumen y diagnóstico: SOLO LECTURA. En el módulo de aprobación
+        # lo único editable son las recomendaciones — el contenido del
+        # reporte se genera automático y se aprueba tal cual.
+        _sum = _d.get("summary", "")
+        _diag = _d.get("diagnosis", "")
+        st.markdown('<div class="bf-label">Resumen ejecutivo (solo lectura)</div>',
+                    unsafe_allow_html=True)
+        with st.container(border=True, height=260):
+            st.markdown(_sum or "_(sin resumen)_")
+        st.markdown('<div class="bf-label">Diagnóstico (solo lectura)</div>',
+                    unsafe_allow_html=True)
+        with st.container(border=True, height=150):
+            st.markdown(_diag or "_(sin diagnóstico)_")
 
         # Recomendaciones VIGENTES del activo (vienen del reporte anterior,
         # traídas de una): edítalas aquí mismo; persisten con su fecha.
@@ -266,17 +271,7 @@ for _iid, _tag, _d in _pending:
                                       key=f"bfq_aprbr_{_iid}",
                                       placeholder="opcional")
 
-        _b1, _b2, _b3 = st.columns([1, 1, 1.4])
-        with _b1:
-            if st.button("💾 Guardar cambios", key=f"bfq_save_{_iid}",
-                         use_container_width=True):
-                from core.briefing_queue import update_draft
-                if update_draft(_iid, summary=_sum, diagnosis=_diag):
-                    from core.briefing_queue import list_pending
-                    st.session_state["bfq_cache"] = list_pending()
-                    st.success("Borrador guardado.")
-                else:
-                    st.error("No se pudo guardar el borrador.")
+        _b2, _b3 = st.columns([1, 1.6])
         with _b2:
             if st.button("👁 Vista previa PDF", key=f"bfq_prev_{_iid}",
                          use_container_width=True):
@@ -303,10 +298,9 @@ for _iid, _tag, _d in _pending:
                 elif not (_elab or "").strip():
                     st.error("Falta 'Elaborado por'.")
                 else:
-                    from core.briefing_queue import approve_and_send, update_draft
-                    update_draft(_iid, summary=_sum, diagnosis=_diag)
-                    # Persistir también la tabla de recomendaciones tal como
-                    # está en pantalla (por si no presionó Guardar).
+                    from core.briefing_queue import approve_and_send
+                    # Persistir la tabla de recomendaciones tal como está en
+                    # pantalla (lo ÚNICO editable en aprobación).
                     try:
                         _qsave(_iid, [{"id": r.get("id") or "",
                                        "text": r.get("Recomendación") or "",
@@ -424,100 +418,12 @@ with st.container(border=True):
 st.markdown("")
 
 # -----------------------------------------------------------------
-# Recomendaciones del activo — gestionadas por el especialista
-# -----------------------------------------------------------------
-# Persisten entre reportes (captured_parameters de la instancia): el
-# briefing siguiente arranca con las mismas y solo se toca lo que cambió.
-# Cada una lleva su fecha de inicio (el PDF la muestra en gris opaco).
-# Cuando el cliente ejecuta una recomendación, se borra la fila. Si no
-# hay ninguna, el briefing cae al borrador automático.
-if _scope == "Un activo" and _target_iid:
-    from datetime import date as _date
-
-    import pandas as pd
-
-    from core.briefing_recommendations import (
-        list_recommendations, save_recommendations,
-    )
-
-    with st.container(border=True):
-        st.markdown(
-            '<div class="bf-label">Recomendaciones vigentes '
-            '<span class="bf-accent">·</span> persisten entre reportes</div>',
-            unsafe_allow_html=True,
-        )
-        # Cargar de Supabase UNA sola vez por activo (session_state). Cada
-        # tecleo/edición del data_editor dispara un rerun de la página: si
-        # aquí se consultara Supabase en cada rerun, editar se vuelve lento.
-        # La edición vive en el estado del editor; Supabase solo se toca al
-        # Guardar (y ahí se refresca el caché).
-        _ss_recs = f"recs_cache_{_target_iid}"
-        if _ss_recs not in st.session_state:
-            st.session_state[_ss_recs] = list_recommendations(_target_iid)
-        _recs = st.session_state[_ss_recs]
-
-        def _to_date(s):
-            try:
-                return _date.fromisoformat(str(s)[:10])
-            except Exception:
-                return _date.today()
-
-        _df = pd.DataFrame(
-            [{"id": r["id"], "Recomendación": r["text"],
-              "Fecha de inicio": _to_date(r["started_at"])} for r in _recs],
-            columns=["id", "Recomendación", "Fecha de inicio"],
-        )
-        _edited = st.data_editor(
-            _df,
-            key=f"recs_editor_{_target_iid}",
-            num_rows="dynamic",
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "id": None,  # oculto — identidad interna de la fila
-                "Recomendación": st.column_config.TextColumn(
-                    "Recomendación", width="large", required=True,
-                    help="Texto técnico tal como debe salir en el PDF."),
-                "Fecha de inicio": st.column_config.DateColumn(
-                    "Fecha de inicio", format="YYYY-MM-DD",
-                    default=_date.today(),
-                    help="Cuándo se emitió por primera vez. El PDF la "
-                         "muestra en gris al final de la recomendación."),
-            },
-        )
-        _c1, _c2 = st.columns([1, 2.4])
-        with _c1:
-            if st.button("💾  Guardar", key=f"recs_save_{_target_iid}",
-                         use_container_width=True):
-                _rows = []
-                for _, _row in _edited.iterrows():
-                    _rows.append({
-                        "id": _row.get("id") or "",
-                        "text": _row.get("Recomendación") or "",
-                        "started_at": _row.get("Fecha de inicio"),
-                    })
-                if save_recommendations(_target_iid, _rows):
-                    # Refrescar el caché de sesión con lo persistido
-                    # (normalizado y ordenado por fecha) y resetear el
-                    # estado del editor para que muestre exactamente eso.
-                    st.session_state[_ss_recs] = list_recommendations(_target_iid)
-                    st.session_state.pop(f"recs_editor_{_target_iid}", None)
-                    st.success("Recomendaciones guardadas.")
-                    st.rerun()
-                else:
-                    st.error("No se pudieron guardar. Reintenta.")
-        with _c2:
-            st.caption(
-                "➕ agrega filas abajo · 🗑 selecciona la fila y bórrala cuando "
-                "el cliente la ejecute · sin filas, el briefing usa el "
-                "borrador automático."
-            )
-
-st.markdown("")
-
-# -----------------------------------------------------------------
 # Generación
 # -----------------------------------------------------------------
+# NOTA (v3.31.397): en ELABORACIÓN no se edita nada — el reporte se crea
+# automático (toma las recomendaciones vigentes del ciclo anterior con su
+# fecha) y se manda a la cola. La edición de recomendaciones vive ÚNICAMENTE
+# en "Pendientes de aprobación".
 if st.button("📄  Generar briefing", type="primary", use_container_width=True):
     from core.briefing_builder import build_asset_briefing, build_all_briefings
     # Portada profesional: firma "Preparado por" con el usuario logueado
