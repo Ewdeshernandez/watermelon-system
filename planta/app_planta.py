@@ -311,9 +311,16 @@ if _LIC.expires_soon:
 # Silencioso si no hay internet (Planta es offline-first).
 # =====================================================================
 try:
-    from updater import get_cached_check, render_update_banner
+    from updater import (
+        get_cached_check, render_update_banner, run_auto_update_ui,
+    )
     _UPDATE_INFO = get_cached_check(_app_version)
     render_update_banner(_UPDATE_INFO)
+    # v3.31.398 — AUTO-UPDATE: si hay versión nueva y corremos como .exe,
+    # botón que descarga el installer y lo corre /VERYSILENT (la app se
+    # cierra, se actualiza y se reabre sola — sin reinstalar a mano).
+    # Con data/.auto_update_on_start.flag lo hace SOLO al detectar internet.
+    run_auto_update_ui(_UPDATE_INFO)
 except ImportError:
     _UPDATE_INFO = None  # updater es opcional, no romper si falta
 
@@ -934,7 +941,9 @@ st.divider()
 st.markdown("## ☁ Sincronización con Watermelon Cloud")
 
 try:
-    from auth_planta import current_user, login, logout
+    from auth_planta import (
+        current_user, logout, request_login_code, verify_login_code,
+    )
     from sync_uploader import (
         list_pending, list_uploaded, sync_all, get_sync_stats,
     )
@@ -951,26 +960,54 @@ if _SYNC_AVAILABLE:
     _stats = get_sync_stats(_CAPTURES_DIR)
 
     if _user is None:
-        # No logueado — mostrar formulario de login
+        # No logueado — login por CÓDIGO OTP (v3.31.398, igual que la app
+        # Cloud: ya no hay passwords). Paso 1: email → enviar código.
+        # Paso 2: ingresar el código de 6 dígitos que llega al correo.
         with st.expander("🔐 Inicia sesión para sincronizar capturas al Cloud",
                           expanded=False):
             st.caption(
-                "Una sola vez (necesitas internet ahora). Tu sesión queda "
-                "guardada y se renueva automáticamente cuando esté disponible."
+                "Una sola vez (necesitas internet ahora). Te enviamos un "
+                "código de 6 dígitos a tu correo — sin contraseña. Tu sesión "
+                "queda guardada y se renueva automáticamente."
             )
-            with st.form("planta_login"):
-                _email = st.text_input("Email", placeholder="tu@email.com")
-                _pwd = st.text_input("Password", type="password")
-                if st.form_submit_button("Iniciar sesión", type="primary"):
-                    if not _email or not _pwd:
-                        st.error("Email y password requeridos")
-                    else:
-                        try:
-                            login(_email, _pwd)
-                            st.success("✓ Logueado. Recargando...")
-                            st.rerun()
-                        except RuntimeError as exc:
-                            st.error(f"Login falló: {exc}")
+            _otp_email = st.session_state.get("_planta_otp_email", "")
+            if not _otp_email:
+                with st.form("planta_otp_request"):
+                    _email = st.text_input("Email", placeholder="tu@email.com")
+                    if st.form_submit_button("📧 Enviarme el código",
+                                             type="primary"):
+                        if not _email or "@" not in _email:
+                            st.error("Escribe un email válido.")
+                        else:
+                            try:
+                                request_login_code(_email)
+                                st.session_state["_planta_otp_email"] = \
+                                    _email.strip().lower()
+                                st.rerun()
+                            except (RuntimeError, ValueError) as exc:
+                                st.error(str(exc))
+            else:
+                st.info(f"📧 Código enviado a **{_otp_email}** — revisa tu "
+                        f"correo (también spam).")
+                with st.form("planta_otp_verify"):
+                    _code = st.text_input(
+                        "Código de 6 dígitos", max_chars=8,
+                        placeholder="123456")
+                    _cv1, _cv2 = st.columns(2)
+                    _do_verify = _cv1.form_submit_button(
+                        "✓ Verificar e iniciar sesión", type="primary")
+                    _do_back = _cv2.form_submit_button("← Cambiar email")
+                if _do_verify:
+                    try:
+                        verify_login_code(_otp_email, _code)
+                        st.session_state.pop("_planta_otp_email", None)
+                        st.success("✓ Logueado. Recargando...")
+                        st.rerun()
+                    except (RuntimeError, ValueError) as exc:
+                        st.error(str(exc))
+                if _do_back:
+                    st.session_state.pop("_planta_otp_email", None)
+                    st.rerun()
 
         if _stats["pending"] > 0:
             st.info(

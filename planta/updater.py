@@ -272,6 +272,119 @@ def check_for_updates(
 
 
 # ============================================================================
+# AUTO-UPDATE (v3.31.398) — descarga el installer del release y lo corre en
+# SILENCIO (Inno Setup /VERYSILENT): el cliente NO reinstala nada a mano.
+# Flujo: banner → "Actualizar ahora" (o modo desatendido con
+# data/.auto_update_on_start.flag) → descarga .exe → .bat que espera, corre
+# el installer silencioso y relanza la app → la app se cierra sola.
+# Solo aplica en el bundle congelado de Windows (PyInstaller): en dev el
+# código vive en el repo y se actualiza con git.
+# ============================================================================
+
+_AUTOSTART_FLAG = ".auto_update_on_start.flag"
+
+
+def _is_frozen() -> bool:
+    return getattr(sys, "frozen", False)
+
+
+def is_auto_update_enabled() -> bool:
+    """Modo desatendido: si existe data/.auto_update_on_start.flag, la app
+    descarga e instala sola al detectar versión nueva con internet."""
+    return (_get_data_dir() / _AUTOSTART_FLAG).exists()
+
+
+def can_self_update(info: "UpdateInfo") -> bool:
+    """True si podemos auto-instalar: hay update, corremos como .exe
+    congelado en Windows, y el release trae un installer .exe."""
+    return bool(
+        info.has_update and not info.error
+        and _is_frozen() and os.name == "nt"
+        and info.download_url.lower().endswith(".exe")
+    )
+
+
+def download_installer(info: "UpdateInfo", progress_cb=None) -> Path:
+    """Descarga el installer del release a data/updates/. Reanuda NO — si
+    existe completo (mismo tamaño esperado desconocido → si existe se
+    re-descarga para evitar corruptos). Devuelve el path local."""
+    updates_dir = _get_data_dir() / "updates"
+    updates_dir.mkdir(parents=True, exist_ok=True)
+    fname = info.download_url.rsplit("/", 1)[-1] or f"update_{info.latest_version}.exe"
+    dest = updates_dir / fname
+    req = urllib.request.Request(
+        info.download_url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        total = int(resp.headers.get("Content-Length", 0) or 0)
+        done = 0
+        with open(dest, "wb") as fh:
+            while True:
+                chunk = resp.read(1024 * 256)
+                if not chunk:
+                    break
+                fh.write(chunk)
+                done += len(chunk)
+                if progress_cb and total:
+                    progress_cb(min(done / total, 1.0))
+    if dest.stat().st_size < 1024 * 1024:  # <1MB = seguro no es el installer
+        dest.unlink(missing_ok=True)
+        raise RuntimeError("Descarga incompleta del installer.")
+    return dest
+
+
+def apply_update_and_restart(installer_path: Path) -> None:
+    """Lanza el installer en modo silencioso vía un .bat desacoplado y cierra
+    la app. El .bat espera 3s (a que muera este proceso), corre Inno Setup
+    /VERYSILENT (instala sobre la misma carpeta) y relanza el .exe."""
+    import subprocess
+    exe_path = Path(sys.executable)  # el WatermelonPlanta.exe congelado
+    bat = _get_data_dir() / "updates" / "apply_update.bat"
+    bat.write_text(
+        "@echo off\r\n"
+        "timeout /t 3 /nobreak >nul\r\n"
+        f"\"{installer_path}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "
+        "/CLOSEAPPLICATIONS /RESTARTAPPLICATIONS=0\r\n"
+        f"start \"\" \"{exe_path}\"\r\n"
+        f"del \"{installer_path}\" >nul 2>&1\r\n",
+        encoding="ascii", errors="replace",
+    )
+    DETACHED = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
+    subprocess.Popen(["cmd", "/c", str(bat)], creationflags=DETACHED,
+                     close_fds=True)
+    os._exit(0)  # el .bat toma el control: instala y relanza
+
+
+def run_auto_update_ui(info: "UpdateInfo") -> None:
+    """Botón 'Actualizar ahora' con barra de progreso (Streamlit). Si el modo
+    desatendido está activo, arranca solo sin preguntar."""
+    try:
+        import streamlit as st
+    except ImportError:
+        return
+    if not can_self_update(info):
+        return
+
+    _auto = is_auto_update_enabled()
+    _clicked = st.button(
+        f"⬇ Actualizar AUTOMÁTICAMENTE a {info.latest_version} "
+        f"(descarga, instala y reabre sola)",
+        key="auto_update_now", type="primary", use_container_width=True)
+    if _clicked or (_auto and not st.session_state.get("_au_started")):
+        st.session_state["_au_started"] = True
+        _bar = st.progress(0.0, text="Descargando actualización…")
+        try:
+            dest = download_installer(
+                info, progress_cb=lambda p: _bar.progress(
+                    p, text=f"Descargando actualización… {int(p*100)}%"))
+            _bar.progress(1.0, text="Instalando — la app se reiniciará sola "
+                                    "en unos segundos…")
+            apply_update_and_restart(dest)
+        except Exception as e:  # noqa: BLE001
+            st.error(f"No se pudo auto-actualizar: {e}. Usa el botón "
+                     f"'Descargar installer' y córrelo manualmente.")
+
+
+# ============================================================================
 # UI (Streamlit)
 # ============================================================================
 

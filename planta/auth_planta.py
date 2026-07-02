@@ -75,6 +75,69 @@ def _get_supabase_client():
     return create_client(url, key)
 
 
+def _save_session(resp, email: str) -> Dict:
+    """Persiste la sesión Supabase en planta/data/.auth.json (JWT + refresh)."""
+    if not resp.session or not resp.session.access_token:
+        raise RuntimeError("Supabase no devolvió un session token válido")
+    data = {
+        "email": resp.user.email if resp.user else email,
+        "user_id": resp.user.id if resp.user else None,
+        "access_token": resp.session.access_token,
+        "refresh_token": resp.session.refresh_token,
+        "expires_at": resp.session.expires_at,
+        "logged_in_at": int(time.time()),
+    }
+    _AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _AUTH_FILE.write_text(json.dumps(data, indent=2))
+    return data
+
+
+# ---------------------------------------------------------------------------
+# Login por CÓDIGO OTP (v3.31.398) — igual que Watermelon Cloud: ya no hay
+# passwords. Supabase manda un código de 6 dígitos al email del técnico;
+# verify_otp devuelve la MISMA sesión JWT que antes (RLS intacto).
+# ---------------------------------------------------------------------------
+def request_login_code(email: str) -> None:
+    """Pide a Supabase que envíe el código OTP al email. Requiere internet.
+
+    should_create_user=False: solo usuarios ya registrados en Watermelon
+    Cloud pueden loguearse desde Planta."""
+    email = (email or "").strip().lower()
+    if not email or "@" not in email:
+        raise ValueError("Email inválido")
+    client = _get_supabase_client()
+    try:
+        client.auth.sign_in_with_otp({
+            "email": email,
+            "options": {"should_create_user": False},
+        })
+    except Exception as exc:
+        raise RuntimeError(
+            f"No se pudo enviar el código: {exc}. Verifica el email (debe "
+            f"existir en Watermelon Cloud) y la conexión a internet."
+        ) from exc
+
+
+def verify_login_code(email: str, code: str) -> Dict:
+    """Verifica el código OTP y guarda la sesión JWT (planta/data/.auth.json).
+
+    Returns: dict con email + access_token + expires_at."""
+    email = (email or "").strip().lower()
+    code = (code or "").strip().replace(" ", "")
+    if not email or not code:
+        raise ValueError("Email y código requeridos")
+    client = _get_supabase_client()
+    try:
+        resp = client.auth.verify_otp({
+            "email": email, "token": code, "type": "email",
+        })
+    except Exception as exc:
+        raise RuntimeError(
+            f"Código inválido o vencido: {exc}. Pide un código nuevo."
+        ) from exc
+    return _save_session(resp, email)
+
+
 def login(email: str, password: str) -> Dict:
     """
     Hace login al Watermelon Cloud y guarda JWT en planta/data/.auth.json.
