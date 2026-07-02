@@ -773,8 +773,23 @@ def _period_history(instance_id: str, days: int = 7) -> Dict[str, List[Dict[str,
 
         from core.live_readings import history_bucketed, latest_for_instance
         latest = latest_for_instance(instance_id) or []
-        from_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+        # ESCALERA DE VENTANA (v3.31.406): el RPC trend_bucketed puede dar
+        # statement timeout en ventanas largas si falta el índice
+        # idx_live_readings_trend (sql/trend_bucketed.sql). Se intenta la
+        # ventana completa y se va recortando a la mitad hasta obtener datos.
+        # La ventana que funcione con el PRIMER sensor se reutiliza para el
+        # resto (evita pagar el timeout de 8s en cada canal).
+        ladder = [days, max(2, days // 2), max(1, days // 4)]
+        window_days: Optional[int] = None
         bucket = "1 hour" if days <= 8 else "4 hours"
+
+        def _fetch(var: str, d: int):
+            from_iso = (datetime.now(timezone.utc)
+                        - timedelta(days=d)).isoformat()
+            return history_bucketed(instance_id, var, "Direct",
+                                    from_iso, bucket)
+
         for r in latest:
             if r.get("metric") != "Direct":
                 continue
@@ -783,7 +798,22 @@ def _period_history(instance_id: str, days: int = 7) -> Dict[str, List[Dict[str,
             lbl, var = r.get("sensor_label"), r.get("variable")
             if not lbl or not var:
                 continue
-            rows = history_bucketed(instance_id, var, "Direct", from_iso, bucket)
+            rows = []
+            if window_days is None:
+                for d in ladder:
+                    rows = _fetch(var, d)
+                    if rows:
+                        window_days = d
+                        if d != days:
+                            log.warning(
+                                "_period_history: RPC timeout con %dd — "
+                                "usando ventana de %dd. Crear el índice "
+                                "idx_live_readings_trend (sql/"
+                                "trend_bucketed.sql) para la ventana "
+                                "completa.", days, d)
+                        break
+            else:
+                rows = _fetch(var, window_days)
             pts = [{"captured_at": b.get("bucket"),
                     "value": b.get("max_val", b.get("avg_val")),
                     "unit": r.get("unit")}
