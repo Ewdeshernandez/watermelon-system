@@ -305,16 +305,19 @@ def generate_briefing_pdf(
                 if _fecha:
                     _cap += f", {_fecha}"
                 _cap += f" · {_equipo}"
-                # Título + figura + caption SIEMPRE juntos en la misma página
-                # y centrados. El análisis fluye después (puede saltar de
-                # página sin romper el bloque visual).
-                body.append(KeepTogether([
+                # Título + figura + caption + ANÁLISIS juntos en la misma
+                # página (para leer la figura y su interpretación sin saltar
+                # de hoja). Si el bloque no cabe, KeepTogether lo pasa entero
+                # a la página siguiente; solo si excede una página completa
+                # se permite el corte.
+                _block = [
                     Paragraph(head, st_fig_head),
                     img,
                     Paragraph(_cap, st_cap_fig),
-                ]))
+                ]
                 if analysis:
-                    body.append(Paragraph(paragraph_safe(analysis), st_analysis))
+                    _block.append(Paragraph(paragraph_safe(analysis), st_analysis))
+                body.append(KeepTogether(_block))
             except Exception:
                 pass
 

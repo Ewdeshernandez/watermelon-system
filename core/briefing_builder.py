@@ -652,8 +652,21 @@ def build_asset_briefing(
         _gen_ts = _dt.now(ZoneInfo("America/Bogota")).strftime("%Y-%m-%d %H:%M")
     except Exception:
         _gen_ts = _dt.now().strftime("%Y-%m-%d %H:%M")
+    # Bloque del activo en portada — MISMO criterio que los Reports clásicos
+    # (16_Reports _maybe_set): asset_class + tag en la línea grande, luego
+    # modelo, ubicación y cliente, y el tren compuesto en gris.
+    try:
+        from core.instance_state import compose_train_description
+        _train_full = (compose_train_description(instance_obj) or "").strip()
+    except Exception:
+        _train_full = ""
     pdf_meta = {
-        "train_description": train_bare,
+        "asset_class": (getattr(instance_obj, "asset_class", "") or "").strip(),
+        "asset_model": (getattr(instance_obj, "driver_model", "")
+                        or getattr(instance_obj, "driven_model", "") or "").strip(),
+        "location": (getattr(instance_obj, "site", "")
+                     or getattr(instance_obj, "location", "") or "").strip(),
+        "train_description": _train_full or train_bare,
         "client": client,
         "report_date": _gen_ts,  # meta_extra puede sobreescribir si la UI lo pasa
         # Portada: rango REAL del periodo evaluado + consecutivo del equipo.
