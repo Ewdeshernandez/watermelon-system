@@ -193,14 +193,30 @@ def _filter_current_channels(instance_id: str,
         return sensors
 
 
+def _train_sort_key(label: str):
+    """Orden FÍSICO del tren (v3.31.414, pedido del usuario): primero la
+    turbina (CRF/TRF/TURBINA — 1XD,1YD,2XD,2YD...), luego el gearbox y sus
+    auxiliares (bomba/starter), luego el generador; dentro de cada máquina
+    por número de plano y label."""
+    import re as _re
+    u = str(label or "").upper()
+    m = _re.search(r"(\d+)", u)
+    plane = int(m.group(1)) if m else 99
+    if "CRF" in u or "TRF" in u or "TURBIN" in u:
+        rank = 0
+    elif ("GEARBOX" in u or "REDUCTOR" in u or "BOMBA" in u
+          or "PUMP" in u or "STARTER" in u):
+        rank = 1
+    elif "GEN" in u:
+        rank = 2
+    else:
+        rank = 3
+    return (rank, plane, u)
+
+
 def _sorted_sensors(sensors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    try:
-        from core.channel_order import channel_sort_key
-        return sorted(sensors, key=lambda s: channel_sort_key(
-            s.get("sensor_label", ""),
-            s.get("amp_unit", "") or s.get("unit", "")))
-    except Exception:
-        return sensors
+    return sorted(sensors,
+                  key=lambda s: _train_sort_key(s.get("sensor_label", "")))
 
 
 def _png(fig, height: int = 900) -> Optional[bytes]:
@@ -694,6 +710,37 @@ def orbit_bundle(instance_id: str) -> Dict[str, Any]:
         return {"png": None, "analysis": ""}
     bearings = [b for b in payload.get("bearings", [])
                 if b.get("x_values") and b.get("y_values")]
+    # v3.31.414 — Órbitas SOLO de turbina y generador (el gearbox y sus
+    # auxiliares no van), en orden físico del tren. Se excluye por token del
+    # label Y por número de plano (labels genéricos tipo "BRG 3": el plano 3
+    # es gearbox según la config del activo).
+    import re as _re
+    _EXCL = ("GEARBOX", "REDUCTOR", "BOMBA", "PUMP", "STARTER")
+    _gbx_planes: set = set()
+    try:
+        from core.instance_state import get_instance
+        for s in getattr(get_instance(instance_id), "sensors", None) or []:
+            pl = str(s.get("plane_label", "")).upper()
+            if any(t in pl for t in _EXCL):
+                try:
+                    _gbx_planes.add(int(s.get("plane", 0) or 0))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    def _orbit_ok(b) -> bool:
+        lbl = str(b.get("bearing_label", "")).upper()
+        if any(t in lbl for t in _EXCL):
+            return False
+        m = _re.search(r"(\d+)", lbl)
+        if m and int(m.group(1)) in _gbx_planes:
+            return False
+        return True
+
+    bearings = [b for b in bearings if _orbit_ok(b)]
+    bearings = sorted(bearings,
+                      key=lambda b: _train_sort_key(b.get("bearing_label", "")))
     if not bearings:
         return {"png": None, "analysis": ""}
     try:
@@ -848,7 +895,13 @@ def trend_png(instance_id: str, n_per_sensor: int = 60) -> Optional[bytes]:
 # Tendencias SEPARADAS por sección (Ciclo 23.170) — CRF-TRF vs Generador, etc.
 # Cada figura lleva sus líneas de alarma/danger (según los umbrales del plano).
 # ---------------------------------------------------------------------------
-_SECTION_ORDER = ["CRF-TRF", "Generador", "Gearbox"]
+# v3.31.414 — orden físico del tren: turbina → gearbox (y auxiliares) →
+# generador. CRF-TRF es la "turbina" de los trenes aeroderivados.
+_SECTION_ORDER = ["CRF-TRF", "Turbina", "Gearbox", "Bomba", "Generador"]
+
+# Dentro de cada sección, orden de unidades pedido por el usuario:
+# desplazamiento → aceleración → velocidad.
+_UNIT_DESCR_ORDER = {"desplazamiento": 0, "aceleración": 1, "velocidad": 2}
 
 
 def _section_key(plane_label: str) -> str:
@@ -1039,12 +1092,15 @@ def build_trend_figures(instance_id: str, instance_obj: Any = None,
             by_unit: Dict[str, List[str]] = {}
             for l in labels_all:
                 by_unit.setdefault(_label_unit(l) or "", []).append(l)
-            for unit_key in sorted(by_unit, key=lambda u: -len(by_unit[u])):
-                labels = sorted(
-                    by_unit[unit_key],
-                    key=lambda k: -len([h for h in spark[k]
-                                        if h.get("value") is not None]),
-                )[:6]  # máx 6 canales por figura para no saturar
+            # Unidades en orden desplazamiento → aceleración → velocidad
+            # (v3.31.414); empate por cantidad de canales desc.
+            for unit_key in sorted(
+                    by_unit,
+                    key=lambda u: (_UNIT_DESCR_ORDER.get(_unit_descr(u), 9),
+                                   -len(by_unit[u]))):
+                # Canales en orden físico del tren (1XD, 1YD, 2XD, 2YD...)
+                labels = sorted(by_unit[unit_key],
+                                key=_train_sort_key)[:6]  # máx 6 por figura
                 series, alarms, dangers, units = [], [], [], []
                 for i, lbl in enumerate(labels):
                     hist = spark.get(lbl, [])
@@ -1233,8 +1289,9 @@ def waveform_history_table(instance_id: str,
 
         # Por canal: SOLO la más reciente (final) y la más antigua (inicial),
         # más reciente primero (como la tabla comparativa de la casa).
+        # Canales en orden físico del tren (v3.31.414).
         rows: List[Dict[str, Any]] = []
-        for canal in sorted(by_canal):
+        for canal in sorted(by_canal, key=_train_sort_key):
             slot = by_canal[canal]
             if not slot:
                 continue

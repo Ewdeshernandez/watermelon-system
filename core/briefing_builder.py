@@ -120,6 +120,19 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
     except Exception:
         _fam_fn = None  # type: ignore
 
+    # v3.31.414 — ORDEN DEL TREN, no por severidad: la Tabular List (y el
+    # Histórico Overall, que hereda este orden) se listan por plano del
+    # sensor (1,2,3,4,...) como en la app; las alarmas se distinguen por el
+    # color del STATUS, no por la posición.
+    import re as _re
+
+    def _plane_key(row):
+        sl = str(row.get("sensor_label", ""))
+        m = _re.match(r"(\d+)", sl)
+        return (int(m.group(1)) if m else 99, sl)
+
+    rendered_rows = sorted(rendered_rows, key=_plane_key)
+
     channels = []
     for r in rendered_rows:
         sl = r["sensor_label"]
