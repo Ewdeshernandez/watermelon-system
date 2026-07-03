@@ -255,13 +255,13 @@ jobs:
           esac
           mkdir -p planta/.streamlit
           cat > planta/.streamlit/secrets.toml <<EOF
-          # Generado por CI (build-planta.yml). Claves PÚBLICAS del proyecto
-          # Watermelon Cloud: url + anon_key. NO contiene el service_key.
+          # Generado por CI (build-planta.yml). Solo claves PUBLICAS del
+          # proyecto Watermelon Cloud: url + anon_key (aptas para frontend).
           [supabase]
           url = "${SUPABASE_URL}"
           anon_key = "${SUPABASE_ANON_KEY}"
           EOF
-          echo "OK secrets.toml generado (url + anon_key, sin service_key)."
+          echo "OK secrets.toml generado (url + anon_key publicos)."
 
       # ------------------------------------------------------
       # 7. Build .exe portable con PyInstaller

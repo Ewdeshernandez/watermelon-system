@@ -74,7 +74,14 @@ datas += [
 _REAL_SECRETS = _PLANTA_DIR / ".streamlit" / "secrets.toml"
 if _REAL_SECRETS.exists():
     _txt = _REAL_SECRETS.read_text(encoding="utf-8", errors="ignore")
-    if "service_key" in _txt or "service_role" in _txt:
+    # Chequear SOLO líneas que NO son comentarios, para no dar falso positivo
+    # cuando un comentario menciona la palabra 'service_key'/'service_role'.
+    # Detectamos una asignación real de esas claves.
+    import re as _re
+    _body = "\n".join(
+        _l for _l in _txt.splitlines() if not _l.lstrip().startswith("#")
+    )
+    if _re.search(r"service_(role|key)", _body):
         raise SystemExit(
             "\n\n[watermelon-planta.spec] ABORTANDO BUILD: "
             "planta/.streamlit/secrets.toml contiene 'service_key'/'service_role'. "
