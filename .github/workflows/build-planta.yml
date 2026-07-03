@@ -381,6 +381,55 @@ jobs:
       # tag vacío (softprops cayó a "refs/heads/main" + HttpError). Se relee
       # VERSION en bash justo antes de publicar como respaldo.
       # ------------------------------------------------------
+      # v3.31.418 — RETENCIÓN: conservar solo los últimos 5 installers en
+      # Supabase Storage. Cada .exe pesa ~3.5 GB y llegaron a acumularse
+      # 157 archivos (552 GB) hasta la limpieza manual del 2026-07-02.
+      # Best-effort: si falla no tumba el build.
+      - name: Retencion de installers (mantener ultimos 5)
+        shell: bash
+        continue-on-error: true
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os, re, urllib.request
+          url = os.environ["SUPABASE_URL"].rstrip("/")
+          key = os.environ["SUPABASE_KEY"]
+          hdr = {"Authorization": f"Bearer {key}", "apikey": key,
+                 "Content-Type": "application/json"}
+
+          def call(method, path, payload):
+              r = urllib.request.Request(url + path,
+                                         data=json.dumps(payload).encode(),
+                                         headers=hdr, method=method)
+              with urllib.request.urlopen(r, timeout=120) as resp:
+                  return json.load(resp)
+
+          files, offset = [], 0
+          while True:
+              page = call("POST", "/storage/v1/object/list/watermelon-planta-deps",
+                          {"prefix": "installers", "limit": 100,
+                           "offset": offset})
+              files += page
+              offset += len(page)
+              if len(page) < 100:
+                  break
+
+          def ver(n):
+              m = re.search(r"v(\d+)\.(\d+)\.(\d+)", n)
+              return tuple(map(int, m.groups())) if m else (0, 0, 0)
+
+          exes = sorted((f["name"] for f in files
+                         if f["name"].endswith(".exe")), key=ver)
+          old = exes[:-5]
+          if old:
+              call("DELETE", "/storage/v1/object/watermelon-planta-deps",
+                   {"prefixes": [f"installers/{n}" for n in old]})
+          print(f"Retencion: {len(old)} installer(s) viejos borrados; "
+                f"quedan {len(exes) - len(old)}")
+          PY
+
       - name: Version fallback (bash)
         id: version2
         shell: bash
