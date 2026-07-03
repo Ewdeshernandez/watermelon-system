@@ -61,6 +61,32 @@ datas += [
         "planta/.streamlit"),
 ]
 
+# ============================================================
+# secrets.toml REAL con las claves PÚBLICAS del proyecto (url + anon_key).
+# En CI lo escribe el step "Generar secrets.toml" ANTES del build a partir de
+# los GH secrets SUPABASE_URL + SUPABASE_ANON_KEY. Empaquetarlo es lo que hace
+# funcionar el login OTP en el .exe (sin él, no hay env ni st.secrets y el
+# login truena con "SUPABASE_URL/ANON_KEY no configurados").
+# NUNCA debe contener el service_key (solo url + anon_key, ambos públicos).
+# Si no existe (dev local sin claves), el build sigue igual y el login usa
+# env/st.secrets como antes.
+# ============================================================
+_REAL_SECRETS = _PLANTA_DIR / ".streamlit" / "secrets.toml"
+if _REAL_SECRETS.exists():
+    _txt = _REAL_SECRETS.read_text(encoding="utf-8", errors="ignore")
+    if "service_key" in _txt or "service_role" in _txt:
+        raise SystemExit(
+            "\n\n[watermelon-planta.spec] ABORTANDO BUILD: "
+            "planta/.streamlit/secrets.toml contiene 'service_key'/'service_role'. "
+            "El .exe del cliente SOLO puede llevar url + anon_key (públicos). "
+            "Quitá el service_key de ese archivo antes de buildear.\n"
+        )
+    datas.append((str(_REAL_SECRETS), "planta/.streamlit"))
+    print("[watermelon-planta.spec] OK incluido secrets.toml real (url + anon_key).")
+else:
+    print("[watermelon-planta.spec] AVISO: no hay secrets.toml real; el .exe "
+          "dependerá de env/st.secrets para el login (OTP no funcionará en campo).")
+
 # Core modal (reusable desde planta/)
 _CORE_MODAL = _REPO_ROOT / "core" / "modal"
 if _CORE_MODAL.exists():
