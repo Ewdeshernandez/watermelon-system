@@ -239,13 +239,22 @@ def check_for_updates(
     body = str(data.get("body", ""))
     published_at = str(data.get("published_at", ""))
 
-    # 5. Buscar asset del installer (.exe)
+    # 5. Buscar el installer: primero como asset de GitHub (.exe con
+    #    "planta"), y si no hay assets (v3.31.417 — el pipeline sube el .exe
+    #    a Supabase Storage y solo deja el LINK FIRMADO en el body del
+    #    release), extraer la URL de "[DESCARGA DIRECTA](...)" del body.
     download_url = release_url
     for asset in data.get("assets", []):
         name = str(asset.get("name", ""))
         if name.lower().endswith(".exe") and "planta" in name.lower():
             download_url = str(asset.get("browser_download_url", release_url))
             break
+    if download_url == release_url and body:
+        import re as _re
+        m = (_re.search(r"\[DESCARGA DIRECTA\]\((https?://[^)\s]+)\)", body)
+             or _re.search(r"(https?://\S+?\.exe(?:\?\S+)?)", body))
+        if m:
+            download_url = m.group(1)
 
     # 6. Comparar versiones
     has_update = (
@@ -296,11 +305,13 @@ def is_auto_update_enabled() -> bool:
 
 def can_self_update(info: "UpdateInfo") -> bool:
     """True si podemos auto-instalar: hay update, corremos como .exe
-    congelado en Windows, y el release trae un installer .exe."""
+    congelado en Windows, y hay URL de installer (.exe en el path — las
+    URLs firmadas de Supabase llevan ?token=... después del .exe)."""
+    url = (info.download_url or "").lower().split("?", 1)[0]
     return bool(
         info.has_update and not info.error
         and _is_frozen() and os.name == "nt"
-        and info.download_url.lower().endswith(".exe")
+        and url.endswith(".exe")
     )
 
 
@@ -310,7 +321,8 @@ def download_installer(info: "UpdateInfo", progress_cb=None) -> Path:
     re-descarga para evitar corruptos). Devuelve el path local."""
     updates_dir = _get_data_dir() / "updates"
     updates_dir.mkdir(parents=True, exist_ok=True)
-    fname = info.download_url.rsplit("/", 1)[-1] or f"update_{info.latest_version}.exe"
+    fname = (info.download_url.split("?", 1)[0].rsplit("/", 1)[-1]
+             or f"update_{info.latest_version}.exe")
     dest = updates_dir / fname
     req = urllib.request.Request(
         info.download_url, headers={"User-Agent": USER_AGENT})

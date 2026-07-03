@@ -377,12 +377,20 @@ jobs:
 
       # ------------------------------------------------------
       # 10. Crear GitHub Release (SIN asset, solo body con link a Supabase)
+      # v3.31.417 — Fallback del tag: en el run #183 el release llegó con
+      # tag vacío (softprops cayó a "refs/heads/main" + HttpError). Se relee
+      # VERSION en bash justo antes de publicar como respaldo.
       # ------------------------------------------------------
+      - name: Version fallback (bash)
+        id: version2
+        shell: bash
+        run: echo "version=$(tr -d ' \r\n' < VERSION)" >> "$GITHUB_OUTPUT"
+
       - name: Publicar GitHub Release con link a Supabase
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: Watermelon Planta ${{ steps.version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.version || steps.version2.outputs.version }}
+          name: Watermelon Planta ${{ steps.version.outputs.version || steps.version2.outputs.version }}
           body: |
             # 🍉 Watermelon Planta Edition — ${{ steps.version.outputs.version }}
 
