@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Optional, Dict
@@ -34,8 +35,85 @@ from typing import Optional, Dict
 _AUTH_FILE = Path(__file__).parent / "data" / ".auth.json"
 
 
+def _read_bundled_secrets() -> tuple[Optional[str], Optional[str]]:
+    """Lee url + anon_key de un secrets.toml EMPAQUETADO en el .exe.
+
+    En el .exe congelado (PyInstaller onefile) NO hay variables de entorno
+    ni st.secrets: st.secrets busca .streamlit/secrets.toml relativo al CWD,
+    que no existe. Por eso el login OTP fallaba en campo con
+    "SUPABASE_URL y SUPABASE_ANON_KEY no configurados".
+
+    El build (CI) escribe planta/.streamlit/secrets.toml con las claves
+    PÚBLICAS del proyecto (url + anon_key) y el .spec lo empaqueta. Acá lo
+    leemos DIRECTO por ruta, de forma determinista, probando varias
+    ubicaciones candidatas (frozen y dev). Nunca contiene el service_key.
+    """
+    candidates = []
+    # 1) Junto a este módulo: <bundle>/planta/.streamlit/secrets.toml
+    candidates.append(Path(__file__).resolve().parent / ".streamlit" / "secrets.toml")
+    # 2) En el root del bundle PyInstaller (_MEIPASS) cuando está frozen
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "planta" / ".streamlit" / "secrets.toml")
+        candidates.append(Path(meipass) / ".streamlit" / "secrets.toml")
+    # 3) Relativo al directorio de trabajo actual
+    candidates.append(Path.cwd() / ".streamlit" / "secrets.toml")
+
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+            url, key = _parse_supabase_toml(text)
+            if url and key:
+                return url, key
+        except Exception:  # noqa: BLE001 — un secrets.toml roto no debe tumbar el login
+            continue
+    return None, None
+
+
+def _parse_supabase_toml(text: str) -> tuple[Optional[str], Optional[str]]:
+    """Extrae supabase.url + supabase.anon_key de un secrets.toml.
+
+    Usa tomllib/toml si están disponibles; si no (p.ej. Python <3.11 sin el
+    paquete toml), cae a un mini-parser manual — el archivo que genera el CI
+    es trivial (una sección [supabase] con dos líneas key = "valor")."""
+    # 1) Parser TOML de verdad si está a mano.
+    for _mod in ("tomllib", "toml", "tomli"):
+        try:
+            _p = __import__(_mod)
+            data = _p.loads(text)
+            sup = data.get("supabase", {}) or {}
+            u, k = sup.get("url"), sup.get("anon_key")
+            if u and k:
+                return u, k
+        except Exception:  # noqa: BLE001
+            continue
+    # 2) Mini-parser manual (sin dependencias).
+    url = key = None
+    in_supabase = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("["):
+            in_supabase = line.lower().replace(" ", "") == "[supabase]"
+            continue
+        if not in_supabase or "=" not in line:
+            continue
+        name, _, val = line.partition("=")
+        name = name.strip().lower()
+        val = val.split("#", 1)[0].strip().strip('"').strip("'")
+        if name == "url":
+            url = val
+        elif name == "anon_key":
+            key = val
+    return url, key
+
+
 def _get_supabase_credentials() -> tuple[str, str]:
-    """Lee SUPABASE_URL y ANON_KEY de env vars o st.secrets."""
+    """Lee SUPABASE_URL y ANON_KEY de env vars, st.secrets o secrets.toml
+    empaquetado (este último es el que hace funcionar el login en el .exe)."""
     url = os.environ.get("SUPABASE_URL")
     key = os.environ.get("SUPABASE_ANON_KEY")
 
@@ -47,6 +125,12 @@ def _get_supabase_credentials() -> tuple[str, str]:
                 key = key or st.secrets["supabase"].get("anon_key")
         except (ImportError, FileNotFoundError, KeyError):
             pass
+
+    # Fallback determinista para el .exe congelado (sin env ni st.secrets).
+    if not url or not key:
+        b_url, b_key = _read_bundled_secrets()
+        url = url or b_url
+        key = key or b_key
 
     if not url or not key:
         raise RuntimeError(

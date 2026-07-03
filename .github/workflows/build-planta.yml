@@ -225,6 +225,45 @@ jobs:
           Write-Host "✓ Tamaño total extraído: $([math]::Round($totalSize / 1GB, 2)) GB"
 
       # ------------------------------------------------------
+      # 6.5 Generar planta/.streamlit/secrets.toml (claves PÚBLICAS)
+      #     Sin esto el .exe sale sin credenciales Supabase y el login
+      #     OTP truena en campo con "SUPABASE_URL/ANON_KEY no configurados".
+      #     Solo url + anon_key (ambos públicos). NUNCA el service_key.
+      # ------------------------------------------------------
+      - name: Generar secrets.toml para el bundle
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          set -e
+          if [ -z "${SUPABASE_ANON_KEY}" ]; then
+            echo "ERROR: falta el GitHub secret SUPABASE_ANON_KEY."
+            echo "Agregalo en Settings -> Secrets and variables -> Actions."
+            echo "Valor = Supabase Dashboard -> Settings -> API -> 'anon public'."
+            exit 1
+          fi
+          if [ -z "${SUPABASE_URL}" ]; then
+            echo "ERROR: falta el GitHub secret SUPABASE_URL."
+            exit 1
+          fi
+          # Guardia: el anon key debe ser rol 'anon', jamás service_role.
+          case "${SUPABASE_ANON_KEY}" in
+            *service_role*)
+              echo "ERROR: SUPABASE_ANON_KEY parece un service_role key. Usá el 'anon public'."
+              exit 1 ;;
+          esac
+          mkdir -p planta/.streamlit
+          cat > planta/.streamlit/secrets.toml <<EOF
+          # Generado por CI (build-planta.yml). Claves PÚBLICAS del proyecto
+          # Watermelon Cloud: url + anon_key. NO contiene el service_key.
+          [supabase]
+          url = "${SUPABASE_URL}"
+          anon_key = "${SUPABASE_ANON_KEY}"
+          EOF
+          echo "OK secrets.toml generado (url + anon_key, sin service_key)."
+
+      # ------------------------------------------------------
       # 7. Build .exe portable con PyInstaller
       # ------------------------------------------------------
       - name: Build WatermelonPlanta.exe con PyInstaller
