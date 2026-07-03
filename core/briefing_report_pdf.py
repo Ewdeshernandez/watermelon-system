@@ -474,10 +474,24 @@ def generate_briefing_pdf(
             # análisis va con la última parte.
             _parts = figures.get(f"{key}_pngs") or [figures[key]]
             for pi, part in enumerate(_parts, start=1):
-                _head = cap if len(_parts) == 1 else f"{cap} ({pi}/{len(_parts)})"
+                # v3.31.415 — cada parte es un paquete por máquina con nombre
+                # ({"png","name"}); compat con bytes planos.
+                if isinstance(part, dict):
+                    _png_bytes = part.get("png")
+                    _sfx = (part.get("name") or "").strip()
+                else:
+                    _png_bytes, _sfx = part, ""
+                if not _png_bytes:
+                    continue
+                if _sfx:
+                    _head = f"{cap} — {_sfx}"
+                elif len(_parts) > 1:
+                    _head = f"{cap} ({pi}/{len(_parts)})"
+                else:
+                    _head = cap
                 _an = (figures.get(f"{key}_analysis") or "") \
                     if pi == len(_parts) else ""
-                _add_fig(part, _head, _h, analysis=_an)
+                _add_fig(_png_bytes, _head, _h, analysis=_an)
 
     return render_report_pdf(meta, body)
 

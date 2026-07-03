@@ -219,6 +219,34 @@ def _sorted_sensors(sensors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                   key=lambda s: _train_sort_key(s.get("sensor_label", "")))
 
 
+_RANK_NAMES = {0: "Turbina", 1: "Gearbox", 2: "Generador", 3: ""}
+
+
+def _machine_chunks(sensors: List[Dict[str, Any]],
+                    label_key: str = "sensor_label",
+                    max_per_fig: int = 8) -> List[tuple]:
+    """Agrupa canales POR MÁQUINA para las figuras apiladas (v3.31.415,
+    pedido del usuario): paquete Turbina (1XD,1YD,2XD,2YD), paquete Gearbox
+    (todos sus canales juntos), paquete Generador (5XD,5YD,6XD,6YD). Si un
+    grupo excede max_per_fig se subdivide. Devuelve [(nombre, [sensores])]."""
+    grouped: Dict[int, List[Dict[str, Any]]] = {}
+    for s in sensors:
+        r = _train_sort_key(str(s.get(label_key, "")))[0]
+        grouped.setdefault(r, []).append(s)
+    out: List[tuple] = []
+    for r in sorted(grouped):
+        grp = grouped[r]
+        name = _RANK_NAMES.get(r, "")
+        if len(grp) <= max_per_fig:
+            out.append((name, grp))
+        else:
+            n_parts = (len(grp) + max_per_fig - 1) // max_per_fig
+            for i in range(n_parts):
+                part = grp[i * max_per_fig:(i + 1) * max_per_fig]
+                out.append((f"{name} ({i + 1}/{n_parts})".strip(), part))
+    return out
+
+
 def _png(fig, height: int = 900) -> Optional[bytes]:
     try:
         from core.plot_export import fig_to_png_bytes
@@ -333,12 +361,9 @@ def spectrum_bundle(instance_id: str) -> Dict[str, Any]:
             pass
 
         findings: List[Dict[str, Any]] = []
-        pngs: List[bytes] = []
-        # v3.31.412 — máx 6 canales por figura: con 10-12 canales apilados en
-        # un solo PNG (altura fija) cada espectro quedaba de 1 mm, ilegible.
-        _CHUNK = 6
-        chunks = [sensors[i:i + _CHUNK] for i in range(0, len(sensors), _CHUNK)]
-        for chunk in chunks:
+        pngs: List[Dict[str, Any]] = []
+        # v3.31.415 — paquetes POR MÁQUINA: Turbina / Gearbox / Generador.
+        for _grp_name, chunk in _machine_chunks(sensors):
             cn = len(chunk)
             fig = make_subplots(rows=cn, cols=1, shared_xaxes=True,
                                 vertical_spacing=min(0.08, 0.3 / max(cn, 1)),
@@ -400,8 +425,8 @@ def spectrum_bundle(instance_id: str) -> Dict[str, Any]:
                               font=dict(size=12, color="#334155"))
             p = _png(fig, height=_h)
             if p:
-                pngs.append(p)
-        return {"png": (pngs[0] if pngs else None), "pngs": pngs,
+                pngs.append({"png": p, "name": _grp_name})
+        return {"png": (pngs[0]["png"] if pngs else None), "pngs": pngs,
                 "analysis": _spectrum_analysis(findings)}
     except Exception as e:
         log.warning("spectrum_bundle: %s", e)
@@ -571,10 +596,9 @@ def waveform_bundle(instance_id: str) -> Dict[str, Any]:
         import plotly.graph_objects as go
         from plotly.subplots import make_subplots
         findings: List[Dict[str, Any]] = []
-        pngs: List[bytes] = []
-        _CHUNK = 6  # v3.31.412 — máx 6 canales por figura (legibilidad)
-        chunks = [sensors[i:i + _CHUNK] for i in range(0, len(sensors), _CHUNK)]
-        for chunk in chunks:
+        pngs: List[Dict[str, Any]] = []
+        # v3.31.415 — paquetes POR MÁQUINA: Turbina / Gearbox / Generador.
+        for _grp_name, chunk in _machine_chunks(sensors):
             cn = len(chunk)
             fig = make_subplots(rows=cn, cols=1, shared_xaxes=False,
                                 vertical_spacing=min(0.08, 0.3 / max(cn, 1)),
@@ -622,8 +646,8 @@ def waveform_bundle(instance_id: str) -> Dict[str, Any]:
                               font=dict(size=12, color="#334155"))
             p = _png(fig, height=_h)
             if p:
-                pngs.append(p)
-        return {"png": (pngs[0] if pngs else None), "pngs": pngs,
+                pngs.append({"png": p, "name": _grp_name})
+        return {"png": (pngs[0]["png"] if pngs else None), "pngs": pngs,
                 "analysis": _waveform_analysis(findings)}
     except Exception as e:
         log.warning("waveform_bundle: %s", e)
@@ -1066,10 +1090,33 @@ def build_trend_figures(instance_id: str, instance_obj: Any = None,
         if not spark:
             return []
         lookup = _build_sensor_lookup(instance_obj) if instance_obj is not None else {}
+
+        # v3.31.415 — mapa plano→sección desde la config del activo: cuando
+        # el label no matchea en el lookup (duplicados/nomenclatura), la
+        # sección se infiere por el NÚMERO de plano del canal. Fix del caso
+        # SGT300B donde los desplazamientos del gearbox caían a "Otros".
+        import re as _re
+        plane_sec: Dict[int, str] = {}
+        for s in (getattr(instance_obj, "sensors", None) or []):
+            _sec = _section_key(str(s.get("plane_label", "")))
+            if _sec in _SECTION_ORDER:
+                try:
+                    plane_sec.setdefault(int(s.get("plane", 0) or 0), _sec)
+                except Exception:
+                    pass
+
+        def _sec_for(lbl: str) -> str:
+            s = lookup.get(lbl) or {}
+            sec = _section_key(s.get("plane_label", ""))
+            if sec not in _SECTION_ORDER:
+                m = _re.match(r"(\d+)", str(lbl))
+                if m and int(m.group(1)) in plane_sec:
+                    return plane_sec[int(m.group(1))]
+            return sec
+
         groups: Dict[str, List[str]] = {}
         for lbl in spark:
-            s = lookup.get(lbl) or {}
-            groups.setdefault(_section_key(s.get("plane_label", "")), []).append(lbl)
+            groups.setdefault(_sec_for(lbl), []).append(lbl)
 
         def _sec_sort(k):
             return (_SECTION_ORDER.index(k) if k in _SECTION_ORDER else 99, k)
