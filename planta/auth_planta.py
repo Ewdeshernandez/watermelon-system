@@ -177,49 +177,104 @@ def _save_session(resp, email: str) -> Dict:
 
 
 # ---------------------------------------------------------------------------
-# Login por CÓDIGO OTP (v3.31.398) — igual que Watermelon Cloud: ya no hay
-# passwords. Supabase manda un código de 6 dígitos al email del técnico;
-# verify_otp devuelve la MISMA sesión JWT que antes (RLS intacto).
+# Login por CÓDIGO OTP (v3.31.420+, Plan B) — UNIFICADO con la app principal.
+# Ya NO usamos el OTP nativo de Supabase (dependía de la plantilla de email
+# "Magic link or OTP", que no incluía {{ .Token }} → el código no llegaba).
+# Ahora llamamos a la Edge Function `planta-auth`, que corre server-side con
+# el service_role: genera el código, lo envía por NUESTRO correo (Microsoft
+# Graph, ehernandez@sigasas.com) y, al verificar, acuña una SESIÓN Supabase
+# (JWT + refresh) que devolvemos acá. El client_secret de Graph vive solo en
+# el servidor, nunca en el .exe. sync_uploader sigue subiendo con ese JWT.
 # ---------------------------------------------------------------------------
-def request_login_code(email: str) -> None:
-    """Pide a Supabase que envíe el código OTP al email. Requiere internet.
+def _planta_auth_endpoint() -> str:
+    url, _ = _get_supabase_credentials()
+    return url.rstrip("/") + "/functions/v1/planta-auth"
 
-    should_create_user=False: solo usuarios ya registrados en Watermelon
-    Cloud pueden loguearse desde Planta."""
-    email = (email or "").strip().lower()
-    if not email or "@" not in email:
-        raise ValueError("Email inválido")
-    client = _get_supabase_client()
+
+def _post_planta_auth(payload: Dict) -> Dict:
+    """POST JSON a la Edge Function planta-auth. Devuelve el body parseado
+    (incluye 'ok' o 'error'). Levanta RuntimeError solo si no hay red."""
+    import urllib.request
+    import urllib.error
+
+    url, key = _get_supabase_credentials()
+    endpoint = url.rstrip("/") + "/functions/v1/planta-auth"
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(endpoint, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    req.add_header("apikey", key)
+    req.add_header("Authorization", f"Bearer {key}")
     try:
-        client.auth.sign_in_with_otp({
-            "email": email,
-            "options": {"should_create_user": False},
-        })
-    except Exception as exc:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            return json.loads(exc.read().decode("utf-8"))
+        except Exception:  # noqa: BLE001
+            return {"error": f"http_{exc.code}"}
+    except Exception as exc:  # noqa: BLE001 — red caída / DNS / timeout
         raise RuntimeError(
-            f"No se pudo enviar el código: {exc}. Verifica el email (debe "
-            f"existir en Watermelon Cloud) y la conexión a internet."
+            f"No se pudo contactar el servidor de acceso: {exc}. "
+            "Verifica tu conexión a internet."
         ) from exc
 
 
+def _save_session_dict(res: Dict) -> Dict:
+    """Persiste en planta/data/.auth.json la sesión devuelta por la Edge
+    Function (mismo formato de siempre)."""
+    if not res.get("access_token"):
+        raise RuntimeError("El servidor no devolvió un token de sesión válido")
+    data = {
+        "email": res.get("email"),
+        "user_id": res.get("user_id"),
+        "access_token": res["access_token"],
+        "refresh_token": res.get("refresh_token", ""),
+        "expires_at": res.get("expires_at"),
+        "logged_in_at": int(time.time()),
+    }
+    _AUTH_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _AUTH_FILE.write_text(json.dumps(data, indent=2))
+    return data
+
+
+def request_login_code(email: str) -> None:
+    """Pide a la Edge Function que envíe el código OTP al email (por Graph).
+
+    Requiere internet. Por seguridad la función responde OK aunque el correo
+    no exista (no filtra qué correos están registrados); solo envía el código
+    a usuarios ya registrados en Watermelon Cloud."""
+    email = (email or "").strip().lower()
+    if not email or "@" not in email:
+        raise ValueError("Email inválido")
+    res = _post_planta_auth({"action": "request", "email": email})
+    if not res.get("ok"):
+        raise RuntimeError(
+            "No se pudo enviar el código "
+            f"({res.get('error', 'error desconocido')}). Reintenta en un momento."
+        )
+
+
 def verify_login_code(email: str, code: str) -> Dict:
-    """Verifica el código OTP y guarda la sesión JWT (planta/data/.auth.json).
+    """Verifica el código OTP contra la Edge Function y guarda la sesión JWT
+    (planta/data/.auth.json).
 
     Returns: dict con email + access_token + expires_at."""
     email = (email or "").strip().lower()
     code = (code or "").strip().replace(" ", "")
     if not email or not code:
         raise ValueError("Email y código requeridos")
-    client = _get_supabase_client()
-    try:
-        resp = client.auth.verify_otp({
-            "email": email, "token": code, "type": "email",
-        })
-    except Exception as exc:
-        raise RuntimeError(
-            f"Código inválido o vencido: {exc}. Pide un código nuevo."
-        ) from exc
-    return _save_session(resp, email)
+    res = _post_planta_auth({"action": "verify", "email": email, "code": code})
+    if not res.get("ok"):
+        err = res.get("error", "desconocido")
+        msg = {
+            "invalid_code": "Código incorrecto.",
+            "invalid_code_format": "El código debe ser de 6 dígitos.",
+            "code_expired": "El código venció. Pide uno nuevo.",
+            "too_many_attempts": "Demasiados intentos. Pide un código nuevo.",
+            "no_challenge": "No hay un código pendiente para ese correo. Pide uno nuevo.",
+        }.get(err, f"No se pudo verificar el código ({err}). Pide uno nuevo.")
+        raise RuntimeError(msg)
+    return _save_session_dict(res)
 
 
 def login(email: str, password: str) -> Dict:
