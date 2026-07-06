@@ -164,6 +164,27 @@ def load_geometry(asset_id: str) -> Optional[ModalGeometry]:
         return ModalGeometry.from_dict(json.load(f))
 
 
+def list_geometries() -> List[str]:
+    """Lista los asset_id de las geometrías guardadas en disco, para poder
+    reusar configuraciones creadas por el usuario (no solo las de activos
+    registrados)."""
+    if not _GEOMETRY_DIR.exists():
+        return []
+    return sorted(p.stem for p in _GEOMETRY_DIR.glob("*.json"))
+
+
+def delete_geometry(asset_id: str) -> bool:
+    """Borra una geometría guardada. True si existía, False si no."""
+    p = _path_for(asset_id)
+    if p.exists():
+        try:
+            p.unlink()
+            return True
+        except Exception:
+            return False
+    return False
+
+
 # ---------------------------------------------------------------------
 # Templates pre-cargados (mas comunes en O&G y power gen)
 # ---------------------------------------------------------------------

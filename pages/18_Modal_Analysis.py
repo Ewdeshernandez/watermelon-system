@@ -615,9 +615,67 @@ with tab_setup:
     if not _geom_asset_id:
         st.caption(
             "Modo ad-hoc — la geometría vive solo en esta sesión. "
-            "Para persistir entre sesiones, selecciona un activo registrado en "
-            "Tab Setup o usa **⬇ Export JSON** para guardarla externamente."
+            "Para persistir entre sesiones, guárdala con un nombre abajo, "
+            "selecciona un activo registrado en Tab Setup, o usa "
+            "**⬇ Export JSON** para guardarla externamente."
         )
+
+    # --- Guardar / cargar CONFIGURACIONES PERSONALIZADAS (también en ad-hoc) ---
+    # Antes solo se podían guardar geometrías de activos registrados; las que
+    # creaba el usuario se perdían. Ahora se pueden guardar con nombre y reusar.
+    with st.expander("💾 Guardar / cargar configuración personalizada",
+                     expanded=False):
+        from core.modal.geometry_3d import (
+            list_geometries as _list_geoms, delete_geometry as _del_geom,
+        )
+        _saved_all = _list_geoms()
+        _custom_saved = [s for s in _saved_all if s.startswith("custom_")]
+        _cc1, _cc2 = st.columns(2)
+        with _cc1:
+            st.markdown("**Guardar la geometría actual**")
+            _save_name = st.text_input(
+                "Nombre de la configuración", key="geom_custom_name",
+                placeholder="ej. Skid compresor Parex")
+            if st.button("Guardar configuración", key="geom_custom_save",
+                         disabled=not _save_name.strip(),
+                         use_container_width=True):
+                _slug = "".join(c if c.isalnum() or c in "-_" else "_"
+                                for c in _save_name.strip().lower())
+                geom.asset_id = "custom_" + _slug
+                geom.name = _save_name.strip() or geom.name
+                try:
+                    save_geometry(geom)
+                    st.success(
+                        f"✓ Guardada como **{_save_name}**. Ya puedes "
+                        f"recargarla en cualquier momento aquí a la derecha.")
+                except Exception as _e:  # noqa: BLE001
+                    st.error(f"No se pudo guardar: {_e}")
+        with _cc2:
+            st.markdown("**Cargar / borrar una guardada**")
+            if _custom_saved:
+                _pick = st.selectbox(
+                    "Configuración guardada",
+                    ["(elegir)"] + _custom_saved,
+                    format_func=lambda s: (s[len("custom_"):].replace("_", " ")
+                                            if s.startswith("custom_") else s),
+                    key="geom_custom_load_pick")
+                _lc1, _lc2 = st.columns(2)
+                if _lc1.button("Cargar", key="geom_custom_load_btn",
+                               disabled=_pick == "(elegir)",
+                               use_container_width=True):
+                    _g = load_geometry(_pick)
+                    if _g:
+                        st.session_state["modal_geometry"] = _g
+                        st.rerun()
+                    else:
+                        st.error("No se pudo cargar esa configuración.")
+                if _lc2.button("Borrar", key="geom_custom_del_btn",
+                               disabled=_pick == "(elegir)",
+                               use_container_width=True):
+                    _del_geom(_pick)
+                    st.rerun()
+            else:
+                st.caption("Aún no hay configuraciones personalizadas guardadas.")
 
     # ----- Preview Plotly 3D -----
     # v3.31.208 — Envuelto en try/except defensivo. Si geom está vacía o
@@ -688,9 +746,17 @@ with tab_setup:
                 with c1:
                     _nm = st.text_input("Nombre", value=_b_default.name,
                                           key="geom_b_name")
-                    _shape = st.selectbox("Forma", ["cylinder", "box"],
-                                            index=0 if _b_default.shape == "cylinder" else 1,
-                                            key="geom_b_shape")
+                    _shape = st.selectbox(
+                        "Forma", ["cylinder", "box"],
+                        index=0 if _b_default.shape == "cylinder" else 1,
+                        format_func=lambda s: {
+                            "cylinder": "Cilindro (eje / rotor / carcasa redonda)",
+                            "box": "Rectángulo / placa (skid, fan cooler, base, carcasa)",
+                        }.get(s, s),
+                        help="El 'Rectángulo/placa' es una caja: para un skid o "
+                             "fan cooler usa half_width grande y half_height "
+                             "pequeño (queda plano y ancho).",
+                        key="geom_b_shape")
                     _x0 = st.number_input("x_start", value=float(_b_default.x_start),
                                             step=10.0, key="geom_b_x0")
                     _x1 = st.number_input("x_end", value=float(_b_default.x_end),
