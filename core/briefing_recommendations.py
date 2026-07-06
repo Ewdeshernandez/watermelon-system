@@ -65,13 +65,14 @@ def _norm_rec(rec: Dict[str, Any]) -> Optional[Dict[str, str]]:
 
 
 def list_recommendations(instance_id: str) -> List[Dict[str, str]]:
-    """Recomendaciones vigentes del activo, ordenadas por fecha de inicio
-    ascendente (la más antigua primero — es la que más urge cerrar)."""
+    """Recomendaciones vigentes del activo, en el ORDEN EN QUE FUERON
+    INGRESADAS/REDACTADAS (no se reordenan por fecha). La fecha es solo
+    información de referencia y no debe afectar el orden de visualización."""
     try:
         from core.instance_state import get_instance_parameters
         raw = get_instance_parameters(instance_id).get(PARAM_KEY) or []
         recs = [r for r in (_norm_rec(x) for x in raw if isinstance(x, dict)) if r]
-        recs.sort(key=lambda r: r["started_at"])
+        # NO ordenar por fecha — se mantiene el orden de ingreso.
         return recs
     except Exception as e:
         log.warning("list_recommendations(%s) falló: %s", instance_id, e)
@@ -84,7 +85,7 @@ def save_recommendations(instance_id: str, recs: List[Dict[str, Any]]) -> bool:
     try:
         from core.instance_state import update_instance_parameter
         clean = [r for r in (_norm_rec(x) for x in recs or [] if isinstance(x, dict)) if r]
-        clean.sort(key=lambda r: r["started_at"])
+        # NO ordenar por fecha — se conserva el orden en que el editor las pasó.
         # update_instance_parameter con "" elimina la clave → usar None/[] explícito
         return update_instance_parameter(instance_id, PARAM_KEY, clean or None)
     except Exception as e:

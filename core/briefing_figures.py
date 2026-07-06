@@ -1288,22 +1288,61 @@ def waveform_history_table(instance_id: str,
 
         from core import history_storage as hs
         from core.waveform_history import load_waveform_snapshot
+
+        def _parse_meas_ts(sv):
+            """Parsea el csv_timestamp de la WF (ej '6/30/2026 6:50:21 AM')
+            → datetime naive. None si no se puede."""
+            from datetime import datetime as _dt
+            sv = (sv or "").strip()
+            if not sv:
+                return None
+            for _f in ("%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M %p",
+                       "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y",
+                       "%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %H:%M:%S",
+                       "%d/%m/%Y %H:%M", "%d/%m/%Y",
+                       "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+                try:
+                    return _dt.strptime(sv, _f)
+                except Exception:
+                    pass
+            try:
+                return _dt.fromisoformat(sv.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                return None
+
+        def _payload_meas_dt(pl):
+            """Fecha REAL de medición del payload WF (primer csv_timestamp)."""
+            for _s in (pl.get("sensors") or []):
+                _dt = _parse_meas_ts(str(_s.get("csv_timestamp") or ""))
+                if _dt is not None:
+                    return _dt
+            return None
+
         snaps = (hs.list_snapshots(instance_id, "waveform") or [])[:max_snaps]
         by_canal: Dict[str, Dict[str, Dict[str, Any]]] = {}
         for smeta in snaps:
             sid = smeta.get("snapshot_id", "")
             m = re.search(r"(\d{8})_(\d{6})", sid)
-            if not m:
-                continue
-            d, t = m.group(1), m.group(2)
-            sort_key = d + t
-            fecha = f"{d[6:8]}/{d[4:6]}/{d[:4]} {t[:2]}:{t[2:4]}"
+            # Default = fecha del snapshot_id (hora de SUBIDA). Se sobreescribe
+            # con el timestamp REAL de medición (csv_timestamp) apenas se carga
+            # el payload — bug fig#4: mostraba la fecha de subida, no la medición.
+            if m:
+                d, t = m.group(1), m.group(2)
+                sort_key = d + t
+                fecha = f"{d[6:8]}/{d[4:6]}/{d[:4]} {t[:2]}:{t[2:4]}"
+            else:
+                sort_key = sid
+                fecha = sid
             try:
                 payload = load_waveform_snapshot(instance_id, sid)
             except Exception:
                 payload = None
             if not payload:
                 continue
+            _meas = _payload_meas_dt(payload)
+            if _meas is not None:
+                sort_key = _meas.strftime("%Y%m%d%H%M%S")
+                fecha = _meas.strftime("%d/%m/%Y %H:%M")
             p_unit = (payload.get("amp_unit", "") or payload.get("unit", ""))
             for s in payload.get("sensors", []) or []:
                 vals = s.get("values")
