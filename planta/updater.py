@@ -345,17 +345,26 @@ def download_installer(info: "UpdateInfo", progress_cb=None) -> Path:
 
 
 def apply_update_and_restart(installer_path: Path) -> None:
-    """Lanza el installer en modo silencioso vía un .bat desacoplado y cierra
-    la app. El .bat espera 3s (a que muera este proceso), corre Inno Setup
-    /VERYSILENT (instala sobre la misma carpeta) y relanza el .exe."""
+    """Lanza el installer ELEVADO (admin) en modo silencioso vía un .bat
+    desacoplado, cierra la app y luego la relanza.
+
+    El instalador escribe en Program Files → necesita permisos de admin. Antes
+    el .bat corría el installer SIN elevar y con /SUPPRESSMSGBOXES: la
+    instalación fallaba EN SILENCIO (sin permiso, sin aviso) y había que
+    instalar a mano. Ahora usamos PowerShell `Start-Process -Verb RunAs`:
+    Windows pide UN solo permiso (UAC "¿Permitir cambios?" → Sí) y de ahí el
+    instalador corre solo, silencioso, y la app se reabre sola."""
     import subprocess
     exe_path = Path(sys.executable)  # el WatermelonPlanta.exe congelado
     bat = _get_data_dir() / "updates" / "apply_update.bat"
+    _args = ("'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"
+             "'/CLOSEAPPLICATIONS','/RESTARTAPPLICATIONS=0'")
+    _ps = (f"Start-Process -FilePath '{installer_path}' "
+           f"-ArgumentList {_args} -Verb RunAs -Wait")
     bat.write_text(
         "@echo off\r\n"
         "timeout /t 3 /nobreak >nul\r\n"
-        f"\"{installer_path}\" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART "
-        "/CLOSEAPPLICATIONS /RESTARTAPPLICATIONS=0\r\n"
+        f"powershell -NoProfile -ExecutionPolicy Bypass -Command \"{_ps}\"\r\n"
         f"start \"\" \"{exe_path}\"\r\n"
         f"del \"{installer_path}\" >nul 2>&1\r\n",
         encoding="ascii", errors="replace",
@@ -363,7 +372,7 @@ def apply_update_and_restart(installer_path: Path) -> None:
     DETACHED = 0x00000008 | 0x00000200  # DETACHED_PROCESS | NEW_PROCESS_GROUP
     subprocess.Popen(["cmd", "/c", str(bat)], creationflags=DETACHED,
                      close_fds=True)
-    os._exit(0)  # el .bat toma el control: instala y relanza
+    os._exit(0)  # el .bat toma el control: eleva, instala y relanza
 
 
 def run_auto_update_ui(info: "UpdateInfo") -> None:
