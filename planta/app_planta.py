@@ -208,9 +208,24 @@ except ImportError:
 # =====================================================================
 _app_version = "v1.0.0"
 try:
-    _ver_file = _REPO_ROOT / "VERSION"
-    if _ver_file.exists():
-        _app_version = _ver_file.read_text().strip()
+    import sys as _sys_v
+    # Buscar VERSION en varias rutas (frozen-aware): raíz del bundle, _MEIPASS,
+    # y junto al .exe. Antes solo probaba _REPO_ROOT/VERSION → en el .exe no
+    # existía y se quedaba en "v1.0.0" (y el updater creía siempre que había
+    # update). El .spec ahora empaqueta VERSION en la raíz del bundle.
+    _vf_candidates = [_REPO_ROOT / "VERSION"]
+    _mei = getattr(_sys_v, "_MEIPASS", None)
+    if _mei:
+        _vf_candidates.append(Path(_mei) / "VERSION")
+    if getattr(_sys_v, "frozen", False):
+        _vf_candidates.append(Path(_sys_v.executable).parent / "VERSION")
+    for _vf in _vf_candidates:
+        try:
+            if _vf.exists():
+                _app_version = _vf.read_text().strip()
+                break
+        except Exception:
+            continue
 except Exception:
     pass
 

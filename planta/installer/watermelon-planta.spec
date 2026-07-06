@@ -46,6 +46,10 @@ datas = []
 # El app principal y la página de captura
 datas += [
     (str(_PLANTA_DIR / "app_planta.py"),                "planta"),
+    # VERSION en la RAÍZ del bundle → app_planta y updater lo leen como
+    # _REPO_ROOT/VERSION (= <bundle>/VERSION). Sin esto, en el .exe no existe y
+    # la app caía a "v1.0.0" y el updater creía SIEMPRE que había actualización.
+    (str(_REPO_ROOT / "VERSION"),                        "."),
     (str(_PLANTA_DIR / "auth_planta.py"),                "planta"),
     (str(_PLANTA_DIR / "sync_uploader.py"),              "planta"),
     (str(_PLANTA_DIR / "license_manager.py"),            "planta"),
