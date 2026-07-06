@@ -41,7 +41,17 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-_CAPTURES_DIR = _REPO_ROOT / "planta" / "data" / "captures"
+# Dir PERSISTENTE de capturas (frozen-aware): en el .exe va JUNTO al ejecutable,
+# NO en el temporal _MEIPASS (Path(__file__)/parents, que se borra al cerrar).
+# DEBE coincidir con el dir que escanea el sync (app_planta) — si no, la captura
+# guarda en un lado y el sync mira otro → nunca aparece el botón "Sync ahora".
+import os as _os  # noqa: E402
+if _os.environ.get("WATERMELON_DATA_DIR"):
+    _CAPTURES_DIR = Path(_os.environ["WATERMELON_DATA_DIR"]) / "captures"
+elif getattr(sys, "frozen", False):
+    _CAPTURES_DIR = Path(sys.executable).parent / "data" / "captures"
+else:
+    _CAPTURES_DIR = _REPO_ROOT / "planta" / "data" / "captures"
 _CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
 # Botón volver

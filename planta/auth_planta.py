@@ -32,7 +32,23 @@ import time
 from pathlib import Path
 from typing import Optional, Dict
 
-_AUTH_FILE = Path(__file__).parent / "data" / ".auth.json"
+def planta_data_dir() -> Path:
+    """Directorio de datos PERSISTENTE del Planta (single source of truth).
+
+    En el .exe congelado va JUNTO al ejecutable (no en el temporal _MEIPASS,
+    que se borra al cerrar). Igual que license_manager/updater. Antes esto
+    usaba Path(__file__).parent y en el .exe caía al _MEIPASS → la sesión de
+    login NO persistía y el sync escaneaba una carpeta vacía (nunca aparecía
+    el botón 'Sync ahora')."""
+    _env = os.environ.get("WATERMELON_DATA_DIR")
+    if _env:
+        return Path(_env)
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent / "data"
+    return Path(__file__).parent / "data"
+
+
+_AUTH_FILE = planta_data_dir() / ".auth.json"
 
 
 def _read_bundled_secrets() -> tuple[Optional[str], Optional[str]]:

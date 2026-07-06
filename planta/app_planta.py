@@ -45,8 +45,11 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Asegurar carpetas de datos
-_CAPTURES_DIR = Path(__file__).parent / "data" / "captures"
+# Asegurar carpetas de datos — usar el dir PERSISTENTE frozen-aware (junto al
+# .exe), NO Path(__file__) (que en el .exe cae al temporal _MEIPASS). Antes el
+# sync escaneaba el temporal vacío y nunca aparecía el botón "Sync ahora".
+from auth_planta import planta_data_dir as _planta_data_dir  # noqa: E402
+_CAPTURES_DIR = _planta_data_dir() / "captures"
 _CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
 # =====================================================================
