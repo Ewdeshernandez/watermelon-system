@@ -231,6 +231,13 @@ def generate_briefing_pdf(
     if channels:
         body.append(PageBreak())
         body.append(Paragraph("TABULAR LIST — CANALES (API 670 / ISO 20816-3)", styles["WMTOC1"]))
+        _asof = (meta or {}).get("tabular_asof", "")
+        if _asof:
+            body.append(Paragraph(
+                f"Datos de Live Monitoring · última lectura: {_asof}",
+                ParagraphStyle("bfTabAsof", fontName=REGULAR, fontSize=8,
+                               textColor=colors.HexColor("#6b7280"),
+                               leading=10, spaceAfter=4)))
         st_cell = ParagraphStyle("c", fontName=REGULAR, fontSize=7,
                                  textColor=colors.HexColor("#111827"), leading=9)
         st_cn = ParagraphStyle("cn", fontName="Courier", fontSize=7,

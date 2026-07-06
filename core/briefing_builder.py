@@ -69,11 +69,28 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
     from core.live_readings import latest_for_instance
     from core.live_report_builder import (
         _build_sensor_lookup, _compute_rendered_rows, _compute_health_score,
-        _format_age, _seconds_since,
+        _format_age, _seconds_since, _parse_captured_at,
     )
     latest = latest_for_instance(instance_id) or []
     if not latest:
         return None
+
+    # Fecha/hora de los datos de la Tabular List = captured_at de la lectura
+    # MÁS RECIENTE (Live Monitoring). Se muestra bajo el título para que quede
+    # claro de qué momento son los datos.
+    _asof_dt = None
+    for _r in latest:
+        _d = _parse_captured_at(_r.get("captured_at"))
+        if _d is not None and (_asof_dt is None or _d > _asof_dt):
+            _asof_dt = _d
+    tabular_asof = ""
+    if _asof_dt is not None:
+        try:
+            from zoneinfo import ZoneInfo
+            tabular_asof = _asof_dt.astimezone(
+                ZoneInfo("America/Bogota")).strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            tabular_asof = _asof_dt.strftime("%d/%m/%Y %H:%M")
 
     sensor_lookup = _build_sensor_lookup(instance_obj)
     rendered_rows, severity_summary = _compute_rendered_rows(latest, sensor_lookup, instance_obj)
@@ -173,6 +190,7 @@ def _compute_asset_data(instance_id: str, instance_obj: Any) -> Optional[Dict[st
         "channels": channels,
         "severity_summary": severity_summary,
         "n_alarm": n_alarm, "n_danger": n_danger,
+        "tabular_asof": tabular_asof,
     }
 
 
@@ -789,6 +807,9 @@ def build_asset_briefing(
         # definitivo viene en meta_extra desde la cola de aprobación.
         "period": _period_range_str(period_label),
         "consecutive": next_consecutive(instance_id, tag, claim=False),
+        # Fecha/hora de la lectura más reciente (Live Monitoring) para la
+        # Tabular List — así el lector sabe de qué momento son esos datos.
+        "tabular_asof": data.get("tabular_asof", ""),
     }
     if meta_extra:
         pdf_meta.update({k: v for k, v in meta_extra.items() if v})
