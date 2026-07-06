@@ -721,10 +721,80 @@ def _render_tabular_detail(payload: Dict[str, Any]) -> None:
     st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
+import functools as _functools
+
+
+def _parse_csv_ts_str(s: str):
+    """Parsea la fecha REAL de medición del CSV.
+
+    Formatos típicos del metadato 'Timestamp' (ej. '6/30/2026 6:50:21 AM',
+    '2/27/2026 7:00:48 AM'). Devuelve datetime NAIVE (hora de planta tal cual,
+    sin convertir zona) o None si no se puede parsear."""
+    from datetime import datetime as _dt
+    s = (s or "").strip()
+    if not s:
+        return None
+    fmts = (
+        "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M %p",
+        "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%m/%d/%Y",
+        "%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M", "%d/%m/%Y",
+        "%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d",
+    )
+    for f in fmts:
+        try:
+            return _dt.strptime(s, f)
+        except Exception:
+            pass
+    try:
+        return _dt.fromisoformat(s.replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def _find_csv_ts(obj):
+    """Busca recursivamente el primer 'csv_timestamp' no vacío en el payload
+    (sirve para waveform/spectrum/orbit/tabular, que lo guardan por
+    sensor/canal/bearing)."""
+    if isinstance(obj, dict):
+        v = obj.get("csv_timestamp")
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+        for vv in obj.values():
+            r = _find_csv_ts(vv)
+            if r:
+                return r
+    elif isinstance(obj, list):
+        for it in obj:
+            r = _find_csv_ts(it)
+            if r:
+                return r
+    return None
+
+
+@_functools.lru_cache(maxsize=1024)
+def _measured_dt_cached(instance_id: str, analysis_key: str, sid: str):
+    """Fecha REAL de medición del snapshot (csv_timestamp del payload).
+
+    Cacheado porque los snapshots son inmutables: solo carga el payload una
+    vez por (instance, tipo, sid). Devuelve datetime naive o None."""
+    from core import history_storage as _hs
+    try:
+        payload = _hs.load_snapshot(instance_id, analysis_key, sid)
+    except Exception:
+        return None
+    if not payload:
+        return None
+    return _parse_csv_ts_str(_find_csv_ts(payload) or "")
+
+
 def list_snapshots_brief(instance_id: str, analysis_key: str):
     """Lista [{snapshot_id, date_label}] del tipo, más nuevos primero.
-    date_label se deriva del snapshot_id ('..._YYYYMMDD_HHMMSS...'). Liviano
-    (no descarga payloads). Para el selector de fecha del Análisis Avanzado."""
+
+    date_label = **fecha REAL de medición** (csv_timestamp del CSV) cuando
+    existe; si no, cae a la fecha del snapshot_id (hora de subida). Antes se
+    usaba siempre la del snapshot_id → mostraba la hora de SUBIDA en vez del
+    período real del dato (bug v3.31.x). Ordena por la fecha efectiva desc.
+    La lectura del payload va cacheada (snapshots inmutables)."""
     import re as _re
     from datetime import datetime as _dt
     if not instance_id or not analysis_key:
@@ -739,23 +809,30 @@ def list_snapshots_brief(instance_id: str, analysis_key: str):
         sid = s.get("snapshot_id", "")
         if not sid:
             continue
-        label = sid
-        m = _re.search(r"(\d{8})_(\d{6})", sid)
-        if m:
-            try:
-                # El snapshot_id se genera en UTC (servidor Render). Convertimos
-                # a hora local Colombia para que coincida con la hora de carga.
-                d = _dt.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+        # 1) Preferir la fecha REAL de medición (del CSV).
+        eff = _measured_dt_cached(instance_id, analysis_key, sid)
+        # 2) Fallback: fecha del snapshot_id (= hora de subida, UTC→Colombia).
+        if eff is None:
+            m = _re.search(r"(\d{8})_(\d{6})", sid)
+            if m:
                 try:
-                    from zoneinfo import ZoneInfo
-                    d = d.replace(tzinfo=ZoneInfo("UTC")).astimezone(
-                        ZoneInfo("America/Bogota"))
+                    d = _dt.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+                    try:
+                        from zoneinfo import ZoneInfo
+                        d = d.replace(tzinfo=ZoneInfo("UTC")).astimezone(
+                            ZoneInfo("America/Bogota")).replace(tzinfo=None)
+                    except Exception:
+                        pass
+                    eff = d
                 except Exception:
-                    pass
-                label = d.strftime("%d/%m/%Y · %H:%M")
-            except Exception:
-                pass
-        out.append({"snapshot_id": sid, "date_label": label})
+                    eff = None
+        label = eff.strftime("%d/%m/%Y · %H:%M") if eff is not None else sid
+        out.append({"snapshot_id": sid, "date_label": label,
+                    "_sort": eff or _dt.min})
+    # Más nuevos primero, según la fecha efectiva (medición real cuando la hay).
+    out.sort(key=lambda x: x["_sort"], reverse=True)
+    for o in out:
+        o.pop("_sort", None)
     return out
 
 

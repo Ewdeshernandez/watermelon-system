@@ -183,6 +183,39 @@ with _dc2:
         unsafe_allow_html=True,
     )
 
+# --- Eliminar un snapshot subido por error (con confirmación) ---
+with st.expander("🗑️ Eliminar esta fecha (si se subió por error)", expanded=False):
+    st.caption(
+        f"Se eliminará permanentemente el snapshot "
+        f"**{_label_by_sid.get(_sel_sid, _sel_sid)}** de este activo. "
+        f"Esta acción no se puede deshacer."
+    )
+    _confirm_del = st.checkbox(
+        "Confirmo que quiero eliminar esta fecha",
+        key=f"wm_la_delconfirm_{_akey}_{instance_id}",
+    )
+    if st.button(
+        "Eliminar definitivamente",
+        disabled=not _confirm_del,
+        key=f"wm_la_delbtn_{_akey}_{instance_id}",
+    ):
+        try:
+            from core import history_storage as _hs_del
+            _ok_del = _hs_del.delete_snapshot(instance_id, _akey, _sel_sid)
+        except Exception:
+            _ok_del = False
+        if _ok_del:
+            # Limpiar la cache de fechas de medición (el snapshot ya no existe).
+            try:
+                from core.recent_analyses_widget import _measured_dt_cached
+                _measured_dt_cached.cache_clear()
+            except Exception:
+                pass
+            st.success("Snapshot eliminado.")
+            st.rerun()
+        else:
+            st.error("No se pudo eliminar el snapshot. Reintenta.")
+
 with st.spinner("Cargando snapshot…"):
     _payload = load_snapshot_payload(instance_id, _akey, _sel_sid)
 
