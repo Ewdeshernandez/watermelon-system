@@ -351,7 +351,7 @@ def generate_briefing_pdf(
             ("LEFTPADDING", (0, 0), (-1, -1), 2), ("RIGHTPADDING", (0, 0), (-1, -1), 2),
         ] + _cell_styles))
         body.append(KeepTogether([
-            Paragraph("Histórico Overall — pico diario, últimos 10 días",
+            Paragraph("Tendencia del Overall — pico diario · últimos 10 días",
                       ParagraphStyle("WMTOC2", parent=styles["WMTOC2"],
                                      alignment=TA_CENTER)),
             _htbl,
