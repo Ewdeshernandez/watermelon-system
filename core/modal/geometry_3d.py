@@ -33,6 +33,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Tuple
 import json
 import math
+import os
+import sys
 
 
 # ---------------------------------------------------------------------
@@ -138,7 +140,21 @@ class ModalGeometry:
 # Persistencia
 # ---------------------------------------------------------------------
 
-_GEOMETRY_DIR = Path("data/modal/geometries")
+def _geometry_dir() -> Path:
+    """Directorio PERSISTENTE de geometrías guardadas. En Render usa el disco
+    persistente (WM_PERSIST_DIR); en el .exe de Planta, junto al ejecutable;
+    en dev, relativo. Antes era SIEMPRE relativo → en Render se borraba al
+    redesplegar y las configuraciones personalizadas guardadas se perdían
+    ('creé una nueva pero no quedó guardada')."""
+    _pd = os.environ.get("WM_PERSIST_DIR")
+    if _pd:
+        return Path(_pd) / "modal" / "geometries"
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).parent / "data" / "modal" / "geometries"
+    return Path("data/modal/geometries")
+
+
+_GEOMETRY_DIR = _geometry_dir()
 
 
 def _path_for(asset_id: str) -> Path:
