@@ -20,7 +20,7 @@ Bloques generados por modo natural:
 
 Norma aplicable
 ---------------
-ISO 7626-6 §8 — Documentacion modal: cada modo debe incluir fn, zeta,
+ISO 7626-6 secc. 8 — Documentacion modal: cada modo debe incluir fn, zeta,
 mode shape, metodo aplicado, validacion (MPC + AutoMAC).
 """
 
@@ -139,7 +139,7 @@ def build_modal_report_items(
         notes_base = (f"Damping zeta = {zeta:.3f}% · Q = "
                        f"{1.0 / (2 * max(zeta / 100.0, 1e-6)):.1f} · "
                        f"MPC = {mpc:.1f}% · Clasificacion: {cls.upper()} · "
-                       f"Metodo: {method} · Norma: ISO 7626-6 §7.2")
+                       f"Metodo: {method} · Norma: ISO 7626-6 secc. 7.2")
 
         # 1) Snapshot 3D mode shape
         _bump(f"Modo {mode.mode_number} 3D")
@@ -185,7 +185,7 @@ def build_modal_report_items(
                 title=f"{mode_label} — Bar chart magnitud + fase",
                 png_bytes=png_bar,
                 notes=("Magnitud normalizada y fase por canal del mode "
-                       "shape complejo. ISO 7626-6 §7.2."),
+                       "shape complejo. ISO 7626-6 secc. 7.2."),
                 machine=asset_name,
                 point="Sensores",
                 variable="|phi| + arg(phi)",
@@ -247,7 +247,7 @@ def build_modal_report_items(
             png_bytes=png_mac,
             notes=("Modal Assurance Criterion entre cada par de modos. "
                    "Diagonal = 1 (siempre). Off-diagonal > 0.7 indica modos "
-                   "redundantes. ISO 7626-6 §6.5 + API 684 §1.6. · "
+                   "redundantes. ISO 7626-6 secc. 6.5 + API 684 secc. 1.6. · "
                    + redundancy_note),
             machine=asset_name,
             point="Set modal completo",
@@ -303,7 +303,7 @@ def build_modal_report_items(
             png_bytes=png_tbl,
             notes=(f"Identificacion modal por {method}. Total: "
                    f"{len(natural_modes)} modos naturales. "
-                   "Compliance ISO 7626-6 §8 (documentacion)."),
+                   "Compliance ISO 7626-6 secc. 8 (documentacion)."),
             machine=asset_name,
             point="Set modal completo",
             variable="Tabla modal",
@@ -387,7 +387,7 @@ def build_setup_items(geom: Any, asset_name: str = "Activo") -> List[Dict[str, A
             png_bytes=png,
             notes=(f"Vista del tren mecanico con {len(geom.blocks)} bloques "
                    f"y {len(geom.sensors)} sensores instrumentados. "
-                   "ISO 7626-6 §6 — DOF y orientacion espacial documentados."),
+                   "ISO 7626-6 secc. 6 — DOF y orientacion espacial documentados."),
             machine=asset_name,
             point="Setup",
             variable="Geometria 3D",
@@ -518,7 +518,7 @@ def build_acquisition_items(tdms: Any, asset_name: str = "Activo",
                 png_bytes=png,
                 notes=(f"Senal cruda del canal {ch.name} (unidad {unit}). "
                        f"Captura {len(data)/fs:.1f} s @ {fs:.0f} Hz. "
-                       "ISO 7626-5 §6.4 — muestreo simultaneo."),
+                       "ISO 7626-5 secc. 6.4 — muestreo simultaneo."),
                 machine=asset_name,
                 point=ch.name,
                 variable="Waveform raw",
@@ -585,7 +585,7 @@ def build_ema_items(frfs: List[Any], peaks: List[Any],
             title=f"FRF EMA · {len(peaks)} modos · Bode magnitud",
             png_bytes=png,
             notes=("FRF principal EMA en escala dB con peaks de modos "
-                   "naturales marcados. ISO 7626-6 §6.3 — identificacion "
+                   "naturales marcados. ISO 7626-6 secc. 6.3 — identificacion "
                    "por half-power band."),
             machine=asset_name,
             point="FRF",
@@ -624,7 +624,7 @@ def build_ema_items(frfs: List[Any], peaks: List[Any],
                 item_type="modal_ema_peaks_table",
                 title=f"Tabla peaks EMA · {len(peaks)} modos",
                 png_bytes=png_t,
-                notes="Identificacion por half-power method (ISO 7626-6 §6.3.2).",
+                notes="Identificacion por half-power method (ISO 7626-6 secc. 6.3.2).",
                 machine=asset_name,
                 point="EMA",
                 variable="Peaks table",
@@ -730,7 +730,7 @@ def build_fea_items(fea_result: Any, fdd_result: Any,
             png_bytes=png_mac,
             notes=(f"Modal Assurance Criterion entre {len(fea_result.modes)} "
                    f"modos FEA y {len(exp_shapes)} modos experimentales. "
-                   "Diagonal alta indica buen match. API 684 §1.6."),
+                   "Diagonal alta indica buen match. API 684 secc. 1.6."),
             machine=asset_name,
             point="FEA validation",
             variable="Cross-MAC",
@@ -773,7 +773,7 @@ def build_fea_items(fea_result: Any, fdd_result: Any,
             title=f"Pareo modos FEA <-> Experimental · {len(pairs)} pares",
             png_bytes=png_p,
             notes=("Pareo greedy con clasificacion: valid / shape_only / "
-                   "freq_only / weak / no_match. API 684 §1.6 + Ewins 2000."),
+                   "freq_only / weak / no_match. API 684 secc. 1.6 + Ewins 2000."),
             machine=asset_name,
             point="FEA validation",
             variable="Mode pairing",
@@ -860,8 +860,8 @@ def build_modal_ai_payload(
         "norm": {
             "primary": "ISO 7626-1..6 (Modal analysis)",
             "operating_vibration": "ISO 20816",
-            "rotor_dynamics": "API 684 §1.6",
-            "compressor_separation": "API 618 §7.9.4.2.5.3.2",
+            "rotor_dynamics": "API 684 secc. 1.6",
+            "compressor_separation": "API 618 secc. 7.9.4.2.5.3.2",
         },
         "technical": {
             "method": method,

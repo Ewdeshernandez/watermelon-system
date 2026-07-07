@@ -9,7 +9,7 @@ Genera visualizaciones de los mode shapes identificados:
 
 Norma aplicable
 ---------------
-ISO 7626-6 §7.2 — Visualización de mode shapes. Requiere indicación clara
+ISO 7626-6 secc. 7.2 — Visualización de mode shapes. Requiere indicación clara
 de la magnitud relativa y la fase entre puntos de medición.
 """
 
@@ -172,7 +172,7 @@ def build_complexity_polar_plot(
     colineales (apuntan en la misma dirección o opuestas), el modo es real.
     Si están dispersos, el modo es complejo.
 
-    Cumple ISO 7626-6 §7.2 — visualización geométrica del MPC.
+    Cumple ISO 7626-6 secc. 7.2 — visualización geométrica del MPC.
 
     Args:
         mode_shape: vector complejo (N_DOFs,) — np.ndarray
@@ -351,7 +351,7 @@ def build_campbell_diagram(
     Genera el Diagrama de Campbell — cruza modos identificados vs velocidad
     operativa para identificar velocidades críticas (intersecciones modo ↔ orden).
 
-    Estándar en rotodinámica (API 684 §1.6).
+    Estándar en rotodinámica (API 684 secc. 1.6).
 
     Args:
         natural_frequencies_hz: lista de frecuencias naturales identificadas (Hz)

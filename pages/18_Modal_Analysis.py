@@ -19,7 +19,7 @@ Marco normativo
 · ISO 7626-1 a 7626-6 (EMA)
 · ISO 20816 (OMA)
 · API 684 (rotor dynamics validation)
-· API 618 §7.9 (criterio separación modal)
+· API 618 secc. 7.9 (criterio separación modal)
 """
 
 from __future__ import annotations
@@ -183,7 +183,7 @@ with tab_setup:
     modal_section_header(
         title="Configuración del ensayo modal",
         subtitle="Selecciona o registra el activo bajo análisis",
-        norm_ref="ISO 7626-6 §6",
+        norm_ref="ISO 7626-6 secc. 6",
         icon="🛠",
     )
 
@@ -429,7 +429,7 @@ with tab_setup:
                     modal_section_header(
                         title="Sensores configurados",
                         subtitle="Distribución por tipo y readiness para análisis modal 3D",
-                        norm_ref="ISO 7626-6 §6.2",
+                        norm_ref="ISO 7626-6 secc. 6.2",
                         icon="📡",
                     )
                     modal_kpi_row([
@@ -514,7 +514,7 @@ with tab_setup:
             "DOF. La geometría se usa como soporte visual para las mode shapes "
             "en Tab 5. Persistencia por activo o session-only en modo ad-hoc."
         ),
-        norm_ref="ISO 7626-6 §6 · DOF y orientación espacial documentadas",
+        norm_ref="ISO 7626-6 secc. 6 · DOF y orientación espacial documentadas",
     )
 
     from core.modal.geometry_3d import (
@@ -684,7 +684,19 @@ with tab_setup:
     # nunca renderizaban. Ahora muestra mensaje amigable y sigue.
     try:
         fig_geom = build_geometry_figure(geom)
-        st.plotly_chart(fig_geom, use_container_width=True)
+        st.plotly_chart(
+            fig_geom, use_container_width=True,
+            config={
+                "displaylogo": False,
+                # En una escena 3D el botón "Zoom" no acerca (solo resetea la
+                # cámara) y hay dos botones de reset redundantes (Home y Reset
+                # camera). Quitamos el Zoom y el reset duplicado; se rota/pan
+                # con el mouse y el zoom con la rueda.
+                "modeBarButtonsToRemove": ["zoom3d", "resetCameraLastSave3d"],
+            })
+        st.caption(
+            "🖱️ Zoom con la rueda del mouse · arrastra para rotar · "
+            "el botón 🏠 restablece la vista.")
     except Exception as _exc_geom:  # noqa: BLE001
         st.warning(
             "⚠ No se pudo renderizar el preview 3D de la geometría. "
@@ -1010,7 +1022,7 @@ with tab_acq:
                 _can_capture = True
 
         else:
-            # EMA: ISO 7626-5 §6.3 — ≥3 promedios, duración 1–2 s por impacto
+            # EMA: ISO 7626-5 secc. 6.3 — ≥3 promedios, duración 1–2 s por impacto
             with col2:
                 ni_dur = st.number_input(
                     "Duración por impacto (s)",
@@ -1026,7 +1038,7 @@ with tab_acq:
                     value=int(st.session_state.get("ni_avg_ema", 5)),
                     min_value=1, max_value=30, step=1,
                     key="ni_avg_ema",
-                    help="ISO 7626-5 §6.3: mínimo 3, recomendado 5–10. "
+                    help="ISO 7626-5 secc. 6.3: mínimo 3, recomendado 5–10. "
                          "Más promedios → mejor relación señal/ruido.",
                 )
             # fn_low no aplica para EMA
@@ -1037,7 +1049,7 @@ with tab_acq:
                 modal_status_banner(
                     title=f"N° de impactos {ni_avg} insuficiente — norma exige ≥ 3",
                     detail=(
-                        "ISO 7626-5 §6.3 requiere **mínimo 3 promedios** para "
+                        "ISO 7626-5 secc. 6.3 requiere **mínimo 3 promedios** para "
                         "estimación válida de FRF. Con un solo impacto no hay "
                         "control de coherencia y los modos pueden ser ruido. "
                         "Aumenta a 5–10 promedios antes de iniciar."
@@ -1049,7 +1061,7 @@ with tab_acq:
                 modal_status_banner(
                     title=f"N° de impactos {ni_avg} cumple el mínimo · recomendado 5–10",
                     detail=(
-                        "ISO 7626-5 §6.3 permite 3 promedios como piso pero "
+                        "ISO 7626-5 secc. 6.3 permite 3 promedios como piso pero "
                         "recomienda 5–10 para reducir la varianza de la FRF. "
                         "El checklist de coherencia post-captura será más exigente."
                     ),
@@ -1060,7 +1072,7 @@ with tab_acq:
                 modal_status_banner(
                     title=f"Configuración EMA conforme a norma · {ni_avg} promedios × {ni_dur:.1f} s",
                     detail=(
-                        "ISO 7626-5 §6.3 cumplido (≥ 5 promedios). Total estimado "
+                        "ISO 7626-5 secc. 6.3 cumplido (≥ 5 promedios). Total estimado "
                         f"de captura: ≈ {ni_avg * ni_dur:.0f} s + esperas entre impactos."
                     ),
                     severity="ok",
@@ -1688,7 +1700,7 @@ with tab_acq:
             tdms_coh_thr = st.number_input(
                 "γ² mínimo aceptable", value=0.8, step=0.05,
                 min_value=0.5, max_value=1.0, key="tdms_coh",
-                help="ISO 7626-5 §7.4 — coherencia mínima en banda de interés. "
+                help="ISO 7626-5 secc. 7.4 — coherencia mínima en banda de interés. "
                 "Típico 0.8, estricto 0.9.",
             )
 
@@ -2157,7 +2169,7 @@ with tab_ema:
     st.caption(
         "Identificación de parámetros modales (frecuencia natural, damping, mode shape) "
         "por método Circle-Fit Nyquist (Kennedy-Pancu) + half-power. "
-        "Cumple ISO 7626-6 §6.3."
+        "Cumple ISO 7626-6 secc. 6.3."
     )
 
     # ─── Si hay TDMS procesado, ofrecer identificación moderna ───────
@@ -2280,7 +2292,7 @@ with tab_ema:
                 "🔬 Método Circle-Fit Nyquist (Kennedy-Pancu 1947) — clásico en EMA "
                 "para modos SDOF. Modos en verde han pasado el ajuste circular "
                 "(precisión típica < 1% en fn). Modos en ámbar usan half-power como "
-                "fallback (precisión 2-5%). Ambos cumplen ISO 7626-6 §6.3."
+                "fallback (precisión 2-5%). Ambos cumplen ISO 7626-6 secc. 6.3."
             )
 
         st.divider()
@@ -2401,7 +2413,7 @@ with tab_ema:
             st.plotly_chart(fig_peaks, use_container_width=True)
 
             st.caption(
-                "🔬 Damping calculado por método half-power (-3 dB · ISO 7626-6 §6.3.2). "
+                "🔬 Damping calculado por método half-power (-3 dB · ISO 7626-6 secc. 6.3.2). "
                 "Diamantes ámbar marcan los modos detectados — hover para frecuencia + damping. "
                 "Para mode shapes y curve fit LSCF, se requiere integración pyEMA (próximo sprint)."
             )
@@ -2651,7 +2663,7 @@ with tab_oma:
                     f"Δf = {fdd.frequencies_hz[1]:.2f} Hz. "
                     "Mode shapes complejos disponibles en Tab Mode Shapes."
                 ),
-                norm_ref="ISO 20816 + ISO 7626-6 §6.4",
+                norm_ref="ISO 20816 + ISO 7626-6 secc. 6.4",
                 algorithm="FDD · Brincker, Zhang, Andersen 2001 · MPC Pappa & Eishan 1995",
             )
 
@@ -2663,7 +2675,7 @@ with tab_3d:
     modal_section_header(
         title="Visualización de Mode Shapes",
         subtitle="5 representaciones complementarias del mismo modo natural",
-        norm_ref="ISO 7626-6 §7.2",
+        norm_ref="ISO 7626-6 secc. 7.2",
         icon="🎬",
     )
 
@@ -2681,7 +2693,7 @@ with tab_3d:
                 "flechas 3D sobre el activo."
             ),
             cta_label="Ve al Tab OMA y ejecuta FDD",
-            norm_ref="ISO 7626-6 §7.2",
+            norm_ref="ISO 7626-6 secc. 7.2",
         )
     else:
         # ─── Selector global de modo (siempre arriba) ────────────────
@@ -2731,7 +2743,7 @@ with tab_3d:
         # EXPANDER 1 — Nivel 1 Bar chart (abierto por default)
         # ═══════════════════════════════════════════════════════════════
         with st.expander(
-            "📊  Bar chart 2D — Magnitud + fase del mode shape  ·  ISO 7626-6 §7.2",
+            "📊  Bar chart 2D — Magnitud + fase del mode shape  ·  ISO 7626-6 secc. 7.2",
             expanded=True,
         ):
             modal_plot_caption(
@@ -2740,7 +2752,7 @@ with tab_3d:
                     "shape vector. Es la representación matemáticamente más "
                     "directa y válida bajo norma."
                 ),
-                norm_ref="ISO 7626-6 §7.2",
+                norm_ref="ISO 7626-6 secc. 7.2",
                 algorithm="Mode shape vector complejo del FDD",
             )
             fig_bar = build_bar_chart_mode_shape(
@@ -2767,7 +2779,7 @@ with tab_3d:
                     "= modo natural real. **Vectores dispersos** = modo complejo "
                     "o espurio. Visualización estándar de complejidad modal."
                 ),
-                norm_ref="ISO 7626-6 §7.2",
+                norm_ref="ISO 7626-6 secc. 7.2",
                 algorithm="Modal Phase Collinearity (Pappa & Eishan 1995)",
             )
             fig_pol = build_complexity_polar_plot(
@@ -2791,7 +2803,7 @@ with tab_3d:
 
         with st.expander(
             f"🔗  AutoMAC Matrix — Correlación entre modos{_redundant_warning}  ·  "
-            "ISO 7626-6 §6.5 + API 684 §1.6",
+            "ISO 7626-6 secc. 6.5 + API 684 secc. 1.6",
             expanded=False,
         ):
             modal_plot_caption(
@@ -2801,7 +2813,7 @@ with tab_3d:
                     "indica modos redundantes (mismo modo identificado 2 veces "
                     "— uno debería eliminarse). Matriz AutoMAC estándar."
                 ),
-                norm_ref="ISO 7626-6 §6.5 · API 684 §1.6",
+                norm_ref="ISO 7626-6 secc. 6.5 · API 684 secc. 1.6",
                 algorithm="AutoMAC matrix (Allemang & Brown 1982)",
             )
             view_3d = st.toggle("Vista 3D barras (profesional)",
@@ -2837,7 +2849,7 @@ with tab_3d:
         # EXPANDER 4 — Diagrama de Campbell
         # ═══════════════════════════════════════════════════════════════
         with st.expander(
-            "📈  Diagrama de Campbell — Velocidades críticas  ·  API 684 §1.6",
+            "📈  Diagrama de Campbell — Velocidades críticas  ·  API 684 secc. 1.6",
             expanded=False,
         ):
             modal_plot_caption(
@@ -2848,7 +2860,7 @@ with tab_3d:
                     "velocidades críticas — puntos donde una armónica excita "
                     "un modo natural y puede causar resonancia."
                 ),
-                norm_ref="API 684 §1.6",
+                norm_ref="API 684 secc. 1.6",
                 algorithm="Diagrama de Campbell — rotor dynamics estándar",
             )
 
@@ -2905,7 +2917,7 @@ with tab_3d:
                             detail=(
                                 "El activo opera cerca de un cruce modo×armónica. "
                                 "Riesgo de amplificación resonante — revisar API 618 "
-                                "§7.9.4.2.5.3.2 (separación ≥ 10%)."
+                                "secc. 7.9.4.2.5.3.2 (separación ≥ 10%)."
                             ),
                             severity="fail",
                         )
@@ -2970,7 +2982,7 @@ with tab_3d:
                     "rojo = anti-fase. Fuente preferida: editor de geometría "
                     "en Tab Setup. Fallback: Sensor Map del activo."
                 ),
-                norm_ref="ISO 7626-6 §7.2",
+                norm_ref="ISO 7626-6 secc. 7.2",
                 algorithm="Plotly Cone3D + mode shape vector (phase-signed)",
             )
 
@@ -3359,7 +3371,7 @@ with tab_3d:
                         "actual. Se renderizan al PDF estándar SIGA junto al "
                         "resto de figuras."
                     ),
-                    norm_ref="ISO 7626-6 §8 · Documentación modal",
+                    norm_ref="ISO 7626-6 secc. 8 · Documentación modal",
                 )
 
                 _rep_c1, _rep_c2 = st.columns([2, 3])
@@ -3527,7 +3539,7 @@ with tab_3d:
                         "aplicar un template (motor+compresor, turbina+gen, "
                         "bomba+motor) o construirla manualmente, y las flechas "
                         "3D se activan inmediatamente con el match por nombre "
-                        "de canal. Los Niveles 1-4 ya cumplen ISO 7626-6 §7.2."
+                        "de canal. Los Niveles 1-4 ya cumplen ISO 7626-6 secc. 7.2."
                     ),
                     severity="info",
                 )
@@ -3549,7 +3561,7 @@ with tab_3d:
         st.caption(
             "📅 **Roadmap próximo sprint:** Nivel 3 — Mesh3D animado con "
             "colormap profesional Watermelon. Los Niveles 1-2 actuales (bar chart + "
-            "flechas 3D) ya cumplen ISO 7626-6 §7.2 — el animated mesh es "
+            "flechas 3D) ya cumplen ISO 7626-6 secc. 7.2 — el animated mesh es "
             "feature visual, no requisito normativo."
         )
 
@@ -3561,7 +3573,7 @@ with tab_fea:
     modal_section_header(
         title="Correlación EMA / OMA ↔ FEA",
         subtitle="Validación cruzada del modelo numérico contra resultados experimentales",
-        norm_ref="API 684 §1.6 · MAC ≥ 0.7 + Δf ≤ 10%",
+        norm_ref="API 684 secc. 1.6 · MAC ≥ 0.7 + Δf ≤ 10%",
         icon="🧮",
     )
 
@@ -3614,7 +3626,7 @@ with tab_fea:
                 "picos en Tab EMA. Luego vuelve a este tab y sube tu JSON FEA."
             ),
             cta_label="Cambia a Tab OMA o Tab EMA",
-            norm_ref="API 684 §1.6",
+            norm_ref="API 684 secc. 1.6",
         )
     else:
         col_src1, col_src2, col_src3 = st.columns(3)
@@ -3687,14 +3699,14 @@ with tab_fea:
                 mac_thr = st.number_input(
                     "Umbral MAC para validez",
                     value=0.70, min_value=0.5, max_value=0.95, step=0.05,
-                    help="API 684 §1.6 / Ewins: MAC ≥ 0.7 indica forma "
+                    help="API 684 secc. 1.6 / Ewins: MAC ≥ 0.7 indica forma "
                          "correlacionada. Estándar industrial.",
                 )
             with col_cfg2:
                 freq_tol = st.number_input(
                     "Tolerancia Δf (%)",
                     value=10.0, min_value=2.0, max_value=30.0, step=1.0,
-                    help="API 684 §1.6: |Δf|/f_exp ≤ 10% es aceptable para "
+                    help="API 684 secc. 1.6: |Δf|/f_exp ≤ 10% es aceptable para "
                          "validación de rotor dynamics. < 5% es excelente.",
                 )
 
@@ -3785,7 +3797,7 @@ with tab_fea:
                             detail=(
                                 "Todos los modos FEA tienen contraparte experimental "
                                 "con correlación válida. El modelo se considera apto "
-                                "para predicción de rotor dynamics bajo API 684 §1.6."
+                                "para predicción de rotor dynamics bajo API 684 secc. 1.6."
                             ),
                             severity="ok",
                         )
@@ -3864,7 +3876,7 @@ with tab_reports:
             "Elige qué figuras enviar al reporte SIGA. Análisis "
             "automático normativo + opcional IA interpretativa."
         ),
-        norm_ref="ISO 7626-6 §8 · Documentación modal",
+        norm_ref="ISO 7626-6 secc. 8 · Documentación modal",
         icon="📊",
     )
 
@@ -3889,7 +3901,7 @@ with tab_reports:
                 "aquí y podrás seleccionar qué figuras enviar al reporte."
             ),
             cta_label="Cambia a Tab EMA o Tab OMA",
-            norm_ref="ISO 7626-6 §8",
+            norm_ref="ISO 7626-6 secc. 8",
         )
     else:
         # =================================================================
@@ -4008,7 +4020,7 @@ with tab_reports:
                         "🔗 AutoMAC heatmap matrix",
                         value=True,
                         key="_rep_sel_automac",
-                        help="MAC entre todos los modos · ISO 7626-6 §6.5",
+                        help="MAC entre todos los modos · ISO 7626-6 secc. 6.5",
                     )
                     _all_selections["automac"] = _sel_mac
                 with _gc2:
@@ -4545,15 +4557,15 @@ modal_footer_norms(
         "ISO 7626-1..6",
         "ISO 20816",
         "API 684",
-        "API 618 §7.9.4.2.5.3.2",
+        "API 618 secc. 7.9.4.2.5.3.2",
     ],
     algorithms=[
         "Circle-Fit Nyquist (Kennedy-Pancu 1947)",
         "FDD (Brincker, Zhang, Andersen 2001)",
         "Modal Complexity MPC (Pappa & Eishan 1995)",
-        "AutoMAC (ISO 7626-6 §6.5)",
-        "Half-power method (ISO 7626-6 §6.3.2)",
-        "Diagrama de Campbell (API 684 §1.6)",
+        "AutoMAC (ISO 7626-6 secc. 6.5)",
+        "Half-power method (ISO 7626-6 secc. 6.3.2)",
+        "Diagrama de Campbell (API 684 secc. 1.6)",
     ],
     # version=None → lee VERSION dinámicamente vía core.version
 )

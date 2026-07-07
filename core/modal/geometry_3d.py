@@ -22,7 +22,7 @@ ad-hoc sin activo registrado, la geometria vive en session_state.
 
 Norma aplicable
 ---------------
-ISO 7626-6 §6 — Identificacion de DOF y orientacion espacial de los puntos
+ISO 7626-6 secc. 6 — Identificacion de DOF y orientacion espacial de los puntos
 de medicion debe ser claramente documentada en el reporte modal.
 """
 

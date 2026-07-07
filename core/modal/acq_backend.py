@@ -70,9 +70,9 @@ para entornos sin maleta como Cloud).
 
 Marco normativo
 ---------------
-ISO 7626-5 §6 — Configuración de canales para impact testing
-ISO 7626-5 §7 — Adquisición sincronizada input/output
-ISO 20816-1 §5.3 — Requisitos de instrumentación para mediciones operacionales
+ISO 7626-5 secc. 6 — Configuración de canales para impact testing
+ISO 7626-5 secc. 7 — Adquisición sincronizada input/output
+ISO 20816-1 secc. 5.3 — Requisitos de instrumentación para mediciones operacionales
 """
 
 from __future__ import annotations

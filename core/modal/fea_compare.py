@@ -30,7 +30,7 @@ Roadmap futuro: parsers nativos para .rst (Ansys), .op2 (Nastran),
 
 Norma aplicable
 ---------------
-API 684 §1.6 — Rotor dynamics: el modelo debe reproducir las frecuencias
+API 684 secc. 1.6 — Rotor dynamics: el modelo debe reproducir las frecuencias
 naturales identificadas en la prueba con un error < 10% y MAC > 0.7
 para los modos en el rango de operacion.
 """
@@ -184,7 +184,7 @@ def pair_modes(
     Pareo greedy: para cada modo FEA, busca el experimental con mayor MAC.
     Marca el par como 'valid' si cumple MAC y delta de frecuencia.
 
-    API 684 §1.6 / Ewins (2000):
+    API 684 secc. 1.6 / Ewins (2000):
       - MAC >= 0.7 (correlacion de forma)
       - |delta_f|/f_exp <= 10% (correlacion de frecuencia)
     """

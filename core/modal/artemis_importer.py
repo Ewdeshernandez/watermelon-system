@@ -25,7 +25,7 @@ proveer fs (sample rate) y bw (bandwidth) — el eje se reconstruye:
 
 Norma aplicable
 ---------------
-ISO 7626-6 §5 — Formatos de intercambio de datos modales. Este importer es
+ISO 7626-6 secc. 5 — Formatos de intercambio de datos modales. Este importer es
 fallback para datos previos a la adopción del formato UFF/UNV recomendado.
 """
 

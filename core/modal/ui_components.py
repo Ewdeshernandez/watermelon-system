@@ -160,13 +160,13 @@ def modal_footer_norms(
         version: versión del módulo
     """
     norms = list(active_norms or [
-        "ISO 7626-1..6", "ISO 20816", "API 684", "API 618 §7.9.4.2.5.3.2",
+        "ISO 7626-1..6", "ISO 20816", "API 684", "API 618 secc. 7.9.4.2.5.3.2",
     ])
     algos = list(algorithms or [
         "Circle-Fit Nyquist (Kennedy-Pancu 1947)",
         "FDD (Brincker 2001)",
         "Modal Complexity (Pappa & Eishan 1995)",
-        "AutoMAC (ISO 7626-6 §6.5)",
+        "AutoMAC (ISO 7626-6 secc. 6.5)",
     ])
 
     st.markdown(
@@ -343,7 +343,7 @@ def modal_plot_caption(
 
     Args:
         text: descripción interpretativa
-        norm_ref: "ISO 7626-6 §6.3"
+        norm_ref: "ISO 7626-6 secc. 6.3"
         algorithm: "Brincker, Zhang, Andersen 2001"
     """
     parts = []

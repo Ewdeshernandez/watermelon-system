@@ -12,7 +12,7 @@ lo cual requiere tkinter — NO disponible en Streamlit Cloud. Implementación
 nativa en numpy/scipy elimina esta dependencia frágil y nos da control total
 sobre conditioning numérico y stability checks.
 
-Algoritmo LSCF (Reynolds 2003, ISO 7626-6 §6.3)
+Algoritmo LSCF (Reynolds 2003, ISO 7626-6 secc. 6.3)
 -----------------------------------------------
 Para FRF H(ω) compleja medida en N_outputs:
 
@@ -28,7 +28,7 @@ Para FRF H(ω) compleja medida en N_outputs:
 7. Filtrar polos estables: Re(s) < 0
 8. Extraer fn = |s|/(2π), ζ = -Re(s)/|s|
 
-Stability Diagram (ISO 7626-6 §6.5)
+Stability Diagram (ISO 7626-6 secc. 6.5)
 ------------------------------------
 Para cada orden n de 2 a N_max (paso 2):
   Ejecutar LSCF
@@ -44,8 +44,8 @@ se toma el polo de orden más alto (más refinado).
 
 Norma aplicable
 ---------------
-ISO 7626-6 §6.3 — Identificación de parámetros modales por curve fitting
-ISO 7626-6 §6.5 — Validación con MAC entre orders consecutivos
+ISO 7626-6 secc. 6.3 — Identificación de parámetros modales por curve fitting
+ISO 7626-6 secc. 6.5 — Validación con MAC entre orders consecutivos
 """
 
 from __future__ import annotations
@@ -175,7 +175,7 @@ def lscf_single_order(
         omega_n = abs(s)
         if omega_n < 1e-6:
             continue
-        # ISO 7626-6 §6.3 — polo físico: Re(s) < 0 (sistema estable)
+        # ISO 7626-6 secc. 6.3 — polo físico: Re(s) < 0 (sistema estable)
         if np.real(s) >= 0:
             continue
         zeta = -float(np.real(s) / omega_n)

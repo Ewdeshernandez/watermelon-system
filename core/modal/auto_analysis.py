@@ -10,8 +10,8 @@ auto-analisis que ya existe en Spectrum, SCL, Polar.
 
 Reglas implementadas
 --------------------
-1. Cruce con armonicas (1x, 2x, 3x...) — API 684 §1.6, API 618 §7.9.4.2.5.3.2
-2. AutoMAC redundancy (off-diagonal > 0.7) — ISO 7626-6 §6.5
+1. Cruce con armonicas (1x, 2x, 3x...) — API 684 secc. 1.6, API 618 secc. 7.9.4.2.5.3.2
+2. AutoMAC redundancy (off-diagonal > 0.7) — ISO 7626-6 secc. 6.5
 3. MPC threshold — Pappa & Eishan 1995
 4. Damping anormal (> 5% o < 0.1%) — ISO 20816
 5. Modos cercanos (delta_f < 5%) — posibles modos repetidos
@@ -40,7 +40,7 @@ def _classify_freq_vs_harmonics(
     tolerance_pct: float = 10.0,
 ) -> Tuple[Optional[int], Optional[float]]:
     """Retorna (orden, delta_pct) si freq esta cerca de N*running, sino (None, None).
-    tolerance_pct = 10% por default (API 618 §7.9.4.2.5.3.2 = separacion >= 10%)."""
+    tolerance_pct = 10% por default (API 618 secc. 7.9.4.2.5.3.2 = separacion >= 10%)."""
     if running_hz <= 0:
         return None, None
     for n in range(1, n_harmonics + 1):
@@ -72,7 +72,7 @@ def analyze_modal_results(
             title="Sin modos identificados",
             text=("El analisis no devolvio modos. Verifica la calidad de la "
                   "captura, el rango de frecuencias y los parametros del FDD/EMA."),
-            norm_ref="ISO 7626-6 §6",
+            norm_ref="ISO 7626-6 secc. 6",
         ))
         return findings
 
@@ -101,7 +101,7 @@ def analyze_modal_results(
                   f"Considera aumentar la duracion de captura (OMA) o el "
                   f"numero de promedios (EMA), o ampliar la banda de "
                   f"frecuencias de busqueda."),
-            norm_ref="ISO 7626-6 §6",
+            norm_ref="ISO 7626-6 secc. 6",
         ))
     else:
         findings.append(Finding(
@@ -112,7 +112,7 @@ def analyze_modal_results(
                   f"modos fisicos. Adicional: {len(harmonic_modes)} "
                   f"armonicas + {len(spurious_modes)} espurios "
                   f"clasificados automaticamente."),
-            norm_ref="ISO 7626-6 §6",
+            norm_ref="ISO 7626-6 secc. 6",
         ))
 
     # ---- Regla 2: Cruce con armonicas de velocidad operativa ----
@@ -140,13 +140,13 @@ def analyze_modal_results(
                 text=(f"La frecuencia natural del modo {c['mode']} esta a "
                       f"{c['delta_pct']:.1f}% de la armonica {c['order']}x "
                       f"({c['order'] * running_hz:.1f} Hz). "
-                      f"API 618 §7.9.4.2.5.3.2 exige separacion >= 10%. "
+                      f"API 618 secc. 7.9.4.2.5.3.2 exige separacion >= 10%. "
                       + ("RIESGO DE RESONANCIA — revisar diseno o limitar "
                          "operacion."
                          if sev == "fail" else
                          "Operacion limite — monitorear amplitud "
                          "en el modo durante operacion sostenida.")),
-                norm_ref="API 618 §7.9.4.2.5.3.2 + API 684 §1.6",
+                norm_ref="API 618 secc. 7.9.4.2.5.3.2 + API 684 secc. 1.6",
             ))
     else:
         findings.append(Finding(
@@ -154,8 +154,8 @@ def analyze_modal_results(
             title="Sin cruces criticos con armonicas operativas",
             text=(f"Ningun modo natural cae dentro del +/-10% de las "
                   f"armonicas {running_rpm:.0f} rpm. Separacion conforme "
-                  f"a API 618 §7.9.4.2.5.3.2."),
-            norm_ref="API 618 §7.9.4.2.5.3.2",
+                  f"a API 618 secc. 7.9.4.2.5.3.2."),
+            norm_ref="API 618 secc. 7.9.4.2.5.3.2",
         ))
 
     # ---- Regla 3: AutoMAC redundancy ----
@@ -186,7 +186,7 @@ def analyze_modal_results(
                               f"identificado dos veces — uno deberia "
                               f"eliminarse o ajustar los parametros del FDD "
                               f"(min_distance_hz, prominencia)."),
-                        norm_ref="ISO 7626-6 §6.5",
+                        norm_ref="ISO 7626-6 secc. 6.5",
                     ))
             else:
                 findings.append(Finding(
@@ -195,7 +195,7 @@ def analyze_modal_results(
                     text=(f"AutoMAC off-diagonal < {mac_threshold} en todos "
                           f"los pares. Todos los modos son fisicamente "
                           f"distintos."),
-                    norm_ref="ISO 7626-6 §6.5",
+                    norm_ref="ISO 7626-6 secc. 6.5",
                 ))
         except Exception:  # noqa: BLE001
             pass
@@ -263,7 +263,7 @@ def analyze_modal_results(
                       f"mismo plano (X+Y) o un par close-coupled. "
                       f"Verificar mode shapes — si son ortogonales son "
                       f"par X/Y, si son similares son redundantes."),
-                norm_ref="Ewins 2000 §2.5",
+                norm_ref="Ewins 2000 secc. 2.5",
             ))
 
     return findings

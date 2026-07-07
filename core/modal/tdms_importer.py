@@ -35,8 +35,8 @@ Heurísticas en orden de prioridad:
 
 Norma aplicable
 ---------------
-ISO 7626-6 §5 — Formatos de intercambio de datos modales
-ISO 7626-5 §7.3 — Identificación de canal de excitación (input)
+ISO 7626-6 secc. 5 — Formatos de intercambio de datos modales
+ISO 7626-5 secc. 7.3 — Identificación de canal de excitación (input)
 """
 
 from __future__ import annotations

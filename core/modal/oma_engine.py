@@ -43,7 +43,7 @@ Esto se valida con el sensor de phase reference si está disponible.
 Norma aplicable
 ---------------
 ISO 20816 — Evaluación de vibraciones en máquinas en operación
-ISO 7626-6 §6.4 — Identificación output-only / OMA
+ISO 7626-6 secc. 6.4 — Identificación output-only / OMA
 Brincker, Zhang, Andersen 2001 — paper original FDD
 """
 
@@ -467,8 +467,8 @@ def compute_mac_matrix(modes: List[OMAMode]) -> np.ndarray:
       · MAC > 0.7 off-diagonal → modos REDUNDANTES (eliminar uno)
 
     Norma aplicable:
-      · ISO 7626-6 §6.5 — Validación entre orders consecutivos
-      · API 684 §1.6 — Correlación EMA vs FEA
+      · ISO 7626-6 secc. 6.5 — Validación entre orders consecutivos
+      · API 684 secc. 1.6 — Correlación EMA vs FEA
 
     Args:
         modes: lista de OMAMode con mode_shape complejo

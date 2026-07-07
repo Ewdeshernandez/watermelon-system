@@ -29,10 +29,10 @@ donde f₁, f₂ son las frecuencias donde la magnitud cae a |H_peak| / √2
 
 Norma aplicable
 ---------------
-ISO 7626-2 §6.2 — Cálculo de movilidad por estimadores H1/H2
-ISO 7626-5 §7.3 — Promediado de FRFs en ensayos con martillo
-ISO 7626-5 §7.4 — Validación con coherencia (mínimo 0.8 en banda de interés)
-ISO 7626-6 §6.3.2 — Half-power method para damping
+ISO 7626-2 secc. 6.2 — Cálculo de movilidad por estimadores H1/H2
+ISO 7626-5 secc. 7.3 — Promediado de FRFs en ensayos con martillo
+ISO 7626-5 secc. 7.4 — Validación con coherencia (mínimo 0.8 en banda de interés)
+ISO 7626-6 secc. 6.3.2 — Half-power method para damping
 """
 
 from __future__ import annotations

@@ -12,25 +12,25 @@ los datos. Watermelon valida automáticamente y emite un veredicto.
 
 Criterios implementados
 -----------------------
-1. **Single peak input** — ISO 7626-5 §7.3.2
+1. **Single peak input** — ISO 7626-5 secc. 7.3.2
      El impacto debe ser una sola descarga, sin "doble golpe". Validamos
      que el segundo pico mayor en el input sea al menos 6× menor que el
      primario (rejection ratio).
 
-2. **Input spectrum flat** — ISO 7626-5 §6.3
+2. **Input spectrum flat** — ISO 7626-5 secc. 6.3
      El espectro del martillo debe ser plano (±10 dB) hasta la frecuencia
      objetivo. Si decae prematuramente, la banda alta no está bien excitada
      y los modos allí no son confiables.
 
-3. **Output decay** — ISO 7626-5 §7.3.3
+3. **Output decay** — ISO 7626-5 secc. 7.3.3
      La respuesta debe decaer ≥ 90% antes del fin del record. Si no, hay
      leakage espectral y los modos quedan distorsionados.
 
-4. **Coherence band** — ISO 7626-5 §7.4
+4. **Coherence band** — ISO 7626-5 secc. 7.4
      γ²(f) ≥ 0.8 (típico) o ≥ 0.9 (estricto) en la banda de interés.
      Si falla en alguna sub-banda, los modos allí no son confiables.
 
-5. **Number of averages** — ISO 7626-5 §7.3.4
+5. **Number of averages** — ISO 7626-5 secc. 7.3.4
      Mínimo 5 impactos promediados por punto de medición.
 
 Cada check devuelve un CheckResult dataclass con:
@@ -104,7 +104,7 @@ def check_single_peak_input(
     min_separation_ms: float = 5.0,
 ) -> CheckResult:
     """
-    ISO 7626-5 §7.3.2 — Validar que el impacto sea único.
+    ISO 7626-5 secc. 7.3.2 — Validar que el impacto sea único.
 
     Busca el peak global del input. Luego busca el segundo peak más alto
     en ventanas separadas del primero. Si el ratio peak1/peak2 < rejection_ratio
@@ -114,14 +114,14 @@ def check_single_peak_input(
     if x.size < 16:
         return CheckResult(False, "fail", "Single peak input",
                            "Señal demasiado corta para validar",
-                           "ISO 7626-5 §7.3.2")
+                           "ISO 7626-5 secc. 7.3.2")
 
     peak1_idx = int(np.argmax(x))
     peak1 = float(x[peak1_idx])
     if peak1 < 1e-12:
         return CheckResult(False, "fail", "Single peak input",
                            "Señal de input plana (sin impacto detectable)",
-                           "ISO 7626-5 §7.3.2")
+                           "ISO 7626-5 secc. 7.3.2")
 
     # Buscar segundo peak fuera de una ventana de ±min_separation_ms del primero
     window_samples = max(1, int(min_separation_ms * 1e-3 * sample_rate_hz))
@@ -139,7 +139,7 @@ def check_single_peak_input(
     if not passed:
         detail += " ⚠ Posible doble golpe — re-tomar impacto."
     return CheckResult(passed, severity, "Single peak input", detail,
-                       "ISO 7626-5 §7.3.2",
+                       "ISO 7626-5 secc. 7.3.2",
                        measured_value=ratio, threshold=rejection_ratio)
 
 
@@ -151,19 +151,19 @@ def check_input_spectrum_flat(
     f_min_hz: float = 5.0,
 ) -> CheckResult:
     """
-    ISO 7626-5 §6.3 — El auto-espectro del martillo debe ser plano (±flatness_db)
+    ISO 7626-5 secc. 6.3 — El auto-espectro del martillo debe ser plano (±flatness_db)
     desde f_min hasta f_target.
     """
     try:
         from scipy.signal import welch
     except ImportError:
         return CheckResult(False, "fail", "Input spectrum flat",
-                           "scipy no disponible", "ISO 7626-5 §6.3")
+                           "scipy no disponible", "ISO 7626-5 secc. 6.3")
 
     x = np.asarray(input_signal, dtype=float)
     if x.size < 64:
         return CheckResult(False, "fail", "Input spectrum flat",
-                           "Señal demasiado corta", "ISO 7626-5 §6.3")
+                           "Señal demasiado corta", "ISO 7626-5 secc. 6.3")
 
     nperseg = min(x.size, 1024)
     freq, psd = welch(x, fs=sample_rate_hz, nperseg=nperseg)
@@ -172,7 +172,7 @@ def check_input_spectrum_flat(
     mask = (freq >= f_min_hz) & (freq <= f_target_hz)
     if not np.any(mask):
         return CheckResult(False, "fail", "Input spectrum flat",
-                           "Banda f_min→f_target no cubierta", "ISO 7626-5 §6.3")
+                           "Banda f_min→f_target no cubierta", "ISO 7626-5 secc. 6.3")
 
     band = mag_db[mask]
     deviation = float(band.max() - band.min())
@@ -184,7 +184,7 @@ def check_input_spectrum_flat(
         detail += (" ⚠ Martillo con cabeza muy dura o muy blanda — ajustar "
                    "para que excite uniformemente la banda objetivo.")
     return CheckResult(passed, severity, "Input spectrum flat", detail,
-                       "ISO 7626-5 §6.3",
+                       "ISO 7626-5 secc. 6.3",
                        measured_value=deviation, threshold=flatness_db)
 
 
@@ -193,7 +193,7 @@ def check_response_decay(
     decay_fraction: float = 0.10,
 ) -> CheckResult:
     """
-    ISO 7626-5 §7.3.3 — La respuesta debe decaer significativamente antes
+    ISO 7626-5 secc. 7.3.3 — La respuesta debe decaer significativamente antes
     del fin del record. Si los últimos 10% del record tienen RMS > decay_fraction
     del RMS máximo → leakage probable → FAIL.
     """
@@ -201,7 +201,7 @@ def check_response_decay(
     n = y.size
     if n < 100:
         return CheckResult(False, "fail", "Response decay",
-                           "Señal demasiado corta", "ISO 7626-5 §7.3.3")
+                           "Señal demasiado corta", "ISO 7626-5 secc. 7.3.3")
 
     # RMS en ventana inicial (primer 20%) vs ventana final (último 10%)
     n_init = max(10, n // 5)
@@ -211,7 +211,7 @@ def check_response_decay(
 
     if rms_init < 1e-12:
         return CheckResult(False, "fail", "Response decay",
-                           "Respuesta inicial nula", "ISO 7626-5 §7.3.3")
+                           "Respuesta inicial nula", "ISO 7626-5 secc. 7.3.3")
 
     ratio = rms_final / rms_init
     passed = ratio <= decay_fraction
@@ -222,7 +222,7 @@ def check_response_decay(
         detail += (" ⚠ La respuesta no decayó suficiente — aumentar duración "
                    "del record o aplicar exponential window.")
     return CheckResult(passed, severity, "Response decay", detail,
-                       "ISO 7626-5 §7.3.3",
+                       "ISO 7626-5 secc. 7.3.3",
                        measured_value=ratio, threshold=decay_fraction)
 
 
@@ -235,7 +235,7 @@ def check_coherence_band(
     min_passing_fraction: float = 0.85,
 ) -> CheckResult:
     """
-    ISO 7626-5 §7.4 — Coherencia γ² ≥ threshold en la banda de interés.
+    ISO 7626-5 secc. 7.4 — Coherencia γ² ≥ threshold en la banda de interés.
 
     Permite que hasta (1 - min_passing_fraction) de la banda esté por debajo
     del threshold (típicamente en bins de modos donde por definición γ² baja).
@@ -246,7 +246,7 @@ def check_coherence_band(
     mask = (f >= f_min_hz) & (f <= f_max_hz)
     if not np.any(mask):
         return CheckResult(False, "fail", "Coherencia γ²",
-                           "Banda no cubierta", "ISO 7626-5 §7.4")
+                           "Banda no cubierta", "ISO 7626-5 secc. 7.4")
 
     band = g[mask]
     passing_fraction = float(np.mean(band >= threshold))
@@ -262,7 +262,7 @@ def check_coherence_band(
         detail += (" ⚠ Coherencia insuficiente — aumentar N° de impactos, "
                    "verificar masa montaje del sensor o reducir ruido ambiente.")
     return CheckResult(passed, severity, "Coherencia γ²", detail,
-                       "ISO 7626-5 §7.4",
+                       "ISO 7626-5 secc. 7.4",
                        measured_value=passing_fraction,
                        threshold=min_passing_fraction)
 
@@ -272,7 +272,7 @@ def check_n_averages(
     minimum: int = 5,
 ) -> CheckResult:
     """
-    ISO 7626-5 §7.3.4 — Mínimo 5 promedios para reducir varianza estadística.
+    ISO 7626-5 secc. 7.3.4 — Mínimo 5 promedios para reducir varianza estadística.
     """
     passed = n_averages >= minimum
     severity = "ok" if passed else ("warning" if n_averages >= 3 else "fail")
@@ -281,7 +281,7 @@ def check_n_averages(
         detail += (" ⚠ Pocos promedios — la varianza de la FRF será alta y "
                    "puede ocultar modos cercanos a ruido.")
     return CheckResult(passed, severity, "N° de promedios", detail,
-                       "ISO 7626-5 §7.3.4",
+                       "ISO 7626-5 secc. 7.3.4",
                        measured_value=float(n_averages),
                        threshold=float(minimum))
 

@@ -29,7 +29,7 @@ Notas
 
 Norma aplicable
 ---------------
-ISO 7626-1 §4 — Definición de movilidad mecánica. La señal debe estar en
+ISO 7626-1 secc. 4 — Definición de movilidad mecánica. La señal debe estar en
 unidades de ingeniería antes de cualquier cálculo de FRF o parámetro modal.
 """
 

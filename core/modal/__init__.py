@@ -23,7 +23,7 @@ OMA — Operational Modal Analysis:
 FEA — Finite Element Analysis:
   · Sin norma única para iteración de modelo
   · Correlación EMA/OMA ↔ FEA vía MAC (Modal Assurance Criterion)
-  · API 618 §7.9.4.2.5.3.2 — criterio separación modal (≥10% real, ≥20% diseño)
+  · API 618 secc. 7.9.4.2.5.3.2 — criterio separación modal (≥10% real, ≥20% diseño)
 
 Hardware estandarizado
 ----------------------
