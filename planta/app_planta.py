@@ -1106,6 +1106,56 @@ if _SYNC_AVAILABLE:
 
 st.divider()
 
+# --- Backup / restaurar capturas locales (protege ante updates/reinstalaciones,
+# que borran la carpeta de datos). Las capturas en el Cloud siguen a salvo, pero
+# esto da un respaldo local extra. ---
+with st.expander("💾 Backup / restaurar capturas locales", expanded=False):
+    st.caption(
+        "Descarga un ZIP con TODAS tus capturas locales (.tdms) para respaldo, "
+        "o restaura desde un ZIP. Útil tras actualizar o reinstalar la app.")
+    import io as _io_bk
+    import zipfile as _zip_bk
+    from datetime import datetime as _dt_bk
+    _bk1, _bk2 = st.columns(2)
+    with _bk1:
+        st.markdown("**Exportar (backup)**")
+        _all_caps = sorted(_CAPTURES_DIR.glob("*.tdms"))
+        if _all_caps:
+            _buf = _io_bk.BytesIO()
+            with _zip_bk.ZipFile(_buf, "w", _zip_bk.ZIP_DEFLATED) as _zf:
+                for _c in _all_caps:
+                    _zf.write(_c, arcname=_c.name)
+            st.download_button(
+                f"⬇ Descargar backup ({len(_all_caps)} capturas)",
+                data=_buf.getvalue(),
+                file_name=f"watermelon_capturas_{_dt_bk.now():%Y%m%d_%H%M}.zip",
+                mime="application/zip", use_container_width=True,
+                key="planta_backup_dl")
+        else:
+            st.caption("No hay capturas locales para respaldar.")
+    with _bk2:
+        st.markdown("**Restaurar (importar)**")
+        _up = st.file_uploader("Sube un ZIP de backup", type=["zip"],
+                               key="planta_restore_up")
+        if _up is not None and st.button("Restaurar capturas",
+                                         key="planta_restore_btn",
+                                         use_container_width=True):
+            try:
+                _n = 0
+                with _zip_bk.ZipFile(_io_bk.BytesIO(_up.read())) as _zf:
+                    for _nm in _zf.namelist():
+                        # Solo .tdms sin rutas (evita zip-slip).
+                        if (_nm.lower().endswith(".tdms")
+                                and "/" not in _nm and "\\" not in _nm):
+                            (_CAPTURES_DIR / _nm).write_bytes(_zf.read(_nm))
+                            _n += 1
+                st.success(f"✓ {_n} capturas restauradas.")
+                st.rerun()
+            except Exception as _e_bk:  # noqa: BLE001
+                st.error(f"No se pudo restaurar: {_e_bk}")
+
+st.divider()
+
 # Lista de capturas previas
 st.markdown("## 📂 Capturas previas en este equipo")
 captures = sorted(_CAPTURES_DIR.glob("*.tdms"),

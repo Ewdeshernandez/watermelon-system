@@ -376,6 +376,16 @@ if _installed_slots:
 # ------------------------------------------------------------------
 st.divider()
 
+# Nombre/etiqueta OPCIONAL del ensayo → se agrega al nombre del .tdms para
+# poder identificarlo fácil en el Cloud (antes todos salían como
+# "planta_oma_<timestamp>.tdms", indistinguibles entre sí).
+_ensayo_label = st.text_input(
+    "Nombre del ensayo (opcional)",
+    placeholder="ej. Skid compresor - punto 3",
+    help="Se agrega al nombre del archivo .tdms para identificarlo luego en "
+         "el Cloud. Si lo dejas vacío, se usa solo la fecha/hora.",
+    key="planta_ensayo_label")
+
 if errors:
     for e in errors:
         st.error(f"✗ {e}")
@@ -399,7 +409,12 @@ else:
         # Output path
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         mode_token = "oma" if is_oma else "ema"
-        out_path = _CAPTURES_DIR / f"planta_{mode_token}_{ts}.tdms"
+        _lbl_slug = "".join(
+            c if c.isalnum() or c in "-_" else "_"
+            for c in (_ensayo_label or "").strip())[:40].strip("_")
+        _fname = (f"planta_{mode_token}_{_lbl_slug}_{ts}.tdms" if _lbl_slug
+                  else f"planta_{mode_token}_{ts}.tdms")
+        out_path = _CAPTURES_DIR / _fname
 
         config = AcquisitionConfig(
             mode="oma_continuous" if is_oma else "ema_triggered",
