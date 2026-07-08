@@ -52,6 +52,65 @@ from auth_planta import planta_data_dir as _planta_data_dir  # noqa: E402
 _CAPTURES_DIR = _planta_data_dir() / "captures"
 _CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
+# Carpeta PERSISTENTE de backups automáticos (junto a las capturas). Cada vez
+# que cambia el set de capturas se genera un ZIP fechado y se conservan los
+# últimos N. Así el usuario tiene respaldos accesibles desde la app sin tener
+# que descargar nada a mano. (Feedback de campo, v3.31.434.)
+_BACKUPS_DIR = _planta_data_dir() / "backups"
+_BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+_BACKUP_KEEP = 5  # cuántos backups automáticos conservar
+
+
+def _auto_backup_captures(keep: int = _BACKUP_KEEP):
+    """Crea un ZIP de todas las capturas .tdms si el set cambió desde el último
+    backup. Devuelve (Path | None, str) = (archivo creado o None, estado).
+    Dedupe por 'firma' = nº de archivos + suma de tamaños + mtime máximo, así
+    no se generan ZIPs redundantes en cada rerun de Streamlit."""
+    import io as _io
+    import zipfile as _zip
+    from datetime import datetime as _dt
+    try:
+        caps = sorted(_CAPTURES_DIR.glob("*.tdms"))
+        if not caps:
+            return None, "sin-capturas"
+        sig = "{}_{}_{}".format(
+            len(caps),
+            sum(c.stat().st_size for c in caps),
+            int(max(c.stat().st_mtime for c in caps)),
+        )
+        sig_file = _BACKUPS_DIR / ".last_sig"
+        prev = sig_file.read_text().strip() if sig_file.exists() else ""
+        if sig == prev:
+            return None, "sin-cambios"
+        buf = _io.BytesIO()
+        with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
+            for c in caps:
+                zf.write(c, arcname=c.name)
+        out = _BACKUPS_DIR / f"backup_{_dt.now():%Y%m%d_%H%M%S}.zip"
+        out.write_bytes(buf.getvalue())
+        sig_file.write_text(sig)
+        # Retención: conservar solo los últimos `keep`.
+        backups = sorted(_BACKUPS_DIR.glob("backup_*.zip"),
+                         key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in backups[keep:]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+        return out, "ok"
+    except Exception as _e:  # noqa: BLE001
+        return None, f"error: {_e}"
+
+
+# Ejecutar el auto-backup una vez por sesión (no en cada rerun).
+try:
+    import streamlit as _st_bk
+    if not _st_bk.session_state.get("_auto_backup_done"):
+        _auto_backup_captures()
+        _st_bk.session_state["_auto_backup_done"] = True
+except Exception:  # noqa: BLE001
+    pass
+
 # =====================================================================
 # Tema visual global (v3.31.214 — FASE E branding consistente)
 # Tipografía Inter / system fonts + colores SIGA + spacing pulido
@@ -1116,6 +1175,48 @@ with st.expander("💾 Backup / restaurar capturas locales", expanded=False):
     import io as _io_bk
     import zipfile as _zip_bk
     from datetime import datetime as _dt_bk
+
+    # --- Backups automáticos guardados dentro de la app (persistentes) -------
+    st.markdown("**🔁 Backups automáticos (guardados en la app)**")
+    st.caption(
+        "Se genera solo un respaldo cada vez que cambian tus capturas; se "
+        f"conservan los últimos {_BACKUP_KEEP}. Quedan en `backups/`.")
+    _bkc1, _bkc2 = st.columns([1, 2])
+    with _bkc1:
+        if st.button("💾 Crear backup ahora", key="planta_backup_now",
+                     use_container_width=True):
+            # Forzar: borrar la firma para que sí genere uno nuevo.
+            _sig = _BACKUPS_DIR / ".last_sig"
+            try:
+                _sig.unlink()
+            except OSError:
+                pass
+            _out, _stt = _auto_backup_captures()
+            if _stt == "ok":
+                st.success(f"✓ Backup creado: {_out.name}")
+            elif _stt == "sin-capturas":
+                st.info("No hay capturas para respaldar.")
+            else:
+                st.warning(f"No se creó backup ({_stt}).")
+            st.rerun()
+    _saved = sorted(_BACKUPS_DIR.glob("backup_*.zip"),
+                    key=lambda p: p.stat().st_mtime, reverse=True)
+    if _saved:
+        for _b in _saved:
+            _sz = _b.stat().st_size / (1024 * 1024)
+            _ts = _dt_bk.fromtimestamp(_b.stat().st_mtime)
+            _ca, _cb = st.columns([3, 1])
+            _ca.caption(f"`{_b.name}` · {_sz:.1f} MB · "
+                        f"{_ts:%Y-%m-%d %H:%M}")
+            _cb.download_button(
+                "⬇", data=_b.read_bytes(), file_name=_b.name,
+                mime="application/zip", key=f"dl_{_b.name}",
+                use_container_width=True)
+    else:
+        st.caption("Aún no hay backups automáticos. Se crearán al capturar datos.")
+
+    st.divider()
+    st.markdown("**Backup manual / restaurar**")
     _bk1, _bk2 = st.columns(2)
     with _bk1:
         st.markdown("**Exportar (backup)**")
