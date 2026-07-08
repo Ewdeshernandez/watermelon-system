@@ -359,7 +359,7 @@ def template_empty() -> ModalGeometry:
     y había que borrarlos a mano."""
     return ModalGeometry(
         name="Nueva configuración",
-        shaft_start=0.0, shaft_end=1000.0, shaft_radius=25.0,
+        shaft_start=0.0, shaft_end=1000.0, shaft_radius=0.0,
         blocks=[], sensors=[],
     )
 
@@ -650,15 +650,18 @@ def build_geometry_figure(geom: ModalGeometry,
             flatshading=True,
         ))
 
-    # 2) Eje (shaft) — cilindro fino centrado
-    xs, ys, zs, i, j, k = _cylinder_mesh(geom.shaft_start, geom.shaft_end,
-                                           geom.shaft_radius, n_theta=12, n_x=10)
-    fig.add_trace(go.Mesh3d(
-        x=xs, y=ys, z=zs, i=i, j=j, k=k,
-        color=geom.shaft_color, opacity=0.95,
-        name="Eje", showlegend=show_legend, hoverinfo="name",
-        flatshading=True,
-    ))
+    # 2) Eje (shaft) — cilindro fino centrado.
+    #    Solo se dibuja si la geometría realmente tiene eje (shaft_radius > 0).
+    #    Para placas/estructuras sin eje rotativo, shaft_radius=0 → sin eje.
+    if geom.shaft_radius > 0:
+        xs, ys, zs, i, j, k = _cylinder_mesh(geom.shaft_start, geom.shaft_end,
+                                               geom.shaft_radius, n_theta=12, n_x=10)
+        fig.add_trace(go.Mesh3d(
+            x=xs, y=ys, z=zs, i=i, j=j, k=k,
+            color=geom.shaft_color, opacity=0.95,
+            name="Eje", showlegend=show_legend, hoverinfo="name",
+            flatshading=True,
+        ))
 
     # 3) Sensores — Scatter3d + Cone para DOF
     if geom.sensors:
@@ -904,18 +907,20 @@ def build_geometry_with_mode_shape(
         block_meshes_base.append((xs, ys, zs, ii, jj, kk,
                                     b.kind, b.color, b.opacity, b.name))
 
-    # Shaft (cilindro central) — siempre kind="shaft"
-    xs, ys, zs, ii, jj, kk = _cylinder_mesh(geom.shaft_start, geom.shaft_end,
-                                              geom.shaft_radius, n_theta=12, n_x=10)
-    shaft_base = (xs, ys, zs, ii, jj, kk, "shaft",
-                   geom.shaft_color, 0.85, "Eje")
+    # Shaft (cilindro central) — solo si la geometría tiene eje (shaft_radius > 0).
+    shaft_base = None
+    if geom.shaft_radius > 0:
+        xs, ys, zs, ii, jj, kk = _cylinder_mesh(geom.shaft_start, geom.shaft_end,
+                                                  geom.shaft_radius, n_theta=12, n_x=10)
+        shaft_base = (xs, ys, zs, ii, jj, kk, "shaft",
+                       geom.shaft_color, 0.85, "Eje")
 
     # Intensity range global (para que el colormap sea estable a traves de frames)
+    _int_meshes = list(block_meshes_base)
+    if shaft_base is not None:
+        _int_meshes.append(shaft_base)
     int_max = 0.0
-    for (xs0, ys0, zs0, ii, jj, kk, kind, _c, _o, _n) in block_meshes_base + [
-            (shaft_base[0], shaft_base[1], shaft_base[2], shaft_base[3],
-             shaft_base[4], shaft_base[5], shaft_base[6], shaft_base[7],
-             shaft_base[8], shaft_base[9])]:
+    for (xs0, ys0, zs0, ii, jj, kk, kind, _c, _o, _n) in _int_meshes:
         for k_test in (0, n_frames // 4):
             th = 2.0 * math.pi * k_test / max(n_frames, 1)
             _, _, _, intens = _displace_mesh(xs0, ys0, zs0, kind, th)
@@ -932,14 +937,15 @@ def build_geometry_with_mode_shape(
                 name=f"{name} (ghost)", showlegend=False, hoverinfo="skip",
                 flatshading=True,
             ))
-        # Shaft ghost
-        s_xs, s_ys, s_zs, s_i, s_j, s_k = shaft_base[0:6]
-        fig.add_trace(go.Mesh3d(
-            x=s_xs, y=s_ys, z=s_zs, i=s_i, j=s_j, k=s_k,
-            color="#64748b", opacity=0.20,
-            name="Eje (ghost)", showlegend=False, hoverinfo="skip",
-            flatshading=True,
-        ))
+        # Shaft ghost (solo si hay eje)
+        if shaft_base is not None:
+            s_xs, s_ys, s_zs, s_i, s_j, s_k = shaft_base[0:6]
+            fig.add_trace(go.Mesh3d(
+                x=s_xs, y=s_ys, z=s_zs, i=s_i, j=s_j, k=s_k,
+                color="#64748b", opacity=0.20,
+                name="Eje (ghost)", showlegend=False, hoverinfo="skip",
+                flatshading=True,
+            ))
 
     # Trace indices para frames — los bloques van primero, luego shaft, luego labels, luego cones
     block_trace_indices = []
@@ -968,21 +974,23 @@ def build_geometry_with_mode_shape(
         ))
         block_trace_indices.append(len(fig.data) - 1)
 
-    # Shaft (deformado por shaft spline en t=0) — color uniforme oscuro para que destaque
-    xs0, ys0, zs0, ii, jj, kk, kind, color, opacity, name = shaft_base
-    new_x, new_y, new_z, intensity = _displace_mesh(xs0, ys0, zs0, kind, 0.0)
-    fig.add_trace(go.Mesh3d(
-        x=new_x, y=new_y, z=new_z, i=ii, j=jj, k=kk,
-        intensity=intensity, intensitymode="vertex",
-        colorscale=colormap, cmin=-int_max, cmax=int_max,
-        showscale=False, opacity=1.0,
-        name=name, showlegend=False, hoverinfo="skip",
-        flatshading=False,
-        lighting=dict(ambient=0.5, diffuse=0.9, specular=0.5,
-                        roughness=0.4, fresnel=0.2),
-        lightposition=dict(x=2000, y=2500, z=2500),
-    ))
-    shaft_trace_idx = len(fig.data) - 1
+    # Shaft (deformado por shaft spline en t=0) — solo si hay eje
+    shaft_trace_idx = None
+    if shaft_base is not None:
+        xs0, ys0, zs0, ii, jj, kk, kind, color, opacity, name = shaft_base
+        new_x, new_y, new_z, intensity = _displace_mesh(xs0, ys0, zs0, kind, 0.0)
+        fig.add_trace(go.Mesh3d(
+            x=new_x, y=new_y, z=new_z, i=ii, j=jj, k=kk,
+            intensity=intensity, intensitymode="vertex",
+            colorscale=colormap, cmin=-int_max, cmax=int_max,
+            showscale=False, opacity=1.0,
+            name=name, showlegend=False, hoverinfo="skip",
+            flatshading=False,
+            lighting=dict(ambient=0.5, diffuse=0.9, specular=0.5,
+                            roughness=0.4, fresnel=0.2),
+            lightposition=dict(x=2000, y=2500, z=2500),
+        ))
+        shaft_trace_idx = len(fig.data) - 1
 
     # -------------------------------------------------------------------
     # Paso 4: Manejo de "sin matches"
@@ -1125,7 +1133,9 @@ def build_geometry_with_mode_shape(
     # -------------------------------------------------------------------
     if animate:
         frames = []
-        animated_indices = list(block_trace_indices) + [shaft_trace_idx]
+        animated_indices = list(block_trace_indices)
+        if shaft_trace_idx is not None:
+            animated_indices.append(shaft_trace_idx)
         if show_arrows and cone_pos_idx >= 0:
             animated_indices.extend([cone_pos_idx, cone_neg_idx])
         for k in range(n_frames):
@@ -1142,17 +1152,18 @@ def build_geometry_with_mode_shape(
                     name=name, showlegend=False, hoverinfo="skip",
                     flatshading=False,
                 ))
-            # Shaft deformado con intensity
-            xs0, ys0, zs0, ii, jj, kk, kind, color, opacity, name = shaft_base
-            new_x, new_y, new_z, intensity = _displace_mesh(xs0, ys0, zs0, kind, theta)
-            frame_data.append(go.Mesh3d(
-                x=new_x, y=new_y, z=new_z, i=ii, j=jj, k=kk,
-                intensity=intensity, intensitymode="vertex",
-                colorscale=colormap, cmin=-int_max, cmax=int_max,
-                showscale=False, opacity=1.0,
-                name=name, showlegend=False, hoverinfo="skip",
-                flatshading=False,
-            ))
+            # Shaft deformado con intensity (solo si hay eje)
+            if shaft_base is not None:
+                xs0, ys0, zs0, ii, jj, kk, kind, color, opacity, name = shaft_base
+                new_x, new_y, new_z, intensity = _displace_mesh(xs0, ys0, zs0, kind, theta)
+                frame_data.append(go.Mesh3d(
+                    x=new_x, y=new_y, z=new_z, i=ii, j=jj, k=kk,
+                    intensity=intensity, intensitymode="vertex",
+                    colorscale=colormap, cmin=-int_max, cmax=int_max,
+                    showscale=False, opacity=1.0,
+                    name=name, showlegend=False, hoverinfo="skip",
+                    flatshading=False,
+                ))
             # Cones (opcional)
             if show_arrows and cone_pos_idx >= 0:
                 cone_pos_k, cone_neg_k = _cones_at_phase(theta)
