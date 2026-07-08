@@ -211,10 +211,20 @@ with tab_setup:
 
     # ─── MODO AD-HOC ──────────────────────────────────────────────────
     if setup_mode.startswith("🎯"):
-        st.markdown("**Datos del activo (análisis puntual)**")
+        st.warning(
+            "⏱️ **Modo ad-hoc = TEMPORAL.** Estos datos viven solo en esta "
+            "sesión y **NO registran un activo permanente** (no aparecen en la "
+            "lista de 'Activo bajo análisis'). Sirve para un análisis puntual de "
+            "un equipo externo.\n\n"
+            "➡️ **Para crear un activo PERMANENTE** que quede guardado y puedas "
+            "reutilizar en futuros análisis, usa **'✦ Crear activo (wizard)'** "
+            "en el menú lateral (Machinery Library). Ahí sí se registra."
+        )
+        st.markdown("**Datos del activo (análisis puntual · temporal)**")
         st.caption(
             "Completa la metadata mínima del equipo bajo análisis. "
-            "Estos datos aparecerán en el Hero del módulo y en el reporte final."
+            "Estos datos aparecerán en el Hero del módulo y en el reporte final "
+            "de ESTA sesión (no se guardan como activo)."
         )
 
         col_a, col_b = st.columns(2)
@@ -534,11 +544,13 @@ with tab_setup:
     if "modal_geometry" not in st.session_state:
         if _geom_asset_id:
             _loaded = load_geometry(_geom_asset_id)
+            # Si el activo no tiene geometría guardada, empezar VACÍO (sin
+            # eje/acoples auto) en vez del template motor+compresor.
             st.session_state["modal_geometry"] = (
-                _loaded if _loaded else TEMPLATES["motor_compressor"]()
+                _loaded if _loaded else TEMPLATES["empty"]()
             )
         else:
-            st.session_state["modal_geometry"] = TEMPLATES["motor_compressor"]()
+            st.session_state["modal_geometry"] = TEMPLATES["empty"]()
 
     geom: ModalGeometry = st.session_state["modal_geometry"]
 
@@ -554,10 +566,11 @@ with tab_setup:
     with col_t1:
         tpl_choice = st.selectbox(
             "Cargar template (se aplica automáticamente al seleccionar)",
-            options=["(mantener actual)",
+            options=["(mantener actual)", "empty",
                       "motor_compressor", "turbine_generator", "pump_motor"],
             format_func=lambda k: {
                 "(mantener actual)": "— Mantener configuración actual —",
+                "empty": "Vacío — construir desde cero (sin eje/acoples)",
                 "motor_compressor": "Motor + Compresor (6 sensores)",
                 "turbine_generator": "Turbina + Generador · LM6000+Brush (6 sensores)",
                 "pump_motor": "Bomba + Motor (4 sensores)",

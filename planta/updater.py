@@ -39,7 +39,16 @@ GITHUB_REPO = "watermelon-system"
 GITHUB_RELEASES_API = (
     f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 )
-CHECK_INTERVAL_HOURS = 24
+# Chequeo LIGERO de versión: el archivo VERSION crudo del repo. NO tiene el
+# límite de 60 req/h de la API de GitHub (era la causa de que el updater dejara
+# de detectar versiones nuevas: 403 rate limit → error silencioso). Solo pegamos
+# a la API cuando el raw dice que SÍ hay versión nueva (para el link de descarga).
+GITHUB_RAW_VERSION = (
+    f"https://raw.githubusercontent.com/{GITHUB_OWNER}/{GITHUB_REPO}/main/VERSION"
+)
+CHECK_INTERVAL_HOURS = 1  # cache corto: el chequeo por VERSION crudo no tiene
+#                           límite de rate, así no se queda pegado a versiones
+#                           viejas (antes 24h → tardaba en detectar nuevas).
 TIMEOUT_SECONDS = 5
 USER_AGENT = "WatermelonPlanta"
 
@@ -181,7 +190,30 @@ def check_for_updates(
             except (ValueError, TypeError):
                 pass  # cache corrupto, ignorar y refetch
 
-    # 3. Hacer request a GitHub Releases API
+    # 3a. Chequeo LIGERO por el VERSION crudo (sin límite de rate). Si NO hay
+    # versión nueva, salimos SIN pegar a la API de GitHub (que sí tiene el
+    # límite de 60/h que rompía la detección). Esto blinda el update-check.
+    _raw_latest = ""
+    try:
+        _rreq = urllib.request.Request(
+            GITHUB_RAW_VERSION, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(_rreq, timeout=TIMEOUT_SECONDS) as _rresp:
+            _raw_latest = _rresp.read().decode("utf-8").strip()
+    except Exception:  # noqa: BLE001 — si el raw falla, caemos a la API abajo
+        _raw_latest = ""
+    if _raw_latest and (_version_tuple(_raw_latest)
+                        <= _version_tuple(current_version)):
+        info = UpdateInfo(
+            has_update=False,
+            current_version=current_version,
+            latest_version=_raw_latest,
+            checked_at=datetime.utcnow().isoformat(),
+        )
+        _write_cache(info)
+        return info
+
+    # 3b. Request a la API de GitHub — SOLO cuando el raw dice que hay versión
+    # nueva (o el raw falló). Aquí obtenemos el link de descarga del release.
     try:
         req = urllib.request.Request(
             GITHUB_RELEASES_API,

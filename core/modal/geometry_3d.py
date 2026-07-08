@@ -351,7 +351,21 @@ def template_pump_motor() -> ModalGeometry:
     )
 
 
+def template_empty() -> ModalGeometry:
+    """Geometría VACÍA para empezar de cero: SIN bloques (eje/acoples) ni
+    sensores auto-generados. El usuario agrega solo lo que su equipo real
+    necesita, con control total. Antes, al crear un activo nuevo se cargaba
+    'motor_compressor' con eje + acoples + sensores que casi nunca coincidían
+    y había que borrarlos a mano."""
+    return ModalGeometry(
+        name="Nueva configuración",
+        shaft_start=0.0, shaft_end=1000.0, shaft_radius=25.0,
+        blocks=[], sensors=[],
+    )
+
+
 TEMPLATES: Dict[str, Any] = {
+    "empty": template_empty,
     "motor_compressor": template_motor_compressor,
     "turbine_generator": template_turbine_generator,
     "pump_motor": template_pump_motor,
