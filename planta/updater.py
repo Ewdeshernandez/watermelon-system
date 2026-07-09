@@ -389,15 +389,28 @@ def apply_update_and_restart(installer_path: Path) -> None:
     import subprocess
     exe_path = Path(sys.executable)  # el WatermelonPlanta.exe congelado
     bat = _get_data_dir() / "updates" / "apply_update.bat"
+    # Flags Inno: /NORESTARTAPPLICATIONS (no que Inno relance la app — la
+    # relanzamos NOSOTROS abajo; el malformado /RESTARTAPPLICATIONS=0 anterior
+    # podía provocar un relanzamiento concurrente vía Restart Manager y colisión
+    # de la extracción onefile a _MEI).
     _args = ("'/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"
-             "'/CLOSEAPPLICATIONS','/RESTARTAPPLICATIONS=0'")
+             "'/CLOSEAPPLICATIONS','/NORESTARTAPPLICATIONS'")
     _ps = (f"Start-Process -FilePath '{installer_path}' "
            f"-ArgumentList {_args} -Verb RunAs -Wait")
+    # Tras instalar, ESPERAR a que Windows Defender termine de escanear los
+    # archivos recién escritos antes de arrancar. Sin esta pausa, el bootloader
+    # onefile extrae python312.dll a _MEI mientras Defender aún lo tiene tomado
+    # → "Failed to load Python DLL". Además reintentamos el arranque 3 veces.
     bat.write_text(
         "@echo off\r\n"
         "timeout /t 3 /nobreak >nul\r\n"
         f"powershell -NoProfile -ExecutionPolicy Bypass -Command \"{_ps}\"\r\n"
+        "timeout /t 6 /nobreak >nul\r\n"
         f"start \"\" \"{exe_path}\"\r\n"
+        "timeout /t 8 /nobreak >nul\r\n"
+        "tasklist /fi \"imagename eq WatermelonPlanta.exe\" | "
+        "find /i \"WatermelonPlanta.exe\" >nul || "
+        f"( timeout /t 4 /nobreak >nul & start \"\" \"{exe_path}\" )\r\n"
         f"del \"{installer_path}\" >nul 2>&1\r\n",
         encoding="ascii", errors="replace",
     )

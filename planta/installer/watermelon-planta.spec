@@ -308,8 +308,16 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,           # comprime el .exe (~30% reducción)
-    upx_exclude=[],
+    # UPX DESACTIVADO (v3.31.435): comprimir python312.dll / vcruntime con UPX
+    # dispara falsos positivos de Windows Defender, que bloquea/pone en
+    # cuarentena el DLL a mitad de la extracción a _MEI → "Failed to load
+    # Python DLL python312.dll: The specified module could not be found".
+    # Aparecía sobre todo tras auto-update (Defender escanea agresivo los
+    # archivos recién instalados). Sin UPX el .exe crece ~30% pero arranca
+    # confiable. NO reactivar sin excluir python*.dll y vcruntime*.dll.
+    upx=False,
+    upx_exclude=["python312.dll", "python3.dll",
+                 "vcruntime140.dll", "vcruntime140_1.dll"],
     runtime_tmpdir=None,
     console=False,      # FASE L v3.31.233: sin ventana negra cmd.exe
                         # Los logs van a data\logs\watermelon-YYYYMMDD.log
