@@ -531,6 +531,7 @@ with tab_setup:
         ModalGeometry, GeometryBlock, GeometrySensor,
         TEMPLATES, build_geometry_figure,
         save_geometry, load_geometry,
+        autosave_geometry, load_autosave,
     )
 
     # Resolver asset_id para persistencia (None si ad-hoc)
@@ -540,19 +541,37 @@ with tab_setup:
     if not _adhoc_for_geom and _inst_key_for_geom and _inst_key_for_geom != "(seleccionar)":
         _geom_asset_id = _inst_key_for_geom
 
-    # Cargar geometría existente o inicializar
+    # Cargar geometría existente o inicializar.
+    # Prioridad: geometría guardada del activo → autosave de la última sesión
+    # → vacío. El autosave evita perder la config al recargar la página
+    # (session_state se limpia, pero el autosave persiste en disco).
     if "modal_geometry" not in st.session_state:
-        if _geom_asset_id:
-            _loaded = load_geometry(_geom_asset_id)
-            # Si el activo no tiene geometría guardada, empezar VACÍO (sin
-            # eje/acoples auto) en vez del template motor+compresor.
-            st.session_state["modal_geometry"] = (
-                _loaded if _loaded else TEMPLATES["empty"]()
-            )
+        _loaded = load_geometry(_geom_asset_id) if _geom_asset_id else None
+        if _loaded:
+            st.session_state["modal_geometry"] = _loaded
         else:
-            st.session_state["modal_geometry"] = TEMPLATES["empty"]()
+            _auto = load_autosave()
+            if _auto and (_auto.blocks or _auto.sensors):
+                st.session_state["modal_geometry"] = _auto
+                st.session_state["_geom_restored_autosave"] = True
+            else:
+                st.session_state["modal_geometry"] = TEMPLATES["empty"]()
 
     geom: ModalGeometry = st.session_state["modal_geometry"]
+
+    # Autosave de la geometría de trabajo (con detección de cambios para no
+    # reescribir en cada rerun). Restaura sola si el usuario recarga la página.
+    try:
+        _geom_json_now = geom.to_json()
+        if st.session_state.get("_geom_autosave_last") != _geom_json_now:
+            autosave_geometry(geom)
+            st.session_state["_geom_autosave_last"] = _geom_json_now
+    except Exception:  # noqa: BLE001
+        pass
+
+    if st.session_state.pop("_geom_restored_autosave", False):
+        st.caption("↩️ Se restauró la última configuración en la que estabas "
+                   "trabajando. Guárdala con nombre abajo si quieres reusarla.")
 
     # ----- Toolbar -----
     # Callback de auto-aplicación del template al cambiar el selectbox
@@ -767,10 +786,17 @@ with tab_setup:
                                             name="Nuevo bloque")
 
             if _b_default is not None:
+                # Sufijo de key ligado al bloque/acción seleccionado. Sin esto,
+                # Streamlit conserva el valor viejo del widget al cambiar de
+                # bloque (el value= se ignora si la key ya tiene estado) → los
+                # campos "no se actualizaban" al editar otro bloque.
+                _bsfx = (f"e{_idx_b}"
+                         if _action_b == "Editar existente" and geom.blocks
+                         else "new")
                 c1, c2 = st.columns(2)
                 with c1:
                     _nm = st.text_input("Nombre", value=_b_default.name,
-                                          key="geom_b_name")
+                                          key=f"geom_b_name_{_bsfx}")
                     _shape = st.selectbox(
                         "Forma", ["cylinder", "box"],
                         index=0 if _b_default.shape == "cylinder" else 1,
@@ -781,31 +807,31 @@ with tab_setup:
                         help="El 'Rectángulo/placa' es una caja: para un skid o "
                              "fan cooler usa half_width grande y half_height "
                              "pequeño (queda plano y ancho).",
-                        key="geom_b_shape")
+                        key=f"geom_b_shape_{_bsfx}")
                     _x0 = st.number_input("x_start", value=float(_b_default.x_start),
-                                            step=10.0, key="geom_b_x0")
+                                            step=10.0, key=f"geom_b_x0_{_bsfx}")
                     _x1 = st.number_input("x_end", value=float(_b_default.x_end),
-                                            step=10.0, key="geom_b_x1")
+                                            step=10.0, key=f"geom_b_x1_{_bsfx}")
                 with c2:
                     if _shape == "cylinder":
                         _r = st.number_input("Radio", value=float(_b_default.radius),
                                                step=10.0, min_value=1.0,
-                                               key="geom_b_r")
+                                               key=f"geom_b_r_{_bsfx}")
                         _hw, _hh = _r, _r
                     else:
                         _hw = st.number_input("half_width (Y)",
                                                 value=float(_b_default.half_width),
                                                 step=10.0, min_value=1.0,
-                                                key="geom_b_hw")
+                                                key=f"geom_b_hw_{_bsfx}")
                         _hh = st.number_input("half_height (Z)",
                                                 value=float(_b_default.half_height),
                                                 step=10.0, min_value=1.0,
-                                                key="geom_b_hh")
+                                                key=f"geom_b_hh_{_bsfx}")
                         _r = max(_hw, _hh)
                     _color = st.color_picker("Color", value=_b_default.color,
-                                                key="geom_b_color")
+                                                key=f"geom_b_color_{_bsfx}")
                     _op = st.slider("Opacidad", 0.1, 1.0, float(_b_default.opacity),
-                                      0.05, key="geom_b_op")
+                                      0.05, key=f"geom_b_op_{_bsfx}")
                     _kind_opts = ["casing", "shaft", "coupling"]
                     _kind = st.selectbox(
                         "Capa de deformación",
@@ -814,7 +840,7 @@ with tab_setup:
                             _b_default.kind if _b_default.kind in _kind_opts
                             else "casing"
                         ),
-                        key="geom_b_kind",
+                        key=f"geom_b_kind_{_bsfx}",
                         help=("casing: deforma con accels · shaft: deforma "
                               "con proxies · coupling: estático o interpolado"),
                     )
@@ -869,10 +895,15 @@ with tab_setup:
                                               name=f"S{len(geom.sensors)+1}")
 
             if _s_default is not None:
+                # Sufijo de key ligado al sensor/acción (mismo motivo que en
+                # bloques: evita que el value= se ignore al cambiar de sensor).
+                _ssfx = (f"e{_idx_s}"
+                         if _action_s == "Editar existente" and geom.sensors
+                         else "new")
                 c1, c2 = st.columns(2)
                 with c1:
                     _snm = st.text_input("Nombre", value=_s_default.name,
-                                           key="geom_s_name")
+                                           key=f"geom_s_name_{_ssfx}")
                     _styp = st.selectbox("Tipo",
                                            ["accelerometer", "proximity", "velocity"],
                                            index=["accelerometer", "proximity", "velocity"].index(
@@ -880,28 +911,28 @@ with tab_setup:
                                                if _s_default.sensor_type in
                                                   ["accelerometer", "proximity", "velocity"]
                                                else "accelerometer"),
-                                           key="geom_s_type")
+                                           key=f"geom_s_type_{_ssfx}")
                     _sdof = st.selectbox("DOF",
                                            ["+X", "-X", "+Y", "-Y", "+Z", "-Z"],
                                            index=["+X", "-X", "+Y", "-Y", "+Z", "-Z"].index(
                                                _s_default.dof if _s_default.dof
                                                in ["+X", "-X", "+Y", "-Y", "+Z", "-Z"]
                                                else "+Y"),
-                                           key="geom_s_dof")
+                                           key=f"geom_s_dof_{_ssfx}")
                 with c2:
                     _sx = st.number_input("x", value=float(_s_default.x), step=10.0,
-                                            key="geom_s_x")
+                                            key=f"geom_s_x_{_ssfx}")
                     _sy = st.number_input("y", value=float(_s_default.y), step=10.0,
-                                            key="geom_s_y")
+                                            key=f"geom_s_y_{_ssfx}")
                     _sz = st.number_input("z", value=float(_s_default.z), step=10.0,
-                                            key="geom_s_z")
+                                            key=f"geom_s_z_{_ssfx}")
                     _mnt_opts = ["(auto)", "casing", "shaft_proximity"]
                     _cur_mnt = _s_default.mounting if _s_default.mounting in _mnt_opts else "(auto)"
                     _mnt_sel = st.selectbox(
                         "Mounting (qué mide)",
                         _mnt_opts,
                         index=_mnt_opts.index(_cur_mnt),
-                        key="geom_s_mounting",
+                        key=f"geom_s_mounting_{_ssfx}",
                         help=("Auto = inferido del tipo (accel/vel → casing, "
                               "proximity → shaft_proximity). Override manual si "
                               "tienes un caso especial."),
@@ -2679,6 +2710,55 @@ with tab_oma:
                 norm_ref="ISO 20816 + ISO 7626-6 secc. 6.4",
                 algorithm="FDD · Brincker, Zhang, Andersen 2001 · MPC Pappa & Eishan 1995",
             )
+
+            # --- Panel explicativo: cómo leer los resultados OMA -------------
+            with st.expander("❓ ¿Cómo se leen estos resultados? "
+                             "(escala, picos, damping, complejidad, confianza)",
+                             expanded=False):
+                st.markdown(
+                    "**La gráfica (Singular Values del PSD, en dB)**\n\n"
+                    "El eje vertical está en **decibeles: `dB = 10·log₁₀(valor "
+                    "singular)`**. Es una escala **relativa y logarítmica**, no un "
+                    "valor físico absoluto — por eso arranca cerca de 0 dB (el pico "
+                    "de mayor energía) y baja a valores negativos (−40, −60 dB) en "
+                    "las zonas de poca energía. Lo que importa **no es el número en "
+                    "sí, sino la FORMA**: cada **pico local** marca una frecuencia "
+                    "donde la estructura responde con mucha más energía → un posible "
+                    "**modo natural**. Los valles entre picos son zonas sin "
+                    "resonancia."
+                )
+                st.markdown(
+                    "**Por qué un pico se marca como modo natural (🟢)**\n\n"
+                    "El algoritmo **FDD** (Frequency Domain Decomposition, Brincker "
+                    "2001) descompone la matriz de densidad espectral en valores "
+                    "singulares. Un pico se clasifica como **modo natural** si: (1) "
+                    "es un máximo local claro del 1er valor singular, (2) su forma "
+                    "modal es **coherente** (alta pureza), y (3) **no** coincide con "
+                    "un múltiplo de la velocidad de giro (eso sería armónica 🔴) ni "
+                    "es un pico aislado sin forma física (espurio ⚪)."
+                )
+                st.markdown(
+                    "**Los parámetros de la tabla**\n\n"
+                    "- **Frecuencia (Hz):** dónde está el pico = frecuencia natural "
+                    "del modo.\n"
+                    "- **Damping (%):** amortiguamiento, estimado por el método de "
+                    "**half-power (−3 dB)**: entre más ancho el pico, más "
+                    "amortiguado. Valores típicos estructurales: 0.5–5%. Valores "
+                    "altos (>10%) suelen indicar registro corto o modo mal definido.\n"
+                    "- **Complejidad / MPC (%):** *Modal Phase Collinearity* (Pappa "
+                    "1995). Un modo real tiene los puntos moviéndose en fase (0% = "
+                    "modo normal, limpio). Complejidad alta = fases dispersas = "
+                    "posible ruido o solape de modos.\n"
+                    "- **Confianza:** índice combinado (nitidez del pico + coherencia "
+                    "de forma + separación de armónicas). Es una guía relativa, no "
+                    "una probabilidad."
+                )
+                st.info(
+                    "Regla práctica: fíate primero de los **picos verdes bien "
+                    "separados con damping 0.5–5% y complejidad baja**. Si un modo "
+                    "sale con damping >10% o complejidad alta, suele mejorar "
+                    "**recapturando con más tiempo de registro** (sube el T_low).",
+                    icon="💡")
 
 
 # ---------------------------------------------------------------------

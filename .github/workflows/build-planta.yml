@@ -271,11 +271,14 @@ jobs:
         working-directory: planta/installer
         run: |
           python -m PyInstaller watermelon-planta.spec --clean --noconfirm
-          if (-not (Test-Path "dist/WatermelonPlanta.exe")) {
-            throw "WatermelonPlanta.exe no se generó"
+          # ONEDIR (v3.31.436): PyInstaller genera la CARPETA
+          # dist/WatermelonPlanta/ con el .exe adentro (+ _internal/).
+          if (-not (Test-Path "dist/WatermelonPlanta/WatermelonPlanta.exe")) {
+            throw "dist/WatermelonPlanta/WatermelonPlanta.exe no se generó"
           }
-          $size = [math]::Round((Get-Item "dist/WatermelonPlanta.exe").Length / 1MB, 1)
-          Write-Host "✓ WatermelonPlanta.exe generado: $size MB"
+          $size = [math]::Round((Get-ChildItem "dist/WatermelonPlanta" -Recurse |
+            Measure-Object -Property Length -Sum).Sum / 1MB, 1)
+          Write-Host "✓ Carpeta WatermelonPlanta generada: $size MB"
 
       # ------------------------------------------------------
       # 8. Build installer profesional con Inno Setup

@@ -183,10 +183,11 @@ def load_geometry(asset_id: str) -> Optional[ModalGeometry]:
 def list_geometries() -> List[str]:
     """Lista los asset_id de las geometrías guardadas en disco, para poder
     reusar configuraciones creadas por el usuario (no solo las de activos
-    registrados)."""
+    registrados). Excluye el slot reservado de autosave."""
     if not _GEOMETRY_DIR.exists():
         return []
-    return sorted(p.stem for p in _GEOMETRY_DIR.glob("*.json"))
+    return sorted(p.stem for p in _GEOMETRY_DIR.glob("*.json")
+                  if p.stem != _AUTOSAVE_STEM)
 
 
 def delete_geometry(asset_id: str) -> bool:
@@ -199,6 +200,38 @@ def delete_geometry(asset_id: str) -> bool:
         except Exception:
             return False
     return False
+
+
+# ---------------------------------------------------------------------
+# AUTOSAVE (v3.31.436) — la geometría de trabajo vive en session_state y se
+# perdía al recargar la página / reiniciar. Ahora se autoguarda en un slot
+# reservado y se restaura al volver a abrir el módulo, así la configuración
+# (bloques, sensores, DOF) NO se pierde aunque el usuario cierre la pestaña.
+# ---------------------------------------------------------------------
+_AUTOSAVE_STEM = "_autosave"
+
+
+def autosave_geometry(geom: ModalGeometry) -> None:
+    """Persiste la geometría de trabajo en el slot reservado de autosave.
+    No interfiere con las configuraciones guardadas con nombre. Silencioso."""
+    try:
+        _GEOMETRY_DIR.mkdir(parents=True, exist_ok=True)
+        with open(_GEOMETRY_DIR / f"{_AUTOSAVE_STEM}.json", "w") as f:
+            f.write(geom.to_json())
+    except Exception:  # noqa: BLE001 — autosave nunca debe romper la UI
+        pass
+
+
+def load_autosave() -> Optional[ModalGeometry]:
+    """Restaura la última geometría de trabajo autoguardada (o None)."""
+    p = _GEOMETRY_DIR / f"{_AUTOSAVE_STEM}.json"
+    if not p.exists():
+        return None
+    try:
+        with open(p, "r") as f:
+            return ModalGeometry.from_dict(json.load(f))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 # ---------------------------------------------------------------------
@@ -636,18 +669,29 @@ def build_geometry_figure(geom: ModalGeometry,
 
     fig = go.Figure()
 
-    # 1) Bloques
+    # Iluminación compartida — da volumen/sombreado realista a los sólidos
+    # (v3.31.436: antes flatshading plano se veía "de baja calidad").
+    _lighting = dict(ambient=0.55, diffuse=0.9, specular=0.28,
+                     roughness=0.5, fresnel=0.12)
+    _lightpos = dict(x=1200, y=1800, z=2200)
+
+    # 1) Bloques — malla de mayor resolución + iluminación. Los cilindros van
+    #    suaves (flatshading=False); las cajas/placas planas quedan mejor con
+    #    facetas (flatshading=True).
     for b in geom.blocks:
         if b.shape == "cylinder":
-            xs, ys, zs, i, j, k = _cylinder_mesh(b.x_start, b.x_end, b.radius)
+            xs, ys, zs, i, j, k = _cylinder_mesh(b.x_start, b.x_end, b.radius,
+                                                   n_theta=40, n_x=12)
+            _flat = False
         else:
             xs, ys, zs, i, j, k = _box_mesh(b.x_start, b.x_end,
-                                              b.half_width, b.half_height)
+                                              b.half_width, b.half_height, n_x=10)
+            _flat = True
         fig.add_trace(go.Mesh3d(
             x=xs, y=ys, z=zs, i=i, j=j, k=k,
             color=b.color, opacity=b.opacity,
             name=b.name, showlegend=show_legend, hoverinfo="name",
-            flatshading=True,
+            flatshading=_flat, lighting=_lighting, lightposition=_lightpos,
         ))
 
     # 2) Eje (shaft) — cilindro fino centrado.
@@ -655,12 +699,12 @@ def build_geometry_figure(geom: ModalGeometry,
     #    Para placas/estructuras sin eje rotativo, shaft_radius=0 → sin eje.
     if geom.shaft_radius > 0:
         xs, ys, zs, i, j, k = _cylinder_mesh(geom.shaft_start, geom.shaft_end,
-                                               geom.shaft_radius, n_theta=12, n_x=10)
+                                               geom.shaft_radius, n_theta=32, n_x=14)
         fig.add_trace(go.Mesh3d(
             x=xs, y=ys, z=zs, i=i, j=j, k=k,
-            color=geom.shaft_color, opacity=0.95,
+            color=geom.shaft_color, opacity=0.97,
             name="Eje", showlegend=show_legend, hoverinfo="name",
-            flatshading=True,
+            flatshading=False, lighting=_lighting, lightposition=_lightpos,
         ))
 
     # 3) Sensores — Scatter3d + Cone para DOF
@@ -668,7 +712,9 @@ def build_geometry_figure(geom: ModalGeometry,
         sx = [s.x for s in geom.sensors]
         sy = [s.y for s in geom.sensors]
         sz = [s.z for s in geom.sensors]
-        labels = [f"{s.name} ({s.dof})" for s in geom.sensors]
+        # etiqueta clara: nombre + DOF + tipo/mounting
+        labels = [f"{s.name} · {s.dof} · {s.sensor_type} "
+                  f"({s.effective_mounting()})" for s in geom.sensors]
         # color por tipo de sensor
         color_map = {"accelerometer": "#16a34a",
                        "proximity": "#dc2626",
@@ -676,17 +722,26 @@ def build_geometry_figure(geom: ModalGeometry,
         colors = [color_map.get(s.sensor_type, "#16a34a") for s in geom.sensors]
         fig.add_trace(go.Scatter3d(
             x=sx, y=sy, z=sz, mode="markers+text",
-            marker=dict(size=8, color=colors, line=dict(width=2, color="#0F1E3D")),
-            text=[s.name for s in geom.sensors],
+            marker=dict(size=11, color=colors, symbol="circle",
+                        line=dict(width=2.5, color="#ffffff"),
+                        opacity=1.0),
+            text=[f"{s.name} {s.dof}" for s in geom.sensors],
             textposition="top center",
-            textfont=dict(size=11, color="#0F1E3D"),
+            textfont=dict(size=12, color="#0F1E3D",
+                          family="Inter, Arial, sans-serif"),
             hovertext=labels, hoverinfo="text",
             name="Sensores", showlegend=show_legend,
         ))
 
-        # Cones para DOF — tamano relativo al span del eje
+        # Cones para DOF — tamano relativo al span del activo. Se dimensiona
+        # por el span REAL (bloques + eje) para que en placas pequeñas las
+        # flechas no queden gigantes ni invisibles.
         if arrow_size is None:
-            arrow_size = max((geom.shaft_end - geom.shaft_start) * 0.06, 50.0)
+            _xs_all = ([b.x_start for b in geom.blocks]
+                       + [b.x_end for b in geom.blocks]
+                       + [geom.shaft_start, geom.shaft_end])
+            _span_real = (max(_xs_all) - min(_xs_all)) if _xs_all else 1000.0
+            arrow_size = max(_span_real * 0.08, 30.0)
         cone_u, cone_v, cone_w = [], [], []
         cone_x, cone_y, cone_z = [], [], []
         for s in geom.sensors:
@@ -703,7 +758,7 @@ def build_geometry_figure(geom: ModalGeometry,
             sizemode="absolute", sizeref=arrow_size,
             colorscale=[[0, "#D89B22"], [1, "#D89B22"]],
             showscale=False, name="DOF", showlegend=show_legend,
-            hoverinfo="skip",
+            hoverinfo="skip", anchor="tail",
         ))
 
     # Layout

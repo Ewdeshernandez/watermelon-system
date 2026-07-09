@@ -51,22 +51,23 @@ if errorlevel 1 (
 
 echo.
 echo [4/4] Verificando el .exe generado...
-if not exist "dist\WatermelonPlanta.exe" (
-    echo ERROR: dist\WatermelonPlanta.exe no se genero.
+REM ONEDIR (v3.31.436): PyInstaller genera la carpeta dist\WatermelonPlanta\
+if not exist "dist\WatermelonPlanta\WatermelonPlanta.exe" (
+    echo ERROR: dist\WatermelonPlanta\WatermelonPlanta.exe no se genero.
     pause
     exit /b 1
 )
 
-REM Mostrar tamano
-for %%I in ("dist\WatermelonPlanta.exe") do echo   Tamano: %%~zI bytes (~%%~zI / 1024 / 1024 MB)
+REM Mostrar tamano del .exe
+for %%I in ("dist\WatermelonPlanta\WatermelonPlanta.exe") do echo   Tamano exe: %%~zI bytes
 
 echo.
 echo ============================================================
 echo   BUILD COMPLETO
 echo ============================================================
 echo.
-echo El .exe esta en:
-echo   %CD%\dist\WatermelonPlanta.exe
+echo La app esta en la carpeta:
+echo   %CD%\dist\WatermelonPlanta\WatermelonPlanta.exe
 echo.
 echo Probarlo: doble click en ese .exe — debe abrir tu browser
 echo en localhost:8501 con la app de Watermelon Planta.

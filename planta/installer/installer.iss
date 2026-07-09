@@ -98,8 +98,13 @@ Name: "quicklaunchicon"; Description: "{cm:CreateQuickLaunchIcon}"; \
     Flags: unchecked; OnlyBelowVersion: 6.1
 
 [Files]
-; El .exe principal (generado por PyInstaller en installer\dist\)
-Source: "dist\WatermelonPlanta.exe"; DestDir: "{app}"; Flags: ignoreversion
+; ONEDIR (v3.31.436): PyInstaller ahora genera una CARPETA
+; dist\WatermelonPlanta\ (con WatermelonPlanta.exe + _internal\ con todos los
+; DLL). Empaquetamos la carpeta completa. Antes era un solo .exe onefile que
+; se extraía a %Temp%\_MEI en cada arranque (causa del error 'Failed to load
+; Python DLL'). En onedir los DLL viven fijos junto al .exe → sin extracción.
+Source: "dist\WatermelonPlanta\*"; DestDir: "{app}"; \
+    Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; README operativo
 Source: "..\README_PLANTA.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme

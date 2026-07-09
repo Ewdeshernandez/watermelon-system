@@ -32,10 +32,10 @@ if not exist "%ISCC%" (
     exit /b 1
 )
 
-REM Verificar que WatermelonPlanta.exe exista
-if not exist "dist\WatermelonPlanta.exe" (
+REM Verificar que la carpeta onedir exista (v3.31.436)
+if not exist "dist\WatermelonPlanta\WatermelonPlanta.exe" (
     echo.
-    echo ERROR: No existe dist\WatermelonPlanta.exe
+    echo ERROR: No existe dist\WatermelonPlanta\WatermelonPlanta.exe
     echo Corre primero build_exe.bat para generarlo.
     pause
     exit /b 1

@@ -297,28 +297,26 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
+# ONEDIR (v3.31.436): antes era onefile (todo dentro de un .exe que se extraía
+# a %Temp%\_MEI en CADA arranque). Esa extracción era la causa raíz de:
+#   • "Failed to load Python DLL python312.dll: specified module not found"
+#     (Defender bloqueaba el DLL a mitad de la extracción, sobre todo tras
+#      auto-update cuando escanea agresivo los archivos recién instalados)
+#   • "Failed to remove temporary directory _MEIxxxxx" (handle tomado al salir)
+# En onedir los DLL viven FIJOS junto al .exe (carpeta _internal), NO se
+# extrae nada en runtime → ambos errores desaparecen de raíz. El instalador
+# Inno empaqueta la carpeta completa en un solo setup.exe (el auto-update no
+# cambia). UPX sigue desactivado por el mismo motivo Defender.
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
+    [],                 # onedir: los binarios NO van dentro del .exe
+    exclude_binaries=True,
     name="WatermelonPlanta",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    # UPX DESACTIVADO (v3.31.435): comprimir python312.dll / vcruntime con UPX
-    # dispara falsos positivos de Windows Defender, que bloquea/pone en
-    # cuarentena el DLL a mitad de la extracción a _MEI → "Failed to load
-    # Python DLL python312.dll: The specified module could not be found".
-    # Aparecía sobre todo tras auto-update (Defender escanea agresivo los
-    # archivos recién instalados). Sin UPX el .exe crece ~30% pero arranca
-    # confiable. NO reactivar sin excluir python*.dll y vcruntime*.dll.
     upx=False,
-    upx_exclude=["python312.dll", "python3.dll",
-                 "vcruntime140.dll", "vcruntime140_1.dll"],
-    runtime_tmpdir=None,
     console=False,      # FASE L v3.31.233: sin ventana negra cmd.exe
                         # Los logs van a data\logs\watermelon-YYYYMMDD.log
                         # El user controla la app desde el tray icon
@@ -333,4 +331,16 @@ exe = EXE(
         if (_SPEC_DIR / "assets" / "watermelon.ico").exists()
         else None
     ),
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=["python312.dll", "python3.dll",
+                 "vcruntime140.dll", "vcruntime140_1.dll"],
+    name="WatermelonPlanta",   # → dist/WatermelonPlanta/ (carpeta)
 )
