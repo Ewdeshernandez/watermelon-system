@@ -2711,6 +2711,20 @@ with tab_oma:
                 algorithm="FDD · Brincker, Zhang, Andersen 2001 · MPC Pappa & Eishan 1995",
             )
 
+            # --- Diagnóstico automático del ensayo (interpretación + validez) -
+            try:
+                from core.modal.oma_interpret import interpret_fdd
+                _diag = interpret_fdd(fdd)
+                st.markdown("#### 🔎 Diagnóstico automático del ensayo")
+                _sev_ui = {"ok": st.success, "info": st.info,
+                           "warn": st.warning, "crit": st.error}
+                for _o in _diag["observations"]:
+                    _sev_ui.get(_o.severity, st.info)(
+                        f"**{_o.title}** — {_o.detail}")
+                st.markdown(f"**Conclusión técnica:** {_diag['conclusion']}")
+            except Exception as _e_diag:  # noqa: BLE001
+                st.caption(f"(No se pudo generar el diagnóstico: {_e_diag})")
+
             # --- Panel explicativo: cómo leer los resultados OMA -------------
             with st.expander("❓ ¿Cómo se leen estos resultados? "
                              "(escala, picos, damping, complejidad, confianza)",
