@@ -715,6 +715,44 @@ class OrbitPair:
     y_name: str
 
 
+def _extract_plane_number(name: str):
+    """Extrae el número de plano/sonda del nombre del canal (primer entero de
+    3+ dígitos). 'Ferrari' evita: '5807 wf 13 de julio 2026' → 5807 (no 13)."""
+    m = re.search(r"\d{3,}", str(name))
+    return int(m.group()) if m else None
+
+
+def _pair_by_consecutive_planes(names, used) -> List["OrbitPair"]:
+    """Empareja canales cuyos nombres son NÚMEROS DE PLANO consecutivos.
+
+    Convención Bently / API 670: las dos sondas ortogonales del MISMO cojinete
+    llevan números consecutivos (impar = X, par = Y), p.ej. 5807=X y 5808=Y en
+    el lado de acople; 5809=X y 5810=Y en el otro cojinete. Empareja (n, n+1)
+    SOLO cuando n es impar, para no cruzar cojinetes (evita el bug de emparejar
+    5807 con 5810, que son planos de cojinetes distintos). El menor (impar) = X.
+    """
+    num_to_name = {}
+    for n in names:
+        if n in used:
+            continue
+        pnum = _extract_plane_number(n)
+        if pnum is None:
+            continue
+        num_to_name.setdefault(pnum, n)  # si dos comparten número, toma el 1º
+    result: List[OrbitPair] = []
+    for pnum in sorted(num_to_name):
+        if pnum % 2 != 1:            # solo el IMPAR inicia el par (X)
+            continue
+        x_name = num_to_name.get(pnum)
+        y_name = num_to_name.get(pnum + 1)
+        if (x_name and y_name and x_name not in used and y_name not in used):
+            used.add(x_name)
+            used.add(y_name)
+            result.append(OrbitPair(label=f"{x_name} + {y_name}",
+                                    x_name=x_name, y_name=y_name))
+    return result
+
+
 def build_orbit_pairs(signals: dict) -> List[OrbitPair]:
     names = list(signals.keys())
     if len(names) < 2:
@@ -757,6 +795,12 @@ def build_orbit_pairs(signals: dict) -> List[OrbitPair]:
                     y_name=candidate_y,
                 )
             )
+
+    # Para canales SIN marcador X/Y (nombrados por número de plano, típico de
+    # colectores Bently), emparejar por planos consecutivos del mismo cojinete.
+    # Esto corrige la asociación incorrecta (5807+5810 → 5807+5808) y, al usar
+    # las sondas ORTOGONALES reales, también corrige el sentido de la órbita.
+    pairs.extend(_pair_by_consecutive_planes(names, used))
 
     if not pairs:
         default_x, default_y = _default_signal_pair(signals)
