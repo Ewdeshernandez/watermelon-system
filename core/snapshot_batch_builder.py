@@ -546,6 +546,58 @@ def build_tabular_payload(parsed_files: List[Dict[str, Any]],
 # FACADE — build all
 # =============================================================
 
+def _parse_measured_dt(ts_str: str):
+    """Parsea la estampa de tiempo del CSV a datetime (varios formatos)."""
+    from datetime import datetime as _dt
+    s = (ts_str or "").strip()
+    if not s:
+        return None
+    for fmt in ("%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %H:%M:%S",
+                "%m/%d/%Y %I:%M %p", "%m/%d/%Y %H:%M",
+                "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M",
+                "%d/%m/%Y %I:%M:%S %p", "%d/%m/%Y %H:%M:%S"):
+        try:
+            return _dt.strptime(s, fmt)
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
+def group_parsed_files_by_measurement(
+    parsed_files: List[Dict[str, Any]],
+) -> List[Tuple[str, List[Dict[str, Any]]]]:
+    """Agrupa los archivos por FECHA/HORA de medición (csv_timestamp, redondeada
+    al minuto) para que corridas de fechas distintas NO se mezclen en un mismo
+    snapshot. Antes, subir CSVs del 06/07 y del 13/07 juntos los fusionaba en un
+    solo snapshot con la fecha más reciente (bug de campo v3.31.442).
+
+    Devuelve [(label, [files]), ...] ordenado por fecha ascendente. Los archivos
+    sin timestamp parseable van a un único grupo 'sin fecha'.
+    """
+    groups: Dict[Any, List[Dict[str, Any]]] = {}
+    order: List[Any] = []
+    for pf in parsed_files:
+        dt = _parse_measured_dt(_extract_timestamp(pf))
+        key = (dt.year, dt.month, dt.day, dt.hour, dt.minute) if dt else None
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(pf)
+
+    def _sortkey(k):
+        return (1,) if k is None else (0, k)
+
+    result: List[Tuple[str, List[Dict[str, Any]]]] = []
+    for key in sorted(order, key=_sortkey):
+        if key is None:
+            label = "sin fecha"
+        else:
+            label = "%02d/%02d/%04d %02d:%02d" % (
+                key[2], key[1], key[0], key[3], key[4])
+        result.append((label, groups[key]))
+    return result
+
+
 def build_all_snapshots_from_parsed_files(
     parsed_files: List[Dict[str, Any]],
     rotational_speed_rpm: Optional[float] = None,
@@ -576,4 +628,5 @@ __all__ = [
     "build_orbit_payload",
     "build_tabular_payload",
     "build_all_snapshots_from_parsed_files",
+    "group_parsed_files_by_measurement",
 ]

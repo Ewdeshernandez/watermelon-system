@@ -978,25 +978,43 @@ if valid_files and _active_instance_id:
             n_failed = 0
             errors: list = []
 
-            with st.spinner("Construyendo payloads de los 4 tipos..."):
+            # Agrupar por FECHA DE MEDICIÓN: cada corrida (fecha) se guarda como
+            # un snapshot SEPARADO. Antes, subir CSVs del 06/07 y del 13/07
+            # juntos los fusionaba en un solo snapshot con la fecha más reciente
+            # y mezclaba los canales de ambas fechas (bug de campo v3.31.442).
+            with st.spinner("Agrupando por fecha de medición y construyendo "
+                            "payloads..."):
                 try:
-                    payloads = build_all_snapshots_from_parsed_files(
-                        valid_files, rotational_speed_rpm=rpm,
-                    )
+                    from core.snapshot_batch_builder import (
+                        group_parsed_files_by_measurement as _group_by_meas)
+                    _date_groups = _group_by_meas(valid_files)
                 except Exception as e:
-                    st.error(f"Error armando payloads: {e}")
-                    payloads = None
+                    st.error(f"Error agrupando por fecha: {e}")
+                    _date_groups = [("", valid_files)]
 
-            if payloads is not None:
-                import importlib
-                save_map = {
-                    "waveform": save_wf, "spectrum": save_sp,
-                    "orbit": save_or, "tabular": save_tb,
-                }
+            payloads = None  # se setea al primer grupo construido (guard abajo)
+            import importlib
+            save_map = {
+                "waveform": save_wf, "spectrum": save_sp,
+                "orbit": save_or, "tabular": save_tb,
+            }
+            for _glabel, _gfiles in _date_groups:
+                try:
+                    _grp_payloads = build_all_snapshots_from_parsed_files(
+                        _gfiles, rotational_speed_rpm=rpm,
+                    )
+                    payloads = _grp_payloads
+                except Exception as e:
+                    errors.append(f"✗ grupo {_glabel}: {e}")
+                    continue
+                # Etiqueta de corrida: la del usuario + la fecha de la corrida
+                # (así snapshots de distinta fecha no comparten label idéntico).
+                _grp_label = (f"{snap_label} · {_glabel}".strip(" ·")
+                              if _glabel else (snap_label or ""))
                 for stype, enabled in save_map.items():
                     if not enabled:
                         continue
-                    payload = payloads.get(stype, {})
+                    payload = _grp_payloads.get(stype, {})
                     # Skip si payload está vacío (ej. orbit sin pares X/Y)
                     items = (
                         payload.get("sensors_data")
@@ -1005,7 +1023,7 @@ if valid_files and _active_instance_id:
                         or []
                     )
                     if not items:
-                        errors.append(f"{stype}: sin datos para guardar")
+                        errors.append(f"{stype} [{_glabel}]: sin datos para guardar")
                         continue
                     try:
                         module_path, fn_name = SAVE_FUNCTIONS_MAP[stype]
@@ -1014,24 +1032,27 @@ if valid_files and _active_instance_id:
                         sid = save_fn(
                             instance_id=_active_instance_id,
                             **payload,
-                            corrida_label=snap_label or "",
+                            corrida_label=_grp_label,
                             notes=snap_notes or "",
                             operating_speed_rpm=rpm,
                         )
                         if sid:
                             n_saved += 1
-                            errors.append(f"✓ {stype}: {sid}")
+                            errors.append(f"✓ {stype} [{_glabel}]: {sid}")
                         else:
                             n_failed += 1
-                            errors.append(f"✗ {stype}: save devolvió None")
+                            errors.append(f"✗ {stype} [{_glabel}]: save devolvió None")
                     except Exception as e:
                         n_failed += 1
-                        errors.append(f"✗ {stype}: {e}")
+                        errors.append(f"✗ {stype} [{_glabel}]: {e}")
 
+            if payloads is not None:
                 if n_saved > 0:
+                    _n_fechas = len([g for g in _date_groups if g[1]])
                     st.success(
                         f"✓ {n_saved} snapshot(s) guardado(s) para "
-                        f"`{_active_instance_id}` — ya visibles en Live Monitoring."
+                        f"`{_active_instance_id}` en {_n_fechas} fecha(s) de "
+                        f"medición — ya visibles en Live Monitoring."
                     )
                 if n_failed > 0:
                     st.warning(
