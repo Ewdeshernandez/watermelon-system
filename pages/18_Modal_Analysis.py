@@ -187,6 +187,31 @@ with tab_setup:
         icon="🛠",
     )
 
+    # Restaurar la última selección (modo + activo + metadata ad-hoc) que se
+    # persistió a disco, para NO tener que re-seleccionar el activo cada vez que
+    # la app recarga / se actualiza / se vuelve al Setup (feedback v3.31.438).
+    from core.modal.modal_session import (
+        load_last_selection as _load_sel,
+        save_last_selection as _save_sel,
+    )
+    if not st.session_state.get("_modal_sel_restored"):
+        st.session_state["_modal_sel_restored"] = True
+        _persist = _load_sel()
+        _pm = _persist.get("setup_mode", "")
+        _valid_modes = ("📦 Activo registrado en Machinery Library",
+                        "🎯 Análisis ad-hoc — equipo externo / one-off")
+        if _pm in _valid_modes and "modal_setup_mode" not in st.session_state:
+            st.session_state["modal_setup_mode"] = _pm
+        # El activo registrado se aplica más abajo (cuando conocemos opciones).
+        st.session_state["_modal_pending_asset"] = _persist.get("asset_id", "")
+        _adh = _persist.get("adhoc", {}) or {}
+        for _k in ("tag", "client", "station", "model", "notes"):
+            _v = _adh.get(_k)
+            if _v and f"modal_adhoc_{_k}" not in st.session_state:
+                st.session_state[f"modal_adhoc_{_k}"] = _v
+        if _adh.get("tag"):
+            st.session_state.setdefault("modal_adhoc_meta", _adh)
+
     # ─── Modo dual: activo registrado vs análisis ad-hoc ──────────────
     # Ad-hoc cubre clientes que solo contratan análisis modal puntual sin
     # registrar el activo en Machinery Library (consultoría one-off, equipo
@@ -266,13 +291,16 @@ with tab_setup:
 
         if adhoc_tag:
             # Guardar como pseudo-instance en session_state
-            st.session_state["modal_adhoc_meta"] = {
+            _adhoc_dict = {
                 "tag": adhoc_tag,
                 "client": adhoc_client,
                 "station": adhoc_station,
                 "model": adhoc_model,
                 "notes": adhoc_notes,
             }
+            st.session_state["modal_adhoc_meta"] = _adhoc_dict
+            # Persistir a disco para restaurar tras recarga (v3.31.438).
+            _save_sel(setup_mode=setup_mode, asset_id="", adhoc=_adhoc_dict)
             # Limpiar el selector de registrado para evitar conflicto
             if st.session_state.get("modal_inst") not in (None, "(seleccionar)", ""):
                 st.session_state["modal_inst"] = "(seleccionar)"
@@ -353,6 +381,13 @@ with tab_setup:
             e.get("instance_id", ""): _inst_label(e) for e in _all_insts
         }
 
+        # Aplicar el activo pendiente restaurado desde disco (si existe y es
+        # una opción válida), antes de instanciar el selectbox.
+        _pending_asset = st.session_state.pop("_modal_pending_asset", "")
+        if ("modal_inst" not in st.session_state
+                and _pending_asset and _pending_asset in _options):
+            st.session_state["modal_inst"] = _pending_asset
+
         col_sel, col_meta = st.columns([3, 2])
         with col_sel:
             picked_id = st.selectbox(
@@ -361,6 +396,9 @@ with tab_setup:
                 format_func=lambda x: _labels_by_id.get(x, x) if x != "(seleccionar)" else x,
                 key="modal_inst",
             )
+            # Persistir la selección para restaurarla tras recarga (v3.31.438).
+            if picked_id and picked_id != "(seleccionar)":
+                _save_sel(setup_mode=setup_mode, asset_id=picked_id, adhoc={})
 
         with col_meta:
             st.caption(
@@ -572,6 +610,35 @@ with tab_setup:
     if st.session_state.pop("_geom_restored_autosave", False):
         st.caption("↩️ Se restauró la última configuración en la que estabas "
                    "trabajando. Guárdala con nombre abajo si quieres reusarla.")
+
+    # --- Guía por etapas: feedback inmediato del avance de configuración ----
+    # (v3.31.438) Flujo más claro: el usuario ve en qué paso va y cuál sigue.
+    _step_asset = bool(_geom_asset_id) or bool(
+        st.session_state.get("modal_adhoc_meta"))
+    _step_blocks = len(geom.blocks) > 0
+    _step_sensors = len(geom.sensors) > 0
+    _step_ready = _step_blocks and _step_sensors
+
+    def _chk(ok: bool) -> str:
+        return "✅" if ok else "⬜"
+
+    st.markdown(
+        f"**Progreso de configuración:**  "
+        f"{_chk(_step_asset)} 1· Activo  →  "
+        f"{_chk(_step_blocks)} 2· Geometría ({len(geom.blocks)} bloques)  →  "
+        f"{_chk(_step_sensors)} 3· Sensores ({len(geom.sensors)})  →  "
+        f"{_chk(_step_ready)} 4· Listo para capturar")
+    if not _step_blocks:
+        st.caption("➡️ **Siguiente paso:** agrega al menos un bloque (la forma "
+                   "del equipo) en «➕ Agregar / editar bloque». El modelo 3D "
+                   "de arriba se actualiza al aplicar cada cambio.")
+    elif not _step_sensors:
+        st.caption("➡️ **Siguiente paso:** agrega tus sensores con su posición "
+                   "(x, y, z) y dirección DOF en «➕ Agregar / editar sensor».")
+    else:
+        st.caption("✅ **Geometría lista.** Revisa el modelo 3D de arriba "
+                   "(sensores en verde, flechas DOF en naranja). Guárdala con "
+                   "nombre abajo para reutilizarla en futuras campañas.")
 
     # ----- Toolbar -----
     # Callback de auto-aplicación del template al cambiar el selectbox
