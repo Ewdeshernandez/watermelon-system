@@ -504,10 +504,12 @@ def resolve_sensor_for_point(
     # Esto evita falsos positivos donde un pattern de otro tipo
     # matchea contra la variable o un substring genérico.
     universe = list(sensors)
+    _type_filter_applied = False
     if type_hint:
         filtered = [s for s in universe if str(s.get("sensor_type", "")).lower() == type_hint]
         if filtered:
             universe = filtered
+            _type_filter_applied = True
     if direction_hint:
         # Usamos la dirección EFECTIVA (corrige Dir mal cargado vía etiqueta),
         # si no, una sonda como 3YV con Dir=X crudo quedaría fuera del universo Y.
@@ -533,6 +535,17 @@ def resolve_sensor_for_point(
             continue
         if _pattern_matches(pattern, point_norm):
             return sensor
+
+    # Guarda anti cross-tipo (v3.31.443): si el Point indica un tipo físico
+    # (velocidad/accel/proximidad) pero el mapa NO tiene NINGÚN sensor de ese
+    # tipo, NO forzar un match fuzzy. Bug real TES1: '1VT6831 (C) CRF' —un
+    # velocímetro— se etiquetaba como la proximidad 'VE5809 (Y)' porque, al no
+    # haber velocímetros, el universo quedaba con TODOS los sensores y el
+    # tie-break por token ('CRF') / el fallback candidates[0] cruzaban tipos.
+    # Los patrones explícitos (csv_match_pattern) ya tuvieron su chance arriba;
+    # devolver None hace que la Tabular muestre el Point real del CSV.
+    if type_hint and not _type_filter_applied:
+        return None
 
     # =========================================================
     # FASE 2: tie-break sobre el universo filtrado
