@@ -447,13 +447,18 @@ with tab_setup:
                 sensors = list(inst.sensors or [])
                 if not sensors:
                     modal_status_banner(
-                        title="Activo sin sensores configurados",
+                        title="Activo sin sensor map en Machinery Library",
                         detail=(
-                            "Este activo no tiene sensores definidos en Machinery "
-                            "Library. Configura el sensor map antes de ejecutar "
-                            "el análisis modal."
+                            "Este activo no tiene un sensor map registrado en "
+                            "Machinery Library (ese mapa se usa para Live "
+                            "Monitoring). **Para el análisis modal NO es "
+                            "obligatorio:** define tus sensores y su DOF abajo, "
+                            "en «Geometría 3D del activo», y guárdalos como "
+                            "«📦 Configuración COMPLETA del análisis» para "
+                            "reutilizarlos. El ensayo modal usa esos sensores y "
+                            "los canales del archivo capturado."
                         ),
-                        severity="warning",
+                        severity="info",
                     )
                 else:
                     # Contadores por tipo
@@ -775,6 +780,88 @@ with tab_setup:
                     st.rerun()
             else:
                 st.caption("Aún no hay configuraciones personalizadas guardadas.")
+
+    # --- Configuración COMPLETA del análisis (geometría + sensores + parámetros)
+    # Guarda TODO el ensayo como una plantilla reutilizable de un clic. Resuelve
+    # el pedido de no reconfigurar sensores/parámetros en cada ensayo del mismo
+    # activo (feedback de campo v3.31.440).
+    with st.expander("📦 Configuración COMPLETA del análisis "
+                     "(geometría + sensores + parámetros) — plantilla de 1 clic",
+                     expanded=False):
+        import json as _json_preset
+        from core.modal.analysis_preset import (
+            save_preset as _save_preset, load_preset as _load_preset,
+            list_presets as _list_presets, delete_preset as _del_preset,
+            PRESET_PARAM_KEYS as _PRESET_KEYS,
+        )
+        st.caption(
+            "Un preset guarda **todo el ensayo en un archivo**: la geometría "
+            "(bloques + sensores + DOF) y los parámetros del ensayo (f_min/f_max, "
+            "duración, prominencia, RPM, promedios y el mapa de canales de la "
+            "maleta). Cárgalo luego con **un clic** para repetir el mismo ensayo "
+            "sin reconfigurar nada. Ideal para activos que mides periódicamente. "
+            "No requiere Machinery Library — todo se guarda desde aquí.")
+
+        _pc1, _pc2 = st.columns(2)
+        with _pc1:
+            st.markdown("**Guardar configuración completa**")
+            _preset_name = st.text_input(
+                "Nombre del preset", key="modal_preset_name",
+                placeholder="ej. TES3 · OMA cojinetes · setup estándar")
+            if st.button("💾 Guardar preset completo", key="modal_preset_save",
+                         disabled=not _preset_name.strip(),
+                         use_container_width=True):
+                _params = {k: st.session_state.get(k)
+                           for k in _PRESET_KEYS if k in st.session_state}
+                try:
+                    _save_preset(_preset_name, geom.to_json(), _params)
+                    st.success(
+                        f"✓ Preset **{_preset_name}** guardado: "
+                        f"{len(geom.blocks)} bloque(s), {len(geom.sensors)} "
+                        f"sensor(es) y {len(_params)} parámetro(s). "
+                        "Recárgalo cuando quieras aquí a la derecha.")
+                except Exception as _e:  # noqa: BLE001
+                    st.error(f"No se pudo guardar: {_e}")
+        with _pc2:
+            st.markdown("**Cargar / borrar un preset**")
+            _presets = _list_presets()
+            if _presets:
+                _psel = st.selectbox("Preset guardado", ["(elegir)"] + _presets,
+                                     key="modal_preset_pick")
+                _pb1, _pb2 = st.columns(2)
+                if _pb1.button("📂 Cargar preset", key="modal_preset_load",
+                               disabled=_psel == "(elegir)",
+                               use_container_width=True):
+                    _pre = _load_preset(_psel)
+                    if _pre:
+                        # 1) Geometría (bloques + sensores + DOF)
+                        if _pre.get("geometry"):
+                            try:
+                                st.session_state["modal_geometry"] = \
+                                    ModalGeometry.from_dict(
+                                        _json_preset.loads(_pre["geometry"]))
+                            except Exception:  # noqa: BLE001
+                                pass
+                        # 2) Parámetros del ensayo → session_state (se aplican
+                        #    al re-render de las pestañas Adquisición/OMA/EMA).
+                        for _k, _v in (_pre.get("params") or {}).items():
+                            if _k in _PRESET_KEYS:
+                                st.session_state[_k] = _v
+                        st.success(
+                            f"✓ Preset **{_psel}** cargado (geometría + "
+                            "parámetros). Ve a Adquisición / OMA / EMA: los "
+                            "valores quedaron restaurados.")
+                        st.rerun()
+                    else:
+                        st.error("No se pudo cargar el preset.")
+                if _pb2.button("🗑 Borrar", key="modal_preset_del",
+                               disabled=_psel == "(elegir)",
+                               use_container_width=True):
+                    _del_preset(_psel)
+                    st.rerun()
+            else:
+                st.caption("Aún no hay presets guardados. Configura tu ensayo y "
+                           "guárdalo arriba con un nombre.")
 
     # ----- Preview Plotly 3D -----
     # v3.31.208 — Envuelto en try/except defensivo. Si geom está vacía o
