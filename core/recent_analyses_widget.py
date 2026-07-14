@@ -804,35 +804,57 @@ def list_snapshots_brief(instance_id: str, analysis_key: str):
         snaps = _hs.list_snapshots(instance_id, analysis_key) or []
     except Exception:
         return []
+    def _upload_dt_from_sid(_sid: str):
+        """Fecha/hora de SUBIDA embebida en el snapshot_id (UTC→Colombia)."""
+        m = _re.search(r"(\d{8})_(\d{6})", _sid)
+        if not m:
+            return None
+        try:
+            d = _dt.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
+            try:
+                from zoneinfo import ZoneInfo
+                d = d.replace(tzinfo=ZoneInfo("UTC")).astimezone(
+                    ZoneInfo("America/Bogota")).replace(tzinfo=None)
+            except Exception:
+                pass
+            return d
+        except Exception:
+            return None
+
     out = []
     for s in snaps:
         sid = s.get("snapshot_id", "")
         if not sid:
             continue
-        # 1) Preferir la fecha REAL de medición (del CSV).
-        eff = _measured_dt_cached(instance_id, analysis_key, sid)
-        # 2) Fallback: fecha del snapshot_id (= hora de subida, UTC→Colombia).
-        if eff is None:
-            m = _re.search(r"(\d{8})_(\d{6})", sid)
-            if m:
-                try:
-                    d = _dt.strptime(m.group(1) + m.group(2), "%Y%m%d%H%M%S")
-                    try:
-                        from zoneinfo import ZoneInfo
-                        d = d.replace(tzinfo=ZoneInfo("UTC")).astimezone(
-                            ZoneInfo("America/Bogota")).replace(tzinfo=None)
-                    except Exception:
-                        pass
-                    eff = d
-                except Exception:
-                    eff = None
-        label = eff.strftime("%d/%m/%Y · %H:%M") if eff is not None else sid
+        # Fecha REAL de medición (del CSV) y fecha de SUBIDA (del snapshot_id).
+        measured = _measured_dt_cached(instance_id, analysis_key, sid)
+        uploaded = _upload_dt_from_sid(sid)
+
+        # Etiqueta: fecha de MEDICIÓN (período real del dato) + cuándo se SUBIÓ.
+        # Mostrar ambas evita confusión ("subí datos hoy pero salen con fecha
+        # de otro día") y desambigua varias corridas de la misma medición
+        # (feedback v3.31.439). Antes solo se veía la fecha de medición y las
+        # subidas recientes parecían no aparecer.
+        if measured is not None:
+            label = measured.strftime("%d/%m/%Y · %H:%M")
+            if uploaded is not None:
+                # segundos en la subida para distinguir cargas casi simultáneas
+                # (p.ej. CRF y TRF subidos en el mismo save).
+                label += " · subido " + uploaded.strftime("%d/%m %H:%M:%S")
+        elif uploaded is not None:
+            label = uploaded.strftime("%d/%m/%Y · %H:%M") + " (subida)"
+        else:
+            label = sid
+
         out.append({"snapshot_id": sid, "date_label": label,
-                    "_sort": eff or _dt.min})
-    # Más nuevos primero, según la fecha efectiva (medición real cuando la hay).
-    out.sort(key=lambda x: x["_sort"], reverse=True)
+                    "_upl": uploaded or _dt.min,
+                    "_meas": measured or _dt.min})
+    # Ordenar por SUBIDA descendente (lo recién cargado primero, que es lo que
+    # el usuario espera al validar una carga); desempate por medición.
+    out.sort(key=lambda x: (x["_upl"], x["_meas"]), reverse=True)
     for o in out:
-        o.pop("_sort", None)
+        o.pop("_upl", None)
+        o.pop("_meas", None)
     return out
 
 
