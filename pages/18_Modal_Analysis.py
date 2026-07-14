@@ -2801,6 +2801,34 @@ with tab_oma:
                     ),
                 ))
 
+            # Overlay de picos CANDIDATOS (transparencia del criterio): marca
+            # los bumps más marcados aunque NO superen la prominencia mínima,
+            # así el usuario ve por qué se aceptó/descartó cada pico.
+            try:
+                from core.modal.oma_interpret import (
+                    svd_detection_report as _svd_report)
+                _det = _svd_report(fdd.frequencies_hz, sv1_db,
+                                    float(oma_fmin), float(oma_fmax),
+                                    float(oma_prom))
+                _accepted = {round(m.natural_frequency_hz, 1) for m in fdd.modes}
+                for _cf, _cp in _det.get("candidates", []):
+                    if round(_cf, 1) in _accepted:
+                        continue
+                    _ci = int(np.argmin(np.abs(fdd.frequencies_hz - _cf)))
+                    fig_sv.add_trace(go.Scatter(
+                        x=[_cf], y=[sv1_db[_ci]], mode="markers",
+                        marker=dict(color="rgba(148,163,184,0.9)", size=9,
+                                    symbol="circle-open",
+                                    line=dict(width=1.5, color="#64748b")),
+                        showlegend=False,
+                        hovertemplate=(
+                            f"Pico candidato<br>{_cf:.1f} Hz · prominencia "
+                            f"{_cp:.1f} dB<br>(umbral: {float(oma_prom):.0f} dB)"
+                            "<extra></extra>"),
+                    ))
+            except Exception:  # noqa: BLE001
+                _det = {}
+
             fig_sv.update_layout(
                 title=("Singular Values of Spectral Densities — "
                        "verde: modo natural (fn) · rojo: armónica (Nx) · gris: espurio"),
@@ -2813,6 +2841,39 @@ with tab_oma:
                 legend=dict(orientation="h", y=1.05, x=0.65),
             )
             st.plotly_chart(fig_sv, use_container_width=True)
+
+            # Criterios de detección usados (transparencia del algoritmo)
+            st.caption(
+                f"**Criterios de detección usados:** banda "
+                f"**{float(oma_fmin):.0f}–{float(oma_fmax):.0f} Hz** · "
+                f"prominencia mínima del pico **≥ {float(oma_prom):.0f} dB** sobre "
+                "el ruido local · clasificación por MPC (natural < 40% · espurio "
+                "> 75%) y cercanía a armónicas de la velocidad de giro. El eje Y "
+                "es **10·log₁₀(valor singular)**: escala **relativa** en dB (no un "
+                "valor físico absoluto). Los **círculos huecos grises** son picos "
+                "candidatos que NO superaron el umbral de prominencia.")
+
+            # Explicación específica cuando NO se identificó ningún modo natural
+            if _n_natural == 0:
+                _best_hz = _det.get("best_hz")
+                _best_prom = float(_det.get("best_prom", 0.0) or 0.0)
+                if _det.get("n_at_threshold", 0) == 0 and _best_hz is not None:
+                    st.warning(
+                        f"**Por qué 0 modos:** ningún pico supera la prominencia "
+                        f"mínima de **{float(oma_prom):.0f} dB** en la banda "
+                        f"{float(oma_fmin):.0f}–{float(oma_fmax):.0f} Hz. El pico "
+                        f"más marcado es de solo **{_best_prom:.1f} dB** "
+                        f"(~{_best_hz:.1f} Hz). Opciones: baja la prominencia a "
+                        f"~{max(_best_prom * 0.8, 1):.0f} dB si crees que es un modo "
+                        "real, ajusta la banda, o el registro no tiene modos claros "
+                        "(excitación ambiental muy baja o sensor mal acoplado).",
+                        icon="🔎")
+                elif _best_hz is None:
+                    st.warning(
+                        "**Por qué 0 modos:** la curva SVD no presenta picos en la "
+                        "banda elegida (parece ruido de banda ancha). Verifica que "
+                        "el sensor mida vibración real y que la banda cubra el rango "
+                        "de interés.", icon="🔎")
 
             st.markdown(f"### Tabla modal OMA — {len(fdd.modes)} candidatos")
             import pandas as pd

@@ -41,6 +41,40 @@ def _natural_modes(fdd: Any) -> List[Any]:
             if getattr(m, "classification", "natural") == "natural"]
 
 
+def svd_detection_report(freqs, sv1_db, f_min_hz: float, f_max_hz: float,
+                         prominence_db: float, top: int = 6) -> dict:
+    """Analiza la curva SVD y reporta los picos CANDIDATOS y por qué se
+    aceptan/descartan, para dar transparencia al criterio del FDD (feedback
+    v3.31.444). Devuelve dict con: n_at_threshold (picos que superan la
+    prominencia), candidates [(hz, prominencia_db)] (los más marcados), best_hz,
+    best_prom, noise_floor_db. Nunca lanza."""
+    try:
+        import numpy as np
+        from scipy.signal import find_peaks
+    except Exception:  # noqa: BLE001
+        return {}
+    try:
+        f = np.asarray(freqs, dtype=float)
+        y = np.asarray(sv1_db, dtype=float)
+        mask = (f >= f_min_hz) & (f <= f_max_hz)
+        fb, yb = f[mask], y[mask]
+        if fb.size < 5:
+            return {"n_at_threshold": 0, "candidates": [], "best_hz": None,
+                    "best_prom": 0.0, "noise_floor_db": None}
+        pk_thr, _ = find_peaks(yb, prominence=max(prominence_db, 0.01))
+        pk_all, props_all = find_peaks(yb, prominence=0.5)
+        proms = props_all.get("prominences", np.array([]))
+        order = list(np.argsort(proms)[::-1][:top]) if proms.size else []
+        candidates = [(float(fb[pk_all[i]]), float(proms[i])) for i in order]
+        best_hz = candidates[0][0] if candidates else None
+        best_prom = candidates[0][1] if candidates else 0.0
+        return {"n_at_threshold": int(pk_thr.size), "candidates": candidates,
+                "best_hz": best_hz, "best_prom": best_prom,
+                "noise_floor_db": float(np.median(yb))}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def interpret_fdd(fdd: Any) -> dict:
     """Devuelve {'observations': [Observation], 'conclusion': str,
     'single_sensor': bool}. Nunca lanza — si algo falta, degrada."""
