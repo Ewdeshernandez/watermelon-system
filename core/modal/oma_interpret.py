@@ -66,9 +66,19 @@ def svd_detection_report(freqs, sv1_db, f_min_hz: float, f_max_hz: float,
         proms = props_all.get("prominences", np.array([]))
         order = list(np.argsort(proms)[::-1][:top]) if proms.size else []
         candidates = [(float(fb[pk_all[i]]), float(proms[i])) for i in order]
+        # Detalle por candidato: incluye el valor singular (dB) en el pico y si
+        # supera el umbral de prominencia — alimenta la tabla de candidatos con
+        # el motivo de aceptación/rechazo (v3.31.451).
+        candidates_detail = [{
+            "freq_hz": float(fb[pk_all[i]]),
+            "prominence_db": float(proms[i]),
+            "sv_db": float(yb[pk_all[i]]),
+            "passes": bool(float(proms[i]) >= prominence_db),
+        } for i in order]
         best_hz = candidates[0][0] if candidates else None
         best_prom = candidates[0][1] if candidates else 0.0
         return {"n_at_threshold": int(pk_thr.size), "candidates": candidates,
+                "candidates_detail": candidates_detail,
                 "best_hz": best_hz, "best_prom": best_prom,
                 "noise_floor_db": float(np.median(yb))}
     except Exception:  # noqa: BLE001

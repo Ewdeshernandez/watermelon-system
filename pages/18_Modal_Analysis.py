@@ -732,7 +732,8 @@ if _active_modal_tab == "🛠 Setup":
     # --- Guardar / cargar CONFIGURACIONES PERSONALIZADAS (también en ad-hoc) ---
     # Antes solo se podían guardar geometrías de activos registrados; las que
     # creaba el usuario se perdían. Ahora se pueden guardar con nombre y reusar.
-    with st.expander("💾 Guardar / cargar configuración personalizada",
+    with st.expander("💾 Guardar / cargar SOLO la geometría "
+                     "(para la config completa usa el panel 📦 de abajo)",
                      expanded=False):
         from core.modal.geometry_3d import (
             list_geometries as _list_geoms, delete_geometry as _del_geom,
@@ -790,9 +791,12 @@ if _active_modal_tab == "🛠 Setup":
     # Guarda TODO el ensayo como una plantilla reutilizable de un clic. Resuelve
     # el pedido de no reconfigurar sensores/parámetros en cada ensayo del mismo
     # activo (feedback de campo v3.31.440).
-    with st.expander("📦 Configuración COMPLETA del análisis "
-                     "(geometría + sensores + parámetros) — plantilla de 1 clic",
-                     expanded=False):
+    # expanded=True (v3.31.451): estaba colapsado y los usuarios no lo
+    # encontraban ("no hay forma clara de guardar la config completa"), aunque
+    # existía. Se abre por defecto para que sea evidente.
+    with st.expander("📦 GUARDAR / CARGAR la configuración COMPLETA del activo "
+                     "(geometría + sensores + parámetros del ensayo) — 1 clic",
+                     expanded=True):
         import json as _json_preset
         from core.modal.analysis_preset import (
             save_preset as _save_preset, load_preset as _load_preset,
@@ -2799,10 +2803,13 @@ if _active_modal_tab == "🌊 OMA":
                     textfont=dict(size=9, color="#0F1E3D"),
                     showlegend=False,
                     hovertemplate=(
-                        f"Modo {m.mode_number}<br>"
-                        f"{m.natural_frequency_hz:.2f} Hz · ζ={m.damping_ratio_pct:.2f}%<br>"
-                        f"complexity={m.complexity_pct:.1f}%<br>"
-                        f"{m.classification}<extra></extra>"
+                        f"<b>Modo {m.mode_number} — ACEPTADO</b><br>"
+                        f"Frecuencia: {m.natural_frequency_hz:.2f} Hz<br>"
+                        f"Damping ζ: {m.damping_ratio_pct:.2f}%<br>"
+                        f"Valor singular: {sv1_db[idx]:.1f} dB<br>"
+                        f"Complejidad MPC: {m.complexity_pct:.1f}%<br>"
+                        f"Confianza: {m.confidence * 100:.0f}%<br>"
+                        f"Clasificación: {m.classification}<extra></extra>"
                     ),
                 ))
 
@@ -2827,9 +2834,12 @@ if _active_modal_tab == "🌊 OMA":
                                     line=dict(width=1.5, color="#64748b")),
                         showlegend=False,
                         hovertemplate=(
-                            f"Pico candidato<br>{_cf:.1f} Hz · prominencia "
-                            f"{_cp:.1f} dB<br>(umbral: {float(oma_prom):.0f} dB)"
-                            "<extra></extra>"),
+                            f"<b>Pico candidato — DESCARTADO</b><br>"
+                            f"Frecuencia: {_cf:.2f} Hz<br>"
+                            f"Prominencia: {_cp:.1f} dB<br>"
+                            f"Valor singular: {sv1_db[_ci]:.1f} dB<br>"
+                            f"Umbral requerido: {float(oma_prom):.0f} dB<br>"
+                            f"Motivo: no destaca del ruido<extra></extra>"),
                     ))
             except Exception:  # noqa: BLE001
                 _det = {}
@@ -2879,6 +2889,51 @@ if _active_modal_tab == "🌊 OMA":
                         "banda elegida (parece ruido de banda ancha). Verifica que "
                         "el sensor mida vibración real y que la banda cubra el rango "
                         "de interés.", icon="🔎")
+
+            # --- Tabla de PICOS CANDIDATOS: todos los detectados, con el motivo
+            # de aceptación o rechazo. Antes, si ninguno pasaba el umbral la
+            # tabla salía "0 candidatos" aunque la gráfica sí marcaba círculos
+            # → confusión. Ahora se ve cada pico y por qué se descartó.
+            _cd = _det.get("candidates_detail", []) if isinstance(_det, dict) else []
+            if _cd:
+                import pandas as _pd_c
+                _acc_by_hz = {round(m.natural_frequency_hz, 1): m for m in fdd.modes}
+                _rows_c = []
+                for _c in sorted(_cd, key=lambda d: -d["prominence_db"]):
+                    _m = _acc_by_hz.get(round(_c["freq_hz"], 1))
+                    if _m is not None:
+                        _estado = "✅ Aceptado"
+                        _clase = _m.classification
+                        _motivo = (
+                            f"Supera prominencia (≥{float(oma_prom):.0f} dB) · "
+                            f"MPC {_m.complexity_pct:.0f}% → {_clase}")
+                        _conf = f"{_m.confidence * 100:.0f}%"
+                    else:
+                        _estado = "❌ Descartado"
+                        _clase = "—"
+                        _motivo = (
+                            f"Prominencia {_c['prominence_db']:.1f} dB < umbral "
+                            f"{float(oma_prom):.0f} dB (pico no destaca del ruido)")
+                        _conf = "—"
+                    _rows_c.append({
+                        "Frecuencia (Hz)": round(_c["freq_hz"], 2),
+                        "Prominencia (dB)": round(_c["prominence_db"], 2),
+                        "Valor singular (dB)": round(_c["sv_db"], 1),
+                        "Estado": _estado,
+                        "Clasificación": _clase,
+                        "Confianza": _conf,
+                        "Motivo": _motivo,
+                    })
+                st.markdown(
+                    f"### Picos candidatos — {len(_rows_c)} detectados · "
+                    f"{sum(1 for r in _rows_c if r['Estado'].startswith('✅'))} aceptados")
+                st.caption(
+                    "Todos los picos que el algoritmo evaluó, con el motivo de "
+                    "aceptación o rechazo. Los ❌ son los círculos huecos grises "
+                    "de la gráfica: existen, pero no destacan lo suficiente del "
+                    "ruido para considerarse un modo.")
+                st.dataframe(_pd_c.DataFrame(_rows_c),
+                             use_container_width=True, hide_index=True)
 
             st.markdown(f"### Tabla modal OMA — {len(fdd.modes)} candidatos")
             import pandas as pd
