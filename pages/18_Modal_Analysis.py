@@ -165,21 +165,26 @@ modal_hero_card(
 # =====================================================================
 # Tabs
 # =====================================================================
-tab_setup, tab_acq, tab_ema, tab_oma, tab_3d, tab_fea, tab_reports = st.tabs([
-    "🛠 Setup",
-    "📥 Adquisición",
-    "🔨 EMA",
-    "🌊 OMA",
-    "🎬 Mode Shapes 3D",
-    "🧮 FEA Compare",
-    "📊 Reports",
-])
+# Navegación con estado PERSISTENTE. Antes se usaba st.tabs, que se reinicia a
+# la 1ª pestaña en cada st.rerun() → tras cualquier acción (cargar, aplicar,
+# ejecutar) el flujo "saltaba" de vuelta a Setup y había que re-navegar. El
+# radio guarda la pestaña activa en session_state y sobrevive los reruns, así
+# el usuario se queda donde estaba (v3.31.445).
+_MODAL_TABS = [
+    "🛠 Setup", "📥 Adquisición", "🔨 EMA", "🌊 OMA",
+    "🎬 Mode Shapes 3D", "🧮 FEA Compare", "📊 Reports",
+]
+_active_modal_tab = st.radio(
+    "Navegación del módulo modal", _MODAL_TABS,
+    horizontal=True, key="modal_active_tab", label_visibility="collapsed",
+)
+st.divider()
 
 
 # ---------------------------------------------------------------------
 # Tab 1 — Setup
 # ---------------------------------------------------------------------
-with tab_setup:
+if _active_modal_tab == "🛠 Setup":
     modal_section_header(
         title="Configuración del ensayo modal",
         subtitle="Selecciona o registra el activo bajo análisis",
@@ -1110,7 +1115,7 @@ with tab_setup:
 # ---------------------------------------------------------------------
 # Tab 2 — Adquisición
 # ---------------------------------------------------------------------
-with tab_acq:
+if _active_modal_tab == "📥 Adquisición":
     st.subheader("Adquisición de datos")
     st.caption("Tres rutas: captura live desde la maleta, importar archivo pre-capturado, o importar FRFs legacy.")
 
@@ -2362,7 +2367,7 @@ with tab_acq:
 # ---------------------------------------------------------------------
 # Tab 3 — EMA Processing
 # ---------------------------------------------------------------------
-with tab_ema:
+if _active_modal_tab == "🔨 EMA":
     st.subheader("Análisis Modal Experimental")
     st.caption(
         "Identificación de parámetros modales (frecuencia natural, damping, mode shape) "
@@ -2620,7 +2625,7 @@ with tab_ema:
 # ---------------------------------------------------------------------
 # Tab 4 — OMA Processing (FDD)
 # ---------------------------------------------------------------------
-with tab_oma:
+if _active_modal_tab == "🌊 OMA":
     st.subheader("Análisis Modal Operacional — FDD")
     st.caption(
         "Frequency Domain Decomposition (Brincker 2001) sobre datos operacionales "
@@ -2993,7 +2998,7 @@ with tab_oma:
 # ---------------------------------------------------------------------
 # Tab 5 — Mode Shapes (visualización)
 # ---------------------------------------------------------------------
-with tab_3d:
+if _active_modal_tab == "🎬 Mode Shapes 3D":
     modal_section_header(
         title="Visualización de Mode Shapes",
         subtitle="5 representaciones complementarias del mismo modo natural",
@@ -3891,7 +3896,7 @@ with tab_3d:
 # ---------------------------------------------------------------------
 # Tab 6 — FEA Compare
 # ---------------------------------------------------------------------
-with tab_fea:
+if _active_modal_tab == "🧮 FEA Compare":
     modal_section_header(
         title="Correlación EMA / OMA ↔ FEA",
         subtitle="Validación cruzada del modelo numérico contra resultados experimentales",
@@ -4191,7 +4196,7 @@ with tab_fea:
 # ---------------------------------------------------------------------
 # Tab 7 — Reports (selector granular + auto-análisis + IA)
 # ---------------------------------------------------------------------
-with tab_reports:
+if _active_modal_tab == "📊 Reports":
     modal_section_header(
         title="Reports — selector granular + análisis",
         subtitle=(
