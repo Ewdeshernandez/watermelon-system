@@ -195,8 +195,20 @@ def check_for_updates(
     # límite de 60/h que rompía la detección). Esto blinda el update-check.
     _raw_latest = ""
     try:
-        _rreq = urllib.request.Request(
-            GITHUB_RAW_VERSION, headers={"User-Agent": USER_AGENT})
+        # CACHE-BUSTER (v3.31.452): raw.githubusercontent responde con
+        # 'cache-control: max-age=300' → durante los 5 min posteriores a un
+        # release el CDN puede devolver la versión ANTERIOR. El updater leía ese
+        # valor viejo, concluía "no hay update" y lo cacheaba 1 h → el cliente
+        # se quedaba sin ver la versión nueva (caso real: Mauricio en .450 no
+        # veía la .451 ya publicada). Con un query param único + headers
+        # no-cache forzamos una lectura fresca en cada chequeo.
+        import time as _time
+        _url = f"{GITHUB_RAW_VERSION}?t={int(_time.time())}"
+        _rreq = urllib.request.Request(_url, headers={
+            "User-Agent": USER_AGENT,
+            "Cache-Control": "no-cache",
+            "Pragma": "no-cache",
+        })
         with urllib.request.urlopen(_rreq, timeout=TIMEOUT_SECONDS) as _rresp:
             _raw_latest = _rresp.read().decode("utf-8").strip()
     except Exception:  # noqa: BLE001 — si el raw falla, caemos a la API abajo
