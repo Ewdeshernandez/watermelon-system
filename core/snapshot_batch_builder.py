@@ -87,23 +87,53 @@ def _extract_sensor_label(parsed_file: Dict[str, Any]) -> str:
     return "unknown"
 
 
-def _extract_sampling_rate(parsed_file: Dict[str, Any]) -> float:
-    """Sampling rate desde metadata, sino calcula del time column."""
-    meta = parsed_file.get("metadata", {}) or {}
-    for key in ("Sampling Rate", "Sample Rate", "Fs", "Sampling Frequency", "Sample Freq"):
-        v = meta.get(key)
-        if v is not None:
-            try:
-                # Strip units si las hay (ej. "25600 Hz")
-                num_str = re.sub(r"[^\d.]", "", str(v))
-                if num_str:
-                    fs = float(num_str)
-                    if fs > 0:
-                        return fs
-            except Exception:
-                pass
+def _parse_rate_value(raw: Any) -> Optional[float]:
+    """Parsea una frecuencia de muestreo respetando el PREFIJO DE UNIDAD.
 
-    # Calcular desde la columna time
+    Bug real (v3.31.446): el parseo anterior hacía re.sub(r"[^\\d.]", "") y
+    '2.56 kHz' quedaba en 2.56 Hz — un error de 1000× que dejaba el espectro
+    comprimido junto a 0 Hz (SGT300B). Ahora kHz/MHz escalan y CPM/RPM se
+    convierten a Hz.
+    """
+    s = str(raw or "").strip().lower()
+    if not s:
+        return None
+    mult = 1.0
+    if "khz" in s:
+        mult = 1e3
+    elif "mhz" in s:
+        mult = 1e6
+    elif "cpm" in s or "rpm" in s:
+        mult = 1.0 / 60.0
+    # Separador de miles "1,024" → "1024"; coma decimal "2,56" → "2.56"
+    s_num = re.sub(r"(?<=\d),(?=\d{3}\b)", "", s).replace(",", ".")
+    m = re.search(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?", s_num)
+    if not m:
+        return None
+    try:
+        val = float(m.group(0))
+    except ValueError:
+        return None
+    fs = val * mult
+    return fs if fs > 0 else None
+
+
+def _extract_sampling_rate(parsed_file: Dict[str, Any]) -> float:
+    """Sampling rate desde metadata (unit-aware), sino calcula del time column."""
+    meta = parsed_file.get("metadata", {}) or {}
+    fs_meta: Optional[float] = None
+    for key in ("Sampling Rate", "Sample Rate", "Fs", "Sampling Frequency", "Sample Freq"):
+        if meta.get(key) is not None:
+            fs_meta = _parse_rate_value(meta.get(key))
+            if fs_meta:
+                break
+
+    # Guarda de plausibilidad: ningún CSV de vibración se muestrea < 10 Hz.
+    # Si la metadata da algo absurdo (unidad rara/mal escrita), la ignoramos y
+    # estimamos del time column, que viene del dato real.
+    if fs_meta is not None and fs_meta >= 10.0:
+        return fs_meta
+
     df = parsed_file.get("dataframe")
     time_col = parsed_file.get("time_column")
     if df is not None and time_col and time_col in df.columns:
@@ -116,6 +146,8 @@ def _extract_sampling_rate(parsed_file: Dict[str, Any]) -> float:
         except Exception:
             pass
 
+    if fs_meta is not None and fs_meta > 0:
+        return fs_meta  # último recurso
     return DEFAULT_SAMPLING_RATE_HZ
 
 
