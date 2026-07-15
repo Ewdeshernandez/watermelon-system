@@ -70,8 +70,12 @@ def _safe_float(v) -> float:
 def _extract_sensor_label(parsed_file: Dict[str, Any]) -> str:
     """Heurística: sensor label desde metadata o filename."""
     meta = parsed_file.get("metadata", {}) or {}
-    # 1) Channel/Sensor/Point en metadata (priority order)
-    for key in ("Sensor", "Channel", "Point", "Variable", "Location", "Tag"):
+    # 1) Channel/Sensor/Point en metadata (priority order).
+    #    'Point Name' va ANTES que 'Variable': los CSV Bently traen
+    #    'Point Name,1XD TURBINA DE' (la etiqueta útil) y
+    #    'Variable,Disp Wf(128X/16revs).KPH TURBINA' (metadata técnica).
+    for key in ("Sensor", "Channel", "Point Name", "Point", "Variable",
+                "Location", "Tag"):
         val = meta.get(key)
         if val and isinstance(val, str) and val.strip():
             return val.strip()
@@ -118,10 +122,43 @@ def _parse_rate_value(raw: Any) -> Optional[float]:
     return fs if fs > 0 else None
 
 
+# Factores para llevar la columna de tiempo a SEGUNDOS. Los CSV Bently traen
+# 'X-Axis Unit,ms' — el tiempo está en MILISEGUNDOS. Leerlo como segundos daba
+# una fs 1000× menor (30.3 Hz en vez de 30.303 Hz para SGT300B) y el espectro
+# quedaba aplastado contra 0 Hz. (v3.31.449 — causa raíz confirmada con CSV real.)
+_TIME_UNIT_TO_SECONDS: Dict[str, float] = {
+    "s": 1.0, "sec": 1.0, "secs": 1.0, "second": 1.0, "seconds": 1.0,
+    "ms": 1e-3, "msec": 1e-3, "msecs": 1e-3,
+    "millisecond": 1e-3, "milliseconds": 1e-3,
+    "us": 1e-6, "µs": 1e-6, "μs": 1e-6, "usec": 1e-6,
+    "microsecond": 1e-6, "microseconds": 1e-6,
+    "ns": 1e-9, "nsec": 1e-9,
+    "min": 60.0, "minute": 60.0, "minutes": 60.0,
+}
+
+
+def _time_unit_scale(parsed_file: Dict[str, Any]) -> float:
+    """Factor para convertir la columna de tiempo a SEGUNDOS, leyendo la
+    unidad declarada por el propio CSV ('X-Axis Unit'). Determinista: sin
+    heurísticas de umbrales. Si no está declarada, asume segundos (1.0)."""
+    meta = parsed_file.get("metadata", {}) or {}
+    for key in ("X-Axis Unit", "X Axis Unit", "X-Axis Units", "X Axis Units",
+                "Time Unit", "Time Units"):
+        v = meta.get(key)
+        if v and isinstance(v, str):
+            u = v.strip().lower()
+            if u in _TIME_UNIT_TO_SECONDS:
+                return _TIME_UNIT_TO_SECONDS[u]
+    return 1.0
+
+
 def _extract_sampling_rate(parsed_file: Dict[str, Any]) -> float:
-    """Sampling rate desde metadata (unit-aware), sino calcula del time column."""
+    """Sampling rate desde metadata (unit-aware), sino calcula del time column
+    HONRANDO la unidad de tiempo declarada en el CSV ('X-Axis Unit')."""
     meta = parsed_file.get("metadata", {}) or {}
     fs_meta: Optional[float] = None
+    # OJO: 'Sample Speed' NO va acá — en los CSV Bently es la velocidad del EJE
+    # (rpm), no la frecuencia de muestreo.
     for key in ("Sampling Rate", "Sample Rate", "Fs", "Sampling Frequency", "Sample Freq"):
         if meta.get(key) is not None:
             fs_meta = _parse_rate_value(meta.get(key))
@@ -140,21 +177,18 @@ def _extract_sampling_rate(parsed_file: Dict[str, Any]) -> float:
         try:
             t = pd.to_numeric(df[time_col], errors="coerce").dropna().to_numpy()
             if len(t) > 2:
-                dt = np.median(np.diff(t))
+                # Llevar dt a SEGUNDOS usando la unidad declarada por el CSV
+                # ('X-Axis Unit,ms' en Bently). Esta es la corrección REAL:
+                # determinista, no depende de umbrales.
+                dt = float(np.median(np.diff(t))) * _time_unit_scale(parsed_file)
                 if dt > 0:
                     fs_time = 1.0 / dt
-                    # CORRECCIÓN DE UNIDAD DE TIEMPO (v3.31.447). Varios CSV
-                    # traen la columna de tiempo en MILISEGUNDOS (o µs) pero se
-                    # lee como segundos → dt 1000× mayor → fs 1000× menor →
-                    # el espectro queda aplastado contra 0 Hz (caso SGT300B y
-                    # el ya documentado en tes1: pico a 0.0598 "Hz" con la
-                    # máquina a 3600 rpm). Ninguna medición de vibración se
-                    # muestrea por debajo de ~10 Hz, así que si la fs resultante
-                    # es absurda, escalamos por décadas de 1000 hasta que sea
-                    # física. Así el espectro sale bien AL GUARDAR, sin depender
-                    # de que el usuario ingrese las RPM.
+                    # Red de seguridad para CSV que NO declaran la unidad: si la
+                    # fs sigue siendo absurda para vibración (< 200 Hz — el
+                    # mínimo razonable, ya que 1X típico ya está en 50-250 Hz),
+                    # el tiempo casi seguro venía en ms/µs sin declararlo.
                     _guard = 0
-                    while fs_time < 10.0 and _guard < 3:
+                    while fs_time < 200.0 and _guard < 3:
                         fs_time *= 1000.0
                         _guard += 1
                     return fs_time
@@ -167,9 +201,16 @@ def _extract_sampling_rate(parsed_file: Dict[str, Any]) -> float:
 
 
 def _extract_unit(parsed_file: Dict[str, Any]) -> str:
-    """Unidad de amplitud desde metadata."""
+    """Unidad de amplitud desde metadata.
+
+    v3.31.449 — se agregó la variante CON GUION ('Y-Axis Unit'), que es la que
+    usan los CSV Bently reales (SGT300B trae 'Y-Axis Unit,µm'). Antes solo se
+    buscaba 'Y Axis Unit' con espacio → la unidad se perdía y el espectro
+    quedaba sin unidad ni clasificación de familia (prox/vel/acel).
+    """
     meta = parsed_file.get("metadata", {}) or {}
-    for key in ("Y Axis Unit", "Amplitude Unit", "Unit", "Units"):
+    for key in ("Y-Axis Unit", "Y Axis Unit", "Y-Axis Units", "Y Axis Units",
+                "Amplitude Unit", "Unit", "Units"):
         v = meta.get(key)
         if v and isinstance(v, str) and v.strip():
             return v.strip()
