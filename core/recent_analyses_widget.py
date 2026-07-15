@@ -387,13 +387,23 @@ def _render_spectrum_detail(payload: Dict[str, Any],
                 if 0.85 <= _ratio / _cand <= 1.15:
                     _scale = _cand
                     break
-        elif _dom:
-            # Sin rpm de referencia: si todo el espectro cabe bajo 600 CPM
-            # (10 Hz) es físicamente implausible → asumir factor ms (×1000)
+        # Fallback por PLAUSIBILIDAD FÍSICA — v3.31.448: antes esto vivía en un
+        # `elif _dom:`, así que solo corría si se había hallado un pico
+        # dominante. En un espectro mal escalado toda la energía cae en ~0 Hz y
+        # NO hay pico válido (freq=0) → _dom = None → no entraba a ninguna rama
+        # y el eje se quedaba sin corregir (caso SGT300B: espectro aplastado
+        # contra 0). La comprobación de fmax no necesita el pico: si TODO el
+        # espectro cabe bajo 600 CPM (10 Hz) es físicamente implausible para
+        # vibración → el eje viene ÷1000 (CSV con tiempo en ms). Se escala por
+        # décadas de 1000 hasta que el fmax sea físico.
+        if _scale == 1.0:
             try:
                 _fmax_raw = max(max(_sensor_freqs_cpm(s)) for s in sensors)
-                if _fmax_raw < 600.0:
-                    _scale = 1000.0
+                if 0 < _fmax_raw < 600.0:
+                    _s = 1.0
+                    while _fmax_raw * _s < 600.0 and _s < 1e6:
+                        _s *= 1000.0
+                    _scale = _s
             except Exception:
                 pass
 
