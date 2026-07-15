@@ -229,6 +229,35 @@ def _extract_timestamp(parsed_file: Dict[str, Any]) -> str:
     return ""
 
 
+def extract_running_speed_rpm(parsed_files: List[Dict[str, Any]]) -> Optional[float]:
+    """Velocidad de giro (rpm) DECLARADA por el CSV.
+
+    Los CSV Bently traen 'Sample Speed,14049 rpm' — la velocidad real del eje.
+    Usarla evita que la plataforma la adivine desde el pico dominante del
+    espectro, que en máquinas con componente sub-síncrona fuerte apunta al pico
+    equivocado y deja los cursores 1X/2X/3X mal ubicados (v3.31.450).
+
+    Devuelve la primera velocidad físicamente plausible (60–60.000 rpm) o None.
+    """
+    for pf in parsed_files or []:
+        meta = pf.get("metadata", {}) or {}
+        for key in ("Sample Speed", "Running Speed", "Shaft Speed",
+                    "Machine Speed", "Speed", "RPM"):
+            v = meta.get(key)
+            if v is None:
+                continue
+            m = re.search(r"[-+]?\d*\.?\d+", str(v).replace(",", ""))
+            if not m:
+                continue
+            try:
+                val = float(m.group(0))
+            except ValueError:
+                continue
+            if 60.0 <= val <= 60000.0:
+                return val
+    return None
+
+
 def _extract_signal(parsed_file: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray]:
     """Devuelve (time_arr, values_arr) como numpy arrays float64."""
     df = parsed_file["dataframe"]
@@ -717,4 +746,5 @@ __all__ = [
     "build_tabular_payload",
     "build_all_snapshots_from_parsed_files",
     "group_parsed_files_by_measurement",
+    "extract_running_speed_rpm",
 ]

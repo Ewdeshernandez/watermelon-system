@@ -999,9 +999,25 @@ if valid_files and _active_instance_id:
                 "orbit": save_or, "tabular": save_tb,
             }
             for _glabel, _gfiles in _date_groups:
+                # Si el usuario no ingresó RPM, tomarla del propio CSV
+                # ('Sample Speed,14049 rpm' en Bently). Así los cursores 1X/2X/3X
+                # y los vectores quedan bien referenciados sin tipear nada
+                # (v3.31.450).
+                _grp_rpm = rpm
+                if not _grp_rpm:
+                    try:
+                        from core.snapshot_batch_builder import (
+                            extract_running_speed_rpm as _auto_rpm)
+                        _grp_rpm = _auto_rpm(_gfiles)
+                        if _grp_rpm:
+                            errors.append(
+                                f"ℹ RPM auto-detectada del CSV [{_glabel}]: "
+                                f"{_grp_rpm:.0f} rpm")
+                    except Exception:  # noqa: BLE001
+                        _grp_rpm = rpm
                 try:
                     _grp_payloads = build_all_snapshots_from_parsed_files(
-                        _gfiles, rotational_speed_rpm=rpm,
+                        _gfiles, rotational_speed_rpm=_grp_rpm,
                     )
                     payloads = _grp_payloads
                 except Exception as e:
@@ -1034,7 +1050,7 @@ if valid_files and _active_instance_id:
                             **payload,
                             corrida_label=_grp_label,
                             notes=snap_notes or "",
-                            operating_speed_rpm=rpm,
+                            operating_speed_rpm=_grp_rpm,
                         )
                         if sid:
                             n_saved += 1

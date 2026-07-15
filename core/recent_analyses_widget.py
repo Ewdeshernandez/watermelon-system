@@ -407,8 +407,18 @@ def _render_spectrum_detail(payload: Dict[str, Any],
             except Exception:
                 pass
 
+        # Velocidad de giro para los cursores 1X/2X/3X. PRIORIDAD: la velocidad
+        # REAL del snapshot (operating_speed_rpm, que viene del CSV
+        # 'Sample Speed' o la ingresa el usuario). Antes se derivaba SIEMPRE del
+        # pico dominante, y en máquinas con una componente sub-síncrona fuerte
+        # ese pico no es el 1X → los cursores quedaban amontonados en el
+        # extremo izquierdo y la fundamental/armónicos mal referenciados
+        # (caso SGT300B: pico dominante 888 CPM vs 1X real 14.049 CPM).
+        # v3.31.450.
         run_cpm = None
-        if _dom:
+        if _rpm > 0:
+            run_cpm = _rpm
+        elif _dom:
             _cand_run = _dom * _scale
             if 180.0 <= _cand_run <= 120000.0:
                 run_cpm = _cand_run
