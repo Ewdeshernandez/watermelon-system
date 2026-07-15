@@ -142,7 +142,22 @@ def _extract_sampling_rate(parsed_file: Dict[str, Any]) -> float:
             if len(t) > 2:
                 dt = np.median(np.diff(t))
                 if dt > 0:
-                    return 1.0 / dt
+                    fs_time = 1.0 / dt
+                    # CORRECCIÓN DE UNIDAD DE TIEMPO (v3.31.447). Varios CSV
+                    # traen la columna de tiempo en MILISEGUNDOS (o µs) pero se
+                    # lee como segundos → dt 1000× mayor → fs 1000× menor →
+                    # el espectro queda aplastado contra 0 Hz (caso SGT300B y
+                    # el ya documentado en tes1: pico a 0.0598 "Hz" con la
+                    # máquina a 3600 rpm). Ninguna medición de vibración se
+                    # muestrea por debajo de ~10 Hz, así que si la fs resultante
+                    # es absurda, escalamos por décadas de 1000 hasta que sea
+                    # física. Así el espectro sale bien AL GUARDAR, sin depender
+                    # de que el usuario ingrese las RPM.
+                    _guard = 0
+                    while fs_time < 10.0 and _guard < 3:
+                        fs_time *= 1000.0
+                        _guard += 1
+                    return fs_time
         except Exception:
             pass
 
