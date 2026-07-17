@@ -589,10 +589,44 @@ if _active_modal_tab == "🛠 Setup":
     if not _adhoc_for_geom and _inst_key_for_geom and _inst_key_for_geom != "(seleccionar)":
         _geom_asset_id = _inst_key_for_geom
 
+    # CONFIG COMPLETA POR ACTIVO (v3.31.453). Cada activo registrado tiene su
+    # propia configuración completa (geometría + sensores + parámetros del
+    # ensayo) guardada bajo la clave 'asset__<instance_id>'. Al SELECCIONAR el
+    # activo se restaura sola — sin cargar presets a mano. Antes había que
+    # guardar/cargar por nombre y el usuario reportaba que "la configuración de
+    # la máquina no queda guardada".
+    from core.modal.analysis_preset import (
+        save_preset as _save_asset_cfg, load_preset as _load_asset_cfg,
+        PRESET_PARAM_KEYS as _ASSET_PARAM_KEYS,
+    )
+    import json as _json_asset
+
+    def _asset_cfg_key(aid: str) -> str:
+        return f"asset__{aid}"
+
+    def _apply_asset_params(_params: dict) -> None:
+        """Restaura los parámetros del ensayo en session_state."""
+        for _k, _v in (_params or {}).items():
+            if _k in _ASSET_PARAM_KEYS and _k not in st.session_state:
+                st.session_state[_k] = _v
+
+    # Si cambió el activo seleccionado, recargar SU configuración completa.
+    if _geom_asset_id and st.session_state.get("_modal_cfg_asset") != _geom_asset_id:
+        _cfg = _load_asset_cfg(_asset_cfg_key(_geom_asset_id))
+        if _cfg:
+            try:
+                if _cfg.get("geometry"):
+                    st.session_state["modal_geometry"] = ModalGeometry.from_dict(
+                        _json_asset.loads(_cfg["geometry"]))
+                _apply_asset_params(_cfg.get("params") or {})
+                st.session_state["_modal_cfg_restored"] = _geom_asset_id
+            except Exception:  # noqa: BLE001
+                pass
+        st.session_state["_modal_cfg_asset"] = _geom_asset_id
+
     # Cargar geometría existente o inicializar.
-    # Prioridad: geometría guardada del activo → autosave de la última sesión
-    # → vacío. El autosave evita perder la config al recargar la página
-    # (session_state se limpia, pero el autosave persiste en disco).
+    # Prioridad: config completa del activo → geometría guardada del activo →
+    # autosave de la última sesión → vacío.
     if "modal_geometry" not in st.session_state:
         _loaded = load_geometry(_geom_asset_id) if _geom_asset_id else None
         if _loaded:
@@ -606,6 +640,13 @@ if _active_modal_tab == "🛠 Setup":
                 st.session_state["modal_geometry"] = TEMPLATES["empty"]()
 
     geom: ModalGeometry = st.session_state["modal_geometry"]
+
+    if st.session_state.pop("_modal_cfg_restored", None):
+        st.success(
+            f"✅ Configuración completa de **{_geom_asset_id}** restaurada "
+            f"automáticamente: {len(geom.blocks)} bloque(s), "
+            f"{len(geom.sensors)} sensor(es) y los parámetros del ensayo. "
+            "No necesitas reconfigurar nada.", icon="📦")
 
     # Autosave de la geometría de trabajo (con detección de cambios para no
     # reescribir en cada rerun). Restaura sola si el usuario recarga la página.
@@ -675,19 +716,30 @@ if _active_modal_tab == "🛠 Setup":
             on_change=_apply_template_on_change,
         )
     with col_t2:
-        if st.button("💾 Guardar", key="geom_save",
-                       use_container_width=True,
+        if st.button("💾 Guardar TODO para este activo", key="geom_save",
+                       use_container_width=True, type="primary",
                        disabled=not _geom_asset_id,
-                       help=("Persiste a data/modal/geometries/<asset_id>.json. "
-                             "Disponible solo con activo registrado."
+                       help=("Selecciona un activo registrado arriba para poder "
+                             "guardar su configuración."
                              if not _geom_asset_id else
-                             "Persiste a disco para este activo")):
+                             "Guarda geometría + sensores + parámetros del ensayo "
+                             "para ESTE activo. Al volver a seleccionarlo, se "
+                             "restaura todo automáticamente.")):
             geom.asset_id = _geom_asset_id
             try:
-                _p = save_geometry(geom)
-                st.toast(f"Geometría guardada en {_p.name}", icon="✅")
+                save_geometry(geom)  # compat: geometría por activo
+                # Config COMPLETA atada al activo (geometría + parámetros).
+                _params_now = {k: st.session_state.get(k)
+                               for k in _ASSET_PARAM_KEYS if k in st.session_state}
+                _save_asset_cfg(_asset_cfg_key(_geom_asset_id),
+                                geom.to_json(), _params_now)
+                st.success(
+                    f"✅ Configuración completa de **{_geom_asset_id}** guardada: "
+                    f"{len(geom.blocks)} bloque(s), {len(geom.sensors)} sensor(es) "
+                    f"y {len(_params_now)} parámetro(s). La próxima vez que "
+                    "selecciones este activo, se restaura sola.", icon="📦")
             except Exception as exc:  # noqa: BLE001
-                st.toast(f"Error al guardar: {exc}", icon="⚠")
+                st.error(f"Error al guardar: {exc}")
     with col_t3:
         if st.button("⬇ Export JSON", key="geom_export",
                        use_container_width=True,
@@ -2722,13 +2774,56 @@ if _active_modal_tab == "🌊 OMA":
                                         help="Si se da, marca picos cercanos a "
                                              "1×, 2×, 3× como armónicos")
 
+        # --- Recorte del intervalo a procesar (v3.31.453) -------------------
+        # En OMA los primeros segundos suelen traer transitorios (arranque de la
+        # adquisición, asentamiento del sensor IEPE, manipulación) que
+        # contaminan la identificación de modos. Permite descartar inicio/final.
+        st.markdown("**✂️ Intervalo a procesar**")
+        _dur_total = float(_record_dur or 0.0)
+        _tc1, _tc2, _tc3 = st.columns([1, 1, 2])
+        with _tc1:
+            _trim_start = st.number_input(
+                "Descartar al inicio (s)", value=0.0, min_value=0.0,
+                max_value=max(_dur_total - 1.0, 0.0), step=0.5, key="oma_trim_start",
+                help="Recomendado 1–2 s: descarta el transitorio de arranque de "
+                     "la adquisición y el asentamiento del sensor.")
+        with _tc2:
+            _trim_end = st.number_input(
+                "Descartar al final (s)", value=0.0, min_value=0.0,
+                max_value=max(_dur_total - 1.0, 0.0), step=0.5, key="oma_trim_end",
+                help="Útil si al final hubo manipulación del sensor o parada.")
+        _dur_eff = max(_dur_total - float(_trim_start) - float(_trim_end), 0.0)
+        with _tc3:
+            if _dur_eff <= 0:
+                st.error("El recorte deja el registro vacío — reduce los valores.")
+            elif _trim_start or _trim_end:
+                st.info(f"Se procesarán **{_dur_eff:.1f} s** de {_dur_total:.1f} s "
+                        f"(desde {_trim_start:.1f} s hasta "
+                        f"{_dur_total - _trim_end:.1f} s).", icon="✂️")
+            else:
+                st.caption(f"Se procesa el registro completo ({_dur_total:.1f} s). "
+                           "Si ves un transitorio al inicio, descarta 1–2 s.")
+
         if st.button("🌊 Ejecutar FDD + identificar modos", type="primary",
-                       use_container_width=True, key="oma_run"):
+                       use_container_width=True, key="oma_run",
+                       disabled=(_dur_eff <= 0)):
             from core.modal.oma_engine import run_oma
 
             time_data = np.stack([ch.data for ch in tdms_oma.channels], axis=1)
+            # Aplicar el recorte por muestras
+            _fs_oma = float(tdms_oma.sample_rate_hz)
+            _i0 = int(round(float(_trim_start) * _fs_oma))
+            _i1 = time_data.shape[0] - int(round(float(_trim_end) * _fs_oma))
+            _i0 = max(0, min(_i0, time_data.shape[0] - 1))
+            _i1 = max(_i0 + 1, min(_i1, time_data.shape[0]))
+            _n_before = time_data.shape[0]
+            time_data = time_data[_i0:_i1, :]
+            if _i0 or _i1 < _n_before:
+                st.caption(
+                    f"✂️ Recorte aplicado: {time_data.shape[0]:,} de "
+                    f"{_n_before:,} muestras ({time_data.shape[0] / _fs_oma:.1f} s).")
             running_hz = (oma_rpm / 60.0) if oma_rpm > 0 else None
-            nperseg = min(4096, time_data.shape[0] // 8)
+            nperseg = min(4096, max(time_data.shape[0] // 8, 16))
             with st.spinner("Computando matriz PSD + SVD por frecuencia..."):
                 fdd_result = run_oma(
                     time_data=time_data,
