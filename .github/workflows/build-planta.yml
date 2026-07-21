@@ -39,6 +39,14 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write  # necesario para crear releases
+      id-token: write  # OIDC para Azure Trusted Signing (firma de código)
+
+    # Guarda de firma (v3.31.454): mapea el secret a env para poder gatear los
+    # pasos de firma. Si el secret NO está configurado, el build corre igual
+    # SIN firmar (no rompe). Cuando esté Azure Trusted Signing listo, la firma
+    # se activa sola. Elimina el bloqueo de Smart App Control de raíz.
+    env:
+      SIGN_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
 
     steps:
       # ------------------------------------------------------
@@ -281,6 +289,30 @@ jobs:
           Write-Host "✓ Carpeta WatermelonPlanta generada: $size MB"
 
       # ------------------------------------------------------
+      # 7b. FIRMA del .exe con Azure Trusted Signing (v3.31.454)
+      #     Firma WatermelonPlanta.exe ANTES de empaquetarlo, para que el
+      #     ejecutable instalado pase Smart App Control. Solo corre si están
+      #     configurados los secrets de Azure (si no, se salta sin romper).
+      # ------------------------------------------------------
+      - name: Firmar WatermelonPlanta.exe (Azure Trusted Signing)
+        if: ${{ env.SIGN_CLIENT_ID != '' }}
+        uses: azure/trusted-signing-action@v0.5.9
+        with:
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          files-folder: planta/installer/dist/WatermelonPlanta
+          files-folder-filter: exe
+          files-folder-recurse: true
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+
+      # ------------------------------------------------------
       # 8. Build installer profesional con Inno Setup
       # ------------------------------------------------------
       - name: Build Setup.exe con Inno Setup
@@ -299,6 +331,30 @@ jobs:
           $size = [math]::Round($setup.Length / 1MB, 1)
           Write-Host "✓ $($setup.Name) generado: $size MB"
           echo "SETUP_PATH=planta/installer/$($setup.FullName.Substring($setup.FullName.IndexOf('dist')))" >> $env:GITHUB_ENV
+
+      # ------------------------------------------------------
+      # 8b. FIRMA del instalador con Azure Trusted Signing (v3.31.454)
+      #     Firma el Setup.exe final para que NO lo bloquee Smart App Control
+      #     al descargarlo/ejecutarlo. Solo firma el .exe del setup (no recurse,
+      #     así no re-firma el WatermelonPlanta.exe interno ya firmado).
+      # ------------------------------------------------------
+      - name: Firmar el instalador Setup.exe (Azure Trusted Signing)
+        if: ${{ env.SIGN_CLIENT_ID != '' }}
+        uses: azure/trusted-signing-action@v0.5.9
+        with:
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_SIGNING_PROFILE }}
+          files-folder: planta/installer/dist
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
 
       # ------------------------------------------------------
       # 9. Upload .exe Full a Supabase Storage
