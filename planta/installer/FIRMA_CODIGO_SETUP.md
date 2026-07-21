@@ -1,78 +1,70 @@
-# Firma de código — Watermelon Planta (Azure Trusted / Artifact Signing)
+# Firma de código — Watermelon Planta (SSL.com OV + eSigner cloud)
 
 Objetivo: firmar digitalmente `WatermelonPlanta.exe` y el instalador para que
 **Smart App Control (SAC)** y SmartScreen dejen de bloquearlos en los PCs de los
 clientes. El workflow (`.github/workflows/build-planta.yml`) ya tiene los pasos
-de firma; **solo faltan las credenciales de Azure**. Mientras no existan, el
-build corre igual pero SIN firmar.
+de firma con **SSL.com eSigner**; **solo faltan las credenciales** (los 4
+secrets `SSL_*`). Mientras no existan, el build corre igual pero SIN firmar.
 
-> Nota: en enero 2026 Microsoft renombró "Trusted Signing" → **"Artifact
-> Signing"**. Es el mismo servicio.
+> Se descartó Azure Trusted Signing: NO está disponible para organizaciones de
+> Colombia (solo EE.UU./Canadá/UE/UK). SSL.com sí emite a empresas colombianas.
+
+## Producto comprado
+- **OV Code Signing** (US$129/año) — pone el nombre de SIGA GROUP S.A.S en cada
+  instalador y elimina "Editor no verificado".
+- **eSigner Cloud Signing Tier 1** (US$180/año, 30 días gratis) — firma desde
+  GitHub Actions sin token USB, vía HSM en la nube. 240 firmas/año.
 
 ---
 
-## Requisito previo
-Identidad de la organización verificable. Para el perfil de certificado tipo
-**"Public Trust"** Microsoft valida legalmente a la empresa (SIGA GROUP S.A.S).
-La verificación tarda 1–5 días hábiles. Costo del servicio: ~US$9.99/mes.
+## Paso 1 — Activar cuenta y validar la organización (TÚ)
+1. Verificá el correo de activación de SSL.com en **ehernandez@sigasas.com**.
+2. Completá la orden con los datos legales de **SIGA GROUP S.A.S**: razón social,
+   NIT, dirección registrada, teléfono verificable (te llaman/mandan código).
+   Tené a mano el Certificado de Cámara de Comercio.
+3. SSL.com valida en **3–5 días hábiles**. El certificado OV se emite ahí.
 
-## Paso 1 — Crear los recursos en Azure Portal
-1. Entra a https://portal.azure.com con la cuenta de la empresa.
-2. Busca **"Trusted Signing"** (o "Artifact Signing") → **Create**.
-   - Crea un **Trusted Signing Account** (elige región, ej. `East US` o
-     `West Europe`). Anota el **endpoint** que te muestra, ej.
-     `https://eus.codesigning.azure.net`.
-3. Dentro de la cuenta → **Identity validation** → verifica la organización
-   (razón social, NIT, dirección). Espera la aprobación.
-4. Ya aprobada → crea un **Certificate Profile** tipo **Public Trust**. Anota
-   su **nombre**.
+## Paso 2 — Enrolar el certificado en eSigner + sacar credenciales (TÚ)
+En el portal SSL.com Manager, una vez emitido el certificado:
+1. Enrolá el certificado OV en **eSigner** (si no quedó activo desde la compra).
+2. Configurá la **autenticación TOTP** para firma automatizada: SSL.com te da un
+   **QR / secret TOTP** — guardá el **secret** (texto), NO solo el QR.
+3. Anotá el **credential_id** del certificado (aparece en el detalle del cert /
+   en la API de eSigner).
 
-## Paso 2 — Crear el "App Registration" (identidad para GitHub)
-1. Azure Portal → **Microsoft Entra ID** → **App registrations** → **New**.
-   - Nombre: `watermelon-github-signing`. Créala.
-2. Anota de la app: **Application (client) ID** y **Directory (tenant) ID**.
-3. En la app → **Certificates & secrets** → **New client secret** → copia el
-   **Value** (se muestra una sola vez).
-
-## Paso 3 — Dar permiso de firma a esa identidad
-1. Vuelve al **Trusted Signing Account** → **Access control (IAM)** →
-   **Add role assignment**.
-2. Rol: **Trusted Signing Certificate Profile Signer**.
-3. Asigna a la app `watermelon-github-signing`.
-
-## Paso 4 — Cargar los secrets en GitHub
-Repo → **Settings → Secrets and variables → Actions → New repository secret**.
-Crea estos 6:
+## Paso 3 — Cargar los 4 secrets en GitHub (TÚ, te guío)
+Repo → **Settings → Secrets and variables → Actions → New repository secret**:
 
 | Secret | Valor |
 |---|---|
-| `AZURE_TENANT_ID` | Directory (tenant) ID |
-| `AZURE_CLIENT_ID` | Application (client) ID |
-| `AZURE_CLIENT_SECRET` | el Value del client secret |
-| `AZURE_SIGNING_ENDPOINT` | ej. `https://eus.codesigning.azure.net` |
-| `AZURE_SIGNING_ACCOUNT` | nombre del Trusted Signing Account |
-| `AZURE_SIGNING_PROFILE` | nombre del Certificate Profile |
+| `SSL_USERNAME` | tu usuario de SSL.com |
+| `SSL_PASSWORD` | tu contraseña de SSL.com |
+| `SSL_CREDENTIAL_ID` | el credential_id del certificado en eSigner |
+| `SSL_TOTP_SECRET` | el secret TOTP (texto) de eSigner |
 
-En cuanto exista `AZURE_CLIENT_ID`, los pasos de firma se activan solos en el
+En cuanto exista `SSL_USERNAME`, los pasos de firma se activan solos en el
 siguiente build.
 
-## Paso 5 — Verificar
-1. Haz un push que dispare el build (o Actions → Run workflow).
-2. En los logs deben aparecer en verde los pasos **"Firmar
-   WatermelonPlanta.exe"** y **"Firmar el instalador Setup.exe"**.
-3. Descarga el instalador, clic derecho → **Propiedades → Firmas digitales**:
-   debe listar a **SIGA GROUP S.A.S** con timestamp.
-4. Instálalo en un PC con Smart App Control activo: ya **no** debe bloquearse.
+## Paso 4 — Verificar (YO)
+1. Disparás un build (push que toque VERSION/planta/core/modal, o Run workflow).
+2. En los logs deben salir en verde **"Firmar WatermelonPlanta.exe (SSL.com
+   eSigner)"** y **"Firmar el instalador Setup.exe (SSL.com eSigner)"**.
+3. Descargá el instalador → clic derecho → **Propiedades → Firmas digitales**:
+   debe listar **SIGA GROUP S.A.S** con timestamp.
+4. Instalalo en un PC con Smart App Control activo: el bloqueo de "editor no
+   verificable" desaparece. (La reputación plena ante SAC/SmartScreen se
+   acumula con las descargas; puede tardar unos días/algunas descargas.)
 
 ---
 
 ## Notas
-- SAC además de la firma usa reputación/ML. Con firma de Public Trust el
-  bloqueo desaparece; en apps nuevas puede tardar unos días en ganar
-  reputación plena, pero el "publisher no verificable" se elimina de inmediato.
-- La versión de la acción usada es `azure/trusted-signing-action@v0.5.9`. Si
-  falla por versión, revisa la última en
-  https://github.com/Azure/trusted-signing-action/releases y actualiza el tag.
-- Mientras se monta esto, el workaround para el técnico es apagar SAC
-  (Configuración → Seguridad de Windows → Control de aplicaciones y navegador →
-  Smart App Control → Desactivado); en Windows 11 24H2/25H2 se puede reactivar.
+- Acción usada: `sslcom/esigner-codesign@develop`. Si falla por versión, revisá
+  https://github.com/SSLcom/esigner-codesign y fijá un tag estable.
+- El primer build firmado hay que verificarlo — puede requerir ajustar
+  `file_path`/`override` según cómo devuelva la acción los archivos firmados.
+- Tier 1 = 240 firmas/año. El workflow firma 2 archivos por release (.exe +
+  instalador); alcanza para ~120 releases/año. Si se firma en cada push conviene
+  gatear la firma solo en releases.
+- Mientras se completa todo esto, el workaround para el técnico es apagar Smart
+  App Control (Configuración → Seguridad de Windows → Control de aplicaciones y
+  navegador → Smart App Control → Desactivado); en Win 11 24H2/25H2 se reactiva.
