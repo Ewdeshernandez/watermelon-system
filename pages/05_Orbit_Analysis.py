@@ -729,14 +729,38 @@ def _extract_plane_number(name: str):
     return int(m.group()) if m else None
 
 
-def _pair_by_consecutive_planes(names, used) -> List["OrbitPair"]:
+def _dir_from_signal(signals: dict, name: str) -> str:
+    """Dirección declarada del canal: 'X', 'Y' o '' (según metadata o nombre).
+    Es la FUENTE DE VERDAD para asignar los ejes X/Y de la órbita y evitar que
+    salga espejada. (v3.31.457)"""
+    sig = signals.get(name) if signals else None
+    md = (getattr(sig, "metadata", {}) or {}) if sig is not None else {}
+    hay = " ".join(str(md.get(k, "")) for k in
+                   ("Point", "Variable", "Sensor", "Channel", "Location"))
+    h = (hay + " " + str(name)).upper()
+    if "(Y)" in h:
+        return "Y"
+    if "(X)" in h:
+        return "X"
+    m = re.search(r"\d\s*([XY])\s*[AVD]\b", h)   # compacto Bently: 3XD, 8YV
+    if m:
+        return m.group(1)
+    m = re.search(r"[-_ ]([XY])\b", h)           # sufijo -X, _Y, " X"
+    if m:
+        return m.group(1)
+    return ""
+
+
+def _pair_by_consecutive_planes(names, used, signals=None) -> List["OrbitPair"]:
     """Empareja canales cuyos nombres son NÚMEROS DE PLANO consecutivos.
 
     Convención Bently / API 670: las dos sondas ortogonales del MISMO cojinete
-    llevan números consecutivos (impar = X, par = Y), p.ej. 5807=X y 5808=Y en
-    el lado de acople; 5809=X y 5810=Y en el otro cojinete. Empareja (n, n+1)
-    SOLO cuando n es impar, para no cruzar cojinetes (evita el bug de emparejar
-    5807 con 5810, que son planos de cojinetes distintos). El menor (impar) = X.
+    llevan números consecutivos (p.ej. 5807 y 5808). Se emparejan (n, n+1) con n
+    impar para no cruzar cojinetes (evita 5807 con 5810). La asignación X vs Y se
+    toma de la DIRECCIÓN REAL del canal (metadata) — NO del número: en algunos
+    activos el menor es Y (TES1: 5807=Y, 5808=X), y asumir 'menor=X' dejaba la
+    órbita espejada (CW en vez de CCW). Si no hay dirección declarada, cae al
+    supuesto menor=X. (v3.31.457)
     """
     num_to_name = {}
     for n in names:
@@ -748,15 +772,23 @@ def _pair_by_consecutive_planes(names, used) -> List["OrbitPair"]:
         num_to_name.setdefault(pnum, n)  # si dos comparten número, toma el 1º
     result: List[OrbitPair] = []
     for pnum in sorted(num_to_name):
-        if pnum % 2 != 1:            # solo el IMPAR inicia el par (X)
+        if pnum % 2 != 1:            # solo el IMPAR inicia el par
             continue
-        x_name = num_to_name.get(pnum)
-        y_name = num_to_name.get(pnum + 1)
-        if (x_name and y_name and x_name not in used and y_name not in used):
-            used.add(x_name)
-            used.add(y_name)
-            result.append(OrbitPair(label=f"{x_name} + {y_name}",
-                                    x_name=x_name, y_name=y_name))
+        a = num_to_name.get(pnum)        # menor (impar)
+        b = num_to_name.get(pnum + 1)    # mayor (par)
+        if not (a and b and a not in used and b not in used):
+            continue
+        da, db = _dir_from_signal(signals, a), _dir_from_signal(signals, b)
+        if da == "X" or db == "Y":
+            x_name, y_name = a, b
+        elif da == "Y" or db == "X":     # TES1: 5807=Y, 5808=X → invertir
+            x_name, y_name = b, a
+        else:
+            x_name, y_name = a, b        # fallback: menor = X
+        used.add(x_name)
+        used.add(y_name)
+        result.append(OrbitPair(label=f"{x_name} + {y_name}",
+                                x_name=x_name, y_name=y_name))
     return result
 
 
@@ -807,7 +839,7 @@ def build_orbit_pairs(signals: dict) -> List[OrbitPair]:
     # colectores Bently), emparejar por planos consecutivos del mismo cojinete.
     # Esto corrige la asociación incorrecta (5807+5810 → 5807+5808) y, al usar
     # las sondas ORTOGONALES reales, también corrige el sentido de la órbita.
-    pairs.extend(_pair_by_consecutive_planes(names, used))
+    pairs.extend(_pair_by_consecutive_planes(names, used, signals))
 
     if not pairs:
         default_x, default_y = _default_signal_pair(signals)
@@ -1357,6 +1389,15 @@ else:
     ui_filter_mode = st.selectbox("Filter", ["Direct", "1X", "2X"], index=0)
     machine_rotation = st.selectbox("Machine rotation", ["CW", "CCW"], index=1)
 
+    # Respaldo manual (v3.31.457): si la metadata del CSV no declara la
+    # dirección X/Y, la órbita puede salir espejada. Este toggle la invierte
+    # para que coincida con la referencia (System1 / montaje real).
+    st.checkbox("Invertir X/Y (si la órbita sale espejada)",
+                key="orbit_invert_xy",
+                help="Intercambia los ejes X e Y del par. Úsalo si el sentido "
+                     "de la órbita no coincide con System1 o con la rotación "
+                     "real del eje.")
+
     scale_mode = st.selectbox("Scale", ["Auto", "Manual"], index=0)
     manual_scale_value = 2.0
     if scale_mode == "Manual":
@@ -1371,6 +1412,11 @@ else:
         )
 
 selected_pairs = [pair_label_map[label] for label in st.session_state.wm_orbit_selected_labels if label in pair_label_map]
+
+# Respaldo manual: invertir X/Y del par si el usuario lo pidió (órbita espejada).
+if bool(st.session_state.get("orbit_invert_xy", False)):
+    selected_pairs = [OrbitPair(label=p.label, x_name=p.y_name, y_name=p.x_name)
+                      for p in selected_pairs]
 
 if not selected_pairs:
     st.info("Selecciona una o más órbitas en la barra lateral.")
