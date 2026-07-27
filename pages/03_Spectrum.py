@@ -3057,6 +3057,8 @@ def build_compare_overlay_figure(
     annotate_peak: bool,
     logo_uri: Optional[str],
     spectrum_mode_label: str,
+    show_harmonics: bool = False,
+    harmonic_count: int = 0,
 ) -> go.Figure:
     fig = go.Figure()
 
@@ -3151,6 +3153,29 @@ def build_compare_overlay_figure(
             line_color="rgba(148, 163, 184, 0.18)",
             layer="below",
         )
+
+    # Cursores de armónicos (1X, 2X, ...) anclados al RPM — también en COMPARE
+    # MODE (v3.31.459). Antes solo se dibujaban en el panel individual.
+    _rpm_h = None
+    for _r in compare_records:
+        if getattr(_r, "rpm", None) and _r.rpm > 0:
+            _rpm_h = float(_r.rpm)
+            break
+    if show_harmonics and _rpm_h and harmonic_count and int(harmonic_count) > 0:
+        for k in range(1, int(harmonic_count) + 1):
+            hx = _rpm_h * k
+            if x_max > 0 and hx > x_max:
+                break
+            fig.add_vline(
+                x=hx,
+                line=dict(color="#6366f1" if k == 1 else "#94a3b8",
+                          width=1.3 if k == 1 else 0.9, dash="dot"),
+                annotation_text=f"{k}X",
+                annotation_position="top",
+                annotation_font=dict(size=9.4 if k == 1 else 9.0,
+                                     color="#4f46e5" if k == 1 else "#64748b"),
+                layer="below",
+            )
 
     x0, x1 = 0.006, 0.994
     y0, y1 = 1.014, 1.106
@@ -3347,6 +3372,8 @@ def render_compare_panel(
     y_axis_manual_max: Optional[float],
     compare_fill_area: bool,
     annotate_peak: bool,
+    show_harmonics: bool = False,
+    harmonic_count: int = 0,
 ) -> None:
     compare_dicts = [
         {"timestamp": rec.timestamp, "record": rec}
@@ -3417,6 +3444,8 @@ def render_compare_panel(
         annotate_peak=annotate_peak,
         logo_uri=logo_uri,
         spectrum_mode_label=window_name,
+        show_harmonics=show_harmonics,
+        harmonic_count=harmonic_count,
     )
 
     compare_export_key = make_export_state_key(
@@ -3939,6 +3968,8 @@ if enable_compare_mode:
         y_axis_manual_max=y_axis_manual_max,
         compare_fill_area=compare_fill_area,
         annotate_peak=annotate_peak,
+        show_harmonics=show_harmonics,
+        harmonic_count=harmonic_count,
     )
 elif enable_trend_mode:
     n_records = len(selected_records)
