@@ -1512,6 +1512,29 @@ def render_waveform_overview(records: List["SignalRecord"]) -> None:
                 hovertemplate=(f"<b>{r.name}</b><br>%{{x:.4f}} s · "
                                f"%{{y:.4f}} {r.amplitude_unit}<extra></extra>"),
             ), row=i, col=1)
+            # Parámetros característicos por señal: Pico, RMS y Factor de Cresta
+            # (v3.31.461). Se muestran arriba-derecha de cada waveform.
+            try:
+                _a = np.asarray(r.amplitude, dtype=float)
+                _a = _a[np.isfinite(_a)]
+                _pk = float(np.nanmax(np.abs(_a))) if _a.size else 0.0
+                _rms = float(np.sqrt(np.nanmean(_a ** 2))) if _a.size else 0.0
+                _cf = (_pk / _rms) if _rms > 1e-12 else 0.0
+                _u = getattr(r, "amplitude_unit", "") or ""
+                fig.add_annotation(
+                    row=i, col=1, xref="x domain", yref="y domain",
+                    x=0.995, y=0.96, xanchor="right", yanchor="top",
+                    text=(f"Pk <b>{_pk:.3g}</b> · RMS <b>{_rms:.3g}</b> · "
+                          f"CF <b>{_cf:.2f}</b> {_u}"),
+                    showarrow=False,
+                    font=dict(size=9.5, color="#334155",
+                              family="ui-monospace, SFMono-Regular, Menlo, monospace"),
+                    bgcolor="rgba(255,255,255,0.82)",
+                    bordercolor="rgba(148,163,184,0.5)", borderwidth=0.8,
+                    borderpad=2,
+                )
+            except Exception:
+                pass
         fig.update_xaxes(showgrid=True, gridcolor="#f1f5f9", zeroline=False)
         fig.update_xaxes(title_text="Tiempo (s)", row=n, col=1)
         fig.update_yaxes(showgrid=True, gridcolor="#f8fafc",
