@@ -2133,6 +2133,14 @@ def render_spectrum_overview(
         from plotly.subplots import make_subplots
         ordered = sorted({r.name for r in recs})
         n = len(recs)
+        # Escala de amplitud COMÚN por unidad (v3.31.458): canales de la misma
+        # unidad comparten el rango Y → comparación visual directa. ON por
+        # defecto; se puede apagar para autoescala por canal.
+        _common_scale = st.checkbox(
+            "Escala de amplitud común (por unidad)", value=True,
+            key="spec_ov_common_scale",
+            help="Todos los canales de la misma unidad se grafican en el mismo "
+                 "rango de amplitud para comparar a simple vista.")
         spectra = [
             compute_spectrum_peak(
                 time_s=r.time_s, y=r.amplitude, window_name=window_name,
@@ -2141,6 +2149,21 @@ def render_spectrum_overview(
             )
             for r in recs
         ]
+        # Amplitud por canal + máximo por unidad (dentro del rango visible).
+        _amps = [convert_peak_to_mode(sp.amp_peak, amplitude_mode)
+                 for sp in spectra]
+        _fam_max: dict = {}
+        for _r, _sp, _a in zip(recs, spectra, _amps):
+            _unit = (getattr(_r, "amplitude_unit", "") or "").strip().lower()
+            try:
+                _fc = np.asarray(_sp.freq_cpm, dtype=float)
+                _av = np.asarray(_a, dtype=float)
+                if max_cpm and _fc.shape == _av.shape:
+                    _av = _av[_fc <= float(max_cpm)]
+                _vmax = float(np.nanmax(_av)) if _av.size else 0.0
+            except Exception:
+                _vmax = 0.0
+            _fam_max[_unit] = max(_fam_max.get(_unit, 0.0), _vmax)
         # 1X (CPM): rpm del primer canal con rpm>0; si no, pico dominante global.
         one_x: Optional[float] = None
         for r in recs:
@@ -2165,7 +2188,7 @@ def render_spectrum_overview(
             ann.xanchor = "left"
 
         for i, (r, sp) in enumerate(zip(recs, spectra), start=1):
-            amp = convert_peak_to_mode(sp.amp_peak, amplitude_mode)
+            amp = _amps[i - 1]
             color = _ov_color(r.name, ordered)
             fig.add_trace(go.Scatter(
                 x=sp.freq_cpm, y=amp, mode="lines",
@@ -2190,6 +2213,13 @@ def render_spectrum_overview(
         fig.update_xaxes(showgrid=True, gridcolor="#f1f5f9", zeroline=False)
         fig.update_xaxes(title_text="Frecuencia (CPM)", row=n, col=1)
         fig.update_yaxes(showgrid=True, gridcolor="#f8fafc", zeroline=False)
+        # Aplicar escala común por unidad (mismo rango Y por familia).
+        if _common_scale:
+            for i, r in enumerate(recs, start=1):
+                _unit = (getattr(r, "amplitude_unit", "") or "").strip().lower()
+                _fm = _fam_max.get(_unit, 0.0)
+                if _fm > 0:
+                    fig.update_yaxes(range=[0.0, _fm * 1.10], row=i, col=1)
         fig.update_layout(
             height=max(150, 104 * n),
             margin=dict(l=52, r=14, t=22, b=34),

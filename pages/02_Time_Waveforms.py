@@ -1480,6 +1480,21 @@ def render_waveform_overview(records: List["SignalRecord"]) -> None:
         from plotly.subplots import make_subplots
         ordered = sorted({r.name for r in recs})
         n = len(recs)
+        # Escala de amplitud COMÚN por unidad (v3.31.458): canales de la misma
+        # unidad comparten el rango Y (simétrico ±max) → comparación directa.
+        _common_scale = st.checkbox(
+            "Escala de amplitud común (por unidad)", value=True,
+            key="wf_ov_common_scale",
+            help="Todos los canales de la misma unidad se grafican en el mismo "
+                 "rango de amplitud para comparar a simple vista.")
+        _fam_absmax: dict = {}
+        for _r in recs:
+            _unit = (getattr(_r, "amplitude_unit", "") or "").strip().lower()
+            try:
+                _vmax = float(np.nanmax(np.abs(np.asarray(_r.amplitude, dtype=float))))
+            except Exception:
+                _vmax = 0.0
+            _fam_absmax[_unit] = max(_fam_absmax.get(_unit, 0.0), _vmax)
         fig = make_subplots(
             rows=n, cols=1, shared_xaxes=True, vertical_spacing=0.045,
             subplot_titles=[r.name for r in recs],
@@ -1501,6 +1516,14 @@ def render_waveform_overview(records: List["SignalRecord"]) -> None:
         fig.update_xaxes(title_text="Tiempo (s)", row=n, col=1)
         fig.update_yaxes(showgrid=True, gridcolor="#f8fafc",
                          zeroline=True, zerolinecolor="#e2e8f0")
+        # Escala común por unidad: rango Y simétrico compartido por familia.
+        if _common_scale:
+            for i, r in enumerate(recs, start=1):
+                _unit = (getattr(r, "amplitude_unit", "") or "").strip().lower()
+                _fm = _fam_absmax.get(_unit, 0.0)
+                if _fm > 0:
+                    fig.update_yaxes(range=[-_fm * 1.05, _fm * 1.05],
+                                     row=i, col=1)
         fig.update_layout(
             height=max(150, 100 * n),
             margin=dict(l=52, r=14, t=22, b=34),
