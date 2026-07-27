@@ -294,8 +294,15 @@ def _draw_top_strip(fig, orbit_result, ui_filter_mode, logo_uri):
     timestamp = orbit_result.probe_state.get("timestamp", "—")
     rpm_text = f"{format_number(orbit_result.rpm, 0)} rpm" if orbit_result.rpm is not None else "rpm —"
 
+    # "Sentido de Giro" mostraba el TRAVERSAL de la órbita (derivado del dato),
+    # pero se leía como la rotación de la máquina → confusión. Ahora se separan:
+    #   · Rotación = la que seleccionó el usuario (afecta la precesión, NO la
+    #     forma de la órbita, que es lo que mide físicamente el eje).
+    #   · Órbita   = sentido real de recorrido de la órbita (del dato).
+    #   · Precesión = Forward si coinciden, Backward si son opuestos.
     sentido = orbit_result.traversal
     precession = orbit_result.precession
+    machine_rot = orbit_result.probe_state.get("machine_rotation", "—")
 
     mode_label = {
         "Direct": "Orbit Direct",
@@ -373,7 +380,7 @@ def _draw_top_strip(fig, orbit_result, ui_filter_mode, logo_uri):
         y=y_text,
         xanchor="left",
         yanchor="middle",
-        text=f"Sentido de Giro: <b>{sentido}</b>",
+        text=f"Rot: <b>{machine_rot}</b> · Órbita: <b>{sentido}</b>",
         showarrow=False,
         font=dict(size=12.0, color="#111827"),
         align="left",
@@ -382,7 +389,7 @@ def _draw_top_strip(fig, orbit_result, ui_filter_mode, logo_uri):
     fig.add_annotation(
         xref="paper",
         yref="paper",
-        x=0.675,
+        x=0.705,
         y=y_text,
         xanchor="left",
         yanchor="middle",

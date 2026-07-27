@@ -539,6 +539,7 @@ def compute_orbit(
         "x_probe_label": f"{x_channel} @ {geom_x.angle_deg:.0f} {geom_x.side_normalized}",
         "y_probe_label": f"{y_channel} @ {geom_y.angle_deg:.0f} {geom_y.side_normalized}",
         "machine_name": machine_name,
+        "machine_rotation": str(machine_rotation),
         "timestamp": timestamp,
         "units": units,
         "samples_per_rev": spr,
