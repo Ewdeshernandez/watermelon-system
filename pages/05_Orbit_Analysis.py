@@ -931,52 +931,80 @@ def render_orbit_overview(
         return
     try:
         ordered = sorted({p.label for p in prs})
+        # Escala COMÚN (v3.31.462): misma escala en todas las órbitas del
+        # overview para comparar directamente amplitudes/forma. ON por defecto.
+        _common = st.checkbox(
+            "Escala común (todas las órbitas al mismo rango)", value=True,
+            key="orbit_ov_common_scale",
+            help="Grafica todas las órbitas con el mismo rango X-Y para "
+                 "comparar tamaño y forma a simple vista.")
+        # 1) Calcular todas las órbitas + máximo global de coordenadas.
+        results = []
+        _gmax = 0.0
+        for pair in prs:
+            try:
+                result = compute_orbit(
+                    signals[pair.x_name], signals[pair.y_name],
+                    filter_mode=ui_filter_mode,
+                    machine_rotation=machine_rotation,
+                    x_probe_angle_deg=45.0, x_probe_side="Right",
+                    y_probe_angle_deg=45.0, y_probe_side="Left",
+                )
+            except Exception as e:  # noqa: BLE001
+                results.append((pair, e))
+                continue
+            results.append((pair, result))
+            for seg_x, seg_y in zip(result.segment_x_open or [],
+                                    result.segment_y_open or []):
+                try:
+                    _gmax = max(_gmax,
+                                float(np.nanmax(np.abs(np.asarray(seg_x, dtype=float)))),
+                                float(np.nanmax(np.abs(np.asarray(seg_y, dtype=float)))))
+                except Exception:  # noqa: BLE001
+                    pass
+        _lim = (_gmax * 1.10) if _gmax > 0 else None
+
+        # 2) Renderizar con rango común (si aplica).
         ncols = min(len(prs), 3)
         cols = st.columns(ncols)
-        for idx, pair in enumerate(prs):
+        for idx, (pair, result) in enumerate(results):
             with cols[idx % ncols]:
-                try:
-                    result = compute_orbit(
-                        signals[pair.x_name], signals[pair.y_name],
-                        filter_mode=ui_filter_mode,
-                        machine_rotation=machine_rotation,
-                        x_probe_angle_deg=45.0, x_probe_side="Right",
-                        y_probe_angle_deg=45.0, y_probe_side="Left",
-                    )
-                    color = _orb_color(pair.label, ordered)
-                    units = (result.probe_state or {}).get("units", "mil")
-                    fig = go.Figure()
-                    for seg_x, seg_y in zip(result.segment_x_open or [],
-                                            result.segment_y_open or []):
-                        fig.add_trace(go.Scattergl(
-                            x=seg_x, y=seg_y, mode="lines",
-                            line=dict(width=1.1, color=color),
-                            showlegend=False, hoverinfo="skip"))
-                    sp = getattr(result, "start_point", None)
-                    if sp is not None and len(sp) >= 2:
-                        fig.add_trace(go.Scatter(
-                            x=[sp[0]], y=[sp[1]], mode="markers",
-                            marker=dict(size=5, color=color),
-                            showlegend=False, hoverinfo="skip"))
-                    fig.update_layout(
-                        title=dict(text=f"<b>{pair.label}</b>",
-                                   font=dict(size=11, color=color)),
-                        height=230, margin=dict(l=8, r=8, t=30, b=8),
-                        plot_bgcolor="white", paper_bgcolor="white",
-                        font=dict(family="-apple-system, system-ui, sans-serif",
-                                  size=9, color="#475569"),
-                        showlegend=False,
-                        xaxis=dict(showgrid=True, gridcolor="#f1f5f9",
-                                   zeroline=True, zerolinecolor="#cbd5e1",
-                                   scaleanchor="y", scaleratio=1,
-                                   title=f"X ({units})"),
-                        yaxis=dict(showgrid=True, gridcolor="#f1f5f9",
-                                   zeroline=True, zerolinecolor="#cbd5e1",
-                                   title=f"Y ({units})"),
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-                except Exception as e:
-                    st.warning(f"{pair.label}: {e}")
+                if isinstance(result, Exception):
+                    st.warning(f"{pair.label}: {result}")
+                    continue
+                color = _orb_color(pair.label, ordered)
+                units = (result.probe_state or {}).get("units", "mil")
+                fig = go.Figure()
+                for seg_x, seg_y in zip(result.segment_x_open or [],
+                                        result.segment_y_open or []):
+                    fig.add_trace(go.Scattergl(
+                        x=seg_x, y=seg_y, mode="lines",
+                        line=dict(width=1.1, color=color),
+                        showlegend=False, hoverinfo="skip"))
+                sp = getattr(result, "start_point", None)
+                if sp is not None and len(sp) >= 2:
+                    fig.add_trace(go.Scatter(
+                        x=[sp[0]], y=[sp[1]], mode="markers",
+                        marker=dict(size=5, color=color),
+                        showlegend=False, hoverinfo="skip"))
+                _xr = [-_lim, _lim] if (_common and _lim) else None
+                fig.update_layout(
+                    title=dict(text=f"<b>{pair.label}</b>",
+                               font=dict(size=11, color=color)),
+                    height=230, margin=dict(l=8, r=8, t=30, b=8),
+                    plot_bgcolor="white", paper_bgcolor="white",
+                    font=dict(family="-apple-system, system-ui, sans-serif",
+                              size=9, color="#475569"),
+                    showlegend=False,
+                    xaxis=dict(showgrid=True, gridcolor="#f1f5f9",
+                               zeroline=True, zerolinecolor="#cbd5e1",
+                               scaleanchor="y", scaleratio=1,
+                               range=_xr, title=f"X ({units})"),
+                    yaxis=dict(showgrid=True, gridcolor="#f1f5f9",
+                               zeroline=True, zerolinecolor="#cbd5e1",
+                               range=_xr, title=f"Y ({units})"),
+                )
+                st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
         st.warning(f"No se pudo renderizar el overview de órbitas: {e}")
 
