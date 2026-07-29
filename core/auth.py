@@ -933,20 +933,38 @@ def render_user_menu() -> None:
         # passwords que cambiar. El menú queda solo con "Cerrar sesión".
 
         if st.button("Cerrar sesión", use_container_width=True, key="logout_button"):
-            # v3.31.460 — logout ROBUSTO. Antes se hacía un reload REAL del
-            # navegador (location.replace) que borraba session_state → con él el
-            # guard `_wm_logged_out`. Y dependía de que el JS borrara la cookie
-            # ANTES del reload: una carrera que perdía → al recargar, la cookie
-            # del request seguía viva y `_rehydrate_from_cookie` volvía a loguear
-            # (quedabas en el perfil activo, el bug reportado).
-            #
-            # Ahora: logout() limpia session_state, borra la cookie (JS
-            # best-effort, sin reload que compita) y deja el guard
-            # `_wm_logged_out`. Ese guard vive en session_state y SOBREVIVE
-            # st.switch_page, así `_rehydrate_from_cookie` NO rehidrata aunque la
-            # cookie del request tarde en irse. Navegación server-side confiable.
+            # v3.31.464 — logout DEFINITIVO. El bug: la cookie firmada sobrevivía
+            # y `_rehydrate_from_cookie` volvía a loguear. Antes el reload
+            # competía con el borrado de la cookie (carrera que perdía). Ahora:
+            #   1) logout() limpia session_state + guard + best-effort clear.
+            #   2) Se borra la cookie con VARIOS formatos (cubre mismatch de
+            #      atributos Secure/SameSite) y se ESPERA 250 ms para que
+            #      propague ANTES de recargar → el request nuevo llega SIN cookie
+            #      → no rehidrata → login. Sobrevive incluso a recarga dura.
             logout()
-            st.switch_page("pages/00_Login.py")
+            import streamlit.components.v1 as _components
+            try:
+                from core.session_cookie import COOKIE_NAME as _CK
+            except Exception:
+                _CK = "wm_session"
+            _components.html(
+                f"""<script>
+                (function() {{
+                  try {{
+                    var p = window.parent;
+                    p.document.cookie = "{_CK}=; path=/; max-age=0; SameSite=Lax; Secure";
+                    p.document.cookie = "{_CK}=; path=/; max-age=0";
+                    p.document.cookie = "{_CK}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT";
+                  }} catch (e) {{}}
+                  setTimeout(function() {{
+                    try {{ window.parent.location.replace(window.parent.location.origin); }}
+                    catch (e) {{ try {{ window.location.replace('/'); }} catch (e2) {{}} }}
+                  }}, 250);
+                }})();
+                </script>""",
+                height=0,
+            )
+            st.stop()
 
         # Ciclo 17.7 — versión del sistema al pie del sidebar.
         # Ciclo 17.24 — versión LIMPIA: solo el dot del entorno + número.

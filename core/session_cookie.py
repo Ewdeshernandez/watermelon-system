@@ -38,6 +38,14 @@ COOKIE_NAME = "wm_session"
 TTL_SECONDS = 60 * 60  # 1 hora de inactividad (ventana deslizante). El tope
 # absoluto de 6 h se controla aparte vía 'started_at' en el payload (core.auth).
 
+# EPOCH de autenticación (v3.31.464). Se embebe en la cookie; si NO coincide con
+# el valor actual, restore() rechaza la cookie → el usuario debe re-loguearse.
+# BUMPEAR este valor en cualquier actualización que DEBA cerrar la sesión de
+# todos (p.ej. cambios de seguridad/permisos). Así "una actualización que
+# requiere reiniciar la sesión" fuerza el ingreso de credenciales, sin obligar a
+# re-login en cada micro-deploy.
+AUTH_EPOCH = "2026-07-29-a"
+
 
 def _secret() -> bytes:
     """Clave HMAC para firmar el token. Prioriza un secreto dedicado;
@@ -123,6 +131,7 @@ def persist(user: Dict[str, Any]) -> None:
             # Inicio absoluto de la sesión: viaja en la cookie para que el tope
             # de 6 h se respete aunque la sesión en memoria se haya perdido.
             "started_at": int(user.get("started_at", 0) or 0),
+            "epoch": AUTH_EPOCH,
         })
         _write_cookie(token, TTL_SECONDS)
     except Exception:
@@ -139,7 +148,14 @@ def restore() -> Optional[Dict[str, Any]]:
         token = cookies.get(COOKIE_NAME)
         if not token:
             return None
-        return verify_token(token)
+        payload = verify_token(token)
+        if not payload:
+            return None
+        # EPOCH: si la cookie es de una época anterior (actualización que exige
+        # re-login), la rechazamos → pide credenciales de nuevo.
+        if str(payload.get("epoch", "")) != AUTH_EPOCH:
+            return None
+        return payload
     except Exception:
         return None
 
