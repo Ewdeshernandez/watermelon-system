@@ -1499,19 +1499,25 @@ def render_waveform_overview(records: List["SignalRecord"]) -> None:
             rows=n, cols=1, shared_xaxes=True, vertical_spacing=0.045,
             subplot_titles=[r.name for r in recs],
         )
+        # v3.31.463 — color ÚNICO + trazo más grueso para legibilidad.
+        _WF_LINE = "#0F4C81"
         for ann, r in zip(fig.layout.annotations, recs):
-            ann.font = dict(size=11, color=_wf_color(r.name, ordered),
+            ann.font = dict(size=11, color="#334155",
                             family="ui-monospace, SFMono-Regular, Menlo, monospace")
             ann.x = 0.0
             ann.xanchor = "left"
         for i, r in enumerate(recs, start=1):
-            color = _wf_color(r.name, ordered)
             fig.add_trace(go.Scattergl(
                 x=r.time_s, y=r.amplitude, mode="lines",
-                line=dict(width=1.0, color=color), showlegend=False,
+                line=dict(width=1.5, color=_WF_LINE), showlegend=False,
                 hovertemplate=(f"<b>{r.name}</b><br>%{{x:.4f}} s · "
                                f"%{{y:.4f}} {r.amplitude_unit}<extra></extra>"),
             ), row=i, col=1)
+            # Unidad explícita en el eje Y de cada canal.
+            _uy = getattr(r, "amplitude_unit", "") or ""
+            fig.update_yaxes(title_text=(f"Amp ({_uy})" if _uy else "Amp"),
+                             title_font=dict(size=9, color="#94a3b8"),
+                             row=i, col=1)
             # Parámetros característicos por señal: Pico, RMS y Factor de Cresta
             # (v3.31.461). Se muestran arriba-derecha de cada waveform.
             try:

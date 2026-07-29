@@ -2181,21 +2181,28 @@ def render_spectrum_overview(
             rows=n, cols=1, shared_xaxes=True, vertical_spacing=0.045,
             subplot_titles=[r.name for r in recs],
         )
+        # v3.31.463 — color ÚNICO + trazo más grueso para legibilidad (antes
+        # cada canal iba de un color distinto).
+        _OV_LINE = "#0F4C81"
         for ann, r in zip(fig.layout.annotations, recs):
-            ann.font = dict(size=11, color=_ov_color(r.name, ordered),
+            ann.font = dict(size=11, color="#334155",
                             family="ui-monospace, SFMono-Regular, Menlo, monospace")
             ann.x = 0.0
             ann.xanchor = "left"
 
         for i, (r, sp) in enumerate(zip(recs, spectra), start=1):
             amp = _amps[i - 1]
-            color = _ov_color(r.name, ordered)
             fig.add_trace(go.Scatter(
                 x=sp.freq_cpm, y=amp, mode="lines",
-                line=dict(width=1.1, color=color), showlegend=False,
+                line=dict(width=1.7, color=_OV_LINE), showlegend=False,
                 hovertemplate=(f"<b>{r.name}</b><br>%{{x:,.0f}} CPM · "
                                f"%{{y:.4f}} {r.amplitude_unit}<extra></extra>"),
             ), row=i, col=1)
+            # Unidad explícita en el eje Y de cada canal.
+            _u = getattr(r, "amplitude_unit", "") or ""
+            fig.update_yaxes(title_text=(f"Amp ({_u})" if _u else "Amp"),
+                             title_font=dict(size=9, color="#94a3b8"),
+                             row=i, col=1)
             if one_x:
                 for k in (1, 2, 3):
                     if max_cpm and one_x * k > max_cpm:
