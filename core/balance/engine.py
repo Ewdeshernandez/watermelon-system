@@ -305,7 +305,20 @@ def solve_2plane(
         quality = "GOOD"
         note = "Modelo estable."
 
-    sol = np.linalg.solve(M, Y)
+    # Guarda de robustez: matriz singular → no hay solución única de 2 planos.
+    # (Antes np.linalg.solve lanzaba LinAlgError cruda, no atrapada por la UI.)
+    if abs(det) < 1e-12:
+        raise ValueError(
+            "Matriz de coeficientes singular: los dos planos responden de forma "
+            "casi idéntica. Revisá los pesos/ángulos de prueba y la repetibilidad "
+            "de la medición — no hay solución única de balanceo en 2 planos."
+        )
+    try:
+        sol = np.linalg.solve(M, Y)
+    except np.linalg.LinAlgError as exc:
+        raise ValueError(
+            f"No se pudo resolver el sistema de 2 planos (matriz mal condicionada): {exc}"
+        ) from exc
     WA_corr = sol[0, 0]
     WB_corr = sol[1, 0]
 

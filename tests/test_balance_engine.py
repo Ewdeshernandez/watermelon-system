@@ -118,6 +118,20 @@ def test_solve_2plane_zero_trial_raises():
     raise AssertionError("Debe lanzar ValueError con trial cero")
 
 
+def test_solve_2plane_singular_raises_valueerror():
+    # Corridas 1 y 2 con respuesta IDÉNTICA → columnas de M paralelas →
+    # matriz singular. Debe lanzar ValueError limpio (no LinAlgError cruda).
+    A0 = to_complex(1.0, 0.0); B0 = to_complex(1.0, 0.0)
+    A1 = to_complex(1.1, 0.0); B1 = to_complex(1.05, 0.0)
+    A2 = to_complex(1.1, 0.0); B2 = to_complex(1.05, 0.0)   # = corrida 1
+    W = to_complex(1.0, 0.0)
+    try:
+        solve_2plane(A0, B0, A1, B1, A2, B2, W, W)
+    except ValueError:
+        return
+    raise AssertionError("Matriz singular debe lanzar ValueError")
+
+
 # ---------------------------------------------------------------------------
 # ISO 21940-11 — permisibles
 # ---------------------------------------------------------------------------
