@@ -48,6 +48,29 @@ def _f(x: Any) -> Optional[float]:
 # =====================================================================
 # Helpers PUROS (sin red) — testeables
 # =====================================================================
+# Palabras que indican la sección del tren en el plane_label. Cubre tanto la
+# convención del wizard ("DE driven") como las descriptivas de máquinas
+# configuradas a mano ("5YD DE generador", "compresor centrífugo", "bomba").
+_DRIVEN_KW = ("driven", "generador", "generator", "alternador", "compresor",
+              "compressor", "bomba", "pump", "carga", "load", "driven equipment")
+_DRIVER_KW = ("driver", "turbina", "turbine", "motor", "engine",
+              "gas producer", "power turbine", " gp ", " pt ")
+_GEARBOX_KW = ("gearbox", "reductor", "multiplicador", "caja")
+
+
+def _section_from_label(plane_label: str) -> str:
+    """Clasifica un plano en Driver / Driven / Gearbox según su etiqueta.
+    Robusto a etiquetas descriptivas (no solo la convención 'driven')."""
+    pl = f" {str(plane_label or '').lower()} "
+    if any(k in pl for k in _GEARBOX_KW):
+        return "Gearbox"
+    if any(k in pl for k in _DRIVEN_KW):
+        return "Driven"
+    if any(k in pl for k in _DRIVER_KW):
+        return "Driver"
+    return "Driver"  # default conservador
+
+
 def group_planes_from_sensors(sensors: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Agrupa las sondas de proximidad radiales (X/Y) por plano.
 
@@ -74,7 +97,7 @@ def group_planes_from_sensors(sensors: List[Dict[str, Any]]) -> List[Dict[str, A
             continue
         plane = int(s.get("plane") or 0)
         plabel = s.get("plane_label") or f"Plano {plane}"
-        section = "Driven" if "driven" in str(plabel).lower() else "Driver"
+        section = _section_from_label(plabel)
         entry = planes.setdefault(plane, {
             "plane": plane,
             "plane_label": plabel,

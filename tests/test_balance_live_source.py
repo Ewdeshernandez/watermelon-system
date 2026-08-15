@@ -12,7 +12,19 @@ from __future__ import annotations
 
 from core.balance.live_source import (
     group_planes_from_sensors, pick_sensor_for_plane, parse_1x_rows,
+    _section_from_label,
 )
+
+
+def test_section_from_label_descriptive():
+    # Convención wizard + etiquetas descriptivas reales (SGT300B).
+    assert _section_from_label("DE driven") == "Driven"
+    assert _section_from_label("5YD DE generador") == "Driven"
+    assert _section_from_label("NDE generador") == "Driven"
+    assert _section_from_label("Compresor centrífugo") == "Driven"
+    assert _section_from_label("1YD DE turbina") == "Driver"
+    assert _section_from_label("Driver bearing 3") == "Driver"
+    assert _section_from_label("4YD gearbox") == "Gearbox"
 
 
 def _prox(plane, plane_label, direction):
