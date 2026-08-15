@@ -151,6 +151,51 @@ def _bal_capture_cb(iid: str, targets: List[Tuple[str, str, str]]) -> None:
     st.session_state["_bal_msg"] = " · ".join(ok + warn) or "Sin datos live."
 
 
+def _suggest_trial_cb(w_key: str, n_key: str, r_key: str, k_key: str, mag_key: str) -> None:
+    """on_click: calcula el peso de prueba (API 684) y lo rellena en mag_key."""
+    W = float(st.session_state.get(w_key) or 0.0)
+    N = float(st.session_state.get(n_key) or 0.0)
+    R = float(st.session_state.get(r_key) or 0.0)
+    k = float(st.session_state.get(k_key) or 1.25)
+    Wt, _u = recommend_trial_weight_g(W, N, R, k)
+    st.session_state[mag_key] = round(float(Wt), 2)
+    st.session_state["_bal_tw_msg"] = f"Peso de prueba sugerido: {Wt:,.2f} g (API 684)"
+
+
+def _trial_weight_suggester(prefix: str, mag_key: str,
+                            title: str = "Sugerir peso de prueba (API 684)") -> None:
+    """Panel compacto: W del plano + rpm + radio → sugiere y rellena el peso
+    de prueba de esa corrida. W = carga soportada por ESE plano (≈ ½ del rotor
+    si está entre dos cojinetes)."""
+    with st.expander(title, expanded=False):
+        st.caption("W = peso soportado por **este plano** (≈ ½ del rotor entre 2 "
+                   "cojinetes). Fórmula API 684: W_prueba = 6350·W·k / (N·radio).")
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            _num(f"{prefix}_sw", "Peso del plano W [kg]", 3500.0,
+                 min_value=0.0, step=10.0, format="%.1f")
+        with c2:
+            _num(f"{prefix}_sn", "Velocidad N [rpm]",
+                 float(st.session_state.get("iso_rpm")
+                       or st.session_state.get("tw_rpm") or 3600.0),
+                 min_value=0.0, step=10.0, format="%.0f")
+        with c3:
+            _num(f"{prefix}_sr", "Radio [mm]", 420.0,
+                 min_value=0.0, step=1.0, format="%.1f")
+        with c4:
+            _num(f"{prefix}_sk", "Factor k", 1.25,
+                 min_value=0.2, max_value=2.0, step=0.05, format="%.2f")
+        Wt, _u = recommend_trial_weight_g(
+            st.session_state[f"{prefix}_sw"], st.session_state[f"{prefix}_sn"],
+            st.session_state[f"{prefix}_sr"], st.session_state[f"{prefix}_sk"])
+        st.button(f"Sugerir → {Wt:,.2f} g  ·  rellena el peso de prueba",
+                  key=f"{prefix}_sbtn", on_click=_suggest_trial_cb,
+                  args=(f"{prefix}_sw", f"{prefix}_sn", f"{prefix}_sr",
+                        f"{prefix}_sk", mag_key))
+        if st.session_state.get("_bal_tw_msg"):
+            st.caption("✅ " + st.session_state["_bal_tw_msg"])
+
+
 def _machine_and_planes(key: str):
     opts = _instance_options()
     if not opts:
@@ -252,6 +297,8 @@ with tab_1p:
                 if st.session_state.get("_bal_msg"):
                     st.caption("📡 " + st.session_state["_bal_msg"])
 
+    _trial_weight_suggester("b1_tw", "b1_tw_mag")
+
     with st.container(border=True):
         colA, colB, colC = st.columns(3)
         with colA:
@@ -345,6 +392,7 @@ with tab_2p:
             a0m, a0a = _vector_inputs("b2_a0", "A0 — sonda plano A", unit2)
         with c2:
             b0m, b0a = _vector_inputs("b2_b0", "B0 — sonda plano B", unit2)
+    _trial_weight_suggester("b2_wa", "b2_wa_mag", "Sugerir peso de prueba · plano A (API 684)")
     with st.container(border=True):
         st.markdown("**Corrida 1 — peso de prueba en plano A**")
         c1, c2, c3 = st.columns(3)
@@ -354,6 +402,7 @@ with tab_2p:
             a1m, a1a = _vector_inputs("b2_a1", "A1 — sonda A", unit2)
         with c3:
             b1m, b1a = _vector_inputs("b2_b1", "B1 — sonda B", unit2)
+    _trial_weight_suggester("b2_wb", "b2_wb_mag", "Sugerir peso de prueba · plano B (API 684)")
     with st.container(border=True):
         st.markdown("**Corrida 2 — peso de prueba en plano B**")
         c1, c2, c3 = st.columns(3)
