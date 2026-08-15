@@ -464,5 +464,86 @@ with tab_rep:
                 "pestañas anteriores.")
 
     st.divider()
-    st.caption("El reporte PDF branded SIGA/Watermelon (reutilizando el "
-               "generador de ROTORIX) es el siguiente paso de la integración.")
+    st.markdown("##### Datos del reporte")
+
+    # Prefill opcional desde la máquina Live seleccionada (activo/cliente/sitio).
+    _live_iid = st.session_state.get("b2_live_iid") or st.session_state.get("b1_live_iid")
+    if _live_iid:
+        try:
+            from core.instance_state import get_instance as _gi
+            _inst = _gi(_live_iid)
+            if _inst is not None:
+                st.session_state.setdefault("rep_asset", _inst.tag or _live_iid)
+                st.session_state.setdefault("rep_client", getattr(_inst, "client", "") or "")
+                st.session_state.setdefault(
+                    "rep_location",
+                    getattr(_inst, "site", "") or getattr(_inst, "location", "") or "")
+        except Exception:
+            pass
+
+    from datetime import date as _date
+    st.session_state.setdefault("rep_asset", "")
+    st.session_state.setdefault("rep_client", "")
+    st.session_state.setdefault("rep_location", "")
+    st.session_state.setdefault("rep_specialist", _user.get("full_name") or "")
+    st.session_state.setdefault("rep_date", _date.today().strftime("%d/%m/%Y"))
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        rep_asset = st.text_input("Activo", key="rep_asset")
+        rep_client = st.text_input("Cliente", key="rep_client")
+    with c2:
+        rep_location = st.text_input("Sitio / ubicación", key="rep_location")
+        rep_specialist = st.text_input("Especialista", key="rep_specialist")
+    with c3:
+        rep_date = st.text_input("Fecha", key="rep_date")
+        rep_notes = st.text_area("Notas", key="rep_notes", height=80)
+
+    def _pair(prefix: str):
+        m = st.session_state.get(f"{prefix}_mag")
+        if m is None:
+            return None
+        a = st.session_state.get(f"{prefix}_ang") or 0.0
+        return (float(m), float(a))
+
+    one_plane = None
+    if r1:
+        vf = _pair("b1_vf")
+        vf = vf if (vf and vf[0] > 0) else None
+        one_plane = {"unit": st.session_state.get("b1_unit", "µm pk-pk"),
+                     "v0": _pair("b1_v0"), "trial": _pair("b1_tw"),
+                     "vt": _pair("b1_vt"), "vf": vf, "result": r1}
+    two_plane = None
+    if r2:
+        two_plane = {"unit": st.session_state.get("b2_unit", "µm pk-pk"),
+                     "a0": _pair("b2_a0"), "b0": _pair("b2_b0"),
+                     "a1": _pair("b2_a1"), "b1": _pair("b2_b1"),
+                     "a2": _pair("b2_a2"), "b2": _pair("b2_b2"),
+                     "wa": _pair("b2_wa"), "wb": _pair("b2_wb"), "result": r2}
+
+    if not (one_plane or two_plane or ev):
+        st.info("Corré al menos un balanceo o una validación ISO para generar el PDF.")
+    else:
+        if st.button("Generar reporte PDF", key="rep_pdf", type="primary"):
+            try:
+                from core.balance.report import build_balance_pdf
+                meta = {
+                    "asset": rep_asset, "client": rep_client, "location": rep_location,
+                    "specialist": rep_specialist, "report_date": rep_date,
+                    "unit": (st.session_state.get("b1_unit")
+                             or st.session_state.get("b2_unit") or "µm pk-pk"),
+                    "rpm": (st.session_state.get("iso_rpm")
+                            or st.session_state.get("tw_rpm")),
+                    "notes": rep_notes,
+                }
+                st.session_state["bal_pdf"] = build_balance_pdf(
+                    meta=meta, one_plane=one_plane, two_plane=two_plane, iso=ev)
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Error generando el PDF: {e}")
+                st.session_state.pop("bal_pdf", None)
+        if st.session_state.get("bal_pdf"):
+            import re as _re
+            _fn = "Balanceo_" + _re.sub(r"[^A-Za-z0-9]+", "_",
+                                        (rep_asset or "activo")).strip("_") + ".pdf"
+            st.download_button("⬇ Descargar PDF", data=st.session_state["bal_pdf"],
+                               file_name=_fn, mime="application/pdf")
