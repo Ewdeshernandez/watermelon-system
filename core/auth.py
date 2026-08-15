@@ -105,6 +105,15 @@ NAV_GROUPS = [
         ],
     },
     {
+        "section": "Balanceo",
+        "items": [
+            # Módulo Balanceo (coef. de influencia 1/2 planos) bajo ISO 21940-11/12
+            # + API 684. Motor puro en core.balance (extraído de ROTORIX, validado
+            # en campo). Solo admin/specialist — bloqueado para cliente.
+            {"label": "⚖️  Balanceo", "page": "pages/19_Balanceo.py"},
+        ],
+    },
+    {
         "section": "Reports",
         "items": [
             # Ciclo 17.33 — eliminados Phase Analysis y Diagnostics legacy
@@ -164,6 +173,8 @@ CLIENT_BLOCKED_PAGES = {
     # de adquisición ni los curve fits — solo recibe el reporte final modal
     # integrado en Reports.
     "pages/18_Modal_Analysis.py",
+    # Balanceo: herramienta del analista (coef. influencia ISO 21940 / API 684)
+    "pages/19_Balanceo.py",
     # FASE J v3.31.221 — Admin licencias Planta es solo SIGA internal
     "pages/20_License_Admin.py",
 }
