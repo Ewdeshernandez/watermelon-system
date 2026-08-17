@@ -16,8 +16,20 @@ import pandas as pd
 import streamlit as st
 
 from core.reports_ext.builders import BUILDERS
-from core.reports_ext.common import autofill_base_meta, today_str
+from core.reports_ext.common import (
+    autofill_base_meta, today_str, REVIEWERS, peek_consecutive, commit_consecutive,
+)
 from core.reports_ext.ui import rep_section_header, rep_status_banner
+
+
+def _current_user_name() -> str:
+    """Nombre del especialista logueado (aparece automáticamente)."""
+    try:
+        from core.auth import get_current_user
+        u = get_current_user() or {}
+        return (u.get("full_name") or u.get("name") or u.get("email") or "").strip()
+    except Exception:
+        return ""
 
 
 # ---------------------------------------------------------------------
@@ -53,11 +65,15 @@ def _meta_form(prefix: str) -> Dict[str, Any]:
         for k in ("client", "plant", "location", "equipo"):
             st.session_state.setdefault(f"{prefix}_{k}", base.get(k, ""))
         st.session_state.setdefault(f"{prefix}_train", base.get("train_description", ""))
+        # especialista = usuario logueado (automático, editable)
+        st.session_state.setdefault(f"{prefix}_spec", _current_user_name())
+        # consecutivo automático ISO 9001 (editable)
+        st.session_state.setdefault(f"{prefix}_cons", peek_consecutive(prefix))
         st.session_state[f"{prefix}_autofilled"] = True
 
     with st.container(border=True):
         st.caption("Datos del servicio · auto-rellenados desde el activo activo "
-                   "(editables).")
+                   "y el usuario logueado (editables).")
         c1, c2, c3 = st.columns(3)
         with c1:
             client = st.text_input("Cliente", key=f"{prefix}_client")
@@ -67,18 +83,24 @@ def _meta_form(prefix: str) -> Dict[str, Any]:
             equipo = st.text_input("Equipo", key=f"{prefix}_equipo")
         with c3:
             report_date = st.text_input("Fecha", value=today_str(), key=f"{prefix}_date")
-            consecutive = st.text_input("Consecutivo", key=f"{prefix}_cons")
+            consecutive = st.text_input(
+                "Consecutivo (automático · ISO 9001)", key=f"{prefix}_cons",
+                help="Código SIGA-TIPO-AÑO-NNNN generado automáticamente. "
+                     "Editable si necesitas empatar tu numeración.")
         c4, c5 = st.columns(2)
         with c4:
             specialist = st.text_input("Preparado por (especialista)",
-                                       key=f"{prefix}_spec")
+                                       key=f"{prefix}_spec",
+                                       help="Se rellena con el usuario logueado.")
         with c5:
-            reviewer = st.text_input("Revisado por", key=f"{prefix}_rev")
+            reviewer = st.selectbox("Revisado por (autoridad)",
+                                    list(REVIEWERS.keys()), key=f"{prefix}_rev")
 
     return {
         "client": client, "plant": plant, "location": location, "equipo": equipo,
         "report_date": report_date, "consecutive": consecutive,
-        "specialist": specialist, "reviewer": reviewer,
+        "specialist": specialist,
+        "reviewer": reviewer, "reviewer_role": REVIEWERS.get(reviewer, ""),
         "train_description": st.session_state.get(f"{prefix}_train", ""),
     }
 
@@ -86,19 +108,34 @@ def _meta_form(prefix: str) -> Dict[str, Any]:
 def _photo_uploader(prefix: str, label: str = "Registro fotográfico") -> List[Dict[str, Any]]:
     files = st.file_uploader(label, accept_multiple_files=True,
                              type=["png", "jpg", "jpeg"], key=f"{prefix}_photos")
+    files = files or []
     photos: List[Dict[str, Any]] = []
-    for f in files or []:
-        photos.append({"bytes": f.getvalue(),
-                       "caption": f.name.rsplit(".", 1)[0]})
-    if photos:
-        st.caption(f"{len(photos)} foto(s) cargada(s).")
+    if files:
+        st.caption(f"{len(files)} imagen(es). Escribe un título por figura; se "
+                   "numeran automáticamente en orden (Figura 1, 2, 3…).")
+        with st.expander(f"Títulos de las {len(files)} figuras", expanded=True):
+            for i, f in enumerate(files, 1):
+                title = st.text_input(f"Figura {i}", key=f"{prefix}_figt_{i}",
+                                      placeholder=f"Descripción de la figura {i}")
+                cap = f"Figura {i}. {title}".rstrip(". ") if title else f"Figura {i}"
+                photos.append({"bytes": f.getvalue(), "caption": cap})
     return photos
+
+
+def _commit_consecutive_once(prefix: str, family: str, cons: str) -> None:
+    """Incrementa el contador solo si el consecutivo mostrado es el automático
+    aún no confirmado (evita gastar números en recargas o regeneraciones)."""
+    done = st.session_state.setdefault(f"{prefix}_cons_committed", set())
+    if cons and cons.startswith("SIGA-") and cons not in done:
+        commit_consecutive(family)
+        done.add(cons)
 
 
 def _generate(prefix: str, family: str, meta: Dict[str, Any], content: Dict[str, Any]):
     if st.button("Generar reporte PDF", type="primary", key=f"{prefix}_gen"):
         try:
             st.session_state[f"{prefix}_pdf"] = BUILDERS[family](meta=meta, content=content)
+            _commit_consecutive_once(prefix, family, meta.get("consecutive", ""))
         except Exception as e:  # noqa: BLE001
             st.error(f"Error generando el PDF: {e}")
             st.session_state.pop(f"{prefix}_pdf", None)

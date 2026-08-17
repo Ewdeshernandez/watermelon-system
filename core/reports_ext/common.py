@@ -20,6 +20,8 @@ Incluye:
 from __future__ import annotations
 
 import io
+import json
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -319,9 +321,96 @@ def today_str() -> str:
     return datetime.now().strftime("%d/%m/%Y")
 
 
+# ---------------------------------------------------------------------
+# Consecutivo automático (ISO 9001:2015 §7.5.2 — identificación única)
+# ---------------------------------------------------------------------
+# Esquema: SIGA-{TIPO}-{AÑO}-{NNNN}. Contador persistente por tipo y año.
+# ISO 9001:2015 §7.5.2 exige que la información documentada tenga
+# identificación única (título, fecha, autor, número de referencia) y deja
+# libre el formato; este esquema es trazable, ordenable y único.
+TYPE_CODES = {
+    "diario": "DIA", "preliminar": "PRE", "boroscopia": "BOR",
+    "alineacion": "ALI", "mecanico": "MEC",
+}
+
+# Autoridades habilitadas para revisar/aprobar reportes (solo dos).
+REVIEWERS = {
+    "Ewdes A. Hernández B.": "Machinery Diagnostic Champion",
+    "Ángel Leiva": "Ingeniero CBM",
+}
+
+
+def _state_dir() -> Optional[str]:
+    """Directorio persistente (disco de Render vía WM_PERSIST_DIR) o local."""
+    d = os.environ.get("WM_PERSIST_DIR") or os.path.join(
+        os.path.expanduser("~"), ".watermelon_state")
+    try:
+        os.makedirs(d, exist_ok=True)
+        return d
+    except Exception:
+        return None
+
+
+def _counter_file() -> Optional[str]:
+    d = _state_dir()
+    return os.path.join(d, "report_consecutives.json") if d else None
+
+
+def _load_counters() -> Dict[str, int]:
+    f = _counter_file()
+    if f and os.path.exists(f):
+        try:
+            with open(f, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_counters(c: Dict[str, int]) -> bool:
+    f = _counter_file()
+    if not f:
+        return False
+    try:
+        with open(f, "w", encoding="utf-8") as fh:
+            json.dump(c, fh)
+        return True
+    except Exception:
+        return False
+
+
+def _cons_key(family: str) -> str:
+    return f"{TYPE_CODES.get(family, family)}-{datetime.now().year}"
+
+
+def _fmt_cons(family: str, n: int) -> str:
+    return f"SIGA-{TYPE_CODES.get(family, family)}-{datetime.now().year}-{n:04d}"
+
+
+def peek_consecutive(family: str) -> str:
+    """Siguiente consecutivo SIN incrementar (para mostrar en el formulario)."""
+    if _counter_file() is None:
+        return f"SIGA-{TYPE_CODES.get(family, family)}-{datetime.now():%Y-%m%d%H%M}"
+    n = int(_load_counters().get(_cons_key(family), 0)) + 1
+    return _fmt_cons(family, n)
+
+
+def commit_consecutive(family: str) -> str:
+    """Incrementa el contador y devuelve el consecutivo asignado."""
+    if _counter_file() is None:
+        return f"SIGA-{TYPE_CODES.get(family, family)}-{datetime.now():%Y-%m%d%H%M}"
+    c = _load_counters()
+    k = _cons_key(family)
+    n = int(c.get(k, 0)) + 1
+    c[k] = n
+    _save_counters(c)
+    return _fmt_cons(family, n)
+
+
 __all__ = [
     "make_styles", "p", "section", "subsection", "bullets", "numbered_plan",
     "kv_table", "two_col_kv", "grid_table", "safe_image", "photo_grid",
     "severity_table", "severity_legend", "signatures_block",
     "autofill_base_meta", "today_str",
+    "TYPE_CODES", "REVIEWERS", "peek_consecutive", "commit_consecutive",
 ]
