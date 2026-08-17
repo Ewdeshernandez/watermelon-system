@@ -47,6 +47,53 @@ def _disk_mesh(xp: float, R: float, color: str, n: int = 48) -> go.Mesh3d:
                      opacity=0.22, hoverinfo="skip", showscale=False)
 
 
+def _cuboid(x0, x1, y0, y1, z0, z1, color, opacity: float = 1.0) -> go.Mesh3d:
+    x = [x0, x1, x1, x0, x0, x1, x1, x0]
+    y = [y0, y0, y1, y1, y0, y0, y1, y1]
+    z = [z0, z0, z0, z0, z1, z1, z1, z1]
+    tri = [(0, 1, 2), (0, 2, 3), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4),
+           (3, 2, 6), (3, 6, 7), (0, 3, 7), (0, 7, 4), (1, 2, 6), (1, 6, 5)]
+    return go.Mesh3d(
+        x=x, y=y, z=z,
+        i=[t[0] for t in tri], j=[t[1] for t in tri], k=[t[2] for t in tri],
+        color=color, opacity=opacity, flatshading=True,
+        hoverinfo="skip", showscale=False,
+        lighting=dict(ambient=0.6, diffuse=0.75, specular=0.12))
+
+
+def _saddle(xc: float, hw: float, r: float, color: str) -> go.Surface:
+    """Asiento (casquillo) que cradla el eje por debajo — arco 205°..335°."""
+    th = np.linspace(np.deg2rad(205), np.deg2rad(335), 26)
+    xs = np.linspace(xc - hw, xc + hw, 2)
+    TH, X = np.meshgrid(th, xs)
+    Y = r * np.sin(TH)
+    Z = r * np.cos(TH)
+    return go.Surface(x=X, y=Y, z=Z, showscale=False, opacity=1.0,
+                      colorscale=[[0, color], [1, color]], hoverinfo="skip",
+                      lighting=dict(ambient=0.7, diffuse=0.6, specular=0.35))
+
+
+def _bearing(fig: go.Figure, xb: float, rs: float, R: float) -> None:
+    """Soporte de cojinete plano: fundación + pedestal + asiento de babbitt."""
+    steel = "#64748b"; base = "#334155"; babbitt = "#c8912b"
+    base_z = -R * 1.5
+    ped_top = -rs * 1.05
+    hw = R * 0.40
+    hy = R * 0.34
+    # fundación (base ancha)
+    fig.add_trace(_cuboid(xb - hw * 1.5, xb + hw * 1.5, -hy * 1.7, hy * 1.7,
+                          base_z - R * 0.10, base_z, base))
+    # pedestal
+    fig.add_trace(_cuboid(xb - hw, xb + hw, -hy, hy, base_z, ped_top, steel))
+    # asiento / casquillo (babbitt) cradando el eje
+    fig.add_trace(_saddle(xb, hw * 0.92, rs * 1.22, babbitt))
+    # etiqueta
+    fig.add_trace(go.Scatter3d(
+        x=[xb], y=[0], z=[base_z - R * 0.28], mode="text",
+        text=["Cojinete"], textfont=dict(size=9, color="#94a3b8"),
+        hoverinfo="skip", showlegend=False))
+
+
 def rotor_3d_figure(planes: List[Dict[str, Any]],
                     shaft_len: float = 10.0, R: float = 1.0,
                     height: int = 380) -> go.Figure:
@@ -68,12 +115,9 @@ def rotor_3d_figure(planes: List[Dict[str, Any]],
         lighting=dict(ambient=0.6, diffuse=0.7, specular=0.2),
     ))
 
-    # --- Cojinetes (bloques en los extremos) ---
-    for xb in (0.0, shaft_len):
-        fig.add_trace(go.Scatter3d(
-            x=[xb], y=[0], z=[-R * 1.25], mode="markers",
-            marker=dict(size=9, color=_NAVY, symbol="square"),
-            hovertext="Cojinete", hoverinfo="text", showlegend=False))
+    # --- Cojinetes: soportes de cojinete plano (fundación + pedestal + babbitt) ---
+    for xb in (shaft_len * 0.06, shaft_len * 0.94):
+        _bearing(fig, xb, rs, R)
 
     # --- Planos de corrección ---
     for pl in planes:
