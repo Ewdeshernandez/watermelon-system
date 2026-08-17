@@ -262,6 +262,15 @@ with tab_1p:
     bal_section_header("Balanceo en 1 plano",
                        "H = (Vt − V0) / Wt  ·  Wcorr = −V0 / H",
                        "ISO 21940-12 · coeficiente de influencia", "🎯")
+    # Rotor 3D SIEMPRE visible arriba (neutro al abrir; con el contrapeso al calcular).
+    _r1prev = st.session_state.get("bal_r1p")
+    st.plotly_chart(
+        rotor_3d_1plane(_r1prev["corr_ang_deg"] if _r1prev else None,
+                        f"{_r1prev['corr_mass_g']:.1f} g" if _r1prev else "—"),
+        use_container_width=True)
+    if not _r1prev:
+        st.caption("🧭 El rotor muestra la posición del contrapeso apenas calculás el balanceo.")
+
     top = st.columns([1, 1])
     with top[0]:
         unit1 = st.selectbox("Unidad de vibración", UNITS, key="b1_unit")
@@ -312,6 +321,7 @@ with tab_1p:
     if st.button("Calcular balanceo 1 plano", key="b1_calc", type="primary"):
         try:
             st.session_state["bal_r1p"] = solve_1plane(v0m, v0a, vtm, vta, twm, twa)
+            st.rerun()
         except ValueError as e:
             st.error(str(e))
             st.session_state.pop("bal_r1p", None)
@@ -319,12 +329,6 @@ with tab_1p:
     r = st.session_state.get("bal_r1p")
     if r:
         st.markdown("")
-        bal_section_header("Dónde poner el peso",
-                           "Rotor 3D — plano de corrección y posición angular del "
-                           "contrapeso.", icon="🧭")
-        st.plotly_chart(
-            rotor_3d_1plane(r["corr_ang_deg"], f"{r['corr_mass_g']:.1f} g"),
-            use_container_width=True)
         bal_kpi_row([
             (f"{r['corr_mass_g']:,.2f} g", "Peso de corrección", "masa a instalar", "cyan"),
             (f"{r['corr_ang_deg']:,.1f}°", "Ángulo", "posición angular", "cyan"),
@@ -347,6 +351,18 @@ with tab_2p:
                        "Matriz de coeficientes de influencia 2×2 · corridas "
                        "0 (inicial) · 1 (trial A) · 2 (trial B).",
                        "ISO 21940-12", "🎯")
+    # Rotor 3D SIEMPRE visible arriba (neutro al abrir; con contrapesos al calcular).
+    _r2prev = st.session_state.get("bal_r2p")
+    if _r2prev:
+        _wam, _waa = to_polar(_r2prev["WA_corr"])
+        _wbm, _wba = to_polar(_r2prev["WB_corr"])
+        _fig2 = rotor_3d_2plane(_waa, f"{_wam:.1f} g", _wba, f"{_wbm:.1f} g")
+    else:
+        _fig2 = rotor_3d_2plane(None, "—", None, "—")
+    st.plotly_chart(_fig2, use_container_width=True)
+    if not _r2prev:
+        st.caption("🧭 El rotor muestra la posición de los contrapesos (planos A y B) al calcular.")
+
     top = st.columns([1, 1])
     with top[0]:
         unit2 = st.selectbox("Unidad de vibración", UNITS, key="b2_unit")
@@ -428,6 +444,7 @@ with tab_2p:
                 to_complex(a2m, a2a), to_complex(b2m, b2a),
                 to_complex(wam, waa), to_complex(wbm, wba),
             )
+            st.rerun()
         except ValueError as e:
             st.error(str(e))
             st.session_state.pop("bal_r2p", None)
@@ -437,12 +454,6 @@ with tab_2p:
         st.markdown("")
         wa_mag, wa_ang = to_polar(r["WA_corr"])
         wb_mag, wb_ang = to_polar(r["WB_corr"])
-        bal_section_header("Dónde poner los pesos",
-                           "Rotor 3D — planos A y B con la posición angular de cada "
-                           "contrapeso.", icon="🧭")
-        st.plotly_chart(
-            rotor_3d_2plane(wa_ang, f"{wa_mag:.1f} g", wb_ang, f"{wb_mag:.1f} g"),
-            use_container_width=True)
         bal_kpi_row([
             (f"{wa_mag:,.2f} g", "Corrección plano A", f"∠ {wa_ang:,.1f}°", "cyan"),
             (f"{wb_mag:,.2f} g", "Corrección plano B", f"∠ {wb_ang:,.1f}°", "cyan"),
