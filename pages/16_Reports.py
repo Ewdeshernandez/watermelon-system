@@ -3374,6 +3374,20 @@ _wm_page_header(
     "Waveform, Orbit y Tabular List, y exporta un PDF corporativo listo para cliente.",
 )
 
+# =============================================================
+# v3.31.483 — Familias de reporte (pestañas). El "Reporte del Sistema"
+# (todo el builder de vibraciones de abajo) queda INTACTO; las familias de
+# campo (diario/preliminar/boroscopia/alineación/mecánico) se renderizan
+# arriba y hacen st.stop() para no ejecutar el cuerpo del sistema.
+# =============================================================
+from core.reports_ext.ui import report_family_selector as _rep_family_selector
+from core.reports_ext.page import render_report_family as _render_report_family
+
+_rep_family = _rep_family_selector()
+if _rep_family != "sistema":
+    _render_report_family(_rep_family)
+    st.stop()
+
 c1, c2, c3, c4 = st.columns(4)
 with c1:
     st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Figuras en reporte</div><div class="wm-kpi-value">{len(items):,}</div></div>', unsafe_allow_html=True)
