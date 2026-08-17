@@ -42,7 +42,7 @@ from core.balance.ui import (
     bal_hero_card, bal_section_header, bal_kpi_row, bal_status_banner,
     bal_footer_norms,
 )
-from core.balance.rotor3d import rotor_3d_1plane, rotor_3d_2plane
+from core.balance.rotor3d import rotor_3d_figure, build_planes_1p, build_planes_2p
 
 
 # =====================================================================
@@ -262,14 +262,18 @@ with tab_1p:
     bal_section_header("Balanceo en 1 plano",
                        "H = (Vt − V0) / Wt  ·  Wcorr = −V0 / H",
                        "ISO 21940-12 · coeficiente de influencia", "🎯")
-    # Rotor 3D SIEMPRE visible arriba (neutro al abrir; con el contrapeso al calcular).
+    # Rotor 3D fijo (imagen) SIEMPRE arriba: la vibración medida (V0) aparece
+    # apenas se carga el dato; el contrapeso, al calcular.
     _r1prev = st.session_state.get("bal_r1p")
-    st.plotly_chart(
-        rotor_3d_1plane(_r1prev["corr_ang_deg"] if _r1prev else None,
-                        f"{_r1prev['corr_mass_g']:.1f} g" if _r1prev else "—"),
-        use_container_width=True)
-    if not _r1prev:
-        st.caption("🧭 El rotor muestra la posición del contrapeso apenas calculás el balanceo.")
+    _v0 = st.session_state.get("b1_v0_mag")
+    _vib1 = (_v0, st.session_state.get("b1_v0_ang") or 0.0) if _v0 else None
+    _planes1 = build_planes_1p(
+        _vib1, st.session_state.get("b1_unit", "µm pk-pk"),
+        _r1prev["corr_ang_deg"] if _r1prev else None,
+        f"{_r1prev['corr_mass_g']:.1f} g" if _r1prev else "")
+    st.plotly_chart(rotor_3d_figure(_planes1), use_container_width=True,
+                    config={"staticPlot": True, "displayModeBar": False})
+    st.caption("🔴 Vibración medida (V0)   ·   🔷 Contrapeso a instalar (aparece al calcular)")
 
     top = st.columns([1, 1])
     with top[0]:
@@ -351,17 +355,24 @@ with tab_2p:
                        "Matriz de coeficientes de influencia 2×2 · corridas "
                        "0 (inicial) · 1 (trial A) · 2 (trial B).",
                        "ISO 21940-12", "🎯")
-    # Rotor 3D SIEMPRE visible arriba (neutro al abrir; con contrapesos al calcular).
+    # Rotor 3D fijo (imagen) SIEMPRE arriba: vibración inicial (A0/B0) aparece al
+    # cargar los datos; los contrapesos, al calcular.
     _r2prev = st.session_state.get("bal_r2p")
+    _a0 = st.session_state.get("b2_a0_mag")
+    _b0 = st.session_state.get("b2_b0_mag")
+    _vibA = (_a0, st.session_state.get("b2_a0_ang") or 0.0) if _a0 else None
+    _vibB = (_b0, st.session_state.get("b2_b0_ang") or 0.0) if _b0 else None
+    _u2 = st.session_state.get("b2_unit", "µm pk-pk")
     if _r2prev:
         _wam, _waa = to_polar(_r2prev["WA_corr"])
         _wbm, _wba = to_polar(_r2prev["WB_corr"])
-        _fig2 = rotor_3d_2plane(_waa, f"{_wam:.1f} g", _wba, f"{_wbm:.1f} g")
+        _planes2 = build_planes_2p(_vibA, _vibB, _u2, _waa, f"{_wam:.1f} g",
+                                   _wba, f"{_wbm:.1f} g")
     else:
-        _fig2 = rotor_3d_2plane(None, "—", None, "—")
-    st.plotly_chart(_fig2, use_container_width=True)
-    if not _r2prev:
-        st.caption("🧭 El rotor muestra la posición de los contrapesos (planos A y B) al calcular.")
+        _planes2 = build_planes_2p(_vibA, _vibB, _u2, None, "", None, "")
+    st.plotly_chart(rotor_3d_figure(_planes2), use_container_width=True,
+                    config={"staticPlot": True, "displayModeBar": False})
+    st.caption("🔴 Vibración inicial (A0/B0)   ·   🔷 Contrapesos (aparecen al calcular)")
 
     top = st.columns([1, 1])
     with top[0]:
