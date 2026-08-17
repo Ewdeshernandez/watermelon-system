@@ -46,6 +46,17 @@ def report_family_selector() -> str:
         div[data-testid="stRadio"] label:has(input:checked) {{
             color:{NAVY}; box-shadow:inset 0 -3px 0 {CYAN};
         }}
+        /* punto de color por pestaña (algo de vida, sin cajas) */
+        div[data-testid="stRadio"] label::before {{
+            content:"●"; font-size:10px; margin-right:8px; vertical-align:middle;
+            opacity:0.9;
+        }}
+        div[data-testid="stRadio"] label:nth-of-type(1)::before {{ color:#64748B; }}
+        div[data-testid="stRadio"] label:nth-of-type(2)::before {{ color:#1AAEE5; }}
+        div[data-testid="stRadio"] label:nth-of-type(3)::before {{ color:#8B5CF6; }}
+        div[data-testid="stRadio"] label:nth-of-type(4)::before {{ color:#16A34A; }}
+        div[data-testid="stRadio"] label:nth-of-type(5)::before {{ color:#D89B22; }}
+        div[data-testid="stRadio"] label:nth-of-type(6)::before {{ color:#EF4444; }}
         </style>
         """,
         unsafe_allow_html=True,
