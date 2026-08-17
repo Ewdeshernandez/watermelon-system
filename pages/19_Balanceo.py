@@ -271,13 +271,18 @@ with tab_1p:
         _vib1, st.session_state.get("b1_unit", "µm pk-pk"),
         _r1prev["corr_ang_deg"] if _r1prev else None,
         f"{_r1prev['corr_mass_g']:.1f} g" if _r1prev else "")
-    st.markdown(rotor_face_svg(_planes1), unsafe_allow_html=True)
+    st.markdown(rotor_face_svg(_planes1, rotation=st.session_state.get("b1_rot", "CCW")),
+                unsafe_allow_html=True)
     st.caption("🔴 Vibración medida (V0)   ·   🔷 Contrapeso a instalar (aparece al calcular)")
 
-    top = st.columns([1, 1])
+    top = st.columns([1, 1, 1])
     with top[0]:
         unit1 = st.selectbox("Unidad de vibración", UNITS, key="b1_unit")
     with top[1]:
+        st.selectbox("Sentido de giro", ["CCW", "CW"], key="b1_rot",
+                     help="Orienta la escala angular contra el giro (convención "
+                          "de balanceo). No afecta el cálculo.")
+    with top[2]:
         source1 = st.radio("Fuente de datos", ["Manual", "Live Monitoring"],
                            key="b1_source", horizontal=True)
 
@@ -369,13 +374,18 @@ with tab_2p:
                                    _wba, f"{_wbm:.1f} g")
     else:
         _planes2 = build_planes_2p(_vibA, _vibB, _u2, None, "", None, "")
-    st.markdown(rotor_face_svg(_planes2), unsafe_allow_html=True)
+    st.markdown(rotor_face_svg(_planes2, rotation=st.session_state.get("b2_rot", "CCW")),
+                unsafe_allow_html=True)
     st.caption("🔴 Vibración inicial (A0/B0)   ·   🔷 Contrapesos (aparecen al calcular)")
 
-    top = st.columns([1, 1])
+    top = st.columns([1, 1, 1])
     with top[0]:
         unit2 = st.selectbox("Unidad de vibración", UNITS, key="b2_unit")
     with top[1]:
+        st.selectbox("Sentido de giro", ["CCW", "CW"], key="b2_rot",
+                     help="Orienta la escala angular contra el giro (convención "
+                          "de balanceo). No afecta el cálculo.")
+    with top[2]:
         source2 = st.radio("Fuente de datos", ["Manual", "Live Monitoring"],
                            key="b2_source", horizontal=True)
 
@@ -626,6 +636,8 @@ with tab_rep:
                              or st.session_state.get("b2_unit") or "µm pk-pk"),
                     "rpm": (st.session_state.get("iso_rpm")
                             or st.session_state.get("tw_rpm")),
+                    "rotation": (st.session_state.get("b1_rot")
+                                 or st.session_state.get("b2_rot") or "CCW"),
                     "notes": rep_notes,
                 }
                 st.session_state["bal_pdf"] = build_balance_pdf(

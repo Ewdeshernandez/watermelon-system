@@ -168,6 +168,8 @@ def build_balance_pdf(
         ("Fecha", meta.get("report_date") or datetime.now().strftime("%d/%m/%Y")),
         ("Velocidad", f"{_fmt(meta.get('rpm'), 0)} rpm"),
         ("Unidad de vibración", unit),
+        ("Sentido de giro", f"{meta.get('rotation', 'CCW')} · ángulos medidos "
+                            "contra el sentido de giro"),
         ("Norma", "ISO 21940-11 / 21940-12 · API 684"),
     ], styles))
     if meta.get("notes"):
@@ -262,8 +264,12 @@ def build_balance_pdf(
 
     body.append(_p(
         "Reporte generado por Watermelon System · módulo Balanceo. Cálculo por "
-        "coeficiente de influencia bajo ISO 21940-11/12 y API 684. La convención "
-        "angular es de campo (0° en TDC).", styles, "WMBody"))
+        "coeficiente de influencia bajo ISO 21940-11/12 y API 684. Convención "
+        "angular de campo: 0° en TDC, ángulos medidos contra el sentido de giro "
+        f"({meta.get('rotation', 'CCW')}). El método es convención-agnóstico: el "
+        "coeficiente de influencia se obtiene de la corrida de prueba, por lo que "
+        "el ángulo de corrección queda en la misma convención de los datos.",
+        styles, "WMBody"))
 
     report_meta = {
         "report_title": meta.get("report_title") or "Reporte de Balanceo",
