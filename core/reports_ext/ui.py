@@ -26,19 +26,25 @@ def report_family_selector() -> str:
     st.markdown(
         f"""
         <style>
-        div[data-testid="stRadio"] div[role="radiogroup"] {{
-            gap:6px; flex-wrap:wrap; border-bottom:2px solid {GRAY_LIGHT};
-            padding-bottom:2px; margin-bottom:6px;
+        /* Barra de pestañas de familias de reporte (estilo Calibración) */
+        div[data-testid="stRadio"] > div[role="radiogroup"] {{
+            flex-direction:row !important; gap:4px; flex-wrap:wrap;
+            border-bottom:2px solid #E5EAF0; margin-bottom:10px;
         }}
         div[data-testid="stRadio"] label {{
-            background:{GRAY_LIGHT}; border:1px solid #e2e8f0; border-bottom:none;
-            border-radius:9px 9px 0 0; padding:7px 16px !important; margin:0 !important;
-            font-weight:600; color:{NAVY}; transition:all .15s;
+            background:{GRAY_LIGHT}; border:1px solid #E5EAF0; border-bottom:none;
+            border-radius:10px 10px 0 0; padding:8px 18px !important; margin:0 !important;
+            font-weight:600; color:{NAVY}; cursor:pointer; transition:all .15s;
         }}
-        div[data-testid="stRadio"] label:hover {{ background:#e8f4fb; }}
-        div[data-testid="stRadio"] label[data-baseweb="radio"] div:first-child {{
-            display:none;
+        div[data-testid="stRadio"] label:hover {{ background:#E8F4FB; }}
+        /* ocultar SOLO el círculo del radio (primer DIV del label; robusto
+           aunque haya un <input> antes) */
+        div[data-testid="stRadio"] label > div:first-of-type {{ display:none !important; }}
+        /* pestaña activa: relleno navy */
+        div[data-testid="stRadio"] label:has(input:checked) {{
+            background:{NAVY}; color:#ffffff; border-color:{NAVY};
         }}
+        div[data-testid="stRadio"] label:has(input:checked) * {{ color:#ffffff !important; }}
         </style>
         """,
         unsafe_allow_html=True,

@@ -27,8 +27,7 @@ from reportlab.platypus import PageBreak, Spacer
 from core.report_pdf_shell import render_report_pdf
 from core.reports_ext.common import (
     make_styles, p, section, bullets, numbered_plan, kv_table, two_col_kv,
-    grid_table, photo_grid, severity_table, severity_legend, signatures_block,
-    today_str,
+    grid_table, photo_grid, severity_table, severity_legend, today_str,
 )
 
 _CITY = "Cajicá, Cundinamarca · Colombia"
@@ -73,18 +72,6 @@ def _service_data(meta: Dict[str, Any], styles, servicio: str = "") -> List[Any]
     ]
 
 
-def _signatures(meta: Dict[str, Any], styles) -> List[Any]:
-    left = {"org": meta.get("contratista_org", meta.get("client", "")),
-            "name": meta.get("contratista_name", ""),
-            "role": meta.get("contratista_role", "")}
-    right = {"org": meta.get("contratante_org", "SIGA GROUP S.A.S"),
-             "name": meta.get("reviewer", meta.get("specialist", "")),
-             "role": meta.get("reviewer_role", "Machinery Diagnostic Champion")}
-    return [Spacer(1, 0.6 * cm),
-            section("Firmas", styles),
-            signatures_block(left, right, styles)]
-
-
 def _photos(content: Dict[str, Any], styles, num: str) -> List[Any]:
     photos = content.get("photos") or []
     if not photos:
@@ -119,7 +106,6 @@ def build_daily_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> bytes:
         body += numbered_plan(plan, styles)
 
     body += _photos(content, styles, "5")
-    body += _signatures(meta, styles)
 
     return render_report_pdf(
         _shell_meta(meta, title="Reporte Diario", format_code="SIGA-FMT-136",
@@ -160,7 +146,6 @@ def build_preliminary_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> b
                   "definitivos se emiten en el reporte técnico final.", styles))
 
     body += _photos(content, styles, "7")
-    body += _signatures(meta, styles)
 
     return render_report_pdf(
         _shell_meta(meta, title="Reporte Preliminar", format_code="SIGA-FMT-PRE",
@@ -210,7 +195,6 @@ def build_borescope_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> byt
         body.append(severity_table(rows, styles))
 
     body += _photos(content, styles, "7")
-    body += _signatures(meta, styles)
 
     return render_report_pdf(
         _shell_meta(meta, title="Reporte Servicio de Inspección Boroscópica",
@@ -265,7 +249,6 @@ def build_alignment_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> byt
         body += bullets(content["recomendaciones"], styles); body.append(Spacer(1, 0.2 * cm))
 
     body += _photos(content, styles, "8")
-    body += _signatures(meta, styles)
 
     return render_report_pdf(
         _shell_meta(meta, title="Reporte de Alineación", format_code="SIGA-FMT-ALI",
@@ -310,7 +293,6 @@ def build_mechanical_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> by
     body += bullets(content.get("recomendaciones", []) or ["—"], styles); body.append(Spacer(1, 0.2 * cm))
 
     body += _photos(content, styles, "8")
-    body += _signatures(meta, styles)
 
     return render_report_pdf(
         _shell_meta(meta, title="Reporte Mecánico", format_code="SIGA-FMT-MEC",
