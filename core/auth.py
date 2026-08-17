@@ -111,9 +111,15 @@ NAV_GROUPS = [
             # + API 684. Motor puro en core.balance (extraído de ROTORIX, validado
             # en campo). Solo admin/specialist — bloqueado para cliente.
             {"label": "⚖️  Balanceo", "page": "pages/19_Balanceo.py"},
+        ],
+    },
+    {
+        "section": "Calibración",
+        "items": [
             # Módulo Calibración (curvas de linealidad de sensores) bajo API 670
             # 5.ª ed. + manual del fabricante. Motor puro en core.calibration.
-            # Proximidad / acelerómetro / velomitor. Solo admin/specialist.
+            # Proximidad / acelerómetro / velomitor. Solo admin/specialist —
+            # bloqueado para cliente. Sección propia, al mismo nivel que Balanceo.
             {"label": "📐  Calibración", "page": "pages/21_Calibracion.py"},
         ],
     },
