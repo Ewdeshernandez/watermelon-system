@@ -42,6 +42,7 @@ from core.balance.ui import (
     bal_hero_card, bal_section_header, bal_kpi_row, bal_status_banner,
     bal_footer_norms,
 )
+from core.balance.rotor3d import rotor_3d_1plane, rotor_3d_2plane
 
 
 # =====================================================================
@@ -318,6 +319,12 @@ with tab_1p:
     r = st.session_state.get("bal_r1p")
     if r:
         st.markdown("")
+        bal_section_header("Dónde poner el peso",
+                           "Rotor 3D — plano de corrección y posición angular del "
+                           "contrapeso.", icon="🧭")
+        st.plotly_chart(
+            rotor_3d_1plane(r["corr_ang_deg"], f"{r['corr_mass_g']:.1f} g"),
+            use_container_width=True)
         bal_kpi_row([
             (f"{r['corr_mass_g']:,.2f} g", "Peso de corrección", "masa a instalar", "cyan"),
             (f"{r['corr_ang_deg']:,.1f}°", "Ángulo", "posición angular", "cyan"),
@@ -430,6 +437,12 @@ with tab_2p:
         st.markdown("")
         wa_mag, wa_ang = to_polar(r["WA_corr"])
         wb_mag, wb_ang = to_polar(r["WB_corr"])
+        bal_section_header("Dónde poner los pesos",
+                           "Rotor 3D — planos A y B con la posición angular de cada "
+                           "contrapeso.", icon="🧭")
+        st.plotly_chart(
+            rotor_3d_2plane(wa_ang, f"{wa_mag:.1f} g", wb_ang, f"{wb_mag:.1f} g"),
+            use_container_width=True)
         bal_kpi_row([
             (f"{wa_mag:,.2f} g", "Corrección plano A", f"∠ {wa_ang:,.1f}°", "cyan"),
             (f"{wb_mag:,.2f} g", "Corrección plano B", f"∠ {wb_ang:,.1f}°", "cyan"),
