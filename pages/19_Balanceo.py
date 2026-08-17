@@ -272,7 +272,9 @@ with tab_1p:
         _r1prev["corr_ang_deg"] if _r1prev else None,
         f"{_r1prev['corr_mass_g']:.1f} g" if _r1prev else "")
     st.plotly_chart(rotor_3d_figure(_planes1), use_container_width=True,
-                    config={"staticPlot": True, "displayModeBar": False})
+                    key="bal_rotor_1p",
+                    config={"displayModeBar": False, "scrollZoom": False,
+                            "doubleClick": False, "displaylogo": False})
     st.caption("🔴 Vibración medida (V0)   ·   🔷 Contrapeso a instalar (aparece al calcular)")
 
     top = st.columns([1, 1])
@@ -371,7 +373,9 @@ with tab_2p:
     else:
         _planes2 = build_planes_2p(_vibA, _vibB, _u2, None, "", None, "")
     st.plotly_chart(rotor_3d_figure(_planes2), use_container_width=True,
-                    config={"staticPlot": True, "displayModeBar": False})
+                    key="bal_rotor_2p",
+                    config={"displayModeBar": False, "scrollZoom": False,
+                            "doubleClick": False, "displaylogo": False})
     st.caption("🔴 Vibración inicial (A0/B0)   ·   🔷 Contrapesos (aparecen al calcular)")
 
     top = st.columns([1, 1])

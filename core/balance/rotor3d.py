@@ -31,12 +31,12 @@ _VIB = "#ef4444"          # vibración (rojo)
 _COLORS = {"cyan": "#1AAEE5", "green": "#16a34a", "amber": "#D89B22"}
 
 
-def _circle(xp: float, R: float, n: int = 60):
+def _circle(xp: float, R: float, n: int = 40):
     th = np.linspace(0, 2 * np.pi, n)
     return np.full(n, xp), R * np.sin(th), R * np.cos(th)
 
 
-def _disk_mesh(xp: float, R: float, color: str, n: int = 48) -> go.Mesh3d:
+def _disk_mesh(xp: float, R: float, color: str, n: int = 32) -> go.Mesh3d:
     th = np.linspace(0, 2 * np.pi, n, endpoint=False)
     ys = np.concatenate([[0.0], R * np.sin(th)])
     zs = np.concatenate([[0.0], R * np.cos(th)])
@@ -64,7 +64,7 @@ def rotor_3d_figure(planes: List[Dict[str, Any]],
     rs = R * 0.15  # eje fino y limpio
 
     # --- Eje (cilindro) ---
-    theta = np.linspace(0, 2 * np.pi, 40)
+    theta = np.linspace(0, 2 * np.pi, 24)
     xline = np.linspace(0, shaft_len, 2)
     th, X = np.meshgrid(theta, xline)
     fig.add_trace(go.Surface(
@@ -136,11 +136,13 @@ def rotor_3d_figure(planes: List[Dict[str, Any]],
 
     fig.update_layout(
         height=height, margin=dict(l=0, r=0, t=6, b=0),
-        paper_bgcolor="rgba(0,0,0,0)", showlegend=False, dragmode=False,
+        paper_bgcolor="rgba(0,0,0,0)", showlegend=False, uirevision="fixed",
         scene=dict(
             xaxis=dict(visible=False), yaxis=dict(visible=False),
             zaxis=dict(visible=False), aspectmode="manual",
             aspectratio=dict(x=2.4, y=1, z=1),
+            # Vista fija: sin drag (giro) en la escena 3D.
+            dragmode=False,
             camera=dict(eye=dict(x=1.45, y=1.6, z=0.95),
                         projection=dict(type="orthographic")),
         ),
