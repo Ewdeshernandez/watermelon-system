@@ -36,7 +36,7 @@ def report_family_selector() -> str:
             background:transparent !important; border:none !important;
             border-radius:0 !important; box-shadow:none;
             padding:6px 1px 11px 1px !important; margin:0 !important;
-            font-weight:600; font-size:15px; color:#64748B; cursor:pointer;
+            font-weight:500; font-size:14px; color:#64748B; cursor:pointer;
             transition:color .15s;
         }}
         div[data-testid="stRadio"] label:hover {{ color:{NAVY}; }}
@@ -48,7 +48,7 @@ def report_family_selector() -> str:
         }}
         /* punto de color por pestaña (algo de vida, sin cajas) */
         div[data-testid="stRadio"] label::before {{
-            content:"●"; font-size:10px; margin-right:8px; vertical-align:middle;
+            content:"●"; font-size:9px; margin-right:7px; vertical-align:middle;
             opacity:0.9;
         }}
         div[data-testid="stRadio"] label:nth-of-type(1)::before {{ color:#64748B; }}
