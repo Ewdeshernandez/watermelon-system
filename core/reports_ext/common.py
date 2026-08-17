@@ -384,13 +384,13 @@ def _cons_key(family: str) -> str:
 
 
 def _fmt_cons(family: str, n: int) -> str:
-    return f"SIGA-{TYPE_CODES.get(family, family)}-{datetime.now().year}-{n:04d}"
+    return f"SIGAGROUP-{TYPE_CODES.get(family, family)}-{datetime.now().year}-{n:04d}"
 
 
 def peek_consecutive(family: str) -> str:
     """Siguiente consecutivo SIN incrementar (para mostrar en el formulario)."""
     if _counter_file() is None:
-        return f"SIGA-{TYPE_CODES.get(family, family)}-{datetime.now():%Y-%m%d%H%M}"
+        return f"SIGAGROUP-{TYPE_CODES.get(family, family)}-{datetime.now():%Y-%m%d%H%M}"
     n = int(_load_counters().get(_cons_key(family), 0)) + 1
     return _fmt_cons(family, n)
 
@@ -398,7 +398,7 @@ def peek_consecutive(family: str) -> str:
 def commit_consecutive(family: str) -> str:
     """Incrementa el contador y devuelve el consecutivo asignado."""
     if _counter_file() is None:
-        return f"SIGA-{TYPE_CODES.get(family, family)}-{datetime.now():%Y-%m%d%H%M}"
+        return f"SIGAGROUP-{TYPE_CODES.get(family, family)}-{datetime.now():%Y-%m%d%H%M}"
     c = _load_counters()
     k = _cons_key(family)
     n = int(c.get(k, 0)) + 1

@@ -126,7 +126,7 @@ def _commit_consecutive_once(prefix: str, family: str, cons: str) -> None:
     """Incrementa el contador solo si el consecutivo mostrado es el automático
     aún no confirmado (evita gastar números en recargas o regeneraciones)."""
     done = st.session_state.setdefault(f"{prefix}_cons_committed", set())
-    if cons and cons.startswith("SIGA-") and cons not in done:
+    if cons and cons.startswith("SIGAGROUP-") and cons not in done:
         commit_consecutive(family)
         done.add(cons)
 
