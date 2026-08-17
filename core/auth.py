@@ -111,6 +111,10 @@ NAV_GROUPS = [
             # + API 684. Motor puro en core.balance (extraído de ROTORIX, validado
             # en campo). Solo admin/specialist — bloqueado para cliente.
             {"label": "⚖️  Balanceo", "page": "pages/19_Balanceo.py"},
+            # Módulo Calibración (curvas de linealidad de sensores) bajo API 670
+            # 5.ª ed. + manual del fabricante. Motor puro en core.calibration.
+            # Proximidad / acelerómetro / velomitor. Solo admin/specialist.
+            {"label": "📐  Calibración", "page": "pages/21_Calibracion.py"},
         ],
     },
     {
@@ -177,6 +181,8 @@ CLIENT_BLOCKED_PAGES = {
     "pages/19_Balanceo.py",
     # FASE J v3.31.221 — Admin licencias Planta es solo SIGA internal
     "pages/20_License_Admin.py",
+    # Calibración: herramienta del analista (curvas de linealidad API 670).
+    "pages/21_Calibracion.py",
 }
 
 
