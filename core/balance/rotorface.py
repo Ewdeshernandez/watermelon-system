@@ -34,7 +34,7 @@ def _pt(cx: float, cy: float, r: float, ang_deg: float) -> Tuple[float, float]:
 
 
 def _plane_svg(cx: float, cy: float, r: float, pl: Dict[str, Any],
-               vmax: float) -> str:
+               vmax: float, arrow_id: str) -> str:
     color = _COLORS.get(pl.get("color", "cyan"), _COLORS["cyan"])
     fill = _FILLS.get(pl.get("color", "cyan"), "#eef2f7")
     s: List[str] = []
@@ -60,7 +60,8 @@ def _plane_svg(cx: float, cy: float, r: float, pl: Dict[str, Any],
         L = r * 0.82 * (vmag / vmax)
         vx, vy = _pt(cx, cy, L, vang)
         s.append(f'<line x1="{cx:.1f}" y1="{cy:.1f}" x2="{vx:.1f}" y2="{vy:.1f}" '
-                 f'stroke="{_VIB}" stroke-width="3" marker-end="url(#vibarrow)"/>')
+                 f'stroke="{_VIB}" stroke-width="2" stroke-linecap="round" '
+                 f'marker-end="url(#{arrow_id})"/>')
         anchor = "start" if vx >= cx else "end"
         dx = 8 if vx >= cx else -8
         s.append(f'<text x="{vx+dx:.1f}" y="{vy-6:.1f}" text-anchor="{anchor}" '
@@ -92,6 +93,11 @@ def _plane_svg(cx: float, cy: float, r: float, pl: Dict[str, Any],
 
 def rotor_face_svg(planes: List[Dict[str, Any]], height: int = 300) -> str:
     """SVG de la(s) cara(s) del rotor con vibración + contrapeso."""
+    import secrets
+    # ID de marcador ÚNICO por SVG: si 1p y 2p comparten el mismo id en el DOM,
+    # el segundo SVG no resuelve la flecha (por eso "2 planos no mostraba flecha").
+    arrow_id = "vibarrow_" + secrets.token_hex(3)
+
     n = max(1, len(planes))
     cell = 360
     width = cell * n
@@ -102,7 +108,7 @@ def rotor_face_svg(planes: List[Dict[str, Any]], height: int = 300) -> str:
                default=0.0)
 
     body = "".join(
-        _plane_svg(cell * (i + 0.5), cy, r, pl, vmax)
+        _plane_svg(cell * (i + 0.5), cy, r, pl, vmax, arrow_id)
         for i, pl in enumerate(planes))
 
     return (
@@ -110,9 +116,9 @@ def rotor_face_svg(planes: List[Dict[str, Any]], height: int = 300) -> str:
         f'<svg viewBox="0 0 {width} {height}" width="100%" '
         f'style="max-height:{height}px" xmlns="http://www.w3.org/2000/svg" '
         f'font-family="Inter,system-ui,sans-serif">'
-        f'<defs><marker id="vibarrow" markerWidth="9" markerHeight="9" '
-        f'refX="6" refY="3" orient="auto" markerUnits="strokeWidth">'
-        f'<path d="M0,0 L6,3 L0,6 Z" fill="{_VIB}"/></marker></defs>'
+        f'<defs><marker id="{arrow_id}" markerWidth="10" markerHeight="8" '
+        f'refX="6.5" refY="3" orient="auto" markerUnits="strokeWidth">'
+        f'<path d="M0,0 L7,3 L0,6 L1.8,3 Z" fill="{_VIB}"/></marker></defs>'
         f'{body}</svg></div>'
     )
 
