@@ -42,7 +42,7 @@ from core.balance.ui import (
     bal_hero_card, bal_section_header, bal_kpi_row, bal_status_banner,
     bal_footer_norms,
 )
-from core.balance.rotor3d import rotor_3d_figure, build_planes_1p, build_planes_2p
+from core.balance.rotorface import rotor_face_svg, build_planes_1p, build_planes_2p
 
 
 # =====================================================================
@@ -271,10 +271,7 @@ with tab_1p:
         _vib1, st.session_state.get("b1_unit", "µm pk-pk"),
         _r1prev["corr_ang_deg"] if _r1prev else None,
         f"{_r1prev['corr_mass_g']:.1f} g" if _r1prev else "")
-    st.plotly_chart(rotor_3d_figure(_planes1), use_container_width=True,
-                    key="bal_rotor_1p",
-                    config={"displayModeBar": False, "scrollZoom": False,
-                            "doubleClick": False, "displaylogo": False})
+    st.markdown(rotor_face_svg(_planes1), unsafe_allow_html=True)
     st.caption("🔴 Vibración medida (V0)   ·   🔷 Contrapeso a instalar (aparece al calcular)")
 
     top = st.columns([1, 1])
@@ -372,10 +369,7 @@ with tab_2p:
                                    _wba, f"{_wbm:.1f} g")
     else:
         _planes2 = build_planes_2p(_vibA, _vibB, _u2, None, "", None, "")
-    st.plotly_chart(rotor_3d_figure(_planes2), use_container_width=True,
-                    key="bal_rotor_2p",
-                    config={"displayModeBar": False, "scrollZoom": False,
-                            "doubleClick": False, "displaylogo": False})
+    st.markdown(rotor_face_svg(_planes2), unsafe_allow_html=True)
     st.caption("🔴 Vibración inicial (A0/B0)   ·   🔷 Contrapesos (aparecen al calcular)")
 
     top = st.columns([1, 1])
