@@ -48,8 +48,8 @@ def report_family_selector() -> str:
         }}
         /* punto de color por pestaña (algo de vida, sin cajas) */
         div[data-testid="stRadio"] label::before {{
-            content:"●"; font-size:9px; margin-right:7px; vertical-align:middle;
-            opacity:0.9;
+            content:"●"; font-size:13px; margin-right:8px; vertical-align:middle;
+            position:relative; top:-1px; opacity:0.95;
         }}
         div[data-testid="stRadio"] label:nth-of-type(1)::before {{ color:#64748B; }}
         div[data-testid="stRadio"] label:nth-of-type(2)::before {{ color:#1AAEE5; }}
