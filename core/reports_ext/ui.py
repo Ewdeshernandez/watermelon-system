@@ -26,25 +26,26 @@ def report_family_selector() -> str:
     st.markdown(
         f"""
         <style>
-        /* Barra de pestañas de familias de reporte (estilo Calibración) */
+        /* Barra de pestañas PLANA estilo st.tabs (Calibración): sin cajas,
+           un solo color de acento (subrayado cian en la activa). */
         div[data-testid="stRadio"] > div[role="radiogroup"] {{
-            flex-direction:row !important; gap:4px; flex-wrap:wrap;
-            border-bottom:2px solid #E5EAF0; margin-bottom:10px;
+            flex-direction:row !important; gap:30px; flex-wrap:wrap;
+            border-bottom:1px solid #E5EAF0; margin-bottom:16px;
         }}
         div[data-testid="stRadio"] label {{
-            background:{GRAY_LIGHT}; border:1px solid #E5EAF0; border-bottom:none;
-            border-radius:10px 10px 0 0; padding:8px 18px !important; margin:0 !important;
-            font-weight:600; color:{NAVY}; cursor:pointer; transition:all .15s;
+            background:transparent !important; border:none !important;
+            border-radius:0 !important; box-shadow:none;
+            padding:6px 1px 11px 1px !important; margin:0 !important;
+            font-weight:600; font-size:15px; color:#64748B; cursor:pointer;
+            transition:color .15s;
         }}
-        div[data-testid="stRadio"] label:hover {{ background:#E8F4FB; }}
-        /* ocultar SOLO el círculo del radio (primer DIV del label; robusto
-           aunque haya un <input> antes) */
+        div[data-testid="stRadio"] label:hover {{ color:{NAVY}; }}
+        /* ocultar el círculo del radio (primer DIV del label) */
         div[data-testid="stRadio"] label > div:first-of-type {{ display:none !important; }}
-        /* pestaña activa: relleno navy */
+        /* pestaña activa: texto navy + subrayado cian (indicador de tab) */
         div[data-testid="stRadio"] label:has(input:checked) {{
-            background:{NAVY}; color:#ffffff; border-color:{NAVY};
+            color:{NAVY}; box-shadow:inset 0 -3px 0 {CYAN};
         }}
-        div[data-testid="stRadio"] label:has(input:checked) * {{ color:#ffffff !important; }}
         </style>
         """,
         unsafe_allow_html=True,

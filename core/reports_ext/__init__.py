@@ -17,12 +17,12 @@ contenido; la UI (page.py) hace el wiring con formularios y carga de fotos.
 from __future__ import annotations
 
 REPORT_FAMILIES = [
-    ("sistema", "📊  Reporte del Sistema"),
-    ("diario", "📅  Diario"),
-    ("preliminar", "📝  Preliminar"),
-    ("boroscopia", "🔍  Boroscopia"),
-    ("alineacion", "📐  Alineación"),
-    ("mecanico", "🔧  Mecánico"),
+    ("sistema", "Reporte del Sistema"),
+    ("diario", "Diario"),
+    ("preliminar", "Preliminar"),
+    ("boroscopia", "Boroscopia"),
+    ("alineacion", "Alineación"),
+    ("mecanico", "Mecánico"),
 ]
 
 __all__ = ["REPORT_FAMILIES"]
