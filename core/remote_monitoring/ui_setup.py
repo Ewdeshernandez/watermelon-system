@@ -4,12 +4,15 @@ core/remote_monitoring/ui_setup.py — Tab "Setup" (config amigable ADRE/System1
 
 Render Streamlit de la configuración de máquina + grid de canales. Estilo
 ADRE 408 / System1 pero simple: tarjeta de máquina compacta + grid editable
-+ validación en vivo API 670. Escribe al modelo único (sensor_map/instance)
-vía core.remote_monitoring.config.
++ diagrama de sección de cojinete (SVG, bolitas de color) + validación en
+vivo API 670. Escribe al modelo único (sensor_map/instance) vía
+core.remote_monitoring.config.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List
+import html
+import math
+from typing import List
 
 import pandas as pd
 import streamlit as st
@@ -17,11 +20,30 @@ import streamlit as st
 from core.remote_monitoring import config as cfg
 
 
+# Paleta (misma que Calibración / Balanceo — clase mundial, no PowerPoint)
+NAVY = "#0F1E3D"
+CYAN = "#1AAEE5"
+CYAN_DARK = "#0F7FB0"
+AMBER = "#D89B22"
+GRAY = "#6B7280"
+GRAY_LIGHT = "#F4F7FB"
+
+# Color de bolita por tipo de sensor
+_TYPE_COLOR = {
+    "proximity": "#8b5cf6",       # violeta
+    "velometer": "#06b6d4",       # cian
+    "accelerometer": "#ef4444",   # rojo
+    "keyphasor": AMBER,           # ámbar
+}
+
 _GRID_COLS = ["bnc_port", "point_label", "plane", "sensor_type",
               "sensitivity_mv_per_eu", "unit_native", "coupling",
               "angle_deg", "side", "alarm", "danger"]
 
 
+# =====================================================================
+# Estado de máquina
+# =====================================================================
 def _init_machine_defaults() -> None:
     d = {
         "rm_m_name": "Máquina ad-hoc", "rm_m_rpm": 3600.0,
@@ -47,10 +69,9 @@ def _machine_from_state() -> cfg.MachineConfig:
     )
 
 
-def _rows_from_grid() -> List[cfg.ChannelRow]:
-    raw = st.session_state.get("rm_setup_rows", [])
+def _rows_from_records(records: list) -> List[cfg.ChannelRow]:
     rows: List[cfg.ChannelRow] = []
-    for r in raw:
+    for r in records:
         try:
             rows.append(cfg.ChannelRow(
                 bnc_port=int(r.get("bnc_port", 0) or 0),
@@ -70,16 +91,44 @@ def _rows_from_grid() -> List[cfg.ChannelRow]:
     return rows
 
 
+def _inject_css() -> None:
+    st.markdown(f"""
+        <style>
+        .rm-sec-head {{
+            background:{NAVY}; color:#fff; padding:10px 16px; border-radius:10px 10px 0 0;
+            font-weight:700; font-size:14px; letter-spacing:.02em;
+            border-bottom:3px solid {CYAN}; margin-top:6px;
+        }}
+        .rm-sec-head small {{ color:{CYAN}; font-weight:600; }}
+        /* Marco vistoso de la tabla — tipo software internacional */
+        div[data-testid="stDataFrame"], div[data-testid="stDataEditor"] {{
+            border:1px solid #d6deea; border-radius:0 0 12px 12px;
+            box-shadow:0 6px 18px rgba(15,30,61,.08); overflow:hidden;
+        }}
+        .rm-legend span {{
+            display:inline-flex; align-items:center; gap:5px; margin-right:14px;
+            font-size:12px; color:{GRAY};
+        }}
+        .rm-legend i {{ width:13px; height:13px; border-radius:50%;
+            display:inline-block; border:2px solid #fff; box-shadow:0 0 0 1px #cbd5e1; }}
+        </style>
+    """, unsafe_allow_html=True)
+
+
+# =====================================================================
+# Render principal
+# =====================================================================
 def render_setup() -> None:
     _init_machine_defaults()
+    _inject_css()
 
-    st.markdown("#### 1 · Máquina")
-    st.caption("Definí el tren (API 684). Elegí una plantilla para autocompletar "
-               "rpm, cojinete y norma ISO, o cargá manual.")
+    st.markdown('<div class="rm-sec-head">1 · Máquina '
+                '<small>— tren (API 684)</small></div>', unsafe_allow_html=True)
+    st.caption("Elegí una plantilla para autocompletar rpm, cojinete y norma ISO, o cargá manual.")
 
     # --- plantilla ---
     try:
-        from core.machine_templates import list_templates, get_template, suggest_norm_for_template
+        from core.machine_templates import list_templates, suggest_norm_for_template
         templates = list_templates()
     except Exception:  # noqa: BLE001
         templates = []
@@ -120,7 +169,7 @@ def render_setup() -> None:
     with c3:
         st.radio("Sentido de giro", cfg.ROTATIONS, key="rm_m_rot", horizontal=True)
         st.radio("Speed control", cfg.SPEED_CONTROLS, key="rm_m_speed", horizontal=True,
-                 help="Variable habilita lógica de arranque/parada (Fase 2).")
+                 help="Variable habilita lógica de arranque/parada (transitorios).")
 
     c4, c5, c6 = st.columns(3)
     with c4:
@@ -133,67 +182,66 @@ def render_setup() -> None:
 
     st.divider()
 
-    # --- grid de canales ---
-    st.markdown("#### 2 · Canales (BNC → punto de medición)")
+    # =================================================================
+    # 2 · Canales
+    # =================================================================
+    st.markdown('<div class="rm-sec-head">2 · Canales '
+                '<small>— BNC → punto de medición</small></div>', unsafe_allow_html=True)
+
     gcol1, gcol2 = st.columns([1, 3])
     with gcol1:
         if st.button("🧩 Auto-generar layout", use_container_width=True,
                      help="Genera pares X/Y por cojinete + keyphasor desde la máquina."):
             machine = _machine_from_state()
             rows = cfg.auto_layout(machine)
-            st.session_state["rm_setup_rows"] = [
-                {c: getattr(r, c) for c in _GRID_COLS} for r in rows]
+            st.session_state["rm_setup_rows"] = [{c: getattr(r, c) for c in _GRID_COLS} for r in rows]
             st.rerun()
     with gcol2:
-        st.caption("Editá cada fila. Tipos: proximity / velometer / accelerometer / "
-                   "keyphasor. Convención Bently (API 670): ángulo desde TDC (arriba), "
-                   "**R** = horario, **L** = antihorario → 45°L + 45°R = 90°. Sensib. en mV/EU.")
+        st.caption("Convención Bently (API 670): ángulo desde **TDC (arriba)**, "
+                   "**R** = horario, **L** = antihorario → 45°L + 45°R = 90°. "
+                   "La unidad se ajusta al tipo de sensor.")
 
-    if not st.session_state.get("rm_setup_rows"):
-        st.info("Pulsá **Auto-generar layout** para empezar, o agregá filas manualmente.")
-        st.session_state["rm_setup_rows"] = []
+    st.session_state.setdefault("rm_setup_rows", [])
 
+    # Patrón correcto de data_editor: la FUENTE (rm_setup_rows) es estable
+    # (solo cambia en Auto-generar / Guardar). Las ediciones viven en el
+    # widget keyed y se leen del valor de retorno — así el cambio de ángulo
+    # se toma de una, sin el bug de "reescribir" (no re-alimentamos la fuente
+    # en cada rerun).
     df = pd.DataFrame(st.session_state["rm_setup_rows"], columns=_GRID_COLS)
     edited = st.data_editor(
-        df,
-        key="rm_grid_editor",
-        num_rows="dynamic",
-        use_container_width=True,
+        df, key="rm_grid_editor", num_rows="dynamic", use_container_width=True,
         column_config={
-            "bnc_port": st.column_config.NumberColumn("BNC", min_value=1, max_value=32, step=1),
-            "point_label": st.column_config.TextColumn("Punto"),
-            "plane": st.column_config.NumberColumn("Cojinete", min_value=0, max_value=16, step=1),
+            "bnc_port": st.column_config.NumberColumn("BNC", min_value=1, max_value=32, step=1, width="small"),
+            "point_label": st.column_config.TextColumn("Punto", width="small"),
+            "plane": st.column_config.NumberColumn("Cojinete", min_value=0, max_value=16, step=1, width="small"),
             "sensor_type": st.column_config.SelectboxColumn("Tipo", options=cfg.SENSOR_TYPES),
             "sensitivity_mv_per_eu": st.column_config.NumberColumn("Sensib. mV/EU", step=1.0),
-            "unit_native": st.column_config.SelectboxColumn("Unidad", options=cfg.ALL_UNITS,
-                                                            help="Se autocorrige al tipo del sensor."),
-            "coupling": st.column_config.SelectboxColumn("Coupling", options=cfg.COUPLINGS),
-            "angle_deg": st.column_config.NumberColumn("Ángulo °", min_value=0.0, max_value=360.0, step=5.0),
-            "side": st.column_config.SelectboxColumn("Lado", options=["", "L", "R"]),
-            "alarm": st.column_config.NumberColumn("Alert", step=0.1),
-            "danger": st.column_config.NumberColumn("Danger", step=0.1),
+            "unit_native": st.column_config.SelectboxColumn("Unidad", options=cfg.ALL_UNITS),
+            "coupling": st.column_config.SelectboxColumn("Coupling", options=cfg.COUPLINGS, width="small"),
+            "angle_deg": st.column_config.NumberColumn("Ángulo °", min_value=0.0, max_value=360.0, step=5.0, width="small"),
+            "side": st.column_config.SelectboxColumn("Lado", options=["", "L", "R"], width="small"),
+            "alarm": st.column_config.NumberColumn("Alert", step=0.1, width="small"),
+            "danger": st.column_config.NumberColumn("Danger", step=0.1, width="small"),
         },
     )
-    # persistir edición + auto-corregir unidad al tipo del sensor
-    rows_edited = edited.to_dict("records")
-    for r in rows_edited:
-        t = str(r.get("sensor_type", "proximity") or "proximity")
-        valid = cfg.valid_units_for(t)
-        if valid and r.get("unit_native") not in valid:
-            r["unit_native"] = cfg.default_unit(t)
-    st.session_state["rm_setup_rows"] = rows_edited
+    rows = _rows_from_records(edited.to_dict("records"))
 
-    # --- diagrama polar: dónde queda físicamente cada sonda ---
-    _render_probe_polar(_rows_from_grid(), _machine_from_state())
+    # =================================================================
+    # Diagrama de sección de cojinete (SVG pro — bolitas de color)
+    # =================================================================
+    _render_bearing_diagram(rows, _machine_from_state())
 
-    # --- validación en vivo API 670 ---
-    st.markdown("#### 3 · Validación (API 670 / ISO 20816)")
+    # =================================================================
+    # 3 · Validación
+    # =================================================================
+    st.markdown('<div class="rm-sec-head">3 · Validación '
+                '<small>— API 670 / ISO 20816</small></div>', unsafe_allow_html=True)
     machine = _machine_from_state()
-    setup = cfg.AcqSetup(machine=machine, channels=_rows_from_grid())
+    setup = cfg.AcqSetup(machine=machine, channels=rows)
     findings = cfg.validate_setup(setup)
     n_err = sum(1 for f in findings if f.level == "error")
     n_warn = sum(1 for f in findings if f.level == "warn")
-
     for f in findings:
         if f.level == "error":
             st.error(f"❌ {f.message}")
@@ -203,13 +251,12 @@ def render_setup() -> None:
             st.success(f"✅ {f.message}")
 
     st.divider()
-
-    # --- guardar ---
     scol1, scol2 = st.columns([1, 3])
     with scol1:
         can_save = n_err == 0 and len(setup.channels) > 0
         if st.button("💾 Guardar configuración", type="primary",
                      use_container_width=True, disabled=not can_save):
+            st.session_state["rm_setup_rows"] = edited.to_dict("records")  # commit
             _save_and_activate(setup)
     with scol2:
         if n_err:
@@ -220,86 +267,132 @@ def render_setup() -> None:
             st.caption("Todo OK. Guardá y pasá al tab **Monitor** para adquirir.")
 
 
+# =====================================================================
+# Diagrama SVG de sección de cojinete
+# =====================================================================
+def _rot_arrow(cx: float, cy: float, r: float, rotation: str) -> str:
+    """Flecha circular de sentido de giro (SVG)."""
+    cw = (rotation or "").upper() == "CW"
+    start_deg, end_deg, sweep = (135, 45, 1) if cw else (45, 135, 0)
+
+    def pt(a):
+        rad = math.radians(a)
+        return cx + r * math.cos(rad), cy + r * math.sin(rad)
+
+    x0, y0 = pt(start_deg)
+    x1, y1 = pt(end_deg)
+    arc = (f'<path d="M{x0:.1f},{y0:.1f} A{r},{r} 0 1 {sweep} {x1:.1f},{y1:.1f}" '
+           f'fill="none" stroke="{CYAN_DARK}" stroke-width="3.5" stroke-linecap="round"/>')
+    tangent = end_deg + (90 if cw else -90)
+    a1 = math.radians(tangent + 150)
+    a2 = math.radians(tangent - 150)
+    s = 12
+    p1 = (x1 + s * math.cos(a1), y1 + s * math.sin(a1))
+    p2 = (x1 + s * math.cos(a2), y1 + s * math.sin(a2))
+    head = (f'<path d="M{x1:.1f},{y1:.1f} L{p1[0]:.1f},{p1[1]:.1f} '
+            f'L{p2[0]:.1f},{p2[1]:.1f} Z" fill="{CYAN_DARK}"/>')
+    lbl = (f'<text x="{cx:.0f}" y="{cy+5:.0f}" text-anchor="middle" font-size="15" '
+           f'font-weight="800" fill="{NAVY}">{"CW ↻" if cw else "CCW ↺"}</text>')
+    return arc + head + lbl
+
+
+def _bearing_diagram_svg(probes: List[cfg.ChannelRow], machine: cfg.MachineConfig) -> str:
+    C = 210.0
+    R_out = 160.0
+    R_ball = 138.0
+    rb = 28.0
+    parts: List[str] = []
+    parts.append(f'''<defs>
+      <radialGradient id="rm_house" cx="42%" cy="38%" r="72%">
+        <stop offset="0%" stop-color="#26406e"/><stop offset="100%" stop-color="{NAVY}"/>
+      </radialGradient>
+      <radialGradient id="rm_shaft" cx="40%" cy="35%" r="75%">
+        <stop offset="0%" stop-color="#e8eef6"/><stop offset="100%" stop-color="#9aa8bd"/>
+      </radialGradient>
+      <filter id="rm_sh" x="-40%" y="-40%" width="180%" height="180%">
+        <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#0f1e3d" flood-opacity="0.35"/>
+      </filter>
+    </defs>''')
+    # alojamiento + banda + eje
+    parts.append(f'<circle cx="{C}" cy="{C}" r="{R_out}" fill="url(#rm_house)" stroke="{NAVY}" stroke-width="2"/>')
+    parts.append(f'<circle cx="{C}" cy="{C}" r="116" fill="#ffffff"/>')
+    parts.append(f'<circle cx="{C}" cy="{C}" r="60" fill="url(#rm_shaft)" stroke="#7c8ba3" stroke-width="1.5"/>')
+    # marca TDC
+    parts.append(f'<path d="M{C-9},{C-R_out+3} L{C+9},{C-R_out+3} L{C},{C-R_out+17} Z" fill="{CYAN}"/>')
+    parts.append(f'<text x="{C}" y="{C-R_out-9}" text-anchor="middle" font-size="12" '
+                 f'font-weight="700" fill="{NAVY}">TDC 0°</text>')
+    # flecha de giro
+    parts.append(_rot_arrow(C, C, 84, machine.rotation))
+    # bolitas de sondas
+    for p in probes:
+        theta = cfg.absolute_angle(p.angle_deg, p.side)
+        rad = math.radians(theta)
+        x = C + R_ball * math.sin(rad)
+        y = C - R_ball * math.cos(rad)
+        color = _TYPE_COLOR.get(p.sensor_type, "#475569")
+        label = html.escape((p.point_label or "")[:5])
+        parts.append(f'<line x1="{C+80*math.sin(rad):.1f}" y1="{C-80*math.cos(rad):.1f}" '
+                     f'x2="{x:.1f}" y2="{y:.1f}" stroke="#cbd5e1" stroke-width="2"/>')
+        parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{rb}" fill="{color}" '
+                     f'stroke="#ffffff" stroke-width="3.5" filter="url(#rm_sh)"/>')
+        parts.append(f'<text x="{x:.1f}" y="{y+4:.1f}" text-anchor="middle" font-size="12.5" '
+                     f'font-weight="800" fill="#ffffff" font-family="monospace">{label}</text>')
+        lx = C + (R_out + 24) * math.sin(rad)
+        ly = C - (R_out + 24) * math.cos(rad)
+        side_txt = f"{p.angle_deg:.0f}°{p.side}".strip()
+        parts.append(f'<text x="{lx:.1f}" y="{ly+4:.1f}" text-anchor="middle" font-size="11" '
+                     f'fill="{GRAY}">{html.escape(side_txt)}</text>')
+    return (f'<svg viewBox="0 0 420 452" width="100%" style="max-width:430px;display:block;'
+            f'margin:0 auto" xmlns="http://www.w3.org/2000/svg">{"".join(parts)}</svg>')
+
+
+def _render_bearing_diagram(rows: List[cfg.ChannelRow], machine: cfg.MachineConfig) -> None:
+    planes = sorted({r.plane for r in rows if r.plane > 0})
+    if not planes:
+        return
+    st.markdown('<div class="rm-sec-head">Sección de cojinete '
+                '<small>— posición física de las sondas</small></div>', unsafe_allow_html=True)
+    dcol1, dcol2 = st.columns([3, 2])
+    with dcol1:
+        sel = st.selectbox("Cojinete", planes, key="rm_polar_brg",
+                           format_func=lambda p: f"Cojinete {p}")
+        probes = [r for r in rows if r.plane == sel]   # incluye keyphasor asignado al cojinete
+        st.markdown(_bearing_diagram_svg(probes, machine), unsafe_allow_html=True)
+    with dcol2:
+        # leyenda de colores
+        st.markdown(
+            '<div class="rm-legend" style="margin:8px 0 12px 0;">'
+            f'<span><i style="background:{_TYPE_COLOR["proximity"]}"></i>Proximidad</span>'
+            f'<span><i style="background:{_TYPE_COLOR["velometer"]}"></i>Velocidad</span>'
+            f'<span><i style="background:{_TYPE_COLOR["accelerometer"]}"></i>Acelerómetro</span>'
+            f'<span><i style="background:{_TYPE_COLOR["keyphasor"]}"></i>Keyphasor</span>'
+            '</div>', unsafe_allow_html=True)
+        radials = [r for r in probes if r.sensor_type in ("proximity", "velometer", "accelerometer")]
+        if len(radials) >= 2:
+            a0 = cfg.absolute_angle(radials[0].angle_deg, radials[0].side)
+            a1 = cfg.absolute_angle(radials[1].angle_deg, radials[1].side)
+            sep = cfg.angular_separation(a0, a1)
+            if abs(sep - 90.0) <= 5.0:
+                st.success(f"✅ Par ortogonal: {sep:.0f}° entre {radials[0].point_label} "
+                           f"y {radials[1].point_label}.")
+            else:
+                st.warning(f"⚠ {radials[0].point_label}–{radials[1].point_label} a {sep:.0f}° "
+                           "(no 90°). Para órbita correcta van a 90°.")
+        kph = [r for r in probes if r.sensor_type == "keyphasor"]
+        if kph:
+            st.caption(f"🔑 Keyphasor **{kph[0].point_label}** en este cojinete "
+                       f"({cfg.absolute_angle(kph[0].angle_deg, kph[0].side):.0f}° abs).")
+
+
 def _save_and_activate(setup: cfg.AcqSetup) -> None:
     try:
         path = cfg.save_setup(setup)
     except Exception as e:  # noqa: BLE001
         st.error(f"No se pudo guardar: {type(e).__name__}: {e}")
         return
-    # Activar para el tab Monitor
     st.session_state["rm_channels"] = cfg.setup_to_channel_configs(setup)
     st.session_state["rm_machine_rpm"] = float(setup.machine.rpm_nominal)
     st.session_state["rm_machine_name"] = setup.machine.name
     st.session_state["rm_active_setup"] = setup.machine.name
     st.success(f"💾 Guardado: `{path.name}` · {len(setup.channels)} canales. "
                "Andá al tab **Monitor** y pulsá ▶ Iniciar.")
-
-
-def _render_probe_polar(rows: List[cfg.ChannelRow], machine: cfg.MachineConfig) -> None:
-    """Vista polar tipo reloj: dónde queda físicamente cada sonda.
-
-    Convención Bently (API 670): TDC (arriba) = 0°, R horario, L antihorario.
-    El operador escribe ángulo+lado en el grid y ve la bolita aparecer en su
-    posición real. Hace obvia la ortogonalidad 90° del par X/Y.
-    """
-    import plotly.graph_objects as go
-
-    vib = [r for r in rows if r.sensor_type != "keyphasor" and r.plane > 0]
-    planes = sorted({r.plane for r in vib})
-    if not planes:
-        st.caption("Agregá sondas radiales (con cojinete) para ver la vista polar.")
-        return
-
-    st.markdown("##### Posición física de las sondas (vista polar)")
-    sel = st.selectbox("Ver cojinete", planes, key="rm_polar_brg",
-                       format_func=lambda p: f"Cojinete {p}")
-    probes = [r for r in vib if r.plane == sel]
-    if not probes:
-        return
-
-    theta = [cfg.absolute_angle(r.angle_deg, r.side) for r in probes]
-    labels = [r.point_label for r in probes]
-
-    fig = go.Figure()
-    # anillo del alojamiento
-    fig.add_trace(go.Scatterpolar(
-        r=[1.0] * 361, theta=list(range(361)), mode="lines",
-        line=dict(color="#cbd5e1", width=1), hoverinfo="skip", showlegend=False))
-    # sondas
-    fig.add_trace(go.Scatterpolar(
-        r=[1.0] * len(probes), theta=theta, mode="markers+text",
-        text=labels, textposition="middle center",
-        textfont=dict(color="white", size=10, family="monospace"),
-        marker=dict(size=30, color="#2563eb", line=dict(color="white", width=2)),
-        hovertext=[f"{r.point_label} · {r.angle_deg:.0f}°{r.side} (abs {t:.0f}°)"
-                   for r, t in zip(probes, theta)],
-        hoverinfo="text", showlegend=False))
-
-    fig.update_layout(
-        height=380, margin=dict(l=40, r=40, t=20, b=20),
-        polar=dict(
-            radialaxis=dict(visible=False, range=[0, 1.15]),
-            angularaxis=dict(
-                rotation=90, direction="clockwise",
-                tickmode="array",
-                tickvals=[0, 45, 90, 135, 180, 225, 270, 315],
-                ticktext=["TDC 0°", "45°R", "90°R", "135°R",
-                          "BDC 180°", "135°L", "90°L", "45°L"],
-                tickfont=dict(size=10)),
-        ),
-    )
-    c1, c2 = st.columns([3, 2])
-    with c1:
-        st.plotly_chart(fig, use_container_width=True)
-    with c2:
-        st.caption(f"**Sentido de giro:** {machine.rotation}")
-        # chequeo de ortogonalidad del par
-        if len(probes) >= 2:
-            sep = cfg.angular_separation(theta[0], theta[1])
-            if abs(sep - 90.0) <= 5.0:
-                st.success(f"✅ Par ortogonal: {sep:.0f}° entre {labels[0]} y {labels[1]}.")
-            else:
-                st.warning(f"⚠ {labels[0]}–{labels[1]} a {sep:.0f}° (no 90°). "
-                           "Para órbita correcta las sondas van a 90°.")
-        st.caption("Bently/API 670: 0° arriba (TDC), R horario, L antihorario. "
-                   "Ej: una sonda 45°L y otra 45°R quedan a 90°.")
