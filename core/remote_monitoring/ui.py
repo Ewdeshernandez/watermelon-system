@@ -7,13 +7,15 @@ de Live Monitoring. Independiente de Live Monitoring (que sigue mostrando
 los escalares Modbus del Bently). Acá se hace adquisición dinámica en vivo
 (NI / simulado) y se dibuja rotordinámica.
 
+Dos tabs:
+  ⚙️ Setup   — config amigable de máquina + canales (ui_setup.render_setup).
+  📡 Monitor — adquisición en vivo + gráficos, usando los canales guardados
+               en Setup (o un demo si aún no configuraste).
+
 Patrón de refresco: SÍNCRONO. El AcqAgent vive en st.session_state; en cada
 rerun bombeamos unos bloques (agent.pump) y redibujamos. "Live" hace
 st.rerun() en loop. Nada de hilos en la UI — los hilos son para el Agent
 headless de sitio (core/remote_monitoring/agent.py start/stop).
-
-En Mac corre con SimulatedStreamSource. En el PC de sitio se elige la
-fuente NI (NIStreamSource) — misma UI, misma tubería.
 """
 
 from __future__ import annotations
@@ -30,51 +32,50 @@ from core.remote_monitoring.agent import AcqAgent
 from core.remote_monitoring.stream_source import (
     StreamConfig,
     SimulatedStreamSource,
+    is_keyphasor_channel,
 )
-from core.remote_monitoring.keyphasor import detect_keyphasor, one_x_vector
+from core.remote_monitoring.keyphasor import one_x_vector
+
 
 # =====================================================================
 # Punto de entrada — llamado por pages/02_Remote_Monitoring.py
 # =====================================================================
 def render_remote_monitoring() -> None:
-    """Renderiza la página completa Remote Monitoring."""
-    _render_remote_monitoring()
+    """Renderiza la página completa Remote Monitoring (Setup + Monitor)."""
+    try:
+        from core.ui_theme import page_header
+        page_header(title="Remote Monitoring",
+                    subtitle="Adquisición dinámica en vivo · rotordinámica NI · ISO 20816 / API 670")
+    except Exception:  # noqa: BLE001
+        st.title("Remote Monitoring")
+
+    tab_setup, tab_monitor = st.tabs(["⚙️ Setup", "📡 Monitor"])
+    with tab_setup:
+        from core.remote_monitoring.ui_setup import render_setup
+        render_setup()
+    with tab_monitor:
+        _render_monitor()
 
 
 # =====================================================================
-# Helpers de configuración
+# Helpers de construcción
 # =====================================================================
-def _make_channels(n_pairs: int, with_keyphasor: bool) -> List[ChannelConfig]:
-    """Genera pares X/Y de proximidad (mil) + keyphasor opcional.
-
-    Nombres: 1Y,1X,2Y,2X,... (convención Watermelon, sin underscore en display).
-    """
-    chs: List[ChannelConfig] = []
-    bnc = 1
-    for p in range(1, n_pairs + 1):
-        chs.append(ChannelConfig(name=f"{p}Y", coupling="AC",
-                                  sensitivity_mv_per_eu=200.0, bnc_port=bnc, units="mil"))
-        bnc += 1
-        chs.append(ChannelConfig(name=f"{p}X", coupling="AC",
-                                  sensitivity_mv_per_eu=200.0, bnc_port=bnc, units="mil"))
-        bnc += 1
-    if with_keyphasor:
-        chs.append(ChannelConfig(name="KPH", coupling="DC",
-                                  sensitivity_mv_per_eu=1.0, bnc_port=bnc, units="V"))
-    return chs
+def _demo_channels() -> List[ChannelConfig]:
+    """Layout demo (2 cojinetes X/Y + keyphasor) para arrancar sin config."""
+    from core.remote_monitoring.config import MachineConfig, auto_layout, setup_to_channel_configs, AcqSetup
+    m = MachineConfig(n_bearings=2)
+    return setup_to_channel_configs(AcqSetup(machine=m, channels=auto_layout(m)))
 
 
-def _config_signature(source_kind, fs, n_pairs, kph, rpm, defect, instance_id) -> str:
-    return f"{source_kind}|{fs}|{n_pairs}|{kph}|{rpm}|{defect}|{instance_id}"
+def _channels_fingerprint(channels: List[ChannelConfig]) -> str:
+    return "|".join(f"{c.name}:{c.bnc_port}:{c.coupling}:{c.sensitivity_mv_per_eu}" for c in channels)
 
 
-def _build_agent(source_kind: str, fs: float, n_pairs: int, with_kph: bool,
-                 rpm: float, defect: str, instance_id: str) -> AcqAgent:
-    channels = _make_channels(n_pairs, with_kph)
+def _build_agent(channels: List[ChannelConfig], source_kind: str, rpm: float,
+                 defect: str, fs: float, instance_id: str) -> AcqAgent:
     cfg = StreamConfig(
         sample_rate_hz=fs, channels=channels,
         block_seconds=0.25, buffer_seconds=8.0,
-        keyphasor_name="KPH" if with_kph else None,
         rpm=rpm, defect=defect,
     )
     if source_kind == "NI 9178 (campo)":
@@ -86,58 +87,60 @@ def _build_agent(source_kind: str, fs: float, n_pairs: int, with_kph: bool,
 
 
 # =====================================================================
-# Render principal
+# Tab Monitor — adquisición + gráficos
 # =====================================================================
-def _render_remote_monitoring() -> None:
-    try:
-        from core.ui_theme import page_header
-        page_header(title="Remote Monitoring",
-                    subtitle="Adquisición dinámica en vivo · rotordinámica NI · ISO 20816 / API 670")
-    except Exception:
-        st.title("Remote Monitoring")
+def _render_monitor() -> None:
+    channels: Optional[List[ChannelConfig]] = st.session_state.get("rm_channels")
 
-    # ---------------- Panel de configuración ----------------
-    with st.expander("⚙️ Configuración de adquisición", expanded=True):
-        c1, c2, c3 = st.columns(3)
-        with c1:
+    if not channels:
+        st.info("No hay configuración activa. Andá al tab **⚙️ Setup** y guardá una "
+                "máquina, o cargá un layout demo para probar ya.")
+        if st.button("Cargar layout demo (2 cojinetes + keyphasor)"):
+            st.session_state["rm_channels"] = _demo_channels()
+            st.session_state["rm_machine_rpm"] = 3600.0
+            st.session_state["rm_machine_name"] = "Demo"
+            st.rerun()
+        return
+
+    machine_name = st.session_state.get("rm_machine_name", "adhoc")
+    default_rpm = float(st.session_state.get("rm_machine_rpm", 3600.0))
+
+    st.caption(f"Máquina activa: **{machine_name}** · {len(channels)} canales "
+               f"({sum(1 for c in channels if not is_keyphasor_channel(c))} de vibración).")
+
+    # ---------------- Controles de adquisición ----------------
+    with st.expander("⚙️ Fuente y parámetros", expanded=False):
+        col1, col2, col3 = st.columns(3)
+        with col1:
             source_kind = st.selectbox(
-                "Fuente de datos",
-                ["Simulado (dev/Mac)", "NI 9178 (campo)"],
-                help="En el PC de sitio elegí NI 9178. En Mac, Simulado.",
-            )
-            instance_id = st.text_input("Máquina / instancia", value="adhoc",
-                                        help="Ad-hoc o el ID de un activo configurado.")
-        with c2:
+                "Fuente de datos", ["Simulado (dev/Mac)", "NI 9178 (campo)"],
+                help="En el PC de sitio elegí NI 9178. En Mac, Simulado.")
+        with col2:
             fs = st.select_slider("Sample rate (Hz)",
                                   options=[2560, 5120, 10240, 25600, 51200], value=5120)
-            n_pairs = st.number_input("Pares de proximidad (X/Y)", 1, 8, 2)
-        with c3:
-            with_kph = st.checkbox("Keyphasor (fase 1X)", value=True)
+        with col3:
             if source_kind.startswith("Simulado"):
-                rpm = st.number_input("RPM simulada", 300, 30000, 3600, step=60)
-                defect = st.selectbox("Defecto simulado",
-                                      ["none", "unbalance", "misalignment"])
+                rpm = st.number_input("RPM simulada", 300, 30000, int(default_rpm), step=60)
+                defect = st.selectbox("Defecto simulado", ["none", "unbalance", "misalignment"])
             else:
-                rpm, defect = 3600.0, "none"
+                rpm, defect = default_rpm, "none"
 
-    sig = _config_signature(source_kind, fs, n_pairs, with_kph, rpm, defect, instance_id)
-    if st.session_state.get("rm_cfg_sig") != sig:
-        # Config cambió → reconstruir agente (detener el anterior)
+    sig = f"{source_kind}|{fs}|{rpm}|{defect}|{_channels_fingerprint(channels)}"
+    if st.session_state.get("rm_agent_sig") != sig:
         old = st.session_state.get("rm_agent")
         if old is not None:
             try:
                 old.stop()
-            except Exception:
+            except Exception:  # noqa: BLE001
                 pass
         st.session_state["rm_agent"] = _build_agent(
-            source_kind, fs, n_pairs, with_kph, rpm, defect, instance_id)
-        st.session_state["rm_cfg_sig"] = sig
+            channels, source_kind, float(rpm), defect, float(fs), machine_name)
+        st.session_state["rm_agent_sig"] = sig
         st.session_state["rm_running"] = False
         st.session_state["rm_trend"] = []
 
     agent: AcqAgent = st.session_state["rm_agent"]
 
-    # ---------------- Controles ----------------
     b1, b2, b3, b4, b5 = st.columns([1, 1, 1, 1, 2])
     with b1:
         if st.button("▶ Iniciar", use_container_width=True):
@@ -159,7 +162,7 @@ def _render_remote_monitoring() -> None:
     err = None
     try:
         if live or take:
-            agent.pump(4 if live else 8)  # ~1–2 s por refresh
+            agent.pump(4 if live else 8)
     except ImportError as e:
         err = str(e)
         st.session_state["rm_running"] = False
@@ -182,26 +185,25 @@ def _render_remote_monitoring() -> None:
     rpm_est = agent.estimate_rpm(snap)
     _render_status(agent, snap, rpm_est)
 
-    # ---------------- Guardar ----------------
     if save:
         _save_snapshot(agent, snap, rpm_est)
 
-    # ---------------- Gráficos ----------------
     vib_channels = [(i, ch) for i, ch in enumerate(agent.channels)
-                    if not (with_kph and ch.name == "KPH")]
+                    if not is_keyphasor_channel(ch)]
     names = [ch.name for _, ch in vib_channels]
 
     tab_wf, tab_sp, tab_orb, tab_1x, tab_tr = st.tabs(
         ["📈 Waveform", "📊 Spectrum", "🔵 Orbita", "🎯 1X Vectores", "📉 Tendencia"])
-
     with tab_wf:
-        sel = st.selectbox("Canal", names, key="rm_wf_ch")
-        idx = names.index(sel)
-        _plot_waveform(snap[vib_channels[idx][0]], fs, vib_channels[idx][1])
+        if names:
+            sel = st.selectbox("Canal", names, key="rm_wf_ch")
+            idx = names.index(sel)
+            _plot_waveform(snap[vib_channels[idx][0]], fs, vib_channels[idx][1])
     with tab_sp:
-        sel = st.selectbox("Canal", names, key="rm_sp_ch")
-        idx = names.index(sel)
-        _plot_spectrum(snap[vib_channels[idx][0]], fs, vib_channels[idx][1], rpm_est)
+        if names:
+            sel = st.selectbox("Canal", names, key="rm_sp_ch")
+            idx = names.index(sel)
+            _plot_spectrum(snap[vib_channels[idx][0]], fs, vib_channels[idx][1], rpm_est)
     with tab_orb:
         _plot_orbit(snap, vib_channels, fs)
     with tab_1x:
@@ -209,7 +211,6 @@ def _render_remote_monitoring() -> None:
     with tab_tr:
         _update_and_plot_trend(snap, vib_channels)
 
-    # ---------------- Auto-refresh loop ----------------
     if st.session_state.get("rm_running"):
         time.sleep(0.4)
         st.rerun()
@@ -269,10 +270,11 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float) -> None:
     if len(vib_channels) < 2:
         st.info("La órbita necesita un par X/Y. Configurá al menos 1 par.")
         return
-    pairs = []
     names = [ch.name for _, ch in vib_channels]
-    for i in range(0, len(vib_channels) - 1, 2):
-        pairs.append(f"{names[i]}–{names[i+1]}")
+    pairs = [f"{names[i]}–{names[i+1]}" for i in range(0, len(vib_channels) - 1, 2)]
+    if not pairs:
+        st.info("La órbita necesita un par X/Y consecutivo.")
+        return
     sel = st.selectbox("Par de proximidad", pairs, key="rm_orbit_pair")
     pi = pairs.index(sel) * 2
     yi, chy = vib_channels[pi]
@@ -293,7 +295,7 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float) -> None:
 def _table_1x(snap: np.ndarray, vib_channels, fs: float,
               rpm: Optional[float]) -> None:
     if not rpm:
-        st.warning("Sin keyphasor no hay vectores 1X. Activá el keyphasor en la config.")
+        st.warning("Sin keyphasor no hay vectores 1X. Activá el keyphasor en Setup.")
         return
     f1 = rpm / 60.0
     rows = []
