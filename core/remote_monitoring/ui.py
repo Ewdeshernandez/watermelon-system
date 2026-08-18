@@ -324,8 +324,7 @@ def _monitoreo_display() -> None:
     tc = st.session_state.setdefault("rm_transient", TransientCapture())
     if rpm:
         tc.feed(snap, rpm, agent.sample_rate_hz, vib)
-    _render_status(agent, snap, rpm, state, tc.n_samples)
-    _render_counters(agent, snap, tc)
+    _render_stat_strip(agent, snap, rpm, state, tc)
     st.markdown("##### Tabular list — valores actuales")
     _render_tabular_list(agent, snap, rpm, vib)
 
@@ -499,35 +498,59 @@ def _render_tabular_list(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]
 # =====================================================================
 # Widgets de gráfico
 # =====================================================================
-def _render_counters(agent: AcqAgent, snap: np.ndarray, tc: TransientCapture) -> None:
-    """Contadores tipo ADRE: samples tomados, vectores, formas de onda guardadas,
-    tamaño de la data."""
+def _render_stat_strip(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float],
+                       state: str, tc: TransientCapture) -> None:
+    """Tira compacta de estado + contadores (secundaria al tabular).
+    Fuente pequeña, tooltips explicativos al pasar el mouse."""
+    from core.remote_monitoring.ui_setup import NAVY, CYAN, GRAY_LIGHT
+    fs = agent.sample_rate_hz
+    filled = snap.shape[1]
+    vent_s = filled / fs if fs else 0.0
     try:
         block = agent.source.config.block_samples
+        block_s = agent.source.config.block_seconds
     except Exception:  # noqa: BLE001
-        block = 0
+        block, block_s = 0, 0.0
     total_samples = agent.blocks_read * block
-    n_ch = len(agent.channels)
-    filled = snap.shape[1]
-    size_mb = n_ch * filled * 8 / 1e6
+    size_mb = len(agent.channels) * filled * 8 / 1e6
     saved = int(st.session_state.get("rm_saved_count", 0))
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Samples tomados", f"{total_samples:,}")
-    c2.metric("Vectores 1X", tc.n_samples)
-    c3.metric("Formas de onda guardadas", saved)
-    c4.metric("Tamaño ventana", f"{size_mb:.2f} MB")
-
-
-def _render_status(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float],
-                   state: str, n_transient: int) -> None:
-    c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("RPM", f"{rpm:.0f}" if rpm else "—")
-    c2.metric("1X (Hz)", f"{rpm/60:.1f}" if rpm else "—")
     color = rm_states.state_color(state)
-    c3.markdown(f"**Estado**<br><span style='color:{color};font-weight:700;font-size:1.3rem'>"
-                f"{rm_states.state_label(state)}</span>", unsafe_allow_html=True)
-    c4.metric("Ventana", f"{snap.shape[1]/agent.sample_rate_hz:.1f} s")
-    c5.metric("Pts transitorio", n_transient)
+
+    def cell(label, value, *, vcolor=NAVY, tip="") -> str:
+        t = f' title="{tip}"' if tip else ""
+        return (f'<div{t} style="display:flex;flex-direction:column;gap:1px;padding:0 14px;'
+                f'border-left:2px solid #eef2f8;cursor:{"help" if tip else "default"}">'
+                f'<span style="font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;'
+                f'font-weight:700;color:#8a97ab;white-space:nowrap">{label}</span>'
+                f'<span style="font-size:15px;font-weight:800;color:{vcolor};'
+                f'font-family:ui-monospace,monospace;line-height:1.15">{value}</span></div>')
+
+    live = "corriendo" if fs else ""
+    cells = [
+        cell("RPM", f"{rpm:.0f}" if rpm else "—",
+             tip="Velocidad estimada por el keyphasor."),
+        cell("1X", f"{rpm/60:.1f} Hz" if rpm else "—",
+             tip="Frecuencia de giro (RPM/60)."),
+        cell("Estado", rm_states.state_label(state), vcolor=color,
+             tip="Estable / Arranque / Parada según el cambio de RPM."),
+        cell("Ventana", f"{vent_s:.1f} s",
+             tip=f"Buffer rodante: se guardan los últimos {vent_s:.0f} s de forma de onda. "
+                 f"Sobre esta ventana se calculan espectro, órbita y formas de onda."),
+        cell("Samples", f"{total_samples:,}",
+             tip=f"Muestras totales adquiridas desde ▶ Iniciar "
+                 f"(bloques de {block_s:g} s a {fs:g} Hz)."),
+        cell("Vectores", f"{tc.n_samples}",
+             tip="Puntos de velocidad capturados para Bode/Cascada. Solo crece durante "
+                 "un transitorio (arranque/parada); en estable se queda en 1."),
+        cell("Guardados", f"{saved}",
+             tip="Formas de onda guardadas a disco con el botón 💾 Guardar."),
+        cell("Tamaño", f"{size_mb:.2f} MB",
+             tip="Memoria que ocupa la ventana actual en RAM (canales × muestras × 8 bytes)."),
+    ]
+    st.markdown(
+        f'<div style="display:flex;flex-wrap:wrap;align-items:stretch;gap:8px 0;'
+        f'padding:10px 4px;margin:2px 0 6px;background:{GRAY_LIGHT};border-radius:10px;'
+        f'border:1px solid #e6ecf5">{"".join(cells)}</div>', unsafe_allow_html=True)
 
 
 def _plot_waveform(x: np.ndarray, fs: float, ch: ChannelConfig) -> None:
