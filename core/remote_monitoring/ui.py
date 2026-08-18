@@ -21,7 +21,6 @@ headless de sitio (core/remote_monitoring/agent.py start/stop).
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -278,26 +277,50 @@ def _render_monitoreo() -> None:
         live = st.checkbox("🟢 Live (auto-refresh)", value=st.session_state.get("rm_running", False))
         st.session_state["rm_running"] = live
 
-    snap, rpm, state, tc, err, vib = _acquire(agent, 4 if live else (8 if take else 0))
-    if err:
-        st.error(f"⚠ No se pudo adquirir: {err}")
-        if "nidaqmx" in err.lower():
-            st.info("En Mac usá la fuente **Simulado**. La fuente NI solo corre en el PC de sitio.")
+    # Acciones one-shot en el run principal (fuera del fragment).
+    if take:
+        try:
+            agent.pump(8)
+        except Exception as e:  # noqa: BLE001
+            st.session_state["rm_running"] = False
+            st.error(f"⚠ No se pudo adquirir: {type(e).__name__}: {e}")
+    if save:
+        _s = agent.snapshot()
+        if _s.shape[1]:
+            _save_snapshot(agent, _s, agent.estimate_rpm(_s))
+
+    # Auto-refresh SIN elementos fantasma: fragment con run_every en vez del
+    # loop time.sleep()+st.rerun() (que dejaba residuos al cambiar de vista).
+    st.fragment(_monitoreo_display, run_every=(0.5 if live else None))()
+
+
+def _monitoreo_display() -> None:
+    agent = st.session_state.get("rm_agent")
+    if agent is None:
+        return
+    live = st.session_state.get("rm_running", False)
+    if live:
+        try:
+            agent.pump(4)
+        except Exception as e:  # noqa: BLE001
+            st.session_state["rm_running"] = False
+            st.error(f"⚠ {type(e).__name__}: {e}")
+            return
+    snap = agent.snapshot()
     if snap.shape[1] == 0:
         st.info("Sin datos aún. Pulsá **▶ Iniciar** o **Tomar 1 lectura**.")
         return
-
-    if save:
-        _save_snapshot(agent, snap, rpm)
+    rpm = agent.estimate_rpm(snap)
+    vib = [(i, ch) for i, ch in enumerate(agent.channels) if not is_keyphasor_channel(ch)]
+    state = rm_states.classify_state(rpm, st.session_state.get("rm_prev_rpm"))
+    st.session_state["rm_prev_rpm"] = rpm
+    tc = st.session_state.setdefault("rm_transient", TransientCapture())
+    if rpm:
+        tc.feed(snap, rpm, agent.sample_rate_hz, vib)
     _render_status(agent, snap, rpm, state, tc.n_samples)
     _render_counters(agent, snap, tc)
-
     st.markdown("##### Tabular list — valores actuales")
     _render_tabular_list(agent, snap, rpm, vib)
-
-    if st.session_state.get("rm_running"):
-        time.sleep(0.4)
-        st.rerun()
 
 
 # =====================================================================
@@ -315,14 +338,37 @@ def _render_analisis() -> None:
         st.session_state["rm_running"] = live
     with top[2]:
         st.caption("La adquisición se **inicia en Monitoreo**. Acá se analizan los datos que entran.")
+    if take:
+        try:
+            agent.pump(8)
+        except Exception:  # noqa: BLE001
+            pass
+    st.fragment(_analisis_display, run_every=(0.5 if live else None))()
 
-    snap, rpm, state, tc, err, vib = _acquire(agent, 4 if live else (8 if take else 0))
+
+def _analisis_display() -> None:
+    agent = st.session_state.get("rm_agent")
+    if agent is None:
+        return
+    live = st.session_state.get("rm_running", False)
+    if live:
+        try:
+            agent.pump(4)
+        except Exception:  # noqa: BLE001
+            st.session_state["rm_running"] = False
+    snap = agent.snapshot()
     if snap.shape[1] == 0:
         st.info("Sin datos. Andá a **Monitoreo** y pulsá **▶ Iniciar**.")
         return
+    rpm = agent.estimate_rpm(snap)
+    vib = [(i, ch) for i, ch in enumerate(agent.channels) if not is_keyphasor_channel(ch)]
+    state = rm_states.classify_state(rpm, st.session_state.get("rm_prev_rpm"))
+    st.session_state["rm_prev_rpm"] = rpm
+    tc = st.session_state.setdefault("rm_transient", TransientCapture())
+    if rpm:
+        tc.feed(snap, rpm, agent.sample_rate_hz, vib)
     fs = agent.sample_rate_hz
     names = [ch.name for _, ch in vib]
-    # Header slim (una línea) — el tabular completo va SOLO en la pestaña Tabular
     _vent = snap.shape[1] / fs
     _rpm_txt = f"**RPM {rpm:.0f}** · 1X {rpm / 60:.1f} Hz · " if rpm else ""
     st.caption(f"{_rpm_txt}estado **{rm_states.state_label(state)}** · ventana {_vent:.1f} s · "
@@ -378,10 +424,6 @@ def _render_analisis() -> None:
         if names:
             sel = st.selectbox("Canal", names, key="rm_wf3_ch")
             _plot_waterfall(tc, sel)
-
-    if st.session_state.get("rm_running"):
-        time.sleep(0.4)
-        st.rerun()
 
 
 # =====================================================================
