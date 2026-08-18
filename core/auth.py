@@ -139,12 +139,11 @@ NAV_GROUPS = [
         "section": "Administración",
         "admin_only": True,
         "items": [
-            # Ciclo 20B — Admin de clientes/roles (solo admin)
-            {"label": "◇  Admin · Clientes", "page": "pages/_admin_clients.py"},
-            # FASE J v3.31.221 — Admin de licencias Watermelon Planta (solo admin SIGA)
-            {"label": "🔐  Admin · Licencias Planta", "page": "pages/20_License_Admin.py"},
-            # Ciclo 17.14 — Admin de usuarios (antes bloque hardcodeado aparte)
-            {"label": "👥  Admin · Usuarios", "page": "pages/_admin_users.py"},
+            # v3.31.492 — Hub único de Administración con pestañas de colores
+            # (Clientes · Licencias Planta · Usuarios). Reemplaza los 3 ítems
+            # sueltos; la lógica vive en core/admin/*.py y se renderiza una a la
+            # vez (branch). Las páginas viejas quedan como envoltorios.
+            {"label": "🛡️  Administración", "page": "pages/20_Administracion.py"},
         ],
     },
 ]
@@ -195,6 +194,9 @@ CLIENT_BLOCKED_PAGES = {
     "pages/19_Balanceo.py",
     # FASE J v3.31.221 — Admin licencias Planta es solo SIGA internal
     "pages/20_License_Admin.py",
+    # v3.31.492 — Hub de Administración (Clientes/Licencias/Usuarios), solo admin
+    "pages/20_Administracion.py",
+    "pages/_admin_users.py",
     # Calibración: herramienta del analista (curvas de linealidad API 670).
     "pages/21_Calibracion.py",
 }
