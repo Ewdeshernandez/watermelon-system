@@ -42,8 +42,11 @@ def _shell_meta(meta: Dict[str, Any], *, title: str, format_code: str,
         "report_title": title,
         "format_code": meta.get("format_code") or format_code,
         "format_version": meta.get("format_version") or format_version,
-        "asset": meta.get("equipo", ""),
-        "asset_class": asset_class,
+        # Línea grande de la portada = EQUIPO (lo que el técnico escribió).
+        # Antes se usaba asset_class ("Reporte diario de servicio") y repetía
+        # el título. Fallback a asset_class solo si no hay equipo. v3.31.493.
+        "asset": meta.get("equipo") or asset_class,
+        "asset_class": "",
         "client": meta.get("client", ""),
         "location": meta.get("plant") or meta.get("location", ""),
         "train_description": meta.get("train_description", ""),

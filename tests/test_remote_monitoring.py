@@ -225,3 +225,81 @@ def test_store_roundtrip_and_sync():
     store.mark_synced(meta.snapshot_id)
     assert len(store.pending_sync()) == 0
     assert store.count(only_pending=True) == 0
+
+
+# ============================================================ config (Fase 1)
+def test_auto_layout_pairs_and_keyphasor():
+    from core.remote_monitoring.config import MachineConfig, auto_layout
+    m = MachineConfig(name="X", n_bearings=3)
+    rows = auto_layout(m)
+    labels = [r.point_label for r in rows]
+    assert labels == ["1Y", "1X", "2Y", "2X", "3Y", "3X", "KPH"]
+    # BNC secuencial y único
+    assert [r.bnc_port for r in rows] == list(range(1, 8))
+    # keyphasor detectado
+    assert rows[-1].is_keyphasor()
+
+
+def test_validate_flags_alert_ge_danger():
+    from core.remote_monitoring.config import (
+        MachineConfig, AcqSetup, ChannelRow, validate_setup, is_setup_valid)
+    ch = ChannelRow(bnc_port=1, point_label="1Y", plane=1, sensor_type="proximity",
+                    sensitivity_mv_per_eu=200, unit_native="mil pp", coupling="AC",
+                    angle_deg=0, alarm=5.0, danger=4.0)
+    setup = AcqSetup(machine=MachineConfig(), channels=[ch])
+    codes = {f.code for f in validate_setup(setup)}
+    assert "alert_ge_danger" in codes
+    assert not is_setup_valid(setup)
+
+
+def test_validate_flags_non_orthogonal_xy():
+    from core.remote_monitoring.config import (
+        MachineConfig, AcqSetup, ChannelRow, validate_setup)
+    a = ChannelRow(bnc_port=1, point_label="1Y", plane=1, sensor_type="proximity",
+                   sensitivity_mv_per_eu=200, angle_deg=0)
+    b = ChannelRow(bnc_port=2, point_label="1X", plane=1, sensor_type="proximity",
+                   sensitivity_mv_per_eu=200, angle_deg=45)  # 45° != 90°
+    setup = AcqSetup(machine=MachineConfig(), channels=[a, b])
+    codes = {f.code for f in validate_setup(setup)}
+    assert "xy_not_orthogonal" in codes
+
+
+def test_validate_warns_no_keyphasor():
+    from core.remote_monitoring.config import (
+        MachineConfig, AcqSetup, ChannelRow, validate_setup)
+    a = ChannelRow(bnc_port=1, point_label="1Y", plane=1, sensor_type="proximity",
+                   sensitivity_mv_per_eu=200, angle_deg=0)
+    b = ChannelRow(bnc_port=2, point_label="1X", plane=1, sensor_type="proximity",
+                   sensitivity_mv_per_eu=200, angle_deg=90)
+    setup = AcqSetup(machine=MachineConfig(), channels=[a, b])
+    codes = {f.code for f in validate_setup(setup)}
+    assert "no_keyphasor" in codes
+
+
+def test_setup_bridges_to_channel_configs_and_sensor_map():
+    from core.remote_monitoring.config import (
+        MachineConfig, auto_layout, AcqSetup,
+        setup_to_channel_configs, setup_to_sensor_map)
+    setup = AcqSetup(machine=MachineConfig(n_bearings=2), channels=auto_layout(MachineConfig(n_bearings=2)))
+    ccs = setup_to_channel_configs(setup)
+    assert [c.bnc_port for c in ccs] == [1, 2, 3, 4, 5]
+    assert ccs[0].coupling == "AC" and ccs[-1].coupling == "DC"
+    sm = setup_to_sensor_map(setup)
+    assert len(sm) == 5
+    assert sm[0]["sensitivity_mv_per_eu"] == 200.0
+    assert sm[0]["angle_deg"] == 0.0
+
+
+def test_setup_persistence_roundtrip():
+    import tempfile, os
+    os.environ["WM_PERSIST_DIR"] = tempfile.mkdtemp()
+    from core.remote_monitoring import config as cfg
+    m = cfg.MachineConfig(name="Persist Test", rpm_nominal=1800, n_bearings=1)
+    setup = cfg.AcqSetup(machine=m, channels=cfg.auto_layout(m))
+    cfg.save_setup(setup)
+    assert "Persist_Test" in cfg.list_setups()
+    loaded = cfg.load_setup("Persist Test")
+    assert loaded is not None
+    assert loaded.machine.rpm_nominal == 1800
+    assert [c.point_label for c in loaded.channels] == ["1Y", "1X", "KPH"]
+    del os.environ["WM_PERSIST_DIR"]
