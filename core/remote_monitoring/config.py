@@ -496,3 +496,13 @@ def list_setups() -> List[str]:
     if not d.exists():
         return []
     return sorted(p.stem for p in d.glob("*.json"))
+
+
+def delete_setup(name: str) -> bool:
+    """Borra un setup guardado. Devuelve True si borró algo."""
+    p = _setups_dir() / f"{_slug(name)}.json"
+    try:
+        p.unlink()
+        return True
+    except Exception:  # noqa: BLE001
+        return False

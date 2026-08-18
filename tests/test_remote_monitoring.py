@@ -492,3 +492,15 @@ def test_orbit_pairs_bidirectional():
     pairs = orbit_pairs([y, x])
     assert len(pairs) == 1
     assert set(pairs[0]) == {"1Y", "1X"}  # bidireccional: basta setear un lado
+
+
+def test_saved_config_delete():
+    import os, tempfile
+    os.environ["WM_PERSIST_DIR"] = tempfile.mkdtemp()
+    from core.remote_monitoring import config as cfg
+    m = cfg.MachineConfig(name="Rotor Kit SIGA 1", n_bearings=1)
+    cfg.save_setup(cfg.AcqSetup(machine=m, channels=cfg.auto_layout(m)))
+    assert "Rotor_Kit_SIGA_1" in cfg.list_setups()
+    assert cfg.delete_setup("Rotor Kit SIGA 1") is True
+    assert "Rotor_Kit_SIGA_1" not in cfg.list_setups()
+    del os.environ["WM_PERSIST_DIR"]

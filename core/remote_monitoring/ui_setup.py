@@ -128,6 +128,31 @@ def _inject_css() -> None:
 # =====================================================================
 # Render principal
 # =====================================================================
+def _load_setup_into_state(name: str) -> None:
+    """Carga una configuración guardada al estado del Setup (máquina + canales
+    + adquisición). Se puede editar y re-guardar (sobrescribe) o cambiar el
+    nombre para crear una nueva a partir de ésta."""
+    s = cfg.load_setup(name)
+    if s is None:
+        st.warning(f"No se pudo cargar '{name}'.")
+        return
+    m = s.machine
+    st.session_state["rm_m_name"] = m.name
+    st.session_state["rm_m_rpm"] = float(m.rpm_nominal)
+    st.session_state["rm_m_rpmin"] = float(m.rpm_min)
+    st.session_state["rm_m_rpmax"] = float(m.rpm_max)
+    st.session_state["rm_m_rot"] = m.rotation if m.rotation in cfg.ROTATIONS else "CCW"
+    st.session_state["rm_m_speed"] = m.speed_control if m.speed_control in cfg.SPEED_CONTROLS else "constant"
+    st.session_state["rm_m_brgtype"] = m.bearing_type if m.bearing_type in cfg.BEARING_TYPES else "plain"
+    st.session_state["rm_m_nbrg"] = int(m.n_bearings)
+    st.session_state["rm_m_iso"] = m.iso_norm
+    st.session_state["rm_setup_rows"] = [asdict(c) for c in s.channels]
+    st.session_state["rm_acq"] = asdict(s.acquisition)
+    st.session_state.pop("rm_edit_idx", None)
+    st.success(f"📂 Cargada: {m.name} · {len(s.channels)} canales.")
+    st.rerun()
+
+
 def render_setup() -> None:
     _init_machine_defaults()
     _inject_css()
@@ -167,6 +192,26 @@ def render_setup() -> None:
                     st.session_state["rm_m_iso"] = norm or ""
                 except Exception:  # noqa: BLE001
                     pass
+                st.rerun()
+
+    # --- Configuraciones GUARDADAS (mis plantillas) — cargar / borrar ---
+    _saved = cfg.list_setups()
+    if _saved:
+        scol1, scol2, scol3 = st.columns([3, 1, 1])
+        with scol1:
+            pick_s = st.selectbox("📂 Cargar configuración guardada", ["—"] + _saved,
+                                  key="rm_load_pick",
+                                  help="Tus configuraciones guardadas. Cargala, editala y "
+                                       "re-guardá (sobrescribe) o cambiá el nombre (crea otra).")
+        with scol2:
+            st.write(""); st.write("")
+            if st.button("📂 Cargar", use_container_width=True) and pick_s != "—":
+                _load_setup_into_state(pick_s)
+        with scol3:
+            st.write(""); st.write("")
+            if st.button("🗑 Borrar", use_container_width=True) and pick_s != "—":
+                cfg.delete_setup(pick_s)
+                st.session_state.pop("rm_load_pick", None)
                 st.rerun()
 
     c1, c2, c3 = st.columns(3)
