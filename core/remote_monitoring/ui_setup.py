@@ -266,25 +266,8 @@ def render_setup() -> None:
 
 
 # =====================================================================
-# Editor maestro-detalle de canales (custom, sin data_editor)
+# Editor maestro-detalle de canales (custom, con form + botón Actualizar)
 # =====================================================================
-def _set_field(idx: int, field: str, wkey: str) -> None:
-    rows = st.session_state.get("rm_setup_rows", [])
-    if 0 <= idx < len(rows):
-        rows[idx][field] = st.session_state.get(wkey)
-
-
-def _set_type(idx: int, wkey: str) -> None:
-    rows = st.session_state.get("rm_setup_rows", [])
-    if not (0 <= idx < len(rows)):
-        return
-    t = st.session_state.get(wkey)
-    rows[idx]["sensor_type"] = t
-    valid = cfg.valid_units_for(t)
-    if valid and rows[idx].get("unit_native") not in valid:
-        rows[idx]["unit_native"] = cfg.default_unit(t)
-
-
 def _render_channel_editor() -> None:
     rows = st.session_state["rm_setup_rows"]
     ctrl = st.columns([2, 1, 1])
@@ -321,40 +304,35 @@ def _render_channel_form(idx: int) -> None:
     is_kph = str(row.get("sensor_type", "")) == "keyphasor"
 
     def _num(col, label, field, mn, mx, step, as_int=False, help=None):
-        wk = f"f_{field}_{idx}"
         v = row.get(field, 0) or 0
         col.number_input(label, min_value=mn, max_value=mx,
-                         value=(int(v) if as_int else float(v)), step=step, key=wk,
-                         on_change=_set_field, args=(idx, field, wk), help=help)
+                         value=(int(v) if as_int else float(v)), step=step,
+                         key=f"f_{field}_{idx}", help=help)
 
-    def _sel(col, label, field, options):
-        wk = f"f_{field}_{idx}"
+    def _sel(col, label, field, options, help=None):
         cur = row.get(field, options[0])
         col.selectbox(label, options, index=options.index(cur) if cur in options else 0,
-                      key=wk, on_change=_set_field, args=(idx, field, wk))
+                      key=f"f_{field}_{idx}", help=help)
 
-    with st.container(border=True):
-        st.markdown(f"**Editando:** `{row.get('point_label','?')}`")
+    # st.form: editás libre y NADA se aplica hasta pulsar "Actualizar".
+    with st.form(f"rm_chan_form_{idx}"):
+        st.markdown(f"**Editando:** `{row.get('point_label','?')}` — llená y pulsá "
+                    "**🔄 Actualizar** para subirlo a la tabla.")
         st.caption("Identificación")
         c = st.columns(4)
-        wk = f"f_point_label_{idx}"
-        c[0].text_input("Punto", value=row.get("point_label", ""), key=wk,
-                        on_change=_set_field, args=(idx, "point_label", wk))
+        c[0].text_input("Punto", value=row.get("point_label", ""), key=f"f_point_label_{idx}")
         _num(c[1], "BNC", "bnc_port", 1, 32, 1, as_int=True)
         _num(c[2], "Cojinete", "plane", 0, 16, 1, as_int=True, help="0 = sin cojinete")
-        wka = f"f_active_{idx}"
-        c[3].checkbox("Activo", value=bool(row.get("active", True)), key=wka,
-                      on_change=_set_field, args=(idx, "active", wka))
+        c[3].checkbox("Activo", value=bool(row.get("active", True)), key=f"f_active_{idx}")
 
         st.caption("Transductor")
         c = st.columns(4)
-        wkt = f"f_sensor_type_{idx}"
         cur_t = row.get("sensor_type", "proximity")
         c[0].selectbox("Tipo", cfg.SENSOR_TYPES,
                        index=cfg.SENSOR_TYPES.index(cur_t) if cur_t in cfg.SENSOR_TYPES else 0,
-                       key=wkt, on_change=_set_type, args=(idx, wkt))
+                       key=f"f_sensor_type_{idx}")
         _num(c[1], "Sensib. mV/EU", "sensitivity_mv_per_eu", 0.0, 5000.0, 1.0)
-        _sel(c[2], "Unidad", "unit_native", cfg.ALL_UNITS)
+        _sel(c[2], "Unidad", "unit_native", cfg.ALL_UNITS, help="Se ajusta al tipo al Actualizar.")
         _sel(c[3], "Coupling", "coupling", cfg.COUPLINGS)
         c = st.columns(4)
         _num(c[0], "Full-scale (EU)", "full_scale", 0.0, 100000.0, 1.0, help="Rango de medición. 0 = auto")
@@ -376,30 +354,67 @@ def _render_channel_form(idx: int) -> None:
         else:
             st.caption("Asociaciones (referencia de fase + par de órbita)")
             c = st.columns(4)
-            # Keyphasor asociado (varios kph en trenes multi-eje)
             kph_opts = [""] + [str(r.get("point_label", "")) for r in rows
                                if str(r.get("sensor_type", "")) == "keyphasor"]
             cur_k = row.get("keyphasor_ref", "")
-            wkk = f"f_keyphasor_ref_{idx}"
             c[0].selectbox("Keyphasor asociado", kph_opts,
                            index=kph_opts.index(cur_k) if cur_k in kph_opts else 0,
-                           key=wkk, on_change=_set_field, args=(idx, "keyphasor_ref", wkk),
+                           key=f"f_keyphasor_ref_{idx}",
                            help="Referencia de fase 1X. Un tren puede tener varios keyphasor.")
-            # Par X/Y para la órbita (mismo cojinete)
             pair_opts = [""] + [str(r.get("point_label", "")) for j, r in enumerate(rows)
                                 if j != idx and str(r.get("sensor_type", "")) != "keyphasor"
                                 and int(r.get("plane", 0) or 0) == int(row.get("plane", 0) or 0)]
             cur_p = row.get("pair_ref", "")
-            wkp = f"f_pair_ref_{idx}"
             c[1].selectbox("Par X/Y (órbita)", pair_opts,
                            index=pair_opts.index(cur_p) if cur_p in pair_opts else 0,
-                           key=wkp, on_change=_set_field, args=(idx, "pair_ref", wkp),
+                           key=f"f_pair_ref_{idx}",
                            help="Sensor ortogonal para la órbita, ej. 1XD ↔ 1YD.")
-
             st.caption("Alarmas (API 670)")
             c = st.columns(4)
             _num(c[0], "Alert", "alarm", 0.0, 100000.0, 0.1)
             _num(c[1], "Danger", "danger", 0.0, 100000.0, 0.1)
+
+        submitted = st.form_submit_button("🔄 Actualizar canal", type="primary",
+                                          use_container_width=True)
+    if submitted:
+        _commit_channel_form(idx, is_kph)
+        st.rerun()
+
+
+def _commit_channel_form(idx: int, is_kph: bool) -> None:
+    """Sube los valores del form a la fila idx (al pulsar Actualizar)."""
+    rows = st.session_state["rm_setup_rows"]
+    if not (0 <= idx < len(rows)):
+        return
+    r = rows[idx]
+
+    def g(field, default=None):
+        return st.session_state.get(f"f_{field}_{idx}", default)
+
+    r["point_label"] = str(g("point_label", r.get("point_label", "")) or "")
+    r["bnc_port"] = int(g("bnc_port", r.get("bnc_port", 1)) or 1)
+    r["plane"] = int(g("plane", r.get("plane", 0)) or 0)
+    r["active"] = bool(g("active", True))
+    t = str(g("sensor_type", r.get("sensor_type", "proximity")) or "proximity")
+    r["sensor_type"] = t
+    u = str(g("unit_native", r.get("unit_native", "")) or "")
+    valid = cfg.valid_units_for(t)
+    r["unit_native"] = u if (not valid or u in valid) else cfg.default_unit(t)  # autocorrige al tipo
+    r["sensitivity_mv_per_eu"] = float(g("sensitivity_mv_per_eu", 0) or 0)
+    r["coupling"] = str(g("coupling", "AC") or "AC")
+    r["full_scale"] = float(g("full_scale", 0) or 0)
+    r["angle_deg"] = float(g("angle_deg", 0) or 0)
+    r["side"] = str(g("side", "") or "")
+    if is_kph:
+        r["events_per_rev"] = int(g("events_per_rev", 1) or 1)
+        r["trigger_v"] = float(g("trigger_v", 0) or 0)
+        r["notch_type"] = str(g("notch_type", "") or "")
+    else:
+        r["gap_bias_v"] = float(g("gap_bias_v", 0) or 0)
+        r["keyphasor_ref"] = str(g("keyphasor_ref", "") or "")
+        r["pair_ref"] = str(g("pair_ref", "") or "")
+        r["alarm"] = float(g("alarm", 0) or 0)
+        r["danger"] = float(g("danger", 0) or 0)
 
 
 # =====================================================================
@@ -410,28 +425,29 @@ def _render_acq_params() -> cfg.AcquisitionParams:
                 '<small>— espectro / bode / cascade</small></div>', unsafe_allow_html=True)
     st.session_state.setdefault("rm_acq", asdict(cfg.AcquisitionParams()))
     a = st.session_state["rm_acq"]
-    unit = a.get("freq_unit", "cpm")
-    with st.container(border=True):
-        # Unidad de frecuencia (CPM por defecto, o Hz)
-        ufc = st.columns([1, 3])
-        unit = ufc[0].radio("Frecuencia en", cfg.FREQ_UNITS, horizontal=True,
-                            index=cfg.FREQ_UNITS.index(unit) if unit in cfg.FREQ_UNITS else 0,
-                            format_func=lambda u: u.upper(), key="rm_acq_funit")
-        ul = cfg.freq_label(unit)
-        fstep = 60 if unit == "cpm" else 50
-        fmax_max = 2_400_000 if unit == "cpm" else 40_000
-        fmax_disp = int(round(cfg.hz_to_display(float(a.get("fmax_hz", 1000)), unit)))
-        fmin_disp = cfg.hz_to_display(float(a.get("fmin_hz", 2.0)), unit)
 
+    # Toggle de unidad FUERA del form → reconvierte el display en vivo.
+    unit = a.get("freq_unit", "cpm")
+    ufc = st.columns([1, 3])
+    unit = ufc[0].radio("Frecuencia en", cfg.FREQ_UNITS, horizontal=True,
+                        index=cfg.FREQ_UNITS.index(unit) if unit in cfg.FREQ_UNITS else 0,
+                        format_func=lambda u: u.upper(), key="rm_acq_funit")
+    ul = cfg.freq_label(unit)
+    fstep = 60 if unit == "cpm" else 50
+    fmax_max = 2_400_000 if unit == "cpm" else 40_000
+    fmax_disp = int(round(cfg.hz_to_display(float(a.get("fmax_hz", 1000)), unit)))
+    fmin_disp = float(round(cfg.hz_to_display(float(a.get("fmin_hz", 2.0)), unit), 1))
+
+    # Form: editás libre y NADA se aplica hasta "Actualizar parámetros".
+    with st.form("rm_acq_form"):
         c = st.columns(3)
+        # keys sufijadas por unidad → re-init limpio al cambiar CPM/Hz
         fmax_v = c[0].number_input(f"Fmax / span ({ul})", 60, fmax_max, fmax_disp,
-                                   step=fstep, key="rm_acq_fmax",
+                                   step=fstep, key=f"rm_acq_fmax_{unit}",
                                    help="≥10×rpm general; 3.25×GMF engranajes")
-        fmin_v = c[1].number_input(f"Fmin / HP ({ul})", 0.0, float(fmax_max), float(round(fmin_disp, 1)),
-                                   step=float(fstep), key="rm_acq_fmin",
+        fmin_v = c[1].number_input(f"Fmin / HP ({ul})", 0.0, float(fmax_max), fmin_disp,
+                                   step=float(fstep), key=f"rm_acq_fmin_{unit}",
                                    help="120 CPM (2 Hz) o 0.3×rpm — no cortar el sub-síncrono")
-        fmax = cfg.display_to_hz(float(fmax_v), unit)   # → Hz interno
-        fmin = cfg.display_to_hz(float(fmin_v), unit)
         lines = c[2].selectbox("Líneas", cfg.LINES_OPTIONS,
                                index=cfg.LINES_OPTIONS.index(int(a.get("lines", 1600)))
                                if int(a.get("lines", 1600)) in cfg.LINES_OPTIONS else 2,
@@ -454,15 +470,25 @@ def _render_acq_params() -> cfg.AcquisitionParams:
                                    default=list(a.get("orders", [1.0, 2.0])),
                                    format_func=lambda o: f"{o:g}X", key="rm_acq_orders",
                                    help="1X y 2X por defecto (ADRE). Se muestran en la tabla de Vectores.")
-    acq = cfg.AcquisitionParams(fmax_hz=float(fmax), fmin_hz=float(fmin), lines=int(lines),
-                                averages=int(averages), window=window, samples_per_rev=int(spr),
-                                waveform_mode=wmode, orders=[float(o) for o in (orders or [1.0])],
-                                freq_unit=unit)
+        submitted = st.form_submit_button("🔄 Actualizar parámetros", type="primary",
+                                          use_container_width=True)
+    if submitted:
+        new = cfg.AcquisitionParams(
+            fmax_hz=cfg.display_to_hz(float(fmax_v), unit),
+            fmin_hz=cfg.display_to_hz(float(fmin_v), unit),
+            lines=int(lines), averages=int(averages), window=window,
+            samples_per_rev=int(spr), waveform_mode=wmode,
+            orders=[float(o) for o in (orders or [1.0])], freq_unit=unit)
+        st.session_state["rm_acq"] = asdict(new)
+        st.rerun()
+
+    # Estado COMMITTED (desde session) — caption + retorno
+    valid = {f.name for f in fields(cfg.AcquisitionParams)}
+    acq = cfg.AcquisitionParams(**{k: v for k, v in a.items() if k in valid})
     df_disp = cfg.hz_to_display(acq.delta_f(), unit)
-    st.caption(f"Resolución **Δf = {df_disp:.3g} {ul}** · span {cfg.hz_to_display(fmax, unit):.0f} {ul} · "
-               f"{lines} líneas · ventana {window} · {averages} promedios · {wmode} · "
+    st.caption(f"Resolución **Δf = {df_disp:.3g} {ul}** · span {cfg.hz_to_display(acq.fmax_hz, unit):.0f} {ul} · "
+               f"{acq.lines} líneas · ventana {acq.window} · {acq.averages} promedios · {acq.waveform_mode} · "
                f"órdenes {', '.join(f'{o:g}X' for o in acq.orders)}")
-    st.session_state["rm_acq"] = asdict(acq)
     return acq
 
 
@@ -591,7 +617,7 @@ def _channels_html_table(rows: List[cfg.ChannelRow]) -> str:
     que esta es la vista 'linda'; la edición vive en el expander.
     """
     heads = ["Punto", "BNC", "Coj.", "Tipo", "Sensib.", "Unidad", "FS", "Gap V",
-             "Coupl.", "Ángulo", "Alert", "Danger", "Act."]
+             "Coupl.", "Ángulo", "Kph", "Par", "Alert", "Danger", "Act."]
     th = "".join(
         f'<th style="padding:10px 12px;text-align:left;font-size:11px;'
         f'letter-spacing:.04em;text-transform:uppercase;font-weight:700;'
@@ -628,6 +654,8 @@ def _channels_html_table(rows: List[cfg.ChannelRow]) -> str:
             f'<span style="font-family:monospace;">{_num(r.gap_bias_v)}</span>' if r.gap_bias_v else dash,
             coup,
             f'<span style="font-family:monospace;">{html.escape(ang)}</span>',
+            f'<span style="font-family:monospace;color:{AMBER};">🔑{html.escape(r.keyphasor_ref)}</span>' if r.keyphasor_ref else dash,
+            f'<span style="font-family:monospace;color:{CYAN_DARK};font-weight:700;">{html.escape(r.pair_ref)}</span>' if r.pair_ref else dash,
             f'<span style="font-family:monospace;color:{AMBER};">{_num(r.alarm)}</span>' if r.alarm else dash,
             f'<span style="font-family:monospace;color:#dc2626;">{_num(r.danger)}</span>' if r.danger else dash,
             act,
@@ -640,7 +668,7 @@ def _channels_html_table(rows: List[cfg.ChannelRow]) -> str:
     return (
         f'<div style="border:1px solid #d6deea;border-radius:12px;overflow-x:auto;'
         f'box-shadow:0 6px 18px rgba(15,30,61,.08);margin:6px 0 4px 0;">'
-        f'<table style="width:100%;border-collapse:collapse;min-width:920px;">'
+        f'<table style="width:100%;border-collapse:collapse;min-width:1080px;">'
         f'<thead><tr style="background:{NAVY};">{th}</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table></div>'
     )
