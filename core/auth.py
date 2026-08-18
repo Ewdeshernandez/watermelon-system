@@ -57,6 +57,10 @@ NAV_GROUPS = [
             # Diferenciador vs System1/AMS Suite. 🔴 se queda como signature
             # signaling "live data here".
             {"label": "🔴  Live Monitoring", "page": "pages/02_Live_Monitoring.py"},
+            # v3.31.494 — Remote Monitoring: adquisición dinámica en vivo
+            # (maleta NI 9178 + 9234 / simulado) → rotordinámica completa.
+            # Herramienta de analista (admin/specialist), bloqueada a cliente.
+            {"label": "📡  Remote Monitoring", "page": "pages/02_Remote_Monitoring.py"},
             # Ciclo 15.1 — Machine Map (heatmap de severidad por sensor)
             {"label": "⌖  Machine Map", "page": "pages/01b_Machine_Map.py"},
         ],
@@ -167,6 +171,9 @@ CLIENT_BLOCKED_PAGES = {
     "pages/01_Load_Data.py",
     # pages/15_Diagnostics.py removido del producto en Ciclo 17.33.
     "pages/01b_Machine_Map.py",  # tiene comandos para editar el map
+    # v3.31.494 — Remote Monitoring: adquisición dinámica (NI) es trabajo
+    # interno del analista. El cliente recibe el reporte, no el módulo de captura.
+    "pages/02_Remote_Monitoring.py",
     # Ciclo 18.2 — Importers no para client (sube data y crea activos)
     "pages/17_Importers.py",
     # Ciclo 20B — Admin de clientes solo admin (specialists tampoco)
