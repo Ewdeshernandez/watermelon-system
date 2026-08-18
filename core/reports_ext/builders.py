@@ -22,11 +22,12 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from reportlab.lib.units import cm
-from reportlab.platypus import PageBreak, Spacer
+from reportlab.platypus import KeepTogether, PageBreak, Spacer
 
 from core.report_pdf_shell import render_report_pdf
 from core.reports_ext.common import (
-    make_styles, p, section, bullets, numbered_plan, kv_table, two_col_kv,
+    make_styles, p, section, bullets, numbered_plan, numbered_list,
+    machine_info_table, inspection_status_table, kv_table, two_col_kv,
     grid_table, photo_grid, severity_table, severity_legend, today_str,
     photo_credit,
 )
@@ -182,12 +183,13 @@ def build_borescope_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> byt
     body.append(section("2. Antecedentes", styles))
     body.append(p(content.get("antecedentes", "—"), styles)); body.append(Spacer(1, 0.2 * cm))
 
+    # 3 y 4 con viñetas NUMÉRICAS (pedido Ewdes)
     body.append(section("3. Hallazgos", styles))
-    body += bullets(content.get("hallazgos", []) or ["—"], styles)
+    body += numbered_list(content.get("hallazgos", []) or ["—"], styles)
     body.append(Spacer(1, 0.3 * cm))
 
     body.append(section("4. Recomendaciones finales", styles))
-    body += bullets(content.get("recomendaciones", []) or ["—"], styles)
+    body += numbered_list(content.get("recomendaciones", []) or ["—"], styles)
     body.append(Spacer(1, 0.3 * cm))
 
     body.append(section("5. Metodología", styles))
@@ -197,11 +199,34 @@ def build_borescope_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> byt
                   "asignando nivel de severidad."), styles))
     if content.get("equipo"):
         body.append(p(content["equipo"], styles))
+
+    # Info de la máquina (Tabla 1) + imágenes del equipo en Metodología
+    turbine = content.get("machine_info") or {}
+    borescope = content.get("borescope_info") or {}
+    if turbine or borescope:
+        body.append(Spacer(1, 0.2 * cm))
+        body.append(p("<b>Tabla 1.</b> Información de equipos y herramientas.", styles))
+        body += machine_info_table(turbine, borescope, styles)
+
+    meth_imgs = content.get("methodology_images") or []
+    if meth_imgs:
+        body += photo_grid(meth_imgs, styles, cols=content.get("methodology_photo_cols", 2),
+                           credit=photo_credit())
+
+    # Tabla de inspección de la máquina (puntos y estado)
+    insp = content.get("inspection_rows") or []
+    if insp:
+        body.append(Spacer(1, 0.2 * cm))
+        body.append(p("<b>Puntos de inspección y estado.</b>", styles))
+        body.append(inspection_status_table(insp, styles))
     body.append(Spacer(1, 0.3 * cm))
 
-    body.append(section("6. Desarrollo del servicio", styles))
-    body.append(p("Condición de severidades:", styles))
-    body.append(severity_legend(styles))
+    # 6. Desarrollo del servicio — encabezado + leyenda JUNTOS en la misma página
+    body.append(KeepTogether([
+        section("6. Desarrollo del servicio", styles),
+        p("Condición de severidades:", styles),
+        severity_legend(styles),
+    ]))
     body.append(Spacer(1, 0.3 * cm))
     rows = content.get("severity_rows") or []
     if rows:

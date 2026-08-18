@@ -89,6 +89,92 @@ def bullets(items: List[str], styles) -> List[Any]:
     return out
 
 
+def numbered_list(items: List[str], styles) -> List[Any]:
+    """Lista NUMERADA simple (1. 2. 3.) en peso normal. Para Hallazgos /
+    Recomendaciones de la boroscopia."""
+    out: List[Any] = []
+    n = 0
+    for it in items:
+        if str(it).strip():
+            n += 1
+            out.append(Paragraph(f"{n}.&nbsp;&nbsp;" + paragraph_safe(str(it)),
+                                  styles["WMClinicalNumbered"]))
+    return out
+
+
+def machine_info_table(turbine: Dict[str, str], borescope: Dict[str, str],
+                       styles) -> List[Any]:
+    """Tabla 1 estilo SIGA: dos bloques (equipo inspeccionado + boroscopio),
+    cada uno con su banda de título. Devuelve flowables."""
+    out: List[Any] = []
+
+    def _band(title: str) -> Table:
+        t = Table([[Paragraph(f"<b>{paragraph_safe(title)}</b>", styles["WMTableHeader"])]],
+                  colWidths=[16.2 * cm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_HEADER_BG)),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        return t
+
+    def _pairs_table(pairs: List[Tuple[str, str, str, str]]) -> Table:
+        data = [[Paragraph(f"<b>{paragraph_safe(a)}</b>", styles["WMTableCell"]),
+                 Paragraph(paragraph_safe(b or '—'), styles["WMTableCell"]),
+                 Paragraph(f"<b>{paragraph_safe(c)}</b>" if c else "", styles["WMTableCell"]),
+                 Paragraph(paragraph_safe(d or '—') if c else "", styles["WMTableCell"])]
+                for a, b, c, d in pairs]
+        t = Table(data, colWidths=[3.6 * cm, 4.5 * cm, 3.6 * cm, 4.5 * cm])
+        t.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ]))
+        return t
+
+    if turbine:
+        out.append(_band("Información del equipo inspeccionado"))
+        out.append(_pairs_table([
+            ("Fabricante", turbine.get("fabricante", ""), "Horas", turbine.get("horas", "")),
+            ("Modelo", turbine.get("modelo", ""), "Arranques", turbine.get("arranques", "")),
+            ("Serie", turbine.get("serie", ""), "", ""),
+        ]))
+        out.append(Spacer(1, 0.2 * cm))
+    if borescope:
+        out.append(_band("Información del boroscopio"))
+        out.append(_pairs_table([
+            ("Marca", borescope.get("marca", ""), "Modelo", borescope.get("modelo", "")),
+        ]))
+        out.append(Spacer(1, 0.2 * cm))
+    return out
+
+
+def inspection_status_table(rows: List[Dict[str, str]], styles) -> Table:
+    """Tabla de puntos de inspección y estado. row: {ubicacion, punto, estado}.
+    El estado se colorea (Serviciable verde / No serviciable rojo)."""
+    head = [Paragraph(f"<b>{h}</b>", styles["WMTableHeader"]) for h in
+            ["Ubicación", "Punto", "Estado"]]
+    data = [head]
+    for r in rows:
+        est = str(r.get("estado", ""))
+        col = _severity_color(est) if est.strip() else "#94a3b8"
+        data.append([
+            Paragraph(paragraph_safe(str(r.get("ubicacion", ""))), styles["WMTableCell"]),
+            Paragraph(paragraph_safe(str(r.get("punto", ""))), styles["WMTableCell"]),
+            Paragraph(f'<font color="{col}"><b>{paragraph_safe(est or "—")}</b></font>',
+                      styles["WMTableCell"]),
+        ])
+    t = Table(data, colWidths=[4.5 * cm, 6.2 * cm, 5.5 * cm], repeatRows=1)
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_HEADER_BG)),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]))
+    return t
+
+
 def numbered_plan(sections: List[Dict[str, Any]], styles) -> List[Any]:
     """Plan de trabajo: [{title, items:[...]}] → secciones numeradas con
     sub-bullets, estilo del formato SIGA-FMT-136."""
@@ -254,12 +340,20 @@ def severity_table(rows: List[Dict[str, Any]], styles) -> Table:
         col = _severity_color(sev)
         sev_html = (f'<b><font color="{col}">{paragraph_safe(sev)}</font></b><br/>'
                     f'{paragraph_safe(str(r.get("comment","")))}')
-        img = safe_image(r.get("image_bytes"), 4.2, 4.0)
+        # Múltiples imágenes por acceso: 'images' (lista de bytes) o 'image_bytes'.
+        img_list = r.get("images") or ([r["image_bytes"]] if r.get("image_bytes") else [])
+        cell_imgs: List[Any] = []
+        for raw in img_list:
+            im = safe_image(raw, 4.2, 3.6)
+            if im:
+                cell_imgs.append(im)
+                cell_imgs.append(Spacer(1, 0.15 * cm))
+        img_cell = cell_imgs if cell_imgs else [Paragraph("—", styles["WMTableCell"])]
         data.append([
             Paragraph(paragraph_safe(str(r.get("access", ""))), styles["WMTableCell"]),
             Paragraph(paragraph_safe(str(r.get("findings", ""))), styles["WMTableCell"]),
             Paragraph(sev_html, styles["WMTableCell"]),
-            img or Paragraph("—", styles["WMTableCell"]),
+            img_cell,
         ])
     t = Table(data, colWidths=[3.0 * cm, 4.6 * cm, 4.2 * cm, 4.4 * cm], repeatRows=1)
     t.setStyle(TableStyle([
@@ -441,6 +535,7 @@ def commit_consecutive(family: str) -> str:
 
 __all__ = [
     "make_styles", "p", "section", "subsection", "bullets", "numbered_plan",
+    "numbered_list", "machine_info_table", "inspection_status_table",
     "kv_table", "two_col_kv", "grid_table", "safe_image", "photo_grid",
     "severity_table", "severity_legend", "signatures_block",
     "autofill_base_meta", "today_str", "photo_credit",
