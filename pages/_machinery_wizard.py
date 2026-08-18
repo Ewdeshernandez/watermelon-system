@@ -670,7 +670,9 @@ def _render_sensors_table_editor(state: Dict[str, Any], sensors: List[Dict[str, 
                 "Pattern CSV (opcional)", width="medium",
             ),
         },
-        key="wiz_sensors_editor",
+        # La key incluye una "generación": al Regenerar se incrementa y el
+        # data_editor arranca de cero (descarta added_rows/edited_rows fantasma).
+        key=f"wiz_sensors_editor_{state.get('_sensor_editor_gen', 0)}",
     )
     state["_wizard_table_edited"] = edited
 
@@ -1859,6 +1861,10 @@ elif current == 5:
             if st.button("🔄 Regenerar desde paso 4",
                          help="Descarta cambios y reconstruye el mapa con las unidades del paso 4",
                          key="wiz_regen_sensors"):
+                # Fuerza un data_editor nuevo (limpia added_rows/edited_rows
+                # que sobrevivían a la regeneración y metían filas fantasma).
+                state["_sensor_editor_gen"] = state.get("_sensor_editor_gen", 0) + 1
+                state.pop("_wizard_table_edited", None)
                 state["sensors_override"] = _build_full_sensor_map(state)
                 # Aplicar los setpoints del paso 4 al nuevo mapa
                 disp_unit = state.get("displacement_unit", "mil pp")
@@ -1899,19 +1905,38 @@ elif current == 5:
             if edited_df is not None and state.get("sensors_override"):
                 edited_records = edited_df.to_dict(orient="records")
                 originals_by_idx = {i: s for i, s in enumerate(state["sensors_override"])}
+                def _num(v, default):
+                    """float() tolerante: None, NaN o '' → default. Evita el
+                    TypeError 'float() ... NoneType' cuando el data_editor deja
+                    una fila con celdas vacías (p. ej. la fila fantasma que
+                    agrega num_rows='dynamic')."""
+                    try:
+                        if v is None:
+                            return float(default)
+                        f = float(v)
+                        return f if f == f else float(default)  # descarta NaN
+                    except (TypeError, ValueError):
+                        return float(default)
+
                 final_sensors = []
                 for i, row in enumerate(edited_records):
+                    plane = (row.get("plane_label") or "").strip()
+                    stype = (row.get("sensor_type") or "").strip()
+                    # Salta la fila fantasma del data_editor dinámico: sin plano
+                    # NI tipo no es un sensor real (antes rompía en float(None)).
+                    if not plane and not stype:
+                        continue
                     base = dict(originals_by_idx.get(i, {}))
                     base.update({
-                        "plane_label": row.get("plane_label", ""),
-                        "side": row.get("side", "L"),
-                        "angle_deg": float(row.get("angle_deg", 45.0)),
-                        "direction": row.get("direction", "Y"),
-                        "sensor_type": row.get("sensor_type", "proximity"),
-                        "unit_native": row.get("unit_native", ""),
-                        "alarm": float(row.get("alarm", 0.0)),
-                        "danger": float(row.get("danger", 0.0)),
-                        "csv_match_pattern": row.get("csv_match_pattern", ""),
+                        "plane_label": plane,
+                        "side": row.get("side") or "L",
+                        "angle_deg": _num(row.get("angle_deg"), 45.0),
+                        "direction": row.get("direction") or "Y",
+                        "sensor_type": stype or "proximity",
+                        "unit_native": row.get("unit_native") or "",
+                        "alarm": _num(row.get("alarm"), 0.0),
+                        "danger": _num(row.get("danger"), 0.0),
+                        "csv_match_pattern": row.get("csv_match_pattern") or "",
                     })
                     final_sensors.append(base)
                 state["sensors_override"] = final_sensors

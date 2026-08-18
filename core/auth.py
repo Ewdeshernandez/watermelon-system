@@ -105,6 +105,25 @@ NAV_GROUPS = [
         ],
     },
     {
+        "section": "Balanceo",
+        "items": [
+            # Módulo Balanceo (coef. de influencia 1/2 planos) bajo ISO 21940-11/12
+            # + API 684. Motor puro en core.balance (extraído de ROTORIX, validado
+            # en campo). Solo admin/specialist — bloqueado para cliente.
+            {"label": "⚖️  Balanceo", "page": "pages/19_Balanceo.py"},
+        ],
+    },
+    {
+        "section": "Calibración",
+        "items": [
+            # Módulo Calibración (curvas de linealidad de sensores) bajo API 670
+            # 5.ª ed. + manual del fabricante. Motor puro en core.calibration.
+            # Proximidad / acelerómetro / velomitor. Solo admin/specialist —
+            # bloqueado para cliente. Sección propia, al mismo nivel que Balanceo.
+            {"label": "📐  Calibración", "page": "pages/21_Calibracion.py"},
+        ],
+    },
+    {
         "section": "Reports",
         "items": [
             # Ciclo 17.33 — eliminados Phase Analysis y Diagnostics legacy
@@ -112,12 +131,19 @@ NAV_GROUPS = [
         ],
     },
     {
-        "section": "Administration",
+        # v3.31.491 — Sección Administración UNIFICADA (antes había dos headers:
+        # "Administration" en inglés + "Administración" hardcodeado para Usuarios).
+        # admin_only=True → el sidebar la esconde COMPLETA salvo para is_admin,
+        # así ningún specialist ve botones de admin que igual no puede abrir
+        # (las páginas ya se auto-protegen con require_role("admin")).
+        "section": "Administración",
+        "admin_only": True,
         "items": [
-            # Ciclo 20B — Admin de clientes/roles (solo admin)
-            {"label": "◇  Admin · Clientes", "page": "pages/_admin_clients.py"},
-            # FASE J v3.31.221 — Admin de licencias Watermelon Planta (solo admin SIGA)
-            {"label": "🔐  Admin · Licencias Planta", "page": "pages/20_License_Admin.py"},
+            # v3.31.492 — Hub único de Administración con pestañas de colores
+            # (Clientes · Licencias Planta · Usuarios). Reemplaza los 3 ítems
+            # sueltos; la lógica vive en core/admin/*.py y se renderiza una a la
+            # vez (branch). Las páginas viejas quedan como envoltorios.
+            {"label": "🛡️  Administración", "page": "pages/20_Administracion.py"},
         ],
     },
 ]
@@ -164,8 +190,15 @@ CLIENT_BLOCKED_PAGES = {
     # de adquisición ni los curve fits — solo recibe el reporte final modal
     # integrado en Reports.
     "pages/18_Modal_Analysis.py",
+    # Balanceo: herramienta del analista (coef. influencia ISO 21940 / API 684)
+    "pages/19_Balanceo.py",
     # FASE J v3.31.221 — Admin licencias Planta es solo SIGA internal
     "pages/20_License_Admin.py",
+    # v3.31.492 — Hub de Administración (Clientes/Licencias/Usuarios), solo admin
+    "pages/20_Administracion.py",
+    "pages/_admin_users.py",
+    # Calibración: herramienta del analista (curvas de linealidad API 670).
+    "pages/21_Calibracion.py",
 }
 
 
@@ -868,7 +901,13 @@ def render_user_menu() -> None:
         # client: vista limitada; specialist/admin: menú completo.
         _user_role = (user.get("role", "") or "").strip().lower()
 
+        _is_admin = bool(user.get("is_admin"))
         for group in NAV_GROUPS:
+            # Secciones admin_only (Administración): SOLO para is_admin. Así
+            # ningún specialist/viewer ve botones de admin (que igual rebotan
+            # con require_role). v3.31.491.
+            if group.get("admin_only") and not _is_admin:
+                continue
             # Ciclo 23.130 — usar is_page_visible_in_nav_for_role para que
             # los módulos de análisis del cliente (accesibles vía redirect)
             # NO aparezcan en el sidebar — solo Home + Live Monitoring + Reports.
@@ -889,20 +928,6 @@ def render_user_menu() -> None:
                     key=f"nav_{item['page']}",
                 ):
                     st.switch_page(item["page"])
-
-        # Ciclo 17.14 — Botón "Admin Panel" SOLO para admin único
-        if user.get("is_admin"):
-            st.markdown('<div class="wm-side-divider"></div>', unsafe_allow_html=True)
-            st.markdown(
-                '<div class="wm-side-section">Administración</div>',
-                unsafe_allow_html=True,
-            )
-            if st.button("👥  Admin · Usuarios", use_container_width=True,
-                         key="nav_admin_users"):
-                try:
-                    st.switch_page("pages/_admin_users.py")
-                except Exception:
-                    st.warning("Admin Panel todavía no está disponible.")
 
         st.markdown('<div class="wm-side-divider"></div>', unsafe_allow_html=True)
         st.markdown('<div class="wm-logout-spacer"></div>', unsafe_allow_html=True)

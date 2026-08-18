@@ -3957,4 +3957,17 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # v3.31.49x — Modo "Remote Monitoring" (adquisición dinámica en vivo NI).
+    # Se dibuja un selector de modo arriba; si el usuario elige Remote
+    # Monitoring, ese módulo toma la página y main() (Active Asset, Modbus)
+    # NO corre. Si elige Active Asset, todo sigue EXACTAMENTE igual que antes.
+    try:
+        from core.remote_monitoring.ui import maybe_render_remote_monitoring
+        _rm_active = maybe_render_remote_monitoring()
+    except Exception as _rm_exc:  # noqa: BLE001 — nunca romper la página legacy
+        import traceback as _tb
+        st.warning("Remote Monitoring no disponible; mostrando Active Asset.")
+        _tb.print_exc()
+        _rm_active = False
+    if not _rm_active:
+        main()
