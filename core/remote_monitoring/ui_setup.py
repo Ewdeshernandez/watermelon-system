@@ -159,40 +159,8 @@ def render_setup() -> None:
 
     st.markdown('<div class="rm-sec-head">1 · Máquina '
                 '<small>— tren (API 684)</small></div>', unsafe_allow_html=True)
-    st.caption("Elegí una plantilla para autocompletar rpm, cojinete y norma ISO, o cargá manual.")
-
-    # --- plantilla ---
-    try:
-        from core.machine_templates import list_templates, suggest_norm_for_template
-        templates = list_templates()
-    except Exception:  # noqa: BLE001
-        templates = []
-
-    if templates:
-        tpl_labels = ["— (manual) —"] + [t.label for t in templates]
-        tcol1, tcol2 = st.columns([3, 1])
-        with tcol1:
-            pick = st.selectbox("Plantilla de máquina", tpl_labels, key="rm_tpl_pick")
-        with tcol2:
-            st.write("")
-            st.write("")
-            if st.button("Aplicar plantilla", use_container_width=True) and pick != tpl_labels[0]:
-                t = templates[tpl_labels.index(pick) - 1]
-                st.session_state["rm_m_name"] = t.label
-                if t.operating_rpm_nominal:
-                    st.session_state["rm_m_rpm"] = float(t.operating_rpm_nominal)
-                if t.operating_rpm_range and len(t.operating_rpm_range) >= 2:
-                    st.session_state["rm_m_rpmin"] = float(min(t.operating_rpm_range))
-                    st.session_state["rm_m_rpmax"] = float(max(t.operating_rpm_range))
-                if t.bearing_type:
-                    bt = t.bearing_type.lower()
-                    st.session_state["rm_m_brgtype"] = bt if bt in cfg.BEARING_TYPES else "plain"
-                try:
-                    norm, _ = suggest_norm_for_template(t.template_id)
-                    st.session_state["rm_m_iso"] = norm or ""
-                except Exception:  # noqa: BLE001
-                    pass
-                st.rerun()
+    st.caption("Cargá los datos de la máquina, o cargá una **configuración guardada** para "
+               "editarla o crear una nueva a partir de ésta.")
 
     # --- Configuraciones GUARDADAS (mis plantillas) — cargar / borrar ---
     _saved = cfg.list_setups()
@@ -773,6 +741,40 @@ def _channels_html_table(rows: List[cfg.ChannelRow], acq_by_type: dict = None,
     )
 
 
+def _watermelon_success(title: str, detail: str) -> None:
+    """Celebración con sandías cayendo + banner de éxito (on-brand 🍉)."""
+    positions = [4, 14, 24, 34, 44, 54, 64, 74, 84, 94]
+    spans = "".join(
+        f'<span style="left:{p}%;animation-delay:{i * 0.11:.2f}s;'
+        f'font-size:{26 + (i % 3) * 9}px;">🍉</span>'
+        for i, p in enumerate(positions))
+    st.markdown(f"""
+        <div class="wm-rain">{spans}</div>
+        <div class="wm-save-ok">
+          <div class="wm-save-emoji">🍉</div>
+          <div>
+            <div class="wm-save-title">{html.escape(title)}</div>
+            <div class="wm-save-detail">{html.escape(detail)}</div>
+          </div>
+        </div>
+        <style>
+        .wm-rain {{ position:fixed; inset:0; pointer-events:none; z-index:9999; overflow:hidden; }}
+        .wm-rain span {{ position:absolute; top:-60px;
+            animation: wm-fall 2.9s cubic-bezier(.35,0,.65,1) forwards; }}
+        @keyframes wm-fall {{ 0%{{transform:translateY(0) rotate(0);opacity:1}}
+            100%{{transform:translateY(110vh) rotate(340deg);opacity:.12}} }}
+        .wm-save-ok {{ display:flex; align-items:center; gap:16px;
+            background:linear-gradient(135deg,{NAVY} 0%,#0F766E 100%); color:#fff;
+            padding:18px 22px; border-radius:14px; margin:12px 0 4px 0;
+            box-shadow:0 10px 28px rgba(15,118,110,.28); animation: wm-pop .4s ease; }}
+        @keyframes wm-pop {{ from{{transform:scale(.96);opacity:0}} to{{transform:scale(1);opacity:1}} }}
+        .wm-save-emoji {{ font-size:40px; line-height:1; }}
+        .wm-save-title {{ font-weight:800; font-size:18px; }}
+        .wm-save-detail {{ color:rgba(226,232,240,.9); font-size:13px; margin-top:3px; }}
+        </style>
+    """, unsafe_allow_html=True)
+
+
 def _save_and_activate(setup: cfg.AcqSetup) -> None:
     try:
         path = cfg.save_setup(setup)
@@ -792,5 +794,7 @@ def _save_and_activate(setup: cfg.AcqSetup) -> None:
                                              for c in setup.channels}
     # Pares X/Y explícitos → órbita en el Monitor
     st.session_state["rm_pairs_saved"] = [list(p) for p in cfg.orbit_pairs(setup.channels)]
-    st.success(f"💾 Guardado: `{path.name}` · {len(setup.channels)} canales · "
-               f"Fmax {setup.acquisition.fmax_hz:.0f} Hz. Andá al tab **Monitoreo** y pulsá ▶ Iniciar.")
+    _watermelon_success(
+        "¡Configuración guardada con éxito! 🍉",
+        f"{setup.machine.name} · {len(setup.channels)} canales. "
+        f"Andá al tab Monitoreo y pulsá ▶ Iniciar para adquirir.")
