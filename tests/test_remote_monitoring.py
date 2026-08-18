@@ -451,3 +451,21 @@ def test_full_acqsetup_persist_with_acquisition(tmp_path=None):
     assert loaded.acquisition.window == "flattop"
     assert loaded.channels[0].gap_bias_v == -9.5
     del os.environ["WM_PERSIST_DIR"]
+
+
+def test_orders_waveform_notch_persist():
+    import os, tempfile
+    os.environ["WM_PERSIST_DIR"] = tempfile.mkdtemp()
+    from core.remote_monitoring import config as cfg
+    m = cfg.MachineConfig(name="Orders Test", n_bearings=1)
+    rows = cfg.auto_layout(m)
+    rows[-1].notch_type = "muesca"  # keyphasor
+    setup = cfg.AcqSetup(machine=m, channels=rows,
+                         acquisition=cfg.AcquisitionParams(waveform_mode="asynchronous",
+                                                           orders=[0.5, 1.0, 2.0, 3.0]))
+    cfg.save_setup(setup)
+    loaded = cfg.load_setup("Orders Test")
+    assert loaded.acquisition.waveform_mode == "asynchronous"
+    assert loaded.acquisition.orders == [0.5, 1.0, 2.0, 3.0]
+    assert loaded.channels[-1].notch_type == "muesca"
+    del os.environ["WM_PERSIST_DIR"]

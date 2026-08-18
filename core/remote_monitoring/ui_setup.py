@@ -362,6 +362,7 @@ def _render_channel_form(idx: int) -> None:
             c = st.columns(4)
             _num(c[0], "Eventos/rev", "events_per_rev", 1, 360, 1, as_int=True)
             _num(c[1], "Umbral disparo (V)", "trigger_v", -24.0, 24.0, 0.5)
+            _sel(c[2], "Tipo de muesca", "notch_type", cfg.NOTCH_TYPES)
         else:
             st.caption("Alarmas (API 670)")
             c = st.columns(4)
@@ -397,10 +398,22 @@ def _render_acq_params() -> cfg.AcquisitionParams:
                                  key="rm_acq_win")
         spr = c2[2].number_input("Samples/rev (0=auto)", 0, 1024, int(a.get("samples_per_rev", 0)),
                                  key="rm_acq_spr", help="Muestreo síncrono para bode/cascade")
+        c3 = st.columns([1, 2])
+        wmode = c3[0].selectbox("Forma de onda", cfg.WAVEFORM_MODES,
+                                index=cfg.WAVEFORM_MODES.index(a.get("waveform_mode", "synchronous"))
+                                if a.get("waveform_mode", "synchronous") in cfg.WAVEFORM_MODES else 0,
+                                key="rm_acq_wmode",
+                                help="Síncrona (por revolución, para bode/cascade) o asíncrona (Hz fijo)")
+        orders = c3[1].multiselect("Órdenes a verificar (×rpm)", cfg.COMMON_ORDERS,
+                                   default=list(a.get("orders", [1.0, 2.0])),
+                                   format_func=lambda o: f"{o:g}X", key="rm_acq_orders",
+                                   help="1X y 2X por defecto (ADRE). Se muestran en la tabla de Vectores.")
     acq = cfg.AcquisitionParams(fmax_hz=float(fmax), fmin_hz=float(fmin), lines=int(lines),
-                                averages=int(averages), window=window, samples_per_rev=int(spr))
+                                averages=int(averages), window=window, samples_per_rev=int(spr),
+                                waveform_mode=wmode, orders=[float(o) for o in (orders or [1.0])])
     st.caption(f"Resolución **Δf = {acq.delta_f():.3f} Hz** · span {fmax:.0f} Hz · {lines} líneas · "
-               f"ventana {window} · {averages} promedios")
+               f"ventana {window} · {averages} promedios · {wmode} · "
+               f"órdenes {', '.join(f'{o:g}X' for o in acq.orders)}")
     st.session_state["rm_acq"] = asdict(acq)
     return acq
 
