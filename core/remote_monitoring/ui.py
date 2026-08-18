@@ -335,8 +335,15 @@ def _render_analisis() -> None:
         _render_tabular_list(agent, snap, rpm, vib)
     with tabs[1]:
         if names:
-            sel = st.selectbox("Canal", names, key="rm_tr_ch")
-            _plot_trend(snap, vib, sel)
+            tmap = st.session_state.get("rm_type_by_name") or {}
+            fams = []
+            for _, ch in vib:
+                t = tmap.get(ch.name, "proximity")
+                if t not in fams:
+                    fams.append(t)
+            sel_fam = st.selectbox("Familia de sensor", fams,
+                                   format_func=lambda t: _FAMILY_ES.get(t, t), key="rm_tr_fam")
+            _plot_trend(snap, vib, sel_fam, tmap)
     with tabs[2]:
         if names:
             sel = st.selectbox("Canal", names, key="rm_wf_ch")
@@ -563,9 +570,15 @@ def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float
                f"(referenciados al keyphasor). 1X = {f1:.1f} Hz.")
 
 
-def _plot_trend(snap: np.ndarray, vib_channels, channel_name: str) -> None:
-    """Tendencia overall de UN canal: línea fina, eje Y en la unidad del sensor,
-    eje X fecha/hora, con líneas de Alert y Danger (API 670)."""
+_FAMILY_ES = {"proximity": "Proximidad", "velometer": "Velocidad", "accelerometer": "Acelerómetro"}
+_TREND_PALETTE = ["#2563eb", "#06b6d4", "#16a34a", "#8b5cf6", "#ef4444",
+                  "#f97316", "#ec4899", "#64748b", "#0f766e", "#7c3aed"]
+
+
+def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict) -> None:
+    """Tendencia overall POR FAMILIA (proximidad / velocidad / aceleración):
+    todos los canales de la familia en líneas finas, eje Y en la unidad de la
+    familia, eje X fecha/hora, con líneas de Alert y Danger (API 670)."""
     import plotly.graph_objects as go
     hist = st.session_state.setdefault("rm_trend", [])
     # Acumula overall (RMS en EU) de todos los canales cada tick
@@ -577,26 +590,31 @@ def _plot_trend(snap: np.ndarray, vib_channels, channel_name: str) -> None:
     hist.append((datetime.now(), overall))
     if len(hist) > 300:
         del hist[: len(hist) - 300]
-    if not channel_name:
-        return
 
+    fam_channels = [ch for _, ch in vib_channels
+                    if type_map.get(ch.name, "proximity") == family]
+    if not fam_channels:
+        st.info("No hay canales de esa familia.")
+        return
     xs = [h[0] for h in hist]
-    ys = [h[1].get(channel_name) for h in hist]
-    unit = unit_by.get(channel_name, "")
+    unit = unit_by.get(fam_channels[0].name, "")
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", line=dict(width=1.4, color="#2563eb"),
-                             name=channel_name))
-    # Líneas de alarma / danger
-    al, dg = (st.session_state.get("rm_alarms_by_name") or {}).get(channel_name, (0.0, 0.0))
-    if al and al > 0:
-        fig.add_hline(y=al, line=dict(color="#D89B22", width=1.3, dash="dash"),
-                      annotation_text=f"Alert {al:g}", annotation_position="top left")
-    if dg and dg > 0:
-        fig.add_hline(y=dg, line=dict(color="#dc2626", width=1.3, dash="dash"),
-                      annotation_text=f"Danger {dg:g}", annotation_position="top left")
-    fig.update_layout(height=380, margin=dict(l=10, r=10, t=40, b=10),
+    for k, ch in enumerate(fam_channels):
+        fig.add_trace(go.Scatter(x=xs, y=[h[1].get(ch.name) for h in hist], mode="lines",
+                                 name=ch.name, line=dict(width=1.4, color=_TREND_PALETTE[k % len(_TREND_PALETTE)])))
+    # Alert/Danger de la familia (si difieren entre canales, se toma la mínima = conservador)
+    alarms = st.session_state.get("rm_alarms_by_name") or {}
+    als = [alarms.get(ch.name, (0, 0))[0] for ch in fam_channels if alarms.get(ch.name, (0, 0))[0] > 0]
+    dgs = [alarms.get(ch.name, (0, 0))[1] for ch in fam_channels if alarms.get(ch.name, (0, 0))[1] > 0]
+    if als:
+        fig.add_hline(y=min(als), line=dict(color="#D89B22", width=1.3, dash="dash"),
+                      annotation_text=f"Alert {min(als):g}", annotation_position="top left")
+    if dgs:
+        fig.add_hline(y=min(dgs), line=dict(color="#dc2626", width=1.3, dash="dash"),
+                      annotation_text=f"Danger {min(dgs):g}", annotation_position="top left")
+    fig.update_layout(height=400, margin=dict(l=10, r=10, t=40, b=10),
                       xaxis_title="Fecha / hora", yaxis_title=f"Overall ({unit})" if unit else "Overall",
-                      title=f"Tendencia overall · {channel_name}")
+                      title=f"Tendencia overall · {_FAMILY_ES.get(family, family)}")
     fig.update_xaxes(type="date")
     st.plotly_chart(fig, use_container_width=True)
 
