@@ -433,14 +433,15 @@ def _render_tabular_list(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]
     from core.remote_monitoring.ui_setup import NAVY, CYAN, GRAY_LIGHT
     orders = sorted((st.session_state.get("rm_acq_saved") or {}).get("orders") or [1.0, 2.0])
     alarms = st.session_state.get("rm_alarms_by_name") or {}
+    gaps = st.session_state.get("rm_gap_by_name") or {}
     fs = agent.sample_rate_hz
     f1 = (rpm / 60.0) if rpm else None
 
-    heads = ["Sensor", "Overall"]
+    heads = ["Sensor", "Gap", "Overall"]
     if f1:
         for o in orders:
-            heads += [f"{o:g}X", f"{o:g}X °"]
-    heads.append("Estado")
+            heads += [f"{o:g}X", f"{o:g}X fase"]
+    heads += ["Alarma", "Danger", "Estado"]
     th = "".join(f'<th style="padding:9px 12px;text-align:left;font-size:11px;'
                  f'text-transform:uppercase;font-weight:700;color:{CYAN};white-space:nowrap;">{h}</th>'
                  for h in heads)
@@ -450,20 +451,29 @@ def _render_tabular_list(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]
         eu = snap[i] * 1000.0 / ch.sensitivity_mv_per_eu
         overall = float(np.sqrt(np.mean((eu - np.mean(eu)) ** 2)))
         al, dg = alarms.get(ch.name, (0.0, 0.0))
+        gap = gaps.get(ch.name, 0.0)
         if dg > 0 and overall >= dg:
             status, scol = "DANGER", "#dc2626"
         elif al > 0 and overall >= al:
             status, scol = "ALERT", "#D89B22"
         else:
             status, scol = "OK", "#16a34a"
+        gap_txt = (f'<span style="font-family:monospace">{gap:.2f} V</span>'
+                   if gap else '<span style="color:#94a3b8">—</span>')
         cells = [f'<b style="color:{NAVY}">{ch.name}</b>',
+                 gap_txt,
                  f'<span style="font-family:monospace">{overall:.4g} {ch.units}</span>']
         if f1:
             for o in orders:
                 a, ph = one_x_vector(eu, fs, o * f1)
                 cells.append(f'<span style="font-family:monospace">{a:.3g}</span>')
                 cells.append(f'<span style="font-family:monospace;color:#64748b">{ph:.0f}°</span>')
-        cells.append(f'<span style="color:{scol};font-weight:800">{status}</span>')
+        al_txt = (f'<span style="font-family:monospace;color:#D89B22">{al:.3g} {ch.units}</span>'
+                  if al > 0 else '<span style="color:#94a3b8">—</span>')
+        dg_txt = (f'<span style="font-family:monospace;color:#dc2626">{dg:.3g} {ch.units}</span>'
+                  if dg > 0 else '<span style="color:#94a3b8">—</span>')
+        cells += [al_txt, dg_txt,
+                  f'<span style="color:{scol};font-weight:800">{status}</span>']
         bg = "#ffffff" if k % 2 == 0 else GRAY_LIGHT
         tds = "".join(f'<td style="padding:10px 12px;font-size:13px;border-top:1px solid #e8edf5;'
                       f'white-space:nowrap">{c}</td>' for c in cells)
@@ -617,6 +627,20 @@ _TREND_PALETTE = ["#2563eb", "#06b6d4", "#16a34a", "#8b5cf6", "#ef4444",
                   "#f97316", "#ec4899", "#64748b", "#0f766e", "#7c3aed"]
 
 
+def _nice_top(v: float) -> float:
+    """Techo 'redondo' >= v para el eje Y (1,1.2,1.5,2,2.5,3,4,5,6,8,10 × 10ⁿ).
+    Ej.: 5.75 → 6, 0.575 → 0.6, 57.5 → 60."""
+    import math
+    if v <= 0:
+        return 1.0
+    exp = math.floor(math.log10(v))
+    base = 10.0 ** exp
+    for m in (1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10):
+        if m * base >= v - 1e-12:
+            return round(m * base, 10)
+    return 10.0 * base
+
+
 def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict) -> None:
     """Tendencia overall POR FAMILIA (proximidad / velocidad / aceleración):
     todos los canales de la familia en líneas finas, eje Y en la unidad de la
@@ -649,15 +673,22 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict) -> 
     als = [alarms.get(ch.name, (0, 0))[0] for ch in fam_channels if alarms.get(ch.name, (0, 0))[0] > 0]
     dgs = [alarms.get(ch.name, (0, 0))[1] for ch in fam_channels if alarms.get(ch.name, (0, 0))[1] > 0]
     if als:
-        fig.add_hline(y=min(als), line=dict(color="#D89B22", width=1.3, dash="dash"),
-                      annotation_text=f"Alert {min(als):g}", annotation_position="top left")
+        fig.add_hline(y=min(als), line=dict(color="#D89B22", width=1.5, dash="dash"),
+                      annotation_text=f"Alarma {min(als):g}", annotation_position="top left")
     if dgs:
-        fig.add_hline(y=min(dgs), line=dict(color="#dc2626", width=1.3, dash="dash"),
+        fig.add_hline(y=min(dgs), line=dict(color="#dc2626", width=1.5, dash="dash"),
                       annotation_text=f"Danger {min(dgs):g}", annotation_position="top left")
+    # Eje Y: siempre arranca en 0 y autoescala con headroom por encima del pico
+    # (dato, alarma o danger — lo que sea mayor) → techo "redondo".
+    data_peak = max((v for h in hist for n, v in h[1].items()
+                     if n in {c.name for c in fam_channels} and v is not None), default=0.0)
+    peak = max([data_peak] + als + dgs) if (als or dgs or data_peak) else 0.0
+    ymax = _nice_top(peak * 1.15) if peak > 0 else 1.0
     fig.update_layout(height=400, margin=dict(l=10, r=10, t=40, b=10),
                       xaxis_title="Fecha / hora", yaxis_title=f"Overall ({unit})" if unit else "Overall",
                       title=f"Tendencia overall · {_FAMILY_ES.get(family, family)}")
     fig.update_xaxes(type="date")
+    fig.update_yaxes(range=[0, ymax], rangemode="tozero")
     st.plotly_chart(fig, use_container_width=True)
 
 
