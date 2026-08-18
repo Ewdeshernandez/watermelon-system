@@ -322,7 +322,11 @@ def _render_analisis() -> None:
         return
     fs = agent.sample_rate_hz
     names = [ch.name for _, ch in vib]
-    _render_status(agent, snap, rpm, state, tc.n_samples)
+    # Header slim (una línea) — el tabular completo va SOLO en la pestaña Tabular
+    _vent = snap.shape[1] / fs
+    _rpm_txt = f"**RPM {rpm:.0f}** · 1X {rpm / 60:.1f} Hz · " if rpm else ""
+    st.caption(f"{_rpm_txt}estado **{rm_states.state_label(state)}** · ventana {_vent:.1f} s · "
+               f"{tc.n_samples} vectores transitorios")
 
     tabs = st.tabs(["Tabular", "Tendencias", "Formas de onda", "Espectro",
                     "Órbitas", "Bode", "Polar", "Shaft Centerline",
@@ -330,7 +334,9 @@ def _render_analisis() -> None:
     with tabs[0]:
         _render_tabular_list(agent, snap, rpm, vib)
     with tabs[1]:
-        _update_and_plot_trend(snap, vib)
+        if names:
+            sel = st.selectbox("Canal", names, key="rm_tr_ch")
+            _plot_trend(snap, vib, sel)
     with tabs[2]:
         if names:
             sel = st.selectbox("Canal", names, key="rm_wf_ch")
@@ -557,19 +563,41 @@ def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float
                f"(referenciados al keyphasor). 1X = {f1:.1f} Hz.")
 
 
-def _update_and_plot_trend(snap: np.ndarray, vib_channels) -> None:
+def _plot_trend(snap: np.ndarray, vib_channels, channel_name: str) -> None:
+    """Tendencia overall de UN canal: línea fina, eje Y en la unidad del sensor,
+    eje X fecha/hora, con líneas de Alert y Danger (API 670)."""
     import plotly.graph_objects as go
     hist = st.session_state.setdefault("rm_trend", [])
-    rms = {ch.name: float(np.sqrt(np.mean((snap[i] - np.mean(snap[i])) ** 2))) for i, ch in vib_channels}
-    hist.append((datetime.now().strftime("%H:%M:%S"), rms))
-    if len(hist) > 120:
-        del hist[: len(hist) - 120]
+    # Acumula overall (RMS en EU) de todos los canales cada tick
+    overall, unit_by = {}, {}
+    for i, ch in vib_channels:
+        eu = snap[i] * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else snap[i]
+        overall[ch.name] = float(np.sqrt(np.mean((eu - np.mean(eu)) ** 2)))
+        unit_by[ch.name] = ch.units
+    hist.append((datetime.now(), overall))
+    if len(hist) > 300:
+        del hist[: len(hist) - 300]
+    if not channel_name:
+        return
+
+    xs = [h[0] for h in hist]
+    ys = [h[1].get(channel_name) for h in hist]
+    unit = unit_by.get(channel_name, "")
     fig = go.Figure()
-    for _, ch in vib_channels:
-        fig.add_trace(go.Scatter(x=[h[0] for h in hist], y=[h[1].get(ch.name) for h in hist],
-                                 mode="lines+markers", name=ch.name, line=dict(width=1)))
-    fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10),
-                      xaxis_title="hora", yaxis_title="RMS (V)", title="Tendencia overall (RMS por canal)")
+    fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines", line=dict(width=1.4, color="#2563eb"),
+                             name=channel_name))
+    # Líneas de alarma / danger
+    al, dg = (st.session_state.get("rm_alarms_by_name") or {}).get(channel_name, (0.0, 0.0))
+    if al and al > 0:
+        fig.add_hline(y=al, line=dict(color="#D89B22", width=1.3, dash="dash"),
+                      annotation_text=f"Alert {al:g}", annotation_position="top left")
+    if dg and dg > 0:
+        fig.add_hline(y=dg, line=dict(color="#dc2626", width=1.3, dash="dash"),
+                      annotation_text=f"Danger {dg:g}", annotation_position="top left")
+    fig.update_layout(height=380, margin=dict(l=10, r=10, t=40, b=10),
+                      xaxis_title="Fecha / hora", yaxis_title=f"Overall ({unit})" if unit else "Overall",
+                      title=f"Tendencia overall · {channel_name}")
+    fig.update_xaxes(type="date")
     st.plotly_chart(fig, use_container_width=True)
 
 
