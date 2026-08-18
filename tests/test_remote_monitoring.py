@@ -16,6 +16,7 @@ import pytest
 
 from core.modal.acq_backend import ChannelConfig
 from core.remote_monitoring import (
+    AcqAgent,
     RingBuffer,
     SimulatedStreamSource,
     StreamConfig,
@@ -303,3 +304,75 @@ def test_setup_persistence_roundtrip():
     assert loaded.machine.rpm_nominal == 1800
     assert [c.point_label for c in loaded.channels] == ["1Y", "1X", "KPH"]
     del os.environ["WM_PERSIST_DIR"]
+
+
+# ============================================================ states (Fase 2)
+def test_classify_state_transitions():
+    from core.remote_monitoring.states import (
+        classify_state, OFF, SLOW_ROLL, STARTUP, COASTDOWN, STEADY)
+    assert classify_state(0, None) == OFF
+    assert classify_state(50, 50) == SLOW_ROLL
+    assert classify_state(3000, 2900) == STARTUP
+    assert classify_state(3000, 3100) == COASTDOWN
+    assert classify_state(3000, 3000) == STEADY
+
+
+# ========================================================= transient (Fase 2)
+def _runup_channels():
+    return [
+        ChannelConfig(name="1Y", coupling="AC", sensitivity_mv_per_eu=200.0, bnc_port=1, units="mil"),
+        ChannelConfig(name="KPH", coupling="DC", sensitivity_mv_per_eu=1.0, bnc_port=2, units="V"),
+    ]
+
+
+def test_transient_capture_builds_bode_with_resonance_peak():
+    from core.remote_monitoring.transient import TransientCapture, TransientConfig
+    from core.remote_monitoring.stream_source import is_keyphasor_channel
+    fs = 5120
+    chans = _runup_channels()
+    cfg = StreamConfig(sample_rate_hz=fs, channels=chans, block_seconds=0.25,
+                       buffer_seconds=2.0, speed_profile="runup",
+                       rpm_start=600, rpm_end=6000, ramp_seconds=15,
+                       sim_critical_rpm=3000, sim_zeta=0.04, noise_rms=0.004)
+    agent = AcqAgent(SimulatedStreamSource(cfg), instance_id="runup")
+    tc = TransientCapture(TransientConfig(delta_rpm=50, min_rpm=200, capture_samples=2048))
+    vib = [(i, c) for i, c in enumerate(chans) if not is_keyphasor_channel(c)]
+
+    captured = 0
+    for _ in range(60):  # ~15 s → recorre la rampa
+        agent.pump(1)
+        snap = agent.snapshot()
+        rpm = agent.estimate_rpm(snap)
+        if tc.feed(snap, rpm, fs, vib):
+            captured += 1
+
+    assert tc.n_samples >= 10, f"pocos puntos capturados: {tc.n_samples}"
+    rpms, amp, phase = tc.bode("1Y")
+    # rpm ordenado ascendente
+    assert np.all(np.diff(rpms) >= 0)
+    # el pico de amplitud 1X cae cerca de la crítica (3000 rpm)
+    peak_rpm = rpms[int(np.argmax(amp))]
+    assert 2500 < peak_rpm < 3500, f"pico de bode en {peak_rpm:.0f}, se esperaba ~3000"
+    # la fase gira (0→180) al pasar la crítica: subió de forma monótona neta
+    assert phase.max() - phase.min() > 60
+
+
+def test_transient_cascade_shape():
+    from core.remote_monitoring.transient import TransientCapture, TransientConfig
+    from core.remote_monitoring.stream_source import is_keyphasor_channel
+    fs = 5120
+    chans = _runup_channels()
+    cfg = StreamConfig(sample_rate_hz=fs, channels=chans, block_seconds=0.25,
+                       buffer_seconds=2.0, speed_profile="runup",
+                       rpm_start=600, rpm_end=4000, ramp_seconds=10,
+                       sim_critical_rpm=2500, sim_zeta=0.05)
+    agent = AcqAgent(SimulatedStreamSource(cfg), instance_id="runup")
+    tc = TransientCapture(TransientConfig(delta_rpm=50, min_rpm=200, capture_samples=2048, fmax_hz=300))
+    vib = [(i, c) for i, c in enumerate(chans) if not is_keyphasor_channel(c)]
+    for _ in range(50):
+        agent.pump(1)
+        tc.feed(agent.snapshot(), agent.estimate_rpm(), fs, vib)
+    rpms, freqs, mat = tc.cascade("1Y")
+    assert mat.shape == (len(rpms), len(freqs))
+    assert len(rpms) >= 5
+    assert freqs.max() <= 300 + 5   # respetó fmax
