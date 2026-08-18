@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import html
 import math
-from dataclasses import asdict
+from dataclasses import asdict, fields
 from typing import List
 
 import streamlit as st
@@ -69,23 +69,33 @@ def _machine_from_state() -> cfg.MachineConfig:
     )
 
 
+_INT_FIELDS = {"bnc_port", "plane", "events_per_rev"}
+_BOOL_FIELDS = {"active"}
+_STR_FIELDS = {"point_label", "sensor_type", "unit_native", "coupling", "side",
+               "notch_type", "keyphasor_ref", "pair_ref"}
+
+
 def _rows_from_records(records: list) -> List[cfg.ChannelRow]:
+    """dict → ChannelRow incluyendo TODOS los campos (full_scale, gap, active,
+    keyphasor_ref, pair_ref, etc.). Coerción de tipos tolerante."""
+    valid = {f.name for f in fields(cfg.ChannelRow)}
     rows: List[cfg.ChannelRow] = []
     for r in records:
         try:
-            rows.append(cfg.ChannelRow(
-                bnc_port=int(r.get("bnc_port", 0) or 0),
-                point_label=str(r.get("point_label", "") or ""),
-                plane=int(r.get("plane", 0) or 0),
-                sensor_type=str(r.get("sensor_type", "proximity") or "proximity"),
-                sensitivity_mv_per_eu=float(r.get("sensitivity_mv_per_eu", 0) or 0),
-                unit_native=str(r.get("unit_native", "") or ""),
-                coupling=str(r.get("coupling", "AC") or "AC"),
-                angle_deg=float(r.get("angle_deg", 0) or 0),
-                side=str(r.get("side", "") or ""),
-                alarm=float(r.get("alarm", 0) or 0),
-                danger=float(r.get("danger", 0) or 0),
-            ))
+            kw = {}
+            for k in valid:
+                if k not in r:
+                    continue
+                v = r[k]
+                if k in _INT_FIELDS:
+                    kw[k] = int(v or 0)
+                elif k in _BOOL_FIELDS:
+                    kw[k] = bool(v)
+                elif k in _STR_FIELDS:
+                    kw[k] = str(v if v is not None else "")
+                else:
+                    kw[k] = float(v or 0)
+            rows.append(cfg.ChannelRow(**kw))
         except Exception:  # noqa: BLE001 — fila incompleta durante edición
             continue
     return rows
@@ -364,6 +374,28 @@ def _render_channel_form(idx: int) -> None:
             _num(c[1], "Umbral disparo (V)", "trigger_v", -24.0, 24.0, 0.5)
             _sel(c[2], "Tipo de muesca", "notch_type", cfg.NOTCH_TYPES)
         else:
+            st.caption("Asociaciones (referencia de fase + par de órbita)")
+            c = st.columns(4)
+            # Keyphasor asociado (varios kph en trenes multi-eje)
+            kph_opts = [""] + [str(r.get("point_label", "")) for r in rows
+                               if str(r.get("sensor_type", "")) == "keyphasor"]
+            cur_k = row.get("keyphasor_ref", "")
+            wkk = f"f_keyphasor_ref_{idx}"
+            c[0].selectbox("Keyphasor asociado", kph_opts,
+                           index=kph_opts.index(cur_k) if cur_k in kph_opts else 0,
+                           key=wkk, on_change=_set_field, args=(idx, "keyphasor_ref", wkk),
+                           help="Referencia de fase 1X. Un tren puede tener varios keyphasor.")
+            # Par X/Y para la órbita (mismo cojinete)
+            pair_opts = [""] + [str(r.get("point_label", "")) for j, r in enumerate(rows)
+                                if j != idx and str(r.get("sensor_type", "")) != "keyphasor"
+                                and int(r.get("plane", 0) or 0) == int(row.get("plane", 0) or 0)]
+            cur_p = row.get("pair_ref", "")
+            wkp = f"f_pair_ref_{idx}"
+            c[1].selectbox("Par X/Y (órbita)", pair_opts,
+                           index=pair_opts.index(cur_p) if cur_p in pair_opts else 0,
+                           key=wkp, on_change=_set_field, args=(idx, "pair_ref", wkp),
+                           help="Sensor ortogonal para la órbita, ej. 1XD ↔ 1YD.")
+
             st.caption("Alarmas (API 670)")
             c = st.columns(4)
             _num(c[0], "Alert", "alarm", 0.0, 100000.0, 0.1)
@@ -378,14 +410,28 @@ def _render_acq_params() -> cfg.AcquisitionParams:
                 '<small>— espectro / bode / cascade</small></div>', unsafe_allow_html=True)
     st.session_state.setdefault("rm_acq", asdict(cfg.AcquisitionParams()))
     a = st.session_state["rm_acq"]
+    unit = a.get("freq_unit", "cpm")
     with st.container(border=True):
+        # Unidad de frecuencia (CPM por defecto, o Hz)
+        ufc = st.columns([1, 3])
+        unit = ufc[0].radio("Frecuencia en", cfg.FREQ_UNITS, horizontal=True,
+                            index=cfg.FREQ_UNITS.index(unit) if unit in cfg.FREQ_UNITS else 0,
+                            format_func=lambda u: u.upper(), key="rm_acq_funit")
+        ul = cfg.freq_label(unit)
+        fstep = 60 if unit == "cpm" else 50
+        fmax_max = 2_400_000 if unit == "cpm" else 40_000
+        fmax_disp = int(round(cfg.hz_to_display(float(a.get("fmax_hz", 1000)), unit)))
+        fmin_disp = cfg.hz_to_display(float(a.get("fmin_hz", 2.0)), unit)
+
         c = st.columns(3)
-        fmax = c[0].number_input("Fmax / span (Hz)", 50, 40000, int(a.get("fmax_hz", 1000)),
-                                 step=50, key="rm_acq_fmax",
-                                 help="≥10×rpm general; 3.25×GMF engranajes")
-        fmin = c[1].number_input("Fmin / HP (Hz)", 0.0, 1000.0, float(a.get("fmin_hz", 2.0)),
-                                 step=0.5, key="rm_acq_fmin",
-                                 help="2 Hz o 0.3×rpm — no cortar el sub-síncrono")
+        fmax_v = c[0].number_input(f"Fmax / span ({ul})", 60, fmax_max, fmax_disp,
+                                   step=fstep, key="rm_acq_fmax",
+                                   help="≥10×rpm general; 3.25×GMF engranajes")
+        fmin_v = c[1].number_input(f"Fmin / HP ({ul})", 0.0, float(fmax_max), float(round(fmin_disp, 1)),
+                                   step=float(fstep), key="rm_acq_fmin",
+                                   help="120 CPM (2 Hz) o 0.3×rpm — no cortar el sub-síncrono")
+        fmax = cfg.display_to_hz(float(fmax_v), unit)   # → Hz interno
+        fmin = cfg.display_to_hz(float(fmin_v), unit)
         lines = c[2].selectbox("Líneas", cfg.LINES_OPTIONS,
                                index=cfg.LINES_OPTIONS.index(int(a.get("lines", 1600)))
                                if int(a.get("lines", 1600)) in cfg.LINES_OPTIONS else 2,
@@ -410,9 +456,11 @@ def _render_acq_params() -> cfg.AcquisitionParams:
                                    help="1X y 2X por defecto (ADRE). Se muestran en la tabla de Vectores.")
     acq = cfg.AcquisitionParams(fmax_hz=float(fmax), fmin_hz=float(fmin), lines=int(lines),
                                 averages=int(averages), window=window, samples_per_rev=int(spr),
-                                waveform_mode=wmode, orders=[float(o) for o in (orders or [1.0])])
-    st.caption(f"Resolución **Δf = {acq.delta_f():.3f} Hz** · span {fmax:.0f} Hz · {lines} líneas · "
-               f"ventana {window} · {averages} promedios · {wmode} · "
+                                waveform_mode=wmode, orders=[float(o) for o in (orders or [1.0])],
+                                freq_unit=unit)
+    df_disp = cfg.hz_to_display(acq.delta_f(), unit)
+    st.caption(f"Resolución **Δf = {df_disp:.3g} {ul}** · span {cfg.hz_to_display(fmax, unit):.0f} {ul} · "
+               f"{lines} líneas · ventana {window} · {averages} promedios · {wmode} · "
                f"órdenes {', '.join(f'{o:g}X' for o in acq.orders)}")
     st.session_state["rm_acq"] = asdict(acq)
     return acq
@@ -610,5 +658,7 @@ def _save_and_activate(setup: cfg.AcqSetup) -> None:
     st.session_state["rm_active_setup"] = setup.machine.name
     # Params de adquisición → el Monitor los usa (Fmax en spectrum/cascade)
     st.session_state["rm_acq_saved"] = asdict(setup.acquisition)
+    # Pares X/Y explícitos → órbita en el Monitor
+    st.session_state["rm_pairs_saved"] = [list(p) for p in cfg.orbit_pairs(setup.channels)]
     st.success(f"💾 Guardado: `{path.name}` · {len(setup.channels)} canales · "
                f"Fmax {setup.acquisition.fmax_hz:.0f} Hz. Andá al tab **Monitoreo** y pulsá ▶ Iniciar.")

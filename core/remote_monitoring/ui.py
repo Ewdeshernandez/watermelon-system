@@ -339,19 +339,36 @@ def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
 def _plot_orbit(snap: np.ndarray, vib_channels, fs: float) -> None:
     import plotly.graph_objects as go
     if len(vib_channels) < 2:
-        st.info("La órbita necesita un par X/Y. Configurá al menos 1 par.")
+        st.info("La órbita necesita un par X/Y. Asocialo en **Configuración → Par X/Y**.")
         return
-    names = [ch.name for _, ch in vib_channels]
-    pairs = [f"{names[i]}–{names[i+1]}" for i in range(0, len(vib_channels) - 1, 2)]
-    if not pairs:
-        st.info("La órbita necesita un par X/Y consecutivo.")
+    name_to = {ch.name: (i, ch) for i, ch in vib_channels}
+    # Pares EXPLÍCITOS desde la config (Par X/Y). Fallback a consecutivos.
+    saved = st.session_state.get("rm_pairs_saved") or []
+    valid = [(a, b) for a, b in saved if a in name_to and b in name_to]
+    if not valid:
+        names = [ch.name for _, ch in vib_channels]
+        valid = [(names[i], names[i + 1]) for i in range(0, len(vib_channels) - 1, 2)]
+    if not valid:
+        st.info("La órbita necesita un par X/Y. Asocialo en **Configuración → Par X/Y**.")
         return
-    sel = st.selectbox("Par de proximidad", pairs, key="rm_orbit_pair")
-    pi = pairs.index(sel) * 2
-    yi, chy = vib_channels[pi]
-    xi, chx = vib_channels[pi + 1]
-    y = snap[yi] * 1000.0 / chy.sensitivity_mv_per_eu - np.mean(snap[yi] * 1000.0 / chy.sensitivity_mv_per_eu)
-    x = snap[xi] * 1000.0 / chx.sensitivity_mv_per_eu - np.mean(snap[xi] * 1000.0 / chx.sensitivity_mv_per_eu)
+
+    labels = [f"{a}–{b}" for a, b in valid]
+    sel = st.selectbox("Par de órbita", labels, key="rm_orbit_pair")
+    a, b = valid[labels.index(sel)]
+    # Y = vertical (nombre con 'Y'), X = horizontal
+    is_y = lambda n: "Y" in n.upper()
+    if is_y(a) and not is_y(b):
+        yname, xname = a, b
+    elif is_y(b) and not is_y(a):
+        yname, xname = b, a
+    else:
+        yname, xname = a, b
+    yi, chy = name_to[yname]
+    xi, chx = name_to[xname]
+    y = snap[yi] * 1000.0 / chy.sensitivity_mv_per_eu
+    x = snap[xi] * 1000.0 / chx.sensitivity_mv_per_eu
+    y = y - np.mean(y)
+    x = x - np.mean(x)
     fig = go.Figure(go.Scatter(x=x, y=y, mode="lines", line=dict(width=1)))
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10),
                       xaxis_title=f"{chx.name} ({chx.units})", yaxis_title=f"{chy.name} ({chy.units})",
