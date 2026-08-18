@@ -69,17 +69,20 @@ def render_remote_monitoring() -> None:
         }
         .st-key-rm_view label:nth-of-type(1)::before { color:#1AAEE5; }
         .st-key-rm_view label:nth-of-type(2)::before { color:#16A34A; }
+        .st-key-rm_view label:nth-of-type(3)::before { color:#8B5CF6; }
         </style>
     """, unsafe_allow_html=True)
 
-    view = st.radio("Vista", ["Configuración", "Monitoreo"], horizontal=True,
+    view = st.radio("Vista", ["Configuración", "Monitoreo", "Análisis"], horizontal=True,
                     key="rm_view", label_visibility="collapsed")
     st.divider()
     if view == "Configuración":
         from core.remote_monitoring.ui_setup import render_setup
         render_setup()
+    elif view == "Monitoreo":
+        _render_monitoreo()
     else:
-        _render_monitor()
+        _render_analisis()
 
 
 # =====================================================================
@@ -117,58 +120,31 @@ def _build_agent(channels: List[ChannelConfig], source_kind: str, fs: float,
 # =====================================================================
 # Tab Monitor — adquisición + gráficos
 # =====================================================================
-def _render_monitor() -> None:
-    channels: Optional[List[ChannelConfig]] = st.session_state.get("rm_channels")
+def _no_config_gate() -> bool:
+    """True si NO hay config activa (muestra ayuda + demo). Comparte Monitoreo/Análisis."""
+    if st.session_state.get("rm_channels"):
+        return False
+    st.info("No hay configuración activa. Andá a **Configuración** y guardá una máquina, "
+            "o cargá un layout demo para probar ya.")
+    if st.button("Cargar layout demo (2 cojinetes + keyphasor)"):
+        st.session_state["rm_channels"] = _demo_channels()
+        st.session_state["rm_machine_rpm"] = 3600.0
+        st.session_state["rm_machine_name"] = "Demo"
+        st.rerun()
+    return True
 
+
+def _ensure_agent() -> Optional[AcqAgent]:
+    """Construye/devuelve el agente desde la config activa + fuente/params
+    guardados en session. Compartido por Monitoreo y Análisis."""
+    channels = st.session_state.get("rm_channels")
     if not channels:
-        st.info("No hay configuración activa. Andá al tab **⚙️ Setup** y guardá una "
-                "máquina, o cargá un layout demo para probar ya.")
-        if st.button("Cargar layout demo (2 cojinetes + keyphasor)"):
-            st.session_state["rm_channels"] = _demo_channels()
-            st.session_state["rm_machine_rpm"] = 3600.0
-            st.session_state["rm_machine_name"] = "Demo"
-            st.rerun()
-        return
-
-    machine_name = st.session_state.get("rm_machine_name", "adhoc")
+        return None
     default_rpm = float(st.session_state.get("rm_machine_rpm", 3600.0))
-
-    st.caption(f"Máquina activa: **{machine_name}** · {len(channels)} canales "
-               f"({sum(1 for c in channels if not is_keyphasor_channel(c))} de vibración).")
-
-    # ---------------- Fuente y parámetros ----------------
-    with st.expander("⚙️ Fuente y parámetros", expanded=False):
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            source_kind = st.selectbox(
-                "Fuente de datos", ["Simulado (dev/Mac)", "NI 9178 (campo)"],
-                help="En el PC de sitio elegí NI 9178. En Mac, Simulado.")
-        with col2:
-            fs = st.select_slider("Sample rate (Hz)",
-                                  options=[2560, 5120, 10240, 25600, 51200], value=5120)
-        with col3:
-            defect = st.selectbox("Defecto simulado", ["none", "unbalance", "misalignment"]) \
-                if source_kind.startswith("Simulado") else "none"
-
-        sim = {"rpm": default_rpm, "defect": defect, "speed_profile": "constant"}
-        if source_kind.startswith("Simulado"):
-            st.markdown("**Perfil de velocidad** (transitorios → bode/cascade)")
-            p1, p2, p3, p4 = st.columns(4)
-            with p1:
-                prof = st.selectbox("Perfil", ["constant", "runup", "coastdown", "runup_coastdown"])
-            sim["speed_profile"] = prof
-            if prof == "constant":
-                with p2:
-                    sim["rpm"] = st.number_input("RPM", 300, 30000, int(default_rpm), step=60)
-            else:
-                with p2:
-                    sim["rpm_start"] = st.number_input("RPM inicio", 0, 30000, 600, step=60)
-                with p3:
-                    sim["rpm_end"] = st.number_input("RPM fin", 0, 30000, 6000, step=60)
-                with p4:
-                    sim["sim_critical_rpm"] = st.number_input("Crítica (rpm)", 0, 30000, 3000, step=60)
-                sim["ramp_seconds"] = st.slider("Duración rampa (s)", 5, 120, 30)
-
+    source_kind = st.session_state.get("rm_source_kind", "Simulado (dev/Mac)")
+    fs = int(st.session_state.get("rm_fs", 5120))
+    sim = st.session_state.get("rm_sim") or {"rpm": default_rpm, "defect": "none",
+                                             "speed_profile": "constant"}
     sig = f"{source_kind}|{fs}|{sim}|{_channels_fingerprint(channels)}"
     if st.session_state.get("rm_agent_sig") != sig:
         old = st.session_state.get("rm_agent")
@@ -177,19 +153,94 @@ def _render_monitor() -> None:
                 old.stop()
             except Exception:  # noqa: BLE001
                 pass
-        st.session_state["rm_agent"] = _build_agent(channels, source_kind, float(fs), sim, machine_name)
+        st.session_state["rm_agent"] = _build_agent(
+            channels, source_kind, float(fs), sim, st.session_state.get("rm_machine_name", "adhoc"))
         st.session_state["rm_agent_sig"] = sig
-        st.session_state["rm_running"] = False
+        st.session_state.setdefault("rm_running", False)
         st.session_state["rm_trend"] = []
         _bt = st.session_state.get("rm_acq_by_type_saved") or {}
-        if _bt:
-            _fmax = max(float(v.get("fmax_hz", 1000)) for v in _bt.values())
-        else:
-            _fmax = float((st.session_state.get("rm_acq_saved") or {}).get("fmax_hz", 1000.0))
+        _fmax = (max((float(v.get("fmax_hz", 1000)) for v in _bt.values()), default=1000.0) if _bt
+                 else float((st.session_state.get("rm_acq_saved") or {}).get("fmax_hz", 1000.0)))
         st.session_state["rm_transient"] = TransientCapture(TransientConfig(fmax_hz=_fmax))
         st.session_state["rm_prev_rpm"] = None
+    return st.session_state["rm_agent"]
 
-    agent: AcqAgent = st.session_state["rm_agent"]
+
+def _acquire(agent: AcqAgent, pump_n: int):
+    """Bombea (si pump_n>0), toma snapshot, estima rpm/estado, alimenta transitorio.
+    Devuelve (snap, rpm, state, tc, err, vib_channels)."""
+    err = None
+    try:
+        if pump_n:
+            agent.pump(pump_n)
+    except ImportError as e:
+        err = str(e)
+        st.session_state["rm_running"] = False
+    except Exception as e:  # noqa: BLE001
+        err = f"{type(e).__name__}: {e}"
+        st.session_state["rm_running"] = False
+    snap = agent.snapshot()
+    vib = [(i, ch) for i, ch in enumerate(agent.channels) if not is_keyphasor_channel(ch)]
+    rpm = agent.estimate_rpm(snap) if snap.shape[1] else None
+    state = rm_states.classify_state(rpm, st.session_state.get("rm_prev_rpm"))
+    st.session_state["rm_prev_rpm"] = rpm
+    tc = st.session_state.setdefault("rm_transient", TransientCapture())
+    if rpm and snap.shape[1]:
+        tc.feed(snap, rpm, agent.sample_rate_hz, vib)
+    return snap, rpm, state, tc, err, vib
+
+
+def _render_source_params() -> None:
+    """Fuente y parámetros (solo en Monitoreo). Guarda en session."""
+    default_rpm = float(st.session_state.get("rm_machine_rpm", 3600.0))
+    with st.expander("⚙️ Fuente y parámetros", expanded=False):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            source_kind = st.selectbox("Fuente de datos", ["Simulado (dev/Mac)", "NI 9178 (campo)"],
+                                       key="rm_src_kind", help="En sitio: NI 9178. En Mac: Simulado.")
+        with col2:
+            fs = st.select_slider("Sample rate (Hz)", options=[2560, 5120, 10240, 25600, 51200],
+                                  value=int(st.session_state.get("rm_fs", 5120)), key="rm_fs_w")
+        with col3:
+            defect = (st.selectbox("Defecto simulado", ["none", "unbalance", "misalignment"], key="rm_defect")
+                      if source_kind.startswith("Simulado") else "none")
+        sim = {"rpm": default_rpm, "defect": defect, "speed_profile": "constant"}
+        if source_kind.startswith("Simulado"):
+            st.markdown("**Perfil de velocidad** (transitorios → bode/cascade)")
+            p1, p2, p3, p4 = st.columns(4)
+            with p1:
+                prof = st.selectbox("Perfil", ["constant", "runup", "coastdown", "runup_coastdown"], key="rm_prof")
+            sim["speed_profile"] = prof
+            if prof == "constant":
+                with p2:
+                    sim["rpm"] = st.number_input("RPM", 300, 30000, int(default_rpm), step=60, key="rm_simrpm")
+            else:
+                with p2:
+                    sim["rpm_start"] = st.number_input("RPM inicio", 0, 30000, 600, step=60, key="rm_rpmst")
+                with p3:
+                    sim["rpm_end"] = st.number_input("RPM fin", 0, 30000, 6000, step=60, key="rm_rpmend")
+                with p4:
+                    sim["sim_critical_rpm"] = st.number_input("Crítica (rpm)", 0, 30000, 3000, step=60, key="rm_crit")
+                sim["ramp_seconds"] = st.slider("Duración rampa (s)", 5, 120, 30, key="rm_ramp")
+    st.session_state["rm_source_kind"] = source_kind
+    st.session_state["rm_fs"] = fs
+    st.session_state["rm_sim"] = sim
+
+
+# =====================================================================
+# Vista MONITOREO — config activa + adquisición + tabular list (ADRE)
+# =====================================================================
+def _render_monitoreo() -> None:
+    if _no_config_gate():
+        return
+    channels = st.session_state["rm_channels"]
+    machine_name = st.session_state.get("rm_machine_name", "adhoc")
+    n_vib = sum(1 for c in channels if not is_keyphasor_channel(c))
+    st.caption(f"Máquina activa: **{machine_name}** · {len(channels)} canales "
+               f"({n_vib} de vibración) · fuente lista para adquirir.")
+
+    _render_source_params()
+    agent = _ensure_agent()
 
     b1, b2, b3, b4, b5 = st.columns([1, 1, 1, 1, 2])
     with b1:
@@ -201,93 +252,154 @@ def _render_monitor() -> None:
     with b3:
         take = st.button("🔄 Tomar 1 lectura", use_container_width=True)
     with b4:
-        save = st.button("💾 Guardar", use_container_width=True,
-                         help="Persiste la ventana actual al store local.")
+        save = st.button("💾 Guardar", use_container_width=True)
     with b5:
-        live = st.checkbox("🟢 Live (auto-refresh)",
-                           value=st.session_state.get("rm_running", False))
+        live = st.checkbox("🟢 Live (auto-refresh)", value=st.session_state.get("rm_running", False))
         st.session_state["rm_running"] = live
 
-    # ---------------- Adquisición ----------------
-    err = None
-    try:
-        if live or take:
-            agent.pump(4 if live else 8)
-    except ImportError as e:
-        err = str(e)
-        st.session_state["rm_running"] = False
-    except Exception as e:  # noqa: BLE001
-        err = f"{type(e).__name__}: {e}"
-        st.session_state["rm_running"] = False
-
+    snap, rpm, state, tc, err, vib = _acquire(agent, 4 if live else (8 if take else 0))
     if err:
         st.error(f"⚠ No se pudo adquirir: {err}")
         if "nidaqmx" in err.lower():
-            st.info("En Mac usá la fuente **Simulado**. La fuente NI solo corre "
-                    "en el PC de sitio (Windows con NI-DAQmx + 9178 conectado).")
-
-    snap = agent.snapshot()
+            st.info("En Mac usá la fuente **Simulado**. La fuente NI solo corre en el PC de sitio.")
     if snap.shape[1] == 0:
         st.info("Sin datos aún. Pulsá **▶ Iniciar** o **Tomar 1 lectura**.")
         return
 
-    fs = agent.sample_rate_hz
-    rpm_est = agent.estimate_rpm(snap)
-
-    vib_channels = [(i, ch) for i, ch in enumerate(agent.channels)
-                    if not is_keyphasor_channel(ch)]
-    names = [ch.name for _, ch in vib_channels]
-
-    # Estado + captura transitoria (bode/cascade se llenan en arranque/parada)
-    prev = st.session_state.get("rm_prev_rpm")
-    state = rm_states.classify_state(rpm_est, prev)
-    st.session_state["rm_prev_rpm"] = rpm_est
-    tc: TransientCapture = st.session_state.setdefault("rm_transient", TransientCapture())
-    if rpm_est:
-        tc.feed(snap, rpm_est, fs, vib_channels)
-
-    _render_status(agent, snap, rpm_est, state, tc.n_samples)
-
+    _render_status(agent, snap, rpm, state, tc.n_samples)
     if save:
-        _save_snapshot(agent, snap, rpm_est)
+        _save_snapshot(agent, snap, rpm)
 
-    tabs = st.tabs(["📈 Waveform", "📊 Spectrum", "🔵 Orbita", "🎯 Vectores",
-                    "📉 Tendencia", "📐 Bode", "🌊 Cascade"])
+    st.markdown("##### Tabular list — valores actuales")
+    _render_tabular_list(agent, snap, rpm, vib)
+
+    if st.session_state.get("rm_running"):
+        time.sleep(0.4)
+        st.rerun()
+
+
+# =====================================================================
+# Vista ANÁLISIS — todos los gráficos en orden
+# =====================================================================
+def _render_analisis() -> None:
+    if _no_config_gate():
+        return
+    agent = _ensure_agent()
+    top = st.columns([1, 1, 3])
+    with top[0]:
+        take = st.button("🔄 Actualizar", use_container_width=True)
+    with top[1]:
+        live = st.checkbox("🟢 Live", value=st.session_state.get("rm_running", False))
+        st.session_state["rm_running"] = live
+    with top[2]:
+        st.caption("La adquisición se **inicia en Monitoreo**. Acá se analizan los datos que entran.")
+
+    snap, rpm, state, tc, err, vib = _acquire(agent, 4 if live else (8 if take else 0))
+    if snap.shape[1] == 0:
+        st.info("Sin datos. Andá a **Monitoreo** y pulsá **▶ Iniciar**.")
+        return
+    fs = agent.sample_rate_hz
+    names = [ch.name for _, ch in vib]
+    _render_status(agent, snap, rpm, state, tc.n_samples)
+
+    tabs = st.tabs(["📋 Tabular", "📉 Tendencias", "∿ Formas de onda", "📊 Espectro",
+                    "🔵 Órbitas", "📐 Bode", "◔ Polar", "─ Shaft Centerline",
+                    "🌊 Cascada", "⛰ Waterfall"])
     with tabs[0]:
+        _render_tabular_list(agent, snap, rpm, vib)
+    with tabs[1]:
+        _update_and_plot_trend(snap, vib)
+    with tabs[2]:
         if names:
             sel = st.selectbox("Canal", names, key="rm_wf_ch")
             i = names.index(sel)
-            _plot_waveform(snap[vib_channels[i][0]], fs, vib_channels[i][1])
-    with tabs[1]:
+            _plot_waveform(snap[vib[i][0]], fs, vib[i][1])
+    with tabs[3]:
         if names:
             sel = st.selectbox("Canal", names, key="rm_sp_ch")
             i = names.index(sel)
-            # Fmax POR TIPO del canal graficado (prox baja freq, accel alta)
             _bt = st.session_state.get("rm_acq_by_type_saved") or {}
             _tmap = st.session_state.get("rm_type_by_name") or {}
-            _ctype = _tmap.get(vib_channels[i][1].name, "proximity")
+            _ctype = _tmap.get(vib[i][1].name, "proximity")
             _fmax = float((_bt.get(_ctype) or st.session_state.get("rm_acq_saved") or {}).get("fmax_hz", 0) or 0)
-            _plot_spectrum(snap[vib_channels[i][0]], fs, vib_channels[i][1], rpm_est,
-                           fmax=_fmax or None)
-    with tabs[2]:
-        _plot_orbit(snap, vib_channels, fs)
-    with tabs[3]:
-        _orders = (st.session_state.get("rm_acq_saved") or {}).get("orders") or [1.0, 2.0]
-        _table_orders(snap, vib_channels, fs, rpm_est, _orders)
+            _plot_spectrum(snap[vib[i][0]], fs, vib[i][1], rpm, fmax=_fmax or None)
     with tabs[4]:
-        _update_and_plot_trend(snap, vib_channels)
+        _plot_orbit(snap, vib, fs)
     with tabs[5]:
         if names:
             sel = st.selectbox("Canal", names, key="rm_bode_ch")
             _plot_bode(tc, sel)
     with tabs[6]:
         if names:
+            sel = st.selectbox("Canal", names, key="rm_polar_ch")
+            _plot_polar(tc, sel, snap, vib, fs, rpm)
+    with tabs[7]:
+        _plot_shaft_centerline(snap, vib)
+    with tabs[8]:
+        if names:
             sel = st.selectbox("Canal", names, key="rm_casc_ch")
-            _plot_cascade(tc, sel, rpm_est)
+            _plot_cascade(tc, sel, rpm)
+    with tabs[9]:
+        if names:
+            sel = st.selectbox("Canal", names, key="rm_wf3_ch")
+            _plot_waterfall(tc, sel)
 
     if st.session_state.get("rm_running"):
         time.sleep(0.4)
         st.rerun()
+
+
+# =====================================================================
+# Tabular list (current values — estilo ADRE)
+# =====================================================================
+def _render_tabular_list(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float], vib) -> None:
+    from core.remote_monitoring.ui_setup import NAVY, CYAN, GRAY_LIGHT
+    orders = sorted((st.session_state.get("rm_acq_saved") or {}).get("orders") or [1.0, 2.0])
+    alarms = st.session_state.get("rm_alarms_by_name") or {}
+    fs = agent.sample_rate_hz
+    f1 = (rpm / 60.0) if rpm else None
+
+    heads = ["Sensor", "Overall"]
+    if f1:
+        for o in orders:
+            heads += [f"{o:g}X", f"{o:g}X °"]
+    heads.append("Estado")
+    th = "".join(f'<th style="padding:9px 12px;text-align:left;font-size:11px;'
+                 f'text-transform:uppercase;font-weight:700;color:{CYAN};white-space:nowrap;">{h}</th>'
+                 for h in heads)
+
+    body = []
+    for k, (i, ch) in enumerate(vib):
+        eu = snap[i] * 1000.0 / ch.sensitivity_mv_per_eu
+        overall = float(np.sqrt(np.mean((eu - np.mean(eu)) ** 2)))
+        al, dg = alarms.get(ch.name, (0.0, 0.0))
+        if dg > 0 and overall >= dg:
+            status, scol = "DANGER", "#dc2626"
+        elif al > 0 and overall >= al:
+            status, scol = "ALERT", "#D89B22"
+        else:
+            status, scol = "OK", "#16a34a"
+        cells = [f'<b style="color:{NAVY}">{ch.name}</b>',
+                 f'<span style="font-family:monospace">{overall:.4g} {ch.units}</span>']
+        if f1:
+            for o in orders:
+                a, ph = one_x_vector(eu, fs, o * f1)
+                cells.append(f'<span style="font-family:monospace">{a:.3g}</span>')
+                cells.append(f'<span style="font-family:monospace;color:#64748b">{ph:.0f}°</span>')
+        cells.append(f'<span style="color:{scol};font-weight:800">{status}</span>')
+        bg = "#ffffff" if k % 2 == 0 else GRAY_LIGHT
+        tds = "".join(f'<td style="padding:10px 12px;font-size:13px;border-top:1px solid #e8edf5;'
+                      f'white-space:nowrap">{c}</td>' for c in cells)
+        body.append(f'<tr style="background:{bg}">{tds}</tr>')
+
+    if not f1:
+        st.caption("Sin keyphasor no hay vectores 1X/2X — solo Overall. Activá el keyphasor en Configuración.")
+    st.markdown(
+        f'<div style="border:1px solid #d6deea;border-radius:12px;overflow-x:auto;'
+        f'box-shadow:0 6px 18px rgba(15,30,61,.08)">'
+        f'<table style="width:100%;border-collapse:collapse;min-width:560px">'
+        f'<thead><tr style="background:{NAVY}">{th}</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table></div>', unsafe_allow_html=True)
 
 
 # =====================================================================
@@ -461,6 +573,78 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
     fig.update_layout(height=460, margin=dict(l=10, r=10, t=40, b=10),
                       xaxis_title="Frecuencia (Hz)", yaxis_title="RPM",
                       title=f"Cascade · {channel} ({len(rpms)} espectros)", showlegend=False)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
+                fs: float, rpm: Optional[float]) -> None:
+    """Polar 1X: vector amplitud/fase. Con transitorio muestra el locus vs
+    velocidad (tipo Nyquist); en estacionario, el punto actual."""
+    import plotly.graph_objects as go
+    rpms, amp, phase = tc.bode(channel)
+    fig = go.Figure()
+    if len(rpms) >= 2:
+        fig.add_trace(go.Scatterpolar(
+            r=amp, theta=phase, mode="lines+markers",
+            marker=dict(size=7, color=rpms, colorscale="Turbo", colorbar=dict(title="RPM")),
+            line=dict(width=1.5)))
+        title = f"Polar 1X · {channel} — locus vs velocidad"
+    else:
+        name_to = {ch.name: (i, ch) for i, ch in vib}
+        if channel in name_to and rpm:
+            i, ch = name_to[channel]
+            eu = snap[i] * 1000.0 / ch.sensitivity_mv_per_eu
+            a, ph = one_x_vector(eu, fs, rpm / 60.0)
+            fig.add_trace(go.Scatterpolar(r=[a], theta=[ph], mode="markers+text",
+                                          text=[f"{a:.3g}∠{ph:.0f}°"], textposition="top center",
+                                          marker=dict(size=16, color="#8B5CF6")))
+        title = f"Polar 1X · {channel} — punto actual (corré un runup para el locus)"
+    fig.update_layout(height=440, margin=dict(l=30, r=30, t=44, b=20), showlegend=False,
+                      polar=dict(angularaxis=dict(rotation=90, direction="clockwise")), title=title)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _plot_shaft_centerline(snap: np.ndarray, vib) -> None:
+    """Shaft centerline: posición media del eje (gap DC) en el par X/Y."""
+    import plotly.graph_objects as go
+    name_to = {ch.name: (i, ch) for i, ch in vib}
+    saved = st.session_state.get("rm_pairs_saved") or []
+    valid = [(a, b) for a, b in saved if a in name_to and b in name_to]
+    if not valid:
+        st.info("Configurá pares X/Y en **Configuración → Par X/Y** para el shaft centerline.")
+        return
+    fig = go.Figure()
+    th = np.linspace(0, 2 * np.pi, 120)
+    for a, b in valid:
+        is_y = lambda n: "Y" in n.upper()
+        yn, xn = (a, b) if is_y(a) and not is_y(b) else ((b, a) if is_y(b) else (a, b))
+        yi, chy = name_to[yn]
+        xi, chx = name_to[xn]
+        gy = float(np.mean(snap[yi] * 1000.0 / chy.sensitivity_mv_per_eu))
+        gx = float(np.mean(snap[xi] * 1000.0 / chx.sensitivity_mv_per_eu))
+        fig.add_trace(go.Scatter(x=[gx], y=[gy], mode="markers+text", text=[f"{xn}/{yn}"],
+                                 textposition="top center", marker=dict(size=15, color="#2563eb")))
+    fig.add_trace(go.Scatter(x=np.cos(th) * 0.01, y=np.sin(th) * 0.01, mode="lines",
+                             line=dict(color="#e2e8f0"), hoverinfo="skip"))
+    fig.update_layout(height=440, title="Shaft Centerline (posición del eje)",
+                      xaxis_title="X", yaxis_title="Y", showlegend=False,
+                      yaxis=dict(scaleanchor="x", scaleratio=1))
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption("⚠ Requiere gap DC. El NI-9234 es AC-coupled → la posición estática es ~0. "
+               "Para SCL real: gap del path Bently (Modbus) o un canal DC dedicado.")
+
+
+def _plot_waterfall(tc: TransientCapture, channel: str) -> None:
+    """Waterfall 3D: espectro vs velocidad (superficie). Transitorio."""
+    import plotly.graph_objects as go
+    rpms, freqs, mat = tc.cascade(channel)
+    if len(rpms) < 2:
+        st.info("El Waterfall se llena en un transitorio (runup/coastdown). Corré uno en Monitoreo.")
+        return
+    fig = go.Figure(go.Surface(x=freqs, y=rpms, z=mat, colorscale="Turbo", showscale=True))
+    fig.update_layout(height=520, title=f"Waterfall 3D · {channel}",
+                      scene=dict(xaxis_title="Hz", yaxis_title="RPM", zaxis_title="Ampl"),
+                      margin=dict(l=0, r=0, t=40, b=0))
     st.plotly_chart(fig, use_container_width=True)
 
 

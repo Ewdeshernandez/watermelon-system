@@ -788,6 +788,8 @@ def _save_and_activate(setup: cfg.AcqSetup) -> None:
     # Por tipo → el Monitor elige Fmax según el tipo del canal graficado
     st.session_state["rm_acq_by_type_saved"] = {t: asdict(p) for t, p in setup.acquisition_by_type.items()}
     st.session_state["rm_type_by_name"] = {c.point_label: c.sensor_type for c in setup.channels}
+    st.session_state["rm_alarms_by_name"] = {c.point_label: (float(c.alarm or 0), float(c.danger or 0))
+                                             for c in setup.channels}
     # Pares X/Y explícitos → órbita en el Monitor
     st.session_state["rm_pairs_saved"] = [list(p) for p in cfg.orbit_pairs(setup.channels)]
     st.success(f"💾 Guardado: `{path.name}` · {len(setup.channels)} canales · "
