@@ -10,7 +10,8 @@ los escalares Modbus del Bently). Acá se hace adquisición dinámica en vivo
 Dos tabs:
   ⚙️ Setup   — config amigable de máquina + canales (ui_setup.render_setup).
   📡 Monitor — adquisición en vivo + gráficos, usando los canales guardados
-               en Setup (o un demo si aún no configuraste).
+               en Setup. Estado estacionario: waveform/spectrum/órbita/1X/
+               tendencia. Transitorio (arranque/parada): bode/cascade.
 
 Patrón de refresco: SÍNCRONO. El AcqAgent vive en st.session_state; en cada
 rerun bombeamos unos bloques (agent.pump) y redibujamos. "Live" hace
@@ -35,6 +36,8 @@ from core.remote_monitoring.stream_source import (
     is_keyphasor_channel,
 )
 from core.remote_monitoring.keyphasor import one_x_vector
+from core.remote_monitoring.transient import TransientCapture, TransientConfig
+from core.remote_monitoring import states as rm_states
 
 
 # =====================================================================
@@ -61,7 +64,6 @@ def render_remote_monitoring() -> None:
 # Helpers de construcción
 # =====================================================================
 def _demo_channels() -> List[ChannelConfig]:
-    """Layout demo (2 cojinetes X/Y + keyphasor) para arrancar sin config."""
     from core.remote_monitoring.config import MachineConfig, auto_layout, setup_to_channel_configs, AcqSetup
     m = MachineConfig(n_bearings=2)
     return setup_to_channel_configs(AcqSetup(machine=m, channels=auto_layout(m)))
@@ -71,12 +73,16 @@ def _channels_fingerprint(channels: List[ChannelConfig]) -> str:
     return "|".join(f"{c.name}:{c.bnc_port}:{c.coupling}:{c.sensitivity_mv_per_eu}" for c in channels)
 
 
-def _build_agent(channels: List[ChannelConfig], source_kind: str, rpm: float,
-                 defect: str, fs: float, instance_id: str) -> AcqAgent:
+def _build_agent(channels: List[ChannelConfig], source_kind: str, fs: float,
+                 sim: dict, instance_id: str) -> AcqAgent:
     cfg = StreamConfig(
         sample_rate_hz=fs, channels=channels,
         block_seconds=0.25, buffer_seconds=8.0,
-        rpm=rpm, defect=defect,
+        rpm=sim.get("rpm", 3600.0), defect=sim.get("defect", "none"),
+        speed_profile=sim.get("speed_profile", "constant"),
+        rpm_start=sim.get("rpm_start", 0.0), rpm_end=sim.get("rpm_end", 0.0),
+        ramp_seconds=sim.get("ramp_seconds", 30.0),
+        sim_critical_rpm=sim.get("sim_critical_rpm", 0.0),
     )
     if source_kind == "NI 9178 (campo)":
         from core.remote_monitoring.ni_stream_source import NIStreamSource
@@ -108,7 +114,7 @@ def _render_monitor() -> None:
     st.caption(f"Máquina activa: **{machine_name}** · {len(channels)} canales "
                f"({sum(1 for c in channels if not is_keyphasor_channel(c))} de vibración).")
 
-    # ---------------- Controles de adquisición ----------------
+    # ---------------- Fuente y parámetros ----------------
     with st.expander("⚙️ Fuente y parámetros", expanded=False):
         col1, col2, col3 = st.columns(3)
         with col1:
@@ -119,13 +125,29 @@ def _render_monitor() -> None:
             fs = st.select_slider("Sample rate (Hz)",
                                   options=[2560, 5120, 10240, 25600, 51200], value=5120)
         with col3:
-            if source_kind.startswith("Simulado"):
-                rpm = st.number_input("RPM simulada", 300, 30000, int(default_rpm), step=60)
-                defect = st.selectbox("Defecto simulado", ["none", "unbalance", "misalignment"])
-            else:
-                rpm, defect = default_rpm, "none"
+            defect = st.selectbox("Defecto simulado", ["none", "unbalance", "misalignment"]) \
+                if source_kind.startswith("Simulado") else "none"
 
-    sig = f"{source_kind}|{fs}|{rpm}|{defect}|{_channels_fingerprint(channels)}"
+        sim = {"rpm": default_rpm, "defect": defect, "speed_profile": "constant"}
+        if source_kind.startswith("Simulado"):
+            st.markdown("**Perfil de velocidad** (transitorios → bode/cascade)")
+            p1, p2, p3, p4 = st.columns(4)
+            with p1:
+                prof = st.selectbox("Perfil", ["constant", "runup", "coastdown", "runup_coastdown"])
+            sim["speed_profile"] = prof
+            if prof == "constant":
+                with p2:
+                    sim["rpm"] = st.number_input("RPM", 300, 30000, int(default_rpm), step=60)
+            else:
+                with p2:
+                    sim["rpm_start"] = st.number_input("RPM inicio", 0, 30000, 600, step=60)
+                with p3:
+                    sim["rpm_end"] = st.number_input("RPM fin", 0, 30000, 6000, step=60)
+                with p4:
+                    sim["sim_critical_rpm"] = st.number_input("Crítica (rpm)", 0, 30000, 3000, step=60)
+                sim["ramp_seconds"] = st.slider("Duración rampa (s)", 5, 120, 30)
+
+    sig = f"{source_kind}|{fs}|{sim}|{_channels_fingerprint(channels)}"
     if st.session_state.get("rm_agent_sig") != sig:
         old = st.session_state.get("rm_agent")
         if old is not None:
@@ -133,11 +155,12 @@ def _render_monitor() -> None:
                 old.stop()
             except Exception:  # noqa: BLE001
                 pass
-        st.session_state["rm_agent"] = _build_agent(
-            channels, source_kind, float(rpm), defect, float(fs), machine_name)
+        st.session_state["rm_agent"] = _build_agent(channels, source_kind, float(fs), sim, machine_name)
         st.session_state["rm_agent_sig"] = sig
         st.session_state["rm_running"] = False
         st.session_state["rm_trend"] = []
+        st.session_state["rm_transient"] = TransientCapture()
+        st.session_state["rm_prev_rpm"] = None
 
     agent: AcqAgent = st.session_state["rm_agent"]
 
@@ -183,33 +206,50 @@ def _render_monitor() -> None:
 
     fs = agent.sample_rate_hz
     rpm_est = agent.estimate_rpm(snap)
-    _render_status(agent, snap, rpm_est)
-
-    if save:
-        _save_snapshot(agent, snap, rpm_est)
 
     vib_channels = [(i, ch) for i, ch in enumerate(agent.channels)
                     if not is_keyphasor_channel(ch)]
     names = [ch.name for _, ch in vib_channels]
 
-    tab_wf, tab_sp, tab_orb, tab_1x, tab_tr = st.tabs(
-        ["📈 Waveform", "📊 Spectrum", "🔵 Orbita", "🎯 1X Vectores", "📉 Tendencia"])
-    with tab_wf:
+    # Estado + captura transitoria (bode/cascade se llenan en arranque/parada)
+    prev = st.session_state.get("rm_prev_rpm")
+    state = rm_states.classify_state(rpm_est, prev)
+    st.session_state["rm_prev_rpm"] = rpm_est
+    tc: TransientCapture = st.session_state.setdefault("rm_transient", TransientCapture())
+    if rpm_est:
+        tc.feed(snap, rpm_est, fs, vib_channels)
+
+    _render_status(agent, snap, rpm_est, state, tc.n_samples)
+
+    if save:
+        _save_snapshot(agent, snap, rpm_est)
+
+    tabs = st.tabs(["📈 Waveform", "📊 Spectrum", "🔵 Orbita", "🎯 1X Vectores",
+                    "📉 Tendencia", "📐 Bode", "🌊 Cascade"])
+    with tabs[0]:
         if names:
             sel = st.selectbox("Canal", names, key="rm_wf_ch")
-            idx = names.index(sel)
-            _plot_waveform(snap[vib_channels[idx][0]], fs, vib_channels[idx][1])
-    with tab_sp:
+            i = names.index(sel)
+            _plot_waveform(snap[vib_channels[i][0]], fs, vib_channels[i][1])
+    with tabs[1]:
         if names:
             sel = st.selectbox("Canal", names, key="rm_sp_ch")
-            idx = names.index(sel)
-            _plot_spectrum(snap[vib_channels[idx][0]], fs, vib_channels[idx][1], rpm_est)
-    with tab_orb:
+            i = names.index(sel)
+            _plot_spectrum(snap[vib_channels[i][0]], fs, vib_channels[i][1], rpm_est)
+    with tabs[2]:
         _plot_orbit(snap, vib_channels, fs)
-    with tab_1x:
+    with tabs[3]:
         _table_1x(snap, vib_channels, fs, rpm_est)
-    with tab_tr:
+    with tabs[4]:
         _update_and_plot_trend(snap, vib_channels)
+    with tabs[5]:
+        if names:
+            sel = st.selectbox("Canal", names, key="rm_bode_ch")
+            _plot_bode(tc, sel)
+    with tabs[6]:
+        if names:
+            sel = st.selectbox("Canal", names, key="rm_casc_ch")
+            _plot_cascade(tc, sel, rpm_est)
 
     if st.session_state.get("rm_running"):
         time.sleep(0.4)
@@ -219,12 +259,16 @@ def _render_monitor() -> None:
 # =====================================================================
 # Widgets de gráfico
 # =====================================================================
-def _render_status(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]) -> None:
-    c1, c2, c3, c4 = st.columns(4)
+def _render_status(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float],
+                   state: str, n_transient: int) -> None:
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("RPM", f"{rpm:.0f}" if rpm else "—")
     c2.metric("1X (Hz)", f"{rpm/60:.1f}" if rpm else "—")
-    c3.metric("Ventana", f"{snap.shape[1]/agent.sample_rate_hz:.1f} s")
-    c4.metric("Bloques leídos", agent.blocks_read)
+    color = rm_states.state_color(state)
+    c3.markdown(f"**Estado**<br><span style='color:{color};font-weight:700;font-size:1.3rem'>"
+                f"{rm_states.state_label(state)}</span>", unsafe_allow_html=True)
+    c4.metric("Ventana", f"{snap.shape[1]/agent.sample_rate_hz:.1f} s")
+    c5.metric("Pts transitorio", n_transient)
 
 
 def _plot_waveform(x: np.ndarray, fs: float, ch: ChannelConfig) -> None:
@@ -234,8 +278,7 @@ def _plot_waveform(x: np.ndarray, fs: float, ch: ChannelConfig) -> None:
     t = np.arange(len(eu)) / fs
     fig = go.Figure(go.Scatter(x=t, y=eu, mode="lines", line=dict(width=1)))
     fig.update_layout(height=340, margin=dict(l=10, r=10, t=30, b=10),
-                      xaxis_title="s", yaxis_title=ch.units,
-                      title=f"Waveform · {ch.name}")
+                      xaxis_title="s", yaxis_title=ch.units, title=f"Waveform · {ch.name}")
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -247,8 +290,7 @@ def _spectrum(x: np.ndarray, fs: float):
     return freqs, mag
 
 
-def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig,
-                   rpm: Optional[float]) -> None:
+def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[float]) -> None:
     import plotly.graph_objects as go
     eu = x * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else x
     freqs, mag = _spectrum(eu, fs)
@@ -260,8 +302,7 @@ def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig,
                 fig.add_vline(x=k * f1, line=dict(color="#ef4444", width=1, dash="dot"),
                               annotation_text=lbl)
     fig.update_layout(height=340, margin=dict(l=10, r=10, t=30, b=10),
-                      xaxis_title="Hz", yaxis_title=ch.units,
-                      title=f"Spectrum · {ch.name}")
+                      xaxis_title="Hz", yaxis_title=ch.units, title=f"Spectrum · {ch.name}")
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -279,21 +320,16 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float) -> None:
     pi = pairs.index(sel) * 2
     yi, chy = vib_channels[pi]
     xi, chx = vib_channels[pi + 1]
-    y = snap[yi] * 1000.0 / chy.sensitivity_mv_per_eu
-    x = snap[xi] * 1000.0 / chx.sensitivity_mv_per_eu
-    y = y - np.mean(y)
-    x = x - np.mean(x)
+    y = snap[yi] * 1000.0 / chy.sensitivity_mv_per_eu - np.mean(snap[yi] * 1000.0 / chy.sensitivity_mv_per_eu)
+    x = snap[xi] * 1000.0 / chx.sensitivity_mv_per_eu - np.mean(snap[xi] * 1000.0 / chx.sensitivity_mv_per_eu)
     fig = go.Figure(go.Scatter(x=x, y=y, mode="lines", line=dict(width=1)))
     fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10),
-                      xaxis_title=f"{chx.name} ({chx.units})",
-                      yaxis_title=f"{chy.name} ({chy.units})",
-                      title=f"Órbita · {sel}",
-                      yaxis=dict(scaleanchor="x", scaleratio=1))
+                      xaxis_title=f"{chx.name} ({chx.units})", yaxis_title=f"{chy.name} ({chy.units})",
+                      title=f"Órbita · {sel}", yaxis=dict(scaleanchor="x", scaleratio=1))
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _table_1x(snap: np.ndarray, vib_channels, fs: float,
-              rpm: Optional[float]) -> None:
+def _table_1x(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float]) -> None:
     if not rpm:
         st.warning("Sin keyphasor no hay vectores 1X. Activá el keyphasor en Setup.")
         return
@@ -302,27 +338,67 @@ def _table_1x(snap: np.ndarray, vib_channels, fs: float,
     for i, ch in vib_channels:
         eu = snap[i] * 1000.0 / ch.sensitivity_mv_per_eu
         amp, phase = one_x_vector(eu, fs, f1)
-        rows.append({"Sensor": ch.name, f"1X ({ch.units} 0-pk)": round(amp, 4),
-                     "Fase (°)": round(phase, 1)})
+        rows.append({"Sensor": ch.name, f"1X ({ch.units} 0-pk)": round(amp, 4), "Fase (°)": round(phase, 1)})
     st.dataframe(rows, use_container_width=True, hide_index=True)
 
 
 def _update_and_plot_trend(snap: np.ndarray, vib_channels) -> None:
     import plotly.graph_objects as go
     hist = st.session_state.setdefault("rm_trend", [])
-    rms = {ch.name: float(np.sqrt(np.mean((snap[i] - np.mean(snap[i])) ** 2)))
-           for i, ch in vib_channels}
+    rms = {ch.name: float(np.sqrt(np.mean((snap[i] - np.mean(snap[i])) ** 2))) for i, ch in vib_channels}
     hist.append((datetime.now().strftime("%H:%M:%S"), rms))
     if len(hist) > 120:
         del hist[: len(hist) - 120]
     fig = go.Figure()
     for _, ch in vib_channels:
-        fig.add_trace(go.Scatter(x=[h[0] for h in hist],
-                                 y=[h[1].get(ch.name) for h in hist],
+        fig.add_trace(go.Scatter(x=[h[0] for h in hist], y=[h[1].get(ch.name) for h in hist],
                                  mode="lines+markers", name=ch.name, line=dict(width=1)))
     fig.update_layout(height=360, margin=dict(l=10, r=10, t=30, b=10),
-                      xaxis_title="hora", yaxis_title="RMS (V)",
-                      title="Tendencia overall (RMS por canal)")
+                      xaxis_title="hora", yaxis_title="RMS (V)", title="Tendencia overall (RMS por canal)")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _plot_bode(tc: TransientCapture, channel: str) -> None:
+    """Bode: 1X amplitud & fase vs rpm. Se llena durante arranque/parada."""
+    from plotly.subplots import make_subplots
+    import plotly.graph_objects as go
+    rpms, amp, phase = tc.bode(channel)
+    if len(rpms) < 2:
+        st.info("El Bode se llena durante un **transitorio**. En **Fuente y parámetros** "
+                "elegí perfil *runup* o *coastdown*, pulsá ▶ Live, y verás la curva "
+                "construirse al pasar por la velocidad crítica.")
+        return
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
+                        subplot_titles=("Amplitud 1X", "Fase 1X (°)"))
+    fig.add_trace(go.Scatter(x=rpms, y=amp, mode="lines+markers", line=dict(width=1.5),
+                             name="Amp 1X"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=rpms, y=phase, mode="lines+markers", line=dict(width=1.5),
+                             marker=dict(color="#f59e0b"), name="Fase"), row=2, col=1)
+    fig.update_yaxes(title_text="0-pk", row=1, col=1)
+    fig.update_yaxes(title_text="grados", row=2, col=1)
+    fig.update_xaxes(title_text="RPM", row=2, col=1)
+    fig.update_layout(height=460, margin=dict(l=10, r=10, t=40, b=10), showlegend=False,
+                      title=f"Bode · {channel} ({len(rpms)} puntos)")
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> None:
+    """Cascade / spectral map: espectro vs rpm (heatmap). Transitorio."""
+    import plotly.graph_objects as go
+    rpms, freqs, mat = tc.cascade(channel)
+    if len(rpms) < 2:
+        st.info("El Cascade se llena durante un **transitorio** (runup/coastdown). "
+                "Elegí el perfil en **Fuente y parámetros** y pulsá ▶ Live.")
+        return
+    fig = go.Figure(go.Heatmap(x=freqs, y=rpms, z=mat, colorscale="Turbo",
+                               colorbar=dict(title="Ampl")))
+    # línea de orden 1X (diagonal): freq = rpm/60
+    order1 = rpms / 60.0
+    fig.add_trace(go.Scatter(x=order1, y=rpms, mode="lines",
+                             line=dict(color="white", width=1, dash="dot"), name="1X"))
+    fig.update_layout(height=460, margin=dict(l=10, r=10, t=40, b=10),
+                      xaxis_title="Frecuencia (Hz)", yaxis_title="RPM",
+                      title=f"Cascade · {channel} ({len(rpms)} espectros)", showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -333,9 +409,8 @@ def _save_snapshot(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]) -> N
         ch_meta = [{"name": ch.name, "bnc_port": ch.bnc_port, "coupling": ch.coupling,
                     "sensitivity_mv_per_eu": float(ch.sensitivity_mv_per_eu or 0.0),
                     "units": ch.units} for ch in agent.channels]
-        meta = store.save_snapshot(
-            agent.instance_id, snap, ch_meta, agent.sample_rate_hz, rpm=rpm,
-            captured_at=datetime.now(timezone.utc).isoformat())
+        meta = store.save_snapshot(agent.instance_id, snap, ch_meta, agent.sample_rate_hz,
+                                   rpm=rpm, captured_at=datetime.now(timezone.utc).isoformat())
         st.success(f"💾 Guardado offline: {meta.snapshot_id} "
                    f"({store.count(only_pending=True)} pendiente(s) de sync)")
     except Exception as e:  # noqa: BLE001
