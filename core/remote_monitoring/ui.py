@@ -141,9 +141,16 @@ def _no_config_gate() -> bool:
     st.info("No hay configuración activa. Andá a **Configuración** y guardá una máquina, "
             "o cargá un layout demo para probar ya.")
     if st.button("Cargar layout demo (2 cojinetes + keyphasor)"):
-        st.session_state["rm_channels"] = _demo_channels()
+        chans = _demo_channels()
+        st.session_state["rm_channels"] = chans
         st.session_state["rm_machine_rpm"] = 3600.0
         st.session_state["rm_machine_name"] = "Demo"
+        # Valores de ejemplo (proximidad, mil pp / V) para que Gap, Alarma,
+        # Danger y las líneas de tendencia se vean sin configurar nada.
+        vibs = [c.name for c in chans if not is_keyphasor_channel(c)]
+        st.session_state["rm_alarms_by_name"] = {n: (2.5, 4.0) for n in vibs}
+        st.session_state["rm_gap_by_name"] = {n: -9.5 for n in vibs}
+        st.session_state["rm_type_by_name"] = {n: "proximity" for n in vibs}
         st.rerun()
     return True
 
