@@ -260,7 +260,9 @@ def render_setup() -> None:
     # (los widgets del form escriben con on_change antes de este render).
     row_objs = _rows_from_records(st.session_state["rm_setup_rows"])
     if row_objs:
-        st.markdown(_channels_html_table(row_objs), unsafe_allow_html=True)
+        _bt = st.session_state.get("rm_acq_by_type", {})
+        _unit = st.session_state.get("rm_acq", {}).get("freq_unit", "cpm")
+        st.markdown(_channels_html_table(row_objs, _bt, _unit), unsafe_allow_html=True)
     else:
         st.info("Pulsá **🧩 Auto-generar layout** o **➕ Agregar canal** para empezar.")
 
@@ -692,14 +694,26 @@ def _render_bearing_diagram(rows: List[cfg.ChannelRow], machine: cfg.MachineConf
                        f"({cfg.absolute_angle(kph[0].angle_deg, kph[0].side):.0f}° abs).")
 
 
-def _channels_html_table(rows: List[cfg.ChannelRow]) -> str:
+def _channels_html_table(rows: List[cfg.ChannelRow], acq_by_type: dict = None,
+                         freq_unit: str = "cpm") -> str:
     """Tabla HTML pulida (read-only) de los canales — clase mundial.
 
-    Cabecera navy, bolita de color por tipo, filas zebra, badges de coupling,
-    monospace para números. El data_editor (canvas) no se puede estilizar, así
-    que esta es la vista 'linda'; la edición vive en el expander.
+    Incluye la columna 'Banda' = Fmax/líneas que USA cada canal según su tipo
+    (proximidad/velocidad/acelerómetro), leído de acquisition_by_type. Así al
+    marcar un canal como proximidad se ve de una qué banda de adquisición usa.
     """
-    heads = ["Punto", "BNC", "Coj.", "Tipo", "Sensib.", "Unidad", "FS", "Gap V",
+    acq_by_type = acq_by_type or {}
+    ul = cfg.freq_label(freq_unit)
+
+    def _band(r):
+        if r.sensor_type not in cfg.SPECTRAL_TYPES:
+            return None
+        e = acq_by_type.get(r.sensor_type)
+        fmax = float(e.get("fmax_hz")) if e and "fmax_hz" in e else cfg.default_acq_for_type(r.sensor_type).fmax_hz
+        lines = int(e.get("lines")) if e and "lines" in e else cfg.default_acq_for_type(r.sensor_type).lines
+        return f"{cfg.hz_to_display(fmax, freq_unit):.0f} {ul}·{lines}L"
+
+    heads = ["Punto", "BNC", "Coj.", "Tipo", "Sensib.", "Unidad", "Banda", "FS", "Gap V",
              "Coupl.", "Ángulo", "Kph", "Par", "Alert", "Danger", "Act."]
     th = "".join(
         f'<th style="padding:10px 12px;text-align:left;font-size:11px;'
@@ -733,6 +747,8 @@ def _channels_html_table(rows: List[cfg.ChannelRow]) -> str:
             html.escape(r.sensor_type),
             f'<span style="font-family:monospace;">{_num(r.sensitivity_mv_per_eu)}</span>',
             html.escape(r.unit_native),
+            (f'<span style="font-family:monospace;color:{CYAN_DARK};">{html.escape(_band(r))}</span>'
+             if _band(r) else dash),
             f'<span style="font-family:monospace;">{_num(r.full_scale)}</span>' if r.full_scale else dash,
             f'<span style="font-family:monospace;">{_num(r.gap_bias_v)}</span>' if r.gap_bias_v else dash,
             coup,
@@ -751,7 +767,7 @@ def _channels_html_table(rows: List[cfg.ChannelRow]) -> str:
     return (
         f'<div style="border:1px solid #d6deea;border-radius:12px;overflow-x:auto;'
         f'box-shadow:0 6px 18px rgba(15,30,61,.08);margin:6px 0 4px 0;">'
-        f'<table style="width:100%;border-collapse:collapse;min-width:1080px;">'
+        f'<table style="width:100%;border-collapse:collapse;min-width:1180px;">'
         f'<thead><tr style="background:{NAVY};">{th}</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table></div>'
     )
