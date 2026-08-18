@@ -150,16 +150,17 @@ def _generate(prefix: str, family: str, meta: Dict[str, Any], content: Dict[str,
 # Formularios por familia
 # ---------------------------------------------------------------------
 def _daily(meta):
-    rep_section_header("Reporte Diario", "Datos del servicio · hallazgos · plan de trabajo",
+    rep_section_header("Reporte Diario",
+                       "Datos del servicio · actividades realizadas · hallazgos · observaciones",
                        "SIGA-FMT-136")
     servicio = st.text_input("Servicio", key="diario_servicio",
                              placeholder="Revisión Bomba FLOWSERVE CPVX")
+    st.markdown("**Actividades realizadas** — título de sección en su línea; sub-ítems con «- ».")
+    plan = st.text_area("Actividades realizadas", key="diario_plan", height=160,
+                        placeholder="Recepción y preparación\n- Recepción en taller\n- Limpieza inicial\nVerificación dimensional\n- Run-out en bujes")
     c1, c2 = st.columns(2)
     hall = c1.text_area("Hallazgos (uno por línea)", key="diario_hall", height=120)
     obs = c2.text_area("Observaciones (una por línea)", key="diario_obs", height=120)
-    st.markdown("**Plan de trabajo** — título de sección en su línea; sub-ítems con «- ».")
-    plan = st.text_area("Plan de trabajo", key="diario_plan", height=160,
-                        placeholder="Recepción y preparación\n- Recepción en taller\n- Limpieza inicial\nVerificación dimensional\n- Run-out en bujes")
     photos = _photo_uploader("diario")
     content = {"servicio": servicio, "hallazgos": _lines(hall),
                "observaciones": _lines(obs), "plan": _parse_plan(plan), "photos": photos}

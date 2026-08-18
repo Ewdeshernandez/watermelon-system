@@ -385,10 +385,29 @@ def build_cover_flowables(meta: Dict[str, Any], styles) -> List[Any]:
 
     story.append(HRFlowable(width="40%", thickness=0.7, color=colors.HexColor(_MUTE),
                             spaceBefore=4, spaceAfter=14, hAlign="CENTER"))
+
+    # La línea principal (idx 0 = nombre del equipo) SIEMPRE en una sola línea:
+    # medimos el ancho real y reducimos la fuente hasta que quepa. v3.31.494.
+    _avail = A4[0] - 2 * 2.1 * cm - 0.3 * cm
+
+    def _fit_font(text: str, base: float, minimum: float = 13.0) -> float:
+        size = base
+        try:
+            while size > minimum and pdfmetrics.stringWidth(text, BOLD, size) > _avail:
+                size -= 0.5
+        except Exception:
+            return base
+        return size
+
     for idx, line in enumerate(cover_block_lines):
+        if idx == 0:
+            fsize = _fit_font(paragraph_safe(line), 24.0)
+            lead = fsize + 4
+        else:
+            fsize, lead = 16, 20
         story.append(Paragraph(paragraph_safe(line), ParagraphStyle(
             name=f"WMCoverBlock_{idx}", parent=styles["Normal"], fontName=BOLD,
-            fontSize=24 if idx == 0 else 16, leading=28 if idx == 0 else 20,
+            fontSize=fsize, leading=lead,
             alignment=TA_CENTER, textColor=colors.HexColor(_INK), spaceAfter=2)))
 
     train_text = (meta.get("train_description") or "").strip()

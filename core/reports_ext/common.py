@@ -26,10 +26,21 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import Image, Paragraph, Spacer, Table, TableStyle
 
 from core.report_pdf_shell import make_styles, paragraph_safe  # noqa: F401
+
+
+def _photo_caption_style() -> ParagraphStyle:
+    """Estilo de leyenda de figura en CURSIVA (Helvetica-Oblique = itálica real;
+    la fuente embebida no trae variante itálica)."""
+    return ParagraphStyle(
+        name="WMPhotoCaptionItalic", fontName="Helvetica-Oblique",
+        fontSize=10, leading=13, alignment=TA_CENTER,
+        textColor=colors.HexColor("#111827"), spaceBefore=5, spaceAfter=8)
 
 _HEADER_BG = "#0f4c81"
 _OK = "#16a34a"
@@ -173,11 +184,12 @@ def photo_grid(photos: List[Dict[str, Any]], styles, cols: int = 2,
     if not photos:
         return out
     cell_w = 16.0 / cols       # cm por celda
+    cap_style = _photo_caption_style()   # leyendas en cursiva
     row: List[Any] = []
     grid_rows: List[List[Any]] = []
     for ph in photos:
         img = safe_image(ph.get("bytes"), cell_w - 0.4, max_h_cm)
-        cap = Paragraph(paragraph_safe(ph.get("caption", "")), styles["WMFigureCaption"])
+        cap = Paragraph(paragraph_safe(ph.get("caption", "")), cap_style)
         cell = [img, cap] if img else [cap]
         row.append(cell)
         if len(row) == cols:

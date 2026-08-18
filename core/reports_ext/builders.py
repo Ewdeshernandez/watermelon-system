@@ -93,21 +93,29 @@ def build_daily_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> bytes:
     plan[list of {title, items}], photos[list of {bytes, caption}]."""
     styles = make_styles()
     body: List[Any] = []
+    # 1. Datos del servicio
     body += _service_data(meta, styles, content.get("servicio", ""))
 
-    body.append(section("2. Hallazgos", styles))
+    # 2. Actividades realizadas
+    body.append(section("2. Actividades realizadas", styles))
+    acts = content.get("plan") or content.get("actividades") or []
+    if acts:
+        body += numbered_plan(acts, styles)
+    else:
+        body += bullets(["—"], styles)
+    body.append(Spacer(1, 0.3 * cm))
+
+    # 3. Hallazgos
+    body.append(section("3. Hallazgos", styles))
     body += bullets(content.get("hallazgos", []) or ["—"], styles)
     body.append(Spacer(1, 0.3 * cm))
 
-    body.append(section("3. Observaciones", styles))
+    # 4. Observaciones
+    body.append(section("4. Observaciones", styles))
     body += bullets(content.get("observaciones", []) or ["—"], styles)
     body.append(Spacer(1, 0.3 * cm))
 
-    plan = content.get("plan") or []
-    if plan:
-        body.append(section("4. Plan de trabajo", styles))
-        body += numbered_plan(plan, styles)
-
+    # 5. Registro fotográfico
     body += _photos(content, styles, "5")
 
     return render_report_pdf(
