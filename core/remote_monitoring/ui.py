@@ -2,9 +2,10 @@
 core/remote_monitoring/ui.py — Modo "Remote Monitoring" (render Streamlit)
 =========================================================================
 
-Se monta DENTRO de pages/02_Live_Monitoring.py como un modo alterno:
-lo actual (Active Asset, datos Modbus) queda intacto; este modo hace
-adquisición dinámica en vivo (NI / simulado) y dibuja rotordinámica.
+Página propia del sidebar (pages/02_Remote_Monitoring.py), justo debajo
+de Live Monitoring. Independiente de Live Monitoring (que sigue mostrando
+los escalares Modbus del Bently). Acá se hace adquisición dinámica en vivo
+(NI / simulado) y se dibuja rotordinámica.
 
 Patrón de refresco: SÍNCRONO. El AcqAgent vive en st.session_state; en cada
 rerun bombeamos unos bloques (agent.pump) y redibujamos. "Live" hace
@@ -32,29 +33,12 @@ from core.remote_monitoring.stream_source import (
 )
 from core.remote_monitoring.keyphasor import detect_keyphasor, one_x_vector
 
-_MODE_KEY = "wm_live_view_mode"
-_MODE_ACTIVE = "Active Asset"
-_MODE_REMOTE = "Remote Monitoring"
-
-
 # =====================================================================
-# Punto de entrada — llamado desde el dispatcher de la página
+# Punto de entrada — llamado por pages/02_Remote_Monitoring.py
 # =====================================================================
-def maybe_render_remote_monitoring() -> bool:
-    """Dibuja el selector de modo arriba de todo. Si el usuario eligió
-    Remote Monitoring, renderiza el módulo y devuelve True (la página
-    legacy NO debe correr). Si eligió Active Asset, devuelve False."""
-    mode = st.radio(
-        "Modo de monitoreo",
-        [_MODE_ACTIVE, _MODE_REMOTE],
-        horizontal=True,
-        key=_MODE_KEY,
-        label_visibility="collapsed",
-    )
-    if mode != _MODE_REMOTE:
-        return False
+def render_remote_monitoring() -> None:
+    """Renderiza la página completa Remote Monitoring."""
     _render_remote_monitoring()
-    return True
 
 
 # =====================================================================
