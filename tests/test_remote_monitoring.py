@@ -1,4 +1,5 @@
 """
+import os
 Tests del módulo Remote Monitoring (streaming en vivo).
 
 Corren SIN hardware — usan SimulatedStreamSource. Validan:
@@ -403,3 +404,50 @@ def test_transient_cascade_shape():
     assert mat.shape == (len(rpms), len(freqs))
     assert len(rpms) >= 5
     assert freqs.max() <= 300 + 5   # respetó fmax
+
+
+# ================================================= campos ADRE/acq (Fase nueva)
+def test_channelrow_new_fields_and_backcompat():
+    from core.remote_monitoring.config import MachineConfig, auto_layout
+    rows = auto_layout(MachineConfig(n_bearings=1))
+    prox = rows[0]
+    assert prox.full_scale == 10.0 and prox.gap_bias_v == -9.5 and prox.active is True
+    kph = rows[-1]
+    assert kph.events_per_rev == 1 and kph.trigger_v == -7.0
+
+
+def test_acquisition_params_delta_f_and_validation():
+    from core.remote_monitoring.config import (
+        MachineConfig, AcqSetup, ChannelRow, AcquisitionParams, validate_setup)
+    acq = AcquisitionParams(fmax_hz=2000, lines=1600)
+    assert abs(acq.delta_f() - 1.25) < 1e-6
+    # Fmin >= Fmax → error
+    bad = AcqSetup(machine=MachineConfig(),
+                   channels=[ChannelRow(1, "1Y", 1, "proximity", 200, "mil pp", "AC", 45, "L")],
+                   acquisition=AcquisitionParams(fmax_hz=100, fmin_hz=200))
+    assert any(f.code == "acq_freq_range" and f.level == "error" for f in validate_setup(bad))
+
+
+def test_gap_out_of_range_flagged():
+    from core.remote_monitoring.config import (
+        MachineConfig, AcqSetup, ChannelRow, validate_setup)
+    ch = ChannelRow(1, "1Y", 1, "proximity", 200, "mil pp", "AC", 45, "L", gap_bias_v=+5.0)
+    codes = {f.code for f in validate_setup(AcqSetup(machine=MachineConfig(), channels=[ch]))}
+    assert "gap_out_of_range" in codes
+
+
+def test_full_acqsetup_persist_with_acquisition(tmp_path=None):
+    import os
+    import tempfile
+    os.environ["WM_PERSIST_DIR"] = tempfile.mkdtemp()
+    from core.remote_monitoring import config as cfg
+    m = cfg.MachineConfig(name="Persist Acq", n_bearings=1)
+    setup = cfg.AcqSetup(machine=m, channels=cfg.auto_layout(m),
+                         acquisition=cfg.AcquisitionParams(fmax_hz=5000, lines=3200, window="flattop"))
+    cfg.save_setup(setup)
+    loaded = cfg.load_setup("Persist Acq")
+    assert loaded.acquisition.fmax_hz == 5000
+    assert loaded.acquisition.lines == 3200
+    assert loaded.acquisition.window == "flattop"
+    assert loaded.channels[0].gap_bias_v == -9.5
+    del os.environ["WM_PERSIST_DIR"]

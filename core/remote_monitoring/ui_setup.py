@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import html
 import math
+from dataclasses import asdict
 from typing import List
 
-import pandas as pd
 import streamlit as st
 
 from core.remote_monitoring import config as cfg
@@ -193,60 +193,41 @@ def render_setup() -> None:
         if st.button("🧩 Auto-generar layout", use_container_width=True,
                      help="Genera pares X/Y por cojinete + keyphasor desde la máquina."):
             machine = _machine_from_state()
-            rows = cfg.auto_layout(machine)
-            st.session_state["rm_setup_rows"] = [{c: getattr(r, c) for c in _GRID_COLS} for r in rows]
+            st.session_state["rm_setup_rows"] = [asdict(r) for r in cfg.auto_layout(machine)]
             st.rerun()
     with gcol2:
         st.caption("Convención Bently (API 670): ángulo desde **TDC (arriba)**, "
-                   "**R** = horario, **L** = antihorario → 45°L + 45°R = 90°. "
-                   "La unidad se ajusta al tipo de sensor.")
+                   "**R** = horario, **L** = antihorario → 45°L + 45°R = 90°.")
 
     st.session_state.setdefault("rm_setup_rows", [])
-    has_rows = bool(st.session_state["rm_setup_rows"])
 
-    # Edición en un expander (el grid canvas no se puede estilizar) —
-    # Patrón correcto de data_editor: la FUENTE (rm_setup_rows) es estable
-    # (solo cambia en Auto-generar / Guardar). Las ediciones se leen del
-    # valor de retorno → el cambio de ángulo se toma de una.
-    with st.expander("✏️  Editar canales (tabla)", expanded=not has_rows):
-        df = pd.DataFrame(st.session_state["rm_setup_rows"], columns=_GRID_COLS)
-        edited = st.data_editor(
-            df, key="rm_grid_editor", num_rows="dynamic", use_container_width=True,
-            column_config={
-                "bnc_port": st.column_config.NumberColumn("BNC", min_value=1, max_value=32, step=1, width="small"),
-                "point_label": st.column_config.TextColumn("Punto", width="small"),
-                "plane": st.column_config.NumberColumn("Cojinete", min_value=0, max_value=16, step=1, width="small"),
-                "sensor_type": st.column_config.SelectboxColumn("Tipo", options=cfg.SENSOR_TYPES),
-                "sensitivity_mv_per_eu": st.column_config.NumberColumn("Sensib. mV/EU", step=1.0),
-                "unit_native": st.column_config.SelectboxColumn("Unidad", options=cfg.ALL_UNITS),
-                "coupling": st.column_config.SelectboxColumn("Coupling", options=cfg.COUPLINGS, width="small"),
-                "angle_deg": st.column_config.NumberColumn("Ángulo °", min_value=0.0, max_value=360.0, step=5.0, width="small"),
-                "side": st.column_config.SelectboxColumn("Lado", options=["", "L", "R"], width="small"),
-                "alarm": st.column_config.NumberColumn("Alert", step=0.1, width="small"),
-                "danger": st.column_config.NumberColumn("Danger", step=0.1, width="small"),
-            },
-        )
-    rows = _rows_from_records(edited.to_dict("records"))
-
-    # Vista bonita (read-only) de los canales — tipo software internacional
-    if rows:
-        st.markdown(_channels_html_table(rows), unsafe_allow_html=True)
+    # Vista bonita (master) — read-only, refleja las ediciones al toque
+    # (los widgets del form escriben con on_change antes de este render).
+    row_objs = _rows_from_records(st.session_state["rm_setup_rows"])
+    if row_objs:
+        st.markdown(_channels_html_table(row_objs), unsafe_allow_html=True)
     else:
-        st.info("Pulsá **🧩 Auto-generar layout** para empezar, o abrí "
-                "**✏️ Editar canales** para agregar filas.")
+        st.info("Pulsá **🧩 Auto-generar layout** o **➕ Agregar canal** para empezar.")
 
-    # =================================================================
+    # Editor maestro-detalle (form de propiedades del canal seleccionado)
+    _render_channel_editor()
+    rows = _rows_from_records(st.session_state["rm_setup_rows"])
+
     # Diagrama de sección de cojinete (SVG pro — bolitas de color)
-    # =================================================================
     _render_bearing_diagram(rows, _machine_from_state())
 
     # =================================================================
-    # 3 · Validación
+    # 3 · Parámetros de adquisición (global)
     # =================================================================
-    st.markdown('<div class="rm-sec-head">3 · Validación '
+    acq = _render_acq_params()
+
+    # =================================================================
+    # 4 · Validación
+    # =================================================================
+    st.markdown('<div class="rm-sec-head">4 · Validación '
                 '<small>— API 670 / ISO 20816</small></div>', unsafe_allow_html=True)
     machine = _machine_from_state()
-    setup = cfg.AcqSetup(machine=machine, channels=rows)
+    setup = cfg.AcqSetup(machine=machine, channels=rows, acquisition=acq)
     findings = cfg.validate_setup(setup)
     n_err = sum(1 for f in findings if f.level == "error")
     n_warn = sum(1 for f in findings if f.level == "warn")
@@ -264,7 +245,6 @@ def render_setup() -> None:
         can_save = n_err == 0 and len(setup.channels) > 0
         if st.button("💾 Guardar configuración", type="primary",
                      use_container_width=True, disabled=not can_save):
-            st.session_state["rm_setup_rows"] = edited.to_dict("records")  # commit
             _save_and_activate(setup)
     with scol2:
         if n_err:
@@ -272,7 +252,157 @@ def render_setup() -> None:
         elif n_warn:
             st.caption(f"{n_warn} advertencia(s) — podés guardar igual, pero revisá.")
         else:
-            st.caption("Todo OK. Guardá y pasá al tab **Monitor** para adquirir.")
+            st.caption("Todo OK. Guardá y pasá al tab **Monitoreo** para adquirir.")
+
+
+# =====================================================================
+# Editor maestro-detalle de canales (custom, sin data_editor)
+# =====================================================================
+def _set_field(idx: int, field: str, wkey: str) -> None:
+    rows = st.session_state.get("rm_setup_rows", [])
+    if 0 <= idx < len(rows):
+        rows[idx][field] = st.session_state.get(wkey)
+
+
+def _set_type(idx: int, wkey: str) -> None:
+    rows = st.session_state.get("rm_setup_rows", [])
+    if not (0 <= idx < len(rows)):
+        return
+    t = st.session_state.get(wkey)
+    rows[idx]["sensor_type"] = t
+    valid = cfg.valid_units_for(t)
+    if valid and rows[idx].get("unit_native") not in valid:
+        rows[idx]["unit_native"] = cfg.default_unit(t)
+
+
+def _render_channel_editor() -> None:
+    rows = st.session_state["rm_setup_rows"]
+    ctrl = st.columns([2, 1, 1])
+    idx = None
+    with ctrl[0]:
+        if rows:
+            idx = st.selectbox(
+                "Editar canal", list(range(len(rows))),
+                format_func=lambda i: f"BNC {rows[i].get('bnc_port', '?')} · {rows[i].get('point_label', '?')}",
+                key="rm_edit_idx")
+        else:
+            st.caption("Sin canales — usá Auto-generar o Agregar.")
+    with ctrl[1]:
+        st.write(""); st.write("")
+        if st.button("➕ Agregar", use_container_width=True):
+            nb = max([int(r.get("bnc_port", 0) or 0) for r in rows], default=0) + 1
+            rows.append(asdict(cfg.ChannelRow(bnc_port=min(nb, 32), point_label=f"CH{nb}")))
+            st.rerun()
+    with ctrl[2]:
+        st.write(""); st.write("")
+        if idx is not None and st.button("🗑 Eliminar", use_container_width=True):
+            rows.pop(idx)
+            st.session_state.pop("rm_edit_idx", None)
+            st.rerun()
+
+    if idx is None or idx >= len(rows):
+        return
+    _render_channel_form(idx)
+
+
+def _render_channel_form(idx: int) -> None:
+    rows = st.session_state["rm_setup_rows"]
+    row = rows[idx]
+    is_kph = str(row.get("sensor_type", "")) == "keyphasor"
+
+    def _num(col, label, field, mn, mx, step, as_int=False, help=None):
+        wk = f"f_{field}_{idx}"
+        v = row.get(field, 0) or 0
+        col.number_input(label, min_value=mn, max_value=mx,
+                         value=(int(v) if as_int else float(v)), step=step, key=wk,
+                         on_change=_set_field, args=(idx, field, wk), help=help)
+
+    def _sel(col, label, field, options):
+        wk = f"f_{field}_{idx}"
+        cur = row.get(field, options[0])
+        col.selectbox(label, options, index=options.index(cur) if cur in options else 0,
+                      key=wk, on_change=_set_field, args=(idx, field, wk))
+
+    with st.container(border=True):
+        st.markdown(f"**Editando:** `{row.get('point_label','?')}`")
+        st.caption("Identificación")
+        c = st.columns(4)
+        wk = f"f_point_label_{idx}"
+        c[0].text_input("Punto", value=row.get("point_label", ""), key=wk,
+                        on_change=_set_field, args=(idx, "point_label", wk))
+        _num(c[1], "BNC", "bnc_port", 1, 32, 1, as_int=True)
+        _num(c[2], "Cojinete", "plane", 0, 16, 1, as_int=True, help="0 = sin cojinete")
+        wka = f"f_active_{idx}"
+        c[3].checkbox("Activo", value=bool(row.get("active", True)), key=wka,
+                      on_change=_set_field, args=(idx, "active", wka))
+
+        st.caption("Transductor")
+        c = st.columns(4)
+        wkt = f"f_sensor_type_{idx}"
+        cur_t = row.get("sensor_type", "proximity")
+        c[0].selectbox("Tipo", cfg.SENSOR_TYPES,
+                       index=cfg.SENSOR_TYPES.index(cur_t) if cur_t in cfg.SENSOR_TYPES else 0,
+                       key=wkt, on_change=_set_type, args=(idx, wkt))
+        _num(c[1], "Sensib. mV/EU", "sensitivity_mv_per_eu", 0.0, 5000.0, 1.0)
+        _sel(c[2], "Unidad", "unit_native", cfg.ALL_UNITS)
+        _sel(c[3], "Coupling", "coupling", cfg.COUPLINGS)
+        c = st.columns(4)
+        _num(c[0], "Full-scale (EU)", "full_scale", 0.0, 100000.0, 1.0, help="Rango de medición. 0 = auto")
+        if not is_kph:
+            _num(c[1], "Gap/Bias (V)", "gap_bias_v", -24.0, 24.0, 0.1,
+                 help="Voltaje DC de la sonda (prox ~ -9 a -11 V)")
+
+        st.caption("Orientación (Bently: TDC arriba, R horario, L antihorario)")
+        c = st.columns(4)
+        _num(c[0], "Ángulo °", "angle_deg", 0.0, 360.0, 5.0)
+        _sel(c[1], "Lado", "side", ["", "L", "R"])
+
+        if is_kph:
+            st.caption("Keyphasor")
+            c = st.columns(4)
+            _num(c[0], "Eventos/rev", "events_per_rev", 1, 360, 1, as_int=True)
+            _num(c[1], "Umbral disparo (V)", "trigger_v", -24.0, 24.0, 0.5)
+        else:
+            st.caption("Alarmas (API 670)")
+            c = st.columns(4)
+            _num(c[0], "Alert", "alarm", 0.0, 100000.0, 0.1)
+            _num(c[1], "Danger", "danger", 0.0, 100000.0, 0.1)
+
+
+# =====================================================================
+# Parámetros de adquisición (global)
+# =====================================================================
+def _render_acq_params() -> cfg.AcquisitionParams:
+    st.markdown('<div class="rm-sec-head">3 · Parámetros de adquisición '
+                '<small>— espectro / bode / cascade</small></div>', unsafe_allow_html=True)
+    st.session_state.setdefault("rm_acq", asdict(cfg.AcquisitionParams()))
+    a = st.session_state["rm_acq"]
+    with st.container(border=True):
+        c = st.columns(3)
+        fmax = c[0].number_input("Fmax / span (Hz)", 50, 40000, int(a.get("fmax_hz", 1000)),
+                                 step=50, key="rm_acq_fmax",
+                                 help="≥10×rpm general; 3.25×GMF engranajes")
+        fmin = c[1].number_input("Fmin / HP (Hz)", 0.0, 1000.0, float(a.get("fmin_hz", 2.0)),
+                                 step=0.5, key="rm_acq_fmin",
+                                 help="2 Hz o 0.3×rpm — no cortar el sub-síncrono")
+        lines = c[2].selectbox("Líneas", cfg.LINES_OPTIONS,
+                               index=cfg.LINES_OPTIONS.index(int(a.get("lines", 1600)))
+                               if int(a.get("lines", 1600)) in cfg.LINES_OPTIONS else 2,
+                               key="rm_acq_lines")
+        c2 = st.columns(3)
+        averages = c2[0].number_input("Promedios", 1, 64, int(a.get("averages", 4)), key="rm_acq_avg")
+        window = c2[1].selectbox("Ventana", cfg.WINDOWS,
+                                 index=cfg.WINDOWS.index(a.get("window", "hanning"))
+                                 if a.get("window", "hanning") in cfg.WINDOWS else 0,
+                                 key="rm_acq_win")
+        spr = c2[2].number_input("Samples/rev (0=auto)", 0, 1024, int(a.get("samples_per_rev", 0)),
+                                 key="rm_acq_spr", help="Muestreo síncrono para bode/cascade")
+    acq = cfg.AcquisitionParams(fmax_hz=float(fmax), fmin_hz=float(fmin), lines=int(lines),
+                                averages=int(averages), window=window, samples_per_rev=int(spr))
+    st.caption(f"Resolución **Δf = {acq.delta_f():.3f} Hz** · span {fmax:.0f} Hz · {lines} líneas · "
+               f"ventana {window} · {averages} promedios")
+    st.session_state["rm_acq"] = asdict(acq)
+    return acq
 
 
 # =====================================================================
@@ -399,23 +529,24 @@ def _channels_html_table(rows: List[cfg.ChannelRow]) -> str:
     monospace para números. El data_editor (canvas) no se puede estilizar, así
     que esta es la vista 'linda'; la edición vive en el expander.
     """
-    heads = ["Punto", "BNC", "Cojinete", "Tipo", "Sensib.", "Unidad",
-             "Coupling", "Ángulo", "Alert", "Danger"]
+    heads = ["Punto", "BNC", "Coj.", "Tipo", "Sensib.", "Unidad", "FS", "Gap V",
+             "Coupl.", "Ángulo", "Alert", "Danger", "Act."]
     th = "".join(
         f'<th style="padding:10px 12px;text-align:left;font-size:11px;'
         f'letter-spacing:.04em;text-transform:uppercase;font-weight:700;'
-        f'color:{CYAN};border:none;">{html.escape(h)}</th>' for h in heads)
+        f'color:{CYAN};border:none;white-space:nowrap;">{html.escape(h)}</th>' for h in heads)
 
     def _num(v):
         try:
-            f = float(v)
-            return f"{f:g}"
+            return f"{float(v):g}"
         except Exception:  # noqa: BLE001
             return html.escape(str(v))
 
+    dash = '<span style="color:#94a3b8;">—</span>'
     body = []
     for i, r in enumerate(rows):
         color = _TYPE_COLOR.get(r.sensor_type, "#475569")
+        muted = "" if r.active else "opacity:.45;"
         bg = "#ffffff" if i % 2 == 0 else GRAY_LIGHT
         dot = (f'<span style="display:inline-block;width:13px;height:13px;'
                f'border-radius:50%;background:{color};border:2px solid #fff;'
@@ -423,27 +554,32 @@ def _channels_html_table(rows: List[cfg.ChannelRow]) -> str:
         ang = f"{r.angle_deg:.0f}°{(' ' + r.side) if r.side else ''}"
         coup = (f'<span style="background:{NAVY};color:#fff;font-size:10.5px;'
                 f'font-weight:700;padding:2px 9px;border-radius:999px;">{html.escape(r.coupling)}</span>')
+        act = ('<span style="color:#16a34a;font-weight:800;">✓</span>' if r.active
+               else '<span style="color:#94a3b8;font-weight:800;">✗</span>')
         tds = [
             f'{dot}<b style="color:{NAVY};">{html.escape(r.point_label)}</b>',
             f'<span style="font-family:monospace;">{r.bnc_port}</span>',
-            html.escape(str(r.plane)) if r.plane else '<span style="color:#94a3b8;">—</span>',
+            html.escape(str(r.plane)) if r.plane else dash,
             html.escape(r.sensor_type),
             f'<span style="font-family:monospace;">{_num(r.sensitivity_mv_per_eu)}</span>',
             html.escape(r.unit_native),
+            f'<span style="font-family:monospace;">{_num(r.full_scale)}</span>' if r.full_scale else dash,
+            f'<span style="font-family:monospace;">{_num(r.gap_bias_v)}</span>' if r.gap_bias_v else dash,
             coup,
             f'<span style="font-family:monospace;">{html.escape(ang)}</span>',
-            f'<span style="font-family:monospace;color:{AMBER};">{_num(r.alarm)}</span>',
-            f'<span style="font-family:monospace;color:#dc2626;">{_num(r.danger)}</span>',
+            f'<span style="font-family:monospace;color:{AMBER};">{_num(r.alarm)}</span>' if r.alarm else dash,
+            f'<span style="font-family:monospace;color:#dc2626;">{_num(r.danger)}</span>' if r.danger else dash,
+            act,
         ]
         cells = "".join(
-            f'<td style="padding:11px 12px;font-size:13px;color:#334155;'
-            f'border-top:1px solid #e8edf5;">{c}</td>' for c in tds)
+            f'<td style="padding:11px 12px;font-size:13px;color:#334155;{muted}'
+            f'border-top:1px solid #e8edf5;white-space:nowrap;">{c}</td>' for c in tds)
         body.append(f'<tr style="background:{bg};">{cells}</tr>')
 
     return (
-        f'<div style="border:1px solid #d6deea;border-radius:12px;overflow:hidden;'
+        f'<div style="border:1px solid #d6deea;border-radius:12px;overflow-x:auto;'
         f'box-shadow:0 6px 18px rgba(15,30,61,.08);margin:6px 0 4px 0;">'
-        f'<table style="width:100%;border-collapse:collapse;">'
+        f'<table style="width:100%;border-collapse:collapse;min-width:920px;">'
         f'<thead><tr style="background:{NAVY};">{th}</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table></div>'
     )
@@ -459,5 +595,7 @@ def _save_and_activate(setup: cfg.AcqSetup) -> None:
     st.session_state["rm_machine_rpm"] = float(setup.machine.rpm_nominal)
     st.session_state["rm_machine_name"] = setup.machine.name
     st.session_state["rm_active_setup"] = setup.machine.name
-    st.success(f"💾 Guardado: `{path.name}` · {len(setup.channels)} canales. "
-               "Andá al tab **Monitor** y pulsá ▶ Iniciar.")
+    # Params de adquisición → el Monitor los usa (Fmax en spectrum/cascade)
+    st.session_state["rm_acq_saved"] = asdict(setup.acquisition)
+    st.success(f"💾 Guardado: `{path.name}` · {len(setup.channels)} canales · "
+               f"Fmax {setup.acquisition.fmax_hz:.0f} Hz. Andá al tab **Monitoreo** y pulsá ▶ Iniciar.")

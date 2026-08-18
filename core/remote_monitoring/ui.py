@@ -181,7 +181,9 @@ def _render_monitor() -> None:
         st.session_state["rm_agent_sig"] = sig
         st.session_state["rm_running"] = False
         st.session_state["rm_trend"] = []
-        st.session_state["rm_transient"] = TransientCapture()
+        _acq = st.session_state.get("rm_acq_saved") or {}
+        _fmax = float(_acq.get("fmax_hz", 1000.0))
+        st.session_state["rm_transient"] = TransientCapture(TransientConfig(fmax_hz=_fmax))
         st.session_state["rm_prev_rpm"] = None
 
     agent: AcqAgent = st.session_state["rm_agent"]
@@ -257,7 +259,9 @@ def _render_monitor() -> None:
         if names:
             sel = st.selectbox("Canal", names, key="rm_sp_ch")
             i = names.index(sel)
-            _plot_spectrum(snap[vib_channels[i][0]], fs, vib_channels[i][1], rpm_est)
+            _fmax = float((st.session_state.get("rm_acq_saved") or {}).get("fmax_hz", 0) or 0)
+            _plot_spectrum(snap[vib_channels[i][0]], fs, vib_channels[i][1], rpm_est,
+                           fmax=_fmax or None)
     with tabs[2]:
         _plot_orbit(snap, vib_channels, fs)
     with tabs[3]:
@@ -312,7 +316,8 @@ def _spectrum(x: np.ndarray, fs: float):
     return freqs, mag
 
 
-def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[float]) -> None:
+def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[float],
+                   fmax: Optional[float] = None) -> None:
     import plotly.graph_objects as go
     eu = x * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else x
     freqs, mag = _spectrum(eu, fs)
@@ -325,6 +330,8 @@ def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
                               annotation_text=lbl)
     fig.update_layout(height=340, margin=dict(l=10, r=10, t=30, b=10),
                       xaxis_title="Hz", yaxis_title=ch.units, title=f"Spectrum · {ch.name}")
+    if fmax and fmax > 0:
+        fig.update_xaxes(range=[0, fmax])  # span Fmax de los parámetros de adquisición
     st.plotly_chart(fig, use_container_width=True)
 
 

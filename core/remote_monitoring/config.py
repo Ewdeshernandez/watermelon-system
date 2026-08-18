@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import os
 import sys
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -126,6 +126,12 @@ class ChannelRow:
     side: str = ""
     alarm: float = 0.0
     danger: float = 0.0
+    # --- Fase campos ADRE 408 / API 670 ---
+    full_scale: float = 0.0        # rango de medición (EU). 0 = auto
+    gap_bias_v: float = 0.0        # voltaje gap/bias nominal (V) — sondas prox DC
+    active: bool = True            # canal activo (recolecta) — ADRE "Active"
+    events_per_rev: int = 1        # keyphasor: pulsos por revolución
+    trigger_v: float = 0.0         # keyphasor: umbral de disparo (V)
 
     def is_keyphasor(self) -> bool:
         if self.sensor_type == "keyphasor":
@@ -134,10 +140,30 @@ class ChannelRow:
         return any(tok in nm for tok in _KPH_TOKENS)
 
 
+# Parámetros de adquisición GLOBALES (por medición, no por canal) — igual que
+# System1 "Spectrums & Waveforms". Definen la calidad del espectro/bode/cascade.
+WINDOWS = ["hanning", "hamming", "flattop", "rectangular"]
+LINES_OPTIONS = [400, 800, 1600, 3200, 6400]
+
+
+@dataclass
+class AcquisitionParams:
+    fmax_hz: float = 1000.0        # frecuencia máxima del espectro (span)
+    fmin_hz: float = 2.0           # corte pasa-altos (quita DC/deriva)
+    lines: int = 1600              # líneas de resolución → Δf
+    averages: int = 4              # promedios espectrales
+    window: str = "hanning"        # ventana FFT
+    samples_per_rev: int = 0       # muestreo síncrono (0 = auto)
+
+    def delta_f(self) -> float:
+        return self.fmax_hz / self.lines if self.lines else 0.0
+
+
 @dataclass
 class AcqSetup:
     machine: MachineConfig = field(default_factory=MachineConfig)
     channels: List[ChannelRow] = field(default_factory=list)
+    acquisition: AcquisitionParams = field(default_factory=AcquisitionParams)
 
     def keyphasor_row(self) -> Optional[ChannelRow]:
         for ch in self.channels:
@@ -165,18 +191,21 @@ def auto_layout(machine: MachineConfig, with_keyphasor: bool = True) -> List[Cha
         rows.append(ChannelRow(bnc_port=bnc, point_label=f"{brg}Y", plane=brg,
                                sensor_type="proximity", sensitivity_mv_per_eu=200.0,
                                unit_native="mil pp", coupling="AC",
-                               angle_deg=45.0, side="L", alarm=2.5, danger=4.0))
+                               angle_deg=45.0, side="L", alarm=2.5, danger=4.0,
+                               full_scale=10.0, gap_bias_v=-9.5, active=True))
         bnc += 1
         rows.append(ChannelRow(bnc_port=bnc, point_label=f"{brg}X", plane=brg,
                                sensor_type="proximity", sensitivity_mv_per_eu=200.0,
                                unit_native="mil pp", coupling="AC",
-                               angle_deg=45.0, side="R", alarm=2.5, danger=4.0))
+                               angle_deg=45.0, side="R", alarm=2.5, danger=4.0,
+                               full_scale=10.0, gap_bias_v=-9.5, active=True))
         bnc += 1
     if with_keyphasor:
         rows.append(ChannelRow(bnc_port=bnc, point_label="KPH", plane=0,
                                sensor_type="keyphasor", sensitivity_mv_per_eu=1.0,
                                unit_native="pulses/rev", coupling="DC",
-                               angle_deg=0.0, side="", alarm=0.0, danger=0.0))
+                               angle_deg=0.0, side="", alarm=0.0, danger=0.0,
+                               active=True, events_per_rev=1, trigger_v=-7.0))
     return rows
 
 
@@ -286,6 +315,28 @@ def validate_setup(setup: AcqSetup) -> List[Finding]:
             out.append(Finding("warn", "unit_mismatch",
                                f"{ch.point_label}: unidad '{ch.unit_native}' no es típica de "
                                f"{ch.sensor_type} ({' / '.join(valid_u)})."))
+        # Gap/bias de sondas de proximidad (Bently -24V: típico -2 a -18 VDC)
+        if ch.sensor_type == "proximity" and ch.gap_bias_v != 0.0:
+            if not (-18.0 <= ch.gap_bias_v <= -2.0):
+                out.append(Finding("warn", "gap_out_of_range",
+                                   f"{ch.point_label}: gap {ch.gap_bias_v} V fuera del rango "
+                                   f"típico [-18, -2] VDC de un proximitor."))
+        # Danger no debe exceder el full-scale del transductor
+        if ch.full_scale > 0 and ch.danger > 0 and ch.danger > ch.full_scale:
+            out.append(Finding("warn", "danger_over_fullscale",
+                               f"{ch.point_label}: Danger ({ch.danger}) supera el "
+                               f"full-scale ({ch.full_scale} {ch.unit_native})."))
+
+    # Parámetros de adquisición globales
+    acq = setup.acquisition
+    if acq.fmin_hz >= acq.fmax_hz:
+        out.append(Finding("error", "acq_freq_range",
+                           f"Fmin ({acq.fmin_hz} Hz) debe ser menor que Fmax ({acq.fmax_hz} Hz)."))
+    kph_rows = [c for c in chans if c.is_keyphasor()]
+    for k in kph_rows:
+        if k.events_per_rev < 1:
+            out.append(Finding("warn", "kph_events",
+                               f"{k.point_label}: eventos/rev debe ser ≥ 1."))
 
     errors = [f for f in out if f.level == "error"]
     warns = [f for f in out if f.level == "warn"]
@@ -374,9 +425,17 @@ def save_setup(setup: AcqSetup) -> Path:
     d.mkdir(parents=True, exist_ok=True)
     path = d / f"{_slug(setup.machine.name)}.json"
     payload = {"machine": asdict(setup.machine),
-               "channels": [asdict(c) for c in setup.channels]}
+               "channels": [asdict(c) for c in setup.channels],
+               "acquisition": asdict(setup.acquisition)}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return path
+
+
+def _filter_fields(cls, data: dict) -> dict:
+    """Filtra un dict a los campos válidos del dataclass (tolerante a JSON viejo
+    con campos faltantes o extra)."""
+    valid = {f.name for f in fields(cls)}
+    return {k: v for k, v in (data or {}).items() if k in valid}
 
 
 def load_setup(name: str) -> Optional[AcqSetup]:
@@ -384,9 +443,10 @@ def load_setup(name: str) -> Optional[AcqSetup]:
     if not path.exists():
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
-    machine = MachineConfig(**data.get("machine", {}))
-    channels = [ChannelRow(**c) for c in data.get("channels", [])]
-    return AcqSetup(machine=machine, channels=channels)
+    machine = MachineConfig(**_filter_fields(MachineConfig, data.get("machine", {})))
+    channels = [ChannelRow(**_filter_fields(ChannelRow, c)) for c in data.get("channels", [])]
+    acq = AcquisitionParams(**_filter_fields(AcquisitionParams, data.get("acquisition", {})))
+    return AcqSetup(machine=machine, channels=channels, acquisition=acq)
 
 
 def list_setups() -> List[str]:
