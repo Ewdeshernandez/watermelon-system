@@ -28,6 +28,7 @@ from core.report_pdf_shell import render_report_pdf
 from core.reports_ext.common import (
     make_styles, p, section, bullets, numbered_plan, kv_table, two_col_kv,
     grid_table, photo_grid, severity_table, severity_legend, today_str,
+    photo_credit,
 )
 
 _CITY = "Cajicá, Cundinamarca · Colombia"
@@ -80,7 +81,8 @@ def _photos(content: Dict[str, Any], styles, num: str) -> List[Any]:
     if not photos:
         return []
     out = [section(f"{num}. Registro fotográfico", styles)]
-    out += photo_grid(photos, styles, cols=content.get("photo_cols", 2))
+    out += photo_grid(photos, styles, cols=content.get("photo_cols", 2),
+                      credit=photo_credit())
     out.append(Spacer(1, 0.3 * cm))
     return out
 

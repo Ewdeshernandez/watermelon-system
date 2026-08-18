@@ -40,7 +40,21 @@ def _photo_caption_style() -> ParagraphStyle:
     return ParagraphStyle(
         name="WMPhotoCaptionItalic", fontName="Helvetica-Oblique",
         fontSize=10, leading=13, alignment=TA_CENTER,
-        textColor=colors.HexColor("#111827"), spaceBefore=5, spaceAfter=8)
+        textColor=colors.HexColor("#111827"), spaceBefore=5, spaceAfter=3)
+
+
+def _photo_credit_style() -> ParagraphStyle:
+    """Crédito discreto bajo cada figura (pequeño, gris, cursiva)."""
+    return ParagraphStyle(
+        name="WMPhotoCredit", fontName="Helvetica-Oblique",
+        fontSize=7.5, leading=9.5, alignment=TA_CENTER,
+        textColor=colors.HexColor("#94a3b8"), spaceAfter=8)
+
+
+def photo_credit(year: Optional[int] = None) -> str:
+    """Texto de crédito de fotografía (propiedad SIGA)."""
+    y = year or datetime.now().year
+    return f"Fotografía tomada por SIGA, {y}"
 
 _HEADER_BG = "#0f4c81"
 _OK = "#16a34a"
@@ -82,7 +96,8 @@ def numbered_plan(sections: List[Dict[str, Any]], styles) -> List[Any]:
     for i, sec in enumerate(sections, 1):
         title = str(sec.get("title", "")).strip()
         if title:
-            out.append(Paragraph(f"<b>{i}. {paragraph_safe(title)}</b>",
+            # Sin negrita (pedido Ewdes): número + descripción en peso normal.
+            out.append(Paragraph(f"{i}.&nbsp;&nbsp;{paragraph_safe(title)}",
                                   styles["WMClinicalNumbered"]))
         for it in sec.get("items", []) or []:
             if str(it).strip():
@@ -178,19 +193,24 @@ def safe_image(raw: bytes, max_w_cm: float, max_h_cm: float) -> Optional[Image]:
 
 
 def photo_grid(photos: List[Dict[str, Any]], styles, cols: int = 2,
-               max_h_cm: float = 6.0) -> List[Any]:
-    """Registro fotográfico en cuadrícula. photos: [{bytes, caption}]."""
+               max_h_cm: float = 6.0, credit: Optional[str] = None) -> List[Any]:
+    """Registro fotográfico en cuadrícula. photos: [{bytes, caption}].
+    credit: crédito discreto bajo cada figura (ej. 'Fotografía tomada por SIGA,
+    2026'). None = sin crédito."""
     out: List[Any] = []
     if not photos:
         return out
     cell_w = 16.0 / cols       # cm por celda
-    cap_style = _photo_caption_style()   # leyendas en cursiva
+    cap_style = _photo_caption_style()      # leyendas en cursiva
+    credit_style = _photo_credit_style()    # crédito pequeño gris
     row: List[Any] = []
     grid_rows: List[List[Any]] = []
     for ph in photos:
         img = safe_image(ph.get("bytes"), cell_w - 0.4, max_h_cm)
         cap = Paragraph(paragraph_safe(ph.get("caption", "")), cap_style)
         cell = [img, cap] if img else [cap]
+        if credit:
+            cell.append(Paragraph(paragraph_safe(credit), credit_style))
         row.append(cell)
         if len(row) == cols:
             grid_rows.append(row); row = []
@@ -423,6 +443,6 @@ __all__ = [
     "make_styles", "p", "section", "subsection", "bullets", "numbered_plan",
     "kv_table", "two_col_kv", "grid_table", "safe_image", "photo_grid",
     "severity_table", "severity_legend", "signatures_block",
-    "autofill_base_meta", "today_str",
+    "autofill_base_meta", "today_str", "photo_credit",
     "TYPE_CODES", "REVIEWERS", "peek_consecutive", "commit_consecutive",
 ]
