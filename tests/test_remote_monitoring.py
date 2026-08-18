@@ -469,3 +469,26 @@ def test_orders_waveform_notch_persist():
     assert loaded.acquisition.orders == [0.5, 1.0, 2.0, 3.0]
     assert loaded.channels[-1].notch_type == "muesca"
     del os.environ["WM_PERSIST_DIR"]
+
+
+def test_freq_unit_conversion():
+    from core.remote_monitoring.config import hz_to_display, display_to_hz, freq_label
+    assert hz_to_display(1000, "cpm") == 60000
+    assert hz_to_display(1000, "hz") == 1000
+    assert display_to_hz(60000, "cpm") == 1000
+    assert freq_label("cpm") == "CPM" and freq_label("hz") == "Hz"
+
+
+def test_only_three_windows():
+    from core.remote_monitoring.config import WINDOWS
+    assert WINDOWS == ["hanning", "flattop", "uniform"]
+    assert "hamming" not in WINDOWS
+
+
+def test_orbit_pairs_bidirectional():
+    from core.remote_monitoring.config import ChannelRow, orbit_pairs
+    y = ChannelRow(1, "1Y", 1, "proximity", 200, "mil pp", "AC", 45, "L", pair_ref="1X")
+    x = ChannelRow(2, "1X", 1, "proximity", 200, "mil pp", "AC", 45, "R")  # sin pair_ref
+    pairs = orbit_pairs([y, x])
+    assert len(pairs) == 1
+    assert set(pairs[0]) == {"1Y", "1X"}  # bidireccional: basta setear un lado

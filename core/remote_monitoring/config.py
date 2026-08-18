@@ -133,6 +133,8 @@ class ChannelRow:
     events_per_rev: int = 1        # keyphasor: pulsos por revolución
     trigger_v: float = 0.0         # keyphasor: umbral de disparo (V)
     notch_type: str = ""           # keyphasor: muesca | proyección | rueda dentada
+    keyphasor_ref: str = ""        # punto keyphasor asociado (referencia de fase 1X)
+    pair_ref: str = ""             # punto par X/Y para la órbita
 
     def is_keyphasor(self) -> bool:
         if self.sensor_type == "keyphasor":
@@ -143,23 +145,39 @@ class ChannelRow:
 
 # Parámetros de adquisición GLOBALES (por medición, no por canal) — igual que
 # System1 "Spectrums & Waveforms". Definen la calidad del espectro/bode/cascade.
-WINDOWS = ["hanning", "hamming", "flattop", "rectangular"]
+# Ventanas estándar de análisis de vibración (3): Hanning (general),
+# Flat-Top (exactitud de amplitud), Uniform/Rectangular (transitorios/impacto).
+WINDOWS = ["hanning", "flattop", "uniform"]
 LINES_OPTIONS = [400, 800, 1600, 3200, 6400]
 WAVEFORM_MODES = ["synchronous", "asynchronous"]
 COMMON_ORDERS = [0.5, 1.0, 2.0, 3.0]        # órdenes ×rpm típicos a trackear
 NOTCH_TYPES = ["", "muesca", "proyección", "rueda dentada"]
+FREQ_UNITS = ["cpm", "hz"]                  # unidad de display de frecuencia
+
+
+def freq_label(unit: str) -> str:
+    return "CPM" if (unit or "").lower() == "cpm" else "Hz"
+
+
+def hz_to_display(hz: float, unit: str) -> float:
+    return hz * 60.0 if (unit or "").lower() == "cpm" else hz
+
+
+def display_to_hz(val: float, unit: str) -> float:
+    return val / 60.0 if (unit or "").lower() == "cpm" else val
 
 
 @dataclass
 class AcquisitionParams:
-    fmax_hz: float = 1000.0        # frecuencia máxima del espectro (span)
-    fmin_hz: float = 2.0           # corte pasa-altos (quita DC/deriva)
+    fmax_hz: float = 1000.0        # frecuencia máxima del espectro (span) — SIEMPRE en Hz interno
+    fmin_hz: float = 2.0           # corte pasa-altos (quita DC/deriva) — Hz interno
     lines: int = 1600              # líneas de resolución → Δf
     averages: int = 4              # promedios espectrales
     window: str = "hanning"        # ventana FFT
     samples_per_rev: int = 0       # muestreo síncrono (0 = auto)
     waveform_mode: str = "synchronous"   # synchronous | asynchronous
     orders: List[float] = field(default_factory=lambda: [1.0, 2.0])  # 1X, 2X por defecto (ADRE)
+    freq_unit: str = "cpm"         # cpm | hz — preferencia de display (CPM por defecto)
 
     def delta_f(self) -> float:
         return self.fmax_hz / self.lines if self.lines else 0.0
@@ -359,6 +377,24 @@ def is_setup_valid(setup: AcqSetup) -> bool:
 # =====================================================================
 # Puentes a los modelos existentes (fuente única de verdad)
 # =====================================================================
+def orbit_pairs(channels: List[ChannelRow]) -> List[Tuple[str, str]]:
+    """Pares X/Y explícitos para órbita, desde pair_ref (bidireccional, sin
+    duplicar). Ej: si 1XD.pair_ref='1YD' → par ('1XD','1YD')."""
+    by_name = {c.point_label: c for c in channels}
+    seen: set = set()
+    pairs: List[Tuple[str, str]] = []
+    for c in channels:
+        if c.is_keyphasor():
+            continue
+        partner = (c.pair_ref or "").strip()
+        if partner and partner != c.point_label and partner in by_name:
+            key = tuple(sorted([c.point_label, partner]))
+            if key not in seen:
+                seen.add(key)
+                pairs.append((c.point_label, partner))
+    return pairs
+
+
 def setup_to_channel_configs(setup: AcqSetup) -> List:
     """AcqSetup → List[ChannelConfig] de core.modal.acq_backend (adquisición)."""
     from core.modal.acq_backend import ChannelConfig
