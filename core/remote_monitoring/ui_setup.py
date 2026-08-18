@@ -146,7 +146,8 @@ def render_setup() -> None:
             st.rerun()
     with gcol2:
         st.caption("Editá cada fila. Tipos: proximity / velometer / accelerometer / "
-                   "keyphasor. Convención Bently: Y=0° (TDC), X=90°. Sensib. en mV/EU.")
+                   "keyphasor. Convención Bently (API 670): ángulo desde TDC (arriba), "
+                   "**R** = horario, **L** = antihorario → 45°L + 45°R = 90°. Sensib. en mV/EU.")
 
     if not st.session_state.get("rm_setup_rows"):
         st.info("Pulsá **Auto-generar layout** para empezar, o agregá filas manualmente.")
@@ -164,7 +165,8 @@ def render_setup() -> None:
             "plane": st.column_config.NumberColumn("Cojinete", min_value=0, max_value=16, step=1),
             "sensor_type": st.column_config.SelectboxColumn("Tipo", options=cfg.SENSOR_TYPES),
             "sensitivity_mv_per_eu": st.column_config.NumberColumn("Sensib. mV/EU", step=1.0),
-            "unit_native": st.column_config.TextColumn("Unidad"),
+            "unit_native": st.column_config.SelectboxColumn("Unidad", options=cfg.ALL_UNITS,
+                                                            help="Se autocorrige al tipo del sensor."),
             "coupling": st.column_config.SelectboxColumn("Coupling", options=cfg.COUPLINGS),
             "angle_deg": st.column_config.NumberColumn("Ángulo °", min_value=0.0, max_value=360.0, step=5.0),
             "side": st.column_config.SelectboxColumn("Lado", options=["", "L", "R"]),
@@ -172,8 +174,17 @@ def render_setup() -> None:
             "danger": st.column_config.NumberColumn("Danger", step=0.1),
         },
     )
-    # persistir edición
-    st.session_state["rm_setup_rows"] = edited.to_dict("records")
+    # persistir edición + auto-corregir unidad al tipo del sensor
+    rows_edited = edited.to_dict("records")
+    for r in rows_edited:
+        t = str(r.get("sensor_type", "proximity") or "proximity")
+        valid = cfg.valid_units_for(t)
+        if valid and r.get("unit_native") not in valid:
+            r["unit_native"] = cfg.default_unit(t)
+    st.session_state["rm_setup_rows"] = rows_edited
+
+    # --- diagrama polar: dónde queda físicamente cada sonda ---
+    _render_probe_polar(_rows_from_grid(), _machine_from_state())
 
     # --- validación en vivo API 670 ---
     st.markdown("#### 3 · Validación (API 670 / ISO 20816)")
@@ -222,3 +233,73 @@ def _save_and_activate(setup: cfg.AcqSetup) -> None:
     st.session_state["rm_active_setup"] = setup.machine.name
     st.success(f"💾 Guardado: `{path.name}` · {len(setup.channels)} canales. "
                "Andá al tab **Monitor** y pulsá ▶ Iniciar.")
+
+
+def _render_probe_polar(rows: List[cfg.ChannelRow], machine: cfg.MachineConfig) -> None:
+    """Vista polar tipo reloj: dónde queda físicamente cada sonda.
+
+    Convención Bently (API 670): TDC (arriba) = 0°, R horario, L antihorario.
+    El operador escribe ángulo+lado en el grid y ve la bolita aparecer en su
+    posición real. Hace obvia la ortogonalidad 90° del par X/Y.
+    """
+    import plotly.graph_objects as go
+
+    vib = [r for r in rows if r.sensor_type != "keyphasor" and r.plane > 0]
+    planes = sorted({r.plane for r in vib})
+    if not planes:
+        st.caption("Agregá sondas radiales (con cojinete) para ver la vista polar.")
+        return
+
+    st.markdown("##### Posición física de las sondas (vista polar)")
+    sel = st.selectbox("Ver cojinete", planes, key="rm_polar_brg",
+                       format_func=lambda p: f"Cojinete {p}")
+    probes = [r for r in vib if r.plane == sel]
+    if not probes:
+        return
+
+    theta = [cfg.absolute_angle(r.angle_deg, r.side) for r in probes]
+    labels = [r.point_label for r in probes]
+
+    fig = go.Figure()
+    # anillo del alojamiento
+    fig.add_trace(go.Scatterpolar(
+        r=[1.0] * 361, theta=list(range(361)), mode="lines",
+        line=dict(color="#cbd5e1", width=1), hoverinfo="skip", showlegend=False))
+    # sondas
+    fig.add_trace(go.Scatterpolar(
+        r=[1.0] * len(probes), theta=theta, mode="markers+text",
+        text=labels, textposition="middle center",
+        textfont=dict(color="white", size=10, family="monospace"),
+        marker=dict(size=30, color="#2563eb", line=dict(color="white", width=2)),
+        hovertext=[f"{r.point_label} · {r.angle_deg:.0f}°{r.side} (abs {t:.0f}°)"
+                   for r, t in zip(probes, theta)],
+        hoverinfo="text", showlegend=False))
+
+    fig.update_layout(
+        height=380, margin=dict(l=40, r=40, t=20, b=20),
+        polar=dict(
+            radialaxis=dict(visible=False, range=[0, 1.15]),
+            angularaxis=dict(
+                rotation=90, direction="clockwise",
+                tickmode="array",
+                tickvals=[0, 45, 90, 135, 180, 225, 270, 315],
+                ticktext=["TDC 0°", "45°R", "90°R", "135°R",
+                          "BDC 180°", "135°L", "90°L", "45°L"],
+                tickfont=dict(size=10)),
+        ),
+    )
+    c1, c2 = st.columns([3, 2])
+    with c1:
+        st.plotly_chart(fig, use_container_width=True)
+    with c2:
+        st.caption(f"**Sentido de giro:** {machine.rotation}")
+        # chequeo de ortogonalidad del par
+        if len(probes) >= 2:
+            sep = cfg.angular_separation(theta[0], theta[1])
+            if abs(sep - 90.0) <= 5.0:
+                st.success(f"✅ Par ortogonal: {sep:.0f}° entre {labels[0]} y {labels[1]}.")
+            else:
+                st.warning(f"⚠ {labels[0]}–{labels[1]} a {sep:.0f}° (no 90°). "
+                           "Para órbita correcta las sondas van a 90°.")
+        st.caption("Bently/API 670: 0° arriba (TDC), R horario, L antihorario. "
+                   "Ej: una sonda 45°L y otra 45°R quedan a 90°.")

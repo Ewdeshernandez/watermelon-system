@@ -42,13 +42,28 @@ ROTATIONS = ["CW", "CCW"]
 SPEED_CONTROLS = ["constant", "variable"]
 BEARING_TYPES = ["plain", "tilting_pad", "rolling", "mixed"]
 
-# Unidad nativa por defecto según tipo de sensor
-_DEFAULT_UNIT = {
-    "proximity": "mil pp",
-    "velometer": "mm/s rms",
-    "accelerometer": "g rms",
-    "keyphasor": "pulses/rev",
+# Unidades válidas por tipo de sensor (la 1ª es el default).
+UNITS_BY_TYPE = {
+    "proximity": ["mil pp", "µm pp", "mil 0-pk", "µm 0-pk"],
+    "velometer": ["mm/s rms", "mm/s pk", "in/s pk", "in/s rms"],
+    "accelerometer": ["g rms", "g pk", "m/s² rms", "m/s² pk"],
+    "keyphasor": ["rpm", "pulses/rev"],
 }
+# Unión ordenada de todas las unidades (para el dropdown del grid).
+ALL_UNITS = list(dict.fromkeys(u for lst in UNITS_BY_TYPE.values() for u in lst))
+
+
+def valid_units_for(sensor_type: str) -> List[str]:
+    return UNITS_BY_TYPE.get(sensor_type, [])
+
+
+def default_unit(sensor_type: str) -> str:
+    lst = UNITS_BY_TYPE.get(sensor_type, [""])
+    return lst[0] if lst else ""
+
+
+# Unidad nativa por defecto según tipo de sensor
+_DEFAULT_UNIT = {t: (lst[0] if lst else "") for t, lst in UNITS_BY_TYPE.items()}
 # Coupling por defecto según tipo
 _DEFAULT_COUPLING = {
     "proximity": "AC",
@@ -145,15 +160,17 @@ def auto_layout(machine: MachineConfig, with_keyphasor: bool = True) -> List[Cha
     bnc = 1
     n = max(1, int(machine.n_bearings))
     for brg in range(1, n + 1):
+        # Convención Bently Nevada (API 670): ángulo desde TDC (arriba),
+        # Y a 45° izquierda, X a 45° derecha → 90° entre sí.
         rows.append(ChannelRow(bnc_port=bnc, point_label=f"{brg}Y", plane=brg,
                                sensor_type="proximity", sensitivity_mv_per_eu=200.0,
                                unit_native="mil pp", coupling="AC",
-                               angle_deg=0.0, side="", alarm=2.5, danger=4.0))
+                               angle_deg=45.0, side="L", alarm=2.5, danger=4.0))
         bnc += 1
         rows.append(ChannelRow(bnc_port=bnc, point_label=f"{brg}X", plane=brg,
                                sensor_type="proximity", sensitivity_mv_per_eu=200.0,
                                unit_native="mil pp", coupling="AC",
-                               angle_deg=90.0, side="R", alarm=2.5, danger=4.0))
+                               angle_deg=45.0, side="R", alarm=2.5, danger=4.0))
         bnc += 1
     if with_keyphasor:
         rows.append(ChannelRow(bnc_port=bnc, point_label="KPH", plane=0,
@@ -161,6 +178,28 @@ def auto_layout(machine: MachineConfig, with_keyphasor: bool = True) -> List[Cha
                                unit_native="pulses/rev", coupling="DC",
                                angle_deg=0.0, side="", alarm=0.0, danger=0.0))
     return rows
+
+
+def absolute_angle(angle_deg: float, side: str) -> float:
+    """Ángulo ABSOLUTO de la sonda medido desde TDC (arriba), sentido horario.
+
+    Convención Bently Nevada / API 670: el ángulo se cuenta desde arriba
+    (TDC = 0°) hacia la Derecha (horario) o Izquierda (antihorario).
+      · 45° R  → 45°   (1:30 h)
+      · 45° L  → 315°  (10:30 h)  → separación 90° respecto a 45° R ✓
+      · sin lado → se interpreta como horario desde TDC (igual que R).
+    """
+    s = (side or "").strip().upper()
+    a = float(angle_deg) % 360.0
+    if s == "L":
+        return (-float(angle_deg)) % 360.0
+    return a
+
+
+def angular_separation(a_abs: float, b_abs: float) -> float:
+    """Separación no orientada entre dos ángulos absolutos (0..180)."""
+    d = abs((a_abs - b_abs) % 360.0)
+    return min(d, 360.0 - d)
 
 
 def defaults_for_type(sensor_type: str) -> Dict[str, Any]:
@@ -219,12 +258,15 @@ def validate_setup(setup: AcqSetup) -> List[Finding]:
     for plane, group in by_plane.items():
         radials = [c for c in group if c.sensor_type in ("proximity", "velometer", "accelerometer")]
         if len(radials) >= 2:
-            a0, a1 = radials[0].angle_deg, radials[1].angle_deg
-            sep = abs((a0 - a1) % 180.0)
-            sep = min(sep, 180.0 - sep)  # separación no orientada
+            # Ángulo ABSOLUTO (considerando lado L/R) — convención Bently.
+            abs0 = absolute_angle(radials[0].angle_deg, radials[0].side)
+            abs1 = absolute_angle(radials[1].angle_deg, radials[1].side)
+            sep = angular_separation(abs0, abs1)
             if abs(sep - 90.0) > 5.0:
+                d0 = f"{radials[0].angle_deg:.0f}°{radials[0].side}".strip()
+                d1 = f"{radials[1].angle_deg:.0f}°{radials[1].side}".strip()
                 out.append(Finding("warn", "xy_not_orthogonal",
-                                   f"Cojinete {plane}: sondas a {a0:.0f}°/{a1:.0f}° "
+                                   f"Cojinete {plane}: sondas a {d0}/{d1} "
                                    f"(separación {sep:.0f}°, se esperan 90°±5° para órbita)."))
 
     # Alert < Danger; sensibilidad en rango físico; unidades por tipo
@@ -239,6 +281,11 @@ def validate_setup(setup: AcqSetup) -> List[Finding]:
             out.append(Finding("warn", "sens_out_of_range",
                                f"{ch.point_label}: sensib {ch.sensitivity_mv_per_eu} mV/EU fuera "
                                f"del rango típico [{lo:.0f}–{hi:.0f}] para {ch.sensor_type}."))
+        valid_u = valid_units_for(ch.sensor_type)
+        if valid_u and ch.unit_native and ch.unit_native not in valid_u:
+            out.append(Finding("warn", "unit_mismatch",
+                               f"{ch.point_label}: unidad '{ch.unit_native}' no es típica de "
+                               f"{ch.sensor_type} ({' / '.join(valid_u)})."))
 
     errors = [f for f in out if f.level == "error"]
     warns = [f for f in out if f.level == "warn"]
