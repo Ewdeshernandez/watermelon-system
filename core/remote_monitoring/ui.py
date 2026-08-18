@@ -248,7 +248,7 @@ def _render_monitor() -> None:
     if save:
         _save_snapshot(agent, snap, rpm_est)
 
-    tabs = st.tabs(["📈 Waveform", "📊 Spectrum", "🔵 Orbita", "🎯 1X Vectores",
+    tabs = st.tabs(["📈 Waveform", "📊 Spectrum", "🔵 Orbita", "🎯 Vectores",
                     "📉 Tendencia", "📐 Bode", "🌊 Cascade"])
     with tabs[0]:
         if names:
@@ -265,7 +265,8 @@ def _render_monitor() -> None:
     with tabs[2]:
         _plot_orbit(snap, vib_channels, fs)
     with tabs[3]:
-        _table_1x(snap, vib_channels, fs, rpm_est)
+        _orders = (st.session_state.get("rm_acq_saved") or {}).get("orders") or [1.0, 2.0]
+        _table_orders(snap, vib_channels, fs, rpm_est, _orders)
     with tabs[4]:
         _update_and_plot_trend(snap, vib_channels)
     with tabs[5]:
@@ -358,17 +359,25 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float) -> None:
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _table_1x(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float]) -> None:
+def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float],
+                  orders: Optional[list] = None) -> None:
     if not rpm:
-        st.warning("Sin keyphasor no hay vectores 1X. Activá el keyphasor en Setup.")
+        st.warning("Sin keyphasor no hay vectores. Activá el keyphasor en Configuración.")
         return
+    orders = sorted(orders or [1.0, 2.0])
     f1 = rpm / 60.0
     rows = []
     for i, ch in vib_channels:
         eu = snap[i] * 1000.0 / ch.sensitivity_mv_per_eu
-        amp, phase = one_x_vector(eu, fs, f1)
-        rows.append({"Sensor": ch.name, f"1X ({ch.units} 0-pk)": round(amp, 4), "Fase (°)": round(phase, 1)})
+        row = {"Sensor": ch.name}
+        for o in orders:
+            amp, phase = one_x_vector(eu, fs, o * f1)
+            row[f"{o:g}X ({ch.units})"] = round(amp, 4)
+            row[f"{o:g}X °"] = round(phase, 1)
+        rows.append(row)
     st.dataframe(rows, use_container_width=True, hide_index=True)
+    st.caption(f"Vectores síncronos a {', '.join(f'{o:g}X' for o in orders)} "
+               f"(referenciados al keyphasor). 1X = {f1:.1f} Hz.")
 
 
 def _update_and_plot_trend(snap: np.ndarray, vib_channels) -> None:

@@ -132,6 +132,7 @@ class ChannelRow:
     active: bool = True            # canal activo (recolecta) — ADRE "Active"
     events_per_rev: int = 1        # keyphasor: pulsos por revolución
     trigger_v: float = 0.0         # keyphasor: umbral de disparo (V)
+    notch_type: str = ""           # keyphasor: muesca | proyección | rueda dentada
 
     def is_keyphasor(self) -> bool:
         if self.sensor_type == "keyphasor":
@@ -144,6 +145,9 @@ class ChannelRow:
 # System1 "Spectrums & Waveforms". Definen la calidad del espectro/bode/cascade.
 WINDOWS = ["hanning", "hamming", "flattop", "rectangular"]
 LINES_OPTIONS = [400, 800, 1600, 3200, 6400]
+WAVEFORM_MODES = ["synchronous", "asynchronous"]
+COMMON_ORDERS = [0.5, 1.0, 2.0, 3.0]        # órdenes ×rpm típicos a trackear
+NOTCH_TYPES = ["", "muesca", "proyección", "rueda dentada"]
 
 
 @dataclass
@@ -154,6 +158,8 @@ class AcquisitionParams:
     averages: int = 4              # promedios espectrales
     window: str = "hanning"        # ventana FFT
     samples_per_rev: int = 0       # muestreo síncrono (0 = auto)
+    waveform_mode: str = "synchronous"   # synchronous | asynchronous
+    orders: List[float] = field(default_factory=lambda: [1.0, 2.0])  # 1X, 2X por defecto (ADRE)
 
     def delta_f(self) -> float:
         return self.fmax_hz / self.lines if self.lines else 0.0
