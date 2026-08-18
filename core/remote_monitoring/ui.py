@@ -52,11 +52,33 @@ def render_remote_monitoring() -> None:
     except Exception:  # noqa: BLE001
         st.title("Remote Monitoring")
 
-    tab_setup, tab_monitor = st.tabs(["⚙️ Setup", "📡 Monitor"])
-    with tab_setup:
+    # Pestañas con bolitas de color (patrón de la casa — Calibración/Reports),
+    # scopeadas con .st-key-rm_view para NO afectar los otros radios del Setup.
+    st.markdown("""
+        <style>
+        .st-key-rm_view label > div:first-of-type { display:none !important; }
+        .st-key-rm_view label {
+            font-size:16px; font-weight:600; padding:6px 20px 9px 20px; color:#64748b;
+        }
+        .st-key-rm_view label:hover { color:#0F1E3D; }
+        .st-key-rm_view label:has(input:checked) {
+            color:#0F1E3D; box-shadow:inset 0 -3px 0 #1AAEE5;
+        }
+        .st-key-rm_view label::before {
+            content:"●"; font-size:19px; margin-right:10px; vertical-align:-2px;
+        }
+        .st-key-rm_view label:nth-of-type(1)::before { color:#1AAEE5; }
+        .st-key-rm_view label:nth-of-type(2)::before { color:#16A34A; }
+        </style>
+    """, unsafe_allow_html=True)
+
+    view = st.radio("Vista", ["Configuración", "Monitoreo"], horizontal=True,
+                    key="rm_view", label_visibility="collapsed")
+    st.divider()
+    if view == "Configuración":
         from core.remote_monitoring.ui_setup import render_setup
         render_setup()
-    with tab_monitor:
+    else:
         _render_monitor()
 
 

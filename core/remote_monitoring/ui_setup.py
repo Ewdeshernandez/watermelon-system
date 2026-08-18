@@ -202,30 +202,38 @@ def render_setup() -> None:
                    "La unidad se ajusta al tipo de sensor.")
 
     st.session_state.setdefault("rm_setup_rows", [])
+    has_rows = bool(st.session_state["rm_setup_rows"])
 
+    # Edición en un expander (el grid canvas no se puede estilizar) —
     # Patrón correcto de data_editor: la FUENTE (rm_setup_rows) es estable
-    # (solo cambia en Auto-generar / Guardar). Las ediciones viven en el
-    # widget keyed y se leen del valor de retorno — así el cambio de ángulo
-    # se toma de una, sin el bug de "reescribir" (no re-alimentamos la fuente
-    # en cada rerun).
-    df = pd.DataFrame(st.session_state["rm_setup_rows"], columns=_GRID_COLS)
-    edited = st.data_editor(
-        df, key="rm_grid_editor", num_rows="dynamic", use_container_width=True,
-        column_config={
-            "bnc_port": st.column_config.NumberColumn("BNC", min_value=1, max_value=32, step=1, width="small"),
-            "point_label": st.column_config.TextColumn("Punto", width="small"),
-            "plane": st.column_config.NumberColumn("Cojinete", min_value=0, max_value=16, step=1, width="small"),
-            "sensor_type": st.column_config.SelectboxColumn("Tipo", options=cfg.SENSOR_TYPES),
-            "sensitivity_mv_per_eu": st.column_config.NumberColumn("Sensib. mV/EU", step=1.0),
-            "unit_native": st.column_config.SelectboxColumn("Unidad", options=cfg.ALL_UNITS),
-            "coupling": st.column_config.SelectboxColumn("Coupling", options=cfg.COUPLINGS, width="small"),
-            "angle_deg": st.column_config.NumberColumn("Ángulo °", min_value=0.0, max_value=360.0, step=5.0, width="small"),
-            "side": st.column_config.SelectboxColumn("Lado", options=["", "L", "R"], width="small"),
-            "alarm": st.column_config.NumberColumn("Alert", step=0.1, width="small"),
-            "danger": st.column_config.NumberColumn("Danger", step=0.1, width="small"),
-        },
-    )
+    # (solo cambia en Auto-generar / Guardar). Las ediciones se leen del
+    # valor de retorno → el cambio de ángulo se toma de una.
+    with st.expander("✏️  Editar canales (tabla)", expanded=not has_rows):
+        df = pd.DataFrame(st.session_state["rm_setup_rows"], columns=_GRID_COLS)
+        edited = st.data_editor(
+            df, key="rm_grid_editor", num_rows="dynamic", use_container_width=True,
+            column_config={
+                "bnc_port": st.column_config.NumberColumn("BNC", min_value=1, max_value=32, step=1, width="small"),
+                "point_label": st.column_config.TextColumn("Punto", width="small"),
+                "plane": st.column_config.NumberColumn("Cojinete", min_value=0, max_value=16, step=1, width="small"),
+                "sensor_type": st.column_config.SelectboxColumn("Tipo", options=cfg.SENSOR_TYPES),
+                "sensitivity_mv_per_eu": st.column_config.NumberColumn("Sensib. mV/EU", step=1.0),
+                "unit_native": st.column_config.SelectboxColumn("Unidad", options=cfg.ALL_UNITS),
+                "coupling": st.column_config.SelectboxColumn("Coupling", options=cfg.COUPLINGS, width="small"),
+                "angle_deg": st.column_config.NumberColumn("Ángulo °", min_value=0.0, max_value=360.0, step=5.0, width="small"),
+                "side": st.column_config.SelectboxColumn("Lado", options=["", "L", "R"], width="small"),
+                "alarm": st.column_config.NumberColumn("Alert", step=0.1, width="small"),
+                "danger": st.column_config.NumberColumn("Danger", step=0.1, width="small"),
+            },
+        )
     rows = _rows_from_records(edited.to_dict("records"))
+
+    # Vista bonita (read-only) de los canales — tipo software internacional
+    if rows:
+        st.markdown(_channels_html_table(rows), unsafe_allow_html=True)
+    else:
+        st.info("Pulsá **🧩 Auto-generar layout** para empezar, o abrí "
+                "**✏️ Editar canales** para agregar filas.")
 
     # =================================================================
     # Diagrama de sección de cojinete (SVG pro — bolitas de color)
@@ -382,6 +390,63 @@ def _render_bearing_diagram(rows: List[cfg.ChannelRow], machine: cfg.MachineConf
         if kph:
             st.caption(f"🔑 Keyphasor **{kph[0].point_label}** en este cojinete "
                        f"({cfg.absolute_angle(kph[0].angle_deg, kph[0].side):.0f}° abs).")
+
+
+def _channels_html_table(rows: List[cfg.ChannelRow]) -> str:
+    """Tabla HTML pulida (read-only) de los canales — clase mundial.
+
+    Cabecera navy, bolita de color por tipo, filas zebra, badges de coupling,
+    monospace para números. El data_editor (canvas) no se puede estilizar, así
+    que esta es la vista 'linda'; la edición vive en el expander.
+    """
+    heads = ["Punto", "BNC", "Cojinete", "Tipo", "Sensib.", "Unidad",
+             "Coupling", "Ángulo", "Alert", "Danger"]
+    th = "".join(
+        f'<th style="padding:10px 12px;text-align:left;font-size:11px;'
+        f'letter-spacing:.04em;text-transform:uppercase;font-weight:700;'
+        f'color:{CYAN};border:none;">{html.escape(h)}</th>' for h in heads)
+
+    def _num(v):
+        try:
+            f = float(v)
+            return f"{f:g}"
+        except Exception:  # noqa: BLE001
+            return html.escape(str(v))
+
+    body = []
+    for i, r in enumerate(rows):
+        color = _TYPE_COLOR.get(r.sensor_type, "#475569")
+        bg = "#ffffff" if i % 2 == 0 else GRAY_LIGHT
+        dot = (f'<span style="display:inline-block;width:13px;height:13px;'
+               f'border-radius:50%;background:{color};border:2px solid #fff;'
+               f'box-shadow:0 0 0 1px #cbd5e1;margin-right:9px;vertical-align:-2px;"></span>')
+        ang = f"{r.angle_deg:.0f}°{(' ' + r.side) if r.side else ''}"
+        coup = (f'<span style="background:{NAVY};color:#fff;font-size:10.5px;'
+                f'font-weight:700;padding:2px 9px;border-radius:999px;">{html.escape(r.coupling)}</span>')
+        tds = [
+            f'{dot}<b style="color:{NAVY};">{html.escape(r.point_label)}</b>',
+            f'<span style="font-family:monospace;">{r.bnc_port}</span>',
+            html.escape(str(r.plane)) if r.plane else '<span style="color:#94a3b8;">—</span>',
+            html.escape(r.sensor_type),
+            f'<span style="font-family:monospace;">{_num(r.sensitivity_mv_per_eu)}</span>',
+            html.escape(r.unit_native),
+            coup,
+            f'<span style="font-family:monospace;">{html.escape(ang)}</span>',
+            f'<span style="font-family:monospace;color:{AMBER};">{_num(r.alarm)}</span>',
+            f'<span style="font-family:monospace;color:#dc2626;">{_num(r.danger)}</span>',
+        ]
+        cells = "".join(
+            f'<td style="padding:11px 12px;font-size:13px;color:#334155;'
+            f'border-top:1px solid #e8edf5;">{c}</td>' for c in tds)
+        body.append(f'<tr style="background:{bg};">{cells}</tr>')
+
+    return (
+        f'<div style="border:1px solid #d6deea;border-radius:12px;overflow:hidden;'
+        f'box-shadow:0 6px 18px rgba(15,30,61,.08);margin:6px 0 4px 0;">'
+        f'<table style="width:100%;border-collapse:collapse;">'
+        f'<thead><tr style="background:{NAVY};">{th}</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table></div>'
+    )
 
 
 def _save_and_activate(setup: cfg.AcqSetup) -> None:
