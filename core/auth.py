@@ -131,12 +131,20 @@ NAV_GROUPS = [
         ],
     },
     {
-        "section": "Administration",
+        # v3.31.491 — Sección Administración UNIFICADA (antes había dos headers:
+        # "Administration" en inglés + "Administración" hardcodeado para Usuarios).
+        # admin_only=True → el sidebar la esconde COMPLETA salvo para is_admin,
+        # así ningún specialist ve botones de admin que igual no puede abrir
+        # (las páginas ya se auto-protegen con require_role("admin")).
+        "section": "Administración",
+        "admin_only": True,
         "items": [
             # Ciclo 20B — Admin de clientes/roles (solo admin)
             {"label": "◇  Admin · Clientes", "page": "pages/_admin_clients.py"},
             # FASE J v3.31.221 — Admin de licencias Watermelon Planta (solo admin SIGA)
             {"label": "🔐  Admin · Licencias Planta", "page": "pages/20_License_Admin.py"},
+            # Ciclo 17.14 — Admin de usuarios (antes bloque hardcodeado aparte)
+            {"label": "👥  Admin · Usuarios", "page": "pages/_admin_users.py"},
         ],
     },
 ]
@@ -891,7 +899,13 @@ def render_user_menu() -> None:
         # client: vista limitada; specialist/admin: menú completo.
         _user_role = (user.get("role", "") or "").strip().lower()
 
+        _is_admin = bool(user.get("is_admin"))
         for group in NAV_GROUPS:
+            # Secciones admin_only (Administración): SOLO para is_admin. Así
+            # ningún specialist/viewer ve botones de admin (que igual rebotan
+            # con require_role). v3.31.491.
+            if group.get("admin_only") and not _is_admin:
+                continue
             # Ciclo 23.130 — usar is_page_visible_in_nav_for_role para que
             # los módulos de análisis del cliente (accesibles vía redirect)
             # NO aparezcan en el sidebar — solo Home + Live Monitoring + Reports.
@@ -912,20 +926,6 @@ def render_user_menu() -> None:
                     key=f"nav_{item['page']}",
                 ):
                     st.switch_page(item["page"])
-
-        # Ciclo 17.14 — Botón "Admin Panel" SOLO para admin único
-        if user.get("is_admin"):
-            st.markdown('<div class="wm-side-divider"></div>', unsafe_allow_html=True)
-            st.markdown(
-                '<div class="wm-side-section">Administración</div>',
-                unsafe_allow_html=True,
-            )
-            if st.button("👥  Admin · Usuarios", use_container_width=True,
-                         key="nav_admin_users"):
-                try:
-                    st.switch_page("pages/_admin_users.py")
-                except Exception:
-                    st.warning("Admin Panel todavía no está disponible.")
 
         st.markdown('<div class="wm-side-divider"></div>', unsafe_allow_html=True)
         st.markdown('<div class="wm-logout-spacer"></div>', unsafe_allow_html=True)
