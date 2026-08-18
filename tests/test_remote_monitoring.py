@@ -288,7 +288,34 @@ def test_setup_bridges_to_channel_configs_and_sensor_map():
     sm = setup_to_sensor_map(setup)
     assert len(sm) == 5
     assert sm[0]["sensitivity_mv_per_eu"] == 200.0
-    assert sm[0]["angle_deg"] == 0.0
+    assert sm[0]["angle_deg"] == 45.0  # Bently: Y a 45° (lado L)
+
+
+def test_absolute_angle_bently_convention():
+    from core.remote_monitoring.config import absolute_angle, angular_separation
+    assert absolute_angle(45, "R") == 45.0
+    assert absolute_angle(45, "L") == 315.0
+    assert absolute_angle(90, "") == 90.0
+    # 45R y 45L quedan a 90° (el bug reportado)
+    assert angular_separation(absolute_angle(45, "R"), absolute_angle(45, "L")) == 90.0
+
+
+def test_auto_layout_pair_is_orthogonal_with_sides():
+    from core.remote_monitoring.config import MachineConfig, auto_layout, AcqSetup, validate_setup
+    m = MachineConfig(n_bearings=1)
+    setup = AcqSetup(machine=m, channels=auto_layout(m))
+    codes = {f.code for f in validate_setup(setup)}
+    assert "xy_not_orthogonal" not in codes  # 45L + 45R = 90°
+
+
+def test_unit_mismatch_flagged():
+    from core.remote_monitoring.config import (
+        MachineConfig, AcqSetup, ChannelRow, validate_setup)
+    ch = ChannelRow(bnc_port=1, point_label="1Y", plane=1, sensor_type="accelerometer",
+                    sensitivity_mv_per_eu=100, unit_native="mil pp", angle_deg=45, side="L")
+    setup = AcqSetup(machine=MachineConfig(), channels=[ch])
+    codes = {f.code for f in validate_setup(setup)}
+    assert "unit_mismatch" in codes
 
 
 def test_setup_persistence_roundtrip():
