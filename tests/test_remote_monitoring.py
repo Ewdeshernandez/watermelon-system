@@ -504,3 +504,24 @@ def test_saved_config_delete():
     assert cfg.delete_setup("Rotor Kit SIGA 1") is True
     assert "Rotor_Kit_SIGA_1" not in cfg.list_setups()
     del os.environ["WM_PERSIST_DIR"]
+
+
+def test_acq_by_type_defaults_and_persist():
+    import os, tempfile
+    os.environ["WM_PERSIST_DIR"] = tempfile.mkdtemp()
+    from core.remote_monitoring import config as cfg
+    s = cfg.AcqSetup()
+    assert s.acq_for("proximity").fmax_hz == 1000.0
+    assert s.acq_for("accelerometer").fmax_hz == 10000.0
+    assert s.acq_for("velometer").fmax_hz == 2000.0
+    # persistencia por tipo
+    m = cfg.MachineConfig(name="Mixta AT", n_bearings=1)
+    setup = cfg.AcqSetup(machine=m, channels=cfg.auto_layout(m))
+    setup.acquisition_by_type["accelerometer"].fmax_hz = 20000.0
+    setup.acquisition_by_type["accelerometer"].lines = 6400
+    cfg.save_setup(setup)
+    loaded = cfg.load_setup("Mixta AT")
+    assert loaded.acq_for("accelerometer").fmax_hz == 20000.0
+    assert loaded.acq_for("accelerometer").lines == 6400
+    assert loaded.acq_for("proximity").fmax_hz == 1000.0  # sin tocar
+    del os.environ["WM_PERSIST_DIR"]

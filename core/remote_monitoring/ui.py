@@ -181,8 +181,11 @@ def _render_monitor() -> None:
         st.session_state["rm_agent_sig"] = sig
         st.session_state["rm_running"] = False
         st.session_state["rm_trend"] = []
-        _acq = st.session_state.get("rm_acq_saved") or {}
-        _fmax = float(_acq.get("fmax_hz", 1000.0))
+        _bt = st.session_state.get("rm_acq_by_type_saved") or {}
+        if _bt:
+            _fmax = max(float(v.get("fmax_hz", 1000)) for v in _bt.values())
+        else:
+            _fmax = float((st.session_state.get("rm_acq_saved") or {}).get("fmax_hz", 1000.0))
         st.session_state["rm_transient"] = TransientCapture(TransientConfig(fmax_hz=_fmax))
         st.session_state["rm_prev_rpm"] = None
 
@@ -259,7 +262,11 @@ def _render_monitor() -> None:
         if names:
             sel = st.selectbox("Canal", names, key="rm_sp_ch")
             i = names.index(sel)
-            _fmax = float((st.session_state.get("rm_acq_saved") or {}).get("fmax_hz", 0) or 0)
+            # Fmax POR TIPO del canal graficado (prox baja freq, accel alta)
+            _bt = st.session_state.get("rm_acq_by_type_saved") or {}
+            _tmap = st.session_state.get("rm_type_by_name") or {}
+            _ctype = _tmap.get(vib_channels[i][1].name, "proximity")
+            _fmax = float((_bt.get(_ctype) or st.session_state.get("rm_acq_saved") or {}).get("fmax_hz", 0) or 0)
             _plot_spectrum(snap[vib_channels[i][0]], fs, vib_channels[i][1], rpm_est,
                            fmax=_fmax or None)
     with tabs[2]:

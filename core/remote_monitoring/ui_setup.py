@@ -274,7 +274,7 @@ def render_setup() -> None:
     # =================================================================
     # 3 · Parámetros de adquisición (global)
     # =================================================================
-    acq = _render_acq_params()
+    train_acq, acq_by_type = _render_acq_params(rows)
 
     # =================================================================
     # 4 · Validación
@@ -282,7 +282,8 @@ def render_setup() -> None:
     st.markdown('<div class="rm-sec-head">4 · Validación '
                 '<small>— API 670 / ISO 20816</small></div>', unsafe_allow_html=True)
     machine = _machine_from_state()
-    setup = cfg.AcqSetup(machine=machine, channels=rows, acquisition=acq)
+    setup = cfg.AcqSetup(machine=machine, channels=rows, acquisition=train_acq,
+                         acquisition_by_type=acq_by_type)
     findings = cfg.validate_setup(setup)
     n_err = sum(1 for f in findings if f.level == "error")
     n_warn = sum(1 for f in findings if f.level == "warn")
@@ -463,13 +464,29 @@ def _commit_channel_form(idx: int, is_kph: bool) -> None:
 
 
 # =====================================================================
-# Parámetros de adquisición (global)
+# Parámetros de adquisición — general del tren + POR TIPO de sensor
 # =====================================================================
-def _render_acq_params() -> cfg.AcquisitionParams:
+_TYPE_ES = {"proximity": "Proximidad", "velometer": "Velocidad", "accelerometer": "Acelerómetro"}
+
+
+def _render_acq_params(rows: List[cfg.ChannelRow]):
+    """Devuelve (train_acq, acquisition_by_type)."""
     st.markdown('<div class="rm-sec-head">3 · Parámetros de adquisición '
-                '<small>— espectro / bode / cascade</small></div>', unsafe_allow_html=True)
+                '<small>— general del tren + por tipo de sensor</small></div>',
+                unsafe_allow_html=True)
+
+    # Tipos espectrales presentes en la config (prox/vel/accel)
+    present = [t for t in cfg.SPECTRAL_TYPES
+               if any(r.sensor_type == t for r in rows)] or ["proximity"]
+
     st.session_state.setdefault("rm_acq", asdict(cfg.AcquisitionParams()))
+    st.session_state.setdefault(
+        "rm_acq_by_type",
+        {t: asdict(cfg.default_acq_for_type(t)) for t in cfg.SPECTRAL_TYPES})
     a = st.session_state["rm_acq"]
+    bt = st.session_state["rm_acq_by_type"]
+    for t in present:
+        bt.setdefault(t, asdict(cfg.default_acq_for_type(t)))
 
     # Toggle de unidad FUERA del form → reconvierte el display en vivo.
     unit = a.get("freq_unit", "cpm")
@@ -480,61 +497,82 @@ def _render_acq_params() -> cfg.AcquisitionParams:
     ul = cfg.freq_label(unit)
     fstep = 60 if unit == "cpm" else 50
     fmax_max = 2_400_000 if unit == "cpm" else 40_000
-    fmax_disp = int(round(cfg.hz_to_display(float(a.get("fmax_hz", 1000)), unit)))
-    fmin_disp = float(round(cfg.hz_to_display(float(a.get("fmin_hz", 2.0)), unit), 1))
 
-    # Form: editás libre y NADA se aplica hasta "Actualizar parámetros".
     with st.form("rm_acq_form"):
+        st.caption("General del tren")
         c = st.columns(3)
-        # keys sufijadas por unidad → re-init limpio al cambiar CPM/Hz
-        fmax_v = c[0].number_input(f"Fmax / span ({ul})", 60, fmax_max, fmax_disp,
-                                   step=fstep, key=f"rm_acq_fmax_{unit}",
-                                   help="≥10×rpm general; 3.25×GMF engranajes")
-        fmin_v = c[1].number_input(f"Fmin / HP ({ul})", 0.0, float(fmax_max), fmin_disp,
-                                   step=float(fstep), key=f"rm_acq_fmin_{unit}",
-                                   help="120 CPM (2 Hz) o 0.3×rpm — no cortar el sub-síncrono")
-        lines = c[2].selectbox("Líneas", cfg.LINES_OPTIONS,
-                               index=cfg.LINES_OPTIONS.index(int(a.get("lines", 1600)))
-                               if int(a.get("lines", 1600)) in cfg.LINES_OPTIONS else 2,
-                               key="rm_acq_lines")
-        c2 = st.columns(3)
-        averages = c2[0].number_input("Promedios", 1, 64, int(a.get("averages", 4)), key="rm_acq_avg")
-        window = c2[1].selectbox("Ventana", cfg.WINDOWS,
-                                 index=cfg.WINDOWS.index(a.get("window", "hanning"))
-                                 if a.get("window", "hanning") in cfg.WINDOWS else 0,
-                                 key="rm_acq_win")
-        spr = c2[2].number_input("Samples/rev (0=auto)", 0, 1024, int(a.get("samples_per_rev", 0)),
-                                 key="rm_acq_spr", help="Muestreo síncrono para bode/cascade")
-        c3 = st.columns([1, 2])
-        wmode = c3[0].selectbox("Forma de onda", cfg.WAVEFORM_MODES,
-                                index=cfg.WAVEFORM_MODES.index(a.get("waveform_mode", "synchronous"))
-                                if a.get("waveform_mode", "synchronous") in cfg.WAVEFORM_MODES else 0,
-                                key="rm_acq_wmode",
-                                help="Síncrona (por revolución, para bode/cascade) o asíncrona (Hz fijo)")
-        orders = c3[1].multiselect("Órdenes a verificar (×rpm)", cfg.COMMON_ORDERS,
-                                   default=list(a.get("orders", [1.0, 2.0])),
-                                   format_func=lambda o: f"{o:g}X", key="rm_acq_orders",
-                                   help="1X y 2X por defecto (ADRE). Se muestran en la tabla de Vectores.")
+        wmode = c[0].selectbox("Forma de onda", cfg.WAVEFORM_MODES,
+                               index=cfg.WAVEFORM_MODES.index(a.get("waveform_mode", "synchronous"))
+                               if a.get("waveform_mode", "synchronous") in cfg.WAVEFORM_MODES else 0,
+                               key="rm_acq_wmode",
+                               help="Síncrona (por revolución, bode/cascade) o asíncrona (Hz fijo)")
+        spr = c[1].number_input("Samples/rev (0=auto)", 0, 1024, int(a.get("samples_per_rev", 0)),
+                                key="rm_acq_spr")
+        orders = c[2].multiselect("Órdenes (×rpm)", cfg.COMMON_ORDERS,
+                                  default=list(a.get("orders", [1.0, 2.0])),
+                                  format_func=lambda o: f"{o:g}X", key="rm_acq_orders")
+
+        # Un bloque por tipo de sensor presente
+        edited = {}
+        for t in present:
+            e = bt[t]
+            st.divider()
+            st.caption(f"📡 {_TYPE_ES.get(t, t)} — banda propia")
+            c = st.columns(3)
+            fmax_v = c[0].number_input(
+                f"Fmax ({ul})", 60, fmax_max,
+                int(round(cfg.hz_to_display(float(e.get("fmax_hz", 1000)), unit))),
+                step=fstep, key=f"acq_{t}_fmax_{unit}",
+                help="Prox ~1000 Hz (60k CPM); accel ~10 kHz (600k CPM)")
+            fmin_v = c[1].number_input(
+                f"Fmin ({ul})", 0.0, float(fmax_max),
+                float(round(cfg.hz_to_display(float(e.get("fmin_hz", 2.0)), unit), 1)),
+                step=float(fstep), key=f"acq_{t}_fmin_{unit}")
+            lines = c[2].selectbox("Líneas", cfg.LINES_OPTIONS,
+                                   index=cfg.LINES_OPTIONS.index(int(e.get("lines", 1600)))
+                                   if int(e.get("lines", 1600)) in cfg.LINES_OPTIONS else 2,
+                                   key=f"acq_{t}_lines")
+            c2 = st.columns(3)
+            avg = c2[0].number_input("Promedios", 1, 64, int(e.get("averages", 4)), key=f"acq_{t}_avg")
+            win = c2[1].selectbox("Ventana", cfg.WINDOWS,
+                                  index=cfg.WINDOWS.index(e.get("window", "hanning"))
+                                  if e.get("window", "hanning") in cfg.WINDOWS else 0,
+                                  key=f"acq_{t}_win")
+            edited[t] = (fmax_v, fmin_v, lines, avg, win)
+
         submitted = st.form_submit_button("🔄 Actualizar parámetros", type="primary",
                                           use_container_width=True)
+
     if submitted:
-        new = cfg.AcquisitionParams(
-            fmax_hz=cfg.display_to_hz(float(fmax_v), unit),
-            fmin_hz=cfg.display_to_hz(float(fmin_v), unit),
-            lines=int(lines), averages=int(averages), window=window,
-            samples_per_rev=int(spr), waveform_mode=wmode,
-            orders=[float(o) for o in (orders or [1.0])], freq_unit=unit)
-        st.session_state["rm_acq"] = asdict(new)
+        for t, (fmax_v, fmin_v, lines, avg, win) in edited.items():
+            bt[t] = asdict(cfg.AcquisitionParams(
+                fmax_hz=cfg.display_to_hz(float(fmax_v), unit),
+                fmin_hz=cfg.display_to_hz(float(fmin_v), unit),
+                lines=int(lines), averages=int(avg), window=win,
+                waveform_mode=wmode, samples_per_rev=int(spr),
+                orders=[float(o) for o in (orders or [1.0])], freq_unit=unit))
+        # Train-global: hereda fmax del primer tipo presente como fallback
+        base = bt[present[0]]
+        st.session_state["rm_acq"] = asdict(cfg.AcquisitionParams(
+            fmax_hz=float(base["fmax_hz"]), fmin_hz=float(base["fmin_hz"]),
+            lines=int(base["lines"]), averages=int(base["averages"]), window=base["window"],
+            waveform_mode=wmode, samples_per_rev=int(spr),
+            orders=[float(o) for o in (orders or [1.0])], freq_unit=unit))
+        st.session_state["rm_acq_by_type"] = bt
         st.rerun()
 
-    # Estado COMMITTED (desde session) — caption + retorno
+    # Estado COMMITTED (desde session)
     valid = {f.name for f in fields(cfg.AcquisitionParams)}
-    acq = cfg.AcquisitionParams(**{k: v for k, v in a.items() if k in valid})
-    df_disp = cfg.hz_to_display(acq.delta_f(), unit)
-    st.caption(f"Resolución **Δf = {df_disp:.3g} {ul}** · span {cfg.hz_to_display(acq.fmax_hz, unit):.0f} {ul} · "
-               f"{acq.lines} líneas · ventana {acq.window} · {acq.averages} promedios · {acq.waveform_mode} · "
-               f"órdenes {', '.join(f'{o:g}X' for o in acq.orders)}")
-    return acq
+    train = cfg.AcquisitionParams(**{k: v for k, v in a.items() if k in valid})
+    by_type = {t: cfg.AcquisitionParams(**{k: v for k, v in bt[t].items() if k in valid})
+               for t in bt}
+    resume = " · ".join(
+        f"{_TYPE_ES.get(t, t)}: {cfg.hz_to_display(by_type[t].fmax_hz, unit):.0f} {ul}/"
+        f"{by_type[t].lines}L (Δf {cfg.hz_to_display(by_type[t].delta_f(), unit):.3g})"
+        for t in present)
+    st.caption(f"{resume} · {train.waveform_mode} · órdenes "
+               f"{', '.join(f'{o:g}X' for o in train.orders)}")
+    return train, by_type
 
 
 # =====================================================================
@@ -731,6 +769,9 @@ def _save_and_activate(setup: cfg.AcqSetup) -> None:
     st.session_state["rm_active_setup"] = setup.machine.name
     # Params de adquisición → el Monitor los usa (Fmax en spectrum/cascade)
     st.session_state["rm_acq_saved"] = asdict(setup.acquisition)
+    # Por tipo → el Monitor elige Fmax según el tipo del canal graficado
+    st.session_state["rm_acq_by_type_saved"] = {t: asdict(p) for t, p in setup.acquisition_by_type.items()}
+    st.session_state["rm_type_by_name"] = {c.point_label: c.sensor_type for c in setup.channels}
     # Pares X/Y explícitos → órbita en el Monitor
     st.session_state["rm_pairs_saved"] = [list(p) for p in cfg.orbit_pairs(setup.channels)]
     st.success(f"💾 Guardado: `{path.name}` · {len(setup.channels)} canales · "
