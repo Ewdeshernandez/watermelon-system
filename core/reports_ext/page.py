@@ -184,42 +184,78 @@ def _preliminary(meta):
 
 def _borescope(meta):
     rep_section_header("Inspección Boroscópica",
-                       "Introducción · hallazgos · severidad por acceso · evidencias",
+                       "Introducción · hallazgos · info de máquina · severidad por acceso",
                        "SIGA-FMT-178")
     intro = st.text_area("1. Introducción y alcance", key="boro_intro", height=80)
     ante = st.text_area("2. Antecedentes", key="boro_ante", height=70)
     c1, c2 = st.columns(2)
-    hall = c1.text_area("3. Hallazgos (uno por línea)", key="boro_hall", height=110)
-    reco = c2.text_area("4. Recomendaciones (una por línea)", key="boro_reco", height=110)
+    hall = c1.text_area("3. Hallazgos (uno por línea → numerados)", key="boro_hall", height=110)
+    reco = c2.text_area("4. Recomendaciones (una por línea → numeradas)", key="boro_reco", height=110)
     metod = st.text_area("5. Metodología (opcional)", key="boro_metod", height=70,
                          placeholder="Equipo Olympus Iplex LX/LT, sonda 6 mm, 2 m...")
 
+    # --- Info de la máquina (Tabla 1) ---
+    with st.expander("Información de la máquina y del boroscopio (Tabla 1)", expanded=False):
+        mc = st.columns(3)
+        fab = mc[0].text_input("Fabricante", key="boro_fab")
+        mod = mc[1].text_input("Modelo", key="boro_mod")
+        ser = mc[2].text_input("Serie", key="boro_ser")
+        mc2 = st.columns(2)
+        hrs = mc2[0].text_input("Horas", key="boro_hrs")
+        arr = mc2[1].text_input("Arranques", key="boro_arr")
+        bc = st.columns(2)
+        bmarca = bc[0].text_input("Boroscopio — marca", value="Olympus", key="boro_bmarca")
+        bmodelo = bc[1].text_input("Boroscopio — modelo", key="boro_bmodelo")
+    machine_info = {k: v for k, v in {"fabricante": fab, "modelo": mod, "serie": ser,
+                                      "horas": hrs, "arranques": arr}.items() if v.strip()}
+    borescope_info = {k: v for k, v in {"marca": bmarca, "modelo": bmodelo}.items() if v.strip()}
+
+    # --- Imágenes del equipo / metodología ---
+    with st.expander("Imágenes del equipo / metodología (boroscopio, turbina, puntos)", expanded=False):
+        meth_imgs = _photo_uploader("boro_meth", label="Imágenes de metodología")
+
+    # --- Tabla de puntos de inspección y estado ---
+    with st.expander("Puntos de inspección y estado (tabla)", expanded=False):
+        insp_default = pd.DataFrame({"Ubicación": ["", ""], "Punto": ["", ""],
+                                     "Estado": ["Serviciable", "Serviciable"]})
+        insp_ed = st.data_editor(insp_default, num_rows="dynamic", use_container_width=True,
+                                 key="boro_insp_editor",
+                                 column_config={"Estado": st.column_config.SelectboxColumn(
+                                     options=["Serviciable", "No serviciable", "-"])})
+        inspection_rows = [{"ubicacion": r["Ubicación"], "punto": r["Punto"], "estado": r["Estado"]}
+                           for _, r in insp_ed.iterrows()
+                           if str(r["Ubicación"]).strip() or str(r["Punto"]).strip()]
+
+    # --- 6. Desarrollo: accesos por severidad + MÚLTIPLES imágenes por acceso ---
     st.markdown("**6. Desarrollo — hallazgos por acceso (nivel de severidad):**")
     default = pd.DataFrame({
         "Acceso/Ubicación": ["", ""], "Hallazgos": ["", ""],
         "Severidad": ["Serviciable", "Serviciable"], "Comentarios": ["", ""]})
-    edited = st.data_editor(
-        st.session_state.get("boro_sev_df", default), num_rows="dynamic",
-        use_container_width=True, key="boro_sev_editor",
-        column_config={"Severidad": st.column_config.SelectboxColumn(
-            options=["Serviciable", "No operativo"])})
-    evid = st.file_uploader("Evidencias (en orden de fila)", accept_multiple_files=True,
-                            type=["png", "jpg", "jpeg"], key="boro_evid")
-    ev_bytes = [f.getvalue() for f in (evid or [])]
-
+    edited = st.data_editor(default, num_rows="dynamic", use_container_width=True,
+                            key="boro_sev_editor",
+                            column_config={"Severidad": st.column_config.SelectboxColumn(
+                                options=["Serviciable", "No serviciable"])})
     rows = []
-    for i, (_, r) in enumerate(edited.iterrows()):
-        if not (str(r.get("Acceso/Ubicación", "")).strip()
-                or str(r.get("Hallazgos", "")).strip()):
-            continue
+    _accesos = [(i, r) for i, (_, r) in enumerate(edited.iterrows())
+                if str(r.get("Acceso/Ubicación", "")).strip()
+                or str(r.get("Hallazgos", "")).strip()]
+    if _accesos:
+        st.caption("Sube una o varias imágenes por cada acceso:")
+    for i, r in _accesos:
+        acc = str(r.get("Acceso/Ubicación", "")).strip() or f"acceso {i + 1}"
         row = {"access": r.get("Acceso/Ubicación", ""), "findings": r.get("Hallazgos", ""),
                "severity": r.get("Severidad", ""), "comment": r.get("Comentarios", "")}
-        if i < len(ev_bytes):
-            row["image_bytes"] = ev_bytes[i]
+        files = st.file_uploader(f"Imágenes · {acc}", accept_multiple_files=True,
+                                 type=["png", "jpg", "jpeg"], key=f"boro_imgs_{i}")
+        if files:
+            row["images"] = [f.getvalue() for f in files]
         rows.append(row)
 
     content = {"introduccion": intro, "antecedentes": ante, "hallazgos": _lines(hall),
-               "recomendaciones": _lines(reco), "metodologia": metod, "severity_rows": rows}
+               "recomendaciones": _lines(reco), "metodologia": metod,
+               "machine_info": machine_info, "borescope_info": borescope_info,
+               "methodology_images": meth_imgs, "inspection_rows": inspection_rows,
+               "severity_rows": rows}
     _generate("boro", "boroscopia", meta, content)
 
 

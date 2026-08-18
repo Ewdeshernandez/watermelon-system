@@ -70,6 +70,21 @@ def render_remote_monitoring() -> None:
         .st-key-rm_view label:nth-of-type(1)::before { color:#1AAEE5; }
         .st-key-rm_view label:nth-of-type(2)::before { color:#16A34A; }
         .st-key-rm_view label:nth-of-type(3)::before { color:#8B5CF6; }
+
+        /* Sub-pestañas (Análisis) con bolitas de color — sin emojis */
+        .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]::before {
+            content:"●"; font-size:16px; margin-right:8px; vertical-align:-1px;
+        }
+        .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]:nth-child(1)::before { color:#1AAEE5; }
+        .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]:nth-child(2)::before { color:#16A34A; }
+        .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]:nth-child(3)::before { color:#8B5CF6; }
+        .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]:nth-child(4)::before { color:#D89B22; }
+        .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]:nth-child(5)::before { color:#EF4444; }
+        .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]:nth-child(6)::before { color:#06B6D4; }
+        .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]:nth-child(7)::before { color:#EC4899; }
+        .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]:nth-child(8)::before { color:#2563EB; }
+        .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]:nth-child(9)::before { color:#F97316; }
+        .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]:nth-child(10)::before { color:#64748B; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -206,10 +221,13 @@ def _render_source_params() -> None:
                       if source_kind.startswith("Simulado") else "none")
         sim = {"rpm": default_rpm, "defect": defect, "speed_profile": "constant"}
         if source_kind.startswith("Simulado"):
-            st.markdown("**Perfil de velocidad** (transitorios → bode/cascade)")
+            st.markdown("**Modo de la máquina** (define el muestreo)")
+            _MODE_MAP = {"Estable": "constant", "Arranque": "runup",
+                         "Parada": "coastdown", "Arranque + Parada": "runup_coastdown"}
             p1, p2, p3, p4 = st.columns(4)
             with p1:
-                prof = st.selectbox("Perfil", ["constant", "runup", "coastdown", "runup_coastdown"], key="rm_prof")
+                mode_es = st.selectbox("Modo", list(_MODE_MAP.keys()), key="rm_prof")
+            prof = _MODE_MAP[mode_es]
             sim["speed_profile"] = prof
             if prof == "constant":
                 with p2:
@@ -221,7 +239,10 @@ def _render_source_params() -> None:
                     sim["rpm_end"] = st.number_input("RPM fin", 0, 30000, 6000, step=60, key="rm_rpmend")
                 with p4:
                     sim["sim_critical_rpm"] = st.number_input("Crítica (rpm)", 0, 30000, 3000, step=60, key="rm_crit")
-                sim["ramp_seconds"] = st.slider("Duración rampa (s)", 5, 120, 30, key="rm_ramp")
+                sim["ramp_seconds"] = st.slider("Duración (s)", 5, 120, 30, key="rm_ramp")
+            st.caption("**Estable**: velocidad constante (estado estacionario, muestreo continuo). "
+                       "**Arranque / Parada**: barrido de velocidad → captura **transitoria** "
+                       "(finer, por Δrpm) para bode / cascade / waterfall.")
     st.session_state["rm_source_kind"] = source_kind
     st.session_state["rm_fs"] = fs
     st.session_state["rm_sim"] = sim
@@ -266,9 +287,10 @@ def _render_monitoreo() -> None:
         st.info("Sin datos aún. Pulsá **▶ Iniciar** o **Tomar 1 lectura**.")
         return
 
-    _render_status(agent, snap, rpm, state, tc.n_samples)
     if save:
         _save_snapshot(agent, snap, rpm)
+    _render_status(agent, snap, rpm, state, tc.n_samples)
+    _render_counters(agent, snap, tc)
 
     st.markdown("##### Tabular list — valores actuales")
     _render_tabular_list(agent, snap, rpm, vib)
@@ -302,9 +324,9 @@ def _render_analisis() -> None:
     names = [ch.name for _, ch in vib]
     _render_status(agent, snap, rpm, state, tc.n_samples)
 
-    tabs = st.tabs(["📋 Tabular", "📉 Tendencias", "∿ Formas de onda", "📊 Espectro",
-                    "🔵 Órbitas", "📐 Bode", "◔ Polar", "─ Shaft Centerline",
-                    "🌊 Cascada", "⛰ Waterfall"])
+    tabs = st.tabs(["Tabular", "Tendencias", "Formas de onda", "Espectro",
+                    "Órbitas", "Bode", "Polar", "Shaft Centerline",
+                    "Cascada", "Waterfall"])
     with tabs[0]:
         _render_tabular_list(agent, snap, rpm, vib)
     with tabs[1]:
@@ -405,6 +427,25 @@ def _render_tabular_list(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]
 # =====================================================================
 # Widgets de gráfico
 # =====================================================================
+def _render_counters(agent: AcqAgent, snap: np.ndarray, tc: TransientCapture) -> None:
+    """Contadores tipo ADRE: samples tomados, vectores, formas de onda guardadas,
+    tamaño de la data."""
+    try:
+        block = agent.source.config.block_samples
+    except Exception:  # noqa: BLE001
+        block = 0
+    total_samples = agent.blocks_read * block
+    n_ch = len(agent.channels)
+    filled = snap.shape[1]
+    size_mb = n_ch * filled * 8 / 1e6
+    saved = int(st.session_state.get("rm_saved_count", 0))
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Samples tomados", f"{total_samples:,}")
+    c2.metric("Vectores 1X", tc.n_samples)
+    c3.metric("Formas de onda guardadas", saved)
+    c4.metric("Tamaño ventana", f"{size_mb:.2f} MB")
+
+
 def _render_status(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float],
                    state: str, n_transient: int) -> None:
     c1, c2, c3, c4, c5 = st.columns(5)
@@ -657,6 +698,7 @@ def _save_snapshot(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]) -> N
                     "units": ch.units} for ch in agent.channels]
         meta = store.save_snapshot(agent.instance_id, snap, ch_meta, agent.sample_rate_hz,
                                    rpm=rpm, captured_at=datetime.now(timezone.utc).isoformat())
+        st.session_state["rm_saved_count"] = int(st.session_state.get("rm_saved_count", 0)) + 1
         st.success(f"💾 Guardado offline: {meta.snapshot_id} "
                    f"({store.count(only_pending=True)} pendiente(s) de sync)")
     except Exception as e:  # noqa: BLE001
