@@ -596,11 +596,12 @@ def _plot_waveform(chans, fs: float, rpm: Optional[float] = None) -> None:
     from plotly.subplots import make_subplots
     import plotly.graph_objects as go
     machine = st.session_state.get("rm_machine_name", "—")
-    # Se piensa en VUELTAS, no en ms (los ms dependen del rpm).
-    n_rev = st.select_slider("Vueltas a mostrar", options=[8, 16, 32, 64], value=32,
+    # Se piensa en VUELTAS, no en ms (los ms dependen del rpm). 32 = punto dulce
+    # (como System1 Wf 64X/32); 8/16 para ver un ciclo con más detalle.
+    n_rev = st.select_slider("Vueltas a mostrar", options=[8, 16, 32], value=32,
                              key="rm_wf_revs",
-                             help="Nº de revoluciones mostradas. Menos vueltas = más detalle del "
-                                  "ciclo (ver glitches); más vueltas = mejor resolución de espectro.")
+                             help="Nº de revoluciones mostradas. 32 = default. "
+                                  "8/16 = ver un ciclo con más detalle (glitches, forma).")
     prepared = []
     for sig, ch in chans:
         eu = sig * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else sig
@@ -633,13 +634,15 @@ def _plot_waveform(chans, fs: float, rpm: Optional[float] = None) -> None:
         + (f' · {rpm:.0f} rpm' if rpm else '') + '</span>'
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
-    col_plot, col_cur = st.columns([5, 1.25])
+    wfcol = ["#2f6fb0", "#7c5cd6", "#159a5b", "#d9822b"]   # color por canal (le da vida)
+    col_plot, col_cur = st.columns([6, 1])
     with col_plot:
         rows = len(prepared)
-        fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.06)
+        fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.07)
         for r, p in enumerate(prepared, start=1):
+            c = wfcol[(r - 1) % len(wfcol)]
             fig.add_trace(go.Scatter(
-                x=p["t"], y=p["eu"], mode="lines", line=dict(width=1.0, color=_S1_BLUE),
+                x=p["t"], y=p["eu"], mode="lines", line=dict(width=1.1, color=c),
                 hovertemplate=f"%{{x:.1f}} ms<br>%{{y:.4g}} {p['ch'].units}<extra></extra>"),
                 row=r, col=1)
             if rpm and rpm > 0 and len(p["t"]):
@@ -659,25 +662,39 @@ def _plot_waveform(chans, fs: float, rpm: Optional[float] = None) -> None:
                          showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
                          showspikes=True, spikecolor="#94a3b8", spikemode="across",
                          spikesnap="cursor", row=rows, col=1)
-        fig.update_layout(height=max(250, 210 * rows), margin=dict(l=56, r=10, t=8, b=38),
+        fig.update_layout(height=max(360, 320 * rows), margin=dict(l=58, r=10, t=8, b=40),
                           plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
                           hovermode="closest", showlegend=False)
         st.plotly_chart(fig, use_container_width=True)
     with col_cur:
-        body = ""
-        for p in prepared:
-            body += (f'<div style="margin-bottom:9px">'
-                     f'<b style="color:{_S1_TITLE}">{p["ch"].name}</b><br>'
-                     f'pp&nbsp;&nbsp;&nbsp;{p["pp"]:.3g} {p["ch"].units}<br>'
-                     f'pk&nbsp;&nbsp;&nbsp;{p["pk"]:.3g}<br>'
-                     f'rms&nbsp;&nbsp;{p["rms"]:.3g}<br>'
-                     f'crest&nbsp;{p["crest"]:.2f}</div>')
+        blocks = ""
+        for i, p in enumerate(prepared):
+            c = wfcol[i % len(wfcol)]
+            sep = "border-top:1px solid #eef2f8;padding-top:8px;margin-top:8px;" if i else ""
+            rowsv = "".join(
+                f'<span style="color:#94a3b8">{k}</span>'
+                f'<span style="text-align:right;font-weight:700;color:#0F1E3D">{v}</span>'
+                for k, v in [("pp", f'{p["pp"]:.3g} {p["ch"].units}'),
+                             ("pk", f'{p["pk"]:.3g}'),
+                             ("rms", f'{p["rms"]:.3g}'),
+                             ("crest", f'{p["crest"]:.2f}')])
+            blocks += (
+                f'<div style="{sep}">'
+                f'<div style="color:{c};font-weight:800;font-size:12px;margin-bottom:4px;'
+                f'display:flex;align-items:center;gap:5px">'
+                f'<span style="width:7px;height:7px;border-radius:50%;background:{c}"></span>{p["ch"].name}</div>'
+                f'<div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;'
+                f'font-family:ui-monospace,monospace;font-size:11px">{rowsv}</div></div>')
         st.markdown(
-            f'<div style="border:1px solid #c7d0dc;border-radius:8px;overflow:hidden;'
-            f'font-family:ui-monospace,monospace;font-size:11px;margin-top:2px">'
-            f'<div style="background:{_S1_TITLE};color:#fff;padding:5px 9px;font-weight:700;'
-            f'letter-spacing:.03em">CURSOR</div>'
-            f'<div style="padding:9px 10px;color:#1f2937">{body}</div></div>',
+            f'<div style="border-radius:12px;overflow:hidden;border:1px solid #e6ecf5;'
+            f'box-shadow:0 6px 20px rgba(15,30,61,.12);margin-top:2px;'
+            f'font-family:Arial,Helvetica,sans-serif">'
+            f'<div style="background:linear-gradient(135deg,#0F1E3D,#20406e);color:#fff;'
+            f'padding:6px 11px;font-weight:800;letter-spacing:.12em;font-size:10px;'
+            f'display:flex;align-items:center;gap:7px">'
+            f'<span style="width:7px;height:7px;border-radius:50%;background:#1AAEE5;'
+            f'box-shadow:0 0 7px #1AAEE5"></span>CURSOR</div>'
+            f'<div style="padding:10px 11px">{blocks}</div></div>',
             unsafe_allow_html=True)
 
 
@@ -932,46 +949,26 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict) -> 
     als = [alarms.get(ch.name, (0, 0))[0] for ch in fam_channels if alarms.get(ch.name, (0, 0))[0] > 0]
     dgs = [alarms.get(ch.name, (0, 0))[1] for ch in fam_channels if alarms.get(ch.name, (0, 0))[1] > 0]
 
-    # Selector rápido de rango, tipo ADRE/System1.
-    rng = st.radio("Rango", ["CV", "Horas", "Días", "Meses"], horizontal=True, index=1,
+    # Selector de rango. CV = tendencia actual (en vivo); el resto pregunta cantidad.
+    rng = st.radio("Rango", ["CV", "Horas", "Días", "Semanas", "Meses"], horizontal=True, index=0,
                    key="rm_trend_range",
-                   help="CV = valores actuales (snapshot). Horas/Días/Meses = histórico de tendencia.")
-
-    # === CV: valores actuales (barra horizontal por canal + alarma/danger) ===
+                   help="CV = tendencia actual (en vivo, últimos minutos). "
+                        "Horas/Días/Semanas/Meses = histórico; elegís cuántos.")
+    _uword = {"Horas": "horas", "Días": "días", "Semanas": "semanas", "Meses": "meses"}
     if rng == "CV":
-        names = [c.name for c in fam_channels]
-        vals = [overall.get(n, 0.0) for n in names]
-        cols = []
-        for n, v in zip(names, vals):
-            al, dg = alarms.get(n, (0, 0))
-            cols.append("#dc2626" if (dg > 0 and v >= dg)
-                        else "#D89B22" if (al > 0 and v >= al) else _S1_BLUE)
-        fig = go.Figure(go.Bar(x=vals, y=names, orientation="h", marker_color=cols,
-                               hovertemplate="%{y}: %{x:.3g} " + unit + "<extra></extra>"))
-        if als:
-            fig.add_vline(x=min(als), line=dict(color="#D89B22", width=1.5, dash="dash"),
-                          annotation_text="Alarma", annotation_font=dict(size=9, color="#b8801c"))
-        if dgs:
-            fig.add_vline(x=min(dgs), line=dict(color="#dc2626", width=1.5, dash="dash"),
-                          annotation_text="Danger", annotation_font=dict(size=9, color="#c0392b"))
-        peak = max(vals + als + dgs) if (vals or als or dgs) else 0.0
-        fig.update_layout(height=max(200, 60 + 46 * len(names)), margin=dict(l=10, r=16, t=44, b=36),
-                          plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
-                          title=dict(text=f"Valores actuales · {famname}",
-                                     font=dict(size=13, color=_S1_TITLE)))
-        fig.update_xaxes(title=f"Overall ({unit})" if unit else "Overall",
-                         range=[0, _nice_top(peak * 1.15) if peak > 0 else 1.0],
-                         showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
-                         ticks="outside", tickcolor=_S1_AXIS)
-        fig.update_yaxes(showgrid=False, showline=True, linecolor=_S1_AXIS, autorange="reversed")
-        st.plotly_chart(fig, use_container_width=True)
-        return
+        span = timedelta(minutes=5)
+        title_rng = "actual (en vivo)"
+    else:
+        _dflt = {"Horas": 6, "Días": 7, "Semanas": 4, "Meses": 6}[rng]
+        qty = int(st.number_input(f"¿Cuántas/os {_uword[rng]}?", min_value=1, max_value=999,
+                                  value=_dflt, step=1, key=f"rm_trend_qty_{rng}"))
+        _delta = {"Horas": timedelta(hours=1), "Días": timedelta(days=1),
+                  "Semanas": timedelta(weeks=1), "Meses": timedelta(days=30)}[rng]
+        span = _delta * qty
+        title_rng = f"últimas/os {qty} {_uword[rng]}"
 
-    # === Rango temporal (Horas / Días / Meses) ===
-    span = {"Horas": timedelta(hours=6), "Días": timedelta(days=7),
-            "Meses": timedelta(days=180)}[rng]
     cutoff = datetime.now() - span
-    hview = [(t, o) for (t, o) in hist if t >= cutoff] or hist
+    hview = [(t, o) for (t, o) in hist if t >= cutoff] or hist[-1:]
     xs = [h[0] for h in hview]
     fig = go.Figure()
     for k, ch in enumerate(fam_channels):
@@ -993,7 +990,7 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict) -> 
     fig.update_layout(height=400, margin=dict(l=10, r=16, t=44, b=36),
                       plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
                       xaxis_title="Fecha / hora", yaxis_title=f"Overall ({unit})" if unit else "Overall",
-                      title=dict(text=f"Tendencia overall · {famname} · {rng}",
+                      title=dict(text=f"Tendencia overall · {famname} · {title_rng}",
                                  font=dict(size=13, color=_S1_TITLE)),
                       legend=dict(orientation="h", y=1.02, yanchor="bottom", font=dict(size=10)))
     fig.update_xaxes(type="date", showgrid=True, gridcolor=_S1_GRID, showline=True,
@@ -1001,8 +998,9 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict) -> 
     fig.update_yaxes(range=[0, ymax], rangemode="tozero", showgrid=True, gridcolor=_S1_GRID,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
     st.plotly_chart(fig, use_container_width=True)
-    st.caption("Histórico de la sesión. El histórico completo por días/meses llega con el "
-               "sync a Supabase (Fase 2).")
+    if rng != "CV":
+        st.caption("Mostrando el histórico disponible de la sesión. El histórico completo "
+                   "(días/semanas/meses) llega con el sync a Supabase (Fase 2).")
 
 
 def _plot_bode(tc: TransientCapture, channel: str) -> None:
