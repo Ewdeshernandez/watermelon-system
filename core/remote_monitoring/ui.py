@@ -145,6 +145,7 @@ def _no_config_gate() -> bool:
         st.session_state["rm_channels"] = chans
         st.session_state["rm_machine_rpm"] = 3600.0
         st.session_state["rm_machine_name"] = "Demo"
+        st.session_state["rm_machine_rotation"] = "CCW"
         # Valores de ejemplo (proximidad, mil pp / V) para que Gap, Alarma,
         # Danger y las líneas de tendencia se vean sin configurar nada.
         vibs = [c.name for c in chans if not is_keyphasor_channel(c)]
@@ -416,18 +417,18 @@ def _analisis_display() -> None:
         if names:
             sel = st.selectbox("Canal", names, key="rm_wf_ch")
             i = names.index(sel)
-            _plot_waveform(snap[vib[i][0]], fs, vib[i][1])
+            _plot_waveform(snap[vib[i][0]], fs, vib[i][1], rpm)
     with tabs[3]:
         if names:
             sel = st.selectbox("Canal", names, key="rm_sp_ch")
             i = names.index(sel)
-            _bt = st.session_state.get("rm_acq_by_type_saved") or {}
-            _tmap = st.session_state.get("rm_type_by_name") or {}
-            _ctype = _tmap.get(vib[i][1].name, "proximity")
-            _fmax = float((_bt.get(_ctype) or st.session_state.get("rm_acq_saved") or {}).get("fmax_hz", 0) or 0)
-            _plot_spectrum(snap[vib[i][0]], fs, vib[i][1], rpm, fmax=_fmax or None)
+            _p = _acq_for_channel(vib[i][1].name)
+            _plot_spectrum(snap[vib[i][0]], fs, vib[i][1], rpm,
+                           fmin_hz=float(_p.get("fmin_hz", 0) or 0),
+                           fmax_hz=float(_p.get("fmax_hz", 0) or 0),
+                           freq_unit=_p.get("freq_unit", "cpm"))
     with tabs[4]:
-        _plot_orbit(snap, vib, fs)
+        _plot_orbit(snap, vib, fs, rpm)
     with tabs[5]:
         if names:
             sel = st.selectbox("Canal", names, key="rm_bode_ch")
@@ -569,14 +570,50 @@ def _render_stat_strip(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float],
         f'border:1px solid #e6ecf5">{"".join(cells)}</div>', unsafe_allow_html=True)
 
 
-def _plot_waveform(x: np.ndarray, fs: float, ch: ChannelConfig) -> None:
+def _acq_for_channel(name: str) -> dict:
+    """Params de adquisición efectivos del canal (por tipo → fallback general)."""
+    _bt = st.session_state.get("rm_acq_by_type_saved") or {}
+    _tmap = st.session_state.get("rm_type_by_name") or {}
+    ctype = _tmap.get(name, "proximity")
+    return dict(_bt.get(ctype) or st.session_state.get("rm_acq_saved") or {})
+
+
+def _plot_waveform(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[float] = None) -> None:
+    """Forma de onda estilo System1: eje X en ms, crosshair, puntos de keyphasor
+    por vuelta y panel de pp/pk/rms/crest factor."""
     import plotly.graph_objects as go
     eu = x * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else x
     eu = eu - np.mean(eu)
-    t = np.arange(len(eu)) / fs
-    fig = go.Figure(go.Scatter(x=t, y=eu, mode="lines", line=dict(width=1)))
-    fig.update_layout(height=340, margin=dict(l=10, r=10, t=30, b=10),
-                      xaxis_title="s", yaxis_title=ch.units, title=f"Waveform · {ch.name}")
+    t_ms = np.arange(len(eu)) / fs * 1000.0
+    rms = float(np.sqrt(np.mean(eu ** 2))) if len(eu) else 0.0
+    pk = float(np.max(np.abs(eu))) if len(eu) else 0.0
+    pp = float(np.ptp(eu)) if len(eu) else 0.0
+    crest = pk / rms if rms > 0 else 0.0
+    fig = go.Figure(go.Scatter(
+        x=t_ms, y=eu, mode="lines", line=dict(width=1.2, color="#2563eb"),
+        hovertemplate=f"%{{x:.1f}} ms<br>%{{y:.4g}} {ch.units}<extra></extra>"))
+    if rpm and rpm > 0 and len(t_ms):
+        period_ms = 60000.0 / rpm
+        kt = np.arange(0.0, float(t_ms[-1]), period_ms)
+        ky = np.interp(kt, t_ms, eu)
+        fig.add_trace(go.Scatter(x=kt, y=ky, mode="markers",
+                                 marker=dict(size=7, color="#1e3a8a"),
+                                 hovertemplate="Keyphasor<br>%{x:.1f} ms<extra></extra>",
+                                 showlegend=False))
+    ymax = _nice_top(pk * 1.15) if pk > 0 else 1.0
+    fig.update_layout(height=360, margin=dict(l=52, r=16, t=56, b=40),
+                      plot_bgcolor="#f8fafc", paper_bgcolor="#ffffff",
+                      font=dict(color="#111827"), title=f"Forma de onda · {ch.name}",
+                      hovermode="closest")
+    fig.update_xaxes(title="ms", showgrid=False, showline=True, linecolor="#9ca3af",
+                     ticks="outside", tickcolor="#6b7280", showspikes=True,
+                     spikecolor="#94a3b8", spikemode="across", spikesnap="cursor", spikethickness=1)
+    fig.update_yaxes(title=ch.units, range=[-ymax, ymax], zeroline=True, zerolinecolor="#cbd5e1",
+                     gridcolor="rgba(148,163,184,0.18)", showline=True, linecolor="#9ca3af",
+                     ticks="outside", tickcolor="#6b7280")
+    fig.add_annotation(xref="paper", yref="paper", x=1.0, y=1.16, xanchor="right", showarrow=False,
+                       text=f"pp {pp:.3g} · pk {pk:.3g} · rms {rms:.3g} {ch.units} · crest {crest:.2f}",
+                       font=dict(size=11, color="#475569"))
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -589,25 +626,72 @@ def _spectrum(x: np.ndarray, fs: float):
 
 
 def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[float],
-                   fmax: Optional[float] = None) -> None:
+                   fmin_hz: float = 0.0, fmax_hz: float = 0.0, freq_unit: str = "cpm") -> None:
+    """Espectro estilo System1: eje Y en la unidad del sensor (pp) desde 0 y
+    autoescala; eje X en la unidad elegida (CPM/Hz) de Fmin a Fmax; crosshair
+    con hover que muestra frecuencia, amplitud y orden; panel Overall + 1X."""
     import plotly.graph_objects as go
+    from core.remote_monitoring.config import hz_to_display, freq_label
     eu = x * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else x
-    freqs, mag = _spectrum(eu, fs)
-    fig = go.Figure(go.Scatter(x=freqs, y=mag, mode="lines", line=dict(width=1)))
-    if rpm:
-        f1 = rpm / 60.0
+    freqs, mag = _spectrum(eu, fs)          # mag = amplitud 0-pk
+    amp_pp = mag * 2.0                        # a pico-pico (convención Bently)
+    unit = freq_label(freq_unit)
+    fdisp = freqs * (60.0 if unit == "CPM" else 1.0)
+    f1 = (rpm / 60.0) if rpm else None
+    orders = (freqs / f1) if f1 else np.zeros_like(freqs)
+    xmin = hz_to_display(fmin_hz, freq_unit) if fmin_hz > 0 else 0.0
+    xmax = hz_to_display(fmax_hz, freq_unit) if fmax_hz > 0 else (fdisp[-1] if len(fdisp) else 1.0)
+    band = (freqs >= (fmin_hz or 0)) & (freqs <= (fmax_hz if fmax_hz > 0 else freqs[-1] if len(freqs) else 0))
+    ov_pp = float(np.sqrt(np.sum(mag[band] ** 2) / 2.0)) * 2.0 * np.sqrt(2.0) if band.any() else 0.0
+    fig = go.Figure(go.Scatter(
+        x=fdisp, y=amp_pp, mode="lines", line=dict(width=1.1, color="#2563eb"),
+        customdata=orders,
+        hovertemplate=(f"%{{x:.0f}} {unit}<br>%{{y:.4g}} {ch.units} pp"
+                       + ("<br>%{customdata:.2f}X" if f1 else "") + "<extra></extra>")))
+    if f1:
         for k, lbl in [(1, "1X"), (2, "2X"), (3, "3X")]:
-            if k * f1 < freqs[-1]:
-                fig.add_vline(x=k * f1, line=dict(color="#ef4444", width=1, dash="dot"),
-                              annotation_text=lbl)
-    fig.update_layout(height=340, margin=dict(l=10, r=10, t=30, b=10),
-                      xaxis_title="Hz", yaxis_title=ch.units, title=f"Spectrum · {ch.name}")
-    if fmax and fmax > 0:
-        fig.update_xaxes(range=[0, fmax])  # span Fmax de los parámetros de adquisición
+            fx = hz_to_display(k * f1, freq_unit)
+            if xmin <= fx <= xmax:
+                fig.add_vline(x=fx, line=dict(color="#ef4444", width=1, dash="dot"),
+                              annotation_text=lbl, annotation_font_size=10)
+    peak = float(amp_pp[band].max()) if band.any() else (float(amp_pp.max()) if len(amp_pp) else 0.0)
+    ymax = _nice_top(peak * 1.15) if peak > 0 else 1.0
+    fig.update_layout(height=360, margin=dict(l=56, r=16, t=56, b=42),
+                      plot_bgcolor="#f8fafc", paper_bgcolor="#ffffff",
+                      font=dict(color="#111827"), title=f"Espectro · {ch.name}", hovermode="x")
+    fig.update_xaxes(title=f"Frecuencia ({unit})", range=[xmin, xmax], showgrid=False,
+                     showline=True, linecolor="#9ca3af", ticks="outside", tickcolor="#6b7280",
+                     showspikes=True, spikecolor="#94a3b8", spikemode="across",
+                     spikesnap="cursor", spikethickness=1)
+    fig.update_yaxes(title=f"{ch.units} pp", range=[0, ymax], gridcolor="rgba(148,163,184,0.18)",
+                     showline=True, linecolor="#9ca3af", ticks="outside", tickcolor="#6b7280")
+    ann = f"O/All {ov_pp:.3g} {ch.units} pp"
+    if f1:
+        a1, _ph = one_x_vector(eu, fs, f1)
+        ann += f" · 1X {a1 * 2:.3g} {ch.units} pp @ {hz_to_display(f1, freq_unit):.0f} {unit}"
+    fig.add_annotation(xref="paper", yref="paper", x=1.0, y=1.16, xanchor="right", showarrow=False,
+                       text=ann, font=dict(size=11, color="#475569"))
     st.plotly_chart(fig, use_container_width=True)
 
 
-def _plot_orbit(snap: np.ndarray, vib_channels, fs: float) -> None:
+def _orbit_dir_arrow(fig, rotation: str, R: float) -> None:
+    """Dibuja un arco con flecha indicando el sentido de giro (arriba de la órbita)."""
+    import plotly.graph_objects as go
+    r = R * 1.22
+    cw = (rotation or "CCW").upper() == "CW"
+    ang = np.radians(np.linspace(140, 60, 24) if cw else np.linspace(60, 140, 24))
+    ax_, ay_ = r * np.cos(ang), r * np.sin(ang)
+    fig.add_trace(go.Scatter(x=ax_, y=ay_, mode="lines", line=dict(color="#0F1E3D", width=2.2),
+                             hoverinfo="skip", showlegend=False))
+    fig.add_annotation(x=ax_[-1], y=ay_[-1], ax=ax_[-4], ay=ay_[-4],
+                       xref="x", yref="y", axref="x", ayref="y", showarrow=True,
+                       arrowhead=2, arrowsize=1.5, arrowwidth=2.2, arrowcolor="#0F1E3D", text="")
+    fig.add_annotation(x=0.0, y=r, yshift=12, showarrow=False,
+                       text=f"{'⟳' if cw else '⟲'} {rotation}",
+                       font=dict(size=12, color="#0F1E3D"))
+
+
+def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] = None) -> None:
     import plotly.graph_objects as go
     if len(vib_channels) < 2:
         st.info("La órbita necesita un par X/Y. Asocialo en **Configuración → Par X/Y**.")
@@ -640,10 +724,44 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float) -> None:
     x = snap[xi] * 1000.0 / chx.sensitivity_mv_per_eu
     y = y - np.mean(y)
     x = x - np.mean(x)
-    fig = go.Figure(go.Scatter(x=x, y=y, mode="lines", line=dict(width=1)))
-    fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10),
-                      xaxis_title=f"{chx.name} ({chx.units})", yaxis_title=f"{chy.name} ({chy.units})",
-                      title=f"Órbita · {sel}", yaxis=dict(scaleanchor="x", scaleratio=1))
+
+    # Filtro estilo System1: Directa (todo), 1X o 2X (reconstruido del vector).
+    f1 = (rpm / 60.0) if rpm else None
+    fmode = st.radio("Filtro", ["Directa", "1X", "2X"], horizontal=True, key="rm_orbit_filter",
+                     help="Directa = onda completa. 1X/2X = órbita filtrada al orden (elipse).")
+    if fmode == "Directa" or not f1:
+        xo, yo = x, y
+    else:
+        n = 1.0 if fmode == "1X" else 2.0
+        f = n * f1
+        ax_, px_ = one_x_vector(x, fs, f)
+        ay_, py_ = one_x_vector(y, fs, f)
+        tt = np.linspace(0.0, 1.0 / f1, 400)   # una vuelta del eje
+        xo = ax_ * np.cos(2 * np.pi * f * tt + np.radians(px_))
+        yo = ay_ * np.cos(2 * np.pi * f * tt + np.radians(py_))
+    R = max(float(np.max(np.abs(xo))) if len(xo) else 0.0,
+            float(np.max(np.abs(yo))) if len(yo) else 0.0, 1e-9)
+
+    fig = go.Figure(go.Scatter(
+        x=xo, y=yo, mode="lines", line=dict(width=1.4, color="#2563eb"),
+        hovertemplate=f"X %{{x:.3g}}<br>Y %{{y:.3g}} {chy.units}<extra></extra>"))
+    # Punto de keyphasor (t=0)
+    fig.add_trace(go.Scatter(x=[xo[0]], y=[yo[0]], mode="markers",
+                             marker=dict(size=9, color="#dc2626"), showlegend=False,
+                             hovertemplate="Keyphasor (t=0)<extra></extra>"))
+    # Sentido de giro (flecha)
+    rotation = st.session_state.get("rm_machine_rotation", "CCW")
+    _orbit_dir_arrow(fig, rotation, R)
+    lim = R * 1.4
+    fig.update_layout(height=440, margin=dict(l=10, r=10, t=44, b=10),
+                      plot_bgcolor="#f8fafc", paper_bgcolor="#ffffff", font=dict(color="#111827"),
+                      title=f"Órbita · {sel} · {fmode}", showlegend=False)
+    fig.update_xaxes(title=f"{chx.name} ({chx.units})", range=[-lim, lim], zeroline=True,
+                     zerolinecolor="#cbd5e1", showgrid=True, gridcolor="rgba(148,163,184,0.15)",
+                     showline=True, linecolor="#9ca3af")
+    fig.update_yaxes(title=f"{chy.name} ({chy.units})", range=[-lim, lim], zeroline=True,
+                     zerolinecolor="#cbd5e1", showgrid=True, gridcolor="rgba(148,163,184,0.15)",
+                     showline=True, linecolor="#9ca3af", scaleanchor="x", scaleratio=1)
     st.plotly_chart(fig, use_container_width=True)
 
 
