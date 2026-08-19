@@ -96,6 +96,15 @@ def render_remote_monitoring() -> None:
         .stNumberInput div[data-baseweb="input"]:hover { border-color:#c3cede !important; }
         /* Radio horizontal más aireado, sin cajas */
         .stRadio [role="radiogroup"] { gap:6px 18px !important; }
+
+        /* Controles de rango de la tendencia: chicos y alineados */
+        .st-key-rm_trend_ctrls { margin-top:-6px; }
+        .st-key-rm_trend_ctrls [role="radiogroup"] { gap:2px 12px !important; align-items:center; }
+        .st-key-rm_trend_ctrls [role="radiogroup"] label p { font-size:12px !important; }
+        .st-key-rm_trend_ctrls [role="radiogroup"] label { padding:1px 0 !important; }
+        .st-key-rm_trend_ctrls .stNumberInput div[data-baseweb="input"] {
+            min-height:30px !important; border-radius:7px !important; }
+        .st-key-rm_trend_ctrls .stNumberInput input { font-size:12px !important; padding:2px 8px !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -1023,18 +1032,18 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
-    # Controles abajo: botones de unidad (Actual/Horas/Días/…) + casilla de cantidad.
-    bc = st.columns([3, 1.1])
-    with bc[0]:
-        st.radio("Rango", ["Actual"] + list(_unit.keys()), horizontal=True,
-                 key="rm_trend_win", label_visibility="collapsed")
-    with bc[1]:
-        if sel != "Actual":
-            _u = {"Horas": "horas", "Días": "días",
-                  "Semanas": "semanas", "Meses": "meses"}[sel]
-            _k = f"rm_trend_qty_{sel}"
-            st.session_state.setdefault(_k, _dfl.get(sel, 1))
-            st.number_input(f"¿Cuántas/os {_u}?", 1, 999, step=1, key=_k)
+    # Controles abajo: chicos y alineados (contenedor con CSS compacto scopeado).
+    with st.container(key="rm_trend_ctrls"):
+        bc = st.columns([3.4, 0.7])
+        with bc[0]:
+            st.radio("Rango", ["Actual"] + list(_unit.keys()), horizontal=True,
+                     key="rm_trend_win", label_visibility="collapsed")
+        with bc[1]:
+            if sel != "Actual":
+                _k = f"rm_trend_qty_{sel}"
+                st.session_state.setdefault(_k, _dfl.get(sel, 1))
+                st.number_input("cantidad", 1, 999, step=1, key=_k,
+                                label_visibility="collapsed")
 
 
 def _plot_bode(tc: TransientCapture, channel: str) -> None:
