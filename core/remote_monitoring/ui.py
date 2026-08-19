@@ -422,7 +422,6 @@ def _analisis_display() -> None:
                 f'<b style="color:{vcol};font-family:ui-monospace,monospace">{val}</b>')
     _items = " &nbsp;·&nbsp; ".join([
         _st("RPM", f"{rpm:.0f}" if rpm else "—"),
-        _st("1X", f"{rpm / 60:.1f} Hz" if rpm else "—"),
         _st("Estado", rm_states.state_label(state), _scol),
         _st("Ventana", f"{_vent:.1f} s"),
     ])
