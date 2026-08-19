@@ -98,20 +98,21 @@ def render_remote_monitoring() -> None:
         .stRadio [role="radiogroup"] { gap:6px 18px !important; }
 
         /* Controles de rango de la tendencia: chicos y alineados */
-        .st-key-rm_trend_ctrls { margin-top:-6px; }
+        .st-key-rm_trend_ctrls { margin-top:-4px; }
         .st-key-rm_trend_ctrls [role="radiogroup"] { gap:2px 12px !important; align-items:center; }
         .st-key-rm_trend_ctrls [role="radiogroup"] label p { font-size:12px !important; }
         .st-key-rm_trend_ctrls [role="radiogroup"] label { padding:1px 0 !important; }
-        /* Cajita de cantidad: chica, limpia, sin los +/- feos ni borde rojo */
-        .st-key-rm_trend_ctrls .stNumberInput { max-width:96px; margin-left:auto; }
-        .st-key-rm_trend_ctrls .stNumberInput button { display:none !important; }
-        .st-key-rm_trend_ctrls .stNumberInput div[data-baseweb="input"] {
-            min-height:28px !important; border-radius:7px !important;
+        /* Cajita de cantidad: chica, limpia, sin +/- ni borde rojo */
+        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] { width:80px !important; }
+        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] button { display:none !important; }
+        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] > div,
+        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] div[data-baseweb="input"] {
+            min-height:28px !important; border-radius:8px !important;
             border-color:#dbe3ee !important; background:#fff !important; }
-        .st-key-rm_trend_ctrls .stNumberInput div[data-baseweb="input"]:focus-within {
+        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] div[data-baseweb="input"]:focus-within {
             border-color:#93b4d8 !important; box-shadow:0 0 0 2px #dbe9f8 !important; }
-        .st-key-rm_trend_ctrls .stNumberInput input {
-            font-size:12px !important; padding:2px 8px !important; text-align:center; }
+        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] input {
+            font-size:12px !important; padding:2px 6px !important; text-align:center; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -1039,18 +1040,16 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
-    # Controles abajo: chicos y alineados (contenedor con CSS compacto scopeado).
-    with st.container(key="rm_trend_ctrls"):
-        bc = st.columns([3.4, 0.7])
-        with bc[0]:
-            st.radio("Rango", ["Actual"] + list(_unit.keys()), horizontal=True,
-                     key="rm_trend_win", label_visibility="collapsed")
-        with bc[1]:
-            if sel != "Actual":
-                _k = f"rm_trend_qty_{sel}"
-                st.session_state.setdefault(_k, _dfl.get(sel, 1))
-                st.number_input("cantidad", 1, 999, step=1, key=_k,
-                                label_visibility="collapsed")
+    # Controles abajo: radio + casilla JUNTOS en un contenedor horizontal alineado.
+    with st.container(key="rm_trend_ctrls", horizontal=True,
+                      vertical_alignment="center", gap="small"):
+        st.radio("Rango", ["Actual"] + list(_unit.keys()), horizontal=True,
+                 key="rm_trend_win", label_visibility="collapsed")
+        if sel != "Actual":
+            _k = f"rm_trend_qty_{sel}"
+            st.session_state.setdefault(_k, _dfl.get(sel, 1))
+            st.number_input("cantidad", 1, 999, step=1, key=_k,
+                            label_visibility="collapsed")
 
 
 def _plot_bode(tc: TransientCapture, channel: str) -> None:
