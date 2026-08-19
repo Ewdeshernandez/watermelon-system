@@ -967,11 +967,16 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
     dgs = [alarms.get(ch.name, (0, 0))[1] for ch in fam_channels if alarms.get(ch.name, (0, 0))[1] > 0]
 
     # Ventana de tiempo. "Actual" = período en vivo de 15 min (sin selector).
-    # Los demás = período histórico con barra deslizable para navegar.
-    _win = {"Actual": timedelta(minutes=15), "1 H": timedelta(hours=1),
-            "1 D": timedelta(days=1), "1 S": timedelta(weeks=1), "1 M": timedelta(days=30)}
+    # Los demás = período histórico: unidad × cantidad + barra deslizable.
+    _unit = {"Horas": timedelta(hours=1), "Días": timedelta(days=1),
+             "Semanas": timedelta(weeks=1), "Meses": timedelta(days=30)}
+    _dfl = {"Horas": 6, "Días": 7, "Semanas": 4, "Meses": 6}
     sel = st.session_state.get("rm_trend_win", "Actual")
-    delta = _win[sel]
+    if sel == "Actual":
+        delta, qty = timedelta(minutes=15), 1
+    else:
+        qty = int(st.session_state.get(f"rm_trend_qty_{sel}", _dfl.get(sel, 1)) or 1)
+        delta = _unit[sel] * qty
     now = datetime.now()
     xs = [h[0] for h in hist]   # todo el histórico (para poder deslizar/navegar)
 
@@ -1018,9 +1023,18 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
-    # Botones de rango LIMPIOS, abajo (Actual = 15 min en vivo; el resto histórico).
-    st.radio("Rango", list(_win.keys()), horizontal=True, key="rm_trend_win",
-             label_visibility="collapsed")
+    # Controles abajo: botones de unidad (Actual/Horas/Días/…) + casilla de cantidad.
+    bc = st.columns([3, 1.1])
+    with bc[0]:
+        st.radio("Rango", ["Actual"] + list(_unit.keys()), horizontal=True,
+                 key="rm_trend_win", label_visibility="collapsed")
+    with bc[1]:
+        if sel != "Actual":
+            _u = {"Horas": "horas", "Días": "días",
+                  "Semanas": "semanas", "Meses": "meses"}[sel]
+            _k = f"rm_trend_qty_{sel}"
+            st.session_state.setdefault(_k, _dfl.get(sel, 1))
+            st.number_input(f"¿Cuántas/os {_u}?", 1, 999, step=1, key=_k)
 
 
 def _plot_bode(tc: TransientCapture, channel: str) -> None:
