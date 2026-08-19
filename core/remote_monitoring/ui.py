@@ -102,17 +102,23 @@ def render_remote_monitoring() -> None:
         .st-key-rm_trend_ctrls [role="radiogroup"] { gap:2px 12px !important; align-items:center; }
         .st-key-rm_trend_ctrls [role="radiogroup"] label p { font-size:12px !important; }
         .st-key-rm_trend_ctrls [role="radiogroup"] label { padding:1px 0 !important; }
-        /* Cajita de cantidad: chica, limpia, sin +/- ni borde rojo */
-        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] { width:80px !important; }
+        /* Selector de tipo de sensor: compacto, en la misma línea */
+        .st-key-rm_trend_ctrls [data-testid="stSelectbox"] { width:190px !important; }
+        .st-key-rm_trend_ctrls [data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+            min-height:30px !important; border-radius:8px !important; }
+        /* Cajita de cantidad: SIN recuadro externo; se sombrea al pasar/enfocar */
+        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] { width:70px !important; }
         .st-key-rm_trend_ctrls [data-testid="stNumberInput"] button { display:none !important; }
-        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] > div,
         .st-key-rm_trend_ctrls [data-testid="stNumberInput"] div[data-baseweb="input"] {
-            min-height:28px !important; border-radius:8px !important;
-            border-color:#dbe3ee !important; background:#fff !important; }
+            min-height:30px !important; border-radius:8px !important;
+            border:1px solid transparent !important; background:transparent !important; }
+        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] div[data-baseweb="input"]:hover {
+            background:#eef3fb !important; }
         .st-key-rm_trend_ctrls [data-testid="stNumberInput"] div[data-baseweb="input"]:focus-within {
-            border-color:#93b4d8 !important; box-shadow:0 0 0 2px #dbe9f8 !important; }
+            background:#eef3fb !important; border-color:#c3d4ea !important; box-shadow:none !important; }
         .st-key-rm_trend_ctrls [data-testid="stNumberInput"] input {
-            font-size:12px !important; padding:2px 6px !important; text-align:center; }
+            font-size:12px !important; padding:2px 6px !important; text-align:center;
+            background:transparent !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -446,11 +452,8 @@ def _analisis_display() -> None:
                 t = tmap.get(ch.name, "proximity")
                 if t not in fams:
                     fams.append(t)
-            # Un solo selector: el tipo de sensor. El rango de tiempo se maneja con
-            # los botones (H/D/S/M/Todo) + la barra deslizable del propio gráfico.
-            sel_fam = st.selectbox("Tipo de sensor", fams,
-                                   format_func=lambda t: _FAMILY_ES.get(t, t), key="rm_tr_fam")
-            _plot_trend(snap, vib, sel_fam, tmap, rpm=rpm)
+            # Tipo de sensor + rango van en UNA fila abajo (dentro de _plot_trend).
+            _plot_trend(snap, vib, tmap, fams, rpm=rpm)
     with tabs[2]:
         if names:
             sels = st.multiselect("Canales", names, default=[names[0]], key="rm_wf_ch",
@@ -954,13 +957,17 @@ _TREND_BRIGHT = ["#2f6fb0", "#16a34a", "#e11d48", "#7c3aed",
                  "#0891b2", "#ea580c", "#db2777", "#0f766e"]
 
 
-def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
+def _plot_trend(snap: np.ndarray, vib_channels, type_map: dict, fams: list,
                 rpm: Optional[float] = None) -> None:
     """Tendencia overall estilo System1: fondo blanco, líneas finas de colores
-    vivos, alarma/danger sólidas (sin adornos), y botones de rango de tiempo
-    LIMPIOS abajo (1H/1D/1S/1M/Todo) — sin barra con thumbnail."""
+    vivos, alarma/danger sólidas, y controles (tipo de sensor + rango) en UNA
+    fila abajo. La barra deslizable aparece solo en períodos históricos."""
     import plotly.graph_objects as go
     from datetime import timedelta
+    # Tipo de sensor: viene del selector de la fila de abajo (via session_state).
+    family = st.session_state.get("rm_tr_fam")
+    if family not in fams:
+        family = fams[0] if fams else "proximity"
     hist = st.session_state.setdefault("rm_trend", [])
     overall, unit_by = {}, {}
     for i, ch in vib_channels:
@@ -1040,9 +1047,11 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
-    # Controles abajo: radio + casilla JUNTOS en un contenedor horizontal alineado.
+    # Controles en UNA fila abajo: tipo de sensor + rango + cantidad (compactos).
     with st.container(key="rm_trend_ctrls", horizontal=True,
-                      vertical_alignment="center", gap="small"):
+                      vertical_alignment="center", gap="medium"):
+        st.selectbox("Tipo de sensor", fams, format_func=lambda t: _FAMILY_ES.get(t, t),
+                     key="rm_tr_fam", label_visibility="collapsed")
         st.radio("Rango", ["Actual"] + list(_unit.keys()), horizontal=True,
                  key="rm_trend_win", label_visibility="collapsed")
         if sel != "Actual":
