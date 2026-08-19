@@ -421,9 +421,13 @@ def _analisis_display() -> None:
             _plot_trend(snap, vib, sel_fam, tmap)
     with tabs[2]:
         if names:
-            sel = st.selectbox("Canal", names, key="rm_wf_ch")
-            i = names.index(sel)
-            _plot_waveform(snap[vib[i][0]], fs, vib[i][1], rpm)
+            sels = st.multiselect("Canales", names, default=[names[0]], key="rm_wf_ch",
+                                  help="Elegí uno o varios canales para ver sus formas de onda apiladas.")
+            if sels:
+                chans = [(snap[vib[names.index(s)][0]], vib[names.index(s)][1]) for s in sels]
+                _plot_waveform(chans, fs, rpm)
+            else:
+                st.info("Elegí al menos un canal.")
     with tabs[3]:
         if names:
             sel = st.selectbox("Canal", names, key="rm_sp_ch")
@@ -584,64 +588,97 @@ def _acq_for_channel(name: str) -> dict:
     return dict(_bt.get(ctype) or st.session_state.get("rm_acq_saved") or {})
 
 
-def _plot_waveform(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[float] = None) -> None:
-    """Forma de onda estilo System1: eje X en ms, crosshair, puntos de keyphasor
-    por vuelta y panel de pp/pk/rms/crest factor."""
+def _plot_waveform(chans, fs: float, rpm: Optional[float] = None) -> None:
+    """Una o varias formas de onda apiladas, estilo estación de análisis:
+    encabezado con tag de máquina + fecha/hora de la toma, panel de cursor
+    lateral (con reborde, sin tapar la onda), eje X en ms desde 0 y puntos de
+    keyphasor por vuelta. `chans` = lista de (señal, ChannelConfig)."""
+    from plotly.subplots import make_subplots
     import plotly.graph_objects as go
-    eu = x * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else x
-    eu = eu - np.mean(eu)
-    # Se piensa en VUELTAS, no en ms. System1 = Wf(64X/32) → 32 vueltas.
-    # ~16-32 vueltas (potencia de 2) es el punto dulce para análisis.
+    machine = st.session_state.get("rm_machine_name", "—")
+    # Se piensa en VUELTAS, no en ms (los ms dependen del rpm).
     n_rev = st.select_slider("Vueltas a mostrar", options=[8, 16, 32, 64], value=32,
                              key="rm_wf_revs",
-                             help="Nº de revoluciones del eje. 32 = default System1 (Wf 64X/32). "
-                                  "Más vueltas = mejor espectro; menos = más detalle visual.")
-    if rpm and rpm > 0:
-        n_show = min(len(eu), max(1, int(round(n_rev * (60.0 / rpm) * fs))))
-    else:
-        n_show = min(len(eu), int(0.5 * fs))
-    eu = eu[-n_show:] if n_show else eu
-    eu = eu - np.mean(eu)
-    t_ms = np.arange(len(eu)) / fs * 1000.0
-    rms = float(np.sqrt(np.mean(eu ** 2))) if len(eu) else 0.0
-    pk = float(np.max(np.abs(eu))) if len(eu) else 0.0
-    pp = float(np.ptp(eu)) if len(eu) else 0.0
-    crest = pk / rms if rms > 0 else 0.0
-    fig = go.Figure(go.Scatter(
-        x=t_ms, y=eu, mode="lines", line=dict(width=1.0, color=_S1_BLUE),
-        hovertemplate=f"%{{x:.1f}} ms<br>%{{y:.4g}} {ch.units}<extra></extra>"))
-    if rpm and rpm > 0 and len(t_ms):
-        period_ms = 60000.0 / rpm
-        kt = np.arange(0.0, float(t_ms[-1]), period_ms)
-        ky = np.interp(kt, t_ms, eu)
-        fig.add_trace(go.Scatter(x=kt, y=ky, mode="markers",
-                                 marker=dict(size=7, color=_S1_KPH),
-                                 hovertemplate="Keyphasor<br>%{x:.1f} ms<extra></extra>",
-                                 showlegend=False))
-    ymax = _nice_top(pk * 1.15) if pk > 0 else 1.0
-    fig.update_layout(height=360, margin=dict(l=54, r=16, t=44, b=40),
-                      plot_bgcolor="#ffffff", paper_bgcolor="#ffffff",
-                      font=_S1_FONT, hovermode="closest", showlegend=False,
-                      title=dict(text=f"Forma de onda · {ch.name}",
-                                 font=dict(size=13, color=_S1_TITLE)))
-    xmax_ms = float(t_ms[-1]) if len(t_ms) else 1.0
-    fig.update_xaxes(title="ms", range=[0, xmax_ms], showgrid=True, gridcolor=_S1_GRID,
-                     showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
-                     ticklen=4, showspikes=True, spikecolor="#94a3b8", spikemode="across",
-                     spikesnap="cursor", spikethickness=1)
-    fig.update_yaxes(title=ch.units, range=[-ymax, ymax], zeroline=True, zerolinecolor="#d5dbe4",
-                     showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
-                     ticks="outside", tickcolor=_S1_AXIS, ticklen=4)
-    _s1_readout(fig, [f"{ch.name} · {rpm:.0f} rpm" if rpm else ch.name,
-                      f"pp    {pp:.3g} {ch.units}",
-                      f"pk    {pk:.3g}",
-                      f"rms   {rms:.3g}",
-                      f"crest {crest:.2f}"])
-    st.plotly_chart(fig, use_container_width=True)
-    if rpm and rpm > 0:
-        st.caption(f"{n_rev} vueltas · {xmax_ms:.0f} ms @ {rpm:.0f} rpm. "
-                   f"Buena práctica: 16–32 vueltas con samples/rev potencia de 2 "
-                   f"(System1 = 64×32 = 2048 muestras) → FFT limpia + órbita estable.")
+                             help="Nº de revoluciones mostradas. Menos vueltas = más detalle del "
+                                  "ciclo (ver glitches); más vueltas = mejor resolución de espectro.")
+    prepared = []
+    for sig, ch in chans:
+        eu = sig * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else sig
+        eu = eu - np.mean(eu)
+        if rpm and rpm > 0:
+            n_show = min(len(eu), max(1, int(round(n_rev * (60.0 / rpm) * fs))))
+        else:
+            n_show = min(len(eu), int(0.5 * fs))
+        eu = (eu[-n_show:] if n_show else eu)
+        eu = eu - np.mean(eu)
+        t_ms = np.arange(len(eu)) / fs * 1000.0
+        rms = float(np.sqrt(np.mean(eu ** 2))) if len(eu) else 0.0
+        pk = float(np.max(np.abs(eu))) if len(eu) else 0.0
+        pp = float(np.ptp(eu)) if len(eu) else 0.0
+        crest = pk / rms if rms > 0 else 0.0
+        prepared.append(dict(ch=ch, eu=eu, t=t_ms, rms=rms, pk=pk, pp=pp, crest=crest))
+    if not prepared:
+        return
+    xmax_ms = max((float(p["t"][-1]) for p in prepared if len(p["t"])), default=1.0)
+    sr = (fs * 60.0 / rpm) if rpm else 0.0   # samples/rev aprox
+
+    # Encabezado: tag de máquina · canales · Wf spec · rpm · fecha/hora de toma.
+    ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
+    chlabel = ", ".join(p["ch"].name for p in prepared)
+    st.markdown(
+        f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
+        f'gap:6px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
+        f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
+        f'<span><b>{machine}</b> · {chlabel} · Wf ≈{sr:.0f}×{n_rev} vueltas'
+        + (f' · {rpm:.0f} rpm' if rpm else '') + '</span>'
+        f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
+
+    col_plot, col_cur = st.columns([5, 1.25])
+    with col_plot:
+        rows = len(prepared)
+        fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.06)
+        for r, p in enumerate(prepared, start=1):
+            fig.add_trace(go.Scatter(
+                x=p["t"], y=p["eu"], mode="lines", line=dict(width=1.0, color=_S1_BLUE),
+                hovertemplate=f"%{{x:.1f}} ms<br>%{{y:.4g}} {p['ch'].units}<extra></extra>"),
+                row=r, col=1)
+            if rpm and rpm > 0 and len(p["t"]):
+                period_ms = 60000.0 / rpm
+                kt = np.arange(0.0, float(p["t"][-1]), period_ms)
+                ky = np.interp(kt, p["t"], p["eu"])
+                fig.add_trace(go.Scatter(x=kt, y=ky, mode="markers",
+                                         marker=dict(size=6, color=_S1_KPH), showlegend=False,
+                                         hovertemplate="Keyphasor<br>%{x:.1f} ms<extra></extra>"),
+                              row=r, col=1)
+            ymax = _nice_top(p["pk"] * 1.15) if p["pk"] > 0 else 1.0
+            fig.update_yaxes(title_text=f"{p['ch'].name} ({p['ch'].units})", range=[-ymax, ymax],
+                             zeroline=True, zerolinecolor="#d5dbe4", showgrid=True, gridcolor=_S1_GRID,
+                             showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
+                             row=r, col=1)
+        fig.update_xaxes(title_text="ms", range=[0, xmax_ms], showgrid=True, gridcolor=_S1_GRID,
+                         showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
+                         showspikes=True, spikecolor="#94a3b8", spikemode="across",
+                         spikesnap="cursor", row=rows, col=1)
+        fig.update_layout(height=max(250, 210 * rows), margin=dict(l=56, r=10, t=8, b=38),
+                          plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
+                          hovermode="closest", showlegend=False)
+        st.plotly_chart(fig, use_container_width=True)
+    with col_cur:
+        body = ""
+        for p in prepared:
+            body += (f'<div style="margin-bottom:9px">'
+                     f'<b style="color:{_S1_TITLE}">{p["ch"].name}</b><br>'
+                     f'pp&nbsp;&nbsp;&nbsp;{p["pp"]:.3g} {p["ch"].units}<br>'
+                     f'pk&nbsp;&nbsp;&nbsp;{p["pk"]:.3g}<br>'
+                     f'rms&nbsp;&nbsp;{p["rms"]:.3g}<br>'
+                     f'crest&nbsp;{p["crest"]:.2f}</div>')
+        st.markdown(
+            f'<div style="border:1px solid #c7d0dc;border-radius:8px;overflow:hidden;'
+            f'font-family:ui-monospace,monospace;font-size:11px;margin-top:2px">'
+            f'<div style="background:{_S1_TITLE};color:#fff;padding:5px 9px;font-weight:700;'
+            f'letter-spacing:.03em">CURSOR</div>'
+            f'<div style="padding:9px 10px;color:#1f2937">{body}</div></div>',
+            unsafe_allow_html=True)
 
 
 def _spectrum(x: np.ndarray, fs: float):
