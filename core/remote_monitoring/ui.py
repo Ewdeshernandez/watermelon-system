@@ -940,9 +940,10 @@ _TREND_BRIGHT = ["#2f6fb0", "#16a34a", "#e11d48", "#7c3aed",
 def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
                 rpm: Optional[float] = None) -> None:
     """Tendencia overall estilo System1: fondo blanco, líneas finas de colores
-    vivos, alarma/danger con triángulos en las puntas, y navegación de tiempo
-    con botones (H/D/S/M/Todo) + barra deslizable (rangeslider)."""
+    vivos, alarma/danger sólidas (sin adornos), y botones de rango de tiempo
+    LIMPIOS abajo (1H/1D/1S/1M/Todo) — sin barra con thumbnail."""
     import plotly.graph_objects as go
+    from datetime import timedelta
     hist = st.session_state.setdefault("rm_trend", [])
     overall, unit_by = {}, {}
     for i, ch in vib_channels:
@@ -965,10 +966,19 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
     als = [alarms.get(ch.name, (0, 0))[0] for ch in fam_channels if alarms.get(ch.name, (0, 0))[0] > 0]
     dgs = [alarms.get(ch.name, (0, 0))[1] for ch in fam_channels if alarms.get(ch.name, (0, 0))[1] > 0]
 
-    xs = [h[0] for h in hist]
-    x0, x1 = (xs[0], xs[-1]) if xs else (datetime.now(), datetime.now())
+    # Ventana de tiempo (botones limpios ABAJO, sin barra con basura).
+    _win = {"1 H": timedelta(hours=1), "1 D": timedelta(days=1), "1 S": timedelta(weeks=1),
+            "1 M": timedelta(days=30), "Todo": None}
+    sel = st.session_state.get("rm_trend_win", "Todo")
+    delta = _win.get(sel)
+    if delta:
+        cutoff = datetime.now() - delta
+        hview = [(t, o) for (t, o) in hist if t >= cutoff] or hist[-1:]
+    else:
+        hview = hist
+    xs = [h[0] for h in hview]
 
-    # Encabezado (contexto de máquina · tipo de sensor · rango de fechas).
+    # Encabezado (contexto de máquina · tipo de sensor · rpm · fecha).
     ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
     st.markdown(
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
@@ -981,48 +991,34 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
     fig = go.Figure()
     for k, ch in enumerate(fam_channels):
         fig.add_trace(go.Scatter(
-            x=xs, y=[h[1].get(ch.name) for h in hist], mode="lines", name=ch.name,
+            x=xs, y=[h[1].get(ch.name) for h in hview], mode="lines", name=ch.name,
             line=dict(width=1.5, color=_TREND_BRIGHT[k % len(_TREND_BRIGHT)])))
-    # Alarma (ámbar) y Danger (roja): como SHAPES (add_hline) + triángulos por
-    # anotación → NO ensucian la barra deslizable (solo viven en el gráfico).
+    # Alarma (ámbar) y Danger (roja): línea sólida limpia, sin flechas.
     for lvl, col, lbl in [(min(als) if als else None, "#f59e0b", "Alarma"),
                           (min(dgs) if dgs else None, "#e11d48", "Danger")]:
         if lvl:
-            fig.add_hline(y=lvl, line=dict(color=col, width=1.5),
+            fig.add_hline(y=lvl, line=dict(color=col, width=1.4),
                           annotation_text=f"{lbl} {lvl:g}", annotation_position="top left",
                           annotation_font=dict(size=9, color=col))
-            fig.add_annotation(x=x0, y=lvl, xref="x", yref="y", showarrow=False,
-                               text="◀", font=dict(size=10, color=col), xanchor="center")
-            fig.add_annotation(x=x1, y=lvl, xref="x", yref="y", showarrow=False,
-                               text="▶", font=dict(size=10, color=col), xanchor="center")
-    data_peak = max((v for h in hist for n, v in h[1].items()
+    data_peak = max((v for h in hview for n, v in h[1].items()
                      if n in {c.name for c in fam_channels} and v is not None), default=0.0)
     peak = max([data_peak] + als + dgs) if (als or dgs or data_peak) else 0.0
     ymax = _nice_top(peak * 1.15) if peak > 0 else 1.0
 
-    fig.update_layout(height=440, margin=dict(l=10, r=12, t=48, b=10),
+    fig.update_layout(height=420, margin=dict(l=10, r=12, t=46, b=30),
                       plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
                       yaxis_title=f"Overall ({unit})" if unit else "Overall",
                       legend=dict(orientation="h", y=1.06, yanchor="bottom", x=1, xanchor="right",
                                   font=dict(size=11), bgcolor="rgba(255,255,255,0)"))
-    # Botones de rango (H/D/S/M/Todo) + barra deslizable de tiempo (como System1).
-    fig.update_xaxes(
-        type="date", showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
-        ticks="outside", tickcolor=_S1_AXIS,
-        rangeselector=dict(
-            buttons=[dict(count=1, label="1 H", step="hour", stepmode="backward"),
-                     dict(count=1, label="1 D", step="day", stepmode="backward"),
-                     dict(count=7, label="1 S", step="day", stepmode="backward"),
-                     dict(count=1, label="1 M", step="month", stepmode="backward"),
-                     dict(step="all", label="Todo")],
-            x=0, y=1.02, xanchor="left", yanchor="bottom",
-            bgcolor="#eef3fb", activecolor="#2f6fb0", bordercolor="#d7deea", borderwidth=1,
-            font=dict(size=11, color="#334155")),
-        rangeslider=dict(visible=True, thickness=0.06, bgcolor="#f6f8fc",
-                         bordercolor="#d7deea", borderwidth=1))
+    fig.update_xaxes(type="date", showgrid=True, gridcolor=_S1_GRID, showline=True,
+                     linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
     fig.update_yaxes(range=[0, ymax], rangemode="tozero", showgrid=True, gridcolor=_S1_GRID,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
+
+    # Botones de rango LIMPIOS, abajo (como la barra inferior de System1).
+    st.radio("Rango", list(_win.keys()), horizontal=True, key="rm_trend_win",
+             label_visibility="collapsed")
 
 
 def _plot_bode(tc: TransientCapture, channel: str) -> None:
