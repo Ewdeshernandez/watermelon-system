@@ -102,10 +102,12 @@ def render_remote_monitoring() -> None:
         .st-key-rm_trend_ctrls [role="radiogroup"] { gap:2px 12px !important; align-items:center; }
         .st-key-rm_trend_ctrls [role="radiogroup"] label p { font-size:12px !important; }
         .st-key-rm_trend_ctrls [role="radiogroup"] label { padding:1px 0 !important; }
-        /* Selector de tipo de sensor: compacto, en la misma línea */
-        .st-key-rm_trend_ctrls [data-testid="stSelectbox"] { width:190px !important; }
-        .st-key-rm_trend_ctrls [data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+        /* Multiselección de canales: compacta, en la misma línea */
+        .st-key-rm_trend_ctrls [data-testid="stMultiSelect"] { min-width:220px !important; }
+        .st-key-rm_trend_ctrls [data-testid="stMultiSelect"] div[data-baseweb="select"] > div {
             min-height:30px !important; border-radius:8px !important; }
+        .st-key-rm_trend_ctrls [data-testid="stMultiSelect"] [data-baseweb="tag"] {
+            height:20px !important; font-size:11px !important; }
         /* Cajita de cantidad: SIN recuadro externo; se sombrea al pasar/enfocar */
         .st-key-rm_trend_ctrls [data-testid="stNumberInput"] { width:70px !important; }
         .st-key-rm_trend_ctrls [data-testid="stNumberInput"] button { display:none !important; }
@@ -447,13 +449,8 @@ def _analisis_display() -> None:
     with tabs[1]:
         if names:
             tmap = st.session_state.get("rm_type_by_name") or {}
-            fams = []
-            for _, ch in vib:
-                t = tmap.get(ch.name, "proximity")
-                if t not in fams:
-                    fams.append(t)
-            # Tipo de sensor + rango van en UNA fila abajo (dentro de _plot_trend).
-            _plot_trend(snap, vib, tmap, fams, rpm=rpm)
+            # Selección de canales + rango van en UNA fila abajo (dentro de _plot_trend).
+            _plot_trend(snap, vib, tmap, rpm=rpm)
     with tabs[2]:
         if names:
             sels = st.multiselect("Canales", names, default=[names[0]], key="rm_wf_ch",
@@ -957,17 +954,14 @@ _TREND_BRIGHT = ["#2f6fb0", "#16a34a", "#e11d48", "#7c3aed",
                  "#0891b2", "#ea580c", "#db2777", "#0f766e"]
 
 
-def _plot_trend(snap: np.ndarray, vib_channels, type_map: dict, fams: list,
+def _plot_trend(snap: np.ndarray, vib_channels, type_map: dict,
                 rpm: Optional[float] = None) -> None:
-    """Tendencia overall estilo System1: fondo blanco, líneas finas de colores
-    vivos, alarma/danger sólidas, y controles (tipo de sensor + rango) en UNA
-    fila abajo. La barra deslizable aparece solo en períodos históricos."""
+    """Tendencia overall estilo System1: elegís los CANALES (multiselección),
+    pero solo se pueden mezclar los de misma unidad Y misma alarma/danger (no se
+    puede mezclar mils con g). Controles en una fila abajo; barra deslizable en
+    períodos históricos."""
     import plotly.graph_objects as go
     from datetime import timedelta
-    # Tipo de sensor: viene del selector de la fila de abajo (via session_state).
-    family = st.session_state.get("rm_tr_fam")
-    if family not in fams:
-        family = fams[0] if fams else "proximity"
     hist = st.session_state.setdefault("rm_trend", [])
     overall, unit_by = {}, {}
     for i, ch in vib_channels:
@@ -978,80 +972,94 @@ def _plot_trend(snap: np.ndarray, vib_channels, type_map: dict, fams: list,
     if len(hist) > 5000:
         del hist[: len(hist) - 5000]
 
-    fam_channels = [ch for _, ch in vib_channels
-                    if type_map.get(ch.name, "proximity") == family]
-    if not fam_channels:
-        st.info("No hay canales de esa familia.")
+    name_to_ch = {ch.name: ch for _, ch in vib_channels}
+    all_names = list(name_to_ch.keys())
+    if not all_names:
+        st.info("No hay canales de vibración.")
         return
-    unit = unit_by.get(fam_channels[0].name, "")
-    famname = _FAMILY_ES.get(family, family)
     machine = st.session_state.get("rm_machine_name", "—")
     alarms = st.session_state.get("rm_alarms_by_name") or {}
-    als = [alarms.get(ch.name, (0, 0))[0] for ch in fam_channels if alarms.get(ch.name, (0, 0))[0] > 0]
-    dgs = [alarms.get(ch.name, (0, 0))[1] for ch in fam_channels if alarms.get(ch.name, (0, 0))[1] > 0]
+
+    def _compat(n):   # clave de compatibilidad: unidad + alarma + danger
+        al, dg = alarms.get(n, (0, 0))
+        return (unit_by.get(n, ""), round(float(al), 6), round(float(dg), 6))
+
+    # Selección de canales (multiselección). Solo se plotean los compatibles con
+    # el primero; los incompatibles se descartan con aviso ("no se pueden mezclar").
+    st.session_state.setdefault("rm_tr_chans", [all_names[0]])
+    sels_raw = [s for s in st.session_state["rm_tr_chans"] if s in all_names] or [all_names[0]]
+    ref = _compat(sels_raw[0])
+    plotted = [s for s in sels_raw if _compat(s) == ref]
+    excluded = [s for s in sels_raw if _compat(s) != ref]
+    if st.session_state["rm_tr_chans"] != plotted:
+        st.session_state["rm_tr_chans"] = plotted   # limpia los incompatibles
+    plot_chs = [name_to_ch[n] for n in plotted]
+    unit = ref[0]
+    als = [ref[1]] if ref[1] > 0 else []
+    dgs = [ref[2]] if ref[2] > 0 else []
 
     # Ventana de tiempo. "Actual" = período en vivo de 15 min (sin selector).
-    # Los demás = período histórico: unidad × cantidad + barra deslizable.
     _unit = {"Horas": timedelta(hours=1), "Días": timedelta(days=1),
              "Semanas": timedelta(weeks=1), "Meses": timedelta(days=30)}
     _dfl = {"Horas": 6, "Días": 7, "Semanas": 4, "Meses": 6}
     sel = st.session_state.get("rm_trend_win", "Actual")
     if sel == "Actual":
-        delta, qty = timedelta(minutes=15), 1
+        delta = timedelta(minutes=15)
     else:
         qty = int(st.session_state.get(f"rm_trend_qty_{sel}", _dfl.get(sel, 1)) or 1)
         delta = _unit[sel] * qty
     now = datetime.now()
-    xs = [h[0] for h in hist]   # todo el histórico (para poder deslizar/navegar)
+    xs = [h[0] for h in hist]
 
-    # Encabezado (contexto de máquina · tipo de sensor · rpm · fecha).
+    # Encabezado (máquina · Tendencia · canales · rpm · fecha).
     ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
     st.markdown(
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
         f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
         f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
-        f'<span><b>{machine}</b> · Tendencia · {famname}'
+        f'<span><b>{machine}</b> · Tendencia · {", ".join(plotted)}'
         + (f' · <span style="color:#c7d6ea">{rpm:.0f} rpm</span>' if rpm else '') + '</span>'
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
     fig = go.Figure()
-    for k, ch in enumerate(fam_channels):
+    for k, ch in enumerate(plot_chs):
         fig.add_trace(go.Scatter(
             x=xs, y=[h[1].get(ch.name) for h in hist], mode="lines", name=ch.name,
-            line=dict(width=1.5, color=_TREND_BRIGHT[k % len(_TREND_BRIGHT)])))
-    # Alarma (ámbar) y Danger (roja): línea sólida limpia, sin flechas.
+            line=dict(width=1.6, color=_TREND_BRIGHT[k % len(_TREND_BRIGHT)])))
     for lvl, col, lbl in [(min(als) if als else None, "#f59e0b", "Alarma"),
                           (min(dgs) if dgs else None, "#e11d48", "Danger")]:
         if lvl:
             fig.add_hline(y=lvl, line=dict(color=col, width=1.4),
                           annotation_text=f"{lbl} {lvl:g}", annotation_position="top left",
                           annotation_font=dict(size=9, color=col))
-    data_peak = max((v for h in hist for n, v in h[1].items()
-                     if n in {c.name for c in fam_channels} and v is not None), default=0.0)
+    data_peak = max((h[1].get(n) for h in hist for n in plotted if h[1].get(n) is not None),
+                    default=0.0)
     peak = max([data_peak] + als + dgs) if (als or dgs or data_peak) else 0.0
     ymax = _nice_top(peak * 1.15) if peak > 0 else 1.0
 
-    fig.update_layout(height=420, margin=dict(l=10, r=12, t=46, b=30),
+    fig.update_layout(height=520, margin=dict(l=10, r=12, t=46, b=30),
                       plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
                       yaxis_title=f"Overall ({unit})" if unit else "Overall",
                       legend=dict(orientation="h", y=1.06, yanchor="bottom", x=1, xanchor="right",
                                   font=dict(size=11), bgcolor="rgba(255,255,255,0)"))
-    # La vista arranca en el período elegido; para históricos se puede deslizar.
     fig.update_xaxes(type="date", range=[now - delta, now], showgrid=True, gridcolor=_S1_GRID,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
     if sel != "Actual":
-        # Selector de tiempo deslizable SOLO para períodos históricos.
         fig.update_xaxes(rangeslider=dict(visible=True, thickness=0.07, bgcolor="#f6f8fc",
                                           bordercolor="#d7deea", borderwidth=1))
     fig.update_yaxes(range=[0, ymax], rangemode="tozero", showgrid=True, gridcolor=_S1_GRID,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
-    # Controles en UNA fila abajo: tipo de sensor + rango + cantidad (compactos).
+    if excluded:
+        st.caption(f"⚠ No se pueden mezclar: **{', '.join(excluded)}** tiene distinta "
+                   f"unidad o alarma/danger que **{plotted[0]}**. Se quitó de la selección.")
+
+    # Controles en UNA fila abajo: canales + rango + cantidad (compactos).
     with st.container(key="rm_trend_ctrls", horizontal=True,
                       vertical_alignment="center", gap="medium"):
-        st.selectbox("Tipo de sensor", fams, format_func=lambda t: _FAMILY_ES.get(t, t),
-                     key="rm_tr_fam", label_visibility="collapsed")
+        st.multiselect("Canales", all_names, key="rm_tr_chans",
+                       label_visibility="collapsed", placeholder="Canales…")
         st.radio("Rango", ["Actual"] + list(_unit.keys()), horizontal=True,
                  key="rm_trend_win", label_visibility="collapsed")
         if sel != "Actual":
