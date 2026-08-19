@@ -269,7 +269,7 @@ def _render_monitoreo() -> None:
     _render_source_params()
     agent = _ensure_agent()
 
-    b1, b2, b3, b4, b5 = st.columns([1, 1, 1, 1, 2])
+    b1, b2, b3, b4, b5, b6 = st.columns([1, 1, 1.3, 1.3, 1, 1.6])
     with b1:
         if st.button("▶ Iniciar", use_container_width=True):
             st.session_state["rm_running"] = True
@@ -277,14 +277,30 @@ def _render_monitoreo() -> None:
         if st.button("⏸ Detener", use_container_width=True):
             st.session_state["rm_running"] = False
     with b3:
-        take = st.button("🔄 Tomar 1 lectura", use_container_width=True)
+        capture = st.button("📸 Capturar", use_container_width=True, type="primary",
+                            help="Toma una lectura fresca y la guarda en un solo clic.")
     with b4:
-        save = st.button("💾 Guardar", use_container_width=True)
+        take = st.button("🔄 Tomar 1 lectura", use_container_width=True,
+                         help="Refresca una lectura sin guardarla.")
     with b5:
+        save = st.button("💾 Guardar", use_container_width=True,
+                         help="Guarda la ventana actual sin tomar datos nuevos.")
+    with b6:
         live = st.checkbox("🟢 Live (auto-refresh)", value=st.session_state.get("rm_running", False))
         st.session_state["rm_running"] = live
 
     # Acciones one-shot en el run principal (fuera del fragment).
+    if capture:
+        try:
+            agent.pump(8)
+            _s = agent.snapshot()
+            if _s.shape[1]:
+                _save_snapshot(agent, _s, agent.estimate_rpm(_s))
+            else:
+                st.warning("Sin datos para capturar. Pulsá ▶ Iniciar primero.")
+        except Exception as e:  # noqa: BLE001
+            st.session_state["rm_running"] = False
+            st.error(f"⚠ No se pudo capturar: {type(e).__name__}: {e}")
     if take:
         try:
             agent.pump(8)
