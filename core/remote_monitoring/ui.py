@@ -634,12 +634,8 @@ def _plot_waveform(chans, fs: float, rpm: Optional[float] = None) -> None:
     from plotly.subplots import make_subplots
     import plotly.graph_objects as go
     machine = st.session_state.get("rm_machine_name", "—")
-    # Se piensa en VUELTAS, no en ms (los ms dependen del rpm). 32 = punto dulce
-    # (como System1 Wf 64X/32); 8/16 para ver un ciclo con más detalle.
-    n_rev = st.select_slider("Vueltas a mostrar", options=[8, 16, 32], value=32,
-                             key="rm_wf_revs",
-                             help="Nº de revoluciones mostradas. 32 = default. "
-                                  "8/16 = ver un ciclo con más detalle (glitches, forma).")
+    # 32 vueltas fijas (punto dulce, como System1 Wf 64X/32) — sin control extra.
+    n_rev = 32
     prepared = []
     for sig, ch in chans:
         eu = sig * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else sig
