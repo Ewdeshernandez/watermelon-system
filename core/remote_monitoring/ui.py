@@ -604,30 +604,34 @@ def _plot_waveform(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
     pp = float(np.ptp(eu)) if len(eu) else 0.0
     crest = pk / rms if rms > 0 else 0.0
     fig = go.Figure(go.Scatter(
-        x=t_ms, y=eu, mode="lines", line=dict(width=1.2, color="#2563eb"),
+        x=t_ms, y=eu, mode="lines", line=dict(width=1.0, color=_S1_BLUE),
         hovertemplate=f"%{{x:.1f}} ms<br>%{{y:.4g}} {ch.units}<extra></extra>"))
     if rpm and rpm > 0 and len(t_ms):
         period_ms = 60000.0 / rpm
         kt = np.arange(0.0, float(t_ms[-1]), period_ms)
         ky = np.interp(kt, t_ms, eu)
         fig.add_trace(go.Scatter(x=kt, y=ky, mode="markers",
-                                 marker=dict(size=7, color="#1e3a8a"),
+                                 marker=dict(size=7, color=_S1_KPH),
                                  hovertemplate="Keyphasor<br>%{x:.1f} ms<extra></extra>",
                                  showlegend=False))
     ymax = _nice_top(pk * 1.15) if pk > 0 else 1.0
-    fig.update_layout(height=360, margin=dict(l=52, r=16, t=56, b=40),
-                      plot_bgcolor="#f8fafc", paper_bgcolor="#ffffff",
-                      font=dict(color="#111827"), title=f"Forma de onda · {ch.name}",
-                      hovermode="closest", showlegend=False)
-    fig.update_xaxes(title="ms", showgrid=False, showline=True, linecolor="#9ca3af",
-                     ticks="outside", tickcolor="#6b7280", showspikes=True,
-                     spikecolor="#94a3b8", spikemode="across", spikesnap="cursor", spikethickness=1)
-    fig.update_yaxes(title=ch.units, range=[-ymax, ymax], zeroline=True, zerolinecolor="#cbd5e1",
-                     gridcolor="rgba(148,163,184,0.18)", showline=True, linecolor="#9ca3af",
-                     ticks="outside", tickcolor="#6b7280")
-    fig.add_annotation(xref="paper", yref="paper", x=1.0, y=1.16, xanchor="right", showarrow=False,
-                       text=f"pp {pp:.3g} · pk {pk:.3g} · rms {rms:.3g} {ch.units} · crest {crest:.2f}",
-                       font=dict(size=11, color="#475569"))
+    fig.update_layout(height=360, margin=dict(l=54, r=16, t=44, b=40),
+                      plot_bgcolor="#ffffff", paper_bgcolor="#ffffff",
+                      font=_S1_FONT, hovermode="closest", showlegend=False,
+                      title=dict(text=f"Forma de onda · {ch.name}",
+                                 font=dict(size=13, color=_S1_TITLE)))
+    fig.update_xaxes(title="ms", showgrid=True, gridcolor=_S1_GRID, showline=True,
+                     linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS, ticklen=4,
+                     showspikes=True, spikecolor="#94a3b8", spikemode="across",
+                     spikesnap="cursor", spikethickness=1)
+    fig.update_yaxes(title=ch.units, range=[-ymax, ymax], zeroline=True, zerolinecolor="#d5dbe4",
+                     showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
+                     ticks="outside", tickcolor=_S1_AXIS, ticklen=4)
+    _s1_readout(fig, [f"{ch.name} · {rpm:.0f} rpm" if rpm else ch.name,
+                      f"pp    {pp:.3g} {ch.units}",
+                      f"pk    {pk:.3g}",
+                      f"rms   {rms:.3g}",
+                      f"crest {crest:.2f}"])
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -658,7 +662,7 @@ def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
     band = (freqs >= (fmin_hz or 0)) & (freqs <= (fmax_hz if fmax_hz > 0 else freqs[-1] if len(freqs) else 0))
     ov_pp = float(np.sqrt(np.sum(mag[band] ** 2) / 2.0)) * 2.0 * np.sqrt(2.0) if band.any() else 0.0
     fig = go.Figure(go.Scatter(
-        x=fdisp, y=amp_pp, mode="lines", line=dict(width=1.1, color="#2563eb"),
+        x=fdisp, y=amp_pp, mode="lines", line=dict(width=1.0, color=_S1_BLUE),
         customdata=orders,
         hovertemplate=(f"%{{x:.0f}} {unit}<br>%{{y:.4g}} {ch.units}"
                        + ("<br>%{customdata:.2f}X" if f1 else "") + "<extra></extra>")))
@@ -666,25 +670,31 @@ def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
         for k, lbl in [(1, "1X"), (2, "2X"), (3, "3X")]:
             fx = hz_to_display(k * f1, freq_unit)
             if xmin <= fx <= xmax:
-                fig.add_vline(x=fx, line=dict(color="#ef4444", width=1, dash="dot"),
-                              annotation_text=lbl, annotation_font_size=10)
+                fig.add_vline(x=fx, line=dict(color="#e26d6d", width=1, dash="dot"),
+                              annotation_text=lbl,
+                              annotation_font=dict(size=9, color="#c0392b"))
     peak = float(amp_pp[band].max()) if band.any() else (float(amp_pp.max()) if len(amp_pp) else 0.0)
     ymax = _nice_top(peak * 1.15) if peak > 0 else 1.0
-    fig.update_layout(height=360, margin=dict(l=56, r=16, t=56, b=42),
-                      plot_bgcolor="#f8fafc", paper_bgcolor="#ffffff",
-                      font=dict(color="#111827"), title=f"Espectro · {ch.name}", hovermode="x")
-    fig.update_xaxes(title=f"Frecuencia ({unit})", range=[xmin, xmax], showgrid=False,
-                     showline=True, linecolor="#9ca3af", ticks="outside", tickcolor="#6b7280",
-                     showspikes=True, spikecolor="#94a3b8", spikemode="across",
-                     spikesnap="cursor", spikethickness=1)
-    fig.update_yaxes(title=ch.units, range=[0, ymax], gridcolor="rgba(148,163,184,0.18)",
-                     showline=True, linecolor="#9ca3af", ticks="outside", tickcolor="#6b7280")
-    ann = f"O/All {ov_pp:.3g} {ch.units}"
+    fig.update_layout(height=380, margin=dict(l=58, r=16, t=44, b=42),
+                      plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
+                      hovermode="x", title=dict(text=f"Espectro · {ch.name}",
+                                                font=dict(size=13, color=_S1_TITLE)))
+    fig.update_xaxes(title=f"Frecuencia ({unit})", range=[xmin, xmax], showgrid=True,
+                     gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS, ticks="outside",
+                     tickcolor=_S1_AXIS, ticklen=4, showspikes=True, spikecolor="#94a3b8",
+                     spikemode="across", spikesnap="cursor", spikethickness=1)
+    fig.update_yaxes(title=ch.units, range=[0, ymax], showgrid=True, gridcolor=_S1_GRID,
+                     showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS, ticklen=4)
+    # Panel de armónicos (cursor tipo System1): 1X..6X con amplitud @ frecuencia.
+    lines = [f"O/All {ov_pp:.3g} {ch.units}"]
     if f1:
-        a1, _ph = one_x_vector(eu, fs, f1)
-        ann += f" · 1X {a1 * 2:.3g} {ch.units} @ {hz_to_display(f1, freq_unit):.0f} {unit}"
-    fig.add_annotation(xref="paper", yref="paper", x=1.0, y=1.16, xanchor="right", showarrow=False,
-                       text=ann, font=dict(size=11, color="#475569"))
+        fmax_eff = fmax_hz if fmax_hz > 0 else (freqs[-1] if len(freqs) else 0.0)
+        for k in range(1, 7):
+            if k * f1 > fmax_eff:
+                break
+            ak, _pk = one_x_vector(eu, fs, k * f1)
+            lines.append(f"{k}X  {ak * 2:.3g} @ {hz_to_display(k * f1, freq_unit):.0f} {unit}")
+    _s1_readout(fig, lines)
     st.plotly_chart(fig, use_container_width=True)
 
 
@@ -765,7 +775,7 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
             float(np.max(np.abs(yo))) if len(yo) else 0.0, 1e-9)
 
     fig = go.Figure(go.Scatter(
-        x=xo, y=yo, mode="lines", line=dict(width=1.4, color="#2563eb"),
+        x=xo, y=yo, mode="lines", line=dict(width=1.2, color=_S1_BLUE),
         hovertemplate=f"X %{{x:.3g}}<br>Y %{{y:.3g}} {chy.units}<extra></extra>"))
     # Punto de keyphasor (t=0)
     fig.add_trace(go.Scatter(x=[xo[0]], y=[yo[0]], mode="markers",
@@ -776,13 +786,14 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
     _orbit_dir_arrow(fig, rotation, R)
     lim = R * 1.4
     fig.update_layout(height=440, margin=dict(l=10, r=10, t=44, b=10),
-                      plot_bgcolor="#f8fafc", paper_bgcolor="#ffffff", font=dict(color="#111827"),
-                      title=f"Órbita · {sel} · {fmode}", showlegend=False)
+                      plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
+                      title=dict(text=f"Órbita · {sel} · {fmode}",
+                                 font=dict(size=13, color=_S1_TITLE)), showlegend=False)
     fig.update_xaxes(title=f"{chx.name} ({chx.units})", range=[-lim, lim], zeroline=True,
-                     zerolinecolor="#cbd5e1", showgrid=True, gridcolor="rgba(148,163,184,0.15)",
-                     showline=True, linecolor="#9ca3af")
+                     zerolinecolor="#d5dbe4", showgrid=True, gridcolor=_S1_GRID,
+                     showline=True, linecolor=_S1_AXIS)
     fig.update_yaxes(title=f"{chy.name} ({chy.units})", range=[-lim, lim], zeroline=True,
-                     zerolinecolor="#cbd5e1", showgrid=True, gridcolor="rgba(148,163,184,0.15)",
+                     zerolinecolor="#d5dbe4", showgrid=True, gridcolor=_S1_GRID,
                      showline=True, linecolor="#9ca3af", scaleanchor="x", scaleratio=1)
     st.plotly_chart(fig, use_container_width=True)
 
@@ -812,6 +823,26 @@ _FAMILY_ES = {"proximity": "Proximidad", "velometer": "Velocidad", "acceleromete
 _TREND_PALETTE = ["#2563eb", "#06b6d4", "#16a34a", "#8b5cf6", "#ef4444",
                   "#f97316", "#ec4899", "#64748b", "#0f766e", "#7c3aed"]
 
+# Paleta "System1 mejorado": fondo blanco, traza azul aciano fina, grilla tenue.
+_S1_BLUE = "#4f8fd0"        # traza (cornflower, como System1)
+_S1_KPH = "#12467f"         # puntos de keyphasor (azul profundo)
+_S1_GRID = "rgba(15,30,61,0.06)"
+_S1_AXIS = "#aeb6c2"
+_S1_TITLE = "#0F1E3D"
+_S1_FONT = dict(color="#334155", size=11, family="Arial, Helvetica, sans-serif")
+
+
+def _s1_readout(fig, lines, *, x=0.995, y=0.98) -> None:
+    """Caja de lectura tipo 'cursor' de System1 (arriba-derecha, monoespaciada)."""
+    header = lines[0]
+    body = "<br>".join(lines[1:])
+    txt = (f"<b>{header}</b>" + ("<br>" + body if body else ""))
+    fig.add_annotation(xref="paper", yref="paper", x=x, y=y, xanchor="right", yanchor="top",
+                       align="left", showarrow=False, text=txt,
+                       font=dict(size=10, color="#1f2937", family="ui-monospace, monospace"),
+                       bordercolor="#c7d0dc", borderwidth=1, borderpad=7,
+                       bgcolor="rgba(255,255,255,0.92)")
+
 
 def _nice_top(v: float) -> float:
     """Techo 'redondo' >= v para el eje Y (1,1.2,1.5,2,2.5,3,4,5,6,8,10 × 10ⁿ).
@@ -832,6 +863,7 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict) -> 
     todos los canales de la familia en líneas finas, eje Y en la unidad de la
     familia, eje X fecha/hora, con líneas de Alert y Danger (API 670)."""
     import plotly.graph_objects as go
+    from datetime import timedelta
     hist = st.session_state.setdefault("rm_trend", [])
     # Acumula overall (RMS en EU) de todos los canales cada tick
     overall, unit_by = {}, {}
@@ -840,42 +872,91 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict) -> 
         overall[ch.name] = float(np.sqrt(np.mean((eu - np.mean(eu)) ** 2)))
         unit_by[ch.name] = ch.units
     hist.append((datetime.now(), overall))
-    if len(hist) > 300:
-        del hist[: len(hist) - 300]
+    if len(hist) > 3000:
+        del hist[: len(hist) - 3000]
 
     fam_channels = [ch for _, ch in vib_channels
                     if type_map.get(ch.name, "proximity") == family]
     if not fam_channels:
         st.info("No hay canales de esa familia.")
         return
-    xs = [h[0] for h in hist]
     unit = unit_by.get(fam_channels[0].name, "")
-    fig = go.Figure()
-    for k, ch in enumerate(fam_channels):
-        fig.add_trace(go.Scatter(x=xs, y=[h[1].get(ch.name) for h in hist], mode="lines",
-                                 name=ch.name, line=dict(width=1.4, color=_TREND_PALETTE[k % len(_TREND_PALETTE)])))
-    # Alert/Danger de la familia (si difieren entre canales, se toma la mínima = conservador)
+    famname = _FAMILY_ES.get(family, family)
     alarms = st.session_state.get("rm_alarms_by_name") or {}
     als = [alarms.get(ch.name, (0, 0))[0] for ch in fam_channels if alarms.get(ch.name, (0, 0))[0] > 0]
     dgs = [alarms.get(ch.name, (0, 0))[1] for ch in fam_channels if alarms.get(ch.name, (0, 0))[1] > 0]
+
+    # Selector rápido de rango, tipo ADRE/System1.
+    rng = st.radio("Rango", ["CV", "Horas", "Días", "Meses"], horizontal=True, index=1,
+                   key="rm_trend_range",
+                   help="CV = valores actuales (snapshot). Horas/Días/Meses = histórico de tendencia.")
+
+    # === CV: valores actuales (barra horizontal por canal + alarma/danger) ===
+    if rng == "CV":
+        names = [c.name for c in fam_channels]
+        vals = [overall.get(n, 0.0) for n in names]
+        cols = []
+        for n, v in zip(names, vals):
+            al, dg = alarms.get(n, (0, 0))
+            cols.append("#dc2626" if (dg > 0 and v >= dg)
+                        else "#D89B22" if (al > 0 and v >= al) else _S1_BLUE)
+        fig = go.Figure(go.Bar(x=vals, y=names, orientation="h", marker_color=cols,
+                               hovertemplate="%{y}: %{x:.3g} " + unit + "<extra></extra>"))
+        if als:
+            fig.add_vline(x=min(als), line=dict(color="#D89B22", width=1.5, dash="dash"),
+                          annotation_text="Alarma", annotation_font=dict(size=9, color="#b8801c"))
+        if dgs:
+            fig.add_vline(x=min(dgs), line=dict(color="#dc2626", width=1.5, dash="dash"),
+                          annotation_text="Danger", annotation_font=dict(size=9, color="#c0392b"))
+        peak = max(vals + als + dgs) if (vals or als or dgs) else 0.0
+        fig.update_layout(height=max(200, 60 + 46 * len(names)), margin=dict(l=10, r=16, t=44, b=36),
+                          plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
+                          title=dict(text=f"Valores actuales · {famname}",
+                                     font=dict(size=13, color=_S1_TITLE)))
+        fig.update_xaxes(title=f"Overall ({unit})" if unit else "Overall",
+                         range=[0, _nice_top(peak * 1.15) if peak > 0 else 1.0],
+                         showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
+                         ticks="outside", tickcolor=_S1_AXIS)
+        fig.update_yaxes(showgrid=False, showline=True, linecolor=_S1_AXIS, autorange="reversed")
+        st.plotly_chart(fig, use_container_width=True)
+        return
+
+    # === Rango temporal (Horas / Días / Meses) ===
+    span = {"Horas": timedelta(hours=6), "Días": timedelta(days=7),
+            "Meses": timedelta(days=180)}[rng]
+    cutoff = datetime.now() - span
+    hview = [(t, o) for (t, o) in hist if t >= cutoff] or hist
+    xs = [h[0] for h in hview]
+    fig = go.Figure()
+    for k, ch in enumerate(fam_channels):
+        fig.add_trace(go.Scatter(x=xs, y=[h[1].get(ch.name) for h in hview], mode="lines",
+                                 name=ch.name,
+                                 line=dict(width=1.4, color=_TREND_PALETTE[k % len(_TREND_PALETTE)])))
     if als:
         fig.add_hline(y=min(als), line=dict(color="#D89B22", width=1.5, dash="dash"),
-                      annotation_text=f"Alarma {min(als):g}", annotation_position="top left")
+                      annotation_text=f"Alarma {min(als):g}", annotation_position="top left",
+                      annotation_font=dict(size=9, color="#b8801c"))
     if dgs:
         fig.add_hline(y=min(dgs), line=dict(color="#dc2626", width=1.5, dash="dash"),
-                      annotation_text=f"Danger {min(dgs):g}", annotation_position="top left")
-    # Eje Y: siempre arranca en 0 y autoescala con headroom por encima del pico
-    # (dato, alarma o danger — lo que sea mayor) → techo "redondo".
-    data_peak = max((v for h in hist for n, v in h[1].items()
+                      annotation_text=f"Danger {min(dgs):g}", annotation_position="top left",
+                      annotation_font=dict(size=9, color="#c0392b"))
+    data_peak = max((v for h in hview for n, v in h[1].items()
                      if n in {c.name for c in fam_channels} and v is not None), default=0.0)
     peak = max([data_peak] + als + dgs) if (als or dgs or data_peak) else 0.0
     ymax = _nice_top(peak * 1.15) if peak > 0 else 1.0
-    fig.update_layout(height=400, margin=dict(l=10, r=10, t=40, b=10),
+    fig.update_layout(height=400, margin=dict(l=10, r=16, t=44, b=36),
+                      plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
                       xaxis_title="Fecha / hora", yaxis_title=f"Overall ({unit})" if unit else "Overall",
-                      title=f"Tendencia overall · {_FAMILY_ES.get(family, family)}")
-    fig.update_xaxes(type="date")
-    fig.update_yaxes(range=[0, ymax], rangemode="tozero")
+                      title=dict(text=f"Tendencia overall · {famname} · {rng}",
+                                 font=dict(size=13, color=_S1_TITLE)),
+                      legend=dict(orientation="h", y=1.02, yanchor="bottom", font=dict(size=10)))
+    fig.update_xaxes(type="date", showgrid=True, gridcolor=_S1_GRID, showline=True,
+                     linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
+    fig.update_yaxes(range=[0, ymax], rangemode="tozero", showgrid=True, gridcolor=_S1_GRID,
+                     showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
     st.plotly_chart(fig, use_container_width=True)
+    st.caption("Histórico de la sesión. El histórico completo por días/meses llega con el "
+               "sync a Supabase (Fase 2).")
 
 
 def _plot_bode(tc: TransientCapture, channel: str) -> None:
