@@ -784,6 +784,7 @@ def _save_and_activate(setup: cfg.AcqSetup) -> None:
     st.session_state["rm_channels"] = cfg.setup_to_channel_configs(setup)
     st.session_state["rm_machine_rpm"] = float(setup.machine.rpm_nominal)
     st.session_state["rm_machine_name"] = setup.machine.name
+    st.session_state["rm_machine_rotation"] = setup.machine.rotation
     st.session_state["rm_active_setup"] = setup.machine.name
     # Params de adquisición → el Monitor los usa (Fmax en spectrum/cascade)
     st.session_state["rm_acq_saved"] = asdict(setup.acquisition)
