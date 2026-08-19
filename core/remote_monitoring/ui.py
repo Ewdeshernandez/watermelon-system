@@ -413,20 +413,8 @@ def _analisis_display() -> None:
     fs = agent.sample_rate_hz
     names = [ch.name for _, ch in vib]
     _vent = snap.shape[1] / fs
-    # Tira de estado tipo instrumento (slim): RPM · 1X · estado · ventana.
-    _scol = rm_states.state_color(state)
-
-    def _st(lbl, val, vcol="#0F1E3D"):
-        return (f'<span style="color:#8a97ab;font-size:10px;text-transform:uppercase;'
-                f'letter-spacing:.04em">{lbl}</span> '
-                f'<b style="color:{vcol};font-family:ui-monospace,monospace">{val}</b>')
-    _items = " &nbsp;·&nbsp; ".join([
-        _st("RPM", f"{rpm:.0f}" if rpm else "—"),
-        _st("Estado", rm_states.state_label(state), _scol),
-        _st("Ventana", f"{_vent:.1f} s"),
-    ])
-    st.markdown(f'<div style="padding:2px 2px 8px;font-size:12px">{_items}</div>',
-                unsafe_allow_html=True)
+    # (El contexto RPM/estado/ventana vive en el header de cada gráfico,
+    #  no en una tira global — para que cada gráfico sea autocontenido.)
 
     tabs = st.tabs(["Tabular", "Tendencias", "Formas de onda", "Espectro",
                     "Órbitas", "Bode", "Polar", "Shaft Centerline",
@@ -659,9 +647,10 @@ def _plot_waveform(chans, fs: float, rpm: Optional[float] = None,
     xmax_ms = max((float(p["t"][-1]) for p in prepared if len(p["t"])), default=1.0)
     sr = (fs * 60.0 / rpm) if rpm else 0.0   # samples/rev aprox
 
-    # Encabezado autocontenido: tag · canal(es) · RPM · estado · ventana · fecha.
+    # Encabezado autocontenido (contexto de máquina, común a todos los canales):
+    # tag · RPM · estado · ventana · fecha. La identidad de cada canal va en su
+    # propio pill dentro de la onda.
     ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
-    chlabel = ", ".join(p["ch"].name for p in prepared)
     ctx = ""
     if rpm:
         ctx = (f'<span style="color:#c7d6ea">RPM <b style="color:#fff">{rpm:.0f}</b> · '
@@ -671,7 +660,7 @@ def _plot_waveform(chans, fs: float, rpm: Optional[float] = None,
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
         f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
         f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
-        f'<span><b>{machine}</b> · {chlabel}</span>'
+        f'<span><b>{machine}</b></span>'
         f'{ctx}'
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
@@ -693,10 +682,17 @@ def _plot_waveform(chans, fs: float, rpm: Optional[float] = None,
                                      hovertemplate="Keyphasor<br>%{x:.1f} ms<extra></extra>"),
                           row=r, col=1)
         ymax = _nice_top(p["pk"] * 1.15) if p["pk"] > 0 else 1.0
-        fig.update_yaxes(title_text=f"{p['ch'].name} ({p['ch'].units})", range=[-ymax, ymax],
+        fig.update_yaxes(title_text=p["ch"].units, range=[-ymax, ymax],
                          zeroline=True, zerolinecolor="#d5dbe4", showgrid=True, gridcolor=_S1_GRID,
                          showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
                          row=r, col=1)
+        # Pill de identidad del canal (arriba-izquierda de cada onda).
+        _sfx0 = "" if r == 1 else str(r)
+        fig.add_annotation(
+            xref=f"x{_sfx0} domain", yref=f"y{_sfx0} domain", x=0.008, y=0.95,
+            xanchor="left", yanchor="top", showarrow=False, text=f"<b>{p['ch'].name}</b>",
+            font=dict(size=12, color="#fff", family="Arial, Helvetica, sans-serif"),
+            bgcolor=c, borderpad=4, opacity=0.96)
         # Caja de datos DENTRO de la onda (abajo-derecha), marco azul, título en
         # negrita y valor en cursiva — como la competencia (System1).
         _sfx = "" if r == 1 else str(r)
