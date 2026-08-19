@@ -94,12 +94,6 @@ def render_remote_monitoring() -> None:
         }
         [data-baseweb="select"] > div:hover,
         .stNumberInput div[data-baseweb="input"]:hover { border-color:#c3cede !important; }
-        /* Labels de widgets más chicos/sobrios */
-        .stSelectbox label p, .stRadio label p, .stNumberInput label p,
-        .stMultiSelect label p, .stTextInput label p, .stSlider label p {
-            font-size:11px !important; font-weight:600 !important;
-            color:#64748b !important; text-transform:uppercase; letter-spacing:.03em;
-        }
         /* Radio horizontal más aireado, sin cajas */
         .stRadio [role="radiogroup"] { gap:6px 18px !important; }
         </style>
