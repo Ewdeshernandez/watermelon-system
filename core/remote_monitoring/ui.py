@@ -590,8 +590,12 @@ def _plot_waveform(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
     import plotly.graph_objects as go
     eu = x * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else x
     eu = eu - np.mean(eu)
-    # Mostrar solo N vueltas (como System1) para ver los ciclos, no los 8 s.
-    n_rev = st.slider("Vueltas a mostrar", 4, 40, 12, key="rm_wf_revs")
+    # Se piensa en VUELTAS, no en ms. System1 = Wf(64X/32) → 32 vueltas.
+    # ~16-32 vueltas (potencia de 2) es el punto dulce para análisis.
+    n_rev = st.select_slider("Vueltas a mostrar", options=[8, 16, 32, 64], value=32,
+                             key="rm_wf_revs",
+                             help="Nº de revoluciones del eje. 32 = default System1 (Wf 64X/32). "
+                                  "Más vueltas = mejor espectro; menos = más detalle visual.")
     if rpm and rpm > 0:
         n_show = min(len(eu), max(1, int(round(n_rev * (60.0 / rpm) * fs))))
     else:
@@ -620,9 +624,10 @@ def _plot_waveform(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
                       font=_S1_FONT, hovermode="closest", showlegend=False,
                       title=dict(text=f"Forma de onda · {ch.name}",
                                  font=dict(size=13, color=_S1_TITLE)))
-    fig.update_xaxes(title="ms", showgrid=True, gridcolor=_S1_GRID, showline=True,
-                     linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS, ticklen=4,
-                     showspikes=True, spikecolor="#94a3b8", spikemode="across",
+    xmax_ms = float(t_ms[-1]) if len(t_ms) else 1.0
+    fig.update_xaxes(title="ms", range=[0, xmax_ms], showgrid=True, gridcolor=_S1_GRID,
+                     showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
+                     ticklen=4, showspikes=True, spikecolor="#94a3b8", spikemode="across",
                      spikesnap="cursor", spikethickness=1)
     fig.update_yaxes(title=ch.units, range=[-ymax, ymax], zeroline=True, zerolinecolor="#d5dbe4",
                      showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
@@ -633,6 +638,10 @@ def _plot_waveform(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
                       f"rms   {rms:.3g}",
                       f"crest {crest:.2f}"])
     st.plotly_chart(fig, use_container_width=True)
+    if rpm and rpm > 0:
+        st.caption(f"{n_rev} vueltas · {xmax_ms:.0f} ms @ {rpm:.0f} rpm. "
+                   f"Buena práctica: 16–32 vueltas con samples/rev potencia de 2 "
+                   f"(System1 = 64×32 = 2048 muestras) → FFT limpia + órbita estable.")
 
 
 def _spectrum(x: np.ndarray, fs: float):
