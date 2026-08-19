@@ -429,22 +429,11 @@ def _analisis_display() -> None:
                 t = tmap.get(ch.name, "proximity")
                 if t not in fams:
                     fams.append(t)
-            # Controles en UNA fila (minimalista, tipo instrumento).
-            _uword = {"Horas": "horas", "Días": "días", "Semanas": "semanas", "Meses": "meses"}
-            _dfl = {"Horas": 6, "Días": 7, "Semanas": 4, "Meses": 6}
-            c1, c2, c3 = st.columns([1.3, 2.6, 0.9])
-            with c1:
-                sel_fam = st.selectbox("Tipo de sensor", fams,
-                                       format_func=lambda t: _FAMILY_ES.get(t, t), key="rm_tr_fam")
-            with c2:
-                rng = st.radio("Rango", ["CV", "Horas", "Días", "Semanas", "Meses"],
-                               horizontal=True, index=0, key="rm_trend_range",
-                               help="CV = tendencia actual en vivo. El resto: histórico, elegís cuántos.")
-            with c3:
-                qty = (int(st.number_input(f"¿Cuántas/os {_uword[rng]}?", 1, 999,
-                                           _dfl[rng], 1, key=f"rm_trend_qty_{rng}"))
-                       if rng != "CV" else 0)
-            _plot_trend(snap, vib, sel_fam, tmap, rng, qty)
+            # Un solo selector: el tipo de sensor. El rango de tiempo se maneja con
+            # los botones (H/D/S/M/Todo) + la barra deslizable del propio gráfico.
+            sel_fam = st.selectbox("Tipo de sensor", fams,
+                                   format_func=lambda t: _FAMILY_ES.get(t, t), key="rm_tr_fam")
+            _plot_trend(snap, vib, sel_fam, tmap, rpm=rpm)
     with tabs[2]:
         if names:
             sels = st.multiselect("Canales", names, default=[names[0]], key="rm_wf_ch",
@@ -944,24 +933,25 @@ def _nice_top(v: float) -> float:
     return 10.0 * base
 
 
+_TREND_BRIGHT = ["#2f6fb0", "#16a34a", "#e11d48", "#7c3aed",
+                 "#0891b2", "#ea580c", "#db2777", "#0f766e"]
+
+
 def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
-                rng: str = "CV", qty: int = 0) -> None:
-    """Tendencia overall POR FAMILIA (proximidad / velocidad / aceleración):
-    todos los canales de la familia en líneas finas, eje Y en la unidad de la
-    familia, eje X fecha/hora, con líneas de Alert y Danger (API 670).
-    rng/qty vienen del selector de la fila superior (una sola línea)."""
+                rpm: Optional[float] = None) -> None:
+    """Tendencia overall estilo System1: fondo blanco, líneas finas de colores
+    vivos, alarma/danger con triángulos en las puntas, y navegación de tiempo
+    con botones (H/D/S/M/Todo) + barra deslizable (rangeslider)."""
     import plotly.graph_objects as go
-    from datetime import timedelta
     hist = st.session_state.setdefault("rm_trend", [])
-    # Acumula overall (RMS en EU) de todos los canales cada tick
     overall, unit_by = {}, {}
     for i, ch in vib_channels:
         eu = snap[i] * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else snap[i]
         overall[ch.name] = float(np.sqrt(np.mean((eu - np.mean(eu)) ** 2)))
         unit_by[ch.name] = ch.units
     hist.append((datetime.now(), overall))
-    if len(hist) > 3000:
-        del hist[: len(hist) - 3000]
+    if len(hist) > 5000:
+        del hist[: len(hist) - 5000]
 
     fam_channels = [ch for _, ch in vib_channels
                     if type_map.get(ch.name, "proximity") == family]
@@ -970,50 +960,65 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
         return
     unit = unit_by.get(fam_channels[0].name, "")
     famname = _FAMILY_ES.get(family, family)
+    machine = st.session_state.get("rm_machine_name", "—")
     alarms = st.session_state.get("rm_alarms_by_name") or {}
     als = [alarms.get(ch.name, (0, 0))[0] for ch in fam_channels if alarms.get(ch.name, (0, 0))[0] > 0]
     dgs = [alarms.get(ch.name, (0, 0))[1] for ch in fam_channels if alarms.get(ch.name, (0, 0))[1] > 0]
 
-    # Rango viene del selector de arriba (CV / Horas / Días / Semanas / Meses + cantidad).
-    _uword = {"Horas": "horas", "Días": "días", "Semanas": "semanas", "Meses": "meses"}
-    if rng == "CV":
-        span = timedelta(minutes=5)
-        title_rng = "actual (en vivo)"
-    else:
-        _delta = {"Horas": timedelta(hours=1), "Días": timedelta(days=1),
-                  "Semanas": timedelta(weeks=1), "Meses": timedelta(days=30)}[rng]
-        span = _delta * max(1, int(qty))
-        title_rng = f"últimas/os {int(qty)} {_uword[rng]}"
+    xs = [h[0] for h in hist]
+    x0, x1 = (xs[0], xs[-1]) if xs else (datetime.now(), datetime.now())
 
-    cutoff = datetime.now() - span
-    hview = [(t, o) for (t, o) in hist if t >= cutoff] or hist[-1:]
-    xs = [h[0] for h in hview]
+    # Encabezado (contexto de máquina · tipo de sensor · rango de fechas).
+    ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
+    st.markdown(
+        f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
+        f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
+        f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
+        f'<span><b>{machine}</b> · Tendencia · {famname}'
+        + (f' · <span style="color:#c7d6ea">{rpm:.0f} rpm</span>' if rpm else '') + '</span>'
+        f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
+
     fig = go.Figure()
     for k, ch in enumerate(fam_channels):
-        fig.add_trace(go.Scatter(x=xs, y=[h[1].get(ch.name) for h in hview], mode="lines",
-                                 name=ch.name,
-                                 line=dict(width=1.4, color=_TREND_PALETTE[k % len(_TREND_PALETTE)])))
-    if als:
-        fig.add_hline(y=min(als), line=dict(color="#D89B22", width=1.5, dash="dash"),
-                      annotation_text=f"Alarma {min(als):g}", annotation_position="top left",
-                      annotation_font=dict(size=9, color="#b8801c"))
-    if dgs:
-        fig.add_hline(y=min(dgs), line=dict(color="#dc2626", width=1.5, dash="dash"),
-                      annotation_text=f"Danger {min(dgs):g}", annotation_position="top left",
-                      annotation_font=dict(size=9, color="#c0392b"))
-    data_peak = max((v for h in hview for n, v in h[1].items()
+        fig.add_trace(go.Scatter(
+            x=xs, y=[h[1].get(ch.name) for h in hist], mode="lines", name=ch.name,
+            line=dict(width=1.5, color=_TREND_BRIGHT[k % len(_TREND_BRIGHT)])))
+    # Alarma (ámbar) y Danger (roja): línea sólida con triángulos en las puntas.
+    for lvl, col, lbl in [(min(als) if als else None, "#f59e0b", "Alarma"),
+                          (min(dgs) if dgs else None, "#e11d48", "Danger")]:
+        if lvl:
+            fig.add_trace(go.Scatter(
+                x=[x0, x1], y=[lvl, lvl], mode="lines+markers", name=f"{lbl} {lvl:g}",
+                line=dict(color=col, width=1.6), showlegend=False, hoverinfo="skip",
+                marker=dict(symbol=["triangle-right", "triangle-left"], size=10, color=col)))
+            fig.add_annotation(x=x0, y=lvl, text=f"{lbl} {lvl:g}", xanchor="left",
+                               yanchor="bottom", showarrow=False,
+                               font=dict(size=9, color=col), bgcolor="rgba(255,255,255,0.7)")
+    data_peak = max((v for h in hist for n, v in h[1].items()
                      if n in {c.name for c in fam_channels} and v is not None), default=0.0)
     peak = max([data_peak] + als + dgs) if (als or dgs or data_peak) else 0.0
     ymax = _nice_top(peak * 1.15) if peak > 0 else 1.0
-    fig.update_layout(height=400, margin=dict(l=10, r=90, t=40, b=36),
+
+    fig.update_layout(height=440, margin=dict(l=10, r=12, t=48, b=10),
                       plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
-                      xaxis_title="Fecha / hora", yaxis_title=f"Overall ({unit})" if unit else "Overall",
-                      title=dict(text=f"Tendencia overall · {famname} · {title_rng}",
-                                 font=dict(size=13, color=_S1_TITLE)),
-                      legend=dict(orientation="v", x=1.01, xanchor="left", y=1, yanchor="top",
+                      yaxis_title=f"Overall ({unit})" if unit else "Overall",
+                      legend=dict(orientation="h", y=1.06, yanchor="bottom", x=1, xanchor="right",
                                   font=dict(size=11), bgcolor="rgba(255,255,255,0)"))
-    fig.update_xaxes(type="date", showgrid=True, gridcolor=_S1_GRID, showline=True,
-                     linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
+    # Botones de rango (H/D/S/M/Todo) + barra deslizable de tiempo (como System1).
+    fig.update_xaxes(
+        type="date", showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
+        ticks="outside", tickcolor=_S1_AXIS,
+        rangeselector=dict(
+            buttons=[dict(count=1, label="1 H", step="hour", stepmode="backward"),
+                     dict(count=1, label="1 D", step="day", stepmode="backward"),
+                     dict(count=7, label="1 S", step="day", stepmode="backward"),
+                     dict(count=1, label="1 M", step="month", stepmode="backward"),
+                     dict(step="all", label="Todo")],
+            x=0, y=1.02, xanchor="left", yanchor="bottom",
+            bgcolor="#eef3fb", activecolor="#2f6fb0", bordercolor="#d7deea", borderwidth=1,
+            font=dict(size=11, color="#334155")),
+        rangeslider=dict(visible=True, thickness=0.09, bgcolor="#f6f8fc",
+                         bordercolor="#d7deea", borderwidth=1))
     fig.update_yaxes(range=[0, ymax], rangemode="tozero", showgrid=True, gridcolor=_S1_GRID,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
