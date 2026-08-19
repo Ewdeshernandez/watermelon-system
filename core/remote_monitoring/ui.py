@@ -89,7 +89,9 @@ def render_remote_monitoring() -> None:
 
     view = st.radio("Vista", ["Configuración", "Monitoreo", "Análisis"], horizontal=True,
                     key="rm_view", label_visibility="collapsed")
-    st.divider()
+    # Hairline sutil (sin el st.divider() que gasta mucho espacio vertical).
+    st.markdown('<hr style="margin:2px 0 10px;border:none;border-top:1px solid #e6ecf5">',
+                unsafe_allow_html=True)
     if view == "Configuración":
         from core.remote_monitoring.ui_setup import render_setup
         render_setup()
@@ -359,14 +361,14 @@ def _render_analisis() -> None:
     if _no_config_gate():
         return
     agent = _ensure_agent()
-    top = st.columns([1, 1, 3])
+    top = st.columns([1, 0.8, 3])
     with top[0]:
         take = st.button("🔄 Actualizar", use_container_width=True)
     with top[1]:
         live = st.checkbox("🟢 Live", value=st.session_state.get("rm_running", False))
         st.session_state["rm_running"] = live
     with top[2]:
-        st.caption("La adquisición se **inicia en Monitoreo**. Acá se analizan los datos que entran.")
+        st.caption("Adquisición desde **Monitoreo**.")
     if take:
         try:
             agent.pump(8)
@@ -416,9 +418,22 @@ def _analisis_display() -> None:
                 t = tmap.get(ch.name, "proximity")
                 if t not in fams:
                     fams.append(t)
-            sel_fam = st.selectbox("Familia de sensor", fams,
-                                   format_func=lambda t: _FAMILY_ES.get(t, t), key="rm_tr_fam")
-            _plot_trend(snap, vib, sel_fam, tmap)
+            # Controles en UNA fila (minimalista, tipo instrumento).
+            _uword = {"Horas": "horas", "Días": "días", "Semanas": "semanas", "Meses": "meses"}
+            _dfl = {"Horas": 6, "Días": 7, "Semanas": 4, "Meses": 6}
+            c1, c2, c3 = st.columns([1.3, 2.6, 0.9])
+            with c1:
+                sel_fam = st.selectbox("Familia", fams,
+                                       format_func=lambda t: _FAMILY_ES.get(t, t), key="rm_tr_fam")
+            with c2:
+                rng = st.radio("Rango", ["CV", "Horas", "Días", "Semanas", "Meses"],
+                               horizontal=True, index=0, key="rm_trend_range",
+                               help="CV = tendencia actual en vivo. El resto: histórico, elegís cuántos.")
+            with c3:
+                qty = (int(st.number_input(f"¿Cuántas/os {_uword[rng]}?", 1, 999,
+                                           _dfl[rng], 1, key=f"rm_trend_qty_{rng}"))
+                       if rng != "CV" else 0)
+            _plot_trend(snap, vib, sel_fam, tmap, rng, qty)
     with tabs[2]:
         if names:
             sels = st.multiselect("Canales", names, default=[names[0]], key="rm_wf_ch",
@@ -921,10 +936,12 @@ def _nice_top(v: float) -> float:
     return 10.0 * base
 
 
-def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict) -> None:
+def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
+                rng: str = "CV", qty: int = 0) -> None:
     """Tendencia overall POR FAMILIA (proximidad / velocidad / aceleración):
     todos los canales de la familia en líneas finas, eje Y en la unidad de la
-    familia, eje X fecha/hora, con líneas de Alert y Danger (API 670)."""
+    familia, eje X fecha/hora, con líneas de Alert y Danger (API 670).
+    rng/qty vienen del selector de la fila superior (una sola línea)."""
     import plotly.graph_objects as go
     from datetime import timedelta
     hist = st.session_state.setdefault("rm_trend", [])
@@ -949,23 +966,16 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict) -> 
     als = [alarms.get(ch.name, (0, 0))[0] for ch in fam_channels if alarms.get(ch.name, (0, 0))[0] > 0]
     dgs = [alarms.get(ch.name, (0, 0))[1] for ch in fam_channels if alarms.get(ch.name, (0, 0))[1] > 0]
 
-    # Selector de rango. CV = tendencia actual (en vivo); el resto pregunta cantidad.
-    rng = st.radio("Rango", ["CV", "Horas", "Días", "Semanas", "Meses"], horizontal=True, index=0,
-                   key="rm_trend_range",
-                   help="CV = tendencia actual (en vivo, últimos minutos). "
-                        "Horas/Días/Semanas/Meses = histórico; elegís cuántos.")
+    # Rango viene del selector de arriba (CV / Horas / Días / Semanas / Meses + cantidad).
     _uword = {"Horas": "horas", "Días": "días", "Semanas": "semanas", "Meses": "meses"}
     if rng == "CV":
         span = timedelta(minutes=5)
         title_rng = "actual (en vivo)"
     else:
-        _dflt = {"Horas": 6, "Días": 7, "Semanas": 4, "Meses": 6}[rng]
-        qty = int(st.number_input(f"¿Cuántas/os {_uword[rng]}?", min_value=1, max_value=999,
-                                  value=_dflt, step=1, key=f"rm_trend_qty_{rng}"))
         _delta = {"Horas": timedelta(hours=1), "Días": timedelta(days=1),
                   "Semanas": timedelta(weeks=1), "Meses": timedelta(days=30)}[rng]
-        span = _delta * qty
-        title_rng = f"últimas/os {qty} {_uword[rng]}"
+        span = _delta * max(1, int(qty))
+        title_rng = f"últimas/os {int(qty)} {_uword[rng]}"
 
     cutoff = datetime.now() - span
     hview = [(t, o) for (t, o) in hist if t >= cutoff] or hist[-1:]
