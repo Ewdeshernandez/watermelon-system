@@ -463,7 +463,8 @@ def _analisis_display() -> None:
                                   help="Elegí uno o varios canales para ver sus formas de onda apiladas.")
             if sels:
                 chans = [(snap[vib[names.index(s)][0]], vib[names.index(s)][1]) for s in sels]
-                _plot_waveform(chans, fs, rpm)
+                _plot_waveform(chans, fs, rpm, rm_states.state_label(state),
+                               rm_states.state_color(state), _vent)
             else:
                 st.info("Elegí al menos un canal.")
     with tabs[3]:
@@ -626,10 +627,11 @@ def _acq_for_channel(name: str) -> dict:
     return dict(_bt.get(ctype) or st.session_state.get("rm_acq_saved") or {})
 
 
-def _plot_waveform(chans, fs: float, rpm: Optional[float] = None) -> None:
+def _plot_waveform(chans, fs: float, rpm: Optional[float] = None,
+                   state_lbl: str = "", state_col: str = "#9fb3d1", vent_s: float = 0.0) -> None:
     """Una o varias formas de onda apiladas, estilo estación de análisis:
-    encabezado con tag de máquina + fecha/hora de la toma, panel de cursor
-    lateral (con reborde, sin tapar la onda), eje X en ms desde 0 y puntos de
+    encabezado autocontenido (tag · canal · RPM · estado · ventana · fecha),
+    caja de datos DENTRO de cada onda, eje X en ms desde 0 y puntos de
     keyphasor por vuelta. `chans` = lista de (señal, ChannelConfig)."""
     from plotly.subplots import make_subplots
     import plotly.graph_objects as go
@@ -657,15 +659,20 @@ def _plot_waveform(chans, fs: float, rpm: Optional[float] = None) -> None:
     xmax_ms = max((float(p["t"][-1]) for p in prepared if len(p["t"])), default=1.0)
     sr = (fs * 60.0 / rpm) if rpm else 0.0   # samples/rev aprox
 
-    # Encabezado: tag de máquina · canales · Wf spec · rpm · fecha/hora de toma.
+    # Encabezado autocontenido: tag · canal(es) · RPM · estado · ventana · fecha.
     ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
     chlabel = ", ".join(p["ch"].name for p in prepared)
+    ctx = ""
+    if rpm:
+        ctx = (f'<span style="color:#c7d6ea">RPM <b style="color:#fff">{rpm:.0f}</b> · '
+               f'Estado <b style="color:{state_col}">{state_lbl}</b> · '
+               f'Ventana <b style="color:#fff">{vent_s:.1f} s</b></span>')
     st.markdown(
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
-        f'gap:6px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
+        f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
         f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
-        f'<span><b>{machine}</b> · {chlabel} · Wf ≈{sr:.0f}×{n_rev} vueltas'
-        + (f' · {rpm:.0f} rpm' if rpm else '') + '</span>'
+        f'<span><b>{machine}</b> · {chlabel}</span>'
+        f'{ctx}'
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
     wfcol = ["#2f6fb0", "#7c5cd6", "#159a5b", "#d9822b"]   # color por canal (le da vida)
@@ -690,15 +697,21 @@ def _plot_waveform(chans, fs: float, rpm: Optional[float] = None) -> None:
                          zeroline=True, zerolinecolor="#d5dbe4", showgrid=True, gridcolor=_S1_GRID,
                          showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
                          row=r, col=1)
-        # Caja de datos DENTRO de la onda (abajo-derecha), como System1.
+        # Caja de datos DENTRO de la onda (abajo-derecha), marco azul, título en
+        # negrita y valor en cursiva — como la competencia (System1).
         _sfx = "" if r == 1 else str(r)
+        _kv = (lambda k, v: f'<b style="color:{_S1_TITLE}">{k}</b> '
+                            f'<i style="color:#2f6fb0">{v}</i>')
         fig.add_annotation(
-            xref=f"x{_sfx} domain", yref=f"y{_sfx} domain", x=0.995, y=0.03,
+            xref=f"x{_sfx} domain", yref=f"y{_sfx} domain", x=0.992, y=0.04,
             xanchor="right", yanchor="bottom", align="left", showarrow=False,
-            text=(f'pp <b>{p["pp"]:.3g} {p["ch"].units}</b>  ·  '
-                  f'rms <b>{p["rms"]:.3g}</b>  ·  CF <b>{p["crest"]:.2f}</b>'),
-            font=dict(size=10.5, color="#1f2937", family="ui-monospace, monospace"),
-            bgcolor="rgba(255,255,255,0.82)", bordercolor="#d7deea", borderwidth=1, borderpad=5)
+            text=("&nbsp;&nbsp;·&nbsp;&nbsp;".join([
+                _kv("pp", f'{p["pp"]:.3g} {p["ch"].units}'),
+                _kv("rms", f'{p["rms"]:.3g}'),
+                _kv("CF", f'{p["crest"]:.2f}')])),
+            font=dict(size=11, family="Arial, Helvetica, sans-serif"),
+            bgcolor="rgba(244,249,255,0.94)", bordercolor="#2f6fb0",
+            borderwidth=1.4, borderpad=7)
     fig.update_xaxes(title_text="ms", range=[0, xmax_ms], showgrid=True, gridcolor=_S1_GRID,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
                      showspikes=True, spikecolor="#94a3b8", spikemode="across",
