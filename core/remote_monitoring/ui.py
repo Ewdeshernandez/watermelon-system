@@ -84,6 +84,24 @@ def render_remote_monitoring() -> None:
         .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]:nth-child(8)::before { color:#2563EB; }
         .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]:nth-child(9)::before { color:#F97316; }
         .stTabs [data-baseweb="tab-list"] [data-baseweb="tab"]:nth-child(10)::before { color:#64748B; }
+
+        /* Controles minimalistas (menos "cuadros feos"): planos, borde tenue */
+        [data-baseweb="select"] > div,
+        .stNumberInput div[data-baseweb="input"],
+        .stTextInput div[data-baseweb="input"] {
+            background:#fff !important; border-color:#e2e8f2 !important;
+            border-radius:9px !important; min-height:38px !important;
+        }
+        [data-baseweb="select"] > div:hover,
+        .stNumberInput div[data-baseweb="input"]:hover { border-color:#c3cede !important; }
+        /* Labels de widgets más chicos/sobrios */
+        .stSelectbox label p, .stRadio label p, .stNumberInput label p,
+        .stMultiSelect label p, .stTextInput label p, .stSlider label p {
+            font-size:11px !important; font-weight:600 !important;
+            color:#64748b !important; text-transform:uppercase; letter-spacing:.03em;
+        }
+        /* Radio horizontal más aireado, sin cajas */
+        .stRadio [role="radiogroup"] { gap:6px 18px !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -361,14 +379,14 @@ def _render_analisis() -> None:
     if _no_config_gate():
         return
     agent = _ensure_agent()
-    top = st.columns([1, 0.8, 3])
+    top = st.columns([0.9, 0.7, 4])
     with top[0]:
-        take = st.button("🔄 Actualizar", use_container_width=True)
+        take = st.button("🔄 Actualizar", use_container_width=True,
+                         help="Refresca una lectura (útil con Live apagado).")
     with top[1]:
-        live = st.checkbox("🟢 Live", value=st.session_state.get("rm_running", False))
+        live = st.checkbox("🟢 Live", value=st.session_state.get("rm_running", False),
+                           help="Auto-refresco de los gráficos.")
         st.session_state["rm_running"] = live
-    with top[2]:
-        st.caption("Adquisición desde **Monitoreo**.")
     if take:
         try:
             agent.pump(8)
@@ -401,9 +419,21 @@ def _analisis_display() -> None:
     fs = agent.sample_rate_hz
     names = [ch.name for _, ch in vib]
     _vent = snap.shape[1] / fs
-    _rpm_txt = f"**RPM {rpm:.0f}** · 1X {rpm / 60:.1f} Hz · " if rpm else ""
-    st.caption(f"{_rpm_txt}estado **{rm_states.state_label(state)}** · ventana {_vent:.1f} s · "
-               f"{tc.n_samples} vectores transitorios")
+    # Tira de estado tipo instrumento (slim): RPM · 1X · estado · ventana.
+    _scol = rm_states.state_color(state)
+
+    def _st(lbl, val, vcol="#0F1E3D"):
+        return (f'<span style="color:#8a97ab;font-size:10px;text-transform:uppercase;'
+                f'letter-spacing:.04em">{lbl}</span> '
+                f'<b style="color:{vcol};font-family:ui-monospace,monospace">{val}</b>')
+    _items = " &nbsp;·&nbsp; ".join([
+        _st("RPM", f"{rpm:.0f}" if rpm else "—"),
+        _st("1X", f"{rpm / 60:.1f} Hz" if rpm else "—"),
+        _st("Estado", rm_states.state_label(state), _scol),
+        _st("Ventana", f"{_vent:.1f} s"),
+    ])
+    st.markdown(f'<div style="padding:2px 2px 8px;font-size:12px">{_items}</div>',
+                unsafe_allow_html=True)
 
     tabs = st.tabs(["Tabular", "Tendencias", "Formas de onda", "Espectro",
                     "Órbitas", "Bode", "Polar", "Shaft Centerline",
@@ -423,7 +453,7 @@ def _analisis_display() -> None:
             _dfl = {"Horas": 6, "Días": 7, "Semanas": 4, "Meses": 6}
             c1, c2, c3 = st.columns([1.3, 2.6, 0.9])
             with c1:
-                sel_fam = st.selectbox("Familia", fams,
+                sel_fam = st.selectbox("Tipo de sensor", fams,
                                        format_func=lambda t: _FAMILY_ES.get(t, t), key="rm_tr_fam")
             with c2:
                 rng = st.radio("Rango", ["CV", "Horas", "Días", "Semanas", "Meses"],
@@ -680,7 +710,7 @@ def _plot_waveform(chans, fs: float, rpm: Optional[float] = None) -> None:
         fig.update_layout(height=max(360, 320 * rows), margin=dict(l=58, r=10, t=8, b=40),
                           plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
                           hovermode="closest", showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
     with col_cur:
         blocks = ""
         for i, p in enumerate(prepared):
@@ -773,7 +803,7 @@ def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
             ak, _pk = one_x_vector(eu, fs, k * f1)
             lines.append(f"{k}X  {ak * 2:.3g} @ {hz_to_display(k * f1, freq_unit):.0f} {unit}")
     _s1_readout(fig, lines)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
 
 def _orbit_dir_arrow(fig, rotation: str, R: float) -> None:
@@ -873,7 +903,7 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
     fig.update_yaxes(title=f"{chy.name} ({chy.units})", range=[-lim, lim], zeroline=True,
                      zerolinecolor="#d5dbe4", showgrid=True, gridcolor=_S1_GRID,
                      showline=True, linecolor="#9ca3af", scaleanchor="x", scaleratio=1)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
 
 def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float],
@@ -897,9 +927,12 @@ def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float
                f"(referenciados al keyphasor). 1X = {f1:.1f} Hz.")
 
 
-_FAMILY_ES = {"proximity": "Proximidad", "velometer": "Velocidad", "accelerometer": "Acelerómetro"}
+_FAMILY_ES = {"proximity": "Desplazamiento", "velometer": "Velocidad", "accelerometer": "Aceleración"}
 _TREND_PALETTE = ["#2563eb", "#06b6d4", "#16a34a", "#8b5cf6", "#ef4444",
                   "#f97316", "#ec4899", "#64748b", "#0f766e", "#7c3aed"]
+
+# Sin la barra de íconos de plotly (se veía "de quinta"). Solo gráfico limpio.
+_PLOTLY_CFG = {"displayModeBar": False, "staticPlot": False, "scrollZoom": False}
 
 # Paleta "System1 mejorado": fondo blanco, traza azul aciano fina, grilla tenue.
 _S1_BLUE = "#4f8fd0"        # traza (cornflower, como System1)
@@ -997,20 +1030,18 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
                      if n in {c.name for c in fam_channels} and v is not None), default=0.0)
     peak = max([data_peak] + als + dgs) if (als or dgs or data_peak) else 0.0
     ymax = _nice_top(peak * 1.15) if peak > 0 else 1.0
-    fig.update_layout(height=400, margin=dict(l=10, r=16, t=44, b=36),
+    fig.update_layout(height=400, margin=dict(l=10, r=90, t=40, b=36),
                       plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
                       xaxis_title="Fecha / hora", yaxis_title=f"Overall ({unit})" if unit else "Overall",
                       title=dict(text=f"Tendencia overall · {famname} · {title_rng}",
                                  font=dict(size=13, color=_S1_TITLE)),
-                      legend=dict(orientation="h", y=1.02, yanchor="bottom", font=dict(size=10)))
+                      legend=dict(orientation="v", x=1.01, xanchor="left", y=1, yanchor="top",
+                                  font=dict(size=11), bgcolor="rgba(255,255,255,0)"))
     fig.update_xaxes(type="date", showgrid=True, gridcolor=_S1_GRID, showline=True,
                      linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
     fig.update_yaxes(range=[0, ymax], rangemode="tozero", showgrid=True, gridcolor=_S1_GRID,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
-    st.plotly_chart(fig, use_container_width=True)
-    if rng != "CV":
-        st.caption("Mostrando el histórico disponible de la sesión. El histórico completo "
-                   "(días/semanas/meses) llega con el sync a Supabase (Fase 2).")
+    st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
 
 def _plot_bode(tc: TransientCapture, channel: str) -> None:
@@ -1034,7 +1065,7 @@ def _plot_bode(tc: TransientCapture, channel: str) -> None:
     fig.update_xaxes(title_text="RPM", row=2, col=1)
     fig.update_layout(height=460, margin=dict(l=10, r=10, t=40, b=10), showlegend=False,
                       title=f"Bode · {channel} ({len(rpms)} puntos)")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
 
 def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> None:
@@ -1054,7 +1085,7 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
     fig.update_layout(height=460, margin=dict(l=10, r=10, t=40, b=10),
                       xaxis_title="Frecuencia (Hz)", yaxis_title="RPM",
                       title=f"Cascade · {channel} ({len(rpms)} espectros)", showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
 
 def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
@@ -1082,7 +1113,7 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
         title = f"Polar 1X · {channel} — punto actual (corré un runup para el locus)"
     fig.update_layout(height=440, margin=dict(l=30, r=30, t=44, b=20), showlegend=False,
                       polar=dict(angularaxis=dict(rotation=90, direction="clockwise")), title=title)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
 
 def _plot_shaft_centerline(snap: np.ndarray, vib) -> None:
@@ -1110,7 +1141,7 @@ def _plot_shaft_centerline(snap: np.ndarray, vib) -> None:
     fig.update_layout(height=440, title="Shaft Centerline (posición del eje)",
                       xaxis_title="X", yaxis_title="Y", showlegend=False,
                       yaxis=dict(scaleanchor="x", scaleratio=1))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
     st.caption("⚠ Requiere gap DC. El NI-9234 es AC-coupled → la posición estática es ~0. "
                "Para SCL real: gap del path Bently (Modbus) o un canal DC dedicado.")
 
@@ -1126,7 +1157,7 @@ def _plot_waterfall(tc: TransientCapture, channel: str) -> None:
     fig.update_layout(height=520, title=f"Waterfall 3D · {channel}",
                       scene=dict(xaxis_title="Hz", yaxis_title="RPM", zaxis_title="Ampl"),
                       margin=dict(l=0, r=0, t=40, b=0))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
 
 def _save_snapshot(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]) -> None:
