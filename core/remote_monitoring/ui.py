@@ -102,9 +102,16 @@ def render_remote_monitoring() -> None:
         .st-key-rm_trend_ctrls [role="radiogroup"] { gap:2px 12px !important; align-items:center; }
         .st-key-rm_trend_ctrls [role="radiogroup"] label p { font-size:12px !important; }
         .st-key-rm_trend_ctrls [role="radiogroup"] label { padding:1px 0 !important; }
+        /* Cajita de cantidad: chica, limpia, sin los +/- feos ni borde rojo */
+        .st-key-rm_trend_ctrls .stNumberInput { max-width:96px; margin-left:auto; }
+        .st-key-rm_trend_ctrls .stNumberInput button { display:none !important; }
         .st-key-rm_trend_ctrls .stNumberInput div[data-baseweb="input"] {
-            min-height:30px !important; border-radius:7px !important; }
-        .st-key-rm_trend_ctrls .stNumberInput input { font-size:12px !important; padding:2px 8px !important; }
+            min-height:28px !important; border-radius:7px !important;
+            border-color:#dbe3ee !important; background:#fff !important; }
+        .st-key-rm_trend_ctrls .stNumberInput div[data-baseweb="input"]:focus-within {
+            border-color:#93b4d8 !important; box-shadow:0 0 0 2px #dbe9f8 !important; }
+        .st-key-rm_trend_ctrls .stNumberInput input {
+            font-size:12px !important; padding:2px 8px !important; text-align:center; }
         </style>
     """, unsafe_allow_html=True)
 
