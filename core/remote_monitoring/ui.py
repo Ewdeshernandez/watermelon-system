@@ -669,67 +669,44 @@ def _plot_waveform(chans, fs: float, rpm: Optional[float] = None) -> None:
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
     wfcol = ["#2f6fb0", "#7c5cd6", "#159a5b", "#d9822b"]   # color por canal (le da vida)
-    col_plot, col_cur = st.columns([6, 1])
-    with col_plot:
-        rows = len(prepared)
-        fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.07)
-        for r, p in enumerate(prepared, start=1):
-            c = wfcol[(r - 1) % len(wfcol)]
-            fig.add_trace(go.Scatter(
-                x=p["t"], y=p["eu"], mode="lines", line=dict(width=1.1, color=c),
-                hovertemplate=f"%{{x:.1f}} ms<br>%{{y:.4g}} {p['ch'].units}<extra></extra>"),
-                row=r, col=1)
-            if rpm and rpm > 0 and len(p["t"]):
-                period_ms = 60000.0 / rpm
-                kt = np.arange(0.0, float(p["t"][-1]), period_ms)
-                ky = np.interp(kt, p["t"], p["eu"])
-                fig.add_trace(go.Scatter(x=kt, y=ky, mode="markers",
-                                         marker=dict(size=6, color=_S1_KPH), showlegend=False,
-                                         hovertemplate="Keyphasor<br>%{x:.1f} ms<extra></extra>"),
-                              row=r, col=1)
-            ymax = _nice_top(p["pk"] * 1.15) if p["pk"] > 0 else 1.0
-            fig.update_yaxes(title_text=f"{p['ch'].name} ({p['ch'].units})", range=[-ymax, ymax],
-                             zeroline=True, zerolinecolor="#d5dbe4", showgrid=True, gridcolor=_S1_GRID,
-                             showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
-                             row=r, col=1)
-        fig.update_xaxes(title_text="ms", range=[0, xmax_ms], showgrid=True, gridcolor=_S1_GRID,
+    rows = len(prepared)
+    fig = make_subplots(rows=rows, cols=1, shared_xaxes=True, vertical_spacing=0.09)
+    for r, p in enumerate(prepared, start=1):
+        c = wfcol[(r - 1) % len(wfcol)]
+        fig.add_trace(go.Scatter(
+            x=p["t"], y=p["eu"], mode="lines", line=dict(width=1.1, color=c),
+            hovertemplate=f"%{{x:.1f}} ms<br>%{{y:.4g}} {p['ch'].units}<extra></extra>"),
+            row=r, col=1)
+        if rpm and rpm > 0 and len(p["t"]):
+            period_ms = 60000.0 / rpm
+            kt = np.arange(0.0, float(p["t"][-1]), period_ms)
+            ky = np.interp(kt, p["t"], p["eu"])
+            fig.add_trace(go.Scatter(x=kt, y=ky, mode="markers",
+                                     marker=dict(size=6, color=_S1_KPH), showlegend=False,
+                                     hovertemplate="Keyphasor<br>%{x:.1f} ms<extra></extra>"),
+                          row=r, col=1)
+        ymax = _nice_top(p["pk"] * 1.15) if p["pk"] > 0 else 1.0
+        fig.update_yaxes(title_text=f"{p['ch'].name} ({p['ch'].units})", range=[-ymax, ymax],
+                         zeroline=True, zerolinecolor="#d5dbe4", showgrid=True, gridcolor=_S1_GRID,
                          showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
-                         showspikes=True, spikecolor="#94a3b8", spikemode="across",
-                         spikesnap="cursor", row=rows, col=1)
-        fig.update_layout(height=max(360, 320 * rows), margin=dict(l=58, r=10, t=8, b=40),
-                          plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
-                          hovermode="closest", showlegend=False)
-        st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
-    with col_cur:
-        blocks = ""
-        for i, p in enumerate(prepared):
-            c = wfcol[i % len(wfcol)]
-            sep = "border-top:1px solid #eef2f8;padding-top:8px;margin-top:8px;" if i else ""
-            rowsv = "".join(
-                f'<span style="color:#94a3b8">{k}</span>'
-                f'<span style="text-align:right;font-weight:700;color:#0F1E3D">{v}</span>'
-                for k, v in [("pp", f'{p["pp"]:.3g} {p["ch"].units}'),
-                             ("pk", f'{p["pk"]:.3g}'),
-                             ("rms", f'{p["rms"]:.3g}'),
-                             ("crest", f'{p["crest"]:.2f}')])
-            blocks += (
-                f'<div style="{sep}">'
-                f'<div style="color:{c};font-weight:800;font-size:12px;margin-bottom:4px;'
-                f'display:flex;align-items:center;gap:5px">'
-                f'<span style="width:7px;height:7px;border-radius:50%;background:{c}"></span>{p["ch"].name}</div>'
-                f'<div style="display:grid;grid-template-columns:auto 1fr;gap:2px 8px;'
-                f'font-family:ui-monospace,monospace;font-size:11px">{rowsv}</div></div>')
-        st.markdown(
-            f'<div style="border-radius:12px;overflow:hidden;border:1px solid #e6ecf5;'
-            f'box-shadow:0 6px 20px rgba(15,30,61,.12);margin-top:2px;'
-            f'font-family:Arial,Helvetica,sans-serif">'
-            f'<div style="background:linear-gradient(135deg,#0F1E3D,#20406e);color:#fff;'
-            f'padding:6px 11px;font-weight:800;letter-spacing:.12em;font-size:10px;'
-            f'display:flex;align-items:center;gap:7px">'
-            f'<span style="width:7px;height:7px;border-radius:50%;background:#1AAEE5;'
-            f'box-shadow:0 0 7px #1AAEE5"></span>CURSOR</div>'
-            f'<div style="padding:10px 11px">{blocks}</div></div>',
-            unsafe_allow_html=True)
+                         row=r, col=1)
+        # Caja de datos DENTRO de la onda (abajo-derecha), como System1.
+        _sfx = "" if r == 1 else str(r)
+        fig.add_annotation(
+            xref=f"x{_sfx} domain", yref=f"y{_sfx} domain", x=0.995, y=0.03,
+            xanchor="right", yanchor="bottom", align="left", showarrow=False,
+            text=(f'pp <b>{p["pp"]:.3g} {p["ch"].units}</b>  ·  '
+                  f'rms <b>{p["rms"]:.3g}</b>  ·  CF <b>{p["crest"]:.2f}</b>'),
+            font=dict(size=10.5, color="#1f2937", family="ui-monospace, monospace"),
+            bgcolor="rgba(255,255,255,0.82)", bordercolor="#d7deea", borderwidth=1, borderpad=5)
+    fig.update_xaxes(title_text="ms", range=[0, xmax_ms], showgrid=True, gridcolor=_S1_GRID,
+                     showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
+                     showspikes=True, spikecolor="#94a3b8", spikemode="across",
+                     spikesnap="cursor", row=rows, col=1)
+    fig.update_layout(height=max(340, 300 * rows), margin=dict(l=58, r=12, t=8, b=40),
+                      plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
+                      hovermode="closest", showlegend=False)
+    st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
 
 def _spectrum(x: np.ndarray, fs: float):
