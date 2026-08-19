@@ -983,17 +983,18 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
         fig.add_trace(go.Scatter(
             x=xs, y=[h[1].get(ch.name) for h in hist], mode="lines", name=ch.name,
             line=dict(width=1.5, color=_TREND_BRIGHT[k % len(_TREND_BRIGHT)])))
-    # Alarma (ámbar) y Danger (roja): línea sólida con triángulos en las puntas.
+    # Alarma (ámbar) y Danger (roja): como SHAPES (add_hline) + triángulos por
+    # anotación → NO ensucian la barra deslizable (solo viven en el gráfico).
     for lvl, col, lbl in [(min(als) if als else None, "#f59e0b", "Alarma"),
                           (min(dgs) if dgs else None, "#e11d48", "Danger")]:
         if lvl:
-            fig.add_trace(go.Scatter(
-                x=[x0, x1], y=[lvl, lvl], mode="lines+markers", name=f"{lbl} {lvl:g}",
-                line=dict(color=col, width=1.6), showlegend=False, hoverinfo="skip",
-                marker=dict(symbol=["triangle-right", "triangle-left"], size=10, color=col)))
-            fig.add_annotation(x=x0, y=lvl, text=f"{lbl} {lvl:g}", xanchor="left",
-                               yanchor="bottom", showarrow=False,
-                               font=dict(size=9, color=col), bgcolor="rgba(255,255,255,0.7)")
+            fig.add_hline(y=lvl, line=dict(color=col, width=1.5),
+                          annotation_text=f"{lbl} {lvl:g}", annotation_position="top left",
+                          annotation_font=dict(size=9, color=col))
+            fig.add_annotation(x=x0, y=lvl, xref="x", yref="y", showarrow=False,
+                               text="◀", font=dict(size=10, color=col), xanchor="center")
+            fig.add_annotation(x=x1, y=lvl, xref="x", yref="y", showarrow=False,
+                               text="▶", font=dict(size=10, color=col), xanchor="center")
     data_peak = max((v for h in hist for n, v in h[1].items()
                      if n in {c.name for c in fam_channels} and v is not None), default=0.0)
     peak = max([data_peak] + als + dgs) if (als or dgs or data_peak) else 0.0
@@ -1017,7 +1018,7 @@ def _plot_trend(snap: np.ndarray, vib_channels, family: str, type_map: dict,
             x=0, y=1.02, xanchor="left", yanchor="bottom",
             bgcolor="#eef3fb", activecolor="#2f6fb0", bordercolor="#d7deea", borderwidth=1,
             font=dict(size=11, color="#334155")),
-        rangeslider=dict(visible=True, thickness=0.09, bgcolor="#f6f8fc",
+        rangeslider=dict(visible=True, thickness=0.06, bgcolor="#f6f8fc",
                          bordercolor="#d7deea", borderwidth=1))
     fig.update_yaxes(range=[0, ymax], rangemode="tozero", showgrid=True, gridcolor=_S1_GRID,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
