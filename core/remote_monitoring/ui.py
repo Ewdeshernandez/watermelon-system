@@ -152,6 +152,12 @@ def _no_config_gate() -> bool:
         st.session_state["rm_alarms_by_name"] = {n: (2.5, 4.0) for n in vibs}
         st.session_state["rm_gap_by_name"] = {n: -9.5 for n in vibs}
         st.session_state["rm_type_by_name"] = {n: "proximity" for n in vibs}
+        # Params de adquisición (proximidad) → Fmax/Fmin acotan el espectro
+        from dataclasses import asdict as _asdict
+        from core.remote_monitoring.config import default_acq_for_type
+        _pp = _asdict(default_acq_for_type("proximity"))
+        st.session_state["rm_acq_saved"] = _pp
+        st.session_state["rm_acq_by_type_saved"] = {"proximity": _pp}
         st.rerun()
     return True
 
@@ -584,6 +590,14 @@ def _plot_waveform(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
     import plotly.graph_objects as go
     eu = x * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else x
     eu = eu - np.mean(eu)
+    # Mostrar solo N vueltas (como System1) para ver los ciclos, no los 8 s.
+    n_rev = st.slider("Vueltas a mostrar", 4, 40, 12, key="rm_wf_revs")
+    if rpm and rpm > 0:
+        n_show = min(len(eu), max(1, int(round(n_rev * (60.0 / rpm) * fs))))
+    else:
+        n_show = min(len(eu), int(0.5 * fs))
+    eu = eu[-n_show:] if n_show else eu
+    eu = eu - np.mean(eu)
     t_ms = np.arange(len(eu)) / fs * 1000.0
     rms = float(np.sqrt(np.mean(eu ** 2))) if len(eu) else 0.0
     pk = float(np.max(np.abs(eu))) if len(eu) else 0.0
@@ -604,7 +618,7 @@ def _plot_waveform(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
     fig.update_layout(height=360, margin=dict(l=52, r=16, t=56, b=40),
                       plot_bgcolor="#f8fafc", paper_bgcolor="#ffffff",
                       font=dict(color="#111827"), title=f"Forma de onda · {ch.name}",
-                      hovermode="closest")
+                      hovermode="closest", showlegend=False)
     fig.update_xaxes(title="ms", showgrid=False, showline=True, linecolor="#9ca3af",
                      ticks="outside", tickcolor="#6b7280", showspikes=True,
                      spikecolor="#94a3b8", spikemode="across", spikesnap="cursor", spikethickness=1)
@@ -646,7 +660,7 @@ def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
     fig = go.Figure(go.Scatter(
         x=fdisp, y=amp_pp, mode="lines", line=dict(width=1.1, color="#2563eb"),
         customdata=orders,
-        hovertemplate=(f"%{{x:.0f}} {unit}<br>%{{y:.4g}} {ch.units} pp"
+        hovertemplate=(f"%{{x:.0f}} {unit}<br>%{{y:.4g}} {ch.units}"
                        + ("<br>%{customdata:.2f}X" if f1 else "") + "<extra></extra>")))
     if f1:
         for k, lbl in [(1, "1X"), (2, "2X"), (3, "3X")]:
@@ -663,12 +677,12 @@ def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
                      showline=True, linecolor="#9ca3af", ticks="outside", tickcolor="#6b7280",
                      showspikes=True, spikecolor="#94a3b8", spikemode="across",
                      spikesnap="cursor", spikethickness=1)
-    fig.update_yaxes(title=f"{ch.units} pp", range=[0, ymax], gridcolor="rgba(148,163,184,0.18)",
+    fig.update_yaxes(title=ch.units, range=[0, ymax], gridcolor="rgba(148,163,184,0.18)",
                      showline=True, linecolor="#9ca3af", ticks="outside", tickcolor="#6b7280")
-    ann = f"O/All {ov_pp:.3g} {ch.units} pp"
+    ann = f"O/All {ov_pp:.3g} {ch.units}"
     if f1:
         a1, _ph = one_x_vector(eu, fs, f1)
-        ann += f" · 1X {a1 * 2:.3g} {ch.units} pp @ {hz_to_display(f1, freq_unit):.0f} {unit}"
+        ann += f" · 1X {a1 * 2:.3g} {ch.units} @ {hz_to_display(f1, freq_unit):.0f} {unit}"
     fig.add_annotation(xref="paper", yref="paper", x=1.0, y=1.16, xanchor="right", showarrow=False,
                        text=ann, font=dict(size=11, color="#475569"))
     st.plotly_chart(fig, use_container_width=True)
@@ -730,7 +744,15 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
     fmode = st.radio("Filtro", ["Directa", "1X", "2X"], horizontal=True, key="rm_orbit_filter",
                      help="Directa = onda completa. 1X/2X = órbita filtrada al orden (elipse).")
     if fmode == "Directa" or not f1:
-        xo, yo = x, y
+        # Mostrar solo N vueltas para una órbita limpia (no 8 s superpuestos).
+        n_rev = st.slider("Vueltas a mostrar", 3, 30, 12, key="rm_orbit_revs")
+        if f1:
+            n_show = min(len(x), max(1, int(round(n_rev * (1.0 / f1) * fs))))
+            xo, yo = x[-n_show:], y[-n_show:]
+        else:
+            xo, yo = x, y
+        xo = xo - np.mean(xo)
+        yo = yo - np.mean(yo)
     else:
         n = 1.0 if fmode == "1X" else 2.0
         f = n * f1
