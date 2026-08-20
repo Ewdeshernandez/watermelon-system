@@ -1515,7 +1515,7 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
         f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
         f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
-        f'<span><b>{machine}</b> · Bode · {channel} · <span style="color:#c7d6ea">{order}X</span>'
+        f'<span><b>{machine}</b> · {channel} · Bode · <span style="color:#c7d6ea">{order}X</span>'
         f'{comp_txt}</span>'
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
@@ -1679,7 +1679,7 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
         f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
         f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
-        f'<span><b>{machine}</b> · Polar 1X · {channel}{extra}</span>'
+        f'<span><b>{machine}</b> · {channel} · Polar{extra}</span>'
         f'<span style="color:#9fb3d1">🕒 {datetime.now().strftime("%d %b %Y · %H:%M:%S")}</span></div>',
         unsafe_allow_html=True))
 
