@@ -47,7 +47,7 @@ def render_remote_monitoring() -> None:
     try:
         from core.ui_theme import page_header
         page_header(title="Remote Monitoring",
-                    subtitle="Adquisición dinámica en vivo · rotordinámica NI · ISO 20816 / API 670")
+                    subtitle="Adquisición dinámica en vivo · rotordinámica · ISO 20816 / API 670 / API 684")
     except Exception:  # noqa: BLE001
         st.title("Remote Monitoring")
 
@@ -162,7 +162,7 @@ def _build_agent(channels: List[ChannelConfig], source_kind: str, fs: float,
         ramp_seconds=sim.get("ramp_seconds", 30.0),
         sim_critical_rpm=sim.get("sim_critical_rpm", 0.0),
     )
-    if source_kind == "NI 9178 (campo)":
+    if source_kind == "Campo (planta)":
         from core.remote_monitoring.ni_stream_source import NIStreamSource
         source = NIStreamSource(cfg)
     else:
@@ -263,8 +263,9 @@ def _render_source_params() -> None:
     with st.expander("⚙️ Fuente y parámetros", expanded=False):
         col1, col2, col3 = st.columns(3)
         with col1:
-            source_kind = st.selectbox("Fuente de datos", ["Simulado (dev/Mac)", "NI 9178 (campo)"],
-                                       key="rm_src_kind", help="En sitio: NI 9178. En Mac: Simulado.")
+            source_kind = st.selectbox("Fuente de datos", ["Simulado", "Campo (planta)"],
+                                       key="rm_src_kind",
+                                       help="Campo = adquisición en sitio. Simulado = pruebas.")
         with col2:
             fs = st.select_slider("Sample rate (Hz)", options=[2560, 5120, 10240, 25600, 51200],
                                   value=int(st.session_state.get("rm_fs", 5120)), key="rm_fs_w")
@@ -1167,8 +1168,8 @@ def _plot_shaft_centerline(snap: np.ndarray, vib) -> None:
                       xaxis_title="X", yaxis_title="Y", showlegend=False,
                       yaxis=dict(scaleanchor="x", scaleratio=1))
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
-    st.caption("⚠ Requiere gap DC. El NI-9234 es AC-coupled → la posición estática es ~0. "
-               "Para SCL real: gap del path Bently (Modbus) o un canal DC dedicado.")
+    st.caption("⚠ Requiere gap DC. Con canales AC-coupled la posición estática es ~0. "
+               "Para Shaft Centerline real se necesita el gap DC del proximitor.")
 
 
 def _plot_waterfall(tc: TransientCapture, channel: str) -> None:
