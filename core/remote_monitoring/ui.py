@@ -501,6 +501,7 @@ def _render_tabular_list(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]
     orders = sorted((st.session_state.get("rm_acq_saved") or {}).get("orders") or [1.0, 2.0])
     alarms = st.session_state.get("rm_alarms_by_name") or {}
     gaps = st.session_state.get("rm_gap_by_name") or {}
+    tmap = st.session_state.get("rm_type_by_name") or {}
     fs = agent.sample_rate_hz
     f1 = (rpm / 60.0) if rpm else None
 
@@ -516,7 +517,9 @@ def _render_tabular_list(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]
     body = []
     for k, (i, ch) in enumerate(vib):
         eu = snap[i] * 1000.0 / ch.sensitivity_mv_per_eu
-        overall = float(np.sqrt(np.mean((eu - np.mean(eu)) ** 2)))
+        conv, _norm, k0, krms = _amp_conv(tmap.get(ch.name, "proximity"))
+        u = f"{ch.units} {conv}"
+        overall = float(np.sqrt(np.mean((eu - np.mean(eu)) ** 2))) * krms
         al, dg = alarms.get(ch.name, (0.0, 0.0))
         gap = gaps.get(ch.name, 0.0)
         if dg > 0 and overall >= dg:
@@ -529,16 +532,17 @@ def _render_tabular_list(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]
                    if gap else '<span style="color:#94a3b8">—</span>')
         cells = [f'<b style="color:{NAVY}">{ch.name}</b>',
                  gap_txt,
-                 f'<span style="font-family:monospace">{overall:.4g} {ch.units}</span>']
+                 f'<span style="font-family:monospace">{overall:.4g} {u}</span>']
         if f1:
             freqs_c, mag_c = _spectrum(eu, fs)
             for o in orders:
                 a, ph = _order_amp_phase(freqs_c, mag_c, eu, fs, o * f1)
+                a *= k0
                 cells.append(f'<span style="font-family:monospace">{a:.3g}</span>')
                 cells.append(f'<span style="font-family:monospace;color:#64748b">{ph:.0f}°</span>')
-        al_txt = (f'<span style="font-family:monospace;color:#D89B22">{al:.3g} {ch.units}</span>'
+        al_txt = (f'<span style="font-family:monospace;color:#D89B22">{al:.3g} {u}</span>'
                   if al > 0 else '<span style="color:#94a3b8">—</span>')
-        dg_txt = (f'<span style="font-family:monospace;color:#dc2626">{dg:.3g} {ch.units}</span>'
+        dg_txt = (f'<span style="font-family:monospace;color:#dc2626">{dg:.3g} {u}</span>'
                   if dg > 0 else '<span style="color:#94a3b8">—</span>')
         cells += [al_txt, dg_txt,
                   f'<span style="color:{scol};font-weight:800">{status}</span>']
@@ -555,6 +559,9 @@ def _render_tabular_list(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]
         f'<table style="width:100%;border-collapse:collapse;min-width:560px">'
         f'<thead><tr style="background:{NAVY}">{th}</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table></div>', unsafe_allow_html=True)
+    st.caption("Amplitudes según norma: **desplazamiento en pp** (API 670 · ISO 7919), "
+               "**velocidad/aceleración en RMS** (ISO 20816). Overall y alarma/danger "
+               "en la misma convención del sensor.")
 
 
 # =====================================================================
@@ -734,6 +741,29 @@ def _spectrum(x: np.ndarray, fs: float):
     return freqs, mag
 
 
+# Convención de amplitud por tipo de sensor, según norma internacional:
+#   proximity (desplazamiento relativo) -> pp   [API 670 · ISO 7919 / ISO 20816-2]
+#   velometer (velocidad de carcasa)    -> rms  [ISO 20816 / ISO 10816]
+#   accelerometer (aceleración)         -> rms  [ISO 20816]
+# pp = 2·(0-pk) = 2·√2·rms  ·  rms = (0-pk)/√2
+_SQRT2 = float(np.sqrt(2.0))
+_AMP_STD = {
+    "proximity":     ("pp",  "API 670 · ISO 7919"),
+    "velometer":     ("rms", "ISO 20816"),
+    "accelerometer": ("rms", "ISO 20816"),
+}
+
+
+def _amp_conv(ctype):
+    """(sufijo, norma, k_desde_0pk, k_desde_rms) para el tipo de sensor.
+    k_desde_0pk: multiplica una amplitud espectral 0-pk → convención.
+    k_desde_rms: multiplica un RMS del dominio del tiempo → convención."""
+    conv, norm = _AMP_STD.get(ctype or "proximity", _AMP_STD["proximity"])
+    if conv == "pp":
+        return "pp", norm, 2.0, 2.0 * _SQRT2
+    return "rms", norm, 1.0 / _SQRT2, 1.0
+
+
 def _order_amp_phase(freqs, mag, eu, fs, f_target, tol_frac=0.06):
     """Amplitud 0-pk del armónico (leída del PICO real del espectro cerca de
     f_target) + su fase. Robusto cuando el rpm estimado no cae exacto en la
@@ -762,6 +792,7 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
     from plotly.subplots import make_subplots
     from core.remote_monitoring.config import hz_to_display, freq_label
     machine = st.session_state.get("rm_machine_name", "—")
+    tmap = st.session_state.get("rm_type_by_name") or {}
     f1 = (rpm / 60.0) if rpm else None
 
     prepared = []
@@ -770,20 +801,21 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
         fmin_hz = float(p.get("fmin_hz", 0) or 0)
         fmax_hz = float(p.get("fmax_hz", 0) or 0)
         freq_unit = p.get("freq_unit", "cpm")
+        conv, norm, k0, krms = _amp_conv(tmap.get(ch.name, "proximity"))
         eu = sig * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else sig
         freqs, mag = _spectrum(eu, fs)
-        amp_pp = mag * 2.0
+        amp = mag * k0                          # amplitud en la convención de la norma
         unit = freq_label(freq_unit)
         fdisp = freqs * (60.0 if unit == "CPM" else 1.0)
         xmin = hz_to_display(fmin_hz, freq_unit) if fmin_hz > 0 else 0.0
         xmax = hz_to_display(fmax_hz, freq_unit) if fmax_hz > 0 else (fdisp[-1] if len(fdisp) else 1.0)
         band = (freqs >= (fmin_hz or 0)) & (freqs <= (fmax_hz if fmax_hz > 0 else (freqs[-1] if len(freqs) else 0)))
-        ov_pp = float(np.sqrt(np.sum(mag[band] ** 2) / 2.0)) * 2.0 * np.sqrt(2.0) if band.any() else 0.0
+        ov = float(np.sqrt(np.sum(mag[band] ** 2) / 2.0)) * krms if band.any() else 0.0
         orders = (freqs / f1) if f1 else np.zeros_like(freqs)
-        peak = float(amp_pp[band].max()) if band.any() else (float(amp_pp.max()) if len(amp_pp) else 0.0)
-        prepared.append(dict(ch=ch, eu=eu, freqs=freqs, fdisp=fdisp, amp_pp=amp_pp, unit=unit,
-                             freq_unit=freq_unit, xmin=xmin, xmax=xmax, fmax_hz=fmax_hz,
-                             ov_pp=ov_pp, orders=orders, peak=peak))
+        peak = float(amp[band].max()) if band.any() else (float(amp.max()) if len(amp) else 0.0)
+        prepared.append(dict(ch=ch, eu=eu, freqs=freqs, fdisp=fdisp, amp=amp, unit=unit,
+                             uconv=conv, norm=norm, freq_unit=freq_unit, xmin=xmin, xmax=xmax,
+                             fmax_hz=fmax_hz, ov=ov, orders=orders, peak=peak))
     if not prepared:
         return
 
@@ -794,7 +826,7 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
         dfd = (fd[1] - fd[0]) if len(fd) > 1 else 1.0
         tol = max(3 * dfd, 0.006 * tgt)
         m = np.abs(fd - tgt) <= tol
-        a = float(p["amp_pp"][m].max()) if m.any() else float(p["amp_pp"][int(np.argmin(np.abs(fd - tgt)))])
+        a = float(p["amp"][m].max()) if m.any() else float(p["amp"][int(np.argmin(np.abs(fd - tgt)))])
         return a, tgt
 
     # Header (tag · Espectro · canales · rpm · fecha).
@@ -814,9 +846,9 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
     for r, p in enumerate(prepared, start=1):
         c = _S1_BLUE
         fig.add_trace(go.Scatter(
-            x=p["fdisp"], y=p["amp_pp"], mode="lines", line=dict(width=1.0, color=c),
+            x=p["fdisp"], y=p["amp"], mode="lines", line=dict(width=1.0, color=c),
             customdata=p["orders"],
-            hovertemplate=(f"%{{x:.0f}} {p['unit']}<br>%{{y:.4g}} {p['ch'].units}"
+            hovertemplate=(f"%{{x:.0f}} {p['unit']}<br>%{{y:.4g}} {p['ch'].units} {p['uconv']}"
                            + ("<br>%{customdata:.2f}X" if f1 else "") + "<extra></extra>")),
             row=r, col=1)
         if f1:
@@ -827,7 +859,7 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
                                   annotation_text=lbl, annotation_font=dict(size=9, color="#c0392b"),
                                   row=r, col=1)
         ymax = _nice_top(p["peak"] * 1.15) if p["peak"] > 0 else 1.0
-        fig.update_yaxes(title_text=f"{p['ch'].name} ({p['ch'].units})", range=[0, ymax],
+        fig.update_yaxes(title_text=f"{p['ch'].name} ({p['ch'].units} {p['uconv']})", range=[0, ymax],
                          showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
                          ticks="outside", tickcolor=_S1_AXIS, row=r, col=1)
         fig.update_xaxes(range=[p["xmin"], p["xmax"]], showgrid=True, gridcolor=_S1_GRID,
@@ -837,7 +869,7 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
                          title_text=(f"Frecuencia ({p['unit']})" if r == rows_n else None))
         # Caja de ARMÓNICOS por canal (arriba-derecha del subplot).
         _sfx = "" if r == 1 else str(r)
-        hrows = [_kv("O/All", f"{p['ov_pp']:.3g} {p['ch'].units}")]
+        hrows = [_kv("O/All", f"{p['ov']:.3g} {p['ch'].units} {p['uconv']}")]
         if f1:
             fmax_eff = p["fmax_hz"] if p["fmax_hz"] > 0 else (p["freqs"][-1] if len(p["freqs"]) else 0.0)
             for k in range(1, 7):
@@ -854,6 +886,8 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
                       plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
                       hovermode="x", showlegend=False)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
+    _norms = ", ".join(dict.fromkeys(f"{p['ch'].name}: {p['uconv']} ({p['norm']})" for p in prepared))
+    st.caption(f"Amplitud según norma — {_norms}.")
 
 
 def _orbit_dir_arrow(fig, rotation: str, R: float) -> None:
