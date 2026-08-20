@@ -910,13 +910,13 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
     st.caption(f"Amplitud según norma — {_norms}.")
 
 
-def _orbit_dir_arrow(fig, rotation: str, R: float) -> None:
-    """Arco con flecha indicando el sentido de giro (arriba de la órbita)."""
+def _orbit_dir_arrow(fig, rotation: str, R: float, cx0: float = 0.0, cy0: float = 0.0) -> None:
+    """Arco con flecha indicando el sentido de giro, centrado en (cx0, cy0)."""
     import plotly.graph_objects as go
     r = R * 1.20
     cw = (rotation or "CCW").upper() == "CW"
     ang = np.radians(np.linspace(140, 60, 24) if cw else np.linspace(60, 140, 24))
-    ax_, ay_ = r * np.cos(ang), r * np.sin(ang)
+    ax_, ay_ = cx0 + r * np.cos(ang), cy0 + r * np.sin(ang)
     fig.add_trace(go.Scatter(x=ax_, y=ay_, mode="lines", line=dict(color="#0F1E3D", width=2.0),
                              hoverinfo="skip", showlegend=False))
     fig.add_annotation(x=ax_[-1], y=ay_[-1], ax=ax_[-4], ay=ay_[-4],
@@ -925,15 +925,15 @@ def _orbit_dir_arrow(fig, rotation: str, R: float) -> None:
 
 
 def _orbit_probe_axes(fig, m_deg_x: float, m_deg_y: float, lim: float,
-                      xname: str, yname: str) -> None:
-    """Ejes de las sondas dibujados en su ÁNGULO REAL de montaje + cajita X/Y en
-    la punta (estilo System1: el eje va donde está físicamente la sonda)."""
+                      xname: str, yname: str, cx0: float = 0.0) -> None:
+    """Ejes de las sondas en su ÁNGULO REAL de montaje + cajita X/Y en la punta,
+    centrados en (cx0, 0). (System1: el eje va donde está físicamente la sonda.)"""
     for m_deg, nm in [(m_deg_x, xname), (m_deg_y, yname)]:
         m = np.radians(m_deg)
         cx, cy = np.cos(m), np.sin(m)
-        fig.add_shape(type="line", x0=-lim * cx, y0=-lim * cy, x1=lim * cx, y1=lim * cy,
+        fig.add_shape(type="line", x0=cx0 - lim * cx, y0=-lim * cy, x1=cx0 + lim * cx, y1=lim * cy,
                       line=dict(color="#dbe2ee", width=1.2), layer="below")
-        fig.add_annotation(x=0.9 * lim * cx, y=0.9 * lim * cy, showarrow=False,
+        fig.add_annotation(x=cx0 + 0.9 * lim * cx, y=0.9 * lim * cy, showarrow=False,
                            text=f"<b>{nm}</b>", font=dict(size=10.5, color="#334155"),
                            bgcolor="#ffffff", bordercolor="#c7d0dc", borderwidth=1, borderpad=3)
 
@@ -1053,23 +1053,28 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
     _kv = (lambda k, v: f'<b style="color:{_S1_TITLE}">{k}</b> <i style="color:#2f6fb0">{v}</i>')
-    cols = st.columns(len(data), gap="small")
-    for d, col in zip(data, cols):
-        fig = go.Figure(go.Scatter(
-            x=d["h"], y=d["v"], mode="lines", line=dict(width=1.4, color=_S1_BLUE),
-            hovertemplate=f"H %{{x:.3g}}<br>V %{{y:.3g}} {d['u']}<extra></extra>"))
-        _orbit_probe_axes(fig, d["mX"], d["mY"], lim, d["xname"], d["yname"])
-        if kphline and d["khh"] is not None and len(d["khh"]) > 1:
-            fig.add_trace(go.Scatter(x=d["khh"], y=d["khv"], mode="lines",
-                                     line=dict(width=2.0, color="#e0982a", shape="spline"),
-                                     hoverinfo="skip", showlegend=False))
+    # UN solo lienzo: las órbitas se colocan una seguida de otra (trasladadas en X)
+    # dentro del MISMO sistema de coords → la línea que une los keyphasor de bearing
+    # 1→2→3 es directa (= forma deflectada del eje en el instante de keyphasor).
+    N = len(data)
+    Dx = 2.7 * lim                      # separación centro-a-centro
+    fig = go.Figure()
+    node_x, node_y, node_lbl = [], [], []
+    for k, d in enumerate(data):
+        cx0 = k * Dx
+        fig.add_trace(go.Scatter(
+            x=d["h"] + cx0, y=d["v"], mode="lines", line=dict(width=1.4, color=_S1_BLUE),
+            name=d["lbl"], hovertemplate=f"{d['lbl']}<br>H %{{customdata:.3g}}<br>"
+            f"V %{{y:.3g}} {d['u']}<extra></extra>", customdata=d["h"]))
+        _orbit_probe_axes(fig, d["mX"], d["mY"], lim, d["xname"], d["yname"], cx0=cx0)
         if d["khh"] is not None and len(d["khh"]):
-            fig.add_trace(go.Scatter(x=d["khh"], y=d["khv"], mode="markers", showlegend=False,
+            fig.add_trace(go.Scatter(x=d["khh"] + cx0, y=d["khv"], mode="markers", showlegend=False,
                                      marker=dict(size=7, color="#dc2626", line=dict(width=1, color="#fff")),
                                      hovertemplate="Keyphasor<extra></extra>"))
-        _orbit_dir_arrow(fig, rotation, lim / 1.5)
-        # Caja de lecturas DENTRO del cuadro (abajo-izq, en coords de datos para
-        # que quede SOBRE la órbita, no en la banda lateral).
+            node_x.append(float(np.mean(d["khh"])) + cx0)
+            node_y.append(float(np.mean(d["khv"])))
+            node_lbl.append(d["lbl"])
+        _orbit_dir_arrow(fig, rotation, lim / 1.5, cx0=cx0)
         if d["vec"] is None:
             rows = [_kv(d["lbl"], ""), _kv("Xpp", f"{d['xpp']:.3g} {d['u']}"),
                     _kv("Ypp", f"{d['ypp']:.3g} {d['u']}"), _kv("Smax", f"{d['smax']:.3g} {d['chy'].units}")]
@@ -1079,22 +1084,30 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
                     _kv(f"{fmode} Y", f"{ayv * 2:.3g} {d['u']} ∠{pyv:.0f}°"),
                     _kv("Smax", f"{d['smax']:.3g} {d['chy'].units}")]
         fig.add_annotation(
-            x=-0.97 * lim, y=-0.97 * lim, xref="x", yref="y", xanchor="left", yanchor="bottom",
+            x=cx0 - 0.97 * lim, y=-0.97 * lim, xref="x", yref="y", xanchor="left", yanchor="bottom",
             align="left", showarrow=False, text="<br>".join(rows),
             font=dict(size=10, family="Arial, Helvetica, sans-serif"),
             bgcolor="rgba(244,249,255,0.92)", bordercolor="#2f6fb0", borderwidth=1.4, borderpad=6)
-        fig.update_layout(height=460, margin=dict(l=6, r=6, t=6, b=6),
-                          plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
-                          showlegend=False)
-        fig.update_xaxes(range=[-lim, lim], zeroline=True, zerolinecolor="#c9d2e0", zerolinewidth=1,
-                         showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
-                         ticks="outside", tickcolor=_S1_AXIS, constrain="domain")
-        fig.update_yaxes(range=[-lim, lim], zeroline=True, zerolinecolor="#c9d2e0", zerolinewidth=1,
-                         showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
-                         ticks="outside", tickcolor=_S1_AXIS, scaleanchor="x", scaleratio=1,
-                         constrain="domain")
-        with col:
-            st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
+    # Forma deflectada: une los keyphasor de cada bearing (instante común).
+    if kphline and len(node_x) > 1:
+        fig.add_trace(go.Scatter(
+            x=node_x, y=node_y, mode="lines+markers", line=dict(width=2.4, color="#e0982a", shape="spline"),
+            marker=dict(size=9, color="#e0982a", line=dict(width=1.5, color="#fff")),
+            hovertemplate="Forma deflectada<extra></extra>", showlegend=False))
+
+    x_lo, x_hi = -1.35 * lim, (N - 1) * Dx + 1.35 * lim
+    # Alto proporcional al aspecto (aprox ancho 760) para evitar bandas blancas.
+    h_px = int(max(240, min(470, 760.0 * (2.7 * lim) / (x_hi - x_lo))))
+    fig.update_layout(height=h_px, margin=dict(l=6, r=6, t=6, b=6),
+                      plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
+                      showlegend=False)
+    fig.update_xaxes(range=[x_lo, x_hi], showgrid=False, zeroline=False,
+                     showticklabels=False, showline=False, ticks="")
+    fig.update_yaxes(range=[-1.35 * lim, 1.35 * lim], zeroline=True, zerolinecolor="#c9d2e0",
+                     zerolinewidth=1, showgrid=True, gridcolor=_S1_GRID, showline=True,
+                     linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
+                     scaleanchor="x", scaleratio=1)
+    st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
 
 def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float],
