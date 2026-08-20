@@ -353,7 +353,10 @@ def _render_source_params() -> None:
                                                                step=60, key="rm_crit2",
                                                                help="0 = sin segunda resonancia.")
                 with cc2:
-                    sim["ramp_seconds"] = st.slider("Duración (s)", 5, 120, 30, key="rm_ramp")
+                    sim["ramp_seconds"] = st.slider("Duración (s)", 5, 300, 90, key="rm_ramp",
+                                                    help="Runup/coastdown más LENTO = más puntos "
+                                                         "en Bode/Polar (como Bently). Un coastdown "
+                                                         "real es lento → curva muy densa.")
             st.caption("**Estable**: velocidad constante (estado estacionario, muestreo continuo). "
                        "**Arranque / Parada**: barrido de velocidad → captura **transitoria** "
                        "(finer, por Δrpm) para bode / cascade / waterfall.")
@@ -1779,18 +1782,34 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
             textposition="bottom center", textfont=dict(size=9, color=op_stat["color"]),
             hoverinfo="skip", showlegend=False))
 
-    rmax = _nice_top(float(r.max()) * 1.15) if r.max() > 0 else 1.0
+    rpk = float(r.max()) if r.max() > 0 else 1.0
+    rmax = _nice_top(rpk * 1.15)
+    rlim = rmax * 1.16                       # anillo extra para la flecha de giro
     # Marca de la sonda en 0° (dónde está físicamente montada).
     fig.add_trace(go.Scatterpolar(r=[rmax], theta=[0], mode="markers+text",
                   marker=dict(size=10, color="#0F1E3D", symbol="triangle-up"),
                   text=[f" {channel}"], textposition="middle right",
                   textfont=dict(size=10, color="#0F1E3D"), hoverinfo="skip", showlegend=False))
+    # Flecha del SENTIDO DE GIRO de la máquina (arriba, fuera del dato).
+    mdir = 1 if rot_dir == "CCW" else -1                 # +1 = CCW en pantalla
+    s = 1 if ang_dir == "counterclockwise" else -1
+    scr = np.linspace(62, 118, 22) if mdir > 0 else np.linspace(118, 62, 22)   # ángulos de pantalla
+    th_arc = (scr - rot0) / s
+    fig.add_trace(go.Scatterpolar(r=[rmax * 1.09] * len(scr), theta=th_arc, mode="lines",
+                  line=dict(color="#0F1E3D", width=2.6), hoverinfo="skip", showlegend=False,
+                  cliponaxis=False))
+    _tang = scr[-1] + 90 * mdir
+    fig.add_trace(go.Scatterpolar(r=[rmax * 1.09], theta=[th_arc[-1]], mode="markers",
+                  marker=dict(size=15, color="#0F1E3D", symbol="triangle-up", angle=90 - _tang),
+                  hoverinfo="skip", showlegend=False, cliponaxis=False))
+    fig.add_trace(go.Scatterpolar(r=[rmax * 1.15], theta=[(90 - rot0) / s], mode="text",
+                  text=[f"giro {rot_dir}"], textfont=dict(size=10, color="#0F1E3D"),
+                  hoverinfo="skip", showlegend=False, cliponaxis=False))
     fig.update_layout(height=560, margin=dict(l=30, r=30, t=10, b=20), showlegend=False,
                       paper_bgcolor="#ffffff", font=_S1_FONT,
                       polar=dict(bgcolor="#ffffff",
-                                 radialaxis=dict(range=[0, rmax], gridcolor=_S1_GRID, angle=rot0,
-                                                 tickfont=dict(size=9, color="#64748b"),
-                                                 ticksuffix=f" {uu.split()[0] if uu else ''}",
+                                 radialaxis=dict(range=[0, rlim], gridcolor=_S1_GRID, angle=rot0,
+                                                 tickangle=0, nticks=6, tickfont=dict(size=8.5, color="#9aa6b6"),
                                                  title=dict(text="")),
                                  angularaxis=dict(rotation=rot0, direction=ang_dir, dtick=30,
                                                   gridcolor=_S1_GRID, tickfont=dict(size=9),
