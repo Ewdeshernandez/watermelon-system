@@ -219,7 +219,7 @@ def render_setup() -> None:
             st.session_state["rm_setup_rows"] = [asdict(r) for r in cfg.auto_layout(machine)]
             st.rerun()
     with gcol2:
-        st.caption("Convención Bently (API 670): ángulo desde **TDC (arriba)**, "
+        st.caption("Convención de ángulo (API 670): desde **TDC (arriba)**, "
                    "**R** = horario, **L** = antihorario → 45°L + 45°R = 90°.")
 
     st.session_state.setdefault("rm_setup_rows", [])
@@ -356,7 +356,7 @@ def _render_channel_form(idx: int) -> None:
             _num(c[1], "Gap/Bias (V)", "gap_bias_v", -24.0, 24.0, 0.1,
                  help="Voltaje DC de la sonda (prox ~ -9 a -11 V)")
 
-        st.caption("Orientación (Bently: TDC arriba, R horario, L antihorario)")
+        st.caption("Orientación (TDC arriba, R horario, L antihorario)")
         c = st.columns(4)
         _num(c[0], "Ángulo °", "angle_deg", 0.0, 360.0, 5.0)
         _sel(c[1], "Lado", "side", ["", "L", "R"])
