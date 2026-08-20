@@ -99,9 +99,10 @@ def render_remote_monitoring() -> None:
 
         /* Controles de rango de la tendencia: chicos y alineados */
         .st-key-rm_trend_ctrls { margin-top:-4px; }
-        .st-key-rm_trend_ctrls [role="radiogroup"] { gap:2px 12px !important; align-items:center; }
-        .st-key-rm_trend_ctrls [role="radiogroup"] label p { font-size:12px !important; }
-        .st-key-rm_trend_ctrls [role="radiogroup"] label { padding:1px 0 !important; }
+        :is(.st-key-rm_trend_ctrls,.st-key-rm_casc_ctrls) [role="radiogroup"] { gap:2px 12px !important; align-items:center; }
+        :is(.st-key-rm_trend_ctrls,.st-key-rm_casc_ctrls) [role="radiogroup"] label p { font-size:12px !important; }
+        :is(.st-key-rm_trend_ctrls,.st-key-rm_casc_ctrls) [role="radiogroup"] label { padding:1px 0 !important; }
+        .st-key-rm_casc_ctrls { margin-top:-4px; }
         /* Multiselección de canales: compacta, en la misma línea */
         .st-key-rm_trend_ctrls [data-testid="stMultiSelect"] { min-width:220px !important; }
         .st-key-rm_trend_ctrls [data-testid="stMultiSelect"] div[data-baseweb="select"] > div {
@@ -1666,6 +1667,13 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
         f'<span style="color:#c7d6ea">{rpms.min():.0f}–{rpms.max():.0f} rpm</span></span>'
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
+    # Unidad del eje de frecuencia: Hz (estructurales verticales), CPM, u Órdenes
+    # (1X vertical — cómodo para seguir armónicos).
+    with st.container(key="rm_casc_ctrls", horizontal=True, vertical_alignment="center", gap="medium"):
+        xmode = st.radio("Frecuencia", ["Hz", "CPM", "Órdenes"], horizontal=True,
+                         key="rm_casc_xunit", label_visibility="collapsed",
+                         help="Hz: resonancias estructurales quedan verticales. Órdenes: el 1X "
+                              "queda vertical (sigue el rpm).")
     mat = mat * k0                                   # amplitud en convención de norma
     fmax = float(freqs[-1]) if len(freqs) else 1.0
     # Submuestreo a ~40 espectros para que se lea limpio.
@@ -1677,31 +1685,49 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
     peak = float(MM.max()) or 1.0
     scale = (span / max(1, len(rr))) * 1.7 / peak    # alto de cada espectro (en rpm)
 
+    if xmode == "Órdenes":
+        _xf = lambda fr, rp: fr * 60.0 / rp if rp > 0 else fr
+        xtitle, xhi = "Orden (× rpm)", 6.0
+    elif xmode == "CPM":
+        _xf = lambda fr, rp: fr * 60.0
+        xtitle, xhi = "Frecuencia (CPM)", fmax * 60.0
+    else:
+        _xf = lambda fr, rp: fr
+        xtitle, xhi = "Frecuencia (Hz)", fmax
+
     fig = go.Figure()
     # Espectros apilados con HIDDEN-LINE: de atrás (alta rpm) a adelante (baja),
     # cada uno con relleno blanco que oculta los de atrás (look System1).
     for i in range(len(rr) - 1, -1, -1):
         base = float(rr[i])
+        xv = _xf(freqs, base)
         y = base + MM[i] * scale
         fig.add_trace(go.Scatter(
-            x=np.concatenate([freqs, freqs[::-1]]),
-            y=np.concatenate([y, np.full(len(freqs), base)]),
+            x=np.concatenate([xv, xv[::-1]]),
+            y=np.concatenate([y, np.full(len(xv), base)]),
             fill="toself", fillcolor="rgba(255,255,255,0.97)", line=dict(width=0),
             hoverinfo="skip", showlegend=False))
         fig.add_trace(go.Scatter(
-            x=freqs, y=y, mode="lines", line=dict(color=_S1_BLUE, width=0.9),
-            hovertemplate=f"%{{x:.0f}} Hz · {base:.0f} rpm<extra></extra>", showlegend=False))
-    # Líneas de orden diagonales (freq = k·rpm/60) ENCIMA.
+            x=xv, y=y, mode="lines", line=dict(color=_S1_BLUE, width=0.9),
+            hovertemplate=f"%{{x:.2f}} {xmode} · {base:.0f} rpm<extra></extra>", showlegend=False))
+    # Líneas de orden: diagonales en Hz/CPM, VERTICALES en Órdenes.
     for k, lbl, col in [(0.5, "½X", "#94a3b8"), (1.0, "1X", "#e26d6d"),
                         (2.0, "2X", "#e0982a"), (3.0, "3X", "#8b5cf6")]:
-        fx = k * rr / 60.0
-        m = fx <= fmax
-        if m.sum() < 2:
-            continue
-        fig.add_trace(go.Scatter(x=fx[m], y=rr[m], mode="lines",
-                      line=dict(color=col, width=1, dash="dot"), hoverinfo="skip", showlegend=False))
-        fig.add_annotation(x=float(fx[m][-1]), y=float(rr[m][-1]), text=lbl, showarrow=False,
-                           yshift=9, font=dict(size=9.5, color=col))
+        if xmode == "Órdenes":
+            if k > xhi:
+                continue
+            fig.add_vline(x=k, line=dict(color=col, width=1, dash="dot"))
+            fig.add_annotation(x=k, y=rr[-1], text=lbl, showarrow=False, yshift=9,
+                               font=dict(size=9.5, color=col))
+        else:
+            fx = (k * rr / 60.0) * (60.0 if xmode == "CPM" else 1.0)   # k·rpm/60 en Hz/CPM
+            m = fx <= xhi
+            if m.sum() < 2:
+                continue
+            fig.add_trace(go.Scatter(x=fx[m], y=rr[m], mode="lines",
+                          line=dict(color=col, width=1, dash="dot"), hoverinfo="skip", showlegend=False))
+            fig.add_annotation(x=float(fx[m][-1]), y=float(rr[m][-1]), text=lbl, showarrow=False,
+                               yshift=9, font=dict(size=9.5, color=col))
     # Críticas (picos 1X del Bode) como línea horizontal tenue.
     rb, ab, _ph = tc.bode(channel)
     if len(rb) >= 3:
@@ -1713,7 +1739,7 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
 
     fig.update_layout(height=620, margin=dict(l=58, r=16, t=8, b=42),
                       plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT, showlegend=False)
-    fig.update_xaxes(title_text="Frecuencia (Hz)", range=[0, fmax], showgrid=True, gridcolor=_S1_GRID,
+    fig.update_xaxes(title_text=xtitle, range=[0, xhi], showgrid=True, gridcolor=_S1_GRID,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
     fig.update_yaxes(title_text="RPM", range=[rr[0] - span * 0.02, rr[-1] + peak * scale * 1.1],
                      showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
