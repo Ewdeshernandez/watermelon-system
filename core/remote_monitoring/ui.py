@@ -236,7 +236,7 @@ def _ensure_agent() -> Optional[AcqAgent]:
         return None
     default_rpm = float(st.session_state.get("rm_machine_rpm", 3600.0))
     source_kind = st.session_state.get("rm_source_kind", "Simulado (dev/Mac)")
-    fs = int(st.session_state.get("rm_fs", 5120))
+    fs = int(st.session_state.get("rm_fs", 25600))
     sim = st.session_state.get("rm_sim") or {"rpm": default_rpm, "defect": "none",
                                              "speed_profile": "constant"}
     sig = f"{source_kind}|{fs}|{sim}|{_channels_fingerprint(channels)}"
@@ -255,7 +255,12 @@ def _ensure_agent() -> Optional[AcqAgent]:
         _bt = st.session_state.get("rm_acq_by_type_saved") or {}
         _fmax = (max((float(v.get("fmax_hz", 1000)) for v in _bt.values()), default=1000.0) if _bt
                  else float((st.session_state.get("rm_acq_saved") or {}).get("fmax_hz", 1000.0)))
-        st.session_state["rm_transient"] = TransientCapture(TransientConfig(fmax_hz=_fmax))
+        # Ventana de captura ~0.5 s (más muestras/vuelta a mayor fs → order
+        # tracking más fino), acotada a potencia razonable.
+        _fs = int(st.session_state.get("rm_fs", 25600))
+        _cap = int(min(16384, max(4096, round(0.5 * _fs / 1024) * 1024)))
+        st.session_state["rm_transient"] = TransientCapture(
+            TransientConfig(fmax_hz=_fmax, capture_samples=_cap))
         st.session_state["rm_prev_rpm"] = None
     return st.session_state["rm_agent"]
 
@@ -280,7 +285,8 @@ def _acquire(agent: AcqAgent, pump_n: int):
     st.session_state["rm_prev_rpm"] = rpm
     tc = st.session_state.setdefault("rm_transient", TransientCapture())
     if rpm and snap.shape[1]:
-        tc.feed(snap, rpm, agent.sample_rate_hz, vib)
+        tc.feed(snap, rpm, agent.sample_rate_hz, vib,
+                kph_idx=agent.source.config.keyphasor_index())
     return snap, rpm, state, tc, err, vib
 
 
@@ -295,7 +301,7 @@ def _render_source_params() -> None:
                                        help="Campo = adquisición en sitio. Simulado = pruebas.")
         with col2:
             fs = st.select_slider("Sample rate (Hz)", options=[2560, 5120, 10240, 25600, 51200],
-                                  value=int(st.session_state.get("rm_fs", 5120)), key="rm_fs_w")
+                                  value=int(st.session_state.get("rm_fs", 25600)), key="rm_fs_w")
         with col3:
             defect = (st.selectbox("Defecto simulado", ["none", "unbalance", "misalignment"], key="rm_defect")
                       if source_kind.startswith("Simulado") else "none")
@@ -419,7 +425,8 @@ def _monitoreo_display() -> None:
     st.session_state["rm_prev_rpm"] = rpm
     tc = st.session_state.setdefault("rm_transient", TransientCapture())
     if rpm:
-        tc.feed(snap, rpm, agent.sample_rate_hz, vib)
+        tc.feed(snap, rpm, agent.sample_rate_hz, vib,
+                kph_idx=agent.source.config.keyphasor_index())
     _render_stat_strip(agent, snap, rpm, state, tc)
     st.markdown("##### Tabular list — valores actuales")
     _render_tabular_list(agent, snap, rpm, vib)
@@ -468,7 +475,8 @@ def _analisis_display() -> None:
     st.session_state["rm_prev_rpm"] = rpm
     tc = st.session_state.setdefault("rm_transient", TransientCapture())
     if rpm:
-        tc.feed(snap, rpm, agent.sample_rate_hz, vib)
+        tc.feed(snap, rpm, agent.sample_rate_hz, vib,
+                kph_idx=agent.source.config.keyphasor_index())
     fs = agent.sample_rate_hz
     names = [ch.name for _, ch in vib]
     _vent = snap.shape[1] / fs
@@ -1360,7 +1368,11 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
     if comp:
         z = z - zref
     amp_disp = np.abs(z) * k0
-    ph_disp = np.degrees(np.angle(z)) % 360.0
+    ph_disp = np.degrees(np.angle(z)) % 360.0          # 0-360 (lectura del cursor)
+    # Fase DESENROLLADA para el trazo → curva continua (sin saltos de 360°),
+    # como Bently. rpms viene ordenado ascendente, así que unwrap es válido.
+    ph_plot = np.degrees(np.unwrap(np.angle(z)))
+    ph_plot = ph_plot - float(np.round(ph_plot[0] / 360.0)) * 360.0   # arranca cerca de 0-360
 
     i_pk = int(np.argmax(amp_disp))
     ncrit = float(rpms[i_pk])
@@ -1380,13 +1392,14 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05)
-    # FASE arriba (System1). Eje invertido → el lag crece hacia abajo.
-    fig.add_trace(go.Scatter(x=rpms, y=ph_disp, mode="lines+markers", line=dict(width=1.4, color=_S1_BLUE),
-                             marker=dict(size=4, color=_S1_KPH),
+    # FASE arriba (System1). Eje invertido → el lag crece hacia abajo. Línea
+    # continua sin marcadores (como Bently) — spline para suavizar.
+    fig.add_trace(go.Scatter(x=rpms, y=ph_plot, mode="lines",
+                             line=dict(width=1.8, color=_S1_BLUE, shape="spline", smoothing=0.6),
                              hovertemplate="%{x:.0f} rpm<br>%{y:.0f}°<extra></extra>"), row=1, col=1)
     # AMPLITUD abajo.
-    fig.add_trace(go.Scatter(x=rpms, y=amp_disp, mode="lines+markers", line=dict(width=1.4, color=_S1_BLUE),
-                             marker=dict(size=4, color=_S1_KPH),
+    fig.add_trace(go.Scatter(x=rpms, y=amp_disp, mode="lines",
+                             line=dict(width=1.8, color=_S1_BLUE, shape="spline", smoothing=0.6),
                              hovertemplate=f"%{{x:.0f}} rpm<br>%{{y:.3g}} {units} {conv}<extra></extra>"),
                   row=2, col=1)
     # Velocidad(es) crítica(s): picos locales prominentes (hasta 3), fusionando
