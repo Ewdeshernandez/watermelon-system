@@ -1323,8 +1323,10 @@ def _plot_trend(snap: np.ndarray, vib_channels, type_map: dict,
                             label_visibility="collapsed")
 
 
-def _plot_bode(tc: TransientCapture, channel: str) -> None:
-    """Bode: 1X amplitud & fase vs rpm. Se llena durante arranque/parada."""
+def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
+    """Bode estilo System1 (mejorado): FASE arriba (lag, eje invertido) + AMPLITUD
+    abajo vs rpm. Marca la velocidad crítica (pico), compensación de slow-roll
+    opcional, amplitud por norma. Se llena durante arranque/parada."""
     from plotly.subplots import make_subplots
     import plotly.graph_objects as go
     rpms, amp, phase = tc.bode(channel)
@@ -1333,17 +1335,83 @@ def _plot_bode(tc: TransientCapture, channel: str) -> None:
                 "elegí perfil *runup* o *coastdown*, pulsá ▶ Live, y verás la curva "
                 "construirse al pasar por la velocidad crítica.")
         return
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.08,
-                        subplot_titles=("Amplitud 1X", "Fase 1X (°)"))
-    fig.add_trace(go.Scatter(x=rpms, y=amp, mode="lines+markers", line=dict(width=1.5),
-                             name="Amp 1X"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=rpms, y=phase, mode="lines+markers", line=dict(width=1.5),
-                             marker=dict(color="#f59e0b"), name="Fase"), row=2, col=1)
-    fig.update_yaxes(title_text="0-pk", row=1, col=1)
-    fig.update_yaxes(title_text="grados", row=2, col=1)
-    fig.update_xaxes(title_text="RPM", row=2, col=1)
-    fig.update_layout(height=460, margin=dict(l=10, r=10, t=40, b=10), showlegend=False,
-                      title=f"Bode · {channel} ({len(rpms)} puntos)")
+
+    tmap = st.session_state.get("rm_type_by_name") or {}
+    conv, norm, k0, _krms = _amp_conv(tmap.get(channel, "proximity"))
+    chs = st.session_state.get("rm_channels") or []
+    units = next((c.units for c in chs if c.name == channel), "mil")
+    machine = st.session_state.get("rm_machine_name", "—")
+
+    with st.container(key="rm_bode_ctrls", horizontal=True, vertical_alignment="center", gap="medium"):
+        comp = st.toggle("Compensar slow-roll", key="rm_bode_comp",
+                         help="Resta el vector 1X a baja velocidad (runout mecánico/eléctrico) "
+                              "a todos los puntos — como el 'Comp' de System1.")
+
+    # Vector complejo 1X → compensación slow-roll (resta el vector más lento).
+    z = amp * np.exp(1j * np.radians(phase))
+    zref = z[0] if len(z) else 0.0 + 0.0j     # rpms viene ordenado ascendente
+    if comp:
+        z = z - zref
+    amp_disp = np.abs(z) * k0
+    ph_disp = np.degrees(np.angle(z)) % 360.0
+
+    i_pk = int(np.argmax(amp_disp))
+    ncrit = float(rpms[i_pk])
+    a_pk = float(amp_disp[i_pk])
+    ph_pk = float(ph_disp[i_pk])
+
+    # Header autocontenido (tag · Bode · canal · orden · rango rpm · fecha).
+    ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
+    comp_txt = (f' · <span style="color:#c7d6ea">Comp {np.abs(zref) * k0:.3g} {units} {conv} '
+                f'∠{np.degrees(np.angle(zref)) % 360:.0f}°</span>') if comp else ''
+    st.markdown(
+        f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
+        f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
+        f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
+        f'<span><b>{machine}</b> · Bode · {channel} · <span style="color:#c7d6ea">{order}X</span>'
+        f'{comp_txt}</span>'
+        f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
+
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.05)
+    # FASE arriba (System1). Eje invertido → el lag crece hacia abajo.
+    fig.add_trace(go.Scatter(x=rpms, y=ph_disp, mode="lines+markers", line=dict(width=1.4, color=_S1_BLUE),
+                             marker=dict(size=4, color=_S1_KPH),
+                             hovertemplate="%{x:.0f} rpm<br>%{y:.0f}°<extra></extra>"), row=1, col=1)
+    # AMPLITUD abajo.
+    fig.add_trace(go.Scatter(x=rpms, y=amp_disp, mode="lines+markers", line=dict(width=1.4, color=_S1_BLUE),
+                             marker=dict(size=4, color=_S1_KPH),
+                             hovertemplate=f"%{{x:.0f}} rpm<br>%{{y:.3g}} {units} {conv}<extra></extra>"),
+                  row=2, col=1)
+    # Velocidad crítica (pico) marcada en ambos.
+    for r in (1, 2):
+        fig.add_vline(x=ncrit, line=dict(color="#e26d6d", width=1, dash="dot"), row=r, col=1)
+    fig.add_annotation(x=ncrit, y=a_pk, row=2, col=1, text=f"Ncrit ≈ {ncrit:.0f} rpm",
+                       showarrow=True, arrowhead=2, arrowsize=0.8, arrowcolor="#c0392b", ax=28, ay=-18,
+                       font=dict(size=10, color="#c0392b"), bgcolor="rgba(255,255,255,0.85)")
+
+    ymax = _nice_top(a_pk * 1.15) if a_pk > 0 else 1.0
+    fig.update_yaxes(title_text="Fase 1X (°)", autorange="reversed", dtick=90, row=1, col=1,
+                     showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
+                     ticks="outside", tickcolor=_S1_AXIS, zeroline=False)
+    fig.update_yaxes(title_text=f"1X ({units} {conv})", range=[0, ymax], row=2, col=1,
+                     showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
+                     ticks="outside", tickcolor=_S1_AXIS, zeroline=False)
+    fig.update_xaxes(row=1, col=1, showgrid=True, gridcolor=_S1_GRID, showline=True,
+                     linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
+    fig.update_xaxes(title_text="RPM", rangemode="tozero", row=2, col=1, showgrid=True,
+                     gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS, ticks="outside",
+                     tickcolor=_S1_AXIS)
+    # Caja tipo cursor (arriba-derecha): pico de resonancia.
+    _kv = (lambda k, v: f'<b style="color:{_S1_TITLE}">{k}</b> <i style="color:#2f6fb0">{v}</i>')
+    fig.add_annotation(
+        xref="x domain", yref="y domain", x=0.992, y=0.04, xanchor="right", yanchor="bottom",
+        align="left", showarrow=False,
+        text="<br>".join([_kv("Ncrit", f"{ncrit:.0f} rpm"),
+                          _kv("Amp", f"{a_pk:.3g} {units} {conv}"), _kv("Fase", f"{ph_pk:.0f}°")]),
+        font=dict(size=10.5, family="Arial, Helvetica, sans-serif"),
+        bgcolor="rgba(244,249,255,0.94)", bordercolor="#2f6fb0", borderwidth=1.4, borderpad=6)
+    fig.update_layout(height=480, margin=dict(l=58, r=16, t=8, b=40),
+                      plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT, showlegend=False)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
 
