@@ -142,20 +142,27 @@ def render_remote_monitoring() -> None:
             background:transparent !important; text-align:center;
             font-size:12px !important; padding:2px 6px !important; }
 
-        /* Controles del Bode: toggle + campos de rpm compactos */
-        .st-key-rm_bode_ctrls { margin-top:-4px; }
-        .st-key-rm_bode_ctrls [data-testid="stNumberInput"] { width:150px !important; }
-        .st-key-rm_bode_ctrls [data-testid="stNumberInput"] label p { font-size:11px !important; }
+        /* Controles del Bode: panel de instrumento — toggle + campos de rpm */
+        .st-key-rm_bode_ctrls {
+            margin:2px 0 8px; padding:8px 14px; background:#f7f9fd;
+            border:1px solid #e3e9f2; border-radius:10px; align-items:center !important; }
+        .st-key-rm_bode_ctrls [data-testid="stNumberInput"] { width:158px !important; }
+        .st-key-rm_bode_ctrls [data-testid="stNumberInput"] label p {
+            font-size:9.5px !important; text-transform:uppercase; letter-spacing:.05em;
+            font-weight:700 !important; color:#8a97ab !important; margin-bottom:1px !important; }
         .st-key-rm_bode_ctrls [data-testid="stNumberInput"] button { display:none !important; }
         .st-key-rm_bode_ctrls [data-testid="stNumberInputContainer"] {
-            border:none !important; box-shadow:none !important; outline:none !important;
-            background:#f2f6fc !important; min-height:30px !important; border-radius:8px !important; }
+            border:1px solid #d6deea !important; box-shadow:none !important; outline:none !important;
+            background:#ffffff !important; min-height:32px !important; border-radius:8px !important;
+            transition:border-color .12s, background .12s; }
         .st-key-rm_bode_ctrls [data-testid="stNumberInputContainer"]:hover,
         .st-key-rm_bode_ctrls [data-testid="stNumberInputContainer"]:focus-within {
-            background:#e9f0fb !important; }
+            border-color:#2f6fb0 !important; background:#f4f8ff !important; }
         .st-key-rm_bode_ctrls [data-testid="stNumberInput"] input {
-            background:transparent !important; text-align:center;
-            font-size:12px !important; padding:2px 6px !important; }
+            background:transparent !important; text-align:center; color:#0F1E3D !important;
+            font-family:ui-monospace,monospace !important; font-weight:600 !important;
+            font-size:13px !important; padding:3px 8px !important; }
+        .st-key-rm_bode_ctrls [data-testid="stWidgetLabel"] p { font-size:12px !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -1488,13 +1495,43 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
                            showarrow=True, arrowhead=2, arrowsize=0.8, arrowcolor="#c0392b",
                            ax=26, ay=-16, font=dict(size=10, color="#c0392b"),
                            bgcolor="rgba(255,255,255,0.85)")
-    # Velocidad de operación (verde) + margen de separación a la crítica próxima.
+    # Velocidad de operación + margen de separación (API 684). Roja si la máquina
+    # queda en resonancia o con margen insuficiente; verde si cumple.
+    op_status, op_msg = None, ""
+    if op_rpm > 0 and len(crit_idx):
+        j = min(crit_idx, key=lambda i: abs(rr[i] - op_rpm))
+        ncj, afj = float(rr[j]), af_by_crit.get(j)
+        sm = abs(ncj - op_rpm) / op_rpm * 100.0
+        below = ncj < op_rpm
+        req = 15.0 if below else 20.0                    # API 617/684: 15% abajo, 20% arriba
+        needs_margin = (afj is None) or (afj >= 2.5)     # margen exigido si AF ≥ 2.5
+        oi = crit_idx.index(j)
+        ordl = _ORD[oi] if oi < len(_ORD) else f"{oi+1}ª"
+        af_txt = f", AF {afj:.1f}" if afj else ""
+        if sm < 3.0:
+            op_status = "res"
+            op_msg = (f"⚠ **EN RESONANCIA** — la velocidad de operación ({op_rpm:.0f} rpm) coincide "
+                      f"con la {ordl} crítica ({ncj:.0f} rpm{af_txt}). Amplitud y fase muy "
+                      f"sensibles a cualquier cambio; **API 684 no admite operar sobre una crítica**.")
+        elif needs_margin and sm < req:
+            op_status = "margin"
+            op_msg = (f"⚠ **Margen insuficiente** — operás a **{sm:.0f}%** de la {ordl} crítica "
+                      f"({ncj:.0f} rpm{af_txt}); API 684 pide **≥{req:.0f}%** "
+                      f"({'crítica por debajo' if below else 'crítica por encima'}) para modos "
+                      f"poco amortiguados (AF≥2.5). Riesgo de amplitudes altas cerca de resonancia.")
+        else:
+            op_status = "ok"
+            op_msg = (f"✓ **Margen de separación {sm:.0f}%** a la {ordl} crítica ({ncj:.0f} rpm) — "
+                      f"cumple API 684 (≥{req:.0f}%).")
+    op_col = "#dc2626" if op_status in ("res", "margin") else "#16a34a"
     if op_rpm > 0 and lo_rpm <= op_rpm <= hi_rpm:
+        _bad = op_status in ("res", "margin")
         for r in (1, 2):
-            fig.add_vline(x=op_rpm, line=dict(color="#16a34a", width=1.2), row=r, col=1)
+            fig.add_vline(x=op_rpm, line=dict(color=op_col, width=1.8 if _bad else 1.2,
+                                              dash="solid" if _bad else "solid"), row=r, col=1)
         fig.add_annotation(x=op_rpm, y=1.0, yref="y2 domain", row=2, col=1, yanchor="bottom",
-                           text=f"Op {op_rpm:.0f}", showarrow=False,
-                           font=dict(size=9.5, color="#15803d"))
+                           text=f"{'⚠ ' if _bad else ''}Op {op_rpm:.0f}", showarrow=False,
+                           font=dict(size=9.5, color=op_col))
 
     ymax = _nice_top(a_pk * 1.15) if a_pk > 0 else 1.0
     fig.update_yaxes(title_text="Fase 1X (°)", autorange="reversed", dtick=90, row=1, col=1,
@@ -1526,18 +1563,14 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
                       plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT, showlegend=False)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
-    # Notas API 684: high spot / heavy spot + margen de separación.
-    sep = ""
-    if op_rpm > 0 and len(crit_idx):
-        j = min(crit_idx, key=lambda i: abs(rr[i] - op_rpm))
-        sm = abs(rr[j] - op_rpm) / op_rpm * 100.0
-        flag = "⚠ " if sm < 15 else "✓ "
-        sep = (f" · {flag}**Margen de separación** {sm:.0f}% a la crítica más próxima "
-               f"({rr[j]:.0f} rpm) — API 684 pide ≥15 %.")
+    # Banner de estado de operación (API 684): rojo si resonancia/margen insuf.
+    if op_status in ("res", "margin"):
+        st.error(op_msg)
+    elif op_status == "ok":
+        st.success(op_msg)
     st.caption("**High spot** = fase del pico (dónde el eje llega más cerca de la sonda). "
                "Bajo la 1ª crítica, high spot ≈ **heavy spot** (desbalance); en la crítica giran "
-               "~90°, encima ~180° (API 684). **AF** = factor de amplificación por media potencia."
-               + sep)
+               "~90°, encima ~180° (API 684). **AF** = factor de amplificación por media potencia.")
 
 
 def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> None:
