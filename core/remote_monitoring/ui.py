@@ -1117,24 +1117,25 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
                      scaleanchor="x", scaleratio=1)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
-    # Valores FUERA del gráfico (tira compacta, una por órbita) — así el gráfico
-    # queda limpio, sin cajas encima.
+    # Valores FUERA del gráfico, una tarjeta por órbita ALINEADA bajo cada una
+    # (los centros de órbita caen en el centro de cada columna → st.columns encaja).
     def _card(d):
         if d["vec"] is None:
-            inner = (_kv("Xpp", f"{d['xpp']:.3g} {d['u']}") + " · " +
-                     _kv("Ypp", f"{d['ypp']:.3g} {d['u']}") + " · " +
+            inner = (_kv("Xpp", f"{d['xpp']:.3g} {d['u']}") + "<br>" +
+                     _kv("Ypp", f"{d['ypp']:.3g} {d['u']}") + "<br>" +
                      _kv("Smax", f"{d['smax']:.3g} {d['chy'].units}"))
         else:
             axv, pxv, ayv, pyv = d["vec"]
-            inner = (_kv(f"{fmode} X", f"{axv * 2:.3g} {d['u']} ∠{pxv:.0f}°") + " · " +
-                     _kv(f"{fmode} Y", f"{ayv * 2:.3g} {d['u']} ∠{pyv:.0f}°") + " · " +
+            inner = (_kv(f"{fmode} X", f"{axv * 2:.3g} {d['u']} ∠{pxv:.0f}°") + "<br>" +
+                     _kv(f"{fmode} Y", f"{ayv * 2:.3g} {d['u']} ∠{pyv:.0f}°") + "<br>" +
                      _kv("Smax", f"{d['smax']:.3g} {d['chy'].units}"))
-        return (f'<div style="padding:6px 10px;border:1px solid #d6deea;border-radius:8px;'
-                f'background:#f8fafd;font-size:11.5px;font-family:Arial,Helvetica,sans-serif">'
-                f'<b style="color:{_S1_TITLE}">{d["lbl"]}</b> &nbsp; {inner}</div>')
-    st.markdown(
-        f'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">'
-        f'{"".join(_card(d) for d in data)}</div>', unsafe_allow_html=True)
+        return (f'<div style="padding:7px 10px;border:1px solid #d6deea;border-radius:8px;'
+                f'background:#f8fafd;font-size:11.5px;line-height:1.6;text-align:center;'
+                f'font-family:Arial,Helvetica,sans-serif">{inner}</div>')
+    vcols = st.columns(len(data), gap="small")
+    for d, vc in zip(data, vcols):
+        with vc:
+            st.markdown(_card(d), unsafe_allow_html=True)
 
 
 def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float],
