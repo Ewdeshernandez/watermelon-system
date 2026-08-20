@@ -293,6 +293,17 @@ class SimulatedStreamSource(StreamSource):
                 sig += 1.20 * base * A * np.sin(phase + ph + phi_res)  # boost 1X
             elif cfg.defect == "misalignment":
                 sig += 0.90 * base * np.sin(2.0 * phase + ph)          # boost 2X
+            elif cfg.defect == "oil_whirl" and cfg.sim_critical_rpm > 0:
+                # Inestabilidad de película: oil WHIRL (~0.45X, sigue el rpm) que
+                # al pasar ~2.2× la 1ª crítica se ENGANCHA a la natural = oil WHIP
+                # (frecuencia fija). Aparece por encima de ~1.8× la crítica.
+                fn1 = cfg.sim_critical_rpm / 60.0
+                aw = 0.7 * base
+                whirl = aw * np.sin(0.45 * phase + ph)
+                whip = 1.4 * aw * np.sin(2.0 * math.pi * fn1 * (idx / fs))
+                on = rpm > 1.8 * cfg.sim_critical_rpm
+                lock = rpm > 2.2 * cfg.sim_critical_rpm
+                sig += np.where(on, np.where(lock, whip, whirl), 0.0)
 
             sig += cfg.noise_rms * self._rng.standard_normal(n)
             out[ci] = sig

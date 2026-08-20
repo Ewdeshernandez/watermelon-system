@@ -326,7 +326,10 @@ def _render_source_params() -> None:
             fs = st.select_slider("Sample rate (Hz)", options=[2560, 5120, 10240, 25600, 51200],
                                   value=int(st.session_state.get("rm_fs", 25600)), key="rm_fs_w")
         with col3:
-            defect = (st.selectbox("Defecto simulado", ["none", "unbalance", "misalignment"], key="rm_defect")
+            defect = (st.selectbox("Defecto simulado",
+                                   ["none", "unbalance", "misalignment", "oil_whirl"], key="rm_defect",
+                                   help="oil_whirl: inyecta inestabilidad de película — remolino "
+                                        "(~0.45X) que se engancha (whip) al pasar 2× la crítica.")
                       if source_kind.startswith("Simulado") else "none")
         sim = {"rpm": default_rpm, "defect": defect, "speed_profile": "constant"}
         if source_kind.startswith("Simulado"):
@@ -1327,6 +1330,67 @@ def _op_margin(rr, crit_idx, af_by_crit, op_rpm):
                      f"cumple API 684 (≥{req:.0f}%)."))
 
 
+def _cascade_diagnosis(rpms, freqs, mat, crit_rpms):
+    """Auto-diagnóstico de la cascada: velocidades críticas (modos) +
+    inestabilidades SUBSÍNCRONAS con nombre propio, discriminando oil whirl (sigue
+    el rpm ~0.45X), oil whip (se engancha a una natural = frecuencia fija) y ½X
+    (roce/holgura). Devuelve lista de (nivel, título, detalle)."""
+    out = []
+    for nc in crit_rpms:
+        out.append(("info", f"Velocidad crítica ≈ {nc:.0f} rpm",
+                    "Resonancia de un modo de flexión del rotor (se amplifica el 1X). "
+                    "Verificar margen de separación (API 684)."))
+    if not len(rpms) or freqs is None or not len(freqs):
+        return out
+    df = float(freqs[1] - freqs[0]) if len(freqs) > 1 else 1.0
+    gmax = float(np.max(mat)) if mat.size else 0.0
+    pts = []          # (rpm, freq_sub, order, amp)
+    for i, rp in enumerate(rpms):
+        f1 = rp / 60.0
+        if f1 <= 0:
+            continue
+        band = (freqs >= 0.15 * f1) & (freqs <= 0.9 * f1)     # zona subsíncrona
+        if not band.any():
+            continue
+        sub = mat[i][band]
+        fb = freqs[band]
+        j = int(np.argmax(sub))
+        af, ff = float(sub[j]), float(fb[j])
+        b1 = np.abs(freqs - f1) <= max(df, 0.05 * f1)
+        a1 = float(mat[i][b1].max()) if b1.any() else 0.0
+        if af > 0.25 * max(a1, 1e-9) and af > 0.06 * max(gmax, 1e-9):
+            pts.append((rp, ff, ff / f1, af))
+    if len(pts) < max(4, len(rpms) // 8):
+        return out
+    P = np.array(pts, float)
+    ffreq, orders = P[:, 1], P[:, 2]
+    mo = float(np.median(orders))
+    f_cv = float(np.std(ffreq) / (np.mean(ffreq) + 1e-9))     # ~0 = frecuencia fija (whip)
+    o_cv = float(np.std(orders) / (np.mean(orders) + 1e-9))   # ~0 = orden fijo (whirl/½X)
+    near_crit = bool(crit_rpms) and any(abs(np.mean(ffreq) * 60.0 - nc) < 0.18 * nc for nc in crit_rpms)
+    if f_cv < 0.14 and o_cv > 0.18 and near_crit:
+        out.append(("danger", "⚠ OIL WHIP (latigazo de aceite)",
+                    f"Vibración subsíncrona ENGANCHADA a una frecuencia natural (~{np.mean(ffreq):.0f} Hz "
+                    f"≈ 1ª crítica): se queda FIJA mientras sube la velocidad. Inestabilidad de la "
+                    f"película de aceite **severa y destructiva** (API 684) — actuar (carga, claro, "
+                    f"tipo de cojinete)."))
+    elif 0.35 <= mo <= 0.49 and o_cv < 0.16:
+        out.append(("danger", "⚠ OIL WHIRL (remolino de aceite)",
+                    f"Vibración subsíncrona a **~{mo:.2f}X** que SIGUE la velocidad (frecuencia = "
+                    f"~{mo:.2f}×rpm): inestabilidad de la película de aceite del cojinete (API 684). "
+                    f"Puede degenerar en oil whip al pasar ~2× la 1ª crítica."))
+    elif 0.47 <= mo <= 0.53 and o_cv < 0.14:
+        out.append(("warn", "Subarmónico ½X",
+                    f"Componente a **~0.5X** que sigue la velocidad → típico de **roce (rub)** o "
+                    f"**holgura mecánica**, NO película de aceite. Se diferencia del oil whirl "
+                    f"(que va en ~0.42–0.48X)."))
+    else:
+        out.append(("warn", f"Subsíncrono ~{mo:.2f}X",
+                    "Hay energía por debajo del 1X; vigilar su evolución con la velocidad para "
+                    "clasificar (whirl sigue el rpm; whip se fija en una natural)."))
+    return out
+
+
 _TREND_BRIGHT = ["#2f6fb0", "#16a34a", "#e11d48", "#7c3aed",
                  "#0891b2", "#ea580c", "#db2777", "#0f766e"]
 
@@ -1730,9 +1794,11 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
                                yshift=9, font=dict(size=9.5, color=col))
     # Críticas (picos 1X del Bode) como línea horizontal tenue.
     rb, ab, _ph = tc.bode(channel)
+    crit_rpms = []
     if len(rb) >= 3:
         for ci in _detect_criticals(np.asarray(rb, float), np.asarray(ab, float)):
             yc = float(rb[ci])
+            crit_rpms.append(yc)
             fig.add_hline(y=yc, line=dict(color="#e26d6d", width=1, dash="dot"),
                           annotation_text=f"Ncrit {yc:.0f}", annotation_position="right",
                           annotation_font=dict(size=9, color="#c0392b"))
@@ -1749,6 +1815,19 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
                f"**órdenes** (½X, 1X, 2X, 3X): el pico que sube por **1X** es el desbalance/respuesta "
                f"síncrona; energía en **½X** = inestabilidad (remolino/latigazo), en **2X** = "
                f"desalineación. Amplitud en {uu.split()[-1] if uu else 'pp'} (API 670).")
+
+    # Auto-diagnóstico (modos + inestabilidad de película con nombre propio).
+    findings = _cascade_diagnosis(rpms, freqs, mat, crit_rpms)
+    if findings:
+        st.markdown("**🔎 Auto-diagnóstico (API 684)**")
+        for lvl, title, detail in findings:
+            body = f"**{title}** — {detail}"
+            if lvl == "danger":
+                st.error(body)
+            elif lvl == "warn":
+                st.warning(body)
+            else:
+                st.info(body)
 
 
 def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
