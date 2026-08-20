@@ -141,6 +141,21 @@ def render_remote_monitoring() -> None:
         .st-key-rm_orbit_ctrls [data-testid="stNumberInput"] input {
             background:transparent !important; text-align:center;
             font-size:12px !important; padding:2px 6px !important; }
+
+        /* Controles del Bode: toggle + campos de rpm compactos */
+        .st-key-rm_bode_ctrls { margin-top:-4px; }
+        .st-key-rm_bode_ctrls [data-testid="stNumberInput"] { width:150px !important; }
+        .st-key-rm_bode_ctrls [data-testid="stNumberInput"] label p { font-size:11px !important; }
+        .st-key-rm_bode_ctrls [data-testid="stNumberInput"] button { display:none !important; }
+        .st-key-rm_bode_ctrls [data-testid="stNumberInputContainer"] {
+            border:none !important; box-shadow:none !important; outline:none !important;
+            background:#f2f6fc !important; min-height:30px !important; border-radius:8px !important; }
+        .st-key-rm_bode_ctrls [data-testid="stNumberInputContainer"]:hover,
+        .st-key-rm_bode_ctrls [data-testid="stNumberInputContainer"]:focus-within {
+            background:#e9f0fb !important; }
+        .st-key-rm_bode_ctrls [data-testid="stNumberInput"] input {
+            background:transparent !important; text-align:center;
+            font-size:12px !important; padding:2px 6px !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -1359,7 +1374,7 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
 
     rpms = np.asarray(rpms, float)
     lo_rpm, hi_rpm = float(rpms.min()), float(rpms.max())
-    op_rpm = float(st.session_state.get("rm_machine_rpm", 0) or 0)
+    _op_nominal = float(st.session_state.get("rm_machine_rpm", 0) or 0)
     with st.container(key="rm_bode_ctrls", horizontal=True, vertical_alignment="center", gap="medium"):
         comp = st.toggle("Compensar slow-roll", key="rm_bode_comp",
                          help="Resta el vector 1X de slow-roll (runout mecánico + eléctrico) a "
@@ -1371,6 +1386,13 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
             sr_rpm = st.number_input("Vel. slow-roll (rpm)", int(lo_rpm), int(hi_rpm),
                                      int(round(lo_rpm)), step=60, key="rm_bode_srrpm",
                                      help="Velocidad de referencia del vector slow-roll.")
+        # Velocidad de operación: arranca con la nominal de la config, editable
+        # para evaluar el margen de separación a otra velocidad.
+        op_rpm = float(st.number_input(
+            "Vel. operación (rpm)", 0, 60000, int(round(_op_nominal)) if _op_nominal > 0 else 3600,
+            step=60, key="rm_bode_oprpm",
+            help="Velocidad de operación (nominal). Por defecto la de la config; cambiala para "
+                 "evaluar el margen de separación a otra velocidad. 0 = ocultar."))
 
     # Vector complejo 1X → compensación slow-roll (resta el vector de referencia).
     z = amp * np.exp(1j * np.radians(phase))
