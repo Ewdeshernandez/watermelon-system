@@ -29,7 +29,9 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
-from reportlab.platypus import Image, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import (
+    Image, KeepTogether, Paragraph, Spacer, Table, TableStyle,
+)
 
 from core.report_pdf_shell import make_styles, paragraph_safe  # noqa: F401
 
@@ -367,6 +369,46 @@ def severity_table(rows: List[Dict[str, Any]], styles) -> Table:
     return t
 
 
+def severity_blocks(rows: List[Dict[str, Any]], styles) -> List[Any]:
+    """Desarrollo por acceso, robusto ante MUCHAS imágenes. Cada acceso:
+      - Tabla de texto (Acceso | Hallazgos | Severidad/Comentarios) — corta, se
+        mantiene junta (KeepTogether).
+      - Rejilla de imágenes debajo (3 por fila) que SÍ se parte entre páginas.
+
+    Reemplaza a severity_table cuando hay tantas imágenes que una sola fila de
+    tabla superaría el alto de la página (ReportLab no parte una fila)."""
+    out: List[Any] = []
+    cw = [3.2 * cm, 6.5 * cm, 6.5 * cm]
+    for r in rows:
+        sev = str(r.get("severity", ""))
+        col = _severity_color(sev)
+        head = [Paragraph(f"<b>{h}</b>", styles["WMTableHeader"]) for h in
+                ["Acceso / Ubicación", "Hallazgos evidenciados", "Severidad / Comentarios"]]
+        sev_html = (f'<b><font color="{col}">{paragraph_safe(sev)}</font></b><br/>'
+                    f'{paragraph_safe(str(r.get("comment", "")))}')
+        datarow = [
+            Paragraph(paragraph_safe(str(r.get("access", ""))), styles["WMTableCell"]),
+            Paragraph(paragraph_safe(str(r.get("findings", ""))), styles["WMTableCell"]),
+            Paragraph(sev_html, styles["WMTableCell"]),
+        ]
+        t = Table([head, datarow], colWidths=cw)
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_HEADER_BG)),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ]))
+        out.append(KeepTogether([t]))
+
+        img_list = r.get("images") or ([r["image_bytes"]] if r.get("image_bytes") else [])
+        photos = [{"bytes": b, "caption": ""} for b in img_list if b]
+        if photos:
+            out.append(Spacer(1, 0.12 * cm))
+            out += photo_grid(photos, styles, cols=3, max_h_cm=5.0, credit=None)
+        out.append(Spacer(1, 0.35 * cm))
+    return out
+
+
 def severity_legend(styles) -> Table:
     """Tabla 'Condición de severidades' (Operativo / No operativo)."""
     rows = [
@@ -537,7 +579,7 @@ __all__ = [
     "make_styles", "p", "section", "subsection", "bullets", "numbered_plan",
     "numbered_list", "machine_info_table", "inspection_status_table",
     "kv_table", "two_col_kv", "grid_table", "safe_image", "photo_grid",
-    "severity_table", "severity_legend", "signatures_block",
+    "severity_table", "severity_blocks", "severity_legend", "signatures_block",
     "autofill_base_meta", "today_str", "photo_credit",
     "TYPE_CODES", "REVIEWERS", "peek_consecutive", "commit_consecutive",
 ]

@@ -28,8 +28,8 @@ from core.report_pdf_shell import render_report_pdf
 from core.reports_ext.common import (
     make_styles, p, section, bullets, numbered_plan, numbered_list,
     machine_info_table, inspection_status_table, kv_table, two_col_kv,
-    grid_table, photo_grid, severity_table, severity_legend, today_str,
-    photo_credit,
+    grid_table, photo_grid, severity_table, severity_blocks, severity_legend,
+    today_str, photo_credit,
 )
 
 _CITY = "Cajicá, Cundinamarca · Colombia"
@@ -230,7 +230,10 @@ def build_borescope_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> byt
     body.append(Spacer(1, 0.3 * cm))
     rows = content.get("severity_rows") or []
     if rows:
-        body.append(severity_table(rows, styles))
+        # severity_blocks (no severity_table): saca las imágenes de la celda a
+        # una rejilla que SÍ se parte entre páginas → evita el error de "fila
+        # demasiado alta" cuando un acceso tiene muchas fotos. v3.31.508.
+        body += severity_blocks(rows, styles)
 
     body += _photos(content, styles, "7")
 
