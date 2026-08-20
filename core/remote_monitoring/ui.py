@@ -181,6 +181,7 @@ def _build_agent(channels: List[ChannelConfig], source_kind: str, fs: float,
         rpm_start=sim.get("rpm_start", 0.0), rpm_end=sim.get("rpm_end", 0.0),
         ramp_seconds=sim.get("ramp_seconds", 30.0),
         sim_critical_rpm=sim.get("sim_critical_rpm", 0.0),
+        sim_critical_rpm2=sim.get("sim_critical_rpm2", 0.0),
     )
     if source_kind == "Campo (planta)":
         from core.remote_monitoring.ni_stream_source import NIStreamSource
@@ -317,8 +318,14 @@ def _render_source_params() -> None:
                 with p3:
                     sim["rpm_end"] = st.number_input("RPM fin", 0, 30000, 6000, step=60, key="rm_rpmend")
                 with p4:
-                    sim["sim_critical_rpm"] = st.number_input("Crítica (rpm)", 0, 30000, 3000, step=60, key="rm_crit")
-                sim["ramp_seconds"] = st.slider("Duración (s)", 5, 120, 30, key="rm_ramp")
+                    sim["sim_critical_rpm"] = st.number_input("Crítica 1 (rpm)", 0, 30000, 3000, step=60, key="rm_crit")
+                cc1, cc2 = st.columns(2)
+                with cc1:
+                    sim["sim_critical_rpm2"] = st.number_input("Crítica 2 (rpm, opcional)", 0, 30000, 0,
+                                                               step=60, key="rm_crit2",
+                                                               help="0 = sin segunda resonancia.")
+                with cc2:
+                    sim["ramp_seconds"] = st.slider("Duración (s)", 5, 120, 30, key="rm_ramp")
             st.caption("**Estable**: velocidad constante (estado estacionario, muestreo continuo). "
                        "**Arranque / Parada**: barrido de velocidad → captura **transitoria** "
                        "(finer, por Δrpm) para bode / cascade / waterfall.")
@@ -1382,12 +1389,28 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
                              marker=dict(size=4, color=_S1_KPH),
                              hovertemplate=f"%{{x:.0f}} rpm<br>%{{y:.3g}} {units} {conv}<extra></extra>"),
                   row=2, col=1)
-    # Velocidad crítica (pico) marcada en ambos.
-    for r in (1, 2):
-        fig.add_vline(x=ncrit, line=dict(color="#e26d6d", width=1, dash="dot"), row=r, col=1)
-    fig.add_annotation(x=ncrit, y=a_pk, row=2, col=1, text=f"Ncrit ≈ {ncrit:.0f} rpm",
-                       showarrow=True, arrowhead=2, arrowsize=0.8, arrowcolor="#c0392b", ax=28, ay=-18,
-                       font=dict(size=10, color="#c0392b"), bgcolor="rgba(255,255,255,0.85)")
+    # Velocidad(es) crítica(s): picos locales prominentes (hasta 3), fusionando
+    # los cercanos. Marca cada uno con línea + etiqueta Ncrit.
+    rr, aa = np.asarray(rpms, float), np.asarray(amp_disp, float)
+    mx = float(aa.max()) if len(aa) else 0.0
+    cand = [i for i in range(1, len(aa) - 1)
+            if aa[i] >= aa[i - 1] and aa[i] >= aa[i + 1] and aa[i] > 0.4 * mx]
+    span = (rr[-1] - rr[0]) if len(rr) > 1 else 1.0
+    crit_idx = []
+    for i in cand:
+        if crit_idx and abs(rr[i] - rr[crit_idx[-1]]) < 0.08 * span:
+            if aa[i] > aa[crit_idx[-1]]:
+                crit_idx[-1] = i
+        else:
+            crit_idx.append(i)
+    crit_idx = sorted(crit_idx, key=lambda i: -aa[i])[:3] or [i_pk]
+    for i in crit_idx:
+        for r in (1, 2):
+            fig.add_vline(x=float(rr[i]), line=dict(color="#e26d6d", width=1, dash="dot"), row=r, col=1)
+        fig.add_annotation(x=float(rr[i]), y=float(aa[i]), row=2, col=1,
+                           text=f"Ncrit ≈ {rr[i]:.0f} rpm", showarrow=True, arrowhead=2,
+                           arrowsize=0.8, arrowcolor="#c0392b", ax=26, ay=-16,
+                           font=dict(size=10, color="#c0392b"), bgcolor="rgba(255,255,255,0.85)")
 
     ymax = _nice_top(a_pk * 1.15) if a_pk > 0 else 1.0
     fig.update_yaxes(title_text="Fase 1X (°)", autorange="reversed", dtick=90, row=1, col=1,

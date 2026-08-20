@@ -87,6 +87,7 @@ class StreamConfig:
     # respuesta 1X se amplifica al pasar por la crítica y la fase gira 0→180°,
     # produciendo un Bode físicamente correcto. 0 = sin resonancia (plano).
     sim_critical_rpm: float = 0.0
+    sim_critical_rpm2: float = 0.0     # 2ª crítica opcional (2 resonancias)
     sim_zeta: float = 0.05
 
     def __post_init__(self) -> None:
@@ -261,9 +262,17 @@ class SimulatedStreamSource(StreamSource):
         dphi = 2.0 * math.pi * f1 / fs
         phase = self._phase + np.cumsum(dphi)   # ángulo 1X en rad
 
-        # Amplificación síncrona por velocidad crítica (Bode físico)
-        fn = cfg.sim_critical_rpm / 60.0 if cfg.sim_critical_rpm > 0 else 0.0
-        A, phi_res = self._sdof(f1, fn, cfg.sim_zeta)
+        # Amplificación síncrona por velocidad(es) crítica(s) (Bode físico).
+        # Suma vectorial de una o dos resonancias SDOF; sin críticas → plano.
+        crits = [c / 60.0 for c in (cfg.sim_critical_rpm, cfg.sim_critical_rpm2) if c > 0]
+        if crits:
+            z = np.zeros_like(f1, dtype=complex)
+            for fn in crits:
+                Ai, phii = self._sdof(f1, fn, cfg.sim_zeta)
+                z = z + Ai * np.exp(1j * phii)
+            A, phi_res = np.abs(z), np.angle(z)
+        else:
+            A, phi_res = np.ones_like(f1), np.zeros_like(f1)
 
         out = np.empty((cfg.n_channels, n), dtype=float)
         for ci, ch in enumerate(cfg.channels):

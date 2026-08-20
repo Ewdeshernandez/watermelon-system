@@ -26,6 +26,30 @@ import numpy as np
 from core.remote_monitoring.keyphasor import one_x_vector
 
 
+def _order_vector(eu, fs, f_target, freqs, mag, tol_frac=0.04):
+    """Vector 1X (amp 0-pk, fase deg) leyendo el PICO real del espectro cerca de
+    f_target y calculando el vector a esa frecuencia. Robusto cuando el rpm
+    estimado no coincide exacto con la frecuencia real (transitorio) → evita el
+    colapso de la proyección síncrona directa a f_target."""
+    if f_target <= 0 or len(freqs) < 2:
+        return one_x_vector(eu, fs, f_target)
+    df = float(freqs[1] - freqs[0])
+    tol = max(3.0 * df, tol_frac * f_target)
+    band = np.abs(freqs - f_target) <= tol
+    n = min(len(freqs), len(mag))
+    band = band[:n]
+    if band.any():
+        idx = np.where(band)[0]
+        j = int(idx[int(np.argmax(mag[:n][idx]))])
+        f_peak = float(freqs[j])
+        amp_peak = float(mag[j])          # magnitud del pico (robusta al barrido)
+    else:
+        f_peak, amp_peak = float(f_target), None
+    # Amplitud = pico del espectro; fase = vector síncrono a esa frecuencia.
+    a_sync, phase = one_x_vector(eu, fs, f_peak)
+    return (amp_peak if amp_peak is not None else a_sync), phase
+
+
 @dataclass
 class TransientConfig:
     delta_rpm: float = 25.0        # capturar un punto cada Δrpm de cambio
@@ -89,6 +113,10 @@ class TransientCapture:
             raw = snap[idx, -win:]
             eu = raw * 1000.0 / sens if sens > 0 else raw
             freqs, mag = self._spectrum(eu, fs)
+            # Vector 1X del PICO real cerca de f1 (evita el colapso de la
+            # proyección síncrona cuando el rpm estimado no cae exacto).
+            amp, phase = _order_vector(eu, fs, f1, freqs, mag)
+            sample.vect1x[ch.name] = (amp, phase)
             if self.freqs is None:
                 self.freqs = freqs
             # alinear longitud si fs/ventana variaran (defensivo)
@@ -96,8 +124,6 @@ class TransientCapture:
                 m = min(len(mag), len(self.freqs))
                 mag = mag[:m]
             sample.spectra[ch.name] = mag
-            amp, phase = one_x_vector(eu, fs, f1)
-            sample.vect1x[ch.name] = (amp, phase)
 
         self.samples.append(sample)
         self._last_rpm = float(rpm)
