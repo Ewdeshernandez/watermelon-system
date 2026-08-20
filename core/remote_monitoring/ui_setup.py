@@ -795,6 +795,9 @@ def _save_and_activate(setup: cfg.AcqSetup) -> None:
                                              for c in setup.channels}
     st.session_state["rm_gap_by_name"] = {c.point_label: float(c.gap_bias_v or 0.0)
                                           for c in setup.channels}
+    # Ángulo ABSOLUTO de montaje de cada sonda (desde TDC, horario) → órbita real
+    st.session_state["rm_angle_by_name"] = {
+        c.point_label: float(cfg.absolute_angle(c.angle_deg, c.side)) for c in setup.channels}
     # Pares X/Y explícitos → órbita en el Monitor
     st.session_state["rm_pairs_saved"] = [list(p) for p in cfg.orbit_pairs(setup.channels)]
     _watermelon_success(

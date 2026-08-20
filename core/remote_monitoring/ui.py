@@ -911,29 +911,42 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
 
 
 def _orbit_dir_arrow(fig, rotation: str, R: float) -> None:
-    """Dibuja un arco con flecha indicando el sentido de giro (arriba de la órbita)."""
+    """Arco con flecha indicando el sentido de giro (arriba de la órbita)."""
     import plotly.graph_objects as go
-    r = R * 1.22
+    r = R * 1.20
     cw = (rotation or "CCW").upper() == "CW"
     ang = np.radians(np.linspace(140, 60, 24) if cw else np.linspace(60, 140, 24))
     ax_, ay_ = r * np.cos(ang), r * np.sin(ang)
-    fig.add_trace(go.Scatter(x=ax_, y=ay_, mode="lines", line=dict(color="#0F1E3D", width=2.2),
+    fig.add_trace(go.Scatter(x=ax_, y=ay_, mode="lines", line=dict(color="#0F1E3D", width=2.0),
                              hoverinfo="skip", showlegend=False))
     fig.add_annotation(x=ax_[-1], y=ay_[-1], ax=ax_[-4], ay=ay_[-4],
                        xref="x", yref="y", axref="x", ayref="y", showarrow=True,
-                       arrowhead=2, arrowsize=1.5, arrowwidth=2.2, arrowcolor="#0F1E3D", text="")
-    fig.add_annotation(x=0.0, y=r, yshift=12, showarrow=False,
-                       text=f"{'⟳' if cw else '⟲'} {rotation}",
-                       font=dict(size=12, color="#0F1E3D"))
+                       arrowhead=2, arrowsize=1.4, arrowwidth=2.0, arrowcolor="#0F1E3D", text="")
+
+
+def _orbit_probe_axes(fig, m_deg_x: float, m_deg_y: float, lim: float,
+                      xname: str, yname: str) -> None:
+    """Ejes de las sondas dibujados en su ÁNGULO REAL de montaje + cajita X/Y en
+    la punta (estilo System1: el eje va donde está físicamente la sonda)."""
+    for m_deg, nm in [(m_deg_x, xname), (m_deg_y, yname)]:
+        m = np.radians(m_deg)
+        cx, cy = np.cos(m), np.sin(m)
+        fig.add_shape(type="line", x0=-lim * cx, y0=-lim * cy, x1=lim * cx, y1=lim * cy,
+                      line=dict(color="#dbe2ee", width=1.2), layer="below")
+        fig.add_annotation(x=0.9 * lim * cx, y=0.9 * lim * cy, showarrow=False,
+                           text=f"<b>{nm}</b>", font=dict(size=10.5, color="#334155"),
+                           bgcolor="#ffffff", bordercolor="#c7d0dc", borderwidth=1, borderpad=3)
 
 
 def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] = None) -> None:
+    """Una o varias órbitas lado a lado, rotadas al ángulo REAL de las sondas
+    (estilo System1). Info dentro de cada figura; opción de unir los keyphasor
+    con una curva (locus por vuelta) para análisis."""
     import plotly.graph_objects as go
     if len(vib_channels) < 2:
         st.info("La órbita necesita un par X/Y. Asocialo en **Configuración → Par X/Y**.")
         return
     name_to = {ch.name: (i, ch) for i, ch in vib_channels}
-    # Pares EXPLÍCITOS desde la config (Par X/Y). Fallback a consecutivos.
     saved = st.session_state.get("rm_pairs_saved") or []
     valid = [(a, b) for a, b in saved if a in name_to and b in name_to]
     if not valid:
@@ -945,10 +958,18 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
 
     labels = [f"{a}–{b}" for a, b in valid]
     f1 = (rpm / 60.0) if rpm else None
-    # Controles compactos en UNA fila: par · filtro · (vueltas si Directa).
+    angmap = st.session_state.get("rm_angle_by_name") or {}
+    tmap = st.session_state.get("rm_type_by_name") or {}
+    rotation = st.session_state.get("rm_machine_rotation", "CCW")
+
+    # Controles compactos en UNA fila: pares · filtro · (vueltas) · unir keyphasor.
     with st.container(key="rm_orbit_ctrls", horizontal=True,
                       vertical_alignment="center", gap="medium"):
-        sel = st.selectbox("Par", labels, key="rm_orbit_pair", label_visibility="collapsed")
+        st.session_state.setdefault("rm_orbit_pairs", [labels[0]])
+        st.session_state["rm_orbit_pairs"] = [s for s in st.session_state["rm_orbit_pairs"]
+                                              if s in labels] or [labels[0]]
+        sels = st.multiselect("Pares", labels, key="rm_orbit_pairs",
+                              label_visibility="collapsed", placeholder="Órbitas…")
         fmode = st.radio("Filtro", ["Directa", "1X", "2X"], horizontal=True,
                          key="rm_orbit_filter", label_visibility="collapsed",
                          help="Directa = onda completa. 1X/2X = órbita filtrada al orden (elipse).")
@@ -956,111 +977,128 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
         if fmode == "Directa":
             n_rev = int(st.number_input("Vueltas", 3, 60, 12, step=1, key="rm_orbit_revs",
                                         label_visibility="collapsed"))
+        kphline = st.toggle("Unir keyphasor", key="rm_orbit_kphline",
+                            help="Une con una curva los puntos de keyphasor (locus vuelta a vuelta).")
+    sels = sels or [labels[0]]
 
-    a, b = valid[labels.index(sel)]
-    # Y = vertical (nombre con 'Y'), X = horizontal
-    is_y = lambda n: "Y" in n.upper()
-    if is_y(a) and not is_y(b):
-        yname, xname = a, b
-    elif is_y(b) and not is_y(a):
-        yname, xname = b, a
-    else:
-        yname, xname = a, b
-    yi, chy = name_to[yname]
-    xi, chx = name_to[xname]
-    y = snap[yi] * 1000.0 / chy.sensitivity_mv_per_eu
-    x = snap[xi] * 1000.0 / chx.sensitivity_mv_per_eu
-    y = y - np.mean(y)
-    x = x - np.mean(x)
-
-    # Reconstrucción según filtro. kx/ky = puntos de keyphasor; vec = vector filtrado.
-    kx = ky = vec = None
-    if fmode == "Directa" or not f1:
-        if f1:
-            n_show = min(len(x), max(1, int(round(n_rev * (1.0 / f1) * fs))))
-            xo, yo = x[-n_show:], y[-n_show:]
+    def _prep(pair_lbl):
+        a, b = valid[labels.index(pair_lbl)]
+        is_y = lambda n: "Y" in n.upper()
+        if is_y(a) and not is_y(b):
+            yname, xname = a, b
+        elif is_y(b) and not is_y(a):
+            yname, xname = b, a
         else:
-            xo, yo = x, y
-        xo = xo - np.mean(xo)
-        yo = yo - np.mean(yo)
-        if f1:   # un punto de keyphasor por vuelta
-            spr = fs / f1
-            kt = np.arange(0.0, float(len(xo)), spr)
-            idx = np.arange(len(xo))
-            kx, ky = np.interp(kt, idx, xo), np.interp(kt, idx, yo)
-    else:
-        n = 1.0 if fmode == "1X" else 2.0
-        f = n * f1
-        ax_, px_ = one_x_vector(x, fs, f)
-        ay_, py_ = one_x_vector(y, fs, f)
-        tt = np.linspace(0.0, 1.0 / f1, 400)   # una vuelta del eje
-        xo = ax_ * np.cos(2 * np.pi * f * tt + np.radians(px_))
-        yo = ay_ * np.cos(2 * np.pi * f * tt + np.radians(py_))
-        kx, ky = np.array([xo[0]]), np.array([yo[0]])
-        vec = (ax_, px_, ay_, py_)
-    R = max(float(np.max(np.abs(xo))) if len(xo) else 0.0,
-            float(np.max(np.abs(yo))) if len(yo) else 0.0, 1e-9)
+            yname, xname = a, b
+        yi, chy = name_to[yname]
+        xi, chx = name_to[xname]
+        y = snap[yi] * 1000.0 / chy.sensitivity_mv_per_eu
+        x = snap[xi] * 1000.0 / chx.sensitivity_mv_per_eu
+        x, y = x - np.mean(x), y - np.mean(y)
+        kx = ky = vec = None
+        if fmode == "Directa" or not f1:
+            if f1:
+                n_show = min(len(x), max(1, int(round(n_rev * (1.0 / f1) * fs))))
+                x, y = x[-n_show:], y[-n_show:]
+            x, y = x - np.mean(x), y - np.mean(y)
+            if f1:
+                spr = fs / f1
+                kt = np.arange(0.0, float(len(x)), spr)
+                idx = np.arange(len(x))
+                kx, ky = np.interp(kt, idx, x), np.interp(kt, idx, y)
+        else:
+            n = 1.0 if fmode == "1X" else 2.0
+            f = n * f1
+            axv, pxv = one_x_vector(x, fs, f)
+            ayv, pyv = one_x_vector(y, fs, f)
+            tt = np.linspace(0.0, 1.0 / f1, 400)
+            x = axv * np.cos(2 * np.pi * f * tt + np.radians(pxv))
+            y = ayv * np.cos(2 * np.pi * f * tt + np.radians(pyv))
+            kx, ky = np.array([x[0]]), np.array([y[0]])
+            vec = (axv, pxv, ayv, pyv)
+        # Ángulos: absoluto (desde TDC, horario) → matemático (desde +X, CCW).
+        ax_abs = float(angmap.get(xname, 45.0))    # 45°R por defecto (típico)
+        ay_abs = float(angmap.get(yname, 315.0))   # 45°L por defecto
+        mX, mY = 90.0 - ax_abs, 90.0 - ay_abs
+        mXr, mYr = np.radians(mX), np.radians(mY)
+        # Rotación a marco físico (vertical = TDC arriba).
+        h = x * np.cos(mXr) + y * np.cos(mYr)
+        v = x * np.sin(mXr) + y * np.sin(mYr)
+        khh = khv = None
+        if kx is not None:
+            khh = kx * np.cos(mXr) + ky * np.cos(mYr)
+            khv = kx * np.sin(mXr) + ky * np.sin(mYr)
+        conv, norm, _k0, _krms = _amp_conv(tmap.get(yname, "proximity"))
+        return dict(lbl=pair_lbl, xname=xname, yname=yname, chx=chx, chy=chy,
+                    h=h, v=v, khh=khh, khv=khv, mX=mX, mY=mY, vec=vec, conv=conv, norm=norm,
+                    u=f"{chy.units} {conv}", xpp=float(np.ptp(x)), ypp=float(np.ptp(y)),
+                    smax=float(np.max(np.sqrt(h ** 2 + v ** 2))) if len(h) else 0.0)
 
-    # Convención de amplitud (órbita = desplazamiento → pp por norma).
-    conv, norm, _k0, _krms = _amp_conv(
-        (st.session_state.get("rm_type_by_name") or {}).get(yname, "proximity"))
-    u = f"{chy.units} {conv}"
-    xpp = float(np.ptp(xo)) if len(xo) else 0.0
-    ypp = float(np.ptp(yo)) if len(yo) else 0.0
-    smax = float(np.max(np.sqrt(xo ** 2 + yo ** 2))) if len(xo) else 0.0
+    data = [_prep(s) for s in sels]
+    gR = max((max(float(np.max(np.abs(d["h"]))) if len(d["h"]) else 0.0,
+                  float(np.max(np.abs(d["v"]))) if len(d["v"]) else 0.0) for d in data),
+             default=1e-9)
+    lim = gR * 1.5   # escala COMÚN → órbitas comparables
 
-    # Header autocontenido (tag · Órbita · par · filtro · rpm · fecha).
+    # Header autocontenido (tag · Órbita · filtro · rpm · fecha).
     machine = st.session_state.get("rm_machine_name", "—")
     ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
     st.markdown(
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
         f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
         f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
-        f'<span><b>{machine}</b> · Órbita · {sel} · <span style="color:#c7d6ea">{fmode}</span>'
+        f'<span><b>{machine}</b> · Órbita · <span style="color:#c7d6ea">{fmode}</span>'
         + (f' · <span style="color:#c7d6ea">{rpm:.0f} rpm</span>' if rpm else '') + '</span>'
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
-    fig = go.Figure(go.Scatter(
-        x=xo, y=yo, mode="lines", line=dict(width=1.4, color=_S1_BLUE),
-        hovertemplate=f"{chx.name} %{{x:.3g}}<br>{chy.name} %{{y:.3g}} {u}<extra></extra>"))
-    if kx is not None and len(kx):
-        fig.add_trace(go.Scatter(x=kx, y=ky, mode="markers", showlegend=False,
-                                 marker=dict(size=8, color="#dc2626", line=dict(width=1, color="#fff")),
-                                 hovertemplate="Keyphasor<extra></extra>"))
-    rotation = st.session_state.get("rm_machine_rotation", "CCW")
-    _orbit_dir_arrow(fig, rotation, R)
-    lim = R * 1.45
-
-    # Caja de lecturas DENTRO (arriba-izquierda), marco azul — estilo System1.
     _kv = (lambda k, v: f'<b style="color:{_S1_TITLE}">{k}</b> <i style="color:#2f6fb0">{v}</i>')
-    if vec is None:
-        rows = [_kv("Xpp", f"{xpp:.3g} {u}"), _kv("Ypp", f"{ypp:.3g} {u}"),
-                _kv("Smax", f"{smax:.3g} {chy.units}")]
-    else:
-        ax_, px_, ay_, py_ = vec
-        rows = [_kv(f"{fmode} X", f"{ax_ * 2:.3g} {u} ∠{px_:.0f}°"),
-                _kv(f"{fmode} Y", f"{ay_ * 2:.3g} {u} ∠{py_:.0f}°"),
-                _kv("Smax", f"{smax:.3g} {chy.units}")]
-    fig.add_annotation(
-        xref="paper", yref="paper", x=0.015, y=0.985, xanchor="left", yanchor="top",
-        align="left", showarrow=False, text="<br>".join(rows),
-        font=dict(size=10.5, family="Arial, Helvetica, sans-serif"),
-        bgcolor="rgba(244,249,255,0.94)", bordercolor="#2f6fb0", borderwidth=1.4, borderpad=7)
+    cols = st.columns(len(data), gap="small")
+    for d, col in zip(data, cols):
+        fig = go.Figure(go.Scatter(
+            x=d["h"], y=d["v"], mode="lines", line=dict(width=1.4, color=_S1_BLUE),
+            hovertemplate=f"H %{{x:.3g}}<br>V %{{y:.3g}} {d['u']}<extra></extra>"))
+        _orbit_probe_axes(fig, d["mX"], d["mY"], lim, d["xname"], d["yname"])
+        if kphline and d["khh"] is not None and len(d["khh"]) > 1:
+            fig.add_trace(go.Scatter(x=d["khh"], y=d["khv"], mode="lines",
+                                     line=dict(width=1.4, color="#e0982a", shape="spline"),
+                                     hoverinfo="skip", showlegend=False))
+        if d["khh"] is not None and len(d["khh"]):
+            fig.add_trace(go.Scatter(x=d["khh"], y=d["khv"], mode="markers", showlegend=False,
+                                     marker=dict(size=7, color="#dc2626", line=dict(width=1, color="#fff")),
+                                     hovertemplate="Keyphasor<extra></extra>"))
+        _orbit_dir_arrow(fig, rotation, lim / 1.5)
+        # Caja de lecturas DENTRO (arriba-izquierda): tag del par + amplitudes.
+        if d["vec"] is None:
+            rows = [_kv(d["lbl"], ""), _kv("Xpp", f"{d['xpp']:.3g} {d['u']}"),
+                    _kv("Ypp", f"{d['ypp']:.3g} {d['u']}"), _kv("Smax", f"{d['smax']:.3g} {d['chy'].units}")]
+        else:
+            axv, pxv, ayv, pyv = d["vec"]
+            rows = [_kv(d["lbl"], ""), _kv(f"{fmode} X", f"{axv * 2:.3g} {d['u']} ∠{pxv:.0f}°"),
+                    _kv(f"{fmode} Y", f"{ayv * 2:.3g} {d['u']} ∠{pyv:.0f}°"),
+                    _kv("Smax", f"{d['smax']:.3g} {d['chy'].units}")]
+        fig.add_annotation(
+            xref="paper", yref="paper", x=0.02, y=0.98, xanchor="left", yanchor="top",
+            align="left", showarrow=False, text="<br>".join(rows),
+            font=dict(size=10, family="Arial, Helvetica, sans-serif"),
+            bgcolor="rgba(244,249,255,0.94)", bordercolor="#2f6fb0", borderwidth=1.4, borderpad=6)
+        fig.update_layout(height=460, margin=dict(l=6, r=6, t=6, b=6),
+                          plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
+                          showlegend=False)
+        fig.update_xaxes(range=[-lim, lim], zeroline=True, zerolinecolor="#c9d2e0", zerolinewidth=1,
+                         showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
+                         ticks="outside", tickcolor=_S1_AXIS, constrain="domain")
+        fig.update_yaxes(range=[-lim, lim], zeroline=True, zerolinecolor="#c9d2e0", zerolinewidth=1,
+                         showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
+                         ticks="outside", tickcolor=_S1_AXIS, scaleanchor="x", scaleratio=1,
+                         constrain="domain")
+        with col:
+            st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
-    fig.update_layout(height=480, margin=dict(l=10, r=10, t=10, b=10),
-                      plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
-                      showlegend=False)
-    fig.update_xaxes(title=f"{chx.name} ({u})", range=[-lim, lim], zeroline=True,
-                     zerolinecolor="#c9d2e0", zerolinewidth=1, showgrid=True, gridcolor=_S1_GRID,
-                     showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
-                     constrain="domain")
-    fig.update_yaxes(title=f"{chy.name} ({u})", range=[-lim, lim], zeroline=True,
-                     zerolinecolor="#c9d2e0", zerolinewidth=1, showgrid=True, gridcolor=_S1_GRID,
-                     showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
-                     scaleanchor="x", scaleratio=1, constrain="domain")
-    st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
-    st.caption(f"Órbita de desplazamiento — amplitud en **{conv}** ({norm}). "
-               f"Punto rojo = keyphasor (referencia una vez por vuelta); flecha = sentido de giro.")
+    d0 = data[0]
+    st.caption(f"Ejes en el ángulo REAL de montaje de las sondas (desde TDC). "
+               f"Amplitud en **{d0['conv']}** ({d0['norm']}). Punto rojo = keyphasor "
+               f"(1 por vuelta){' · curva ámbar = locus vuelta a vuelta' if kphline else ''}; "
+               f"flecha = sentido de giro. Escala común entre órbitas.")
 
 
 def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float],
