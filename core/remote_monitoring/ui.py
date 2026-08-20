@@ -581,7 +581,7 @@ def _render_tabular_list(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]
     for k, (i, ch) in enumerate(vib):
         eu = snap[i] * 1000.0 / ch.sensitivity_mv_per_eu
         conv, _norm, k0, krms = _amp_conv(tmap.get(ch.name, "proximity"))
-        u = f"{ch.units} {conv}"
+        u = _amp_unit(ch.units, conv)
         overall = float(np.sqrt(np.mean((eu - np.mean(eu)) ** 2))) * krms
         al, dg = alarms.get(ch.name, (0.0, 0.0))
         gap = gaps.get(ch.name, 0.0)
@@ -827,6 +827,16 @@ def _amp_conv(ctype):
     return "rms", norm, 1.0 / _SQRT2, 1.0
 
 
+def _amp_unit(units_native, conv):
+    """Unidad de display sin duplicar el sufijo: la unidad nativa suele venir con
+    'pp'/'rms' (ej. 'mil pp') → se limpia y se le pega la convención de la norma.
+    'mil pp' + pp → 'mil pp' (no 'mil pp pp'); 'mm/s' + rms → 'mm/s rms'."""
+    base = (str(units_native or "")
+            .replace("pp", "").replace("PP", "")
+            .replace("rms", "").replace("RMS", "").strip())
+    return f"{base} {conv}".strip()
+
+
 def _order_amp_phase(freqs, mag, eu, fs, f_target, tol_frac=0.06):
     """Amplitud 0-pk del armónico (leída del PICO real del espectro cerca de
     f_target) + su fase. Robusto cuando el rpm estimado no cae exacto en la
@@ -877,7 +887,8 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
         orders = (freqs / f1) if f1 else np.zeros_like(freqs)
         peak = float(amp[band].max()) if band.any() else (float(amp.max()) if len(amp) else 0.0)
         prepared.append(dict(ch=ch, eu=eu, freqs=freqs, fdisp=fdisp, amp=amp, unit=unit,
-                             uconv=conv, norm=norm, freq_unit=freq_unit, xmin=xmin, xmax=xmax,
+                             uconv=conv, u=_amp_unit(ch.units, conv), norm=norm,
+                             freq_unit=freq_unit, xmin=xmin, xmax=xmax,
                              fmax_hz=fmax_hz, ov=ov, orders=orders, peak=peak))
     if not prepared:
         return
@@ -911,7 +922,7 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
         fig.add_trace(go.Scatter(
             x=p["fdisp"], y=p["amp"], mode="lines", line=dict(width=1.0, color=c),
             customdata=p["orders"],
-            hovertemplate=(f"%{{x:.0f}} {p['unit']}<br>%{{y:.4g}} {p['ch'].units} {p['uconv']}"
+            hovertemplate=(f"%{{x:.0f}} {p['unit']}<br>%{{y:.4g}} {p['u']}"
                            + ("<br>%{customdata:.2f}X" if f1 else "") + "<extra></extra>")),
             row=r, col=1)
         if f1:
@@ -922,7 +933,7 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
                                   annotation_text=lbl, annotation_font=dict(size=9, color="#c0392b"),
                                   row=r, col=1)
         ymax = _nice_top(p["peak"] * 1.15) if p["peak"] > 0 else 1.0
-        fig.update_yaxes(title_text=f"{p['ch'].name} ({p['ch'].units} {p['uconv']})", range=[0, ymax],
+        fig.update_yaxes(title_text=f"{p['ch'].name} ({p['u']})", range=[0, ymax],
                          showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
                          ticks="outside", tickcolor=_S1_AXIS, row=r, col=1)
         fig.update_xaxes(range=[p["xmin"], p["xmax"]], showgrid=True, gridcolor=_S1_GRID,
@@ -932,7 +943,7 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
                          title_text=(f"Frecuencia ({p['unit']})" if r == rows_n else None))
         # Caja de ARMÓNICOS por canal (arriba-derecha del subplot).
         _sfx = "" if r == 1 else str(r)
-        hrows = [_kv("O/All", f"{p['ov']:.3g} {p['ch'].units} {p['uconv']}")]
+        hrows = [_kv("O/All", f"{p['ov']:.3g} {p['u']}")]
         if f1:
             fmax_eff = p["fmax_hz"] if p["fmax_hz"] > 0 else (p["freqs"][-1] if len(p["freqs"]) else 0.0)
             for k in range(1, 7):
@@ -1075,7 +1086,7 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
         conv, norm, _k0, _krms = _amp_conv(tmap.get(yname, "proximity"))
         return dict(lbl=pair_lbl, xname=xname, yname=yname, chx=chx, chy=chy,
                     h=h, v=v, khh=khh, khv=khv, mX=mX, mY=mY, vec=vec, conv=conv, norm=norm,
-                    u=f"{chy.units} {conv}", xpp=float(np.ptp(x)), ypp=float(np.ptp(y)),
+                    u=_amp_unit(chy.units, conv), xpp=float(np.ptp(x)), ypp=float(np.ptp(y)),
                     smax=float(np.max(np.sqrt(h ** 2 + v ** 2))) if len(h) else 0.0)
 
     def _lead_int(s):
@@ -1448,6 +1459,7 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
     conv, norm, k0, _krms = _amp_conv(tmap.get(channel, "proximity"))
     chs = st.session_state.get("rm_channels") or []
     units = next((c.units for c in chs if c.name == channel), "mil")
+    uu = _amp_unit(units, conv)
     machine = st.session_state.get("rm_machine_name", "—")
 
     rpms = np.asarray(rpms, float)
@@ -1494,7 +1506,7 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
 
     # Header autocontenido (tag · Bode · canal · orden · rango rpm · fecha).
     ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
-    comp_txt = (f' · <span style="color:#c7d6ea">Comp {np.abs(zref) * k0:.3g} {units} {conv} '
+    comp_txt = (f' · <span style="color:#c7d6ea">Comp {np.abs(zref) * k0:.3g} {uu} '
                 f'∠{np.degrees(np.angle(zref)) % 360:.0f}°</span>') if comp else ''
     st.markdown(
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
@@ -1513,7 +1525,7 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
     # AMPLITUD abajo.
     fig.add_trace(go.Scatter(x=rpms, y=amp_disp, mode="lines",
                              line=dict(width=1.8, color=_S1_BLUE, shape="spline", smoothing=0.6),
-                             hovertemplate=f"%{{x:.0f}} rpm<br>%{{y:.3g}} {units} {conv}<extra></extra>"),
+                             hovertemplate=f"%{{x:.0f}} rpm<br>%{{y:.3g}} {uu}<extra></extra>"),
                   row=2, col=1)
     # Velocidad(es) crítica(s): picos locales prominentes (hasta 3), fusionando
     # los cercanos. Marca cada uno con línea + etiqueta Ncrit.
@@ -1590,7 +1602,7 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
     fig.update_yaxes(title_text="Fase 1X (°)", autorange="reversed", dtick=90, row=1, col=1,
                      showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
                      ticks="outside", tickcolor=_S1_AXIS, zeroline=False)
-    fig.update_yaxes(title_text=f"1X ({units} {conv})", range=[0, ymax], row=2, col=1,
+    fig.update_yaxes(title_text=f"1X ({uu})", range=[0, ymax], row=2, col=1,
                      showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
                      ticks="outside", tickcolor=_S1_AXIS, zeroline=False)
     fig.update_xaxes(row=1, col=1, showgrid=True, gridcolor=_S1_GRID, showline=True,
@@ -1601,7 +1613,7 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
     # Caja tipo cursor (arriba-derecha): resonancia principal (API 684).
     _kv = (lambda k, v: f'<b style="color:{_S1_TITLE}">{k}</b> <i style="color:#2f6fb0">{v}</i>')
     af_main = _half_power_af(rr, aa, i_pk)
-    box = [_kv("Ncrit", f"{ncrit:.0f} rpm"), _kv("Amp", f"{a_pk:.3g} {units} {conv}"),
+    box = [_kv("Ncrit", f"{ncrit:.0f} rpm"), _kv("Amp", f"{a_pk:.3g} {uu}"),
            _kv("High spot", f"{ph_pk:.0f}°")]
     if af_main:
         box.append(_kv("AF", f"{af_main[0]:.1f}"))
@@ -1658,6 +1670,7 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
     conv, norm, k0, _krms = _amp_conv(tmap.get(channel, "proximity"))
     chs = st.session_state.get("rm_channels") or []
     units = next((c.units for c in chs if c.name == channel), "mil")
+    uu = _amp_unit(units, conv)
     machine = st.session_state.get("rm_machine_name", "—")
     _hdr = (lambda extra: st.markdown(
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
@@ -1677,7 +1690,7 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
             eu = snap[i] * 1000.0 / ch.sensitivity_mv_per_eu
             a, ph = one_x_vector(eu, fs, rpm / 60.0)
             fig.add_trace(go.Scatterpolar(r=[a * k0], theta=[ph], mode="markers+text",
-                          text=[f"{a * k0:.3g} {units} {conv} ∠{ph:.0f}°"], textposition="top center",
+                          text=[f"{a * k0:.3g} {uu} ∠{ph:.0f}°"], textposition="top center",
                           marker=dict(size=15, color=_S1_KPH)))
         fig.update_layout(height=460, margin=dict(l=30, r=30, t=10, b=20), showlegend=False,
                           paper_bgcolor="#ffffff", font=_S1_FONT,
@@ -1712,7 +1725,16 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
     r = np.abs(z) * k0
     th = np.degrees(np.angle(z)) % 360.0
 
-    comp_txt = (f' · <span style="color:#c7d6ea">Comp {np.abs(zref) * k0:.3g} {units} {conv} '
+    # Orientación FÍSICA (como System1): el 0° de fase se ubica en el plano de la
+    # sonda (ángulo real de montaje desde TDC), y la fase (lag) corre EN CONTRA
+    # del sentido de giro. Así el vector apunta al high spot en la sección real.
+    angmap = st.session_state.get("rm_angle_by_name") or {}
+    beta = float(angmap.get(channel, 315.0 if "Y" in channel.upper() else 45.0))  # abs desde TDC (horario)
+    rot_dir = (st.session_state.get("rm_machine_rotation", "CCW") or "CCW").upper()
+    rot0 = (90.0 - beta) % 360.0                          # fase 0 → hacia la sonda
+    ang_dir = "counterclockwise" if rot_dir == "CW" else "clockwise"   # lag contra el giro
+
+    comp_txt = (f' · <span style="color:#c7d6ea">Comp {np.abs(zref) * k0:.3g} {uu} '
                 f'∠{np.degrees(np.angle(zref)) % 360:.0f}°</span>') if comp else ''
     _hdr(f' · <span style="color:#c7d6ea">1X</span>{comp_txt}')
 
@@ -1726,14 +1748,17 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
     fig.add_trace(go.Scatterpolar(
         r=r, theta=th, mode="lines+markers", line=dict(color=_S1_BLUE, width=1.6),
         marker=dict(size=3.5, color=_S1_KPH), customdata=rpms,
-        hovertemplate="%{customdata:.0f} rpm<br>%{r:.3g} " + f"{units} {conv}" +
+        hovertemplate="%{customdata:.0f} rpm<br>%{r:.3g} " + f"{uu}" +
                       "<br>%{theta:.0f}°<extra></extra>", showlegend=False))
-    # Etiquetas de rpm cada N puntos (como System1).
-    step = max(1, len(rpms) // 14)
-    ii = list(range(0, len(rpms), step))
-    fig.add_trace(go.Scatterpolar(r=r[ii], theta=th[ii], mode="text",
-                  text=[f"{rpms[i]:.0f}" for i in ii], textposition="top center",
-                  textfont=dict(size=8, color="#7a8699"), hoverinfo="skip", showlegend=False))
+    # Etiquetas de rpm cada N puntos, salteando el amontonamiento cerca del centro.
+    rmx = float(r.max()) if len(r) else 1.0
+    cand_lbl = [i for i in range(len(rpms)) if r[i] > 0.14 * rmx]
+    step = max(1, len(cand_lbl) // 12)
+    ii = cand_lbl[::step]
+    if ii:
+        fig.add_trace(go.Scatterpolar(r=r[ii], theta=th[ii], mode="text",
+                      text=[f"{rpms[i]:.0f}" for i in ii], textposition="top center",
+                      textfont=dict(size=8, color="#7a8699"), hoverinfo="skip", showlegend=False))
     # Crítica(s): estrella roja + etiqueta con AF.
     for i in crit_idx:
         afv = af_by_crit.get(i)
@@ -1755,19 +1780,25 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
             hoverinfo="skip", showlegend=False))
 
     rmax = _nice_top(float(r.max()) * 1.15) if r.max() > 0 else 1.0
+    # Marca de la sonda en 0° (dónde está físicamente montada).
+    fig.add_trace(go.Scatterpolar(r=[rmax], theta=[0], mode="markers+text",
+                  marker=dict(size=10, color="#0F1E3D", symbol="triangle-up"),
+                  text=[f" {channel}"], textposition="middle right",
+                  textfont=dict(size=10, color="#0F1E3D"), hoverinfo="skip", showlegend=False))
     fig.update_layout(height=560, margin=dict(l=30, r=30, t=10, b=20), showlegend=False,
                       paper_bgcolor="#ffffff", font=_S1_FONT,
                       polar=dict(bgcolor="#ffffff",
-                                 radialaxis=dict(range=[0, rmax], gridcolor=_S1_GRID, angle=90,
+                                 radialaxis=dict(range=[0, rmax], gridcolor=_S1_GRID, angle=rot0,
                                                  tickfont=dict(size=9, color="#64748b"),
-                                                 title=dict(text=f"1X ({units} {conv})")),
-                                 angularaxis=dict(rotation=90, direction="clockwise", dtick=30,
+                                                 ticksuffix=f" {uu.split()[0] if uu else ''}",
+                                                 title=dict(text="")),
+                                 angularaxis=dict(rotation=rot0, direction=ang_dir, dtick=30,
                                                   gridcolor=_S1_GRID, tickfont=dict(size=9),
-                                                  linecolor=_S1_AXIS)))
+                                                  ticksuffix="°", linecolor=_S1_AXIS)))
     # Caja de cursor (pico de resonancia) — esquina, en coords de papel.
     _kv = (lambda k, v: f'<b style="color:{_S1_TITLE}">{k}</b> <i style="color:#2f6fb0">{v}</i>')
     af_main = _half_power_af(rpms, r, i_pk)
-    box = [_kv("Ncrit", f"{rpms[i_pk]:.0f} rpm"), _kv("Amp", f"{r[i_pk]:.3g} {units} {conv}"),
+    box = [_kv("Ncrit", f"{rpms[i_pk]:.0f} rpm"), _kv("Amp", f"{r[i_pk]:.3g} {uu}"),
            _kv("Fase", f"{th[i_pk]:.0f}°")]
     if af_main:
         box.append(_kv("AF", f"{af_main[0]:.1f}"))
@@ -1775,19 +1806,22 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
                        align="left", showarrow=False, text="<br>".join(box),
                        font=dict(size=10.5, family="Arial, Helvetica, sans-serif"),
                        bgcolor="rgba(244,249,255,0.94)", bordercolor="#2f6fb0", borderwidth=1.4, borderpad=6)
-    # Sentido de velocidad creciente.
+    # Nota de orientación física.
     fig.add_annotation(xref="paper", yref="paper", x=0.99, y=0.99, xanchor="right", yanchor="top",
-                       showarrow=False, text="↻ velocidad ↑",
-                       font=dict(size=10, color="#64748b"))
+                       showarrow=False,
+                       text=f"0° = sonda {channel} · fase contra el giro ({rot_dir})",
+                       font=dict(size=9.5, color="#64748b"))
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
     if op_stat and op_stat["status"] in ("res", "margin"):
         st.error(op_stat["msg"])
     elif op_stat and op_stat["status"] == "ok":
         st.success(op_stat["msg"])
-    st.caption("Locus 1X (Nyquist): cada punto = vector amplitud∠fase a esa rpm. El **lazo grande** "
-               "marca la resonancia (crítica). Amplitud radial en **pp** para desplazamiento "
-               "(API 670); slow-roll y criterios de operación por **API 684**.")
+    st.caption(f"Locus 1X orientado al **plano real de la sonda {channel}** (0° = su ángulo de "
+               f"montaje desde TDC) con la **fase creciendo en contra del sentido de giro** "
+               f"({rot_dir}) — igual que System1. El **lazo** marca la resonancia; el vector "
+               f"apunta al high spot. Amplitud radial en **{uu.split()[-1] if uu else 'pp'}** "
+               f"(API 670); slow-roll y operación por **API 684**.")
 
 
 def _plot_shaft_centerline(snap: np.ndarray, vib) -> None:
