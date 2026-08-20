@@ -202,9 +202,22 @@ class SimulatedStreamSource(StreamSource):
         self._cursor = 0
         self._phase = 0.0   # fase 1X acumulada (rad) — continuidad con velocidad variable
         self._rng: Optional[np.random.Generator] = None
-        self._phase_offsets = np.array(
-            [((i * math.pi / 2.0) % (2 * math.pi)) for i in range(config.n_channels)]
-        )
+        # Offsets de fase 1X por canal. Para que la FORMA DEFLECTADA (unir los
+        # keyphasor de cada cojinete) salga como una curva SUAVE de lado-libre a
+        # lado-acople: la fase base avanza ~28° por cojinete y, dentro del par,
+        # X va en cuadratura (+90°) respecto a Y → órbita elíptica bien formada.
+        offs = []
+        for ch in config.channels:
+            label = (getattr(ch, "name", "") or "").upper()
+            digits = "".join(c for c in label if c.isdigit())
+            brg = int(digits) if digits else 0
+            if "X" in label and "KPH" not in label:
+                quad = math.pi / 2.0
+            else:
+                quad = 0.0
+            theta = math.radians(28.0 * max(0, brg - 1))
+            offs.append((theta + quad) % (2 * math.pi))
+        self._phase_offsets = np.array(offs) if offs else np.zeros(config.n_channels)
         self._kph_idx = config.keyphasor_index()
 
     def start(self) -> None:
