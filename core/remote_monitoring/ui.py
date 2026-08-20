@@ -1642,23 +1642,87 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
 
 
 def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> None:
-    """Cascade / spectral map: espectro vs rpm (heatmap). Transitorio."""
+    """Cascada estilo System1 mejorado: espectros APILADOS vs rpm (hidden-line),
+    con líneas de orden diagonales (½X, 1X, 2X, 3X), críticas marcadas y amplitud
+    por norma. Se llena durante un transitorio (runup/coastdown)."""
     import plotly.graph_objects as go
     rpms, freqs, mat = tc.cascade(channel)
     if len(rpms) < 2:
-        st.info("El Cascade se llena durante un **transitorio** (runup/coastdown). "
+        st.info("La cascada se llena durante un **transitorio** (runup/coastdown). "
                 "Elegí el perfil en **Fuente y parámetros** y pulsá ▶ Live.")
         return
-    fig = go.Figure(go.Heatmap(x=freqs, y=rpms, z=mat, colorscale="Turbo",
-                               colorbar=dict(title="Ampl")))
-    # línea de orden 1X (diagonal): freq = rpm/60
-    order1 = rpms / 60.0
-    fig.add_trace(go.Scatter(x=order1, y=rpms, mode="lines",
-                             line=dict(color="white", width=1, dash="dot"), name="1X"))
-    fig.update_layout(height=460, margin=dict(l=10, r=10, t=40, b=10),
-                      xaxis_title="Frecuencia (Hz)", yaxis_title="RPM",
-                      title=f"Cascade · {channel} ({len(rpms)} espectros)", showlegend=False)
+    tmap = st.session_state.get("rm_type_by_name") or {}
+    conv, norm, k0, _krms = _amp_conv(tmap.get(channel, "proximity"))
+    chs = st.session_state.get("rm_channels") or []
+    units = next((c.units for c in chs if c.name == channel), "mil")
+    uu = _amp_unit(units, conv)
+    machine = st.session_state.get("rm_machine_name", "—")
+    ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
+    st.markdown(
+        f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
+        f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
+        f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
+        f'<span><b>{machine}</b> · {channel} · Cascada · '
+        f'<span style="color:#c7d6ea">{rpms.min():.0f}–{rpms.max():.0f} rpm</span></span>'
+        f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
+
+    mat = mat * k0                                   # amplitud en convención de norma
+    fmax = float(freqs[-1]) if len(freqs) else 1.0
+    # Submuestreo a ~40 espectros para que se lea limpio.
+    n = len(rpms)
+    idx = np.unique(np.linspace(0, n - 1, min(40, n)).round().astype(int))
+    rr = rpms[idx]
+    MM = mat[idx]
+    span = float(rr[-1] - rr[0]) or 1.0
+    peak = float(MM.max()) or 1.0
+    scale = (span / max(1, len(rr))) * 1.7 / peak    # alto de cada espectro (en rpm)
+
+    fig = go.Figure()
+    # Espectros apilados con HIDDEN-LINE: de atrás (alta rpm) a adelante (baja),
+    # cada uno con relleno blanco que oculta los de atrás (look System1).
+    for i in range(len(rr) - 1, -1, -1):
+        base = float(rr[i])
+        y = base + MM[i] * scale
+        fig.add_trace(go.Scatter(
+            x=np.concatenate([freqs, freqs[::-1]]),
+            y=np.concatenate([y, np.full(len(freqs), base)]),
+            fill="toself", fillcolor="rgba(255,255,255,0.97)", line=dict(width=0),
+            hoverinfo="skip", showlegend=False))
+        fig.add_trace(go.Scatter(
+            x=freqs, y=y, mode="lines", line=dict(color=_S1_BLUE, width=0.9),
+            hovertemplate=f"%{{x:.0f}} Hz · {base:.0f} rpm<extra></extra>", showlegend=False))
+    # Líneas de orden diagonales (freq = k·rpm/60) ENCIMA.
+    for k, lbl, col in [(0.5, "½X", "#94a3b8"), (1.0, "1X", "#e26d6d"),
+                        (2.0, "2X", "#e0982a"), (3.0, "3X", "#8b5cf6")]:
+        fx = k * rr / 60.0
+        m = fx <= fmax
+        if m.sum() < 2:
+            continue
+        fig.add_trace(go.Scatter(x=fx[m], y=rr[m], mode="lines",
+                      line=dict(color=col, width=1, dash="dot"), hoverinfo="skip", showlegend=False))
+        fig.add_annotation(x=float(fx[m][-1]), y=float(rr[m][-1]), text=lbl, showarrow=False,
+                           yshift=9, font=dict(size=9.5, color=col))
+    # Críticas (picos 1X del Bode) como línea horizontal tenue.
+    rb, ab, _ph = tc.bode(channel)
+    if len(rb) >= 3:
+        for ci in _detect_criticals(np.asarray(rb, float), np.asarray(ab, float)):
+            yc = float(rb[ci])
+            fig.add_hline(y=yc, line=dict(color="#e26d6d", width=1, dash="dot"),
+                          annotation_text=f"Ncrit {yc:.0f}", annotation_position="right",
+                          annotation_font=dict(size=9, color="#c0392b"))
+
+    fig.update_layout(height=620, margin=dict(l=58, r=16, t=8, b=42),
+                      plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT, showlegend=False)
+    fig.update_xaxes(title_text="Frecuencia (Hz)", range=[0, fmax], showgrid=True, gridcolor=_S1_GRID,
+                     showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
+    fig.update_yaxes(title_text="RPM", range=[rr[0] - span * 0.02, rr[-1] + peak * scale * 1.1],
+                     showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
+                     ticks="outside", tickcolor=_S1_AXIS)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
+    st.caption(f"Cascada: cada traza es un espectro a su rpm (apilados). Las **diagonales** son las "
+               f"**órdenes** (½X, 1X, 2X, 3X): el pico que sube por **1X** es el desbalance/respuesta "
+               f"síncrona; energía en **½X** = inestabilidad (remolino/latigazo), en **2X** = "
+               f"desalineación. Amplitud en {uu.split()[-1] if uu else 'pp'} (API 670).")
 
 
 def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
