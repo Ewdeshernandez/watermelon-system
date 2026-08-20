@@ -735,14 +735,15 @@ def _spectrum(x: np.ndarray, fs: float):
 
 def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[float],
                    fmin_hz: float = 0.0, fmax_hz: float = 0.0, freq_unit: str = "cpm") -> None:
-    """Espectro estilo System1: eje Y en la unidad del sensor (pp) desde 0 y
-    autoescala; eje X en la unidad elegida (CPM/Hz) de Fmin a Fmax; crosshair
-    con hover que muestra frecuencia, amplitud y orden; panel Overall + 1X."""
+    """Espectro estilo estación de análisis: header autocontenido (tag · canal ·
+    rpm · fecha), fondo blanco, traza fina, eje X en CPM/Hz de Fmin a Fmax, Y en
+    la unidad (pp) desde 0, crosshair, y caja de ARMÓNICOS (O/All + 1X..6X)."""
     import plotly.graph_objects as go
     from core.remote_monitoring.config import hz_to_display, freq_label
+    machine = st.session_state.get("rm_machine_name", "—")
     eu = x * 1000.0 / ch.sensitivity_mv_per_eu if ch.sensitivity_mv_per_eu else x
     freqs, mag = _spectrum(eu, fs)          # mag = amplitud 0-pk
-    amp_pp = mag * 2.0                        # a pico-pico (convención Bently)
+    amp_pp = mag * 2.0                        # a pico-pico
     unit = freq_label(freq_unit)
     fdisp = freqs * (60.0 if unit == "CPM" else 1.0)
     f1 = (rpm / 60.0) if rpm else None
@@ -751,6 +752,17 @@ def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
     xmax = hz_to_display(fmax_hz, freq_unit) if fmax_hz > 0 else (fdisp[-1] if len(fdisp) else 1.0)
     band = (freqs >= (fmin_hz or 0)) & (freqs <= (fmax_hz if fmax_hz > 0 else freqs[-1] if len(freqs) else 0))
     ov_pp = float(np.sqrt(np.sum(mag[band] ** 2) / 2.0)) * 2.0 * np.sqrt(2.0) if band.any() else 0.0
+
+    # Header autocontenido (tag · canal · rpm · fecha).
+    ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
+    st.markdown(
+        f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
+        f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
+        f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
+        f'<span><b>{machine}</b> · Espectro · {ch.name}'
+        + (f' · <span style="color:#c7d6ea">{rpm:.0f} rpm</span>' if rpm else '') + '</span>'
+        f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
+
     fig = go.Figure(go.Scatter(
         x=fdisp, y=amp_pp, mode="lines", line=dict(width=1.0, color=_S1_BLUE),
         customdata=orders,
@@ -765,26 +777,30 @@ def _plot_spectrum(x: np.ndarray, fs: float, ch: ChannelConfig, rpm: Optional[fl
                               annotation_font=dict(size=9, color="#c0392b"))
     peak = float(amp_pp[band].max()) if band.any() else (float(amp_pp.max()) if len(amp_pp) else 0.0)
     ymax = _nice_top(peak * 1.15) if peak > 0 else 1.0
-    fig.update_layout(height=380, margin=dict(l=58, r=16, t=44, b=42),
+    fig.update_layout(height=440, margin=dict(l=58, r=16, t=10, b=42),
                       plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
-                      hovermode="x", title=dict(text=f"Espectro · {ch.name}",
-                                                font=dict(size=13, color=_S1_TITLE)))
+                      hovermode="x", showlegend=False)
     fig.update_xaxes(title=f"Frecuencia ({unit})", range=[xmin, xmax], showgrid=True,
                      gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS, ticks="outside",
                      tickcolor=_S1_AXIS, ticklen=4, showspikes=True, spikecolor="#94a3b8",
                      spikemode="across", spikesnap="cursor", spikethickness=1)
     fig.update_yaxes(title=ch.units, range=[0, ymax], showgrid=True, gridcolor=_S1_GRID,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS, ticklen=4)
-    # Panel de armónicos (cursor tipo System1): 1X..6X con amplitud @ frecuencia.
-    lines = [f"O/All {ov_pp:.3g} {ch.units}"]
+    # Caja de ARMÓNICOS (cursor estilo System1) arriba-derecha, marco azul.
+    _kv = (lambda k, v: f'<b style="color:{_S1_TITLE}">{k}</b> <i style="color:#2f6fb0">{v}</i>')
+    rows = [_kv("O/All", f"{ov_pp:.3g} {ch.units}")]
     if f1:
         fmax_eff = fmax_hz if fmax_hz > 0 else (freqs[-1] if len(freqs) else 0.0)
         for k in range(1, 7):
             if k * f1 > fmax_eff:
                 break
             ak, _pk = one_x_vector(eu, fs, k * f1)
-            lines.append(f"{k}X  {ak * 2:.3g} @ {hz_to_display(k * f1, freq_unit):.0f} {unit}")
-    _s1_readout(fig, lines)
+            rows.append(_kv(f"{k}X", f"{ak * 2:.3g} @ {hz_to_display(k * f1, freq_unit):.0f} {unit}"))
+    fig.add_annotation(
+        xref="paper", yref="paper", x=0.992, y=0.97, xanchor="right", yanchor="top",
+        align="left", showarrow=False, text="<br>".join(rows),
+        font=dict(size=10.5, family="Arial, Helvetica, sans-serif"),
+        bgcolor="rgba(244,249,255,0.94)", bordercolor="#2f6fb0", borderwidth=1.4, borderpad=8)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
 
