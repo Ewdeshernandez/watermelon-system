@@ -1119,6 +1119,9 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
 
     # Valores FUERA del gráfico, una tarjeta por órbita ALINEADA bajo cada una
     # (los centros de órbita caen en el centro de cada columna → st.columns encaja).
+    # La letra se achica con más órbitas para que todo quepa en su columna.
+    _fs = 12.0 if N <= 2 else (11.0 if N == 3 else (10.0 if N <= 5 else 9.0))
+
     def _card(d):
         if d["vec"] is None:
             inner = (_kv("Xpp", f"{d['xpp']:.3g} {d['u']}") + "<br>" +
@@ -1129,9 +1132,9 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
             inner = (_kv(f"{fmode} X", f"{axv * 2:.3g} {d['u']} ∠{pxv:.0f}°") + "<br>" +
                      _kv(f"{fmode} Y", f"{ayv * 2:.3g} {d['u']} ∠{pyv:.0f}°") + "<br>" +
                      _kv("Smax", f"{d['smax']:.3g} {d['chy'].units}"))
-        return (f'<div style="padding:7px 10px;border:1px solid #d6deea;border-radius:8px;'
-                f'background:#f8fafd;font-size:11.5px;line-height:1.6;text-align:center;'
-                f'font-family:Arial,Helvetica,sans-serif">{inner}</div>')
+        return (f'<div style="padding:6px 8px;border:1px solid #d6deea;border-radius:8px;'
+                f'background:#f8fafd;font-size:{_fs}px;line-height:1.55;text-align:center;'
+                f'word-break:break-word;font-family:Arial,Helvetica,sans-serif">{inner}</div>')
     vcols = st.columns(len(data), gap="small")
     for d, vc in zip(data, vcols):
         with vc:
