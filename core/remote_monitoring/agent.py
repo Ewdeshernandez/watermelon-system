@@ -159,7 +159,12 @@ class AcqAgent:
         if kph_idx is None:
             return None
         from core.remote_monitoring.keyphasor import detect_keyphasor
-        return detect_keyphasor(snap[kph_idx], self.sample_rate_hz).rpm
+        # Ventana corta (≤2 s) para SEGUIR transitorios sin retraso: el buffer
+        # largo (8 s) promedia la rampa y deja el rpm ~cientos de rpm atrás,
+        # descuadrando el Bode. 2 s alcanza para varios pulsos aun a baja rpm.
+        kph = snap[kph_idx]
+        win = min(len(kph), int(round(2.0 * self.sample_rate_hz)))
+        return detect_keyphasor(kph[-win:], self.sample_rate_hz).rpm
 
     def live_signals(self, seconds: Optional[float] = None,
                      include_keyphasor: bool = False) -> List:
