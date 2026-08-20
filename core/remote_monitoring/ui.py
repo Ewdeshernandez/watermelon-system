@@ -1493,8 +1493,10 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
            _kv("High spot", f"{ph_pk:.0f}°")]
     if af_main:
         box.append(_kv("AF", f"{af_main[0]:.1f}"))
+    # En el subplot de AMPLITUD (arriba-derecha, zona vacía a alta rpm) para NO
+    # tapar la curva de fase.
     fig.add_annotation(
-        xref="x domain", yref="y domain", x=0.992, y=0.04, xanchor="right", yanchor="bottom",
+        xref="x2 domain", yref="y2 domain", x=0.992, y=0.97, xanchor="right", yanchor="top",
         align="left", showarrow=False, text="<br>".join(box),
         font=dict(size=10.5, family="Arial, Helvetica, sans-serif"),
         bgcolor="rgba(244,249,255,0.94)", bordercolor="#2f6fb0", borderwidth=1.4, borderpad=6)
