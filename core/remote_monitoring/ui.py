@@ -108,16 +108,16 @@ def render_remote_monitoring() -> None:
             min-height:30px !important; border-radius:8px !important; }
         .st-key-rm_trend_ctrls [data-testid="stMultiSelect"] [data-baseweb="tag"] {
             height:20px !important; font-size:11px !important; }
-        /* Cajita de cantidad: SIN bordes (externo/rojo), solo sombreado al pasar/enfocar */
+        /* Cajita de cantidad: el borde vive en stNumberInputContainer → lo quito ahí.
+           Sin borde externo ni rojo; solo sombreado al pasar/enfocar. */
         .st-key-rm_trend_ctrls [data-testid="stNumberInput"] { width:64px !important; }
         .st-key-rm_trend_ctrls [data-testid="stNumberInput"] button { display:none !important; }
-        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] [data-baseweb="input"],
-        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] [data-baseweb="base-input"] {
+        .st-key-rm_trend_ctrls [data-testid="stNumberInputContainer"] {
             border:none !important; box-shadow:none !important; outline:none !important;
             background:transparent !important; min-height:30px !important; border-radius:8px !important; }
-        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] [data-baseweb="input"]:hover,
-        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] [data-baseweb="input"]:focus-within {
-            background:#e9f0fb !important; box-shadow:none !important; }
+        .st-key-rm_trend_ctrls [data-testid="stNumberInputContainer"]:hover,
+        .st-key-rm_trend_ctrls [data-testid="stNumberInputContainer"]:focus-within {
+            background:#e9f0fb !important; }
         .st-key-rm_trend_ctrls [data-testid="stNumberInput"] input {
             background:transparent !important; text-align:center;
             font-size:12px !important; padding:2px 6px !important; }
