@@ -75,11 +75,11 @@ def _order_vector(eu, fs, f_target, freqs, mag, ref_sample=0, tol_frac=0.04):
 
 @dataclass
 class TransientConfig:
-    delta_rpm: float = 8.0         # capturar un punto cada Δrpm de cambio (denso)
+    delta_rpm: float = 3.0         # capturar un punto cada Δrpm de cambio (MUY denso)
     min_rpm: float = 100.0         # no capturar por debajo (ruido de arranque)
     capture_samples: int = 4096    # ventana FFT por punto (líneas consistentes)
     fmax_hz: float = 500.0         # tope de frecuencia guardado (acota RAM)
-    max_samples: int = 200         # máximo de puntos de velocidad en memoria
+    max_samples: int = 800         # máximo de puntos de velocidad en memoria
 
 
 @dataclass
