@@ -108,19 +108,19 @@ def render_remote_monitoring() -> None:
             min-height:30px !important; border-radius:8px !important; }
         .st-key-rm_trend_ctrls [data-testid="stMultiSelect"] [data-baseweb="tag"] {
             height:20px !important; font-size:11px !important; }
-        /* Cajita de cantidad: SIN recuadro externo; se sombrea al pasar/enfocar */
-        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] { width:70px !important; }
+        /* Cajita de cantidad: SIN bordes (externo/rojo), solo sombreado al pasar/enfocar */
+        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] { width:64px !important; }
         .st-key-rm_trend_ctrls [data-testid="stNumberInput"] button { display:none !important; }
-        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] div[data-baseweb="input"] {
-            min-height:30px !important; border-radius:8px !important;
-            border:1px solid transparent !important; background:transparent !important; }
-        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] div[data-baseweb="input"]:hover {
-            background:#eef3fb !important; }
-        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] div[data-baseweb="input"]:focus-within {
-            background:#eef3fb !important; border-color:#c3d4ea !important; box-shadow:none !important; }
+        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] [data-baseweb="input"],
+        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] [data-baseweb="base-input"] {
+            border:none !important; box-shadow:none !important; outline:none !important;
+            background:transparent !important; min-height:30px !important; border-radius:8px !important; }
+        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] [data-baseweb="input"]:hover,
+        .st-key-rm_trend_ctrls [data-testid="stNumberInput"] [data-baseweb="input"]:focus-within {
+            background:#e9f0fb !important; box-shadow:none !important; }
         .st-key-rm_trend_ctrls [data-testid="stNumberInput"] input {
-            font-size:12px !important; padding:2px 6px !important; text-align:center;
-            background:transparent !important; }
+            background:transparent !important; text-align:center;
+            font-size:12px !important; padding:2px 6px !important; }
         </style>
     """, unsafe_allow_html=True)
 
