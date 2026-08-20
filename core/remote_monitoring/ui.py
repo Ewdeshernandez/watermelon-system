@@ -121,6 +121,26 @@ def render_remote_monitoring() -> None:
         .st-key-rm_trend_ctrls [data-testid="stNumberInput"] input {
             background:transparent !important; text-align:center;
             font-size:12px !important; padding:2px 6px !important; }
+
+        /* Controles de la órbita: par + filtro + vueltas, chicos y alineados */
+        .st-key-rm_orbit_ctrls { margin-top:-4px; }
+        .st-key-rm_orbit_ctrls [role="radiogroup"] { gap:2px 12px !important; align-items:center; }
+        .st-key-rm_orbit_ctrls [role="radiogroup"] label p { font-size:12px !important; }
+        .st-key-rm_orbit_ctrls [role="radiogroup"] label { padding:1px 0 !important; }
+        .st-key-rm_orbit_ctrls [data-testid="stSelectbox"] { min-width:150px !important; }
+        .st-key-rm_orbit_ctrls [data-testid="stSelectbox"] div[data-baseweb="select"] > div {
+            min-height:30px !important; border-radius:8px !important; font-size:12px !important; }
+        .st-key-rm_orbit_ctrls [data-testid="stNumberInput"] { width:66px !important; }
+        .st-key-rm_orbit_ctrls [data-testid="stNumberInput"] button { display:none !important; }
+        .st-key-rm_orbit_ctrls [data-testid="stNumberInputContainer"] {
+            border:none !important; box-shadow:none !important; outline:none !important;
+            background:transparent !important; min-height:30px !important; border-radius:8px !important; }
+        .st-key-rm_orbit_ctrls [data-testid="stNumberInputContainer"]:hover,
+        .st-key-rm_orbit_ctrls [data-testid="stNumberInputContainer"]:focus-within {
+            background:#e9f0fb !important; }
+        .st-key-rm_orbit_ctrls [data-testid="stNumberInput"] input {
+            background:transparent !important; text-align:center;
+            font-size:12px !important; padding:2px 6px !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -924,7 +944,19 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
         return
 
     labels = [f"{a}–{b}" for a, b in valid]
-    sel = st.selectbox("Par de órbita", labels, key="rm_orbit_pair")
+    f1 = (rpm / 60.0) if rpm else None
+    # Controles compactos en UNA fila: par · filtro · (vueltas si Directa).
+    with st.container(key="rm_orbit_ctrls", horizontal=True,
+                      vertical_alignment="center", gap="medium"):
+        sel = st.selectbox("Par", labels, key="rm_orbit_pair", label_visibility="collapsed")
+        fmode = st.radio("Filtro", ["Directa", "1X", "2X"], horizontal=True,
+                         key="rm_orbit_filter", label_visibility="collapsed",
+                         help="Directa = onda completa. 1X/2X = órbita filtrada al orden (elipse).")
+        n_rev = 12
+        if fmode == "Directa":
+            n_rev = int(st.number_input("Vueltas", 3, 60, 12, step=1, key="rm_orbit_revs",
+                                        label_visibility="collapsed"))
+
     a, b = valid[labels.index(sel)]
     # Y = vertical (nombre con 'Y'), X = horizontal
     is_y = lambda n: "Y" in n.upper()
@@ -941,13 +973,9 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
     y = y - np.mean(y)
     x = x - np.mean(x)
 
-    # Filtro estilo System1: Directa (todo), 1X o 2X (reconstruido del vector).
-    f1 = (rpm / 60.0) if rpm else None
-    fmode = st.radio("Filtro", ["Directa", "1X", "2X"], horizontal=True, key="rm_orbit_filter",
-                     help="Directa = onda completa. 1X/2X = órbita filtrada al orden (elipse).")
+    # Reconstrucción según filtro. kx/ky = puntos de keyphasor; vec = vector filtrado.
+    kx = ky = vec = None
     if fmode == "Directa" or not f1:
-        # Mostrar solo N vueltas para una órbita limpia (no 8 s superpuestos).
-        n_rev = st.slider("Vueltas a mostrar", 3, 30, 12, key="rm_orbit_revs")
         if f1:
             n_show = min(len(x), max(1, int(round(n_rev * (1.0 / f1) * fs))))
             xo, yo = x[-n_show:], y[-n_show:]
@@ -955,6 +983,11 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
             xo, yo = x, y
         xo = xo - np.mean(xo)
         yo = yo - np.mean(yo)
+        if f1:   # un punto de keyphasor por vuelta
+            spr = fs / f1
+            kt = np.arange(0.0, float(len(xo)), spr)
+            idx = np.arange(len(xo))
+            kx, ky = np.interp(kt, idx, xo), np.interp(kt, idx, yo)
     else:
         n = 1.0 if fmode == "1X" else 2.0
         f = n * f1
@@ -963,31 +996,71 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
         tt = np.linspace(0.0, 1.0 / f1, 400)   # una vuelta del eje
         xo = ax_ * np.cos(2 * np.pi * f * tt + np.radians(px_))
         yo = ay_ * np.cos(2 * np.pi * f * tt + np.radians(py_))
+        kx, ky = np.array([xo[0]]), np.array([yo[0]])
+        vec = (ax_, px_, ay_, py_)
     R = max(float(np.max(np.abs(xo))) if len(xo) else 0.0,
             float(np.max(np.abs(yo))) if len(yo) else 0.0, 1e-9)
 
+    # Convención de amplitud (órbita = desplazamiento → pp por norma).
+    conv, norm, _k0, _krms = _amp_conv(
+        (st.session_state.get("rm_type_by_name") or {}).get(yname, "proximity"))
+    u = f"{chy.units} {conv}"
+    xpp = float(np.ptp(xo)) if len(xo) else 0.0
+    ypp = float(np.ptp(yo)) if len(yo) else 0.0
+    smax = float(np.max(np.sqrt(xo ** 2 + yo ** 2))) if len(xo) else 0.0
+
+    # Header autocontenido (tag · Órbita · par · filtro · rpm · fecha).
+    machine = st.session_state.get("rm_machine_name", "—")
+    ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
+    st.markdown(
+        f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
+        f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
+        f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
+        f'<span><b>{machine}</b> · Órbita · {sel} · <span style="color:#c7d6ea">{fmode}</span>'
+        + (f' · <span style="color:#c7d6ea">{rpm:.0f} rpm</span>' if rpm else '') + '</span>'
+        f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
+
     fig = go.Figure(go.Scatter(
-        x=xo, y=yo, mode="lines", line=dict(width=1.2, color=_S1_BLUE),
-        hovertemplate=f"X %{{x:.3g}}<br>Y %{{y:.3g}} {chy.units}<extra></extra>"))
-    # Punto de keyphasor (t=0)
-    fig.add_trace(go.Scatter(x=[xo[0]], y=[yo[0]], mode="markers",
-                             marker=dict(size=9, color="#dc2626"), showlegend=False,
-                             hovertemplate="Keyphasor (t=0)<extra></extra>"))
-    # Sentido de giro (flecha)
+        x=xo, y=yo, mode="lines", line=dict(width=1.4, color=_S1_BLUE),
+        hovertemplate=f"{chx.name} %{{x:.3g}}<br>{chy.name} %{{y:.3g}} {u}<extra></extra>"))
+    if kx is not None and len(kx):
+        fig.add_trace(go.Scatter(x=kx, y=ky, mode="markers", showlegend=False,
+                                 marker=dict(size=8, color="#dc2626", line=dict(width=1, color="#fff")),
+                                 hovertemplate="Keyphasor<extra></extra>"))
     rotation = st.session_state.get("rm_machine_rotation", "CCW")
     _orbit_dir_arrow(fig, rotation, R)
-    lim = R * 1.4
-    fig.update_layout(height=440, margin=dict(l=10, r=10, t=44, b=10),
+    lim = R * 1.45
+
+    # Caja de lecturas DENTRO (arriba-izquierda), marco azul — estilo System1.
+    _kv = (lambda k, v: f'<b style="color:{_S1_TITLE}">{k}</b> <i style="color:#2f6fb0">{v}</i>')
+    if vec is None:
+        rows = [_kv("Xpp", f"{xpp:.3g} {u}"), _kv("Ypp", f"{ypp:.3g} {u}"),
+                _kv("Smax", f"{smax:.3g} {chy.units}")]
+    else:
+        ax_, px_, ay_, py_ = vec
+        rows = [_kv(f"{fmode} X", f"{ax_ * 2:.3g} {u} ∠{px_:.0f}°"),
+                _kv(f"{fmode} Y", f"{ay_ * 2:.3g} {u} ∠{py_:.0f}°"),
+                _kv("Smax", f"{smax:.3g} {chy.units}")]
+    fig.add_annotation(
+        xref="paper", yref="paper", x=0.015, y=0.985, xanchor="left", yanchor="top",
+        align="left", showarrow=False, text="<br>".join(rows),
+        font=dict(size=10.5, family="Arial, Helvetica, sans-serif"),
+        bgcolor="rgba(244,249,255,0.94)", bordercolor="#2f6fb0", borderwidth=1.4, borderpad=7)
+
+    fig.update_layout(height=480, margin=dict(l=10, r=10, t=10, b=10),
                       plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
-                      title=dict(text=f"Órbita · {sel} · {fmode}",
-                                 font=dict(size=13, color=_S1_TITLE)), showlegend=False)
-    fig.update_xaxes(title=f"{chx.name} ({chx.units})", range=[-lim, lim], zeroline=True,
-                     zerolinecolor="#d5dbe4", showgrid=True, gridcolor=_S1_GRID,
-                     showline=True, linecolor=_S1_AXIS)
-    fig.update_yaxes(title=f"{chy.name} ({chy.units})", range=[-lim, lim], zeroline=True,
-                     zerolinecolor="#d5dbe4", showgrid=True, gridcolor=_S1_GRID,
-                     showline=True, linecolor="#9ca3af", scaleanchor="x", scaleratio=1)
+                      showlegend=False)
+    fig.update_xaxes(title=f"{chx.name} ({u})", range=[-lim, lim], zeroline=True,
+                     zerolinecolor="#c9d2e0", zerolinewidth=1, showgrid=True, gridcolor=_S1_GRID,
+                     showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
+                     constrain="domain")
+    fig.update_yaxes(title=f"{chy.name} ({u})", range=[-lim, lim], zeroline=True,
+                     zerolinecolor="#c9d2e0", zerolinewidth=1, showgrid=True, gridcolor=_S1_GRID,
+                     showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
+                     scaleanchor="x", scaleratio=1, constrain="domain")
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
+    st.caption(f"Órbita de desplazamiento — amplitud en **{conv}** ({norm}). "
+               f"Punto rojo = keyphasor (referencia una vez por vuelta); flecha = sentido de giro.")
 
 
 def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float],
