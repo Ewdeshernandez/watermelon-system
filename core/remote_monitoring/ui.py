@@ -1740,9 +1740,10 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
                               "queda vertical (sigue el rpm).")
     mat = mat * k0                                   # amplitud en convención de norma
     fmax = float(freqs[-1]) if len(freqs) else 1.0
-    # Submuestreo a ~40 espectros para que se lea limpio.
+    # Submuestreo a ~60 espectros para el DIBUJO (más = mancha ilegible); el
+    # diagnóstico y el Bode usan TODOS los puntos capturados, no estos.
     n = len(rpms)
-    idx = np.unique(np.linspace(0, n - 1, min(40, n)).round().astype(int))
+    idx = np.unique(np.linspace(0, n - 1, min(60, n)).round().astype(int))
     rr = rpms[idx]
     MM = mat[idx]
     span = float(rr[-1] - rr[0]) or 1.0
