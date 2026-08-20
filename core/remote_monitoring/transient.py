@@ -75,11 +75,13 @@ def _order_vector(eu, fs, f_target, freqs, mag, ref_sample=0, tol_frac=0.04):
 
 @dataclass
 class TransientConfig:
-    delta_rpm: float = 3.0         # capturar un punto cada Δrpm de cambio (MUY denso)
+    delta_rpm: float = 12.0        # espaciado objetivo entre puntos (rpm) — denso como System1
     min_rpm: float = 100.0         # no capturar por debajo (ruido de arranque)
     capture_samples: int = 4096    # ventana FFT por punto (líneas consistentes)
     fmax_hz: float = 500.0         # tope de frecuencia guardado (acota RAM)
-    max_samples: int = 800         # máximo de puntos de velocidad en memoria
+    max_samples: int = 1500        # máximo de puntos de velocidad en memoria
+    hop_seconds: float = 0.04      # paso fino del barrido del buffer (densifica)
+    sweep_seconds: float = 2.5     # porción reciente del buffer que se barre por refresco
 
 
 @dataclass
@@ -113,36 +115,12 @@ class TransientCapture:
             return freqs[keep], mag[keep]
         return freqs, mag
 
-    def feed(self, snap: np.ndarray, rpm: Optional[float], fs: float,
-             vib_channels: List[Tuple[int, object]], kph_idx: Optional[int] = None) -> bool:
-        """Evalúa si capturar un punto de velocidad. Devuelve True si capturó.
-
-        vib_channels: lista de (índice_en_snap, ChannelConfig) SOLO de vibración.
-        kph_idx: fila del keyphasor en snap → referencia de fase (t=0). Sin él la
-        fase 1X sale como ruido (referida al inicio arbitrario de la ventana).
-        El snapshot viene en Volts; se escala a EU con la sensitivity del canal.
-        """
-        if rpm is None or rpm < self.config.min_rpm:
-            return False
-        if snap.shape[1] == 0:
-            return False
-        # ¿cambió lo suficiente la velocidad?
-        if self._last_rpm is not None and abs(rpm - self._last_rpm) < self.config.delta_rpm:
-            return False
-
-        win = min(self.config.capture_samples, snap.shape[1])
-        f1 = rpm / 60.0
-        # Pulsos del keyphasor en la ventana → order tracking (fase física).
-        ref, pulses = 0, None
-        if kph_idx is not None and 0 <= kph_idx < snap.shape[0]:
-            kr = detect_keyphasor(snap[kph_idx, -win:], fs)
-            if kr.ref_sample is not None:
-                ref = int(kr.ref_sample)
-            pulses = kr.pulse_sample_indices
-        sample = SpeedSample(rpm=float(rpm))
+    def _capture_window(self, snap, seg, fs, vib_channels, rr, pulses, ref) -> None:
+        """Arma y guarda un SpeedSample desde la ventana `seg` del snapshot."""
+        sample = SpeedSample(rpm=float(rr))
         for idx, ch in vib_channels:
             sens = float(getattr(ch, "sensitivity_mv_per_eu", 0.0) or 0.0)
-            raw = snap[idx, -win:]
+            raw = snap[idx, seg]
             eu = raw * 1000.0 / sens if sens > 0 else raw
             freqs, mag = self._spectrum(eu, fs)
             # 1X por ORDER TRACKING (amp+fase limpias, referidas al keyphasor);
@@ -151,21 +129,71 @@ class TransientCapture:
             if sync is not None:
                 amp, phase = sync
             else:
-                amp, phase = _order_vector(eu, fs, f1, freqs, mag, ref_sample=ref)
+                amp, phase = _order_vector(eu, fs, rr / 60.0, freqs, mag, ref_sample=ref)
             sample.vect1x[ch.name] = (amp, phase)
             if self.freqs is None:
                 self.freqs = freqs
-            # alinear longitud si fs/ventana variaran (defensivo)
             if len(mag) != len(self.freqs):
                 m = min(len(mag), len(self.freqs))
                 mag = mag[:m]
             sample.spectra[ch.name] = mag
-
         self.samples.append(sample)
-        self._last_rpm = float(rpm)
+
+    def feed(self, snap: np.ndarray, rpm: Optional[float], fs: float,
+             vib_channels: List[Tuple[int, object]], kph_idx: Optional[int] = None) -> int:
+        """Barre la porción RECIENTE del buffer en pasos finos y captura un punto
+        por cada Δrpm NO cubierto → densidad independiente del refresco (como
+        System1, que procesa la data continua y no un snapshot por refresco).
+        Devuelve cuántos puntos nuevos capturó.
+
+        kph_idx: fila del keyphasor → referencia de fase (order tracking).
+        """
+        if snap.shape[1] == 0:
+            return 0
+        win = min(self.config.capture_samples, snap.shape[1])
+        if win < 8:
+            return 0
+        hop = max(int(self.config.hop_seconds * fs), 1)
+        sweep_n = min(snap.shape[1], int(self.config.sweep_seconds * fs) + win)
+        start0 = max(0, snap.shape[1] - sweep_n)
+        end = snap.shape[1] - win
+        dr = self.config.delta_rpm
+        caps = np.array([s.rpm for s in self.samples], dtype=float)
+        caps.sort()
+
+        def _covered(rr, extra):
+            if caps.size:
+                i = int(np.searchsorted(caps, rr))
+                for k in (i - 1, i):
+                    if 0 <= k < caps.size and abs(caps[k] - rr) < dr:
+                        return True
+            return any(abs(rr - x) < dr for x in extra)
+
+        n_new, added, p0 = 0, [], start0
+        while p0 <= end:
+            seg = slice(p0, p0 + win)
+            rr, pulses, ref = None, None, 0
+            if kph_idx is not None and 0 <= kph_idx < snap.shape[0]:
+                kr = detect_keyphasor(snap[kph_idx, seg], fs)
+                rr = kr.rpm
+                pulses = kr.pulse_sample_indices
+                if kr.ref_sample is not None:
+                    ref = int(kr.ref_sample)
+            if rr is None:
+                rr = rpm
+            if rr is None or rr < self.config.min_rpm or _covered(rr, added):
+                p0 += hop
+                continue
+            self._capture_window(snap, seg, fs, vib_channels, rr, pulses, ref)
+            added.append(rr)
+            n_new += 1
+            p0 += hop
+
         if len(self.samples) > self.config.max_samples:
             self.samples = self.samples[-self.config.max_samples:]
-        return True
+        if self.samples:
+            self._last_rpm = self.samples[-1].rpm
+        return n_new
 
     # --- lecturas ---
     @property
