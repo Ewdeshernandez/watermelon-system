@@ -143,26 +143,26 @@ def render_remote_monitoring() -> None:
             font-size:12px !important; padding:2px 6px !important; }
 
         /* Controles del Bode: panel de instrumento — toggle + campos de rpm */
-        .st-key-rm_bode_ctrls {
+        :is(.st-key-rm_bode_ctrls,.st-key-rm_polar_ctrls) {
             margin:2px 0 8px; padding:8px 14px; background:#f7f9fd;
             border:1px solid #e3e9f2; border-radius:10px; align-items:center !important; }
-        .st-key-rm_bode_ctrls [data-testid="stNumberInput"] { width:158px !important; }
-        .st-key-rm_bode_ctrls [data-testid="stNumberInput"] label p {
+        :is(.st-key-rm_bode_ctrls,.st-key-rm_polar_ctrls) [data-testid="stNumberInput"] { width:158px !important; }
+        :is(.st-key-rm_bode_ctrls,.st-key-rm_polar_ctrls) [data-testid="stNumberInput"] label p {
             font-size:9.5px !important; text-transform:uppercase; letter-spacing:.05em;
             font-weight:700 !important; color:#8a97ab !important; margin-bottom:1px !important; }
-        .st-key-rm_bode_ctrls [data-testid="stNumberInput"] button { display:none !important; }
-        .st-key-rm_bode_ctrls [data-testid="stNumberInputContainer"] {
+        :is(.st-key-rm_bode_ctrls,.st-key-rm_polar_ctrls) [data-testid="stNumberInput"] button { display:none !important; }
+        :is(.st-key-rm_bode_ctrls,.st-key-rm_polar_ctrls) [data-testid="stNumberInputContainer"] {
             border:1px solid #d6deea !important; box-shadow:none !important; outline:none !important;
             background:#ffffff !important; min-height:32px !important; border-radius:8px !important;
             transition:border-color .12s, background .12s; }
-        .st-key-rm_bode_ctrls [data-testid="stNumberInputContainer"]:hover,
-        .st-key-rm_bode_ctrls [data-testid="stNumberInputContainer"]:focus-within {
+        :is(.st-key-rm_bode_ctrls,.st-key-rm_polar_ctrls) [data-testid="stNumberInputContainer"]:hover,
+        :is(.st-key-rm_bode_ctrls,.st-key-rm_polar_ctrls) [data-testid="stNumberInputContainer"]:focus-within {
             border-color:#2f6fb0 !important; background:#f4f8ff !important; }
-        .st-key-rm_bode_ctrls [data-testid="stNumberInput"] input {
+        :is(.st-key-rm_bode_ctrls,.st-key-rm_polar_ctrls) [data-testid="stNumberInput"] input {
             background:transparent !important; text-align:center; color:#0F1E3D !important;
             font-family:ui-monospace,monospace !important; font-weight:600 !important;
             font-size:13px !important; padding:3px 8px !important; }
-        .st-key-rm_bode_ctrls [data-testid="stWidgetLabel"] p { font-size:12px !important; }
+        :is(.st-key-rm_bode_ctrls,.st-key-rm_polar_ctrls) [data-testid="stWidgetLabel"] p { font-size:12px !important; }
         </style>
     """, unsafe_allow_html=True)
 
@@ -1241,6 +1241,77 @@ def _nice_top(v: float) -> float:
     return 10.0 * base
 
 
+def _half_power_af(rr, aa, ipk):
+    """Factor de amplificación (AF/SAF) por ancho de banda de media potencia
+    (API 684): AF = Nc / (N2 − N1), con N1,N2 donde amp = pico/√2.
+    Devuelve (AF, N1, N2, h) o None."""
+    apk = aa[ipk]
+    if apk <= 0:
+        return None
+    h = apk / np.sqrt(2.0)
+    N1 = N2 = None
+    for i in range(ipk, 0, -1):
+        if aa[i] >= h > aa[i - 1]:
+            N1 = float(np.interp(h, [aa[i - 1], aa[i]], [rr[i - 1], rr[i]])); break
+    for i in range(ipk, len(aa) - 1):
+        if aa[i] >= h > aa[i + 1]:
+            N2 = float(np.interp(h, [aa[i + 1], aa[i]], [rr[i + 1], rr[i]])); break
+    if N1 is None or N2 is None or N2 <= N1:
+        return None
+    return rr[ipk] / (N2 - N1), N1, N2, h
+
+
+def _detect_criticals(rr, aa, thr_frac=0.4, merge_frac=0.08, top=4):
+    """Índices de picos de resonancia (locales prominentes, fusionando cercanos),
+    ordenados por rpm ascendente."""
+    if len(aa) < 3:
+        return [int(np.argmax(aa))] if len(aa) else []
+    mx = float(np.max(aa))
+    cand = [i for i in range(1, len(aa) - 1)
+            if aa[i] >= aa[i - 1] and aa[i] >= aa[i + 1] and aa[i] > thr_frac * mx]
+    span = (rr[-1] - rr[0]) if len(rr) > 1 else 1.0
+    out = []
+    for i in cand:
+        if out and abs(rr[i] - rr[out[-1]]) < merge_frac * span:
+            if aa[i] > aa[out[-1]]:
+                out[-1] = i
+        else:
+            out.append(i)
+    out = sorted(sorted(out, key=lambda i: -aa[i])[:top], key=lambda i: rr[i])
+    return out or [int(np.argmax(aa))]
+
+
+def _op_margin(rr, crit_idx, af_by_crit, op_rpm):
+    """Estado de la velocidad de operación vs la crítica más próxima (API 684/617).
+    Devuelve dict(status, msg, color) o None si no aplica."""
+    if op_rpm <= 0 or not len(crit_idx):
+        return None
+    _ORD = ["1ª", "2ª", "3ª", "4ª", "5ª"]
+    j = min(crit_idx, key=lambda i: abs(rr[i] - op_rpm))
+    ncj, afj = float(rr[j]), af_by_crit.get(j)
+    sm = abs(ncj - op_rpm) / op_rpm * 100.0
+    below = ncj < op_rpm
+    req = 15.0 if below else 20.0
+    needs = (afj is None) or (afj >= 2.5)
+    oi = crit_idx.index(j)
+    ordl = _ORD[oi] if oi < len(_ORD) else f"{oi+1}ª"
+    af_txt = f", AF {afj:.1f}" if afj else ""
+    if sm < 3.0:
+        return dict(status="res", color="#dc2626",
+                    msg=(f"⚠ **EN RESONANCIA** — la velocidad de operación ({op_rpm:.0f} rpm) coincide "
+                         f"con la {ordl} crítica ({ncj:.0f} rpm{af_txt}). Amplitud y fase muy sensibles; "
+                         f"**API 684 no admite operar sobre una crítica**."))
+    if needs and sm < req:
+        return dict(status="margin", color="#dc2626",
+                    msg=(f"⚠ **Margen insuficiente** — operás a **{sm:.0f}%** de la {ordl} crítica "
+                         f"({ncj:.0f} rpm{af_txt}); API 684 pide **≥{req:.0f}%** "
+                         f"({'crítica por debajo' if below else 'crítica por encima'}) para modos "
+                         f"poco amortiguados (AF≥2.5). Riesgo de amplitudes altas."))
+    return dict(status="ok", color="#16a34a",
+                msg=(f"✓ **Margen de separación {sm:.0f}%** a la {ordl} crítica ({ncj:.0f} rpm) — "
+                     f"cumple API 684 (≥{req:.0f}%)."))
+
+
 _TREND_BRIGHT = ["#2f6fb0", "#16a34a", "#e11d48", "#7c3aed",
                  "#0891b2", "#ea580c", "#db2777", "#0f766e"]
 
@@ -1421,24 +1492,6 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
     a_pk = float(amp_disp[i_pk])
     ph_pk = float(ph_disp[i_pk])
 
-    def _half_power_af(rr, aa, ipk):
-        """Factor de amplificación (AF/SAF) por ancho de banda de media potencia
-        (API 684): AF = Nc / (N2 − N1), con N1,N2 donde amp = pico/√2."""
-        apk = aa[ipk]
-        if apk <= 0:
-            return None
-        h = apk / np.sqrt(2.0)
-        N1 = N2 = None
-        for i in range(ipk, 0, -1):
-            if aa[i] >= h > aa[i - 1]:
-                N1 = float(np.interp(h, [aa[i - 1], aa[i]], [rr[i - 1], rr[i]])); break
-        for i in range(ipk, len(aa) - 1):
-            if aa[i] >= h > aa[i + 1]:
-                N2 = float(np.interp(h, [aa[i + 1], aa[i]], [rr[i + 1], rr[i]])); break
-        if N1 is None or N2 is None or N2 <= N1:
-            return None
-        return rr[ipk] / (N2 - N1), N1, N2, h
-
     # Header autocontenido (tag · Bode · canal · orden · rango rpm · fecha).
     ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
     comp_txt = (f' · <span style="color:#c7d6ea">Comp {np.abs(zref) * k0:.3g} {units} {conv} '
@@ -1595,30 +1648,146 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
 
 def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
                 fs: float, rpm: Optional[float]) -> None:
-    """Polar 1X: vector amplitud/fase. Con transitorio muestra el locus vs
-    velocidad (tipo Nyquist); en estacionario, el punto actual."""
+    """Polar / Nyquist del vector 1X vs velocidad (locus), estilo System1 mejorado:
+    amplitud radial por norma (API 670 pp), fase angular, slow-roll compensable
+    (API 684/670), críticas marcadas, velocidad de operación con alerta de
+    resonancia (API 684), etiquetas de rpm, sentido de velocidad y caja de cursor."""
     import plotly.graph_objects as go
     rpms, amp, phase = tc.bode(channel)
-    fig = go.Figure()
-    if len(rpms) >= 2:
-        fig.add_trace(go.Scatterpolar(
-            r=amp, theta=phase, mode="lines+markers",
-            marker=dict(size=7, color=rpms, colorscale="Turbo", colorbar=dict(title="RPM")),
-            line=dict(width=1.5)))
-        title = f"Polar 1X · {channel} — locus vs velocidad"
-    else:
+    tmap = st.session_state.get("rm_type_by_name") or {}
+    conv, norm, k0, _krms = _amp_conv(tmap.get(channel, "proximity"))
+    chs = st.session_state.get("rm_channels") or []
+    units = next((c.units for c in chs if c.name == channel), "mil")
+    machine = st.session_state.get("rm_machine_name", "—")
+    _hdr = (lambda extra: st.markdown(
+        f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
+        f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
+        f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
+        f'<span><b>{machine}</b> · Polar 1X · {channel}{extra}</span>'
+        f'<span style="color:#9fb3d1">🕒 {datetime.now().strftime("%d %b %Y · %H:%M:%S")}</span></div>',
+        unsafe_allow_html=True))
+
+    # --- Estacionario: solo el punto actual ---
+    if len(rpms) < 2:
+        _hdr(' · <span style="color:#c7d6ea">punto actual (corré un runup para el locus)</span>')
+        fig = go.Figure()
         name_to = {ch.name: (i, ch) for i, ch in vib}
         if channel in name_to and rpm:
             i, ch = name_to[channel]
             eu = snap[i] * 1000.0 / ch.sensitivity_mv_per_eu
             a, ph = one_x_vector(eu, fs, rpm / 60.0)
-            fig.add_trace(go.Scatterpolar(r=[a], theta=[ph], mode="markers+text",
-                                          text=[f"{a:.3g}∠{ph:.0f}°"], textposition="top center",
-                                          marker=dict(size=16, color="#8B5CF6")))
-        title = f"Polar 1X · {channel} — punto actual (corré un runup para el locus)"
-    fig.update_layout(height=440, margin=dict(l=30, r=30, t=44, b=20), showlegend=False,
-                      polar=dict(angularaxis=dict(rotation=90, direction="clockwise")), title=title)
+            fig.add_trace(go.Scatterpolar(r=[a * k0], theta=[ph], mode="markers+text",
+                          text=[f"{a * k0:.3g} {units} {conv} ∠{ph:.0f}°"], textposition="top center",
+                          marker=dict(size=15, color=_S1_KPH)))
+        fig.update_layout(height=460, margin=dict(l=30, r=30, t=10, b=20), showlegend=False,
+                          paper_bgcolor="#ffffff", font=_S1_FONT,
+                          polar=dict(bgcolor="#ffffff",
+                                     angularaxis=dict(rotation=90, direction="clockwise")))
+        st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
+        return
+
+    rpms = np.asarray(rpms, float)
+    lo_rpm, hi_rpm = float(rpms.min()), float(rpms.max())
+    _op_nominal = float(st.session_state.get("rm_machine_rpm", 0) or 0)
+    with st.container(key="rm_polar_ctrls", horizontal=True, vertical_alignment="center", gap="medium"):
+        comp = st.toggle("Compensar slow-roll", key="rm_polar_comp",
+                         help="Resta el vector 1X de slow-roll (runout) a todo el locus → respuesta "
+                              "dinámica real. API 684 / API 670.")
+        sr_rpm = None
+        if comp:
+            sr_rpm = st.number_input("Vel. slow-roll (rpm)", int(lo_rpm), int(hi_rpm),
+                                     int(round(lo_rpm)), step=60, key="rm_polar_srrpm")
+        op_rpm = float(st.number_input(
+            "Vel. operación (rpm)", 0, 60000, int(round(_op_nominal)) if _op_nominal > 0 else 3600,
+            step=60, key="rm_polar_oprpm",
+            help="Velocidad de operación. Marca el punto en el locus y evalúa resonancia (API 684)."))
+
+    z = np.asarray(amp, float) * np.exp(1j * np.radians(phase))
+    zref = 0.0 + 0.0j
+    if comp:
+        tgt = float(sr_rpm) if sr_rpm else lo_rpm
+        band = np.abs(rpms - tgt) <= max(60.0, 0.05 * tgt)
+        zref = complex(np.mean(z[band])) if band.any() else z[int(np.argmin(np.abs(rpms - tgt)))]
+        z = z - zref
+    r = np.abs(z) * k0
+    th = np.degrees(np.angle(z)) % 360.0
+
+    comp_txt = (f' · <span style="color:#c7d6ea">Comp {np.abs(zref) * k0:.3g} {units} {conv} '
+                f'∠{np.degrees(np.angle(zref)) % 360:.0f}°</span>') if comp else ''
+    _hdr(f' · <span style="color:#c7d6ea">1X</span>{comp_txt}')
+
+    # Críticas + AF
+    crit_idx = _detect_criticals(rpms, r)
+    af_by_crit = {i: (_half_power_af(rpms, r, i) or [None])[0] for i in crit_idx}
+    i_pk = int(np.argmax(r))
+
+    fig = go.Figure()
+    # Locus 1X (línea aciano + puntos finos), color por rpm en el hover.
+    fig.add_trace(go.Scatterpolar(
+        r=r, theta=th, mode="lines+markers", line=dict(color=_S1_BLUE, width=1.6),
+        marker=dict(size=3.5, color=_S1_KPH), customdata=rpms,
+        hovertemplate="%{customdata:.0f} rpm<br>%{r:.3g} " + f"{units} {conv}" +
+                      "<br>%{theta:.0f}°<extra></extra>", showlegend=False))
+    # Etiquetas de rpm cada N puntos (como System1).
+    step = max(1, len(rpms) // 14)
+    ii = list(range(0, len(rpms), step))
+    fig.add_trace(go.Scatterpolar(r=r[ii], theta=th[ii], mode="text",
+                  text=[f"{rpms[i]:.0f}" for i in ii], textposition="top center",
+                  textfont=dict(size=8, color="#7a8699"), hoverinfo="skip", showlegend=False))
+    # Crítica(s): estrella roja + etiqueta con AF.
+    for i in crit_idx:
+        afv = af_by_crit.get(i)
+        fig.add_trace(go.Scatterpolar(
+            r=[r[i]], theta=[th[i]], mode="markers+text", marker=dict(size=12, color="#dc2626", symbol="star"),
+            text=[f"Ncrit {rpms[i]:.0f}" + (f" · AF {afv:.1f}" if afv else "")],
+            textposition="middle right", textfont=dict(size=9, color="#c0392b"),
+            hoverinfo="skip", showlegend=False))
+    # Velocidad de operación: verde/roja según resonancia (API 684).
+    op_stat = _op_margin(rpms, crit_idx, af_by_crit, op_rpm)
+    if op_stat and lo_rpm <= op_rpm <= hi_rpm:
+        jo = int(np.argmin(np.abs(rpms - op_rpm)))
+        fig.add_trace(go.Scatterpolar(
+            r=[r[jo]], theta=[th[jo]], mode="markers+text",
+            marker=dict(size=12, color=op_stat["color"], symbol="circle",
+                        line=dict(width=1.5, color="#fff")),
+            text=[f"{'⚠ ' if op_stat['status'] != 'ok' else ''}Op {op_rpm:.0f}"],
+            textposition="bottom center", textfont=dict(size=9, color=op_stat["color"]),
+            hoverinfo="skip", showlegend=False))
+
+    rmax = _nice_top(float(r.max()) * 1.15) if r.max() > 0 else 1.0
+    fig.update_layout(height=560, margin=dict(l=30, r=30, t=10, b=20), showlegend=False,
+                      paper_bgcolor="#ffffff", font=_S1_FONT,
+                      polar=dict(bgcolor="#ffffff",
+                                 radialaxis=dict(range=[0, rmax], gridcolor=_S1_GRID, angle=90,
+                                                 tickfont=dict(size=9, color="#64748b"),
+                                                 title=dict(text=f"1X ({units} {conv})")),
+                                 angularaxis=dict(rotation=90, direction="clockwise", dtick=30,
+                                                  gridcolor=_S1_GRID, tickfont=dict(size=9),
+                                                  linecolor=_S1_AXIS)))
+    # Caja de cursor (pico de resonancia) — esquina, en coords de papel.
+    _kv = (lambda k, v: f'<b style="color:{_S1_TITLE}">{k}</b> <i style="color:#2f6fb0">{v}</i>')
+    af_main = _half_power_af(rpms, r, i_pk)
+    box = [_kv("Ncrit", f"{rpms[i_pk]:.0f} rpm"), _kv("Amp", f"{r[i_pk]:.3g} {units} {conv}"),
+           _kv("Fase", f"{th[i_pk]:.0f}°")]
+    if af_main:
+        box.append(_kv("AF", f"{af_main[0]:.1f}"))
+    fig.add_annotation(xref="paper", yref="paper", x=0.005, y=0.99, xanchor="left", yanchor="top",
+                       align="left", showarrow=False, text="<br>".join(box),
+                       font=dict(size=10.5, family="Arial, Helvetica, sans-serif"),
+                       bgcolor="rgba(244,249,255,0.94)", bordercolor="#2f6fb0", borderwidth=1.4, borderpad=6)
+    # Sentido de velocidad creciente.
+    fig.add_annotation(xref="paper", yref="paper", x=0.99, y=0.99, xanchor="right", yanchor="top",
+                       showarrow=False, text="↻ velocidad ↑",
+                       font=dict(size=10, color="#64748b"))
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
+
+    if op_stat and op_stat["status"] in ("res", "margin"):
+        st.error(op_stat["msg"])
+    elif op_stat and op_stat["status"] == "ok":
+        st.success(op_stat["msg"])
+    st.caption("Locus 1X (Nyquist): cada punto = vector amplitud∠fase a esa rpm. El **lazo grande** "
+               "marca la resonancia (crítica). Amplitud radial en **pp** para desplazamiento "
+               "(API 670); slow-roll y criterios de operación por **API 684**.")
 
 
 def _plot_shaft_centerline(snap: np.ndarray, vib) -> None:
