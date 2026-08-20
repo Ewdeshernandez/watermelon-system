@@ -161,9 +161,9 @@ def render_remote_monitoring() -> None:
 # =====================================================================
 # Helpers de construcción
 # =====================================================================
-def _demo_channels() -> List[ChannelConfig]:
+def _demo_channels(n_bearings: int = 4) -> List[ChannelConfig]:
     from core.remote_monitoring.config import MachineConfig, auto_layout, setup_to_channel_configs, AcqSetup
-    m = MachineConfig(n_bearings=2)
+    m = MachineConfig(n_bearings=n_bearings)
     return setup_to_channel_configs(AcqSetup(machine=m, channels=auto_layout(m)))
 
 
@@ -199,8 +199,8 @@ def _no_config_gate() -> bool:
         return False
     st.info("No hay configuración activa. Andá a **Configuración** y guardá una máquina, "
             "o cargá un layout demo para probar ya.")
-    if st.button("Cargar layout demo (2 cojinetes + keyphasor)"):
-        chans = _demo_channels()
+    if st.button("Cargar layout demo (4 cojinetes + keyphasor)"):
+        chans = _demo_channels(4)
         st.session_state["rm_channels"] = chans
         st.session_state["rm_machine_rpm"] = 3600.0
         st.session_state["rm_machine_name"] = "Demo"
@@ -211,6 +211,12 @@ def _no_config_gate() -> bool:
         st.session_state["rm_alarms_by_name"] = {n: (2.5, 4.0) for n in vibs}
         st.session_state["rm_gap_by_name"] = {n: -9.5 for n in vibs}
         st.session_state["rm_type_by_name"] = {n: "proximity" for n in vibs}
+        # Ángulos reales de sonda (Y=45°L→315°, X=45°R→45°) + pares X/Y por cojinete
+        st.session_state["rm_angle_by_name"] = {
+            n: (315.0 if "Y" in n.upper() else 45.0) for n in vibs}
+        _brgs = sorted({int("".join(ch for ch in n if ch.isdigit()) or 0) for n in vibs})
+        st.session_state["rm_pairs_saved"] = [[f"{b}Y", f"{b}X"] for b in _brgs
+                                              if f"{b}Y" in vibs and f"{b}X" in vibs]
         # Params de adquisición (proximidad) → Fmax/Fmin acotan el espectro
         from dataclasses import asdict as _asdict
         from core.remote_monitoring.config import default_acq_for_type
@@ -1035,7 +1041,19 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
                     u=f"{chy.units} {conv}", xpp=float(np.ptp(x)), ypp=float(np.ptp(y)),
                     smax=float(np.max(np.sqrt(h ** 2 + v ** 2))) if len(h) else 0.0)
 
+    def _lead_int(s):
+        n = ""
+        for c in str(s):
+            if c.isdigit():
+                n += c
+            elif n:
+                break
+        return int(n) if n else 999
+
     data = [_prep(s) for s in sels]
+    # Orden SIEMPRE de cojinete 1 (lado libre) al último → la forma deflectada
+    # arranca en el lado libre y recorre la máquina.
+    data.sort(key=lambda d: _lead_int(d["xname"]))
     gR = max((max(float(np.max(np.abs(d["h"]))) if len(d["h"]) else 0.0,
                   float(np.max(np.abs(d["v"]))) if len(d["v"]) else 0.0) for d in data),
              default=1e-9)
@@ -1075,19 +1093,9 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
             node_y.append(float(np.mean(d["khv"])))
             node_lbl.append(d["lbl"])
         _orbit_dir_arrow(fig, rotation, lim / 1.5, cx0=cx0)
-        if d["vec"] is None:
-            rows = [_kv(d["lbl"], ""), _kv("Xpp", f"{d['xpp']:.3g} {d['u']}"),
-                    _kv("Ypp", f"{d['ypp']:.3g} {d['u']}"), _kv("Smax", f"{d['smax']:.3g} {d['chy'].units}")]
-        else:
-            axv, pxv, ayv, pyv = d["vec"]
-            rows = [_kv(d["lbl"], ""), _kv(f"{fmode} X", f"{axv * 2:.3g} {d['u']} ∠{pxv:.0f}°"),
-                    _kv(f"{fmode} Y", f"{ayv * 2:.3g} {d['u']} ∠{pyv:.0f}°"),
-                    _kv("Smax", f"{d['smax']:.3g} {d['chy'].units}")]
-        fig.add_annotation(
-            x=cx0 - 0.97 * lim, y=-0.97 * lim, xref="x", yref="y", xanchor="left", yanchor="bottom",
-            align="left", showarrow=False, text="<br>".join(rows),
-            font=dict(size=10, family="Arial, Helvetica, sans-serif"),
-            bgcolor="rgba(244,249,255,0.92)", bordercolor="#2f6fb0", borderwidth=1.4, borderpad=6)
+        # Solo el TAG del par, chico y limpio, debajo de la órbita (sin caja encima).
+        fig.add_annotation(x=cx0, y=-1.2 * lim, xref="x", yref="y", showarrow=False,
+                           text=f"<b>{d['lbl']}</b>", font=dict(size=11, color=_S1_TITLE))
     # Forma deflectada: une los keyphasor de cada bearing (instante común).
     if kphline and len(node_x) > 1:
         fig.add_trace(go.Scatter(
@@ -1108,6 +1116,25 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
                      linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
                      scaleanchor="x", scaleratio=1)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
+
+    # Valores FUERA del gráfico (tira compacta, una por órbita) — así el gráfico
+    # queda limpio, sin cajas encima.
+    def _card(d):
+        if d["vec"] is None:
+            inner = (_kv("Xpp", f"{d['xpp']:.3g} {d['u']}") + " · " +
+                     _kv("Ypp", f"{d['ypp']:.3g} {d['u']}") + " · " +
+                     _kv("Smax", f"{d['smax']:.3g} {d['chy'].units}"))
+        else:
+            axv, pxv, ayv, pyv = d["vec"]
+            inner = (_kv(f"{fmode} X", f"{axv * 2:.3g} {d['u']} ∠{pxv:.0f}°") + " · " +
+                     _kv(f"{fmode} Y", f"{ayv * 2:.3g} {d['u']} ∠{pyv:.0f}°") + " · " +
+                     _kv("Smax", f"{d['smax']:.3g} {d['chy'].units}"))
+        return (f'<div style="padding:6px 10px;border:1px solid #d6deea;border-radius:8px;'
+                f'background:#f8fafd;font-size:11.5px;font-family:Arial,Helvetica,sans-serif">'
+                f'<b style="color:{_S1_TITLE}">{d["lbl"]}</b> &nbsp; {inner}</div>')
+    st.markdown(
+        f'<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px">'
+        f'{"".join(_card(d) for d in data)}</div>', unsafe_allow_html=True)
 
 
 def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float],
