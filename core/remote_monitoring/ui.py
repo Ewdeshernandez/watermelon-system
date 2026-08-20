@@ -978,7 +978,8 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
             n_rev = int(st.number_input("Vueltas", 3, 60, 12, step=1, key="rm_orbit_revs",
                                         label_visibility="collapsed"))
         kphline = st.toggle("Unir keyphasor", key="rm_orbit_kphline",
-                            help="Une con una curva los puntos de keyphasor (locus vuelta a vuelta).")
+                            help="Une los keyphasor vuelta a vuelta (locus). Visible en "
+                                 "transitorios; en régimen estable coinciden en un punto.")
     sels = sels or [labels[0]]
 
     def _prep(pair_lbl):
@@ -1060,14 +1061,15 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
         _orbit_probe_axes(fig, d["mX"], d["mY"], lim, d["xname"], d["yname"])
         if kphline and d["khh"] is not None and len(d["khh"]) > 1:
             fig.add_trace(go.Scatter(x=d["khh"], y=d["khv"], mode="lines",
-                                     line=dict(width=1.4, color="#e0982a", shape="spline"),
+                                     line=dict(width=2.0, color="#e0982a", shape="spline"),
                                      hoverinfo="skip", showlegend=False))
         if d["khh"] is not None and len(d["khh"]):
             fig.add_trace(go.Scatter(x=d["khh"], y=d["khv"], mode="markers", showlegend=False,
                                      marker=dict(size=7, color="#dc2626", line=dict(width=1, color="#fff")),
                                      hovertemplate="Keyphasor<extra></extra>"))
         _orbit_dir_arrow(fig, rotation, lim / 1.5)
-        # Caja de lecturas DENTRO (arriba-izquierda): tag del par + amplitudes.
+        # Caja de lecturas DENTRO del cuadro (abajo-izq, en coords de datos para
+        # que quede SOBRE la órbita, no en la banda lateral).
         if d["vec"] is None:
             rows = [_kv(d["lbl"], ""), _kv("Xpp", f"{d['xpp']:.3g} {d['u']}"),
                     _kv("Ypp", f"{d['ypp']:.3g} {d['u']}"), _kv("Smax", f"{d['smax']:.3g} {d['chy'].units}")]
@@ -1077,10 +1079,10 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
                     _kv(f"{fmode} Y", f"{ayv * 2:.3g} {d['u']} ∠{pyv:.0f}°"),
                     _kv("Smax", f"{d['smax']:.3g} {d['chy'].units}")]
         fig.add_annotation(
-            xref="paper", yref="paper", x=0.02, y=0.98, xanchor="left", yanchor="top",
+            x=-0.97 * lim, y=-0.97 * lim, xref="x", yref="y", xanchor="left", yanchor="bottom",
             align="left", showarrow=False, text="<br>".join(rows),
             font=dict(size=10, family="Arial, Helvetica, sans-serif"),
-            bgcolor="rgba(244,249,255,0.94)", bordercolor="#2f6fb0", borderwidth=1.4, borderpad=6)
+            bgcolor="rgba(244,249,255,0.92)", bordercolor="#2f6fb0", borderwidth=1.4, borderpad=6)
         fig.update_layout(height=460, margin=dict(l=6, r=6, t=6, b=6),
                           plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT,
                           showlegend=False)
@@ -1093,12 +1095,6 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
                          constrain="domain")
         with col:
             st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
-
-    d0 = data[0]
-    st.caption(f"Ejes en el ángulo REAL de montaje de las sondas (desde TDC). "
-               f"Amplitud en **{d0['conv']}** ({d0['norm']}). Punto rojo = keyphasor "
-               f"(1 por vuelta){' · curva ámbar = locus vuelta a vuelta' if kphline else ''}; "
-               f"flecha = sentido de giro. Escala común entre órbitas.")
 
 
 def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float],
