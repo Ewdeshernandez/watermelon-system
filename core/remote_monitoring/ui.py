@@ -1357,15 +1357,28 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
     units = next((c.units for c in chs if c.name == channel), "mil")
     machine = st.session_state.get("rm_machine_name", "—")
 
+    rpms = np.asarray(rpms, float)
+    lo_rpm, hi_rpm = float(rpms.min()), float(rpms.max())
+    op_rpm = float(st.session_state.get("rm_machine_rpm", 0) or 0)
     with st.container(key="rm_bode_ctrls", horizontal=True, vertical_alignment="center", gap="medium"):
         comp = st.toggle("Compensar slow-roll", key="rm_bode_comp",
-                         help="Resta el vector 1X a baja velocidad (runout mecánico/eléctrico) "
-                              "a todos los puntos — como el 'Comp' de System1.")
+                         help="Resta el vector 1X de slow-roll (runout mecánico + eléctrico) a "
+                              "TODOS los puntos → aísla la respuesta dinámica real. Práctica "
+                              "estándar API 684 / API 670. Elegí la velocidad de slow-roll "
+                              "(típico < 10% de la 1ª crítica, con el eje casi rígido).")
+        sr_rpm = None
+        if comp:
+            sr_rpm = st.number_input("Vel. slow-roll (rpm)", int(lo_rpm), int(hi_rpm),
+                                     int(round(lo_rpm)), step=60, key="rm_bode_srrpm",
+                                     help="Velocidad de referencia del vector slow-roll.")
 
-    # Vector complejo 1X → compensación slow-roll (resta el vector más lento).
+    # Vector complejo 1X → compensación slow-roll (resta el vector de referencia).
     z = amp * np.exp(1j * np.radians(phase))
-    zref = z[0] if len(z) else 0.0 + 0.0j     # rpms viene ordenado ascendente
+    zref = 0.0 + 0.0j
     if comp:
+        tgt = float(sr_rpm) if sr_rpm else lo_rpm
+        band = np.abs(rpms - tgt) <= max(60.0, 0.05 * tgt)
+        zref = complex(np.mean(z[band])) if band.any() else z[int(np.argmin(np.abs(rpms - tgt)))]
         z = z - zref
     amp_disp = np.abs(z) * k0
     ph_disp = np.degrees(np.angle(z)) % 360.0          # 0-360 (lectura del cursor)
@@ -1378,6 +1391,24 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
     ncrit = float(rpms[i_pk])
     a_pk = float(amp_disp[i_pk])
     ph_pk = float(ph_disp[i_pk])
+
+    def _half_power_af(rr, aa, ipk):
+        """Factor de amplificación (AF/SAF) por ancho de banda de media potencia
+        (API 684): AF = Nc / (N2 − N1), con N1,N2 donde amp = pico/√2."""
+        apk = aa[ipk]
+        if apk <= 0:
+            return None
+        h = apk / np.sqrt(2.0)
+        N1 = N2 = None
+        for i in range(ipk, 0, -1):
+            if aa[i] >= h > aa[i - 1]:
+                N1 = float(np.interp(h, [aa[i - 1], aa[i]], [rr[i - 1], rr[i]])); break
+        for i in range(ipk, len(aa) - 1):
+            if aa[i] >= h > aa[i + 1]:
+                N2 = float(np.interp(h, [aa[i + 1], aa[i]], [rr[i + 1], rr[i]])); break
+        if N1 is None or N2 is None or N2 <= N1:
+            return None
+        return rr[ipk] / (N2 - N1), N1, N2, h
 
     # Header autocontenido (tag · Bode · canal · orden · rango rpm · fecha).
     ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
@@ -1416,14 +1447,32 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
                 crit_idx[-1] = i
         else:
             crit_idx.append(i)
-    crit_idx = sorted(crit_idx, key=lambda i: -aa[i])[:3] or [i_pk]
-    for i in crit_idx:
+    # Quedarse con los más prominentes, pero ETIQUETAR por orden de rpm (1ª, 2ª…).
+    crit_idx = sorted(sorted(crit_idx, key=lambda i: -aa[i])[:4], key=lambda i: rr[i]) or [i_pk]
+    _ORD = ["1ª", "2ª", "3ª", "4ª", "5ª"]
+    af_by_crit = {}
+    for k, i in enumerate(crit_idx):
+        af = _half_power_af(rr, aa, i)
+        af_by_crit[i] = af[0] if af else None
         for r in (1, 2):
             fig.add_vline(x=float(rr[i]), line=dict(color="#e26d6d", width=1, dash="dot"), row=r, col=1)
-        fig.add_annotation(x=float(rr[i]), y=float(aa[i]), row=2, col=1,
-                           text=f"Ncrit ≈ {rr[i]:.0f} rpm", showarrow=True, arrowhead=2,
-                           arrowsize=0.8, arrowcolor="#c0392b", ax=26, ay=-16,
-                           font=dict(size=10, color="#c0392b"), bgcolor="rgba(255,255,255,0.85)")
+        lbl = f"{_ORD[k] if k < len(_ORD) else str(k+1)} crítica ≈ {rr[i]:.0f} rpm"
+        if af:
+            lbl += f" · AF {af[0]:.1f}"
+            # Banda de media potencia (visual del método API 684).
+            fig.add_shape(type="line", x0=af[1], x1=af[2], y0=af[3], y1=af[3], row=2, col=1,
+                          line=dict(color="#c0392b", width=1, dash="dot"))
+        fig.add_annotation(x=float(rr[i]), y=float(aa[i]), row=2, col=1, text=lbl,
+                           showarrow=True, arrowhead=2, arrowsize=0.8, arrowcolor="#c0392b",
+                           ax=26, ay=-16, font=dict(size=10, color="#c0392b"),
+                           bgcolor="rgba(255,255,255,0.85)")
+    # Velocidad de operación (verde) + margen de separación a la crítica próxima.
+    if op_rpm > 0 and lo_rpm <= op_rpm <= hi_rpm:
+        for r in (1, 2):
+            fig.add_vline(x=op_rpm, line=dict(color="#16a34a", width=1.2), row=r, col=1)
+        fig.add_annotation(x=op_rpm, y=1.0, yref="y2 domain", row=2, col=1, yanchor="bottom",
+                           text=f"Op {op_rpm:.0f}", showarrow=False,
+                           font=dict(size=9.5, color="#15803d"))
 
     ymax = _nice_top(a_pk * 1.15) if a_pk > 0 else 1.0
     fig.update_yaxes(title_text="Fase 1X (°)", autorange="reversed", dtick=90, row=1, col=1,
@@ -1437,18 +1486,34 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
     fig.update_xaxes(title_text="RPM", rangemode="tozero", row=2, col=1, showgrid=True,
                      gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS, ticks="outside",
                      tickcolor=_S1_AXIS)
-    # Caja tipo cursor (arriba-derecha): pico de resonancia.
+    # Caja tipo cursor (arriba-derecha): resonancia principal (API 684).
     _kv = (lambda k, v: f'<b style="color:{_S1_TITLE}">{k}</b> <i style="color:#2f6fb0">{v}</i>')
+    af_main = _half_power_af(rr, aa, i_pk)
+    box = [_kv("Ncrit", f"{ncrit:.0f} rpm"), _kv("Amp", f"{a_pk:.3g} {units} {conv}"),
+           _kv("High spot", f"{ph_pk:.0f}°")]
+    if af_main:
+        box.append(_kv("AF", f"{af_main[0]:.1f}"))
     fig.add_annotation(
         xref="x domain", yref="y domain", x=0.992, y=0.04, xanchor="right", yanchor="bottom",
-        align="left", showarrow=False,
-        text="<br>".join([_kv("Ncrit", f"{ncrit:.0f} rpm"),
-                          _kv("Amp", f"{a_pk:.3g} {units} {conv}"), _kv("Fase", f"{ph_pk:.0f}°")]),
+        align="left", showarrow=False, text="<br>".join(box),
         font=dict(size=10.5, family="Arial, Helvetica, sans-serif"),
         bgcolor="rgba(244,249,255,0.94)", bordercolor="#2f6fb0", borderwidth=1.4, borderpad=6)
     fig.update_layout(height=480, margin=dict(l=58, r=16, t=8, b=40),
                       plot_bgcolor="#ffffff", paper_bgcolor="#ffffff", font=_S1_FONT, showlegend=False)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
+
+    # Notas API 684: high spot / heavy spot + margen de separación.
+    sep = ""
+    if op_rpm > 0 and len(crit_idx):
+        j = min(crit_idx, key=lambda i: abs(rr[i] - op_rpm))
+        sm = abs(rr[j] - op_rpm) / op_rpm * 100.0
+        flag = "⚠ " if sm < 15 else "✓ "
+        sep = (f" · {flag}**Margen de separación** {sm:.0f}% a la crítica más próxima "
+               f"({rr[j]:.0f} rpm) — API 684 pide ≥15 %.")
+    st.caption("**High spot** = fase del pico (dónde el eje llega más cerca de la sonda). "
+               "Bajo la 1ª crítica, high spot ≈ **heavy spot** (desbalance); en la crítica giran "
+               "~90°, encima ~180° (API 684). **AF** = factor de amplificación por media potencia."
+               + sep)
 
 
 def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> None:
