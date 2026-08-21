@@ -630,41 +630,17 @@ def _render_reprocess(agent: AcqAgent) -> None:
                 kph = agent.source.config.keyphasor_index()
                 tc = TransientCapture(st.session_state.get("rm_transient").config
                                       if st.session_state.get("rm_transient") else None)
-                npts = tc.process_full(full, float(manifest.get("fs", agent.sample_rate_hz)),
-                                       vib, kph_idx=kph, delta_rpm=8.0)
+                fsr = float(manifest.get("fs", agent.sample_rate_hz))
+                npts = tc.process_full(full, fsr, vib, kph_idx=kph, delta_rpm=8.0)
                 st.session_state["rm_transient"] = tc
-            st.success(f"✓ Reprocesado: **{npts} puntos** desde el registro completo "
-                       f"({full.shape[1]/manifest.get('fs',1):.0f} s de onda cruda). "
-                       f"Mirá **Bode / Cascada / Polar** abajo.")
-
-
-def _render_transient_only(agent: AcqAgent, tc: TransientCapture) -> None:
-    """Vista de una GRABACIÓN reprocesada cuando no hay adquisición en vivo:
-    solo las pestañas de transitorio (Bode/Polar/Cascada/Waterfall) desde `tc`."""
-    names = [ch.name for ch in agent.channels if not is_keyphasor_channel(ch)]
-    if not names:
-        st.info("La grabación no tiene canales de vibración.")
-        return
-    rmin, rmax = None, None
-    try:
-        rr = tc.bode(names[0])[0]
-        if len(rr):
-            rmin, rmax = float(np.min(rr)), float(np.max(rr))
-    except Exception:  # noqa: BLE001
-        pass
-    rng = f" · {rmin:.0f}–{rmax:.0f} rpm" if rmin is not None else ""
-    st.info(f"📼 **Grabación reprocesada** ({tc.n_samples} puntos{rng}) — sin adquisición en vivo. "
-            f"Poné **🟢 Live** para volver al monitoreo en tiempo real.")
-    tabs = st.tabs(["Bode", "Polar", "Cascada", "Waterfall"])
-    with tabs[0]:
-        _plot_bode(tc, st.selectbox("Canal", names, key="rm_ro_bode"))
-    with tabs[1]:
-        _plot_polar(tc, st.selectbox("Canal", names, key="rm_ro_polar"),
-                    np.zeros((0, 0)), [], agent.sample_rate_hz, None)
-    with tabs[2]:
-        _plot_cascade(tc, st.selectbox("Canal", names, key="rm_ro_casc"), None)
-    with tabs[3]:
-        _plot_waterfall(tc, st.selectbox("Canal", names, key="rm_ro_wf"))
+                # Guarda la onda completa para el REPLAY (todos los gráficos con cursor).
+                st.session_state["rm_replay"] = {
+                    "full": full, "fs": fsr, "dur": full.shape[1] / fsr,
+                    "win": min(int(2.0 * fsr), full.shape[1]), "rec_id": m["rec_id"]}
+                st.session_state["rm_running"] = False     # replay, no vivo
+            st.success(f"✓ Reprocesado: **{npts} puntos** de {full.shape[1]/fsr:.0f} s de onda cruda. "
+                       f"Abajo tenés **TODOS** los gráficos: movés el **🎚 cursor** para onda/espectro/"
+                       f"órbita/tabular en cada instante, y Bode/Cascada/Polar de toda la corrida.")
 
 
 def _analisis_display() -> None:
@@ -678,23 +654,48 @@ def _analisis_display() -> None:
         except Exception:  # noqa: BLE001
             st.session_state["rm_running"] = False
     snap = agent.snapshot()
+    replay = st.session_state.get("rm_replay")
+    replay_mode = snap.shape[1] == 0 and replay is not None
+    fs = agent.sample_rate_hz
+    kph_idx = agent.source.config.keyphasor_index()
+    rpm = None
+    if replay_mode:
+        # REPLAY de la grabación: cursor de tiempo → ventana → TODOS los gráficos
+        # (onda, espectro, órbita, tabular) en ese instante; Bode/Cascada usan todo.
+        full = replay["full"]
+        fs = float(replay["fs"])
+        win = int(replay["win"])
+        dur = float(replay["dur"])
+        maxt = max(0.0, dur - win / fs)
+        cc = st.columns([4, 1])
+        with cc[0]:
+            t = st.slider(f"🎚 Cursor de la grabación · {replay.get('rec_id', '')} (s)",
+                          0.0, round(maxt, 2), min(round(maxt, 2), 0.0),
+                          step=(round(maxt / 200, 3) or 0.05), key="rm_replay_t")
+        with cc[1]:
+            if st.button("✕ Salir del replay", use_container_width=True):
+                st.session_state.pop("rm_replay", None)
+                st.rerun()
+        off = int(t * fs)
+        snap = np.ascontiguousarray(full[:, off:off + win])
+        st.info(f"📼 **Replay de grabación** · cursor {t:.1f} / {dur:.0f} s — movés el cursor y ves "
+                f"**onda / espectro / órbita / tabular** en ese instante; **Bode/Polar/Cascada/"
+                f"Waterfall** usan toda la grabación.")
+        if kph_idx is not None and snap.shape[1]:
+            from core.remote_monitoring.keyphasor import detect_keyphasor
+            rpm = detect_keyphasor(snap[kph_idx, -min(snap.shape[1], int(2 * fs)):], fs).rpm
     if snap.shape[1] == 0:
-        _tc = st.session_state.get("rm_transient")
-        if _tc is not None and _tc.n_samples >= 2:
-            _render_transient_only(agent, _tc)      # grabación reprocesada, sin vivo
-        else:
-            st.info("Sin datos. Andá a **Monitoreo** y pulsá **▶ Iniciar** "
-                    "(o reprocesá una grabación arriba).")
+        st.info("Sin datos. Andá a **Monitoreo** y pulsá **▶ Iniciar** "
+                "(o reprocesá una grabación arriba).")
         return
-    rpm = agent.estimate_rpm(snap)
+    if not replay_mode:
+        rpm = agent.estimate_rpm(snap)
     vib = [(i, ch) for i, ch in enumerate(agent.channels) if not is_keyphasor_channel(ch)]
     state = rm_states.classify_state(rpm, st.session_state.get("rm_prev_rpm"))
     st.session_state["rm_prev_rpm"] = rpm
     tc = st.session_state.setdefault("rm_transient", TransientCapture())
-    if rpm:
-        tc.feed(snap, rpm, agent.sample_rate_hz, vib,
-                kph_idx=agent.source.config.keyphasor_index())
-    fs = agent.sample_rate_hz
+    if rpm and not replay_mode:      # en replay NO alimentar (tc ya viene del reproceso)
+        tc.feed(snap, rpm, fs, vib, kph_idx=kph_idx)
     names = [ch.name for _, ch in vib]
     _vent = snap.shape[1] / fs
     # (El contexto RPM/estado/ventana vive en el header de cada gráfico,
