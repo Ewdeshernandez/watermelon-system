@@ -608,6 +608,35 @@ def _render_reprocess(agent: AcqAgent) -> None:
                        f"Mirá **Bode / Cascada / Polar** abajo.")
 
 
+def _render_transient_only(agent: AcqAgent, tc: TransientCapture) -> None:
+    """Vista de una GRABACIÓN reprocesada cuando no hay adquisición en vivo:
+    solo las pestañas de transitorio (Bode/Polar/Cascada/Waterfall) desde `tc`."""
+    names = [ch.name for ch in agent.channels if not is_keyphasor_channel(ch)]
+    if not names:
+        st.info("La grabación no tiene canales de vibración.")
+        return
+    rmin, rmax = None, None
+    try:
+        rr = tc.bode(names[0])[0]
+        if len(rr):
+            rmin, rmax = float(np.min(rr)), float(np.max(rr))
+    except Exception:  # noqa: BLE001
+        pass
+    rng = f" · {rmin:.0f}–{rmax:.0f} rpm" if rmin is not None else ""
+    st.info(f"📼 **Grabación reprocesada** ({tc.n_samples} puntos{rng}) — sin adquisición en vivo. "
+            f"Poné **🟢 Live** para volver al monitoreo en tiempo real.")
+    tabs = st.tabs(["Bode", "Polar", "Cascada", "Waterfall"])
+    with tabs[0]:
+        _plot_bode(tc, st.selectbox("Canal", names, key="rm_ro_bode"))
+    with tabs[1]:
+        _plot_polar(tc, st.selectbox("Canal", names, key="rm_ro_polar"),
+                    np.zeros((0, 0)), [], agent.sample_rate_hz, None)
+    with tabs[2]:
+        _plot_cascade(tc, st.selectbox("Canal", names, key="rm_ro_casc"), None)
+    with tabs[3]:
+        _plot_waterfall(tc, st.selectbox("Canal", names, key="rm_ro_wf"))
+
+
 def _analisis_display() -> None:
     agent = st.session_state.get("rm_agent")
     if agent is None:
@@ -620,7 +649,12 @@ def _analisis_display() -> None:
             st.session_state["rm_running"] = False
     snap = agent.snapshot()
     if snap.shape[1] == 0:
-        st.info("Sin datos. Andá a **Monitoreo** y pulsá **▶ Iniciar**.")
+        _tc = st.session_state.get("rm_transient")
+        if _tc is not None and _tc.n_samples >= 2:
+            _render_transient_only(agent, _tc)      # grabación reprocesada, sin vivo
+        else:
+            st.info("Sin datos. Andá a **Monitoreo** y pulsá **▶ Iniciar** "
+                    "(o reprocesá una grabación arriba).")
         return
     rpm = agent.estimate_rpm(snap)
     vib = [(i, ch) for i, ch in enumerate(agent.channels) if not is_keyphasor_channel(ch)]
