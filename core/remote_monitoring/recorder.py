@@ -309,6 +309,32 @@ def is_raw_local(rec_dir: str) -> bool:
     return os.path.isfile(os.path.join(rec_dir, "data.f32"))
 
 
+def list_all_recordings() -> List[dict]:
+    """Todas las grabaciones locales (de cualquier instancia), recientes primero.
+    Sirve para que la app encuentre lo que grabó el colector headless aunque el
+    nombre de máquina activo no coincida."""
+    base = _persist_root()
+    out = []
+    if not os.path.isdir(base):
+        return out
+    for inst in os.listdir(base):
+        idir = os.path.join(base, inst)
+        if not os.path.isdir(idir):
+            continue
+        for rid in os.listdir(idir):
+            mp = os.path.join(idir, rid, "manifest.json")
+            if os.path.isfile(mp):
+                try:
+                    m = json.load(open(mp))
+                    m["_dir"] = os.path.join(idir, rid)
+                    m["_instance"] = inst
+                    out.append(m)
+                except Exception:  # noqa: BLE001
+                    pass
+    out.sort(key=lambda m: m.get("started", 0), reverse=True)
+    return out
+
+
 def load_recording(rec_dir: str) -> Tuple[dict, np.ndarray]:
     """Reconstruye (manifest, waveform completa (canales, muestras)) del registro."""
     manifest = json.load(open(os.path.join(rec_dir, "manifest.json")))
