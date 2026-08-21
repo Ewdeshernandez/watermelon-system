@@ -74,6 +74,21 @@ jobs:
           printf '@echo off\r\n"%%~dp0WatermelonField.exe" --sens 100 --fs 5120 --chans 4,5,6,7 --names 1Y,1X,2Y,2X --kph-bnc 1 --machine Rotor_Kit_SIGA_1\r\npause\r\n' \
             > out/4_cuatro_radiales_2_cojinetes.bat
 
+          # --- BANCO DE PRUEBAS: escenarios sim (sin hardware) para probar TODO ---
+          mkdir -p out/Banco_de_Pruebas
+          scen () { printf '@echo off\r\n"%%~dp0..\\WatermelonField.exe" --fs %s --scenario %s\r\npause\r\n' "$2" "$1" > "out/Banco_de_Pruebas/$3.bat"; }
+          scen prox_6brg        5120  "01_proximidad_6cojinetes_orbitas"
+          scen prox_runup_whip  5120  "02_arranque_2criticas_oil_whip__Bode_Cascada"
+          scen prox_misalign    5120  "03_desalineacion_2X"
+          scen prox_looseness   5120  "04_holgura_armonicos"
+          scen prox_rub         5120  "05_roce_subarmonicos"
+          scen accel_bpfo      25600  "06_acelerometros_falla_BPFO_envelope"
+          scen accel_bpfi      25600  "07_acelerometros_falla_BPFI"
+          scen accel_bsf       25600  "08_acelerometros_falla_BSF"
+          scen gear_mesh       25600  "09_engrane_GMF"
+          scen vel_iso_6brg     5120  "10_velocidad_ISO20816"
+          scen coastdown        5120  "11_parada_coastdown"
+
           # --- instrucciones en texto plano (sin algoritmos) ---
           cat > out/LEEME.txt <<'TXT'
           Watermelon Field - modulo nativo de adquisicion (Windows)
@@ -99,6 +114,21 @@ jobs:
 
           Sin internet funciona igual; las grabaciones quedan locales y se suben
           cuando haya conexion (por ahora quedan "local pendiente").
+
+          BANCO DE PRUEBAS (carpeta Banco_de_Pruebas)  <-- SIN cDAQ, todo simulado
+          ---------------------------------------------------------------------
+          Para desarrollar/probar TODOS los modulos sin hardware. Doble clic:
+
+            01_proximidad_6cojinetes_orbitas        -> 6 cojinetes, orbitas, tabular, forma modal
+            02_arranque_2criticas_oil_whip          -> RUNUP: Bode, Cascada, Polar, diagnostico
+            03_desalineacion_2X / 04_holgura / 05_roce -> defectos de proximidad
+            06_BPFO / 07_BPFI / 08_BSF              -> acelerometros: fallas de rodamiento (envelope)
+            09_engrane_GMF                          -> frecuencia de engrane
+            10_velocidad_ISO20816                   -> overall en mm/s
+            11_parada_coastdown                     -> parada por 2 criticas
+
+          Son datos sinteticos fisicamente correctos: sirven para afinar graficos,
+          alarmas y diagnostico mientras llega la tarjeta de proximidad.
           TXT
 
           ls -la out
