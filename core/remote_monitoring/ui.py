@@ -99,10 +99,10 @@ def render_remote_monitoring() -> None:
 
         /* Controles de rango de la tendencia: chicos y alineados */
         .st-key-rm_trend_ctrls { margin-top:-4px; }
-        :is(.st-key-rm_trend_ctrls,.st-key-rm_casc_ctrls) [role="radiogroup"] { gap:2px 12px !important; align-items:center; }
-        :is(.st-key-rm_trend_ctrls,.st-key-rm_casc_ctrls) [role="radiogroup"] label p { font-size:12px !important; }
-        :is(.st-key-rm_trend_ctrls,.st-key-rm_casc_ctrls) [role="radiogroup"] label { padding:1px 0 !important; }
-        .st-key-rm_casc_ctrls { margin-top:-4px; }
+        :is(.st-key-rm_trend_ctrls,.st-key-rm_casc_ctrls,.st-key-rm_wf3_ctrls) [role="radiogroup"] { gap:2px 12px !important; align-items:center; }
+        :is(.st-key-rm_trend_ctrls,.st-key-rm_casc_ctrls,.st-key-rm_wf3_ctrls) [role="radiogroup"] label p { font-size:12px !important; }
+        :is(.st-key-rm_trend_ctrls,.st-key-rm_casc_ctrls,.st-key-rm_wf3_ctrls) [role="radiogroup"] label { padding:1px 0 !important; }
+        .st-key-rm_casc_ctrls, .st-key-rm_wf3_ctrls { margin-top:-4px; }
         /* Multiselección de canales: compacta, en la misma línea */
         .st-key-rm_trend_ctrls [data-testid="stMultiSelect"] { min-width:220px !important; }
         .st-key-rm_trend_ctrls [data-testid="stMultiSelect"] div[data-baseweb="select"] > div {
@@ -2167,18 +2167,95 @@ def _plot_shaft_centerline(snap: np.ndarray, vib) -> None:
                "Para Shaft Centerline real se necesita el gap DC del proximitor.")
 
 
+def _hexlerp(c1: str, c2: str, t: float) -> str:
+    a, b = int(c1[1:], 16), int(c2[1:], 16)
+    ar, ag, ab = (a >> 16) & 255, (a >> 8) & 255, a & 255
+    br, bg, bb = (b >> 16) & 255, (b >> 8) & 255, b & 255
+    return f"#{round(ar+(br-ar)*t):02x}{round(ag+(bg-ag)*t):02x}{round(ab+(bb-ab)*t):02x}"
+
+
 def _plot_waterfall(tc: TransientCapture, channel: str) -> None:
-    """Waterfall 3D: espectro vs velocidad (superficie). Transitorio."""
+    """Waterfall 3D estilo System1 mejorado: espectros apilados en 3D (traza por
+    rpm, gradiente por velocidad), líneas de orden en el piso, selector
+    Hz/CPM/Órdenes, amplitud por norma. Transitorio (runup/coastdown)."""
     import plotly.graph_objects as go
     rpms, freqs, mat = tc.cascade(channel)
     if len(rpms) < 2:
-        st.info("El Waterfall se llena en un transitorio (runup/coastdown). Corré uno en Monitoreo.")
+        st.info("El Waterfall se llena en un **transitorio** (runup/coastdown). Corré uno en Monitoreo.")
         return
-    fig = go.Figure(go.Surface(x=freqs, y=rpms, z=mat, colorscale="Turbo", showscale=True))
-    fig.update_layout(height=520, title=f"Waterfall 3D · {channel}",
-                      scene=dict(xaxis_title="Hz", yaxis_title="RPM", zaxis_title="Ampl"),
-                      margin=dict(l=0, r=0, t=40, b=0))
+    tmap = st.session_state.get("rm_type_by_name") or {}
+    conv, norm, k0, _krms = _amp_conv(tmap.get(channel, "proximity"))
+    chs = st.session_state.get("rm_channels") or []
+    units = next((c.units for c in chs if c.name == channel), "mil")
+    uu = _amp_unit(units, conv)
+    machine = st.session_state.get("rm_machine_name", "—")
+    ts = datetime.now().strftime("%d %b %Y · %H:%M:%S")
+    st.markdown(
+        f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
+        f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
+        f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
+        f'<span><b>{machine}</b> · {channel} · Waterfall 3D · '
+        f'<span style="color:#c7d6ea">{rpms.min():.0f}–{rpms.max():.0f} rpm</span></span>'
+        f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
+
+    with st.container(key="rm_wf3_ctrls", horizontal=True, vertical_alignment="center", gap="medium"):
+        xmode = st.radio("Frecuencia", ["Hz", "CPM", "Órdenes"], horizontal=True,
+                         key="rm_wf3_xunit", label_visibility="collapsed")
+    mat = mat * k0
+    fmax = float(freqs[-1]) if len(freqs) else 1.0
+    n = len(rpms)
+    idx = np.unique(np.linspace(0, n - 1, min(48, n)).round().astype(int))
+    rr, MM = rpms[idx], mat[idx]
+    tmin, tmax = float(rr[0]), float(rr[-1])
+    if xmode == "Órdenes":
+        _xf = lambda fr, rp: fr * 60.0 / rp if rp > 0 else fr
+        xtitle, xhi = "Orden (× rpm)", 6.0
+    elif xmode == "CPM":
+        _xf = lambda fr, rp: fr * 60.0
+        xtitle, xhi = "Frecuencia (CPM)", fmax * 60.0
+    else:
+        _xf = lambda fr, rp: fr
+        xtitle, xhi = "Frecuencia (Hz)", fmax
+
+    fig = go.Figure()
+    for i in range(len(rr)):
+        frac = (rr[i] - tmin) / ((tmax - tmin) or 1.0)
+        fig.add_trace(go.Scatter3d(
+            x=_xf(freqs, rr[i]), y=np.full(len(freqs), rr[i]), z=MM[i], mode="lines",
+            line=dict(color=_hexlerp("#7fb3ea", "#0F1E3D", frac), width=2.5),
+            hovertemplate=f"%{{x:.1f}} {xmode} · {rr[i]:.0f} rpm · %{{z:.3g}} {uu}<extra></extra>",
+            showlegend=False))
+    # Líneas de orden en el piso (z=0).
+    for k, lbl, col in [(1.0, "1X", "#e26d6d"), (2.0, "2X", "#e0982a"), (3.0, "3X", "#8b5cf6")]:
+        if xmode == "Órdenes":
+            if k > xhi:
+                continue
+            fig.add_trace(go.Scatter3d(x=[k, k], y=[rr[0], rr[-1]], z=[0, 0], mode="lines",
+                          line=dict(color=col, width=3, dash="dot"), hoverinfo="skip", showlegend=False))
+        else:
+            fx = (k * rr / 60.0) * (60.0 if xmode == "CPM" else 1.0)
+            m = fx <= xhi
+            if m.sum() < 2:
+                continue
+            fig.add_trace(go.Scatter3d(x=fx[m], y=rr[m], z=np.zeros(int(m.sum())), mode="lines",
+                          line=dict(color=col, width=3, dash="dot"), hoverinfo="skip", showlegend=False))
+
+    fig.update_layout(height=640, margin=dict(l=0, r=0, t=6, b=0), paper_bgcolor="#ffffff",
+                      font=_S1_FONT, showlegend=False,
+                      scene=dict(
+                          xaxis=dict(title=xtitle, range=[0, xhi], backgroundcolor="#ffffff",
+                                     gridcolor="#e6ecf5", zerolinecolor="#cdd7e6"),
+                          yaxis=dict(title="RPM", backgroundcolor="#ffffff", gridcolor="#e6ecf5",
+                                     zerolinecolor="#cdd7e6"),
+                          zaxis=dict(title=uu, backgroundcolor="#ffffff", gridcolor="#e6ecf5",
+                                     zerolinecolor="#cdd7e6"),
+                          camera=dict(eye=dict(x=1.7, y=-1.6, z=0.85)),
+                          aspectratio=dict(x=1.5, y=1.7, z=0.5)))
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
+    st.caption(f"Waterfall 3D: cada traza = un espectro a su rpm (profundidad), color por velocidad. "
+               f"Las líneas del piso son las **órdenes**; el ridge que sube por **1X** = síncrono, "
+               f"lo **fijo en frecuencia** = estructural, lo **subsíncrono** = inestabilidad. "
+               f"Amplitud en {uu.split()[-1] if uu else 'pp'} (API 670). Arrastrá para rotar.")
 
 
 def _save_snapshot(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]) -> None:
