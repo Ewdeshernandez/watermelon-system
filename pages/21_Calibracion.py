@@ -392,7 +392,7 @@ def _report_tab() -> None:
             st.rerun()
 
     st.divider()
-    if st.button("Generar reporte PDF", key="cal_pdf", type="primary"):
+    if st.button("Generar reporte PDF", key="cal_gen_btn", type="primary"):
         try:
             from core.calibration.report import build_calibration_pdf
             meta = {

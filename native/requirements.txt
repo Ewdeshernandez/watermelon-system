@@ -1,0 +1,5 @@
+# Watermelon Field — módulo nativo de adquisición (Windows/campo)
+numpy
+PySide6>=6.6
+pyqtgraph>=0.13
+nidaqmx            # solo Windows con NI-DAQmx (el resto corre con --sim)
