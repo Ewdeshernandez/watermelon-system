@@ -1,19 +1,15 @@
 """
-Watermelon Field — módulo NATIVO industrial de adquisición y monitoreo en vivo
-==============================================================================
+Watermelon Field — módulo NATIVO industrial de adquisición y monitoreo
+======================================================================
 
-App de escritorio (PySide6 + pyqtgraph) para el PC de campo. Tiempo real sólido,
-SIN navegador → no se traba. Reusa TODO el motor de core/remote_monitoring
-(adquisición NI, FFT, order tracking, diagnóstico). La web queda solo para
-análisis/reportes.
+App de escritorio (PySide6 + pyqtgraph): menú, barra de herramientas, pestañas
+(Configuración · Monitoreo · Tabular · Espectro) y barra de estado — estilo
+estación de análisis (System1/ADRE), pero abierto y con nube. Reusa el motor de
+core/remote_monitoring. Tiempo real nativo, sin navegador.
 
 Correr:
-    python native/watermelon_field.py --sim          # demo (Mac/dev, sin hardware)
-    python native/watermelon_field.py                # campo: NI real (Windows)
-    python native/watermelon_field.py --mod cDAQ1Mod1 --chans 0,1 --sens 100 --fs 5120
-
-v0.1 — base: waveforms + espectro (canal elegible) + barras de nivel (overall) +
-rpm, con Iniciar/Detener/Grabar. Próximo: órbita, Bode/cascada, alarmas.
+    python native/watermelon_field.py --sim          # demo (Mac/dev)
+    python native/watermelon_field.py --sens 100 --fs 5120   # NI real (Windows)
 """
 from __future__ import annotations
 
@@ -29,9 +25,9 @@ from core.remote_monitoring.agent import AcqAgent
 from core.remote_monitoring.stream_source import (ChannelConfig, StreamConfig,
                                                   SimulatedStreamSource, is_keyphasor_channel)
 
-_NAVY = "#0F1E3D"
-_BLUE = "#4f8fd0"
-_GRID = (210, 218, 230)
+NAVY = "#0F1E3D"
+BLUE = "#2f6fb0"
+CORN = "#4f8fd0"
 
 
 def build_agent(args) -> AcqAgent:
@@ -41,16 +37,14 @@ def build_agent(args) -> AcqAgent:
     units = "mil pp" if args.prox else "g rms"
     chans = []
     for k, i in enumerate(idxs):
-        chans.append(ChannelConfig(
-            name=names[k] if k < len(names) else f"CH{i}", coupling=coup,
-            sensitivity_mv_per_eu=args.sens, bnc_port=(i + 1), units=units))
+        chans.append(ChannelConfig(name=names[k] if k < len(names) else f"CH{i}", coupling=coup,
+                                   sensitivity_mv_per_eu=args.sens, bnc_port=(i + 1), units=units))
     if args.kph_bnc:
         chans.append(ChannelConfig(name="KPH", coupling="DC", sensitivity_mv_per_eu=1.0,
                                    bnc_port=args.kph_bnc, units="pulses/rev"))
     cfg = StreamConfig(sample_rate_hz=args.fs, channels=chans, block_seconds=0.1,
                        buffer_seconds=4.0, rpm=args.rpm, chassis_name=args.chassis)
     if args.sim:
-        cfg.speed_profile = "constant"
         source = SimulatedStreamSource(cfg)
     else:
         from core.remote_monitoring.ni_stream_source import NIStreamSource
@@ -65,17 +59,42 @@ def _spectrum(x, fs):
     return np.fft.rfftfreq(len(x), 1.0 / fs), mag
 
 
+def _stylesheet() -> str:
+    return f"""
+    QMainWindow, QWidget {{ background: #f4f7fb; color: #1f2937;
+        font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; }}
+    QMenuBar {{ background: {NAVY}; color: white; }}
+    QMenuBar::item:selected {{ background: {BLUE}; }}
+    QMenu {{ background: white; border: 1px solid #d6deea; }}
+    QMenu::item:selected {{ background: {CORN}; color: white; }}
+    QToolBar {{ background: {NAVY}; spacing: 6px; padding: 5px; border: none; }}
+    QToolBar QToolButton {{ color: white; padding: 6px 12px; border-radius: 6px; }}
+    QToolBar QToolButton:hover {{ background: {BLUE}; }}
+    QTabWidget::pane {{ border: 1px solid #d6deea; background: white; }}
+    QTabBar::tab {{ background: #e7edf6; padding: 8px 18px; margin-right: 2px;
+        border-top-left-radius: 6px; border-top-right-radius: 6px; }}
+    QTabBar::tab:selected {{ background: white; color: {NAVY}; font-weight: 700;
+        border-bottom: 2px solid {CORN}; }}
+    QStatusBar {{ background: {NAVY}; color: #c7d6ea; }}
+    QPushButton {{ background: {BLUE}; color: white; border: none; padding: 7px 14px;
+        border-radius: 6px; }}
+    QPushButton:hover {{ background: {NAVY}; }}
+    QPushButton:disabled {{ background: #9fb3d1; }}
+    QTableWidget {{ background: white; gridline-color: #e8edf5; }}
+    QHeaderView::section {{ background: {NAVY}; color: white; padding: 6px; border: none; }}
+    """
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--sim", action="store_true", help="Fuente simulada (sin hardware)")
+    ap.add_argument("--sim", action="store_true")
     ap.add_argument("--machine", default="Rotor_Kit_Field")
     ap.add_argument("--chassis", default="cDAQ1")
-    ap.add_argument("--mod", default="cDAQ1Mod1")   # informativo (bnc_port hace el mapeo)
     ap.add_argument("--chans", default="0,1")
     ap.add_argument("--names", default="1YA,1XA")
     ap.add_argument("--sens", type=float, default=100.0)
     ap.add_argument("--fs", type=float, default=5120.0)
-    ap.add_argument("--rpm", type=float, default=1475.0)   # solo para el simulador
+    ap.add_argument("--rpm", type=float, default=1475.0)
     ap.add_argument("--prox", action="store_true")
     ap.add_argument("--kph-bnc", type=int, default=0)
     args = ap.parse_args()
@@ -84,114 +103,107 @@ def main() -> int:
         from PySide6 import QtWidgets, QtCore, QtGui
         import pyqtgraph as pg
     except ImportError:
-        print("Faltan dependencias del módulo nativo:\n    pip install -r native/requirements.txt")
+        print("Instalá deps del nativo:  pip install -r native/requirements.txt")
         return 2
 
     agent = build_agent(args)
+    vib = [(i, c) for i, c in enumerate(agent.channels) if not is_keyphasor_channel(c)]
     from core.remote_monitoring.recorder import TransientRecorder, upload_recording
 
-    pg.setConfigOptions(antialias=True, background="w", foreground=_NAVY)
+    pg.setConfigOptions(antialias=True, background="w", foreground=NAVY)
     app = QtWidgets.QApplication(sys.argv)
+    app.setStyleSheet(_stylesheet())
 
     win = QtWidgets.QMainWindow()
-    win.setWindowTitle(f"Watermelon Field · {args.machine}")
-    win.resize(1280, 800)
-    central = QtWidgets.QWidget(); win.setCentralWidget(central)
-    root = QtWidgets.QVBoxLayout(central)
+    win.setWindowTitle(f"Watermelon Field — {args.machine}")
+    win.resize(1360, 860)
+    rec_state = {"rec": None}
 
-    # --- Barra de control ---
-    bar = QtWidgets.QHBoxLayout()
-    btn_start = QtWidgets.QPushButton("▶ Iniciar")
-    btn_stop = QtWidgets.QPushButton("⏸ Detener"); btn_stop.setEnabled(False)
-    btn_rec = QtWidgets.QPushButton("⏺ Grabar"); btn_rec.setCheckable(True)
-    lbl_rpm = QtWidgets.QLabel("RPM: —"); lbl_rpm.setStyleSheet(f"font-weight:700;color:{_NAVY}")
-    lbl_status = QtWidgets.QLabel("detenido")
-    ch_names = [c.name for c in agent.channels if not is_keyphasor_channel(c)]
-    combo = QtWidgets.QComboBox(); combo.addItems(ch_names)
-    for w in (btn_start, btn_stop, btn_rec):
-        w.setMinimumHeight(34)
-    bar.addWidget(btn_start); bar.addWidget(btn_stop); bar.addWidget(btn_rec)
-    bar.addSpacing(16); bar.addWidget(QtWidgets.QLabel("Espectro de:")); bar.addWidget(combo)
-    bar.addStretch(1); bar.addWidget(lbl_rpm); bar.addSpacing(16); bar.addWidget(lbl_status)
-    root.addLayout(bar)
+    # ---------------- Menú ----------------
+    mb = win.menuBar()
+    m_file = mb.addMenu("&Archivo")
+    m_view = mb.addMenu("&Ver")
+    m_help = mb.addMenu("A&yuda")
+    act_start = QtGui.QAction("▶ Iniciar", win)
+    act_stop = QtGui.QAction("⏸ Detener", win); act_stop.setEnabled(False)
+    act_rec = QtGui.QAction("⏺ Grabar", win); act_rec.setCheckable(True)
+    act_quit = QtGui.QAction("Salir", win)
+    for a in (act_start, act_stop, act_rec):
+        m_file.addAction(a)
+    m_file.addSeparator(); m_file.addAction(act_quit)
+    act_about = QtGui.QAction("Acerca de Watermelon Field", win)
+    m_help.addAction(act_about)
 
-    # --- Gráficos (pyqtgraph, tiempo real) ---
-    gl = pg.GraphicsLayoutWidget(); root.addWidget(gl, 1)
-    vib = [(i, c) for i, c in enumerate(agent.channels) if not is_keyphasor_channel(c)]
-    kph_idx = agent.source.config.keyphasor_index()
+    # ---------------- Toolbar ----------------
+    tb = win.addToolBar("Principal")
+    tb.setMovable(False)
+    tb.addAction(act_start); tb.addAction(act_stop); tb.addAction(act_rec)
+    spacer = QtWidgets.QWidget(); spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
+                                                       QtWidgets.QSizePolicy.Preferred)
+    tb.addWidget(spacer)
+    lbl_machine = QtWidgets.QLabel(f"  {args.machine}   ")
+    lbl_machine.setStyleSheet("color:white; font-weight:700; font-size:14px;")
+    tb.addWidget(lbl_machine)
 
-    # Fila 1: waveforms apilados (una curva por canal)
+    # ---------------- Pestañas ----------------
+    tabs = QtWidgets.QTabWidget(); win.setCentralWidget(tabs)
+
+    # --- Configuración ---
+    cfg_w = QtWidgets.QWidget(); cfg_l = QtWidgets.QVBoxLayout(cfg_w)
+    cfg_l.addWidget(QtWidgets.QLabel(f"<b>Máquina:</b> {args.machine}  ·  "
+                                     f"<b>Muestreo:</b> {args.fs:.0f} Hz  ·  "
+                                     f"<b>Chasis:</b> {args.chassis}"))
+    tblc = QtWidgets.QTableWidget(len(agent.channels), 5)
+    tblc.setHorizontalHeaderLabels(["Canal", "BNC", "Tipo", "Sensib (mV/EU)", "Acople"])
+    tblc.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    for r, c in enumerate(agent.channels):
+        tipo = "keyphasor" if is_keyphasor_channel(c) else ("proximidad" if c.coupling == "AC"
+                                                            else "acelerómetro")
+        for col, val in enumerate([c.name, str(c.bnc_port), tipo,
+                                    f"{c.sensitivity_mv_per_eu:g}", c.coupling]):
+            it = QtWidgets.QTableWidgetItem(val); it.setFlags(QtCore.Qt.ItemIsEnabled)
+            tblc.setItem(r, col, it)
+    cfg_l.addWidget(tblc)
+    cfg_l.addWidget(QtWidgets.QLabel("<i>(La edición de canales / carga desde la nube llega en v0.4.)</i>"))
+    tabs.addTab(cfg_w, "Configuración")
+
+    # --- Monitoreo (scope live) ---
+    mon_w = QtWidgets.QWidget(); mon_l = QtWidgets.QVBoxLayout(mon_w)
+    top = QtWidgets.QHBoxLayout()
+    top.addWidget(QtWidgets.QLabel("Espectro de:"))
+    combo = QtWidgets.QComboBox(); combo.addItems([c.name for _, c in vib]); top.addWidget(combo)
+    top.addStretch(1); mon_l.addLayout(top)
+    gl = pg.GraphicsLayoutWidget(); mon_l.addWidget(gl, 1)
     wave_curves = []
     for r, (i, c) in enumerate(vib):
-        p = gl.addPlot(row=r, col=0)
-        p.showGrid(x=True, y=True, alpha=0.25)
-        p.setLabel("left", c.name, units=c.units.split()[0] if c.units else "")
-        if r < len(vib) - 1:
-            p.getAxis("bottom").setStyle(showValues=False)
-        else:
-            p.setLabel("bottom", "ms")
-        wave_curves.append(p.plot(pen=pg.mkPen(_BLUE, width=1.3)))
-    # Fila siguiente: espectro
-    p_spec = gl.addPlot(row=len(vib), col=0)
-    p_spec.showGrid(x=True, y=True, alpha=0.25)
-    p_spec.setLabel("left", "amplitud")
-    p_spec.setLabel("bottom", "Frecuencia (Hz)")
-    spec_curve = p_spec.plot(pen=pg.mkPen(_BLUE, width=1.3))
+        p = gl.addPlot(row=r, col=0); p.showGrid(x=True, y=True, alpha=0.25)
+        p.setLabel("left", c.name)
+        p.getAxis("bottom").setStyle(showValues=(r == len(vib) - 1))
+        wave_curves.append(p.plot(pen=pg.mkPen(CORN, width=1.3)))
+    p_spec = gl.addPlot(row=len(vib), col=0); p_spec.showGrid(x=True, y=True, alpha=0.25)
+    p_spec.setLabel("left", "amplitud"); p_spec.setLabel("bottom", "Frecuencia (Hz)")
+    spec_curve = p_spec.plot(pen=pg.mkPen(CORN, width=1.3))
     v1x = pg.InfiniteLine(angle=90, pen=pg.mkPen("#e26d6d", width=1, style=QtCore.Qt.DashLine))
     p_spec.addItem(v1x)
+    tabs.addTab(mon_w, "Monitoreo")
 
-    # Barra de nivel (overall) por canal, abajo
-    bars = QtWidgets.QHBoxLayout()
-    level_lbls = []
-    for _, c in vib:
-        box = QtWidgets.QVBoxLayout()
-        pb = QtWidgets.QProgressBar(); pb.setRange(0, 100); pb.setTextVisible(True)
-        pb.setFormat(f"{c.name}: %v%")
-        lab = QtWidgets.QLabel(f"{c.name}  —"); lab.setStyleSheet(f"color:{_NAVY}")
-        box.addWidget(lab); box.addWidget(pb)
-        bars.addLayout(box); level_lbls.append((pb, lab, c))
-    root.addLayout(bars)
+    # --- Tabular (valores actuales, vivo) ---
+    tab_w = QtWidgets.QWidget(); tab_l = QtWidgets.QVBoxLayout(tab_w)
+    tblt = QtWidgets.QTableWidget(len(vib), 5)
+    tblt.setHorizontalHeaderLabels(["Sensor", "Overall", "1X", "1X fase", "Estado"])
+    tblt.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    tblt.verticalHeader().setVisible(False)
+    tab_l.addWidget(tblt)
+    tabs.addTab(tab_w, "Tabular")
 
-    # --- Estado de grabación ---
-    state = {"rec": None}
+    lbl_rpm = QtWidgets.QLabel("RPM: —"); lbl_state = QtWidgets.QLabel("detenido")
+    lbl_rec = QtWidgets.QLabel("")
+    win.statusBar().addWidget(lbl_state)
+    win.statusBar().addPermanentWidget(lbl_rec)
+    win.statusBar().addPermanentWidget(lbl_rpm)
 
-    def do_start():
-        try:
-            agent.start()
-            btn_start.setEnabled(False); btn_stop.setEnabled(True)
-            lbl_status.setText("adquiriendo (hilo de fondo)")
-            timer.start(60)     # ~16 FPS
-        except Exception as e:  # noqa: BLE001
-            QtWidgets.QMessageBox.critical(win, "Error", f"No se pudo iniciar: {e}")
-
-    def do_stop():
-        timer.stop(); agent.stop()
-        btn_start.setEnabled(True); btn_stop.setEnabled(False)
-        lbl_status.setText("detenido")
-        if btn_rec.isChecked():
-            btn_rec.setChecked(False); do_rec(False)
-
-    def do_rec(checked):
-        if checked:
-            ch_meta = [{"name": c.name, "units": c.units, "coupling": c.coupling,
-                        "bnc_port": c.bnc_port, "sensitivity_mv_per_eu": float(c.sensitivity_mv_per_eu or 0)}
-                       for c in agent.channels]
-            rec = TransientRecorder(agent.instance_id, agent.sample_rate_hz, ch_meta, machine=args.machine)
-            agent.on_block = rec.append
-            state["rec"] = rec
-            btn_rec.setText("⏹ Detener grabación")
-        else:
-            rec = state.get("rec")
-            agent.on_block = None
-            if rec:
-                rec.stop()
-                up = upload_recording(rec.dir)
-                msg = ("subida a la nube" if up.get("ok") else "local (pendiente)")
-                QtWidgets.QMessageBox.information(
-                    win, "Grabación", f"{rec.rec_id} · {rec.status.duration_s:.0f}s · "
-                    f"{rec.status.size_mb:.1f} MB · {msg}")
-            state["rec"] = None
-            btn_rec.setText("⏺ Grabar")
+    # ---------------- Lógica ----------------
+    from core.remote_monitoring.keyphasor import one_x_vector
 
     def update():
         snap = agent.snapshot(2.0)
@@ -201,36 +213,82 @@ def main() -> int:
         rpm = agent.estimate_rpm(snap)
         lbl_rpm.setText(f"RPM: {rpm:.0f}" if rpm else "RPM: —")
         f1 = (rpm / 60.0) if rpm else None
-        # waveforms (últimos ~0.3 s)
-        nshow = min(snap.shape[1], int(0.3 * fs))
-        tms = np.arange(nshow) / fs * 1000.0
-        for (i, c), curve in zip(vib, wave_curves):
-            eu = snap[i, -nshow:] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0)
-            curve.setData(tms, eu - eu.mean())
-        # nivel overall por canal (barra 0-100 relativo a full-scale simple)
-        for pb, lab, c in level_lbls:
-            idx = next(ii for ii, cc in vib if cc.name == c.name)
-            eu = snap[idx] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0)
-            ov = float(np.sqrt(np.mean((eu - eu.mean()) ** 2)))
-            lab.setText(f"{c.name}  {ov:.3g} {c.units}")
-            pb.setValue(int(min(100, ov / 0.5 * 100)))   # escala provisional
-        # espectro del canal elegido
-        name = combo.currentText()
-        sel = next((i for i, c in vib if c.name == name), vib[0][0])
-        sens = next((c.sensitivity_mv_per_eu for i, c in vib if i == sel), 100.0)
-        eu = snap[sel] * 1000.0 / (sens or 1.0)
-        fr, mag = _spectrum(eu, fs)
-        keep = fr <= min(fr[-1], 2000.0)
-        spec_curve.setData(fr[keep], mag[keep])
-        if f1:
-            v1x.setPos(f1); v1x.show()
-        else:
-            v1x.hide()
+        idx_tab = tabs.currentIndex()
+        if idx_tab == 1:      # Monitoreo
+            nshow = min(snap.shape[1], int(0.3 * fs))
+            tms = np.arange(nshow) / fs * 1000.0
+            for (i, c), curve in zip(vib, wave_curves):
+                eu = snap[i, -nshow:] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0)
+                curve.setData(tms, eu - eu.mean())
+            name = combo.currentText()
+            sel = next((i for i, c in vib if c.name == name), vib[0][0])
+            sens = next((c.sensitivity_mv_per_eu for i, c in vib if i == sel), 100.0)
+            fr, mag = _spectrum(snap[sel] * 1000.0 / (sens or 1.0), fs)
+            keep = fr <= min(fr[-1], 2000.0)
+            spec_curve.setData(fr[keep], mag[keep])
+            v1x.setPos(f1) if f1 else v1x.hide()
+            if f1:
+                v1x.show()
+        elif idx_tab == 2:    # Tabular
+            for r, (i, c) in enumerate(vib):
+                eu = snap[i] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0)
+                ov = float(np.sqrt(np.mean((eu - eu.mean()) ** 2)))
+                a1 = ph = 0.0
+                if f1:
+                    a1, ph = one_x_vector(eu - eu.mean(), fs, f1)
+                vals = [c.name, f"{ov:.3g} {c.units}", f"{a1:.3g}", f"{ph:.0f}°", "OK"]
+                for col, v in enumerate(vals):
+                    tblt.setItem(r, col, QtWidgets.QTableWidgetItem(v))
 
     timer = QtCore.QTimer(); timer.timeout.connect(update)
-    btn_start.clicked.connect(do_start)
-    btn_stop.clicked.connect(do_stop)
-    btn_rec.toggled.connect(do_rec)
+
+    def do_start():
+        try:
+            agent.start()
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QMessageBox.critical(win, "Error", f"No se pudo iniciar: {e}")
+            return
+        act_start.setEnabled(False); act_stop.setEnabled(True)
+        lbl_state.setText("● adquiriendo (hilo de fondo)")
+        timer.start(60)
+
+    def do_stop():
+        timer.stop()
+        try:
+            agent.stop()
+        except Exception:  # noqa: BLE001
+            pass
+        act_start.setEnabled(True); act_stop.setEnabled(False)
+        lbl_state.setText("detenido")
+        if act_rec.isChecked():
+            act_rec.setChecked(False)
+
+    def do_rec(checked):
+        if checked:
+            ch_meta = [{"name": c.name, "units": c.units, "coupling": c.coupling,
+                        "bnc_port": c.bnc_port, "sensitivity_mv_per_eu": float(c.sensitivity_mv_per_eu or 0)}
+                       for c in agent.channels]
+            rec = TransientRecorder(agent.instance_id, agent.sample_rate_hz, ch_meta, machine=args.machine)
+            agent.on_block = rec.append
+            rec_state["rec"] = rec
+            lbl_rec.setText("🔴 GRABANDO")
+        else:
+            rec = rec_state.get("rec"); agent.on_block = None
+            if rec:
+                rec.stop()
+                up = upload_recording(rec.dir)
+                QtWidgets.QMessageBox.information(
+                    win, "Grabación", f"{rec.rec_id} · {rec.status.duration_s:.0f}s · "
+                    f"{rec.status.size_mb:.1f} MB · {'☁ nube' if up.get('ok') else 'local (pendiente)'}")
+            rec_state["rec"] = None; lbl_rec.setText("")
+
+    act_start.triggered.connect(do_start)
+    act_stop.triggered.connect(do_stop)
+    act_rec.toggled.connect(do_rec)
+    act_quit.triggered.connect(win.close)
+    act_about.triggered.connect(lambda: QtWidgets.QMessageBox.about(
+        win, "Watermelon Field", "Watermelon Field — módulo nativo de adquisición.\n"
+        "Rotodinámica API 670/684 · nube integrada.\n© SIGA"))
 
     win.show()
     ret = app.exec()
