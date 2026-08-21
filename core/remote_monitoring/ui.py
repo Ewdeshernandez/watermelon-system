@@ -425,12 +425,19 @@ def _render_monitoreo() -> None:
             st.rerun()
     with rc2:
         if recording and st.button("⏹ Detener grabación", use_container_width=True, type="primary"):
+            from core.remote_monitoring.recorder import upload_recording
             rec.stop()
             agent.on_block = None
             st.session_state["rm_recorder"] = rec
-            st.success(f"📼 Grabación **{rec.rec_id}** · {rec.status.duration_s:.0f} s · "
-                       f"{rec.status.size_mb:.1f} MB · {rec.status.blocks} bloques. "
-                       f"Reprocesala en **Análisis → 📼 Reprocesar grabación**.")
+            up = upload_recording(rec.dir)                 # intenta subir a Supabase
+            if up.get("ok"):
+                st.success(f"📼 Grabación **{rec.rec_id}** ({rec.status.duration_s:.0f} s · "
+                           f"{rec.status.size_mb:.1f} MB) guardada y **☁ subida a Supabase**. "
+                           f"Reprocesala en **Análisis → 📼 Reprocesar**.")
+            else:
+                st.warning(f"📼 Grabación **{rec.rec_id}** guardada local ({rec.status.size_mb:.1f} MB). "
+                           f"**Pendiente de subir** ({up.get('reason', 'sin conexión')}). Se sube "
+                           f"con **☁ Subir pendientes** cuando haya internet.")
             st.rerun()
     with rc3:
         if recording:
@@ -439,6 +446,14 @@ def _render_monitoreo() -> None:
             st.markdown(f"<div style='padding:6px 10px'>🔴 <b>GRABANDO</b> · "
                         f"{s.duration_s:.0f} s · {s.blocks} bloques · {s.size_mb:.1f} MB · "
                         f"cruda a disco</div>", unsafe_allow_html=True)
+        else:
+            from core.remote_monitoring.recorder import pending_count, sync_pending
+            _pend = pending_count(agent.instance_id)
+            if _pend and st.button(f"☁ Subir pendientes ({_pend})", use_container_width=True,
+                                   help="Sube a Supabase las grabaciones que quedaron locales (campo sin internet)."):
+                ok, fail = sync_pending(agent.instance_id)
+                (st.success if not fail else st.warning)(f"☁ Subidas {ok} · fallos {fail}.")
+                st.rerun()
 
     # Acciones one-shot en el run principal (fuera del fragment).
     if capture:
@@ -526,8 +541,31 @@ def _render_analisis() -> None:
             agent.pump(8)
         except Exception:  # noqa: BLE001
             pass
+    _render_new_recordings_alert(agent)
     _render_reprocess(agent)
     st.fragment(_analisis_display, run_every=(0.5 if live else None))()
+
+
+def _render_new_recordings_alert(agent: AcqAgent) -> None:
+    """Aviso al especialista: hay nueva grabación (en Supabase) para analizar."""
+    from core.remote_monitoring.recorder import cloud_recordings
+    recs = cloud_recordings(agent.instance_id)
+    if not recs:
+        return
+    seen = st.session_state.setdefault("rm_seen_recs", set())
+    fresh = [r for r in recs if r.get("rec_id") not in seen]
+    if not fresh:
+        return
+    latest = fresh[0]
+    st.markdown(
+        f"<div style='padding:11px 16px;margin:2px 0 10px;background:#fff7ed;border:1px solid #fdba74;"
+        f"border-radius:10px;color:#9a3412;font-size:13.5px'>🔔 <b>{len(fresh)} grabación(es) nueva(s) "
+        f"para analizar</b> — última <b>{latest.get('rec_id')}</b> "
+        f"({(latest.get('duration_s') or 0):.0f} s, {latest.get('machine','')}). Reprocesala abajo 👇"
+        f"</div>", unsafe_allow_html=True)
+    if st.button("Marcar como vistas", key="rm_seen_btn"):
+        seen.update(r.get("rec_id") for r in recs)
+        st.rerun()
 
 
 def _render_reprocess(agent: AcqAgent) -> None:
