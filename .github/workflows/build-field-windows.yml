@@ -1,0 +1,110 @@
+name: build-field-windows
+
+# Compila el módulo NATIVO (native/watermelon_field.py) a UN SOLO .exe de Windows
+# con PyInstaller. El binario es lo único que se lleva a la PC de campo: el
+# código fuente NUNCA se copia a esa máquina (secreto industrial).
+#
+# Disparar:
+#   · Manual  -> pestaña Actions -> "build-field-windows" -> Run workflow
+#   · Tag     -> git tag field-vX.Y.Z && git push origin field-vX.Y.Z
+#
+# Resultado: artefacto "WatermelonField-windows" (Actions -> corrida -> Artifacts)
+# con WatermelonField.exe + lanzadores .bat + instrucciones.
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - 'field-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias del nativo + PyInstaller
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx pyinstaller
+
+      - name: Compilar WatermelonField.exe (onefile)
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean --onefile \
+            --name WatermelonField \
+            --paths . \
+            --collect-submodules core.remote_monitoring \
+            --collect-submodules core.modal \
+            --hidden-import core.loaders.base \
+            --hidden-import core.signal_registry \
+            --hidden-import core.sensor_map \
+            --hidden-import core.supabase_auth \
+            --collect-all nidaqmx \
+            --exclude-module streamlit \
+            --exclude-module supabase \
+            --exclude-module matplotlib \
+            --exclude-module pandas \
+            native/watermelon_field.py
+
+      - name: Empaquetar binario + lanzadores
+        shell: bash
+        run: |
+          mkdir -p out
+          cp dist/WatermelonField.exe out/
+
+          # --- lanzadores .bat (solo líneas de comando, sin código fuente) ---
+          printf '@echo off\r\n"%%~dp0WatermelonField.exe" --sim\r\npause\r\n' \
+            > out/1_DEMO_sin_hardware.bat
+
+          printf '@echo off\r\n"%%~dp0WatermelonField.exe" --sens 100 --fs 5120 --chans 0,1 --names 1YA,1XA\r\npause\r\n' \
+            > out/2_dos_acelerometros.bat
+
+          printf '@echo off\r\n"%%~dp0WatermelonField.exe" --sens 100 --fs 5120 --chans 1,2 --names 1YA,1XA --kph-bnc 1 --machine Rotor_Kit_SIGA_1\r\npause\r\n' \
+            > out/3_runup_con_keyphasor.bat
+
+          printf '@echo off\r\n"%%~dp0WatermelonField.exe" --sens 100 --fs 5120 --chans 4,5,6,7 --names 1Y,1X,2Y,2X --kph-bnc 1 --machine Rotor_Kit_SIGA_1\r\npause\r\n' \
+            > out/4_cuatro_radiales_2_cojinetes.bat
+
+          # --- instrucciones en texto plano (sin algoritmos) ---
+          cat > out/LEEME.txt <<'TXT'
+          Watermelon Field - modulo nativo de adquisicion (Windows)
+          =========================================================
+
+          Requisito unico en la PC: driver NI-DAQmx instalado (de National Instruments).
+          NO se necesita Python ni nada mas: el .exe ya trae todo adentro.
+
+          COMO USAR
+          ---------
+          Doble clic en el .bat segun tu montaje:
+
+            1_DEMO_sin_hardware.bat        -> ver la interfaz sin cDAQ (simulacion)
+            2_dos_acelerometros.bat        -> 2 acel. 100 mV/g en Modulo 1 (ai0, ai1)
+            3_runup_con_keyphasor.bat      -> keyphasor en Mod1 ai0 + 2 acel. en ai1,ai2
+                                              (para Bode / Cascada / diagnostico en arranque)
+            4_cuatro_radiales_2_cojinetes.bat -> keyphasor Mod1 ai0 + 4 radiales en Modulo 2
+
+          Tambien podes correr WatermelonField.exe directo (doble clic) = 2 acel. por defecto.
+
+          En la app: Iniciar -> Grabar (opcional) -> mira Monitoreo / Orbita / Bode /
+          Cascada / Diagnostico. Detener para terminar.
+
+          Sin internet funciona igual; las grabaciones quedan locales y se suben
+          cuando haya conexion (por ahora quedan "local pendiente").
+          TXT
+
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WatermelonField-windows
+          path: out/
+          retention-days: 30
