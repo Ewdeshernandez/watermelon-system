@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import errno
 import json
 import os
 import re
@@ -9,6 +10,9 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+# Flag de fallo de persistencia (disco lleno). La UI puede leerlo para avisar.
+PERSIST_LAST_ERROR: Dict[str, Any] = {}
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -554,6 +558,60 @@ def _restore_state(raw: Dict[str, Any],
 # Ciclo 17.14.1 — Helpers internos de write atómico + backups
 # =============================================================
 
+def _purge_backups(target: Path) -> int:
+    """Borra TODOS los backups .bak.1..N de `target`. Devuelve cuántos borró.
+    Los backups son solo para recovery; en disco lleno se pueden sacrificar."""
+    n = 0
+    for i in range(1, MAX_BACKUPS + 1):
+        b = _backup_path(target, i)
+        try:
+            if b.exists():
+                b.unlink(); n += 1
+        except Exception:
+            pass
+    return n
+
+
+def _purge_orphan_tmp(directory: Path) -> int:
+    """Borra archivos temporales huérfanos (*.tmp) que quedaron de escrituras
+    interrumpidas (típico cuando el disco se llenó a medio write)."""
+    n = 0
+    try:
+        for p in Path(directory).glob("*.tmp"):
+            try:
+                p.unlink(); n += 1
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return n
+
+
+def free_disk_space_best_effort() -> Dict[str, int]:
+    """Libera espacio de forma SEGURA en todo el árbol de datos: elimina
+    backups .bak.* y temporales .tmp huérfanos de todos los usuarios. No toca
+    el estado vigente, drafts ni imágenes. Devuelve conteos."""
+    baks = tmps = 0
+    roots = {_PERSIST_ROOT, DATA_DIR}
+    for root in roots:
+        try:
+            if not root.exists():
+                continue
+            for p in root.rglob("*.bak.*"):
+                try:
+                    p.unlink(); baks += 1
+                except Exception:
+                    pass
+            for p in root.rglob("*.tmp"):
+                try:
+                    p.unlink(); tmps += 1
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    return {"backups": baks, "tmp": tmps}
+
+
 def _backup_path(target: Path, idx: int) -> Path:
     """Devuelve el path del backup número `idx` (1..MAX_BACKUPS)
     para el archivo `target`. Ej: report_state.json → report_state.json.bak.1
@@ -674,15 +732,48 @@ def save_report_state(*, items: Any, meta: Any,
     # pasó un filename arbitrario (caso draft o export) Y no pasó email,
     # caemos al activo de sesión.
     effective_email = email if email is not None else _current_owner_email()
-    payload = _serialize_state(items=items, meta=meta, email=effective_email)
-    # Inyectar metadata interna del save (útil para debugging)
-    payload["_save_meta"] = {
-        "saved_at": datetime.now().isoformat(timespec="seconds"),
-        "n_items": len(payload.get("items", [])),
-        "owner_email": effective_email or "",
-    }
-    _rotate_backups(target)
-    _atomic_write_json(target, payload)
+
+    def _do_save() -> None:
+        payload = _serialize_state(items=items, meta=meta, email=effective_email)
+        payload["_save_meta"] = {
+            "saved_at": datetime.now().isoformat(timespec="seconds"),
+            "n_items": len(payload.get("items", [])),
+            "owner_email": effective_email or "",
+        }
+        _rotate_backups(target)
+        _atomic_write_json(target, payload)
+
+    # v3.31.5xx — Resiliencia a DISCO LLENO (ENOSPC). Antes, un disco lleno
+    # hacía crashear TODA la página de Reports al arrancar (autosave). Ahora:
+    # si no hay espacio, liberamos backups + temporales huérfanos y reintentamos
+    # una vez; si aún falla, NO crasheamos — la sesión sigue viva, solo se
+    # marca el fallo de persistencia para que la UI avise.
+    try:
+        _do_save()
+        PERSIST_LAST_ERROR.clear()
+    except OSError as exc:
+        if getattr(exc, "errno", None) == errno.ENOSPC:
+            _purge_backups(target)
+            _purge_orphan_tmp(target.parent)
+            try:
+                free_disk_space_best_effort()
+            except Exception:
+                pass
+            try:
+                _do_save()
+                PERSIST_LAST_ERROR.clear()
+            except OSError as exc2:
+                PERSIST_LAST_ERROR.clear()
+                PERSIST_LAST_ERROR.update({
+                    "enospc": True,
+                    "message": "Disco lleno: no se pudo autoguardar. El trabajo "
+                               "de esta sesión sigue en memoria; libera espacio "
+                               "en el servidor para volver a persistir.",
+                    "at": datetime.now().isoformat(timespec="seconds"),
+                    "detail": str(exc2),
+                })
+            return
+        raise
 
 
 def load_report_state(*, filename: Path | None = None,

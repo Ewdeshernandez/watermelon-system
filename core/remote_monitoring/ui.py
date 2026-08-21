@@ -629,44 +629,56 @@ def _render_new_recordings_alert(agent: AcqAgent) -> None:
 
 
 def _render_reprocess(agent: AcqAgent) -> None:
-    """Reprocesa una GRABACIÓN de transitorio completa → Bode/Cascada/Polar a
-    máxima resolución (usa el registro crudo, no la ventana en vivo)."""
-    from core.remote_monitoring.recorder import list_recordings, load_recording
-    recs = list_recordings(agent.instance_id)
+    """Reprocesa una GRABACIÓN (incluida la del colector headless) a TODOS los
+    gráficos. Auto-contenido: usa los canales/sensibilidades de la propia
+    grabación, sin depender de la config viva."""
+    import types
+    from core.remote_monitoring.recorder import list_all_recordings, load_recording
+    recs = list_all_recordings()
     if not recs:
         return
-    with st.expander(f"📼 Reprocesar grabación de transitorio ({len(recs)} disponible(s))"):
+    with st.expander(f"📼 Reprocesar grabación ({len(recs)} disponible(s))"):
         def _lbl(m):
             import datetime as _dt
             t = _dt.datetime.fromtimestamp(m.get("started", 0)).strftime("%d %b %H:%M")
             dur = m.get("duration_s") or (m.get("samples", 0) / (m.get("fs", 1) or 1))
-            return f"{m['rec_id']} · {t} · {dur:.0f} s · {m.get('n_channels', 0)} canales"
+            return (f"{m.get('_instance','')} · {m['rec_id']} · {t} · {dur:.0f} s · "
+                    f"{m.get('n_channels', 0)} canales")
         labels = [_lbl(m) for m in recs]
         sel = st.selectbox("Grabación", labels, key="rm_reproc_sel")
         c1, c2 = st.columns([1, 3])
         with c1:
             go_rep = st.button("⚙ Reprocesar", use_container_width=True, type="primary")
         with c2:
-            st.caption("Barre TODO el registro crudo en pasos finos → Bode/Cascada/Polar con la "
-                       "máxima densidad de puntos, sin depender del refresco en vivo.")
+            st.caption("Reconstruye onda/espectro/órbita/tabular (con cursor) + Bode/Cascada/Polar "
+                       "de toda la corrida, desde el registro crudo. No depende del vivo.")
         if go_rep:
             m = recs[labels.index(sel)]
             with st.spinner("Reprocesando registro completo…"):
                 manifest, full = load_recording(m["_dir"])
-                names = [c["name"] for c in manifest.get("channels", [])]
-                # map de índices y sensibilidades del canal (para escalar a EU)
-                vib = [(i, ch) for i, ch in enumerate(agent.channels)
-                       if not is_keyphasor_channel(ch) and ch.name in names]
-                kph = agent.source.config.keyphasor_index()
+                # Canales AUTO-CONTENIDOS desde la grabación (nombre, sensib, unidad).
+                ch_objs = []
+                for cm in manifest.get("channels", []):
+                    ch_objs.append(types.SimpleNamespace(
+                        name=cm.get("name", "ch"), units=cm.get("units", "g rms"),
+                        sensitivity_mv_per_eu=float(cm.get("sensitivity_mv_per_eu") or 100.0),
+                        coupling=cm.get("coupling", "IEPE"), bnc_port=int(cm.get("bnc_port", 1) or 1)))
+                tmap = st.session_state.setdefault("rm_type_by_name", {})
+                for o in ch_objs:
+                    if not is_keyphasor_channel(o):
+                        tmap[o.name] = ("accelerometer" if str(o.coupling).upper() == "IEPE"
+                                        else "proximity")
+                vib = [(i, o) for i, o in enumerate(ch_objs) if not is_keyphasor_channel(o)]
+                kph = next((i for i, o in enumerate(ch_objs) if is_keyphasor_channel(o)), None)
+                fsr = float(manifest.get("fs", 5120))
                 tc = TransientCapture(st.session_state.get("rm_transient").config
                                       if st.session_state.get("rm_transient") else None)
-                fsr = float(manifest.get("fs", agent.sample_rate_hz))
                 npts = tc.process_full(full, fsr, vib, kph_idx=kph, delta_rpm=8.0)
                 st.session_state["rm_transient"] = tc
-                # Guarda la onda completa para el REPLAY (todos los gráficos con cursor).
                 st.session_state["rm_replay"] = {
                     "full": full, "fs": fsr, "dur": full.shape[1] / fsr,
-                    "win": min(int(2.0 * fsr), full.shape[1]), "rec_id": m["rec_id"]}
+                    "win": min(int(2.0 * fsr), full.shape[1]), "rec_id": m["rec_id"],
+                    "vib": vib, "kph": kph, "channels": ch_objs}
                 st.session_state["rm_running"] = False     # replay, no vivo
             st.success(f"✓ Reprocesado: **{npts} puntos** de {full.shape[1]/fsr:.0f} s de onda cruda. "
                        f"Abajo tenés **TODOS** los gráficos: movés el **🎚 cursor** para onda/espectro/"
@@ -694,6 +706,7 @@ def _analisis_display() -> None:
         # (onda, espectro, órbita, tabular) en ese instante; Bode/Cascada usan todo.
         full = replay["full"]
         fs = float(replay["fs"])
+        kph_idx = replay.get("kph")            # keyphasor de la GRABACIÓN
         win = int(replay["win"])
         dur = float(replay["dur"])
         maxt = max(0.0, dur - win / fs)
@@ -720,7 +733,8 @@ def _analisis_display() -> None:
         return
     if not replay_mode:
         rpm = agent.estimate_rpm(snap)
-    vib = [(i, ch) for i, ch in enumerate(agent.channels) if not is_keyphasor_channel(ch)]
+    vib = (replay["vib"] if replay_mode
+           else [(i, ch) for i, ch in enumerate(agent.channels) if not is_keyphasor_channel(ch)])
     state = rm_states.classify_state(rpm, st.session_state.get("rm_prev_rpm"))
     st.session_state["rm_prev_rpm"] = rpm
     tc = st.session_state.setdefault("rm_transient", TransientCapture())
