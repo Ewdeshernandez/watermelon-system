@@ -465,16 +465,33 @@ def main() -> int:
 
     def do_apply():
         """Guarda la máquina y RELANZA el app midiéndola (evita reconstruir plots)."""
-        import subprocess, tempfile
+        import subprocess, tempfile, types
         m = read_form()
         path = os.path.join(tempfile.gettempdir(), "wm_apply_machine.json")
         m.save(path)
-        if getattr(sys, "frozen", False):
-            cmd = [sys.executable, "--machine-file", path]
-        else:
-            cmd = [sys.executable, os.path.abspath(__file__), "--machine-file", path]
+        # 1) Validar en ESTE proceso que la máquina se puede construir (si falla,
+        #    mostramos el error acá y NO cerramos nada).
         try:
-            subprocess.Popen(cmd)
+            _a = types.SimpleNamespace(machine_file=path, scenario="", defect="", sim=True,
+                                       fs=m.fs, machine=m.name, chans="", names="", sens=100.0,
+                                       rpm=m.rpm, prox=False, kph_bnc=0, chassis="cDAQ1")
+            build_agent(_a)
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QMessageBox.critical(
+                win, "Aplicar y medir", f"La configuración tiene un problema y no se puede "
+                f"medir:\n\n{type(e).__name__}: {e}")
+            return
+        # 2) Relanzar en una ventana que QUEDA ABIERTA si hay error (para verlo).
+        try:
+            if getattr(sys, "frozen", False):
+                bat = os.path.join(tempfile.gettempdir(), "wm_run_machine.bat")
+                with open(bat, "w") as f:
+                    f.write(f'@echo off\r\n"{sys.executable}" --machine-file "{path}"\r\n'
+                            f'if errorlevel 1 (echo. & echo *** ERROR al iniciar *** & pause)\r\n')
+                os.startfile(bat)  # noqa: S606  (Windows)
+            else:
+                subprocess.Popen([sys.executable, os.path.abspath(__file__),
+                                  "--machine-file", path])
             win.close()
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(win, "Aplicar", f"No se pudo relanzar: {e}")
@@ -785,5 +802,33 @@ def main() -> int:
     return ret
 
 
+def _run_with_crashlog() -> int:
+    """Corre main() y, si algo revienta al iniciar, guarda el traceback en un
+    archivo junto al .exe y lo muestra en un diálogo (para diagnosticar en campo)."""
+    try:
+        return main()
+    except SystemExit:
+        raise
+    except BaseException:  # noqa: BLE001
+        import traceback
+        base = os.path.dirname(sys.executable if getattr(sys, "frozen", False)
+                               else os.path.abspath(__file__))
+        logp = os.path.join(base, "watermelon_error.log")
+        tb = traceback.format_exc()
+        try:
+            with open(logp, "a", encoding="utf-8") as f:
+                f.write("\n==== error al iniciar ====\n" + tb + "\n")
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            from PySide6 import QtWidgets
+            _a = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
+            QtWidgets.QMessageBox.critical(None, "Watermelon Field — error al iniciar",
+                                           f"{tb}\n\nDetalle guardado en:\n{logp}")
+        except Exception:  # noqa: BLE001
+            print(tb)
+        return 1
+
+
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(_run_with_crashlog())
