@@ -409,9 +409,21 @@ def _report_tab() -> None:
 
     st.divider()
     # Hallazgos / recomendaciones + fotos relevantes (opcionales)
+    def _sentences(text: str):
+        """Separa por ORACIÓN: un item continúa hasta un punto seguido de
+        espacio. Une saltos de línea y no rompe decimales (0.0007 no lleva
+        espacio tras el punto)."""
+        import re
+        t = re.sub(r"\s+", " ", (text or "").strip())
+        if not t:
+            return []
+        return [s.strip() for s in re.split(r"(?<=\.)\s+", t) if s.strip()]
+
     cH, cR = st.columns(2)
-    hall = cH.text_area("Hallazgos (uno por línea)", key="cal_hall", height=100)
-    reco = cR.text_area("Recomendaciones (una por línea)", key="cal_reco", height=100)
+    hall = cH.text_area("Hallazgos (un item por oración, termina en punto)",
+                        key="cal_hall", height=100)
+    reco = cR.text_area("Recomendaciones (un item por oración, termina en punto)",
+                        key="cal_reco", height=100)
     _files = st.file_uploader("Fotos / imágenes relevantes (opcional)",
                               accept_multiple_files=True, type=["png", "jpg", "jpeg"],
                               key="cal_report_photos")
@@ -435,8 +447,8 @@ def _report_tab() -> None:
                 "specialist": st.session_state.get("cal_specialist"),
                 "report_date": st.session_state.get("cal_date"),
                 "notes": st.session_state.get("cal_notes"),
-                "hallazgos": [l.strip() for l in (hall or "").splitlines() if l.strip()],
-                "recomendaciones": [l.strip() for l in (reco or "").splitlines() if l.strip()],
+                "hallazgos": _sentences(hall),
+                "recomendaciones": _sentences(reco),
                 "photos": photos,
             }
             st.session_state["cal_pdf"] = build_calibration_pdf(meta=meta, loops=loops)
