@@ -25,20 +25,21 @@ from core.remote_monitoring.agent import AcqAgent
 from core.remote_monitoring.stream_source import (ChannelConfig, StreamConfig,
                                                   SimulatedStreamSource, is_keyphasor_channel)
 
-# --- Paleta industrial (clase System1/ADRE): tema oscuro instrumento ---
-BG = "#0e1420"       # fondo app (slate profundo)
-PANEL = "#141d2e"    # paneles / plots
-PANEL2 = "#1b2740"   # panel elevado / hover
-LINE = "#26344f"     # bordes / grid
-INK = "#e6edf7"      # texto principal
-MUTE = "#93a4c0"     # texto secundario
-ACC = "#23d5c7"      # acento teal
-NAVY = "#0b1220"     # chrome (menú/toolbar/status)
+# --- Paleta System1 (paridad con la WEB): tema claro instrumento ---
+BG = "#eef2f7"       # fondo app (gris azulado claro, como la web)
+PANEL = "#ffffff"    # paneles / plots (blancos, como System1)
+PANEL2 = "#e7edf6"   # hover / panel elevado
+LINE = "#d6deea"     # bordes / grid
+INK = "#1f2937"      # texto principal
+MUTE = "#64748b"     # texto secundario
+ACC = "#2f6fb0"      # acento azul (web)
+NAVY = "#0F1E3D"     # chrome (menú/toolbar/status) + títulos
 BLUE = "#2f6fb0"
-CORN = "#38bdf8"     # traza primaria (cian)
-AMBER = "#f5b74a"    # traza secundaria (ámbar)
-GREEN = "#4ade80"    # órbita
-REDL = "#ff5d5d"     # 1X / keyphasor / peligro
+CORN = "#4f8fd0"     # traza primaria (cornflower, System1)
+AMBER = "#e08a1e"    # traza secundaria (ámbar) para fase/espectro
+GREEN = "#2fa36b"    # órbita
+REDL = "#c0392b"     # 1X / keyphasor marker / peligro
+KPH = "#12467f"      # puntos keyphasor (azul profundo, System1)
 
 
 def build_agent(args) -> AcqAgent:
@@ -91,18 +92,18 @@ def _stylesheet() -> str:
     QWidget {{ background: {BG}; color: {INK};
         font-family: 'Segoe UI', 'Inter', Arial, sans-serif; font-size: 13px; }}
     QLabel {{ background: transparent; color: {INK}; }}
-    QMenuBar {{ background: {NAVY}; color: {INK}; padding: 2px; }}
-    QMenuBar::item {{ padding: 5px 10px; background: transparent; }}
-    QMenuBar::item:selected {{ background: {PANEL2}; border-radius: 5px; }}
+    QMenuBar {{ background: {NAVY}; color: #eaf1fb; padding: 2px; }}
+    QMenuBar::item {{ padding: 5px 10px; background: transparent; color: #eaf1fb; }}
+    QMenuBar::item:selected {{ background: {ACC}; border-radius: 5px; color: white; }}
     QMenu {{ background: {PANEL}; border: 1px solid {LINE}; color: {INK}; }}
-    QMenu::item:selected {{ background: {ACC}; color: {NAVY}; }}
+    QMenu::item:selected {{ background: {ACC}; color: white; }}
     QToolBar {{ background: {NAVY}; spacing: 8px; padding: 7px 10px;
-        border-bottom: 1px solid {LINE}; }}
-    QToolBar::separator {{ background: {LINE}; width: 1px; margin: 4px 6px; }}
-    QToolBar QToolButton {{ color: {INK}; padding: 7px 14px; border-radius: 7px;
+        border-bottom: 1px solid {NAVY}; }}
+    QToolBar::separator {{ background: #2b3d5f; width: 1px; margin: 4px 6px; }}
+    QToolBar QToolButton {{ color: #eaf1fb; padding: 7px 14px; border-radius: 7px;
         font-weight: 600; }}
-    QToolBar QToolButton:hover {{ background: {PANEL2}; }}
-    QToolBar QToolButton:disabled {{ color: {MUTE}; }}
+    QToolBar QToolButton:hover {{ background: {ACC}; color: white; }}
+    QToolBar QToolButton:disabled {{ color: #6b7d9c; }}
     QTabWidget::pane {{ border: 1px solid {LINE}; background: {PANEL};
         border-radius: 8px; top: -1px; }}
     QTabBar {{ qproperty-drawBase: 0; }}
@@ -112,8 +113,8 @@ def _stylesheet() -> str:
     QTabBar::tab:hover {{ color: {INK}; background: {PANEL}; }}
     QTabBar::tab:selected {{ background: {PANEL}; color: {ACC};
         border-bottom: 2px solid {ACC}; }}
-    QStatusBar {{ background: {NAVY}; color: {MUTE}; border-top: 1px solid {LINE}; }}
-    QStatusBar QLabel {{ color: {MUTE}; padding: 2px 8px; }}
+    QStatusBar {{ background: {NAVY}; color: #b7c6de; border-top: 1px solid {NAVY}; }}
+    QStatusBar QLabel {{ color: #b7c6de; padding: 2px 8px; }}
     QPushButton {{ background: {PANEL2}; color: {INK}; border: 1px solid {LINE};
         padding: 7px 15px; border-radius: 7px; font-weight: 600; }}
     QPushButton:hover {{ background: {ACC}; color: {NAVY}; border-color: {ACC}; }}
@@ -228,7 +229,11 @@ def main() -> int:
     from core.remote_monitoring.sim_machine import (SimMachine, SensorSpec, MODES, PHENOMENA,
                                                     MODE_TO_PROFILE, save_to_library,
                                                     list_machines, load_from_library)
-    _KINDS = ["prox", "vel", "accel", "keyphasor"]
+    _KIND_LABELS = [("Proximidad", "prox"), ("Velocidad", "vel"),
+                    ("Acelerómetro", "accel"), ("Keyphasor", "keyphasor")]
+    _LABEL_BY_KIND = {k: l for l, k in _KIND_LABELS}
+    _KIND_BY_LABEL = {l: k for l, k in _KIND_LABELS}
+    _SIDES = ["—", "R", "L"]
 
     def _machine_from_agent() -> SimMachine:
         """Máquina inicial a partir de los canales con que arrancó el app."""
@@ -286,9 +291,20 @@ def main() -> int:
     r3.addWidget(QtWidgets.QLabel("accel:"))
     cb_ph_a = QtWidgets.QComboBox(); cb_ph_a.addItems(PHENOMENA["accel"]); r3.addWidget(cb_ph_a)
     cfg_l.addLayout(r3)
-    # tabla de sensores (editable)
-    tblc = QtWidgets.QTableWidget(0, 5)
-    tblc.setHorizontalHeaderLabels(["Canal", "Tipo", "BNC", "Sensib (mV/EU)", "Ángulo°"])
+    # fila 3b: máquina (rotación / cojinete) — paridad con la web
+    r3b = QtWidgets.QHBoxLayout()
+    r3b.addWidget(QtWidgets.QLabel("Sentido de giro:"))
+    cb_rot = QtWidgets.QComboBox(); cb_rot.addItems(["CCW", "CW"]); r3b.addWidget(cb_rot)
+    r3b.addWidget(QtWidgets.QLabel("Tipo de cojinete:"))
+    cb_brg = QtWidgets.QComboBox(); cb_brg.addItems(["plain", "tilting_pad", "rolling", "mixed"])
+    r3b.addWidget(cb_brg)
+    r3b.addWidget(QtWidgets.QLabel("<i style='color:#64748b'>Ángulo API 670: desde TDC · "
+                                   "R=horario · L=antihorario (45°L+45°R=90°)</i>"))
+    r3b.addStretch(1); cfg_l.addLayout(r3b)
+    # tabla de sensores (editable) — mismas columnas que la web
+    tblc = QtWidgets.QTableWidget(0, 9)
+    tblc.setHorizontalHeaderLabels(["Canal", "Tipo", "BNC", "Sensib (mV/EU)",
+                                    "Ángulo°", "Lado", "Gap (V)", "Alarma", "Peligro"])
     tblc.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
     cfg_l.addWidget(tblc, 1)
     rb = QtWidgets.QHBoxLayout()
@@ -304,14 +320,23 @@ def main() -> int:
     def _add_sensor_row(s: SensorSpec):
         r = tblc.rowCount(); tblc.insertRow(r)
         tblc.setItem(r, 0, QtWidgets.QTableWidgetItem(s.name))
-        cbk = QtWidgets.QComboBox(); cbk.addItems(_KINDS); cbk.setCurrentText(s.kind)
+        cbk = QtWidgets.QComboBox(); cbk.addItems([l for l, _ in _KIND_LABELS])
+        cbk.setCurrentText(_LABEL_BY_KIND.get(s.kind, "Acelerómetro"))
         tblc.setCellWidget(r, 1, cbk)
         tblc.setItem(r, 2, QtWidgets.QTableWidgetItem(str(s.bnc)))
         tblc.setItem(r, 3, QtWidgets.QTableWidgetItem(f"{s.sensitivity:g}"))
         tblc.setItem(r, 4, QtWidgets.QTableWidgetItem(f"{s.angle:g}"))
+        cbs = QtWidgets.QComboBox(); cbs.addItems(_SIDES)
+        cbs.setCurrentText(s.side if s.side in ("R", "L") else "—")
+        tblc.setCellWidget(r, 5, cbs)
+        tblc.setItem(r, 6, QtWidgets.QTableWidgetItem(f"{s.gap:g}"))
+        tblc.setItem(r, 7, QtWidgets.QTableWidgetItem(f"{s.alarm:g}"))
+        tblc.setItem(r, 8, QtWidgets.QTableWidgetItem(f"{s.danger:g}"))
 
     def fill_form(m: SimMachine):
         ed_name.setText(m.name); sp_fs.setValue(int(m.fs))
+        cb_rot.setCurrentText(getattr(m, "rotation", "CCW"))
+        cb_brg.setCurrentText(getattr(m, "bearing_type", "plain"))
         cb_mode.setCurrentText(m.mode if m.mode in MODES else "estable")
         sp_rpm.setValue(m.rpm); sp_r0.setValue(m.rpm_start); sp_r1.setValue(m.rpm_end)
         sp_ramp.setValue(m.ramp_s); sp_c1.setValue(m.crit1); sp_c2.setValue(m.crit2)
@@ -326,13 +351,21 @@ def main() -> int:
         sens = []
         for r in range(tblc.rowCount()):
             nm = tblc.item(r, 0).text() if tblc.item(r, 0) else f"CH{r}"
-            kd = tblc.cellWidget(r, 1).currentText() if tblc.cellWidget(r, 1) else "accel"
+            lbl = tblc.cellWidget(r, 1).currentText() if tblc.cellWidget(r, 1) else "Acelerómetro"
+            kd = _KIND_BY_LABEL.get(lbl, "accel")
+            sd = tblc.cellWidget(r, 5).currentText() if tblc.cellWidget(r, 5) else "—"
+
             def _num(col, dv):
-                try: return float(tblc.item(r, col).text())
-                except Exception: return dv
-            sens.append(SensorSpec(nm, kd, int(_num(2, r + 1)), _num(3, 100.0), _num(4, 0.0)))
+                try:
+                    return float(tblc.item(r, col).text())
+                except Exception:  # noqa: BLE001
+                    return dv
+            sens.append(SensorSpec(nm, kd, int(_num(2, r + 1)), _num(3, 100.0), _num(4, 0.0),
+                                   side=("" if sd == "—" else sd),
+                                   gap=_num(6, 0.0), alarm=_num(7, 0.0), danger=_num(8, 0.0)))
         ph = {"prox": cb_ph_p.currentText(), "vel": cb_ph_v.currentText(), "accel": cb_ph_a.currentText()}
         return SimMachine(name=ed_name.text() or "Maquina", fs=float(sp_fs.value()), sensors=sens,
+                          rotation=cb_rot.currentText(), bearing_type=cb_brg.currentText(),
                           mode=cb_mode.currentText(), rpm=sp_rpm.value(),
                           rpm_start=sp_r0.value(), rpm_end=sp_r1.value(), ramp_s=sp_ramp.value(),
                           crit1=sp_c1.value(), crit2=sp_c2.value(), severity=sp_sev.value(),
@@ -424,8 +457,8 @@ def main() -> int:
         orb_plot = pg.PlotWidget(); orb_plot.setAspectLocked(True)
         orb_plot.showGrid(x=True, y=True, alpha=0.25)
         orb_plot.addLine(x=0, pen=pg.mkPen("#c9d2e0")); orb_plot.addLine(y=0, pen=pg.mkPen("#c9d2e0"))
-        orb_curve = orb_plot.plot(pen=pg.mkPen(GREEN, width=1.7))
-        orb_kph = orb_plot.plot(pen=None, symbol="o", symbolBrush=REDL, symbolSize=9)
+        orb_curve = orb_plot.plot(pen=pg.mkPen(CORN, width=1.7))
+        orb_kph = orb_plot.plot(pen=None, symbol="o", symbolBrush=KPH, symbolSize=9)
         orb_l.addWidget(orb_plot, 1)
         tabs.addTab(orb_w, "Órbita")
 
@@ -516,11 +549,11 @@ def main() -> int:
                 if f1:
                     a1, ph = one_x_vector(eu - eu.mean(), fs, f1)
                 if args.danger and ov >= args.danger:
-                    estado, bgc, fgc = "PELIGRO", "#3b1518", "#ff8f8f"
+                    estado, bgc, fgc = "PELIGRO", "#fde2e2", "#991b1b"
                 elif args.alarm and ov >= args.alarm:
-                    estado, bgc, fgc = "ALERTA", "#3a2f12", "#f5c451"
+                    estado, bgc, fgc = "ALERTA", "#fdf0d5", "#92400e"
                 else:
-                    estado, bgc, fgc = "OK", "#12301c", "#6ee7a0"
+                    estado, bgc, fgc = "OK", "#e6f4ea", "#166534"
                 vals = [c.name, f"{ov:.3g} {c.units}", f"{a1:.3g}", f"{ph:.0f}°", estado]
                 for cc, v in enumerate(vals):
                     it = QtWidgets.QTableWidgetItem(v)
@@ -566,8 +599,8 @@ def main() -> int:
         rb, ab, _ph = tc.bode(cb_casc.currentText())
         crit = [float(rb[i]) for i in diag.detect_criticals(np.asarray(rb, float), np.asarray(ab, float))]
         found = diag.cascade_diagnosis(rr, fr, mat, crit)
-        html = [f"<h3 style='color:{ACC}'>🔎 Auto-diagnóstico (API 684)</h3>"]
-        col = {"info": "#5aa9e6", "warn": AMBER, "danger": "#ff6b6b"}
+        html = [f"<h3 style='color:{NAVY}'>🔎 Auto-diagnóstico (API 684)</h3>"]
+        col = {"info": ACC, "warn": "#b45309", "danger": "#b91c1c"}
         for lvl, title, detail in found:
             html.append(f"<p style='color:{col.get(lvl,'#333')}'><b>{title}</b><br>{detail}</p>")
         diag_txt.setHtml("".join(html) if found else "<i>Sin hallazgos.</i>")

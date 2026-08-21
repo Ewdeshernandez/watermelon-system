@@ -51,13 +51,23 @@ class SensorSpec:
     kind: str            # prox | vel | accel | keyphasor
     bnc: int
     sensitivity: float = 100.0
-    angle: float = 0.0   # ángulo de sonda (proximidad) para orientar la órbita
+    angle: float = 0.0   # ángulo de sonda desde TDC (grados)
+    side: str = ""       # "R" (horario) | "L" (antihorario) | "" — convención API 670
+    gap: float = 0.0     # voltaje gap/bias (V) — sondas de proximidad DC
+    alarm: float = 0.0   # nivel de alarma (unid. del canal, ISO 20816)
+    danger: float = 0.0  # nivel de peligro
 
     def units(self) -> str:
         return _UNITS.get(self.kind, "EU")
 
     def coupling(self) -> str:
         return _COUP.get(self.kind, "DC")
+
+    def abs_angle(self) -> float:
+        """Ángulo ABSOLUTO desde TDC: R = horario (=ángulo), L = antihorario
+        (=-ángulo). 45°R→45°, 45°L→315° (API 670 / Bently)."""
+        a = float(self.angle) % 360.0
+        return (-a) % 360.0 if (self.side or "").upper() == "L" else a
 
     def to_channel(self) -> ChannelConfig:
         return ChannelConfig(name=self.name, coupling=self.coupling(),
@@ -70,6 +80,8 @@ class SimMachine:
     name: str = "Maquina_1"
     fs: float = 5120.0
     sensors: List[SensorSpec] = field(default_factory=list)
+    rotation: str = "CCW"            # CW | CCW (sentido de giro, para la órbita)
+    bearing_type: str = "plain"      # plain | tilting_pad | rolling | mixed
     # operación
     mode: str = "estable"            # estable | arranque | parada | arranque_parada
     rpm: float = 3000.0
@@ -132,8 +144,9 @@ class SimMachine:
         b = 2
         for brg in range(1, n_bearings + 1):
             for ax in ("Y", "X"):
-                ang = 315.0 if ax == "Y" else 45.0
-                s.append(SensorSpec(f"{brg}{ax}", "prox", b, 200.0, ang)); b += 1
+                side = "L" if ax == "Y" else "R"       # Y=45°L, X=45°R (90° entre sí)
+                s.append(SensorSpec(f"{brg}{ax}", "prox", b, 200.0, angle=45.0, side=side,
+                                    gap=-9.5, alarm=2.5, danger=4.0)); b += 1
         return SimMachine(name=name, sensors=s, rpm=3000.0, crit1=2000.0)
 
     @staticmethod
@@ -144,12 +157,14 @@ class SimMachine:
         b = 2
         for brg in (1, 2):                      # motor: rodamientos
             for ax in ("H", "V"):
-                s.append(SensorSpec(f"{brg}{ax}", "accel", b, 100.0)); b += 1
+                s.append(SensorSpec(f"{brg}{ax}", "accel", b, 100.0, alarm=4.5, danger=7.1)); b += 1
         for brg in (3, 4):                      # bomba: cojinetes planos
             for ax in ("Y", "X"):
-                ang = 315.0 if ax == "Y" else 45.0
-                s.append(SensorSpec(f"{brg}{ax}", "prox", b, 200.0, ang)); b += 1
+                side = "L" if ax == "Y" else "R"
+                s.append(SensorSpec(f"{brg}{ax}", "prox", b, 200.0, angle=45.0, side=side,
+                                    gap=-9.5, alarm=2.5, danger=4.0)); b += 1
         return SimMachine(name=name, fs=25600.0, sensors=s, rpm=3000.0, crit1=1500.0,
+                          rotation="CCW", bearing_type="mixed",
                           rpm_start=300.0, rpm_end=6000.0, ramp_s=90.0,
                           phenomena={"accel": "bearing_bpfo", "prox": "oil_whirl"})
 
