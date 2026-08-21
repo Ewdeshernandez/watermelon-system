@@ -74,15 +74,21 @@ def main() -> int:
 
     # ---- 2) Lectura de prueba (VOLTAJE, sin IEPE = seguro para proximidad) ----
     n = int(args.fs * args.secs)
-    print(f"\nLeyendo {args.secs:.0f} s a {args.fs:.0f} Hz (voltaje, IEPE OFF)…")
+    settle = 3.0                                    # s a descartar (el 9234 AC se asienta)
+    n_settle = int(args.fs * settle)
+    print(f"\nLeyendo (voltaje, IEPE OFF): descarto {settle:.0f} s de asentamiento del "
+          f"acople AC y mido {args.secs:.0f} s a {args.fs:.0f} Hz…")
     task = nidaqmx.Task()
     try:
         for p in phys:
             task.ai_channels.add_ai_voltage_chan(
                 p, min_val=-5.0, max_val=5.0,
                 terminal_config=TerminalConfiguration.DEFAULT)  # 9234: pseudodiff, sin IEPE
-        task.timing.cfg_samp_clk_timing(rate=args.fs, sample_mode=AcquisitionType.FINITE,
-                                        samps_per_chan=n)
+        # CONTINUO: arrancamos, descartamos el transitorio y recién medimos.
+        task.timing.cfg_samp_clk_timing(rate=args.fs, sample_mode=AcquisitionType.CONTINUOUS,
+                                        samps_per_chan=int(args.fs * (settle + args.secs + 1)))
+        task.start()
+        task.read(number_of_samples_per_channel=n_settle, timeout=settle + 10)   # descartar
         data = np.asarray(task.read(number_of_samples_per_channel=n, timeout=args.secs + 10),
                           dtype=float)
     except Exception as e:  # noqa: BLE001
