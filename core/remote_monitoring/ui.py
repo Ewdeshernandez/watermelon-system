@@ -404,6 +404,42 @@ def _render_monitoreo() -> None:
         live = st.checkbox("🟢 Live (auto-refresh)", value=st.session_state.get("rm_running", False))
         st.session_state["rm_running"] = live
 
+    # --- Grabador de transitorio: onda cruda completa a disco (no se pierde nada) ---
+    rec = st.session_state.get("rm_recorder")
+    recording = bool(rec and getattr(rec, "open", False))
+    rc1, rc2, rc3 = st.columns([1.4, 1.4, 4])
+    with rc1:
+        if not recording and st.button("⏺ Grabar transitorio", use_container_width=True,
+                                       help="Graba la ONDA CRUDA completa a disco durante toda la "
+                                            "rampa (arranque/parada). No se pierde nada; después se "
+                                            "reprocesa a Bode/Cascada a máxima resolución."):
+            from core.remote_monitoring.recorder import TransientRecorder
+            ch_meta = [{"name": c.name, "units": c.units, "coupling": c.coupling,
+                        "bnc_port": c.bnc_port,
+                        "sensitivity_mv_per_eu": float(c.sensitivity_mv_per_eu or 0.0)}
+                       for c in agent.channels]
+            rec = TransientRecorder(agent.instance_id, agent.sample_rate_hz, ch_meta, machine=machine_name)
+            agent.on_block = rec.append
+            st.session_state["rm_recorder"] = rec
+            st.session_state["rm_running"] = True     # que fluyan bloques
+            st.rerun()
+    with rc2:
+        if recording and st.button("⏹ Detener grabación", use_container_width=True, type="primary"):
+            rec.stop()
+            agent.on_block = None
+            st.session_state["rm_recorder"] = rec
+            st.success(f"📼 Grabación **{rec.rec_id}** · {rec.status.duration_s:.0f} s · "
+                       f"{rec.status.size_mb:.1f} MB · {rec.status.blocks} bloques. "
+                       f"Reprocesala en **Análisis → 📼 Reprocesar grabación**.")
+            st.rerun()
+    with rc3:
+        if recording:
+            agent.on_block = rec.append   # re-asegura el hook por si el agente se reusó
+            s = rec.status
+            st.markdown(f"<div style='padding:6px 10px'>🔴 <b>GRABANDO</b> · "
+                        f"{s.duration_s:.0f} s · {s.blocks} bloques · {s.size_mb:.1f} MB · "
+                        f"cruda a disco</div>", unsafe_allow_html=True)
+
     # Acciones one-shot en el run principal (fuera del fragment).
     if capture:
         try:
@@ -437,6 +473,9 @@ def _monitoreo_display() -> None:
     if agent is None:
         return
     live = st.session_state.get("rm_running", False)
+    _rec = st.session_state.get("rm_recorder")
+    if _rec is not None and getattr(_rec, "open", False):
+        agent.on_block = _rec.append          # el pump de acá persiste cada bloque
     if live:
         try:
             agent.pump(4)
@@ -444,6 +483,12 @@ def _monitoreo_display() -> None:
             st.session_state["rm_running"] = False
             st.error(f"⚠ {type(e).__name__}: {e}")
             return
+    if _rec is not None and getattr(_rec, "open", False):
+        s = _rec.status
+        st.markdown(f"<div style='padding:4px 10px;background:#fdecec;border:1px solid #f5c2c2;"
+                    f"border-radius:8px;color:#b91c1c;font-size:12px'>🔴 <b>GRABANDO transitorio</b> · "
+                    f"{s.duration_s:.0f} s · {s.blocks} bloques · {s.size_mb:.1f} MB · onda cruda a disco"
+                    f"</div>", unsafe_allow_html=True)
     snap = agent.snapshot()
     if snap.shape[1] == 0:
         st.info("Sin datos aún. Pulsá **▶ Iniciar** o **Tomar 1 lectura**.")
@@ -481,7 +526,48 @@ def _render_analisis() -> None:
             agent.pump(8)
         except Exception:  # noqa: BLE001
             pass
+    _render_reprocess(agent)
     st.fragment(_analisis_display, run_every=(0.5 if live else None))()
+
+
+def _render_reprocess(agent: AcqAgent) -> None:
+    """Reprocesa una GRABACIÓN de transitorio completa → Bode/Cascada/Polar a
+    máxima resolución (usa el registro crudo, no la ventana en vivo)."""
+    from core.remote_monitoring.recorder import list_recordings, load_recording
+    recs = list_recordings(agent.instance_id)
+    if not recs:
+        return
+    with st.expander(f"📼 Reprocesar grabación de transitorio ({len(recs)} disponible(s))"):
+        def _lbl(m):
+            import datetime as _dt
+            t = _dt.datetime.fromtimestamp(m.get("started", 0)).strftime("%d %b %H:%M")
+            dur = m.get("duration_s") or (m.get("samples", 0) / (m.get("fs", 1) or 1))
+            return f"{m['rec_id']} · {t} · {dur:.0f} s · {m.get('n_channels', 0)} canales"
+        labels = [_lbl(m) for m in recs]
+        sel = st.selectbox("Grabación", labels, key="rm_reproc_sel")
+        c1, c2 = st.columns([1, 3])
+        with c1:
+            go_rep = st.button("⚙ Reprocesar", use_container_width=True, type="primary")
+        with c2:
+            st.caption("Barre TODO el registro crudo en pasos finos → Bode/Cascada/Polar con la "
+                       "máxima densidad de puntos, sin depender del refresco en vivo.")
+        if go_rep:
+            m = recs[labels.index(sel)]
+            with st.spinner("Reprocesando registro completo…"):
+                manifest, full = load_recording(m["_dir"])
+                names = [c["name"] for c in manifest.get("channels", [])]
+                # map de índices y sensibilidades del canal (para escalar a EU)
+                vib = [(i, ch) for i, ch in enumerate(agent.channels)
+                       if not is_keyphasor_channel(ch) and ch.name in names]
+                kph = agent.source.config.keyphasor_index()
+                tc = TransientCapture(st.session_state.get("rm_transient").config
+                                      if st.session_state.get("rm_transient") else None)
+                npts = tc.process_full(full, float(manifest.get("fs", agent.sample_rate_hz)),
+                                       vib, kph_idx=kph, delta_rpm=8.0)
+                st.session_state["rm_transient"] = tc
+            st.success(f"✓ Reprocesado: **{npts} puntos** desde el registro completo "
+                       f"({full.shape[1]/manifest.get('fs',1):.0f} s de onda cruda). "
+                       f"Mirá **Bode / Cascada / Polar** abajo.")
 
 
 def _analisis_display() -> None:
