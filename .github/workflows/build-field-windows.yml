@@ -18,7 +18,7 @@ on:
       - 'field-v*'
 
 permissions:
-  contents: read
+  contents: write   # para publicar el Release con el .exe (descarga directa, sin login)
 
 jobs:
   build:
@@ -182,3 +182,20 @@ jobs:
           name: WatermelonField-windows
           path: out/
           retention-days: 30
+
+      # Publica un RELEASE con el .zip → descarga DIRECTA (botón normal, sin login)
+      - name: Empaquetar zip para el Release
+        if: startsWith(github.ref, 'refs/tags/field-v')
+        shell: pwsh
+        run: Compress-Archive -Path out/* -DestinationPath WatermelonField-windows.zip -Force
+
+      - name: Publicar Release
+        if: startsWith(github.ref, 'refs/tags/field-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "${GITHUB_REF_NAME}" WatermelonField-windows.zip \
+            --title "Watermelon Field ${GITHUB_REF_NAME}" \
+            --notes "Modulo nativo de campo (Windows). Descargá WatermelonField-windows.zip, descomprimí y corré 0_SIMULADOR_configurable.bat. Requisito: driver NI-DAQmx." \
+          || gh release upload "${GITHUB_REF_NAME}" WatermelonField-windows.zip --clobber
