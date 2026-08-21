@@ -764,15 +764,17 @@ def main() -> int:
         cf = agent.source.config
         if hasattr(cf, "speed_profile"):
             cf.speed_profile = MODE_TO_PROFILE.get(mode, "constant")
-            # Asegurar un RANGO de barrido para arranque/parada (si la máquina no lo
-            # trae, lo derivamos de rpm operativa y crítica → siempre pasa la crítica).
+            # Orientar SIEMPRE el barrido según el modo: arranque sube (lo→hi),
+            # parada baja (hi→lo). Deriva el rango de la máquina o de la crítica.
             if mode in ("arranque", "parada", "arranque_parada"):
-                if cf.rpm_start <= 0 or cf.rpm_end <= 0 or cf.rpm_start == cf.rpm_end:
-                    hi = max(cf.rpm * 2.0, (cf.sim_critical_rpm or 0) * 2.5,
-                             (cf.sim_critical_rpm2 or 0) * 1.4, 6000.0)
-                    lo = 300.0
-                    cf.rpm_start, cf.rpm_end = (lo, hi) if mode != "parada" else (hi, lo)
-                    cf.ramp_seconds = max(cf.ramp_seconds, 60.0)
+                vals = [v for v in (cf.rpm_start, cf.rpm_end) if v > 0]
+                lo = min(vals) if vals else 300.0
+                hi = max([cf.rpm_start, cf.rpm_end, cf.rpm * 2.0,
+                          (cf.sim_critical_rpm or 0) * 2.5, (cf.sim_critical_rpm2 or 0) * 1.4])
+                if hi <= lo:
+                    lo, hi = 300.0, max(6000.0, cf.rpm * 2.0)
+                cf.rpm_start, cf.rpm_end = (hi, lo) if mode == "parada" else (lo, hi)
+                cf.ramp_seconds = max(cf.ramp_seconds, 60.0)
         if hasattr(agent.source, "rewind"):
             agent.source.rewind()
         tc = TransientCapture(TransientConfig(fmax_hz=min(2000.0, agent.sample_rate_hz / 2.5)))

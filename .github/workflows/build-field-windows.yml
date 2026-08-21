@@ -77,13 +77,13 @@ jobs:
 
           # --- SIMULADOR CONFIGURABLE (v0.4): abrí, editá la máquina en Configuración,
           #     Guardar / Aplicar y medir. Arranca con la plantilla motor+bomba. ---
-          printf '@echo off\r\n"%%~dp0WatermelonField.exe" --scenario motor_bomba --fs 25600\r\npause\r\n' \
-            > out/0_SIMULADOR_configurable.bat
+          printf '@echo off\r\n"%%~dp0WatermelonField.exe" --scenario prox_4brg --fs 5120\r\npause\r\n' \
+            > out/0_SIMULADOR_proximidad_4cojinetes.bat
 
           # --- NUBE: credenciales (el usuario las pega UNA vez) + lanzadores que suben ---
           printf '@echo off\r\nREM  ===  EDITA estas 2 lineas con tu Supabase y guarda  ===\r\nset "WM_SUPABASE_URL=https://TU-PROYECTO.supabase.co"\r\nset "WM_SUPABASE_KEY=TU_SERVICE_KEY_AQUI"\r\n' \
             > out/Nube__EDITAR_credenciales.bat
-          printf '@echo off\r\ncall "%%~dp0Nube__EDITAR_credenciales.bat"\r\n"%%~dp0WatermelonField.exe" --scenario motor_bomba --fs 25600\r\npause\r\n' \
+          printf '@echo off\r\ncall "%%~dp0Nube__EDITAR_credenciales.bat"\r\n"%%~dp0WatermelonField.exe" --scenario prox_4brg --fs 5120\r\npause\r\n' \
             > out/SIMULADOR_con_NUBE.bat
           printf '@echo off\r\ncall "%%~dp0Nube__EDITAR_credenciales.bat"\r\n"%%~dp0WatermelonField.exe" --sens 100 --fs 5120 --chans 0,1 --names 1YA,1XA\r\npause\r\n' \
             > out/MEDIR_acelerometros_con_NUBE.bat
@@ -124,7 +124,7 @@ jobs:
 
           Tambien podes correr WatermelonField.exe directo (doble clic) = 2 acel. por defecto.
 
-          SIMULADOR CONFIGURABLE (0_SIMULADOR_configurable.bat)
+          SIMULADOR (0_SIMULADOR_proximidad_4cojinetes.bat)  <-- DEFAULT recomendado
           -----------------------------------------------------
           Abre la app como una MAQUINA REAL simulada. En la pestaña Configuracion:
             - edita sensores (Canal, Tipo prox/vel/accel/keyphasor, BNC, Sensib, Angulo)
@@ -197,5 +197,5 @@ jobs:
         run: |
           gh release create "${GITHUB_REF_NAME}" WatermelonField-windows.zip \
             --title "Watermelon Field ${GITHUB_REF_NAME}" \
-            --notes "Modulo nativo de campo (Windows). Descargá WatermelonField-windows.zip, descomprimí y corré 0_SIMULADOR_configurable.bat. Requisito: driver NI-DAQmx." \
+            --notes "Modulo nativo de campo (Windows). Descargá WatermelonField-windows.zip, descomprimí y corré 0_SIMULADOR_proximidad_4cojinetes.bat (default: proximidad 4 cojinetes, estable/arranque/parada). Requisito: driver NI-DAQmx." \
           || gh release upload "${GITHUB_REF_NAME}" WatermelonField-windows.zip --clobber
