@@ -79,7 +79,40 @@ SCENARIOS: Dict[str, Dict] = {
         desc="6 cojinetes · PROXIMIDAD · PARADA (coastdown) por 2 críticas → Bode inverso",
         kind="prox", n_brg=6, defect="none", crit=1800.0, crit2=4200.0,
         profile="coastdown", rpm_start=6000, rpm_end=300, ramp=90),
+    "motor_bomba": dict(
+        desc="TREN MIXTO · MOTOR (rodamientos, 4 acelerómetros) + BOMBA (cojinetes planos, "
+             "4 proximidades) · keyphasor común (fase) · falla BPFO en motor + oil whirl en bomba",
+        train=True),
 }
+
+
+def _make_train(fs: float) -> StreamConfig:
+    """Tren real: motor eléctrico (rodamientos → 4 acelerómetros, cojinetes 1–2)
+    acoplado a bomba (cojinetes planos/película → 4 proximidades X/Y, cojinetes
+    3–4). Un solo keyphasor (fase común de todo el tren).
+
+    Física: el MOTOR muestra falla de rodamiento (BPFO) en aceleración; la BOMBA
+    muestra inestabilidad de película (oil whirl ~0.45X) en proximidad — ambos a
+    la vez, cada uno en su sensor. rpm por encima de la crítica de la bomba para
+    que el whirl aparezca."""
+    ch: List[ChannelConfig] = [_kph(1)]
+    b = 2
+    # Motor — 2 cojinetes de rodamiento, acelerómetros H/V (g, IEPE)
+    for brg in (1, 2):
+        for ax in ("H", "V"):
+            ch.append(ChannelConfig(name=f"{brg}{ax}", coupling="IEPE",
+                                    sensitivity_mv_per_eu=100.0, bnc_port=b, units="g rms"))
+            b += 1
+    # Bomba — 2 cojinetes planos, proximidad X/Y (mil pp, DC)
+    for brg in (3, 4):
+        for ax in ("Y", "X"):
+            ch.append(ChannelConfig(name=f"{brg}{ax}", coupling="DC",
+                                    sensitivity_mv_per_eu=200.0, bnc_port=b, units="mil pp"))
+            b += 1
+    return StreamConfig(
+        sample_rate_hz=fs, channels=ch, block_seconds=0.1, buffer_seconds=12.0,
+        rpm=3000.0, sim_critical_rpm=1500.0, sim_zeta=0.06,
+        defect_by_kind={"accel": "bearing_bpfo", "prox": "oil_whirl"})
 
 
 def _make(kind: str, n_brg: int, fs: float, rpm: float = 3600.0, defect: str = "none",
@@ -102,6 +135,8 @@ def build_scenario(name: str, fs: float = 5120.0) -> StreamConfig:
     if name not in SCENARIOS:
         raise KeyError(f"escenario '{name}' desconocido. Opciones: {', '.join(SCENARIOS)}")
     kw = {k: v for k, v in SCENARIOS[name].items() if k != "desc"}
+    if kw.pop("train", False):
+        return _make_train(fs=fs)
     return _make(fs=fs, **kw)
 
 

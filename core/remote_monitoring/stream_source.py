@@ -104,6 +104,10 @@ class StreamConfig:
     #   none | unbalance | misalignment | looseness | rub | oil_whirl
     #   bearing_bpfo | bearing_bpfi | bearing_bsf | gear_mesh
     defect: str = "none"
+    # Defecto POR TIPO de sensor (trenes mixtos: p.ej. motor con rodamientos
+    # → {'accel': 'bearing_bpfo'} y bomba con cojinetes planos → {'prox':
+    # 'oil_whirl'} a la vez). Si un kind no está, usa `defect`.
+    defect_by_kind: dict = field(default_factory=dict)
     noise_rms: float = 0.02
     seed: int = 7
     # Geometría para las frecuencias de falla (aceleración/envelope):
@@ -321,7 +325,8 @@ class SimulatedStreamSource(StreamSource):
 
         # Frecuencia de la falla seleccionada (rodamiento/engrane) y su fase
         # acumulada (continua entre bloques) — habilita envelope y bandas laterales.
-        defect = cfg.defect
+        dbk = cfg.defect_by_kind or {}
+        accel_defect = dbk.get("accel", cfg.defect)   # la falla de rodamiento/engrane vive en accel
         bd = cfg.sim_bd_pd
         nb = max(1, int(cfg.sim_n_balls))
         fault_mult = {
@@ -329,7 +334,7 @@ class SimulatedStreamSource(StreamSource):
             "bearing_bpfi": (nb / 2.0) * (1.0 + bd),
             "bearing_bsf": (1.0 / (2.0 * max(bd, 1e-6))) * (1.0 - bd ** 2),
             "gear_mesh": float(max(1, int(cfg.sim_gear_teeth))),
-        }.get(defect, 0.0)
+        }.get(accel_defect, 0.0)
         if fault_mult > 0:
             f_fault = fault_mult * f1
             fault_phase = self._fault_phase + np.cumsum(2.0 * math.pi * f_fault / fs)
@@ -347,6 +352,7 @@ class SimulatedStreamSource(StreamSource):
 
             ph = self._phase_offsets[ci]
             base = 0.3 + 0.15 * (((ch.bnc_port or 1) - 1) % 4)
+            defect = dbk.get(kind, cfg.defect)   # defecto efectivo para ESTE tipo de sensor
 
             if kind == "prox":
                 # DESPLAZAMIENTO (mil/µm pp): dominan 1X/2X, órbitas, forma modal.

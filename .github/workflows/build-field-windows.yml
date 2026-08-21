@@ -88,6 +88,7 @@ jobs:
           scen gear_mesh       25600  "09_engrane_GMF"
           scen vel_iso_6brg     5120  "10_velocidad_ISO20816"
           scen coastdown        5120  "11_parada_coastdown"
+          scen motor_bomba     25600  "12_TREN_motor_rodamientos_+_bomba_cojinetes_planos"
 
           # --- instrucciones en texto plano (sin algoritmos) ---
           cat > out/LEEME.txt <<'TXT'
@@ -126,6 +127,9 @@ jobs:
             09_engrane_GMF                          -> frecuencia de engrane
             10_velocidad_ISO20816                   -> overall en mm/s
             11_parada_coastdown                     -> parada por 2 criticas
+            12_TREN_motor_+_bomba                    -> motor (rodamientos, 4 acel, BPFO) +
+                                                       bomba (cojinetes planos, 4 proximidades,
+                                                       oil whirl), keyphasor comun (fase)
 
           Son datos sinteticos fisicamente correctos: sirven para afinar graficos,
           alarmas y diagnostico mientras llega la tarjeta de proximidad.
