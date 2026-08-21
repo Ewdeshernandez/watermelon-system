@@ -34,7 +34,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install numpy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx pyinstaller
+          pip install numpy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx supabase pyinstaller
 
       - name: Compilar WatermelonField.exe (onefile)
         shell: bash
@@ -49,8 +49,9 @@ jobs:
             --hidden-import core.sensor_map \
             --hidden-import core.supabase_auth \
             --collect-all nidaqmx \
+            --collect-all supabase \
+            --copy-metadata supabase \
             --exclude-module streamlit \
-            --exclude-module supabase \
             --exclude-module matplotlib \
             --exclude-module pandas \
             native/watermelon_field.py
@@ -78,6 +79,14 @@ jobs:
           #     Guardar / Aplicar y medir. Arranca con la plantilla motor+bomba. ---
           printf '@echo off\r\n"%%~dp0WatermelonField.exe" --scenario motor_bomba --fs 25600\r\npause\r\n' \
             > out/0_SIMULADOR_configurable.bat
+
+          # --- NUBE: credenciales (el usuario las pega UNA vez) + lanzadores que suben ---
+          printf '@echo off\r\nREM  ===  EDITA estas 2 lineas con tu Supabase y guarda  ===\r\nset "WM_SUPABASE_URL=https://TU-PROYECTO.supabase.co"\r\nset "WM_SUPABASE_KEY=TU_SERVICE_KEY_AQUI"\r\n' \
+            > out/Nube__EDITAR_credenciales.bat
+          printf '@echo off\r\ncall "%%~dp0Nube__EDITAR_credenciales.bat"\r\n"%%~dp0WatermelonField.exe" --scenario motor_bomba --fs 25600\r\npause\r\n' \
+            > out/SIMULADOR_con_NUBE.bat
+          printf '@echo off\r\ncall "%%~dp0Nube__EDITAR_credenciales.bat"\r\n"%%~dp0WatermelonField.exe" --sens 100 --fs 5120 --chans 0,1 --names 1YA,1XA\r\npause\r\n' \
+            > out/MEDIR_acelerometros_con_NUBE.bat
 
           # --- BANCO DE PRUEBAS: escenarios sim (sin hardware) para probar TODO ---
           mkdir -p out/Banco_de_Pruebas
@@ -148,6 +157,22 @@ jobs:
 
           Son datos sinteticos fisicamente correctos: sirven para afinar graficos,
           alarmas y diagnostico mientras llega la tarjeta de proximidad.
+
+          NUBE: medir en Windows y VER desde la Mac (web)
+          -----------------------------------------------
+          1) Abri  Nube__EDITAR_credenciales.bat  con Bloc de notas y pega tu
+             WM_SUPABASE_URL y WM_SUPABASE_KEY (las mismas del proyecto Supabase).
+             Guarda. (Este archivo NO se comparte: son tus credenciales.)
+          2) Corre  SIMULADOR_con_NUBE.bat  o  MEDIR_acelerometros_con_NUBE.bat
+          3) En la app: Iniciar -> Grabar -> Detener. Al detener la grabacion se
+             SUBE a la nube (si hay internet). Sin internet queda local y se sube
+             sola la proxima vez que le des Iniciar.
+          4) En tu Mac, abri la WEB (Remote Monitoring), misma maquina (mismo
+             nombre), y en "Reprocesar grabacion" veras la grabacion con el icono
+             de nube; la descarga y la reprocesa a todos los graficos.
+
+          IMPORTANTE: el nombre de la maquina debe coincidir entre Windows y la web
+          para que aparezca (es el identificador de la maquina).
           TXT
 
           ls -la out

@@ -172,13 +172,27 @@ def is_synced(rec_dir: str) -> bool:
 
 
 def _sb_client():
-    """Cliente Supabase (service_key) reusando el auth de la app. None si no hay
-    credenciales o no hay internet."""
+    """Cliente Supabase. Dos contextos:
+      1) WEB (Streamlit): reusa el auth de la app (st.secrets service_key).
+      2) CAMPO (.exe headless): credenciales por variables de entorno
+         WM_SUPABASE_URL + WM_SUPABASE_KEY (sin Streamlit).
+    None si no hay credenciales o no hay internet."""
     try:
         from core.supabase_auth import get_admin_client
-        return get_admin_client()
+        c = get_admin_client()
+        if c is not None:
+            return c
     except Exception:  # noqa: BLE001
-        return None
+        pass
+    url = os.environ.get("WM_SUPABASE_URL")
+    key = os.environ.get("WM_SUPABASE_KEY")
+    if url and key:
+        try:
+            from supabase import create_client
+            return create_client(url, key)
+        except Exception:  # noqa: BLE001
+            return None
+    return None
 
 
 _BUCKET = os.environ.get("WM_TRANSIENTS_BUCKET", "transients")
@@ -254,6 +268,42 @@ def cloud_recordings(instance_id: str, limit: int = 30) -> List[dict]:
         return res.data or []
     except Exception:  # noqa: BLE001
         return []
+
+
+def download_recording(instance_id: str, rec_id: str) -> Optional[str]:
+    """Descarga una grabación de Supabase a disco local (para reprocesar en la
+    Mac). Devuelve el directorio local o None. Idempotente: si ya está local con
+    onda cruda, no re-descarga."""
+    import gzip
+    dest = os.path.join(_persist_root(), instance_id, rec_id)
+    if os.path.isfile(os.path.join(dest, "data.f32")) and os.path.isfile(
+            os.path.join(dest, "manifest.json")):
+        return dest
+    client = _sb_client()
+    if client is None:
+        return None
+    base = f"{instance_id}/{rec_id}"
+    try:
+        os.makedirs(dest, exist_ok=True)
+        store = client.storage.from_(_BUCKET)
+        for fn in ("manifest.json", "index.jsonl", "data.f32"):
+            gz = (fn == "data.f32")
+            key = f"{base}/{fn}" + (".gz" if gz else "")
+            try:
+                raw = store.download(key)
+            except Exception:  # noqa: BLE001
+                if gz:
+                    return None      # la onda cruda es imprescindible
+                continue
+            if gz:
+                raw = gzip.decompress(raw)
+            with open(os.path.join(dest, fn), "wb") as f:
+                f.write(raw)
+        with open(os.path.join(dest, ".synced"), "w") as f:
+            f.write("cloud")
+        return dest
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def local_usage(instance_id: str) -> Tuple[int, int]:

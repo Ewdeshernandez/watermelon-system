@@ -633,16 +633,32 @@ def _render_reprocess(agent: AcqAgent) -> None:
     gráficos. Auto-contenido: usa los canales/sensibilidades de la propia
     grabación, sin depender de la config viva."""
     import types
-    from core.remote_monitoring.recorder import list_all_recordings, load_recording
+    from core.remote_monitoring.recorder import (list_all_recordings, load_recording,
+                                                 cloud_recordings, download_recording)
     recs = list_all_recordings()
+    # Suma las grabaciones que están SOLO en la nube (subidas por el equipo de
+    # campo Windows) para poder verlas desde la Mac. Se descargan al reprocesar.
+    _local_ids = {(m.get("_instance", ""), m.get("rec_id")) for m in recs}
+    for cr in cloud_recordings(agent.instance_id, limit=50):
+        if (cr.get("instance_id", ""), cr.get("rec_id")) in _local_ids:
+            continue
+        recs.append({"rec_id": cr.get("rec_id"), "_instance": cr.get("instance_id", ""),
+                     "started": cr.get("started", 0), "duration_s": cr.get("duration_s"),
+                     "n_channels": cr.get("n_channels", 0), "fs": cr.get("fs", 1),
+                     "machine": cr.get("machine", ""), "_cloud": True})
     if not recs:
         return
     with st.expander(f"📼 Reprocesar grabación ({len(recs)} disponible(s))"):
         def _lbl(m):
             import datetime as _dt
-            t = _dt.datetime.fromtimestamp(m.get("started", 0)).strftime("%d %b %H:%M")
+            ts = m.get("started", 0)
+            try:
+                t = _dt.datetime.fromtimestamp(float(ts)).strftime("%d %b %H:%M")
+            except Exception:  # noqa: BLE001
+                t = str(ts)[:16]
             dur = m.get("duration_s") or (m.get("samples", 0) / (m.get("fs", 1) or 1))
-            return (f"{m.get('_instance','')} · {m['rec_id']} · {t} · {dur:.0f} s · "
+            tag = "☁ " if m.get("_cloud") else ""
+            return (f"{tag}{m.get('_instance','')} · {m['rec_id']} · {t} · {dur or 0:.0f} s · "
                     f"{m.get('n_channels', 0)} canales")
         labels = [_lbl(m) for m in recs]
         sel = st.selectbox("Grabación", labels, key="rm_reproc_sel")
@@ -654,6 +670,13 @@ def _render_reprocess(agent: AcqAgent) -> None:
                        "de toda la corrida, desde el registro crudo. No depende del vivo.")
         if go_rep:
             m = recs[labels.index(sel)]
+            if m.get("_cloud") and not m.get("_dir"):
+                with st.spinner("Descargando grabación de la nube…"):
+                    d = download_recording(m.get("_instance", ""), m["rec_id"])
+                if not d:
+                    st.error("No se pudo descargar de la nube (revisá credenciales/internet).")
+                    return
+                m["_dir"] = d
             with st.spinner("Reprocesando registro completo…"):
                 manifest, full = load_recording(m["_dir"])
                 # Canales AUTO-CONTENIDOS desde la grabación (nombre, sensib, unidad).
