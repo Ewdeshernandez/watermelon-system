@@ -506,18 +506,88 @@ def main() -> int:
     tblc.itemChanged.connect(lambda *_: draw_bearing())   # redibuja al editar ángulo/nombre
     cb_rot.currentTextChanged.connect(lambda *_: draw_bearing())
 
-    # --- Monitoreo (scope live) ---
+    # --- Monitoreo (adquisición + estado + tabular rápido, estilo web) ---
+    from core.remote_monitoring.stream_source import channel_kind as _ckind
+    from core.remote_monitoring.recorder import (sync_pending, local_usage, free_bytes,
+                                                 pending_count)
+    ALARM_DEF = {"prox": (2.5, 4.0), "vel": (2.8, 4.5), "accel": (4.5, 7.1)}
+
+    def _alarm_for(c):
+        if args.alarm or args.danger:
+            return args.alarm, args.danger
+        return ALARM_DEF.get(_ckind(c), (0.0, 0.0))
+
+    def _amp3(eu0, fs, f1, kind):
+        """Overall + 1X + 2X en la convención de la NORMA del sensor:
+        proximidad → pp (API 670/ISO 7919); velocidad/acel → RMS (ISO 20816).
+        Amplitudes 1X/2X del pico del espectro (no colapsan); fase por proyección."""
+        if kind == "prox":
+            ov = float(eu0.max() - eu0.min()); k = 2.0            # 0-pk → pp
+        else:
+            ov = float(np.sqrt(np.mean(eu0 ** 2))); k = 1.0 / np.sqrt(2.0)  # 0-pk → rms
+        fr, mag = _spectrum(eu0, fs)
+        def _order(o):
+            if not f1:
+                return 0.0, 0.0
+            ft = o * f1; b = (fr >= ft * 0.8) & (fr <= ft * 1.2)
+            amp = float(mag[b].max()) * k if b.any() else 0.0
+            _, ph = one_x_vector(eu0, fs, ft)
+            return amp, ph
+        a1, p1 = _order(1.0); a2, p2 = _order(2.0)
+        return ov, a1, p1, a2, p2
+
     mon_w = QtWidgets.QWidget(); mon_l = QtWidgets.QVBoxLayout(mon_w)
+    # tira de estado (RPM · 1X · Estado · Ventana · Samples · Vectores · Guardados · Tamaño)
+    strip = QtWidgets.QFrame()
+    strip.setStyleSheet(f"background:white; border:1px solid {LINE}; border-radius:8px;")
+    sl = QtWidgets.QHBoxLayout(strip); sl.setContentsMargins(4, 6, 4, 6)
+    sv = {}
+
+    def _statcell(key, label):
+        w = QtWidgets.QWidget(); v = QtWidgets.QVBoxLayout(w)
+        v.setContentsMargins(14, 0, 14, 0); v.setSpacing(1)
+        lab = QtWidgets.QLabel(label)
+        lab.setStyleSheet("color:#8a97ab; font-size:9px; font-weight:700; letter-spacing:.05em;")
+        val = QtWidgets.QLabel("—")
+        val.setStyleSheet(f"color:{NAVY}; font-size:15px; font-weight:800; font-family:monospace;")
+        v.addWidget(lab); v.addWidget(val); sv[key] = val
+        sl.addWidget(w)
+    for _k, _l in [("rpm", "RPM"), ("x1", "1X"), ("estado", "ESTADO"), ("vent", "VENTANA"),
+                   ("samp", "SAMPLES"), ("vect", "VECTORES"), ("guard", "GUARDADOS"),
+                   ("size", "TAMAÑO")]:
+        _statcell(_k, _l)
+    sl.addStretch(1); mon_l.addWidget(strip)
+    # controles: grabar transitorio + subir pendientes + uso de disco
+    ctl = QtWidgets.QHBoxLayout()
+    btn_rec_t = QtWidgets.QPushButton("⏺ Grabar transitorio"); btn_rec_t.setCheckable(True)
+    btn_rec_t.setStyleSheet(_redbtn)
+    btn_sync = QtWidgets.QPushButton("☁ Subir pendientes")
+    lbl_disk = QtWidgets.QLabel("💽 —"); lbl_disk.setStyleSheet("color:#64748b;")
+    ctl.addWidget(btn_rec_t); ctl.addWidget(btn_sync); ctl.addStretch(1); ctl.addWidget(lbl_disk)
+    mon_l.addLayout(ctl)
+    # tabular list — valores actuales (rápido)
+    tblt = QtWidgets.QTableWidget(len(vib), 10)
+    tblt.setHorizontalHeaderLabels(["Sensor", "Gap", "Overall", "1X", "1X fase",
+                                    "2X", "2X fase", "Alarma", "Danger", "Estado"])
+    tblt.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    tblt.verticalHeader().setVisible(False)
+    mon_l.addWidget(tblt, 1)
+    mon_l.addWidget(QtWidgets.QLabel(
+        "<i style='color:#64748b'>Amplitudes por norma: desplazamiento en pp (API 670 · "
+        "ISO 7919), velocidad/aceleración en RMS (ISO 20816).</i>"))
+    tabs.addTab(mon_w, "Monitoreo")
+
+    # --- Onda (ANÁLISIS: forma de onda + espectro) ---
+    ond_w = QtWidgets.QWidget(); ond_l = QtWidgets.QVBoxLayout(ond_w)
     top = QtWidgets.QHBoxLayout()
     top.addWidget(QtWidgets.QLabel("Espectro de:"))
     combo = QtWidgets.QComboBox(); combo.addItems([c.name for _, c in vib]); top.addWidget(combo)
-    top.addStretch(1); mon_l.addLayout(top)
-    gl = pg.GraphicsLayoutWidget(); mon_l.addWidget(gl, 1)
-    from core.remote_monitoring.stream_source import channel_kind as _ckind
+    top.addStretch(1); ond_l.addLayout(top)
+    gl = pg.GraphicsLayoutWidget(); ond_l.addWidget(gl, 1)
     wave_curves = []
     for r, (i, c) in enumerate(vib):
         p = gl.addPlot(row=r, col=0); p.showGrid(x=True, y=True, alpha=0.25)
-        col = SENSOR_COLORS.get(_ckind(c), CORN)            # traza por tipo de sensor (como la web)
+        col = SENSOR_COLORS.get(_ckind(c), CORN)
         p.setLabel("left", c.name, color=col)
         p.getAxis("bottom").setStyle(showValues=(r == len(vib) - 1))
         wave_curves.append(p.plot(pen=pg.mkPen(col, width=1.4)))
@@ -526,20 +596,7 @@ def main() -> int:
     spec_curve = p_spec.plot(pen=pg.mkPen(AMBER, width=1.4))
     v1x = pg.InfiniteLine(angle=90, pen=pg.mkPen(REDL, width=1, style=QtCore.Qt.DashLine))
     p_spec.addItem(v1x)
-    tabs.addTab(mon_w, "Monitoreo")
-
-    # --- Tabular (valores actuales, vivo) ---
-    tab_w = QtWidgets.QWidget(); tab_l = QtWidgets.QVBoxLayout(tab_w)
-    tblt = QtWidgets.QTableWidget(len(vib), 5)
-    tblt.setHorizontalHeaderLabels(["Sensor", "Overall", "1X", "1X fase", "Estado"])
-    tblt.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
-    tblt.verticalHeader().setVisible(False)
-    tab_l.addWidget(tblt)
-    if args.alarm or args.danger:
-        tab_l.addWidget(QtWidgets.QLabel(
-            f"<i>Alarma {args.alarm:g} · Peligro {args.danger:g} {vib[0][1].units} "
-            f"(ISO 20816). OK / ALERTA / PELIGRO por Overall.</i>"))
-    tabs.addTab(tab_w, "Tabular")
+    tabs.addTab(ond_w, "Onda")
 
     # --- Órbita (par X/Y, vivo) ---
     orb_ok = len(vib) >= 2
@@ -624,6 +681,60 @@ def main() -> int:
                 pass
         cur = tabs.tabText(tabs.currentIndex())
         if cur == "Monitoreo":
+            # estado global (estable/arranque/parada) por variación de rpm
+            prev = rec_state.get("prev_rpm")
+            if rpm and prev:
+                d = rpm - prev
+                estado_g = "Arranque" if d > 15 else ("Parada" if d < -15 else "Estable")
+            else:
+                estado_g = "—"
+            rec_state["prev_rpm"] = rpm
+            # tira de estado
+            try:
+                block = agent.source.config.block_samples
+                total = int(getattr(agent, "blocks_read", 0)) * block
+            except Exception:  # noqa: BLE001
+                total = snap.shape[1]
+            try:
+                vect = len(tc.bode(vib[0][1].name)[0])
+            except Exception:  # noqa: BLE001
+                vect = 0
+            sv["rpm"].setText(f"{rpm:.0f}" if rpm else "—")
+            sv["x1"].setText(f"{f1:.1f} Hz" if f1 else "—")
+            sv["estado"].setText(estado_g)
+            sv["estado"].setStyleSheet("font-size:15px;font-weight:800;font-family:monospace;color:"
+                                       + ("#16a34a" if estado_g == "Estable" else "#b45309"))
+            sv["vent"].setText(f"{snap.shape[1] / fs:.1f} s")
+            sv["samp"].setText(f"{total:,}")
+            sv["vect"].setText(str(vect))
+            sv["guard"].setText(str(int(rec_state.get("guard", 0))))
+            sv["size"].setText(f"{len(agent.channels) * snap.shape[1] * 8 / 1e6:.2f} MB")
+            if rec_state["fn"] % 32 == 0:
+                _refresh_disk()
+            # tabular list
+            for r, (i, c) in enumerate(vib):
+                eu = snap[i] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0)
+                eu0 = eu - eu.mean()
+                gapv = float(snap[i].mean())            # V (prox real ~-9.5; sim ~0)
+                ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c))
+                al, dg = _alarm_for(c)
+                if dg and ov >= dg:
+                    estado, bgc, fgc = "DANGER", "#fde2e2", "#991b1b"
+                elif al and ov >= al:
+                    estado, bgc, fgc = "ALERT", "#fdf0d5", "#92400e"
+                else:
+                    estado, bgc, fgc = "OK", "#e6f4ea", "#166534"
+                vals = [c.name, f"{gapv:.2f} V", f"{ov:.3g} {c.units}", f"{a1:.3g}",
+                        f"{p1:.0f}°", f"{a2:.3g}", f"{p2:.0f}°",
+                        f"{al:g}", f"{dg:g}", estado]
+                for cc, v in enumerate(vals):
+                    it = QtWidgets.QTableWidgetItem(v)
+                    if cc == 0:
+                        it.setForeground(QtGui.QColor(SENSOR_COLORS.get(_ckind(c), NAVY)))
+                    if cc == 9:
+                        it.setBackground(QtGui.QColor(bgc)); it.setForeground(QtGui.QColor(fgc))
+                    tblt.setItem(r, cc, it)
+        elif cur == "Onda":
             nshow = min(snap.shape[1], int(0.3 * fs))
             tms = np.arange(nshow) / fs * 1000.0
             for (i, c), curve in zip(vib, wave_curves):
@@ -635,28 +746,10 @@ def main() -> int:
             fr, mag = _spectrum(snap[sel] * 1000.0 / (sens or 1.0), fs)
             keep = fr <= min(fr[-1], 2000.0)
             spec_curve.setData(fr[keep], mag[keep])
-            v1x.setPos(f1) if f1 else v1x.hide()
             if f1:
-                v1x.show()
-        elif cur == "Tabular":
-            for r, (i, c) in enumerate(vib):
-                eu = snap[i] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0)
-                ov = float(np.sqrt(np.mean((eu - eu.mean()) ** 2)))
-                a1 = ph = 0.0
-                if f1:
-                    a1, ph = one_x_vector(eu - eu.mean(), fs, f1)
-                if args.danger and ov >= args.danger:
-                    estado, bgc, fgc = "PELIGRO", "#fde2e2", "#991b1b"
-                elif args.alarm and ov >= args.alarm:
-                    estado, bgc, fgc = "ALERTA", "#fdf0d5", "#92400e"
-                else:
-                    estado, bgc, fgc = "OK", "#e6f4ea", "#166534"
-                vals = [c.name, f"{ov:.3g} {c.units}", f"{a1:.3g}", f"{ph:.0f}°", estado]
-                for cc, v in enumerate(vals):
-                    it = QtWidgets.QTableWidgetItem(v)
-                    if cc == 4:
-                        it.setBackground(QtGui.QColor(bgc)); it.setForeground(QtGui.QColor(fgc))
-                    tblt.setItem(r, cc, it)
+                v1x.setPos(f1); v1x.show()
+            else:
+                v1x.hide()
         elif orb_ok and cur == "Órbita":
             xi = next((i for i, c in vib if c.name == cb_x.currentText()), vib[0][0])
             yi = next((i for i, c in vib if c.name == cb_y.currentText()), vib[1][0])
@@ -737,24 +830,56 @@ def main() -> int:
         if act_rec.isChecked():
             act_rec.setChecked(False)
 
+    def _refresh_disk():
+        try:
+            cnt, used = local_usage(agent.instance_id)
+            free = free_bytes()
+            lbl_disk.setText(f"💽 {cnt} grabación(es) · {used / 1e6:.0f} MB usados · "
+                             f"{free / 1e6:.0f} MB libres")
+            pend = pending_count(agent.instance_id)
+            btn_sync.setText(f"☁ Subir pendientes ({pend})" if pend else "☁ Subir pendientes")
+            btn_sync.setEnabled(pend > 0)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def do_sync():
+        try:
+            ok, fail = sync_pending(agent.instance_id)
+            QtWidgets.QMessageBox.information(win, "Sincronizar",
+                                             f"Subidas {ok} · fallidas {fail}.")
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(win, "Sincronizar", f"No se pudo subir: {e}")
+        _refresh_disk()
+
     def do_rec(checked):
         if checked:
+            # pedir nombre/consecutivo (como la web) — default con timestamp
+            import time as _t
+            default = f"{args.machine}_{_t.strftime('%Y%m%d_%H%M%S')}"
+            tag, ok = QtWidgets.QInputDialog.getText(
+                win, "Grabar transitorio", "Nombre / consecutivo de la grabación:", text=default)
+            if not ok:
+                btn_rec_t.setChecked(False); act_rec.setChecked(False)
+                return
             ch_meta = [{"name": c.name, "units": c.units, "coupling": c.coupling,
                         "bnc_port": c.bnc_port, "sensitivity_mv_per_eu": float(c.sensitivity_mv_per_eu or 0)}
                        for c in agent.channels]
-            rec = TransientRecorder(agent.instance_id, agent.sample_rate_hz, ch_meta, machine=args.machine)
+            rec = TransientRecorder(agent.instance_id, agent.sample_rate_hz, ch_meta,
+                                    machine=args.machine, rec_id=(tag.strip() or None))
             agent.on_block = rec.append
             rec_state["rec"] = rec
-            lbl_rec.setText("🔴 GRABANDO")
+            lbl_rec.setText(f"🔴 GRABANDO · {rec.rec_id}")
         else:
             rec = rec_state.get("rec"); agent.on_block = None
             if rec:
                 rec.stop()
                 up = upload_recording(rec.dir)
+                rec_state["guard"] = int(rec_state.get("guard", 0)) + 1
                 QtWidgets.QMessageBox.information(
                     win, "Grabación", f"{rec.rec_id} · {rec.status.duration_s:.0f}s · "
-                    f"{rec.status.size_mb:.1f} MB · {'☁ nube' if up.get('ok') else 'local (pendiente)'}")
+                    f"{rec.status.size_mb:.1f} MB · {'☁ subida a la nube' if up.get('ok') else 'guardada local (pendiente de subir)'}")
             rec_state["rec"] = None; lbl_rec.setText("")
+        _refresh_disk()
 
     def set_mode_live(mode):
         """Cambia el MODO de operación en vivo (estable/arranque/parada) sobre la
@@ -790,6 +915,11 @@ def main() -> int:
     act_start.triggered.connect(do_start)
     act_stop.triggered.connect(do_stop)
     act_rec.toggled.connect(do_rec)
+    # Espejo del botón "Grabar transitorio" del módulo Monitoreo con el de la barra
+    btn_rec_t.toggled.connect(lambda ch: act_rec.setChecked(ch) if act_rec.isChecked() != ch else None)
+    act_rec.toggled.connect(lambda ch: btn_rec_t.setChecked(ch) if btn_rec_t.isChecked() != ch else None)
+    btn_sync.clicked.connect(do_sync)
+    _refresh_disk()
     act_quit.triggered.connect(win.close)
     act_about.triggered.connect(lambda: QtWidgets.QMessageBox.about(
         win, "Watermelon Field", "Watermelon Field — módulo nativo de adquisición.\n"
