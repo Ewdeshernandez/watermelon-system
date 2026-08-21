@@ -90,3 +90,29 @@ bucket de Storage para los documentos asociados.';
 -- de la app (Asset Documents → "+ Crear nueva instancia") y aparecen
 -- automáticamente acá una vez configurado el secret en Streamlit Cloud.
 -- =============================================================
+
+
+-- =============================================================
+-- GRABACIONES DE TRANSITORIO (Remote Monitoring — transient recorder)
+-- Onda cruda grabada en continuo durante un arranque/parada; el archivo
+-- crudo va al bucket de Storage "transients", acá va la metadata.
+-- =============================================================
+CREATE TABLE IF NOT EXISTS transient_recordings (
+    rec_id        TEXT PRIMARY KEY,
+    instance_id   TEXT NOT NULL,
+    machine       TEXT,
+    fs            DOUBLE PRECISION,
+    n_channels    INTEGER,
+    samples       BIGINT,
+    duration_s    DOUBLE PRECISION,
+    size_bytes    BIGINT,
+    started       DOUBLE PRECISION,
+    storage_path  TEXT,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_transient_rec_instance
+    ON transient_recordings (instance_id, created_at DESC);
+
+-- Bucket de Storage para la onda cruda (crear una vez):
+--   insert into storage.buckets (id, name, public) values ('transients','transients', false);
+-- (El uploader intenta crear el bucket solo; si RLS lo bloquea, corré esto.)

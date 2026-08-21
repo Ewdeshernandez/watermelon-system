@@ -131,6 +131,105 @@ def list_recordings(instance_id: str) -> List[dict]:
     return out
 
 
+def _dir_size(rec_dir: str) -> int:
+    total = 0
+    for fn in os.listdir(rec_dir):
+        try:
+            total += os.path.getsize(os.path.join(rec_dir, fn))
+        except OSError:
+            pass
+    return total
+
+
+def is_synced(rec_dir: str) -> bool:
+    return os.path.isfile(os.path.join(rec_dir, ".synced"))
+
+
+def _sb_client():
+    """Cliente Supabase (service_key) reusando el auth de la app. None si no hay
+    credenciales o no hay internet."""
+    try:
+        from core.supabase_auth import get_admin_client
+        return get_admin_client()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+_BUCKET = os.environ.get("WM_TRANSIENTS_BUCKET", "transients")
+
+
+def upload_recording(rec_dir: str) -> dict:
+    """Sube la grabación a Supabase (Storage + fila de metadata) y la marca
+    `.synced`. Offline-first: si no hay cliente/internet devuelve {ok:False}."""
+    import gzip
+    client = _sb_client()
+    if client is None:
+        return {"ok": False, "reason": "offline"}
+    try:
+        manifest = json.load(open(os.path.join(rec_dir, "manifest.json")))
+        rec_id = manifest["rec_id"]
+        instance = os.path.basename(os.path.dirname(rec_dir))
+        base = f"{instance}/{rec_id}"
+        try:
+            client.storage.create_bucket(_BUCKET)          # idempotente
+        except Exception:  # noqa: BLE001
+            pass
+        store = client.storage.from_(_BUCKET)
+        for fn in ("manifest.json", "index.jsonl", "data.f32"):
+            p = os.path.join(rec_dir, fn)
+            if not os.path.isfile(p):
+                continue
+            raw = open(p, "rb").read()
+            key = f"{base}/{fn}"
+            if fn == "data.f32":                            # comprime la onda cruda
+                raw = gzip.compress(raw)
+                key += ".gz"
+            try:
+                store.upload(key, raw, {"upsert": "true"})
+            except Exception:  # noqa: BLE001
+                store.update(key, raw)
+        row = {"rec_id": rec_id, "instance_id": instance, "machine": manifest.get("machine", ""),
+               "fs": manifest.get("fs"), "n_channels": manifest.get("n_channels"),
+               "samples": manifest.get("samples"), "duration_s": manifest.get("duration_s"),
+               "size_bytes": _dir_size(rec_dir), "started": manifest.get("started"),
+               "storage_path": base}
+        client.table("transient_recordings").upsert(row).execute()
+        with open(os.path.join(rec_dir, ".synced"), "w") as f:
+            f.write(str(time.time()))
+        return {"ok": True, "path": base}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
+
+
+def pending_count(instance_id: str) -> int:
+    return sum(1 for m in list_recordings(instance_id) if not is_synced(m["_dir"]))
+
+
+def sync_pending(instance_id: str) -> Tuple[int, int]:
+    """Sube todas las grabaciones no sincronizadas. Devuelve (ok, fallos)."""
+    ok = fail = 0
+    for m in list_recordings(instance_id):
+        if is_synced(m["_dir"]):
+            continue
+        r = upload_recording(m["_dir"])
+        ok += 1 if r.get("ok") else 0
+        fail += 0 if r.get("ok") else 1
+    return ok, fail
+
+
+def cloud_recordings(instance_id: str, limit: int = 30) -> List[dict]:
+    """Grabaciones en Supabase para esta máquina (para el aviso al especialista)."""
+    client = _sb_client()
+    if client is None:
+        return []
+    try:
+        res = (client.table("transient_recordings").select("*")
+               .eq("instance_id", instance_id).order("started", desc=True).limit(limit).execute())
+        return res.data or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def load_recording(rec_dir: str) -> Tuple[dict, np.ndarray]:
     """Reconstruye (manifest, waveform completa (canales, muestras)) del registro."""
     manifest = json.load(open(os.path.join(rec_dir, "manifest.json")))
