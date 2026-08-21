@@ -25,9 +25,20 @@ from core.remote_monitoring.agent import AcqAgent
 from core.remote_monitoring.stream_source import (ChannelConfig, StreamConfig,
                                                   SimulatedStreamSource, is_keyphasor_channel)
 
-NAVY = "#0F1E3D"
+# --- Paleta industrial (clase System1/ADRE): tema oscuro instrumento ---
+BG = "#0e1420"       # fondo app (slate profundo)
+PANEL = "#141d2e"    # paneles / plots
+PANEL2 = "#1b2740"   # panel elevado / hover
+LINE = "#26344f"     # bordes / grid
+INK = "#e6edf7"      # texto principal
+MUTE = "#93a4c0"     # texto secundario
+ACC = "#23d5c7"      # acento teal
+NAVY = "#0b1220"     # chrome (menú/toolbar/status)
 BLUE = "#2f6fb0"
-CORN = "#4f8fd0"
+CORN = "#38bdf8"     # traza primaria (cian)
+AMBER = "#f5b74a"    # traza secundaria (ámbar)
+GREEN = "#4ade80"    # órbita
+REDL = "#ff5d5d"     # 1X / keyphasor / peligro
 
 
 def build_agent(args) -> AcqAgent:
@@ -76,27 +87,58 @@ def _spectrum(x, fs):
 
 def _stylesheet() -> str:
     return f"""
-    QMainWindow, QWidget {{ background: #f4f7fb; color: #1f2937;
-        font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; }}
-    QMenuBar {{ background: {NAVY}; color: white; }}
-    QMenuBar::item:selected {{ background: {BLUE}; }}
-    QMenu {{ background: white; border: 1px solid #d6deea; }}
-    QMenu::item:selected {{ background: {CORN}; color: white; }}
-    QToolBar {{ background: {NAVY}; spacing: 6px; padding: 5px; border: none; }}
-    QToolBar QToolButton {{ color: white; padding: 6px 12px; border-radius: 6px; }}
-    QToolBar QToolButton:hover {{ background: {BLUE}; }}
-    QTabWidget::pane {{ border: 1px solid #d6deea; background: white; }}
-    QTabBar::tab {{ background: #e7edf6; padding: 8px 18px; margin-right: 2px;
-        border-top-left-radius: 6px; border-top-right-radius: 6px; }}
-    QTabBar::tab:selected {{ background: white; color: {NAVY}; font-weight: 700;
-        border-bottom: 2px solid {CORN}; }}
-    QStatusBar {{ background: {NAVY}; color: #c7d6ea; }}
-    QPushButton {{ background: {BLUE}; color: white; border: none; padding: 7px 14px;
-        border-radius: 6px; }}
-    QPushButton:hover {{ background: {NAVY}; }}
-    QPushButton:disabled {{ background: #9fb3d1; }}
-    QTableWidget {{ background: white; gridline-color: #e8edf5; }}
-    QHeaderView::section {{ background: {NAVY}; color: white; padding: 6px; border: none; }}
+    QMainWindow, QDialog {{ background: {BG}; }}
+    QWidget {{ background: {BG}; color: {INK};
+        font-family: 'Segoe UI', 'Inter', Arial, sans-serif; font-size: 13px; }}
+    QLabel {{ background: transparent; color: {INK}; }}
+    QMenuBar {{ background: {NAVY}; color: {INK}; padding: 2px; }}
+    QMenuBar::item {{ padding: 5px 10px; background: transparent; }}
+    QMenuBar::item:selected {{ background: {PANEL2}; border-radius: 5px; }}
+    QMenu {{ background: {PANEL}; border: 1px solid {LINE}; color: {INK}; }}
+    QMenu::item:selected {{ background: {ACC}; color: {NAVY}; }}
+    QToolBar {{ background: {NAVY}; spacing: 8px; padding: 7px 10px;
+        border-bottom: 1px solid {LINE}; }}
+    QToolBar::separator {{ background: {LINE}; width: 1px; margin: 4px 6px; }}
+    QToolBar QToolButton {{ color: {INK}; padding: 7px 14px; border-radius: 7px;
+        font-weight: 600; }}
+    QToolBar QToolButton:hover {{ background: {PANEL2}; }}
+    QToolBar QToolButton:disabled {{ color: {MUTE}; }}
+    QTabWidget::pane {{ border: 1px solid {LINE}; background: {PANEL};
+        border-radius: 8px; top: -1px; }}
+    QTabBar {{ qproperty-drawBase: 0; }}
+    QTabBar::tab {{ background: transparent; color: {MUTE}; padding: 9px 20px;
+        margin-right: 3px; border: none; font-weight: 600;
+        border-top-left-radius: 7px; border-top-right-radius: 7px; }}
+    QTabBar::tab:hover {{ color: {INK}; background: {PANEL}; }}
+    QTabBar::tab:selected {{ background: {PANEL}; color: {ACC};
+        border-bottom: 2px solid {ACC}; }}
+    QStatusBar {{ background: {NAVY}; color: {MUTE}; border-top: 1px solid {LINE}; }}
+    QStatusBar QLabel {{ color: {MUTE}; padding: 2px 8px; }}
+    QPushButton {{ background: {PANEL2}; color: {INK}; border: 1px solid {LINE};
+        padding: 7px 15px; border-radius: 7px; font-weight: 600; }}
+    QPushButton:hover {{ background: {ACC}; color: {NAVY}; border-color: {ACC}; }}
+    QPushButton:disabled {{ background: {PANEL}; color: {MUTE}; }}
+    QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox {{ background: {PANEL};
+        color: {INK}; border: 1px solid {LINE}; border-radius: 6px; padding: 5px 8px;
+        selection-background-color: {ACC}; selection-color: {NAVY}; }}
+    QComboBox:hover, QLineEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover {{
+        border-color: {ACC}; }}
+    QComboBox QAbstractItemView {{ background: {PANEL}; color: {INK};
+        selection-background-color: {ACC}; selection-color: {NAVY};
+        border: 1px solid {LINE}; }}
+    QComboBox::drop-down {{ border: none; width: 20px; }}
+    QTableWidget {{ background: {PANEL}; color: {INK}; gridline-color: {LINE};
+        border: 1px solid {LINE}; border-radius: 8px; }}
+    QTableWidget::item {{ padding: 4px; }}
+    QTableWidget::item:selected {{ background: {PANEL2}; color: {INK}; }}
+    QHeaderView::section {{ background: {NAVY}; color: {MUTE}; padding: 7px;
+        border: none; border-right: 1px solid {LINE}; font-weight: 700; }}
+    QTextEdit {{ background: {PANEL}; color: {INK}; border: 1px solid {LINE};
+        border-radius: 8px; }}
+    QScrollBar:vertical {{ background: {BG}; width: 11px; margin: 0; }}
+    QScrollBar::handle:vertical {{ background: {LINE}; border-radius: 5px; min-height: 30px; }}
+    QScrollBar::handle:vertical:hover {{ background: {ACC}; }}
+    QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
     """
 
 
@@ -140,7 +182,7 @@ def main() -> int:
     from core.remote_monitoring.sim_machine import MODES, MODE_TO_PROFILE
     tc = TransientCapture(TransientConfig(fmax_hz=min(2000.0, args.fs / 2.5)))
 
-    pg.setConfigOptions(antialias=True, background="w", foreground=NAVY)
+    pg.setConfigOptions(antialias=True, background=PANEL, foreground=MUTE)
     app = QtWidgets.QApplication(sys.argv)
     app.setStyleSheet(_stylesheet())
 
@@ -351,8 +393,8 @@ def main() -> int:
         wave_curves.append(p.plot(pen=pg.mkPen(CORN, width=1.3)))
     p_spec = gl.addPlot(row=len(vib), col=0); p_spec.showGrid(x=True, y=True, alpha=0.25)
     p_spec.setLabel("left", "amplitud"); p_spec.setLabel("bottom", "Frecuencia (Hz)")
-    spec_curve = p_spec.plot(pen=pg.mkPen(CORN, width=1.3))
-    v1x = pg.InfiniteLine(angle=90, pen=pg.mkPen("#e26d6d", width=1, style=QtCore.Qt.DashLine))
+    spec_curve = p_spec.plot(pen=pg.mkPen(AMBER, width=1.4))
+    v1x = pg.InfiniteLine(angle=90, pen=pg.mkPen(REDL, width=1, style=QtCore.Qt.DashLine))
     p_spec.addItem(v1x)
     tabs.addTab(mon_w, "Monitoreo")
 
@@ -382,8 +424,8 @@ def main() -> int:
         orb_plot = pg.PlotWidget(); orb_plot.setAspectLocked(True)
         orb_plot.showGrid(x=True, y=True, alpha=0.25)
         orb_plot.addLine(x=0, pen=pg.mkPen("#c9d2e0")); orb_plot.addLine(y=0, pen=pg.mkPen("#c9d2e0"))
-        orb_curve = orb_plot.plot(pen=pg.mkPen(CORN, width=1.4))
-        orb_kph = orb_plot.plot(pen=None, symbol="o", symbolBrush="#dc2626", symbolSize=9)
+        orb_curve = orb_plot.plot(pen=pg.mkPen(GREEN, width=1.7))
+        orb_kph = orb_plot.plot(pen=None, symbol="o", symbolBrush=REDL, symbolSize=9)
         orb_l.addWidget(orb_plot, 1)
         tabs.addTab(orb_w, "Órbita")
 
@@ -395,10 +437,12 @@ def main() -> int:
     gl_b = pg.GraphicsLayoutWidget(); bode_l.addWidget(gl_b, 1)
     p_ph = gl_b.addPlot(row=0, col=0); p_ph.setLabel("left", "Fase 1X (°)"); p_ph.showGrid(x=True, y=True, alpha=0.25)
     p_ph.getAxis("bottom").setStyle(showValues=False); p_ph.invertY(True)
-    c_ph = p_ph.plot(pen=pg.mkPen(CORN, width=1.6))
+    c_ph = p_ph.plot(pen=pg.mkPen(AMBER, width=1.8), symbol="o", symbolSize=4,
+                     symbolBrush=AMBER, symbolPen=None)
     p_am = gl_b.addPlot(row=1, col=0); p_am.setLabel("left", "1X"); p_am.setLabel("bottom", "RPM")
     p_am.showGrid(x=True, y=True, alpha=0.25)
-    c_am = p_am.plot(pen=pg.mkPen(CORN, width=1.6))
+    c_am = p_am.plot(pen=pg.mkPen(CORN, width=1.8), symbol="o", symbolSize=4,
+                     symbolBrush=CORN, symbolPen=None)
     tabs.addTab(bode_w, "Bode")
 
     # --- Cascada (espectros apilados) ---
@@ -472,16 +516,16 @@ def main() -> int:
                 if f1:
                     a1, ph = one_x_vector(eu - eu.mean(), fs, f1)
                 if args.danger and ov >= args.danger:
-                    estado, col = "PELIGRO", QtGui.QColor("#fde2e2")
+                    estado, bgc, fgc = "PELIGRO", "#3b1518", "#ff8f8f"
                 elif args.alarm and ov >= args.alarm:
-                    estado, col = "ALERTA", QtGui.QColor("#fdf0d5")
+                    estado, bgc, fgc = "ALERTA", "#3a2f12", "#f5c451"
                 else:
-                    estado, col = "OK", QtGui.QColor("#e6f4ea")
+                    estado, bgc, fgc = "OK", "#12301c", "#6ee7a0"
                 vals = [c.name, f"{ov:.3g} {c.units}", f"{a1:.3g}", f"{ph:.0f}°", estado]
                 for cc, v in enumerate(vals):
                     it = QtWidgets.QTableWidgetItem(v)
                     if cc == 4:
-                        it.setBackground(col)
+                        it.setBackground(QtGui.QColor(bgc)); it.setForeground(QtGui.QColor(fgc))
                     tblt.setItem(r, cc, it)
         elif orb_ok and cur == "Órbita":
             xi = next((i for i, c in vib if c.name == cb_x.currentText()), vib[0][0])
@@ -522,8 +566,8 @@ def main() -> int:
         rb, ab, _ph = tc.bode(cb_casc.currentText())
         crit = [float(rb[i]) for i in diag.detect_criticals(np.asarray(rb, float), np.asarray(ab, float))]
         found = diag.cascade_diagnosis(rr, fr, mat, crit)
-        html = ["<h3>🔎 Auto-diagnóstico (API 684)</h3>"]
-        col = {"info": "#2f6fb0", "warn": "#b45309", "danger": "#b91c1c"}
+        html = [f"<h3 style='color:{ACC}'>🔎 Auto-diagnóstico (API 684)</h3>"]
+        col = {"info": "#5aa9e6", "warn": AMBER, "danger": "#ff6b6b"}
         for lvl, title, detail in found:
             html.append(f"<p style='color:{col.get(lvl,'#333')}'><b>{title}</b><br>{detail}</p>")
         diag_txt.setHtml("".join(html) if found else "<i>Sin hallazgos.</i>")
@@ -590,6 +634,15 @@ def main() -> int:
         cf = agent.source.config
         if hasattr(cf, "speed_profile"):
             cf.speed_profile = MODE_TO_PROFILE.get(mode, "constant")
+            # Asegurar un RANGO de barrido para arranque/parada (si la máquina no lo
+            # trae, lo derivamos de rpm operativa y crítica → siempre pasa la crítica).
+            if mode in ("arranque", "parada", "arranque_parada"):
+                if cf.rpm_start <= 0 or cf.rpm_end <= 0 or cf.rpm_start == cf.rpm_end:
+                    hi = max(cf.rpm * 2.0, (cf.sim_critical_rpm or 0) * 2.5,
+                             (cf.sim_critical_rpm2 or 0) * 1.4, 6000.0)
+                    lo = 300.0
+                    cf.rpm_start, cf.rpm_end = (lo, hi) if mode != "parada" else (hi, lo)
+                    cf.ramp_seconds = max(cf.ramp_seconds, 60.0)
         if hasattr(agent.source, "rewind"):
             agent.source.rewind()
         tc = TransientCapture(TransientConfig(fmax_hz=min(2000.0, agent.sample_rate_hz / 2.5)))

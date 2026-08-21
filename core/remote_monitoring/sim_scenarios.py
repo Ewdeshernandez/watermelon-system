@@ -112,6 +112,7 @@ def _make_train(fs: float) -> StreamConfig:
     return StreamConfig(
         sample_rate_hz=fs, channels=ch, block_seconds=0.1, buffer_seconds=12.0,
         rpm=3000.0, sim_critical_rpm=1500.0, sim_zeta=0.06,
+        rpm_start=300.0, rpm_end=6000.0, ramp_seconds=90.0,
         defect_by_kind={"accel": "bearing_bpfo", "prox": "oil_whirl"})
 
 

@@ -150,6 +150,7 @@ class SimMachine:
                 ang = 315.0 if ax == "Y" else 45.0
                 s.append(SensorSpec(f"{brg}{ax}", "prox", b, 200.0, ang)); b += 1
         return SimMachine(name=name, fs=25600.0, sensors=s, rpm=3000.0, crit1=1500.0,
+                          rpm_start=300.0, rpm_end=6000.0, ramp_s=90.0,
                           phenomena={"accel": "bearing_bpfo", "prox": "oil_whirl"})
 
 
