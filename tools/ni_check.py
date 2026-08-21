@@ -1,22 +1,17 @@
 """
-tools/ni_check.py — PRUEBA DE ORO paso 1: diagnóstico del hardware NI
-=====================================================================
+tools/ni_check.py — PRUEBA DE ORO: diagnóstico del hardware NI
+==============================================================
 
 Corre en el PC de sitio (Windows) con NI-DAQmx + `pip install nidaqmx`.
-NO usa IEPE (lee como VOLTAJE) → seguro para proximidad. Verifica, antes de
-abrir la app:
-  1) Qué chasis/módulos ve el driver (nombre real en NI MAX).
-  2) Que las 5 señales llegan (keyphasor + 4 radiales), con stats por canal.
-  3) Que el keyphasor pulsa (estimación de rpm).
 
-Uso:
-    python tools/ni_check.py                 # autodetecta módulos 9234
-    python tools/ni_check.py --mod1 cDAQ1Mod1 --mod2 cDAQ1Mod2
-    python tools/ni_check.py --fs 25600 --secs 2
+Dos modos:
+  · POR DEFECTO (proximidad): lee VOLTAJE, IEPE OFF (seguro para proximidad).
+      python tools/ni_check.py
+  · ACELERÓMETROS: enciende IEPE (2 mA) en los 4 canales del Mod2.
+      python tools/ni_check.py --iepe            (sensib 100 mV/g por defecto)
+      python tools/ni_check.py --iepe --sens 100 (poné la de TU acelerómetro)
 
-Cableado esperado (tu setup):
-    Mod1/ai0        = keyphasor
-    Mod2/ai0..ai3   = 4 radiales (proximidad, salida BNC del proximitor)
+Opciones: --mod1 cDAQ1Mod1 --mod2 cDAQ1Mod2 --fs 25600 --secs 2
 """
 from __future__ import annotations
 
@@ -29,26 +24,27 @@ import numpy as np
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--mod1", default=None, help="Módulo del keyphasor (ej. cDAQ1Mod1)")
-    ap.add_argument("--mod2", default=None, help="Módulo de los radiales (ej. cDAQ1Mod2)")
+    ap.add_argument("--mod2", default=None, help="Módulo de los sensores (ej. cDAQ1Mod2)")
     ap.add_argument("--fs", type=float, default=25600.0)
     ap.add_argument("--secs", type=float, default=2.0)
+    ap.add_argument("--iepe", action="store_true", help="IEPE ON (acelerómetros en Mod2)")
+    ap.add_argument("--sens", type=float, default=100.0, help="mV/g del acelerómetro")
     args = ap.parse_args()
 
     try:
         import nidaqmx
-        from nidaqmx.constants import AcquisitionType, TerminalConfiguration
+        from nidaqmx.constants import (AcquisitionType, TerminalConfiguration,
+                                       ExcitationSource, AccelUnits)
     except ImportError:
-        print("✗ nidaqmx no está instalado. En el PC de sitio:\n"
-              "    1) Instalá NI-DAQmx (driver) desde ni.com\n"
+        print("✗ nidaqmx no está instalado.\n    1) Instalá NI-DAQmx (ni.com)\n"
               "    2) pip install nidaqmx")
         return 2
 
-    # ---- 1) Inventario de dispositivos ----
     sysm = nidaqmx.system.System.local()
     devs = list(sysm.devices)
     print("=== Dispositivos NI detectados ===")
     if not devs:
-        print("✗ Ninguno. ¿Está el cDAQ conectado por USB y encendido? Revisá NI MAX.")
+        print("✗ Ninguno. ¿cDAQ conectado por USB y encendido? Revisá NI MAX.")
         return 3
     mods_9234 = []
     for d in devs:
@@ -62,29 +58,38 @@ def main() -> int:
 
     mod1 = args.mod1 or (mods_9234[0] if len(mods_9234) >= 1 else None)
     mod2 = args.mod2 or (mods_9234[1] if len(mods_9234) >= 2 else None)
-    if not mod1 or not mod2:
-        print("\n✗ No pude autodetectar 2 módulos 9234. Pasalos a mano:\n"
-              "    python tools/ni_check.py --mod1 <nombre> --mod2 <nombre>\n"
-              "  (usá los nombres que aparecen arriba, ej. cDAQ1Mod1)")
+    if not mod2 or (not args.iepe and not mod1):
+        print("\n✗ No pude autodetectar los módulos. Pasalos a mano con --mod1/--mod2.")
         return 4
-    print(f"\nUsando: keyphasor={mod1}/ai0 · radiales={mod2}/ai0..ai3")
 
-    phys = [f"{mod1}/ai0"] + [f"{mod2}/ai{i}" for i in range(4)]
-    names = ["KPH", "R1", "R2", "R3", "R4"]
+    # Modo acelerómetro: solo los 4 del Mod2 con IEPE. Modo proximidad: kph + 4 radiales.
+    if args.iepe:
+        phys = [f"{mod2}/ai{i}" for i in range(4)]
+        names = ["A1", "A2", "A3", "A4"]
+        print(f"\nMODO ACELERÓMETROS · IEPE ON (2 mA) · {args.sens:.0f} mV/g · {mod2}/ai0..ai3")
+    else:
+        phys = [f"{mod1}/ai0"] + [f"{mod2}/ai{i}" for i in range(4)]
+        names = ["KPH", "R1", "R2", "R3", "R4"]
+        print(f"\nMODO PROXIMIDAD · IEPE OFF · keyphasor={mod1}/ai0 · radiales={mod2}/ai0..ai3")
 
-    # ---- 2) Lectura de prueba (VOLTAJE, sin IEPE = seguro para proximidad) ----
     n = int(args.fs * args.secs)
-    settle = 3.0                                    # s a descartar (el 9234 AC se asienta)
+    settle = 3.0
     n_settle = int(args.fs * settle)
-    print(f"\nLeyendo (voltaje, IEPE OFF): descarto {settle:.0f} s de asentamiento del "
-          f"acople AC y mido {args.secs:.0f} s a {args.fs:.0f} Hz…")
+    print(f"Leyendo: descarto {settle:.0f} s de asentamiento y mido {args.secs:.0f} s a "
+          f"{args.fs:.0f} Hz…")
+
     task = nidaqmx.Task()
+    unit = "g" if args.iepe else "V"
     try:
         for p in phys:
-            task.ai_channels.add_ai_voltage_chan(
-                p, min_val=-5.0, max_val=5.0,
-                terminal_config=TerminalConfiguration.DEFAULT)  # 9234: pseudodiff, sin IEPE
-        # CONTINUO: arrancamos, descartamos el transitorio y recién medimos.
+            if args.iepe:
+                task.ai_channels.add_ai_accel_chan(
+                    p, sensitivity=args.sens, units=AccelUnits.G,
+                    current_excit_source=ExcitationSource.INTERNAL, current_excit_val=0.002)
+            else:
+                task.ai_channels.add_ai_voltage_chan(
+                    p, min_val=-5.0, max_val=5.0,
+                    terminal_config=TerminalConfiguration.DEFAULT)
         task.timing.cfg_samp_clk_timing(rate=args.fs, sample_mode=AcquisitionType.CONTINUOUS,
                                         samps_per_chan=int(args.fs * (settle + args.secs + 1)))
         task.start()
@@ -93,7 +98,6 @@ def main() -> int:
                           dtype=float)
     except Exception as e:  # noqa: BLE001
         print(f"✗ Error leyendo: {type(e).__name__}: {e}")
-        print("  Chequeá: nombres de módulos, que ai0..ai3 existan, y el cableado BNC.")
         try:
             task.close()
         except Exception:  # noqa: BLE001
@@ -108,32 +112,26 @@ def main() -> int:
     if data.ndim == 1:
         data = data[None, :]
 
-    print("\n=== Señales (Volts) ===")
-    print(f"{'canal':6s} {'min':>9s} {'max':>9s} {'rms(AC)':>9s} {'pp':>9s}")
+    print(f"\n=== Señales ({unit}) ===")
+    print(f"{'canal':6s} {'min':>10s} {'max':>10s} {'rms(AC)':>10s} {'pp':>10s}")
     for i, nm in enumerate(names):
         x = data[i]
         ac = x - np.mean(x)
-        print(f"{nm:6s} {x.min():9.4f} {x.max():9.4f} {np.sqrt(np.mean(ac**2)):9.4f} {np.ptp(x):9.4f}")
+        print(f"{nm:6s} {x.min():10.4f} {x.max():10.4f} {np.sqrt(np.mean(ac**2)):10.4f} {np.ptp(x):10.4f}")
 
-    # ---- 3) Keyphasor → rpm ----
-    kph = data[0]
-    dev = np.abs(kph - np.median(kph))
-    peak = float(dev.max())
-    if peak < 1e-3:
-        print("\n⚠ Keyphasor plano (sin pulso). ¿Está conectado en Mod1/ai0? "
-              "Ojo: en el 9234 (AC-coupled) el pulso se atenúa — es esperable.")
+    if args.iepe:
+        print("\n✓ Si algún A# muestra rms(AC) > 0 (vibración real), el acelerómetro está OK. "
+              "Los canales sin acelerómetro conectado dan valores raros/altos = normal.")
     else:
-        thr = 0.5 * peak
-        active = dev > thr
-        rising = np.flatnonzero((~active[:-1]) & (active[1:])) + 1
-        if rising.size >= 2:
-            rev_s = np.median(np.diff(rising)) / args.fs
-            print(f"\n✓ Keyphasor pulsa: ~{60.0/rev_s:.0f} rpm ({rising.size} pulsos en {args.secs:.0f} s).")
+        kph = data[0]
+        dev = np.abs(kph - np.median(kph))
+        if dev.max() < 1e-3:
+            print("\n⚠ Keyphasor plano (sin pulso). En el 9234 (AC) es esperable.")
         else:
-            print(f"\n⚠ Keyphasor con actividad pero <2 pulsos claros ({rising.size}).")
-
-    print("\n✓ Diagnóstico OK. Si las 4 radiales muestran rms(AC) > 0 y el keyphasor pulsa, "
-          "estás listo para abrir la app (Fuente = Campo, máquina Rotor_Kit_SIGA_1).")
+            thr = 0.5 * dev.max()
+            rising = np.flatnonzero((~(dev[:-1] > thr)) & (dev[1:] > thr)) + 1
+            if rising.size >= 2:
+                print(f"\n✓ Keyphasor: ~{60.0/(np.median(np.diff(rising))/args.fs):.0f} rpm.")
     return 0
 
 
