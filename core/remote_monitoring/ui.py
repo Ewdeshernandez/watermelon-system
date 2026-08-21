@@ -2204,7 +2204,7 @@ def _plot_waterfall(tc: TransientCapture, channel: str) -> None:
     mat = mat * k0
     fmax = float(freqs[-1]) if len(freqs) else 1.0
     n = len(rpms)
-    idx = np.unique(np.linspace(0, n - 1, min(48, n)).round().astype(int))
+    idx = np.unique(np.linspace(0, n - 1, min(80, n)).round().astype(int))
     rr, MM = rpms[idx], mat[idx]
     tmin, tmax = float(rr[0]), float(rr[-1])
     if xmode == "Órdenes":
@@ -2240,7 +2240,7 @@ def _plot_waterfall(tc: TransientCapture, channel: str) -> None:
             fig.add_trace(go.Scatter3d(x=fx[m], y=rr[m], z=np.zeros(int(m.sum())), mode="lines",
                           line=dict(color=col, width=3, dash="dot"), hoverinfo="skip", showlegend=False))
 
-    fig.update_layout(height=640, margin=dict(l=0, r=0, t=6, b=0), paper_bgcolor="#ffffff",
+    fig.update_layout(height=720, margin=dict(l=0, r=0, t=4, b=0), paper_bgcolor="#ffffff",
                       font=_S1_FONT, showlegend=False,
                       scene=dict(
                           xaxis=dict(title=xtitle, range=[0, xhi], backgroundcolor="#ffffff",
@@ -2249,8 +2249,12 @@ def _plot_waterfall(tc: TransientCapture, channel: str) -> None:
                                      zerolinecolor="#cdd7e6"),
                           zaxis=dict(title=uu, backgroundcolor="#ffffff", gridcolor="#e6ecf5",
                                      zerolinecolor="#cdd7e6"),
-                          camera=dict(eye=dict(x=1.7, y=-1.6, z=0.85)),
-                          aspectratio=dict(x=1.5, y=1.7, z=0.5)))
+                          aspectmode="manual", aspectratio=dict(x=1.25, y=2.4, z=0.42),
+                          # Vista clásica de waterfall: casi de costado y baja →
+                          # los picos se alinean en ridges diagonales (como System1).
+                          camera=dict(eye=dict(x=1.35, y=-2.05, z=0.4),
+                                      up=dict(x=0, y=0, z=1),
+                                      center=dict(x=0, y=0, z=-0.12))))
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
     st.caption(f"Waterfall 3D: cada traza = un espectro a su rpm (profundidad), color por velocidad. "
                f"Las líneas del piso son las **órdenes**; el ridge que sube por **1X** = síncrono, "
