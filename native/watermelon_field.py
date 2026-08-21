@@ -111,6 +111,10 @@ def main() -> int:
     agent = build_agent(args)
     vib = [(i, c) for i, c in enumerate(agent.channels) if not is_keyphasor_channel(c)]
     from core.remote_monitoring.recorder import TransientRecorder, upload_recording
+    from core.remote_monitoring.transient import TransientCapture, TransientConfig
+    from core.remote_monitoring import analysis as diag
+    kph_glob = agent.source.config.keyphasor_index()
+    tc = TransientCapture(TransientConfig(fmax_hz=min(2000.0, args.fs / 2.5)))
 
     pg.setConfigOptions(antialias=True, background="w", foreground=NAVY)
     app = QtWidgets.QApplication(sys.argv)
@@ -220,6 +224,38 @@ def main() -> int:
         orb_l.addWidget(orb_plot, 1)
         tabs.addTab(orb_w, "Órbita")
 
+    # --- Bode (amp + fase vs rpm, se llena en runup) ---
+    bode_w = QtWidgets.QWidget(); bode_l = QtWidgets.QVBoxLayout(bode_w)
+    bh = QtWidgets.QHBoxLayout(); bh.addWidget(QtWidgets.QLabel("Canal:"))
+    cb_bode = QtWidgets.QComboBox(); cb_bode.addItems([c.name for _, c in vib]); bh.addWidget(cb_bode)
+    bh.addStretch(1); bode_l.addLayout(bh)
+    gl_b = pg.GraphicsLayoutWidget(); bode_l.addWidget(gl_b, 1)
+    p_ph = gl_b.addPlot(row=0, col=0); p_ph.setLabel("left", "Fase 1X (°)"); p_ph.showGrid(x=True, y=True, alpha=0.25)
+    p_ph.getAxis("bottom").setStyle(showValues=False); p_ph.invertY(True)
+    c_ph = p_ph.plot(pen=pg.mkPen(CORN, width=1.6))
+    p_am = gl_b.addPlot(row=1, col=0); p_am.setLabel("left", "1X"); p_am.setLabel("bottom", "RPM")
+    p_am.showGrid(x=True, y=True, alpha=0.25)
+    c_am = p_am.plot(pen=pg.mkPen(CORN, width=1.6))
+    tabs.addTab(bode_w, "Bode")
+
+    # --- Cascada (espectros apilados) ---
+    casc_w = QtWidgets.QWidget(); casc_l = QtWidgets.QVBoxLayout(casc_w)
+    ch2 = QtWidgets.QHBoxLayout(); ch2.addWidget(QtWidgets.QLabel("Canal:"))
+    cb_casc = QtWidgets.QComboBox(); cb_casc.addItems([c.name for _, c in vib]); ch2.addWidget(cb_casc)
+    ch2.addStretch(1); casc_l.addLayout(ch2)
+    p_casc = pg.PlotWidget(); p_casc.setLabel("bottom", "Frecuencia (Hz)"); p_casc.setLabel("left", "RPM")
+    p_casc.showGrid(x=True, y=True, alpha=0.2)
+    casc_curves = [p_casc.plot(pen=pg.mkPen(CORN, width=0.9)) for _ in range(40)]
+    casc_l.addWidget(p_casc, 1)
+    tabs.addTab(casc_w, "Cascada")
+
+    # --- Diagnóstico (whirl/whip + críticas) ---
+    diag_w = QtWidgets.QWidget(); diag_l = QtWidgets.QVBoxLayout(diag_w)
+    btn_diag = QtWidgets.QPushButton("🔎 Diagnosticar (API 684)")
+    diag_txt = QtWidgets.QTextEdit(); diag_txt.setReadOnly(True)
+    diag_l.addWidget(btn_diag); diag_l.addWidget(diag_txt, 1)
+    tabs.addTab(diag_w, "Diagnóstico")
+
     lbl_rpm = QtWidgets.QLabel("RPM: —"); lbl_state = QtWidgets.QLabel("detenido")
     lbl_rec = QtWidgets.QLabel("")
     win.statusBar().addWidget(lbl_state)
@@ -242,8 +278,15 @@ def main() -> int:
                 rpm = float(fr0[band][np.argmax(mag0[band])] * 60.0)
         lbl_rpm.setText(f"RPM: {rpm:.0f}" if rpm else "RPM: —")
         f1 = (rpm / 60.0) if rpm else None
-        idx_tab = tabs.currentIndex()
-        if idx_tab == 1:      # Monitoreo
+        # Alimentar el capturador de transitorio (throttle ~cada 0.5 s) para Bode/Cascada.
+        rec_state["fn"] = rec_state.get("fn", 0) + 1
+        if rpm and rec_state["fn"] % 8 == 0:
+            try:
+                tc.feed(snap, rpm, fs, vib, kph_idx=kph_glob)
+            except Exception:  # noqa: BLE001
+                pass
+        cur = tabs.tabText(tabs.currentIndex())
+        if cur == "Monitoreo":
             nshow = min(snap.shape[1], int(0.3 * fs))
             tms = np.arange(nshow) / fs * 1000.0
             for (i, c), curve in zip(vib, wave_curves):
@@ -258,7 +301,7 @@ def main() -> int:
             v1x.setPos(f1) if f1 else v1x.hide()
             if f1:
                 v1x.show()
-        elif idx_tab == 2:    # Tabular
+        elif cur == "Tabular":
             for r, (i, c) in enumerate(vib):
                 eu = snap[i] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0)
                 ov = float(np.sqrt(np.mean((eu - eu.mean()) ** 2)))
@@ -277,7 +320,7 @@ def main() -> int:
                     if cc == 4:
                         it.setBackground(col)
                     tblt.setItem(r, cc, it)
-        elif orb_ok and idx_tab == 3:    # Órbita (par X/Y)
+        elif orb_ok and cur == "Órbita":
             xi = next((i for i, c in vib if c.name == cb_x.currentText()), vib[0][0])
             yi = next((i for i, c in vib if c.name == cb_y.currentText()), vib[1][0])
             nrev = min(snap.shape[1], int((12 * fs / max(rpm, 1)) * 60) if rpm else int(0.3 * fs))
@@ -290,8 +333,40 @@ def main() -> int:
             if f1 and len(x):
                 spr = max(1, int(fs / f1))
                 orb_kph.setData(x[::spr], y[::spr])
+        elif cur == "Bode":
+            rr, am, ph = tc.bode(cb_bode.currentText())
+            if len(rr):
+                c_am.setData(rr, np.asarray(am) * 2.0)      # pp aprox
+                c_ph.setData(rr, np.asarray(ph))
+        elif cur == "Cascada":
+            rr, fr, mat = tc.cascade(cb_casc.currentText())
+            for cv in casc_curves:
+                cv.setData([], [])
+            if len(rr) >= 2 and mat.size:
+                idx = np.unique(np.linspace(0, len(rr) - 1, min(len(casc_curves), len(rr)))
+                                .round().astype(int))
+                span = float(rr[-1] - rr[0]) or 1.0
+                pk = float(mat.max()) or 1.0
+                sc = (span / max(1, len(idx))) * 1.5 / pk
+                for cv, i in zip(casc_curves, idx):
+                    cv.setData(fr, rr[i] + mat[i] * sc)
+
+    def run_diag():
+        rr, fr, mat = tc.cascade(cb_casc.currentText())
+        if len(rr) < 3:
+            diag_txt.setHtml("<i>Corré un runup (variá la velocidad) para tener datos que diagnosticar.</i>")
+            return
+        rb, ab, _ph = tc.bode(cb_casc.currentText())
+        crit = [float(rb[i]) for i in diag.detect_criticals(np.asarray(rb, float), np.asarray(ab, float))]
+        found = diag.cascade_diagnosis(rr, fr, mat, crit)
+        html = ["<h3>🔎 Auto-diagnóstico (API 684)</h3>"]
+        col = {"info": "#2f6fb0", "warn": "#b45309", "danger": "#b91c1c"}
+        for lvl, title, detail in found:
+            html.append(f"<p style='color:{col.get(lvl,'#333')}'><b>{title}</b><br>{detail}</p>")
+        diag_txt.setHtml("".join(html) if found else "<i>Sin hallazgos.</i>")
 
     timer = QtCore.QTimer(); timer.timeout.connect(update)
+    btn_diag.clicked.connect(run_diag)
 
     def do_start():
         try:
