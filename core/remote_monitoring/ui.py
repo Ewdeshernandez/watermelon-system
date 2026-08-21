@@ -251,6 +251,29 @@ def _no_config_gate() -> bool:
     return True
 
 
+def _is_sim(agent) -> bool:
+    return type(agent.source).__name__ == "SimulatedStreamSource"
+
+
+def _acq(agent, n_blocks: int = 4) -> None:
+    """Alimenta la adquisición sin bloquear la UI.
+    · Simulado → bombea n bloques (genera a demanda).
+    · Campo / NI real → arranca (idempotente) el HILO de fondo que lee el stream
+      en continuo, así el driver NI nunca se atrasa ni congela la pantalla."""
+    if _is_sim(agent):
+        agent.pump(n_blocks)
+    else:
+        agent.start()          # idempotente: no re-arranca si ya corre
+
+
+def _acq_stop(agent) -> None:
+    """Detiene la adquisición (hilo + tarea NI en campo)."""
+    try:
+        agent.stop()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _ensure_agent() -> Optional[AcqAgent]:
     """Construye/devuelve el agente desde la config activa + fuente/params
     guardados en session. Compartido por Monitoreo y Análisis."""
@@ -294,7 +317,7 @@ def _acquire(agent: AcqAgent, pump_n: int):
     err = None
     try:
         if pump_n:
-            agent.pump(pump_n)
+            _acq(agent, pump_n)
     except ImportError as e:
         err = str(e)
         st.session_state["rm_running"] = False
@@ -387,10 +410,16 @@ def _render_monitoreo() -> None:
     b1, b2, b3, b4, b5, b6 = st.columns([1, 1, 1.3, 1.3, 1, 1.6])
     with b1:
         if st.button("▶ Iniciar", use_container_width=True):
-            st.session_state["rm_running"] = True
+            try:
+                _acq(agent, 1)                  # campo: arranca el hilo de fondo
+                st.session_state["rm_running"] = True
+            except Exception as e:  # noqa: BLE001
+                st.session_state["rm_running"] = False
+                st.error(f"⚠ No se pudo iniciar la adquisición: {type(e).__name__}: {e}")
     with b2:
         if st.button("⏸ Detener", use_container_width=True):
             st.session_state["rm_running"] = False
+            _acq_stop(agent)                    # campo: para el hilo + tarea NI
     with b3:
         capture = st.button("📸 Capturar", use_container_width=True, type="primary",
                             help="Toma una lectura fresca y la guarda en un solo clic.")
@@ -429,6 +458,7 @@ def _render_monitoreo() -> None:
                     agent.on_block = rec.append
                     st.session_state["rm_recorder"] = rec
                     st.session_state["rm_running"] = True     # que fluyan bloques
+                    _acq(agent, 1)                            # campo: arranca el hilo
                     st.rerun()
                 except OSError as e:
                     st.error(f"⚠ No se pudo iniciar la grabación (disco): {e}. "
@@ -488,7 +518,7 @@ def _render_monitoreo() -> None:
     # Acciones one-shot en el run principal (fuera del fragment).
     if capture:
         try:
-            agent.pump(8)
+            _acq(agent, 8)
             _s = agent.snapshot()
             if _s.shape[1]:
                 _save_snapshot(agent, _s, agent.estimate_rpm(_s))
@@ -499,7 +529,7 @@ def _render_monitoreo() -> None:
             st.error(f"⚠ No se pudo capturar: {type(e).__name__}: {e}")
     if take:
         try:
-            agent.pump(8)
+            _acq(agent, 8)
         except Exception as e:  # noqa: BLE001
             st.session_state["rm_running"] = False
             st.error(f"⚠ No se pudo adquirir: {type(e).__name__}: {e}")
@@ -523,7 +553,7 @@ def _monitoreo_display() -> None:
         agent.on_block = _rec.append          # el pump de acá persiste cada bloque
     if live:
         try:
-            agent.pump(4)
+            _acq(agent, 4)
         except Exception as e:  # noqa: BLE001
             st.session_state["rm_running"] = False
             st.error(f"⚠ {type(e).__name__}: {e}")
@@ -568,7 +598,7 @@ def _render_analisis() -> None:
         st.session_state["rm_running"] = live
     if take:
         try:
-            agent.pump(8)
+            _acq(agent, 8)
         except Exception:  # noqa: BLE001
             pass
     _render_new_recordings_alert(agent)
@@ -650,7 +680,7 @@ def _analisis_display() -> None:
     live = st.session_state.get("rm_running", False)
     if live:
         try:
-            agent.pump(4)
+            _acq(agent, 4)
         except Exception:  # noqa: BLE001
             st.session_state["rm_running"] = False
     snap = agent.snapshot()
