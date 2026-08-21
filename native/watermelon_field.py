@@ -38,8 +38,11 @@ BLUE = "#2f6fb0"
 CORN = "#4f8fd0"     # traza primaria (cornflower, System1)
 AMBER = "#e08a1e"    # traza secundaria (ámbar) para fase/espectro
 GREEN = "#2fa36b"    # órbita
-REDL = "#c0392b"     # 1X / keyphasor marker / peligro
+REDL = "#c0392b"     # 1X / peligro
 KPH = "#12467f"      # puntos keyphasor (azul profundo, System1)
+# Colores por TIPO de sensor (idénticos a la web: bolitas de la sección)
+SENSOR_COLORS = {"prox": "#8b5cf6", "vel": "#22b8cf", "accel": "#ef4444", "keyphasor": "#f59e0b"}
+SENSOR_ES = {"prox": "Proximidad", "vel": "Velocidad", "accel": "Acelerómetro", "keyphasor": "Keyphasor"}
 
 
 def build_agent(args) -> AcqAgent:
@@ -257,7 +260,19 @@ def main() -> int:
                           phenomena=dict(getattr(cf, "defect_by_kind", {}) or {}),
                           severity=float(getattr(cf, "sim_severity", 1.0)))
 
+    cfg_outer = QtWidgets.QWidget(); cfg_ol = QtWidgets.QVBoxLayout(cfg_outer)
+    cfg_scroll = QtWidgets.QScrollArea(); cfg_scroll.setWidgetResizable(True)
+    cfg_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
     cfg_w = QtWidgets.QWidget(); cfg_l = QtWidgets.QVBoxLayout(cfg_w)
+    cfg_scroll.setWidget(cfg_w); cfg_ol.addWidget(cfg_scroll)
+
+    def _sec(txt):
+        lb = QtWidgets.QLabel(txt)
+        lb.setStyleSheet(f"background:{NAVY}; color:white; font-weight:700; font-size:13px;"
+                         f"padding:8px 13px; border-radius:6px; margin-top:6px;")
+        return lb
+
+    cfg_l.addWidget(_sec("1 · Máquina  —  tren (API 684)"))
     # fila 1: nombre, fs, biblioteca
     r1 = QtWidgets.QHBoxLayout()
     r1.addWidget(QtWidgets.QLabel("Máquina:"))
@@ -279,59 +294,119 @@ def main() -> int:
     sp_r1 = _dsp(0, 60000, 6000); r2.addWidget(sp_r1)
     r2.addWidget(QtWidgets.QLabel("Rampa(s):")); sp_ramp = _dsp(1, 3600, 90, 5); r2.addWidget(sp_ramp)
     cfg_l.addLayout(r2)
-    # fila 3: críticas, severidad, fenómenos
-    r3 = QtWidgets.QHBoxLayout()
-    r3.addWidget(QtWidgets.QLabel("Crítica 1:")); sp_c1 = _dsp(0, 60000, 0); r3.addWidget(sp_c1)
-    r3.addWidget(QtWidgets.QLabel("Crítica 2:")); sp_c2 = _dsp(0, 60000, 0); r3.addWidget(sp_c2)
-    r3.addWidget(QtWidgets.QLabel("Severidad:")); sp_sev = _dsp(0, 3, 1.0, 0.25); r3.addWidget(sp_sev)
-    r3.addWidget(QtWidgets.QLabel("Fenómeno prox:"))
-    cb_ph_p = QtWidgets.QComboBox(); cb_ph_p.addItems(PHENOMENA["prox"]); r3.addWidget(cb_ph_p)
-    r3.addWidget(QtWidgets.QLabel("vel:"))
-    cb_ph_v = QtWidgets.QComboBox(); cb_ph_v.addItems(PHENOMENA["vel"]); r3.addWidget(cb_ph_v)
-    r3.addWidget(QtWidgets.QLabel("accel:"))
-    cb_ph_a = QtWidgets.QComboBox(); cb_ph_a.addItems(PHENOMENA["accel"]); r3.addWidget(cb_ph_a)
-    cfg_l.addLayout(r3)
-    # fila 3b: máquina (rotación / cojinete) — paridad con la web
+    # fila 2b: máquina (rotación / cojinete)
     r3b = QtWidgets.QHBoxLayout()
     r3b.addWidget(QtWidgets.QLabel("Sentido de giro:"))
     cb_rot = QtWidgets.QComboBox(); cb_rot.addItems(["CCW", "CW"]); r3b.addWidget(cb_rot)
     r3b.addWidget(QtWidgets.QLabel("Tipo de cojinete:"))
     cb_brg = QtWidgets.QComboBox(); cb_brg.addItems(["plain", "tilting_pad", "rolling", "mixed"])
-    r3b.addWidget(cb_brg)
-    r3b.addWidget(QtWidgets.QLabel("<i style='color:#64748b'>Ángulo API 670: desde TDC · "
-                                   "R=horario · L=antihorario (45°L+45°R=90°)</i>"))
-    r3b.addStretch(1); cfg_l.addLayout(r3b)
-    # tabla de sensores (editable) — mismas columnas que la web
+    r3b.addWidget(cb_brg); r3b.addStretch(1); cfg_l.addLayout(r3b)
+
+    cfg_l.addWidget(_sec("Fenómenos y transitorio  —  inyectá fallas por tipo de sensor"))
+    r3 = QtWidgets.QHBoxLayout()
+    r3.addWidget(QtWidgets.QLabel("Crítica 1:")); sp_c1 = _dsp(0, 60000, 0); r3.addWidget(sp_c1)
+    r3.addWidget(QtWidgets.QLabel("Crítica 2:")); sp_c2 = _dsp(0, 60000, 0); r3.addWidget(sp_c2)
+    r3.addWidget(QtWidgets.QLabel("Severidad:")); sp_sev = _dsp(0, 3, 1.0, 0.25); r3.addWidget(sp_sev)
+    r3.addWidget(QtWidgets.QLabel("Prox:"))
+    cb_ph_p = QtWidgets.QComboBox(); cb_ph_p.addItems(PHENOMENA["prox"]); r3.addWidget(cb_ph_p)
+    r3.addWidget(QtWidgets.QLabel("Vel:"))
+    cb_ph_v = QtWidgets.QComboBox(); cb_ph_v.addItems(PHENOMENA["vel"]); r3.addWidget(cb_ph_v)
+    r3.addWidget(QtWidgets.QLabel("Accel:"))
+    cb_ph_a = QtWidgets.QComboBox(); cb_ph_a.addItems(PHENOMENA["accel"]); r3.addWidget(cb_ph_a)
+    r3.addStretch(1); cfg_l.addLayout(r3)
+
+    cfg_l.addWidget(_sec("2 · Canales  —  BNC → punto de medición"))
+    # leyenda de colores por tipo (idéntica a la web) + convención de ángulo
+    leg = QtWidgets.QLabel(
+        f"<span style='color:{SENSOR_COLORS['prox']}'>●</span> Proximidad&nbsp;&nbsp;"
+        f"<span style='color:{SENSOR_COLORS['vel']}'>●</span> Velocidad&nbsp;&nbsp;"
+        f"<span style='color:{SENSOR_COLORS['accel']}'>●</span> Acelerómetro&nbsp;&nbsp;"
+        f"<span style='color:{SENSOR_COLORS['keyphasor']}'>●</span> Keyphasor"
+        f"&nbsp;&nbsp;&nbsp;<span style='color:#64748b'>Ángulo API 670: desde TDC · "
+        f"R=horario · L=antihorario (45°L+45°R=90°)</span>")
+    cfg_l.addWidget(leg)
+    # tabla + diagrama de sección lado a lado
+    canv = QtWidgets.QHBoxLayout()
     tblc = QtWidgets.QTableWidget(0, 9)
     tblc.setHorizontalHeaderLabels(["Canal", "Tipo", "BNC", "Sensib (mV/EU)",
                                     "Ángulo°", "Lado", "Gap (V)", "Alarma", "Peligro"])
     tblc.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
-    cfg_l.addWidget(tblc, 1)
+    canv.addWidget(tblc, 3)
+    brg_plot = pg.PlotWidget(); brg_plot.setBackground("w"); brg_plot.setAspectLocked(True)
+    brg_plot.hideAxis("left"); brg_plot.hideAxis("bottom"); brg_plot.setMenuEnabled(False)
+    brg_plot.setMinimumWidth(280)
+    canv.addWidget(brg_plot, 2)
+    cfg_l.addLayout(canv, 1)
     rb = QtWidgets.QHBoxLayout()
     btn_add = QtWidgets.QPushButton("+ Sensor"); btn_del = QtWidgets.QPushButton("– Quitar")
     btn_tpl = QtWidgets.QPushButton("Plantilla motor+bomba")
-    btn_save = QtWidgets.QPushButton("💾 Guardar en biblioteca")
+    btn_save = QtWidgets.QPushButton("💾 Guardar configuración")
     btn_apply = QtWidgets.QPushButton("▶ Aplicar y medir")
+    _redbtn = ("QPushButton{background:#f5484a;color:white;border:none;font-weight:700;"
+               "padding:8px 16px;border-radius:7px;} QPushButton:hover{background:#d63c3e;}")
+    btn_save.setStyleSheet(_redbtn); btn_apply.setStyleSheet(_redbtn)
     for b in (btn_add, btn_del, btn_tpl): rb.addWidget(b)
     rb.addStretch(1); rb.addWidget(btn_save); rb.addWidget(btn_apply)
     cfg_l.addLayout(rb)
-    tabs.addTab(cfg_w, "Configuración")
+    tabs.addTab(cfg_outer, "Configuración")
+
+    import math as _math
+
+    def draw_bearing():
+        """Dibuja la sección del cojinete (bolitas de color en su ángulo) como la web."""
+        try:
+            brg_plot.clear()
+            th = np.linspace(0, 2 * np.pi, 200)
+            R = 1.0
+            brg_plot.plot(R * np.sin(th), R * np.cos(th), pen=pg.mkPen(NAVY, width=14))  # anillo
+            brg_plot.plot(0.34 * np.sin(th), 0.34 * np.cos(th),
+                          pen=pg.mkPen("#c9d6e8", width=2))                                # eje
+            tdc = pg.ScatterPlotItem([0], [R + 0.14], symbol="t", size=15, brush=ACC, pen=None)
+            brg_plot.addItem(tdc)
+            t0 = pg.TextItem("TDC 0°", color=NAVY, anchor=(0.5, 1.2)); t0.setPos(0, R + 0.16)
+            brg_plot.addItem(t0)
+            m = read_form()
+            for s in m.sensors:
+                a = _math.radians(s.abs_angle())
+                x, y = R * _math.sin(a), R * _math.cos(a)     # 0°=arriba, R=horario
+                col = SENSOR_COLORS.get(s.kind, "#8b5cf6")
+                brg_plot.addItem(pg.ScatterPlotItem([x], [y], symbol="o", size=26,
+                                                    brush=col, pen=pg.mkPen("w", width=2)))
+                lb = pg.TextItem(s.name, color="w", anchor=(0.5, 0.5)); lb.setPos(x, y)
+                brg_plot.addItem(lb)
+            cx = pg.TextItem(("CW ↻" if m.rotation == "CW" else "CCW ↺"),
+                             color=NAVY, anchor=(0.5, 0.5)); cx.setPos(0, 0)
+            brg_plot.addItem(cx)
+            brg_plot.setXRange(-1.5, 1.5); brg_plot.setYRange(-1.4, 1.4)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _color_name_cell(r):
+        w = tblc.cellWidget(r, 1)
+        kind = _KIND_BY_LABEL.get(w.currentText(), "accel") if w else "accel"
+        it = tblc.item(r, 0)
+        if it:
+            it.setForeground(QtGui.QColor(SENSOR_COLORS.get(kind, "#8b5cf6")))
+            f = it.font(); f.setBold(True); it.setFont(f)
 
     def _add_sensor_row(s: SensorSpec):
         r = tblc.rowCount(); tblc.insertRow(r)
         tblc.setItem(r, 0, QtWidgets.QTableWidgetItem(s.name))
         cbk = QtWidgets.QComboBox(); cbk.addItems([l for l, _ in _KIND_LABELS])
         cbk.setCurrentText(_LABEL_BY_KIND.get(s.kind, "Acelerómetro"))
+        cbk.currentTextChanged.connect(lambda _t, rr=r: (_color_name_cell(rr), draw_bearing()))
         tblc.setCellWidget(r, 1, cbk)
         tblc.setItem(r, 2, QtWidgets.QTableWidgetItem(str(s.bnc)))
         tblc.setItem(r, 3, QtWidgets.QTableWidgetItem(f"{s.sensitivity:g}"))
         tblc.setItem(r, 4, QtWidgets.QTableWidgetItem(f"{s.angle:g}"))
         cbs = QtWidgets.QComboBox(); cbs.addItems(_SIDES)
         cbs.setCurrentText(s.side if s.side in ("R", "L") else "—")
+        cbs.currentTextChanged.connect(lambda _t: draw_bearing())
         tblc.setCellWidget(r, 5, cbs)
         tblc.setItem(r, 6, QtWidgets.QTableWidgetItem(f"{s.gap:g}"))
         tblc.setItem(r, 7, QtWidgets.QTableWidgetItem(f"{s.alarm:g}"))
         tblc.setItem(r, 8, QtWidgets.QTableWidgetItem(f"{s.danger:g}"))
+        _color_name_cell(r)
 
     def fill_form(m: SimMachine):
         ed_name.setText(m.name); sp_fs.setValue(int(m.fs))
@@ -346,6 +421,7 @@ def main() -> int:
         cb_ph_a.setCurrentText(m.phenomena.get("accel", "none"))
         tblc.setRowCount(0)
         for s in m.sensors: _add_sensor_row(s)
+        draw_bearing()
 
     def read_form() -> SimMachine:
         sens = []
@@ -410,6 +486,8 @@ def main() -> int:
     btn_save.clicked.connect(do_save_lib)
     btn_apply.clicked.connect(do_apply)
     refresh_lib(); fill_form(_machine_from_agent())
+    tblc.itemChanged.connect(lambda *_: draw_bearing())   # redibuja al editar ángulo/nombre
+    cb_rot.currentTextChanged.connect(lambda *_: draw_bearing())
 
     # --- Monitoreo (scope live) ---
     mon_w = QtWidgets.QWidget(); mon_l = QtWidgets.QVBoxLayout(mon_w)
@@ -418,12 +496,14 @@ def main() -> int:
     combo = QtWidgets.QComboBox(); combo.addItems([c.name for _, c in vib]); top.addWidget(combo)
     top.addStretch(1); mon_l.addLayout(top)
     gl = pg.GraphicsLayoutWidget(); mon_l.addWidget(gl, 1)
+    from core.remote_monitoring.stream_source import channel_kind as _ckind
     wave_curves = []
     for r, (i, c) in enumerate(vib):
         p = gl.addPlot(row=r, col=0); p.showGrid(x=True, y=True, alpha=0.25)
-        p.setLabel("left", c.name)
+        col = SENSOR_COLORS.get(_ckind(c), CORN)            # traza por tipo de sensor (como la web)
+        p.setLabel("left", c.name, color=col)
         p.getAxis("bottom").setStyle(showValues=(r == len(vib) - 1))
-        wave_curves.append(p.plot(pen=pg.mkPen(CORN, width=1.3)))
+        wave_curves.append(p.plot(pen=pg.mkPen(col, width=1.4)))
     p_spec = gl.addPlot(row=len(vib), col=0); p_spec.showGrid(x=True, y=True, alpha=0.25)
     p_spec.setLabel("left", "amplitud"); p_spec.setLabel("bottom", "Frecuencia (Hz)")
     spec_curve = p_spec.plot(pen=pg.mkPen(AMBER, width=1.4))
