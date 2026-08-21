@@ -45,6 +45,36 @@ def is_keyphasor_channel(ch: ChannelConfig, explicit_name: Optional[str] = None)
     return any(tok in nm for tok in _KEYPHASOR_TOKENS)
 
 
+def channel_kind(ch: ChannelConfig, is_kph: bool = False) -> str:
+    """Clasifica el canal por su MAGNITUD física para sintetizarlo bien:
+    'kph' | 'prox' (desplazamiento) | 'vel' (velocidad) | 'accel' (aceleración).
+    Se decide por unidades y acoplamiento (no por hardware)."""
+    if is_kph:
+        return "kph"
+    u = (ch.units or "").lower()
+    c = (ch.coupling or "").upper()
+    toks = set(u.replace("/", " ").replace("·", " ").split())
+    if "mil" in u or "µm" in u or "um" in toks or "micron" in u or "micrometer" in u:
+        return "prox"
+    if "mm/s" in u or "in/s" in u or "ips" in toks or "mm" in toks and "s" in toks:
+        return "vel"
+    if "g" in toks or c == "IEPE" or "accel" in u or "m/s2" in u or "m/s^2" in u:
+        return "accel"
+    return "prox" if c == "DC" else "accel"
+
+
+def bearing_fault_freqs(fr: float, n_balls: int, bd_pd: float):
+    """Frecuencias de falla de rodamiento (Hz) a partir de fr = rpm/60.
+    bd_pd = (Bd/Pd)·cosφ. Devuelve dict con BPFO/BPFI/BSF/FTF."""
+    nb = max(1, int(n_balls))
+    return {
+        "BPFO": (nb / 2.0) * fr * (1.0 - bd_pd),
+        "BPFI": (nb / 2.0) * fr * (1.0 + bd_pd),
+        "BSF": (fr / (2.0 * max(bd_pd, 1e-6))) * (1.0 - bd_pd ** 2),
+        "FTF": (fr / 2.0) * (1.0 - bd_pd),
+    }
+
+
 @dataclass
 class StreamConfig:
     """Configuración de una sesión de streaming continuo.
@@ -70,9 +100,22 @@ class StreamConfig:
 
     # --- Solo simulación ---
     rpm: float = 3600.0                 # velocidad del rotor simulado (constante)
-    defect: str = "none"                # none | unbalance | misalignment
+    # Catálogo de defectos (el motor lo sintetiza según el TIPO de sensor):
+    #   none | unbalance | misalignment | looseness | rub | oil_whirl
+    #   bearing_bpfo | bearing_bpfi | bearing_bsf | gear_mesh
+    defect: str = "none"
+    # Defecto POR TIPO de sensor (trenes mixtos: p.ej. motor con rodamientos
+    # → {'accel': 'bearing_bpfo'} y bomba con cojinetes planos → {'prox':
+    # 'oil_whirl'} a la vez). Si un kind no está, usa `defect`.
+    defect_by_kind: dict = field(default_factory=dict)
     noise_rms: float = 0.02
     seed: int = 7
+    # Geometría para las frecuencias de falla (aceleración/envelope):
+    sim_n_balls: int = 8                # elementos rodantes del rodamiento
+    sim_bd_pd: float = 0.34             # (Bd/Pd)·cosφ  → BPFO≈Nb/2·(1-·), BPFI≈Nb/2·(1+·)
+    sim_gear_teeth: int = 22            # dientes (GMF = teeth·fr) para gear_mesh
+    sim_res_hz: float = 0.0             # resonancia estructural del ring (0 = auto ~0.3·fs)
+    sim_severity: float = 1.0           # escala de severidad del/los fenómeno(s) (0=sano .. 3=severo)
 
     # Perfil de velocidad (solo simulación) — habilita TRANSITORIOS (bode/cascade).
     #   constant         → rpm fija (comportamiento por defecto)
@@ -220,15 +263,30 @@ class SimulatedStreamSource(StreamSource):
             offs.append((theta + quad) % (2 * math.pi))
         self._phase_offsets = np.array(offs) if offs else np.zeros(config.n_channels)
         self._kph_idx = config.keyphasor_index()
+        # Tipo físico por canal (prox/vel/accel/kph) → síntesis distinta.
+        self._kind = [channel_kind(ch, i == self._kph_idx)
+                      for i, ch in enumerate(config.channels)]
+        # Resonancia estructural del "ring" de aceleración (fija → carrier continuo).
+        self._f_res = config.sim_res_hz if config.sim_res_hz > 0 else min(4000.0, 0.30 * config.sample_rate_hz)
+        self._fault_phase = 0.0   # fase acumulada de la frecuencia de falla (rad)
 
     def start(self) -> None:
         self._cursor = 0
         self._phase = 0.0
+        self._fault_phase = 0.0
         self._rng = np.random.default_rng(self.config.seed)
         self._running = True
 
     def stop(self) -> None:
         self._running = False
+
+    def rewind(self) -> None:
+        """Reinicia el reloj del rotor (cursor/fase) SIN parar el stream. Se usa
+        al cambiar de MODO (estable→arranque→parada) para que la rampa arranque
+        desde t=0 y el transitorio salga limpio."""
+        self._cursor = 0
+        self._phase = 0.0
+        self._fault_phase = 0.0
 
     @staticmethod
     def _sdof(f1: np.ndarray, fn: float, zeta: float):
@@ -274,40 +332,98 @@ class SimulatedStreamSource(StreamSource):
         else:
             A, phi_res = np.ones_like(f1), np.zeros_like(f1)
 
+        # Frecuencia de la falla seleccionada (rodamiento/engrane) y su fase
+        # acumulada (continua entre bloques) — habilita envelope y bandas laterales.
+        dbk = cfg.defect_by_kind or {}
+        sev = max(0.0, float(cfg.sim_severity))       # escala de severidad de fenómenos
+        accel_defect = dbk.get("accel", cfg.defect)   # la falla de rodamiento/engrane vive en accel
+        bd = cfg.sim_bd_pd
+        nb = max(1, int(cfg.sim_n_balls))
+        fault_mult = {
+            "bearing_bpfo": (nb / 2.0) * (1.0 - bd),
+            "bearing_bpfi": (nb / 2.0) * (1.0 + bd),
+            "bearing_bsf": (1.0 / (2.0 * max(bd, 1e-6))) * (1.0 - bd ** 2),
+            "gear_mesh": float(max(1, int(cfg.sim_gear_teeth))),
+        }.get(accel_defect, 0.0)
+        if fault_mult > 0:
+            f_fault = fault_mult * f1
+            fault_phase = self._fault_phase + np.cumsum(2.0 * math.pi * f_fault / fs)
+        else:
+            fault_phase = None
+        carrier = np.sin(2.0 * math.pi * self._f_res * (idx / fs))  # resonancia estructural
+
         out = np.empty((cfg.n_channels, n), dtype=float)
         for ci, ch in enumerate(cfg.channels):
-            if ci == self._kph_idx:
-                # Pulso once-per-rev (~2% duty) desde la fase acumulada
-                frac = np.mod(phase / (2.0 * math.pi), 1.0)
+            kind = self._kind[ci]
+            if kind == "kph":
+                frac = np.mod(phase / (2.0 * math.pi), 1.0)     # pulso once-per-rev (~2%)
                 out[ci] = np.where(frac < 0.02, -5.0, 0.0)
                 continue
 
-            base = 0.3 + 0.15 * (((ch.bnc_port or 1) - 1) % 4)
             ph = self._phase_offsets[ci]
+            base = 0.3 + 0.15 * (((ch.bnc_port or 1) - 1) % 4)
+            defect = dbk.get(kind, cfg.defect)   # defecto efectivo para ESTE tipo de sensor
 
-            sig = base * A * np.sin(phase + ph + phi_res)       # 1X (amplificado)
-            sig += 0.40 * base * np.sin(2.0 * phase + ph / 2)   # 2X
-            sig += 0.15 * base * np.sin(0.5 * phase)            # 0.5X
+            if kind == "prox":
+                # DESPLAZAMIENTO (mil/µm pp): dominan 1X/2X, órbitas, forma modal.
+                sig = base * A * np.sin(phase + ph + phi_res)
+                sig += 0.40 * base * np.sin(2.0 * phase + ph / 2)
+                sig += 0.15 * base * np.sin(0.5 * phase)
+                if defect == "unbalance":
+                    sig += sev * 1.20 * base * A * np.sin(phase + ph + phi_res)
+                elif defect == "misalignment":
+                    sig += sev * 0.90 * base * np.sin(2.0 * phase + ph)
+                elif defect == "looseness":
+                    for h in range(1, 6):                        # tren de armónicos
+                        sig += sev * (0.35 / h) * base * np.sin(h * phase + ph)
+                    sig += sev * 0.30 * base * np.sin(0.5 * phase)   # + ½X
+                elif defect == "rub":
+                    sig += sev * 0.45 * base * np.sin(0.5 * phase + ph)
+                    sig += sev * 0.30 * base * np.sin(phase / 3.0)   # 1/3X
+                    sig = np.clip(sig, -1.6 * base, 1.6 * base)  # truncado (contacto)
+                elif defect == "oil_whirl" and cfg.sim_critical_rpm > 0:
+                    fn1 = cfg.sim_critical_rpm / 60.0
+                    aw = sev * 0.7 * base
+                    whirl = aw * np.sin(0.45 * phase + ph)
+                    whip = 1.4 * aw * np.sin(2.0 * math.pi * fn1 * (idx / fs))
+                    on = rpm > 1.8 * cfg.sim_critical_rpm
+                    lock = rpm > 2.2 * cfg.sim_critical_rpm
+                    sig += np.where(on, np.where(lock, whip, whirl), 0.0)
+                sig += cfg.noise_rms * self._rng.standard_normal(n)
 
-            if cfg.defect == "unbalance":
-                sig += 1.20 * base * A * np.sin(phase + ph + phi_res)  # boost 1X
-            elif cfg.defect == "misalignment":
-                sig += 0.90 * base * np.sin(2.0 * phase + ph)          # boost 2X
-            elif cfg.defect == "oil_whirl" and cfg.sim_critical_rpm > 0:
-                # Inestabilidad de película: oil WHIRL (~0.45X, sigue el rpm) que
-                # al pasar ~2.2× la 1ª crítica se ENGANCHA a la natural = oil WHIP
-                # (frecuencia fija). Aparece por encima de ~1.8× la crítica.
-                fn1 = cfg.sim_critical_rpm / 60.0
-                aw = 0.7 * base
-                whirl = aw * np.sin(0.45 * phase + ph)
-                whip = 1.4 * aw * np.sin(2.0 * math.pi * fn1 * (idx / fs))
-                on = rpm > 1.8 * cfg.sim_critical_rpm
-                lock = rpm > 2.2 * cfg.sim_critical_rpm
-                sig += np.where(on, np.where(lock, whip, whirl), 0.0)
+            elif kind == "vel":
+                # VELOCIDAD (mm/s RMS, ISO 20816): 1X dominante + 2X, banda de máquina.
+                vb = 1.4 + 0.5 * (((ch.bnc_port or 1) - 1) % 4)
+                sig = vb * A * np.sin(phase + ph + phi_res)
+                sig += 0.55 * vb * np.sin(2.0 * phase + ph)
+                sig += 0.20 * vb * np.sin(3.0 * phase)
+                if defect == "unbalance":
+                    sig += sev * 1.0 * vb * A * np.sin(phase + ph + phi_res)
+                elif defect == "misalignment":
+                    sig += sev * 1.1 * vb * np.sin(2.0 * phase + ph)
+                elif defect == "looseness":
+                    for h in range(1, 6):
+                        sig += sev * (0.5 / h) * vb * np.sin(h * phase + ph)
+                sig += 0.05 * vb * self._rng.standard_normal(n)
 
-            sig += cfg.noise_rms * self._rng.standard_normal(n)
+            else:  # accel (g, IEPE): alta frecuencia, fallas de rodamiento/engrane
+                ab = 0.020 + 0.006 * (((ch.bnc_port or 1) - 1) % 4)
+                sig = ab * (0.5 * np.sin(phase + ph) + 0.3 * np.sin(2.0 * phase))
+                if fault_phase is not None and defect.startswith("bearing"):
+                    # Tren de impulsos periódico (f_falla) excitando la resonancia →
+                    # bandas laterales f_res ± k·f_falla y envelope a f_falla.
+                    pulse = np.exp(6.0 * (np.cos(fault_phase) - 1.0))  # bump agudo
+                    load = 1.0 + 0.6 * np.sin(phase + ph) if defect == "bearing_bpfi" else 1.0
+                    sig += sev * 6.0 * ab * load * pulse * carrier
+                elif fault_phase is not None and defect == "gear_mesh":
+                    # GMF = dientes·fr con bandas laterales a 1X (modulación).
+                    sig += sev * 5.0 * ab * (1.0 + 0.4 * np.sin(phase + ph)) * np.sin(fault_phase)
+                sig += 0.30 * ab * self._rng.standard_normal(n)  # piso banda ancha
+
             out[ci] = sig
 
         self._cursor += n
         self._phase = float(phase[-1])
+        if fault_phase is not None:
+            self._fault_phase = float(fault_phase[-1])
         return out

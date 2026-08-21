@@ -268,6 +268,22 @@ def build_calibration_pdf(*, meta: Dict[str, Any],
             body.append(Image(io.BytesIO(png), width=15.0 * cm, height=img_h * cm))
 
         body.append(Spacer(1, 0.2 * cm))
+
+        # Nota de zona lineal / setpoint (proximidad) — aclara el "calibrar aquí".
+        lw = a.get("linear_window") if stype == "proximity" else None
+        if lw:
+            xu = a.get("x_unit", "mil")
+            body.append(_p(
+                f"<b>Zona lineal (calibrable):</b> de {_fmt(-abs(lw['start_v']), 2)} a "
+                f"{_fmt(-abs(lw['end_v']), 2)} Vdc ({_fmt(lw['start_x'], 0)}–"
+                f"{_fmt(lw['end_x'], 0)} {xu}), donde el ISF y el DSL cumplen. "
+                f"<b>Monte/ajuste el gap para operar en ~{_fmt(-abs(lw['center_v']), 2)} "
+                f"Vdc ({_fmt(lw['center_x'], 0)} {xu})</b>, centro de esa zona, de modo que "
+                "el eje tenga recorrido lineal simétrico. Nota: el clásico −10 Vdc es el "
+                "centro de una zona lineal completa (~80 mil); si la zona útil de este lazo "
+                "es menor, el setpoint recomendado se corre en consecuencia.",
+                styles, "WMBody"))
+
         body.append(_p(
             f"Veredicto: <b>{a.get('verdict', '—')}</b>. "
             "Resultados válidos para las condiciones del ensayo. Blanco de "

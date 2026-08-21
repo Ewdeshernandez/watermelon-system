@@ -1,0 +1,159 @@
+name: build-field-windows
+
+# Compila el módulo NATIVO (native/watermelon_field.py) a UN SOLO .exe de Windows
+# con PyInstaller. El binario es lo único que se lleva a la PC de campo: el
+# código fuente NUNCA se copia a esa máquina (secreto industrial).
+#
+# Disparar:
+#   · Manual  -> pestaña Actions -> "build-field-windows" -> Run workflow
+#   · Tag     -> git tag field-vX.Y.Z && git push origin field-vX.Y.Z
+#
+# Resultado: artefacto "WatermelonField-windows" (Actions -> corrida -> Artifacts)
+# con WatermelonField.exe + lanzadores .bat + instrucciones.
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - 'field-v*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias del nativo + PyInstaller
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx pyinstaller
+
+      - name: Compilar WatermelonField.exe (onefile)
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean --onefile \
+            --name WatermelonField \
+            --paths . \
+            --collect-submodules core.remote_monitoring \
+            --collect-submodules core.modal \
+            --hidden-import core.loaders.base \
+            --hidden-import core.signal_registry \
+            --hidden-import core.sensor_map \
+            --hidden-import core.supabase_auth \
+            --collect-all nidaqmx \
+            --exclude-module streamlit \
+            --exclude-module supabase \
+            --exclude-module matplotlib \
+            --exclude-module pandas \
+            native/watermelon_field.py
+
+      - name: Empaquetar binario + lanzadores
+        shell: bash
+        run: |
+          mkdir -p out
+          cp dist/WatermelonField.exe out/
+
+          # --- lanzadores .bat (solo líneas de comando, sin código fuente) ---
+          printf '@echo off\r\n"%%~dp0WatermelonField.exe" --sim\r\npause\r\n' \
+            > out/1_DEMO_sin_hardware.bat
+
+          printf '@echo off\r\n"%%~dp0WatermelonField.exe" --sens 100 --fs 5120 --chans 0,1 --names 1YA,1XA\r\npause\r\n' \
+            > out/2_dos_acelerometros.bat
+
+          printf '@echo off\r\n"%%~dp0WatermelonField.exe" --sens 100 --fs 5120 --chans 1,2 --names 1YA,1XA --kph-bnc 1 --machine Rotor_Kit_SIGA_1\r\npause\r\n' \
+            > out/3_runup_con_keyphasor.bat
+
+          printf '@echo off\r\n"%%~dp0WatermelonField.exe" --sens 100 --fs 5120 --chans 4,5,6,7 --names 1Y,1X,2Y,2X --kph-bnc 1 --machine Rotor_Kit_SIGA_1\r\npause\r\n' \
+            > out/4_cuatro_radiales_2_cojinetes.bat
+
+          # --- SIMULADOR CONFIGURABLE (v0.4): abrí, editá la máquina en Configuración,
+          #     Guardar / Aplicar y medir. Arranca con la plantilla motor+bomba. ---
+          printf '@echo off\r\n"%%~dp0WatermelonField.exe" --scenario motor_bomba --fs 25600\r\npause\r\n' \
+            > out/0_SIMULADOR_configurable.bat
+
+          # --- BANCO DE PRUEBAS: escenarios sim (sin hardware) para probar TODO ---
+          mkdir -p out/Banco_de_Pruebas
+          scen () { printf '@echo off\r\n"%%~dp0..\\WatermelonField.exe" --fs %s --scenario %s\r\npause\r\n' "$2" "$1" > "out/Banco_de_Pruebas/$3.bat"; }
+          scen prox_6brg        5120  "01_proximidad_6cojinetes_orbitas"
+          scen prox_runup_whip  5120  "02_arranque_2criticas_oil_whip__Bode_Cascada"
+          scen prox_misalign    5120  "03_desalineacion_2X"
+          scen prox_looseness   5120  "04_holgura_armonicos"
+          scen prox_rub         5120  "05_roce_subarmonicos"
+          scen accel_bpfo      25600  "06_acelerometros_falla_BPFO_envelope"
+          scen accel_bpfi      25600  "07_acelerometros_falla_BPFI"
+          scen accel_bsf       25600  "08_acelerometros_falla_BSF"
+          scen gear_mesh       25600  "09_engrane_GMF"
+          scen vel_iso_6brg     5120  "10_velocidad_ISO20816"
+          scen coastdown        5120  "11_parada_coastdown"
+          scen motor_bomba     25600  "12_TREN_motor_rodamientos_+_bomba_cojinetes_planos"
+
+          # --- instrucciones en texto plano (sin algoritmos) ---
+          cat > out/LEEME.txt <<'TXT'
+          Watermelon Field - modulo nativo de adquisicion (Windows)
+          =========================================================
+
+          Requisito unico en la PC: driver NI-DAQmx instalado (de National Instruments).
+          NO se necesita Python ni nada mas: el .exe ya trae todo adentro.
+
+          COMO USAR
+          ---------
+          Doble clic en el .bat segun tu montaje:
+
+            1_DEMO_sin_hardware.bat        -> ver la interfaz sin cDAQ (simulacion)
+            2_dos_acelerometros.bat        -> 2 acel. 100 mV/g en Modulo 1 (ai0, ai1)
+            3_runup_con_keyphasor.bat      -> keyphasor en Mod1 ai0 + 2 acel. en ai1,ai2
+                                              (para Bode / Cascada / diagnostico en arranque)
+            4_cuatro_radiales_2_cojinetes.bat -> keyphasor Mod1 ai0 + 4 radiales en Modulo 2
+
+          Tambien podes correr WatermelonField.exe directo (doble clic) = 2 acel. por defecto.
+
+          SIMULADOR CONFIGURABLE (0_SIMULADOR_configurable.bat)
+          -----------------------------------------------------
+          Abre la app como una MAQUINA REAL simulada. En la pestaña Configuracion:
+            - edita sensores (Canal, Tipo prox/vel/accel/keyphasor, BNC, Sensib, Angulo)
+            - elige Modo (estable / arranque / parada / arranque_parada)
+            - inyecta fenomenos por tipo de sensor + severidad, criticas, RPM, rampa
+            - Guardar en biblioteca  /  Cargar  /  ">>> Aplicar y medir"
+          Ademas, arriba tenes el combo MODO para cambiar estable/arranque/parada EN VIVO.
+          "Plantilla motor+bomba" carga el tren motor(rodamientos)+bomba(cojinetes planos).
+
+          En la app: Iniciar -> Grabar (opcional) -> mira Monitoreo / Orbita / Bode /
+          Cascada / Diagnostico. Detener para terminar.
+
+          Sin internet funciona igual; las grabaciones quedan locales y se suben
+          cuando haya conexion (por ahora quedan "local pendiente").
+
+          BANCO DE PRUEBAS (carpeta Banco_de_Pruebas)  <-- SIN cDAQ, todo simulado
+          ---------------------------------------------------------------------
+          Para desarrollar/probar TODOS los modulos sin hardware. Doble clic:
+
+            01_proximidad_6cojinetes_orbitas        -> 6 cojinetes, orbitas, tabular, forma modal
+            02_arranque_2criticas_oil_whip          -> RUNUP: Bode, Cascada, Polar, diagnostico
+            03_desalineacion_2X / 04_holgura / 05_roce -> defectos de proximidad
+            06_BPFO / 07_BPFI / 08_BSF              -> acelerometros: fallas de rodamiento (envelope)
+            09_engrane_GMF                          -> frecuencia de engrane
+            10_velocidad_ISO20816                   -> overall en mm/s
+            11_parada_coastdown                     -> parada por 2 criticas
+            12_TREN_motor_+_bomba                    -> motor (rodamientos, 4 acel, BPFO) +
+                                                       bomba (cojinetes planos, 4 proximidades,
+                                                       oil whirl), keyphasor comun (fase)
+
+          Son datos sinteticos fisicamente correctos: sirven para afinar graficos,
+          alarmas y diagnostico mientras llega la tarjeta de proximidad.
+          TXT
+
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WatermelonField-windows
+          path: out/
+          retention-days: 30
