@@ -97,6 +97,8 @@ def main() -> int:
     ap.add_argument("--rpm", type=float, default=1475.0)
     ap.add_argument("--prox", action="store_true")
     ap.add_argument("--kph-bnc", type=int, default=0)
+    ap.add_argument("--alarm", type=float, default=0.0, help="Nivel de alarma (unid. del canal)")
+    ap.add_argument("--danger", type=float, default=0.0, help="Nivel de peligro (unid. del canal)")
     args = ap.parse_args()
 
     try:
@@ -194,7 +196,29 @@ def main() -> int:
     tblt.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
     tblt.verticalHeader().setVisible(False)
     tab_l.addWidget(tblt)
+    if args.alarm or args.danger:
+        tab_l.addWidget(QtWidgets.QLabel(
+            f"<i>Alarma {args.alarm:g} · Peligro {args.danger:g} {vib[0][1].units} "
+            f"(ISO 20816). OK / ALERTA / PELIGRO por Overall.</i>"))
     tabs.addTab(tab_w, "Tabular")
+
+    # --- Órbita (par X/Y, vivo) ---
+    orb_ok = len(vib) >= 2
+    if orb_ok:
+        orb_w = QtWidgets.QWidget(); orb_l = QtWidgets.QVBoxLayout(orb_w)
+        xy = QtWidgets.QHBoxLayout()
+        xy.addWidget(QtWidgets.QLabel("X:"))
+        cb_x = QtWidgets.QComboBox(); cb_x.addItems([c.name for _, c in vib]); cb_x.setCurrentIndex(0)
+        xy.addWidget(cb_x); xy.addWidget(QtWidgets.QLabel("Y:"))
+        cb_y = QtWidgets.QComboBox(); cb_y.addItems([c.name for _, c in vib]); cb_y.setCurrentIndex(1)
+        xy.addWidget(cb_y); xy.addStretch(1); orb_l.addLayout(xy)
+        orb_plot = pg.PlotWidget(); orb_plot.setAspectLocked(True)
+        orb_plot.showGrid(x=True, y=True, alpha=0.25)
+        orb_plot.addLine(x=0, pen=pg.mkPen("#c9d2e0")); orb_plot.addLine(y=0, pen=pg.mkPen("#c9d2e0"))
+        orb_curve = orb_plot.plot(pen=pg.mkPen(CORN, width=1.4))
+        orb_kph = orb_plot.plot(pen=None, symbol="o", symbolBrush="#dc2626", symbolSize=9)
+        orb_l.addWidget(orb_plot, 1)
+        tabs.addTab(orb_w, "Órbita")
 
     lbl_rpm = QtWidgets.QLabel("RPM: —"); lbl_state = QtWidgets.QLabel("detenido")
     lbl_rec = QtWidgets.QLabel("")
@@ -211,6 +235,11 @@ def main() -> int:
             return
         fs = agent.sample_rate_hz
         rpm = agent.estimate_rpm(snap)
+        if not rpm:      # sin keyphasor → rpm del pico dominante de vibración (1X)
+            fr0, mag0 = _spectrum(snap[vib[0][0]], fs)
+            band = (fr0 > 3) & (fr0 < 300)
+            if band.any() and float(mag0[band].max()) > 1e-9:
+                rpm = float(fr0[band][np.argmax(mag0[band])] * 60.0)
         lbl_rpm.setText(f"RPM: {rpm:.0f}" if rpm else "RPM: —")
         f1 = (rpm / 60.0) if rpm else None
         idx_tab = tabs.currentIndex()
@@ -236,9 +265,31 @@ def main() -> int:
                 a1 = ph = 0.0
                 if f1:
                     a1, ph = one_x_vector(eu - eu.mean(), fs, f1)
-                vals = [c.name, f"{ov:.3g} {c.units}", f"{a1:.3g}", f"{ph:.0f}°", "OK"]
-                for col, v in enumerate(vals):
-                    tblt.setItem(r, col, QtWidgets.QTableWidgetItem(v))
+                if args.danger and ov >= args.danger:
+                    estado, col = "PELIGRO", QtGui.QColor("#fde2e2")
+                elif args.alarm and ov >= args.alarm:
+                    estado, col = "ALERTA", QtGui.QColor("#fdf0d5")
+                else:
+                    estado, col = "OK", QtGui.QColor("#e6f4ea")
+                vals = [c.name, f"{ov:.3g} {c.units}", f"{a1:.3g}", f"{ph:.0f}°", estado]
+                for cc, v in enumerate(vals):
+                    it = QtWidgets.QTableWidgetItem(v)
+                    if cc == 4:
+                        it.setBackground(col)
+                    tblt.setItem(r, cc, it)
+        elif orb_ok and idx_tab == 3:    # Órbita (par X/Y)
+            xi = next((i for i, c in vib if c.name == cb_x.currentText()), vib[0][0])
+            yi = next((i for i, c in vib if c.name == cb_y.currentText()), vib[1][0])
+            nrev = min(snap.shape[1], int((12 * fs / max(rpm, 1)) * 60) if rpm else int(0.3 * fs))
+            sx = next(cc for ii, cc in vib if ii == xi)
+            sy = next(cc for ii, cc in vib if ii == yi)
+            x = snap[xi, -nrev:] * 1000.0 / (sx.sensitivity_mv_per_eu or 1.0)
+            y = snap[yi, -nrev:] * 1000.0 / (sy.sensitivity_mv_per_eu or 1.0)
+            x = x - x.mean(); y = y - y.mean()
+            orb_curve.setData(x, y)
+            if f1 and len(x):
+                spr = max(1, int(fs / f1))
+                orb_kph.setData(x[::spr], y[::spr])
 
     timer = QtCore.QTimer(); timer.timeout.connect(update)
 
