@@ -413,16 +413,26 @@ def _render_monitoreo() -> None:
                                        help="Graba la ONDA CRUDA completa a disco durante toda la "
                                             "rampa (arranque/parada). No se pierde nada; después se "
                                             "reprocesa a Bode/Cascada a máxima resolución."):
-            from core.remote_monitoring.recorder import TransientRecorder
-            ch_meta = [{"name": c.name, "units": c.units, "coupling": c.coupling,
-                        "bnc_port": c.bnc_port,
-                        "sensitivity_mv_per_eu": float(c.sensitivity_mv_per_eu or 0.0)}
-                       for c in agent.channels]
-            rec = TransientRecorder(agent.instance_id, agent.sample_rate_hz, ch_meta, machine=machine_name)
-            agent.on_block = rec.append
-            st.session_state["rm_recorder"] = rec
-            st.session_state["rm_running"] = True     # que fluyan bloques
-            st.rerun()
+            from core.remote_monitoring.recorder import TransientRecorder, free_bytes
+            _free = free_bytes()
+            if _free and _free < 200 * 1024 * 1024:   # < 200 MB libres → no arranca
+                st.error(f"⚠ Poco espacio en disco ({_free/1e6:.0f} MB libres). Liberá con "
+                         f"**🗑 Limpiar grabaciones locales** antes de grabar.")
+            else:
+                try:
+                    ch_meta = [{"name": c.name, "units": c.units, "coupling": c.coupling,
+                                "bnc_port": c.bnc_port,
+                                "sensitivity_mv_per_eu": float(c.sensitivity_mv_per_eu or 0.0)}
+                               for c in agent.channels]
+                    rec = TransientRecorder(agent.instance_id, agent.sample_rate_hz, ch_meta,
+                                            machine=machine_name)
+                    agent.on_block = rec.append
+                    st.session_state["rm_recorder"] = rec
+                    st.session_state["rm_running"] = True     # que fluyan bloques
+                    st.rerun()
+                except OSError as e:
+                    st.error(f"⚠ No se pudo iniciar la grabación (disco): {e}. "
+                             f"Liberá con **🗑 Limpiar grabaciones locales**.")
     with rc2:
         if recording and st.button("⏹ Detener grabación", use_container_width=True, type="primary"):
             from core.remote_monitoring.recorder import upload_recording
@@ -453,6 +463,26 @@ def _render_monitoreo() -> None:
                                    help="Sube a Supabase las grabaciones que quedaron locales (campo sin internet)."):
                 ok, fail = sync_pending(agent.instance_id)
                 (st.success if not fail else st.warning)(f"☁ Subidas {ok} · fallos {fail}.")
+                st.rerun()
+
+    # Aviso si la grabación se detuvo por disco lleno + gestión de espacio.
+    if rec is not None and getattr(rec, "error", None):
+        st.error(f"⚠ La grabación se detuvo: **{rec.error}**. Liberá disco abajo y volvé a grabar.")
+    from core.remote_monitoring.recorder import local_usage, free_bytes, clear_recordings
+    _cnt, _used = local_usage(agent.instance_id)
+    if _cnt:
+        _free = free_bytes()
+        d1, d2 = st.columns([2.3, 1.4])
+        with d1:
+            st.caption(f"💽 Grabaciones locales: **{_cnt}** · {_used/1e6:.0f} MB usados · "
+                       f"{_free/1e6:.0f} MB libres en disco.")
+        with d2:
+            if st.button(f"🗑 Limpiar grabaciones locales ({_cnt})", use_container_width=True,
+                         help="Borra las grabaciones del disco local para liberar espacio. Las que ya "
+                              "se subieron a Supabase quedan en la nube."):
+                n, freed = clear_recordings(agent.instance_id)
+                st.session_state.pop("rm_recorder", None)
+                st.success(f"🗑 Borradas {n} grabación(es) · liberados {freed/1e6:.0f} MB.")
                 st.rerun()
 
     # Acciones one-shot en el run principal (fuera del fragment).
