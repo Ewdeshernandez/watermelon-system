@@ -3375,6 +3375,28 @@ _wm_page_header(
 )
 
 # =============================================================
+# Aviso de DISCO LLENO (ENOSPC). El autosave ya no crashea la página; acá
+# avisamos y ofrecemos liberar espacio (borra backups .bak.* y temporales).
+# =============================================================
+try:
+    from core.report_state import (
+        PERSIST_LAST_ERROR as _WM_PERSIST_ERR,
+        free_disk_space_best_effort as _wm_free_space,
+    )
+    if _WM_PERSIST_ERR.get("enospc"):
+        st.warning("⚠️ **Disco lleno en el servidor.** El autoguardado está "
+                   "degradado (tu trabajo sigue en memoria). Libera espacio y "
+                   "vuelve a guardar.")
+        if st.button("🧹 Liberar espacio en disco", key="wm_free_disk"):
+            _freed = _wm_free_space()
+            st.success(f"Liberado: {_freed.get('backups', 0)} backups y "
+                       f"{_freed.get('tmp', 0)} temporales. Reintenta guardar.")
+            _WM_PERSIST_ERR.clear()
+            st.rerun()
+except Exception:
+    pass
+
+# =============================================================
 # v3.31.483 — Familias de reporte (pestañas). El "Reporte del Sistema"
 # (todo el builder de vibraciones de abajo) queda INTACTO; las familias de
 # campo (diario/preliminar/boroscopia/alineación/mecánico) se renderizan
