@@ -195,6 +195,47 @@ class TransientCapture:
             self._last_rpm = self.samples[-1].rpm
         return n_new
 
+    def process_full(self, full: np.ndarray, fs: float,
+                     vib_channels: List[Tuple[int, object]], kph_idx: Optional[int] = None,
+                     delta_rpm: Optional[float] = None) -> int:
+        """Reprocesa una GRABACIÓN completa (canales, muestras) barriéndola entera
+        en pasos finos → Bode/Cascada a la máxima resolución, sin perder nada.
+        Reinicia la captura. Devuelve cuántos puntos generó."""
+        self.reset()
+        if delta_rpm:
+            self.config.delta_rpm = float(delta_rpm)
+        if full.ndim != 2 or full.shape[1] < 8:
+            return 0
+        win = min(self.config.capture_samples, full.shape[1])
+        hop = max(int(self.config.hop_seconds * fs), 1)
+        dr = self.config.delta_rpm
+        seen, p0, end, n_new = set(), 0, full.shape[1] - win, 0
+        while p0 <= end:
+            seg = slice(p0, p0 + win)
+            rr, pulses, ref = None, None, 0
+            if kph_idx is not None and 0 <= kph_idx < full.shape[0]:
+                kr = detect_keyphasor(full[kph_idx, seg], fs)
+                rr = kr.rpm
+                pulses = kr.pulse_sample_indices
+                if kr.ref_sample is not None:
+                    ref = int(kr.ref_sample)
+            if rr is None or rr < self.config.min_rpm:
+                p0 += hop
+                continue
+            b = round(rr / dr)
+            if b in seen:
+                p0 += hop
+                continue
+            seen.add(b)
+            self._capture_window(full, seg, fs, vib_channels, rr, pulses, ref)
+            n_new += 1
+            p0 += hop
+            if len(self.samples) >= self.config.max_samples:
+                break
+        if self.samples:
+            self._last_rpm = self.samples[-1].rpm
+        return n_new
+
     # --- lecturas ---
     @property
     def n_samples(self) -> int:
