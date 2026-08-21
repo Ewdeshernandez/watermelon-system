@@ -118,12 +118,13 @@ def _prox_result_rows(a: Dict[str, Any]) -> List[List[str]]:
     ]
     lw = a.get("linear_window")
     if lw:
+        # Vdc en convención Proximitor (negativa).
         rows.append([
             "Rango lineal útil (calibrable)",
             f"{_fmt(lw['start_x'], 0)}–{_fmt(lw['end_x'], 0)} {xu}  "
-            f"({_fmt(lw['start_v'], 2)} a {_fmt(lw['end_v'], 2)} Vdc)",
+            f"({_fmt(-abs(lw['start_v']), 2)} a {_fmt(-abs(lw['end_v']), 2)} Vdc)",
             f"setpoint ~{_fmt(lw['center_x'], 0)} {xu} "
-            f"({_fmt(lw['center_v'], 2)} Vdc)",
+            f"({_fmt(-abs(lw['center_v']), 2)} Vdc)",
             "cumple 80 mil" if lw.get("meets_min_range") else "< 80 mil",
         ])
     return rows
@@ -203,6 +204,33 @@ def build_calibration_pdf(*, meta: Dict[str, Any],
     if meta.get("notes"):
         body.append(Spacer(1, 0.3 * cm))
         body.append(_p(meta["notes"], styles, "WMBody"))
+
+    # ---- Hallazgos / Recomendaciones (opcionales) --------------------
+    hall = [h for h in (meta.get("hallazgos") or []) if str(h).strip()]
+    reco = [r for r in (meta.get("recomendaciones") or []) if str(r).strip()]
+    if hall:
+        body.append(Spacer(1, 0.3 * cm))
+        body.append(_section("2. Hallazgos", styles))
+        for i, h in enumerate(hall, 1):
+            body.append(_p(f"{i}.&nbsp;&nbsp;{h}", styles, "WMBody"))
+    if reco:
+        body.append(Spacer(1, 0.2 * cm))
+        body.append(_section(f"{3 if hall else 2}. Recomendaciones", styles))
+        for i, r in enumerate(reco, 1):
+            body.append(_p(f"{i}.&nbsp;&nbsp;{r}", styles, "WMBody"))
+
+    # ---- Registro fotográfico (fotos relevantes, opcional) -----------
+    photos = meta.get("photos") or []
+    if photos:
+        body.append(Spacer(1, 0.3 * cm))
+        _num = 2 + (1 if hall else 0) + (1 if reco else 0)
+        body.append(_section(f"{_num}. Registro fotográfico", styles))
+        try:
+            from core.reports_ext.common import photo_grid, photo_credit
+            body += photo_grid(photos, styles, cols=2, credit=photo_credit())
+        except Exception:
+            pass
+
     body.append(PageBreak())
 
     # ---- Un certificado por lazo ------------------------------------

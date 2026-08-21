@@ -206,8 +206,8 @@ def _proximity_tab() -> None:
         sev = "ok" if lw.get("meets_min_range") else "warning"
         cal_status_banner(
             f"Rango lineal útil (calibrable): {lw['start_x']:.0f}–{lw['end_x']:.0f} {xunit} "
-            f"({lw['start_v']:.2f} a {lw['end_v']:.2f} Vdc)",
-            f"Setpoint recomendado ~{lw['center_x']:.0f} {xunit} ({lw['center_v']:.2f} Vdc) · "
+            f"({-abs(lw['start_v']):.2f} a {-abs(lw['end_v']):.2f} Vdc)",
+            f"Setpoint recomendado ~{lw['center_x']:.0f} {xunit} ({-abs(lw['center_v']):.2f} Vdc) · "
             f"span {lw['span_x']:.0f} {xunit} "
             + ("cumple el mínimo de 80 mil de API 670."
                if lw.get("meets_min_range")
@@ -408,6 +408,23 @@ def _report_tab() -> None:
             st.rerun()
 
     st.divider()
+    # Hallazgos / recomendaciones + fotos relevantes (opcionales)
+    cH, cR = st.columns(2)
+    hall = cH.text_area("Hallazgos (uno por línea)", key="cal_hall", height=100)
+    reco = cR.text_area("Recomendaciones (una por línea)", key="cal_reco", height=100)
+    _files = st.file_uploader("Fotos / imágenes relevantes (opcional)",
+                              accept_multiple_files=True, type=["png", "jpg", "jpeg"],
+                              key="cal_report_photos")
+    photos = []
+    if _files:
+        with st.expander(f"Títulos de las {len(_files)} figuras", expanded=True):
+            for _i, _f in enumerate(_files, 1):
+                _t = st.text_input(f"Figura {_i}", key=f"cal_figt_{_i}",
+                                   placeholder=f"Descripción de la figura {_i}")
+                _cap = f"Figura {_i}. {_t}".rstrip(". ") if _t else f"Figura {_i}"
+                photos.append({"bytes": _f.getvalue(), "caption": _cap})
+
+    st.divider()
     if st.button("Generar reporte PDF", key="cal_gen_btn", type="primary"):
         try:
             from core.calibration.report import build_calibration_pdf
@@ -418,6 +435,9 @@ def _report_tab() -> None:
                 "specialist": st.session_state.get("cal_specialist"),
                 "report_date": st.session_state.get("cal_date"),
                 "notes": st.session_state.get("cal_notes"),
+                "hallazgos": [l.strip() for l in (hall or "").splitlines() if l.strip()],
+                "recomendaciones": [l.strip() for l in (reco or "").splitlines() if l.strip()],
+                "photos": photos,
             }
             st.session_state["cal_pdf"] = build_calibration_pdf(meta=meta, loops=loops)
         except Exception as e:  # noqa: BLE001
