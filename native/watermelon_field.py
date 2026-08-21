@@ -31,9 +31,15 @@ CORN = "#4f8fd0"
 
 
 def build_agent(args) -> AcqAgent:
+    # Banco de pruebas: escenario sim con nombre (proximidad/accel/velocidad/faults)
+    if getattr(args, "scenario", ""):
+        from core.remote_monitoring.sim_scenarios import build_scenario
+        cfg = build_scenario(args.scenario, fs=args.fs)
+        return AcqAgent(SimulatedStreamSource(cfg), instance_id=args.machine)
+
     idxs = [int(x) for x in args.chans.split(",") if x.strip() != ""]
     names = [s.strip() for s in args.names.split(",")]
-    coup = "AC" if args.prox else "IEPE"
+    coup = "DC" if args.prox else "IEPE"
     units = "mil pp" if args.prox else "g rms"
     chans = []
     for k, i in enumerate(idxs):
@@ -43,8 +49,9 @@ def build_agent(args) -> AcqAgent:
         chans.append(ChannelConfig(name="KPH", coupling="DC", sensitivity_mv_per_eu=1.0,
                                    bnc_port=args.kph_bnc, units="pulses/rev"))
     cfg = StreamConfig(sample_rate_hz=args.fs, channels=chans, block_seconds=0.1,
-                       buffer_seconds=4.0, rpm=args.rpm, chassis_name=args.chassis)
-    if args.sim:
+                       buffer_seconds=4.0, rpm=args.rpm, chassis_name=args.chassis,
+                       defect=(getattr(args, "defect", "") or "none"))
+    if args.sim or getattr(args, "defect", ""):
         source = SimulatedStreamSource(cfg)
     else:
         from core.remote_monitoring.ni_stream_source import NIStreamSource
@@ -88,6 +95,12 @@ def _stylesheet() -> str:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--sim", action="store_true")
+    ap.add_argument("--scenario", default="",
+                    help="banco de pruebas sim: prox_6brg, prox_runup_whip, accel_bpfo, "
+                         "accel_bpfi, accel_bsf, gear_mesh, vel_iso_6brg, coastdown, ...")
+    ap.add_argument("--defect", default="",
+                    help="inyecta defecto (modo manual --sim): unbalance|misalignment|"
+                         "looseness|rub|oil_whirl|bearing_bpfo|bearing_bpfi|bearing_bsf|gear_mesh")
     ap.add_argument("--machine", default="Rotor_Kit_Field")
     ap.add_argument("--chassis", default="cDAQ1")
     ap.add_argument("--chans", default="0,1")
