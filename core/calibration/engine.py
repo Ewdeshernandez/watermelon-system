@@ -195,6 +195,37 @@ def analyze_proximity_linearity(
     # --- Rango lineal cubierto ---
     span_x = float(np.ptp(xa))
 
+    # --- Ventana lineal ÚTIL: mayor tramo contiguo que cumple ISF±tol y DSL±tol ---
+    # Valor agregado sobre API 670: dice ENTRE QUÉ GAP el lazo es calibrable/lineal,
+    # en unidad-x y en Vdc (voltaje = recta best-fit evaluada en el gap).
+    win = None
+    npts = len(xa)
+    for ai in range(npts):
+        for bi in range(ai + 1, npts):
+            ok_isf = all(abs(isf_err_pct[k]) <= isf_tol_pct + 1e-9 for k in range(ai, bi))
+            if not ok_isf:
+                continue
+            xs = xa[ai:bi + 1]; ys = ya[ai:bi + 1]
+            b_ref_w = fixed_slope_intercept(xs, ys, slope_ref)
+            dsl_w = [abs((ys[i] - (slope_ref * xs[i] + b_ref_w)) / slope_ref)
+                     for i in range(len(xs))]
+            if max(dsl_w) <= dsl_tol_x + 1e-9:
+                sp = float(xs[-1] - xs[0])
+                if win is None or sp > win["span_x"]:
+                    win = {"start_x": float(xs[0]), "end_x": float(xs[-1]), "span_x": sp}
+    linear_window = None
+    if win:
+        cx = (win["start_x"] + win["end_x"]) / 2.0
+        # Vdc en la recta best-fit (misma convención de signo que los datos)
+        v_at = lambda g: float(slope * g + intercept)
+        linear_window = {
+            "start_x": win["start_x"], "end_x": win["end_x"], "span_x": win["span_x"],
+            "center_x": float(cx),
+            "start_v": v_at(win["start_x"]), "end_v": v_at(win["end_x"]),
+            "center_v": v_at(cx),
+            "meets_min_range": bool(win["span_x"] >= min_range_x - 1e-9),
+        }
+
     # --- Cumplimiento API 670 ---
     pass_isf = max_isf_err_pct <= isf_tol_pct + 1e-9
     pass_dsl = max_dsl_x <= dsl_tol_x + 1e-9
@@ -221,6 +252,7 @@ def analyze_proximity_linearity(
         "max_linearity_pct": float(max_lin_pct),
         "starting_point_is_reference": bool(starting_point_is_reference),
         "span_x": span_x,
+        "linear_window": linear_window,
         "min_range_x": float(min_range_x),
         "isf_tol_pct": float(isf_tol_pct),
         "dsl_tol_x": float(dsl_tol_x),

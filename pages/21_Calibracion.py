@@ -201,6 +201,22 @@ def _proximity_tab() -> None:
         badge_detail=f"ISF {a['max_isf_err_pct']:.1f}% · DSL {a['max_dsl_x']:.2f} {xunit}"),
         unsafe_allow_html=True)
 
+    lw = a.get("linear_window")
+    if lw:
+        sev = "ok" if lw.get("meets_min_range") else "warning"
+        cal_status_banner(
+            f"Rango lineal útil (calibrable): {lw['start_x']:.0f}–{lw['end_x']:.0f} {xunit} "
+            f"({lw['start_v']:.2f} a {lw['end_v']:.2f} Vdc)",
+            f"Setpoint recomendado ~{lw['center_x']:.0f} {xunit} ({lw['center_v']:.2f} Vdc) · "
+            f"span {lw['span_x']:.0f} {xunit} "
+            + ("cumple el mínimo de 80 mil de API 670."
+               if lw.get("meets_min_range")
+               else "por debajo del mínimo de 80 mil de API 670 (usable pero fuera de norma)."),
+            sev)
+    else:
+        cal_status_banner("Sin ventana lineal que cumpla ISF±5% y DSL±1 mil",
+                          "Ningún tramo de la curva cumple ambos criterios.", "fail")
+
     _add_button("proximity", "linearity", tag, manuf, model, serial, idn,
                 spec["norm"], a)
 

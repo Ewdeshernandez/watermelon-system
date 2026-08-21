@@ -99,7 +99,7 @@ def _grid_table(headers: List[str], rows: List[List[Any]], styles,
 # ---------------------------------------------------------------------
 def _prox_result_rows(a: Dict[str, Any]) -> List[List[str]]:
     xu = a.get("x_unit", "mil")
-    return [
+    rows = [
         ["Sensibilidad promedio (ASF)",
          f"{_fmt(a['asf_mv_per_x'], 2)} mV/{xu}  ({_fmt(a['asf_err_pct'], 2)} %)",
          f"nominal {_fmt(a['nominal_mv_per_x'], 2)} mV/{xu}",
@@ -116,6 +116,17 @@ def _prox_result_rows(a: Dict[str, Any]) -> List[List[str]]:
         ["Linealidad (best-fit)",
          f"{_fmt(a['max_linearity_pct'], 3)} %", "referencia", "—"],
     ]
+    lw = a.get("linear_window")
+    if lw:
+        rows.append([
+            "Rango lineal útil (calibrable)",
+            f"{_fmt(lw['start_x'], 0)}–{_fmt(lw['end_x'], 0)} {xu}  "
+            f"({_fmt(lw['start_v'], 2)} a {_fmt(lw['end_v'], 2)} Vdc)",
+            f"setpoint ~{_fmt(lw['center_x'], 0)} {xu} "
+            f"({_fmt(lw['center_v'], 2)} Vdc)",
+            "cumple 80 mil" if lw.get("meets_min_range") else "< 80 mil",
+        ])
+    return rows
 
 
 def _amp_result_rows(a: Dict[str, Any]) -> List[List[str]]:
