@@ -31,6 +31,14 @@ CORN = "#4f8fd0"
 
 
 def build_agent(args) -> AcqAgent:
+    # Máquina simulada editable (archivo JSON de la biblioteca) — v0.4
+    if getattr(args, "machine_file", ""):
+        from core.remote_monitoring.sim_machine import SimMachine
+        m = SimMachine.load(args.machine_file)
+        args.fs = m.fs                     # la máquina manda el muestreo
+        args.machine = m.name
+        return AcqAgent(SimulatedStreamSource(m.to_stream_config()), instance_id=m.name)
+
     # Banco de pruebas: escenario sim con nombre (proximidad/accel/velocidad/faults)
     if getattr(args, "scenario", ""):
         from core.remote_monitoring.sim_scenarios import build_scenario
@@ -101,6 +109,8 @@ def main() -> int:
     ap.add_argument("--defect", default="",
                     help="inyecta defecto (modo manual --sim): unbalance|misalignment|"
                          "looseness|rub|oil_whirl|bearing_bpfo|bearing_bpfi|bearing_bsf|gear_mesh")
+    ap.add_argument("--machine-file", default="",
+                    help="corre una máquina simulada guardada (JSON de la biblioteca) — v0.4")
     ap.add_argument("--machine", default="Rotor_Kit_Field")
     ap.add_argument("--chassis", default="cDAQ1")
     ap.add_argument("--chans", default="0,1")
@@ -127,6 +137,7 @@ def main() -> int:
     from core.remote_monitoring.transient import TransientCapture, TransientConfig
     from core.remote_monitoring import analysis as diag
     kph_glob = agent.source.config.keyphasor_index()
+    from core.remote_monitoring.sim_machine import MODES, MODE_TO_PROFILE
     tc = TransientCapture(TransientConfig(fmax_hz=min(2000.0, args.fs / 2.5)))
 
     pg.setConfigOptions(antialias=True, background="w", foreground=NAVY)
@@ -157,6 +168,10 @@ def main() -> int:
     tb = win.addToolBar("Principal")
     tb.setMovable(False)
     tb.addAction(act_start); tb.addAction(act_stop); tb.addAction(act_rec)
+    tb.addSeparator()
+    lbl_modo = QtWidgets.QLabel(" Modo: "); lbl_modo.setStyleSheet("color:white;")
+    tb.addWidget(lbl_modo)
+    cb_run = QtWidgets.QComboBox(); cb_run.addItems(MODES); tb.addWidget(cb_run)
     spacer = QtWidgets.QWidget(); spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
                                                        QtWidgets.QSizePolicy.Preferred)
     tb.addWidget(spacer)
@@ -167,24 +182,159 @@ def main() -> int:
     # ---------------- Pestañas ----------------
     tabs = QtWidgets.QTabWidget(); win.setCentralWidget(tabs)
 
-    # --- Configuración ---
+    # --- Configuración (editor de máquina simulada — v0.4) ---
+    from core.remote_monitoring.sim_machine import (SimMachine, SensorSpec, MODES, PHENOMENA,
+                                                    MODE_TO_PROFILE, save_to_library,
+                                                    list_machines, load_from_library)
+    _KINDS = ["prox", "vel", "accel", "keyphasor"]
+
+    def _machine_from_agent() -> SimMachine:
+        """Máquina inicial a partir de los canales con que arrancó el app."""
+        sens = []
+        for c in agent.channels:
+            if is_keyphasor_channel(c):
+                k = "keyphasor"
+            elif "mil" in (c.units or "").lower():
+                k = "prox"
+            elif "mm/s" in (c.units or "").lower():
+                k = "vel"
+            else:
+                k = "accel"
+            sens.append(SensorSpec(c.name, k, int(c.bnc_port or 1),
+                                   float(c.sensitivity_mv_per_eu or 100.0)))
+        cf = agent.source.config
+        return SimMachine(name=args.machine, fs=float(args.fs), sensors=sens,
+                          rpm=float(getattr(cf, "rpm", 3000.0)),
+                          crit1=float(getattr(cf, "sim_critical_rpm", 0.0)),
+                          crit2=float(getattr(cf, "sim_critical_rpm2", 0.0)),
+                          phenomena=dict(getattr(cf, "defect_by_kind", {}) or {}),
+                          severity=float(getattr(cf, "sim_severity", 1.0)))
+
     cfg_w = QtWidgets.QWidget(); cfg_l = QtWidgets.QVBoxLayout(cfg_w)
-    cfg_l.addWidget(QtWidgets.QLabel(f"<b>Máquina:</b> {args.machine}  ·  "
-                                     f"<b>Muestreo:</b> {args.fs:.0f} Hz  ·  "
-                                     f"<b>Chasis:</b> {args.chassis}"))
-    tblc = QtWidgets.QTableWidget(len(agent.channels), 5)
-    tblc.setHorizontalHeaderLabels(["Canal", "BNC", "Tipo", "Sensib (mV/EU)", "Acople"])
+    # fila 1: nombre, fs, biblioteca
+    r1 = QtWidgets.QHBoxLayout()
+    r1.addWidget(QtWidgets.QLabel("Máquina:"))
+    ed_name = QtWidgets.QLineEdit(); r1.addWidget(ed_name, 2)
+    r1.addWidget(QtWidgets.QLabel("Muestreo (Hz):"))
+    sp_fs = QtWidgets.QSpinBox(); sp_fs.setRange(256, 102400); sp_fs.setSingleStep(1280); r1.addWidget(sp_fs)
+    r1.addWidget(QtWidgets.QLabel("Biblioteca:"))
+    cb_lib = QtWidgets.QComboBox(); cb_lib.setMinimumWidth(160); r1.addWidget(cb_lib)
+    btn_load = QtWidgets.QPushButton("Cargar"); r1.addWidget(btn_load)
+    cfg_l.addLayout(r1)
+    # fila 2: operación
+    r2 = QtWidgets.QHBoxLayout()
+    r2.addWidget(QtWidgets.QLabel("Modo:"))
+    cb_mode = QtWidgets.QComboBox(); cb_mode.addItems(MODES); r2.addWidget(cb_mode)
+    def _dsp(mn, mx, val, step=100.0):
+        s = QtWidgets.QDoubleSpinBox(); s.setRange(mn, mx); s.setValue(val); s.setSingleStep(step); return s
+    r2.addWidget(QtWidgets.QLabel("RPM:")); sp_rpm = _dsp(0, 60000, 3000); r2.addWidget(sp_rpm)
+    r2.addWidget(QtWidgets.QLabel("Arranque→")); sp_r0 = _dsp(0, 60000, 300); r2.addWidget(sp_r0)
+    sp_r1 = _dsp(0, 60000, 6000); r2.addWidget(sp_r1)
+    r2.addWidget(QtWidgets.QLabel("Rampa(s):")); sp_ramp = _dsp(1, 3600, 90, 5); r2.addWidget(sp_ramp)
+    cfg_l.addLayout(r2)
+    # fila 3: críticas, severidad, fenómenos
+    r3 = QtWidgets.QHBoxLayout()
+    r3.addWidget(QtWidgets.QLabel("Crítica 1:")); sp_c1 = _dsp(0, 60000, 0); r3.addWidget(sp_c1)
+    r3.addWidget(QtWidgets.QLabel("Crítica 2:")); sp_c2 = _dsp(0, 60000, 0); r3.addWidget(sp_c2)
+    r3.addWidget(QtWidgets.QLabel("Severidad:")); sp_sev = _dsp(0, 3, 1.0, 0.25); r3.addWidget(sp_sev)
+    r3.addWidget(QtWidgets.QLabel("Fenómeno prox:"))
+    cb_ph_p = QtWidgets.QComboBox(); cb_ph_p.addItems(PHENOMENA["prox"]); r3.addWidget(cb_ph_p)
+    r3.addWidget(QtWidgets.QLabel("vel:"))
+    cb_ph_v = QtWidgets.QComboBox(); cb_ph_v.addItems(PHENOMENA["vel"]); r3.addWidget(cb_ph_v)
+    r3.addWidget(QtWidgets.QLabel("accel:"))
+    cb_ph_a = QtWidgets.QComboBox(); cb_ph_a.addItems(PHENOMENA["accel"]); r3.addWidget(cb_ph_a)
+    cfg_l.addLayout(r3)
+    # tabla de sensores (editable)
+    tblc = QtWidgets.QTableWidget(0, 5)
+    tblc.setHorizontalHeaderLabels(["Canal", "Tipo", "BNC", "Sensib (mV/EU)", "Ángulo°"])
     tblc.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
-    for r, c in enumerate(agent.channels):
-        tipo = "keyphasor" if is_keyphasor_channel(c) else ("proximidad" if c.coupling == "AC"
-                                                            else "acelerómetro")
-        for col, val in enumerate([c.name, str(c.bnc_port), tipo,
-                                    f"{c.sensitivity_mv_per_eu:g}", c.coupling]):
-            it = QtWidgets.QTableWidgetItem(val); it.setFlags(QtCore.Qt.ItemIsEnabled)
-            tblc.setItem(r, col, it)
-    cfg_l.addWidget(tblc)
-    cfg_l.addWidget(QtWidgets.QLabel("<i>(La edición de canales / carga desde la nube llega en v0.4.)</i>"))
+    cfg_l.addWidget(tblc, 1)
+    rb = QtWidgets.QHBoxLayout()
+    btn_add = QtWidgets.QPushButton("+ Sensor"); btn_del = QtWidgets.QPushButton("– Quitar")
+    btn_tpl = QtWidgets.QPushButton("Plantilla motor+bomba")
+    btn_save = QtWidgets.QPushButton("💾 Guardar en biblioteca")
+    btn_apply = QtWidgets.QPushButton("▶ Aplicar y medir")
+    for b in (btn_add, btn_del, btn_tpl): rb.addWidget(b)
+    rb.addStretch(1); rb.addWidget(btn_save); rb.addWidget(btn_apply)
+    cfg_l.addLayout(rb)
     tabs.addTab(cfg_w, "Configuración")
+
+    def _add_sensor_row(s: SensorSpec):
+        r = tblc.rowCount(); tblc.insertRow(r)
+        tblc.setItem(r, 0, QtWidgets.QTableWidgetItem(s.name))
+        cbk = QtWidgets.QComboBox(); cbk.addItems(_KINDS); cbk.setCurrentText(s.kind)
+        tblc.setCellWidget(r, 1, cbk)
+        tblc.setItem(r, 2, QtWidgets.QTableWidgetItem(str(s.bnc)))
+        tblc.setItem(r, 3, QtWidgets.QTableWidgetItem(f"{s.sensitivity:g}"))
+        tblc.setItem(r, 4, QtWidgets.QTableWidgetItem(f"{s.angle:g}"))
+
+    def fill_form(m: SimMachine):
+        ed_name.setText(m.name); sp_fs.setValue(int(m.fs))
+        cb_mode.setCurrentText(m.mode if m.mode in MODES else "estable")
+        sp_rpm.setValue(m.rpm); sp_r0.setValue(m.rpm_start); sp_r1.setValue(m.rpm_end)
+        sp_ramp.setValue(m.ramp_s); sp_c1.setValue(m.crit1); sp_c2.setValue(m.crit2)
+        sp_sev.setValue(m.severity)
+        cb_ph_p.setCurrentText(m.phenomena.get("prox", "none"))
+        cb_ph_v.setCurrentText(m.phenomena.get("vel", "none"))
+        cb_ph_a.setCurrentText(m.phenomena.get("accel", "none"))
+        tblc.setRowCount(0)
+        for s in m.sensors: _add_sensor_row(s)
+
+    def read_form() -> SimMachine:
+        sens = []
+        for r in range(tblc.rowCount()):
+            nm = tblc.item(r, 0).text() if tblc.item(r, 0) else f"CH{r}"
+            kd = tblc.cellWidget(r, 1).currentText() if tblc.cellWidget(r, 1) else "accel"
+            def _num(col, dv):
+                try: return float(tblc.item(r, col).text())
+                except Exception: return dv
+            sens.append(SensorSpec(nm, kd, int(_num(2, r + 1)), _num(3, 100.0), _num(4, 0.0)))
+        ph = {"prox": cb_ph_p.currentText(), "vel": cb_ph_v.currentText(), "accel": cb_ph_a.currentText()}
+        return SimMachine(name=ed_name.text() or "Maquina", fs=float(sp_fs.value()), sensors=sens,
+                          mode=cb_mode.currentText(), rpm=sp_rpm.value(),
+                          rpm_start=sp_r0.value(), rpm_end=sp_r1.value(), ramp_s=sp_ramp.value(),
+                          crit1=sp_c1.value(), crit2=sp_c2.value(), severity=sp_sev.value(),
+                          phenomena={k: v for k, v in ph.items() if v != "none"})
+
+    def refresh_lib():
+        cb_lib.clear(); cb_lib.addItems(list_machines() or ["(vacía)"])
+
+    def do_load_lib():
+        nm = cb_lib.currentText()
+        if nm and nm != "(vacía)":
+            fill_form(load_from_library(nm))
+
+    def do_save_lib():
+        m = read_form()
+        try:
+            save_to_library(m); refresh_lib()
+            QtWidgets.QMessageBox.information(win, "Biblioteca", f"Máquina '{m.name}' guardada.")
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(win, "Biblioteca", f"No se pudo guardar: {e}")
+
+    def do_apply():
+        """Guarda la máquina y RELANZA el app midiéndola (evita reconstruir plots)."""
+        import subprocess, tempfile
+        m = read_form()
+        path = os.path.join(tempfile.gettempdir(), "wm_apply_machine.json")
+        m.save(path)
+        if getattr(sys, "frozen", False):
+            cmd = [sys.executable, "--machine-file", path]
+        else:
+            cmd = [sys.executable, os.path.abspath(__file__), "--machine-file", path]
+        try:
+            subprocess.Popen(cmd)
+            win.close()
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(win, "Aplicar", f"No se pudo relanzar: {e}")
+
+    btn_add.clicked.connect(lambda: _add_sensor_row(SensorSpec("CHn", "accel", tblc.rowCount() + 1)))
+    btn_del.clicked.connect(lambda: tblc.removeRow(tblc.currentRow()) if tblc.currentRow() >= 0 else None)
+    btn_tpl.clicked.connect(lambda: fill_form(SimMachine.plantilla_motor_bomba()))
+    btn_load.clicked.connect(do_load_lib)
+    btn_save.clicked.connect(do_save_lib)
+    btn_apply.clicked.connect(do_apply)
+    refresh_lib(); fill_form(_machine_from_agent())
 
     # --- Monitoreo (scope live) ---
     mon_w = QtWidgets.QWidget(); mon_l = QtWidgets.QVBoxLayout(mon_w)
@@ -421,6 +571,26 @@ def main() -> int:
                     f"{rec.status.size_mb:.1f} MB · {'☁ nube' if up.get('ok') else 'local (pendiente)'}")
             rec_state["rec"] = None; lbl_rec.setText("")
 
+    def set_mode_live(mode):
+        """Cambia el MODO de operación en vivo (estable/arranque/parada) sobre la
+        misma máquina: ajusta el perfil, rebobina el reloj del rotor y reinicia el
+        capturador de transitorio para que Bode/Cascada salgan limpios."""
+        nonlocal tc
+        cf = agent.source.config
+        if hasattr(cf, "speed_profile"):
+            cf.speed_profile = MODE_TO_PROFILE.get(mode, "constant")
+        if hasattr(agent.source, "rewind"):
+            agent.source.rewind()
+        tc = TransientCapture(TransientConfig(fmax_hz=min(2000.0, agent.sample_rate_hz / 2.5)))
+        for cv in casc_curves:
+            cv.setData([], [])
+        c_am.setData([], []); c_ph.setData([], [])
+        lbl_state.setText(f"● {mode}" if agent.source.is_running() else f"modo: {mode}")
+
+    _prof0 = getattr(agent.source.config, "speed_profile", "constant")
+    _inv = {v: k for k, v in MODE_TO_PROFILE.items()}
+    cb_run.blockSignals(True); cb_run.setCurrentText(_inv.get(_prof0, "estable")); cb_run.blockSignals(False)
+    cb_run.currentTextChanged.connect(set_mode_live)
     act_start.triggered.connect(do_start)
     act_stop.triggered.connect(do_stop)
     act_rec.toggled.connect(do_rec)

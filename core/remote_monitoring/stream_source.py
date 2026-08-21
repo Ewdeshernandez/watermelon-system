@@ -115,6 +115,7 @@ class StreamConfig:
     sim_bd_pd: float = 0.34             # (Bd/Pd)·cosφ  → BPFO≈Nb/2·(1-·), BPFI≈Nb/2·(1+·)
     sim_gear_teeth: int = 22            # dientes (GMF = teeth·fr) para gear_mesh
     sim_res_hz: float = 0.0             # resonancia estructural del ring (0 = auto ~0.3·fs)
+    sim_severity: float = 1.0           # escala de severidad del/los fenómeno(s) (0=sano .. 3=severo)
 
     # Perfil de velocidad (solo simulación) — habilita TRANSITORIOS (bode/cascade).
     #   constant         → rpm fija (comportamiento por defecto)
@@ -279,6 +280,14 @@ class SimulatedStreamSource(StreamSource):
     def stop(self) -> None:
         self._running = False
 
+    def rewind(self) -> None:
+        """Reinicia el reloj del rotor (cursor/fase) SIN parar el stream. Se usa
+        al cambiar de MODO (estable→arranque→parada) para que la rampa arranque
+        desde t=0 y el transitorio salga limpio."""
+        self._cursor = 0
+        self._phase = 0.0
+        self._fault_phase = 0.0
+
     @staticmethod
     def _sdof(f1: np.ndarray, fn: float, zeta: float):
         """Respuesta síncrona de rotor (SDOF): amplificación + fase 1X.
@@ -326,6 +335,7 @@ class SimulatedStreamSource(StreamSource):
         # Frecuencia de la falla seleccionada (rodamiento/engrane) y su fase
         # acumulada (continua entre bloques) — habilita envelope y bandas laterales.
         dbk = cfg.defect_by_kind or {}
+        sev = max(0.0, float(cfg.sim_severity))       # escala de severidad de fenómenos
         accel_defect = dbk.get("accel", cfg.defect)   # la falla de rodamiento/engrane vive en accel
         bd = cfg.sim_bd_pd
         nb = max(1, int(cfg.sim_n_balls))
@@ -360,20 +370,20 @@ class SimulatedStreamSource(StreamSource):
                 sig += 0.40 * base * np.sin(2.0 * phase + ph / 2)
                 sig += 0.15 * base * np.sin(0.5 * phase)
                 if defect == "unbalance":
-                    sig += 1.20 * base * A * np.sin(phase + ph + phi_res)
+                    sig += sev * 1.20 * base * A * np.sin(phase + ph + phi_res)
                 elif defect == "misalignment":
-                    sig += 0.90 * base * np.sin(2.0 * phase + ph)
+                    sig += sev * 0.90 * base * np.sin(2.0 * phase + ph)
                 elif defect == "looseness":
                     for h in range(1, 6):                        # tren de armónicos
-                        sig += (0.35 / h) * base * np.sin(h * phase + ph)
-                    sig += 0.30 * base * np.sin(0.5 * phase)     # + ½X
+                        sig += sev * (0.35 / h) * base * np.sin(h * phase + ph)
+                    sig += sev * 0.30 * base * np.sin(0.5 * phase)   # + ½X
                 elif defect == "rub":
-                    sig += 0.45 * base * np.sin(0.5 * phase + ph)
-                    sig += 0.30 * base * np.sin(phase / 3.0)     # 1/3X
+                    sig += sev * 0.45 * base * np.sin(0.5 * phase + ph)
+                    sig += sev * 0.30 * base * np.sin(phase / 3.0)   # 1/3X
                     sig = np.clip(sig, -1.6 * base, 1.6 * base)  # truncado (contacto)
                 elif defect == "oil_whirl" and cfg.sim_critical_rpm > 0:
                     fn1 = cfg.sim_critical_rpm / 60.0
-                    aw = 0.7 * base
+                    aw = sev * 0.7 * base
                     whirl = aw * np.sin(0.45 * phase + ph)
                     whip = 1.4 * aw * np.sin(2.0 * math.pi * fn1 * (idx / fs))
                     on = rpm > 1.8 * cfg.sim_critical_rpm
@@ -388,12 +398,12 @@ class SimulatedStreamSource(StreamSource):
                 sig += 0.55 * vb * np.sin(2.0 * phase + ph)
                 sig += 0.20 * vb * np.sin(3.0 * phase)
                 if defect == "unbalance":
-                    sig += 1.0 * vb * A * np.sin(phase + ph + phi_res)
+                    sig += sev * 1.0 * vb * A * np.sin(phase + ph + phi_res)
                 elif defect == "misalignment":
-                    sig += 1.1 * vb * np.sin(2.0 * phase + ph)
+                    sig += sev * 1.1 * vb * np.sin(2.0 * phase + ph)
                 elif defect == "looseness":
                     for h in range(1, 6):
-                        sig += (0.5 / h) * vb * np.sin(h * phase + ph)
+                        sig += sev * (0.5 / h) * vb * np.sin(h * phase + ph)
                 sig += 0.05 * vb * self._rng.standard_normal(n)
 
             else:  # accel (g, IEPE): alta frecuencia, fallas de rodamiento/engrane
@@ -404,10 +414,10 @@ class SimulatedStreamSource(StreamSource):
                     # bandas laterales f_res ± k·f_falla y envelope a f_falla.
                     pulse = np.exp(6.0 * (np.cos(fault_phase) - 1.0))  # bump agudo
                     load = 1.0 + 0.6 * np.sin(phase + ph) if defect == "bearing_bpfi" else 1.0
-                    sig += 6.0 * ab * load * pulse * carrier
+                    sig += sev * 6.0 * ab * load * pulse * carrier
                 elif fault_phase is not None and defect == "gear_mesh":
                     # GMF = dientes·fr con bandas laterales a 1X (modulación).
-                    sig += 5.0 * ab * (1.0 + 0.4 * np.sin(phase + ph)) * np.sin(fault_phase)
+                    sig += sev * 5.0 * ab * (1.0 + 0.4 * np.sin(phase + ph)) * np.sin(fault_phase)
                 sig += 0.30 * ab * self._rng.standard_normal(n)  # piso banda ancha
 
             out[ci] = sig

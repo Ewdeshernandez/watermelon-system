@@ -74,6 +74,11 @@ jobs:
           printf '@echo off\r\n"%%~dp0WatermelonField.exe" --sens 100 --fs 5120 --chans 4,5,6,7 --names 1Y,1X,2Y,2X --kph-bnc 1 --machine Rotor_Kit_SIGA_1\r\npause\r\n' \
             > out/4_cuatro_radiales_2_cojinetes.bat
 
+          # --- SIMULADOR CONFIGURABLE (v0.4): abrí, editá la máquina en Configuración,
+          #     Guardar / Aplicar y medir. Arranca con la plantilla motor+bomba. ---
+          printf '@echo off\r\n"%%~dp0WatermelonField.exe" --scenario motor_bomba --fs 25600\r\npause\r\n' \
+            > out/0_SIMULADOR_configurable.bat
+
           # --- BANCO DE PRUEBAS: escenarios sim (sin hardware) para probar TODO ---
           mkdir -p out/Banco_de_Pruebas
           scen () { printf '@echo off\r\n"%%~dp0..\\WatermelonField.exe" --fs %s --scenario %s\r\npause\r\n' "$2" "$1" > "out/Banco_de_Pruebas/$3.bat"; }
@@ -109,6 +114,16 @@ jobs:
             4_cuatro_radiales_2_cojinetes.bat -> keyphasor Mod1 ai0 + 4 radiales en Modulo 2
 
           Tambien podes correr WatermelonField.exe directo (doble clic) = 2 acel. por defecto.
+
+          SIMULADOR CONFIGURABLE (0_SIMULADOR_configurable.bat)
+          -----------------------------------------------------
+          Abre la app como una MAQUINA REAL simulada. En la pestaña Configuracion:
+            - edita sensores (Canal, Tipo prox/vel/accel/keyphasor, BNC, Sensib, Angulo)
+            - elige Modo (estable / arranque / parada / arranque_parada)
+            - inyecta fenomenos por tipo de sensor + severidad, criticas, RPM, rampa
+            - Guardar en biblioteca  /  Cargar  /  ">>> Aplicar y medir"
+          Ademas, arriba tenes el combo MODO para cambiar estable/arranque/parada EN VIVO.
+          "Plantilla motor+bomba" carga el tren motor(rodamientos)+bomba(cojinetes planos).
 
           En la app: Iniciar -> Grabar (opcional) -> mira Monitoreo / Orbita / Bode /
           Cascada / Diagnostico. Detener para terminar.
