@@ -828,7 +828,9 @@ def main() -> int:
             keep = fr <= fmax_hz
             cpm = fr[keep] * 60.0                                   # eje en CPM
             spec_curve.setData(cpm, mag[keep])
-            p_spec.setXRange(0, fmax_hz * 60.0, padding=0.02)
+            ymax = float(mag[keep].max()) if mag[keep].size else 1.0
+            p_spec.setXRange(0, fmax_hz * 60.0, padding=0)         # origen X en 0
+            p_spec.setYRange(0, ymax * 1.08 + 1e-9, padding=0)     # base Y en 0 (no flota)
             kconv = 2.0 if kind_s == "prox" else (1.0 / np.sqrt(2.0))
             def _ordamp(o):
                 if not f1:
