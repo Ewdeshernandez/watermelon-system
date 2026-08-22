@@ -201,8 +201,8 @@ def main() -> int:
     m_view = mb.addMenu("&Ver")
     m_help = mb.addMenu("A&yuda")
     act_start = QtGui.QAction("▶ Iniciar", win)
-    act_stop = QtGui.QAction("⏸ Detener", win); act_stop.setEnabled(False)
-    act_rec = QtGui.QAction("⏺ Grabar", win); act_rec.setCheckable(True)
+    act_stop = QtGui.QAction("■ Detener", win); act_stop.setEnabled(False)
+    act_rec = QtGui.QAction("● Grabar", win); act_rec.setCheckable(True)
     act_quit = QtGui.QAction("Salir", win)
     for a in (act_start, act_stop, act_rec):
         m_file.addAction(a)
@@ -559,10 +559,10 @@ def main() -> int:
     sl.addStretch(1); mon_l.addWidget(strip)
     # controles: grabar transitorio + subir pendientes + uso de disco
     ctl = QtWidgets.QHBoxLayout()
-    btn_rec_t = QtWidgets.QPushButton("⏺ Grabar transitorio"); btn_rec_t.setCheckable(True)
+    btn_rec_t = QtWidgets.QPushButton("● Grabar transitorio"); btn_rec_t.setCheckable(True)
     btn_rec_t.setStyleSheet(_redbtn)
-    btn_sync = QtWidgets.QPushButton("☁ Subir pendientes")
-    lbl_disk = QtWidgets.QLabel("💽 —"); lbl_disk.setStyleSheet("color:#64748b;")
+    btn_sync = QtWidgets.QPushButton("↑ Subir pendientes")
+    lbl_disk = QtWidgets.QLabel("Disco: —"); lbl_disk.setStyleSheet("color:#64748b;")
     ctl.addWidget(btn_rec_t); ctl.addWidget(btn_sync); ctl.addStretch(1); ctl.addWidget(lbl_disk)
     mon_l.addLayout(ctl)
     # tabular list — valores actuales (rápido)
@@ -645,7 +645,7 @@ def main() -> int:
 
     # --- Diagnóstico (whirl/whip + críticas) ---
     diag_w = QtWidgets.QWidget(); diag_l = QtWidgets.QVBoxLayout(diag_w)
-    btn_diag = QtWidgets.QPushButton("🔎 Diagnosticar (API 684)")
+    btn_diag = QtWidgets.QPushButton("Diagnosticar (API 684)")
     diag_txt = QtWidgets.QTextEdit(); diag_txt.setReadOnly(True)
     diag_l.addWidget(btn_diag); diag_l.addWidget(diag_txt, 1)
     tabs.addTab(diag_w, "Diagnóstico")
@@ -789,7 +789,7 @@ def main() -> int:
         rb, ab, _ph = tc.bode(cb_casc.currentText())
         crit = [float(rb[i]) for i in diag.detect_criticals(np.asarray(rb, float), np.asarray(ab, float))]
         found = diag.cascade_diagnosis(rr, fr, mat, crit)
-        html = [f"<h3 style='color:{NAVY}'>🔎 Auto-diagnóstico (API 684)</h3>"]
+        html = [f"<h3 style='color:{NAVY}'>Auto-diagnóstico (API 684)</h3>"]
         col = {"info": ACC, "warn": "#b45309", "danger": "#b91c1c"}
         for lvl, title, detail in found:
             html.append(f"<p style='color:{col.get(lvl,'#333')}'><b>{title}</b><br>{detail}</p>")
@@ -834,10 +834,10 @@ def main() -> int:
         try:
             cnt, used = local_usage(agent.instance_id)
             free = free_bytes()
-            lbl_disk.setText(f"💽 {cnt} grabación(es) · {used / 1e6:.0f} MB usados · "
+            lbl_disk.setText(f"Disco: {cnt} grabación(es) · {used / 1e6:.0f} MB usados · "
                              f"{free / 1e6:.0f} MB libres")
             pend = pending_count(agent.instance_id)
-            btn_sync.setText(f"☁ Subir pendientes ({pend})" if pend else "☁ Subir pendientes")
+            btn_sync.setText(f"↑ Subir pendientes ({pend})" if pend else "↑ Subir pendientes")
             btn_sync.setEnabled(pend > 0)
         except Exception:  # noqa: BLE001
             pass
@@ -868,7 +868,7 @@ def main() -> int:
                                     machine=args.machine, rec_id=(tag.strip() or None))
             agent.on_block = rec.append
             rec_state["rec"] = rec
-            lbl_rec.setText(f"🔴 GRABANDO · {rec.rec_id}")
+            lbl_rec.setText(f"● GRABANDO · {rec.rec_id}")
         else:
             rec = rec_state.get("rec"); agent.on_block = None
             if rec:
