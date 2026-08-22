@@ -562,8 +562,9 @@ def main() -> int:
                           " font-family:'Consolas','SF Mono',monospace;")
         v.addWidget(lab); v.addWidget(val); sv[key] = val
         sl.addWidget(w)
-    _cells = [("rpm", "RPM"), ("x1", "1X"), ("estado", "ESTADO"), ("vent", "VENTANA"),
-              ("samp", "SAMPLES"), ("vect", "VECTORES"), ("guard", "GUARDADOS"), ("size", "TAMAÑO")]
+    _cells = [("rpm", "RPM"), ("x1", "1X"), ("estado", "ESTADO"), ("srate", "MUESTREO"),
+              ("vent", "VENTANA"), ("samp", "SAMPLES"), ("vect", "VECTORES"),
+              ("guard", "GUARDADOS"), ("size", "TAMAÑO")]
     for _n, (_k, _l) in enumerate(_cells):
         _statcell(_k, _l, first=(_n == 0))
     sl.addStretch(1); mon_l.addWidget(strip)
@@ -609,7 +610,7 @@ def main() -> int:
         wave_curves.append(p.plot(pen=pg.mkPen(col, width=1.5)))
         pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col))
         p.addItem(pill); wave_pills.append(pill)
-        stt = pg.TextItem("", color=MUTE, anchor=(1, 1)); p.addItem(stt); wave_stats.append(stt)
+        stt = pg.TextItem("", color=MUTE, anchor=(1, 0)); p.addItem(stt); wave_stats.append(stt)
         wave_plots.append(p)
     p_spec = gl.addPlot(row=len(vib), col=0); p_spec.showGrid(x=True, y=True, alpha=0.2)
     p_spec.setLabel("left", "amplitud"); p_spec.setLabel("bottom", "Frecuencia (Hz)")
@@ -619,7 +620,7 @@ def main() -> int:
         ln = pg.InfiniteLine(angle=90, pen=pg.mkPen(col, width=1, style=QtCore.Qt.DashLine))
         p_spec.addItem(ln); return ln
     v1x = _ordline(REDL); v2x = _ordline("#8b5cf6"); v3x = _ordline("#2fa36b")
-    spec_info = pg.TextItem("", color=NAVY, anchor=(0, 0)); p_spec.addItem(spec_info)
+    spec_info = pg.TextItem("", color=NAVY, anchor=(1, 0)); p_spec.addItem(spec_info)
     tabs.addTab(ond_w, "Onda")
 
     onda_focus = {"i": None}    # None = todas; idx = solo esa onda
@@ -756,6 +757,7 @@ def main() -> int:
                 "border:none; font-size:18px; font-weight:800;"
                 " font-family:'Consolas','SF Mono',monospace; color:"
                 + ("#16a34a" if estado_g == "Estable" else "#b45309"))
+            sv["srate"].setText(f"{fs/1000:.1f} kS/s" if fs >= 1000 else f"{fs:.0f} S/s")
             sv["vent"].setText(f"{snap.shape[1] / fs:.1f} s")
             sv["samp"].setText(f"{total:,}")
             sv["vect"].setText(str(vect))
@@ -818,22 +820,28 @@ def main() -> int:
             sig = snap[sel] * 1000.0 / (csel.sensitivity_mv_per_eu or 1.0)
             sig0 = sig - sig.mean()
             fr, mag = _spectrum(sig0, fs)
-            keep = fr <= min(fr[-1], 2000.0)
+            # Fmax de display según el tipo (como la config): prox/vel 60 000 CPM (1000 Hz),
+            # acel banda alta. Se auto-ajusta.
+            kind_s = _ckind(csel)
+            fmax_disp = 1000.0 if kind_s in ("prox", "vel") else min(0.4 * fs, 10000.0)
+            fmax_disp = min(fmax_disp, float(fr[-1]))
+            keep = fr <= fmax_disp
             spec_curve.setData(fr[keep], mag[keep])
-            kprox = 2.0 if _ckind(csel) == "prox" else (1.0 / np.sqrt(2.0))
+            p_spec.setXRange(0, fmax_disp, padding=0.02)
+            kconv = 2.0 if kind_s == "prox" else (1.0 / np.sqrt(2.0))
             def _ordamp(o):
                 if not f1:
                     return 0.0
                 ft = o * f1; b = (fr >= ft * 0.8) & (fr <= ft * 1.2)
-                return float(mag[b].max()) * kprox if b.any() else 0.0
-            overall = float(sig0.max() - sig0.min()) if _ckind(csel) == "prox" else float(np.sqrt(np.mean(sig0 ** 2)))
+                return float(mag[b].max()) * kconv if b.any() else 0.0
+            overall = float(sig0.max() - sig0.min()) if kind_s == "prox" else float(np.sqrt(np.mean(sig0 ** 2)))
             if f1:
                 for ln, o in ((v1x, 1), (v2x, 2), (v3x, 3)):
                     ln.setPos(o * f1); ln.show()
                 spec_info.setText(
-                    f"{csel.name}  ·  Overall {overall:.2f} {csel.units}  ·  "
+                    f"{csel.name} · Overall {overall:.2f} {csel.units} · "
                     f"1X {_ordamp(1):.2f}  2X {_ordamp(2):.2f}  3X {_ordamp(3):.2f}")
-                spec_info.setPos(fr[keep][1] if len(fr[keep]) > 1 else 0, float(mag[keep].max()))
+                spec_info.setPos(fmax_disp, float(mag[keep].max()))
             else:
                 for ln in (v1x, v2x, v3x):
                     ln.hide()
