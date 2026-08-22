@@ -131,12 +131,16 @@ def _stylesheet() -> str:
         selection-background-color: {ACC}; selection-color: {NAVY};
         border: 1px solid {LINE}; }}
     QComboBox::drop-down {{ border: none; width: 20px; }}
-    QTableWidget {{ background: {PANEL}; color: {INK}; gridline-color: {LINE};
-        border: 1px solid {LINE}; border-radius: 8px; }}
-    QTableWidget::item {{ padding: 4px; }}
-    QTableWidget::item:selected {{ background: {PANEL2}; color: {INK}; }}
-    QHeaderView::section {{ background: {NAVY}; color: {MUTE}; padding: 7px;
-        border: none; border-right: 1px solid {LINE}; font-weight: 700; }}
+    QTableWidget {{ background: {PANEL}; color: {INK}; gridline-color: #eef2f8;
+        border: 1px solid {LINE}; border-radius: 10px;
+        alternate-background-color: #f6f9fd; }}
+    QTableWidget::item {{ padding: 6px 8px; }}
+    QTableWidget::item:selected {{ background: #dbe8f7; color: {INK}; }}
+    QHeaderView::section {{ background: {NAVY}; color: #8ec3ef; padding: 9px 8px;
+        border: none; border-right: 1px solid #24344f; font-weight: 700;
+        text-transform: uppercase; letter-spacing: .04em; }}
+    QHeaderView::section:first {{ border-top-left-radius: 9px; }}
+    QHeaderView::section:last {{ border-top-right-radius: 9px; border-right: none; }}
     QTextEdit {{ background: {PANEL}; color: {INK}; border: 1px solid {LINE};
         border-radius: 8px; }}
     QScrollBar:vertical {{ background: {BG}; width: 11px; margin: 0; }}
@@ -577,6 +581,10 @@ def main() -> int:
                                     "2X", "2X fase", "Alarma", "Danger", "Estado"])
     tblt.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
     tblt.verticalHeader().setVisible(False)
+    tblt.setAlternatingRowColors(True)
+    tblt.setShowGrid(False)
+    tblt.setSelectionMode(QtWidgets.QAbstractItemView.NoSelection)
+    tblt.setFocusPolicy(QtCore.Qt.NoFocus)
     mon_l.addWidget(tblt, 1)
     mon_l.addWidget(QtWidgets.QLabel(
         "<i style='color:#64748b'>Amplitudes por norma: desplazamiento en pp (API 670 · "
@@ -742,10 +750,17 @@ def main() -> int:
                         f"{al:g}", f"{dg:g}", estado]
                 for cc, v in enumerate(vals):
                     it = QtWidgets.QTableWidgetItem(v)
-                    if cc == 0:
-                        it.setForeground(QtGui.QColor(SENSOR_COLORS.get(_ckind(c), NAVY)))
-                    if cc == 9:
+                    f = it.font()
+                    if cc == 0:                                  # sensor: cornflower como la web
+                        it.setForeground(QtGui.QColor(CORN)); f.setBold(True); it.setFont(f)
+                    elif cc == 7:                                # Alarma: ámbar
+                        it.setForeground(QtGui.QColor("#e08a1e"))
+                    elif cc == 8:                                # Danger: rojo
+                        it.setForeground(QtGui.QColor("#c0392b"))
+                    elif cc == 9:                                # Estado: chip de color
                         it.setBackground(QtGui.QColor(bgc)); it.setForeground(QtGui.QColor(fgc))
+                        f.setBold(True); it.setFont(f)
+                        it.setTextAlignment(QtCore.Qt.AlignCenter)
                     tblt.setItem(r, cc, it)
         elif cur == "Onda":
             nshow = min(snap.shape[1], int(0.3 * fs))
