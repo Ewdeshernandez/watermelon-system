@@ -595,10 +595,10 @@ def main() -> int:
     # --- Onda (ANÁLISIS: formas de onda + espectro) ---
     ond_w = QtWidgets.QWidget(); ond_l = QtWidgets.QVBoxLayout(ond_w)
     top = QtWidgets.QHBoxLayout()
-    top.addWidget(QtWidgets.QLabel("Espectro (FFT) de:"))
-    combo = QtWidgets.QComboBox(); combo.addItems([c.name for _, c in vib]); top.addWidget(combo)
+    top.addWidget(QtWidgets.QLabel("<b>Formas de onda</b>"))
     top.addWidget(QtWidgets.QLabel(
-        "<i style='color:#64748b'>doble clic en una onda = verla sola · doble clic otra vez = volver</i>"))
+        "<i style='color:#64748b'>doble clic en una onda = verla sola con su espectro (FFT) · "
+        "doble clic otra vez = volver a todas</i>"))
     top.addStretch(1); ond_l.addLayout(top)
     gl = pg.GraphicsLayoutWidget(); ond_l.addWidget(gl, 1)
     wave_curves = []; wave_plots = []; wave_stats = []; wave_pills = []
@@ -629,6 +629,8 @@ def main() -> int:
         fi = onda_focus["i"]
         for idx, p in enumerate(wave_plots):
             p.setVisible(fi is None or idx == fi)
+        p_spec.setVisible(fi is not None)          # espectro SOLO al enfocar (doble clic)
+    p_spec.setVisible(False)                        # arranca oculto (grilla = solo ondas)
 
     def _onda_dblclick(ev):
         try:
@@ -810,45 +812,39 @@ def main() -> int:
                 wave_stats[idx].setText(f"pp  {pp:.2f} {c.units}\nrms {rms:.2f}\nCF  {cf:.2f}")
                 wave_stats[idx].setPos(tms[-1], eu0.max())
                 wave_pills[idx].setPos(tms[0], eu0.max())
-            # Espectro: sigue el canal ENFOCADO (o el del combo). Overall + 1X/2X/3X.
+            # Espectro: SOLO cuando hay una onda enfocada (doble clic). En la grilla no.
             if fi is not None:
                 sel, csel = vib[fi]
-            else:
-                nm = combo.currentText()
-                sel = next((i for i, c in vib if c.name == nm), vib[0][0])
-                csel = next((c for i, c in vib if i == sel), vib[0][1])
-            sig = snap[sel] * 1000.0 / (csel.sensitivity_mv_per_eu or 1.0)
-            sig0 = sig - sig.mean()
-            fr, mag = _spectrum(sig0, fs)
-            # Fmax de display según el tipo (como la config): prox/vel 60 000 CPM (1000 Hz),
-            # acel banda alta. Se auto-ajusta.
-            kind_s = _ckind(csel)
-            fmax_hz = 1000.0 if kind_s in ("prox", "vel") else min(0.4 * fs, 10000.0)
-            fmax_hz = min(fmax_hz, float(fr[-1]))
-            keep = fr <= fmax_hz
-            cpm = fr[keep] * 60.0                                   # eje en CPM
-            spec_curve.setData(cpm, mag[keep])
-            ymax = float(mag[keep].max()) if mag[keep].size else 1.0
-            p_spec.setXRange(0, fmax_hz * 60.0, padding=0)         # origen X en 0
-            p_spec.setYRange(0, ymax * 1.08 + 1e-9, padding=0)     # base Y en 0 (no flota)
-            kconv = 2.0 if kind_s == "prox" else (1.0 / np.sqrt(2.0))
-            def _ordamp(o):
-                if not f1:
-                    return 0.0
-                ft = o * f1; b = (fr >= ft * 0.8) & (fr <= ft * 1.2)
-                return float(mag[b].max()) * kconv if b.any() else 0.0
-            overall = float(sig0.max() - sig0.min()) if kind_s == "prox" else float(np.sqrt(np.mean(sig0 ** 2)))
-            if f1:
-                for ln, o in ((v1x, 1), (v2x, 2), (v3x, 3)):
-                    ln.setPos(o * f1 * 60.0); ln.show()               # órdenes en CPM
-                spec_info.setText(
-                    f"{csel.name}\nOverall {overall:.2f} {csel.units}\n"
-                    f"1X  {_ordamp(1):.2f}\n2X  {_ordamp(2):.2f}\n3X  {_ordamp(3):.2f}")
-                spec_info.setPos(fmax_hz * 60.0, float(mag[keep].max()))
-            else:
-                for ln in (v1x, v2x, v3x):
-                    ln.hide()
-                spec_info.setText("")
+                sig = snap[sel] * 1000.0 / (csel.sensitivity_mv_per_eu or 1.0)
+                sig0 = sig - sig.mean()
+                fr, mag = _spectrum(sig0, fs)
+                kind_s = _ckind(csel)
+                fmax_hz = 1000.0 if kind_s in ("prox", "vel") else min(0.4 * fs, 10000.0)
+                fmax_hz = min(fmax_hz, float(fr[-1]))
+                keep = fr <= fmax_hz
+                cpm = fr[keep] * 60.0                                   # eje en CPM
+                spec_curve.setData(cpm, mag[keep])
+                ymax = float(mag[keep].max()) if mag[keep].size else 1.0
+                p_spec.setXRange(0, fmax_hz * 60.0, padding=0)         # origen X en 0
+                p_spec.setYRange(0, ymax * 1.08 + 1e-9, padding=0)     # base Y en 0
+                kconv = 2.0 if kind_s == "prox" else (1.0 / np.sqrt(2.0))
+                def _ordamp(o):
+                    if not f1:
+                        return 0.0
+                    ft = o * f1; b = (fr >= ft * 0.8) & (fr <= ft * 1.2)
+                    return float(mag[b].max()) * kconv if b.any() else 0.0
+                overall = float(sig0.max() - sig0.min()) if kind_s == "prox" else float(np.sqrt(np.mean(sig0 ** 2)))
+                if f1:
+                    for ln, o in ((v1x, 1), (v2x, 2), (v3x, 3)):
+                        ln.setPos(o * f1 * 60.0); ln.show()               # órdenes en CPM
+                    spec_info.setText(
+                        f"{csel.name}\nOverall {overall:.2f} {csel.units}\n"
+                        f"1X  {_ordamp(1):.2f}\n2X  {_ordamp(2):.2f}\n3X  {_ordamp(3):.2f}")
+                    spec_info.setPos(fmax_hz * 60.0, float(mag[keep].max()))
+                else:
+                    for ln in (v1x, v2x, v3x):
+                        ln.hide()
+                    spec_info.setText("")
         elif orb_ok and cur == "Órbita":
             xi = next((i for i, c in vib if c.name == cb_x.currentText()), vib[0][0])
             yi = next((i for i, c in vib if c.name == cb_y.currentText()), vib[1][0])
