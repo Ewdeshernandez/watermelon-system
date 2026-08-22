@@ -603,7 +603,7 @@ def main() -> int:
     gl = pg.GraphicsLayoutWidget(); ond_l.addWidget(gl, 1)
     wave_curves = []; wave_plots = []; wave_stats = []; wave_pills = []
     for r, (i, c) in enumerate(vib):
-        p = gl.addPlot(row=r, col=0); p.showGrid(x=True, y=True, alpha=0.18)
+        p = gl.addPlot(row=r, col=0); p.showGrid(x=False, y=True, alpha=0.06)  # limpio, casi blanco
         col = SENSOR_COLORS.get(_ckind(c), CORN)
         p.setLabel("left", c.name, color=col)
         p.getAxis("bottom").setStyle(showValues=(r == len(vib) - 1))
@@ -612,8 +612,8 @@ def main() -> int:
         p.addItem(pill); wave_pills.append(pill)
         stt = pg.TextItem("", color=MUTE, anchor=(1, 0)); p.addItem(stt); wave_stats.append(stt)
         wave_plots.append(p)
-    p_spec = gl.addPlot(row=len(vib), col=0); p_spec.showGrid(x=True, y=True, alpha=0.2)
-    p_spec.setLabel("left", "amplitud"); p_spec.setLabel("bottom", "Frecuencia (Hz)")
+    p_spec = gl.addPlot(row=len(vib), col=0); p_spec.showGrid(x=False, y=True, alpha=0.06)
+    p_spec.setLabel("left", "amplitud"); p_spec.setLabel("bottom", "Frecuencia (CPM)")
     p_spec.setTitle("Espectro (FFT)", color=NAVY, size="9pt")
     spec_curve = p_spec.plot(pen=pg.mkPen(AMBER, width=1.4))
     def _ordline(col):
@@ -807,7 +807,7 @@ def main() -> int:
                 curve.setData(tms, eu0)
                 pp = float(eu0.max() - eu0.min()); rms = float(np.sqrt(np.mean(eu0 ** 2)))
                 cf = (float(np.max(np.abs(eu0))) / rms) if rms > 1e-9 else 0.0
-                wave_stats[idx].setText(f"pp {pp:.2f} · rms {rms:.2f} · CF {cf:.2f} {c.units}")
+                wave_stats[idx].setText(f"pp  {pp:.2f} {c.units}\nrms {rms:.2f}\nCF  {cf:.2f}")
                 wave_stats[idx].setPos(tms[-1], eu0.max())
                 wave_pills[idx].setPos(tms[0], eu0.max())
             # Espectro: sigue el canal ENFOCADO (o el del combo). Overall + 1X/2X/3X.
@@ -823,11 +823,12 @@ def main() -> int:
             # Fmax de display según el tipo (como la config): prox/vel 60 000 CPM (1000 Hz),
             # acel banda alta. Se auto-ajusta.
             kind_s = _ckind(csel)
-            fmax_disp = 1000.0 if kind_s in ("prox", "vel") else min(0.4 * fs, 10000.0)
-            fmax_disp = min(fmax_disp, float(fr[-1]))
-            keep = fr <= fmax_disp
-            spec_curve.setData(fr[keep], mag[keep])
-            p_spec.setXRange(0, fmax_disp, padding=0.02)
+            fmax_hz = 1000.0 if kind_s in ("prox", "vel") else min(0.4 * fs, 10000.0)
+            fmax_hz = min(fmax_hz, float(fr[-1]))
+            keep = fr <= fmax_hz
+            cpm = fr[keep] * 60.0                                   # eje en CPM
+            spec_curve.setData(cpm, mag[keep])
+            p_spec.setXRange(0, fmax_hz * 60.0, padding=0.02)
             kconv = 2.0 if kind_s == "prox" else (1.0 / np.sqrt(2.0))
             def _ordamp(o):
                 if not f1:
@@ -837,11 +838,11 @@ def main() -> int:
             overall = float(sig0.max() - sig0.min()) if kind_s == "prox" else float(np.sqrt(np.mean(sig0 ** 2)))
             if f1:
                 for ln, o in ((v1x, 1), (v2x, 2), (v3x, 3)):
-                    ln.setPos(o * f1); ln.show()
+                    ln.setPos(o * f1 * 60.0); ln.show()               # órdenes en CPM
                 spec_info.setText(
-                    f"{csel.name} · Overall {overall:.2f} {csel.units} · "
-                    f"1X {_ordamp(1):.2f}  2X {_ordamp(2):.2f}  3X {_ordamp(3):.2f}")
-                spec_info.setPos(fmax_disp, float(mag[keep].max()))
+                    f"{csel.name}\nOverall {overall:.2f} {csel.units}\n"
+                    f"1X  {_ordamp(1):.2f}\n2X  {_ordamp(2):.2f}\n3X  {_ordamp(3):.2f}")
+                spec_info.setPos(fmax_hz * 60.0, float(mag[keep].max()))
             else:
                 for ln in (v1x, v2x, v3x):
                     ln.hide()
