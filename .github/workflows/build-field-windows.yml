@@ -36,6 +36,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install numpy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx supabase pyinstaller
 
+      - name: Embeber credenciales de nube (anon key) desde GitHub Secrets
+        shell: bash
+        env:
+          SB_URL: ${{ secrets.SUPABASE_URL }}
+          SB_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          printf 'SUPABASE_URL = "%s"\nSUPABASE_KEY = "%s"\n' "$SB_URL" "$SB_KEY" \
+            > core/remote_monitoring/_cloud_config.py
+          echo "cloud: url=$([ -n "$SB_URL" ] && echo SET || echo empty) key=$([ -n "$SB_KEY" ] && echo SET || echo empty)"
+
       - name: Compilar WatermelonField.exe (onefile)
         shell: bash
         run: |
@@ -48,6 +58,7 @@ jobs:
             --hidden-import core.signal_registry \
             --hidden-import core.sensor_map \
             --hidden-import core.supabase_auth \
+            --hidden-import core.remote_monitoring._cloud_config \
             --collect-all nidaqmx \
             --collect-all supabase \
             --copy-metadata supabase \

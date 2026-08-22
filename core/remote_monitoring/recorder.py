@@ -186,6 +186,16 @@ def _sb_client():
         pass
     url = os.environ.get("WM_SUPABASE_URL")
     key = os.environ.get("WM_SUPABASE_KEY")
+    # Credenciales EMBEBIDAS en el build (anon key) → el .exe de campo sube sin
+    # configurar nada. El módulo lo genera el pipeline desde GitHub Secrets; si no
+    # existe, no pasa nada (queda offline).
+    if not (url and key):
+        try:
+            from core.remote_monitoring import _cloud_config as _cc
+            url = url or getattr(_cc, "SUPABASE_URL", "")
+            key = key or getattr(_cc, "SUPABASE_KEY", "")
+        except Exception:  # noqa: BLE001
+            pass
     if url and key:
         try:
             from supabase import create_client
