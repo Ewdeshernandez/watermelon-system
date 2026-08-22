@@ -538,24 +538,30 @@ def main() -> int:
 
     mon_w = QtWidgets.QWidget(); mon_l = QtWidgets.QVBoxLayout(mon_w)
     # tira de estado (RPM · 1X · Estado · Ventana · Samples · Vectores · Guardados · Tamaño)
-    strip = QtWidgets.QFrame()
-    strip.setStyleSheet(f"background:white; border:1px solid {LINE}; border-radius:8px;")
-    sl = QtWidgets.QHBoxLayout(strip); sl.setContentsMargins(4, 6, 4, 6)
+    strip = QtWidgets.QFrame(); strip.setObjectName("statStrip")
+    # selector con # → el borde queda SOLO en el panel, no en cada celda (bug anterior)
+    strip.setStyleSheet(f"QFrame#statStrip {{ background:white; border:1px solid {LINE}; "
+                        f"border-radius:10px; }}")
+    sl = QtWidgets.QHBoxLayout(strip); sl.setContentsMargins(6, 8, 6, 8); sl.setSpacing(0)
     sv = {}
 
-    def _statcell(key, label):
+    def _statcell(key, label, first=False):
         w = QtWidgets.QWidget(); v = QtWidgets.QVBoxLayout(w)
-        v.setContentsMargins(14, 0, 14, 0); v.setSpacing(1)
+        v.setContentsMargins(18, 2, 18, 2); v.setSpacing(2)
+        if not first:                                   # divisor sutil entre métricas
+            w.setStyleSheet("border-left:1px solid #eef2f7;")
         lab = QtWidgets.QLabel(label)
-        lab.setStyleSheet("color:#8a97ab; font-size:9px; font-weight:700; letter-spacing:.05em;")
+        lab.setStyleSheet("border:none; color:#8a97ab; font-size:10px; font-weight:700;"
+                          " letter-spacing:.06em;")
         val = QtWidgets.QLabel("—")
-        val.setStyleSheet(f"color:{NAVY}; font-size:15px; font-weight:800; font-family:monospace;")
+        val.setStyleSheet(f"border:none; color:{NAVY}; font-size:18px; font-weight:800;"
+                          " font-family:'Consolas','SF Mono',monospace;")
         v.addWidget(lab); v.addWidget(val); sv[key] = val
         sl.addWidget(w)
-    for _k, _l in [("rpm", "RPM"), ("x1", "1X"), ("estado", "ESTADO"), ("vent", "VENTANA"),
-                   ("samp", "SAMPLES"), ("vect", "VECTORES"), ("guard", "GUARDADOS"),
-                   ("size", "TAMAÑO")]:
-        _statcell(_k, _l)
+    _cells = [("rpm", "RPM"), ("x1", "1X"), ("estado", "ESTADO"), ("vent", "VENTANA"),
+              ("samp", "SAMPLES"), ("vect", "VECTORES"), ("guard", "GUARDADOS"), ("size", "TAMAÑO")]
+    for _n, (_k, _l) in enumerate(_cells):
+        _statcell(_k, _l, first=(_n == 0))
     sl.addStretch(1); mon_l.addWidget(strip)
     # controles: grabar transitorio + subir pendientes + uso de disco
     ctl = QtWidgets.QHBoxLayout()
@@ -611,8 +617,13 @@ def main() -> int:
         orb_plot = pg.PlotWidget(); orb_plot.setAspectLocked(True)
         orb_plot.showGrid(x=True, y=True, alpha=0.25)
         orb_plot.addLine(x=0, pen=pg.mkPen("#c9d2e0")); orb_plot.addLine(y=0, pen=pg.mkPen("#c9d2e0"))
-        orb_curve = orb_plot.plot(pen=pg.mkPen(CORN, width=1.7))
-        orb_kph = orb_plot.plot(pen=None, symbol="o", symbolBrush=KPH, symbolSize=9)
+        orb_curve = orb_plot.plot(pen=pg.mkPen(CORN, width=1.8))
+        orb_smax = orb_plot.plot(pen=pg.mkPen(REDL, width=1.2, style=QtCore.Qt.DashLine))
+        orb_smax_txt = pg.TextItem("", color=REDL, anchor=(0, 1)); orb_plot.addItem(orb_smax_txt)
+        orb_kph = orb_plot.plot(pen=None, symbol="o", symbolBrush=KPH, symbolSize=8,
+                                symbolPen=pg.mkPen("w", width=1))
+        orb_kph1 = orb_plot.plot(pen=None, symbol="o", symbolBrush=REDL, symbolSize=13,
+                                 symbolPen=pg.mkPen("w", width=2))   # keyphasor de referencia
         orb_l.addWidget(orb_plot, 1)
         tabs.addTab(orb_w, "Órbita")
 
@@ -702,8 +713,10 @@ def main() -> int:
             sv["rpm"].setText(f"{rpm:.0f}" if rpm else "—")
             sv["x1"].setText(f"{f1:.1f} Hz" if f1 else "—")
             sv["estado"].setText(estado_g)
-            sv["estado"].setStyleSheet("font-size:15px;font-weight:800;font-family:monospace;color:"
-                                       + ("#16a34a" if estado_g == "Estable" else "#b45309"))
+            sv["estado"].setStyleSheet(
+                "border:none; font-size:18px; font-weight:800;"
+                " font-family:'Consolas','SF Mono',monospace; color:"
+                + ("#16a34a" if estado_g == "Estable" else "#b45309"))
             sv["vent"].setText(f"{snap.shape[1] / fs:.1f} s")
             sv["samp"].setText(f"{total:,}")
             sv["vect"].setText(str(vect))
@@ -760,9 +773,17 @@ def main() -> int:
             y = snap[yi, -nrev:] * 1000.0 / (sy.sensitivity_mv_per_eu or 1.0)
             x = x - x.mean(); y = y - y.mean()
             orb_curve.setData(x, y)
+            # Smax: máximo desplazamiento (línea del centro al punto + etiqueta)
+            if len(x):
+                rad = np.hypot(x, y); j = int(np.argmax(rad))
+                orb_smax.setData([0, x[j]], [0, y[j]])
+                orb_smax_txt.setText(f"Smax {rad[j]:.2f} {sx.units}")
+                orb_smax_txt.setPos(x[j], y[j])
             if f1 and len(x):
                 spr = max(1, int(fs / f1))
-                orb_kph.setData(x[::spr], y[::spr])
+                kx, ky = x[::spr], y[::spr]
+                orb_kph.setData(kx, ky)
+                orb_kph1.setData(kx[:1], ky[:1])     # primer pulso = referencia (rojo grande)
         elif cur == "Bode":
             rr, am, ph = tc.bode(cb_bode.currentText())
             if len(rr):
