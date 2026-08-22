@@ -196,6 +196,12 @@ def _sb_client():
             key = key or getattr(_cc, "SUPABASE_KEY", "")
         except Exception:  # noqa: BLE001
             pass
+    # Limpiar espacios/saltos de línea (pegado en secrets) y normalizar el esquema
+    url = (url or "").strip().strip('"').strip("'")
+    key = (key or "").strip().strip('"').strip("'")
+    if url and not url.startswith("http"):
+        url = "https://" + url
+    url = url.rstrip("/")
     if url and key:
         try:
             from supabase import create_client
