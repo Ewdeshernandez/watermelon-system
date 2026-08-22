@@ -864,12 +864,42 @@ def main() -> int:
             pass
 
     def do_sync():
+        # 1) ¿hay credenciales/cliente de nube?
+        try:
+            from core.remote_monitoring.recorder import _sb_client
+            client = _sb_client()
+        except Exception:  # noqa: BLE001
+            client = None
+        if client is None:
+            has_url = bool(os.environ.get("WM_SUPABASE_URL"))
+            has_key = bool(os.environ.get("WM_SUPABASE_KEY"))
+            QtWidgets.QMessageBox.warning(
+                win, "Sincronizar — sin conexión a la nube",
+                "No se pudo conectar a Supabase, por eso las grabaciones no suben "
+                "(quedan guardadas local).\n\n"
+                f"• WM_SUPABASE_URL {'OK' if has_url else 'FALTA'}\n"
+                f"• WM_SUPABASE_KEY {'OK' if has_key else 'FALTA'}\n\n"
+                "Pasos:\n"
+                "1) Editá 'Nube__EDITAR_credenciales.bat' con tu Project URL y service_role key "
+                "(Supabase → Project Settings → API).\n"
+                "2) Abrí el programa con 'SIMULADOR_con_NUBE.bat' (ese carga las credenciales).\n"
+                "3) Verificá que haya internet.")
+            _refresh_disk(); return
+        # 2) subir
         try:
             ok, fail = sync_pending(agent.instance_id)
-            QtWidgets.QMessageBox.information(win, "Sincronizar",
-                                             f"Subidas {ok} · fallidas {fail}.")
+            msg = f"Subidas {ok} · fallidas {fail}."
+            if fail:
+                from core.remote_monitoring.recorder import list_recordings, is_synced, upload_recording
+                for m in list_recordings(agent.instance_id):
+                    if not is_synced(m["_dir"]):
+                        r = upload_recording(m["_dir"])
+                        if not r.get("ok"):
+                            msg += f"\n\nMotivo: {r.get('reason', '?')}"
+                            break
+            QtWidgets.QMessageBox.information(win, "Sincronizar", msg)
         except Exception as e:  # noqa: BLE001
-            QtWidgets.QMessageBox.warning(win, "Sincronizar", f"No se pudo subir: {e}")
+            QtWidgets.QMessageBox.warning(win, "Sincronizar", f"No se pudo subir: {type(e).__name__}: {e}")
         _refresh_disk()
 
     def do_rec(checked):

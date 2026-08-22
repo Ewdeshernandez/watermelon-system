@@ -77,7 +77,7 @@ jobs:
 
           # --- SIMULADOR CONFIGURABLE (v0.4): abrí, editá la máquina en Configuración,
           #     Guardar / Aplicar y medir. Arranca con la plantilla motor+bomba. ---
-          printf '@echo off\r\n"%%~dp0WatermelonField.exe" --scenario prox_4brg --fs 5120\r\npause\r\n' \
+          printf '@echo off\r\nif exist "%%~dp0Nube__EDITAR_credenciales.bat" call "%%~dp0Nube__EDITAR_credenciales.bat"\r\n"%%~dp0WatermelonField.exe" --scenario prox_4brg --fs 5120\r\npause\r\n' \
             > out/0_SIMULADOR_proximidad_4cojinetes.bat
 
           # --- NUBE: credenciales (el usuario las pega UNA vez) + lanzadores que suben ---
