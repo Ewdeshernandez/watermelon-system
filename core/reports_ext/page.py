@@ -9,6 +9,7 @@ del branch que hace st.stop() (dejando intacto el reporte del sistema).
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict, List
 
@@ -20,6 +21,120 @@ from core.reports_ext.common import (
     autofill_base_meta, today_str, REVIEWERS, peek_consecutive, commit_consecutive,
 )
 from core.reports_ext.ui import rep_section_header, rep_status_banner
+from core.reports_ext import drafts as _drafts
+
+
+# =====================================================================
+# Autoguardado + borradores (no perder el reporte si se cae la sesión)
+# =====================================================================
+# Prefijos de session_state por familia (metadatos + contenido).
+_FAMILY_PREFIXES = {
+    "diario": ["diario"],
+    "preliminar": ["preliminar", "prel"],
+    "boroscopia": ["boroscopia", "boro"],
+    "alineacion": ["alineacion", "ali"],
+    "mecanico": ["mecanico", "mec"],
+}
+# Subcadenas de llaves que NO se persisten (bytes/uploaders/editores/UI/PDF).
+_SKIP_SUBSTR = ("_editor", "_pdf", "_photos", "_evid", "figt", "_draft",
+                "_pick", "_gen", "_dl", "_meth")
+
+
+def _rep_module(family: str) -> str:
+    return f"campo_{family}"
+
+
+def _family_keys(family: str) -> List[str]:
+    prefs = tuple(p + "_" for p in _FAMILY_PREFIXES.get(family, [family]))
+    return [k for k in list(st.session_state.keys()) if k.startswith(prefs)]
+
+
+def _capture_family_state(family: str) -> Dict[str, Any]:
+    prefs = tuple(p + "_" for p in _FAMILY_PREFIXES.get(family, [family]))
+    out: Dict[str, Any] = {}
+    for k in list(st.session_state.keys()):
+        if not k.startswith(prefs):
+            continue
+        if any(s in k for s in _SKIP_SUBSTR):
+            continue
+        v = st.session_state.get(k)
+        if not (isinstance(v, (str, int, float, bool, list, dict)) or v is None):
+            continue
+        try:
+            json.dumps(v)
+        except Exception:
+            continue
+        out[k] = v
+    return out
+
+
+def _apply_pending(family: str) -> None:
+    """Aplica una restauración/limpieza PENDIENTE antes de instanciar widgets."""
+    pend = st.session_state.pop(f"_rep_pending_{family}", None)
+    if pend is None:
+        return
+    if pend.get("__clear__"):
+        for k in _family_keys(family):
+            if any(s in k for s in ("_draft", "_pick")):
+                continue
+            try:
+                del st.session_state[k]
+            except Exception:
+                pass
+        return
+    for k, v in pend.items():
+        if k == "__clear__":
+            continue
+        st.session_state[k] = v
+
+
+def _draft_bar(family: str) -> None:
+    module = _rep_module(family)
+    with st.expander("💾 Borradores del reporte", expanded=False):
+        st.caption("El reporte se autoguarda solo; si se cae la sesión o hay "
+                   "redeploy, entra a «Recuperar autoguardado». También puedes "
+                   "guardar versiones con nombre. (Las fotos se re-suben.)")
+        r0 = st.columns([1, 1, 2])
+        if r0[0].button("♻ Recuperar autoguardado", key=f"{module}_recover"):
+            _auto = _drafts.load_autosave(module)
+            if _auto:
+                st.session_state[f"_rep_pending_{family}"] = _auto
+                st.rerun()
+            else:
+                st.warning("No hay autoguardado para este reporte.")
+        if r0[1].button("🆕 Nuevo (limpiar)", key=f"{module}_new"):
+            st.session_state[f"_rep_pending_{family}"] = {"__clear__": True}
+            st.rerun()
+        d1, d2 = st.columns([3, 1])
+        _dname = d1.text_input("Nombre del borrador", key=f"{module}_draft_name",
+                               placeholder="ej: SGT-300 B — boroscopia")
+        if d2.button("💾 Guardar", key=f"{module}_draft_save", use_container_width=True):
+            _nm = (_dname or "").strip() or "borrador"
+            if _drafts.save_draft(module, _nm, _capture_family_state(family)):
+                st.success(f"Borrador «{_nm}» guardado.")
+            else:
+                st.error("No se pudo guardar (¿disco lleno?).")
+        _existing = _drafts.list_drafts(module)
+        e1, e2, e3, e4 = st.columns([3, 1, 1, 1])
+        _sel = e1.selectbox("Borradores existentes", ["—"] + _existing,
+                            key=f"{module}_draft_pick")
+        _has = _sel != "—"
+        if e2.button("Cargar", key=f"{module}_draft_load", use_container_width=True,
+                     disabled=not _has):
+            _stt = _drafts.load_draft(module, _sel)
+            if _stt is not None:
+                st.session_state[f"_rep_pending_{family}"] = _stt
+                st.rerun()
+        if e3.button("Duplicar", key=f"{module}_draft_dup", use_container_width=True,
+                     disabled=not _has):
+            _stt = _drafts.load_draft(module, _sel)
+            if _stt is not None:
+                _drafts.save_draft(module, f"{_sel} (copia)", _stt)
+                st.rerun()
+        if e4.button("Eliminar", key=f"{module}_draft_del", use_container_width=True,
+                     disabled=not _has):
+            _drafts.delete_draft(module, _sel)
+            st.rerun()
 
 
 def _current_user_name() -> str:
@@ -316,14 +431,25 @@ _FORMS = {
 
 
 def render_report_family(family: str) -> None:
-    """Renderiza el formulario + generación PDF de la familia elegida."""
+    """Renderiza el formulario + generación PDF de la familia elegida, con
+    autoguardado + borradores (no se pierde el trabajo ante caída/redeploy)."""
     form = _FORMS.get(family)
     if form is None:
         st.error(f"Tipo de reporte desconocido: {family}")
         return
+    # 1) Aplicar restauración/limpieza pendiente ANTES de instanciar widgets.
+    _apply_pending(family)
+    # 2) Barra de borradores (recuperar/guardar/cargar/duplicar/nuevo).
+    _draft_bar(family)
+    # 3) Formulario.
     meta = _meta_form(family)
     st.divider()
     form(meta)
+    # 4) Autoguardado del estado (tolerante a disco lleno; no crashea).
+    try:
+        _drafts.autosave(_rep_module(family), _capture_family_state(family))
+    except Exception:
+        pass
 
 
 __all__ = ["render_report_family"]
