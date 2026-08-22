@@ -591,26 +591,54 @@ def main() -> int:
         "ISO 7919), velocidad/aceleración en RMS (ISO 20816).</i>"))
     tabs.addTab(mon_w, "Monitoreo")
 
-    # --- Onda (ANÁLISIS: forma de onda + espectro) ---
+    # --- Onda (ANÁLISIS: formas de onda + espectro) ---
     ond_w = QtWidgets.QWidget(); ond_l = QtWidgets.QVBoxLayout(ond_w)
     top = QtWidgets.QHBoxLayout()
-    top.addWidget(QtWidgets.QLabel("Espectro de:"))
+    top.addWidget(QtWidgets.QLabel("Espectro (FFT) de:"))
     combo = QtWidgets.QComboBox(); combo.addItems([c.name for _, c in vib]); top.addWidget(combo)
+    top.addWidget(QtWidgets.QLabel(
+        "<i style='color:#64748b'>doble clic en una onda = verla sola · doble clic otra vez = volver</i>"))
     top.addStretch(1); ond_l.addLayout(top)
     gl = pg.GraphicsLayoutWidget(); ond_l.addWidget(gl, 1)
-    wave_curves = []
+    wave_curves = []; wave_plots = []; wave_stats = []; wave_pills = []
     for r, (i, c) in enumerate(vib):
-        p = gl.addPlot(row=r, col=0); p.showGrid(x=True, y=True, alpha=0.25)
+        p = gl.addPlot(row=r, col=0); p.showGrid(x=True, y=True, alpha=0.18)
         col = SENSOR_COLORS.get(_ckind(c), CORN)
         p.setLabel("left", c.name, color=col)
         p.getAxis("bottom").setStyle(showValues=(r == len(vib) - 1))
-        wave_curves.append(p.plot(pen=pg.mkPen(col, width=1.4)))
-    p_spec = gl.addPlot(row=len(vib), col=0); p_spec.showGrid(x=True, y=True, alpha=0.25)
+        wave_curves.append(p.plot(pen=pg.mkPen(col, width=1.5)))
+        pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col))
+        p.addItem(pill); wave_pills.append(pill)
+        stt = pg.TextItem("", color=MUTE, anchor=(1, 1)); p.addItem(stt); wave_stats.append(stt)
+        wave_plots.append(p)
+    p_spec = gl.addPlot(row=len(vib), col=0); p_spec.showGrid(x=True, y=True, alpha=0.2)
     p_spec.setLabel("left", "amplitud"); p_spec.setLabel("bottom", "Frecuencia (Hz)")
+    p_spec.setTitle("Espectro (FFT)", color=NAVY, size="9pt")
     spec_curve = p_spec.plot(pen=pg.mkPen(AMBER, width=1.4))
     v1x = pg.InfiniteLine(angle=90, pen=pg.mkPen(REDL, width=1, style=QtCore.Qt.DashLine))
     p_spec.addItem(v1x)
     tabs.addTab(ond_w, "Onda")
+
+    onda_focus = {"i": None}    # None = todas; idx = solo esa onda
+
+    def _apply_onda_focus():
+        fi = onda_focus["i"]
+        for idx, p in enumerate(wave_plots):
+            p.setVisible(fi is None or idx == fi)
+
+    def _onda_dblclick(ev):
+        try:
+            if not ev.double():
+                return
+            pos = ev.scenePos()
+            for idx, p in enumerate(wave_plots):
+                if p.isVisible() and p.vb.sceneBoundingRect().contains(pos):
+                    onda_focus["i"] = None if onda_focus["i"] == idx else idx
+                    _apply_onda_focus(); return
+            onda_focus["i"] = None; _apply_onda_focus()   # doble clic fuera → volver
+        except Exception:  # noqa: BLE001
+            pass
+    gl.scene().sigMouseClicked.connect(_onda_dblclick)
 
     # --- Órbita (par X/Y, vivo) ---
     orb_ok = len(vib) >= 2
@@ -763,11 +791,21 @@ def main() -> int:
                         it.setTextAlignment(QtCore.Qt.AlignCenter)
                     tblt.setItem(r, cc, it)
         elif cur == "Onda":
-            nshow = min(snap.shape[1], int(0.3 * fs))
+            fi = onda_focus["i"]
+            nshow = min(snap.shape[1], int(0.6 * fs) if fi is not None else int(0.3 * fs))
             tms = np.arange(nshow) / fs * 1000.0
-            for (i, c), curve in zip(vib, wave_curves):
+            for idx, ((i, c), curve) in enumerate(zip(vib, wave_curves)):
+                if fi is not None and idx != fi:
+                    continue                                   # foco: solo la elegida
                 eu = snap[i, -nshow:] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0)
-                curve.setData(tms, eu - eu.mean())
+                eu0 = eu - eu.mean()
+                curve.setData(tms, eu0)
+                # stats pp/rms/CF (como la web) + pill de identidad
+                pp = float(eu0.max() - eu0.min()); rms = float(np.sqrt(np.mean(eu0 ** 2)))
+                cf = (float(np.max(np.abs(eu0))) / rms) if rms > 1e-9 else 0.0
+                wave_stats[idx].setText(f"pp {pp:.2f} · rms {rms:.2f} · CF {cf:.2f}")
+                wave_stats[idx].setPos(tms[-1], eu0.max())
+                wave_pills[idx].setPos(tms[0], eu0.max())
             name = combo.currentText()
             sel = next((i for i, c in vib if c.name == name), vib[0][0])
             sens = next((c.sensitivity_mv_per_eu for i, c in vib if i == sel), 100.0)
@@ -900,6 +938,14 @@ def main() -> int:
                 "2) Abrí el programa con 'SIMULADOR_con_NUBE.bat' (ese carga las credenciales).\n"
                 "3) Verificá que haya internet.")
             _refresh_disk(); return
+        # URL que realmente se está usando (para diagnosticar)
+        used_url = os.environ.get("WM_SUPABASE_URL", "")
+        if not used_url:
+            try:
+                from core.remote_monitoring import _cloud_config as _cc
+                used_url = getattr(_cc, "SUPABASE_URL", "")
+            except Exception:  # noqa: BLE001
+                used_url = "(no embebida)"
         # 2) subir
         try:
             ok, fail = sync_pending(agent.instance_id)
@@ -912,6 +958,9 @@ def main() -> int:
                         if not r.get("ok"):
                             msg += f"\n\nMotivo: {r.get('reason', '?')}"
                             break
+                msg += f"\n\nURL usada: {used_url or '(vacía)'}"
+                msg += ("\n→ Si el host no es 'xxxxx.supabase.co' correcto, el secret "
+                        "SUPABASE_URL está mal. Corregilo en GitHub (Settings → Secrets).")
             QtWidgets.QMessageBox.information(win, "Sincronizar", msg)
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(win, "Sincronizar", f"No se pudo subir: {type(e).__name__}: {e}")
