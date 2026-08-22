@@ -40,7 +40,7 @@ jobs:
         shell: bash
         env:
           SB_URL: ${{ secrets.SUPABASE_URL }}
-          SB_KEY: ${{ secrets.SUPABASE_KEY }}
+          SB_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
           printf 'SUPABASE_URL = "%s"\nSUPABASE_KEY = "%s"\n' "$SB_URL" "$SB_KEY" \
             > core/remote_monitoring/_cloud_config.py
