@@ -615,8 +615,11 @@ def main() -> int:
     p_spec.setLabel("left", "amplitud"); p_spec.setLabel("bottom", "Frecuencia (Hz)")
     p_spec.setTitle("Espectro (FFT)", color=NAVY, size="9pt")
     spec_curve = p_spec.plot(pen=pg.mkPen(AMBER, width=1.4))
-    v1x = pg.InfiniteLine(angle=90, pen=pg.mkPen(REDL, width=1, style=QtCore.Qt.DashLine))
-    p_spec.addItem(v1x)
+    def _ordline(col):
+        ln = pg.InfiniteLine(angle=90, pen=pg.mkPen(col, width=1, style=QtCore.Qt.DashLine))
+        p_spec.addItem(ln); return ln
+    v1x = _ordline(REDL); v2x = _ordline("#8b5cf6"); v3x = _ordline("#2fa36b")
+    spec_info = pg.TextItem("", color=NAVY, anchor=(0, 0)); p_spec.addItem(spec_info)
     tabs.addTab(ond_w, "Onda")
 
     onda_focus = {"i": None}    # None = todas; idx = solo esa onda
@@ -792,7 +795,7 @@ def main() -> int:
                     tblt.setItem(r, cc, it)
         elif cur == "Onda":
             fi = onda_focus["i"]
-            nshow = min(snap.shape[1], int(0.6 * fs) if fi is not None else int(0.3 * fs))
+            nshow = min(snap.shape[1], int(0.6 * fs))          # 600 ms (estándar)
             tms = np.arange(nshow) / fs * 1000.0
             for idx, ((i, c), curve) in enumerate(zip(vib, wave_curves)):
                 if fi is not None and idx != fi:
@@ -800,22 +803,41 @@ def main() -> int:
                 eu = snap[i, -nshow:] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0)
                 eu0 = eu - eu.mean()
                 curve.setData(tms, eu0)
-                # stats pp/rms/CF (como la web) + pill de identidad
                 pp = float(eu0.max() - eu0.min()); rms = float(np.sqrt(np.mean(eu0 ** 2)))
                 cf = (float(np.max(np.abs(eu0))) / rms) if rms > 1e-9 else 0.0
-                wave_stats[idx].setText(f"pp {pp:.2f} · rms {rms:.2f} · CF {cf:.2f}")
+                wave_stats[idx].setText(f"pp {pp:.2f} · rms {rms:.2f} · CF {cf:.2f} {c.units}")
                 wave_stats[idx].setPos(tms[-1], eu0.max())
                 wave_pills[idx].setPos(tms[0], eu0.max())
-            name = combo.currentText()
-            sel = next((i for i, c in vib if c.name == name), vib[0][0])
-            sens = next((c.sensitivity_mv_per_eu for i, c in vib if i == sel), 100.0)
-            fr, mag = _spectrum(snap[sel] * 1000.0 / (sens or 1.0), fs)
+            # Espectro: sigue el canal ENFOCADO (o el del combo). Overall + 1X/2X/3X.
+            if fi is not None:
+                sel, csel = vib[fi]
+            else:
+                nm = combo.currentText()
+                sel = next((i for i, c in vib if c.name == nm), vib[0][0])
+                csel = next((c for i, c in vib if i == sel), vib[0][1])
+            sig = snap[sel] * 1000.0 / (csel.sensitivity_mv_per_eu or 1.0)
+            sig0 = sig - sig.mean()
+            fr, mag = _spectrum(sig0, fs)
             keep = fr <= min(fr[-1], 2000.0)
             spec_curve.setData(fr[keep], mag[keep])
+            kprox = 2.0 if _ckind(csel) == "prox" else (1.0 / np.sqrt(2.0))
+            def _ordamp(o):
+                if not f1:
+                    return 0.0
+                ft = o * f1; b = (fr >= ft * 0.8) & (fr <= ft * 1.2)
+                return float(mag[b].max()) * kprox if b.any() else 0.0
+            overall = float(sig0.max() - sig0.min()) if _ckind(csel) == "prox" else float(np.sqrt(np.mean(sig0 ** 2)))
             if f1:
-                v1x.setPos(f1); v1x.show()
+                for ln, o in ((v1x, 1), (v2x, 2), (v3x, 3)):
+                    ln.setPos(o * f1); ln.show()
+                spec_info.setText(
+                    f"{csel.name}  ·  Overall {overall:.2f} {csel.units}  ·  "
+                    f"1X {_ordamp(1):.2f}  2X {_ordamp(2):.2f}  3X {_ordamp(3):.2f}")
+                spec_info.setPos(fr[keep][1] if len(fr[keep]) > 1 else 0, float(mag[keep].max()))
             else:
-                v1x.hide()
+                for ln in (v1x, v2x, v3x):
+                    ln.hide()
+                spec_info.setText("")
         elif orb_ok and cur == "Órbita":
             xi = next((i for i, c in vib if c.name == cb_x.currentText()), vib[0][0])
             yi = next((i for i, c in vib if c.name == cb_y.currentText()), vib[1][0])

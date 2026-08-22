@@ -186,6 +186,11 @@ def _sb_client():
         pass
     url = os.environ.get("WM_SUPABASE_URL")
     key = os.environ.get("WM_SUPABASE_KEY")
+    # Ignorar valores de EJEMPLO (placeholder) para que no pisen lo embebido.
+    if url and ("TU-PROYECTO" in url or "TU_PROYECTO" in url):
+        url = None
+    if key and ("TU_SERVICE" in key or "TU-SERVICE" in key or "AQUI" in key):
+        key = None
     # Credenciales EMBEBIDAS en el build (anon key) → el .exe de campo sube sin
     # configurar nada. El módulo lo genera el pipeline desde GitHub Secrets; si no
     # existe, no pasa nada (queda offline).
