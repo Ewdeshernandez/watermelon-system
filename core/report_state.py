@@ -711,7 +711,7 @@ def _resolve_state_file(filename: Optional[Path] = None,
 
 def save_report_state(*, items: Any, meta: Any,
                        filename: Path | None = None,
-                       email: Optional[str] = None) -> None:
+                       email: Optional[str] = None) -> bool:
     """Persiste el estado del reporte de forma SEGURA.
 
     Ciclo 17.14.1 HOTFIX:
@@ -748,9 +748,14 @@ def save_report_state(*, items: Any, meta: Any,
     # si no hay espacio, liberamos backups + temporales huérfanos y reintentamos
     # una vez; si aún falla, NO crasheamos — la sesión sigue viva, solo se
     # marca el fallo de persistencia para que la UI avise.
+    # Devuelve True si PERSISTIÓ; False si el disco estaba lleno y no se pudo.
+    # Es CRÍTICO para append_report_item_and_persist: si no persistió, NO debe
+    # recargar de disco (recargaría el estado viejo y botaría el item recién
+    # agregado — bug "dice enviado pero no aparece en Reports").
     try:
         _do_save()
         PERSIST_LAST_ERROR.clear()
+        return True
     except OSError as exc:
         if getattr(exc, "errno", None) == errno.ENOSPC:
             _purge_backups(target)
@@ -762,17 +767,18 @@ def save_report_state(*, items: Any, meta: Any,
             try:
                 _do_save()
                 PERSIST_LAST_ERROR.clear()
+                return True
             except OSError as exc2:
                 PERSIST_LAST_ERROR.clear()
                 PERSIST_LAST_ERROR.update({
                     "enospc": True,
-                    "message": "Disco lleno: no se pudo autoguardar. El trabajo "
-                               "de esta sesión sigue en memoria; libera espacio "
-                               "en el servidor para volver a persistir.",
+                    "message": "Disco lleno: no se pudo guardar. El trabajo de "
+                               "esta sesión sigue en memoria; libera espacio en "
+                               "el servidor para persistir.",
                     "at": datetime.now().isoformat(timespec="seconds"),
                     "detail": str(exc2),
                 })
-            return
+                return False
         raise
 
 
@@ -1018,15 +1024,20 @@ def append_report_item_and_persist(item: Dict[str, Any]) -> bool:
         st.session_state["report_items"].append(item)
 
     try:
-        save_report_state(
+        ok = save_report_state(
             items=st.session_state["report_items"],
             meta=st.session_state.get("report_meta", {}) or {},
         )
-        # Ciclo 17.20: después del save, recargamos los items en forma
-        # LAZY (image_bytes → None, image_file → path al PNG ya escrito).
-        # Esto libera la memoria de los image_bytes inmediatamente, sin
-        # esperar al próximo rerun. Crítico para evitar OOM cuando se
-        # envían muchas imágenes al reporte en la misma sesión.
+    except Exception:
+        ok = False
+
+    # Ciclo 17.20: después del save exitoso, recargamos los items en forma
+    # LAZY (image_bytes → None, image_file → path al PNG ya escrito) para
+    # liberar memoria. PERO SOLO si persistió: si el disco estaba lleno y no
+    # se guardó, recargar traería el estado VIEJO y botaría el item recién
+    # agregado (bug "dice enviado pero no aparece en Reports"). En ese caso
+    # mantenemos el item en memoria para que Reports lo muestre en la sesión.
+    if ok:
         try:
             _persisted = load_report_state()
             _lazy_items = _persisted.get("items", [])
@@ -1034,11 +1045,7 @@ def append_report_item_and_persist(item: Dict[str, Any]) -> bool:
                 st.session_state["report_items"] = _lazy_items
         except Exception:
             pass  # no bloqueante — el save ya fue exitoso
-        return True
-    except Exception:
-        # La memoria ya está actualizada, lo único que falla es
-        # la persistencia a disco — no rompemos al usuario.
-        return False
+    return bool(ok)
 
 
 def _draft_path(draft_name: Any, email: Optional[str] = None) -> Path:
