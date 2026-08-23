@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import threading
 
 import numpy as np
 
@@ -975,25 +976,35 @@ def main() -> int:
                 used_url = getattr(_cc, "SUPABASE_URL", "")
             except Exception:  # noqa: BLE001
                 used_url = "(no embebida)"
-        # 2) subir
-        try:
-            ok, fail = sync_pending(agent.instance_id)
-            msg = f"Subidas {ok} · fallidas {fail}."
-            if fail:
-                from core.remote_monitoring.recorder import list_recordings, is_synced, upload_recording
-                for m in list_recordings(agent.instance_id):
-                    if not is_synced(m["_dir"]):
-                        r = upload_recording(m["_dir"])
-                        if not r.get("ok"):
-                            msg += f"\n\nMotivo: {r.get('reason', '?')}"
-                            break
-                msg += f"\n\nURL usada: {used_url or '(vacía)'}"
-                msg += ("\n→ Si el host no es 'xxxxx.supabase.co' correcto, el secret "
-                        "SUPABASE_URL está mal. Corregilo en GitHub (Settings → Secrets).")
-            QtWidgets.QMessageBox.information(win, "Sincronizar", msg)
-        except Exception as e:  # noqa: BLE001
-            QtWidgets.QMessageBox.warning(win, "Sincronizar", f"No se pudo subir: {type(e).__name__}: {e}")
-        _refresh_disk()
+        # 2) subir EN HILO DE FONDO (no congela la UI)
+        btn_sync.setEnabled(False); btn_sync.setText("Subiendo…")
+        res = {}
+
+        def _work():
+            try:
+                from core.remote_monitoring.recorder import (sync_pending, list_recordings,
+                                                             is_synced, upload_recording)
+                ok, fail = sync_pending(agent.instance_id)
+                msg = f"Subidas {ok} · fallidas {fail}."
+                if fail:
+                    for m in list_recordings(agent.instance_id):
+                        if not is_synced(m["_dir"]):
+                            r = upload_recording(m["_dir"])
+                            if not r.get("ok"):
+                                msg += f"\n\nMotivo: {r.get('reason', '?')}\nURL usada: {used_url or '(vacía)'}"
+                                break
+                res["msg"] = msg
+            except Exception as e:  # noqa: BLE001
+                res["msg"] = f"No se pudo subir: {type(e).__name__}: {e}"
+            res["done"] = True
+        threading.Thread(target=_work, daemon=True).start()
+
+        def _check():
+            if not res.get("done"):
+                QtCore.QTimer.singleShot(300, _check); return
+            btn_sync.setEnabled(True); _refresh_disk()
+            QtWidgets.QMessageBox.information(win, "Sincronizar", res["msg"])
+        QtCore.QTimer.singleShot(300, _check)
 
     def do_rec(checked):
         if checked:
@@ -1015,14 +1026,34 @@ def main() -> int:
             lbl_rec.setText(f"● GRABANDO · {rec.rec_id}")
         else:
             rec = rec_state.get("rec"); agent.on_block = None
+            rec_state["rec"] = None
             if rec:
                 rec.stop()
-                up = upload_recording(rec.dir)
                 rec_state["guard"] = int(rec_state.get("guard", 0)) + 1
-                QtWidgets.QMessageBox.information(
-                    win, "Grabación", f"{rec.rec_id} · {rec.status.duration_s:.0f}s · "
-                    f"{rec.status.size_mb:.1f} MB · {'☁ subida a la nube' if up.get('ok') else 'guardada local (pendiente de subir)'}")
-            rec_state["rec"] = None; lbl_rec.setText("")
+                d, rid = rec.dir, rec.rec_id
+                dur, mb = rec.status.duration_s, rec.status.size_mb
+                lbl_rec.setText("subiendo…")
+                res = {}
+
+                def _work():
+                    try:
+                        res["up"] = upload_recording(d)
+                    except Exception as e:  # noqa: BLE001
+                        res["up"] = {"ok": False, "reason": str(e)}
+                    res["done"] = True
+                threading.Thread(target=_work, daemon=True).start()
+
+                def _check():
+                    if not res.get("done"):
+                        QtCore.QTimer.singleShot(300, _check); return
+                    lbl_rec.setText(""); _refresh_disk()
+                    up = res.get("up", {})
+                    QtWidgets.QMessageBox.information(
+                        win, "Grabación", f"{rid} · {dur:.0f}s · {mb:.1f} MB · "
+                        + ("☁ subida a la nube" if up.get("ok") else "guardada local (pendiente de subir)"))
+                QtCore.QTimer.singleShot(300, _check)
+            else:
+                lbl_rec.setText("")
         _refresh_disk()
 
     def set_mode_live(mode):
