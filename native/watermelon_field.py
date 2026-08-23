@@ -574,8 +574,10 @@ def main() -> int:
     btn_rec_t = QtWidgets.QPushButton("● Grabar transitorio"); btn_rec_t.setCheckable(True)
     btn_rec_t.setStyleSheet(_redbtn)
     btn_sync = QtWidgets.QPushButton("↑ Subir pendientes")
+    btn_clear = QtWidgets.QPushButton("🗑 Limpiar locales")
     lbl_disk = QtWidgets.QLabel("Disco: —"); lbl_disk.setStyleSheet("color:#64748b;")
-    ctl.addWidget(btn_rec_t); ctl.addWidget(btn_sync); ctl.addStretch(1); ctl.addWidget(lbl_disk)
+    ctl.addWidget(btn_rec_t); ctl.addWidget(btn_sync); ctl.addWidget(btn_clear)
+    ctl.addStretch(1); ctl.addWidget(lbl_disk)
     mon_l.addLayout(ctl)
     # tabular list — valores actuales (rápido)
     tblt = QtWidgets.QTableWidget(len(vib), 10)
@@ -1094,6 +1096,43 @@ def main() -> int:
     btn_rec_t.toggled.connect(lambda ch: act_rec.setChecked(ch) if act_rec.isChecked() != ch else None)
     act_rec.toggled.connect(lambda ch: btn_rec_t.setChecked(ch) if btn_rec_t.isChecked() != ch else None)
     btn_sync.clicked.connect(do_sync)
+
+    def do_clear():
+        from core.remote_monitoring.recorder import clear_recordings, pending_count, local_usage
+        cnt, used = local_usage(agent.instance_id)
+        if cnt == 0:
+            QtWidgets.QMessageBox.information(win, "Limpiar locales", "No hay grabaciones locales.")
+            return
+        pend = pending_count(agent.instance_id)
+        m = QtWidgets.QMessageBox(win)
+        m.setWindowTitle("Limpiar grabaciones locales")
+        m.setIcon(QtWidgets.QMessageBox.Warning)
+        m.setText(f"Borrar {cnt} grabación(es) locales ({used/1e6:.0f} MB)?")
+        m.setInformativeText(
+            (f"⚠ Hay {pend} SIN subir a la nube: si las borrás, se pierden.\n\n"
+             if pend else "Las que ya están en la nube quedan en la nube.\n\n")
+            + "¿Continuar?")
+        only = None
+        if pend:
+            bt_all = m.addButton("Borrar TODAS", QtWidgets.QMessageBox.DestructiveRole)
+            bt_synced = m.addButton("Solo las ya subidas", QtWidgets.QMessageBox.AcceptRole)
+            m.addButton("Cancelar", QtWidgets.QMessageBox.RejectRole)
+            m.exec()
+            cl = m.clickedButton()
+            if cl == bt_all: only = False
+            elif cl == bt_synced: only = True
+            else: return
+        else:
+            m.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
+            if m.exec() != QtWidgets.QMessageBox.Yes:
+                return
+            only = False
+        n, freed = clear_recordings(agent.instance_id, only_synced=bool(only))
+        rec_state["guard"] = 0
+        _refresh_disk()
+        QtWidgets.QMessageBox.information(win, "Limpiar locales",
+                                         f"Borradas {n} grabación(es) · liberados {freed/1e6:.0f} MB.")
+    btn_clear.clicked.connect(do_clear)
     _refresh_disk()
     act_quit.triggered.connect(win.close)
     act_about.triggered.connect(lambda: QtWidgets.QMessageBox.about(

@@ -29,6 +29,58 @@ def _persist_root() -> str:
     return os.path.join(root, "remote_monitoring", "transients")
 
 
+# Retención de grabaciones transitorias locales. Por defecto 60 días; se puede
+# ajustar por env (WM_TRANSIENTS_RETENTION_DAYS). Evita que el disco se llene
+# solo (bug real: transients llenó /var/data a 100%).
+RETENTION_DAYS = int(os.environ.get("WM_TRANSIENTS_RETENTION_DAYS", "60") or 60)
+
+
+def purge_old_recordings(days: int = None, root: str = None) -> dict:
+    """Borra grabaciones transitorias locales con más de `days` días (por fecha
+    de modificación de la carpeta rec_*). Devuelve {'deleted','bytes'}.
+
+    Seguro: solo toca .../remote_monitoring/transients/<instance>/rec_*; nunca
+    reportes, snapshots ni configuraciones. No crashea ante errores de FS.
+    Las grabaciones ya suelen estar sincronizadas al bucket en la nube, así que
+    lo local es caché."""
+    days = int(days if days is not None else RETENTION_DAYS)
+    base = root or _persist_root()
+    cutoff = time.time() - days * 86400.0
+    deleted = 0
+    freed = 0
+    try:
+        if not os.path.isdir(base):
+            return {"deleted": 0, "bytes": 0}
+        for inst in os.listdir(base):
+            inst_dir = os.path.join(base, inst)
+            if not os.path.isdir(inst_dir):
+                continue
+            for rid in os.listdir(inst_dir):
+                if not rid.startswith("rec_"):
+                    continue
+                rec_dir = os.path.join(inst_dir, rid)
+                try:
+                    if not os.path.isdir(rec_dir):
+                        continue
+                    if os.path.getmtime(rec_dir) >= cutoff:
+                        continue  # reciente → conservar
+                    sz = 0
+                    for dp, _dn, fns in os.walk(rec_dir):
+                        for fn in fns:
+                            try:
+                                sz += os.path.getsize(os.path.join(dp, fn))
+                            except Exception:
+                                pass
+                    shutil.rmtree(rec_dir, ignore_errors=True)
+                    deleted += 1
+                    freed += sz
+                except Exception:  # noqa: BLE001
+                    continue
+    except Exception:  # noqa: BLE001
+        pass
+    return {"deleted": deleted, "bytes": freed}
+
+
 def free_bytes() -> int:
     """Espacio libre en el disco de persistencia (0 si no se puede leer)."""
     p = _persist_root()
@@ -243,7 +295,7 @@ def upload_recording(rec_dir: str) -> dict:
             raw = open(p, "rb").read()
             key = f"{base}/{fn}"
             if fn == "data.f32":                            # comprime la onda cruda
-                raw = gzip.compress(raw)
+                raw = gzip.compress(raw, compresslevel=1)   # nivel 1: rápido, no acapara CPU/GIL
                 key += ".gz"
             try:
                 store.upload(key, raw, {"upsert": "true"})
