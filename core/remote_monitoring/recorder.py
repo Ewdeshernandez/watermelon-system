@@ -288,15 +288,14 @@ def upload_recording(rec_dir: str) -> dict:
         except Exception:  # noqa: BLE001
             pass
         store = client.storage.from_(_BUCKET)
+        # SIN gzip: comprimir grande acaparaba el CPU/GIL y colgaba la UI. Subimos
+        # la onda cruda tal cual; la red libera el GIL y la interfaz queda fluida.
         for fn in ("manifest.json", "index.jsonl", "data.f32"):
             p = os.path.join(rec_dir, fn)
             if not os.path.isfile(p):
                 continue
             raw = open(p, "rb").read()
             key = f"{base}/{fn}"
-            if fn == "data.f32":                            # comprime la onda cruda
-                raw = gzip.compress(raw, compresslevel=1)   # nivel 1: rápido, no acapara CPU/GIL
-                key += ".gz"
             try:
                 store.upload(key, raw, {"upsert": "true"})
             except Exception:  # noqa: BLE001
@@ -374,16 +373,21 @@ def download_recording(instance_id: str, rec_id: str) -> Optional[str]:
         os.makedirs(dest, exist_ok=True)
         store = client.storage.from_(_BUCKET)
         for fn in ("manifest.json", "index.jsonl", "data.f32"):
-            gz = (fn == "data.f32")
-            key = f"{base}/{fn}" + (".gz" if gz else "")
-            try:
-                raw = store.download(key)
-            except Exception:  # noqa: BLE001
-                if gz:
-                    return None      # la onda cruda es imprescindible
-                continue
-            if gz:
-                raw = gzip.decompress(raw)
+            raw = None
+            if fn == "data.f32":
+                # nuevas grabaciones: crudo; viejas: .gz → probar ambos
+                try:
+                    raw = store.download(f"{base}/data.f32")
+                except Exception:  # noqa: BLE001
+                    try:
+                        raw = gzip.decompress(store.download(f"{base}/data.f32.gz"))
+                    except Exception:  # noqa: BLE001
+                        return None      # la onda cruda es imprescindible
+            else:
+                try:
+                    raw = store.download(f"{base}/{fn}")
+                except Exception:  # noqa: BLE001
+                    continue
             with open(os.path.join(dest, fn), "wb") as f:
                 f.write(raw)
         with open(os.path.join(dest, ".synced"), "w") as f:

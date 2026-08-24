@@ -205,11 +205,13 @@ def main() -> int:
     m_file = mb.addMenu("&Archivo")
     m_view = mb.addMenu("&Ver")
     m_help = mb.addMenu("A&yuda")
-    act_start = QtGui.QAction("▶ Iniciar", win)
-    act_stop = QtGui.QAction("■ Detener", win); act_stop.setEnabled(False)
-    act_save = QtGui.QAction("💾 Guardar datos", win)
+    act_start = QtGui.QAction("Iniciar", win)
+    act_stop = QtGui.QAction("Detener", win); act_stop.setEnabled(False)
+    act_save = QtGui.QAction("Guardar datos", win)
+    act_sync = QtGui.QAction("Subir a la nube", win)
+    act_clear = QtGui.QAction("Borrar datos", win)
     act_quit = QtGui.QAction("Salir", win)
-    for a in (act_start, act_stop, act_save):
+    for a in (act_start, act_stop, act_save, act_sync, act_clear):
         m_file.addAction(a)
     m_file.addSeparator(); m_file.addAction(act_quit)
     act_about = QtGui.QAction("Acerca de Watermelon Field", win)
@@ -219,6 +221,8 @@ def main() -> int:
     tb = win.addToolBar("Principal")
     tb.setMovable(False)
     tb.addAction(act_start); tb.addAction(act_stop); tb.addAction(act_save)
+    tb.addSeparator()
+    tb.addAction(act_sync); tb.addAction(act_clear)
     tb.addSeparator()
     lbl_modo = QtWidgets.QLabel(" Modo: "); lbl_modo.setStyleSheet("color:white;")
     tb.addWidget(lbl_modo)
@@ -345,8 +349,8 @@ def main() -> int:
     rb = QtWidgets.QHBoxLayout()
     btn_add = QtWidgets.QPushButton("+ Sensor"); btn_del = QtWidgets.QPushButton("– Quitar")
     btn_tpl = QtWidgets.QPushButton("Plantilla motor+bomba")
-    btn_save = QtWidgets.QPushButton("💾 Guardar configuración")
-    btn_apply = QtWidgets.QPushButton("▶ Aplicar y medir")
+    btn_save = QtWidgets.QPushButton("Guardar configuración")
+    btn_apply = QtWidgets.QPushButton("Aplicar y medir")
     _redbtn = ("QPushButton{background:#f5484a;color:white;border:none;font-weight:700;"
                "padding:8px 16px;border-radius:7px;} QPushButton:hover{background:#d63c3e;}")
     btn_save.setStyleSheet(_redbtn); btn_apply.setStyleSheet(_redbtn)
@@ -569,13 +573,9 @@ def main() -> int:
     for _n, (_k, _l) in enumerate(_cells):
         _statcell(_k, _l, first=(_n == 0))
     sl.addStretch(1); mon_l.addWidget(strip)
-    # controles: guardar datos (subir corrida) + subir pendientes + limpiar + disco
+    # (Iniciar/Detener/Guardar/Subir a la nube/Borrar datos viven en la barra superior)
     ctl = QtWidgets.QHBoxLayout()
-    btn_save = QtWidgets.QPushButton("💾 Guardar datos"); btn_save.setStyleSheet(_redbtn)
-    btn_sync = QtWidgets.QPushButton("↑ Subir pendientes")
-    btn_clear = QtWidgets.QPushButton("🗑 Limpiar locales")
     lbl_disk = QtWidgets.QLabel("Disco: —"); lbl_disk.setStyleSheet("color:#64748b;")
-    ctl.addWidget(btn_save); ctl.addWidget(btn_sync); ctl.addWidget(btn_clear)
     ctl.addStretch(1); ctl.addWidget(lbl_disk)
     mon_l.addLayout(ctl)
     # tabular list — valores actuales (rápido)
@@ -1008,8 +1008,8 @@ def main() -> int:
             lbl_disk.setText(f"Disco: {cnt} grabación(es) · {used / 1e6:.0f} MB usados · "
                              f"{free / 1e6:.0f} MB libres")
             pend = pending_count(agent.instance_id)
-            btn_sync.setText(f"↑ Subir pendientes ({pend})" if pend else "↑ Subir pendientes")
-            btn_sync.setEnabled(pend > 0)
+            act_sync.setText(f"Subir a la nube ({pend})" if pend else "Subir a la nube")
+            act_sync.setEnabled(pend > 0)
         except Exception:  # noqa: BLE001
             pass
 
@@ -1044,7 +1044,7 @@ def main() -> int:
             except Exception:  # noqa: BLE001
                 used_url = "(no embebida)"
         # 2) subir EN HILO DE FONDO (no congela la UI)
-        btn_sync.setEnabled(False); btn_sync.setText("Subiendo…")
+        act_sync.setEnabled(False); act_sync.setText("Subiendo…")
         res = {}
 
         def _work():
@@ -1068,7 +1068,7 @@ def main() -> int:
         def _check():
             if not res.get("done"):
                 QtCore.QTimer.singleShot(300, _check); return
-            btn_sync.setEnabled(True); btn_sync.setText("↑ Subir pendientes"); _refresh_disk()
+            act_sync.setEnabled(True); act_sync.setText("Subir a la nube"); _refresh_disk()
             ok, fail = res.get("ok", 0), res.get("fail", 0)
             if res.get("err"):
                 _nice("Sincronizar", f"<b style='color:#b91c1c'>No se pudo subir</b><br>"
@@ -1163,8 +1163,7 @@ def main() -> int:
     act_start.triggered.connect(do_start)
     act_stop.triggered.connect(do_stop)
     act_save.triggered.connect(do_save)     # barra: Guardar datos
-    btn_save.clicked.connect(do_save)        # módulo Monitoreo: Guardar datos
-    btn_sync.clicked.connect(do_sync)
+    act_sync.triggered.connect(do_sync)     # barra: Subir a la nube
 
     def do_clear():
         from core.remote_monitoring.recorder import clear_recordings, pending_count, local_usage
@@ -1201,7 +1200,7 @@ def main() -> int:
         _refresh_disk()
         QtWidgets.QMessageBox.information(win, "Limpiar locales",
                                          f"Borradas {n} grabación(es) · liberados {freed/1e6:.0f} MB.")
-    btn_clear.clicked.connect(do_clear)
+    act_clear.triggered.connect(do_clear)   # barra: Borrar datos
     _refresh_disk()
     act_quit.triggered.connect(win.close)
     act_about.triggered.connect(lambda: QtWidgets.QMessageBox.about(
