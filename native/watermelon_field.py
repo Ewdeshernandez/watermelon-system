@@ -649,28 +649,71 @@ def main() -> int:
             pass
     gl.scene().sigMouseClicked.connect(_onda_dblclick)
 
-    # --- Órbita (par X/Y, vivo) ---
-    orb_ok = len(vib) >= 2
+    # --- Órbita (grilla de pares X/Y orientados por ángulo de sonda, estilo web) ---
+    import math as _mo
+
+    def _probe_angle(name):
+        nm = (name or "").upper()
+        if "Y" in nm: return 315.0     # 45°L
+        if "X" in nm: return 45.0      # 45°R
+        if "V" in nm: return 0.0       # vertical (TDC)
+        if "H" in nm: return 90.0      # horizontal (lado R)
+        return 0.0
+    _byb = {}
+    for i, c in vib:
+        nm = c.name.upper()
+        dg = "".join(ch for ch in nm if ch.isdigit()); brg = int(dg) if dg else 0
+        ax = "Y" if ("Y" in nm or "V" in nm) else ("X" if ("X" in nm or "H" in nm) else "?")
+        if ax != "?":
+            _byb.setdefault(brg, {})[ax] = (i, c)
+    orb_pairs = [(brg, _byb[brg]["Y"], _byb[brg]["X"])
+                 for brg in sorted(_byb) if "Y" in _byb[brg] and "X" in _byb[brg]]
+    orb_ok = len(orb_pairs) >= 1
+    orb_items = []
+    orb_focus = {"k": None}
     if orb_ok:
         orb_w = QtWidgets.QWidget(); orb_l = QtWidgets.QVBoxLayout(orb_w)
-        xy = QtWidgets.QHBoxLayout()
-        xy.addWidget(QtWidgets.QLabel("X:"))
-        cb_x = QtWidgets.QComboBox(); cb_x.addItems([c.name for _, c in vib]); cb_x.setCurrentIndex(0)
-        xy.addWidget(cb_x); xy.addWidget(QtWidgets.QLabel("Y:"))
-        cb_y = QtWidgets.QComboBox(); cb_y.addItems([c.name for _, c in vib]); cb_y.setCurrentIndex(1)
-        xy.addWidget(cb_y); xy.addStretch(1); orb_l.addLayout(xy)
-        orb_plot = pg.PlotWidget(); orb_plot.setAspectLocked(True)
-        orb_plot.showGrid(x=True, y=True, alpha=0.25)
-        orb_plot.addLine(x=0, pen=pg.mkPen("#c9d2e0")); orb_plot.addLine(y=0, pen=pg.mkPen("#c9d2e0"))
-        orb_curve = orb_plot.plot(pen=pg.mkPen(CORN, width=1.8))
-        orb_smax = orb_plot.plot(pen=pg.mkPen(REDL, width=1.2, style=QtCore.Qt.DashLine))
-        orb_smax_txt = pg.TextItem("", color=REDL, anchor=(0, 1)); orb_plot.addItem(orb_smax_txt)
-        orb_kph = orb_plot.plot(pen=None, symbol="o", symbolBrush=KPH, symbolSize=8,
-                                symbolPen=pg.mkPen("w", width=1))
-        orb_kph1 = orb_plot.plot(pen=None, symbol="o", symbolBrush=REDL, symbolSize=13,
-                                 symbolPen=pg.mkPen("w", width=2))   # keyphasor de referencia
-        orb_l.addWidget(orb_plot, 1)
+        orb_l.addWidget(QtWidgets.QLabel(
+            "<b>Órbitas</b> <i style='color:#64748b'>— orientadas al ángulo de sonda "
+            "(Y=45°L · X=45°R) · doble clic = ver una sola · doble clic otra vez = volver</i>"))
+        gl_orb = pg.GraphicsLayoutWidget(); orb_l.addWidget(gl_orb, 1)
+        ncol = 2 if len(orb_pairs) > 1 else 1
+        for k, (brg, (yi, yc), (xi, xc)) in enumerate(orb_pairs):
+            p = gl_orb.addPlot(row=k // ncol, col=k % ncol)
+            p.setAspectLocked(True); p.showGrid(x=True, y=True, alpha=0.12)
+            p.hideAxis("left"); p.hideAxis("bottom"); p.setMenuEnabled(False)
+            p.addLine(x=0, pen=pg.mkPen("#e6ecf5")); p.addLine(y=0, pen=pg.mkPen("#e6ecf5"))
+            it = dict(
+                p=p, yi=yi, xi=xi, yc=yc, xc=xc, brg=brg,
+                aY=_mo.radians(_probe_angle(yc.name)), aX=_mo.radians(_probe_angle(xc.name)),
+                curve=p.plot(pen=pg.mkPen(CORN, width=1.7)),
+                smax=p.plot(pen=pg.mkPen(REDL, width=1.1, style=QtCore.Qt.DashLine)),
+                smax_txt=pg.TextItem("", color=REDL, anchor=(0.5, 1.2)),
+                kph=p.plot(pen=None, symbol="o", symbolBrush=KPH, symbolSize=7, symbolPen=pg.mkPen("w", width=1)),
+                kph1=p.plot(pen=None, symbol="o", symbolBrush=REDL, symbolSize=12, symbolPen=pg.mkPen("w", width=2)),
+                pill=pg.TextItem(f"Cojinete {brg}", color="w", anchor=(0, 0), fill=pg.mkBrush(NAVY)))
+            p.addItem(it["smax_txt"]); p.addItem(it["pill"])
+            orb_items.append(it)
         tabs.addTab(orb_w, "Órbita")
+
+        def _apply_orb_focus():
+            fk = orb_focus["k"]
+            for idx, it in enumerate(orb_items):
+                it["p"].setVisible(fk is None or idx == fk)
+
+        def _orb_dblclick(ev):
+            try:
+                if not ev.double():
+                    return
+                pos = ev.scenePos()
+                for idx, it in enumerate(orb_items):
+                    if it["p"].isVisible() and it["p"].vb.sceneBoundingRect().contains(pos):
+                        orb_focus["k"] = None if orb_focus["k"] == idx else idx
+                        _apply_orb_focus(); return
+                orb_focus["k"] = None; _apply_orb_focus()
+            except Exception:  # noqa: BLE001
+                pass
+        gl_orb.scene().sigMouseClicked.connect(_orb_dblclick)
 
     # --- Bode (amp + fase vs rpm, se llena en runup) ---
     bode_w = QtWidgets.QWidget(); bode_l = QtWidgets.QVBoxLayout(bode_w)
@@ -849,26 +892,30 @@ def main() -> int:
                         ln.hide()
                     spec_info.setText("")
         elif orb_ok and cur == "Órbita":
-            xi = next((i for i, c in vib if c.name == cb_x.currentText()), vib[0][0])
-            yi = next((i for i, c in vib if c.name == cb_y.currentText()), vib[1][0])
-            nrev = min(snap.shape[1], int((12 * fs / max(rpm, 1)) * 60) if rpm else int(0.3 * fs))
-            sx = next(cc for ii, cc in vib if ii == xi)
-            sy = next(cc for ii, cc in vib if ii == yi)
-            x = snap[xi, -nrev:] * 1000.0 / (sx.sensitivity_mv_per_eu or 1.0)
-            y = snap[yi, -nrev:] * 1000.0 / (sy.sensitivity_mv_per_eu or 1.0)
-            x = x - x.mean(); y = y - y.mean()
-            orb_curve.setData(x, y)
-            # Smax: máximo desplazamiento (línea del centro al punto + etiqueta)
-            if len(x):
-                rad = np.hypot(x, y); j = int(np.argmax(rad))
-                orb_smax.setData([0, x[j]], [0, y[j]])
-                orb_smax_txt.setText(f"Smax {rad[j]:.2f} {sx.units}")
-                orb_smax_txt.setPos(x[j], y[j])
-            if f1 and len(x):
-                spr = max(1, int(fs / f1))
-                kx, ky = x[::spr], y[::spr]
-                orb_kph.setData(kx, ky)
-                orb_kph1.setData(kx[:1], ky[:1])     # primer pulso = referencia (rojo grande)
+            fk = orb_focus["k"]
+            nrev = min(snap.shape[1], int((8 * fs / max(rpm, 1)) * 60) if rpm else int(0.4 * fs))
+            for idx, it in enumerate(orb_items):
+                if fk is not None and idx != fk:
+                    continue
+                yc, xc = it["yc"], it["xc"]
+                Y = snap[it["yi"], -nrev:] * 1000.0 / (yc.sensitivity_mv_per_eu or 1.0)
+                X = snap[it["xi"], -nrev:] * 1000.0 / (xc.sensitivity_mv_per_eu or 1.0)
+                Y = Y - Y.mean(); X = X - X.mean()
+                # orientar al marco físico: proyectar cada sonda a su ángulo (desde TDC)
+                px = X * _mo.sin(it["aX"]) + Y * _mo.sin(it["aY"])
+                py = X * _mo.cos(it["aX"]) + Y * _mo.cos(it["aY"])
+                it["curve"].setData(px, py)
+                if len(px):
+                    rad = np.hypot(px, py); j = int(np.argmax(rad))
+                    it["smax"].setData([0, px[j]], [0, py[j]])
+                    it["smax_txt"].setText(f"Smax {rad[j]:.2f} {xc.units}")
+                    it["smax_txt"].setPos(px[j], py[j])
+                    it["pill"].setPos(float(px.min()), float(py.max()))
+                if f1 and len(px):
+                    spr = max(1, int(fs / f1))
+                    kx, ky = px[::spr], py[::spr]
+                    it["kph"].setData(kx, ky)
+                    it["kph1"].setData(kx[:1], ky[:1])   # 1er pulso = referencia (rojo grande)
         elif cur == "Bode":
             rr, am, ph = tc.bode(cb_bode.currentText())
             if len(rr):
@@ -912,7 +959,7 @@ def main() -> int:
             return
         act_start.setEnabled(False); act_stop.setEnabled(True)
         lbl_state.setText("● adquiriendo (hilo de fondo)")
-        timer.start(60)
+        timer.start(90)     # ~11 fps: fluido y más liviano de CPU/RAM (PCs modestas)
         # NO auto-subir al iniciar: subir pendientes grandes en background acaparaba
         # la CPU (gzip) y colgaba la UI. La subida es ahora SOLO manual (botón
         # "Subir pendientes") o automática al PARAR una grabación.
