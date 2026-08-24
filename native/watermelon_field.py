@@ -207,9 +207,9 @@ def main() -> int:
     m_help = mb.addMenu("A&yuda")
     act_start = QtGui.QAction("▶ Iniciar", win)
     act_stop = QtGui.QAction("■ Detener", win); act_stop.setEnabled(False)
-    act_rec = QtGui.QAction("● Grabar", win); act_rec.setCheckable(True)
+    act_save = QtGui.QAction("💾 Guardar datos", win)
     act_quit = QtGui.QAction("Salir", win)
-    for a in (act_start, act_stop, act_rec):
+    for a in (act_start, act_stop, act_save):
         m_file.addAction(a)
     m_file.addSeparator(); m_file.addAction(act_quit)
     act_about = QtGui.QAction("Acerca de Watermelon Field", win)
@@ -218,7 +218,7 @@ def main() -> int:
     # ---------------- Toolbar ----------------
     tb = win.addToolBar("Principal")
     tb.setMovable(False)
-    tb.addAction(act_start); tb.addAction(act_stop); tb.addAction(act_rec)
+    tb.addAction(act_start); tb.addAction(act_stop); tb.addAction(act_save)
     tb.addSeparator()
     lbl_modo = QtWidgets.QLabel(" Modo: "); lbl_modo.setStyleSheet("color:white;")
     tb.addWidget(lbl_modo)
@@ -569,14 +569,13 @@ def main() -> int:
     for _n, (_k, _l) in enumerate(_cells):
         _statcell(_k, _l, first=(_n == 0))
     sl.addStretch(1); mon_l.addWidget(strip)
-    # controles: grabar transitorio + subir pendientes + uso de disco
+    # controles: guardar datos (subir corrida) + subir pendientes + limpiar + disco
     ctl = QtWidgets.QHBoxLayout()
-    btn_rec_t = QtWidgets.QPushButton("● Grabar transitorio"); btn_rec_t.setCheckable(True)
-    btn_rec_t.setStyleSheet(_redbtn)
+    btn_save = QtWidgets.QPushButton("💾 Guardar datos"); btn_save.setStyleSheet(_redbtn)
     btn_sync = QtWidgets.QPushButton("↑ Subir pendientes")
     btn_clear = QtWidgets.QPushButton("🗑 Limpiar locales")
     lbl_disk = QtWidgets.QLabel("Disco: —"); lbl_disk.setStyleSheet("color:#64748b;")
-    ctl.addWidget(btn_rec_t); ctl.addWidget(btn_sync); ctl.addWidget(btn_clear)
+    ctl.addWidget(btn_save); ctl.addWidget(btn_sync); ctl.addWidget(btn_clear)
     ctl.addStretch(1); ctl.addWidget(lbl_disk)
     mon_l.addLayout(ctl)
     # tabular list — valores actuales (rápido)
@@ -759,6 +758,10 @@ def main() -> int:
     from core.remote_monitoring.keyphasor import one_x_vector
 
     def update():
+        # indicador en vivo de captura (se graba desde Iniciar) — así se ve que NO se pierde data
+        _sess = rec_state.get("session")
+        if _sess is not None and getattr(_sess, "open", False):
+            lbl_rec.setText(f"● capturando · {_sess.status.duration_s:.0f}s · {_sess.status.size_mb:.1f} MB")
         snap = agent.snapshot(2.0)
         if snap.shape[1] < 16:
             return
@@ -952,17 +955,32 @@ def main() -> int:
     btn_diag.clicked.connect(run_diag)
 
     def do_start():
+        # Pide nombre/consecutivo de la corrida y GRABA DESDE EL INICIO a disco
+        # (así no se pierde nada, aunque guardes/subas después).
+        import time as _t
+        default = f"{args.machine}_{_t.strftime('%Y%m%d_%H%M%S')}"
+        tag, ok = QtWidgets.QInputDialog.getText(
+            win, "Iniciar corrida", "Nombre / consecutivo de la corrida:", text=default)
+        if not ok:
+            return
         try:
             agent.start()
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.critical(win, "Error", f"No se pudo iniciar: {e}")
             return
+        try:
+            ch_meta = [{"name": c.name, "units": c.units, "coupling": c.coupling,
+                        "bnc_port": c.bnc_port, "sensitivity_mv_per_eu": float(c.sensitivity_mv_per_eu or 0)}
+                       for c in agent.channels]
+            rec = TransientRecorder(agent.instance_id, agent.sample_rate_hz, ch_meta,
+                                    machine=args.machine, rec_id=(tag.strip() or None))
+            agent.on_block = rec.append          # captura CADA bloque desde el inicio
+            rec_state["session"] = rec; rec_state["saved"] = False
+        except Exception:  # noqa: BLE001
+            rec_state["session"] = None
         act_start.setEnabled(False); act_stop.setEnabled(True)
-        lbl_state.setText("● adquiriendo (hilo de fondo)")
+        lbl_state.setText("● capturando datos (desde el inicio)")
         timer.start(90)     # ~11 fps: fluido y más liviano de CPU/RAM (PCs modestas)
-        # NO auto-subir al iniciar: subir pendientes grandes en background acaparaba
-        # la CPU (gzip) y colgaba la UI. La subida es ahora SOLO manual (botón
-        # "Subir pendientes") o automática al PARAR una grabación.
 
     def do_stop():
         timer.stop()
@@ -970,10 +988,18 @@ def main() -> int:
             agent.stop()
         except Exception:  # noqa: BLE001
             pass
+        agent.on_block = None
+        rec = rec_state.get("session")
+        if rec and getattr(rec, "open", False):
+            rec.stop()
         act_start.setEnabled(True); act_stop.setEnabled(False)
-        lbl_state.setText("detenido")
-        if act_rec.isChecked():
-            act_rec.setChecked(False)
+        lbl_rec.setText("")
+        if rec:
+            lbl_state.setText(f"detenido · {rec.status.duration_s:.0f}s · "
+                              f"{rec.status.size_mb:.1f} MB · listo para 💾 Guardar datos")
+        else:
+            lbl_state.setText("detenido")
+        _refresh_disk()
 
     def _refresh_disk():
         try:
@@ -1047,55 +1073,47 @@ def main() -> int:
             QtWidgets.QMessageBox.information(win, "Sincronizar", res["msg"])
         QtCore.QTimer.singleShot(300, _check)
 
-    def do_rec(checked):
-        if checked:
-            # pedir nombre/consecutivo (como la web) — default con timestamp
-            import time as _t
-            default = f"{args.machine}_{_t.strftime('%Y%m%d_%H%M%S')}"
-            tag, ok = QtWidgets.QInputDialog.getText(
-                win, "Grabar transitorio", "Nombre / consecutivo de la grabación:", text=default)
-            if not ok:
-                btn_rec_t.setChecked(False); act_rec.setChecked(False)
-                return
-            ch_meta = [{"name": c.name, "units": c.units, "coupling": c.coupling,
-                        "bnc_port": c.bnc_port, "sensitivity_mv_per_eu": float(c.sensitivity_mv_per_eu or 0)}
-                       for c in agent.channels]
-            rec = TransientRecorder(agent.instance_id, agent.sample_rate_hz, ch_meta,
-                                    machine=args.machine, rec_id=(tag.strip() or None))
-            agent.on_block = rec.append
-            rec_state["rec"] = rec
-            lbl_rec.setText(f"● GRABANDO · {rec.rec_id}")
-        else:
-            rec = rec_state.get("rec"); agent.on_block = None
-            rec_state["rec"] = None
-            if rec:
-                rec.stop()
+    def do_save():
+        # 1) Si TODAVÍA está adquiriendo → hay que detener primero
+        if act_stop.isEnabled():
+            QtWidgets.QMessageBox.warning(
+                win, "Guardar datos",
+                "Primero detené la adquisición con ■ Detener, y después Guardá los datos.")
+            return
+        # 2) ¿hay una corrida nueva (detenida, sin guardar)?
+        rec = rec_state.get("session")
+        if not rec or rec_state.get("saved"):
+            QtWidgets.QMessageBox.information(
+                win, "Guardar datos",
+                "No hay una corrida nueva para guardar.\n\nHacé: ▶ Iniciar → (medí) → ■ Detener → 💾 Guardar datos.")
+            return
+        # 3) subir a la nube EN HILO (no congela)
+        d, rid = rec.dir, rec.rec_id
+        dur, mb = rec.status.duration_s, rec.status.size_mb
+        btn_save.setEnabled(False); lbl_rec.setText("guardando…")
+        res = {}
+
+        def _work():
+            try:
+                res["up"] = upload_recording(d)
+            except Exception as e:  # noqa: BLE001
+                res["up"] = {"ok": False, "reason": str(e)}
+            res["done"] = True
+        threading.Thread(target=_work, daemon=True).start()
+
+        def _check():
+            if not res.get("done"):
+                QtCore.QTimer.singleShot(300, _check); return
+            btn_save.setEnabled(True); lbl_rec.setText(""); _refresh_disk()
+            up = res.get("up", {})
+            if up.get("ok"):
+                rec_state["saved"] = True
                 rec_state["guard"] = int(rec_state.get("guard", 0)) + 1
-                d, rid = rec.dir, rec.rec_id
-                dur, mb = rec.status.duration_s, rec.status.size_mb
-                lbl_rec.setText("subiendo…")
-                res = {}
-
-                def _work():
-                    try:
-                        res["up"] = upload_recording(d)
-                    except Exception as e:  # noqa: BLE001
-                        res["up"] = {"ok": False, "reason": str(e)}
-                    res["done"] = True
-                threading.Thread(target=_work, daemon=True).start()
-
-                def _check():
-                    if not res.get("done"):
-                        QtCore.QTimer.singleShot(300, _check); return
-                    lbl_rec.setText(""); _refresh_disk()
-                    up = res.get("up", {})
-                    QtWidgets.QMessageBox.information(
-                        win, "Grabación", f"{rid} · {dur:.0f}s · {mb:.1f} MB · "
-                        + ("☁ subida a la nube" if up.get("ok") else "guardada local (pendiente de subir)"))
-                QtCore.QTimer.singleShot(300, _check)
-            else:
-                lbl_rec.setText("")
-        _refresh_disk()
+            QtWidgets.QMessageBox.information(
+                win, "Guardar datos", f"{rid} · {dur:.0f}s · {mb:.1f} MB · "
+                + ("☁ guardado en la nube" if up.get("ok")
+                   else f"guardado local (pendiente de subir)\n{up.get('reason','')}"))
+        QtCore.QTimer.singleShot(300, _check)
 
     def set_mode_live(mode):
         """Cambia el MODO de operación en vivo (estable/arranque/parada) sobre la
@@ -1130,10 +1148,8 @@ def main() -> int:
     cb_run.currentTextChanged.connect(set_mode_live)
     act_start.triggered.connect(do_start)
     act_stop.triggered.connect(do_stop)
-    act_rec.toggled.connect(do_rec)
-    # Espejo del botón "Grabar transitorio" del módulo Monitoreo con el de la barra
-    btn_rec_t.toggled.connect(lambda ch: act_rec.setChecked(ch) if act_rec.isChecked() != ch else None)
-    act_rec.toggled.connect(lambda ch: btn_rec_t.setChecked(ch) if btn_rec_t.isChecked() != ch else None)
+    act_save.triggered.connect(do_save)     # barra: Guardar datos
+    btn_save.clicked.connect(do_save)        # módulo Monitoreo: Guardar datos
     btn_sync.clicked.connect(do_sync)
 
     def do_clear():
