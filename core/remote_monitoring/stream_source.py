@@ -389,6 +389,20 @@ class SimulatedStreamSource(StreamSource):
                     on = rpm > 1.8 * cfg.sim_critical_rpm
                     lock = rpm > 2.2 * cfg.sim_critical_rpm
                     sig += np.where(on, np.where(lock, whip, whirl), 0.0)
+                # SHAFT CENTERLINE: DC de posición del muñón. En reposo asienta abajo
+                # (alta excentricidad); al subir rpm "flota" hacia el centro con ángulo
+                # de attitude. Proyectado al ángulo de la sonda → mueve el gap medio.
+                nm = (ch.name or "").upper()
+                a_probe = math.radians(315.0 if "Y" in nm else (45.0 if "X" in nm else
+                                       (0.0 if "V" in nm else (90.0 if "H" in nm else 0.0))))
+                rc = cfg.sim_critical_rpm if cfg.sim_critical_rpm > 0 else 3000.0
+                ecc = np.clip(1.0 - rpm / (3.5 * rc), 0.04, 1.0)     # 1 en reposo → ~0 alta vel
+                att = math.radians(38.0)
+                Cmil = 8.0                                            # clearance (mil)
+                jx = Cmil * ecc * math.sin(att)                       # muñón (mil) — X derecha
+                jy = -Cmil * ecc * math.cos(att)                      # abajo en reposo
+                dc_eu = jx * math.sin(a_probe) + jy * math.cos(a_probe)   # mil sobre la sonda
+                sig = sig + dc_eu * (ch.sensitivity_mv_per_eu or 200.0) / 1000.0  # a "volts"
                 sig += cfg.noise_rms * self._rng.standard_normal(n)
 
             elif kind == "vel":

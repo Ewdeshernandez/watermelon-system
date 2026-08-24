@@ -47,7 +47,7 @@ SCENARIOS: Dict[str, Dict] = {
     "prox_4brg": dict(
         desc="DEFAULT · 4 cojinetes · PROXIMIDAD (mil pp) · estable/arranque/parada (crítica 2000)",
         kind="prox", n_brg=4, rpm=3000.0, defect="unbalance", crit=2000.0,
-        profile="constant", rpm_start=300.0, rpm_end=6000.0, ramp=90.0),
+        profile="constant", rpm_start=300.0, rpm_end=9000.0, ramp=90.0),
     "prox_6brg": dict(
         desc="6 cojinetes · PROXIMIDAD (mil pp) · desbalance leve · rpm fija → órbitas, tabular, forma modal",
         kind="prox", n_brg=6, rpm=3600.0, defect="unbalance", crit=2400.0),

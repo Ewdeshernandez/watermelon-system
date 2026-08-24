@@ -749,7 +749,23 @@ def main() -> int:
     p_am.showGrid(x=True, y=True, alpha=0.25)
     c_am = p_am.plot(pen=pg.mkPen(CORN, width=1.8), symbol="o", symbolSize=4,
                      symbolBrush=CORN, symbolPen=None)
+    bode_hint = pg.TextItem("Poné Modo → arranque (o parada) para llenar el Bode",
+                            color=MUTE, anchor=(0.5, 0.5)); p_am.addItem(bode_hint)
     tabs.addTab(bode_w, "Bode")
+
+    # --- Polar (Nyquist del vector 1X vs rpm, se llena en runup) ---
+    pol_w = QtWidgets.QWidget(); pol_l = QtWidgets.QVBoxLayout(pol_w)
+    ph2 = QtWidgets.QHBoxLayout(); ph2.addWidget(QtWidgets.QLabel("Canal:"))
+    cb_pol = QtWidgets.QComboBox(); cb_pol.addItems([c.name for _, c in vib]); ph2.addWidget(cb_pol)
+    ph2.addStretch(1); pol_l.addLayout(ph2)
+    p_pol = pg.PlotWidget(); p_pol.setAspectLocked(True); p_pol.showGrid(x=True, y=True, alpha=0.12)
+    p_pol.addLine(x=0, pen=pg.mkPen("#e6ecf5")); p_pol.addLine(y=0, pen=pg.mkPen("#e6ecf5"))
+    pol_curve = p_pol.plot(pen=pg.mkPen(CORN, width=1.8))
+    pol_pts = p_pol.plot(pen=None, symbol="o", symbolSize=5, symbolBrush=KPH, symbolPen=None)
+    pol_hint = pg.TextItem("Poné Modo → arranque para llenar el Polar", color=MUTE, anchor=(0.5, 0.5))
+    p_pol.addItem(pol_hint)
+    pol_l.addWidget(p_pol, 1)
+    tabs.addTab(pol_w, "Polar")
 
     # --- Cascada (espectros apilados) ---
     casc_w = QtWidgets.QWidget(); casc_l = QtWidgets.QVBoxLayout(casc_w)
@@ -761,6 +777,34 @@ def main() -> int:
     casc_curves = [p_casc.plot(pen=pg.mkPen(CORN, width=0.9)) for _ in range(40)]
     casc_l.addWidget(p_casc, 1)
     tabs.addTab(casc_w, "Cascada")
+
+    # --- Shaft Centerline (posición del muñón en el cojinete vs rpm) ---
+    scl_items = []
+    scl_track = {}          # brg -> {rpm_bucket: (x, y)}
+    if orb_ok:
+        scl_w = QtWidgets.QWidget(); scl_l = QtWidgets.QVBoxLayout(scl_w)
+        scl_l.addWidget(QtWidgets.QLabel(
+            "<b>Shaft Centerline</b> <i style='color:#64748b'>— posición del muñón en el juego del "
+            "cojinete al variar la velocidad (arranque/parada). El punto rojo = actual.</i>"))
+        gl_scl = pg.GraphicsLayoutWidget(); scl_l.addWidget(gl_scl, 1)
+        ncol = 2 if len(orb_pairs) > 1 else 1
+        _th = np.linspace(0, 2 * np.pi, 120); Cclr = 10.0     # juego dibujado (mil)
+        for k, (brg, (yi, yc), (xi, xc)) in enumerate(orb_pairs):
+            p = gl_scl.addPlot(row=k // ncol, col=k % ncol)
+            p.setAspectLocked(True); p.showGrid(x=True, y=True, alpha=0.1)
+            p.hideAxis("left"); p.hideAxis("bottom"); p.setMenuEnabled(False)
+            p.plot(Cclr * np.sin(_th), Cclr * np.cos(_th), pen=pg.mkPen(NAVY, width=2))  # juego
+            p.addLine(x=0, pen=pg.mkPen("#e6ecf5")); p.addLine(y=0, pen=pg.mkPen("#e6ecf5"))
+            it = dict(p=p, yi=yi, xi=xi, yc=yc, xc=xc, brg=brg,
+                      aY=_mo.radians(_probe_angle(yc.name)), aX=_mo.radians(_probe_angle(xc.name)),
+                      track=p.plot(pen=pg.mkPen(CORN, width=1.5)),
+                      cur=p.plot(pen=None, symbol="o", symbolSize=12, symbolBrush=REDL,
+                                 symbolPen=pg.mkPen("w", width=2)),
+                      pill=pg.TextItem(f"Cojinete {brg}", color="w", anchor=(0, 0), fill=pg.mkBrush(NAVY)))
+            p.addItem(it["pill"]); p.setXRange(-Cclr * 1.2, Cclr * 1.2); p.setYRange(-Cclr * 1.2, Cclr * 1.2)
+            it["pill"].setPos(-Cclr * 1.1, Cclr * 1.1)
+            scl_items.append(it); scl_track[brg] = {}
+        tabs.addTab(scl_w, "Shaft Centerline")
 
     # --- Diagnóstico (whirl/whip + críticas) ---
     diag_w = QtWidgets.QWidget(); diag_l = QtWidgets.QVBoxLayout(diag_w)
@@ -946,9 +990,38 @@ def main() -> int:
                     it["kph1"].setData(kx[:1], ky[:1])   # 1er pulso = referencia (rojo grande)
         elif cur == "Bode":
             rr, am, ph = tc.bode(cb_bode.currentText())
-            if len(rr):
+            if len(rr) >= 2:
+                bode_hint.setText("")
                 c_am.setData(rr, np.asarray(am) * 2.0)      # pp aprox
                 c_ph.setData(rr, np.asarray(ph))
+            else:
+                bode_hint.setText("Poné Modo → arranque (o parada) para llenar el Bode")
+                bode_hint.setPos(float(rr[0]) if len(rr) else 3000.0, 0.0)
+        elif cur == "Polar":
+            rr, am, ph = tc.bode(cb_pol.currentText())
+            if len(rr) >= 3:
+                pol_hint.setText("")
+                th = np.radians(np.asarray(ph, float)); a = np.asarray(am, float) * 2.0
+                x = a * np.cos(th); y = a * np.sin(th)
+                pol_curve.setData(x, y); pol_pts.setData(x, y)
+            else:
+                pol_curve.setData([], []); pol_pts.setData([], [])
+                pol_hint.setText("Poné Modo → arranque para llenar el Polar")
+        elif scl_items and cur == "Shaft Centerline":
+            for it in scl_items:
+                Y = snap[it["yi"]] * 1000.0 / (it["yc"].sensitivity_mv_per_eu or 1.0)
+                X = snap[it["xi"]] * 1000.0 / (it["xc"].sensitivity_mv_per_eu or 1.0)
+                mX, mY = float(X.mean()), float(Y.mean())          # posición media (gap, mil)
+                # a marco físico por el ángulo de sonda
+                cx = mX * _mo.sin(it["aX"]) + mY * _mo.sin(it["aY"])
+                cy = mX * _mo.cos(it["aX"]) + mY * _mo.cos(it["aY"])
+                it["cur"].setData([cx], [cy])
+                if rpm:
+                    bk = int(rpm // 100) * 100
+                    scl_track[it["brg"]][bk] = (cx, cy)
+                    pts = [scl_track[it["brg"]][r] for r in sorted(scl_track[it["brg"]])]
+                    if pts:
+                        it["track"].setData([p[0] for p in pts], [p[1] for p in pts])
         elif cur == "Cascada":
             rr, fr, mat = tc.cascade(cb_casc.currentText())
             for cv in casc_curves:
@@ -1184,6 +1257,9 @@ def main() -> int:
         for cv in casc_curves:
             cv.setData([], [])
         c_am.setData([], []); c_ph.setData([], [])
+        pol_curve.setData([], []); pol_pts.setData([], [])
+        for _b in scl_track:                 # reiniciar la traza del shaft centerline
+            scl_track[_b].clear()
         lbl_state.setText(f"● {mode}" if agent.source.is_running() else f"modo: {mode}")
 
     _prof0 = getattr(agent.source.config, "speed_profile", "constant")
