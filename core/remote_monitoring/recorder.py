@@ -288,14 +288,18 @@ def upload_recording(rec_dir: str) -> dict:
         except Exception:  # noqa: BLE001
             pass
         store = client.storage.from_(_BUCKET)
-        # SIN gzip: comprimir grande acaparaba el CPU/GIL y colgaba la UI. Subimos
-        # la onda cruda tal cual; la red libera el GIL y la interfaz queda fluida.
+        # gzip la onda cruda: la achica ~3× para pasar el límite de tamaño del
+        # Storage y subir mucho más rápido. Se comprime en el hilo de subida, así
+        # no congela la UI (el bloqueo real era subir crudo cientos de MB).
         for fn in ("manifest.json", "index.jsonl", "data.f32"):
             p = os.path.join(rec_dir, fn)
             if not os.path.isfile(p):
                 continue
             raw = open(p, "rb").read()
             key = f"{base}/{fn}"
+            if fn == "data.f32":
+                raw = gzip.compress(raw, compresslevel=6)   # buen ratio, rápido
+                key += ".gz"
             try:
                 store.upload(key, raw, {"upsert": "true"})
             except Exception:  # noqa: BLE001

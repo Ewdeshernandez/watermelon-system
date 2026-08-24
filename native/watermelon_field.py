@@ -1047,19 +1047,22 @@ def main() -> int:
         act_sync.setEnabled(False); act_sync.setText("Subiendo…")
         res = {}
 
+        res["ok"] = res["fail"] = 0
+
         def _work():
             try:
-                from core.remote_monitoring.recorder import (sync_pending, list_recordings,
-                                                             is_synced, upload_recording)
-                ok, fail = sync_pending(agent.instance_id)
-                res["ok"], res["fail"] = ok, fail
-                if fail:
-                    for m in list_recordings(agent.instance_id):
-                        if not is_synced(m["_dir"]):
-                            r = upload_recording(m["_dir"])
-                            if not r.get("ok"):
-                                res["reason"] = f"{r.get('reason', '?')} · URL: {used_url or '(vacía)'}"
-                                break
+                from core.remote_monitoring.recorder import (list_recordings, is_synced,
+                                                             upload_recording)
+                pend = [m for m in list_recordings(agent.instance_id) if not is_synced(m["_dir"])]
+                res["total"] = len(pend)
+                for k, m in enumerate(pend):
+                    res["progress"] = f"Subiendo {k + 1} de {len(pend)}…"
+                    r = upload_recording(m["_dir"])
+                    if r.get("ok"):
+                        res["ok"] += 1
+                    else:
+                        res["fail"] += 1
+                        res["reason"] = f"{r.get('reason', '?')} · URL: {used_url or '(vacía)'}"
             except Exception as e:  # noqa: BLE001
                 res["err"] = f"{type(e).__name__}: {e}"
             res["done"] = True
@@ -1067,7 +1070,9 @@ def main() -> int:
 
         def _check():
             if not res.get("done"):
-                QtCore.QTimer.singleShot(300, _check); return
+                lbl_rec.setText(res.get("progress", "subiendo…"))
+                QtCore.QTimer.singleShot(400, _check); return
+            lbl_rec.setText("")
             act_sync.setEnabled(True); act_sync.setText("Subir a la nube"); _refresh_disk()
             ok, fail = res.get("ok", 0), res.get("fail", 0)
             if res.get("err"):
