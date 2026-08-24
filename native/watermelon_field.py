@@ -837,17 +837,27 @@ def main() -> int:
         rpm_lbls = [pg.TextItem("", color="#64748b", anchor=(0.5, 0.5)) for _ in range(8)]
         for t in rpm_lbls:
             p.addItem(t)
+        arc = p.plot(pen=pg.mkPen(NAVY, width=3))            # arco de giro de la máquina
+        arw = pg.ArrowItem(angle=0, tipAngle=32, headLen=13, brush=NAVY, pen=None); p.addItem(arw)
         pol_cells.append(dict(p=p, name=c.name, unit=c.units, pill=pill, curve=curve, pts=pts,
                               ncrit=ncrit, op=op, ncrit_txt=ncrit_txt, box=box, rpm_lbls=rpm_lbls,
-                              pa=pa, deg_items=deg_items))
+                              pa=pa, deg_items=deg_items, arc=arc, arw=arw))
     tabs.addTab(pol_w, "Polar")
     _grid_focus(pol_cells, pol_focus, gl_pol)
 
     def _polar_relabel():
         cw = (cb_giro.currentText() == "CW")     # CW → ángulos de fase al revés
+        R = 1.34
+        # arco de giro sobre el tope: CW gira horario, CCW antihorario
+        degs = np.linspace(305, 55, 26) if cw else np.linspace(55, 305, 26)
+        xs = R * np.sin(np.radians(degs)); ys = R * np.cos(np.radians(degs))
         for cl in pol_cells:
             for t, d in cl["deg_items"]:
                 t.setText(f"{(360 - d) % 360 if cw else d}°")
+            cl["arc"].setData(xs, ys)
+            cl["arw"].setPos(float(xs[-1]), float(ys[-1]))
+            dx = xs[-1] - xs[-2]; dy = ys[-1] - ys[-2]
+            cl["arw"].setStyle(angle=_mo.degrees(_mo.atan2(dy, -dx)))   # punta en el sentido de avance
     _polar_relabel()
     cb_giro.currentTextChanged.connect(lambda *_: _polar_relabel())
 
@@ -1471,7 +1481,7 @@ def main() -> int:
         win, "Watermelon Field", "Watermelon Field — módulo nativo de adquisición.\n"
         "Rotodinámica API 670/684 · nube integrada.\n© SIGA"))
 
-    win.show()
+    win.showMaximized()      # usar toda la pantalla (se adapta a cualquier resolución)
     ret = app.exec()
     try:
         agent.stop()
