@@ -796,24 +796,41 @@ def main() -> int:
             pass
     gl_bode.scene().sigMouseMoved.connect(_bode_mouse)
 
-    # --- Polar (grilla por canal: Nyquist del vector 1X; doble clic = uno solo) ---
+    # --- Polar (grilla por canal; doble clic = polar completo estilo web) ---
     pol_w = QtWidgets.QWidget(); pol_l = QtWidgets.QVBoxLayout(pol_w)
     pol_l.addWidget(QtWidgets.QLabel(
-        "<b>Polar</b> <i style='color:#64748b'>— vector 1X (Nyquist) de cada canal en el arranque · "
-        "doble clic = ver uno solo</i>"))
+        "<b>Polar</b> <i style='color:#64748b'>— vector 1X vs rpm de cada canal (arranque) · 0° arriba, "
+        "giro horario · doble clic = polar completo con rpm, Ncrit y datos</i>"))
     gl_pol = pg.GraphicsLayoutWidget(); pol_l.addWidget(gl_pol, 1)
     pol_cells = []; pol_focus = {"k": None}
+    _pth = np.linspace(0, 2 * np.pi, 120)
     for k, (i, c) in enumerate(vib):
         p = gl_pol.addPlot(row=k // _ncb, col=k % _ncb)
-        p.setAspectLocked(True); p.showGrid(x=True, y=True, alpha=0.1)
-        p.hideAxis("left"); p.hideAxis("bottom"); p.setMenuEnabled(False)
-        p.addLine(x=0, pen=pg.mkPen("#e6ecf5")); p.addLine(y=0, pen=pg.mkPen("#e6ecf5"))
+        p.setAspectLocked(True); p.hideAxis("left"); p.hideAxis("bottom"); p.setMenuEnabled(False)
+        for _r in (0.25, 0.5, 0.75, 1.0):                       # anillos de amplitud
+            p.plot(_r * np.sin(_pth), _r * np.cos(_pth),
+                   pen=pg.mkPen("#d6deea", width=1, style=QtCore.Qt.DashLine))
+        for d in range(0, 360, 30):                             # radios + grados
+            a = _mo.radians(d)
+            p.plot([0, _mo.sin(a)], [0, _mo.cos(a)], pen=pg.mkPen("#eef2f8", width=1))
+            t = pg.TextItem(f"{d}°", color=MUTE, anchor=(0.5, 0.5))
+            t.setPos(1.13 * _mo.sin(a), 1.13 * _mo.cos(a)); p.addItem(t)
+        p.setXRange(-1.35, 1.35); p.setYRange(-1.35, 1.35)
         col = SENSOR_COLORS.get(_ckind(c), CORN)
-        pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col)); p.addItem(pill)
-        pol_cells.append(dict(
-            p=p, name=c.name, pill=pill,
-            curve=p.plot(pen=pg.mkPen(col, width=1.6)),
-            pts=p.plot(pen=None, symbol="o", symbolSize=4, symbolBrush=KPH, symbolPen=None)))
+        pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col))
+        p.addItem(pill); pill.setPos(-1.3, 1.3)
+        curve = p.plot(pen=pg.mkPen(col, width=1.6))
+        pts = p.plot(pen=None, symbol="o", symbolSize=4, symbolBrush=KPH, symbolPen=None)
+        ncrit = pg.ScatterPlotItem(size=16, symbol="star", brush=pg.mkBrush(REDL), pen=pg.mkPen("w", width=1))
+        op = pg.ScatterPlotItem(size=12, brush=pg.mkBrush("#16a34a"), pen=pg.mkPen("w", width=1))
+        p.addItem(ncrit); p.addItem(op)
+        ncrit_txt = pg.TextItem("", color=REDL, anchor=(0, 0.5)); p.addItem(ncrit_txt)
+        box = pg.TextItem("", color=NAVY, anchor=(0, 1)); p.addItem(box); box.setPos(-1.3, -1.1)
+        rpm_lbls = [pg.TextItem("", color="#64748b", anchor=(0.5, 0.5)) for _ in range(8)]
+        for t in rpm_lbls:
+            p.addItem(t)
+        pol_cells.append(dict(p=p, name=c.name, unit=c.units, pill=pill, curve=curve, pts=pts,
+                              ncrit=ncrit, op=op, ncrit_txt=ncrit_txt, box=box, rpm_lbls=rpm_lbls))
     tabs.addTab(pol_w, "Polar")
     _grid_focus(pol_cells, pol_focus, gl_pol)
 
@@ -1082,11 +1099,40 @@ def main() -> int:
             for k, cl in enumerate(pol_cells):
                 if fk is not None and k != fk:
                     continue
+                rich = (fk is not None and k == fk)
                 rr, am, ph = tc.bode(cl["name"])
                 if len(rr) >= 3:
-                    th = np.radians(np.asarray(ph, float)); a = np.asarray(am, float) * 2.0
-                    x = a * np.cos(th); y = a * np.sin(th)
+                    rrn = np.asarray(rr, float)
+                    a = np.asarray(am, float) * 2.0
+                    th = np.radians(np.asarray(ph, float))
+                    amax = float(a.max()) or 1.0
+                    rn = a / amax
+                    x = rn * np.sin(th); y = rn * np.cos(th)      # 0° arriba, horario
                     cl["curve"].setData(x, y); cl["pts"].setData(x, y)
+                    jc = int(np.argmax(a))                        # Ncrit = máx amplitud
+                    if rich:
+                        cl["ncrit"].setData([x[jc]], [y[jc]]); cl["op"].setData([x[-1]], [y[-1]])
+                        cl["ncrit_txt"].setText(f"Ncrit {rrn[jc]:.0f}")
+                        cl["ncrit_txt"].setPos(x[jc], y[jc])
+                        af = ""
+                        try:
+                            _r2 = diag.half_power_af(rrn, a, jc)
+                            if _r2:
+                                af = f" · AF {_r2[0]:.1f}"
+                        except Exception:  # noqa: BLE001
+                            pass
+                        cl["box"].setText(f"{cl['name']}   Ncrit {rrn[jc]:.0f} rpm · "
+                                          f"Amp {a[jc]:.1f} {cl['unit']} · Fase {np.degrees(th[jc]):.0f}°{af}")
+                        idxs = np.unique(np.linspace(0, len(rrn) - 1, 8).round().astype(int))
+                        for t, jj in zip(cl["rpm_lbls"], idxs):
+                            t.setText(f"{rrn[jj]:.0f}"); t.setPos(float(x[jj]), float(y[jj]))
+                        for t in cl["rpm_lbls"][len(idxs):]:
+                            t.setText("")
+                    else:
+                        cl["ncrit"].setData([], []); cl["op"].setData([], [])
+                        cl["ncrit_txt"].setText(""); cl["box"].setText("")
+                        for t in cl["rpm_lbls"]:
+                            t.setText("")
         elif scl_items and cur == "Shaft Centerline":
             for it in scl_items:
                 rrk = sorted(scl_track[it["brg"]])       # ya acumulado arriba (siempre)
@@ -1346,6 +1392,10 @@ def main() -> int:
             cl["amp"].setData([], []); cl["data"] = {}; cl["cur"].hide(); cl["txt"].setText("")
         for cl in pol_cells:
             cl["curve"].setData([], []); cl["pts"].setData([], [])
+            cl["ncrit"].setData([], []); cl["op"].setData([], [])
+            cl["ncrit_txt"].setText(""); cl["box"].setText("")
+            for _t in cl["rpm_lbls"]:
+                _t.setText("")
         for _b in scl_track:                 # reiniciar la traza del shaft centerline
             scl_track[_b].clear()
         lbl_state.setText(f"● {mode}" if agent.source.is_running() else f"modo: {mode}")
