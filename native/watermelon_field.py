@@ -751,6 +751,26 @@ def main() -> int:
                      symbolBrush=CORN, symbolPen=None)
     bode_hint = pg.TextItem("Poné Modo → arranque (o parada) para llenar el Bode",
                             color=MUTE, anchor=(0.5, 0.5)); p_am.addItem(bode_hint)
+    # Cursor del Bode: mové el mouse → "1X {amp} @ {fase}° @ {rpm} rpm"
+    bode_data = {}
+    bode_cur = pg.InfiniteLine(angle=90, pen=pg.mkPen("#334155", width=1))
+    bode_txt = pg.TextItem("", color="#0F1E3D", anchor=(0, 1))
+    p_am.addItem(bode_cur); p_am.addItem(bode_txt); bode_cur.hide()
+
+    def _bode_mouse(pos):
+        try:
+            rr = bode_data.get("rr")
+            if rr is None or not len(rr) or not p_am.sceneBoundingRect().contains(pos):
+                bode_cur.hide(); bode_txt.setText(""); return
+            vx = float(p_am.vb.mapSceneToView(pos).x())
+            j = int(np.abs(rr - vx).argmin())
+            bode_cur.setPos(float(rr[j])); bode_cur.show()
+            bode_txt.setText(f"1X {bode_data['am'][j]:.2f} {bode_data['unit']} @ "
+                             f"{bode_data['ph'][j]:.0f}° @ {rr[j]:.0f} rpm")
+            bode_txt.setPos(float(rr[j]), float(bode_data["am"][j]))
+        except Exception:  # noqa: BLE001
+            pass
+    p_am.scene().sigMouseMoved.connect(_bode_mouse)
     tabs.addTab(bode_w, "Bode")
 
     # --- Polar (Nyquist del vector 1X vs rpm, se llena en runup) ---
@@ -778,32 +798,43 @@ def main() -> int:
     casc_l.addWidget(p_casc, 1)
     tabs.addTab(casc_w, "Cascada")
 
-    # --- Shaft Centerline (posición del muñón en el cojinete vs rpm) ---
+    # --- Shaft Centerline (posición del muñón en el cojinete vs rpm) — estilo web ---
     scl_items = []
     scl_track = {}          # brg -> {rpm_bucket: (x, y)}
+    try:
+        _scl_cmap = pg.colormap.get("turbo")
+    except Exception:  # noqa: BLE001
+        _scl_cmap = None
     if orb_ok:
         scl_w = QtWidgets.QWidget(); scl_l = QtWidgets.QVBoxLayout(scl_w)
         scl_l.addWidget(QtWidgets.QLabel(
             "<b>Shaft Centerline</b> <i style='color:#64748b'>— posición del muñón en el juego del "
-            "cojinete al variar la velocidad (arranque/parada). El punto rojo = actual.</i>"))
+            "cojinete al variar la velocidad. Traza coloreada por rpm · REST = reposo (abajo) · "
+            "punto grande = actual.</i>"))
         gl_scl = pg.GraphicsLayoutWidget(); scl_l.addWidget(gl_scl, 1)
         ncol = 2 if len(orb_pairs) > 1 else 1
-        _th = np.linspace(0, 2 * np.pi, 120); Cclr = 10.0     # juego dibujado (mil)
+        _th = np.linspace(0, 2 * np.pi, 160); Cclr = 8.0     # juego dibujado (mil)
         for k, (brg, (yi, yc), (xi, xc)) in enumerate(orb_pairs):
             p = gl_scl.addPlot(row=k // ncol, col=k % ncol)
-            p.setAspectLocked(True); p.showGrid(x=True, y=True, alpha=0.1)
+            p.setAspectLocked(True); p.showGrid(x=True, y=True, alpha=0.06)
             p.hideAxis("left"); p.hideAxis("bottom"); p.setMenuEnabled(False)
-            p.plot(Cclr * np.sin(_th), Cclr * np.cos(_th), pen=pg.mkPen(NAVY, width=2))  # juego
-            p.addLine(x=0, pen=pg.mkPen("#e6ecf5")); p.addLine(y=0, pen=pg.mkPen("#e6ecf5"))
-            it = dict(p=p, yi=yi, xi=xi, yc=yc, xc=xc, brg=brg,
-                      aY=_mo.radians(_probe_angle(yc.name)), aX=_mo.radians(_probe_angle(xc.name)),
-                      track=p.plot(pen=pg.mkPen(CORN, width=1.5)),
-                      cur=p.plot(pen=None, symbol="o", symbolSize=12, symbolBrush=REDL,
-                                 symbolPen=pg.mkPen("w", width=2)),
-                      pill=pg.TextItem(f"Cojinete {brg}", color="w", anchor=(0, 0), fill=pg.mkBrush(NAVY)))
-            p.addItem(it["pill"]); p.setXRange(-Cclr * 1.2, Cclr * 1.2); p.setYRange(-Cclr * 1.2, Cclr * 1.2)
-            it["pill"].setPos(-Cclr * 1.1, Cclr * 1.1)
-            scl_items.append(it); scl_track[brg] = {}
+            p.plot(Cclr * np.sin(_th), Cclr * np.cos(_th),
+                   pen=pg.mkPen("#94a3b8", width=1.5, style=QtCore.Qt.DashLine))     # juego
+            p.addLine(x=0, pen=pg.mkPen("#eef2f8")); p.addLine(y=0, pen=pg.mkPen("#eef2f8"))
+            p.addItem(pg.ScatterPlotItem([0], [0], symbol="+", size=14, pen=pg.mkPen(NAVY, width=2)))  # centro
+            rest = pg.TextItem("REST", color=REDL, anchor=(0.5, 0)); rest.setPos(0, -Cclr * 0.99)
+            p.addItem(rest)
+            line = p.plot(pen=pg.mkPen("#8aa0bd", width=1))
+            trk = pg.ScatterPlotItem(size=7, pen=None); p.addItem(trk)
+            cur = pg.ScatterPlotItem(size=14, brush=pg.mkBrush(REDL), pen=pg.mkPen("w", width=2)); p.addItem(cur)
+            pill = pg.TextItem(f"Cojinete {brg}", color="w", anchor=(0, 0), fill=pg.mkBrush(NAVY))
+            p.addItem(pill); pill.setPos(-Cclr * 1.15, Cclr * 1.15)
+            p.setXRange(-Cclr * 1.25, Cclr * 1.25); p.setYRange(-Cclr * 1.25, Cclr * 1.25)
+            scl_items.append(dict(
+                p=p, yi=yi, xi=xi, yc=yc, xc=xc, brg=brg,
+                aY=_mo.radians(_probe_angle(yc.name)), aX=_mo.radians(_probe_angle(xc.name)),
+                line=line, trk=trk, cur=cur))
+            scl_track[brg] = {}
         tabs.addTab(scl_w, "Shaft Centerline")
 
     # --- Diagnóstico (whirl/whip + críticas) ---
@@ -990,11 +1021,15 @@ def main() -> int:
                     it["kph"].setData(kx, ky)
                     it["kph1"].setData(kx[:1], ky[:1])   # 1er pulso = referencia (rojo grande)
         elif cur == "Bode":
-            rr, am, ph = tc.bode(cb_bode.currentText())
+            nmb = cb_bode.currentText()
+            rr, am, ph = tc.bode(nmb)
             if len(rr) >= 2:
                 bode_hint.setText("")
-                c_am.setData(rr, np.asarray(am) * 2.0)      # pp aprox
-                c_ph.setData(rr, np.asarray(ph))
+                amp = np.asarray(am) * 2.0
+                c_am.setData(rr, amp); c_ph.setData(rr, np.asarray(ph))
+                bode_data["rr"] = np.asarray(rr, float); bode_data["am"] = amp
+                bode_data["ph"] = np.asarray(ph, float)
+                bode_data["unit"] = next((c.units for i, c in vib if c.name == nmb), "mil pp")
             else:
                 bode_hint.setText("Poné Modo → arranque (o parada) para llenar el Bode")
                 bode_hint.setPos(float(rr[0]) if len(rr) else 3000.0, 0.0)
@@ -1020,9 +1055,17 @@ def main() -> int:
                 if rpm:
                     bk = int(rpm // 100) * 100
                     scl_track[it["brg"]][bk] = (cx, cy)
-                    pts = [scl_track[it["brg"]][r] for r in sorted(scl_track[it["brg"]])]
-                    if pts:
-                        it["track"].setData([p[0] for p in pts], [p[1] for p in pts])
+                    rrk = sorted(scl_track[it["brg"]])
+                    xs = [scl_track[it["brg"]][r][0] for r in rrk]
+                    ys = [scl_track[it["brg"]][r][1] for r in rrk]
+                    it["line"].setData(xs, ys)
+                    if _scl_cmap is not None and len(rrk) >= 2:
+                        rlo, rhi = rrk[0], max(rrk[-1], rrk[0] + 1)
+                        brs = [pg.mkBrush(_scl_cmap.map((r - rlo) / (rhi - rlo), mode="qcolor"))
+                               for r in rrk]
+                        it["trk"].setData(xs, ys, brush=brs)
+                    else:
+                        it["trk"].setData(xs, ys, brush=pg.mkBrush(CORN))
         elif cur == "Cascada":
             rr, fr, mat = tc.cascade(cb_casc.currentText())
             for cv in casc_curves:
