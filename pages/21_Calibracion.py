@@ -62,6 +62,51 @@ if not is_page_allowed_for_role("pages/21_Calibracion.py", _role):
 
 st.session_state.setdefault("cal_loops", [])
 
+# =====================================================================
+# Autoguardado + recuperación (no perder el reporte si se cae la sesión)
+# =====================================================================
+from core.reports_ext import drafts as _drafts
+
+_CAL_MODULE = "calibracion"
+# Claves de estado que se persisten (lo valioso: lazos + metadatos del reporte).
+_CAL_KEYS = ["cal_loops", "cal_asset", "cal_client", "cal_location",
+             "cal_specialist", "cal_date", "cal_notes", "cal_hall", "cal_reco"]
+
+
+def _cal_capture_state() -> dict:
+    return {k: st.session_state.get(k) for k in _CAL_KEYS}
+
+
+# 1) Aplicar una restauración PENDIENTE (de cargar/duplicar borrador) — se hace
+#    ANTES de instanciar cualquier widget para no chocar con Streamlit.
+_pending = st.session_state.pop("_cal_pending_restore", None)
+if _pending is not None:
+    for _k in _CAL_KEYS:
+        st.session_state[_k] = _pending.get(_k)
+    if not isinstance(st.session_state.get("cal_loops"), list):
+        st.session_state["cal_loops"] = _pending.get("cal_loops") or []
+
+# 2) Recuperación AUTOMÁTICA tras caída/reconexión/redeploy: si la sesión está
+#    vacía pero el autoguardado tiene CUALQUIER contenido (lazos O metadatos del
+#    reporte), se restaura — igual que el reporte del sistema.
+if not st.session_state.get("_cal_recovery_checked"):
+    st.session_state["_cal_recovery_checked"] = True
+    _session_empty = (not st.session_state.get("cal_loops")
+                      and not (st.session_state.get("cal_asset") or "").strip())
+    if _session_empty:
+        _auto = _drafts.load_autosave(_CAL_MODULE)
+        _has_content = bool(_auto) and (
+            bool(_auto.get("cal_loops"))
+            or any(str(_auto.get(_k) or "").strip()
+                   for _k in ("cal_asset", "cal_client", "cal_location",
+                              "cal_specialist", "cal_notes", "cal_hall", "cal_reco")))
+        if _has_content:
+            for _k in _CAL_KEYS:
+                st.session_state[_k] = _auto.get(_k)
+            if not isinstance(st.session_state.get("cal_loops"), list):
+                st.session_state["cal_loops"] = _auto.get("cal_loops") or []
+            st.session_state["_cal_recovered"] = True
+
 
 # =====================================================================
 # Hero
@@ -77,6 +122,14 @@ def _hero() -> None:
 
 
 _hero()
+
+if st.session_state.pop("_cal_recovered", None):
+    st.info("♻ Se recuperó tu último borrador automático (lazos y datos del "
+            "reporte). Si tenías fotos, vuelve a subirlas.")
+
+_cal_ts = st.session_state.get("_cal_autosave_ts")
+st.caption("🟢 Autoguardado activo — el reporte se recupera si se cae la sesión"
+           + (f" · último guardado: {_cal_ts}" if _cal_ts else "."))
 
 
 # =====================================================================
@@ -386,6 +439,46 @@ def _report_tab() -> None:
             st.text_input("Fecha", key="cal_date")
             st.text_area("Notas", key="cal_notes", height=80)
 
+    # ---- Borradores (autoguardado + guardar/cargar/duplicar/nuevo) --------
+    with st.expander("💾 Borradores del reporte", expanded=False):
+        st.caption("El reporte se autoguarda solo; si se cae la sesión o hay "
+                   "redeploy, al volver se recupera. Aquí puedes guardar "
+                   "versiones con nombre.")
+        d1, d2 = st.columns([3, 1])
+        _dname = d1.text_input("Nombre del borrador", key="cal_draft_name",
+                               placeholder="ej: Unidad 2 — calibración proximidad")
+        if d2.button("💾 Guardar borrador", key="cal_draft_save",
+                     use_container_width=True):
+            _nm = (_dname or "").strip() or "borrador"
+            if _drafts.save_draft(_CAL_MODULE, _nm, _cal_capture_state()):
+                st.success(f"Borrador «{_nm}» guardado.")
+            else:
+                st.error("No se pudo guardar (¿disco lleno en el servidor?).")
+        _existing = _drafts.list_drafts(_CAL_MODULE)
+        e1, e2, e3, e4 = st.columns([3, 1, 1, 1])
+        _sel = e1.selectbox("Borradores existentes", ["—"] + _existing,
+                            key="cal_draft_pick")
+        _has = _sel != "—"
+        if e2.button("Cargar", key="cal_draft_load", use_container_width=True,
+                     disabled=not _has):
+            _stt = _drafts.load_draft(_CAL_MODULE, _sel)
+            if _stt is not None:
+                st.session_state["_cal_pending_restore"] = _stt
+                st.rerun()
+        if e3.button("Duplicar", key="cal_draft_dup", use_container_width=True,
+                     disabled=not _has):
+            _stt = _drafts.load_draft(_CAL_MODULE, _sel)
+            if _stt is not None:
+                _drafts.save_draft(_CAL_MODULE, f"{_sel} (copia)", _stt)
+                st.rerun()
+        if e4.button("Eliminar", key="cal_draft_del", use_container_width=True,
+                     disabled=not _has):
+            _drafts.delete_draft(_CAL_MODULE, _sel)
+            st.rerun()
+        if st.button("🆕 Nuevo reporte (limpiar)", key="cal_draft_new"):
+            st.session_state["_cal_pending_restore"] = {}
+            st.rerun()
+
     loops = st.session_state.get("cal_loops", [])
     if not loops:
         st.info("Aún no hay lazos. Agrégalos desde las pestañas de Proximidad, "
@@ -478,5 +571,13 @@ with tab_ve:
     _seismic_tab("velomitor", "ve")
 with tab_rep:
     _report_tab()
+
+# Autoguardado al final de cada render (tolerante a disco lleno; no crashea).
+try:
+    if _drafts.autosave(_CAL_MODULE, _cal_capture_state()):
+        import datetime as _dt
+        st.session_state["_cal_autosave_ts"] = _dt.datetime.now().strftime("%H:%M:%S")
+except Exception:
+    pass
 
 cal_footer_norms()
