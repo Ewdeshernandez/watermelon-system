@@ -614,6 +614,8 @@ def main() -> int:
         p.addItem(pill); wave_pills.append(pill)
         stt = pg.TextItem("", color=MUTE, anchor=(1, 0)); p.addItem(stt); wave_stats.append(stt)
         wave_plots.append(p)
+    for _p in wave_plots[1:]:
+        _p.setXLink(wave_plots[0])          # todas las ondas ALINEADAS en X (arrancan en 0)
     p_spec = gl.addPlot(row=len(vib), col=0); p_spec.showGrid(x=False, y=True, alpha=0.06)
     p_spec.setLabel("left", "amplitud"); p_spec.setLabel("bottom", "Frecuencia (CPM)")
     p_spec.setTitle("Espectro (FFT)", color=NAVY, size="9pt")
@@ -623,6 +625,25 @@ def main() -> int:
         p_spec.addItem(ln); return ln
     v1x = _ordline(REDL); v2x = _ordline("#8b5cf6"); v3x = _ordline("#2fa36b")
     spec_info = pg.TextItem("", color=NAVY, anchor=(1, 0)); p_spec.addItem(spec_info)
+    # Cursor del espectro: mové el mouse y muestra "valor unidad @ CPM"
+    spec_data = {}
+    spec_cursor = pg.InfiniteLine(angle=90, pen=pg.mkPen("#334155", width=1))
+    spec_cur_txt = pg.TextItem("", color="#0F1E3D", anchor=(0, 1))
+    p_spec.addItem(spec_cursor); p_spec.addItem(spec_cur_txt); spec_cursor.hide()
+
+    def _spec_mouse(pos):
+        try:
+            cpm = spec_data.get("cpm"); mag = spec_data.get("mag")
+            if cpm is None or not len(cpm) or not p_spec.sceneBoundingRect().contains(pos):
+                spec_cursor.hide(); spec_cur_txt.setText(""); return
+            vx = float(p_spec.vb.mapSceneToView(pos).x())
+            j = int(np.abs(cpm - vx).argmin())
+            spec_cursor.setPos(float(cpm[j])); spec_cursor.show()
+            spec_cur_txt.setText(f"{mag[j]:.3g} {spec_data.get('unit','')} @ {cpm[j]:.0f} CPM")
+            spec_cur_txt.setPos(float(cpm[j]), float(mag[j]))
+        except Exception:  # noqa: BLE001
+            pass
+    p_spec.scene().sigMouseMoved.connect(_spec_mouse)
     tabs.addTab(ond_w, "Onda")
 
     onda_focus = {"i": None}    # None = todas; idx = solo esa onda
@@ -861,6 +882,8 @@ def main() -> int:
                 wave_stats[idx].setText(f"pp  {pp:.2f} {c.units}\nrms {rms:.2f}\nCF  {cf:.2f}")
                 wave_stats[idx].setPos(tms[-1], eu0.max())
                 wave_pills[idx].setPos(tms[0], eu0.max())
+            if len(tms):
+                wave_plots[0].setXRange(0.0, float(tms[-1]), padding=0)  # X desde 0, todas alineadas
             # Espectro: SOLO cuando hay una onda enfocada (doble clic). En la grilla no.
             if fi is not None:
                 sel, csel = vib[fi]
@@ -871,12 +894,14 @@ def main() -> int:
                 fmax_hz = 1000.0 if kind_s in ("prox", "vel") else min(0.4 * fs, 10000.0)
                 fmax_hz = min(fmax_hz, float(fr[-1]))
                 keep = fr <= fmax_hz
+                kconv = 2.0 if kind_s == "prox" else (1.0 / np.sqrt(2.0))
                 cpm = fr[keep] * 60.0                                   # eje en CPM
-                spec_curve.setData(cpm, mag[keep])
-                ymax = float(mag[keep].max()) if mag[keep].size else 1.0
+                magd = mag[keep] * kconv                                # convención del sensor (pp/rms)
+                spec_curve.setData(cpm, magd)
+                spec_data["cpm"] = cpm; spec_data["mag"] = magd; spec_data["unit"] = csel.units
+                ymax = float(magd.max()) if magd.size else 1.0
                 p_spec.setXRange(0, fmax_hz * 60.0, padding=0)         # origen X en 0
                 p_spec.setYRange(0, ymax * 1.08 + 1e-9, padding=0)     # base Y en 0
-                kconv = 2.0 if kind_s == "prox" else (1.0 / np.sqrt(2.0))
                 def _ordamp(o):
                     if not f1:
                         return 0.0
@@ -889,7 +914,7 @@ def main() -> int:
                     spec_info.setText(
                         f"{csel.name}\nOverall {overall:.2f} {csel.units}\n"
                         f"1X  {_ordamp(1):.2f}\n2X  {_ordamp(2):.2f}\n3X  {_ordamp(3):.2f}")
-                    spec_info.setPos(fmax_hz * 60.0, float(mag[keep].max()))
+                    spec_info.setPos(fmax_hz * 60.0, ymax)
                 else:
                     for ln in (v1x, v2x, v3x):
                         ln.hide()
