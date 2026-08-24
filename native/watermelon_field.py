@@ -735,57 +735,87 @@ def main() -> int:
                 pass
         gl_orb.scene().sigMouseClicked.connect(_orb_dblclick)
 
-    # --- Bode (amp + fase vs rpm, se llena en runup) ---
+    def _grid_focus(cells, focus, gl):
+        """Doble clic para enfocar una celda / volver a la grilla (patrón común)."""
+        def _apply():
+            fk = focus["k"]
+            for k, cl in enumerate(cells):
+                cl["p"].setVisible(fk is None or k == fk)
+
+        def _dbl(ev):
+            try:
+                if not ev.double():
+                    return
+                pos = ev.scenePos()
+                for k, cl in enumerate(cells):
+                    if cl["p"].isVisible() and cl["p"].vb.sceneBoundingRect().contains(pos):
+                        focus["k"] = None if focus["k"] == k else k
+                        _apply(); return
+                focus["k"] = None; _apply()
+            except Exception:  # noqa: BLE001
+                pass
+        gl.scene().sigMouseClicked.connect(_dbl)
+        return _apply
+
+    # --- Bode (grilla por canal: amplitud 1X vs rpm; doble clic = uno + cursor) ---
     bode_w = QtWidgets.QWidget(); bode_l = QtWidgets.QVBoxLayout(bode_w)
-    bh = QtWidgets.QHBoxLayout(); bh.addWidget(QtWidgets.QLabel("Canal:"))
-    cb_bode = QtWidgets.QComboBox(); cb_bode.addItems([c.name for _, c in vib]); bh.addWidget(cb_bode)
-    bh.addStretch(1); bode_l.addLayout(bh)
-    gl_b = pg.GraphicsLayoutWidget(); bode_l.addWidget(gl_b, 1)
-    p_ph = gl_b.addPlot(row=0, col=0); p_ph.setLabel("left", "Fase 1X (°)"); p_ph.showGrid(x=True, y=True, alpha=0.25)
-    p_ph.getAxis("bottom").setStyle(showValues=False); p_ph.invertY(True)
-    c_ph = p_ph.plot(pen=pg.mkPen(AMBER, width=1.8), symbol="o", symbolSize=4,
-                     symbolBrush=AMBER, symbolPen=None)
-    p_am = gl_b.addPlot(row=1, col=0); p_am.setLabel("left", "1X"); p_am.setLabel("bottom", "RPM")
-    p_am.showGrid(x=True, y=True, alpha=0.25)
-    c_am = p_am.plot(pen=pg.mkPen(CORN, width=1.8), symbol="o", symbolSize=4,
-                     symbolBrush=CORN, symbolPen=None)
-    bode_hint = pg.TextItem("Poné Modo → arranque (o parada) para llenar el Bode",
-                            color=MUTE, anchor=(0.5, 0.5)); p_am.addItem(bode_hint)
-    # Cursor del Bode: mové el mouse → "1X {amp} @ {fase}° @ {rpm} rpm"
-    bode_data = {}
-    bode_cur = pg.InfiniteLine(angle=90, pen=pg.mkPen("#334155", width=1))
-    bode_txt = pg.TextItem("", color="#0F1E3D", anchor=(0, 1))
-    p_am.addItem(bode_cur); p_am.addItem(bode_txt); bode_cur.hide()
+    bode_l.addWidget(QtWidgets.QLabel(
+        "<b>Bode</b> <i style='color:#64748b'>— amplitud 1X vs rpm de cada canal (se llena en arranque) · "
+        "doble clic = ver uno solo · mové el mouse = amplitud/fase/rpm</i>"))
+    gl_bode = pg.GraphicsLayoutWidget(); bode_l.addWidget(gl_bode, 1)
+    bode_cells = []; bode_focus = {"k": None}; _ncb = 2 if len(vib) > 1 else 1
+    for k, (i, c) in enumerate(vib):
+        p = gl_bode.addPlot(row=k // _ncb, col=k % _ncb)
+        p.showGrid(x=True, y=True, alpha=0.12); p.setLabel("bottom", "RPM"); p.setLabel("left", f"1X {c.units}")
+        col = SENSOR_COLORS.get(_ckind(c), CORN)
+        pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col)); p.addItem(pill)
+        cur = pg.InfiniteLine(angle=90, pen=pg.mkPen("#334155", width=1)); p.addItem(cur); cur.hide()
+        txt = pg.TextItem("", color="#0F1E3D", anchor=(0, 1)); p.addItem(txt)
+        bode_cells.append(dict(
+            p=p, name=c.name, unit=c.units, cur=cur, txt=txt, data={},
+            amp=p.plot(pen=pg.mkPen(col, width=1.6), symbol="o", symbolSize=3, symbolBrush=col, symbolPen=None),
+            pill=pill))
+    tabs.addTab(bode_w, "Bode")
+    _grid_focus(bode_cells, bode_focus, gl_bode)
 
     def _bode_mouse(pos):
         try:
-            rr = bode_data.get("rr")
-            if rr is None or not len(rr) or not p_am.sceneBoundingRect().contains(pos):
-                bode_cur.hide(); bode_txt.setText(""); return
-            vx = float(p_am.vb.mapSceneToView(pos).x())
+            fk = bode_focus["k"]
+            if fk is None:
+                return
+            cl = bode_cells[fk]; rr = cl["data"].get("rr")
+            if rr is None or not len(rr) or not cl["p"].vb.sceneBoundingRect().contains(pos):
+                cl["cur"].hide(); cl["txt"].setText(""); return
+            vx = float(cl["p"].vb.mapSceneToView(pos).x())
             j = int(np.abs(rr - vx).argmin())
-            bode_cur.setPos(float(rr[j])); bode_cur.show()
-            bode_txt.setText(f"1X {bode_data['am'][j]:.2f} {bode_data['unit']} @ "
-                             f"{bode_data['ph'][j]:.0f}° @ {rr[j]:.0f} rpm")
-            bode_txt.setPos(float(rr[j]), float(bode_data["am"][j]))
+            cl["cur"].setPos(float(rr[j])); cl["cur"].show()
+            cl["txt"].setText(f"1X {cl['data']['am'][j]:.2f} {cl['unit']} @ "
+                              f"{cl['data']['ph'][j]:.0f}° @ {rr[j]:.0f} rpm")
+            cl["txt"].setPos(float(rr[j]), float(cl['data']['am'][j]))
         except Exception:  # noqa: BLE001
             pass
-    p_am.scene().sigMouseMoved.connect(_bode_mouse)
-    tabs.addTab(bode_w, "Bode")
+    gl_bode.scene().sigMouseMoved.connect(_bode_mouse)
 
-    # --- Polar (Nyquist del vector 1X vs rpm, se llena en runup) ---
+    # --- Polar (grilla por canal: Nyquist del vector 1X; doble clic = uno solo) ---
     pol_w = QtWidgets.QWidget(); pol_l = QtWidgets.QVBoxLayout(pol_w)
-    ph2 = QtWidgets.QHBoxLayout(); ph2.addWidget(QtWidgets.QLabel("Canal:"))
-    cb_pol = QtWidgets.QComboBox(); cb_pol.addItems([c.name for _, c in vib]); ph2.addWidget(cb_pol)
-    ph2.addStretch(1); pol_l.addLayout(ph2)
-    p_pol = pg.PlotWidget(); p_pol.setAspectLocked(True); p_pol.showGrid(x=True, y=True, alpha=0.12)
-    p_pol.addLine(x=0, pen=pg.mkPen("#e6ecf5")); p_pol.addLine(y=0, pen=pg.mkPen("#e6ecf5"))
-    pol_curve = p_pol.plot(pen=pg.mkPen(CORN, width=1.8))
-    pol_pts = p_pol.plot(pen=None, symbol="o", symbolSize=5, symbolBrush=KPH, symbolPen=None)
-    pol_hint = pg.TextItem("Poné Modo → arranque para llenar el Polar", color=MUTE, anchor=(0.5, 0.5))
-    p_pol.addItem(pol_hint)
-    pol_l.addWidget(p_pol, 1)
+    pol_l.addWidget(QtWidgets.QLabel(
+        "<b>Polar</b> <i style='color:#64748b'>— vector 1X (Nyquist) de cada canal en el arranque · "
+        "doble clic = ver uno solo</i>"))
+    gl_pol = pg.GraphicsLayoutWidget(); pol_l.addWidget(gl_pol, 1)
+    pol_cells = []; pol_focus = {"k": None}
+    for k, (i, c) in enumerate(vib):
+        p = gl_pol.addPlot(row=k // _ncb, col=k % _ncb)
+        p.setAspectLocked(True); p.showGrid(x=True, y=True, alpha=0.1)
+        p.hideAxis("left"); p.hideAxis("bottom"); p.setMenuEnabled(False)
+        p.addLine(x=0, pen=pg.mkPen("#e6ecf5")); p.addLine(y=0, pen=pg.mkPen("#e6ecf5"))
+        col = SENSOR_COLORS.get(_ckind(c), CORN)
+        pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col)); p.addItem(pill)
+        pol_cells.append(dict(
+            p=p, name=c.name, pill=pill,
+            curve=p.plot(pen=pg.mkPen(col, width=1.6)),
+            pts=p.plot(pen=None, symbol="o", symbolSize=4, symbolBrush=KPH, symbolPen=None)))
     tabs.addTab(pol_w, "Polar")
+    _grid_focus(pol_cells, pol_focus, gl_pol)
 
     # --- Cascada (espectros apilados) ---
     casc_w = QtWidgets.QWidget(); casc_l = QtWidgets.QVBoxLayout(casc_w)
@@ -1021,28 +1051,26 @@ def main() -> int:
                     it["kph"].setData(kx, ky)
                     it["kph1"].setData(kx[:1], ky[:1])   # 1er pulso = referencia (rojo grande)
         elif cur == "Bode":
-            nmb = cb_bode.currentText()
-            rr, am, ph = tc.bode(nmb)
-            if len(rr) >= 2:
-                bode_hint.setText("")
-                amp = np.asarray(am) * 2.0
-                c_am.setData(rr, amp); c_ph.setData(rr, np.asarray(ph))
-                bode_data["rr"] = np.asarray(rr, float); bode_data["am"] = amp
-                bode_data["ph"] = np.asarray(ph, float)
-                bode_data["unit"] = next((c.units for i, c in vib if c.name == nmb), "mil pp")
-            else:
-                bode_hint.setText("Poné Modo → arranque (o parada) para llenar el Bode")
-                bode_hint.setPos(float(rr[0]) if len(rr) else 3000.0, 0.0)
+            fk = bode_focus["k"]
+            for k, cl in enumerate(bode_cells):
+                if fk is not None and k != fk:
+                    continue
+                rr, am, ph = tc.bode(cl["name"])
+                if len(rr) >= 2:
+                    amp = np.asarray(am, float) * 2.0
+                    cl["amp"].setData(rr, amp)
+                    cl["data"] = {"rr": np.asarray(rr, float), "am": amp, "ph": np.asarray(ph, float)}
+                    cl["pill"].setPos(float(rr[0]), float(amp.max()))
         elif cur == "Polar":
-            rr, am, ph = tc.bode(cb_pol.currentText())
-            if len(rr) >= 3:
-                pol_hint.setText("")
-                th = np.radians(np.asarray(ph, float)); a = np.asarray(am, float) * 2.0
-                x = a * np.cos(th); y = a * np.sin(th)
-                pol_curve.setData(x, y); pol_pts.setData(x, y)
-            else:
-                pol_curve.setData([], []); pol_pts.setData([], [])
-                pol_hint.setText("Poné Modo → arranque para llenar el Polar")
+            fk = pol_focus["k"]
+            for k, cl in enumerate(pol_cells):
+                if fk is not None and k != fk:
+                    continue
+                rr, am, ph = tc.bode(cl["name"])
+                if len(rr) >= 3:
+                    th = np.radians(np.asarray(ph, float)); a = np.asarray(am, float) * 2.0
+                    x = a * np.cos(th); y = a * np.sin(th)
+                    cl["curve"].setData(x, y); cl["pts"].setData(x, y)
         elif scl_items and cur == "Shaft Centerline":
             for it in scl_items:
                 Y = snap[it["yi"]] * 1000.0 / (it["yc"].sensitivity_mv_per_eu or 1.0)
@@ -1300,8 +1328,10 @@ def main() -> int:
         tc = TransientCapture(TransientConfig(fmax_hz=min(2000.0, agent.sample_rate_hz / 2.5)))
         for cv in casc_curves:
             cv.setData([], [])
-        c_am.setData([], []); c_ph.setData([], [])
-        pol_curve.setData([], []); pol_pts.setData([], [])
+        for cl in bode_cells:
+            cl["amp"].setData([], []); cl["data"] = {}; cl["cur"].hide(); cl["txt"].setText("")
+        for cl in pol_cells:
+            cl["curve"].setData([], []); cl["pts"].setData([], [])
         for _b in scl_track:                 # reiniciar la traza del shaft centerline
             scl_track[_b].clear()
         lbl_state.setText(f"● {mode}" if agent.source.is_running() else f"modo: {mode}")
