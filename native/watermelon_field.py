@@ -913,17 +913,9 @@ def main() -> int:
         act_start.setEnabled(False); act_stop.setEnabled(True)
         lbl_state.setText("● adquiriendo (hilo de fondo)")
         timer.start(60)
-        # Offline-first: al arrancar, intenta subir grabaciones pendientes (si hay
-        # internet + credenciales WM_SUPABASE_URL/KEY). En hilo aparte, no bloquea.
-        import threading
-
-        def _bg_sync():
-            try:
-                from core.remote_monitoring.recorder import sync_pending
-                sync_pending(agent.instance_id)
-            except Exception:  # noqa: BLE001
-                pass
-        threading.Thread(target=_bg_sync, daemon=True).start()
+        # NO auto-subir al iniciar: subir pendientes grandes en background acaparaba
+        # la CPU (gzip) y colgaba la UI. La subida es ahora SOLO manual (botón
+        # "Subir pendientes") o automática al PARAR una grabación.
 
     def do_stop():
         timer.stop()
