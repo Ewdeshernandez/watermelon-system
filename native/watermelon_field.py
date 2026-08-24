@@ -796,11 +796,16 @@ def main() -> int:
             pass
     gl_bode.scene().sigMouseMoved.connect(_bode_mouse)
 
-    # --- Polar (grilla por canal; doble clic = polar completo estilo web) ---
+    # --- Polar (0° = ángulo de la sonda · fase contra el giro; grilla + doble clic) ---
     pol_w = QtWidgets.QWidget(); pol_l = QtWidgets.QVBoxLayout(pol_w)
-    pol_l.addWidget(QtWidgets.QLabel(
-        "<b>Polar</b> <i style='color:#64748b'>— vector 1X vs rpm de cada canal (arranque) · 0° arriba, "
-        "giro horario · doble clic = polar completo con rpm, Ncrit y datos</i>"))
+    ptop = QtWidgets.QHBoxLayout()
+    ptop.addWidget(QtWidgets.QLabel("<b>Polar</b>"))
+    ptop.addWidget(QtWidgets.QLabel("Giro:"))
+    cb_giro = QtWidgets.QComboBox(); cb_giro.addItems(["CCW", "CW"]); ptop.addWidget(cb_giro)
+    ptop.addWidget(QtWidgets.QLabel(
+        "<i style='color:#64748b'>0° = ángulo de la sonda · fase CONTRA el giro · "
+        "doble clic = polar completo (rpm, Ncrit, datos)</i>"))
+    ptop.addStretch(1); pol_l.addLayout(ptop)
     gl_pol = pg.GraphicsLayoutWidget(); pol_l.addWidget(gl_pol, 1)
     pol_cells = []; pol_focus = {"k": None}
     _pth = np.linspace(0, 2 * np.pi, 120)
@@ -810,11 +815,14 @@ def main() -> int:
         for _r in (0.25, 0.5, 0.75, 1.0):                       # anillos de amplitud
             p.plot(_r * np.sin(_pth), _r * np.cos(_pth),
                    pen=pg.mkPen("#d6deea", width=1, style=QtCore.Qt.DashLine))
-        for d in range(0, 360, 30):                             # radios + grados
-            a = _mo.radians(d)
+        pa = _probe_angle(c.name)                               # 0° del polar = ángulo de la sonda
+        deg_items = []
+        for d in range(0, 360, 30):                             # radios a ángulos FÍSICOS
+            a = _mo.radians(pa + d)
             p.plot([0, _mo.sin(a)], [0, _mo.cos(a)], pen=pg.mkPen("#eef2f8", width=1))
-            t = pg.TextItem(f"{d}°", color=MUTE, anchor=(0.5, 0.5))
+            t = pg.TextItem("", color=MUTE, anchor=(0.5, 0.5))
             t.setPos(1.13 * _mo.sin(a), 1.13 * _mo.cos(a)); p.addItem(t)
+            deg_items.append((t, d))
         p.setXRange(-1.35, 1.35); p.setYRange(-1.35, 1.35)
         col = SENSOR_COLORS.get(_ckind(c), CORN)
         pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col))
@@ -830,9 +838,18 @@ def main() -> int:
         for t in rpm_lbls:
             p.addItem(t)
         pol_cells.append(dict(p=p, name=c.name, unit=c.units, pill=pill, curve=curve, pts=pts,
-                              ncrit=ncrit, op=op, ncrit_txt=ncrit_txt, box=box, rpm_lbls=rpm_lbls))
+                              ncrit=ncrit, op=op, ncrit_txt=ncrit_txt, box=box, rpm_lbls=rpm_lbls,
+                              pa=pa, deg_items=deg_items))
     tabs.addTab(pol_w, "Polar")
     _grid_focus(pol_cells, pol_focus, gl_pol)
+
+    def _polar_relabel():
+        cw = (cb_giro.currentText() == "CW")     # CW → ángulos de fase al revés
+        for cl in pol_cells:
+            for t, d in cl["deg_items"]:
+                t.setText(f"{(360 - d) % 360 if cw else d}°")
+    _polar_relabel()
+    cb_giro.currentTextChanged.connect(lambda *_: _polar_relabel())
 
     # --- Cascada (grilla por canal: espectros apilados; doble clic = uno solo) ---
     casc_w = QtWidgets.QWidget(); casc_l = QtWidgets.QVBoxLayout(casc_w)
@@ -1104,10 +1121,12 @@ def main() -> int:
                 if len(rr) >= 3:
                     rrn = np.asarray(rr, float)
                     a = np.asarray(am, float) * 2.0
-                    th = np.radians(np.asarray(ph, float))
+                    # ángulo FÍSICO = sonda + fase contra el giro (CW → signo negativo)
+                    sign = -1.0 if cb_giro.currentText() == "CW" else 1.0
+                    phys = np.radians(cl["pa"] + sign * np.asarray(ph, float))
                     amax = float(a.max()) or 1.0
                     rn = a / amax
-                    x = rn * np.sin(th); y = rn * np.cos(th)      # 0° arriba, horario
+                    x = rn * np.sin(phys); y = rn * np.cos(phys)
                     cl["curve"].setData(x, y); cl["pts"].setData(x, y)
                     jc = int(np.argmax(a))                        # Ncrit = máx amplitud
                     if rich:
@@ -1122,7 +1141,8 @@ def main() -> int:
                         except Exception:  # noqa: BLE001
                             pass
                         cl["box"].setText(f"{cl['name']}   Ncrit {rrn[jc]:.0f} rpm · "
-                                          f"Amp {a[jc]:.1f} {cl['unit']} · Fase {np.degrees(th[jc]):.0f}°{af}")
+                                          f"Amp {a[jc]:.1f} {cl['unit']} · "
+                                          f"Fase {float(np.asarray(ph, float)[jc]):.0f}°{af}")
                         idxs = np.unique(np.linspace(0, len(rrn) - 1, 8).round().astype(int))
                         for t, jj in zip(cl["rpm_lbls"], idxs):
                             t.setText(f"{rrn[jj]:.0f}"); t.setPos(float(x[jj]), float(y[jj]))
