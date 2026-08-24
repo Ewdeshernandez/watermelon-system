@@ -839,9 +839,10 @@ def main() -> int:
                 rpm = float(fr0[band][np.argmax(mag0[band])] * 60.0)
         lbl_rpm.setText(f"RPM: {rpm:.0f}" if rpm else "RPM: —")
         f1 = (rpm / 60.0) if rpm else None
-        # Alimentar el capturador de transitorio (throttle ~cada 0.5 s) para Bode/Cascada.
+        # Alimentar el capturador de transitorio para Bode/Polar/Cascada. Con el sim
+        # ya a tiempo real, cada ~4 refrescos (~0.36 s) da muchos puntos en el arranque.
         rec_state["fn"] = rec_state.get("fn", 0) + 1
-        if rpm and rec_state["fn"] % 8 == 0:
+        if rpm and rec_state["fn"] % 4 == 0:
             try:
                 tc.feed(snap, rpm, fs, vib, kph_idx=kph_glob)
             except Exception:  # noqa: BLE001

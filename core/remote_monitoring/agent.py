@@ -118,9 +118,24 @@ class AcqAgent:
 
     def _loop(self) -> None:
         self._ensure_started()
+        # Con hardware real, read_block() BLOQUEA hasta que el DAQ llena el bloque
+        # (ya corre a tiempo real). Con el SIMULADOR, read_block() devuelve al
+        # instante → hay que PACEAR a tiempo real, si no: (1) el arranque de 90 s
+        # se completa en un segundo (transitorios con 4 puntos) y (2) el hilo satura
+        # un núcleo de CPU generando datos sin parar (traba la PC).
+        sim = type(self.source).__name__ == "SimulatedStreamSource"
+        dt = float(getattr(self.source.config, "block_seconds", 0.1))
+        next_t = time.monotonic()
         while not self._stop_evt.is_set():
             block = self.source.read_block()
             self._ingest(block, time.monotonic())
+            if sim:
+                next_t += dt
+                slp = next_t - time.monotonic()
+                if slp > 0:
+                    self._stop_evt.wait(slp)      # duerme pero responde al stop
+                else:
+                    next_t = time.monotonic()     # se atrasó → resync
 
     def start(self) -> None:
         """Arranca el loop en un hilo background (live continuo)."""
