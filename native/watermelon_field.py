@@ -817,16 +817,22 @@ def main() -> int:
     tabs.addTab(pol_w, "Polar")
     _grid_focus(pol_cells, pol_focus, gl_pol)
 
-    # --- Cascada (espectros apilados) ---
+    # --- Cascada (grilla por canal: espectros apilados; doble clic = uno solo) ---
     casc_w = QtWidgets.QWidget(); casc_l = QtWidgets.QVBoxLayout(casc_w)
-    ch2 = QtWidgets.QHBoxLayout(); ch2.addWidget(QtWidgets.QLabel("Canal:"))
-    cb_casc = QtWidgets.QComboBox(); cb_casc.addItems([c.name for _, c in vib]); ch2.addWidget(cb_casc)
-    ch2.addStretch(1); casc_l.addLayout(ch2)
-    p_casc = pg.PlotWidget(); p_casc.setLabel("bottom", "Frecuencia (Hz)"); p_casc.setLabel("left", "RPM")
-    p_casc.showGrid(x=True, y=True, alpha=0.2)
-    casc_curves = [p_casc.plot(pen=pg.mkPen(CORN, width=0.9)) for _ in range(40)]
-    casc_l.addWidget(p_casc, 1)
+    casc_l.addWidget(QtWidgets.QLabel(
+        "<b>Cascada</b> <i style='color:#64748b'>— espectros apilados por rpm de cada canal (arranque) · "
+        "doble clic = ver uno solo</i>"))
+    gl_casc = pg.GraphicsLayoutWidget(); casc_l.addWidget(gl_casc, 1)
+    casc_cells = []; casc_focus = {"k": None}; _NCC = 26
+    for k, (i, c) in enumerate(vib):
+        p = gl_casc.addPlot(row=k // _ncb, col=k % _ncb)
+        p.showGrid(x=True, y=True, alpha=0.15); p.setLabel("bottom", "Frecuencia (Hz)"); p.setLabel("left", "RPM")
+        col = SENSOR_COLORS.get(_ckind(c), CORN)
+        pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col)); p.addItem(pill)
+        casc_cells.append(dict(p=p, name=c.name, pill=pill,
+                               curves=[p.plot(pen=pg.mkPen(col, width=0.8)) for _ in range(_NCC)]))
     tabs.addTab(casc_w, "Cascada")
+    _grid_focus(casc_cells, casc_focus, gl_casc)
 
     # --- Shaft Centerline (posición del muñón en el cojinete vs rpm) — estilo web ---
     scl_items = []
@@ -908,6 +914,16 @@ def main() -> int:
                 tc.feed(snap, rpm, fs, vib, kph_idx=kph_glob)
             except Exception:  # noqa: BLE001
                 pass
+            # Shaft Centerline: acumular la posición del muñón por rpm SIEMPRE (no solo
+            # con la pestaña abierta) para que la traza se arme durante el arranque.
+            if scl_items:
+                bk = int(rpm // 100) * 100
+                for it in scl_items:
+                    mX = float((snap[it["xi"]] * 1000.0 / (it["xc"].sensitivity_mv_per_eu or 1.0)).mean())
+                    mY = float((snap[it["yi"]] * 1000.0 / (it["yc"].sensitivity_mv_per_eu or 1.0)).mean())
+                    cx = mX * _mo.sin(it["aX"]) + mY * _mo.sin(it["aY"])
+                    cy = mX * _mo.cos(it["aX"]) + mY * _mo.cos(it["aY"])
+                    scl_track[it["brg"]][bk] = (cx, cy)
         cur = tabs.tabText(tabs.currentIndex())
         if cur == "Monitoreo":
             # estado global (estable/arranque/parada) por variación de rpm
@@ -1073,46 +1089,43 @@ def main() -> int:
                     cl["curve"].setData(x, y); cl["pts"].setData(x, y)
         elif scl_items and cur == "Shaft Centerline":
             for it in scl_items:
-                Y = snap[it["yi"]] * 1000.0 / (it["yc"].sensitivity_mv_per_eu or 1.0)
-                X = snap[it["xi"]] * 1000.0 / (it["xc"].sensitivity_mv_per_eu or 1.0)
-                mX, mY = float(X.mean()), float(Y.mean())          # posición media (gap, mil)
-                # a marco físico por el ángulo de sonda
-                cx = mX * _mo.sin(it["aX"]) + mY * _mo.sin(it["aY"])
-                cy = mX * _mo.cos(it["aX"]) + mY * _mo.cos(it["aY"])
-                it["cur"].setData([cx], [cy])
-                if rpm:
-                    bk = int(rpm // 100) * 100
-                    scl_track[it["brg"]][bk] = (cx, cy)
-                    rrk = sorted(scl_track[it["brg"]])
-                    xs = [scl_track[it["brg"]][r][0] for r in rrk]
-                    ys = [scl_track[it["brg"]][r][1] for r in rrk]
-                    it["line"].setData(xs, ys)
-                    if _scl_cmap is not None and len(rrk) >= 2:
-                        rlo, rhi = rrk[0], max(rrk[-1], rrk[0] + 1)
-                        brs = [pg.mkBrush(_scl_cmap.map((r - rlo) / (rhi - rlo), mode="qcolor"))
-                               for r in rrk]
-                        it["trk"].setData(xs, ys, brush=brs)
-                    else:
-                        it["trk"].setData(xs, ys, brush=pg.mkBrush(CORN))
+                rrk = sorted(scl_track[it["brg"]])       # ya acumulado arriba (siempre)
+                if not rrk:
+                    continue
+                xs = [scl_track[it["brg"]][r][0] for r in rrk]
+                ys = [scl_track[it["brg"]][r][1] for r in rrk]
+                it["cur"].setData([xs[-1]], [ys[-1]])    # posición actual (último rpm)
+                it["line"].setData(xs, ys)
+                if _scl_cmap is not None and len(rrk) >= 2:
+                    rlo, rhi = rrk[0], max(rrk[-1], rrk[0] + 1)
+                    brs = [pg.mkBrush(_scl_cmap.map((r - rlo) / (rhi - rlo), mode="qcolor"))
+                           for r in rrk]
+                    it["trk"].setData(xs, ys, brush=brs)
+                else:
+                    it["trk"].setData(xs, ys, brush=pg.mkBrush(CORN))
         elif cur == "Cascada":
-            rr, fr, mat = tc.cascade(cb_casc.currentText())
-            for cv in casc_curves:
-                cv.setData([], [])
-            if len(rr) >= 2 and mat.size:
-                idx = np.unique(np.linspace(0, len(rr) - 1, min(len(casc_curves), len(rr)))
-                                .round().astype(int))
-                span = float(rr[-1] - rr[0]) or 1.0
-                pk = float(mat.max()) or 1.0
-                sc = (span / max(1, len(idx))) * 1.5 / pk
-                for cv, i in zip(casc_curves, idx):
-                    cv.setData(fr, rr[i] + mat[i] * sc)
+            fk = casc_focus["k"]
+            for k, cl in enumerate(casc_cells):
+                if fk is not None and k != fk:
+                    continue
+                rr, fr, mat = tc.cascade(cl["name"])
+                for cv in cl["curves"]:
+                    cv.setData([], [])
+                if len(rr) >= 2 and mat.size:
+                    idx = np.unique(np.linspace(0, len(rr) - 1, min(len(cl["curves"]), len(rr)))
+                                    .round().astype(int))
+                    span = float(rr[-1] - rr[0]) or 1.0
+                    pk = float(mat.max()) or 1.0
+                    sc = (span / max(1, len(idx))) * 1.5 / pk
+                    for cv, i in zip(cl["curves"], idx):
+                        cv.setData(fr, rr[i] + mat[i] * sc)
 
     def run_diag():
-        rr, fr, mat = tc.cascade(cb_casc.currentText())
+        rr, fr, mat = tc.cascade(vib[0][1].name)
         if len(rr) < 3:
             diag_txt.setHtml("<i>Corré un runup (variá la velocidad) para tener datos que diagnosticar.</i>")
             return
-        rb, ab, _ph = tc.bode(cb_casc.currentText())
+        rb, ab, _ph = tc.bode(vib[0][1].name)
         crit = [float(rb[i]) for i in diag.detect_criticals(np.asarray(rb, float), np.asarray(ab, float))]
         found = diag.cascade_diagnosis(rr, fr, mat, crit)
         html = [f"<h3 style='color:{NAVY}'>Auto-diagnóstico (API 684)</h3>"]
@@ -1326,8 +1339,9 @@ def main() -> int:
         if hasattr(agent.source, "rewind"):
             agent.source.rewind()
         tc = TransientCapture(TransientConfig(fmax_hz=min(2000.0, agent.sample_rate_hz / 2.5)))
-        for cv in casc_curves:
-            cv.setData([], [])
+        for cl in casc_cells:
+            for cv in cl["curves"]:
+                cv.setData([], [])
         for cl in bode_cells:
             cl["amp"].setData([], []); cl["data"] = {}; cl["cur"].hide(); cl["txt"].setText("")
         for cl in pol_cells:
