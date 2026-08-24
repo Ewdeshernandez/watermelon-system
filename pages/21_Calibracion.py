@@ -66,11 +66,15 @@ st.session_state.setdefault("cal_loops", [])
 # Autoguardado + recuperación (no perder el reporte si se cae la sesión)
 # =====================================================================
 from core.reports_ext import drafts as _drafts
+from core.reports_ext.common import REVIEWERS, peek_consecutive, commit_consecutive
 
 _CAL_MODULE = "calibracion"
-# Claves de estado que se persisten (lo valioso: lazos + metadatos del reporte).
+# Claves de estado que se persisten (lo valioso: lazos + metadatos + textos de
+# las secciones descriptivas). Las fotos no se persisten (se re-suben).
 _CAL_KEYS = ["cal_loops", "cal_asset", "cal_client", "cal_location",
-             "cal_specialist", "cal_date", "cal_notes", "cal_hall", "cal_reco"]
+             "cal_specialist", "cal_date", "cal_notes", "cal_hall", "cal_reco",
+             "cal_cons", "cal_rev",
+             "cal_met_txt", "cal_inf_txt", "cal_dev_txt", "cal_lin_txt", "cal_sat_txt"]
 
 
 def _cal_capture_state() -> dict:
@@ -426,6 +430,7 @@ def _report_tab() -> None:
     st.session_state.setdefault("cal_location", "")
     st.session_state.setdefault("cal_specialist", _user.get("full_name") or "")
     st.session_state.setdefault("cal_date", _date.today().strftime("%d/%m/%Y"))
+    st.session_state.setdefault("cal_cons", peek_consecutive("calibracion"))
 
     with st.container(border=True):
         c1, c2, c3 = st.columns(3)
@@ -434,10 +439,16 @@ def _report_tab() -> None:
             st.text_input("Cliente", key="cal_client")
         with c2:
             st.text_input("Sitio / ubicación", key="cal_location")
-            st.text_input("Especialista", key="cal_specialist")
+            st.text_input("Especialista (preparado por)", key="cal_specialist")
         with c3:
             st.text_input("Fecha", key="cal_date")
             st.text_area("Notas", key="cal_notes", height=80)
+        c4, c5 = st.columns(2)
+        with c4:
+            st.text_input("Consecutivo (automático · ISO 9001)", key="cal_cons",
+                          help="Código SIGAGROUP-CAL-AÑO-NNNN automático y editable.")
+        with c5:
+            st.selectbox("Aprobado por (autoridad)", list(REVIEWERS.keys()), key="cal_rev")
 
     # ---- Borradores (autoguardado + guardar/cargar/duplicar/nuevo) --------
     with st.expander("💾 Borradores del reporte", expanded=False):
@@ -512,27 +523,43 @@ def _report_tab() -> None:
             return []
         return [s.strip() for s in re.split(r"(?<=\.)\s+", t) if s.strip()]
 
-    cH, cR = st.columns(2)
-    hall = cH.text_area("Hallazgos (un item por oración, termina en punto)",
-                        key="cal_hall", height=100)
-    reco = cR.text_area("Recomendaciones (un item por oración, termina en punto)",
-                        key="cal_reco", height=100)
-    _files = st.file_uploader("Fotos / imágenes relevantes (opcional)",
-                              accept_multiple_files=True, type=["png", "jpg", "jpeg"],
-                              key="cal_report_photos")
-    photos = []
-    if _files:
-        with st.expander(f"Títulos de las {len(_files)} figuras", expanded=True):
-            for _i, _f in enumerate(_files, 1):
-                _t = st.text_input(f"Figura {_i}", key=f"cal_figt_{_i}",
+    def _sec_input(key: str, title: str, only_photos: bool = False) -> dict:
+        """Sección con párrafo + imágenes (o solo imágenes). Fotos con título
+        por figura. El texto se persiste; las fotos se re-suben."""
+        with st.expander(title, expanded=False):
+            txt = ""
+            if not only_photos:
+                txt = st.text_area("Párrafo", key=f"{key}_txt", height=100)
+            files = st.file_uploader("Imágenes", accept_multiple_files=True,
+                                     type=["png", "jpg", "jpeg"], key=f"{key}_imgs")
+            phs = []
+            for _i, _f in enumerate(files or [], 1):
+                _t = st.text_input(f"Figura {_i}", key=f"{key}_figt_{_i}",
                                    placeholder=f"Descripción de la figura {_i}")
                 _cap = f"Figura {_i}. {_t}".rstrip(". ") if _t else f"Figura {_i}"
-                photos.append({"bytes": _f.getvalue(), "caption": _cap})
+                phs.append({"bytes": _f.getvalue(), "caption": _cap})
+        return {"text": txt, "photos": phs}
+
+    cH, cR = st.columns(2)
+    hall = cH.text_area("2. Hallazgos (un item por oración, termina en punto)",
+                        key="cal_hall", height=100)
+    reco = cR.text_area("3. Recomendaciones (un item por oración, termina en punto)",
+                        key="cal_reco", height=100)
+
+    st.markdown("**Secciones descriptivas** (opcionales — cada una acepta párrafo e imágenes):")
+    sec_met = _sec_input("cal_met", "4. Metodología")
+    sec_inf = _sec_input("cal_inf", "5. Información de la unidad")
+    sec_dev = _sec_input("cal_dev", "6. Desarrollo del servicio")
+    sec_lin = _sec_input("cal_lin", "6.1 Prueba de linealidad")
+    sec_sat = _sec_input("cal_sat", "6.2 Pruebas SAT")
+    sec_anx = _sec_input("cal_anx", "7. Anexo fotográfico (solo imágenes)", only_photos=True)
 
     st.divider()
     if st.button("Generar reporte PDF", key="cal_gen_btn", type="primary"):
         try:
             from core.calibration.report import build_calibration_pdf
+            _cons = st.session_state.get("cal_cons")
+            _rev = st.session_state.get("cal_rev")
             meta = {
                 "asset": st.session_state.get("cal_asset"),
                 "client": st.session_state.get("cal_client"),
@@ -540,11 +567,20 @@ def _report_tab() -> None:
                 "specialist": st.session_state.get("cal_specialist"),
                 "report_date": st.session_state.get("cal_date"),
                 "notes": st.session_state.get("cal_notes"),
+                "consecutive": _cons,
+                "reviewer": _rev, "reviewer_role": REVIEWERS.get(_rev, ""),
                 "hallazgos": _sentences(hall),
                 "recomendaciones": _sentences(reco),
-                "photos": photos,
+                "sec_metodologia": sec_met, "sec_info_unidad": sec_inf,
+                "sec_desarrollo": sec_dev, "sec_linealidad": sec_lin,
+                "sec_sat": sec_sat, "anexo_photos": sec_anx.get("photos", []),
             }
             st.session_state["cal_pdf"] = build_calibration_pdf(meta=meta, loops=loops)
+            # Confirmar el consecutivo (una sola vez) si es el automático.
+            _done = st.session_state.setdefault("_cal_cons_committed", set())
+            if _cons and str(_cons).startswith("SIGAGROUP-") and _cons not in _done:
+                commit_consecutive("calibracion")
+                _done.add(_cons)
         except Exception as e:  # noqa: BLE001
             st.error(f"Error generando el PDF: {e}")
             st.session_state.pop("cal_pdf", None)

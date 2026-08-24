@@ -498,7 +498,7 @@ def today_str() -> str:
 # libre el formato; este esquema es trazable, ordenable y único.
 TYPE_CODES = {
     "diario": "DIA", "preliminar": "PRE", "boroscopia": "BOR",
-    "alineacion": "ALI", "mecanico": "MEC",
+    "alineacion": "ALI", "mecanico": "MEC", "calibracion": "CAL",
 }
 
 # Autoridades habilitadas para revisar/aprobar reportes (solo dos).

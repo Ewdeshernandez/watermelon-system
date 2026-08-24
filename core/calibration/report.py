@@ -25,7 +25,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from reportlab.lib import colors
 from reportlab.lib.units import cm
-from reportlab.platypus import Image, PageBreak, Paragraph, Spacer, Table, TableStyle
+from reportlab.platypus import (
+    Image, KeepTogether, PageBreak, Paragraph, Spacer, Table, TableStyle,
+)
 
 from core.report_pdf_shell import render_report_pdf, make_styles
 from core.calibration.curve import curve_png
@@ -44,6 +46,38 @@ def _p(text: str, styles, style: str = "WMBody"):
 
 def _section(title: str, styles):
     return Paragraph(title, styles["WMTOC1"])
+
+
+def _subsection(title: str, styles):
+    return Paragraph(title, styles["WMTOC2"])
+
+
+def _section_block(num_title: str, sec: Dict[str, Any], styles,
+                   sub: bool = False) -> List[Any]:
+    """Bloque de sección con párrafo + imágenes. Devuelve flowables o [] si no
+    hay contenido. El encabezado se mantiene JUNTO con lo primero que sigue
+    (KeepTogether) para que NO quede huérfano al pie de página."""
+    sec = sec or {}
+    text = str(sec.get("text", "") or "").strip()
+    photos = [p for p in (sec.get("photos") or []) if p.get("bytes")]
+    if not text and not photos:
+        return []
+    head = _subsection(num_title, styles) if sub else _section(num_title, styles)
+    out: List[Any] = []
+    try:
+        from core.reports_ext.common import photo_grid, photo_credit
+        grid = photo_grid(photos, styles, cols=2, credit=photo_credit()) if photos else []
+    except Exception:
+        grid = []
+    if text:
+        out.append(KeepTogether([head, _p(text, styles)]))
+        out += grid
+    else:
+        # solo fotos: encabezado + primera tabla de imágenes juntos
+        out.append(KeepTogether([head] + grid[:1]))
+        out += grid[1:]
+    out.append(Spacer(1, 0.3 * cm))
+    return out
 
 
 def _fmt(x: Any, nd: int = 2) -> str:
@@ -205,42 +239,56 @@ def build_calibration_pdf(*, meta: Dict[str, Any],
         body.append(Spacer(1, 0.3 * cm))
         body.append(_p(meta["notes"], styles, "WMBody"))
 
-    # ---- Hallazgos / Recomendaciones (opcionales) --------------------
+    # ---- 2. Hallazgos / 3. Recomendaciones (numeradas, por oración) --
     hall = [h for h in (meta.get("hallazgos") or []) if str(h).strip()]
     reco = [r for r in (meta.get("recomendaciones") or []) if str(r).strip()]
     if hall:
         body.append(Spacer(1, 0.3 * cm))
-        body.append(_section("2. Hallazgos", styles))
-        for i, h in enumerate(hall, 1):
+        body.append(KeepTogether([_section("2. Hallazgos", styles),
+                                  _p(f"1.&nbsp;&nbsp;{hall[0]}", styles)]))
+        for i, h in enumerate(hall[1:], 2):
             body.append(_p(f"{i}.&nbsp;&nbsp;{h}", styles, "WMBody"))
     if reco:
         body.append(Spacer(1, 0.2 * cm))
-        body.append(_section(f"{3 if hall else 2}. Recomendaciones", styles))
-        for i, r in enumerate(reco, 1):
+        body.append(KeepTogether([_section("3. Recomendaciones", styles),
+                                  _p(f"1.&nbsp;&nbsp;{reco[0]}", styles)]))
+        for i, r in enumerate(reco[1:], 2):
             body.append(_p(f"{i}.&nbsp;&nbsp;{r}", styles, "WMBody"))
 
-    # ---- Registro fotográfico (fotos relevantes, opcional) -----------
-    photos = meta.get("photos") or []
-    if photos:
-        body.append(Spacer(1, 0.3 * cm))
-        _num = 2 + (1 if hall else 0) + (1 if reco else 0)
-        body.append(_section(f"{_num}. Registro fotográfico", styles))
-        try:
-            from core.reports_ext.common import photo_grid, photo_credit
-            body += photo_grid(photos, styles, cols=2, credit=photo_credit())
-        except Exception:
-            pass
+    # ---- 4-7. Secciones descriptivas (párrafo + imágenes) ------------
+    body += _section_block("4. Metodología", meta.get("sec_metodologia"), styles)
+    body += _section_block("5. Información de la unidad", meta.get("sec_info_unidad"), styles)
+    _dev = _section_block("6. Desarrollo del servicio", meta.get("sec_desarrollo"), styles)
+    _lin = _section_block("6.1 Prueba de linealidad", meta.get("sec_linealidad"), styles, sub=True)
+    _sat = _section_block("6.2 Pruebas SAT", meta.get("sec_sat"), styles, sub=True)
+    # Si hay 6.1/6.2 pero no un párrafo en 6, igual emitimos el encabezado 6.
+    if (_lin or _sat) and not _dev:
+        _dev = [KeepTogether([_section("6. Desarrollo del servicio", styles),
+                              (_lin[0] if _lin else _sat[0])])]
+        # el primero ya quedó dentro del KeepTogether; evitamos duplicar
+        if _lin:
+            _lin = _lin[1:]
+        elif _sat:
+            _sat = _sat[1:]
+    body += _dev + _lin + _sat
+
+    # ---- 7. Anexo fotográfico (solo imágenes) ------------------------
+    anexo = [p for p in (meta.get("anexo_photos") or []) if p.get("bytes")]
+    if anexo:
+        body += _section_block("7. Anexo fotográfico", {"photos": anexo}, styles)
 
     body.append(PageBreak())
 
-    # ---- Un certificado por lazo ------------------------------------
+    # ---- 8. Certificados (uno por lazo) -----------------------------
+    body.append(_section("8. Certificados", styles))
+    body.append(Spacer(1, 0.2 * cm))
     for i, lp in enumerate(loops, 1):
         a = lp.get("analysis", {})
         stype = lp.get("sensor_type", "")
         kind = lp.get("kind", "linearity")
         tag = lp.get("tag", f"Lazo {i}")
 
-        body.append(_section(f"Certificado {i} — {tag}", styles))
+        body.append(_subsection(f"Certificado {i} — {tag}", styles))
         body.append(_kv_table([
             ("Tag / punto", tag),
             ("Tipo de sensor", _type_label(stype)),
@@ -303,6 +351,13 @@ def build_calibration_pdf(*, meta: Dict[str, Any],
         "prepared_by": meta.get("specialist", ""),
         "prepared_role": meta.get("specialist_role", "Analista de vibraciones"),
         "prepared_city": meta.get("location", ""),
+        # Aprobado/Revisado por (autoridad) + consecutivo, igual que los reportes de campo.
+        "reviewed_by": meta.get("reviewer", ""),
+        "reviewed_role": meta.get("reviewer_role", "Machinery Diagnostic Champion"),
+        "reviewed_city": meta.get("location", ""),
+        "prepared_label": "Preparado por:",
+        "reviewed_label": "Aprobado por:",
+        "consecutive": meta.get("consecutive", ""),
         "report_date": meta.get("report_date") or datetime.now().strftime("%d/%m/%Y"),
         "train_description": meta.get("train_description",
                                       "Curvas de linealidad · API 670"),
