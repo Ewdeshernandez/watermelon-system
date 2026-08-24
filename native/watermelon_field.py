@@ -1052,68 +1052,82 @@ def main() -> int:
                 from core.remote_monitoring.recorder import (sync_pending, list_recordings,
                                                              is_synced, upload_recording)
                 ok, fail = sync_pending(agent.instance_id)
-                msg = f"Subidas {ok} · fallidas {fail}."
+                res["ok"], res["fail"] = ok, fail
                 if fail:
                     for m in list_recordings(agent.instance_id):
                         if not is_synced(m["_dir"]):
                             r = upload_recording(m["_dir"])
                             if not r.get("ok"):
-                                msg += f"\n\nMotivo: {r.get('reason', '?')}\nURL usada: {used_url or '(vacía)'}"
+                                res["reason"] = f"{r.get('reason', '?')} · URL: {used_url or '(vacía)'}"
                                 break
-                res["msg"] = msg
             except Exception as e:  # noqa: BLE001
-                res["msg"] = f"No se pudo subir: {type(e).__name__}: {e}"
+                res["err"] = f"{type(e).__name__}: {e}"
             res["done"] = True
         threading.Thread(target=_work, daemon=True).start()
 
         def _check():
             if not res.get("done"):
                 QtCore.QTimer.singleShot(300, _check); return
-            btn_sync.setEnabled(True); _refresh_disk()
-            QtWidgets.QMessageBox.information(win, "Sincronizar", res["msg"])
+            btn_sync.setEnabled(True); btn_sync.setText("↑ Subir pendientes"); _refresh_disk()
+            ok, fail = res.get("ok", 0), res.get("fail", 0)
+            if res.get("err"):
+                _nice("Sincronizar", f"<b style='color:#b91c1c'>No se pudo subir</b><br>"
+                      f"<span style='color:#334155'>{res['err']}</span>", QtWidgets.QMessageBox.Warning)
+            elif fail == 0 and ok > 0:
+                _nice("Sincronizado",
+                      "<div style='font-size:17px'><b style='color:#166534'>☁ Datos sincronizados en la nube</b></div>"
+                      f"<div style='color:#334155;margin-top:6px'>{ok} grabación(es) subida(s).</div>"
+                      "<div style='color:#0F1E3D;margin-top:10px;font-size:14px'>Ya podés <b>iniciar el "
+                      "diagnóstico en Watermelon System</b> (web → Análisis → Reprocesar). 🍉</div>")
+            elif ok == 0 and fail == 0:
+                _nice("Sincronizar", "<b>No hay grabaciones pendientes.</b> Todo está en la nube.")
+            else:
+                _nice("Sincronizar",
+                      f"<b>Subidas {ok} · fallidas {fail}.</b><br>"
+                      f"<span style='color:#b45309'>{res.get('reason','')}</span>",
+                      QtWidgets.QMessageBox.Warning)
         QtCore.QTimer.singleShot(300, _check)
+
+    def _nice(title, html, icon=QtWidgets.QMessageBox.Information):
+        m = QtWidgets.QMessageBox(win)
+        m.setWindowTitle(title); m.setIcon(icon)
+        m.setTextFormat(QtCore.Qt.RichText)
+        m.setText(html)
+        m.exec()
 
     def do_save():
         # 1) Si TODAVÍA está adquiriendo → hay que detener primero
         if act_stop.isEnabled():
-            QtWidgets.QMessageBox.warning(
-                win, "Guardar datos",
-                "Primero detené la adquisición con ■ Detener, y después Guardá los datos.")
+            _nice("Guardar datos",
+                  "<div style='font-size:15px'><b style='color:#b45309'>⏸ Primero detené la adquisición</b></div>"
+                  "<div style='color:#334155;margin-top:4px'>Dale <b>■ Detener</b> y después "
+                  "<b>💾 Guardar datos</b>.</div>", QtWidgets.QMessageBox.Warning)
             return
-        # 2) ¿hay una corrida nueva (detenida, sin guardar)?
+        # 2) ¿hay una corrida detenida?
         rec = rec_state.get("session")
-        if not rec or rec_state.get("saved"):
-            QtWidgets.QMessageBox.information(
-                win, "Guardar datos",
-                "No hay una corrida nueva para guardar.\n\nHacé: ▶ Iniciar → (medí) → ■ Detener → 💾 Guardar datos.")
+        if not rec:
+            _nice("Guardar datos",
+                  "<div style='font-size:15px'><b>No hay una corrida para guardar</b></div>"
+                  "<div style='color:#334155;margin-top:4px'>Hacé: <b>▶ Iniciar</b> → medí → "
+                  "<b>■ Detener</b> → <b>💾 Guardar datos</b>.</div>")
             return
-        # 3) subir a la nube EN HILO (no congela)
-        d, rid = rec.dir, rec.rec_id
-        dur, mb = rec.status.duration_s, rec.status.size_mb
-        btn_save.setEnabled(False); lbl_rec.setText("guardando…")
-        res = {}
-
-        def _work():
-            try:
-                res["up"] = upload_recording(d)
-            except Exception as e:  # noqa: BLE001
-                res["up"] = {"ok": False, "reason": str(e)}
-            res["done"] = True
-        threading.Thread(target=_work, daemon=True).start()
-
-        def _check():
-            if not res.get("done"):
-                QtCore.QTimer.singleShot(300, _check); return
-            btn_save.setEnabled(True); lbl_rec.setText(""); _refresh_disk()
-            up = res.get("up", {})
-            if up.get("ok"):
-                rec_state["saved"] = True
-                rec_state["guard"] = int(rec_state.get("guard", 0)) + 1
-            QtWidgets.QMessageBox.information(
-                win, "Guardar datos", f"{rid} · {dur:.0f}s · {mb:.1f} MB · "
-                + ("☁ guardado en la nube" if up.get("ok")
-                   else f"guardado local (pendiente de subir)\n{up.get('reason','')}"))
-        QtCore.QTimer.singleShot(300, _check)
+        # 3) La corrida YA está en disco (se graba desde Iniciar). Guardar = confirmar local.
+        if not rec_state.get("saved"):
+            rec_state["guard"] = int(rec_state.get("guard", 0)) + 1
+            rec_state["saved"] = True
+        _refresh_disk()
+        pend = 0
+        try:
+            from core.remote_monitoring.recorder import pending_count
+            pend = pending_count(agent.instance_id)
+        except Exception:  # noqa: BLE001
+            pass
+        _nice("Datos guardados",
+              "<div style='font-size:17px'><b style='color:#166534'>✅ Datos guardados en el equipo</b></div>"
+              f"<div style='color:#0F1E3D;font-family:monospace;margin-top:6px'>{rec.rec_id}<br>"
+              f"{rec.status.duration_s:.0f} s · {rec.status.size_mb:.1f} MB</div>"
+              "<div style='color:#b45309;margin-top:10px;font-size:14px'>⏳ <b>Pendiente de subir a la nube</b> — "
+              f"apretá <b>↑ Subir pendientes ({pend})</b> cuando tengas internet.</div>")
 
     def set_mode_live(mode):
         """Cambia el MODO de operación en vivo (estable/arranque/parada) sobre la
