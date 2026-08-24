@@ -343,6 +343,20 @@ def cloud_recordings(instance_id: str, limit: int = 30) -> List[dict]:
         return []
 
 
+def cloud_recordings_all(limit: int = 60) -> List[dict]:
+    """TODAS las grabaciones en Supabase (cualquier máquina). Para que el
+    especialista las encuentre desde la web sin depender del nombre de máquina."""
+    client = _sb_client()
+    if client is None:
+        return []
+    try:
+        res = (client.table("transient_recordings").select("*")
+               .order("started", desc=True).limit(limit).execute())
+        return res.data or []
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def download_recording(instance_id: str, rec_id: str) -> Optional[str]:
     """Descarga una grabación de Supabase a disco local (para reprocesar en la
     Mac). Devuelve el directorio local o None. Idempotente: si ya está local con

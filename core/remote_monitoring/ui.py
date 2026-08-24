@@ -634,12 +634,13 @@ def _render_reprocess(agent: AcqAgent) -> None:
     grabación, sin depender de la config viva."""
     import types
     from core.remote_monitoring.recorder import (list_all_recordings, load_recording,
-                                                 cloud_recordings, download_recording)
+                                                 cloud_recordings_all, download_recording)
     recs = list_all_recordings()
     # Suma las grabaciones que están SOLO en la nube (subidas por el equipo de
-    # campo Windows) para poder verlas desde la Mac. Se descargan al reprocesar.
+    # campo Windows) para poder verlas desde la Mac — de CUALQUIER máquina, así
+    # aparecen aunque la web esté en otra máquina. Se descargan al reprocesar.
     _local_ids = {(m.get("_instance", ""), m.get("rec_id")) for m in recs}
-    for cr in cloud_recordings(agent.instance_id, limit=50):
+    for cr in cloud_recordings_all(limit=60):
         if (cr.get("instance_id", ""), cr.get("rec_id")) in _local_ids:
             continue
         recs.append({"rec_id": cr.get("rec_id"), "_instance": cr.get("instance_id", ""),
