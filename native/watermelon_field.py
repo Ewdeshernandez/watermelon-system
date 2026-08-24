@@ -603,6 +603,7 @@ def main() -> int:
         "doble clic otra vez = volver a todas</i>"))
     top.addStretch(1); ond_l.addLayout(top)
     gl = pg.GraphicsLayoutWidget(); ond_l.addWidget(gl, 1)
+    gl.ci.setContentsMargins(2, 2, 2, 2); gl.ci.setSpacing(2)
     wave_curves = []; wave_plots = []; wave_stats = []; wave_pills = []
     for r, (i, c) in enumerate(vib):
         p = gl.addPlot(row=r, col=0); p.showGrid(x=False, y=True, alpha=0.06)  # limpio, casi blanco
@@ -697,6 +698,7 @@ def main() -> int:
             "<b>Órbitas</b> <i style='color:#64748b'>— orientadas al ángulo de sonda "
             "(Y=45°L · X=45°R) · doble clic = ver una sola · doble clic otra vez = volver</i>"))
         gl_orb = pg.GraphicsLayoutWidget(); orb_l.addWidget(gl_orb, 1)
+        gl_orb.ci.setContentsMargins(2, 2, 2, 2); gl_orb.ci.setSpacing(2)
         ncol = 2 if len(orb_pairs) > 1 else 1
         for k, (brg, (yi, yc), (xi, xc)) in enumerate(orb_pairs):
             p = gl_orb.addPlot(row=k // ncol, col=k % ncol)
@@ -763,6 +765,7 @@ def main() -> int:
         "<b>Bode</b> <i style='color:#64748b'>— amplitud 1X vs rpm de cada canal (se llena en arranque) · "
         "doble clic = ver uno solo · mové el mouse = amplitud/fase/rpm</i>"))
     gl_bode = pg.GraphicsLayoutWidget(); bode_l.addWidget(gl_bode, 1)
+    gl_bode.ci.setContentsMargins(2, 2, 2, 2); gl_bode.ci.setSpacing(2)
     bode_cells = []; bode_focus = {"k": None}; _ncb = 2 if len(vib) > 1 else 1
     for k, (i, c) in enumerate(vib):
         p = gl_bode.addPlot(row=k // _ncb, col=k % _ncb)
@@ -807,10 +810,12 @@ def main() -> int:
         "doble clic = polar completo (rpm, Ncrit, datos)</i>"))
     ptop.addStretch(1); pol_l.addLayout(ptop)
     gl_pol = pg.GraphicsLayoutWidget(); pol_l.addWidget(gl_pol, 1)
+    gl_pol.ci.setContentsMargins(2, 2, 2, 2); gl_pol.ci.setSpacing(2)
     pol_cells = []; pol_focus = {"k": None}
+    _ncp = 4 if len(vib) >= 5 else (2 if len(vib) > 1 else 1)   # cuadrados: más columnas = más grandes
     _pth = np.linspace(0, 2 * np.pi, 120)
     for k, (i, c) in enumerate(vib):
-        p = gl_pol.addPlot(row=k // _ncb, col=k % _ncb)
+        p = gl_pol.addPlot(row=k // _ncp, col=k % _ncp)
         p.setAspectLocked(True); p.hideAxis("left"); p.hideAxis("bottom"); p.setMenuEnabled(False)
         for _r in (0.25, 0.5, 0.75, 1.0):                       # anillos de amplitud
             p.plot(_r * np.sin(_pth), _r * np.cos(_pth),
@@ -837,8 +842,8 @@ def main() -> int:
         rpm_lbls = [pg.TextItem("", color="#64748b", anchor=(0.5, 0.5)) for _ in range(8)]
         for t in rpm_lbls:
             p.addItem(t)
-        arc = p.plot(pen=pg.mkPen(NAVY, width=3))            # arco de giro de la máquina
-        arw = pg.ArrowItem(angle=0, tipAngle=32, headLen=13, brush=NAVY, pen=None); p.addItem(arw)
+        arc = p.plot(pen=pg.mkPen("#9aa8bd", width=1.3))     # arco de giro (discreto)
+        arw = pg.ArrowItem(angle=0, tipAngle=28, headLen=7, brush="#9aa8bd", pen=None); p.addItem(arw)
         pol_cells.append(dict(p=p, name=c.name, unit=c.units, pill=pill, curve=curve, pts=pts,
                               ncrit=ncrit, op=op, ncrit_txt=ncrit_txt, box=box, rpm_lbls=rpm_lbls,
                               pa=pa, deg_items=deg_items, arc=arc, arw=arw))
@@ -847,9 +852,9 @@ def main() -> int:
 
     def _polar_relabel():
         cw = (cb_giro.currentText() == "CW")     # CW → ángulos de fase al revés
-        R = 1.34
-        # arco de giro sobre el tope: CW gira horario, CCW antihorario
-        degs = np.linspace(305, 55, 26) if cw else np.linspace(55, 305, 26)
+        R = 1.16
+        # arco chico de giro cerca del tope: CW = horario, CCW = antihorario
+        degs = np.linspace(-26, 26, 14) if cw else np.linspace(26, -26, 14)
         xs = R * np.sin(np.radians(degs)); ys = R * np.cos(np.radians(degs))
         for cl in pol_cells:
             for t, d in cl["deg_items"]:
@@ -867,6 +872,7 @@ def main() -> int:
         "<b>Cascada</b> <i style='color:#64748b'>— espectros apilados por rpm de cada canal (arranque) · "
         "doble clic = ver uno solo</i>"))
     gl_casc = pg.GraphicsLayoutWidget(); casc_l.addWidget(gl_casc, 1)
+    gl_casc.ci.setContentsMargins(2, 2, 2, 2); gl_casc.ci.setSpacing(2)
     casc_cells = []; casc_focus = {"k": None}; _NCC = 26
     for k, (i, c) in enumerate(vib):
         p = gl_casc.addPlot(row=k // _ncb, col=k % _ncb)
@@ -892,6 +898,7 @@ def main() -> int:
             "cojinete al variar la velocidad. Traza coloreada por rpm · REST = reposo (abajo) · "
             "punto grande = actual.</i>"))
         gl_scl = pg.GraphicsLayoutWidget(); scl_l.addWidget(gl_scl, 1)
+        gl_scl.ci.setContentsMargins(2, 2, 2, 2); gl_scl.ci.setSpacing(2)
         ncol = 2 if len(orb_pairs) > 1 else 1
         _th = np.linspace(0, 2 * np.pi, 160); Cclr = 8.0     # juego dibujado (mil)
         for k, (brg, (yi, yc), (xi, xc)) in enumerate(orb_pairs):
