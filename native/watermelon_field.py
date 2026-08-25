@@ -46,6 +46,35 @@ SENSOR_COLORS = {"prox": "#8b5cf6", "vel": "#22b8cf", "accel": "#ef4444", "keyph
 SENSOR_LABELS = {"prox": "Proximity", "vel": "Velocity", "accel": "Accelerometer", "keyphasor": "Keyphasor"}
 
 
+def _asset_path(rel: str) -> str:
+    """Ruta a un asset tanto en dev como en el .exe (PyInstaller _MEIPASS)."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    return os.path.join(base, rel)
+
+
+_LOGO_URI_CACHE = {}
+
+
+def _logo_data_uri() -> str:
+    """Logo Watermelon como data URI (base64) para incrustar en el HTML del reporte.
+    Cachea el resultado; devuelve '' si no se encuentra el asset."""
+    if "uri" in _LOGO_URI_CACHE:
+        return _LOGO_URI_CACHE["uri"]
+    uri = ""
+    try:
+        import base64
+        for rel in ("assets/watermelon_logo.png", "watermelon_logo.png"):
+            p = _asset_path(rel)
+            if os.path.exists(p):
+                with open(p, "rb") as f:
+                    uri = "data:image/png;base64," + base64.b64encode(f.read()).decode("ascii")
+                break
+    except Exception:  # noqa: BLE001
+        uri = ""
+    _LOGO_URI_CACHE["uri"] = uri
+    return uri
+
+
 def build_agent(args) -> AcqAgent:
     # Máquina simulada editable (archivo JSON de la biblioteca) — v0.4
     if getattr(args, "machine_file", ""):
@@ -191,8 +220,8 @@ def main() -> int:
     from core.remote_monitoring.sim_machine import MODES, MODE_TO_PROFILE
     # Internal mode keys stay Spanish (stored in JSON / used by the engine); the UI
     # shows English labels and maps back to the key.
-    MODE_LABELS = {"estable": "Steady", "arranque": "Run-up", "parada": "Coast-down",
-                   "arranque_parada": "Run-up / Coast-down"}
+    MODE_LABELS = {"estable": "Steady", "arranque": "Startup", "parada": "Coastdown",
+                   "arranque_parada": "Startup / Coastdown"}
     LABEL_TO_MODE = {v: k for k, v in MODE_LABELS.items()}
     _mode_labels = [MODE_LABELS.get(m, m) for m in MODES]
     tc = TransientCapture(TransientConfig(fmax_hz=min(2000.0, args.fs / 2.5)))
@@ -934,8 +963,14 @@ def main() -> int:
     diag_w = QtWidgets.QWidget(); diag_l = QtWidgets.QVBoxLayout(diag_w)
     drow = QtWidgets.QHBoxLayout()
     btn_diag = QtWidgets.QPushButton("Generate preliminary report")
-    btn_diag_save = QtWidgets.QPushButton("Save report…")
-    drow.addWidget(btn_diag); drow.addWidget(btn_diag_save)
+    btn_diag_pdf = QtWidgets.QPushButton("Save PDF…")
+    btn_diag_save = QtWidgets.QPushButton("Save HTML…")
+    btn_diag_cloud = QtWidgets.QPushButton("Upload report to cloud")
+    _greenbtn = ("QPushButton{background:#10b981;color:white;border:none;font-weight:700;"
+                 "padding:7px 15px;border-radius:7px;} QPushButton:hover{background:#0e9f6e;}")
+    btn_diag_pdf.setStyleSheet(_greenbtn)
+    drow.addWidget(btn_diag); drow.addWidget(btn_diag_pdf)
+    drow.addWidget(btn_diag_save); drow.addWidget(btn_diag_cloud)
     drow.addSpacing(16)
     drow.addWidget(QtWidgets.QLabel("Report language:"))
     cb_lang = QtWidgets.QComboBox(); cb_lang.addItems(["English", "Español"]); drow.addWidget(cb_lang)
@@ -996,7 +1031,7 @@ def main() -> int:
             prev = rec_state.get("prev_rpm")
             if rpm and prev:
                 d = rpm - prev
-                estado_g = "Run-up" if d > 15 else ("Coast-down" if d < -15 else "Steady")
+                estado_g = "Startup" if d > 15 else ("Coastdown" if d < -15 else "Steady")
             else:
                 estado_g = "—"
             rec_state["prev_rpm"] = rpm
@@ -1307,8 +1342,21 @@ def main() -> int:
         # --- HTML report ---
         verdict = T["verdicts"][worst]
         thr = "".join(f"<th>{x}</th>" for x in T["th"])
+        # Branded header (Watermelon System) — matches the web reports
+        logo = _logo_data_uri()
+        logo_img = (f"<img src='{logo}' width='46' height='46' "
+                    "style='vertical-align:middle;margin-right:12px'>") if logo else "🍉 "
+        header = (
+            "<table width='100%' cellspacing='0' cellpadding='0' "
+            "style='background:#0b1426;border-radius:10px'><tr>"
+            f"<td style='padding:14px 18px'>{logo_img}"
+            "<span style='color:#f8fafc;font-size:22px;font-weight:800;vertical-align:middle;"
+            "letter-spacing:-.02em'>Watermelon System</span>"
+            "<span style='color:#10b981;font-size:13px;font-weight:700;margin-left:12px'>"
+            "Vibration &amp; Rotordynamics</span></td></tr></table>")
         h = [f"<div style='font-family:Segoe UI,Arial'>",
-             f"<h2 style='color:{NAVY};margin:0'>{T['title']}</h2>",
+             header,
+             f"<h2 style='color:{NAVY};margin:10px 0 0 0'>{T['title']}</h2>",
              f"<div style='color:#64748b;font-size:12px'>{T['machine']} <b>{args.machine}</b> · "
              f"{_t.strftime(T['dfmt'])} · RPM {rpm:.0f} · {T['sampling']} {fs/1000:.1f} kS/s</div>",
              f"<p style='font-size:15px'>{T['verdict']}: <b style='color:{verdict[1]}'>{verdict[0]}</b> "
@@ -1367,9 +1415,93 @@ def main() -> int:
             _nice("Save report", f"<b style='color:#b91c1c'>Could not save</b><br>{e}",
                   QtWidgets.QMessageBox.Warning)
 
+    def do_save_pdf():
+        """Exporta el reporte a PDF directamente (sin navegador) — listo para enviar."""
+        if not diag_state.get("html"):
+            _nice("Save PDF", "<b>Generate the report first</b> with «Generate preliminary report».")
+            return
+        import time as _t
+        from core.remote_monitoring.recorder import _persist_root
+        rdir = os.path.join(os.path.dirname(_persist_root()), "reports")
+        os.makedirs(rdir, exist_ok=True)
+        default = os.path.join(rdir, f"report_{args.machine}_{_t.strftime('%Y%m%d_%H%M%S')}.pdf")
+        path, _f = QtWidgets.QFileDialog.getSaveFileName(win, "Save report as PDF", default,
+                                                         "PDF (*.pdf)")
+        if not path:
+            return
+        try:
+            doc = QtGui.QTextDocument()
+            doc.setHtml("<div style='font-family:Segoe UI,Arial'>" + diag_state["html"] + "</div>")
+            writer = QtGui.QPdfWriter(path)
+            writer.setPageSize(QtGui.QPageSize(QtGui.QPageSize.A4))
+            try:
+                writer.setPageMargins(QtCore.QMarginsF(14, 14, 14, 14),
+                                      QtGui.QPageLayout.Unit.Millimeter)
+            except Exception:  # noqa: BLE001
+                pass
+            doc.print_(writer)
+            _nice("PDF saved",
+                  "<div style='font-size:15px'><b style='color:#166534'>✅ PDF saved</b></div>"
+                  f"<div style='color:#334155;font-family:monospace;margin-top:6px'>{path}</div>"
+                  "<div style='color:#64748b;margin-top:8px'>Ready to send by email / WhatsApp.</div>")
+        except Exception as e:  # noqa: BLE001
+            _nice("Save PDF", f"<b style='color:#b91c1c'>Could not export PDF</b><br>{e}",
+                  QtWidgets.QMessageBox.Warning)
+
+    def do_upload_report():
+        """Sube el reporte (HTML) a la nube junto a las grabaciones (bucket transients)."""
+        if not diag_state.get("html"):
+            _nice("Upload report", "<b>Generate the report first</b> with «Generate preliminary report».")
+            return
+        import time as _t
+        try:
+            from core.remote_monitoring.recorder import _sb_client, _BUCKET
+            client = _sb_client()
+        except Exception:  # noqa: BLE001
+            client = None
+        if client is None:
+            _nice("Upload report", "<b>No cloud connection.</b> Check your internet and try again; "
+                  "the report is still available to save as PDF/HTML locally.",
+                  QtWidgets.QMessageBox.Warning)
+            return
+        slug = "".join(c if c.isalnum() or c in "-_" else "_" for c in args.machine)
+        key = f"reports/{slug}/report_{_t.strftime('%Y%m%d_%H%M%S')}.html"
+        payload = ("<html><meta charset='utf-8'><body>" + diag_state["html"] + "</body></html>").encode("utf-8")
+        btn_diag_cloud.setEnabled(False); btn_diag_cloud.setText("Uploading…")
+        res = {}
+
+        def _work():
+            try:
+                store = client.storage.from_(_BUCKET)
+                try:
+                    store.upload(key, payload, {"upsert": "true", "content-type": "text/html"})
+                except Exception:  # noqa: BLE001
+                    store.update(key, payload)
+                res["ok"] = True
+            except Exception as e:  # noqa: BLE001
+                res["err"] = f"{type(e).__name__}: {e}"
+            res["done"] = True
+        threading.Thread(target=_work, daemon=True).start()
+
+        def _check():
+            if not res.get("done"):
+                QtCore.QTimer.singleShot(400, _check); return
+            btn_diag_cloud.setEnabled(True); btn_diag_cloud.setText("Upload report to cloud")
+            if res.get("ok"):
+                _nice("Report uploaded",
+                      "<div style='font-size:15px'><b style='color:#166534'>☁ Report uploaded</b></div>"
+                      f"<div style='color:#334155;font-family:monospace;margin-top:6px'>{_BUCKET}/{key}</div>")
+            else:
+                _nice("Upload report", f"<b style='color:#b91c1c'>Upload failed</b><br>"
+                      f"<span style='color:#334155'>{res.get('err','?')}</span>",
+                      QtWidgets.QMessageBox.Warning)
+        QtCore.QTimer.singleShot(300, _check)
+
     timer = QtCore.QTimer(); timer.timeout.connect(update)
     btn_diag.clicked.connect(run_diag)
+    btn_diag_pdf.clicked.connect(do_save_pdf)
     btn_diag_save.clicked.connect(do_save_report)
+    btn_diag_cloud.clicked.connect(do_upload_report)
 
     def do_start():
         # Pide nombre/consecutivo de la corrida y GRABA DESDE EL INICIO a disco

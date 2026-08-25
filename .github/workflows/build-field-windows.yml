@@ -60,6 +60,7 @@ jobs:
             --hidden-import core.sensor_map \
             --hidden-import core.supabase_auth \
             --hidden-import core.remote_monitoring._cloud_config \
+            --add-data "assets/watermelon_logo.png;assets" \
             --collect-all nidaqmx \
             --collect-all supabase \
             --copy-metadata supabase \
