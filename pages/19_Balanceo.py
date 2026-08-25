@@ -500,9 +500,9 @@ with tab_iso:
             rpm_iso = _num("iso_rpm", "Speed N [rpm]", 3600.0,
                            min_value=0.0, step=10.0, format="%.0f")
         with c2:
-            modo = st.radio("Residual U_res", ["Ingresar U_res [g·mm]",
-                                               "Calcular de masa·radio"], key="iso_mode")
-            if modo.startswith("Ingresar"):
+            modo = st.radio("Residual U_res", ["Enter U_res [g·mm]",
+                                               "Compute from mass·radius"], key="iso_mode")
+            if modo.startswith("Enter"):
                 U_res = _num("iso_ures", "U_res [g·mm]", 0.0, min_value=0.0,
                              step=1.0, format="%.1f")
             else:

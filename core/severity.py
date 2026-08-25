@@ -267,8 +267,63 @@ def compute_severity(
     }
 
 
+# ============================================================
+# Display-only English translation of the severity taxonomy
+# ------------------------------------------------------------
+# The canonical severity/status strings stay Spanish everywhere in the logic and
+# in persisted data (last_executive_severity, DB rows, comparisons, dict keys).
+# These maps translate ONLY at the render point, so the English web UI shows
+# English labels without desyncing history or breaking any comparison.
+# ============================================================
+STATUS_DISPLAY_EN: Dict[str, str] = {
+    "Normal": "Normal",
+    "Alarma": "Alarm",
+    "Danger": "Danger",
+    "Peligro": "Danger",
+    "Sin Norma": "No Standard",
+    "Sin norma": "No Standard",
+    "No Data": "No Data",
+    "Sin Datos": "No Data",
+}
+
+EXEC_SEVERITY_DISPLAY_EN: Dict[str, str] = {
+    "CRÍTICA": "CRITICAL",
+    "ACCIÓN REQUERIDA": "ACTION REQUIRED",
+    "ATENCIÓN": "WARNING",
+    "VIGILANCIA": "MONITOR",
+    "CONDICIÓN ACEPTABLE": "ACCEPTABLE",
+    "SIN ANÁLISIS": "NO ANALYSIS",
+    "SIN NORMA": "NO STANDARD",
+    # title / mixed case fallbacks
+    "Sin análisis": "No analysis",
+    "Sin analisis": "No analysis",
+}
+
+
+def status_display_en(status: Optional[str]) -> str:
+    """English DISPLAY label for a sensor status (Normal/Alarma/Danger/Sin Norma…).
+    Returns the input unchanged if unknown. Never use for comparisons."""
+    if not status:
+        return status or ""
+    return STATUS_DISPLAY_EN.get(status, STATUS_DISPLAY_EN.get(status.strip(), status))
+
+
+def exec_severity_display_en(severity: Optional[str]) -> str:
+    """English DISPLAY label for an executive severity class (CRÍTICA/ATENCIÓN…).
+    Case/space-insensitive; returns the input unchanged if unknown."""
+    if not severity:
+        return severity or ""
+    s = severity.strip()
+    if s in EXEC_SEVERITY_DISPLAY_EN:
+        return EXEC_SEVERITY_DISPLAY_EN[s]
+    up = s.upper()
+    return EXEC_SEVERITY_DISPLAY_EN.get(up, severity)
+
+
 __all__ = [
     "CLASS_TABLES", "CLASS_LABELS",
     "detect_asset_class", "thresholds_for",
     "family_from", "compute_severity",
+    "STATUS_DISPLAY_EN", "EXEC_SEVERITY_DISPLAY_EN",
+    "status_display_en", "exec_severity_display_en",
 ]

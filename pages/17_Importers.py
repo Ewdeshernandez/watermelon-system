@@ -227,11 +227,11 @@ with tab_templates:
     with col_a:
         category_filter = st.selectbox(
             "Filter by category",
-            options=["Todas"] + cats,
+            options=["All"] + cats,
             key="template_cat_filter",
         )
 
-    if category_filter == "Todas":
+    if category_filter == "All":
         templates = list_templates()
     else:
         templates = list_templates_by_category(category_filter)

@@ -1738,7 +1738,7 @@ def render_documents_section(instance_id: str) -> None:
     # Filtros
     fcol1, fcol2 = st.columns([1, 2])
     with fcol1:
-        type_options = ["Todos"] + sorted({
+        type_options = ["All"] + sorted({
             DOCUMENT_TYPES.get(d.get("document_type", "other"),
                               d.get("document_type", "—"))
             for d in docs
@@ -1758,7 +1758,7 @@ def render_documents_section(instance_id: str) -> None:
     # Aplicar filtros
     filtered = []
     for d in docs:
-        if sel_type != "Todos":
+        if sel_type != "All":
             d_type_label = DOCUMENT_TYPES.get(
                 d.get("document_type", "other"),
                 d.get("document_type", "—"),
@@ -2298,7 +2298,8 @@ def _render_machinery_card_v2(inst: Any, inst_id: str) -> None:
     sev_color, sev_bg, sev_icon = _SEVERITY_CONFIG.get(
         severity, ("#64748b", "#f1f5f9", "⚪"),
     )
-    sev_label = severity or "SIN ANÁLISIS"
+    from core.severity import exec_severity_display_en
+    sev_label = exec_severity_display_en(severity or "SIN ANÁLISIS")
 
     # Schematic embebido
     schematic_html = ""
@@ -2597,15 +2598,15 @@ def render_machinery_grid_v2() -> None:
             <div class="val" style="color:#0f172a;">{total_sensors}</div>
           </div>
           <div class="wmlib-kpi accent" style="border-left-color:#3b82f6;">
-            <div class="lbl">Vigilancia</div>
+            <div class="lbl">Monitor</div>
             <div class="val" style="color:#3b82f6;">{n_watch}</div>
           </div>
           <div class="wmlib-kpi accent" style="border-left-color:#f59e0b;">
-            <div class="lbl">Atención</div>
+            <div class="lbl">Warning</div>
             <div class="val" style="color:#f59e0b;">{n_warn}</div>
           </div>
           <div class="wmlib-kpi accent" style="border-left-color:#dc2626;">
-            <div class="lbl">Crítico</div>
+            <div class="lbl">Critical</div>
             <div class="val" style="color:#dc2626;">{n_crit}</div>
           </div>
         </div>
@@ -2658,7 +2659,7 @@ def render_machinery_grid_v2() -> None:
     with f4:
         sort_by = st.selectbox(
             "Sort",
-            options=["A → Z", "Z → A", "Más sensores", "Menos sensores"],
+            options=["A → Z", "Z → A", "Most sensors", "Fewest sensors"],
             index=0,
             key="wmlib_sort",
             label_visibility="collapsed",
@@ -2690,9 +2691,9 @@ def render_machinery_grid_v2() -> None:
         filtered.sort(key=lambda p: (p[1].tag or p[0]).lower())
     elif sort_by == "Z → A":
         filtered.sort(key=lambda p: (p[1].tag or p[0]).lower(), reverse=True)
-    elif sort_by == "Más sensores":
+    elif sort_by == "Most sensors":
         filtered.sort(key=lambda p: -len(p[1].sensors or []))
-    elif sort_by == "Menos sensores":
+    elif sort_by == "Fewest sensors":
         filtered.sort(key=lambda p: len(p[1].sensors or []))
 
     # Si los filtros activos redujeron el set, mostrar contador
@@ -2890,7 +2891,8 @@ def _render_machinery_row(inst: Any, inst_id: str) -> None:
     sev_color, sev_bg, _ = _SEVERITY_CONFIG.get(
         severity, ("#94a3b8", "#f1f5f9", ""),
     )
-    sev_label = severity or "Sin análisis"
+    from core.severity import exec_severity_display_en
+    sev_label = exec_severity_display_en(severity or "SIN ANÁLISIS")
 
     n_sensors = len(inst.sensors or [])
     n_docs = len(inst.documents or [])

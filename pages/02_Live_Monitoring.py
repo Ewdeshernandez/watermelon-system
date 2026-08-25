@@ -353,7 +353,9 @@ def _to_local(ts) -> Any:
 
 
 def status_pill_html(status: str, fg: str, bg: str) -> str:
-    return f'<span class="wm-status-pill" style="background:{bg};color:{fg};">{status}</span>'
+    from core.severity import status_display_en
+    return (f'<span class="wm-status-pill" style="background:{bg};color:{fg};">'
+            f'{status_display_en(status)}</span>')
 
 
 def _build_sensor_lookup(instance_obj) -> Dict[str, Dict[str, Any]]:

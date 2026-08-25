@@ -288,7 +288,7 @@ def _seismic_tab(sensor_type: str, prefix: str) -> None:
     c1, c2, c3 = st.columns(3)
     tag = c1.text_input("Tag / point", key=f"{prefix}_tag")
     manuf = c2.selectbox("Manufacturer", MANUFACTURERS, key=f"{prefix}_manuf")
-    ensayo = c3.selectbox("Test", ["Linealidad de amplitud", "Respuesta en frecuencia"],
+    ensayo = c3.selectbox("Test", ["Amplitude linearity", "Frequency response"],
                           key=f"{prefix}_kind")
     c4, c5, c6 = st.columns(3)
     model = c4.text_input("Model", key=f"{prefix}_model")
@@ -297,7 +297,7 @@ def _seismic_tab(sensor_type: str, prefix: str) -> None:
 
     _source_selector(prefix)
 
-    if ensayo.startswith("Linealidad"):
+    if ensayo.startswith("Amplitude"):
         _amplitude_section(sensor_type, prefix, spec, tag, manuf, model, serial, idn, label)
     else:
         _frequency_section(sensor_type, prefix, spec, tag, manuf, model, serial, idn, label)
