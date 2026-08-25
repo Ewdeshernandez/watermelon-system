@@ -926,9 +926,14 @@ def main() -> int:
 
     # --- Diagnóstico (whirl/whip + críticas) ---
     diag_w = QtWidgets.QWidget(); diag_l = QtWidgets.QVBoxLayout(diag_w)
-    btn_diag = QtWidgets.QPushButton("Diagnosticar (API 684)")
+    drow = QtWidgets.QHBoxLayout()
+    btn_diag = QtWidgets.QPushButton("Generar reporte preliminar")
+    btn_diag_save = QtWidgets.QPushButton("Guardar reporte…")
+    drow.addWidget(btn_diag); drow.addWidget(btn_diag_save); drow.addStretch(1)
+    diag_l.addLayout(drow)
     diag_txt = QtWidgets.QTextEdit(); diag_txt.setReadOnly(True)
-    diag_l.addWidget(btn_diag); diag_l.addWidget(diag_txt, 1)
+    diag_l.addWidget(diag_txt, 1)
+    diag_state = {"html": ""}
     tabs.addTab(diag_w, "Diagnóstico")
 
     lbl_rpm = QtWidgets.QLabel("RPM: —"); lbl_state = QtWidgets.QLabel("detenido")
@@ -1204,21 +1209,112 @@ def main() -> int:
                         cv.setData(fr, rr[i] + mat[i] * sc)
 
     def run_diag():
-        rr, fr, mat = tc.cascade(vib[0][1].name)
-        if len(rr) < 3:
-            diag_txt.setHtml("<i>Corré un runup (variá la velocidad) para tener datos que diagnosticar.</i>")
+        import time as _t
+        snap = agent.snapshot()
+        if snap.shape[1] < 16:
+            diag_txt.setHtml("<i>Iniciá la adquisición (▶ Iniciar) para generar el reporte.</i>")
             return
-        rb, ab, _ph = tc.bode(vib[0][1].name)
-        crit = [float(rb[i]) for i in diag.detect_criticals(np.asarray(rb, float), np.asarray(ab, float))]
-        found = diag.cascade_diagnosis(rr, fr, mat, crit)
-        html = [f"<h3 style='color:{NAVY}'>Auto-diagnóstico (API 684)</h3>"]
+        fs = agent.sample_rate_hz
+        rpm = agent.estimate_rpm(snap) or 0.0
+        f1 = (rpm / 60.0) if rpm else None
+        # 1) Niveles actuales por sensor (norma por tipo) + estado
+        rows = []; worst = 0
+        for i, c in vib:
+            eu = snap[i] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0); eu0 = eu - eu.mean()
+            ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c))
+            al, dg = _alarm_for(c)
+            if dg and ov >= dg:
+                st, scol = "PELIGRO", "#b91c1c"; worst = max(worst, 2)
+            elif al and ov >= al:
+                st, scol = "ALERTA", "#b45309"; worst = max(worst, 1)
+            else:
+                st, scol = "OK", "#166534"
+            rows.append((c.name, ov, c.units, a1, p1, a2, p2, al, dg, st, scol))
+        # 2) Velocidades críticas + AF (del transitorio)
+        crit_lines = []; crits = set()
+        for i, c in vib:
+            rb, ab = np.asarray(tc.bode(c.name)[0], float), np.asarray(tc.bode(c.name)[1], float)
+            if len(rb) >= 3:
+                for j in diag.detect_criticals(rb, ab):
+                    nc = float(rb[j]); crits.add(round(nc / 50) * 50)
+                    af = ""
+                    _r2 = diag.half_power_af(rb, ab, j)
+                    if _r2:
+                        af = f" · AF {_r2[0]:.1f}"
+                    crit_lines.append(f"{c.name}: <b>{nc:.0f} rpm</b>{af}")
+        # 3) Subsíncronos (whirl / whip / ½X)
+        rrk, frk, matk = tc.cascade(vib[0][1].name)
+        subs = diag.cascade_diagnosis(rrk, frk, matk, sorted(float(x) for x in crits)) if len(rrk) >= 3 else []
+        # --- Reporte HTML ---
+        verdict = [("SIN NOVEDAD", "#166534"), ("OBSERVAR — nivel de ALERTA", "#b45309"),
+                   ("ACCIÓN — nivel de PELIGRO", "#b91c1c")][worst]
+        h = [f"<div style='font-family:Segoe UI,Arial'>",
+             f"<h2 style='color:{NAVY};margin:0'>Reporte preliminar de vibraciones</h2>",
+             f"<div style='color:#64748b;font-size:12px'>Máquina <b>{args.machine}</b> · "
+             f"{_t.strftime('%d/%m/%Y %H:%M')} · RPM {rpm:.0f} · Muestreo {fs/1000:.1f} kS/s</div>",
+             f"<p style='font-size:15px'>Veredicto: <b style='color:{verdict[1]}'>{verdict[0]}</b> "
+             f"<span style='color:#64748b;font-size:12px'>(overall vs ISO 20816 / niveles configurados)</span></p>",
+             "<h3 style='color:#0F1E3D'>1 · Niveles actuales por sensor</h3>",
+             "<table cellspacing='0' cellpadding='5' border='1' style='border-collapse:collapse;"
+             "border-color:#d6deea;font-size:12px'>",
+             "<tr style='background:#0F1E3D;color:#8ec3ef'><th>Sensor</th><th>Overall</th><th>1X</th>"
+             "<th>1X fase</th><th>2X</th><th>Alarma</th><th>Peligro</th><th>Estado</th></tr>"]
+        for nm, ov, un, a1, p1, a2, p2, al, dg, st, scol in rows:
+            h.append(f"<tr><td><b>{nm}</b></td><td>{ov:.2f} {un}</td><td>{a1:.2f}</td>"
+                     f"<td>{p1:.0f}°</td><td>{a2:.2f}</td><td>{al:g}</td><td>{dg:g}</td>"
+                     f"<td style='color:{scol}'><b>{st}</b></td></tr>")
+        h.append("</table>")
+        h.append("<h3 style='color:#0F1E3D'>2 · Velocidades críticas (API 684)</h3>")
+        h.append("<p>" + ("<br>".join(crit_lines) if crit_lines
+                          else "<i>Sin críticas detectadas (hacé un arranque/parada para evaluarlas).</i>") + "</p>")
+        h.append("<h3 style='color:#0F1E3D'>3 · Inestabilidades / subsíncronos</h3>")
         col = {"info": ACC, "warn": "#b45309", "danger": "#b91c1c"}
-        for lvl, title, detail in found:
-            html.append(f"<p style='color:{col.get(lvl,'#333')}'><b>{title}</b><br>{detail}</p>")
-        diag_txt.setHtml("".join(html) if found else "<i>Sin hallazgos.</i>")
+        if subs:
+            for lvl, title, detail in subs:
+                h.append(f"<p style='color:{col.get(lvl,'#333')}'><b>{title}</b><br>{detail}</p>")
+        else:
+            h.append("<p><i>Sin subsíncronos relevantes.</i></p>")
+        h.append("<h3 style='color:#0F1E3D'>4 · Recomendación</h3><ul>")
+        if worst >= 2:
+            h.append("<li><b>Nivel de PELIGRO</b>: programar parada / inspección; verificar balanceo, "
+                     "alineación y cojinetes.</li>")
+        elif worst == 1:
+            h.append("<li>Nivel de <b>ALERTA</b>: aumentar frecuencia de monitoreo y planificar corrección.</li>")
+        else:
+            h.append("<li>Niveles dentro de norma; continuar monitoreo de rutina.</li>")
+        if any("WHIP" in (t or "") for _l, t, _d in subs):
+            h.append("<li><b>Oil whip</b>: inestabilidad de película severa — actuar sobre el cojinete.</li>")
+        if crit_lines:
+            h.append("<li>Verificar <b>margen de separación</b> a las críticas (API 684) en arranque/parada.</li>")
+        h.append("</ul><div style='color:#94a3b8;font-size:11px'>Reporte automático preliminar — "
+                 "requiere validación de especialista. Watermelon System.</div></div>")
+        html = "".join(h)
+        diag_state["html"] = html
+        diag_txt.setHtml(html)
+
+    def do_save_report():
+        if not diag_state.get("html"):
+            _nice("Guardar reporte", "<b>Primero generá el reporte</b> con «Generar reporte preliminar».")
+            return
+        import time as _t
+        from core.remote_monitoring.recorder import _persist_root
+        rdir = os.path.join(os.path.dirname(_persist_root()), "reports")
+        os.makedirs(rdir, exist_ok=True)
+        path = os.path.join(rdir, f"reporte_{args.machine}_{_t.strftime('%Y%m%d_%H%M%S')}.html")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("<html><meta charset='utf-8'><body>" + diag_state["html"] + "</body></html>")
+            _nice("Reporte guardado",
+                  "<div style='font-size:15px'><b style='color:#166534'>✅ Reporte guardado</b></div>"
+                  f"<div style='color:#334155;font-family:monospace;margin-top:6px'>{path}</div>"
+                  "<div style='color:#64748b;margin-top:8px'>Abrilo con el navegador; podés imprimirlo a PDF.</div>")
+        except Exception as e:  # noqa: BLE001
+            _nice("Guardar reporte", f"<b style='color:#b91c1c'>No se pudo guardar</b><br>{e}",
+                  QtWidgets.QMessageBox.Warning)
 
     timer = QtCore.QTimer(); timer.timeout.connect(update)
     btn_diag.clicked.connect(run_diag)
+    btn_diag_save.clicked.connect(do_save_report)
 
     def do_start():
         # Pide nombre/consecutivo de la corrida y GRABA DESDE EL INICIO a disco
