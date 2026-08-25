@@ -43,7 +43,7 @@ REDL = "#c0392b"     # 1X / peligro
 KPH = "#12467f"      # puntos keyphasor (azul profundo, System1)
 # Colores por TIPO de sensor (idénticos a la web: bolitas de la sección)
 SENSOR_COLORS = {"prox": "#8b5cf6", "vel": "#22b8cf", "accel": "#ef4444", "keyphasor": "#f59e0b"}
-SENSOR_ES = {"prox": "Proximidad", "vel": "Velocidad", "accel": "Acelerómetro", "keyphasor": "Keyphasor"}
+SENSOR_LABELS = {"prox": "Proximity", "vel": "Velocity", "accel": "Accelerometer", "keyphasor": "Keyphasor"}
 
 
 def build_agent(args) -> AcqAgent:
@@ -179,7 +179,7 @@ def main() -> int:
         from PySide6 import QtWidgets, QtCore, QtGui
         import pyqtgraph as pg
     except ImportError:
-        print("Instalá deps del nativo:  pip install -r native/requirements.txt")
+        print("Install native deps:  pip install -r native/requirements.txt")
         return 2
 
     agent = build_agent(args)
@@ -189,6 +189,12 @@ def main() -> int:
     from core.remote_monitoring import analysis as diag
     kph_glob = agent.source.config.keyphasor_index()
     from core.remote_monitoring.sim_machine import MODES, MODE_TO_PROFILE
+    # Internal mode keys stay Spanish (stored in JSON / used by the engine); the UI
+    # shows English labels and maps back to the key.
+    MODE_LABELS = {"estable": "Steady", "arranque": "Run-up", "parada": "Coast-down",
+                   "arranque_parada": "Run-up / Coast-down"}
+    LABEL_TO_MODE = {v: k for k, v in MODE_LABELS.items()}
+    _mode_labels = [MODE_LABELS.get(m, m) for m in MODES]
     tc = TransientCapture(TransientConfig(fmax_hz=min(2000.0, args.fs / 2.5)))
 
     pg.setConfigOptions(antialias=True, background=PANEL, foreground=MUTE)
@@ -202,31 +208,31 @@ def main() -> int:
 
     # ---------------- Menú ----------------
     mb = win.menuBar()
-    m_file = mb.addMenu("&Archivo")
-    m_view = mb.addMenu("&Ver")
-    m_help = mb.addMenu("A&yuda")
-    act_start = QtGui.QAction("Iniciar", win)
-    act_stop = QtGui.QAction("Detener", win); act_stop.setEnabled(False)
-    act_save = QtGui.QAction("Guardar datos", win)
-    act_sync = QtGui.QAction("Subir a la nube", win)
-    act_clear = QtGui.QAction("Borrar datos", win)
-    act_quit = QtGui.QAction("Salir", win)
+    m_file = mb.addMenu("&File")
+    m_view = mb.addMenu("&View")
+    m_help = mb.addMenu("&Help")
+    act_start = QtGui.QAction("Start", win)
+    act_stop = QtGui.QAction("Stop", win); act_stop.setEnabled(False)
+    act_save = QtGui.QAction("Save data", win)
+    act_sync = QtGui.QAction("Upload to cloud", win)
+    act_clear = QtGui.QAction("Delete data", win)
+    act_quit = QtGui.QAction("Quit", win)
     for a in (act_start, act_stop, act_save, act_sync, act_clear):
         m_file.addAction(a)
     m_file.addSeparator(); m_file.addAction(act_quit)
-    act_about = QtGui.QAction("Acerca de Watermelon Field", win)
+    act_about = QtGui.QAction("About Watermelon Field", win)
     m_help.addAction(act_about)
 
     # ---------------- Toolbar ----------------
-    tb = win.addToolBar("Principal")
+    tb = win.addToolBar("Main")
     tb.setMovable(False)
     tb.addAction(act_start); tb.addAction(act_stop); tb.addAction(act_save)
     tb.addSeparator()
     tb.addAction(act_sync); tb.addAction(act_clear)
     tb.addSeparator()
-    lbl_modo = QtWidgets.QLabel(" Modo: "); lbl_modo.setStyleSheet("color:white;")
+    lbl_modo = QtWidgets.QLabel(" Mode: "); lbl_modo.setStyleSheet("color:white;")
     tb.addWidget(lbl_modo)
-    cb_run = QtWidgets.QComboBox(); cb_run.addItems(MODES); tb.addWidget(cb_run)
+    cb_run = QtWidgets.QComboBox(); cb_run.addItems(_mode_labels); tb.addWidget(cb_run)
     spacer = QtWidgets.QWidget(); spacer.setSizePolicy(QtWidgets.QSizePolicy.Expanding,
                                                        QtWidgets.QSizePolicy.Preferred)
     tb.addWidget(spacer)
@@ -241,8 +247,8 @@ def main() -> int:
     from core.remote_monitoring.sim_machine import (SimMachine, SensorSpec, MODES, PHENOMENA,
                                                     MODE_TO_PROFILE, save_to_library,
                                                     list_machines, load_from_library)
-    _KIND_LABELS = [("Proximidad", "prox"), ("Velocidad", "vel"),
-                    ("Acelerómetro", "accel"), ("Keyphasor", "keyphasor")]
+    _KIND_LABELS = [("Proximity", "prox"), ("Velocity", "vel"),
+                    ("Accelerometer", "accel"), ("Keyphasor", "keyphasor")]
     _LABEL_BY_KIND = {k: l for l, k in _KIND_LABELS}
     _KIND_BY_LABEL = {l: k for l, k in _KIND_LABELS}
     _SIDES = ["—", "R", "L"]
@@ -281,41 +287,41 @@ def main() -> int:
                          f"padding:8px 13px; border-radius:6px; margin-top:6px;")
         return lb
 
-    cfg_l.addWidget(_sec("1 · Máquina  —  tren (API 684)"))
-    # fila 1: nombre, fs, biblioteca
+    cfg_l.addWidget(_sec("1 · Machine  —  train (API 684)"))
+    # row 1: name, fs, library
     r1 = QtWidgets.QHBoxLayout()
-    r1.addWidget(QtWidgets.QLabel("Máquina:"))
+    r1.addWidget(QtWidgets.QLabel("Machine:"))
     ed_name = QtWidgets.QLineEdit(); r1.addWidget(ed_name, 2)
-    r1.addWidget(QtWidgets.QLabel("Muestreo (Hz):"))
+    r1.addWidget(QtWidgets.QLabel("Sampling (Hz):"))
     sp_fs = QtWidgets.QSpinBox(); sp_fs.setRange(256, 102400); sp_fs.setSingleStep(1280); r1.addWidget(sp_fs)
-    r1.addWidget(QtWidgets.QLabel("Biblioteca:"))
+    r1.addWidget(QtWidgets.QLabel("Library:"))
     cb_lib = QtWidgets.QComboBox(); cb_lib.setMinimumWidth(160); r1.addWidget(cb_lib)
-    btn_load = QtWidgets.QPushButton("Cargar"); r1.addWidget(btn_load)
+    btn_load = QtWidgets.QPushButton("Load"); r1.addWidget(btn_load)
     cfg_l.addLayout(r1)
-    # fila 2: operación
+    # row 2: operation
     r2 = QtWidgets.QHBoxLayout()
-    r2.addWidget(QtWidgets.QLabel("Modo:"))
-    cb_mode = QtWidgets.QComboBox(); cb_mode.addItems(MODES); r2.addWidget(cb_mode)
+    r2.addWidget(QtWidgets.QLabel("Mode:"))
+    cb_mode = QtWidgets.QComboBox(); cb_mode.addItems(_mode_labels); r2.addWidget(cb_mode)
     def _dsp(mn, mx, val, step=100.0):
         s = QtWidgets.QDoubleSpinBox(); s.setRange(mn, mx); s.setValue(val); s.setSingleStep(step); return s
     r2.addWidget(QtWidgets.QLabel("RPM:")); sp_rpm = _dsp(0, 60000, 3000); r2.addWidget(sp_rpm)
-    r2.addWidget(QtWidgets.QLabel("Arranque→")); sp_r0 = _dsp(0, 60000, 300); r2.addWidget(sp_r0)
+    r2.addWidget(QtWidgets.QLabel("Start→")); sp_r0 = _dsp(0, 60000, 300); r2.addWidget(sp_r0)
     sp_r1 = _dsp(0, 60000, 6000); r2.addWidget(sp_r1)
-    r2.addWidget(QtWidgets.QLabel("Rampa(s):")); sp_ramp = _dsp(1, 3600, 90, 5); r2.addWidget(sp_ramp)
+    r2.addWidget(QtWidgets.QLabel("Ramp(s):")); sp_ramp = _dsp(1, 3600, 90, 5); r2.addWidget(sp_ramp)
     cfg_l.addLayout(r2)
-    # fila 2b: máquina (rotación / cojinete)
+    # row 2b: machine (rotation / bearing)
     r3b = QtWidgets.QHBoxLayout()
-    r3b.addWidget(QtWidgets.QLabel("Sentido de giro:"))
+    r3b.addWidget(QtWidgets.QLabel("Rotation:"))
     cb_rot = QtWidgets.QComboBox(); cb_rot.addItems(["CCW", "CW"]); r3b.addWidget(cb_rot)
-    r3b.addWidget(QtWidgets.QLabel("Tipo de cojinete:"))
+    r3b.addWidget(QtWidgets.QLabel("Bearing type:"))
     cb_brg = QtWidgets.QComboBox(); cb_brg.addItems(["plain", "tilting_pad", "rolling", "mixed"])
     r3b.addWidget(cb_brg); r3b.addStretch(1); cfg_l.addLayout(r3b)
 
-    cfg_l.addWidget(_sec("Fenómenos y transitorio  —  inyectá fallas por tipo de sensor"))
+    cfg_l.addWidget(_sec("Phenomena & transient  —  inject faults by sensor type"))
     r3 = QtWidgets.QHBoxLayout()
-    r3.addWidget(QtWidgets.QLabel("Crítica 1:")); sp_c1 = _dsp(0, 60000, 0); r3.addWidget(sp_c1)
-    r3.addWidget(QtWidgets.QLabel("Crítica 2:")); sp_c2 = _dsp(0, 60000, 0); r3.addWidget(sp_c2)
-    r3.addWidget(QtWidgets.QLabel("Severidad:")); sp_sev = _dsp(0, 3, 1.0, 0.25); r3.addWidget(sp_sev)
+    r3.addWidget(QtWidgets.QLabel("Critical 1:")); sp_c1 = _dsp(0, 60000, 0); r3.addWidget(sp_c1)
+    r3.addWidget(QtWidgets.QLabel("Critical 2:")); sp_c2 = _dsp(0, 60000, 0); r3.addWidget(sp_c2)
+    r3.addWidget(QtWidgets.QLabel("Severity:")); sp_sev = _dsp(0, 3, 1.0, 0.25); r3.addWidget(sp_sev)
     r3.addWidget(QtWidgets.QLabel("Prox:"))
     cb_ph_p = QtWidgets.QComboBox(); cb_ph_p.addItems(PHENOMENA["prox"]); r3.addWidget(cb_ph_p)
     r3.addWidget(QtWidgets.QLabel("Vel:"))
@@ -324,21 +330,21 @@ def main() -> int:
     cb_ph_a = QtWidgets.QComboBox(); cb_ph_a.addItems(PHENOMENA["accel"]); r3.addWidget(cb_ph_a)
     r3.addStretch(1); cfg_l.addLayout(r3)
 
-    cfg_l.addWidget(_sec("2 · Canales  —  BNC → punto de medición"))
-    # leyenda de colores por tipo (idéntica a la web) + convención de ángulo
+    cfg_l.addWidget(_sec("2 · Channels  —  BNC → measurement point"))
+    # per-type color legend (same as the web) + angle convention
     leg = QtWidgets.QLabel(
-        f"<span style='color:{SENSOR_COLORS['prox']}'>●</span> Proximidad&nbsp;&nbsp;"
-        f"<span style='color:{SENSOR_COLORS['vel']}'>●</span> Velocidad&nbsp;&nbsp;"
-        f"<span style='color:{SENSOR_COLORS['accel']}'>●</span> Acelerómetro&nbsp;&nbsp;"
+        f"<span style='color:{SENSOR_COLORS['prox']}'>●</span> Proximity&nbsp;&nbsp;"
+        f"<span style='color:{SENSOR_COLORS['vel']}'>●</span> Velocity&nbsp;&nbsp;"
+        f"<span style='color:{SENSOR_COLORS['accel']}'>●</span> Accelerometer&nbsp;&nbsp;"
         f"<span style='color:{SENSOR_COLORS['keyphasor']}'>●</span> Keyphasor"
-        f"&nbsp;&nbsp;&nbsp;<span style='color:#64748b'>Ángulo API 670: desde TDC · "
-        f"R=horario · L=antihorario (45°L+45°R=90°)</span>")
+        f"&nbsp;&nbsp;&nbsp;<span style='color:#64748b'>API 670 angle: from TDC · "
+        f"R=clockwise · L=counter-clockwise (45°L+45°R=90°)</span>")
     cfg_l.addWidget(leg)
-    # tabla + diagrama de sección lado a lado
+    # table + section diagram side by side
     canv = QtWidgets.QHBoxLayout()
     tblc = QtWidgets.QTableWidget(0, 9)
-    tblc.setHorizontalHeaderLabels(["Canal", "Tipo", "BNC", "Sensib (mV/EU)",
-                                    "Ángulo°", "Lado", "Gap (V)", "Alarma", "Peligro"])
+    tblc.setHorizontalHeaderLabels(["Channel", "Type", "BNC", "Sensit. (mV/EU)",
+                                    "Angle°", "Side", "Gap (V)", "Alarm", "Danger"])
     tblc.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
     canv.addWidget(tblc, 3)
     brg_plot = pg.PlotWidget(); brg_plot.setBackground("w"); brg_plot.setAspectLocked(True)
@@ -347,17 +353,17 @@ def main() -> int:
     canv.addWidget(brg_plot, 2)
     cfg_l.addLayout(canv, 1)
     rb = QtWidgets.QHBoxLayout()
-    btn_add = QtWidgets.QPushButton("+ Sensor"); btn_del = QtWidgets.QPushButton("– Quitar")
-    btn_tpl = QtWidgets.QPushButton("Plantilla motor+bomba")
-    btn_save = QtWidgets.QPushButton("Guardar configuración")
-    btn_apply = QtWidgets.QPushButton("Aplicar y medir")
+    btn_add = QtWidgets.QPushButton("+ Sensor"); btn_del = QtWidgets.QPushButton("– Remove")
+    btn_tpl = QtWidgets.QPushButton("Motor+pump template")
+    btn_save = QtWidgets.QPushButton("Save configuration")
+    btn_apply = QtWidgets.QPushButton("Apply & measure")
     _redbtn = ("QPushButton{background:#f5484a;color:white;border:none;font-weight:700;"
                "padding:8px 16px;border-radius:7px;} QPushButton:hover{background:#d63c3e;}")
     btn_save.setStyleSheet(_redbtn); btn_apply.setStyleSheet(_redbtn)
     for b in (btn_add, btn_del, btn_tpl): rb.addWidget(b)
     rb.addStretch(1); rb.addWidget(btn_save); rb.addWidget(btn_apply)
     cfg_l.addLayout(rb)
-    tabs.addTab(cfg_outer, "Configuración")
+    tabs.addTab(cfg_outer, "Setup")
 
     import math as _math
 
@@ -402,7 +408,7 @@ def main() -> int:
         r = tblc.rowCount(); tblc.insertRow(r)
         tblc.setItem(r, 0, QtWidgets.QTableWidgetItem(s.name))
         cbk = QtWidgets.QComboBox(); cbk.addItems([l for l, _ in _KIND_LABELS])
-        cbk.setCurrentText(_LABEL_BY_KIND.get(s.kind, "Acelerómetro"))
+        cbk.setCurrentText(_LABEL_BY_KIND.get(s.kind, "Accelerometer"))
         cbk.currentTextChanged.connect(lambda _t, rr=r: (_color_name_cell(rr), draw_bearing()))
         tblc.setCellWidget(r, 1, cbk)
         tblc.setItem(r, 2, QtWidgets.QTableWidgetItem(str(s.bnc)))
@@ -421,7 +427,7 @@ def main() -> int:
         ed_name.setText(m.name); sp_fs.setValue(int(m.fs))
         cb_rot.setCurrentText(getattr(m, "rotation", "CCW"))
         cb_brg.setCurrentText(getattr(m, "bearing_type", "plain"))
-        cb_mode.setCurrentText(m.mode if m.mode in MODES else "estable")
+        cb_mode.setCurrentText(MODE_LABELS.get(m.mode, MODE_LABELS["estable"]))
         sp_rpm.setValue(m.rpm); sp_r0.setValue(m.rpm_start); sp_r1.setValue(m.rpm_end)
         sp_ramp.setValue(m.ramp_s); sp_c1.setValue(m.crit1); sp_c2.setValue(m.crit2)
         sp_sev.setValue(m.severity)
@@ -436,7 +442,7 @@ def main() -> int:
         sens = []
         for r in range(tblc.rowCount()):
             nm = tblc.item(r, 0).text() if tblc.item(r, 0) else f"CH{r}"
-            lbl = tblc.cellWidget(r, 1).currentText() if tblc.cellWidget(r, 1) else "Acelerómetro"
+            lbl = tblc.cellWidget(r, 1).currentText() if tblc.cellWidget(r, 1) else "Accelerometer"
             kd = _KIND_BY_LABEL.get(lbl, "accel")
             sd = tblc.cellWidget(r, 5).currentText() if tblc.cellWidget(r, 5) else "—"
 
@@ -449,28 +455,28 @@ def main() -> int:
                                    side=("" if sd == "—" else sd),
                                    gap=_num(6, 0.0), alarm=_num(7, 0.0), danger=_num(8, 0.0)))
         ph = {"prox": cb_ph_p.currentText(), "vel": cb_ph_v.currentText(), "accel": cb_ph_a.currentText()}
-        return SimMachine(name=ed_name.text() or "Maquina", fs=float(sp_fs.value()), sensors=sens,
+        return SimMachine(name=ed_name.text() or "Machine", fs=float(sp_fs.value()), sensors=sens,
                           rotation=cb_rot.currentText(), bearing_type=cb_brg.currentText(),
-                          mode=cb_mode.currentText(), rpm=sp_rpm.value(),
+                          mode=LABEL_TO_MODE.get(cb_mode.currentText(), "estable"), rpm=sp_rpm.value(),
                           rpm_start=sp_r0.value(), rpm_end=sp_r1.value(), ramp_s=sp_ramp.value(),
                           crit1=sp_c1.value(), crit2=sp_c2.value(), severity=sp_sev.value(),
                           phenomena={k: v for k, v in ph.items() if v != "none"})
 
     def refresh_lib():
-        cb_lib.clear(); cb_lib.addItems(list_machines() or ["(vacía)"])
+        cb_lib.clear(); cb_lib.addItems(list_machines() or ["(empty)"])
 
     def do_load_lib():
         nm = cb_lib.currentText()
-        if nm and nm != "(vacía)":
+        if nm and nm != "(empty)":
             fill_form(load_from_library(nm))
 
     def do_save_lib():
         m = read_form()
         try:
             save_to_library(m); refresh_lib()
-            QtWidgets.QMessageBox.information(win, "Biblioteca", f"Máquina '{m.name}' guardada.")
+            QtWidgets.QMessageBox.information(win, "Library", f"Machine '{m.name}' saved.")
         except Exception as e:  # noqa: BLE001
-            QtWidgets.QMessageBox.warning(win, "Biblioteca", f"No se pudo guardar: {e}")
+            QtWidgets.QMessageBox.warning(win, "Library", f"Could not save: {e}")
 
     def do_apply():
         """Guarda la máquina y RELANZA el app midiéndola (evita reconstruir plots)."""
@@ -487,8 +493,8 @@ def main() -> int:
             build_agent(_a)
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.critical(
-                win, "Aplicar y medir", f"La configuración tiene un problema y no se puede "
-                f"medir:\n\n{type(e).__name__}: {e}")
+                win, "Apply & measure", f"The configuration has a problem and cannot be "
+                f"measured:\n\n{type(e).__name__}: {e}")
             return
         # 2) Relanzar en una ventana que QUEDA ABIERTA si hay error (para verlo).
         try:
@@ -496,14 +502,14 @@ def main() -> int:
                 bat = os.path.join(tempfile.gettempdir(), "wm_run_machine.bat")
                 with open(bat, "w") as f:
                     f.write(f'@echo off\r\n"{sys.executable}" --machine-file "{path}"\r\n'
-                            f'if errorlevel 1 (echo. & echo *** ERROR al iniciar *** & pause)\r\n')
+                            f'if errorlevel 1 (echo. & echo *** ERROR on startup *** & pause)\r\n')
                 os.startfile(bat)  # noqa: S606  (Windows)
             else:
                 subprocess.Popen([sys.executable, os.path.abspath(__file__),
                                   "--machine-file", path])
             win.close()
         except Exception as e:  # noqa: BLE001
-            QtWidgets.QMessageBox.warning(win, "Aplicar", f"No se pudo relanzar: {e}")
+            QtWidgets.QMessageBox.warning(win, "Apply", f"Could not relaunch: {e}")
 
     btn_add.clicked.connect(lambda: _add_sensor_row(SensorSpec("CHn", "accel", tblc.rowCount() + 1)))
     btn_del.clicked.connect(lambda: tblc.removeRow(tblc.currentRow()) if tblc.currentRow() >= 0 else None)
@@ -567,21 +573,21 @@ def main() -> int:
                           " font-family:'Consolas','SF Mono',monospace;")
         v.addWidget(lab); v.addWidget(val); sv[key] = val
         sl.addWidget(w)
-    _cells = [("rpm", "RPM"), ("x1", "1X"), ("estado", "ESTADO"), ("srate", "MUESTREO"),
-              ("vent", "VENTANA"), ("samp", "SAMPLES"), ("vect", "VECTORES"),
-              ("guard", "GUARDADOS"), ("size", "TAMAÑO")]
+    _cells = [("rpm", "RPM"), ("x1", "1X"), ("estado", "STATUS"), ("srate", "SAMPLING"),
+              ("vent", "WINDOW"), ("samp", "SAMPLES"), ("vect", "VECTORS"),
+              ("guard", "SAVED"), ("size", "SIZE")]
     for _n, (_k, _l) in enumerate(_cells):
         _statcell(_k, _l, first=(_n == 0))
     sl.addStretch(1); mon_l.addWidget(strip)
-    # (Iniciar/Detener/Guardar/Subir a la nube/Borrar datos viven en la barra superior)
+    # (Start/Stop/Save/Upload/Delete live in the top toolbar)
     ctl = QtWidgets.QHBoxLayout()
-    lbl_disk = QtWidgets.QLabel("Disco: —"); lbl_disk.setStyleSheet("color:#64748b;")
+    lbl_disk = QtWidgets.QLabel("Disk: —"); lbl_disk.setStyleSheet("color:#64748b;")
     ctl.addStretch(1); ctl.addWidget(lbl_disk)
     mon_l.addLayout(ctl)
-    # tabular list — valores actuales (rápido)
+    # tabular list — current values (fast)
     tblt = QtWidgets.QTableWidget(len(vib), 10)
-    tblt.setHorizontalHeaderLabels(["Sensor", "Gap", "Overall", "1X", "1X fase",
-                                    "2X", "2X fase", "Alarma", "Danger", "Estado"])
+    tblt.setHorizontalHeaderLabels(["Sensor", "Gap", "Overall", "1X", "1X phase",
+                                    "2X", "2X phase", "Alarm", "Danger", "Status"])
     tblt.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
     tblt.verticalHeader().setVisible(False)
     tblt.setAlternatingRowColors(True)
@@ -590,17 +596,17 @@ def main() -> int:
     tblt.setFocusPolicy(QtCore.Qt.NoFocus)
     mon_l.addWidget(tblt, 1)
     mon_l.addWidget(QtWidgets.QLabel(
-        "<i style='color:#64748b'>Amplitudes por norma: desplazamiento en pp (API 670 · "
-        "ISO 7919), velocidad/aceleración en RMS (ISO 20816).</i>"))
-    tabs.addTab(mon_w, "Monitoreo")
+        "<i style='color:#64748b'>Amplitudes by standard: displacement in pp (API 670 · "
+        "ISO 7919), velocity/acceleration in RMS (ISO 20816).</i>"))
+    tabs.addTab(mon_w, "Monitoring")
 
     # --- Onda (ANÁLISIS: formas de onda + espectro) ---
     ond_w = QtWidgets.QWidget(); ond_l = QtWidgets.QVBoxLayout(ond_w)
     top = QtWidgets.QHBoxLayout()
-    top.addWidget(QtWidgets.QLabel("<b>Formas de onda</b>"))
+    top.addWidget(QtWidgets.QLabel("<b>Waveforms</b>"))
     top.addWidget(QtWidgets.QLabel(
-        "<i style='color:#64748b'>doble clic en una onda = verla sola con su espectro (FFT) · "
-        "doble clic otra vez = volver a todas</i>"))
+        "<i style='color:#64748b'>double-click a waveform = view it alone with its spectrum (FFT) · "
+        "double-click again = back to all</i>"))
     top.addStretch(1); ond_l.addLayout(top)
     gl = pg.GraphicsLayoutWidget(); ond_l.addWidget(gl, 1)
     gl.ci.setContentsMargins(2, 2, 2, 2); gl.ci.setSpacing(2)
@@ -618,8 +624,8 @@ def main() -> int:
     for _p in wave_plots[1:]:
         _p.setXLink(wave_plots[0])          # todas las ondas ALINEADAS en X (arrancan en 0)
     p_spec = gl.addPlot(row=len(vib), col=0); p_spec.showGrid(x=False, y=True, alpha=0.06)
-    p_spec.setLabel("left", "amplitud"); p_spec.setLabel("bottom", "Frecuencia (CPM)")
-    p_spec.setTitle("Espectro (FFT)", color=NAVY, size="9pt")
+    p_spec.setLabel("left", "amplitude"); p_spec.setLabel("bottom", "Frequency (CPM)")
+    p_spec.setTitle("Spectrum (FFT)", color=NAVY, size="9pt")
     spec_curve = p_spec.plot(pen=pg.mkPen(AMBER, width=1.4))
     def _ordline(col):
         ln = pg.InfiniteLine(angle=90, pen=pg.mkPen(col, width=1, style=QtCore.Qt.DashLine))
@@ -645,7 +651,7 @@ def main() -> int:
         except Exception:  # noqa: BLE001
             pass
     p_spec.scene().sigMouseMoved.connect(_spec_mouse)
-    tabs.addTab(ond_w, "Onda")
+    tabs.addTab(ond_w, "Waveform")
 
     onda_focus = {"i": None}    # None = todas; idx = solo esa onda
 
@@ -695,8 +701,8 @@ def main() -> int:
     if orb_ok:
         orb_w = QtWidgets.QWidget(); orb_l = QtWidgets.QVBoxLayout(orb_w)
         orb_l.addWidget(QtWidgets.QLabel(
-            "<b>Órbitas</b> <i style='color:#64748b'>— orientadas al ángulo de sonda "
-            "(Y=45°L · X=45°R) · doble clic = ver una sola · doble clic otra vez = volver</i>"))
+            "<b>Orbits</b> <i style='color:#64748b'>— oriented to the probe angle "
+            "(Y=45°L · X=45°R) · double-click = view one · double-click again = back</i>"))
         gl_orb = pg.GraphicsLayoutWidget(); orb_l.addWidget(gl_orb, 1)
         gl_orb.ci.setContentsMargins(2, 2, 2, 2); gl_orb.ci.setSpacing(2)
         ncol = 2 if len(orb_pairs) > 1 else 1
@@ -713,10 +719,10 @@ def main() -> int:
                 smax_txt=pg.TextItem("", color=REDL, anchor=(0.5, 1.2)),
                 kph=p.plot(pen=None, symbol="o", symbolBrush=KPH, symbolSize=7, symbolPen=pg.mkPen("w", width=1)),
                 kph1=p.plot(pen=None, symbol="o", symbolBrush=REDL, symbolSize=12, symbolPen=pg.mkPen("w", width=2)),
-                pill=pg.TextItem(f"Cojinete {brg}", color="w", anchor=(0, 0), fill=pg.mkBrush(NAVY)))
+                pill=pg.TextItem(f"Bearing {brg}", color="w", anchor=(0, 0), fill=pg.mkBrush(NAVY)))
             p.addItem(it["smax_txt"]); p.addItem(it["pill"])
             orb_items.append(it)
-        tabs.addTab(orb_w, "Órbita")
+        tabs.addTab(orb_w, "Orbit")
 
         def _apply_orb_focus():
             fk = orb_focus["k"]
@@ -762,8 +768,8 @@ def main() -> int:
     # --- Bode (grilla por canal: amplitud 1X vs rpm; doble clic = uno + cursor) ---
     bode_w = QtWidgets.QWidget(); bode_l = QtWidgets.QVBoxLayout(bode_w)
     bode_l.addWidget(QtWidgets.QLabel(
-        "<b>Bode</b> <i style='color:#64748b'>— amplitud 1X vs rpm de cada canal (se llena en arranque) · "
-        "doble clic = ver uno solo · mové el mouse = amplitud/fase/rpm</i>"))
+        "<b>Bode</b> <i style='color:#64748b'>— 1X amplitude vs rpm per channel (fills during run-up) · "
+        "double-click = view one · move the mouse = amplitude/phase/rpm</i>"))
     gl_bode = pg.GraphicsLayoutWidget(); bode_l.addWidget(gl_bode, 1)
     gl_bode.ci.setContentsMargins(2, 2, 2, 2); gl_bode.ci.setSpacing(2)
     bode_cells = []; bode_focus = {"k": None}; _ncb = 2 if len(vib) > 1 else 1
@@ -803,11 +809,11 @@ def main() -> int:
     pol_w = QtWidgets.QWidget(); pol_l = QtWidgets.QVBoxLayout(pol_w)
     ptop = QtWidgets.QHBoxLayout()
     ptop.addWidget(QtWidgets.QLabel("<b>Polar</b>"))
-    ptop.addWidget(QtWidgets.QLabel("Giro:"))
+    ptop.addWidget(QtWidgets.QLabel("Rotation:"))
     cb_giro = QtWidgets.QComboBox(); cb_giro.addItems(["CCW", "CW"]); ptop.addWidget(cb_giro)
     ptop.addWidget(QtWidgets.QLabel(
-        "<i style='color:#64748b'>0° = ángulo de la sonda · fase CONTRA el giro · "
-        "doble clic = polar completo (rpm, Ncrit, datos)</i>"))
+        "<i style='color:#64748b'>0° = probe angle · phase AGAINST rotation · "
+        "double-click = full polar (rpm, Ncrit, data)</i>"))
     ptop.addStretch(1); pol_l.addLayout(ptop)
     gl_pol = pg.GraphicsLayoutWidget(); pol_l.addWidget(gl_pol, 1)
     gl_pol.ci.setContentsMargins(2, 2, 2, 2); gl_pol.ci.setSpacing(2)
@@ -869,19 +875,19 @@ def main() -> int:
     # --- Cascada (grilla por canal: espectros apilados; doble clic = uno solo) ---
     casc_w = QtWidgets.QWidget(); casc_l = QtWidgets.QVBoxLayout(casc_w)
     casc_l.addWidget(QtWidgets.QLabel(
-        "<b>Cascada</b> <i style='color:#64748b'>— espectros apilados por rpm de cada canal (arranque) · "
-        "doble clic = ver uno solo</i>"))
+        "<b>Cascade</b> <i style='color:#64748b'>— spectra stacked by rpm per channel (run-up) · "
+        "double-click = view one</i>"))
     gl_casc = pg.GraphicsLayoutWidget(); casc_l.addWidget(gl_casc, 1)
     gl_casc.ci.setContentsMargins(2, 2, 2, 2); gl_casc.ci.setSpacing(2)
     casc_cells = []; casc_focus = {"k": None}; _NCC = 26
     for k, (i, c) in enumerate(vib):
         p = gl_casc.addPlot(row=k // _ncb, col=k % _ncb)
-        p.showGrid(x=True, y=True, alpha=0.15); p.setLabel("bottom", "Frecuencia (Hz)"); p.setLabel("left", "RPM")
+        p.showGrid(x=True, y=True, alpha=0.15); p.setLabel("bottom", "Frequency (Hz)"); p.setLabel("left", "RPM")
         col = SENSOR_COLORS.get(_ckind(c), CORN)
         pill = pg.TextItem(c.name, color="w", anchor=(0, 0), fill=pg.mkBrush(col)); p.addItem(pill)
         casc_cells.append(dict(p=p, name=c.name, pill=pill,
                                curves=[p.plot(pen=pg.mkPen(col, width=0.8)) for _ in range(_NCC)]))
-    tabs.addTab(casc_w, "Cascada")
+    tabs.addTab(casc_w, "Cascade")
     _grid_focus(casc_cells, casc_focus, gl_casc)
 
     # --- Shaft Centerline (posición del muñón en el cojinete vs rpm) — estilo web ---
@@ -894,9 +900,9 @@ def main() -> int:
     if orb_ok:
         scl_w = QtWidgets.QWidget(); scl_l = QtWidgets.QVBoxLayout(scl_w)
         scl_l.addWidget(QtWidgets.QLabel(
-            "<b>Shaft Centerline</b> <i style='color:#64748b'>— posición del muñón en el juego del "
-            "cojinete al variar la velocidad. Traza coloreada por rpm · REST = reposo (abajo) · "
-            "punto grande = actual.</i>"))
+            "<b>Shaft Centerline</b> <i style='color:#64748b'>— journal position within the bearing "
+            "clearance as speed changes. Track colored by rpm · REST = at rest (bottom) · "
+            "large dot = current.</i>"))
         gl_scl = pg.GraphicsLayoutWidget(); scl_l.addWidget(gl_scl, 1)
         gl_scl.ci.setContentsMargins(2, 2, 2, 2); gl_scl.ci.setSpacing(2)
         ncol = 2 if len(orb_pairs) > 1 else 1
@@ -914,7 +920,7 @@ def main() -> int:
             line = p.plot(pen=pg.mkPen("#8aa0bd", width=1))
             trk = pg.ScatterPlotItem(size=7, pen=None); p.addItem(trk)
             cur = pg.ScatterPlotItem(size=14, brush=pg.mkBrush(REDL), pen=pg.mkPen("w", width=2)); p.addItem(cur)
-            pill = pg.TextItem(f"Cojinete {brg}", color="w", anchor=(0, 0), fill=pg.mkBrush(NAVY))
+            pill = pg.TextItem(f"Bearing {brg}", color="w", anchor=(0, 0), fill=pg.mkBrush(NAVY))
             p.addItem(pill); pill.setPos(-Cclr * 1.04, Cclr * 1.06)
             p.setXRange(-Cclr * 1.12, Cclr * 1.12); p.setYRange(-Cclr * 1.12, Cclr * 1.12)
             scl_items.append(dict(
@@ -924,19 +930,23 @@ def main() -> int:
             scl_track[brg] = {}
         tabs.addTab(scl_w, "Shaft Centerline")
 
-    # --- Diagnóstico (whirl/whip + críticas) ---
+    # --- Diagnostics (whirl/whip + criticals) ---
     diag_w = QtWidgets.QWidget(); diag_l = QtWidgets.QVBoxLayout(diag_w)
     drow = QtWidgets.QHBoxLayout()
-    btn_diag = QtWidgets.QPushButton("Generar reporte preliminar")
-    btn_diag_save = QtWidgets.QPushButton("Guardar reporte…")
-    drow.addWidget(btn_diag); drow.addWidget(btn_diag_save); drow.addStretch(1)
+    btn_diag = QtWidgets.QPushButton("Generate preliminary report")
+    btn_diag_save = QtWidgets.QPushButton("Save report…")
+    drow.addWidget(btn_diag); drow.addWidget(btn_diag_save)
+    drow.addSpacing(16)
+    drow.addWidget(QtWidgets.QLabel("Report language:"))
+    cb_lang = QtWidgets.QComboBox(); cb_lang.addItems(["English", "Español"]); drow.addWidget(cb_lang)
+    drow.addStretch(1)
     diag_l.addLayout(drow)
     diag_txt = QtWidgets.QTextEdit(); diag_txt.setReadOnly(True)
     diag_l.addWidget(diag_txt, 1)
     diag_state = {"html": ""}
-    tabs.addTab(diag_w, "Diagnóstico")
+    tabs.addTab(diag_w, "Diagnostics")
 
-    lbl_rpm = QtWidgets.QLabel("RPM: —"); lbl_state = QtWidgets.QLabel("detenido")
+    lbl_rpm = QtWidgets.QLabel("RPM: —"); lbl_state = QtWidgets.QLabel("stopped")
     lbl_rec = QtWidgets.QLabel("")
     win.statusBar().addWidget(lbl_state)
     win.statusBar().addPermanentWidget(lbl_rec)
@@ -949,7 +959,7 @@ def main() -> int:
         # indicador en vivo de captura (se graba desde Iniciar) — así se ve que NO se pierde data
         _sess = rec_state.get("session")
         if _sess is not None and getattr(_sess, "open", False):
-            lbl_rec.setText(f"● capturando · {_sess.status.duration_s:.0f}s · {_sess.status.size_mb:.1f} MB")
+            lbl_rec.setText(f"● capturing · {_sess.status.duration_s:.0f}s · {_sess.status.size_mb:.1f} MB")
         snap = agent.snapshot(2.0)
         if snap.shape[1] < 16:
             return
@@ -981,12 +991,12 @@ def main() -> int:
                     cy = mX * _mo.cos(it["aX"]) + mY * _mo.cos(it["aY"])
                     scl_track[it["brg"]][bk] = (cx, cy)
         cur = tabs.tabText(tabs.currentIndex())
-        if cur == "Monitoreo":
-            # estado global (estable/arranque/parada) por variación de rpm
+        if cur == "Monitoring":
+            # global state (steady/run-up/coast-down) from rpm variation
             prev = rec_state.get("prev_rpm")
             if rpm and prev:
                 d = rpm - prev
-                estado_g = "Arranque" if d > 15 else ("Parada" if d < -15 else "Estable")
+                estado_g = "Run-up" if d > 15 else ("Coast-down" if d < -15 else "Steady")
             else:
                 estado_g = "—"
             rec_state["prev_rpm"] = rpm
@@ -1006,7 +1016,7 @@ def main() -> int:
             sv["estado"].setStyleSheet(
                 "border:none; font-size:18px; font-weight:800;"
                 " font-family:'Consolas','SF Mono',monospace; color:"
-                + ("#16a34a" if estado_g == "Estable" else "#b45309"))
+                + ("#16a34a" if estado_g == "Steady" else "#b45309"))
             sv["srate"].setText(f"{fs/1000:.1f} kS/s" if fs >= 1000 else f"{fs:.0f} S/s")
             sv["vent"].setText(f"{snap.shape[1] / fs:.1f} s")
             sv["samp"].setText(f"{total:,}")
@@ -1045,7 +1055,7 @@ def main() -> int:
                         f.setBold(True); it.setFont(f)
                         it.setTextAlignment(QtCore.Qt.AlignCenter)
                     tblt.setItem(r, cc, it)
-        elif cur == "Onda":
+        elif cur == "Waveform":
             fi = onda_focus["i"]
             nshow = min(snap.shape[1], int(0.6 * fs))          # 600 ms (estándar)
             tms = np.arange(nshow) / fs * 1000.0
@@ -1097,7 +1107,7 @@ def main() -> int:
                     for ln in (v1x, v2x, v3x):
                         ln.hide()
                     spec_info.setText("")
-        elif orb_ok and cur == "Órbita":
+        elif orb_ok and cur == "Orbit":
             fk = orb_focus["k"]
             nrev = min(snap.shape[1], int((8 * fs / max(rpm, 1)) * 60) if rpm else int(0.4 * fs))
             for idx, it in enumerate(orb_items):
@@ -1191,7 +1201,7 @@ def main() -> int:
                     it["trk"].setData(xs, ys, brush=brs)
                 else:
                     it["trk"].setData(xs, ys, brush=pg.mkBrush(CORN))
-        elif cur == "Cascada":
+        elif cur == "Cascade":
             fk = casc_focus["k"]
             for k, cl in enumerate(casc_cells):
                 if fk is not None and k != fk:
@@ -1208,29 +1218,78 @@ def main() -> int:
                     for cv, i in zip(cl["curves"], idx):
                         cv.setData(fr, rr[i] + mat[i] * sc)
 
+    # --- Bilingual strings for the preliminary report (EN default, ES for the client) ---
+    REPORT_T = {
+        "en": dict(
+            need_acq="<i>Start acquisition (▶ Start) to generate the report.</i>",
+            title="Preliminary vibration report", machine="Machine", sampling="Sampling",
+            verdict="Verdict", verdict_note="(overall vs ISO 20816 / configured levels)",
+            verdicts=[("NO FINDINGS", "#166534"), ("WATCH — ALERT level", "#b45309"),
+                      ("ACTION — DANGER level", "#b91c1c")],
+            s1="1 · Current levels by sensor",
+            th=["Sensor", "Overall", "1X", "1X phase", "2X", "Alarm", "Danger", "Status"],
+            st=["OK", "ALERT", "DANGER"],
+            s2="2 · Critical speeds (API 684)",
+            no_crit="<i>No criticals detected (run a run-up/coast-down to evaluate them).</i>",
+            s3="3 · Instabilities / sub-synchronous",
+            no_sub="<i>No relevant sub-synchronous components.</i>",
+            s4="4 · Recommendation",
+            rec_danger="<b>DANGER level</b>: schedule shutdown / inspection; check balancing, "
+                       "alignment and bearings.",
+            rec_alert="<b>ALERT</b> level: increase monitoring frequency and plan corrective action.",
+            rec_ok="Levels within standard; continue routine monitoring.",
+            rec_whip="<b>Oil whip</b>: severe film instability — act on the bearing.",
+            rec_crit="Verify the <b>separation margin</b> to criticals (API 684) at run-up/coast-down.",
+            footer="Automatic preliminary report — requires specialist validation. Watermelon System.",
+            dfmt="%m/%d/%Y %H:%M"),
+        "es": dict(
+            need_acq="<i>Iniciá la adquisición (▶ Iniciar) para generar el reporte.</i>",
+            title="Reporte preliminar de vibraciones", machine="Máquina", sampling="Muestreo",
+            verdict="Veredicto", verdict_note="(overall vs ISO 20816 / niveles configurados)",
+            verdicts=[("SIN NOVEDAD", "#166534"), ("OBSERVAR — nivel de ALERTA", "#b45309"),
+                      ("ACCIÓN — nivel de PELIGRO", "#b91c1c")],
+            s1="1 · Niveles actuales por sensor",
+            th=["Sensor", "Overall", "1X", "1X fase", "2X", "Alarma", "Peligro", "Estado"],
+            st=["OK", "ALERTA", "PELIGRO"],
+            s2="2 · Velocidades críticas (API 684)",
+            no_crit="<i>Sin críticas detectadas (hacé un arranque/parada para evaluarlas).</i>",
+            s3="3 · Inestabilidades / subsíncronos",
+            no_sub="<i>Sin subsíncronos relevantes.</i>",
+            s4="4 · Recomendación",
+            rec_danger="<b>Nivel de PELIGRO</b>: programar parada / inspección; verificar balanceo, "
+                       "alineación y cojinetes.",
+            rec_alert="Nivel de <b>ALERTA</b>: aumentar frecuencia de monitoreo y planificar corrección.",
+            rec_ok="Niveles dentro de norma; continuar monitoreo de rutina.",
+            rec_whip="<b>Oil whip</b>: inestabilidad de película severa — actuar sobre el cojinete.",
+            rec_crit="Verificar el <b>margen de separación</b> a las críticas (API 684) en arranque/parada.",
+            footer="Reporte automático preliminar — requiere validación de especialista. Watermelon System.",
+            dfmt="%d/%m/%Y %H:%M"),
+    }
+
     def run_diag():
         import time as _t
+        T = REPORT_T["es" if cb_lang.currentText() == "Español" else "en"]
         snap = agent.snapshot()
         if snap.shape[1] < 16:
-            diag_txt.setHtml("<i>Iniciá la adquisición (▶ Iniciar) para generar el reporte.</i>")
+            diag_txt.setHtml(T["need_acq"])
             return
         fs = agent.sample_rate_hz
         rpm = agent.estimate_rpm(snap) or 0.0
         f1 = (rpm / 60.0) if rpm else None
-        # 1) Niveles actuales por sensor (norma por tipo) + estado
+        # 1) Current levels by sensor (per-type standard) + status
         rows = []; worst = 0
         for i, c in vib:
             eu = snap[i] * 1000.0 / (c.sensitivity_mv_per_eu or 1.0); eu0 = eu - eu.mean()
             ov, a1, p1, a2, p2 = _amp3(eu0, fs, f1, _ckind(c))
             al, dg = _alarm_for(c)
             if dg and ov >= dg:
-                st, scol = "PELIGRO", "#b91c1c"; worst = max(worst, 2)
+                st, scol = T["st"][2], "#b91c1c"; worst = max(worst, 2)
             elif al and ov >= al:
-                st, scol = "ALERTA", "#b45309"; worst = max(worst, 1)
+                st, scol = T["st"][1], "#b45309"; worst = max(worst, 1)
             else:
-                st, scol = "OK", "#166534"
+                st, scol = T["st"][0], "#166534"
             rows.append((c.name, ov, c.units, a1, p1, a2, p2, al, dg, st, scol))
-        # 2) Velocidades críticas + AF (del transitorio)
+        # 2) Critical speeds + AF (from the transient)
         crit_lines = []; crits = set()
         for i, c in vib:
             rb, ab = np.asarray(tc.bode(c.name)[0], float), np.asarray(tc.bode(c.name)[1], float)
@@ -1242,74 +1301,70 @@ def main() -> int:
                     if _r2:
                         af = f" · AF {_r2[0]:.1f}"
                     crit_lines.append(f"{c.name}: <b>{nc:.0f} rpm</b>{af}")
-        # 3) Subsíncronos (whirl / whip / ½X)
+        # 3) Sub-synchronous (whirl / whip / ½X)
         rrk, frk, matk = tc.cascade(vib[0][1].name)
         subs = diag.cascade_diagnosis(rrk, frk, matk, sorted(float(x) for x in crits)) if len(rrk) >= 3 else []
-        # --- Reporte HTML ---
-        verdict = [("SIN NOVEDAD", "#166534"), ("OBSERVAR — nivel de ALERTA", "#b45309"),
-                   ("ACCIÓN — nivel de PELIGRO", "#b91c1c")][worst]
+        # --- HTML report ---
+        verdict = T["verdicts"][worst]
+        thr = "".join(f"<th>{x}</th>" for x in T["th"])
         h = [f"<div style='font-family:Segoe UI,Arial'>",
-             f"<h2 style='color:{NAVY};margin:0'>Reporte preliminar de vibraciones</h2>",
-             f"<div style='color:#64748b;font-size:12px'>Máquina <b>{args.machine}</b> · "
-             f"{_t.strftime('%d/%m/%Y %H:%M')} · RPM {rpm:.0f} · Muestreo {fs/1000:.1f} kS/s</div>",
-             f"<p style='font-size:15px'>Veredicto: <b style='color:{verdict[1]}'>{verdict[0]}</b> "
-             f"<span style='color:#64748b;font-size:12px'>(overall vs ISO 20816 / niveles configurados)</span></p>",
-             "<h3 style='color:#0F1E3D'>1 · Niveles actuales por sensor</h3>",
+             f"<h2 style='color:{NAVY};margin:0'>{T['title']}</h2>",
+             f"<div style='color:#64748b;font-size:12px'>{T['machine']} <b>{args.machine}</b> · "
+             f"{_t.strftime(T['dfmt'])} · RPM {rpm:.0f} · {T['sampling']} {fs/1000:.1f} kS/s</div>",
+             f"<p style='font-size:15px'>{T['verdict']}: <b style='color:{verdict[1]}'>{verdict[0]}</b> "
+             f"<span style='color:#64748b;font-size:12px'>{T['verdict_note']}</span></p>",
+             f"<h3 style='color:#0F1E3D'>{T['s1']}</h3>",
              "<table cellspacing='0' cellpadding='5' border='1' style='border-collapse:collapse;"
              "border-color:#d6deea;font-size:12px'>",
-             "<tr style='background:#0F1E3D;color:#8ec3ef'><th>Sensor</th><th>Overall</th><th>1X</th>"
-             "<th>1X fase</th><th>2X</th><th>Alarma</th><th>Peligro</th><th>Estado</th></tr>"]
+             f"<tr style='background:#0F1E3D;color:#8ec3ef'>{thr}</tr>"]
         for nm, ov, un, a1, p1, a2, p2, al, dg, st, scol in rows:
             h.append(f"<tr><td><b>{nm}</b></td><td>{ov:.2f} {un}</td><td>{a1:.2f}</td>"
                      f"<td>{p1:.0f}°</td><td>{a2:.2f}</td><td>{al:g}</td><td>{dg:g}</td>"
                      f"<td style='color:{scol}'><b>{st}</b></td></tr>")
         h.append("</table>")
-        h.append("<h3 style='color:#0F1E3D'>2 · Velocidades críticas (API 684)</h3>")
-        h.append("<p>" + ("<br>".join(crit_lines) if crit_lines
-                          else "<i>Sin críticas detectadas (hacé un arranque/parada para evaluarlas).</i>") + "</p>")
-        h.append("<h3 style='color:#0F1E3D'>3 · Inestabilidades / subsíncronos</h3>")
+        h.append(f"<h3 style='color:#0F1E3D'>{T['s2']}</h3>")
+        h.append("<p>" + ("<br>".join(crit_lines) if crit_lines else T["no_crit"]) + "</p>")
+        h.append(f"<h3 style='color:#0F1E3D'>{T['s3']}</h3>")
         col = {"info": ACC, "warn": "#b45309", "danger": "#b91c1c"}
         if subs:
             for lvl, title, detail in subs:
                 h.append(f"<p style='color:{col.get(lvl,'#333')}'><b>{title}</b><br>{detail}</p>")
         else:
-            h.append("<p><i>Sin subsíncronos relevantes.</i></p>")
-        h.append("<h3 style='color:#0F1E3D'>4 · Recomendación</h3><ul>")
+            h.append(f"<p>{T['no_sub']}</p>")
+        h.append(f"<h3 style='color:#0F1E3D'>{T['s4']}</h3><ul>")
         if worst >= 2:
-            h.append("<li><b>Nivel de PELIGRO</b>: programar parada / inspección; verificar balanceo, "
-                     "alineación y cojinetes.</li>")
+            h.append(f"<li>{T['rec_danger']}</li>")
         elif worst == 1:
-            h.append("<li>Nivel de <b>ALERTA</b>: aumentar frecuencia de monitoreo y planificar corrección.</li>")
+            h.append(f"<li>{T['rec_alert']}</li>")
         else:
-            h.append("<li>Niveles dentro de norma; continuar monitoreo de rutina.</li>")
+            h.append(f"<li>{T['rec_ok']}</li>")
         if any("WHIP" in (t or "") for _l, t, _d in subs):
-            h.append("<li><b>Oil whip</b>: inestabilidad de película severa — actuar sobre el cojinete.</li>")
+            h.append(f"<li>{T['rec_whip']}</li>")
         if crit_lines:
-            h.append("<li>Verificar <b>margen de separación</b> a las críticas (API 684) en arranque/parada.</li>")
-        h.append("</ul><div style='color:#94a3b8;font-size:11px'>Reporte automático preliminar — "
-                 "requiere validación de especialista. Watermelon System.</div></div>")
+            h.append(f"<li>{T['rec_crit']}</li>")
+        h.append(f"</ul><div style='color:#94a3b8;font-size:11px'>{T['footer']}</div></div>")
         html = "".join(h)
         diag_state["html"] = html
         diag_txt.setHtml(html)
 
     def do_save_report():
         if not diag_state.get("html"):
-            _nice("Guardar reporte", "<b>Primero generá el reporte</b> con «Generar reporte preliminar».")
+            _nice("Save report", "<b>Generate the report first</b> with «Generate preliminary report».")
             return
         import time as _t
         from core.remote_monitoring.recorder import _persist_root
         rdir = os.path.join(os.path.dirname(_persist_root()), "reports")
         os.makedirs(rdir, exist_ok=True)
-        path = os.path.join(rdir, f"reporte_{args.machine}_{_t.strftime('%Y%m%d_%H%M%S')}.html")
+        path = os.path.join(rdir, f"report_{args.machine}_{_t.strftime('%Y%m%d_%H%M%S')}.html")
         try:
             with open(path, "w", encoding="utf-8") as f:
                 f.write("<html><meta charset='utf-8'><body>" + diag_state["html"] + "</body></html>")
-            _nice("Reporte guardado",
-                  "<div style='font-size:15px'><b style='color:#166534'>✅ Reporte guardado</b></div>"
+            _nice("Report saved",
+                  "<div style='font-size:15px'><b style='color:#166534'>✅ Report saved</b></div>"
                   f"<div style='color:#334155;font-family:monospace;margin-top:6px'>{path}</div>"
-                  "<div style='color:#64748b;margin-top:8px'>Abrilo con el navegador; podés imprimirlo a PDF.</div>")
+                  "<div style='color:#64748b;margin-top:8px'>Open it in your browser; you can print it to PDF.</div>")
         except Exception as e:  # noqa: BLE001
-            _nice("Guardar reporte", f"<b style='color:#b91c1c'>No se pudo guardar</b><br>{e}",
+            _nice("Save report", f"<b style='color:#b91c1c'>Could not save</b><br>{e}",
                   QtWidgets.QMessageBox.Warning)
 
     timer = QtCore.QTimer(); timer.timeout.connect(update)
@@ -1322,13 +1377,13 @@ def main() -> int:
         import time as _t
         default = f"{args.machine}_{_t.strftime('%Y%m%d_%H%M%S')}"
         tag, ok = QtWidgets.QInputDialog.getText(
-            win, "Iniciar corrida", "Nombre / consecutivo de la corrida:", text=default)
+            win, "Start run", "Run name / sequence number:", text=default)
         if not ok:
             return
         try:
             agent.start()
         except Exception as e:  # noqa: BLE001
-            QtWidgets.QMessageBox.critical(win, "Error", f"No se pudo iniciar: {e}")
+            QtWidgets.QMessageBox.critical(win, "Error", f"Could not start: {e}")
             return
         try:
             ch_meta = [{"name": c.name, "units": c.units, "coupling": c.coupling,
@@ -1341,8 +1396,8 @@ def main() -> int:
         except Exception:  # noqa: BLE001
             rec_state["session"] = None
         act_start.setEnabled(False); act_stop.setEnabled(True)
-        lbl_state.setText("● capturando datos (desde el inicio)")
-        timer.start(90)     # ~11 fps: fluido y más liviano de CPU/RAM (PCs modestas)
+        lbl_state.setText("● capturing data (from the start)")
+        timer.start(90)     # ~11 fps: smooth and lighter on CPU/RAM (modest PCs)
 
     def do_stop():
         timer.stop()
@@ -1357,20 +1412,20 @@ def main() -> int:
         act_start.setEnabled(True); act_stop.setEnabled(False)
         lbl_rec.setText("")
         if rec:
-            lbl_state.setText(f"detenido · {rec.status.duration_s:.0f}s · "
-                              f"{rec.status.size_mb:.1f} MB · listo para 💾 Guardar datos")
+            lbl_state.setText(f"stopped · {rec.status.duration_s:.0f}s · "
+                              f"{rec.status.size_mb:.1f} MB · ready to 💾 Save data")
         else:
-            lbl_state.setText("detenido")
+            lbl_state.setText("stopped")
         _refresh_disk()
 
     def _refresh_disk():
         try:
             cnt, used = local_usage(agent.instance_id)
             free = free_bytes()
-            lbl_disk.setText(f"Disco: {cnt} grabación(es) · {used / 1e6:.0f} MB usados · "
-                             f"{free / 1e6:.0f} MB libres")
+            lbl_disk.setText(f"Disk: {cnt} recording(s) · {used / 1e6:.0f} MB used · "
+                             f"{free / 1e6:.0f} MB free")
             pend = pending_count(agent.instance_id)
-            act_sync.setText(f"Subir a la nube ({pend})" if pend else "Subir a la nube")
+            act_sync.setText(f"Upload to cloud ({pend})" if pend else "Upload to cloud")
             act_sync.setEnabled(pend > 0)
         except Exception:  # noqa: BLE001
             pass
@@ -1383,19 +1438,14 @@ def main() -> int:
         except Exception:  # noqa: BLE001
             client = None
         if client is None:
-            has_url = bool(os.environ.get("WM_SUPABASE_URL"))
-            has_key = bool(os.environ.get("WM_SUPABASE_KEY"))
             QtWidgets.QMessageBox.warning(
-                win, "Sincronizar — sin conexión a la nube",
-                "No se pudo conectar a Supabase, por eso las grabaciones no suben "
-                "(quedan guardadas local).\n\n"
-                f"• WM_SUPABASE_URL {'OK' if has_url else 'FALTA'}\n"
-                f"• WM_SUPABASE_KEY {'OK' if has_key else 'FALTA'}\n\n"
-                "Pasos:\n"
-                "1) Editá 'Nube__EDITAR_credenciales.bat' con tu Project URL y service_role key "
-                "(Supabase → Project Settings → API).\n"
-                "2) Abrí el programa con 'SIMULADOR_con_NUBE.bat' (ese carga las credenciales).\n"
-                "3) Verificá que haya internet.")
+                win, "Upload — no cloud connection",
+                "Could not connect to the cloud, so recordings were not uploaded "
+                "(they stay saved locally and nothing is lost).\n\n"
+                "Please check:\n"
+                "1) This computer has an internet connection.\n"
+                "2) A firewall/proxy is not blocking the connection.\n\n"
+                "You can retry the upload later — the data is kept on disk.")
             _refresh_disk(); return
         # URL que realmente se está usando (para diagnosticar)
         used_url = os.environ.get("WM_SUPABASE_URL", "")
@@ -1406,7 +1456,7 @@ def main() -> int:
             except Exception:  # noqa: BLE001
                 used_url = "(no embebida)"
         # 2) subir EN HILO DE FONDO (no congela la UI)
-        act_sync.setEnabled(False); act_sync.setText("Subiendo…")
+        act_sync.setEnabled(False); act_sync.setText("Uploading…")
         res = {}
 
         res["ok"] = res["fail"] = 0
@@ -1418,7 +1468,7 @@ def main() -> int:
                 pend = [m for m in list_recordings(agent.instance_id) if not is_synced(m["_dir"])]
                 res["total"] = len(pend)
                 for k, m in enumerate(pend):
-                    res["progress"] = f"Subiendo {k + 1} de {len(pend)}…"
+                    res["progress"] = f"Uploading {k + 1} of {len(pend)}…"
                     r = upload_recording(m["_dir"])
                     if r.get("ok"):
                         res["ok"] += 1
@@ -1432,25 +1482,25 @@ def main() -> int:
 
         def _check():
             if not res.get("done"):
-                lbl_rec.setText(res.get("progress", "subiendo…"))
+                lbl_rec.setText(res.get("progress", "uploading…"))
                 QtCore.QTimer.singleShot(400, _check); return
             lbl_rec.setText("")
-            act_sync.setEnabled(True); act_sync.setText("Subir a la nube"); _refresh_disk()
+            act_sync.setEnabled(True); act_sync.setText("Upload to cloud"); _refresh_disk()
             ok, fail = res.get("ok", 0), res.get("fail", 0)
             if res.get("err"):
-                _nice("Sincronizar", f"<b style='color:#b91c1c'>No se pudo subir</b><br>"
+                _nice("Upload", f"<b style='color:#b91c1c'>Upload failed</b><br>"
                       f"<span style='color:#334155'>{res['err']}</span>", QtWidgets.QMessageBox.Warning)
             elif fail == 0 and ok > 0:
-                _nice("Sincronizado",
-                      "<div style='font-size:17px'><b style='color:#166534'>☁ Datos sincronizados en la nube</b></div>"
-                      f"<div style='color:#334155;margin-top:6px'>{ok} grabación(es) subida(s).</div>"
-                      "<div style='color:#0F1E3D;margin-top:10px;font-size:14px'>Ya podés <b>iniciar el "
-                      "diagnóstico en Watermelon System</b> (web → Análisis → Reprocesar). 🍉</div>")
+                _nice("Uploaded",
+                      "<div style='font-size:17px'><b style='color:#166534'>☁ Data synced to the cloud</b></div>"
+                      f"<div style='color:#334155;margin-top:6px'>{ok} recording(s) uploaded.</div>"
+                      "<div style='color:#0F1E3D;margin-top:10px;font-size:14px'>You can now <b>start the "
+                      "diagnosis in Watermelon System</b> (web → Analysis → Reprocess). 🍉</div>")
             elif ok == 0 and fail == 0:
-                _nice("Sincronizar", "<b>No hay grabaciones pendientes.</b> Todo está en la nube.")
+                _nice("Upload", "<b>No pending recordings.</b> Everything is in the cloud.")
             else:
-                _nice("Sincronizar",
-                      f"<b>Subidas {ok} · fallidas {fail}.</b><br>"
+                _nice("Upload",
+                      f"<b>Uploaded {ok} · failed {fail}.</b><br>"
                       f"<span style='color:#b45309'>{res.get('reason','')}</span>",
                       QtWidgets.QMessageBox.Warning)
         QtCore.QTimer.singleShot(300, _check)
@@ -1465,18 +1515,18 @@ def main() -> int:
     def do_save():
         # 1) Si TODAVÍA está adquiriendo → hay que detener primero
         if act_stop.isEnabled():
-            _nice("Guardar datos",
-                  "<div style='font-size:15px'><b style='color:#b45309'>⏸ Primero detené la adquisición</b></div>"
-                  "<div style='color:#334155;margin-top:4px'>Dale <b>■ Detener</b> y después "
-                  "<b>💾 Guardar datos</b>.</div>", QtWidgets.QMessageBox.Warning)
+            _nice("Save data",
+                  "<div style='font-size:15px'><b style='color:#b45309'>⏸ Stop acquisition first</b></div>"
+                  "<div style='color:#334155;margin-top:4px'>Press <b>■ Stop</b> and then "
+                  "<b>💾 Save data</b>.</div>", QtWidgets.QMessageBox.Warning)
             return
-        # 2) ¿hay una corrida detenida?
+        # 2) is there a stopped run?
         rec = rec_state.get("session")
         if not rec:
-            _nice("Guardar datos",
-                  "<div style='font-size:15px'><b>No hay una corrida para guardar</b></div>"
-                  "<div style='color:#334155;margin-top:4px'>Hacé: <b>▶ Iniciar</b> → medí → "
-                  "<b>■ Detener</b> → <b>💾 Guardar datos</b>.</div>")
+            _nice("Save data",
+                  "<div style='font-size:15px'><b>No run to save</b></div>"
+                  "<div style='color:#334155;margin-top:4px'>Do: <b>▶ Start</b> → measure → "
+                  "<b>■ Stop</b> → <b>💾 Save data</b>.</div>")
             return
         # 3) La corrida YA está en disco (se graba desde Iniciar). Guardar = confirmar local.
         if not rec_state.get("saved"):
@@ -1489,18 +1539,20 @@ def main() -> int:
             pend = pending_count(agent.instance_id)
         except Exception:  # noqa: BLE001
             pass
-        _nice("Datos guardados",
-              "<div style='font-size:17px'><b style='color:#166534'>✅ Datos guardados en el equipo</b></div>"
+        _nice("Data saved",
+              "<div style='font-size:17px'><b style='color:#166534'>✅ Data saved on this computer</b></div>"
               f"<div style='color:#0F1E3D;font-family:monospace;margin-top:6px'>{rec.rec_id}<br>"
               f"{rec.status.duration_s:.0f} s · {rec.status.size_mb:.1f} MB</div>"
-              "<div style='color:#b45309;margin-top:10px;font-size:14px'>⏳ <b>Pendiente de subir a la nube</b> — "
-              f"apretá <b>↑ Subir pendientes ({pend})</b> cuando tengas internet.</div>")
+              "<div style='color:#b45309;margin-top:10px;font-size:14px'>⏳ <b>Pending cloud upload</b> — "
+              f"press <b>↑ Upload to cloud ({pend})</b> when you have internet.</div>")
 
     def set_mode_live(mode):
-        """Cambia el MODO de operación en vivo (estable/arranque/parada) sobre la
-        misma máquina: ajusta el perfil, rebobina el reloj del rotor y reinicia el
-        capturador de transitorio para que Bode/Cascada salgan limpios."""
+        """Change the operating MODE live (steady/run-up/coast-down) on the same
+        machine: adjust the profile, rewind the rotor clock and reset the transient
+        capture so Bode/Cascade come out clean. `mode` arrives as the UI label."""
         nonlocal tc
+        label = mode
+        mode = LABEL_TO_MODE.get(mode, mode)     # UI label → internal key
         cf = agent.source.config
         if hasattr(cf, "speed_profile"):
             cf.speed_profile = MODE_TO_PROFILE.get(mode, "constant")
@@ -1531,11 +1583,13 @@ def main() -> int:
                 _t.setText("")
         for _b in scl_track:                 # reiniciar la traza del shaft centerline
             scl_track[_b].clear()
-        lbl_state.setText(f"● {mode}" if agent.source.is_running() else f"modo: {mode}")
+        lbl_state.setText(f"● {label}" if agent.source.is_running() else f"mode: {label}")
 
     _prof0 = getattr(agent.source.config, "speed_profile", "constant")
     _inv = {v: k for k, v in MODE_TO_PROFILE.items()}
-    cb_run.blockSignals(True); cb_run.setCurrentText(_inv.get(_prof0, "estable")); cb_run.blockSignals(False)
+    cb_run.blockSignals(True)
+    cb_run.setCurrentText(MODE_LABELS.get(_inv.get(_prof0, "estable"), "Steady"))
+    cb_run.blockSignals(False)
     cb_run.currentTextChanged.connect(set_mode_live)
     act_start.triggered.connect(do_start)
     act_stop.triggered.connect(do_stop)
@@ -1546,22 +1600,22 @@ def main() -> int:
         from core.remote_monitoring.recorder import clear_recordings, pending_count, local_usage
         cnt, used = local_usage(agent.instance_id)
         if cnt == 0:
-            QtWidgets.QMessageBox.information(win, "Limpiar locales", "No hay grabaciones locales.")
+            QtWidgets.QMessageBox.information(win, "Delete local data", "No local recordings.")
             return
         pend = pending_count(agent.instance_id)
         m = QtWidgets.QMessageBox(win)
-        m.setWindowTitle("Limpiar grabaciones locales")
+        m.setWindowTitle("Delete local recordings")
         m.setIcon(QtWidgets.QMessageBox.Warning)
-        m.setText(f"Borrar {cnt} grabación(es) locales ({used/1e6:.0f} MB)?")
+        m.setText(f"Delete {cnt} local recording(s) ({used/1e6:.0f} MB)?")
         m.setInformativeText(
-            (f"⚠ Hay {pend} SIN subir a la nube: si las borrás, se pierden.\n\n"
-             if pend else "Las que ya están en la nube quedan en la nube.\n\n")
-            + "¿Continuar?")
+            (f"⚠ {pend} are NOT uploaded to the cloud: if you delete them, they are lost.\n\n"
+             if pend else "The ones already in the cloud stay in the cloud.\n\n")
+            + "Continue?")
         only = None
         if pend:
-            bt_all = m.addButton("Borrar TODAS", QtWidgets.QMessageBox.DestructiveRole)
-            bt_synced = m.addButton("Solo las ya subidas", QtWidgets.QMessageBox.AcceptRole)
-            m.addButton("Cancelar", QtWidgets.QMessageBox.RejectRole)
+            bt_all = m.addButton("Delete ALL", QtWidgets.QMessageBox.DestructiveRole)
+            bt_synced = m.addButton("Only uploaded ones", QtWidgets.QMessageBox.AcceptRole)
+            m.addButton("Cancel", QtWidgets.QMessageBox.RejectRole)
             m.exec()
             cl = m.clickedButton()
             if cl == bt_all: only = False
@@ -1575,16 +1629,16 @@ def main() -> int:
         n, freed = clear_recordings(agent.instance_id, only_synced=bool(only))
         rec_state["guard"] = 0
         _refresh_disk()
-        QtWidgets.QMessageBox.information(win, "Limpiar locales",
-                                         f"Borradas {n} grabación(es) · liberados {freed/1e6:.0f} MB.")
+        QtWidgets.QMessageBox.information(win, "Delete local data",
+                                         f"Deleted {n} recording(s) · freed {freed/1e6:.0f} MB.")
     act_clear.triggered.connect(do_clear)   # barra: Borrar datos
     _refresh_disk()
     act_quit.triggered.connect(win.close)
     act_about.triggered.connect(lambda: QtWidgets.QMessageBox.about(
-        win, "Watermelon Field", "Watermelon Field — módulo nativo de adquisición.\n"
-        "Rotodinámica API 670/684 · nube integrada.\n© SIGA"))
+        win, "Watermelon Field", "Watermelon Field — native acquisition module.\n"
+        "Rotordynamics API 670/684 · integrated cloud.\n© SIGA"))
 
-    win.showMaximized()      # usar toda la pantalla (se adapta a cualquier resolución)
+    win.showMaximized()      # use the full screen (adapts to any resolution)
     ret = app.exec()
     try:
         agent.stop()
@@ -1608,14 +1662,14 @@ def _run_with_crashlog() -> int:
         tb = traceback.format_exc()
         try:
             with open(logp, "a", encoding="utf-8") as f:
-                f.write("\n==== error al iniciar ====\n" + tb + "\n")
+                f.write("\n==== startup error ====\n" + tb + "\n")
         except Exception:  # noqa: BLE001
             pass
         try:
             from PySide6 import QtWidgets
             _a = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-            QtWidgets.QMessageBox.critical(None, "Watermelon Field — error al iniciar",
-                                           f"{tb}\n\nDetalle guardado en:\n{logp}")
+            QtWidgets.QMessageBox.critical(None, "Watermelon Field — startup error",
+                                           f"{tb}\n\nDetails saved to:\n{logp}")
         except Exception:  # noqa: BLE001
             print(tb)
         return 1
