@@ -842,8 +842,8 @@ def main() -> int:
         rpm_lbls = [pg.TextItem("", color="#64748b", anchor=(0.5, 0.5)) for _ in range(8)]
         for t in rpm_lbls:
             p.addItem(t)
-        arc = p.plot(pen=pg.mkPen("#9aa8bd", width=1.3))     # arco de giro (discreto)
-        arw = pg.ArrowItem(angle=0, tipAngle=28, headLen=7, brush="#9aa8bd", pen=None); p.addItem(arw)
+        arc = p.plot(pen=pg.mkPen("#5b6b86", width=2.0))     # arco de giro (visible pero prolijo)
+        arw = pg.ArrowItem(angle=0, tipAngle=30, headLen=10, brush="#5b6b86", pen=None); p.addItem(arw)
         pol_cells.append(dict(p=p, name=c.name, unit=c.units, pill=pill, curve=curve, pts=pts,
                               ncrit=ncrit, op=op, ncrit_txt=ncrit_txt, box=box, rpm_lbls=rpm_lbls,
                               pa=pa, deg_items=deg_items, arc=arc, arw=arw))
@@ -852,9 +852,9 @@ def main() -> int:
 
     def _polar_relabel():
         cw = (cb_giro.currentText() == "CW")     # CW → ángulos de fase al revés
-        R = 1.16
-        # arco chico de giro cerca del tope: CW = horario, CCW = antihorario
-        degs = np.linspace(-26, 26, 14) if cw else np.linspace(26, -26, 14)
+        R = 1.18
+        # arco de giro cerca del tope: CW = horario, CCW = antihorario
+        degs = np.linspace(-32, 32, 16) if cw else np.linspace(32, -32, 16)
         xs = R * np.sin(np.radians(degs)); ys = R * np.cos(np.radians(degs))
         for cl in pol_cells:
             for t, d in cl["deg_items"]:
@@ -915,8 +915,8 @@ def main() -> int:
             trk = pg.ScatterPlotItem(size=7, pen=None); p.addItem(trk)
             cur = pg.ScatterPlotItem(size=14, brush=pg.mkBrush(REDL), pen=pg.mkPen("w", width=2)); p.addItem(cur)
             pill = pg.TextItem(f"Cojinete {brg}", color="w", anchor=(0, 0), fill=pg.mkBrush(NAVY))
-            p.addItem(pill); pill.setPos(-Cclr * 1.15, Cclr * 1.15)
-            p.setXRange(-Cclr * 1.25, Cclr * 1.25); p.setYRange(-Cclr * 1.25, Cclr * 1.25)
+            p.addItem(pill); pill.setPos(-Cclr * 1.04, Cclr * 1.06)
+            p.setXRange(-Cclr * 1.12, Cclr * 1.12); p.setYRange(-Cclr * 1.12, Cclr * 1.12)
             scl_items.append(dict(
                 p=p, yi=yi, xi=xi, yc=yc, xc=xc, brg=brg,
                 aY=_mo.radians(_probe_angle(yc.name)), aX=_mo.radians(_probe_angle(xc.name)),
