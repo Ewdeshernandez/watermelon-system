@@ -45,7 +45,7 @@ from core.calibration.ui import (
 # Setup + auth
 # =====================================================================
 st.set_page_config(
-    page_title="Watermelon System | Calibración",
+    page_title="Watermelon System | Calibration",
     page_icon="📐",
     layout="wide",
 )
@@ -57,7 +57,7 @@ apply_watermelon_page_style()
 _user = get_current_user() or {}
 _role = str(_user.get("role", "")).lower()
 if not is_page_allowed_for_role("pages/21_Calibracion.py", _role):
-    st.error("Tu rol no tiene acceso a este módulo.")
+    st.error("Your role does not have access to this module.")
     st.stop()
 
 st.session_state.setdefault("cal_loops", [])
@@ -118,22 +118,22 @@ if not st.session_state.get("_cal_recovery_checked"):
 def _hero() -> None:
     n = len(st.session_state.get("cal_loops", []))
     cal_hero_card(
-        asset_name=st.session_state.get("cal_asset") or "(activo sin especificar)",
+        asset_name=st.session_state.get("cal_asset") or "(unspecified asset)",
         client=st.session_state.get("cal_client", ""),
         site=st.session_state.get("cal_location", ""),
-        mode=(f"{n} LAZO" + ("S" if n != 1 else "")) if n else "—",
+        mode=(f"{n} LOOP" + ("S" if n != 1 else "")) if n else "—",
     )
 
 
 _hero()
 
 if st.session_state.pop("_cal_recovered", None):
-    st.info("♻ Se recuperó tu último borrador automático (lazos y datos del "
-            "reporte). Si tenías fotos, vuelve a subirlas.")
+    st.info("♻ Your last automatic draft was recovered (loops and report "
+            "data). If you had photos, upload them again.")
 
 _cal_ts = st.session_state.get("_cal_autosave_ts")
-st.caption("🟢 Autoguardado activo — el reporte se recupera si se cae la sesión"
-           + (f" · último guardado: {_cal_ts}" if _cal_ts else "."))
+st.caption("🟢 Autosave active — the report is recovered if the session drops"
+           + (f" · last saved: {_cal_ts}" if _cal_ts else "."))
 
 
 # =====================================================================
@@ -170,13 +170,13 @@ def _default_df(cols: Dict[str, List[float]]) -> pd.DataFrame:
 
 
 def _source_selector(prefix: str) -> str:
-    src = st.radio("Fuente de datos", ["Manual", "Automático (shaker)"],
+    src = st.radio("Data source", ["Manual", "Automatic (shaker)"],
                    horizontal=True, key=f"{prefix}_source")
     if src.startswith("Auto"):
         cal_status_banner(
-            "Importación automática (shaker) — en desarrollo",
-            "Próximamente el shaker de referencia enviará los pares medidos "
-            "directo al módulo. Por ahora, ingresa los datos en la tabla.",
+            "Automatic import (shaker) — in development",
+            "Soon the reference shaker will send the measured pairs straight "
+            "into the module. For now, enter the data in the table.",
             "info")
     return src
 
@@ -186,25 +186,25 @@ def _source_selector(prefix: str) -> str:
 # =====================================================================
 def _proximity_tab() -> None:
     cal_section_header(
-        "Linealidad estática de proximidad",
-        "Gap → voltaje · best-fit vs 200 mV/mil · ISF ±5 % · DSL ±1 mil",
-        "API 670 · Tabla 1 / Fig. 4")
+        "Proximity static linearity",
+        "Gap → voltage · best-fit vs 200 mV/mil · ISF ±5 % · DSL ±1 mil",
+        "API 670 · Table 1 / Fig. 4")
 
     c1, c2, c3 = st.columns(3)
-    tag = c1.text_input("Tag / punto", key="px_tag", placeholder="1YD")
-    manuf = c2.selectbox("Fabricante", MANUFACTURERS, key="px_manuf")
-    xunit_disp = c3.selectbox("Unidad de gap", ["mil", "µm"], key="px_xunit")
+    tag = c1.text_input("Tag / point", key="px_tag", placeholder="1YD")
+    manuf = c2.selectbox("Manufacturer", MANUFACTURERS, key="px_manuf")
+    xunit_disp = c3.selectbox("Gap unit", ["mil", "µm"], key="px_xunit")
     c4, c5, c6 = st.columns(3)
-    model = c4.text_input("Modelo", key="px_model", placeholder="3300 XL 8 mm")
-    serial = c5.text_input("N.º de serie", key="px_serial")
-    idn = c6.text_input("ID / lazo", key="px_id")
+    model = c4.text_input("Model", key="px_model", placeholder="3300 XL 8 mm")
+    serial = c5.text_input("Serial number", key="px_serial")
+    idn = c6.text_input("ID / loop", key="px_id")
 
     _source_selector("px")
 
     xunit = "um" if xunit_disp == "µm" else "mil"
     spec = get_default_spec("proximity", manuf, xunit)
     gcol = f"Gap [{xunit_disp}]"
-    ocol = "Salida [V]"
+    ocol = "Output [V]"
 
     if st.session_state.get("px_grid_unit") != xunit:
         # (re)inicializa la grilla al cambiar de unidad
@@ -212,8 +212,8 @@ def _proximity_tab() -> None:
             {gcol: spec["grid"], ocol: [None] * len(spec["grid"])})
         st.session_state["px_grid_unit"] = xunit
 
-    st.caption("Ingresa la salida del oscilador-demodulador (V) para cada gap. "
-               "Incremento típico API 670: 10 mil / 250 µm.")
+    st.caption("Enter the oscillator-demodulator output (V) for each gap. "
+               "Typical API 670 increment: 10 mil / 250 µm.")
     edited = st.data_editor(
         st.session_state.get("px_df", _default_df(
             {gcol: spec["grid"], ocol: [None] * len(spec["grid"])})),
@@ -225,7 +225,7 @@ def _proximity_tab() -> None:
 
     xs, ys = _parse_xy(edited, gcol, ocol)
     if len(xs) < 2:
-        st.info("Ingresa al menos 2 puntos (gap, salida) para ver la curva.")
+        st.info("Enter at least 2 points (gap, output) to see the curve.")
         return
 
     try:
@@ -235,25 +235,25 @@ def _proximity_tab() -> None:
             isf_tol_pct=spec["isf_tol_pct"], dsl_tol_x=spec["dsl_tol_x"],
             min_range_x=spec["min_range_x"])
     except Exception as e:  # noqa: BLE001
-        st.error(f"No se pudo analizar: {e}")
+        st.error(f"Analysis failed: {e}")
         return
 
     cal_kpi_row([
         (f"{a['asf_mv_per_x']:.1f}", f"ASF mV/{xunit}",
          f"nominal {spec['nominal_label']}", "cyan"),
-        (f"{a['max_isf_err_pct']:.2f} %", "Máx. ISF",
-         f"límite ±{spec['isf_tol_pct']:.0f} %", "green" if a["pass_isf"] else "red"),
-        (f"{a['max_dsl_x']:.3f}", f"Máx. DSL {xunit}",
-         f"límite {spec['dsl_tol_label']}", "green" if a["pass_dsl"] else "red"),
-        (a["verdict"], "Veredicto API 670",
-         f"rango {a['span_x']:.0f}/{spec['min_range_x']:.0f} {xunit}",
+        (f"{a['max_isf_err_pct']:.2f} %", "Max. ISF",
+         f"limit ±{spec['isf_tol_pct']:.0f} %", "green" if a["pass_isf"] else "red"),
+        (f"{a['max_dsl_x']:.3f}", f"Max. DSL {xunit}",
+         f"limit {spec['dsl_tol_label']}", "green" if a["pass_dsl"] else "red"),
+        (a["verdict"], "API 670 verdict",
+         f"range {a['span_x']:.0f}/{spec['min_range_x']:.0f} {xunit}",
          "green" if a["pass"] else "red"),
     ])
 
     st.markdown(linearity_curve_svg(
         a["x"], a["y"], a["y_fit"],
-        title=f"{tag or 'Lazo'} — Linealidad de proximidad",
-        x_label=f"Gap [{xunit_disp}]", y_label="Salida [V]",
+        title=f"{tag or 'Loop'} — Proximity linearity",
+        x_label=f"Gap [{xunit_disp}]", y_label="Output [V]",
         verdict=a["verdict"],
         badge_detail=f"ISF {a['max_isf_err_pct']:.1f}% · DSL {a['max_dsl_x']:.2f} {xunit}"),
         unsafe_allow_html=True)
@@ -262,17 +262,17 @@ def _proximity_tab() -> None:
     if lw:
         sev = "ok" if lw.get("meets_min_range") else "warning"
         cal_status_banner(
-            f"Rango lineal útil (calibrable): {lw['start_x']:.0f}–{lw['end_x']:.0f} {xunit} "
-            f"({-abs(lw['start_v']):.2f} a {-abs(lw['end_v']):.2f} Vdc)",
-            f"Setpoint recomendado ~{lw['center_x']:.0f} {xunit} ({-abs(lw['center_v']):.2f} Vdc) · "
+            f"Usable linear range (calibratable): {lw['start_x']:.0f}–{lw['end_x']:.0f} {xunit} "
+            f"({-abs(lw['start_v']):.2f} to {-abs(lw['end_v']):.2f} Vdc)",
+            f"Recommended setpoint ~{lw['center_x']:.0f} {xunit} ({-abs(lw['center_v']):.2f} Vdc) · "
             f"span {lw['span_x']:.0f} {xunit} "
-            + ("cumple el mínimo de 80 mil de API 670."
+            + ("meets the API 670 minimum of 80 mil."
                if lw.get("meets_min_range")
-               else "por debajo del mínimo de 80 mil de API 670 (usable pero fuera de norma)."),
+               else "below the API 670 minimum of 80 mil (usable but out of spec)."),
             sev)
     else:
-        cal_status_banner("Sin ventana lineal que cumpla ISF±5% y DSL±1 mil",
-                          "Ningún tramo de la curva cumple ambos criterios.", "fail")
+        cal_status_banner("No linear window meets ISF±5% and DSL±1 mil",
+                          "No segment of the curve meets both criteria.", "fail")
 
     _add_button("proximity", "linearity", tag, manuf, model, serial, idn,
                 spec["norm"], a)
@@ -283,17 +283,17 @@ def _proximity_tab() -> None:
 # =====================================================================
 def _seismic_tab(sensor_type: str, prefix: str) -> None:
     spec = get_default_spec(sensor_type)
-    label = "Acelerómetro" if sensor_type == "accelerometer" else "Velomitor"
+    label = "Accelerometer" if sensor_type == "accelerometer" else "Velomitor"
 
     c1, c2, c3 = st.columns(3)
-    tag = c1.text_input("Tag / punto", key=f"{prefix}_tag")
-    manuf = c2.selectbox("Fabricante", MANUFACTURERS, key=f"{prefix}_manuf")
-    ensayo = c3.selectbox("Ensayo", ["Linealidad de amplitud", "Respuesta en frecuencia"],
+    tag = c1.text_input("Tag / point", key=f"{prefix}_tag")
+    manuf = c2.selectbox("Manufacturer", MANUFACTURERS, key=f"{prefix}_manuf")
+    ensayo = c3.selectbox("Test", ["Linealidad de amplitud", "Respuesta en frecuencia"],
                           key=f"{prefix}_kind")
     c4, c5, c6 = st.columns(3)
-    model = c4.text_input("Modelo", key=f"{prefix}_model")
-    serial = c5.text_input("N.º de serie", key=f"{prefix}_serial")
-    idn = c6.text_input("ID / lazo", key=f"{prefix}_id")
+    model = c4.text_input("Model", key=f"{prefix}_model")
+    serial = c5.text_input("Serial number", key=f"{prefix}_serial")
+    idn = c6.text_input("ID / loop", key=f"{prefix}_id")
 
     _source_selector(prefix)
 
@@ -305,17 +305,17 @@ def _seismic_tab(sensor_type: str, prefix: str) -> None:
 
 def _amplitude_section(sensor_type, prefix, spec, tag, manuf, model, serial, idn, label):
     cal_section_header(
-        f"Linealidad de amplitud — {label}",
-        f"Nivel de excitación → salida · best-fit · nominal {spec['nominal_sensitivity']:g} "
+        f"Amplitude linearity — {label}",
+        f"Excitation level → output · best-fit · nominal {spec['nominal_sensitivity']:g} "
         f"{spec['sensitivity_unit']}",
-        "API 670 · Tabla 1")
+        "API 670 · Table 1")
     lu, ou = spec["level_unit"], spec["output_unit"]
-    lcol, ocol = f"Nivel [{lu}]", f"Salida [{ou}]"
+    lcol, ocol = f"Level [{lu}]", f"Output [{ou}]"
     cc = st.columns(3)
-    nominal = cc[0].number_input(f"Sensibilidad nominal [{spec['sensitivity_unit']}]",
+    nominal = cc[0].number_input(f"Nominal sensitivity [{spec['sensitivity_unit']}]",
                                  value=float(spec["nominal_sensitivity"]),
                                  key=f"{prefix}_amp_nom", step=1.0, format="%.3f")
-    tol = cc[1].number_input("Tolerancia amplitud [%FS]", value=float(spec["ampl_tol_pct"]),
+    tol = cc[1].number_input("Amplitude tolerance [%FS]", value=float(spec["ampl_tol_pct"]),
                              key=f"{prefix}_amp_tol", step=0.5, format="%.1f")
 
     dkey = f"{prefix}_amp_df"
@@ -326,25 +326,25 @@ def _amplitude_section(sensor_type, prefix, spec, tag, manuf, model, serial, idn
                             use_container_width=True, key=f"{prefix}_amp_editor")
     xs, ys = _parse_xy(edited, lcol, ocol)
     if len(xs) < 2:
-        st.info("Ingresa al menos 2 niveles (nivel, salida) para ver la curva.")
+        st.info("Enter at least 2 levels (level, output) to see the curve.")
         return
     try:
         a = analyze_amplitude_linearity(xs, ys, nominal_sensitivity=nominal,
                                         tol_pct=tol, level_unit=lu, output_unit=ou)
     except Exception as e:  # noqa: BLE001
-        st.error(f"No se pudo analizar: {e}")
+        st.error(f"Analysis failed: {e}")
         return
     cal_kpi_row([
         (f"{a['sensitivity']:.3f}", spec["sensitivity_unit"], "best-fit", "cyan"),
         (f"{a['sens_err_pct']:.2f} %", "Error vs nominal",
          f"nominal {nominal:g}", "navy"),
-        (f"{a['max_dev_pct_fs']:.3f} %", "Máx. desv. amplitud",
-         f"límite ±{tol:.1f} %FS", "green" if a["pass"] else "red"),
-        (a["verdict"], "Veredicto", "API 670", "green" if a["pass"] else "red"),
+        (f"{a['max_dev_pct_fs']:.3f} %", "Max. amplitude dev.",
+         f"limit ±{tol:.1f} %FS", "green" if a["pass"] else "red"),
+        (a["verdict"], "Verdict", "API 670", "green" if a["pass"] else "red"),
     ])
     st.markdown(linearity_curve_svg(
-        a["x"], a["y"], a["y_fit"], title=f"{tag or label} — Linealidad de amplitud",
-        x_label=f"Nivel [{lu}]", y_label=f"Salida [{ou}]", verdict=a["verdict"],
+        a["x"], a["y"], a["y_fit"], title=f"{tag or label} — Amplitude linearity",
+        x_label=f"Level [{lu}]", y_label=f"Output [{ou}]", verdict=a["verdict"],
         badge_detail=f"{a['max_dev_pct_fs']:.2f} %FS"), unsafe_allow_html=True)
     _add_button(sensor_type, "amplitude", tag, manuf, model, serial, idn,
                 spec["norm"], a)
@@ -353,16 +353,16 @@ def _amplitude_section(sensor_type, prefix, spec, tag, manuf, model, serial, idn
 def _frequency_section(sensor_type, prefix, spec, tag, manuf, model, serial, idn, label):
     band = spec["freq_band_hz"]
     cal_section_header(
-        f"Respuesta en frecuencia — {label}",
-        f"Sensibilidad vs frecuencia · desviación dB · banda {band[0]:g}–{band[1]:g} Hz",
-        "API 670 · Tabla 1")
+        f"Frequency response — {label}",
+        f"Sensitivity vs frequency · dB deviation · band {band[0]:g}–{band[1]:g} Hz",
+        "API 670 · Table 1")
     su = spec["sensitivity_unit"]
-    fcol, scol = "Frecuencia [Hz]", f"Sensibilidad [{su}]"
+    fcol, scol = "Frequency [Hz]", f"Sensitivity [{su}]"
     cc = st.columns(3)
-    ref = cc[0].number_input("Frecuencia de referencia [Hz]",
+    ref = cc[0].number_input("Reference frequency [Hz]",
                              value=float(spec["freq_ref_hz"]),
                              key=f"{prefix}_fr_ref", step=1.0, format="%.0f")
-    tol = cc[1].number_input("Tolerancia [dB]", value=float(spec["freq_tol_db"]),
+    tol = cc[1].number_input("Tolerance [dB]", value=float(spec["freq_tol_db"]),
                              key=f"{prefix}_fr_tol", step=0.5, format="%.1f")
 
     dkey = f"{prefix}_fr_df"
@@ -373,25 +373,25 @@ def _frequency_section(sensor_type, prefix, spec, tag, manuf, model, serial, idn
                             use_container_width=True, key=f"{prefix}_fr_editor")
     xs, ys = _parse_xy(edited, fcol, scol)
     if len(xs) < 2:
-        st.info("Ingresa al menos 2 frecuencias (frecuencia, sensibilidad).")
+        st.info("Enter at least 2 frequencies (frequency, sensitivity).")
         return
     try:
         a = analyze_frequency_response(xs, ys, ref_freq_hz=ref, tol_db=tol,
                                        band_hz=band, sens_unit=su)
     except Exception as e:  # noqa: BLE001
-        st.error(f"No se pudo analizar: {e}")
+        st.error(f"Analysis failed: {e}")
         return
     cal_kpi_row([
         (f"{a['ref_sensitivity']:.2f}", su, f"@ {a['ref_freq_hz']:.0f} Hz", "cyan"),
-        (f"{a['max_dev_db']:.2f} dB", "Máx. desviación",
-         f"límite ±{tol:.1f} dB", "green" if a["pass"] else "red"),
-        (a["verdict"], "Veredicto", f"banda {band[0]:g}–{band[1]:g} Hz",
+        (f"{a['max_dev_db']:.2f} dB", "Max. deviation",
+         f"limit ±{tol:.1f} dB", "green" if a["pass"] else "red"),
+        (a["verdict"], "Verdict", f"band {band[0]:g}–{band[1]:g} Hz",
          "green" if a["pass"] else "red"),
     ])
     st.markdown(linearity_curve_svg(
         a["x"], a["y"], None,
-        title=f"{tag or label} — Respuesta en frecuencia",
-        x_label="Frecuencia [Hz]", y_label=f"Sensibilidad [{su}]",
+        title=f"{tag or label} — Frequency response",
+        x_label="Frequency [Hz]", y_label=f"Sensitivity [{su}]",
         verdict=a["verdict"], badge_detail=f"{a['max_dev_db']:.2f} dB"),
         unsafe_allow_html=True)
     _add_button(sensor_type, "frequency", tag, manuf, model, serial, idn,
@@ -403,17 +403,17 @@ def _frequency_section(sensor_type, prefix, spec, tag, manuf, model, serial, idn
 # =====================================================================
 def _add_button(sensor_type, kind, tag, manuf, model, serial, idn, norm, analysis):
     if not tag:
-        st.caption("Asigna un **tag** para poder agregar el lazo al reporte.")
+        st.caption("Assign a **tag** to add the loop to the report.")
         return
-    if st.button(f"➕ Agregar / actualizar «{tag}» en el reporte",
+    if st.button(f"➕ Add / update «{tag}» in the report",
                  key=f"add_{sensor_type}_{kind}", type="primary"):
         _upsert_loop({
             "tag": tag, "sensor_type": sensor_type, "kind": kind,
             "manufacturer": manuf, "model": model, "serial": serial,
             "id_number": idn, "norm": norm, "analysis": analysis,
         })
-        st.success(f"«{tag}» agregado al reporte "
-                   f"({len(st.session_state['cal_loops'])} lazo(s)).")
+        st.success(f"«{tag}» added to the report "
+                   f"({len(st.session_state['cal_loops'])} loop(s)).")
 
 
 # =====================================================================
@@ -421,8 +421,8 @@ def _add_button(sensor_type, kind, tag, manuf, model, serial, idn, norm, analysi
 # =====================================================================
 def _report_tab() -> None:
     from datetime import date as _date
-    cal_section_header("Reporte de calibración",
-                       "Portada + 1 certificado independiente por lazo (1 a 50)",
+    cal_section_header("Calibration report",
+                       "Cover page + 1 independent certificate per loop (1 to 50)",
                        "WM-CAL · API 670")
 
     st.session_state.setdefault("cal_asset", "")
@@ -435,68 +435,68 @@ def _report_tab() -> None:
     with st.container(border=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            st.text_input("Activo", key="cal_asset")
-            st.text_input("Cliente", key="cal_client")
+            st.text_input("Asset", key="cal_asset")
+            st.text_input("Client", key="cal_client")
         with c2:
-            st.text_input("Sitio / ubicación", key="cal_location")
-            st.text_input("Especialista (preparado por)", key="cal_specialist")
+            st.text_input("Site / location", key="cal_location")
+            st.text_input("Specialist (prepared by)", key="cal_specialist")
         with c3:
-            st.text_input("Fecha", key="cal_date")
-            st.text_area("Notas", key="cal_notes", height=80)
+            st.text_input("Date", key="cal_date")
+            st.text_area("Notes", key="cal_notes", height=80)
         c4, c5 = st.columns(2)
         with c4:
-            st.text_input("Consecutivo (automático · ISO 9001)", key="cal_cons",
-                          help="Código SIGAGROUP-CAL-AÑO-NNNN automático y editable.")
+            st.text_input("Sequential number (automatic · ISO 9001)", key="cal_cons",
+                          help="Automatic, editable SIGAGROUP-CAL-YEAR-NNNN code.")
         with c5:
-            st.selectbox("Aprobado por (autoridad)", list(REVIEWERS.keys()), key="cal_rev")
+            st.selectbox("Approved by (authority)", list(REVIEWERS.keys()), key="cal_rev")
 
     # ---- Borradores (autoguardado + guardar/cargar/duplicar/nuevo) --------
-    with st.expander("💾 Borradores del reporte", expanded=False):
-        st.caption("El reporte se autoguarda solo; si se cae la sesión o hay "
-                   "redeploy, al volver se recupera. Aquí puedes guardar "
-                   "versiones con nombre.")
+    with st.expander("💾 Report drafts", expanded=False):
+        st.caption("The report autosaves on its own; if the session drops or "
+                   "there is a redeploy, it is recovered when you return. Here "
+                   "you can save named versions.")
         d1, d2 = st.columns([3, 1])
-        _dname = d1.text_input("Nombre del borrador", key="cal_draft_name",
-                               placeholder="ej: Unidad 2 — calibración proximidad")
-        if d2.button("💾 Guardar borrador", key="cal_draft_save",
+        _dname = d1.text_input("Draft name", key="cal_draft_name",
+                               placeholder="e.g. Unit 2 — proximity calibration")
+        if d2.button("💾 Save draft", key="cal_draft_save",
                      use_container_width=True):
-            _nm = (_dname or "").strip() or "borrador"
+            _nm = (_dname or "").strip() or "draft"
             if _drafts.save_draft(_CAL_MODULE, _nm, _cal_capture_state()):
-                st.success(f"Borrador «{_nm}» guardado.")
+                st.success(f"Draft «{_nm}» saved.")
             else:
-                st.error("No se pudo guardar (¿disco lleno en el servidor?).")
+                st.error("Could not save (server disk full?).")
         _existing = _drafts.list_drafts(_CAL_MODULE)
         e1, e2, e3, e4 = st.columns([3, 1, 1, 1])
-        _sel = e1.selectbox("Borradores existentes", ["—"] + _existing,
+        _sel = e1.selectbox("Existing drafts", ["—"] + _existing,
                             key="cal_draft_pick")
         _has = _sel != "—"
-        if e2.button("Cargar", key="cal_draft_load", use_container_width=True,
+        if e2.button("Load", key="cal_draft_load", use_container_width=True,
                      disabled=not _has):
             _stt = _drafts.load_draft(_CAL_MODULE, _sel)
             if _stt is not None:
                 st.session_state["_cal_pending_restore"] = _stt
                 st.rerun()
-        if e3.button("Duplicar", key="cal_draft_dup", use_container_width=True,
+        if e3.button("Duplicate", key="cal_draft_dup", use_container_width=True,
                      disabled=not _has):
             _stt = _drafts.load_draft(_CAL_MODULE, _sel)
             if _stt is not None:
-                _drafts.save_draft(_CAL_MODULE, f"{_sel} (copia)", _stt)
+                _drafts.save_draft(_CAL_MODULE, f"{_sel} (copy)", _stt)
                 st.rerun()
-        if e4.button("Eliminar", key="cal_draft_del", use_container_width=True,
+        if e4.button("Delete", key="cal_draft_del", use_container_width=True,
                      disabled=not _has):
             _drafts.delete_draft(_CAL_MODULE, _sel)
             st.rerun()
-        if st.button("🆕 Nuevo reporte (limpiar)", key="cal_draft_new"):
+        if st.button("🆕 New report (clear)", key="cal_draft_new"):
             st.session_state["_cal_pending_restore"] = {}
             st.rerun()
 
     loops = st.session_state.get("cal_loops", [])
     if not loops:
-        st.info("Aún no hay lazos. Agrégalos desde las pestañas de Proximidad, "
-                "Acelerómetro o Velomitor.")
+        st.info("No loops yet. Add them from the Proximity, Accelerometer or "
+                "Velomitor tabs.")
         return
 
-    st.markdown(f"**{len(loops)} lazo(s) en el reporte:**")
+    st.markdown(f"**{len(loops)} loop(s) in the report:**")
     for i, lp in enumerate(loops):
         a = lp.get("analysis", {})
         cc = st.columns([3, 2, 2, 2, 1])
@@ -507,7 +507,7 @@ def _report_tab() -> None:
         color = "#16a34a" if verdict == "PASA" else "#dc2626"
         cc[3].markdown(f"<span style='color:{color};font-weight:700'>{verdict}</span>",
                        unsafe_allow_html=True)
-        if cc[4].button("🗑", key=f"del_{i}", help="Quitar del reporte"):
+        if cc[4].button("🗑", key=f"del_{i}", help="Remove from report"):
             loops.pop(i)
             st.rerun()
 
@@ -529,33 +529,33 @@ def _report_tab() -> None:
         with st.expander(title, expanded=False):
             txt = ""
             if not only_photos:
-                txt = st.text_area("Párrafo", key=f"{key}_txt", height=100)
-            files = st.file_uploader("Imágenes", accept_multiple_files=True,
+                txt = st.text_area("Paragraph", key=f"{key}_txt", height=100)
+            files = st.file_uploader("Images", accept_multiple_files=True,
                                      type=["png", "jpg", "jpeg"], key=f"{key}_imgs")
             phs = []
             for _i, _f in enumerate(files or [], 1):
-                _t = st.text_input(f"Figura {_i}", key=f"{key}_figt_{_i}",
-                                   placeholder=f"Descripción de la figura {_i}")
-                _cap = f"Figura {_i}. {_t}".rstrip(". ") if _t else f"Figura {_i}"
+                _t = st.text_input(f"Figure {_i}", key=f"{key}_figt_{_i}",
+                                   placeholder=f"Description of figure {_i}")
+                _cap = f"Figure {_i}. {_t}".rstrip(". ") if _t else f"Figure {_i}"
                 phs.append({"bytes": _f.getvalue(), "caption": _cap})
         return {"text": txt, "photos": phs}
 
     cH, cR = st.columns(2)
-    hall = cH.text_area("2. Hallazgos (un item por oración, termina en punto)",
+    hall = cH.text_area("2. Findings (one item per sentence, ends with a period)",
                         key="cal_hall", height=100)
-    reco = cR.text_area("3. Recomendaciones (un item por oración, termina en punto)",
+    reco = cR.text_area("3. Recommendations (one item per sentence, ends with a period)",
                         key="cal_reco", height=100)
 
-    st.markdown("**Secciones descriptivas** (opcionales — cada una acepta párrafo e imágenes):")
-    sec_met = _sec_input("cal_met", "4. Metodología")
-    sec_inf = _sec_input("cal_inf", "5. Información de la unidad")
-    sec_dev = _sec_input("cal_dev", "6. Desarrollo del servicio")
-    sec_lin = _sec_input("cal_lin", "6.1 Prueba de linealidad")
-    sec_sat = _sec_input("cal_sat", "6.2 Pruebas SAT")
-    sec_anx = _sec_input("cal_anx", "7. Anexo fotográfico (solo imágenes)", only_photos=True)
+    st.markdown("**Descriptive sections** (optional — each accepts a paragraph and images):")
+    sec_met = _sec_input("cal_met", "4. Methodology")
+    sec_inf = _sec_input("cal_inf", "5. Unit information")
+    sec_dev = _sec_input("cal_dev", "6. Service execution")
+    sec_lin = _sec_input("cal_lin", "6.1 Linearity test")
+    sec_sat = _sec_input("cal_sat", "6.2 SAT tests")
+    sec_anx = _sec_input("cal_anx", "7. Photographic appendix (images only)", only_photos=True)
 
     st.divider()
-    if st.button("Generar reporte PDF", key="cal_gen_btn", type="primary"):
+    if st.button("Generate PDF report", key="cal_gen_btn", type="primary"):
         try:
             from core.calibration.report import build_calibration_pdf
             _cons = st.session_state.get("cal_cons")
@@ -582,14 +582,14 @@ def _report_tab() -> None:
                 commit_consecutive("calibracion")
                 _done.add(_cons)
         except Exception as e:  # noqa: BLE001
-            st.error(f"Error generando el PDF: {e}")
+            st.error(f"Error generating the PDF: {e}")
             st.session_state.pop("cal_pdf", None)
     if st.session_state.get("cal_pdf"):
         import re as _re
         fn = "Calibracion_" + _re.sub(r"[^A-Za-z0-9]+", "_",
                                       (st.session_state.get("cal_asset") or "sensores")
                                       ).strip("_") + ".pdf"
-        st.download_button("⬇ Descargar PDF", data=st.session_state["cal_pdf"],
+        st.download_button("⬇ Download PDF", data=st.session_state["cal_pdf"],
                            file_name=fn, mime="application/pdf")
 
 
@@ -597,7 +597,7 @@ def _report_tab() -> None:
 # Tabs
 # =====================================================================
 tab_px, tab_ac, tab_ve, tab_rep = st.tabs(
-    ["🔵  Proximidad", "🟢  Acelerómetro", "🟡  Velomitor", "📄  Reporte"])
+    ["🔵  Proximity", "🟢  Accelerometer", "🟡  Velomitor", "📄  Report"])
 
 with tab_px:
     _proximity_tab()

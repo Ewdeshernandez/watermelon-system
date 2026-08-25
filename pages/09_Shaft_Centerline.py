@@ -338,7 +338,7 @@ def add_scl_cat_iv_overlay(
             text=["BEARING CENTER"], textposition="top right",
             textfont=dict(size=10, color="#0f172a", family="Arial Black"),
             name="Bearing center", hoverinfo="text",
-            hovertext=f"Bearing center geométrico ({center_x:.2f}, {center_y:.2f}) mil pp",
+            hovertext=f"Geometric bearing center ({center_x:.2f}, {center_y:.2f}) mil pp",
             showlegend=False,
         )
     )
@@ -352,7 +352,7 @@ def add_scl_cat_iv_overlay(
                 text=["REST"], textposition="bottom left",
                 textfont=dict(size=10, color="#dc2626", family="Arial Black"),
                 name="Rest position", hoverinfo="text",
-                hovertext="Posición de reposo (rotor parado, muñón al fondo del cojinete por gravedad)",
+                hovertext="Rest position (rotor stopped, journal at the bottom of the bearing by gravity)",
                 showlegend=False,
             )
         )
@@ -417,15 +417,15 @@ def detect_early_rub(
     if max_util >= danger_util_pct:
         severity = "DANGER"
         color = "#dc2626"
-        message = "Riesgo alto de pérdida de margen geométrico / rub"
+        message = "High risk of losing geometric margin / rub"
     elif max_util >= warning_util_pct:
         severity = "WARNING"
         color = "#f59e0b"
-        message = "Aproximación significativa al límite geométrico"
+        message = "Significant approach to the geometric limit"
     else:
         severity = "NORMAL"
         color = "#16a34a"
-        message = "Operación dentro del margen geométrico"
+        message = "Operation within the geometric margin"
 
     trend_score = 0.0
     if len(util) > 1:
@@ -484,58 +484,58 @@ def build_shaft_text_diagnostics(
     util_max = float(util_max or 0.0)
     margin_min = float(margin_min or 0.0)
 
-    warning_txt = f"{float(first_warning_speed):.0f} rpm" if first_warning_speed is not None else "no identificado"
-    danger_txt = f"{float(first_danger_speed):.0f} rpm" if first_danger_speed is not None else "no identificado"
+    warning_txt = f"{float(first_warning_speed):.0f} rpm" if first_warning_speed is not None else "not identified"
+    danger_txt = f"{float(first_danger_speed):.0f} rpm" if first_danger_speed is not None else "not identified"
 
     if status_up == "DANGER" or util_max >= 100.0 or margin_min <= 0.0:
-        headline = "Posición de eje fuera del margen geométrico admisible del cojinete"
+        headline = "Shaft position outside the bearing's allowable geometric margin"
         detail = (
-            f"La trayectoria del eje (shaft centerline) evidencia una condición de operación fuera de la envolvente geométrica del cojinete, "
-            f"con una utilización máxima del clearance del {util_max:.1f}% y un margen residual de {margin_min:.1f}%. "
-            f"Se identifica ingreso a condición de advertencia alrededor de {warning_txt} y condición severa alrededor de {danger_txt}.\n\n"
-            f"Desde el punto de vista rotodinámico, este comportamiento es consistente con un desplazamiento excéntrico elevado del rotor dentro del cojinete, "
-            f"lo que sugiere sobrecarga radial efectiva o pérdida de capacidad de centrado hidrodinámico. El patrón observado puede asociarse a desalineación, "
-            f"incremento de carga transmitida, pérdida de rigidez del film lubricante, clearances reales diferentes a los asumidos o combinación de estos mecanismos.\n\n"
-            f"La pérdida de margen geométrico incrementa de forma significativa la probabilidad de interacción rotor-estator (rub), "
-            f"especialmente durante transitorios, cambios de carga o pasos por velocidad crítica."
+            f"The shaft centerline trajectory shows an operating condition outside the bearing's geometric envelope, "
+            f"with a maximum clearance utilization of {util_max:.1f}% and a residual margin of {margin_min:.1f}%. "
+            f"Entry into a warning condition is identified around {warning_txt} and a severe condition around {danger_txt}.\n\n"
+            f"From a rotordynamic standpoint, this behavior is consistent with a high eccentric displacement of the rotor within the bearing, "
+            f"suggesting effective radial overload or loss of hydrodynamic centering capacity. The observed pattern may be associated with misalignment, "
+            f"increased transmitted load, loss of lubricant-film stiffness, actual clearances different from those assumed, or a combination of these mechanisms.\n\n"
+            f"The loss of geometric margin significantly increases the likelihood of rotor-stator interaction (rub), "
+            f"especially during transients, load changes, or passes through critical speed."
         )
         action = (
-            "Se recomienda como acción prioritaria:\n"
-            "- Verificar alineación en condición fría y caliente\n"
-            "- Evaluar carga radial real del tren y condición de soporte\n"
-            "- Revisar presión, temperatura y viscosidad del sistema de lubricación\n"
-            "- Validar clearances reales del cojinete frente a los valores de diseño\n"
-            "- Evitar operación sostenida en este régimen hasta completar la evaluación técnica"
+            "Recommended as a priority action:\n"
+            "- Verify alignment in cold and hot conditions\n"
+            "- Assess the actual radial load of the train and the support condition\n"
+            "- Review pressure, temperature, and viscosity of the lubrication system\n"
+            "- Validate the actual bearing clearances against the design values\n"
+            "- Avoid sustained operation in this regime until the technical evaluation is complete"
         )
     elif status_up == "WARNING" or util_max >= 80.0 or margin_min <= 20.0:
-        headline = "Posición de eje con reducción significativa del margen geométrico"
+        headline = "Shaft position with a significant reduction of the geometric margin"
         detail = (
-            f"La trayectoria del eje muestra aproximación relevante al límite geométrico del cojinete, "
-            f"con una utilización máxima del clearance del {util_max:.1f}% y un margen mínimo remanente de {margin_min:.1f}%. "
-            f"Se identifica inicio de condición de advertencia alrededor de {warning_txt}.\n\n"
-            f"Este comportamiento sugiere incremento de excentricidad operativa y reducción de la capacidad de centrado del sistema rotor-cojinete. "
-            f"Desde la perspectiva rotodinámica, la condición requiere seguimiento cercano para evitar evolución hacia pérdida total de margen y eventual interacción rotor-estator."
+            f"The shaft trajectory shows a relevant approach to the bearing's geometric limit, "
+            f"with a maximum clearance utilization of {util_max:.1f}% and a minimum remaining margin of {margin_min:.1f}%. "
+            f"The onset of a warning condition is identified around {warning_txt}.\n\n"
+            f"This behavior suggests an increase in operating eccentricity and a reduction of the rotor-bearing system's centering capacity. "
+            f"From a rotordynamic perspective, the condition requires close monitoring to avoid evolution toward total loss of margin and eventual rotor-stator interaction."
         )
         action = (
-            "Se recomienda:\n"
-            "- Correlacionar esta condición con historial de operación y tendencia de vibración\n"
-            "- Revisar alineación, carga radial y comportamiento térmico\n"
-            "- Confirmar condición de lubricación y estabilidad del film\n"
-            "- Mantener seguimiento estrecho antes de extender operación en este régimen"
+            "Recommended:\n"
+            "- Correlate this condition with operating history and vibration trend\n"
+            "- Review alignment, radial load, and thermal behavior\n"
+            "- Confirm the lubrication condition and film stability\n"
+            "- Maintain close monitoring before extending operation in this regime"
         )
     else:
-        headline = "Posición de eje dentro del margen geométrico esperado"
+        headline = "Shaft position within the expected geometric margin"
         detail = (
-            f"La trayectoria del eje se mantiene dentro de la envolvente geométrica del cojinete, "
-            f"con una utilización máxima del clearance del {util_max:.1f}% y un margen mínimo remanente de {margin_min:.1f}%.\n\n"
-            f"Desde el punto de vista rotodinámico, no se observan indicios de pérdida relevante de margen geométrico en la condición analizada. "
-            f"La respuesta es compatible con operación estable del sistema rotor-cojinete dentro del rango evaluado."
+            f"The shaft trajectory stays within the bearing's geometric envelope, "
+            f"with a maximum clearance utilization of {util_max:.1f}% and a minimum remaining margin of {margin_min:.1f}%.\n\n"
+            f"From a rotordynamic standpoint, no signs of relevant loss of geometric margin are observed in the analyzed condition. "
+            f"The response is consistent with stable operation of the rotor-bearing system within the evaluated range."
         )
         action = (
-            "Se recomienda:\n"
-            "- Mantener seguimiento periódico de la posición de eje\n"
-            "- Correlacionar con vibración, fase y variables operativas\n"
-            "- Confirmar estabilidad del comportamiento en futuras corridas"
+            "Recommended:\n"
+            "- Maintain periodic monitoring of the shaft position\n"
+            "- Correlate with vibration, phase, and operating variables\n"
+            "- Confirm the stability of the behavior in future runs"
         )
 
     return {
@@ -550,14 +550,14 @@ def read_scl_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame]:
 
     lines = text.splitlines()
     if not lines:
-        raise ValueError("Archivo vacío.")
+        raise ValueError("Empty file.")
 
     header_idx = find_header_line(
         lines,
         required_signals=("Point Value", "Paired Point Value", "Speed", "Timestamp"),
     )
     if header_idx is None:
-        raise ValueError("No se encontró el encabezado real del CSV Shaft Centerline.")
+        raise ValueError("Could not find the actual header of the Shaft Centerline CSV.")
 
     meta = parse_metadata_block(lines[:header_idx])
     data_text = "\n".join(lines[header_idx:])
@@ -575,7 +575,7 @@ def read_scl_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame]:
     ]
     missing = [c for c in required if c not in df.columns]
     if missing:
-        raise ValueError(f"Faltan columnas en el CSV: {missing}")
+        raise ValueError(f"Missing columns in the CSV: {missing}")
 
     df["Point Value"] = pd.to_numeric(df["Point Value"], errors="coerce")
     df["Paired Point Value"] = pd.to_numeric(df["Paired Point Value"], errors="coerce")
@@ -586,7 +586,7 @@ def read_scl_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame]:
     df = filter_status_valid(df, ["Value Status", "Paired Value Status", "Speed Status"])
 
     if df.empty:
-        raise ValueError("No quedaron filas válidas después del filtrado.")
+        raise ValueError("No valid rows remained after filtering.")
 
     raw_df = df.sort_values(["Speed", "Timestamp"], kind="stable").reset_index(drop=True)
 
@@ -1162,71 +1162,71 @@ def _scl_compare_diagnostic(records: List[Dict[str, Any]]) -> Dict[str, str]:
         improvement_score += 1
 
     if all_over_limit or all_zero_margin:
-        trend_class = "condición crítica sostenida"
-        headline = "Comparación multi-fecha con condición crítica sostenida del sistema rotor-cojinete"
+        trend_class = "sustained critical condition"
+        headline = "Multi-date comparison with a sustained critical condition of the rotor-bearing system"
         trend_sentence = (
-            "Todas las corridas analizadas muestran operación fuera del margen geométrico admisible del cojinete, "
-            "por lo que no se trata de un evento aislado sino de una condición persistente del sistema."
+            "All analyzed runs show operation outside the bearing's allowable geometric margin, "
+            "so this is not an isolated event but a persistent condition of the system."
         )
     elif latest_critical and deterioration_score >= 2:
-        trend_class = "deterioro progresivo hacia condición crítica"
-        headline = "Comparación multi-fecha con deterioro progresivo hacia condición crítica"
+        trend_class = "progressive deterioration toward a critical condition"
+        headline = "Multi-date comparison with progressive deterioration toward a critical condition"
         trend_sentence = (
-            "La corrida más reciente evidencia empeoramiento respecto a la línea base, "
-            "con reducción adicional del margen geométrico y mayor compromiso dinámico del eje dentro del cojinete."
+            "The most recent run shows worsening relative to the baseline, "
+            "with a further reduction of the geometric margin and greater dynamic compromise of the shaft within the bearing."
         )
     elif deterioration_score >= 2:
-        trend_class = "deterioro progresivo"
-        headline = "Comparación multi-fecha con deterioro progresivo de la condición rotodinámica"
+        trend_class = "progressive deterioration"
+        headline = "Multi-date comparison with progressive deterioration of the rotordynamic condition"
         trend_sentence = (
-            "La comparación secuencial evidencia una tendencia desfavorable, compatible con incremento de excentricidad operativa "
-            "y pérdida de capacidad de centrado hidrodinámico."
+            "The sequential comparison shows an unfavorable trend, consistent with an increase in operating eccentricity "
+            "and a loss of hydrodynamic centering capacity."
         )
     elif improvement_score >= 2 and not latest_critical:
-        trend_class = "mejora parcial"
-        headline = "Comparación multi-fecha con mejora parcial respecto a la condición base"
+        trend_class = "partial improvement"
+        headline = "Multi-date comparison with partial improvement relative to the baseline condition"
         trend_sentence = (
-            "La corrida más reciente muestra reducción del compromiso geométrico frente a la línea base; "
-            "sin embargo, la condición aún debe validarse contra criterios de aceptación del sistema."
+            "The most recent run shows a reduction of the geometric compromise relative to the baseline; "
+            "however, the condition must still be validated against the system's acceptance criteria."
         )
     else:
-        trend_class = "cambio moderado"
-        headline = "Comparación multi-fecha con cambios operativos medibles en la trayectoria del eje"
+        trend_class = "moderate change"
+        headline = "Multi-date comparison with measurable operational changes in the shaft trajectory"
         trend_sentence = (
-            "No se identifica una variación concluyente compatible con deterioro progresivo severo, "
-            "pero sí cambios medibles en la posición del eje y en la respuesta geométrica del cojinete."
+            "No conclusive variation consistent with severe progressive deterioration is identified, "
+            "but there are measurable changes in the shaft position and in the geometric response of the bearing."
         )
 
     detail = (
-        f"Se compararon {len(ordered)} corridas de shaft centerline correspondientes a diferentes fechas de adquisición. "
-        f"La comparación entre la corrida base ({baseline['label']}) y la más reciente ({latest['label']}) muestra una variación de "
-        f"{delta_util:+.1f} puntos porcentuales en la utilización máxima del clearance, "
-        f"{delta_margin:+.1f} puntos en el margen geométrico remanente y "
-        f"{delta_radial:+.3f} en el desplazamiento radial máximo.\n\n"
-        f"El desplazamiento del centro medio de la trayectoria entre ambas corridas es de {centroid_shift:.3f}, "
-        f"parámetro útil para evaluar migración del eje dentro del cojinete y cambios en la condición de centrado hidrodinámico. "
-        f"En clasificación global, la tendencia observada corresponde a: {trend_class}.\n\n"
+        f"{len(ordered)} shaft centerline runs from different acquisition dates were compared. "
+        f"The comparison between the baseline run ({baseline['label']}) and the most recent one ({latest['label']}) shows a variation of "
+        f"{delta_util:+.1f} percentage points in the maximum clearance utilization, "
+        f"{delta_margin:+.1f} points in the remaining geometric margin and "
+        f"{delta_radial:+.3f} in the maximum radial displacement.\n\n"
+        f"The shift of the mean center of the trajectory between the two runs is {centroid_shift:.3f}, "
+        f"a useful parameter for assessing shaft migration within the bearing and changes in the hydrodynamic centering condition. "
+        f"In the overall classification, the observed trend corresponds to: {trend_class}.\n\n"
         f"{trend_sentence}\n\n"
-        f"Desde el punto de vista de dinámica del rotor, una migración sostenida del centerline acompañada por incremento de utilización de clearance "
-        f"es consistente con aumento de excentricidad operativa, modificación de la carga radial efectiva, cambios en la rigidez del film lubricante, "
-        f"variación de clearances reales o alteraciones en alineación y condición de soporte."
+        f"From a rotordynamics standpoint, a sustained migration of the centerline accompanied by an increase in clearance utilization "
+        f"is consistent with an increase in operating eccentricity, a change in the effective radial load, changes in the lubricant film stiffness, "
+        f"variation of actual clearances or alterations in alignment and support condition."
     )
 
     if all_over_limit or latest_critical:
         action = (
-            "Se recomienda:\n"
-            "- Tratar la condición comparativa como hallazgo de alta criticidad\n"
-            "- Contrastar las corridas contra condición base de aceptación o condición post-mantenimiento\n"
-            "- Correlacionar el cambio del centerline con carga, temperatura, lubricación, vibración y fase\n"
-            "- Verificar alineación, condición de soporte y clearances reales del cojinete\n"
-            "- Restringir operación sostenida en el régimen comprometido hasta completar evaluación técnica"
+            "Recommended actions:\n"
+            "- Treat the comparative condition as a high-criticality finding\n"
+            "- Contrast the runs against an acceptance baseline or post-maintenance condition\n"
+            "- Correlate the centerline change with load, temperature, lubrication, vibration and phase\n"
+            "- Verify alignment, support condition and the bearing's actual clearances\n"
+            "- Restrict sustained operation in the compromised regime until technical evaluation is complete"
         )
     else:
         action = (
-            "Se recomienda:\n"
-            "- Mantener seguimiento multi-fecha para confirmar si la tendencia es progresiva o dependiente del régimen operativo\n"
-            "- Correlacionar el cambio de centerline con carga, temperatura, lubricación y vibración\n"
-            "- Validar la condición frente a la línea base de aceptación del equipo"
+            "Recommended actions:\n"
+            "- Maintain multi-date tracking to confirm whether the trend is progressive or dependent on the operating regime\n"
+            "- Correlate the centerline change with load, temperature, lubrication and vibration\n"
+            "- Validate the condition against the equipment's acceptance baseline"
         )
 
     return {
@@ -1318,7 +1318,7 @@ def render_scl_panel(
         ].copy()
 
     if display_df.empty:
-        st.warning(f"Panel {panel_index + 1}: no hay datos válidos en el rango RPM seleccionado.")
+        st.warning(f"Panel {panel_index + 1}: no valid data in the selected RPM range.")
         return
 
     speed_min = int(display_df["speed"].min())
@@ -1397,7 +1397,7 @@ def render_scl_panel(
             manual_center_x=manual_center_x,
             manual_center_y=manual_center_y,
         )
-        boundary["source"] = "auto heurístico (datos)"
+        boundary["source"] = "auto heuristic (data)"
 
     # Auto X/Y ahora consciente del clearance: la escala visible incluye
     # siempre el círculo de clearance del cojinete
@@ -1556,7 +1556,7 @@ def render_scl_panel(
                 attitude_shift_classifier,
             )
             _first_prev = _scl_prev_snapshots_list[0]
-            _prev_label = str(_first_prev.get("label", "corrida anterior"))
+            _prev_label = str(_first_prev.get("label", "previous run"))
             _prev_x = float(_first_prev.get("x_gap_at_op", 0))
             _prev_y = float(_first_prev.get("y_gap_at_op", 0))
             _prev_ecc = float(_first_prev.get("eccentricity_ratio", 0))
@@ -1603,16 +1603,16 @@ def render_scl_panel(
 
             # 1) Encabezado factual
             _narr.append(
-                f"Análisis comparativo de centerline contra «{_prev_label}». "
-                f"A la velocidad operativa ({operating_rpm:.0f} rpm), la "
-                f"posición DC del muñón evolucionó de "
-                f"({_prev_x:+.3f}, {_prev_y:+.3f}) {_gap_unit} a "
-                f"({_curr_x:+.3f}, {_curr_y:+.3f}) {_gap_unit}, lo que "
-                f"representa una migración vectorial de "
-                f"({_delta_x:+.3f}, {_delta_y:+.3f}) {_gap_unit}. La "
-                f"eccentricity ratio cambió de {_prev_ecc:.3f} a "
-                f"{_curr_ecc:.3f} (Δe/c = {_delta_ecc:+.3f}) y el "
-                f"attitude angle pasó de {_prev_att:.1f}° a "
+                f"Comparative centerline analysis against «{_prev_label}». "
+                f"At operating speed ({operating_rpm:.0f} rpm), the "
+                f"journal DC position evolved from "
+                f"({_prev_x:+.3f}, {_prev_y:+.3f}) {_gap_unit} to "
+                f"({_curr_x:+.3f}, {_curr_y:+.3f}) {_gap_unit}, which "
+                f"represents a vector migration of "
+                f"({_delta_x:+.3f}, {_delta_y:+.3f}) {_gap_unit}. The "
+                f"eccentricity ratio changed from {_prev_ecc:.3f} to "
+                f"{_curr_ecc:.3f} (Δe/c = {_delta_ecc:+.3f}) and the "
+                f"attitude angle went from {_prev_att:.1f}° to "
                 f"{_curr_att:.1f}° (Δ = {_delta_att:+.1f}°)."
             )
 
@@ -1621,30 +1621,30 @@ def render_scl_panel(
                 _used_pct_prev = abs(_prev_ecc) * 100.0
                 _used_pct_curr = abs(_curr_ecc) * 100.0
                 _para = (
-                    f"En términos del clearance hidrodinámico ({_cr_local:.3f} "
-                    f"{_gap_unit} radial), el muñón consume {_used_pct_curr:.0f}% "
-                    f"del clearance disponible (anterior: {_used_pct_prev:.0f}%). "
+                    f"In terms of the hydrodynamic clearance ({_cr_local:.3f} "
+                    f"{_gap_unit} radial), the journal uses {_used_pct_curr:.0f}% "
+                    f"of the available clearance (previous: {_used_pct_prev:.0f}%). "
                 )
                 if _curr_ecc > 0.85:
                     _para += (
-                        "Esta posición está en zona crítica del clearance "
-                        "(>85%) según los criterios de API 670 §6.7 — el "
-                        "espacio entre muñón y carcasa está reducido a "
-                        "valores donde el contacto sólido es probable bajo "
-                        "transitorios. Se recomienda inspección inmediata "
-                        "del cojinete, sello y juego diametral. "
+                        "This position is in the critical clearance zone "
+                        "(>85%) per API 670 §6.7 criteria — the "
+                        "space between journal and housing is reduced to "
+                        "values where solid contact is likely under "
+                        "transients. Immediate inspection of the "
+                        "bearing, seal, and diametral clearance is recommended. "
                     )
                 elif _curr_ecc > 0.70:
                     _para += (
-                        "La posición está en zona de alarma del clearance "
-                        "(70–85%), consumo elevado pero todavía dentro del "
-                        "margen operacional según API 670. Se recomienda "
-                        "vigilancia estrecha en próximas corridas. "
+                        "The position is in the clearance alarm zone "
+                        "(70–85%), high usage but still within the "
+                        "operational margin per API 670. Close "
+                        "monitoring in upcoming runs is recommended. "
                     )
                 else:
                     _para += (
-                        "La posición está dentro del rango operacional "
-                        "normal del cojinete hidrodinámico. "
+                        "The position is within the normal operating "
+                        "range of the hydrodynamic bearing. "
                     )
                 _narr.append(_para)
 
@@ -1652,62 +1652,62 @@ def render_scl_panel(
             _diag_parts: List[str] = []
             if _ecc_class == "migration_critical":
                 _diag_parts.append(
-                    "La migración del centerline (Δe/c ≥ 0.25) es crítica "
-                    "según los criterios de Bently / API 670, magnitud que "
-                    "no se explica por deriva operacional normal. Sugiere "
-                    "asentamiento del cojinete, pérdida significativa de "
-                    "clearance por wiping del babbitt, deformación del "
-                    "soporte por carga o cambio severo de la condición de "
-                    "alineación entre cojinetes adyacentes."
+                    "The centerline migration (Δe/c ≥ 0.25) is critical "
+                    "per Bently / API 670 criteria, a magnitude that "
+                    "is not explained by normal operational drift. It suggests "
+                    "bearing settling, significant loss of "
+                    "clearance from babbitt wiping, support "
+                    "deformation under load, or a severe change in the "
+                    "alignment condition between adjacent bearings."
                 )
             elif _ecc_class == "migration_major":
                 _diag_parts.append(
-                    "La migración del centerline (Δe/c entre 0.15 y 0.25) "
-                    "es mayor y requiere investigación. Causas típicas: "
-                    "cambio en distribución de carga estática (alineación, "
-                    "expansión térmica del soporte), variación apreciable "
-                    "de la viscosidad del aceite (temperatura, "
-                    "contaminación), o desgaste asimétrico incipiente del "
-                    "babbitt del cojinete."
+                    "The centerline migration (Δe/c between 0.15 and 0.25) "
+                    "is major and requires investigation. Typical causes: "
+                    "a change in static load distribution (alignment, "
+                    "thermal support expansion), appreciable variation "
+                    "of oil viscosity (temperature, "
+                    "contamination), or incipient asymmetric wear of the "
+                    "bearing babbitt."
                 )
             elif _ecc_class == "migration_minor":
                 _diag_parts.append(
-                    "La migración del centerline (Δe/c entre 0.05 y 0.15) "
-                    "es menor y puede deberse a variación normal de "
-                    "condiciones operativas (temperatura del aceite, carga "
-                    "del proceso). Vale comparar con la próxima corrida "
-                    "para confirmar si la tendencia se consolida."
+                    "The centerline migration (Δe/c between 0.05 and 0.15) "
+                    "is minor and may be due to normal variation of "
+                    "operating conditions (oil temperature, process "
+                    "load). It is worth comparing with the next run "
+                    "to confirm whether the trend consolidates."
                 )
             else:
                 _diag_parts.append(
-                    "La eccentricity ratio se mantiene estable entre "
-                    "corridas (Δ < 5% del clearance), sin evidencia de "
-                    "migración del muñón."
+                    "The eccentricity ratio remains stable between "
+                    "runs (Δ < 5% of clearance), with no evidence of "
+                    "journal migration."
                 )
 
             if _att_class == "shift_critical":
                 _diag_parts.append(
-                    "Adicionalmente, el shift de attitude angle (≥30°) "
-                    "indica un cambio severo en la dirección de la fuerza "
-                    "hidrodinámica reactiva. Este patrón se asocia "
-                    "típicamente con misalignment progresivo entre "
-                    "cojinetes acoplados o redistribución mayor de carga "
-                    "axial-radial — recomendable verificar alineación de "
-                    "los cojinetes según API 686."
+                    "Additionally, the attitude angle shift (≥30°) "
+                    "indicates a severe change in the direction of the reactive "
+                    "hydrodynamic force. This pattern is typically "
+                    "associated with progressive misalignment between "
+                    "coupled bearings or a major redistribution of "
+                    "axial-radial load — it is advisable to verify bearing "
+                    "alignment per API 686."
                 )
             elif _att_class == "shift_major":
                 _diag_parts.append(
-                    "El shift de attitude angle (15–30°) sugiere cambio "
-                    "moderado de la dirección de la fuerza hidrodinámica, "
-                    "consistente con redistribución de carga entre "
-                    "cojinetes adyacentes. Vale revisar las lecturas de "
-                    "alineación al frío en próxima parada programada."
+                    "The attitude angle shift (15–30°) suggests a moderate "
+                    "change in the direction of the hydrodynamic force, "
+                    "consistent with load redistribution between "
+                    "adjacent bearings. It is worth reviewing the cold "
+                    "alignment readings at the next scheduled outage."
                 )
             elif _att_class == "shift_minor":
                 _diag_parts.append(
-                    "El shift de attitude angle (5–15°) es menor y "
-                    "normalmente se atribuye a variación operacional. "
-                    "Monitorear evolución."
+                    "The attitude angle shift (5–15°) is minor and "
+                    "is normally attributed to operational variation. "
+                    "Monitor its evolution."
                 )
 
             if _diag_parts:
@@ -1733,26 +1733,26 @@ def render_scl_panel(
                 _lo_para = ""
                 if abs(_delta_lo) > 100:
                     _lo_para = (
-                        f"La velocidad de lift-off cambió de "
-                        f"{_prev_lo:.0f} rpm a {_curr_lo:.0f} rpm "
+                        f"The lift-off speed changed from "
+                        f"{_prev_lo:.0f} rpm to {_curr_lo:.0f} rpm "
                         f"(Δ = {_delta_lo:+.0f} rpm). "
                     )
                     if _delta_lo > 200:
                         _lo_para += (
-                            "Un incremento >200 rpm en lift-off es señal "
-                            "de degradación del soporte hidrodinámico — "
-                            "viscosidad efectiva reducida, carga "
-                            "incrementada o pérdida de clearance. "
-                            "Evaluación preventiva del aceite (viscosidad, "
-                            "contaminación) recomendada según API 670 §6.7."
+                            "An increase >200 rpm in lift-off is a sign "
+                            "of hydrodynamic support degradation — "
+                            "reduced effective viscosity, increased "
+                            "load, or loss of clearance. "
+                            "Preventive oil evaluation (viscosity, "
+                            "contamination) is recommended per API 670 §6.7."
                         )
                     elif _delta_lo < -200:
                         _lo_para += (
-                            "Una disminución >200 rpm en lift-off "
-                            "típicamente indica condición más favorable "
-                            "del aceite (más fresco, mejor viscosidad) o "
-                            "redistribución de carga que descargó este "
-                            "cojinete."
+                            "A decrease >200 rpm in lift-off "
+                            "typically indicates a more favorable oil "
+                            "condition (fresher, better viscosity) or "
+                            "a load redistribution that unloaded this "
+                            "bearing."
                         )
                     if _lo_para:
                         _narr.append(_lo_para)
@@ -1762,23 +1762,23 @@ def render_scl_panel(
                 _disc = ""
                 if _att_class in ("shift_major", "shift_critical"):
                     _disc = (
-                        "Diagnóstico diferencial: la combinación de "
-                        "migración significativa del centerline + shift "
-                        "mayor del attitude angle apunta más a un cambio "
-                        "ESTRUCTURAL (alineación, asentamiento, daño "
-                        "mecánico del cojinete) que a deriva operacional. "
-                        "Recomendable verificación al frío y revisión del "
-                        "babbit antes de descartar bearing wear."
+                        "Differential diagnosis: the combination of "
+                        "significant centerline migration + a major "
+                        "attitude angle shift points more to a "
+                        "STRUCTURAL change (alignment, settling, mechanical "
+                        "bearing damage) than to operational drift. "
+                        "Cold verification and babbitt inspection are "
+                        "advisable before ruling out bearing wear."
                     )
                 else:
                     _disc = (
-                        "Diagnóstico diferencial: la migración del "
-                        "centerline sin shift apreciable de attitude "
-                        "angle es más compatible con cambio de condición "
-                        "OPERACIONAL (carga, temperatura del aceite) que "
-                        "con daño mecánico del cojinete. Aún así, "
-                        "monitorear de cerca para descartar consolidación "
-                        "de la tendencia."
+                        "Differential diagnosis: centerline migration "
+                        "without an appreciable attitude angle shift "
+                        "is more consistent with an OPERATIONAL condition "
+                        "change (load, oil temperature) than with "
+                        "mechanical bearing damage. Even so, "
+                        "monitor closely to rule out consolidation "
+                        "of the trend."
                     )
                 _narr.append(_disc)
 
@@ -1795,7 +1795,7 @@ def render_scl_panel(
         key=f"wm_scl_plot_{panel_index}_{item['id']}",
     )
 
-    with st.expander(f"Diagnóstico automático · Panel {panel_index + 1}", expanded=True):
+    with st.expander(f"Automatic diagnosis · Panel {panel_index + 1}", expanded=True):
         st.markdown(f"**{text_diag['headline']}**")
         st.write(text_diag["detail"])
         st.write(text_diag["action"])
@@ -1853,7 +1853,7 @@ def render_scl_panel(
                 vault_params.get("bearing_inner_diameter_mm") if vault_params else None
             ),
             diametral_clearance_mm=diametral_clearance_mm_value,
-            clearance_source=cr_source or "configuración manual de la sidebar",
+            clearance_source=cr_source or "manual sidebar configuration",
             babbitt_material=(vault_params.get("babbitt_material") if vault_params else None),
             last_rebabbiting_date=(
                 vault_params.get("last_rebabbiting_date") if vault_params else None
@@ -1867,7 +1867,7 @@ def render_scl_panel(
         )
 
         with st.expander(
-            f"Diagnóstico avanzado (rotordynamics + Vault) · Panel {panel_index + 1}",
+            f"Advanced diagnosis (rotordynamics + Vault) · Panel {panel_index + 1}",
             expanded=True,
         ):
             st.markdown(f"**{cat_iv_text_diag['headline']}**")
@@ -1898,7 +1898,7 @@ def render_scl_panel(
     elif cat_iv_text_diag is not None:
         notes = (
             f"{cat_iv_text_diag['detail']}\n\n{cat_iv_text_diag['action']}\n\n"
-            f"---\nDiagnóstico de utilización de boundary (referencia rest position):\n\n"
+            f"---\nBoundary utilization diagnosis (rest-position reference):\n\n"
             f"{_build_scl_report_notes(text_diag)}"
         )
     else:
@@ -1913,22 +1913,22 @@ def render_scl_panel(
         st.session_state[ai_state_key_scl] = None
 
     with st.expander(
-        "Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        "AI clinical interpretation · Assisted Cat IV diagnosis",
         expanded=False,
     ):
         if not is_ai_available():
             st.info(
-                "**AI Diagnóstico no disponible.** Falta configurar "
-                "`[anthropic] api_key` en los secrets de Streamlit."
+                "**AI Diagnosis not available.** The "
+                "`[anthropic] api_key` is not configured in the Streamlit secrets."
             )
         else:
             stored_scl = st.session_state.get(ai_state_key_scl)
             ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
             with ai_btn_col1:
                 gen_clicked_scl = st.button(
-                    "Generar diagnóstico AI"
+                    "Generate AI diagnosis"
                     if stored_scl is None
-                    else "Diagnóstico generado",
+                    else "Diagnosis generated",
                     key=f"ai_gen_btn_scl_{panel_index}_{item['id']}",
                     use_container_width=True,
                     type="primary" if stored_scl is None else "secondary",
@@ -1936,15 +1936,15 @@ def render_scl_panel(
                 )
             with ai_btn_col2:
                 regen_clicked_scl = st.button(
-                    "Regenerar",
+                    "Regenerate",
                     key=f"ai_regen_btn_scl_{panel_index}_{item['id']}",
                     use_container_width=True,
                     disabled=stored_scl is None,
                 )
             with ai_btn_col3:
                 st.caption(
-                    "Claude Sonnet 4.5 · ~$0.015 por diagnóstico · "
-                    "cacheado 30 días si no regenerás."
+                    "Claude Sonnet 4.5 · ~$0.015 per diagnosis · "
+                    "cached 30 days unless you regenerate."
                 )
 
             should_call_scl = bool(gen_clicked_scl) and (stored_scl is None)
@@ -1980,7 +1980,7 @@ def render_scl_panel(
                     "trend": {},
                 }
 
-                with st.spinner("Claude analizando el shaft centerline... (5-15 seg)"):
+                with st.spinner("Claude analyzing the shaft centerline... (5-15 sec)"):
                     try:
                         result_scl = generate_ai_diagnostic(
                             ai_payload_scl,
@@ -1991,7 +1991,7 @@ def render_scl_panel(
                         result_scl = {
                             "ok": False,
                             "markdown": (
-                                f"_Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"_Unexpected error generating AI diagnosis:_\n\n"
                                 f"```\n{type(exc).__name__}: {exc}\n```"
                             ),
                             "error": str(exc)[:500],
@@ -2010,7 +2010,7 @@ def render_scl_panel(
                 if stored_scl.get("ok"):
                     if stored_scl.get("fallback_used"):
                         st.info(
-                            "Diagnóstico generado con modelo de respaldo "
+                            "Diagnosis generated with the fallback model "
                             "(Haiku 4.5)."
                         )
                     st.markdown(stored_scl.get("markdown", ""))
@@ -2024,26 +2024,26 @@ def render_scl_panel(
                         + stored_scl.get("output_tokens", 0) * out_p_scl
                     ) / 1_000_000
                     fallback_tag_scl = (
-                        " · modelo de respaldo"
+                        " · fallback model"
                         if stored_scl.get("fallback_used") else ""
                     )
                     st.caption(
-                        f"Modelo: `{model_used_scl}` · "
+                        f"Model: `{model_used_scl}` · "
                         f"Tokens: {stored_scl.get('input_tokens', 0)} → "
                         f"{stored_scl.get('output_tokens', 0)} · "
-                        f"Costo: ~${cost_usd_scl:.4f} · "
-                        f"{'(cacheado)' if stored_scl.get('cached') else '(generado nuevo)'}"
+                        f"Cost: ~${cost_usd_scl:.4f} · "
+                        f"{'(cached)' if stored_scl.get('cached') else '(newly generated)'}"
                         f"{fallback_tag_scl}"
                     )
                 else:
                     st.error(
-                        stored_scl.get("markdown", "Error al generar diagnóstico AI.")
+                        stored_scl.get("markdown", "Error generating AI diagnosis.")
                     )
 
     b1, b2 = st.columns(2)
     with b1:
         png_bytes, png_error = build_export_png_bytes(export_fig)
-        if st.button("Enviar panel a reporte", key=f"scl_report_btn_{panel_index}_{item['id']}"):
+        if st.button("Send panel to report", key=f"scl_report_btn_{panel_index}_{item['id']}"):
             # Ciclo 17.26 — armar bloque AI si está generado
             ai_stored_for_scl_report = st.session_state.get(ai_state_key_scl)
             final_notes_scl = notes
@@ -2054,16 +2054,16 @@ def render_scl_panel(
                     ai_stored_for_scl_report.get("markdown", "")
                 ).strip()
                 if ai_md_scl:
-                    quant_lines_scl: List[str] = ["Parámetro|Valor"]
+                    quant_lines_scl: List[str] = ["Parameter|Value"]
                     if machine:
-                        quant_lines_scl.append(f"Máquina|{machine}")
+                        quant_lines_scl.append(f"Machine|{machine}")
                     if point:
-                        quant_lines_scl.append(f"Punto X|{point}")
+                        quant_lines_scl.append(f"Point X|{point}")
                     if paired_point:
-                        quant_lines_scl.append(f"Punto Y|{paired_point}")
+                        quant_lines_scl.append(f"Point Y|{paired_point}")
                     if clearance_center_mode:
                         quant_lines_scl.append(
-                            f"Modo de referencia|{clearance_center_mode}"
+                            f"Reference mode|{clearance_center_mode}"
                         )
                     if cat_iv_text_diag:
                         cat_iv_headline_scl = str(
@@ -2071,7 +2071,7 @@ def render_scl_panel(
                         ).strip()
                         if cat_iv_headline_scl:
                             quant_lines_scl.append(
-                                f"Diagnóstico Cat IV|{cat_iv_headline_scl}"
+                                f"Cat IV diagnosis|{cat_iv_headline_scl}"
                             )
 
                     final_notes_scl = (
@@ -2084,16 +2084,16 @@ def render_scl_panel(
                 title=title, notes=final_notes_scl, image_bytes=png_bytes
             )
             ai_extra_scl = (
-                " (con Diagnóstico AI)"
+                " (with AI Diagnosis)"
                 if final_notes_scl != notes else ""
             )
             st.success(
-                f"Panel individual enviado al reporte{ai_extra_scl}."
+                f"Individual panel sent to the report{ai_extra_scl}."
             )
     with b2:
         if png_bytes is not None:
             st.download_button(
-                "Descargar PNG panel",
+                "Download panel PNG",
                 data=png_bytes,
                 file_name=f"{item['file_stem']}_shaft_centerline_hd.png",
                 mime="image/png",
@@ -2101,7 +2101,7 @@ def render_scl_panel(
                 width="stretch",
             )
         elif png_error:
-            st.warning(f"No fue posible generar PNG: {png_error}")
+            st.warning(f"Could not generate PNG: {png_error}")
 
 
 def render_scl_compare_section(
@@ -2149,7 +2149,7 @@ def render_scl_compare_section(
     )
 
     st.markdown("---")
-    st.markdown("## Comparación multi-fecha · Shaft Centerline")
+    st.markdown("## Multi-date comparison · Shaft Centerline")
 
     fig = go.Figure()
 
@@ -2192,7 +2192,7 @@ def render_scl_compare_section(
                 manual_cx=manual_clearance_x, manual_cy=manual_clearance_y,
                 manual_center_x=manual_center_x, manual_center_y=manual_center_y,
             )
-            boundary["source"] = "auto heurístico (datos)"
+            boundary["source"] = "auto heuristic (data)"
 
         # Auto X/Y consciente del clearance también en el comparativo
         x_range, y_range = compute_xy_ranges(
@@ -2242,7 +2242,7 @@ def render_scl_compare_section(
     for idx, rec in enumerate(compare_records):
         df = rec["df"]
         color = palette[idx % len(palette)]
-        date_label = "sin fecha"
+        date_label = "no date"
         if rec["ts_start"] is not None:
             date_label = pd.Timestamp(rec["ts_start"]).strftime("%Y-%m-%d %H:%M")
 
@@ -2292,7 +2292,7 @@ def render_scl_compare_section(
                 textfont=dict(size=10, color=op["color"], family="Arial Black"),
                 name=f"Op @ {op['rpm']:.0f} rpm · {op['date_label']}",
                 hovertemplate=(
-                    f"Punto operativo<br>{op['date_label']}<br>"
+                    f"Operating point<br>{op['date_label']}<br>"
                     f"X: {op['x']:.3f} mil pp<br>Y: {op['y']:.3f} mil pp<br>"
                     f"RPM: {op['rpm']:.0f}<extra></extra>"
                 ),
@@ -2333,14 +2333,14 @@ def render_scl_compare_section(
                 y=[boundary["center_y"], last_op["y"]],
                 mode="lines",
                 line=dict(width=1.5, color="#0f172a", dash="dash"),
-                name="Attitude angle (última fecha)",
+                name="Attitude angle (latest date)",
                 hoverinfo="skip",
                 showlegend=True,
             )
         )
 
     fig.update_layout(
-        title="Shaft Centerline · Comparación multi-fecha",
+        title="Shaft Centerline · Multi-date comparison",
         xaxis_title="Paired probe (mil)",
         yaxis_title="Probe (mil)",
         height=720,
@@ -2372,16 +2372,16 @@ def render_scl_compare_section(
     for rec in compare_records:
         summary_rows.append(
             {
-                "Archivo": rec["label"],
-                "Fecha inicio": pd.Timestamp(rec["ts_start"]).strftime("%Y-%m-%d %H:%M") if rec["ts_start"] is not None else "—",
-                "Fecha fin": pd.Timestamp(rec["ts_end"]).strftime("%Y-%m-%d %H:%M") if rec["ts_end"] is not None else "—",
+                "File": rec["label"],
+                "Start date": pd.Timestamp(rec["ts_start"]).strftime("%Y-%m-%d %H:%M") if rec["ts_start"] is not None else "—",
+                "End date": pd.Timestamp(rec["ts_end"]).strftime("%Y-%m-%d %H:%M") if rec["ts_end"] is not None else "—",
                 "Max util %": round(rec["max_util"], 2),
                 "Min margin %": round(rec["min_margin"], 2),
                 "1st warning": "—" if rec["first_warning_speed"] is None else round(float(rec["first_warning_speed"]), 0),
                 "1st danger": "—" if rec["first_danger_speed"] is None else round(float(rec["first_danger_speed"]), 0),
                 "Radial peak": round(rec["radial_peak"], 4),
-                "Centro X": round(rec["centroid_x"], 4),
-                "Centro Y": round(rec["centroid_y"], 4),
+                "Center X": round(rec["centroid_x"], 4),
+                "Center Y": round(rec["centroid_y"], 4),
                 "Severity": rec["severity"],
             }
         )
@@ -2393,7 +2393,7 @@ def render_scl_compare_section(
     # Diagnóstico legacy (boundary utilization)
     # =========================================================
     diag = _scl_compare_diagnostic(compare_records)
-    with st.expander("Diagnóstico comparativo automático (boundary)", expanded=False):
+    with st.expander("Automatic comparative diagnosis (boundary)", expanded=False):
         st.markdown(f"**{diag['headline']}**")
         st.write(diag["detail"])
         st.write(diag["action"])
@@ -2443,20 +2443,20 @@ def render_scl_compare_section(
                 key=lambda e: pd.Timestamp(e["ts_start"]) if e["ts_start"] is not None else pd.Timestamp.min
             )
 
-            with st.expander("Diagnóstico avanzado multi-fecha (rotordynamics + Vault)", expanded=True):
+            with st.expander("Advanced multi-date diagnosis (rotordynamics + Vault)", expanded=True):
                 # Tabla de e/c por fecha
                 rows_cat = []
                 for e in ecc_states:
                     es = e["ecc_state"]
                     rows_cat.append({
-                        "Fecha": pd.Timestamp(e["ts_start"]).strftime("%Y-%m-%d") if e["ts_start"] is not None else "—",
-                        "Archivo": e["label"],
+                        "Date": pd.Timestamp(e["ts_start"]).strftime("%Y-%m-%d") if e["ts_start"] is not None else "—",
+                        "File": e["label"],
                         "RPM": f"{es.rpm:.0f}",
                         "X (mil pp)": f"{es.x_pos:+.3f}",
                         "Y (mil pp)": f"{es.y_pos:+.3f}",
                         "e/c": f"{es.eccentricity_ratio:.3f}",
                         "α (°)": f"{es.attitude_angle_deg:.1f}",
-                        "Clasificación": es.classification,
+                        "Classification": es.classification,
                     })
                 st.dataframe(pd.DataFrame(rows_cat), width="stretch", hide_index=True)
 
@@ -2469,20 +2469,20 @@ def render_scl_compare_section(
                 # Comparación entre primera y última corrida
                 migration = compare_centerline_migration(first["ecc_state"], last["ecc_state"])
 
-                profile_clause = f"El profile activo es '{profile_label}'." if profile_label else ""
-                doc_clause = f" Documento de referencia: {vault_doc_ref}." if vault_doc_ref else ""
+                profile_clause = f"The active profile is '{profile_label}'." if profile_label else ""
+                doc_clause = f" Reference document: {vault_doc_ref}." if vault_doc_ref else ""
 
                 clearance_clause = ""
                 if boundary.get("source"):
-                    clearance_clause = f" Clearance radial usado en el análisis: {boundary['clearance_x']:.3f} mil pp ({boundary['source']})."
+                    clearance_clause = f" Radial clearance used in the analysis: {boundary['clearance_x']:.3f} mil pp ({boundary['source']})."
 
                 # Construir narrativa fluida
                 paragraphs_cat = []
 
                 paragraphs_cat.append(
-                    f"Se analizó la evolución del centerline del muñón a velocidad operativa "
-                    f"{operating_rpm:.0f} rpm a lo largo de {len(ecc_states)} corridas comprendidas "
-                    f"entre {first_date} y {last_date}. {profile_clause}{clearance_clause}{doc_clause}"
+                    f"The journal centerline evolution was analyzed at operating speed "
+                    f"{operating_rpm:.0f} rpm across {len(ecc_states)} runs spanning "
+                    f"between {first_date} and {last_date}. {profile_clause}{clearance_clause}{doc_clause}"
                 )
 
                 # Síntesis cronológica
@@ -2491,13 +2491,13 @@ def render_scl_compare_section(
                     es = e["ecc_state"]
                     date_str = pd.Timestamp(e["ts_start"]).strftime("%d %b %Y") if e["ts_start"] is not None else e["label"]
                     prose_lines.append(
-                        f"La corrida del {date_str} ubicó el muñón en posición "
-                        f"({es.x_pos:+.3f}, {es.y_pos:+.3f}) mil pp, con eccentricity ratio "
-                        f"e/c = {es.eccentricity_ratio:.3f} y attitude angle "
-                        f"{es.attitude_angle_deg:.1f}°, clasificación {es.classification}."
+                        f"The {date_str} run placed the journal at position "
+                        f"({es.x_pos:+.3f}, {es.y_pos:+.3f}) mil pp, with eccentricity ratio "
+                        f"e/c = {es.eccentricity_ratio:.3f} and attitude angle "
+                        f"{es.attitude_angle_deg:.1f}°, classification {es.classification}."
                     )
                 paragraphs_cat.append(
-                    "Síntesis cronológica de las posiciones medidas:\n\n" +
+                    "Chronological synthesis of the measured positions:\n\n" +
                     "\n\n".join(prose_lines)
                 )
 
@@ -2509,36 +2509,36 @@ def render_scl_compare_section(
                 # Acciones según severidad de migración
                 if migration.classification == "STABLE":
                     items_cat = [
-                        f"Adoptar la corrida del {last_date} como línea base actualizada del centerline.",
-                        "Mantener la frecuencia actual de medición y comparar próximos arranques contra la línea base.",
-                        "Vigilar e/c y attitude angle en cada nueva corrida para detectar tendencias tempranas.",
-                        "Correlacionar con datos de Polar/Bode 1X y temperatura de cojinetes para confirmar estabilidad de condición.",
+                        f"Adopt the {last_date} run as the updated centerline baseline.",
+                        "Keep the current measurement frequency and compare upcoming startups against the baseline.",
+                        "Monitor e/c and attitude angle on each new run to detect early trends.",
+                        "Correlate with Polar/Bode 1X data and bearing temperature to confirm condition stability.",
                     ]
                 elif migration.classification == "MINOR_DRIFT":
                     items_cat = [
-                        "Continuar el monitoreo con frecuencia mayor para confirmar si la migración es transient o tendencia.",
-                        "Verificar consistencia de las condiciones de medición entre fechas (carga, temperatura del aceite, balance).",
-                        "Correlacionar con eventos de mantenimiento u operación entre fechas.",
+                        "Continue monitoring at a higher frequency to confirm whether the migration is transient or a trend.",
+                        "Verify the consistency of measurement conditions between dates (load, oil temperature, balance).",
+                        "Correlate with maintenance or operating events between dates.",
                     ]
                 elif migration.classification == "MODERATE_DRIFT":
                     items_cat = [
-                        "Investigar causas de la migración: cambio de carga, alineación del tren, condición del babbitt.",
-                        "Inspeccionar visualmente el cojinete en próximo paro programado.",
-                        "Verificar viscosidad del aceite y temperatura de cojinetes contra valores de comisionamiento.",
-                        "Correlacionar con espectro 1X (Polar/Bode) y órbita filtrada.",
+                        "Investigate the causes of the migration: load change, train alignment, babbitt condition.",
+                        "Visually inspect the bearing at the next scheduled outage.",
+                        "Verify oil viscosity and bearing temperature against commissioning values.",
+                        "Correlate with the 1X spectrum (Polar/Bode) and filtered orbit.",
                     ]
                 else:
                     items_cat = [
-                        "PRIORIDAD ALTA: programar inspección directa del babbitt en próxima oportunidad.",
-                        "Verificar inmediatamente temperatura, viscosidad y caudal del aceite contra especificación OEM.",
-                        "Confirmar carga real del rotor y descartar desalineación del tren.",
-                        "Documentar como hallazgo crítico, notificar al equipo de ingeniería rotodinámica.",
-                        "Si la condición persiste, restringir operación sostenida hasta confirmación del estado del cojinete.",
+                        "HIGH PRIORITY: schedule a direct babbitt inspection at the next opportunity.",
+                        "Immediately verify oil temperature, viscosity, and flow against the OEM specification.",
+                        "Confirm the actual rotor load and rule out train misalignment.",
+                        "Document as a critical finding and notify the rotordynamics engineering team.",
+                        "If the condition persists, restrict sustained operation until the bearing state is confirmed.",
                     ]
 
                 intro_cat = (
-                    "A partir del análisis de migración del centerline entre las fechas "
-                    "evaluadas, se establecen las siguientes recomendaciones:"
+                    "Based on the centerline migration analysis between the "
+                    "evaluated dates, the following recommendations are established:"
                 )
                 action_cat = intro_cat + "\n\n" + "\n\n".join(
                     f"{i+1}. {item}" for i, item in enumerate(items_cat)
@@ -2557,13 +2557,13 @@ def render_scl_compare_section(
     # la posición de reposo, no contra el bearing center real). Se conserva en
     # los expanders de la UI para inspección, pero no entra al PDF.
     bently_frame = (clearance_center_mode or "").lower().startswith("bottom load")
-    summary_block = f"--- RESUMEN ---\n{summary_df.to_string(index=False)}"
+    summary_block = f"--- SUMMARY ---\n{summary_df.to_string(index=False)}"
     if cat_iv_compare_md and bently_frame:
         notes = f"{cat_iv_compare_md}\n\n{summary_block}"
     elif cat_iv_compare_md:
         notes = (
             f"{cat_iv_compare_md}\n\n---\n\n"
-            f"Diagnóstico de utilización de boundary (referencia rest position):\n\n"
+            f"Boundary utilization diagnosis (rest-position reference):\n\n"
             f"{diag['headline']}\n\n{diag['detail']}\n\n{diag['action']}\n\n"
             f"{summary_block}"
         )
@@ -2587,21 +2587,21 @@ def render_scl_compare_section(
             range_clause = f" · {t_min} → {t_max}"
         except Exception:
             range_clause = ""
-    compare_title = f"Shaft Centerline · Comparación multi-fecha{range_clause}"
+    compare_title = f"Shaft Centerline · Multi-date comparison{range_clause}"
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Enviar comparativo a reporte", key="wm_scl_compare_report_btn"):
+        if st.button("Send comparison to report", key="wm_scl_compare_report_btn"):
             push_report_item(
                 title=compare_title,
                 notes=notes,
                 image_bytes=png_bytes,
             )
-            st.success("Comparación multi-fecha enviada al reporte.")
+            st.success("Multi-date comparison sent to the report.")
     with c2:
         if png_bytes is not None:
             st.download_button(
-                "Descargar PNG comparativo",
+                "Download comparison PNG",
                 data=png_bytes,
                 file_name="shaft_centerline_compare.png",
                 mime="image/png",
@@ -2609,7 +2609,7 @@ def render_scl_compare_section(
                 width="stretch",
             )
         elif png_error:
-            st.warning(f"No fue posible generar PNG del comparativo: {png_error}")
+            st.warning(f"Could not generate the comparison PNG: {png_error}")
 
 
 def main():
@@ -2651,21 +2651,21 @@ def main():
 
         if cr_mil_vault is not None:
             st.success(
-                f"**Vault:** clearance radial = {cr_mil_vault:.2f} mil pp "
+                f"**Vault:** radial clearance = {cr_mil_vault:.2f} mil pp "
                 f"({cr_source})"
             )
         else:
             st.info(
-                "Sin datos de cojinete en el Vault. Captura el diámetro interno "
-                "y/o clearance del cojinete en Asset Documents para análisis "
-                "preciso conforme a API 670. Usando valores manuales de la sidebar."
+                "No bearing data in the Vault. Capture the bearing inner diameter "
+                "and/or clearance in Asset Documents for a precise "
+                "analysis per API 670. Using manual sidebar values."
             )
 
         st.markdown("---")
         st.markdown("### Shaft Centerline input")
 
         uploaded_files_new = st.file_uploader(
-            "Cargar CSV Shaft Centerline",
+            "Upload Shaft Centerline CSV",
             type=["csv"],
             accept_multiple_files=True,
             key="wm_scl_file_uploader",
@@ -2679,11 +2679,11 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             if active_files:
-                st.caption(f"Archivos Shaft activos: {len(active_files)}")
+                st.caption(f"Active Shaft files: {len(active_files)}")
             else:
-                st.caption("No hay archivos Shaft cargados")
+                st.caption("No Shaft files loaded")
         with col2:
-            if st.button("Limpiar archivos Shaft", key="wm_scl_clear_file_btn"):
+            if st.button("Clear Shaft files", key="wm_scl_clear_file_btn"):
                 clear_scl_persisted_files()
                 st.rerun()
 
@@ -2695,9 +2695,9 @@ def main():
         normalize_to_origin = st.checkbox("Normalize to first point", value=False)
 
         st.markdown("### RPM filter")
-        rpm_filter_enabled = st.checkbox("Filtrar rango RPM", value=False)
-        rpm_min_filter_ui = st.number_input("RPM inicio", value=0.0, step=100.0, format="%.0f")
-        rpm_max_filter_ui = st.number_input("RPM fin", value=100000.0, step=100.0, format="%.0f")
+        rpm_filter_enabled = st.checkbox("Filter RPM range", value=False)
+        rpm_min_filter_ui = st.number_input("RPM start", value=0.0, step=100.0, format="%.0f")
+        rpm_max_filter_ui = st.number_input("RPM end", value=100000.0, step=100.0, format="%.0f")
 
         rpm_min_filter = rpm_min_filter_ui if rpm_filter_enabled else None
         rpm_max_filter = rpm_max_filter_ui if rpm_filter_enabled else None
@@ -2707,24 +2707,24 @@ def main():
         clearance_center_mode = st.selectbox(
             "Boundary center",
             options=[
-                "Bottom load reference (API 670 / práctica estándar)",
+                "Bottom load reference (API 670 / standard practice)",
                 "Origin (0,0)",
                 "Data Mean",
                 "Manual",
             ],
             index=0,
             help=(
-                "Convención de placement del clearance circle:\n\n"
-                "**Bottom load reference**: práctica estándar para cojinetes hidrodinámicos en "
-                "máquinas horizontales con carga gravitacional (referencia API 670). "
-                "El (0,0) del registro = muñón en reposo apoyado al fondo del cojinete. "
-                "Bearing center automáticamente en (0, +Cr). "
-                "Usar este default a menos que haya razón específica.\n\n"
-                "**Origin (0,0)**: bearing center forzado al origen. Solo para debug, máquinas "
-                "verticales o sistemas con calibración no estándar.\n\n"
-                "**Data Mean**: bearing center en el centroide. Útil cuando el registro no fue "
-                "calibrado al rest position.\n\n"
-                "**Manual**: especifica el centro tú mismo."
+                "Clearance-circle placement convention:\n\n"
+                "**Bottom load reference**: standard practice for hydrodynamic bearings in "
+                "horizontal machines with gravitational load (API 670 reference). "
+                "The (0,0) of the record = journal at rest resting at the bottom of the bearing. "
+                "Bearing center automatically at (0, +Cr). "
+                "Use this default unless there is a specific reason.\n\n"
+                "**Origin (0,0)**: bearing center forced to the origin. Only for debug, vertical "
+                "machines, or systems with non-standard calibration.\n\n"
+                "**Data Mean**: bearing center at the centroid. Useful when the record was not "
+                "calibrated to the rest position.\n\n"
+                "**Manual**: specify the center yourself."
             ),
         )
 
@@ -2746,7 +2746,7 @@ def main():
         early_rub_danger_pct = st.slider("Danger utilization %", min_value=60, max_value=100, value=95, step=1)
 
     if not active_files:
-        st.info("Carga uno o varios archivos CSV de Shaft Centerline desde el panel izquierdo.")
+        st.info("Upload one or more Shaft Centerline CSV files from the left panel.")
         return
 
     parsed_items, failed_items = parse_uploaded_scl_files(active_files)
@@ -2756,7 +2756,7 @@ def main():
             st.warning(f"{file_name}: {error_text}")
 
     if not parsed_items:
-        st.info("No se pudo procesar ningún archivo válido.")
+        st.info("No valid file could be processed.")
         return
 
     logo_uri = get_logo_data_uri(LOGO_PATH)
@@ -2902,7 +2902,7 @@ def main():
 
     with st.sidebar:
         st.markdown("---")
-        st.markdown("### 📚 Histórico SCL")
+        st.markdown("### 📚 SCL History")
         try:
             from core.scl_history import (
                 save_scl_snapshot,
@@ -2914,35 +2914,35 @@ def main():
             _scl_hist_ok = True
         except Exception as _e:
             _scl_hist_ok = False
-            st.caption(f"_(Histórico SCL no disponible: {_e})_")
+            st.caption(f"_(SCL history not available: {_e})_")
 
         if _scl_hist_ok and _scl_inst_id:
             _scl_existing_snaps = list_scl_snapshots(_scl_inst_id)
             st.caption(
-                f"{len(_scl_existing_snaps)} snapshot(s) SCL guardado(s)."
+                f"{len(_scl_existing_snaps)} SCL snapshot(s) saved."
             )
 
             if not _scl_curr_readings:
                 if not _scl_sensors_map:
-                    st.caption("_(No hay Sensor Map configurado.)_")
+                    st.caption("_(No Sensor Map configured.)_")
                 elif not parsed_items:
-                    st.caption("_(No hay CSVs SCL cargados todavía.)_")
+                    st.caption("_(No SCL CSVs loaded yet.)_")
                 else:
                     st.warning(
-                        f"{len(parsed_items)} CSV(s) SCL cargado(s) "
-                        f"pero ninguno matchea sensores del Sensor Map."
+                        f"{len(parsed_items)} SCL CSV(s) loaded "
+                        f"but none match sensors in the Sensor Map."
                     )
-                    with st.expander("Diagnóstico — CSVs vs patterns"):
+                    with st.expander("Diagnosis — CSVs vs patterns"):
                         _dr = []
                         for it in parsed_items:
                             m = it.get("meta") or {}
                             _dr.append({
-                                "Archivo": it.get("file_name", ""),
+                                "File": it.get("file_name", ""),
                                 "Point": str(m.get("Point Name", "") or ""),
                                 "Paired": str(m.get("Paired Point Name", "") or ""),
                             })
                         if _dr:
-                            st.markdown("**CSVs SCL cargados:**")
+                            st.markdown("**Loaded SCL CSVs:**")
                             st.dataframe(
                                 pd.DataFrame(_dr),
                                 width="stretch", hide_index=True,
@@ -2954,36 +2954,36 @@ def main():
                                 continue
                             _sr.append({
                                 "Sensor": _diag_slbl(s),
-                                "Plano": s.get("plane_label", "") or "",
-                                "Pattern": s.get("csv_match_pattern", "") or "(vacío)",
+                                "Plane": s.get("plane_label", "") or "",
+                                "Pattern": s.get("csv_match_pattern", "") or "(empty)",
                             })
                         if _sr:
-                            st.markdown("**Sensores proximity del mapa:**")
+                            st.markdown("**Proximity sensors in the map:**")
                             st.dataframe(
                                 pd.DataFrame(_sr),
                                 width="stretch", hide_index=True,
                             )
             else:
-                with st.expander("📸 Guardar snapshot SCL actual", expanded=False):
+                with st.expander("📸 Save current SCL snapshot", expanded=False):
                     st.caption(
-                        f"Captura X/Y position + eccentricity + attitude a "
-                        f"{active_operating_rpm:.0f} rpm para "
+                        f"Captures X/Y position + eccentricity + attitude at "
+                        f"{active_operating_rpm:.0f} rpm for "
                         f"{len(_scl_curr_readings)} bearing(s)."
                     )
                     _scl_snap_label = st.text_input(
-                        "Etiqueta de la corrida",
+                        "Run label",
                         value="",
-                        placeholder="Ej. Coastdown abril 27",
+                        placeholder="E.g. Coastdown April 27",
                         key=f"wm_scl_snap_label_{_scl_inst_id}",
                     )
                     _scl_snap_notes = st.text_area(
-                        "Observaciones (opcional)",
+                        "Notes (optional)",
                         value="",
                         key=f"wm_scl_snap_notes_{_scl_inst_id}",
                         height=70,
                     )
                     if st.button(
-                        "Guardar snapshot SCL",
+                        "Save SCL snapshot",
                         type="primary", width="stretch",
                         key=f"wm_scl_snap_save_{_scl_inst_id}",
                     ):
@@ -2995,10 +2995,10 @@ def main():
                                 corrida_label=_scl_snap_label,
                                 notes=_scl_snap_notes,
                             )
-                            st.success(f"✓ Snapshot SCL guardado: {sid}")
+                            st.success(f"✓ SCL snapshot saved: {sid}")
                             st.rerun()
                         except Exception as _e:
-                            st.error(f"No se pudo guardar: {_e}")
+                            st.error(f"Could not save: {_e}")
 
             # Multiselect comparativo
             _selected_scl_cmp_ids: List[str] = []
@@ -3023,7 +3023,7 @@ def main():
                                     _full, _curr_by_lbl)
                         except Exception:
                             pass
-                    _suffix = " · (corrida actual)" if _is_current else ""
+                    _suffix = " · (current run)" if _is_current else ""
                     _opspeed = s.get("operating_speed_rpm")
                     _opspeed_str = f" @ {_opspeed:.0f}rpm" if _opspeed else ""
                     _lbl = (f"{s['corrida_label'][:28]}{_opspeed_str} "
@@ -3042,14 +3042,14 @@ def main():
                     _saved = st.session_state[_scl_cmp_state_key]
                     _scl_default_pick = [l for l in _saved if l in _scl_opt_lbls]
                 _scl_picked = st.multiselect(
-                    "Corridas a superponer en el SCL",
+                    "Runs to overlay on the SCL",
                     options=_scl_opt_lbls,
                     default=_scl_default_pick,
                     key=f"wm_scl_cmp_multi_{_scl_inst_id}",
                     help=(
-                        "0 = solo actual; 1 = comparativo simple; "
-                        "N = superposición histórica con gradiente "
-                        "cronológico de las trayectorias del muñón."
+                        "0 = current only; 1 = simple comparison; "
+                        "N = historical overlay with a chronological "
+                        "gradient of the journal trajectories."
                     ),
                 )
                 st.session_state[_scl_cmp_state_key] = _scl_picked
@@ -3060,7 +3060,7 @@ def main():
 
                 # Lista borrar
                 with st.expander(
-                    f"️ Gestionar snapshots SCL ({len(_scl_existing_snaps)})"
+                    f"️ Manage SCL snapshots ({len(_scl_existing_snaps)})"
                 ):
                     for s in _scl_existing_snaps:
                         cols_h = st.columns([4, 1])
@@ -3072,10 +3072,10 @@ def main():
                         if cols_h[1].button(
                             "️",
                             key=f"wm_scl_del_{s['snapshot_id']}",
-                            help="Borrar este snapshot",
+                            help="Delete this snapshot",
                         ):
                             if delete_scl_snapshot(_scl_inst_id, s["snapshot_id"]):
-                                st.success("Borrado.")
+                                st.success("Deleted.")
                                 st.rerun()
 
             st.session_state["wm_scl_compare_snapshot_ids"] = _selected_scl_cmp_ids
@@ -3125,47 +3125,47 @@ def main():
 
                     _diag = []
                     if _ecc_class == "migration_critical":
-                        _diag.append("Migración crítica (>25% clearance)")
+                        _diag.append("Critical migration (>25% clearance)")
                     elif _ecc_class == "migration_major":
-                        _diag.append("Migración mayor (>15% clearance)")
+                        _diag.append("Major migration (>15% clearance)")
                     elif _ecc_class == "migration_minor":
-                        _diag.append("Migración menor")
+                        _diag.append("Minor migration")
                     elif _ecc_class == "stable":
-                        _diag.append("Eccentricity estable")
+                        _diag.append("Stable eccentricity")
                     if _att_class == "shift_critical":
-                        _diag.append("Shift attitude crítico (≥30°)")
+                        _diag.append("Critical attitude shift (≥30°)")
                     elif _att_class == "shift_major":
-                        _diag.append("Shift attitude mayor")
+                        _diag.append("Major attitude shift")
 
                     _cmp_rows.append({
                         "Bearing": _lbl,
-                        "vs Corrida": f"{_slbl} ({_sts})",
-                        "Anterior X/Y": f"{_prev_x:.2f} / {_prev_y:.2f} mil",
-                        "Actual X/Y": f"{r['x_gap_at_op']:.2f} / {r['y_gap_at_op']:.2f} mil",
+                        "vs Run": f"{_slbl} ({_sts})",
+                        "Previous X/Y": f"{_prev_x:.2f} / {_prev_y:.2f} mil",
+                        "Current X/Y": f"{r['x_gap_at_op']:.2f} / {r['y_gap_at_op']:.2f} mil",
                         "Δ X/Y": f"{_delta_x:+.2f} / {_delta_y:+.2f}",
-                        "e/c anterior": f"{_prev_ecc:.3f}",
-                        "e/c actual": f"{r['eccentricity_ratio']:.3f}",
+                        "Previous e/c": f"{_prev_ecc:.3f}",
+                        "Current e/c": f"{r['eccentricity_ratio']:.3f}",
                         "Δ e/c": f"{_delta_ecc:+.3f}",
-                        "Anterior attitude": f"{_prev_att:.1f}°",
-                        "Actual attitude": f"{r['attitude_angle']:.1f}°",
+                        "Previous attitude": f"{_prev_att:.1f}°",
+                        "Current attitude": f"{r['attitude_angle']:.1f}°",
                         "Δ attitude": f"{_delta_att:+.1f}°",
-                        "Diagnóstico": " · ".join(_diag) if _diag else "—",
+                        "Diagnosis": " · ".join(_diag) if _diag else "—",
                     })
 
             if _cmp_rows:
-                st.markdown("### Comparativo SCL — vs corridas anteriores")
+                st.markdown("### SCL comparison — vs previous runs")
                 st.caption(
-                    "Migración del centerline del muñón entre corridas. "
-                    "Cambio de eccentricity ratio o shift de attitude angle "
-                    "indican cambio en distribución de carga, viscosidad del "
-                    "aceite o pérdida de clearance del cojinete (API 670 §6.7)."
+                    "Journal centerline migration between runs. "
+                    "A change in eccentricity ratio or an attitude angle shift "
+                    "indicate a change in load distribution, oil "
+                    "viscosity, or loss of bearing clearance (API 670 §6.7)."
                 )
                 st.dataframe(
                     pd.DataFrame(_cmp_rows),
                     width="stretch", hide_index=True,
                 )
         except Exception as _scl_cmp_e:
-            st.caption(f"_(Comparativo SCL no disponible: {_scl_cmp_e})_")
+            st.caption(f"_(SCL comparison not available: {_scl_cmp_e})_")
 
     for panel_index, item in enumerate(parsed_items):
         render_scl_panel(

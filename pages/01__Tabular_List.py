@@ -79,11 +79,11 @@ if st.session_state.get("_loaded_from_snapshot"):
         (function() {
           const HIDE_HEADINGS = [
             '🟢 Tabular List',
-            'Override criterio',
-            'Guardar corrida actual',
-            'Gestionar snapshots',
+            'Override criterion',
+            'Save current run',
+            'Manage snapshots',
           ];
-          const HIDE_BUTTONS = ['Prepare PNG HD','Download PNG HD','Enviar a Reporte'];
+          const HIDE_BUTTONS = ['Prepare PNG HD','Download PNG HD','Send to Report'];
           function applyHides() {
             try {
               const doc = window.parent.document;
@@ -338,7 +338,7 @@ apply_page_style()
 
 from core.ui_theme import page_header as _wm_page_header  # hero compartido (v3.31.313)
 _wm_page_header("Tabular List",
-                "Vista tabular de señales y mediciones · valores 1X/2X, fase, RMS por canal.")
+                "Tabular view of signals and measurements · 1X/2X values, phase, RMS per channel.")
 
 
 def get_logo_base64(path: Path) -> Optional[str]:
@@ -1114,7 +1114,7 @@ def render_tabular_narrative_box(headline: str, narrative: str) -> None:
     st.markdown(
         f'''
         <div class="wm-diagnostic-box">
-            <div class="wm-diagnostic-title">Resumen diagnóstico</div>
+            <div class="wm-diagnostic-title">Diagnostic summary</div>
             <div class="wm-diagnostic-headline">{headline}</div>
             <div class="wm-diagnostic-body">{narrative}</div>
         </div>
@@ -1138,7 +1138,7 @@ def queue_tabular_to_report(
             "id": item_id,
             "type": "tabular",
             "title": f"Tabular List — {sample_record.machine}",
-            "notes": text_diag.get("narrative", "Resumen técnico generado automáticamente."),
+            "notes": text_diag.get("narrative", "Technical summary generated automatically."),
             "signal_id": sample_record.signal_id,
             "figure": None,
             "image_bytes": png_bytes,
@@ -1338,7 +1338,7 @@ from core.tabular_defaults import derive_tabular_defaults
 records_all = load_signals_from_session()
 
 if not records_all:
-    st.warning("No se pudieron cargar señales válidas desde st.session_state['signals'].")
+    st.warning("Could not load valid signals from st.session_state['signals'].")
     st.stop()
 
 with st.sidebar:
@@ -1350,9 +1350,9 @@ _active_instance = get_instance(_active_instance_id) if _active_instance_id else
 
 if _active_instance is None:
     st.error(
-        "🚨 **No hay máquina activa.** Andá al menú lateral → "
-        "**Machinery Library** → activá la máquina que vas a analizar "
-        "y volvé acá. Tabular List no opera sin un activo seleccionado."
+        "🚨 **No active machine.** Go to the sidebar → "
+        "**Machinery Library** → activate the machine you are going to analyze "
+        "and come back here. Tabular List does not operate without a selected asset."
     )
     st.stop()
 
@@ -1379,9 +1379,9 @@ if not _is_client_view_tab:
                 pass
     with bcols[1]:
         st.markdown(f"### 🟢 Tabular List · **{_active_instance.tag or _active_instance.instance_id}**")
-        st.caption(compose_train_description(_active_instance) or "(sin descripción)")
+        st.caption(compose_train_description(_active_instance) or "(no description)")
         st.markdown(
-            f"**Criterio aplicado:** {_defaults['criterion']}  \n"
+            f"**Applied criterion:** {_defaults['criterion']}  \n"
             f"_{_defaults['criterion_explanation']}_"
         )
         st.markdown(
@@ -1399,16 +1399,16 @@ if not _is_client_view_tab:
                 _types_count[_t] = _types_count.get(_t, 0) + 1
             _types_str = " + ".join(f"{c} {t}" for t, c in _types_count.items())
             st.markdown(
-                f"**📍 Sensor Map:** `{_n_sensors}` sensores configurados "
-                f"({_types_str}). Los thresholds individuales del DCS tienen prioridad "
-                f"sobre los defaults de arriba — la tabla clasifica cada fila con el "
-                f"sensor que matchea su Point."
+                f"**📍 Sensor Map:** `{_n_sensors}` sensors configured "
+                f"({_types_str}). The individual DCS thresholds take priority "
+                f"over the defaults above — the table classifies each row with the "
+                f"sensor that matches its Point."
             )
         else:
             st.warning(
-                "📍 **Sensor Map vacío.** El activo no tiene sensores configurados. "
-                "Andá a Machinery Library → Mapa de Sensores para configurarlos. "
-                "Mientras tanto, todas las filas se clasifican con los defaults globales."
+                "📍 **Empty Sensor Map.** The asset has no sensors configured. "
+                "Go to Machinery Library → Sensor Map to configure them. "
+                "In the meantime, all rows are classified with the global defaults."
             )
 
 # ============================================================
@@ -1436,39 +1436,39 @@ if _active_instance.sensors:
         _mini_total = _mini_counts["total"]
 
         _mini_title = (
-            f"🗺️ Machine Map (vista rápida) · "
-            f"{_mini_counts['normal']} aceptables · "
-            f"{_mini_counts['alarm']} atención · "
-            f"{_mini_counts['danger']} acción · "
-            f"{_mini_counts['no_data']} sin datos"
+            f"🗺️ Machine Map (quick view) · "
+            f"{_mini_counts['normal']} acceptable · "
+            f"{_mini_counts['alarm']} attention · "
+            f"{_mini_counts['danger']} action · "
+            f"{_mini_counts['no_data']} no data"
         )
         with st.expander(_mini_title, expanded=True):
             _kpi_cols = st.columns(4)
             _kpi_cols[0].metric(
-                "✅ CONDICIÓN ACEPTABLE",
+                "✅ ACCEPTABLE CONDITION",
                 f"{_mini_counts['normal']}",
-                f"de {_mini_total}",
+                f"of {_mini_total}",
             )
             _kpi_cols[1].metric(
-                "⚠️ ATENCIÓN",
+                "⚠️ ATTENTION",
                 f"{_mini_counts['alarm']}",
-                f"de {_mini_total}",
+                f"of {_mini_total}",
             )
             _kpi_cols[2].metric(
-                "🚨 ACCIÓN REQUERIDA",
+                "🚨 ACTION REQUIRED",
                 f"{_mini_counts['danger']}",
-                f"de {_mini_total}",
+                f"of {_mini_total}",
             )
             _kpi_cols[3].metric(
-                "◌ Sin datos",
+                "◌ No data",
                 f"{_mini_counts['no_data']}",
-                f"de {_mini_total}",
+                f"of {_mini_total}",
             )
 
             if not _mini_signals:
                 st.caption(
-                    "ℹ️ No hay señales cargadas en sesión — todos los planos se "
-                    "muestran neutros. Andá a **Load Data** para cargar CSVs."
+                    "ℹ️ No signals loaded in session — all planes are "
+                    "shown neutral. Go to **Load Data** to load CSVs."
                 )
 
             _sev_by_label = dict(
@@ -1576,7 +1576,7 @@ if _active_instance.sensors:
             except _SkipTrainDiagram:
                 pass  # cliente: skipea silenciosamente
             except Exception as _mini_e:
-                st.caption(f"_(no se pudo renderizar el mini-diagrama: {_mini_e})_")
+                st.caption(f"_(could not render the mini-diagram: {_mini_e})_")
 
             # Ver Machine Map completo — solo para analista
             if not _skip_train_diag_client:
@@ -1585,14 +1585,14 @@ if _active_instance.sensors:
                     try:
                         st.page_link(
                             "pages/01b_Machine_Map.py",
-                            label="Ver Machine Map completo →",
+                            label="Open full Machine Map →",
                             icon="🗺️",
                         )
                     except Exception:
-                        st.caption("Machine Map completo disponible en el menú lateral.")
+                        st.caption("Full Machine Map available in the sidebar.")
     except Exception as _mini_outer_e:
         # No queremos que un fallo del mini-map rompa el Tabular.
-        st.caption(f"_(mini Machine Map no disponible: {_mini_outer_e})_")
+        st.caption(f"_(mini Machine Map unavailable: {_mini_outer_e})_")
 
 criterion_options = [
     "ISO 20816-3",
@@ -1620,9 +1620,9 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Tabular List Setup")
     st.caption(
-        "Toda la configuración (criterio, familia, unidades, setpoints) "
-        "viene automáticamente del Sensor Map de la instancia activa. "
-        "El override avanzado abajo solo se usa para análisis comparativos."
+        "All configuration (criterion, family, units, setpoints) "
+        "comes automatically from the Sensor Map of the active instance. "
+        "The advanced override below is only used for comparative analyses."
     )
 
     # Ciclo 14c.3 — config_mode siempre 'sensor_map' (no más selector
@@ -1631,10 +1631,10 @@ with st.sidebar:
     # la instancia (auto). Ningún input manual per-machine ni per-point.
     config_mode = "sensor_map"
 
-    with st.expander("⚙️ Override criterio para este análisis (avanzado)", expanded=False):
+    with st.expander("⚙️ Override criterion for this analysis (advanced)", expanded=False):
         st.caption(
-            "Útil para comparar el mismo set de datos contra criterios alternativos "
-            "(ej. ISO 20816-2 vs ISO 7919-3). NO modifica la instancia en Machinery Library."
+            "Useful to compare the same data set against alternative criteria "
+            "(e.g. ISO 20816-2 vs ISO 7919-3). It does NOT modify the instance in Machinery Library."
         )
 
         _ovr_criterion_idx = (
@@ -1711,7 +1711,7 @@ with st.sidebar:
         )
 
         if _override_active:
-            st.warning("⚠️ Override activo")
+            st.warning("⚠️ Override active")
             criterion_selected = _ovr_criterion
             criterion_text = _ovr_criterion_text
             measurement_family = _ovr_family
@@ -1720,7 +1720,7 @@ with st.sidebar:
             danger_value = float(_ovr_danger)
 
     if danger_value < alarm_value:
-        st.warning("Danger debería ser mayor o igual que Alarm.")
+        st.warning("Danger should be greater than or equal to Alarm.")
 
 # Banner de override fuera del sidebar (visible para el usuario)
 # Ciclo 23.123 — En cliente NO se muestra (es info técnica de analista,
@@ -1728,11 +1728,11 @@ with st.sidebar:
 # cajita amarilla huérfana con solo el ⚠️).
 if _override_active and not st.session_state.get("_loaded_from_snapshot"):
     st.warning(
-        f"⚠️ **Override criterio activo** — "
+        f"⚠️ **Criterion override active** — "
         f"Criterion: {criterion_text} · Family: {measurement_family} · "
         f"Overall: {overall_mode} · Alarm: {alarm_value:.3f} · Danger: {danger_value:.3f}. "
-        f"Los defaults de la instancia ({_defaults['criterion']}) están desactivados "
-        f"para este análisis."
+        f"The instance defaults ({_defaults['criterion']}) are disabled "
+        f"for this analysis."
     )
 
 # Ciclo 14c.3 — bloques Machine Settings / Point Settings eliminados.
@@ -1789,7 +1789,7 @@ except Exception:
     st.session_state["wm_severity_df"] = None
 
 if df_table.empty:
-    st.warning("No fue posible construir la tabla.")
+    st.warning("Could not build the table.")
     st.stop()
 
 # Ciclo 14c.3 — overall_mode_text refleja que cada fila usa la unidad
@@ -1823,30 +1823,30 @@ try:
 
     with st.sidebar:
         st.markdown("---")
-        st.markdown("### 📚 Histórico de la unidad")
+        st.markdown("### 📚 Unit history")
 
         _existing_snaps = list_snapshots(_hist_inst_id) if _hist_inst_id else []
         st.caption(
-            f"{len(_existing_snaps)} corrida(s) guardada(s) para esta unidad."
+            f"{len(_existing_snaps)} run(s) saved for this unit."
         )
 
         if _wm_severity_df is not None and not _wm_severity_df.empty:
-            with st.expander("📸 Guardar corrida actual", expanded=False):
+            with st.expander("📸 Save current run", expanded=False):
                 _snap_label = st.text_input(
-                    "Etiqueta de la corrida (opcional)",
+                    "Run label (optional)",
                     value="",
-                    placeholder="Ej. Corrida abril 2026",
+                    placeholder="E.g. April 2026 run",
                     key=f"wm_snap_label_{_hist_inst_id}",
                 )
                 _snap_notes = st.text_area(
-                    "Observaciones (opcional)",
+                    "Observations (optional)",
                     value="",
-                    placeholder="Condición operativa, cambios recientes, etc.",
+                    placeholder="Operating condition, recent changes, etc.",
                     key=f"wm_snap_notes_{_hist_inst_id}",
                     height=80,
                 )
                 if st.button(
-                    "💾 Guardar snapshot",
+                    "💾 Save snapshot",
                     type="primary",
                     width="stretch",
                     key=f"wm_snap_save_{_hist_inst_id}",
@@ -1858,12 +1858,12 @@ try:
                             corrida_label=_snap_label,
                             notes=_snap_notes,
                         )
-                        st.success(f"✓ Snapshot guardado: {sid}")
+                        st.success(f"✓ Snapshot saved: {sid}")
                         st.rerun()
                     except Exception as _e:
-                        st.error(f"No se pudo guardar: {_e}")
+                        st.error(f"Could not save: {_e}")
         else:
-            st.caption("_(Cargá los CSVs primero para poder snapshotear.)_")
+            st.caption("_(Load the CSVs first to be able to snapshot.)_")
 
         # Selector de comparación
         if _existing_snaps:
@@ -1876,7 +1876,7 @@ try:
             except Exception:
                 _wm_is_ident = None
 
-            _opts = [("__none__", "— Sin comparación —")]
+            _opts = [("__none__", "— No comparison —")]
             _first_diff_idx = -1
             for _i, s in enumerate(_existing_snaps):
                 _is_current = False
@@ -1887,7 +1887,7 @@ try:
                             _is_current = _wm_is_ident(_snap_full, _wm_severity_df, 1.0)
                     except Exception:
                         pass
-                _suffix = " · _(corrida actual)_" if _is_current else ""
+                _suffix = " · _(current run)_" if _is_current else ""
                 _lbl = f"{s['corrida_label'][:30]} ({s['timestamp'][:10]}){_suffix}"
                 _opts.append((s["snapshot_id"], _lbl))
                 # Marcar el primer snapshot que NO es la corrida actual
@@ -1906,7 +1906,7 @@ try:
                st.session_state[_cmp_state_key] in _opt_keys:
                 _default_cmp_idx = _opt_keys.index(st.session_state[_cmp_state_key])
             _selected_cmp = st.selectbox(
-                "Comparar con corrida anterior",
+                "Compare with previous run",
                 options=_opt_lbls,
                 index=_default_cmp_idx,
                 key=f"wm_cmp_select_widget_{_hist_inst_id}",
@@ -1916,26 +1916,26 @@ try:
         else:
             _selected_cmp_id = "__none__"
             st.caption(
-                "_(Aún no hay snapshots. Guardá uno arriba para empezar a "
-                "comparar.)_"
+                "_(No snapshots yet. Save one above to start "
+                "comparing.)_"
             )
 
         # Lista compacta de snapshots existentes con borrar
         if _existing_snaps:
-            with st.expander(f"🗂️ Gestionar snapshots ({len(_existing_snaps)})"):
+            with st.expander(f"🗂️ Manage snapshots ({len(_existing_snaps)})"):
                 for s in _existing_snaps:
                     cols_h = st.columns([4, 1])
                     cols_h[0].markdown(
                         f"**{s['corrida_label'][:30]}**  \n"
-                        f"_{s['timestamp']} · {s['n_readings']} sensores_"
+                        f"_{s['timestamp']} · {s['n_readings']} sensors_"
                     )
                     if cols_h[1].button(
                         "🗑️",
                         key=f"wm_del_snap_{s['snapshot_id']}",
-                        help="Borrar este snapshot",
+                        help="Delete this snapshot",
                     ):
                         if delete_snapshot(_hist_inst_id, s['snapshot_id']):
-                            st.success("Borrado.")
+                            st.success("Deleted.")
                             st.rerun()
 
     # Vista de comparativo en el cuerpo principal
@@ -1944,13 +1944,13 @@ try:
         if prev_snap is not None:
             cmp_df = compare_to_previous(_wm_severity_df, prev_snap)
             if not cmp_df.empty:
-                st.markdown("### 📈 Comparativo con corrida anterior")
+                st.markdown("### 📈 Comparison with previous run")
                 _prev_lbl = prev_snap.get("corrida_label", _selected_cmp_id)
                 _prev_ts = prev_snap.get("timestamp", "")[:10]
                 st.caption(
-                    f"Comparando esta corrida contra **{_prev_lbl}** "
-                    f"({_prev_ts}). Sensores que aparecieron por primera vez "
-                    f"se marcan como '—'."
+                    f"Comparing this run against **{_prev_lbl}** "
+                    f"({_prev_ts}). Sensors that appeared for the first time "
+                    f"are marked as '—'."
                 )
 
                 # Resumen de tendencias
@@ -1958,21 +1958,21 @@ try:
                 _summary_chips = []
                 if _trends.get("up_critical", 0):
                     _summary_chips.append(
-                        f"▲ {_trends['up_critical']} con alza significativa"
+                        f"▲ {_trends['up_critical']} with significant rise"
                     )
                 if _trends.get("up", 0):
-                    _summary_chips.append(f"↑ {_trends['up']} subiendo")
+                    _summary_chips.append(f"↑ {_trends['up']} rising")
                 if _trends.get("stable", 0):
-                    _summary_chips.append(f"→ {_trends['stable']} estables")
+                    _summary_chips.append(f"→ {_trends['stable']} stable")
                 if _trends.get("down", 0):
-                    _summary_chips.append(f"↓ {_trends['down']} bajando")
+                    _summary_chips.append(f"↓ {_trends['down']} falling")
                 if _trends.get("down_good", 0):
                     _summary_chips.append(
-                        f"▼ {_trends['down_good']} con baja significativa"
+                        f"▼ {_trends['down_good']} with significant drop"
                     )
                 if _trends.get("no_prev", 0):
                     _summary_chips.append(
-                        f"— {_trends['no_prev']} sin lectura previa"
+                        f"— {_trends['no_prev']} with no previous reading"
                     )
                 st.markdown(" · ".join(_summary_chips))
 
@@ -1998,18 +1998,19 @@ try:
                 def _fmt_trend(t):
                     return f"{trend_arrow(t)} {t}"
 
-                _disp["Anterior"] = _disp["Overall_prev"].map(_fmt_num)
-                _disp["Actual"] = _disp["Overall"].map(_fmt_num)
+                _disp["Previous"] = _disp["Overall_prev"].map(_fmt_num)
+                _disp["Current"] = _disp["Overall"].map(_fmt_num)
                 _disp["Δ"] = _disp["Delta"].map(_fmt_num)
                 _disp["Δ %"] = _disp["Delta_pct"].map(_fmt_pct)
-                _disp["Tendencia"] = _disp["Trend"].map(_fmt_trend)
+                _disp["_trend_fmt"] = _disp["Trend"].map(_fmt_trend)
                 _disp = _disp[[
                     "Label", "Plane Label", "Type", "Unit",
-                    "Anterior", "Actual", "Δ", "Δ %", "Tendencia",
+                    "Previous", "Current", "Δ", "Δ %", "_trend_fmt",
                     "Status_prev", "Status",
                 ]].rename(columns={
-                    "Status_prev": "Status anterior",
-                    "Status": "Status actual",
+                    "_trend_fmt": "Trend",
+                    "Status_prev": "Previous status",
+                    "Status": "Current status",
                 })
                 # Ordenar por trend critico primero
                 _trend_order = {"up_critical": 0, "up": 1, "no_prev": 2,
@@ -2021,7 +2022,7 @@ try:
                 _disp = _disp.loc[cmp_df.index]
                 st.dataframe(_disp, width="stretch", hide_index=True)
 except Exception as _hist_e:
-    st.caption(f"_(Histórico no disponible: {_hist_e})_")
+    st.caption(f"_(History unavailable: {_hist_e})_")
 
 
 # Ciclo 23.121 — Helper card "Autoanálisis Tabular List" + narrative box:
@@ -2030,14 +2031,14 @@ except Exception as _hist_e:
 # analista: Semáforo, ATENCIÓN, "firma tipo desbalance").
 if not st.session_state.get("_loaded_from_snapshot"):
     helper_card(
-        title="Autoanálisis Tabular List",
+        title="Tabular List auto-analysis",
         subtitle=text_diag["headline"],
         chips=[
-            (f"Semáforo: {text_diag['status']}", text_diag["color"]),
+            (f"Traffic light: {text_diag['status']}", text_diag["color"]),
             (f"Normal: {text_diag['normal_count']}", None),
             (f"Alarm: {text_diag['alarm_count']}", None),
             (f"Danger: {text_diag['danger_count']}", None),
-            (f"Firma dominante: {text_diag['primary_pattern']}", None),
+            (f"Dominant signature: {text_diag['primary_pattern']}", None),
         ],
     )
     render_tabular_narrative_box(text_diag["headline"], text_diag["narrative"])
@@ -2074,7 +2075,7 @@ with col_export2:
         st.button("Download PNG HD", disabled=True, width="stretch")
 
 with col_report:
-    if st.button("Enviar a Reporte", width="stretch"):
+    if st.button("Send to Report", width="stretch"):
         try:
             png_bytes = st.session_state.wm_tabular_export_png_bytes
             if png_bytes is None:
@@ -2095,7 +2096,7 @@ with col_report:
                 total_rows=len(df_table),
                 text_diag=text_diag,
             )
-            st.success("Tabular List enviado al reporte")
+            st.success("Tabular List sent to report")
         except Exception as e:
             st.session_state.wm_tabular_export_error = str(e)
 

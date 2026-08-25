@@ -49,7 +49,7 @@ from core.balance.rotorface import rotor_face_svg, build_planes_1p, build_planes
 # Setup + auth
 # =====================================================================
 st.set_page_config(
-    page_title="Watermelon System | Balanceo",
+    page_title="Watermelon System | Balancing",
     page_icon="⚖️",
     layout="wide",
 )
@@ -61,7 +61,7 @@ apply_watermelon_page_style()
 _user = get_current_user() or {}
 _role = str(_user.get("role", "")).lower()
 if not is_page_allowed_for_role("pages/19_Balanceo.py", _role):
-    st.error("Tu rol no tiene acceso a este módulo.")
+    st.error("Your role does not have access to this module.")
     st.stop()
 
 UNITS = ["µm pk-pk", "mil pk-pk", "mm/s RMS"]
@@ -72,13 +72,13 @@ UNITS = ["µm pk-pk", "mil pk-pk", "mm/s RMS"]
 # =====================================================================
 def _hero() -> None:
     if st.session_state.get("bal_r2p"):
-        mode = "2 planos"
+        mode = "2 planes"
     elif st.session_state.get("bal_r1p"):
-        mode = "1 plano"
+        mode = "1 plane"
     else:
         mode = "—"
     bal_hero_card(
-        asset_name=st.session_state.get("rep_asset") or "(activo sin especificar)",
+        asset_name=st.session_state.get("rep_asset") or "(unspecified asset)",
         client=st.session_state.get("rep_client", ""),
         site=st.session_state.get("rep_location", ""),
         mode=mode,
@@ -101,20 +101,20 @@ def _vector_inputs(prefix: str, title: str, unit: str):
                 f"margin-bottom:2px;'>{title}</div>", unsafe_allow_html=True)
     c1, c2 = st.columns(2)
     with c1:
-        mag = _num(f"{prefix}_mag", f"Magnitud [{unit}]", 0.0,
+        mag = _num(f"{prefix}_mag", f"Magnitude [{unit}]", 0.0,
                    min_value=0.0, step=0.1, format="%.3f")
     with c2:
-        ang = _num(f"{prefix}_ang", "Ángulo [°]", 0.0, step=1.0, format="%.1f")
+        ang = _num(f"{prefix}_ang", "Angle [°]", 0.0, step=1.0, format="%.1f")
     return mag, ang
 
 
 def _quality_severity(quality: str) -> Tuple[str, str, str]:
     q = (quality or "").upper()
     if q == "GOOD":
-        return ("ok", "Modelo estable", "GOOD")
+        return ("ok", "Stable model", "GOOD")
     if q in ("MED", "MEDIUM"):
-        return ("warning", "Sensible al ruido — revisar repetibilidad", "MED")
-    return ("fail", "Sensibilidad baja / matriz mal condicionada", "POOR")
+        return ("warning", "Noise-sensitive — check repeatability", "MED")
+    return ("fail", "Low sensitivity / ill-conditioned matrix", "POOR")
 
 
 # =====================================================================
@@ -143,13 +143,13 @@ def _bal_capture_cb(iid: str, targets: List[Tuple[str, str, str]]) -> None:
     for lbl, mag_key, ang_key in targets:
         v = res.get(lbl) if lbl else None
         if v is None:
-            warn.append(f"⚠ sin 1X live para {lbl or '—'}")
+            warn.append(f"⚠ no live 1X for {lbl or '—'}")
             continue
         mag, ph, _unit, _ts = v
         st.session_state[mag_key] = float(mag)
         st.session_state[ang_key] = float(ph)
         ok.append(f"{lbl}: {mag:.3f} ∠ {ph:.1f}°")
-    st.session_state["_bal_msg"] = " · ".join(ok + warn) or "Sin datos live."
+    st.session_state["_bal_msg"] = " · ".join(ok + warn) or "No live data."
 
 
 def _suggest_trial_cb(w_key: str, n_key: str, r_key: str, k_key: str, mag_key: str) -> None:
@@ -160,28 +160,28 @@ def _suggest_trial_cb(w_key: str, n_key: str, r_key: str, k_key: str, mag_key: s
     k = float(st.session_state.get(k_key) or 1.25)
     Wt, _u = recommend_trial_weight_g(W, N, R, k)
     st.session_state[mag_key] = round(float(Wt), 2)
-    st.session_state["_bal_tw_msg"] = f"Peso de prueba sugerido: {Wt:,.2f} g (API 684)"
+    st.session_state["_bal_tw_msg"] = f"Suggested trial weight: {Wt:,.2f} g (API 684)"
 
 
 def _trial_weight_suggester(prefix: str, mag_key: str,
-                            title: str = "Sugerir peso de prueba (API 684)") -> None:
+                            title: str = "Suggest trial weight (API 684)") -> None:
     """Panel compacto: W del plano + rpm + radio → sugiere y rellena el peso
     de prueba de esa corrida. W = carga soportada por ESE plano (≈ ½ del rotor
     si está entre dos cojinetes)."""
     with st.expander(title, expanded=False):
-        st.caption("W = peso soportado por **este plano** (≈ ½ del rotor entre 2 "
-                   "cojinetes). Fórmula API 684: W_prueba = 6350·W·k / (N·radio).")
+        st.caption("W = weight supported by **this plane** (≈ ½ of the rotor "
+                   "between 2 bearings). API 684 formula: W_trial = 6350·W·k / (N·radius).")
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            _num(f"{prefix}_sw", "Peso del plano W [kg]", 3500.0,
+            _num(f"{prefix}_sw", "Plane weight W [kg]", 3500.0,
                  min_value=0.0, step=10.0, format="%.1f")
         with c2:
-            _num(f"{prefix}_sn", "Velocidad N [rpm]",
+            _num(f"{prefix}_sn", "Speed N [rpm]",
                  float(st.session_state.get("iso_rpm")
                        or st.session_state.get("tw_rpm") or 3600.0),
                  min_value=0.0, step=10.0, format="%.0f")
         with c3:
-            _num(f"{prefix}_sr", "Radio [mm]", 420.0,
+            _num(f"{prefix}_sr", "Radius [mm]", 420.0,
                  min_value=0.0, step=1.0, format="%.1f")
         with c4:
             _num(f"{prefix}_sk", "Factor k", 1.25,
@@ -189,7 +189,7 @@ def _trial_weight_suggester(prefix: str, mag_key: str,
         Wt, _u = recommend_trial_weight_g(
             st.session_state[f"{prefix}_sw"], st.session_state[f"{prefix}_sn"],
             st.session_state[f"{prefix}_sr"], st.session_state[f"{prefix}_sk"])
-        st.button(f"Sugerir → {Wt:,.2f} g  ·  rellena el peso de prueba",
+        st.button(f"Suggest → {Wt:,.2f} g  ·  fill in the trial weight",
                   key=f"{prefix}_sbtn", on_click=_suggest_trial_cb,
                   args=(f"{prefix}_sw", f"{prefix}_sn", f"{prefix}_sr",
                         f"{prefix}_sk", mag_key))
@@ -200,26 +200,26 @@ def _trial_weight_suggester(prefix: str, mag_key: str,
 def _machine_and_planes(key: str):
     opts = _instance_options()
     if not opts:
-        st.info("No hay máquinas disponibles.")
+        st.info("No machines available.")
         return None, []
-    iid = st.selectbox("Máquina", [o[0] for o in opts],
+    iid = st.selectbox("Machine", [o[0] for o in opts],
                        format_func=lambda x: dict(opts).get(x, x), key=f"{key}_iid")
     from core.balance.live_source import list_balance_planes
     planes = list_balance_planes(iid)
     if not planes:
-        st.warning("Esta máquina no tiene sondas de proximidad radiales configuradas.")
+        st.warning("This machine has no radial proximity probes configured.")
     return iid, planes
 
 
 def _plane_label(p) -> str:
-    return f"[{p['section']}] {p['plane_label']} (plano {p['plane']})"
+    return f"[{p['section']}] {p['plane_label']} (plane {p['plane']})"
 
 
 # =====================================================================
 # Tabs
 # =====================================================================
 tab_tw, tab_1p, tab_2p, tab_iso, tab_rep = st.tabs([
-    "Peso de prueba", "1 plano", "2 planos", "Validación ISO", "Reporte",
+    "Trial weight", "1 plane", "2 planes", "ISO validation", "Report",
 ])
 
 
@@ -227,18 +227,18 @@ tab_tw, tab_1p, tab_2p, tab_iso, tab_rep = st.tabs([
 # 1) Peso de prueba (API 684)
 # ---------------------------------------------------------------------
 with tab_tw:
-    bal_section_header("Peso de prueba", "Masa de arranque para provocar un "
-                       "cambio de vector medible.", "API 684 · Umax = 6350·W/N", "⚙️")
+    bal_section_header("Trial weight", "Starting mass to produce a measurable "
+                       "vector change.", "API 684 · Umax = 6350·W/N", "⚙️")
     with st.container(border=True):
         c1, c2, c3, c4 = st.columns(4)
         with c1:
-            W_plane = _num("tw_wplane", "Peso del plano W [kg]", 3500.0,
+            W_plane = _num("tw_wplane", "Plane weight W [kg]", 3500.0,
                            min_value=0.0, step=10.0, format="%.1f")
         with c2:
-            rpm = _num("tw_rpm", "Velocidad N [rpm]", 3600.0,
+            rpm = _num("tw_rpm", "Speed N [rpm]", 3600.0,
                        min_value=0.0, step=10.0, format="%.0f")
         with c3:
-            radius = _num("tw_radius", "Radio de corrección [mm]", 420.0,
+            radius = _num("tw_radius", "Correction radius [mm]", 420.0,
                           min_value=0.0, step=1.0, format="%.1f")
         with c4:
             k = _num("tw_k", "Factor k (0.2–2.0)", 1.25,
@@ -247,21 +247,21 @@ with tab_tw:
     Wtrial, Utrial = recommend_trial_weight_g(W_plane, rpm, radius, k)
     Umax = umax_api684_gmm(W_plane, rpm)
     bal_kpi_row([
-        (f"{Wtrial:,.2f} g", "Peso de prueba", "recomendado @ radio indicado", "cyan"),
+        (f"{Wtrial:,.2f} g", "Trial weight", "recommended @ given radius", "cyan"),
         (f"{Umax:,.0f}", "Umax [g·mm]", "API 684", "navy"),
-        (f"{Utrial:,.0f}", "U de prueba [g·mm]", f"k = {k:.2f}", "navy"),
+        (f"{Utrial:,.0f}", "Trial U [g·mm]", f"k = {k:.2f}", "navy"),
     ])
-    st.caption("Ajustá el peso a la masa/rosca disponible y confirmá que genere "
-               "un cambio de vector medible antes de calcular la corrección.")
+    st.caption("Adjust the weight to the available mass/thread and confirm it "
+               "produces a measurable vector change before computing the correction.")
 
 
 # ---------------------------------------------------------------------
 # 2) Balanceo en 1 plano
 # ---------------------------------------------------------------------
 with tab_1p:
-    bal_section_header("Balanceo en 1 plano",
+    bal_section_header("Single-plane balancing",
                        "H = (Vt − V0) / Wt  ·  Wcorr = −V0 / H",
-                       "ISO 21940-12 · coeficiente de influencia", "🎯")
+                       "ISO 21940-12 · influence coefficient", "🎯")
     # Rotor 3D fijo (imagen) SIEMPRE arriba: la vibración medida (V0) aparece
     # apenas se carga el dato; el contrapeso, al calcular.
     _r1prev = st.session_state.get("bal_r1p")
@@ -273,17 +273,17 @@ with tab_1p:
         f"{_r1prev['corr_mass_g']:.1f} g" if _r1prev else "")
     st.markdown(rotor_face_svg(_planes1, rotation=st.session_state.get("b1_rot", "CCW")),
                 unsafe_allow_html=True)
-    st.caption("🔴 Vibración medida (V0)   ·   🔷 Contrapeso a instalar (aparece al calcular)")
+    st.caption("🔴 Measured vibration (V0)   ·   🔷 Correction weight to install (appears on calculation)")
 
     top = st.columns([1, 1, 1])
     with top[0]:
-        unit1 = st.selectbox("Unidad de vibración", UNITS, key="b1_unit")
+        unit1 = st.selectbox("Vibration unit", UNITS, key="b1_unit")
     with top[1]:
-        st.selectbox("Sentido de giro", ["CCW", "CW"], key="b1_rot",
-                     help="Orienta la escala angular contra el giro (convención "
-                          "de balanceo). No afecta el cálculo.")
+        st.selectbox("Rotation direction", ["CCW", "CW"], key="b1_rot",
+                     help="Orients the angular scale against rotation (balancing "
+                          "convention). Does not affect the calculation.")
     with top[2]:
-        source1 = st.radio("Fuente de datos", ["Manual", "Live Monitoring"],
+        source1 = st.radio("Data source", ["Manual", "Live Monitoring"],
                            key="b1_source", horizontal=True)
 
     if source1 == "Live Monitoring":
@@ -292,24 +292,24 @@ with tab_1p:
             if planes:
                 cpa, cpb = st.columns([2, 1])
                 with cpa:
-                    p_idx = st.selectbox("Plano a balancear", list(range(len(planes))),
+                    p_idx = st.selectbox("Plane to balance", list(range(len(planes))),
                                          format_func=lambda i: _plane_label(planes[i]),
                                          key="b1_live_plane")
                 with cpb:
-                    direction = st.radio("Dirección", ["Y", "X"], key="b1_live_dir",
+                    direction = st.radio("Direction", ["Y", "X"], key="b1_live_dir",
                                          horizontal=True)
                 from core.balance.live_source import pick_sensor_for_plane
                 sensor = pick_sensor_for_plane(planes[p_idx], direction)
-                st.caption(f"Sonda seleccionada: **{sensor or '—'}**  ·  "
-                           "capturá el 1X en cada corrida.")
+                st.caption(f"Selected probe: **{sensor or '—'}**  ·  "
+                           "capture 1X on each run.")
                 b1, b2, b3 = st.columns(3)
-                b1.button("Capturar V0", key="b1_cap_v0", use_container_width=True,
+                b1.button("Capture V0", key="b1_cap_v0", use_container_width=True,
                           on_click=_bal_capture_cb,
                           args=(iid, [(sensor, "b1_v0_mag", "b1_v0_ang")]))
-                b2.button("Capturar Vt", key="b1_cap_vt", use_container_width=True,
+                b2.button("Capture Vt", key="b1_cap_vt", use_container_width=True,
                           on_click=_bal_capture_cb,
                           args=(iid, [(sensor, "b1_vt_mag", "b1_vt_ang")]))
-                b3.button("Capturar Vf", key="b1_cap_vf", use_container_width=True,
+                b3.button("Capture Vf", key="b1_cap_vf", use_container_width=True,
                           on_click=_bal_capture_cb,
                           args=(iid, [(sensor, "b1_vf_mag", "b1_vf_ang")]))
                 if st.session_state.get("_bal_msg"):
@@ -320,13 +320,13 @@ with tab_1p:
     with st.container(border=True):
         colA, colB, colC = st.columns(3)
         with colA:
-            v0m, v0a = _vector_inputs("b1_v0", "V0 — vibración inicial", unit1)
+            v0m, v0a = _vector_inputs("b1_v0", "V0 — initial vibration", unit1)
         with colB:
-            twm, twa = _vector_inputs("b1_tw", "Peso de prueba [g]", "g")
+            twm, twa = _vector_inputs("b1_tw", "Trial weight [g]", "g")
         with colC:
-            vtm, vta = _vector_inputs("b1_vt", "Vt — con peso de prueba", unit1)
+            vtm, vta = _vector_inputs("b1_vt", "Vt — with trial weight", unit1)
 
-    if st.button("Calcular balanceo 1 plano", key="b1_calc", type="primary"):
+    if st.button("Calculate single-plane balancing", key="b1_calc", type="primary"):
         try:
             st.session_state["bal_r1p"] = solve_1plane(v0m, v0a, vtm, vta, twm, twa)
             st.rerun()
@@ -338,26 +338,26 @@ with tab_1p:
     if r:
         st.markdown("")
         bal_kpi_row([
-            (f"{r['corr_mass_g']:,.2f} g", "Peso de corrección", "masa a instalar", "cyan"),
-            (f"{r['corr_ang_deg']:,.1f}°", "Ángulo", "posición angular", "cyan"),
-            (f"{r['pred_mag']:,.3f}", f"Residual [{unit1}]", "vibración estimada", "green"),
+            (f"{r['corr_mass_g']:,.2f} g", "Correction weight", "mass to install", "cyan"),
+            (f"{r['corr_ang_deg']:,.1f}°", "Angle", "angular position", "cyan"),
+            (f"{r['pred_mag']:,.3f}", f"Residual [{unit1}]", "estimated vibration", "green"),
         ])
         sev, detail, tag = _quality_severity(r["quality"])
-        bal_status_banner(f"Calidad del modelo: {tag}", f"{detail}. {r['note']}", sev)
-        with st.expander("Validar contra la medición final (opcional)"):
-            vfm, _vfa = _vector_inputs("b1_vf", "Vf — vibración final medida", unit1)
+        bal_status_banner(f"Model quality: {tag}", f"{detail}. {r['note']}", sev)
+        with st.expander("Validate against final measurement (optional)"):
+            vfm, _vfa = _vector_inputs("b1_vf", "Vf — measured final vibration", unit1)
             if vfm > 0:
                 bal_kpi_row([(f"{pct_reduction(v0m, vfm):,.1f} %",
-                              "Reducción de vibración", "V0 → Vf", "green")])
+                              "Vibration reduction", "V0 → Vf", "green")])
 
 
 # ---------------------------------------------------------------------
 # 3) Balanceo en 2 planos
 # ---------------------------------------------------------------------
 with tab_2p:
-    bal_section_header("Balanceo en 2 planos",
-                       "Matriz de coeficientes de influencia 2×2 · corridas "
-                       "0 (inicial) · 1 (trial A) · 2 (trial B).",
+    bal_section_header("Two-plane balancing",
+                       "2×2 influence coefficient matrix · runs "
+                       "0 (initial) · 1 (trial A) · 2 (trial B).",
                        "ISO 21940-12", "🎯")
     # Rotor 3D fijo (imagen) SIEMPRE arriba: vibración inicial (A0/B0) aparece al
     # cargar los datos; los contrapesos, al calcular.
@@ -376,17 +376,17 @@ with tab_2p:
         _planes2 = build_planes_2p(_vibA, _vibB, _u2, None, "", None, "")
     st.markdown(rotor_face_svg(_planes2, rotation=st.session_state.get("b2_rot", "CCW")),
                 unsafe_allow_html=True)
-    st.caption("🔴 Vibración inicial (A0/B0)   ·   🔷 Contrapesos (aparecen al calcular)")
+    st.caption("🔴 Initial vibration (A0/B0)   ·   🔷 Correction weights (appear on calculation)")
 
     top = st.columns([1, 1, 1])
     with top[0]:
-        unit2 = st.selectbox("Unidad de vibración", UNITS, key="b2_unit")
+        unit2 = st.selectbox("Vibration unit", UNITS, key="b2_unit")
     with top[1]:
-        st.selectbox("Sentido de giro", ["CCW", "CW"], key="b2_rot",
-                     help="Orienta la escala angular contra el giro (convención "
-                          "de balanceo). No afecta el cálculo.")
+        st.selectbox("Rotation direction", ["CCW", "CW"], key="b2_rot",
+                     help="Orients the angular scale against rotation (balancing "
+                          "convention). Does not affect the calculation.")
     with top[2]:
-        source2 = st.radio("Fuente de datos", ["Manual", "Live Monitoring"],
+        source2 = st.radio("Data source", ["Manual", "Live Monitoring"],
                            key="b2_source", horizontal=True)
 
     if source2 == "Live Monitoring":
@@ -395,32 +395,32 @@ with tab_2p:
             if planes and len(planes) >= 2:
                 c1, c2, c3 = st.columns(3)
                 with c1:
-                    ia = st.selectbox("Plano A (lado acople)", list(range(len(planes))),
+                    ia = st.selectbox("Plane A (coupling side)", list(range(len(planes))),
                                       format_func=lambda i: _plane_label(planes[i]),
                                       key="b2_live_planeA")
                 with c2:
                     st.session_state.setdefault("b2_live_planeB", 1 if len(planes) > 1 else 0)
-                    ib = st.selectbox("Plano B (lado libre)", list(range(len(planes))),
+                    ib = st.selectbox("Plane B (free side)", list(range(len(planes))),
                                       format_func=lambda i: _plane_label(planes[i]),
                                       key="b2_live_planeB")
                 with c3:
-                    direction = st.radio("Dirección (ambos planos)", ["Y", "X"],
+                    direction = st.radio("Direction (both planes)", ["Y", "X"],
                                          key="b2_live_dir", horizontal=True)
                 from core.balance.live_source import pick_sensor_for_plane
                 sA = pick_sensor_for_plane(planes[ia], direction)
                 sB = pick_sensor_for_plane(planes[ib], direction)
-                st.caption(f"Sondas: A = **{sA or '—'}** · B = **{sB or '—'}** "
-                           f"(misma dirección {direction})")
+                st.caption(f"Probes: A = **{sA or '—'}** · B = **{sB or '—'}** "
+                           f"(same direction {direction})")
                 b1, b2, b3 = st.columns(3)
-                b1.button("Capturar corrida 0 (A0,B0)", key="b2_cap0",
+                b1.button("Capture run 0 (A0,B0)", key="b2_cap0",
                           use_container_width=True, on_click=_bal_capture_cb,
                           args=(iid, [(sA, "b2_a0_mag", "b2_a0_ang"),
                                       (sB, "b2_b0_mag", "b2_b0_ang")]))
-                b2.button("Capturar corrida 1 (A1,B1)", key="b2_cap1",
+                b2.button("Capture run 1 (A1,B1)", key="b2_cap1",
                           use_container_width=True, on_click=_bal_capture_cb,
                           args=(iid, [(sA, "b2_a1_mag", "b2_a1_ang"),
                                       (sB, "b2_b1_mag", "b2_b1_ang")]))
-                b3.button("Capturar corrida 2 (A2,B2)", key="b2_cap2",
+                b3.button("Capture run 2 (A2,B2)", key="b2_cap2",
                           use_container_width=True, on_click=_bal_capture_cb,
                           args=(iid, [(sA, "b2_a2_mag", "b2_a2_ang"),
                                       (sB, "b2_b2_mag", "b2_b2_ang")]))
@@ -428,34 +428,34 @@ with tab_2p:
                     st.caption("📡 " + st.session_state["_bal_msg"])
 
     with st.container(border=True):
-        st.markdown("**Corrida 0 — inicial**")
+        st.markdown("**Run 0 — initial**")
         c1, c2 = st.columns(2)
         with c1:
-            a0m, a0a = _vector_inputs("b2_a0", "A0 — sonda plano A", unit2)
+            a0m, a0a = _vector_inputs("b2_a0", "A0 — plane A probe", unit2)
         with c2:
-            b0m, b0a = _vector_inputs("b2_b0", "B0 — sonda plano B", unit2)
-    _trial_weight_suggester("b2_wa", "b2_wa_mag", "Sugerir peso de prueba · plano A (API 684)")
+            b0m, b0a = _vector_inputs("b2_b0", "B0 — plane B probe", unit2)
+    _trial_weight_suggester("b2_wa", "b2_wa_mag", "Suggest trial weight · plane A (API 684)")
     with st.container(border=True):
-        st.markdown("**Corrida 1 — peso de prueba en plano A**")
+        st.markdown("**Run 1 — trial weight on plane A**")
         c1, c2, c3 = st.columns(3)
         with c1:
-            wam, waa = _vector_inputs("b2_wa", "Trial plano A [g]", "g")
+            wam, waa = _vector_inputs("b2_wa", "Trial plane A [g]", "g")
         with c2:
-            a1m, a1a = _vector_inputs("b2_a1", "A1 — sonda A", unit2)
+            a1m, a1a = _vector_inputs("b2_a1", "A1 — probe A", unit2)
         with c3:
-            b1m, b1a = _vector_inputs("b2_b1", "B1 — sonda B", unit2)
-    _trial_weight_suggester("b2_wb", "b2_wb_mag", "Sugerir peso de prueba · plano B (API 684)")
+            b1m, b1a = _vector_inputs("b2_b1", "B1 — probe B", unit2)
+    _trial_weight_suggester("b2_wb", "b2_wb_mag", "Suggest trial weight · plane B (API 684)")
     with st.container(border=True):
-        st.markdown("**Corrida 2 — peso de prueba en plano B**")
+        st.markdown("**Run 2 — trial weight on plane B**")
         c1, c2, c3 = st.columns(3)
         with c1:
-            wbm, wba = _vector_inputs("b2_wb", "Trial plano B [g]", "g")
+            wbm, wba = _vector_inputs("b2_wb", "Trial plane B [g]", "g")
         with c2:
-            a2m, a2a = _vector_inputs("b2_a2", "A2 — sonda A", unit2)
+            a2m, a2a = _vector_inputs("b2_a2", "A2 — probe A", unit2)
         with c3:
-            b2m, b2a = _vector_inputs("b2_b2", "B2 — sonda B", unit2)
+            b2m, b2a = _vector_inputs("b2_b2", "B2 — probe B", unit2)
 
-    if st.button("Calcular balanceo 2 planos", key="b2_calc", type="primary"):
+    if st.button("Calculate two-plane balancing", key="b2_calc", type="primary"):
         try:
             st.session_state["bal_r2p"] = solve_2plane(
                 to_complex(a0m, a0a), to_complex(b0m, b0a),
@@ -474,13 +474,13 @@ with tab_2p:
         wa_mag, wa_ang = to_polar(r["WA_corr"])
         wb_mag, wb_ang = to_polar(r["WB_corr"])
         bal_kpi_row([
-            (f"{wa_mag:,.2f} g", "Corrección plano A", f"∠ {wa_ang:,.1f}°", "cyan"),
-            (f"{wb_mag:,.2f} g", "Corrección plano B", f"∠ {wb_ang:,.1f}°", "cyan"),
-            (f"{abs(r['A_after']):,.3f}", f"Residual A [{unit2}]", "estimado", "green"),
-            (f"{abs(r['B_after']):,.3f}", f"Residual B [{unit2}]", "estimado", "green"),
+            (f"{wa_mag:,.2f} g", "Plane A correction", f"∠ {wa_ang:,.1f}°", "cyan"),
+            (f"{wb_mag:,.2f} g", "Plane B correction", f"∠ {wb_ang:,.1f}°", "cyan"),
+            (f"{abs(r['A_after']):,.3f}", f"Residual A [{unit2}]", "estimated", "green"),
+            (f"{abs(r['B_after']):,.3f}", f"Residual B [{unit2}]", "estimated", "green"),
         ])
         sev, detail, tag = _quality_severity(r["quality"])
-        bal_status_banner(f"Calidad del modelo: {tag}",
+        bal_status_banner(f"Model quality: {tag}",
                           f"{detail}. cond(M) = {r['cond']:.1f}. {r['note']}", sev)
 
 
@@ -488,16 +488,16 @@ with tab_2p:
 # 4) Validación ISO 21940-11
 # ---------------------------------------------------------------------
 with tab_iso:
-    bal_section_header("Validación ISO",
-                       "e_per = 9549·G/N  ·  U_per = e_per·W. El residual se "
-                       "evalúa contra los grados ISO 21940.",
+    bal_section_header("ISO validation",
+                       "e_per = 9549·G/N  ·  U_per = e_per·W. The residual is "
+                       "evaluated against ISO 21940 grades.",
                        "ISO 21940-11", "✅")
     with st.container(border=True):
         c1, c2 = st.columns(2)
         with c1:
-            W_iso = _num("iso_w", "Peso del rotor W [kg]", 11000.0,
+            W_iso = _num("iso_w", "Rotor weight W [kg]", 11000.0,
                          min_value=0.0, step=10.0, format="%.1f")
-            rpm_iso = _num("iso_rpm", "Velocidad N [rpm]", 3600.0,
+            rpm_iso = _num("iso_rpm", "Speed N [rpm]", 3600.0,
                            min_value=0.0, step=10.0, format="%.0f")
         with c2:
             modo = st.radio("Residual U_res", ["Ingresar U_res [g·mm]",
@@ -506,30 +506,30 @@ with tab_iso:
                 U_res = _num("iso_ures", "U_res [g·mm]", 0.0, min_value=0.0,
                              step=1.0, format="%.1f")
             else:
-                mr = _num("iso_resmass", "Masa residual [g]", 0.0, min_value=0.0,
+                mr = _num("iso_resmass", "Residual mass [g]", 0.0, min_value=0.0,
                           step=0.1, format="%.2f")
-                rr = _num("iso_resrad", "Radio [mm]", 420.0, min_value=0.0,
+                rr = _num("iso_resrad", "Radius [mm]", 420.0, min_value=0.0,
                           step=1.0, format="%.1f")
                 U_res = calc_U_trial(mr, rr)
-                st.caption(f"U_res calculado = **{U_res:,.1f} g·mm**")
+                st.caption(f"U_res computed = **{U_res:,.1f} g·mm**")
 
     ev = evaluate_iso_grades(W_iso, rpm_iso, U_res)
     st.session_state["bal_iso"] = ev
     if ev["status_code"] == "FAIL":
-        bal_status_banner("No cumple", ev["summary_label"], "fail")
+        bal_status_banner("Does not comply", ev["summary_label"], "fail")
     elif ev["best_grade"] is not None and ev["best_grade"] <= 2.5:
-        bal_status_banner("Cumple", ev["summary_label"], "ok")
+        bal_status_banner("Complies", ev["summary_label"], "ok")
     else:
-        bal_status_banner("Cumple (calidad básica)", ev["summary_label"], "warning")
+        bal_status_banner("Complies (basic quality)", ev["summary_label"], "warning")
 
     rows = []
     for g in ev["results"]:
         rows.append({
-            "Grado": f"G{g['G']:g}",
+            "Grade": f"G{g['G']:g}",
             "e_per [µm]": round(g["e_per"], 3),
             "U_per [g·mm]": round(g["U_per"], 1),
             "U_res/U_per": round(g["ratio"], 2) if g["ratio"] < 900 else "—",
-            "Cumple": "✅" if g["pass"] else "❌",
+            "Complies": "✅" if g["pass"] else "❌",
         })
     st.dataframe(rows, hide_index=True, use_container_width=True)
 
@@ -538,8 +538,8 @@ with tab_iso:
 # 5) Reporte
 # ---------------------------------------------------------------------
 with tab_rep:
-    bal_section_header("Reporte", "Resumen de la sesión y PDF branded "
-                       "Watermelon/SIGA.", "ISO 21940 · API 684", "⎙")
+    bal_section_header("Report", "Session summary and branded "
+                       "Watermelon/SIGA PDF.", "ISO 21940 · API 684", "⎙")
 
     r1 = st.session_state.get("bal_r1p")
     r2 = st.session_state.get("bal_r2p")
@@ -547,27 +547,27 @@ with tab_rep:
 
     lines: List[str] = []
     if r1:
-        lines.append(f"1 plano · corrección {r1['corr_mass_g']:.2f} g @ "
+        lines.append(f"1 plane · correction {r1['corr_mass_g']:.2f} g @ "
                      f"{r1['corr_ang_deg']:.1f}° · residual {r1['pred_mag']:.3f} "
                      f"· {r1['quality']}")
     if r2:
         wa_m, wa_a = to_polar(r2["WA_corr"])
         wb_m, wb_a = to_polar(r2["WB_corr"])
-        lines.append(f"2 planos · A: {wa_m:.2f} g @ {wa_a:.1f}° · "
+        lines.append(f"2 planes · A: {wa_m:.2f} g @ {wa_a:.1f}° · "
                      f"B: {wb_m:.2f} g @ {wb_a:.1f}° · {r2['quality']}")
     if ev:
-        lines.append(f"Validación ISO · {ev['summary_label']}")
+        lines.append(f"ISO validation · {ev['summary_label']}")
 
     if lines:
         with st.container(border=True):
             for ln in lines:
                 st.markdown(f"- {ln}")
     else:
-        st.info("Aún no hay cálculos en esta sesión. Corré un balanceo en las "
-                "pestañas anteriores.")
+        st.info("No calculations in this session yet. Run a balancing in the "
+                "previous tabs.")
 
     st.markdown("")
-    bal_section_header("Datos del reporte")
+    bal_section_header("Report data")
 
     _live_iid = st.session_state.get("b2_live_iid") or st.session_state.get("b1_live_iid")
     if _live_iid:
@@ -593,14 +593,14 @@ with tab_rep:
     with st.container(border=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            rep_asset = st.text_input("Activo", key="rep_asset")
-            rep_client = st.text_input("Cliente", key="rep_client")
+            rep_asset = st.text_input("Asset", key="rep_asset")
+            rep_client = st.text_input("Client", key="rep_client")
         with c2:
-            rep_location = st.text_input("Sitio / ubicación", key="rep_location")
-            rep_specialist = st.text_input("Especialista", key="rep_specialist")
+            rep_location = st.text_input("Site / location", key="rep_location")
+            rep_specialist = st.text_input("Specialist", key="rep_specialist")
         with c3:
-            rep_date = st.text_input("Fecha", key="rep_date")
-            rep_notes = st.text_area("Notas", key="rep_notes", height=80)
+            rep_date = st.text_input("Date", key="rep_date")
+            rep_notes = st.text_area("Notes", key="rep_notes", height=80)
 
     def _pair(prefix: str):
         m = st.session_state.get(f"{prefix}_mag")
@@ -624,9 +624,9 @@ with tab_rep:
                      "wa": _pair("b2_wa"), "wb": _pair("b2_wb"), "result": r2}
 
     if not (one_plane or two_plane or ev):
-        st.info("Corré al menos un balanceo o una validación ISO para generar el PDF.")
+        st.info("Run at least one balancing or ISO validation to generate the PDF.")
     else:
-        if st.button("Generar reporte PDF", key="rep_pdf", type="primary"):
+        if st.button("Generate PDF report", key="rep_pdf", type="primary"):
             try:
                 from core.balance.report import build_balance_pdf
                 meta = {
@@ -643,13 +643,13 @@ with tab_rep:
                 st.session_state["bal_pdf"] = build_balance_pdf(
                     meta=meta, one_plane=one_plane, two_plane=two_plane, iso=ev)
             except Exception as e:  # noqa: BLE001
-                st.error(f"Error generando el PDF: {e}")
+                st.error(f"Error generating the PDF: {e}")
                 st.session_state.pop("bal_pdf", None)
         if st.session_state.get("bal_pdf"):
             import re as _re
             _fn = "Balanceo_" + _re.sub(r"[^A-Za-z0-9]+", "_",
                                         (rep_asset or "activo")).strip("_") + ".pdf"
-            st.download_button("⬇ Descargar PDF", data=st.session_state["bal_pdf"],
+            st.download_button("⬇ Download PDF", data=st.session_state["bal_pdf"],
                                file_name=_fn, mime="application/pdf")
 
 

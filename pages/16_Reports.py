@@ -439,16 +439,16 @@ if _rec_from and not st.session_state.get("wm_report_recovery_dismissed"):
     _rec_n = st.session_state.get("wm_report_recovered_n_items", 0)
     _rec_at = st.session_state.get("wm_report_recovered_at", "")
     st.warning(
-        f"**Tu reporte se recuperó de un backup automático.** "
-        f"El archivo principal tenía un problema (probablemente "
-        f"Streamlit se interrumpió mientras guardaba) y restauramos "
-        f"desde **`{_rec_from}`** con **{_rec_n} items**.\n\n"
-        f"**Por favor revisá** que estén todos los items que esperabas. "
-        f"Si falta algo del último ratito, puede haberse perdido entre el "
-        f"último guardado exitoso y la corrupción.",
+        f"**Your report was recovered from an automatic backup.** "
+        f"The main file had a problem (Streamlit was probably "
+        f"interrupted while saving) and we restored "
+        f"from **`{_rec_from}`** with **{_rec_n} items**.\n\n"
+        f"**Please check** that all the items you expected are present. "
+        f"If something from the last moment is missing, it may have been lost "
+        f"between the last successful save and the corruption.",
         icon="",
     )
-    if st.button("Entendido — descartar este aviso",
+    if st.button("Got it — dismiss this notice",
                  key="wm_report_recovery_dismiss"):
         st.session_state["wm_report_recovery_dismissed"] = True
         st.session_state.pop("wm_report_recovered_from", None)
@@ -456,17 +456,17 @@ if _rec_from and not st.session_state.get("wm_report_recovery_dismissed"):
 
 if _load_err and not st.session_state.get("wm_report_load_err_dismissed"):
     st.error(
-        f"**No pude cargar tu reporte ni desde backups.** "
-        f"El archivo `data/report_state.json` y todos sus backups (.bak.1 a "
-        f".bak.{5}) están corruptos o ilegibles.\n\n"
-        f"**Error técnico:** `{_load_err[:200]}`\n\n"
-        f"**Acción sugerida:** revisá manualmente la carpeta "
-        f"`data/` por si hay algún archivo recuperable. Si no, vas a tener "
-        f"que reconstruir el reporte desde cero. Esto NO debería volver a "
-        f"pasar — el sistema nuevo guarda 5 backups rotativos.",
+        f"**I couldn't load your report, even from backups.** "
+        f"The file `data/report_state.json` and all of its backups (.bak.1 to "
+        f".bak.{5}) are corrupted or unreadable.\n\n"
+        f"**Technical error:** `{_load_err[:200]}`\n\n"
+        f"**Suggested action:** manually check the "
+        f"`data/` folder in case there is a recoverable file. Otherwise, you'll "
+        f"have to rebuild the report from scratch. This should NOT happen "
+        f"again — the new system keeps 5 rotating backups.",
         icon="",
     )
-    if st.button("Entendido — empezar reporte limpio",
+    if st.button("Got it — start a clean report",
                  key="wm_report_load_err_dismiss"):
         st.session_state["wm_report_load_err_dismissed"] = True
         st.session_state.pop("wm_report_load_error", None)
@@ -519,14 +519,14 @@ if _wm_my_role == "client":
                     margin-bottom:18px;">
           <div style="font-size:11px;font-weight:800;letter-spacing:0.18em;
                       text-transform:uppercase;color:#a5b4fc;">
-            🔐 Acceso de cliente — Solo lectura
+            🔐 Client access — Read only
           </div>
           <div style="font-size:22px;font-weight:800;margin:6px 0;">
-            📚 Archivo histórico de reportes
+            📚 Report archive
           </div>
           <div style="color:rgba(226,232,240,0.85);font-size:13px;">
-            Bienvenido <b>{_wm_my_email}</b>. Acá podés consultar y descargar
-            los reportes técnicos que SIGASAS compartió con vos.
+            Welcome <b>{_wm_my_email}</b>. Here you can view and download
+            the technical reports that SIGASAS has shared with you.
           </div>
         </div>
         """,
@@ -540,12 +540,12 @@ if _wm_my_role == "client":
     # Quedan solo filtros útiles: por activo + por año.
     cf1, cf2 = st.columns([2, 1])
     with cf1:
-        _cf_asset = st.text_input("Filtrar por activo",
-                                   placeholder="ej. C-200C",
+        _cf_asset = st.text_input("Filter by asset",
+                                   placeholder="e.g. C-200C",
                                    key="wm_cli_arch_asset").strip()
     with cf2:
         _cf_year = st.selectbox(
-            "Año",
+            "Year",
             options=["(todos)"] + [str(y) for y in range(datetime.now().year, 2023, -1)],
             index=0, key="wm_cli_arch_year",
         )
@@ -565,11 +565,11 @@ if _wm_my_role == "client":
     )
     if not _cli_archived:
         st.info(
-            "📭 No hay reportes compartidos contigo todavía. "
-            "Cuando SIGASAS publique un nuevo análisis, aparecerá acá."
+            "📭 No reports have been shared with you yet. "
+            "When SIGASAS publishes a new analysis, it will appear here."
         )
     else:
-        st.caption(f"{len(_cli_archived)} reporte(s) disponibles")
+        st.caption(f"{len(_cli_archived)} report(s) available")
         for sc in _cli_archived:
             rm = sc.get("report_meta", {}) or {}
             _aid = sc.get("archive_id", "")
@@ -601,7 +601,7 @@ if _wm_my_role == "client":
                       {_client} · {_asset}
                     </div>
                     <div style="color:#475569;font-size:12px;margin-top:2px;">
-                      Publicado {_date} · {_size}
+                      Published {_date} · {_size}
                     </div>
                   </div>
                   <div>{_sev_badge}</div>
@@ -613,7 +613,7 @@ if _wm_my_role == "client":
                                            viewer_role=_wm_my_role)
             if _pb:
                 st.download_button(
-                    "Descargar este reporte",
+                    "Download this report",
                     data=_pb,
                     file_name=f"{_aid.split('/')[-1]}.pdf",
                     mime="application/pdf",
@@ -623,8 +623,8 @@ if _wm_my_role == "client":
 
     st.divider()
     st.caption(
-        "¿Necesitás un reporte que no aparece acá? Contactá a tu "
-        "especialista SIGASAS para solicitar la publicación."
+        "Need a report that doesn't appear here? Contact your "
+        "SIGASAS specialist to request that it be published."
     )
     st.stop()
 
@@ -642,12 +642,12 @@ if _can_inspect_others:
     ]
     if _other_users:
         with st.expander(
-            "Inspeccionar el reporte de otro especialista (read-only)",
+            "Inspect another specialist's report (read-only)",
             expanded=False,
         ):
-            _opts = ["(mi propio reporte)"] + [
+            _opts = ["(my own report)"] + [
                 f"{u['owner_email']}  ·  {u['n_items']} items  ·  "
-                f"último guardado: {u.get('last_saved', '')[:16]}"
+                f"last saved: {u.get('last_saved', '')[:16]}"
                 for u in _other_users
             ]
             _emails = [_wm_my_email] + [u["owner_email"] for u in _other_users]
@@ -656,7 +656,7 @@ if _can_inspect_others:
                 if _owner_of_this_report in _emails:
                     _current_idx = _emails.index(_owner_of_this_report)
             _pick_idx = st.selectbox(
-                "¿De quién?",
+                "Whose?",
                 options=range(len(_opts)),
                 format_func=lambda i: _opts[i],
                 index=_current_idx,
@@ -685,13 +685,13 @@ if not _is_my_own and _owner_of_this_report:
     bcols = st.columns([0.7, 0.3])
     with bcols[0]:
         st.warning(
-            f"️ **Estás viendo el reporte de `{_owner_of_this_report}` "
-            f"en modo SOLO LECTURA.** Cualquier cambio que hagas no se va a "
-            f"guardar. Para editarlo, usá el botón 'Duplicar a mi reporte'.",
+            f"️ **You are viewing `{_owner_of_this_report}`'s report "
+            f"in READ-ONLY mode.** Any changes you make will not be "
+            f"saved. To edit it, use the 'Duplicate to my report' button.",
             icon="",
         )
     with bcols[1]:
-        if st.button("Duplicar a mi reporte",
+        if st.button("Duplicate to my report",
                      use_container_width=True,
                      key="wm_dup_to_mine",
                      type="primary"):
@@ -709,8 +709,8 @@ if not _is_my_own and _owner_of_this_report:
             st.session_state["report_meta"] = _meta_to_copy
             st.session_state["report_state_loaded_for"] = _wm_my_email
             st.success(
-                f"✓ Duplicado al espacio tuyo ({len(_items_to_copy)} items). "
-                "Ahora podés editarlo libremente."
+                f"✓ Duplicated to your workspace ({len(_items_to_copy)} items). "
+                "You can now edit it freely."
             )
             st.rerun()
 
@@ -930,7 +930,7 @@ def _source_line(item: Dict[str, Any]) -> str:
         item.get("timestamp", "").strip(),
     ]
     parts = [p for p in parts if p]
-    return " | ".join(parts) if parts else "Sin metadata asociada"
+    return " | ".join(parts) if parts else "No associated metadata"
 
 
 def _count_by_type(items: List[Dict[str, Any]], item_type: str) -> int:
@@ -3370,8 +3370,8 @@ if not meta.get("reviewed_role"):
 from core.ui_theme import page_header as _wm_page_header  # hero compartido (v3.31.313)
 _wm_page_header(
     "Reports",
-    "Editor premium de entregables técnicos. Organiza figuras reales de Spectrum, "
-    "Waveform, Orbit y Tabular List, y exporta un PDF corporativo listo para cliente.",
+    "Premium editor for technical deliverables. Organize real figures from Spectrum, "
+    "Waveform, Orbit and Tabular List, and export a corporate PDF ready for the client.",
 )
 
 # =============================================================
@@ -3384,13 +3384,13 @@ try:
         free_disk_space_best_effort as _wm_free_space,
     )
     if _WM_PERSIST_ERR.get("enospc"):
-        st.warning("⚠️ **Disco lleno en el servidor.** El autoguardado está "
-                   "degradado (tu trabajo sigue en memoria). Libera espacio y "
-                   "vuelve a guardar.")
-        if st.button("🧹 Liberar espacio en disco", key="wm_free_disk"):
+        st.warning("⚠️ **Disk full on the server.** Autosave is "
+                   "degraded (your work is still in memory). Free up space and "
+                   "save again.")
+        if st.button("🧹 Free up disk space", key="wm_free_disk"):
             _freed = _wm_free_space()
-            st.success(f"Liberado: {_freed.get('backups', 0)} backups y "
-                       f"{_freed.get('tmp', 0)} temporales. Reintenta guardar.")
+            st.success(f"Freed: {_freed.get('backups', 0)} backups and "
+                       f"{_freed.get('tmp', 0)} temporary files. Try saving again.")
             _WM_PERSIST_ERR.clear()
             st.rerun()
 except Exception:
@@ -3412,13 +3412,13 @@ if _rep_family != "sistema":
 
 c1, c2, c3, c4 = st.columns(4)
 with c1:
-    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Figuras en reporte</div><div class="wm-kpi-value">{len(items):,}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Figures in report</div><div class="wm-kpi-value">{len(items):,}</div></div>', unsafe_allow_html=True)
 with c2:
-    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Bloques Spectrum</div><div class="wm-kpi-value">{_count_by_type(items, "spectrum"):,}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Spectrum blocks</div><div class="wm-kpi-value">{_count_by_type(items, "spectrum"):,}</div></div>', unsafe_allow_html=True)
 with c3:
-    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Preparado por</div><div class="wm-kpi-value">{meta["prepared_by"] or "-"}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Prepared by</div><div class="wm-kpi-value">{meta["prepared_by"] or "-"}</div></div>', unsafe_allow_html=True)
 with c4:
-    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Consecutivo</div><div class="wm-kpi-value">{meta["consecutive"] or "-"}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="wm-kpi"><div class="wm-kpi-label">Consecutive</div><div class="wm-kpi-value">{meta["consecutive"] or "-"}</div></div>', unsafe_allow_html=True)
 
 st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
 
@@ -3445,28 +3445,28 @@ def _wm_report_autosave_indicator() -> None:
         ok = False
     _ts = st.session_state.get("_wm_report_autosave_ts", "—")
     _color = "#10b981" if ok else "#d97706"
-    _msg = "Autoguardado" if ok else "Reintentando guardado"
+    _msg = "Autosaved" if ok else "Retrying save"
     st.markdown(
         f"<div style='display:inline-flex;align-items:center;gap:7px;"
         f"font-size:12px;color:#475569;background:#f1f5f9;border:1px solid #e2e8f0;"
         f"border-radius:8px;padding:5px 12px;margin-bottom:6px;'>"
         f"<span style='width:8px;height:8px;border-radius:50%;background:{_color};'></span>"
-        f"💾 {_msg} cada 2 min · último: <b>{_ts}</b></div>",
+        f"💾 {_msg} every 2 min · last: <b>{_ts}</b></div>",
         unsafe_allow_html=True,
     )
 
 _wm_report_autosave_indicator()
 
-st.markdown('<div class="wm-section-title">Acciones del reporte</div>', unsafe_allow_html=True)
+st.markdown('<div class="wm-section-title">Report actions</div>', unsafe_allow_html=True)
 
 ga1, ga2, ga3, ga4 = st.columns([1.2, 1.2, 1.2, 3.4])
 with ga1:
-    if st.button("Actualizar figuras", use_container_width=True):
+    if st.button("Refresh figures", use_container_width=True):
         _persist_items(_get_items())
         st.rerun()
 with ga2:
     clear_disabled = len(items) == 0
-    if st.button("Vaciar reporte", use_container_width=True, disabled=clear_disabled):
+    if st.button("Clear report", use_container_width=True, disabled=clear_disabled):
         _clear_all_items()
         st.rerun()
 
@@ -3534,23 +3534,23 @@ with ga4:
     _ai_exec_help = None
     if not is_ai_available():
         _ai_exec_help = (
-            "AI no disponible. Configurá [anthropic] api_key en los "
-            "secrets de Streamlit para habilitar."
+            "AI unavailable. Configure [anthropic] api_key in the "
+            "Streamlit secrets to enable it."
         )
     elif len(items) == 0:
         _ai_exec_help = (
-            "Agregá al menos una figura desde Spectrum, Trends, etc. "
-            "antes de generar la síntesis ejecutiva."
+            "Add at least one figure from Spectrum, Trends, etc. "
+            "before generating the executive synthesis."
         )
     if st.button(
-        "Generar Síntesis Ejecutiva AI",
+        "Generate AI Executive Synthesis",
         use_container_width=True,
         disabled=_ai_exec_disabled,
         type="primary" if not _ai_exec_disabled else "secondary",
         help=_ai_exec_help,
         key="wm_ai_exec_btn",
     ):
-        with st.spinner("Claude leyendo todas las figuras y sintetizando... (8-20 seg)"):
+        with st.spinner("Claude reading all the figures and synthesizing... (8-20 sec)"):
             try:
                 _exec_result = generate_executive_summary(
                     items, meta=meta, use_cache=True
@@ -3559,7 +3559,7 @@ with ga4:
                 _exec_result = {
                     "ok": False,
                     "markdown": (
-                        f"_Error inesperado:_\n\n```\n"
+                        f"_Unexpected error:_\n\n```\n"
                         f"{type(exc).__name__}: {exc}\n```"
                     ),
                     "error": str(exc)[:500],
@@ -3584,14 +3584,14 @@ with ga4:
 _exec_stored = st.session_state.get("wm_ai_exec_summary")
 if _exec_stored is not None:
     with st.expander(
-        "Síntesis Ejecutiva AI (vista previa, va al inicio del PDF)",
+        "AI Executive Synthesis (preview, goes at the start of the PDF)",
         expanded=True,
     ):
         if _exec_stored.get("ok"):
             if _exec_stored.get("fallback_used"):
                 st.info(
-                    "Generado con modelo de respaldo (Haiku 4.5). "
-                    "Podés regenerar más tarde cuando Sonnet recupere capacidad."
+                    "Generated with the fallback model (Haiku 4.5). "
+                    "You can regenerate later when Sonnet recovers capacity."
                 )
             # Ciclo 17.32 (v3.31.237) — STALENESS CHECK.
             # Comparar fingerprint guardado vs estado actual del reporte.
@@ -3610,10 +3610,10 @@ if _exec_stored is not None:
 
             if _is_stale:
                 st.warning(
-                    "⚠️ Esta síntesis fue generada con un estado anterior "
-                    "del reporte (items, severidad o fecha cambiaron). "
-                    "Hacé clic en **Regenerar** para que refleje el "
-                    "estado actual antes de exportar el PDF."
+                    "⚠️ This synthesis was generated with an earlier state "
+                    "of the report (items, severity or date changed). "
+                    "Click **Regenerate** so it reflects the "
+                    "current state before exporting the PDF."
                 )
 
             st.markdown(_exec_stored.get("markdown", ""))
@@ -3629,11 +3629,11 @@ if _exec_stored is not None:
             _exec_btn_cols = st.columns([1, 1, 5])
             with _exec_btn_cols[0]:
                 if st.button(
-                    "Regenerar",
+                    "Regenerate",
                     key="wm_ai_exec_regen",
                     use_container_width=True,
                 ):
-                    with st.spinner("Regenerando síntesis..."):
+                    with st.spinner("Regenerating synthesis..."):
                         try:
                             _exec_new = generate_executive_summary(
                                 items, meta=meta, use_cache=False
@@ -3653,29 +3653,29 @@ if _exec_stored is not None:
                             st.error(f"Error: {exc}")
             with _exec_btn_cols[1]:
                 if st.button(
-                    "Descartar",
+                    "Discard",
                     key="wm_ai_exec_clear",
                     use_container_width=True,
-                    help="Vuelve al resumen ejecutivo determinístico legacy.",
+                    help="Reverts to the legacy deterministic executive summary.",
                 ):
                     st.session_state["wm_ai_exec_summary"] = None
                     st.rerun()
             with _exec_btn_cols[2]:
                 _fb_tag = (
-                    " · modelo de respaldo"
+                    " · fallback model"
                     if _exec_stored.get("fallback_used") else ""
                 )
                 st.caption(
-                    f"Modelo: `{_model_used_exec}` · "
+                    f"Model: `{_model_used_exec}` · "
                     f"Tokens: {_exec_stored.get('input_tokens', 0)} → "
                     f"{_exec_stored.get('output_tokens', 0)} · "
-                    f"Costo: ~${_cost_exec:.4f}{_fb_tag}"
+                    f"Cost: ~${_cost_exec:.4f}{_fb_tag}"
                 )
         else:
             st.error(
-                _exec_stored.get("markdown", "Error al generar síntesis ejecutiva.")
+                _exec_stored.get("markdown", "Failed to generate the executive synthesis.")
             )
-            if st.button("Reintentar", key="wm_ai_exec_retry"):
+            if st.button("Retry", key="wm_ai_exec_retry"):
                 st.session_state["wm_ai_exec_summary"] = None
                 st.rerun()
 
@@ -3733,24 +3733,24 @@ _runcmp_disabled = (
 _runcmp_help = None
 if not is_ai_available():
     _runcmp_help = (
-        "AI no disponible. Configurá [anthropic] api_key en los secrets."
+        "AI unavailable. Configure [anthropic] api_key in the secrets."
     )
 elif len(items) == 0:
-    _runcmp_help = "Agregá figuras al reporte primero."
+    _runcmp_help = "Add figures to the report first."
 elif _runcmp_prev is None:
     if not _runcmp_iid and not _runcmp_itag:
         _runcmp_help = (
-            "No hay activo seleccionado en el meta del reporte. "
-            "Activá una instancia desde Machinery Library."
+            "No asset selected in the report meta. "
+            "Activate an instance from Machinery Library."
         )
     else:
         _runcmp_help = (
-            f"No se encontró un reporte anterior archivado del activo "
-            f"'{_runcmp_itag or _runcmp_iid}'. Este es el primer reporte "
-            f"de este activo, o el anterior aún no está archivado."
+            f"No previous archived report was found for asset "
+            f"'{_runcmp_itag or _runcmp_iid}'. This is the first report "
+            f"for this asset, or the previous one is not archived yet."
         )
 
-_runcmp_label_btn = "Comparar con reporte anterior"
+_runcmp_label_btn = "Compare with previous report"
 if _runcmp_prev:
     _prev_consec = (_runcmp_prev.get("report_meta", {}) or {}).get(
         "consecutive", ""
@@ -3758,7 +3758,7 @@ if _runcmp_prev:
     _prev_date = _runcmp_prev.get("archived_at", "")[:10]
     if _prev_consec or _prev_date:
         _runcmp_label_btn = (
-            f"Comparar con reporte anterior "
+            f"Compare with previous report "
             f"({_prev_consec or _prev_date})"
         )
 
@@ -3773,7 +3773,7 @@ with _runcmp_btn_cols[0]:
         type="primary" if not _runcmp_disabled else "secondary",
     ):
         with st.spinner(
-            "Claude comparando con el reporte anterior... (8-20 seg)"
+            "Claude comparing with the previous report... (8-20 sec)"
         ):
             try:
                 _runcmp_result = generate_run_comparison(
@@ -3786,7 +3786,7 @@ with _runcmp_btn_cols[0]:
                 _runcmp_result = {
                     "ok": False,
                     "markdown": (
-                        f"_Error inesperado:_\n\n```\n"
+                        f"_Unexpected error:_\n\n```\n"
                         f"{type(exc).__name__}: {exc}\n```"
                     ),
                     "error": str(exc)[:500],
@@ -3810,30 +3810,30 @@ with _runcmp_btn_cols[1]:
         _prev_iid = _prev_meta.get("instance_tag", "")
         _prev_date_disp = _runcmp_prev.get("archived_at", "")[:10]
         st.caption(
-            f"Reporte anterior detectado: **{_prev_meta.get('consecutive', '—')}** · "
-            f"{_prev_date_disp} · Severidad anterior: **{_prev_sev}** · "
-            f"Activo: {_prev_iid or 'N/A'}"
+            f"Previous report detected: **{_prev_meta.get('consecutive', '—')}** · "
+            f"{_prev_date_disp} · Previous severity: **{_prev_sev}** · "
+            f"Asset: {_prev_iid or 'N/A'}"
         )
 
 # Render del resultado del run-compare
 _runcmp_stored = st.session_state.get("wm_ai_runcmp_result")
 if _runcmp_stored is not None:
     with st.expander(
-        "Evolución desde la última corrida (vista previa, va al PDF)",
+        "Evolution since the last run (preview, goes to the PDF)",
         expanded=True,
     ):
         if _runcmp_stored.get("ok"):
             if _runcmp_stored.get("fallback_used"):
                 st.info(
-                    "Esta comparación se generó con el modelo de "
-                    "respaldo (Haiku 4.5). Calidad ligeramente menor."
+                    "This comparison was generated with the fallback "
+                    "model (Haiku 4.5). Slightly lower quality."
                 )
             _days = _runcmp_stored.get("days_elapsed")
             _prev_consec_disp = _runcmp_stored.get("prev_consecutive", "")
             if _days is not None and _prev_consec_disp:
                 st.caption(
-                    f"Comparado contra reporte **{_prev_consec_disp}** "
-                    f"({_days} días atrás)"
+                    f"Compared against report **{_prev_consec_disp}** "
+                    f"({_days} days ago)"
                 )
             st.markdown(_runcmp_stored.get("markdown", ""))
             _model_used_rc = str(_runcmp_stored.get("model", "") or "")
@@ -3841,11 +3841,11 @@ if _runcmp_stored is not None:
             _rc_btn_cols = st.columns([1, 1, 5])
             with _rc_btn_cols[0]:
                 if st.button(
-                    "Regenerar",
+                    "Regenerate",
                     key="wm_ai_runcmp_regen",
                     use_container_width=True,
                 ):
-                    with st.spinner("Regenerando..."):
+                    with st.spinner("Regenerating..."):
                         try:
                             _rc_new = generate_run_comparison(
                                 _runcmp_prev,
@@ -3859,7 +3859,7 @@ if _runcmp_stored is not None:
                             st.error(f"Error: {exc}")
             with _rc_btn_cols[1]:
                 if st.button(
-                    "Descartar",
+                    "Discard",
                     key="wm_ai_runcmp_clear",
                     use_container_width=True,
                 ):
@@ -3867,22 +3867,22 @@ if _runcmp_stored is not None:
                     st.rerun()
             with _rc_btn_cols[2]:
                 _fb_tag_rc = (
-                    " · modelo de respaldo"
+                    " · fallback model"
                     if _runcmp_stored.get("fallback_used") else ""
                 )
                 st.caption(
-                    f"Modelo: `{_model_used_rc}` · "
+                    f"Model: `{_model_used_rc}` · "
                     f"Tokens: {_runcmp_stored.get('input_tokens', 0)} → "
                     f"{_runcmp_stored.get('output_tokens', 0)} · "
-                    f"Costo: ~${_cost_rc:.4f}{_fb_tag_rc}"
+                    f"Cost: ~${_cost_rc:.4f}{_fb_tag_rc}"
                 )
         else:
             st.error(
                 _runcmp_stored.get(
-                    "markdown", "Error al generar comparación run-vs-run."
+                    "markdown", "Failed to generate the run-vs-run comparison."
                 )
             )
-            if st.button("Reintentar", key="wm_ai_runcmp_retry"):
+            if st.button("Retry", key="wm_ai_runcmp_retry"):
                 st.session_state["wm_ai_runcmp_result"] = None
                 st.rerun()
 
@@ -3920,28 +3920,28 @@ _rul_disabled = (
 )
 _rul_help = None
 if not is_ai_available():
-    _rul_help = "AI no disponible. Configurá [anthropic] api_key."
+    _rul_help = "AI unavailable. Configure [anthropic] api_key."
 elif len(items) == 0:
-    _rul_help = "Agregá figuras al reporte primero."
+    _rul_help = "Add figures to the report first."
 elif len(_rul_history) == 0:
     if not _rul_iid and not _rul_itag:
         _rul_help = (
-            "Activá una instancia desde Machinery Library para "
-            "habilitar el análisis predictivo."
+            "Activate an instance from Machinery Library to "
+            "enable the predictive analysis."
         )
     else:
         _rul_help = (
-            f"Sin historial archivado del activo "
-            f"'{_rul_itag or _rul_iid}'. La proyección RUL requiere "
-            f"al menos un reporte previo (idealmente 3+ para "
+            f"No archived history for asset "
+            f"'{_rul_itag or _rul_iid}'. The RUL projection requires "
+            f"at least one previous report (ideally 3+ for "
             f"percentiles)."
         )
 
-_rul_label_btn = "Estimar Vida Útil Restante (RUL)"
+_rul_label_btn = "Estimate Remaining Useful Life (RUL)"
 if _rul_history:
     _rul_label_btn = (
-        f"Estimar Vida Útil Restante "
-        f"({len(_rul_history)} reportes históricos)"
+        f"Estimate Remaining Useful Life "
+        f"({len(_rul_history)} historical reports)"
     )
 
 _rul_btn_cols = st.columns([2.4, 3.6])
@@ -3955,8 +3955,8 @@ with _rul_btn_cols[0]:
         type="primary" if not _rul_disabled else "secondary",
     ):
         with st.spinner(
-            "Claude analizando trayectoria histórica y proyectando "
-            "vida útil... (10-25 seg)"
+            "Claude analyzing the historical trajectory and projecting "
+            "useful life... (10-25 sec)"
         ):
             try:
                 _rul_result = generate_rul_estimate(
@@ -3969,7 +3969,7 @@ with _rul_btn_cols[0]:
                 _rul_result = {
                     "ok": False,
                     "markdown": (
-                        f"_Error inesperado:_\n\n```\n"
+                        f"_Unexpected error:_\n\n```\n"
                         f"{type(exc).__name__}: {exc}\n```"
                     ),
                     "error": str(exc)[:500],
@@ -3991,35 +3991,35 @@ with _rul_btn_cols[1]:
         _rul_min = (_rul_history[0].get("archived_at", "") or "")[:10]
         _rul_max = (_rul_history[-1].get("archived_at", "") or "")[:10]
         _rul_quality = (
-            "Suficiente para percentiles"
+            "Sufficient for percentiles"
             if _rul_n >= MIN_HISTORY_FOR_RUL
-            else f"Análisis cualitativo solamente (mínimo {MIN_HISTORY_FOR_RUL} reportes para percentiles)"
+            else f"Qualitative analysis only (minimum {MIN_HISTORY_FOR_RUL} reports for percentiles)"
         )
         st.caption(
-            f"Historia detectada: **{_rul_n} reportes** entre "
-            f"{_rul_min} y {_rul_max}. {_rul_quality}"
+            f"History detected: **{_rul_n} reports** between "
+            f"{_rul_min} and {_rul_max}. {_rul_quality}"
         )
 
 # Render del resultado RUL
 _rul_stored = st.session_state.get("wm_ai_rul_result")
 if _rul_stored is not None:
     with st.expander(
-        "Proyección de vida útil restante (vista previa, va al PDF)",
+        "Remaining useful life projection (preview, goes to the PDF)",
         expanded=True,
     ):
         if _rul_stored.get("ok"):
             if _rul_stored.get("fallback_used"):
                 st.info(
-                    "Esta proyección se generó con el modelo de "
-                    "respaldo (Haiku 4.5). Calidad ligeramente menor."
+                    "This projection was generated with the fallback "
+                    "model (Haiku 4.5). Slightly lower quality."
                 )
             _n_h = _rul_stored.get("n_history", 0)
             _days_cov = _rul_stored.get("history_days_covered", 0)
             _mono = _rul_stored.get("monotonic", False)
             st.caption(
-                f"Base estadística: {_n_h} reportes · "
-                f"{_days_cov} días cubiertos · "
-                f"Trayectoria monotónica: {'sí' if _mono else 'no (requiere validación)'}"
+                f"Statistical base: {_n_h} reports · "
+                f"{_days_cov} days covered · "
+                f"Monotonic trajectory: {'yes' if _mono else 'no (requires validation)'}"
             )
             st.markdown(_rul_stored.get("markdown", ""))
             _model_used_rul = str(_rul_stored.get("model", "") or "")
@@ -4027,11 +4027,11 @@ if _rul_stored is not None:
             _rul_btn_cols2 = st.columns([1, 1, 5])
             with _rul_btn_cols2[0]:
                 if st.button(
-                    "Regenerar",
+                    "Regenerate",
                     key="wm_ai_rul_regen",
                     use_container_width=True,
                 ):
-                    with st.spinner("Regenerando..."):
+                    with st.spinner("Regenerating..."):
                         try:
                             _rul_new = generate_rul_estimate(
                                 _rul_history,
@@ -4045,7 +4045,7 @@ if _rul_stored is not None:
                             st.error(f"Error: {exc}")
             with _rul_btn_cols2[1]:
                 if st.button(
-                    "Descartar",
+                    "Discard",
                     key="wm_ai_rul_clear",
                     use_container_width=True,
                 ):
@@ -4053,22 +4053,22 @@ if _rul_stored is not None:
                     st.rerun()
             with _rul_btn_cols2[2]:
                 _fb_tag_rul = (
-                    " · modelo de respaldo"
+                    " · fallback model"
                     if _rul_stored.get("fallback_used") else ""
                 )
                 st.caption(
-                    f"Modelo: `{_model_used_rul}` · "
+                    f"Model: `{_model_used_rul}` · "
                     f"Tokens: {_rul_stored.get('input_tokens', 0)} → "
                     f"{_rul_stored.get('output_tokens', 0)} · "
-                    f"Costo: ~${_cost_rul:.4f}{_fb_tag_rul}"
+                    f"Cost: ~${_cost_rul:.4f}{_fb_tag_rul}"
                 )
         else:
             st.error(
                 _rul_stored.get(
-                    "markdown", "Error al generar proyección RUL."
+                    "markdown", "Failed to generate the RUL projection."
                 )
             )
-            if st.button("Reintentar", key="wm_ai_rul_retry"):
+            if st.button("Retry", key="wm_ai_rul_retry"):
                 st.session_state["wm_ai_rul_result"] = None
                 st.rerun()
 
@@ -4086,14 +4086,14 @@ _patterns_disabled = (
 )
 _patterns_help = None
 if not is_ai_available():
-    _patterns_help = "AI no disponible. Configurá [anthropic] api_key."
+    _patterns_help = "AI unavailable. Configure [anthropic] api_key."
 elif len(items) == 0:
-    _patterns_help = "Agregá figuras al reporte primero."
+    _patterns_help = "Add figures to the report first."
 
 _patterns_btn_cols = st.columns([2.4, 3.6])
 with _patterns_btn_cols[0]:
     if st.button(
-        "Buscar patrones similares en archivo histórico",
+        "Search for similar patterns in the report archive",
         key="wm_ai_patterns_btn",
         use_container_width=True,
         disabled=_patterns_disabled,
@@ -4101,8 +4101,8 @@ with _patterns_btn_cols[0]:
         type="primary" if not _patterns_disabled else "secondary",
     ):
         with st.spinner(
-            "Claude buscando patrones mecánicos similares en el "
-            "archivo histórico... (10-25 seg)"
+            "Claude searching for similar mechanical patterns in the "
+            "report archive... (10-25 sec)"
         ):
             try:
                 _patterns_result = find_similar_patterns(
@@ -4118,7 +4118,7 @@ with _patterns_btn_cols[0]:
                     "ok": False,
                     "matches": [],
                     "global_assessment": (
-                        f"_Error inesperado:_\n\n```\n"
+                        f"_Unexpected error:_\n\n```\n"
                         f"{type(exc).__name__}: {exc}\n```"
                     ),
                     "n_history_searched": 0,
@@ -4133,40 +4133,40 @@ with _patterns_btn_cols[0]:
 
 with _patterns_btn_cols[1]:
     st.caption(
-        "Reconoce patrones mecánicos similares en otros reportes "
-        "archivados (mismo cliente, otros activos). Memoria "
-        "institucional: cada reporte que archivás suma valor a los "
-        "próximos análisis."
+        "Recognizes similar mechanical patterns in other archived "
+        "reports (same client, other assets). Institutional "
+        "memory: every report you archive adds value to future "
+        "analyses."
     )
 
 # Render del resultado
 _patterns_stored = st.session_state.get("wm_ai_patterns_result")
 if _patterns_stored is not None:
     with st.expander(
-        "Patrones reconocidos en archivo histórico (vista previa, va al PDF)",
+        "Patterns recognized in the report archive (preview, goes to the PDF)",
         expanded=True,
     ):
         if _patterns_stored.get("ok"):
             if _patterns_stored.get("fallback_used"):
                 st.info(
-                    "Resultados generados con modelo de respaldo "
-                    "(Haiku 4.5). Calidad ligeramente menor."
+                    "Results generated with the fallback model "
+                    "(Haiku 4.5). Slightly lower quality."
                 )
             _n_hist_p = _patterns_stored.get("n_history_searched", 0)
             _global_p = _patterns_stored.get("global_assessment", "")
             st.caption(
-                f"Archivo searcheado: {_n_hist_p} reportes accesibles."
+                f"Archive searched: {_n_hist_p} accessible reports."
             )
             if _global_p:
                 st.markdown(f"**{_global_p}**")
             _matches_p = _patterns_stored.get("matches", []) or []
             if not _matches_p:
                 st.info(
-                    "No se identificaron patrones con similitud "
-                    "significativa (>40%) en el archivo accesible. "
-                    "Esto puede ser un caso novel para el programa "
-                    "de monitoreo, o el archivo necesita más reportes "
-                    "comparables."
+                    "No patterns with significant similarity (>40%) "
+                    "were identified in the accessible archive. "
+                    "This may be a novel case for the monitoring "
+                    "program, or the archive needs more comparable "
+                    "reports."
                 )
             else:
                 for i, m in enumerate(_matches_p, 1):
@@ -4193,17 +4193,17 @@ if _patterns_stored is not None:
                         f"font-weight:700; font-size:0.85rem; "
                         f"margin-right:10px;'>"
                         f"{_score}% · {_band}</span>"
-                        f"<b>{_consec or 'reporte'}</b> · {_date}"
-                        f" · {_asset} · severidad {_sev}"
+                        f"<b>{_consec or 'report'}</b> · {_date}"
+                        f" · {_asset} · severity {_sev}"
                         f"</div>",
                         unsafe_allow_html=True,
                     )
                     if _rationale:
-                        st.markdown(f"**Por qué son similares:** {_rationale}")
+                        st.markdown(f"**Why they are similar:** {_rationale}")
                     if _resolution and _resolution != "(resolución no documentada en el archivo)":
-                        st.markdown(f"**Resolución del caso histórico:** {_resolution}")
+                        st.markdown(f"**Resolution of the historical case:** {_resolution}")
                     if _applicability:
-                        st.markdown(f"**Aplicabilidad al caso actual:** {_applicability}")
+                        st.markdown(f"**Applicability to the current case:** {_applicability}")
                     # Botón de descarga del PDF citado
                     try:
                         from core.reports_archive import get_archived_pdf_bytes
@@ -4217,7 +4217,7 @@ if _patterns_stored is not None:
                     if _ref_pdf:
                         _safe_fname = (_consec or _archive_id.replace("/", "_"))[:40]
                         st.download_button(
-                            f"Descargar PDF del caso histórico",
+                            f"Download the historical case PDF",
                             data=_ref_pdf,
                             file_name=f"{_safe_fname}.pdf",
                             mime="application/pdf",
@@ -4236,11 +4236,11 @@ if _patterns_stored is not None:
             _patterns_btn_cols2 = st.columns([1, 1, 5])
             with _patterns_btn_cols2[0]:
                 if st.button(
-                    "Regenerar",
+                    "Regenerate",
                     key="wm_ai_patterns_regen",
                     use_container_width=True,
                 ):
-                    with st.spinner("Regenerando..."):
+                    with st.spinner("Regenerating..."):
                         try:
                             _new = find_similar_patterns(
                                 current_meta=meta,
@@ -4256,7 +4256,7 @@ if _patterns_stored is not None:
                             st.error(f"Error: {exc}")
             with _patterns_btn_cols2[1]:
                 if st.button(
-                    "Descartar",
+                    "Discard",
                     key="wm_ai_patterns_clear",
                     use_container_width=True,
                 ):
@@ -4264,19 +4264,19 @@ if _patterns_stored is not None:
                     st.rerun()
             with _patterns_btn_cols2[2]:
                 st.caption(
-                    f"Modelo: `{_model_used_p}` · "
+                    f"Model: `{_model_used_p}` · "
                     f"Tokens: {_patterns_stored.get('input_tokens', 0)} → "
                     f"{_patterns_stored.get('output_tokens', 0)} · "
-                    f"Costo: ~${_cost_p:.4f}{_fb_tag_p}"
+                    f"Cost: ~${_cost_p:.4f}{_fb_tag_p}"
                 )
         else:
             st.error(
                 _patterns_stored.get(
                     "global_assessment",
-                    "Error al buscar patrones similares.",
+                    "Failed to search for similar patterns.",
                 )
             )
-            if st.button("Reintentar", key="wm_ai_patterns_retry"):
+            if st.button("Retry", key="wm_ai_patterns_retry"):
                 st.session_state["wm_ai_patterns_result"] = None
                 st.rerun()
 
@@ -4302,20 +4302,20 @@ except Exception:
     _active_id = None
     _active_inst = None
 
-with st.expander("Auto-fill desde activo monitoreado", expanded=True):
+with st.expander("Auto-fill from monitored asset", expanded=True):
     if _active_inst is None:
         st.warning(
-            "No hay activo monitoreado activo. Anda a Machinery Library "
-            "y activa una máquina para que sus datos se auto-llenen acá."
+            "No monitored asset is active. Go to Machinery Library "
+            "and activate a machine so its data auto-fills here."
         )
     else:
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown(f"**Activo:** {_active_inst.tag or _active_inst.instance_id}")
-            st.caption(f"Cliente · {meta.get('client') or '—'}")
-            st.caption(f"Sitio · {meta.get('location') or '—'}")
-            st.caption(f"Clase · {meta.get('asset_class') or '—'}")
-            st.caption(f"Modelo · {meta.get('asset_model') or '—'}")
+            st.markdown(f"**Asset:** {_active_inst.tag or _active_inst.instance_id}")
+            st.caption(f"Client · {meta.get('client') or '—'}")
+            st.caption(f"Site · {meta.get('location') or '—'}")
+            st.caption(f"Class · {meta.get('asset_class') or '—'}")
+            st.caption(f"Model · {meta.get('asset_model') or '—'}")
         with c2:
             train_d = (meta.get('train_description') or '').strip()
             if train_d:
@@ -4336,38 +4336,38 @@ with st.expander("Auto-fill desde activo monitoreado", expanded=True):
                     test_bytes = get_instance_document_bytes(sch_inst, sch_doc)
                     if test_bytes:
                         st.success(
-                            f"✓ Esquemático listo para Resumen Ejecutivo "
+                            f"✓ Schematic ready for the Executive Summary "
                             f"({len(test_bytes) // 1024} KB)"
                         )
                     else:
                         st.error(
-                            f"✗ schematic_doc_id presente ({sch_doc}) pero "
-                            f"no se pudo leer el archivo del Vault. "
-                            f"¿El documento fue borrado?"
+                            f"✗ schematic_doc_id present ({sch_doc}) but "
+                            f"the Vault file could not be read. "
+                            f"Was the document deleted?"
                         )
                 except Exception as e:
-                    st.error(f"✗ Error leyendo esquemático: {e}")
+                    st.error(f"✗ Error reading schematic: {e}")
             elif inst_sch:
                 # La instancia tiene schematic_png pero el meta no se rellenó
                 st.warning(
-                    f"El activo tiene schematic_png={inst_sch[:20]}... "
-                    f"pero el meta del reporte no lo tomó. Click en "
-                    f"'Reset auto-fill' abajo para forzar recarga."
+                    f"The asset has schematic_png={inst_sch[:20]}... "
+                    f"but the report meta didn't take it. Click "
+                    f"'Reset auto-fill' below to force a reload."
                 )
-                if st.button("Reset auto-fill desde activo", key="reset_autofill"):
+                if st.button("Reset auto-fill from asset", key="reset_autofill"):
                     meta["schematic_doc_id"] = ""
                     meta["schematic_instance_id"] = ""
                     _autofill_report_meta_from_active_instance()
                     st.rerun()
             else:
                 st.error(
-                    "✗ El activo NO tiene esquemático principal vinculado. "
-                    "Andá a Machinery Library → tu máquina activa → "
-                    "Editar metadata → tab Esquemático → seleccioná tu PNG/JPG → guardar."
+                    "✗ The asset has NO main schematic linked. "
+                    "Go to Machinery Library → your active machine → "
+                    "Edit metadata → Schematic tab → select your PNG/JPG → save."
                 )
 
 with ga3:
-    if st.button("Preparar PDF", use_container_width=True, disabled=not pdf_ready):
+    if st.button("Prepare PDF", use_container_width=True, disabled=not pdf_ready):
         try:
             # Ciclo 17.26 P5+ — Si el especialista generó síntesis
             # ejecutiva AI, la inyectamos al meta para que el PDF la
@@ -4498,7 +4498,7 @@ if pdf_bytes is not None:
     dl_cols = st.columns([0.5, 0.5])
     with dl_cols[0]:
         st.download_button(
-            "Descargar PDF",
+            "Download PDF",
             data=pdf_bytes,
             file_name=(meta.get("consecutive") or "watermelon_report").replace(" ", "_") + ".pdf",
             mime="application/pdf",
@@ -4510,31 +4510,31 @@ if pdf_bytes is not None:
         _can_archive = _is_my_own and _wm_my_role in ("admin", "specialist")
         if not _can_archive:
             st.button(
-                "Archivar reporte",
+                "Archive report",
                 disabled=True, use_container_width=True,
-                help="Solo el autor del reporte puede archivarlo.",
+                help="Only the report author can archive it.",
             )
         else:
-            with st.popover("Archivar reporte", use_container_width=True):
-                st.markdown("**Archivar copia inmutable del PDF**")
+            with st.popover("Archive report", use_container_width=True):
+                st.markdown("**Archive an immutable copy of the PDF**")
                 st.caption(
-                    "Una vez archivado, el PDF queda guardado de forma permanente "
-                    "en el repositorio histórico (no se sobrescribe). "
-                    "Vas a poder consultarlo desde la pestaña 'Archivo histórico'."
+                    "Once archived, the PDF is stored permanently "
+                    "in the report repository (it is not overwritten). "
+                    "You'll be able to consult it from the 'Report archive' tab."
                 )
                 _share = st.checkbox(
-                    "Compartir con cliente (visible para users con role=client)",
+                    "Share with client (visible to users with role=client)",
                     value=False,
                     key="wm_archive_share_cb",
                 )
                 _notes = st.text_area(
-                    "Notas de esta versión (opcional)",
-                    placeholder="Ej: revisión final tras feedback del cliente; "
-                                "incluye análisis del segundo trip del jueves",
+                    "Notes for this version (optional)",
+                    placeholder="e.g. final revision after client feedback; "
+                                "includes analysis of Thursday's second trip",
                     key="wm_archive_notes",
                     height=80,
                 )
-                if st.button("Confirmar archivado",
+                if st.button("Confirm archive",
                              key="wm_archive_do",
                              type="primary",
                              use_container_width=True):
@@ -4547,11 +4547,11 @@ if pdf_bytes is not None:
                     )
                     if _arch_res.get("ok"):
                         st.success(
-                            f"✓ Archivado como `{_arch_res['archive_id']}` · "
+                            f"✓ Archived as `{_arch_res['archive_id']}` · "
                             f"{_arch_res['size_human']}"
                         )
                     else:
-                        st.error(f"Falló: {_arch_res.get('error', 'error')}")
+                        st.error(f"Failed: {_arch_res.get('error', 'error')}")
 
 if pdf_error:
     st.warning(f"PDF export error: {pdf_error}")
@@ -4560,7 +4560,7 @@ st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
 
 drafts = list_report_drafts()
 
-st.markdown('<div class="wm-section-title">Borradores del reporte</div>', unsafe_allow_html=True)
+st.markdown('<div class="wm-section-title">Report drafts</div>', unsafe_allow_html=True)
 
 d1, d2, d3, d4 = st.columns([1.9, 1.1, 1.1, 1.1])
 with d1:
@@ -4574,25 +4574,25 @@ with d1:
         st.session_state["report_draft_name_value"] = default_draft_name
 
     draft_name = st.text_input(
-        "Nombre del borrador",
+        "Draft name",
         key="report_draft_name_value",
     )
 with d2:
     st.write("")
     st.write("")
-    if st.button("Guardar borrador", use_container_width=True):
+    if st.button("Save draft", use_container_width=True):
         saved_name = save_named_report_draft(
             draft_name=draft_name,
             items=st.session_state.get("report_items", []),
             meta=st.session_state.get("report_meta", {}),
         )
         save_report_state(items=st.session_state.get("report_items", []), meta=st.session_state.get("report_meta", {}))
-        st.success(f"Borrador guardado: {saved_name}")
+        st.success(f"Draft saved: {saved_name}")
         st.rerun()
 with d3:
     st.write("")
     st.write("")
-    if st.button("Duplicar borrador", use_container_width=True):
+    if st.button("Duplicate draft", use_container_width=True):
         base_name = (draft_name or "reporte_actual").strip()
         duplicate_name = f"{base_name}_copia"
         saved_name = save_named_report_draft(
@@ -4600,12 +4600,12 @@ with d3:
             items=st.session_state.get("report_items", []),
             meta=st.session_state.get("report_meta", {}),
         )
-        st.success(f"Borrador duplicado: {saved_name}")
+        st.success(f"Draft duplicated: {saved_name}")
         st.rerun()
 with d4:
     st.write("")
     st.write("")
-    if st.button("Nuevo reporte", use_container_width=True):
+    if st.button("New report", use_container_width=True):
         st.session_state["report_items"] = []
         st.session_state["report_meta"] = dict(DEFAULT_REPORT_META)
         st.session_state["report_pdf_bytes"] = None
@@ -4617,7 +4617,7 @@ with d4:
 d5, d6, d7 = st.columns([2.2, 1.1, 1.1])
 with d5:
     selected_draft = st.selectbox(
-        "Borradores existentes",
+        "Existing drafts",
         options=drafts if drafts else ["—"],
         index=0,
         key="report_selected_draft",
@@ -4625,7 +4625,7 @@ with d5:
 with d6:
     st.write("")
     st.write("")
-    if st.button("Cargar borrador", use_container_width=True, disabled=not drafts or selected_draft == "—"):
+    if st.button("Load draft", use_container_width=True, disabled=not drafts or selected_draft == "—"):
         loaded = load_named_report_draft(selected_draft)
         merged_meta = dict(DEFAULT_REPORT_META)
         if isinstance(loaded.get("meta"), dict):
@@ -4638,113 +4638,113 @@ with d6:
         st.session_state["report_pdf_bytes"] = None
         st.session_state["report_pdf_error"] = None
         save_report_state(items=st.session_state["report_items"], meta=st.session_state["report_meta"])
-        st.success(f"Borrador cargado: {selected_draft}")
+        st.success(f"Draft loaded: {selected_draft}")
         st.rerun()
 with d7:
     st.write("")
     st.write("")
-    if st.button("Eliminar borrador", use_container_width=True, disabled=not drafts or selected_draft == "—"):
+    if st.button("Delete draft", use_container_width=True, disabled=not drafts or selected_draft == "—"):
         delete_named_report_draft(selected_draft)
         if st.session_state.get("report_draft_name_value") == selected_draft:
             pass
-        st.success(f"Borrador eliminado: {selected_draft}")
+        st.success(f"Draft deleted: {selected_draft}")
         st.rerun()
 
 st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
 
-st.markdown('<div class="wm-section-title">Metadatos del reporte</div>', unsafe_allow_html=True)
+st.markdown('<div class="wm-section-title">Report metadata</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="wm-meta-hint">La fecha del reporte se carga automáticamente con la fecha actual. El periodo evaluado es opcional y vale la pena cuando el servicio corresponde a una campaña, ventana operativa o rango de fechas.</div>',
+    '<div class="wm-meta-hint">The report date is loaded automatically with the current date. The evaluated period is optional and worthwhile when the service corresponds to a campaign, operating window or date range.</div>',
     unsafe_allow_html=True,
 )
 
 m1, m2, m3 = st.columns(3)
 with m1:
-    meta["report_title"] = st.text_input("Título del reporte", key="report_meta_report_title", value=meta["report_title"])
+    meta["report_title"] = st.text_input("Report title", key="report_meta_report_title", value=meta["report_title"])
 with m2:
-    meta["client"] = st.text_input("Cliente", key="report_meta_client", value=meta["client"])
+    meta["client"] = st.text_input("Client", key="report_meta_client", value=meta["client"])
 with m3:
-    meta["asset"] = st.text_input("Activo / máquina", key="report_meta_asset", value=meta["asset"])
+    meta["asset"] = st.text_input("Asset / machine", key="report_meta_asset", value=meta["asset"])
 
 m4, m5, m6 = st.columns(3)
 with m4:
-    meta["unit"] = st.text_input("Unidad", key="report_meta_unit", value=meta["unit"])
+    meta["unit"] = st.text_input("Unit", key="report_meta_unit", value=meta["unit"])
 with m5:
-    meta["location"] = st.text_input("Ubicación", key="report_meta_location", value=meta["location"])
+    meta["location"] = st.text_input("Location", key="report_meta_location", value=meta["location"])
 with m6:
-    meta["consecutive"] = st.text_input("Consecutivo", key="report_meta_consecutive", value=meta["consecutive"])
+    meta["consecutive"] = st.text_input("Consecutive", key="report_meta_consecutive", value=meta["consecutive"])
 
 # Ciclo 10A — bloque grande SIGA-style del activo en la portada
 m_sa1, m_sa2 = st.columns(2)
 with m_sa1:
     meta["asset_class"] = st.text_input(
-        "Clase de activo (portada)",
+        "Asset class (cover)",
         key="report_meta_asset_class",
         value=meta.get("asset_class", ""),
         placeholder="TURBOGENERADOR, MOTOR-BOMBA, COMPRESOR…",
         help=(
-            "Clase técnica del activo en mayúsculas — aparece en grande "
-            "en la portada del PDF, junto a la unidad. Estilo reporte SIGA."
+            "Technical asset class in uppercase — appears large "
+            "on the PDF cover, next to the unit. SIGA report style."
         ),
     )
 with m_sa2:
     meta["asset_model"] = st.text_input(
-        "Modelo / configuración (portada)",
+        "Model / configuration (cover)",
         key="report_meta_asset_model",
         value=meta.get("asset_model", ""),
         placeholder="LM5000, SGT-300, Brush 54 MW…",
-        help="Modelo/configuración del activo. Se imprime en grande debajo de la clase.",
+        help="Asset model/configuration. Printed large below the class.",
     )
 
 # Composición del tren acoplado — la mayoría de máquinas reales son trenes
 # acoplados (turbina + generador, motor + bomba, motor + compresor, etc.)
 meta["train_description"] = st.text_area(
-    "Composición del tren acoplado (opcional)",
+    "Coupled train composition (optional)",
     key="report_meta_train_description",
     value=meta.get("train_description", ""),
     height=80,
     placeholder=(
-        "Ejemplo: una turbina aeroderivada GE LM6000 acoplada por reductor "
-        "doble-helicoidal a un generador eléctrico Brush de 54 MW a 3600 rpm. "
-        "Este texto reemplaza al campo 'Activo' en la portada y narrativas "
-        "cuando se completa, permitiendo describir trenes mecánicos completos."
+        "Example: a GE LM6000 aeroderivative turbine coupled through a "
+        "double-helical gearbox to a 54 MW Brush electric generator at 3600 rpm. "
+        "This text replaces the 'Asset' field on the cover and in the narratives "
+        "when filled in, allowing you to describe complete mechanical trains."
     ),
 )
 
 m7, m8 = st.columns(2)
 with m7:
-    meta["prepared_by"] = st.text_input("Preparado por", key="report_meta_prepared_by", value=meta["prepared_by"])
-    meta["prepared_role"] = st.text_input("Cargo de quien prepara", key="report_meta_prepared_role", value=meta["prepared_role"])
+    meta["prepared_by"] = st.text_input("Prepared by", key="report_meta_prepared_by", value=meta["prepared_by"])
+    meta["prepared_role"] = st.text_input("Role of the preparer", key="report_meta_prepared_role", value=meta["prepared_role"])
     meta["prepared_city"] = st.text_input(
-        "Ciudad / país de quien prepara",
+        "City / country of the preparer",
         key="report_meta_prepared_city",
         value=meta.get("prepared_city", ""),
         placeholder="Cajicá, Cundinamarca · Colombia",
-        help="Ciudad y país que aparecen debajo del nombre/cargo en la portada.",
+        help="City and country shown below the name/role on the cover.",
     )
 with m8:
-    meta["reviewed_by"] = st.text_input("Revisado por", key="report_meta_reviewed_by", value=meta["reviewed_by"])
-    meta["reviewed_role"] = st.text_input("Cargo de quien revisa", key="report_meta_reviewed_role", value=meta["reviewed_role"])
+    meta["reviewed_by"] = st.text_input("Reviewed by", key="report_meta_reviewed_by", value=meta["reviewed_by"])
+    meta["reviewed_role"] = st.text_input("Role of the reviewer", key="report_meta_reviewed_role", value=meta["reviewed_role"])
     meta["reviewed_city"] = st.text_input(
-        "Ciudad / país de quien revisa",
+        "City / country of the reviewer",
         key="report_meta_reviewed_city",
         value=meta.get("reviewed_city", ""),
         placeholder="Cajicá, Cundinamarca · Colombia",
     )
 
 st.markdown(
-    '<div class="wm-signature-help">Estos cargos también se mostrarán en el bloque final de aprobación del PDF.</div>',
+    '<div class="wm-signature-help">These roles will also be shown in the final approval block of the PDF.</div>',
     unsafe_allow_html=True,
 )
 
 m9, m10 = st.columns(2)
 with m9:
-    meta["report_date"] = st.text_input("Fecha del reporte", key="report_meta_report_date", value=meta["report_date"] or TODAY_STR)
+    meta["report_date"] = st.text_input("Report date", key="report_meta_report_date", value=meta["report_date"] or TODAY_STR)
 with m10:
-    meta["period"] = st.text_input("Periodo evaluado (opcional)", key="report_meta_period", value=meta["period"], placeholder="Ejemplo: 2026-04-01 a 2026-04-07")
+    meta["period"] = st.text_input("Evaluated period (optional)", key="report_meta_period", value=meta["period"], placeholder="Example: 2026-04-01 to 2026-04-07")
 
 st.markdown(
-    '<div class="wm-highlight-box"><b>Sugerencia editorial</b><br>Si el servicio corresponde a una visita puntual, puedes dejar vacío el periodo evaluado y usar solo la fecha del reporte. Si cubre tendencia, campaña o ventana de operación, sí conviene llenarlo.</div>',
+    '<div class="wm-highlight-box"><b>Editorial tip</b><br>If the service corresponds to a one-off visit, you can leave the evaluated period empty and use only the report date. If it covers a trend, campaign or operating window, it is worth filling in.</div>',
     unsafe_allow_html=True,
 )
 
@@ -5359,9 +5359,9 @@ def _autodraft_single_section(
     return full.get(section, "")
 
 
-st.markdown('<div class="wm-section-title">Secciones narrativas</div>', unsafe_allow_html=True)
+st.markdown('<div class="wm-section-title">Narrative sections</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="wm-meta-hint">Si dejas vacíos los tres campos, esas secciones se ocultan en el PDF y las figuras pasan a numerarse desde 1. Usa "Auto-redactar desde figuras" para generar un draft inicial a partir de las narrativas de cada figura cargada.</div>',
+    '<div class="wm-meta-hint">If you leave the three fields empty, those sections are hidden in the PDF and the figures are renumbered from 1. Use "Auto-draft from figures" to generate an initial draft from the narratives of each loaded figure.</div>',
     unsafe_allow_html=True,
 )
 
@@ -5376,42 +5376,42 @@ st.markdown(
 # resumen ejecutivo separado. Ahora todo coherente.
 
 st.markdown(
-    '<div class="wm-muted">Cada sección puede regenerarse individualmente con el botón <b>Auto-redactar</b>. El draft se basa en metadatos del reporte (cliente, activo) y en hallazgos extraídos de las narrativas de cada figura cargada.</div>',
+    '<div class="wm-muted">Each section can be regenerated individually with the <b>Auto-draft</b> button. The draft is based on the report metadata (client, asset) and on findings extracted from the narratives of each loaded figure.</div>',
     unsafe_allow_html=True,
 )
 
 _section_specs = [
     {
         "key": "executive_summary",
-        "label": "Resumen ejecutivo",
-        "hint": "Página inicial del PDF, después de la portada",
+        "label": "Executive summary",
+        "hint": "First page of the PDF, after the cover",
         "height": 220,
-        "placeholder": "Síntesis de 4–5 párrafos: estado global, hallazgos clave, severidad y acciones críticas. Lo que el cliente lee primero al abrir el PDF.",
-        "btn_label": "Auto-redactar Resumen Ejecutivo",
+        "placeholder": "A 4–5 paragraph synthesis: overall status, key findings, severity and critical actions. What the client reads first when opening the PDF.",
+        "btn_label": "Auto-draft Executive Summary",
     },
     {
         "key": "service_objective",
-        "label": "Objetivo del servicio",
-        "hint": "¿Qué se evaluó y bajo qué normas?",
+        "label": "Service objective",
+        "hint": "What was evaluated and under which standards?",
         "height": 150,
-        "placeholder": "Evaluar la condición rotodinámica del activo según API 670 / API 684 / ISO 20816...",
-        "btn_label": "Auto-redactar Objetivo",
+        "placeholder": "Evaluate the rotordynamic condition of the asset according to API 670 / API 684 / ISO 20816...",
+        "btn_label": "Auto-draft Objective",
     },
     {
         "key": "service_development",
-        "label": "Desarrollo del servicio",
-        "hint": "Metodología — adquisición, procesamiento, comparación temporal, síntesis",
+        "label": "Service development",
+        "hint": "Methodology — acquisition, processing, temporal comparison, synthesis",
         "height": 220,
-        "placeholder": "Etapas del servicio ejecutado por el sistema Watermelon System...",
-        "btn_label": "Auto-redactar Desarrollo",
+        "placeholder": "Stages of the service executed by the Watermelon System...",
+        "btn_label": "Auto-draft Development",
     },
     {
         "key": "recommendations",
-        "label": "Recomendaciones",
-        "hint": "Acciones priorizadas a partir de los hallazgos consolidados",
+        "label": "Recommendations",
+        "hint": "Prioritized actions based on the consolidated findings",
         "height": 220,
-        "placeholder": "1. Investigar puntos en zona Alarm. 2. Verificar...",
-        "btn_label": "Auto-redactar Recomendaciones",
+        "placeholder": "1. Investigate points in the Alarm zone. 2. Verify...",
+        "btn_label": "Auto-draft Recommendations",
     },
 ]
 
@@ -5429,7 +5429,7 @@ for _spec in _section_specs:
         )
     with _h_right:
         if st.button(
-            "🪄 Auto-redactar",
+            "🪄 Auto-draft",
             use_container_width=True,
             disabled=len(items) == 0,
             key=f"autodraft_btn_{_key}",
@@ -5444,10 +5444,10 @@ for _spec in _section_specs:
                     items=st.session_state.get("report_items", []),
                     meta=meta,
                 )
-                st.success(f"«{_spec['label']}» regenerada.")
+                st.success(f"«{_spec['label']}» regenerated.")
                 st.rerun()
             except Exception as _exc:
-                st.error(f"No se pudo auto-redactar: {_exc}")
+                st.error(f"Could not auto-draft: {_exc}")
 
     # Textarea full-width
     # Ciclo 17.20 fix: NO podemos pasar value= si _wkey ya está en
@@ -5469,37 +5469,37 @@ st.session_state["report_meta"] = meta
 save_report_state(items=st.session_state.get("report_items", []), meta=st.session_state["report_meta"])
 
 st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
-st.markdown('<div class="wm-section-title">Estructura del reporte</div>', unsafe_allow_html=True)
+st.markdown('<div class="wm-section-title">Report structure</div>', unsafe_allow_html=True)
 
 if not items:
-    st.info("Todavía no hay figuras en el reporte. Entra a Spectrum, Waveform, Orbit o Tabular List y usa el botón 'Enviar a Reporte'.")
+    st.info("There are no figures in the report yet. Go to Spectrum, Waveform, Orbit or Tabular List and use the 'Send to Report' button.")
 else:
     for index, item in enumerate(items, start=1):
         st.markdown('<div class="wm-card"><div class="wm-figure-card">', unsafe_allow_html=True)
         badge_class = _type_badge_class(item["type"])
-        st.markdown(f'<div class="wm-block-title">Figura {index}. {item["title"]}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="wm-block-title">Figure {index}. {item["title"]}</div>', unsafe_allow_html=True)
         st.markdown(f'<div class="wm-block-subtitle"><span class="wm-badge {badge_class}">{_type_badge(item["type"])}</span>{_source_line(item)}</div>', unsafe_allow_html=True)
 
         tcol1, tcol2, tcol3, tcol4 = st.columns([2.4, 0.8, 0.8, 0.8])
         with tcol1:
-            new_title = st.text_input("Título de la figura", value=item["title"], key=f"report_title_{item['id']}")
+            new_title = st.text_input("Figure title", value=item["title"], key=f"report_title_{item['id']}")
             item["title"] = new_title
         with tcol2:
             st.write("")
             st.write("")
-            if st.button("↑ Subir", key=f"report_up_{item['id']}", use_container_width=True, disabled=index == 1):
+            if st.button("↑ Up", key=f"report_up_{item['id']}", use_container_width=True, disabled=index == 1):
                 _move_item(item["id"], -1)
                 st.rerun()
         with tcol3:
             st.write("")
             st.write("")
-            if st.button("↓ Bajar", key=f"report_down_{item['id']}", use_container_width=True, disabled=index == len(items)):
+            if st.button("↓ Down", key=f"report_down_{item['id']}", use_container_width=True, disabled=index == len(items)):
                 _move_item(item["id"], +1)
                 st.rerun()
         with tcol4:
             st.write("")
             st.write("")
-            if st.button("Eliminar", key=f"report_remove_{item['id']}", use_container_width=True):
+            if st.button("Remove", key=f"report_remove_{item['id']}", use_container_width=True):
                 _remove_item(item["id"])
                 st.rerun()
 
@@ -5522,11 +5522,11 @@ else:
                 )
 
         new_notes = st.text_area(
-            f"Interpretación técnica de la figura {index}",
+            f"Technical interpretation of figure {index}",
             value=item["notes"],
             key=f"report_notes_{item['id']}",
             height=150,
-            placeholder="Escribe aquí el análisis técnico que irá debajo de esta figura en el reporte final.",
+            placeholder="Write here the technical analysis that will go below this figure in the final report.",
         )
         item["notes"] = new_notes
 
@@ -5535,50 +5535,50 @@ else:
     _persist_items(items)
 
 st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
-st.markdown('<div class="wm-section-title">Vista previa del reporte</div>', unsafe_allow_html=True)
+st.markdown('<div class="wm-section-title">Report preview</div>', unsafe_allow_html=True)
 
 p1, p2 = st.columns([1.12, 1.88])
 with p1:
     st.markdown('<div class="wm-card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="wm-block-title">{meta["report_title"] or "Reporte técnico de vibraciones"}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="wm-block-title">{meta["report_title"] or "Technical vibration report"}</div>', unsafe_allow_html=True)
     st.markdown(
         f"""
         <div class="wm-note">
-            <strong>Cliente:</strong> {meta["client"] or "-"}<br>
-            <strong>Activo:</strong> {meta["asset"] or "-"}<br>
-            <strong>Unidad:</strong> {meta["unit"] or "-"}<br>
-            <strong>Ubicación:</strong> {meta["location"] or "-"}<br>
-            <strong>Preparado por:</strong> {meta["prepared_by"] or "-"}<br>
-            <strong>Cargo:</strong> {meta["prepared_role"] or "-"}<br>
-            <strong>Revisado por:</strong> {meta["reviewed_by"] or "-"}<br>
-            <strong>Cargo revisión:</strong> {meta["reviewed_role"] or "-"}<br>
-            <strong>Fecha del reporte:</strong> {meta["report_date"] or TODAY_STR}<br>
-            <strong>Periodo evaluado:</strong> {meta["period"] or "No aplica"}<br>
-            <strong>Consecutivo:</strong> {meta["consecutive"] or "-"}<br>
+            <strong>Client:</strong> {meta["client"] or "-"}<br>
+            <strong>Asset:</strong> {meta["asset"] or "-"}<br>
+            <strong>Unit:</strong> {meta["unit"] or "-"}<br>
+            <strong>Location:</strong> {meta["location"] or "-"}<br>
+            <strong>Prepared by:</strong> {meta["prepared_by"] or "-"}<br>
+            <strong>Role:</strong> {meta["prepared_role"] or "-"}<br>
+            <strong>Reviewed by:</strong> {meta["reviewed_by"] or "-"}<br>
+            <strong>Reviewer role:</strong> {meta["reviewed_role"] or "-"}<br>
+            <strong>Report date:</strong> {meta["report_date"] or TODAY_STR}<br>
+            <strong>Evaluated period:</strong> {meta["period"] or "N/A"}<br>
+            <strong>Consecutive:</strong> {meta["consecutive"] or "-"}<br>
         </div>
         """,
         unsafe_allow_html=True,
     )
     st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="wm-block-subtitle">Resumen ejecutivo (página inicial del PDF)</div>', unsafe_allow_html=True)
+    st.markdown('<div class="wm-block-subtitle">Executive summary (first page of the PDF)</div>', unsafe_allow_html=True)
     st.write(meta.get("executive_summary") or "—")
     st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="wm-block-subtitle">Objetivo del servicio</div>', unsafe_allow_html=True)
+    st.markdown('<div class="wm-block-subtitle">Service objective</div>', unsafe_allow_html=True)
     st.write(meta["service_objective"] or "—")
     st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="wm-block-subtitle">Recomendaciones</div>', unsafe_allow_html=True)
+    st.markdown('<div class="wm-block-subtitle">Recommendations</div>', unsafe_allow_html=True)
     st.write(meta["recommendations"] or "—")
     st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
-    st.markdown('<div class="wm-block-subtitle">Desarrollo del servicio</div>', unsafe_allow_html=True)
+    st.markdown('<div class="wm-block-subtitle">Service development</div>', unsafe_allow_html=True)
     st.write(meta["service_development"] or "—")
     st.markdown("</div>", unsafe_allow_html=True)
 
 with p2:
     st.markdown('<div class="wm-card">', unsafe_allow_html=True)
-    st.markdown('<div class="wm-block-title">Resumen ordenado de figuras</div>', unsafe_allow_html=True)
+    st.markdown('<div class="wm-block-title">Ordered figure summary</div>', unsafe_allow_html=True)
 
     if not items:
-        st.markdown('<div class="wm-note">No hay figuras agregadas todavía.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="wm-note">No figures added yet.</div>', unsafe_allow_html=True)
     else:
         for index, item in enumerate(items, start=1):
             summary_note = item["notes"][:240] + ("..." if len(item["notes"]) > 240 else "") if item["notes"] else ""
@@ -5587,7 +5587,7 @@ with p2:
                 f"""
                 <div class="wm-preview-card">
                     <span class="wm-badge {badge_class}">{_type_badge(item["type"])}</span>
-                    <span class="wm-badge wm-badge-generic">Figura {index}</span>
+                    <span class="wm-badge wm-badge-generic">Figure {index}</span>
                     <strong>{item["title"]}</strong><br>
                     <span class="wm-muted">{_source_line(item)}</span><br><br>
                     <span class="wm-note">{summary_note}</span>
@@ -5599,8 +5599,8 @@ with p2:
     st.markdown("</div>", unsafe_allow_html=True)
 
 st.caption(
-    "Flujo actual: Spectrum, Waveform, Orbit y Tabular List empujan contenido real al reporte mediante st.session_state['report_items']. "
-    "Reports actúa como editor premium del entregable técnico y exportador PDF profesional, sin reconstruir motores visuales."
+    "Current flow: Spectrum, Waveform, Orbit and Tabular List push real content to the report via st.session_state['report_items']. "
+    "Reports acts as a premium editor of the technical deliverable and a professional PDF exporter, without rebuilding the visual engines."
 )
 
 
@@ -5615,33 +5615,33 @@ st.divider()
 st.markdown(
     '<div class="wm-divider"></div><br/>'
     '<h2 style="margin-top:0;font-weight:800;color:#0f172a;">'
-    '📚 Archivo histórico de reportes</h2>',
+    '📚 Report archive</h2>',
     unsafe_allow_html=True,
 )
 
 _archive_stats = get_archive_stats()
 ah_k1, ah_k2, ah_k3 = st.columns(3)
 with ah_k1:
-    st.metric("Total archivados", _archive_stats["total"])
+    st.metric("Total archived", _archive_stats["total"])
 with ah_k2:
-    st.metric("Espacio total", _archive_stats["total_size_human"])
+    st.metric("Total space", _archive_stats["total_size_human"])
 with ah_k3:
-    st.metric("Autores con archivo", len(_archive_stats["by_owner"]))
+    st.metric("Authors with archive", len(_archive_stats["by_owner"]))
 
 # Filtros
 fc1, fc2, fc3, fc4 = st.columns([0.27, 0.27, 0.27, 0.19])
 with fc1:
-    _f_client = st.text_input("Filtrar cliente", placeholder="ej. PAREX",
+    _f_client = st.text_input("Filter client", placeholder="e.g. PAREX",
                                key="wm_arch_client").strip()
 with fc2:
-    _f_asset = st.text_input("Filtrar activo", placeholder="ej. C-200C",
+    _f_asset = st.text_input("Filter asset", placeholder="e.g. C-200C",
                               key="wm_arch_asset").strip()
 with fc3:
-    _f_owner = st.text_input("Filtrar autor", placeholder="ej. jsuarez",
+    _f_owner = st.text_input("Filter author", placeholder="e.g. jsuarez",
                               key="wm_arch_owner").strip()
 with fc4:
     _f_year = st.selectbox(
-        "Año",
+        "Year",
         options=["(todos)"] + [str(y) for y in range(datetime.now().year, 2023, -1)],
         index=0,
         key="wm_arch_year",
@@ -5665,14 +5665,14 @@ _archived = list_archived_reports(
 )
 
 st.caption(
-    f"Mostrando **{len(_archived)}** reportes archivados visibles para tu role "
+    f"Showing **{len(_archived)}** archived reports visible to your role "
     f"(`{_wm_my_role}`)"
 )
 
 if not _archived:
     st.info(
-        "No hay reportes archivados que coincidan con tus filtros. "
-        "Cuando generes un PDF y le des 'Archivar reporte', aparecerá acá."
+        "There are no archived reports matching your filters. "
+        "When you generate a PDF and click 'Archive report', it will appear here."
     )
 else:
     for sc in _archived:
@@ -5691,7 +5691,7 @@ else:
             # Streamlit/CommonMark tratara las líneas internas como bloques de código,
             # mostrando los <div> como texto crudo. textwrap.dedent normaliza la
             # indentación al mínimo común (0 acá) y el HTML se renderiza limpio.
-            _shared_str = " · compartido con cliente" if _shared else ""
+            _shared_str = " · shared with client" if _shared else ""
             _sev_pill = (
                 f'<span style="background:#fee2e2;color:#b91c1c;'
                 f'padding:4px 10px;border-radius:999px;font-size:10px;'
@@ -5718,7 +5718,7 @@ else:
                 )
                 if _pdf_b:
                     st.download_button(
-                        "Descargar PDF",
+                        "Download PDF",
                         data=_pdf_b,
                         file_name=f"{_aid.split('/')[-1]}.pdf",
                         mime="application/pdf",
@@ -5726,7 +5726,7 @@ else:
                         use_container_width=True,
                     )
                 else:
-                    st.button("Descargar PDF", disabled=True,
+                    st.button("Download PDF", disabled=True,
                               key=f"dl_dis_{_aid}", use_container_width=True)
             with ac2:
                 # Toggle compartir con cliente (solo owner o admin)
@@ -5734,7 +5734,7 @@ else:
                               or _wm_my_role == "admin")
                 if _can_share:
                     if _shared:
-                        if st.button("Despublicar",
+                        if st.button("Unpublish",
                                      key=f"unsh_{_aid}",
                                      use_container_width=True):
                             r = share_with_client(_aid, False,
@@ -5745,7 +5745,7 @@ else:
                             else:
                                 st.error(r.get("error"))
                     else:
-                        if st.button("Compartir",
+                        if st.button("Share",
                                      key=f"sh_{_aid}",
                                      use_container_width=True):
                             r = share_with_client(_aid, True,
@@ -5760,16 +5760,16 @@ else:
                 _can_del = (_owner.lower() == _wm_my_email
                             or _wm_my_role == "admin")
                 if _can_del:
-                    with st.popover("️  Eliminar", use_container_width=True):
-                        st.warning(f"Vas a eliminar: `{_aid}`")
-                        if st.button("Confirmar eliminación",
+                    with st.popover("️  Delete", use_container_width=True):
+                        st.warning(f"You are about to delete: `{_aid}`")
+                        if st.button("Confirm deletion",
                                      key=f"del_{_aid}",
                                      type="primary"):
                             r = delete_archived_report(_aid,
                                                         viewer_email=_wm_my_email,
                                                         viewer_role=_wm_my_role)
                             if r.get("ok"):
-                                st.success("Eliminado.")
+                                st.success("Deleted.")
                                 st.rerun()
                             else:
                                 st.error(r.get("error"))

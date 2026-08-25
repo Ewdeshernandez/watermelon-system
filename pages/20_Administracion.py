@@ -19,7 +19,7 @@ from __future__ import annotations
 import streamlit as st
 
 st.set_page_config(
-    page_title="Watermelon System | Administración",
+    page_title="Watermelon System | Administration",
     page_icon="🛡️",
     layout="wide",
 )
@@ -46,10 +46,10 @@ st.markdown(
          border-radius:14px; margin-bottom:18px;">
       <div style="font-size:11px; font-weight:700; letter-spacing:0.18em;
            text-transform:uppercase; color:{_CYAN}; margin-bottom:4px;">
-           SIGA Internal · Administración</div>
-      <div style="font-size:24px; font-weight:800;">Panel de Administración</div>
+           SIGA Internal · Administration</div>
+      <div style="font-size:24px; font-weight:800;">Administration Panel</div>
       <div style="font-size:13px; color:rgba(226,232,240,0.85); margin-top:4px;">
-           Clientes &amp; roles · Licencias Watermelon Planta · Usuarios del sistema</div>
+           Clients &amp; roles · Watermelon Plant Licenses · System users</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -87,7 +87,7 @@ st.markdown(
 
 _LABELS = [lbl for _, lbl in ADMIN_SECTIONS]
 _KEYS = [key for key, _ in ADMIN_SECTIONS]
-_choice = st.radio("Sección", _LABELS, horizontal=True, key="admin_section_choice",
+_choice = st.radio("Section", _LABELS, horizontal=True, key="admin_section_choice",
                    label_visibility="collapsed")
 _sel = _KEYS[_LABELS.index(_choice)] if _choice in _LABELS else "clientes"
 

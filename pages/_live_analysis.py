@@ -26,7 +26,7 @@ from core.auth import require_login, render_user_menu
 # =============================================================
 
 st.set_page_config(
-    page_title="Watermelon System | Análisis Avanzado",
+    page_title="Watermelon System | Advanced Analysis",
     layout="wide",
     initial_sidebar_state="expanded",  # Ciclo 23.161 — nav visible al entrar
 )
@@ -43,8 +43,8 @@ apply_watermelon_page_style()
 from core.ui_theme import page_header
 
 page_header(
-    "Análisis Avanzado",
-    subtitle="Espectro · Forma de onda · Órbita — último snapshot del activo",
+    "Advanced Analysis",
+    subtitle="Spectrum · Waveform · Orbit — latest asset snapshot",
 )
 
 # =============================================================
@@ -56,7 +56,7 @@ instance_id = (
     or st.session_state.get("live_asset_v3")
 )
 if not instance_id:
-    st.info("Entrá desde **Live Monitoring** con el botón 🍉 Análisis avanzado.")
+    st.info("Enter from **Live Monitoring** using the 🍉 Advanced Analysis button.")
     st.stop()
 
 _tag = str(instance_id).upper()
@@ -74,9 +74,9 @@ except Exception:
 # Ciclo 23.162 — Íconos Material (líneas monocromas, look industrial) en
 # vez de emojis. Espectro=barras FFT, Onda=línea temporal, Órbita=target.
 _VIEWS = [
-    ":material/equalizer: Espectro",
-    ":material/show_chart: Forma de onda",
-    ":material/track_changes: Órbita",
+    ":material/equalizer: Spectrum",
+    ":material/show_chart: Waveform",
+    ":material/track_changes: Orbit",
 ]
 
 c_left, c_right = st.columns([3, 2])
@@ -91,12 +91,12 @@ with c_left:
 with c_right:
     try:
         _view = st.segmented_control(
-            "Vista", _VIEWS, default=_VIEWS[0],
+            "View", _VIEWS, default=_VIEWS[0],
             key="wm_la_view", label_visibility="collapsed",
         )
     except Exception:
         _view = st.radio(
-            "Vista", _VIEWS, horizontal=True,
+            "View", _VIEWS, horizontal=True,
             key="wm_la_view_radio", label_visibility="collapsed",
         )
 _view = _view or _VIEWS[0]
@@ -156,8 +156,8 @@ _akey, _render = _KEY_BY_VIEW[_view]
 _snaps = list_snapshots_brief(instance_id, _akey)
 if not _snaps:
     st.info(
-        "Aún no hay un snapshot de este tipo para el activo. "
-        "Se genera desde Load Data / módulos de análisis."
+        "There is no snapshot of this type for the asset yet. "
+        "It is generated from Load Data / analysis modules."
     )
     st.stop()
 
@@ -167,35 +167,35 @@ _label_by_sid = {s["snapshot_id"]: s["date_label"] for s in _snaps}
 _dc1, _dc2 = st.columns([2, 3])
 with _dc1:
     _sel_sid = st.selectbox(
-        "📅 Fecha de la data",
+        "📅 Data date",
         _sid_options,
         index=0,
         format_func=lambda sid: _label_by_sid.get(sid, sid),
         key=f"wm_la_snapdate_{_akey}_{instance_id}",
-        help="Cada fecha es una corrida guardada con todos sus canales. "
-             "Elegí la fecha que querés ver.",
+        help="Each date is a saved run with all its channels. "
+             "Pick the date you want to view.",
     )
 with _dc2:
     st.markdown(
         f"<div style='padding-top:30px;color:#475569;font-size:13px;'>"
-        f"Mostrando datos del <b>{_label_by_sid.get(_sel_sid, _sel_sid)}</b> "
-        f"· {len(_snaps)} fecha(s) disponible(s)</div>",
+        f"Showing data from <b>{_label_by_sid.get(_sel_sid, _sel_sid)}</b> "
+        f"· {len(_snaps)} date(s) available</div>",
         unsafe_allow_html=True,
     )
 
 # --- Eliminar un snapshot subido por error (con confirmación) ---
-with st.expander("🗑️ Eliminar esta fecha (si se subió por error)", expanded=False):
+with st.expander("🗑️ Delete this date (if uploaded by mistake)", expanded=False):
     st.caption(
-        f"Se eliminará permanentemente el snapshot "
-        f"**{_label_by_sid.get(_sel_sid, _sel_sid)}** de este activo. "
-        f"Esta acción no se puede deshacer."
+        f"The snapshot "
+        f"**{_label_by_sid.get(_sel_sid, _sel_sid)}** for this asset will be "
+        f"permanently deleted. This action cannot be undone."
     )
     _confirm_del = st.checkbox(
-        "Confirmo que quiero eliminar esta fecha",
+        "I confirm I want to delete this date",
         key=f"wm_la_delconfirm_{_akey}_{instance_id}",
     )
     if st.button(
-        "Eliminar definitivamente",
+        "Delete permanently",
         disabled=not _confirm_del,
         key=f"wm_la_delbtn_{_akey}_{instance_id}",
     ):
@@ -211,16 +211,16 @@ with st.expander("🗑️ Eliminar esta fecha (si se subió por error)", expande
                 _measured_dt_cached.cache_clear()
             except Exception:
                 pass
-            st.success("Snapshot eliminado.")
+            st.success("Snapshot deleted.")
             st.rerun()
         else:
-            st.error("No se pudo eliminar el snapshot. Reintenta.")
+            st.error("Could not delete the snapshot. Try again.")
 
-with st.spinner("Cargando snapshot…"):
+with st.spinner("Loading snapshot…"):
     _payload = load_snapshot_payload(instance_id, _akey, _sel_sid)
 
 if not _payload:
-    st.info("No se pudo cargar el snapshot seleccionado.")
+    st.info("Could not load the selected snapshot.")
 else:
     _fu = _get_fam_units(instance_id)
     try:

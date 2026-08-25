@@ -641,13 +641,13 @@ with left_col:
     st.markdown(
         """
         <div class="wm-hero">
-            Diagnóstico avanzado para
-            <span class="accent">máquinas críticas.</span>
+            Advanced diagnostics for
+            <span class="accent">critical machines.</span>
         </div>
         <div class="wm-left-note">
-            Plataforma corporativa para monitoreo y análisis rotodinámico
-            de turbomaquinaria, generación, compresión y bombeo —
-            alineada con API 670 / API 684 / ISO 20816.
+            Enterprise platform for rotordynamic monitoring and analysis
+            of turbomachinery, power generation, compression and pumping —
+            aligned with API 670 / API 684 / ISO 20816.
         </div>
 
         <!-- Hero spectrum SVG — espectro de vibración decorativo
@@ -793,11 +793,11 @@ with right_col:
     st.markdown(
         """
         <div class="wm-login-top">🔐 Secure access</div>
-        <div class="wm-login-title">Ingresar</div>
-        <div class="wm-login-copy">Acceso sin contraseña: te enviamos un código de un solo uso a tu correo registrado. Las sesiones quedan auditadas para trazabilidad.</div>
+        <div class="wm-login-title">Sign in</div>
+        <div class="wm-login-copy">Passwordless access: we send a one-time code to your registered email. Sessions are audited for traceability.</div>
         <div class="wm-login-trust">
             <span class="icon">🛡</span>
-            <span>Código de un solo uso · sesión 1 h inactividad / 6 h máx · audit log</span>
+            <span>One-time code · 1 h idle / 6 h max session · audit log</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -805,7 +805,7 @@ with right_col:
 
     # Aviso de sesión expirada (tope de inactividad / 6 h absoluto)
     if st.session_state.pop("_wm_session_expired", False):
-        st.info("Tu sesión expiró por seguridad. Ingresá un nuevo código para continuar.")
+        st.info("Your session expired for security reasons. Enter a new code to continue.")
 
     _otp_step = st.session_state.get("otp_step", "email")
 
@@ -813,14 +813,14 @@ with right_col:
     if _otp_step != "code":
         with st.form("wm_otp_email_form", clear_on_submit=False):
             _email_in = st.text_input(
-                "Correo corporativo",
-                placeholder="nombre.apellido@sigasas.com",
+                "Corporate email",
+                placeholder="first.last@sigasas.com",
                 key="wm_otp_email",
                 autocomplete="email",
-                help=("Para SIGASAS: tu correo @sigasas.com. "
-                      "Para clientes: el correo registrado por tu administrador."),
+                help=("For SIGASAS: your @sigasas.com email. "
+                      "For clients: the email registered by your administrator."),
             )
-            _send = st.form_submit_button("Enviar código", use_container_width=True)
+            _send = st.form_submit_button("Send code", use_container_width=True)
         if _send:
             _res = auth_otp.request_code((_email_in or "").strip().lower())
             if _res.get("ok"):
@@ -828,21 +828,21 @@ with right_col:
                 st.session_state["otp_step"] = "code"
                 st.rerun()
             else:
-                st.error(_res.get("error", "No se pudo enviar el código."))
+                st.error(_res.get("error", "Could not send the code."))
 
     # ── Paso 2: código → verificar e ingresar ───────────────────────────
     else:
         _masked = auth_otp.mask_email(st.session_state.get("otp_email", ""))
-        st.caption(f"Enviamos un código de 6 dígitos a {_masked}. Vence en "
-                   f"{auth_otp.OTP_TTL_SECONDS // 60} minutos.")
+        st.caption(f"We sent a 6-digit code to {_masked}. It expires in "
+                   f"{auth_otp.OTP_TTL_SECONDS // 60} minutes.")
         with st.form("wm_otp_code_form", clear_on_submit=False):
             _code_in = st.text_input(
-                "Código de acceso",
-                placeholder="6 dígitos",
+                "Access code",
+                placeholder="6 digits",
                 key="wm_otp_code",
                 max_chars=6,
             )
-            _verify = st.form_submit_button("Verificar e ingresar",
+            _verify = st.form_submit_button("Verify and sign in",
                                             use_container_width=True)
         if _verify:
             _res = auth_otp.submit_code(
@@ -855,19 +855,19 @@ with right_col:
                     st.session_state.pop(_k, None)
                 st.switch_page("pages/_landing.py")
             else:
-                st.error(_res.get("error", "Código inválido."))
+                st.error(_res.get("error", "Invalid code."))
 
         _c1, _c2 = st.columns(2)
         with _c1:
-            if st.button("Reenviar código", use_container_width=True,
+            if st.button("Resend code", use_container_width=True,
                          key="wm_otp_resend"):
                 _res = auth_otp.request_code(st.session_state.get("otp_email", ""))
                 if _res.get("ok"):
-                    st.success("Te enviamos un código nuevo.")
+                    st.success("We sent you a new code.")
                 else:
-                    st.error(_res.get("error", "No se pudo reenviar."))
+                    st.error(_res.get("error", "Could not resend."))
         with _c2:
-            if st.button("Usar otro correo", use_container_width=True,
+            if st.button("Use a different email", use_container_width=True,
                          key="wm_otp_change_email"):
                 for _k in ("otp_step", "otp_email"):
                     st.session_state.pop(_k, None)

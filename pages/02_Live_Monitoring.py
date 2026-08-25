@@ -283,7 +283,7 @@ def _format_age(captured_at: Any) -> str:
         return "—"
     delta = (datetime.now(timezone.utc) - captured).total_seconds()
     if delta < 0:
-        return "ahora"
+        return "now"
     if delta < 60:
         return f"{int(delta)} s"
     if delta < 3600:
@@ -449,7 +449,7 @@ def phasor_svg(amp: Optional[float], phase: Optional[float], max_amp: float, col
     else:
         arrow = (
             f'<text x="{cx}" y="{cy + 3}" text-anchor="middle" font-size="10" '
-            f'fill="#94a3b8">— sin datos —</text>'
+            f'fill="#94a3b8">— no data —</text>'
         )
 
     return (
@@ -801,19 +801,19 @@ def render_sensor_map_library(
         return text.strip()
 
     drv_prefix_map = {
-        "gas_turbine_aero": "Turbina",
-        "gas_turbine_industrial": "Turbina",
-        "steam_turbine": "Turbina vapor",
+        "gas_turbine_aero": "Turbine",
+        "gas_turbine_industrial": "Turbine",
+        "steam_turbine": "Steam turbine",
         "electric_motor_sleeve": "Motor",
         "electric_motor_rolling": "Motor",
-        "recip_engine_8cyl_inline": "Motor recip.",
-        "recip_engine_16cyl_inline": "Motor recip.",
+        "recip_engine_8cyl_inline": "Recip. engine",
+        "recip_engine_16cyl_inline": "Recip. engine",
     }
     drvn_prefix_map = {
-        "generator_synchronous": "Generador",
-        "centrifugal_compressor": "Compresor",
-        "recip_compressor": "Compresor recip.",
-        "pump_centrifugal": "Bomba",
+        "generator_synchronous": "Generator",
+        "centrifugal_compressor": "Compressor",
+        "recip_compressor": "Recip. compressor",
+        "pump_centrifugal": "Pump",
         "gearbox": "Gearbox",
     }
 
@@ -855,7 +855,7 @@ def render_sensor_map_library(
             **_gbx_kw(instance_obj),
         )
     except Exception as e:
-        st.caption(f"(Asset library no pudo rendir: {e}) — cayendo al PNG legacy.")
+        st.caption(f"(Asset library could not render: {e}) — falling back to legacy PNG.")
         return False
 
     # Ciclo 23.33 — SVG display puro. El click directo en SVG no es
@@ -914,21 +914,21 @@ def _render_export_bar(
     right_cols = st.columns([7, 2])
     with right_cols[1]:
         try:
-            with st.popover("📥 Exportar diagrama", use_container_width=True):
+            with st.popover("📥 Export diagram", use_container_width=True):
                 st.markdown(
                     f"<div style='font-size:11px;color:#64748b;margin-bottom:6px;'>"
-                    f"Snapshot generado: <b>{ts}</b></div>",
+                    f"Snapshot generated: <b>{ts}</b></div>",
                     unsafe_allow_html=True,
                 )
                 st.download_button(
-                    label="📐 Descargar SVG vectorial",
+                    label="📐 Download vector SVG",
                     data=svg.encode("utf-8"),
                     file_name=f"{safe_id}_diagram_{ts}.svg",
                     mime="image/svg+xml",
                     use_container_width=True,
                     help=(
-                        "SVG = vectorial, escala infinita. Se inserta nativo en "
-                        "PowerPoint, Keynote, Word, Google Slides (desde 2019)."
+                        "SVG = vector, infinite scaling. Embeds natively in "
+                        "PowerPoint, Keynote, Word, Google Slides (since 2019)."
                     ),
                     key=f"export_svg_{safe_id}",
                     type="primary",
@@ -939,9 +939,9 @@ def _render_export_bar(
 
                 st.markdown(
                     "<div style='font-size:11px;color:#475569;margin-top:10px;line-height:1.5;'>"
-                    "💡 <b>¿Necesitás PNG local?</b> Abrí el SVG en "
+                    "💡 <b>Need a local PNG?</b> Open the SVG in "
                     "<a href='https://inkscape.org' target='_blank' rel='noopener'>Inkscape</a> "
-                    "o <a href='https://cloudconvert.com/svg-to-png' target='_blank' "
+                    "or <a href='https://cloudconvert.com/svg-to-png' target='_blank' "
                     "rel='noopener'>cloudconvert.com</a>."
                     "</div>",
                     unsafe_allow_html=True,
@@ -949,7 +949,7 @@ def _render_export_bar(
         except AttributeError:
             # Streamlit < 1.32 → fallback botón inline
             st.download_button(
-                "📐 SVG vectorial",
+                "📐 Vector SVG",
                 data=svg.encode("utf-8"),
                 file_name=f"{safe_id}_diagram_{ts}.svg",
                 mime="image/svg+xml",
@@ -1008,7 +1008,7 @@ def _build_share_meta(
     if n_danger > 0:
         status_label = f"⚠ DANGER ({n_danger})"
     elif n_alarm > 0:
-        status_label = f"⚠ ALARMA ({n_alarm})"
+        status_label = f"⚠ ALARM ({n_alarm})"
     else:
         status_label = "✓ NORMAL"
 
@@ -1047,8 +1047,8 @@ def _render_share_html(
     cfg = get_storage_share_config()
     if cfg is None:
         st.caption(
-            "_📱 Share por WhatsApp/Email no disponible — falta configurar_ "
-            "`anon_key` _en Streamlit secrets._"
+            "_📱 Share via WhatsApp/Email not available — need to configure_ "
+            "`anon_key` _in Streamlit secrets._"
         )
         return
 
@@ -1156,9 +1156,9 @@ def _render_share_html(
         </div>
         <div class="wm-share-status" id="wm-share-status"></div>
         <div class="wm-share-success" id="wm-share-success">
-            <div class="wm-share-success-title">✓ Snapshot publicado</div>
+            <div class="wm-share-success-title">✓ Snapshot published</div>
             <div class="wm-share-success-url" id="wm-share-url"></div>
-            <button class="wm-share-copy" id="wm-share-copy">📋 Copiar link</button>
+            <button class="wm-share-copy" id="wm-share-copy">📋 Copy link</button>
         </div>
     </div>
 
@@ -1200,7 +1200,7 @@ def _render_share_html(
             urlEl.textContent = url;
             successEl.classList.add('show');
             copyBtn.classList.remove('copied');
-            copyBtn.textContent = '📋 Copiar link';
+            copyBtn.textContent = '📋 Copy link';
         }}
         function hideSuccess() {{
             successEl.classList.remove('show');
@@ -1215,9 +1215,9 @@ def _render_share_html(
             if (META.train) lines.push(META.train);
             const k = [];
             if (META.speed && META.speed !== '—') k.push(META.speed);
-            if (META.n_sens > 0) k.push(`${{META.n_sens}} sensores`);
+            if (META.n_sens > 0) k.push(`${{META.n_sens}} sensors`);
             if (k.length) lines.push(k.join('  ·  '));
-            lines.push(`Estado: ${{META.status}}`);
+            lines.push(`Status: ${{META.status}}`);
             lines.push(`Snapshot: ${{TS}}`);
             lines.push('');
             lines.push(publicUrl);
@@ -1235,11 +1235,11 @@ def _render_share_html(
                 await Promise.race([
                     new Promise((resolve, reject) => {{
                         img.onload = resolve;
-                        img.onerror = () => reject(new Error('SVG no se pudo cargar como imagen'));
+                        img.onerror = () => reject(new Error('SVG could not load as image'));
                         img.src = url;
                     }}),
                     new Promise((_, rej) =>
-                        setTimeout(() => rej(new Error('Timeout cargando SVG (30s)')), 30000)
+                        setTimeout(() => rej(new Error('Timeout loading SVG (30s)')), 30000)
                     ),
                 ]);
                 const aspect = img.naturalHeight / img.naturalWidth;
@@ -1251,7 +1251,7 @@ def _render_share_html(
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
                 return await new Promise((res, rej) => {{
-                    canvas.toBlob(b => b ? res(b) : rej(new Error('toBlob falló')), 'image/png');
+                    canvas.toBlob(b => b ? res(b) : rej(new Error('toBlob failed')), 'image/png');
                 }});
             }} finally {{
                 URL.revokeObjectURL(url);
@@ -1285,16 +1285,16 @@ def _render_share_html(
         window.wmShare = async function(target) {{
             setDisabled(true);
             hideSuccess();
-            setStatus('⏳ Generando PNG 4K…', 'busy');
+            setStatus('⏳ Generating 4K PNG…', 'busy');
             try {{
                 const pngBlob = await svgToPngBlob(4000);
                 if (pngBlob.size > MAX_SIZE) {{
                     throw new Error(
-                        `PNG demasiado grande (${{(pngBlob.size/1024/1024).toFixed(1)}} MB > 5 MB). ` +
-                        `Reducí resolución del diagrama o usá el SVG.`
+                        `PNG too large (${{(pngBlob.size/1024/1024).toFixed(1)}} MB > 5 MB). ` +
+                        `Reduce the diagram resolution or use the SVG.`
                     );
                 }}
-                setStatus(`⬆ Subiendo ${{(pngBlob.size/1024).toFixed(0)}} KB a Supabase…`, 'busy');
+                setStatus(`⬆ Uploading ${{(pngBlob.size/1024).toFixed(0)}} KB to Supabase…`, 'busy');
                 const publicUrl = await uploadToSupabase(pngBlob);
                 setStatus('', '');
                 showSuccess(publicUrl);
@@ -1306,7 +1306,7 @@ def _render_share_html(
                 if (target === 'whatsapp') {{
                     urlToOpen = `https://wa.me/?text=${{encodeURIComponent(caption)}}`;
                 }} else {{
-                    const subject = encodeURIComponent(`Diagrama Watermelon — ${{META.tag}}`);
+                    const subject = encodeURIComponent(`Watermelon diagram — ${{META.tag}}`);
                     const body = encodeURIComponent(caption);
                     urlToOpen = `mailto:?subject=${{subject}}&body=${{body}}`;
                 }}
@@ -1316,21 +1316,21 @@ def _render_share_html(
                     try {{
                         await navigator.clipboard.writeText(caption);
                         setStatus(
-                            '⚠ El navegador bloqueó abrir la ventana — ' +
-                            'caption copiado al portapapeles, pegalo manualmente.',
+                            '⚠ The browser blocked opening the window — ' +
+                            'caption copied to clipboard, paste it manually.',
                             'busy'
                         );
                     }} catch (cbe) {{
                         setStatus(
-                            '⚠ El navegador bloqueó abrir la ventana y no se pudo ' +
-                            'copiar. Usá el link de arriba.',
+                            '⚠ The browser blocked opening the window and it could ' +
+                            'not be copied. Use the link above.',
                             'error'
                         );
                     }}
                 }}
             }} catch (e) {{
                 console.error('wmShare error:', e);
-                setStatus('✗ ' + (e.message || 'Error desconocido'), 'error');
+                setStatus('✗ ' + (e.message || 'Unknown error'), 'error');
             }} finally {{
                 setDisabled(false);
             }}
@@ -1341,14 +1341,14 @@ def _render_share_html(
             const url = urlEl.textContent;
             try {{
                 await navigator.clipboard.writeText(url);
-                copyBtn.textContent = '✓ Copiado';
+                copyBtn.textContent = '✓ Copied';
                 copyBtn.classList.add('copied');
                 setTimeout(() => {{
-                    copyBtn.textContent = '📋 Copiar link';
+                    copyBtn.textContent = '📋 Copy link';
                     copyBtn.classList.remove('copied');
                 }}, 2000);
             }} catch (e) {{
-                copyBtn.textContent = '✗ No se pudo copiar';
+                copyBtn.textContent = '✗ Could not copy';
             }}
         }});
     }})();
@@ -1505,7 +1505,7 @@ def render_sensor_map_hero(
         '<span><span class="lg-dot" style="background:#ef4444;"></span>Danger</span>'
         '<span><span class="lg-dot" style="background:#94a3b8;"></span>Sin Norma</span>'
         '<span style="margin-left:auto;color:#94a3b8;text-transform:none;letter-spacing:0;">'
-        'Hover sensor para ver valor</span>'
+        'Hover a sensor to see its value</span>'
         '</div>'
     )
 
@@ -1558,10 +1558,10 @@ def render_sensor_zoom_panel(
     if not match:
         # Sensor no existe en latest — limpiar query param y avisar
         st.warning(
-            f"Sensor `{selected_sensor}` no tiene lectura activa. "
-            "Click otro dot del diagrama o ✕ para cerrar."
+            f"Sensor `{selected_sensor}` has no active reading. "
+            "Click another dot on the diagram or ✕ to close."
         )
-        if st.button("✕ Cerrar selección", key="zoom_close_orphan"):
+        if st.button("✕ Close selection", key="zoom_close_orphan"):
             st.query_params.clear()
             st.rerun()
         return
@@ -1650,12 +1650,12 @@ def render_sensor_zoom_panel(
     # Gap. Cada métrica usa el mismo framework de plot (multi-sensor + bands +
     # paginación). Phasor / Polar plot quedan para más adelante.
     CHART_TYPE_TO_METRIC = {
-        "📈 Tendencia · Direct":       "Direct",
-        "📈 Tendencia · 1X amplitud":  "1X_Ampl",
-        "📈 Tendencia · 1X fase":      "1X_Phase",
-        "📈 Tendencia · 2X amplitud":  "2X_Ampl",
-        "📈 Tendencia · 2X fase":      "2X_Phase",
-        "📈 Tendencia · Gap":          "Gap",
+        "📈 Trend · Direct":       "Direct",
+        "📈 Trend · 1X amplitude": "1X_Ampl",
+        "📈 Trend · 1X phase":     "1X_Phase",
+        "📈 Trend · 2X amplitude": "2X_Ampl",
+        "📈 Trend · 2X phase":     "2X_Phase",
+        "📈 Trend · Gap":          "Gap",
     }
     # Ciclo 23.74 — SCL eliminado del zoom panel (era flow incorrecto:
     # asumía datos live de Supabase, pero el módulo SCL real es CSV-based
@@ -1665,13 +1665,13 @@ def render_sensor_zoom_panel(
     sel_col, range_col, close_col = st.columns([3, 2, 1])
     with sel_col:
         chart_type = st.selectbox(
-            "Tipo de gráfico",
+            "Chart type",
             options=list(CHART_TYPE_TO_METRIC.keys()) + [
-                "🔍 Espectro (próximamente)",
-                "🌊 Forma de onda (próximamente)",
-                "🌀 Orbit (próximamente)",
-                "📊 Cascade / Waterfall (próximamente)",
-                "📍 Shaft Centerline → ver módulo dedicado",
+                "🔍 Spectrum (coming soon)",
+                "🌊 Waveform (coming soon)",
+                "🌀 Orbit (coming soon)",
+                "📊 Cascade / Waterfall (coming soon)",
+                "📍 Shaft Centerline → see dedicated module",
             ],
             index=0,
             key=f"zoom_chart_type_{selected_sensor}",
@@ -1680,18 +1680,18 @@ def render_sensor_zoom_panel(
     with range_col:
         if chart_type in CHART_TYPE_TO_METRIC:
             range_choice = st.selectbox(
-                "Rango",
-                ["Última hora", "6 horas", "24 horas", "7 días", "30 días", "Todo"],
+                "Range",
+                ["Last hour", "6 hours", "24 hours", "7 days", "30 days", "All"],
                 index=1,
                 key=f"zoom_range_{selected_sensor}",
                 label_visibility="collapsed",
-                help="Cuanta historia traer del registro append-only en Supabase",
+                help="How much history to fetch from the append-only log in Supabase",
             )
         else:
-            range_choice = "6 horas"
+            range_choice = "6 hours"
             st.empty()
     with close_col:
-        if st.button("✕ Cerrar", key="zoom_close", use_container_width=True):
+        if st.button("✕ Close", key="zoom_close", use_container_width=True):
             st.query_params.clear()
             st.rerun()
 
@@ -1713,9 +1713,9 @@ def render_sensor_zoom_panel(
 
         if not all_sensors_for_metric:
             st.info(
-                f"Ningún sensor de este activo envía la métrica `{target_metric}` "
-                f"todavía. Verificá la configuración del collector o probá otro tipo "
-                f"de gráfico."
+                f"No sensor on this asset sends the `{target_metric}` metric "
+                f"yet. Check the collector configuration or try another chart "
+                f"type."
             )
         else:
             # Sensor primario para el chart (color de severidad + KPIs + bands)
@@ -1726,7 +1726,7 @@ def render_sensor_zoom_panel(
                 None,
             ) or {}
             sensor_unit = primary_row.get("unit", "")
-            metric_label = chart_type.replace("📈 Tendencia · ", "")
+            metric_label = chart_type.replace("📈 Trend · ", "")
 
             # Checkbox grid de sensores — todos los disponibles para la metric.
             # CSS override para que NO use el rojo nativo de Streamlit.
@@ -1762,16 +1762,16 @@ def render_sensor_zoom_panel(
                 with top_row[0]:
                     n_active = sum(1 for s in all_sensors_for_metric if sensor_state.get(s, s == primary))
                     st.caption(
-                        f"🎚 **Sensores en gráfico** · {n_active}/{len(all_sensors_for_metric)} activos · "
-                        f"metric `{target_metric}` · unidad `{sensor_unit or '—'}`"
+                        f"🎚 **Sensors in chart** · {n_active}/{len(all_sensors_for_metric)} active · "
+                        f"metric `{target_metric}` · unit `{sensor_unit or '—'}`"
                     )
                 with top_row[1]:
-                    if st.button("✓ Todos", key=f"all_{sensors_key}", use_container_width=True):
+                    if st.button("✓ All", key=f"all_{sensors_key}", use_container_width=True):
                         for s in all_sensors_for_metric:
                             st.session_state[sensors_key][s] = True
                         st.rerun()
                 with top_row[2]:
-                    if st.button("✗ Solo 1", key=f"clear_{sensors_key}", use_container_width=True):
+                    if st.button("✗ Only 1", key=f"clear_{sensors_key}", use_container_width=True):
                         st.session_state[sensors_key] = {primary: True}
                         st.rerun()
 
@@ -1800,18 +1800,18 @@ def render_sensor_zoom_panel(
             # filas son ~100s de fetches secuenciales y luego congelan
             # plotly + browser. 50k cubre 30+ días con 1 lectura/min.
             range_to_limit = {
-                "Última hora": 400,
-                "6 horas":     2200,
-                "24 horas":    9000,
-                "7 días":      62000,
-                "30 días":     150000,
-                "Todo":        50000,
+                "Last hour": 400,
+                "6 hours":   2200,
+                "24 hours":  9000,
+                "7 days":    62000,
+                "30 days":   150000,
+                "All":       50000,
             }
             limit = range_to_limit.get(range_choice, 2200)
             if limit > 20000:
                 st.caption(
-                    f"⚠ Rango grande ({limit:,} lecturas max) — la carga "
-                    f"puede tardar 30s+. Si el browser se traba, usá 24h o 7d."
+                    f"⚠ Large range ({limit:,} readings max) — loading "
+                    f"may take 30s+. If the browser freezes, use 24h or 7d."
                 )
 
             def _fetch_paginated(inst, var, met, total_limit, page_size=1000):
@@ -1841,8 +1841,8 @@ def render_sensor_zoom_panel(
                         # ahora avisamos al operador que el dataset puede
                         # estar truncado por un timestamp nulo en un row.
                         st.caption(
-                            f"⚠ Paginación cortada en {len(acc):,} filas "
-                            f"(fila con captured_at nulo)."
+                            f"⚠ Pagination stopped at {len(acc):,} rows "
+                            f"(row with null captured_at)."
                         )
                         break
                     try:
@@ -1898,8 +1898,8 @@ def render_sensor_zoom_panel(
 
             if not series_by_sensor:
                 st.info(
-                    f"Sin historial todavía para los sensores seleccionados en `{target_metric}`. "
-                    "Esperá unos minutos para que el collector acumule lecturas."
+                    f"No history yet for the selected sensors in `{target_metric}`. "
+                    "Wait a few minutes for the collector to accumulate readings."
                 )
             else:
                 import pandas as pd
@@ -1920,9 +1920,9 @@ def render_sensor_zoom_panel(
                 if primary_df.empty:
                     primary_df = df_trend
                 c1, c2, c3 = st.columns(3)
-                with c1: st.metric(f"Mín · {primary}", f"{primary_df['value'].min():.3f} {sensor_unit}")
-                with c2: st.metric(f"Máx · {primary}", f"{primary_df['value'].max():.3f} {sensor_unit}")
-                with c3: st.metric(f"Promedio · {primary}", f"{primary_df['value'].mean():.3f} {sensor_unit}")
+                with c1: st.metric(f"Min · {primary}", f"{primary_df['value'].min():.3f} {sensor_unit}")
+                with c2: st.metric(f"Max · {primary}", f"{primary_df['value'].max():.3f} {sensor_unit}")
+                with c3: st.metric(f"Average · {primary}", f"{primary_df['value'].mean():.3f} {sensor_unit}")
 
                 # Severity bands solo aplican para Direct (los thresholds están en
                 # término de amplitud Direct, no de fase ni de gap voltage).
@@ -1957,7 +1957,7 @@ def render_sensor_zoom_panel(
                     if show_bands and alarm_val > 0 and danger_val > alarm_val:
                         fig.add_hline(
                             y=alarm_val, line=dict(color="#d97706", width=1.2, dash="dash"),
-                            annotation_text="Alarma", annotation_position="top left",
+                            annotation_text="Alarm", annotation_position="top left",
                             annotation=dict(font=dict(color="#d97706", size=10, family="monospace"), xshift=-44),
                         )
 
@@ -2032,18 +2032,18 @@ def render_sensor_zoom_panel(
     elif chart_type.startswith("📍 Shaft Centerline"):
         # Ciclo 23.74 — SCL es CSV-based, vive en módulo dedicado
         st.info(
-            "**Shaft Centerline Plot** se construye desde archivos CSV "
-            "uploaded — no desde lecturas live. Andá al módulo dedicado:\n\n"
+            "**Shaft Centerline Plot** is built from uploaded CSV files "
+            "— not from live readings. Go to the dedicated module:\n\n"
             "🛰 **Time Domain → Shaft Centerline** (sidebar)\n\n"
-            "Ahí subís el CSV del análisis y obtenés el plot completo con "
-            "clearance boundary Cat IV, anillos de excentricidad, attitude "
-            "angle, eccentricity ratio, y comparación entre fechas."
+            "There you upload the analysis CSV and get the full plot with "
+            "Cat IV clearance boundary, eccentricity rings, attitude "
+            "angle, eccentricity ratio, and comparison across dates."
         )
     else:
         # Placeholder para Espectro / Waveform / Orbit / Cascade
         st.info(
-            f"**{chart_type}** — esta vista todavía no está integrada en el "
-            f"zoom panel. Pronto se integra inline para `{display_label}`."
+            f"**{chart_type}** — this view is not yet integrated into the "
+            f"zoom panel. It will be integrated inline soon for `{display_label}`."
         )
 
 
@@ -2068,14 +2068,14 @@ def compute_health_score(
       0-49   → Zona D (Peligro)   · rojo
     """
     if not latest:
-        return None, "Sin datos", "#94a3b8"
+        return None, "No data", "#94a3b8"
     s = severity_summary or {}
     n_normal = s.get("Normal", 0)
     n_alarm = s.get("Alarma", 0)
     n_danger = s.get("Danger", 0)
     n_eval = n_normal + n_alarm + n_danger
     if n_eval == 0:
-        return None, "Sin norma", "#94a3b8"
+        return None, "No standard", "#94a3b8"
     # Penalización: cada alarma resta hasta 18 pts proporcional, cada danger 45.
     penalty = (n_alarm * 18 + n_danger * 45) / n_eval
     score = int(round(max(0.0, 100.0 - penalty)))
@@ -2084,12 +2084,12 @@ def compute_health_score(
     elif n_alarm > 0:
         score = min(score, 74)
     if score >= 90:
-        return score, "Zona A · Normal", "#1D9E75"
+        return score, "Zone A · Normal", "#1D9E75"
     if score >= 75:
-        return score, "Zona B · Vigilancia", "#1D9E75"
+        return score, "Zone B · Watch", "#1D9E75"
     if score >= 50:
-        return score, "Zona C · Alerta", "#EF9F27"
-    return score, "Zona D · Peligro", "#E24B4A"
+        return score, "Zone C · Alert", "#EF9F27"
+    return score, "Zone D · Danger", "#E24B4A"
 
 
 def health_gauge_svg(score: Optional[int], color: str, size: int = 86) -> str:
@@ -2103,7 +2103,7 @@ def health_gauge_svg(score: Optional[int], color: str, size: int = 86) -> str:
     val_txt = str(score) if score is not None else "—"
     return (
         f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" '
-        f'role="img" aria-label="Salud del activo {val_txt} de 100" '
+        f'role="img" aria-label="Asset health {val_txt} of 100" '
         f'style="display:block;">'
         f'<circle cx="{cx}" cy="{cy}" r="{r:.1f}" fill="none" stroke="#334155" stroke-width="7"/>'
         f'<circle cx="{cx}" cy="{cy}" r="{r:.1f}" fill="none" stroke="{color}" '
@@ -2141,12 +2141,12 @@ def _build_live_report_pdf(
     speed_txt = f"{float(speed_row['value']):.0f} rpm" if speed_row and speed_row.get("value") is not None else "—"
     n_danger = severity_summary.get("Danger", 0)
     n_alarm = severity_summary.get("Alarma", 0)
-    status = "Crítica" if n_danger else ("Atención" if n_alarm else "Operación normal")
+    status = "Critical" if n_danger else ("Attention" if n_alarm else "Normal operation")
     last_txt = "—"
     if latest:
         try:
             oldest = min(latest, key=lambda r: _seconds_since(r["captured_at"]))
-            last_txt = f"hace {_format_age(oldest['captured_at'])}"
+            last_txt = f"{_format_age(oldest['captured_at'])} ago"
         except Exception:
             pass
     health = {"score": score, "zone": zone, "color": zcolor}
@@ -2298,25 +2298,25 @@ def render_asset_header(
     # (no mostrar "OPERACIÓN NORMAL" en verde cuando realmente no hay
     # señal del activo — eso es engañoso para el cliente).
     if not latest:
-        status_label = "SIN DATOS"
+        status_label = "NO DATA"
         status_fg = "#475569"
         status_bg = "#f1f5f9"
         status_border = "#cbd5e1"
         status_icon = "○"
     elif n_danger > 0:
-        status_label = "CRÍTICA"
+        status_label = "CRITICAL"
         status_fg = "#991b1b"
         status_bg = "#fef2f2"
         status_border = "#fca5a5"
         status_icon = "●"
     elif n_alarm > 0:
-        status_label = "ATENCIÓN"
+        status_label = "ATTENTION"
         status_fg = "#92400e"
         status_bg = "#fffbeb"
         status_border = "#fcd34d"
         status_icon = "▲"
     else:
-        status_label = "OPERACIÓN NORMAL"
+        status_label = "NORMAL OPERATION"
         status_fg = "#166534"
         status_bg = "#f0fdf4"
         status_border = "#86efac"
@@ -2365,11 +2365,11 @@ def render_asset_header(
             )
         if instance_obj.client:
             chip_items.append(
-                f'<span class="wm-bar-chip"><b>CLIENTE</b>{instance_obj.client}</span>'
+                f'<span class="wm-bar-chip"><b>CLIENT</b>{instance_obj.client}</span>'
             )
         if instance_obj.site:
             chip_items.append(
-                f'<span class="wm-bar-chip"><b>SITIO</b>{instance_obj.site}</span>'
+                f'<span class="wm-bar-chip"><b>SITE</b>{instance_obj.site}</span>'
             )
     chips_html = "".join(chip_items)
 
@@ -2384,7 +2384,7 @@ def render_asset_header(
         f'{health_gauge_svg(_score, _zcolor)}'
         f'<div style="display:flex; flex-direction:column; gap:2px;">'
         f'<span style="font-size:9px; color:#64748b; font-weight:700; '
-        f'letter-spacing:0.1em; text-transform:uppercase;">Salud activo</span>'
+        f'letter-spacing:0.1em; text-transform:uppercase;">Asset health</span>'
         f'<span style="font-size:12px; color:{_zcolor}; font-weight:800;">{_zone}</span>'
         f'</div></div>'
     )
@@ -2488,15 +2488,15 @@ def render_asset_header(
                     <div class="wm-bar-class">{class_label} · ISO 20816 / API 670</div>
                 </div>
                 <div class="wm-bar-kpi">
-                    <span class="wm-bar-kpi-label">VELOCIDAD</span>
+                    <span class="wm-bar-kpi-label">SPEED</span>
                     <span class="wm-bar-kpi-value">{speed_txt}<span class="wm-bar-kpi-unit">rpm</span></span>
                 </div>
                 <div class="wm-bar-kpi">
-                    <span class="wm-bar-kpi-label">ÚLTIMA LECTURA</span>
-                    <span class="wm-bar-kpi-value" style="color:{age_color};">hace {age_txt}</span>
+                    <span class="wm-bar-kpi-label">LAST READING</span>
+                    <span class="wm-bar-kpi-value" style="color:{age_color};">{age_txt} ago</span>
                 </div>
                 <div class="wm-bar-kpi">
-                    <span class="wm-bar-kpi-label">ALARMAS</span>
+                    <span class="wm-bar-kpi-label">ALARMS</span>
                     <span class="wm-bar-kpi-value" style="color:{alarms_color};">{alarms_txt}</span>
                 </div>
                 {health_block}
@@ -2528,7 +2528,7 @@ def render_alarm_strip(rendered_rows: List[Dict[str, Any]]) -> None:
         )
     extra = ""
     if len(danger_rows) > 4:
-        extra = f'<span style="opacity:0.8;">+{len(danger_rows)-4} más</span>'
+        extra = f'<span style="opacity:0.8;">+{len(danger_rows)-4} more</span>'
 
     st.markdown(
         textwrap.dedent(
@@ -2537,7 +2537,7 @@ def render_alarm_strip(rendered_rows: List[Dict[str, Any]]) -> None:
                 <div class="wm-alarm-icon">⚠</div>
                 <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-width:240px;">
                     <div style="font-size:11px;letter-spacing:0.1em;text-transform:uppercase;opacity:0.85;">
-                        Sensores en danger ({len(danger_rows)})
+                        Sensors in danger ({len(danger_rows)})
                     </div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:13px;">
                         {''.join(items)} {extra}
@@ -2588,13 +2588,13 @@ def render_status_bar(
     alarms_total = n_alarm + n_danger
     if alarms_total == 0:
         alarms_color = "#22c55e"
-        alarms_text = "Sin alarmas"
+        alarms_text = "No alarms"
     elif n_danger == 0:
         alarms_color = "#f59e0b"
-        alarms_text = f"{n_alarm} alarma{'s' if n_alarm != 1 else ''}"
+        alarms_text = f"{n_alarm} alarm{'s' if n_alarm != 1 else ''}"
     else:
         alarms_color = "#ef4444"
-        alarms_text = f"{n_danger} danger · {n_alarm} alarma{'s' if n_alarm != 1 else ''}"
+        alarms_text = f"{n_danger} danger · {n_alarm} alarm{'s' if n_alarm != 1 else ''}"
 
     st.markdown(
         textwrap.dedent(
@@ -2613,20 +2613,20 @@ def render_status_bar(
                 flex-wrap: wrap;
             ">
                 <span style="display:inline-flex;align-items:center;gap:6px;">
-                    <span style="color:#64748b;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;font-size:10px;">Velocidad</span>
+                    <span style="color:#64748b;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;font-size:10px;">Speed</span>
                     <span style="font-weight:800;font-variant-numeric:tabular-nums;">{speed_txt}</span>
                     <span style="color:#94a3b8;font-size:11px;">rpm</span>
                 </span>
                 <span style="color:#cbd5e1;">·</span>
                 <span style="display:inline-flex;align-items:center;gap:6px;">
-                    <span style="color:#64748b;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;font-size:10px;">Sensores</span>
+                    <span style="color:#64748b;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;font-size:10px;">Sensors</span>
                     <span style="font-weight:800;">{n_direct}</span>
-                    <span style="color:#94a3b8;font-size:11px;">activos</span>
+                    <span style="color:#94a3b8;font-size:11px;">active</span>
                 </span>
                 <span style="color:#cbd5e1;">·</span>
                 <span style="display:inline-flex;align-items:center;gap:6px;">
-                    <span style="color:#64748b;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;font-size:10px;">Última lectura</span>
-                    <span style="font-weight:800;color:{age_color};">hace {age_txt}</span>
+                    <span style="color:#64748b;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;font-size:10px;">Last reading</span>
+                    <span style="font-weight:800;color:{age_color};">{age_txt} ago</span>
                 </span>
                 <span style="color:#cbd5e1;">·</span>
                 <span style="display:inline-flex;align-items:center;gap:6px;">
@@ -2702,7 +2702,7 @@ def render_event_timeline(events: List[Dict[str, Any]]) -> None:
             'background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;'
             'margin:4px 0 12px 0;font-size:12px;color:#166534;">'
             '<span style="font-size:15px;">✓</span>'
-            'Sin eventos de alarma en la ventana reciente — operación estable.'
+            'No alarm events in the recent window — stable operation.'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -2725,7 +2725,7 @@ def render_event_timeline(events: List[Dict[str, Any]]) -> None:
             f'<span style="padding:2px 9px;border-radius:12px;background:{e["bg"]};color:{e["fg"]};'
             f'font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:0.05em;">{to_label}</span>'
             f'<span style="color:#475569;font-family:monospace;">{val_txt}</span>'
-            f'<span style="margin-left:auto;color:#94a3b8;font-size:11px;">hace {age}</span>'
+            f'<span style="margin-left:auto;color:#94a3b8;font-size:11px;">{age} ago</span>'
             f'</div>'
         )
     st.markdown(
@@ -2733,7 +2733,7 @@ def render_event_timeline(events: List[Dict[str, Any]]) -> None:
         'overflow:hidden;margin:4px 0 12px 0;">'
         '<div style="padding:9px 14px;background:#f8fafc;'
         'border-bottom:1px solid #e5edf7;font-size:10px;font-weight:700;color:#475569;'
-        'text-transform:uppercase;letter-spacing:0.08em;">Registro de eventos · últimos cruces de umbral</div>'
+        'text-transform:uppercase;letter-spacing:0.08em;">Event log · latest threshold crossings</div>'
         + "".join(rows) + '</div>',
         unsafe_allow_html=True,
     )
@@ -2783,7 +2783,7 @@ def render_channels_table(
     spark_data: Dict[str, List[Dict[str, Any]]],
 ) -> None:
     if not rendered_rows:
-        st.info("Sin lecturas Direct para mostrar.")
+        st.info("No Direct readings to show.")
         return
 
     body_rows = []
@@ -2829,12 +2829,12 @@ def render_channels_table(
                 <tr>
                     <th>Status</th>
                     <th>Sensor</th>
-                    <th>Ubicación</th>
+                    <th>Location</th>
                     <th>Variable</th>
-                    <th style="text-align:right;">Valor</th>
+                    <th style="text-align:right;">Value</th>
                     <th>Unit</th>
-                    <th>Trend (30 lecturas)</th>
-                    <th>Edad</th>
+                    <th>Trend (30 readings)</th>
+                    <th>Age</th>
                 </tr>
             </thead>
             <tbody>__ROWS__</tbody>
@@ -2911,20 +2911,20 @@ def render_api670_table(
             f'</tr>'
         )
     if not body:
-        st.info("Sin canales para mostrar.")
+        st.info("No channels to show.")
         return
     table_html = (
         '<table class="wm-live-table"><thead><tr>'
-        '<th>Estado</th><th>Canal</th><th>Ubicación</th>'
-        '<th style="text-align:right;">Overall</th><th>Unit</th><th>Tendencia</th>'
-        '<th style="text-align:right;">1X ampl</th><th>1X fase</th>'
-        '<th style="text-align:right;">2X ampl</th><th>2X fase</th>'
+        '<th>Status</th><th>Channel</th><th>Location</th>'
+        '<th style="text-align:right;">Overall</th><th>Unit</th><th>Trend</th>'
+        '<th style="text-align:right;">1X ampl</th><th>1X phase</th>'
+        '<th style="text-align:right;">2X ampl</th><th>2X phase</th>'
         '</tr></thead><tbody>' + "\n".join(body) + '</tbody></table>'
     )
     st.markdown(table_html, unsafe_allow_html=True)
     st.caption(
-        "1X = componente síncrona (desbalance) · 2X = segunda armónica "
-        "(desalineamiento / soltura) · convención API 670."
+        "1X = synchronous component (unbalance) · 2X = second harmonic "
+        "(misalignment / looseness) · API 670 convention."
     )
 
 
@@ -2942,14 +2942,14 @@ def render_vectors_phasors(latest: List[Dict[str, Any]]) -> None:
 
     if not by_sensor:
         st.info(
-            "Este activo no envía vectores 1X/2X. "
-            "Solo proximity probes con módulos vibration monitor generan datos vectoriales."
+            "This asset does not send 1X/2X vectors. "
+            "Only proximity probes with vibration monitor modules generate vector data."
         )
         return
 
     st.caption(
-        "🎯 **Vectores síncronos 1X / 2X** · Amplitud y fase por sensor — "
-        "el dato fundamental para Polar Plot, Bode y diagnóstico de balanceo / desalineamiento."
+        "🎯 **Synchronous 1X / 2X vectors** · Amplitude and phase per sensor — "
+        "the fundamental data for Polar Plot, Bode and balancing / misalignment diagnosis."
     )
 
     # Determinamos max_amp por unidad para escala consistente del phasor
@@ -3014,14 +3014,14 @@ def render_vectors_phasors(latest: List[Dict[str, Any]]) -> None:
 def render_diagnostic_table(latest: List[Dict[str, Any]]) -> None:
     diag_rows = [r for r in latest if r.get("metric") in ("Gap", "BiasVoltage")]
     if not diag_rows:
-        st.info("Sin métricas de diagnostic (Gap / BiasVoltage) en esta instancia.")
+        st.info("No diagnostic metrics (Gap / BiasVoltage) on this instance.")
         return
 
     st.caption(
-        "🔧 **Health del transducer.** "
-        "Gap = posición DC del eje en el cojinete (rango típico −7 a −10 V DC). "
-        "BiasVoltage = bias del acelerómetro (rango típico 10–12 V DC). "
-        "Valores fuera de rango indican sensor degradado, no problema mecánico."
+        "🔧 **Transducer health.** "
+        "Gap = DC position of the shaft in the bearing (typical range −7 to −10 V DC). "
+        "BiasVoltage = accelerometer bias (typical range 10–12 V DC). "
+        "Out-of-range values indicate a degraded sensor, not a mechanical problem."
     )
 
     body_rows = []
@@ -3038,10 +3038,10 @@ def render_diagnostic_table(latest: List[Dict[str, Any]]) -> None:
             v = float(val) if val is not None else None
             if v is not None:
                 if metric == "Gap" and (v < -11 or v > -6):
-                    status = "Fuera de rango"
+                    status = "Out of range"
                     st_fg, st_bg = "#92400e", "#fef3c7"
                 elif metric == "BiasVoltage" and (v < 8 or v > 14):
-                    status = "Fuera de rango"
+                    status = "Out of range"
                     st_fg, st_bg = "#92400e", "#fef3c7"
         except Exception:
             pass
@@ -3067,8 +3067,8 @@ def render_diagnostic_table(latest: List[Dict[str, Any]]) -> None:
         """
         <table class="wm-live-table">
             <thead><tr>
-                <th>Health</th><th>Sensor</th><th>Variable</th><th>Métrica</th>
-                <th style="text-align:right;">Valor</th><th>Unit</th><th>Edad</th>
+                <th>Health</th><th>Sensor</th><th>Variable</th><th>Metric</th>
+                <th style="text-align:right;">Value</th><th>Unit</th><th>Age</th>
             </tr></thead>
             <tbody>__ROWS__</tbody>
         </table>
@@ -3103,7 +3103,7 @@ def render_history_chart(
         and not (r.get("variable") or "").lower().startswith("velocidad")
     ]
     if not direct_rows:
-        st.info("Sin variables Direct para graficar todavía.")
+        st.info("No Direct variables to plot yet.")
         return
 
     options = sorted([
@@ -3128,23 +3128,23 @@ def render_history_chart(
     col_var, col_range = st.columns([3, 1])
     with col_var:
         chosen_labels = st.multiselect(
-            "📈 Sensores a graficar (1 o varios — overlay)",
+            "📈 Sensors to plot (1 or several — overlay)",
             labels,
             default=_default_labels(),
             key="live_history_vars_multi",
-            help="Seleccioná uno o varios sensores. Útil para comparar 1YA vs 2YA, "
-                 "o ver patrones cross-sensor de un evento de carga. Por defecto "
-                 "se muestran los canales que comparten unidad para overlay comparable.",
+            help="Select one or several sensors. Useful to compare 1YA vs 2YA, "
+                 "or to see cross-sensor patterns of a load event. By default "
+                 "the channels sharing a unit are shown for comparable overlay.",
         )
     with col_range:
         range_choice = st.selectbox(
-            "Rango", ["Última hora", "6 horas", "24 horas", "7 días", "30 días", "1 año"],
+            "Range", ["Last hour", "6 hours", "24 hours", "7 days", "30 days", "1 year"],
             index=1, key="live_history_range",
-            help="Histórico de Supabase, downsampled server-side por intervalos (escala a 1 año)",
+            help="Supabase history, downsampled server-side by intervals (scales to 1 year)",
         )
 
     if not chosen_labels:
-        st.info("Seleccioná al menos 1 sensor para ver tendencia.")
+        st.info("Select at least 1 sensor to see the trend.")
         return
 
     # Downsampling server-side (Ciclo 23.146) — cada rango usa un balde de
@@ -3154,12 +3154,12 @@ def render_history_chart(
     # rango. Min/Máx muestran el pico REAL del balde (no se pierden picos).
     from datetime import timedelta as _td, datetime as _dtmod, timezone as _tzmod
     range_cfg = {
-        "Última hora": (_td(hours=1),  "30 seconds"),
-        "6 horas":     (_td(hours=6),  "2 minutes"),
-        "24 horas":    (_td(hours=24), "10 minutes"),
-        "7 días":      (_td(days=7),   "1 hour"),
-        "30 días":     (_td(days=30),  "6 hours"),
-        "1 año":       (_td(days=365), "1 day"),
+        "Last hour": (_td(hours=1),  "30 seconds"),
+        "6 hours":   (_td(hours=6),  "2 minutes"),
+        "24 hours":  (_td(hours=24), "10 minutes"),
+        "7 days":    (_td(days=7),   "1 hour"),
+        "30 days":   (_td(days=30),  "6 hours"),
+        "1 year":    (_td(days=365), "1 day"),
     }
     _delta, _bucket = range_cfg.get(range_choice, (_td(hours=6), "2 minutes"))
     _from_iso = (_dtmod.now(_tzmod.utc) - _delta).isoformat()
@@ -3205,7 +3205,7 @@ def render_history_chart(
         })
 
     if not sensor_data:
-        st.info("Sin histórico aún en ningún sensor seleccionado.")
+        st.info("No history yet on any selected sensor.")
         return
 
     # KPIs combinados — Mín/Máx usan el pico REAL de cada balde (no se pierden
@@ -3216,10 +3216,10 @@ def render_history_chart(
     total_readings = int(sum(pd.to_numeric(sd["df"]["n"], errors="coerce").fillna(0).sum() for sd in sensor_data))
     all_values = _maxs  # usado abajo para el y_max del gráfico
     c1, c2, c3, c4 = st.columns(4)
-    with c1: st.metric("Mín (real)", f"{_mins.min():.3f}")
-    with c2: st.metric("Máx (real)", f"{_maxs.max():.3f}")
-    with c3: st.metric("Promedio", f"{_avgs.mean():.3f}")
-    with c4: st.metric("Σ Lecturas", f"{total_readings:,}")
+    with c1: st.metric("Min (real)", f"{_mins.min():.3f}")
+    with c2: st.metric("Max (real)", f"{_maxs.max():.3f}")
+    with c3: st.metric("Average", f"{_avgs.mean():.3f}")
+    with c4: st.metric("Σ Readings", f"{total_readings:,}")
 
     # Decidir si mostramos bandas: solo si todos comparten unit + alarm + danger
     units = {sd["unit"] for sd in sensor_data}
@@ -3255,7 +3255,7 @@ def render_history_chart(
                           annotation_text="Danger", annotation_position="top left",
                           annotation=dict(font=dict(color="#dc2626", size=10, family="monospace"), xshift=-44))
             fig.add_hline(y=alarm, line=dict(color="#d97706", width=1.2, dash="dash"),
-                          annotation_text="Alarma", annotation_position="top left",
+                          annotation_text="Alarm", annotation_position="top left",
                           annotation=dict(font=dict(color="#d97706", size=10, family="monospace"), xshift=-44))
 
         # Downsampling por buckets de tiempo (Ciclo 23.145) — clave para
@@ -3298,7 +3298,7 @@ def render_history_chart(
             ))
 
         # Y-axis title: si todos comparten unit, mostrar; sino "valor"
-        y_title = list(units)[0] if len(units) == 1 else "valor"
+        y_title = list(units)[0] if len(units) == 1 else "value"
 
         fig.update_layout(
             margin=dict(l=60, r=20, t=40, b=10),
@@ -3330,14 +3330,14 @@ def render_history_chart(
         if not show_bands and len(sensor_data) > 1:
             mixed_units = ", ".join(sorted(units))
             st.caption(
-                f"📐 Bandas de severidad omitidas — los sensores seleccionados "
-                f"tienen unidades mixtas ({mixed_units}) o thresholds distintos. "
-                f"Seleccioná sensores del mismo tipo (todos `g pk`, todos `in/s pk`, "
-                f"todos `mil pp`) para ver las bandas."
+                f"📐 Severity bands omitted — the selected sensors "
+                f"have mixed units ({mixed_units}) or different thresholds. "
+                f"Select sensors of the same type (all `g pk`, all `in/s pk`, "
+                f"all `mil pp`) to see the bands."
             )
     except Exception as e:
         # Fallback a st.line_chart si plotly falla
-        st.caption(f"(plotly no disponible — fallback: {e})")
+        st.caption(f"(plotly not available — fallback: {e})")
         combined = pd.DataFrame()
         for sd in sensor_data:
             df_one = sd["df"].set_index("captured_at")[["value"]].copy()
@@ -3425,12 +3425,12 @@ def main() -> None:
     if not instances:
         if _current_role == "client":
             st.warning(
-                "No tenés activos asignados en tu cuenta. Contactá a tu "
-                "specialist de Watermelon para que te asigne los activos "
-                "del contrato."
+                "You have no assets assigned to your account. Contact your "
+                "Watermelon specialist to assign the contract "
+                "assets."
             )
         else:
-            st.info("No hay activos registrados aún. Andá a Machinery Library para crear uno.")
+            st.info("No assets registered yet. Go to Machinery Library to create one.")
         return
 
     # Build mapping instance_id → display label "TAG · Cliente"
@@ -3518,7 +3518,7 @@ def main() -> None:
         <div class="wm-picker-header">
             <div class="wm-picker-header-icon">🛰</div>
             <div class="wm-picker-header-text">
-                <div class="wm-picker-header-title">Activo monitoreado</div>
+                <div class="wm-picker-header-title">Monitored asset</div>
                 <div class="wm-picker-header-sub">Real-time · ISO 20816 / API 670</div>
             </div>
         </div>
@@ -3526,7 +3526,7 @@ def main() -> None:
         unsafe_allow_html=True,
     )
     instance_id = st.selectbox(
-        "Activo",   # label oculto por CSS
+        "Asset",   # label oculto por CSS
         options,
         index=default_idx,
         key="live_asset_v3",
@@ -3623,17 +3623,17 @@ def main() -> None:
             "<path d='M2 12a10 10 0 0 1 10-10'/><path d='M5.6 12a6 6 0 0 1 6-6'/>"
             "<circle cx='12' cy='12' r='1.6' fill='#94a3b8' stroke='none'/></svg>"
             "<div style='font-size:14px;font-weight:600;color:#0f172a;'>"
-            "Sin lecturas en tiempo real ahora mismo</div>"
+            "No real-time readings right now</div>"
             "<div style='font-size:12px;color:#64748b;line-height:1.6;max-width:420px;'>"
-            "El collector enviará nuevas mediciones automáticamente. "
-            "Mientras tanto, abajo está el histórico de análisis disponible."
+            "The collector will send new measurements automatically. "
+            "Meanwhile, the available analysis history is below."
             "</div>"
             "</div>",
             unsafe_allow_html=True,
         )
         col_retry, _ = st.columns([1, 5])
         with col_retry:
-            if st.button("Reintentar conexión", use_container_width=True):
+            if st.button("Retry connection", use_container_width=True):
                 _cached_latest_for_instance.clear()
                 st.session_state.pop(f"_wm_load_retry_{instance_id}", None)
                 st.rerun()
@@ -3653,8 +3653,8 @@ def main() -> None:
 
     if using_cache:
         st.caption(
-            f"⏳ Reintentando conexión con Supabase — mostrando última lectura "
-            f"válida (hace {int(cache_age)}s). Refrescá si persiste."
+            f"⏳ Retrying connection to Supabase — showing last valid "
+            f"reading ({int(cache_age)}s ago). Refresh if it persists."
         )
 
     rendered_rows, severity_summary = compute_rendered_rows(latest, sensor_lookup, instance_obj)
@@ -3737,12 +3737,12 @@ def main() -> None:
             }
             </style>
             <div class="wm-legend-row">
-                <span class="wm-legend-label">Leyenda</span>
+                <span class="wm-legend-label">Legend</span>
                 <span class="wm-legend-item"><span class="wm-legend-dot" style="background:#15803d;"></span>Normal</span>
                 <span class="wm-legend-item"><span class="wm-legend-dot" style="background:#b45309;"></span>Alarma</span>
                 <span class="wm-legend-item"><span class="wm-legend-dot" style="background:#dc2626;"></span>Danger</span>
-                <span class="wm-legend-item"><span class="wm-legend-stale"></span>Stale (sin lectura > 60s)</span>
-                <span class="wm-legend-item"><span class="wm-legend-spark"></span>Threshold bar (verde→rojo escala alarm/danger)</span>
+                <span class="wm-legend-item"><span class="wm-legend-stale"></span>Stale (no reading > 60s)</span>
+                <span class="wm-legend-item"><span class="wm-legend-spark"></span>Threshold bar (green→red alarm/danger scale)</span>
             </div>
             """).strip(),
             unsafe_allow_html=True,
@@ -3758,10 +3758,10 @@ def main() -> None:
     # que pelea contra los reportes rígidos de Emerson/Bently.
     col_rep, col_send, _sp = st.columns([1.4, 1.4, 3])
     with col_rep:
-        if st.button("📄 Descargar reporte PDF", use_container_width=True,
+        if st.button("📄 Download PDF report", use_container_width=True,
                      key=f"live_pdf_{instance_id}",
-                     help="Reporte ejecutivo de 1 página con el estado actual del activo"):
-            with st.spinner("Generando reporte ejecutivo…"):
+                     help="1-page executive report with the current asset status"):
+            with st.spinner("Generating executive report…"):
                 pdf_bytes, _meta = _build_live_report_pdf(
                     instance_id, instance_obj, latest,
                     rendered_rows, severity_summary, spark_data,
@@ -3769,7 +3769,7 @@ def main() -> None:
             if pdf_bytes:
                 _stamp = datetime.now().strftime("%Y%m%d_%H%M")
                 st.download_button(
-                    "Descargar PDF listo ✓",
+                    "Download ready PDF ✓",
                     data=pdf_bytes,
                     file_name=f"Reporte_{instance_id}_{_stamp}.pdf",
                     mime="application/pdf",
@@ -3777,7 +3777,7 @@ def main() -> None:
                     key=f"live_pdf_dl_{instance_id}",
                 )
             else:
-                st.error("No se pudo generar el reporte. Verificá que haya lecturas activas.")
+                st.error("Could not generate the report. Check that there are active readings.")
 
     # Ciclo 23.150 — Envío manual al cliente (email + WhatsApp). Reusa el
     # mismo builder del PDF y el orquestador core.report_delivery. El destino
@@ -3791,19 +3791,19 @@ def main() -> None:
         except Exception:
             _avail = {"email": False, "whatsapp": False}
         _can_send = _avail.get("email") or _avail.get("whatsapp")
-        if st.button("📨 Enviar al cliente", use_container_width=True,
+        if st.button("📨 Send to client", use_container_width=True,
                      key=f"live_send_{instance_id}", disabled=not _can_send,
-                     help=("Envía el reporte por email y/o WhatsApp al destinatario "
-                           "configurado en Machinery Library." if _can_send else
-                           "Configurá email o WhatsApp del cliente en Machinery "
-                           "Library → Envío al cliente.")):
-            with st.spinner("Generando y enviando reporte…"):
+                     help=("Sends the report by email and/or WhatsApp to the recipient "
+                           "configured in Machinery Library." if _can_send else
+                           "Configure the client's email or WhatsApp in Machinery "
+                           "Library → Send to client.")):
+            with st.spinner("Generating and sending report…"):
                 pdf_bytes, _meta = _build_live_report_pdf(
                     instance_id, instance_obj, latest,
                     rendered_rows, severity_summary, spark_data,
                 )
                 if not pdf_bytes:
-                    st.error("No se pudo generar el reporte. Verificá que haya lecturas activas.")
+                    st.error("Could not generate the report. Check that there are active readings.")
                 else:
                     from core.report_delivery import deliver_report
                     res = deliver_report(instance_obj, pdf_bytes, _meta)
@@ -3811,18 +3811,18 @@ def main() -> None:
                     _wa = res.get("whatsapp")
                     if _em is not None:
                         if _em.get("ok"):
-                            st.success(f"✓ Email enviado a {instance_obj.client_email}")
+                            st.success(f"✓ Email sent to {instance_obj.client_email}")
                         else:
-                            st.error(f"Email: {_em.get('error', 'falló')}")
+                            st.error(f"Email: {_em.get('error', 'failed')}")
                     if _wa is not None:
                         if _wa.get("ok"):
-                            st.success(f"✓ WhatsApp enviado a {instance_obj.whatsapp_number}")
+                            st.success(f"✓ WhatsApp sent to {instance_obj.whatsapp_number}")
                         else:
-                            st.error(f"WhatsApp: {_wa.get('error', 'falló')}")
+                            st.error(f"WhatsApp: {_wa.get('error', 'failed')}")
                     if not res.get("any_ok") and _em is None and _wa is None:
-                        st.warning(res.get("error", "No se envió por ningún canal."))
+                        st.warning(res.get("error", "Not sent through any channel."))
         if not _can_send:
-            st.caption("⚙ Configurá el destinatario en Machinery Library.")
+            st.caption("⚙ Configure the recipient in Machinery Library.")
 
     # Ciclo 23.142 — Event List estilo System1: registro cronológico de
     # cruces de umbral (Normal→Alarma→Danger) por canal en la ventana
@@ -3830,14 +3830,14 @@ def main() -> None:
     # "entró en alarma hace 12 min".
     try:
         events = detect_severity_events(spark_data, sensor_lookup, instance_obj)
-        with st.expander("Registro de eventos — cruces de umbral", expanded=False):
+        with st.expander("Event log — threshold crossings", expanded=False):
             render_event_timeline(events)
     except Exception as e:
         import logging
         logging.warning("event timeline (overview) failed: %s", e)
 
     try:
-        with st.expander("Tendencia overall — vibración en el tiempo", expanded=False):
+        with st.expander("Overall trend — vibration over time", expanded=False):
             render_history_chart(instance_id, latest, sensor_lookup, instance_obj)
     except Exception as e:
         import logging
@@ -3846,7 +3846,7 @@ def main() -> None:
     # Ciclo 23.140 — Tabla API 670: Overall + 1X/2X por canal. Vista de
     # analista (desbalance vs desalineamiento) que pelea con System1/AMS.
     try:
-        with st.expander("Canales — Overall + vectores 1X / 2X (API 670)", expanded=False):
+        with st.expander("Channels — Overall + 1X / 2X vectors (API 670)", expanded=False):
             render_api670_table(rendered_rows, latest, spark_data)
     except Exception as e:
         import logging
@@ -3865,10 +3865,10 @@ def main() -> None:
         _c_an1, _c_an2, _c_an3 = st.columns([2, 3, 2])
         with _c_an2:
             if st.button(
-                "🍉 Análisis avanzado",
+                "🍉 Advanced analysis",
                 key="wm_open_live_analysis",
                 use_container_width=True,
-                help="Espectro · Forma de onda · Órbita del último snapshot",
+                help="Spectrum · Waveform · Orbit of the latest snapshot",
             ):
                 st.session_state["_live_analysis_instance"] = instance_id
                 st.switch_page("pages/_live_analysis.py")
@@ -3892,9 +3892,9 @@ def main() -> None:
         # Expander idéntico a los demás (Registro de eventos, Tendencia,
         # Canales, Análisis avanzado). Se abre solo si ya hay un sensor
         # seleccionado vía query param; adentro va el picker + el zoom panel.
-        with st.expander("Análisis detallado — por sensor",
+        with st.expander("Detailed analysis — by sensor",
                          expanded=bool(selected_sensor)):
-            sel_options = ["Elegí un sensor…"] + direct_labels
+            sel_options = ["Choose a sensor…"] + direct_labels
             try:
                 sel_idx = sel_options.index(selected_sensor) if selected_sensor in direct_labels else 0
             except ValueError:
@@ -3907,7 +3907,7 @@ def main() -> None:
                 format_func=lambda x: x.replace("_", "") if x in direct_labels else x,
                 label_visibility="collapsed",
             )
-            new_value = new_sel if new_sel != "Elegí un sensor…" else None
+            new_value = new_sel if new_sel != "Choose a sensor…" else None
             if new_value != selected_sensor:
                 if new_value:
                     st.query_params["sensor"] = new_value
@@ -3932,10 +3932,10 @@ def main() -> None:
             from core.instance_state import get_instance_document_bytes
             png_bytes = get_instance_document_bytes(instance_id, instance_obj.schematic_png)
             if png_bytes:
-                st.image(png_bytes, caption="Esquemático del activo", use_container_width=True)
+                st.image(png_bytes, caption="Asset schematic", use_container_width=True)
                 st.caption(
-                    "💡 Configurá las posiciones (x_pct, y_pct) de cada sensor en el "
-                    "Sensor Map del activo para activar el Live Sensor Map con dots de severidad."
+                    "💡 Configure each sensor's positions (x_pct, y_pct) in the "
+                    "asset's Sensor Map to enable the Live Sensor Map with severity dots."
                 )
         except Exception:
             pass
@@ -3947,11 +3947,11 @@ def main() -> None:
     st.markdown("---")
     c1, c2 = st.columns([1, 4])
     with c1:
-        if st.button("Refrescar ahora", key="live_refresh_v3", use_container_width=True):
+        if st.button("Refresh now", key="live_refresh_v3", use_container_width=True):
             st.rerun()
     with c2:
         st.caption(
-            f"📅 Sync local: {datetime.now().strftime('%H:%M:%S')} · "
+            f"📅 Local sync: {datetime.now().strftime('%H:%M:%S')} · "
             "Engine: Watermelon System · ISO 20816-3 / API 670"
         )
 

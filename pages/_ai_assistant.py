@@ -60,9 +60,9 @@ _user_role = (_user.get("role") or "").strip().lower()
 # Solo admin + specialist por ahora. client puede liberarse después.
 if _user_role not in ("admin", "specialist"):
     st.error(
-        "Acceso restringido. El AI Assistant está disponible para roles "
-        "**admin** y **specialist**. Si tu rol es client, contactá al "
-        "especialista responsable de tu activo."
+        "Restricted access. The AI Assistant is available for the "
+        "**admin** and **specialist** roles. If your role is client, contact the "
+        "specialist responsible for your asset."
     )
     st.stop()
 
@@ -99,12 +99,12 @@ st.markdown(
             Watermelon System · AI Assistant
         </div>
         <div style='font-size:1.6rem; font-weight:700; margin-top:4px;'>
-            Consultá tu archivo histórico en lenguaje natural
+            Query your historical archive in natural language
         </div>
         <div style='font-size:0.95rem; color:#cbd5e1; margin-top:6px;'>
-            Hacé preguntas sobre los reportes archivados de tus activos.
-            El sistema responde con citaciones precisas a los reportes
-            relevantes (consecutivo, fecha, severidad).
+            Ask questions about the archived reports for your assets.
+            The system responds with precise citations to the relevant
+            reports (consecutive, date, severity).
         </div>
     </div>
     """,
@@ -113,10 +113,10 @@ st.markdown(
 
 if not is_ai_available():
     st.warning(
-        "**AI no disponible.** Falta configurar `[anthropic] api_key` "
-        "en los secrets de Streamlit Cloud. Mientras tanto, el archivo "
-        "histórico sigue accesible desde **Reports → Archivo histórico** "
-        "(navegación tradicional con filtros)."
+        "**AI not available.** `[anthropic] api_key` still needs to be "
+        "configured in the Streamlit Cloud secrets. In the meantime, the "
+        "historical archive remains accessible from **Reports → Historical archive** "
+        "(traditional navigation with filters)."
     )
     st.stop()
 
@@ -126,45 +126,45 @@ if not is_ai_available():
 # =============================================================
 
 with st.sidebar:
-    st.markdown("### Preguntas sugeridas")
+    st.markdown("### Suggested questions")
     _suggestions: List[str] = [
-        "¿Cuáles activos tienen severidad CRÍTICA en el archivo?",
-        "Mostrame todos los reportes con oil whip de los últimos 6 meses.",
-        "¿Cuál fue el reporte con peor severidad de 2026?",
-        "Resumime los hallazgos principales del cliente ECOPETROL.",
-        "¿Qué patrones de fallo se repiten en los turbogeneradores?",
-        "Compará la evolución de severidad por activo en este año.",
+        "Which assets have CRITICAL severity in the archive?",
+        "Show me all reports with oil whip from the last 6 months.",
+        "Which was the report with the worst severity in 2026?",
+        "Summarize the main findings for the client ECOPETROL.",
+        "Which failure patterns recur in the turbogenerators?",
+        "Compare the severity evolution by asset this year.",
     ]
     for i, sugg in enumerate(_suggestions):
         if st.button(sugg, key=f"wm_aiq_sugg_{i}", use_container_width=True):
             st.session_state["wm_aiq_pending_question"] = sugg
 
     st.markdown("---")
-    st.markdown("### Opciones")
+    st.markdown("### Options")
 
     st.session_state["wm_aiq_use_pdf_text"] = st.toggle(
-        "Análisis profundo (extrae texto de los PDFs)",
+        "Deep analysis (extracts text from the PDFs)",
         value=st.session_state["wm_aiq_use_pdf_text"],
         help=(
-            "Por default, el AI usa solo la metadata de cada reporte "
-            "(cliente, activo, severidad, resumen ejecutivo). Activá "
-            "esto para que también lea el contenido completo del PDF "
-            "— responde preguntas más profundas pero cuesta ~3x más "
-            "tokens y tarda más."
+            "By default, the AI uses only each report's metadata "
+            "(client, asset, severity, executive summary). Enable "
+            "this so it also reads the full content of the PDF "
+            "— it answers deeper questions but costs ~3x more "
+            "tokens and takes longer."
         ),
     )
 
     st.markdown("---")
-    st.markdown("### Sesión actual")
+    st.markdown("### Current session")
     _n_turns = len(st.session_state["wm_aiq_history"])
     _cost_total = st.session_state["wm_aiq_total_cost"]
     _in_total = st.session_state["wm_aiq_total_tokens_in"]
     _out_total = st.session_state["wm_aiq_total_tokens_out"]
-    st.caption(f"Preguntas hechas: **{_n_turns // 2}**")
+    st.caption(f"Questions asked: **{_n_turns // 2}**")
     st.caption(f"Tokens IN: {_in_total:,} · OUT: {_out_total:,}")
-    st.caption(f"Costo acumulado: **~${_cost_total:.4f}**")
+    st.caption(f"Accumulated cost: **~${_cost_total:.4f}**")
 
-    if st.button("Limpiar conversación", use_container_width=True,
+    if st.button("Clear conversation", use_container_width=True,
                  disabled=_n_turns == 0):
         st.session_state["wm_aiq_history"] = []
         st.session_state["wm_aiq_total_cost"] = 0.0
@@ -174,16 +174,16 @@ with st.sidebar:
 
     if _user_role == "admin":
         st.markdown("---")
-        if st.button("Limpiar cache (admin)", use_container_width=True):
+        if st.button("Clear cache (admin)", use_container_width=True):
             n = clear_qa_cache()
-            st.success(f"{n} archivos de cache eliminados.")
+            st.success(f"{n} cache files deleted.")
 
 
 # =============================================================
 # INFO DE ARCHIVO ACCESIBLE
 # =============================================================
 
-with st.expander("Archivo accesible para tu rol", expanded=False):
+with st.expander("Archive accessible to your role", expanded=False):
     try:
         _all_reports = list_archived_reports(
             viewer_email=_user_email,
@@ -192,34 +192,34 @@ with st.expander("Archivo accesible para tu rol", expanded=False):
         )
     except Exception as exc:
         _all_reports = []
-        st.warning(f"No se pudo listar el archivo: {exc}")
+        st.warning(f"Could not list the archive: {exc}")
 
     if not _all_reports:
         st.info(
-            "No hay reportes archivados accesibles para tu rol. Cuando "
-            "el especialista archive un reporte desde Reports → "
-            "Archivar reporte, va a aparecer acá y vas a poder "
-            "consultarlo."
+            "There are no archived reports accessible for your role. When "
+            "the specialist archives a report from Reports → "
+            "Archive report, it will appear here and you will be able "
+            "to query it."
         )
     else:
-        st.caption(f"**{len(_all_reports)} reportes** accesibles según tu rol "
+        st.caption(f"**{len(_all_reports)} reports** accessible for your role "
                    f"(`{_user_role}`).")
         # Agrupación por cliente para vista rápida
         _by_client: Dict[str, int] = {}
         _by_severity: Dict[str, int] = {}
         for sc in _all_reports:
             rm = sc.get("report_meta", {}) or {}
-            client = rm.get("client", "(sin cliente)").strip() or "(sin cliente)"
-            sev = rm.get("executive_severity", "").strip() or "(sin severidad)"
+            client = rm.get("client", "(no client)").strip() or "(no client)"
+            sev = rm.get("executive_severity", "").strip() or "(no severity)"
             _by_client[client] = _by_client.get(client, 0) + 1
             _by_severity[sev] = _by_severity.get(sev, 0) + 1
         _info_cols = st.columns(2)
         with _info_cols[0]:
-            st.caption("**Por cliente:**")
+            st.caption("**By client:**")
             for c, n in sorted(_by_client.items(), key=lambda x: -x[1]):
                 st.caption(f"  · {c}: {n}")
         with _info_cols[1]:
-            st.caption("**Por severidad:**")
+            st.caption("**By severity:**")
             for s, n in sorted(_by_severity.items(), key=lambda x: -x[1]):
                 st.caption(f"  · {s}: {n}")
 
@@ -232,8 +232,8 @@ def _render_assistant_turn(turn: Dict[str, Any]) -> None:
     """Renderiza una respuesta del assistant: markdown + reportes citados."""
     if turn.get("fallback_used"):
         st.info(
-            "Esta respuesta se generó con el modelo de respaldo "
-            "(Haiku 4.5). Calidad ligeramente menor."
+            "This response was generated with the fallback model "
+            "(Haiku 4.5). Slightly lower quality."
         )
     md = turn.get("markdown", "")
     st.markdown(md)
@@ -241,7 +241,7 @@ def _render_assistant_turn(turn: Dict[str, Any]) -> None:
     # Reportes citados — botones de descarga
     refs: List[Dict[str, str]] = turn.get("reports_referenced", []) or []
     if refs:
-        with st.expander(f"Reportes citados ({len(refs)})", expanded=True):
+        with st.expander(f"Cited reports ({len(refs)})", expanded=True):
             for ref in refs:
                 aid = ref.get("archive_id", "")
                 consec = ref.get("consecutive", "")
@@ -259,7 +259,7 @@ def _render_assistant_turn(turn: Dict[str, Any]) -> None:
                 if date:
                     ref_meta_bits.append(date)
                 if sev:
-                    ref_meta_bits.append(f"Severidad: {sev}")
+                    ref_meta_bits.append(f"Severity: {sev}")
                 ref_meta = " · ".join(ref_meta_bits)
 
                 ref_cols = st.columns([4.5, 1.5])
@@ -279,7 +279,7 @@ def _render_assistant_turn(turn: Dict[str, Any]) -> None:
                     if _pdf_bytes:
                         _fname_safe = (consec or aid.replace("/", "_"))[:40]
                         st.download_button(
-                            "Descargar PDF",
+                            "Download PDF",
                             data=_pdf_bytes,
                             file_name=f"{_fname_safe}.pdf",
                             mime="application/pdf",
@@ -288,11 +288,11 @@ def _render_assistant_turn(turn: Dict[str, Any]) -> None:
                         )
                     else:
                         st.button(
-                            "Descargar PDF",
+                            "Download PDF",
                             disabled=True,
                             key=f"wm_aiq_dl_dis_{aid}_{turn.get('turn_id', '')}",
                             use_container_width=True,
-                            help="PDF no accesible.",
+                            help="PDF not accessible.",
                         )
 
     # Caption con metadata técnica
@@ -302,11 +302,11 @@ def _render_assistant_turn(turn: Dict[str, Any]) -> None:
     _cost = turn.get("cost_usd", 0.0)
     _n_in_ctx = turn.get("n_reports_in_context", 0)
     _fb = turn.get("fallback_used", False)
-    _fb_tag = " · modelo de respaldo" if _fb else ""
+    _fb_tag = " · fallback model" if _fb else ""
     st.caption(
-        f"Modelo: `{_model}` · Reportes en contexto: {_n_in_ctx} · "
+        f"Model: `{_model}` · Reports in context: {_n_in_ctx} · "
         f"Tokens: {_tokens_in:,} → {_tokens_out:,} · "
-        f"Costo: ~${_cost:.4f}{_fb_tag}"
+        f"Cost: ~${_cost:.4f}{_fb_tag}"
     )
 
 
@@ -321,7 +321,7 @@ for idx, turn in enumerate(st.session_state["wm_aiq_history"]):
             if turn.get("ok"):
                 _render_assistant_turn(turn)
             else:
-                st.error(turn.get("markdown", "Error en la respuesta."))
+                st.error(turn.get("markdown", "Error in the response."))
 
 
 # =============================================================
@@ -332,7 +332,7 @@ for idx, turn in enumerate(st.session_state["wm_aiq_history"]):
 _pending_q = st.session_state.pop("wm_aiq_pending_question", None)
 
 _question_input = st.chat_input(
-    "Hacé una pregunta sobre tus reportes archivados...",
+    "Ask a question about your archived reports...",
 )
 
 # Procesar la pregunta (sea del input o de una sugerencia clickeada)
@@ -352,7 +352,7 @@ if _question_to_process:
 
     # 3) Llamar a Claude
     with st.chat_message("assistant"):
-        with st.spinner("Buscando en el archivo y sintetizando... (5-30 seg)"):
+        with st.spinner("Searching the archive and synthesizing... (5-30 sec)"):
             try:
                 _qa_result = query_archive(
                     _question_to_process,
@@ -365,7 +365,7 @@ if _question_to_process:
                 _qa_result = {
                     "ok": False,
                     "markdown": (
-                        f"_Error inesperado:_\n\n```\n"
+                        f"_Unexpected error:_\n\n```\n"
                         f"{type(exc).__name__}: {exc}\n```"
                     ),
                     "reports_referenced": [],
@@ -394,7 +394,7 @@ if _question_to_process:
         if _qa_result.get("ok"):
             _render_assistant_turn(_qa_result)
         else:
-            st.error(_qa_result.get("markdown", "Error en la respuesta."))
+            st.error(_qa_result.get("markdown", "Error in the response."))
 
     # Forzar rerun para limpiar el chat_input y persistir el turn
     st.rerun()

@@ -132,7 +132,7 @@ apply_page_style()
 
 from core.ui_theme import page_header as _wm_page_header  # hero compartido (v3.31.313)
 _wm_page_header("Trends",
-                "Tendencias de severidad y parámetros en el tiempo · evolución de la condición.")
+                "Severity and parameter trends over time · condition evolution.")
 
 
 def get_logo_base64(path: Path) -> Optional[str]:
@@ -725,7 +725,7 @@ def suggest_trend_thresholds(
     }
 
     if metric_key != "Amplitude":
-        out["detail"] = "Setpoints sólo aplican a Amplitude"
+        out["detail"] = "Setpoints only apply to Amplitude"
         return out
 
     out["applicable"] = True
@@ -763,7 +763,7 @@ def suggest_trend_thresholds(
                 )
                 out["detail"] = (
                     f"{_info['label']}"
-                    + (" · Override del especialista" if _has_override else "")
+                    + (" · Specialist override" if _has_override else "")
                 )
                 out["norm_reference"] = _info["reference"]
                 return out
@@ -791,14 +791,14 @@ def suggest_trend_thresholds(
         out["source"] = "Sensor Map"
         if len(matched_pairs) == 1:
             rec, s = matched_pairs[0]
-            plane_lbl = s.get("plane_label") or f"plano {s.get('plane','')}"
+            plane_lbl = s.get("plane_label") or f"plane {s.get('plane','')}"
             stype = s.get("sensor_type", "")
             unit = s.get("unit_native", "") or unit_hint
             out["detail"] = f"{rec.point_clean} → {plane_lbl} · {stype} ({unit})"
         else:
             out["detail"] = (
-                f"{len(matched_pairs)} sensores en el panel · usando los "
-                f"setpoints más conservadores"
+                f"{len(matched_pairs)} sensors in the panel · using the "
+                f"most conservative setpoints"
             )
         return out
 
@@ -808,8 +808,8 @@ def suggest_trend_thresholds(
     out["danger"] = d_iso
     out["source"] = src
     out["detail"] = (
-        f"{src} para {unit_hint or 'Amplitude'}"
-        f" (no hay match con Sensor Map)"
+        f"{src} for {unit_hint or 'Amplitude'}"
+        f" (no match with Sensor Map)"
     )
     return out
 
@@ -1224,9 +1224,9 @@ def align_trend_and_operational_for_correlation(
 def classify_correlation_strength(corr_value: Optional[float]) -> Dict[str, str]:
     if corr_value is None or not math.isfinite(float(corr_value)):
         return {
-            "strength": "Nula",
-            "direction": "Indeterminada",
-            "interpretation": "No fue posible calcular correlación válida entre vibración y variable operativa.",
+            "strength": "None",
+            "direction": "Indeterminate",
+            "interpretation": "It was not possible to compute a valid correlation between vibration and the operating variable.",
             "color": "#64748b",
         }
 
@@ -1234,35 +1234,35 @@ def classify_correlation_strength(corr_value: Optional[float]) -> Dict[str, str]
     abs_corr = abs(corr)
 
     if corr >= 0.0:
-        direction = "Positiva"
+        direction = "Positive"
     else:
-        direction = "Negativa"
+        direction = "Negative"
 
     if abs_corr >= 0.75:
-        strength = "Fuerte"
+        strength = "Strong"
         color = "#16a34a"
     elif abs_corr >= 0.50:
-        strength = "Moderada"
+        strength = "Moderate"
         color = "#f59e0b"
     elif abs_corr >= 0.25:
-        strength = "Débil"
+        strength = "Weak"
         color = "#f97316"
     else:
-        strength = "Nula"
+        strength = "None"
         color = "#64748b"
 
-    if strength == "Fuerte" and direction == "Positiva":
-        interpretation = "La vibración aumenta cuando aumenta la variable operativa, lo que sugiere influencia operativa importante."
-    elif strength == "Fuerte" and direction == "Negativa":
-        interpretation = "La vibración disminuye cuando aumenta la variable operativa, indicando relación inversa fuerte."
-    elif strength == "Moderada" and direction == "Positiva":
-        interpretation = "Existe relación operativa apreciable, aunque no completamente dominante."
-    elif strength == "Moderada" and direction == "Negativa":
-        interpretation = "Existe relación inversa moderada entre vibración y variable operativa."
-    elif strength == "Débil":
-        interpretation = "La dependencia operativa es débil; conviene complementar con diagnóstico mecánico."
+    if strength == "Strong" and direction == "Positive":
+        interpretation = "Vibration rises as the operating variable rises, suggesting significant operational influence."
+    elif strength == "Strong" and direction == "Negative":
+        interpretation = "Vibration falls as the operating variable rises, indicating a strong inverse relationship."
+    elif strength == "Moderate" and direction == "Positive":
+        interpretation = "There is an appreciable operational relationship, though not fully dominant."
+    elif strength == "Moderate" and direction == "Negative":
+        interpretation = "There is a moderate inverse relationship between vibration and the operating variable."
+    elif strength == "Weak":
+        interpretation = "The operational dependence is weak; it should be complemented with mechanical diagnostics."
     else:
-        interpretation = "No se observa dependencia operativa clara; la condición podría estar dominada por factores mecánicos o por ruido operacional."
+        interpretation = "No clear operational dependence is observed; the condition may be dominated by mechanical factors or operational noise."
 
     return {
         "strength": strength,
@@ -1282,9 +1282,9 @@ def build_trend_operational_correlation(
             "valid": False,
             "corr_value": None,
             "sample_count": 0,
-            "strength": "Nula",
-            "direction": "Indeterminada",
-            "interpretation": "Seleccione una señal de vibración y una variable operativa para habilitar la correlación.",
+            "strength": "None",
+            "direction": "Indeterminate",
+            "interpretation": "Select a vibration signal and an operating variable to enable correlation.",
             "color": "#64748b",
             "trend_name": trend_record.point_clean if trend_record else "—",
             "operational_name": operational_record.variable if operational_record else "—",
@@ -1301,9 +1301,9 @@ def build_trend_operational_correlation(
             "valid": False,
             "corr_value": None,
             "sample_count": int(len(merged)),
-            "strength": "Nula",
-            "direction": "Indeterminada",
-            "interpretation": "No hay suficientes puntos coincidentes en el tiempo para calcular correlación confiable.",
+            "strength": "None",
+            "direction": "Indeterminate",
+            "interpretation": "There are not enough time-coincident points to compute a reliable correlation.",
             "color": "#64748b",
             "trend_name": trend_record.point_clean,
             "operational_name": operational_record.variable,
@@ -1495,7 +1495,7 @@ def build_anomaly_narrative(records: List[TrendRecord], metric_key: str) -> str:
             all_anomalies.append(df)
 
     if not all_anomalies:
-        return "No se identifican eventos anómalos relevantes en la señal dentro de la ventana analizada."
+        return "No relevant anomalous events are identified in the signal within the analyzed window."
 
     df_all = pd.concat(all_anomalies, ignore_index=True)
 
@@ -1512,57 +1512,57 @@ def build_anomaly_narrative(records: List[TrendRecord], metric_key: str) -> str:
     # Clasificación de comportamiento
     # ------------------------------------------------------------
     if total >= 15:
-        pattern = "recurrente"
+        pattern = "recurrent"
     elif total >= 6:
-        pattern = "intermitente"
+        pattern = "intermittent"
     else:
-        pattern = "aislado"
+        pattern = "isolated"
 
     # ------------------------------------------------------------
     # Tipo dominante
     # ------------------------------------------------------------
     if spikes > drops and spikes > outliers:
-        dominant = "spikes (incrementos abruptos)"
+        dominant = "spikes (abrupt increases)"
     elif drops > spikes and drops > outliers:
-        dominant = "drops (caídas abruptas)"
+        dominant = "drops (abrupt decreases)"
     else:
-        dominant = "outliers dispersos"
+        dominant = "scattered outliers"
 
     # ------------------------------------------------------------
     # Severidad dominante
     # ------------------------------------------------------------
     if high > 0:
-        severity_text = "con presencia de eventos de alta severidad"
+        severity_text = "with high-severity events present"
     elif medium > 0:
-        severity_text = "con eventos de severidad moderada"
+        severity_text = "with moderate-severity events"
     else:
-        severity_text = "predominantemente de baja severidad"
+        severity_text = "predominantly low-severity"
 
     # ------------------------------------------------------------
     # Interpretación técnica
     # ------------------------------------------------------------
-    if pattern == "recurrente":
+    if pattern == "recurrent":
         interpretation = (
-            "La recurrencia de eventos anómalos sugiere un comportamiento no aleatorio, "
-            "posiblemente asociado a condiciones operativas repetitivas o a una condición mecánica persistente."
+            "The recurrence of anomalous events suggests non-random behavior, "
+            "possibly associated with repetitive operating conditions or a persistent mechanical condition."
         )
-    elif pattern == "intermitente":
+    elif pattern == "intermittent":
         interpretation = (
-            "Los eventos anómalos aparecen de forma intermitente, lo que puede estar asociado "
-            "a cambios operativos, transitorios o perturbaciones externas."
+            "The anomalous events appear intermittently, which may be associated "
+            "with operational changes, transients, or external disturbances."
         )
     else:
         interpretation = (
-            "Los eventos detectados son aislados, sin patrón repetitivo claro, "
-            "posiblemente asociados a ruido o perturbaciones puntuales."
+            "The detected events are isolated, with no clear repetitive pattern, "
+            "possibly associated with noise or isolated disturbances."
         )
 
     # ------------------------------------------------------------
     # Construcción final
     # ------------------------------------------------------------
     narrative = (
-        f"Se detectaron {total} eventos anómalos en la señal, clasificados como comportamiento {pattern}, "
-        f"con predominio de {dominant} y {severity_text}. "
+        f"{total} anomalous events were detected in the signal, classified as {pattern} behavior, "
+        f"predominantly {dominant} and {severity_text}. "
         f"{interpretation}"
     )
 
@@ -1601,16 +1601,16 @@ def build_panel_anomaly_summary(records: List[TrendRecord], metric_key: str) -> 
             )
 
     if total_count == 0:
-        interpretation = "No se detectaron anomalías puntuales relevantes en la señal dentro de la ventana mostrada."
+        interpretation = "No relevant point anomalies were detected in the signal within the displayed window."
         color = "#16a34a"
     elif top_severity == "High":
-        interpretation = "Se detectaron anomalías de alta severidad. Conviene revisar eventos transitorios, instrumentación o condición mecánica local."
+        interpretation = "High-severity anomalies were detected. Review transient events, instrumentation, or local mechanical condition."
         color = "#dc2626"
     elif top_severity == "Medium":
-        interpretation = "Se detectaron anomalías moderadas. Conviene revisar cambios operativos o perturbaciones puntuales."
+        interpretation = "Moderate anomalies were detected. Review operational changes or isolated disturbances."
         color = "#f59e0b"
     else:
-        interpretation = "Se detectaron anomalías leves y aisladas. Mantener seguimiento y correlacionar con operación."
+        interpretation = "Minor, isolated anomalies were detected. Keep monitoring and correlate with operation."
         color = "#f97316"
 
     return {
@@ -1636,9 +1636,9 @@ def build_lagged_correlation_analysis(
             "valid": False,
             "best_corr": None,
             "best_lag_min": None,
-            "direction": "Indeterminada",
-            "strength": "Nula",
-            "interpretation": "Seleccione una señal de vibración y una variable operativa para habilitar el análisis con desfase.",
+            "direction": "Indeterminate",
+            "strength": "None",
+            "interpretation": "Select a vibration signal and an operating variable to enable lag analysis.",
             "lag_df": pd.DataFrame(columns=["lag_min", "corr"]),
             "color": "#64748b",
         }
@@ -1654,9 +1654,9 @@ def build_lagged_correlation_analysis(
             "valid": False,
             "best_corr": None,
             "best_lag_min": None,
-            "direction": "Indeterminada",
-            "strength": "Nula",
-            "interpretation": "No hay suficientes puntos coincidentes para analizar correlación con desfase.",
+            "direction": "Indeterminate",
+            "strength": "None",
+            "interpretation": "There are not enough coincident points to analyze lagged correlation.",
             "lag_df": pd.DataFrame(columns=["lag_min", "corr"]),
             "color": "#64748b",
         }
@@ -1708,9 +1708,9 @@ def build_lagged_correlation_analysis(
             "valid": False,
             "best_corr": None,
             "best_lag_min": None,
-            "direction": "Indeterminada",
-            "strength": "Nula",
-            "interpretation": "No fue posible calcular correlaciones válidas en la ventana de desfases.",
+            "direction": "Indeterminate",
+            "strength": "None",
+            "interpretation": "It was not possible to compute valid correlations across the lag window.",
             "lag_df": lag_df,
             "color": "#64748b",
         }
@@ -1723,16 +1723,16 @@ def build_lagged_correlation_analysis(
     meta = classify_correlation_strength(best_corr)
 
     if abs(best_lag) <= step_minutes:
-        lag_meaning = "La relación parece prácticamente simultánea entre vibración y variable operativa."
+        lag_meaning = "The relationship appears virtually simultaneous between vibration and the operating variable."
     elif best_lag > 0:
         lag_meaning = (
-            f"La mejor correlación aparece con un desfase de +{best_lag} min, "
-            "lo que sugiere que la variable operativa antecede la respuesta vibratoria."
+            f"The best correlation appears at a lag of +{best_lag} min, "
+            "suggesting that the operating variable leads the vibratory response."
         )
     else:
         lag_meaning = (
-            f"La mejor correlación aparece con un desfase de {best_lag} min, "
-            "lo que sugiere que la vibración antecede a la variable operativa o que existe inversión temporal en el comportamiento."
+            f"The best correlation appears at a lag of {best_lag} min, "
+            "suggesting that vibration leads the operating variable or that there is a temporal inversion in the behavior."
         )
 
     interpretation = f"{meta['interpretation']} {lag_meaning}"
@@ -1839,15 +1839,15 @@ def build_operational_correlation_report_block(
     lag_txt = str(lag_txt) if lag_txt is not None else "—"
 
     lines = [
-        "Correlación operativa:",
-        f"- Variable analizada: {variable_name}",
-        f"- Correlación simple: {corr_txt}",
-        f"- Fuerza: {corr_info.get('strength') or '—'}",
-        f"- Dirección: {corr_info.get('direction') or '—'}",
-        f"- Correlación con mejor lag: {lag_corr_txt}",
-        f"- Mejor lag: {lag_txt} min",
-        f"- Interpretación simple: {corr_info.get('interpretation') or 'Sin interpretación disponible.'}",
-        f"- Interpretación con lag: {lag_info.get('interpretation') or 'Sin interpretación disponible.'}",
+        "Operational correlation:",
+        f"- Analyzed variable: {variable_name}",
+        f"- Simple correlation: {corr_txt}",
+        f"- Strength: {corr_info.get('strength') or '—'}",
+        f"- Direction: {corr_info.get('direction') or '—'}",
+        f"- Best-lag correlation: {lag_corr_txt}",
+        f"- Best lag: {lag_txt} min",
+        f"- Simple interpretation: {corr_info.get('interpretation') or 'No interpretation available.'}",
+        f"- Lag interpretation: {lag_info.get('interpretation') or 'No interpretation available.'}",
     ]
     return "\\n".join(lines)
 
@@ -1912,7 +1912,7 @@ def build_operational_variable_ranking(
         if score < 0:
             score = 0.0
 
-        interpretation = lag_info.get("interpretation") or corr_info.get("interpretation") or "Sin interpretación disponible."
+        interpretation = lag_info.get("interpretation") or corr_info.get("interpretation") or "No interpretation available."
 
         rows.append(
             {
@@ -1922,8 +1922,8 @@ def build_operational_variable_ranking(
                 "Lag Corr": lag_corr,
                 "Best Lag (min)": lag_min,
                 "Score": score,
-                "Strength": lag_info.get("strength") or corr_info.get("strength") or "Nula",
-                "Direction": lag_info.get("direction") or corr_info.get("direction") or "Indeterminada",
+                "Strength": lag_info.get("strength") or corr_info.get("strength") or "None",
+                "Direction": lag_info.get("direction") or corr_info.get("direction") or "Indeterminate",
                 "Interpretation": interpretation,
             }
         )
@@ -1944,24 +1944,24 @@ def build_operational_variable_ranking(
 def build_operational_variable_ranking_summary(ranking_df: pd.DataFrame) -> str:
     if ranking_df is None or ranking_df.empty:
         return (
-            "No se identificó una variable operativa dominante que explique la vibración, "
-            "ya sea por falta de datos o por ausencia de correlaciones confiables."
+            "No dominant operating variable was identified to explain the vibration, "
+            "either due to lack of data or the absence of reliable correlations."
         )
 
     top = ranking_df.iloc[0]
     variable = str(top.get("Variable") or "—")
     family = str(top.get("Family") or "generic")
-    strength = str(top.get("Strength") or "Nula")
-    direction = str(top.get("Direction") or "Indeterminada")
+    strength = str(top.get("Strength") or "None")
+    direction = str(top.get("Direction") or "Indeterminate")
     lag_corr = format_number(top.get("Lag Corr"), 3)
     lag_min = top.get("Best Lag (min)")
     lag_txt = str(int(lag_min)) if pd.notna(lag_min) else "—"
 
     return (
-        f"La variable operativa que mejor explica el comportamiento vibratorio es {variable} "
-        f"(familia {family}), con correlación dominante {strength.lower()} {direction.lower()} "
-        f"y mejor correlación con desfase de {lag_corr}, observada en un lag de {lag_txt} min. "
-        f"Esto sugiere que dicha variable tiene la mayor influencia operativa relativa sobre la vibración dentro de la ventana analizada."
+        f"The operating variable that best explains the vibratory behavior is {variable} "
+        f"(family {family}), with a dominant {strength.lower()} {direction.lower()} correlation "
+        f"and best lagged correlation of {lag_corr}, observed at a lag of {lag_txt} min. "
+        f"This suggests that this variable has the greatest relative operational influence on vibration within the analyzed window."
     )
 
 
@@ -1978,7 +1978,7 @@ def detect_behavior_change(record: TrendRecord, metric_key: str) -> Dict[str, An
             "change_score": None,
             "classification": "Insufficient data",
             "change_timestamp": None,
-            "interpretation": "No hay suficientes datos para evaluar cambio de comportamiento."
+            "interpretation": "There is not enough data to assess behavior change."
         }
 
     df = df.copy()
@@ -1992,7 +1992,7 @@ def detect_behavior_change(record: TrendRecord, metric_key: str) -> Dict[str, An
             "change_score": None,
             "classification": "Insufficient data",
             "change_timestamp": None,
-            "interpretation": "No hay suficientes datos para evaluar cambio de comportamiento."
+            "interpretation": "There is not enough data to assess behavior change."
         }
 
     y = df["y"].to_numpy(dtype=float)
@@ -2033,7 +2033,7 @@ def detect_behavior_change(record: TrendRecord, metric_key: str) -> Dict[str, An
             "change_score": None,
             "classification": "Insufficient data",
             "change_timestamp": None,
-            "interpretation": "No fue posible localizar un punto de cambio confiable."
+            "interpretation": "It was not possible to locate a reliable change point."
         }
 
     change_ts = safe_datetime(x_ts.iloc[best_idx]) if best_idx < len(x_ts) else None
@@ -2046,23 +2046,23 @@ def detect_behavior_change(record: TrendRecord, metric_key: str) -> Dict[str, An
         classification = "No significant change"
 
     ts_txt = (
-        f" alrededor de {pretty_date(change_ts)} {pretty_time(change_ts)}"
+        f" around {pretty_date(change_ts)} {pretty_time(change_ts)}"
         if change_ts is not None else ""
     )
 
     if classification == "Strong change":
         interpretation = (
-            f"Se detecta un cambio claro de comportamiento en la señal{ts_txt}, indicando transición entre dos regímenes "
-            "operativos o modificación relevante de la condición de la máquina."
+            f"A clear behavior change is detected in the signal{ts_txt}, indicating a transition between two operating "
+            "regimes or a significant change in machine condition."
         )
     elif classification == "Moderate change":
         interpretation = (
-            f"Se observa un cambio moderado en el comportamiento de la señal{ts_txt}, que podría estar asociado a "
-            "variaciones operativas o evolución de la condición mecánica."
+            f"A moderate change is observed in the signal behavior{ts_txt}, which could be associated with "
+            "operational variations or evolution of the mechanical condition."
         )
     else:
         interpretation = (
-            "No se identifican cambios significativos de comportamiento dentro de la ventana analizada."
+            "No significant behavior changes are identified within the analyzed window."
         )
 
     return {
@@ -2089,7 +2089,7 @@ def build_behavior_change_summary(records: List[TrendRecord], metric_key: str) -
         return {
             "count": 0,
             "top_classification": "None",
-            "interpretation": "No hay datos suficientes para evaluar cambios de comportamiento.",
+            "interpretation": "There is not enough data to assess behavior changes.",
             "details": results
         }
 
@@ -2099,17 +2099,17 @@ def build_behavior_change_summary(records: List[TrendRecord], metric_key: str) -
     if strong > 0:
         top = "Strong change"
         interpretation = (
-            "Se detecta al menos un cambio fuerte de comportamiento en las señales, indicando transición clara de régimen."
+            "At least one strong behavior change is detected in the signals, indicating a clear regime transition."
         )
     elif moderate > 0:
         top = "Moderate change"
         interpretation = (
-            "Se identifican cambios moderados de comportamiento, que sugieren variaciones operativas o evolución progresiva."
+            "Moderate behavior changes are identified, suggesting operational variations or progressive evolution."
         )
     else:
         top = "No significant change"
         interpretation = (
-            "No se detectan cambios relevantes de comportamiento en la ventana analizada."
+            "No relevant behavior changes are detected in the analyzed window."
         )
 
     return {
@@ -2125,7 +2125,7 @@ def build_behavior_narrative(records: List[TrendRecord], metric_key: str) -> str
     summary = build_behavior_change_summary(records, metric_key)
 
     if summary["count"] == 0:
-        return "No hay información suficiente para evaluar cambios de comportamiento."
+        return "There is not enough information to assess behavior changes."
 
     details = summary.get("details", [])
     valid = [d for d in details if d.get("valid") and d.get("classification") in ["Strong change", "Moderate change"]]
@@ -2142,12 +2142,12 @@ def build_behavior_narrative(records: List[TrendRecord], metric_key: str) -> str
     change_ts = top.get("change_timestamp")
     ts_txt = (
         f"{pretty_date(change_ts)} {pretty_time(change_ts)}"
-        if change_ts is not None else "sin timestamp identificable"
+        if change_ts is not None else "no identifiable timestamp"
     )
 
     return (
-        f"{summary['interpretation']} El cambio más representativo se localiza en la señal "
-        f"{top.get('record_name', '—')} alrededor de {ts_txt}."
+        f"{summary['interpretation']} The most representative change is located in signal "
+        f"{top.get('record_name', '—')} around {ts_txt}."
     )
 
 def detect_trend_drift(record: TrendRecord, metric_key: str) -> Dict[str, Any]:
@@ -2159,8 +2159,8 @@ def detect_trend_drift(record: TrendRecord, metric_key: str) -> Dict[str, Any]:
             "severity": "None",
             "change_pct": None,
             "slope_ratio": None,
-            "direction": "Indeterminada",
-            "interpretation": "No hay suficientes datos para evaluar drift.",
+            "direction": "Indeterminate",
+            "interpretation": "There is not enough data to assess drift.",
             "valid": False,
         }
 
@@ -2172,8 +2172,8 @@ def detect_trend_drift(record: TrendRecord, metric_key: str) -> Dict[str, Any]:
             "severity": "None",
             "change_pct": None,
             "slope_ratio": None,
-            "direction": "Indeterminada",
-            "interpretation": "No hay suficientes datos para evaluar drift.",
+            "direction": "Indeterminate",
+            "interpretation": "There is not enough data to assess drift.",
             "valid": False,
         }
 
@@ -2194,7 +2194,7 @@ def detect_trend_drift(record: TrendRecord, metric_key: str) -> Dict[str, Any]:
 
     classification = "No Drift"
     severity = "None"
-    interpretation = "No se observa deriva sostenida relevante."
+    interpretation = "No relevant sustained drift is observed."
 
     # Drift sostenido = pendiente importante con dispersión controlada
     if slope_ratio >= 0.18 and volatility_ratio <= 0.35:
@@ -2212,13 +2212,13 @@ def detect_trend_drift(record: TrendRecord, metric_key: str) -> Dict[str, Any]:
 
         if classification == "Progressive Increase":
             interpretation = (
-                "La señal presenta deriva progresiva ascendente, compatible con incremento sostenido "
-                "de la condición medida dentro de la ventana analizada."
+                "The signal shows a progressive upward drift, consistent with a sustained increase "
+                "of the measured condition within the analyzed window."
             )
         else:
             interpretation = (
-                "La señal presenta deriva progresiva descendente, compatible con reducción sostenida "
-                "de la condición medida dentro de la ventana analizada."
+                "The signal shows a progressive downward drift, consistent with a sustained decrease "
+                "of the measured condition within the analyzed window."
             )
 
     return {
@@ -2242,7 +2242,7 @@ def build_panel_drift_summary(records: List[TrendRecord], metric_key: str) -> Di
         return {
             "total_drift_signals": 0,
             "top_severity": "None",
-            "interpretation": "No hay señales disponibles para analizar drift.",
+            "interpretation": "No signals available to analyze drift.",
             "details": [],
         }
 
@@ -2252,7 +2252,7 @@ def build_panel_drift_summary(records: List[TrendRecord], metric_key: str) -> Di
         return {
             "total_drift_signals": 0,
             "top_severity": "None",
-            "interpretation": "No se detecta deriva progresiva dominante en las señales seleccionadas.",
+            "interpretation": "No dominant progressive drift is detected in the selected signals.",
             "details": rows,
         }
 
@@ -2265,17 +2265,17 @@ def build_panel_drift_summary(records: List[TrendRecord], metric_key: str) -> Di
 
     if top_severity == "High":
         interpretation = (
-            "Se detecta deriva progresiva de alta severidad en al menos una señal, "
-            "lo que sugiere cambio sostenido de condición y amerita revisión prioritaria."
+            "High-severity progressive drift is detected in at least one signal, "
+            "suggesting a sustained condition change that warrants priority review."
         )
     elif top_severity == "Medium":
         interpretation = (
-            "Se detecta deriva progresiva moderada, compatible con evolución sostenida de la condición "
-            "que conviene seguir de cerca."
+            "Moderate progressive drift is detected, consistent with a sustained condition evolution "
+            "that should be followed closely."
         )
     else:
         interpretation = (
-            "Se detecta deriva leve en la ventana analizada. Conviene monitorear si el patrón se consolida."
+            "Slight drift is detected in the analyzed window. Monitor whether the pattern consolidates."
         )
 
     return {
@@ -2292,7 +2292,7 @@ def build_drift_narrative(records: List[TrendRecord], metric_key: str) -> str:
 
     drift_rows = [r for r in rows if r.get("classification") != "No Drift"]
     if not drift_rows:
-        return "No se identifican patrones de deriva progresiva relevantes en la ventana analizada."
+        return "No relevant progressive drift patterns are identified in the analyzed window."
 
     increasing = sum(1 for r in drift_rows if r.get("classification") == "Progressive Increase")
     decreasing = sum(1 for r in drift_rows if r.get("classification") == "Progressive Decrease")
@@ -2300,16 +2300,16 @@ def build_drift_narrative(records: List[TrendRecord], metric_key: str) -> str:
     top_severity = summary.get("top_severity", "None")
 
     if increasing > decreasing:
-        dominant = "deriva progresiva ascendente"
+        dominant = "progressive upward drift"
     elif decreasing > increasing:
-        dominant = "deriva progresiva descendente"
+        dominant = "progressive downward drift"
     else:
-        dominant = "deriva mixta sin una dirección dominante"
+        dominant = "mixed drift with no dominant direction"
 
     return (
-        f"Se identifican {total} señales con comportamiento de drift, con predominio de {dominant} "
-        f"y severidad máxima {top_severity}. Esto sugiere un desplazamiento sostenido de la línea base "
-        f"más allá de eventos puntuales, por lo que conviene revisar evolución temporal, carga y condición mecánica."
+        f"{total} signals with drift behavior are identified, predominantly {dominant} "
+        f"and a maximum severity of {top_severity}. This suggests a sustained baseline shift "
+        f"beyond point events, so review the temporal evolution, load, and mechanical condition."
     )
 
 
@@ -2340,7 +2340,7 @@ def _compute_trend_health(
     """
     out: Dict[str, Any] = {
         "status": "unknown",
-        "status_label": "Sin datos",
+        "status_label": "No data",
         "max_value": float("nan"),
         "latest_value": float("nan"),
         "slope_per_day": float("nan"),
@@ -2406,22 +2406,22 @@ def _compute_trend_health(
 
     if has_danger and recent_max >= float(danger_value):
         out["status"] = "action"
-        out["status_label"] = "Acción Requerida"
+        out["status_label"] = "Action Required"
     elif has_warning and recent_max >= float(warning_value):
         out["status"] = "alarm"
-        out["status_label"] = "Atención"
+        out["status_label"] = "Attention"
     elif has_warning and (
         recent_max >= 0.85 * float(warning_value)
         or latest >= 0.85 * float(warning_value)
     ):
         out["status"] = "watch"
-        out["status_label"] = "Vigilancia"
+        out["status_label"] = "Watch"
     elif has_warning or has_danger:
         out["status"] = "ok"
         out["status_label"] = "Normal"
     else:
         out["status"] = "ok"
-        out["status_label"] = "Sin umbrales"
+        out["status_label"] = "No thresholds"
 
     # 3) Pendiente por linealizar contra tiempo (días) + forecast
     #    Ciclo 17.5.7 — endurecemos la validez del forecast:
@@ -2565,19 +2565,19 @@ def _draw_health_chip(
     bits: List[str] = []
     if isinstance(slope, (int, float)) and math.isfinite(slope):
         if abs(slope) < 1e-9:
-            bits.append("pendiente: estable")
+            bits.append("slope: stable")
         else:
             arrow = "↑" if slope > 0 else "↓"
-            bits.append(f"pendiente {arrow} {abs(slope):.3g}/día")
+            bits.append(f"slope {arrow} {abs(slope):.3g}/day")
     # Ciclo 17.5.7 — solo mostramos forecast cuando es válido
     # (>= 0.5 días, ventana >= 24h, varianza estable). El
     # _compute_trend_health ya filtra esos casos a None.
     if forecast_days is not None and forecast_target is not None:
         if 0.5 <= forecast_days < 365 * 5:
             if forecast_days < 1.5:
-                bits.append(f"~1 día → {forecast_target}")
+                bits.append(f"~1 day → {forecast_target}")
             else:
-                bits.append(f"~{forecast_days:.0f} días → {forecast_target}")
+                bits.append(f"~{forecast_days:.0f} days → {forecast_target}")
 
     info_text = " · ".join(bits)
     if info_text:
@@ -2622,8 +2622,8 @@ def build_trend_autodiagnostic(
     """
     out: Dict[str, Any] = {
         "status": "unknown",
-        "status_label": "Sin datos",
-        "headline": "No hay suficientes datos para emitir autodiagnóstico.",
+        "status_label": "No data",
+        "headline": "There is not enough data to produce a self-diagnosis.",
         "prose": [],
         "recommendations": [],
     }
@@ -2655,10 +2655,10 @@ def build_trend_autodiagnostic(
     point_label = primary.point_clean
 
     if n_records == 1:
-        signal_descriptor = f"el punto «{point_label}»"
+        signal_descriptor = f"point «{point_label}»"
     else:
         signal_descriptor = (
-            f"{n_records} puntos de medición sobre el activo «{primary.machine}»"
+            f"{n_records} measurement points on asset «{primary.machine}»"
         )
 
     # -------------------------------------------------------------
@@ -2667,21 +2667,21 @@ def build_trend_autodiagnostic(
     par1: List[str] = []
     if not math.isnan(latest_value):
         par1.append(
-            f"El último valor reportado de {metric_key.lower()} en {signal_descriptor} "
-            f"es {latest_value:.3g} {metric_unit}".rstrip() + "."
+            f"The latest reported {metric_key.lower()} value on {signal_descriptor} "
+            f"is {latest_value:.3g} {metric_unit}".rstrip() + "."
         )
 
     if warning_value is not None and math.isfinite(float(warning_value)):
         pct_w = (latest_value / float(warning_value) * 100.0) if float(warning_value) > 0 else 0.0
         par1.append(
-            f"Esto representa el {pct_w:.0f}% del umbral Warning "
+            f"This represents {pct_w:.0f}% of the Warning threshold "
             f"({float(warning_value):.3g} {metric_unit})".rstrip() + "."
         )
     if danger_value is not None and math.isfinite(float(danger_value)):
         pct_d = (latest_value / float(danger_value) * 100.0) if float(danger_value) > 0 else 0.0
         par1.append(
-            f"Frente al umbral Danger ({float(danger_value):.3g} {metric_unit}) "
-            f"el consumo es del {pct_d:.0f}%".rstrip() + "."
+            f"Against the Danger threshold ({float(danger_value):.3g} {metric_unit}) "
+            f"the usage is {pct_d:.0f}%".rstrip() + "."
         )
 
     # Ciclo 17.5.9 — si el último valor es bajo PERO la ventana
@@ -2694,40 +2694,40 @@ def build_trend_autodiagnostic(
     ):
         _exceed_what = ""
         if danger_value is not None and recent_max_value >= float(danger_value):
-            _exceed_what = f"superando el umbral Danger ({float(danger_value):.3g} {metric_unit})".rstrip()
+            _exceed_what = f"exceeding the Danger threshold ({float(danger_value):.3g} {metric_unit})".rstrip()
         elif warning_value is not None and recent_max_value >= float(warning_value):
-            _exceed_what = f"superando el umbral Warning ({float(warning_value):.3g} {metric_unit})".rstrip()
+            _exceed_what = f"exceeding the Warning threshold ({float(warning_value):.3g} {metric_unit})".rstrip()
         if _exceed_what:
             par1.append(
-                f"Sin embargo, dentro de la ventana reciente se registró un pico "
-                f"de {recent_max_value:.3g} {metric_unit} ".rstrip()
-                + f", {_exceed_what}; el estado se clasifica según el peor valor "
-                f"reciente, no únicamente el último sample."
+                f"However, within the recent window a peak "
+                f"of {recent_max_value:.3g} {metric_unit} was recorded".rstrip()
+                + f", {_exceed_what}; the status is classified by the worst recent "
+                f"value, not only the last sample."
             )
 
     status = out["status"]
     if status == "action":
         par1.append(
-            "El nivel actual supera el umbral Danger establecido; según los criterios "
-            "de ISO 20816 y de los manuales de fábrica esto corresponde a la zona D — "
-            "se recomienda parada para inspección o reducción de carga inmediata."
+            "The current level exceeds the established Danger threshold; per ISO 20816 "
+            "criteria and factory manuals this corresponds to zone D — "
+            "shutdown for inspection or an immediate load reduction is recommended."
         )
     elif status == "alarm":
         par1.append(
-            "El nivel actual cruza el umbral Warning (zona C de ISO 20816) — la máquina "
-            "no debería operar de forma continua bajo esta amplitud sin un programa "
-            "explícito de seguimiento condicional."
+            "The current level crosses the Warning threshold (ISO 20816 zone C) — the machine "
+            "should not operate continuously at this amplitude without an explicit "
+            "condition-monitoring program."
         )
     elif status == "watch":
         par1.append(
-            "El nivel se encuentra entre el 85% y el 100% del Warning, en una zona de "
-            "vigilancia prudente; conviene aumentar la frecuencia de monitoreo y "
-            "documentar las condiciones de operación de cada toma."
+            "The level is between 85% and 100% of Warning, in a zone of "
+            "prudent vigilance; increase the monitoring frequency and "
+            "document the operating conditions of each reading."
         )
     elif status == "ok":
         par1.append(
-            "El nivel se encuentra dentro de la zona operacional normal de los "
-            "criterios de severidad establecidos."
+            "The level is within the normal operating zone of the "
+            "established severity criteria."
         )
 
     # -------------------------------------------------------------
@@ -2737,21 +2737,21 @@ def build_trend_autodiagnostic(
     if isinstance(slope, (int, float)) and math.isfinite(slope):
         if abs(slope) < 1e-9:
             par2.append(
-                "La pendiente del último tramo es prácticamente plana, lo que sugiere "
-                "un régimen estable de la señal — sin tendencia direccional clara."
+                "The slope of the last segment is virtually flat, suggesting "
+                "a stable signal regime — with no clear directional trend."
             )
         elif slope > 0:
             par2.append(
-                f"La pendiente del último tramo es positiva, +{slope:.3g} "
-                f"{metric_unit}/día, evidenciando un crecimiento gradual de la "
-                f"amplitud."
+                f"The slope of the last segment is positive, +{slope:.3g} "
+                f"{metric_unit}/day, indicating a gradual growth of the "
+                f"amplitude."
             )
         else:
             par2.append(
-                f"La pendiente del último tramo es negativa, {slope:.3g} "
-                f"{metric_unit}/día — la señal disminuye con el tiempo, lo que "
-                f"puede asociarse a estabilización post-mantenimiento, "
-                f"asentamiento térmico o redistribución de carga del rotor."
+                f"The slope of the last segment is negative, {slope:.3g} "
+                f"{metric_unit}/day — the signal decreases over time, which "
+                f"may be associated with post-maintenance stabilization, "
+                f"thermal settling, or rotor load redistribution."
             )
 
         # Ciclo 17.5.7 — solo emitimos forecast si _compute_trend_health
@@ -2762,22 +2762,22 @@ def build_trend_autodiagnostic(
             _fcast_int = max(1, int(round(float(forecast_days))))
             if forecast_days < 14:
                 par2.append(
-                    f"Si la pendiente actual se mantiene, el umbral {forecast_target} "
-                    f"se alcanzaría en aproximadamente {_fcast_int} día(s) — "
-                    f"horizonte corto que justifica intervención preventiva."
+                    f"If the current slope holds, the {forecast_target} threshold "
+                    f"would be reached in approximately {_fcast_int} day(s) — "
+                    f"a short horizon that justifies preventive intervention."
                 )
             elif forecast_days < 60:
                 par2.append(
-                    f"Manteniendo la pendiente actual, el umbral {forecast_target} "
-                    f"sería alcanzado en aproximadamente {_fcast_int} días, "
-                    f"lo que permite planificar una intervención dentro del próximo "
-                    f"ciclo de mantenimiento."
+                    f"Maintaining the current slope, the {forecast_target} threshold "
+                    f"would be reached in approximately {_fcast_int} days, "
+                    f"allowing an intervention to be planned within the next "
+                    f"maintenance cycle."
                 )
             elif forecast_days < 365:
                 par2.append(
-                    f"El forecast lineal sitúa el cruce del umbral {forecast_target} "
-                    f"a unos {_fcast_int} días — horizonte cómodo, pero "
-                    f"conviene reevaluar la pendiente con la próxima corrida."
+                    f"The linear forecast places the {forecast_target} threshold crossing "
+                    f"at about {_fcast_int} days — a comfortable horizon, but "
+                    f"the slope should be reassessed with the next run."
                 )
         elif (
             isinstance(slope, (int, float))
@@ -2788,12 +2788,12 @@ def build_trend_autodiagnostic(
             # validador. Lo decimos honestamente en lugar de inventar
             # una proyección.
             par2.append(
-                "La ventana actual es demasiado corta o la cola es "
-                "demasiado inestable como para emitir un forecast lineal "
-                "confiable a Warning/Danger; se sugiere repetir la "
-                "medición en condiciones operacionales estables y con "
-                "al menos 24 horas de datos para construir una "
-                "proyección representativa."
+                "The current window is too short or the tail is "
+                "too unstable to produce a reliable linear forecast "
+                "to Warning/Danger; it is suggested to repeat the "
+                "measurement under stable operating conditions and with "
+                "at least 24 hours of data to build a "
+                "representative projection."
             )
 
     # -------------------------------------------------------------
@@ -2807,23 +2807,23 @@ def build_trend_autodiagnostic(
         if n_anom > 0:
             if top_sev == "High":
                 par3.append(
-                    f"Se identifican {n_anom} eventos puntuales en la ventana, con "
-                    f"presencia de eventos de alta severidad — patrón sugestivo de "
-                    f"transitorios mecánicos, eventos de instrumentación o fallas "
-                    f"locales del cojinete que merecen revisión específica."
+                    f"{n_anom} point events are identified in the window, with "
+                    f"high-severity events present — a pattern suggestive of "
+                    f"mechanical transients, instrumentation events, or local "
+                    f"bearing faults that warrant specific review."
                 )
             elif top_sev == "Medium":
                 par3.append(
-                    f"Se identifican {n_anom} eventos puntuales, con severidad "
-                    f"moderada predominante — pueden estar asociados a cambios "
-                    f"operacionales, transitorios de carga o perturbaciones puntuales "
-                    f"del proceso."
+                    f"{n_anom} point events are identified, predominantly of "
+                    f"moderate severity — they may be associated with operational "
+                    f"changes, load transients, or isolated process "
+                    f"disturbances."
                 )
             else:
                 par3.append(
-                    f"Se identifican {n_anom} eventos puntuales de baja severidad — "
-                    f"compatibles con ruido de medición o perturbaciones aisladas, "
-                    f"sin patrón mecánico claro."
+                    f"{n_anom} low-severity point events are identified — "
+                    f"consistent with measurement noise or isolated disturbances, "
+                    f"with no clear mechanical pattern."
                 )
         # Si no hay anomalías significativas, simplemente no agregamos
         # nada — el lector lo asume del estado general.
@@ -2841,18 +2841,18 @@ def build_trend_autodiagnostic(
         if n_drift > 0 and top_drift in ("High", "Medium"):
             if top_drift == "High":
                 par4.append(
-                    f"El detector de deriva progresiva clasifica {n_drift} "
-                    f"señal(es) en severidad alta. Esto refleja un cambio "
-                    f"sostenido de tendencia (no eventos puntuales) y suele "
-                    f"asociarse a procesos lentos: desgaste, drift térmico del "
-                    f"sistema, deriva de la instrumentación o evolución progresiva "
-                    f"del balance dinámico."
+                    f"The progressive-drift detector classifies {n_drift} "
+                    f"signal(s) as high severity. This reflects a sustained "
+                    f"trend change (not point events) and is typically "
+                    f"associated with slow processes: wear, system thermal "
+                    f"drift, instrumentation drift, or progressive evolution "
+                    f"of the dynamic balance."
                 )
             else:
                 par4.append(
-                    f"El detector de deriva progresiva señala {n_drift} señal(es) "
-                    f"en severidad media — una evolución gradual pero todavía "
-                    f"contenida, recomendable seguir bajo vigilancia condicional."
+                    f"The progressive-drift detector flags {n_drift} signal(s) "
+                    f"at medium severity — a gradual but still contained "
+                    f"evolution, advisable to keep under condition monitoring."
                 )
     except Exception:
         pass
@@ -2866,17 +2866,17 @@ def build_trend_autodiagnostic(
         top_class = str(behav.get("top_classification", "None") or "None")
         if top_class == "Strong change":
             par5.append(
-                "Adicionalmente, el detector de cambio de régimen identifica un "
-                "salto fuerte de comportamiento — la señal cruza un punto de "
-                "inflexión claro, lo que sugiere un evento puntual (cambio de "
-                "carga importante, intervención mecánica, falla incipiente) que "
-                "redefine el promedio operacional."
+                "Additionally, the regime-change detector identifies a "
+                "strong behavior jump — the signal crosses a clear "
+                "inflection point, suggesting a discrete event (major load "
+                "change, mechanical intervention, incipient fault) that "
+                "redefines the operational average."
             )
         elif top_class == "Moderate change":
             par5.append(
-                "El detector de cambio de régimen reporta una transición "
-                "moderada, compatible con ajuste operacional o evolución "
-                "progresiva del proceso."
+                "The regime-change detector reports a moderate "
+                "transition, consistent with operational adjustment or "
+                "progressive process evolution."
             )
     except Exception:
         pass
@@ -2889,14 +2889,14 @@ def build_trend_autodiagnostic(
         op_var_names = sorted({r.variable for r in operational_records if r.variable})
         if op_var_names:
             shown = ", ".join(op_var_names[:3])
-            extra = " y otras" if len(op_var_names) > 3 else ""
+            extra = " and others" if len(op_var_names) > 3 else ""
             par6.append(
-                f"En esta corrida se cuenta con variables operativas correlacionadas "
-                f"({shown}{extra}). Se recomienda revisar el panel de correlación "
-                f"con desfase para verificar si la evolución de la señal sigue a "
-                f"un parámetro de proceso (carga, temperatura, RPM) — esto permite "
-                f"distinguir entre cambio de régimen operacional y degradación "
-                f"mecánica intrínseca."
+                f"This run includes correlated operating variables "
+                f"({shown}{extra}). It is recommended to review the lagged "
+                f"correlation panel to verify whether the signal evolution follows "
+                f"a process parameter (load, temperature, RPM) — this helps "
+                f"distinguish between an operational regime change and intrinsic "
+                f"mechanical degradation."
             )
 
     # -------------------------------------------------------------
@@ -2904,25 +2904,25 @@ def build_trend_autodiagnostic(
     # -------------------------------------------------------------
     recs: List[str] = []
     if status == "action":
-        recs.append("Coordinar parada planificada o reducción de carga inmediata para inspección.")
-        recs.append("Capturar espectro y forma de onda en condiciones actuales para confirmar la fuente del incremento.")
-        recs.append("Verificar tendencia de centerline y acoplamientos asociados al punto comprometido.")
+        recs.append("Coordinate a planned shutdown or immediate load reduction for inspection.")
+        recs.append("Capture spectrum and waveform under current conditions to confirm the source of the increase.")
+        recs.append("Check the centerline trend and couplings associated with the affected point.")
     elif status == "alarm":
-        recs.append("Aumentar frecuencia de monitoreo (diaria si es posible) y registrar evolución bajo condiciones operacionales conocidas.")
-        recs.append("Programar inspección dirigida en el próximo paro programado.")
-        recs.append("Evaluar correlación con cambios recientes de carga, temperatura o composición de fluido de proceso.")
+        recs.append("Increase monitoring frequency (daily if possible) and log the evolution under known operating conditions.")
+        recs.append("Schedule a targeted inspection at the next planned outage.")
+        recs.append("Assess correlation with recent changes in load, temperature, or process-fluid composition.")
     elif status == "watch":
-        recs.append("Mantener seguimiento semanal y documentar las condiciones de cada toma.")
-        recs.append("Si la pendiente se mantiene positiva en la siguiente corrida, escalar a Atención.")
+        recs.append("Maintain weekly monitoring and document the conditions of each reading.")
+        recs.append("If the slope stays positive on the next run, escalate to Attention.")
     elif status == "ok":
-        recs.append("Continuar con el plan rutinario de monitoreo periódico.")
-        recs.append("Conservar la línea base actual como referencia post-mantenimiento.")
+        recs.append("Continue with the routine periodic monitoring plan.")
+        recs.append("Preserve the current baseline as a post-maintenance reference.")
 
     if forecast_days is not None and forecast_target is not None and forecast_days < 60:
         _fcast_rec = max(1, int(round(float(forecast_days))))
         recs.append(
-            f"Programar inspección antes de los {_fcast_rec} día(s) de forecast "
-            f"al cruce del umbral {forecast_target}."
+            f"Schedule an inspection before the {_fcast_rec} day(s) forecast "
+            f"to the {forecast_target} threshold crossing."
         )
 
     # -------------------------------------------------------------
@@ -2930,17 +2930,17 @@ def build_trend_autodiagnostic(
     # -------------------------------------------------------------
     if status == "action":
         out["headline"] = (
-            f"Estado: ACCIÓN REQUERIDA. {metric_key} en zona D "
-            f"({latest_value:.3g} {metric_unit}); supera el umbral Danger."
+            f"Status: ACTION REQUIRED. {metric_key} in zone D "
+            f"({latest_value:.3g} {metric_unit}); exceeds the Danger threshold."
         ).strip()
     elif status == "alarm":
         out["headline"] = (
-            f"Estado: ATENCIÓN. {metric_key} cruza Warning "
-            f"({latest_value:.3g} {metric_unit}); requiere monitoreo intensivo."
+            f"Status: ATTENTION. {metric_key} crosses Warning "
+            f"({latest_value:.3g} {metric_unit}); requires intensive monitoring."
         ).strip()
     elif status == "watch":
         out["headline"] = (
-            f"Estado: VIGILANCIA. {metric_key} consume el 85–100% del Warning."
+            f"Status: WATCH. {metric_key} uses 85–100% of Warning."
         ).strip()
     elif status == "ok":
         if (
@@ -2952,8 +2952,8 @@ def build_trend_autodiagnostic(
         ):
             _fcast_hl = max(1, int(round(float(forecast_days))))
             out["headline"] = (
-                f"Estado: NORMAL con tendencia ascendente; cruce de umbral "
-                f"proyectado en ~{_fcast_hl} día(s)."
+                f"Status: NORMAL with an upward trend; threshold crossing "
+                f"projected in ~{_fcast_hl} day(s)."
             )
         elif (
             isinstance(slope, (int, float))
@@ -2964,13 +2964,13 @@ def build_trend_autodiagnostic(
             # Hay pendiente positiva pero el forecast fue invalidado
             # (ventana <24h o cola inestable). Headline honesto.
             out["headline"] = (
-                "Estado: NORMAL con tendencia ascendente; ventana actual "
-                "insuficiente para emitir un forecast confiable."
+                "Status: NORMAL with an upward trend; current window "
+                "insufficient to produce a reliable forecast."
             )
         else:
-            out["headline"] = "Estado: NORMAL. Señal dentro de la zona operacional sin tendencia preocupante."
+            out["headline"] = "Status: NORMAL. Signal within the operating zone with no concerning trend."
     else:
-        out["headline"] = "Sin umbrales definidos; el autodiagnóstico se limita a la descripción estadística."
+        out["headline"] = "No thresholds defined; the self-diagnosis is limited to the statistical description."
 
     # -------------------------------------------------------------
     # Componer prosa final
@@ -3706,8 +3706,8 @@ def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[st
         # 3. Si NO hay traces con data, devolver error explícito
         if n_traces_with_data == 0:
             return None, (
-                "Figura sin traces con datos. ¿Hay señales seleccionadas? "
-                "(Verificá Signal Selection y Operational Selection en sidebar)"
+                "Figure has no traces with data. Are any signals selected? "
+                "(Check Signal Selection and Operational Selection in the sidebar)"
             )
 
         # 4. Construir figura HD
@@ -3770,18 +3770,18 @@ def build_export_png_bytes(fig: go.Figure) -> Tuple[Optional[bytes], Optional[st
             export_fig, width=export_w, height=export_h, scale=1
         )
         if _png_err:
-            return None, f"Error generando PNG HD: {_png_err}"
+            return None, f"Error generating HD PNG: {_png_err}"
 
         # 6. Validar que no devuelva bytes vacíos
         if not png_bytes or len(png_bytes) < 1000:
             return None, (
-                f"Kaleido devolvió PNG inválido ({len(png_bytes) if png_bytes else 0} bytes). "
-                f"Probable bug de versión kaleido — reportá al equipo."
+                f"Kaleido returned an invalid PNG ({len(png_bytes) if png_bytes else 0} bytes). "
+                f"Likely a kaleido version bug — report it to the team."
             )
 
         return png_bytes, None
     except Exception as e:
-        return None, f"Error generando PNG HD: {type(e).__name__}: {e}"
+        return None, f"Error generating HD PNG: {type(e).__name__}: {e}"
 
 
 def _sanitize_series_for_analysis(values: pd.Series) -> np.ndarray:
@@ -3855,8 +3855,8 @@ def _build_single_trend_narrative(record: TrendRecord, metric_key: str) -> str:
     unit = _trend_unit_for_metric(record, metric_key)
     if df.empty:
         return (
-            f"{record.point_clean}: no se identificaron datos válidos para el análisis de {metric_key.lower()}, "
-            "por lo que no fue posible emitir diagnóstico automático."
+            f"{record.point_clean}: no valid data was identified for the {metric_key.lower()} analysis, "
+            "so an automatic diagnosis could not be produced."
         )
 
     analysis = _classify_trend_behavior(df["y"])
@@ -3865,41 +3865,41 @@ def _build_single_trend_narrative(record: TrendRecord, metric_key: str) -> str:
     end_ts = safe_datetime(df["x"].iloc[-1])
 
     base = (
-        f"{record.point_clean} — ventana analizada desde {pretty_date(start_ts)} {pretty_time(start_ts)} "
-        f"hasta {pretty_date(end_ts)} {pretty_time(end_ts)}, con {sample_count} muestras válidas. "
-        f"Valor inicial {format_number(analysis.get('initial_value'), 3)} {unit}, "
-        f"valor final {format_number(analysis.get('final_value'), 3)} {unit}, "
-        f"variación total {format_number(analysis.get('change_pct'), 2)}%."
+        f"{record.point_clean} — window analyzed from {pretty_date(start_ts)} {pretty_time(start_ts)} "
+        f"to {pretty_date(end_ts)} {pretty_time(end_ts)}, with {sample_count} valid samples. "
+        f"Initial value {format_number(analysis.get('initial_value'), 3)} {unit}, "
+        f"final value {format_number(analysis.get('final_value'), 3)} {unit}, "
+        f"total change {format_number(analysis.get('change_pct'), 2)}%."
     )
 
     classification = analysis.get("classification")
     if classification == "progressive_increase":
         return (
-            f"{base} La tendencia presenta un incremento progresivo del {metric_key.lower()}, "
-            "lo cual sugiere posible deterioro del estado mecánico o evolución de una condición incipiente. "
-            "Se recomienda seguimiento estrecho y correlación con variables operativas y alarmas."
+            f"{base} The trend shows a progressive increase in {metric_key.lower()}, "
+            "which suggests possible mechanical deterioration or evolution of an incipient condition. "
+            "Close monitoring and correlation with operating variables and alarms are recommended."
         )
     if classification == "progressive_decrease":
         return (
-            f"{base} La señal muestra una disminución progresiva del {metric_key.lower()}, "
-            "compatible con normalización de la condición o reducción de carga/excitación. "
-            "Se recomienda verificar si el comportamiento coincide con cambios operativos esperados."
+            f"{base} The signal shows a progressive decrease in {metric_key.lower()}, "
+            "consistent with condition normalization or a reduction in load/excitation. "
+            "Verify whether the behavior matches expected operational changes."
         )
     if classification == "abrupt":
         return (
-            f"{base} Se observan variaciones bruscas y dispersión elevada en la señal, "
-            "compatibles con condición transitoria, inestabilidad o cambios operativos repentinos. "
-            "Se recomienda revisar eventos de proceso, transientes de arranque/parada y consistencia de la instrumentación."
+            f"{base} Abrupt variations and high dispersion are observed in the signal, "
+            "consistent with a transient condition, instability, or sudden operational changes. "
+            "Review process events, startup/coastdown transients, and instrumentation consistency."
         )
     if classification == "stable":
         return (
-            f"{base} El comportamiento es estable y sin desviaciones significativas, "
-            "lo que es consistente con una condición normal dentro de la ventana evaluada. "
-            "Se recomienda continuar monitoreo rutinario."
+            f"{base} The behavior is stable with no significant deviations, "
+            "consistent with a normal condition within the evaluated window. "
+            "Continuing routine monitoring is recommended."
         )
     return (
-        f"{base} La cantidad de información disponible no es suficiente para clasificar con confianza la tendencia. "
-        "Se recomienda ampliar la ventana temporal o validar la calidad de los datos."
+        f"{base} The amount of available information is not sufficient to classify the trend with confidence. "
+        "Extending the time window or validating data quality is recommended."
     )
 
 
@@ -3909,7 +3909,7 @@ def _build_operational_only_narrative(records: List[OperationalRecord]) -> str:
         df = get_operational_clean_df(rec)
         if df.empty:
             lines.append(
-                f"{rec.variable}: no se identificaron datos válidos para emitir diagnóstico automático."
+                f"{rec.variable}: no valid data was identified to produce an automatic diagnosis."
             )
             continue
         analysis = _classify_trend_behavior(df["y"])
@@ -3917,24 +3917,24 @@ def _build_operational_only_narrative(records: List[OperationalRecord]) -> str:
         end_ts = safe_datetime(df["x"].iloc[-1])
         unit = rec.unit or ""
         base = (
-            f"{rec.variable} — ventana analizada desde {pretty_date(start_ts)} {pretty_time(start_ts)} "
-            f"hasta {pretty_date(end_ts)} {pretty_time(end_ts)}. "
-            f"Valor inicial {format_number(analysis.get('initial_value'), 3)} {unit}, "
-            f"valor final {format_number(analysis.get('final_value'), 3)} {unit}, "
-            f"variación total {format_number(analysis.get('change_pct'), 2)}%."
+            f"{rec.variable} — window analyzed from {pretty_date(start_ts)} {pretty_time(start_ts)} "
+            f"to {pretty_date(end_ts)} {pretty_time(end_ts)}. "
+            f"Initial value {format_number(analysis.get('initial_value'), 3)} {unit}, "
+            f"final value {format_number(analysis.get('final_value'), 3)} {unit}, "
+            f"total change {format_number(analysis.get('change_pct'), 2)}%."
         )
 
         classification = analysis.get("classification")
         if classification == "progressive_increase":
-            lines.append(f"{base} Tendencia operativa con incremento progresivo sostenido.")
+            lines.append(f"{base} Operational trend with sustained progressive increase.")
         elif classification == "progressive_decrease":
-            lines.append(f"{base} Tendencia operativa con descenso progresivo sostenido.")
+            lines.append(f"{base} Operational trend with sustained progressive decrease.")
         elif classification == "abrupt":
-            lines.append(f"{base} Tendencia operativa con variaciones bruscas o comportamiento transitorio.")
+            lines.append(f"{base} Operational trend with abrupt variations or transient behavior.")
         elif classification == "stable":
-            lines.append(f"{base} Tendencia operativa estable durante la ventana evaluada.")
+            lines.append(f"{base} Stable operational trend during the evaluated window.")
         else:
-            lines.append(f"{base} Información insuficiente para clasificar la tendencia.")
+            lines.append(f"{base} Insufficient information to classify the trend.")
     return "\n\n".join(lines)
 
 
@@ -3953,12 +3953,12 @@ def build_trend_report_narrative(
     if operational_records:
         op_summary = _build_operational_only_narrative(operational_records)
         trend_lines.append(
-            "Correlación operativa disponible:\n\n"
+            "Operational correlation available:\n\n"
             f"{op_summary}"
         )
-    
+
 context = st.session_state.get("asset_context", {})
-ctx_text = f"\n\nContexto de máquina: {context.get('type','')} - {context.get('description','')}"
+ctx_text = f"\n\nMachine context: {context.get('type','')} - {context.get('description','')}"
 
 
 
@@ -4055,7 +4055,7 @@ with st.sidebar:
                 _delta = _ts_max - _ts_min
                 _days = _delta.total_seconds() / 86400.0
                 if _days >= 1:
-                    _window_txt = f"{_days:.1f} días"
+                    _window_txt = f"{_days:.1f} days"
                 else:
                     _window_txt = f"{_delta.total_seconds() / 3600.0:.1f} h"
             _fam_chips = " ".join(
@@ -4069,10 +4069,10 @@ with st.sidebar:
                 <div style="background:#ecfdf5;border-left:3px solid #10b981;
                             padding:8px 11px;border-radius:6px;margin-top:6px;
                             font-size:0.82rem;color:#065f46;">
-                    <b>✓ {_n_vars} variables operativas</b>
-                    · {_total_pts:,} muestras · ventana {_window_txt}
+                    <b>✓ {_n_vars} operating variables</b>
+                    · {_total_pts:,} samples · window {_window_txt}
                     <br><span style='font-size:0.74rem;color:#047857;'>
-                    Familias detectadas:</span> {_fam_chips}
+                    Detected families:</span> {_fam_chips}
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -4092,11 +4092,11 @@ with st.sidebar:
     # operacional) bajo la instancia activa, y volver a traer
     # corridas anteriores para concatenarlas con la corrida
     # actual y tener un trend largo de meses/años.
-    st.markdown("### 📚 Histórico de Tendencias")
+    st.markdown("### 📚 Trend History")
     if not trend_active_instance_id:
         st.caption(
-            "Seleccione una instancia activa (arriba) para guardar y "
-            "recuperar corridas históricas."
+            "Select an active instance (above) to save and "
+            "retrieve historical runs."
         )
         historical_corrida_ids: List[str] = []
     else:
@@ -4110,38 +4110,38 @@ with st.sidebar:
             _earl = str(_hist_summary.get("earliest", "") or "").split("T")[0]
             _late = str(_hist_summary.get("latest", "") or "").split("T")[0]
             _tot_files = int(_hist_summary.get("total_files", 0) or 0)
-            _resumen_txt = f"{_n_corr} corrida(s) archivada(s) · {_tot_files} CSV total"
+            _resumen_txt = f"{_n_corr} archived run(s) · {_tot_files} CSV total"
             if _earl and _late:
-                _resumen_txt += f" · rango: {_earl} → {_late}"
+                _resumen_txt += f" · range: {_earl} → {_late}"
             st.caption(_resumen_txt)
         else:
-            st.caption("Aún no hay corridas archivadas para esta instancia.")
+            st.caption("No archived runs yet for this instance.")
 
         # ----- Guardar corrida actual
-        with st.expander("📸 Archivar corrida actual", expanded=False):
+        with st.expander("📸 Archive current run", expanded=False):
             _all_current_files = list(uploaded_files or []) + list(operational_uploaded_files or [])
             if not _all_current_files:
                 st.caption(
-                    "Cargue al menos un CSV (trend u operacional) en los uploaders "
-                    "de arriba antes de archivar."
+                    "Load at least one CSV (trend or operational) in the uploaders "
+                    "above before archiving."
                 )
             else:
                 _label_default = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")
                 _corrida_label_in = st.text_input(
-                    "Etiqueta de la corrida (opcional)",
+                    "Run label (optional)",
                     value="",
-                    placeholder=f"Ejemplo: «Post-mantenimiento abril» — default: {_label_default}",
+                    placeholder=f"Example: «Post-maintenance April» — default: {_label_default}",
                     key="wm_trend_hist_label",
                 )
                 _corrida_notes_in = st.text_area(
-                    "Observaciones (opcional)",
+                    "Notes (optional)",
                     value="",
                     height=80,
-                    placeholder="Condiciones de la corrida, eventos notables, ajustes operacionales…",
+                    placeholder="Run conditions, notable events, operational adjustments…",
                     key="wm_trend_hist_notes",
                 )
                 if st.button(
-                    "Guardar al histórico",
+                    "Save to history",
                     key="wm_trend_hist_save_btn",
                     use_container_width=True,
                 ):
@@ -4166,12 +4166,12 @@ with st.sidebar:
                             except Exception:
                                 pass
                         st.success(
-                            f"Corrida archivada bajo «{trend_active_instance_id}» "
+                            f"Run archived under «{trend_active_instance_id}» "
                             f"({len(_files_bytes)} CSV)."
                         )
                         st.rerun()
                     except Exception as exc:
-                        st.error(f"No se pudo archivar la corrida: {exc}")
+                        st.error(f"Could not archive the run: {exc}")
 
         # ----- Cargar corridas anteriores para merge
         try:
@@ -4200,18 +4200,18 @@ with st.sidebar:
                 c["corrida_id"]: _corrida_label_fmt(c) for c in _avail_corridas
             }
             historical_corrida_ids = st.multiselect(
-                "Incluir corridas anteriores en el análisis",
+                "Include previous runs in the analysis",
                 options=list(_corrida_id_to_label.keys()),
                 format_func=lambda cid: _corrida_id_to_label.get(cid, cid),
                 default=st.session_state.get("wm_trend_hist_selected", []),
                 key="wm_trend_hist_selected",
                 help=(
-                    "Las corridas seleccionadas se concatenan cronológicamente "
-                    "con la corrida actual para reconstruir tendencias largas."
+                    "The selected runs are concatenated chronologically "
+                    "with the current run to reconstruct long trends."
                 ),
             )
 
-            with st.expander("Administrar corridas archivadas", expanded=False):
+            with st.expander("Manage archived runs", expanded=False):
                 for _meta in _avail_corridas:
                     _cid = _meta.get("corrida_id", "")
                     cols = st.columns([0.78, 0.22])
@@ -4219,12 +4219,12 @@ with st.sidebar:
                     if cols[1].button(
                         "",
                         key=f"wm_trend_hist_del_{_cid}",
-                        help=f"Borrar corrida {_cid}",
+                        help=f"Delete run {_cid}",
                     ):
                         try:
                             ok = delete_trend_corrida(trend_active_instance_id, _cid)
                             if ok:
-                                st.success(f"Corrida {_cid} eliminada.")
+                                st.success(f"Run {_cid} deleted.")
                                 # Limpiar de la selección si estaba ahí
                                 _sel = list(st.session_state.get("wm_trend_hist_selected", []))
                                 if _cid in _sel:
@@ -4232,9 +4232,9 @@ with st.sidebar:
                                     st.session_state["wm_trend_hist_selected"] = _sel
                                 st.rerun()
                             else:
-                                st.warning("No se pudo borrar la corrida.")
+                                st.warning("Could not delete the run.")
                         except Exception as exc:
-                            st.error(f"Error borrando: {exc}")
+                            st.error(f"Error deleting: {exc}")
         else:
             historical_corrida_ids = []
 
@@ -4287,11 +4287,11 @@ if _hist_corrida_ids and _hist_active_instance_id:
         operational_records_all.extend(_hist_op_recs)
         _hist_summary_msgs.append(
             f"«{_label}» · {len(_hist_trend_recs)} trend / "
-            f"{len(_hist_op_recs)} operacional"
+            f"{len(_hist_op_recs)} operational"
         )
     if _hist_summary_msgs:
         st.info(
-            "📚 Corridas históricas incluidas en el análisis:\n\n- "
+            "📚 Historical runs included in the analysis:\n\n- "
             + "\n- ".join(_hist_summary_msgs)
         )
 
@@ -4300,7 +4300,7 @@ operational_records_all = sorted(operational_records_all, key=lambda r: (r.machi
 
 
 if not records_all and not operational_records_all:
-    st.warning("Cargue al menos un CSV de tendencia o un CSV de data operativa en este módulo.")
+    st.warning("Load at least one trend CSV or one operational data CSV in this module.")
     st.stop()
 
 # =========================================================
@@ -4323,27 +4323,27 @@ def _build_trend_asset_context_from_instance(state: Dict[str, Any]) -> Dict[str,
     # asset_type: heurística por profile_label / machine_group
     pl_low = profile_label.lower()
     if "turbogen" in pl_low or "tg-" in pl_low:
-        asset_type = "Turbogenerador"
+        asset_type = "Turbogenerator"
     elif "turbina de gas" in pl_low or "lm6000" in pl_low or "frame " in pl_low:
-        asset_type = "Turbina de gas"
+        asset_type = "Gas turbine"
     elif "vapor" in pl_low and "turbina" in pl_low:
-        asset_type = "Turbina de vapor"
+        asset_type = "Steam turbine"
     elif "generador" in pl_low or "alternador" in pl_low:
-        asset_type = "Generador eléctrico"
+        asset_type = "Electric generator"
     elif "compresor" in pl_low:
-        asset_type = "Compresor"
+        asset_type = "Compressor"
     elif "bomba" in pl_low:
-        asset_type = "Bomba"
+        asset_type = "Pump"
     elif "ventilador" in pl_low or "fan" in pl_low:
-        asset_type = "Ventilador"
+        asset_type = "Fan"
     elif "gearbox" in pl_low or "caja" in pl_low:
         asset_type = "Gearbox"
     elif "motor" in pl_low:
-        asset_type = "Motor eléctrico"
+        asset_type = "Electric motor"
     elif machine_group:
         asset_type = profile_label or machine_group
     else:
-        asset_type = profile_label or "Activo monitoreado"
+        asset_type = profile_label or "Monitored asset"
 
     machine_configuration = "Simple"
     description_bits: List[str] = []
@@ -4352,7 +4352,7 @@ def _build_trend_asset_context_from_instance(state: Dict[str, Any]) -> Dict[str,
     if tag and tag != "(default)":
         description_bits.append(f"tag {tag}")
     if location:
-        description_bits.append(f"ubicación {location}")
+        description_bits.append(f"location {location}")
     if notes:
         description_bits.append(notes)
     machine_description = ". ".join(description_bits) if description_bits else (instance_label or asset_type)
@@ -4419,15 +4419,6 @@ def final_report_cleanup(text: Any) -> str:
     t = re.sub(r"\n{3,}", "\n\n", t)
     t = re.sub(r"[ \t]+", " ", t)
 
-    # Ajustes editoriales
-    t = t.replace("amplitude", "amplitud vibratoria")
-    t = t.replace("Amplitude", "Amplitud vibratoria")
-    t = t.replace("del amplitud vibratoria", "de la amplitud vibratoria")
-    t = t.replace("del amplitude", "de la amplitud vibratoria")
-    t = t.replace("de amplitude", "de la amplitud vibratoria")
-    t = t.replace(" phase ", " fase ")
-    t = t.replace(" speed ", " velocidad ")
-
     return t.strip()
 
 
@@ -4442,8 +4433,8 @@ def build_behavior_change_report_block(records: List[TrendRecord], metric_key: s
 
     if not valid:
         return (
-            "Cambio de comportamiento: no se identifican transiciones relevantes de régimen "
-            "dentro de la ventana analizada."
+            "Behavior change: no relevant regime transitions are identified "
+            "within the analyzed window."
         )
 
     top = sorted(
@@ -4456,13 +4447,13 @@ def build_behavior_change_report_block(records: List[TrendRecord], metric_key: s
     if change_ts is not None:
         ts_txt = f"{pretty_date(change_ts)} {pretty_time(change_ts)}"
     else:
-        ts_txt = "sin timestamp identificable"
+        ts_txt = "no identifiable timestamp"
 
     return (
-        f"Cambio de comportamiento: la clasificación dominante es {summary.get('top_classification', '—')}. "
-        f"El cambio más representativo se localiza en la señal {top.get('record_name', '—')} "
-        f"alrededor de {ts_txt}. "
-        f"{top.get('interpretation', 'Sin interpretación disponible.')}"
+        f"Behavior change: the dominant classification is {summary.get('top_classification', '—')}. "
+        f"The most representative change is located in signal {top.get('record_name', '—')} "
+        f"around {ts_txt}. "
+        f"{top.get('interpretation', 'No interpretation available.')}"
     )
 
 
@@ -4544,7 +4535,7 @@ def queue_trend_to_report(
             _bits: List[str] = []
             _headline = _autodiag_for_pdf.get("headline", "")
             if _headline:
-                _bits.append(f"Diagnóstico ejecutivo: {_headline}")
+                _bits.append(f"Executive diagnosis: {_headline}")
 
             for _para in _autodiag_for_pdf.get("prose", []) or []:
                 if _para and _para.strip():
@@ -4553,7 +4544,7 @@ def queue_trend_to_report(
             _recs_for_pdf = _autodiag_for_pdf.get("recommendations", []) or []
             if _recs_for_pdf:
                 _rec_lines = "\n".join([f"  {_i}. {_r}" for _i, _r in enumerate(_recs_for_pdf, 1)])
-                _bits.append(f"Acciones recomendadas:\n{_rec_lines}")
+                _bits.append(f"Recommended actions:\n{_rec_lines}")
 
             # Marco de fuente de los setpoints (Vault / ISO / Override)
             _src = (_thr_meta.get("source") or "").strip()
@@ -4563,8 +4554,8 @@ def queue_trend_to_report(
                     _sw = _thr_meta.get("suggested_warning")
                     _sd = _thr_meta.get("suggested_danger")
                     _src_line_parts.append(
-                        "Override del cliente activo "
-                        f"(sugeridos: W={_sw} / D={_sd})"
+                        "Client override active "
+                        f"(suggested: W={_sw} / D={_sd})"
                     )
                 _detail = (_thr_meta.get("detail") or "").strip()
                 if _detail:
@@ -4574,11 +4565,11 @@ def queue_trend_to_report(
                 # Ciclo 17.9 — cita normativa explícita en el PDF
                 _norm_ref = (_thr_meta.get("norm_reference") or "").strip()
                 if _norm_ref:
-                    _bits.append(f"Referencia normativa: {_norm_ref}.")
+                    _bits.append(f"Standard reference: {_norm_ref}.")
                 _override_just = (_thr_meta.get("override_justification") or "").strip()
                 if _override_just and (_thr_meta.get("warning_is_override") or _thr_meta.get("danger_is_override")):
                     _bits.append(
-                        f"Justificación del override del especialista: {_override_just}"
+                        f"Specialist override justification: {_override_just}"
                     )
 
             if _bits:
@@ -4683,14 +4674,14 @@ def queue_trend_to_report(
         narrative = f"{narrative}\n\n{correlation_report_block}"
 
     if ranking_summary:
-        narrative = f"{narrative}\n\nRanking automático de variables operativas:\n{ranking_summary}"
+        narrative = f"{narrative}\n\nAutomatic ranking of operating variables:\n{ranking_summary}"
 
     if drift_narrative:
         narrative = (
-            f"{narrative}\n\nDeriva progresiva (drift):\n"
+            f"{narrative}\n\nProgressive drift:\n"
             f"{drift_narrative}\n"
-            f"Señales con drift: {drift_summary.get('total_drift_signals', 0)} | "
-            f"Severidad máxima: {drift_summary.get('top_severity', 'None')}."
+            f"Signals with drift: {drift_summary.get('total_drift_signals', 0)} | "
+            f"Maximum severity: {drift_summary.get('top_severity', 'None')}."
         )
 
     if behavior_narrative:
@@ -4817,14 +4808,14 @@ with st.sidebar:
         _fam_order = ["pressure", "temperature", "flow", "frequency",
                       "speed", "power", "vibration", "generic"]
         _fam_label = {
-            "pressure": "🔵 Presiones",
-            "temperature": "🟠 Temperaturas",
-            "flow": "Flujos",
-            "frequency": "Frecuencia/VFD",
-            "speed": "⚙️ Velocidad",
-            "power": "Potencia",
-            "vibration": "Vibración",
-            "generic": "Otros",
+            "pressure": "🔵 Pressures",
+            "temperature": "🟠 Temperatures",
+            "flow": "Flows",
+            "frequency": "Frequency/VFD",
+            "speed": "⚙️ Speed",
+            "power": "Power",
+            "vibration": "Vibration",
+            "generic": "Other",
         }
         _qp_cols = st.columns(2)
         _qp_idx = 0
@@ -4837,14 +4828,14 @@ with st.sidebar:
                     f"{_fam_label.get(fam, fam.title())} ({len(_ids)})",
                     key=f"wm_tr_qp_{fam}",
                     use_container_width=True,
-                    help=f"Cargar todas las variables de tipo {fam}",
+                    help=f"Load all {fam}-type variables",
                 ):
                     st.session_state.wm_tr_operational_signal_ids = list(_ids)
                     st.rerun()
             _qp_idx += 1
         # Botón "Limpiar" si hay seleccionadas
         if st.session_state.get("wm_tr_operational_signal_ids"):
-            if st.button("✕ Limpiar selección operativa",
+            if st.button("✕ Clear operational selection",
                          key="wm_tr_op_clear",
                          use_container_width=True,
                          type="secondary"):
@@ -4857,10 +4848,10 @@ with st.sidebar:
         if r.op_id in st.session_state.wm_tr_operational_signal_ids and r.display_name in operational_names
     ]
     selected_operational_names = st.multiselect(
-        "Variables operativas (presión, temperatura, flujo, VFD…)",
+        "Operating variables (pressure, temperature, flow, VFD…)",
         options=operational_names,
         default=default_operational_names,
-        help="Seleccione variables individuales o use los botones rápidos de arriba para cargar por familia.",
+        help="Select individual variables or use the quick buttons above to load by family.",
     )
     st.session_state.wm_tr_operational_signal_ids = [operational_name_map[name] for name in selected_operational_names]
 
@@ -4957,7 +4948,7 @@ with st.sidebar:
     st.markdown(
         f"<div style='background:{_src_color[1]};border-left:3px solid {_src_color[0]};"
         f"padding:8px 12px;border-radius:6px;margin:2px 0 8px 0;font-size:0.85rem;'>"
-        f"<b>Setpoints sugeridos:</b> {_src}<br>"
+        f"<b>Suggested setpoints:</b> {_src}<br>"
         f"<span style='color:#475569;font-size:0.78rem;'>"
         f"{_thr_suggestion.get('detail','')}</span>"
         f"</div>",
@@ -4976,7 +4967,7 @@ with st.sidebar:
     # Boton "Aplicar Vault" que limpia overrides y pre-llena con sugerencia.
     _btn_cols = st.columns([0.6, 0.4])
     with _btn_cols[0]:
-        if st.button("Aplicar setpoints sugeridos", key="wm_tr_apply_vault_thr", use_container_width=True):
+        if st.button("Apply suggested setpoints", key="wm_tr_apply_vault_thr", use_container_width=True):
             st.session_state.pop("wm_tr_warning_override_value", None)
             st.session_state.pop("wm_tr_danger_override_value", None)
             st.rerun()
@@ -4996,7 +4987,7 @@ with st.sidebar:
         if abs(warning_value - _default_w) > 1e-9:
             _w_is_override = True
             st.caption(
-                f"⚙️ Override del cliente · sugerido: {_default_w:.3f}"
+                f"⚙️ Client override · suggested: {_default_w:.3f}"
             )
 
     danger_enabled = st.checkbox("Enable danger line", value=True, key="wm_tr_danger_enabled")
@@ -5014,7 +5005,7 @@ with st.sidebar:
         if abs(danger_value - _default_d) > 1e-9:
             _d_is_override = True
             st.caption(
-                f"⚙️ Override del cliente · sugerido: {_default_d:.3f}"
+                f"⚙️ Client override · suggested: {_default_d:.3f}"
             )
 
     # Persistir el origen para que el reporte/PDF lo cite correctamente
@@ -5060,7 +5051,7 @@ if st.session_state.wm_tr_display_mode in ["Combined", "Independent"] and not se
     st.stop()
 
 if st.session_state.wm_tr_display_mode == "Mixed" and (not selected_records_sorted or not selected_operational_records_sorted):
-    st.warning("Mixed mode requiere al menos una señal de vibración y una señal operativa.")
+    st.warning("Mixed mode requires at least one vibration signal and one operational signal.")
     st.stop()
 
 mixed_operational_notice: Optional[str] = None
@@ -5070,8 +5061,8 @@ if st.session_state.wm_tr_display_mode == "Mixed" and len(selected_operational_r
     filtered = [r for r in selected_operational_records_sorted if r.family == first_family]
     if len(filtered) != len(selected_operational_records_sorted):
         mixed_operational_notice = (
-            "Mixed mode solo mezcla una familia operativa por eje secundario. "
-            f"Se usarán únicamente las señales de tipo '{first_family}'."
+            "Mixed mode only blends one operational family per secondary axis. "
+            f"Only '{first_family}'-type signals will be used."
         )
     selected_operational_records_sorted = filtered
 
@@ -5088,7 +5079,7 @@ if (not time_options) and selected_operational_records_sorted:
 time_labels = [ts_to_label(ts) for ts in time_options]
 
 if not time_labels:
-    st.warning("No hay datos válidos para los cursores en la selección actual.")
+    st.warning("No valid data for the cursors in the current selection.")
     st.stop()
 
 
@@ -5132,7 +5123,7 @@ if x_axis_mode == "Manual":
             """
             <div class="wm-control-shell">
                 <div class="wm-control-title">X-Axis Window</div>
-                <div class="wm-control-subtitle">Ajusta el inicio y fin del tiempo con sliders precisos.</div>
+                <div class="wm-control-subtitle">Adjust the start and end time with precise sliders.</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -5148,7 +5139,7 @@ with st.expander("Cursor Controls", expanded=False):
         """
         <div class="wm-control-shell">
             <div class="wm-control-title">Cursor Controls</div>
-            <div class="wm-control-subtitle">Referencias temporales A/B para comparar comportamiento entre dos momentos.</div>
+            <div class="wm-control-subtitle">A/B time references to compare behavior between two moments.</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -5247,29 +5238,29 @@ def render_trend_panel(
         st.session_state[ai_state_key_tr] = None
 
     with st.expander(
-        "Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        "AI clinical interpretation · Assisted Cat IV diagnosis",
         expanded=False,
     ):
         if not is_ai_available():
             st.info(
-                "**AI Diagnóstico no disponible.** Falta configurar "
-                "`[anthropic] api_key` en los secrets de Streamlit. El "
-                "diagnóstico técnico determinístico contiene toda la "
-                "evidencia ISO/API necesaria."
+                "**AI Diagnosis not available.** The "
+                "`[anthropic] api_key` is not configured in the Streamlit secrets. The "
+                "deterministic technical diagnosis contains all the "
+                "ISO/API evidence needed."
             )
         elif not panel_records and not panel_operational_records:
             st.caption(
-                "Cargá señales de tendencia u operativas para habilitar "
-                "el diagnóstico AI."
+                "Load trend or operational signals to enable "
+                "the AI diagnosis."
             )
         else:
             stored_tr = st.session_state.get(ai_state_key_tr)
             ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
             with ai_btn_col1:
                 gen_clicked_tr = st.button(
-                    "Generar diagnóstico AI"
+                    "Generate AI diagnosis"
                     if stored_tr is None
-                    else "Diagnóstico generado",
+                    else "Diagnosis generated",
                     key=f"ai_gen_btn_tr_{export_state_key}",
                     use_container_width=True,
                     type="primary" if stored_tr is None else "secondary",
@@ -5277,15 +5268,15 @@ def render_trend_panel(
                 )
             with ai_btn_col2:
                 regen_clicked_tr = st.button(
-                    "Regenerar",
+                    "Regenerate",
                     key=f"ai_regen_btn_tr_{export_state_key}",
                     use_container_width=True,
                     disabled=stored_tr is None,
                 )
             with ai_btn_col3:
                 st.caption(
-                    "Claude Sonnet 4.5 · ~$0.015 por diagnóstico · "
-                    "cacheado 30 días si no regenerás."
+                    "Claude Sonnet 4.5 · ~$0.015 per diagnosis · "
+                    "cached 30 days unless you regenerate."
                 )
 
             should_call_tr = bool(gen_clicked_tr) and (stored_tr is None)
@@ -5380,7 +5371,7 @@ def render_trend_panel(
                     },
                 }
 
-                with st.spinner("Claude analizando la tendencia... (5-15 seg)"):
+                with st.spinner("Claude analyzing the trend... (5-15 sec)"):
                     try:
                         result_tr = generate_ai_diagnostic(
                             ai_payload_tr,
@@ -5391,7 +5382,7 @@ def render_trend_panel(
                         result_tr = {
                             "ok": False,
                             "markdown": (
-                                f"_Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"_Unexpected error generating AI diagnosis:_\n\n"
                                 f"```\n{type(exc).__name__}: {exc}\n```"
                             ),
                             "error": str(exc)[:500],
@@ -5410,9 +5401,9 @@ def render_trend_panel(
                 if stored_tr.get("ok"):
                     if stored_tr.get("fallback_used"):
                         st.info(
-                            "Diagnóstico generado con modelo de respaldo "
-                            "(Haiku 4.5). Podés regenerar más tarde cuando "
-                            "Sonnet recupere capacidad."
+                            "Diagnosis generated with the fallback model "
+                            "(Haiku 4.5). You can regenerate later when "
+                            "Sonnet regains capacity."
                         )
                     st.markdown(stored_tr.get("markdown", ""))
                     model_used_tr = str(stored_tr.get("model", "") or "")
@@ -5425,21 +5416,21 @@ def render_trend_panel(
                         + stored_tr.get("output_tokens", 0) * out_p_tr
                     ) / 1_000_000
                     fallback_tag_tr = (
-                        " · modelo de respaldo"
+                        " · fallback model"
                         if stored_tr.get("fallback_used") else ""
                     )
                     st.caption(
-                        f"Modelo: `{model_used_tr}` · "
+                        f"Model: `{model_used_tr}` · "
                         f"Tokens: {stored_tr.get('input_tokens', 0)} → "
                         f"{stored_tr.get('output_tokens', 0)} · "
-                        f"Costo: ~${cost_usd_tr:.4f} · "
-                        f"{'(cacheado)' if stored_tr.get('cached') else '(generado nuevo)'}"
+                        f"Cost: ~${cost_usd_tr:.4f} · "
+                        f"{'(cached)' if stored_tr.get('cached') else '(newly generated)'}"
                         f"{fallback_tag_tr} · "
                         f"{stored_tr.get('generated_at', '')}"
                     )
                 else:
                     st.error(
-                        stored_tr.get("markdown", "Error al generar diagnóstico AI.")
+                        stored_tr.get("markdown", "Error generating AI diagnosis.")
                     )
 
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
@@ -5467,7 +5458,7 @@ def render_trend_panel(
             st.button("Download PNG HD", disabled=True, use_container_width=True, key=f"download_disabled_{export_state_key}")
 
     with col_report:
-        if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
+        if st.button("Send to Report", key=f"send_report_{export_state_key}", use_container_width=True):
             # Ciclo 17.26 — armar bloque AI si está generado
             ai_stored_for_tr_report = st.session_state.get(
                 f"wm_ai_diag_trends_{export_state_key}"
@@ -5480,31 +5471,31 @@ def render_trend_panel(
                     ai_stored_for_tr_report.get("markdown", "")
                 ).strip()
                 if ai_md_tr:
-                    quant_lines_tr: List[str] = ["Parámetro|Valor"]
-                    quant_lines_tr.append(f"Métrica analizada|{metric_key}")
+                    quant_lines_tr: List[str] = ["Parameter|Value"]
+                    quant_lines_tr.append(f"Analyzed metric|{metric_key}")
                     if panel_records:
                         quant_lines_tr.append(
-                            f"Señales de tendencia|{len(panel_records)}"
+                            f"Trend signals|{len(panel_records)}"
                         )
                     if panel_operational_records:
                         quant_lines_tr.append(
-                            f"Variables operativas|{len(panel_operational_records)}"
+                            f"Operating variables|{len(panel_operational_records)}"
                         )
                     _thr_meta_tr = st.session_state.get(
                         "wm_tr_threshold_source", {}
                     ) or {}
                     if warning_enabled and warning_value is not None:
                         quant_lines_tr.append(
-                            f"Umbral Warning|{float(warning_value):.3f}"
+                            f"Warning threshold|{float(warning_value):.3f}"
                         )
                     if danger_enabled and danger_value is not None:
                         quant_lines_tr.append(
-                            f"Umbral Danger|{float(danger_value):.3f}"
+                            f"Danger threshold|{float(danger_value):.3f}"
                         )
                     _src_tr = (_thr_meta_tr.get("source") or "").strip()
                     if _src_tr and _src_tr not in ("default", "n/a"):
                         quant_lines_tr.append(
-                            f"Fuente de setpoints|{_src_tr}"
+                            f"Setpoint source|{_src_tr}"
                         )
 
                     ai_notes_override_tr = (
@@ -5524,13 +5515,13 @@ def render_trend_panel(
                 notes_override=ai_notes_override_tr,
             )
             ai_extra_tr = (
-                " · con Diagnóstico AI"
+                " · with AI Diagnosis"
                 if ai_notes_override_tr else ""
             )
             if image_ok:
-                st.success(f"Trend enviado al reporte{ai_extra_tr}")
+                st.success(f"Trend sent to the report{ai_extra_tr}")
             else:
-                st.error(image_error or "No fue posible enviar el trend al reporte.")
+                st.error(image_error or "Could not send the trend to the report.")
 
     with col_bode:
         bode_disabled = operational_only_mode or len(panel_records) == 0
@@ -5570,7 +5561,7 @@ def render_trend_panel(
             # markdown simple, headline en bold, prosa con st.write,
             # recomendaciones como prosa enumerada. Sin chips de
             # color, sin emojis grandes, sin border-left.
-            st.markdown("### Diagnóstico ejecutivo")
+            st.markdown("### Executive diagnosis")
             if _headline:
                 st.markdown(f"**{_headline}**")
             for _para in _autodiag.get("prose", []) or []:
@@ -5578,15 +5569,15 @@ def render_trend_panel(
                     st.write(_para)
             _recs = _autodiag.get("recommendations", []) or []
             if _recs:
-                st.write("Acciones recomendadas:")
+                st.write("Recommended actions:")
                 for _i, _r in enumerate(_recs, 1):
                     st.write(f"{_i}. {_r}")
         except Exception as _exc:
-            st.caption(f"Diagnóstico no disponible ({_exc})")
+            st.caption(f"Diagnosis not available ({_exc})")
 
     if panel_records:
         anomaly_summary = build_panel_anomaly_summary(panel_records, metric_key)
-        st.markdown("#### Detección automática de anomalías")
+        st.markdown("#### Automatic anomaly detection")
         a1, a2, a3 = st.columns(3)
         with a1:
             st.metric("Anomalies", str(anomaly_summary.get("total_count", 0)))
@@ -5594,25 +5585,25 @@ def render_trend_panel(
             st.metric("Affected signals", str(anomaly_summary.get("affected_records", 0)))
         with a3:
             st.metric("Top severity", anomaly_summary.get("top_severity", "None"))
-        st.info(anomaly_summary.get("interpretation", "Sin interpretación disponible."))
+        st.info(anomaly_summary.get("interpretation", "No interpretation available."))
 
         anomaly_narrative = build_anomaly_narrative(panel_records, metric_key)
-        st.markdown("**Interpretación técnica de anomalías:**")
+        st.markdown("**Technical interpretation of anomalies:**")
         st.write(anomaly_narrative)
 
     if panel_records and show_drift_analysis:
         drift_summary = build_panel_drift_summary(panel_records, metric_key)
         drift_narrative = build_drift_narrative(panel_records, metric_key)
 
-        st.markdown("#### Detección de drift (deriva progresiva)")
+        st.markdown("#### Drift detection (progressive drift)")
         d1, d2 = st.columns(2)
         with d1:
             st.metric("Signals with drift", str(drift_summary.get("total_drift_signals", 0)))
         with d2:
             st.metric("Top drift severity", drift_summary.get("top_severity", "None"))
 
-        st.info(drift_summary.get("interpretation", "Sin interpretación disponible."))
-        st.markdown("**Interpretación técnica de drift:**")
+        st.info(drift_summary.get("interpretation", "No interpretation available."))
+        st.markdown("**Technical interpretation of drift:**")
         st.write(drift_narrative)
 
     # ------------------------------------------------------------
@@ -5621,7 +5612,7 @@ def render_trend_panel(
         behavior_summary = build_behavior_change_summary(panel_records, metric_key)
         behavior_narrative = build_behavior_narrative(panel_records, metric_key)
 
-        st.markdown("#### Cambio de comportamiento (F9-A)")
+        st.markdown("#### Behavior change (F9-A)")
         details_valid = [
             d for d in behavior_summary.get("details", [])
             if d.get("valid") and d.get("classification") in ["Strong change", "Moderate change"]
@@ -5651,9 +5642,9 @@ def render_trend_panel(
             else:
                 st.metric("Main change timestamp", "—")
 
-        st.info(behavior_summary.get("interpretation", "Sin interpretación"))
+        st.info(behavior_summary.get("interpretation", "No interpretation"))
 
-        st.markdown("**Interpretación técnica:**")
+        st.markdown("**Technical interpretation:**")
         st.write(behavior_narrative)
 
 
@@ -5669,7 +5660,7 @@ def render_trend_panel(
             metric_key=metric_key,
         )
 
-        st.markdown("#### Correlación automática vibración vs variable operativa")
+        st.markdown("#### Automatic vibration vs operating variable correlation")
 
         corr_value = correlation_info.get("corr_value")
         corr_text = format_number(corr_value, 3) if corr_value is not None else "—"
@@ -5684,7 +5675,7 @@ def render_trend_panel(
         with c4:
             st.metric("Samples", str(correlation_info.get("sample_count") or 0))
 
-        st.info(correlation_info.get("interpretation") or "Sin interpretación disponible.")
+        st.info(correlation_info.get("interpretation") or "No interpretation available.")
 
         scatter_fig = build_correlation_scatter_figure(correlation_info)
         st.plotly_chart(
@@ -5702,7 +5693,7 @@ def render_trend_panel(
             step_minutes=10,
         )
 
-        st.markdown("#### Correlación con desfase temporal (lag)")
+        st.markdown("#### Lagged (time-shift) correlation")
         l1, l2, l3, l4 = st.columns(4)
         with l1:
             st.metric(
@@ -5720,7 +5711,7 @@ def render_trend_panel(
         with l4:
             st.metric("Lag direction", lag_info.get("direction") or "—")
 
-        st.info(lag_info.get("interpretation") or "Sin interpretación disponible.")
+        st.info(lag_info.get("interpretation") or "No interpretation available.")
 
         lag_fig = build_lag_correlation_figure(lag_info)
         st.plotly_chart(
@@ -5737,7 +5728,7 @@ def render_trend_panel(
                 metric_key=metric_key,
             )
 
-            st.markdown("#### Ranking automático de variables operativas")
+            st.markdown("#### Automatic ranking of operating variables")
             ranking_summary = build_operational_variable_ranking_summary(ranking_df)
             st.info(ranking_summary)
 

@@ -244,7 +244,7 @@ apply_page_style()
 
 from core.ui_theme import page_header as _wm_page_header  # hero compartido (v3.31.313)
 _wm_page_header("Spectrum Analysis",
-                "FFT y análisis espectral · frecuencias de falla (1X, 2X, BPFO, BPFI, GMF...).")
+                "FFT and spectral analysis · fault frequencies (1X, 2X, BPFO, BPFI, GMF...).")
 
 # ------------------------------------------------------------
 # Helpers
@@ -1742,7 +1742,7 @@ if "report_items" not in st.session_state:
 records_all = load_signals_from_session()
 
 if not records_all:
-    st.warning("No se pudieron cargar señales válidas desde `st.session_state['signals']`.")
+    st.warning("Could not load valid signals from `st.session_state['signals']`.")
     st.stop()
 
 # ------------------------------------------------------------
@@ -1800,7 +1800,7 @@ if _is_client_view_sidebar:
     }
     max_cpm = _CLIENT_MAX_CPM.get(current_family, 60000.0)
     suggested_max_cpm = max_cpm
-    scale_reason = f"Cliente · {current_family} → {int(max_cpm):,} CPM"
+    scale_reason = f"Client · {current_family} → {int(max_cpm):,} CPM"
     st.session_state[family_key] = max_cpm
 
     y_axis_mode = "Auto"
@@ -1912,13 +1912,13 @@ else:
         step=1000.0,
         format="%.0f",
         help=(
-            f"Auto-sugerido para esta señal: {suggested_max_cpm:,.0f} CPM. "
-            f"Razón: {scale_reason} Cambialo si necesitás otro rango."
+            f"Auto-suggested for this signal: {suggested_max_cpm:,.0f} CPM. "
+            f"Reason: {scale_reason} Change it if you need another range."
         ),
         key=f"wm_sp_max_cpm_input_{current_family}",
     )
     st.session_state[family_key] = float(max_cpm)
-    st.caption(f"Auto-rango: {scale_reason}")
+    st.caption(f"Auto-range: {scale_reason}")
 
     y_axis_mode = st.selectbox(
         "Y-axis scale",
@@ -2079,7 +2079,7 @@ def queue_spectrum_to_report(
             ),
             "type": "spectrum",
             "title": panel_title,
-            "notes": report_notes or "Interpretación técnica pendiente para este espectro.",
+            "notes": report_notes or "Technical interpretation pending for this spectrum.",
             "signal_id": primary.signal_id,
             # Ciclo 17.19 OOM fix — NO guardar el go.Figure en session_state
             # (cada figure pesa 20-100 MB, con 5 gráficas revienta los 1 GB
@@ -2127,7 +2127,7 @@ def render_spectrum_overview(
     recs = [r for r in records if getattr(r, "time_s", None) is not None
             and r.time_s.size > 2][:8]
     if not recs:
-        st.info("Seleccioná al menos 1 canal para el overview.")
+        st.info("Select at least 1 channel for the overview.")
         return
     try:
         from plotly.subplots import make_subplots
@@ -2137,10 +2137,10 @@ def render_spectrum_overview(
         # unidad comparten el rango Y → comparación visual directa. ON por
         # defecto; se puede apagar para autoescala por canal.
         _common_scale = st.checkbox(
-            "Escala de amplitud común (por unidad)", value=True,
+            "Common amplitude scale (per unit)", value=True,
             key="spec_ov_common_scale",
-            help="Todos los canales de la misma unidad se grafican en el mismo "
-                 "rango de amplitud para comparar a simple vista.")
+            help="All channels of the same unit are plotted on the same "
+                 "amplitude range to compare at a glance.")
         spectra = [
             compute_spectrum_peak(
                 time_s=r.time_s, y=r.amplitude, window_name=window_name,
@@ -2218,7 +2218,7 @@ def render_spectrum_overview(
         if max_cpm:
             fig.update_xaxes(range=[0, max_cpm])
         fig.update_xaxes(showgrid=True, gridcolor="#f1f5f9", zeroline=False)
-        fig.update_xaxes(title_text="Frecuencia (CPM)", row=n, col=1)
+        fig.update_xaxes(title_text="Frequency (CPM)", row=n, col=1)
         fig.update_yaxes(showgrid=True, gridcolor="#f8fafc", zeroline=False)
         # Aplicar escala común por unidad (mismo rango Y por familia).
         if _common_scale:
@@ -2237,12 +2237,12 @@ def render_spectrum_overview(
         )
         if one_x:
             st.caption(
-                f"Cursores de orden anclados a 1X = {one_x:,.0f} CPM "
-                f"(~{one_x / 60:.0f} Hz). Abajo, cada canal en detalle completo."
+                f"Order cursors anchored at 1X = {one_x:,.0f} CPM "
+                f"(~{one_x / 60:.0f} Hz). Below, each channel in full detail."
             )
         st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
-        st.warning(f"No se pudo renderizar el overview apilado: {e}")
+        st.warning(f"Could not render the stacked overview: {e}")
 
 
 def render_spectrum_panel(
@@ -2546,7 +2546,7 @@ def render_spectrum_panel(
         st.markdown("")
 
         helper_cols = [
-            (f"Semáforo: {semaforo_status}", semaforo_color),
+            (f"Traffic light: {semaforo_status}", semaforo_color),
             (f"1X Amp: {format_number(one_x_display_amp, 3)} {amplitude_unit_text(primary.amplitude_unit, amplitude_mode)}".strip(), None),
             (f"Overall: {format_number(overall_spec_rms, 3)} {amplitude_unit_text(primary.amplitude_unit, amplitude_mode)}".strip(), None),
             (f"Peak Freq: {format_number(spectrum.peak_freq_cpm, 1)} CPM", None),
@@ -2616,14 +2616,14 @@ def render_spectrum_panel(
             "CONDICIÓN ACEPTABLE": "#16a34a",
         }.get(sev, "#475569")
         with st.expander(
-            f"Diagnóstico avanzado · {cat_iv_diag.get('headline', '')}",
+            f"Advanced diagnosis · {cat_iv_diag.get('headline', '')}",
             expanded=True,
         ):
             st.markdown(
                 f"<div style='display:inline-block; padding:6px 14px; "
                 f"border-radius:999px; background:{sev_color}; color:white; "
                 f"font-weight:700; font-size:0.95rem; margin-bottom:8px;'>"
-                f"Severidad global: {sev}</div>",
+                f"Global severity: {sev}</div>",
                 unsafe_allow_html=True,
             )
             st.write(cat_iv_diag.get("detail", ""))
@@ -2632,7 +2632,7 @@ def render_spectrum_panel(
             findings = cat_iv_diag.get("findings", [])
             if findings:
                 st.caption(
-                    "Hallazgos detectados: " + " · ".join(
+                    "Detected findings: " + " · ".join(
                         f"{f.get('headline')}" for f in findings
                     )
                 )
@@ -2654,15 +2654,15 @@ def render_spectrum_panel(
     _is_client_view_ai = bool(st.session_state.get("_loaded_from_snapshot"))
     if (not _is_client_view_ai):
       with st.expander(
-        "Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        "AI clinical interpretation · Assisted Cat IV diagnosis",
         expanded=False,
       ):
         if not is_ai_available():
             st.info(
-                "**AI Diagnóstico no disponible.** Falta configurar "
-                "`[anthropic] api_key` en los secrets de Streamlit. Mientras "
-                "tanto, el diagnóstico técnico determinístico de arriba contiene "
-                "toda la evidencia ISO/API necesaria."
+                "**AI diagnosis not available.** The "
+                "`[anthropic] api_key` in the Streamlit secrets is not configured. In the "
+                "meantime, the deterministic technical diagnosis above contains "
+                "all the necessary ISO/API evidence."
             )
         else:
             stored = st.session_state.get(ai_state_key)
@@ -2670,9 +2670,9 @@ def render_spectrum_panel(
             ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
             with ai_btn_col1:
                 gen_clicked = st.button(
-                    "Generar diagnóstico AI"
+                    "Generate AI diagnosis"
                     if stored is None
-                    else "Diagnóstico generado",
+                    else "Diagnosis generated",
                     key=f"ai_gen_btn_{export_state_key}",
                     use_container_width=True,
                     type="primary" if stored is None else "secondary",
@@ -2680,16 +2680,16 @@ def render_spectrum_panel(
                 )
             with ai_btn_col2:
                 regen_clicked = st.button(
-                    "Regenerar",
+                    "Regenerate",
                     key=f"ai_regen_btn_{export_state_key}",
                     use_container_width=True,
                     disabled=stored is None,
-                    help="Fuerza una nueva llamada a Claude (ignora el cache).",
+                    help="Forces a new call to Claude (ignores the cache).",
                 )
             with ai_btn_col3:
                 st.caption(
-                    "Claude Sonnet 4.5 · ~$0.015 por diagnóstico · "
-                    "cacheado 30 días si no regenerás."
+                    "Claude Sonnet 4.5 · ~$0.015 per diagnosis · "
+                    "cached 30 days unless you regenerate."
                 )
 
             should_call = bool(gen_clicked) and (stored is None)
@@ -2766,7 +2766,7 @@ def render_spectrum_panel(
                         str(bearing_diagnostic_text)[:1500]
                     )
 
-                with st.spinner("Claude analizando el espectro... (5-15 seg)"):
+                with st.spinner("Claude analyzing the spectrum... (5-15 sec)"):
                     try:
                         result = generate_ai_diagnostic(
                             ai_payload,
@@ -2777,7 +2777,7 @@ def render_spectrum_panel(
                         result = {
                             "ok": False,
                             "markdown": (
-                                f"_Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"_Unexpected error generating AI diagnosis:_\n\n"
                                 f"```\n{type(exc).__name__}: {exc}\n```"
                             ),
                             "error": str(exc)[:500],
@@ -2798,11 +2798,11 @@ def render_spectrum_panel(
                     # nunca en el PDF al cliente).
                     if stored.get("fallback_used"):
                         st.info(
-                            "Este diagnóstico se generó con el modelo de "
-                            "respaldo (Haiku 4.5) porque el modelo principal "
-                            "(Sonnet 4.5) estaba sobrecargado. La calidad es "
-                            "ligeramente menor. Podés regenerar más tarde "
-                            "cuando Sonnet recupere capacidad."
+                            "This diagnosis was generated with the fallback "
+                            "model (Haiku 4.5) because the primary model "
+                            "(Sonnet 4.5) was overloaded. The quality is "
+                            "slightly lower. You can regenerate later "
+                            "when Sonnet recovers capacity."
                         )
                     st.markdown(stored.get("markdown", ""))
                     # Pricing depende del modelo que efectivamente respondió.
@@ -2816,21 +2816,21 @@ def render_spectrum_panel(
                         + stored.get("output_tokens", 0) * out_p
                     ) / 1_000_000
                     fallback_tag = (
-                        " · modelo de respaldo"
+                        " · fallback model"
                         if stored.get("fallback_used") else ""
                     )
                     st.caption(
-                        f"Modelo: `{model_used}` · "
+                        f"Model: `{model_used}` · "
                         f"Tokens: {stored.get('input_tokens', 0)} → "
                         f"{stored.get('output_tokens', 0)} · "
-                        f"Costo: ~${cost_usd:.4f} · "
-                        f"{'(cacheado)' if stored.get('cached') else '(generado nuevo)'}"
+                        f"Cost: ~${cost_usd:.4f} · "
+                        f"{'(cached)' if stored.get('cached') else '(newly generated)'}"
                         f"{fallback_tag} · "
                         f"{stored.get('generated_at', '')}"
                     )
                 else:
                     st.error(
-                        stored.get("markdown", "Error al generar diagnóstico AI.")
+                        stored.get("markdown", "Error generating AI diagnosis.")
                     )
 
     # Ciclo 23.107 — Modo cliente: ocultar export buttons (Prepare/Download
@@ -2869,7 +2869,7 @@ def render_spectrum_panel(
             )
 
     with col_report:
-        if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
+        if st.button("Send to Report", key=f"send_report_{export_state_key}", use_container_width=True):
             png_bytes_for_report = None
             try:
                 png_bytes_for_report, _png_error_for_report = build_export_png_bytes(fig=fig)
@@ -2895,7 +2895,7 @@ def render_spectrum_panel(
                 spectrum_report_notes = build_spectrum_report_notes(text_diag)
 
             if not spectrum_report_notes.strip():
-                spectrum_report_notes = "Interpretación técnica pendiente para este espectro."
+                spectrum_report_notes = "Technical interpretation pending for this spectrum."
 
             # Ciclo 17.26 — Voz única firmada: cuando hay diagnóstico AI,
             # el bloque AI MANDA. Reemplazamos enteramente la narrativa
@@ -2913,14 +2913,14 @@ def render_spectrum_panel(
                 ai_md = str(ai_stored.get("markdown", "")).strip()
                 if ai_md:
                     # Construir filas de la tabla cuantitativa de evidencia.
-                    quant_lines: List[str] = ["Parámetro|Valor"]
+                    quant_lines: List[str] = ["Parameter|Value"]
                     amp_unit_text_local = amplitude_unit_text(
                         primary.amplitude_unit, amplitude_mode
                     )
                     rpm_val = float(getattr(primary, "rpm", 0.0) or 0.0)
                     if rpm_val > 0:
                         quant_lines.append(
-                            f"Velocidad de giro|{rpm_val:.0f} RPM"
+                            f"Rotational speed|{rpm_val:.0f} RPM"
                         )
                     # Bug fix v3.5.4: Overall se calculaba como RMS-Parseval
                     # pero se mostraba con la unidad del modo de display
@@ -2951,11 +2951,11 @@ def render_spectrum_panel(
                     if cat_iv_diag is not None:
                         sev = str(cat_iv_diag.get("severity_global", "") or "").strip()
                         if sev:
-                            quant_lines.append(f"Severidad ISO/API|{sev}")
+                            quant_lines.append(f"ISO/API severity|{sev}")
                     # Punto de medición si está disponible
                     pt = str(getattr(primary, "point", "") or "").strip()
                     if pt:
-                        quant_lines.append(f"Punto de medición|{pt}")
+                        quant_lines.append(f"Measurement point|{pt}")
 
                     spectrum_report_notes = (
                         "<<<WM_AI_BLOCK>>>\n"
@@ -2972,10 +2972,10 @@ def render_spectrum_panel(
                 report_notes=spectrum_report_notes,
             )
             ai_extra = (
-                " · con Diagnóstico AI"
+                " · with AI diagnosis"
                 if ai_stored and ai_stored.get("ok") else ""
             )
-            st.success(f"Spectrum enviado al reporte{ai_extra}")
+            st.success(f"Spectrum sent to report{ai_extra}")
 
 
 def summarize_compare_signal(
@@ -3350,7 +3350,7 @@ def queue_compare_to_report(
             ),
             "type": "spectrum",
             "title": report_title,
-            "notes": report_notes or "Comparación espectral pendiente de interpretación técnica.",
+            "notes": report_notes or "Spectral comparison pending technical interpretation.",
             "signal_id": f"{record_a.signal_id}__{record_b.signal_id}",
             # Ciclo 17.19 OOM fix — NO guardar el go.Figure en session_state
             # (cada figure pesa 20-100 MB, con 5 gráficas revienta los 1 GB
@@ -3482,7 +3482,7 @@ def render_compare_panel(
     time_label = build_compare_time_label(ts_a, ts_b, delta_days)
 
     st.markdown("### Spectrum Compare Mode")
-    st.caption(f"Orden temporal aplicado automáticamente: A = más antigua, B = más reciente | {time_label}")
+    st.caption(f"Temporal order applied automatically: A = oldest, B = most recent | {time_label}")
 
     compare_rows = [
         {
@@ -3529,9 +3529,9 @@ def render_compare_panel(
             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
                 <span style="padding:6px 10px;border-radius:999px;background:{card_color};color:white;font-weight:600;">Score {compare_executive_card.get("compare_score", 0)}/100</span>
                 <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Trend: {compare_executive_card.get("condition_trend", "—")}</span>
-                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Semáforo: {compare_executive_card.get("traffic_light", "—")}</span>
-                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Comparabilidad: {compare_executive_card.get("comparability_score", 0)}%</span>
-                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Confianza: {compare_executive_card.get("confidence_pct", 0)}%</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Traffic light: {compare_executive_card.get("traffic_light", "—")}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Comparability: {compare_executive_card.get("comparability_score", 0)}%</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Confidence: {compare_executive_card.get("confidence_pct", 0)}%</span>
             </div>
             <div style="font-size:14px;color:#111827;line-height:1.5;">{compare_executive_card.get("condition_text", "")}</div>
         </div>
@@ -3550,17 +3550,17 @@ def render_compare_panel(
 
     detail_cols = st.columns(6)
     with detail_cols[0]:
-        st.metric("Falla primaria", str(compare_assessment.get("primary_fault") or "—"))
+        st.metric("Primary fault", str(compare_assessment.get("primary_fault") or "—"))
     with detail_cols[1]:
-        st.metric("Falla secundaria", str(compare_assessment.get("secondary_fault") or "—"))
+        st.metric("Secondary fault", str(compare_assessment.get("secondary_fault") or "—"))
     with detail_cols[2]:
         st.metric("Compare Score", f"{int(compare_assessment.get('compare_score', 0))}/100")
     with detail_cols[3]:
         st.metric("Condition Trend", str(compare_assessment.get("condition_trend") or "—"))
     with detail_cols[4]:
-        st.metric("Semáforo", str(compare_assessment.get("traffic_light") or "—"))
+        st.metric("Traffic light", str(compare_assessment.get("traffic_light") or "—"))
     with detail_cols[5]:
-        st.metric("Comparabilidad", f"{int(compare_assessment.get('comparability_score', 0))}%")
+        st.metric("Comparability", f"{int(compare_assessment.get('comparability_score', 0))}%")
 
     st.markdown("#### Compare Validation")
     st.dataframe(compare_validation_df, use_container_width=True, hide_index=True)
@@ -3570,7 +3570,7 @@ def render_compare_panel(
         for warning in warnings:
             st.warning(warning)
     else:
-        st.success("Comparación válida: A y B son razonablemente comparables para lectura técnica rápida.")
+        st.success("Valid comparison: A and B are reasonably comparable for a quick technical reading.")
 
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
     left_pad, col_export1, col_export2, col_report, right_pad = st.columns([1.8, 1.2, 1.2, 1.2, 1.8])
@@ -3602,7 +3602,7 @@ def render_compare_panel(
             )
 
     with col_report:
-        if st.button("Enviar compare a Reporte", key=f"send_compare_report_{compare_export_key}", use_container_width=True):
+        if st.button("Send compare to Report", key=f"send_compare_report_{compare_export_key}", use_container_width=True):
             png_bytes_for_report = None
             try:
                 png_bytes_for_report, _png_error_for_report = build_export_png_bytes(fig=compare_fig)
@@ -3626,7 +3626,7 @@ def render_compare_panel(
                 report_notes=report_notes,
                 image_bytes=png_bytes_for_report,
             )
-            st.success("Compare mode enviado al reporte")
+            st.success("Compare mode sent to report")
 
 
 def summarize_trend_signal(
@@ -3730,7 +3730,7 @@ def queue_trend_to_report(
             ),
             "type": "spectrum",
             "title": trend_title,
-            "notes": trend_notes or "Tendencia multitemporal pendiente de interpretación técnica.",
+            "notes": trend_notes or "Multi-temporal trend pending technical interpretation.",
             "signal_id": "__".join(r.signal_id for r in trend_records),
             "figure": None,
             "image_bytes": trend_image_bytes,
@@ -3875,7 +3875,7 @@ def render_trend_panel(
     traffic_color = str(trend_assessment.get("traffic_color") or "#64748b")
 
     st.markdown("### Spectrum Trend Mode")
-    st.caption("Trend Mode evalúa 3 o más mediciones ordenadas por fecha para estimar la evolución de condición de la máquina.")
+    st.caption("Trend Mode evaluates 3 or more measurements ordered by date to estimate the evolution of the machine's condition.")
 
     st.markdown(
         f"""
@@ -3884,9 +3884,9 @@ def render_trend_panel(
             <div style="font-size:22px;font-weight:700;color:#111827;margin-bottom:8px;">{trend_assessment.get("headline", "Trend Assessment")}</div>
             <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
                 <span style="padding:6px 10px;border-radius:999px;background:{traffic_color};color:white;font-weight:600;">Trend: {trend_assessment.get("trend_label", "—")}</span>
-                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Semáforo: {trend_assessment.get("traffic_light", "—")}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Traffic light: {trend_assessment.get("traffic_light", "—")}</span>
                 <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Driver: {trend_assessment.get("top_driver", "—")}</span>
-                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Último score: {compare_format_number(trend_assessment.get("latest_score"), 2)}</span>
+                <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Latest score: {compare_format_number(trend_assessment.get("latest_score"), 2)}</span>
                 <span style="padding:6px 10px;border-radius:999px;background:#f3f4f6;color:#111827;">Series: {trend_assessment.get("series_count", 0)}</span>
             </div>
             <div style="font-size:14px;color:#111827;line-height:1.5;">{trend_assessment.get("narrative", "")}</div>
@@ -3899,13 +3899,13 @@ def render_trend_panel(
     with metric_cols[0]:
         st.metric("Trend Label", str(trend_assessment.get("trend_label") or "—"))
     with metric_cols[1]:
-        st.metric("Semáforo", str(trend_assessment.get("traffic_light") or "—"))
+        st.metric("Traffic light", str(trend_assessment.get("traffic_light") or "—"))
     with metric_cols[2]:
-        st.metric("Driver dominante", str(trend_assessment.get("top_driver") or "—"))
+        st.metric("Dominant driver", str(trend_assessment.get("top_driver") or "—"))
     with metric_cols[3]:
-        st.metric("Cambio driver", compare_format_number(trend_assessment.get("top_driver_pct"), 1) + "%" if trend_assessment.get("top_driver_pct") is not None else "—")
+        st.metric("Driver change", compare_format_number(trend_assessment.get("top_driver_pct"), 1) + "%" if trend_assessment.get("top_driver_pct") is not None else "—")
     with metric_cols[4]:
-        st.metric("Último score", compare_format_number(trend_assessment.get("latest_score"), 2))
+        st.metric("Latest score", compare_format_number(trend_assessment.get("latest_score"), 2))
 
     trend_fig = build_trend_overview_figure(trend_df)
 
@@ -3928,7 +3928,7 @@ def render_trend_panel(
 
     with col_report:
         if st.button(
-            "Enviar trend a Reporte",
+            "Send trend to Report",
             key=f"send_trend_report_{len(ordered_records)}_{ordered_records[0].signal_id}_{ordered_records[-1].signal_id}",
             use_container_width=True,
         ):
@@ -3940,7 +3940,7 @@ def render_trend_panel(
                 trend_table_df=trend_df,
                 trend_fig=trend_fig,
             )
-            st.success("Trend mode enviado al reporte")
+            st.success("Trend mode sent to report")
 
 selected_ids = [
     signal_id
@@ -3949,7 +3949,7 @@ selected_ids = [
 ]
 
 if not selected_ids:
-    st.info("Selecciona uno o más espectros en la barra lateral.")
+    st.info("Select one or more spectra in the sidebar.")
     st.stop()
 
 selected_records = [
@@ -3959,7 +3959,7 @@ selected_records = [
 
 if enable_compare_mode:
     if len(selected_records) != 2:
-        st.warning("Compare mode requiere exactamente 2 señales seleccionadas.")
+        st.warning("Compare mode requires exactly 2 selected signals.")
         st.stop()
 
     render_compare_panel(
@@ -3982,15 +3982,15 @@ elif enable_trend_mode:
     n_records = len(selected_records)
 
     if n_records < 3:
-        st.warning("Trend mode requiere mínimo 3 señales seleccionadas.")
+        st.warning("Trend mode requires at least 3 selected signals.")
         st.stop()
 
     if n_records > 10:
-        st.error("Trend mode soporta máximo 10 señales para mantener calidad de análisis.")
+        st.error("Trend mode supports at most 10 signals to maintain analysis quality.")
         st.stop()
 
     if n_records > 8:
-        st.warning(f"Se están usando {n_records} señales. Se recomienda máximo 8 para mejor interpretación.")
+        st.warning(f"{n_records} signals are being used. A maximum of 8 is recommended for better interpretation.")
 
     render_trend_panel(
         trend_records=selected_records,

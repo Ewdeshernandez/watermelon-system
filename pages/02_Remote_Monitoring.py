@@ -37,4 +37,17 @@ apply_watermelon_page_style()
 
 from core.remote_monitoring.ui import render_remote_monitoring
 
+# Retención automática de transitorios (evita que /var/data se vuelva a llenar).
+# Corre una vez por sesión: borra grabaciones locales con más de N días.
+if not st.session_state.get("_rm_retention_done"):
+    st.session_state["_rm_retention_done"] = True
+    try:
+        from core.remote_monitoring.recorder import purge_old_recordings, RETENTION_DAYS
+        _res = purge_old_recordings()
+        if _res.get("deleted"):
+            st.toast(f"🧹 Retención: se liberaron {_res['bytes'] / 1e6:.0f} MB "
+                     f"de {_res['deleted']} grabación(es) > {RETENTION_DAYS} días.")
+    except Exception:
+        pass
+
 render_remote_monitoring()

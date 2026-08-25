@@ -73,7 +73,7 @@ if st.session_state.get("_loaded_from_snapshot"):
         <script>
         (function() {
           const HIDE_BUTTONS = [
-            'Prepare PNG HD', 'Download PNG HD', 'Enviar a Reporte',
+            'Prepare PNG HD', 'Download PNG HD', 'Send to Report',
           ];
           function hideExports() {
             try {
@@ -271,7 +271,7 @@ apply_page_style()
 
 from core.ui_theme import page_header as _wm_page_header  # hero compartido (v3.31.313)
 _wm_page_header("Time Waveform Analysis",
-                "Forma de onda en el tiempo · impactos, modulación y transitorios.")
+                "Time waveform · impacts, modulation and transients.")
 
 
 # ------------------------------------------------------------
@@ -1397,7 +1397,7 @@ else:
 records_all = load_signals_from_session(input_time_mode=input_time_mode)
 
 if not records_all:
-    st.warning("No se pudieron cargar señales válidas desde `st.session_state['signals']`.")
+    st.warning("Could not load valid signals from `st.session_state['signals']`.")
     st.stop()
 
 
@@ -1474,7 +1474,7 @@ def render_waveform_overview(records: List["SignalRecord"]) -> None:
     recs = [r for r in records if getattr(r, "time_s", None) is not None
             and r.time_s.size > 2][:8]
     if not recs:
-        st.info("Seleccioná al menos 1 canal para el overview.")
+        st.info("Select at least 1 channel for the overview.")
         return
     try:
         from plotly.subplots import make_subplots
@@ -1483,10 +1483,10 @@ def render_waveform_overview(records: List["SignalRecord"]) -> None:
         # Escala de amplitud COMÚN por unidad (v3.31.458): canales de la misma
         # unidad comparten el rango Y (simétrico ±max) → comparación directa.
         _common_scale = st.checkbox(
-            "Escala de amplitud común (por unidad)", value=True,
+            "Common amplitude scale (per unit)", value=True,
             key="wf_ov_common_scale",
-            help="Todos los canales de la misma unidad se grafican en el mismo "
-                 "rango de amplitud para comparar a simple vista.")
+            help="All channels of the same unit are plotted on the same "
+                 "amplitude range to compare at a glance.")
         _fam_absmax: dict = {}
         for _r in recs:
             _unit = (getattr(_r, "amplitude_unit", "") or "").strip().lower()
@@ -1542,7 +1542,7 @@ def render_waveform_overview(records: List["SignalRecord"]) -> None:
             except Exception:
                 pass
         fig.update_xaxes(showgrid=True, gridcolor="#f1f5f9", zeroline=False)
-        fig.update_xaxes(title_text="Tiempo (s)", row=n, col=1)
+        fig.update_xaxes(title_text="Time (s)", row=n, col=1)
         fig.update_yaxes(showgrid=True, gridcolor="#f8fafc",
                          zeroline=True, zerolinecolor="#e2e8f0")
         # Escala común por unidad: rango Y simétrico compartido por familia.
@@ -1561,11 +1561,11 @@ def render_waveform_overview(records: List["SignalRecord"]) -> None:
                       size=10, color="#475569"),
             showlegend=False,
         )
-        st.caption("Formas de onda apiladas, eje de tiempo compartido. "
-                   "Abajo, cada canal en detalle completo.")
+        st.caption("Stacked waveforms, shared time axis. "
+                   "Below, each channel in full detail.")
         st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
-        st.warning(f"No se pudo renderizar el overview de formas de onda: {e}")
+        st.warning(f"Could not render the waveform overview: {e}")
 
 
 def render_waveform_panel(
@@ -1588,7 +1588,7 @@ def render_waveform_panel(
 ) -> None:
     mask = (primary.time_s >= t_min) & (primary.time_s <= t_max)
     if not np.any(mask):
-        st.warning(f"La ventana seleccionada no contiene datos para {primary.name}.")
+        st.warning(f"The selected window contains no data for {primary.name}.")
         return
 
     base_y = normalize_signal(primary.amplitude, normalization_mode)[mask]
@@ -1705,9 +1705,9 @@ def render_waveform_panel(
                             line=dict(width=1, color="white"),
                         ),
                         hovertemplate=(
-                            "Impacto<br>"
-                            "Tiempo: %{x:.3f}<br>"
-                            "Amplitud: %{y:.4f}<extra></extra>"
+                            "Impact<br>"
+                            "Time: %{x:.3f}<br>"
+                            "Amplitude: %{y:.4f}<extra></extra>"
                         ),
                     )
                 )
@@ -1795,7 +1795,7 @@ def render_waveform_panel(
                             color="red",
                             line=dict(width=2, color="white"),
                         ),
-                        hovertemplate="Impacto<br>x=%{x}<br>y=%{y}<extra></extra>",
+                        hovertemplate="Impact<br>x=%{x}<br>y=%{y}<extra></extra>",
                     )
                 )
     except Exception:
@@ -1887,14 +1887,14 @@ def render_waveform_panel(
         _is_client_view = bool(st.session_state.get("_loaded_from_snapshot"))
         if not _is_client_view:
           with st.expander(
-              f"Diagnóstico avanzado · {cat_iv_wf_diag.get('headline', '')}",
+              f"Advanced diagnosis · {cat_iv_wf_diag.get('headline', '')}",
               expanded=True,
           ):
             st.markdown(
                 f"<div style='display:inline-block; padding:6px 14px; "
                 f"border-radius:999px; background:{sev_color}; color:white; "
                 f"font-weight:700; font-size:0.95rem; margin-bottom:8px;'>"
-                f"Severidad global: {sev}</div>",
+                f"Global severity: {sev}</div>",
                 unsafe_allow_html=True,
             )
 
@@ -1930,8 +1930,8 @@ def render_waveform_panel(
                 _c8.metric("Peak-to-Peak", f"{_p2p:.4f}")
 
                 _ic1, _ic2 = st.columns(2)
-                _ic1.metric("Cantidad de transitorios", str(_impacts_count))
-                _ic2.metric("Threshold dinámico", f"{_impacts_thr:.4f}")
+                _ic1.metric("Transient count", str(_impacts_count))
+                _ic2.metric("Dynamic threshold", f"{_impacts_thr:.4f}")
             except Exception:
                 pass
 
@@ -1940,7 +1940,7 @@ def render_waveform_panel(
             findings = cat_iv_wf_diag.get("findings", [])
             if findings:
                 st.caption(
-                    "Hallazgos detectados: "
+                    "Detected findings: "
                     + " · ".join(f.get("headline", "") for f in findings)
                 )
 
@@ -1961,24 +1961,24 @@ def render_waveform_panel(
     _is_client_view_ai = bool(st.session_state.get("_loaded_from_snapshot"))
     if not _is_client_view_ai:
      with st.expander(
-        "Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        "AI clinical interpretation · Assisted Cat IV diagnosis",
         expanded=False,
     ):
         if not is_ai_available():
             st.info(
-                "**AI Diagnóstico no disponible.** Falta configurar "
-                "`[anthropic] api_key` en los secrets de Streamlit. El "
-                "diagnóstico técnico determinístico de arriba contiene "
-                "toda la evidencia ISO/API necesaria."
+                "**AI diagnosis not available.** The "
+                "`[anthropic] api_key` in the Streamlit secrets is not configured. The "
+                "deterministic technical diagnosis above contains "
+                "all the necessary ISO/API evidence."
             )
         else:
             stored = st.session_state.get(ai_state_key)
             ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
             with ai_btn_col1:
                 gen_clicked = st.button(
-                    "Generar diagnóstico AI"
+                    "Generate AI diagnosis"
                     if stored is None
-                    else "Diagnóstico generado",
+                    else "Diagnosis generated",
                     key=f"ai_gen_btn_wf_{export_state_key}",
                     use_container_width=True,
                     type="primary" if stored is None else "secondary",
@@ -1986,16 +1986,16 @@ def render_waveform_panel(
                 )
             with ai_btn_col2:
                 regen_clicked = st.button(
-                    "Regenerar",
+                    "Regenerate",
                     key=f"ai_regen_btn_wf_{export_state_key}",
                     use_container_width=True,
                     disabled=stored is None,
-                    help="Fuerza una nueva llamada a Claude (ignora cache).",
+                    help="Forces a new call to Claude (ignores cache).",
                 )
             with ai_btn_col3:
                 st.caption(
-                    "Claude Sonnet 4.5 · ~$0.015 por diagnóstico · "
-                    "cacheado 30 días si no regenerás."
+                    "Claude Sonnet 4.5 · ~$0.015 per diagnosis · "
+                    "cached 30 days unless you regenerate."
                 )
 
             should_call = bool(gen_clicked) and (stored is None)
@@ -2062,7 +2062,7 @@ def render_waveform_panel(
                         ][:6],
                     }
 
-                with st.spinner("Claude analizando la forma de onda... (5-15 seg)"):
+                with st.spinner("Claude analyzing the waveform... (5-15 sec)"):
                     try:
                         result = generate_ai_diagnostic(
                             ai_payload,
@@ -2073,7 +2073,7 @@ def render_waveform_panel(
                         result = {
                             "ok": False,
                             "markdown": (
-                                f"_Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"_Unexpected error generating AI diagnosis:_\n\n"
                                 f"```\n{type(exc).__name__}: {exc}\n```"
                             ),
                             "error": str(exc)[:500],
@@ -2092,10 +2092,10 @@ def render_waveform_panel(
                 if stored.get("ok"):
                     if stored.get("fallback_used"):
                         st.info(
-                            "Este diagnóstico se generó con el modelo de "
-                            "respaldo (Haiku 4.5) porque el modelo principal "
-                            "(Sonnet 4.5) estaba sobrecargado. La calidad es "
-                            "ligeramente menor. Podés regenerar más tarde."
+                            "This diagnosis was generated with the fallback "
+                            "model (Haiku 4.5) because the primary model "
+                            "(Sonnet 4.5) was overloaded. The quality is "
+                            "slightly lower. You can regenerate later."
                         )
                     st.markdown(stored.get("markdown", ""))
                     model_used = str(stored.get("model", "") or "")
@@ -2108,21 +2108,21 @@ def render_waveform_panel(
                         + stored.get("output_tokens", 0) * out_p
                     ) / 1_000_000
                     fallback_tag = (
-                        " · modelo de respaldo"
+                        " · fallback model"
                         if stored.get("fallback_used") else ""
                     )
                     st.caption(
-                        f"Modelo: `{model_used}` · "
+                        f"Model: `{model_used}` · "
                         f"Tokens: {stored.get('input_tokens', 0)} → "
                         f"{stored.get('output_tokens', 0)} · "
-                        f"Costo: ~${cost_usd:.4f} · "
-                        f"{'(cacheado)' if stored.get('cached') else '(generado nuevo)'}"
+                        f"Cost: ~${cost_usd:.4f} · "
+                        f"{'(cached)' if stored.get('cached') else '(newly generated)'}"
                         f"{fallback_tag} · "
                         f"{stored.get('generated_at', '')}"
                     )
                 else:
                     st.error(
-                        stored.get("markdown", "Error al generar diagnóstico AI.")
+                        stored.get("markdown", "Error generating AI diagnosis.")
                     )
 
     st.markdown('<div class="wm-export-actions"></div>', unsafe_allow_html=True)
@@ -2136,7 +2136,7 @@ def render_waveform_panel(
             """
             <script>
             (function() {
-              const TARGETS = ['Prepare PNG HD', 'Download PNG HD', 'Enviar a Reporte'];
+              const TARGETS = ['Prepare PNG HD', 'Download PNG HD', 'Send to Report'];
               function hideBtns() {
                 try {
                   const doc = window.parent.document;
@@ -2194,7 +2194,7 @@ def render_waveform_panel(
             )
 
     with col_report:
-        if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
+        if st.button("Send to Report", key=f"send_report_{export_state_key}", use_container_width=True):
             png_bytes_for_report = None
             png_error_for_report = None
 
@@ -2235,10 +2235,10 @@ def render_waveform_panel(
                 ).strip()
                 if ai_md_for_report:
                     # Tabla cuantitativa: métricas tiempo-dominio principales
-                    quant_lines: List[str] = ["Parámetro|Valor"]
+                    quant_lines: List[str] = ["Parameter|Value"]
                     rpm_val = float(getattr(prepared, "rpm", 0.0) or 0.0)
                     if rpm_val > 0:
-                        quant_lines.append(f"Velocidad de giro|{rpm_val:.0f} RPM")
+                        quant_lines.append(f"Rotational speed|{rpm_val:.0f} RPM")
                     _struct_rep = (
                         cat_iv_wf_diag.get("structured")
                         if cat_iv_wf_diag else {}
@@ -2263,17 +2263,17 @@ def render_waveform_panel(
                     _impacts_count_v = int(_i_rep.get("count", 0) or 0)
                     if _impacts_count_v > 0:
                         quant_lines.append(
-                            f"Transitorios detectados|{_impacts_count_v}"
+                            f"Transients detected|{_impacts_count_v}"
                         )
                     if cat_iv_wf_diag is not None:
                         sev_v = str(
                             cat_iv_wf_diag.get("severity_global", "") or ""
                         ).strip()
                         if sev_v:
-                            quant_lines.append(f"Severidad ISO/API|{sev_v}")
+                            quant_lines.append(f"ISO/API severity|{sev_v}")
                     pt_v = str(getattr(prepared, "point", "") or "").strip()
                     if pt_v:
-                        quant_lines.append(f"Punto de medición|{pt_v}")
+                        quant_lines.append(f"Measurement point|{pt_v}")
 
                     ai_notes_override = (
                         "<<<WM_AI_BLOCK>>>\n"
@@ -2292,17 +2292,17 @@ def render_waveform_panel(
             )
 
             ai_extra = (
-                " · con Diagnóstico AI"
+                " · with AI diagnosis"
                 if ai_notes_override else ""
             )
             if png_bytes_for_report is not None:
                 st.success(
-                    f"Waveform enviado al reporte con imagen PNG{ai_extra}."
+                    f"Waveform sent to report with PNG image{ai_extra}."
                 )
             else:
                 st.warning(
-                    f"Waveform enviado al reporte sin PNG{ai_extra}. "
-                    f"Detalle: {png_error_for_report}"
+                    f"Waveform sent to report without PNG{ai_extra}. "
+                    f"Detail: {png_error_for_report}"
                 )
 
     panel_error = st.session_state.wm_export_store[export_state_key]["error"]
@@ -2476,7 +2476,7 @@ selected_ids = [
 ]
 
 if not selected_ids:
-    st.info("Selecciona una o más formas de onda en la barra lateral.")
+    st.info("Select one or more waveforms in the sidebar.")
     st.stop()
 
 selected_records = [next(r for r in records_all if r.signal_id == signal_id) for signal_id in selected_ids]

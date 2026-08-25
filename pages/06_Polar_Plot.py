@@ -198,14 +198,14 @@ def read_polar_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame
 
     lines = text.splitlines()
     if not lines:
-        raise ValueError("Archivo vacío.")
+        raise ValueError("Empty file.")
 
     header_idx = find_header_line(
         lines,
         required_signals=("Amp", "Phase", "Speed", "Timestamp"),
     )
     if header_idx is None:
-        raise ValueError("No se encontró el encabezado real del CSV Polar.")
+        raise ValueError("Could not find the actual header row in the Polar CSV.")
 
     meta = parse_metadata_block(lines[:header_idx])
     data_text = "\n".join(lines[header_idx:])
@@ -215,7 +215,7 @@ def read_polar_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame
     required = ["Amp", "Amp Status", "Phase", "Phase Status", "Speed", "Speed Status", "Timestamp"]
     missing = [c for c in required if c not in df.columns]
     if missing:
-        raise ValueError(f"Faltan columnas en el CSV: {missing}")
+        raise ValueError(f"Missing columns in the CSV: {missing}")
 
     df["amp"] = pd.to_numeric(df["Amp"], errors="coerce")
     df["phase"] = pd.to_numeric(df["Phase"], errors="coerce")
@@ -226,7 +226,7 @@ def read_polar_csv(file_obj) -> Tuple[Dict[str, str], pd.DataFrame, pd.DataFrame
     df = filter_status_valid(df, ["Amp Status", "Phase Status", "Speed Status"])
 
     if df.empty:
-        raise ValueError("No quedaron filas válidas después del filtrado.")
+        raise ValueError("No valid rows remained after filtering.")
 
     raw_df = df.sort_values(["Timestamp", "speed"]).reset_index(drop=True)
 
@@ -602,7 +602,7 @@ def build_polar_figure(
                     textfont=dict(size=11, color=color, family="Arial Black"),
                     showlegend=False,
                     hovertemplate=(
-                        f"<b>Crítica #{idx+1}</b><br>"
+                        f"<b>Critical #{idx+1}</b><br>"
                         f"RPM: {int(round(cs_rpm_pro))}<br>"
                         f"{label_q}<br>"
                         f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
@@ -673,7 +673,7 @@ def build_polar_figure(
                 _snaps_to_draw = [{
                     "amp": float(prev_snapshot_amp),
                     "phase": float(prev_snapshot_phase),
-                    "label": prev_snapshot_label or "anterior",
+                    "label": prev_snapshot_label or "previous",
                     "op_speed": prev_snapshot_op_speed,
                     "timestamp": "",
                 }]
@@ -715,7 +715,7 @@ def build_polar_figure(
             for _idx, _snap in enumerate(_snaps_to_draw):
                 _prev_amp = float(_snap["amp"])
                 _prev_phase_disp = float(_snap["phase"]) % 360.0
-                _prev_lbl_text = _snap.get("label", "anterior") or "anterior"
+                _prev_lbl_text = _snap.get("label", "previous") or "previous"
                 _prev_op = _snap.get("op_speed")
                 _prev_op_text = (
                     f" @ {int(round(_prev_op))} rpm" if _prev_op else ""
@@ -786,7 +786,7 @@ def build_polar_figure(
                                 opacity=0.85,
                                 showlegend=False,
                                 hovertemplate=(
-                                    f"<b>Pico {_prev_lbl_text}</b><br>"
+                                    f"<b>Peak {_prev_lbl_text}</b><br>"
                                     f"Speed: {_peak_speed:.0f} rpm<br>"
                                     f"Amp: {_peak_amp:.3f} {amp_unit}<br>"
                                     f"Phase: {_peak_phase:.1f}°<extra></extra>"
@@ -811,7 +811,7 @@ def build_polar_figure(
                             line=dict(width=2.0, color=_line_color, dash="dot"),
                             showlegend=False,
                             hoverinfo="skip",
-                            name=f"Trail {_prev_lbl_text} → actual",
+                            name=f"Trail {_prev_lbl_text} → current",
                         )
                     )
 
@@ -856,7 +856,7 @@ def build_polar_figure(
                     textfont=dict(size=10, color="#0f172a", family="Arial Black"),
                     showlegend=False,
                     hovertemplate=(
-                        f"<b>Operación nominal</b><br>"
+                        f"<b>Rated operation</b><br>"
                         f"RPM: {int(round(operating_rpm))}<br>"
                         f"Amplitude: %{{r:.3f}} {amp_unit}<br>"
                         f"Phase Display: %{{theta:.1f}}°<extra></extra>"
@@ -1040,10 +1040,10 @@ def _build_polar_report_notes(text_diag: Dict[str, str]) -> str:
 
     if action:
         action_clean = action
-        action_clean = re.sub(r"^Se recomienda:\s*", "", action_clean, flags=re.IGNORECASE)
+        action_clean = re.sub(r"^(Se recomienda|Recommended):\s*", "", action_clean, flags=re.IGNORECASE)
         action_clean = action_clean.strip()
         if action_clean:
-            blocks.append("Se recomienda:\n" + action_clean)
+            blocks.append("Recommended:\n" + action_clean)
 
     return "\n\n".join([b for b in blocks if b]).strip()
 
@@ -1198,63 +1198,60 @@ def build_polar_text_diagnostics(
         phase_delta = float(dominant.get("phase_delta", 0.0) or 0.0)
 
         if status_up == "DANGER":
-            headline = f"Respuesta polar severa compatible con amplificación dinámica cerca de {cs_speed:.0f} rpm"
+            headline = f"Severe polar response consistent with dynamic amplification near {cs_speed:.0f} rpm"
             detail = (
-                f"La trayectoria polar evidencia una respuesta dinámica significativa alrededor de {cs_speed:.0f} rpm, "
-                f"con amplitud aproximada de {cs_amp:.3f} y variación de fase de {phase_delta:.1f}°. "
-                f"La combinación de incremento de amplitud y cambio de fase sugiere proximidad a una velocidad crítica, "
-                f"pérdida de margen dinámico o cambio relevante de rigidez/amortiguamiento del sistema rotor-soporte.\n\n"
-                f"Desde el punto de vista de dinámica de rotores, esta condición debe correlacionarse con Bode, órbitas, "
-                f"forma de onda, shaft centerline y condiciones reales de carga."
+                f"The polar trajectory shows a significant dynamic response around {cs_speed:.0f} rpm, "
+                f"with an approximate amplitude of {cs_amp:.3f} and a phase change of {phase_delta:.1f}°. "
+                f"The combination of rising amplitude and phase change suggests proximity to a critical speed, "
+                f"loss of dynamic margin, or a relevant change in stiffness/damping of the rotor-support system.\n\n"
+                f"From a rotordynamics standpoint, this condition should be correlated with the Bode plot, orbits, "
+                f"waveform, shaft centerline and actual load conditions."
             )
             action = (
-                "Se recomienda como acción prioritaria:\n"
-                "- Correlacionar el pico polar con Bode de amplitud y fase\n"
-                "- Confirmar repetibilidad durante arranque/parada\n"
-                "- Verificar alineación, rigidez de soporte, balance y condición de cojinetes\n"
-                "- Revisar el cambio de fase alrededor del régimen identificado\n"
-                "- Evitar operación sostenida cerca del régimen crítico hasta completar evaluación"
+                "Priority actions:\n"
+                "- Correlate the polar peak with the amplitude and phase Bode plot\n"
+                "- Confirm repeatability during startup/coastdown\n"
+                "- Verify alignment, support stiffness, balance and bearing condition\n"
+                "- Review the phase change around the identified regime\n"
+                "- Avoid sustained operation near the critical regime until the evaluation is complete"
             )
         elif status_up == "WARNING":
-            headline = f"Respuesta polar con indicios de amplificación dinámica cerca de {cs_speed:.0f} rpm"
+            headline = f"Polar response with signs of dynamic amplification near {cs_speed:.0f} rpm"
             detail = (
-                f"La trayectoria polar muestra una zona de respuesta relevante alrededor de {cs_speed:.0f} rpm, "
-                f"con amplitud aproximada de {cs_amp:.3f} y cambio de fase de {phase_delta:.1f}°. "
-                f"El comportamiento es consistente con amplificación dinámica moderada, sin evidencia suficiente para clasificarla como severa.\n\n"
-                f"Desde el enfoque de análisis de vibraciones, esta condición debe mantenerse bajo seguimiento, especialmente si el pico se repite "
-                f"en corridas posteriores o si se acompaña de incremento en 1X, cambio de fase o alteración de órbita."
+                f"The polar trajectory shows a relevant response zone around {cs_speed:.0f} rpm, "
+                f"with an approximate amplitude of {cs_amp:.3f} and a phase change of {phase_delta:.1f}°. "
+                f"The behavior is consistent with moderate dynamic amplification, without sufficient evidence to classify it as severe.\n\n"
+                f"From a vibration-analysis standpoint, this condition should be kept under monitoring, especially if the peak repeats "
+                f"in later runs or is accompanied by a rise in 1X, a phase change, or a change in the orbit."
             )
             action = (
-                "Se recomienda:\n"
-                "- Comparar contra corridas históricas y condición base\n"
-                "- Validar la respuesta con Bode y espectro 1X\n"
-                "- Confirmar si existe tendencia creciente de amplitud\n"
-                "- Mantener seguimiento durante próximos arranques/paradas"
+                "- Compare against historical runs and the baseline condition\n"
+                "- Validate the response with the Bode plot and 1X spectrum\n"
+                "- Confirm whether a rising amplitude trend exists\n"
+                "- Keep monitoring during upcoming startups/coastdowns"
             )
         else:
-            headline = f"Respuesta polar controlada con candidato dinámico cerca de {cs_speed:.0f} rpm"
+            headline = f"Controlled polar response with a dynamic candidate near {cs_speed:.0f} rpm"
             detail = (
-                f"Se identifica un candidato dinámico alrededor de {cs_speed:.0f} rpm, con amplitud aproximada de {cs_amp:.3f} "
-                f"y cambio de fase de {phase_delta:.1f}°. La trayectoria polar no evidencia una respuesta severa en esta condición.\n\n"
-                f"El comportamiento es compatible con operación estable, aunque el punto identificado debe conservarse como referencia para comparación futura."
+                f"A dynamic candidate is identified around {cs_speed:.0f} rpm, with an approximate amplitude of {cs_amp:.3f} "
+                f"and a phase change of {phase_delta:.1f}°. The polar trajectory shows no severe response under this condition.\n\n"
+                f"The behavior is compatible with stable operation, although the identified point should be kept as a reference for future comparison."
             )
             action = (
-                "Se recomienda:\n"
-                "- Mantener la corrida como línea base\n"
-                "- Comparar con futuras trayectorias polares\n"
-                "- Correlacionar con Bode, órbita y tendencia de amplitud 1X"
+                "- Keep the run as a baseline\n"
+                "- Compare with future polar trajectories\n"
+                "- Correlate with the Bode plot, orbit and 1X amplitude trend"
             )
     else:
-        headline = "Respuesta polar sin velocidad crítica dominante claramente identificada"
+        headline = "Polar response with no clearly identified dominant critical speed"
         detail = (
-            f"La trayectoria polar presenta amplitud máxima de {max_amp:.3f} y no muestra un candidato claro de velocidad crítica bajo la heurística aplicada. "
-            f"La condición debe correlacionarse con Bode, espectro, órbita y variables operativas antes de concluir el mecanismo dominante."
+            f"The polar trajectory shows a peak amplitude of {max_amp:.3f} and no clear critical-speed candidate under the applied heuristic. "
+            f"The condition should be correlated with the Bode plot, spectrum, orbit and operating variables before concluding the dominant mechanism."
         )
         action = (
-            "Se recomienda:\n"
-            "- Mantener seguimiento histórico\n"
-            "- Comparar contra futuras corridas\n"
-            "- Validar con Bode, espectro y órbita si cambia la condición"
+            "- Keep historical monitoring\n"
+            "- Compare against future runs\n"
+            "- Validate with the Bode plot, spectrum and orbit if the condition changes"
         )
 
     return {"headline": headline, "detail": detail, "action": action}
@@ -1340,55 +1337,55 @@ def build_polar_text_diagnostics(
 
         if abs(phase_delta) >= 45.0:
             modal_txt = (
-                "El cambio de fase es suficientemente representativo para sospechar transición modal marcada. "
-                "Antes de la velocidad crítica el rotor tiende a comportarse con respuesta más rígida; después del paso por la zona modal, "
-                "la respuesta se vuelve más flexible y la fase evidencia el cambio de relación entre fuerza excitadora y desplazamiento."
+                "The phase change is representative enough to suspect a marked modal transition. "
+                "Below the critical speed the rotor tends to behave with a stiffer response; after passing through the modal zone, "
+                "the response becomes more flexible and the phase reflects the change in the relationship between exciting force and displacement."
             )
         elif abs(phase_delta) >= 15.0:
             modal_txt = (
-                "El cambio de fase es moderado y sugiere aproximación a una zona de amplificación dinámica. "
-                "La respuesta aún no confirma por sí sola un paso crítico plenamente desarrollado, pero sí muestra una modificación de rigidez dinámica aparente."
+                "The phase change is moderate and suggests approach to a dynamic amplification zone. "
+                "The response does not by itself confirm a fully developed critical crossing, but it does show a change in apparent dynamic stiffness."
             )
         else:
             modal_txt = (
-                "El cambio de fase es bajo, por lo que el punto identificado debe tratarse como candidato dinámico y no como velocidad crítica confirmada. "
-                "La confirmación requiere correlación con Bode, fase, órbita y repetibilidad entre corridas."
+                "The phase change is low, so the identified point should be treated as a dynamic candidate and not as a confirmed critical speed. "
+                "Confirmation requires correlation with the Bode plot, phase, orbit and repeatability across runs."
             )
 
         if status_up == "DANGER":
-            headline = f"Respuesta polar severa asociada a posible velocidad crítica cerca de {cs_speed:.0f} rpm"
+            headline = f"Severe polar response associated with a possible critical speed near {cs_speed:.0f} rpm"
         elif status_up == "WARNING":
-            headline = f"Respuesta polar con indicios de amplificación dinámica cerca de {cs_speed:.0f} rpm"
+            headline = f"Polar response with signs of dynamic amplification near {cs_speed:.0f} rpm"
         else:
-            headline = f"Respuesta polar controlada con candidato modal cerca de {cs_speed:.0f} rpm"
+            headline = f"Controlled polar response with a modal candidate near {cs_speed:.0f} rpm"
 
         detail = (
-            f"La trayectoria polar identifica una zona de interés alrededor de {cs_speed:.0f} rpm, con amplitud aproximada de {cs_amp:.3f} "
-            f"y variación de fase de {phase_delta:.1f}°. Esta condición es compatible con una posible aproximación a velocidad crítica o forma modal del sistema rotor-soporte.\\n\\n"
+            f"The polar trajectory identifies a zone of interest around {cs_speed:.0f} rpm, with an approximate amplitude of {cs_amp:.3f} "
+            f"and a phase change of {phase_delta:.1f}°. This condition is compatible with a possible approach to a critical speed or modal shape of the rotor-support system.\\n\\n"
             f"{modal_txt}\\n\\n"
-            f"Desde el punto de vista de análisis rotodinámico, la interpretación debe enfocarse en la relación entre amplitud, fase y velocidad. "
-            f"Un incremento de amplitud acompañado por cambio de fase consistente puede indicar paso por una forma modal; si la amplitud aumenta sin cambio de fase suficiente, "
-            f"la condición puede estar más asociada a desbalance, excentricidad, respuesta forzada o cambios operativos."
+            f"From a rotordynamics-analysis standpoint, interpretation should focus on the relationship between amplitude, phase and speed. "
+            f"A rise in amplitude accompanied by a consistent phase change may indicate passage through a modal shape; if amplitude rises without a sufficient phase change, "
+            f"the condition may be more associated with unbalance, eccentricity, forced response or operating changes."
         )
 
         action = (
-            "Correlacionar la trayectoria polar con Bode de amplitud y fase.\\n"
-            "Verificar repetibilidad de la zona modal entre arranques/paradas.\\n"
-            "Comparar contra órbitas filtradas 1X y shaft centerline.\\n"
-            "Confirmar si el cambio de fase ocurre antes, durante o después del máximo de amplitud.\\n"
-            "Validar condiciones de balance, alineación, rigidez de soporte, lubricación y carga."
+            "Correlate the polar trajectory with the amplitude and phase Bode plot.\\n"
+            "Verify repeatability of the modal zone across startups/coastdowns.\\n"
+            "Compare against 1X-filtered orbits and shaft centerline.\\n"
+            "Confirm whether the phase change occurs before, during or after the amplitude peak.\\n"
+            "Validate balance, alignment, support stiffness, lubrication and load conditions."
         )
     else:
-        headline = "Respuesta polar sin velocidad crítica dominante claramente identificada"
+        headline = "Polar response with no clearly identified dominant critical speed"
         detail = (
-            f"La trayectoria polar presenta amplitud máxima de {max_amp:.3f}, sin un candidato modal dominante bajo la heurística aplicada. "
-            f"No se observa una combinación suficientemente clara de incremento de amplitud y cambio de fase para confirmar velocidad crítica.\\n\\n"
-            f"Esta condición puede representar una respuesta estable, una excitación forzada o una corrida donde el régimen crítico no fue cruzado de forma suficientemente clara."
+            f"The polar trajectory shows a peak amplitude of {max_amp:.3f}, with no dominant modal candidate under the applied heuristic. "
+            f"There is no sufficiently clear combination of rising amplitude and phase change to confirm a critical speed.\\n\\n"
+            f"This condition may represent a stable response, a forced excitation, or a run where the critical regime was not crossed clearly enough."
         )
         action = (
-            "Mantener la corrida como referencia histórica.\\n"
-            "Comparar contra futuras trayectorias polares.\\n"
-            "Correlacionar con Bode, espectro 1X, órbita y variables operativas."
+            "Keep the run as a historical reference.\\n"
+            "Compare against future polar trajectories.\\n"
+            "Correlate with the Bode plot, 1X spectrum, orbit and operating variables."
         )
 
     return {"headline": headline, "detail": detail, "action": action}
@@ -1533,27 +1530,27 @@ def _polar_compare_diagnostic(records: List[Dict[str, Any]]) -> Dict[str, str]:
     delta_speed = float(latest["dominant_speed"] - baseline["dominant_speed"])
     delta_phase = float(latest["dominant_phase_delta"] - baseline["dominant_phase_delta"])
 
-    amp_trend = "incremento" if delta_amp > 0.15 else "reducción" if delta_amp < -0.15 else "estabilidad"
-    speed_shift = "desplazamiento hacia mayor velocidad" if delta_speed > 100 else "desplazamiento hacia menor velocidad" if delta_speed < -100 else "sin desplazamiento relevante de velocidad"
+    amp_trend = "an increase" if delta_amp > 0.15 else "a reduction" if delta_amp < -0.15 else "stability"
+    speed_shift = "a shift toward higher speed" if delta_speed > 100 else "a shift toward lower speed" if delta_speed < -100 else "no relevant speed shift"
 
-    headline = "Comparación multi-fecha de trayectoria polar y respuesta modal"
+    headline = "Multi-date comparison of polar trajectory and modal response"
 
     detail = (
-        f"Se compararon {len(ordered)} corridas polares. Entre la corrida base ({baseline['label']}) y la más reciente ({latest['label']}) "
-        f"se observa {amp_trend} de la amplitud dominante ({delta_amp:+.3f}), {speed_shift} ({delta_speed:+.0f} rpm) "
-        f"y variación de fase dominante de {delta_phase:+.1f}°.\\n\\n"
-        f"Desde el punto de vista rotodinámico, la comparación polar permite evaluar si la respuesta del rotor mantiene el mismo patrón modal o si existe migración de la zona crítica. "
-        f"Cuando el máximo de amplitud y el cambio de fase se desplazan entre corridas, puede existir modificación de rigidez efectiva, amortiguamiento, condición de soporte, balance o carga.\\n\\n"
-        f"Antes de una velocidad crítica el rotor tiende a comportarse como un sistema más rígido; al cruzar una forma modal, la fase y la trayectoria cambian y el rotor manifiesta comportamiento flexible. "
-        f"Por eso, la lectura conjunta de amplitud, fase y velocidad es más concluyente que la amplitud por sí sola."
+        f"{len(ordered)} polar runs were compared. Between the baseline run ({baseline['label']}) and the most recent one ({latest['label']}), "
+        f"the dominant amplitude shows {amp_trend} ({delta_amp:+.3f}), {speed_shift} ({delta_speed:+.0f} rpm) "
+        f"and a dominant phase change of {delta_phase:+.1f}°.\\n\\n"
+        f"From a rotordynamics standpoint, the polar comparison makes it possible to assess whether the rotor response keeps the same modal pattern or whether the critical zone has migrated. "
+        f"When the amplitude peak and the phase change shift between runs, there may be a change in effective stiffness, damping, support condition, balance or load.\\n\\n"
+        f"Below a critical speed the rotor tends to behave as a stiffer system; on crossing a modal shape, the phase and the trajectory change and the rotor shows flexible behavior. "
+        f"For that reason, reading amplitude, phase and speed together is more conclusive than amplitude alone."
     )
 
     action = (
-        "Correlacionar las corridas polares con Bode de amplitud/fase.\\n"
-        "Verificar si la velocidad candidata se repite o migra entre fechas.\\n"
-        "Comparar contra órbitas 1X y shaft centerline.\\n"
-        "Validar si hubo cambios de balance, alineación, lubricación, temperatura o carga.\\n"
-        "Usar la corrida más estable como línea base de aceptación."
+        "Correlate the polar runs with the amplitude/phase Bode plot.\\n"
+        "Verify whether the candidate speed repeats or migrates across dates.\\n"
+        "Compare against 1X orbits and shaft centerline.\\n"
+        "Validate whether there were changes in balance, alignment, lubrication, temperature or load.\\n"
+        "Use the most stable run as the acceptance baseline."
     )
 
     return {"headline": headline, "detail": detail, "action": action}
@@ -1666,7 +1663,7 @@ def render_polar_compare_section(
     )
 
     st.markdown("---")
-    st.markdown("## Comparación multi-fecha · Polar Plot")
+    st.markdown("## Multi-date comparison · Polar Plot")
 
     fig = go.Figure()
     palette = _temporal_palette(len(records_chrono))
@@ -1685,7 +1682,7 @@ def render_polar_compare_section(
             cs_pro = rec["primary_critical"]
             zone = rec.get("iso_eval").zone if rec.get("iso_eval") else "—"
             q_str = f"{cs_pro.q_factor:.2f}" if np.isfinite(cs_pro.q_factor) else "—"
-            trace_name = f"{date_label}  ·  Q={q_str}  ·  zona {zone}"
+            trace_name = f"{date_label}  ·  Q={q_str}  ·  zone {zone}"
         else:
             trace_name = f"{date_label}  ·  {rec['label']}"
 
@@ -1723,7 +1720,7 @@ def render_polar_compare_section(
                     textposition="top center",
                     textfont=dict(size=11, color=color, family="Arial Black"),
                     showlegend=False,
-                    hovertemplate=f"<b>Crítica detectada</b><br>{cs_marker_label}<br>Amp: %{{r:.3f}}<br>Phase: %{{theta:.1f}}°<extra></extra>",
+                    hovertemplate=f"<b>Detected critical</b><br>{cs_marker_label}<br>Amp: %{{r:.3f}}<br>Phase: %{{theta:.1f}}°<extra></extra>",
                 )
             )
 
@@ -1739,7 +1736,7 @@ def render_polar_compare_section(
                     mode="markers",
                     marker=dict(size=14, color=color, symbol="star", line=dict(width=2, color="white")),
                     showlegend=False,
-                    hovertemplate=f"<b>Operación nominal</b><br>{operating_rpm:.0f} rpm<br>Amp: %{{r:.3f}}<br>Phase: %{{theta:.1f}}°<extra></extra>",
+                    hovertemplate=f"<b>Rated operation</b><br>{operating_rpm:.0f} rpm<br>Amp: %{{r:.3f}}<br>Phase: %{{theta:.1f}}°<extra></extra>",
                 )
             )
 
@@ -1768,14 +1765,14 @@ def render_polar_compare_section(
         rpm_text = f"{int(min(all_speeds))} - {int(max(all_speeds))} rpm"
 
     dt_values = [r["ts_start"] for r in records if r["ts_start"] is not None]
-    dt_text = "Comparación multi-fecha"
+    dt_text = "Multi-date comparison"
     if dt_values:
         dt_text = " / ".join([pd.Timestamp(v).strftime("%Y-%m-%d") for v in dt_values[:4]])
 
     draw_top_strip(
         fig=fig,
         machine=items[0].get("machine", ""),
-        point_text="Polar Plot · Comparación multi-fecha",
+        point_text="Polar Plot · Multi-date comparison",
         variable=f"{axis_label} | {install_angle_deg:.0f}° {side_label} | Rotation {rotation_direction}",
         dt_text=dt_text,
         rpm_text=rpm_text,
@@ -1839,26 +1836,26 @@ def render_polar_compare_section(
             api_pro = r.get("primary_api684")
             iso_eval = r.get("iso_eval")
             rows.append({
-                "Fecha": pd.Timestamp(r["ts_start"]).strftime("%Y-%m-%d") if r["ts_start"] is not None else "—",
-                "Archivo": r["label"],
-                "RPM crítica": f"{cs_pro.rpm:.0f}" if cs_pro is not None else "—",
+                "Date": pd.Timestamp(r["ts_start"]).strftime("%Y-%m-%d") if r["ts_start"] is not None else "—",
+                "File": r["label"],
+                "Critical RPM": f"{cs_pro.rpm:.0f}" if cs_pro is not None else "—",
                 "Q factor": f"{cs_pro.q_factor:.2f}" if (cs_pro is not None and np.isfinite(cs_pro.q_factor)) else "—",
-                "Δfase (°)": f"{cs_pro.phase_change_deg:.0f}" if cs_pro is not None else "—",
+                "Δphase (°)": f"{cs_pro.phase_change_deg:.0f}" if cs_pro is not None else "—",
                 "FWHM (rpm)": f"{cs_pro.fwhm_rpm:.0f}" if (cs_pro is not None and np.isfinite(cs_pro.fwhm_rpm)) else "—",
                 peak_col_label: peak_fmt.format(r.get("peak_amp_csv", 0.0)),
-                "Zona ISO": iso_eval.zone if iso_eval is not None else "—",
+                "ISO zone": iso_eval.zone if iso_eval is not None else "—",
                 "API 684": ("✓" if api_pro is not None and api_pro.compliant else "✗") if api_pro is not None else "—",
             })
         summary = pd.DataFrame(rows)
     else:
         summary = pd.DataFrame([
             {
-                "Archivo": r["label"],
-                "Fecha inicio": pd.Timestamp(r["ts_start"]).strftime("%Y-%m-%d %H:%M") if r["ts_start"] is not None else "—",
-                "Fecha fin": pd.Timestamp(r["ts_end"]).strftime("%Y-%m-%d %H:%M") if r["ts_end"] is not None else "—",
-                "Amp dominante": round(r["dominant_amp"], 3),
-                "RPM candidata": round(r["dominant_speed"], 0),
-                "Delta fase": round(r["dominant_phase_delta"], 1),
+                "File": r["label"],
+                "Start date": pd.Timestamp(r["ts_start"]).strftime("%Y-%m-%d %H:%M") if r["ts_start"] is not None else "—",
+                "End date": pd.Timestamp(r["ts_end"]).strftime("%Y-%m-%d %H:%M") if r["ts_end"] is not None else "—",
+                "Dominant amp": round(r["dominant_amp"], 3),
+                "Candidate RPM": round(r["dominant_speed"], 0),
+                "Phase delta": round(r["dominant_phase_delta"], 1),
                 "Max amp": round(r["max_amp"], 3),
             }
             for r in records_chrono
@@ -1878,7 +1875,7 @@ def render_polar_compare_section(
     else:
         diag = _polar_compare_diagnostic(records_chrono)
 
-    st.markdown("### Diagnóstico comparativo automático")
+    st.markdown("### Automatic comparative diagnostic")
     st.markdown(f"**{diag['headline']}**")
     st.write(diag["detail"])
     st.write(diag["action"])
@@ -1909,23 +1906,23 @@ def render_polar_compare_section(
                     if np.isfinite(cs_pro.q_factor)
                     else "—"
                 )
-                compliant_str = "conforme API 684" if api_pro.compliant else "NO conforme API 684"
+                compliant_str = "API 684 compliant" if api_pro.compliant else "NOT API 684 compliant"
                 prose_lines.append(
-                    f"La corrida del {date_str} ({r['label']}) reportó velocidad crítica en "
-                    f"{cs_pro.rpm:.0f} rpm con factor Q de {q_str} y amplitud pico de {amp_str}, "
-                    f"clasificada en zona {iso_eval.zone} de ISO 20816-2 y {compliant_str}."
+                    f"The {date_str} run ({r['label']}) reported a critical speed at "
+                    f"{cs_pro.rpm:.0f} rpm with a Q factor of {q_str} and a peak amplitude of {amp_str}, "
+                    f"classified in zone {iso_eval.zone} of ISO 20816-2 and {compliant_str}."
                 )
             else:
                 prose_lines.append(
-                    f"La corrida del {date_str} ({r['label']}) no presenta velocidad crítica "
-                    f"detectable bajo los criterios automáticos."
+                    f"The {date_str} run ({r['label']}) shows no critical speed "
+                    f"detectable under the automatic criteria."
                 )
 
         prose_summary = "\n\n".join(prose_lines)
 
         notes = (
             f"{diag['detail']}\n\n"
-            f"Síntesis cronológica de las corridas analizadas:\n\n"
+            f"Chronological synthesis of the analyzed runs:\n\n"
             f"{prose_summary}\n\n"
             f"{diag['action']}"
         )
@@ -1933,14 +1930,14 @@ def render_polar_compare_section(
         summary_lines = []
         for _, row in summary.iterrows():
             summary_lines.append(
-                f"- {row['Archivo']}: candidato {row['RPM candidata']:.0f} rpm, "
-                f"amplitud dominante {row['Amp dominante']:.3f}, "
-                f"Δfase {row['Delta fase']:.1f}°, máximo {row['Max amp']:.3f}."
+                f"- {row['File']}: candidate {row['Candidate RPM']:.0f} rpm, "
+                f"dominant amplitude {row['Dominant amp']:.3f}, "
+                f"Δphase {row['Phase delta']:.1f}°, max {row['Max amp']:.3f}."
             )
 
         notes = (
             _build_polar_report_notes(diag)
-            + "\n\nResumen comparativo de corridas:\n"
+            + "\n\nRun comparison summary:\n"
             + "\n".join(summary_lines)
         )
 
@@ -1948,21 +1945,21 @@ def render_polar_compare_section(
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Enviar comparativo Polar a reporte", key="wm_polar_compare_report_btn"):
+        if st.button("Send Polar comparison to report", key="wm_polar_compare_report_btn"):
             ensure_report_state()
             append_report_item_and_persist(
                 {
                     "type": "polar_compare",
-                    "title": "Polar Plot · Comparación multi-fecha",
+                    "title": "Polar Plot · Multi-date comparison",
                     "notes": notes,
                     "image_bytes": png_bytes,
                 }
             )
-            st.success("Comparativo Polar enviado al reporte.")
+            st.success("Polar comparison sent to the report.")
     with c2:
         if png_bytes is not None:
             st.download_button(
-                "Descargar PNG comparativo Polar",
+                "Download Polar comparison PNG",
                 data=png_bytes,
                 file_name="polar_compare_hd.png",
                 mime="image/png",
@@ -1970,7 +1967,7 @@ def render_polar_compare_section(
                 width="stretch",
             )
         elif png_error:
-            st.warning(f"No fue posible generar PNG comparativo: {png_error}")
+            st.warning(f"Could not generate the comparison PNG: {png_error}")
 
 # ============================================================
 # MULTI-FILE LOADER
@@ -2073,8 +2070,8 @@ def render_polar_panel(
         plot_df = plot_df[(plot_df["speed"] >= lo) & (plot_df["speed"] <= hi)].copy()
         if plot_df.empty:
             st.warning(
-                f"Panel {panel_index + 1}: no hay puntos en el rango RPM "
-                f"[{lo:.0f} – {hi:.0f}]. Ajusta el rango en la sidebar."
+                f"Panel {panel_index + 1}: no points in the RPM range "
+                f"[{lo:.0f} – {hi:.0f}]. Adjust the range in the sidebar."
             )
             return
 
@@ -2325,7 +2322,7 @@ def render_polar_panel(
                 )
                 _phase_class = phase_shift_classifier(_delta_phase)
                 _amp_unit_local = meta.get("Amp Unit", "") or meta.get("Y-Axis Unit", "") or ""
-                _prev_lbl_text = _prev_label or "corrida anterior"
+                _prev_lbl_text = _prev_label or "previous run"
 
                 # --- Datos del modo en la corrida ACTUAL ---
                 # Phase delta a través del peak (via critical_speeds_pro
@@ -2352,61 +2349,61 @@ def render_polar_panel(
                 # ~90°  = modo conical/pivotal o segundo modo
                 # >270° = posible flexural / segundo modo bending
                 # <90°  = anti-resonancia o resonancia estructural
-                _mode_type = "modo no caracterizado"
+                _mode_type = "uncharacterized mode"
                 if _curr_cs_phase_delta is not None and _curr_cs_phase_delta != 0:
                     _abs_pd = abs(_curr_cs_phase_delta)
                     if 150.0 <= _abs_pd <= 210.0:
                         _mode_type = (
-                            "primer modo translacional (Δφ ≈ 180°), "
-                            "consistente con bending mode tipo 'in-phase' "
-                            "del rotor según la nomenclatura de Bently y "
+                            "first translational mode (Δφ ≈ 180°), "
+                            "consistent with an 'in-phase' rotor "
+                            "bending mode per Bently nomenclature and "
                             "API 684 §6"
                         )
                     elif 70.0 <= _abs_pd < 150.0:
                         _mode_type = (
-                            "modo cónico / pivotal o segundo modo "
-                            "translacional (Δφ ≈ 90–150°), respuesta "
-                            "típica cuando el rotor pivota alrededor "
-                            "de un punto nodal cercano al cojinete"
+                            "conical / pivotal mode or second "
+                            "translational mode (Δφ ≈ 90–150°), a typical "
+                            "response when the rotor pivots about "
+                            "a nodal point near the bearing"
                         )
                     elif 210.0 < _abs_pd <= 360.0:
                         _mode_type = (
-                            "segundo modo flexural o respuesta acoplada "
-                            "rotor-estructura (Δφ > 210°)"
+                            "second flexural mode or coupled "
+                            "rotor-structure response (Δφ > 210°)"
                         )
                     else:
                         _mode_type = (
-                            "respuesta de baja deflexión modal "
-                            "(Δφ < 70°) — posible resonancia "
-                            "estructural del soporte / fundación más "
-                            "que modo del rotor"
+                            "low modal deflection response "
+                            "(Δφ < 70°) — possibly a structural "
+                            "resonance of the support / foundation rather "
+                            "than a rotor mode"
                         )
 
                 _narr_parts: List[str] = []
 
                 # 1) Encabezado factual
                 _narr_parts.append(
-                    f"Análisis comparativo rotodinámico contra "
+                    f"Rotordynamic comparative analysis against "
                     f"«{_prev_lbl_text}»"
                     + (
-                        f" del {_prev_label[:10]}"
+                        f" from {_prev_label[:10]}"
                         if _prev_label and len(_prev_label) >= 10 else ""
                     )
-                    + ". A la velocidad operativa "
-                    f"({operating_rpm:.0f} rpm), la respuesta sincrónica "
-                    f"1X del sensor evolucionó de "
+                    + ". At the operating speed "
+                    f"({operating_rpm:.0f} rpm), the sensor's 1X synchronous "
+                    f"response evolved from "
                     f"{float(_prev_amp):.3f} {_amp_unit_local} @ "
-                    f"{float(_prev_phase):.1f}° a "
+                    f"{float(_prev_phase):.1f}° to "
                     f"{_curr_amp_op:.3f} {_amp_unit_local} @ "
-                    f"{_curr_phase_op:.1f}°, lo que representa un "
+                    f"{_curr_phase_op:.1f}°, representing a "
                     + (
-                        f"vector change de {_delta_amp:+.3f} {_amp_unit_local} "
+                        f"vector change of {_delta_amp:+.3f} {_amp_unit_local} "
                         f"({_delta_amp_pct:+.1f}%)"
                         if _delta_amp_pct is not None
-                        else f"vector change de {_delta_amp:+.3f} {_amp_unit_local}"
+                        else f"vector change of {_delta_amp:+.3f} {_amp_unit_local}"
                     )
-                    + f" en magnitud y un shift de fase 1X de "
-                    f"{_delta_phase:+.1f}° en arco menor."
+                    + f" in magnitude and a 1X phase shift of "
+                    f"{_delta_phase:+.1f}° along the minor arc."
                 )
 
                 # 2) Caracterización del modo y forma estructural
@@ -2414,97 +2411,94 @@ def render_polar_panel(
                     _ratio_op_cs = operating_rpm / _curr_cs_rpm
                     _separation_pct = (_ratio_op_cs - 1.0) * 100.0
                     _q_str = (
-                        f", con factor de amplificación Q={_curr_q:.2f}"
+                        f", with amplification factor Q={_curr_q:.2f}"
                         if _curr_q else ""
                     )
                     _mode_para = (
-                        f"La trayectoria polar revela una velocidad "
-                        f"crítica en {_curr_cs_rpm:.0f} rpm con un "
-                        f"cambio de fase de "
-                        f"{abs(_curr_cs_phase_delta or 0):.0f}° a través "
-                        f"del peak{_q_str}. Este patrón se interpreta "
-                        f"como {_mode_type}. "
+                        f"The polar trajectory reveals a critical "
+                        f"speed at {_curr_cs_rpm:.0f} rpm with a "
+                        f"phase change of "
+                        f"{abs(_curr_cs_phase_delta or 0):.0f}° across "
+                        f"the peak{_q_str}. This pattern is interpreted "
+                        f"as {_mode_type}. "
                     )
                     if _separation_pct >= 15.0:
                         _mode_para += (
-                            f"La velocidad operativa queda "
-                            f"{_separation_pct:+.1f}% por encima del "
-                            f"modo, separación amplia que cumple el "
-                            f"requisito de margen de API 684 §6. "
+                            f"The operating speed sits "
+                            f"{_separation_pct:+.1f}% above the "
+                            f"mode, a wide separation that meets the "
+                            f"API 684 §6 margin requirement. "
                         )
                     elif _separation_pct >= 0:
                         _mode_para += (
-                            f"La velocidad operativa queda solo "
-                            f"{_separation_pct:+.1f}% por encima del "
-                            f"modo. Es estrecho contra el margen "
-                            f"recomendado de API 684 §6 (≥15%) y "
-                            f"merece evaluación detallada de "
-                            f"separation margin si el Q se incrementa. "
+                            f"The operating speed sits only "
+                            f"{_separation_pct:+.1f}% above the "
+                            f"mode. This is narrow against the "
+                            f"recommended API 684 §6 margin (≥15%) and "
+                            f"warrants a detailed separation-margin "
+                            f"evaluation if Q increases. "
                         )
                     else:
                         _mode_para += (
-                            f"La velocidad operativa está "
-                            f"{abs(_separation_pct):.1f}% por debajo "
-                            f"del modo identificado, configuración de "
-                            f"sub-crítica que se considera estable "
-                            f"siempre que el Q se mantenga acotado. "
+                            f"The operating speed is "
+                            f"{abs(_separation_pct):.1f}% below "
+                            f"the identified mode, a sub-critical "
+                            f"configuration considered stable "
+                            f"as long as Q stays bounded. "
                         )
                     _narr_parts.append(_mode_para)
 
                 # 3) Diagnóstico diferencial del shift
                 if _phase_class == "shift_critical":
                     _narr_parts.append(
-                        "El shift de fase 1X supera 60° en arco menor, "
-                        "magnitud considerada crítica según los criterios "
-                        "de Bently / API 684. Magnitudes de esta escala "
-                        "son inconsistentes con simple deriva térmica o "
-                        "operacional y apuntan a un cambio mecánico "
-                        "estructural del rotor: pérdida de masa por "
-                        "desprendimiento de pieza, propagación de "
-                        "fisura / crack, asentamiento súbito del cojinete "
-                        "o pérdida del contacto con el sello / impeller. "
-                        "Se recomienda parada controlada para inspección "
-                        "y análisis complementario de orbits filtrados a "
-                        "1X y forma de onda en ambos planos del cojinete "
-                        "antes de continuar operación."
+                        "The 1X phase shift exceeds 60° along the minor "
+                        "arc, a magnitude considered critical under the "
+                        "Bently / API 684 criteria. Shifts of this scale "
+                        "are inconsistent with simple thermal or "
+                        "operational drift and point to a structural "
+                        "mechanical change in the rotor: mass loss from "
+                        "a detached part, crack propagation, sudden "
+                        "bearing settlement, or loss of contact at the "
+                        "seal / impeller. A controlled shutdown is "
+                        "recommended for inspection and complementary "
+                        "analysis of 1X-filtered orbits and waveform in "
+                        "both bearing planes before continuing operation."
                     )
                 elif _phase_class == "shift_major":
                     _narr_parts.append(
-                        "El shift de fase 1X entre 30° y 60° es la firma "
-                        "clásica de un cambio de balance del rotor según "
-                        "la metodología de vector polar response que "
-                        "documentan Bently y API 684. La magnitud y "
-                        "dirección del vector change son consistentes "
-                        "con una redistribución de masa rotativa "
-                        "(suciedad acumulada o desprendida en álabes, "
-                        "pérdida progresiva de balance weights, "
-                        "deformación térmica residual). Se recomienda "
-                        "programar balance de campo según ISO 21940-12 "
-                        "nivel G 2.5 en próxima ventana, verificando "
-                        "previamente la consistencia de fase entre "
-                        "arranques sucesivos para descartar componente "
-                        "transitoria."
+                        "The 1X phase shift between 30° and 60° is the "
+                        "classic signature of a rotor balance change "
+                        "under the polar vector-response methodology "
+                        "documented by Bently and API 684. The magnitude "
+                        "and direction of the vector change are "
+                        "consistent with a redistribution of rotating "
+                        "mass (dirt accumulated or shed on blades, "
+                        "progressive loss of balance weights, "
+                        "residual thermal distortion). Scheduling a "
+                        "field balance per ISO 21940-12 grade G 2.5 in "
+                        "the next window is recommended, first verifying "
+                        "phase consistency across successive startups to "
+                        "rule out a transient component."
                     )
                 elif _phase_class == "shift_minor":
                     _narr_parts.append(
-                        "El shift de fase 1X entre 10° y 30° es menor y "
-                        "puede atribuirse a deriva operacional normal "
-                        "(temperatura, carga, expansión térmica del "
-                        "rotor o de los soportes). No constituye por sí "
-                        "solo evidencia de cambio mecánico, pero merece "
-                        "vigilancia: una tendencia consolidada a lo "
-                        "largo de varias corridas en la misma dirección "
-                        "vectorial sí indicaría cambio incipiente de "
-                        "balance que conviene caracterizar antes de que "
-                        "cruce la zona mayor."
+                        "The 1X phase shift between 10° and 30° is minor "
+                        "and can be attributed to normal operational "
+                        "drift (temperature, load, thermal expansion of "
+                        "the rotor or the supports). By itself it is not "
+                        "evidence of a mechanical change, but it warrants "
+                        "monitoring: a consolidated trend across several "
+                        "runs in the same vector direction would indicate "
+                        "an incipient balance change worth characterizing "
+                        "before it crosses into the major zone."
                     )
                 elif _phase_class == "stable":
                     _narr_parts.append(
-                        "El shift de fase 1X (<10°) está dentro de la "
-                        "variación normal de la respuesta sincrónica y "
-                        "no constituye evidencia de cambio mecánico ni "
-                        "de balance. La forma del vector se considera "
-                        "estable entre corridas."
+                        "The 1X phase shift (<10°) is within the normal "
+                        "variation of the synchronous response and is "
+                        "not evidence of a mechanical or balance change. "
+                        "The vector shape is considered stable across "
+                        "runs."
                     )
 
                 # 4) Análisis del cambio de amplitud (sensitividad)
@@ -2512,39 +2506,37 @@ def render_polar_panel(
                     _amp_class = amplitude_change_classifier(_delta_amp_pct)
                     if _amp_class == "amp_critical":
                         _narr_parts.append(
-                            "El crecimiento de amplitud 1X supera el "
-                            "50% entre corridas. Combinado con el shift "
-                            "de fase descrito, refuerza el diagnóstico "
-                            "de degradación activa de la respuesta "
-                            "modal — la sensibilidad del rotor a la "
-                            "fuerza de excitación residual está "
-                            "creciendo, lo que es típico de pérdida de "
-                            "amortiguamiento (damping degradation) en "
-                            "los soportes hidrodinámicos según el "
-                            "marco de análisis de API 684."
+                            "The 1X amplitude growth exceeds "
+                            "50% between runs. Combined with the "
+                            "described phase shift, it reinforces the "
+                            "diagnosis of active degradation of the "
+                            "modal response — the rotor's sensitivity to "
+                            "residual excitation force is increasing, "
+                            "which is typical of damping degradation in "
+                            "the hydrodynamic bearings under the "
+                            "API 684 analysis framework."
                         )
                     elif _amp_class == "amp_high":
                         _narr_parts.append(
-                            "El crecimiento de amplitud 1X (≥20%) "
-                            "acompañando al shift de fase es consistente "
-                            "con un cambio activo en la respuesta modal "
-                            "del sistema rotor-soporte. Vale revisar "
-                            "el factor de amplificación Q en próximas "
-                            "corridas para descartar pérdida progresiva "
-                            "de damping."
+                            "The 1X amplitude growth (≥20%) "
+                            "accompanying the phase shift is consistent "
+                            "with an active change in the modal response "
+                            "of the rotor-support system. It is worth "
+                            "reviewing the amplification factor Q in "
+                            "upcoming runs to rule out progressive "
+                            "damping loss."
                         )
                     elif _amp_class in ("amp_down_strong", "amp_down"):
                         _narr_parts.append(
-                            "La amplitud 1X bajó de manera significativa "
-                            "respecto a la corrida anterior. Si esto "
-                            "coincide con un shift de fase mayor, puede "
-                            "tratarse de un cambio de balance "
-                            "compensatorio (ej. una intervención previa, "
-                            "redistribución térmica) más que de "
-                            "degradación. Conviene revisar el "
-                            "registro operacional y los reportes de "
-                            "mantenimiento entre corridas para "
-                            "confirmar."
+                            "The 1X amplitude dropped significantly "
+                            "relative to the previous run. If this "
+                            "coincides with a major phase shift, it may "
+                            "reflect a compensatory balance change "
+                            "(e.g. a prior intervention, thermal "
+                            "redistribution) rather than degradation. It "
+                            "is advisable to review the operational log "
+                            "and the maintenance reports between runs to "
+                            "confirm."
                         )
 
                 # 5) Distinción modal del rotor vs estructural
@@ -2554,18 +2546,18 @@ def render_polar_panel(
                     and abs(_curr_cs_phase_delta) < 90.0
                 ):
                     _narr_parts.append(
-                        "Nota diferencial: el cambio de fase a través "
-                        "del peak observado (<90°) es atípico de un "
-                        "modo libre del rotor y sugiere que el peak "
-                        "podría corresponder a una resonancia "
-                        "estructural del soporte o fundación más que a "
-                        "un modo del rotor. Es importante validar "
-                        "antes de atribuir el cambio observado a "
-                        "balance del rotor — un cambio mecánico en la "
-                        "fundación (suelta de anclajes, deterioro de "
-                        "grouting) produce el mismo patrón en el "
-                        "polar pero requiere intervención estructural, "
-                        "no balance."
+                        "Differential note: the phase change across "
+                        "the observed peak (<90°) is atypical of a "
+                        "free rotor mode and suggests the peak "
+                        "could correspond to a structural "
+                        "resonance of the support or foundation rather "
+                        "than a rotor mode. It is important to validate "
+                        "before attributing the observed change to "
+                        "rotor balance — a mechanical change in the "
+                        "foundation (loose anchor bolts, grouting "
+                        "deterioration) produces the same pattern in the "
+                        "polar plot but requires structural "
+                        "intervention, not balancing."
                     )
 
                 _comp_narr = " ".join(_narr_parts)
@@ -2611,7 +2603,7 @@ def render_polar_panel(
         title=f"API 684 Helper · Polar {panel_index + 1}",
         subtitle=text_diag["headline"],
         chips=[
-            (f"Semáforo: {semaforo_status}", semaforo_color),
+            (f"Status: {semaforo_status}", semaforo_color),
             (f"Health score: {polar_diag['score']:.1f}", None),
             (f"Max amplitude: {polar_diag['max_amp']:.3f} {amp_unit}", None),
             (f"Critical candidates: {polar_diag['candidate_count']}", None),
@@ -2642,22 +2634,22 @@ def render_polar_panel(
         st.session_state[ai_state_key_pol] = None
 
     with st.expander(
-        "Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        "AI clinical interpretation · Assisted Cat IV diagnostic",
         expanded=False,
     ):
         if not is_ai_available():
             st.info(
-                "**AI Diagnóstico no disponible.** Falta configurar "
-                "`[anthropic] api_key` en los secrets de Streamlit."
+                "**AI diagnostic not available.** `[anthropic] api_key` must be "
+                "configured in the Streamlit secrets."
             )
         else:
             stored_pol = st.session_state.get(ai_state_key_pol)
             ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
             with ai_btn_col1:
                 gen_clicked_pol = st.button(
-                    "Generar diagnóstico AI"
+                    "Generate AI diagnostic"
                     if stored_pol is None
-                    else "Diagnóstico generado",
+                    else "Diagnostic generated",
                     key=f"ai_gen_btn_pol_{export_state_key}",
                     use_container_width=True,
                     type="primary" if stored_pol is None else "secondary",
@@ -2665,15 +2657,15 @@ def render_polar_panel(
                 )
             with ai_btn_col2:
                 regen_clicked_pol = st.button(
-                    "Regenerar",
+                    "Regenerate",
                     key=f"ai_regen_btn_pol_{export_state_key}",
                     use_container_width=True,
                     disabled=stored_pol is None,
                 )
             with ai_btn_col3:
                 st.caption(
-                    "Claude Sonnet 4.5 · ~$0.015 por diagnóstico · "
-                    "cacheado 30 días si no regenerás."
+                    "Claude Sonnet 4.5 · ~$0.015 per diagnostic · "
+                    "cached 30 days unless you regenerate."
                 )
 
             should_call_pol = bool(gen_clicked_pol) and (stored_pol is None)
@@ -2724,7 +2716,7 @@ def render_polar_panel(
                     "trend": {},
                 }
 
-                with st.spinner("Claude analizando la respuesta polar... (5-15 seg)"):
+                with st.spinner("Claude analyzing the polar response... (5-15 s)"):
                     try:
                         result_pol = generate_ai_diagnostic(
                             ai_payload_pol,
@@ -2735,7 +2727,7 @@ def render_polar_panel(
                         result_pol = {
                             "ok": False,
                             "markdown": (
-                                f"_Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"_Unexpected error generating the AI diagnostic:_\n\n"
                                 f"```\n{type(exc).__name__}: {exc}\n```"
                             ),
                             "error": str(exc)[:500],
@@ -2754,7 +2746,7 @@ def render_polar_panel(
                 if stored_pol.get("ok"):
                     if stored_pol.get("fallback_used"):
                         st.info(
-                            "Diagnóstico generado con modelo de respaldo "
+                            "Diagnostic generated with the fallback model "
                             "(Haiku 4.5)."
                         )
                     st.markdown(stored_pol.get("markdown", ""))
@@ -2768,20 +2760,20 @@ def render_polar_panel(
                         + stored_pol.get("output_tokens", 0) * out_p_pol
                     ) / 1_000_000
                     fallback_tag_pol = (
-                        " · modelo de respaldo"
+                        " · fallback model"
                         if stored_pol.get("fallback_used") else ""
                     )
                     st.caption(
-                        f"Modelo: `{model_used_pol}` · "
+                        f"Model: `{model_used_pol}` · "
                         f"Tokens: {stored_pol.get('input_tokens', 0)} → "
                         f"{stored_pol.get('output_tokens', 0)} · "
-                        f"Costo: ~${cost_usd_pol:.4f} · "
-                        f"{'(cacheado)' if stored_pol.get('cached') else '(generado nuevo)'}"
+                        f"Cost: ~${cost_usd_pol:.4f} · "
+                        f"{'(cached)' if stored_pol.get('cached') else '(newly generated)'}"
                         f"{fallback_tag_pol}"
                     )
                 else:
                     st.error(
-                        stored_pol.get("markdown", "Error al generar diagnóstico AI.")
+                        stored_pol.get("markdown", "Error generating the AI diagnostic.")
                     )
 
     # Helper para construir el bloque AI cuando se envía a reporte
@@ -2794,26 +2786,26 @@ def render_polar_panel(
         ai_md_local = str(ai_stored_local.get("markdown", "")).strip()
         if not ai_md_local:
             return None
-        quant_lines_pol: List[str] = ["Parámetro|Valor"]
+        quant_lines_pol: List[str] = ["Parameter|Value"]
         if operating_rpm:
             quant_lines_pol.append(
-                f"Velocidad operativa|{float(operating_rpm):.0f} RPM"
+                f"Operating speed|{float(operating_rpm):.0f} RPM"
             )
         _max_amp = float(polar_diag.get("max_amp", 0.0) or 0.0)
         if _max_amp > 0:
             quant_lines_pol.append(
-                f"Amplitud máxima|{_max_amp:.3f} {amp_unit}".strip()
+                f"Peak amplitude|{_max_amp:.3f} {amp_unit}".strip()
             )
         _score = float(polar_diag.get("score", 0.0) or 0.0)
         if _score > 0:
             quant_lines_pol.append(f"Health score|{_score:.1f}")
         _candidates = int(polar_diag.get("candidate_count", 0) or 0)
-        quant_lines_pol.append(f"Velocidades críticas detectadas|{_candidates}")
+        quant_lines_pol.append(f"Detected critical speeds|{_candidates}")
         if semaforo_status:
-            quant_lines_pol.append(f"Semáforo|{semaforo_status}")
+            quant_lines_pol.append(f"Status|{semaforo_status}")
         _pt = str(meta.get("Point Name", "") or "").strip()
         if _pt:
-            quant_lines_pol.append(f"Punto de medición|{_pt}")
+            quant_lines_pol.append(f"Measurement point|{_pt}")
         return (
             "<<<WM_AI_BLOCK>>>\n"
             + "\n".join(quant_lines_pol)
@@ -2872,12 +2864,12 @@ def main() -> None:
         col1, col2 = st.columns(2)
         with col1:
             if active_polar_files:
-                st.caption(f"Archivos Polar activos: {len(active_polar_files)}")
+                st.caption(f"Active Polar files: {len(active_polar_files)}")
             else:
-                st.caption("No hay archivos Polar cargados")
+                st.caption("No Polar files loaded")
 
         with col2:
-            if st.button("Limpiar archivos Polar", key="wm_polar_clear_files_btn"):
+            if st.button("Clear Polar files", key="wm_polar_clear_files_btn"):
                 clear_polar_persisted_files()
                 st.rerun()
 
@@ -2885,8 +2877,8 @@ def main() -> None:
 
     if not uploaded_files:
         panel_card(
-            title="Carga archivos para comenzar",
-            subtitle="Sube uno o varios archivos CSV Polar desde el panel izquierdo.",
+            title="Load files to begin",
+            subtitle="Upload one or more Polar CSV files from the left panel.",
             meta_html="",
             chips=[],
         )
@@ -2896,10 +2888,10 @@ def main() -> None:
 
     if failed_items:
         for file_name, error_text in failed_items:
-            st.warning(f"No pude leer {file_name}: {error_text}")
+            st.warning(f"Could not read {file_name}: {error_text}")
 
     if not parsed_items:
-        st.error("No se pudo cargar ningún archivo Polar válido.")
+        st.error("No valid Polar file could be loaded.")
         return
 
     id_to_item = {item["id"]: item for item in parsed_items}
@@ -3125,7 +3117,7 @@ def main() -> None:
 
     with st.sidebar:
         st.markdown("---")
-        st.markdown("### 📚 Histórico Polar")
+        st.markdown("### 📚 Polar History")
 
         try:
             from core.polar_history import (
@@ -3141,7 +3133,7 @@ def main() -> None:
             _polar_hist_ok = True
         except Exception as _hist_e:
             _polar_hist_ok = False
-            st.caption(f"_(Histórico Polar no disponible: {_hist_e})_")
+            st.caption(f"_(Polar history not available: {_hist_e})_")
 
         if _polar_hist_ok and _polar_inst_id:
             # Ciclo 17.34 (v3.31.240) — sensor isolation. Si UN solo
@@ -3158,46 +3150,46 @@ def main() -> None:
                 sensor_id=_polar_filter_sensor,
             )
             _polar_filter_hint = (
-                f" (filtrado por sensor **{_polar_filter_sensor}**)"
+                f" (filtered by sensor **{_polar_filter_sensor}**)"
                 if _polar_filter_sensor else ""
             )
             st.caption(
-                f"{len(_polar_existing_snaps)} snapshot(s) Polar guardado(s) "
-                f"para esta unidad{_polar_filter_hint}."
+                f"{len(_polar_existing_snaps)} Polar snapshot(s) saved "
+                f"for this unit{_polar_filter_hint}."
             )
 
             if not _polar_curr_readings:
                 if not _polar_sensors_map:
                     st.caption(
-                        "_(No hay Sensor Map configurado para esta instancia. "
-                        "Andá a Machinery Library a configurarlo.)_"
+                        "_(No Sensor Map configured for this instance. "
+                        "Go to Machinery Library to set it up.)_"
                     )
                 else:
                     st.caption(
-                        "_(Ningún CSV Polar cargado matchea sensores del "
-                        "Sensor Map de esta instancia.)_"
+                        "_(No loaded Polar CSV matches sensors in this "
+                        "instance's Sensor Map.)_"
                     )
             else:
-                with st.expander("📸 Guardar snapshot Polar actual", expanded=False):
+                with st.expander("📸 Save current Polar snapshot", expanded=False):
                     st.caption(
-                        f"Captura el 1X amp + fase a {operating_rpm:.0f} rpm "
-                        f"para {len(_polar_curr_readings)} sensor(es) matched."
+                        f"Captures 1X amp + phase at {operating_rpm:.0f} rpm "
+                        f"for {len(_polar_curr_readings)} matched sensor(s)."
                     )
                     _polar_snap_label = st.text_input(
-                        "Etiqueta de la corrida",
+                        "Run label",
                         value="",
-                        placeholder="Ej. Coastdown abril 27",
+                        placeholder="e.g. Coastdown Apr 27",
                         key=f"wm_polar_snap_label_{_polar_inst_id}",
                     )
                     _polar_snap_notes = st.text_area(
-                        "Observaciones (opcional)",
+                        "Notes (optional)",
                         value="",
-                        placeholder="Velocidad operativa, condición, evento.",
+                        placeholder="Operating speed, condition, event.",
                         key=f"wm_polar_snap_notes_{_polar_inst_id}",
                         height=70,
                     )
                     if st.button(
-                        "Guardar snapshot Polar",
+                        "Save Polar snapshot",
                         type="primary",
                         width="stretch",
                         key=f"wm_polar_snap_save_{_polar_inst_id}",
@@ -3211,12 +3203,12 @@ def main() -> None:
                                 notes=_polar_snap_notes,
                             )
                             st.success(
-                                f"✓ Snapshot Polar guardado: {sid} "
-                                f"({len(_polar_curr_readings)} sensores)"
+                                f"✓ Polar snapshot saved: {sid} "
+                                f"({len(_polar_curr_readings)} sensors)"
                             )
                             st.rerun()
                         except Exception as _e:
-                            st.error(f"No se pudo guardar: {_e}")
+                            st.error(f"Could not save: {_e}")
 
             # Selector de comparación — Ciclo 17.1.1 multi-select
             # Permite 0 snapshots (solo corrida actual), 1 (vs una corrida
@@ -3244,7 +3236,7 @@ def main() -> None:
                                 )
                         except Exception:
                             pass
-                    _suffix = " · (corrida actual)" if _is_current else ""
+                    _suffix = " · (current run)" if _is_current else ""
                     _opspeed = s.get("operating_speed_rpm")
                     _opspeed_str = f" @ {_opspeed:.0f}rpm" if _opspeed else ""
                     _lbl = (f"{s['corrida_label'][:28]}{_opspeed_str} "
@@ -3267,15 +3259,15 @@ def main() -> None:
                         l for l in _saved if l in _polar_opt_lbls
                     ]
                 _picked = st.multiselect(
-                    "Corridas a superponer en el polar",
+                    "Runs to overlay on the polar",
                     options=_polar_opt_lbls,
                     default=_polar_default_pick,
                     key=f"wm_polar_cmp_multi_{_polar_inst_id}",
                     help=(
-                        "Elegí 0 corridas para ver solo la actual, 1 para "
-                        "comparativo simple, o varias para superposición "
-                        "histórica con gradiente cronológico (más viejas "
-                        "más claritas, más recientes más oscuras)."
+                        "Pick 0 runs to see only the current one, 1 for a "
+                        "simple comparison, or several for a historical "
+                        "overlay with a chronological gradient (older ones "
+                        "lighter, more recent ones darker)."
                     ),
                 )
                 st.session_state[_polar_cmp_state_key] = _picked
@@ -3283,11 +3275,11 @@ def main() -> None:
                     _polar_lbl_to_key[l] for l in _picked if l in _polar_lbl_to_key
                 ]
                 if not _selected_polar_cmp_ids:
-                    st.caption("_Solo se mostrará la corrida actual._")
+                    st.caption("_Only the current run will be shown._")
                 else:
                     st.caption(
-                        f"Se superpondrán **{len(_selected_polar_cmp_ids)}** "
-                        f"corrida(s) anterior(es) sobre la actual."
+                        f"**{len(_selected_polar_cmp_ids)}** previous "
+                        f"run(s) will be overlaid on the current one."
                     )
 
             # Lista de snapshots con borrar + indicador de trayectoria
@@ -3311,23 +3303,23 @@ def main() -> None:
 
                 if _legacy_count > 0:
                     st.warning(
-                        f"{_legacy_count} snapshot(s) viejos sin "
-                        f"trayectoria completa — solo muestran el operating "
-                        f"point en el polar. Para ver el loop completo, "
-                        f"resnapshoteá cargando esa corrida y volviendo a "
-                        f"guardar."
+                        f"{_legacy_count} old snapshot(s) without a "
+                        f"full trajectory — they only show the operating "
+                        f"point on the polar. To see the full loop, "
+                        f"re-snapshot by loading that run and saving "
+                        f"again."
                     )
 
-                with st.expander(f"️ Gestionar snapshots Polar ({len(_polar_existing_snaps)})"):
+                with st.expander(f"️ Manage Polar snapshots ({len(_polar_existing_snaps)})"):
                     if _legacy_count > 0:
                         if st.button(
-                            f"🧹 Borrar los {_legacy_count} snapshot(s) sin trayectoria",
+                            f"🧹 Delete the {_legacy_count} snapshot(s) without trajectory",
                             key=f"wm_polar_del_legacy_{_polar_inst_id}",
                             help=(
-                                "Borra todos los snapshots que se guardaron "
-                                "antes del Ciclo 17.1.2 (sin trail completo). "
-                                "Los snapshots actuales con trayectoria NO se "
-                                "tocan."
+                                "Deletes all snapshots saved before "
+                                "Cycle 17.1.2 (without a full trail). "
+                                "Current snapshots with a trajectory are "
+                                "NOT touched."
                             ),
                         ):
                             _deleted = 0
@@ -3336,10 +3328,10 @@ def main() -> None:
                                     if delete_polar_snapshot(_polar_inst_id, s["snapshot_id"]):
                                         _deleted += 1
                             st.success(
-                                f"✓ {_deleted} snapshot(s) viejos borrados. "
-                                f"Cargá las corridas y guardá snapshots "
-                                f"nuevos para reconstruir el histórico con "
-                                f"trayectoria."
+                                f"✓ {_deleted} old snapshot(s) deleted. "
+                                f"Load the runs and save new snapshots "
+                                f"to rebuild the history with a "
+                                f"trajectory."
                             )
                             st.rerun()
                         st.markdown("---")
@@ -3348,21 +3340,21 @@ def main() -> None:
                         cols_h = st.columns([4, 1])
                         _has_traj = _snap_has_trail.get(s["snapshot_id"], False)
                         _traj_chip = (
-                            "con trayectoria" if _has_traj
-                            else "solo punto Op (legacy)"
+                            "with trajectory" if _has_traj
+                            else "operating point only (legacy)"
                         )
                         cols_h[0].markdown(
                             f"**{s['corrida_label'][:30]}** · {_traj_chip}  \n"
-                            f"_{s['timestamp']} · {s['n_sensors']} sensores · "
+                            f"_{s['timestamp']} · {s['n_sensors']} sensors · "
                             f"{s.get('operating_speed_rpm', 0):.0f} rpm_"
                         )
                         if cols_h[1].button(
                             "️",
                             key=f"wm_polar_del_{s['snapshot_id']}",
-                            help="Borrar este snapshot",
+                            help="Delete this snapshot",
                         ):
                             if delete_polar_snapshot(_polar_inst_id, s["snapshot_id"]):
-                                st.success("Borrado.")
+                                st.success("Deleted.")
                                 st.rerun()
 
             # Persistir los snapshot ids elegidos (lista) para que el
@@ -3376,11 +3368,11 @@ def main() -> None:
             st.session_state["wm_polar_compare_inst_id"] = _polar_inst_id
         elif _polar_hist_ok and not _polar_inst_id:
             st.caption(
-                "_(Activá una Asset Instance arriba para guardar histórico.)_"
+                "_(Activate an Asset Instance above to save history.)_"
             )
 
     if not selected_ids:
-        st.info("Selecciona uno o más polares en la barra lateral.")
+        st.info("Select one or more polars in the sidebar.")
         return
 
     selected_items = [id_to_item[sid] for sid in selected_ids]
@@ -3426,14 +3418,14 @@ def main() -> None:
                     if _prev is None:
                         _cmp_rows.append({
                             "Sensor": _lbl,
-                            "vs Corrida": f"{_snap_label_short} ({_snap_ts})",
-                            "Anterior amp": "—",
-                            "Actual amp": f"{r['amp_at_op']:.3f} {r['amp_unit']}",
+                            "vs Run": f"{_snap_label_short} ({_snap_ts})",
+                            "Previous amp": "—",
+                            "Current amp": f"{r['amp_at_op']:.3f} {r['amp_unit']}",
                             "Δ amp": "—",
-                            "Anterior fase": "—",
-                            "Actual fase": f"{r['phase_at_op']:.1f}°",
-                            "Δ fase": "—",
-                            "Diagnóstico": "Sin lectura previa para este sensor",
+                            "Previous phase": "—",
+                            "Current phase": f"{r['phase_at_op']:.1f}°",
+                            "Δ phase": "—",
+                            "Diagnostic": "No previous reading for this sensor",
                         })
                         continue
                     _prev_amp = float(_prev.get("amp_at_op", 0))
@@ -3446,16 +3438,16 @@ def main() -> None:
 
                     _diag_parts = []
                     if _phase_class == "shift_critical":
-                        _diag_parts.append("Shift fase crítico (>60°)")
+                        _diag_parts.append("Critical phase shift (>60°)")
                     elif _phase_class == "shift_major":
-                        _diag_parts.append("Shift fase mayor (≥30°)")
+                        _diag_parts.append("Major phase shift (≥30°)")
                     elif _phase_class == "shift_minor":
-                        _diag_parts.append("Shift fase menor (10–30°)")
+                        _diag_parts.append("Minor phase shift (10–30°)")
                     elif _phase_class == "stable":
-                        _diag_parts.append("Fase estable (<10°)")
+                        _diag_parts.append("Stable phase (<10°)")
                     if _delta_amp_pct is not None:
                         if _amp_class in ("amp_critical", "amp_high"):
-                            _diag_parts.append(f"Amp {_delta_amp_pct:+.0f}% (alza)")
+                            _diag_parts.append(f"Amp {_delta_amp_pct:+.0f}% (rising)")
                         elif _amp_class == "amp_up":
                             _diag_parts.append(f"Amp {_delta_amp_pct:+.0f}%")
                         elif _amp_class in ("amp_down_strong", "amp_down"):
@@ -3463,41 +3455,41 @@ def main() -> None:
 
                     _cmp_rows.append({
                         "Sensor": _lbl,
-                        "vs Corrida": f"{_snap_label_short} ({_snap_ts})",
-                        "Anterior amp": f"{_prev_amp:.3f} {r['amp_unit']}",
-                        "Actual amp": f"{r['amp_at_op']:.3f} {r['amp_unit']}",
+                        "vs Run": f"{_snap_label_short} ({_snap_ts})",
+                        "Previous amp": f"{_prev_amp:.3f} {r['amp_unit']}",
+                        "Current amp": f"{r['amp_at_op']:.3f} {r['amp_unit']}",
                         "Δ amp": (
                             f"{_delta_amp:+.3f} ({_delta_amp_pct:+.1f}%)"
                             if _delta_amp_pct is not None else "—"
                         ),
-                        "Anterior fase": f"{_prev_phase:.1f}°",
-                        "Actual fase": f"{r['phase_at_op']:.1f}°",
-                        "Δ fase": f"{_delta_phase:+.1f}°",
-                        "Diagnóstico": " · ".join(_diag_parts) if _diag_parts else "—",
+                        "Previous phase": f"{_prev_phase:.1f}°",
+                        "Current phase": f"{r['phase_at_op']:.1f}°",
+                        "Δ phase": f"{_delta_phase:+.1f}°",
+                        "Diagnostic": " · ".join(_diag_parts) if _diag_parts else "—",
                     })
 
             if _cmp_rows:
-                st.markdown("### Comparativo Polar — vs corridas anteriores")
+                st.markdown("### Polar comparison — vs previous runs")
                 _n_snaps = len(_snap_meta_by_id)
                 if _n_snaps == 1:
                     _only = list(_snap_meta_by_id.values())[0]
                     st.caption(
-                        f"Comparando contra **{_only.get('corrida_label', '')}** "
-                        f"del {_only.get('timestamp', '')[:10]}. Shift de fase "
-                        f"1X >30° es síntoma diagnóstico de cambio de balance "
-                        f"del rotor (API 684 / ISO 21940-12)."
+                        f"Comparing against **{_only.get('corrida_label', '')}** "
+                        f"from {_only.get('timestamp', '')[:10]}. A 1X phase "
+                        f"shift >30° is a diagnostic symptom of a rotor "
+                        f"balance change (API 684 / ISO 21940-12)."
                     )
                 else:
                     st.caption(
-                        f"Mostrando comparativo contra **{_n_snaps} corridas "
-                        f"anteriores**. Cada fila es una combinación "
-                        f"(sensor × corrida). Shift de fase 1X >30° = "
-                        f"síntoma de cambio de balance (API 684)."
+                        f"Showing a comparison against **{_n_snaps} previous "
+                        f"runs**. Each row is a (sensor × run) combination. "
+                        f"A 1X phase shift >30° = symptom of a balance "
+                        f"change (API 684)."
                     )
                 _cmp_disp = pd.DataFrame(_cmp_rows)
                 st.dataframe(_cmp_disp, width="stretch", hide_index=True)
         except Exception as _polar_cmp_e:
-            st.caption(f"_(Comparativo Polar no disponible: {_polar_cmp_e})_")
+            st.caption(f"_(Polar comparison not available: {_polar_cmp_e})_")
 
     for panel_index, item in enumerate(selected_items):
         render_polar_panel(

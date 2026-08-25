@@ -62,8 +62,8 @@ _user_role = (_user.get("role") or "").strip().lower()
 
 if _user_role not in ("admin", "specialist"):
     st.error(
-        "Acceso restringido. El Briefing Mensual está disponible "
-        "para roles **admin** y **specialist**."
+        "Restricted access. The Monthly Briefing is available "
+        "to **admin** and **specialist** roles."
     )
     st.stop()
 
@@ -79,15 +79,15 @@ st.markdown(
                 color:#f1f5f9; margin-bottom:16px;'>
         <div style='font-size:0.95rem; font-weight:600; letter-spacing:0.04em;
                     text-transform:uppercase; color:#cbd5e1;'>
-            Watermelon System · Briefing Ejecutivo
+            Watermelon System · Executive Briefing
         </div>
         <div style='font-size:1.6rem; font-weight:700; margin-top:4px;'>
-            Briefing mensual al VP de Operaciones del cliente
+            Monthly briefing for the client's VP of Operations
         </div>
         <div style='font-size:0.95rem; color:#cbd5e1; margin-top:6px;'>
-            PDF de 1 página con el estado consolidado del portafolio
-            del cliente, listo para enviar por email al C-level
-            decisor que no se loguea al sistema.
+            One-page PDF with the consolidated status of the client's
+            asset portfolio, ready to email to the C-level decision
+            maker who does not log in to the system.
         </div>
     </div>
     """,
@@ -96,8 +96,8 @@ st.markdown(
 
 if not is_ai_available():
     st.warning(
-        "**AI no disponible.** Falta configurar `[anthropic] api_key` "
-        "en los secrets. El briefing requiere Claude para sintetizar."
+        "**AI unavailable.** `[anthropic] api_key` is not configured "
+        "in the secrets. The briefing requires Claude to synthesize."
     )
     st.stop()
 
@@ -138,9 +138,9 @@ _clients = _discover_clients(_user_email, _user_role)
 
 if not _clients:
     st.info(
-        "No hay clientes con reportes archivados en el sistema. "
-        "Cuando se archiven reportes desde Reports → Archivar reporte, "
-        "el cliente aparecerá acá."
+        "There are no clients with archived reports in the system. "
+        "Once reports are archived from Reports → Archive report, "
+        "the client will appear here."
     )
     st.stop()
 
@@ -149,16 +149,16 @@ if not _clients:
 # FORMULARIO DE SELECCIÓN
 # =============================================================
 
-st.markdown("### 1. Configuración del briefing")
+st.markdown("### 1. Briefing configuration")
 
 _form_cols = st.columns([2.5, 1.5, 1.5])
 
 with _form_cols[0]:
     selected_client = st.selectbox(
-        "Cliente",
+        "Client",
         options=_clients,
         key="wm_brief_client",
-        help="Elegí el cliente sobre el que querés generar el briefing.",
+        help="Choose the client you want to generate the briefing for.",
     )
 
 with _form_cols[1]:
@@ -182,22 +182,22 @@ with _form_cols[1]:
     if default_iso not in months_options:
         months_options.insert(0, default_iso)
     selected_month = st.selectbox(
-        "Mes a cubrir",
+        "Month to cover",
         options=months_options,
         index=months_options.index(default_iso) if default_iso in months_options else 0,
         format_func=lambda x: _format_month_es(x),
         key="wm_brief_month",
         help=(
-            "Por default es el mes anterior completo. El briefing "
-            "cubre todos los reportes archivados del cliente en el "
-            "rango del mes seleccionado."
+            "Defaults to the full previous month. The briefing "
+            "covers all of the client's archived reports within "
+            "the selected month's range."
         ),
     )
 
 with _form_cols[2]:
     st.caption("&nbsp;", unsafe_allow_html=True)  # spacer alineación
     generate_clicked = st.button(
-        "Generar briefing",
+        "Generate briefing",
         type="primary",
         use_container_width=True,
         key="wm_brief_generate_btn",
@@ -210,8 +210,8 @@ with _form_cols[2]:
 
 if generate_clicked:
     with st.spinner(
-        "Claude leyendo todos los reportes del mes y "
-        "sintetizando el briefing ejecutivo... (10-30 seg)"
+        "Claude reading all of the month's reports and "
+        "synthesizing the executive briefing... (10-30 sec)"
     ):
         try:
             _brief_res = generate_monthly_briefing(
@@ -225,7 +225,7 @@ if generate_clicked:
             _brief_res = {
                 "ok": False,
                 "markdown": (
-                    f"_Error inesperado:_\n\n```\n"
+                    f"_Unexpected error:_\n\n```\n"
                     f"{type(exc).__name__}: {exc}\n```"
                 ),
                 "asset_aggregates": [],
@@ -250,15 +250,15 @@ if generate_clicked:
 _stored = st.session_state.get("wm_brief_result")
 if _stored is None:
     st.info(
-        "Configurá el cliente y el mes arriba, después dale a "
-        "**Generar briefing**. Claude va a leer todos los reportes "
-        "archivados del periodo y redactar la síntesis ejecutiva."
+        "Set the client and month above, then click "
+        "**Generate briefing**. Claude will read all of the period's "
+        "archived reports and write the executive synthesis."
     )
     st.stop()
 
 if not _stored.get("ok"):
-    st.error(_stored.get("markdown", "Error al generar el briefing."))
-    if st.button("Reintentar"):
+    st.error(_stored.get("markdown", "Failed to generate the briefing."))
+    if st.button("Retry"):
         st.session_state["wm_brief_result"] = None
         st.session_state["wm_brief_pdf_bytes"] = None
         st.rerun()
@@ -269,12 +269,12 @@ if not _stored.get("ok"):
 # Preview en pantalla
 # =============================================================
 
-st.markdown("### 2. Preview del briefing")
+st.markdown("### 2. Briefing preview")
 
 if _stored.get("fallback_used"):
     st.info(
-        "Briefing generado con modelo de respaldo (Haiku 4.5). "
-        "Calidad ligeramente menor."
+        "Briefing generated with the fallback model (Haiku 4.5). "
+        "Slightly lower quality."
     )
 
 # Caption con metadata de la consulta
@@ -285,9 +285,9 @@ _in_tok = _stored.get("input_tokens", 0)
 _out_tok = _stored.get("output_tokens", 0)
 _model_used = _stored.get("model", "")
 st.caption(
-    f"{_n_reports} reportes · {_n_assets} activos · "
-    f"Modelo: `{_model_used}` · Tokens: {_in_tok:,} → {_out_tok:,} · "
-    f"Costo: ~${_cost:.4f}"
+    f"{_n_reports} reports · {_n_assets} assets · "
+    f"Model: `{_model_used}` · Tokens: {_in_tok:,} → {_out_tok:,} · "
+    f"Cost: ~${_cost:.4f}"
 )
 
 # Render del markdown del AI
@@ -297,7 +297,7 @@ with st.container(border=True):
 # Tabla de activos (vista rápida)
 _aggs = _stored.get("asset_aggregates", []) or []
 if _aggs:
-    with st.expander(f"Estado por activo ({len(_aggs)} activos)", expanded=False):
+    with st.expander(f"Status by asset ({len(_aggs)} assets)", expanded=False):
         for ag in _aggs:
             sev = ag.get("latest_severity", "—")
             color = SEVERITY_COLORS.get(sev, "#475569")
@@ -306,7 +306,7 @@ if _aggs:
                 f"background:#f8fafc; border-left:4px solid {color}; "
                 f"margin-bottom:5px;'>"
                 f"<b>{ag.get('asset_blob') or ag.get('instance_tag') or '—'}</b> "
-                f"· {ag.get('n_reports_in_month', 0)} reporte(s) en el mes · "
+                f"· {ag.get('n_reports_in_month', 0)} report(s) in the month · "
                 f"<span style='color:{color}; font-weight:bold;'>{sev}</span>"
                 f"</div>",
                 unsafe_allow_html=True,
@@ -317,24 +317,24 @@ if _aggs:
 # Generar PDF (lazy)
 # =============================================================
 
-st.markdown("### 3. Descargar o enviar")
+st.markdown("### 3. Download or send")
 
 _pdf_cols = st.columns([1.5, 1.5, 4])
 
 with _pdf_cols[0]:
     if st.button(
-        "Generar PDF",
+        "Generate PDF",
         use_container_width=True,
         key="wm_brief_pdf_btn",
         type="secondary",
     ):
-        with st.spinner("Generando PDF..."):
+        with st.spinner("Generating PDF..."):
             try:
                 _pdf_bytes = generate_monthly_briefing_pdf(_stored)
                 st.session_state["wm_brief_pdf_bytes"] = _pdf_bytes
-                st.success(f"PDF generado ({len(_pdf_bytes) // 1024} KB)")
+                st.success(f"PDF generated ({len(_pdf_bytes) // 1024} KB)")
             except Exception as exc:
-                st.error(f"Error generando PDF: {exc}")
+                st.error(f"Error generating PDF: {exc}")
 
 _pdf_bytes_cached = st.session_state.get("wm_brief_pdf_bytes")
 
@@ -346,7 +346,7 @@ with _pdf_cols[1]:
         )
         _fname = f"briefing_{_safe_client}_{selected_month}.pdf"
         st.download_button(
-            "Descargar PDF",
+            "Download PDF",
             data=_pdf_bytes_cached,
             file_name=_fname,
             mime="application/pdf",
@@ -356,10 +356,10 @@ with _pdf_cols[1]:
         )
     else:
         st.button(
-            "Descargar PDF",
+            "Download PDF",
             disabled=True,
             use_container_width=True,
-            help="Generá el PDF primero.",
+            help="Generate the PDF first.",
         )
 
 
@@ -368,30 +368,30 @@ with _pdf_cols[1]:
 # =============================================================
 
 st.markdown("---")
-st.markdown("### 4. Enviar por email al cliente")
+st.markdown("### 4. Send to client via email")
 
 _email_status = get_email_backend_status()
 if not _email_status.get("configured"):
     st.warning(
-        f"📧 **Email no configurado.** {_email_status.get('details', '')}\n\n"
-        "Para enviar briefings por email, configurá Microsoft Graph "
-        "o SMTP en los secrets de Streamlit Cloud (sección `[email]`)."
+        f"📧 **Email not configured.** {_email_status.get('details', '')}\n\n"
+        "To send briefings by email, configure Microsoft Graph "
+        "or SMTP in the Streamlit Cloud secrets (`[email]` section)."
     )
 else:
     st.caption(
-        f"Backend de email configurado: **{_email_status.get('backend', 'N/A')}**"
+        f"Configured email backend: **{_email_status.get('backend', 'N/A')}**"
     )
 
     _email_cols = st.columns([3, 1.5])
     with _email_cols[0]:
         recipients_input = st.text_input(
-            "Destinatarios (separados por coma)",
+            "Recipients (comma-separated)",
             value="",
-            placeholder="vp.operaciones@cliente.com, gerente.mantenimiento@cliente.com",
+            placeholder="vp.operations@client.com, maintenance.manager@client.com",
             key="wm_brief_recipients",
             help=(
-                "Lista de emails separados por coma. Cada destinatario "
-                "recibe un email individual con el PDF adjunto."
+                "Comma-separated list of emails. Each recipient "
+                "receives an individual email with the PDF attached."
             ),
         )
     with _email_cols[1]:
@@ -403,11 +403,11 @@ else:
         )
         send_help = None
         if not _pdf_bytes_cached:
-            send_help = "Generá el PDF primero."
+            send_help = "Generate the PDF first."
         elif not recipients_input.strip():
-            send_help = "Agregá al menos un destinatario."
+            send_help = "Add at least one recipient."
         send_clicked = st.button(
-            "Enviar email",
+            "Send email",
             use_container_width=True,
             disabled=send_disabled,
             help=send_help,
@@ -424,11 +424,11 @@ else:
 
         if invalid_recipients:
             st.warning(
-                f"Emails inválidos ignorados: {', '.join(invalid_recipients)}"
+                f"Invalid emails ignored: {', '.join(invalid_recipients)}"
             )
 
         if not valid_recipients:
-            st.error("No hay destinatarios válidos.")
+            st.error("No valid recipients.")
         else:
             month_label = _format_month_es(selected_month)
             subject = f"Executive Briefing — {selected_client} · {month_label}"
@@ -495,7 +495,7 @@ SIGA SAS
             sent_ok = 0
             sent_fail = 0
             with st.spinner(
-                f"Enviando a {len(valid_recipients)} destinatario(s)..."
+                f"Sending to {len(valid_recipients)} recipient(s)..."
             ):
                 for recipient in valid_recipients:
                     res = send_email(
@@ -514,18 +514,18 @@ SIGA SAS
                     else:
                         sent_fail += 1
                         st.error(
-                            f"Falló envío a {recipient}: {res.get('error', '')}"
+                            f"Failed to send to {recipient}: {res.get('error', '')}"
                         )
 
             if sent_ok > 0:
                 st.success(
-                    f"Enviado a {sent_ok} destinatario(s) "
-                    f"vía {_email_status.get('backend', 'N/A')}."
+                    f"Sent to {sent_ok} recipient(s) "
+                    f"via {_email_status.get('backend', 'N/A')}."
                 )
             if sent_fail > 0:
                 st.warning(
-                    f"{sent_fail} envío(s) fallaron. Revisá los "
-                    f"errores arriba y reintentá."
+                    f"{sent_fail} send(s) failed. Check the "
+                    f"errors above and retry."
                 )
 
 
@@ -535,7 +535,7 @@ SIGA SAS
 
 st.markdown("---")
 st.caption(
-    "Para automatizar el envío mensual (día 1 de cada mes), se "
-    "puede configurar un cron job que llame al endpoint de generación "
-    "y envío. Por ahora el envío es manual desde esta página."
+    "To automate the monthly send (on the 1st of each month), you "
+    "can configure a cron job that calls the generation and send "
+    "endpoint. For now, sending is manual from this page."
 )

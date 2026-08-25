@@ -77,9 +77,9 @@ _build_severity_table = _shared_build_severity_table
 page_header(
     title="Machine Map",
     subtitle=(
-        "Mapa visual de severidad por sensor sobre el tren acoplado. "
-        "Cada sonda se colorea según el estado actual de su medición "
-        "contra los setpoints individuales del Sensor Map."
+        "Visual severity map per sensor across the coupled train. "
+        "Each probe is colored according to the current state of its measurement "
+        "against the individual setpoints of the Sensor Map."
     ),
 )
 
@@ -92,16 +92,16 @@ _active_instance = get_instance(_active_id) if _active_id else None
 
 if _active_instance is None:
     st.error(
-        "🚨 **No hay máquina activa.** Andá a Machinery Library, "
-        "activá un activo y volvé acá."
+        "🚨 **No active machine.** Go to Machinery Library, "
+        "activate an asset and come back here."
     )
     st.stop()
 
 if not _active_instance.sensors:
     st.warning(
-        "El activo activo no tiene **Sensor Map** configurado. "
-        "Andá a Machinery Library → sección 'Mapa de Sensores' → "
-        "'Generar mapa estándar' para configurarlo."
+        "The active asset has no **Sensor Map** configured. "
+        "Go to Machinery Library → 'Sensor Map' section → "
+        "'Generate standard map' to configure it."
     )
     st.stop()
 
@@ -121,11 +121,11 @@ with st.container(border=True):
     with bcols[1]:
         _tag = _active_instance.tag or _active_instance.instance_id
         st.markdown(f"### 🟢 Machine Map · **{_tag}**")
-        st.caption(compose_train_description(_active_instance) or "(sin descripción)")
+        st.caption(compose_train_description(_active_instance) or "(no description)")
         st.caption(
-            f"Sensor Map: **{len(_active_instance.sensors)} sensores configurados** · "
-            f"Cliente: {_active_instance.client or '—'} · "
-            f"Sitio: {_active_instance.site or _active_instance.location or '—'}"
+            f"Sensor Map: **{len(_active_instance.sensors)} sensors configured** · "
+            f"Client: {_active_instance.client or '—'} · "
+            f"Site: {_active_instance.site or _active_instance.location or '—'}"
         )
 
 # Construir tabla de severidad usando los signals cargados
@@ -133,9 +133,9 @@ signals = st.session_state.get("signals", {}) or {}
 
 if not signals:
     st.info(
-        "ℹ️ No hay señales cargadas en sesión. Andá a **Load Data** "
-        "para cargar CSVs y volvé al Machine Map. Los marcadores van a "
-        "aparecer en gris (Sin datos) hasta entonces."
+        "ℹ️ No signals loaded in session. Go to **Load Data** "
+        "to load CSVs and come back to the Machine Map. Markers will "
+        "appear gray (No data) until then."
     )
 
 df_severity = _build_severity_table(_active_instance.sensors, signals)
@@ -149,13 +149,13 @@ n_danger = _counts["danger"]
 n_nodata = _counts["no_data"]
 
 cols_summary = st.columns(4)
-cols_summary[0].metric("✅ CONDICIÓN ACEPTABLE", f"{n_normal}", f"de {total}")
-cols_summary[1].metric("⚠️ ATENCIÓN", f"{n_alarm}", f"de {total}")
-cols_summary[2].metric("🚨 ACCIÓN REQUERIDA", f"{n_danger}", f"de {total}")
-cols_summary[3].metric("◌ Sin datos", f"{n_nodata}", f"de {total}")
+cols_summary[0].metric("✅ ACCEPTABLE CONDITION", f"{n_normal}", f"of {total}")
+cols_summary[1].metric("⚠️ ATTENTION", f"{n_alarm}", f"of {total}")
+cols_summary[2].metric("🚨 ACTION REQUIRED", f"{n_danger}", f"of {total}")
+cols_summary[3].metric("◌ No data", f"{n_nodata}", f"of {total}")
 
 # Diagrama con heatmap
-st.markdown("### 🎯 Heatmap de severidad por plano")
+st.markdown("### 🎯 Severity heatmap by plane")
 severity_by_label: Dict[str, str] = dict(
     zip(df_severity["Label"].astype(str), df_severity["Status"].astype(str))
 )
@@ -221,23 +221,23 @@ if _diag_png is None:
             driven_kind=_mm_dvn_kind,
         )
     except Exception as e:
-        st.warning(f"Error al renderizar diagrama: {e}")
+        st.warning(f"Error rendering diagram: {e}")
 
 if _diag_png:
     st.image(_diag_png, use_container_width=True)
     if _used_real_schematic:
         st.caption(
-            "Heatmap renderizado sobre el esquemático real del activo "
-            "(coordenadas configuradas en Machinery Library → Posicionar "
-            "sensores sobre el esquemático)."
+            "Heatmap rendered over the asset's real schematic "
+            "(coordinates configured in Machinery Library → Place "
+            "sensors on the schematic)."
         )
 else:
-    st.warning("No se pudo renderizar el diagrama.")
+    st.warning("Could not render the diagram.")
 
 # Drill-down: sensores con atención requerida
 critical_df = df_severity[df_severity["Status"].isin(["Alarm", "Danger"])].copy()
 if not critical_df.empty:
-    st.markdown("### 🚨 Sensores con atención requerida")
+    st.markdown("### 🚨 Sensors requiring attention")
     critical_display = critical_df[[
         "Label", "Plane Label", "Type", "Overall", "Alarm", "Danger",
         "Unit", "Status", "Source",
@@ -250,12 +250,12 @@ if not critical_df.empty:
 else:
     if total > 0 and n_nodata < total:
         st.success(
-            "✅ Todos los sensores con datos están en zona aceptable "
-            "(por debajo de Alarm)."
+            "✅ All sensors with data are in the acceptable zone "
+            "(below Alarm)."
         )
 
 # Tabla completa colapsada
-with st.expander(f"Tabla completa de sensores ({total} configurados)", expanded=False):
+with st.expander(f"Full sensor table ({total} configured)", expanded=False):
     full_display = df_severity[[
         "Label", "Plane", "Plane Label", "Type", "Family", "Unit",
         "Alarm", "Danger", "Overall", "Status", "Source",
@@ -285,9 +285,9 @@ with st.expander(f"Tabla completa de sensores ({total} configurados)", expanded=
 nodata_df = df_severity[df_severity["Status"] == "No Data"].copy()
 if not nodata_df.empty and signals:
     with st.expander(
-        f"🔍 Diagnóstico — por qué {len(nodata_df)} "
-        f"{'sensor aparece' if len(nodata_df) == 1 else 'sensores aparecen'} "
-        f"sin datos",
+        f"🔍 Diagnostics — why {len(nodata_df)} "
+        f"{'sensor shows' if len(nodata_df) == 1 else 'sensors show'} "
+        f"no data",
         expanded=False,
     ):
         # Recolectar Point names + variables + units de los signals en sesion
@@ -314,22 +314,22 @@ if not nodata_df.empty and signals:
 
         if not point_inventory:
             st.info(
-                "No hay signals con metadata disponible en sesión para "
-                "diagnosticar. Recargá los CSVs en Load Data."
+                "No signals with available metadata in session to "
+                "diagnose. Reload the CSVs in Load Data."
             )
         else:
             st.caption(
-                "El matcher empareja CSVs con sensores del Sensor Map "
-                "usando el `csv_match_pattern` del sensor contra el "
-                "Point name del CSV. La unidad del CSV también debe ser "
-                "compatible con la familia del sensor."
+                "The matcher pairs CSVs with Sensor Map sensors "
+                "using the sensor's `csv_match_pattern` against the "
+                "CSV Point name. The CSV unit must also be "
+                "compatible with the sensor's family."
             )
 
             inv_df = pd.DataFrame(point_inventory)
-            st.markdown("**Signals cargados en sesión:**")
+            st.markdown("**Signals loaded in session:**")
             st.dataframe(inv_df, use_container_width=True, hide_index=True)
 
-            st.markdown("**Sensores sin datos y patrones esperados:**")
+            st.markdown("**Sensors with no data and expected patterns:**")
 
             # Para cada sensor sin datos, mostrar patron + intento manual
             from core.sensor_map import resolve_sensor_for_point as _diag_resolve
@@ -369,12 +369,12 @@ if not nodata_df.empty and signals:
 
                 diag_rows.append({
                     "Sensor": sr["Label"],
-                    "Plano": sr["Plane Label"] or sr["Plane"],
-                    "Tipo": stype,
-                    "Unidad esperada": unit_native,
-                    "csv_match_pattern": pattern or "(vacío)",
-                    "¿Algún signal cargado matchea?": (
-                        f"✓ {hit_signal}" if hit_signal else "✗ ninguno"
+                    "Plane": sr["Plane Label"] or sr["Plane"],
+                    "Type": stype,
+                    "Expected unit": unit_native,
+                    "csv_match_pattern": pattern or "(empty)",
+                    "Any loaded signal matches?": (
+                        f"✓ {hit_signal}" if hit_signal else "✗ none"
                     ),
                 })
 
@@ -385,15 +385,15 @@ if not nodata_df.empty and signals:
             )
 
             st.info(
-                "💡 **Cómo solucionarlo:**\n\n"
-                "• Si tu CSV tiene Point name distinto al esperado, "
-                "edita el `csv_match_pattern` del sensor en "
-                "**Machinery Library → Mapa de Sensores** para que "
-                "matchee. Ejemplo: si el Point real es `VE5809`, "
-                "podés usar pattern `*5809*` o `VE58*`.\n\n"
-                "• Si tu CSV no está cargado, andá a **Load Data** "
-                "y subilo.\n\n"
-                "• Si el sensor es de proximidad pero el CSV está "
-                "en `g` o `in/s`, no es ese signal — tenés que cargar "
-                "el CSV en `mil pp` o `µm pp` que corresponde al sensor."
+                "💡 **How to fix it:**\n\n"
+                "• If your CSV has a Point name different from the expected one, "
+                "edit the sensor's `csv_match_pattern` in "
+                "**Machinery Library → Sensor Map** so it "
+                "matches. Example: if the real Point is `VE5809`, "
+                "you can use pattern `*5809*` or `VE58*`.\n\n"
+                "• If your CSV is not loaded, go to **Load Data** "
+                "and upload it.\n\n"
+                "• If the sensor is a proximity probe but the CSV is "
+                "in `g` or `in/s`, it is not that signal — you must load "
+                "the CSV in `mil pp` or `µm pp` matching the sensor."
             )

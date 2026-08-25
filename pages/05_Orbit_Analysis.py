@@ -68,7 +68,7 @@ if st.session_state.get("_loaded_from_snapshot"):
         """
         <script>
         (function() {
-          const HIDE_BUTTONS = ['Prepare PNG HD','Download PNG HD','Enviar a Reporte'];
+          const HIDE_BUTTONS = ['Prepare PNG HD','Download PNG HD','Send to Report'];
           function hideExports() {
             try {
               const doc = window.parent.document;
@@ -197,7 +197,7 @@ apply_page_style()
 
 from core.ui_theme import page_header as _wm_page_header  # hero compartido (v3.31.313)
 _wm_page_header("Orbit Analysis",
-                "Órbita y forma del eje · precesión, holguras, rubs y condición de cojinetes.")
+                "Orbit and shaft shape · precession, clearances, rubs and bearing condition.")
 
 
 def get_logo_base64(path: Path):
@@ -380,7 +380,7 @@ def _draw_top_strip(fig, orbit_result, ui_filter_mode, logo_uri):
         y=y_text,
         xanchor="left",
         yanchor="middle",
-        text=f"Rot: <b>{machine_rot}</b> · Órbita: <b>{sentido}</b>",
+        text=f"Rot: <b>{machine_rot}</b> · Orbit: <b>{sentido}</b>",
         showarrow=False,
         font=dict(size=12.0, color="#111827"),
         align="left",
@@ -393,7 +393,7 @@ def _draw_top_strip(fig, orbit_result, ui_filter_mode, logo_uri):
         y=y_text,
         xanchor="left",
         yanchor="middle",
-        text=f"Precesión: <b>{precession}</b>",
+        text=f"Precession: <b>{precession}</b>",
         showarrow=False,
         font=dict(size=12.0, color="#111827"),
         align="left",
@@ -437,17 +437,17 @@ def _draw_right_info_box(fig, orbit_result, ui_filter_mode):
     if ui_filter_mode == "Direct":
         rows.extend(
             [
-                ("Amplitud X", f"{format_number(orbit_result.diagnostics.get('x_wf_amp_pkpk'), 3)} {units} pp"),
-                ("Amplitud Y", f"{format_number(orbit_result.diagnostics.get('y_wf_amp_pkpk'), 3)} {units} pp"),
-                ("Revoluciones", str(int(orbit_result.diagnostics.get("display_revolutions_raw", 1)))),
+                ("Amplitude X", f"{format_number(orbit_result.diagnostics.get('x_wf_amp_pkpk'), 3)} {units} pp"),
+                ("Amplitude Y", f"{format_number(orbit_result.diagnostics.get('y_wf_amp_pkpk'), 3)} {units} pp"),
+                ("Revolutions", str(int(orbit_result.diagnostics.get("display_revolutions_raw", 1)))),
             ]
         )
     else:
         rows.extend(
             [
-                ("Amplitud X", f"{format_number(orbit_result.diagnostics.get('x_harmonic_amplitude_mean'), 3)} {units} pp"),
-                ("Amplitud Y", f"{format_number(orbit_result.diagnostics.get('y_harmonic_amplitude_mean'), 3)} {units} pp"),
-                ("Revoluciones", str(int(orbit_result.diagnostics.get("displayed_revolutions_filtered", 1)))),
+                ("Amplitude X", f"{format_number(orbit_result.diagnostics.get('x_harmonic_amplitude_mean'), 3)} {units} pp"),
+                ("Amplitude Y", f"{format_number(orbit_result.diagnostics.get('y_harmonic_amplitude_mean'), 3)} {units} pp"),
+                ("Revolutions", str(int(orbit_result.diagnostics.get("displayed_revolutions_filtered", 1)))),
             ]
         )
 
@@ -555,7 +555,7 @@ def build_orbit_figure(orbit_result, ui_filter_mode, logo_uri, scale_mode, manua
             mode="markers",
             marker=dict(symbol="circle", size=8, color=start_color, line=dict(width=1.2, color="#ffffff")),
             showlegend=False,
-            hovertemplate=f"Inicio órbita<br>X: %{{x:.4f}} {units}<br>Y: %{{y:.4f}} {units}<extra></extra>",
+            hovertemplate=f"Orbit start<br>X: %{{x:.4f}} {units}<br>Y: %{{y:.4f}} {units}<extra></extra>",
             name="start_marker",
         )
     )
@@ -927,17 +927,17 @@ def render_orbit_overview(
 ) -> None:
     prs = pairs[:6]
     if not prs:
-        st.info("Seleccioná al menos 1 par X-Y para el overview.")
+        st.info("Select at least 1 X-Y pair for the overview.")
         return
     try:
         ordered = sorted({p.label for p in prs})
         # Escala COMÚN (v3.31.462): misma escala en todas las órbitas del
         # overview para comparar directamente amplitudes/forma. ON por defecto.
         _common = st.checkbox(
-            "Escala común (todas las órbitas al mismo rango)", value=True,
+            "Common scale (all orbits at the same range)", value=True,
             key="orbit_ov_common_scale",
-            help="Grafica todas las órbitas con el mismo rango X-Y para "
-                 "comparar tamaño y forma a simple vista.")
+            help="Plots all orbits with the same X-Y range to "
+                 "compare size and shape at a glance.")
         # 1) Calcular todas las órbitas + máximo global de coordenadas.
         results = []
         _gmax = 0.0
@@ -1006,7 +1006,7 @@ def render_orbit_overview(
                 )
                 st.plotly_chart(fig, use_container_width=True)
     except Exception as e:
-        st.warning(f"No se pudo renderizar el overview de órbitas: {e}")
+        st.warning(f"Could not render the orbit overview: {e}")
 
 
 def render_orbit_panel(
@@ -1095,22 +1095,22 @@ def render_orbit_panel(
     _is_client_view_ai_orb = bool(st.session_state.get("_loaded_from_snapshot"))
     if (not _is_client_view_ai_orb):
       with st.expander(
-        "Interpretación clínica AI · Diagnóstico Cat IV asistido",
+        "AI clinical interpretation · Assisted Cat IV diagnosis",
         expanded=False,
       ):
         if not is_ai_available():
             st.info(
-                "**AI Diagnóstico no disponible.** Falta configurar "
-                "`[anthropic] api_key` en los secrets de Streamlit."
+                "**AI diagnosis not available.** The "
+                "`[anthropic] api_key` in the Streamlit secrets is not configured."
             )
         else:
             stored_orb = st.session_state.get(ai_state_key_orb)
             ai_btn_col1, ai_btn_col2, ai_btn_col3 = st.columns([1.4, 1.4, 2.4])
             with ai_btn_col1:
                 gen_clicked_orb = st.button(
-                    "Generar diagnóstico AI"
+                    "Generate AI diagnosis"
                     if stored_orb is None
-                    else "Diagnóstico generado",
+                    else "Diagnosis generated",
                     key=f"ai_gen_btn_orb_{export_state_key}",
                     use_container_width=True,
                     type="primary" if stored_orb is None else "secondary",
@@ -1118,15 +1118,15 @@ def render_orbit_panel(
                 )
             with ai_btn_col2:
                 regen_clicked_orb = st.button(
-                    "Regenerar",
+                    "Regenerate",
                     key=f"ai_regen_btn_orb_{export_state_key}",
                     use_container_width=True,
                     disabled=stored_orb is None,
                 )
             with ai_btn_col3:
                 st.caption(
-                    "Claude Sonnet 4.5 · ~$0.015 por diagnóstico · "
-                    "cacheado 30 días si no regenerás."
+                    "Claude Sonnet 4.5 · ~$0.015 per diagnosis · "
+                    "cached 30 days unless you regenerate."
                 )
 
             should_call_orb = bool(gen_clicked_orb) and (stored_orb is None)
@@ -1169,7 +1169,7 @@ def render_orbit_panel(
                     "trend": {},
                 }
 
-                with st.spinner("Claude analizando la órbita... (5-15 seg)"):
+                with st.spinner("Claude analyzing the orbit... (5-15 sec)"):
                     try:
                         result_orb = generate_ai_diagnostic(
                             ai_payload_orb,
@@ -1180,7 +1180,7 @@ def render_orbit_panel(
                         result_orb = {
                             "ok": False,
                             "markdown": (
-                                f"_Error inesperado al generar diagnóstico AI:_\n\n"
+                                f"_Unexpected error generating AI diagnosis:_\n\n"
                                 f"```\n{type(exc).__name__}: {exc}\n```"
                             ),
                             "error": str(exc)[:500],
@@ -1199,7 +1199,7 @@ def render_orbit_panel(
                 if stored_orb.get("ok"):
                     if stored_orb.get("fallback_used"):
                         st.info(
-                            "Diagnóstico generado con modelo de respaldo "
+                            "Diagnosis generated with the fallback model "
                             "(Haiku 4.5)."
                         )
                     st.markdown(stored_orb.get("markdown", ""))
@@ -1213,20 +1213,20 @@ def render_orbit_panel(
                         + stored_orb.get("output_tokens", 0) * out_p_orb
                     ) / 1_000_000
                     fallback_tag_orb = (
-                        " · modelo de respaldo"
+                        " · fallback model"
                         if stored_orb.get("fallback_used") else ""
                     )
                     st.caption(
-                        f"Modelo: `{model_used_orb}` · "
+                        f"Model: `{model_used_orb}` · "
                         f"Tokens: {stored_orb.get('input_tokens', 0)} → "
                         f"{stored_orb.get('output_tokens', 0)} · "
-                        f"Costo: ~${cost_usd_orb:.4f} · "
-                        f"{'(cacheado)' if stored_orb.get('cached') else '(generado nuevo)'}"
+                        f"Cost: ~${cost_usd_orb:.4f} · "
+                        f"{'(cached)' if stored_orb.get('cached') else '(newly generated)'}"
                         f"{fallback_tag_orb}"
                     )
                 else:
                     st.error(
-                        stored_orb.get("markdown", "Error al generar diagnóstico AI.")
+                        stored_orb.get("markdown", "Error generating AI diagnosis.")
                     )
 
     # Ciclo 23.114 — Modo cliente: skipea export buttons del panel
@@ -1265,7 +1265,7 @@ def render_orbit_panel(
             )
 
     with col_report:
-        if st.button("Enviar a Reporte", key=f"send_report_{export_state_key}", use_container_width=True):
+        if st.button("Send to Report", key=f"send_report_{export_state_key}", use_container_width=True):
             # Ciclo 17.26 — armar bloque AI si está generado
             ai_stored_for_orb_report = st.session_state.get(
                 f"wm_ai_diag_orbit_{export_state_key}"
@@ -1278,36 +1278,36 @@ def render_orbit_panel(
                     ai_stored_for_orb_report.get("markdown", "")
                 ).strip()
                 if ai_md_orb:
-                    quant_lines_orb: List[str] = ["Parámetro|Valor"]
+                    quant_lines_orb: List[str] = ["Parameter|Value"]
                     _diag_rep = result.diagnostics or {}
                     _rpm_orb = float(_diag_rep.get("rpm") or 0.0)
                     if _rpm_orb > 0:
                         quant_lines_orb.append(
-                            f"Velocidad de giro|{_rpm_orb:.0f} RPM"
+                            f"Rotational speed|{_rpm_orb:.0f} RPM"
                         )
                     _x_p = float(_diag_rep.get("x_wf_amp_pkpk") or 0.0)
                     _y_p = float(_diag_rep.get("y_wf_amp_pkpk") or 0.0)
                     if _x_p > 0:
                         quant_lines_orb.append(
-                            f"Amplitud X (peak-to-peak)|{_x_p:.3f}"
+                            f"Amplitude X (peak-to-peak)|{_x_p:.3f}"
                         )
                     if _y_p > 0:
                         quant_lines_orb.append(
-                            f"Amplitud Y (peak-to-peak)|{_y_p:.3f}"
+                            f"Amplitude Y (peak-to-peak)|{_y_p:.3f}"
                         )
                     if result.precession:
                         quant_lines_orb.append(
-                            f"Dirección de precesión|{result.precession}"
+                            f"Precession direction|{result.precession}"
                         )
                     if result.traversal:
                         quant_lines_orb.append(
-                            f"Sentido de traversal|{result.traversal}"
+                            f"Traversal direction|{result.traversal}"
                         )
                     quant_lines_orb.append(
-                        f"Modo de filtro|{ui_filter_mode}"
+                        f"Filter mode|{ui_filter_mode}"
                     )
                     quant_lines_orb.append(
-                        f"Punto de medición|{pair.x_name} + {pair.y_name}"
+                        f"Measurement point|{pair.x_name} + {pair.y_name}"
                     )
 
                     ai_notes_override_orb = (
@@ -1322,10 +1322,10 @@ def render_orbit_panel(
                 notes_override=ai_notes_override_orb,
             )
             ai_extra_orb = (
-                " · con Diagnóstico AI"
+                " · with AI diagnosis"
                 if ai_notes_override_orb else ""
             )
-            st.success(f"Orbit enviada al reporte{ai_extra_orb}")
+            st.success(f"Orbit sent to report{ai_extra_orb}")
 
     panel_error = st.session_state.wm_orbit_export_store[export_state_key]["error"]
     if panel_error:
@@ -1342,11 +1342,11 @@ if "report_items" not in st.session_state:
 signals = _signals_dict()
 
 if not signals:
-    st.warning("No se pudieron cargar señales válidas desde `st.session_state['signals']`.")
+    st.warning("Could not load valid signals from `st.session_state['signals']`.")
     st.stop()
 
 if len(signals) < 2:
-    st.warning("Orbit necesita mínimo dos señales cargadas.")
+    st.warning("Orbit needs at least two loaded signals.")
     st.stop()
 
 # Ciclo 23.114/115 — En cliente: filtrar signals a SOLO desplazamiento.
@@ -1383,7 +1383,7 @@ if _is_client_view_orbit:
 
 pairs = build_orbit_pairs(signals)
 if not pairs:
-    st.warning("No fue posible construir pares X/Y para órbitas.")
+    st.warning("Could not build X/Y pairs for orbits.")
     st.stop()
 
 pair_label_map = {pair.label: pair for pair in pairs}
@@ -1420,11 +1420,11 @@ else:
     # Respaldo manual (v3.31.457): si la metadata del CSV no declara la
     # dirección X/Y, la órbita puede salir espejada. Este toggle la invierte
     # para que coincida con la referencia (System1 / montaje real).
-    st.checkbox("Invertir X/Y (si la órbita sale espejada)",
+    st.checkbox("Invert X/Y (if the orbit comes out mirrored)",
                 key="orbit_invert_xy",
-                help="Intercambia los ejes X e Y del par. Úsalo si el sentido "
-                     "de la órbita no coincide con System1 o con la rotación "
-                     "real del eje.")
+                help="Swaps the X and Y axes of the pair. Use it if the orbit "
+                     "direction does not match System1 or the real shaft "
+                     "rotation.")
 
     scale_mode = st.selectbox("Scale", ["Auto", "Manual"], index=0)
     manual_scale_value = 2.0
@@ -1447,7 +1447,7 @@ if bool(st.session_state.get("orbit_invert_xy", False)):
                       for p in selected_pairs]
 
 if not selected_pairs:
-    st.info("Selecciona una o más órbitas en la barra lateral.")
+    st.info("Select one or more orbits in the sidebar.")
     st.stop()
 
 logo_uri = get_logo_data_uri(LOGO_PATH)
@@ -1455,7 +1455,7 @@ logo_uri = get_logo_data_uri(LOGO_PATH)
 # Ciclo 23.151 — Overview de órbitas (grilla compacta) arriba del detalle.
 if len(selected_pairs) >= 1:
     with st.expander(
-        f"🌀 Overview de órbitas — {len(selected_pairs)} par(es)",
+        f"🌀 Orbit overview — {len(selected_pairs)} pair(s)",
         expanded=True,
     ):
         render_orbit_overview(

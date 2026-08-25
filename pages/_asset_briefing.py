@@ -32,9 +32,9 @@ require_role(("admin", "specialist"))
 from core.ui_theme import apply_watermelon_page_style, page_header
 apply_watermelon_page_style()
 page_header(
-    "Briefing por activo",
-    subtitle="Resumen gerencial + figuras (tendencia · espectro · onda · órbita) "
-             "por activo · Semanal o Mensual · con el formato de tus reportes.",
+    "Asset briefing",
+    subtitle="Management summary + figures (trend · spectrum · waveform · orbit) "
+             "per asset · Weekly or Monthly · in the format of your reports.",
 )
 
 # -----------------------------------------------------------------
@@ -151,21 +151,21 @@ st.markdown(
 with st.container(border=True):
     cfg1, cfg2 = st.columns(2)
     with cfg1:
-        st.markdown('<div class="bf-label">Periodo</div>', unsafe_allow_html=True)
+        st.markdown('<div class="bf-label">Period</div>', unsafe_allow_html=True)
         _period = st.radio(
-            "Periodo", ["Semanal", "Mensual"], horizontal=True,
+            "Period", ["Semanal", "Mensual"], horizontal=True,
             key="briefing_period", label_visibility="collapsed",
         )
     with cfg2:
-        st.markdown('<div class="bf-label">Alcance</div>', unsafe_allow_html=True)
+        st.markdown('<div class="bf-label">Scope</div>', unsafe_allow_html=True)
         _scope = st.radio(
-            "Alcance", ["Un activo", "Todos los activos"], horizontal=True,
+            "Scope", ["Un activo", "Todos los activos"], horizontal=True,
             key="briefing_scope", label_visibility="collapsed",
         )
 
     _target_iid = None
     if _scope == "Un activo":
-        st.markdown('<div class="bf-label" style="margin-top:14px;">Activo</div>',
+        st.markdown('<div class="bf-label" style="margin-top:14px;">Asset</div>',
                     unsafe_allow_html=True)
         try:
             from core.instance_state import get_instances_version, list_instances
@@ -187,21 +187,21 @@ with st.container(border=True):
                     _opts.append((iid, tag))
             if _opts:
                 _label_map = {f"{tag} ({iid})": iid for iid, tag in _opts}
-                _sel = st.selectbox("Activo", list(_label_map.keys()),
+                _sel = st.selectbox("Asset", list(_label_map.keys()),
                                     key="briefing_asset", label_visibility="collapsed")
                 _target_iid = _label_map.get(_sel)
             else:
-                st.info("No hay activos registrados.")
+                st.info("No assets registered.")
         except Exception as e:
-            st.error(f"No se pudieron listar los activos: {e}")
+            st.error(f"Could not list the assets: {e}")
 
-    st.markdown('<div class="bf-label" style="margin-top:14px;">Redacción</div>',
+    st.markdown('<div class="bf-label" style="margin-top:14px;">Drafting</div>',
                 unsafe_allow_html=True)
     _use_ai = st.toggle(
-        "Usar IA para redacción (si hay credenciales)", value=True,
+        "Use AI for drafting (if credentials are available)", value=True,
         key="briefing_use_ai",
-        help="Si está activo y hay credenciales, la IA mejora el borrador. "
-             "Si no, se usa el borrador determinístico (siempre funciona).",
+        help="If enabled and credentials are available, the AI improves the draft. "
+             "Otherwise, the deterministic draft is used (always works).",
     )
 
 st.markdown("")
@@ -212,28 +212,28 @@ st.markdown("")
 # en la cola, se revisa (solo recomendaciones editables), se firma y al
 # aprobar se genera el PDF final y se envía al cliente.
 # -----------------------------------------------------------------
-if st.button("📝  Generar reporte y enviarlo a APROBACIÓN",
+if st.button("📝  Generate report and send it to APPROVAL",
              type="primary", use_container_width=True, key="bfq_manual"):
     from core.briefing_builder import build_asset_draft, build_all_drafts
     _ms = []
-    with st.spinner("Generando borrador(es) — datos + redacción IA…"):
+    with st.spinner("Generating draft(s) — data + AI drafting…"):
         if _scope == "Todos los activos":
             _ms = build_all_drafts(_period, use_ai=_use_ai)
         elif _target_iid:
             _ms = [build_asset_draft(_target_iid, _period, use_ai=_use_ai)]
         else:
-            st.warning("Selecciona un activo.")
+            st.warning("Select an asset.")
     if _ms:
         _ok = [m for m in _ms if m.get("ok")]
         _bad = [m for m in _ms if not m.get("ok")]
         for m in _bad:
             st.warning(f"{m.get('tag', m.get('instance_id'))}: "
-                       f"{m.get('status','?')} (no se creó borrador)")
+                       f"{m.get('status','?')} (draft not created)")
         if _ok:
             from core.briefing_queue import list_pending
             st.session_state["bfq_cache"] = list_pending()
-            st.success(f"✅ {len(_ok)} borrador(es) en la cola — apruébalos "
-                       f"abajo en 'Pendientes de aprobación'.")
+            st.success(f"✅ {len(_ok)} draft(s) in the queue — approve them "
+                       f"below in 'Pending approval'.")
 
 # -----------------------------------------------------------------
 # Programación AUTOMÁTICA POR ACTIVO (v3.31.402) — cada equipo tiene su
@@ -241,11 +241,11 @@ if st.button("📝  Generar reporte y enviarlo a APROBACIÓN",
 # borradores de los activos cuya programación coincide
 # (send_weekly_briefing.py --check-schedule).
 # -----------------------------------------------------------------
-with st.expander("⏰ Programación automática por activo — generar y enviar "
-                 "a aprobación solo", expanded=False):
+with st.expander("⏰ Automatic per-asset scheduling — only generate and send "
+                 "to approval", expanded=False):
     if _scope != "Un activo" or not _target_iid:
-        st.info("Selecciona **Un activo** arriba para configurar su "
-                "programación (es por equipo, no genérica).")
+        st.info("Select **Un activo** above to configure its "
+                "schedule (it is per equipment, not generic).")
     else:
         from core.briefing_queue import get_schedule, save_schedule
 
@@ -254,47 +254,47 @@ with st.expander("⏰ Programación automática por activo — generar y enviar 
             st.session_state[_sched_ss] = get_schedule(_target_iid)
         _cfg = st.session_state[_sched_ss]
 
-        _DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes",
-                 "Sábado", "Domingo"]
+        _DIAS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
+                 "Saturday", "Sunday"]
         _en = st.toggle(
-            f"Generación automática activa para este activo",
+            f"Automatic generation enabled for this asset",
             value=bool(_cfg.get("enabled")), key=f"bfq_sched_en_{_target_iid}")
         _sc1, _sc2, _sc3 = st.columns([2, 1, 1])
         with _sc1:
             _days_sel = st.multiselect(
-                "Día(s)", _DIAS,
+                "Day(s)", _DIAS,
                 default=[_DIAS[d] for d in (_cfg.get("days") or [0])
                          if 0 <= int(d) <= 6],
                 key=f"bfq_sched_days_{_target_iid}")
         with _sc2:
             _hour_sel = st.selectbox(
-                "Hora (Bogotá)", list(range(24)),
+                "Hour (Bogotá)", list(range(24)),
                 index=int(_cfg.get("hour", 5)),
                 format_func=lambda h: f"{h:02d}:00",
                 key=f"bfq_sched_hour_{_target_iid}")
         with _sc3:
             _per_sel = st.selectbox(
-                "Periodo", ["Semanal", "Mensual"],
+                "Period", ["Semanal", "Mensual"],
                 index=(1 if str(_cfg.get("period", "")).startswith("Mensual") else 0),
                 key=f"bfq_sched_period_{_target_iid}")
-        if st.button("💾 Guardar programación",
+        if st.button("💾 Save schedule",
                      key=f"bfq_sched_save_{_target_iid}"):
             _new_cfg = {
                 "enabled": _en,
-                "days": [_DIAS.index(d) for d in (_days_sel or ["Lunes"])],
+                "days": [_DIAS.index(d) for d in (_days_sel or ["Monday"])],
                 "hour": int(_hour_sel),
                 "period": _per_sel,
             }
             if save_schedule(_target_iid, _new_cfg):
                 st.session_state[_sched_ss] = _new_cfg
-                _dias_txt = ", ".join(_days_sel or ["Lunes"])
-                st.success(f"✅ Programado para este activo: {_dias_txt} a las "
-                           f"{_hour_sel:02d}:00 ({_per_sel}). El borrador "
-                           f"llegará solo a 'Pendientes de aprobación' con "
-                           f"alerta al entrar a la app."
-                           if _en else "Programación guardada (desactivada).")
+                _dias_txt = ", ".join(_days_sel or ["Monday"])
+                st.success(f"✅ Scheduled for this asset: {_dias_txt} at "
+                           f"{_hour_sel:02d}:00 ({_per_sel}). The draft "
+                           f"will arrive on its own in 'Pending approval' with "
+                           f"an alert when you enter the app."
+                           if _en else "Schedule saved (disabled).")
             else:
-                st.error("No se pudo guardar la programación.")
+                st.error("Could not save the schedule.")
 
 # -----------------------------------------------------------------
 # PENDIENTES DE APROBACIÓN — lista compacta (v3.31.399)
@@ -319,21 +319,21 @@ _pending = st.session_state["bfq_cache"]
 _qh1, _qh2 = st.columns([4, 1])
 with _qh1:
     st.markdown(
-        f'<div class="bf-label">Pendientes de aprobación '
-        f'<span class="bf-accent">·</span> {len(_pending)} reporte(s)</div>',
+        f'<div class="bf-label">Pending approval '
+        f'<span class="bf-accent">·</span> {len(_pending)} report(s)</div>',
         unsafe_allow_html=True,
     )
 with _qh2:
-    if st.button("🔄 Actualizar", key="bfq_refresh", use_container_width=True):
+    if st.button("🔄 Refresh", key="bfq_refresh", use_container_width=True):
         from core.briefing_queue import list_pending
         st.session_state["bfq_cache"] = list_pending()
         st.session_state.pop("bfq_open", None)
         st.rerun()
 
 if not _pending:
-    st.caption("No hay reportes pendientes. El cron del lunes 6am los deja "
-               "aquí; también puedes crear uno arriba con "
-               "'Generar BORRADOR'.")
+    st.caption("No pending reports. The Monday 6am cron leaves them "
+               "here; you can also create one above with "
+               "'Generate report and send it to APPROVAL'.")
 
 _open_iid = st.session_state.get("bfq_open", "")
 
@@ -347,11 +347,11 @@ for _iid, _tag, _d in _pending:
                 <span class="bf-dot"></span>
                 <div class="bf-row-main">
                     <span class="bf-row-tag">{_tag}</span>
-                    &nbsp;<span class="bf-row-sev">· Reporte {_d.get('period','Semanal')}
+                    &nbsp;<span class="bf-row-sev">· {_d.get('period','Semanal')} report
                     · {_st_txt}</span>
                     <div class="bf-chips">
-                        <span class="bf-chip">{_d.get('consecutive','') or 'sin consecutivo'}</span>
-                        <span class="bf-chip">borrador {( _d.get('created_at','') or '')[:16]}</span>
+                        <span class="bf-chip">{_d.get('consecutive','') or 'no consecutive'}</span>
+                        <span class="bf-chip">draft {( _d.get('created_at','') or '')[:16]}</span>
                     </div>
                 </div>
             </div>
@@ -360,12 +360,12 @@ for _iid, _tag, _d in _pending:
         )
     with _r2:
         if _open_iid == _iid:
-            if st.button("✖ Cerrar", key=f"bfq_close_{_iid}",
+            if st.button("✖ Close", key=f"bfq_close_{_iid}",
                          use_container_width=True):
                 st.session_state.pop("bfq_open", None)
                 st.rerun()
         else:
-            if st.button("✅ Aprobar…", key=f"bfq_openbtn_{_iid}",
+            if st.button("✅ Approve…", key=f"bfq_openbtn_{_iid}",
                          use_container_width=True):
                 st.session_state["bfq_open"] = _iid
                 st.rerun()
@@ -378,16 +378,16 @@ for _iid, _tag, _d in _pending:
     _sum = _d.get("summary", "")
     _diag = _d.get("diagnosis", "")
     with st.container(border=True):
-        with st.expander("👁 Resumen ejecutivo y diagnóstico (solo lectura)",
+        with st.expander("👁 Executive summary and diagnosis (read-only)",
                           expanded=False):
-            st.markdown(_sum or "_(sin resumen)_")
+            st.markdown(_sum or "_(no summary)_")
             st.markdown("---")
-            st.markdown(_diag or "_(sin diagnóstico)_")
+            st.markdown(_diag or "_(no diagnosis)_")
 
         # Recomendaciones: lo ÚNICO editable en aprobación. Vienen del
         # reporte anterior con su fecha. Carga perezosa (solo al abrir).
-        st.markdown("**Recomendaciones** (traídas del reporte anterior — "
-                    "edita, agrega o borra las que el cliente ya ejecutó):")
+        st.markdown("**Recommendations** (brought from the previous report — "
+                    "edit, add, or delete the ones the client has already done):")
         from datetime import date as _qdate
 
         import pandas as _qpd
@@ -418,31 +418,31 @@ for _iid, _tag, _d in _pending:
             column_config={
                 "id": None,
                 "Recomendación": st.column_config.TextColumn(
-                    "Recomendación", width="large", required=True),
+                    "Recommendation", width="large", required=True),
                 "Fecha de inicio": st.column_config.DateColumn(
-                    "Fecha de inicio", format="YYYY-MM-DD",
+                    "Start date", format="YYYY-MM-DD",
                     default=_qdate.today()),
             },
         )
 
         _s1, _s2 = st.columns(2)
         with _s1:
-            _elab = st.text_input("Elaborado por", value=_me_name,
+            _elab = st.text_input("Prepared by", value=_me_name,
                                   key=f"bfq_elab_{_iid}")
-            _elab_rol = st.text_input("Cargo (elaboró)", value="",
+            _elab_rol = st.text_input("Role (prepared)", value="",
                                       key=f"bfq_elabr_{_iid}",
-                                      placeholder="opcional")
+                                      placeholder="optional")
         with _s2:
-            _aprb = st.text_input("Aprobado por", value="",
+            _aprb = st.text_input("Approved by", value="",
                                   key=f"bfq_aprb_{_iid}",
-                                  placeholder="obligatorio para aprobar")
-            _aprb_rol = st.text_input("Cargo (aprobó)", value="",
+                                  placeholder="required to approve")
+            _aprb_rol = st.text_input("Role (approved)", value="",
                                       key=f"bfq_aprbr_{_iid}",
-                                      placeholder="opcional")
+                                      placeholder="optional")
 
         _b2, _b3 = st.columns([1, 1.6])
         with _b2:
-            if st.button("👁 Vista previa PDF", key=f"bfq_prev_{_iid}",
+            if st.button("👁 PDF preview", key=f"bfq_prev_{_iid}",
                          use_container_width=True):
                 # Persistir recomendaciones en pantalla antes de rasterizar
                 try:
@@ -453,7 +453,7 @@ for _iid, _tag, _d in _pending:
                     st.session_state[_q_ss] = _qlist(_iid)
                 except Exception:
                     pass
-                with st.spinner("Generando vista previa…"):
+                with st.spinner("Generating preview…"):
                     from core.briefing_builder import build_asset_briefing
                     _pdf, _m = build_asset_briefing(
                         _iid, _d.get("period", "Semanal"), use_ai=False,
@@ -468,13 +468,13 @@ for _iid, _tag, _d in _pending:
                     )
                 st.session_state[f"bfq_pdf_{_iid}"] = _pdf
         with _b3:
-            if st.button("✅ Aprobar y enviar al cliente", key=f"bfq_go_{_iid}",
+            if st.button("✅ Approve and send to client", key=f"bfq_go_{_iid}",
                          type="primary", use_container_width=True):
                 if not (_aprb or "").strip():
-                    st.error("Falta 'Aprobado por' — el reporte siempre debe "
-                             "llevar elaborado y aprobado.")
+                    st.error("'Approved by' is missing — the report must always "
+                             "carry both prepared-by and approved-by.")
                 elif not (_elab or "").strip():
-                    st.error("Falta 'Elaborado por'.")
+                    st.error("'Prepared by' is missing.")
                 else:
                     from core.briefing_queue import approve_and_send
                     # Persistir la tabla de recomendaciones tal como está en
@@ -487,8 +487,8 @@ for _iid, _tag, _d in _pending:
                         st.session_state[_q_ss] = _qlist(_iid)
                     except Exception:
                         pass
-                    with st.spinner("Aprobando, generando PDF final y "
-                                    "enviando al cliente…"):
+                    with st.spinner("Approving, generating final PDF and "
+                                    "sending to client…"):
                         _res = approve_and_send(
                             _iid, prepared_by=_elab, approved_by=_aprb,
                             prepared_role=_elab_rol, approved_role=_aprb_rol,
@@ -497,35 +497,35 @@ for _iid, _tag, _d in _pending:
                     if _res.get("ok"):
                         _dv = _res.get("delivery") or {}
                         if _dv.get("any_ok"):
-                            st.success(f"✅ {_tag} aprobado y ENVIADO al cliente.")
+                            st.success(f"✅ {_tag} approved and SENT to the client.")
                         else:
                             st.warning(
-                                f"Aprobado, pero el envío falló o el activo no "
-                                f"tiene canales configurados: "
-                                f"{_dv.get('error', _dv)}. Descarga el PDF y "
-                                f"envíalo manualmente.")
+                                f"Approved, but sending failed or the asset "
+                                f"has no channels configured: "
+                                f"{_dv.get('error', _dv)}. Download the PDF and "
+                                f"send it manually.")
                         st.session_state[f"bfq_pdf_{_iid}"] = _res.get("pdf")
                         st.session_state.pop("bfq_open", None)
                         from core.briefing_queue import list_pending
                         st.session_state["bfq_cache"] = list_pending()
                     else:
-                        st.error(f"No se pudo aprobar: {_res.get('error')}")
+                        st.error(f"Could not approve: {_res.get('error')}")
 
         if st.session_state.get(f"bfq_pdf_{_iid}"):
             st.download_button(
-                "⬇ Descargar PDF (última versión generada)",
+                "⬇ Download PDF (latest generated version)",
                 data=st.session_state[f"bfq_pdf_{_iid}"],
-                file_name=f"Reporte_{_tag}_{_d.get('period','Semanal')}.pdf",
+                file_name=f"Report_{_tag}_{_d.get('period','Semanal')}.pdf",
                 mime="application/pdf", key=f"bfq_dl_{_iid}",
                 use_container_width=True,
             )
     st.markdown("")
 
 st.markdown(
-    '<div class="bf-foot">💡&nbsp;Flujo: el <b>lunes 6am</b> el sistema deja el '
-    'borrador de cada activo en <b>Pendientes de aprobación</b> → el '
-    'especialista lo revisa/edita → firma <b>Elaborado por</b> y '
-    '<b>Aprobado por</b> → al aprobar, el PDF final se envía automáticamente '
-    'al cliente por los canales del activo.</div>',
+    '<div class="bf-foot">💡&nbsp;Flow: on <b>Monday 6am</b> the system leaves the '
+    'draft of each asset in <b>Pending approval</b> → the '
+    'specialist reviews/edits it → signs off <b>Prepared by</b> and '
+    '<b>Approved by</b> → on approval, the final PDF is automatically sent '
+    'to the client through the asset\'s channels.</div>',
     unsafe_allow_html=True,
 )

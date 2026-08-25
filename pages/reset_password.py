@@ -25,7 +25,7 @@ import streamlit as st
 
 
 st.set_page_config(
-    page_title="Watermelon System | Restablecer contraseña",
+    page_title="Watermelon System | Reset password",
     page_icon="🍉",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -125,22 +125,22 @@ _token = _get_query_token().strip()
 # UI
 # =============================================================
 st.markdown('<div class="wmr-card">', unsafe_allow_html=True)
-st.markdown('<span class="wmr-pill">🔐 Restablecer contraseña</span>',
+st.markdown('<span class="wmr-pill">🔐 Reset password</span>',
             unsafe_allow_html=True)
-st.markdown('<div class="wmr-title">Elegí una nueva contraseña</div>',
+st.markdown('<div class="wmr-title">Choose a new password</div>',
             unsafe_allow_html=True)
 
 if not _token:
     st.markdown(
-        '<div class="wmr-sub">Este link no incluye un token válido.</div>',
+        '<div class="wmr-sub">This link does not include a valid token.</div>',
         unsafe_allow_html=True,
     )
     st.error(
-        "🚫 No detectamos un token de reset en la URL. "
-        "Por favor pedí un nuevo link desde la página de Login → "
-        "'¿Olvidaste tu contraseña?'"
+        "🚫 We could not detect a reset token in the URL. "
+        "Please request a new link from the Login page → "
+        "'Forgot your password?'"
     )
-    if st.button("Volver al Login", use_container_width=True):
+    if st.button("Back to Login", use_container_width=True):
         st.switch_page("pages/00_Login.py")
     st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
@@ -149,7 +149,7 @@ if not _token:
 try:
     from core.password_reset import validate_token, consume_token
 except Exception as e:
-    st.error(f"Error de configuración: no se pudo cargar password_reset ({e})")
+    st.error(f"Configuration error: could not load password_reset ({e})")
     st.stop()
 
 _val = validate_token(_token)
@@ -159,11 +159,11 @@ if not _val.get("valid"):
         unsafe_allow_html=True,
     )
     st.error(
-        f"🚫 **{_val.get('error', 'Token inválido.')}**\n\n"
-        "Si necesitás un nuevo link, pedilo desde la página de Login → "
-        "'¿Olvidaste tu contraseña?'"
+        f"🚫 **{_val.get('error', 'Invalid token.')}**\n\n"
+        "If you need a new link, request it from the Login page → "
+        "'Forgot your password?'"
     )
-    if st.button("Volver al Login", use_container_width=True):
+    if st.button("Back to Login", use_container_width=True):
         st.switch_page("pages/00_Login.py")
     st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
@@ -175,10 +175,10 @@ _expires = _val.get("expires_at", "")[:16].replace("T", " ")
 
 st.markdown(
     f'<div class="wmr-sub">'
-    f"Hola <b>{_full_name or _email}</b>,<br/>"
-    f"Estás a punto de restablecer la contraseña de la cuenta "
+    f"Hello <b>{_full_name or _email}</b>,<br/>"
+    f"You are about to reset the password for the account "
     f"<code>{_email}</code>.<br/>"
-    f"<small style='color:#94a3b8;'>Link válido hasta: {_expires}</small>"
+    f"<small style='color:#94a3b8;'>Link valid until: {_expires}</small>"
     "</div>",
     unsafe_allow_html=True,
 )
@@ -186,41 +186,41 @@ st.markdown(
 # Si ya cambió OK, mostrar pantalla de éxito en vez del form
 if st.session_state.get("wm_reset_success"):
     st.success(
-        f"✅ **Tu contraseña se actualizó correctamente.**\n\n"
-        f"Ya podés iniciar sesión con la nueva clave en `{_email}`."
+        f"✅ **Your password was updated successfully.**\n\n"
+        f"You can now sign in with the new password using `{_email}`."
     )
-    if st.button("Ir al Login ahora", use_container_width=True, type="primary"):
+    if st.button("Go to Login now", use_container_width=True, type="primary"):
         st.switch_page("pages/00_Login.py")
     st.markdown('</div>', unsafe_allow_html=True)
     st.stop()
 
 with st.form("wm_reset_form", clear_on_submit=False):
     new_pwd = st.text_input(
-        "Nueva contraseña",
+        "New password",
         type="password",
-        placeholder="Mínimo 8 caracteres",
+        placeholder="At least 8 characters",
         key="wm_reset_new_pwd",
         autocomplete="new-password",
     )
     confirm_pwd = st.text_input(
-        "Confirmar nueva contraseña",
+        "Confirm new password",
         type="password",
-        placeholder="Volvé a tipearla",
+        placeholder="Type it again",
         key="wm_reset_confirm_pwd",
         autocomplete="new-password",
     )
     st.caption(
-        "💡 Recomendación: usá una password de al menos 12 caracteres con "
-        "mayúsculas, minúsculas y números. Considerá usar un password "
+        "💡 Recommendation: use a password of at least 12 characters with "
+        "uppercase, lowercase and numbers. Consider using a password "
         "manager (1Password, Bitwarden, Apple Passwords)."
     )
-    submit = st.form_submit_button("Cambiar contraseña", use_container_width=True)
+    submit = st.form_submit_button("Change password", use_container_width=True)
 
 if submit:
     if not new_pwd or len(new_pwd) < 8:
-        st.error("La password debe tener al menos 8 caracteres.")
+        st.error("The password must be at least 8 characters long.")
     elif new_pwd != confirm_pwd:
-        st.error("Las dos passwords no coinciden.")
+        st.error("The two passwords do not match.")
     else:
         try:
             res = consume_token(_token, new_pwd)
@@ -228,8 +228,8 @@ if submit:
                 st.session_state["wm_reset_success"] = True
                 st.rerun()
             else:
-                st.error(f"No se pudo cambiar la password: {res.get('error')}")
+                st.error(f"Could not change the password: {res.get('error')}")
         except Exception as e:
-            st.error(f"Error inesperado: {e}")
+            st.error(f"Unexpected error: {e}")
 
 st.markdown('</div>', unsafe_allow_html=True)

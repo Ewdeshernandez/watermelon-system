@@ -121,12 +121,12 @@ def render_create_instance_section() -> None:
                 <div style="font-size: 38px; line-height: 1;">🧙</div>
                 <div style="flex: 1; min-width: 240px;">
                     <div style="font-weight: 800; color: #1e3a8a; font-size: 16px; margin-bottom: 2px;">
-                        Crear nueva máquina con asistente
+                        Create a new machine with the wizard
                     </div>
                     <div style="color: #475569; font-size: 13px; line-height: 1.45;">
-                        Wizard guiado de 6 pasos: profile → tren → operación →
-                        soportes y sensores → sensor map → parámetros sembrados.
-                        Todas las máquinas nuevas arrancan correctamente configuradas.
+                        Guided 6-step wizard: profile → train → operation →
+                        supports and sensors → sensor map → seeded parameters.
+                        Every new machine starts correctly configured.
                     </div>
                 </div>
             </div>
@@ -135,7 +135,7 @@ def render_create_instance_section() -> None:
         unsafe_allow_html=True,
     )
     if st.button(
-        "🧙 Abrir asistente de creación",
+        "🧙 Open creation wizard",
         key="wm_open_wizard_cta",
         use_container_width=True,
         type="primary",
@@ -144,9 +144,9 @@ def render_create_instance_section() -> None:
             st.switch_page("pages/_machinery_wizard.py")
         except Exception as _e:
             st.error(
-                f"No se pudo abrir el asistente automáticamente "
-                f"({type(_e).__name__}). Andá a la barra lateral → "
-                f"'🧙 Crear activo (wizard)'."
+                f"Could not open the wizard automatically "
+                f"({type(_e).__name__}). Go to the sidebar → "
+                f"'🧙 Create asset (wizard)'."
             )
 
 
@@ -162,7 +162,7 @@ def render_instance_header(state: Dict[str, Any]) -> None:
 
     inst = get_instance(instance_id)
     if inst is None:
-        st.warning("Instancia no encontrada.")
+        st.warning("Instance not found.")
         return
 
     # Cabecera resumen
@@ -184,7 +184,7 @@ def render_instance_header(state: Dict[str, Any]) -> None:
         loc_parts = [p for p in [inst.client, inst.site or inst.location] if p]
         st.caption(f"📍 {' · '.join(loc_parts)}")
     if inst.notes:
-        with st.expander("Notas de la instancia", expanded=False):
+        with st.expander("Instance notes", expanded=False):
             st.write(inst.notes)
 
     # Preview del esquemático (si está cargado)
@@ -192,53 +192,53 @@ def render_instance_header(state: Dict[str, Any]) -> None:
         try:
             png_bytes = get_instance_document_bytes(instance_id, inst.schematic_png)
             if png_bytes:
-                st.image(png_bytes, caption="Esquemático del tren acoplado", width=480)
+                st.image(png_bytes, caption="Coupled train schematic", width=480)
         except Exception:
             pass
 
-    with st.expander("Editar metadata completa de esta instancia", expanded=False):
+    with st.expander("Edit full metadata for this instance", expanded=False):
         (tab_id, tab_train, tab_op, tab_sup, tab_pr, tab_set, tab_norm,
          tab_mnt, tab_sch, tab_envio) = st.tabs([
-            "Identificación", "Tren acoplado", "Operación", "Soportes",
-            "Sondas", "Setpoints", "Norma ISO", "Mantenimiento", "Esquemático",
-            "Envío al cliente",
+            "Identification", "Coupled train", "Operation", "Supports",
+            "Probes", "Setpoints", "ISO Standard", "Maintenance", "Schematic",
+            "Client delivery",
         ])
 
         with st.form(f"edit_header_{instance_id}"):
             with tab_id:
                 c1, c2 = st.columns(2)
                 with c1:
-                    new_tag = st.text_input("Tag", value=inst.tag or "", help="Identificador corto operativo, ej. TES1")
-                    new_client = st.text_input("Cliente", value=inst.client or "", help="ej. ECOPETROL - MAGNEX")
-                    new_site = st.text_input("Sitio / Planta", value=inst.site or "", help="ej. TERMOSURIA - VILLAVICENCIO")
+                    new_tag = st.text_input("Tag", value=inst.tag or "", help="Short operating identifier, e.g. TES1")
+                    new_client = st.text_input("Client", value=inst.client or "", help="e.g. ECOPETROL - MAGNEX")
+                    new_site = st.text_input("Site / Plant", value=inst.site or "", help="e.g. TERMOSURIA - VILLAVICENCIO")
                 with c2:
-                    new_asset_class = st.text_input("Clase de activo", value=inst.asset_class or "", help="ej. TURBOGENERADOR")
-                    new_loc = st.text_input("Ubicación (legacy)", value=inst.location or "", help="campo libre antiguo")
-                new_notes = st.text_area("Notas", value=inst.notes or "", height=70)
+                    new_asset_class = st.text_input("Asset class", value=inst.asset_class or "", help="e.g. TURBOGENERATOR")
+                    new_loc = st.text_input("Location (legacy)", value=inst.location or "", help="legacy free-text field")
+                new_notes = st.text_area("Notes", value=inst.notes or "", height=70)
 
             with tab_train:
-                st.markdown("**Driver (máquina motriz)**")
+                st.markdown("**Driver (driving machine)**")
                 d1, d2, d3 = st.columns(3)
                 with d1:
-                    new_drv_mfr = st.text_input("Fabricante driver", value=inst.driver_manufacturer or "")
+                    new_drv_mfr = st.text_input("Driver manufacturer", value=inst.driver_manufacturer or "")
                 with d2:
-                    new_drv_mdl = st.text_input("Modelo driver", value=inst.driver_model or "")
+                    new_drv_mdl = st.text_input("Driver model", value=inst.driver_model or "")
                 with d3:
-                    new_drv_ser = st.text_input("S/N driver (interno)", value=inst.driver_serial or "")
-                st.markdown("**Driven (máquina accionada)**")
+                    new_drv_ser = st.text_input("Driver S/N (internal)", value=inst.driver_serial or "")
+                st.markdown("**Driven (driven machine)**")
                 e1, e2, e3 = st.columns(3)
                 with e1:
-                    new_dvn_mfr = st.text_input("Fabricante driven", value=inst.driven_manufacturer or "")
+                    new_dvn_mfr = st.text_input("Driven manufacturer", value=inst.driven_manufacturer or "")
                 with e2:
-                    new_dvn_mdl = st.text_input("Modelo driven", value=inst.driven_model or "")
+                    new_dvn_mdl = st.text_input("Driven model", value=inst.driven_model or "")
                 with e3:
-                    new_dvn_ser = st.text_input("S/N driven (interno)", value=inst.driven_serial or "")
+                    new_dvn_ser = st.text_input("Driven S/N (internal)", value=inst.driven_serial or "")
                 p1, p2 = st.columns(2)
                 with p1:
-                    new_power = st.number_input("Potencia nominal (MW)", value=float(inst.nominal_power_mw or 0.0), min_value=0.0, max_value=2000.0, step=1.0)
+                    new_power = st.number_input("Nominal power (MW)", value=float(inst.nominal_power_mw or 0.0), min_value=0.0, max_value=2000.0, step=1.0)
                 with p2:
                     new_coupling = st.selectbox(
-                        "Clase de acople",
+                        "Coupling class",
                         ["", "rigid", "flexible", "fluid"],
                         index=["", "rigid", "flexible", "fluid"].index(inst.coupling_class) if inst.coupling_class in ["", "rigid", "flexible", "fluid"] else 0,
                     )
@@ -246,23 +246,23 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                 # Ciclo 23.165 — Sentido de giro por sección (órbitas).
                 # Turbina (driver) y generador (driven) pueden girar opuesto
                 # si hay caja reductora. Vacío = auto (se infiere de la órbita).
-                st.markdown("**Sentido de giro** "
+                st.markdown("**Rotation direction** "
                             "<span style='color:#94a3b8;font-size:0.8rem'>"
-                            "(vista hacia el acople · usado en las órbitas)</span>",
+                            "(viewed toward the coupling · used in the orbits)</span>",
                             unsafe_allow_html=True)
                 _ROT = ["", "CW", "CCW"]
-                _ROT_LBL = {"": "Auto (inferir)", "CW": "CW — horario",
-                            "CCW": "CCW — antihorario"}
+                _ROT_LBL = {"": "Auto (infer)", "CW": "CW — clockwise",
+                            "CCW": "CCW — counter-clockwise"}
                 rg1, rg2 = st.columns(2)
                 with rg1:
                     new_rot_driver = st.selectbox(
-                        "Turbina / driver",
+                        "Turbine / driver",
                         _ROT, format_func=lambda v: _ROT_LBL[v],
                         index=_ROT.index(inst.rotation_driver) if getattr(inst, "rotation_driver", "") in _ROT else 0,
                     )
                 with rg2:
                     new_rot_driven = st.selectbox(
-                        "Generador / driven",
+                        "Generator / driven",
                         _ROT, format_func=lambda v: _ROT_LBL[v],
                         index=_ROT.index(inst.rotation_driven) if getattr(inst, "rotation_driven", "") in _ROT else 0,
                     )
@@ -270,10 +270,10 @@ def render_instance_header(state: Dict[str, Any]) -> None:
             with tab_op:
                 o1, o2 = st.columns(2)
                 with o1:
-                    new_nom_rpm = st.number_input("RPM nominal", value=float(inst.nominal_rpm or 0.0), min_value=0.0, max_value=200000.0, step=10.0)
-                    new_min_rpm = st.number_input("Min RPM operativo", value=float(inst.min_rpm or 0.0), min_value=0.0, max_value=200000.0, step=10.0)
+                    new_nom_rpm = st.number_input("Nominal RPM", value=float(inst.nominal_rpm or 0.0), min_value=0.0, max_value=200000.0, step=10.0)
+                    new_min_rpm = st.number_input("Min operating RPM", value=float(inst.min_rpm or 0.0), min_value=0.0, max_value=200000.0, step=10.0)
                 with o2:
-                    new_max_rpm = st.number_input("Max RPM operativo", value=float(inst.max_rpm or 0.0), min_value=0.0, max_value=200000.0, step=10.0)
+                    new_max_rpm = st.number_input("Max operating RPM", value=float(inst.max_rpm or 0.0), min_value=0.0, max_value=200000.0, step=10.0)
                     new_trip_rpm = st.number_input("Trip RPM (overspeed)", value=float(inst.trip_rpm or 0.0), min_value=0.0, max_value=200000.0, step=10.0)
                 new_iso_group = st.text_input("ISO group", value=inst.iso_group or "", help="rigid / flexible")
 
@@ -281,28 +281,28 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                 s1, s2 = st.columns(2)
                 with s1:
                     new_sup_type = st.selectbox(
-                        "Tipo de soporte",
+                        "Support type",
                         ["", "fluid_film", "rolling_element", "magnetic", "mixed"],
                         index=["", "fluid_film", "rolling_element", "magnetic", "mixed"].index(inst.support_type) if inst.support_type in ["", "fluid_film", "rolling_element", "magnetic", "mixed"] else 0,
                     )
                 with s2:
-                    new_sup_count = st.number_input("Cantidad de soportes", value=int(inst.support_count or 0), min_value=0, max_value=50, step=1)
+                    new_sup_count = st.number_input("Number of supports", value=int(inst.support_count or 0), min_value=0, max_value=50, step=1)
                 new_sup_detail = st.text_area(
-                    "Detalle (texto libre)",
+                    "Detail (free text)",
                     value=inst.support_detail or "",
                     height=80,
-                    help="ej. '4 cojinetes planos tilting pad 5 zapatas, ID 254mm, clearance 8mil'",
+                    help="e.g. '4 tilting-pad journal bearings, 5 pads, ID 254mm, clearance 8mil'",
                 )
 
             with tab_pr:
                 p1, p2 = st.columns(2)
                 with p1:
-                    new_px = st.number_input("Orientación sonda X (°)", value=float(inst.probe_x_orientation_deg or 0.0), min_value=-180.0, max_value=180.0, step=1.0, help="típico 45° (XL) o 0° (vertical)")
+                    new_px = st.number_input("Probe X orientation (°)", value=float(inst.probe_x_orientation_deg or 0.0), min_value=-180.0, max_value=180.0, step=1.0, help="typical 45° (XL) or 0° (vertical)")
                 with p2:
-                    new_py = st.number_input("Orientación sonda Y (°)", value=float(inst.probe_y_orientation_deg or 0.0), min_value=-180.0, max_value=180.0, step=1.0, help="típico -45° (YR) o 90° (horizontal)")
+                    new_py = st.number_input("Probe Y orientation (°)", value=float(inst.probe_y_orientation_deg or 0.0), min_value=-180.0, max_value=180.0, step=1.0, help="typical -45° (YR) or 90° (horizontal)")
 
             with tab_set:
-                st.caption("Si están definidos, el motor de severidad usa estos thresholds reales antes que ISO genérico.")
+                st.caption("If defined, the severity engine uses these real thresholds before the generic ISO ones.")
                 a1, a2, a3 = st.columns(3)
                 with a1:
                     new_alert = st.number_input("Alert level", value=float(inst.alert_level or 0.0), min_value=0.0, step=0.1)
@@ -310,7 +310,7 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     new_danger = st.number_input("Danger level", value=float(inst.danger_level or 0.0), min_value=0.0, step=0.1)
                 with a3:
                     new_trip = st.number_input("Trip level", value=float(inst.trip_level or 0.0), min_value=0.0, step=0.1)
-                new_sp_unit = st.text_input("Unidad", value=inst.setpoint_unit or "", help="ej. mil pp / mm/s rms")
+                new_sp_unit = st.text_input("Unit", value=inst.setpoint_unit or "", help="e.g. mil pp / mm/s rms")
 
             # =========================================================
             # Ciclo 17.9 — Tab "Norma ISO"
@@ -327,11 +327,11 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     suggest_class_for_machine,
                 )
                 st.caption(
-                    "La norma de evaluación define los setpoints Warning/Danger "
-                    "para vibración estructural, vibración de eje, balanceo de "
-                    "rotor o análisis rotodinámico. Si no la asignás, el sistema "
-                    "cae a defaults heurísticos. Si la asignás, Trend, Tabular y "
-                    "Reports usan estos valores y citan la norma en el PDF."
+                    "The evaluation standard defines the Warning/Danger setpoints "
+                    "for structural vibration, shaft vibration, rotor balancing "
+                    "or rotordynamic analysis. If you do not assign one, the system "
+                    "falls back to heuristic defaults. If you assign one, Trend, Tabular and "
+                    "Reports use these values and cite the standard in the PDF."
                 )
 
                 # =====================================================
@@ -342,13 +342,13 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                 # para que el usuario sepa qué tipo de norma elige.
                 _GROUP_TAGS = {
                     "Vibración (carcasa)":          "📳 VIB",
-                    "Vibración de eje (proximity)": "🛡️ EJE",
+                    "Vibración de eje (proximity)": "🛡️ SHAFT",
                     "Balanceo de rotor":            "⚖️ BAL",
                     "Análisis rotodinámico":        "🔬 ROT",
                 }
                 _groups = list_norm_groups()
                 _norm_codes = [""]
-                _norm_labels = ["(sin asignar — usar defaults heurísticos)"]
+                _norm_labels = ["(unassigned — use heuristic defaults)"]
                 _norm_meta_by_code: Dict[str, Dict[str, Any]] = {}
                 for grp_name, items in _groups.items():
                     tag = _GROUP_TAGS.get(grp_name, grp_name)
@@ -375,11 +375,11 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                              if c == _suggested),
                             _suggested,
                         )
-                        st.info(f"💡 Norma sugerida según el activo: **{_sname}**")
+                        st.info(f"💡 Suggested standard for this asset: **{_sname}**")
 
                 _norm_idx = _norm_codes.index(_current_norm) if _current_norm in _norm_codes else 0
                 _selected_norm_idx = st.selectbox(
-                    "Norma de evaluación (agrupada por dominio)",
+                    "Evaluation standard (grouped by domain)",
                     options=range(len(_norm_codes)),
                     format_func=lambda i: _norm_labels[i],
                     index=_norm_idx,
@@ -394,16 +394,16 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     _met = _nm.get("metric", "")
                     _un  = _nm.get("unit", "")
                     _MET_HINTS = {
-                        "velocity_rms":         "Vibración estructural en velocidad RMS.",
-                        "velocity_pk":          "Vibración estructural en velocidad pico.",
-                        "displacement_pp":      "Vibración de eje pico-a-pico (proximity probe).",
-                        "acceleration_rms":     "Aceleración RMS (alta frecuencia).",
-                        "unbalance_grade":      "Grado de balanceo del rotor (e_per · ω).",
-                        "amplification_factor": "Factor de amplificación rotodinámico (Q/AF) o margen de separación.",
+                        "velocity_rms":         "Structural vibration in RMS velocity.",
+                        "velocity_pk":          "Structural vibration in peak velocity.",
+                        "displacement_pp":      "Shaft vibration peak-to-peak (proximity probe).",
+                        "acceleration_rms":     "RMS acceleration (high frequency).",
+                        "unbalance_grade":      "Rotor balance grade (e_per · ω).",
+                        "amplification_factor": "Rotordynamic amplification factor (Q/AF) or separation margin.",
                     }
                     st.caption(
-                        f"📐 **Dominio:** {_grp}  ·  **Métrica:** `{_met}`  ·  "
-                        f"**Unidad:** {_un}.  {_MET_HINTS.get(_met, '')}"
+                        f"📐 **Domain:** {_grp}  ·  **Metric:** `{_met}`  ·  "
+                        f"**Unit:** {_un}.  {_MET_HINTS.get(_met, '')}"
                     )
 
                 new_norm_class = ""
@@ -431,7 +431,7 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                         if _current_class in _class_codes else 0
                     )
                     _selected_class_idx = st.selectbox(
-                        "Class / Categoría dentro de la norma",
+                        "Class / Category within the standard",
                         options=range(len(_class_codes)),
                         format_func=lambda i: _class_labels[i],
                         index=_class_idx,
@@ -445,13 +445,13 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                         _d = _info["danger"]
                         _u = _info["unit"]
                         st.success(
-                            f"**Setpoints sugeridos por la norma:**  "
+                            f"**Setpoints suggested by the standard:**  "
                             f"Warning **{_w} {_u}** · Danger **{_d} {_u}**"
                         )
                         st.caption(f"📚 {_info['reference']}")
 
-                        # Override del especialista
-                        st.markdown("**Override del especialista (opcional)**")
+                        # Specialist override
+                        st.markdown("**Specialist override (optional)**")
                         oc1, oc2 = st.columns(2)
                         with oc1:
                             new_warn_override = float(st.number_input(
@@ -460,8 +460,8 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                                 min_value=0.0,
                                 step=0.1,
                                 format="%.3f",
-                                help="0 = usar el de la norma. Cualquier otro valor "
-                                     "overridea (más conservador o más laxo).",
+                                help="0 = use the standard value. Any other value "
+                                     "overrides it (more conservative or more lenient).",
                                 key=f"warn_override_{instance_id}",
                             ))
                         with oc2:
@@ -475,12 +475,12 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                             ))
                         if new_warn_override > 0 or new_danger_override > 0:
                             new_justification = st.text_area(
-                                "Justificación del override (queda en el reporte)",
+                                "Override justification (kept in the report)",
                                 value=new_justification,
                                 height=80,
-                                placeholder="Ej. Cliente exige criterio conservador "
-                                            "Class 1 en lugar de Class 2 estándar de "
-                                            "la norma — máquina nueva sin baseline.",
+                                placeholder="e.g. Client requires the conservative "
+                                            "Class 1 criterion instead of the standard "
+                                            "Class 2 — new machine with no baseline.",
                                 key=f"override_just_{instance_id}",
                             )
                             # Mostrar resumen del override efectivo
@@ -489,26 +489,26 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                             _diff_w = ((_eff_w - _w) / _w * 100) if _w > 0 else 0
                             _diff_d = ((_eff_d - _d) / _d * 100) if _d > 0 else 0
                             st.caption(
-                                f"⚙️ **Setpoints efectivos:** "
-                                f"Warning {_eff_w:.3f} ({_diff_w:+.0f}% vs norma) · "
-                                f"Danger {_eff_d:.3f} ({_diff_d:+.0f}% vs norma)"
+                                f"⚙️ **Effective setpoints:** "
+                                f"Warning {_eff_w:.3f} ({_diff_w:+.0f}% vs standard) · "
+                                f"Danger {_eff_d:.3f} ({_diff_d:+.0f}% vs standard)"
                             )
 
             with tab_mnt:
                 m1, m2 = st.columns(2)
                 with m1:
-                    new_lb = st.text_input("Último balanceo (YYYY-MM-DD)", value=inst.last_balance_date or "")
-                    new_la = st.text_input("Último alineamiento", value=inst.last_alignment_date or "")
+                    new_lb = st.text_input("Last balancing (YYYY-MM-DD)", value=inst.last_balance_date or "")
+                    new_la = st.text_input("Last alignment", value=inst.last_alignment_date or "")
                 with m2:
-                    new_lo = st.text_input("Último overhaul mayor", value=inst.last_overhaul_date or "")
-                    new_co = st.text_input("Fecha de comisionamiento", value=inst.commissioning_date or "")
+                    new_lo = st.text_input("Last major overhaul", value=inst.last_overhaul_date or "")
+                    new_co = st.text_input("Commissioning date", value=inst.commissioning_date or "")
 
             with tab_sch:
                 st.caption(
-                    "Cualquier imagen del Vault del activo (PNG / JPG / JPEG / GIF / "
-                    "WEBP / SVG) aparece como opción acá, sin importar el 'document_type' "
-                    "con que la hayas subido. Seleccioná cuál usar como esquemático "
-                    "principal del tren para que aparezca en el Resumen Ejecutivo del PDF."
+                    "Any image in the asset Vault (PNG / JPG / JPEG / GIF / "
+                    "WEBP / SVG) appears as an option here, regardless of the 'document_type' "
+                    "you uploaded it with. Select which one to use as the main train "
+                    "schematic so it appears in the PDF Executive Summary."
                 )
                 # Filtro permisivo (Ciclo 14a hotfix 6): acepta documentos que
                 # sean imágenes por extensión, además del tipo 'schematic'.
@@ -516,7 +516,7 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                 # cuando lo cargó.
                 _SCH_TYPES = ("schematic", "esquematico", "diagram")
                 _SCH_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".tiff")
-                schematic_options = [("", "(sin esquemático)")]
+                schematic_options = [("", "(no schematic)")]
                 for d in inst.documents:
                     dtype = (d.get("document_type") or "").lower()
                     fname = (d.get("filename") or "").lower()
@@ -529,7 +529,7 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                 option_labels = [o[1] for o in schematic_options]
                 current_idx = option_ids.index(inst.schematic_png) if inst.schematic_png in option_ids else 0
                 new_sch_idx = st.selectbox(
-                    "Esquemático principal",
+                    "Main schematic",
                     options=range(len(option_ids)),
                     format_func=lambda i: option_labels[i],
                     index=current_idx,
@@ -537,37 +537,37 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                 new_sch_id = option_ids[new_sch_idx]
                 if len(schematic_options) == 1:
                     st.warning(
-                        "El Vault de este activo no tiene aún ninguna imagen. "
-                        "Subí un PNG/JPG en la sección 'Cargar nuevo documento' "
-                        "más abajo y volvé acá."
+                        "This asset's Vault does not have any image yet. "
+                        "Upload a PNG/JPG in the 'Upload new document' section "
+                        "below and come back here."
                     )
 
             with tab_envio:
                 st.caption(
-                    "Configurá a quién y cuándo se envía automáticamente el "
-                    "**reporte ejecutivo de condición** (1 página, PDF). Se envía "
-                    "por email y/o WhatsApp en el día y hora elegidos. También "
-                    "podés enviarlo manualmente desde Live Monitoring."
+                    "Configure who receives the **executive condition report** "
+                    "(1 page, PDF) and when it is sent automatically. It is delivered "
+                    "by email and/or WhatsApp on the chosen day and time. You can also "
+                    "send it manually from Live Monitoring."
                 )
-                _DOW = ["Lunes", "Martes", "Miércoles", "Jueves",
-                        "Viernes", "Sábado", "Domingo"]
+                _DOW = ["Monday", "Tuesday", "Wednesday", "Thursday",
+                        "Friday", "Saturday", "Sunday"]
                 ev1, ev2 = st.columns(2)
                 with ev1:
                     new_client_email = st.text_input(
-                        "Email(s) del cliente", value=inst.client_email or "",
-                        help="Uno o varios, separados por COMA. "
-                             "Ej. jefe@cliente.com, mantenimiento@cliente.com",
+                        "Client email(s)", value=inst.client_email or "",
+                        help="One or more, separated by COMMA. "
+                             "e.g. boss@client.com, maintenance@client.com",
                     )
                 with ev2:
                     new_whatsapp_number = st.text_input(
-                        "WhatsApp(s) del cliente", value=inst.whatsapp_number or "",
-                        help="Uno o varios separados por COMA. Con código de país, sin '+'. "
-                             "Ej. 573001234567, 573009998877",
+                        "Client WhatsApp(s)", value=inst.whatsapp_number or "",
+                        help="One or more separated by COMMA. With country code, without '+'. "
+                             "e.g. 573001234567, 573009998877",
                     )
                 new_report_enabled = st.checkbox(
-                    "Activar envío automático programado",
+                    "Enable scheduled automatic delivery",
                     value=bool(getattr(inst, "report_send_enabled", False)),
-                    help="Si está activo, el sistema envía el reporte solo en los días y horas elegidos.",
+                    help="If enabled, the system sends the report only on the chosen days and times.",
                 )
                 # Defaults: usar listas nuevas si existen, sino el campo single (back-compat)
                 _def_days = [int(x) for x in (getattr(inst, "report_send_days", None) or [])] \
@@ -578,8 +578,8 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                 # Días como CHECKBOXES (no st.multiselect: dentro de st.form +
                 # st.tabs el multiselect tiene un bug de Streamlit que resetea
                 # la pestaña al seleccionar). Las casillas funcionan estable.
-                st.markdown("**Días de envío** (marcá uno o varios)")
-                _abbr = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+                st.markdown("**Delivery days** (check one or more)")
+                _abbr = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
                 _dcols = st.columns(7)
                 new_report_days = []
                 for _i in range(7):
@@ -589,9 +589,9 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                             new_report_days.append(_i)
 
                 new_report_hours_raw = st.text_input(
-                    "Horas de envío (0-23, hora local — una o varias, separadas por coma)",
+                    "Delivery hours (0-23, local time — one or more, separated by comma)",
                     value=", ".join(str(h) for h in _def_hours),
-                    help="Ej. 6, 18  → manda a las 06:00 y a las 18:00.",
+                    help="e.g. 6, 18  → sends at 06:00 and 18:00.",
                 )
                 new_report_hours = []
                 for _tok in new_report_hours_raw.replace(";", " ").replace(",", " ").split():
@@ -604,17 +604,17 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                 new_report_hours = sorted(set(new_report_hours))
                 st.divider()
                 new_alarm_enabled = st.checkbox(
-                    "Avisar automáticamente por alarma / peligro",
+                    "Auto-notify on alarm / danger",
                     value=bool(getattr(inst, "alarm_send_enabled", False)),
-                    help="Si está activo, manda el reporte apenas un canal cruza a "
-                         "Alarma o Danger (revisión cada 15 min). Un aviso por episodio: "
-                         "no repite hasta que el activo se normaliza o empeora.",
+                    help="If enabled, it sends the report as soon as a channel crosses into "
+                         "Alarm or Danger (checked every 15 min). One notification per episode: "
+                         "it does not repeat until the asset returns to normal or worsens.",
                 )
 
                 if not (inst.client_email or inst.whatsapp_number):
-                    st.info("Cargá al menos un email o un WhatsApp para poder enviar.")
+                    st.info("Enter at least one email or WhatsApp to be able to send.")
 
-            saved = st.form_submit_button("💾 Actualizar metadata completa", width="stretch")
+            saved = st.form_submit_button("💾 Update full metadata", width="stretch")
             if saved:
                 update_instance_header(
                     instance_id,
@@ -669,7 +669,7 @@ def render_instance_header(state: Dict[str, Any]) -> None:
                     setpoint_danger_override=float(new_danger_override or 0.0),
                     override_justification=(new_justification or "").strip(),
                 )
-                st.success("Metadata actualizada.")
+                st.success("Metadata updated.")
                 st.rerun()
 
 
@@ -697,13 +697,13 @@ def render_sensor_map_section(instance_id: str) -> None:
     if inst is None:
         return
 
-    st.markdown("### 📍 Mapa de Sensores")
+    st.markdown("### 📍 Sensor Map")
     st.caption(
-        "Configurá una sola vez los sensores físicos del activo: ubicación API 670 / "
-        "ISO 20816-1 (planos numerados de **driver → driven**), dirección X/Y a 45° R/L, "
-        "tipo (proximity / velocity / accelerometer), unidad nativa y setpoints "
-        "individuales del DCS. Después Tabular List clasifica cada CSV cargado con "
-        "los thresholds correctos del sensor que matchea."
+        "Configure the asset's physical sensors once: API 670 / "
+        "ISO 20816-1 location (planes numbered from **driver → driven**), X/Y direction at 45° R/L, "
+        "type (proximity / velocity / accelerometer), native unit and individual "
+        "DCS setpoints. Tabular List then classifies each loaded CSV with "
+        "the correct thresholds of the matching sensor."
     )
 
     # Form de generación + botón limpiar
@@ -713,36 +713,36 @@ def render_sensor_map_section(instance_id: str) -> None:
     # turbina aero (rolling_element con TRF/CRF) + generador (fluid_film X-Y).
 
     with st.expander(
-        "🪄 Generar mapa estándar (configurable)",
+        "🪄 Generate standard map (configurable)",
         expanded=(len(inst.sensors) == 0),
     ):
         st.caption(
-            "Configurá driver y driven por separado. "
-            "**Driver = máquina motriz** (turbina, motor). "
-            "**Driven = máquina accionada** (generador, bomba, compresor). "
-            "Para cada lado elegís cuántos planos (cojinetes) tiene y qué tipo "
-            "de soporte: `fluid_film` genera par X-Y proxímetros a 45° R/L "
-            "(API 670); `rolling_element` genera 1 acelerómetro radial por plano."
+            "Configure driver and driven separately. "
+            "**Driver = driving machine** (turbine, motor). "
+            "**Driven = driven machine** (generator, pump, compressor). "
+            "For each side you choose how many planes (bearings) it has and what "
+            "support type: `fluid_film` generates an X-Y proximity pair at 45° R/L "
+            "(API 670); `rolling_element` generates 1 radial accelerometer per plane."
         )
 
         # 3 modos de instrumentación. Para que sean amigables, traducimos
         # internamente los keys técnicos a etiquetas claras.
         _MODE_LABELS = {
-            "proximity_xy": "Proxímetros X-Y (API 670, fluid_film)",
-            "axial_accel": "Acelerómetro radial (1 por cojinete)",
-            "accel_plus_velocity": "Acelerómetro + Velocímetro (turbinas aero, TRF/CRF)",
+            "proximity_xy": "X-Y proximity probes (API 670, fluid_film)",
+            "axial_accel": "Radial accelerometer (1 per bearing)",
+            "accel_plus_velocity": "Accelerometer + Velometer (aero turbines, TRF/CRF)",
         }
         _MODE_KEYS = list(_MODE_LABELS.keys())
         _MODE_LABEL_LIST = list(_MODE_LABELS.values())
 
         gcol1, gcol2 = st.columns(2)
         with gcol1:
-            st.markdown("**Driver (motriz)**")
+            st.markdown("**Driver (driving)**")
             gen_driver_planes = st.number_input(
-                "Planos del driver",
+                "Driver planes",
                 min_value=1, max_value=50, value=2, step=1,
                 key=f"gen_driver_planes_{instance_id}",
-                help="Hasta 50 apoyos por sección (driver+driven = 100 máx).",
+                help="Up to 50 supports per section (driver+driven = 100 max).",
             )
             # Default modo según support_type ya configurado en la instancia
             _sup = (inst.support_type or "").lower()
@@ -751,78 +751,78 @@ def render_sensor_map_section(instance_id: str) -> None:
                 else _MODE_KEYS.index("proximity_xy")
             )
             _gen_driver_mode_label = st.selectbox(
-                "Instrumentación driver",
+                "Driver instrumentation",
                 options=_MODE_LABEL_LIST,
                 index=_driver_default_mode_idx,
                 key=f"gen_driver_mode_{instance_id}",
                 help=(
-                    "**Proxímetros X-Y**: cojinetes planos hidrodinámicos (Brush, Siemens grandes). "
-                    "**Acelerómetro radial**: rodamientos simples (motores chicos, bombas). "
-                    "**Accel + Velocity**: turbinas aero modernas (LM6000, TM2500) con "
-                    "instrumentación completa en TRF y CRF."
+                    "**X-Y proximity probes**: hydrodynamic journal bearings (Brush, large Siemens). "
+                    "**Radial accelerometer**: simple rolling-element bearings (small motors, pumps). "
+                    "**Accel + Velocity**: modern aero turbines (LM6000, TM2500) with "
+                    "full instrumentation on TRF and CRF."
                 ),
             )
             gen_driver_mode = _MODE_KEYS[_MODE_LABEL_LIST.index(_gen_driver_mode_label)]
             gen_driver_prefix = ""
             if gen_driver_mode in ("axial_accel", "accel_plus_velocity"):
                 gen_driver_prefix = st.text_input(
-                    "Prefijo Point CSV (acelerómetros)",
+                    "CSV Point prefix (accelerometers)",
                     value="acell",
                     key=f"gen_driver_prefix_{instance_id}",
-                    help="Texto que aparece en el Point del CSV. Ej. 'TRF', 'CRF', 'BRG', 'casing', 'acell'. "
-                         "Si tu equipo tiene CRF y TRF (LM6000), generá una primera vez con prefijo 'CRF' y "
-                         "después editá manualmente el segundo plano para que su pattern diga 'TRF'.",
+                    help="Text that appears in the CSV Point. e.g. 'TRF', 'CRF', 'BRG', 'casing', 'acell'. "
+                         "If your unit has CRF and TRF (LM6000), generate once with the 'CRF' prefix and "
+                         "then manually edit the second plane so its pattern says 'TRF'.",
                 )
 
         with gcol2:
-            st.markdown("**Driven (accionada)**")
+            st.markdown("**Driven (driven)**")
             gen_driven_planes = st.number_input(
-                "Planos del driven",
+                "Driven planes",
                 min_value=1, max_value=50, value=2, step=1,
                 key=f"gen_driven_planes_{instance_id}",
-                help="Hasta 50 apoyos por sección (driver+driven = 100 máx).",
+                help="Up to 50 supports per section (driver+driven = 100 max).",
             )
             _gen_driven_mode_label = st.selectbox(
-                "Instrumentación driven",
+                "Driven instrumentation",
                 options=_MODE_LABEL_LIST,
                 index=_MODE_KEYS.index("proximity_xy"),
                 key=f"gen_driven_mode_{instance_id}",
-                help="Generadores grandes y compresores centrífugos típicamente = "
-                     "Proxímetros X-Y. Bombas chicas y motores = Accel radial.",
+                help="Large generators and centrifugal compressors are typically = "
+                     "X-Y proximity probes. Small pumps and motors = radial accelerometer.",
             )
             gen_driven_mode = _MODE_KEYS[_MODE_LABEL_LIST.index(_gen_driven_mode_label)]
             gen_driven_prefix = ""
             if gen_driven_mode in ("axial_accel", "accel_plus_velocity"):
                 gen_driven_prefix = st.text_input(
-                    "Prefijo Point CSV (acelerómetros driven)",
+                    "CSV Point prefix (driven accelerometers)",
                     value="acell",
                     key=f"gen_driven_prefix_{instance_id}",
                 )
 
-        # Keyphasor (referencia 1X de fase)
+        # Keyphasor (1X phase reference)
         gen_include_keyphasor = st.checkbox(
-            "Incluir keyphasor en coupling (referencia 1X para Polar/Bode)",
+            "Include keyphasor at coupling (1X reference for Polar/Bode)",
             value=False,
             key=f"gen_keyphasor_{instance_id}",
-            help="Sensor de fase montado típicamente en el lado acople "
-                 "entre driver y driven. Genera 1 pulso por revolución y se usa "
-                 "como referencia angular para los plots polares y diagramas Bode.",
+            help="Phase sensor typically mounted on the coupling side "
+                 "between driver and driven. Generates 1 pulse per revolution and is used "
+                 "as the angular reference for polar plots and Bode diagrams.",
         )
 
         # Confirmación si ya hay sensores configurados
         confirm_overwrite = True
         if len(inst.sensors) > 0:
             st.warning(
-                f"⚠️ Ya hay **{len(inst.sensors)} sensores** configurados. "
-                "Al generar uno nuevo se reemplazan TODOS los existentes."
+                f"⚠️ There are already **{len(inst.sensors)} sensors** configured. "
+                "Generating a new one replaces ALL existing ones."
             )
             confirm_overwrite = st.checkbox(
-                "Confirmo sobreescribir el mapa actual",
+                "I confirm overwriting the current map",
                 key=f"confirm_overwrite_{instance_id}",
             )
 
         if st.button(
-            "🪄 Generar mapa con esta configuración",
+            "🪄 Generate map with this configuration",
             key=f"gen_sensor_map_{instance_id}",
             type="primary",
             disabled=(len(inst.sensors) > 0 and not confirm_overwrite),
@@ -837,25 +837,25 @@ def render_sensor_map_section(instance_id: str) -> None:
                 include_keyphasor=gen_include_keyphasor,
             )
             update_instance_header(instance_id, sensors=new_map)
-            st.success(f"Mapa generado con {len(new_map)} sensores.")
+            st.success(f"Map generated with {len(new_map)} sensors.")
             st.rerun()
 
-    # Botón limpiar (separado, siempre disponible)
+    # Clear button (separate, always available)
     if st.button(
-        "🗑️ Limpiar mapa de sensores",
+        "🗑️ Clear sensor map",
         key=f"clear_sensor_map_{instance_id}",
         disabled=len(inst.sensors) == 0,
     ):
         update_instance_header(instance_id, sensors=[])
-        st.success("Mapa de sensores limpiado.")
+        st.success("Sensor map cleared.")
         st.rerun()
 
     if not inst.sensors:
         st.info(
-            "Este activo no tiene sensores configurados. "
-            "Expandí **🪄 Generar mapa estándar** arriba para empezar con un "
-            "layout configurable según tipo de soporte de driver y driven, "
-            "o configurá sensor por sensor manualmente con el editor de abajo."
+            "This asset has no configured sensors. "
+            "Expand **🪄 Generate standard map** above to start with a "
+            "layout configurable by driver and driven support type, "
+            "or configure sensor by sensor manually with the editor below."
         )
 
     # ============================================================
@@ -889,9 +889,9 @@ def render_sensor_map_section(instance_id: str) -> None:
             if _expected_lower and _unit.lower() not in _expected_lower:
                 unit_inconsistencies.append({
                     "label": (_s.get("plane_label") or "").strip()
-                             or f"plano {_s.get('plane', '?')}",
+                             or f"plane {_s.get('plane', '?')}",
                     "type": _stype or "—",
-                    "unit": _unit or "(vacío)",
+                    "unit": _unit or "(empty)",
                     "expected": _expected,
                 })
 
@@ -921,20 +921,20 @@ def render_sensor_map_section(instance_id: str) -> None:
         # Validación de coherencia (el bug de C-200-C)
         if unit_inconsistencies:
             with st.expander(
-                f"⚠️ {len(unit_inconsistencies)} sensor(es) con unidad incoherente "
-                f"con su tipo · click para revisar",
+                f"⚠️ {len(unit_inconsistencies)} sensor(s) with a unit inconsistent "
+                f"with its type · click to review",
                 expanded=True,
             ):
                 st.markdown(
-                    "Estos sensores tienen un mismatch entre **tipo** y **unidad** "
-                    "configurada. Puede causar que Tabular List muestre la unidad "
-                    "del CSV en lugar de la configurada (bug histórico C-200-C). "
-                    "Corregilos en el editor de abajo eligiendo una unidad coherente."
+                    "These sensors have a mismatch between their configured **type** "
+                    "and **unit**. It can cause Tabular List to show the CSV unit "
+                    "instead of the configured one (historic bug C-200-C). "
+                    "Fix them in the editor below by choosing a consistent unit."
                 )
                 for inc in unit_inconsistencies:
                     st.markdown(
-                        f"- **`{inc['label']}`** · tipo **`{inc['type']}`** + "
-                        f"unidad **`{inc['unit']}`** → debería ser: "
+                        f"- **`{inc['label']}`** · type **`{inc['type']}`** + "
+                        f"unit **`{inc['unit']}`** → should be: "
                         f"`{', '.join(inc['expected'])}`"
                     )
 
@@ -954,23 +954,23 @@ def render_sensor_map_section(instance_id: str) -> None:
         key=f"sensor_map_editor_{instance_id}",
         column_config={
             "plane": st.column_config.NumberColumn(
-                "Plano", min_value=1, max_value=100, step=1, default=1,
-                help="Número correlativo desde driver (1) a driven (último). "
-                     "API 670. Hasta 100 planos en máquinas con muchos apoyos.",
+                "Plane", min_value=1, max_value=100, step=1, default=1,
+                help="Sequential number from driver (1) to driven (last). "
+                     "API 670. Up to 100 planes on machines with many supports.",
             ),
             "plane_label": st.column_config.TextColumn(
-                "Etiqueta plano",
-                help="ej. 'DE driver', 'NDE driven'. Opcional, para display en UI.",
+                "Plane label",
+                help="e.g. 'DE driver', 'NDE driven'. Optional, for UI display.",
             ),
             "side": st.column_config.SelectboxColumn(
-                "Lado",
+                "Side",
                 options=["L", "R", "top", "bottom", "—"],
                 default="L",
-                help="Hemisferio visto desde el extremo del driver. L=izquierdo, R=derecho.",
+                help="Hemisphere viewed from the driver end. L=left, R=right.",
             ),
             "angle_deg": st.column_config.NumberColumn(
-                "Ángulo (°)", min_value=-180.0, max_value=180.0, step=1.0, default=45.0,
-                help="0° = arriba. Sondas X-Y API 670 típicas: ±45°.",
+                "Angle (°)", min_value=-180.0, max_value=180.0, step=1.0, default=45.0,
+                help="0° = top. Typical X-Y API 670 probes: ±45°.",
             ),
             "direction": st.column_config.SelectboxColumn(
                 "Dir",
@@ -978,19 +978,19 @@ def render_sensor_map_section(instance_id: str) -> None:
                 default="Y",
             ),
             "sensor_type": st.column_config.SelectboxColumn(
-                "Tipo",
+                "Type",
                 options=["proximity", "velocity", "accelerometer", "keyphasor"],
                 default="proximity",
                 help=(
-                    "proximity → Desplazamiento (mil pp / µm pp). "
-                    "velocity → Velocidad (mm/s RMS / in/s peak). "
-                    "accelerometer → Aceleración (g RMS / m/s² RMS). "
-                    "keyphasor → Referencia 1X de fase (pulses/rev), "
-                    "típicamente en coupling."
+                    "proximity → Displacement (mil pp / µm pp). "
+                    "velocity → Velocity (mm/s RMS / in/s peak). "
+                    "accelerometer → Acceleration (g RMS / m/s² RMS). "
+                    "keyphasor → 1X phase reference (pulses/rev), "
+                    "typically at the coupling."
                 ),
             ),
             "unit_native": st.column_config.SelectboxColumn(
-                "Unidad",
+                "Unit",
                 options=[
                     # Desplazamiento
                     "mil pp",
@@ -1009,38 +1009,38 @@ def render_sensor_map_section(instance_id: str) -> None:
                 ],
                 default="mil pp",
                 help=(
-                    "Unidad nativa del sensor según su tipo. Las opciones están "
-                    "agrupadas: las primeras 3 son desplazamiento (proximity), "
-                    "las siguientes 4 velocidad (velocity), las últimas 4 "
-                    "aceleración (accelerometer). Elegí la que use tu DCS / OEM."
+                    "Native sensor unit according to its type. The options are "
+                    "grouped: the first 3 are displacement (proximity), "
+                    "the next 4 velocity (velocity), the last 4 "
+                    "acceleration (accelerometer). Choose the one your DCS / OEM uses."
                 ),
             ),
             "alarm": st.column_config.NumberColumn(
                 "Alarm", min_value=0.0, step=0.1, format="%.3f", default=4.0,
-                help="Setpoint de alerta en la unidad nativa. Cuando la amplitud supera este valor, status = ATENCIÓN.",
+                help="Alert setpoint in the native unit. When the amplitude exceeds this value, status = ATTENTION.",
             ),
             "danger": st.column_config.NumberColumn(
                 "Danger", min_value=0.0, step=0.1, format="%.3f", default=6.0,
-                help="Setpoint de disparo en la unidad nativa. Cuando la amplitud supera este valor, status = ACCIÓN REQUERIDA / CRÍTICA.",
+                help="Trip setpoint in the native unit. When the amplitude exceeds this value, status = ACTION REQUIRED / CRITICAL.",
             ),
             "csv_match_pattern": st.column_config.TextColumn(
-                "Texto Point CSV",
+                "CSV Point text",
                 help=(
-                    "Texto que aparece en el campo Point del CSV cargado. "
-                    "Tres formatos válidos:\n"
-                    "  • Substring simple: 'VE5807' matchea 'VE5807 (Y)' o 'VE5807-Y'.\n"
-                    "  • Lista por comas: 'VE5807 (Y), VE5807-Y, 5807_Y' matchea cualquiera de las variantes.\n"
-                    "  • Glob: '*5807*y*' usa comodines para casos avanzados.\n"
-                    "El match es case-insensitive."
+                    "Text that appears in the Point field of the loaded CSV. "
+                    "Three valid formats:\n"
+                    "  • Simple substring: 'VE5807' matches 'VE5807 (Y)' or 'VE5807-Y'.\n"
+                    "  • Comma list: 'VE5807 (Y), VE5807-Y, 5807_Y' matches any of the variants.\n"
+                    "  • Glob: '*5807*y*' uses wildcards for advanced cases.\n"
+                    "The match is case-insensitive."
                 ),
             ),
-            "notes": st.column_config.TextColumn("Notas"),
+            "notes": st.column_config.TextColumn("Notes"),
         },
         width="stretch",
     )
 
     if st.button(
-        "💾 Guardar mapa de sensores",
+        "💾 Save sensor map",
         key=f"save_sensor_map_{instance_id}",
         type="primary",
         width="stretch",
@@ -1099,17 +1099,17 @@ def render_sensor_map_section(instance_id: str) -> None:
             except Exception:
                 continue
         update_instance_header(instance_id, sensors=new_sensors)
-        st.success(f"Mapa guardado con {len(new_sensors)} sensores.")
+        st.success(f"Map saved with {len(new_sensors)} sensors.")
         st.rerun()
 
-    # Preview del mapa actual con labels formateados + diagrama visual
+    # Current map preview with formatted labels + visual diagram
     if inst.sensors:
-        with st.expander(f"Preview del mapa actual ({len(inst.sensors)} sensores)", expanded=False):
+        with st.expander(f"Current map preview ({len(inst.sensors)} sensors)", expanded=False):
             preview_lines = []
             for s in inst.sensors:
                 lbl = sensor_label(s)
                 ploc = (
-                    f"plano {s.get('plane', '?')} ({s.get('plane_label', '')}) · "
+                    f"plane {s.get('plane', '?')} ({s.get('plane_label', '')}) · "
                     f"{s.get('side', '')} {s.get('angle_deg', 0):.0f}° · "
                     f"{s.get('direction', '')}"
                 )
@@ -1117,7 +1117,7 @@ def render_sensor_map_section(instance_id: str) -> None:
                     f"{s.get('sensor_type', '')} ({s.get('unit_native', '')}) · "
                     f"A={s.get('alarm', 0):.2f} D={s.get('danger', 0):.2f}"
                 )
-                pat = s.get('csv_match_pattern', '') or '(sin pattern)'
+                pat = s.get('csv_match_pattern', '') or '(no pattern)'
                 preview_lines.append(f"- **{lbl}** · {ploc} · {tinfo} · match=`{pat}`")
             st.markdown("\n".join(preview_lines))
 
@@ -1129,12 +1129,12 @@ def render_sensor_map_section(instance_id: str) -> None:
         # acepta/rechaza por sensor y aplica en bulk.
         # ============================================================
         st.markdown("---")
-        st.markdown("#### 🪄 Sugerir patterns desde CSVs cargados")
+        st.markdown("#### 🪄 Suggest patterns from loaded CSVs")
         st.caption(
-            "Si subiste CSVs en Load Data y algunos sensores aparecen sin "
-            "match contra el Sensor Map, este asistente analiza los Point "
-            "names de los CSVs y propone un `csv_match_pattern` concreto "
-            "para cada sensor sin pattern. Acepta o rechaza por fila."
+            "If you uploaded CSVs in Load Data and some sensors appear without "
+            "a match against the Sensor Map, this wizard analyzes the CSV Point "
+            "names and proposes a concrete `csv_match_pattern` "
+            "for each sensor without a pattern. Accept or reject per row."
         )
 
         try:
@@ -1168,9 +1168,9 @@ def render_sensor_map_section(instance_id: str) -> None:
 
             if not _wiz_signals_meta:
                 st.info(
-                    "No hay signals cargados en sesión. Andá a **Load Data** "
-                    "para subir los CSVs y volvé aquí — el asistente analiza "
-                    "los Point names y propone patterns para tus sensores."
+                    "No signals loaded in this session. Go to **Load Data** "
+                    "to upload the CSVs and come back here — the wizard analyzes "
+                    "the Point names and proposes patterns for your sensors."
                 )
             else:
                 # Detectar matches definitivos y proponer para los que faltan
@@ -1202,20 +1202,20 @@ def render_sensor_map_section(instance_id: str) -> None:
                         if str(_s.get("sensor_type", "")).lower() != "keyphasor"
                     ):
                         st.success(
-                            "✓ Todos los sensores de vibración tienen un "
-                            "pattern que matchea correctamente con un CSV "
-                            "cargado. No hay sugerencias pendientes."
+                            "✓ All vibration sensors have a "
+                            "pattern that matches correctly with a loaded "
+                            "CSV. There are no pending suggestions."
                         )
                     else:
                         st.info(
-                            "No hay sugerencias adicionales. Sensores sin "
-                            "match no tienen CSVs compatibles cargados."
+                            "No additional suggestions. Sensors without "
+                            "a match have no compatible CSVs loaded."
                         )
                 else:
                     st.markdown(
                         f"**{len(_wiz_rows)}** "
-                        f"{'sensor sin match' if len(_wiz_rows) == 1 else 'sensores sin match definitivo'}"
-                        f" — propuestas:"
+                        f"{'sensor without a match' if len(_wiz_rows) == 1 else 'sensors without a definitive match'}"
+                        f" — proposals:"
                     )
 
                     # Inicializar checkboxes en session_state
@@ -1251,20 +1251,20 @@ def render_sensor_map_section(instance_id: str) -> None:
                                 f"`{_sensor.get('direction', '')}`"
                             )
                             st.caption(
-                                f"Pattern actual: `{_cur_pattern or '(vacío)'}`"
+                                f"Current pattern: `{_cur_pattern or '(empty)'}`"
                             )
                         with cols_w[2]:
                             st.markdown(
-                                f"{_conf_emoji} → propone `{_sug['proposed_pattern']}` "
-                                f"(matchea **{_sug['candidate_point']}**)"
+                                f"{_conf_emoji} → proposes `{_sug['proposed_pattern']}` "
+                                f"(matches **{_sug['candidate_point']}**)"
                             )
                             st.caption(
-                                f"Desde `{_sug['candidate_signal']}` · "
+                                f"From `{_sug['candidate_signal']}` · "
                                 f"{_sug['reason']}"
                             )
 
                     if st.button(
-                        f"✨ Aplicar {sum(st.session_state[_wiz_state_key].values())} pattern(s) seleccionados",
+                        f"✨ Apply {sum(st.session_state[_wiz_state_key].values())} selected pattern(s)",
                         key=f"wiz_apply_btn_{instance_id}",
                         type="primary",
                         width="stretch",
@@ -1287,24 +1287,24 @@ def render_sensor_map_section(instance_id: str) -> None:
                         if _applied > 0:
                             update_instance_header(instance_id, sensors=_new_sensors)
                             st.success(
-                                f"✓ {_applied} pattern(s) aplicados al Sensor Map. "
-                                f"Volvé a Tabular List o Reports y los sensores "
-                                f"aparecerán con sus valores Overall."
+                                f"✓ {_applied} pattern(s) applied to the Sensor Map. "
+                                f"Go back to Tabular List or Reports and the sensors "
+                                f"will appear with their Overall values."
                             )
                             # limpiar el state para que no quede pegado
                             st.session_state.pop(_wiz_state_key, None)
                             st.rerun()
                         else:
-                            st.info("Marcá al menos una fila para aplicar.")
+                            st.info("Select at least one row to apply.")
         except Exception as _wiz_e:
-            st.caption(f"_(wizard no disponible: {_wiz_e})_")
+            st.caption(f"_(wizard unavailable: {_wiz_e})_")
 
         # Ciclo 14c.2 — diagrama visual del mapa de sensores
-        st.markdown("#### 🎯 Diagrama visual del mapa")
+        st.markdown("#### 🎯 Visual map diagram")
         st.caption(
-            "Vista lateral del tren con cojinetes numerados (convención API 670 / "
-            "ISO 20816-1 driver→driven) y vista polar por plano con sondas en sus "
-            "ángulos físicos. R/L vistos desde el extremo del driver, 0° arriba."
+            "Side view of the train with numbered bearings (API 670 / "
+            "ISO 20816-1 driver→driven convention) and a polar view per plane with probes at their "
+            "physical angles. R/L viewed from the driver end, 0° at top."
         )
 
         # Ciclo 23.13 — Si la instancia tiene driver_icon_key + driven_icon_key
@@ -1370,13 +1370,13 @@ def render_sensor_map_section(instance_id: str) -> None:
                 _n_mapped = len(_s_for_svg)
                 if _n_mapped < _n_total:
                     st.caption(
-                        f"📍 **{_n_mapped} de {_n_total}** sensores asignados a un anchor del icono. "
-                        f"Los {_n_total - _n_mapped} restantes no aparecen — asignales side/anchor "
-                        f"en el wizard (Step 5 · Editor visual)."
+                        f"📍 **{_n_mapped} of {_n_total}** sensors assigned to an icon anchor. "
+                        f"The remaining {_n_total - _n_mapped} do not appear — assign them side/anchor "
+                        f"in the wizard (Step 5 · Visual editor)."
                     )
                 else:
                     st.caption(
-                        f"📍 {_n_mapped} sensores · todos asignados a su cojinete físico."
+                        f"📍 {_n_mapped} sensors · all assigned to their physical bearing."
                     )
                 _used_library = True
             except Exception as _lib_e:
@@ -1458,11 +1458,11 @@ def render_sensor_map_section(instance_id: str) -> None:
                     st.image(_diag_png, use_container_width=True)
                 else:
                     st.warning(
-                        "No se pudo renderizar el diagrama. "
-                        "Verificá que matplotlib esté disponible en el entorno."
+                        "Could not render the diagram. "
+                        "Check that matplotlib is available in the environment."
                     )
             except Exception as e:
-                st.warning(f"Error al renderizar diagrama: {e}")
+                st.warning(f"Error rendering diagram: {e}")
 
         # ============================================================
         # Ciclo 15.2 — Click-to-place sobre el schematic_png real
@@ -1480,12 +1480,12 @@ def render_sensor_map_section(instance_id: str) -> None:
         # ============================================================
         if inst.schematic_png:
             st.markdown("---")
-            st.markdown("#### 📍 Posicionar sensores sobre el esquemático")
+            st.markdown("#### 📍 Position sensors on the schematic")
             st.caption(
-                "Ubicá cada cojinete sobre la foto/dibujo del activo. Una vez "
-                "posicionados, los reportes muestran los valores de vibración "
-                "Overall coloreados por severidad sobre tu esquemático real, "
-                "no sobre el genérico turbomachinery."
+                "Place each bearing on the asset photo/drawing. Once "
+                "positioned, the reports show the Overall vibration values "
+                "colored by severity on your real schematic, "
+                "not on the generic turbomachinery one."
             )
 
             try:
@@ -1496,7 +1496,7 @@ def render_sensor_map_section(instance_id: str) -> None:
                 _sch_bytes = None
 
             if not _sch_bytes:
-                st.info("No se pudo cargar el esquemático del activo.")
+                st.info("Could not load the asset schematic.")
             else:
                 # Inventario de planos del Sensor Map (un boton por plano —
                 # no por sensor — porque los sensores que comparten plano
@@ -1517,15 +1517,15 @@ def render_sensor_map_section(instance_id: str) -> None:
                     if p not in planes_map:
                         planes_map[p] = {
                             "is_kp": False,
-                            "plane_label": _s.get("plane_label", "") or f"Plano {p}",
+                            "plane_label": _s.get("plane_label", "") or f"Plane {p}",
                             "x_pct": _s.get("x_pct"),
                             "y_pct": _s.get("y_pct"),
                         }
 
                 if not planes_map:
                     st.info(
-                        "Configurá primero los sensores del mapa arriba "
-                        "para poder posicionarlos sobre el esquemático."
+                        "Configure the map's sensors above first "
+                        "so you can position them on the schematic."
                     )
                 else:
                     # UI de seleccion: que plano vamos a posicionar.
@@ -1538,14 +1538,14 @@ def render_sensor_map_section(instance_id: str) -> None:
                     for k in plane_keys_sorted:
                         info = planes_map[k]
                         coord_status = (
-                            f" · ✓ posicionado ({info['x_pct']:.1f}%, {info['y_pct']:.1f}%)"
+                            f" · ✓ positioned ({info['x_pct']:.1f}%, {info['y_pct']:.1f}%)"
                             if info["x_pct"] is not None and info["y_pct"] is not None
-                            else " · ✗ sin posicionar"
+                            else " · ✗ not positioned"
                         )
                         if k == "KP":
                             plane_options.append(("KP", f"⭐ Keyphasor{coord_status}"))
                         else:
-                            plane_options.append((k, f"Plano {k} · {info['plane_label']}{coord_status}"))
+                            plane_options.append((k, f"Plane {k} · {info['plane_label']}{coord_status}"))
 
                     # Mantener seleccion entre reruns mediante session_state.
                     # Usamos la KEY del plano (no la label) porque la label
@@ -1561,7 +1561,7 @@ def render_sensor_map_section(instance_id: str) -> None:
                     default_idx = keys_in_order.index(st.session_state[_ctp_state_key])
 
                     selected_label = st.selectbox(
-                        "Plano a posicionar (clic en la imagen abajo)",
+                        "Plane to position (click on the image below)",
                         [lbl for _, lbl in plane_options],
                         index=default_idx,
                         key=f"ctp_plane_select_widget_{instance_id}",
@@ -1619,8 +1619,8 @@ def render_sensor_map_section(instance_id: str) -> None:
                                 captured_xy = None
                     except ImportError:
                         st.warning(
-                            "El paquete `streamlit-image-coordinates` no está "
-                            "instalado. Usá el fallback numérico abajo."
+                            "The `streamlit-image-coordinates` package is not "
+                            "installed. Use the numeric fallback below."
                         )
 
                     # Fallback / edicion manual + confirmacion
@@ -1645,7 +1645,7 @@ def render_sensor_map_section(instance_id: str) -> None:
                         key=f"ctp_y_{instance_id}_{selected_plane}",
                     )
                     if cols_xy[2].button(
-                        "💾 Guardar posición de este plano",
+                        "💾 Save this plane's position",
                         key=f"ctp_save_{instance_id}_{selected_plane}",
                         type="primary",
                         width="stretch",
@@ -1665,8 +1665,8 @@ def render_sensor_map_section(instance_id: str) -> None:
                             updated_sensors.append(_s2)
                         update_instance_header(instance_id, sensors=updated_sensors)
                         st.success(
-                            f"Posición guardada para "
-                            f"{'Keyphasor' if selected_plane == 'KP' else f'Plano {selected_plane}'}"
+                            f"Position saved for "
+                            f"{'Keyphasor' if selected_plane == 'KP' else f'Plane {selected_plane}'}"
                             f" → ({new_xp:.1f}%, {new_yp:.1f}%)"
                         )
                         st.rerun()
@@ -1676,7 +1676,7 @@ def render_sensor_map_section(instance_id: str) -> None:
                         v.get("x_pct") is not None for v in planes_map.values()
                     ):
                         if st.button(
-                            "🧹 Borrar todas las posiciones",
+                            "🧹 Clear all positions",
                             key=f"ctp_clear_{instance_id}",
                         ):
                             cleared = []
@@ -1686,7 +1686,7 @@ def render_sensor_map_section(instance_id: str) -> None:
                                 _s2["y_pct"] = None
                                 cleared.append(_s2)
                             update_instance_header(instance_id, sensors=cleared)
-                            st.info("Coordenadas limpiadas.")
+                            st.info("Coordinates cleared.")
                             st.rerun()
 
 
@@ -1698,12 +1698,12 @@ def render_documents_section(instance_id: str) -> None:
     docs = list(inst.documents)
     docs.sort(key=lambda d: d.get("uploaded_at", ""), reverse=True)
 
-    st.markdown("### Documentos del activo")
+    st.markdown("### Asset documents")
     if not docs:
         st.info(
-            "Esta instancia aún no tiene documentos. Subí manuales OEM, "
-            "reportes de mantenimiento, certificados o especificaciones "
-            "desde la sección 'Cargar nuevo documento' más abajo."
+            "This instance has no documents yet. Upload OEM manuals, "
+            "maintenance reports, certificates or specifications "
+            "from the 'Upload new document' section below."
         )
         return
 
@@ -1744,15 +1744,15 @@ def render_documents_section(instance_id: str) -> None:
             for d in docs
         })
         sel_type = st.selectbox(
-            "Filtrar por tipo",
+            "Filter by type",
             options=type_options,
             key=f"docs_type_filter_{instance_id}",
         )
     with fcol2:
         search_q = st.text_input(
-            "Buscar por título / descripción / tag",
+            "Search by title / description / tag",
             key=f"docs_search_{instance_id}",
-            placeholder="ej: rebabbiting, manual, octubre",
+            placeholder="e.g. rebabbiting, manual, october",
         ).strip().lower()
 
     # Aplicar filtros
@@ -1777,11 +1777,11 @@ def render_documents_section(instance_id: str) -> None:
         filtered.append(d)
 
     st.caption(
-        f"Mostrando {len(filtered)} de {len(docs)} documento(s)."
+        f"Showing {len(filtered)} of {len(docs)} document(s)."
     )
 
     if not filtered:
-        st.info("Ningún documento coincide con el filtro.")
+        st.info("No document matches the filter.")
         return
 
     # Grid de cards (3 columnas)
@@ -1826,7 +1826,7 @@ def _render_doc_card(instance_id: str, d: Dict[str, Any], icon: str) -> None:
       <div style="font-size:11px;color:#475569;margin-bottom:6px;min-height:30px;
                  overflow:hidden;text-overflow:ellipsis;display:-webkit-box;
                  -webkit-line-clamp:2;-webkit-box-orient:vertical;">
-        {description or '<span style="color:#94a3b8;">_(sin descripción)_</span>'}
+        {description or '<span style="color:#94a3b8;">_(no description)_</span>'}
       </div>
       <div style="margin-bottom:6px;">{tags_html}</div>
       <div style="display:flex;justify-content:space-between;font-size:10px;color:#94a3b8;
@@ -1844,35 +1844,35 @@ def _render_doc_card(instance_id: str, d: Dict[str, Any], icon: str) -> None:
         file_bytes = get_instance_document_bytes(instance_id, d["id"])
         if file_bytes is not None:
             st.download_button(
-                "📥 Descargar",
+                "📥 Download",
                 data=file_bytes,
                 file_name=d.get("filename", "document"),
                 key=f"dl_v2_{instance_id}_{d['id']}",
                 use_container_width=True,
             )
         else:
-            st.caption("⚠️ no disponible")
+            st.caption("⚠️ unavailable")
     with bcol2:
-        if st.button("🗑️ Eliminar",
+        if st.button("🗑️ Delete",
                      key=f"del_v2_{instance_id}_{d['id']}",
                      use_container_width=True):
             remove_instance_document(instance_id, d["id"])
-            st.success(f"'{d.get('title')}' eliminado.")
+            st.success(f"'{d.get('title')}' deleted.")
             st.rerun()
 
 
 def render_upload_section(instance_id: str) -> None:
     """Formulario de upload de nuevo documento a la instancia activa."""
-    st.markdown("### Cargar nuevo documento")
+    st.markdown("### Upload new document")
     st.caption(
-        f"Los documentos cargados aquí quedan asociados exclusivamente a "
-        f"la instancia activa (`{instance_id}`). No se comparten con otras "
-        f"instancias del mismo profile."
+        f"Documents uploaded here are associated exclusively with "
+        f"the active instance (`{instance_id}`). They are not shared with other "
+        f"instances of the same profile."
     )
 
     with st.form("upload_form", clear_on_submit=True):
         uploaded_file = st.file_uploader(
-            "Archivo (PDF, imagen, documento, hoja de datos)",
+            "File (PDF, image, document, datasheet)",
             type=None,
             accept_multiple_files=False,
         )
@@ -1880,28 +1880,28 @@ def render_upload_section(instance_id: str) -> None:
         col1, col2 = st.columns(2)
         with col1:
             doc_title = st.text_input(
-                "Título descriptivo",
-                placeholder="Ej: Reporte rebabbiting cojinetes (Wersin, oct 2018)",
+                "Descriptive title",
+                placeholder="e.g. Bearing rebabbiting report (Wersin, Oct 2018)",
             )
             doc_type_label_to_key = {label: key for key, label in DOCUMENT_TYPES.items()}
-            doc_type_label = st.selectbox("Tipo de documento", list(DOCUMENT_TYPES.values()))
+            doc_type_label = st.selectbox("Document type", list(DOCUMENT_TYPES.values()))
             doc_type = doc_type_label_to_key[doc_type_label]
         with col2:
             doc_description = st.text_area(
-                "Descripción / contexto",
-                placeholder="Resumen breve del contenido o contexto del documento.",
+                "Description / context",
+                placeholder="Brief summary of the document content or context.",
                 height=100,
             )
             doc_tags_str = st.text_input(
-                "Tags (separados por coma)",
+                "Tags (comma-separated)",
                 placeholder="bearing, rebabbiting, wersin, 2018",
             )
 
-        submitted = st.form_submit_button("Cargar documento", width="stretch")
+        submitted = st.form_submit_button("Upload document", width="stretch")
 
         if submitted:
             if uploaded_file is None:
-                st.error("Selecciona un archivo antes de cargar.")
+                st.error("Select a file before uploading.")
                 return
             tags = [t.strip() for t in doc_tags_str.split(",") if t.strip()]
             doc_id = add_uploaded_file_to_instance(
@@ -1914,12 +1914,12 @@ def render_upload_section(instance_id: str) -> None:
             )
             if doc_id:
                 st.success(
-                    f"Documento '{uploaded_file.name}' cargado en instancia "
+                    f"Document '{uploaded_file.name}' uploaded to instance "
                     f"'{instance_id}'. ID: `{doc_id}`"
                 )
                 st.rerun()
             else:
-                st.error("No fue posible cargar el documento.")
+                st.error("The document could not be uploaded.")
 
 
 _CATEGORY_ICONS = {
@@ -1942,12 +1942,12 @@ def render_captured_parameters_section(instance_id: str) -> None:
     if inst is None:
         return
 
-    st.markdown("### Parámetros técnicos del activo")
+    st.markdown("### Asset technical parameters")
     st.caption(
-        "Captura los parámetros físicos del activo extraídos de los manuales "
-        "OEM o de mediciones de campo. Estos valores alimentan los módulos "
-        "de análisis (Shaft Centerline, Polar, Bode) cuando requieren datos "
-        "específicos del cojinete o del rotor."
+        "Capture the asset's physical parameters extracted from OEM "
+        "manuals or field measurements. These values feed the analysis "
+        "modules (Shaft Centerline, Polar, Bode) when they require "
+        "bearing- or rotor-specific data."
     )
 
     current_values = dict(inst.captured_parameters)
@@ -1976,8 +1976,8 @@ def render_captured_parameters_section(instance_id: str) -> None:
         f'<div style="margin:8px 0;">'
         f'<div style="display:flex;justify-content:space-between;font-size:12px;'
         f'color:#475569;font-weight:600;margin-bottom:4px;">'
-        f'<span>Completitud del activo</span>'
-        f'<span style="color:{bar_color};">{total_filled}/{total_fields} campos · {overall_pct}%</span>'
+        f'<span>Asset completeness</span>'
+        f'<span style="color:{bar_color};">{total_filled}/{total_fields} fields · {overall_pct}%</span>'
         f'</div>'
         f'<div style="background:#f1f5f9;border-radius:999px;height:8px;overflow:hidden;">'
         f'<div style="background:{bar_color};height:100%;width:{overall_pct}%;'
@@ -2009,10 +2009,10 @@ def render_captured_parameters_section(instance_id: str) -> None:
     # Panel de auto-cálculos en vivo (solo lectura)
     derived = compute_all_derived(current_values)
     if derived:
-        st.markdown("#### 🧮 Valores calculados automáticamente")
+        st.markdown("#### 🧮 Automatically calculated values")
         st.caption(
-            "Derivados en vivo de los parámetros ingresados. Si tipeás "
-            "Cd manualmente abajo, ese valor manual gana sobre el cálculo."
+            "Derived live from the entered parameters. If you type "
+            "Cd manually below, that manual value wins over the calculation."
         )
         cols = st.columns(min(len(derived), 4) or 1)
         col_idx = 0
@@ -2020,14 +2020,14 @@ def render_captured_parameters_section(instance_id: str) -> None:
             with cols[col_idx % len(cols)]:
                 if key == "diametral_clearance":
                     st.metric(
-                        "Cd diametral",
+                        "Diametral Cd",
                         f"{info['value_mm']:.3f} mm",
                         delta=f"{info['value_mil']:.2f} mil pp",
                         help=info["explanation"],
                     )
                 elif key == "radial_clearance":
                     st.metric(
-                        "Cr radial",
+                        "Radial Cr",
                         f"{info['value_mm']:.3f} mm",
                         delta=f"{info['value_mil']:.2f} mil pp",
                         help=info["explanation"],
@@ -2042,7 +2042,7 @@ def render_captured_parameters_section(instance_id: str) -> None:
                     )
                 elif key == "unit_load":
                     st.metric(
-                        "Carga unitaria",
+                        "Unit load",
                         f"{info['value_mpa']:.2f} MPa",
                         delta=info["interpretation"],
                         delta_color="off",
@@ -2103,7 +2103,7 @@ def render_captured_parameters_section(instance_id: str) -> None:
                                 value=str(current) if current is not None else "",
                                 key=f"param_{instance_id}_{field_key}",
                                 placeholder="YYYY-MM-DD",
-                                help=help_text or "Formato YYYY-MM-DD",
+                                help=help_text or "YYYY-MM-DD format",
                             )
                             new_values[field_key] = raw_date.strip() if raw_date.strip() else None
                         elif ftype == "text":
@@ -2123,40 +2123,40 @@ def render_captured_parameters_section(instance_id: str) -> None:
                             )
                             new_values[field_key] = raw if raw.strip() else None
 
-        submitted = st.form_submit_button("Guardar parámetros", width="stretch")
+        submitted = st.form_submit_button("Save parameters", width="stretch")
 
     if submitted:
         update_instance_parameters_bulk(instance_id, new_values)
         st.success(
-            "Parámetros guardados en la instancia. Los auto-cálculos se actualizan "
-            "al recargar la página."
+            "Parameters saved to the instance. The auto-calculations update "
+            "when you reload the page."
         )
         st.rerun()
 
 
 def render_danger_zone(instance_id: str) -> None:
     """Acciones destructivas sobre la instancia (eliminar)."""
-    with st.expander("⚠️ Zona peligrosa", expanded=False):
+    with st.expander("⚠️ Danger zone", expanded=False):
         st.warning(
-            "Eliminar la instancia borra todos sus parámetros y documentos "
-            "asociados. Operación irreversible."
+            "Deleting the instance removes all its associated parameters and "
+            "documents. Irreversible operation."
         )
         confirm = st.text_input(
-            f"Para confirmar, escribí el ID de la instancia (`{instance_id}`):",
+            f"To confirm, type the instance ID (`{instance_id}`):",
             key=f"confirm_delete_{instance_id}",
         )
         if st.button(
-            "Eliminar instancia permanentemente",
+            "Delete instance permanently",
             disabled=(confirm.strip() != instance_id),
             key=f"delete_btn_{instance_id}",
         ):
             ok = delete_instance(instance_id)
             if ok:
                 st.session_state.pop("wm_active_instance_id", None)
-                st.success(f"Instancia '{instance_id}' eliminada.")
+                st.success(f"Instance '{instance_id}' deleted.")
                 st.rerun()
             else:
-                st.error("No se pudo eliminar la instancia.")
+                st.error("Could not delete the instance.")
 
 
 # ============================================================
@@ -2195,10 +2195,10 @@ def render_machinery_grid() -> None:
     if not instances:
         return
 
-    st.markdown("### Máquinas registradas")
+    st.markdown("### Registered machines")
     st.caption(
-        f"{len(instances)} máquina(s) en el sistema. "
-        "Click en cualquier card para activarla en todos los módulos de análisis."
+        f"{len(instances)} machine(s) in the system. "
+        "Click any card to activate it across all analysis modules."
     )
 
     cards_per_row = 3
@@ -2213,9 +2213,9 @@ def render_machinery_grid() -> None:
                     continue
 
                 tag = inst.tag or inst_id
-                driver_part = " ".join(p for p in [inst.driver_manufacturer, inst.driver_model] if p) or "(sin driver)"
+                driver_part = " ".join(p for p in [inst.driver_manufacturer, inst.driver_model] if p) or "(no driver)"
                 driven_part = " ".join(p for p in [inst.driven_manufacturer, inst.driven_model] if p)
-                client = inst.client or "(sin cliente)"
+                client = inst.client or "(no client)"
                 site = inst.site or inst.location or ""
                 n_docs = len(inst.documents)
                 power_str = f"{inst.nominal_power_mw:.0f} MW" if inst.nominal_power_mw > 0 else ""
@@ -2239,19 +2239,19 @@ def render_machinery_grid() -> None:
                         st.caption(" · ".join(meta_bits))
                     if client or site:
                         st.caption(" · ".join(p for p in [client, site] if p))
-                    st.caption(f"📄 {n_docs} documento(s)")
+                    st.caption(f"📄 {n_docs} document(s)")
                     # Ciclo 14a — badge claro de estado del esquemático.
                     # Le dice al usuario de un vistazo si esta maquina ya
                     # tiene el esquematico vinculado para que aparezca en
                     # el Resumen Ejecutivo del PDF.
                     if inst.schematic_png:
-                        st.caption("🖼️ esquemático vinculado")
+                        st.caption("🖼️ schematic linked")
                     else:
-                        st.caption("⚠️ sin esquemático principal")
+                        st.caption("⚠️ no main schematic")
 
                     # Indicador si esta es la activa
                     if st.session_state.get("wm_active_instance_id") == inst_id:
-                        st.success("✓ activa", icon="🟢")
+                        st.success("✓ active", icon="🟢")
                     else:
                         # Usamos on_click callback porque la key
                         # 'wm_active_instance_id' ya está instanciada por el
@@ -2261,7 +2261,7 @@ def render_machinery_grid() -> None:
                         # Los callbacks corren en una fase especial donde
                         # session_state se puede escribir libremente.
                         st.button(
-                            "Activar",
+                            "Activate",
                             key=f"activate_{inst_id}",
                             on_click=_set_active_instance,
                             args=(inst_id,),
@@ -2343,7 +2343,7 @@ def _render_machinery_card_v2(inst: Any, inst_id: str) -> None:
         for icon, text in chips
     )
     if not chips_html:
-        chips_html = '<span style="font-size:11px;color:#94a3b8;">(sin metadata)</span>'
+        chips_html = '<span style="font-size:11px;color:#94a3b8;">(no metadata)</span>'
 
     n_sensors = len(inst.sensors or [])
     n_docs = len(inst.documents or [])
@@ -2409,10 +2409,10 @@ def _render_machinery_card_v2(inst: Any, inst_id: str) -> None:
         <span style="background:{sev_bg};color:{sev_color};padding:3px 9px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:0.05em;border:1px solid {sev_color}33;">{sev_icon} {sev_label}</span>
       </div>
       {schematic_html}
-      <div class="wmlib-card-title">{title or "(sin tren definido)"}</div>
+      <div class="wmlib-card-title">{title or "(no train defined)"}</div>
       <div style="margin-bottom:6px;">{chips_html}</div>
       <div class="wmlib-card-footer">
-        <span>◉ <b>{n_sensors}</b> sensores</span>
+        <span>◉ <b>{n_sensors}</b> sensors</span>
         <span>⎙ <b>{n_docs}</b> docs</span>
       </div>
     </div>
@@ -2420,10 +2420,10 @@ def _render_machinery_card_v2(inst: Any, inst_id: str) -> None:
     st.markdown(card_html, unsafe_allow_html=True)
 
     if is_active:
-        st.success("✓ ACTIVA", icon="🟢")
+        st.success("✓ ACTIVE", icon="🟢")
     else:
         st.button(
-            "Activar →",
+            "Activate →",
             key=f"activate_v2_{inst_id}",
             on_click=_set_active_instance,
             args=(inst_id,),
@@ -2489,8 +2489,8 @@ def render_machinery_grid_v2() -> None:
 
     if not inst_pairs:
         st.info(
-            "No hay máquinas registradas todavía. Tocá "
-            "**🧙 Abrir asistente de creación** abajo para crear la primera."
+            "No machines registered yet. Tap "
+            "**🧙 Open creation wizard** below to create the first one."
         )
         return
 
@@ -2535,11 +2535,11 @@ def render_machinery_grid_v2() -> None:
         }}
         </style>
         <div class="wmlib-header-row">
-            <span class="wmlib-header-title">Máquinas registradas</span>
+            <span class="wmlib-header-title">Registered machines</span>
             <span class="wmlib-header-counts">
-                <span><b>{total_machines}</b> máquinas</span>
+                <span><b>{total_machines}</b> machines</span>
                 <span class="sep">·</span>
-                <span><b>{total_sensors}</b> sensores</span>
+                <span><b>{total_sensors}</b> sensors</span>
                 <span class="sep">·</span>
                 <span><b>{total_docs}</b> docs</span>
             </span>
@@ -2589,11 +2589,11 @@ def render_machinery_grid_v2() -> None:
         </style>
         <div class="wmlib-kpis">
           <div class="wmlib-kpi">
-            <div class="lbl">Activos</div>
+            <div class="lbl">Assets</div>
             <div class="val" style="color:#0f172a;">{total_machines}</div>
           </div>
           <div class="wmlib-kpi">
-            <div class="lbl">Sensores</div>
+            <div class="lbl">Sensors</div>
             <div class="val" style="color:#0f172a;">{total_sensors}</div>
           </div>
           <div class="wmlib-kpi accent" style="border-left-color:#3b82f6;">
@@ -2632,32 +2632,32 @@ def render_machinery_grid_v2() -> None:
     f1, f2, f3, f4 = st.columns([3, 2, 2, 1.2])
     with f1:
         search_q = st.text_input(
-            "Buscar",
-            placeholder="🔍 Buscar máquina, modelo, cliente, sitio…",
+            "Search",
+            placeholder="🔍 Search machine, model, client, site…",
             key="wmlib_search",
             label_visibility="collapsed",
         ).strip().lower()
     with f2:
         sel_clients = st.multiselect(
-            "Cliente",
+            "Client",
             options=all_clients,
             default=[],
             key="wmlib_filter_client",
-            placeholder="Todos los clientes" if all_clients else "Sin clientes",
+            placeholder="All clients" if all_clients else "No clients",
             label_visibility="collapsed",
         )
     with f3:
         sel_severities = st.multiselect(
-            "Severidad",
+            "Severity",
             options=all_severities,
             default=[],
             key="wmlib_filter_sev",
-            placeholder="Todas las severidades",
+            placeholder="All severities",
             label_visibility="collapsed",
         )
     with f4:
         sort_by = st.selectbox(
-            "Ordenar",
+            "Sort",
             options=["A → Z", "Z → A", "Más sensores", "Menos sensores"],
             index=0,
             key="wmlib_sort",
@@ -2699,16 +2699,16 @@ def render_machinery_grid_v2() -> None:
     if len(filtered) != len(inst_pairs):
         st.markdown(
             f'<div class="wmlib-filter-hint">'
-            f'Mostrando <b>{len(filtered)}</b> de <b>{len(inst_pairs)}</b> máquinas. '
-            f'<a href="#" onclick="window.location.reload();return false;">Limpiar filtros</a> ↻'
+            f'Showing <b>{len(filtered)}</b> of <b>{len(inst_pairs)}</b> machines. '
+            f'<a href="#" onclick="window.location.reload();return false;">Clear filters</a> ↻'
             f'</div>',
             unsafe_allow_html=True,
         )
 
     if not filtered:
         st.info(
-            "No hay máquinas que coincidan con los filtros aplicados. "
-            "Probá ajustar el search o limpiar los filtros."
+            "No machines match the applied filters. "
+            "Try adjusting the search or clearing the filters."
         )
         st.markdown("---")
         return
@@ -2836,12 +2836,12 @@ def _render_machinery_table(filtered: List[Tuple[str, Any]]) -> None:
     </style>
     <div class="wmlib-table">
       <div class="wmlib-row is-header">
-        <div>Activo</div>
-        <div>Cliente · Sitio</div>
-        <div>Tren</div>
-        <div style="text-align:right;">Sensores</div>
-        <div>Severidad</div>
-        <div style="text-align:right;">Acción</div>
+        <div>Asset</div>
+        <div>Client · Site</div>
+        <div>Train</div>
+        <div style="text-align:right;">Sensors</div>
+        <div>Severity</div>
+        <div style="text-align:right;">Action</div>
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -2948,7 +2948,7 @@ def _render_machinery_row(inst: Any, inst_id: str) -> None:
             )
         else:
             st.markdown(
-                '<span class="wmlib-dim">sin tren definido</span>',
+                '<span class="wmlib-dim">no train defined</span>',
                 unsafe_allow_html=True,
             )
 
@@ -2977,12 +2977,12 @@ def _render_machinery_row(inst: Any, inst_id: str) -> None:
             st.markdown(
                 '<div style="text-align:right;font-size:11px;font-weight:800;'
                 'color:#2563eb;letter-spacing:0.05em;text-transform:uppercase;">'
-                '● Activa</div>',
+                '● Active</div>',
                 unsafe_allow_html=True,
             )
         else:
             st.button(
-                "Abrir →",
+                "Open →",
                 key=f"open_row_{inst_id}",
                 on_click=_set_active_instance,
                 args=(inst_id,),
@@ -3000,7 +3000,7 @@ def main() -> None:
 
     page_header(
         title="Machinery Library",
-        subtitle="Cockpit central de máquinas — perfil técnico, esquemáticos, manuales OEM y parámetros físicos por instancia de activo.",
+        subtitle="Central machinery cockpit — technical profile, schematics, OEM manuals and physical parameters per asset instance.",
     )
 
     with st.sidebar:
@@ -3025,9 +3025,9 @@ def main() -> None:
 
     if not instance_id:
         st.info(
-            "No hay máquina activa. Tocá **🧙 Abrir asistente de creación** "
-            "arriba para crear una nueva, o seleccioná una desde el grid "
-            "de máquinas / sidebar."
+            "No active machine. Tap **🧙 Open creation wizard** "
+            "above to create a new one, or select one from the machines "
+            "grid / sidebar."
         )
         return
 

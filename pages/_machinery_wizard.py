@@ -27,7 +27,7 @@ from __future__ import annotations
 # v3.31.243 — set_page_config primero, sino el sidebar pierde estilos.
 import streamlit as st
 st.set_page_config(
-    page_title="Crear activo · Wizard — Watermelon",
+    page_title="Create asset · Wizard — Watermelon",
     page_icon="🧙",
     layout="wide",
 )
@@ -402,9 +402,9 @@ def _execute_creation(state: Dict[str, Any]) -> None:
     """Crea instance + persiste sensors + parámetros base."""
     inst_id_raw = (state["instance_id"] or "").strip()
     if not inst_id_raw:
-        raise ValueError("El ID del activo es obligatorio.")
+        raise ValueError("The asset ID is required.")
     if get_instance(inst_id_raw) is not None:
-        raise ValueError(f"Ya existe un activo con ID '{inst_id_raw}'.")
+        raise ValueError(f"An asset with ID '{inst_id_raw}' already exists.")
 
     # 1. Crear instance base.
     # IMPORTANTE: create_instance slugifica internamente (ej. 'TES 1' → 'tes_1').
@@ -513,26 +513,26 @@ def _render_icon_picker(
         return None
 
     with column:
-        st.markdown(f"**Icono visual** ({role})")
+        st.markdown(f"**Visual icon** ({role})")
         # Construir lista plana ordenada por categoría
         categories = sorted(by_cat.keys())
 
         # Dropdown 1: categoría
-        cat_options = ["— Sin icono —"] + categories
+        cat_options = ["— No icon —"] + categories
         current_key = state.get(state_key, "")
         current_meta = get_asset_meta(current_key) if current_key else None
-        current_cat = current_meta.get("category") if current_meta else "— Sin icono —"
+        current_cat = current_meta.get("category") if current_meta else "— No icon —"
         if current_cat not in cat_options:
-            current_cat = "— Sin icono —"
+            current_cat = "— No icon —"
 
         cat_pick = st.selectbox(
-            f"Categoría",
+            f"Category",
             options=cat_options,
             index=cat_options.index(current_cat),
             key=f"wiz_icon_cat_{role}",
         )
 
-        if cat_pick == "— Sin icono —":
+        if cat_pick == "— No icon —":
             state[state_key] = ""
             return None
 
@@ -548,7 +548,7 @@ def _render_icon_picker(
         default_idx = item_keys.index(current_key) if current_key in item_keys else 0
 
         icon_pick = st.selectbox(
-            f"Modelo",
+            f"Model",
             options=item_keys,
             format_func=lambda k: item_labels.get(k, k),
             index=default_idx,
@@ -613,14 +613,14 @@ def _render_train_preview(state: Dict[str, Any]) -> None:
             sensors_with_status=[],
             **_gearbox_compose_kwargs(state),
         )
-        st.markdown("**Preview del tren acoplado**")
+        st.markdown("**Coupled train preview**")
         st.markdown(
             f'<div style="background:#ffffff;border:1px solid #e2e8f0;'
             f'border-radius:10px;padding:14px;">{svg}</div>',
             unsafe_allow_html=True,
         )
     except Exception as e:
-        st.caption(f"(Preview no disponible: {e})")
+        st.caption(f"(Preview not available: {e})")
 
 
 def _render_sensors_table_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) -> None:
@@ -646,28 +646,28 @@ def _render_sensors_table_editor(state: Dict[str, Any], sensors: List[Dict[str, 
         num_rows="dynamic",
         use_container_width=True,
         column_config={
-            "plane_label": st.column_config.TextColumn("Plano", width="medium"),
+            "plane_label": st.column_config.TextColumn("Plane", width="medium"),
             "side": st.column_config.SelectboxColumn(
-                "Lado", options=["L", "R", "T", "B", ""], width="small",
+                "Side", options=["L", "R", "T", "B", ""], width="small",
             ),
             "angle_deg": st.column_config.NumberColumn(
-                "Ángulo (°)", min_value=0.0, max_value=360.0, step=15.0,
+                "Angle (°)", min_value=0.0, max_value=360.0, step=15.0,
                 width="small",
             ),
             "direction": st.column_config.SelectboxColumn(
-                "Dirección", options=["X", "Y", "Z", "RAD", "AX", ""],
+                "Direction", options=["X", "Y", "Z", "RAD", "AX", ""],
                 width="small",
             ),
             "sensor_type": st.column_config.SelectboxColumn(
-                "Tipo",
+                "Type",
                 options=["proximity", "accelerometer", "velometer", "keyphasor"],
                 width="medium",
             ),
-            "unit_native": st.column_config.TextColumn("Unidad", width="small"),
+            "unit_native": st.column_config.TextColumn("Unit", width="small"),
             "alarm": st.column_config.NumberColumn("Alarm", width="small"),
             "danger": st.column_config.NumberColumn("Danger", width="small"),
             "csv_match_pattern": st.column_config.TextColumn(
-                "Pattern CSV (opcional)", width="medium",
+                "CSV pattern (optional)", width="medium",
             ),
         },
         # La key incluye una "generación": al Regenerar se incrementa y el
@@ -793,16 +793,16 @@ def _render_modal_config_expander(
         or s.get("dof_direction")
     )
     _expander_title = (
-        "⚙ Configuración modal · capturada ✓"
+        "⚙ Modal configuration · captured ✓"
         if _has_modal
-        else "⚙ Configuración modal (opcional · para EMA / OMA)"
+        else "⚙ Modal configuration (optional · for EMA / OMA)"
     )
 
     with st.expander(_expander_title, expanded=False):
         st.caption(
-            "Requerido solo si vas a usar este sensor en el módulo Modal Analysis. "
-            "Si lo dejas vacío, el sensor sigue funcionando para Live Monitoring, "
-            "Spectrum y Orbit como siempre."
+            "Required only if you are going to use this sensor in the Modal Analysis module. "
+            "If you leave it empty, the sensor keeps working for Live Monitoring, "
+            "Spectrum and Orbit as always."
         )
 
         # Defaults
@@ -820,7 +820,7 @@ def _render_modal_config_expander(
                 value=float(_cur_sens) if _cur_sens is not None else float(_sens_default),
                 step=10.0,
                 key=f"wiz_modal_sens_{idx}",
-                help="Acelerómetro IEPE: 100 mV/g · Sonda de proximidad: 200 mV/mil · Martillo modal: 2.4 mV/N",
+                help="IEPE accelerometer: 100 mV/g · Proximity probe: 200 mV/mil · Modal hammer: 2.4 mV/N",
             )
             # Solo guardamos si el valor difiere significativamente de None;
             # si el analista lo dejó en el default y NO completó posición 3D,
@@ -833,18 +833,18 @@ def _render_modal_config_expander(
             _cur_coup = (s.get("coupling") or _coup_default).upper()
             _coup_idx = _coup_opts.index(_cur_coup) if _cur_coup in _coup_opts else 0
             coup_pick = st.selectbox(
-                "Coupling al sistema",
+                "Coupling to the system",
                 _coup_opts,
                 index=_coup_idx,
                 key=f"wiz_modal_coup_{idx}",
-                format_func=lambda x: x or "— ninguno —",
-                help="IEPE: accel / martillo · AC: Bently con DC blocker · DC: medición directa",
+                format_func=lambda x: x or "— none —",
+                help="IEPE: accel / hammer · AC: Bently with DC blocker · DC: direct measurement",
             )
             if coup_pick:
                 s["coupling"] = coup_pick
 
         # Position 3D
-        st.markdown("**Posición 3D del sensor** — origen: centro crankcase · X axial driver→driven")
+        st.markdown("**Sensor 3D position** — origin: crankcase center · X axial driver→driven")
         _pos = s.get("position_3d") or [0.0, 0.0, 0.0]
         pc1, pc2, pc3 = st.columns(3)
         with pc1:
@@ -861,7 +861,7 @@ def _render_modal_config_expander(
             s["position_3d"] = [float(px), float(py), float(pz)]
 
         # DOF direction
-        st.markdown("**Dirección DOF** — vector unitario del eje sensible")
+        st.markdown("**DOF direction** — unit vector of the sensitive axis")
         _dof = s.get("dof_direction") or [0.0, 1.0, 0.0]  # default Y
         dc1, dc2, dc3 = st.columns(3)
         with dc1:
@@ -883,9 +883,9 @@ def _render_modal_config_expander(
         _plbl = str(s.get("plane_label", "")).upper()
         if not s.get("dof_direction"):
             if "YA" in _plbl or "YV" in _plbl:
-                st.caption("💡 Convención: sensor con 'Y' → `dof_direction` típico [0, 1, 0]")
+                st.caption("💡 Convention: sensor with 'Y' → `dof_direction` typically [0, 1, 0]")
             elif "XA" in _plbl or "XV" in _plbl:
-                st.caption("💡 Convención: sensor con 'X' → `dof_direction` típico [1, 0, 0]")
+                st.caption("💡 Convention: sensor with 'X' → `dof_direction` typically [1, 0, 0]")
 
 
 def _render_visual_editor_library(
@@ -958,15 +958,15 @@ def _render_visual_editor_library(
                 unsafe_allow_html=True,
             )
         except Exception as e:
-            st.warning(f"No se pudo generar el SVG library: {e}")
+            st.warning(f"Could not generate the SVG library: {e}")
 
         n_mapped = len(s_for_svg)
         n_total = len(sensors)
         st.caption(
-            f"📍 **{n_mapped} de {n_total}** sensores asignados a un anchor. "
-            "Los no asignados no aparecen en el preview ni en Live Monitoring."
+            f"📍 **{n_mapped} of {n_total}** sensors assigned to an anchor. "
+            "Unassigned ones do not appear in the preview or in Live Monitoring."
         )
-        if st.button("🪄 Auto-asignar todos por heurística (Bently / API 670)",
+        if st.button("🪄 Auto-assign all by heuristic (Bently / API 670)",
                      key="wiz_lib_autoassign", use_container_width=True):
             for s in sensors:
                 side, anchor = _infer_icon_side_anchor(s, drv, drvn)
@@ -978,10 +978,10 @@ def _render_visual_editor_library(
             st.rerun()
 
     with col_list:
-        st.markdown("**Asignación de cada sensor a un cojinete físico**")
+        st.markdown("**Assignment of each sensor to a physical bearing**")
         st.caption(
-            "Side = en qué máquina del tren (driver / driven). "
-            "Anchor = qué cojinete físico del icono (DE, NDE, TRF, CRF...)."
+            "Side = which machine in the train (driver / driven). "
+            "Anchor = which physical bearing on the icon (DE, NDE, TRF, CRF...)."
         )
 
         for idx, s in enumerate(sensors):
@@ -1084,7 +1084,7 @@ def _render_visual_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) 
         )
 
     if not png_bytes:
-        st.warning("Pillow no está disponible — no puedo generar el schematic.")
+        st.warning("Pillow is not available — I cannot generate the schematic.")
         return
 
     from PIL import Image, ImageDraw, ImageFont
@@ -1170,10 +1170,10 @@ def _render_visual_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) 
                 st.rerun()
         else:
             st.image(overlay)
-            st.caption("(streamlit_image_coordinates no disponible — solo visualización)")
+            st.caption("(streamlit_image_coordinates not available — display only)")
 
     with col_list:
-        st.markdown("**Sensores** (click para seleccionar y reposicionar)")
+        st.markdown("**Sensors** (click to select and reposition)")
         for idx, s in enumerate(sensors):
             label = s.get("plane_label", "") or ""
             stype = s.get("sensor_type", "") or ""
@@ -1194,7 +1194,7 @@ def _render_visual_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) 
                          use_container_width=True):
                 state["_wiz_selected_sensor_idx"] = idx
                 st.rerun()
-        if st.button("❌ Deseleccionar", key="wiz_deselect_sensor"):
+        if st.button("❌ Deselect", key="wiz_deselect_sensor"):
             state["_wiz_selected_sensor_idx"] = -1
             st.rerun()
 
@@ -1203,10 +1203,10 @@ def _render_visual_editor(state: Dict[str, Any], sensors: List[Dict[str, Any]]) 
 # Header del wizard
 # =============================================================
 
-st.title("Crear activo · Wizard guiado")
+st.title("Create asset · Guided wizard")
 st.caption(
-    "Configurá una máquina nueva en 5 pasos. El sistema arma automáticamente "
-    "el mapa de sensores y los setpoints según las normas ISO/API correspondientes."
+    "Set up a new machine in 5 steps. The system automatically builds "
+    "the sensor map and setpoints according to the applicable ISO/API standards."
 )
 
 state = _wizard_state()
@@ -1217,12 +1217,12 @@ current = state["step"]
 # de sensores (así el editor ya muestra los setpoints OEM elegidos por el
 # usuario y no hay que ir-volver entre pasos).
 step_labels = [
-    "1 · Tipo",
-    "2 · Tren",
-    "3 · Instrumentación",
-    "4 · Unidades & setpoints",
-    "5 · Editar sensores",
-    "6 · Datos del activo",
+    "1 · Type",
+    "2 · Train",
+    "3 · Instrumentation",
+    "4 · Units & setpoints",
+    "5 · Edit sensors",
+    "6 · Asset data",
 ]
 step_cols = st.columns(TOTAL_STEPS)
 for i, (col, label) in enumerate(zip(step_cols, step_labels), start=1):
@@ -1251,24 +1251,24 @@ st.markdown("---")
 # =============================================================
 
 if current == 1:
-    st.subheader("Paso 1 · ¿Qué tipo de máquina vas a monitorear?")
+    st.subheader("Step 1 · What type of machine will you monitor?")
 
     col_a, col_b = st.columns([1, 1])
 
     with col_a:
-        st.markdown("**A) Empezar desde cero**")
-        st.caption("Configurá toda la máquina manualmente.")
+        st.markdown("**A) Start from scratch**")
+        st.caption("Set up the whole machine manually.")
         category_options = {
-            "turbomachinery": "🌀 Turbomáquina (turbina/turbogenerador)",
-            "centrifugal_compressor": "⚙️ Compresor centrífugo",
-            "reciprocating_compressor": "🔄 Compresor reciprocante",
-            "centrifugal_pump": "💧 Bomba centrífuga",
-            "electric_motor": "⚡ Motor eléctrico",
-            "fan_blower": "🌬️ Ventilador / soplador",
-            "custom": "🛠️ Otro / personalizado",
+            "turbomachinery": "🌀 Turbomachine (turbine/turbogenerator)",
+            "centrifugal_compressor": "⚙️ Centrifugal compressor",
+            "reciprocating_compressor": "🔄 Reciprocating compressor",
+            "centrifugal_pump": "💧 Centrifugal pump",
+            "electric_motor": "⚡ Electric motor",
+            "fan_blower": "🌬️ Fan / blower",
+            "custom": "🛠️ Other / custom",
         }
         cat_pick = st.radio(
-            "Categoría",
+            "Category",
             options=list(category_options.keys()),
             format_func=lambda k: category_options[k],
             index=list(category_options.keys()).index(state["category"])
@@ -1277,28 +1277,28 @@ if current == 1:
         )
 
     with col_b:
-        st.markdown("**B) Usar una plantilla LATAM**")
+        st.markdown("**B) Use a LATAM template**")
         st.caption(
-            "Pre-carga 20+ máquinas comunes en O&G/generación con sus "
-            "rodamientos típicos, normas y esquemas de sensores recomendados."
+            "Preloads 20+ machines common in O&G/power generation with their "
+            "typical bearings, standards and recommended sensor schemes."
         )
-        cat_filter = state.get("template_filter_cat", "Todas")
-        cats = ["Todas"] + list_categories()
+        cat_filter = state.get("template_filter_cat", "All")
+        cats = ["All"] + list_categories()
         cat_filter = st.selectbox(
-            "Filtrar por categoría",
+            "Filter by category",
             options=cats,
             index=cats.index(cat_filter) if cat_filter in cats else 0,
             key="wiz_template_cat",
         )
-        if cat_filter == "Todas":
+        if cat_filter == "All":
             templates = list_templates()
         else:
             templates = list_templates_by_category(cat_filter)
-        template_options = {"": "— Sin plantilla —"}
+        template_options = {"": "— No template —"}
         for t in templates:
             template_options[t.id] = t.label
         sel_template = st.selectbox(
-            "Plantilla",
+            "Template",
             options=list(template_options.keys()),
             format_func=lambda k: template_options[k],
             index=list(template_options.keys()).index(state["template_id"])
@@ -1309,7 +1309,7 @@ if current == 1:
     # Botón Siguiente
     col_nav = st.columns([3, 1])
     with col_nav[1]:
-        if st.button("Siguiente →", type="primary", use_container_width=True,
+        if st.button("Next →", type="primary", use_container_width=True,
                      key="wiz_step1_next"):
             state["category"] = cat_pick
             state["template_id"] = sel_template
@@ -1343,40 +1343,40 @@ if current == 1:
 # =============================================================
 
 elif current == 2:
-    st.subheader("Paso 2 · Tren mecánico")
-    st.caption("Cuántas máquinas hay acopladas, qué tipo de cojinete, qué acople.")
+    st.subheader("Step 2 · Mechanical train")
+    st.caption("How many machines are coupled, what bearing type, what coupling.")
 
     col_l, col_r = st.columns(2)
 
     with col_l:
-        st.markdown("### Driver (motriz)")
+        st.markdown("### Driver (driving)")
         # Selector visual de icono (asset library System1-style)
         _render_icon_picker(state, role="driver", state_key="driver_icon_key", column=col_l)
         state["driver_type"] = st.text_input(
-            "Tipo / descripción",
+            "Type / description",
             value=state.get("driver_type") or state.get("driver_model") or "",
-            placeholder="Ej: GE LM6000, Solar Mars 100, Motor 4 polos",
+            placeholder="e.g. GE LM6000, Solar Mars 100, 4-pole motor",
             key="wiz_driver_type",
         )
         state["driver_planes"] = st.number_input(
-            "Cantidad de cojinetes (planos de medición)",
+            "Number of bearings (measurement planes)",
             min_value=1, max_value=6,
             value=int(state.get("driver_planes", 2) or 2),
             key="wiz_driver_planes",
         )
         state["driver_bearing_kind"] = st.radio(
-            "Tipo de cojinete",
+            "Bearing type",
             options=["plain", "rolling"],
-            format_func=lambda k: {"plain": "🧱 Cojinete plano (fluid film)",
-                                   "rolling": "⚙️ Rodamiento (rolling element)"}[k],
+            format_func=lambda k: {"plain": "🧱 Plain bearing (fluid film)",
+                                   "rolling": "⚙️ Rolling bearing (rolling element)"}[k],
             index=["plain", "rolling"].index(state.get("driver_bearing_kind", "plain")),
             key="wiz_driver_bearing_kind",
         )
         if state["driver_bearing_kind"] == "rolling":
             state["driver_bearing_model"] = st.text_input(
-                "Modelo de rodamiento típico (opcional)",
+                "Typical bearing model (optional)",
                 value=state.get("driver_bearing_model", ""),
-                placeholder="Ej: SKF 6319, NU 220",
+                placeholder="e.g. SKF 6319, NU 220",
                 key="wiz_driver_bearing_model",
             )
 
@@ -1384,65 +1384,65 @@ elif current == 2:
 
     with col_r:
         if is_recip:
-            st.markdown("### Driven · Compresor reciprocante")
+            st.markdown("### Driven · Reciprocating compressor")
             # Selector visual de icono (asset library System1-style)
             _render_icon_picker(state, role="driven", state_key="driven_icon_key", column=col_r)
             state["driven_type"] = st.text_input(
-                "Modelo / fabricante",
+                "Model / manufacturer",
                 value=state.get("driven_type") or state.get("driven_model") or "",
-                placeholder="Ej: Ariel KBK/4, Burckhardt Process, Dresser-Rand HOS",
+                placeholder="e.g. Ariel KBK/4, Burckhardt Process, Dresser-Rand HOS",
                 key="wiz_driven_type",
             )
             state["cylinders_count"] = st.select_slider(
-                "Número de cilindros",
+                "Number of cylinders",
                 options=[2, 4, 6, 8],
                 value=int(state.get("cylinders_count", 4) or 4),
-                help="Frecuencia 1X = RPM/60; cada cilindro suma armónicos según "
-                     "configuración (single/double-acting, etapas).",
+                help="1X frequency = RPM/60; each cylinder adds harmonics depending "
+                     "on configuration (single/double-acting, stages).",
                 key="wiz_recip_cylinders",
             )
             state["include_rod_drop"] = st.checkbox(
-                "Incluir sensores de rod drop (1 por cilindro)",
+                "Include rod drop sensors (1 per cylinder)",
                 value=bool(state.get("include_rod_drop", True)),
-                help="Detección de desgaste de packing/rider band. Estándar API 618.",
+                help="Packing/rider band wear detection. API 618 standard.",
                 key="wiz_recip_rod_drop",
             )
             # En reciprocantes el "driven_planes" representa frame planes (top + side)
             state["driven_planes"] = 2
             state["driven_bearing_kind"] = "plain"
             st.caption(
-                "ℹ️ En reciprocantes los sensores van en el frame del compresor "
-                "y en cada crosshead, no en cojinetes radiales. ISO 20816-8."
+                "ℹ️ In reciprocating machines the sensors go on the compressor frame "
+                "and on each crosshead, not on radial bearings. ISO 20816-8."
             )
         else:
-            st.markdown("### Driven (accionada)")
+            st.markdown("### Driven (driven machine)")
             # Selector visual de icono (asset library System1-style)
             _render_icon_picker(state, role="driven", state_key="driven_icon_key", column=col_r)
             state["driven_type"] = st.text_input(
-                "Tipo / descripción",
+                "Type / description",
                 value=state.get("driven_type") or state.get("driven_model") or "",
-                placeholder="Ej: Generador Brush 54MW, Compresor Ariel KBK/4",
+                placeholder="e.g. Brush 54MW generator, Ariel KBK/4 compressor",
                 key="wiz_driven_type",
             )
             state["driven_planes"] = st.number_input(
-                "Cantidad de cojinetes (planos de medición)",
+                "Number of bearings (measurement planes)",
                 min_value=1, max_value=6,
                 value=int(state.get("driven_planes", 2) or 2),
                 key="wiz_driven_planes",
             )
             state["driven_bearing_kind"] = st.radio(
-                "Tipo de cojinete",
+                "Bearing type",
                 options=["plain", "rolling"],
-                format_func=lambda k: {"plain": "🧱 Cojinete plano (fluid film)",
-                                       "rolling": "⚙️ Rodamiento (rolling element)"}[k],
+                format_func=lambda k: {"plain": "🧱 Plain bearing (fluid film)",
+                                       "rolling": "⚙️ Rolling bearing (rolling element)"}[k],
                 index=["plain", "rolling"].index(state.get("driven_bearing_kind", "rolling")),
                 key="wiz_driven_bearing_kind",
             )
             if state["driven_bearing_kind"] == "rolling":
                 state["driven_bearing_model"] = st.text_input(
-                    "Modelo de rodamiento típico (opcional)",
+                    "Typical bearing model (optional)",
                     value=state.get("driven_bearing_model", ""),
-                    placeholder="Ej: SKF 6319, NU 220",
+                    placeholder="e.g. SKF 6319, NU 220",
                     key="wiz_driven_bearing_model",
                 )
 
@@ -1450,38 +1450,38 @@ elif current == 2:
 
     # ===== Gearbox opcional (Ciclo 21.2) =====
     state["include_gearbox"] = st.checkbox(
-        "⚙️ Incluir gearbox / multiplicador entre driver y driven",
+        "⚙️ Include gearbox / step-up between driver and driven",
         value=bool(state.get("include_gearbox", False)),
-        help="Activá si hay una caja reductora/multiplicadora intermedia "
-             "(ej: turbina + gearbox + generador, motor + reductor + bomba).",
+        help="Enable if there is an intermediate reduction/step-up gearbox "
+             "(e.g. turbine + gearbox + generator, motor + gearbox + pump).",
         key="wiz_include_gearbox",
     )
 
     if state["include_gearbox"]:
         with st.container(border=True):
-            st.markdown("### Gearbox / Caja reductora")
+            st.markdown("### Gearbox")
             gc1, gc2 = st.columns(2)
             with gc1:
                 state["gearbox_type"] = st.text_input(
-                    "Tipo / fabricante (opcional)",
+                    "Type / manufacturer (optional)",
                     value=state.get("gearbox_type", ""),
-                    placeholder="Ej: Lufkin, Voith, Flender",
+                    placeholder="e.g. Lufkin, Voith, Flender",
                     key="wiz_gearbox_type",
                 )
                 state["gearbox_planes"] = st.number_input(
-                    "Cojinetes del gearbox",
+                    "Gearbox bearings",
                     min_value=2, max_value=6,
                     value=int(state.get("gearbox_planes", 2)),
-                    help="Típico 2 (HSS = high speed shaft + LSS = low speed shaft). "
-                         "Hasta 4 si tiene piñones intermedios.",
+                    help="Typically 2 (HSS = high speed shaft + LSS = low speed shaft). "
+                         "Up to 4 if it has intermediate pinions.",
                     key="wiz_gearbox_planes",
                 )
             with gc2:
                 state["gearbox_bearing_kind"] = st.radio(
-                    "Tipo de cojinete del gearbox",
+                    "Gearbox bearing type",
                     options=["plain", "rolling"],
-                    format_func=lambda k: {"plain": "🧱 Plano",
-                                           "rolling": "⚙️ Rodamiento"}[k],
+                    format_func=lambda k: {"plain": "🧱 Plain",
+                                           "rolling": "⚙️ Rolling"}[k],
                     index=["plain", "rolling"].index(
                         state.get("gearbox_bearing_kind", "rolling")
                     ),
@@ -1490,20 +1490,20 @@ elif current == 2:
                 )
                 if state["gearbox_bearing_kind"] == "rolling":
                     state["gearbox_bearing_model"] = st.text_input(
-                        "Modelo de rodamiento típico (opcional)",
+                        "Typical bearing model (optional)",
                         value=state.get("gearbox_bearing_model", ""),
-                        placeholder="Ej: SKF NU 220, Timken 32220",
+                        placeholder="e.g. SKF NU 220, Timken 32220",
                         key="wiz_gearbox_bearing_model",
                     )
 
-    st.markdown("### Acople")
+    st.markdown("### Coupling")
     state["coupling_class"] = st.radio(
-        "Tipo de acople",
+        "Coupling type",
         options=["rigid", "flexible", "fluid"],
         format_func=lambda k: {
-            "rigid": "🔗 Rígido",
+            "rigid": "🔗 Rigid",
             "flexible": "🌀 Flexible (gear/disk/diaphragm)",
-            "fluid": "💧 Hidrodinámico / fluid coupling",
+            "fluid": "💧 Hydrodynamic / fluid coupling",
         }[k],
         index=["rigid", "flexible", "fluid"].index(state.get("coupling_class", "flexible")),
         horizontal=True,
@@ -1517,17 +1517,17 @@ elif current == 2:
         _render_train_preview(state)
     else:
         st.caption(
-            "💡 Elegí icono visual del driver y driven arriba para ver el "
-            "preview del tren acoplado completo (estilo System1 / AMS)."
+            "💡 Pick a visual icon for the driver and driven above to see the "
+            "full coupled-train preview (System1 / AMS style)."
         )
 
     col_nav = st.columns([1, 2, 1])
     with col_nav[0]:
-        if st.button("← Atrás", use_container_width=True, key="wiz_step2_prev"):
+        if st.button("← Back", use_container_width=True, key="wiz_step2_prev"):
             _go_prev()
             st.rerun()
     with col_nav[2]:
-        if st.button("Siguiente →", type="primary", use_container_width=True,
+        if st.button("Next →", type="primary", use_container_width=True,
                      key="wiz_step2_next"):
             _go_next()
             st.rerun()
@@ -1538,24 +1538,24 @@ elif current == 2:
 # =============================================================
 
 elif current == 3:
-    st.subheader("Paso 3 · Instrumentación")
+    st.subheader("Step 3 · Instrumentation")
     st.caption(
-        "Qué tipo de sensores hay en cada máquina. El sistema arma el mapa "
-        "completo según las prácticas API 670 / ISO 20816."
+        "What type of sensors are on each machine. The system builds the full "
+        "map following API 670 / ISO 20816 practices."
     )
 
     instrum_options = {
-        "proximity_xy": "🎯 Proximidad XY (no contacto, par X-Y a 45°)",
-        "axial_accel": "📍 Acelerómetro carcasa (1 radial top por plano)",
-        "accel_plus_velocity": "📊 Acelerómetro + Velocímetro (carcasa, completo)",
+        "proximity_xy": "🎯 Proximity XY (non-contact, X-Y pair at 45°)",
+        "axial_accel": "📍 Casing accelerometer (1 radial top per plane)",
+        "accel_plus_velocity": "📊 Accelerometer + Velometer (casing, full)",
     }
 
     col_l, col_r = st.columns(2)
 
     with col_l:
-        st.markdown("### Driver — instrumentación")
+        st.markdown("### Driver — instrumentation")
         state["driver_instrumentation"] = st.radio(
-            "Tipo de sensores en el driver",
+            "Sensor type on the driver",
             options=list(instrum_options.keys()),
             format_func=lambda k: instrum_options[k],
             index=list(instrum_options.keys()).index(
@@ -1567,20 +1567,20 @@ elif current == 3:
     with col_r:
         is_recip = state.get("category") == "reciprocating_compressor"
         if is_recip:
-            st.markdown("### Driven · Compresor reciprocante")
+            st.markdown("### Driven · Reciprocating compressor")
             st.info(
-                "**Instrumentación API 618 / ISO 20816-8:**\n"
-                "- 1 velocímetro frame top (radial)\n"
-                "- 1 velocímetro frame side (lateral)\n"
-                f"- 1 acelerómetro crosshead × {state.get('cylinders_count', 4)} cilindros\n"
-                + (f"- 1 rod drop × {state.get('cylinders_count', 4)} cilindros\n"
+                "**API 618 / ISO 20816-8 instrumentation:**\n"
+                "- 1 frame top velometer (radial)\n"
+                "- 1 frame side velometer (lateral)\n"
+                f"- 1 crosshead accelerometer × {state.get('cylinders_count', 4)} cylinders\n"
+                + (f"- 1 rod drop × {state.get('cylinders_count', 4)} cylinders\n"
                    if state.get("include_rod_drop", True) else "")
             )
             state["driven_instrumentation"] = "reciprocating"
         else:
-            st.markdown("### Driven — instrumentación")
+            st.markdown("### Driven — instrumentation")
             state["driven_instrumentation"] = st.radio(
-                "Tipo de sensores en el driven",
+                "Sensor type on the driven",
                 options=list(instrum_options.keys()),
                 format_func=lambda k: instrum_options[k],
                 index=list(instrum_options.keys()).index(
@@ -1591,59 +1591,59 @@ elif current == 3:
 
     # ===== Instrumentación del gearbox (Ciclo 21.2) =====
     if state.get("include_gearbox"):
-        st.markdown("### Gearbox — instrumentación")
+        st.markdown("### Gearbox — instrumentation")
         state["gearbox_instrumentation"] = st.radio(
-            "Tipo de sensores en el gearbox",
+            "Sensor type on the gearbox",
             options=list(instrum_options.keys()),
             format_func=lambda k: instrum_options[k],
             index=list(instrum_options.keys()).index(
                 state.get("gearbox_instrumentation", "axial_accel")
             ),
-            help="Lo más común en gearboxes industriales es axial_accel "
-                 "(acelerómetro carcasa por cojinete).",
+            help="The most common on industrial gearboxes is axial_accel "
+                 "(casing accelerometer per bearing).",
             key="wiz_gearbox_instrum",
         )
 
     st.markdown("---")
-    st.markdown("### Referencia 1X (keyphasor)")
+    st.markdown("### 1X reference (keyphasor)")
     state["include_keyphasor"] = st.checkbox(
-        "Incluir keyphasor (sensor de fase 1X en el coupling)",
+        "Include keyphasor (1X phase sensor on the coupling)",
         value=bool(state.get("include_keyphasor", True)),
-        help="Sensor de proximidad apuntando a una marca en el eje. "
-             "Necesario para análisis de fase, órbita filtrada y Bode/Polar.",
+        help="Proximity sensor aimed at a mark on the shaft. "
+             "Required for phase analysis, filtered orbit and Bode/Polar.",
         key="wiz_keyphasor",
     )
 
-    st.markdown("### Canales por sensor")
+    st.markdown("### Channels per sensor")
     state["channels_per_sensor"] = st.select_slider(
-        "Cantidad de señales por sensor",
+        "Number of signals per sensor",
         options=[1, 2, 3],
         value=int(state.get("channels_per_sensor", 1) or 1),
-        help="1 canal: solo amplitud RMS. 2 canales: RMS + waveform. 3 canales: + spectrum.",
+        help="1 channel: RMS amplitude only. 2 channels: RMS + waveform. 3 channels: + spectrum.",
         key="wiz_channels",
     )
 
     # Preview rápido del mapa (incluye gearbox)
-    with st.expander("👁️ Vista previa del mapa de sensores que se va a generar",
+    with st.expander("👁️ Preview of the sensor map that will be generated",
                      expanded=True):
         try:
             preview = _build_full_sensor_map(state)
-            st.markdown(f"**Total de sensores:** {len(preview)}")
+            st.markdown(f"**Total sensors:** {len(preview)}")
             for s in preview:
                 plane = s.get("plane_label", f"plano {s.get('plane', '?')}")
                 stype = s.get("sensor_type", "?")
                 direction = s.get("direction", "?")
                 st.markdown(f"- `{plane}` · {stype} · dir: {direction}")
         except Exception as e:
-            st.warning(f"No se pudo previsualizar: {e}")
+            st.warning(f"Could not preview: {e}")
 
     col_nav = st.columns([1, 2, 1])
     with col_nav[0]:
-        if st.button("← Atrás", use_container_width=True, key="wiz_step3_prev"):
+        if st.button("← Back", use_container_width=True, key="wiz_step3_prev"):
             _go_prev()
             st.rerun()
     with col_nav[2]:
-        if st.button("Siguiente →", type="primary", use_container_width=True,
+        if st.button("Next →", type="primary", use_container_width=True,
                      key="wiz_step3_next"):
             # Ciclo 23.6 — el mapa ya NO se genera acá. Se genera al pasar
             # del nuevo paso 4 (Unidades & setpoints) al nuevo paso 5
@@ -1661,20 +1661,20 @@ elif current == 3:
 # =============================================================
 
 elif current == 4:
-    st.subheader("Paso 4 · Unidades y setpoints")
+    st.subheader("Step 4 · Units and setpoints")
     st.caption(
-        "Define las unidades en que reporta cada tipo de sensor, y los niveles "
-        "alarm/danger. Estos valores son la fuente de verdad — Tabular List, "
-        "Trends y Reports los respetan. En el siguiente paso podrás ajustar "
-        "sensor por sensor si alguno tiene umbrales distintos al estándar."
+        "Define the units each sensor type reports in, and the alarm/danger "
+        "levels. These values are the source of truth — Tabular List, "
+        "Trends and Reports respect them. In the next step you can adjust "
+        "sensor by sensor if any has thresholds different from the standard."
     )
 
     col_a, col_b, col_c = st.columns(3)
 
     with col_a:
-        st.markdown("### Desplazamiento (proximidad)")
+        st.markdown("### Displacement (proximity)")
         state["displacement_unit"] = st.selectbox(
-            "Unidad",
+            "Unit",
             options=["mil pp", "µm pp"],
             index=["mil pp", "µm pp"].index(
                 state.get("displacement_unit", "mil pp")
@@ -1696,15 +1696,15 @@ elif current == 4:
             key="wiz_prox_danger",
         )
         if state["displacement_unit"] == "µm pp":
-            st.caption("(Equivale a {:.0f} / {:.0f} µm pp)".format(
+            st.caption("(Equivalent to {:.0f} / {:.0f} µm pp)".format(
                 state["proximity_alarm_mil_pp"] * 25.4,
                 state["proximity_danger_mil_pp"] * 25.4,
             ))
 
     with col_b:
-        st.markdown("### Velocidad")
+        st.markdown("### Velocity")
         state["velocity_unit"] = st.selectbox(
-            "Unidad",
+            "Unit",
             options=["mm/s pk", "mm/s rms", "in/s pk"],
             index=["mm/s pk", "mm/s rms", "in/s pk"].index(
                 state.get("velocity_unit", "mm/s pk")
@@ -1727,9 +1727,9 @@ elif current == 4:
         )
 
     with col_c:
-        st.markdown("### Aceleración")
+        st.markdown("### Acceleration")
         state["acceleration_unit"] = st.selectbox(
-            "Unidad",
+            "Unit",
             options=["g pk", "g rms", "m/s² rms"],
             index=["g pk", "g rms", "m/s² rms"].index(
                 state.get("acceleration_unit", "g pk")
@@ -1752,17 +1752,17 @@ elif current == 4:
         )
 
     st.info(
-        "💡 Si la plantilla LATAM tiene una norma ISO recomendada, los "
-        "setpoints ya vienen ajustados. Podés sobreescribirlos arriba."
+        "💡 If the LATAM template has a recommended ISO standard, the "
+        "setpoints come pre-adjusted. You can override them above."
     )
 
     col_nav = st.columns([1, 2, 1])
     with col_nav[0]:
-        if st.button("← Atrás", use_container_width=True, key="wiz_step4_prev"):
+        if st.button("← Back", use_container_width=True, key="wiz_step4_prev"):
             _go_prev()
             st.rerun()
     with col_nav[2]:
-        if st.button("Siguiente →", type="primary", use_container_width=True,
+        if st.button("Next →", type="primary", use_container_width=True,
                      key="wiz_step4_next"):
             # Ciclo 23.6 — al pasar de Unidades & setpoints (nuevo paso 4) al
             # editor de sensores (nuevo paso 5):
@@ -1817,17 +1817,17 @@ elif current == 4:
 # =============================================================
 
 elif current == 5:
-    st.subheader("Paso 5 · Ajustar sensores generados")
+    st.subheader("Step 5 · Adjust generated sensors")
     st.caption(
-        "Sensores generados con las unidades y setpoints del paso anterior. "
-        "Acá podés ajustar individualmente lados, ángulos, tipos, unidades y "
-        "patrones de match al CSV. Si un sensor tiene umbrales distintos al "
-        "estándar (ej. un canal calibrado distinto), editalo en la tabla."
+        "Sensors generated with the units and setpoints from the previous step. "
+        "Here you can individually adjust sides, angles, types, units and "
+        "CSV match patterns. If a sensor has thresholds different from the "
+        "standard (e.g. a differently calibrated channel), edit it in the table."
     )
 
     sensors_override = state.get("sensors_override")
     if not sensors_override:
-        st.warning("No hay sensores generados. Volvé al paso 4 (unidades) y dale Siguiente.")
+        st.warning("No sensors generated. Go back to step 4 (units) and click Next.")
     else:
         import pandas as pd
 
@@ -1835,22 +1835,22 @@ elif current == 5:
         # Antes solo aparecía para reciprocating_compressor, dejando a las
         # demás máquinas sin posicionamiento visual.
         tab_visual, tab_table = st.tabs([
-            "🎨 Editor visual (click para reposicionar)",
-            "📋 Tabla de sensores",
+            "🎨 Visual editor (click to reposition)",
+            "📋 Sensor table",
         ])
         with tab_visual:
             is_recip = state.get("category") == "reciprocating_compressor"
             if is_recip:
                 st.caption(
-                    "Hacé click sobre la imagen para mover el sensor seleccionado a "
-                    "esa posición. El esquema se genera según N cilindros + N "
-                    "cojinetes del motor."
+                    "Click on the image to move the selected sensor to "
+                    "that position. The schematic is generated from N cylinders + N "
+                    "motor bearings."
                 )
             else:
                 st.caption(
-                    "Hacé click sobre la imagen para mover el sensor seleccionado a "
-                    "esa posición. El esquema muestra el tren acoplado driver + "
-                    "acople + driven con los cojinetes numerados."
+                    "Click on the image to move the selected sensor to "
+                    "that position. The schematic shows the coupled train driver + "
+                    "coupling + driven with the bearings numbered."
                 )
             _render_visual_editor(state, sensors_override)
         with tab_table:
@@ -1858,8 +1858,8 @@ elif current == 5:
 
         col_actions = st.columns([1, 1, 2])
         with col_actions[0]:
-            if st.button("🔄 Regenerar desde paso 4",
-                         help="Descarta cambios y reconstruye el mapa con las unidades del paso 4",
+            if st.button("🔄 Regenerate from step 4",
+                         help="Discards changes and rebuilds the map with the step 4 units",
                          key="wiz_regen_sensors"):
                 # Fuerza un data_editor nuevo (limpia added_rows/edited_rows
                 # que sobrevivían a la regeneración y metían filas fantasma).
@@ -1894,11 +1894,11 @@ elif current == 5:
 
     col_nav = st.columns([1, 2, 1])
     with col_nav[0]:
-        if st.button("← Atrás", use_container_width=True, key="wiz_step5_prev"):
+        if st.button("← Back", use_container_width=True, key="wiz_step5_prev"):
             _go_prev()
             st.rerun()
     with col_nav[2]:
-        if st.button("Siguiente →", type="primary", use_container_width=True,
+        if st.button("Next →", type="primary", use_container_width=True,
                      key="wiz_step5_next"):
             # Persistir edits del data_editor antes de avanzar.
             edited_df = state.get("_wizard_table_edited")
@@ -1949,54 +1949,54 @@ elif current == 5:
 # =============================================================
 
 elif current == 6:
-    st.subheader("Paso 6 · Datos del activo")
-    st.caption("Última info y creamos.")
+    st.subheader("Step 6 · Asset data")
+    st.caption("Final info and we create it.")
 
     col_l, col_r = st.columns(2)
 
     with col_l:
         suggested_id = state.get("instance_id") or _slug_default(state)
         state["instance_id"] = st.text_input(
-            "ID único del activo (slug)",
+            "Unique asset ID (slug)",
             value=suggested_id,
-            help="Solo letras, números, guiones y guiones bajos. Ej: 'tes1', 'parex_c200c'.",
+            help="Only letters, numbers, hyphens and underscores. E.g. 'tes1', 'parex_c200c'.",
             key="wiz_instance_id",
         )
         state["tag"] = st.text_input(
-            "Tag interno del cliente",
+            "Client internal tag",
             value=state.get("tag", ""),
-            placeholder="Ej: TES1, C-200-C, SGT300A",
+            placeholder="e.g. TES1, C-200-C, SGT300A",
             key="wiz_tag",
         )
         state["client"] = st.text_input(
-            "Cliente",
+            "Client",
             value=state.get("client", ""),
-            placeholder="Ej: Ecopetrol — Magnex, Parex",
+            placeholder="e.g. Ecopetrol — Magnex, Parex",
             key="wiz_client",
         )
         state["site"] = st.text_input(
-            "Sitio / planta",
+            "Site / plant",
             value=state.get("site", ""),
-            placeholder="Ej: Termosuria Villavicencio",
+            placeholder="e.g. Termosuria Villavicencio",
             key="wiz_site",
         )
         state["location"] = st.text_input(
-            "Ubicación física (opcional)",
+            "Physical location (optional)",
             value=state.get("location", ""),
-            placeholder="Ej: Planta La Belleza, Plato, Magdalena",
+            placeholder="e.g. La Belleza plant, Plato, Magdalena",
             key="wiz_location",
         )
 
     with col_r:
         state["nominal_rpm"] = st.number_input(
-            "RPM nominal",
+            "Nominal RPM",
             min_value=0.0,
             value=float(state.get("nominal_rpm", 0.0) or 0.0),
             step=100.0,
             key="wiz_rpm",
         )
         state["nominal_power_mw"] = st.number_input(
-            "Potencia nominal (MW)",
+            "Nominal power (MW)",
             min_value=0.0,
             value=float(state.get("nominal_power_mw", 0.0) or 0.0),
             step=1.0,
@@ -2008,47 +2008,47 @@ elif current == 6:
         if suggested_profile not in profile_options:
             suggested_profile = "custom_manual" if "custom_manual" in profile_options else profile_options[0]
         state["profile_key"] = st.selectbox(
-            "Profile (familia técnica)",
+            "Profile (technical family)",
             options=profile_options,
             index=profile_options.index(suggested_profile),
             format_func=lambda k: PROFILES[k].label,
             key="wiz_profile",
         )
         state["iso_norm_code"] = st.text_input(
-            "Norma ISO recomendada (opcional)",
+            "Recommended ISO standard (optional)",
             value=state.get("iso_norm_code", ""),
-            help="Ej: ISO_20816_2 o ISO_10816_7",
+            help="E.g. ISO_20816_2 or ISO_10816_7",
             key="wiz_iso",
         )
         state["notes"] = st.text_area(
-            "Notas técnicas",
+            "Technical notes",
             value=state.get("notes", ""),
             height=100,
             key="wiz_notes",
         )
 
     st.markdown("---")
-    st.markdown("### Resumen")
+    st.markdown("### Summary")
 
     s1, s2, s3, s4 = st.columns(4)
-    s1.metric("Categoría", state.get("category", "—"))
-    s2.metric("Cojinetes", f"D:{state['driver_planes']} + A:{state['driven_planes']}")
+    s1.metric("Category", state.get("category", "—"))
+    s2.metric("Bearings", f"D:{state['driver_planes']} + A:{state['driven_planes']}")
     s3.metric("Driver instr.", state["driver_instrumentation"].replace("_", " "))
     s4.metric("Driven instr.", state["driven_instrumentation"].replace("_", " "))
 
     s5, s6, s7, s8 = st.columns(4)
-    s5.metric("Despl.", state["displacement_unit"])
+    s5.metric("Displ.", state["displacement_unit"])
     s6.metric("Vel.", state["velocity_unit"])
-    s7.metric("Acel.", state["acceleration_unit"])
-    s8.metric("Keyphasor", "Sí" if state["include_keyphasor"] else "No")
+    s7.metric("Accel.", state["acceleration_unit"])
+    s8.metric("Keyphasor", "Yes" if state["include_keyphasor"] else "No")
 
     col_nav = st.columns([1, 2, 1])
     with col_nav[0]:
-        if st.button("← Atrás", use_container_width=True, key="wiz_step6_prev"):
+        if st.button("← Back", use_container_width=True, key="wiz_step6_prev"):
             _go_prev()
             st.rerun()
     with col_nav[2]:
-        if st.button("✅ Crear activo", type="primary", use_container_width=True,
+        if st.button("✅ Create asset", type="primary", use_container_width=True,
                      key="wiz_create"):
             try:
                 _execute_creation(state)
@@ -2059,12 +2059,12 @@ elif current == 6:
                 created_id = state['instance_id']
                 _reset_wizard()
                 st.success(
-                    f"✅ Activo '{created_id}' creado correctamente. "
-                    f"Sensores generados automáticamente. "
-                    f"Lo encontrás en Machinery Library."
+                    f"✅ Asset '{created_id}' created successfully. "
+                    f"Sensors generated automatically. "
+                    f"You can find it in Machinery Library."
                 )
             except Exception as e:
-                st.error(f"❌ Error al crear el activo: {e}")
+                st.error(f"❌ Error creating the asset: {e}")
 
 
 # =============================================================
@@ -2074,6 +2074,6 @@ elif current == 6:
 st.markdown("---")
 col_foot = st.columns([3, 1])
 with col_foot[1]:
-    if st.button("🔄 Reiniciar wizard", key="wiz_reset_btn"):
+    if st.button("🔄 Reset wizard", key="wiz_reset_btn"):
         _reset_wizard()
         st.rerun()

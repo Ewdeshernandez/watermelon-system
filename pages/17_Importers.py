@@ -26,7 +26,7 @@ from __future__ import annotations
 # v3.31.243 — set_page_config primero, sino el sidebar pierde estilos.
 import streamlit as st
 st.set_page_config(
-    page_title="Importadores & Plantillas — Watermelon",
+    page_title="Importers & Templates — Watermelon",
     page_icon="📥",
     layout="wide",
 )
@@ -59,16 +59,16 @@ from core.machine_templates import (
 
 from core.ui_theme import page_header as _wm_page_header  # hero compartido (v3.31.313)
 _wm_page_header(
-    "Importadores & Plantillas LATAM",
-    "Carga archivos de Emerson CSI 2140, Bently Nevada ADRE 408 o Universal File "
-    "Format (.uff/.unv), o elige una plantilla pre-cargada de las 20 máquinas más "
-    "comunes en O&G, generación y petroquímica LATAM.",
+    "Importers & LATAM Templates",
+    "Load Emerson CSI 2140, Bently Nevada ADRE 408 or Universal File "
+    "Format (.uff/.unv) files, or choose a pre-loaded template from the 20 most "
+    "common machines in LATAM O&G, power generation and petrochemicals.",
 )
 
 
 tab_import, tab_templates = st.tabs([
-    "📥 Importar CSV (CSI 2140 / ADRE 408 / UFF)",
-    "📚 Plantillas LATAM",
+    "📥 Import CSV (CSI 2140 / ADRE 408 / UFF)",
+    "📚 LATAM Templates",
 ])
 
 
@@ -77,13 +77,13 @@ tab_import, tab_templates = st.tabs([
 # =============================================================
 
 with tab_import:
-    st.subheader("Importar archivo de otro vendor")
+    st.subheader("Import a file from another vendor")
 
     col1, col2 = st.columns([1, 2])
 
     with col1:
         vendor = st.selectbox(
-            "Formato del archivo",
+            "File format",
             options=["csi2140", "adre408", "uff"],
             format_func=lambda v: {
                 "csi2140": "Emerson CSI 2140 (CSV)",
@@ -94,21 +94,21 @@ with tab_import:
         )
 
         st.caption({
-            "csi2140": "Exports del Machinery Health Analyzer (AMS Suite). Tiempo o espectro.",
-            "adre408": "Exports de ADREsoftware (precursor System1). Tiempo o espectro.",
-            "uff":     "Estándar SDRC/IDEAS dataset 58 (ASCII). Time response o spectrum.",
+            "csi2140": "Machinery Health Analyzer exports (AMS Suite). Time or spectrum.",
+            "adre408": "ADREsoftware exports (System1 predecessor). Time or spectrum.",
+            "uff":     "SDRC/IDEAS dataset 58 standard (ASCII). Time response or spectrum.",
         }[vendor])
 
     with col2:
         uploaded = st.file_uploader(
-            "Sube tu archivo",
+            "Upload your file",
             type=["csv", "txt", "uff", "unv", "asc"],
             key="importer_upload",
-            help="Tamaño máximo 200 MB. Múltiples archivos cargas uno por uno.",
+            help="Maximum size 200 MB. Load multiple files one at a time.",
         )
 
     if uploaded is not None:
-        with st.spinner(f"Parseando {uploaded.name} como {vendor}..."):
+        with st.spinner(f"Parsing {uploaded.name} as {vendor}..."):
             try:
                 if vendor == "csi2140":
                     loaded = parse_csi2140(uploaded, file_name=uploaded.name)
@@ -118,15 +118,15 @@ with tab_import:
                     loaded = parse_uff(uploaded, file_name=uploaded.name)
                 loaded.validate()
             except Exception as e:
-                st.error(f"❌ Error parseando el archivo: {e}")
+                st.error(f"❌ Error parsing the file: {e}")
                 st.stop()
 
-        st.success(f"✅ Archivo parseado correctamente como {vendor}")
+        st.success(f"✅ File parsed successfully as {vendor}")
 
         # Resumen
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Muestras", f"{loaded.x.size:,}")
-        m2.metric("Dominio", loaded.domain)
+        m1.metric("Samples", f"{loaded.x.size:,}")
+        m2.metric("Domain", loaded.domain)
         m3.metric("fs (Hz)", f"{loaded.fs:.1f}" if loaded.fs else "—")
         m4.metric("RPM", f"{loaded.rpm:.0f}" if loaded.rpm else "—")
 
@@ -142,15 +142,15 @@ with tab_import:
                 name=loaded.file_name,
             ))
             fig.update_layout(
-                xaxis_title="Tiempo (s)",
-                yaxis_title=f"Amplitud ({loaded.units or '—'})",
+                xaxis_title="Time (s)",
+                yaxis_title=f"Amplitude ({loaded.units or '—'})",
                 template="plotly_white",
                 height=400,
                 margin=dict(l=40, r=20, t=30, b=40),
             )
             st.plotly_chart(fig, use_container_width=True)
             if loaded.x.size > 5000:
-                st.caption(f"Mostrando primeros 5,000 puntos de {loaded.x.size:,} totales.")
+                st.caption(f"Showing first 5,000 points of {loaded.x.size:,} total.")
         elif loaded.domain == "spectrum":
             freq_axis = loaded.metadata.get("axis_freq_hz", [])
             fig = go.Figure()
@@ -161,8 +161,8 @@ with tab_import:
                 line=dict(width=1),
             ))
             fig.update_layout(
-                xaxis_title="Frecuencia (Hz)",
-                yaxis_title=f"Amplitud ({loaded.units or '—'})",
+                xaxis_title="Frequency (Hz)",
+                yaxis_title=f"Amplitude ({loaded.units or '—'})",
                 template="plotly_white",
                 height=400,
                 margin=dict(l=40, r=20, t=30, b=40),
@@ -170,7 +170,7 @@ with tab_import:
             st.plotly_chart(fig, use_container_width=True)
 
         # Metadata expandida
-        with st.expander("🔍 Metadata cruda parseada", expanded=False):
+        with st.expander("🔍 Parsed raw metadata", expanded=False):
             md_display = {k: v for k, v in loaded.metadata.items() if k != "axis_freq_hz"}
             st.json(md_display)
 
@@ -179,15 +179,15 @@ with tab_import:
         col_a, col_b = st.columns([1, 3])
         with col_a:
             do_inject = st.button(
-                "➕ Cargar como Signal Watermelon",
+                "➕ Load as Watermelon Signal",
                 type="primary",
                 use_container_width=True,
             )
         with col_b:
             st.caption(
-                "Inyecta este archivo al `st.session_state['signals']` para que "
-                "el resto de páginas (Spectrum, Trends, Orbit, etc.) lo vean "
-                "igual que si hubiera sido cargado por el flujo nativo."
+                "Injects this file into `st.session_state['signals']` so the "
+                "rest of the pages (Spectrum, Trends, Orbit, etc.) see it just "
+                "as if it had been loaded through the native flow."
             )
 
         if do_inject:
@@ -203,11 +203,11 @@ with tab_import:
                 signals[key] = signal
                 st.session_state["signals"] = signals
                 st.success(
-                    f"✅ Inyectado como '{key}'. Ya está disponible en las "
-                    f"otras páginas (Spectrum, Time Waveforms, Trends, etc.)."
+                    f"✅ Injected as '{key}'. It is now available on the "
+                    f"other pages (Spectrum, Time Waveforms, Trends, etc.)."
                 )
             except Exception as e:
-                st.error(f"❌ No se pudo inyectar al session_state: {e}")
+                st.error(f"❌ Could not inject into session_state: {e}")
 
 
 # =============================================================
@@ -215,18 +215,18 @@ with tab_import:
 # =============================================================
 
 with tab_templates:
-    st.subheader("Catálogo de plantillas LATAM (20 máquinas)")
+    st.subheader("LATAM template catalog (20 machines)")
     st.caption(
-        "Pre-carga de máquinas comunes en O&G, generación y petroquímica LATAM "
-        "con rodamientos típicos, normas ISO/API recomendadas y esquema de "
-        "sensores. Pensado para reducir el time-to-value de un activo nuevo."
+        "Pre-loaded common machines from LATAM O&G, power generation and "
+        "petrochemicals with typical bearings, recommended ISO/API standards "
+        "and sensor layout. Designed to reduce the time-to-value of a new asset."
     )
 
     cats = list_categories()
     col_a, col_b = st.columns([1, 3])
     with col_a:
         category_filter = st.selectbox(
-            "Filtrar por categoría",
+            "Filter by category",
             options=["Todas"] + cats,
             key="template_cat_filter",
         )
@@ -239,80 +239,80 @@ with tab_templates:
     with col_b:
         template_options = {t.id: t.label for t in templates}
         selected_id = st.selectbox(
-            "Plantilla",
+            "Template",
             options=list(template_options.keys()),
             format_func=lambda i: template_options.get(i, i),
             key="template_picker",
         )
 
     if not selected_id:
-        st.info("No hay plantillas en esta categoría.")
+        st.info("No templates in this category.")
         st.stop()
 
     t = get_template(selected_id)
     if t is None:
-        st.warning("Plantilla no encontrada.")
+        st.warning("Template not found.")
         st.stop()
 
     st.markdown(f"### {t.label}")
 
     # KPIs
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Fabricante", t.manufacturer or "—")
-    k2.metric("Categoría", t.category or "—")
-    k3.metric("RPM nominal", f"{t.operating_rpm_nominal:,.0f}" if t.operating_rpm_nominal else "—")
-    k4.metric("Tipo cojinete", t.bearing_type or "—")
+    k1.metric("Manufacturer", t.manufacturer or "—")
+    k2.metric("Category", t.category or "—")
+    k3.metric("Nominal RPM", f"{t.operating_rpm_nominal:,.0f}" if t.operating_rpm_nominal else "—")
+    k4.metric("Bearing type", t.bearing_type or "—")
 
     col_l, col_r = st.columns(2)
 
     with col_l:
-        st.markdown("**Aplicación**")
+        st.markdown("**Application**")
         st.write(", ".join(t.application) if t.application else "—")
 
-        st.markdown("**Potencia (kW)**")
+        st.markdown("**Power (kW)**")
         if t.rated_power_kw and len(t.rated_power_kw) >= 2:
             st.write(f"{t.rated_power_kw[0]:,.0f} – {t.rated_power_kw[-1]:,.0f} kW")
         else:
             st.write("—")
 
-        st.markdown("**Rango de RPM**")
+        st.markdown("**RPM range**")
         if t.operating_rpm_range and len(t.operating_rpm_range) == 2:
             st.write(f"{t.operating_rpm_range[0]:,.0f} – {t.operating_rpm_range[1]:,.0f}")
         else:
             st.write("—")
 
     with col_r:
-        st.markdown("**Norma ISO recomendada**")
+        st.markdown("**Recommended ISO standard**")
         st.write(f"{t.iso_norm_recommended} ({t.iso_class_recommended})" if t.iso_norm_recommended else "—")
 
-        st.markdown("**Norma API recomendada**")
+        st.markdown("**Recommended API standard**")
         st.write(t.api_norm_recommended or "—")
 
-        st.markdown("**Rodamientos típicos**")
+        st.markdown("**Typical bearings**")
         st.write(", ".join(t.common_bearings) if t.common_bearings else "—")
 
-    st.markdown("**Esquema de sensores recomendado**")
+    st.markdown("**Recommended sensor layout**")
     if t.sensor_layout:
         st.json(t.sensor_layout)
     else:
         st.write("—")
 
     if t.notes:
-        st.markdown("**Notas técnicas**")
+        st.markdown("**Technical notes**")
         st.info(t.notes)
 
     # =========================================================
     # Ciclo 18.3 — Crear activo desde esta plantilla
     # =========================================================
     st.markdown("---")
-    with st.expander("➕ Crear activo desde esta plantilla", expanded=False):
+    with st.expander("➕ Create asset from this template", expanded=False):
         from core.instance_state import create_instance, get_instance
         from core.machine_profiles import PROFILES as MACHINE_PROFILES
 
         st.caption(
-            "Auto-rellena los campos con los valores de la plantilla. "
-            "Podés editar todo antes de guardar — la plantilla es solo una "
-            "sugerencia, no una camisa de fuerza."
+            "Auto-fills the fields with the template values. "
+            "You can edit everything before saving — the template is only a "
+            "suggestion, not a straitjacket."
         )
 
         suggested_profile = suggest_profile_key_for_template(t.id) or "custom_manual"
@@ -324,12 +324,12 @@ with tab_templates:
 
         # Notas pre-llenadas con la metadata clave de la plantilla
         prefilled_notes_lines = [
-            f"Plantilla base: {t.label}",
-            f"Fabricante: {t.manufacturer}",
-            f"RPM nominal: {t.operating_rpm_nominal:,.0f}" if t.operating_rpm_nominal else "",
-            f"Norma ISO recomendada: {t.iso_norm_recommended} ({t.iso_class_recommended})" if t.iso_norm_recommended else "",
-            f"Norma API: {t.api_norm_recommended}" if t.api_norm_recommended else "",
-            f"Rodamientos típicos: {', '.join(t.common_bearings)}" if t.common_bearings else "",
+            f"Base template: {t.label}",
+            f"Manufacturer: {t.manufacturer}",
+            f"Nominal RPM: {t.operating_rpm_nominal:,.0f}" if t.operating_rpm_nominal else "",
+            f"Recommended ISO standard: {t.iso_norm_recommended} ({t.iso_class_recommended})" if t.iso_norm_recommended else "",
+            f"API standard: {t.api_norm_recommended}" if t.api_norm_recommended else "",
+            f"Typical bearings: {', '.join(t.common_bearings)}" if t.common_bearings else "",
             "",
             t.notes or "",
         ]
@@ -339,39 +339,39 @@ with tab_templates:
             col_a, col_b = st.columns(2)
             with col_a:
                 inst_id_in = st.text_input(
-                    "ID del activo (slug único)",
-                    placeholder=f"{t.id}_planta_x",
-                    help="Solo letras, números, guiones y guiones bajos.",
+                    "Asset ID (unique slug)",
+                    placeholder=f"{t.id}_plant_x",
+                    help="Only letters, numbers, hyphens and underscores.",
                 )
                 tag_in = st.text_input(
-                    "Tag interno del cliente",
+                    "Client internal tag",
                     placeholder="C200C, Mars-1, etc.",
                 )
             with col_b:
                 profile_in = st.selectbox(
-                    "Profile (familia técnica)",
+                    "Profile (technical family)",
                     options=all_profiles,
                     index=default_idx,
                     format_func=lambda pk: f"{MACHINE_PROFILES[pk].label}",
-                    help="Sugerido a partir de la categoría y RPM de la plantilla. Editable.",
+                    help="Suggested from the template's category and RPM. Editable.",
                 )
                 serial_in = st.text_input(
-                    "Número de serie OEM",
+                    "OEM serial number",
                     placeholder="GE-12345-A",
                 )
 
             location_in = st.text_input(
-                "Ubicación física",
-                placeholder="Ej: Planta La Belleza, Plato, Magdalena",
+                "Physical location",
+                placeholder="e.g. Planta La Belleza, Plato, Magdalena",
             )
             notes_in = st.text_area(
-                "Notas",
+                "Notes",
                 value=prefilled_notes,
                 height=160,
             )
 
             submitted = st.form_submit_button(
-                "✅ Crear activo",
+                "✅ Create asset",
                 type="primary",
                 use_container_width=True,
             )
@@ -379,9 +379,9 @@ with tab_templates:
             if submitted:
                 clean_id = inst_id_in.strip()
                 if not clean_id:
-                    st.error("El ID es obligatorio.")
+                    st.error("The ID is required.")
                 elif get_instance(clean_id) is not None:
-                    st.error(f"Ya existe un activo con ID '{clean_id}'. Elegí otro.")
+                    st.error(f"An asset with ID '{clean_id}' already exists. Choose another.")
                 else:
                     try:
                         inst = create_instance(
@@ -394,10 +394,10 @@ with tab_templates:
                             seed_from_profile=True,
                         )
                         st.success(
-                            f"✅ Activo '{inst.instance_id}' creado desde plantilla "
+                            f"✅ Asset '{inst.instance_id}' created from template "
                             f"'{t.label}'. Profile: {profile_in}. "
-                            f"Lo encontrás en Machinery Library."
+                            f"You can find it in Machinery Library."
                         )
                         st.session_state["wm_active_instance_id"] = inst.instance_id
                     except Exception as e:
-                        st.error(f"No se pudo crear el activo: {e}")
+                        st.error(f"Could not create the asset: {e}")

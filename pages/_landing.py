@@ -135,18 +135,18 @@ if _my_role in ("admin", "specialist"):
                      border-radius:12px;padding:14px 18px;margin:4px 0 10px 0;
                      box-shadow:0 2px 8px rgba(245,158,11,0.15);">
                     <span style="font-weight:800;color:#92400e;font-size:15px;">
-                        🔔 {_n_pend} reporte(s) PENDIENTES de aprobación
+                        🔔 {_n_pend} report(s) PENDING approval
                     </span>
                     <span style="color:#78350f;font-size:13px;">
-                        &nbsp;— el sistema los generó y esperan tu revisión,
-                        firma y envío al cliente.
+                        &nbsp;— the system generated them and they await your review,
+                        signature and delivery to the client.
                     </span>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
         with _al2:
-            if st.button("✅ Ir a aprobar", key="home_goto_briefing",
+            if st.button("✅ Go to approve", key="home_goto_briefing",
                          type="primary", use_container_width=True):
                 st.switch_page("pages/_asset_briefing.py")
 
@@ -656,13 +656,13 @@ _unk  = _fleet["by_severity"].get("unknown", 0)
 
 # Línea de status: prioriza la peor noticia
 if _dang > 0:
-    _status_dot, _status_color, _status_text = "⬤", "#ef4444", f"{_dang} activo(s) en estado crítico"
+    _status_dot, _status_color, _status_text = "⬤", "#ef4444", f"{_dang} asset(s) in critical condition"
 elif _warn > 0:
-    _status_dot, _status_color, _status_text = "⬤", "#f59e0b", f"{_warn} activo(s) requieren atención"
+    _status_dot, _status_color, _status_text = "⬤", "#f59e0b", f"{_warn} asset(s) require attention"
 elif _total == 0:
-    _status_dot, _status_color, _status_text = "⬤", "#94a3b8", "Sin activos cargados — empezá creando uno en Machinery Library"
+    _status_dot, _status_color, _status_text = "⬤", "#94a3b8", "No assets loaded — start by creating one in Machinery Library"
 else:
-    _status_dot, _status_color, _status_text = "⬤", "#10b981", f"{_total} activo(s) monitoreado(s) · sin alertas críticas"
+    _status_dot, _status_color, _status_text = "⬤", "#10b981", f"{_total} asset(s) monitored · no critical alerts"
 
 
 # Ciclo 17.24 — Último reporte archivado (para mostrar en el hero).
@@ -679,7 +679,7 @@ try:
     if _archived:
         _last = _archived[0]
         _archived_at_iso = _last.get("archived_at", "") or ""
-        _last_asset = _last.get("asset_name", "") or _last.get("client_name", "") or "reporte"
+        _last_asset = _last.get("asset_name", "") or _last.get("client_name", "") or "report"
         # Calcular tiempo relativo en Python (server-side)
         _rel = ""
         try:
@@ -692,13 +692,13 @@ try:
                 _diff = (datetime.now(_tz.utc) - _then).total_seconds()
             _diff = max(0, _diff)
             if _diff < 60:
-                _rel = "hace un instante"
+                _rel = "just now"
             elif _diff < 3600:
-                _rel = f"hace {int(_diff // 60)} min"
+                _rel = f"{int(_diff // 60)} min ago"
             elif _diff < 86400:
-                _rel = f"hace {int(_diff // 3600)} h"
+                _rel = f"{int(_diff // 3600)} h ago"
             elif _diff < 86400 * 7:
-                _rel = f"hace {int(_diff // 86400)} días"
+                _rel = f"{int(_diff // 86400)} days ago"
             else:
                 _rel = _then.strftime("%d %b %Y").lower()
         except Exception:
@@ -713,7 +713,7 @@ try:
                 f'data-archived-at="{_archived_at_iso}" '
                 f'data-asset="{_last_asset}">'
                 f'<span class="wmh-lr-icon">📄</span> '
-                f'<span class="wmh-lr-text">último reporte: {_last_asset} · {_rel}</span>'
+                f'<span class="wmh-lr-text">last report: {_last_asset} · {_rel}</span>'
                 f'</div>'
             )
 except Exception:
@@ -813,8 +813,8 @@ def _render_fleet_map(instances) -> bool:
 
     sev_color = {"healthy": "#10b981", "warning": "#f59e0b",
                  "danger": "#ef4444", "unknown": "#94a3b8"}
-    sev_text = {"healthy": "Normal", "warning": "Atención",
-                "danger": "Crítico", "unknown": "Sin datos"}
+    sev_text = {"healthy": "Normal", "warning": "Attention",
+                "danger": "Critical", "unknown": "No data"}
 
     from core.instance_state import get_instance
     from core.health_score import compute_health_score
@@ -852,17 +852,17 @@ def _render_fleet_map(instances) -> bool:
         sev = sev if sev in sev_color else "unknown"
         train = getattr(inst, "asset_class", "") or getattr(inst, "profile_key", "") or "—"
         pts.append((lat, lon, sev, getattr(inst, "tag", "") or inst.instance_id,
-                    getattr(inst, "location", "") or "sin ubicación", train,
+                    getattr(inst, "location", "") or "no location", train,
                     _health_score(inst), inst.instance_id))
 
     # Vitrinas comerciales (DEMO, NO reales) — muestran alcance en las Américas
     # mientras crece la flota real. Quitar/editar esta lista cuando haya
     # activos reales en esas ubicaciones.
     DEMO_ASSETS = [
-        (29.7604, -95.3698, "healthy", "HOU-GT1", "Houston, Texas (EE.UU.)",
-         "Nuovo Pignone — Turbogenerador 54 MW", 88, ""),
-        (17.9892, -92.9281, "healthy", "VHA-GT1", "Villahermosa, Tabasco (México)",
-         "GE LM6000 — Turbogenerador 45 MW", 90, ""),
+        (29.7604, -95.3698, "healthy", "HOU-GT1", "Houston, Texas (USA)",
+         "Nuovo Pignone — 54 MW Turbogenerator", 88, ""),
+        (17.9892, -92.9281, "healthy", "VHA-GT1", "Villahermosa, Tabasco (Mexico)",
+         "GE LM6000 — 45 MW Turbogenerator", 90, ""),
     ]
     pts.extend(DEMO_ASSETS)
 
@@ -890,7 +890,7 @@ def _render_fleet_map(instances) -> bool:
          background:transparent;">
       <div id="wmglobe" style="width:100%;height:100%;display:flex;align-items:center;
            justify-content:center;color:#64748b;font-family:-apple-system,system-ui,sans-serif;
-           font-size:13px;">🌎 Cargando globo 3D…</div>
+           font-size:13px;">🌎 Loading 3D globe…</div>
     </div>
     <script>
     (function(){
@@ -910,9 +910,9 @@ def _render_fleet_map(instances) -> bool:
           .pointLabel(function(d){ return '<div style="background:#0b1f33;color:#e2e8f0;'
             + 'padding:6px 9px;border-radius:6px;border:1px solid #24496e;'
             + 'font:12px -apple-system,system-ui,sans-serif;">'
-            + '<b>'+d.tag+'</b><br>'+d.train+'<br>'+d.sev+' · Salud '+d.health
+            + '<b>'+d.tag+'</b><br>'+d.train+'<br>'+d.sev+' · Health '+d.health
             + '<br>📍 '+d.loc
-            + (d.live ? '<br><span style="color:#7ec8ff;">▸ Click: monitoreo en vivo</span>' : '')
+            + (d.live ? '<br><span style="color:#7ec8ff;">▸ Click: live monitoring</span>' : '')
             + '</div>'; })
           .ringsData(PTS).ringLat('lat').ringLng('lng')
           .ringColor(function(d){ return function(){ return d.color; }; })
@@ -948,7 +948,7 @@ def _render_fleet_map(instances) -> bool:
             load('https://unpkg.com/globe.gl',
               draw,
               function(){ document.getElementById('wmglobe').innerHTML =
-                          'No se pudo cargar el globo 3D. Refrescá la página.'; });
+                          'Could not load the 3D globe. Refresh the page.'; });
           });
       }
     })();
@@ -961,14 +961,14 @@ def _render_fleet_map(instances) -> bool:
 with left:
     st.markdown(
         '<div class="wmh-sec" style="font-size:13px;color:#334155;margin:14px 0 6px 0;">'
-        '🌎 Flota en las Américas <div class="bar"></div></div>',
+        '🌎 Fleet across the Americas <div class="bar"></div></div>',
         unsafe_allow_html=True,
     )
 
     if _total == 0:
         st.info(
-            "🔍 No hay instancias creadas todavía. "
-            "Ve a **Machinery Library → Crear nueva instancia** para empezar."
+            "🔍 No instances created yet. "
+            "Go to **Machinery Library → Create new instance** to get started."
         )
     else:
         # Mapa de flota (protagonista del Home, full width). Click en un
@@ -976,7 +976,7 @@ with left:
         _map_ok = _render_fleet_map(_fleet["instances"])
         if _map_ok:
             st.caption(
-                "🟢 Normal · 🟡 Atención · 🔴 Crítico · ⚪ Sin datos"
+                "🟢 Normal · 🟡 Attention · 🔴 Critical · ⚪ No data"
             )
 
         # v3.31.265 — Tabla compacta minimalista (reemplaza grid de
@@ -1068,7 +1068,7 @@ with left:
         for inst in instances:
             sev_class = inst.severity
             asset_line = inst.asset_class or inst.profile_key or "—"
-            loc_line = inst.location or "sin ubicación"
+            loc_line = inst.location or "no location"
 
             # Health score (carga la instancia full)
             try:
@@ -1119,7 +1119,7 @@ with left:
                     unsafe_allow_html=True,
                 )
             with c5:
-                if st.button("Abrir →", key=f"asset_open_{inst.instance_id}",
+                if st.button("Open →", key=f"asset_open_{inst.instance_id}",
                              use_container_width=True):
                     st.session_state["wm_active_instance"] = inst.instance_id
                     try:
@@ -1128,21 +1128,21 @@ with left:
                         pass
 
         if _fleet["total"] > 9:
-            st.caption(f"+ {_fleet['total'] - 9} activos más en Machinery Library →")
+            st.caption(f"+ {_fleet['total'] - 9} more assets in Machinery Library →")
 
 
 with right:
     st.markdown(
-        '<div class="wmh-sec">📰 Actividad reciente <div class="bar"></div></div>',
+        '<div class="wmh-sec">📰 Recent activity <div class="bar"></div></div>',
         unsafe_allow_html=True,
     )
 
     # Ciclo 17.15 — Toggle "Mi actividad / Toda la actividad" para
     # admin/specialist. Client siempre ve solo su actividad.
     if _my_role in ("admin", "specialist"):
-        _scope_label = {"mine": "🙋 Solo mía", "all": "🌐 Toda la actividad"}
+        _scope_label = {"mine": "🙋 Only mine", "all": "🌐 All activity"}
         _picked = st.radio(
-            "Alcance",
+            "Scope",
             options=["mine", "all"],
             format_func=lambda s: _scope_label[s],
             index=0 if _activity_scope == "mine" else 1,
@@ -1160,8 +1160,8 @@ with right:
             '<div class="wmh-feed-item">'
             '<div class="wmh-feed-icon">💤</div>'
             '<div class="wmh-feed-body">'
-            '<div class="wmh-feed-title">Sin actividad reciente</div>'
-            '<div class="wmh-feed-age">Empezá cargando un CSV o creando una instancia.</div>'
+            '<div class="wmh-feed-title">No recent activity</div>'
+            '<div class="wmh-feed-age">Start by uploading a CSV or creating an instance.</div>'
             '</div></div></div>',
             unsafe_allow_html=True,
         )
@@ -1218,12 +1218,12 @@ st.markdown(
         <span class="sep">│</span>
         <span class="seg">VAULT
             <span class="dot" style="background:{'#10b981' if _health['vault_status']=='OK' else '#94a3b8'};"></span>
-            <b>{_health['vault_status']}</b> · {_health['vault_n']} activos
+            <b>{_health['vault_status']}</b> · {_health['vault_n']} assets
         </span>
         <span class="sep">│</span>
-        <span class="seg">Última sync · <b>{_health['last_data_age']}</b></span>
+        <span class="seg">Last sync · <b>{_health['last_data_age']}</b></span>
         <span class="sep">│</span>
-        <span class="seg">Sesión: <b>{_full_name or 'anónimo'}</b></span>
+        <span class="seg">Session: <b>{_full_name or 'anonymous'}</b></span>
     </div>
     """,
     unsafe_allow_html=True,

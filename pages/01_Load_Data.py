@@ -778,20 +778,20 @@ _active_instance = get_instance(_active_instance_id) if _active_instance_id else
 # CSVs anónimos, siempre vinculados a una máquina física.
 if _active_instance is None:
     st.error(
-        "🚨 **No hay máquina activa.** Antes de cargar CSVs tenés que "
-        "seleccionar el activo monitoreado en **Machinery Library** "
-        "para que los datos queden vinculados a la máquina correcta."
+        "🚨 **No active machine.** Before loading CSVs you must "
+        "select the monitored asset in **Machinery Library** "
+        "so the data is linked to the correct machine."
     )
     st.info(
-        "Andá al menú lateral → **Machinery Library** → click en la "
-        "card de la máquina que vas a analizar (badge verde 'activa') "
-        "y volvé acá."
+        "Go to the sidebar → **Machinery Library** → click the "
+        "card of the machine you are going to analyze (green 'active' badge) "
+        "and come back here."
     )
     st.stop()
 
 # Banner verde con preview del esquemático + datos de la máquina
-_train_desc = compose_train_description(_active_instance) or "(sin descripción del tren)"
-_client = _active_instance.client or "(sin cliente)"
+_train_desc = compose_train_description(_active_instance) or "(no train description)"
+_client = _active_instance.client or "(no client)"
 _site = _active_instance.site or _active_instance.location or ""
 _tag = _active_instance.tag or _active_instance.instance_id
 
@@ -808,13 +808,13 @@ if _site:
     _meta_bits.append(_site)
 
 with st.container(border=True):
-    st.markdown(f"🟢 **Cargando CSVs para {_tag}** — {_train_desc}")
+    st.markdown(f"🟢 **Loading CSVs for {_tag}** — {_train_desc}")
     if _meta_bits:
         st.caption(" · ".join(_meta_bits))
     st.caption(
-        "ℹ️ Los CSVs que subas quedarán etiquetados con "
-        f"`instance_id={_active_instance.instance_id}` y disponibles en todos los "
-        "módulos de análisis (Polar, Bode, SCL, Spectrum, Time Waveforms, Trends) y Reports."
+        "ℹ️ The CSVs you upload will be tagged with "
+        f"`instance_id={_active_instance.instance_id}` and available in all "
+        "analysis modules (Polar, Bode, SCL, Spectrum, Time Waveforms, Trends) and Reports."
     )
 
 
@@ -920,15 +920,15 @@ if valid_files and _active_instance_id:
     }
 
     with st.expander(
-        f"💾 Guardar como snapshot para Live Monitoring ({len(valid_files)} CSVs)",
+        f"💾 Save as snapshot for Live Monitoring ({len(valid_files)} CSVs)",
         expanded=False,
     ):
         st.markdown(
             f"<div style='font-size:12px;color:#475569;margin-bottom:8px;'>"
-            f"Guarda automáticamente los 4 tipos de análisis al histórico del activo "
-            f"<code>{_active_instance_id}</code>. El cliente los ve después en Live "
-            f"Monitoring sin que tenga que cargar nada. Rotación LRU: máx 10 snapshots "
-            f"por tipo, el más viejo se reemplaza al insertar el #11.</div>",
+            f"Automatically saves the 4 analysis types to the history of asset "
+            f"<code>{_active_instance_id}</code>. The client sees them afterwards in Live "
+            f"Monitoring without having to load anything. LRU rotation: max 10 snapshots "
+            f"per type, the oldest is replaced when inserting #11.</div>",
             unsafe_allow_html=True,
         )
 
@@ -939,36 +939,36 @@ if valid_files and _active_instance_id:
             save_sp = st.checkbox("🔍 Spectrum", value=True, key="snap_save_sp")
         with ck_cols[2]:
             save_or = st.checkbox("🌀 Orbit", value=True, key="snap_save_or",
-                                  help="Solo si se detectan pares X/Y por filename.")
+                                  help="Only if X/Y pairs are detected by filename.")
         with ck_cols[3]:
             save_tb = st.checkbox("📋 Tabular", value=True, key="snap_save_tb")
 
         snap_label = st.text_input(
-            "Label de la corrida (opcional)",
-            placeholder="ej. Inspección mañana, Post-mantenimiento, Baseline...",
+            "Run label (optional)",
+            placeholder="e.g. Morning inspection, Post-maintenance, Baseline...",
             key="snap_corrida_label",
         )
         snap_notes = st.text_area(
-            "Notas (opcional)",
-            placeholder="Observaciones del especialista sobre esta corrida",
+            "Notes (optional)",
+            placeholder="Specialist observations about this run",
             key="snap_corrida_notes",
             height=72,
         )
         snap_rpm = st.number_input(
-            "Velocidad rotacional (RPM) — opcional, requerido para vectores 1X/2X",
+            "Rotational speed (RPM) — optional, required for 1X/2X vectors",
             min_value=0.0,
             max_value=30000.0,
             value=0.0,
             step=10.0,
             key="snap_corrida_rpm",
             help=(
-                "Si la conoces, mejora la calidad de Spectrum/Orbit/Tabular "
-                "(computa amplitudes a 1X y 2X de la frecuencia fundamental)."
+                "If you know it, it improves the quality of Spectrum/Orbit/Tabular "
+                "(computes amplitudes at 1X and 2X of the fundamental frequency)."
             ),
         )
 
         if st.button(
-            "✓ Guardar todo y continuar al procesamiento",
+            "✓ Save all and continue to processing",
             type="primary",
             use_container_width=True,
             key="snap_save_confirm",
@@ -982,14 +982,14 @@ if valid_files and _active_instance_id:
             # un snapshot SEPARADO. Antes, subir CSVs del 06/07 y del 13/07
             # juntos los fusionaba en un solo snapshot con la fecha más reciente
             # y mezclaba los canales de ambas fechas (bug de campo v3.31.442).
-            with st.spinner("Agrupando por fecha de medición y construyendo "
+            with st.spinner("Grouping by measurement date and building "
                             "payloads..."):
                 try:
                     from core.snapshot_batch_builder import (
                         group_parsed_files_by_measurement as _group_by_meas)
                     _date_groups = _group_by_meas(valid_files)
                 except Exception as e:
-                    st.error(f"Error agrupando por fecha: {e}")
+                    st.error(f"Error grouping by date: {e}")
                     _date_groups = [("", valid_files)]
 
             payloads = None  # se setea al primer grupo construido (guard abajo)
@@ -1011,7 +1011,7 @@ if valid_files and _active_instance_id:
                         _grp_rpm = _auto_rpm(_gfiles)
                         if _grp_rpm:
                             errors.append(
-                                f"ℹ RPM auto-detectada del CSV [{_glabel}]: "
+                                f"ℹ RPM auto-detected from CSV [{_glabel}]: "
                                 f"{_grp_rpm:.0f} rpm")
                     except Exception:  # noqa: BLE001
                         _grp_rpm = rpm
@@ -1021,7 +1021,7 @@ if valid_files and _active_instance_id:
                     )
                     payloads = _grp_payloads
                 except Exception as e:
-                    errors.append(f"✗ grupo {_glabel}: {e}")
+                    errors.append(f"✗ group {_glabel}: {e}")
                     continue
                 # Etiqueta de corrida: la del usuario + la fecha de la corrida
                 # (así snapshots de distinta fecha no comparten label idéntico).
@@ -1039,7 +1039,7 @@ if valid_files and _active_instance_id:
                         or []
                     )
                     if not items:
-                        errors.append(f"{stype} [{_glabel}]: sin datos para guardar")
+                        errors.append(f"{stype} [{_glabel}]: no data to save")
                         continue
                     try:
                         module_path, fn_name = SAVE_FUNCTIONS_MAP[stype]
@@ -1057,7 +1057,7 @@ if valid_files and _active_instance_id:
                             errors.append(f"✓ {stype} [{_glabel}]: {sid}")
                         else:
                             n_failed += 1
-                            errors.append(f"✗ {stype} [{_glabel}]: save devolvió None")
+                            errors.append(f"✗ {stype} [{_glabel}]: save returned None")
                     except Exception as e:
                         n_failed += 1
                         errors.append(f"✗ {stype} [{_glabel}]: {e}")
@@ -1066,13 +1066,13 @@ if valid_files and _active_instance_id:
                 if n_saved > 0:
                     _n_fechas = len([g for g in _date_groups if g[1]])
                     st.success(
-                        f"✓ {n_saved} snapshot(s) guardado(s) para "
-                        f"`{_active_instance_id}` en {_n_fechas} fecha(s) de "
-                        f"medición — ya visibles en Live Monitoring."
+                        f"✓ {n_saved} snapshot(s) saved for "
+                        f"`{_active_instance_id}` across {_n_fechas} measurement "
+                        f"date(s) — now visible in Live Monitoring."
                     )
                 if n_failed > 0:
                     st.warning(
-                        f"⚠ {n_failed} tipo(s) no se guardaron. Ver detalles abajo."
+                        f"⚠ {n_failed} type(s) were not saved. See details below."
                     )
 
                 # Ciclo 23.116/117 — Si orbit falló (cualquier motivo),
@@ -1111,10 +1111,10 @@ if valid_files and _active_instance_id:
                                 "match": "✗ no X/Y",
                             })
                     st.error(
-                        "**Orbit no se pudo guardar.** Para construir órbitas "
-                        "necesito DOS sensores en el MISMO plano (uno X, uno Y), "
-                        "ej. `3XD` + `3YD` o `VE5808 (X)` + `VE5808 (Y)`. "
-                        "Abajo está el diagnóstico de cómo identifiqué tus archivos:"
+                        "**Orbit could not be saved.** To build orbits "
+                        "I need TWO sensors in the SAME plane (one X, one Y), "
+                        "e.g. `3XD` + `3YD` or `VE5808 (X)` + `VE5808 (Y)`. "
+                        "Below is the diagnostic of how I identified your files:"
                     )
                     import pandas as pd
                     st.dataframe(
@@ -1127,18 +1127,18 @@ if valid_files and _active_instance_id:
                     n_y = sum(1 for r in matched if r["axis"] == "Y")
                     bearings = sorted(set(r["bearing_key"] for r in matched))
                     st.caption(
-                        f"Detectados: {n_x} eje X · {n_y} eje Y · "
-                        f"bearings únicos: {bearings or '(ninguno)'}. "
-                        f"Para emparejar, ambos ejes deben compartir el mismo `bearing_key`."
+                        f"Detected: {n_x} X axis · {n_y} Y axis · "
+                        f"unique bearings: {bearings or '(none)'}. "
+                        f"To pair, both axes must share the same `bearing_key`."
                     )
 
-                with st.expander("Detalles del guardado"):
+                with st.expander("Save details"):
                     for line in errors:
                         st.text(line)
 elif valid_files and not _active_instance_id:
     st.info(
-        "💡 **Tip**: si seleccionás un activo en Machinery Library, podrás guardar "
-        "estos análisis automáticamente al histórico para que aparezcan en Live "
+        "💡 **Tip**: if you select an asset in Machinery Library, you can save "
+        "these analyses automatically to the history so they appear in Live "
         "Monitoring."
     )
 
@@ -1187,7 +1187,7 @@ with col_a:
 
 with col_b:
     st.markdown(
-        '<div class="wm-export-note">Solo los CSVs válidos se registran en la sesión de signals y pasan al workflow de Time Waveform Viewer. El contexto de máquina se vincula automáticamente desde la instancia activa.</div>',
+        '<div class="wm-export-note">Only valid CSVs are registered in the signals session and passed to the Time Waveform Viewer workflow. The machine context is linked automatically from the active instance.</div>',
         unsafe_allow_html=True,
     )
 
