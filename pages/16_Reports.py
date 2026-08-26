@@ -519,14 +519,14 @@ if _wm_my_role == "client":
                     margin-bottom:18px;">
           <div style="font-size:11px;font-weight:800;letter-spacing:0.18em;
                       text-transform:uppercase;color:#a5b4fc;">
-            🔐 Client access — Read only
+            🔐 Acceso de cliente — Solo lectura
           </div>
           <div style="font-size:22px;font-weight:800;margin:6px 0;">
-            📚 Report archive
+            📚 Archivo histórico de reportes
           </div>
           <div style="color:rgba(226,232,240,0.85);font-size:13px;">
-            Welcome <b>{_wm_my_email}</b>. Here you can view and download
-            the technical reports that SIGASAS has shared with you.
+            Bienvenido <b>{_wm_my_email}</b>. Acá podés consultar y descargar
+            los reportes técnicos que SIGASAS compartió con vos.
           </div>
         </div>
         """,
@@ -540,12 +540,12 @@ if _wm_my_role == "client":
     # Quedan solo filtros útiles: por activo + por año.
     cf1, cf2 = st.columns([2, 1])
     with cf1:
-        _cf_asset = st.text_input("Filter by asset",
-                                   placeholder="e.g. C-200C",
+        _cf_asset = st.text_input("Filtrar por activo",
+                                   placeholder="ej. C-200C",
                                    key="wm_cli_arch_asset").strip()
     with cf2:
         _cf_year = st.selectbox(
-            "Year",
+            "Año",
             options=["(todos)"] + [str(y) for y in range(datetime.now().year, 2023, -1)],
             index=0, key="wm_cli_arch_year",
         )
@@ -565,11 +565,11 @@ if _wm_my_role == "client":
     )
     if not _cli_archived:
         st.info(
-            "📭 No reports have been shared with you yet. "
-            "When SIGASAS publishes a new analysis, it will appear here."
+            "📭 No hay reportes compartidos contigo todavía. "
+            "Cuando SIGASAS publique un nuevo análisis, aparecerá acá."
         )
     else:
-        st.caption(f"{len(_cli_archived)} report(s) available")
+        st.caption(f"{len(_cli_archived)} reporte(s) disponibles")
         for sc in _cli_archived:
             rm = sc.get("report_meta", {}) or {}
             _aid = sc.get("archive_id", "")
@@ -601,7 +601,7 @@ if _wm_my_role == "client":
                       {_client} · {_asset}
                     </div>
                     <div style="color:#475569;font-size:12px;margin-top:2px;">
-                      Published {_date} · {_size}
+                      Publicado {_date} · {_size}
                     </div>
                   </div>
                   <div>{_sev_badge}</div>
@@ -613,7 +613,7 @@ if _wm_my_role == "client":
                                            viewer_role=_wm_my_role)
             if _pb:
                 st.download_button(
-                    "Download this report",
+                    "Descargar este reporte",
                     data=_pb,
                     file_name=f"{_aid.split('/')[-1]}.pdf",
                     mime="application/pdf",
@@ -623,8 +623,8 @@ if _wm_my_role == "client":
 
     st.divider()
     st.caption(
-        "Need a report that doesn't appear here? Contact your "
-        "SIGASAS specialist to request that it be published."
+        "¿Necesitás un reporte que no aparece acá? Contactá a tu "
+        "especialista SIGASAS para solicitar la publicación."
     )
     st.stop()
 

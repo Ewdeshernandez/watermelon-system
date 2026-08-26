@@ -369,18 +369,18 @@ def build_bode_text_diagnostics(
     max_amp = float(max_amp or 0.0)
 
     if not critical_speeds:
-        headline = "Bode response with no clearly identified dominant critical speed"
+        headline = "Respuesta Bode sin velocidad crítica dominante claramente identificada"
         detail = (
-            f"The Bode curve shows no dominant critical-speed candidate within the evaluated range. "
-            f"The observed peak amplitude is {max_amp:.3f}. The absence of a dominant peak accompanied by a clear phase rotation "
-            f"suggests a relatively controlled response for this run.\n\n"
-            f"From a rotordynamics standpoint, this condition should be kept as a historical reference for future comparison with new runs, "
-            f"since the analytical value of the Bode plot increases when contrasted with the Polar plot, 1X orbit and shaft centerline."
+            f"La curva Bode no evidencia un candidato dominante de velocidad crítica dentro del rango evaluado. "
+            f"La amplitud máxima observada es {max_amp:.3f}. La ausencia de un pico dominante acompañado por rotación clara de fase "
+            f"sugiere una respuesta relativamente controlada para esta corrida.\n\n"
+            f"Desde el punto de vista rotodinámico, esta condición debe conservarse como referencia histórica para comparación futura con nuevas corridas, "
+            f"ya que el valor analítico del Bode aumenta cuando se contrasta con Polar Plot, órbita 1X y shaft centerline."
         )
         action = (
-            "Keep this run as a comparison baseline.\n"
-            "Compare future Bode runs to identify phase migration, rising amplitude or the appearance of new peaks.\n"
-            "Correlate with the Polar plot, 1X orbits, spectrum and operating conditions."
+            "Mantener esta corrida como línea base de comparación.\n"
+            "Comparar futuras corridas Bode para identificar migración de fase, incremento de amplitud o aparición de picos nuevos.\n"
+            "Correlacionar con Polar Plot, órbitas 1X, espectro y condiciones operativas."
         )
         return {"headline": headline, "detail": detail, "action": action}
 
@@ -391,40 +391,40 @@ def build_bode_text_diagnostics(
 
     if phase_delta >= 60:
         modal_sentence = (
-            "The phase rotation is representative enough to consider a marked modal transition. "
-            "Below this zone the rotor responds in a predominantly rigid manner; on crossing the modal shape, "
-            "the response becomes governed by the dynamic flexibility of the rotor-support system."
+            "El giro de fase es suficientemente representativo para considerar una transición modal marcada. "
+            "Antes de esta zona el rotor responde de forma predominantemente rígida; al cruzar la forma modal, "
+            "la respuesta pasa a estar gobernada por flexibilidad dinámica del sistema rotor-soporte."
         )
     elif phase_delta >= 20:
         modal_sentence = (
-            "The phase rotation is moderate and suggests approach to a dynamic amplification zone. "
-            "There is a change in apparent dynamic stiffness, although a fully defined critical speed cannot yet be stated."
+            "El giro de fase es moderado y sugiere aproximación a una zona de amplificación dinámica. "
+            "Existe modificación de rigidez dinámica aparente, aunque no puede hablarse aún de una velocidad crítica completamente definida."
         )
     else:
         modal_sentence = (
-            "The phase rotation is low; therefore, the peak should be treated as an unconfirmed dynamic candidate. "
-            "The amplitude rise may be influenced by unbalance, eccentricity or operating condition."
+            "El giro de fase es bajo; por tanto, el pico debe tratarse como candidato dinámico no confirmado. "
+            "La elevación de amplitud puede estar influenciada por desbalance, excentricidad o condición operativa."
         )
 
     if status_up == "DANGER":
-        headline = f"Severe Bode response consistent with a critical speed near {rpm:.0f} rpm"
+        headline = f"Respuesta Bode severa compatible con velocidad crítica cerca de {rpm:.0f} rpm"
     elif status_up == "WARNING":
-        headline = f"Bode response with signs of dynamic amplification near {rpm:.0f} rpm"
+        headline = f"Respuesta Bode con indicios de amplificación dinámica cerca de {rpm:.0f} rpm"
     else:
-        headline = f"Controlled Bode response with a modal candidate near {rpm:.0f} rpm"
+        headline = f"Respuesta Bode controlada con candidato modal cerca de {rpm:.0f} rpm"
 
     detail = (
-        f"The Bode curve identifies a zone of interest around {rpm:.0f} rpm, with an approximate amplitude of {amp:.3f} "
-        f"and a phase change of {phase_delta:.1f}°. {modal_sentence}\n\n"
-        f"From a vibration-analysis and rotordynamics standpoint, when the amplitude peak appears accompanied by phase rotation "
-        f"in the same speed band, the likelihood of facing a critical speed or rotor modal shape increases."
+        f"La curva Bode identifica una zona de interés alrededor de {rpm:.0f} rpm, con amplitud aproximada de {amp:.3f} "
+        f"y variación de fase de {phase_delta:.1f}°. {modal_sentence}\n\n"
+        f"Desde el enfoque de análisis de vibraciones y dinámica de rotores, cuando el máximo de amplitud aparece acompañado por rotación de fase "
+        f"en el mismo corredor de velocidad, aumenta la probabilidad de estar frente a una velocidad crítica o forma modal del rotor."
     )
 
     action = (
-        "Correlate this zone with the Polar plot and 1X orbit.\n"
-        "Verify whether the phase change occurs before, during or after the amplitude peak.\n"
-        "Compare against historical runs to confirm repeatability or modal migration.\n"
-        "Validate balance, alignment, support stiffness, lubrication and load conditions."
+        "Correlacionar esta zona con Polar Plot y órbita 1X.\n"
+        "Verificar si el cambio de fase ocurre antes, durante o después del máximo de amplitud.\n"
+        "Comparar contra corridas históricas para confirmar repetibilidad o migración modal.\n"
+        "Validar condiciones de balance, alineación, rigidez de soporte, lubricación y carga."
     )
 
     return {"headline": headline, "detail": detail, "action": action}
@@ -1103,7 +1103,7 @@ def _build_bode_report_notes(text_diag: Dict[str, str]) -> str:
     if comparison_narrative:
         blocks.append(comparison_narrative)
     if action:
-        blocks.append("Recommended:\n" + action)
+        blocks.append("Se recomienda:\n" + action)
 
     return "\n\n".join(blocks).strip()
 

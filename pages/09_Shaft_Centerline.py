@@ -1162,71 +1162,71 @@ def _scl_compare_diagnostic(records: List[Dict[str, Any]]) -> Dict[str, str]:
         improvement_score += 1
 
     if all_over_limit or all_zero_margin:
-        trend_class = "sustained critical condition"
-        headline = "Multi-date comparison with a sustained critical condition of the rotor-bearing system"
+        trend_class = "condición crítica sostenida"
+        headline = "Comparación multi-fecha con condición crítica sostenida del sistema rotor-cojinete"
         trend_sentence = (
-            "All analyzed runs show operation outside the bearing's allowable geometric margin, "
-            "so this is not an isolated event but a persistent condition of the system."
+            "Todas las corridas analizadas muestran operación fuera del margen geométrico admisible del cojinete, "
+            "por lo que no se trata de un evento aislado sino de una condición persistente del sistema."
         )
     elif latest_critical and deterioration_score >= 2:
-        trend_class = "progressive deterioration toward a critical condition"
-        headline = "Multi-date comparison with progressive deterioration toward a critical condition"
+        trend_class = "deterioro progresivo hacia condición crítica"
+        headline = "Comparación multi-fecha con deterioro progresivo hacia condición crítica"
         trend_sentence = (
-            "The most recent run shows worsening relative to the baseline, "
-            "with a further reduction of the geometric margin and greater dynamic compromise of the shaft within the bearing."
+            "La corrida más reciente evidencia empeoramiento respecto a la línea base, "
+            "con reducción adicional del margen geométrico y mayor compromiso dinámico del eje dentro del cojinete."
         )
     elif deterioration_score >= 2:
-        trend_class = "progressive deterioration"
-        headline = "Multi-date comparison with progressive deterioration of the rotordynamic condition"
+        trend_class = "deterioro progresivo"
+        headline = "Comparación multi-fecha con deterioro progresivo de la condición rotodinámica"
         trend_sentence = (
-            "The sequential comparison shows an unfavorable trend, consistent with an increase in operating eccentricity "
-            "and a loss of hydrodynamic centering capacity."
+            "La comparación secuencial evidencia una tendencia desfavorable, compatible con incremento de excentricidad operativa "
+            "y pérdida de capacidad de centrado hidrodinámico."
         )
     elif improvement_score >= 2 and not latest_critical:
-        trend_class = "partial improvement"
-        headline = "Multi-date comparison with partial improvement relative to the baseline condition"
+        trend_class = "mejora parcial"
+        headline = "Comparación multi-fecha con mejora parcial respecto a la condición base"
         trend_sentence = (
-            "The most recent run shows a reduction of the geometric compromise relative to the baseline; "
-            "however, the condition must still be validated against the system's acceptance criteria."
+            "La corrida más reciente muestra reducción del compromiso geométrico frente a la línea base; "
+            "sin embargo, la condición aún debe validarse contra criterios de aceptación del sistema."
         )
     else:
-        trend_class = "moderate change"
-        headline = "Multi-date comparison with measurable operational changes in the shaft trajectory"
+        trend_class = "cambio moderado"
+        headline = "Comparación multi-fecha con cambios operativos medibles en la trayectoria del eje"
         trend_sentence = (
-            "No conclusive variation consistent with severe progressive deterioration is identified, "
-            "but there are measurable changes in the shaft position and in the geometric response of the bearing."
+            "No se identifica una variación concluyente compatible con deterioro progresivo severo, "
+            "pero sí cambios medibles en la posición del eje y en la respuesta geométrica del cojinete."
         )
 
     detail = (
-        f"{len(ordered)} shaft centerline runs from different acquisition dates were compared. "
-        f"The comparison between the baseline run ({baseline['label']}) and the most recent one ({latest['label']}) shows a variation of "
-        f"{delta_util:+.1f} percentage points in the maximum clearance utilization, "
-        f"{delta_margin:+.1f} points in the remaining geometric margin and "
-        f"{delta_radial:+.3f} in the maximum radial displacement.\n\n"
-        f"The shift of the mean center of the trajectory between the two runs is {centroid_shift:.3f}, "
-        f"a useful parameter for assessing shaft migration within the bearing and changes in the hydrodynamic centering condition. "
-        f"In the overall classification, the observed trend corresponds to: {trend_class}.\n\n"
+        f"Se compararon {len(ordered)} corridas de shaft centerline correspondientes a diferentes fechas de adquisición. "
+        f"La comparación entre la corrida base ({baseline['label']}) y la más reciente ({latest['label']}) muestra una variación de "
+        f"{delta_util:+.1f} puntos porcentuales en la utilización máxima del clearance, "
+        f"{delta_margin:+.1f} puntos en el margen geométrico remanente y "
+        f"{delta_radial:+.3f} en el desplazamiento radial máximo.\n\n"
+        f"El desplazamiento del centro medio de la trayectoria entre ambas corridas es de {centroid_shift:.3f}, "
+        f"parámetro útil para evaluar migración del eje dentro del cojinete y cambios en la condición de centrado hidrodinámico. "
+        f"En clasificación global, la tendencia observada corresponde a: {trend_class}.\n\n"
         f"{trend_sentence}\n\n"
-        f"From a rotordynamics standpoint, a sustained migration of the centerline accompanied by an increase in clearance utilization "
-        f"is consistent with an increase in operating eccentricity, a change in the effective radial load, changes in the lubricant film stiffness, "
-        f"variation of actual clearances or alterations in alignment and support condition."
+        f"Desde el punto de vista de dinámica del rotor, una migración sostenida del centerline acompañada por incremento de utilización de clearance "
+        f"es consistente con aumento de excentricidad operativa, modificación de la carga radial efectiva, cambios en la rigidez del film lubricante, "
+        f"variación de clearances reales o alteraciones en alineación y condición de soporte."
     )
 
     if all_over_limit or latest_critical:
         action = (
-            "Recommended actions:\n"
-            "- Treat the comparative condition as a high-criticality finding\n"
-            "- Contrast the runs against an acceptance baseline or post-maintenance condition\n"
-            "- Correlate the centerline change with load, temperature, lubrication, vibration and phase\n"
-            "- Verify alignment, support condition and the bearing's actual clearances\n"
-            "- Restrict sustained operation in the compromised regime until technical evaluation is complete"
+            "Se recomienda:\n"
+            "- Tratar la condición comparativa como hallazgo de alta criticidad\n"
+            "- Contrastar las corridas contra condición base de aceptación o condición post-mantenimiento\n"
+            "- Correlacionar el cambio del centerline con carga, temperatura, lubricación, vibración y fase\n"
+            "- Verificar alineación, condición de soporte y clearances reales del cojinete\n"
+            "- Restringir operación sostenida en el régimen comprometido hasta completar evaluación técnica"
         )
     else:
         action = (
-            "Recommended actions:\n"
-            "- Maintain multi-date tracking to confirm whether the trend is progressive or dependent on the operating regime\n"
-            "- Correlate the centerline change with load, temperature, lubrication and vibration\n"
-            "- Validate the condition against the equipment's acceptance baseline"
+            "Se recomienda:\n"
+            "- Mantener seguimiento multi-fecha para confirmar si la tendencia es progresiva o dependiente del régimen operativo\n"
+            "- Correlacionar el cambio de centerline con carga, temperatura, lubricación y vibración\n"
+            "- Validar la condición frente a la línea base de aceptación del equipo"
         )
 
     return {

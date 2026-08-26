@@ -1495,7 +1495,7 @@ def build_anomaly_narrative(records: List[TrendRecord], metric_key: str) -> str:
             all_anomalies.append(df)
 
     if not all_anomalies:
-        return "No relevant anomalous events are identified in the signal within the analyzed window."
+        return "No se identifican eventos anómalos relevantes en la señal dentro de la ventana analizada."
 
     df_all = pd.concat(all_anomalies, ignore_index=True)
 
@@ -1512,57 +1512,57 @@ def build_anomaly_narrative(records: List[TrendRecord], metric_key: str) -> str:
     # Clasificación de comportamiento
     # ------------------------------------------------------------
     if total >= 15:
-        pattern = "recurrent"
+        pattern = "recurrente"
     elif total >= 6:
-        pattern = "intermittent"
+        pattern = "intermitente"
     else:
-        pattern = "isolated"
+        pattern = "aislado"
 
     # ------------------------------------------------------------
     # Tipo dominante
     # ------------------------------------------------------------
     if spikes > drops and spikes > outliers:
-        dominant = "spikes (abrupt increases)"
+        dominant = "spikes (incrementos abruptos)"
     elif drops > spikes and drops > outliers:
-        dominant = "drops (abrupt decreases)"
+        dominant = "drops (caídas abruptas)"
     else:
-        dominant = "scattered outliers"
+        dominant = "outliers dispersos"
 
     # ------------------------------------------------------------
     # Severidad dominante
     # ------------------------------------------------------------
     if high > 0:
-        severity_text = "with high-severity events present"
+        severity_text = "con presencia de eventos de alta severidad"
     elif medium > 0:
-        severity_text = "with moderate-severity events"
+        severity_text = "con eventos de severidad moderada"
     else:
-        severity_text = "predominantly low-severity"
+        severity_text = "predominantemente de baja severidad"
 
     # ------------------------------------------------------------
     # Interpretación técnica
     # ------------------------------------------------------------
-    if pattern == "recurrent":
+    if pattern == "recurrente":
         interpretation = (
-            "The recurrence of anomalous events suggests non-random behavior, "
-            "possibly associated with repetitive operating conditions or a persistent mechanical condition."
+            "La recurrencia de eventos anómalos sugiere un comportamiento no aleatorio, "
+            "posiblemente asociado a condiciones operativas repetitivas o a una condición mecánica persistente."
         )
-    elif pattern == "intermittent":
+    elif pattern == "intermitente":
         interpretation = (
-            "The anomalous events appear intermittently, which may be associated "
-            "with operational changes, transients, or external disturbances."
+            "Los eventos anómalos aparecen de forma intermitente, lo que puede estar asociado "
+            "a cambios operativos, transitorios o perturbaciones externas."
         )
     else:
         interpretation = (
-            "The detected events are isolated, with no clear repetitive pattern, "
-            "possibly associated with noise or isolated disturbances."
+            "Los eventos detectados son aislados, sin patrón repetitivo claro, "
+            "posiblemente asociados a ruido o perturbaciones puntuales."
         )
 
     # ------------------------------------------------------------
     # Construcción final
     # ------------------------------------------------------------
     narrative = (
-        f"{total} anomalous events were detected in the signal, classified as {pattern} behavior, "
-        f"predominantly {dominant} and {severity_text}. "
+        f"Se detectaron {total} eventos anómalos en la señal, clasificados como comportamiento {pattern}, "
+        f"con predominio de {dominant} y {severity_text}. "
         f"{interpretation}"
     )
 
@@ -2125,7 +2125,7 @@ def build_behavior_narrative(records: List[TrendRecord], metric_key: str) -> str
     summary = build_behavior_change_summary(records, metric_key)
 
     if summary["count"] == 0:
-        return "There is not enough information to assess behavior changes."
+        return "No hay información suficiente para evaluar cambios de comportamiento."
 
     details = summary.get("details", [])
     valid = [d for d in details if d.get("valid") and d.get("classification") in ["Strong change", "Moderate change"]]
@@ -2142,12 +2142,12 @@ def build_behavior_narrative(records: List[TrendRecord], metric_key: str) -> str
     change_ts = top.get("change_timestamp")
     ts_txt = (
         f"{pretty_date(change_ts)} {pretty_time(change_ts)}"
-        if change_ts is not None else "no identifiable timestamp"
+        if change_ts is not None else "sin timestamp identificable"
     )
 
     return (
-        f"{summary['interpretation']} The most representative change is located in signal "
-        f"{top.get('record_name', '—')} around {ts_txt}."
+        f"{summary['interpretation']} El cambio más representativo se localiza en la señal "
+        f"{top.get('record_name', '—')} alrededor de {ts_txt}."
     )
 
 def detect_trend_drift(record: TrendRecord, metric_key: str) -> Dict[str, Any]:
@@ -2292,7 +2292,7 @@ def build_drift_narrative(records: List[TrendRecord], metric_key: str) -> str:
 
     drift_rows = [r for r in rows if r.get("classification") != "No Drift"]
     if not drift_rows:
-        return "No relevant progressive drift patterns are identified in the analyzed window."
+        return "No se identifican patrones de deriva progresiva relevantes en la ventana analizada."
 
     increasing = sum(1 for r in drift_rows if r.get("classification") == "Progressive Increase")
     decreasing = sum(1 for r in drift_rows if r.get("classification") == "Progressive Decrease")
@@ -2300,16 +2300,16 @@ def build_drift_narrative(records: List[TrendRecord], metric_key: str) -> str:
     top_severity = summary.get("top_severity", "None")
 
     if increasing > decreasing:
-        dominant = "progressive upward drift"
+        dominant = "deriva progresiva ascendente"
     elif decreasing > increasing:
-        dominant = "progressive downward drift"
+        dominant = "deriva progresiva descendente"
     else:
-        dominant = "mixed drift with no dominant direction"
+        dominant = "deriva mixta sin una dirección dominante"
 
     return (
-        f"{total} signals with drift behavior are identified, predominantly {dominant} "
-        f"and a maximum severity of {top_severity}. This suggests a sustained baseline shift "
-        f"beyond point events, so review the temporal evolution, load, and mechanical condition."
+        f"Se identifican {total} señales con comportamiento de drift, con predominio de {dominant} "
+        f"y severidad máxima {top_severity}. Esto sugiere un desplazamiento sostenido de la línea base "
+        f"más allá de eventos puntuales, por lo que conviene revisar evolución temporal, carga y condición mecánica."
     )
 
 
@@ -2622,8 +2622,8 @@ def build_trend_autodiagnostic(
     """
     out: Dict[str, Any] = {
         "status": "unknown",
-        "status_label": "No data",
-        "headline": "There is not enough data to produce a self-diagnosis.",
+        "status_label": "Sin datos",
+        "headline": "No hay suficientes datos para emitir autodiagnóstico.",
         "prose": [],
         "recommendations": [],
     }
@@ -2655,10 +2655,10 @@ def build_trend_autodiagnostic(
     point_label = primary.point_clean
 
     if n_records == 1:
-        signal_descriptor = f"point «{point_label}»"
+        signal_descriptor = f"el punto «{point_label}»"
     else:
         signal_descriptor = (
-            f"{n_records} measurement points on asset «{primary.machine}»"
+            f"{n_records} puntos de medición sobre el activo «{primary.machine}»"
         )
 
     # -------------------------------------------------------------
@@ -2667,21 +2667,21 @@ def build_trend_autodiagnostic(
     par1: List[str] = []
     if not math.isnan(latest_value):
         par1.append(
-            f"The latest reported {metric_key.lower()} value on {signal_descriptor} "
-            f"is {latest_value:.3g} {metric_unit}".rstrip() + "."
+            f"El último valor reportado de {metric_key.lower()} en {signal_descriptor} "
+            f"es {latest_value:.3g} {metric_unit}".rstrip() + "."
         )
 
     if warning_value is not None and math.isfinite(float(warning_value)):
         pct_w = (latest_value / float(warning_value) * 100.0) if float(warning_value) > 0 else 0.0
         par1.append(
-            f"This represents {pct_w:.0f}% of the Warning threshold "
+            f"Esto representa el {pct_w:.0f}% del umbral Warning "
             f"({float(warning_value):.3g} {metric_unit})".rstrip() + "."
         )
     if danger_value is not None and math.isfinite(float(danger_value)):
         pct_d = (latest_value / float(danger_value) * 100.0) if float(danger_value) > 0 else 0.0
         par1.append(
-            f"Against the Danger threshold ({float(danger_value):.3g} {metric_unit}) "
-            f"the usage is {pct_d:.0f}%".rstrip() + "."
+            f"Frente al umbral Danger ({float(danger_value):.3g} {metric_unit}) "
+            f"el consumo es del {pct_d:.0f}%".rstrip() + "."
         )
 
     # Ciclo 17.5.9 — si el último valor es bajo PERO la ventana
@@ -2694,40 +2694,40 @@ def build_trend_autodiagnostic(
     ):
         _exceed_what = ""
         if danger_value is not None and recent_max_value >= float(danger_value):
-            _exceed_what = f"exceeding the Danger threshold ({float(danger_value):.3g} {metric_unit})".rstrip()
+            _exceed_what = f"superando el umbral Danger ({float(danger_value):.3g} {metric_unit})".rstrip()
         elif warning_value is not None and recent_max_value >= float(warning_value):
-            _exceed_what = f"exceeding the Warning threshold ({float(warning_value):.3g} {metric_unit})".rstrip()
+            _exceed_what = f"superando el umbral Warning ({float(warning_value):.3g} {metric_unit})".rstrip()
         if _exceed_what:
             par1.append(
-                f"However, within the recent window a peak "
-                f"of {recent_max_value:.3g} {metric_unit} was recorded".rstrip()
-                + f", {_exceed_what}; the status is classified by the worst recent "
-                f"value, not only the last sample."
+                f"Sin embargo, dentro de la ventana reciente se registró un pico "
+                f"de {recent_max_value:.3g} {metric_unit} ".rstrip()
+                + f", {_exceed_what}; el estado se clasifica según el peor valor "
+                f"reciente, no únicamente el último sample."
             )
 
     status = out["status"]
     if status == "action":
         par1.append(
-            "The current level exceeds the established Danger threshold; per ISO 20816 "
-            "criteria and factory manuals this corresponds to zone D — "
-            "shutdown for inspection or an immediate load reduction is recommended."
+            "El nivel actual supera el umbral Danger establecido; según los criterios "
+            "de ISO 20816 y de los manuales de fábrica esto corresponde a la zona D — "
+            "se recomienda parada para inspección o reducción de carga inmediata."
         )
     elif status == "alarm":
         par1.append(
-            "The current level crosses the Warning threshold (ISO 20816 zone C) — the machine "
-            "should not operate continuously at this amplitude without an explicit "
-            "condition-monitoring program."
+            "El nivel actual cruza el umbral Warning (zona C de ISO 20816) — la máquina "
+            "no debería operar de forma continua bajo esta amplitud sin un programa "
+            "explícito de seguimiento condicional."
         )
     elif status == "watch":
         par1.append(
-            "The level is between 85% and 100% of Warning, in a zone of "
-            "prudent vigilance; increase the monitoring frequency and "
-            "document the operating conditions of each reading."
+            "El nivel se encuentra entre el 85% y el 100% del Warning, en una zona de "
+            "vigilancia prudente; conviene aumentar la frecuencia de monitoreo y "
+            "documentar las condiciones de operación de cada toma."
         )
     elif status == "ok":
         par1.append(
-            "The level is within the normal operating zone of the "
-            "established severity criteria."
+            "El nivel se encuentra dentro de la zona operacional normal de los "
+            "criterios de severidad establecidos."
         )
 
     # -------------------------------------------------------------
@@ -2737,21 +2737,21 @@ def build_trend_autodiagnostic(
     if isinstance(slope, (int, float)) and math.isfinite(slope):
         if abs(slope) < 1e-9:
             par2.append(
-                "The slope of the last segment is virtually flat, suggesting "
-                "a stable signal regime — with no clear directional trend."
+                "La pendiente del último tramo es prácticamente plana, lo que sugiere "
+                "un régimen estable de la señal — sin tendencia direccional clara."
             )
         elif slope > 0:
             par2.append(
-                f"The slope of the last segment is positive, +{slope:.3g} "
-                f"{metric_unit}/day, indicating a gradual growth of the "
-                f"amplitude."
+                f"La pendiente del último tramo es positiva, +{slope:.3g} "
+                f"{metric_unit}/día, evidenciando un crecimiento gradual de la "
+                f"amplitud."
             )
         else:
             par2.append(
-                f"The slope of the last segment is negative, {slope:.3g} "
-                f"{metric_unit}/day — the signal decreases over time, which "
-                f"may be associated with post-maintenance stabilization, "
-                f"thermal settling, or rotor load redistribution."
+                f"La pendiente del último tramo es negativa, {slope:.3g} "
+                f"{metric_unit}/día — la señal disminuye con el tiempo, lo que "
+                f"puede asociarse a estabilización post-mantenimiento, "
+                f"asentamiento térmico o redistribución de carga del rotor."
             )
 
         # Ciclo 17.5.7 — solo emitimos forecast si _compute_trend_health
@@ -2762,22 +2762,22 @@ def build_trend_autodiagnostic(
             _fcast_int = max(1, int(round(float(forecast_days))))
             if forecast_days < 14:
                 par2.append(
-                    f"If the current slope holds, the {forecast_target} threshold "
-                    f"would be reached in approximately {_fcast_int} day(s) — "
-                    f"a short horizon that justifies preventive intervention."
+                    f"Si la pendiente actual se mantiene, el umbral {forecast_target} "
+                    f"se alcanzaría en aproximadamente {_fcast_int} día(s) — "
+                    f"horizonte corto que justifica intervención preventiva."
                 )
             elif forecast_days < 60:
                 par2.append(
-                    f"Maintaining the current slope, the {forecast_target} threshold "
-                    f"would be reached in approximately {_fcast_int} days, "
-                    f"allowing an intervention to be planned within the next "
-                    f"maintenance cycle."
+                    f"Manteniendo la pendiente actual, el umbral {forecast_target} "
+                    f"sería alcanzado en aproximadamente {_fcast_int} días, "
+                    f"lo que permite planificar una intervención dentro del próximo "
+                    f"ciclo de mantenimiento."
                 )
             elif forecast_days < 365:
                 par2.append(
-                    f"The linear forecast places the {forecast_target} threshold crossing "
-                    f"at about {_fcast_int} days — a comfortable horizon, but "
-                    f"the slope should be reassessed with the next run."
+                    f"El forecast lineal sitúa el cruce del umbral {forecast_target} "
+                    f"a unos {_fcast_int} días — horizonte cómodo, pero "
+                    f"conviene reevaluar la pendiente con la próxima corrida."
                 )
         elif (
             isinstance(slope, (int, float))
@@ -2788,12 +2788,12 @@ def build_trend_autodiagnostic(
             # validador. Lo decimos honestamente en lugar de inventar
             # una proyección.
             par2.append(
-                "The current window is too short or the tail is "
-                "too unstable to produce a reliable linear forecast "
-                "to Warning/Danger; it is suggested to repeat the "
-                "measurement under stable operating conditions and with "
-                "at least 24 hours of data to build a "
-                "representative projection."
+                "La ventana actual es demasiado corta o la cola es "
+                "demasiado inestable como para emitir un forecast lineal "
+                "confiable a Warning/Danger; se sugiere repetir la "
+                "medición en condiciones operacionales estables y con "
+                "al menos 24 horas de datos para construir una "
+                "proyección representativa."
             )
 
     # -------------------------------------------------------------
@@ -2807,23 +2807,23 @@ def build_trend_autodiagnostic(
         if n_anom > 0:
             if top_sev == "High":
                 par3.append(
-                    f"{n_anom} point events are identified in the window, with "
-                    f"high-severity events present — a pattern suggestive of "
-                    f"mechanical transients, instrumentation events, or local "
-                    f"bearing faults that warrant specific review."
+                    f"Se identifican {n_anom} eventos puntuales en la ventana, con "
+                    f"presencia de eventos de alta severidad — patrón sugestivo de "
+                    f"transitorios mecánicos, eventos de instrumentación o fallas "
+                    f"locales del cojinete que merecen revisión específica."
                 )
             elif top_sev == "Medium":
                 par3.append(
-                    f"{n_anom} point events are identified, predominantly of "
-                    f"moderate severity — they may be associated with operational "
-                    f"changes, load transients, or isolated process "
-                    f"disturbances."
+                    f"Se identifican {n_anom} eventos puntuales, con severidad "
+                    f"moderada predominante — pueden estar asociados a cambios "
+                    f"operacionales, transitorios de carga o perturbaciones puntuales "
+                    f"del proceso."
                 )
             else:
                 par3.append(
-                    f"{n_anom} low-severity point events are identified — "
-                    f"consistent with measurement noise or isolated disturbances, "
-                    f"with no clear mechanical pattern."
+                    f"Se identifican {n_anom} eventos puntuales de baja severidad — "
+                    f"compatibles con ruido de medición o perturbaciones aisladas, "
+                    f"sin patrón mecánico claro."
                 )
         # Si no hay anomalías significativas, simplemente no agregamos
         # nada — el lector lo asume del estado general.
@@ -2841,18 +2841,18 @@ def build_trend_autodiagnostic(
         if n_drift > 0 and top_drift in ("High", "Medium"):
             if top_drift == "High":
                 par4.append(
-                    f"The progressive-drift detector classifies {n_drift} "
-                    f"signal(s) as high severity. This reflects a sustained "
-                    f"trend change (not point events) and is typically "
-                    f"associated with slow processes: wear, system thermal "
-                    f"drift, instrumentation drift, or progressive evolution "
-                    f"of the dynamic balance."
+                    f"El detector de deriva progresiva clasifica {n_drift} "
+                    f"señal(es) en severidad alta. Esto refleja un cambio "
+                    f"sostenido de tendencia (no eventos puntuales) y suele "
+                    f"asociarse a procesos lentos: desgaste, drift térmico del "
+                    f"sistema, deriva de la instrumentación o evolución progresiva "
+                    f"del balance dinámico."
                 )
             else:
                 par4.append(
-                    f"The progressive-drift detector flags {n_drift} signal(s) "
-                    f"at medium severity — a gradual but still contained "
-                    f"evolution, advisable to keep under condition monitoring."
+                    f"El detector de deriva progresiva señala {n_drift} señal(es) "
+                    f"en severidad media — una evolución gradual pero todavía "
+                    f"contenida, recomendable seguir bajo vigilancia condicional."
                 )
     except Exception:
         pass
@@ -2866,17 +2866,17 @@ def build_trend_autodiagnostic(
         top_class = str(behav.get("top_classification", "None") or "None")
         if top_class == "Strong change":
             par5.append(
-                "Additionally, the regime-change detector identifies a "
-                "strong behavior jump — the signal crosses a clear "
-                "inflection point, suggesting a discrete event (major load "
-                "change, mechanical intervention, incipient fault) that "
-                "redefines the operational average."
+                "Adicionalmente, el detector de cambio de régimen identifica un "
+                "salto fuerte de comportamiento — la señal cruza un punto de "
+                "inflexión claro, lo que sugiere un evento puntual (cambio de "
+                "carga importante, intervención mecánica, falla incipiente) que "
+                "redefine el promedio operacional."
             )
         elif top_class == "Moderate change":
             par5.append(
-                "The regime-change detector reports a moderate "
-                "transition, consistent with operational adjustment or "
-                "progressive process evolution."
+                "El detector de cambio de régimen reporta una transición "
+                "moderada, compatible con ajuste operacional o evolución "
+                "progresiva del proceso."
             )
     except Exception:
         pass
@@ -2889,14 +2889,14 @@ def build_trend_autodiagnostic(
         op_var_names = sorted({r.variable for r in operational_records if r.variable})
         if op_var_names:
             shown = ", ".join(op_var_names[:3])
-            extra = " and others" if len(op_var_names) > 3 else ""
+            extra = " y otras" if len(op_var_names) > 3 else ""
             par6.append(
-                f"This run includes correlated operating variables "
-                f"({shown}{extra}). It is recommended to review the lagged "
-                f"correlation panel to verify whether the signal evolution follows "
-                f"a process parameter (load, temperature, RPM) — this helps "
-                f"distinguish between an operational regime change and intrinsic "
-                f"mechanical degradation."
+                f"En esta corrida se cuenta con variables operativas correlacionadas "
+                f"({shown}{extra}). Se recomienda revisar el panel de correlación "
+                f"con desfase para verificar si la evolución de la señal sigue a "
+                f"un parámetro de proceso (carga, temperatura, RPM) — esto permite "
+                f"distinguir entre cambio de régimen operacional y degradación "
+                f"mecánica intrínseca."
             )
 
     # -------------------------------------------------------------
@@ -2904,25 +2904,25 @@ def build_trend_autodiagnostic(
     # -------------------------------------------------------------
     recs: List[str] = []
     if status == "action":
-        recs.append("Coordinate a planned shutdown or immediate load reduction for inspection.")
-        recs.append("Capture spectrum and waveform under current conditions to confirm the source of the increase.")
-        recs.append("Check the centerline trend and couplings associated with the affected point.")
+        recs.append("Coordinar parada planificada o reducción de carga inmediata para inspección.")
+        recs.append("Capturar espectro y forma de onda en condiciones actuales para confirmar la fuente del incremento.")
+        recs.append("Verificar tendencia de centerline y acoplamientos asociados al punto comprometido.")
     elif status == "alarm":
-        recs.append("Increase monitoring frequency (daily if possible) and log the evolution under known operating conditions.")
-        recs.append("Schedule a targeted inspection at the next planned outage.")
-        recs.append("Assess correlation with recent changes in load, temperature, or process-fluid composition.")
+        recs.append("Aumentar frecuencia de monitoreo (diaria si es posible) y registrar evolución bajo condiciones operacionales conocidas.")
+        recs.append("Programar inspección dirigida en el próximo paro programado.")
+        recs.append("Evaluar correlación con cambios recientes de carga, temperatura o composición de fluido de proceso.")
     elif status == "watch":
-        recs.append("Maintain weekly monitoring and document the conditions of each reading.")
-        recs.append("If the slope stays positive on the next run, escalate to Attention.")
+        recs.append("Mantener seguimiento semanal y documentar las condiciones de cada toma.")
+        recs.append("Si la pendiente se mantiene positiva en la siguiente corrida, escalar a Atención.")
     elif status == "ok":
-        recs.append("Continue with the routine periodic monitoring plan.")
-        recs.append("Preserve the current baseline as a post-maintenance reference.")
+        recs.append("Continuar con el plan rutinario de monitoreo periódico.")
+        recs.append("Conservar la línea base actual como referencia post-mantenimiento.")
 
     if forecast_days is not None and forecast_target is not None and forecast_days < 60:
         _fcast_rec = max(1, int(round(float(forecast_days))))
         recs.append(
-            f"Schedule an inspection before the {_fcast_rec} day(s) forecast "
-            f"to the {forecast_target} threshold crossing."
+            f"Programar inspección antes de los {_fcast_rec} día(s) de forecast "
+            f"al cruce del umbral {forecast_target}."
         )
 
     # -------------------------------------------------------------
@@ -2930,17 +2930,17 @@ def build_trend_autodiagnostic(
     # -------------------------------------------------------------
     if status == "action":
         out["headline"] = (
-            f"Status: ACTION REQUIRED. {metric_key} in zone D "
-            f"({latest_value:.3g} {metric_unit}); exceeds the Danger threshold."
+            f"Estado: ACCIÓN REQUERIDA. {metric_key} en zona D "
+            f"({latest_value:.3g} {metric_unit}); supera el umbral Danger."
         ).strip()
     elif status == "alarm":
         out["headline"] = (
-            f"Status: ATTENTION. {metric_key} crosses Warning "
-            f"({latest_value:.3g} {metric_unit}); requires intensive monitoring."
+            f"Estado: ATENCIÓN. {metric_key} cruza Warning "
+            f"({latest_value:.3g} {metric_unit}); requiere monitoreo intensivo."
         ).strip()
     elif status == "watch":
         out["headline"] = (
-            f"Status: WATCH. {metric_key} uses 85–100% of Warning."
+            f"Estado: VIGILANCIA. {metric_key} consume el 85–100% del Warning."
         ).strip()
     elif status == "ok":
         if (
@@ -2952,8 +2952,8 @@ def build_trend_autodiagnostic(
         ):
             _fcast_hl = max(1, int(round(float(forecast_days))))
             out["headline"] = (
-                f"Status: NORMAL with an upward trend; threshold crossing "
-                f"projected in ~{_fcast_hl} day(s)."
+                f"Estado: NORMAL con tendencia ascendente; cruce de umbral "
+                f"proyectado en ~{_fcast_hl} día(s)."
             )
         elif (
             isinstance(slope, (int, float))
@@ -2964,13 +2964,13 @@ def build_trend_autodiagnostic(
             # Hay pendiente positiva pero el forecast fue invalidado
             # (ventana <24h o cola inestable). Headline honesto.
             out["headline"] = (
-                "Status: NORMAL with an upward trend; current window "
-                "insufficient to produce a reliable forecast."
+                "Estado: NORMAL con tendencia ascendente; ventana actual "
+                "insuficiente para emitir un forecast confiable."
             )
         else:
-            out["headline"] = "Status: NORMAL. Signal within the operating zone with no concerning trend."
+            out["headline"] = "Estado: NORMAL. Señal dentro de la zona operacional sin tendencia preocupante."
     else:
-        out["headline"] = "No thresholds defined; the self-diagnosis is limited to the statistical description."
+        out["headline"] = "Sin umbrales definidos; el autodiagnóstico se limita a la descripción estadística."
 
     # -------------------------------------------------------------
     # Componer prosa final
@@ -3855,8 +3855,8 @@ def _build_single_trend_narrative(record: TrendRecord, metric_key: str) -> str:
     unit = _trend_unit_for_metric(record, metric_key)
     if df.empty:
         return (
-            f"{record.point_clean}: no valid data was identified for the {metric_key.lower()} analysis, "
-            "so an automatic diagnosis could not be produced."
+            f"{record.point_clean}: no se identificaron datos válidos para el análisis de {metric_key.lower()}, "
+            "por lo que no fue posible emitir diagnóstico automático."
         )
 
     analysis = _classify_trend_behavior(df["y"])
@@ -3865,41 +3865,41 @@ def _build_single_trend_narrative(record: TrendRecord, metric_key: str) -> str:
     end_ts = safe_datetime(df["x"].iloc[-1])
 
     base = (
-        f"{record.point_clean} — window analyzed from {pretty_date(start_ts)} {pretty_time(start_ts)} "
-        f"to {pretty_date(end_ts)} {pretty_time(end_ts)}, with {sample_count} valid samples. "
-        f"Initial value {format_number(analysis.get('initial_value'), 3)} {unit}, "
-        f"final value {format_number(analysis.get('final_value'), 3)} {unit}, "
-        f"total change {format_number(analysis.get('change_pct'), 2)}%."
+        f"{record.point_clean} — ventana analizada desde {pretty_date(start_ts)} {pretty_time(start_ts)} "
+        f"hasta {pretty_date(end_ts)} {pretty_time(end_ts)}, con {sample_count} muestras válidas. "
+        f"Valor inicial {format_number(analysis.get('initial_value'), 3)} {unit}, "
+        f"valor final {format_number(analysis.get('final_value'), 3)} {unit}, "
+        f"variación total {format_number(analysis.get('change_pct'), 2)}%."
     )
 
     classification = analysis.get("classification")
     if classification == "progressive_increase":
         return (
-            f"{base} The trend shows a progressive increase in {metric_key.lower()}, "
-            "which suggests possible mechanical deterioration or evolution of an incipient condition. "
-            "Close monitoring and correlation with operating variables and alarms are recommended."
+            f"{base} La tendencia presenta un incremento progresivo del {metric_key.lower()}, "
+            "lo cual sugiere posible deterioro del estado mecánico o evolución de una condición incipiente. "
+            "Se recomienda seguimiento estrecho y correlación con variables operativas y alarmas."
         )
     if classification == "progressive_decrease":
         return (
-            f"{base} The signal shows a progressive decrease in {metric_key.lower()}, "
-            "consistent with condition normalization or a reduction in load/excitation. "
-            "Verify whether the behavior matches expected operational changes."
+            f"{base} La señal muestra una disminución progresiva del {metric_key.lower()}, "
+            "compatible con normalización de la condición o reducción de carga/excitación. "
+            "Se recomienda verificar si el comportamiento coincide con cambios operativos esperados."
         )
     if classification == "abrupt":
         return (
-            f"{base} Abrupt variations and high dispersion are observed in the signal, "
-            "consistent with a transient condition, instability, or sudden operational changes. "
-            "Review process events, startup/coastdown transients, and instrumentation consistency."
+            f"{base} Se observan variaciones bruscas y dispersión elevada en la señal, "
+            "compatibles con condición transitoria, inestabilidad o cambios operativos repentinos. "
+            "Se recomienda revisar eventos de proceso, transientes de arranque/parada y consistencia de la instrumentación."
         )
     if classification == "stable":
         return (
-            f"{base} The behavior is stable with no significant deviations, "
-            "consistent with a normal condition within the evaluated window. "
-            "Continuing routine monitoring is recommended."
+            f"{base} El comportamiento es estable y sin desviaciones significativas, "
+            "lo que es consistente con una condición normal dentro de la ventana evaluada. "
+            "Se recomienda continuar monitoreo rutinario."
         )
     return (
-        f"{base} The amount of available information is not sufficient to classify the trend with confidence. "
-        "Extending the time window or validating data quality is recommended."
+        f"{base} La cantidad de información disponible no es suficiente para clasificar con confianza la tendencia. "
+        "Se recomienda ampliar la ventana temporal o validar la calidad de los datos."
     )
 
 
@@ -3909,7 +3909,7 @@ def _build_operational_only_narrative(records: List[OperationalRecord]) -> str:
         df = get_operational_clean_df(rec)
         if df.empty:
             lines.append(
-                f"{rec.variable}: no valid data was identified to produce an automatic diagnosis."
+                f"{rec.variable}: no se identificaron datos válidos para emitir diagnóstico automático."
             )
             continue
         analysis = _classify_trend_behavior(df["y"])
@@ -3917,24 +3917,24 @@ def _build_operational_only_narrative(records: List[OperationalRecord]) -> str:
         end_ts = safe_datetime(df["x"].iloc[-1])
         unit = rec.unit or ""
         base = (
-            f"{rec.variable} — window analyzed from {pretty_date(start_ts)} {pretty_time(start_ts)} "
-            f"to {pretty_date(end_ts)} {pretty_time(end_ts)}. "
-            f"Initial value {format_number(analysis.get('initial_value'), 3)} {unit}, "
-            f"final value {format_number(analysis.get('final_value'), 3)} {unit}, "
-            f"total change {format_number(analysis.get('change_pct'), 2)}%."
+            f"{rec.variable} — ventana analizada desde {pretty_date(start_ts)} {pretty_time(start_ts)} "
+            f"hasta {pretty_date(end_ts)} {pretty_time(end_ts)}. "
+            f"Valor inicial {format_number(analysis.get('initial_value'), 3)} {unit}, "
+            f"valor final {format_number(analysis.get('final_value'), 3)} {unit}, "
+            f"variación total {format_number(analysis.get('change_pct'), 2)}%."
         )
 
         classification = analysis.get("classification")
         if classification == "progressive_increase":
-            lines.append(f"{base} Operational trend with sustained progressive increase.")
+            lines.append(f"{base} Tendencia operativa con incremento progresivo sostenido.")
         elif classification == "progressive_decrease":
-            lines.append(f"{base} Operational trend with sustained progressive decrease.")
+            lines.append(f"{base} Tendencia operativa con descenso progresivo sostenido.")
         elif classification == "abrupt":
-            lines.append(f"{base} Operational trend with abrupt variations or transient behavior.")
+            lines.append(f"{base} Tendencia operativa con variaciones bruscas o comportamiento transitorio.")
         elif classification == "stable":
-            lines.append(f"{base} Stable operational trend during the evaluated window.")
+            lines.append(f"{base} Tendencia operativa estable durante la ventana evaluada.")
         else:
-            lines.append(f"{base} Insufficient information to classify the trend.")
+            lines.append(f"{base} Información insuficiente para clasificar la tendencia.")
     return "\n\n".join(lines)
 
 
@@ -3953,7 +3953,7 @@ def build_trend_report_narrative(
     if operational_records:
         op_summary = _build_operational_only_narrative(operational_records)
         trend_lines.append(
-            "Operational correlation available:\n\n"
+            "Correlación operativa disponible:\n\n"
             f"{op_summary}"
         )
 

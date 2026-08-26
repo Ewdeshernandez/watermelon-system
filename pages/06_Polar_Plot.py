@@ -1040,10 +1040,10 @@ def _build_polar_report_notes(text_diag: Dict[str, str]) -> str:
 
     if action:
         action_clean = action
-        action_clean = re.sub(r"^(Se recomienda|Recommended):\s*", "", action_clean, flags=re.IGNORECASE)
+        action_clean = re.sub(r"^Se recomienda:\s*", "", action_clean, flags=re.IGNORECASE)
         action_clean = action_clean.strip()
         if action_clean:
-            blocks.append("Recommended:\n" + action_clean)
+            blocks.append("Se recomienda:\n" + action_clean)
 
     return "\n\n".join([b for b in blocks if b]).strip()
 
@@ -1198,60 +1198,63 @@ def build_polar_text_diagnostics(
         phase_delta = float(dominant.get("phase_delta", 0.0) or 0.0)
 
         if status_up == "DANGER":
-            headline = f"Severe polar response consistent with dynamic amplification near {cs_speed:.0f} rpm"
+            headline = f"Respuesta polar severa compatible con amplificación dinámica cerca de {cs_speed:.0f} rpm"
             detail = (
-                f"The polar trajectory shows a significant dynamic response around {cs_speed:.0f} rpm, "
-                f"with an approximate amplitude of {cs_amp:.3f} and a phase change of {phase_delta:.1f}°. "
-                f"The combination of rising amplitude and phase change suggests proximity to a critical speed, "
-                f"loss of dynamic margin, or a relevant change in stiffness/damping of the rotor-support system.\n\n"
-                f"From a rotordynamics standpoint, this condition should be correlated with the Bode plot, orbits, "
-                f"waveform, shaft centerline and actual load conditions."
+                f"La trayectoria polar evidencia una respuesta dinámica significativa alrededor de {cs_speed:.0f} rpm, "
+                f"con amplitud aproximada de {cs_amp:.3f} y variación de fase de {phase_delta:.1f}°. "
+                f"La combinación de incremento de amplitud y cambio de fase sugiere proximidad a una velocidad crítica, "
+                f"pérdida de margen dinámico o cambio relevante de rigidez/amortiguamiento del sistema rotor-soporte.\n\n"
+                f"Desde el punto de vista de dinámica de rotores, esta condición debe correlacionarse con Bode, órbitas, "
+                f"forma de onda, shaft centerline y condiciones reales de carga."
             )
             action = (
-                "Priority actions:\n"
-                "- Correlate the polar peak with the amplitude and phase Bode plot\n"
-                "- Confirm repeatability during startup/coastdown\n"
-                "- Verify alignment, support stiffness, balance and bearing condition\n"
-                "- Review the phase change around the identified regime\n"
-                "- Avoid sustained operation near the critical regime until the evaluation is complete"
+                "Se recomienda como acción prioritaria:\n"
+                "- Correlacionar el pico polar con Bode de amplitud y fase\n"
+                "- Confirmar repetibilidad durante arranque/parada\n"
+                "- Verificar alineación, rigidez de soporte, balance y condición de cojinetes\n"
+                "- Revisar el cambio de fase alrededor del régimen identificado\n"
+                "- Evitar operación sostenida cerca del régimen crítico hasta completar evaluación"
             )
         elif status_up == "WARNING":
-            headline = f"Polar response with signs of dynamic amplification near {cs_speed:.0f} rpm"
+            headline = f"Respuesta polar con indicios de amplificación dinámica cerca de {cs_speed:.0f} rpm"
             detail = (
-                f"The polar trajectory shows a relevant response zone around {cs_speed:.0f} rpm, "
-                f"with an approximate amplitude of {cs_amp:.3f} and a phase change of {phase_delta:.1f}°. "
-                f"The behavior is consistent with moderate dynamic amplification, without sufficient evidence to classify it as severe.\n\n"
-                f"From a vibration-analysis standpoint, this condition should be kept under monitoring, especially if the peak repeats "
-                f"in later runs or is accompanied by a rise in 1X, a phase change, or a change in the orbit."
+                f"La trayectoria polar muestra una zona de respuesta relevante alrededor de {cs_speed:.0f} rpm, "
+                f"con amplitud aproximada de {cs_amp:.3f} y cambio de fase de {phase_delta:.1f}°. "
+                f"El comportamiento es consistente con amplificación dinámica moderada, sin evidencia suficiente para clasificarla como severa.\n\n"
+                f"Desde el enfoque de análisis de vibraciones, esta condición debe mantenerse bajo seguimiento, especialmente si el pico se repite "
+                f"en corridas posteriores o si se acompaña de incremento en 1X, cambio de fase o alteración de órbita."
             )
             action = (
-                "- Compare against historical runs and the baseline condition\n"
-                "- Validate the response with the Bode plot and 1X spectrum\n"
-                "- Confirm whether a rising amplitude trend exists\n"
-                "- Keep monitoring during upcoming startups/coastdowns"
+                "Se recomienda:\n"
+                "- Comparar contra corridas históricas y condición base\n"
+                "- Validar la respuesta con Bode y espectro 1X\n"
+                "- Confirmar si existe tendencia creciente de amplitud\n"
+                "- Mantener seguimiento durante próximos arranques/paradas"
             )
         else:
-            headline = f"Controlled polar response with a dynamic candidate near {cs_speed:.0f} rpm"
+            headline = f"Respuesta polar controlada con candidato dinámico cerca de {cs_speed:.0f} rpm"
             detail = (
-                f"A dynamic candidate is identified around {cs_speed:.0f} rpm, with an approximate amplitude of {cs_amp:.3f} "
-                f"and a phase change of {phase_delta:.1f}°. The polar trajectory shows no severe response under this condition.\n\n"
-                f"The behavior is compatible with stable operation, although the identified point should be kept as a reference for future comparison."
+                f"Se identifica un candidato dinámico alrededor de {cs_speed:.0f} rpm, con amplitud aproximada de {cs_amp:.3f} "
+                f"y cambio de fase de {phase_delta:.1f}°. La trayectoria polar no evidencia una respuesta severa en esta condición.\n\n"
+                f"El comportamiento es compatible con operación estable, aunque el punto identificado debe conservarse como referencia para comparación futura."
             )
             action = (
-                "- Keep the run as a baseline\n"
-                "- Compare with future polar trajectories\n"
-                "- Correlate with the Bode plot, orbit and 1X amplitude trend"
+                "Se recomienda:\n"
+                "- Mantener la corrida como línea base\n"
+                "- Comparar con futuras trayectorias polares\n"
+                "- Correlacionar con Bode, órbita y tendencia de amplitud 1X"
             )
     else:
-        headline = "Polar response with no clearly identified dominant critical speed"
+        headline = "Respuesta polar sin velocidad crítica dominante claramente identificada"
         detail = (
-            f"The polar trajectory shows a peak amplitude of {max_amp:.3f} and no clear critical-speed candidate under the applied heuristic. "
-            f"The condition should be correlated with the Bode plot, spectrum, orbit and operating variables before concluding the dominant mechanism."
+            f"La trayectoria polar presenta amplitud máxima de {max_amp:.3f} y no muestra un candidato claro de velocidad crítica bajo la heurística aplicada. "
+            f"La condición debe correlacionarse con Bode, espectro, órbita y variables operativas antes de concluir el mecanismo dominante."
         )
         action = (
-            "- Keep historical monitoring\n"
-            "- Compare against future runs\n"
-            "- Validate with the Bode plot, spectrum and orbit if the condition changes"
+            "Se recomienda:\n"
+            "- Mantener seguimiento histórico\n"
+            "- Comparar contra futuras corridas\n"
+            "- Validar con Bode, espectro y órbita si cambia la condición"
         )
 
     return {"headline": headline, "detail": detail, "action": action}
@@ -1337,55 +1340,55 @@ def build_polar_text_diagnostics(
 
         if abs(phase_delta) >= 45.0:
             modal_txt = (
-                "The phase change is representative enough to suspect a marked modal transition. "
-                "Below the critical speed the rotor tends to behave with a stiffer response; after passing through the modal zone, "
-                "the response becomes more flexible and the phase reflects the change in the relationship between exciting force and displacement."
+                "El cambio de fase es suficientemente representativo para sospechar transición modal marcada. "
+                "Antes de la velocidad crítica el rotor tiende a comportarse con respuesta más rígida; después del paso por la zona modal, "
+                "la respuesta se vuelve más flexible y la fase evidencia el cambio de relación entre fuerza excitadora y desplazamiento."
             )
         elif abs(phase_delta) >= 15.0:
             modal_txt = (
-                "The phase change is moderate and suggests approach to a dynamic amplification zone. "
-                "The response does not by itself confirm a fully developed critical crossing, but it does show a change in apparent dynamic stiffness."
+                "El cambio de fase es moderado y sugiere aproximación a una zona de amplificación dinámica. "
+                "La respuesta aún no confirma por sí sola un paso crítico plenamente desarrollado, pero sí muestra una modificación de rigidez dinámica aparente."
             )
         else:
             modal_txt = (
-                "The phase change is low, so the identified point should be treated as a dynamic candidate and not as a confirmed critical speed. "
-                "Confirmation requires correlation with the Bode plot, phase, orbit and repeatability across runs."
+                "El cambio de fase es bajo, por lo que el punto identificado debe tratarse como candidato dinámico y no como velocidad crítica confirmada. "
+                "La confirmación requiere correlación con Bode, fase, órbita y repetibilidad entre corridas."
             )
 
         if status_up == "DANGER":
-            headline = f"Severe polar response associated with a possible critical speed near {cs_speed:.0f} rpm"
+            headline = f"Respuesta polar severa asociada a posible velocidad crítica cerca de {cs_speed:.0f} rpm"
         elif status_up == "WARNING":
-            headline = f"Polar response with signs of dynamic amplification near {cs_speed:.0f} rpm"
+            headline = f"Respuesta polar con indicios de amplificación dinámica cerca de {cs_speed:.0f} rpm"
         else:
-            headline = f"Controlled polar response with a modal candidate near {cs_speed:.0f} rpm"
+            headline = f"Respuesta polar controlada con candidato modal cerca de {cs_speed:.0f} rpm"
 
         detail = (
-            f"The polar trajectory identifies a zone of interest around {cs_speed:.0f} rpm, with an approximate amplitude of {cs_amp:.3f} "
-            f"and a phase change of {phase_delta:.1f}°. This condition is compatible with a possible approach to a critical speed or modal shape of the rotor-support system.\\n\\n"
+            f"La trayectoria polar identifica una zona de interés alrededor de {cs_speed:.0f} rpm, con amplitud aproximada de {cs_amp:.3f} "
+            f"y variación de fase de {phase_delta:.1f}°. Esta condición es compatible con una posible aproximación a velocidad crítica o forma modal del sistema rotor-soporte.\\n\\n"
             f"{modal_txt}\\n\\n"
-            f"From a rotordynamics-analysis standpoint, interpretation should focus on the relationship between amplitude, phase and speed. "
-            f"A rise in amplitude accompanied by a consistent phase change may indicate passage through a modal shape; if amplitude rises without a sufficient phase change, "
-            f"the condition may be more associated with unbalance, eccentricity, forced response or operating changes."
+            f"Desde el punto de vista de análisis rotodinámico, la interpretación debe enfocarse en la relación entre amplitud, fase y velocidad. "
+            f"Un incremento de amplitud acompañado por cambio de fase consistente puede indicar paso por una forma modal; si la amplitud aumenta sin cambio de fase suficiente, "
+            f"la condición puede estar más asociada a desbalance, excentricidad, respuesta forzada o cambios operativos."
         )
 
         action = (
-            "Correlate the polar trajectory with the amplitude and phase Bode plot.\\n"
-            "Verify repeatability of the modal zone across startups/coastdowns.\\n"
-            "Compare against 1X-filtered orbits and shaft centerline.\\n"
-            "Confirm whether the phase change occurs before, during or after the amplitude peak.\\n"
-            "Validate balance, alignment, support stiffness, lubrication and load conditions."
+            "Correlacionar la trayectoria polar con Bode de amplitud y fase.\\n"
+            "Verificar repetibilidad de la zona modal entre arranques/paradas.\\n"
+            "Comparar contra órbitas filtradas 1X y shaft centerline.\\n"
+            "Confirmar si el cambio de fase ocurre antes, durante o después del máximo de amplitud.\\n"
+            "Validar condiciones de balance, alineación, rigidez de soporte, lubricación y carga."
         )
     else:
-        headline = "Polar response with no clearly identified dominant critical speed"
+        headline = "Respuesta polar sin velocidad crítica dominante claramente identificada"
         detail = (
-            f"The polar trajectory shows a peak amplitude of {max_amp:.3f}, with no dominant modal candidate under the applied heuristic. "
-            f"There is no sufficiently clear combination of rising amplitude and phase change to confirm a critical speed.\\n\\n"
-            f"This condition may represent a stable response, a forced excitation, or a run where the critical regime was not crossed clearly enough."
+            f"La trayectoria polar presenta amplitud máxima de {max_amp:.3f}, sin un candidato modal dominante bajo la heurística aplicada. "
+            f"No se observa una combinación suficientemente clara de incremento de amplitud y cambio de fase para confirmar velocidad crítica.\\n\\n"
+            f"Esta condición puede representar una respuesta estable, una excitación forzada o una corrida donde el régimen crítico no fue cruzado de forma suficientemente clara."
         )
         action = (
-            "Keep the run as a historical reference.\\n"
-            "Compare against future polar trajectories.\\n"
-            "Correlate with the Bode plot, 1X spectrum, orbit and operating variables."
+            "Mantener la corrida como referencia histórica.\\n"
+            "Comparar contra futuras trayectorias polares.\\n"
+            "Correlacionar con Bode, espectro 1X, órbita y variables operativas."
         )
 
     return {"headline": headline, "detail": detail, "action": action}

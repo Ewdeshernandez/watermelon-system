@@ -2610,8 +2610,6 @@ def render_spectrum_panel(
     # default para que el usuario lo vea de inmediato.
     if cat_iv_diag is not None and not _is_client_view:
         sev = cat_iv_diag.get("severity_global", "VIGILANCIA")
-        from core.severity import exec_severity_display_en
-        sev_en = exec_severity_display_en(sev)
         sev_color = {
             "CRÍTICA": "#dc2626", "ACCIÓN REQUERIDA": "#ea580c",
             "ATENCIÓN": "#f59e0b", "VIGILANCIA": "#84cc16",
@@ -2625,7 +2623,7 @@ def render_spectrum_panel(
                 f"<div style='display:inline-block; padding:6px 14px; "
                 f"border-radius:999px; background:{sev_color}; color:white; "
                 f"font-weight:700; font-size:0.95rem; margin-bottom:8px;'>"
-                f"Global severity: {sev_en}</div>",
+                f"Severidad global: {sev}</div>",
                 unsafe_allow_html=True,
             )
             st.write(cat_iv_diag.get("detail", ""))

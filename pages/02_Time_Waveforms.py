@@ -1876,8 +1876,6 @@ def render_waveform_panel(
 
     if cat_iv_wf_diag is not None:
         sev = cat_iv_wf_diag.get("severity_global", "VIGILANCIA")
-        from core.severity import exec_severity_display_en
-        sev_en = exec_severity_display_en(sev)
         sev_color = {
             "CRÍTICA": "#dc2626", "ACCIÓN REQUERIDA": "#ea580c",
             "ATENCIÓN": "#f59e0b", "VIGILANCIA": "#84cc16",
@@ -1896,7 +1894,7 @@ def render_waveform_panel(
                 f"<div style='display:inline-block; padding:6px 14px; "
                 f"border-radius:999px; background:{sev_color}; color:white; "
                 f"font-weight:700; font-size:0.95rem; margin-bottom:8px;'>"
-                f"Global severity: {sev_en}</div>",
+                f"Severidad global: {sev}</div>",
                 unsafe_allow_html=True,
             )
 
