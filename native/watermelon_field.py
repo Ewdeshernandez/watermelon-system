@@ -1342,17 +1342,19 @@ def main() -> int:
         # --- HTML report ---
         verdict = T["verdicts"][worst]
         thr = "".join(f"<th>{x}</th>" for x in T["th"])
-        # Branded header (Watermelon System) — matches the web reports
+        # Branded header (Watermelon System) — white card, green accent bar, navy title.
+        # Clean/print-friendly for the report deliverable (the app chrome stays navy).
         logo = _logo_data_uri()
-        logo_img = (f"<img src='{logo}' width='46' height='46' "
+        logo_img = (f"<img src='{logo}' width='44' height='44' "
                     "style='vertical-align:middle;margin-right:12px'>") if logo else "🍉 "
         header = (
             "<table width='100%' cellspacing='0' cellpadding='0' "
-            "style='background:#0b1426;border-radius:10px'><tr>"
-            f"<td style='padding:14px 18px'>{logo_img}"
-            "<span style='color:#f8fafc;font-size:22px;font-weight:800;vertical-align:middle;"
+            "style='border:1px solid #d6deea'><tr>"
+            "<td width='8' style='background:#10b981'>&nbsp;</td>"
+            f"<td style='background:#ffffff;padding:12px 16px'>{logo_img}"
+            "<span style='color:#0F1E3D;font-size:22px;font-weight:800;vertical-align:middle;"
             "letter-spacing:-.02em'>Watermelon System</span>"
-            "<span style='color:#10b981;font-size:13px;font-weight:700;margin-left:12px'>"
+            "<span style='color:#0e9f6e;font-size:13px;font-weight:700;margin-left:12px'>"
             "Vibration &amp; Rotordynamics</span></td></tr></table>")
         h = [f"<div style='font-family:Segoe UI,Arial'>",
              header,
