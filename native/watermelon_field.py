@@ -119,11 +119,17 @@ def _spectrum(x, fs):
     return np.fft.rfftfreq(len(x), 1.0 / fs), mag
 
 
-def _stylesheet() -> str:
+def _stylesheet(scale: float = 1.0) -> str:
+    # Todas las tipografías/paddings derivan de `scale` → la UI se ajusta al tamaño
+    # de pantalla (auto) o a la escala que elija el usuario (menú View → UI scale).
+    f = max(10, round(13 * scale))          # texto base
+    ft = max(11, round(13 * scale))         # pestañas / botones
+    fh = max(9, round(11 * scale))          # encabezados de tabla
+    pv = max(4, round(7 * scale)); ph = max(6, round(14 * scale))
     return f"""
     QMainWindow, QDialog {{ background: {BG}; }}
     QWidget {{ background: {BG}; color: {INK};
-        font-family: 'Segoe UI', 'Inter', Arial, sans-serif; font-size: 13px; }}
+        font-family: 'Segoe UI', 'Inter', Arial, sans-serif; font-size: {f}px; }}
     QLabel {{ background: transparent; color: {INK}; }}
     QMenuBar {{ background: {NAVY}; color: #eaf1fb; padding: 2px; }}
     QMenuBar::item {{ padding: 5px 10px; background: transparent; color: #eaf1fb; }}
@@ -133,15 +139,15 @@ def _stylesheet() -> str:
     QToolBar {{ background: {NAVY}; spacing: 8px; padding: 7px 10px;
         border-bottom: 1px solid {NAVY}; }}
     QToolBar::separator {{ background: #2b3d5f; width: 1px; margin: 4px 6px; }}
-    QToolBar QToolButton {{ color: #eaf1fb; padding: 7px 14px; border-radius: 7px;
-        font-weight: 600; }}
+    QToolBar QToolButton {{ color: #eaf1fb; padding: {pv}px {ph}px; border-radius: 7px;
+        font-weight: 600; font-size: {ft}px; }}
     QToolBar QToolButton:hover {{ background: {ACC}; color: white; }}
     QToolBar QToolButton:disabled {{ color: #6b7d9c; }}
     QTabWidget::pane {{ border: 1px solid {LINE}; background: {PANEL};
         border-radius: 8px; top: -1px; }}
     QTabBar {{ qproperty-drawBase: 0; }}
     QTabBar::tab {{ background: transparent; color: {MUTE}; padding: 9px 20px;
-        margin-right: 3px; border: none; font-weight: 600;
+        margin-right: 3px; border: none; font-weight: 600; font-size: {ft}px;
         border-top-left-radius: 7px; border-top-right-radius: 7px; }}
     QTabBar::tab:hover {{ color: {INK}; background: {PANEL}; }}
     QTabBar::tab:selected {{ background: {PANEL}; color: {ACC};
@@ -167,7 +173,7 @@ def _stylesheet() -> str:
     QTableWidget::item {{ padding: 6px 8px; }}
     QTableWidget::item:selected {{ background: #dbe8f7; color: {INK}; }}
     QHeaderView::section {{ background: {NAVY}; color: #8ec3ef; padding: 9px 8px;
-        border: none; border-right: 1px solid #24344f; font-weight: 700;
+        border: none; border-right: 1px solid #24344f; font-weight: 700; font-size: {fh}px;
         text-transform: uppercase; letter-spacing: .04em; }}
     QHeaderView::section:first {{ border-top-left-radius: 9px; }}
     QHeaderView::section:last {{ border-top-right-radius: 9px; border-right: none; }}
@@ -227,8 +233,33 @@ def main() -> int:
     tc = TransientCapture(TransientConfig(fmax_hz=min(2000.0, args.fs / 2.5)))
 
     pg.setConfigOptions(antialias=True, background=PANEL, foreground=MUTE)
+    # High-DPI: que Qt escale por densidad de pantalla (monitores 4K/escalados).
+    try:
+        QtGui.QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+            QtCore.Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
+    except Exception:  # noqa: BLE001
+        pass
     app = QtWidgets.QApplication(sys.argv)
-    app.setStyleSheet(_stylesheet())
+
+    # --- Auto-ajuste a la pantalla: deriva una escala de UI del tamaño de pantalla ---
+    ui_scale = {"v": 1.0}
+
+    def _auto_scale() -> float:
+        try:
+            scr = app.primaryScreen()
+            h = scr.availableGeometry().height()
+            # menos alto → UI más compacta; pantallas grandes → un poco más grande
+            sc = 0.80 if h < 800 else 0.90 if h < 950 else 1.0 if h < 1150 else \
+                 1.12 if h < 1500 else 1.25
+            return sc
+        except Exception:  # noqa: BLE001
+            return 1.0
+
+    def apply_scale(sc):
+        ui_scale["v"] = float(sc)
+        app.setStyleSheet(_stylesheet(ui_scale["v"]))
+
+    apply_scale(_auto_scale())
 
     win = QtWidgets.QMainWindow()
     win.setWindowTitle(f"Watermelon Field — {args.machine}")
@@ -251,6 +282,23 @@ def main() -> int:
     m_file.addSeparator(); m_file.addAction(act_quit)
     act_about = QtGui.QAction("About Watermelon Field", win)
     m_help.addAction(act_about)
+
+    # View → UI scale (auto-ajuste a la pantalla; el usuario puede forzar una escala)
+    m_scale = m_view.addMenu("UI scale")
+    _scale_grp = QtGui.QActionGroup(win); _scale_grp.setExclusive(True)
+    _scale_opts = [("Auto (fit screen)", None), ("90%", 0.90), ("100%", 1.0),
+                   ("110%", 1.10), ("125%", 1.25), ("150%", 1.50)]
+
+    def _mk_scale(sc):
+        def _do():
+            apply_scale(_auto_scale() if sc is None else sc)
+        return _do
+    for _lbl, _sc in _scale_opts:
+        _a = QtGui.QAction(_lbl, win, checkable=True); _a.setActionGroup(_scale_grp)
+        if _lbl.startswith("Auto"):
+            _a.setChecked(True)
+        _a.triggered.connect(_mk_scale(_sc))
+        m_scale.addAction(_a)
 
     # ---------------- Toolbar ----------------
     tb = win.addToolBar("Main")
@@ -308,6 +356,18 @@ def main() -> int:
     cfg_scroll = QtWidgets.QScrollArea(); cfg_scroll.setWidgetResizable(True)
     cfg_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
     cfg_w = QtWidgets.QWidget(); cfg_l = QtWidgets.QVBoxLayout(cfg_w)
+    cfg_l.setContentsMargins(4, 4, 4, 4); cfg_l.setSpacing(7)
+    # Config amigable estilo web: letra un poco más chica, casillas prolijas y compactas.
+    cfg_w.setStyleSheet(
+        "QWidget { font-size: 12px; }"
+        "QLabel { color:#475569; font-weight:600; }"
+        "QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
+        "  background:#ffffff; border:1px solid #d6deea; border-radius:7px;"
+        "  padding:4px 8px; min-height:24px; }"
+        "QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {"
+        "  border:1px solid #4f8fd0; }"
+        "QTableWidget { border:1px solid #e6ebf2; border-radius:10px; gridline-color:#eef2f8; }"
+        "QTableWidget::item { padding:3px 6px; }")
     cfg_scroll.setWidget(cfg_w); cfg_ol.addWidget(cfg_scroll)
 
     def _sec(txt):
@@ -375,6 +435,12 @@ def main() -> int:
     tblc.setHorizontalHeaderLabels(["Channel", "Type", "BNC", "Sensit. (mV/EU)",
                                     "Angle°", "Side", "Gap (V)", "Alarm", "Danger"])
     tblc.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    tblc.verticalHeader().setVisible(False)
+    tblc.setAlternatingRowColors(True)
+    tblc.setShowGrid(False)
+    tblc.verticalHeader().setDefaultSectionSize(30)     # filas cómodas y parejas
+    tblc.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+    tblc.setMinimumHeight(220)
     canv.addWidget(tblc, 3)
     brg_plot = pg.PlotWidget(); brg_plot.setBackground("w"); brg_plot.setAspectLocked(True)
     brg_plot.hideAxis("left"); brg_plot.hideAxis("bottom"); brg_plot.setMenuEnabled(False)
