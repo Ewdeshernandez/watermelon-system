@@ -136,13 +136,19 @@ def _stylesheet(scale: float = 1.0) -> str:
     QMenuBar::item:selected {{ background: {ACC}; border-radius: 5px; color: white; }}
     QMenu {{ background: {PANEL}; border: 1px solid {LINE}; color: {INK}; }}
     QMenu::item:selected {{ background: {ACC}; color: white; }}
-    QToolBar {{ background: {NAVY}; spacing: 8px; padding: 7px 10px;
-        border-bottom: 1px solid {NAVY}; }}
-    QToolBar::separator {{ background: #2b3d5f; width: 1px; margin: 4px 6px; }}
-    QToolBar QToolButton {{ color: #eaf1fb; padding: {pv}px {ph}px; border-radius: 7px;
-        font-weight: 600; font-size: {ft}px; }}
-    QToolBar QToolButton:hover {{ background: {ACC}; color: white; }}
-    QToolBar QToolButton:disabled {{ color: #6b7d9c; }}
+    QToolBar {{ background: qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 #16294a, stop:1 #0d1a30); spacing: 7px; padding: 8px 12px;
+        border-bottom: 1px solid #24406e; }}
+    QToolBar::separator {{ background: #2b3d5f; width: 1px; margin: 5px 7px; }}
+    /* Cada acción como CHIP visible (estilo estación de análisis) — el nombre
+       nunca se pierde sobre el fondo oscuro. */
+    QToolBar QToolButton {{ color: #eaf1fb; background: rgba(255,255,255,0.06);
+        border: 1px solid rgba(255,255,255,0.14); padding: {pv}px {ph}px;
+        border-radius: 8px; font-weight: 700; font-size: {ft}px; }}
+    QToolBar QToolButton:hover {{ background: {ACC}; border-color: {ACC}; color: white; }}
+    QToolBar QToolButton:pressed {{ background: {KPH}; border-color: {KPH}; }}
+    QToolBar QToolButton:disabled {{ color: #6f7f9c;
+        background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.06); }}
     QTabWidget::pane {{ border: 1px solid {LINE}; background: {PANEL};
         border-radius: 8px; top: -1px; }}
     QTabBar {{ qproperty-drawBase: 0; }}
@@ -371,19 +377,46 @@ def main() -> int:
     def _dsp(mn, mx, val, step=100.0):
         s = QtWidgets.QDoubleSpinBox(); s.setRange(mn, mx); s.setValue(val); s.setSingleStep(step); return s
 
+    def _wrap(layout):
+        w = QtWidgets.QWidget(); layout.setContentsMargins(0, 0, 0, 0); w.setLayout(layout); return w
+
     cfg_tabs = QtWidgets.QTabWidget(); cfg_ol.addWidget(cfg_tabs, 1)
 
     # ---------- Pestaña 1: Machine ----------
-    pg_machine = QtWidgets.QWidget(); ml = QtWidgets.QVBoxLayout(pg_machine); ml.setSpacing(10)
+    pg_machine = QtWidgets.QWidget(); ml = QtWidgets.QVBoxLayout(pg_machine); ml.setSpacing(9)
+
+    def _subhdr(txt):
+        h = QtWidgets.QLabel(txt)
+        h.setStyleSheet("color:#94a3b8; font-weight:800; font-size:10px; letter-spacing:.08em;"
+                        " text-transform:uppercase; margin-top:4px;")
+        return h
+
+    # Cargar una máquina YA configurada (local o de la web ☁) y editarla
+    ml.addWidget(_subhdr("Load an existing machine (library + cloud ☁)"))
     r_lib = QtWidgets.QHBoxLayout()
-    r_lib.addWidget(QtWidgets.QLabel("Library:"))
-    cb_lib = QtWidgets.QComboBox(); cb_lib.setMinimumWidth(220); r_lib.addWidget(cb_lib)
+    cb_lib = QtWidgets.QComboBox(); cb_lib.setMinimumWidth(280); r_lib.addWidget(cb_lib, 1)
     btn_load = QtWidgets.QPushButton("Load"); r_lib.addWidget(btn_load); r_lib.addStretch(1)
     ml.addLayout(r_lib)
-    r1 = QtWidgets.QHBoxLayout()
-    r1.addWidget(QtWidgets.QLabel("Machine:"))
-    ed_name = QtWidgets.QLineEdit(); r1.addWidget(ed_name, 1)
-    ml.addLayout(r1)
+
+    # Ficha del activo (homólogo a la web)
+    ml.addWidget(_subhdr("Asset record"))
+    fr = QtWidgets.QFormLayout(); fr.setHorizontalSpacing(14); fr.setVerticalSpacing(7)
+    ed_name = QtWidgets.QLineEdit(); ed_name.setPlaceholderText("e.g. TG-1, Compressor K-101")
+    ed_type = QtWidgets.QLineEdit(); ed_type.setPlaceholderText("e.g. Turbogenerator, Motor+Pump")
+    ed_tag = QtWidgets.QLineEdit(); ed_tag.setPlaceholderText("asset tag / nameplate")
+    ed_client = QtWidgets.QLineEdit(); ed_client.setPlaceholderText("client")
+    ed_loc = QtWidgets.QLineEdit(); ed_loc.setPlaceholderText("plant / location")
+    _r1 = QtWidgets.QHBoxLayout(); _r1.addWidget(ed_name, 1); _r1.addSpacing(10)
+    _r1.addWidget(QtWidgets.QLabel("Type:")); _r1.addWidget(ed_type, 1)
+    fr.addRow("Machine name:", _wrap(_r1))
+    _r2 = QtWidgets.QHBoxLayout(); _r2.addWidget(ed_tag, 1); _r2.addSpacing(10)
+    _r2.addWidget(QtWidgets.QLabel("Client:")); _r2.addWidget(ed_client, 1); _r2.addSpacing(10)
+    _r2.addWidget(QtWidgets.QLabel("Location:")); _r2.addWidget(ed_loc, 1)
+    fr.addRow("Tag:", _wrap(_r2))
+    ml.addLayout(fr)
+
+    # Operación + geometría (con Nº de cojinetes → layout recomendado)
+    ml.addWidget(_subhdr("Operation & geometry"))
     r2 = QtWidgets.QHBoxLayout()
     r2.addWidget(QtWidgets.QLabel("Mode:"))
     cb_mode = QtWidgets.QComboBox(); cb_mode.addItems(_mode_labels); r2.addWidget(cb_mode)
@@ -393,6 +426,16 @@ def main() -> int:
     r2.addWidget(QtWidgets.QLabel("Bearing type:"))
     cb_brg = QtWidgets.QComboBox(); cb_brg.addItems(["plain", "tilting_pad", "rolling", "mixed"])
     r2.addWidget(cb_brg); r2.addStretch(1); ml.addLayout(r2)
+    r2b = QtWidgets.QHBoxLayout()
+    r2b.addWidget(QtWidgets.QLabel("No. of bearings:"))
+    sp_nbrg = QtWidgets.QSpinBox(); sp_nbrg.setRange(1, 12); sp_nbrg.setValue(4); r2b.addWidget(sp_nbrg)
+    btn_autolay = QtWidgets.QPushButton("Auto-generate sensor layout")
+    btn_autolay.setStyleSheet(
+        "QPushButton{background:#eef5ff;color:#12467f;border:1px solid #bcd6f5;font-weight:700;"
+        "padding:6px 14px;border-radius:7px;} QPushButton:hover{background:#dbe8f7;}")
+    r2b.addWidget(btn_autolay)
+    r2b.addWidget(QtWidgets.QLabel("<i style='color:#64748b'>→ fills a recommended X/Y layout you can edit</i>"))
+    r2b.addStretch(1); ml.addLayout(r2b)
     ml.addStretch(1)
     cfg_tabs.addTab(pg_machine, "Machine")
 
@@ -433,8 +476,7 @@ def main() -> int:
     sl.addLayout(canv, 1)
     r_sb = QtWidgets.QHBoxLayout()
     btn_add = QtWidgets.QPushButton("+ Sensor"); btn_del = QtWidgets.QPushButton("– Remove")
-    btn_tpl = QtWidgets.QPushButton("Motor+pump template")
-    for b in (btn_add, btn_del, btn_tpl): r_sb.addWidget(b)
+    for b in (btn_add, btn_del): r_sb.addWidget(b)
     r_sb.addStretch(1); sl.addLayout(r_sb)
     cfg_tabs.addTab(pg_sensors, "Sensors & layout")
 
@@ -449,14 +491,43 @@ def main() -> int:
     ra.addWidget(QtWidgets.QLabel("Lines:"))
     cb_lines = QtWidgets.QComboBox(); cb_lines.addItems(["400", "800", "1600", "3200", "6400"])
     cb_lines.setCurrentText("1600"); ra.addWidget(cb_lines)
-    ra.addWidget(QtWidgets.QLabel("Window:"))
-    cb_win = QtWidgets.QComboBox(); cb_win.addItems(["hanning", "flattop", "uniform"]); ra.addWidget(cb_win)
+    ra.addWidget(QtWidgets.QLabel("Fmin (Hz):"))
+    sp_fmin = _dsp(0, 1000, 2, 1); ra.addWidget(sp_fmin)
     ra.addStretch(1); al.addLayout(ra)
-    al.addWidget(QtWidgets.QLabel(
-        "<i style='color:#64748b'>Acquisition quality for spectrum / Bode / cascade "
-        "(ISO / System1 style). Δf = Fmax / Lines.</i>"))
+    ra2 = QtWidgets.QHBoxLayout()
+    ra2.addWidget(QtWidgets.QLabel("Lines:"))
+    cb_lines = QtWidgets.QComboBox(); cb_lines.addItems(["400", "800", "1600", "3200", "6400"])
+    cb_lines.setCurrentText("1600"); ra2.addWidget(cb_lines)
+    ra2.addWidget(QtWidgets.QLabel("Window:"))
+    cb_win = QtWidgets.QComboBox(); cb_win.addItems(["hanning", "flattop", "uniform"]); ra2.addWidget(cb_win)
+    ra2.addWidget(QtWidgets.QLabel("Averages:"))
+    sp_avg = QtWidgets.QSpinBox(); sp_avg.setRange(1, 64); sp_avg.setValue(4); ra2.addWidget(sp_avg)
+    ra2.addStretch(1); al.addLayout(ra2)
+    lbl_acq_df = QtWidgets.QLabel("")
+    lbl_acq_df.setStyleSheet("color:#64748b;")
+    al.addWidget(lbl_acq_df)
+    al.addWidget(_subhdr("Configured channels"))
+    lbl_acq_chans = QtWidgets.QLabel("—"); lbl_acq_chans.setWordWrap(True)
+    lbl_acq_chans.setStyleSheet("color:#0F1E3D;")
+    al.addWidget(lbl_acq_chans)
     al.addStretch(1)
     cfg_tabs.addTab(pg_acq, "Acquisition")
+
+    def _refresh_acq_info():
+        try:
+            fx = float(sp_fmax.value()); ln = int(cb_lines.currentText())
+            df = fx / ln if ln else 0.0
+            lbl_acq_df.setText(f"Δf = Fmax / Lines = {df:.2f} Hz    ·    "
+                               f"window {cb_win.currentText()} · {sp_avg.value()} averages")
+            names = [tblc.item(r, 0).text() for r in range(tblc.rowCount()) if tblc.item(r, 0)]
+            lbl_acq_chans.setText("   ".join(f"● {n}" for n in names) if names else "—")
+        except Exception:  # noqa: BLE001
+            pass
+    for _w in (sp_fmax, sp_avg):
+        _w.valueChanged.connect(lambda *_: _refresh_acq_info())
+    cb_lines.currentTextChanged.connect(lambda *_: _refresh_acq_info())
+    cb_win.currentTextChanged.connect(lambda *_: _refresh_acq_info())
+    cfg_tabs.currentChanged.connect(lambda *_: _refresh_acq_info())
 
     # ---------- Pestaña 4: Simulator (solo con simulador) ----------
     pg_sim = QtWidgets.QWidget(); sml = QtWidgets.QVBoxLayout(pg_sim); sml.setSpacing(10)
@@ -682,6 +753,17 @@ def main() -> int:
                 QtWidgets.QMessageBox.warning(win, "Load", f"Could not download '{name}' from the cloud.")
                 return
             fill_form(_setup_to_sim(setup))
+            mc = setup.machine
+            ed_type.setText(getattr(mc, "machine_type", "") or "")
+            ed_tag.setText(getattr(mc, "tag", "") or "")
+            ed_client.setText(getattr(mc, "client", "") or "")
+            ed_loc.setText(getattr(mc, "location", "") or "")
+            if getattr(mc, "n_bearings", 0):
+                sp_nbrg.setValue(int(mc.n_bearings))
+            aq = setup.acquisition
+            sp_fmax.setValue(int(aq.fmax_hz)); sp_fmin.setValue(float(aq.fmin_hz))
+            cb_lines.setCurrentText(str(int(aq.lines))); cb_win.setCurrentText(aq.window)
+            sp_avg.setValue(int(aq.averages))
         else:
             fill_form(load_from_library(nm))
 
@@ -753,10 +835,13 @@ def main() -> int:
                            rpm_min=float(min(rng)) if rng else 0.0,
                            rpm_max=float(max(rng)) if rng else 0.0,
                            rotation=m.rotation, speed_control=speed,
-                           bearing_type=m.bearing_type, n_bearings=nb)
+                           bearing_type=m.bearing_type, n_bearings=int(sp_nbrg.value()) or nb,
+                           machine_type=ed_type.text().strip(), tag=ed_tag.text().strip(),
+                           client=ed_client.text().strip(), location=ed_loc.text().strip())
         try:
-            acq = AcquisitionParams(fmax_hz=float(sp_fmax.value()),
-                                    lines=int(cb_lines.currentText()), window=cb_win.currentText())
+            acq = AcquisitionParams(fmax_hz=float(sp_fmax.value()), fmin_hz=float(sp_fmin.value()),
+                                    lines=int(cb_lines.currentText()), window=cb_win.currentText(),
+                                    averages=int(sp_avg.value()))
         except Exception:  # noqa: BLE001
             acq = AcquisitionParams()
         return AcqSetup(machine=mc, channels=chans, acquisition=acq)
@@ -804,9 +889,14 @@ def main() -> int:
                       QtWidgets.QMessageBox.Warning)
         QtCore.QTimer.singleShot(300, _check)
 
+    def _do_autolayout():
+        # Nº de cojinetes → layout recomendado (KPH + X/Y por cojinete). El usuario edita.
+        fill_form(SimMachine.plantilla_prox_train(n_bearings=int(sp_nbrg.value()),
+                                                  name=(ed_name.text() or "Machine")))
+
     btn_add.clicked.connect(lambda: _add_sensor_row(SensorSpec("CHn", "accel", tblc.rowCount() + 1)))
     btn_del.clicked.connect(lambda: tblc.removeRow(tblc.currentRow()) if tblc.currentRow() >= 0 else None)
-    btn_tpl.clicked.connect(lambda: fill_form(SimMachine.plantilla_motor_bomba()))
+    btn_autolay.clicked.connect(_do_autolayout)
     btn_load.clicked.connect(do_load_lib)
     btn_save.clicked.connect(do_save_lib)
     btn_cloud.clicked.connect(do_save_cloud_machine)

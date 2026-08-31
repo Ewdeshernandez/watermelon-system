@@ -105,6 +105,11 @@ class MachineConfig:
     bearing_type: str = "plain"      # plain | tilting_pad | rolling | mixed
     n_bearings: int = 2
     iso_norm: str = ""
+    # --- Ficha del activo (homólogo a la web / ADRE 408) ---
+    machine_type: str = ""           # ej. "Turbogenerator", "Motor+Pump"
+    tag: str = ""                    # tag / placa de la máquina
+    client: str = ""                 # cliente
+    location: str = ""               # planta / ubicación
 
     def __post_init__(self) -> None:
         if self.rotation not in ROTATIONS:
