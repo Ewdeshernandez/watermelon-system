@@ -382,7 +382,7 @@ def _render_source_params() -> None:
                 with cc2:
                     sim["ramp_seconds"] = st.slider("Duration (s)", 5, 300, 90, key="rm_ramp",
                                                     help="Slower runup/coastdown = more points "
-                                                         "in Bode/Polar (like Bently). A real "
+                                                         "in Bode/Polar. A real "
                                                          "coastdown is slow → very dense curve.")
             st.caption("**Steady**: constant speed (steady state, continuous sampling). "
                        "**Startup / Coastdown**: speed sweep → **transient** capture "

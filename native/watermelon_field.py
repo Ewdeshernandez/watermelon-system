@@ -4,7 +4,7 @@ Watermelon Field — módulo NATIVO industrial de adquisición y monitoreo
 
 App de escritorio (PySide6 + pyqtgraph): menú, barra de herramientas, pestañas
 (Configuración · Monitoreo · Tabular · Espectro) y barra de estado — estilo
-estación de análisis (System1/ADRE), pero abierto y con nube. Reusa el motor de
+estación de análisis conforme a norma (API 670/ISO), abierta y con nube. Reusa el motor de
 core/remote_monitoring. Tiempo real nativo, sin navegador.
 
 Correr:
@@ -27,9 +27,9 @@ from core.remote_monitoring.agent import AcqAgent
 from core.remote_monitoring.stream_source import (ChannelConfig, StreamConfig,
                                                   SimulatedStreamSource, is_keyphasor_channel)
 
-# --- Paleta System1 (paridad con la WEB): tema claro instrumento ---
+# --- Paleta instrumento (paridad con la WEB): tema claro ---
 BG = "#eef2f7"       # fondo app (gris azulado claro, como la web)
-PANEL = "#ffffff"    # paneles / plots (blancos, como System1)
+PANEL = "#ffffff"    # paneles / plots (blancos)
 PANEL2 = "#e7edf6"   # hover / panel elevado
 LINE = "#d6deea"     # bordes / grid
 INK = "#1f2937"      # texto principal
@@ -37,11 +37,11 @@ MUTE = "#64748b"     # texto secundario
 ACC = "#2f6fb0"      # acento azul (web)
 NAVY = "#0F1E3D"     # chrome (menú/toolbar/status) + títulos
 BLUE = "#2f6fb0"
-CORN = "#4f8fd0"     # traza primaria (cornflower, System1)
+CORN = "#4f8fd0"     # traza primaria (cornflower)
 AMBER = "#e08a1e"    # traza secundaria (ámbar) para fase/espectro
 GREEN = "#2fa36b"    # órbita
 REDL = "#c0392b"     # 1X / peligro
-KPH = "#12467f"      # puntos keyphasor (azul profundo, System1)
+KPH = "#12467f"      # puntos keyphasor (azul profundo)
 # Colores por TIPO de sensor (idénticos a la web: bolitas de la sección)
 SENSOR_COLORS = {"prox": "#8b5cf6", "vel": "#22b8cf", "accel": "#ef4444", "keyphasor": "#f59e0b"}
 SENSOR_LABELS = {"prox": "Proximity", "vel": "Velocity", "accel": "Accelerometer", "keyphasor": "Keyphasor"}
@@ -451,27 +451,30 @@ def main() -> int:
         f"R=clockwise · L=counter-clockwise (45°L+45°R=90°)</span>")
     sl.addWidget(leg)
     canv = QtWidgets.QHBoxLayout()
-    # 9 columnas visibles + 6 OCULTAS (ADRE 408): full_scale, active, coupling, unit,
+    # 9 columnas visibles + 6 OCULTAS (norma API 670): full_scale, active, coupling, unit,
     # keyphasor_ref, pair_ref. La tabla es la fuente única; el "Channel editor" edita todo.
     _COL_FS, _COL_ACT, _COL_COUP, _COL_UNIT, _COL_KPH, _COL_PAIR = 9, 10, 11, 12, 13, 14
     tblc = QtWidgets.QTableWidget(0, 15)
     tblc.setHorizontalHeaderLabels(["Channel", "Type", "BNC", "Sensit. (mV/EU)",
                                     "Angle°", "Side", "Gap (V)", "Alarm", "Danger",
                                     "FullScale", "Active", "Coupling", "Unit", "Keyphasor", "Pair"])
-    for _c in (_COL_FS, _COL_ACT, _COL_COUP, _COL_UNIT, _COL_KPH, _COL_PAIR):
-        tblc.setColumnHidden(_c, True)          # datos ADRE ocultos (se editan en Channel editor)
-    for _c in range(9):
+    # En 'Sensors & layout' se ven SOLO 5 columnas esenciales: Channel/Type/BNC/Angle/Side.
+    # Sensit/Gap/Alarm/Danger + los avanzados se editan en 'Channel editor' → tabla limpia
+    # y más espacio para el diagrama.
+    for _c in (3, 6, 7, 8, _COL_FS, _COL_ACT, _COL_COUP, _COL_UNIT, _COL_KPH, _COL_PAIR):
+        tblc.setColumnHidden(_c, True)
+    for _c in (0, 1, 2, 4, 5):
         tblc.horizontalHeader().setSectionResizeMode(_c, QtWidgets.QHeaderView.Stretch)
     tblc.verticalHeader().setVisible(False)
     tblc.setAlternatingRowColors(True)
     tblc.setShowGrid(False)
-    tblc.verticalHeader().setDefaultSectionSize(30)
+    tblc.verticalHeader().setDefaultSectionSize(26)      # filas compactas (combos no gigantes)
     tblc.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-    tblc.setMinimumHeight(240)
-    canv.addWidget(tblc, 3)
+    tblc.setMinimumHeight(240); tblc.setMaximumWidth(560)
+    canv.addWidget(tblc, 2)
     brg_plot = pg.PlotWidget(); brg_plot.setBackground("w"); brg_plot.setAspectLocked(True)
     brg_plot.hideAxis("left"); brg_plot.hideAxis("bottom"); brg_plot.setMenuEnabled(False)
-    brg_plot.setMinimumWidth(340)
+    brg_plot.setMinimumWidth(420)
     brg_plot.setTitle("Machine layout", color=NAVY, size="10pt")
     _brg_vb = brg_plot.getViewBox()              # diagrama FIJO (sin pan/zoom/rueda)
     _brg_vb.setMouseEnabled(x=False, y=False); _brg_vb.setMenuEnabled(False)
@@ -480,7 +483,7 @@ def main() -> int:
         brg_plot.getPlotItem().hideButtons()
     except Exception:  # noqa: BLE001
         pass
-    canv.addWidget(brg_plot, 2)
+    canv.addWidget(brg_plot, 3)
     sl.addLayout(canv, 1)
     r_sb = QtWidgets.QHBoxLayout()
     btn_add = QtWidgets.QPushButton("+ Sensor"); btn_del = QtWidgets.QPushButton("– Remove")
@@ -488,7 +491,7 @@ def main() -> int:
     r_sb.addStretch(1); sl.addLayout(r_sb)
     cfg_tabs.addTab(pg_sensors, "Sensors & layout")
 
-    # ---------- Pestaña 3: Acquisition (avanzada, estilo System1/ADRE) ----------
+    # ---------- Pestaña 3: Acquisition (avanzada, por norma) ----------
     pg_acq = QtWidgets.QWidget(); al = QtWidgets.QVBoxLayout(pg_acq); al.setSpacing(9)
     al.addWidget(_subhdr("Train-wide"))
     ra = QtWidgets.QHBoxLayout()
@@ -514,7 +517,7 @@ def main() -> int:
     r_ord.addStretch(1); al.addLayout(r_ord)
 
     # Bandas por tipo de sensor (proximidad baja freq · acelerómetro alta freq)
-    al.addWidget(_subhdr("Acquisition band per sensor type (ISO / System1)"))
+    al.addWidget(_subhdr("Acquisition band per sensor type (ISO 20816 / API 670)"))
     acq_band = {}
     _band_def = {"proximity": (1000, 2, "1600"), "velometer": (2000, 2, "1600"),
                  "accelerometer": (10000, 10, "3200")}
@@ -622,15 +625,19 @@ def main() -> int:
     sp_avg.valueChanged.connect(lambda *_: _refresh_acq_info())
     cfg_tabs.currentChanged.connect(lambda *_: _refresh_acq_info())
 
-    # ---------- Pestaña: Channel editor (maestro-detalle, paridad ADRE 408) ----------
+    # ---------- Pestaña: Channel editor (maestro-detalle, por norma API 670) ----------
     pg_ched = QtWidgets.QWidget(); cl = QtWidgets.QVBoxLayout(pg_ched); cl.setSpacing(8)
     _ched_row = {"r": None, "busy": False}
     hrow = QtWidgets.QHBoxLayout()
     hrow.addWidget(QtWidgets.QLabel("Channel:"))
-    cb_ched = QtWidgets.QComboBox(); cb_ched.setMinimumWidth(160); hrow.addWidget(cb_ched)
-    btn_ch_prev = QtWidgets.QPushButton("◀"); btn_ch_next = QtWidgets.QPushButton("▶")
+    cb_ched = QtWidgets.QComboBox(); cb_ched.setMinimumWidth(180); hrow.addWidget(cb_ched)
+    btn_ch_prev = QtWidgets.QPushButton("‹"); btn_ch_next = QtWidgets.QPushButton("›")
+    _navbtn = ("QPushButton{background:transparent;color:#94a3b8;border:none;font-size:18px;"
+               "font-weight:700;padding:0 6px;} QPushButton:hover{color:#12467f;}"
+               "QPushButton:disabled{color:#d6deea;}")
     for _b in (btn_ch_prev, btn_ch_next):
-        _b.setFixedWidth(34); hrow.addWidget(_b)
+        _b.setFixedWidth(26); _b.setToolTip("Previous / next channel"); _b.setStyleSheet(_navbtn)
+        hrow.addWidget(_b)
     lbl_ch_bearing = QtWidgets.QLabel(""); lbl_ch_bearing.setStyleSheet("color:#64748b;")
     hrow.addWidget(lbl_ch_bearing); hrow.addStretch(1)
     cl.addLayout(hrow)
@@ -656,15 +663,18 @@ def main() -> int:
 
     def _grp(title, pairs):
         cl.addWidget(_subhdr(title))
-        f = QtWidgets.QFormLayout(); f.setHorizontalSpacing(16); f.setVerticalSpacing(7)
         row = QtWidgets.QHBoxLayout()
         for i, (lab, w) in enumerate(pairs):
             if lab:
                 row.addWidget(QtWidgets.QLabel(lab))
-            row.addWidget(w, 1)
+            try:
+                w.setMinimumWidth(150); w.setMaximumWidth(220)   # tamaño natural, no estirado
+            except Exception:  # noqa: BLE001
+                pass
+            row.addWidget(w)
             if i < len(pairs) - 1:
-                row.addSpacing(12)
-        row.addStretch(0)
+                row.addSpacing(18)
+        row.addStretch(1)                                        # espacio sobrante a la derecha
         cl.addLayout(row)
 
     _grp("Identification (API 670)", [("Point:", e_point), ("BNC:", e_bnc), ("", e_active)])
@@ -962,6 +972,7 @@ def main() -> int:
         tblc.setItem(r, 0, QtWidgets.QTableWidgetItem(s.name))
         cbk = QtWidgets.QComboBox(); cbk.addItems([l for l, _ in _KIND_LABELS])
         cbk.setCurrentText(_LABEL_BY_KIND.get(s.kind, "Accelerometer"))
+        cbk.setMaximumHeight(22); cbk.setStyleSheet("QComboBox{min-height:0;padding:1px 6px;}")
         cbk.currentTextChanged.connect(lambda _t, rr=r: (_color_name_cell(rr), draw_bearing()))
         tblc.setCellWidget(r, 1, cbk)
         tblc.setItem(r, 2, QtWidgets.QTableWidgetItem(str(s.bnc)))
@@ -969,12 +980,13 @@ def main() -> int:
         tblc.setItem(r, 4, QtWidgets.QTableWidgetItem(f"{s.angle:g}"))
         cbs = QtWidgets.QComboBox(); cbs.addItems(_SIDES)
         cbs.setCurrentText(s.side if s.side in ("R", "L") else "—")
+        cbs.setMaximumHeight(22); cbs.setStyleSheet("QComboBox{min-height:0;padding:1px 6px;}")
         cbs.currentTextChanged.connect(lambda _t: draw_bearing())
         tblc.setCellWidget(r, 5, cbs)
         tblc.setItem(r, 6, QtWidgets.QTableWidgetItem(f"{s.gap:g}"))
         tblc.setItem(r, 7, QtWidgets.QTableWidgetItem(f"{s.alarm:g}"))
         tblc.setItem(r, 8, QtWidgets.QTableWidgetItem(f"{s.danger:g}"))
-        # columnas ADRE ocultas (defaults por tipo). SensorSpec no las trae → derivadas.
+        # columnas avanzadas ocultas (defaults por tipo). SensorSpec no las trae → derivadas.
         _u, _cp = _KIND_UC.get(s.kind, ("g rms", "IEPE"))
         tblc.setItem(r, _COL_FS, QtWidgets.QTableWidgetItem(f"{getattr(s, 'full_scale', 0.0):g}"))
         tblc.setItem(r, _COL_ACT, QtWidgets.QTableWidgetItem("1"))
