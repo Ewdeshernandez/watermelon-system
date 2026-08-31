@@ -191,7 +191,7 @@ def render_setup() -> None:
                 _load_setup_into_state(pick_s)
         with scol3:
             st.write(""); st.write("")
-            if st.button("🗑 Delete", use_container_width=True) and pick_s != "—":
+            if st.button("🗑 Delete", use_container_width=True, key="rm_saved_delete") and pick_s != "—":
                 cfg.delete_setup(pick_s)
                 st.session_state.pop("rm_load_pick", None)
                 st.rerun()
@@ -318,7 +318,7 @@ def _render_channel_editor() -> None:
             st.rerun()
     with ctrl[2]:
         st.write(""); st.write("")
-        if idx is not None and st.button("🗑 Delete", use_container_width=True):
+        if idx is not None and st.button("🗑 Delete", use_container_width=True, key="rm_ch_delete"):
             rows.pop(idx)
             st.session_state.pop("rm_edit_idx", None)
             st.rerun()
