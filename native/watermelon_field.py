@@ -174,6 +174,20 @@ def _stylesheet(scale: float = 1.0) -> str:
         selection-background-color: {ACC}; selection-color: {NAVY};
         border: 1px solid {LINE}; }}
     QComboBox::drop-down {{ border: none; width: 20px; }}
+    /* Flechas ▲▼ de los spinbox: al estilar el QSpinBox por hoja de estilo, Qt deja
+       los botones sin ancho (no se pueden clickear). Se les da geometría explícita. */
+    QSpinBox {{ padding-right: 20px; }}
+    QDoubleSpinBox {{ padding-right: 20px; }}
+    QSpinBox::up-button, QDoubleSpinBox::up-button {{
+        subcontrol-origin: border; subcontrol-position: top right; width: 18px;
+        border-left: 1px solid {LINE}; border-top-right-radius: 6px; background: {PANEL2}; }}
+    QSpinBox::down-button, QDoubleSpinBox::down-button {{
+        subcontrol-origin: border; subcontrol-position: bottom right; width: 18px;
+        border-left: 1px solid {LINE}; border-bottom-right-radius: 6px; background: {PANEL2}; }}
+    QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+    QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {{ background: {ACC}; }}
+    QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ width: 9px; height: 9px; }}
+    QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ width: 9px; height: 9px; }}
     QTableWidget {{ background: {PANEL}; color: {INK}; gridline-color: #eef2f8;
         border: 1px solid {LINE}; border-radius: 10px;
         alternate-background-color: #f6f9fd; }}
@@ -368,6 +382,7 @@ def main() -> int:
         "QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
         "  background:#ffffff; border:1px solid #d6deea; border-radius:7px;"
         "  padding:4px 8px; min-height:24px; }"
+        "QSpinBox, QDoubleSpinBox { padding-right:20px; }"
         "QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {"
         "  border:1px solid #4f8fd0; }"
         "QTableWidget { border:1px solid #e6ebf2; border-radius:10px; gridline-color:#eef2f8; }"
@@ -453,15 +468,16 @@ def main() -> int:
     canv = QtWidgets.QHBoxLayout()
     # 9 columnas visibles + 6 OCULTAS (norma API 670): full_scale, active, coupling, unit,
     # keyphasor_ref, pair_ref. La tabla es la fuente única; el "Channel editor" edita todo.
-    _COL_FS, _COL_ACT, _COL_COUP, _COL_UNIT, _COL_KPH, _COL_PAIR = 9, 10, 11, 12, 13, 14
-    tblc = QtWidgets.QTableWidget(0, 15)
+    _COL_FS, _COL_ACT, _COL_COUP, _COL_UNIT, _COL_KPH, _COL_PAIR, _COL_PLANE = 9, 10, 11, 12, 13, 14, 15
+    tblc = QtWidgets.QTableWidget(0, 16)
     tblc.setHorizontalHeaderLabels(["Channel", "Type", "BNC", "Sensit. (mV/EU)",
                                     "Angle°", "Side", "Gap (V)", "Alarm", "Danger",
-                                    "FullScale", "Active", "Coupling", "Unit", "Keyphasor", "Pair"])
+                                    "FullScale", "Active", "Coupling", "Unit", "Keyphasor",
+                                    "Pair", "Plane"])
     # En 'Sensors & layout' se ven SOLO 5 columnas esenciales: Channel/Type/BNC/Angle/Side.
     # Sensit/Gap/Alarm/Danger + los avanzados se editan en 'Channel editor' → tabla limpia
     # y más espacio para el diagrama.
-    for _c in (3, 6, 7, 8, _COL_FS, _COL_ACT, _COL_COUP, _COL_UNIT, _COL_KPH, _COL_PAIR):
+    for _c in (3, 6, 7, 8, _COL_FS, _COL_ACT, _COL_COUP, _COL_UNIT, _COL_KPH, _COL_PAIR, _COL_PLANE):
         tblc.setColumnHidden(_c, True)
     for _c in (0, 1, 2, 4, 5):
         tblc.horizontalHeader().setSectionResizeMode(_c, QtWidgets.QHeaderView.Stretch)
@@ -496,17 +512,33 @@ def main() -> int:
     al.addWidget(_subhdr("Train-wide"))
     ra = QtWidgets.QHBoxLayout()
     ra.addWidget(QtWidgets.QLabel("Sampling (Hz):"))
-    sp_fs = QtWidgets.QSpinBox(); sp_fs.setRange(256, 102400); sp_fs.setSingleStep(1280); ra.addWidget(sp_fs)
+    sp_fs = QtWidgets.QSpinBox(); sp_fs.setRange(256, 102400); sp_fs.setSingleStep(1280)
+    sp_fs.setToolTip("Muestreo del DAQ (S/s por canal). Debe ser ≥ 2.56 × Fmax.\n"
+                     "Proximidad/eje: 2560–5120.  Rodamientos/acel.: 25600–51200.")
+    ra.addWidget(sp_fs)
     ra.addWidget(QtWidgets.QLabel("Frequency:"))
-    cb_frequ = QtWidgets.QComboBox(); cb_frequ.addItems(["CPM", "Hz"]); ra.addWidget(cb_frequ)
+    cb_frequ = QtWidgets.QComboBox(); cb_frequ.addItems(["CPM", "Hz"])
+    cb_frequ.setToolTip("Unidad de frecuencia en los gráficos.\nCPM = ciclos/min (turbomáquinas).  Hz = ciclos/s.")
+    ra.addWidget(cb_frequ)
     ra.addWidget(QtWidgets.QLabel("Waveform:"))
-    cb_wfmode = QtWidgets.QComboBox(); cb_wfmode.addItems(["synchronous", "asynchronous"]); ra.addWidget(cb_wfmode)
+    cb_wfmode = QtWidgets.QComboBox(); cb_wfmode.addItems(["synchronous", "asynchronous"])
+    cb_wfmode.setToolTip("synchronous = muestreo por vuelta (order tracking, requiere keyphasor;\n"
+                         "ideal órbita/Bode).  asynchronous = por tiempo (sin keyphasor).")
+    ra.addWidget(cb_wfmode)
     ra.addWidget(QtWidgets.QLabel("Samples/rev:"))
-    sp_sprev = QtWidgets.QSpinBox(); sp_sprev.setRange(0, 4096); sp_sprev.setValue(0); ra.addWidget(sp_sprev)
+    sp_sprev = QtWidgets.QSpinBox(); sp_sprev.setRange(0, 4096); sp_sprev.setValue(0)
+    sp_sprev.setToolTip("Muestras por revolución (order tracking). 0 = automático.\nTípico 64, 128, 256 (potencias de 2).")
+    ra.addWidget(sp_sprev)
     ra.addWidget(QtWidgets.QLabel("Averages:"))
-    sp_avg = QtWidgets.QSpinBox(); sp_avg.setRange(1, 64); sp_avg.setValue(4); ra.addWidget(sp_avg)
+    sp_avg = QtWidgets.QSpinBox(); sp_avg.setRange(1, 64); sp_avg.setValue(4)
+    sp_avg.setToolTip("Promedios espectrales. Más promedios = espectro más limpio pero más lento.\n"
+                      "Estable: 4–8.  Transitorio (arranque/parada): 1–2.")
+    ra.addWidget(sp_avg)
     ra.addWidget(QtWidgets.QLabel("Window:"))
-    cb_win = QtWidgets.QComboBox(); cb_win.addItems(["hanning", "flattop", "uniform"]); ra.addWidget(cb_win)
+    cb_win = QtWidgets.QComboBox(); cb_win.addItems(["hanning", "flattop", "uniform"])
+    cb_win.setToolTip("Ventana FFT.\nhanning = general (buena resolución).  "
+                      "flattop = exactitud de amplitud.  uniform = transitorios/impacto.")
+    ra.addWidget(cb_win)
     ra.addStretch(1); al.addLayout(ra)
     r_ord = QtWidgets.QHBoxLayout()
     r_ord.addWidget(QtWidgets.QLabel("Orders (×rpm):"))
@@ -529,8 +561,8 @@ def main() -> int:
                                   "accelerometer": "accel"}[_t], "#8b5cf6")
         _l = QtWidgets.QLabel(f"<span style='color:{_dot}'>●</span> {_lab}"); _l.setMinimumWidth(120)
         rb.addWidget(_l)
-        rb.addWidget(QtWidgets.QLabel("Fmax (Hz):")); _wfx = _dsp(50, 40000, _fx, 100); rb.addWidget(_wfx)
         rb.addWidget(QtWidgets.QLabel("Fmin (Hz):")); _wfn = _dsp(0, 2000, _fn, 1); rb.addWidget(_wfn)
+        rb.addWidget(QtWidgets.QLabel("Fmax (Hz):")); _wfx = _dsp(50, 40000, _fx, 100); rb.addWidget(_wfx)
         rb.addWidget(QtWidgets.QLabel("Lines:"))
         _wln = QtWidgets.QComboBox(); _wln.addItems(["400", "800", "1600", "3200", "6400"])
         _wln.setCurrentText(_ln); rb.addWidget(_wln)
@@ -648,6 +680,9 @@ def main() -> int:
 
     e_point = QtWidgets.QLineEdit()
     e_bnc = QtWidgets.QSpinBox(); e_bnc.setRange(1, 64)
+    e_bearing = QtWidgets.QSpinBox(); e_bearing.setRange(1, 24)
+    e_bearing.setToolTip("Cojinete/plano donde está montado el sensor.\n"
+                         "El keyphasor puede ir en CUALQUIER cojinete (y puede haber varios).")
     e_active = QtWidgets.QCheckBox("Active (collects data)"); e_active.setChecked(True)
     e_type = QtWidgets.QComboBox(); e_type.addItems([l for l, _ in _KIND_LABELS])
     e_sens = _mkspin(0, 100000, 10, 2, 200)
@@ -677,7 +712,8 @@ def main() -> int:
         row.addStretch(1)                                        # espacio sobrante a la derecha
         cl.addLayout(row)
 
-    _grp("Identification (API 670)", [("Point:", e_point), ("BNC:", e_bnc), ("", e_active)])
+    _grp("Identification (API 670)", [("Point:", e_point), ("BNC:", e_bnc),
+                                      ("Bearing:", e_bearing), ("", e_active)])
     _grp("Transducer", [("Type:", e_type), ("Sensitivity mV/EU:", e_sens),
                         ("Unit:", e_unit), ("Coupling:", e_coup)])
     _grp("", [("Full-scale (EU):", e_full), ("Gap/Bias (V):", e_gap)])
@@ -737,7 +773,11 @@ def main() -> int:
         e_kph.setCurrentText(_cell(r, _COL_KPH) or "—")
         e_pair.clear(); e_pair.addItems(["—"] + [n for n in names if n != _cell(r, 0)])
         e_pair.setCurrentText(_cell(r, _COL_PAIR) or "—")
-        lbl_ch_bearing.setText(f"Bearing {_bearing_no(_cell(r, 0)) or '—'}")
+        try:
+            e_bearing.setValue(int(float(_cell(r, _COL_PLANE) or (_bearing_no(_cell(r, 0)) or 1))))
+        except Exception:  # noqa: BLE001
+            e_bearing.setValue(1)
+        lbl_ch_bearing.setText("")
         lbl_ch_ok.setText("")
         _ched_row["busy"] = False
 
@@ -764,6 +804,7 @@ def main() -> int:
         _set(_COL_COUP, e_coup.currentText()); _set(_COL_UNIT, e_unit.currentText())
         _set(_COL_KPH, "" if e_kph.currentText() == "—" else e_kph.currentText())
         _set(_COL_PAIR, "" if e_pair.currentText() == "—" else e_pair.currentText())
+        _set(_COL_PLANE, str(int(e_bearing.value())))
         _color_name_cell(r); draw_bearing()
         _ched_refresh_selector(); _refresh_acq_info()
         lbl_ch_ok.setText("✓ Applied")
@@ -775,7 +816,29 @@ def main() -> int:
             cb_ched.setCurrentText(cur)
         cb_ched.blockSignals(False)
 
+    def _ched_live_orient(*_):
+        # Angle/Side/Bearing se reflejan EN VIVO en el diagrama (sin apretar Apply).
+        r = _ched_row.get("r")
+        if _ched_row.get("busy") or r is None or r >= tblc.rowCount():
+            return
+
+        def _put(col, val):
+            it = tblc.item(r, col)
+            if it:
+                it.setText(val)
+            else:
+                tblc.setItem(r, col, QtWidgets.QTableWidgetItem(val))
+        _put(4, f"{e_ang.value():g}")
+        _put(_COL_PLANE, str(int(e_bearing.value())))
+        sw = tblc.cellWidget(r, 5)
+        if sw:
+            sw.setCurrentText(e_side.currentText())
+        draw_bearing()
+
     cb_ched.currentIndexChanged.connect(lambda i: _ched_load_row(i))
+    e_ang.valueChanged.connect(_ched_live_orient)
+    e_side.currentTextChanged.connect(_ched_live_orient)
+    e_bearing.valueChanged.connect(_ched_live_orient)
     btn_ch_apply.clicked.connect(_ched_apply)
     btn_ch_prev.clicked.connect(lambda: cb_ched.setCurrentIndex(max(0, cb_ched.currentIndex() - 1)))
     btn_ch_next.clicked.connect(
@@ -834,6 +897,57 @@ def main() -> int:
     cfg_tabs.insertTab(4, pg_val, "Validation")
     cfg_tabs.currentChanged.connect(
         lambda *_: _run_validation() if cfg_tabs.currentWidget() is pg_val else None)
+
+    # ---------- Pestaña: Summary (configuración completa, read-only) ----------
+    pg_sum = QtWidgets.QWidget(); ul = QtWidgets.QVBoxLayout(pg_sum); ul.setSpacing(8)
+    lbl_sum_hdr = QtWidgets.QLabel("")
+    lbl_sum_hdr.setStyleSheet(f"background:{NAVY}; color:white; border-radius:10px; padding:12px 16px;")
+    lbl_sum_hdr.setTextFormat(QtCore.Qt.RichText)
+    ul.addWidget(lbl_sum_hdr)
+    _SUM_COLS = ["Channel", "Brg", "Type", "BNC", "Sensit", "Unit", "Coupling", "Angle",
+                 "Side", "FullScale", "Gap", "Alarm", "Danger", "Keyphasor", "Pair", "Active"]
+    tbl_sum = QtWidgets.QTableWidget(0, len(_SUM_COLS))
+    tbl_sum.setHorizontalHeaderLabels(_SUM_COLS)
+    tbl_sum.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    tbl_sum.verticalHeader().setVisible(False)
+    tbl_sum.setAlternatingRowColors(True); tbl_sum.setShowGrid(False)
+    tbl_sum.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+    tbl_sum.verticalHeader().setDefaultSectionSize(26)
+    ul.addWidget(tbl_sum, 1)
+    cfg_tabs.addTab(pg_sum, "Summary")
+
+    def _refresh_summary():
+        try:
+            pfx, pfn, pln = acq_band["proximity"]
+            lbl_sum_hdr.setText(
+                f"<span style='font-size:17px;font-weight:800'>{html.escape(ed_name.text() or '—')}</span>"
+                f"&nbsp;&nbsp;<span style='color:#8ec3ef'>{html.escape(ed_type.text() or '')}</span><br>"
+                f"<span style='color:#b7c6de;font-size:12px'>"
+                f"tag {html.escape(ed_tag.text() or '—')} · client {html.escape(ed_client.text() or '—')} · "
+                f"{html.escape(ed_loc.text() or '—')} &nbsp;|&nbsp; RPM {sp_rpm.value():.0f} · "
+                f"{cb_rot.currentText()} · {cb_brg.currentText()} · {sp_nbrg.value()} bearings &nbsp;|&nbsp; "
+                f"Sampling {sp_fs.value()} Hz · {cb_wfmode.currentText()} · {sp_avg.value()} avg · "
+                f"{cb_frequ.currentText()}</span>")
+            tbl_sum.setRowCount(tblc.rowCount())
+            for r in range(tblc.rowCount()):
+                def _g(c):
+                    it = tblc.item(r, c); return it.text() if it else ""
+                tw = tblc.cellWidget(r, 1); typ = tw.currentText() if tw else "Accelerometer"
+                kind = _KIND_BY_LABEL.get(typ, "accel")
+                sw = tblc.cellWidget(r, 5); side = sw.currentText() if sw else "—"
+                vals = [_g(0), _g(_COL_PLANE), typ, _g(2), _g(3), _g(_COL_UNIT), _g(_COL_COUP),
+                        _g(4), side, _g(_COL_FS), _g(6), _g(7), _g(8), _g(_COL_KPH) or "—",
+                        _g(_COL_PAIR) or "—", ("✓" if _g(_COL_ACT) != "0" else "✗")]
+                for c, v in enumerate(vals):
+                    cell = QtWidgets.QTableWidgetItem(v); cell.setFlags(QtCore.Qt.ItemIsEnabled)
+                    if c == 0:
+                        cell.setForeground(QtGui.QColor(SENSOR_COLORS.get(kind, "#8b5cf6")))
+                        f = cell.font(); f.setBold(True); cell.setFont(f)
+                    tbl_sum.setItem(r, c, cell)
+        except Exception:  # noqa: BLE001
+            pass
+    cfg_tabs.currentChanged.connect(
+        lambda *_: _refresh_summary() if cfg_tabs.currentWidget() is pg_sum else None)
 
     # ---------- Pestaña 4: Simulator (solo con simulador) ----------
     pg_sim = QtWidgets.QWidget(); sml = QtWidgets.QVBoxLayout(pg_sim); sml.setSpacing(10)
@@ -913,9 +1027,21 @@ def main() -> int:
         try:
             brg_plot.clear()
             m = read_form()
+            # cojinete (plano) por sensor: columna Plane; si no, dígitos del nombre.
+            plane_of = {}
+            for r in range(tblc.rowCount()):
+                it0 = tblc.item(r, 0)
+                if not it0:
+                    continue
+                pv = tblc.item(r, _COL_PLANE)
+                try:
+                    plane_of[it0.text()] = int(pv.text()) if (pv and pv.text()) else (_bearing_no(it0.text()) or 1)
+                except Exception:  # noqa: BLE001
+                    plane_of[it0.text()] = _bearing_no(it0.text()) or 1
+            _pl = lambda s: plane_of.get(s.name, _bearing_no(s.name) or 1)
             meas = [s for s in m.sensors if s.kind != "keyphasor"]
             kph = [s for s in m.sensors if s.kind == "keyphasor"]
-            brs = sorted(set(_bearing_no(s.name) for s in meas)) or [1]
+            brs = sorted({_pl(s) for s in meas} | {_pl(s) for s in kph}) or [1]
             S = 1.9                                   # separación entre cojinetes
             xpos = {b: i * S for i, b in enumerate(brs)}
             n = len(brs); xmax = (n - 1) * S
@@ -926,8 +1052,8 @@ def main() -> int:
                 brg_plot.plot(cx + R * np.sin(th), R * np.cos(th), pen=pg.mkPen(NAVY, width=9))
                 lb = pg.TextItem(html=f"<div style='font-size:10pt;color:#64748b;"
                                  f"font-weight:700'>Brg {b}</div>", anchor=(0.5, 0))
-                lb.setPos(cx, -R - 0.22); brg_plot.addItem(lb)
-                bs = [s for s in meas if _bearing_no(s.name) == b]
+                lb.setPos(cx, -R - 0.24); brg_plot.addItem(lb)
+                bs = [s for s in meas if _pl(s) == b]
                 for idx, s in enumerate(bs):
                     a = _math.radians(_disp_angle(s, idx))
                     dx, dy = _math.sin(a), _math.cos(a)
@@ -939,12 +1065,14 @@ def main() -> int:
                                     f"font-weight:700'>{s.name.replace('_', '')}</div>",
                                     anchor=(0.5, 0.5))
                     t.setPos(cx + (R + 0.42) * dx, (R + 0.42) * dy); brg_plot.addItem(t)
-            if kph:                                   # keyphasor a la izquierda del tren
-                brg_plot.addItem(pg.ScatterPlotItem([-0.9], [0.0], symbol="t", size=20,
+            # keyphasor(s): triángulo ámbar bajo SU cojinete (puede haber varios, cualquier cojinete)
+            for s in kph:
+                cx = xpos.get(_pl(s), -0.9)
+                brg_plot.addItem(pg.ScatterPlotItem([cx], [-R - 0.62], symbol="t1", size=18,
                                  brush=SENSOR_COLORS["keyphasor"], pen=pg.mkPen("w", width=1.5)))
-                tk = pg.TextItem(html="<div style='font-size:10pt;color:#64748b;"
-                                 "font-weight:700'>KPH</div>", anchor=(0.5, 1.2))
-                tk.setPos(-0.9, 0.14); brg_plot.addItem(tk)
+                tk = pg.TextItem(html=f"<div style='font-size:9pt;color:#b45309;"
+                                 f"font-weight:700'>{s.name.replace('_', '')}</div>", anchor=(0.5, 0))
+                tk.setPos(cx, -R - 0.86); brg_plot.addItem(tk)
             rot = pg.TextItem(html=f"<div style='font-size:12pt;color:#0F1E3D;font-weight:800'>"
                               f"{'CW ↻' if m.rotation == 'CW' else 'CCW ↺'}</div>", anchor=(1, 1))
             rot.setPos(xmax + 0.95, 1.15); brg_plot.addItem(rot)
@@ -994,6 +1122,7 @@ def main() -> int:
         tblc.setItem(r, _COL_UNIT, QtWidgets.QTableWidgetItem(_u))
         tblc.setItem(r, _COL_KPH, QtWidgets.QTableWidgetItem(getattr(s, "keyphasor_ref", "") or ""))
         tblc.setItem(r, _COL_PAIR, QtWidgets.QTableWidgetItem(getattr(s, "pair_ref", "") or ""))
+        tblc.setItem(r, _COL_PLANE, QtWidgets.QTableWidgetItem(str(_bearing_no(s.name) or 1)))
         _color_name_cell(r)
 
     def fill_form(m: SimMachine):
@@ -1171,8 +1300,12 @@ def main() -> int:
                 fs = float(_cx(_COL_FS) or 0)
             except Exception:  # noqa: BLE001
                 fs = 0.0
+            try:
+                _plane = int(_cx(_COL_PLANE) or (_bearing_no(s.name) or 1))
+            except Exception:  # noqa: BLE001
+                _plane = _bearing_no(s.name) or 1
             chans.append(ChannelRow(
-                bnc_port=int(s.bnc), point_label=s.name, plane=(_bearing_no(s.name) or 1),
+                bnc_port=int(s.bnc), point_label=s.name, plane=_plane,
                 sensor_type=KMAP.get(s.kind, "proximity"),
                 sensitivity_mv_per_eu=float(s.sensitivity),
                 unit_native=(_cx(_COL_UNIT) or UMAP.get(s.kind, "")),
