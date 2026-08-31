@@ -539,3 +539,87 @@ def delete_setup(name: str) -> bool:
         return True
     except Exception:  # noqa: BLE001
         return False
+
+
+# =====================================================================
+# Serialización + persistencia en la NUBE (Supabase) del AcqSetup
+# ---------------------------------------------------------------------
+# La máquina de Remote Monitoring / módulo de campo es un AcqSetup. Este es el
+# "hogar en la nube" para que el CAMPO (nativo) y la WEB compartan la MISMA
+# máquina: tabla `rm_setups` (id, name, metadata jsonb, updated_at). Reusa el
+# cliente Supabase del recorder (credenciales embebidas en el .exe).
+# =====================================================================
+_RM_SETUPS_TABLE = os.environ.get("WM_RM_SETUPS_TABLE", "rm_setups")
+
+
+def setup_to_dict(setup: "AcqSetup") -> Dict[str, Any]:
+    """AcqSetup → dict serializable (mismo formato que el JSON local)."""
+    return {"machine": asdict(setup.machine),
+            "channels": [asdict(c) for c in setup.channels],
+            "acquisition": asdict(setup.acquisition),
+            "acquisition_by_type": {t: asdict(p) for t, p in setup.acquisition_by_type.items()}}
+
+
+def setup_from_dict(data: Dict[str, Any]) -> "AcqSetup":
+    """dict → AcqSetup (tolerante a campos faltantes / JSON viejo)."""
+    machine = MachineConfig(**_filter_fields(MachineConfig, data.get("machine", {})))
+    channels = [ChannelRow(**_filter_fields(ChannelRow, c)) for c in data.get("channels", [])]
+    acq = AcquisitionParams(**_filter_fields(AcquisitionParams, data.get("acquisition", {})))
+    by_type = {t: default_acq_for_type(t) for t in SPECTRAL_TYPES}
+    for t, p in (data.get("acquisition_by_type") or {}).items():
+        by_type[t] = AcquisitionParams(**_filter_fields(AcquisitionParams, p))
+    return AcqSetup(machine=machine, channels=channels, acquisition=acq, acquisition_by_type=by_type)
+
+
+def _rm_client():
+    """Cliente Supabase (reusa el del recorder: env vars → _cloud_config embebido)."""
+    try:
+        from core.remote_monitoring.recorder import _sb_client
+        return _sb_client()
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def save_setup_cloud(setup: "AcqSetup") -> Dict[str, Any]:
+    """Sube (upsert) la máquina a la nube. Offline-first: si no hay cliente/internet
+    devuelve {ok:False}. La misma máquina la ve la web (Remote Monitoring)."""
+    client = _rm_client()
+    if client is None:
+        return {"ok": False, "reason": "offline"}
+    try:
+        from datetime import datetime
+        name = setup.machine.name or "Machine"
+        row = {"id": _slug(name), "name": name, "metadata": setup_to_dict(setup),
+               "updated_at": datetime.now().isoformat(timespec="seconds")}
+        try:
+            client.table(_RM_SETUPS_TABLE).upsert(row).execute()
+        except Exception:  # noqa: BLE001
+            client.table(_RM_SETUPS_TABLE).insert(row).execute()
+        return {"ok": True, "id": row["id"], "name": name}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
+
+
+def list_setups_cloud() -> List[Dict[str, Any]]:
+    client = _rm_client()
+    if client is None:
+        return []
+    try:
+        res = client.table(_RM_SETUPS_TABLE).select("id, name, updated_at").execute()
+        return sorted(res.data or [], key=lambda r: r.get("updated_at", ""), reverse=True)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def load_setup_cloud(name_or_slug: str) -> Optional["AcqSetup"]:
+    client = _rm_client()
+    if client is None:
+        return None
+    try:
+        res = (client.table(_RM_SETUPS_TABLE).select("metadata")
+               .eq("id", _slug(name_or_slug)).single().execute())
+        if res.data and res.data.get("metadata"):
+            return setup_from_dict(res.data["metadata"])
+    except Exception:  # noqa: BLE001
+        return None
+    return None

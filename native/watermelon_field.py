@@ -481,8 +481,12 @@ def main() -> int:
     _redbtn = ("QPushButton{background:#f5484a;color:white;border:none;font-weight:700;"
                "padding:8px 16px;border-radius:7px;} QPushButton:hover{background:#d63c3e;}")
     btn_save.setStyleSheet(_redbtn); btn_apply.setStyleSheet(_redbtn)
+    btn_cloud = QtWidgets.QPushButton("Save machine to Watermelon System")
+    btn_cloud.setStyleSheet(
+        "QPushButton{background:#10b981;color:white;border:none;font-weight:700;"
+        "padding:8px 16px;border-radius:7px;} QPushButton:hover{background:#0e9f6e;}")
     for b in (btn_add, btn_del, btn_tpl): rb.addWidget(b)
-    rb.addStretch(1); rb.addWidget(btn_save); rb.addWidget(btn_apply)
+    rb.addStretch(1); rb.addWidget(btn_cloud); rb.addWidget(btn_save); rb.addWidget(btn_apply)
     cfg_l.addLayout(rb)
     tabs.addTab(cfg_outer, "Setup")
 
@@ -663,11 +667,84 @@ def main() -> int:
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(win, "Apply", f"Could not relaunch: {e}")
 
+    def _form_to_setup():
+        """Convierte la máquina del formulario (SimMachine) al formato ÚNICO de
+        Watermelon System / Remote Monitoring (AcqSetup) — para guardarla/subirla
+        como una máquina nueva que la web comparte."""
+        from core.remote_monitoring.config import AcqSetup, MachineConfig, ChannelRow
+        m = read_form()
+        KMAP = {"prox": "proximity", "vel": "velometer", "accel": "accelerometer",
+                "keyphasor": "keyphasor"}
+        UMAP = {"prox": "mil pp", "vel": "mm/s rms", "accel": "g rms", "keyphasor": "pulses/rev"}
+        CMAP = {"prox": "DC", "vel": "AC", "accel": "IEPE", "keyphasor": "DC"}
+        chans = []
+        for s in m.sensors:
+            chans.append(ChannelRow(
+                bnc_port=int(s.bnc), point_label=s.name, plane=(_bearing_no(s.name) or 1),
+                sensor_type=KMAP.get(s.kind, "proximity"),
+                sensitivity_mv_per_eu=float(s.sensitivity), unit_native=UMAP.get(s.kind, ""),
+                coupling=CMAP.get(s.kind, "AC"), angle_deg=float(s.angle), side=(s.side or ""),
+                alarm=float(s.alarm), danger=float(s.danger), gap_bias_v=float(s.gap),
+                events_per_rev=1))
+        nb = len({_bearing_no(s.name) for s in m.sensors if s.kind != "keyphasor"}) or 1
+        speed = "variable" if m.mode in ("arranque", "parada", "arranque_parada") else "constant"
+        rng = [v for v in (m.rpm_start, m.rpm_end) if v > 0]
+        mc = MachineConfig(name=m.name, rpm_nominal=float(m.rpm),
+                           rpm_min=float(min(rng)) if rng else 0.0,
+                           rpm_max=float(max(rng)) if rng else 0.0,
+                           rotation=m.rotation, speed_control=speed,
+                           bearing_type=m.bearing_type, n_bearings=nb)
+        return AcqSetup(machine=mc, channels=chans)
+
+    def do_save_cloud_machine():
+        try:
+            setup = _form_to_setup()
+        except Exception as e:  # noqa: BLE001
+            _nice("Save machine", f"<b style='color:#b91c1c'>Config error</b><br>{e}",
+                  QtWidgets.QMessageBox.Warning)
+            return
+        if not setup.channels:
+            _nice("Save machine", "<b>Add at least one sensor</b> before saving the machine.")
+            return
+        btn_cloud.setEnabled(False); btn_cloud.setText("Uploading…")
+        res = {}
+
+        def _work():
+            try:
+                from core.remote_monitoring.config import save_setup_cloud
+                res.update(save_setup_cloud(setup))
+            except Exception as e:  # noqa: BLE001
+                res.update({"ok": False, "reason": f"{type(e).__name__}: {e}"})
+            res["done"] = True
+        threading.Thread(target=_work, daemon=True).start()
+
+        def _check():
+            if not res.get("done"):
+                QtCore.QTimer.singleShot(400, _check); return
+            btn_cloud.setEnabled(True); btn_cloud.setText("Save machine to Watermelon System")
+            if res.get("ok"):
+                _nice("Machine saved",
+                      "<div style='font-size:16px'><b style='color:#166534'>☁ Machine saved to "
+                      "Watermelon System</b></div>"
+                      f"<div style='color:#0F1E3D;margin-top:6px'><b>{res.get('name','')}</b> · "
+                      f"{len(setup.channels)} channels</div>"
+                      "<div style='color:#64748b;margin-top:8px'>Now available in the web "
+                      "(Remote Monitoring). 🍉</div>")
+            elif res.get("reason") == "offline":
+                _nice("Save machine", "<b>No cloud connection.</b> Check internet and try again "
+                      "(the machine is still in your local library).", QtWidgets.QMessageBox.Warning)
+            else:
+                _nice("Save machine", f"<b style='color:#b91c1c'>Could not save</b><br>"
+                      f"<span style='color:#334155'>{res.get('reason','?')}</span>",
+                      QtWidgets.QMessageBox.Warning)
+        QtCore.QTimer.singleShot(300, _check)
+
     btn_add.clicked.connect(lambda: _add_sensor_row(SensorSpec("CHn", "accel", tblc.rowCount() + 1)))
     btn_del.clicked.connect(lambda: tblc.removeRow(tblc.currentRow()) if tblc.currentRow() >= 0 else None)
     btn_tpl.clicked.connect(lambda: fill_form(SimMachine.plantilla_motor_bomba()))
     btn_load.clicked.connect(do_load_lib)
     btn_save.clicked.connect(do_save_lib)
+    btn_cloud.clicked.connect(do_save_cloud_machine)
     btn_apply.clicked.connect(do_apply)
     refresh_lib(); fill_form(_machine_from_agent())
     tblc.itemChanged.connect(lambda *_: draw_bearing())   # redibuja al editar ángulo/nombre
