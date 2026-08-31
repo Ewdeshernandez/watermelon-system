@@ -313,14 +313,14 @@ def validate_setup(setup: AcqSetup) -> List[Finding]:
     chans = setup.channels
 
     if not chans:
-        return [Finding("error", "no_channels", "No hay canales configurados.")]
+        return [Finding("error", "no_channels", "No channels configured.")]
 
     # BNC único
     seen: Dict[int, str] = {}
     for ch in chans:
         if ch.bnc_port in seen:
             out.append(Finding("error", "dup_bnc",
-                               f"BNC {ch.bnc_port} duplicado ({seen[ch.bnc_port]} y {ch.point_label})."))
+                               f"BNC {ch.bnc_port} duplicated ({seen[ch.bnc_port]} and {ch.point_label})."))
         else:
             seen[ch.bnc_port] = ch.point_label
 
@@ -328,10 +328,10 @@ def validate_setup(setup: AcqSetup) -> List[Finding]:
     kph = [c for c in chans if c.is_keyphasor()]
     if not kph:
         out.append(Finding("warn", "no_keyphasor",
-                           "Sin keyphasor: no habrá gráficos síncronos (bode/polar/órbita/1X)."))
+                           "No keyphasor: no synchronous plots (bode/polar/orbit/1X)."))
     elif len(kph) > 1:
         out.append(Finding("warn", "multi_keyphasor",
-                           f"{len(kph)} canales keyphasor — normalmente basta 1 por tren."))
+                           f"{len(kph)} keyphasor channels — usually 1 per train is enough."))
 
     # Pares X/Y ortogonales por cojinete (API 670: sondas radiales a 90°)
     by_plane: Dict[int, List[ChannelRow]] = {}
@@ -350,8 +350,8 @@ def validate_setup(setup: AcqSetup) -> List[Finding]:
                 d0 = f"{radials[0].angle_deg:.0f}°{radials[0].side}".strip()
                 d1 = f"{radials[1].angle_deg:.0f}°{radials[1].side}".strip()
                 out.append(Finding("warn", "xy_not_orthogonal",
-                                   f"Cojinete {plane}: sondas a {d0}/{d1} "
-                                   f"(separación {sep:.0f}°, se esperan 90°±5° para órbita)."))
+                                   f"Bearing {plane}: probes at {d0}/{d1} "
+                                   f"(separation {sep:.0f}°, 90°±5° expected for orbit)."))
 
     # Alert < Danger; sensibilidad en rango físico; unidades por tipo
     for ch in chans:
@@ -363,40 +363,40 @@ def validate_setup(setup: AcqSetup) -> List[Finding]:
         lo, hi = _SENS_RANGE.get(ch.sensor_type, (0.0, 1e9))
         if not (lo <= ch.sensitivity_mv_per_eu <= hi):
             out.append(Finding("warn", "sens_out_of_range",
-                               f"{ch.point_label}: sensib {ch.sensitivity_mv_per_eu} mV/EU fuera "
-                               f"del rango típico [{lo:.0f}–{hi:.0f}] para {ch.sensor_type}."))
+                               f"{ch.point_label}: sensitivity {ch.sensitivity_mv_per_eu} mV/EU outside the "
+                               f"typical range [{lo:.0f}–{hi:.0f}] for {ch.sensor_type}."))
         valid_u = valid_units_for(ch.sensor_type)
         if valid_u and ch.unit_native and ch.unit_native not in valid_u:
             out.append(Finding("warn", "unit_mismatch",
-                               f"{ch.point_label}: unidad '{ch.unit_native}' no es típica de "
+                               f"{ch.point_label}: unit '{ch.unit_native}' is not typical for "
                                f"{ch.sensor_type} ({' / '.join(valid_u)})."))
         # Gap/bias de sondas de proximidad (Bently -24V: típico -2 a -18 VDC)
         if ch.sensor_type == "proximity" and ch.gap_bias_v != 0.0:
             if not (-18.0 <= ch.gap_bias_v <= -2.0):
                 out.append(Finding("warn", "gap_out_of_range",
-                                   f"{ch.point_label}: gap {ch.gap_bias_v} V fuera del rango "
-                                   f"típico [-18, -2] VDC de un proximitor."))
+                                   f"{ch.point_label}: gap {ch.gap_bias_v} V outside the typical "
+                                   f"[-18, -2] VDC range of a proximity probe."))
         # Danger no debe exceder el full-scale del transductor
         if ch.full_scale > 0 and ch.danger > 0 and ch.danger > ch.full_scale:
             out.append(Finding("warn", "danger_over_fullscale",
-                               f"{ch.point_label}: Danger ({ch.danger}) supera el "
+                               f"{ch.point_label}: Danger ({ch.danger}) exceeds the "
                                f"full-scale ({ch.full_scale} {ch.unit_native})."))
 
     # Parámetros de adquisición globales
     acq = setup.acquisition
     if acq.fmin_hz >= acq.fmax_hz:
         out.append(Finding("error", "acq_freq_range",
-                           f"Fmin ({acq.fmin_hz} Hz) debe ser menor que Fmax ({acq.fmax_hz} Hz)."))
+                           f"Fmin ({acq.fmin_hz} Hz) must be lower than Fmax ({acq.fmax_hz} Hz)."))
     kph_rows = [c for c in chans if c.is_keyphasor()]
     for k in kph_rows:
         if k.events_per_rev < 1:
             out.append(Finding("warn", "kph_events",
-                               f"{k.point_label}: eventos/rev debe ser ≥ 1."))
+                               f"{k.point_label}: events/rev must be ≥ 1."))
 
     errors = [f for f in out if f.level == "error"]
     warns = [f for f in out if f.level == "warn"]
     if not errors and not warns:
-        out.append(Finding("ok", "all_good", "Configuración válida — sin observaciones."))
+        out.append(Finding("ok", "all_good", "Configuration valid — no findings."))
     return sorted(out, key=lambda f: {"error": 0, "warn": 1, "ok": 2}[f.level])
 
 

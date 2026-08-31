@@ -905,7 +905,8 @@ def main() -> int:
     lbl_sum_hdr.setTextFormat(QtCore.Qt.RichText)
     ul.addWidget(lbl_sum_hdr)
     _SUM_COLS = ["Channel", "Brg", "Type", "BNC", "Sensit", "Unit", "Coupling", "Angle",
-                 "Side", "FullScale", "Gap", "Alarm", "Danger", "Keyphasor", "Pair", "Active"]
+                 "Side", "FullScale", "Gap", "Alarm", "Danger", "Fmin", "Fmax", "Lines",
+                 "Keyphasor", "Pair", "Active"]
     tbl_sum = QtWidgets.QTableWidget(0, len(_SUM_COLS))
     tbl_sum.setHorizontalHeaderLabels(_SUM_COLS)
     tbl_sum.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
@@ -935,9 +936,15 @@ def main() -> int:
                 tw = tblc.cellWidget(r, 1); typ = tw.currentText() if tw else "Accelerometer"
                 kind = _KIND_BY_LABEL.get(typ, "accel")
                 sw = tblc.cellWidget(r, 5); side = sw.currentText() if sw else "—"
+                _WTs = {"prox": "proximity", "vel": "velometer", "accel": "accelerometer"}
+                if kind == "keyphasor":
+                    fmn, fmx, lns = "—", "—", "—"
+                else:
+                    _bfx, _bfn, _bln = acq_band.get(_WTs.get(kind, "proximity"), acq_band["proximity"])
+                    fmn, fmx, lns = f"{_bfn.value():g}", f"{_bfx.value():g}", _bln.currentText()
                 vals = [_g(0), _g(_COL_PLANE), typ, _g(2), _g(3), _g(_COL_UNIT), _g(_COL_COUP),
-                        _g(4), side, _g(_COL_FS), _g(6), _g(7), _g(8), _g(_COL_KPH) or "—",
-                        _g(_COL_PAIR) or "—", ("✓" if _g(_COL_ACT) != "0" else "✗")]
+                        _g(4), side, _g(_COL_FS), _g(6), _g(7), _g(8), fmn, fmx, lns,
+                        _g(_COL_KPH) or "—", _g(_COL_PAIR) or "—", ("✓" if _g(_COL_ACT) != "0" else "✗")]
                 for c, v in enumerate(vals):
                     cell = QtWidgets.QTableWidgetItem(v); cell.setFlags(QtCore.Qt.ItemIsEnabled)
                     if c == 0:
@@ -1073,9 +1080,20 @@ def main() -> int:
                 tk = pg.TextItem(html=f"<div style='font-size:9pt;color:#b45309;"
                                  f"font-weight:700'>{s.name.replace('_', '')}</div>", anchor=(0.5, 0))
                 tk.setPos(cx, -R - 0.86); brg_plot.addItem(tk)
+            # Indicador de giro: FLECHA DIBUJADA (arco + punta) — no depende de glifos que
+            # en Windows salen como cuadrito. CW = horario, CCW = antihorario.
+            cw = (m.rotation == "CW")
+            acx, acy, ar = xmax + 0.72, 0.86, 0.22
+            _a = np.linspace(-115, 115, 40) if cw else np.linspace(115, -115, 40)
+            ax_ = acx + ar * np.sin(np.radians(_a)); ay_ = acy + ar * np.cos(np.radians(_a))
+            brg_plot.plot(ax_, ay_, pen=pg.mkPen("#12467f", width=3))
+            _dx = ax_[-1] - ax_[-2]; _dy = ay_[-1] - ay_[-2]
+            arw = pg.ArrowItem(pos=(ax_[-1], ay_[-1]), angle=_math.degrees(_math.atan2(-_dy, _dx)),
+                               headLen=13, tipAngle=32, brush="#12467f", pen=None)
+            brg_plot.addItem(arw)
             rot = pg.TextItem(html=f"<div style='font-size:12pt;color:#0F1E3D;font-weight:800'>"
-                              f"{'CW ↻' if m.rotation == 'CW' else 'CCW ↺'}</div>", anchor=(1, 1))
-            rot.setPos(xmax + 0.95, 1.15); brg_plot.addItem(rot)
+                              f"{'CW' if cw else 'CCW'}</div>", anchor=(0.5, 0))
+            rot.setPos(acx, acy - ar - 0.02); brg_plot.addItem(rot)
             # Auto-encuadre honrando aspect-lock → se ven TODOS los cojinetes (con 5-6
             # antes se cortaba y solo mostraba los del medio).
             brg_plot.getViewBox().setRange(xRange=(-1.2, xmax + 1.2), yRange=(-1.1, 1.25),
@@ -1244,7 +1262,11 @@ def main() -> int:
         m = read_form()
         try:
             save_to_library(m); refresh_lib()
-            QtWidgets.QMessageBox.information(win, "Library", f"Machine '{m.name}' saved.")
+            _nice("Configuration saved",
+                  "<div style='font-size:15px'><b style='color:#166534'>💾 Saved on this PC</b></div>"
+                  f"<div style='color:#0F1E3D;margin-top:6px'><b>{m.name}</b> · local library</div>"
+                  "<div style='color:#64748b;margin-top:8px'>Stored locally only. To share it with the "
+                  "web/other PCs, use <b>Save machine to Watermelon System</b> (cloud).</div>")
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(win, "Library", f"Could not save: {e}")
 
