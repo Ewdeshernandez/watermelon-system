@@ -133,6 +133,8 @@ def _load_setup_into_state(name: str) -> None:
     + adquisición). Se puede editar y re-guardar (sobrescribe) o cambiar el
     nombre para crear una nueva a partir de ésta."""
     s = cfg.load_setup(name)
+    if s is None:                       # no está local → buscar en la nube (rm_setups)
+        s = cfg.load_setup_cloud(name)
     if s is None:
         st.warning(f"No se pudo cargar '{name}'.")
         return
@@ -162,15 +164,27 @@ def render_setup() -> None:
     st.caption("Cargá los datos de la máquina, o cargá una **configuración guardada** para "
                "editarla o crear una nueva a partir de ésta.")
 
-    # --- Configuraciones GUARDADAS (mis plantillas) — cargar / borrar ---
-    _saved = cfg.list_setups()
+    # --- Configuraciones GUARDADAS (local + nube) — cargar / borrar ---
+    # Se unen las locales con las de la NUBE (rm_setups) para que aparezcan también
+    # las máquinas creadas en el MÓDULO DE CAMPO. Las de la nube van marcadas con ☁.
+    _local = cfg.list_setups()
+    try:
+        _cloud_rows = cfg.list_setups_cloud()
+    except Exception:  # noqa: BLE001
+        _cloud_rows = []
+    _cloud_names = [(r.get("name") or r.get("id") or "") for r in _cloud_rows
+                    if (r.get("name") or r.get("id"))]
+    _saved = list(dict.fromkeys([*_local, *_cloud_names]))
+    _cloud_only = set(_cloud_names) - set(_local)
     if _saved:
         scol1, scol2, scol3 = st.columns([3, 1, 1])
         with scol1:
-            pick_s = st.selectbox("📂 Cargar configuración guardada", ["—"] + _saved,
-                                  key="rm_load_pick",
-                                  help="Tus configuraciones guardadas. Cargala, editala y "
-                                       "re-guardá (sobrescribe) o cambiá el nombre (crea otra).")
+            _opts = ["—"] + [(f"☁ {n}" if n in _cloud_only else n) for n in _saved]
+            pick_raw = st.selectbox("📂 Cargar configuración guardada", _opts,
+                                    key="rm_load_pick",
+                                    help="Tus máquinas guardadas (local + nube ☁). ☁ = creadas en "
+                                         "el módulo de campo. Cargala, editala y re-guardá.")
+            pick_s = pick_raw[1:].strip() if pick_raw.startswith("☁") else pick_raw
         with scol2:
             st.write(""); st.write("")
             if st.button("📂 Cargar", use_container_width=True) and pick_s != "—":
@@ -781,6 +795,16 @@ def _save_and_activate(setup: cfg.AcqSetup) -> None:
     except Exception as e:  # noqa: BLE001
         st.error(f"No se pudo guardar: {type(e).__name__}: {e}")
         return
+    # También subir a la NUBE (rm_setups) → la máquina queda disponible en el módulo
+    # de campo (y viceversa). No es fatal si no hay internet: queda guardada local.
+    try:
+        _rc = cfg.save_setup_cloud(setup)
+        if _rc.get("ok"):
+            st.caption("☁ También guardada en la nube (compartida con el módulo de campo).")
+        elif _rc.get("reason") and _rc.get("reason") != "offline":
+            st.caption(f"⚠ No se pudo subir a la nube: {_rc.get('reason')}")
+    except Exception:  # noqa: BLE001
+        pass
     st.session_state["rm_channels"] = cfg.setup_to_channel_configs(setup)
     st.session_state["rm_machine_rpm"] = float(setup.machine.rpm_nominal)
     st.session_state["rm_machine_name"] = setup.machine.name
