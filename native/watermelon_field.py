@@ -353,12 +353,9 @@ def main() -> int:
                           severity=float(getattr(cf, "sim_severity", 1.0)))
 
     cfg_outer = QtWidgets.QWidget(); cfg_ol = QtWidgets.QVBoxLayout(cfg_outer)
-    cfg_scroll = QtWidgets.QScrollArea(); cfg_scroll.setWidgetResizable(True)
-    cfg_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
-    cfg_w = QtWidgets.QWidget(); cfg_l = QtWidgets.QVBoxLayout(cfg_w)
-    cfg_l.setContentsMargins(4, 4, 4, 4); cfg_l.setSpacing(7)
-    # Config amigable estilo web: letra un poco más chica, casillas prolijas y compactas.
-    cfg_w.setStyleSheet(
+    cfg_ol.setContentsMargins(4, 4, 4, 4); cfg_ol.setSpacing(8)
+    # Config amigable estilo web: letra chica, casillas prolijas, pestañas internas.
+    cfg_outer.setStyleSheet(
         "QWidget { font-size: 12px; }"
         "QLabel { color:#475569; font-weight:600; }"
         "QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {"
@@ -368,56 +365,107 @@ def main() -> int:
         "  border:1px solid #4f8fd0; }"
         "QTableWidget { border:1px solid #e6ebf2; border-radius:10px; gridline-color:#eef2f8; }"
         "QTableWidget::item { padding:3px 6px; }")
-    cfg_scroll.setWidget(cfg_w); cfg_ol.addWidget(cfg_scroll)
 
     _is_sim = type(agent.source).__name__ == "SimulatedStreamSource"
 
-    def _sec(txt):
-        lb = QtWidgets.QLabel(txt)
-        lb.setStyleSheet(f"background:{NAVY}; color:white; font-weight:700; font-size:12px;"
-                         f"padding:5px 11px; border-radius:6px; margin-top:2px;")
-        return lb
+    def _dsp(mn, mx, val, step=100.0):
+        s = QtWidgets.QDoubleSpinBox(); s.setRange(mn, mx); s.setValue(val); s.setSingleStep(step); return s
 
-    cfg_l.addWidget(_sec("1 · Machine  —  train (API 684)"))
-    # row 1: name, fs, library
+    cfg_tabs = QtWidgets.QTabWidget(); cfg_ol.addWidget(cfg_tabs, 1)
+
+    # ---------- Pestaña 1: Machine ----------
+    pg_machine = QtWidgets.QWidget(); ml = QtWidgets.QVBoxLayout(pg_machine); ml.setSpacing(10)
+    r_lib = QtWidgets.QHBoxLayout()
+    r_lib.addWidget(QtWidgets.QLabel("Library:"))
+    cb_lib = QtWidgets.QComboBox(); cb_lib.setMinimumWidth(220); r_lib.addWidget(cb_lib)
+    btn_load = QtWidgets.QPushButton("Load"); r_lib.addWidget(btn_load); r_lib.addStretch(1)
+    ml.addLayout(r_lib)
     r1 = QtWidgets.QHBoxLayout()
     r1.addWidget(QtWidgets.QLabel("Machine:"))
-    ed_name = QtWidgets.QLineEdit(); r1.addWidget(ed_name, 2)
-    r1.addWidget(QtWidgets.QLabel("Sampling (Hz):"))
-    sp_fs = QtWidgets.QSpinBox(); sp_fs.setRange(256, 102400); sp_fs.setSingleStep(1280); r1.addWidget(sp_fs)
-    r1.addWidget(QtWidgets.QLabel("Library:"))
-    cb_lib = QtWidgets.QComboBox(); cb_lib.setMinimumWidth(160); r1.addWidget(cb_lib)
-    btn_load = QtWidgets.QPushButton("Load"); r1.addWidget(btn_load)
-    cfg_l.addLayout(r1)
-    # row 2: operation
+    ed_name = QtWidgets.QLineEdit(); r1.addWidget(ed_name, 1)
+    ml.addLayout(r1)
     r2 = QtWidgets.QHBoxLayout()
     r2.addWidget(QtWidgets.QLabel("Mode:"))
     cb_mode = QtWidgets.QComboBox(); cb_mode.addItems(_mode_labels); r2.addWidget(cb_mode)
-    def _dsp(mn, mx, val, step=100.0):
-        s = QtWidgets.QDoubleSpinBox(); s.setRange(mn, mx); s.setValue(val); s.setSingleStep(step); return s
     r2.addWidget(QtWidgets.QLabel("RPM:")); sp_rpm = _dsp(0, 60000, 3000); r2.addWidget(sp_rpm)
-    _lbl_start = QtWidgets.QLabel("Start→"); r2.addWidget(_lbl_start)
-    sp_r0 = _dsp(0, 60000, 300); r2.addWidget(sp_r0)
-    sp_r1 = _dsp(0, 60000, 6000); r2.addWidget(sp_r1)
-    _lbl_ramp = QtWidgets.QLabel("Ramp(s):"); r2.addWidget(_lbl_ramp)
-    sp_ramp = _dsp(1, 3600, 90, 5); r2.addWidget(sp_ramp)
-    r2.addStretch(1); cfg_l.addLayout(r2)
-    # Estos controles son del SIMULADOR (rampa de arranque/parada); en campo real
-    # (sin simulador) no aplican → se ocultan.
-    _sim_only = [_lbl_start, sp_r0, sp_r1, _lbl_ramp, sp_ramp]
-    # row 2b: machine (rotation / bearing)
-    r3b = QtWidgets.QHBoxLayout()
-    r3b.addWidget(QtWidgets.QLabel("Rotation:"))
-    cb_rot = QtWidgets.QComboBox(); cb_rot.addItems(["CCW", "CW"]); r3b.addWidget(cb_rot)
-    r3b.addWidget(QtWidgets.QLabel("Bearing type:"))
+    r2.addWidget(QtWidgets.QLabel("Rotation:"))
+    cb_rot = QtWidgets.QComboBox(); cb_rot.addItems(["CCW", "CW"]); r2.addWidget(cb_rot)
+    r2.addWidget(QtWidgets.QLabel("Bearing type:"))
     cb_brg = QtWidgets.QComboBox(); cb_brg.addItems(["plain", "tilting_pad", "rolling", "mixed"])
-    r3b.addWidget(cb_brg); r3b.addStretch(1); cfg_l.addLayout(r3b)
+    r2.addWidget(cb_brg); r2.addStretch(1); ml.addLayout(r2)
+    ml.addStretch(1)
+    cfg_tabs.addTab(pg_machine, "Machine")
 
-    # Sección SOLO-SIMULADOR: inyección de fenómenos/severidad/críticas. En campo real
-    # esto no existe (la máquina real ya tiene su comportamiento) → todo el bloque se oculta.
-    sim_box = QtWidgets.QWidget(); sim_bl = QtWidgets.QVBoxLayout(sim_box)
-    sim_bl.setContentsMargins(0, 0, 0, 0); sim_bl.setSpacing(4)
-    sim_bl.addWidget(_sec("Simulator — inject faults by sensor type (test bench only)"))
+    # ---------- Pestaña 2: Sensors & layout ----------
+    pg_sensors = QtWidgets.QWidget(); sl = QtWidgets.QVBoxLayout(pg_sensors)
+    leg = QtWidgets.QLabel(
+        f"<span style='color:{SENSOR_COLORS['prox']}'>●</span> Proximity&nbsp;&nbsp;"
+        f"<span style='color:{SENSOR_COLORS['vel']}'>●</span> Velocity&nbsp;&nbsp;"
+        f"<span style='color:{SENSOR_COLORS['accel']}'>●</span> Accelerometer&nbsp;&nbsp;"
+        f"<span style='color:{SENSOR_COLORS['keyphasor']}'>●</span> Keyphasor"
+        f"&nbsp;&nbsp;&nbsp;<span style='color:#64748b'>API 670 angle: from TDC · "
+        f"R=clockwise · L=counter-clockwise (45°L+45°R=90°)</span>")
+    sl.addWidget(leg)
+    canv = QtWidgets.QHBoxLayout()
+    tblc = QtWidgets.QTableWidget(0, 9)
+    tblc.setHorizontalHeaderLabels(["Channel", "Type", "BNC", "Sensit. (mV/EU)",
+                                    "Angle°", "Side", "Gap (V)", "Alarm", "Danger"])
+    tblc.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    tblc.verticalHeader().setVisible(False)
+    tblc.setAlternatingRowColors(True)
+    tblc.setShowGrid(False)
+    tblc.verticalHeader().setDefaultSectionSize(30)
+    tblc.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+    tblc.setMinimumHeight(240)
+    canv.addWidget(tblc, 3)
+    brg_plot = pg.PlotWidget(); brg_plot.setBackground("w"); brg_plot.setAspectLocked(True)
+    brg_plot.hideAxis("left"); brg_plot.hideAxis("bottom"); brg_plot.setMenuEnabled(False)
+    brg_plot.setMinimumWidth(340)
+    brg_plot.setTitle("Machine layout", color=NAVY, size="10pt")
+    _brg_vb = brg_plot.getViewBox()              # diagrama FIJO (sin pan/zoom/rueda)
+    _brg_vb.setMouseEnabled(x=False, y=False); _brg_vb.setMenuEnabled(False)
+    _brg_vb.wheelEvent = lambda ev, axis=None: None
+    try:
+        brg_plot.getPlotItem().hideButtons()
+    except Exception:  # noqa: BLE001
+        pass
+    canv.addWidget(brg_plot, 2)
+    sl.addLayout(canv, 1)
+    r_sb = QtWidgets.QHBoxLayout()
+    btn_add = QtWidgets.QPushButton("+ Sensor"); btn_del = QtWidgets.QPushButton("– Remove")
+    btn_tpl = QtWidgets.QPushButton("Motor+pump template")
+    for b in (btn_add, btn_del, btn_tpl): r_sb.addWidget(b)
+    r_sb.addStretch(1); sl.addLayout(r_sb)
+    cfg_tabs.addTab(pg_sensors, "Sensors & layout")
+
+    # ---------- Pestaña 3: Acquisition ----------
+    pg_acq = QtWidgets.QWidget(); al = QtWidgets.QVBoxLayout(pg_acq); al.setSpacing(10)
+    ra = QtWidgets.QHBoxLayout()
+    ra.addWidget(QtWidgets.QLabel("Sampling (Hz):"))
+    sp_fs = QtWidgets.QSpinBox(); sp_fs.setRange(256, 102400); sp_fs.setSingleStep(1280); ra.addWidget(sp_fs)
+    ra.addWidget(QtWidgets.QLabel("Fmax (Hz):"))
+    sp_fmax = QtWidgets.QSpinBox(); sp_fmax.setRange(100, 40000); sp_fmax.setSingleStep(100)
+    sp_fmax.setValue(1000); ra.addWidget(sp_fmax)
+    ra.addWidget(QtWidgets.QLabel("Lines:"))
+    cb_lines = QtWidgets.QComboBox(); cb_lines.addItems(["400", "800", "1600", "3200", "6400"])
+    cb_lines.setCurrentText("1600"); ra.addWidget(cb_lines)
+    ra.addWidget(QtWidgets.QLabel("Window:"))
+    cb_win = QtWidgets.QComboBox(); cb_win.addItems(["hanning", "flattop", "uniform"]); ra.addWidget(cb_win)
+    ra.addStretch(1); al.addLayout(ra)
+    al.addWidget(QtWidgets.QLabel(
+        "<i style='color:#64748b'>Acquisition quality for spectrum / Bode / cascade "
+        "(ISO / System1 style). Δf = Fmax / Lines.</i>"))
+    al.addStretch(1)
+    cfg_tabs.addTab(pg_acq, "Acquisition")
+
+    # ---------- Pestaña 4: Simulator (solo con simulador) ----------
+    pg_sim = QtWidgets.QWidget(); sml = QtWidgets.QVBoxLayout(pg_sim); sml.setSpacing(10)
+    rr = QtWidgets.QHBoxLayout()
+    rr.addWidget(QtWidgets.QLabel("Startup/Coastdown range  Start→"))
+    sp_r0 = _dsp(0, 60000, 300); rr.addWidget(sp_r0)
+    sp_r1 = _dsp(0, 60000, 6000); rr.addWidget(sp_r1)
+    rr.addWidget(QtWidgets.QLabel("Ramp(s):")); sp_ramp = _dsp(1, 3600, 90, 5); rr.addWidget(sp_ramp)
+    rr.addStretch(1); sml.addLayout(rr)
     r3 = QtWidgets.QHBoxLayout()
     r3.addWidget(QtWidgets.QLabel("Critical 1:")); sp_c1 = _dsp(0, 60000, 0); r3.addWidget(sp_c1)
     r3.addWidget(QtWidgets.QLabel("Critical 2:")); sp_c2 = _dsp(0, 60000, 0); r3.addWidget(sp_c2)
@@ -428,54 +476,16 @@ def main() -> int:
     cb_ph_v = QtWidgets.QComboBox(); cb_ph_v.addItems(PHENOMENA["vel"]); r3.addWidget(cb_ph_v)
     r3.addWidget(QtWidgets.QLabel("Accel:"))
     cb_ph_a = QtWidgets.QComboBox(); cb_ph_a.addItems(PHENOMENA["accel"]); r3.addWidget(cb_ph_a)
-    r3.addStretch(1); sim_bl.addLayout(r3)
-    cfg_l.addWidget(sim_box)
-    # ocultar todo lo del simulador en modo campo (hardware real)
-    sim_box.setVisible(_is_sim)
-    for _w in _sim_only:
-        _w.setVisible(_is_sim)
+    r3.addStretch(1); sml.addLayout(r3)
+    sml.addWidget(QtWidgets.QLabel(
+        "<i style='color:#64748b'>Test-bench only: injects faults/criticals to validate the "
+        "software without hardware. Not shown in field mode.</i>"))
+    sml.addStretch(1)
+    if _is_sim:
+        cfg_tabs.addTab(pg_sim, "Simulator")
 
-    cfg_l.addWidget(_sec("2 · Channels  —  BNC → measurement point"))
-    # per-type color legend (same as the web) + angle convention
-    leg = QtWidgets.QLabel(
-        f"<span style='color:{SENSOR_COLORS['prox']}'>●</span> Proximity&nbsp;&nbsp;"
-        f"<span style='color:{SENSOR_COLORS['vel']}'>●</span> Velocity&nbsp;&nbsp;"
-        f"<span style='color:{SENSOR_COLORS['accel']}'>●</span> Accelerometer&nbsp;&nbsp;"
-        f"<span style='color:{SENSOR_COLORS['keyphasor']}'>●</span> Keyphasor"
-        f"&nbsp;&nbsp;&nbsp;<span style='color:#64748b'>API 670 angle: from TDC · "
-        f"R=clockwise · L=counter-clockwise (45°L+45°R=90°)</span>")
-    cfg_l.addWidget(leg)
-    # table + section diagram side by side
-    canv = QtWidgets.QHBoxLayout()
-    tblc = QtWidgets.QTableWidget(0, 9)
-    tblc.setHorizontalHeaderLabels(["Channel", "Type", "BNC", "Sensit. (mV/EU)",
-                                    "Angle°", "Side", "Gap (V)", "Alarm", "Danger"])
-    tblc.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
-    tblc.verticalHeader().setVisible(False)
-    tblc.setAlternatingRowColors(True)
-    tblc.setShowGrid(False)
-    tblc.verticalHeader().setDefaultSectionSize(30)     # filas cómodas y parejas
-    tblc.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
-    tblc.setMinimumHeight(220)
-    canv.addWidget(tblc, 3)
-    brg_plot = pg.PlotWidget(); brg_plot.setBackground("w"); brg_plot.setAspectLocked(True)
-    brg_plot.hideAxis("left"); brg_plot.hideAxis("bottom"); brg_plot.setMenuEnabled(False)
-    brg_plot.setMinimumWidth(280)
-    brg_plot.setTitle("Machine layout", color=NAVY, size="9pt")
-    # Diagrama FIJO: sin pan/zoom con el mouse (no se debe mover ni agrandar al pasar el mouse)
-    _brg_vb = brg_plot.getViewBox()
-    _brg_vb.setMouseEnabled(x=False, y=False)
-    _brg_vb.setMenuEnabled(False)
-    _brg_vb.wheelEvent = lambda ev, axis=None: None      # sin zoom por rueda
-    try:
-        brg_plot.getPlotItem().hideButtons()
-    except Exception:  # noqa: BLE001
-        pass
-    canv.addWidget(brg_plot, 2)
-    cfg_l.addLayout(canv, 1)
+    # ---------- Botones de acción (siempre visibles, debajo de las pestañas) ----------
     rb = QtWidgets.QHBoxLayout()
-    btn_add = QtWidgets.QPushButton("+ Sensor"); btn_del = QtWidgets.QPushButton("– Remove")
-    btn_tpl = QtWidgets.QPushButton("Motor+pump template")
     btn_save = QtWidgets.QPushButton("Save configuration")
     btn_apply = QtWidgets.QPushButton("Apply & measure")
     _redbtn = ("QPushButton{background:#f5484a;color:white;border:none;font-weight:700;"
@@ -485,9 +495,8 @@ def main() -> int:
     btn_cloud.setStyleSheet(
         "QPushButton{background:#10b981;color:white;border:none;font-weight:700;"
         "padding:8px 16px;border-radius:7px;} QPushButton:hover{background:#0e9f6e;}")
-    for b in (btn_add, btn_del, btn_tpl): rb.addWidget(b)
     rb.addStretch(1); rb.addWidget(btn_cloud); rb.addWidget(btn_save); rb.addWidget(btn_apply)
-    cfg_l.addLayout(rb)
+    cfg_ol.addLayout(rb)
     tabs.addTab(cfg_outer, "Setup")
 
     import math as _math
@@ -511,44 +520,49 @@ def main() -> int:
 
     def draw_bearing():
         """Esquema HORIZONTAL de la máquina: eje + un anillo por cojinete + TODOS los
-        sensores como bolitas de color en su ángulo, con etiqueta. Diagrama fijo."""
+        sensores como bolitas de color en su ángulo, con etiqueta. Diagrama fijo.
+        Círculos y letras grandes para que se lea bien; separación amplia entre
+        cojinetes para que las etiquetas no se encimen."""
         try:
             brg_plot.clear()
             m = read_form()
             meas = [s for s in m.sensors if s.kind != "keyphasor"]
             kph = [s for s in m.sensors if s.kind == "keyphasor"]
             brs = sorted(set(_bearing_no(s.name) for s in meas)) or [1]
-            xpos = {b: i for i, b in enumerate(brs)}
-            n = len(brs)
-            th = np.linspace(0, 2 * np.pi, 80); R = 0.30
-            # eje (shaft)
-            brg_plot.plot([-0.7, n - 1 + 0.7], [0, 0], pen=pg.mkPen("#c9d6e8", width=7))
+            S = 1.9                                   # separación entre cojinetes
+            xpos = {b: i * S for i, b in enumerate(brs)}
+            n = len(brs); xmax = (n - 1) * S
+            th = np.linspace(0, 2 * np.pi, 90); R = 0.46
+            brg_plot.plot([-0.95, xmax + 0.95], [0, 0], pen=pg.mkPen("#c9d6e8", width=9))  # eje
             for b in brs:
                 cx = xpos[b]
-                brg_plot.plot(cx + R * np.sin(th), R * np.cos(th), pen=pg.mkPen(NAVY, width=7))
-                lb = pg.TextItem(f"Brg {b}", color=MUTE, anchor=(0.5, 0)); lb.setPos(cx, -R - 0.16)
-                brg_plot.addItem(lb)
+                brg_plot.plot(cx + R * np.sin(th), R * np.cos(th), pen=pg.mkPen(NAVY, width=9))
+                lb = pg.TextItem(html=f"<div style='font-size:10pt;color:#64748b;"
+                                 f"font-weight:700'>Brg {b}</div>", anchor=(0.5, 0))
+                lb.setPos(cx, -R - 0.22); brg_plot.addItem(lb)
                 bs = [s for s in meas if _bearing_no(s.name) == b]
                 for idx, s in enumerate(bs):
                     a = _math.radians(_disp_angle(s, idx))
                     dx, dy = _math.sin(a), _math.cos(a)
-                    px, py = cx + (R + 0.10) * dx, (R + 0.10) * dy
+                    px, py = cx + (R + 0.02) * dx, (R + 0.02) * dy
                     col = SENSOR_COLORS.get(s.kind, "#8b5cf6")
-                    brg_plot.addItem(pg.ScatterPlotItem([px], [py], symbol="o", size=15,
-                                                        brush=col, pen=pg.mkPen("w", width=1.5)))
-                    t = pg.TextItem(s.name.replace("_", ""), color=NAVY, anchor=(0.5, 0.5))
-                    t.setPos(cx + (R + 0.34) * dx, (R + 0.34) * dy); brg_plot.addItem(t)
-            # keyphasor (referencia de fase) a la izquierda del tren
-            if kph:
-                brg_plot.addItem(pg.ScatterPlotItem([-0.62], [0.0], symbol="t", size=15,
-                                 brush=SENSOR_COLORS["keyphasor"], pen=pg.mkPen("w", width=1)))
-                tk = pg.TextItem("KPH", color=MUTE, anchor=(0.5, 1.3)); tk.setPos(-0.62, 0.10)
-                brg_plot.addItem(tk)
-            rot = pg.TextItem(("CW ↻" if m.rotation == "CW" else "CCW ↺"),
-                              color=NAVY, anchor=(1, 1)); rot.setPos(n - 1 + 0.7, 0.9)
-            brg_plot.addItem(rot)
-            brg_plot.setXRange(-0.95, n - 1 + 0.95, padding=0)
-            brg_plot.setYRange(-0.85, 0.95, padding=0)
+                    brg_plot.addItem(pg.ScatterPlotItem([px], [py], symbol="o", size=22,
+                                                        brush=col, pen=pg.mkPen("w", width=2)))
+                    t = pg.TextItem(html=f"<div style='font-size:11pt;color:#0F1E3D;"
+                                    f"font-weight:700'>{s.name.replace('_', '')}</div>",
+                                    anchor=(0.5, 0.5))
+                    t.setPos(cx + (R + 0.42) * dx, (R + 0.42) * dy); brg_plot.addItem(t)
+            if kph:                                   # keyphasor a la izquierda del tren
+                brg_plot.addItem(pg.ScatterPlotItem([-0.9], [0.0], symbol="t", size=20,
+                                 brush=SENSOR_COLORS["keyphasor"], pen=pg.mkPen("w", width=1.5)))
+                tk = pg.TextItem(html="<div style='font-size:10pt;color:#64748b;"
+                                 "font-weight:700'>KPH</div>", anchor=(0.5, 1.2))
+                tk.setPos(-0.9, 0.14); brg_plot.addItem(tk)
+            rot = pg.TextItem(html=f"<div style='font-size:12pt;color:#0F1E3D;font-weight:800'>"
+                              f"{'CW ↻' if m.rotation == 'CW' else 'CCW ↺'}</div>", anchor=(1, 1))
+            rot.setPos(xmax + 0.95, 1.15); brg_plot.addItem(rot)
+            brg_plot.setXRange(-1.25, xmax + 1.25, padding=0)
+            brg_plot.setYRange(-1.05, 1.2, padding=0)
         except Exception:  # noqa: BLE001
             pass
 
@@ -716,7 +730,8 @@ def main() -> int:
         """Convierte la máquina del formulario (SimMachine) al formato ÚNICO de
         Watermelon System / Remote Monitoring (AcqSetup) — para guardarla/subirla
         como una máquina nueva que la web comparte."""
-        from core.remote_monitoring.config import AcqSetup, MachineConfig, ChannelRow
+        from core.remote_monitoring.config import (AcqSetup, MachineConfig, ChannelRow,
+                                                    AcquisitionParams)
         m = read_form()
         KMAP = {"prox": "proximity", "vel": "velometer", "accel": "accelerometer",
                 "keyphasor": "keyphasor"}
@@ -739,7 +754,12 @@ def main() -> int:
                            rpm_max=float(max(rng)) if rng else 0.0,
                            rotation=m.rotation, speed_control=speed,
                            bearing_type=m.bearing_type, n_bearings=nb)
-        return AcqSetup(machine=mc, channels=chans)
+        try:
+            acq = AcquisitionParams(fmax_hz=float(sp_fmax.value()),
+                                    lines=int(cb_lines.currentText()), window=cb_win.currentText())
+        except Exception:  # noqa: BLE001
+            acq = AcquisitionParams()
+        return AcqSetup(machine=mc, channels=chans, acquisition=acq)
 
     def do_save_cloud_machine():
         try:
