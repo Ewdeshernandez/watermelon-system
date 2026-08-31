@@ -506,21 +506,55 @@ def main() -> int:
     lbl_acq_df = QtWidgets.QLabel("")
     lbl_acq_df.setStyleSheet("color:#64748b;")
     al.addWidget(lbl_acq_df)
-    al.addWidget(_subhdr("Configured channels"))
-    lbl_acq_chans = QtWidgets.QLabel("—"); lbl_acq_chans.setWordWrap(True)
-    lbl_acq_chans.setStyleSheet("color:#0F1E3D;")
-    al.addWidget(lbl_acq_chans)
-    al.addStretch(1)
+    al.addWidget(_subhdr("Configured channels — pairing & acquisition band per type"))
+    tbl_acq = QtWidgets.QTableWidget(0, 6)
+    tbl_acq.setHorizontalHeaderLabels(["Channel", "Type", "Pair (X/Y)", "Keyphasor",
+                                       "Fmax (Hz)", "Lines"])
+    tbl_acq.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    tbl_acq.verticalHeader().setVisible(False)
+    tbl_acq.setAlternatingRowColors(True); tbl_acq.setShowGrid(False)
+    tbl_acq.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+    tbl_acq.verticalHeader().setDefaultSectionSize(26)
+    al.addWidget(tbl_acq, 1)
     cfg_tabs.addTab(pg_acq, "Acquisition")
 
     def _refresh_acq_info():
         try:
+            from core.remote_monitoring.config import default_acq_for_type
             fx = float(sp_fmax.value()); ln = int(cb_lines.currentText())
             df = fx / ln if ln else 0.0
             lbl_acq_df.setText(f"Δf = Fmax / Lines = {df:.2f} Hz    ·    "
                                f"window {cb_win.currentText()} · {sp_avg.value()} averages")
-            names = [tblc.item(r, 0).text() for r in range(tblc.rowCount()) if tblc.item(r, 0)]
-            lbl_acq_chans.setText("   ".join(f"● {n}" for n in names) if names else "—")
+            _WT = {"prox": "proximity", "vel": "velometer", "accel": "accelerometer",
+                   "keyphasor": "keyphasor"}
+            data = []
+            for r in range(tblc.rowCount()):
+                it = tblc.item(r, 0)
+                if not it:
+                    continue
+                w = tblc.cellWidget(r, 1)
+                lbl = w.currentText() if w else "Accelerometer"
+                data.append((it.text(), _KIND_BY_LABEL.get(lbl, "accel")))
+            names = {n for n, _ in data}
+            kph_name = next((n for n, k in data if k == "keyphasor"), "")
+            tbl_acq.setRowCount(len(data))
+            for i, (nm, kind) in enumerate(data):
+                if kind == "keyphasor":
+                    pair, kphr, fmx, lines = "—", "—", "—", "—"
+                else:
+                    sib = _sibling_name(nm); pair = sib if sib in names else "— (no pair)"
+                    kphr = kph_name or "— (none)"
+                    ap = default_acq_for_type(_WT.get(kind, "proximity"))
+                    fmx, lines = f"{ap.fmax_hz:.0f}", str(ap.lines)
+                vals = [nm, _WT.get(kind, kind).capitalize(), pair, kphr, fmx, lines]
+                for c, v in enumerate(vals):
+                    cell = QtWidgets.QTableWidgetItem(v)
+                    if c == 0:
+                        cell.setForeground(QtGui.QColor(SENSOR_COLORS.get(kind, "#8b5cf6")))
+                        f = cell.font(); f.setBold(True); cell.setFont(f)
+                    elif c == 2 and pair.startswith("—"):
+                        cell.setForeground(QtGui.QColor("#b45309"))
+                    tbl_acq.setItem(i, c, cell)
         except Exception:  # noqa: BLE001
             pass
     for _w in (sp_fmax, sp_avg):
@@ -575,6 +609,16 @@ def main() -> int:
     def _bearing_no(nm):
         d = "".join(ch for ch in (nm or "") if ch.isdigit())
         return int(d) if d else 0
+
+    def _sibling_name(nm):
+        """Nombre del sensor PAR (mismo cojinete, eje opuesto): 1Y↔1X, 1V↔1H, 2YA↔2XA."""
+        s = nm or ""
+        swap = {"Y": "X", "X": "Y", "V": "H", "H": "V",
+                "y": "x", "x": "y", "v": "h", "h": "v"}
+        for i, ch in enumerate(s):
+            if ch in swap:
+                return s[:i] + swap[ch] + s[i + 1:]
+        return ""
 
     def _disp_angle(s, idx):
         """Ángulo para DIBUJAR el sensor: si tiene ángulo configurado, ese; si no,
@@ -632,8 +676,11 @@ def main() -> int:
             rot = pg.TextItem(html=f"<div style='font-size:12pt;color:#0F1E3D;font-weight:800'>"
                               f"{'CW ↻' if m.rotation == 'CW' else 'CCW ↺'}</div>", anchor=(1, 1))
             rot.setPos(xmax + 0.95, 1.15); brg_plot.addItem(rot)
-            brg_plot.setXRange(-1.25, xmax + 1.25, padding=0)
-            brg_plot.setYRange(-1.05, 1.2, padding=0)
+            # Auto-encuadre honrando aspect-lock → se ven TODOS los cojinetes (con 5-6
+            # antes se cortaba y solo mostraba los del medio).
+            brg_plot.getViewBox().setRange(xRange=(-1.2, xmax + 1.2), yRange=(-1.1, 1.25),
+                                           padding=0, disableAutoRange=True)
+            brg_plot.getViewBox().autoRange(padding=0.06)
         except Exception:  # noqa: BLE001
             pass
 
@@ -828,6 +875,16 @@ def main() -> int:
                 coupling=CMAP.get(s.kind, "AC"), angle_deg=float(s.angle), side=(s.side or ""),
                 alarm=float(s.alarm), danger=float(s.danger), gap_bias_v=float(s.gap),
                 events_per_rev=1))
+        # --- PAREO X/Y + referencia de keyphasor (para órbita y fase 1X) ---
+        # El par se infiere por convención: mismo cojinete, eje opuesto (1Y↔1X, 1V↔1H).
+        kph_name = next((c.point_label for c in chans if c.sensor_type == "keyphasor"), "")
+        for c in chans:
+            if c.sensor_type == "keyphasor":
+                continue
+            c.keyphasor_ref = kph_name
+            sib = _sibling_name(c.point_label)
+            if sib and any(o.point_label == sib for o in chans):
+                c.pair_ref = sib
         nb = len({_bearing_no(s.name) for s in m.sensors if s.kind != "keyphasor"}) or 1
         speed = "variable" if m.mode in ("arranque", "parada", "arranque_parada") else "constant"
         rng = [v for v in (m.rpm_start, m.rpm_end) if v > 0]
@@ -891,8 +948,16 @@ def main() -> int:
 
     def _do_autolayout():
         # Nº de cojinetes → layout recomendado (KPH + X/Y por cojinete). El usuario edita.
-        fill_form(SimMachine.plantilla_prox_train(n_bearings=int(sp_nbrg.value()),
-                                                  name=(ed_name.text() or "Machine")))
+        nb = int(sp_nbrg.value())
+        fill_form(SimMachine.plantilla_prox_train(n_bearings=nb, name=(ed_name.text() or "Machine")))
+        cfg_tabs.setCurrentWidget(pg_sensors)          # mostrar el resultado
+        _refresh_acq_info()
+        _nice("Layout ready",
+              "<div style='font-size:15px'><b style='color:#166534'>✅ Recommended layout generated</b></div>"
+              f"<div style='color:#0F1E3D;margin-top:6px'>{nb} bearings · keyphasor + X/Y per bearing "
+              f"({nb * 2 + 1} channels).</div>"
+              "<div style='color:#64748b;margin-top:8px'>Review/edit angles, alarms and gaps in "
+              "<b>Sensors &amp; layout</b>, then continue. 🍉</div>")
 
     btn_add.clicked.connect(lambda: _add_sensor_row(SensorSpec("CHn", "accel", tblc.rowCount() + 1)))
     btn_del.clicked.connect(lambda: tblc.removeRow(tblc.currentRow()) if tblc.currentRow() >= 0 else None)
