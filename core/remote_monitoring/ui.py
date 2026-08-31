@@ -47,7 +47,7 @@ def render_remote_monitoring() -> None:
     try:
         from core.ui_theme import page_header
         page_header(title="Remote Monitoring",
-                    subtitle="Adquisición dinámica en vivo · rotordinámica · ISO 20816 / API 670 / API 684")
+                    subtitle="Live dynamic acquisition · rotordynamics · ISO 20816 / API 670 / API 684")
     except Exception:  # noqa: BLE001
         st.title("Remote Monitoring")
 
@@ -167,15 +167,15 @@ def render_remote_monitoring() -> None:
         </style>
     """, unsafe_allow_html=True)
 
-    view = st.radio("Vista", ["Configuración", "Monitoreo", "Análisis"], horizontal=True,
+    view = st.radio("View", ["Setup", "Monitor", "Analysis"], horizontal=True,
                     key="rm_view", label_visibility="collapsed")
     # Hairline sutil (sin el st.divider() que gasta mucho espacio vertical).
     st.markdown('<hr style="margin:2px 0 10px;border:none;border-top:1px solid #e6ecf5">',
                 unsafe_allow_html=True)
-    if view == "Configuración":
+    if view == "Setup":
         from core.remote_monitoring.ui_setup import render_setup
         render_setup()
-    elif view == "Monitoreo":
+    elif view == "Monitor":
         _render_monitoreo()
     else:
         _render_analisis()
@@ -206,7 +206,7 @@ def _build_agent(channels: List[ChannelConfig], source_kind: str, fs: float,
         sim_critical_rpm=sim.get("sim_critical_rpm", 0.0),
         sim_critical_rpm2=sim.get("sim_critical_rpm2", 0.0),
     )
-    if source_kind == "Campo (planta)":
+    if source_kind == "Field (plant)":
         from core.remote_monitoring.ni_stream_source import NIStreamSource
         source = NIStreamSource(cfg)
     else:
@@ -221,9 +221,9 @@ def _no_config_gate() -> bool:
     """True si NO hay config activa (muestra ayuda + demo). Comparte Monitoreo/Análisis."""
     if st.session_state.get("rm_channels"):
         return False
-    st.info("No hay configuración activa. Andá a **Configuración** y guardá una máquina, "
-            "o cargá un layout demo para probar ya.")
-    if st.button("Cargar layout demo (4 cojinetes + keyphasor)"):
+    st.info("No active configuration. Go to **Setup** and save a machine, "
+            "or load a demo layout to try it now.")
+    if st.button("Load demo layout (4 bearings + keyphasor)"):
         chans = _demo_channels(4)
         st.session_state["rm_channels"] = chans
         st.session_state["rm_machine_rpm"] = 3600.0
@@ -339,29 +339,29 @@ def _acquire(agent: AcqAgent, pump_n: int):
 def _render_source_params() -> None:
     """Fuente y parámetros (solo en Monitoreo). Guarda en session."""
     default_rpm = float(st.session_state.get("rm_machine_rpm", 3600.0))
-    with st.expander("⚙️ Fuente y parámetros", expanded=False):
+    with st.expander("⚙️ Source and parameters", expanded=False):
         col1, col2, col3 = st.columns(3)
         with col1:
-            source_kind = st.selectbox("Fuente de datos", ["Simulado", "Campo (planta)"],
+            source_kind = st.selectbox("Data source", ["Simulated", "Field (plant)"],
                                        key="rm_src_kind",
-                                       help="Campo = adquisición en sitio. Simulado = pruebas.")
+                                       help="Campo = on-site acquisition. Simulado = testing.")
         with col2:
             fs = st.select_slider("Sample rate (Hz)", options=[2560, 5120, 10240, 25600, 51200],
                                   value=int(st.session_state.get("rm_fs", 25600)), key="rm_fs_w")
         with col3:
-            defect = (st.selectbox("Defecto simulado",
+            defect = (st.selectbox("Simulated defect",
                                    ["none", "unbalance", "misalignment", "oil_whirl"], key="rm_defect",
-                                   help="oil_whirl: inyecta inestabilidad de película — remolino "
-                                        "(~0.45X) que se engancha (whip) al pasar 2× la crítica.")
-                      if source_kind.startswith("Simulado") else "none")
+                                   help="oil_whirl: injects fluid-film instability — whirl "
+                                        "(~0.45X) that locks in (whip) past 2× the critical.")
+                      if source_kind.startswith("Simulated") else "none")
         sim = {"rpm": default_rpm, "defect": defect, "speed_profile": "constant"}
-        if source_kind.startswith("Simulado"):
-            st.markdown("**Modo de la máquina** (define el muestreo)")
-            _MODE_MAP = {"Estable": "constant", "Arranque": "runup",
-                         "Parada": "coastdown", "Arranque + Parada": "runup_coastdown"}
+        if source_kind.startswith("Simulated"):
+            st.markdown("**Machine mode** (defines the sampling)")
+            _MODE_MAP = {"Steady": "constant", "Startup": "runup",
+                         "Coastdown": "coastdown", "Startup + Coastdown": "runup_coastdown"}
             p1, p2, p3, p4 = st.columns(4)
             with p1:
-                mode_es = st.selectbox("Modo", list(_MODE_MAP.keys()), key="rm_prof")
+                mode_es = st.selectbox("Mode", list(_MODE_MAP.keys()), key="rm_prof")
             prof = _MODE_MAP[mode_es]
             sim["speed_profile"] = prof
             if prof == "constant":
@@ -369,24 +369,24 @@ def _render_source_params() -> None:
                     sim["rpm"] = st.number_input("RPM", 300, 30000, int(default_rpm), step=60, key="rm_simrpm")
             else:
                 with p2:
-                    sim["rpm_start"] = st.number_input("RPM inicio", 0, 30000, 600, step=60, key="rm_rpmst")
+                    sim["rpm_start"] = st.number_input("Start RPM", 0, 30000, 600, step=60, key="rm_rpmst")
                 with p3:
-                    sim["rpm_end"] = st.number_input("RPM fin", 0, 30000, 6000, step=60, key="rm_rpmend")
+                    sim["rpm_end"] = st.number_input("End RPM", 0, 30000, 6000, step=60, key="rm_rpmend")
                 with p4:
-                    sim["sim_critical_rpm"] = st.number_input("Crítica 1 (rpm)", 0, 30000, 3000, step=60, key="rm_crit")
+                    sim["sim_critical_rpm"] = st.number_input("Critical 1 (rpm)", 0, 30000, 3000, step=60, key="rm_crit")
                 cc1, cc2 = st.columns(2)
                 with cc1:
-                    sim["sim_critical_rpm2"] = st.number_input("Crítica 2 (rpm, opcional)", 0, 30000, 0,
+                    sim["sim_critical_rpm2"] = st.number_input("Critical 2 (rpm, optional)", 0, 30000, 0,
                                                                step=60, key="rm_crit2",
-                                                               help="0 = sin segunda resonancia.")
+                                                               help="0 = no second resonance.")
                 with cc2:
-                    sim["ramp_seconds"] = st.slider("Duración (s)", 5, 300, 90, key="rm_ramp",
-                                                    help="Runup/coastdown más LENTO = más puntos "
-                                                         "en Bode/Polar (como Bently). Un coastdown "
-                                                         "real es lento → curva muy densa.")
-            st.caption("**Estable**: velocidad constante (estado estacionario, muestreo continuo). "
-                       "**Arranque / Parada**: barrido de velocidad → captura **transitoria** "
-                       "(finer, por Δrpm) para bode / cascade / waterfall.")
+                    sim["ramp_seconds"] = st.slider("Duration (s)", 5, 300, 90, key="rm_ramp",
+                                                    help="Slower runup/coastdown = more points "
+                                                         "in Bode/Polar (like Bently). A real "
+                                                         "coastdown is slow → very dense curve.")
+            st.caption("**Steady**: constant speed (steady state, continuous sampling). "
+                       "**Startup / Coastdown**: speed sweep → **transient** capture "
+                       "(finer, by Δrpm) for bode / cascade / waterfall.")
     st.session_state["rm_source_kind"] = source_kind
     st.session_state["rm_fs"] = fs
     st.session_state["rm_sim"] = sim
@@ -401,34 +401,34 @@ def _render_monitoreo() -> None:
     channels = st.session_state["rm_channels"]
     machine_name = st.session_state.get("rm_machine_name", "adhoc")
     n_vib = sum(1 for c in channels if not is_keyphasor_channel(c))
-    st.caption(f"Máquina activa: **{machine_name}** · {len(channels)} canales "
-               f"({n_vib} de vibración) · fuente lista para adquirir.")
+    st.caption(f"Active machine: **{machine_name}** · {len(channels)} channels "
+               f"({n_vib} vibration) · source ready to acquire.")
 
     _render_source_params()
     agent = _ensure_agent()
 
     b1, b2, b3, b4, b5, b6 = st.columns([1, 1, 1.3, 1.3, 1, 1.6])
     with b1:
-        if st.button("▶ Iniciar", use_container_width=True):
+        if st.button("▶ Start", use_container_width=True):
             try:
                 _acq(agent, 1)                  # campo: arranca el hilo de fondo
                 st.session_state["rm_running"] = True
             except Exception as e:  # noqa: BLE001
                 st.session_state["rm_running"] = False
-                st.error(f"⚠ No se pudo iniciar la adquisición: {type(e).__name__}: {e}")
+                st.error(f"⚠ Could not start acquisition: {type(e).__name__}: {e}")
     with b2:
-        if st.button("⏸ Detener", use_container_width=True):
+        if st.button("⏸ Stop", use_container_width=True):
             st.session_state["rm_running"] = False
             _acq_stop(agent)                    # campo: para el hilo + tarea NI
     with b3:
-        capture = st.button("📸 Capturar", use_container_width=True, type="primary",
-                            help="Toma una lectura fresca y la guarda en un solo clic.")
+        capture = st.button("📸 Capture", use_container_width=True, type="primary",
+                            help="Takes a fresh reading and saves it in a single click.")
     with b4:
-        take = st.button("🔄 Tomar 1 lectura", use_container_width=True,
-                         help="Refresca una lectura sin guardarla.")
+        take = st.button("🔄 Take 1 reading", use_container_width=True,
+                         help="Refreshes a reading without saving it.")
     with b5:
-        save = st.button("💾 Guardar", use_container_width=True,
-                         help="Guarda la ventana actual sin tomar datos nuevos.")
+        save = st.button("💾 Save", use_container_width=True,
+                         help="Saves the current window without taking new data.")
     with b6:
         live = st.checkbox("🟢 Live (auto-refresh)", value=st.session_state.get("rm_running", False))
         st.session_state["rm_running"] = live
@@ -438,15 +438,15 @@ def _render_monitoreo() -> None:
     recording = bool(rec and getattr(rec, "open", False))
     rc1, rc2, rc3 = st.columns([1.4, 1.4, 4])
     with rc1:
-        if not recording and st.button("⏺ Grabar transitorio", use_container_width=True,
-                                       help="Graba la ONDA CRUDA completa a disco durante toda la "
-                                            "rampa (arranque/parada). No se pierde nada; después se "
-                                            "reprocesa a Bode/Cascada a máxima resolución."):
+        if not recording and st.button("⏺ Record transient", use_container_width=True,
+                                       help="Records the full RAW WAVEFORM to disk throughout the "
+                                            "whole ramp (startup/coastdown). Nothing is lost; it is "
+                                            "then reprocessed to Bode/Cascade at maximum resolution."):
             from core.remote_monitoring.recorder import TransientRecorder, free_bytes
             _free = free_bytes()
             if _free and _free < 200 * 1024 * 1024:   # < 200 MB libres → no arranca
-                st.error(f"⚠ Poco espacio en disco ({_free/1e6:.0f} MB libres). Liberá con "
-                         f"**🗑 Limpiar grabaciones locales** antes de grabar.")
+                st.error(f"⚠ Low disk space ({_free/1e6:.0f} MB free). Free up with "
+                         f"**🗑 Clear local recordings** before recording.")
             else:
                 try:
                     ch_meta = [{"name": c.name, "units": c.units, "coupling": c.coupling,
@@ -461,58 +461,58 @@ def _render_monitoreo() -> None:
                     _acq(agent, 1)                            # campo: arranca el hilo
                     st.rerun()
                 except OSError as e:
-                    st.error(f"⚠ No se pudo iniciar la grabación (disco): {e}. "
-                             f"Liberá con **🗑 Limpiar grabaciones locales**.")
+                    st.error(f"⚠ Could not start recording (disk): {e}. "
+                             f"Free up with **🗑 Clear local recordings**.")
     with rc2:
-        if recording and st.button("⏹ Detener grabación", use_container_width=True, type="primary"):
+        if recording and st.button("⏹ Stop recording", use_container_width=True, type="primary"):
             from core.remote_monitoring.recorder import upload_recording
             rec.stop()
             agent.on_block = None
             st.session_state["rm_recorder"] = rec
             up = upload_recording(rec.dir)                 # intenta subir a Supabase
             if up.get("ok"):
-                st.success(f"📼 Grabación **{rec.rec_id}** ({rec.status.duration_s:.0f} s · "
-                           f"{rec.status.size_mb:.1f} MB) guardada y **☁ subida a Supabase**. "
-                           f"Reprocesala en **Análisis → 📼 Reprocesar**.")
+                st.success(f"📼 Recording **{rec.rec_id}** ({rec.status.duration_s:.0f} s · "
+                           f"{rec.status.size_mb:.1f} MB) saved and **☁ uploaded to Supabase**. "
+                           f"Reprocess it in **Análisis → 📼 Reprocess**.")
             else:
-                st.warning(f"📼 Grabación **{rec.rec_id}** guardada local ({rec.status.size_mb:.1f} MB). "
-                           f"**Pendiente de subir** ({up.get('reason', 'sin conexión')}). Se sube "
-                           f"con **☁ Subir pendientes** cuando haya internet.")
+                st.warning(f"📼 Recording **{rec.rec_id}** saved locally ({rec.status.size_mb:.1f} MB). "
+                           f"**Pending upload** ({up.get('reason', 'no connection')}). It uploads "
+                           f"with **☁ Upload pending** when internet is available.")
             st.rerun()
     with rc3:
         if recording:
             agent.on_block = rec.append   # re-asegura el hook por si el agente se reusó
             s = rec.status
-            st.markdown(f"<div style='padding:6px 10px'>🔴 <b>GRABANDO</b> · "
-                        f"{s.duration_s:.0f} s · {s.blocks} bloques · {s.size_mb:.1f} MB · "
-                        f"cruda a disco</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='padding:6px 10px'>🔴 <b>RECORDING</b> · "
+                        f"{s.duration_s:.0f} s · {s.blocks} blocks · {s.size_mb:.1f} MB · "
+                        f"raw to disk</div>", unsafe_allow_html=True)
         else:
             from core.remote_monitoring.recorder import pending_count, sync_pending
             _pend = pending_count(agent.instance_id)
-            if _pend and st.button(f"☁ Subir pendientes ({_pend})", use_container_width=True,
-                                   help="Sube a Supabase las grabaciones que quedaron locales (campo sin internet)."):
+            if _pend and st.button(f"☁ Upload pending ({_pend})", use_container_width=True,
+                                   help="Uploads to Supabase the recordings that stayed local (field with no internet)."):
                 ok, fail = sync_pending(agent.instance_id)
-                (st.success if not fail else st.warning)(f"☁ Subidas {ok} · fallos {fail}.")
+                (st.success if not fail else st.warning)(f"☁ Uploaded {ok} · failed {fail}.")
                 st.rerun()
 
     # Aviso si la grabación se detuvo por disco lleno + gestión de espacio.
     if rec is not None and getattr(rec, "error", None):
-        st.error(f"⚠ La grabación se detuvo: **{rec.error}**. Liberá disco abajo y volvé a grabar.")
+        st.error(f"⚠ Recording stopped: **{rec.error}**. Free up disk below and record again.")
     from core.remote_monitoring.recorder import local_usage, free_bytes, clear_recordings
     _cnt, _used = local_usage(agent.instance_id)
     if _cnt:
         _free = free_bytes()
         d1, d2 = st.columns([2.3, 1.4])
         with d1:
-            st.caption(f"💽 Grabaciones locales: **{_cnt}** · {_used/1e6:.0f} MB usados · "
-                       f"{_free/1e6:.0f} MB libres en disco.")
+            st.caption(f"💽 Local recordings: **{_cnt}** · {_used/1e6:.0f} MB used · "
+                       f"{_free/1e6:.0f} MB free on disk.")
         with d2:
-            if st.button(f"🗑 Limpiar grabaciones locales ({_cnt})", use_container_width=True,
-                         help="Borra las grabaciones del disco local para liberar espacio. Las que ya "
-                              "se subieron a Supabase quedan en la nube."):
+            if st.button(f"🗑 Clear local recordings ({_cnt})", use_container_width=True,
+                         help="Deletes the recordings from local disk to free up space. Those already "
+                              "uploaded to Supabase stay in the cloud."):
                 n, freed = clear_recordings(agent.instance_id)
                 st.session_state.pop("rm_recorder", None)
-                st.success(f"🗑 Borradas {n} grabación(es) · liberados {freed/1e6:.0f} MB.")
+                st.success(f"🗑 Deleted {n} recording(s) · freed {freed/1e6:.0f} MB.")
                 st.rerun()
 
     # Acciones one-shot en el run principal (fuera del fragment).
@@ -523,16 +523,16 @@ def _render_monitoreo() -> None:
             if _s.shape[1]:
                 _save_snapshot(agent, _s, agent.estimate_rpm(_s))
             else:
-                st.warning("Sin datos para capturar. Pulsá ▶ Iniciar primero.")
+                st.warning("No data to capture. Press ▶ Start first.")
         except Exception as e:  # noqa: BLE001
             st.session_state["rm_running"] = False
-            st.error(f"⚠ No se pudo capturar: {type(e).__name__}: {e}")
+            st.error(f"⚠ Could not capture: {type(e).__name__}: {e}")
     if take:
         try:
             _acq(agent, 8)
         except Exception as e:  # noqa: BLE001
             st.session_state["rm_running"] = False
-            st.error(f"⚠ No se pudo adquirir: {type(e).__name__}: {e}")
+            st.error(f"⚠ Could not acquire: {type(e).__name__}: {e}")
     if save:
         _s = agent.snapshot()
         if _s.shape[1]:
@@ -561,12 +561,12 @@ def _monitoreo_display() -> None:
     if _rec is not None and getattr(_rec, "open", False):
         s = _rec.status
         st.markdown(f"<div style='padding:4px 10px;background:#fdecec;border:1px solid #f5c2c2;"
-                    f"border-radius:8px;color:#b91c1c;font-size:12px'>🔴 <b>GRABANDO transitorio</b> · "
-                    f"{s.duration_s:.0f} s · {s.blocks} bloques · {s.size_mb:.1f} MB · onda cruda a disco"
+                    f"border-radius:8px;color:#b91c1c;font-size:12px'>🔴 <b>RECORDING transient</b> · "
+                    f"{s.duration_s:.0f} s · {s.blocks} blocks · {s.size_mb:.1f} MB · raw waveform to disk"
                     f"</div>", unsafe_allow_html=True)
     snap = agent.snapshot()
     if snap.shape[1] == 0:
-        st.info("Sin datos aún. Pulsá **▶ Iniciar** o **Tomar 1 lectura**.")
+        st.info("No data yet. Press **▶ Start** or **Take 1 reading**.")
         return
     rpm = agent.estimate_rpm(snap)
     vib = [(i, ch) for i, ch in enumerate(agent.channels) if not is_keyphasor_channel(ch)]
@@ -577,7 +577,7 @@ def _monitoreo_display() -> None:
         tc.feed(snap, rpm, agent.sample_rate_hz, vib,
                 kph_idx=agent.source.config.keyphasor_index())
     _render_stat_strip(agent, snap, rpm, state, tc)
-    st.markdown("##### Tabular list — valores actuales")
+    st.markdown("##### Tabular list — current values")
     _render_tabular_list(agent, snap, rpm, vib)
 
 
@@ -590,11 +590,11 @@ def _render_analisis() -> None:
     agent = _ensure_agent()
     top = st.columns([0.9, 0.7, 4])
     with top[0]:
-        take = st.button("🔄 Actualizar", use_container_width=True,
-                         help="Refresca una lectura (útil con Live apagado).")
+        take = st.button("🔄 Refresh", use_container_width=True,
+                         help="Refreshes a reading (useful with Live off).")
     with top[1]:
         live = st.checkbox("🟢 Live", value=st.session_state.get("rm_running", False),
-                           help="Auto-refresco de los gráficos.")
+                           help="Auto-refresh of the plots.")
         st.session_state["rm_running"] = live
     if take:
         try:
@@ -619,11 +619,11 @@ def _render_new_recordings_alert(agent: AcqAgent) -> None:
     latest = fresh[0]
     st.markdown(
         f"<div style='padding:11px 16px;margin:2px 0 10px;background:#fff7ed;border:1px solid #fdba74;"
-        f"border-radius:10px;color:#9a3412;font-size:13.5px'>🔔 <b>{len(fresh)} grabación(es) nueva(s) "
-        f"para analizar</b> — última <b>{latest.get('rec_id')}</b> "
-        f"({(latest.get('duration_s') or 0):.0f} s, {latest.get('machine','')}). Reprocesala abajo 👇"
+        f"border-radius:10px;color:#9a3412;font-size:13.5px'>🔔 <b>{len(fresh)} new recording(s) "
+        f"to analyze</b> — latest <b>{latest.get('rec_id')}</b> "
+        f"({(latest.get('duration_s') or 0):.0f} s, {latest.get('machine','')}). Reprocess it below 👇"
         f"</div>", unsafe_allow_html=True)
-    if st.button("Marcar como vistas", key="rm_seen_btn"):
+    if st.button("Mark as seen", key="rm_seen_btn"):
         seen.update(r.get("rec_id") for r in recs)
         st.rerun()
 
@@ -649,7 +649,7 @@ def _render_reprocess(agent: AcqAgent) -> None:
                      "machine": cr.get("machine", ""), "_cloud": True})
     if not recs:
         return
-    with st.expander(f"📼 Reprocesar grabación ({len(recs)} disponible(s))"):
+    with st.expander(f"📼 Reprocess recording ({len(recs)} available)"):
         def _lbl(m):
             import datetime as _dt
             ts = m.get("started", 0)
@@ -660,25 +660,25 @@ def _render_reprocess(agent: AcqAgent) -> None:
             dur = m.get("duration_s") or (m.get("samples", 0) / (m.get("fs", 1) or 1))
             tag = "☁ " if m.get("_cloud") else ""
             return (f"{tag}{m.get('_instance','')} · {m['rec_id']} · {t} · {dur or 0:.0f} s · "
-                    f"{m.get('n_channels', 0)} canales")
+                    f"{m.get('n_channels', 0)} channels")
         labels = [_lbl(m) for m in recs]
-        sel = st.selectbox("Grabación", labels, key="rm_reproc_sel")
+        sel = st.selectbox("Recording", labels, key="rm_reproc_sel")
         c1, c2 = st.columns([1, 3])
         with c1:
-            go_rep = st.button("⚙ Reprocesar", use_container_width=True, type="primary")
+            go_rep = st.button("⚙ Reprocess", use_container_width=True, type="primary")
         with c2:
-            st.caption("Reconstruye onda/espectro/órbita/tabular (con cursor) + Bode/Cascada/Polar "
-                       "de toda la corrida, desde el registro crudo. No depende del vivo.")
+            st.caption("Rebuilds waveform/spectrum/orbit/tabular (with cursor) + Bode/Cascade/Polar "
+                       "of the whole run, from the raw record. Independent of the live feed.")
         if go_rep:
             m = recs[labels.index(sel)]
             if m.get("_cloud") and not m.get("_dir"):
-                with st.spinner("Descargando grabación de la nube…"):
+                with st.spinner("Downloading recording from the cloud…"):
                     d = download_recording(m.get("_instance", ""), m["rec_id"])
                 if not d:
-                    st.error("No se pudo descargar de la nube (revisá credenciales/internet).")
+                    st.error("Could not download from the cloud (check credentials/internet).")
                     return
                 m["_dir"] = d
-            with st.spinner("Reprocesando registro completo…"):
+            with st.spinner("Reprocessing full record…"):
                 manifest, full = load_recording(m["_dir"])
                 # Canales AUTO-CONTENIDOS desde la grabación (nombre, sensib, unidad).
                 ch_objs = []
@@ -704,9 +704,9 @@ def _render_reprocess(agent: AcqAgent) -> None:
                     "win": min(int(2.0 * fsr), full.shape[1]), "rec_id": m["rec_id"],
                     "vib": vib, "kph": kph, "channels": ch_objs}
                 st.session_state["rm_running"] = False     # replay, no vivo
-            st.success(f"✓ Reprocesado: **{npts} puntos** de {full.shape[1]/fsr:.0f} s de onda cruda. "
-                       f"Abajo tenés **TODOS** los gráficos: movés el **🎚 cursor** para onda/espectro/"
-                       f"órbita/tabular en cada instante, y Bode/Cascada/Polar de toda la corrida.")
+            st.success(f"✓ Reprocessed: **{npts} points** from {full.shape[1]/fsr:.0f} s of raw waveform. "
+                       f"Below you have **ALL** the plots: move the **🎚 cursor** for waveform/spectrum/"
+                       f"orbit/tabular at each instant, and Bode/Cascade/Polar of the whole run.")
 
 
 def _analisis_display() -> None:
@@ -736,24 +736,24 @@ def _analisis_display() -> None:
         maxt = max(0.0, dur - win / fs)
         cc = st.columns([4, 1])
         with cc[0]:
-            t = st.slider(f"🎚 Cursor de la grabación · {replay.get('rec_id', '')} (s)",
+            t = st.slider(f"🎚 Recording cursor · {replay.get('rec_id', '')} (s)",
                           0.0, round(maxt, 2), min(round(maxt, 2), 0.0),
                           step=(round(maxt / 200, 3) or 0.05), key="rm_replay_t")
         with cc[1]:
-            if st.button("✕ Salir del replay", use_container_width=True):
+            if st.button("✕ Exit replay", use_container_width=True):
                 st.session_state.pop("rm_replay", None)
                 st.rerun()
         off = int(t * fs)
         snap = np.ascontiguousarray(full[:, off:off + win])
-        st.info(f"📼 **Replay de grabación** · cursor {t:.1f} / {dur:.0f} s — movés el cursor y ves "
-                f"**onda / espectro / órbita / tabular** en ese instante; **Bode/Polar/Cascada/"
-                f"Waterfall** usan toda la grabación.")
+        st.info(f"📼 **Recording replay** · cursor {t:.1f} / {dur:.0f} s — move the cursor and see "
+                f"**waveform / spectrum / orbit / tabular** at that instant; **Bode/Polar/Cascade/"
+                f"Waterfall** use the whole recording.")
         if kph_idx is not None and snap.shape[1]:
             from core.remote_monitoring.keyphasor import detect_keyphasor
             rpm = detect_keyphasor(snap[kph_idx, -min(snap.shape[1], int(2 * fs)):], fs).rpm
     if snap.shape[1] == 0:
-        st.info("Sin datos. Andá a **Monitoreo** y pulsá **▶ Iniciar** "
-                "(o reprocesá una grabación arriba).")
+        st.info("No data. Go to **Monitor** and press **▶ Start** "
+                "(or reprocess a recording above).")
         return
     if not replay_mode:
         rpm = agent.estimate_rpm(snap)
@@ -769,9 +769,9 @@ def _analisis_display() -> None:
     # (El contexto RPM/estado/ventana vive en el header de cada gráfico,
     #  no en una tira global — para que cada gráfico sea autocontenido.)
 
-    tabs = st.tabs(["Tabular", "Tendencias", "Formas de onda", "Espectro",
-                    "Órbitas", "Bode", "Polar", "Shaft Centerline",
-                    "Cascada", "Waterfall"])
+    tabs = st.tabs(["Tabular", "Trends", "Waveforms", "Spectrum",
+                    "Orbits", "Bode", "Polar", "Shaft Centerline",
+                    "Cascade", "Waterfall"])
     with tabs[0]:
         _render_tabular_list(agent, snap, rpm, vib)
     with tabs[1]:
@@ -781,42 +781,42 @@ def _analisis_display() -> None:
             _plot_trend(snap, vib, tmap, rpm=rpm)
     with tabs[2]:
         if names:
-            sels = st.multiselect("Canales", names, default=[names[0]], key="rm_wf_ch",
-                                  help="Elegí uno o varios canales para ver sus formas de onda apiladas.")
+            sels = st.multiselect("Channels", names, default=[names[0]], key="rm_wf_ch",
+                                  help="Pick one or more channels to see their stacked waveforms.")
             if sels:
                 chans = [(snap[vib[names.index(s)][0]], vib[names.index(s)][1]) for s in sels]
                 _plot_waveform(chans, fs, rpm, rm_states.state_label(state),
                                rm_states.state_color(state), _vent)
             else:
-                st.info("Elegí al menos un canal.")
+                st.info("Pick at least one channel.")
     with tabs[3]:
         if names:
-            sels = st.multiselect("Canales", names, default=[names[0]], key="rm_sp_ch",
-                                  help="Uno o varios canales — espectros apilados.")
+            sels = st.multiselect("Channels", names, default=[names[0]], key="rm_sp_ch",
+                                  help="One or more channels — stacked spectra.")
             if sels:
                 chans = [(snap[vib[names.index(s)][0]], vib[names.index(s)][1]) for s in sels]
                 _plot_spectrum(chans, fs, rpm)
             else:
-                st.info("Elegí al menos un canal.")
+                st.info("Pick at least one channel.")
     with tabs[4]:
         _plot_orbit(snap, vib, fs, rpm)
     with tabs[5]:
         if names:
-            sel = st.selectbox("Canal", names, key="rm_bode_ch")
+            sel = st.selectbox("Channel", names, key="rm_bode_ch")
             _plot_bode(tc, sel)
     with tabs[6]:
         if names:
-            sel = st.selectbox("Canal", names, key="rm_polar_ch")
+            sel = st.selectbox("Channel", names, key="rm_polar_ch")
             _plot_polar(tc, sel, snap, vib, fs, rpm)
     with tabs[7]:
         _plot_shaft_centerline(snap, vib)
     with tabs[8]:
         if names:
-            sel = st.selectbox("Canal", names, key="rm_casc_ch")
+            sel = st.selectbox("Channel", names, key="rm_casc_ch")
             _plot_cascade(tc, sel, rpm)
     with tabs[9]:
         if names:
-            sel = st.selectbox("Canal", names, key="rm_wf3_ch")
+            sel = st.selectbox("Channel", names, key="rm_wf3_ch")
             _plot_waterfall(tc, sel)
 
 
@@ -835,8 +835,8 @@ def _render_tabular_list(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]
     heads = ["Sensor", "Gap", "Overall"]
     if f1:
         for o in orders:
-            heads += [f"{o:g}X", f"{o:g}X fase"]
-    heads += ["Alarma", "Danger", "Estado"]
+            heads += [f"{o:g}X", f"{o:g}X phase"]
+    heads += ["Alarm", "Danger", "Status"]
     th = "".join(f'<th style="padding:9px 12px;text-align:left;font-size:11px;'
                  f'text-transform:uppercase;font-weight:700;color:{CYAN};white-space:nowrap;">{h}</th>'
                  for h in heads)
@@ -879,16 +879,16 @@ def _render_tabular_list(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]
         body.append(f'<tr style="background:{bg}">{tds}</tr>')
 
     if not f1:
-        st.caption("Sin keyphasor no hay vectores 1X/2X — solo Overall. Activá el keyphasor en Configuración.")
+        st.caption("Without a keyphasor there are no 1X/2X vectors — only Overall. Enable the keyphasor in Setup.")
     st.markdown(
         f'<div style="border:1px solid #d6deea;border-radius:12px;overflow-x:auto;'
         f'box-shadow:0 6px 18px rgba(15,30,61,.08)">'
         f'<table style="width:100%;border-collapse:collapse;min-width:560px">'
         f'<thead><tr style="background:{NAVY}">{th}</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table></div>', unsafe_allow_html=True)
-    st.caption("Amplitudes según norma: **desplazamiento en pp** (API 670 · ISO 7919), "
-               "**velocidad/aceleración en RMS** (ISO 20816). Overall y alarma/danger "
-               "en la misma convención del sensor.")
+    st.caption("Amplitudes by standard: **displacement in pp** (API 670 · ISO 7919), "
+               "**velocity/acceleration in RMS** (ISO 20816). Overall and alarm/danger "
+               "in the same convention as the sensor.")
 
 
 # =====================================================================
@@ -924,24 +924,24 @@ def _render_stat_strip(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float],
     live = "corriendo" if fs else ""
     cells = [
         cell("RPM", f"{rpm:.0f}" if rpm else "—",
-             tip="Velocidad estimada por el keyphasor."),
+             tip="Speed estimated from the keyphasor."),
         cell("1X", f"{rpm/60:.1f} Hz" if rpm else "—",
-             tip="Frecuencia de giro (RPM/60)."),
-        cell("Estado", rm_states.state_label(state), vcolor=color,
-             tip="Estable / Arranque / Parada según el cambio de RPM."),
-        cell("Ventana", f"{vent_s:.1f} s",
-             tip=f"Buffer rodante: se guardan los últimos {vent_s:.0f} s de forma de onda. "
-                 f"Sobre esta ventana se calculan espectro, órbita y formas de onda."),
+             tip="Rotational frequency (RPM/60)."),
+        cell("Status", rm_states.state_label(state), vcolor=color,
+             tip="Steady / Startup / Coastdown depending on the RPM change."),
+        cell("Window", f"{vent_s:.1f} s",
+             tip=f"Rolling buffer: the last {vent_s:.0f} s of waveform are kept. "
+                 f"Spectrum, orbit and waveforms are computed over this window."),
         cell("Samples", f"{total_samples:,}",
-             tip=f"Muestras totales adquiridas desde ▶ Iniciar "
-                 f"(bloques de {block_s:g} s a {fs:g} Hz)."),
-        cell("Vectores", f"{tc.n_samples}",
-             tip="Puntos de velocidad capturados para Bode/Cascada. Solo crece durante "
-                 "un transitorio (arranque/parada); en estable se queda en 1."),
-        cell("Guardados", f"{saved}",
-             tip="Formas de onda guardadas a disco con el botón 💾 Guardar."),
-        cell("Tamaño", f"{size_mb:.2f} MB",
-             tip="Memoria que ocupa la ventana actual en RAM (canales × muestras × 8 bytes)."),
+             tip=f"Total samples acquired since ▶ Start "
+                 f"(blocks of {block_s:g} s at {fs:g} Hz)."),
+        cell("Vectors", f"{tc.n_samples}",
+             tip="Speed points captured for Bode/Cascade. Only grows during "
+                 "a transient (startup/coastdown); at steady state it stays at 1."),
+        cell("Saved", f"{saved}",
+             tip="Waveforms saved to disk with the 💾 Save button."),
+        cell("Size", f"{size_mb:.2f} MB",
+             tip="Memory used by the current window in RAM (channels × samples × 8 bytes)."),
     ]
     st.markdown(
         f'<div style="display:flex;flex-wrap:wrap;align-items:stretch;gap:8px 0;'
@@ -996,8 +996,8 @@ def _plot_waveform(chans, fs: float, rpm: Optional[float] = None,
     ctx = ""
     if rpm:
         ctx = (f'<span style="color:#c7d6ea">RPM <b style="color:#fff">{rpm:.0f}</b> · '
-               f'Estado <b style="color:{state_col}">{state_lbl}</b> · '
-               f'Ventana <b style="color:#fff">{vent_s:.1f} s</b></span>')
+               f'State <b style="color:{state_col}">{state_lbl}</b> · '
+               f'Window <b style="color:#fff">{vent_s:.1f} s</b></span>')
     st.markdown(
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
         f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
@@ -1174,7 +1174,7 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
         f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
         f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
-        f'<span><b>{machine}</b> · Espectro · {chlabel}'
+        f'<span><b>{machine}</b> · Spectrum · {chlabel}'
         + (f' · <span style="color:#c7d6ea">{rpm:.0f} rpm</span>' if rpm else '') + '</span>'
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
@@ -1204,7 +1204,7 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
                          showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS,
                          showspikes=True, spikecolor="#94a3b8", spikemode="across",
                          spikesnap="cursor", row=r, col=1,
-                         title_text=(f"Frecuencia ({p['unit']})" if r == rows_n else None))
+                         title_text=(f"Frequency ({p['unit']})" if r == rows_n else None))
         # Caja de ARMÓNICOS por canal (arriba-derecha del subplot).
         _sfx = "" if r == 1 else str(r)
         hrows = [_kv("O/All", f"{p['ov']:.3g} {p['u']}")]
@@ -1225,7 +1225,7 @@ def _plot_spectrum(chans, fs: float, rpm: Optional[float] = None) -> None:
                       hovermode="x", showlegend=False)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
     _norms = ", ".join(dict.fromkeys(f"{p['ch'].name}: {p['uconv']} ({p['norm']})" for p in prepared))
-    st.caption(f"Amplitud según norma — {_norms}.")
+    st.caption(f"Amplitude by standard — {_norms}.")
 
 
 def _orbit_dir_arrow(fig, rotation: str, R: float, cx0: float = 0.0, cy0: float = 0.0) -> None:
@@ -1262,7 +1262,7 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
     con una curva (locus por vuelta) para análisis."""
     import plotly.graph_objects as go
     if len(vib_channels) < 2:
-        st.info("La órbita necesita un par X/Y. Asocialo en **Configuración → Par X/Y**.")
+        st.info("The orbit needs an X/Y pair. Associate one in **Setup → X/Y pair**.")
         return
     name_to = {ch.name: (i, ch) for i, ch in vib_channels}
     saved = st.session_state.get("rm_pairs_saved") or []
@@ -1271,7 +1271,7 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
         names = [ch.name for _, ch in vib_channels]
         valid = [(names[i], names[i + 1]) for i in range(0, len(vib_channels) - 1, 2)]
     if not valid:
-        st.info("La órbita necesita un par X/Y. Asocialo en **Configuración → Par X/Y**.")
+        st.info("The orbit needs an X/Y pair. Associate one in **Setup → X/Y pair**.")
         return
 
     labels = [f"{a}–{b}" for a, b in valid]
@@ -1286,18 +1286,18 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
         st.session_state.setdefault("rm_orbit_pairs", [labels[0]])
         st.session_state["rm_orbit_pairs"] = [s for s in st.session_state["rm_orbit_pairs"]
                                               if s in labels] or [labels[0]]
-        sels = st.multiselect("Pares", labels, key="rm_orbit_pairs",
-                              label_visibility="collapsed", placeholder="Órbitas…")
-        fmode = st.radio("Filtro", ["Directa", "1X", "2X"], horizontal=True,
+        sels = st.multiselect("Pairs", labels, key="rm_orbit_pairs",
+                              label_visibility="collapsed", placeholder="Orbits…")
+        fmode = st.radio("Filter", ["Direct", "1X", "2X"], horizontal=True,
                          key="rm_orbit_filter", label_visibility="collapsed",
-                         help="Directa = onda completa. 1X/2X = órbita filtrada al orden (elipse).")
+                         help="Directa = full waveform. 1X/2X = orbit filtered to the order (ellipse).")
         n_rev = 12
-        if fmode == "Directa":
-            n_rev = int(st.number_input("Vueltas", 3, 60, 12, step=1, key="rm_orbit_revs",
+        if fmode == "Direct":
+            n_rev = int(st.number_input("Revolutions", 3, 60, 12, step=1, key="rm_orbit_revs",
                                         label_visibility="collapsed"))
-        kphline = st.toggle("Unir keyphasor", key="rm_orbit_kphline",
-                            help="Une los keyphasor vuelta a vuelta (locus). Visible en "
-                                 "transitorios; en régimen estable coinciden en un punto.")
+        kphline = st.toggle("Link keyphasors", key="rm_orbit_kphline",
+                            help="Links the keyphasors revolution to revolution (locus). Visible in "
+                                 "transients; at steady state they coincide in one point.")
     sels = sels or [labels[0]]
 
     def _prep(pair_lbl):
@@ -1315,7 +1315,7 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
         x = snap[xi] * 1000.0 / chx.sensitivity_mv_per_eu
         x, y = x - np.mean(x), y - np.mean(y)
         kx = ky = vec = None
-        if fmode == "Directa" or not f1:
+        if fmode == "Direct" or not f1:
             if f1:
                 n_show = min(len(x), max(1, int(round(n_rev * (1.0 / f1) * fs))))
                 x, y = x[-n_show:], y[-n_show:]
@@ -1378,7 +1378,7 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
         f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
         f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
-        f'<span><b>{machine}</b> · Órbita · <span style="color:#c7d6ea">{fmode}</span>'
+        f'<span><b>{machine}</b> · Orbit · <span style="color:#c7d6ea">{fmode}</span>'
         + (f' · <span style="color:#c7d6ea">{rpm:.0f} rpm</span>' if rpm else '') + '</span>'
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
@@ -1456,7 +1456,7 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
 def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float],
                   orders: Optional[list] = None) -> None:
     if not rpm:
-        st.warning("Sin keyphasor no hay vectores. Activá el keyphasor en Configuración.")
+        st.warning("Without a keyphasor there are no vectors. Enable the keyphasor in Setup.")
         return
     orders = sorted(orders or [1.0, 2.0])
     f1 = rpm / 60.0
@@ -1470,8 +1470,8 @@ def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float
             row[f"{o:g}X °"] = round(phase, 1)
         rows.append(row)
     st.dataframe(rows, use_container_width=True, hide_index=True)
-    st.caption(f"Vectores síncronos a {', '.join(f'{o:g}X' for o in orders)} "
-               f"(referenciados al keyphasor). 1X = {f1:.1f} Hz.")
+    st.caption(f"Synchronous vectors at {', '.join(f'{o:g}X' for o in orders)} "
+               f"(referenced to the keyphasor). 1X = {f1:.1f} Hz.")
 
 
 _FAMILY_ES = {"proximity": "Desplazamiento", "velometer": "Velocidad", "accelerometer": "Aceleración"}
@@ -1561,7 +1561,7 @@ def _op_margin(rr, crit_idx, af_by_crit, op_rpm):
     Devuelve dict(status, msg, color) o None si no aplica."""
     if op_rpm <= 0 or not len(crit_idx):
         return None
-    _ORD = ["1ª", "2ª", "3ª", "4ª", "5ª"]
+    _ORD = ["1st", "2nd", "3rd", "4th", "5th"]
     j = min(crit_idx, key=lambda i: abs(rr[i] - op_rpm))
     ncj, afj = float(rr[j]), af_by_crit.get(j)
     sm = abs(ncj - op_rpm) / op_rpm * 100.0
@@ -1573,18 +1573,18 @@ def _op_margin(rr, crit_idx, af_by_crit, op_rpm):
     af_txt = f", AF {afj:.1f}" if afj else ""
     if sm < 3.0:
         return dict(status="res", color="#dc2626",
-                    msg=(f"⚠ **EN RESONANCIA** — la velocidad de operación ({op_rpm:.0f} rpm) coincide "
-                         f"con la {ordl} crítica ({ncj:.0f} rpm{af_txt}). Amplitud y fase muy sensibles; "
-                         f"**API 684 no admite operar sobre una crítica**."))
+                    msg=(f"⚠ **AT RESONANCE** — the operating speed ({op_rpm:.0f} rpm) coincides "
+                         f"with the {ordl} critical ({ncj:.0f} rpm{af_txt}). Amplitude and phase very sensitive; "
+                         f"**API 684 does not allow operating on a critical**."))
     if needs and sm < req:
         return dict(status="margin", color="#dc2626",
-                    msg=(f"⚠ **Margen insuficiente** — operás a **{sm:.0f}%** de la {ordl} crítica "
-                         f"({ncj:.0f} rpm{af_txt}); API 684 pide **≥{req:.0f}%** "
-                         f"({'crítica por debajo' if below else 'crítica por encima'}) para modos "
-                         f"poco amortiguados (AF≥2.5). Riesgo de amplitudes altas."))
+                    msg=(f"⚠ **Insufficient margin** — operating at **{sm:.0f}%** of the {ordl} critical "
+                         f"({ncj:.0f} rpm{af_txt}); API 684 requires **≥{req:.0f}%** "
+                         f"({'critical below' if below else 'critical above'}) for "
+                         f"lightly damped modes (AF≥2.5). Risk of high amplitudes."))
     return dict(status="ok", color="#16a34a",
-                msg=(f"✓ **Margen de separación {sm:.0f}%** a la {ordl} crítica ({ncj:.0f} rpm) — "
-                     f"cumple API 684 (≥{req:.0f}%)."))
+                msg=(f"✓ **Separation margin {sm:.0f}%** to the {ordl} critical ({ncj:.0f} rpm) — "
+                     f"meets API 684 (≥{req:.0f}%)."))
 
 
 def _cascade_diagnosis(rpms, freqs, mat, crit_rpms):
@@ -1594,9 +1594,9 @@ def _cascade_diagnosis(rpms, freqs, mat, crit_rpms):
     (roce/holgura). Devuelve lista de (nivel, título, detalle)."""
     out = []
     for nc in crit_rpms:
-        out.append(("info", f"Velocidad crítica ≈ {nc:.0f} rpm",
-                    "Resonancia de un modo de flexión del rotor (se amplifica el 1X). "
-                    "Verificar margen de separación (API 684)."))
+        out.append(("info", f"Critical speed ≈ {nc:.0f} rpm",
+                    "Resonance of a rotor bending mode (the 1X is amplified). "
+                    "Check the separation margin (API 684)."))
     if not len(rpms) or freqs is None or not len(freqs):
         return out
     df = float(freqs[1] - freqs[0]) if len(freqs) > 1 else 1.0
@@ -1626,25 +1626,25 @@ def _cascade_diagnosis(rpms, freqs, mat, crit_rpms):
     o_cv = float(np.std(orders) / (np.mean(orders) + 1e-9))   # ~0 = orden fijo (whirl/½X)
     near_crit = bool(crit_rpms) and any(abs(np.mean(ffreq) * 60.0 - nc) < 0.18 * nc for nc in crit_rpms)
     if f_cv < 0.14 and o_cv > 0.18 and near_crit:
-        out.append(("danger", "⚠ OIL WHIP (latigazo de aceite)",
-                    f"Vibración subsíncrona ENGANCHADA a una frecuencia natural (~{np.mean(ffreq):.0f} Hz "
-                    f"≈ 1ª crítica): se queda FIJA mientras sube la velocidad. Inestabilidad de la "
-                    f"película de aceite **severa y destructiva** (API 684) — actuar (carga, claro, "
-                    f"tipo de cojinete)."))
+        out.append(("danger", "⚠ OIL WHIP",
+                    f"Subsynchronous vibration LOCKED to a natural frequency (~{np.mean(ffreq):.0f} Hz "
+                    f"≈ 1st critical): it stays FIXED as speed increases. **Severe and destructive** "
+                    f"oil-film instability (API 684) — act (load, clearance, "
+                    f"bearing type)."))
     elif 0.35 <= mo <= 0.49 and o_cv < 0.16:
-        out.append(("danger", "⚠ OIL WHIRL (remolino de aceite)",
-                    f"Vibración subsíncrona a **~{mo:.2f}X** que SIGUE la velocidad (frecuencia = "
-                    f"~{mo:.2f}×rpm): inestabilidad de la película de aceite del cojinete (API 684). "
-                    f"Puede degenerar en oil whip al pasar ~2× la 1ª crítica."))
+        out.append(("danger", "⚠ OIL WHIRL",
+                    f"Subsynchronous vibration at **~{mo:.2f}X** that FOLLOWS speed (frequency = "
+                    f"~{mo:.2f}×rpm): oil-film instability of the bearing (API 684). "
+                    f"It can degenerate into oil whip past ~2× the 1st critical."))
     elif 0.47 <= mo <= 0.53 and o_cv < 0.14:
-        out.append(("warn", "Subarmónico ½X",
-                    f"Componente a **~0.5X** que sigue la velocidad → típico de **roce (rub)** o "
-                    f"**holgura mecánica**, NO película de aceite. Se diferencia del oil whirl "
-                    f"(que va en ~0.42–0.48X)."))
+        out.append(("warn", "½X subharmonic",
+                    f"Component at **~0.5X** that follows speed → typical of **rub** or "
+                    f"**mechanical looseness**, NOT oil film. Distinguished from oil whirl "
+                    f"(which runs at ~0.42–0.48X)."))
     else:
-        out.append(("warn", f"Subsíncrono ~{mo:.2f}X",
-                    "Hay energía por debajo del 1X; vigilar su evolución con la velocidad para "
-                    "clasificar (whirl sigue el rpm; whip se fija en una natural)."))
+        out.append(("warn", f"Subsynchronous ~{mo:.2f}X",
+                    "There is energy below 1X; watch how it evolves with speed to "
+                    "classify it (whirl follows rpm; whip fixes on a natural)."))
     return out
 
 
@@ -1673,7 +1673,7 @@ def _plot_trend(snap: np.ndarray, vib_channels, type_map: dict,
     name_to_ch = {ch.name: ch for _, ch in vib_channels}
     all_names = list(name_to_ch.keys())
     if not all_names:
-        st.info("No hay canales de vibración.")
+        st.info("No vibration channels.")
         return
     machine = st.session_state.get("rm_machine_name", "—")
     alarms = st.session_state.get("rm_alarms_by_name") or {}
@@ -1696,12 +1696,12 @@ def _plot_trend(snap: np.ndarray, vib_channels, type_map: dict,
     als = [ref[1]] if ref[1] > 0 else []
     dgs = [ref[2]] if ref[2] > 0 else []
 
-    # Ventana de tiempo. "Actual" = período en vivo de 15 min (sin selector).
-    _unit = {"Horas": timedelta(hours=1), "Días": timedelta(days=1),
-             "Semanas": timedelta(weeks=1), "Meses": timedelta(days=30)}
-    _dfl = {"Horas": 6, "Días": 7, "Semanas": 4, "Meses": 6}
-    sel = st.session_state.get("rm_trend_win", "Actual")
-    if sel == "Actual":
+    # Ventana de tiempo. "Now" = período en vivo de 15 min (sin selector).
+    _unit = {"Hours": timedelta(hours=1), "Days": timedelta(days=1),
+             "Weeks": timedelta(weeks=1), "Months": timedelta(days=30)}
+    _dfl = {"Hours": 6, "Days": 7, "Weeks": 4, "Months": 6}
+    sel = st.session_state.get("rm_trend_win", "Now")
+    if sel == "Now":
         delta = timedelta(minutes=15)
     else:
         qty = int(st.session_state.get(f"rm_trend_qty_{sel}", _dfl.get(sel, 1)) or 1)
@@ -1715,7 +1715,7 @@ def _plot_trend(snap: np.ndarray, vib_channels, type_map: dict,
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
         f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
         f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
-        f'<span><b>{machine}</b> · Tendencia · {", ".join(plotted)}'
+        f'<span><b>{machine}</b> · Trend · {", ".join(plotted)}'
         + (f' · <span style="color:#c7d6ea">{rpm:.0f} rpm</span>' if rpm else '') + '</span>'
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
@@ -1724,7 +1724,7 @@ def _plot_trend(snap: np.ndarray, vib_channels, type_map: dict,
         fig.add_trace(go.Scatter(
             x=xs, y=[h[1].get(ch.name) for h in hist], mode="lines", name=ch.name,
             line=dict(width=1.6, color=_TREND_BRIGHT[k % len(_TREND_BRIGHT)])))
-    for lvl, col, lbl in [(min(als) if als else None, "#f59e0b", "Alarma"),
+    for lvl, col, lbl in [(min(als) if als else None, "#f59e0b", "Alarm"),
                           (min(dgs) if dgs else None, "#e11d48", "Danger")]:
         if lvl:
             fig.add_hline(y=lvl, line=dict(color=col, width=1.4),
@@ -1742,7 +1742,7 @@ def _plot_trend(snap: np.ndarray, vib_channels, type_map: dict,
                                   font=dict(size=11), bgcolor="rgba(255,255,255,0)"))
     fig.update_xaxes(type="date", range=[now - delta, now], showgrid=True, gridcolor=_S1_GRID,
                      showline=True, linecolor=_S1_AXIS, ticks="outside", tickcolor=_S1_AXIS)
-    if sel != "Actual":
+    if sel != "Now":
         fig.update_xaxes(rangeslider=dict(visible=True, thickness=0.07, bgcolor="#f6f8fc",
                                           bordercolor="#d7deea", borderwidth=1))
     fig.update_yaxes(range=[0, ymax], rangemode="tozero", showgrid=True, gridcolor=_S1_GRID,
@@ -1750,20 +1750,20 @@ def _plot_trend(snap: np.ndarray, vib_channels, type_map: dict,
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
     if excluded:
-        st.caption(f"⚠ No se pueden mezclar: **{', '.join(excluded)}** tiene distinta "
-                   f"unidad o alarma/danger que **{plotted[0]}**. Se quitó de la selección.")
+        st.caption(f"⚠ Cannot mix: **{', '.join(excluded)}** has a different "
+                   f"unit or alarm/danger than **{plotted[0]}**. Removed from the selection.")
 
     # Controles en UNA fila abajo: canales + rango + cantidad (compactos).
     with st.container(key="rm_trend_ctrls", horizontal=True,
                       vertical_alignment="center", gap="medium"):
-        st.multiselect("Canales", all_names, key="rm_tr_chans",
-                       label_visibility="collapsed", placeholder="Canales…")
-        st.radio("Rango", ["Actual"] + list(_unit.keys()), horizontal=True,
+        st.multiselect("Channels", all_names, key="rm_tr_chans",
+                       label_visibility="collapsed", placeholder="Channels…")
+        st.radio("Range", ["Now"] + list(_unit.keys()), horizontal=True,
                  key="rm_trend_win", label_visibility="collapsed")
-        if sel != "Actual":
+        if sel != "Now":
             _k = f"rm_trend_qty_{sel}"
             st.session_state.setdefault(_k, _dfl.get(sel, 1))
-            st.number_input("cantidad", 1, 999, step=1, key=_k,
+            st.number_input("count", 1, 999, step=1, key=_k,
                             label_visibility="collapsed")
 
 
@@ -1775,9 +1775,9 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
     import plotly.graph_objects as go
     rpms, amp, phase = tc.bode(channel)
     if len(rpms) < 2:
-        st.info("El Bode se llena durante un **transitorio**. En **Fuente y parámetros** "
-                "elegí perfil *runup* o *coastdown*, pulsá ▶ Live, y verás la curva "
-                "construirse al pasar por la velocidad crítica.")
+        st.info("The Bode fills up during a **transient**. In **Source and parameters** "
+                "pick a *runup* or *coastdown* profile, press ▶ Live, and you will see the curve "
+                "build up as it passes through the critical speed.")
         return
 
     tmap = st.session_state.get("rm_type_by_name") or {}
@@ -1791,23 +1791,23 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
     lo_rpm, hi_rpm = float(rpms.min()), float(rpms.max())
     _op_nominal = float(st.session_state.get("rm_machine_rpm", 0) or 0)
     with st.container(key="rm_bode_ctrls", horizontal=True, vertical_alignment="center", gap="medium"):
-        comp = st.toggle("Compensar slow-roll", key="rm_bode_comp",
-                         help="Resta el vector 1X de slow-roll (runout mecánico + eléctrico) a "
-                              "TODOS los puntos → aísla la respuesta dinámica real. Práctica "
-                              "estándar API 684 / API 670. Elegí la velocidad de slow-roll "
-                              "(típico < 10% de la 1ª crítica, con el eje casi rígido).")
+        comp = st.toggle("Compensate slow-roll", key="rm_bode_comp",
+                         help="Subtracts the slow-roll 1X vector (mechanical + electrical runout) from "
+                              "ALL points → isolates the real dynamic response. Standard "
+                              "API 684 / API 670 practice. Pick the slow-roll speed "
+                              "(typically < 10% of the 1st critical, with the shaft nearly rigid).")
         sr_rpm = None
         if comp:
-            sr_rpm = st.number_input("Vel. slow-roll (rpm)", int(lo_rpm), int(hi_rpm),
+            sr_rpm = st.number_input("Slow-roll speed (rpm)", int(lo_rpm), int(hi_rpm),
                                      int(round(lo_rpm)), step=60, key="rm_bode_srrpm",
-                                     help="Velocidad de referencia del vector slow-roll.")
+                                     help="Reference speed of the slow-roll vector.")
         # Velocidad de operación: arranca con la nominal de la config, editable
         # para evaluar el margen de separación a otra velocidad.
         op_rpm = float(st.number_input(
-            "Vel. operación (rpm)", 0, 60000, int(round(_op_nominal)) if _op_nominal > 0 else 3600,
+            "Operating speed (rpm)", 0, 60000, int(round(_op_nominal)) if _op_nominal > 0 else 3600,
             step=60, key="rm_bode_oprpm",
-            help="Velocidad de operación (nominal). Por defecto la de la config; cambiala para "
-                 "evaluar el margen de separación a otra velocidad. 0 = ocultar."))
+            help="Operating speed (nominal). Defaults to the config value; change it to "
+                 "evaluate the separation margin at another speed. 0 = hide."))
 
     # Vector complejo 1X → compensación slow-roll (resta el vector de referencia).
     z = amp * np.exp(1j * np.radians(phase))
@@ -1868,14 +1868,14 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
             crit_idx.append(i)
     # Quedarse con los más prominentes, pero ETIQUETAR por orden de rpm (1ª, 2ª…).
     crit_idx = sorted(sorted(crit_idx, key=lambda i: -aa[i])[:4], key=lambda i: rr[i]) or [i_pk]
-    _ORD = ["1ª", "2ª", "3ª", "4ª", "5ª"]
+    _ORD = ["1st", "2nd", "3rd", "4th", "5th"]
     af_by_crit = {}
     for k, i in enumerate(crit_idx):
         af = _half_power_af(rr, aa, i)
         af_by_crit[i] = af[0] if af else None
         for r in (1, 2):
             fig.add_vline(x=float(rr[i]), line=dict(color="#e26d6d", width=1, dash="dot"), row=r, col=1)
-        lbl = f"{_ORD[k] if k < len(_ORD) else str(k+1)} crítica ≈ {rr[i]:.0f} rpm"
+        lbl = f"{_ORD[k] if k < len(_ORD) else str(k+1)} critical ≈ {rr[i]:.0f} rpm"
         if af:
             lbl += f" · AF {af[0]:.1f}"
             # Banda de media potencia (visual del método API 684).
@@ -1896,23 +1896,23 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
         req = 15.0 if below else 20.0                    # API 617/684: 15% abajo, 20% arriba
         needs_margin = (afj is None) or (afj >= 2.5)     # margen exigido si AF ≥ 2.5
         oi = crit_idx.index(j)
-        ordl = _ORD[oi] if oi < len(_ORD) else f"{oi+1}ª"
+        ordl = _ORD[oi] if oi < len(_ORD) else f"{oi+1}th"
         af_txt = f", AF {afj:.1f}" if afj else ""
         if sm < 3.0:
             op_status = "res"
-            op_msg = (f"⚠ **EN RESONANCIA** — la velocidad de operación ({op_rpm:.0f} rpm) coincide "
-                      f"con la {ordl} crítica ({ncj:.0f} rpm{af_txt}). Amplitud y fase muy "
-                      f"sensibles a cualquier cambio; **API 684 no admite operar sobre una crítica**.")
+            op_msg = (f"⚠ **AT RESONANCE** — the operating speed ({op_rpm:.0f} rpm) coincides "
+                      f"with the {ordl} critical ({ncj:.0f} rpm{af_txt}). Amplitude and phase very "
+                      f"sensitive to any change; **API 684 does not allow operating on a critical**.")
         elif needs_margin and sm < req:
             op_status = "margin"
-            op_msg = (f"⚠ **Margen insuficiente** — operás a **{sm:.0f}%** de la {ordl} crítica "
-                      f"({ncj:.0f} rpm{af_txt}); API 684 pide **≥{req:.0f}%** "
-                      f"({'crítica por debajo' if below else 'crítica por encima'}) para modos "
-                      f"poco amortiguados (AF≥2.5). Riesgo de amplitudes altas cerca de resonancia.")
+            op_msg = (f"⚠ **Insufficient margin** — operating at **{sm:.0f}%** of the {ordl} critical "
+                      f"({ncj:.0f} rpm{af_txt}); API 684 requires **≥{req:.0f}%** "
+                      f"({'critical below' if below else 'critical above'}) for "
+                      f"lightly damped modes (AF≥2.5). Risk of high amplitudes near resonance.")
         else:
             op_status = "ok"
-            op_msg = (f"✓ **Margen de separación {sm:.0f}%** a la {ordl} crítica ({ncj:.0f} rpm) — "
-                      f"cumple API 684 (≥{req:.0f}%).")
+            op_msg = (f"✓ **Separation margin {sm:.0f}%** to the {ordl} critical ({ncj:.0f} rpm) — "
+                      f"meets API 684 (≥{req:.0f}%).")
     op_col = "#dc2626" if op_status in ("res", "margin") else "#16a34a"
     if op_rpm > 0 and lo_rpm <= op_rpm <= hi_rpm:
         _bad = op_status in ("res", "margin")
@@ -1924,7 +1924,7 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
                            font=dict(size=9.5, color=op_col))
 
     ymax = _nice_top(a_pk * 1.15) if a_pk > 0 else 1.0
-    fig.update_yaxes(title_text="Fase 1X (°)", autorange="reversed", dtick=90, row=1, col=1,
+    fig.update_yaxes(title_text="Phase 1X (°)", autorange="reversed", dtick=90, row=1, col=1,
                      showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
                      ticks="outside", tickcolor=_S1_AXIS, zeroline=False)
     fig.update_yaxes(title_text=f"1X ({uu})", range=[0, ymax], row=2, col=1,
@@ -1958,9 +1958,9 @@ def _plot_bode(tc: TransientCapture, channel: str, order: int = 1) -> None:
         st.error(op_msg)
     elif op_status == "ok":
         st.success(op_msg)
-    st.caption("**High spot** = fase del pico (dónde el eje llega más cerca de la sonda). "
-               "Bajo la 1ª crítica, high spot ≈ **heavy spot** (desbalance); en la crítica giran "
-               "~90°, encima ~180° (API 684). **AF** = factor de amplificación por media potencia.")
+    st.caption("**High spot** = phase of the peak (where the shaft comes closest to the probe). "
+               "Below the 1st critical, high spot ≈ **heavy spot** (unbalance); at the critical they turn "
+               "~90°, above ~180° (API 684). **AF** = amplification factor by half power.")
 
 
 def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> None:
@@ -1970,8 +1970,8 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
     import plotly.graph_objects as go
     rpms, freqs, mat = tc.cascade(channel)
     if len(rpms) < 2:
-        st.info("La cascada se llena durante un **transitorio** (runup/coastdown). "
-                "Elegí el perfil en **Fuente y parámetros** y pulsá ▶ Live.")
+        st.info("The cascade fills up during a **transient** (runup/coastdown). "
+                "Pick the profile in **Source and parameters** and press ▶ Live.")
         return
     tmap = st.session_state.get("rm_type_by_name") or {}
     conv, norm, k0, _krms = _amp_conv(tmap.get(channel, "proximity"))
@@ -1984,17 +1984,17 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
         f'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;'
         f'gap:4px 18px;padding:7px 12px;background:{_S1_TITLE};border-radius:8px 8px 0 0;color:#fff;'
         f'font-size:12px;font-family:Arial,Helvetica,sans-serif">'
-        f'<span><b>{machine}</b> · {channel} · Cascada · '
+        f'<span><b>{machine}</b> · {channel} · Cascade · '
         f'<span style="color:#c7d6ea">{rpms.min():.0f}–{rpms.max():.0f} rpm</span></span>'
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
     # Unidad del eje de frecuencia: Hz (estructurales verticales), CPM, u Órdenes
     # (1X vertical — cómodo para seguir armónicos).
     with st.container(key="rm_casc_ctrls", horizontal=True, vertical_alignment="center", gap="medium"):
-        xmode = st.radio("Frecuencia", ["Hz", "CPM", "Órdenes"], horizontal=True,
+        xmode = st.radio("Frequency", ["Hz", "CPM", "Orders"], horizontal=True,
                          key="rm_casc_xunit", label_visibility="collapsed",
-                         help="Hz: resonancias estructurales quedan verticales. Órdenes: el 1X "
-                              "queda vertical (sigue el rpm).")
+                         help="Hz: structural resonances stay vertical. Órdenes: the 1X "
+                              "stays vertical (follows rpm).")
     mat = mat * k0                                   # amplitud en convención de norma
     fmax = float(freqs[-1]) if len(freqs) else 1.0
     # Submuestreo a ~60 espectros para el DIBUJO (más = mancha ilegible); el
@@ -2007,15 +2007,15 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
     peak = float(MM.max()) or 1.0
     scale = (span / max(1, len(rr))) * 1.7 / peak    # alto de cada espectro (en rpm)
 
-    if xmode == "Órdenes":
+    if xmode == "Orders":
         _xf = lambda fr, rp: fr * 60.0 / rp if rp > 0 else fr
-        xtitle, xhi = "Orden (× rpm)", 6.0
+        xtitle, xhi = "Order (× rpm)", 6.0
     elif xmode == "CPM":
         _xf = lambda fr, rp: fr * 60.0
-        xtitle, xhi = "Frecuencia (CPM)", fmax * 60.0
+        xtitle, xhi = "Frequency (CPM)", fmax * 60.0
     else:
         _xf = lambda fr, rp: fr
-        xtitle, xhi = "Frecuencia (Hz)", fmax
+        xtitle, xhi = "Frequency (Hz)", fmax
 
     fig = go.Figure()
     # Espectros apilados con HIDDEN-LINE: de atrás (alta rpm) a adelante (baja),
@@ -2035,7 +2035,7 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
     # Líneas de orden: diagonales en Hz/CPM, VERTICALES en Órdenes.
     for k, lbl, col in [(0.5, "½X", "#94a3b8"), (1.0, "1X", "#e26d6d"),
                         (2.0, "2X", "#e0982a"), (3.0, "3X", "#8b5cf6")]:
-        if xmode == "Órdenes":
+        if xmode == "Orders":
             if k > xhi:
                 continue
             fig.add_vline(x=k, line=dict(color=col, width=1, dash="dot"))
@@ -2069,15 +2069,15 @@ def _plot_cascade(tc: TransientCapture, channel: str, rpm: Optional[float]) -> N
                      showgrid=True, gridcolor=_S1_GRID, showline=True, linecolor=_S1_AXIS,
                      ticks="outside", tickcolor=_S1_AXIS)
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
-    st.caption(f"Cascada: cada traza es un espectro a su rpm (apilados). Las **diagonales** son las "
-               f"**órdenes** (½X, 1X, 2X, 3X): el pico que sube por **1X** es el desbalance/respuesta "
-               f"síncrona; energía en **½X** = inestabilidad (remolino/latigazo), en **2X** = "
-               f"desalineación. Amplitud en {uu.split()[-1] if uu else 'pp'} (API 670).")
+    st.caption(f"Cascade: each trace is a spectrum at its rpm (stacked). The **diagonals** are the "
+               f"**orders** (½X, 1X, 2X, 3X): the peak rising along **1X** is unbalance/synchronous "
+               f"response; energy at **½X** = instability (whirl/whip), at **2X** = "
+               f"misalignment. Amplitude in {uu.split()[-1] if uu else 'pp'} (API 670).")
 
     # Auto-diagnóstico (modos + inestabilidad de película con nombre propio).
     findings = _cascade_diagnosis(rpms, freqs, mat, crit_rpms)
     if findings:
-        st.markdown("**🔎 Auto-diagnóstico (API 684)**")
+        st.markdown("**🔎 Auto-diagnosis (API 684)**")
         for lvl, title, detail in findings:
             body = f"**{title}** — {detail}"
             if lvl == "danger":
@@ -2112,7 +2112,7 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
 
     # --- Estacionario: solo el punto actual ---
     if len(rpms) < 2:
-        _hdr(' · <span style="color:#c7d6ea">punto actual (corré un runup para el locus)</span>')
+        _hdr(' · <span style="color:#c7d6ea">current point (run a runup for the locus)</span>')
         fig = go.Figure()
         name_to = {ch.name: (i, ch) for i, ch in vib}
         if channel in name_to and rpm:
@@ -2133,17 +2133,17 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
     lo_rpm, hi_rpm = float(rpms.min()), float(rpms.max())
     _op_nominal = float(st.session_state.get("rm_machine_rpm", 0) or 0)
     with st.container(key="rm_polar_ctrls", horizontal=True, vertical_alignment="center", gap="medium"):
-        comp = st.toggle("Compensar slow-roll", key="rm_polar_comp",
-                         help="Resta el vector 1X de slow-roll (runout) a todo el locus → respuesta "
-                              "dinámica real. API 684 / API 670.")
+        comp = st.toggle("Compensate slow-roll", key="rm_polar_comp",
+                         help="Subtracts the slow-roll 1X vector (runout) from the whole locus → real "
+                              "dynamic response. API 684 / API 670.")
         sr_rpm = None
         if comp:
-            sr_rpm = st.number_input("Vel. slow-roll (rpm)", int(lo_rpm), int(hi_rpm),
+            sr_rpm = st.number_input("Slow-roll speed (rpm)", int(lo_rpm), int(hi_rpm),
                                      int(round(lo_rpm)), step=60, key="rm_polar_srrpm")
         op_rpm = float(st.number_input(
-            "Vel. operación (rpm)", 0, 60000, int(round(_op_nominal)) if _op_nominal > 0 else 3600,
+            "Operating speed (rpm)", 0, 60000, int(round(_op_nominal)) if _op_nominal > 0 else 3600,
             step=60, key="rm_polar_oprpm",
-            help="Velocidad de operación. Marca el punto en el locus y evalúa resonancia (API 684)."))
+            help="Operating speed. Marks the point on the locus and evaluates resonance (API 684)."))
 
     z = np.asarray(amp, float) * np.exp(1j * np.radians(phase))
     zref = 0.0 + 0.0j
@@ -2230,7 +2230,7 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
                   marker=dict(size=15, color="#0F1E3D", symbol="triangle-up", angle=90 - _tang),
                   hoverinfo="skip", showlegend=False, cliponaxis=False))
     fig.add_trace(go.Scatterpolar(r=[rmax * 1.15], theta=[(90 - rot0) / s], mode="text",
-                  text=[f"giro {rot_dir}"], textfont=dict(size=10, color="#0F1E3D"),
+                  text=[f"rotation {rot_dir}"], textfont=dict(size=10, color="#0F1E3D"),
                   hoverinfo="skip", showlegend=False, cliponaxis=False))
     fig.update_layout(height=560, margin=dict(l=30, r=30, t=10, b=20), showlegend=False,
                       paper_bgcolor="#ffffff", font=_S1_FONT,
@@ -2245,7 +2245,7 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
     _kv = (lambda k, v: f'<b style="color:{_S1_TITLE}">{k}</b> <i style="color:#2f6fb0">{v}</i>')
     af_main = _half_power_af(rpms, r, i_pk)
     box = [_kv("Ncrit", f"{rpms[i_pk]:.0f} rpm"), _kv("Amp", f"{r[i_pk]:.3g} {uu}"),
-           _kv("Fase", f"{th[i_pk]:.0f}°")]
+           _kv("Phase", f"{th[i_pk]:.0f}°")]
     if af_main:
         box.append(_kv("AF", f"{af_main[0]:.1f}"))
     fig.add_annotation(xref="paper", yref="paper", x=0.005, y=0.99, xanchor="left", yanchor="top",
@@ -2255,7 +2255,7 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
     # Nota de orientación física.
     fig.add_annotation(xref="paper", yref="paper", x=0.99, y=0.99, xanchor="right", yanchor="top",
                        showarrow=False,
-                       text=f"0° = sonda {channel} · fase contra el giro ({rot_dir})",
+                       text=f"0° = probe {channel} · phase against rotation ({rot_dir})",
                        font=dict(size=9.5, color="#64748b"))
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
 
@@ -2263,11 +2263,11 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
         st.error(op_stat["msg"])
     elif op_stat and op_stat["status"] == "ok":
         st.success(op_stat["msg"])
-    st.caption(f"Locus 1X orientado al **plano real de la sonda {channel}** (0° = su ángulo de "
-               f"montaje desde TDC) con la **fase creciendo en contra del sentido de giro** "
-               f"({rot_dir}) — igual que System1. El **lazo** marca la resonancia; el vector "
-               f"apunta al high spot. Amplitud radial en **{uu.split()[-1] if uu else 'pp'}** "
-               f"(API 670); slow-roll y operación por **API 684**.")
+    st.caption(f"1X locus oriented to the **real plane of probe {channel}** (0° = its mounting "
+               f"angle from TDC) with **phase growing against the direction of rotation** "
+               f"({rot_dir}) — just like System1. The **loop** marks the resonance; the vector "
+               f"points to the high spot. Radial amplitude in **{uu.split()[-1] if uu else 'pp'}** "
+               f"(API 670); slow-roll and operation per **API 684**.")
 
 
 def _plot_shaft_centerline(snap: np.ndarray, vib) -> None:
@@ -2277,7 +2277,7 @@ def _plot_shaft_centerline(snap: np.ndarray, vib) -> None:
     saved = st.session_state.get("rm_pairs_saved") or []
     valid = [(a, b) for a, b in saved if a in name_to and b in name_to]
     if not valid:
-        st.info("Configurá pares X/Y en **Configuración → Par X/Y** para el shaft centerline.")
+        st.info("Configure X/Y pairs in **Setup → X/Y pair** for the shaft centerline.")
         return
     fig = go.Figure()
     th = np.linspace(0, 2 * np.pi, 120)
@@ -2292,12 +2292,12 @@ def _plot_shaft_centerline(snap: np.ndarray, vib) -> None:
                                  textposition="top center", marker=dict(size=15, color="#2563eb")))
     fig.add_trace(go.Scatter(x=np.cos(th) * 0.01, y=np.sin(th) * 0.01, mode="lines",
                              line=dict(color="#e2e8f0"), hoverinfo="skip"))
-    fig.update_layout(height=440, title="Shaft Centerline (posición del eje)",
+    fig.update_layout(height=440, title="Shaft Centerline (shaft position)",
                       xaxis_title="X", yaxis_title="Y", showlegend=False,
                       yaxis=dict(scaleanchor="x", scaleratio=1))
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
-    st.caption("⚠ Requiere gap DC. Con canales AC-coupled la posición estática es ~0. "
-               "Para Shaft Centerline real se necesita el gap DC del proximitor.")
+    st.caption("⚠ Requires DC gap. With AC-coupled channels the static position is ~0. "
+               "For a real Shaft Centerline the proximitor's DC gap is needed.")
 
 
 def _hexlerp(c1: str, c2: str, t: float) -> str:
@@ -2314,7 +2314,7 @@ def _plot_waterfall(tc: TransientCapture, channel: str) -> None:
     import plotly.graph_objects as go
     rpms, freqs, mat = tc.cascade(channel)
     if len(rpms) < 2:
-        st.info("El Waterfall se llena en un **transitorio** (runup/coastdown). Corré uno en Monitoreo.")
+        st.info("The Waterfall fills up during a **transient** (runup/coastdown). Run one in Monitoreo.")
         return
     tmap = st.session_state.get("rm_type_by_name") or {}
     conv, norm, k0, _krms = _amp_conv(tmap.get(channel, "proximity"))
@@ -2332,7 +2332,7 @@ def _plot_waterfall(tc: TransientCapture, channel: str) -> None:
         f'<span style="color:#9fb3d1">🕒 {ts}</span></div>', unsafe_allow_html=True)
 
     with st.container(key="rm_wf3_ctrls", horizontal=True, vertical_alignment="center", gap="medium"):
-        xmode = st.radio("Frecuencia", ["Hz", "CPM", "Órdenes"], horizontal=True,
+        xmode = st.radio("Frequency", ["Hz", "CPM", "Orders"], horizontal=True,
                          key="rm_wf3_xunit", label_visibility="collapsed")
     mat = mat * k0
     fmax = float(freqs[-1]) if len(freqs) else 1.0
@@ -2340,15 +2340,15 @@ def _plot_waterfall(tc: TransientCapture, channel: str) -> None:
     idx = np.unique(np.linspace(0, n - 1, min(80, n)).round().astype(int))
     rr, MM = rpms[idx], mat[idx]
     tmin, tmax = float(rr[0]), float(rr[-1])
-    if xmode == "Órdenes":
+    if xmode == "Orders":
         _xf = lambda fr, rp: fr * 60.0 / rp if rp > 0 else fr
-        xtitle, xhi = "Orden (× rpm)", 6.0
+        xtitle, xhi = "Order (× rpm)", 6.0
     elif xmode == "CPM":
         _xf = lambda fr, rp: fr * 60.0
-        xtitle, xhi = "Frecuencia (CPM)", fmax * 60.0
+        xtitle, xhi = "Frequency (CPM)", fmax * 60.0
     else:
         _xf = lambda fr, rp: fr
-        xtitle, xhi = "Frecuencia (Hz)", fmax
+        xtitle, xhi = "Frequency (Hz)", fmax
 
     fig = go.Figure()
     for i in range(len(rr)):
@@ -2360,7 +2360,7 @@ def _plot_waterfall(tc: TransientCapture, channel: str) -> None:
             showlegend=False))
     # Líneas de orden en el piso (z=0).
     for k, lbl, col in [(1.0, "1X", "#e26d6d"), (2.0, "2X", "#e0982a"), (3.0, "3X", "#8b5cf6")]:
-        if xmode == "Órdenes":
+        if xmode == "Orders":
             if k > xhi:
                 continue
             fig.add_trace(go.Scatter3d(x=[k, k], y=[rr[0], rr[-1]], z=[0, 0], mode="lines",
@@ -2389,10 +2389,10 @@ def _plot_waterfall(tc: TransientCapture, channel: str) -> None:
                                       up=dict(x=0, y=0, z=1),
                                       center=dict(x=0, y=0, z=-0.12))))
     st.plotly_chart(fig, use_container_width=True, config=_PLOTLY_CFG)
-    st.caption(f"Waterfall 3D: cada traza = un espectro a su rpm (profundidad), color por velocidad. "
-               f"Las líneas del piso son las **órdenes**; el ridge que sube por **1X** = síncrono, "
-               f"lo **fijo en frecuencia** = estructural, lo **subsíncrono** = inestabilidad. "
-               f"Amplitud en {uu.split()[-1] if uu else 'pp'} (API 670). Arrastrá para rotar.")
+    st.caption(f"Waterfall 3D: each trace = a spectrum at its rpm (depth), colored by speed. "
+               f"The floor lines are the **orders**; the ridge rising along **1X** = synchronous, "
+               f"the **fixed in frequency** = structural, the **subsynchronous** = instability. "
+               f"Amplitude in {uu.split()[-1] if uu else 'pp'} (API 670). Drag to rotate.")
 
 
 def _save_snapshot(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]) -> None:
@@ -2405,7 +2405,7 @@ def _save_snapshot(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]) -> N
         meta = store.save_snapshot(agent.instance_id, snap, ch_meta, agent.sample_rate_hz,
                                    rpm=rpm, captured_at=datetime.now(timezone.utc).isoformat())
         st.session_state["rm_saved_count"] = int(st.session_state.get("rm_saved_count", 0)) + 1
-        st.success(f"💾 Guardado offline: {meta.snapshot_id} "
-                   f"({store.count(only_pending=True)} pendiente(s) de sync)")
+        st.success(f"💾 Saved offline: {meta.snapshot_id} "
+                   f"({store.count(only_pending=True)} pending sync)")
     except Exception as e:  # noqa: BLE001
-        st.error(f"No se pudo guardar: {type(e).__name__}: {e}")
+        st.error(f"Could not save: {type(e).__name__}: {e}")

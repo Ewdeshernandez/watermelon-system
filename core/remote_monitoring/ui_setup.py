@@ -46,7 +46,7 @@ _GRID_COLS = ["bnc_port", "point_label", "plane", "sensor_type",
 # =====================================================================
 def _init_machine_defaults() -> None:
     d = {
-        "rm_m_name": "Máquina ad-hoc", "rm_m_rpm": 3600.0,
+        "rm_m_name": "Ad-hoc machine", "rm_m_rpm": 3600.0,
         "rm_m_rpmin": 0.0, "rm_m_rpmax": 0.0, "rm_m_rot": "CCW",
         "rm_m_speed": "constant", "rm_m_brgtype": "plain", "rm_m_nbrg": 2,
         "rm_m_iso": "",
@@ -136,7 +136,7 @@ def _load_setup_into_state(name: str) -> None:
     if s is None:                       # no está local → buscar en la nube (rm_setups)
         s = cfg.load_setup_cloud(name)
     if s is None:
-        st.warning(f"No se pudo cargar '{name}'.")
+        st.warning(f"Could not load '{name}'.")
         return
     m = s.machine
     st.session_state["rm_m_name"] = m.name
@@ -151,7 +151,7 @@ def _load_setup_into_state(name: str) -> None:
     st.session_state["rm_setup_rows"] = [asdict(c) for c in s.channels]
     st.session_state["rm_acq"] = asdict(s.acquisition)
     st.session_state.pop("rm_edit_idx", None)
-    st.success(f"📂 Cargada: {m.name} · {len(s.channels)} canales.")
+    st.success(f"📂 Loaded: {m.name} · {len(s.channels)} channels.")
     st.rerun()
 
 
@@ -159,10 +159,10 @@ def render_setup() -> None:
     _init_machine_defaults()
     _inject_css()
 
-    st.markdown('<div class="rm-sec-head">1 · Máquina '
-                '<small>— tren (API 684)</small></div>', unsafe_allow_html=True)
-    st.caption("Cargá los datos de la máquina, o cargá una **configuración guardada** para "
-               "editarla o crear una nueva a partir de ésta.")
+    st.markdown('<div class="rm-sec-head">1 · Machine '
+                '<small>— train (API 684)</small></div>', unsafe_allow_html=True)
+    st.caption("Enter the machine data, or load a **saved configuration** to "
+               "edit it or create a new one based on it.")
 
     # --- Configuraciones GUARDADAS (local + nube) — cargar / borrar ---
     # Se unen las locales con las de la NUBE (rm_setups) para que aparezcan también
@@ -180,61 +180,61 @@ def render_setup() -> None:
         scol1, scol2, scol3 = st.columns([3, 1, 1])
         with scol1:
             _opts = ["—"] + [(f"☁ {n}" if n in _cloud_only else n) for n in _saved]
-            pick_raw = st.selectbox("📂 Cargar configuración guardada", _opts,
+            pick_raw = st.selectbox("📂 Load saved configuration", _opts,
                                     key="rm_load_pick",
-                                    help="Tus máquinas guardadas (local + nube ☁). ☁ = creadas en "
-                                         "el módulo de campo. Cargala, editala y re-guardá.")
+                                    help="Your saved machines (local + cloud ☁). ☁ = created in "
+                                         "the field module. Load it, edit it and re-save.")
             pick_s = pick_raw[1:].strip() if pick_raw.startswith("☁") else pick_raw
         with scol2:
             st.write(""); st.write("")
-            if st.button("📂 Cargar", use_container_width=True) and pick_s != "—":
+            if st.button("📂 Load", use_container_width=True) and pick_s != "—":
                 _load_setup_into_state(pick_s)
         with scol3:
             st.write(""); st.write("")
-            if st.button("🗑 Borrar", use_container_width=True) and pick_s != "—":
+            if st.button("🗑 Delete", use_container_width=True) and pick_s != "—":
                 cfg.delete_setup(pick_s)
                 st.session_state.pop("rm_load_pick", None)
                 st.rerun()
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        st.text_input("Nombre / tag", key="rm_m_name")
+        st.text_input("Name / tag", key="rm_m_name")
         st.number_input("RPM nominal", 0.0, 60000.0, key="rm_m_rpm", step=60.0)
     with c2:
-        st.number_input("RPM mín (rango)", 0.0, 60000.0, key="rm_m_rpmin", step=60.0)
-        st.number_input("RPM máx (rango)", 0.0, 60000.0, key="rm_m_rpmax", step=60.0)
+        st.number_input("RPM min (range)", 0.0, 60000.0, key="rm_m_rpmin", step=60.0)
+        st.number_input("RPM max (range)", 0.0, 60000.0, key="rm_m_rpmax", step=60.0)
     with c3:
-        st.radio("Sentido de giro", cfg.ROTATIONS, key="rm_m_rot", horizontal=True)
+        st.radio("Rotation direction", cfg.ROTATIONS, key="rm_m_rot", horizontal=True)
         st.radio("Speed control", cfg.SPEED_CONTROLS, key="rm_m_speed", horizontal=True,
-                 help="Variable habilita lógica de arranque/parada (transitorios).")
+                 help="Variable enables start/stop logic (transients).")
 
     c4, c5, c6 = st.columns(3)
     with c4:
-        st.selectbox("Tipo de cojinete", cfg.BEARING_TYPES, key="rm_m_brgtype")
+        st.selectbox("Bearing type", cfg.BEARING_TYPES, key="rm_m_brgtype")
     with c5:
-        st.number_input("Nº de cojinetes", 1, 16, key="rm_m_nbrg")
+        st.number_input("No. of bearings", 1, 16, key="rm_m_nbrg")
     with c6:
         if st.session_state.get("rm_m_iso"):
-            st.text_input("Norma ISO", key="rm_m_iso", disabled=True)
+            st.text_input("ISO standard", key="rm_m_iso", disabled=True)
 
     st.divider()
 
     # =================================================================
     # 2 · Canales
     # =================================================================
-    st.markdown('<div class="rm-sec-head">2 · Canales '
-                '<small>— BNC → punto de medición</small></div>', unsafe_allow_html=True)
+    st.markdown('<div class="rm-sec-head">2 · Channels '
+                '<small>— BNC → measurement point</small></div>', unsafe_allow_html=True)
 
     gcol1, gcol2 = st.columns([1, 3])
     with gcol1:
-        if st.button("🧩 Auto-generar layout", use_container_width=True,
-                     help="Genera pares X/Y por cojinete + keyphasor desde la máquina."):
+        if st.button("🧩 Auto-generate layout", use_container_width=True,
+                     help="Generates X/Y pairs per bearing + keyphasor from the machine."):
             machine = _machine_from_state()
             st.session_state["rm_setup_rows"] = [asdict(r) for r in cfg.auto_layout(machine)]
             st.rerun()
     with gcol2:
-        st.caption("Convención de ángulo (API 670): desde **TDC (arriba)**, "
-                   "**R** = horario, **L** = antihorario → 45°L + 45°R = 90°.")
+        st.caption("Angle convention (API 670): from **TDC (top)**, "
+                   "**R** = clockwise, **L** = counter-clockwise → 45°L + 45°R = 90°.")
 
     st.session_state.setdefault("rm_setup_rows", [])
 
@@ -246,7 +246,7 @@ def render_setup() -> None:
         _unit = st.session_state.get("rm_acq", {}).get("freq_unit", "cpm")
         st.markdown(_channels_html_table(row_objs, _bt, _unit), unsafe_allow_html=True)
     else:
-        st.info("Pulsá **🧩 Auto-generar layout** o **➕ Agregar canal** para empezar.")
+        st.info("Press **🧩 Auto-generate layout** or **➕ Add channel** to start.")
 
     # Editor maestro-detalle (form de propiedades del canal seleccionado)
     _render_channel_editor()
@@ -263,7 +263,7 @@ def render_setup() -> None:
     # =================================================================
     # 4 · Validación
     # =================================================================
-    st.markdown('<div class="rm-sec-head">4 · Validación '
+    st.markdown('<div class="rm-sec-head">4 · Validation '
                 '<small>— API 670 / ISO 20816</small></div>', unsafe_allow_html=True)
     machine = _machine_from_state()
     setup = cfg.AcqSetup(machine=machine, channels=rows, acquisition=train_acq,
@@ -283,16 +283,16 @@ def render_setup() -> None:
     scol1, scol2 = st.columns([1, 3])
     with scol1:
         can_save = n_err == 0 and len(setup.channels) > 0
-        if st.button("💾 Guardar configuración", type="primary",
+        if st.button("💾 Save configuration", type="primary",
                      use_container_width=True, disabled=not can_save):
             _save_and_activate(setup)
     with scol2:
         if n_err:
-            st.caption(f"Corregí los {n_err} error(es) antes de guardar.")
+            st.caption(f"Fix the {n_err} error(s) before saving.")
         elif n_warn:
-            st.caption(f"{n_warn} advertencia(s) — podés guardar igual, pero revisá.")
+            st.caption(f"{n_warn} warning(s) — you can still save, but review them.")
         else:
-            st.caption("Todo OK. Guardá y pasá al tab **Monitoreo** para adquirir.")
+            st.caption("All OK. Save and go to the **Monitoring** tab to acquire.")
 
 
 # =====================================================================
@@ -305,20 +305,20 @@ def _render_channel_editor() -> None:
     with ctrl[0]:
         if rows:
             idx = st.selectbox(
-                "Editar canal", list(range(len(rows))),
+                "Edit channel", list(range(len(rows))),
                 format_func=lambda i: f"BNC {rows[i].get('bnc_port', '?')} · {rows[i].get('point_label', '?')}",
                 key="rm_edit_idx")
         else:
-            st.caption("Sin canales — usá Auto-generar o Agregar.")
+            st.caption("No channels — use Auto-generate or Add.")
     with ctrl[1]:
         st.write(""); st.write("")
-        if st.button("➕ Agregar", use_container_width=True):
+        if st.button("➕ Add", use_container_width=True):
             nb = max([int(r.get("bnc_port", 0) or 0) for r in rows], default=0) + 1
             rows.append(asdict(cfg.ChannelRow(bnc_port=min(nb, 32), point_label=f"CH{nb}")))
             st.rerun()
     with ctrl[2]:
         st.write(""); st.write("")
-        if idx is not None and st.button("🗑 Eliminar", use_container_width=True):
+        if idx is not None and st.button("🗑 Delete", use_container_width=True):
             rows.pop(idx)
             st.session_state.pop("rm_edit_idx", None)
             st.rerun()
@@ -346,65 +346,65 @@ def _render_channel_form(idx: int) -> None:
 
     # st.form: editás libre y NADA se aplica hasta pulsar "Actualizar".
     with st.form(f"rm_chan_form_{idx}"):
-        st.markdown(f"**Editando:** `{row.get('point_label','?')}` — llená y pulsá "
-                    "**🔄 Actualizar** para subirlo a la tabla.")
-        st.caption("Identificación")
+        st.markdown(f"**Editing:** `{row.get('point_label','?')}` — fill it in and press "
+                    "**🔄 Update** to push it to the table.")
+        st.caption("Identification")
         c = st.columns(4)
-        c[0].text_input("Punto", value=row.get("point_label", ""), key=f"f_point_label_{idx}")
+        c[0].text_input("Point", value=row.get("point_label", ""), key=f"f_point_label_{idx}")
         _num(c[1], "BNC", "bnc_port", 1, 32, 1, as_int=True)
-        _num(c[2], "Cojinete", "plane", 0, 16, 1, as_int=True, help="0 = sin cojinete")
-        c[3].checkbox("Activo", value=bool(row.get("active", True)), key=f"f_active_{idx}")
+        _num(c[2], "Bearing", "plane", 0, 16, 1, as_int=True, help="0 = no bearing")
+        c[3].checkbox("Active", value=bool(row.get("active", True)), key=f"f_active_{idx}")
 
-        st.caption("Transductor")
+        st.caption("Transducer")
         c = st.columns(4)
         cur_t = row.get("sensor_type", "proximity")
-        c[0].selectbox("Tipo", cfg.SENSOR_TYPES,
+        c[0].selectbox("Type", cfg.SENSOR_TYPES,
                        index=cfg.SENSOR_TYPES.index(cur_t) if cur_t in cfg.SENSOR_TYPES else 0,
                        key=f"f_sensor_type_{idx}")
-        _num(c[1], "Sensib. mV/EU", "sensitivity_mv_per_eu", 0.0, 5000.0, 1.0)
-        _sel(c[2], "Unidad", "unit_native", cfg.ALL_UNITS, help="Se ajusta al tipo al Actualizar.")
+        _num(c[1], "Sensitivity mV/EU", "sensitivity_mv_per_eu", 0.0, 5000.0, 1.0)
+        _sel(c[2], "Unit", "unit_native", cfg.ALL_UNITS, help="Adjusts to the type on Update.")
         _sel(c[3], "Coupling", "coupling", cfg.COUPLINGS)
         c = st.columns(4)
-        _num(c[0], "Full-scale (EU)", "full_scale", 0.0, 100000.0, 1.0, help="Rango de medición. 0 = auto")
+        _num(c[0], "Full-scale (EU)", "full_scale", 0.0, 100000.0, 1.0, help="Measurement range. 0 = auto")
         if not is_kph:
             _num(c[1], "Gap/Bias (V)", "gap_bias_v", -24.0, 24.0, 0.1,
-                 help="Voltaje DC de la sonda (prox ~ -9 a -11 V)")
+                 help="Probe DC voltage (prox ~ -9 to -11 V)")
 
-        st.caption("Orientación (TDC arriba, R horario, L antihorario)")
+        st.caption("Orientation (TDC top, R clockwise, L counter-clockwise)")
         c = st.columns(4)
-        _num(c[0], "Ángulo °", "angle_deg", 0.0, 360.0, 5.0)
-        _sel(c[1], "Lado", "side", ["", "L", "R"])
+        _num(c[0], "Angle °", "angle_deg", 0.0, 360.0, 5.0)
+        _sel(c[1], "Side", "side", ["", "L", "R"])
 
         if is_kph:
             st.caption("Keyphasor")
             c = st.columns(4)
-            _num(c[0], "Eventos/rev", "events_per_rev", 1, 360, 1, as_int=True)
-            _num(c[1], "Umbral disparo (V)", "trigger_v", -24.0, 24.0, 0.5)
-            _sel(c[2], "Tipo de muesca", "notch_type", cfg.NOTCH_TYPES)
+            _num(c[0], "Events/rev", "events_per_rev", 1, 360, 1, as_int=True)
+            _num(c[1], "Trigger threshold (V)", "trigger_v", -24.0, 24.0, 0.5)
+            _sel(c[2], "Notch type", "notch_type", cfg.NOTCH_TYPES)
         else:
-            st.caption("Asociaciones (referencia de fase + par de órbita)")
+            st.caption("Associations (phase reference + orbit pair)")
             c = st.columns(4)
             kph_opts = [""] + [str(r.get("point_label", "")) for r in rows
                                if str(r.get("sensor_type", "")) == "keyphasor"]
             cur_k = row.get("keyphasor_ref", "")
-            c[0].selectbox("Keyphasor asociado", kph_opts,
+            c[0].selectbox("Associated keyphasor", kph_opts,
                            index=kph_opts.index(cur_k) if cur_k in kph_opts else 0,
                            key=f"f_keyphasor_ref_{idx}",
-                           help="Referencia de fase 1X. Un tren puede tener varios keyphasor.")
+                           help="1X phase reference. A train can have several keyphasors.")
             pair_opts = [""] + [str(r.get("point_label", "")) for j, r in enumerate(rows)
                                 if j != idx and str(r.get("sensor_type", "")) != "keyphasor"
                                 and int(r.get("plane", 0) or 0) == int(row.get("plane", 0) or 0)]
             cur_p = row.get("pair_ref", "")
-            c[1].selectbox("Par X/Y (órbita)", pair_opts,
+            c[1].selectbox("X/Y pair (orbit)", pair_opts,
                            index=pair_opts.index(cur_p) if cur_p in pair_opts else 0,
                            key=f"f_pair_ref_{idx}",
-                           help="Sensor ortogonal para la órbita, ej. 1XD ↔ 1YD.")
-            st.caption("Alarmas (API 670)")
+                           help="Orthogonal sensor for the orbit, e.g. 1XD ↔ 1YD.")
+            st.caption("Alarms (API 670)")
             c = st.columns(4)
             _num(c[0], "Alert", "alarm", 0.0, 100000.0, 0.1)
             _num(c[1], "Danger", "danger", 0.0, 100000.0, 0.1)
 
-        submitted = st.form_submit_button("🔄 Actualizar canal", type="primary",
+        submitted = st.form_submit_button("🔄 Update channel", type="primary",
                                           use_container_width=True)
     if submitted:
         _commit_channel_form(idx, is_kph)
@@ -450,13 +450,13 @@ def _commit_channel_form(idx: int, is_kph: bool) -> None:
 # =====================================================================
 # Parámetros de adquisición — general del tren + POR TIPO de sensor
 # =====================================================================
-_TYPE_ES = {"proximity": "Proximidad", "velometer": "Velocidad", "accelerometer": "Acelerómetro"}
+_TYPE_ES = {"proximity": "Proximity", "velometer": "Velocity", "accelerometer": "Accelerometer"}
 
 
 def _render_acq_params(rows: List[cfg.ChannelRow]):
     """Devuelve (train_acq, acquisition_by_type)."""
-    st.markdown('<div class="rm-sec-head">3 · Parámetros de adquisición '
-                '<small>— general del tren + por tipo de sensor</small></div>',
+    st.markdown('<div class="rm-sec-head">3 · Acquisition parameters '
+                '<small>— train-wide + per sensor type</small></div>',
                 unsafe_allow_html=True)
 
     # Tipos espectrales presentes en la config (prox/vel/accel)
@@ -475,7 +475,7 @@ def _render_acq_params(rows: List[cfg.ChannelRow]):
     # Toggle de unidad FUERA del form → reconvierte el display en vivo.
     unit = a.get("freq_unit", "cpm")
     ufc = st.columns([1, 3])
-    unit = ufc[0].radio("Frecuencia en", cfg.FREQ_UNITS, horizontal=True,
+    unit = ufc[0].radio("Frequency in", cfg.FREQ_UNITS, horizontal=True,
                         index=cfg.FREQ_UNITS.index(unit) if unit in cfg.FREQ_UNITS else 0,
                         format_func=lambda u: u.upper(), key="rm_acq_funit")
     ul = cfg.freq_label(unit)
@@ -483,16 +483,16 @@ def _render_acq_params(rows: List[cfg.ChannelRow]):
     fmax_max = 2_400_000 if unit == "cpm" else 40_000
 
     with st.form("rm_acq_form"):
-        st.caption("General del tren")
+        st.caption("Train-wide")
         c = st.columns(3)
-        wmode = c[0].selectbox("Forma de onda", cfg.WAVEFORM_MODES,
+        wmode = c[0].selectbox("Waveform", cfg.WAVEFORM_MODES,
                                index=cfg.WAVEFORM_MODES.index(a.get("waveform_mode", "synchronous"))
                                if a.get("waveform_mode", "synchronous") in cfg.WAVEFORM_MODES else 0,
                                key="rm_acq_wmode",
-                               help="Síncrona (por revolución, bode/cascade) o asíncrona (Hz fijo)")
+                               help="Synchronous (per revolution, bode/cascade) or asynchronous (fixed Hz)")
         spr = c[1].number_input("Samples/rev (0=auto)", 0, 1024, int(a.get("samples_per_rev", 0)),
                                 key="rm_acq_spr")
-        orders = c[2].multiselect("Órdenes (×rpm)", cfg.COMMON_ORDERS,
+        orders = c[2].multiselect("Orders (×rpm)", cfg.COMMON_ORDERS,
                                   default=list(a.get("orders", [1.0, 2.0])),
                                   format_func=lambda o: f"{o:g}X", key="rm_acq_orders")
 
@@ -501,7 +501,7 @@ def _render_acq_params(rows: List[cfg.ChannelRow]):
         for t in present:
             e = bt[t]
             st.divider()
-            st.caption(f"📡 {_TYPE_ES.get(t, t)} — banda propia")
+            st.caption(f"📡 {_TYPE_ES.get(t, t)} — own band")
             c = st.columns(3)
             fmax_v = c[0].number_input(
                 f"Fmax ({ul})", 60, fmax_max,
@@ -512,19 +512,19 @@ def _render_acq_params(rows: List[cfg.ChannelRow]):
                 f"Fmin ({ul})", 0.0, float(fmax_max),
                 float(round(cfg.hz_to_display(float(e.get("fmin_hz", 2.0)), unit), 1)),
                 step=float(fstep), key=f"acq_{t}_fmin_{unit}")
-            lines = c[2].selectbox("Líneas", cfg.LINES_OPTIONS,
+            lines = c[2].selectbox("Lines", cfg.LINES_OPTIONS,
                                    index=cfg.LINES_OPTIONS.index(int(e.get("lines", 1600)))
                                    if int(e.get("lines", 1600)) in cfg.LINES_OPTIONS else 2,
                                    key=f"acq_{t}_lines")
             c2 = st.columns(3)
-            avg = c2[0].number_input("Promedios", 1, 64, int(e.get("averages", 4)), key=f"acq_{t}_avg")
-            win = c2[1].selectbox("Ventana", cfg.WINDOWS,
+            avg = c2[0].number_input("Averages", 1, 64, int(e.get("averages", 4)), key=f"acq_{t}_avg")
+            win = c2[1].selectbox("Window", cfg.WINDOWS,
                                   index=cfg.WINDOWS.index(e.get("window", "hanning"))
                                   if e.get("window", "hanning") in cfg.WINDOWS else 0,
                                   key=f"acq_{t}_win")
             edited[t] = (fmax_v, fmin_v, lines, avg, win)
 
-        submitted = st.form_submit_button("🔄 Actualizar parámetros", type="primary",
+        submitted = st.form_submit_button("🔄 Update parameters", type="primary",
                                           use_container_width=True)
 
     if submitted:
@@ -554,7 +554,7 @@ def _render_acq_params(rows: List[cfg.ChannelRow]):
         f"{_TYPE_ES.get(t, t)}: {cfg.hz_to_display(by_type[t].fmax_hz, unit):.0f} {ul}/"
         f"{by_type[t].lines}L (Δf {cfg.hz_to_display(by_type[t].delta_f(), unit):.3g})"
         for t in present)
-    st.caption(f"{resume} · {train.waveform_mode} · órdenes "
+    st.caption(f"{resume} · {train.waveform_mode} · orders "
                f"{', '.join(f'{o:g}X' for o in train.orders)}")
     return train, by_type
 
@@ -642,21 +642,21 @@ def _render_bearing_diagram(rows: List[cfg.ChannelRow], machine: cfg.MachineConf
     planes = sorted({r.plane for r in rows if r.plane > 0})
     if not planes:
         return
-    st.markdown('<div class="rm-sec-head">Sección de cojinete '
-                '<small>— posición física de las sondas</small></div>', unsafe_allow_html=True)
+    st.markdown('<div class="rm-sec-head">Bearing section '
+                '<small>— physical probe positions</small></div>', unsafe_allow_html=True)
     dcol1, dcol2 = st.columns([3, 2])
     with dcol1:
-        sel = st.selectbox("Cojinete", planes, key="rm_polar_brg",
-                           format_func=lambda p: f"Cojinete {p}")
+        sel = st.selectbox("Bearing", planes, key="rm_polar_brg",
+                           format_func=lambda p: f"Bearing {p}")
         probes = [r for r in rows if r.plane == sel]   # incluye keyphasor asignado al cojinete
         st.markdown(_bearing_diagram_svg(probes, machine), unsafe_allow_html=True)
     with dcol2:
         # leyenda de colores
         st.markdown(
             '<div class="rm-legend" style="margin:8px 0 12px 0;">'
-            f'<span><i style="background:{_TYPE_COLOR["proximity"]}"></i>Proximidad</span>'
-            f'<span><i style="background:{_TYPE_COLOR["velometer"]}"></i>Velocidad</span>'
-            f'<span><i style="background:{_TYPE_COLOR["accelerometer"]}"></i>Acelerómetro</span>'
+            f'<span><i style="background:{_TYPE_COLOR["proximity"]}"></i>Proximity</span>'
+            f'<span><i style="background:{_TYPE_COLOR["velometer"]}"></i>Velocity</span>'
+            f'<span><i style="background:{_TYPE_COLOR["accelerometer"]}"></i>Accelerometer</span>'
             f'<span><i style="background:{_TYPE_COLOR["keyphasor"]}"></i>Keyphasor</span>'
             '</div>', unsafe_allow_html=True)
         radials = [r for r in probes if r.sensor_type in ("proximity", "velometer", "accelerometer")]
@@ -665,14 +665,14 @@ def _render_bearing_diagram(rows: List[cfg.ChannelRow], machine: cfg.MachineConf
             a1 = cfg.absolute_angle(radials[1].angle_deg, radials[1].side)
             sep = cfg.angular_separation(a0, a1)
             if abs(sep - 90.0) <= 5.0:
-                st.success(f"✅ Par ortogonal: {sep:.0f}° entre {radials[0].point_label} "
-                           f"y {radials[1].point_label}.")
+                st.success(f"✅ Orthogonal pair: {sep:.0f}° between {radials[0].point_label} "
+                           f"and {radials[1].point_label}.")
             else:
-                st.warning(f"⚠ {radials[0].point_label}–{radials[1].point_label} a {sep:.0f}° "
-                           "(no 90°). Para órbita correcta van a 90°.")
+                st.warning(f"⚠ {radials[0].point_label}–{radials[1].point_label} at {sep:.0f}° "
+                           "(not 90°). For a correct orbit they should be at 90°.")
         kph = [r for r in probes if r.sensor_type == "keyphasor"]
         if kph:
-            st.caption(f"🔑 Keyphasor **{kph[0].point_label}** en este cojinete "
+            st.caption(f"🔑 Keyphasor **{kph[0].point_label}** on this bearing "
                        f"({cfg.absolute_angle(kph[0].angle_deg, kph[0].side):.0f}° abs).")
 
 
@@ -695,8 +695,8 @@ def _channels_html_table(rows: List[cfg.ChannelRow], acq_by_type: dict = None,
         lines = int(e.get("lines")) if e and "lines" in e else cfg.default_acq_for_type(r.sensor_type).lines
         return f"{cfg.hz_to_display(fmax, freq_unit):.0f} {ul}·{lines}L"
 
-    heads = ["Punto", "BNC", "Coj.", "Tipo", "Sensib.", "Unidad", "Banda", "FS", "Gap V",
-             "Coupl.", "Ángulo", "Kph", "Par", "Alert", "Danger", "Act."]
+    heads = ["Point", "BNC", "Brg.", "Type", "Sens.", "Unit", "Band", "FS", "Gap V",
+             "Coupl.", "Angle", "Kph", "Pair", "Alert", "Danger", "Act."]
     th = "".join(
         f'<th style="padding:10px 12px;text-align:left;font-size:11px;'
         f'letter-spacing:.04em;text-transform:uppercase;font-weight:700;'
@@ -793,16 +793,16 @@ def _save_and_activate(setup: cfg.AcqSetup) -> None:
     try:
         path = cfg.save_setup(setup)
     except Exception as e:  # noqa: BLE001
-        st.error(f"No se pudo guardar: {type(e).__name__}: {e}")
+        st.error(f"Could not save: {type(e).__name__}: {e}")
         return
     # También subir a la NUBE (rm_setups) → la máquina queda disponible en el módulo
     # de campo (y viceversa). No es fatal si no hay internet: queda guardada local.
     try:
         _rc = cfg.save_setup_cloud(setup)
         if _rc.get("ok"):
-            st.caption("☁ También guardada en la nube (compartida con el módulo de campo).")
+            st.caption("☁ Also saved to the cloud (shared with the field module).")
         elif _rc.get("reason") and _rc.get("reason") != "offline":
-            st.caption(f"⚠ No se pudo subir a la nube: {_rc.get('reason')}")
+            st.caption(f"⚠ Could not upload to the cloud: {_rc.get('reason')}")
     except Exception:  # noqa: BLE001
         pass
     st.session_state["rm_channels"] = cfg.setup_to_channel_configs(setup)
@@ -825,6 +825,6 @@ def _save_and_activate(setup: cfg.AcqSetup) -> None:
     # Pares X/Y explícitos → órbita en el Monitor
     st.session_state["rm_pairs_saved"] = [list(p) for p in cfg.orbit_pairs(setup.channels)]
     _watermelon_success(
-        "¡Configuración guardada con éxito! 🍉",
-        f"{setup.machine.name} · {len(setup.channels)} canales. "
-        f"Andá al tab Monitoreo y pulsá ▶ Iniciar para adquirir.")
+        "Configuration saved successfully! 🍉",
+        f"{setup.machine.name} · {len(setup.channels)} channels. "
+        f"Go to the Monitoring tab and press ▶ Start to acquire.")
