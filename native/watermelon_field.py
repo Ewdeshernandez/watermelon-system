@@ -450,10 +450,17 @@ def main() -> int:
         f"R=clockwise · L=counter-clockwise (45°L+45°R=90°)</span>")
     sl.addWidget(leg)
     canv = QtWidgets.QHBoxLayout()
-    tblc = QtWidgets.QTableWidget(0, 9)
+    # 9 columnas visibles + 6 OCULTAS (ADRE 408): full_scale, active, coupling, unit,
+    # keyphasor_ref, pair_ref. La tabla es la fuente única; el "Channel editor" edita todo.
+    _COL_FS, _COL_ACT, _COL_COUP, _COL_UNIT, _COL_KPH, _COL_PAIR = 9, 10, 11, 12, 13, 14
+    tblc = QtWidgets.QTableWidget(0, 15)
     tblc.setHorizontalHeaderLabels(["Channel", "Type", "BNC", "Sensit. (mV/EU)",
-                                    "Angle°", "Side", "Gap (V)", "Alarm", "Danger"])
-    tblc.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+                                    "Angle°", "Side", "Gap (V)", "Alarm", "Danger",
+                                    "FullScale", "Active", "Coupling", "Unit", "Keyphasor", "Pair"])
+    for _c in (_COL_FS, _COL_ACT, _COL_COUP, _COL_UNIT, _COL_KPH, _COL_PAIR):
+        tblc.setColumnHidden(_c, True)          # datos ADRE ocultos (se editan en Channel editor)
+    for _c in range(9):
+        tblc.horizontalHeader().setSectionResizeMode(_c, QtWidgets.QHeaderView.Stretch)
     tblc.verticalHeader().setVisible(False)
     tblc.setAlternatingRowColors(True)
     tblc.setShowGrid(False)
@@ -527,11 +534,9 @@ def main() -> int:
             f = it.font(); f.setBold(True); it.setFont(f)
         return it
 
-    # Overrides EDITABLES de pareo/keyphasor (el usuario los puede cambiar en la tabla)
-    _pair_ovr = {}   # channel -> pair channel
-    _kph_ovr = {}    # channel -> keyphasor channel
-
     def _refresh_acq_info():
+        # Read-only: muestra los canales EN ORDEN con su pareo/keyphasor (que se EDITAN
+        # en 'Channel editor') y la banda de adquisición por tipo de sensor.
         try:
             from core.remote_monitoring.config import default_acq_for_type
             fx = float(sp_fmax.value()); ln = int(cb_lines.currentText())
@@ -540,44 +545,32 @@ def main() -> int:
                                f"window {cb_win.currentText()} · {sp_avg.value()} averages")
             _WT = {"prox": "proximity", "vel": "velometer", "accel": "accelerometer",
                    "keyphasor": "keyphasor"}
-            data = []
+            rows = []
             for r in range(tblc.rowCount()):
                 it = tblc.item(r, 0)
                 if not it:
                     continue
                 w = tblc.cellWidget(r, 1)
                 lbl = w.currentText() if w else "Accelerometer"
-                data.append((it.text(), _KIND_BY_LABEL.get(lbl, "accel")))
-            meas = [n for n, k in data if k != "keyphasor"]
-            kphs = [n for n, k in data if k == "keyphasor"]
-            kph_name = kphs[0] if kphs else ""
-            tbl_acq.setRowCount(len(data))
-
-            def _mk_combo(options, current, store, chan):
-                cb = QtWidgets.QComboBox(); cb.addItems(options)
-                cb.setCurrentText(current if current in options else options[0])
-                cb.currentTextChanged.connect(
-                    lambda t, ch=chan: store.__setitem__(ch, t))
-                store[chan] = cb.currentText()
-                return cb
-
-            for i, (nm, kind) in enumerate(data):
+                rows.append((r, it.text(), _KIND_BY_LABEL.get(lbl, "accel")))
+            names = {nm for _, nm, _ in rows}
+            kph_name = next((nm for _, nm, k in rows if k == "keyphasor"), "")
+            tbl_acq.setRowCount(len(rows))
+            for i, (r, nm, kind) in enumerate(rows):
                 tbl_acq.setItem(i, 0, _acq_cell(nm, bold=True,
                                 fg=SENSOR_COLORS.get(kind, "#8b5cf6")))
                 tbl_acq.setItem(i, 1, _acq_cell(_WT.get(kind, kind).capitalize()))
                 if kind == "keyphasor":
                     for c in (2, 3, 4, 5):
                         tbl_acq.setItem(i, c, _acq_cell("—"))
-                    tbl_acq.removeCellWidget(i, 2); tbl_acq.removeCellWidget(i, 3)
                     continue
-                sib = _sibling_name(nm)
-                pair_opts = ["—"] + [x for x in meas if x != nm]
-                pdef = _pair_ovr.get(nm) or (sib if sib in meas else "—")
-                tbl_acq.setCellWidget(i, 2, _mk_combo(pair_opts, pdef, _pair_ovr, nm))
-                kph_opts = ["—"] + kphs
-                kdef = _kph_ovr.get(nm) or (kph_name if kph_name else "—")
-                tbl_acq.setCellWidget(i, 3, _mk_combo(kph_opts, kdef, _kph_ovr, nm))
+                pv = tblc.item(r, _COL_PAIR); pair = pv.text() if pv and pv.text() else ""
+                if not pair:
+                    sib = _sibling_name(nm); pair = sib if sib in names else "— (no pair)"
+                kv = tblc.item(r, _COL_KPH); kphr = kv.text() if kv and kv.text() else (kph_name or "— (none)")
                 ap = default_acq_for_type(_WT.get(kind, "proximity"))
+                tbl_acq.setItem(i, 2, _acq_cell(pair, fg=("#b45309" if pair.startswith("—") else None)))
+                tbl_acq.setItem(i, 3, _acq_cell(kphr))
                 tbl_acq.setItem(i, 4, _acq_cell(f"{ap.fmax_hz:.0f}"))
                 tbl_acq.setItem(i, 5, _acq_cell(str(ap.lines)))
         except Exception:  # noqa: BLE001
@@ -587,6 +580,161 @@ def main() -> int:
     cb_lines.currentTextChanged.connect(lambda *_: _refresh_acq_info())
     cb_win.currentTextChanged.connect(lambda *_: _refresh_acq_info())
     cfg_tabs.currentChanged.connect(lambda *_: _refresh_acq_info())
+
+    # ---------- Pestaña: Channel editor (maestro-detalle, paridad ADRE 408) ----------
+    pg_ched = QtWidgets.QWidget(); cl = QtWidgets.QVBoxLayout(pg_ched); cl.setSpacing(8)
+    _ched_row = {"r": None, "busy": False}
+    hrow = QtWidgets.QHBoxLayout()
+    hrow.addWidget(QtWidgets.QLabel("Channel:"))
+    cb_ched = QtWidgets.QComboBox(); cb_ched.setMinimumWidth(160); hrow.addWidget(cb_ched)
+    btn_ch_prev = QtWidgets.QPushButton("◀"); btn_ch_next = QtWidgets.QPushButton("▶")
+    for _b in (btn_ch_prev, btn_ch_next):
+        _b.setFixedWidth(34); hrow.addWidget(_b)
+    lbl_ch_bearing = QtWidgets.QLabel(""); lbl_ch_bearing.setStyleSheet("color:#64748b;")
+    hrow.addWidget(lbl_ch_bearing); hrow.addStretch(1)
+    cl.addLayout(hrow)
+
+    def _mkspin(mn, mx, step=1.0, dec=2, val=0.0):
+        s = QtWidgets.QDoubleSpinBox(); s.setDecimals(dec); s.setRange(mn, mx)
+        s.setSingleStep(step); s.setValue(val); return s
+
+    e_point = QtWidgets.QLineEdit()
+    e_bnc = QtWidgets.QSpinBox(); e_bnc.setRange(1, 64)
+    e_active = QtWidgets.QCheckBox("Active (collects data)"); e_active.setChecked(True)
+    e_type = QtWidgets.QComboBox(); e_type.addItems([l for l, _ in _KIND_LABELS])
+    e_sens = _mkspin(0, 100000, 10, 2, 200)
+    e_unit = QtWidgets.QComboBox(); e_unit.addItems(["mil pp", "um pp", "mm/s rms", "in/s pk", "g rms", "pulses/rev"])
+    e_coup = QtWidgets.QComboBox(); e_coup.addItems(["DC", "AC", "IEPE"])
+    e_full = _mkspin(0, 100000, 1, 2, 0)
+    e_gap = _mkspin(-30, 30, 0.1, 2, 0)
+    e_ang = _mkspin(0, 360, 5, 1, 0)
+    e_side = QtWidgets.QComboBox(); e_side.addItems(_SIDES)
+    e_kph = QtWidgets.QComboBox(); e_pair = QtWidgets.QComboBox()
+    e_alert = _mkspin(0, 100000, 0.1, 3, 0)
+    e_danger = _mkspin(0, 100000, 0.1, 3, 0)
+
+    def _grp(title, pairs):
+        cl.addWidget(_subhdr(title))
+        f = QtWidgets.QFormLayout(); f.setHorizontalSpacing(16); f.setVerticalSpacing(7)
+        row = QtWidgets.QHBoxLayout()
+        for i, (lab, w) in enumerate(pairs):
+            if lab:
+                row.addWidget(QtWidgets.QLabel(lab))
+            row.addWidget(w, 1)
+            if i < len(pairs) - 1:
+                row.addSpacing(12)
+        row.addStretch(0)
+        cl.addLayout(row)
+
+    _grp("Identification (API 670)", [("Point:", e_point), ("BNC:", e_bnc), ("", e_active)])
+    _grp("Transducer", [("Type:", e_type), ("Sensitivity mV/EU:", e_sens),
+                        ("Unit:", e_unit), ("Coupling:", e_coup)])
+    _grp("", [("Full-scale (EU):", e_full), ("Gap/Bias (V):", e_gap)])
+    _grp("Orientation (TDC top · R clockwise · L counter-clockwise)",
+         [("Angle°:", e_ang), ("Side:", e_side)])
+    _grp("Associations (phase reference + orbit pair)",
+         [("Associated keyphasor:", e_kph), ("X/Y pair (orbit):", e_pair)])
+    _grp("Alarms (API 670 / ISO 20816)", [("Alert:", e_alert), ("Danger:", e_danger)])
+
+    btn_ch_apply = QtWidgets.QPushButton("✓ Apply to channel")
+    btn_ch_apply.setStyleSheet(
+        "QPushButton{background:#10b981;color:white;border:none;font-weight:800;"
+        "padding:9px 18px;border-radius:8px;} QPushButton:hover{background:#0e9f6e;}")
+    lbl_ch_ok = QtWidgets.QLabel(""); lbl_ch_ok.setStyleSheet("color:#166534;font-weight:700;")
+    arow = QtWidgets.QHBoxLayout(); arow.addStretch(1)
+    arow.addWidget(lbl_ch_ok); arow.addWidget(btn_ch_apply)
+    cl.addLayout(arow); cl.addStretch(1)
+    cfg_tabs.insertTab(2, pg_ched, "Channel editor")
+
+    def _cell(r, c):
+        it = tblc.item(r, c)
+        return it.text() if it else ""
+
+    def _all_names():
+        return [_cell(r, 0) for r in range(tblc.rowCount()) if tblc.item(r, 0)]
+
+    def _kph_names():
+        out = []
+        for r in range(tblc.rowCount()):
+            w = tblc.cellWidget(r, 1)
+            if w and _KIND_BY_LABEL.get(w.currentText()) == "keyphasor":
+                out.append(_cell(r, 0))
+        return out
+
+    def _ched_load_row(r):
+        if r is None or r < 0 or r >= tblc.rowCount():
+            return
+        _ched_row["busy"] = True
+        _ched_row["r"] = r
+        names = _all_names()
+        e_point.setText(_cell(r, 0))
+        w = tblc.cellWidget(r, 1)
+        e_type.setCurrentText(w.currentText() if w else "Accelerometer")
+        e_bnc.setValue(int(float(_cell(r, 2) or 1)))
+        e_sens.setValue(float(_cell(r, 3) or 0))
+        e_ang.setValue(float(_cell(r, 4) or 0))
+        sw = tblc.cellWidget(r, 5)
+        e_side.setCurrentText(sw.currentText() if sw else "—")
+        e_gap.setValue(float(_cell(r, 6) or 0))
+        e_alert.setValue(float(_cell(r, 7) or 0))
+        e_danger.setValue(float(_cell(r, 8) or 0))
+        e_full.setValue(float(_cell(r, _COL_FS) or 0))
+        e_active.setChecked((_cell(r, _COL_ACT) or "1") != "0")
+        e_coup.setCurrentText(_cell(r, _COL_COUP) or "IEPE")
+        e_unit.setCurrentText(_cell(r, _COL_UNIT) or "g rms")
+        e_kph.clear(); e_kph.addItems(["—"] + _kph_names())
+        e_kph.setCurrentText(_cell(r, _COL_KPH) or "—")
+        e_pair.clear(); e_pair.addItems(["—"] + [n for n in names if n != _cell(r, 0)])
+        e_pair.setCurrentText(_cell(r, _COL_PAIR) or "—")
+        lbl_ch_bearing.setText(f"Bearing {_bearing_no(_cell(r, 0)) or '—'}")
+        lbl_ch_ok.setText("")
+        _ched_row["busy"] = False
+
+    def _ched_apply():
+        r = _ched_row["r"]
+        if r is None or r >= tblc.rowCount():
+            return
+        def _set(c, v):
+            it = tblc.item(r, c)
+            if it:
+                it.setText(v)
+            else:
+                tblc.setItem(r, c, QtWidgets.QTableWidgetItem(v))
+        _set(0, e_point.text() or f"CH{r}")
+        w = tblc.cellWidget(r, 1)
+        if w:
+            w.setCurrentText(e_type.currentText())
+        _set(2, str(e_bnc.value())); _set(3, f"{e_sens.value():g}"); _set(4, f"{e_ang.value():g}")
+        sw = tblc.cellWidget(r, 5)
+        if sw:
+            sw.setCurrentText(e_side.currentText())
+        _set(6, f"{e_gap.value():g}"); _set(7, f"{e_alert.value():g}"); _set(8, f"{e_danger.value():g}")
+        _set(_COL_FS, f"{e_full.value():g}"); _set(_COL_ACT, "1" if e_active.isChecked() else "0")
+        _set(_COL_COUP, e_coup.currentText()); _set(_COL_UNIT, e_unit.currentText())
+        _set(_COL_KPH, "" if e_kph.currentText() == "—" else e_kph.currentText())
+        _set(_COL_PAIR, "" if e_pair.currentText() == "—" else e_pair.currentText())
+        _color_name_cell(r); draw_bearing()
+        _ched_refresh_selector(); _refresh_acq_info()
+        lbl_ch_ok.setText("✓ Applied")
+
+    def _ched_refresh_selector():
+        cur = cb_ched.currentText()
+        cb_ched.blockSignals(True); cb_ched.clear(); cb_ched.addItems(_all_names())
+        if cur in _all_names():
+            cb_ched.setCurrentText(cur)
+        cb_ched.blockSignals(False)
+
+    cb_ched.currentIndexChanged.connect(lambda i: _ched_load_row(i))
+    btn_ch_apply.clicked.connect(_ched_apply)
+    btn_ch_prev.clicked.connect(lambda: cb_ched.setCurrentIndex(max(0, cb_ched.currentIndex() - 1)))
+    btn_ch_next.clicked.connect(
+        lambda: cb_ched.setCurrentIndex(min(cb_ched.count() - 1, cb_ched.currentIndex() + 1)))
+
+    def _sensors_selected(r):
+        if r is not None and r >= 0:
+            cb_ched.setCurrentIndex(r)
+
+    tblc.itemSelectionChanged.connect(lambda: _sensors_selected(tblc.currentRow()))
 
     # ---------- Pestaña 4: Simulator (solo con simulador) ----------
     pg_sim = QtWidgets.QWidget(); sml = QtWidgets.QVBoxLayout(pg_sim); sml.setSpacing(10)
@@ -717,6 +865,9 @@ def main() -> int:
             it.setForeground(QtGui.QColor(SENSOR_COLORS.get(kind, "#8b5cf6")))
             f = it.font(); f.setBold(True); it.setFont(f)
 
+    _KIND_UC = {"prox": ("mil pp", "DC"), "vel": ("mm/s rms", "AC"),
+                "accel": ("g rms", "IEPE"), "keyphasor": ("pulses/rev", "DC")}
+
     def _add_sensor_row(s: SensorSpec):
         r = tblc.rowCount(); tblc.insertRow(r)
         tblc.setItem(r, 0, QtWidgets.QTableWidgetItem(s.name))
@@ -734,6 +885,14 @@ def main() -> int:
         tblc.setItem(r, 6, QtWidgets.QTableWidgetItem(f"{s.gap:g}"))
         tblc.setItem(r, 7, QtWidgets.QTableWidgetItem(f"{s.alarm:g}"))
         tblc.setItem(r, 8, QtWidgets.QTableWidgetItem(f"{s.danger:g}"))
+        # columnas ADRE ocultas (defaults por tipo). SensorSpec no las trae → derivadas.
+        _u, _cp = _KIND_UC.get(s.kind, ("g rms", "IEPE"))
+        tblc.setItem(r, _COL_FS, QtWidgets.QTableWidgetItem(f"{getattr(s, 'full_scale', 0.0):g}"))
+        tblc.setItem(r, _COL_ACT, QtWidgets.QTableWidgetItem("1"))
+        tblc.setItem(r, _COL_COUP, QtWidgets.QTableWidgetItem(_cp))
+        tblc.setItem(r, _COL_UNIT, QtWidgets.QTableWidgetItem(_u))
+        tblc.setItem(r, _COL_KPH, QtWidgets.QTableWidgetItem(getattr(s, "keyphasor_ref", "") or ""))
+        tblc.setItem(r, _COL_PAIR, QtWidgets.QTableWidgetItem(getattr(s, "pair_ref", "") or ""))
         _color_name_cell(r)
 
     def fill_form(m: SimMachine):
@@ -750,6 +909,9 @@ def main() -> int:
         tblc.setRowCount(0)
         for s in m.sensors: _add_sensor_row(s)
         draw_bearing()
+        _ched_refresh_selector()
+        if tblc.rowCount():
+            _ched_load_row(0)
 
     def read_form() -> SimMachine:
         sens = []
@@ -892,28 +1054,33 @@ def main() -> int:
         UMAP = {"prox": "mil pp", "vel": "mm/s rms", "accel": "g rms", "keyphasor": "pulses/rev"}
         CMAP = {"prox": "DC", "vel": "AC", "accel": "IEPE", "keyphasor": "DC"}
         chans = []
-        for s in m.sensors:
+        for r, s in enumerate(m.sensors):        # r == fila de tblc (mismo orden)
+            def _cx(col, dv=""):
+                it = tblc.item(r, col); return it.text() if it else dv
+            try:
+                fs = float(_cx(_COL_FS) or 0)
+            except Exception:  # noqa: BLE001
+                fs = 0.0
             chans.append(ChannelRow(
                 bnc_port=int(s.bnc), point_label=s.name, plane=(_bearing_no(s.name) or 1),
                 sensor_type=KMAP.get(s.kind, "proximity"),
-                sensitivity_mv_per_eu=float(s.sensitivity), unit_native=UMAP.get(s.kind, ""),
-                coupling=CMAP.get(s.kind, "AC"), angle_deg=float(s.angle), side=(s.side or ""),
+                sensitivity_mv_per_eu=float(s.sensitivity),
+                unit_native=(_cx(_COL_UNIT) or UMAP.get(s.kind, "")),
+                coupling=(_cx(_COL_COUP) or CMAP.get(s.kind, "AC")),
+                angle_deg=float(s.angle), side=(s.side or ""),
                 alarm=float(s.alarm), danger=float(s.danger), gap_bias_v=float(s.gap),
-                events_per_rev=1))
-        # --- PAREO X/Y + referencia de keyphasor (para órbita y fase 1X) ---
-        # El par se infiere por convención: mismo cojinete, eje opuesto (1Y↔1X, 1V↔1H).
+                full_scale=fs, active=(_cx(_COL_ACT, "1") != "0"),
+                keyphasor_ref=_cx(_COL_KPH), pair_ref=_cx(_COL_PAIR), events_per_rev=1))
+        # Completar pareo/keyphasor faltantes por inferencia (si el usuario no los definió
+        # en el Channel editor): mismo cojinete, eje opuesto (1Y↔1X); keyphasor del tren.
         kph_name = next((c.point_label for c in chans if c.sensor_type == "keyphasor"), "")
         names = {c.point_label for c in chans}
         for c in chans:
             if c.sensor_type == "keyphasor":
                 continue
-            # override editable (tabla Acquisition) → si no, inferido por nombre
-            ko = _kph_ovr.get(c.point_label)
-            c.keyphasor_ref = ko if (ko and ko != "—") else kph_name
-            po = _pair_ovr.get(c.point_label)
-            if po and po != "—" and po in names:
-                c.pair_ref = po
-            else:
+            if not c.keyphasor_ref:
+                c.keyphasor_ref = kph_name
+            if not c.pair_ref:
                 sib = _sibling_name(c.point_label)
                 if sib and sib in names:
                     c.pair_ref = sib
@@ -991,8 +1158,17 @@ def main() -> int:
               "<div style='color:#64748b;margin-top:8px'>Review/edit angles, alarms and gaps in "
               "<b>Sensors &amp; layout</b>, then continue. 🍉</div>")
 
-    btn_add.clicked.connect(lambda: _add_sensor_row(SensorSpec("CHn", "accel", tblc.rowCount() + 1)))
-    btn_del.clicked.connect(lambda: tblc.removeRow(tblc.currentRow()) if tblc.currentRow() >= 0 else None)
+    def _add_sensor_click():
+        _add_sensor_row(SensorSpec("CHn", "accel", tblc.rowCount() + 1))
+        draw_bearing(); _ched_refresh_selector()
+
+    def _del_sensor_click():
+        if tblc.currentRow() >= 0:
+            tblc.removeRow(tblc.currentRow())
+            draw_bearing(); _ched_refresh_selector()
+
+    btn_add.clicked.connect(_add_sensor_click)
+    btn_del.clicked.connect(_del_sensor_click)
     btn_autolay.clicked.connect(_do_autolayout)
     btn_load.clicked.connect(do_load_lib)
     btn_save.clicked.connect(do_save_lib)
