@@ -370,10 +370,12 @@ def main() -> int:
         "QTableWidget::item { padding:3px 6px; }")
     cfg_scroll.setWidget(cfg_w); cfg_ol.addWidget(cfg_scroll)
 
+    _is_sim = type(agent.source).__name__ == "SimulatedStreamSource"
+
     def _sec(txt):
         lb = QtWidgets.QLabel(txt)
-        lb.setStyleSheet(f"background:{NAVY}; color:white; font-weight:700; font-size:13px;"
-                         f"padding:8px 13px; border-radius:6px; margin-top:6px;")
+        lb.setStyleSheet(f"background:{NAVY}; color:white; font-weight:700; font-size:12px;"
+                         f"padding:5px 11px; border-radius:6px; margin-top:2px;")
         return lb
 
     cfg_l.addWidget(_sec("1 · Machine  —  train (API 684)"))
@@ -394,10 +396,15 @@ def main() -> int:
     def _dsp(mn, mx, val, step=100.0):
         s = QtWidgets.QDoubleSpinBox(); s.setRange(mn, mx); s.setValue(val); s.setSingleStep(step); return s
     r2.addWidget(QtWidgets.QLabel("RPM:")); sp_rpm = _dsp(0, 60000, 3000); r2.addWidget(sp_rpm)
-    r2.addWidget(QtWidgets.QLabel("Start→")); sp_r0 = _dsp(0, 60000, 300); r2.addWidget(sp_r0)
+    _lbl_start = QtWidgets.QLabel("Start→"); r2.addWidget(_lbl_start)
+    sp_r0 = _dsp(0, 60000, 300); r2.addWidget(sp_r0)
     sp_r1 = _dsp(0, 60000, 6000); r2.addWidget(sp_r1)
-    r2.addWidget(QtWidgets.QLabel("Ramp(s):")); sp_ramp = _dsp(1, 3600, 90, 5); r2.addWidget(sp_ramp)
-    cfg_l.addLayout(r2)
+    _lbl_ramp = QtWidgets.QLabel("Ramp(s):"); r2.addWidget(_lbl_ramp)
+    sp_ramp = _dsp(1, 3600, 90, 5); r2.addWidget(sp_ramp)
+    r2.addStretch(1); cfg_l.addLayout(r2)
+    # Estos controles son del SIMULADOR (rampa de arranque/parada); en campo real
+    # (sin simulador) no aplican → se ocultan.
+    _sim_only = [_lbl_start, sp_r0, sp_r1, _lbl_ramp, sp_ramp]
     # row 2b: machine (rotation / bearing)
     r3b = QtWidgets.QHBoxLayout()
     r3b.addWidget(QtWidgets.QLabel("Rotation:"))
@@ -406,7 +413,11 @@ def main() -> int:
     cb_brg = QtWidgets.QComboBox(); cb_brg.addItems(["plain", "tilting_pad", "rolling", "mixed"])
     r3b.addWidget(cb_brg); r3b.addStretch(1); cfg_l.addLayout(r3b)
 
-    cfg_l.addWidget(_sec("Phenomena & transient  —  inject faults by sensor type"))
+    # Sección SOLO-SIMULADOR: inyección de fenómenos/severidad/críticas. En campo real
+    # esto no existe (la máquina real ya tiene su comportamiento) → todo el bloque se oculta.
+    sim_box = QtWidgets.QWidget(); sim_bl = QtWidgets.QVBoxLayout(sim_box)
+    sim_bl.setContentsMargins(0, 0, 0, 0); sim_bl.setSpacing(4)
+    sim_bl.addWidget(_sec("Simulator — inject faults by sensor type (test bench only)"))
     r3 = QtWidgets.QHBoxLayout()
     r3.addWidget(QtWidgets.QLabel("Critical 1:")); sp_c1 = _dsp(0, 60000, 0); r3.addWidget(sp_c1)
     r3.addWidget(QtWidgets.QLabel("Critical 2:")); sp_c2 = _dsp(0, 60000, 0); r3.addWidget(sp_c2)
@@ -417,7 +428,12 @@ def main() -> int:
     cb_ph_v = QtWidgets.QComboBox(); cb_ph_v.addItems(PHENOMENA["vel"]); r3.addWidget(cb_ph_v)
     r3.addWidget(QtWidgets.QLabel("Accel:"))
     cb_ph_a = QtWidgets.QComboBox(); cb_ph_a.addItems(PHENOMENA["accel"]); r3.addWidget(cb_ph_a)
-    r3.addStretch(1); cfg_l.addLayout(r3)
+    r3.addStretch(1); sim_bl.addLayout(r3)
+    cfg_l.addWidget(sim_box)
+    # ocultar todo lo del simulador en modo campo (hardware real)
+    sim_box.setVisible(_is_sim)
+    for _w in _sim_only:
+        _w.setVisible(_is_sim)
 
     cfg_l.addWidget(_sec("2 · Channels  —  BNC → measurement point"))
     # per-type color legend (same as the web) + angle convention
@@ -445,6 +461,16 @@ def main() -> int:
     brg_plot = pg.PlotWidget(); brg_plot.setBackground("w"); brg_plot.setAspectLocked(True)
     brg_plot.hideAxis("left"); brg_plot.hideAxis("bottom"); brg_plot.setMenuEnabled(False)
     brg_plot.setMinimumWidth(280)
+    brg_plot.setTitle("Machine layout", color=NAVY, size="9pt")
+    # Diagrama FIJO: sin pan/zoom con el mouse (no se debe mover ni agrandar al pasar el mouse)
+    _brg_vb = brg_plot.getViewBox()
+    _brg_vb.setMouseEnabled(x=False, y=False)
+    _brg_vb.setMenuEnabled(False)
+    _brg_vb.wheelEvent = lambda ev, axis=None: None      # sin zoom por rueda
+    try:
+        brg_plot.getPlotItem().hideButtons()
+    except Exception:  # noqa: BLE001
+        pass
     canv.addWidget(brg_plot, 2)
     cfg_l.addLayout(canv, 1)
     rb = QtWidgets.QHBoxLayout()
@@ -462,32 +488,63 @@ def main() -> int:
 
     import math as _math
 
+    def _bearing_no(nm):
+        d = "".join(ch for ch in (nm or "") if ch.isdigit())
+        return int(d) if d else 0
+
+    def _disp_angle(s, idx):
+        """Ángulo para DIBUJAR el sensor: si tiene ángulo configurado, ese; si no,
+        convención por nombre (Y=45°L, X=45°R, V=arriba, H=der.) para que no se
+        encimen con el default 0°."""
+        if abs(float(getattr(s, "angle", 0.0) or 0.0)) > 1e-6:
+            return s.abs_angle()
+        nm = (s.name or "").upper()
+        if "Y" in nm: return 315.0
+        if "X" in nm: return 45.0
+        if "V" in nm: return 0.0
+        if "H" in nm: return 90.0
+        return (idx * 40) % 360
+
     def draw_bearing():
-        """Dibuja la sección del cojinete (bolitas de color en su ángulo) como la web."""
+        """Esquema HORIZONTAL de la máquina: eje + un anillo por cojinete + TODOS los
+        sensores como bolitas de color en su ángulo, con etiqueta. Diagrama fijo."""
         try:
             brg_plot.clear()
-            th = np.linspace(0, 2 * np.pi, 200)
-            R = 1.0
-            brg_plot.plot(R * np.sin(th), R * np.cos(th), pen=pg.mkPen(NAVY, width=14))  # anillo
-            brg_plot.plot(0.34 * np.sin(th), 0.34 * np.cos(th),
-                          pen=pg.mkPen("#c9d6e8", width=2))                                # eje
-            tdc = pg.ScatterPlotItem([0], [R + 0.14], symbol="t", size=15, brush=ACC, pen=None)
-            brg_plot.addItem(tdc)
-            t0 = pg.TextItem("TDC 0°", color=NAVY, anchor=(0.5, 1.2)); t0.setPos(0, R + 0.16)
-            brg_plot.addItem(t0)
             m = read_form()
-            for s in m.sensors:
-                a = _math.radians(s.abs_angle())
-                x, y = R * _math.sin(a), R * _math.cos(a)     # 0°=arriba, R=horario
-                col = SENSOR_COLORS.get(s.kind, "#8b5cf6")
-                brg_plot.addItem(pg.ScatterPlotItem([x], [y], symbol="o", size=26,
-                                                    brush=col, pen=pg.mkPen("w", width=2)))
-                lb = pg.TextItem(s.name, color="w", anchor=(0.5, 0.5)); lb.setPos(x, y)
+            meas = [s for s in m.sensors if s.kind != "keyphasor"]
+            kph = [s for s in m.sensors if s.kind == "keyphasor"]
+            brs = sorted(set(_bearing_no(s.name) for s in meas)) or [1]
+            xpos = {b: i for i, b in enumerate(brs)}
+            n = len(brs)
+            th = np.linspace(0, 2 * np.pi, 80); R = 0.30
+            # eje (shaft)
+            brg_plot.plot([-0.7, n - 1 + 0.7], [0, 0], pen=pg.mkPen("#c9d6e8", width=7))
+            for b in brs:
+                cx = xpos[b]
+                brg_plot.plot(cx + R * np.sin(th), R * np.cos(th), pen=pg.mkPen(NAVY, width=7))
+                lb = pg.TextItem(f"Brg {b}", color=MUTE, anchor=(0.5, 0)); lb.setPos(cx, -R - 0.16)
                 brg_plot.addItem(lb)
-            cx = pg.TextItem(("CW ↻" if m.rotation == "CW" else "CCW ↺"),
-                             color=NAVY, anchor=(0.5, 0.5)); cx.setPos(0, 0)
-            brg_plot.addItem(cx)
-            brg_plot.setXRange(-1.5, 1.5); brg_plot.setYRange(-1.4, 1.4)
+                bs = [s for s in meas if _bearing_no(s.name) == b]
+                for idx, s in enumerate(bs):
+                    a = _math.radians(_disp_angle(s, idx))
+                    dx, dy = _math.sin(a), _math.cos(a)
+                    px, py = cx + (R + 0.10) * dx, (R + 0.10) * dy
+                    col = SENSOR_COLORS.get(s.kind, "#8b5cf6")
+                    brg_plot.addItem(pg.ScatterPlotItem([px], [py], symbol="o", size=15,
+                                                        brush=col, pen=pg.mkPen("w", width=1.5)))
+                    t = pg.TextItem(s.name.replace("_", ""), color=NAVY, anchor=(0.5, 0.5))
+                    t.setPos(cx + (R + 0.34) * dx, (R + 0.34) * dy); brg_plot.addItem(t)
+            # keyphasor (referencia de fase) a la izquierda del tren
+            if kph:
+                brg_plot.addItem(pg.ScatterPlotItem([-0.62], [0.0], symbol="t", size=15,
+                                 brush=SENSOR_COLORS["keyphasor"], pen=pg.mkPen("w", width=1)))
+                tk = pg.TextItem("KPH", color=MUTE, anchor=(0.5, 1.3)); tk.setPos(-0.62, 0.10)
+                brg_plot.addItem(tk)
+            rot = pg.TextItem(("CW ↻" if m.rotation == "CW" else "CCW ↺"),
+                              color=NAVY, anchor=(1, 1)); rot.setPos(n - 1 + 0.7, 0.9)
+            brg_plot.addItem(rot)
+            brg_plot.setXRange(-0.95, n - 1 + 0.95, padding=0)
+            brg_plot.setYRange(-0.85, 0.95, padding=0)
         except Exception:  # noqa: BLE001
             pass
 
