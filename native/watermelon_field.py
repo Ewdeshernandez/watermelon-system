@@ -14,6 +14,7 @@ Correr:
 from __future__ import annotations
 
 import argparse
+import html
 import os
 import sys
 import threading
@@ -487,33 +488,55 @@ def main() -> int:
     r_sb.addStretch(1); sl.addLayout(r_sb)
     cfg_tabs.addTab(pg_sensors, "Sensors & layout")
 
-    # ---------- Pestaña 3: Acquisition ----------
-    pg_acq = QtWidgets.QWidget(); al = QtWidgets.QVBoxLayout(pg_acq); al.setSpacing(10)
+    # ---------- Pestaña 3: Acquisition (avanzada, estilo System1/ADRE) ----------
+    pg_acq = QtWidgets.QWidget(); al = QtWidgets.QVBoxLayout(pg_acq); al.setSpacing(9)
+    al.addWidget(_subhdr("Train-wide"))
     ra = QtWidgets.QHBoxLayout()
     ra.addWidget(QtWidgets.QLabel("Sampling (Hz):"))
     sp_fs = QtWidgets.QSpinBox(); sp_fs.setRange(256, 102400); sp_fs.setSingleStep(1280); ra.addWidget(sp_fs)
-    ra.addWidget(QtWidgets.QLabel("Fmax (Hz):"))
-    sp_fmax = QtWidgets.QSpinBox(); sp_fmax.setRange(100, 40000); sp_fmax.setSingleStep(100)
-    sp_fmax.setValue(1000); ra.addWidget(sp_fmax)
-    ra.addWidget(QtWidgets.QLabel("Lines:"))
-    cb_lines = QtWidgets.QComboBox(); cb_lines.addItems(["400", "800", "1600", "3200", "6400"])
-    cb_lines.setCurrentText("1600"); ra.addWidget(cb_lines)
-    ra.addWidget(QtWidgets.QLabel("Fmin (Hz):"))
-    sp_fmin = _dsp(0, 1000, 2, 1); ra.addWidget(sp_fmin)
+    ra.addWidget(QtWidgets.QLabel("Frequency:"))
+    cb_frequ = QtWidgets.QComboBox(); cb_frequ.addItems(["CPM", "Hz"]); ra.addWidget(cb_frequ)
+    ra.addWidget(QtWidgets.QLabel("Waveform:"))
+    cb_wfmode = QtWidgets.QComboBox(); cb_wfmode.addItems(["synchronous", "asynchronous"]); ra.addWidget(cb_wfmode)
+    ra.addWidget(QtWidgets.QLabel("Samples/rev:"))
+    sp_sprev = QtWidgets.QSpinBox(); sp_sprev.setRange(0, 4096); sp_sprev.setValue(0); ra.addWidget(sp_sprev)
+    ra.addWidget(QtWidgets.QLabel("Averages:"))
+    sp_avg = QtWidgets.QSpinBox(); sp_avg.setRange(1, 64); sp_avg.setValue(4); ra.addWidget(sp_avg)
+    ra.addWidget(QtWidgets.QLabel("Window:"))
+    cb_win = QtWidgets.QComboBox(); cb_win.addItems(["hanning", "flattop", "uniform"]); ra.addWidget(cb_win)
     ra.addStretch(1); al.addLayout(ra)
-    ra2 = QtWidgets.QHBoxLayout()
-    ra2.addWidget(QtWidgets.QLabel("Lines:"))
-    cb_lines = QtWidgets.QComboBox(); cb_lines.addItems(["400", "800", "1600", "3200", "6400"])
-    cb_lines.setCurrentText("1600"); ra2.addWidget(cb_lines)
-    ra2.addWidget(QtWidgets.QLabel("Window:"))
-    cb_win = QtWidgets.QComboBox(); cb_win.addItems(["hanning", "flattop", "uniform"]); ra2.addWidget(cb_win)
-    ra2.addWidget(QtWidgets.QLabel("Averages:"))
-    sp_avg = QtWidgets.QSpinBox(); sp_avg.setRange(1, 64); sp_avg.setValue(4); ra2.addWidget(sp_avg)
-    ra2.addStretch(1); al.addLayout(ra2)
-    lbl_acq_df = QtWidgets.QLabel("")
-    lbl_acq_df.setStyleSheet("color:#64748b;")
+    r_ord = QtWidgets.QHBoxLayout()
+    r_ord.addWidget(QtWidgets.QLabel("Orders (×rpm):"))
+    o_half = QtWidgets.QCheckBox("½X"); o_1x = QtWidgets.QCheckBox("1X"); o_1x.setChecked(True)
+    o_2x = QtWidgets.QCheckBox("2X"); o_2x.setChecked(True); o_3x = QtWidgets.QCheckBox("3X")
+    for _c in (o_half, o_1x, o_2x, o_3x):
+        r_ord.addWidget(_c)
+    r_ord.addStretch(1); al.addLayout(r_ord)
+
+    # Bandas por tipo de sensor (proximidad baja freq · acelerómetro alta freq)
+    al.addWidget(_subhdr("Acquisition band per sensor type (ISO / System1)"))
+    acq_band = {}
+    _band_def = {"proximity": (1000, 2, "1600"), "velometer": (2000, 2, "1600"),
+                 "accelerometer": (10000, 10, "3200")}
+    for _t, _lab in [("proximity", "Proximity"), ("velometer", "Velocity"),
+                     ("accelerometer", "Accelerometer")]:
+        _fx, _fn, _ln = _band_def[_t]
+        rb = QtWidgets.QHBoxLayout()
+        _dot = SENSOR_COLORS.get({"proximity": "prox", "velometer": "vel",
+                                  "accelerometer": "accel"}[_t], "#8b5cf6")
+        _l = QtWidgets.QLabel(f"<span style='color:{_dot}'>●</span> {_lab}"); _l.setMinimumWidth(120)
+        rb.addWidget(_l)
+        rb.addWidget(QtWidgets.QLabel("Fmax (Hz):")); _wfx = _dsp(50, 40000, _fx, 100); rb.addWidget(_wfx)
+        rb.addWidget(QtWidgets.QLabel("Fmin (Hz):")); _wfn = _dsp(0, 2000, _fn, 1); rb.addWidget(_wfn)
+        rb.addWidget(QtWidgets.QLabel("Lines:"))
+        _wln = QtWidgets.QComboBox(); _wln.addItems(["400", "800", "1600", "3200", "6400"])
+        _wln.setCurrentText(_ln); rb.addWidget(_wln)
+        rb.addStretch(1); al.addLayout(rb)
+        acq_band[_t] = (_wfx, _wfn, _wln)
+
+    lbl_acq_df = QtWidgets.QLabel(""); lbl_acq_df.setStyleSheet("color:#64748b;")
     al.addWidget(lbl_acq_df)
-    al.addWidget(_subhdr("Configured channels — pairing & acquisition band per type"))
+    al.addWidget(_subhdr("Configured channels — pairing (edit in Channel editor) + band per type"))
     tbl_acq = QtWidgets.QTableWidget(0, 6)
     tbl_acq.setHorizontalHeaderLabels(["Channel", "Type", "Pair (X/Y)", "Keyphasor",
                                        "Fmax (Hz)", "Lines"])
@@ -524,6 +547,17 @@ def main() -> int:
     tbl_acq.verticalHeader().setDefaultSectionSize(26)
     al.addWidget(tbl_acq, 1)
     cfg_tabs.addTab(pg_acq, "Acquisition")
+
+    def _band_ap(t):
+        """AcquisitionParams del tipo t desde los widgets de banda + train-wide."""
+        from core.remote_monitoring.config import AcquisitionParams
+        fx, fn, ln = acq_band[t]
+        orders = [v for v, c in ((0.5, o_half), (1.0, o_1x), (2.0, o_2x), (3.0, o_3x)) if c.isChecked()]
+        return AcquisitionParams(
+            fmax_hz=float(fx.value()), fmin_hz=float(fn.value()), lines=int(ln.currentText()),
+            averages=int(sp_avg.value()), window=cb_win.currentText(),
+            samples_per_rev=int(sp_sprev.value()), waveform_mode=cb_wfmode.currentText(),
+            orders=orders or [1.0], freq_unit=("cpm" if cb_frequ.currentText() == "CPM" else "hz"))
 
     def _acq_cell(text, bold=False, fg=None):
         it = QtWidgets.QTableWidgetItem(text)
@@ -536,13 +570,16 @@ def main() -> int:
 
     def _refresh_acq_info():
         # Read-only: muestra los canales EN ORDEN con su pareo/keyphasor (que se EDITAN
-        # en 'Channel editor') y la banda de adquisición por tipo de sensor.
+        # en 'Channel editor') y la banda de adquisición por tipo de sensor (editable arriba).
         try:
-            from core.remote_monitoring.config import default_acq_for_type
-            fx = float(sp_fmax.value()); ln = int(cb_lines.currentText())
+            _pfx, _pfn, _pln = acq_band["proximity"]
+            fx = float(_pfx.value()); ln = int(_pln.currentText())
             df = fx / ln if ln else 0.0
-            lbl_acq_df.setText(f"Δf = Fmax / Lines = {df:.2f} Hz    ·    "
-                               f"window {cb_win.currentText()} · {sp_avg.value()} averages")
+            orders = [s for s, c in (("½X", o_half), ("1X", o_1x), ("2X", o_2x), ("3X", o_3x))
+                      if c.isChecked()]
+            lbl_acq_df.setText(f"Proximity Δf = {df:.2f} Hz · {cb_wfmode.currentText()} · "
+                               f"{sp_avg.value()} avg · orders {', '.join(orders) or '—'} · "
+                               f"{cb_frequ.currentText()}")
             _WT = {"prox": "proximity", "vel": "velometer", "accel": "accelerometer",
                    "keyphasor": "keyphasor"}
             rows = []
@@ -568,17 +605,21 @@ def main() -> int:
                 if not pair:
                     sib = _sibling_name(nm); pair = sib if sib in names else "— (no pair)"
                 kv = tblc.item(r, _COL_KPH); kphr = kv.text() if kv and kv.text() else (kph_name or "— (none)")
-                ap = default_acq_for_type(_WT.get(kind, "proximity"))
+                _bfx, _bfn, _bln = acq_band.get(_WT.get(kind, "proximity"), acq_band["proximity"])
                 tbl_acq.setItem(i, 2, _acq_cell(pair, fg=("#b45309" if pair.startswith("—") else None)))
                 tbl_acq.setItem(i, 3, _acq_cell(kphr))
-                tbl_acq.setItem(i, 4, _acq_cell(f"{ap.fmax_hz:.0f}"))
-                tbl_acq.setItem(i, 5, _acq_cell(str(ap.lines)))
+                tbl_acq.setItem(i, 4, _acq_cell(f"{_bfx.value():.0f}"))
+                tbl_acq.setItem(i, 5, _acq_cell(_bln.currentText()))
         except Exception:  # noqa: BLE001
             pass
-    for _w in (sp_fmax, sp_avg):
-        _w.valueChanged.connect(lambda *_: _refresh_acq_info())
-    cb_lines.currentTextChanged.connect(lambda *_: _refresh_acq_info())
-    cb_win.currentTextChanged.connect(lambda *_: _refresh_acq_info())
+    for _bw in acq_band.values():
+        _bw[0].valueChanged.connect(lambda *_: _refresh_acq_info())
+        _bw[2].currentTextChanged.connect(lambda *_: _refresh_acq_info())
+    for _cw in (o_half, o_1x, o_2x, o_3x):
+        _cw.stateChanged.connect(lambda *_: _refresh_acq_info())
+    for _w in (cb_wfmode, cb_frequ):
+        _w.currentTextChanged.connect(lambda *_: _refresh_acq_info())
+    sp_avg.valueChanged.connect(lambda *_: _refresh_acq_info())
     cfg_tabs.currentChanged.connect(lambda *_: _refresh_acq_info())
 
     # ---------- Pestaña: Channel editor (maestro-detalle, paridad ADRE 408) ----------
@@ -735,6 +776,54 @@ def main() -> int:
             cb_ched.setCurrentIndex(r)
 
     tblc.itemSelectionChanged.connect(lambda: _sensors_selected(tblc.currentRow()))
+
+    # ---------- Pestaña: Validation (API 670 / ISO 20816) ----------
+    pg_val = QtWidgets.QWidget(); vl = QtWidgets.QVBoxLayout(pg_val); vl.setSpacing(8)
+    vtop = QtWidgets.QHBoxLayout()
+    vtop.addWidget(QtWidgets.QLabel(
+        "<b>Validation</b> <span style='color:#64748b'>— API 670 / ISO 20816 · runs on the "
+        "current configuration</span>"))
+    vtop.addStretch(1)
+    btn_validate = QtWidgets.QPushButton("↻ Validate now")
+    btn_validate.setStyleSheet(
+        "QPushButton{background:#12467f;color:white;border:none;font-weight:700;"
+        "padding:7px 15px;border-radius:7px;} QPushButton:hover{background:#0e3a6b;}")
+    vtop.addWidget(btn_validate); vl.addLayout(vtop)
+    val_summary = QtWidgets.QLabel(""); val_summary.setStyleSheet("font-size:14px;font-weight:700;")
+    vl.addWidget(val_summary)
+    val_out = QtWidgets.QTextEdit(); val_out.setReadOnly(True); vl.addWidget(val_out, 1)
+
+    def _run_validation():
+        try:
+            from core.remote_monitoring.config import validate_setup
+            setup = _form_to_setup()
+            findings = validate_setup(setup)
+        except Exception as e:  # noqa: BLE001
+            val_summary.setText(""); val_out.setHtml(f"<i style='color:#b91c1c'>Error: {e}</i>")
+            return
+        ne = sum(1 for f in findings if f.level == "error")
+        nw = sum(1 for f in findings if f.level == "warn")
+        if ne:
+            val_summary.setText(f"🔴 {ne} error(s) · 🟡 {nw} warning(s) — fix errors before measuring")
+            val_summary.setStyleSheet("font-size:14px;font-weight:800;color:#b91c1c;")
+        elif nw:
+            val_summary.setText(f"🟡 {nw} warning(s) — review recommended")
+            val_summary.setStyleSheet("font-size:14px;font-weight:800;color:#b45309;")
+        else:
+            val_summary.setText("🟢 Configuration valid — no findings")
+            val_summary.setStyleSheet("font-size:14px;font-weight:800;color:#166534;")
+        _ic = {"error": ("🔴", "#b91c1c"), "warn": ("🟡", "#b45309"), "ok": ("🟢", "#166534")}
+        rows = []
+        for f in findings:
+            ic, col = _ic.get(f.level, ("•", "#334155"))
+            rows.append(f"<div style='margin:4px 0'><span>{ic}</span> "
+                        f"<span style='color:{col}'>{html.escape(f.message)}</span></div>")
+        val_out.setHtml("<div style='font-family:Segoe UI,Arial;font-size:12.5px'>"
+                        + "".join(rows) + "</div>")
+    btn_validate.clicked.connect(_run_validation)
+    cfg_tabs.insertTab(4, pg_val, "Validation")
+    cfg_tabs.currentChanged.connect(
+        lambda *_: _run_validation() if cfg_tabs.currentWidget() is pg_val else None)
 
     # ---------- Pestaña 4: Simulator (solo con simulador) ----------
     pg_sim = QtWidgets.QWidget(); sml = QtWidgets.QVBoxLayout(pg_sim); sml.setSpacing(10)
@@ -995,9 +1084,18 @@ def main() -> int:
             if getattr(mc, "n_bearings", 0):
                 sp_nbrg.setValue(int(mc.n_bearings))
             aq = setup.acquisition
-            sp_fmax.setValue(int(aq.fmax_hz)); sp_fmin.setValue(float(aq.fmin_hz))
-            cb_lines.setCurrentText(str(int(aq.lines))); cb_win.setCurrentText(aq.window)
-            sp_avg.setValue(int(aq.averages))
+            cb_win.setCurrentText(aq.window); sp_avg.setValue(int(aq.averages))
+            sp_sprev.setValue(int(getattr(aq, "samples_per_rev", 0) or 0))
+            cb_wfmode.setCurrentText(getattr(aq, "waveform_mode", "synchronous"))
+            cb_frequ.setCurrentText("CPM" if getattr(aq, "freq_unit", "cpm") == "cpm" else "Hz")
+            _ords = set(getattr(aq, "orders", []) or [])
+            o_half.setChecked(0.5 in _ords); o_1x.setChecked(1.0 in _ords)
+            o_2x.setChecked(2.0 in _ords); o_3x.setChecked(3.0 in _ords)
+            for _t in ("proximity", "velometer", "accelerometer"):
+                bp = (setup.acquisition_by_type or {}).get(_t) or aq
+                fx, fn, ln = acq_band[_t]
+                fx.setValue(float(bp.fmax_hz)); fn.setValue(float(bp.fmin_hz))
+                ln.setCurrentText(str(int(bp.lines)))
         else:
             fill_form(load_from_library(nm))
 
@@ -1095,12 +1193,14 @@ def main() -> int:
                            machine_type=ed_type.text().strip(), tag=ed_tag.text().strip(),
                            client=ed_client.text().strip(), location=ed_loc.text().strip())
         try:
-            acq = AcquisitionParams(fmax_hz=float(sp_fmax.value()), fmin_hz=float(sp_fmin.value()),
-                                    lines=int(cb_lines.currentText()), window=cb_win.currentText(),
-                                    averages=int(sp_avg.value()))
+            by_type = {t: _band_ap(t) for t in ("proximity", "velometer", "accelerometer")}
+            acq = _band_ap("proximity")     # global (fallback) = banda de proximidad
         except Exception:  # noqa: BLE001
-            acq = AcquisitionParams()
-        return AcqSetup(machine=mc, channels=chans, acquisition=acq)
+            acq = AcquisitionParams(); by_type = None
+        setup = AcqSetup(machine=mc, channels=chans, acquisition=acq)
+        if by_type:
+            setup.acquisition_by_type = by_type
+        return setup
 
     def do_save_cloud_machine():
         try:
