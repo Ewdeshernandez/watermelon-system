@@ -618,12 +618,57 @@ def main() -> int:
                           crit1=sp_c1.value(), crit2=sp_c2.value(), severity=sp_sev.value(),
                           phenomena={k: v for k, v in ph.items() if v != "none"})
 
+    def _setup_to_sim(setup) -> SimMachine:
+        """AcqSetup (nube/RM) → SimMachine (formato del nativo) para poder editar y
+        medir en el campo una máquina configurada en la web."""
+        KMAP = {"proximity": "prox", "velometer": "vel", "accelerometer": "accel",
+                "keyphasor": "keyphasor"}
+        sens = []
+        for ch in setup.channels:
+            sens.append(SensorSpec(
+                ch.point_label, KMAP.get(ch.sensor_type, "accel"), int(ch.bnc_port or 1),
+                float(ch.sensitivity_mv_per_eu or 100.0), float(ch.angle_deg or 0.0),
+                side=(ch.side or ""), gap=float(getattr(ch, "gap_bias_v", 0.0) or 0.0),
+                alarm=float(ch.alarm or 0.0), danger=float(ch.danger or 0.0)))
+        mc = setup.machine
+        mode = "arranque" if getattr(mc, "speed_control", "constant") == "variable" else "estable"
+        return SimMachine(name=mc.name, fs=float(getattr(args, "fs", 5120.0)) or 5120.0,
+                          sensors=sens, rotation=getattr(mc, "rotation", "CCW"),
+                          bearing_type=getattr(mc, "bearing_type", "plain"), mode=mode,
+                          rpm=float(getattr(mc, "rpm_nominal", 3000.0)),
+                          rpm_start=float(getattr(mc, "rpm_min", 0.0) or 300.0),
+                          rpm_end=float(getattr(mc, "rpm_max", 0.0) or 6000.0))
+
+    def _cloud_machine_names():
+        try:
+            from core.remote_monitoring.config import list_setups_cloud
+            return [(r.get("name") or r.get("id") or "") for r in list_setups_cloud()
+                    if (r.get("name") or r.get("id"))]
+        except Exception:  # noqa: BLE001
+            return []
+
     def refresh_lib():
-        cb_lib.clear(); cb_lib.addItems(list_machines() or ["(empty)"])
+        local = list_machines() or []
+        cloud_only = [n for n in _cloud_machine_names() if n not in local]
+        items = local + [f"☁ {n}" for n in cloud_only]
+        cb_lib.clear(); cb_lib.addItems(items or ["(empty)"])
 
     def do_load_lib():
         nm = cb_lib.currentText()
-        if nm and nm != "(empty)":
+        if not nm or nm == "(empty)":
+            return
+        if nm.startswith("☁"):                     # máquina de la NUBE (rm_setups)
+            name = nm[1:].strip()
+            try:
+                from core.remote_monitoring.config import load_setup_cloud
+                setup = load_setup_cloud(name)
+            except Exception:  # noqa: BLE001
+                setup = None
+            if setup is None:
+                QtWidgets.QMessageBox.warning(win, "Load", f"Could not download '{name}' from the cloud.")
+                return
+            fill_form(_setup_to_sim(setup))
+        else:
             fill_form(load_from_library(nm))
 
     def do_save_lib():
