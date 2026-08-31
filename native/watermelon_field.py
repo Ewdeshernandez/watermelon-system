@@ -518,6 +518,19 @@ def main() -> int:
     al.addWidget(tbl_acq, 1)
     cfg_tabs.addTab(pg_acq, "Acquisition")
 
+    def _acq_cell(text, bold=False, fg=None):
+        it = QtWidgets.QTableWidgetItem(text)
+        it.setFlags(QtCore.Qt.ItemIsEnabled)
+        if fg:
+            it.setForeground(QtGui.QColor(fg))
+        if bold:
+            f = it.font(); f.setBold(True); it.setFont(f)
+        return it
+
+    # Overrides EDITABLES de pareo/keyphasor (el usuario los puede cambiar en la tabla)
+    _pair_ovr = {}   # channel -> pair channel
+    _kph_ovr = {}    # channel -> keyphasor channel
+
     def _refresh_acq_info():
         try:
             from core.remote_monitoring.config import default_acq_for_type
@@ -535,26 +548,38 @@ def main() -> int:
                 w = tblc.cellWidget(r, 1)
                 lbl = w.currentText() if w else "Accelerometer"
                 data.append((it.text(), _KIND_BY_LABEL.get(lbl, "accel")))
-            names = {n for n, _ in data}
-            kph_name = next((n for n, k in data if k == "keyphasor"), "")
+            meas = [n for n, k in data if k != "keyphasor"]
+            kphs = [n for n, k in data if k == "keyphasor"]
+            kph_name = kphs[0] if kphs else ""
             tbl_acq.setRowCount(len(data))
+
+            def _mk_combo(options, current, store, chan):
+                cb = QtWidgets.QComboBox(); cb.addItems(options)
+                cb.setCurrentText(current if current in options else options[0])
+                cb.currentTextChanged.connect(
+                    lambda t, ch=chan: store.__setitem__(ch, t))
+                store[chan] = cb.currentText()
+                return cb
+
             for i, (nm, kind) in enumerate(data):
+                tbl_acq.setItem(i, 0, _acq_cell(nm, bold=True,
+                                fg=SENSOR_COLORS.get(kind, "#8b5cf6")))
+                tbl_acq.setItem(i, 1, _acq_cell(_WT.get(kind, kind).capitalize()))
                 if kind == "keyphasor":
-                    pair, kphr, fmx, lines = "—", "—", "—", "—"
-                else:
-                    sib = _sibling_name(nm); pair = sib if sib in names else "— (no pair)"
-                    kphr = kph_name or "— (none)"
-                    ap = default_acq_for_type(_WT.get(kind, "proximity"))
-                    fmx, lines = f"{ap.fmax_hz:.0f}", str(ap.lines)
-                vals = [nm, _WT.get(kind, kind).capitalize(), pair, kphr, fmx, lines]
-                for c, v in enumerate(vals):
-                    cell = QtWidgets.QTableWidgetItem(v)
-                    if c == 0:
-                        cell.setForeground(QtGui.QColor(SENSOR_COLORS.get(kind, "#8b5cf6")))
-                        f = cell.font(); f.setBold(True); cell.setFont(f)
-                    elif c == 2 and pair.startswith("—"):
-                        cell.setForeground(QtGui.QColor("#b45309"))
-                    tbl_acq.setItem(i, c, cell)
+                    for c in (2, 3, 4, 5):
+                        tbl_acq.setItem(i, c, _acq_cell("—"))
+                    tbl_acq.removeCellWidget(i, 2); tbl_acq.removeCellWidget(i, 3)
+                    continue
+                sib = _sibling_name(nm)
+                pair_opts = ["—"] + [x for x in meas if x != nm]
+                pdef = _pair_ovr.get(nm) or (sib if sib in meas else "—")
+                tbl_acq.setCellWidget(i, 2, _mk_combo(pair_opts, pdef, _pair_ovr, nm))
+                kph_opts = ["—"] + kphs
+                kdef = _kph_ovr.get(nm) or (kph_name if kph_name else "—")
+                tbl_acq.setCellWidget(i, 3, _mk_combo(kph_opts, kdef, _kph_ovr, nm))
+                ap = default_acq_for_type(_WT.get(kind, "proximity"))
+                tbl_acq.setItem(i, 4, _acq_cell(f"{ap.fmax_hz:.0f}"))
+                tbl_acq.setItem(i, 5, _acq_cell(str(ap.lines)))
         except Exception:  # noqa: BLE001
             pass
     for _w in (sp_fmax, sp_avg):
@@ -878,13 +903,20 @@ def main() -> int:
         # --- PAREO X/Y + referencia de keyphasor (para órbita y fase 1X) ---
         # El par se infiere por convención: mismo cojinete, eje opuesto (1Y↔1X, 1V↔1H).
         kph_name = next((c.point_label for c in chans if c.sensor_type == "keyphasor"), "")
+        names = {c.point_label for c in chans}
         for c in chans:
             if c.sensor_type == "keyphasor":
                 continue
-            c.keyphasor_ref = kph_name
-            sib = _sibling_name(c.point_label)
-            if sib and any(o.point_label == sib for o in chans):
-                c.pair_ref = sib
+            # override editable (tabla Acquisition) → si no, inferido por nombre
+            ko = _kph_ovr.get(c.point_label)
+            c.keyphasor_ref = ko if (ko and ko != "—") else kph_name
+            po = _pair_ovr.get(c.point_label)
+            if po and po != "—" and po in names:
+                c.pair_ref = po
+            else:
+                sib = _sibling_name(c.point_label)
+                if sib and sib in names:
+                    c.pair_ref = sib
         nb = len({_bearing_no(s.name) for s in m.sensors if s.kind != "keyphasor"}) or 1
         speed = "variable" if m.mode in ("arranque", "parada", "arranque_parada") else "constant"
         rng = [v for v in (m.rpm_start, m.rpm_end) if v > 0]
@@ -969,6 +1001,10 @@ def main() -> int:
     refresh_lib(); fill_form(_machine_from_agent())
     tblc.itemChanged.connect(lambda *_: draw_bearing())   # redibuja al editar ángulo/nombre
     cb_rot.currentTextChanged.connect(lambda *_: draw_bearing())
+    # Redibujar el diagrama al entrar a "Sensors & layout" → evita que quede viejo
+    # (ej. cambiabas rotación a CW en Machine y el diagrama seguía mostrando CCW).
+    cfg_tabs.currentChanged.connect(
+        lambda *_: draw_bearing() if cfg_tabs.currentWidget() is pg_sensors else None)
 
     # --- Monitoreo (adquisición + estado + tabular rápido, estilo web) ---
     from core.remote_monitoring.stream_source import channel_kind as _ckind
