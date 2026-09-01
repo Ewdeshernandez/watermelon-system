@@ -199,8 +199,10 @@ jobs:
         shell: bash
         run: |
           VER="${GITHUB_REF_NAME#field-v}"
-          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" \
-            "/DMyAppVersion=${VER}" native/installer/watermelon.iss
+          ISCC=$(find "/c/Program Files (x86)/Inno Setup 6" "/c/Program Files/Inno Setup 6" \
+                 -iname ISCC.exe 2>/dev/null | head -1)
+          echo "ISCC=$ISCC"
+          "$ISCC" "/DMyAppVersion=${VER}" native/installer/watermelon.iss
           ls -la WatermelonField-Setup.exe
 
       # Release: publica el INSTALADOR (principal) + el .zip portable (alternativa)

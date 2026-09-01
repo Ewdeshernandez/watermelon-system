@@ -22,6 +22,9 @@ DefaultDirName={autopf}\Watermelon Field
 DefaultGroupName=Watermelon Field
 DisableProgramGroupPage=yes
 DisableDirPage=auto
+; Las rutas (Source/SetupIconFile/OutputDir) se resuelven desde SourceDir; el .iss vive
+; en native/installer, así que subimos dos niveles → raíz del repo (donde está out/ y assets/).
+SourceDir=..\..
 OutputDir=.
 OutputBaseFilename=WatermelonField-Setup
 SetupIconFile=assets\watermelon.ico
