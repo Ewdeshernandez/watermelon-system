@@ -394,9 +394,14 @@ def _equipos_composer(prefix: str) -> List[Dict[str, Any]]:
                 placeholder="ej: Información del conductor / conducido / alineador")
             if hc[1].button("🗑", key=f"{prefix}_eqdel_{eid}"):
                 eqs.pop(i); st.rerun()
-            _seed = eq.get("_df") or {"Campo": ["Fabricante", "Modelo", "Serial"],
-                                      "Valor": ["", "", ""]}
-            ed = st.data_editor(pd.DataFrame(_seed), num_rows="dynamic",
+            # Base ESTABLE en sesión (init una vez desde lo guardado/default).
+            # No se re-siembra con lo editado → evita que se borre al escribir.
+            _dfk = f"{prefix}_eqdf_{eid}"
+            if _dfk not in st.session_state:
+                _seed = eq.get("_df") or {"Campo": ["Fabricante", "Modelo", "Serial"],
+                                          "Valor": ["", "", ""]}
+                st.session_state[_dfk] = pd.DataFrame(_seed)
+            ed = st.data_editor(st.session_state[_dfk], num_rows="dynamic",
                                 use_container_width=True, key=f"{prefix}_eqtbl_editor_{eid}")
             eq["_df"] = {"Campo": [str(x) for x in ed["Campo"].tolist()],
                          "Valor": [str(x) for x in ed["Valor"].tolist()]}
@@ -459,9 +464,12 @@ def _free_block_composer(prefix: str) -> List[Dict[str, Any]]:
                                            key=f"{prefix}_bnc_{bid}"))
                 b["cols"] = ncol
                 cols = [f"C{c + 1}" for c in range(ncol)]
-                seed = b.get("_df") or {}
-                data = {c: (seed.get(c) or ["", ""]) for c in cols}
-                ed = st.data_editor(pd.DataFrame(data), num_rows="dynamic",
+                _dfk = f"{prefix}_bdf_{bid}_{ncol}"
+                if _dfk not in st.session_state:
+                    seed = b.get("_df") or {}
+                    data = {c: (seed.get(c) or ["", ""]) for c in cols}
+                    st.session_state[_dfk] = pd.DataFrame(data)
+                ed = st.data_editor(st.session_state[_dfk], num_rows="dynamic",
                                     use_container_width=True,
                                     key=f"{prefix}_btbl_editor_{bid}_{ncol}")
                 b["_df"] = {c: [str(x) for x in ed[c].tolist()] for c in cols}
@@ -551,13 +559,20 @@ def render_report_family(family: str) -> None:
     _apply_pending(family)
     # 2) Barra de borradores (recuperar/guardar/cargar/duplicar/nuevo).
     _draft_bar(family)
+    # Indicador visible de autoguardado (igual que Calibración).
+    _ats = st.session_state.get(f"_rep_autosave_ts_{family}")
+    st.caption("🟢 Autoguardado activo — el reporte se recupera si se cae la "
+               "sesión" + (f" · último guardado: {_ats}" if _ats else "."))
     # 3) Formulario.
     meta = _meta_form(family)
     st.divider()
     form(meta)
     # 4) Autoguardado del estado (tolerante a disco lleno; no crashea).
     try:
-        _drafts.autosave(_rep_module(family), _capture_family_state(family))
+        if _drafts.autosave(_rep_module(family), _capture_family_state(family)):
+            import datetime as _dt
+            st.session_state[f"_rep_autosave_ts_{family}"] = \
+                _dt.datetime.now().strftime("%H:%M:%S")
     except Exception:
         pass
 
