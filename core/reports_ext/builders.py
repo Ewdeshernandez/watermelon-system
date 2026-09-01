@@ -248,48 +248,63 @@ def build_borescope_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> byt
 # 4. REPORTE DE ALINEACIÓN
 # =====================================================================
 def build_alignment_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> bytes:
-    """content: metodo, objeto, tolerancia_offset, tolerancia_ang,
-    align_rows[list of [param, as_found, as_left, tol, estado]],
-    shims(text), hallazgos[list], observaciones[list], recomendaciones[list],
-    photos[list]."""
+    """Reporte de Alineación — 7 secciones. content:
+      introduccion, antecedentes (text)
+      hallazgos, recomendaciones (list → numeradas)
+      met_text, met_photos[list], met_equipos[list of {title, rows:[[campo,valor]]}]
+      dev_blocks[list de bloques orden libre: text/images/table]
+      anexo_photos[list]"""
+    from core.reports_ext.common import (
+        numbered_list as _numbered, titled_table as _titled,
+        free_blocks_flowables as _freeblocks, photo_grid as _pg,
+        photo_credit as _pc,
+    )
     styles = make_styles()
     body: List[Any] = []
-    body += _service_data(meta, styles, content.get("servicio", "Alineación de ejes"))
 
-    body.append(section("2. Método y alcance", styles))
-    body.append(p(content.get("metodo",
-                  "Alineación por láser de doble haz; convención acople "
-                  "fijo (estacionaria) → móvil."), styles))
-    if content.get("objeto"):
-        body.append(p(content["objeto"], styles))
+    body.append(section("1. Introducción y alcance", styles))
+    body.append(p(content.get("introduccion", "—"), styles)); body.append(Spacer(1, 0.2 * cm))
+
+    body.append(section("2. Antecedentes", styles))
+    body.append(p(content.get("antecedentes", "—"), styles)); body.append(Spacer(1, 0.2 * cm))
+
+    body.append(section("3. Hallazgos", styles))
+    body += _numbered(content.get("hallazgos", []) or ["—"], styles)
     body.append(Spacer(1, 0.3 * cm))
 
-    rows = content.get("align_rows") or [
-        ["Offset vertical", "", "", "", ""],
-        ["Offset horizontal", "", "", "", ""],
-        ["Angularidad vertical", "", "", "", ""],
-        ["Angularidad horizontal", "", "", "", ""],
-    ]
-    body.append(section("3. Condición encontrada / dejada (As found / As left)", styles))
-    body.append(grid_table(
-        ["Parámetro", "As found", "As left", "Tolerancia", "Estado"], rows, styles,
-        col_widths=[5.0 * cm, 2.9 * cm, 2.9 * cm, 2.9 * cm, 2.5 * cm]))
+    body.append(section("4. Recomendaciones finales", styles))
+    body += _numbered(content.get("recomendaciones", []) or ["—"], styles)
     body.append(Spacer(1, 0.3 * cm))
-    if content.get("shims"):
-        body.append(section("4. Correcciones (shims / movimientos)", styles))
-        body.append(p(content["shims"], styles)); body.append(Spacer(1, 0.2 * cm))
 
-    if content.get("hallazgos"):
-        body.append(section("5. Hallazgos", styles))
-        body += bullets(content["hallazgos"], styles); body.append(Spacer(1, 0.2 * cm))
-    if content.get("observaciones"):
-        body.append(section("6. Observaciones", styles))
-        body += bullets(content["observaciones"], styles); body.append(Spacer(1, 0.2 * cm))
-    if content.get("recomendaciones"):
-        body.append(section("7. Recomendaciones", styles))
-        body += bullets(content["recomendaciones"], styles); body.append(Spacer(1, 0.2 * cm))
+    # 5. Metodología: texto + imágenes + tablas de equipo (conductor/conducido/alineador)
+    body.append(section("5. Metodología", styles))
+    if str(content.get("met_text", "")).strip():
+        body.append(p(content["met_text"], styles)); body.append(Spacer(1, 0.2 * cm))
+    _mp = [ph for ph in (content.get("met_photos") or []) if ph.get("bytes")]
+    if _mp:
+        body += _pg(_mp, styles, cols=2, credit=_pc()); body.append(Spacer(1, 0.2 * cm))
+    for eq in (content.get("met_equipos") or []):
+        rows = [r for r in (eq.get("rows") or []) if any(str(c).strip() for c in r)]
+        if rows or eq.get("title"):
+            body.append(_titled(eq.get("title", ""), ["Campo", "Valor"], rows, styles,
+                                col_widths=[6.0 * cm, 10.2 * cm]))
+            body.append(Spacer(1, 0.2 * cm))
+    body.append(Spacer(1, 0.1 * cm))
 
-    body += _photos(content, styles, "8")
+    # 6. Desarrollo del servicio: ORDEN LIBRE (texto/imágenes/tablas)
+    body.append(section("6. Desarrollo del servicio", styles))
+    _blocks = _freeblocks(content.get("dev_blocks") or [], styles, credit=_pc())
+    if _blocks:
+        body += _blocks
+    else:
+        body.append(p("—", styles))
+    body.append(Spacer(1, 0.2 * cm))
+
+    # 7. Anexos (imágenes)
+    anexo = [ph for ph in (content.get("anexo_photos") or []) if ph.get("bytes")]
+    if anexo:
+        body.append(section("7. Anexos", styles))
+        body += _pg(anexo, styles, cols=2, credit=_pc())
 
     return render_report_pdf(
         _shell_meta(meta, title="Reporte de Alineación", format_code="SIGA-FMT-ALI",

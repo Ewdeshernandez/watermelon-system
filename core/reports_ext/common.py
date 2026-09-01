@@ -151,6 +151,71 @@ def machine_info_table(turbine: Dict[str, str], borescope: Dict[str, str],
     return out
 
 
+def titled_table(title: str, headers: Optional[List[str]], rows: List[List[Any]],
+                 styles, total_w_cm: float = 16.2,
+                 col_widths: Optional[List[float]] = None) -> Table:
+    """Tabla con banda de título (span) + fila de encabezados opcional + datos.
+    Sirve para tablas de equipo (Campo/Valor) y para tablas libres (matrices).
+    `rows`: lista de filas (cada fila lista de celdas). Celdas faltantes se
+    rellenan vacías."""
+    ncols = (len(headers) if headers
+             else (max((len(r) for r in rows), default=2) if rows else 2))
+    if not col_widths:
+        col_widths = [total_w_cm / ncols * cm] * ncols
+    data: List[List[Any]] = []
+    style = [
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]
+    r = 0
+    if title:
+        data.append([Paragraph(f"<b>{paragraph_safe(title)}</b>", styles["WMTableHeader"])]
+                    + [""] * (ncols - 1))
+        style += [("SPAN", (0, 0), (-1, 0)),
+                  ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_HEADER_BG)),
+                  ("ALIGN", (0, 0), (-1, 0), "CENTER")]
+        r += 1
+    if headers:
+        data.append([Paragraph(f"<b>{paragraph_safe(h)}</b>", styles["WMTableCell"])
+                     for h in headers])
+        style += [("BACKGROUND", (0, r), (-1, r), colors.HexColor("#e8eef5"))]
+        r += 1
+    for row in (rows or []):
+        cells = [Paragraph(paragraph_safe(str(c)), styles["WMTableCell"]) for c in row]
+        cells += [Paragraph("", styles["WMTableCell"])] * (ncols - len(cells))
+        data.append(cells[:ncols])
+    t = Table(data, colWidths=col_widths, repeatRows=(r if title or headers else 0))
+    t.setStyle(TableStyle(style))
+    return t
+
+
+def free_blocks_flowables(blocks: List[Dict[str, Any]], styles,
+                          credit: Optional[str] = None) -> List[Any]:
+    """Renderiza bloques de ORDEN LIBRE (texto / imágenes / tabla) en el orden
+    dado. block: {'type':'text','text':...} | {'type':'images','photos':[...]} |
+    {'type':'table','title':...,'headers':[...],'rows':[[...]]}."""
+    out: List[Any] = []
+    for b in (blocks or []):
+        bt = b.get("type")
+        if bt == "text" and str(b.get("text", "")).strip():
+            out.append(p(b["text"], styles))
+            out.append(Spacer(1, 0.15 * cm))
+        elif bt == "images":
+            phs = [ph for ph in (b.get("photos") or []) if ph.get("bytes")]
+            if phs:
+                out += photo_grid(phs, styles, cols=b.get("cols", 2), credit=credit)
+                out.append(Spacer(1, 0.15 * cm))
+        elif bt == "table":
+            rows = [r for r in (b.get("rows") or [])
+                    if any(str(c).strip() for c in r)]
+            if rows or b.get("title"):
+                out.append(titled_table(b.get("title", ""), b.get("headers"),
+                                        rows, styles))
+                out.append(Spacer(1, 0.2 * cm))
+    return out
+
+
 def inspection_status_table(rows: List[Dict[str, str]], styles) -> Table:
     """Tabla de puntos de inspección y estado. row: {ubicacion, punto, estado}.
     El estado se colorea (Serviciable verde / No serviciable rojo)."""
@@ -578,6 +643,7 @@ def commit_consecutive(family: str) -> str:
 __all__ = [
     "make_styles", "p", "section", "subsection", "bullets", "numbered_plan",
     "numbered_list", "machine_info_table", "inspection_status_table",
+    "titled_table", "free_blocks_flowables",
     "kv_table", "two_col_kv", "grid_table", "safe_image", "photo_grid",
     "severity_table", "severity_blocks", "severity_legend", "signatures_block",
     "autofill_base_meta", "today_str", "photo_credit",

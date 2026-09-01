@@ -37,7 +37,7 @@ _FAMILY_PREFIXES = {
 }
 # Subcadenas de llaves que NO se persisten (bytes/uploaders/editores/UI/PDF).
 _SKIP_SUBSTR = ("_editor", "_pdf", "_photos", "_evid", "figt", "_draft",
-                "_pick", "_gen", "_dl", "_meth")
+                "_pick", "_gen", "_dl", "_meth", "_img", "_fig_")
 
 
 def _rep_module(family: str) -> str:
@@ -57,7 +57,7 @@ def _capture_family_state(family: str) -> Dict[str, Any]:
             continue
         if any(s in k for s in _SKIP_SUBSTR):
             continue
-        v = st.session_state.get(k)
+        v = _drafts._strip_bytes(st.session_state.get(k))  # quita bytes de imágenes
         if not (isinstance(v, (str, int, float, bool, list, dict)) or v is None):
             continue
         try:
@@ -374,28 +374,138 @@ def _borescope(meta):
     _generate("boro", "boroscopia", meta, content)
 
 
+def _equipos_composer(prefix: str) -> List[Dict[str, Any]]:
+    """Tablas de equipo (Campo/Valor) — conductor, conducido, alineador, etc.
+    Se pueden agregar/quitar. Devuelve [{title, rows:[[campo,valor]]}]."""
+    key = f"{prefix}_equipos"
+    eqs = st.session_state.setdefault(key, [])
+    st.session_state.setdefault(f"{prefix}_eidc", 0)
+    if st.button("➕ Agregar tabla de equipo", key=f"{prefix}_addeq"):
+        st.session_state[f"{prefix}_eidc"] += 1
+        eqs.append({"id": st.session_state[f"{prefix}_eidc"], "title": "", "rows": []})
+        st.rerun()
+    for i, eq in enumerate(list(eqs)):
+        eid = eq["id"]
+        with st.container(border=True):
+            hc = st.columns([6, 1])
+            eq["title"] = hc[0].text_input(
+                "Título de la tabla", value=eq.get("title", ""),
+                key=f"{prefix}_eqttl_{eid}",
+                placeholder="ej: Información del conductor / conducido / alineador")
+            if hc[1].button("🗑", key=f"{prefix}_eqdel_{eid}"):
+                eqs.pop(i); st.rerun()
+            _seed = eq.get("_df") or {"Campo": ["Fabricante", "Modelo", "Serial"],
+                                      "Valor": ["", "", ""]}
+            ed = st.data_editor(pd.DataFrame(_seed), num_rows="dynamic",
+                                use_container_width=True, key=f"{prefix}_eqtbl_editor_{eid}")
+            eq["_df"] = {"Campo": [str(x) for x in ed["Campo"].tolist()],
+                         "Valor": [str(x) for x in ed["Valor"].tolist()]}
+            eq["rows"] = [[str(ed.iloc[r]["Campo"]), str(ed.iloc[r]["Valor"])]
+                          for r in range(len(ed))]
+    return eqs
+
+
+def _free_block_composer(prefix: str) -> List[Dict[str, Any]]:
+    """Compositor de ORDEN LIBRE: bloques de texto / imágenes / tabla que el
+    usuario agrega, reordena (↑/↓) y borra. Devuelve la lista en orden."""
+    key = f"{prefix}_blocks"
+    blocks = st.session_state.setdefault(key, [])
+    st.session_state.setdefault(f"{prefix}_bidc", 0)
+
+    def _nid():
+        st.session_state[f"{prefix}_bidc"] += 1
+        return st.session_state[f"{prefix}_bidc"]
+
+    ca = st.columns(3)
+    if ca[0].button("➕ Texto", key=f"{prefix}_addtxt", use_container_width=True):
+        blocks.append({"id": _nid(), "type": "text", "text": ""}); st.rerun()
+    if ca[1].button("➕ Imágenes", key=f"{prefix}_addimg", use_container_width=True):
+        blocks.append({"id": _nid(), "type": "images"}); st.rerun()
+    if ca[2].button("➕ Tabla", key=f"{prefix}_addtbl", use_container_width=True):
+        blocks.append({"id": _nid(), "type": "table", "cols": 3}); st.rerun()
+
+    for i, b in enumerate(list(blocks)):
+        bid = b["id"]
+        _tlabel = {"text": "Texto", "images": "Imágenes", "table": "Tabla"}.get(b["type"], b["type"])
+        with st.container(border=True):
+            hc = st.columns([6, 1, 1, 1])
+            hc[0].markdown(f"**Bloque {i + 1} · {_tlabel}**")
+            if hc[1].button("↑", key=f"{prefix}_up_{bid}") and i > 0:
+                blocks[i - 1], blocks[i] = blocks[i], blocks[i - 1]; st.rerun()
+            if hc[2].button("↓", key=f"{prefix}_dn_{bid}") and i < len(blocks) - 1:
+                blocks[i + 1], blocks[i] = blocks[i], blocks[i + 1]; st.rerun()
+            if hc[3].button("🗑", key=f"{prefix}_delb_{bid}"):
+                blocks.pop(i); st.rerun()
+
+            if b["type"] == "text":
+                b["text"] = st.text_area("Texto", value=b.get("text", ""),
+                                         key=f"{prefix}_btxt_{bid}", height=100)
+            elif b["type"] == "images":
+                files = st.file_uploader("Imágenes", accept_multiple_files=True,
+                                         type=["png", "jpg", "jpeg"],
+                                         key=f"{prefix}_bimg_{bid}")
+                phs = []
+                for j, f in enumerate(files or [], 1):
+                    _t = st.text_input(f"Figura {j}", key=f"{prefix}_bfig_{bid}_{j}",
+                                       placeholder=f"Descripción de la figura {j}")
+                    _cap = f"Figura {j}. {_t}".rstrip(". ") if _t else f"Figura {j}"
+                    phs.append({"bytes": f.getvalue(), "caption": _cap})
+                b["photos"] = phs
+            elif b["type"] == "table":
+                b["title"] = st.text_input("Título de la tabla", value=b.get("title", ""),
+                                           key=f"{prefix}_bttl_{bid}")
+                ncol = int(st.number_input("Columnas", min_value=2, max_value=6,
+                                           value=int(b.get("cols", 3)),
+                                           key=f"{prefix}_bnc_{bid}"))
+                b["cols"] = ncol
+                cols = [f"C{c + 1}" for c in range(ncol)]
+                seed = b.get("_df") or {}
+                data = {c: (seed.get(c) or ["", ""]) for c in cols}
+                ed = st.data_editor(pd.DataFrame(data), num_rows="dynamic",
+                                    use_container_width=True,
+                                    key=f"{prefix}_btbl_editor_{bid}_{ncol}")
+                b["_df"] = {c: [str(x) for x in ed[c].tolist()] for c in cols}
+                recs = [[str(ed.iloc[r][c]) for c in cols] for r in range(len(ed))]
+                b["headers"] = recs[0] if recs else cols
+                b["rows"] = recs[1:] if len(recs) > 1 else []
+                st.caption("La 1ª fila son los encabezados; las siguientes, los datos.")
+    return blocks
+
+
 def _alignment(meta):
-    rep_section_header("Reporte de Alineación", "As found / As left · tolerancias · shims",
+    rep_section_header("Reporte de Alineación",
+                       "Introducción · antecedentes · metodología · desarrollo libre",
                        "SIGA-FMT-ALI")
-    metodo = st.text_area("Método y alcance", key="ali_metodo", height=70,
-                          placeholder="Alineación láser doble haz; estacionaria → móvil.")
-    st.markdown("**Condición encontrada / dejada:**")
-    default = pd.DataFrame({
-        "Parámetro": ["Offset vertical", "Offset horizontal",
-                      "Angularidad vertical", "Angularidad horizontal"],
-        "As found": ["", "", "", ""], "As left": ["", "", "", ""],
-        "Tolerancia": ["", "", "", ""], "Estado": ["", "", "", ""]})
-    edited = st.data_editor(st.session_state.get("ali_df", default), num_rows="dynamic",
-                            use_container_width=True, key="ali_editor")
-    rows = [[r["Parámetro"], r["As found"], r["As left"], r["Tolerancia"], r["Estado"]]
-            for _, r in edited.iterrows() if str(r["Parámetro"]).strip()]
-    shims = st.text_area("Correcciones (shims / movimientos)", key="ali_shims", height=70)
+    intro = st.text_area("1. Introducción y alcance", key="ali_intro", height=90)
+    ante = st.text_area("2. Antecedentes", key="ali_ante", height=80)
     c1, c2 = st.columns(2)
-    hall = c1.text_area("Hallazgos (uno por línea)", key="ali_hall", height=90)
-    reco = c2.text_area("Recomendaciones (una por línea)", key="ali_reco", height=90)
-    photos = _photo_uploader("ali")
-    content = {"metodo": metodo, "align_rows": rows, "shims": shims,
-               "hallazgos": _lines(hall), "recomendaciones": _lines(reco), "photos": photos}
+    hall = c1.text_area("3. Hallazgos (uno por línea)", key="ali_hall", height=100)
+    reco = c2.text_area("4. Recomendaciones finales (una por línea)", key="ali_reco", height=100)
+
+    # 5. Metodología: texto + imágenes + tablas de equipo (conductor/conducido/alineador)
+    st.markdown("**5. Metodología** — texto, imágenes y tablas de equipo.")
+    met_text = st.text_area("Texto de metodología", key="ali_met_txt", height=90,
+                            placeholder="Alineación láser doble haz; estacionaria → móvil...")
+    with st.expander("Imágenes de metodología", expanded=False):
+        met_photos = _photo_uploader("ali_met", label="Imágenes")
+    with st.expander("Tablas de equipo (conductor · conducido · alineador)", expanded=False):
+        equipos = _equipos_composer("ali_eq")
+
+    # 6. Desarrollo del servicio — ORDEN LIBRE
+    st.markdown("**6. Desarrollo del servicio** — arma el orden que quieras "
+                "(texto, imágenes y tablas):")
+    dev_blocks = _free_block_composer("ali_dev")
+
+    # 7. Anexos
+    with st.expander("7. Anexos (imágenes)", expanded=False):
+        anexo = _photo_uploader("ali_anx", label="Imágenes de anexo")
+
+    content = {
+        "introduccion": intro, "antecedentes": ante,
+        "hallazgos": _lines(hall), "recomendaciones": _lines(reco),
+        "met_text": met_text, "met_photos": met_photos, "met_equipos": equipos,
+        "dev_blocks": dev_blocks, "anexo_photos": anexo,
+    }
     _generate("ali", "alineacion", meta, content)
 
 
