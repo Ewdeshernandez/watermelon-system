@@ -22,7 +22,7 @@ REPORT_FAMILIES = [
     ("preliminar", "Preliminar"),
     ("boroscopia", "Boroscopia"),
     ("alineacion", "Alineación"),
-    ("mecanico", "Mecánico"),
+    ("consolidado", "Consolidado"),
 ]
 
 __all__ = ["REPORT_FAMILIES"]

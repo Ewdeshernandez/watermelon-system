@@ -29,7 +29,8 @@ from core.reports_ext.common import (
     make_styles, p, section, bullets, numbered_plan, numbered_list,
     machine_info_table, inspection_status_table, kv_table, two_col_kv,
     grid_table, photo_grid, severity_table, severity_blocks, severity_legend,
-    today_str, photo_credit,
+    today_str, photo_credit, titled_table, free_blocks_flowables,
+    activities_progress_table,
 )
 
 _CITY = "Cajicá, Cundinamarca · Colombia"
@@ -350,45 +351,106 @@ def build_alignment_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> byt
 # =====================================================================
 # 5. REPORTE MECÁNICO
 # =====================================================================
-def build_mechanical_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> bytes:
-    """content: objeto, actividades[list of {title, items}],
-    metrologia_rows[list of [param, valor, unidad, referencia, estado]],
-    hallazgos[list], observaciones[list], recomendaciones[list], photos[list]."""
+def build_consolidated_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> bytes:
+    """Reporte Consolidado Final — 9 secciones.
+
+    content:
+      antecedentes(text), tech_rows[list of [campo, valor]], estado_photos[list],
+      objetivo(text), act_rows[list of {tipo, descripcion, avance}],
+      recurso_rows[list of [recurso, detalle]], docs_ref[list of str],
+      dev_blocks[free-order blocks], anexo_docs[list of str].
+    """
     styles = make_styles()
     body: List[Any] = []
-    body += _service_data(meta, styles, content.get("servicio", "Intervención mecánica"))
 
-    if content.get("objeto"):
-        body.append(section("2. Objeto y alcance", styles))
-        body.append(p(content["objeto"], styles)); body.append(Spacer(1, 0.3 * cm))
+    # 1. Datos del servicio
+    body += _service_data(meta, styles, content.get("servicio", ""))
 
-    acts = content.get("actividades") or []
-    if acts:
-        body.append(section("3. Actividades ejecutadas", styles))
-        body += numbered_plan(acts, styles)
+    # 2. Antecedentes (solo texto)
+    body.append(section("2. Antecedentes", styles))
+    if str(content.get("antecedentes", "")).strip():
+        body.append(p(content["antecedentes"], styles))
+    else:
+        body.append(p("—", styles))
+    body.append(Spacer(1, 0.3 * cm))
 
-    metro = content.get("metrologia_rows") or []
-    if metro:
-        body.append(section("4. Mediciones / Metrología", styles))
-        body.append(grid_table(
-            ["Parámetro", "Valor", "Unidad", "Referencia", "Estado"], metro, styles,
-            col_widths=[4.8 * cm, 2.8 * cm, 2.4 * cm, 3.4 * cm, 2.8 * cm]))
-        body.append(Spacer(1, 0.3 * cm))
+    # 3. Datos técnicos y estado del equipo (tabla técnica + foto del equipo)
+    body.append(section("3. Datos técnicos y estado del equipo", styles))
+    tech = [r for r in (content.get("tech_rows") or [])
+            if any(str(c).strip() for c in r)]
+    if tech:
+        body.append(titled_table("Datos técnicos", ["Campo", "Valor"], tech, styles,
+                                 col_widths=[6.2 * cm, 10.0 * cm]))
+        body.append(Spacer(1, 0.25 * cm))
+    estado = [ph for ph in (content.get("estado_photos") or []) if ph.get("bytes")]
+    if estado:
+        body += photo_grid(estado, styles, cols=content.get("estado_cols", 2),
+                           credit=photo_credit())
+    body.append(Spacer(1, 0.3 * cm))
 
-    body.append(section("5. Hallazgos", styles))
-    body += bullets(content.get("hallazgos", []) or ["—"], styles); body.append(Spacer(1, 0.2 * cm))
-    if content.get("observaciones"):
-        body.append(section("6. Observaciones", styles))
-        body += bullets(content["observaciones"], styles); body.append(Spacer(1, 0.2 * cm))
-    body.append(section("7. Recomendaciones", styles))
-    body += bullets(content.get("recomendaciones", []) or ["—"], styles); body.append(Spacer(1, 0.2 * cm))
+    # 4. Objetivo del trabajo (texto)
+    body.append(section("4. Objetivo del trabajo", styles))
+    body.append(p(content.get("objetivo") or "—", styles))
+    body.append(Spacer(1, 0.3 * cm))
 
-    body += _photos(content, styles, "8")
+    # 5. Descripción de las actividades (tabla con % de avance)
+    body.append(section("5. Descripción de las actividades", styles))
+    act_rows = [r for r in (content.get("act_rows") or [])
+                if str(r.get("descripcion", "")).strip()]
+    if act_rows:
+        body.append(activities_progress_table(act_rows, styles))
+    else:
+        body.append(p("—", styles))
+    body.append(Spacer(1, 0.3 * cm))
+
+    # 6. Recurso utilizado para realizar la actividad
+    body.append(section("6. Recurso utilizado para realizar la actividad", styles))
+    rec = [r for r in (content.get("recurso_rows") or [])
+           if any(str(c).strip() for c in r)]
+    if rec:
+        body.append(titled_table("", ["Recurso", "Detalle"], rec, styles,
+                                 col_widths=[6.2 * cm, 10.0 * cm]))
+    else:
+        body.append(p("—", styles))
+    body.append(Spacer(1, 0.3 * cm))
+
+    # 7. Documentos de referencia
+    body.append(section("7. Documentos de referencia", styles))
+    docs = [d for d in (content.get("docs_ref") or []) if str(d).strip()]
+    if docs:
+        body += numbered_list(docs, styles)
+    else:
+        body.append(p("—", styles))
+    body.append(Spacer(1, 0.3 * cm))
+
+    # 8. Desarrollo y descripción detallada de las actividades (orden libre)
+    body.append(section("8. Desarrollo y descripción detallada de las actividades",
+                        styles))
+    dev = free_blocks_flowables(content.get("dev_blocks") or [], styles,
+                                credit=photo_credit())
+    if dev:
+        body += dev
+    else:
+        body.append(p("—", styles))
+    body.append(Spacer(1, 0.3 * cm))
+
+    # 9. Anexos (nombres de documentos)
+    body.append(section("9. Anexos", styles))
+    anexos = [a for a in (content.get("anexo_docs") or []) if str(a).strip()]
+    if anexos:
+        body += numbered_list(anexos, styles)
+    else:
+        body.append(p("—", styles))
 
     return render_report_pdf(
-        _shell_meta(meta, title="Reporte Mecánico", format_code="SIGA-FMT-MEC",
-                    format_version="1", asset_class="Intervención mecánica"),
+        _shell_meta(meta, title="Reporte Consolidado Final",
+                    format_code="SIGA-FMT-CON", format_version="1",
+                    asset_class="Reporte consolidado final"),
         body)
+
+
+# Alias de compatibilidad (nombre viejo).
+build_mechanical_pdf = build_consolidated_pdf
 
 
 BUILDERS = {
@@ -396,10 +458,12 @@ BUILDERS = {
     "preliminar": build_preliminary_pdf,
     "boroscopia": build_borescope_pdf,
     "alineacion": build_alignment_pdf,
-    "mecanico": build_mechanical_pdf,
+    "consolidado": build_consolidated_pdf,
+    "mecanico": build_consolidated_pdf,  # compat
 }
 
 __all__ = [
     "build_daily_pdf", "build_preliminary_pdf", "build_borescope_pdf",
-    "build_alignment_pdf", "build_mechanical_pdf", "BUILDERS",
+    "build_alignment_pdf", "build_consolidated_pdf", "build_mechanical_pdf",
+    "BUILDERS",
 ]

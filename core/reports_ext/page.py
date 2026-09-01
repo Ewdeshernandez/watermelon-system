@@ -33,7 +33,7 @@ _FAMILY_PREFIXES = {
     "preliminar": ["preliminar", "prel"],
     "boroscopia": ["boroscopia", "boro"],
     "alineacion": ["alineacion", "ali"],
-    "mecanico": ["mecanico", "mec"],
+    "consolidado": ["consolidado", "con"],
 }
 # Subcadenas de llaves que NO se persisten NI se restauran. Incluye bytes/
 # uploaders/editores/PDF y BOTONES (Streamlit no permite setear su valor por
@@ -538,34 +538,103 @@ def _alignment(meta):
     _generate("ali", "alineacion", meta, content)
 
 
-def _mechanical(meta):
-    rep_section_header("Reporte Mecánico", "Actividades · metrología · hallazgos",
-                       "SIGA-FMT-MEC")
-    objeto = st.text_area("Objeto y alcance", key="mec_objeto", height=70)
-    st.markdown("**Actividades ejecutadas** — título en su línea; sub-ítems con «- ».")
-    acts = st.text_area("Actividades", key="mec_acts", height=130,
-                        placeholder="Desmontaje\n- Retiro de acople\n- Extracción de rodamientos")
-    st.markdown("**Mediciones / Metrología:**")
-    default = pd.DataFrame({"Parámetro": ["", ""], "Valor": ["", ""], "Unidad": ["", ""],
-                            "Referencia": ["", ""], "Estado": ["", ""]})
-    edited = st.data_editor(st.session_state.get("mec_df", default), num_rows="dynamic",
-                            use_container_width=True, key="mec_editor")
-    metro = [[r["Parámetro"], r["Valor"], r["Unidad"], r["Referencia"], r["Estado"]]
-             for _, r in edited.iterrows() if str(r["Parámetro"]).strip()]
-    c1, c2 = st.columns(2)
-    hall = c1.text_area("Hallazgos (uno por línea)", key="mec_hall", height=90)
-    reco = c2.text_area("Recomendaciones (una por línea)", key="mec_reco", height=90)
-    obs = st.text_area("Observaciones (una por línea)", key="mec_obs", height=70)
-    photos = _photo_uploader("mec")
-    content = {"objeto": objeto, "actividades": _parse_plan(acts), "metrologia_rows": metro,
-               "hallazgos": _lines(hall), "observaciones": _lines(obs),
-               "recomendaciones": _lines(reco), "photos": photos}
-    _generate("mec", "mecanico", meta, content)
+def _stable_table(dfkey: str, mirrorkey: str, columns: List[str],
+                  default_df: "pd.DataFrame", editor_key: str,
+                  column_config=None) -> List[List[str]]:
+    """data_editor con base ESTABLE (no se re-siembra de las ediciones, así no
+    se borra al escribir) y un espejo json-serializable en `mirrorkey` para que
+    el autoguardado la recupere si se cae la sesión."""
+    if dfkey not in st.session_state:
+        seed = st.session_state.get(mirrorkey)
+        if seed:
+            st.session_state[dfkey] = pd.DataFrame(seed, columns=columns)
+        else:
+            st.session_state[dfkey] = default_df
+    ed = st.data_editor(st.session_state[dfkey], num_rows="dynamic",
+                        use_container_width=True, key=editor_key,
+                        column_config=column_config or {})
+    recs = [[str(ed.iloc[r][c]) for c in columns] for r in range(len(ed))]
+    st.session_state[mirrorkey] = recs  # espejo para autoguardado
+    return recs
+
+
+def _consolidated(meta):
+    rep_section_header(
+        "Reporte Consolidado Final",
+        "Datos · antecedentes · técnicos · objetivo · actividades · desarrollo",
+        "SIGA-FMT-CON")
+
+    # 2. Antecedentes (solo texto)
+    antecedentes = st.text_area("2. Antecedentes (solo texto)", key="con_ante",
+                                height=110)
+
+    # 3. Datos técnicos y estado del equipo
+    st.markdown("**3. Datos técnicos y estado del equipo** — tabla de datos "
+                "técnicos + foto(s) del equipo (estado).")
+    tech_rows = _stable_table(
+        "con_techdf", "con_techrows", ["Campo", "Valor"],
+        pd.DataFrame({"Campo": ["Marca", "Modelo", "Serial", "Potencia"],
+                      "Valor": ["", "", "", ""]}),
+        "con_tech_editor")
+    tech_rows = [r for r in tech_rows if str(r[0]).strip()]
+    with st.expander("Fotos del equipo (estado)", expanded=False):
+        estado_photos = _photo_uploader("con_estado", label="Fotos del equipo")
+
+    # 4. Objetivo del trabajo
+    objetivo = st.text_area("4. Objetivo del trabajo", key="con_obj", height=90)
+
+    # 5. Descripción de las actividades (tabla con % de avance)
+    st.markdown("**5. Descripción de las actividades** — columna *Tipo*: "
+                "«grupo» (banda), «subgrupo» (banda clara) o «item» (con % de "
+                "avance; se pinta verde en 100%).")
+    _tipo_cfg = {"Tipo": st.column_config.SelectboxColumn(
+        "Tipo", options=["grupo", "subgrupo", "item"], required=True, width="small")}
+    act_recs = _stable_table(
+        "con_actdf", "con_actrows", ["Tipo", "Descripción", "% Avance"],
+        pd.DataFrame({"Tipo": ["grupo", "subgrupo", "item"],
+                      "Descripción": ["", "", ""],
+                      "% Avance": ["", "", "100%"]}),
+        "con_act_editor", column_config=_tipo_cfg)
+    act_rows = [{"tipo": r[0], "descripcion": r[1], "avance": r[2]}
+                for r in act_recs if str(r[1]).strip()]
+
+    # 6. Recurso utilizado para realizar la actividad
+    st.markdown("**6. Recurso utilizado para realizar la actividad**")
+    rec_recs = _stable_table(
+        "con_recdf", "con_recrows", ["Recurso", "Detalle"],
+        pd.DataFrame({"Recurso": ["", ""], "Detalle": ["", ""]}),
+        "con_rec_editor")
+    recurso_rows = [r for r in rec_recs
+                    if str(r[0]).strip() or str(r[1]).strip()]
+
+    # 7. Documentos de referencia
+    docs_ref = st.text_area("7. Documentos de referencia (uno por línea)",
+                            key="con_docs", height=90,
+                            placeholder="API RP 686\nISO 20816-3\nProcedimiento SIGA-PR-xxx")
+
+    # 8. Desarrollo y descripción detallada (orden libre)
+    st.markdown("**8. Desarrollo y descripción detallada de las actividades** — "
+                "arma el orden que quieras (texto, imágenes y tablas):")
+    dev_blocks = _free_block_composer("con_dev")
+
+    # 9. Anexos — nombres de documentos
+    anexo_docs = st.text_area(
+        "9. Anexos — nombres de documentos (uno por línea)", key="con_anexo",
+        height=80, placeholder="Certificado de grout.pdf\nReporte fotográfico.pdf")
+
+    content = {
+        "antecedentes": antecedentes,
+        "tech_rows": tech_rows, "estado_photos": estado_photos,
+        "objetivo": objetivo, "act_rows": act_rows,
+        "recurso_rows": recurso_rows, "docs_ref": _lines(docs_ref),
+        "dev_blocks": dev_blocks, "anexo_docs": _lines(anexo_docs),
+    }
+    _generate("con", "consolidado", meta, content)
 
 
 _FORMS = {
     "diario": _daily, "preliminar": _preliminary, "boroscopia": _borescope,
-    "alineacion": _alignment, "mecanico": _mechanical,
+    "alineacion": _alignment, "consolidado": _consolidated,
 }
 
 

@@ -300,6 +300,61 @@ def two_col_kv(rows: List[Tuple[str, str, str, str]], styles) -> Table:
     return t
 
 
+def activities_progress_table(rows: List[Dict[str, Any]], styles,
+                              total_w_cm: float = 16.2) -> Table:
+    """Tabla de 'Descripción de actividades' con % de avance (estilo SIGA).
+
+    row: {'tipo': 'grupo'|'subgrupo'|'item', 'descripcion': str, 'avance': str}
+      - grupo    → banda que abarca todo el ancho (negrita, fondo azul claro).
+      - subgrupo → banda más clara (negrita).
+      - item     → descripción + celda de avance (verde si 100%, gris si no).
+    """
+    desc_w = total_w_cm - 3.2
+    col_widths = [desc_w * cm, 3.2 * cm]
+    _avc = ParagraphStyle("WMAvance", parent=styles["WMTableCell"],
+                          alignment=TA_CENTER, textColor=colors.white)
+    data: List[List[Any]] = [[
+        Paragraph("<b>DESCRIPCIÓN</b>", styles["WMTableHeader"]),
+        Paragraph("<b>% AVANCE</b>", styles["WMTableHeader"]),
+    ]]
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_HEADER_BG)),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]
+    r = 1
+    for row in (rows or []):
+        tipo = str(row.get("tipo", "item")).strip().lower()
+        desc = str(row.get("descripcion", "")).strip()
+        av = str(row.get("avance", "")).strip()
+        if not desc:
+            continue
+        if tipo in ("grupo", "subgrupo"):
+            data.append([Paragraph(f"<b>{paragraph_safe(desc)}</b>",
+                                   styles["WMTableCell"]), ""])
+            bg = "#d6e0ec" if tipo == "grupo" else "#eef2f7"
+            style += [("SPAN", (0, r), (-1, r)),
+                      ("BACKGROUND", (0, r), (-1, r), colors.HexColor(bg))]
+        else:
+            # % avance: verde si 100, gris en otro caso.
+            is_full = av.replace("%", "").strip() in ("100", "100.0")
+            cell_col = "#63a34d" if is_full else ("#94a3b8" if av else "#ffffff")
+            av_disp = av if av else ""
+            data.append([
+                Paragraph(paragraph_safe(desc), styles["WMTableCell"]),
+                Paragraph(f"<b>{paragraph_safe(av_disp)}</b>", _avc) if av
+                else Paragraph("", styles["WMTableCell"]),
+            ])
+            if av:
+                style.append(("BACKGROUND", (1, r), (1, r),
+                              colors.HexColor(cell_col)))
+        r += 1
+    t = Table(data, colWidths=col_widths, repeatRows=1)
+    t.setStyle(TableStyle(style))
+    return t
+
+
 def grid_table(headers: List[str], rows: List[List[Any]], styles,
                col_widths: Optional[List[float]] = None) -> Table:
     head = [Paragraph(f"<b>{paragraph_safe(h)}</b>", styles["WMTableHeader"]) for h in headers]
@@ -567,7 +622,8 @@ def today_str() -> str:
 # libre el formato; este esquema es trazable, ordenable y único.
 TYPE_CODES = {
     "diario": "DIA", "preliminar": "PRE", "boroscopia": "BOR",
-    "alineacion": "ALI", "mecanico": "MEC", "calibracion": "CAL",
+    "alineacion": "ALI", "consolidado": "CON", "mecanico": "MEC",
+    "calibracion": "CAL",
 }
 
 # Autoridades habilitadas para revisar/aprobar reportes (solo dos).
