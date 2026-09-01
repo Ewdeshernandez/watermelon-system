@@ -247,6 +247,16 @@ def render_setup() -> None:
     with t_sensors:
         st.markdown('<div class="rm-sec-head">Sensors &amp; layout '
                     '<small>— BNC → measurement point</small></div>', unsafe_allow_html=True)
+        # Leyenda de colores idéntica al módulo de campo (bolitas, no emojis).
+        _dot = lambda c: (f'<span style="display:inline-block;width:12px;height:12px;'
+                          f'border-radius:50%;background:{c};border:2px solid #fff;'
+                          f'box-shadow:0 0 0 1px #cbd5e1;vertical-align:-1px;margin-right:5px;"></span>')
+        st.markdown(
+            f'<div style="font-size:12.5px;color:#475569;margin:2px 0 8px 0;">'
+            f'{_dot(_TYPE_COLOR["proximity"])}Proximity&nbsp;&nbsp;&nbsp;'
+            f'{_dot(_TYPE_COLOR["velometer"])}Velocity&nbsp;&nbsp;&nbsp;'
+            f'{_dot(_TYPE_COLOR["accelerometer"])}Accelerometer&nbsp;&nbsp;&nbsp;'
+            f'{_dot(_TYPE_COLOR["keyphasor"])}Keyphasor</div>', unsafe_allow_html=True)
         gcol1, gcol2 = st.columns([1, 3])
         with gcol1:
             if st.button("🧩 Auto-generate layout", use_container_width=True,
@@ -287,14 +297,27 @@ def render_setup() -> None:
     # =========================== VALIDATION ===========================
     with t_valid:
         st.markdown('<div class="rm-sec-head">Validation '
-                    '<small>— API 670 / ISO 20816</small></div>', unsafe_allow_html=True)
+                    '<small>— API 670 / ISO 20816 · runs on the current configuration</small></div>',
+                    unsafe_allow_html=True)
+        # Línea resumen idéntica al módulo de campo (🔴/🟡/🟢).
+        if n_err:
+            st.markdown(f"<div style='font-size:15px;font-weight:800;color:#b91c1c'>🔴 {n_err} "
+                        f"error(s) · 🟡 {n_warn} warning(s) — fix errors before measuring</div>",
+                        unsafe_allow_html=True)
+        elif n_warn:
+            st.markdown(f"<div style='font-size:15px;font-weight:800;color:#b45309'>🟡 {n_warn} "
+                        f"warning(s) — review recommended</div>", unsafe_allow_html=True)
+        else:
+            st.markdown("<div style='font-size:15px;font-weight:800;color:#166534'>🟢 Configuration "
+                        "valid — no findings</div>", unsafe_allow_html=True)
+        st.write("")
         for f in findings:
             if f.level == "error":
-                st.error(f"❌ {f.message}")
+                st.error(f"🔴 {f.message}")
             elif f.level == "warn":
-                st.warning(f"⚠ {f.message}")
+                st.warning(f"🟡 {f.message}")
             else:
-                st.success(f"✅ {f.message}")
+                st.success(f"🟢 {f.message}")
         st.divider()
         scol1, scol2 = st.columns([1, 3])
         with scol1:
@@ -377,12 +400,15 @@ def _render_channel_form(idx: int) -> None:
     with st.form(f"rm_chan_form_{idx}"):
         st.markdown(f"**Editing:** `{row.get('point_label','?')}` — fill it in and press "
                     "**🔄 Update** to push it to the table.")
-        st.caption("Identification")
+        st.caption("Identification (API 670)")
         c = st.columns(4)
         c[0].text_input("Point", value=row.get("point_label", ""), key=f"f_point_label_{idx}")
         _num(c[1], "BNC", "bnc_port", 1, 32, 1, as_int=True)
-        _num(c[2], "Bearing", "plane", 0, 16, 1, as_int=True, help="0 = no bearing")
-        c[3].checkbox("Active", value=bool(row.get("active", True)), key=f"f_active_{idx}")
+        _num(c[2], "Bearing", "plane", 0, 16, 1, as_int=True,
+             help="Bearing/plane where the sensor is mounted. The keyphasor can go on ANY "
+                  "bearing (and there can be several).")
+        c[3].checkbox("Active (collects data)", value=bool(row.get("active", True)),
+                      key=f"f_active_{idx}")
 
         st.caption("Transducer")
         c = st.columns(4)
@@ -399,7 +425,7 @@ def _render_channel_form(idx: int) -> None:
             _num(c[1], "Gap/Bias (V)", "gap_bias_v", -24.0, 24.0, 0.1,
                  help="Probe DC voltage (prox ~ -9 to -11 V)")
 
-        st.caption("Orientation (TDC top, R clockwise, L counter-clockwise)")
+        st.caption("Orientation (TDC top · R clockwise · L counter-clockwise)")
         c = st.columns(4)
         _num(c[0], "Angle °", "angle_deg", 0.0, 360.0, 5.0)
         _sel(c[1], "Side", "side", ["", "L", "R"])
@@ -428,7 +454,7 @@ def _render_channel_form(idx: int) -> None:
                            index=pair_opts.index(cur_p) if cur_p in pair_opts else 0,
                            key=f"f_pair_ref_{idx}",
                            help="Orthogonal sensor for the orbit, e.g. 1XD ↔ 1YD.")
-            st.caption("Alarms (API 670)")
+            st.caption("Alarms (API 670 / ISO 20816)")
             c = st.columns(4)
             _num(c[0], "Alert", "alarm", 0.0, 100000.0, 0.1)
             _num(c[1], "Danger", "danger", 0.0, 100000.0, 0.1)
@@ -512,8 +538,9 @@ def _render_acq_params(rows: List[cfg.ChannelRow]):
     fmax_max = 2_400_000 if unit == "cpm" else 40_000
 
     with st.form("rm_acq_form"):
+        # ---- Train-wide (idéntico al módulo de campo) ----
         st.caption("Train-wide")
-        c = st.columns(3)
+        c = st.columns(4)
         wmode = c[0].selectbox("Waveform", cfg.WAVEFORM_MODES,
                                index=cfg.WAVEFORM_MODES.index(a.get("waveform_mode", "synchronous"))
                                if a.get("waveform_mode", "synchronous") in cfg.WAVEFORM_MODES else 0,
@@ -521,56 +548,61 @@ def _render_acq_params(rows: List[cfg.ChannelRow]):
                                help="Synchronous (per revolution, bode/cascade) or asynchronous (fixed Hz)")
         spr = c[1].number_input("Samples/rev (0=auto)", 0, 1024, int(a.get("samples_per_rev", 0)),
                                 key="rm_acq_spr")
-        orders = c[2].multiselect("Orders (×rpm)", cfg.COMMON_ORDERS,
-                                  default=list(a.get("orders", [1.0, 2.0])),
-                                  format_func=lambda o: f"{o:g}X", key="rm_acq_orders")
+        gavg = c[2].number_input("Averages", 1, 64, int(a.get("averages", 4)), key="rm_acq_gavg")
+        gwin = c[3].selectbox("Window", cfg.WINDOWS,
+                              index=cfg.WINDOWS.index(a.get("window", "hanning"))
+                              if a.get("window", "hanning") in cfg.WINDOWS else 0,
+                              key="rm_acq_gwin")
+        # Órdenes como checkboxes ½X/1X/2X/3X (igual que el campo)
+        _cur_ord = set(float(o) for o in a.get("orders", [1.0, 2.0]))
+        oc = st.columns([1, 1, 1, 1, 4])
+        o_half = oc[0].checkbox("½X", value=0.5 in _cur_ord, key="rm_o_half")
+        o_1x = oc[1].checkbox("1X", value=1.0 in _cur_ord, key="rm_o_1x")
+        o_2x = oc[2].checkbox("2X", value=2.0 in _cur_ord, key="rm_o_2x")
+        o_3x = oc[3].checkbox("3X", value=3.0 in _cur_ord, key="rm_o_3x")
+        oc[4].caption("Orders (×rpm) tracked for Bode/Polar/Cascade.")
 
-        # Un bloque por tipo de sensor presente
+        # ---- Banda de adquisición por tipo de sensor (solo Fmax/Fmin/Lines) ----
+        st.caption("Acquisition band per sensor type (ISO 20816 / API 670)")
         edited = {}
         for t in present:
             e = bt[t]
-            st.divider()
-            st.caption(f"📡 {_TYPE_ES.get(t, t)} — own band")
-            c = st.columns(3)
-            fmax_v = c[0].number_input(
+            c = st.columns([1.4, 1, 1, 1])
+            c[0].markdown(f"**📡 {_TYPE_ES.get(t, t)}**")
+            fmax_v = c[1].number_input(
                 f"Fmax ({ul})", 60, fmax_max,
                 int(round(cfg.hz_to_display(float(e.get("fmax_hz", 1000)), unit))),
                 step=fstep, key=f"acq_{t}_fmax_{unit}",
                 help="Prox ~1000 Hz (60k CPM); accel ~10 kHz (600k CPM)")
-            fmin_v = c[1].number_input(
+            fmin_v = c[2].number_input(
                 f"Fmin ({ul})", 0.0, float(fmax_max),
                 float(round(cfg.hz_to_display(float(e.get("fmin_hz", 2.0)), unit), 1)),
                 step=float(fstep), key=f"acq_{t}_fmin_{unit}")
-            lines = c[2].selectbox("Lines", cfg.LINES_OPTIONS,
+            lines = c[3].selectbox("Lines", cfg.LINES_OPTIONS,
                                    index=cfg.LINES_OPTIONS.index(int(e.get("lines", 1600)))
                                    if int(e.get("lines", 1600)) in cfg.LINES_OPTIONS else 2,
                                    key=f"acq_{t}_lines")
-            c2 = st.columns(3)
-            avg = c2[0].number_input("Averages", 1, 64, int(e.get("averages", 4)), key=f"acq_{t}_avg")
-            win = c2[1].selectbox("Window", cfg.WINDOWS,
-                                  index=cfg.WINDOWS.index(e.get("window", "hanning"))
-                                  if e.get("window", "hanning") in cfg.WINDOWS else 0,
-                                  key=f"acq_{t}_win")
-            edited[t] = (fmax_v, fmin_v, lines, avg, win)
+            edited[t] = (fmax_v, fmin_v, lines)
 
         submitted = st.form_submit_button("🔄 Update parameters", type="primary",
                                           use_container_width=True)
 
     if submitted:
-        for t, (fmax_v, fmin_v, lines, avg, win) in edited.items():
+        _orders = [o for o, on in ((0.5, o_half), (1.0, o_1x), (2.0, o_2x), (3.0, o_3x)) if on] or [1.0]
+        for t, (fmax_v, fmin_v, lines) in edited.items():
             bt[t] = asdict(cfg.AcquisitionParams(
                 fmax_hz=cfg.display_to_hz(float(fmax_v), unit),
                 fmin_hz=cfg.display_to_hz(float(fmin_v), unit),
-                lines=int(lines), averages=int(avg), window=win,
+                lines=int(lines), averages=int(gavg), window=gwin,   # Averages/Window son train-wide
                 waveform_mode=wmode, samples_per_rev=int(spr),
-                orders=[float(o) for o in (orders or [1.0])], freq_unit=unit))
+                orders=_orders, freq_unit=unit))
         # Train-global: hereda fmax del primer tipo presente como fallback
         base = bt[present[0]]
         st.session_state["rm_acq"] = asdict(cfg.AcquisitionParams(
             fmax_hz=float(base["fmax_hz"]), fmin_hz=float(base["fmin_hz"]),
-            lines=int(base["lines"]), averages=int(base["averages"]), window=base["window"],
+            lines=int(base["lines"]), averages=int(gavg), window=gwin,
             waveform_mode=wmode, samples_per_rev=int(spr),
-            orders=[float(o) for o in (orders or [1.0])], freq_unit=unit))
+            orders=_orders, freq_unit=unit))
         st.session_state["rm_acq_by_type"] = bt
         st.rerun()
 
