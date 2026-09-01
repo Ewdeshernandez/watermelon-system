@@ -38,6 +38,9 @@ except Exception as exc:  # noqa: BLE001
 from core.modal.live_impact import (FRFAccumulator, HitQuality, SynthMode,
                                      assess_hit, modes_from_frf, synth_impact,
                                      DEFAULT_SPECIMEN)
+from core.modal.oma_layout import (OMALayout, MeasPoint, default_24ch_layout,
+                                    DEFAULT_COMPONENTS, POSITION_REFS, DOFS)
+from core.modal.oma_engine import run_oma
 
 # ---- Paleta (misma marca que Rotordynamics) ----
 NAVY = "#0F1E3D"
@@ -396,6 +399,221 @@ def build_app(setup: ModalSetup, simulated: bool = True):
         m = (res.frequencies_hz <= setup.fmax_hz) & (res.frequencies_hz >= 5.0)
         nyq_curve.setData(res.frf_complex[m].real, res.frf_complex[m].imag)
     btn_ident.clicked.connect(_identify)
+
+    # =================================================================
+    # TAB 4 — OMA setup (máquina dibujada + puntos de medición)
+    # =================================================================
+    st["oma"] = default_24ch_layout()
+    st["oma_fdd"] = None
+    _COMP_COLOR = {"Motor": "#2563eb", "Bomba": "#16a34a", "Skid": "#a16207",
+                   "Tubería succión": "#0891b2", "Tubería descarga": "#7c3aed"}
+
+    pg_os = QtWidgets.QWidget(); ol = QtWidgets.QVBoxLayout(pg_os)
+    hdr_o = QtWidgets.QLabel("OMA setup — ubicá cada sensor en la máquina con su referencia (ISO 7626 / API 684)")
+    hdr_o.setStyleSheet(f"background:{NAVY};color:white;border-radius:8px;padding:9px 14px;font-weight:700;")
+    ol.addWidget(hdr_o)
+
+    orow = QtWidgets.QHBoxLayout()
+    e_oname = QtWidgets.QLineEdit(st["oma"].name)
+    sp_ofs = QtWidgets.QSpinBox(); sp_ofs.setRange(256, 25600); sp_ofs.setValue(int(st["oma"].fs_hz)); sp_ofs.setSingleStep(256)
+    sp_odur = QtWidgets.QSpinBox(); sp_odur.setRange(10, 900); sp_odur.setValue(int(st["oma"].duration_s))
+    sp_orpm = QtWidgets.QDoubleSpinBox(); sp_orpm.setRange(0, 60000); sp_orpm.setValue(st["oma"].running_speed_rpm)
+    for lab, w in (("Test:", e_oname), ("fs (Hz):", sp_ofs), ("Duración (s):", sp_odur), ("RPM:", sp_orpm)):
+        orow.addWidget(QtWidgets.QLabel(lab)); orow.addWidget(w)
+    orow.addStretch(1)
+    btn_tmpl = QtWidgets.QPushButton("Cargar plantilla 24 canales")
+    btn_addp = QtWidgets.QPushButton("+ Punto")
+    btn_draw = QtWidgets.QPushButton("✓ Aplicar y dibujar"); btn_draw.setStyleSheet(
+        f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
+    orow.addWidget(btn_tmpl); orow.addWidget(btn_addp); orow.addWidget(btn_draw)
+    ol.addLayout(orow)
+
+    osplit = QtWidgets.QHBoxLayout()
+    tbl_pts = QtWidgets.QTableWidget(0, 9)
+    tbl_pts.setHorizontalHeaderLabels(["#", "Componente", "Referencia", "DOF", "Slot", "Canal",
+                                       "Sens (mV/g)", "Ref", "Activo"])
+    tbl_pts.verticalHeader().setVisible(False)
+    tbl_pts.setMaximumWidth(720)
+    p_train = pg.PlotWidget(); p_train.setBackground("w"); p_train.setAspectLocked(True)
+    p_train.hideAxis("left"); p_train.hideAxis("bottom"); p_train.setMenuEnabled(False)
+    p_train.setTitle("Máquina y ubicación de sensores", color=NAVY, size="10pt")
+    _tvb = p_train.getViewBox(); _tvb.setMouseEnabled(x=False, y=False)
+    osplit.addWidget(tbl_pts, 3); osplit.addWidget(p_train, 4)
+    ol.addLayout(osplit, 1)
+    lbl_oval = QtWidgets.QLabel(""); lbl_oval.setStyleSheet("font-weight:700;")
+    ol.addWidget(lbl_oval)
+    tabs.addTab(pg_os, "OMA setup")
+
+    def _mk_combo(items, cur):
+        c = QtWidgets.QComboBox(); c.addItems(items)
+        if cur in items:
+            c.setCurrentText(cur)
+        return c
+
+    def _add_point_row(mp: MeasPoint):
+        r = tbl_pts.rowCount(); tbl_pts.insertRow(r)
+        tbl_pts.setItem(r, 0, QtWidgets.QTableWidgetItem(str(mp.idx)))
+        tbl_pts.setCellWidget(r, 1, _mk_combo(DEFAULT_COMPONENTS, mp.component))
+        tbl_pts.setCellWidget(r, 2, _mk_combo(POSITION_REFS, mp.position_ref))
+        tbl_pts.setCellWidget(r, 3, _mk_combo(DOFS, mp.dof))
+        tbl_pts.setItem(r, 4, QtWidgets.QTableWidgetItem(str(mp.module_slot)))
+        tbl_pts.setItem(r, 5, QtWidgets.QTableWidgetItem(str(mp.channel_index)))
+        tbl_pts.setItem(r, 6, QtWidgets.QTableWidgetItem(f"{mp.sensitivity_mv_per_g:g}"))
+        cbref = QtWidgets.QCheckBox(); cbref.setChecked(mp.reference_sensor)
+        cbact = QtWidgets.QCheckBox(); cbact.setChecked(mp.active)
+        tbl_pts.setCellWidget(r, 7, cbref); tbl_pts.setCellWidget(r, 8, cbact)
+
+    def _fill_points():
+        tbl_pts.setRowCount(0)
+        for mp in st["oma"].points:
+            _add_point_row(mp)
+
+    def _table_to_layout() -> OMALayout:
+        pts = []
+        for r in range(tbl_pts.rowCount()):
+            def _txt(c, d=""):
+                it = tbl_pts.item(r, c); return it.text() if it else d
+            def _cmb(c):
+                w = tbl_pts.cellWidget(r, c); return w.currentText() if w else ""
+            def _chk(c):
+                w = tbl_pts.cellWidget(r, c); return bool(w.isChecked()) if w else False
+            try:
+                pts.append(MeasPoint(
+                    idx=int(_txt(0, str(r + 1)) or r + 1), component=_cmb(1),
+                    position_ref=_cmb(2), dof=_cmb(3),
+                    module_slot=int(_txt(4, "1") or 1), channel_index=int(_txt(5, "0") or 0),
+                    sensitivity_mv_per_g=float(_txt(6, "100") or 100),
+                    reference_sensor=_chk(7), active=_chk(8),
+                    x_norm=st["oma"].points[r].x_norm if r < len(st["oma"].points) else 0.5,
+                    y_norm=st["oma"].points[r].y_norm if r < len(st["oma"].points) else 0.0))
+            except Exception:  # noqa: BLE001
+                continue
+        lay = OMALayout(name=e_oname.text() or "OMA", points=pts,
+                        fs_hz=float(sp_ofs.value()), duration_s=float(sp_odur.value()),
+                        running_speed_rpm=sp_orpm.value())
+        return lay
+
+    def _draw_train():
+        p_train.clear()
+        lay = st["oma"]
+        def box(x0, x1, y0, y1, color, label):
+            p_train.plot([x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0],
+                         pen=pg.mkPen(color, width=2))
+            t = pg.TextItem(label, color=color, anchor=(0.5, 0.5))
+            t.setPos((x0 + x1) / 2, (y0 + y1) / 2); p_train.addItem(t)
+        # skid base
+        p_train.plot([0.0, 1.0, 1.0, 0.0, 0.0], [-0.55, -0.55, -0.42, -0.42, -0.55],
+                     pen=pg.mkPen(_COMP_COLOR["Skid"], width=2))
+        ts = pg.TextItem("SKID", color=_COMP_COLOR["Skid"], anchor=(0, 0.5)); ts.setPos(0.02, -0.485); p_train.addItem(ts)
+        box(0.03, 0.23, -0.30, 0.30, _COMP_COLOR["Motor"], "MOTOR")
+        p_train.plot([0.23, 0.29], [0, 0], pen=pg.mkPen("#334155", width=3))   # coupling
+        box(0.29, 0.53, -0.30, 0.30, _COMP_COLOR["Bomba"], "BOMBA")
+        # tuberías
+        p_train.plot([0.53, 0.72, 0.72], [0.10, 0.10, 0.45], pen=pg.mkPen(_COMP_COLOR["Tubería descarga"], width=3))
+        p_train.plot([0.53, 0.90], [-0.12, -0.12], pen=pg.mkPen(_COMP_COLOR["Tubería succión"], width=3))
+        # sensores
+        for mp in lay.active_points():
+            col = _COMP_COLOR.get(mp.component, "#475569")
+            x = mp.x_norm; y = mp.y_norm
+            sz = 16 if mp.reference_sensor else 11
+            sym = "star" if mp.reference_sensor else "o"
+            p_train.addItem(pg.ScatterPlotItem([x], [y], size=sz, symbol=sym,
+                            brush=pg.mkBrush(col), pen=pg.mkPen("w", width=1.5)))
+            ref = mp.position_ref.split(" ")[0]
+            t = pg.TextItem(f"{ref}{mp.dof}", color="#0F1E3D", anchor=(0.5, 1.4))
+            t.setPos(x, y); t.setScale(0.9); p_train.addItem(t)
+        p_train.getViewBox().autoRange(padding=0.15)
+
+    def _apply_oma():
+        st["oma"] = _table_to_layout()
+        errs = st["oma"].validate()
+        _draw_train()
+        if errs:
+            lbl_oval.setText("⚠ " + " · ".join(errs[:3]))
+            lbl_oval.setStyleSheet(f"color:{RED};font-weight:700;")
+        else:
+            lbl_oval.setText(f"✅ {st['oma'].n_channels()} canales · "
+                             f"{len(st['oma'].references())} referencia(s) · config válida")
+            lbl_oval.setStyleSheet(f"color:{GREEN};font-weight:700;")
+
+    def _load_tmpl():
+        st["oma"] = default_24ch_layout(name=e_oname.text() or "Tren Motor-Bomba")
+        _fill_points(); _draw_train(); _apply_oma()
+
+    def _add_point():
+        n = tbl_pts.rowCount()
+        _add_point_row(MeasPoint(idx=n + 1, component="Motor", position_ref=POSITION_REFS[0],
+                                 dof="+Y", module_slot=n // 4 + 1, channel_index=n % 4,
+                                 x_norm=0.5, y_norm=0.0))
+    btn_tmpl.clicked.connect(_load_tmpl)
+    btn_addp.clicked.connect(_add_point)
+    btn_draw.clicked.connect(_apply_oma)
+    _fill_points(); _draw_train(); _apply_oma()
+
+    # =================================================================
+    # TAB 5 — OMA capture & analyze
+    # =================================================================
+    pg_oc = QtWidgets.QWidget(); cl2 = QtWidgets.QVBoxLayout(pg_oc)
+    crow = QtWidgets.QHBoxLayout()
+    btn_ocap = QtWidgets.QPushButton("▶ Capturar (simulado) + FDD"); btn_ocap.setStyleSheet(
+        f"QPushButton{{background:{ACC};font-size:14px;padding:10px 20px;}} QPushButton:hover{{background:#1490c2;}}")
+    lbl_ocap = QtWidgets.QLabel("OMA operacional: captura continua multicanal → FDD (valores singulares) → modos.")
+    crow.addWidget(btn_ocap); crow.addWidget(lbl_ocap); crow.addStretch(1)
+    cl2.addLayout(crow)
+
+    ocsplit = QtWidgets.QHBoxLayout()
+    tbl_omodes = QtWidgets.QTableWidget(0, 4)
+    tbl_omodes.setHorizontalHeaderLabels(["Freq (Hz)", "Damping (%)", "Complexity (%)", "Clase"])
+    tbl_omodes.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    tbl_omodes.verticalHeader().setVisible(False); tbl_omodes.setMaximumWidth(520)
+    p_svd = pg.PlotWidget(); p_svd.setBackground("w")
+    p_svd.setLabel("left", "Magnitud (dB)"); p_svd.setLabel("bottom", "Frecuencia", "Hz")
+    p_svd.setTitle("Valores singulares (FDD)", color=NAVY); p_svd.showGrid(x=True, y=True, alpha=0.3)
+    svd_curve = p_svd.plot([], [], pen=pg.mkPen(NAVY, width=1.6))
+    ocsplit.addWidget(tbl_omodes, 2); ocsplit.addWidget(p_svd, 3)
+    cl2.addLayout(ocsplit, 1)
+    lbl_ostat = QtWidgets.QLabel(""); cl2.addWidget(lbl_ostat)
+    tabs.addTab(pg_oc, "OMA capture")
+
+    def _oma_capture():
+        from scipy.signal import lfilter
+        lay = st["oma"]; fs = lay.fs_hz; nch = lay.n_channels()
+        if nch < 2:
+            QtWidgets.QMessageBox.information(win, "OMA", "Configurá al menos 2 canales activos en OMA setup.")
+            return
+        secs = min(float(lay.duration_s), 60.0)          # demo: hasta 60 s
+        N = int(secs * fs); rng = st["rng"]
+        lbl_ostat.setText(f"Capturando {secs:.0f} s @ {fs:.0f} Hz · {nch} canales …"); QtWidgets.QApplication.processEvents()
+        modes = [(19.4, 0.020), (38.8, 0.015), (77.4, 0.012), (129.9, 0.010)]
+        data = np.zeros((N, nch))
+        for fn, z in modes:
+            wn = 2 * np.pi * fn; wd = wn * (1 - z * z) ** 0.5
+            r = np.exp(-z * wn / fs); th = wd / fs
+            q = lfilter([1.0], [1.0, -2 * r * np.cos(th), r * r], rng.standard_normal(N))
+            q /= (np.std(q) or 1.0)
+            data += np.outer(q, rng.standard_normal(nch))
+        data += 0.05 * rng.standard_normal((N, nch))
+        fmax = min(fs / 2.56, 200.0)
+        fdd = run_oma(data, fs, nperseg=4096, f_min_hz=5.0, f_max_hz=fmax,
+                      channel_names=lay.channel_names())
+        st["oma_fdd"] = fdd
+        # SVD plot
+        freqs = fdd.frequencies_hz; sv = np.asarray(fdd.singular_values)
+        if sv.ndim == 1:
+            sv = sv[None, :]
+        band = freqs <= fmax
+        svd_curve.setData(freqs[band], 10 * np.log10(np.maximum(sv[0][band], 1e-30)))
+        # modes table
+        tbl_omodes.setRowCount(0)
+        for m in fdd.modes:
+            rr = tbl_omodes.rowCount(); tbl_omodes.insertRow(rr)
+            for c, v in enumerate([f"{m.natural_frequency_hz:.2f}", f"{m.damping_ratio_pct:.3f}",
+                                   f"{m.complexity_pct:.1f}", m.classification]):
+                tbl_omodes.setItem(rr, c, QtWidgets.QTableWidgetItem(v))
+        lbl_ostat.setText(f"✅ FDD listo — {len(fdd.modes)} modos identificados · "
+                          f"exportá al web (Watermelon System → reporte OMA SIGA).")
+        lbl_ostat.setStyleSheet(f"color:{GREEN};font-weight:700;")
+    btn_ocap.clicked.connect(_oma_capture)
 
     return app, win
 
