@@ -499,9 +499,14 @@ def _alignment(meta):
                        "SIGA-FMT-ALI")
     intro = st.text_area("1. Introducción y alcance", key="ali_intro", height=90)
     ante = st.text_area("2. Antecedentes", key="ali_ante", height=80)
+    c0a, c0b = st.columns(2)
+    hall_intro = c0a.text_area("3. Hallazgos — texto introductorio (SIN numerar)",
+                               key="ali_hall_intro", height=70)
+    reco_intro = c0b.text_area("4. Recomendaciones — texto introductorio (SIN numerar)",
+                               key="ali_reco_intro", height=70)
     c1, c2 = st.columns(2)
-    hall = c1.text_area("3. Hallazgos (uno por línea)", key="ali_hall", height=100)
-    reco = c2.text_area("4. Recomendaciones finales (una por línea)", key="ali_reco", height=100)
+    hall = c1.text_area("Hallazgos numerados (uno por línea)", key="ali_hall", height=100)
+    reco = c2.text_area("Recomendaciones numeradas (una por línea)", key="ali_reco", height=100)
 
     # 5. Metodología: texto + imágenes + tablas de equipo (conductor/conducido/alineador)
     st.markdown("**5. Metodología** — texto, imágenes y tablas de equipo.")
@@ -517,15 +522,18 @@ def _alignment(meta):
                 "(texto, imágenes y tablas):")
     dev_blocks = _free_block_composer("ali_dev")
 
-    # 7. Anexos
-    with st.expander("7. Anexos (imágenes)", expanded=False):
-        anexo = _photo_uploader("ali_anx", label="Imágenes de anexo")
+    # 7. Anexos — NOMBRES de documentos adjuntos (no imágenes)
+    anexo_docs = st.text_area(
+        "7. Anexos — nombres de documentos adjuntos (uno por línea)",
+        key="ali_anexo_docs", height=90,
+        placeholder="ej: Certificado de alineación Optalign.pdf\nPlano de acople Triveni.pdf")
 
     content = {
         "introduccion": intro, "antecedentes": ante,
+        "hall_intro": hall_intro, "reco_intro": reco_intro,
         "hallazgos": _lines(hall), "recomendaciones": _lines(reco),
         "met_text": met_text, "met_photos": met_photos, "met_equipos": equipos,
-        "dev_blocks": dev_blocks, "anexo_photos": anexo,
+        "dev_blocks": dev_blocks, "anexo_docs": _lines(anexo_docs),
     }
     _generate("ali", "alineacion", meta, content)
 

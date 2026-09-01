@@ -269,10 +269,14 @@ def build_alignment_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> byt
     body.append(p(content.get("antecedentes", "—"), styles)); body.append(Spacer(1, 0.2 * cm))
 
     body.append(section("3. Hallazgos", styles))
+    if str(content.get("hall_intro", "")).strip():
+        body.append(p(content["hall_intro"], styles)); body.append(Spacer(1, 0.1 * cm))
     body += _numbered(content.get("hallazgos", []) or ["—"], styles)
     body.append(Spacer(1, 0.3 * cm))
 
     body.append(section("4. Recomendaciones finales", styles))
+    if str(content.get("reco_intro", "")).strip():
+        body.append(p(content["reco_intro"], styles)); body.append(Spacer(1, 0.1 * cm))
     body += _numbered(content.get("recomendaciones", []) or ["—"], styles)
     body.append(Spacer(1, 0.3 * cm))
 
@@ -286,8 +290,16 @@ def build_alignment_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> byt
     for eq in (content.get("met_equipos") or []):
         rows = [r for r in (eq.get("rows") or []) if any(str(c).strip() for c in r)]
         if rows or eq.get("title"):
-            body.append(_titled(eq.get("title", ""), ["Campo", "Valor"], rows, styles,
-                                col_widths=[6.0 * cm, 10.2 * cm]))
+            # 4 columnas (2 pares Campo/Valor por fila) para que no queden largas.
+            pairs = []
+            for _i in range(0, len(rows), 2):
+                _a = rows[_i]
+                _b = rows[_i + 1] if _i + 1 < len(rows) else ["", ""]
+                pairs.append([_a[0], (_a[1] if len(_a) > 1 else ""),
+                              _b[0], (_b[1] if len(_b) > 1 else "")])
+            body.append(_titled(eq.get("title", ""),
+                                ["Campo", "Valor", "Campo", "Valor"], pairs, styles,
+                                col_widths=[3.0 * cm, 5.1 * cm, 3.0 * cm, 5.1 * cm]))
             body.append(Spacer(1, 0.2 * cm))
     body.append(Spacer(1, 0.1 * cm))
 
@@ -300,11 +312,12 @@ def build_alignment_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> byt
         body.append(p("—", styles))
     body.append(Spacer(1, 0.2 * cm))
 
-    # 7. Anexos (imágenes)
-    anexo = [ph for ph in (content.get("anexo_photos") or []) if ph.get("bytes")]
-    if anexo:
+    # 7. Anexos — NOMBRES de documentos adjuntos (no imágenes).
+    docs = [d for d in (content.get("anexo_docs") or []) if str(d).strip()]
+    if docs:
         body.append(section("7. Anexos", styles))
-        body += _pg(anexo, styles, cols=2, credit=_pc())
+        body.append(p("Documentos adjuntos al reporte:", styles))
+        body += _numbered(docs, styles)
 
     return render_report_pdf(
         _shell_meta(meta, title="Reporte de Alineación", format_code="SIGA-FMT-ALI",

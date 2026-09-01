@@ -360,6 +360,8 @@ def photo_grid(photos: List[Dict[str, Any]], styles, cols: int = 2,
     grid_rows: List[List[Any]] = []
     for ph in photos:
         img = safe_image(ph.get("bytes"), cell_w - 0.4, max_h_cm)
+        if img is not None:
+            img.hAlign = "CENTER"   # centrar la imagen dentro de la celda
         cap = Paragraph(paragraph_safe(ph.get("caption", "")), cap_style)
         cell = [img, cap] if img else [cap]
         if credit:
