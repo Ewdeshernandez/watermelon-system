@@ -111,7 +111,9 @@ def machine_info_table(turbine: Dict[str, str], borescope: Dict[str, str],
     out: List[Any] = []
 
     def _band(title: str) -> Table:
-        t = Table([[Paragraph(f"<b>{paragraph_safe(title)}</b>", styles["WMTableHeader"])]],
+        _tc = ParagraphStyle("WMBandCentered", parent=styles["WMTableHeader"],
+                             alignment=TA_CENTER)
+        t = Table([[Paragraph(f"<b>{paragraph_safe(title)}</b>", _tc)]],
                   colWidths=[16.2 * cm])
         t.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor(_HEADER_BG)),
@@ -170,7 +172,9 @@ def titled_table(title: str, headers: Optional[List[str]], rows: List[List[Any]]
     ]
     r = 0
     if title:
-        data.append([Paragraph(f"<b>{paragraph_safe(title)}</b>", styles["WMTableHeader"])]
+        _tc = ParagraphStyle("WMTitleCentered", parent=styles["WMTableHeader"],
+                             alignment=TA_CENTER)
+        data.append([Paragraph(f"<b>{paragraph_safe(title)}</b>", _tc)]
                     + [""] * (ncols - 1))
         style += [("SPAN", (0, 0), (-1, 0)),
                   ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_HEADER_BG)),
