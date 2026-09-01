@@ -1404,14 +1404,21 @@ def main() -> int:
         btn_apply.clicked.connect(do_apply)
 
         def _refresh_all():
-            # Botón "↻ Apply changes": refresca TODO con el estado actual del formulario.
+            # Botón "✓ Apply changes": aplica los cambios de máquina/geometría a la vista.
             draw_bearing()
             for _fn in (_refresh_acq_info, _refresh_summary, _ched_refresh_selector):
                 try:
                     _fn()
                 except Exception:  # noqa: BLE001
                     pass
+            n = tblc.rowCount()
+            win.statusBar().showMessage(
+                f"✓ Changes applied — layout diagram & Summary updated · {n} channels", 3500)
         btn_refresh.clicked.connect(_refresh_all)
+        # En "Channel editor" manda su propio "✓ Apply to channel" (por canal); ahí ocultamos
+        # el "✓ Apply changes" global para no tener dos botones que confundan.
+        cfg_tabs.currentChanged.connect(
+            lambda *_: btn_refresh.setVisible(cfg_tabs.currentWidget() is not pg_ched))
 
         refresh_lib(); fill_form(_machine_from_agent())
         tblc.itemChanged.connect(lambda *_: draw_bearing())   # redibuja al editar ángulo/nombre
