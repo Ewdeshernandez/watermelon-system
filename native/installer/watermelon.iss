@@ -22,12 +22,11 @@ DefaultDirName={autopf}\Watermelon Field
 DefaultGroupName=Watermelon Field
 DisableProgramGroupPage=yes
 DisableDirPage=auto
-; Las rutas (Source/SetupIconFile/OutputDir) se resuelven desde SourceDir; el .iss vive
-; en native/installer, así que subimos dos niveles → raíz del repo (donde está out/ y assets/).
-SourceDir=..\..
-OutputDir=.
+; Rutas ABSOLUTAS vía {#SourcePath} (dir del .iss = native/installer) + ..\.. = raíz del
+; repo. Evita la ambigüedad de rutas relativas de Inno Setup.
+OutputDir={#SourcePath}..\..
 OutputBaseFilename=WatermelonField-Setup
-SetupIconFile=assets\watermelon.ico
+SetupIconFile={#SourcePath}..\..\assets\watermelon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
 Compression=lzma2/max
@@ -46,7 +45,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 ; todo el contenido de out/ (exe + .bat + Banco_de_Pruebas + LEEME.txt)
-Source: "out\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SourcePath}..\..\out\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
 ; acceso principal → abre la app (simulador, siempre abre y muestra la UI)
