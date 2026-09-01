@@ -199,9 +199,9 @@ jobs:
         shell: bash
         run: |
           VER="${GITHUB_REF_NAME#field-v}"
-          ISCC=$(find "/c/Program Files (x86)/Inno Setup 6" "/c/Program Files/Inno Setup 6" \
-                 -iname ISCC.exe 2>/dev/null | head -1)
-          echo "ISCC=$ISCC"
+          ISCC=$(find "/c/Program Files (x86)" "/c/Program Files" -iname ISCC.exe 2>/dev/null | head -1)
+          echo "ISCC=[$ISCC]  VER=[$VER]"
+          [ -z "$ISCC" ] && { echo "ISCC.exe no encontrado"; exit 1; }
           "$ISCC" "/DMyAppVersion=${VER}" native/installer/watermelon.iss
           ls -la WatermelonField-Setup.exe
 
