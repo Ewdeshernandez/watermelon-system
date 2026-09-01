@@ -195,17 +195,22 @@ jobs:
         run: choco install innosetup --no-progress -y
 
       # NO bloquea el build si falla: el .zip se publica igual. El log queda como asset.
+      # Se compila en PowerShell (no en bash) porque Git Bash mangla el argumento /D...
       - name: Compilar instalador
         if: startsWith(github.ref, 'refs/tags/field-v')
         continue-on-error: true
-        shell: bash
+        shell: pwsh
         run: |
-          VER="${GITHUB_REF_NAME#field-v}"
-          ISCC=$(find "/c/Program Files (x86)" "/c/Program Files" -iname ISCC.exe 2>/dev/null | head -1)
-          echo "ISCC=[$ISCC]  VER=[$VER]" | tee installer_log.txt
-          if [ -z "$ISCC" ]; then echo "ISCC.exe NOT FOUND" | tee -a installer_log.txt; exit 0; fi
-          "$ISCC" "/DMyAppVersion=${VER}" native/installer/watermelon.iss 2>&1 | tee -a installer_log.txt || true
-          ls -la WatermelonField-Setup.exe 2>&1 | tee -a installer_log.txt || echo "no setup exe" | tee -a installer_log.txt
+          $ver = $env:GITHUB_REF_NAME -replace '^field-v',''
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = (Get-ChildItem "C:\Program Files (x86)","C:\Program Files" -Recurse -Filter ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
+          "ISCC=$iscc  VER=$ver" | Tee-Object installer_log.txt
+          if (-not $iscc) { "ISCC.exe NOT FOUND" | Tee-Object -Append installer_log.txt; exit 0 }
+          & $iscc "/DMyAppVersion=$ver" "native/installer/watermelon.iss" 2>&1 | Tee-Object -Append installer_log.txt
+          if (Test-Path WatermelonField-Setup.exe) { "OK: setup built" | Tee-Object -Append installer_log.txt }
+          else { "no setup exe" | Tee-Object -Append installer_log.txt }
 
       - name: Empaquetar zip para el Release
         if: startsWith(github.ref, 'refs/tags/field-v')
