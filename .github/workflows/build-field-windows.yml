@@ -47,12 +47,13 @@ jobs:
             > core/remote_monitoring/_cloud_config.py
           echo "cloud: url=$([ -n "$SB_URL" ] && echo SET || echo empty) key=$([ -n "$SB_KEY" ] && echo SET || echo empty)"
 
-      - name: Compilar WatermelonField.exe (onefile)
+      - name: Compilar WatermelonField.exe (onedir - menos falsos positivos de antivirus)
         shell: bash
         run: |
-          pyinstaller --noconfirm --clean --onefile \
+          pyinstaller --noconfirm --clean \
             --name WatermelonField \
             --windowed \
+            --contents-directory _internal \
             --paths . \
             --collect-submodules core.remote_monitoring \
             --collect-submodules core.modal \
@@ -75,7 +76,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p out
-          cp dist/WatermelonField.exe out/
+          # onedir: copiamos toda la carpeta (WatermelonField.exe + _internal/ con las libs)
+          cp -r dist/WatermelonField/. out/
 
           # --- lanzadores .bat (solo líneas de comando, sin código fuente) ---
           printf '@echo off\r\n"%%~dp0WatermelonField.exe" --sim\r\npause\r\n' \
