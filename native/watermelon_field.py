@@ -1082,20 +1082,25 @@ def main() -> int:
                     tk = pg.TextItem(html=f"<div style='font-size:9pt;color:#b45309;"
                                      f"font-weight:700'>{s.name.replace('_', '')}</div>", anchor=(0.5, 0))
                     tk.setPos(cx, -R - 0.86); brg_plot.addItem(tk)
-                # Indicador de giro: FLECHA DIBUJADA (arco + punta) — no depende de glifos que
-                # en Windows salen como cuadrito. CW = horario, CCW = antihorario.
+                # Indicador de giro: FLECHA CIRCULAR dibujada (arcos OPUESTOS según sentido,
+                # + punta hecha a mano). Arriba de los planos para no encimarse.
                 cw = (m.rotation == "CW")
-                acx, acy, ar = xmax + 0.72, 0.86, 0.22
-                _a = np.linspace(-115, 115, 40) if cw else np.linspace(115, -115, 40)
-                ax_ = acx + ar * np.sin(np.radians(_a)); ay_ = acy + ar * np.cos(np.radians(_a))
-                brg_plot.plot(ax_, ay_, pen=pg.mkPen("#12467f", width=3))
-                _dx = ax_[-1] - ax_[-2]; _dy = ay_[-1] - ay_[-2]
-                arw = pg.ArrowItem(pos=(ax_[-1], ay_[-1]), angle=_math.degrees(_math.atan2(-_dy, _dx)),
-                                   headLen=13, tipAngle=32, brush="#12467f", pen=None)
-                brg_plot.addItem(arw)
-                rot = pg.TextItem(html=f"<div style='font-size:12pt;color:#0F1E3D;font-weight:800'>"
-                                  f"{'CW' if cw else 'CCW'}</div>", anchor=(0.5, 0))
-                rot.setPos(acx, acy - ar - 0.02); brg_plot.addItem(rot)
+                acx, acy, ar = xmax + 0.78, 1.42, 0.24
+                degs = np.linspace(120, -150, 60) if cw else np.linspace(60, 330, 60)
+                th_a = np.radians(degs)
+                ax_ = acx + ar * np.cos(th_a); ay_ = acy + ar * np.sin(th_a)
+                brg_plot.plot(ax_, ay_, pen=pg.mkPen("#12467f", width=3.5))
+                tvx, tvy = ax_[-1] - ax_[-2], ay_[-1] - ay_[-2]
+                _L = (tvx * tvx + tvy * tvy) ** 0.5 or 1.0
+                tvx, tvy = tvx / _L, tvy / _L
+                for _ang in (146, -146):                 # dos segmentos = punta de flecha
+                    ca, sa = _math.cos(_math.radians(_ang)), _math.sin(_math.radians(_ang))
+                    rx = tvx * ca - tvy * sa; ry = tvx * sa + tvy * ca
+                    brg_plot.plot([ax_[-1], ax_[-1] + 0.16 * rx], [ay_[-1], ay_[-1] + 0.16 * ry],
+                                  pen=pg.mkPen("#12467f", width=3.5))
+                rot = pg.TextItem(html=f"<div style='font-size:13pt;color:#0F1E3D;font-weight:800'>"
+                                  f"{'CW' if cw else 'CCW'}</div>", anchor=(0.5, 0.5))
+                rot.setPos(acx, acy); brg_plot.addItem(rot)
                 # Auto-encuadre honrando aspect-lock → se ven TODOS los cojinetes (con 5-6
                 # antes se cortaba y solo mostraba los del medio).
                 brg_plot.getViewBox().setRange(xRange=(-1.2, xmax + 1.2), yRange=(-1.1, 1.25),
