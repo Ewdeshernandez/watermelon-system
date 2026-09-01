@@ -950,12 +950,12 @@ def main() -> int:
 
         # ---------- Botones de acción (siempre visibles, debajo de las pestañas) ----------
         rb = QtWidgets.QHBoxLayout()
-        btn_refresh = QtWidgets.QPushButton("↻ Apply changes")
-        btn_refresh.setToolTip("Refresca el diagrama y el resumen con los cambios actuales "
-                               "(rotación, canales, ángulos…). No relanza ni mide.")
-        btn_refresh.setStyleSheet(
-            "QPushButton{background:#eef5ff;color:#12467f;border:1px solid #bcd6f5;font-weight:700;"
-            "padding:8px 16px;border-radius:7px;} QPushButton:hover{background:#dbe8f7;}")
+        btn_refresh = QtWidgets.QPushButton("✓ Apply changes")
+        btn_refresh.setToolTip("Aplica los cambios (rotación, canales, ángulos…) al diagrama y "
+                               "al resumen. No relanza ni mide.")
+        btn_refresh.setStyleSheet(                          # MISMO estilo verde que Channel editor
+            "QPushButton{background:#10b981;color:white;border:none;font-weight:800;"
+            "padding:9px 18px;border-radius:8px;} QPushButton:hover{background:#0e9f6e;}")
         rb.addWidget(btn_refresh); rb.addStretch(1)
         btn_save = QtWidgets.QPushButton("Save configuration")
         btn_apply = QtWidgets.QPushButton("Apply & measure")
@@ -1053,23 +1053,18 @@ def main() -> int:
                     tk = pg.TextItem(html=f"<div style='font-size:9pt;color:#b45309;"
                                      f"font-weight:700'>{s.name.replace('_', '')}</div>", anchor=(0.5, 0))
                     tk.setPos(cx, -R - 0.86); brg_plot.addItem(tk)
-                # Indicador de giro: FLECHA CIRCULAR dibujada (arcos OPUESTOS según sentido,
-                # + punta hecha a mano). Arriba de los planos para no encimarse.
+                # Indicador de giro BULLETPROOF: círculo + triángulo arriba que apunta a la
+                # DERECHA (CW / horario) o a la IZQUIERDA (CCW / antihorario). Posición FIJA
+                # arriba (siempre visible), sin matemática que pueda fallar.
                 cw = (m.rotation == "CW")
-                acx, acy, ar = xmax + 0.78, 1.42, 0.24
-                degs = np.linspace(120, -150, 60) if cw else np.linspace(60, 330, 60)
-                th_a = np.radians(degs)
-                ax_ = acx + ar * np.cos(th_a); ay_ = acy + ar * np.sin(th_a)
-                brg_plot.plot(ax_, ay_, pen=pg.mkPen("#12467f", width=3.5))
-                tvx, tvy = ax_[-1] - ax_[-2], ay_[-1] - ay_[-2]
-                _L = (tvx * tvx + tvy * tvy) ** 0.5 or 1.0
-                tvx, tvy = tvx / _L, tvy / _L
-                for _ang in (146, -146):                 # dos segmentos = punta de flecha
-                    ca, sa = _math.cos(_math.radians(_ang)), _math.sin(_math.radians(_ang))
-                    rx = tvx * ca - tvy * sa; ry = tvx * sa + tvy * ca
-                    brg_plot.plot([ax_[-1], ax_[-1] + 0.16 * rx], [ay_[-1], ay_[-1] + 0.16 * ry],
-                                  pen=pg.mkPen("#12467f", width=3.5))
-                rot = pg.TextItem(html=f"<div style='font-size:13pt;color:#0F1E3D;font-weight:800'>"
+                acx, acy, ar = -0.35, 1.42, 0.28
+                _tc = np.linspace(0, 2 * np.pi, 80)
+                brg_plot.plot(acx + ar * np.cos(_tc), acy + ar * np.sin(_tc),
+                              pen=pg.mkPen("#12467f", width=4))
+                brg_plot.addItem(pg.ScatterPlotItem(
+                    [acx], [acy + ar], symbol=("t2" if cw else "t3"), size=22,
+                    brush="#12467f", pen=pg.mkPen("w", width=1)))
+                rot = pg.TextItem(html=f"<div style='font-size:14pt;color:#0F1E3D;font-weight:800'>"
                                   f"{'CW' if cw else 'CCW'}</div>", anchor=(0.5, 0.5))
                 rot.setPos(acx, acy); brg_plot.addItem(rot)
                 # Auto-encuadre honrando aspect-lock → se ven TODOS los cojinetes (con 5-6
