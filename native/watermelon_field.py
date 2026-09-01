@@ -571,18 +571,12 @@ def main() -> int:
             rb.addStretch(1); al.addLayout(rb)
             acq_band[_t] = (_wfx, _wfn, _wln)
 
-        lbl_acq_df = QtWidgets.QLabel(""); lbl_acq_df.setStyleSheet("color:#64748b;")
+        lbl_acq_df = QtWidgets.QLabel(""); lbl_acq_df.setStyleSheet("color:#64748b; font-weight:600;")
         al.addWidget(lbl_acq_df)
-        al.addWidget(_subhdr("Configured channels — pairing (edit in Channel editor) + band per type"))
-        tbl_acq = QtWidgets.QTableWidget(0, 6)
-        tbl_acq.setHorizontalHeaderLabels(["Channel", "Type", "Pair (X/Y)", "Keyphasor",
-                                           "Fmax (Hz)", "Lines"])
-        tbl_acq.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
-        tbl_acq.verticalHeader().setVisible(False)
-        tbl_acq.setAlternatingRowColors(True); tbl_acq.setShowGrid(False)
-        tbl_acq.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
-        tbl_acq.verticalHeader().setDefaultSectionSize(26)
-        al.addWidget(tbl_acq, 1)
+        al.addWidget(QtWidgets.QLabel(
+            "<i style='color:#94a3b8'>El resumen completo por canal (pareo, keyphasor, banda) "
+            "está en la pestaña <b>Summary</b>.</i>"))
+        al.addStretch(1)
         cfg_tabs.addTab(pg_acq, "Acquisition")
 
         def _band_ap(t):
@@ -617,36 +611,6 @@ def main() -> int:
                 lbl_acq_df.setText(f"Proximity Δf = {df:.2f} Hz · {cb_wfmode.currentText()} · "
                                    f"{sp_avg.value()} avg · orders {', '.join(orders) or '—'} · "
                                    f"{cb_frequ.currentText()}")
-                _WT = {"prox": "proximity", "vel": "velometer", "accel": "accelerometer",
-                       "keyphasor": "keyphasor"}
-                rows = []
-                for r in range(tblc.rowCount()):
-                    it = tblc.item(r, 0)
-                    if not it:
-                        continue
-                    w = tblc.cellWidget(r, 1)
-                    lbl = w.currentText() if w else "Accelerometer"
-                    rows.append((r, it.text(), _KIND_BY_LABEL.get(lbl, "accel")))
-                names = {nm for _, nm, _ in rows}
-                kph_name = next((nm for _, nm, k in rows if k == "keyphasor"), "")
-                tbl_acq.setRowCount(len(rows))
-                for i, (r, nm, kind) in enumerate(rows):
-                    tbl_acq.setItem(i, 0, _acq_cell(nm, bold=True,
-                                    fg=SENSOR_COLORS.get(kind, "#8b5cf6")))
-                    tbl_acq.setItem(i, 1, _acq_cell(_WT.get(kind, kind).capitalize()))
-                    if kind == "keyphasor":
-                        for c in (2, 3, 4, 5):
-                            tbl_acq.setItem(i, c, _acq_cell("—"))
-                        continue
-                    pv = tblc.item(r, _COL_PAIR); pair = pv.text() if pv and pv.text() else ""
-                    if not pair:
-                        sib = _sibling_name(nm); pair = sib if sib in names else "— (no pair)"
-                    kv = tblc.item(r, _COL_KPH); kphr = kv.text() if kv and kv.text() else (kph_name or "— (none)")
-                    _bfx, _bfn, _bln = acq_band.get(_WT.get(kind, "proximity"), acq_band["proximity"])
-                    tbl_acq.setItem(i, 2, _acq_cell(pair, fg=("#b45309" if pair.startswith("—") else None)))
-                    tbl_acq.setItem(i, 3, _acq_cell(kphr))
-                    tbl_acq.setItem(i, 4, _acq_cell(f"{_bfx.value():.0f}"))
-                    tbl_acq.setItem(i, 5, _acq_cell(_bln.currentText()))
             except Exception:  # noqa: BLE001
                 pass
         for _bw in acq_band.values():
@@ -986,6 +950,13 @@ def main() -> int:
 
         # ---------- Botones de acción (siempre visibles, debajo de las pestañas) ----------
         rb = QtWidgets.QHBoxLayout()
+        btn_refresh = QtWidgets.QPushButton("↻ Apply changes")
+        btn_refresh.setToolTip("Refresca el diagrama y el resumen con los cambios actuales "
+                               "(rotación, canales, ángulos…). No relanza ni mide.")
+        btn_refresh.setStyleSheet(
+            "QPushButton{background:#eef5ff;color:#12467f;border:1px solid #bcd6f5;font-weight:700;"
+            "padding:8px 16px;border-radius:7px;} QPushButton:hover{background:#dbe8f7;}")
+        rb.addWidget(btn_refresh); rb.addStretch(1)
         btn_save = QtWidgets.QPushButton("Save configuration")
         btn_apply = QtWidgets.QPushButton("Apply & measure")
         _redbtn = ("QPushButton{background:#f5484a;color:white;border:none;font-weight:700;"
@@ -995,7 +966,7 @@ def main() -> int:
         btn_cloud.setStyleSheet(
             "QPushButton{background:#10b981;color:white;border:none;font-weight:700;"
             "padding:8px 16px;border-radius:7px;} QPushButton:hover{background:#0e9f6e;}")
-        rb.addStretch(1); rb.addWidget(btn_cloud); rb.addWidget(btn_save); rb.addWidget(btn_apply)
+        rb.addWidget(btn_cloud); rb.addWidget(btn_save); rb.addWidget(btn_apply)
         cfg_ol.addLayout(rb)
         tabs.addTab(cfg_outer, "Setup")
 
@@ -1436,9 +1407,22 @@ def main() -> int:
         btn_save.clicked.connect(do_save_lib)
         btn_cloud.clicked.connect(do_save_cloud_machine)
         btn_apply.clicked.connect(do_apply)
+
+        def _refresh_all():
+            # Botón "↻ Apply changes": refresca TODO con el estado actual del formulario.
+            draw_bearing()
+            for _fn in (_refresh_acq_info, _refresh_summary, _ched_refresh_selector):
+                try:
+                    _fn()
+                except Exception:  # noqa: BLE001
+                    pass
+        btn_refresh.clicked.connect(_refresh_all)
+
         refresh_lib(); fill_form(_machine_from_agent())
         tblc.itemChanged.connect(lambda *_: draw_bearing())   # redibuja al editar ángulo/nombre
         cb_rot.currentTextChanged.connect(lambda *_: draw_bearing())
+        cb_brg.currentTextChanged.connect(lambda *_: draw_bearing())
+        sp_rpm.valueChanged.connect(lambda *_: _refresh_summary())
         # Redibujar el diagrama al entrar a "Sensors & layout" → evita que quede viejo
         # (ej. cambiabas rotación a CW en Machine y el diagrama seguía mostrando CCW).
         cfg_tabs.currentChanged.connect(
