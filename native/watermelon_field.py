@@ -968,7 +968,7 @@ def main() -> int:
             "padding:8px 16px;border-radius:7px;} QPushButton:hover{background:#0e9f6e;}")
         rb.addWidget(btn_cloud); rb.addWidget(btn_save); rb.addWidget(btn_apply)
         cfg_ol.addLayout(rb)
-        tabs.addTab(cfg_outer, "Setup")
+        tabs.addTab(cfg_outer, "Configuration")
 
         import math as _math
 
@@ -1412,8 +1412,12 @@ def main() -> int:
                 except Exception:  # noqa: BLE001
                     pass
             n = tblc.rowCount()
-            win.statusBar().showMessage(
-                f"✓ Changes applied — layout diagram & Summary updated · {n} channels", 3500)
+            _nice("Changes applied",
+                  "<div style='font-size:15px'><b style='color:#166534'>✓ Changes applied</b></div>"
+                  f"<div style='color:#0F1E3D;margin-top:6px'>Layout diagram &amp; Summary updated · "
+                  f"{n} channels · rotation {cb_rot.currentText()}</div>"
+                  "<div style='color:#64748b;margin-top:8px'>Revisá el diagrama y la pestaña "
+                  "<b>Summary</b>. Para medir con esta config usá <b>Apply &amp; measure</b>.</div>")
         btn_refresh.clicked.connect(_refresh_all)
         # En "Channel editor" manda su propio "✓ Apply to channel" (por canal); ahí ocultamos
         # el "✓ Apply changes" global para no tener dos botones que confundan.

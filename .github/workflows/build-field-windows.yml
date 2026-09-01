@@ -52,6 +52,7 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean --onefile \
             --name WatermelonField \
+            --windowed \
             --paths . \
             --collect-submodules core.remote_monitoring \
             --collect-submodules core.modal \
