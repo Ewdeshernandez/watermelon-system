@@ -1,0 +1,126 @@
+name: build-modal-windows
+
+# Compila el módulo NATIVO de análisis modal (native/watermelon_modal.py) a un
+# .exe de Windows (onedir) con PyInstaller + instalador Inno Setup. Homólogo a
+# build-field-windows.yml pero para Watermelon Modal.
+#
+# Disparar:
+#   · Manual  -> Actions -> "build-modal-windows" -> Run workflow
+#   · Tag     -> git tag modal-vX.Y.Z && git push origin modal-vX.Y.Z
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - 'modal-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Instalar dependencias + PyInstaller
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy scipy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx pyinstaller
+
+      - name: Compilar WatermelonModal.exe (onedir)
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean \
+            --name WatermelonModal \
+            --windowed \
+            --contents-directory _internal \
+            --paths . \
+            --collect-submodules core.modal \
+            --hidden-import core.modal.live_impact \
+            --hidden-import core.modal.frf_compute \
+            --add-data "assets/watermelon_logo.png;assets" \
+            --icon "assets/watermelon.ico" \
+            --collect-submodules scipy \
+            --exclude-module streamlit \
+            --exclude-module matplotlib \
+            --exclude-module pandas \
+            native/watermelon_modal.py
+
+      - name: Empaquetar binario + lanzador
+        shell: bash
+        run: |
+          mkdir -p out_modal
+          cp -r dist/WatermelonModal/. out_modal/
+          printf '@echo off\r\n"%%~dp0WatermelonModal.exe" --sim\r\npause\r\n' \
+            > out_modal/0_SIMULADOR_impacto.bat
+          cat > out_modal/LEEME.txt <<'TXT'
+          Watermelon Modal - ensayo de impacto (analisis modal, Windows)
+          ==============================================================
+
+          Requisito hardware real: driver NI-DAQmx + modulo NI 9234 (IEPE).
+          Sin hardware: doble clic en 0_SIMULADOR_impacto.bat -> demo simulada.
+
+          FLUJO (pestana Impact test):
+            1) Configuration: nombre, fs, block size, canales (martillo + acelerometros).
+            2) Impact test: boton "Impact" -> ves FRF + coherencia del golpe.
+               - LEDs de Overload / Double-hit avisan golpes malos.
+               - Accept (suma al promedio) / Reject (descarta).
+               - Repeti hasta llegar al target de promedios.
+            3) Modes: "Identify modes" -> frecuencias naturales + amortiguamiento
+               (half-power) + Nyquist de movilidad.
+
+          Ventanas de fuerza y exponencial ON por defecto (ISO 7626-5).
+          TXT
+          ls -la out_modal
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WatermelonModal-windows
+          path: out_modal/
+          retention-days: 30
+
+      - name: Instalar Inno Setup
+        if: startsWith(github.ref, 'refs/tags/modal-v')
+        shell: pwsh
+        run: choco install innosetup --no-progress -y
+
+      - name: Compilar instalador
+        if: startsWith(github.ref, 'refs/tags/modal-v')
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $ver = $env:GITHUB_REF_NAME -replace '^modal-v',''
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $iscc = (Get-ChildItem "C:\Program Files (x86)","C:\Program Files" -Recurse -Filter ISCC.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
+          "ISCC=$iscc  VER=$ver" | Tee-Object installer_log.txt
+          if (-not $iscc) { "ISCC.exe NOT FOUND" | Tee-Object -Append installer_log.txt; exit 0 }
+          & $iscc "/DMyAppVersion=$ver" "native/installer/watermelon_modal.iss" 2>&1 | Tee-Object -Append installer_log.txt
+          if (Test-Path WatermelonModal-Setup.exe) { "OK: setup built" | Tee-Object -Append installer_log.txt }
+          else { "no setup exe" | Tee-Object -Append installer_log.txt }
+
+      - name: Empaquetar zip para el Release
+        if: startsWith(github.ref, 'refs/tags/modal-v')
+        shell: pwsh
+        run: Compress-Archive -Path out_modal/* -DestinationPath WatermelonModal-windows.zip -Force
+
+      - name: Publicar Release
+        if: startsWith(github.ref, 'refs/tags/modal-v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          ASSETS="WatermelonModal-windows.zip"
+          [ -f WatermelonModal-Setup.exe ] && ASSETS="WatermelonModal-Setup.exe $ASSETS"
+          [ -f installer_log.txt ] && ASSETS="$ASSETS installer_log.txt"
+          gh release create "${GITHUB_REF_NAME}" $ASSETS \
+            --title "Watermelon Modal ${GITHUB_REF_NAME}" \
+            --notes "Modulo nativo de analisis modal (Windows, impacto). Instalador: WatermelonModal-Setup.exe. Alternativa portable: WatermelonModal-windows.zip. Hardware real: NI-DAQmx + NI 9234. Sin firmar aun -> SmartScreen/SAC pueden pedir confirmacion." \
+          || for a in $ASSETS; do gh release upload "${GITHUB_REF_NAME}" "$a" --clobber; done
