@@ -167,12 +167,12 @@ def render_remote_monitoring() -> None:
         </style>
     """, unsafe_allow_html=True)
 
-    view = st.radio("View", ["Setup", "Monitor", "Analysis"], horizontal=True,
+    view = st.radio("View", ["Configuration", "Monitor", "Analysis"], horizontal=True,
                     key="rm_view", label_visibility="collapsed")
     # Hairline sutil (sin el st.divider() que gasta mucho espacio vertical).
     st.markdown('<hr style="margin:2px 0 10px;border:none;border-top:1px solid #e6ecf5">',
                 unsafe_allow_html=True)
-    if view == "Setup":
+    if view == "Configuration":
         from core.remote_monitoring.ui_setup import render_setup
         render_setup()
     elif view == "Monitor":
@@ -221,7 +221,7 @@ def _no_config_gate() -> bool:
     """True si NO hay config activa (muestra ayuda + demo). Comparte Monitoreo/Análisis."""
     if st.session_state.get("rm_channels"):
         return False
-    st.info("No active configuration. Go to **Setup** and save a machine, "
+    st.info("No active configuration. Go to **Configuration** and save a machine, "
             "or load a demo layout to try it now.")
     if st.button("Load demo layout (4 bearings + keyphasor)"):
         chans = _demo_channels(4)
@@ -879,7 +879,7 @@ def _render_tabular_list(agent: AcqAgent, snap: np.ndarray, rpm: Optional[float]
         body.append(f'<tr style="background:{bg}">{tds}</tr>')
 
     if not f1:
-        st.caption("Without a keyphasor there are no 1X/2X vectors — only Overall. Enable the keyphasor in Setup.")
+        st.caption("Without a keyphasor there are no 1X/2X vectors — only Overall. Enable the keyphasor in Configuration.")
     st.markdown(
         f'<div style="border:1px solid #d6deea;border-radius:12px;overflow-x:auto;'
         f'box-shadow:0 6px 18px rgba(15,30,61,.08)">'
@@ -1262,7 +1262,7 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
     con una curva (locus por vuelta) para análisis."""
     import plotly.graph_objects as go
     if len(vib_channels) < 2:
-        st.info("The orbit needs an X/Y pair. Associate one in **Setup → X/Y pair**.")
+        st.info("The orbit needs an X/Y pair. Associate one in **Configuration → Channel editor → X/Y pair**.")
         return
     name_to = {ch.name: (i, ch) for i, ch in vib_channels}
     saved = st.session_state.get("rm_pairs_saved") or []
@@ -1271,7 +1271,7 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
         names = [ch.name for _, ch in vib_channels]
         valid = [(names[i], names[i + 1]) for i in range(0, len(vib_channels) - 1, 2)]
     if not valid:
-        st.info("The orbit needs an X/Y pair. Associate one in **Setup → X/Y pair**.")
+        st.info("The orbit needs an X/Y pair. Associate one in **Configuration → Channel editor → X/Y pair**.")
         return
 
     labels = [f"{a}–{b}" for a, b in valid]
@@ -1456,7 +1456,7 @@ def _plot_orbit(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float] 
 def _table_orders(snap: np.ndarray, vib_channels, fs: float, rpm: Optional[float],
                   orders: Optional[list] = None) -> None:
     if not rpm:
-        st.warning("Without a keyphasor there are no vectors. Enable the keyphasor in Setup.")
+        st.warning("Without a keyphasor there are no vectors. Enable the keyphasor in Configuration.")
         return
     orders = sorted(orders or [1.0, 2.0])
     f1 = rpm / 60.0
@@ -2265,7 +2265,7 @@ def _plot_polar(tc: TransientCapture, channel: str, snap: np.ndarray, vib,
         st.success(op_stat["msg"])
     st.caption(f"1X locus oriented to the **real plane of probe {channel}** (0° = its mounting "
                f"angle from TDC) with **phase growing against the direction of rotation** "
-               f"({rot_dir}) — just like System1. The **loop** marks the resonance; the vector "
+               f"({rot_dir}). The **loop** marks the resonance; the vector "
                f"points to the high spot. Radial amplitude in **{uu.split()[-1] if uu else 'pp'}** "
                f"(API 670); slow-roll and operation per **API 684**.")
 
@@ -2277,7 +2277,7 @@ def _plot_shaft_centerline(snap: np.ndarray, vib) -> None:
     saved = st.session_state.get("rm_pairs_saved") or []
     valid = [(a, b) for a, b in saved if a in name_to and b in name_to]
     if not valid:
-        st.info("Configure X/Y pairs in **Setup → X/Y pair** for the shaft centerline.")
+        st.info("Configure X/Y pairs in **Configuration → Channel editor → X/Y pair** for the shaft centerline.")
         return
     fig = go.Figure()
     th = np.linspace(0, 2 * np.pi, 120)

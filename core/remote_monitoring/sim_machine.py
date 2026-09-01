@@ -65,7 +65,7 @@ class SensorSpec:
 
     def abs_angle(self) -> float:
         """Ángulo ABSOLUTO desde TDC: R = horario (=ángulo), L = antihorario
-        (=-ángulo). 45°R→45°, 45°L→315° (API 670 / Bently)."""
+        (=-ángulo). 45°R→45°, 45°L→315° (convención API 670)."""
         a = float(self.angle) % 360.0
         return (-a) % 360.0 if (self.side or "").upper() == "L" else a
 
@@ -122,9 +122,15 @@ class SimMachine:
 
     @staticmethod
     def from_dict(d: dict) -> "SimMachine":
-        d = dict(d)
-        d["sensors"] = [SensorSpec(**s) for s in d.get("sensors", [])]
-        return SimMachine(**d)
+        # Tolerante a drift de esquema: ignora claves desconocidas y usa defaults
+        # para las que falten (una máquina guardada con otra versión igual carga).
+        from dataclasses import fields as _fields
+        d = dict(d or {})
+        _ss_ok = {f.name for f in _fields(SensorSpec)}
+        d["sensors"] = [SensorSpec(**{k: v for k, v in (s or {}).items() if k in _ss_ok})
+                        for s in d.get("sensors", [])]
+        _sm_ok = {f.name for f in _fields(SimMachine)}
+        return SimMachine(**{k: v for k, v in d.items() if k in _sm_ok})
 
     def save(self, path: str) -> str:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

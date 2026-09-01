@@ -50,6 +50,7 @@ def _init_machine_defaults() -> None:
         "rm_m_rpmin": 0.0, "rm_m_rpmax": 0.0, "rm_m_rot": "CCW",
         "rm_m_speed": "constant", "rm_m_brgtype": "plain", "rm_m_nbrg": 2,
         "rm_m_iso": "",
+        "rm_m_type": "", "rm_m_tag": "", "rm_m_client": "", "rm_m_loc": "",
     }
     for k, v in d.items():
         st.session_state.setdefault(k, v)
@@ -66,6 +67,10 @@ def _machine_from_state() -> cfg.MachineConfig:
         bearing_type=st.session_state["rm_m_brgtype"],
         n_bearings=int(st.session_state["rm_m_nbrg"]),
         iso_norm=st.session_state.get("rm_m_iso", ""),
+        machine_type=st.session_state.get("rm_m_type", ""),
+        tag=st.session_state.get("rm_m_tag", ""),
+        client=st.session_state.get("rm_m_client", ""),
+        location=st.session_state.get("rm_m_loc", ""),
     )
 
 
@@ -148,6 +153,10 @@ def _load_setup_into_state(name: str) -> None:
     st.session_state["rm_m_brgtype"] = m.bearing_type if m.bearing_type in cfg.BEARING_TYPES else "plain"
     st.session_state["rm_m_nbrg"] = int(m.n_bearings)
     st.session_state["rm_m_iso"] = m.iso_norm
+    st.session_state["rm_m_type"] = getattr(m, "machine_type", "") or ""
+    st.session_state["rm_m_tag"] = getattr(m, "tag", "") or ""
+    st.session_state["rm_m_client"] = getattr(m, "client", "") or ""
+    st.session_state["rm_m_loc"] = getattr(m, "location", "") or ""
     st.session_state["rm_setup_rows"] = [asdict(c) for c in s.channels]
     st.session_state["rm_acq"] = asdict(s.acquisition)
     st.session_state.pop("rm_edit_idx", None)
@@ -156,143 +165,163 @@ def _load_setup_into_state(name: str) -> None:
 
 
 def render_setup() -> None:
+    """Configuración de máquina — MISMAS pestañas que el módulo de campo:
+    Machine · Sensors & layout · Channel editor · Acquisition · Validation · Summary.
+    Lo que se guarda aquí sube a la NUBE (rm_setups) y se puede cargar en campo."""
     _init_machine_defaults()
     _inject_css()
+    st.session_state.setdefault("rm_setup_rows", [])
 
-    st.markdown('<div class="rm-sec-head">1 · Machine '
-                '<small>— train (API 684)</small></div>', unsafe_allow_html=True)
-    st.caption("Enter the machine data, or load a **saved configuration** to "
-               "edit it or create a new one based on it.")
+    t_machine, t_sensors, t_chan, t_acq, t_valid, t_summary = st.tabs(
+        ["Machine", "Sensors & layout", "Channel editor",
+         "Acquisition", "Validation", "Summary"])
 
-    # --- Configuraciones GUARDADAS (local + nube) — cargar / borrar ---
-    # Se unen las locales con las de la NUBE (rm_setups) para que aparezcan también
-    # las máquinas creadas en el MÓDULO DE CAMPO. Las de la nube van marcadas con ☁.
-    _local = cfg.list_setups()
-    try:
-        _cloud_rows = cfg.list_setups_cloud()
-    except Exception:  # noqa: BLE001
-        _cloud_rows = []
-    _cloud_names = [(r.get("name") or r.get("id") or "") for r in _cloud_rows
-                    if (r.get("name") or r.get("id"))]
-    _saved = list(dict.fromkeys([*_local, *_cloud_names]))
-    _cloud_only = set(_cloud_names) - set(_local)
-    if _saved:
-        scol1, scol2, scol3 = st.columns([3, 1, 1])
-        with scol1:
-            _opts = ["—"] + [(f"☁ {n}" if n in _cloud_only else n) for n in _saved]
-            pick_raw = st.selectbox("📂 Load saved configuration", _opts,
-                                    key="rm_load_pick",
-                                    help="Your saved machines (local + cloud ☁). ☁ = created in "
-                                         "the field module. Load it, edit it and re-save.")
-            pick_s = pick_raw[1:].strip() if pick_raw.startswith("☁") else pick_raw
-        with scol2:
-            st.write(""); st.write("")
-            if st.button("📂 Load", use_container_width=True) and pick_s != "—":
-                _load_setup_into_state(pick_s)
-        with scol3:
-            st.write(""); st.write("")
-            if st.button("🗑 Delete", use_container_width=True, key="rm_saved_delete") and pick_s != "—":
-                cfg.delete_setup(pick_s)
-                st.session_state.pop("rm_load_pick", None)
-                st.rerun()
+    # ============================ MACHINE ============================
+    with t_machine:
+        st.markdown('<div class="rm-sec-head">Machine '
+                    '<small>— asset record &amp; train (API 684)</small></div>',
+                    unsafe_allow_html=True)
+        st.caption("Enter the machine data, or load a **saved configuration** to "
+                   "edit it or create a new one based on it.")
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.text_input("Name / tag", key="rm_m_name")
-        st.number_input("RPM nominal", 0.0, 60000.0, key="rm_m_rpm", step=60.0)
-    with c2:
-        st.number_input("RPM min (range)", 0.0, 60000.0, key="rm_m_rpmin", step=60.0)
-        st.number_input("RPM max (range)", 0.0, 60000.0, key="rm_m_rpmax", step=60.0)
-    with c3:
-        st.radio("Rotation direction", cfg.ROTATIONS, key="rm_m_rot", horizontal=True)
+        # --- Configuraciones GUARDADAS (local + nube) — cargar / borrar ---
+        # Se unen las locales con las de la NUBE (rm_setups) para que aparezcan también
+        # las máquinas creadas en el MÓDULO DE CAMPO. Las de la nube van marcadas con ☁.
+        _local = cfg.list_setups()
+        try:
+            _cloud_rows = cfg.list_setups_cloud()
+        except Exception:  # noqa: BLE001
+            _cloud_rows = []
+        _cloud_names = [(r.get("name") or r.get("id") or "") for r in _cloud_rows
+                        if (r.get("name") or r.get("id"))]
+        _saved = list(dict.fromkeys([*_local, *_cloud_names]))
+        _cloud_only = set(_cloud_names) - set(_local)
+        if _saved:
+            scol1, scol2, scol3 = st.columns([3, 1, 1])
+            with scol1:
+                _opts = ["—"] + [(f"☁ {n}" if n in _cloud_only else n) for n in _saved]
+                pick_raw = st.selectbox("📂 Load saved configuration", _opts,
+                                        key="rm_load_pick",
+                                        help="Your saved machines (local + cloud ☁). ☁ = created in "
+                                             "the field module. Load it, edit it and re-save.")
+                pick_s = pick_raw[1:].strip() if pick_raw.startswith("☁") else pick_raw
+            with scol2:
+                st.write(""); st.write("")
+                if st.button("📂 Load", use_container_width=True) and pick_s != "—":
+                    _load_setup_into_state(pick_s)
+            with scol3:
+                st.write(""); st.write("")
+                if st.button("🗑 Delete", use_container_width=True, key="rm_saved_delete") and pick_s != "—":
+                    cfg.delete_setup(pick_s)
+                    st.session_state.pop("rm_load_pick", None)
+                    st.rerun()
+
+        st.markdown("**Asset record**")
+        a1, a2, a3 = st.columns(3)
+        with a1:
+            st.text_input("Machine name / tag", key="rm_m_name")
+            st.text_input("Type", key="rm_m_type", placeholder="Turbogenerator, Motor+Pump")
+        with a2:
+            st.text_input("Asset tag / nameplate", key="rm_m_tag")
+            st.text_input("Client", key="rm_m_client")
+        with a3:
+            st.text_input("Plant / location", key="rm_m_loc")
+
+        st.markdown("**Train & operation**")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            st.number_input("RPM nominal", 0.0, 60000.0, key="rm_m_rpm", step=60.0)
+            st.selectbox("Bearing type", cfg.BEARING_TYPES, key="rm_m_brgtype")
+        with c2:
+            st.number_input("RPM min (range)", 0.0, 60000.0, key="rm_m_rpmin", step=60.0)
+            st.number_input("No. of bearings", 1, 16, key="rm_m_nbrg")
+        with c3:
+            st.number_input("RPM max (range)", 0.0, 60000.0, key="rm_m_rpmax", step=60.0)
+            st.radio("Rotation direction", cfg.ROTATIONS, key="rm_m_rot", horizontal=True)
         st.radio("Speed control", cfg.SPEED_CONTROLS, key="rm_m_speed", horizontal=True,
                  help="Variable enables start/stop logic (transients).")
 
-    c4, c5, c6 = st.columns(3)
-    with c4:
-        st.selectbox("Bearing type", cfg.BEARING_TYPES, key="rm_m_brgtype")
-    with c5:
-        st.number_input("No. of bearings", 1, 16, key="rm_m_nbrg")
-    with c6:
-        if st.session_state.get("rm_m_iso"):
-            st.text_input("ISO standard", key="rm_m_iso", disabled=True)
+    machine = _machine_from_state()
 
-    st.divider()
+    # ======================= SENSORS & LAYOUT =======================
+    with t_sensors:
+        st.markdown('<div class="rm-sec-head">Sensors &amp; layout '
+                    '<small>— BNC → measurement point</small></div>', unsafe_allow_html=True)
+        gcol1, gcol2 = st.columns([1, 3])
+        with gcol1:
+            if st.button("🧩 Auto-generate layout", use_container_width=True,
+                         help="Generates X/Y pairs per bearing + keyphasor from the machine."):
+                st.session_state["rm_setup_rows"] = [asdict(r) for r in cfg.auto_layout(machine)]
+                st.rerun()
+        with gcol2:
+            st.caption("Angle convention (API 670): from **TDC (top)**, "
+                       "**R** = clockwise, **L** = counter-clockwise → 45°L + 45°R = 90°.")
+        row_objs = _rows_from_records(st.session_state["rm_setup_rows"])
+        if row_objs:
+            st.markdown(_channels_compact_table(row_objs), unsafe_allow_html=True)
+            _render_bearing_diagram(row_objs, machine)
+        else:
+            st.info("Press **🧩 Auto-generate layout**, or add channels in **Channel editor**.")
 
-    # =================================================================
-    # 2 · Canales
-    # =================================================================
-    st.markdown('<div class="rm-sec-head">2 · Channels '
-                '<small>— BNC → measurement point</small></div>', unsafe_allow_html=True)
-
-    gcol1, gcol2 = st.columns([1, 3])
-    with gcol1:
-        if st.button("🧩 Auto-generate layout", use_container_width=True,
-                     help="Generates X/Y pairs per bearing + keyphasor from the machine."):
-            machine = _machine_from_state()
-            st.session_state["rm_setup_rows"] = [asdict(r) for r in cfg.auto_layout(machine)]
-            st.rerun()
-    with gcol2:
-        st.caption("Angle convention (API 670): from **TDC (top)**, "
-                   "**R** = clockwise, **L** = counter-clockwise → 45°L + 45°R = 90°.")
-
-    st.session_state.setdefault("rm_setup_rows", [])
-
-    # Vista bonita (master) — read-only, refleja las ediciones al toque
-    # (los widgets del form escriben con on_change antes de este render).
-    row_objs = _rows_from_records(st.session_state["rm_setup_rows"])
-    if row_objs:
-        _bt = st.session_state.get("rm_acq_by_type", {})
-        _unit = st.session_state.get("rm_acq", {}).get("freq_unit", "cpm")
-        st.markdown(_channels_html_table(row_objs, _bt, _unit), unsafe_allow_html=True)
-    else:
-        st.info("Press **🧩 Auto-generate layout** or **➕ Add channel** to start.")
-
-    # Editor maestro-detalle (form de propiedades del canal seleccionado)
-    _render_channel_editor()
+    # ========================= CHANNEL EDITOR =========================
+    with t_chan:
+        st.markdown('<div class="rm-sec-head">Channel editor '
+                    '<small>— per-channel, full parameters</small></div>', unsafe_allow_html=True)
+        _render_channel_editor()
     rows = _rows_from_records(st.session_state["rm_setup_rows"])
 
-    # Diagrama de sección de cojinete (SVG pro — bolitas de color)
-    _render_bearing_diagram(rows, _machine_from_state())
+    # =========================== ACQUISITION ===========================
+    with t_acq:
+        st.markdown('<div class="rm-sec-head">Acquisition '
+                    '<small>— train + per sensor type (ISO 20816)</small></div>',
+                    unsafe_allow_html=True)
+        train_acq, acq_by_type = _render_acq_params(rows)
 
-    # =================================================================
-    # 3 · Parámetros de adquisición (global)
-    # =================================================================
-    train_acq, acq_by_type = _render_acq_params(rows)
-
-    # =================================================================
-    # 4 · Validación
-    # =================================================================
-    st.markdown('<div class="rm-sec-head">4 · Validation '
-                '<small>— API 670 / ISO 20816</small></div>', unsafe_allow_html=True)
-    machine = _machine_from_state()
+    # ---- setup + hallazgos (se usan en Validation y Summary) ----
     setup = cfg.AcqSetup(machine=machine, channels=rows, acquisition=train_acq,
                          acquisition_by_type=acq_by_type)
     findings = cfg.validate_setup(setup)
     n_err = sum(1 for f in findings if f.level == "error")
     n_warn = sum(1 for f in findings if f.level == "warn")
-    for f in findings:
-        if f.level == "error":
-            st.error(f"❌ {f.message}")
-        elif f.level == "warn":
-            st.warning(f"⚠ {f.message}")
-        else:
-            st.success(f"✅ {f.message}")
 
-    st.divider()
-    scol1, scol2 = st.columns([1, 3])
-    with scol1:
-        can_save = n_err == 0 and len(setup.channels) > 0
-        if st.button("💾 Save configuration", type="primary",
-                     use_container_width=True, disabled=not can_save):
-            _save_and_activate(setup)
-    with scol2:
-        if n_err:
-            st.caption(f"Fix the {n_err} error(s) before saving.")
-        elif n_warn:
-            st.caption(f"{n_warn} warning(s) — you can still save, but review them.")
+    # =========================== VALIDATION ===========================
+    with t_valid:
+        st.markdown('<div class="rm-sec-head">Validation '
+                    '<small>— API 670 / ISO 20816</small></div>', unsafe_allow_html=True)
+        for f in findings:
+            if f.level == "error":
+                st.error(f"❌ {f.message}")
+            elif f.level == "warn":
+                st.warning(f"⚠ {f.message}")
+            else:
+                st.success(f"✅ {f.message}")
+        st.divider()
+        scol1, scol2 = st.columns([1, 3])
+        with scol1:
+            can_save = n_err == 0 and len(setup.channels) > 0
+            if st.button("💾 Save configuration", type="primary",
+                         use_container_width=True, disabled=not can_save):
+                _save_and_activate(setup)
+        with scol2:
+            if n_err:
+                st.caption(f"Fix the {n_err} error(s) before saving.")
+            elif n_warn:
+                st.caption(f"{n_warn} warning(s) — you can still save, but review them.")
+            else:
+                st.caption("All OK. Save → shared with the field module (☁) and go to **Monitor**.")
+
+    # ============================= SUMMARY =============================
+    with t_summary:
+        st.markdown('<div class="rm-sec-head">Summary '
+                    '<small>— full read-only view</small></div>', unsafe_allow_html=True)
+        if rows:
+            _bt = st.session_state.get("rm_acq_by_type", {})
+            _unit = st.session_state.get("rm_acq", {}).get("freq_unit", "cpm")
+            st.markdown(_channels_html_table(rows, _bt, _unit), unsafe_allow_html=True)
+            st.caption(f"**{machine.name}** · {len(rows)} channels · rotation {machine.rotation} · "
+                       f"{n_err} error(s), {n_warn} warning(s)")
         else:
-            st.caption("All OK. Save and go to the **Monitoring** tab to acquire.")
+            st.info("No channels yet — configure them in **Sensors & layout** / **Channel editor**.")
 
 
 # =====================================================================
@@ -674,6 +703,43 @@ def _render_bearing_diagram(rows: List[cfg.ChannelRow], machine: cfg.MachineConf
         if kph:
             st.caption(f"🔑 Keyphasor **{kph[0].point_label}** on this bearing "
                        f"({cfg.absolute_angle(kph[0].angle_deg, kph[0].side):.0f}° abs).")
+
+
+def _channels_compact_table(rows: List[cfg.ChannelRow]) -> str:
+    """Tabla compacta (read-only) — solo Channel/Type/BNC/Angle/Side, como en el
+    módulo de campo. Deja más espacio al plano gráfico."""
+    heads = ["Channel", "Type", "BNC", "Angle", "Side"]
+    th = "".join(
+        f'<th style="padding:9px 14px;text-align:left;font-size:11px;'
+        f'letter-spacing:.04em;text-transform:uppercase;font-weight:700;'
+        f'color:{CYAN};border:none;white-space:nowrap;">{html.escape(h)}</th>' for h in heads)
+    dash = '<span style="color:#94a3b8;">—</span>'
+    body = []
+    for i, r in enumerate(rows):
+        color = _TYPE_COLOR.get(r.sensor_type, "#475569")
+        muted = "" if r.active else "opacity:.45;"
+        bg = "#ffffff" if i % 2 == 0 else GRAY_LIGHT
+        dot = (f'<span style="display:inline-block;width:13px;height:13px;'
+               f'border-radius:50%;background:{color};border:2px solid #fff;'
+               f'box-shadow:0 0 0 1px #cbd5e1;margin-right:9px;vertical-align:-2px;"></span>')
+        tds = [
+            f'{dot}<b style="color:{NAVY};">{html.escape(r.point_label)}</b>',
+            html.escape(r.sensor_type),
+            f'<span style="font-family:monospace;">{r.bnc_port}</span>',
+            f'<span style="font-family:monospace;">{r.angle_deg:.0f}°</span>',
+            html.escape(r.side) if r.side else dash,
+        ]
+        cells = "".join(
+            f'<td style="padding:11px 14px;font-size:13px;color:#334155;{muted}'
+            f'border-top:1px solid #e8edf5;white-space:nowrap;">{c}</td>' for c in tds)
+        body.append(f'<tr style="background:{bg};">{cells}</tr>')
+    return (
+        f'<div style="border:1px solid #d6deea;border-radius:12px;overflow:hidden;'
+        f'box-shadow:0 6px 18px rgba(15,30,61,.08);margin:6px 0 4px 0;">'
+        f'<table style="width:100%;border-collapse:collapse;">'
+        f'<thead><tr style="background:{NAVY};">{th}</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table></div>'
+    )
 
 
 def _channels_html_table(rows: List[cfg.ChannelRow], acq_by_type: dict = None,

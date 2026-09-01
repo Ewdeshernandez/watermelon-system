@@ -1229,7 +1229,15 @@ def main() -> int:
                     fx.setValue(float(bp.fmax_hz)); fn.setValue(float(bp.fmin_hz))
                     ln.setCurrentText(str(int(bp.lines)))
             else:
-                fill_form(load_from_library(nm))
+                try:
+                    fill_form(load_from_library(nm))
+                    win.statusBar().showMessage(f"✓ Loaded '{nm}' from local library", 3000)
+                except Exception as e:  # noqa: BLE001
+                    import traceback
+                    QtWidgets.QMessageBox.critical(
+                        win, "Load",
+                        f"Could not load '{nm}' from the local library.\n\n{e}\n\n"
+                        f"{traceback.format_exc()}")
 
         def do_save_lib():
             m = read_form()
