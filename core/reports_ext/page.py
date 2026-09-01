@@ -583,10 +583,14 @@ def _consolidated(meta):
     # 4. Objetivo del trabajo
     objetivo = st.text_area("4. Objetivo del trabajo", key="con_obj", height=90)
 
-    # 5. Descripción de las actividades (tabla con % de avance)
+    # 5. Descripción de las actividades (texto intro + tabla con % de avance)
     st.markdown("**5. Descripción de las actividades** — columna *Tipo*: "
                 "«grupo» (banda), «subgrupo» (banda clara) o «item» (con % de "
                 "avance; se pinta verde en 100%).")
+    act_intro = st.text_area(
+        "Texto introductorio (opcional)", key="con_act_intro", height=60,
+        placeholder="A continuación, se describen las actividades desarrolladas "
+                    "en el mantenimiento e inspección del soleplate.")
     _tipo_cfg = {"Tipo": st.column_config.SelectboxColumn(
         "Tipo", options=["grupo", "subgrupo", "item"], required=True, width="small")}
     act_recs = _stable_table(
@@ -598,19 +602,28 @@ def _consolidated(meta):
     act_rows = [{"tipo": r[0], "descripcion": r[1], "avance": r[2]}
                 for r in act_recs if str(r[1]).strip()]
 
-    # 6. Recurso utilizado para realizar la actividad
-    st.markdown("**6. Recurso utilizado para realizar la actividad**")
+    # 6. Recurso utilizado — texto intro + tabla PERSONAL UTILIZADO (Cantidad/Cargo)
+    st.markdown("**6. Recurso utilizado para realizar la actividad** — "
+                "personal utilizado (cantidad y cargo).")
+    rec_intro = st.text_area(
+        "Texto introductorio (opcional)", key="con_rec_intro", height=60,
+        placeholder="Para la ejecución de las labores se utilizaron los "
+                    "siguientes recursos:")
+    _cant_cfg = {"Cantidad": st.column_config.TextColumn("Cantidad", width="small")}
     rec_recs = _stable_table(
-        "con_recdf", "con_recrows", ["Recurso", "Detalle"],
-        pd.DataFrame({"Recurso": ["", ""], "Detalle": ["", ""]}),
-        "con_rec_editor")
+        "con_recdf", "con_recrows", ["Cantidad", "Cargo"],
+        pd.DataFrame({"Cantidad": ["", ""], "Cargo": ["", ""]}),
+        "con_rec_editor", column_config=_cant_cfg)
     recurso_rows = [r for r in rec_recs
                     if str(r[0]).strip() or str(r[1]).strip()]
 
-    # 7. Documentos de referencia
-    docs_ref = st.text_area("7. Documentos de referencia (uno por línea)",
-                            key="con_docs", height=90,
-                            placeholder="API RP 686\nISO 20816-3\nProcedimiento SIGA-PR-xxx")
+    # 7. Documentos de referencia — opcional texto e imágenes
+    st.markdown("**7. Documentos de referencia** — texto e imágenes (opcionales).")
+    docs_text = st.text_area("Texto (opcional)", key="con_docs_text", height=80,
+                             placeholder="API RP 686, ISO 20816-3, "
+                                         "Procedimiento SIGA-PR-014…")
+    with st.expander("Imágenes (opcional)", expanded=False):
+        docs_photos = _photo_uploader("con_docsimg", label="Imágenes de referencia")
 
     # 8. Desarrollo y descripción detallada (orden libre)
     st.markdown("**8. Desarrollo y descripción detallada de las actividades** — "
@@ -625,8 +638,9 @@ def _consolidated(meta):
     content = {
         "antecedentes": antecedentes,
         "tech_rows": tech_rows, "estado_photos": estado_photos,
-        "objetivo": objetivo, "act_rows": act_rows,
-        "recurso_rows": recurso_rows, "docs_ref": _lines(docs_ref),
+        "objetivo": objetivo, "act_intro": act_intro, "act_rows": act_rows,
+        "rec_intro": rec_intro, "recurso_rows": recurso_rows,
+        "docs_text": docs_text, "docs_photos": docs_photos,
         "dev_blocks": dev_blocks, "anexo_docs": _lines(anexo_docs),
     }
     _generate("con", "consolidado", meta, content)

@@ -393,8 +393,10 @@ def build_consolidated_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> 
     body.append(p(content.get("objetivo") or "—", styles))
     body.append(Spacer(1, 0.3 * cm))
 
-    # 5. Descripción de las actividades (tabla con % de avance)
+    # 5. Descripción de las actividades (texto intro + tabla con % de avance)
     body.append(section("5. Descripción de las actividades", styles))
+    if str(content.get("act_intro", "")).strip():
+        body.append(p(content["act_intro"], styles)); body.append(Spacer(1, 0.15 * cm))
     act_rows = [r for r in (content.get("act_rows") or [])
                 if str(r.get("descripcion", "")).strip()]
     if act_rows:
@@ -403,23 +405,29 @@ def build_consolidated_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> 
         body.append(p("—", styles))
     body.append(Spacer(1, 0.3 * cm))
 
-    # 6. Recurso utilizado para realizar la actividad
+    # 6. Recurso utilizado (texto intro + tabla Personal utilizado: Cantidad/Cargo)
     body.append(section("6. Recurso utilizado para realizar la actividad", styles))
+    if str(content.get("rec_intro", "")).strip():
+        body.append(p(content["rec_intro"], styles)); body.append(Spacer(1, 0.15 * cm))
     rec = [r for r in (content.get("recurso_rows") or [])
            if any(str(c).strip() for c in r)]
     if rec:
-        body.append(titled_table("", ["Recurso", "Detalle"], rec, styles,
-                                 col_widths=[6.2 * cm, 10.0 * cm]))
+        body.append(titled_table("PERSONAL UTILIZADO", ["Cantidad", "Cargo"], rec,
+                                 styles, col_widths=[3.2 * cm, 13.0 * cm]))
     else:
         body.append(p("—", styles))
     body.append(Spacer(1, 0.3 * cm))
 
-    # 7. Documentos de referencia
+    # 7. Documentos de referencia (opcional: texto e imágenes)
     body.append(section("7. Documentos de referencia", styles))
-    docs = [d for d in (content.get("docs_ref") or []) if str(d).strip()]
-    if docs:
-        body += numbered_list(docs, styles)
-    else:
+    _dtxt = str(content.get("docs_text", "")).strip()
+    _dph = [ph for ph in (content.get("docs_photos") or []) if ph.get("bytes")]
+    if _dtxt:
+        body.append(p(content["docs_text"], styles)); body.append(Spacer(1, 0.15 * cm))
+    if _dph:
+        body += photo_grid(_dph, styles, cols=content.get("docs_cols", 2),
+                           credit=photo_credit())
+    if not _dtxt and not _dph:
         body.append(p("—", styles))
     body.append(Spacer(1, 0.3 * cm))
 

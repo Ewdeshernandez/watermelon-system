@@ -315,7 +315,7 @@ def activities_progress_table(rows: List[Dict[str, Any]], styles,
                           alignment=TA_CENTER, textColor=colors.white)
     data: List[List[Any]] = [[
         Paragraph("<b>DESCRIPCIÓN</b>", styles["WMTableHeader"]),
-        Paragraph("<b>% AVANCE</b>", styles["WMTableHeader"]),
+        Paragraph("<b>% AVANCE ACT.</b>", styles["WMTableHeader"]),
     ]]
     style = [
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(_HEADER_BG)),
