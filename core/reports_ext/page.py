@@ -432,14 +432,6 @@ def _free_block_composer(prefix: str) -> List[Dict[str, Any]]:
         st.session_state[f"{prefix}_bidc"] += 1
         return st.session_state[f"{prefix}_bidc"]
 
-    ca = st.columns(3)
-    if ca[0].button("➕ Texto", key=f"{prefix}_addtxt", use_container_width=True):
-        blocks.append({"id": _nid(), "type": "text", "text": ""}); st.rerun()
-    if ca[1].button("➕ Imágenes", key=f"{prefix}_addimg", use_container_width=True):
-        blocks.append({"id": _nid(), "type": "images"}); st.rerun()
-    if ca[2].button("➕ Tabla", key=f"{prefix}_addtbl", use_container_width=True):
-        blocks.append({"id": _nid(), "type": "table", "cols": 3}); st.rerun()
-
     for i, b in enumerate(list(blocks)):
         bid = b["id"]
         _tlabel = {"text": "Texto", "images": "Imágenes", "table": "Tabla"}.get(b["type"], b["type"])
@@ -488,6 +480,16 @@ def _free_block_composer(prefix: str) -> List[Dict[str, Any]]:
                 b["headers"] = recs[0] if recs else cols
                 b["rows"] = recs[1:] if len(recs) > 1 else []
                 st.caption("La 1ª fila son los encabezados; las siguientes, los datos.")
+
+    # Botones de agregar AL FINAL (para seguir sumando bloques desde abajo).
+    st.caption("Agregar bloque:")
+    ca = st.columns(3)
+    if ca[0].button("➕ Texto", key=f"{prefix}_addtxt", use_container_width=True):
+        blocks.append({"id": _nid(), "type": "text", "text": ""}); st.rerun()
+    if ca[1].button("➕ Imágenes", key=f"{prefix}_addimg", use_container_width=True):
+        blocks.append({"id": _nid(), "type": "images"}); st.rerun()
+    if ca[2].button("➕ Tabla", key=f"{prefix}_addtbl", use_container_width=True):
+        blocks.append({"id": _nid(), "type": "table", "cols": 3}); st.rerun()
     return blocks
 
 
