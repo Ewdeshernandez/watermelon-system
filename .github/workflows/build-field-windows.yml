@@ -8,7 +8,7 @@ name: build-field-windows
 #   · Manual  -> pestaña Actions -> "build-field-windows" -> Run workflow
 #   · Tag     -> git tag field-vX.Y.Z && git push origin field-vX.Y.Z
 #
-# Resultado: artefacto "WatermelonField-windows" (Actions -> corrida -> Artifacts)
+# Resultado: artefacto "WatermelonRotordynamics-windows" (Actions -> corrida -> Artifacts)
 # con WatermelonField.exe + lanzadores .bat + instrucciones.
 
 on:
@@ -116,7 +116,7 @@ jobs:
 
           # --- instrucciones en texto plano (sin algoritmos) ---
           cat > out/LEEME.txt <<'TXT'
-          Watermelon Field - modulo nativo de adquisicion (Windows)
+          Watermelon Rotordynamics - modulo nativo de adquisicion (Windows)
           =========================================================
 
           Requisito unico en la PC: driver NI-DAQmx instalado (de National Instruments).
@@ -186,7 +186,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: WatermelonField-windows
+          name: WatermelonRotordynamics-windows
           path: out/
           retention-days: 30
 
@@ -212,13 +212,13 @@ jobs:
           "ISCC=$iscc  VER=$ver" | Tee-Object installer_log.txt
           if (-not $iscc) { "ISCC.exe NOT FOUND" | Tee-Object -Append installer_log.txt; exit 0 }
           & $iscc "/DMyAppVersion=$ver" "native/installer/watermelon.iss" 2>&1 | Tee-Object -Append installer_log.txt
-          if (Test-Path WatermelonField-Setup.exe) { "OK: setup built" | Tee-Object -Append installer_log.txt }
+          if (Test-Path WatermelonRotordynamics-Setup.exe) { "OK: setup built" | Tee-Object -Append installer_log.txt }
           else { "no setup exe" | Tee-Object -Append installer_log.txt }
 
       - name: Empaquetar zip para el Release
         if: startsWith(github.ref, 'refs/tags/field-v')
         shell: pwsh
-        run: Compress-Archive -Path out/* -DestinationPath WatermelonField-windows.zip -Force
+        run: Compress-Archive -Path out/* -DestinationPath WatermelonRotordynamics-windows.zip -Force
 
       - name: Publicar Release
         if: startsWith(github.ref, 'refs/tags/field-v')
@@ -227,10 +227,10 @@ jobs:
         shell: bash
         run: |
           # el .zip SIEMPRE; el instalador y el log si existen
-          ASSETS="WatermelonField-windows.zip"
-          [ -f WatermelonField-Setup.exe ] && ASSETS="WatermelonField-Setup.exe $ASSETS"
+          ASSETS="WatermelonRotordynamics-windows.zip"
+          [ -f WatermelonRotordynamics-Setup.exe ] && ASSETS="WatermelonRotordynamics-Setup.exe $ASSETS"
           [ -f installer_log.txt ] && ASSETS="$ASSETS installer_log.txt"
           gh release create "${GITHUB_REF_NAME}" $ASSETS \
-            --title "Watermelon Field ${GITHUB_REF_NAME}" \
-            --notes "Modulo nativo de campo (Windows). Si esta el instalador: descargá WatermelonField-Setup.exe (app con logo/menu Inicio). Alternativa portable: WatermelonField-windows.zip. Requisito hardware real: driver NI-DAQmx. Sin firmar aun -> SmartScreen/SAC pueden pedir confirmacion." \
+            --title "Watermelon Rotordynamics ${GITHUB_REF_NAME}" \
+            --notes "Modulo nativo de campo (Windows). Si esta el instalador: descargá WatermelonRotordynamics-Setup.exe (app con logo/menu Inicio). Alternativa portable: WatermelonRotordynamics-windows.zip. Requisito hardware real: driver NI-DAQmx. Sin firmar aun -> SmartScreen/SAC pueden pedir confirmacion." \
           || for a in $ASSETS; do gh release upload "${GITHUB_REF_NAME}" "$a" --clobber; done

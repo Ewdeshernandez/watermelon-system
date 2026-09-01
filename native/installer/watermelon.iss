@@ -1,4 +1,4 @@
-; Inno Setup — instalador de Watermelon Field (Windows)
+; Inno Setup — instalador de Watermelon Rotordynamics (Windows)
 ; Empaqueta out/ (WatermelonField.exe + lanzadores + Banco_de_Pruebas + LEEME) en un
 ; instalador con logo, menu Inicio, acceso directo de escritorio y desinstalador.
 ; La version se pasa desde el workflow:  iscc /DMyAppVersion=0.5.54 native/installer/watermelon.iss
@@ -7,7 +7,7 @@
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
 #endif
-#define MyAppName "Watermelon Field"
+#define MyAppName "Watermelon Rotordynamics"
 #define MyAppPublisher "SIGA"
 #define MyAppExeName "WatermelonField.exe"
 #define MyAppURL "https://watermelonsystem.app"
@@ -19,12 +19,12 @@ AppVersion={#MyAppVersion}
 AppVerName={#MyAppName} {#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
-DefaultDirName={autopf}\Watermelon Field
-DefaultGroupName=Watermelon Field
+DefaultDirName={autopf}\Watermelon Rotordynamics
+DefaultGroupName=Watermelon Rotordynamics
 DisableProgramGroupPage=yes
 DisableDirPage=auto
 OutputDir={#SourcePath}..\..
-OutputBaseFilename=WatermelonField-Setup
+OutputBaseFilename=WatermelonRotordynamics-Setup
 SetupIconFile={#SourcePath}..\..\assets\watermelon.ico
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
@@ -45,11 +45,11 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#SourcePath}..\..\out\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\Watermelon Field"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--scenario prox_4brg --fs 5120"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
-Name: "{group}\Watermelon Field (DEMO)"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--sim"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{group}\Watermelon Rotordynamics"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--scenario prox_4brg --fs 5120"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{group}\Watermelon Rotordynamics (DEMO)"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--sim"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{group}\Banco de Pruebas"; Filename: "{app}\Banco_de_Pruebas"
-Name: "{group}\{cm:UninstallProgram,Watermelon Field}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Watermelon Field"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--scenario prox_4brg --fs 5120"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\{cm:UninstallProgram,Watermelon Rotordynamics}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\Watermelon Rotordynamics"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--scenario prox_4brg --fs 5120"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Parameters: "--scenario prox_4brg --fs 5120"; Description: "{cm:LaunchProgram,Watermelon Field}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Parameters: "--scenario prox_4brg --fs 5120"; Description: "{cm:LaunchProgram,Watermelon Rotordynamics}"; Flags: nowait postinstall skipifsilent

@@ -1,5 +1,5 @@
 """
-Watermelon Field — módulo NATIVO industrial de adquisición y monitoreo
+Watermelon Rotordynamics — módulo NATIVO industrial de adquisición y monitoreo
 ======================================================================
 
 App de escritorio (PySide6 + pyqtgraph): menú, barra de herramientas, pestañas
@@ -285,7 +285,7 @@ def main() -> int:
         _mode_labels = [MODE_LABELS.get(m, m) for m in MODES]
         tc = TransientCapture(TransientConfig(fmax_hz=min(2000.0, args.fs / 2.5)))
         win = QtWidgets.QMainWindow()
-        win.setWindowTitle(f"Watermelon Field — {args.machine}")
+        win.setWindowTitle(f"Watermelon Rotordynamics — {args.machine}")
         win.resize(1360, 860)
         rec_state = {"rec": None}
 
@@ -303,7 +303,7 @@ def main() -> int:
         for a in (act_start, act_stop, act_save, act_sync, act_clear):
             m_file.addAction(a)
         m_file.addSeparator(); m_file.addAction(act_quit)
-        act_about = QtGui.QAction("About Watermelon Field", win)
+        act_about = QtGui.QAction("About Watermelon Rotordynamics", win)
         m_help.addAction(act_about)
 
         # View → UI scale (auto-ajuste a la pantalla; el usuario puede forzar una escala)
@@ -2661,7 +2661,7 @@ def main() -> int:
         _refresh_disk()
         act_quit.triggered.connect(win.close)
         act_about.triggered.connect(lambda: QtWidgets.QMessageBox.about(
-            win, "Watermelon Field", "Watermelon Field — native acquisition module.\n"
+            win, "Watermelon Rotordynamics", "Watermelon Rotordynamics — native acquisition module.\n"
             "Rotordynamics API 670/684 · integrated cloud.\n© SIGA"))
 
         win._agent = agent
@@ -2716,7 +2716,7 @@ def _run_with_crashlog() -> int:
         try:
             from PySide6 import QtWidgets
             _a = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
-            QtWidgets.QMessageBox.critical(None, "Watermelon Field — startup error",
+            QtWidgets.QMessageBox.critical(None, "Watermelon Rotordynamics — startup error",
                                            f"{tb}\n\nDetails saved to:\n{logp}")
         except Exception:  # noqa: BLE001
             print(tb)
