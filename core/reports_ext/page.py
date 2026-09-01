@@ -35,9 +35,13 @@ _FAMILY_PREFIXES = {
     "alineacion": ["alineacion", "ali"],
     "mecanico": ["mecanico", "mec"],
 }
-# Subcadenas de llaves que NO se persisten (bytes/uploaders/editores/UI/PDF).
+# Subcadenas de llaves que NO se persisten NI se restauran. Incluye bytes/
+# uploaders/editores/PDF y BOTONES (Streamlit no permite setear su valor por
+# session_state — restaurarlos crashea con StreamlitValueAssignmentNotAllowedError).
 _SKIP_SUBSTR = ("_editor", "_pdf", "_photos", "_evid", "figt", "_draft",
-                "_pick", "_gen", "_dl", "_meth", "_img", "_fig_")
+                "_pick", "_gen", "_dl", "_meth", "_img", "_fig_",
+                "_add", "_up_", "_dn_", "_del", "eqdel", "_recover", "_new",
+                "_bidc", "_eidc")
 
 
 def _rep_module(family: str) -> str:
@@ -85,7 +89,14 @@ def _apply_pending(family: str) -> None:
     for k, v in pend.items():
         if k == "__clear__":
             continue
-        st.session_state[k] = v
+        # No restaurar llaves de widgets no-seteables (botones/uploaders/editores);
+        # setearlas lanza StreamlitValueAssignmentNotAllowedError.
+        if any(s in k for s in _SKIP_SUBSTR):
+            continue
+        try:
+            st.session_state[k] = v
+        except Exception:
+            pass
 
 
 def _draft_bar(family: str) -> None:
