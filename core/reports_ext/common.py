@@ -360,31 +360,29 @@ def photo_grid(photos: List[Dict[str, Any]], styles, cols: int = 2,
     cell_w = 16.0 / cols       # cm por celda
     cap_style = _photo_caption_style()      # leyendas en cursiva
     credit_style = _photo_credit_style()    # crédito pequeño gris
-    row: List[Any] = []
-    grid_rows: List[List[Any]] = []
+    cells: List[Any] = []
     for ph in photos:
         img = safe_image(ph.get("bytes"), cell_w - 0.4, max_h_cm)
         if img is not None:
-            img.hAlign = "CENTER"   # centrar la imagen dentro de la celda
+            img.hAlign = "CENTER"
         cap = Paragraph(paragraph_safe(ph.get("caption", "")), cap_style)
         cell = [img, cap] if img else [cap]
         if credit:
             cell.append(Paragraph(paragraph_safe(credit), credit_style))
-        row.append(cell)
-        if len(row) == cols:
-            grid_rows.append(row); row = []
-    if row:
-        while len(row) < cols:
-            row.append([Paragraph("", styles["WMFigureCaption"])])
-        grid_rows.append(row)
-    t = Table(grid_rows, colWidths=[cell_w * cm] * cols)
-    t.setStyle(TableStyle([
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-    ]))
-    out.append(t)
+        cells.append(cell)
+    # Cada FILA es su propia tabla CENTRADA en la página. Así una imagen sola
+    # queda centrada (no pegada a la izquierda) y una fila incompleta también.
+    for i in range(0, len(cells), cols):
+        chunk = cells[i:i + cols]
+        t = Table([chunk], colWidths=[cell_w * cm] * len(chunk))
+        t.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("TOPPADDING", (0, 0), (-1, -1), 6),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ]))
+        t.hAlign = "CENTER"
+        out.append(t)
     return out
 
 

@@ -262,6 +262,26 @@ def build_alignment_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> byt
     styles = make_styles()
     body: List[Any] = []
 
+    # Numeración CONTINUA de figuras en todo el reporte (Figura 1, 2, 3…),
+    # conservando el nombre. Antes cada bloque numeraba desde 1 → todas "Figura 1".
+    import re as _re
+    _fig = [0]
+
+    def _renum(ph):
+        _fig[0] += 1
+        _t = str(ph.get("title") or ph.get("caption") or "")
+        _t = _re.sub(r"^\s*Figura\s*\d+\.?\s*", "", _t).strip()
+        ph["caption"] = (f"Figura {_fig[0]}. {_t}").rstrip(". ")
+
+    for _ph in (content.get("met_photos") or []):
+        if _ph.get("bytes"):
+            _renum(_ph)
+    for _b in (content.get("dev_blocks") or []):
+        if _b.get("type") == "images":
+            for _ph in (_b.get("photos") or []):
+                if _ph.get("bytes"):
+                    _renum(_ph)
+
     body.append(section("1. Introducción y alcance", styles))
     body.append(p(content.get("introduccion", "—"), styles)); body.append(Spacer(1, 0.2 * cm))
 
@@ -295,8 +315,10 @@ def build_alignment_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> byt
             for _i in range(0, len(rows), 2):
                 _a = rows[_i]
                 _b = rows[_i + 1] if _i + 1 < len(rows) else ["", ""]
-                pairs.append([_a[0], (_a[1] if len(_a) > 1 else ""),
-                              _b[0], (_b[1] if len(_b) > 1 else "")])
+                _ca = f"<b>{_a[0]}</b>" if str(_a[0]).strip() else ""
+                _cb = f"<b>{_b[0]}</b>" if str(_b[0]).strip() else ""
+                pairs.append([_ca, (_a[1] if len(_a) > 1 else ""),
+                              _cb, (_b[1] if len(_b) > 1 else "")])
             body.append(_titled(eq.get("title", ""),
                                 ["Campo", "Valor", "Campo", "Valor"], pairs, styles,
                                 col_widths=[3.0 * cm, 5.1 * cm, 3.0 * cm, 5.1 * cm]))
