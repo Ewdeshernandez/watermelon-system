@@ -1,23 +1,22 @@
 """
-Watermelon Modal — módulo NATIVO de ensayo modal (EMA + OMA, Windows)
-=====================================================================
+Watermelon Modal — native modal-test module (EMA + OMA, Windows)
+================================================================
 
-App de campo (PySide6 + pyqtgraph) homóloga a Watermelon Rotordynamics:
+Field app (PySide6 + pyqtgraph), sibling of Watermelon Rotordynamics. Analyst UI
+in ENGLISH (reports stay Spanish). Configuration flow:
 
-  Configuration (pestañas internas)
-      · Machine        — ficha del activo del cliente + DIBUJO de la máquina
-                         donde se UBICAN los sensores (clic sobre el gráfico).
-      · Measurement points — tabla de canales (componente/referencia/DOF/slot/
-                         canal/sensibilidad), sirve para EMA y OMA.
-      · Acquisition    — fs, block, Fmax, duración, ventanas (EMA), etc.
-  Impact test (EMA)    — golpe→FRF+coherencia en vivo, accept/reject, promedios.
-  OMA capture          — captura continua multicanal → FDD → modos.
-  Modes                — modos EMA (peak-picking + half-power) + Nyquist.
-  Comparative          — compara varias condiciones OMA (tracking de modos).
-  Campbell             — cruces fn↔orden automáticos (API 684) + bandas.
+  Configuration (inner tabs)
+      · Machine            — machine & client data + build the 3D figure (solid,
+                             mouse-orbit) + select EMA / OMA / both.
+      · Sensors            — place sensors ON the drawing (norm-based or by hand;
+                             drag to move) — nothing appears until you add it.
+      · Measurement points — table of every placed sensor (number, axis, A/V/D…).
+      · Acquisition        — fs / block / Fmax / windows + "Recommended per norm".
+      · Summary            — full config table + Save local / Save cloud.
+  Impact test (EMA) · OMA capture · Modes · Comparative (EMA vs OMA) · Campbell.
 
-Modo SIMULADO por defecto (--sim): sin hardware. Con NI 9234 (IEPE) real el mismo
-motor recibe los datos. Cómputo en core.modal.* (testeado).
+3D is a pure-QPainter isometric solid (no OpenGL → robust in the .exe). Compute
+in core.modal.* (tested).
 """
 from __future__ import annotations
 
@@ -32,39 +31,59 @@ try:
     from PySide6 import QtCore, QtGui, QtWidgets
     import pyqtgraph as pg
 except Exception as exc:  # noqa: BLE001
-    print("Falta PySide6/pyqtgraph:", exc)
+    print("Missing PySide6/pyqtgraph:", exc)
     raise
 
 from core.modal.live_impact import (FRFAccumulator, HitQuality, SynthMode, assess_hit,
                                      modes_from_frf, synth_impact)
-
-# Espécimen DEMO compartido por EMA y OMA (para que el Comparative EMA↔OMA correlacione)
-DEMO_MODES = [SynthMode(19.4, 0.020, 1.0), SynthMode(38.8, 0.015, 0.7),
-              SynthMode(77.4, 0.012, 0.45), SynthMode(129.9, 0.010, 0.30)]
-from core.modal.oma_layout import (OMALayout, MeasPoint, default_24ch_layout,
-                                    DEFAULT_COMPONENTS, POSITION_REFS, DOFS)
+from core.modal.oma_layout import (OMALayout, MeasPoint, MachineComponent, default_components,
+                                    auto_place_by_norm, recommended_acquisition, component_default_box,
+                                    is_pipe, COMPONENT_KINDS, POSITION_REFS, DOFS, MEAS_TYPES,
+                                    save_layout_local, list_layouts_local, load_layout_local)
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
-_COMP_COLOR = {"Motor": "#2563eb", "Acople": "#334155", "Turbina": "#0ea5e9",
-               "Bomba": "#16a34a", "Generador": "#7c3aed", "Gear box": "#b45309", "Skid": "#a16207",
-               "Tubería succión": "#0891b2", "Tubería descarga": "#7c3aed"}
 
 
-# ---------- proyección isométrica (3D → 2D) sin OpenGL (robusto en el .exe) ----------
+DEMO_MODES = [SynthMode(19.4, 0.020, 1.0), SynthMode(38.8, 0.015, 0.7),
+              SynthMode(77.4, 0.012, 0.45), SynthMode(129.9, 0.010, 0.30)]
+
+
+def _comp_color(kind: str) -> str:
+    k = (kind or "").lower()
+    if is_pipe(kind):
+        return "#0891b2" if "suction" in k else "#7c3aed"
+    if "motor" in k or "engine" in k:
+        return "#2563eb"
+    if "turbine" in k:
+        return "#0ea5e9"
+    if "compressor" in k:
+        return "#0d9488"
+    if "pump" in k:
+        return "#16a34a"
+    if "generator" in k:
+        return "#7c3aed"
+    if "gearbox" in k:
+        return "#b45309"
+    if "coupling" in k:
+        return "#334155"
+    if "skid" in k:
+        return "#a16207"
+    if "fan" in k or "blower" in k:
+        return "#db2777"
+    return "#64748b"
+
+
+# ---------- isometric projection (3D → 2D) without OpenGL ----------
 def _project(wx, wy, wz, az, el):
     ca, sa = np.cos(az), np.sin(az); ce, se = np.cos(el), np.sin(el)
     x1 = wx * ca - wy * sa
     y1 = wx * sa + wy * ca
-    sx = x1
-    sy = y1 * se + wz * ce
-    depth = y1 * ce - wz * se          # para ordenar caras (painter)
-    return sx, sy, depth
+    return x1, y1 * se + wz * ce, y1 * ce - wz * se
 
 
 def _unproject(sx, sy, az, el):
-    """Inversa asumiendo el plano wy=0 (para colocar puntos con el clic)."""
     ca, sa = np.cos(az), np.sin(az); ce, se = np.cos(el), np.sin(el)
     wx = sx / ca if abs(ca) > 1e-6 else sx
     wz = (sy - wx * sa * se) / ce if abs(ce) > 1e-6 else sy
@@ -72,7 +91,6 @@ def _unproject(sx, sy, az, el):
 
 
 def _cuboid_faces(c):
-    """6 caras del cuboide (x∈[x0,x1] eje, z∈[y0,y1] alto, y∈±depth prof.)."""
     x0, x1, z0, z1, d = c.x0, c.x1, c.y0, c.y1, c.depth
     P = [(x0, -d, z0), (x1, -d, z0), (x1, d, z0), (x0, d, z0),
          (x0, -d, z1), (x1, -d, z1), (x1, d, z1), (x0, d, z1)]
@@ -81,7 +99,7 @@ def _cuboid_faces(c):
 
 
 class Machine3DItem(pg.GraphicsObject):
-    """Dibuja los equipos como sólidos 3D (caras sombreadas) + sensores + flechas DOF."""
+    """Draws equipment as shaded 3D solids + sensors + DOF arrows."""
     def __init__(self):
         super().__init__()
         self.layout = None; self.az = 0.9; self.el = 0.5; self.sel = -1
@@ -112,7 +130,7 @@ class Machine3DItem(pg.GraphicsObject):
         light = np.array([0.4, -0.7, 0.6]); light /= np.linalg.norm(light)
         faces = []
         for c in self.layout.machine_components:
-            base = QtGui.QColor(_COMP_COLOR.get(c.kind, "#64748b"))
+            base = QtGui.QColor(_comp_color(c.kind))
             for f in _cuboid_faces(c):
                 pw = [_project(*p, self.az, self.el) for p in f]
                 dep = float(np.mean([p[2] for p in pw]))
@@ -120,19 +138,17 @@ class Machine3DItem(pg.GraphicsObject):
                 nrm = np.cross(v1, v2); nn = np.linalg.norm(nrm)
                 shade = 0.55 + 0.45 * abs(float(np.dot(nrm / nn, light))) if nn > 0 else 0.7
                 faces.append((dep, pw, base, shade))
-        faces.sort(key=lambda t: t[0])                 # painter: lejos → cerca
+        faces.sort(key=lambda t: t[0])
         for dep, pw, base, shade in faces:
-            col = QtGui.QColor(int(base.red() * shade), int(base.green() * shade),
-                               int(base.blue() * shade))
+            col = QtGui.QColor(int(base.red() * shade), int(base.green() * shade), int(base.blue() * shade))
             poly = QtGui.QPolygonF([QtCore.QPointF(p[0], p[1]) for p in pw])
             painter.setBrush(QtGui.QBrush(col))
             pen = QtGui.QPen(QtGui.QColor("#1e293b")); pen.setCosmetic(True); pen.setWidthF(1.0)
             painter.setPen(pen); painter.drawPolygon(poly)
-        # sensores + flechas DOF
         for i, mp in enumerate(self.layout.points):
             if not mp.active:
                 continue
-            wy = 0.20                                  # al frente, visible
+            wy = 0.20
             sx, sy, _ = _project(mp.x_norm, wy, mp.y_norm, self.az, self.el)
             d = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}.get(mp.axis, (0, 0, 1))
             sg = -1.0 if mp.dof.startswith("-") else 1.0
@@ -140,7 +156,7 @@ class Machine3DItem(pg.GraphicsObject):
                                  mp.y_norm + sg * 0.09 * d[2], self.az, self.el)
             arrow = QtGui.QPen(QtGui.QColor(GREEN)); arrow.setCosmetic(True); arrow.setWidthF(2.2)
             painter.setPen(arrow); painter.drawLine(QtCore.QPointF(sx, sy), QtCore.QPointF(tx, ty))
-            col = QtGui.QColor(_COMP_COLOR.get(mp.component, "#475569"))
+            col = QtGui.QColor(_comp_color(mp.component))
             r = 0.018 if i == self.sel else (0.014 if mp.reference_sensor else 0.010)
             painter.setBrush(QtGui.QBrush(col))
             pen = QtGui.QPen(QtGui.QColor(RED if i == self.sel else "#ffffff"))
@@ -149,13 +165,21 @@ class Machine3DItem(pg.GraphicsObject):
 
 
 class OrbitViewBox(pg.ViewBox):
-    """ViewBox 3D: arrastre IZQUIERDO = girar; rueda = zoom; arrastre DERECHO = mover."""
+    """3D viewbox: left-drag = orbit (or drag a grabbed sensor); wheel = zoom; right-drag = pan."""
     rotate = QtCore.Signal(float, float)
+    grab = QtCore.Signal(object, object)          # scenePos, self  (drag start)
+    drag = QtCore.Signal(object, object, float, float)   # scenePos, self, dx, dy
+    release = QtCore.Signal()
 
     def mouseDragEvent(self, ev, axis=None):
         if ev.button() == QtCore.Qt.LeftButton:
+            if ev.isStart():
+                self.grab.emit(ev.scenePos(), self)
             d = ev.pos() - ev.lastPos()
-            self.rotate.emit(float(d.x()), float(d.y())); ev.accept()
+            self.drag.emit(ev.scenePos(), self, float(d.x()), float(d.y()))
+            if ev.isFinish():
+                self.release.emit()
+            ev.accept()
         else:
             super().mouseDragEvent(ev, axis)
 
@@ -175,12 +199,11 @@ def _stylesheet() -> str:
     QPushButton:hover {{ background: #0e3a6b; }}
     QPushButton:disabled {{ background: #94a3b8; }}
     QTableWidget {{ background: white; gridline-color: #e6ecf5; }}
-    QHeaderView::section {{ background: {NAVY}; color: white; padding: 5px;
-        border: none; font-weight: 700; }}
+    QHeaderView::section {{ background: {NAVY}; color: white; padding: 5px; border: none; font-weight: 700; }}
     """
 
 
-def _led(color: str, on: bool, label: str) -> str:
+def _led(color, on, label):
     c = color if on else "#cbd5e1"
     return (f"<span style='color:{c};font-size:16px'>●</span> "
             f"<span style='font-weight:700;color:{'#334155' if on else '#94a3b8'}'>{label}</span>")
@@ -190,54 +213,53 @@ def build_app(layout: OMALayout, simulated: bool = True):
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication(sys.argv)
     app.setStyleSheet(_stylesheet())
     pg.setConfigOptions(antialias=True)
-
     win = QtWidgets.QMainWindow()
     win.setWindowTitle(f"Watermelon Modal — {layout.name}")
-    win.resize(1300, 840)
+    win.resize(1320, 850)
 
     st = {"layout": layout, "acc": FRFAccumulator(layout.fs_hz, layout.block_size),
-          "pending": None, "target": 5, "oma_fdd": None, "conditions": [],
-          "az": 50.0, "el": 28.0, "rng": np.random.default_rng()}
+          "pending": None, "target": 5, "oma_fdd": None,
+          "az": 50.0, "el": 28.0, "grab": None, "rng": np.random.default_rng(), "_views": []}
 
     tb = win.addToolBar("main"); tb.setMovable(False)
     tb.setStyleSheet(f"QToolBar {{ background: {NAVY}; padding: 6px 12px; }}")
     brand = QtWidgets.QLabel("  🍉 Watermelon Modal")
     brand.setStyleSheet("color:white; font-weight:800; font-size:15px;"); tb.addWidget(brand)
-    sp = QtWidgets.QWidget(); sp.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
-    tb.addWidget(sp)
+    spc = QtWidgets.QWidget(); spc.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
+    tb.addWidget(spc)
     mode_lbl = QtWidgets.QLabel(("SIMULATED — no hardware" if simulated else "LIVE — NI 9234") + "   ")
-    mode_lbl.setStyleSheet(f"color:{'#fbbf24' if simulated else '#34d399'}; font-weight:700;")
-    tb.addWidget(mode_lbl)
+    mode_lbl.setStyleSheet(f"color:{'#fbbf24' if simulated else '#34d399'}; font-weight:700;"); tb.addWidget(mode_lbl)
 
     tabs = QtWidgets.QTabWidget(); win.setCentralWidget(tabs)
 
-    # =================================================================
-    # CONFIGURATION (pestañas internas)
-    # =================================================================
-    cfg_outer = QtWidgets.QWidget(); cfg_ol = QtWidgets.QVBoxLayout(cfg_outer)
-    cfg_tabs = QtWidgets.QTabWidget(); cfg_ol.addWidget(cfg_tabs, 1)
-
-    # Vistas 3D compartidas (Machine=geometría, Sensors=ubicación) — mismo modelo
-    st["_views"] = []
-
+    # ---- forward decls used by _make_view (resolved at signal time) ----
     def _make_view(kind):
         plot = pg.PlotWidget(viewBox=OrbitViewBox()); plot.setBackground("w"); plot.setAspectLocked(True)
         plot.hideAxis("left"); plot.hideAxis("bottom"); plot.setMenuEnabled(False)
         m3 = Machine3DItem(); plot.addItem(m3)
-        v = {"plot": plot, "m3d": m3, "labels": []}; st["_views"].append(v)
-        plot.getViewBox().rotate.connect(lambda dx, dy: _on_rotate(dx, dy))
-        plot.scene().sigMouseClicked.connect(lambda ev: _on_click(ev, plot, kind))
+        v = {"plot": plot, "m3d": m3, "labels": [], "kind": kind}; st["_views"].append(v)
+        vb = plot.getViewBox()
+        vb.grab.connect(lambda sp, _vb, k=kind, p=plot: _on_grab(sp, p, k))
+        vb.drag.connect(lambda sp, _vb, dx, dy, k=kind, p=plot: _on_drag(sp, p, k, dx, dy))
+        vb.release.connect(lambda: st.update(grab=None))
+        plot.scene().sigMouseClicked.connect(lambda ev, k=kind, p=plot: _on_click(ev, p, k))
         return v
 
-    # ---------- Machine: ficha del activo + dibujo con ubicación de sensores ----------
+    # =================================================================
+    # CONFIGURATION
+    # =================================================================
+    cfg_outer = QtWidgets.QWidget(); cfg_ol = QtWidgets.QVBoxLayout(cfg_outer)
+    cfg_tabs = QtWidgets.QTabWidget(); cfg_ol.addWidget(cfg_tabs, 1)
+
+    # ---------- Machine ----------
     pg_m = QtWidgets.QWidget(); ml = QtWidgets.QVBoxLayout(pg_m)
-    ml.addWidget(QtWidgets.QLabel("<b>Client machine</b> — asset record"))
+    ml.addWidget(QtWidgets.QLabel("<b>Machine &amp; client</b>"))
     frm = QtWidgets.QFormLayout()
     e_name = QtWidgets.QLineEdit(layout.name)
-    e_type = QtWidgets.QLineEdit(layout.machine_type); e_type.setPlaceholderText("Motor-Bomba centrífuga…")
-    e_tag = QtWidgets.QLineEdit(layout.tag); e_tag.setPlaceholderText("tag / placa")
-    e_client = QtWidgets.QLineEdit(layout.client); e_client.setPlaceholderText("cliente")
-    e_loc = QtWidgets.QLineEdit(layout.location); e_loc.setPlaceholderText("planta / ubicación")
+    e_type = QtWidgets.QLineEdit(layout.machine_type); e_type.setPlaceholderText("Motor-pump, turbine train…")
+    e_tag = QtWidgets.QLineEdit(layout.tag); e_tag.setPlaceholderText("asset tag / nameplate")
+    e_client = QtWidgets.QLineEdit(layout.client); e_client.setPlaceholderText("client")
+    e_loc = QtWidgets.QLineEdit(layout.location); e_loc.setPlaceholderText("plant / location")
     sp_rpm = QtWidgets.QDoubleSpinBox(); sp_rpm.setRange(0, 60000); sp_rpm.setValue(layout.running_speed_rpm)
     r1 = QtWidgets.QHBoxLayout(); r1.addWidget(e_name, 2); r1.addSpacing(8)
     r1.addWidget(QtWidgets.QLabel("Type:")); r1.addWidget(e_type, 2)
@@ -247,95 +269,86 @@ def build_app(layout: OMALayout, simulated: bool = True):
     r2.addWidget(QtWidgets.QLabel("Location:")); r2.addWidget(e_loc, 1)
     _w2 = QtWidgets.QWidget(); _w2.setLayout(r2); frm.addRow("Tag:", _w2)
     r3 = QtWidgets.QHBoxLayout(); r3.addWidget(QtWidgets.QLabel("Running speed (RPM):")); r3.addWidget(sp_rpm)
-    r3.addSpacing(16); r3.addWidget(QtWidgets.QLabel("Ensayo:"))
-    chk_ema = QtWidgets.QCheckBox("EMA (impacto)"); chk_oma = QtWidgets.QCheckBox("OMA (operacional)")
+    r3.addSpacing(16); r3.addWidget(QtWidgets.QLabel("Test:"))
+    chk_ema = QtWidgets.QCheckBox("EMA (impact)"); chk_oma = QtWidgets.QCheckBox("OMA (operational)")
     chk_ema.setChecked("EMA" in layout.test_modes); chk_oma.setChecked("OMA" in layout.test_modes or not layout.test_modes)
     r3.addWidget(chk_ema); r3.addWidget(chk_oma); r3.addStretch(1)
     _w3 = QtWidgets.QWidget(); _w3.setLayout(r3); frm.addRow("Operation:", _w3)
     ml.addLayout(frm)
 
-    # --- PASO 1: dibujar la máquina (equipos como cajas) ---
-    from core.modal.oma_layout import COMPONENT_KINDS, MEAS_TYPES, MachineComponent
     bld = QtWidgets.QHBoxLayout()
-    bld.addWidget(QtWidgets.QLabel("<b>Equipo:</b>"))
-    cb_kind = QtWidgets.QComboBox(); cb_kind.addItems(COMPONENT_KINDS); cb_kind.setMinimumWidth(150)
-    btn_addcomp = QtWidgets.QPushButton("➕ Agregar equipo")
-    btn_delcomp = QtWidgets.QPushButton("– Quitar equipo")
+    bld.addWidget(QtWidgets.QLabel("<b>Equipment:</b>"))
+    cb_kind = QtWidgets.QComboBox(); cb_kind.addItems(COMPONENT_KINDS); cb_kind.setMinimumWidth(180)
+    btn_addcomp = QtWidgets.QPushButton("➕ Add"); btn_delcomp = QtWidgets.QPushButton("– Remove")
     bld.addWidget(cb_kind); bld.addWidget(btn_addcomp); bld.addWidget(btn_delcomp)
-    btn_tmpl = QtWidgets.QPushButton("Cargar plantilla 24 canales"); bld.addWidget(btn_tmpl)
-    bld.addStretch(1)
-    ml.addLayout(bld)
-    # editor de TAMAÑO del equipo seleccionado (largo / alto / ancho)
-    drow = QtWidgets.QHBoxLayout()
-    drow.addWidget(QtWidgets.QLabel("<b>Tamaño equipo:</b>"))
-    cb_comp = QtWidgets.QComboBox(); cb_comp.setMinimumWidth(140); drow.addWidget(cb_comp)
+    bld.addSpacing(14); bld.addWidget(QtWidgets.QLabel("<b>Size:</b>"));
+    cb_comp = QtWidgets.QComboBox(); cb_comp.setMinimumWidth(150); bld.addWidget(cb_comp)
     sp_len = QtWidgets.QDoubleSpinBox(); sp_len.setRange(0.02, 1.0); sp_len.setSingleStep(0.02); sp_len.setDecimals(2)
     sp_hei = QtWidgets.QDoubleSpinBox(); sp_hei.setRange(0.02, 0.8); sp_hei.setSingleStep(0.02); sp_hei.setDecimals(2)
     sp_wid = QtWidgets.QDoubleSpinBox(); sp_wid.setRange(0.02, 0.6); sp_wid.setSingleStep(0.02); sp_wid.setDecimals(2)
-    for lab, w in (("Largo", sp_len), ("Alto", sp_hei), ("Ancho", sp_wid)):
-        drow.addWidget(QtWidgets.QLabel(lab)); drow.addWidget(w)
-    btn_applygeo = QtWidgets.QPushButton("✓ Aplicar cambios (auto-ordenar)")
-    btn_applygeo.setStyleSheet(f"QPushButton{{background:{ACC};}} QPushButton:hover{{background:#1490c2;}}")
-    drow.addStretch(1); drow.addWidget(btn_applygeo)
-    ml.addLayout(drow)
+    for lab, w in (("L", sp_len), ("H", sp_hei), ("W", sp_wid)):
+        bld.addWidget(QtWidgets.QLabel(lab)); bld.addWidget(w)
+    bld.addStretch(1)
+    ml.addLayout(bld)
     ml.addWidget(QtWidgets.QLabel(
-        "<i style='color:#64748b'>🖱️ Arrastre izq = girar · rueda = zoom · arrastre der = mover · "
-        "clic = mover el equipo elegido. Cuando termines el dibujo, pasá a la pestaña <b>Sensors</b>.</i>"))
+        "<i style='color:#64748b'>🖱️ left-drag = rotate · wheel = zoom · right-drag = pan · "
+        "click = move the selected equipment. Build the figure, then go to <b>Sensors</b>.</i>"))
     vgeo = _make_view("geo"); ml.addWidget(vgeo["plot"], 1)
     cfg_tabs.addTab(pg_m, "Machine")
 
-    # --- PASO 2: ubicar los sensores SOBRE el dibujo ---
+    # ---------- Sensors ----------
     pg_sen = QtWidgets.QWidget(); snl = QtWidgets.QVBoxLayout(pg_sen)
     snl.addWidget(QtWidgets.QLabel(
-        "<b>Ubicá los sensores sobre la máquina.</b> Elegí N°, ejes y qué mide, y "
-        "hacé <b>clic sobre el dibujo</b> — o usá <b>Ubicar por norma</b>."))
+        "<b>Place the sensors on the machine.</b> Set number, axes and quantity, then "
+        "<b>click on the drawing</b> — or use <b>Place by standard</b>."))
     prow = QtWidgets.QHBoxLayout()
-    prow.addWidget(QtWidgets.QLabel("N°:"))
+    prow.addWidget(QtWidgets.QLabel("No.:"))
     sp_num = QtWidgets.QSpinBox(); sp_num.setRange(1, 999); sp_num.setValue(1); prow.addWidget(sp_num)
-    prow.addWidget(QtWidgets.QLabel("Ejes:"))
-    cbx = QtWidgets.QCheckBox("X"); cby = QtWidgets.QCheckBox("Y"); cbz = QtWidgets.QCheckBox("Z")
-    cby.setChecked(True)
+    prow.addWidget(QtWidgets.QLabel("Axes:"))
+    cbx = QtWidgets.QCheckBox("X"); cby = QtWidgets.QCheckBox("Y"); cbz = QtWidgets.QCheckBox("Z"); cby.setChecked(True)
     for w in (cbx, cby, cbz): prow.addWidget(w)
-    prow.addWidget(QtWidgets.QLabel("Mide:"))
+    prow.addWidget(QtWidgets.QLabel("Measures:"))
     cb_mtype = QtWidgets.QComboBox(); cb_mtype.addItems(MEAS_TYPES); prow.addWidget(cb_mtype)
-    prow.addSpacing(14); prow.addWidget(QtWidgets.QLabel("Modo clic:"))
-    cb_click = QtWidgets.QComboBox(); cb_click.addItems(["Colocar punto", "Mover sensor"]); prow.addWidget(cb_click)
+    prow.addSpacing(12); prow.addWidget(QtWidgets.QLabel("Click mode:"))
+    cb_click = QtWidgets.QComboBox(); cb_click.addItems(["Place point", "Move sensor"]); prow.addWidget(cb_click)
     prow.addWidget(QtWidgets.QLabel("Sensor:"))
     cb_place = QtWidgets.QComboBox(); cb_place.setMinimumWidth(150); prow.addWidget(cb_place)
     prow.addStretch(1)
     snl.addLayout(prow)
     nrow = QtWidgets.QHBoxLayout()
-    btn_norm = QtWidgets.QPushButton("📐 Ubicar sensores por norma (API 670 / ISO 20816)")
+    btn_norm = QtWidgets.QPushButton("📐 Place by standard (API 670 / ISO 20816)")
     btn_norm.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
-    btn_clrpts = QtWidgets.QPushButton("🧹 Limpiar sensores")
-    nrow.addWidget(btn_norm); nrow.addWidget(btn_clrpts); nrow.addStretch(1)
+    btn_clrpts = QtWidgets.QPushButton("🧹 Clear sensors")
+    nrow.addWidget(btn_norm); nrow.addWidget(btn_clrpts)
+    nrow.addWidget(QtWidgets.QLabel("<i style='color:#64748b'>· In 'Move sensor' mode, click-and-hold on a "
+                                    "sensor to drag it.</i>")); nrow.addStretch(1)
     snl.addLayout(nrow)
     vsen = _make_view("sensors"); snl.addWidget(vsen["plot"], 1)
     cfg_tabs.addTab(pg_sen, "Sensors")
 
-    # ---------- Measurement points ----------
+    # ---------- Measurement points (table) ----------
     pg_pts = QtWidgets.QWidget(); pl = QtWidgets.QVBoxLayout(pg_pts)
-    prow2 = QtWidgets.QHBoxLayout()
-    btn_addp = QtWidgets.QPushButton("+ Punto"); btn_delp = QtWidgets.QPushButton("– Quitar")
-    btn_val = QtWidgets.QPushButton("✓ Aplicar y validar"); btn_val.setStyleSheet(
-        f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
-    prow2.addWidget(btn_addp); prow2.addWidget(btn_delp); prow2.addStretch(1); prow2.addWidget(btn_val)
-    pl.addLayout(prow2)
+    pl.addWidget(QtWidgets.QLabel("<b>Measurement points</b> — every placed sensor."))
     tbl_pts = QtWidgets.QTableWidget(0, 11)
-    tbl_pts.setHorizontalHeaderLabels(["#", "N°", "Componente", "Referencia", "DOF", "Mide",
-                                       "Slot", "Canal", "Sens (mV/g)", "Ref", "Activo"])
+    tbl_pts.setHorizontalHeaderLabels(["#", "No.", "Component", "Reference", "DOF", "Meas.",
+                                       "Slot", "Ch", "Sens (mV/g)", "Ref", "Active"])
     tbl_pts.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
     tbl_pts.verticalHeader().setVisible(False)
     pl.addWidget(tbl_pts, 1)
+    r_pt = QtWidgets.QHBoxLayout()
+    btn_delp = QtWidgets.QPushButton("– Remove selected")
+    r_pt.addWidget(btn_delp); r_pt.addStretch(1)
+    pl.addLayout(r_pt)
     lbl_val = QtWidgets.QLabel(""); pl.addWidget(lbl_val)
     cfg_tabs.addTab(pg_pts, "Measurement points")
 
     # ---------- Acquisition ----------
-    pg_acq = QtWidgets.QWidget(); al = QtWidgets.QFormLayout(pg_acq)
+    pg_acq = QtWidgets.QWidget(); aol = QtWidgets.QVBoxLayout(pg_acq)
+    al = QtWidgets.QFormLayout()
     sp_fs = QtWidgets.QSpinBox(); sp_fs.setRange(256, 51200); sp_fs.setValue(int(layout.fs_hz)); sp_fs.setSingleStep(256)
     cb_blk = QtWidgets.QComboBox(); cb_blk.addItems(["1024", "2048", "4096", "8192", "16384"]); cb_blk.setCurrentText(str(layout.block_size))
     sp_fmax = QtWidgets.QDoubleSpinBox(); sp_fmax.setRange(10, 25600); sp_fmax.setValue(layout.fmax_hz)
-    sp_dur = QtWidgets.QSpinBox(); sp_dur.setRange(10, 900); sp_dur.setValue(int(layout.duration_s))
+    sp_dur = QtWidgets.QSpinBox(); sp_dur.setRange(5, 3600); sp_dur.setValue(int(layout.duration_s))
     chk_fwin = QtWidgets.QCheckBox("Force window (EMA)"); chk_fwin.setChecked(True)
     chk_ewin = QtWidgets.QCheckBox("Exponential window (EMA)"); chk_ewin.setChecked(True)
     sp_tgt = QtWidgets.QSpinBox(); sp_tgt.setRange(1, 64); sp_tgt.setValue(5)
@@ -348,23 +361,59 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _wbl.addWidget(chk_fwin); _wbl.addWidget(chk_ewin); _wbl.addStretch(1)
     al.addRow("Windows:", _wb)
     lbl_df = QtWidgets.QLabel(""); al.addRow("Resolution:", lbl_df)
+    aol.addLayout(al)
+    rrow = QtWidgets.QHBoxLayout()
+    btn_reco = QtWidgets.QPushButton("📏 Recommended (per standard)")
+    btn_reco.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
+    rrow.addWidget(btn_reco); rrow.addStretch(1)
+    aol.addLayout(rrow)
+    lbl_reco = QtWidgets.QLabel(""); lbl_reco.setWordWrap(True); lbl_reco.setStyleSheet("color:#334155;")
+    aol.addWidget(lbl_reco); aol.addStretch(1)
     cfg_tabs.addTab(pg_acq, "Acquisition")
 
+    # ---------- Summary ----------
+    pg_sum = QtWidgets.QWidget(); sul = QtWidgets.QVBoxLayout(pg_sum)
+    lbl_sum = QtWidgets.QLabel(""); lbl_sum.setStyleSheet(f"background:{NAVY};color:white;border-radius:8px;padding:10px 14px;font-weight:700;")
+    sul.addWidget(lbl_sum)
+    tbl_sum = QtWidgets.QTableWidget(0, 7)
+    tbl_sum.setHorizontalHeaderLabels(["No.", "Code", "Component", "Reference", "DOF", "Meas.", "BNC"])
+    tbl_sum.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_sum.verticalHeader().setVisible(False)
+    sul.addWidget(tbl_sum, 1)
+    save_row = QtWidgets.QHBoxLayout()
+    btn_savelocal = QtWidgets.QPushButton("💾 Save locally")
+    btn_loadlocal = QtWidgets.QPushButton("📂 Load local")
+    btn_savecloud = QtWidgets.QPushButton("☁ Save to Watermelon System")
+    btn_savecloud.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
+    btn_loadcloud = QtWidgets.QPushButton("☁ Load from cloud")
+    for b in (btn_savelocal, btn_loadlocal, btn_savecloud, btn_loadcloud):
+        save_row.addWidget(b)
+    save_row.addStretch(1)
+    sul.addLayout(save_row)
+    cfg_tabs.addTab(pg_sum, "Summary")
+
+    # Apply & auto-arrange bar (shared, present under every config tab)
+    apply_bar = QtWidgets.QHBoxLayout()
+    btn_apply = QtWidgets.QPushButton("✓ Apply changes & auto-arrange")
+    btn_apply.setStyleSheet(f"QPushButton{{background:{ACC};font-size:13px;padding:9px 18px;}} QPushButton:hover{{background:#1490c2;}}")
+    lbl_applyinfo = QtWidgets.QLabel("")
+    apply_bar.addWidget(btn_apply); apply_bar.addWidget(lbl_applyinfo); apply_bar.addStretch(1)
+    cfg_ol.addLayout(apply_bar)
     tabs.addTab(cfg_outer, "Configuration")
 
-    # ---- helpers de configuración ----
+    # =====================================================================
+    # Config helpers
+    # =====================================================================
     def _mk_combo(items, cur):
         c = QtWidgets.QComboBox(); c.addItems(items)
         if cur in items:
             c.setCurrentText(cur)
         return c
 
-    def _add_point_row(mp: MeasPoint):
-        from core.modal.oma_layout import MEAS_TYPES
+    def _add_point_row(mp):
         r = tbl_pts.rowCount(); tbl_pts.insertRow(r)
         tbl_pts.setItem(r, 0, QtWidgets.QTableWidgetItem(str(mp.idx)))
         tbl_pts.setItem(r, 1, QtWidgets.QTableWidgetItem(str(mp.number or mp.idx)))
-        tbl_pts.setCellWidget(r, 2, _mk_combo(DEFAULT_COMPONENTS, mp.component))
+        tbl_pts.setCellWidget(r, 2, _mk_combo(COMPONENT_KINDS, mp.component))
         tbl_pts.setCellWidget(r, 3, _mk_combo(POSITION_REFS, mp.position_ref))
         tbl_pts.setCellWidget(r, 4, _mk_combo(DOFS, mp.dof))
         tbl_pts.setCellWidget(r, 5, _mk_combo(MEAS_TYPES, mp.meas_type))
@@ -384,14 +433,13 @@ def build_app(layout: OMALayout, simulated: bool = True):
     def _sync_place_combo():
         cur = cb_place.currentIndex()
         cb_place.blockSignals(True); cb_place.clear()
-        cb_place.addItems([f"{p.idx:02d} · {p.label}" for p in st["layout"].points])
+        cb_place.addItems([f"{p.code}" for p in st["layout"].points])
         if 0 <= cur < cb_place.count():
             cb_place.setCurrentIndex(cur)
         cb_place.blockSignals(False)
 
     def _table_to_layout():
-        lay = st["layout"]
-        pts = []
+        lay = st["layout"]; pts = []
         for r in range(tbl_pts.rowCount()):
             def _t(c, d=""):
                 it = tbl_pts.item(r, c); return it.text() if it else d
@@ -409,28 +457,22 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     x_norm=old.x_norm if old else 0.5, y_norm=old.y_norm if old else 0.0))
             except Exception:  # noqa: BLE001
                 continue
-        lay.points = pts
+        if pts or tbl_pts.rowCount() == 0:
+            lay.points = pts
         lay.name = e_name.text() or "Modal"; lay.machine_type = e_type.text(); lay.tag = e_tag.text()
-        lay.client = e_client.text(); lay.location = e_loc.text()
-        lay.running_speed_rpm = sp_rpm.value()
+        lay.client = e_client.text(); lay.location = e_loc.text(); lay.running_speed_rpm = sp_rpm.value()
         lay.test_modes = [m for m, c in (("EMA", chk_ema), ("OMA", chk_oma)) if c.isChecked()] or ["OMA"]
         lay.test_type = lay.test_modes[0]
         lay.fs_hz = float(sp_fs.value()); lay.block_size = int(cb_blk.currentText())
         lay.fmax_hz = float(sp_fmax.value()); lay.duration_s = float(sp_dur.value())
-
-    def _comp_color(kind):
-        if kind.startswith("Tubería"):
-            return _COMP_COLOR["Tubería succión"] if "succ" in kind else _COMP_COLOR["Tubería descarga"]
-        return _COMP_COLOR.get(kind, "#475569")
 
     def _view_angles():
         return np.radians(st["az"]), np.radians(st["el"])
 
     def _draw_train(fit=False):
         lay = st["layout"]; az, el = _view_angles(); sel = cb_place.currentIndex()
-        for v in st["_views"]:                          # renderiza en TODAS las vistas
-            plot = v["plot"]; m3 = v["m3d"]
-            m3.set_view(lay, az, el, sel)
+        for v in st["_views"]:
+            plot = v["plot"]; m3 = v["m3d"]; m3.set_view(lay, az, el, sel)
             for t in v["labels"]:
                 plot.removeItem(t)
             v["labels"] = []
@@ -447,7 +489,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             vb = plot.getViewBox()
             if fit:
                 vb.autoRange(padding=0.15)
-            else:                                        # auto-CENTRA conservando el zoom
+            else:
                 br = m3.boundingRect(); (x0, x1), (y0, y1) = vb.viewRange()
                 hw = (x1 - x0) / 2 or 0.7; hh = (y1 - y0) / 2 or 0.5
                 cx, cy = br.center().x(), br.center().y()
@@ -461,129 +503,78 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     return slot, ch
         return 8, 3
 
+    def _comp_at(x, z):
+        lay = st["layout"]
+        for c in lay.machine_components:
+            if c.x0 <= x <= c.x1 and c.y0 <= z <= c.y1:
+                return c.kind
+        return min(lay.machine_components, key=lambda k: abs((k.x0 + k.x1) / 2 - x)).kind if lay.machine_components else "Electric motor"
+
+    def _nearest_sensor(x, z, tol=0.05):
+        best = None; bd = tol
+        for i, mp in enumerate(st["layout"].points):
+            d = ((mp.x_norm - x) ** 2 + (mp.y_norm - z) ** 2) ** 0.5
+            if d < bd:
+                bd = d; best = i
+        return best
+
+    def _on_grab(scenePos, plot, kind):
+        st["grab"] = None
+        if kind == "sensors" and cb_click.currentText() == "Move sensor":
+            pt = plot.getViewBox().mapSceneToView(scenePos); az, el = _view_angles()
+            x, z = _unproject(float(pt.x()), float(pt.y()), az, el)
+            i = _nearest_sensor(x, z)
+            if i is not None:
+                st["grab"] = i
+                cb_place.setCurrentIndex(i)
+
+    def _on_drag(scenePos, plot, kind, dx, dy):
+        if st["grab"] is not None:                        # arrastrar el sensor tomado
+            pt = plot.getViewBox().mapSceneToView(scenePos); az, el = _view_angles()
+            x, z = _unproject(float(pt.x()), float(pt.y()), az, el)
+            mp = st["layout"].points[st["grab"]]; mp.x_norm = x; mp.y_norm = z
+            _draw_train(fit=False)
+        else:                                             # orbitar
+            _on_rotate(dx, dy)
+
+    def _on_rotate(dx, dy):
+        st["az"] = (st["az"] + dx * 0.4) % 360.0
+        st["el"] = float(np.clip(st["el"] - dy * 0.4, 8.0, 88.0))
+        _draw_train(fit=False)
+
     def _on_click(ev, plot, kind):
         try:
             if ev.button() != QtCore.Qt.LeftButton:
                 return
-            pt = plot.getViewBox().mapSceneToView(ev.scenePos())
-            az, el = _view_angles()
-            x, z = _unproject(float(pt.x()), float(pt.y()), az, el)   # → eje (X) y altura (Z)
+            pt = plot.getViewBox().mapSceneToView(ev.scenePos()); az, el = _view_angles()
+            x, z = _unproject(float(pt.x()), float(pt.y()), az, el)
             lay = st["layout"]
-            if kind == "geo":                            # Machine: mover el equipo elegido
+            if kind == "geo":
                 i = cb_comp.currentIndex(); comps = lay.machine_components
                 if 0 <= i < len(comps):
                     c = comps[i]; w = c.x1 - c.x0; h = c.y1 - c.y0
                     c.x0 = x - w / 2; c.x1 = x + w / 2; c.y0 = z - h / 2; c.y1 = z + h / 2
-            elif cb_click.currentText() == "Colocar punto":
+            elif cb_click.currentText() == "Place point":
                 axes = [a for a, cb in (("X", cbx), ("Y", cby), ("Z", cbz)) if cb.isChecked()] or ["Y"]
                 comp = _comp_at(x, z)
                 for a in axes:
                     slot, ch = _next_channel()
-                    lay.points.append(MeasPoint(
-                        idx=len(lay.points) + 1, component=comp, position_ref="Centro",
-                        dof="+" + a, module_slot=slot, channel_index=ch,
-                        number=sp_num.value(), meas_type=cb_mtype.currentText(),
-                        x_norm=x, y_norm=z))
+                    lay.points.append(MeasPoint(idx=len(lay.points) + 1, component=comp, position_ref="Center",
+                                                dof="+" + a, module_slot=slot, channel_index=ch,
+                                                number=sp_num.value(), meas_type=cb_mtype.currentText(),
+                                                x_norm=x, y_norm=z))
                 sp_num.setValue(sp_num.value() + 1); _fill_points()
-            else:                                        # Mover sensor
-                i = cb_place.currentIndex()
-                if 0 <= i < len(lay.points):
-                    lay.points[i].x_norm = x; lay.points[i].y_norm = z
             _draw_train()
         except Exception:  # noqa: BLE001
             pass
 
-    def _comp_at(x, y):
-        """Nombre del equipo cuya caja contiene (x,y); si ninguno, el más cercano."""
-        lay = st["layout"]
-        for c in lay.machine_components:
-            if c.x0 <= x <= c.x1 and c.y0 <= y <= c.y1:
-                return c.kind
-        if lay.machine_components:
-            c = min(lay.machine_components, key=lambda k: abs((k.x0 + k.x1) / 2 - x))
-            return c.kind
-        return "Motor"
-
-    def _add_component():
-        lay = st["layout"]; kind = cb_kind.currentText()
-        n = len([c for c in lay.machine_components if not c.kind.startswith("Tubería")])
-        if kind.startswith("Tubería"):
-            y0, y1 = (0.02, 0.08) if "succ" in kind else (0.08, 0.42)
-            x0 = 0.66 + 0.02 * len(lay.machine_components)
-            lay.machine_components.append(MachineComponent(kind, kind.replace("Tubería", "Tub."),
-                                                           x0, x0 + 0.30, y0, y1, depth=0.04))
-        elif kind == "Acople":
-            x0 = 0.34 + 0.30 * n
-            lay.machine_components.append(MachineComponent(kind, kind, x0, x0 + 0.06, 0.05, 0.14, depth=0.06))
-        else:
-            x0 = 0.03 + 0.34 * n                      # cajas alargadas
-            lay.machine_components.append(MachineComponent(kind, kind, x0, x0 + 0.30, 0.00, 0.19, depth=0.11))
-        _sync_comp_combo(); _draw_train(fit=True)
-
-    def _del_component():
-        lay = st["layout"]
-        if lay.machine_components:
-            lay.machine_components.pop()
-            _sync_comp_combo(); _draw_train(fit=True)
-    btn_addcomp.clicked.connect(_add_component); btn_delcomp.clicked.connect(_del_component)
-
-    def _validate():
-        _table_to_layout()
-        errs = st["layout"].validate()
-        _sync_place_combo(); _sync_comp_combo(); _draw_train(fit=True)
-        if errs:
-            lbl_val.setText("⚠ " + " · ".join(errs[:3])); lbl_val.setStyleSheet(f"color:{RED};font-weight:700;")
-        else:
-            lbl_val.setText(f"✅ {st['layout'].n_channels()} canales · "
-                            f"{len(st['layout'].references())} referencia(s) · válido")
-            lbl_val.setStyleSheet(f"color:{GREEN};font-weight:700;")
-
-    def _load_tmpl():
-        lay = default_24ch_layout(name=e_name.text() or "Tren Motor-Bomba")
-        lay.machine_type = e_type.text(); lay.tag = e_tag.text(); lay.client = e_client.text()
-        lay.location = e_loc.text()
-        lay.test_modes = [m for m, c in (("EMA", chk_ema), ("OMA", chk_oma)) if c.isChecked()] or ["OMA"]
-        st["layout"] = lay
-        _fill_points(); _validate()
-
-    def _add_point():
-        n = tbl_pts.rowCount()
-        _add_point_row(MeasPoint(idx=n + 1, component="Motor", position_ref=POSITION_REFS[0], dof="+Y",
-                                 module_slot=n // 4 + 1, channel_index=n % 4, x_norm=0.5, y_norm=0.0))
-
-    def _del_point():
-        r = tbl_pts.currentRow()
-        if r >= 0:
-            tbl_pts.removeRow(r)
-
-    def _upd_df(*_):
-        fs = float(sp_fs.value()); blk = int(cb_blk.currentText())
-        lbl_df.setText(f"Δf = {fs/blk:.3f} Hz · record {blk/fs*1000:.0f} ms · líneas a Fmax "
-                       f"{int(sp_fmax.value()/(fs/blk))}")
-
-    btn_tmpl.clicked.connect(_load_tmpl); btn_addp.clicked.connect(_add_point)
-    btn_delp.clicked.connect(_del_point); btn_val.clicked.connect(_validate)
-    cb_place.currentIndexChanged.connect(lambda *_: _draw_train())
-
-    def _on_rotate(dx, dy):
-        st["az"] = (st["az"] + dx * 0.4) % 360.0        # yaw completo (todos los lados)
-        st["el"] = float(np.clip(st["el"] - dy * 0.4, 8.0, 88.0))  # pitch amplio
-        _draw_train(fit=False)
-    # (el giro/clic de cada vista ya está conectado en _make_view)
-
-    def _clear_points():
-        st["layout"].points = []; _fill_points(); _draw_train(fit=True)
-    btn_clrpts.clicked.connect(_clear_points)
-
-    # editor de tamaño del equipo seleccionado
     def _sync_comp_combo():
         cur = cb_comp.currentIndex()
         cb_comp.blockSignals(True); cb_comp.clear()
         cb_comp.addItems([c.display() for c in st["layout"].machine_components])
         if 0 <= cur < cb_comp.count():
             cb_comp.setCurrentIndex(cur)
-        cb_comp.blockSignals(False)
-        _load_comp_dims()
+        cb_comp.blockSignals(False); _load_comp_dims()
 
     def _load_comp_dims():
         i = cb_comp.currentIndex(); comps = st["layout"].machine_components
@@ -591,36 +582,19 @@ def build_app(layout: OMALayout, simulated: bool = True):
             return
         c = comps[i]
         for sp in (sp_len, sp_hei, sp_wid): sp.blockSignals(True)
-        sp_len.setValue(round(c.x1 - c.x0, 2)); sp_hei.setValue(round(c.y1 - c.y0, 2))
-        sp_wid.setValue(round(2 * c.depth, 2))
+        sp_len.setValue(round(c.x1 - c.x0, 2)); sp_hei.setValue(round(c.y1 - c.y0, 2)); sp_wid.setValue(round(2 * c.depth, 2))
         for sp in (sp_len, sp_hei, sp_wid): sp.blockSignals(False)
 
     def _apply_comp_dims(*_):
         i = cb_comp.currentIndex(); comps = st["layout"].machine_components
         if not (0 <= i < len(comps)):
             return
-        c = comps[i]
-        cx = (c.x0 + c.x1) / 2; cz = (c.y0 + c.y1) / 2
+        c = comps[i]; cx = (c.x0 + c.x1) / 2; cz = (c.y0 + c.y1) / 2
         L = sp_len.value(); H = sp_hei.value(); W = sp_wid.value()
         c.x0 = cx - L / 2; c.x1 = cx + L / 2; c.y0 = cz - H / 2; c.y1 = cz + H / 2; c.depth = W / 2
         _draw_train(fit=False)
 
-    cb_comp.currentIndexChanged.connect(lambda *_: _load_comp_dims())
-    for sp in (sp_len, sp_hei, sp_wid):
-        sp.valueChanged.connect(_apply_comp_dims)
-
-    def _place_by_norm():
-        from core.modal.oma_layout import auto_place_by_norm
-        auto_place_by_norm(st["layout"])
-        _fill_points(); _draw_train(fit=True)
-        QtWidgets.QMessageBox.information(win, "Norma",
-            f"✅ {st['layout'].n_channels()} sensores ubicados por norma (API 670 / ISO 20816):\n"
-            "cojinetes NDE (lado libre) y DE (lado acople), X/Y/Z, de conductor a conducido.")
-    btn_norm.clicked.connect(_place_by_norm)
-
     def _auto_arrange():
-        """Re-fluye el tren en línea (sin montarse) y RE-ENGANCHA los sensores a su
-        equipo (así no se pierden al cambiar tamaños)."""
         lay = st["layout"]; comps = lay.machine_components
         if not comps:
             return
@@ -633,27 +607,156 @@ def build_app(layout: OMALayout, simulated: bool = True):
         for mp in lay.points:
             c = owner(mp); Lx = (c.x1 - c.x0) or 1.0; Lz = (c.y1 - c.y0) or 1.0
             rel.append((mp, id(c), (mp.x_norm - c.x0) / Lx, (mp.y_norm - c.y0) / Lz))
-        drive = sorted([c for c in comps if not c.kind.startswith("Tubería")], key=lambda c: c.x0)
-        pipes = [c for c in comps if c.kind.startswith("Tubería")]
+        drive = sorted([c for c in comps if not is_pipe(c.kind)], key=lambda c: c.x0)
+        pipes = [c for c in comps if is_pipe(c.kind)]
         x = 0.03
-        for c in drive:                                # equipos pegados (motor→acople→bomba)
+        for c in drive:
             L = c.x1 - c.x0; c.x0 = x; c.x1 = x + L; x = c.x1
         px = x + 0.02
-        for c in pipes:                                # tuberías al final del tren
+        for c in pipes:
             L = c.x1 - c.x0; c.x0 = px; c.x1 = px + L; px = c.x1 + 0.02
         idmap = {id(c): c for c in comps}
-        for (mp, cid, fx, fz) in rel:                  # sensores siguen a su equipo
+        for (mp, cid, fx, fz) in rel:
             c = idmap.get(cid)
             if c:
                 mp.x_norm = c.x0 + fx * (c.x1 - c.x0); mp.y_norm = c.y0 + fz * (c.y1 - c.y0)
-        _fill_points(); _sync_comp_combo(); _draw_train(fit=True)
-    btn_applygeo.clicked.connect(_auto_arrange)
-    sp_fs.valueChanged.connect(_upd_df); cb_blk.currentTextChanged.connect(_upd_df); sp_fmax.valueChanged.connect(_upd_df)
-    _fill_points(); _validate(); _upd_df()
 
-    # =================================================================
+    def _refresh_summary():
+        lay = st["layout"]
+        tbl_sum.setRowCount(0)
+        for mp in lay.points:
+            r = tbl_sum.rowCount(); tbl_sum.insertRow(r)
+            for c, v in enumerate([str(mp.number or mp.idx), mp.code, mp.component, mp.position_ref,
+                                   mp.dof, mp.meas_type, str(mp.bnc)]):
+                tbl_sum.setItem(r, c, QtWidgets.QTableWidgetItem(v))
+        lbl_sum.setText(f"{lay.name} · {lay.client} · {'/'.join(lay.test_modes)} · "
+                        f"{lay.n_channels()} sensors · {len(lay.machine_components)} components · "
+                        f"{lay.running_speed_rpm:.0f} RPM")
+
+    def _apply_all():
+        _table_to_layout(); _auto_arrange()
+        errs = st["layout"].validate()
+        _fill_points(); _sync_comp_combo(); _refresh_summary(); _draw_train(fit=True)
+        st["acc"] = FRFAccumulator(st["layout"].fs_hz, st["layout"].block_size)
+        if errs:
+            lbl_applyinfo.setText("⚠ " + " · ".join(errs[:2])); lbl_applyinfo.setStyleSheet(f"color:{AMBER};font-weight:700;")
+        else:
+            lbl_applyinfo.setText(f"✓ {st['layout'].n_channels()} sensors · arranged · valid")
+            lbl_applyinfo.setStyleSheet(f"color:{GREEN};font-weight:700;")
+        lbl_val.setText(lbl_applyinfo.text())
+
+    def _place_by_norm():
+        _table_to_layout(); auto_place_by_norm(st["layout"])
+        _fill_points(); _refresh_summary(); _draw_train(fit=True)
+        QtWidgets.QMessageBox.information(win, "Standard placement",
+            f"✅ {st['layout'].n_channels()} sensors placed per API 670 / ISO 20816 "
+            "(NDE/DE bearings, X/Y/Z, driver→driven).")
+
+    def _clear_points():
+        st["layout"].points = []; _fill_points(); _refresh_summary(); _draw_train(fit=True)
+
+    def _add_component():
+        lay = st["layout"]; kind = cb_kind.currentText()
+        n = len([c for c in lay.machine_components if not is_pipe(c.kind)])
+        x0 = 0.66 + 0.03 * len(lay.machine_components) if is_pipe(kind) else 0.03 + 0.34 * n
+        box = component_default_box(kind, x0)
+        lay.machine_components.append(MachineComponent(kind, kind, *box))
+        _sync_comp_combo(); _draw_train(fit=True)
+
+    def _del_component():
+        lay = st["layout"]
+        if lay.machine_components:
+            lay.machine_components.pop(); _sync_comp_combo(); _draw_train(fit=True)
+
+    def _del_point():
+        r = tbl_pts.currentRow()
+        if r >= 0:
+            tbl_pts.removeRow(r); _table_to_layout(); _fill_points(); _refresh_summary(); _draw_train()
+
+    def _recommend_acq():
+        _table_to_layout()
+        mode = "OMA" if "OMA" in st["layout"].test_modes else "EMA"
+        rec = recommended_acquisition(mode)
+        sp_fs.setValue(int(rec["fs_hz"])); cb_blk.setCurrentText(str(rec["block_size"]))
+        sp_fmax.setValue(rec["fmax_hz"]); sp_dur.setValue(int(rec["duration_s"])); sp_tgt.setValue(rec["averages"])
+        lbl_reco.setText(f"<b>{mode} — recommended:</b> {rec['note']}")
+
+    def _upd_df(*_):
+        fs = float(sp_fs.value()); blk = int(cb_blk.currentText())
+        lbl_df.setText(f"Δf = {fs/blk:.3f} Hz · record {blk/fs*1000:.0f} ms · lines to Fmax {int(sp_fmax.value()/(fs/blk))}")
+
+    # save / load
+    def _save_local():
+        _table_to_layout()
+        try:
+            p = save_layout_local(st["layout"])
+            QtWidgets.QMessageBox.information(win, "Saved", f"Saved locally:\n{p}")
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(win, "Save", f"Could not save: {e}")
+
+    def _load_local():
+        names = list_layouts_local()
+        if not names:
+            QtWidgets.QMessageBox.information(win, "Load", "No local configurations yet."); return
+        name, ok = QtWidgets.QInputDialog.getItem(win, "Load local", "Configuration:", names, 0, False)
+        if ok and name:
+            st["layout"] = load_layout_local(name); _reload_from_layout()
+
+    def _save_cloud():
+        _table_to_layout()
+        try:
+            from core.modal.modal_cloud import save_layout_cloud
+            rc = save_layout_cloud(st["layout"])
+        except Exception as e:  # noqa: BLE001
+            rc = {"ok": False, "reason": str(e)}
+        if rc.get("ok"):
+            QtWidgets.QMessageBox.information(win, "Cloud", "☁ Saved to Watermelon System — available on the web.")
+        else:
+            QtWidgets.QMessageBox.warning(win, "Cloud",
+                f"Could not upload ({rc.get('reason','offline')}). Saved locally is still available.")
+
+    def _load_cloud():
+        try:
+            from core.modal.modal_cloud import list_layouts_cloud, load_layout_cloud
+            rows = list_layouts_cloud()
+        except Exception:  # noqa: BLE001
+            rows = []
+        names = [r.get("name") or r.get("id") for r in rows if (r.get("name") or r.get("id"))]
+        if not names:
+            QtWidgets.QMessageBox.information(win, "Cloud", "No cloud configurations (or offline)."); return
+        name, ok = QtWidgets.QInputDialog.getItem(win, "Load from cloud", "Configuration:", names, 0, False)
+        if ok and name:
+            lay = load_layout_cloud(name)
+            if lay is not None:
+                st["layout"] = lay; _reload_from_layout()
+
+    def _reload_from_layout():
+        lay = st["layout"]
+        e_name.setText(lay.name); e_type.setText(lay.machine_type); e_tag.setText(lay.tag)
+        e_client.setText(lay.client); e_loc.setText(lay.location); sp_rpm.setValue(lay.running_speed_rpm)
+        chk_ema.setChecked("EMA" in lay.test_modes); chk_oma.setChecked("OMA" in lay.test_modes)
+        sp_fs.setValue(int(lay.fs_hz)); cb_blk.setCurrentText(str(lay.block_size))
+        sp_fmax.setValue(lay.fmax_hz); sp_dur.setValue(int(lay.duration_s))
+        win.setWindowTitle(f"Watermelon Modal — {lay.name}")
+        _fill_points(); _sync_comp_combo(); _refresh_summary(); _upd_df(); _draw_train(fit=True)
+
+    # wiring
+    btn_addcomp.clicked.connect(_add_component); btn_delcomp.clicked.connect(_del_component)
+    cb_comp.currentIndexChanged.connect(lambda *_: _load_comp_dims())
+    for sp in (sp_len, sp_hei, sp_wid): sp.valueChanged.connect(_apply_comp_dims)
+    cb_place.currentIndexChanged.connect(lambda *_: _draw_train())
+    btn_norm.clicked.connect(_place_by_norm); btn_clrpts.clicked.connect(_clear_points)
+    btn_delp.clicked.connect(_del_point); btn_reco.clicked.connect(_recommend_acq)
+    sp_fs.valueChanged.connect(_upd_df); cb_blk.currentTextChanged.connect(_upd_df); sp_fmax.valueChanged.connect(_upd_df)
+    btn_apply.clicked.connect(_apply_all)
+    btn_savelocal.clicked.connect(_save_local); btn_loadlocal.clicked.connect(_load_local)
+    btn_savecloud.clicked.connect(_save_cloud); btn_loadcloud.clicked.connect(_load_cloud)
+
+    _fill_points(); _sync_comp_combo(); _refresh_summary(); _upd_df(); _draw_train(fit=True)
+
+    # =====================================================================
     # IMPACT TEST (EMA)
-    # =================================================================
+    # =====================================================================
     pg_imp = QtWidgets.QWidget(); il = QtWidgets.QVBoxLayout(pg_imp)
     ctl = QtWidgets.QHBoxLayout()
     btn_hit = QtWidgets.QPushButton("🔨 Impact"); btn_hit.setStyleSheet(
@@ -661,8 +764,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_badhit = QtWidgets.QPushButton("⚠ Impact w/ fault")
     btn_acc = QtWidgets.QPushButton("✓ Accept"); btn_acc.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
     btn_rej = QtWidgets.QPushButton("✗ Reject"); btn_rej.setStyleSheet(f"QPushButton{{background:{RED};}}")
-    btn_acc.setEnabled(False); btn_rej.setEnabled(False)
-    btn_rst = QtWidgets.QPushButton("↻ Reset")
+    btn_acc.setEnabled(False); btn_rej.setEnabled(False); btn_rst = QtWidgets.QPushButton("↻ Reset")
     for w in (btn_hit, btn_badhit): ctl.addWidget(w)
     ctl.addSpacing(14); ctl.addWidget(btn_acc); ctl.addWidget(btn_rej); ctl.addStretch(1); ctl.addWidget(btn_rst)
     il.addLayout(ctl)
@@ -678,39 +780,30 @@ def build_app(layout: OMALayout, simulated: bool = True):
     p_coh = pg.PlotWidget(); p_coh.setBackground("w"); p_coh.setYRange(0, 1.05)
     p_coh.setLabel("left", "Coherence"); p_coh.setLabel("bottom", "Frequency", "Hz"); p_coh.setTitle("Coherence", color=NAVY)
     p_coh.showGrid(x=True, y=True, alpha=0.3); p_coh.addItem(pg.InfiniteLine(pos=0.8, angle=0, pen=pg.mkPen(AMBER, style=QtCore.Qt.DashLine)))
-    p_time = pg.PlotWidget(); p_time.setBackground("w"); p_time.setTitle("Last hit — force & response", color=NAVY)
-    p_time.showGrid(x=True, y=True, alpha=0.3)
+    p_time = pg.PlotWidget(); p_time.setBackground("w"); p_time.setTitle("Last hit — force & response", color=NAVY); p_time.showGrid(x=True, y=True, alpha=0.3)
     grid.addWidget(p_frf, 0, 0); grid.addWidget(p_coh, 0, 1); grid.addWidget(p_time, 1, 0, 1, 2)
-    grid.setRowStretch(0, 3); grid.setRowStretch(1, 2)
-    il.addLayout(grid, 1)
+    grid.setRowStretch(0, 3); grid.setRowStretch(1, 2); il.addLayout(grid, 1)
     tabs.addTab(pg_imp, "Impact test (EMA)")
     cur_frf = p_frf.plot([], [], pen=pg.mkPen("#94a3b8", width=1, style=QtCore.Qt.DashLine))
     avg_frf = p_frf.plot([], [], pen=pg.mkPen(ACC, width=2))
     coh_curve = p_coh.plot([], [], pen=pg.mkPen(GREEN, width=2))
-    force_curve = p_time.plot([], [], pen=pg.mkPen(RED, width=1.5))
-    resp_curve = p_time.plot([], [], pen=pg.mkPen(NAVY, width=1))
+    force_curve = p_time.plot([], [], pen=pg.mkPen(RED, width=1.5)); resp_curve = p_time.plot([], [], pen=pg.mkPen(NAVY, width=1))
 
     def _leds(q):
-        lbl_leds.setText(_led(RED, bool(q and q.overload), "Overload") + " &nbsp;&nbsp; "
-                         + _led(AMBER, bool(q and q.double_hit), "Double-hit"))
+        lbl_leds.setText(_led(RED, bool(q and q.overload), "Overload") + " &nbsp;&nbsp; " + _led(AMBER, bool(q and q.double_hit), "Double-hit"))
 
     def _refresh_impact():
-        acc = st["acc"]
-        lbl_avg.setText(f"Averages: {acc.count} / {st['target']}"
-                        + ("   ✅ target" if acc.count >= st["target"] else ""))
+        acc = st["acc"]; lbl_avg.setText(f"Averages: {acc.count} / {st['target']}" + ("   ✅ target" if acc.count >= st["target"] else ""))
         res = acc.result()
         if res is not None:
             m = res.frequencies_hz <= st["layout"].fmax_hz
-            avg_frf.setData(res.frequencies_hz[m], np.maximum(res.magnitude[m], 1e-9))
-            coh_curve.setData(res.frequencies_hz[m], res.coherence[m])
+            avg_frf.setData(res.frequencies_hz[m], np.maximum(res.magnitude[m], 1e-9)); coh_curve.setData(res.frequencies_hz[m], res.coherence[m])
         else:
             avg_frf.setData([], []); coh_curve.setData([], [])
 
     def _do_hit(fault):
-        lay = st["layout"]
-        dbl = fault and st["rng"].random() < 0.5; over = fault and not dbl
-        f, y = synth_impact(lay.fs_hz, lay.block_size, modes=DEMO_MODES, rng=st["rng"],
-                            double_hit=dbl, overload=over)
+        lay = st["layout"]; dbl = fault and st["rng"].random() < 0.5; over = fault and not dbl
+        f, y = synth_impact(lay.fs_hz, lay.block_size, modes=DEMO_MODES, rng=st["rng"], double_hit=dbl, overload=over)
         q = assess_hit(f, y, lay.fs_hz); st["pending"] = (f, y, q)
         acc = st["acc"]; acc.use_force_window = chk_fwin.isChecked(); acc.use_exp_window = chk_ewin.isChecked()
         prev = acc.preview(f, y); m = prev.frequencies_hz <= lay.fmax_hz
@@ -729,8 +822,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         st["pending"] = None; cur_frf.setData([], []); btn_acc.setEnabled(False); btn_rej.setEnabled(False); _leds(None)
 
     def _reset_ema():
-        st["acc"] = FRFAccumulator(st["layout"].fs_hz, st["layout"].block_size)
-        st["pending"] = None
+        st["acc"] = FRFAccumulator(st["layout"].fs_hz, st["layout"].block_size); st["pending"] = None
         for c in (cur_frf, avg_frf, coh_curve, force_curve, resp_curve): c.setData([], [])
         btn_acc.setEnabled(False); btn_rej.setEnabled(False); _leds(None); _refresh_impact()
 
@@ -738,36 +830,30 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_acc.clicked.connect(_accept); btn_rej.clicked.connect(_reject); btn_rst.clicked.connect(_reset_ema)
     _leds(None); _refresh_impact()
 
-    # =================================================================
+    # =====================================================================
     # OMA CAPTURE
-    # =================================================================
+    # =====================================================================
     pg_oc = QtWidgets.QWidget(); cl2 = QtWidgets.QVBoxLayout(pg_oc)
     crow = QtWidgets.QHBoxLayout()
-    btn_ocap = QtWidgets.QPushButton("▶ Capturar (simulado) + FDD"); btn_ocap.setStyleSheet(
+    btn_ocap = QtWidgets.QPushButton("▶ Capture (simulated) + FDD"); btn_ocap.setStyleSheet(
         f"QPushButton{{background:{ACC};font-size:14px;padding:10px 20px;}} QPushButton:hover{{background:#1490c2;}}")
-    crow.addWidget(btn_ocap); crow.addStretch(1)
-    cl2.addLayout(crow)
+    crow.addWidget(btn_ocap); crow.addStretch(1); cl2.addLayout(crow)
     ocs = QtWidgets.QHBoxLayout()
-    tbl_om = QtWidgets.QTableWidget(0, 4)
-    tbl_om.setHorizontalHeaderLabels(["Freq (Hz)", "Damping (%)", "Complexity (%)", "Clase"])
-    tbl_om.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_om.verticalHeader().setVisible(False)
-    tbl_om.setMaximumWidth(520)
-    p_svd = pg.PlotWidget(); p_svd.setBackground("w"); p_svd.setLabel("left", "dB | (1 g)² / Hz")
-    p_svd.setLabel("bottom", "Frequency", "Hz")
-    p_svd.setTitle("Valores singulares de las densidades espectrales — todos los canales", color=NAVY)
-    p_svd.showGrid(x=True, y=True, alpha=0.3)
-    p_svd.addLegend(offset=(-10, 10))
+    tbl_om = QtWidgets.QTableWidget(0, 4); tbl_om.setHorizontalHeaderLabels(["Freq (Hz)", "Damping (%)", "Complexity (%)", "Class"])
+    tbl_om.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_om.verticalHeader().setVisible(False); tbl_om.setMaximumWidth(520)
+    p_svd = pg.PlotWidget(); p_svd.setBackground("w"); p_svd.setLabel("left", "dB | (1 g)² / Hz"); p_svd.setLabel("bottom", "Frequency", "Hz")
+    p_svd.setTitle("Singular values of spectral densities — all channels", color=NAVY); p_svd.showGrid(x=True, y=True, alpha=0.3); p_svd.addLegend(offset=(-10, 10))
     ocs.addWidget(tbl_om, 2); ocs.addWidget(p_svd, 3); cl2.addLayout(ocs, 1)
     lbl_ost = QtWidgets.QLabel(""); cl2.addWidget(lbl_ost)
     tabs.addTab(pg_oc, "OMA capture")
 
     def _oma_capture():
         from scipy.signal import lfilter
-        _validate(); lay = st["layout"]; fs = lay.fs_hz; nch = lay.n_channels()
+        _table_to_layout(); lay = st["layout"]; fs = lay.fs_hz; nch = lay.n_channels()
         if nch < 2:
-            QtWidgets.QMessageBox.information(win, "OMA", "Configurá ≥2 canales activos."); return
+            QtWidgets.QMessageBox.information(win, "OMA", "Add ≥2 active sensors first (Sensors tab)."); return
         secs = min(float(lay.duration_s), 60.0); N = int(secs * fs); rng = st["rng"]
-        lbl_ost.setText(f"Capturando {secs:.0f}s @ {fs:.0f}Hz · {nch} canales…"); QtWidgets.QApplication.processEvents()
+        lbl_ost.setText(f"Capturing {secs:.0f}s @ {fs:.0f}Hz · {nch} channels…"); QtWidgets.QApplication.processEvents()
         data = np.zeros((N, nch))
         for sm in DEMO_MODES:
             fn, z = sm.fn_hz, sm.zeta
@@ -781,117 +867,94 @@ def build_app(layout: OMALayout, simulated: bool = True):
         freqs = fdd.frequencies_hz; sv = np.asarray(fdd.singular_values)
         if sv.ndim == 1: sv = sv[None, :]
         band = freqs <= fmax
-        # TODOS los valores singulares (SV1..SVn): SV1..4 en colores (ARTeMIS), resto gris tenue
-        p_svd.clear()
-        _svcol = ["#2563eb", "#dc2626", "#16a34a", "#9ca3af"]
+        p_svd.clear(); _svcol = ["#2563eb", "#dc2626", "#16a34a", "#9ca3af"]
         for i in range(sv.shape[0]):
-            col = _svcol[i] if i < 4 else "#dbe2ec"
-            wdt = 1.7 if i == 0 else (1.0 if i < 4 else 0.5)
-            nm = f"SV{i+1}" if i < 4 else None
-            p_svd.plot(freqs[band], 10 * np.log10(np.maximum(sv[i][band], 1e-30)),
-                       pen=pg.mkPen(col, width=wdt), name=nm)
-        for m in fdd.modes:                              # modos marcados sobre SV1
+            col = _svcol[i] if i < 4 else "#dbe2ec"; wdt = 1.7 if i == 0 else (1.0 if i < 4 else 0.5)
+            p_svd.plot(freqs[band], 10 * np.log10(np.maximum(sv[i][band], 1e-30)), pen=pg.mkPen(col, width=wdt), name=(f"SV{i+1}" if i < 4 else None))
+        for m in fdd.modes:
             j = int(np.argmin(np.abs(freqs - m.natural_frequency_hz)))
-            p_svd.addItem(pg.ScatterPlotItem([m.natural_frequency_hz],
-                          [10 * np.log10(max(sv[0][j], 1e-30))], size=10, symbol="o",
+            p_svd.addItem(pg.ScatterPlotItem([m.natural_frequency_hz], [10 * np.log10(max(sv[0][j], 1e-30))], size=10, symbol="o",
                           pen=pg.mkPen(RED, width=2), brush=pg.mkBrush(255, 255, 255, 0)))
         tbl_om.setRowCount(0)
         for m in fdd.modes:
             rr = tbl_om.rowCount(); tbl_om.insertRow(rr)
-            for c, v in enumerate([f"{m.natural_frequency_hz:.2f}", f"{m.damping_ratio_pct:.3f}",
-                                   f"{m.complexity_pct:.1f}", m.classification]):
+            for c, v in enumerate([f"{m.natural_frequency_hz:.2f}", f"{m.damping_ratio_pct:.3f}", f"{m.complexity_pct:.1f}", m.classification]):
                 tbl_om.setItem(rr, c, QtWidgets.QTableWidgetItem(v))
-        lbl_ost.setText(f"✅ FDD listo — {len(fdd.modes)} modos. Mirá Comparative (EMA vs OMA) y Campbell.")
-        lbl_ost.setStyleSheet(f"color:{GREEN};font-weight:700;")
-        _refresh_campbell(); _refresh_comparative()
+        lbl_ost.setText(f"✅ FDD done — {len(fdd.modes)} modes. See Comparative (EMA vs OMA) and Campbell.")
+        lbl_ost.setStyleSheet(f"color:{GREEN};font-weight:700;"); _refresh_campbell(); _refresh_comparative()
     btn_ocap.clicked.connect(_oma_capture)
 
-    # =================================================================
+    # =====================================================================
     # MODES (EMA)
-    # =================================================================
+    # =====================================================================
     pg_mod = QtWidgets.QWidget(); ql = QtWidgets.QVBoxLayout(pg_mod)
     mrow = QtWidgets.QHBoxLayout()
     btn_ident = QtWidgets.QPushButton("🎯 Identify modes (EMA)"); btn_ident.setStyleSheet(f"QPushButton{{background:{ACC};}}")
-    mrow.addWidget(btn_ident); mrow.addWidget(QtWidgets.QLabel("Peak-picking + half-power (ISO 7626-6).")); mrow.addStretch(1)
-    ql.addLayout(mrow)
+    mrow.addWidget(btn_ident); mrow.addWidget(QtWidgets.QLabel("Peak-picking + half-power damping (ISO 7626-6).")); mrow.addStretch(1); ql.addLayout(mrow)
     ms = QtWidgets.QHBoxLayout()
     tbl_modes = QtWidgets.QTableWidget(0, 4); tbl_modes.setHorizontalHeaderLabels(["Freq (Hz)", "Damping (%)", "Coherence", "Reliable"])
-    tbl_modes.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_modes.verticalHeader().setVisible(False)
-    tbl_modes.setMaximumWidth(520)
-    p_nyq = pg.PlotWidget(); p_nyq.setBackground("w"); p_nyq.setAspectLocked(True); p_nyq.setTitle("Nyquist", color=NAVY)
-    p_nyq.showGrid(x=True, y=True, alpha=0.3); nyq_curve = p_nyq.plot([], [], pen=pg.mkPen(NAVY, width=1.5))
-    ms.addWidget(tbl_modes, 2); ms.addWidget(p_nyq, 3); ql.addLayout(ms, 1)
+    tbl_modes.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_modes.verticalHeader().setVisible(False); tbl_modes.setMaximumWidth(520)
+    p_nyq = pg.PlotWidget(); p_nyq.setBackground("w"); p_nyq.setAspectLocked(True); p_nyq.setTitle("Nyquist", color=NAVY); p_nyq.showGrid(x=True, y=True, alpha=0.3)
+    nyq_curve = p_nyq.plot([], [], pen=pg.mkPen(NAVY, width=1.5)); ms.addWidget(tbl_modes, 2); ms.addWidget(p_nyq, 3); ql.addLayout(ms, 1)
     tabs.addTab(pg_mod, "Modes")
 
     def _identify():
         res = st["acc"].result()
         if res is None:
-            QtWidgets.QMessageBox.information(win, "Modes", "Aceptá golpes en Impact test."); return
+            QtWidgets.QMessageBox.information(win, "Modes", "Accept some hits in Impact test."); return
         modes = modes_from_frf(res, fmin=5.0, fmax=st["layout"].fmax_hz); tbl_modes.setRowCount(0)
         for mo in modes:
             r = tbl_modes.rowCount(); tbl_modes.insertRow(r)
             for c, v in enumerate([f"{mo.frequency_hz:.1f}", f"{mo.damping_ratio_pct:.2f}",
-                                   (f"{mo.coherence_at_peak:.2f}" if mo.coherence_at_peak is not None else "—"),
-                                   ("✓" if mo.is_reliable else "✗")]):
+                                   (f"{mo.coherence_at_peak:.2f}" if mo.coherence_at_peak is not None else "—"), ("✓" if mo.is_reliable else "✗")]):
                 tbl_modes.setItem(r, c, QtWidgets.QTableWidgetItem(v))
         m = (res.frequencies_hz <= st["layout"].fmax_hz) & (res.frequencies_hz >= 5.0)
         nyq_curve.setData(res.frf_complex[m].real, res.frf_complex[m].imag)
     btn_ident.clicked.connect(_identify)
 
-    # =================================================================
-    # COMPARATIVE (multi-condición OMA)
-    # =================================================================
+    # =====================================================================
+    # COMPARATIVE (EMA vs OMA)
+    # =====================================================================
     pg_cmp = QtWidgets.QWidget(); cpl = QtWidgets.QVBoxLayout(pg_cmp)
-    cpl.addWidget(QtWidgets.QLabel(
-        "<b>Correlación EMA ↔ OMA</b> — compara los modos del <b>ensayo de impacto (EMA)</b> con los "
-        "modos <b>operacionales (OMA)</b>. La correspondencia confirma que son características dinámicas "
-        "reales del conjunto (ISO 7626-6 / API 684)."))
-    crow3 = QtWidgets.QHBoxLayout()
-    btn_cmp = QtWidgets.QPushButton("↻ Comparar EMA vs OMA"); btn_cmp.setStyleSheet(f"QPushButton{{background:{ACC};}}")
+    cpl.addWidget(QtWidgets.QLabel("<b>EMA ↔ OMA correlation</b> — impact-test modes vs operational modes "
+                                   "(ISO 7626-6 / API 684)."))
+    crow3 = QtWidgets.QHBoxLayout(); btn_cmp = QtWidgets.QPushButton("↻ Compare EMA vs OMA"); btn_cmp.setStyleSheet(f"QPushButton{{background:{ACC};}}")
     crow3.addWidget(btn_cmp); crow3.addStretch(1); cpl.addLayout(crow3)
-    tbl_cmp = QtWidgets.QTableWidget(0, 4)
-    tbl_cmp.setHorizontalHeaderLabels(["Modo EMA (Hz)", "Modo OMA (Hz)", "Δf (Hz)", "Δ (%)"])
-    tbl_cmp.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_cmp.verticalHeader().setVisible(False)
-    cpl.addWidget(tbl_cmp, 1)
+    tbl_cmp = QtWidgets.QTableWidget(0, 4); tbl_cmp.setHorizontalHeaderLabels(["EMA mode (Hz)", "OMA mode (Hz)", "Δf (Hz)", "Δ (%)"])
+    tbl_cmp.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_cmp.verticalHeader().setVisible(False); cpl.addWidget(tbl_cmp, 1)
     lbl_cmp = QtWidgets.QLabel(""); lbl_cmp.setWordWrap(True); cpl.addWidget(lbl_cmp)
     tabs.addTab(pg_cmp, "Comparative")
 
     def _refresh_comparative():
-        from core.modal.ema_oma_correlation import correlate, summarize as _corr_sum
+        from core.modal.ema_oma_correlation import correlate, summarize as _cs
         res = st["acc"].result()
         ema = [mp.frequency_hz for mp in modes_from_frf(res, fmin=5, fmax=st["layout"].fmax_hz)] if res else []
         oma = [m.natural_frequency_hz for m in st["oma_fdd"].modes] if st["oma_fdd"] else []
         tbl_cmp.setRowCount(0)
         if not ema or not oma:
             miss = []
-            if not ema: miss.append("EMA (aceptá golpes en Impact test)")
-            if not oma: miss.append("OMA (capturá en OMA capture)")
-            lbl_cmp.setText("Falta: " + " y ".join(miss) + "."); return
+            if not ema: miss.append("EMA (accept hits in Impact test)")
+            if not oma: miss.append("OMA (run OMA capture)")
+            lbl_cmp.setText("Missing: " + " and ".join(miss) + "."); return
         matches = correlate(ema, oma, tol_hz=2.5)
         for m in matches:
             r = tbl_cmp.rowCount(); tbl_cmp.insertRow(r)
             for c, v in enumerate([f"{m.ema_hz:.2f}", f"{m.oma_hz:.3f}", f"{m.delta_hz:.3f}", f"{m.delta_pct:.2f}"]):
                 tbl_cmp.setItem(r, c, QtWidgets.QTableWidgetItem(v))
-        lbl_cmp.setText(_corr_sum(matches))
-    btn_cmp.clicked.connect(_refresh_comparative)
-    _refresh_comparative()
+        lbl_cmp.setText(_cs(matches))
+    btn_cmp.clicked.connect(_refresh_comparative); _refresh_comparative()
 
-    # =================================================================
-    # CAMPBELL (API 684, nativo)
-    # =================================================================
+    # =====================================================================
+    # CAMPBELL
+    # =====================================================================
     pg_cam = QtWidgets.QWidget(); cml = QtWidgets.QVBoxLayout(pg_cam)
-    crow2 = QtWidgets.QHBoxLayout()
-    btn_refc = QtWidgets.QPushButton("↻ Recalcular Campbell"); btn_refc.setStyleSheet(f"QPushButton{{background:{ACC};}}")
-    crow2.addWidget(btn_refc)
-    crow2.addWidget(QtWidgets.QLabel("Cruces fn↔orden automáticos (½×..4×) + bandas de operación (API 684).")); crow2.addStretch(1)
-    cml.addLayout(crow2)
+    crow2 = QtWidgets.QHBoxLayout(); btn_refc = QtWidgets.QPushButton("↻ Recompute Campbell"); btn_refc.setStyleSheet(f"QPushButton{{background:{ACC};}}")
+    crow2.addWidget(btn_refc); crow2.addWidget(QtWidgets.QLabel("Automatic fn↔order crossings (½×..4×) + operating bands (API 684).")); crow2.addStretch(1); cml.addLayout(crow2)
     cams = QtWidgets.QHBoxLayout()
-    p_cam = pg.PlotWidget(); p_cam.setBackground("w"); p_cam.setLabel("left", "Frequency", "Hz")
-    p_cam.setLabel("bottom", "Speed", "RPM"); p_cam.setTitle("Diagrama de Campbell", color=NAVY)
-    p_cam.showGrid(x=True, y=True, alpha=0.3)
+    p_cam = pg.PlotWidget(); p_cam.setBackground("w"); p_cam.setLabel("left", "Frequency", "Hz"); p_cam.setLabel("bottom", "Speed", "RPM")
+    p_cam.setTitle("Campbell diagram", color=NAVY); p_cam.showGrid(x=True, y=True, alpha=0.3)
     tbl_cam = QtWidgets.QTableWidget(0, 5); tbl_cam.setMaximumWidth(520); tbl_cam.verticalHeader().setVisible(False)
-    tbl_cam.setHorizontalHeaderLabels(["Modo", "Orden", "RPM", "Margen%", "Estado"])
-    tbl_cam.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    tbl_cam.setHorizontalHeaderLabels(["Mode", "Order", "RPM", "Margin%", "Status"]); tbl_cam.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
     cams.addWidget(tbl_cam, 2); cams.addWidget(p_cam, 3); cml.addLayout(cams, 1)
     lbl_cam = QtWidgets.QLabel(""); lbl_cam.setWordWrap(True); cml.addWidget(lbl_cam)
     tabs.addTab(pg_cam, "Campbell")
@@ -905,56 +968,39 @@ def build_app(layout: OMALayout, simulated: bool = True):
         return []
 
     def _refresh_campbell():
-        p_cam.clear(); modes = _current_modes()
-        rpm_op = st["layout"].running_speed_rpm or 1185.0
-        SM = 0.15                                        # margen de separación API 684 (±15%)
-        lo, hi = rpm_op * (1 - SM), rpm_op * (1 + SM)
-        rpm_max = max(rpm_op * 1.4, 1500.0)
+        p_cam.clear(); modes = _current_modes(); rpm_op = st["layout"].running_speed_rpm or 1185.0
+        SM = 0.15; lo, hi = rpm_op * (1 - SM), rpm_op * (1 + SM); rpm_max = max(rpm_op * 1.4, 1500.0)
         if not modes:
-            lbl_cam.setText("Sin modos aún — capturá OMA o identificá EMA."); tbl_cam.setRowCount(0); return
-        ymax = max(modes) * 1.25
-        orders = (0.5, 1.0, 2.0, 3.0, 4.0); rpm = np.linspace(0, rpm_max, 60)
-        # zona de MARGEN DE SEPARACIÓN API 684 alrededor de la RPM de la máquina (keep-clear, roja)
-        reg = pg.LinearRegionItem([max(0, lo), min(rpm_max, hi)], movable=False,
-                                  brush=pg.mkBrush(239, 68, 68, 32)); reg.setZValue(-20); p_cam.addItem(reg)
-        # media velocidad (referencia, ámbar)
-        reg2 = pg.LinearRegionItem([rpm_op / 2 * (1 - SM), rpm_op / 2 * (1 + SM)], movable=False,
-                                   brush=pg.mkBrush(245, 158, 11, 26)); reg2.setZValue(-20); p_cam.addItem(reg2)
-        for o in orders:                                # líneas de orden
+            lbl_cam.setText("No modes yet — run OMA capture or identify EMA modes."); tbl_cam.setRowCount(0); return
+        ymax = max(modes) * 1.25; orders = (0.5, 1.0, 2.0, 3.0, 4.0); rpm = np.linspace(0, rpm_max, 60)
+        reg = pg.LinearRegionItem([max(0, lo), min(rpm_max, hi)], movable=False, brush=pg.mkBrush(239, 68, 68, 32)); reg.setZValue(-20); p_cam.addItem(reg)
+        reg2 = pg.LinearRegionItem([rpm_op / 2 * (1 - SM), rpm_op / 2 * (1 + SM)], movable=False, brush=pg.mkBrush(245, 158, 11, 26)); reg2.setZValue(-20); p_cam.addItem(reg2)
+        for o in orders:
             p_cam.plot(rpm, o * rpm / 60.0, pen=pg.mkPen("#6B7280", width=1, style=QtCore.Qt.DotLine))
-            t = pg.TextItem(f"{o:g}×", color="#6B7280", anchor=(0, 0.5)); t.setPos(rpm_max * 0.98, o * rpm_max / 60.0)
-            p_cam.addItem(t)
-        for fn in modes:                                # modos (horizontales)
+            t = pg.TextItem(f"{o:g}×", color="#6B7280", anchor=(0, 0.5)); t.setPos(rpm_max * 0.98, o * rpm_max / 60.0); p_cam.addItem(t)
+        for fn in modes:
             p_cam.plot([0, rpm_max], [fn, fn], pen=pg.mkPen(GREEN, width=2))
-        bands = [SpeedBand(rpm_op, SM * rpm_op, f"Operación {rpm_op:.0f}±{SM*100:.0f}%"),
-                 SpeedBand(rpm_op / 2, SM * rpm_op / 2, "½ velocidad")]
-        cx = compute_crossings(modes, 0, rpm_max, orders=orders, bands=bands)
-        sevcol = {"coincidence": RED, "near": AMBER, "clear": "#94a3b8"}
+        bands = [SpeedBand(rpm_op, SM * rpm_op, f"Operating {rpm_op:.0f}±{SM*100:.0f}%"), SpeedBand(rpm_op / 2, SM * rpm_op / 2, "½ speed")]
+        cx = compute_crossings(modes, 0, rpm_max, orders=orders, bands=bands); sevcol = {"coincidence": RED, "near": AMBER, "clear": "#94a3b8"}
         tbl_cam.setRowCount(0)
         for c in cx:
-            p_cam.addItem(pg.ScatterPlotItem([c.crossing_rpm], [c.mode_hz], size=12, symbol="x",
-                          pen=pg.mkPen(sevcol[c.severity], width=2), brush=pg.mkBrush(sevcol[c.severity])))
+            p_cam.addItem(pg.ScatterPlotItem([c.crossing_rpm], [c.mode_hz], size=12, symbol="x", pen=pg.mkPen(sevcol[c.severity], width=2), brush=pg.mkBrush(sevcol[c.severity])))
             if c.severity in ("coincidence", "near"):
                 r = tbl_cam.rowCount(); tbl_cam.insertRow(r)
-                for j, v in enumerate([f"{c.mode_hz:.2f}", f"{c.order:g}×", f"{c.crossing_rpm:.0f}",
-                                       f"{c.sep_margin_pct:.1f}", {"coincidence": "Coincidencia", "near": "Cercano"}[c.severity]]):
+                for j, v in enumerate([f"{c.mode_hz:.2f}", f"{c.order:g}×", f"{c.crossing_rpm:.0f}", f"{c.sep_margin_pct:.1f}", {"coincidence": "Coincidence", "near": "Near"}[c.severity]]):
                     it = QtWidgets.QTableWidgetItem(v)
                     if j == 4: it.setForeground(QtGui.QBrush(QtGui.QColor(sevcol[c.severity])))
                     tbl_cam.setItem(r, j, it)
-        # RPM de la MÁQUINA — línea prominente + etiqueta clara
         p_cam.plot([rpm_op, rpm_op], [0, ymax], pen=pg.mkPen(NAVY, width=3))
-        t_op = pg.TextItem(f"N máquina\n{rpm_op:.0f} RPM", color=NAVY, anchor=(0.5, 1.0))
-        t_op.setPos(rpm_op, ymax * 0.995); p_cam.addItem(t_op)
-        # límites del margen de separación API 684 + su valor "al lado"
+        t_op = pg.TextItem(f"N machine\n{rpm_op:.0f} RPM", color=NAVY, anchor=(0.5, 1.0)); t_op.setPos(rpm_op, ymax * 0.995); p_cam.addItem(t_op)
         for xb, lab in ((lo, f"−{SM*100:.0f}%\n{lo:.0f}"), (hi, f"+{SM*100:.0f}%\n{hi:.0f}")):
             p_cam.plot([xb, xb], [0, ymax], pen=pg.mkPen(RED, width=1, style=QtCore.Qt.DashLine))
             tt = pg.TextItem(lab, color=RED, anchor=(0.5, 1.0)); tt.setPos(xb, ymax * 0.82); p_cam.addItem(tt)
-        p_cam.setLabel("bottom", f"Velocidad · N máquina {rpm_op:.0f} RPM · margen API 684 ±{SM*100:.0f}%", "RPM")
+        p_cam.setLabel("bottom", f"Speed · N machine {rpm_op:.0f} RPM · API 684 margin ±{SM*100:.0f}%", "RPM")
         p_cam.setXRange(0, rpm_max); p_cam.setYRange(0, ymax)
         from core.modal.campbell import summarize as _cs
-        lbl_cam.setText(f"<b>N máquina = {rpm_op:.0f} RPM</b> · margen de separación API 684 "
-                        f"±{SM*100:.0f}% (zona {lo:.0f}–{hi:.0f} RPM). Todo cruce dentro de esa zona "
-                        f"es una coincidencia de riesgo. " + _cs(cx))
+        lbl_cam.setText(f"<b>N machine = {rpm_op:.0f} RPM</b> · API 684 separation margin ±{SM*100:.0f}% "
+                        f"(zone {lo:.0f}–{hi:.0f} RPM). Any crossing inside that zone is a risk coincidence. " + _cs(cx))
     btn_refc.clicked.connect(_refresh_campbell)
 
     return app, win
@@ -963,9 +1009,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Watermelon Modal — EMA + OMA (native)")
     ap.add_argument("--sim", action="store_true", default=True)
-    ap.add_argument("--name", default="Tren Motor-Bomba")
+    ap.add_argument("--name", default="Motor-Pump train")
     args = ap.parse_args(argv)
-    lay = default_24ch_layout(name=args.name)
+    lay = OMALayout(name=args.name, machine_components=default_components())  # geometry only, no sensors
     try:
         app, win = build_app(lay, simulated=True); win.show(); sys.exit(app.exec())
     except Exception:  # noqa: BLE001

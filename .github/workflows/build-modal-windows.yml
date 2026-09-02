@@ -31,7 +31,17 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install numpy scipy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx pyinstaller
+          pip install numpy scipy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx supabase pyinstaller
+
+      - name: Embeber credenciales de nube (desde GitHub Secrets)
+        shell: bash
+        env:
+          SB_URL: ${{ secrets.SUPABASE_URL }}
+          SB_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          printf 'SUPABASE_URL = "%s"\nSUPABASE_KEY = "%s"\n' "$SB_URL" "$SB_KEY" \
+            > core/remote_monitoring/_cloud_config.py
+          echo "cloud: url=$([ -n "$SB_URL" ] && echo SET || echo empty)"
 
       - name: Compilar WatermelonModal.exe (onedir)
         shell: bash
@@ -42,11 +52,16 @@ jobs:
             --contents-directory _internal \
             --paths . \
             --collect-submodules core.modal \
+            --collect-submodules core.remote_monitoring \
             --hidden-import core.modal.live_impact \
             --hidden-import core.modal.frf_compute \
+            --hidden-import core.modal.modal_cloud \
+            --hidden-import core.remote_monitoring._cloud_config \
             --add-data "assets/watermelon_logo.png;assets" \
             --icon "assets/watermelon.ico" \
             --collect-submodules scipy \
+            --collect-all supabase \
+            --copy-metadata supabase \
             --exclude-module streamlit \
             --exclude-module matplotlib \
             --exclude-module pandas \

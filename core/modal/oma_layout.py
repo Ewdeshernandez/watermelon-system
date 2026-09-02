@@ -15,31 +15,79 @@ Mapeo de hardware: chasis NI cDAQ (p.ej. 9178, 8 slots) con módulos NI 9234
 """
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Sequence
 
 # Componentes típicos de un tren motor-bomba con skid y tuberías
-DEFAULT_COMPONENTS = ["Motor", "Bomba", "Skid", "Tubería succión", "Tubería descarga"]
+DEFAULT_COMPONENTS = ["Electric motor", "Coupling", "Single-stage pump", "Suction pipe", "Discharge pipe"]
 
-# Referencias de posición estándar (editable). NDE=lado libre, DE=lado acople (API 670/ISO 20816)
-POSITION_REFS = ["NDE (lado libre)", "DE (lado acople)", "LL (lado libre)", "LA (lado acople)",
-                 "Centro", "Superior", "Inferior", "Succión", "Descarga", "Base", "Brida"]
+# Standard position references (editable). NDE = free end, DE = drive/coupling end (API 670 / ISO 20816)
+POSITION_REFS = ["NDE (free end)", "DE (coupling end)", "Center", "Top", "Bottom",
+                 "Suction", "Discharge", "Base", "Flange"]
 
-# Equipos rotativos (llevan cojinetes NDE/DE) — para la ubicación por norma
-ROTATING_KINDS = ["Motor", "Turbina", "Bomba", "Generador", "Gear box"]
-
-# Direcciones de medición (grados de libertad)
+# Measurement directions (DOFs)
 DOFS = ["+X", "+Y", "+Z", "-X", "-Y", "-Z", "H", "V", "A"]  # H=horizontal V=vertical A=axial
 
-# Tipo de medida por punto (ISO 7626): A=aceleración, V=velocidad, D=desplazamiento
+# Measurement type per point (ISO 7626): A=acceleration, V=velocity, D=displacement
 MEAS_TYPES = ["A", "V", "D"]
-MEAS_TYPE_NAME = {"A": "Aceleración", "V": "Velocidad", "D": "Desplazamiento"}
+MEAS_TYPE_NAME = {"A": "Acceleration", "V": "Velocity", "D": "Displacement"}
 
-# Tipos de equipo que se pueden dibujar (cajas sobre el skid)
-COMPONENT_KINDS = ["Motor", "Acople", "Turbina", "Bomba", "Generador", "Gear box",
-                   "Tubería succión", "Tubería descarga"]
+# Equipment types that can be drawn (solid boxes on the skid) — enriched database
+COMPONENT_KINDS = [
+    "Electric motor", "Combustion engine", "Gas turbine", "Steam turbine",
+    "Axial compressor", "Centrifugal compressor", "Reciprocating compressor", "Screw compressor",
+    "Multistage pump", "Screw pump", "Single-stage pump",
+    "Gearbox", "Generator", "Fan / Blower", "Coupling", "Bearing housing",
+    "Skid 1", "Skid 2", "Suction pipe", "Discharge pipe",
+]
+
+# Rotating machines (carry NDE/DE bearings) — used by norm-based placement
+ROTATING_KINDS = ["Electric motor", "Combustion engine", "Gas turbine", "Steam turbine",
+                  "Axial compressor", "Centrifugal compressor", "Reciprocating compressor",
+                  "Screw compressor", "Multistage pump", "Screw pump", "Single-stage pump",
+                  "Gearbox", "Generator", "Fan / Blower"]
 
 DEFAULT_SENSITIVITY_MV_PER_G = 100.0
+
+
+def is_pipe(kind: str) -> bool:
+    return "pipe" in (kind or "").lower()
+
+
+def component_default_box(kind: str, x0: float):
+    """Caja por defecto (x0,x1,y0,y1,depth) según el tipo de equipo."""
+    k = (kind or "").lower()
+    if is_pipe(kind):
+        if "suction" in k:
+            return (x0, x0 + 0.32, 0.02, 0.08, 0.04)
+        return (x0, x0 + 0.18, 0.08, 0.42, 0.04)
+    if "coupling" in k:
+        return (x0, x0 + 0.06, 0.05, 0.14, 0.06)
+    if "skid" in k:
+        return (x0, x0 + 0.40, -0.10, 0.00, 0.22)
+    if "gearbox" in k or "bearing" in k:
+        return (x0, x0 + 0.18, 0.00, 0.16, 0.11)
+    if "turbine" in k or "compressor" in k or "engine" in k:
+        return (x0, x0 + 0.38, 0.00, 0.20, 0.12)   # más largos
+    return (x0, x0 + 0.30, 0.00, 0.19, 0.11)        # motor / bomba / generador / fan
+
+
+# Recomendaciones de adquisición por norma (ISO 7626 EMA / ISO 20816 OMA)
+def recommended_acquisition(test_mode: str) -> dict:
+    """Devuelve parámetros recomendados por norma + una nota explicativa."""
+    if (test_mode or "").upper().startswith("EMA"):
+        return {"fs_hz": 2048.0, "block_size": 4096, "fmax_hz": 800.0, "duration_s": 30.0,
+                "window": "force+exp", "averages": 5,
+                "note": ("ISO 7626-5 (martillo): Fmax que cubra los modos de interés, ventana de "
+                         "fuerza + exponencial, 3–5 promedios por punto, coherencia ≥ 0.8 en banda. "
+                         "Δf fino (block grande) para damping.")}
+    return {"fs_hz": 1280.0, "block_size": 4096, "fmax_hz": 200.0, "duration_s": 600.0,
+            "window": "hanning", "averages": 1,
+            "note": ("ISO 20816 / OMA (Brincker & Ventura): registro LARGO (≥ 1000–2000 ciclos del "
+                     "modo más bajo, típ. 5–10 min), muestreo simultáneo, Fmax según banda de interés, "
+                     "sin ventana de fuerza (excitación ambiental/operacional).")}
 
 
 @dataclass
@@ -192,15 +240,43 @@ class OMALayout:
 
 
 def default_components() -> List[MachineComponent]:
-    """Tren en línea: motor → acople → bomba sobre skid + tuberías (sólidos 3D).
-    Cajas ALARGADAS (proporción real de máquina), no cuadradas."""
+    """In-line train: electric motor → coupling → pump + piping (elongated 3D solids)."""
     return [
-        MachineComponent("Motor", "Motor", 0.03, 0.34, 0.00, 0.19, depth=0.11),
-        MachineComponent("Acople", "Acople", 0.34, 0.40, 0.05, 0.14, depth=0.06),
-        MachineComponent("Bomba", "Bomba", 0.40, 0.66, 0.00, 0.17, depth=0.10),
-        MachineComponent("Tubería succión", "Tub. succión", 0.66, 0.98, 0.02, 0.08, depth=0.04),
-        MachineComponent("Tubería descarga", "Tub. descarga", 0.66, 0.82, 0.08, 0.42, depth=0.04),
+        MachineComponent("Electric motor", "Electric motor", 0.03, 0.34, 0.00, 0.19, depth=0.11),
+        MachineComponent("Coupling", "Coupling", 0.34, 0.40, 0.05, 0.14, depth=0.06),
+        MachineComponent("Single-stage pump", "Pump", 0.40, 0.66, 0.00, 0.17, depth=0.10),
+        MachineComponent("Suction pipe", "Suction pipe", 0.66, 0.98, 0.02, 0.08, depth=0.04),
+        MachineComponent("Discharge pipe", "Discharge pipe", 0.66, 0.82, 0.08, 0.42, depth=0.04),
     ]
+
+
+# --- guardado LOCAL (JSON) ---
+def layouts_dir() -> str:
+    d = os.environ.get("WM_MODAL_DIR") or os.path.join(os.path.expanduser("~"), ".watermelon", "modal")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _slug(name: str) -> str:
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in (name or "modal")).strip("_")
+
+
+def save_layout_local(layout: "OMALayout") -> str:
+    p = os.path.join(layouts_dir(), f"{_slug(layout.name)}.json")
+    with open(p, "w", encoding="utf-8") as f:
+        json.dump(layout.to_dict(), f, ensure_ascii=False, indent=2)
+    return p
+
+
+def list_layouts_local() -> List[str]:
+    d = layouts_dir()
+    return sorted(f[:-5] for f in os.listdir(d) if f.endswith(".json"))
+
+
+def load_layout_local(name_or_slug: str) -> "OMALayout":
+    p = os.path.join(layouts_dir(), f"{_slug(name_or_slug)}.json")
+    with open(p, "r", encoding="utf-8") as f:
+        return OMALayout.from_dict(json.load(f))
 
 
 def auto_place_by_norm(layout: "OMALayout",
