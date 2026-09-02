@@ -217,6 +217,18 @@ def build_app(layout: OMALayout, simulated: bool = True):
     cfg_outer = QtWidgets.QWidget(); cfg_ol = QtWidgets.QVBoxLayout(cfg_outer)
     cfg_tabs = QtWidgets.QTabWidget(); cfg_ol.addWidget(cfg_tabs, 1)
 
+    # Vistas 3D compartidas (Machine=geometría, Sensors=ubicación) — mismo modelo
+    st["_views"] = []
+
+    def _make_view(kind):
+        plot = pg.PlotWidget(viewBox=OrbitViewBox()); plot.setBackground("w"); plot.setAspectLocked(True)
+        plot.hideAxis("left"); plot.hideAxis("bottom"); plot.setMenuEnabled(False)
+        m3 = Machine3DItem(); plot.addItem(m3)
+        v = {"plot": plot, "m3d": m3, "labels": []}; st["_views"].append(v)
+        plot.getViewBox().rotate.connect(lambda dx, dy: _on_rotate(dx, dy))
+        plot.scene().sigMouseClicked.connect(lambda ev: _on_click(ev, plot, kind))
+        return v
+
     # ---------- Machine: ficha del activo + dibujo con ubicación de sensores ----------
     pg_m = QtWidgets.QWidget(); ml = QtWidgets.QVBoxLayout(pg_m)
     ml.addWidget(QtWidgets.QLabel("<b>Client machine</b> — asset record"))
@@ -242,7 +254,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _w3 = QtWidgets.QWidget(); _w3.setLayout(r3); frm.addRow("Operation:", _w3)
     ml.addLayout(frm)
 
-    # --- constructor de la máquina (cajas) + colocación de puntos ---
+    # --- PASO 1: dibujar la máquina (equipos como cajas) ---
     from core.modal.oma_layout import COMPONENT_KINDS, MEAS_TYPES, MachineComponent
     bld = QtWidgets.QHBoxLayout()
     bld.addWidget(QtWidgets.QLabel("<b>Equipo:</b>"))
@@ -250,27 +262,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_addcomp = QtWidgets.QPushButton("➕ Agregar equipo")
     btn_delcomp = QtWidgets.QPushButton("– Quitar equipo")
     bld.addWidget(cb_kind); bld.addWidget(btn_addcomp); bld.addWidget(btn_delcomp)
-    bld.addSpacing(18); bld.addWidget(QtWidgets.QLabel("<b>Modo clic:</b>"))
-    cb_click = QtWidgets.QComboBox(); cb_click.addItems(["Colocar punto", "Mover sensor", "Mover equipo"])
-    bld.addWidget(cb_click)
     btn_tmpl = QtWidgets.QPushButton("Cargar plantilla 24 canales"); bld.addWidget(btn_tmpl)
     bld.addStretch(1)
     ml.addLayout(bld)
-
-    prow = QtWidgets.QHBoxLayout()
-    prow.addWidget(QtWidgets.QLabel("<b>Nuevo punto</b> — N°:"))
-    sp_num = QtWidgets.QSpinBox(); sp_num.setRange(1, 999); sp_num.setValue(1); prow.addWidget(sp_num)
-    prow.addWidget(QtWidgets.QLabel("Ejes:"))
-    cbx = QtWidgets.QCheckBox("X"); cby = QtWidgets.QCheckBox("Y"); cbz = QtWidgets.QCheckBox("Z")
-    cby.setChecked(True)
-    for w in (cbx, cby, cbz): prow.addWidget(w)
-    prow.addWidget(QtWidgets.QLabel("Mide:"))
-    cb_mtype = QtWidgets.QComboBox(); cb_mtype.addItems(MEAS_TYPES); prow.addWidget(cb_mtype)
-    prow.addWidget(QtWidgets.QLabel("→ <i>clic en el dibujo para colocarlo</i>"))
-    prow.addStretch(1)
-    prow.addWidget(QtWidgets.QLabel("Mover sensor:"))
-    cb_place = QtWidgets.QComboBox(); cb_place.setMinimumWidth(150); prow.addWidget(cb_place)
-    ml.addLayout(prow)
     # editor de TAMAÑO del equipo seleccionado (largo / alto / ancho)
     drow = QtWidgets.QHBoxLayout()
     drow.addWidget(QtWidgets.QLabel("<b>Tamaño equipo:</b>"))
@@ -282,20 +276,42 @@ def build_app(layout: OMALayout, simulated: bool = True):
         drow.addWidget(QtWidgets.QLabel(lab)); drow.addWidget(w)
     btn_applygeo = QtWidgets.QPushButton("✓ Aplicar cambios (auto-ordenar)")
     btn_applygeo.setStyleSheet(f"QPushButton{{background:{ACC};}} QPushButton:hover{{background:#1490c2;}}")
-    drow.addWidget(btn_applygeo)
-    btn_norm = QtWidgets.QPushButton("📐 Ubicar sensores por norma (API 670 / ISO 20816)")
-    btn_norm.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
-    drow.addStretch(1); drow.addWidget(btn_norm)
+    drow.addStretch(1); drow.addWidget(btn_applygeo)
     ml.addLayout(drow)
     ml.addWidget(QtWidgets.QLabel(
-        "<i style='color:#64748b'>🖱️ Arrastre izquierdo = girar · rueda = zoom · arrastre derecho = mover. "
-        "Clic (según 'Modo clic') = colocar/mover.</i>"))
-    p_train = pg.PlotWidget(viewBox=OrbitViewBox()); p_train.setBackground("w"); p_train.setAspectLocked(True)
-    p_train.hideAxis("left"); p_train.hideAxis("bottom"); p_train.setMenuEnabled(False)
-    ml.addWidget(p_train, 1)
-    m3d = Machine3DItem(); p_train.addItem(m3d)
-    st["_labels"] = []
+        "<i style='color:#64748b'>🖱️ Arrastre izq = girar · rueda = zoom · arrastre der = mover · "
+        "clic = mover el equipo elegido. Cuando termines el dibujo, pasá a la pestaña <b>Sensors</b>.</i>"))
+    vgeo = _make_view("geo"); ml.addWidget(vgeo["plot"], 1)
     cfg_tabs.addTab(pg_m, "Machine")
+
+    # --- PASO 2: ubicar los sensores SOBRE el dibujo ---
+    pg_sen = QtWidgets.QWidget(); snl = QtWidgets.QVBoxLayout(pg_sen)
+    snl.addWidget(QtWidgets.QLabel(
+        "<b>Ubicá los sensores sobre la máquina.</b> Elegí N°, ejes y qué mide, y "
+        "hacé <b>clic sobre el dibujo</b> — o usá <b>Ubicar por norma</b>."))
+    prow = QtWidgets.QHBoxLayout()
+    prow.addWidget(QtWidgets.QLabel("N°:"))
+    sp_num = QtWidgets.QSpinBox(); sp_num.setRange(1, 999); sp_num.setValue(1); prow.addWidget(sp_num)
+    prow.addWidget(QtWidgets.QLabel("Ejes:"))
+    cbx = QtWidgets.QCheckBox("X"); cby = QtWidgets.QCheckBox("Y"); cbz = QtWidgets.QCheckBox("Z")
+    cby.setChecked(True)
+    for w in (cbx, cby, cbz): prow.addWidget(w)
+    prow.addWidget(QtWidgets.QLabel("Mide:"))
+    cb_mtype = QtWidgets.QComboBox(); cb_mtype.addItems(MEAS_TYPES); prow.addWidget(cb_mtype)
+    prow.addSpacing(14); prow.addWidget(QtWidgets.QLabel("Modo clic:"))
+    cb_click = QtWidgets.QComboBox(); cb_click.addItems(["Colocar punto", "Mover sensor"]); prow.addWidget(cb_click)
+    prow.addWidget(QtWidgets.QLabel("Sensor:"))
+    cb_place = QtWidgets.QComboBox(); cb_place.setMinimumWidth(150); prow.addWidget(cb_place)
+    prow.addStretch(1)
+    snl.addLayout(prow)
+    nrow = QtWidgets.QHBoxLayout()
+    btn_norm = QtWidgets.QPushButton("📐 Ubicar sensores por norma (API 670 / ISO 20816)")
+    btn_norm.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
+    btn_clrpts = QtWidgets.QPushButton("🧹 Limpiar sensores")
+    nrow.addWidget(btn_norm); nrow.addWidget(btn_clrpts); nrow.addStretch(1)
+    snl.addLayout(nrow)
+    vsen = _make_view("sensors"); snl.addWidget(vsen["plot"], 1)
+    cfg_tabs.addTab(pg_sen, "Sensors")
 
     # ---------- Measurement points ----------
     pg_pts = QtWidgets.QWidget(); pl = QtWidgets.QVBoxLayout(pg_pts)
@@ -412,29 +428,30 @@ def build_app(layout: OMALayout, simulated: bool = True):
 
     def _draw_train(fit=False):
         lay = st["layout"]; az, el = _view_angles(); sel = cb_place.currentIndex()
-        m3d.set_view(lay, az, el, sel)                 # sólidos 3D + sensores + flechas
-        for t in st["_labels"]:                        # rótulos (equipos + códigos)
-            p_train.removeItem(t)
-        st["_labels"] = []
-        for c in lay.machine_components:
-            sx, sy, _ = _project((c.x0 + c.x1) / 2, 0.0, (c.y0 + c.y1) / 2, az, el)
-            t = pg.TextItem(c.display(), color="#0f172a", anchor=(0.5, 0.5))
-            t.setPos(sx, sy); st["_labels"].append(t); p_train.addItem(t)
-        for mp in lay.points:
-            if not mp.active:
-                continue
-            sx, sy, _ = _project(mp.x_norm, 0.20, mp.y_norm, az, el)
-            t = pg.TextItem(mp.code, color=NAVY, anchor=(0.5, 1.6)); t.setScale(0.85)
-            t.setPos(sx, sy); st["_labels"].append(t); p_train.addItem(t)
-        vb = p_train.getViewBox()
-        if fit:
-            vb.autoRange(padding=0.15)                 # centra y encuadra
-        else:                                          # gira → auto-CENTRA conservando el zoom
-            br = m3d.boundingRect()
-            (x0, x1), (y0, y1) = vb.viewRange()
-            hw = (x1 - x0) / 2 or 0.7; hh = (y1 - y0) / 2 or 0.5
-            cx, cy = br.center().x(), br.center().y()
-            vb.setRange(xRange=(cx - hw, cx + hw), yRange=(cy - hh, cy + hh), padding=0)
+        for v in st["_views"]:                          # renderiza en TODAS las vistas
+            plot = v["plot"]; m3 = v["m3d"]
+            m3.set_view(lay, az, el, sel)
+            for t in v["labels"]:
+                plot.removeItem(t)
+            v["labels"] = []
+            for c in lay.machine_components:
+                sx, sy, _ = _project((c.x0 + c.x1) / 2, 0.0, (c.y0 + c.y1) / 2, az, el)
+                t = pg.TextItem(c.display(), color="#0f172a", anchor=(0.5, 0.5))
+                t.setPos(sx, sy); v["labels"].append(t); plot.addItem(t)
+            for mp in lay.points:
+                if not mp.active:
+                    continue
+                sx, sy, _ = _project(mp.x_norm, 0.20, mp.y_norm, az, el)
+                t = pg.TextItem(mp.code, color=NAVY, anchor=(0.5, 1.6)); t.setScale(0.85)
+                t.setPos(sx, sy); v["labels"].append(t); plot.addItem(t)
+            vb = plot.getViewBox()
+            if fit:
+                vb.autoRange(padding=0.15)
+            else:                                        # auto-CENTRA conservando el zoom
+                br = m3.boundingRect(); (x0, x1), (y0, y1) = vb.viewRange()
+                hw = (x1 - x0) / 2 or 0.7; hh = (y1 - y0) / 2 or 0.5
+                cx, cy = br.center().x(), br.center().y()
+                vb.setRange(xRange=(cx - hw, cx + hw), yRange=(cy - hh, cy + hh), padding=0)
 
     def _next_channel():
         used = {(p.module_slot, p.channel_index) for p in st["layout"].points}
@@ -444,15 +461,20 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     return slot, ch
         return 8, 3
 
-    def _on_train_click(ev):
+    def _on_click(ev, plot, kind):
         try:
             if ev.button() != QtCore.Qt.LeftButton:
                 return
-            pt = p_train.getViewBox().mapSceneToView(ev.scenePos())
+            pt = plot.getViewBox().mapSceneToView(ev.scenePos())
             az, el = _view_angles()
             x, z = _unproject(float(pt.x()), float(pt.y()), az, el)   # → eje (X) y altura (Z)
-            lay = st["layout"]; mode = cb_click.currentText()
-            if mode == "Colocar punto":
+            lay = st["layout"]
+            if kind == "geo":                            # Machine: mover el equipo elegido
+                i = cb_comp.currentIndex(); comps = lay.machine_components
+                if 0 <= i < len(comps):
+                    c = comps[i]; w = c.x1 - c.x0; h = c.y1 - c.y0
+                    c.x0 = x - w / 2; c.x1 = x + w / 2; c.y0 = z - h / 2; c.y1 = z + h / 2
+            elif cb_click.currentText() == "Colocar punto":
                 axes = [a for a, cb in (("X", cbx), ("Y", cby), ("Z", cbz)) if cb.isChecked()] or ["Y"]
                 comp = _comp_at(x, z)
                 for a in axes:
@@ -462,22 +484,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
                         dof="+" + a, module_slot=slot, channel_index=ch,
                         number=sp_num.value(), meas_type=cb_mtype.currentText(),
                         x_norm=x, y_norm=z))
-                sp_num.setValue(sp_num.value() + 1)
-                _fill_points()
-            elif mode == "Mover sensor":
+                sp_num.setValue(sp_num.value() + 1); _fill_points()
+            else:                                        # Mover sensor
                 i = cb_place.currentIndex()
                 if 0 <= i < len(lay.points):
                     lay.points[i].x_norm = x; lay.points[i].y_norm = z
-            elif mode == "Mover equipo":
-                if lay.machine_components:
-                    c = min(lay.machine_components,
-                            key=lambda k: abs((k.x0 + k.x1) / 2 - x) + abs((k.y0 + k.y1) / 2 - z))
-                    w = (c.x1 - c.x0); h = (c.y1 - c.y0)
-                    c.x0 = x - w / 2; c.x1 = x + w / 2; c.y0 = z - h / 2; c.y1 = z + h / 2
             _draw_train()
         except Exception:  # noqa: BLE001
             pass
-    p_train.scene().sigMouseClicked.connect(_on_train_click)
 
     def _comp_at(x, y):
         """Nombre del equipo cuya caja contiene (x,y); si ninguno, el más cercano."""
@@ -555,7 +569,11 @@ def build_app(layout: OMALayout, simulated: bool = True):
         st["az"] = (st["az"] + dx * 0.4) % 360.0        # yaw completo (todos los lados)
         st["el"] = float(np.clip(st["el"] - dy * 0.4, 8.0, 88.0))  # pitch amplio
         _draw_train(fit=False)
-    p_train.getViewBox().rotate.connect(_on_rotate)
+    # (el giro/clic de cada vista ya está conectado en _make_view)
+
+    def _clear_points():
+        st["layout"].points = []; _fill_points(); _draw_train(fit=True)
+    btn_clrpts.clicked.connect(_clear_points)
 
     # editor de tamaño del equipo seleccionado
     def _sync_comp_combo():
