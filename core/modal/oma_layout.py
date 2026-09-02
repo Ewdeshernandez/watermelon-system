@@ -69,11 +69,21 @@ class MeasPoint:
 
 @dataclass
 class OMALayout:
-    """Configuración completa del ensayo OMA (máquina + puntos + adquisición)."""
+    """Configuración completa del ensayo modal (máquina del cliente + puntos +
+    adquisición). Sirve para EMA y OMA."""
     name: str = "Tren Motor-Bomba"
+    # --- ficha del activo del cliente ---
+    machine_type: str = ""               # ej. "Motor-Bomba centrífuga"
+    tag: str = ""                        # tag / placa
+    client: str = ""                     # cliente
+    location: str = ""                   # planta / ubicación
     components: List[str] = field(default_factory=lambda: list(DEFAULT_COMPONENTS))
     points: List[MeasPoint] = field(default_factory=list)
+    # --- adquisición (compartida EMA/OMA) ---
+    test_type: str = "OMA"               # "EMA" | "OMA"
     fs_hz: float = 1280.0
+    block_size: int = 4096               # EMA: muestras por golpe
+    fmax_hz: float = 200.0
     duration_s: float = 300.0            # OMA: registros largos
     chassis: str = "cDAQ-9178"
     module_model: str = "NI 9234"
