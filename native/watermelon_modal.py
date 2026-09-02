@@ -521,9 +521,11 @@ def build_app(layout: OMALayout, simulated: bool = True):
     tbl_om.setHorizontalHeaderLabels(["Freq (Hz)", "Damping (%)", "Complexity (%)", "Clase"])
     tbl_om.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_om.verticalHeader().setVisible(False)
     tbl_om.setMaximumWidth(520)
-    p_svd = pg.PlotWidget(); p_svd.setBackground("w"); p_svd.setLabel("left", "dB"); p_svd.setLabel("bottom", "Frequency", "Hz")
-    p_svd.setTitle("Valores singulares (FDD)", color=NAVY); p_svd.showGrid(x=True, y=True, alpha=0.3)
-    svd_curve = p_svd.plot([], [], pen=pg.mkPen(NAVY, width=1.6))
+    p_svd = pg.PlotWidget(); p_svd.setBackground("w"); p_svd.setLabel("left", "dB | (1 g)² / Hz")
+    p_svd.setLabel("bottom", "Frequency", "Hz")
+    p_svd.setTitle("Valores singulares de las densidades espectrales — todos los canales", color=NAVY)
+    p_svd.showGrid(x=True, y=True, alpha=0.3)
+    p_svd.addLegend(offset=(-10, 10))
     ocs.addWidget(tbl_om, 2); ocs.addWidget(p_svd, 3); cl2.addLayout(ocs, 1)
     lbl_ost = QtWidgets.QLabel(""); cl2.addWidget(lbl_ost)
     tabs.addTab(pg_oc, "OMA capture")
@@ -548,7 +550,20 @@ def build_app(layout: OMALayout, simulated: bool = True):
         freqs = fdd.frequencies_hz; sv = np.asarray(fdd.singular_values)
         if sv.ndim == 1: sv = sv[None, :]
         band = freqs <= fmax
-        svd_curve.setData(freqs[band], 10 * np.log10(np.maximum(sv[0][band], 1e-30)))
+        # TODOS los valores singulares (SV1..SVn): SV1..4 en colores (ARTeMIS), resto gris tenue
+        p_svd.clear()
+        _svcol = ["#2563eb", "#dc2626", "#16a34a", "#9ca3af"]
+        for i in range(sv.shape[0]):
+            col = _svcol[i] if i < 4 else "#dbe2ec"
+            wdt = 1.7 if i == 0 else (1.0 if i < 4 else 0.5)
+            nm = f"SV{i+1}" if i < 4 else None
+            p_svd.plot(freqs[band], 10 * np.log10(np.maximum(sv[i][band], 1e-30)),
+                       pen=pg.mkPen(col, width=wdt), name=nm)
+        for m in fdd.modes:                              # modos marcados sobre SV1
+            j = int(np.argmin(np.abs(freqs - m.natural_frequency_hz)))
+            p_svd.addItem(pg.ScatterPlotItem([m.natural_frequency_hz],
+                          [10 * np.log10(max(sv[0][j], 1e-30))], size=10, symbol="o",
+                          pen=pg.mkPen(RED, width=2), brush=pg.mkBrush(255, 255, 255, 0)))
         tbl_om.setRowCount(0)
         for m in fdd.modes:
             rr = tbl_om.rowCount(); tbl_om.insertRow(rr)
