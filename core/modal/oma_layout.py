@@ -21,9 +21,12 @@ from typing import Dict, List, Optional, Sequence
 # Componentes típicos de un tren motor-bomba con skid y tuberías
 DEFAULT_COMPONENTS = ["Motor", "Bomba", "Skid", "Tubería succión", "Tubería descarga"]
 
-# Referencias de posición estándar (editable). LL=lado libre (NDE), LA=lado acople (DE)
-POSITION_REFS = ["LL (lado libre)", "LA (lado acople)", "Centro", "Superior", "Inferior",
-                 "Succión", "Descarga", "Base", "Brida"]
+# Referencias de posición estándar (editable). NDE=lado libre, DE=lado acople (API 670/ISO 20816)
+POSITION_REFS = ["NDE (lado libre)", "DE (lado acople)", "LL (lado libre)", "LA (lado acople)",
+                 "Centro", "Superior", "Inferior", "Succión", "Descarga", "Base", "Brida"]
+
+# Equipos rotativos (llevan cojinetes NDE/DE) — para la ubicación por norma
+ROTATING_KINDS = ["Motor", "Turbina", "Bomba", "Generador", "Gear box"]
 
 # Direcciones de medición (grados de libertad)
 DOFS = ["+X", "+Y", "+Z", "-X", "-Y", "-Z", "H", "V", "A"]  # H=horizontal V=vertical A=axial
@@ -189,14 +192,44 @@ class OMALayout:
 
 
 def default_components() -> List[MachineComponent]:
-    """Tren en línea: motor → acople → bomba sobre skid + tuberías (sólidos 3D)."""
+    """Tren en línea: motor → acople → bomba sobre skid + tuberías (sólidos 3D).
+    Cajas ALARGADAS (proporción real de máquina), no cuadradas."""
     return [
-        MachineComponent("Motor", "Motor", 0.03, 0.23, -0.05, 0.30, depth=0.16),
-        MachineComponent("Acople", "Acople", 0.23, 0.29, 0.02, 0.18, depth=0.08),
-        MachineComponent("Bomba", "Bomba", 0.29, 0.53, -0.05, 0.30, depth=0.16),
-        MachineComponent("Tubería succión", "Tub. succión", 0.55, 0.92, -0.02, 0.06, depth=0.05),
-        MachineComponent("Tubería descarga", "Tub. descarga", 0.55, 0.74, 0.06, 0.44, depth=0.05),
+        MachineComponent("Motor", "Motor", 0.03, 0.34, 0.00, 0.19, depth=0.11),
+        MachineComponent("Acople", "Acople", 0.34, 0.40, 0.05, 0.14, depth=0.06),
+        MachineComponent("Bomba", "Bomba", 0.40, 0.66, 0.00, 0.17, depth=0.10),
+        MachineComponent("Tubería succión", "Tub. succión", 0.66, 0.98, 0.02, 0.08, depth=0.04),
+        MachineComponent("Tubería descarga", "Tub. descarga", 0.66, 0.82, 0.08, 0.42, depth=0.04),
     ]
+
+
+def auto_place_by_norm(layout: "OMALayout",
+                       sensitivity: float = DEFAULT_SENSITIVITY_MV_PER_G) -> None:
+    """Ubica los puntos según norma (API 670 / ISO 20816-1): en cada equipo
+    rotativo, cojinetes NDE (lado libre) y DE (lado acople), con X/Y/Z, numerados
+    de conductor a conducido. Modifica layout.points in-place."""
+    rot = sorted([c for c in layout.machine_components if c.kind in ROTATING_KINDS],
+                 key=lambda c: c.x0)
+    pts: List[MeasPoint] = []; number = 1; n = 0
+    for j, c in enumerate(rot):
+        if j == 0:
+            ends = [(c.x0, "NDE (lado libre)"), (c.x1, "DE (lado acople)")]
+        elif j == len(rot) - 1:
+            ends = [(c.x0, "DE (lado acople)"), (c.x1, "NDE (lado libre)")]
+        else:
+            ends = [(c.x0, "DE (lado acople)"), (c.x1, "DE (lado acople)")]
+        ztop = c.y1
+        for (xe, ref) in ends:
+            for ax, off in (("X", 0.0), ("Y", 0.035), ("Z", -0.035)):
+                slot = n // 4 + 1; ch = n % 4
+                pts.append(MeasPoint(
+                    idx=n + 1, component=c.kind, position_ref=ref, dof="+" + ax,
+                    module_slot=slot, channel_index=ch, sensitivity_mv_per_g=sensitivity,
+                    number=number, meas_type="A", reference_sensor=(number == 1 and ax == "X"),
+                    x_norm=float(xe), y_norm=float(ztop + off)))
+                n += 1
+            number += 1
+    layout.points = pts
 
 
 # =====================================================================

@@ -148,6 +148,18 @@ class Machine3DItem(pg.GraphicsObject):
             painter.drawEllipse(QtCore.QPointF(sx, sy), r, r)
 
 
+class OrbitViewBox(pg.ViewBox):
+    """ViewBox 3D: arrastre IZQUIERDO = girar; rueda = zoom; arrastre DERECHO = mover."""
+    rotate = QtCore.Signal(float, float)
+
+    def mouseDragEvent(self, ev, axis=None):
+        if ev.button() == QtCore.Qt.LeftButton:
+            d = ev.pos() - ev.lastPos()
+            self.rotate.emit(float(d.x()), float(d.y())); ev.accept()
+        else:
+            super().mouseDragEvent(ev, axis)
+
+
 def _stylesheet() -> str:
     return f"""
     QWidget {{ font-family: 'Segoe UI', Arial; font-size: 12px; color: {NAVY}; }}
@@ -185,7 +197,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
 
     st = {"layout": layout, "acc": FRFAccumulator(layout.fs_hz, layout.block_size),
           "pending": None, "target": 5, "oma_fdd": None, "conditions": [],
-          "rng": np.random.default_rng()}
+          "az": 50.0, "el": 28.0, "rng": np.random.default_rng()}
 
     tb = win.addToolBar("main"); tb.setMovable(False)
     tb.setStyleSheet(f"QToolBar {{ background: {NAVY}; padding: 6px 12px; }}")
@@ -259,18 +271,24 @@ def build_app(layout: OMALayout, simulated: bool = True):
     prow.addWidget(QtWidgets.QLabel("Mover sensor:"))
     cb_place = QtWidgets.QComboBox(); cb_place.setMinimumWidth(150); prow.addWidget(cb_place)
     ml.addLayout(prow)
-    # giro del 3D (azimut / elevación) — sólido rotable sin OpenGL
-    grow = QtWidgets.QHBoxLayout()
-    grow.addWidget(QtWidgets.QLabel("Girar:"))
-    sl_az = QtWidgets.QSlider(QtCore.Qt.Horizontal); sl_az.setRange(-180, 180); sl_az.setValue(50)
-    sl_el = QtWidgets.QSlider(QtCore.Qt.Horizontal); sl_el.setRange(5, 85); sl_el.setValue(28)
-    grow.addWidget(QtWidgets.QLabel("Azimut")); grow.addWidget(sl_az, 1)
-    grow.addWidget(QtWidgets.QLabel("Elevación")); grow.addWidget(sl_el, 1)
-    btn_iso = QtWidgets.QPushButton("Vista ISO"); grow.addWidget(btn_iso)
-    ml.addLayout(grow)
-    p_train = pg.PlotWidget(); p_train.setBackground("w"); p_train.setAspectLocked(True)
+    # editor de TAMAÑO del equipo seleccionado (largo / alto / ancho)
+    drow = QtWidgets.QHBoxLayout()
+    drow.addWidget(QtWidgets.QLabel("<b>Tamaño equipo:</b>"))
+    cb_comp = QtWidgets.QComboBox(); cb_comp.setMinimumWidth(140); drow.addWidget(cb_comp)
+    sp_len = QtWidgets.QDoubleSpinBox(); sp_len.setRange(0.02, 1.0); sp_len.setSingleStep(0.02); sp_len.setDecimals(2)
+    sp_hei = QtWidgets.QDoubleSpinBox(); sp_hei.setRange(0.02, 0.8); sp_hei.setSingleStep(0.02); sp_hei.setDecimals(2)
+    sp_wid = QtWidgets.QDoubleSpinBox(); sp_wid.setRange(0.02, 0.6); sp_wid.setSingleStep(0.02); sp_wid.setDecimals(2)
+    for lab, w in (("Largo", sp_len), ("Alto", sp_hei), ("Ancho", sp_wid)):
+        drow.addWidget(QtWidgets.QLabel(lab)); drow.addWidget(w)
+    btn_norm = QtWidgets.QPushButton("📐 Ubicar sensores por norma (API 670 / ISO 20816)")
+    btn_norm.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
+    drow.addStretch(1); drow.addWidget(btn_norm)
+    ml.addLayout(drow)
+    ml.addWidget(QtWidgets.QLabel(
+        "<i style='color:#64748b'>🖱️ Arrastre izquierdo = girar · rueda = zoom · arrastre derecho = mover. "
+        "Clic (según 'Modo clic') = colocar/mover.</i>"))
+    p_train = pg.PlotWidget(viewBox=OrbitViewBox()); p_train.setBackground("w"); p_train.setAspectLocked(True)
     p_train.hideAxis("left"); p_train.hideAxis("bottom"); p_train.setMenuEnabled(False)
-    p_train.getViewBox().setMouseEnabled(x=False, y=False)
     ml.addWidget(p_train, 1)
     m3d = Machine3DItem(); p_train.addItem(m3d)
     st["_labels"] = []
@@ -387,9 +405,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
         return _COMP_COLOR.get(kind, "#475569")
 
     def _view_angles():
-        return np.radians(sl_az.value()), np.radians(sl_el.value())
+        return np.radians(st["az"]), np.radians(st["el"])
 
-    def _draw_train():
+    def _draw_train(fit=False):
         lay = st["layout"]; az, el = _view_angles(); sel = cb_place.currentIndex()
         m3d.set_view(lay, az, el, sel)                 # sólidos 3D + sensores + flechas
         for t in st["_labels"]:                        # rótulos (equipos + códigos)
@@ -405,7 +423,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
             sx, sy, _ = _project(mp.x_norm, 0.20, mp.y_norm, az, el)
             t = pg.TextItem(mp.code, color=NAVY, anchor=(0.5, 1.6)); t.setScale(0.85)
             t.setPos(sx, sy); st["_labels"].append(t); p_train.addItem(t)
-        p_train.getViewBox().autoRange(padding=0.15)
+        if fit:
+            p_train.getViewBox().autoRange(padding=0.15)
 
     def _next_channel():
         used = {(p.module_slot, p.channel_index) for p in st["layout"].points}
@@ -465,25 +484,29 @@ def build_app(layout: OMALayout, simulated: bool = True):
         lay = st["layout"]; kind = cb_kind.currentText()
         n = len([c for c in lay.machine_components if not c.kind.startswith("Tubería")])
         if kind.startswith("Tubería"):
-            y0, y1 = (-0.16, -0.06) if "succ" in kind else (0.06, 0.44)
-            x0 = 0.55 + 0.02 * len(lay.machine_components)
-            lay.machine_components.append(MachineComponent(kind, kind.replace("Tubería", "Tub."), x0, x0 + 0.30, y0, y1))
+            y0, y1 = (0.02, 0.08) if "succ" in kind else (0.08, 0.42)
+            x0 = 0.66 + 0.02 * len(lay.machine_components)
+            lay.machine_components.append(MachineComponent(kind, kind.replace("Tubería", "Tub."),
+                                                           x0, x0 + 0.30, y0, y1, depth=0.04))
+        elif kind == "Acople":
+            x0 = 0.34 + 0.30 * n
+            lay.machine_components.append(MachineComponent(kind, kind, x0, x0 + 0.06, 0.05, 0.14, depth=0.06))
         else:
-            x0 = 0.03 + 0.26 * n
-            lay.machine_components.append(MachineComponent(kind, kind, x0, x0 + 0.20, -0.30, 0.30))
-        _draw_train()
+            x0 = 0.03 + 0.34 * n                      # cajas alargadas
+            lay.machine_components.append(MachineComponent(kind, kind, x0, x0 + 0.30, 0.00, 0.19, depth=0.11))
+        _sync_comp_combo(); _draw_train(fit=True)
 
     def _del_component():
         lay = st["layout"]
         if lay.machine_components:
             lay.machine_components.pop()
-            _draw_train()
+            _sync_comp_combo(); _draw_train(fit=True)
     btn_addcomp.clicked.connect(_add_component); btn_delcomp.clicked.connect(_del_component)
 
     def _validate():
         _table_to_layout()
         errs = st["layout"].validate()
-        _sync_place_combo(); _draw_train()
+        _sync_place_combo(); _sync_comp_combo(); _draw_train(fit=True)
         if errs:
             lbl_val.setText("⚠ " + " · ".join(errs[:3])); lbl_val.setStyleSheet(f"color:{RED};font-weight:700;")
         else:
@@ -517,9 +540,55 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_tmpl.clicked.connect(_load_tmpl); btn_addp.clicked.connect(_add_point)
     btn_delp.clicked.connect(_del_point); btn_val.clicked.connect(_validate)
     cb_place.currentIndexChanged.connect(lambda *_: _draw_train())
-    sl_az.valueChanged.connect(lambda *_: _draw_train())
-    sl_el.valueChanged.connect(lambda *_: _draw_train())
-    btn_iso.clicked.connect(lambda: (sl_az.setValue(50), sl_el.setValue(28), _draw_train()))
+
+    def _on_rotate(dx, dy):
+        st["az"] = (st["az"] + dx * 0.4) % 360.0
+        st["el"] = float(np.clip(st["el"] - dy * 0.4, 5.0, 85.0))
+        _draw_train(fit=False)
+    p_train.getViewBox().rotate.connect(_on_rotate)
+
+    # editor de tamaño del equipo seleccionado
+    def _sync_comp_combo():
+        cur = cb_comp.currentIndex()
+        cb_comp.blockSignals(True); cb_comp.clear()
+        cb_comp.addItems([c.display() for c in st["layout"].machine_components])
+        if 0 <= cur < cb_comp.count():
+            cb_comp.setCurrentIndex(cur)
+        cb_comp.blockSignals(False)
+        _load_comp_dims()
+
+    def _load_comp_dims():
+        i = cb_comp.currentIndex(); comps = st["layout"].machine_components
+        if not (0 <= i < len(comps)):
+            return
+        c = comps[i]
+        for sp in (sp_len, sp_hei, sp_wid): sp.blockSignals(True)
+        sp_len.setValue(round(c.x1 - c.x0, 2)); sp_hei.setValue(round(c.y1 - c.y0, 2))
+        sp_wid.setValue(round(2 * c.depth, 2))
+        for sp in (sp_len, sp_hei, sp_wid): sp.blockSignals(False)
+
+    def _apply_comp_dims(*_):
+        i = cb_comp.currentIndex(); comps = st["layout"].machine_components
+        if not (0 <= i < len(comps)):
+            return
+        c = comps[i]
+        cx = (c.x0 + c.x1) / 2; cz = (c.y0 + c.y1) / 2
+        L = sp_len.value(); H = sp_hei.value(); W = sp_wid.value()
+        c.x0 = cx - L / 2; c.x1 = cx + L / 2; c.y0 = cz - H / 2; c.y1 = cz + H / 2; c.depth = W / 2
+        _draw_train(fit=False)
+
+    cb_comp.currentIndexChanged.connect(lambda *_: _load_comp_dims())
+    for sp in (sp_len, sp_hei, sp_wid):
+        sp.valueChanged.connect(_apply_comp_dims)
+
+    def _place_by_norm():
+        from core.modal.oma_layout import auto_place_by_norm
+        auto_place_by_norm(st["layout"])
+        _fill_points(); _draw_train(fit=True)
+        QtWidgets.QMessageBox.information(win, "Norma",
+            f"✅ {st['layout'].n_channels()} sensores ubicados por norma (API 670 / ISO 20816):\n"
+            "cojinetes NDE (lado libre) y DE (lado acople), X/Y/Z, de conductor a conducido.")
+    btn_norm.clicked.connect(_place_by_norm)
     sp_fs.valueChanged.connect(_upd_df); cb_blk.currentTextChanged.connect(_upd_df); sp_fmax.valueChanged.connect(_upd_df)
     _fill_points(); _validate(); _upd_df()
 
