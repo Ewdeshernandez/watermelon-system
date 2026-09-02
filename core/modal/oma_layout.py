@@ -28,7 +28,29 @@ POSITION_REFS = ["LL (lado libre)", "LA (lado acople)", "Centro", "Superior", "I
 # Direcciones de medición (grados de libertad)
 DOFS = ["+X", "+Y", "+Z", "-X", "-Y", "-Z", "H", "V", "A"]  # H=horizontal V=vertical A=axial
 
+# Tipo de medida por punto (ISO 7626): A=aceleración, V=velocidad, D=desplazamiento
+MEAS_TYPES = ["A", "V", "D"]
+MEAS_TYPE_NAME = {"A": "Aceleración", "V": "Velocidad", "D": "Desplazamiento"}
+
+# Tipos de equipo que se pueden dibujar (cajas sobre el skid)
+COMPONENT_KINDS = ["Motor", "Turbina", "Bomba", "Generador", "Gear box",
+                   "Tubería succión", "Tubería descarga"]
+
 DEFAULT_SENSITIVITY_MV_PER_G = 100.0
+
+
+@dataclass
+class MachineComponent:
+    """Un equipo dibujado como caja sobre el skid (para armar la máquina)."""
+    kind: str                    # Motor / Turbina / Bomba / Generador / Gear box / Tubería …
+    label: str = ""              # nombre visible (por defecto = kind)
+    x0: float = 0.0              # posición/tamaño a lo largo del tren (editable "a medida")
+    x1: float = 0.18
+    y0: float = -0.30
+    y1: float = 0.30
+
+    def display(self) -> str:
+        return self.label or self.kind
 
 
 @dataclass
@@ -45,9 +67,22 @@ class MeasPoint:
     coupling: str = "IEPE"
     reference_sensor: bool = False   # ¿es sensor de referencia (fijo) del OMA?
     active: bool = True
+    number: int = 0               # número de punto para la etiqueta (1,2,3…); 0 = usa idx
+    meas_type: str = "A"          # A=aceleración, V=velocidad, D=desplazamiento
     # posición esquemática en el dibujo de la máquina (0..1 a lo largo del tren, y por DOF)
     x_norm: float = 0.0
     y_norm: float = 0.0
+
+    @property
+    def axis(self) -> str:
+        """Eje sin signo: +Y->Y, -X->X …"""
+        return (self.dof or "").replace("+", "").replace("-", "").strip() or "Y"
+
+    @property
+    def code(self) -> str:
+        """Etiqueta tipo instrumento: número + eje + tipo, ej. '1XA' (punto 1, X, aceleración)."""
+        n = self.number or self.idx
+        return f"{n}{self.axis}{self.meas_type}"
 
     @property
     def bnc(self) -> int:
@@ -78,9 +113,11 @@ class OMALayout:
     client: str = ""                     # cliente
     location: str = ""                   # planta / ubicación
     components: List[str] = field(default_factory=lambda: list(DEFAULT_COMPONENTS))
+    machine_components: List[MachineComponent] = field(default_factory=list)  # dibujo (cajas)
     points: List[MeasPoint] = field(default_factory=list)
     # --- adquisición (compartida EMA/OMA) ---
-    test_type: str = "OMA"               # "EMA" | "OMA"
+    test_modes: List[str] = field(default_factory=lambda: ["OMA"])  # ["EMA"], ["OMA"] o ambos
+    test_type: str = "OMA"               # (compat) modo principal
     fs_hz: float = 1280.0
     block_size: int = 4096               # EMA: muestras por golpe
     fmax_hz: float = 200.0
@@ -94,7 +131,17 @@ class OMALayout:
         return [p for p in self.points if p.active]
 
     def channel_names(self) -> List[str]:
-        return [p.label for p in self.active_points()]
+        # usa el código instrumento (1XA…); de-duplica si hace falta
+        names: List[str] = []
+        seen: dict = {}
+        for p in self.active_points():
+            c = p.code
+            if c in seen:
+                seen[c] += 1; c = f"{c}_{seen[c]}"
+            else:
+                seen[c] = 0
+            names.append(c)
+        return names
 
     def n_channels(self) -> int:
         return len(self.active_points())
@@ -130,11 +177,24 @@ class OMALayout:
     def from_dict(d: dict) -> "OMALayout":
         from dataclasses import fields as _f
         d = dict(d or {})
-        ok = {f.name for f in _f(MeasPoint)}
-        d["points"] = [MeasPoint(**{k: v for k, v in (p or {}).items() if k in ok})
+        okp = {f.name for f in _f(MeasPoint)}
+        d["points"] = [MeasPoint(**{k: v for k, v in (p or {}).items() if k in okp})
                        for p in d.get("points", [])]
+        okc = {f.name for f in _f(MachineComponent)}
+        d["machine_components"] = [MachineComponent(**{k: v for k, v in (c or {}).items() if k in okc})
+                                   for c in d.get("machine_components", [])]
         okl = {f.name for f in _f(OMALayout)}
         return OMALayout(**{k: v for k, v in d.items() if k in okl})
+
+
+def default_components() -> List[MachineComponent]:
+    """Cajas por defecto: motor + bomba sobre skid + tuberías succión/descarga."""
+    return [
+        MachineComponent("Motor", "Motor", 0.03, 0.23, -0.30, 0.30),
+        MachineComponent("Bomba", "Bomba", 0.29, 0.53, -0.30, 0.30),
+        MachineComponent("Tubería succión", "Tub. succión", 0.55, 0.90, -0.16, -0.06),
+        MachineComponent("Tubería descarga", "Tub. descarga", 0.55, 0.74, 0.06, 0.44),
+    ]
 
 
 # =====================================================================
@@ -162,6 +222,7 @@ def default_24ch_layout(name: str = "Tren Motor-Bomba P-762007",
     points: List[MeasPoint] = []
     n = 0
     for comp, ref, dofs, x in plan:
+        pt_number = len({p.component + p.position_ref for p in points}) + 1
         for d in dofs:
             if n >= 24:
                 break
@@ -171,7 +232,8 @@ def default_24ch_layout(name: str = "Tren Motor-Bomba P-762007",
             points.append(MeasPoint(
                 idx=n + 1, component=comp, position_ref=ref, dof=d,
                 module_slot=slot, channel_index=ch, sensitivity_mv_per_g=sensitivity,
+                number=pt_number, meas_type="A",       # acelerómetros → aceleración
                 x_norm=x, y_norm=yv,
-                reference_sensor=(n in (0, 4))))   # 2 sensores de referencia fijos
+                reference_sensor=(n in (0, 4))))
             n += 1
-    return OMALayout(name=name, points=points)
+    return OMALayout(name=name, points=points, machine_components=default_components())
