@@ -47,8 +47,105 @@ from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
-_COMP_COLOR = {"Motor": "#2563eb", "Bomba": "#16a34a", "Skid": "#a16207",
+_COMP_COLOR = {"Motor": "#2563eb", "Acople": "#334155", "Turbina": "#0ea5e9",
+               "Bomba": "#16a34a", "Generador": "#7c3aed", "Gear box": "#b45309", "Skid": "#a16207",
                "Tubería succión": "#0891b2", "Tubería descarga": "#7c3aed"}
+
+
+# ---------- proyección isométrica (3D → 2D) sin OpenGL (robusto en el .exe) ----------
+def _project(wx, wy, wz, az, el):
+    ca, sa = np.cos(az), np.sin(az); ce, se = np.cos(el), np.sin(el)
+    x1 = wx * ca - wy * sa
+    y1 = wx * sa + wy * ca
+    sx = x1
+    sy = y1 * se + wz * ce
+    depth = y1 * ce - wz * se          # para ordenar caras (painter)
+    return sx, sy, depth
+
+
+def _unproject(sx, sy, az, el):
+    """Inversa asumiendo el plano wy=0 (para colocar puntos con el clic)."""
+    ca, sa = np.cos(az), np.sin(az); ce, se = np.cos(el), np.sin(el)
+    wx = sx / ca if abs(ca) > 1e-6 else sx
+    wz = (sy - wx * sa * se) / ce if abs(ce) > 1e-6 else sy
+    return wx, wz
+
+
+def _cuboid_faces(c):
+    """6 caras del cuboide (x∈[x0,x1] eje, z∈[y0,y1] alto, y∈±depth prof.)."""
+    x0, x1, z0, z1, d = c.x0, c.x1, c.y0, c.y1, c.depth
+    P = [(x0, -d, z0), (x1, -d, z0), (x1, d, z0), (x0, d, z0),
+         (x0, -d, z1), (x1, -d, z1), (x1, d, z1), (x0, d, z1)]
+    F = [(0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4), (3, 2, 6, 7), (0, 3, 7, 4), (1, 2, 6, 5)]
+    return [[P[i] for i in f] for f in F]
+
+
+class Machine3DItem(pg.GraphicsObject):
+    """Dibuja los equipos como sólidos 3D (caras sombreadas) + sensores + flechas DOF."""
+    def __init__(self):
+        super().__init__()
+        self.layout = None; self.az = 0.9; self.el = 0.5; self.sel = -1
+        self._rect = QtCore.QRectF(-1, -1, 2, 2)
+
+    def set_view(self, layout, az, el, sel):
+        self.layout = layout; self.az = az; self.el = el; self.sel = sel
+        self.prepareGeometryChange(); self._recompute(); self.update()
+
+    def _recompute(self):
+        xs, ys = [0.0], [0.0]
+        if self.layout:
+            for c in self.layout.machine_components:
+                for f in _cuboid_faces(c):
+                    for (wx, wy, wz) in f:
+                        sx, sy, _ = _project(wx, wy, wz, self.az, self.el)
+                        xs.append(sx); ys.append(sy)
+        x0, x1 = min(xs), max(xs); y0, y1 = min(ys), max(ys)
+        self._rect = QtCore.QRectF(x0, y0, max(0.1, x1 - x0), max(0.1, y1 - y0))
+
+    def boundingRect(self):
+        return self._rect
+
+    def paint(self, painter, *args):
+        if not self.layout:
+            return
+        painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        light = np.array([0.4, -0.7, 0.6]); light /= np.linalg.norm(light)
+        faces = []
+        for c in self.layout.machine_components:
+            base = QtGui.QColor(_COMP_COLOR.get(c.kind, "#64748b"))
+            for f in _cuboid_faces(c):
+                pw = [_project(*p, self.az, self.el) for p in f]
+                dep = float(np.mean([p[2] for p in pw]))
+                v1 = np.subtract(f[1], f[0]); v2 = np.subtract(f[2], f[0])
+                nrm = np.cross(v1, v2); nn = np.linalg.norm(nrm)
+                shade = 0.55 + 0.45 * abs(float(np.dot(nrm / nn, light))) if nn > 0 else 0.7
+                faces.append((dep, pw, base, shade))
+        faces.sort(key=lambda t: t[0])                 # painter: lejos → cerca
+        for dep, pw, base, shade in faces:
+            col = QtGui.QColor(int(base.red() * shade), int(base.green() * shade),
+                               int(base.blue() * shade))
+            poly = QtGui.QPolygonF([QtCore.QPointF(p[0], p[1]) for p in pw])
+            painter.setBrush(QtGui.QBrush(col))
+            pen = QtGui.QPen(QtGui.QColor("#1e293b")); pen.setCosmetic(True); pen.setWidthF(1.0)
+            painter.setPen(pen); painter.drawPolygon(poly)
+        # sensores + flechas DOF
+        for i, mp in enumerate(self.layout.points):
+            if not mp.active:
+                continue
+            wy = 0.20                                  # al frente, visible
+            sx, sy, _ = _project(mp.x_norm, wy, mp.y_norm, self.az, self.el)
+            d = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}.get(mp.axis, (0, 0, 1))
+            sg = -1.0 if mp.dof.startswith("-") else 1.0
+            tx, ty, _ = _project(mp.x_norm + sg * 0.09 * d[0], wy + sg * 0.09 * d[1],
+                                 mp.y_norm + sg * 0.09 * d[2], self.az, self.el)
+            arrow = QtGui.QPen(QtGui.QColor(GREEN)); arrow.setCosmetic(True); arrow.setWidthF(2.2)
+            painter.setPen(arrow); painter.drawLine(QtCore.QPointF(sx, sy), QtCore.QPointF(tx, ty))
+            col = QtGui.QColor(_COMP_COLOR.get(mp.component, "#475569"))
+            r = 0.018 if i == self.sel else (0.014 if mp.reference_sensor else 0.010)
+            painter.setBrush(QtGui.QBrush(col))
+            pen = QtGui.QPen(QtGui.QColor(RED if i == self.sel else "#ffffff"))
+            pen.setCosmetic(True); pen.setWidthF(2.0 if i == self.sel else 1.2); painter.setPen(pen)
+            painter.drawEllipse(QtCore.QPointF(sx, sy), r, r)
 
 
 def _stylesheet() -> str:
@@ -162,10 +259,21 @@ def build_app(layout: OMALayout, simulated: bool = True):
     prow.addWidget(QtWidgets.QLabel("Mover sensor:"))
     cb_place = QtWidgets.QComboBox(); cb_place.setMinimumWidth(150); prow.addWidget(cb_place)
     ml.addLayout(prow)
+    # giro del 3D (azimut / elevación) — sólido rotable sin OpenGL
+    grow = QtWidgets.QHBoxLayout()
+    grow.addWidget(QtWidgets.QLabel("Girar:"))
+    sl_az = QtWidgets.QSlider(QtCore.Qt.Horizontal); sl_az.setRange(-180, 180); sl_az.setValue(50)
+    sl_el = QtWidgets.QSlider(QtCore.Qt.Horizontal); sl_el.setRange(5, 85); sl_el.setValue(28)
+    grow.addWidget(QtWidgets.QLabel("Azimut")); grow.addWidget(sl_az, 1)
+    grow.addWidget(QtWidgets.QLabel("Elevación")); grow.addWidget(sl_el, 1)
+    btn_iso = QtWidgets.QPushButton("Vista ISO"); grow.addWidget(btn_iso)
+    ml.addLayout(grow)
     p_train = pg.PlotWidget(); p_train.setBackground("w"); p_train.setAspectLocked(True)
     p_train.hideAxis("left"); p_train.hideAxis("bottom"); p_train.setMenuEnabled(False)
     p_train.getViewBox().setMouseEnabled(x=False, y=False)
     ml.addWidget(p_train, 1)
+    m3d = Machine3DItem(); p_train.addItem(m3d)
+    st["_labels"] = []
     cfg_tabs.addTab(pg_m, "Machine")
 
     # ---------- Measurement points ----------
@@ -278,34 +386,26 @@ def build_app(layout: OMALayout, simulated: bool = True):
             return _COMP_COLOR["Tubería succión"] if "succ" in kind else _COMP_COLOR["Tubería descarga"]
         return _COMP_COLOR.get(kind, "#475569")
 
+    def _view_angles():
+        return np.radians(sl_az.value()), np.radians(sl_el.value())
+
     def _draw_train():
-        p_train.clear()
-        lay = st["layout"]
-        # skid base
-        p_train.plot([0.0, 1.0, 1.0, 0.0, 0.0], [-0.62, -0.62, -0.48, -0.48, -0.62],
-                     pen=pg.mkPen(_COMP_COLOR["Skid"], width=2))
-        ts = pg.TextItem("SKID", color=_COMP_COLOR["Skid"], anchor=(0, 0.5)); ts.setPos(0.02, -0.55); p_train.addItem(ts)
-        # equipos (cajas)
+        lay = st["layout"]; az, el = _view_angles(); sel = cb_place.currentIndex()
+        m3d.set_view(lay, az, el, sel)                 # sólidos 3D + sensores + flechas
+        for t in st["_labels"]:                        # rótulos (equipos + códigos)
+            p_train.removeItem(t)
+        st["_labels"] = []
         for c in lay.machine_components:
-            col = _comp_color(c.kind)
-            p_train.plot([c.x0, c.x1, c.x1, c.x0, c.x0], [c.y0, c.y0, c.y1, c.y1, c.y0],
-                         pen=pg.mkPen(col, width=2))
-            t = pg.TextItem(c.display(), color=col, anchor=(0.5, 0.5))
-            t.setPos((c.x0 + c.x1) / 2, (c.y0 + c.y1) / 2); p_train.addItem(t)
-        # sensores (puntos) rotulados por su código 1XA…
-        sel = cb_place.currentIndex()
-        for i, mp in enumerate(lay.points):
+            sx, sy, _ = _project((c.x0 + c.x1) / 2, 0.0, (c.y0 + c.y1) / 2, az, el)
+            t = pg.TextItem(c.display(), color="#0f172a", anchor=(0.5, 0.5))
+            t.setPos(sx, sy); st["_labels"].append(t); p_train.addItem(t)
+        for mp in lay.points:
             if not mp.active:
                 continue
-            col = _COMP_COLOR.get(mp.component, "#475569")
-            sz = 18 if i == sel else (15 if mp.reference_sensor else 11)
-            sym = "star" if mp.reference_sensor else "o"
-            pen = pg.mkPen(RED, width=2.5) if i == sel else pg.mkPen("w", width=1.5)
-            p_train.addItem(pg.ScatterPlotItem([mp.x_norm], [mp.y_norm], size=sz, symbol=sym,
-                            brush=pg.mkBrush(col), pen=pen))
-            t = pg.TextItem(mp.code, color=NAVY, anchor=(0.5, 1.4))
-            t.setPos(mp.x_norm, mp.y_norm); t.setScale(0.9); p_train.addItem(t)
-        p_train.getViewBox().autoRange(padding=0.12)
+            sx, sy, _ = _project(mp.x_norm, 0.20, mp.y_norm, az, el)
+            t = pg.TextItem(mp.code, color=NAVY, anchor=(0.5, 1.6)); t.setScale(0.85)
+            t.setPos(sx, sy); st["_labels"].append(t); p_train.addItem(t)
+        p_train.getViewBox().autoRange(padding=0.15)
 
     def _next_channel():
         used = {(p.module_slot, p.channel_index) for p in st["layout"].points}
@@ -320,31 +420,31 @@ def build_app(layout: OMALayout, simulated: bool = True):
             if ev.button() != QtCore.Qt.LeftButton:
                 return
             pt = p_train.getViewBox().mapSceneToView(ev.scenePos())
-            x, y = float(pt.x()), float(pt.y())
+            az, el = _view_angles()
+            x, z = _unproject(float(pt.x()), float(pt.y()), az, el)   # → eje (X) y altura (Z)
             lay = st["layout"]; mode = cb_click.currentText()
             if mode == "Colocar punto":
                 axes = [a for a, cb in (("X", cbx), ("Y", cby), ("Z", cbz)) if cb.isChecked()] or ["Y"]
-                comp = _comp_at(x, y)
-                offs = {"X": 0.06, "Y": 0.0, "Z": -0.06}
+                comp = _comp_at(x, z)
                 for a in axes:
                     slot, ch = _next_channel()
                     lay.points.append(MeasPoint(
                         idx=len(lay.points) + 1, component=comp, position_ref="Centro",
                         dof="+" + a, module_slot=slot, channel_index=ch,
                         number=sp_num.value(), meas_type=cb_mtype.currentText(),
-                        x_norm=x, y_norm=y + offs.get(a, 0.0)))
+                        x_norm=x, y_norm=z))
                 sp_num.setValue(sp_num.value() + 1)
                 _fill_points()
             elif mode == "Mover sensor":
                 i = cb_place.currentIndex()
                 if 0 <= i < len(lay.points):
-                    lay.points[i].x_norm = x; lay.points[i].y_norm = y
+                    lay.points[i].x_norm = x; lay.points[i].y_norm = z
             elif mode == "Mover equipo":
                 if lay.machine_components:
                     c = min(lay.machine_components,
-                            key=lambda k: abs((k.x0 + k.x1) / 2 - x) + abs((k.y0 + k.y1) / 2 - y))
+                            key=lambda k: abs((k.x0 + k.x1) / 2 - x) + abs((k.y0 + k.y1) / 2 - z))
                     w = (c.x1 - c.x0); h = (c.y1 - c.y0)
-                    c.x0 = x - w / 2; c.x1 = x + w / 2; c.y0 = y - h / 2; c.y1 = y + h / 2
+                    c.x0 = x - w / 2; c.x1 = x + w / 2; c.y0 = z - h / 2; c.y1 = z + h / 2
             _draw_train()
         except Exception:  # noqa: BLE001
             pass
@@ -417,6 +517,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_tmpl.clicked.connect(_load_tmpl); btn_addp.clicked.connect(_add_point)
     btn_delp.clicked.connect(_del_point); btn_val.clicked.connect(_validate)
     cb_place.currentIndexChanged.connect(lambda *_: _draw_train())
+    sl_az.valueChanged.connect(lambda *_: _draw_train())
+    sl_el.valueChanged.connect(lambda *_: _draw_train())
+    btn_iso.clicked.connect(lambda: (sl_az.setValue(50), sl_el.setValue(28), _draw_train()))
     sp_fs.valueChanged.connect(_upd_df); cb_blk.currentTextChanged.connect(_upd_df); sp_fmax.valueChanged.connect(_upd_df)
     _fill_points(); _validate(); _upd_df()
 

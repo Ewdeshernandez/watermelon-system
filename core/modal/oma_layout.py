@@ -33,7 +33,7 @@ MEAS_TYPES = ["A", "V", "D"]
 MEAS_TYPE_NAME = {"A": "Aceleración", "V": "Velocidad", "D": "Desplazamiento"}
 
 # Tipos de equipo que se pueden dibujar (cajas sobre el skid)
-COMPONENT_KINDS = ["Motor", "Turbina", "Bomba", "Generador", "Gear box",
+COMPONENT_KINDS = ["Motor", "Acople", "Turbina", "Bomba", "Generador", "Gear box",
                    "Tubería succión", "Tubería descarga"]
 
 DEFAULT_SENSITIVITY_MV_PER_G = 100.0
@@ -42,12 +42,13 @@ DEFAULT_SENSITIVITY_MV_PER_G = 100.0
 @dataclass
 class MachineComponent:
     """Un equipo dibujado como caja sobre el skid (para armar la máquina)."""
-    kind: str                    # Motor / Turbina / Bomba / Generador / Gear box / Tubería …
+    kind: str                    # Motor / Acople / Turbina / Bomba / Generador / Gear box / Tubería …
     label: str = ""              # nombre visible (por defecto = kind)
-    x0: float = 0.0              # posición/tamaño a lo largo del tren (editable "a medida")
+    x0: float = 0.0              # a lo largo del eje del tren (X), editable "a medida"
     x1: float = 0.18
-    y0: float = -0.30
+    y0: float = -0.30            # altura (Z en el dibujo 3D): base..tope
     y1: float = 0.30
+    depth: float = 0.16          # semi-profundidad (Y) para el sólido 3D
 
     def display(self) -> str:
         return self.label or self.kind
@@ -188,12 +189,13 @@ class OMALayout:
 
 
 def default_components() -> List[MachineComponent]:
-    """Cajas por defecto: motor + bomba sobre skid + tuberías succión/descarga."""
+    """Tren en línea: motor → acople → bomba sobre skid + tuberías (sólidos 3D)."""
     return [
-        MachineComponent("Motor", "Motor", 0.03, 0.23, -0.30, 0.30),
-        MachineComponent("Bomba", "Bomba", 0.29, 0.53, -0.30, 0.30),
-        MachineComponent("Tubería succión", "Tub. succión", 0.55, 0.90, -0.16, -0.06),
-        MachineComponent("Tubería descarga", "Tub. descarga", 0.55, 0.74, 0.06, 0.44),
+        MachineComponent("Motor", "Motor", 0.03, 0.23, -0.05, 0.30, depth=0.16),
+        MachineComponent("Acople", "Acople", 0.23, 0.29, 0.02, 0.18, depth=0.08),
+        MachineComponent("Bomba", "Bomba", 0.29, 0.53, -0.05, 0.30, depth=0.16),
+        MachineComponent("Tubería succión", "Tub. succión", 0.55, 0.92, -0.02, 0.06, depth=0.05),
+        MachineComponent("Tubería descarga", "Tub. descarga", 0.55, 0.74, 0.06, 0.44, depth=0.05),
     ]
 
 
