@@ -661,22 +661,27 @@ def build_app(layout: OMALayout, simulated: bool = True):
     def _refresh_campbell():
         p_cam.clear(); modes = _current_modes()
         rpm_op = st["layout"].running_speed_rpm or 1185.0
-        rpm_max = max(rpm_op * 1.3, 1500.0)
-        bands = [SpeedBand(rpm_op, 0.17 * rpm_op, f"Máx {rpm_op:.0f}±{0.17*rpm_op:.0f}"),
-                 SpeedBand(rpm_op / 2, 0.17 * rpm_op / 1, "½ velocidad")]
+        SM = 0.15                                        # margen de separación API 684 (±15%)
+        lo, hi = rpm_op * (1 - SM), rpm_op * (1 + SM)
+        rpm_max = max(rpm_op * 1.4, 1500.0)
         if not modes:
             lbl_cam.setText("Sin modos aún — capturá OMA o identificá EMA."); tbl_cam.setRowCount(0); return
-        orders = (0.5, 1.0, 2.0, 3.0, 4.0)
-        rpm = np.linspace(0, rpm_max, 60)
-        for b in bands:                                 # bandas sombreadas
-            reg = pg.LinearRegionItem([max(0, b.low), min(rpm_max, b.high)], movable=False,
-                                      brush=pg.mkBrush(245, 158, 11, 40)); reg.setZValue(-10); p_cam.addItem(reg)
+        ymax = max(modes) * 1.25
+        orders = (0.5, 1.0, 2.0, 3.0, 4.0); rpm = np.linspace(0, rpm_max, 60)
+        # zona de MARGEN DE SEPARACIÓN API 684 alrededor de la RPM de la máquina (keep-clear, roja)
+        reg = pg.LinearRegionItem([max(0, lo), min(rpm_max, hi)], movable=False,
+                                  brush=pg.mkBrush(239, 68, 68, 32)); reg.setZValue(-20); p_cam.addItem(reg)
+        # media velocidad (referencia, ámbar)
+        reg2 = pg.LinearRegionItem([rpm_op / 2 * (1 - SM), rpm_op / 2 * (1 + SM)], movable=False,
+                                   brush=pg.mkBrush(245, 158, 11, 26)); reg2.setZValue(-20); p_cam.addItem(reg2)
         for o in orders:                                # líneas de orden
             p_cam.plot(rpm, o * rpm / 60.0, pen=pg.mkPen("#6B7280", width=1, style=QtCore.Qt.DotLine))
             t = pg.TextItem(f"{o:g}×", color="#6B7280", anchor=(0, 0.5)); t.setPos(rpm_max * 0.98, o * rpm_max / 60.0)
             p_cam.addItem(t)
         for fn in modes:                                # modos (horizontales)
             p_cam.plot([0, rpm_max], [fn, fn], pen=pg.mkPen(GREEN, width=2))
+        bands = [SpeedBand(rpm_op, SM * rpm_op, f"Operación {rpm_op:.0f}±{SM*100:.0f}%"),
+                 SpeedBand(rpm_op / 2, SM * rpm_op / 2, "½ velocidad")]
         cx = compute_crossings(modes, 0, rpm_max, orders=orders, bands=bands)
         sevcol = {"coincidence": RED, "near": AMBER, "clear": "#94a3b8"}
         tbl_cam.setRowCount(0)
@@ -690,10 +695,20 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     it = QtWidgets.QTableWidgetItem(v)
                     if j == 4: it.setForeground(QtGui.QBrush(QtGui.QColor(sevcol[c.severity])))
                     tbl_cam.setItem(r, j, it)
-        p_cam.plot([rpm_op, rpm_op], [0, max(modes) * 1.25], pen=pg.mkPen(NAVY, width=2, style=QtCore.Qt.DashLine))
-        p_cam.setXRange(0, rpm_max); p_cam.setYRange(0, max(modes) * 1.25)
+        # RPM de la MÁQUINA — línea prominente + etiqueta clara
+        p_cam.plot([rpm_op, rpm_op], [0, ymax], pen=pg.mkPen(NAVY, width=3))
+        t_op = pg.TextItem(f"N máquina\n{rpm_op:.0f} RPM", color=NAVY, anchor=(0.5, 1.0))
+        t_op.setPos(rpm_op, ymax * 0.995); p_cam.addItem(t_op)
+        # límites del margen de separación API 684 + su valor "al lado"
+        for xb, lab in ((lo, f"−{SM*100:.0f}%\n{lo:.0f}"), (hi, f"+{SM*100:.0f}%\n{hi:.0f}")):
+            p_cam.plot([xb, xb], [0, ymax], pen=pg.mkPen(RED, width=1, style=QtCore.Qt.DashLine))
+            tt = pg.TextItem(lab, color=RED, anchor=(0.5, 1.0)); tt.setPos(xb, ymax * 0.82); p_cam.addItem(tt)
+        p_cam.setLabel("bottom", f"Velocidad · N máquina {rpm_op:.0f} RPM · margen API 684 ±{SM*100:.0f}%", "RPM")
+        p_cam.setXRange(0, rpm_max); p_cam.setYRange(0, ymax)
         from core.modal.campbell import summarize as _cs
-        lbl_cam.setText(_cs(cx))
+        lbl_cam.setText(f"<b>N máquina = {rpm_op:.0f} RPM</b> · margen de separación API 684 "
+                        f"±{SM*100:.0f}% (zona {lo:.0f}–{hi:.0f} RPM). Todo cruce dentro de esa zona "
+                        f"es una coincidencia de riesgo. " + _cs(cx))
     btn_refc.clicked.connect(_refresh_campbell)
 
     return app, win
