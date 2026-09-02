@@ -280,6 +280,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
     sp_wid = QtWidgets.QDoubleSpinBox(); sp_wid.setRange(0.02, 0.6); sp_wid.setSingleStep(0.02); sp_wid.setDecimals(2)
     for lab, w in (("Largo", sp_len), ("Alto", sp_hei), ("Ancho", sp_wid)):
         drow.addWidget(QtWidgets.QLabel(lab)); drow.addWidget(w)
+    btn_applygeo = QtWidgets.QPushButton("✓ Aplicar cambios (auto-ordenar)")
+    btn_applygeo.setStyleSheet(f"QPushButton{{background:{ACC};}} QPushButton:hover{{background:#1490c2;}}")
+    drow.addWidget(btn_applygeo)
     btn_norm = QtWidgets.QPushButton("📐 Ubicar sensores por norma (API 670 / ISO 20816)")
     btn_norm.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
     drow.addStretch(1); drow.addWidget(btn_norm)
@@ -423,8 +426,15 @@ def build_app(layout: OMALayout, simulated: bool = True):
             sx, sy, _ = _project(mp.x_norm, 0.20, mp.y_norm, az, el)
             t = pg.TextItem(mp.code, color=NAVY, anchor=(0.5, 1.6)); t.setScale(0.85)
             t.setPos(sx, sy); st["_labels"].append(t); p_train.addItem(t)
+        vb = p_train.getViewBox()
         if fit:
-            p_train.getViewBox().autoRange(padding=0.15)
+            vb.autoRange(padding=0.15)                 # centra y encuadra
+        else:                                          # gira → auto-CENTRA conservando el zoom
+            br = m3d.boundingRect()
+            (x0, x1), (y0, y1) = vb.viewRange()
+            hw = (x1 - x0) / 2 or 0.7; hh = (y1 - y0) / 2 or 0.5
+            cx, cy = br.center().x(), br.center().y()
+            vb.setRange(xRange=(cx - hw, cx + hw), yRange=(cy - hh, cy + hh), padding=0)
 
     def _next_channel():
         used = {(p.module_slot, p.channel_index) for p in st["layout"].points}
@@ -542,8 +552,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     cb_place.currentIndexChanged.connect(lambda *_: _draw_train())
 
     def _on_rotate(dx, dy):
-        st["az"] = (st["az"] + dx * 0.4) % 360.0
-        st["el"] = float(np.clip(st["el"] - dy * 0.4, 5.0, 85.0))
+        st["az"] = (st["az"] + dx * 0.4) % 360.0        # yaw completo (todos los lados)
+        st["el"] = float(np.clip(st["el"] - dy * 0.4, 8.0, 88.0))  # pitch amplio
         _draw_train(fit=False)
     p_train.getViewBox().rotate.connect(_on_rotate)
 
@@ -589,6 +599,37 @@ def build_app(layout: OMALayout, simulated: bool = True):
             f"✅ {st['layout'].n_channels()} sensores ubicados por norma (API 670 / ISO 20816):\n"
             "cojinetes NDE (lado libre) y DE (lado acople), X/Y/Z, de conductor a conducido.")
     btn_norm.clicked.connect(_place_by_norm)
+
+    def _auto_arrange():
+        """Re-fluye el tren en línea (sin montarse) y RE-ENGANCHA los sensores a su
+        equipo (así no se pierden al cambiar tamaños)."""
+        lay = st["layout"]; comps = lay.machine_components
+        if not comps:
+            return
+        def owner(mp):
+            for c in comps:
+                if c.x0 <= mp.x_norm <= c.x1:
+                    return c
+            return min(comps, key=lambda c: abs((c.x0 + c.x1) / 2 - mp.x_norm))
+        rel = []
+        for mp in lay.points:
+            c = owner(mp); Lx = (c.x1 - c.x0) or 1.0; Lz = (c.y1 - c.y0) or 1.0
+            rel.append((mp, id(c), (mp.x_norm - c.x0) / Lx, (mp.y_norm - c.y0) / Lz))
+        drive = sorted([c for c in comps if not c.kind.startswith("Tubería")], key=lambda c: c.x0)
+        pipes = [c for c in comps if c.kind.startswith("Tubería")]
+        x = 0.03
+        for c in drive:                                # equipos pegados (motor→acople→bomba)
+            L = c.x1 - c.x0; c.x0 = x; c.x1 = x + L; x = c.x1
+        px = x + 0.02
+        for c in pipes:                                # tuberías al final del tren
+            L = c.x1 - c.x0; c.x0 = px; c.x1 = px + L; px = c.x1 + 0.02
+        idmap = {id(c): c for c in comps}
+        for (mp, cid, fx, fz) in rel:                  # sensores siguen a su equipo
+            c = idmap.get(cid)
+            if c:
+                mp.x_norm = c.x0 + fx * (c.x1 - c.x0); mp.y_norm = c.y0 + fz * (c.y1 - c.y0)
+        _fill_points(); _sync_comp_combo(); _draw_train(fit=True)
+    btn_applygeo.clicked.connect(_auto_arrange)
     sp_fs.valueChanged.connect(_upd_df); cb_blk.currentTextChanged.connect(_upd_df); sp_fmax.valueChanged.connect(_upd_df)
     _fill_points(); _validate(); _upd_df()
 
