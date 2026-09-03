@@ -98,12 +98,41 @@ def _cuboid_faces(c):
     return [[P[i] for i in f] for f in F]
 
 
+def _field_disp(v, anim):
+    """Desplazamiento interpolado (IDW) en el vértice v desde los sensores.
+    Devuelve (vector_desplazamiento(3,), magnitud)."""
+    pts = anim["pts"]; dirs = anim["dirs"]; amps = anim["amps"]
+    if len(pts) == 0:
+        return np.zeros(3), 0.0
+    diff = pts - v[None, :]
+    d2 = np.sum(diff * diff, axis=1) + 1e-4
+    w = 1.0 / d2
+    contrib = (amps[:, None] * dirs)                # cada sensor desplaza en su DOF
+    disp = (w[:, None] * contrib).sum(axis=0) / w.sum()
+    return disp, float(np.linalg.norm(disp))
+
+
+def _heat_qcolor(t):
+    """Colormap informativo azul→cian→verde→amarillo→rojo (t en [0,1])."""
+    t = max(0.0, min(1.0, t))
+    stops = [(0.0, (33, 102, 172)), (0.25, (67, 147, 195)), (0.5, (255, 255, 191)),
+             (0.75, (244, 165, 130)), (1.0, (178, 24, 43))]
+    for i in range(len(stops) - 1):
+        t0, c0 = stops[i]; t1, c1 = stops[i + 1]
+        if t <= t1:
+            f = (t - t0) / (t1 - t0 or 1)
+            r = int(c0[0] + f * (c1[0] - c0[0])); g = int(c0[1] + f * (c1[1] - c0[1])); b = int(c0[2] + f * (c1[2] - c0[2]))
+            return QtGui.QColor(r, g, b)
+    return QtGui.QColor(178, 24, 43)
+
+
 class Machine3DItem(pg.GraphicsObject):
     """Draws equipment as shaded 3D solids + sensors + DOF arrows."""
     def __init__(self):
         super().__init__()
         self.layout = None; self.az = 0.9; self.el = 0.5; self.sel = -1
         self.disp = None          # desplazamiento animado por punto activo (a lo largo del DOF)
+        self.anim = None          # {pts(Nx3), dirs(Nx3), amps(N), mmax} → deforma+colorea la máquina
         self._rect = QtCore.QRectF(-1, -1, 2, 2)
 
     def set_view(self, layout, az, el, sel):
@@ -112,6 +141,9 @@ class Machine3DItem(pg.GraphicsObject):
 
     def set_disp(self, disp):
         self.disp = disp; self.update()
+
+    def set_anim(self, anim):
+        self.anim = anim; self.update()
 
     def _recompute(self):
         xs, ys = [0.0], [0.0]
@@ -132,22 +164,31 @@ class Machine3DItem(pg.GraphicsObject):
             return
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
         light = np.array([0.4, -0.7, 0.6]); light /= np.linalg.norm(light)
+        anim = self.anim
         faces = []
         for c in self.layout.machine_components:
             base = QtGui.QColor(_comp_color(c.kind))
             for f in _cuboid_faces(c):
-                pw = [_project(*p, self.az, self.el) for p in f]
+                if anim is not None:                       # deforma la caja con la malla IDW + color
+                    dv = [_field_disp(np.array(p, float), anim) for p in f]  # (disp3, mag)
+                    fd = [tuple(np.array(p, float) + dv[k][0]) for k, p in enumerate(f)]
+                    pw = [_project(*p, self.az, self.el) for p in fd]
+                    mag = float(np.mean([dv[k][1] for k in range(len(f))]))
+                    t = min(1.0, mag / (anim["mmax"] or 1.0))
+                    base = _heat_qcolor(t)
+                else:
+                    pw = [_project(*p, self.az, self.el) for p in f]
                 dep = float(np.mean([p[2] for p in pw]))
                 v1 = np.subtract(f[1], f[0]); v2 = np.subtract(f[2], f[0])
                 nrm = np.cross(v1, v2); nn = np.linalg.norm(nrm)
-                shade = 0.55 + 0.45 * abs(float(np.dot(nrm / nn, light))) if nn > 0 else 0.7
+                shade = 0.6 + 0.4 * abs(float(np.dot(nrm / nn, light))) if nn > 0 else 0.75
                 faces.append((dep, pw, base, shade))
         faces.sort(key=lambda t: t[0])
         for dep, pw, base, shade in faces:
             col = QtGui.QColor(int(base.red() * shade), int(base.green() * shade), int(base.blue() * shade))
             poly = QtGui.QPolygonF([QtCore.QPointF(p[0], p[1]) for p in pw])
             painter.setBrush(QtGui.QBrush(col))
-            pen = QtGui.QPen(QtGui.QColor("#1e293b")); pen.setCosmetic(True); pen.setWidthF(1.0)
+            pen = QtGui.QPen(QtGui.QColor("#1e293b")); pen.setCosmetic(True); pen.setWidthF(0.8)
             painter.setPen(pen); painter.drawPolygon(poly)
         ai = -1
         for i, mp in enumerate(self.layout.points):
@@ -252,7 +293,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         vb = plot.getViewBox()
         vb.grab.connect(lambda sp, _vb, k=kind, p=plot: _on_grab(sp, p, k))
         vb.drag.connect(lambda sp, _vb, dx, dy, k=kind, p=plot: _on_drag(sp, p, k, dx, dy))
-        vb.release.connect(lambda: st.update(grab=None))
+        vb.release.connect(lambda: st.update(grab=None, grab_comp=None))
         plot.scene().sigMouseClicked.connect(lambda ev, k=kind, p=plot: _on_click(ev, p, k))
         return v
 
@@ -529,21 +570,40 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 bd = d; best = i
         return best
 
+    def _nearest_component(x, z):
+        comps = st["layout"].machine_components
+        if not comps:
+            return None
+        best, bd = None, 1e9
+        for i, c in enumerate(comps):
+            d = abs((c.x0 + c.x1) / 2 - x) + abs((c.y0 + c.y1) / 2 - z)
+            if d < bd:
+                bd, best = d, i
+        return best
+
     def _on_grab(scenePos, plot, kind):
-        st["grab"] = None
+        st["grab"] = None; st["grab_comp"] = None
+        pt = plot.getViewBox().mapSceneToView(scenePos); az, el = _view_angles()
+        x, z = _unproject(float(pt.x()), float(pt.y()), az, el)
         if kind == "sensors" and cb_click.currentText() == "Move sensor":
-            pt = plot.getViewBox().mapSceneToView(scenePos); az, el = _view_angles()
-            x, z = _unproject(float(pt.x()), float(pt.y()), az, el)
             i = _nearest_sensor(x, z)
             if i is not None:
-                st["grab"] = i
-                cb_place.setCurrentIndex(i)
+                st["grab"] = i; cb_place.setCurrentIndex(i)
+        elif kind == "geo":                               # click sostenido = arrastrar equipo
+            j = _nearest_component(x, z)
+            if j is not None:
+                st["grab_comp"] = j; cb_comp.setCurrentIndex(j)
 
     def _on_drag(scenePos, plot, kind, dx, dy):
-        if st["grab"] is not None:                        # arrastrar el sensor tomado
-            pt = plot.getViewBox().mapSceneToView(scenePos); az, el = _view_angles()
-            x, z = _unproject(float(pt.x()), float(pt.y()), az, el)
+        pt = plot.getViewBox().mapSceneToView(scenePos); az, el = _view_angles()
+        x, z = _unproject(float(pt.x()), float(pt.y()), az, el)
+        if st.get("grab") is not None:                    # arrastrar el sensor tomado
             mp = st["layout"].points[st["grab"]]; mp.x_norm = x; mp.y_norm = z
+            _draw_train(fit=False)
+        elif st.get("grab_comp") is not None:             # arrastrar el equipo tomado
+            c = st["layout"].machine_components[st["grab_comp"]]
+            w = c.x1 - c.x0; h = c.y1 - c.y0
+            c.x0 = x - w / 2; c.x1 = x + w / 2; c.y0 = z - h / 2; c.y1 = z + h / 2
             _draw_train(fit=False)
         else:                                             # orbitar
             _on_rotate(dx, dy)
@@ -1172,24 +1232,40 @@ def build_app(layout: OMALayout, simulated: bool = True):
         mx = np.max(np.abs(sh)) or 1.0
         return sh / mx
 
+    def _anim_geometry():
+        """pts (world) y dirs (DOF firmado) de los sensores activos, para la malla."""
+        lay = st["layout"]; pts = []; dirs = []
+        for mp in lay.active_points():
+            d = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}.get(mp.axis, (0, 0, 1))
+            sg = -1.0 if mp.dof.startswith("-") else 1.0
+            pts.append([mp.x_norm, 0.20, mp.y_norm]); dirs.append([sg * d[0], sg * d[1], sg * d[2]])
+        return np.array(pts, float), np.array(dirs, float)
+
     def _anim_tick():
         sh = _cur_shape()
         if sh is None:
             return
-        st["_anim_phase"] += 0.28
+        st["_anim_phase"] += 0.26
         ph = np.exp(1j * st["_anim_phase"])
-        disp = (sp_ascale.value() * np.real(sh * ph)).tolist()
-        m_anim.set_disp(disp)
+        scale = sp_ascale.value()
+        amps = scale * np.real(sh * ph)
+        pts, dirs = st.get("_anim_geo", (np.zeros((0, 3)), np.zeros((0, 3))))
+        n = min(len(amps), len(pts))
+        if n == 0:
+            return
+        m_anim.set_disp(amps[:n].tolist())
+        m_anim.set_anim({"pts": pts[:n], "dirs": dirs[:n], "amps": amps[:n], "mmax": scale})
     anim_timer.timeout.connect(_anim_tick)
 
     def _anim_play():
         _anim_reload_modes()
+        st["_anim_geo"] = _anim_geometry()
         m_anim.set_view(st["layout"], np.radians(st["az"]), np.radians(st["el"]), -1)
-        p_anim.getViewBox().autoRange(padding=0.15)
+        p_anim.getViewBox().autoRange(padding=0.2)
         anim_timer.start(45)
 
     def _anim_stop():
-        anim_timer.stop(); m_anim.set_disp(None)
+        anim_timer.stop(); m_anim.set_disp(None); m_anim.set_anim(None)
 
     btn_play.clicked.connect(_anim_play); btn_stop.clicked.connect(_anim_stop)
     cb_asrc.currentIndexChanged.connect(lambda *_: _anim_reload_modes())
