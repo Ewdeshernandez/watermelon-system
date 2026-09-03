@@ -169,26 +169,33 @@ class Machine3DItem(pg.GraphicsObject):
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
         light = np.array([0.4, -0.7, 0.6]); light /= np.linalg.norm(light)
         anim = self.anim
-        faces = []
+        faces = []                                          # (dep, pw, base|None, shade, colmag)
         for c in self.layout.machine_components:
             base = QtGui.QColor(_comp_color(c.kind))
             for f in _cuboid_faces(c):
-                if anim is not None:                       # deforma la caja con la malla IDW + color
-                    dv = [_field_disp(np.array(p, float), anim) for p in f]  # (disp3, mag)
+                colmag = None
+                if anim is not None:                        # deforma la caja con la malla IDW + color
+                    dv = [_field_disp(np.array(p, float), anim) for p in f]
                     fd = [tuple(np.array(p, float) + dv[k][0]) for k, p in enumerate(f)]
                     pw = [_project(*p, self.az, self.el) for p in fd]
-                    mag = float(np.mean([dv[k][1] for k in range(len(f))]))
-                    t = min(1.0, mag / (anim["mmax"] or 1.0))
-                    base = _heat_qcolor(t)
+                    colmag = float(np.mean([dv[k][1] for k in range(len(f))]))
                 else:
                     pw = [_project(*p, self.az, self.el) for p in f]
                 dep = float(np.mean([p[2] for p in pw]))
                 v1 = np.subtract(f[1], f[0]); v2 = np.subtract(f[2], f[0])
                 nrm = np.cross(v1, v2); nn = np.linalg.norm(nrm)
                 shade = 0.6 + 0.4 * abs(float(np.dot(nrm / nn, light))) if nn > 0 else 0.75
-                faces.append((dep, pw, base, shade))
+                faces.append([dep, pw, base, shade, colmag])
+        # normaliza el color sobre TODA la máquina → verde (menos) → rojo (más)
+        if anim is not None:
+            mags = [fc[4] for fc in faces if fc[4] is not None]
+            cmin = min(mags) if mags else 0.0; cmax = max(mags) if mags else 1.0
+            rng = (cmax - cmin) or 1.0
+            for fc in faces:
+                if fc[4] is not None:
+                    fc[2] = _heat_qcolor((fc[4] - cmin) / rng)
         faces.sort(key=lambda t: t[0])
-        for dep, pw, base, shade in faces:
+        for dep, pw, base, shade, _cm in faces:
             col = QtGui.QColor(int(base.red() * shade), int(base.green() * shade), int(base.blue() * shade))
             poly = QtGui.QPolygonF([QtCore.QPointF(p[0], p[1]) for p in pw])
             painter.setBrush(QtGui.QBrush(col))
@@ -346,6 +353,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
     sp_wid = QtWidgets.QDoubleSpinBox(); sp_wid.setRange(0.02, 0.6); sp_wid.setSingleStep(0.02); sp_wid.setDecimals(2)
     for lab, w in (("L", sp_len), ("H", sp_hei), ("W", sp_wid)):
         bld.addWidget(QtWidgets.QLabel(lab)); bld.addWidget(w)
+    chk_lock = QtWidgets.QCheckBox("🔒 Rotate view (lock parts)")
+    chk_lock.setToolTip("ON: arrastrar gira/posiciona TODO el conjunto (X/Y/Z). "
+                        "OFF: arrastrar mueve cada equipo por separado.")
+    bld.addWidget(chk_lock)
     bld.addStretch(1)
     ml.addLayout(bld)
     ml.addWidget(QtWidgets.QLabel(
@@ -545,13 +556,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 t = pg.TextItem(mp.code, color=NAVY, anchor=(0.5, 1.6)); t.setScale(0.85)
                 t.setPos(sx, sy); v["labels"].append(t); plot.addItem(t)
             vb = plot.getViewBox()
-            if fit:
-                vb.autoRange(padding=0.15)
-            else:
+            if fit is True:
+                vb.autoRange(padding=0.15)               # encuadra (carga inicial)
+            elif fit is False:
                 br = m3.boundingRect(); (x0, x1), (y0, y1) = vb.viewRange()
                 hw = (x1 - x0) / 2 or 0.7; hh = (y1 - y0) / 2 or 0.5
                 cx, cy = br.center().x(), br.center().y()
                 vb.setRange(xRange=(cx - hw, cx + hw), yRange=(cy - hh, cy + hh), padding=0)
+            # fit is None → NO tocar la vista (queda exactamente como el usuario la dejó)
 
     def _next_channel():
         used = {(p.module_slot, p.channel_index) for p in st["layout"].points}
@@ -595,8 +607,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
             i = _nearest_sensor(x, z)
             if i is not None:
                 st["grab"] = i; cb_place.setCurrentIndex(i)
-        elif kind == "geo":                               # click sostenido = arrastrar equipo
-            j = _nearest_component(x, z)
+        elif kind == "geo" and not chk_lock.isChecked():  # click sostenido = arrastrar equipo
+            j = _nearest_component(x, z)                   # (si está 🔒, arrastrar GIRA todo)
             if j is not None:
                 st["grab_comp"] = j; cb_comp.setCurrentIndex(j)
 
@@ -687,11 +699,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
         for mp in lay.points:
             c = owner(mp); Lx = (c.x1 - c.x0) or 1.0; Lz = (c.y1 - c.y0) or 1.0
             rel.append((mp, id(c), (mp.x_norm - c.x0) / Lx, (mp.y_norm - c.y0) / Lz))
-        # destrabar solapes SOLO entre el tren rotativo (motor/acople/bomba…), sin mover a origen
+        # destrabar SOLO si dos equipos rotativos se cruzan en X *y* en Z (colisión real);
+        # así respeta apilados intencionales (ej. skid debajo del motor = distinto Z).
         drive = sorted([c for c in comps if not is_pipe(c.kind)], key=lambda c: c.x0)
         for k in range(1, len(drive)):
             prev, cur = drive[k - 1], drive[k]
-            if cur.x0 < prev.x1:                      # se montan → empujar cur a la derecha lo justo
+            x_ov = cur.x0 < prev.x1
+            z_ov = (cur.y0 < prev.y1) and (cur.y1 > prev.y0)
+            if x_ov and z_ov:                        # chocan de verdad → empujar lo justo
                 shift = prev.x1 - cur.x0
                 cur.x0 += shift; cur.x1 += shift
         idmap = {id(c): c for c in comps}
@@ -715,7 +730,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     def _apply_all():
         _table_to_layout(); _auto_arrange()
         errs = st["layout"].validate()
-        _fill_points(); _sync_comp_combo(); _refresh_summary(); _draw_train(fit=True)
+        _fill_points(); _sync_comp_combo(); _refresh_summary(); _draw_train(fit=None)  # deja la vista como está
         st["acc"] = FRFAccumulator(st["layout"].fs_hz, st["layout"].block_size)
         if errs:
             lbl_applyinfo.setText("⚠ " + " · ".join(errs[:2])); lbl_applyinfo.setStyleSheet(f"color:{AMBER};font-weight:700;")
