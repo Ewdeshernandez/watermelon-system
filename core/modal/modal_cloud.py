@@ -55,6 +55,30 @@ def list_layouts_cloud() -> List[Dict[str, Any]]:
         return []
 
 
+_RUNS_TABLE = "modal_runs"
+
+
+def save_run(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Sube una CORRIDA OMA (modos + config) a la nube (tabla `modal_runs`) para
+    que la web genere el reporte. payload libre (jsonb)."""
+    c = _client()
+    if c is None:
+        return {"ok": False, "reason": "offline"}
+    try:
+        from datetime import datetime
+        from core.modal.oma_layout import _slug
+        ts = datetime.now().isoformat(timespec="seconds")
+        row = {"id": f"{_slug(name)}_{ts.replace(':', '').replace('-', '')}",
+               "name": name or "Modal run", "metadata": payload, "updated_at": ts}
+        try:
+            c.table(_RUNS_TABLE).upsert(row).execute()
+        except Exception:  # noqa: BLE001
+            c.table(_RUNS_TABLE).insert(row).execute()
+        return {"ok": True, "name": name, "id": row["id"]}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
+
+
 def load_layout_cloud(name_or_slug: str) -> Optional[Any]:
     c = _client()
     if c is None:

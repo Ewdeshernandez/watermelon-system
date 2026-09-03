@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install numpy scipy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx supabase pyinstaller
+          pip install numpy scipy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx npTDMS supabase pyinstaller
 
       - name: Embeber credenciales de nube (desde GitHub Secrets)
         shell: bash
@@ -55,7 +55,11 @@ jobs:
             --collect-submodules core.remote_monitoring \
             --hidden-import core.modal.live_impact \
             --hidden-import core.modal.frf_compute \
+            --hidden-import core.modal.ssi \
+            --hidden-import core.modal.oma_engine \
+            --hidden-import core.modal.acq_backend \
             --hidden-import core.modal.modal_cloud \
+            --hidden-import nptdms \
             --hidden-import core.remote_monitoring._cloud_config \
             --add-data "assets/watermelon_logo.png;assets" \
             --icon "assets/watermelon.ico" \

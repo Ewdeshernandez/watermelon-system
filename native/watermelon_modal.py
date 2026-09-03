@@ -103,11 +103,15 @@ class Machine3DItem(pg.GraphicsObject):
     def __init__(self):
         super().__init__()
         self.layout = None; self.az = 0.9; self.el = 0.5; self.sel = -1
+        self.disp = None          # desplazamiento animado por punto activo (a lo largo del DOF)
         self._rect = QtCore.QRectF(-1, -1, 2, 2)
 
     def set_view(self, layout, az, el, sel):
         self.layout = layout; self.az = az; self.el = el; self.sel = sel
         self.prepareGeometryChange(); self._recompute(); self.update()
+
+    def set_disp(self, disp):
+        self.disp = disp; self.update()
 
     def _recompute(self):
         xs, ys = [0.0], [0.0]
@@ -145,15 +149,22 @@ class Machine3DItem(pg.GraphicsObject):
             painter.setBrush(QtGui.QBrush(col))
             pen = QtGui.QPen(QtGui.QColor("#1e293b")); pen.setCosmetic(True); pen.setWidthF(1.0)
             painter.setPen(pen); painter.drawPolygon(poly)
+        ai = -1
         for i, mp in enumerate(self.layout.points):
             if not mp.active:
                 continue
+            ai += 1
             wy = 0.20
-            sx, sy, _ = _project(mp.x_norm, wy, mp.y_norm, self.az, self.el)
             d = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}.get(mp.axis, (0, 0, 1))
             sg = -1.0 if mp.dof.startswith("-") else 1.0
-            tx, ty, _ = _project(mp.x_norm + sg * 0.09 * d[0], wy + sg * 0.09 * d[1],
-                                 mp.y_norm + sg * 0.09 * d[2], self.az, self.el)
+            # desplazamiento animado de la forma modal (a lo largo del DOF)
+            dd = 0.0
+            if self.disp is not None and ai < len(self.disp):
+                dd = float(self.disp[ai])
+            px = mp.x_norm + sg * dd * d[0]; py = wy + sg * dd * d[1]; pz = mp.y_norm + sg * dd * d[2]
+            sx, sy, _ = _project(px, py, pz, self.az, self.el)
+            tx, ty, _ = _project(px + sg * 0.09 * d[0], py + sg * 0.09 * d[1],
+                                 pz + sg * 0.09 * d[2], self.az, self.el)
             arrow = QtGui.QPen(QtGui.QColor(GREEN)); arrow.setCosmetic(True); arrow.setWidthF(2.2)
             painter.setPen(arrow); painter.drawLine(QtCore.QPointF(sx, sy), QtCore.QPointF(tx, ty))
             col = QtGui.QColor(_comp_color(mp.component))
@@ -835,9 +846,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # =====================================================================
     pg_oc = QtWidgets.QWidget(); cl2 = QtWidgets.QVBoxLayout(pg_oc)
     crow = QtWidgets.QHBoxLayout()
-    btn_ocap = QtWidgets.QPushButton("▶ Capture (simulated) + FDD"); btn_ocap.setStyleSheet(
+    crow.addWidget(QtWidgets.QLabel("Source:"))
+    cb_src = QtWidgets.QComboBox(); cb_src.addItems(["Simulated", "NI 9234 (live)"]); crow.addWidget(cb_src)
+    btn_ocap = QtWidgets.QPushButton("▶ Capture + FDD"); btn_ocap.setStyleSheet(
         f"QPushButton{{background:{ACC};font-size:14px;padding:10px 20px;}} QPushButton:hover{{background:#1490c2;}}")
-    crow.addWidget(btn_ocap); crow.addStretch(1); cl2.addLayout(crow)
+    btn_upload = QtWidgets.QPushButton("☁ Upload run to cloud")
+    crow.addWidget(btn_ocap); crow.addWidget(btn_upload); crow.addStretch(1); cl2.addLayout(crow)
     ocs = QtWidgets.QHBoxLayout()
     tbl_om = QtWidgets.QTableWidget(0, 4); tbl_om.setHorizontalHeaderLabels(["Freq (Hz)", "Damping (%)", "Complexity (%)", "Class"])
     tbl_om.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_om.verticalHeader().setVisible(False); tbl_om.setMaximumWidth(520)
@@ -853,14 +867,28 @@ def build_app(layout: OMALayout, simulated: bool = True):
         if nch < 2:
             QtWidgets.QMessageBox.information(win, "OMA", "Add ≥2 active sensors first (Sensors tab)."); return
         secs = min(float(lay.duration_s), 60.0); N = int(secs * fs); rng = st["rng"]
-        lbl_ost.setText(f"Capturing {secs:.0f}s @ {fs:.0f}Hz · {nch} channels…"); QtWidgets.QApplication.processEvents()
-        data = np.zeros((N, nch))
-        for sm in DEMO_MODES:
-            fn, z = sm.fn_hz, sm.zeta
-            wn = 2 * np.pi * fn; wd = wn * (1 - z * z) ** 0.5; r = np.exp(-z * wn / fs); th = wd / fs
-            q = lfilter([1.0], [1.0, -2 * r * np.cos(th), r * r], rng.standard_normal(N)); q /= (np.std(q) or 1)
-            data += np.outer(q, rng.standard_normal(nch))
-        data += 0.05 * rng.standard_normal((N, nch))
+        live = cb_src.currentText().startswith("NI")
+        data = None
+        if live:                                        # captura REAL NI 9234 (con fallback)
+            lbl_ost.setText("Connecting to NI 9234…"); QtWidgets.QApplication.processEvents()
+            try:
+                data, fs = _capture_ni(lay, secs)
+                lbl_ost.setText(f"NI 9234: captured {data.shape[0]} samples · {data.shape[1]} ch")
+            except Exception as e:  # noqa: BLE001
+                QtWidgets.QMessageBox.warning(win, "NI 9234",
+                    f"No NI hardware / capture failed → using simulated.\n\n{type(e).__name__}: {e}")
+                data = None
+        if data is None:                                # simulado
+            lbl_ost.setText(f"Capturing {secs:.0f}s @ {fs:.0f}Hz · {nch} channels (simulated)…")
+            QtWidgets.QApplication.processEvents()
+            data = np.zeros((N, nch))
+            for sm in DEMO_MODES:
+                fn, z = sm.fn_hz, sm.zeta
+                wn = 2 * np.pi * fn; wd = wn * (1 - z * z) ** 0.5; r = np.exp(-z * wn / fs); th = wd / fs
+                q = lfilter([1.0], [1.0, -2 * r * np.cos(th), r * r], rng.standard_normal(N)); q /= (np.std(q) or 1)
+                data += np.outer(q, rng.standard_normal(nch))
+            data += 0.05 * rng.standard_normal((N, nch))
+        st["oma_data"] = (data, float(fs))              # guardado para SSI / upload
         fmax = min(fs / 2.56, lay.fmax_hz)
         fdd = run_oma(data, fs, nperseg=4096, f_min_hz=5.0, f_max_hz=fmax, channel_names=lay.channel_names())
         st["oma_fdd"] = fdd
@@ -882,7 +910,41 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 tbl_om.setItem(rr, c, QtWidgets.QTableWidgetItem(v))
         lbl_ost.setText(f"✅ FDD done — {len(fdd.modes)} modes. See Comparative (EMA vs OMA) and Campbell.")
         lbl_ost.setStyleSheet(f"color:{GREEN};font-weight:700;"); _refresh_campbell(); _refresh_comparative()
-    btn_ocap.clicked.connect(_oma_capture)
+
+    def _capture_ni(lay, secs):
+        """Captura REAL continua desde la NI 9234 (IEPE). Lanza excepción si no hay HW."""
+        from core.modal.acq_backend import AcquisitionConfig, ChannelConfig, capture
+        from nptdms import TdmsFile
+        chans = [ChannelConfig(name=p.code, coupling="IEPE",
+                               sensitivity_mv_per_eu=p.sensitivity_mv_per_g, bnc_port=p.bnc, units="g")
+                 for p in lay.active_points()]
+        cfg = AcquisitionConfig(mode="oma_continuous", sample_rate_hz=lay.fs_hz,
+                                duration_s=float(secs), channels=chans, chassis_name="cDAQ1")
+        path = capture(cfg, lambda *a, **k: None)
+        tf = TdmsFile.read(str(path)); grp = tf.groups()[0]
+        cols = [ch[:] for ch in grp.channels()]
+        return np.asarray(cols, float).T, lay.fs_hz
+
+    def _upload_run():
+        fdd = st.get("oma_fdd")
+        if fdd is None:
+            QtWidgets.QMessageBox.information(win, "Cloud", "Run OMA capture first."); return
+        try:
+            from core.modal import modal_cloud
+            payload = {"name": st["layout"].name, "kind": "OMA",
+                       "modes": [{"fn": m.natural_frequency_hz, "zeta": m.damping_ratio_pct,
+                                  "complexity": m.complexity_pct, "class": m.classification}
+                                 for m in fdd.modes],
+                       "layout": st["layout"].to_dict()}
+            r = modal_cloud.save_run(st["layout"].name, payload)
+            if r.get("ok"):
+                QtWidgets.QMessageBox.information(win, "Cloud",
+                    f"☁ Run uploaded ({len(fdd.modes)} modes). Generate the report from the web.")
+            else:
+                QtWidgets.QMessageBox.warning(win, "Cloud", f"Could not upload: {r.get('reason')}")
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(win, "Cloud", f"Upload failed: {type(e).__name__}: {e}")
+    btn_ocap.clicked.connect(_oma_capture); btn_upload.clicked.connect(_upload_run)
 
     # =====================================================================
     # MODES (EMA)
@@ -1002,6 +1064,141 @@ def build_app(layout: OMALayout, simulated: bool = True):
         lbl_cam.setText(f"<b>N machine = {rpm_op:.0f} RPM</b> · API 684 separation margin ±{SM*100:.0f}% "
                         f"(zone {lo:.0f}–{hi:.0f} RPM). Any crossing inside that zone is a risk coincidence. " + _cs(cx))
     btn_refc.clicked.connect(_refresh_campbell)
+
+    # =====================================================================
+    # SSI (subspace) — premium: modos con incertidumbre + estabilización
+    # =====================================================================
+    pg_ssi = QtWidgets.QWidget(); ssl = QtWidgets.QVBoxLayout(pg_ssi)
+    srow = QtWidgets.QHBoxLayout()
+    btn_ssi = QtWidgets.QPushButton("🎯 Run SSI (subspace)"); btn_ssi.setStyleSheet(f"QPushButton{{background:{ACC};}}")
+    srow.addWidget(btn_ssi)
+    srow.addWidget(QtWidgets.QLabel("Time-domain SSI-COV — natural modes with UNCERTAINTY + stabilization diagram (beyond FDD)."))
+    srow.addStretch(1); ssl.addLayout(srow)
+    ssplit = QtWidgets.QHBoxLayout()
+    tbl_ssi = QtWidgets.QTableWidget(0, 6)
+    tbl_ssi.setHorizontalHeaderLabels(["Freq (Hz)", "±", "Damping (%)", "±", "Complexity (%)", "Stable×"])
+    tbl_ssi.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    tbl_ssi.verticalHeader().setVisible(False); tbl_ssi.setMaximumWidth(560)
+    p_stab = pg.PlotWidget(); p_stab.setBackground("w"); p_stab.setLabel("left", "Model order")
+    p_stab.setLabel("bottom", "Frequency", "Hz"); p_stab.setTitle("Stabilization diagram", color=NAVY)
+    p_stab.showGrid(x=True, y=True, alpha=0.3)
+    ssplit.addWidget(tbl_ssi, 2); ssplit.addWidget(p_stab, 3); ssl.addLayout(ssplit, 1)
+    lbl_ssi = QtWidgets.QLabel(""); lbl_ssi.setWordWrap(True); ssl.addWidget(lbl_ssi)
+    tabs.addTab(pg_ssi, "SSI (subspace)")
+
+    def _run_ssi():
+        d = st.get("oma_data")
+        if not d:
+            QtWidgets.QMessageBox.information(win, "SSI", "Run OMA capture first (it stores the time data)."); return
+        from core.modal.ssi import run_ssi_cov
+        data, fs = d; lay = st["layout"]; fmax = min(fs / 2.56, lay.fmax_hz)
+        lbl_ssi.setText("Running SSI-COV (sweeping model orders)…"); QtWidgets.QApplication.processEvents()
+        try:
+            res = run_ssi_cov(data, fs, orders=range(4, 45, 2), i_block=25, fmin_hz=2.0, fmax_hz=fmax)
+        except Exception as e:  # noqa: BLE001
+            lbl_ssi.setText(f"SSI error: {type(e).__name__}: {e}"); return
+        st["ssi"] = res
+        tbl_ssi.setRowCount(0)
+        for m in res.modes:
+            r = tbl_ssi.rowCount(); tbl_ssi.insertRow(r)
+            for c, v in enumerate([f"{m.frequency_hz:.2f}", f"{m.std_frequency_hz:.3f}",
+                                   f"{m.damping_ratio_pct:.2f}", f"{m.std_damping_pct:.2f}",
+                                   f"{m.complexity_pct:.0f}", str(m.n_stable)]):
+                tbl_ssi.setItem(r, c, QtWidgets.QTableWidgetItem(v))
+        p_stab.clear()
+        for (order, freqs, mask) in res.diagram:
+            if len(freqs) == 0:
+                continue
+            st_f = freqs[mask]; un_f = freqs[~mask]
+            if len(un_f):
+                p_stab.addItem(pg.ScatterPlotItem(un_f, [order] * len(un_f), size=6, symbol="x",
+                               pen=pg.mkPen("#cbd5e1"), brush=pg.mkBrush("#cbd5e1")))
+            if len(st_f):
+                p_stab.addItem(pg.ScatterPlotItem(st_f, [order] * len(st_f), size=8, symbol="o",
+                               pen=pg.mkPen(GREEN, width=1.5), brush=pg.mkBrush(GREEN)))
+        for m in res.modes:
+            p_stab.plot([m.frequency_hz, m.frequency_hz], [0, res.orders[-1]],
+                        pen=pg.mkPen(NAVY, width=1, style=QtCore.Qt.DashLine))
+        lbl_ssi.setText(f"✅ SSI: {len(res.modes)} modos estables. Verde = polo estable entre órdenes; "
+                        "la línea azul es el modo identificado. El ± es la INCERTIDUMBRE (dispersión).")
+        lbl_ssi.setStyleSheet(f"color:{GREEN};font-weight:700;")
+        _anim_reload_modes()
+    btn_ssi.clicked.connect(_run_ssi)
+
+    # =====================================================================
+    # MODE SHAPES — animación 3D (modal vs estructural en movimiento)
+    # =====================================================================
+    pg_anim = QtWidgets.QWidget(); anl = QtWidgets.QVBoxLayout(pg_anim)
+    arow = QtWidgets.QHBoxLayout()
+    arow.addWidget(QtWidgets.QLabel("Source:"))
+    cb_asrc = QtWidgets.QComboBox(); cb_asrc.addItems(["OMA (FDD)", "SSI"]); arow.addWidget(cb_asrc)
+    arow.addWidget(QtWidgets.QLabel("Mode:"))
+    cb_amode = QtWidgets.QComboBox(); cb_amode.setMinimumWidth(160); arow.addWidget(cb_amode)
+    arow.addWidget(QtWidgets.QLabel("Scale:"))
+    sp_ascale = QtWidgets.QDoubleSpinBox(); sp_ascale.setRange(0.01, 0.5); sp_ascale.setValue(0.10); sp_ascale.setSingleStep(0.02)
+    arow.addWidget(sp_ascale)
+    btn_play = QtWidgets.QPushButton("▶ Animate"); btn_play.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
+    btn_stop = QtWidgets.QPushButton("⏹ Stop")
+    arow.addWidget(btn_play); arow.addWidget(btn_stop); arow.addStretch(1)
+    anl.addLayout(arow)
+    anl.addWidget(QtWidgets.QLabel(
+        "<i style='color:#64748b'>Los puntos oscilan según la forma modal. Baja complejidad = modo "
+        "estructural real; alta = sospechoso (forzado/armónico). Arrastre izq = girar.</i>"))
+    p_anim = pg.PlotWidget(viewBox=OrbitViewBox()); p_anim.setBackground("w"); p_anim.setAspectLocked(True)
+    p_anim.hideAxis("left"); p_anim.hideAxis("bottom"); p_anim.setMenuEnabled(False)
+    m_anim = Machine3DItem(); p_anim.addItem(m_anim)
+    anl.addWidget(p_anim, 1)
+    tabs.addTab(pg_anim, "Mode shapes")
+
+    st["_anim_phase"] = 0.0
+    anim_timer = QtCore.QTimer(win)
+
+    def _anim_reload_modes():
+        cb_amode.blockSignals(True); cb_amode.clear()
+        src = cb_asrc.currentText()
+        modes = (st["oma_fdd"].modes if (src.startswith("OMA") and st.get("oma_fdd")) else
+                 (st["ssi"].modes if (src == "SSI" and st.get("ssi")) else []))
+        cb_amode.addItems([f"{m.natural_frequency_hz:.2f} Hz" if hasattr(m, "natural_frequency_hz")
+                           else f"{m.frequency_hz:.2f} Hz" for m in modes])
+        cb_amode.blockSignals(False)
+
+    def _cur_shape():
+        src = cb_asrc.currentText(); i = cb_amode.currentIndex()
+        modes = (st["oma_fdd"].modes if (src.startswith("OMA") and st.get("oma_fdd")) else
+                 (st["ssi"].modes if (src == "SSI" and st.get("ssi")) else []))
+        if not (0 <= i < len(modes)):
+            return None
+        sh = np.asarray(getattr(modes[i], "mode_shape"), complex).ravel()
+        mx = np.max(np.abs(sh)) or 1.0
+        return sh / mx
+
+    def _anim_tick():
+        sh = _cur_shape()
+        if sh is None:
+            return
+        st["_anim_phase"] += 0.28
+        ph = np.exp(1j * st["_anim_phase"])
+        disp = (sp_ascale.value() * np.real(sh * ph)).tolist()
+        m_anim.set_disp(disp)
+    anim_timer.timeout.connect(_anim_tick)
+
+    def _anim_play():
+        _anim_reload_modes()
+        m_anim.set_view(st["layout"], np.radians(st["az"]), np.radians(st["el"]), -1)
+        p_anim.getViewBox().autoRange(padding=0.15)
+        anim_timer.start(45)
+
+    def _anim_stop():
+        anim_timer.stop(); m_anim.set_disp(None)
+
+    btn_play.clicked.connect(_anim_play); btn_stop.clicked.connect(_anim_stop)
+    cb_asrc.currentIndexChanged.connect(lambda *_: _anim_reload_modes())
+
+    def _anim_rotate(dx, dy):
+        st["az"] = (st["az"] + dx * 0.4) % 360.0
+        st["el"] = float(np.clip(st["el"] - dy * 0.4, 8.0, 88.0))
+        m_anim.set_view(st["layout"], np.radians(st["az"]), np.radians(st["el"]), -1)
+    p_anim.getViewBox().rotate.connect(_anim_rotate)
 
     return app, win
 
