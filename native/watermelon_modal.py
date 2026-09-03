@@ -1441,54 +1441,171 @@ def build_app(layout: OMALayout, simulated: bool = True):
         lbl_photos.setText(f"{len(st['_photos'])} photos")
     btn_photos.clicked.connect(_add_photos)
 
+    def _table_data(tbl, max_rows=40):
+        heads = [tbl.horizontalHeaderItem(c).text() if tbl.horizontalHeaderItem(c) else str(c)
+                 for c in range(tbl.columnCount())]
+        rows = []
+        for r in range(min(tbl.rowCount(), max_rows)):
+            row = []
+            for c in range(tbl.columnCount()):
+                it = tbl.item(r, c); w = tbl.cellWidget(r, c)
+                if it is not None:
+                    row.append(it.text())
+                elif hasattr(w, "currentText"):
+                    row.append(w.currentText())
+                elif hasattr(w, "isChecked"):
+                    row.append("✓" if w.isChecked() else "")
+                else:
+                    row.append("")
+            rows.append(row)
+        return heads, rows
+
+    def _shape_pngs(top=4):
+        """Renderiza las formas modales de los N modos más relevantes en 3D con color,
+        SIN sensores (como ARTeMIS). Devuelve [(caption, png)]."""
+        out = []
+        fdd = st.get("oma_fdd")
+        modes = list(getattr(fdd, "modes", []) or [])[:top]
+        if not modes:
+            return out
+        cb_asrc.setCurrentText("OMA (FDD)"); _anim_reload_modes()
+        st["_anim_geo"] = _anim_geometry()
+        pts, dirs = st["_anim_geo"]
+        m_anim.set_show_sensors(False)
+        m_anim.set_view(st["layout"], np.radians(st["az"]), np.radians(st["el"]), -1)
+        scale = 0.10
+        for i, m in enumerate(modes):
+            sh = np.asarray(m.mode_shape, complex).ravel()
+            mx = np.max(np.abs(sh)) or 1.0; sh = sh / mx
+            n = min(len(sh), len(pts))
+            if n == 0:
+                continue
+            amps = scale * np.real(sh[:n]); mags = scale * np.abs(sh[:n])
+            m_anim.set_disp(amps.tolist())
+            m_anim.set_anim({"pts": pts[:n], "dirs": dirs[:n], "amps": amps, "mags": mags, "mmax": float(scale)})
+            p_anim.getViewBox().autoRange(padding=0.2)
+            QtWidgets.QApplication.processEvents()
+            png = _grab_png(p_anim)
+            if png:
+                out.append((f"Figura. Forma modal — modo {m.natural_frequency_hz:.2f} Hz "
+                            f"(damping {m.damping_ratio_pct:.2f}%, complexity {m.complexity_pct:.0f}%). "
+                            "Verde = zona que menos se mueve, rojo = la que más.", png))
+        m_anim.set_anim(None); m_anim.set_disp(None); m_anim.set_show_sensors(True)
+        return out
+
+    def _auto_analysis(lay, fdd, cross_rows, ema_rows, verdict):
+        analysis, findings, recs = [], [], []
+        fmax = lay.fmax_hz
+        if fdd and fdd.modes:
+            fns = [m.natural_frequency_hz for m in fdd.modes]
+            analysis.append(f"Se identificaron {len(fns)} modos naturales por OMA (FDD) entre "
+                            f"{min(fns):.1f} y {max(fns):.1f} Hz.")
+        if st.get("ssi") and st["ssi"].modes:
+            analysis.append(f"SSI (subespacios, dominio del tiempo) confirma {len(st['ssi'].modes)} modos "
+                            "con incertidumbre (±) y amortiguamiento preciso — mayor confiabilidad.")
+        coinc = [c for c in cross_rows if c[4] == "Coincidence"]
+        if coinc:
+            analysis.append(f"Screening de resonancia: {len(coinc)} coincidencia(s) dentro de ±15% de la "
+                            "velocidad de operación (API 684) — zonas de interés dinámico.")
+            for c in coinc[:5]:
+                findings.append(f"El modo {c[0]} ({c[1]}) cruza a {c[2]} RPM (margen {c[3]}%) — posible "
+                                "resonancia cerca de la operación.")
+            freqs = ", ".join(sorted({r[0].split()[0] for r in coinc})[:6])
+            recs.append("Correlacionar amplitud y fase de la vibración vs velocidad en operación (API 684) "
+                        f"para los cruces detectados; evaluar rigidización/soporte si las amplitudes son altas.")
+        else:
+            analysis.append("Screening de resonancia: sin coincidencias relevantes dentro de ±15% de la "
+                            "velocidad de operación (API 684).")
+        if ema_rows:
+            analysis.append(f"La correlación EMA↔OMA confirma {len(ema_rows)} modo(s) como características "
+                            "dinámicas reales del conjunto (ISO 7626-6).")
+        hi = [m for m in (fdd.modes if fdd else []) if m.complexity_pct > 40]
+        for m in hi[:3]:
+            findings.append(f"El modo {m.natural_frequency_hz:.2f} Hz tiene complejidad alta "
+                            f"({m.complexity_pct:.0f}%) — verificar (posible armónico/espurio).")
+        if verdict.startswith("NO-GO"):
+            recs.insert(0, "REPETIR la medición antes de retirarse: la calidad de datos es insuficiente.")
+        if min(float(lay.duration_s), 60.0) < 300.0 and "OMA" in lay.test_modes:
+            recs.append("Repetir OMA con registro más largo (≥ 5 min) para mejor amortiguamiento/SSI.")
+        recs.append("Generar el reporte de análisis completo desde Watermelon System (web).")
+        return analysis, findings, recs
+
     def _gen_preliminary():
-        _table_to_layout(); lay = st["layout"]
+        _table_to_layout(); lay = st["layout"]; fdd = st.get("oma_fdd")
         rows, verdict = _compute_quality()
-        # figuras capturadas de la app (sin kaleido)
-        figs = []
-        sv_png = _grab_png(p_svd)
-        if sv_png and st.get("oma_fdd"):
-            figs.append(("Figura. Valores singulares (FDD).", sv_png))
         try:
             _refresh_campbell()
         except Exception:  # noqa: BLE001
             pass
-        cam_png = _grab_png(p_cam)
-        if cam_png:
-            figs.append(("Figura. Diagrama de Campbell (API 684).", cam_png))
-        geo_png = _grab_png(vgeo["plot"])
-        if geo_png:
-            figs.append(("Figura. Máquina y ubicación de sensores.", geo_png))
-        # modos
-        modes_rows = []
-        fdd = st.get("oma_fdd")
-        if fdd:
-            modes_rows = [[f"{m.natural_frequency_hz:.2f}", f"{m.damping_ratio_pct:.2f}",
-                           f"{m.complexity_pct:.0f}", m.classification] for m in fdd.modes]
-        # cruces campbell + correlacion
-        cross_rows = []
-        try:
-            from core.modal.campbell import compute_crossings, SpeedBand
-            mh = [m.natural_frequency_hz for m in fdd.modes] if fdd else []
-            if mh:
-                rpm = lay.running_speed_rpm or 1185.0
-                bands = [SpeedBand(rpm, 0.15 * rpm, "Operation"), SpeedBand(rpm / 2, 0.075 * rpm, "½ speed")]
-                for c in compute_crossings(mh, 0, max(rpm * 1.4, 1500), bands=bands):
-                    if c.severity in ("coincidence", "near"):
-                        cross_rows.append([c.mode_label, f"{c.order:g}×", f"{c.crossing_rpm:.0f}",
-                                           f"{c.sep_margin_pct:.1f}",
-                                           "Coincidence" if c.severity == "coincidence" else "Near"])
-        except Exception:  # noqa: BLE001
-            pass
-        ema_rows = []
+        sections = []
+        # 1) Configuration — dibujo 3D + summary
+        _refresh_summary()
+        cfg_figs = []
+        gp = _grab_png(vgeo["plot"])
+        if gp:
+            cfg_figs.append(("Figura. Máquina y ubicación de sensores (3D).", gp))
+        sh, sr = _table_data(tbl_sum)
+        sections.append({"title": "Configuration", "figures": cfg_figs,
+                         "table": {"headers": sh, "rows": sr}})
+        # 2) EMA (si hay) + OMA densidad espectral
         res = st["acc"].result()
+        if "EMA" in lay.test_modes and res is not None:
+            efigs = []
+            for w, capt in ((p_frf, "Figura. FRF (movilidad) — H1."), (p_coh, "Figura. Coherencia."),
+                            (p_nyq, "Figura. Nyquist.")):
+                png = _grab_png(w)
+                if png:
+                    efigs.append((capt, png))
+            eh, er = _table_data(tbl_modes)
+            sections.append({"title": "EMA — impact test", "figures": efigs,
+                             "table": {"headers": eh, "rows": er}})
+        if fdd:
+            svg = _grab_png(p_svd)
+            oh, orr = _table_data(tbl_om)
+            sections.append({"title": "OMA — spectral density (FDD)",
+                             "figures": [("Figura. Valores singulares (FDD) — todos los canales.", svg)] if svg else [],
+                             "table": {"headers": oh, "rows": orr}})
+        # 3) Modes (EMA identify table already in EMA); add generic modes table from OMA
+        # 4) Comparative (si hay filas)
+        if tbl_cmp.rowCount() > 0:
+            ch2, cr2 = _table_data(tbl_cmp)
+            sections.append({"title": "Comparative — EMA vs OMA", "table": {"headers": ch2, "rows": cr2}})
+        # 5) Campbell — gráfico primero, luego tabla
+        cross_rows = []
+        cam_png = _grab_png(p_cam)
+        chh, crr = _table_data(tbl_cam)
+        cross_rows = crr
+        sections.append({"title": "Campbell — resonance screening (API 684)",
+                         "intro": "Cruces frecuencia natural ↔ orden con la RPM de la máquina y margen de separación.",
+                         "figures": [("Figura. Diagrama de Campbell (API 684).", cam_png)] if cam_png else [],
+                         "table": {"headers": chh or ["Mode", "Order", "RPM", "Margin%", "Status"], "rows": crr}})
+        # 6) SSI — con explicación
+        if st.get("ssi") and st["ssi"].modes:
+            sp = _grab_png(p_stab); shh, srr = _table_data(tbl_ssi)
+            sections.append({"title": "SSI (subspace) — modes with uncertainty",
+                             "intro": ("SSI identifica los modos en el dominio del tiempo: da amortiguamiento "
+                                       "preciso y una INCERTIDUMBRE (±) por modo. Es el resultado más confiable "
+                                       "(validación de modelo, API 684)."),
+                             "figures": [("Figura. Diagrama de estabilización (SSI).", sp)] if sp else [],
+                             "table": {"headers": shh, "rows": srr}})
+        # 7) Mode shapes — 3-4 modos relevantes en 3D con color, sin sensores
+        shp = _shape_pngs(top=4)
+        if shp:
+            sections.append({"title": "Mode shapes — 3D animation snapshots", "figures": shp})
+
+        # correlación EMA-OMA (para el análisis)
+        ema_rows = []
         if res is not None and fdd:
             from core.modal.ema_oma_correlation import correlate
             ema = [mp.frequency_hz for mp in modes_from_frf(res, fmin=5, fmax=lay.fmax_hz)]
             oma = [m.natural_frequency_hz for m in fdd.modes]
             for mm in correlate(ema, oma, tol_hz=2.5):
                 ema_rows.append([f"{mm.ema_hz:.2f}", f"{mm.oma_hz:.3f}", f"{mm.delta_hz:.3f}"])
-        # logo
+
+        analysis, af, ar = _auto_analysis(lay, fdd, cross_rows, ema_rows, verdict)
+        findings = [ln for ln in e_find.toPlainText().splitlines() if ln.strip()] + af
+        recs = [ln for ln in e_rec.toPlainText().splitlines() if ln.strip()] + ar
+
         logo = None
         for cand in ("assets/watermelon_logo.png",
                      os.path.join(getattr(sys, "_MEIPASS", "."), "assets", "watermelon_logo.png")):
@@ -1498,19 +1615,15 @@ def build_app(layout: OMALayout, simulated: bool = True):
             except Exception:  # noqa: BLE001
                 continue
         import datetime as _dt
-        meta = {"title": "Preliminary Modal Report", "asset": lay.name,
-                "machine_type": lay.machine_type, "client": lay.client, "location": lay.location,
-                "test_type": "/".join(lay.test_modes), "rpm": f"{lay.running_speed_rpm:.0f}",
-                "technician": e_tech.text(), "reviewer": e_rev.text(),
+        meta = {"title": "Preliminary Modal Report", "asset": lay.name, "machine_type": lay.machine_type,
+                "client": lay.client, "location": lay.location, "test_type": "/".join(lay.test_modes),
+                "rpm": f"{lay.running_speed_rpm:.0f}", "technician": e_tech.text(), "reviewer": e_rev.text(),
                 "date": _dt.date.today().isoformat(), "verdict": verdict}
-        findings = [ln for ln in e_find.toPlainText().splitlines() if ln.strip()]
-        recs = [ln for ln in e_rec.toPlainText().splitlines() if ln.strip()]
         try:
             from core.modal.preliminary_report import build_preliminary_pdf
-            pdf = build_preliminary_pdf(meta=meta, quality=rows, modes=modes_rows, crossings=cross_rows,
-                                        ema_oma=ema_rows, figures=figs, findings=findings,
-                                        recommendations=recs, photos=st.get("_photos", []),
-                                        run_id=st.get("run_id", ""), logo_png=logo)
+            pdf = build_preliminary_pdf(meta=meta, quality=rows, sections=sections, analysis=analysis,
+                                        findings=findings, recommendations=recs,
+                                        photos=st.get("_photos", []), run_id=st.get("run_id", ""), logo_png=logo)
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.critical(win, "Preliminary", f"Error: {type(e).__name__}: {e}"); return
         path, _ = QtWidgets.QFileDialog.getSaveFileName(win, "Save preliminary report",
