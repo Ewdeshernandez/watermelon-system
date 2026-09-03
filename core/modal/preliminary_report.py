@@ -29,6 +29,32 @@ def _status_color(s: str) -> str:
     return AMBER
 
 
+_T = {
+    "en": {"sub": "Automatic field preliminary — subject to specialist validation",
+           "ident": "Identification", "quality": "Data quality — Go / No-Go (ISO 7626-5)",
+           "check": "Check", "status": "Status", "detail": "Detail", "overall": "Overall",
+           "analysis": "Automatic analysis", "findings": "Findings",
+           "recs": "Recommendations", "evidence": "Field evidence",
+           "asset": "Asset", "client": "Client", "type": "Type", "location": "Location",
+           "test": "Test", "rpm": "Running speed", "tech": "Technician", "rev": "Reviewed by",
+           "date": "Date", "equip": "Equipment", "prep": "Prepared by", "rev2": "Reviewed by",
+           "disc": ("<b>PRELIMINARY REPORT</b> — valid only for the conditions present during the service. "
+                    "Subject to specialist validation and to the full analysis report generated from Watermelon System (web). "
+                    "Cloud run ID: <b>{rid}</b>. Standards: ISO 7626 · ISO 20816 · API 684 · API 670.")},
+    "es": {"sub": "Preliminar de campo automático — sujeto a validación de especialista",
+           "ident": "Identificación", "quality": "Calidad de datos — Go / No-Go (ISO 7626-5)",
+           "check": "Verificación", "status": "Estado", "detail": "Detalle", "overall": "Veredicto",
+           "analysis": "Análisis automático", "findings": "Hallazgos",
+           "recs": "Recomendaciones", "evidence": "Evidencia de campo",
+           "asset": "Activo", "client": "Cliente", "type": "Tipo", "location": "Ubicación",
+           "test": "Ensayo", "rpm": "Velocidad", "tech": "Técnico", "rev": "Revisado por",
+           "date": "Fecha", "equip": "Equipo", "prep": "Preparado por", "rev2": "Revisado por",
+           "disc": ("<b>REPORTE PRELIMINAR</b> — válido únicamente para las condiciones presentes durante el servicio. "
+                    "Sujeto a validación de especialista y al reporte de análisis completo generado desde Watermelon System (web). "
+                    "ID de corrida en la nube: <b>{rid}</b>. Normas: ISO 7626 · ISO 20816 · API 684 · API 670.")},
+}
+
+
 def build_preliminary_pdf(
     *,
     meta: Dict[str, Any],
@@ -40,7 +66,9 @@ def build_preliminary_pdf(
     photos: Optional[List[bytes]] = None,
     run_id: str = "",
     logo_png: Optional[bytes] = None,
+    lang: str = "es",
 ) -> bytes:
+    T = _T.get(lang, _T["es"])
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.units import cm
     from reportlab.lib import colors
@@ -85,8 +113,8 @@ def build_preliminary_pdf(
     # ---- Encabezado ----
     logo_flow = _img(logo_png, 3.2, 1.6) if logo_png else Paragraph("<b>Watermelon</b>", H)
     title_cell = Paragraph(
-        f"<font color='{NAVY}' size=15><b>Preliminary Modal Report</b></font><br/>"
-        f"<font color='#475569' size=9>{meta.get('subtitle', 'Automatic field preliminary — subject to specialist validation')}</font>",
+        f"<font color='{NAVY}' size=15><b>{meta.get('title', 'Preliminary Modal Report')}</b></font><br/>"
+        f"<font color='#475569' size=9>{meta.get('subtitle', T['sub'])}</font>",
         body)
     head = Table([[logo_flow, title_cell]], colWidths=[3.6 * cm, 12.4 * cm])
     head.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
@@ -94,12 +122,12 @@ def build_preliminary_pdf(
     story.append(HRFlowable(width="100%", thickness=2.4, color=colors.HexColor(GREEN), spaceBefore=4, spaceAfter=8))
 
     # ---- 1. Identificación ----
-    story.append(Paragraph("1. Identification", H))
-    idrows = [["Asset", meta.get("asset", ""), "Client", meta.get("client", "")],
-              ["Type", meta.get("machine_type", ""), "Location", meta.get("location", "")],
-              ["Test", meta.get("test_type", ""), "Running speed", f"{meta.get('rpm', '')} RPM"],
-              ["Technician", meta.get("technician", ""), "Reviewed by", meta.get("reviewer", "")],
-              ["Date", meta.get("date", ""), "Equipment", meta.get("equipment", "NI 9234 / cDAQ-9178")]]
+    story.append(Paragraph(f"1. {T['ident']}", H))
+    idrows = [[T["asset"], meta.get("asset", ""), T["client"], meta.get("client", "")],
+              [T["type"], meta.get("machine_type", ""), T["location"], meta.get("location", "")],
+              [T["test"], meta.get("test_type", ""), T["rpm"], f"{meta.get('rpm', '')} RPM"],
+              [T["tech"], meta.get("technician", ""), T["rev"], meta.get("reviewer", "")],
+              [T["date"], meta.get("date", ""), T["equip"], meta.get("equipment", "NI 9234 / cDAQ-9178")]]
     t = Table([[Paragraph(f"<b>{a}</b>", small), Paragraph(str(b), body),
                 Paragraph(f"<b>{c}</b>", small), Paragraph(str(d), body)] for a, b, c, d in idrows],
               colWidths=[2.6 * cm, 5.4 * cm, 2.6 * cm, 5.4 * cm])
@@ -110,9 +138,9 @@ def build_preliminary_pdf(
     story.append(t); story.append(Spacer(1, 8))
 
     # ---- 2. Go/No-Go ----
-    story.append(Paragraph("2. Data quality — Go / No-Go (ISO 7626-5)", H))
+    story.append(Paragraph(f"2. {T['quality']}", H))
     qrows = [[c, s, d] for c, s, d in quality]
-    qt_head = ["Check", "Status", "Detail"]
+    qt_head = [T["check"], T["status"], T["detail"]]
     qb = [[Paragraph(f"<b><font color='white'>{h}</font></b>", small) for h in qt_head]]
     for c, s, d in quality:
         qb.append([Paragraph(c, body), Paragraph(f"<b><font color='{_status_color(s)}'>{s}</font></b>", body),
@@ -126,12 +154,12 @@ def build_preliminary_pdf(
     verdict = meta.get("verdict", "")
     if verdict:
         story.append(Spacer(1, 4))
-        story.append(Paragraph(f"<b>Overall: <font color='{_status_color(verdict)}'>{verdict}</font></b>", body))
+        story.append(Paragraph(f"<b>{T['overall']}: <font color='{_status_color(verdict)}'>{verdict}</font></b>", body))
     story.append(Spacer(1, 8))
 
     # ---- 3. Automatic analysis ----
     if analysis:
-        story.append(Paragraph("3. Automatic analysis", H))
+        story.append(Paragraph(f"3. {T['analysis']}", H))
         for a in analysis:
             story.append(Paragraph("• " + a, body))
         story.append(Spacer(1, 6))
@@ -157,19 +185,19 @@ def build_preliminary_pdf(
 
     # ---- Findings + recommendations ----
     if findings:
-        story.append(Paragraph(f"{n}. Findings", H)); n += 1
+        story.append(Paragraph(f"{n}. {T['findings']}", H)); n += 1
         for i, f in enumerate(findings, 1):
             story.append(Paragraph(f"{i}. {f}", body))
         story.append(Spacer(1, 4))
     if recommendations:
-        story.append(Paragraph(f"{n}. Recommendations", H)); n += 1
+        story.append(Paragraph(f"{n}. {T['recs']}", H)); n += 1
         for i, r in enumerate(recommendations, 1):
             story.append(Paragraph(f"{i}. {r}", body))
         story.append(Spacer(1, 6))
 
     # ---- Evidence ----
     if photos:
-        story.append(Paragraph(f"{n}. Field evidence", H)); n += 1
+        story.append(Paragraph(f"{n}. {T['evidence']}", H)); n += 1
         row = []
         for ph in photos[:8]:
             im = _img(ph, 7.6, 5.2)
@@ -184,12 +212,10 @@ def build_preliminary_pdf(
     # ---- Cierre ----
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor(GRAY), spaceBefore=6, spaceAfter=4))
     story.append(Paragraph(
-        "<b>PRELIMINARY REPORT</b> — valid only for the conditions present during the service. "
-        "Subject to specialist validation and to the full analysis report generated from Watermelon System (web). "
-        f"Cloud run ID: <b>{run_id or '—'}</b>. Standards: ISO 7626 · ISO 20816 · API 684 · API 670.", small))
+        T["disc"].format(rid=run_id or "—"), small))
     story.append(Spacer(1, 10))
-    sig = Table([[Paragraph("_______________________________<br/>Prepared by: " + meta.get("technician", ""), small),
-                  Paragraph("_______________________________<br/>Reviewed by: " + meta.get("reviewer", ""), small)]],
+    sig = Table([[Paragraph("_______________________________<br/>" + T["prep"] + ": " + meta.get("technician", ""), small),
+                  Paragraph("_______________________________<br/>" + T["rev2"] + ": " + meta.get("reviewer", ""), small)]],
                 colWidths=[8 * cm, 8 * cm])
     story.append(sig)
 
