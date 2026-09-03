@@ -99,24 +99,24 @@ def _cuboid_faces(c):
 
 
 def _field_disp(v, anim):
-    """Desplazamiento interpolado (IDW) en el vértice v desde los sensores.
-    Devuelve (vector_desplazamiento(3,), magnitud)."""
-    pts = anim["pts"]; dirs = anim["dirs"]; amps = anim["amps"]
+    """IDW en el vértice v: posición (desde amps instantáneos) + magnitud de COLOR
+    (desde mags = amplitud/envolvente por sensor, para colorear como ARTeMIS)."""
+    pts = anim["pts"]; dirs = anim["dirs"]; amps = anim["amps"]; mags = anim.get("mags")
     if len(pts) == 0:
         return np.zeros(3), 0.0
     diff = pts - v[None, :]
     d2 = np.sum(diff * diff, axis=1) + 1e-4
-    w = 1.0 / d2
-    contrib = (amps[:, None] * dirs)                # cada sensor desplaza en su DOF
-    disp = (w[:, None] * contrib).sum(axis=0) / w.sum()
-    return disp, float(np.linalg.norm(disp))
+    w = 1.0 / d2; wsum = w.sum()
+    disp = (w[:, None] * (amps[:, None] * dirs)).sum(axis=0) / wsum
+    colmag = float((w * mags).sum() / wsum) if mags is not None else float(np.linalg.norm(disp))
+    return disp, colmag
 
 
 def _heat_qcolor(t):
-    """Colormap informativo azul→cian→verde→amarillo→rojo (t en [0,1])."""
+    """Colormap informativo tipo ARTeMIS: VERDE (no vibra) → ámbar → ROJO (más vibra)."""
     t = max(0.0, min(1.0, t))
-    stops = [(0.0, (33, 102, 172)), (0.25, (67, 147, 195)), (0.5, (255, 255, 191)),
-             (0.75, (244, 165, 130)), (1.0, (178, 24, 43))]
+    stops = [(0.0, (22, 163, 74)), (0.35, (132, 204, 22)), (0.6, (245, 158, 11)),
+             (0.8, (249, 115, 22)), (1.0, (220, 38, 38))]
     for i in range(len(stops) - 1):
         t0, c0 = stops[i]; t1, c1 = stops[i + 1]
         if t <= t1:
@@ -132,7 +132,8 @@ class Machine3DItem(pg.GraphicsObject):
         super().__init__()
         self.layout = None; self.az = 0.9; self.el = 0.5; self.sel = -1
         self.disp = None          # desplazamiento animado por punto activo (a lo largo del DOF)
-        self.anim = None          # {pts(Nx3), dirs(Nx3), amps(N), mmax} → deforma+colorea la máquina
+        self.anim = None          # {pts(Nx3), dirs(Nx3), amps(N), mags(N), mmax} → deforma+colorea
+        self.show_sensors = True  # mostrar/ocultar marcadores de sensores
         self._rect = QtCore.QRectF(-1, -1, 2, 2)
 
     def set_view(self, layout, az, el, sel):
@@ -144,6 +145,9 @@ class Machine3DItem(pg.GraphicsObject):
 
     def set_anim(self, anim):
         self.anim = anim; self.update()
+
+    def set_show_sensors(self, on):
+        self.show_sensors = bool(on); self.update()
 
     def _recompute(self):
         xs, ys = [0.0], [0.0]
@@ -195,6 +199,8 @@ class Machine3DItem(pg.GraphicsObject):
             if not mp.active:
                 continue
             ai += 1
+            if not self.show_sensors:                    # animación: solo la pieza en movimiento
+                continue
             wy = 0.20
             d = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}.get(mp.axis, (0, 0, 1))
             sg = -1.0 if mp.dof.startswith("-") else 1.0
@@ -666,6 +672,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
         _draw_train(fit=False)
 
     def _auto_arrange():
+        """Alineación GENTIL: respeta dónde dejaste cada equipo; solo destraba solapes
+        mínimos entre equipos rotativos (empujando a la derecha lo justo) y reengancha
+        los sensores a su equipo. NO re-fluye al origen."""
         lay = st["layout"]; comps = lay.machine_components
         if not comps:
             return
@@ -678,16 +687,15 @@ def build_app(layout: OMALayout, simulated: bool = True):
         for mp in lay.points:
             c = owner(mp); Lx = (c.x1 - c.x0) or 1.0; Lz = (c.y1 - c.y0) or 1.0
             rel.append((mp, id(c), (mp.x_norm - c.x0) / Lx, (mp.y_norm - c.y0) / Lz))
+        # destrabar solapes SOLO entre el tren rotativo (motor/acople/bomba…), sin mover a origen
         drive = sorted([c for c in comps if not is_pipe(c.kind)], key=lambda c: c.x0)
-        pipes = [c for c in comps if is_pipe(c.kind)]
-        x = 0.03
-        for c in drive:
-            L = c.x1 - c.x0; c.x0 = x; c.x1 = x + L; x = c.x1
-        px = x + 0.02
-        for c in pipes:
-            L = c.x1 - c.x0; c.x0 = px; c.x1 = px + L; px = c.x1 + 0.02
+        for k in range(1, len(drive)):
+            prev, cur = drive[k - 1], drive[k]
+            if cur.x0 < prev.x1:                      # se montan → empujar cur a la derecha lo justo
+                shift = prev.x1 - cur.x0
+                cur.x0 += shift; cur.x1 += shift
         idmap = {id(c): c for c in comps}
-        for (mp, cid, fx, fz) in rel:
+        for (mp, cid, fx, fz) in rel:                # sensores siguen a su equipo
             c = idmap.get(cid)
             if c:
                 mp.x_norm = c.x0 + fx * (c.x1 - c.x0); mp.y_norm = c.y0 + fz * (c.y1 - c.y0)
@@ -1197,6 +1205,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     arow.addWidget(QtWidgets.QLabel("Scale:"))
     sp_ascale = QtWidgets.QDoubleSpinBox(); sp_ascale.setRange(0.01, 0.5); sp_ascale.setValue(0.10); sp_ascale.setSingleStep(0.02)
     arow.addWidget(sp_ascale)
+    chk_showsen = QtWidgets.QCheckBox("Show sensors"); chk_showsen.setChecked(False)
+    arow.addWidget(chk_showsen)
     btn_play = QtWidgets.QPushButton("▶ Animate"); btn_play.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
     btn_stop = QtWidgets.QPushButton("⏹ Stop")
     arow.addWidget(btn_play); arow.addWidget(btn_stop); arow.addStretch(1)
@@ -1248,21 +1258,25 @@ def build_app(layout: OMALayout, simulated: bool = True):
         st["_anim_phase"] += 0.26
         ph = np.exp(1j * st["_anim_phase"])
         scale = sp_ascale.value()
-        amps = scale * np.real(sh * ph)
+        amps = scale * np.real(sh * ph)         # posición instantánea (oscila)
+        mags = scale * np.abs(sh)               # amplitud/envolvente (color, estable)
         pts, dirs = st.get("_anim_geo", (np.zeros((0, 3)), np.zeros((0, 3))))
         n = min(len(amps), len(pts))
         if n == 0:
             return
         m_anim.set_disp(amps[:n].tolist())
-        m_anim.set_anim({"pts": pts[:n], "dirs": dirs[:n], "amps": amps[:n], "mmax": scale})
+        m_anim.set_anim({"pts": pts[:n], "dirs": dirs[:n], "amps": amps[:n],
+                         "mags": mags[:n], "mmax": float(scale)})
     anim_timer.timeout.connect(_anim_tick)
 
     def _anim_play():
         _anim_reload_modes()
         st["_anim_geo"] = _anim_geometry()
+        m_anim.set_show_sensors(chk_showsen.isChecked())
         m_anim.set_view(st["layout"], np.radians(st["az"]), np.radians(st["el"]), -1)
         p_anim.getViewBox().autoRange(padding=0.2)
         anim_timer.start(45)
+    chk_showsen.toggled.connect(lambda on: m_anim.set_show_sensors(on))
 
     def _anim_stop():
         anim_timer.stop(); m_anim.set_disp(None); m_anim.set_anim(None)
