@@ -21,6 +21,7 @@ in core.modal.* (tested).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import traceback
 from typing import List, Optional
@@ -1343,6 +1344,182 @@ def build_app(layout: OMALayout, simulated: bool = True):
         st["el"] = float(np.clip(st["el"] - dy * 0.4, 8.0, 88.0))
         m_anim.set_view(st["layout"], np.radians(st["az"]), np.radians(st["el"]), -1)
     p_anim.getViewBox().rotate.connect(_anim_rotate)
+
+    # =====================================================================
+    # PRELIMINARY REPORT — entregable de campo (Go/No-Go + resultados + firma)
+    # =====================================================================
+    pg_prel = QtWidgets.QWidget(); prl = QtWidgets.QVBoxLayout(pg_prel)
+    prl.addWidget(QtWidgets.QLabel(
+        "<b>Preliminary field report</b> — quick same-day deliverable: data-quality Go/No-Go + "
+        "preliminary results + resonance screening + findings. The full report is generated from the web."))
+    pf = QtWidgets.QFormLayout()
+    e_tech = QtWidgets.QLineEdit(); e_rev = QtWidgets.QLineEdit()
+    e_find = QtWidgets.QPlainTextEdit(); e_find.setPlaceholderText("One finding per line…"); e_find.setMaximumHeight(70)
+    e_rec = QtWidgets.QPlainTextEdit(); e_rec.setPlaceholderText("One recommendation per line…"); e_rec.setMaximumHeight(70)
+    pf.addRow("Technician:", e_tech); pf.addRow("Reviewed by:", e_rev)
+    pf.addRow("Findings:", e_find); pf.addRow("Recommendations:", e_rec)
+    prl.addLayout(pf)
+    prow2 = QtWidgets.QHBoxLayout()
+    btn_photos = QtWidgets.QPushButton("🖼 Add photos")
+    lbl_photos = QtWidgets.QLabel("0 photos")
+    btn_qual = QtWidgets.QPushButton("↻ Compute data quality")
+    btn_prel = QtWidgets.QPushButton("📄 Generate preliminary PDF"); btn_prel.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
+    prow2.addWidget(btn_photos); prow2.addWidget(lbl_photos); prow2.addStretch(1)
+    prow2.addWidget(btn_qual); prow2.addWidget(btn_prel)
+    prl.addLayout(prow2)
+    tbl_qual = QtWidgets.QTableWidget(0, 3); tbl_qual.setHorizontalHeaderLabels(["Check", "Status", "Detail"])
+    tbl_qual.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_qual.verticalHeader().setVisible(False)
+    prl.addWidget(tbl_qual, 1)
+    lbl_prel = QtWidgets.QLabel(""); lbl_prel.setWordWrap(True); prl.addWidget(lbl_prel)
+    tabs.addTab(pg_prel, "Preliminary report")
+    st["_photos"] = []
+
+    def _grab_png(widget):
+        try:
+            pix = widget.grab()
+            ba = QtCore.QByteArray(); buf = QtCore.QBuffer(ba); buf.open(QtCore.QIODevice.WriteOnly)
+            pix.save(buf, "PNG"); return bytes(ba)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _compute_quality():
+        lay = st["layout"]; rows = []; fails = 0; warns = 0
+        fdd = st.get("oma_fdd"); res = st["acc"].result()
+        # OMA
+        if "OMA" in lay.test_modes:
+            ok = fdd is not None and getattr(fdd, "modes", None)
+            rows.append(("OMA captured & modes found", "PASS" if ok else "FAIL",
+                         f"{len(fdd.modes)} modes" if ok else "no OMA run"))
+            fails += 0 if ok else 1
+            nch = lay.n_channels()
+            rows.append(("Channels active", "PASS" if nch >= 3 else "WARN", f"{nch} channels"))
+            warns += 0 if nch >= 3 else 1
+            dur = min(float(lay.duration_s), 60.0)
+            long_ok = dur >= 300.0
+            rows.append(("OMA duration adequate (ISO/Brincker)", "PASS" if long_ok else "WARN",
+                         f"{dur:.0f} s (recomm. ≥ 300 s)"))
+            warns += 0 if long_ok else 1
+        # EMA
+        if "EMA" in lay.test_modes:
+            navg = st["acc"].count; tgt = st.get("target", 5)
+            rows.append(("EMA averages ≥ target", "PASS" if navg >= tgt else "WARN", f"{navg}/{tgt} averages"))
+            warns += 0 if navg >= tgt else 1
+            if res is not None:
+                band = (res.frequencies_hz >= 5) & (res.frequencies_hz <= lay.fmax_hz)
+                mn = float(res.coherence[band].min()) if band.any() else 0.0
+                good = mn >= 0.7
+                rows.append(("Coherence in band ≥ 0.7", "PASS" if good else "WARN", f"min {mn:.2f}"))
+                warns += 0 if good else 1
+            else:
+                rows.append(("EMA coherence", "FAIL", "no accepted hits")); fails += 1
+        if not rows:
+            rows.append(("Test type", "WARN", "select EMA/OMA in Machine"))
+        tbl_qual.setRowCount(0)
+        for chk, sta, det in rows:
+            r = tbl_qual.rowCount(); tbl_qual.insertRow(r)
+            for cc, v in enumerate([chk, sta, det]):
+                it = QtWidgets.QTableWidgetItem(v)
+                if cc == 1:
+                    col = GREEN if sta == "PASS" else (RED if sta == "FAIL" else AMBER)
+                    it.setForeground(QtGui.QBrush(QtGui.QColor(col)))
+                tbl_qual.setItem(r, cc, it)
+        verdict = ("NO-GO — re-measure" if fails else ("GO with warnings" if warns else "GO — data acceptable"))
+        st["_verdict"] = verdict
+        lbl_prel.setText(f"Data-quality verdict: {verdict}")
+        lbl_prel.setStyleSheet(f"color:{RED if fails else (AMBER if warns else GREEN)};font-weight:800;")
+        return rows, verdict
+    btn_qual.clicked.connect(_compute_quality)
+
+    def _add_photos():
+        paths, _ = QtWidgets.QFileDialog.getOpenFileNames(win, "Add photos", "", "Images (*.png *.jpg *.jpeg)")
+        for p in paths:
+            try:
+                with open(p, "rb") as fh:
+                    st["_photos"].append(fh.read())
+            except Exception:  # noqa: BLE001
+                pass
+        lbl_photos.setText(f"{len(st['_photos'])} photos")
+    btn_photos.clicked.connect(_add_photos)
+
+    def _gen_preliminary():
+        _table_to_layout(); lay = st["layout"]
+        rows, verdict = _compute_quality()
+        # figuras capturadas de la app (sin kaleido)
+        figs = []
+        sv_png = _grab_png(p_svd)
+        if sv_png and st.get("oma_fdd"):
+            figs.append(("Figura. Valores singulares (FDD).", sv_png))
+        try:
+            _refresh_campbell()
+        except Exception:  # noqa: BLE001
+            pass
+        cam_png = _grab_png(p_cam)
+        if cam_png:
+            figs.append(("Figura. Diagrama de Campbell (API 684).", cam_png))
+        geo_png = _grab_png(vgeo["plot"])
+        if geo_png:
+            figs.append(("Figura. Máquina y ubicación de sensores.", geo_png))
+        # modos
+        modes_rows = []
+        fdd = st.get("oma_fdd")
+        if fdd:
+            modes_rows = [[f"{m.natural_frequency_hz:.2f}", f"{m.damping_ratio_pct:.2f}",
+                           f"{m.complexity_pct:.0f}", m.classification] for m in fdd.modes]
+        # cruces campbell + correlacion
+        cross_rows = []
+        try:
+            from core.modal.campbell import compute_crossings, SpeedBand
+            mh = [m.natural_frequency_hz for m in fdd.modes] if fdd else []
+            if mh:
+                rpm = lay.running_speed_rpm or 1185.0
+                bands = [SpeedBand(rpm, 0.15 * rpm, "Operation"), SpeedBand(rpm / 2, 0.075 * rpm, "½ speed")]
+                for c in compute_crossings(mh, 0, max(rpm * 1.4, 1500), bands=bands):
+                    if c.severity in ("coincidence", "near"):
+                        cross_rows.append([c.mode_label, f"{c.order:g}×", f"{c.crossing_rpm:.0f}",
+                                           f"{c.sep_margin_pct:.1f}",
+                                           "Coincidence" if c.severity == "coincidence" else "Near"])
+        except Exception:  # noqa: BLE001
+            pass
+        ema_rows = []
+        res = st["acc"].result()
+        if res is not None and fdd:
+            from core.modal.ema_oma_correlation import correlate
+            ema = [mp.frequency_hz for mp in modes_from_frf(res, fmin=5, fmax=lay.fmax_hz)]
+            oma = [m.natural_frequency_hz for m in fdd.modes]
+            for mm in correlate(ema, oma, tol_hz=2.5):
+                ema_rows.append([f"{mm.ema_hz:.2f}", f"{mm.oma_hz:.3f}", f"{mm.delta_hz:.3f}"])
+        # logo
+        logo = None
+        for cand in ("assets/watermelon_logo.png",
+                     os.path.join(getattr(sys, "_MEIPASS", "."), "assets", "watermelon_logo.png")):
+            try:
+                with open(cand, "rb") as fh:
+                    logo = fh.read(); break
+            except Exception:  # noqa: BLE001
+                continue
+        import datetime as _dt
+        meta = {"title": "Preliminary Modal Report", "asset": lay.name,
+                "machine_type": lay.machine_type, "client": lay.client, "location": lay.location,
+                "test_type": "/".join(lay.test_modes), "rpm": f"{lay.running_speed_rpm:.0f}",
+                "technician": e_tech.text(), "reviewer": e_rev.text(),
+                "date": _dt.date.today().isoformat(), "verdict": verdict}
+        findings = [ln for ln in e_find.toPlainText().splitlines() if ln.strip()]
+        recs = [ln for ln in e_rec.toPlainText().splitlines() if ln.strip()]
+        try:
+            from core.modal.preliminary_report import build_preliminary_pdf
+            pdf = build_preliminary_pdf(meta=meta, quality=rows, modes=modes_rows, crossings=cross_rows,
+                                        ema_oma=ema_rows, figures=figs, findings=findings,
+                                        recommendations=recs, photos=st.get("_photos", []),
+                                        run_id=st.get("run_id", ""), logo_png=logo)
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QMessageBox.critical(win, "Preliminary", f"Error: {type(e).__name__}: {e}"); return
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(win, "Save preliminary report",
+                                                        f"Preliminary_{lay.name}.pdf", "PDF (*.pdf)")
+        if path:
+            with open(path, "wb") as fh:
+                fh.write(pdf)
+            QtWidgets.QMessageBox.information(win, "Preliminary", f"✅ Saved: {path}")
+    btn_prel.clicked.connect(_gen_preliminary)
 
     return app, win
 
