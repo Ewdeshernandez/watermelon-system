@@ -98,6 +98,19 @@ def _cuboid_faces(c):
     return [[P[i] for i in f] for f in F]
 
 
+def _subdivide_quad(q, n):
+    """Subdivide un quad (4 esquinas) en n×n sub-quads (bilineal) → malla fina."""
+    p0, p1, p2, p3 = [np.array(p, float) for p in q]
+    def bilin(u, v):
+        return (1 - u) * (1 - v) * p0 + u * (1 - v) * p1 + u * v * p2 + (1 - u) * v * p3
+    subs = []
+    for i in range(n):
+        for j in range(n):
+            u0, u1, v0, v1 = i / n, (i + 1) / n, j / n, (j + 1) / n
+            subs.append([bilin(u0, v0), bilin(u1, v0), bilin(u1, v1), bilin(u0, v1)])
+    return subs
+
+
 def _field_disp(v, anim):
     """IDW en el vértice v: posición (desde amps instantáneos) + magnitud de COLOR
     (desde mags = amplitud/envolvente por sensor, para colorear como ARTeMIS)."""
@@ -173,19 +186,22 @@ class Machine3DItem(pg.GraphicsObject):
         for c in self.layout.machine_components:
             base = QtGui.QColor(_comp_color(c.kind))
             for f in _cuboid_faces(c):
-                colmag = None
-                if anim is not None:                        # deforma la caja con la malla IDW + color
-                    dv = [_field_disp(np.array(p, float), anim) for p in f]
-                    fd = [tuple(np.array(p, float) + dv[k][0]) for k, p in enumerate(f)]
-                    pw = [_project(*p, self.az, self.el) for p in fd]
-                    colmag = float(np.mean([dv[k][1] for k in range(len(f))]))
-                else:
-                    pw = [_project(*p, self.az, self.el) for p in f]
-                dep = float(np.mean([p[2] for p in pw]))
-                v1 = np.subtract(f[1], f[0]); v2 = np.subtract(f[2], f[0])
-                nrm = np.cross(v1, v2); nn = np.linalg.norm(nrm)
-                shade = 0.6 + 0.4 * abs(float(np.dot(nrm / nn, light))) if nn > 0 else 0.75
-                faces.append([dep, pw, base, shade, colmag])
+                # en animación cada cara se subdivide en una malla fina (degradé suave)
+                quads = _subdivide_quad(f, 5) if anim is not None else [f]
+                for q in quads:
+                    colmag = None
+                    if anim is not None:
+                        dv = [_field_disp(np.array(p, float), anim) for p in q]
+                        fd = [tuple(np.array(p, float) + dv[k][0]) for k, p in enumerate(q)]
+                        pw = [_project(*p, self.az, self.el) for p in fd]
+                        colmag = float(np.mean([dv[k][1] for k in range(len(q))]))
+                    else:
+                        pw = [_project(*p, self.az, self.el) for p in q]
+                    dep = float(np.mean([p[2] for p in pw]))
+                    v1 = np.subtract(q[1], q[0]); v2 = np.subtract(q[2], q[0])
+                    nrm = np.cross(v1, v2); nn = np.linalg.norm(nrm)
+                    shade = 0.6 + 0.4 * abs(float(np.dot(nrm / nn, light))) if nn > 0 else 0.75
+                    faces.append([dep, pw, base, shade, colmag])
         # normaliza el color sobre TODA la máquina → verde (menos) → rojo (más)
         if anim is not None:
             mags = [fc[4] for fc in faces if fc[4] is not None]
@@ -199,7 +215,10 @@ class Machine3DItem(pg.GraphicsObject):
             col = QtGui.QColor(int(base.red() * shade), int(base.green() * shade), int(base.blue() * shade))
             poly = QtGui.QPolygonF([QtCore.QPointF(p[0], p[1]) for p in pw])
             painter.setBrush(QtGui.QBrush(col))
-            pen = QtGui.QPen(QtGui.QColor("#1e293b")); pen.setCosmetic(True); pen.setWidthF(0.8)
+            if anim is not None:                             # malla fina → sin líneas de grilla
+                pen = QtGui.QPen(col); pen.setCosmetic(True); pen.setWidthF(0.3)
+            else:
+                pen = QtGui.QPen(QtGui.QColor("#1e293b")); pen.setCosmetic(True); pen.setWidthF(0.8)
             painter.setPen(pen); painter.drawPolygon(poly)
         ai = -1
         for i, mp in enumerate(self.layout.points):
@@ -1014,12 +1033,32 @@ def build_app(layout: OMALayout, simulated: bool = True):
             QtWidgets.QMessageBox.information(win, "Cloud", "Run OMA capture first."); return
         try:
             from core.modal import modal_cloud
-            payload = {"name": st["layout"].name, "kind": "OMA",
-                       "modes": [{"fn": m.natural_frequency_hz, "zeta": m.damping_ratio_pct,
-                                  "complexity": m.complexity_pct, "class": m.classification}
-                                 for m in fdd.modes],
-                       "layout": st["layout"].to_dict()}
-            r = modal_cloud.save_run(st["layout"].name, payload)
+            lay = st["layout"]
+            # SVD SV1 (curva de valores singulares) submuestreada para el reporte
+            freqs = np.asarray(fdd.frequencies_hz); sv = np.asarray(fdd.singular_values)
+            if sv.ndim == 1:
+                sv = sv[None, :]
+            fmax = min(float(lay.fs_hz) / 2.56, float(lay.fmax_hz))
+            band = freqs <= fmax
+            fb = freqs[band]; sv1 = sv[0][band]
+            step = max(1, len(fb) // 900)
+            svd = {"freqs": fb[::step].tolist(), "sv1": sv1[::step].tolist()}
+            def _sh(m):
+                s = np.asarray(getattr(m, "mode_shape", []), complex).ravel()
+                return {"re": s.real.tolist(), "im": s.imag.tolist()}
+            modes = [{"fn": m.natural_frequency_hz, "zeta": m.damping_ratio_pct,
+                      "complexity": m.complexity_pct, "class": m.classification, "shape": _sh(m)}
+                     for m in fdd.modes]
+            # modos EMA (si hay) para la correlación EMA↔OMA en el reporte
+            ema = []
+            res = st["acc"].result()
+            if res is not None:
+                ema = [mp.frequency_hz for mp in modes_from_frf(res, fmin=5, fmax=lay.fmax_hz)]
+            payload = {"name": lay.name, "kind": "OMA", "modes": modes, "svd": svd,
+                       "channel_names": lay.channel_names(), "running_rpm": lay.running_speed_rpm,
+                       "ema_modes": ema, "client": lay.client, "asset": lay.machine_type,
+                       "location": lay.location, "layout": lay.to_dict()}
+            r = modal_cloud.save_run(lay.name, payload)
             if r.get("ok"):
                 QtWidgets.QMessageBox.information(win, "Cloud",
                     f"☁ Run uploaded ({len(fdd.modes)} modes). Generate the report from the web.")

@@ -79,6 +79,32 @@ def save_run(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
 
 
+def list_runs() -> List[Dict[str, Any]]:
+    """Lista las corridas OMA subidas por el campo (para elegir en la web)."""
+    c = _client()
+    if c is None:
+        return []
+    try:
+        r = c.table(_RUNS_TABLE).select("id, name, updated_at").execute()
+        return sorted(r.data or [], key=lambda x: x.get("updated_at", ""), reverse=True)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def load_run(run_id: str) -> Optional[Dict[str, Any]]:
+    """Descarga el payload de una corrida OMA por su id."""
+    c = _client()
+    if c is None:
+        return None
+    try:
+        r = c.table(_RUNS_TABLE).select("metadata").eq("id", run_id).single().execute()
+        if r.data and r.data.get("metadata"):
+            return r.data["metadata"]
+    except Exception:  # noqa: BLE001
+        return None
+    return None
+
+
 def load_layout_cloud(name_or_slug: str) -> Optional[Any]:
     c = _client()
     if c is None:

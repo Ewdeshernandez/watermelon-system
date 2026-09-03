@@ -4373,6 +4373,34 @@ if _active_modal_tab == "📊 Reports":
         icon="📊",
     )
 
+    # ---- Corridas OMA subidas desde el CAMPO (nube) → reporte SIGA con un clic ----
+    with st.expander("☁ OMA runs from the field (cloud) → SIGA report", expanded=False):
+        try:
+            from core.modal import modal_cloud
+            _runs = modal_cloud.list_runs()
+        except Exception as _e:  # noqa: BLE001
+            _runs = []; st.caption(f"Cloud unavailable: {_e}")
+        if not _runs:
+            st.info("No field runs found. Capture in Watermelon Modal (field) and press "
+                    "**☁ Upload run to cloud**. Requires the `modal_runs` table in Supabase.")
+        else:
+            _opts = {f"{r.get('name','?')} · {r.get('updated_at','')}": r.get("id") for r in _runs}
+            _pick = st.selectbox("Field run", list(_opts.keys()), key="modal_cloud_run_pick")
+            if st.button("📄 Generate SIGA OMA report", key="modal_cloud_run_report"):
+                try:
+                    _payload = modal_cloud.load_run(_opts[_pick])
+                    if not _payload:
+                        st.error("Could not download the run.")
+                    else:
+                        from core.modal.run_report import build_report_from_run
+                        _pdf = build_report_from_run(_payload)
+                        st.success(f"Report generated · {len(_pdf)//1024} KB.")
+                        st.download_button("⬇ Download report (PDF)", data=_pdf,
+                                           file_name=f"OMA_{_payload.get('name','run')}.pdf",
+                                           mime="application/pdf", key="modal_cloud_run_dl")
+                except Exception as _e:  # noqa: BLE001
+                    st.error(f"Report error: {type(_e).__name__}: {_e}")
+
     # Detectar si hay análisis previo disponible
     _fdd_for_rep = st.session_state.get("modal_oma_result")
     _peaks_for_rep = st.session_state.get("modal_peaks", [])
