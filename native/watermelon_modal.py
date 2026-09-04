@@ -951,10 +951,36 @@ def build_app(layout: OMALayout, simulated: bool = True):
     crow = QtWidgets.QHBoxLayout()
     crow.addWidget(QtWidgets.QLabel("Source:"))
     cb_src = QtWidgets.QComboBox(); cb_src.addItems(["Simulated", "NI 9234 (live)"]); crow.addWidget(cb_src)
+    btn_testni = QtWidgets.QPushButton("🔌 Test NI")
     btn_ocap = QtWidgets.QPushButton("▶ Capture + FDD"); btn_ocap.setStyleSheet(
         f"QPushButton{{background:{ACC};font-size:14px;padding:10px 20px;}} QPushButton:hover{{background:#1490c2;}}")
     btn_upload = QtWidgets.QPushButton("☁ Upload run to cloud")
-    crow.addWidget(btn_ocap); crow.addWidget(btn_upload); crow.addStretch(1); cl2.addLayout(crow)
+    crow.addWidget(btn_testni); crow.addWidget(btn_ocap); crow.addWidget(btn_upload); crow.addStretch(1); cl2.addLayout(crow)
+
+    def _test_ni():
+        try:
+            from core.modal.acq_backend import list_available_devices
+            devs = list_available_devices()
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(win, "NI test",
+                "❌ NI-DAQmx driver not available on this PC.\n\n"
+                "Install the National Instruments NI-DAQmx driver, then reconnect the cDAQ.\n\n"
+                f"Detail: {type(e).__name__}: {e}")
+            return
+        if not devs:
+            QtWidgets.QMessageBox.warning(win, "NI test",
+                "⚠ No NI devices detected.\nCheck: USB cable, chassis power, and that NI-DAQmx sees it (NI MAX).")
+            return
+        chassis = [d for d in devs if "cdaq" in d["product_type"].lower() or "9178" in d["product_type"]]
+        mods = [d for d in devs if "9234" in d["product_type"]]
+        lines = [f"✅ {len(devs)} NI device(s) detected:"]
+        for d in devs:
+            lines.append(f"   • {d['name']} — {d['product_type']} (S/N {d['serial']})")
+        lines.append(f"\nChassis: {len(chassis)} · NI 9234 modules: {len(mods)} → up to {len(mods)*4} channels.")
+        lines.append("Connection OK — you can capture with Source = NI 9234 (live)." if mods
+                     else "No 9234 modules found — check the modules are seated in the chassis.")
+        QtWidgets.QMessageBox.information(win, "NI test", "\n".join(lines))
+    btn_testni.clicked.connect(_test_ni)
     ocs = QtWidgets.QHBoxLayout()
     tbl_om = QtWidgets.QTableWidget(0, 4); tbl_om.setHorizontalHeaderLabels(["Freq (Hz)", "Damping (%)", "Complexity (%)", "Class"])
     tbl_om.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_om.verticalHeader().setVisible(False); tbl_om.setMaximumWidth(520)
