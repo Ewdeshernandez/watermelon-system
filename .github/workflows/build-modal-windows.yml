@@ -71,7 +71,11 @@ jobs:
             --collect-all supabase \
             --copy-metadata supabase \
             --collect-all nidaqmx \
+            --collect-submodules nidaqmx \
+            --copy-metadata nidaqmx \
             --hidden-import nidaqmx \
+            --hidden-import hightime \
+            --hidden-import deprecation \
             --exclude-module streamlit \
             --exclude-module matplotlib \
             --exclude-module pandas \

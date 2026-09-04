@@ -959,13 +959,16 @@ def build_app(layout: OMALayout, simulated: bool = True):
 
     def _test_ni():
         try:
-            from core.modal.acq_backend import list_available_devices
-            devs = list_available_devices()
+            import nidaqmx  # noqa: F401  — probamos el import directo (causa raíz)
+            from nidaqmx.system import System
+            devs = [{"name": d.name, "product_type": d.product_type, "serial": str(d.serial_num)}
+                    for d in System.local().devices]
         except Exception as e:  # noqa: BLE001
+            cause = getattr(e, "__cause__", None)
+            root = f"\n\nRoot cause: {type(cause).__name__}: {cause}" if cause else ""
             QtWidgets.QMessageBox.warning(win, "NI test",
-                "❌ NI-DAQmx driver not available on this PC.\n\n"
-                "Install the National Instruments NI-DAQmx driver, then reconnect the cDAQ.\n\n"
-                f"Detail: {type(e).__name__}: {e}")
+                f"❌ Could not load the NI driver package inside the app.\n\n{type(e).__name__}: {e}{root}\n\n"
+                "If NI MAX sees the chassis, this is a packaging issue (send this text).")
             return
         if not devs:
             QtWidgets.QMessageBox.warning(win, "NI test",
