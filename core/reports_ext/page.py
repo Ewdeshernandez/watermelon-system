@@ -385,12 +385,29 @@ def _borescope(meta):
     _generate("boro", "boroscopia", meta, content)
 
 
+def _sync_ids(items: List[Dict[str, Any]], counter_key: str) -> None:
+    """Evita StreamlitDuplicateElementKey. El contador de IDs NO se persiste; al
+    restaurar un borrador los bloques traen IDs (p.ej. 1..6) pero el contador
+    arranca en 0, así que el siguiente bloque nuevo reusa un ID ya existente y
+    Streamlit crashea con llaves de widget duplicadas (y se cae toda la página →
+    parece que 'se perdió todo'). Aquí: si hay IDs duplicados o no numéricos se
+    renumeran de forma estable, y el contador se sincroniza al máximo ID para
+    que los IDs nuevos nunca colisionen."""
+    ids = [it.get("id") for it in items]
+    bad = (len(set(ids)) != len(ids)) or any(not str(i).isdigit() for i in ids)
+    if bad:
+        for idx, it in enumerate(items, 1):
+            it["id"] = idx
+    mx = max([int(it["id"]) for it in items if str(it.get("id", "")).isdigit()] + [0])
+    st.session_state[counter_key] = max(st.session_state.get(counter_key, 0), mx)
+
+
 def _equipos_composer(prefix: str) -> List[Dict[str, Any]]:
     """Tablas de equipo (Campo/Valor) — conductor, conducido, alineador, etc.
     Se pueden agregar/quitar. Devuelve [{title, rows:[[campo,valor]]}]."""
     key = f"{prefix}_equipos"
     eqs = st.session_state.setdefault(key, [])
-    st.session_state.setdefault(f"{prefix}_eidc", 0)
+    _sync_ids(eqs, f"{prefix}_eidc")
     if st.button("➕ Agregar tabla de equipo", key=f"{prefix}_addeq"):
         st.session_state[f"{prefix}_eidc"] += 1
         eqs.append({"id": st.session_state[f"{prefix}_eidc"], "title": "", "rows": []})
@@ -426,7 +443,7 @@ def _free_block_composer(prefix: str) -> List[Dict[str, Any]]:
     usuario agrega, reordena (↑/↓) y borra. Devuelve la lista en orden."""
     key = f"{prefix}_blocks"
     blocks = st.session_state.setdefault(key, [])
-    st.session_state.setdefault(f"{prefix}_bidc", 0)
+    _sync_ids(blocks, f"{prefix}_bidc")
 
     def _nid():
         st.session_state[f"{prefix}_bidc"] += 1
