@@ -70,6 +70,8 @@ jobs:
             --collect-submodules scipy \
             --collect-all supabase \
             --copy-metadata supabase \
+            --collect-all nidaqmx \
+            --hidden-import nidaqmx \
             --exclude-module streamlit \
             --exclude-module matplotlib \
             --exclude-module pandas \
