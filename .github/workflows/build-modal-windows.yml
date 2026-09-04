@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           python -m pip install --upgrade pip
-          pip install numpy scipy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx npTDMS supabase reportlab pillow pyinstaller
+          pip install numpy scipy "PySide6>=6.6" "pyqtgraph>=0.13" nidaqmx nitypes hightime npTDMS supabase reportlab pillow pyinstaller
 
       - name: Embeber credenciales de nube (desde GitHub Secrets)
         shell: bash
@@ -74,6 +74,10 @@ jobs:
             --collect-submodules nidaqmx \
             --copy-metadata nidaqmx \
             --hidden-import nidaqmx \
+            --collect-all nitypes \
+            --copy-metadata nitypes \
+            --hidden-import nitypes \
+            --copy-metadata hightime \
             --hidden-import hightime \
             --hidden-import deprecation \
             --exclude-module streamlit \
