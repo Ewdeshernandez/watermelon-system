@@ -1042,13 +1042,25 @@ def build_app(layout: OMALayout, simulated: bool = True):
 
     def _capture_ni(lay, secs):
         """Captura REAL continua desde la NI 9234 (IEPE). Lanza excepción si no hay HW."""
-        from core.modal.acq_backend import AcquisitionConfig, ChannelConfig, capture
+        import tempfile
+        from core.modal.acq_backend import (AcquisitionConfig, ChannelConfig, capture,
+                                            list_available_devices)
         from nptdms import TdmsFile
+        # autodetectar el nombre del chasis (cDAQ…) para no depender de "cDAQ1"
+        chassis = "cDAQ1"
+        try:
+            for d in list_available_devices():
+                if "cdaq" in d["product_type"].lower() or "9178" in d["product_type"]:
+                    chassis = d["name"]; break
+        except Exception:  # noqa: BLE001
+            pass
         chans = [ChannelConfig(name=p.code, coupling="IEPE",
                                sensitivity_mv_per_eu=p.sensitivity_mv_per_g, bnc_port=p.bnc, units="g")
                  for p in lay.active_points()]
+        tmp = os.path.join(tempfile.gettempdir(), "wm_modal_oma.tdms")
         cfg = AcquisitionConfig(mode="oma_continuous", sample_rate_hz=lay.fs_hz,
-                                duration_s=float(secs), channels=chans, chassis_name="cDAQ1")
+                                duration_s=float(secs), channels=chans, chassis_name=chassis,
+                                output_tdms_path=tmp)
         path = capture(cfg, lambda *a, **k: None)
         tf = TdmsFile.read(str(path)); grp = tf.groups()[0]
         cols = [ch[:] for ch in grp.channels()]
