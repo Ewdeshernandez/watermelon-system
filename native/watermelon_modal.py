@@ -50,7 +50,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.16"
+__version__ = "0.9.17"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -434,32 +434,42 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _w3 = QtWidgets.QWidget(); _w3.setLayout(r3); frm.addRow("Operation:", _w3)
     ml.addLayout(frm)
 
-    bld = QtWidgets.QHBoxLayout()
-    bld.addWidget(QtWidgets.QLabel("<b>Equipment:</b>"))
-    cb_kind = QtWidgets.QComboBox(); cb_kind.addItems(COMPONENT_KINDS); cb_kind.setMinimumWidth(180)
+    # --- Fila 1: agregar/quitar equipo + nombre editable ---
+    row_add = QtWidgets.QHBoxLayout()
+    row_add.addWidget(QtWidgets.QLabel("<b>Equipment</b>"))
+    cb_kind = QtWidgets.QComboBox(); cb_kind.addItems(COMPONENT_KINDS); cb_kind.setMinimumWidth(190)
     btn_addcomp = QtWidgets.QPushButton("➕ Add"); btn_delcomp = QtWidgets.QPushButton("– Remove")
-    bld.addWidget(cb_kind); bld.addWidget(btn_addcomp); bld.addWidget(btn_delcomp)
-    bld.addSpacing(14); bld.addWidget(QtWidgets.QLabel("<b>Size:</b>"));
-    cb_comp = QtWidgets.QComboBox(); cb_comp.setMinimumWidth(150); bld.addWidget(cb_comp)
-    bld.addWidget(QtWidgets.QLabel("Name:"))
-    e_compname = QtWidgets.QLineEdit(); e_compname.setMinimumWidth(130)
-    e_compname.setPlaceholderText("ej. Motor ABB")
-    e_compname.setToolTip("Nombre que se muestra sobre el equipo en el dibujo (editable).")
-    bld.addWidget(e_compname)
+    row_add.addWidget(cb_kind); row_add.addWidget(btn_addcomp); row_add.addWidget(btn_delcomp)
+    row_add.addSpacing(24)
+    row_add.addWidget(QtWidgets.QLabel("<b>Name</b>"))
+    e_compname = QtWidgets.QLineEdit(); e_compname.setMinimumWidth(160)
+    e_compname.setPlaceholderText("e.g. ABB motor")
+    e_compname.setToolTip("Name shown above the equipment in the drawing (editable).")
+    row_add.addWidget(e_compname)
+    row_add.addStretch(1)
+    ml.addLayout(row_add)
+
+    # --- Fila 2: seleccionar equipo + dimensiones + color + rotar ---
+    bld = QtWidgets.QHBoxLayout()
+    bld.addWidget(QtWidgets.QLabel("<b>Selected</b>"))
+    cb_comp = QtWidgets.QComboBox(); cb_comp.setMinimumWidth(160); bld.addWidget(cb_comp)
+    bld.addSpacing(16); bld.addWidget(QtWidgets.QLabel("<b>Size</b>"))
     sp_len = QtWidgets.QDoubleSpinBox(); sp_len.setRange(0.02, 1.0); sp_len.setSingleStep(0.02); sp_len.setDecimals(2)
     sp_hei = QtWidgets.QDoubleSpinBox(); sp_hei.setRange(0.02, 0.8); sp_hei.setSingleStep(0.02); sp_hei.setDecimals(2)
     sp_wid = QtWidgets.QDoubleSpinBox(); sp_wid.setRange(0.02, 0.6); sp_wid.setSingleStep(0.02); sp_wid.setDecimals(2)
     for lab, w in (("L", sp_len), ("H", sp_hei), ("W", sp_wid)):
         bld.addWidget(QtWidgets.QLabel(lab)); bld.addWidget(w)
-    btn_color = QtWidgets.QPushButton("🎨 Color")
+    bld.addSpacing(16)
+    btn_color = QtWidgets.QPushButton("🎨 Colour")
     btn_color.setToolTip("Pick the colour of the selected equipment (e.g. grey motor, green pump).")
     btn_colreset = QtWidgets.QPushButton("↺")
     btn_colreset.setToolTip("Reset to the default colour for the equipment type.")
     btn_colreset.setMaximumWidth(34)
     bld.addWidget(btn_color); bld.addWidget(btn_colreset)
-    chk_lock = QtWidgets.QCheckBox("🔒 Rotate view (lock parts)")
-    chk_lock.setToolTip("ON: arrastrar gira/posiciona TODO el conjunto (X/Y/Z). "
-                        "OFF: arrastrar mueve cada equipo por separado.")
+    bld.addSpacing(16)
+    chk_lock = QtWidgets.QCheckBox("🔒 Rotate whole assembly")
+    chk_lock.setToolTip("ON: drag rotates/positions the WHOLE assembly (X/Y/Z). "
+                        "OFF: drag moves each equipment separately.")
     bld.addWidget(chk_lock)
     bld.addStretch(1)
     ml.addLayout(bld)
@@ -1488,16 +1498,41 @@ def build_app(layout: OMALayout, simulated: bool = True):
     arow.addWidget(chk_showsen)
     btn_play = QtWidgets.QPushButton("▶ Animate"); btn_play.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
     btn_stop = QtWidgets.QPushButton("⏹ Stop")
-    arow.addWidget(btn_play); arow.addWidget(btn_stop); arow.addStretch(1)
+    arow.addWidget(btn_play); arow.addWidget(btn_stop)
+    arow.addSpacing(10); arow.addWidget(QtWidgets.QLabel("View:"))
+    btn_v_iso = QtWidgets.QPushButton("Iso"); btn_v_top = QtWidgets.QPushButton("Top")
+    btn_v_side = QtWidgets.QPushButton("Side"); btn_v_front = QtWidgets.QPushButton("Front")
+    for _b in (btn_v_iso, btn_v_top, btn_v_side, btn_v_front):
+        _b.setMaximumWidth(52); _b.setStyleSheet("QPushButton{background:#334155;padding:6px 8px;}")
+        arow.addWidget(_b)
+    btn_gif = QtWidgets.QPushButton("🎥 Save clip")
+    btn_gif.setToolTip("Export a short animated clip (GIF) of the current mode shape.")
+    arow.addWidget(btn_gif); arow.addStretch(1)
     anl.addLayout(arow)
     anl.addWidget(QtWidgets.QLabel(
-        "<i style='color:#64748b'>Points oscillate with the mode shape. Low complexity = real "
-        "structural mode; high = suspicious (forced/harmonic). Left-drag = rotate.</i>"))
+        "<i style='color:#64748b'>Colour = vibration amplitude (green→red). Rotate with the view "
+        "buttons or left-drag. The panel on the right shows the modal values and the complexity "
+        "(Argand) plot of the selected mode.</i>"))
+    # --- layout: 3D a la izquierda, panel de datos + complejidad a la derecha ---
+    anim_split = QtWidgets.QHBoxLayout()
     p_anim = pg.PlotWidget(viewBox=OrbitViewBox()); p_anim.setBackground("w"); p_anim.setAspectLocked(True)
     p_anim.hideAxis("left"); p_anim.hideAxis("bottom"); p_anim.setMenuEnabled(False)
     m_anim = Machine3DItem(); p_anim.addItem(m_anim)
     m_anim.set_show_sensors(chk_showsen.isChecked())     # honra el checkbox desde el inicio
-    anl.addWidget(p_anim, 1)
+    anim_split.addWidget(p_anim, 3)
+    right_panel = QtWidgets.QVBoxLayout()
+    lbl_modal = QtWidgets.QLabel("Select a mode."); lbl_modal.setTextFormat(QtCore.Qt.RichText)
+    lbl_modal.setStyleSheet(f"background:white;border:1px solid #e2e8f0;border-radius:8px;padding:10px;")
+    lbl_modal.setAlignment(QtCore.Qt.AlignTop); lbl_modal.setWordWrap(True)
+    right_panel.addWidget(lbl_modal)
+    p_argand = pg.PlotWidget(); p_argand.setBackground("w"); p_argand.setAspectLocked(True)
+    p_argand.setTitle("Complexity (Argand)", color=NAVY); p_argand.showGrid(x=True, y=True, alpha=0.25)
+    p_argand.setMouseEnabled(False, False); p_argand.setMenuEnabled(False)
+    p_argand.setMinimumWidth(300)
+    right_panel.addWidget(p_argand, 1)
+    _rp_w = QtWidgets.QWidget(); _rp_w.setLayout(right_panel); _rp_w.setMaximumWidth(360)
+    anim_split.addWidget(_rp_w)
+    anl.addLayout(anim_split, 1)
     tabs.addTab(pg_anim, "Mode shapes")
 
     st["_anim_phase"] = 0.0
@@ -1521,6 +1556,95 @@ def build_app(layout: OMALayout, simulated: bool = True):
         sh = np.asarray(getattr(modes[i], "mode_shape"), complex).ravel()
         mx = np.max(np.abs(sh)) or 1.0
         return sh / mx
+
+    def _cur_mode():
+        src = cb_asrc.currentText(); i = cb_amode.currentIndex()
+        modes = (st["oma_fdd"].modes if (src.startswith("OMA") and st.get("oma_fdd")) else
+                 (st["ssi"].modes if (src == "SSI" and st.get("ssi")) else []))
+        return modes[i] if 0 <= i < len(modes) else None
+
+    def _update_modal_panel():
+        m = _cur_mode(); p_argand.clear()
+        if m is None:
+            lbl_modal.setText("Select a mode."); return
+        fn = getattr(m, "natural_frequency_hz", getattr(m, "frequency_hz", 0.0))
+        zeta = getattr(m, "damping_ratio_pct", 0.0)
+        cplx = getattr(m, "complexity_pct", 0.0)
+        sfn = getattr(m, "std_frequency_hz", None); sz = getattr(m, "std_damping_pct", None)
+        cls = getattr(m, "classification", "")
+        z = zeta / 100.0
+        logdec = 2 * np.pi * z / np.sqrt(max(1 - z * z, 1e-9)) if z > 0 else 0.0
+        rows = [("Frequency", f"{fn:.3f} Hz")]
+        if sfn is not None: rows.append(("Std. frequency", f"± {sfn:.3f} Hz"))
+        rows.append(("Damping", f"{zeta:.3f} %"))
+        if sz is not None: rows.append(("Std. damping", f"± {sz:.3f} %"))
+        rows.append(("Log. decrement", f"{logdec*100:.3f} %"))
+        rows.append(("Complexity (MPC)", f"{cplx:.2f} %"))
+        if cls: rows.append(("Class", cls))
+        rr = st["layout"].running_speed_rpm
+        if rr:
+            rows.append(("Order (×run)", f"{fn/(rr/60.0):.2f}×"))
+        html = "<b style='font-size:13px'>Modal values</b><table cellspacing='5' style='margin-top:6px'>"
+        for k, v in rows:
+            html += f"<tr><td style='color:#64748b'>{k}&nbsp;&nbsp;</td><td><b>{v}</b></td></tr>"
+        html += "</table>"
+        _q = "real (structural)" if cplx < 15 else ("moderate" if cplx < 45 else "complex (suspicious)")
+        html += f"<div style='margin-top:8px;color:#64748b'>Interpretation: <b>{_q}</b> mode</div>"
+        lbl_modal.setText(html)
+        # Argand: vector por sensor (magnitud + fase) → colinealidad = modo real
+        sh = np.asarray(getattr(m, "mode_shape", []), complex).ravel()
+        if sh.size:
+            s = sh / (np.max(np.abs(sh)) or 1.0)
+            th = np.linspace(0, 2 * np.pi, 72)
+            p_argand.plot(np.cos(th), np.sin(th), pen=pg.mkPen("#cbd5e1", width=1))
+            p_argand.plot([-1.05, 1.05], [0, 0], pen=pg.mkPen("#e2e8f0", width=1))
+            p_argand.plot([0, 0], [-1.05, 1.05], pen=pg.mkPen("#e2e8f0", width=1))
+            for c in s:
+                p_argand.plot([0, float(c.real)], [0, float(c.imag)], pen=pg.mkPen(BLUE, width=1.4))
+            p_argand.addItem(pg.ScatterPlotItem([float(c.real) for c in s], [float(c.imag) for c in s],
+                                                size=7, brush=pg.mkBrush(BLUE), pen=None))
+            p_argand.setXRange(-1.1, 1.1); p_argand.setYRange(-1.1, 1.1)
+
+    def _set_view(az, el):
+        st["az"] = float(az); st["el"] = float(np.clip(el, 8.0, 88.0))
+        m_anim.set_view(st["layout"], np.radians(st["az"]), np.radians(st["el"]), -1)
+        p_anim.getViewBox().autoRange(padding=0.2)
+
+    def _save_clip():
+        sh = _cur_shape()
+        if sh is None:
+            QtWidgets.QMessageBox.information(win, "Clip", "Select a mode first."); return
+        try:
+            from PIL import Image
+            from io import BytesIO
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(win, "Clip", f"Image library not available: {e}"); return
+        path, _f = QtWidgets.QFileDialog.getSaveFileName(win, "Save clip", "mode_shape.gif", "GIF (*.gif)")
+        if not path:
+            return
+        was = anim_timer.isActive(); anim_timer.stop()
+        st["_anim_geo"] = _anim_geometry(); pts, dirs = st["_anim_geo"]
+        m_anim.set_show_sensors(chk_showsen.isChecked())
+        m_anim.set_view(st["layout"], np.radians(st["az"]), np.radians(st["el"]), -1)
+        scale = sp_ascale.value(); frames = []
+        for kf in range(24):
+            ph = np.exp(1j * (kf / 24.0 * 2 * np.pi))
+            amps = scale * np.real(sh * ph); mags = scale * np.abs(sh)
+            n = min(len(amps), len(pts))
+            if n == 0:
+                break
+            m_anim.set_disp(amps[:n].tolist())
+            m_anim.set_anim({"pts": pts[:n], "dirs": dirs[:n], "amps": amps[:n],
+                             "mags": mags[:n], "mmax": float(scale)})
+            QtWidgets.QApplication.processEvents()
+            buf = QtCore.QBuffer(); buf.open(QtCore.QIODevice.WriteOnly)
+            p_anim.grab().save(buf, "PNG")
+            frames.append(Image.open(BytesIO(bytes(buf.data()))).convert("RGB"))
+        if frames:
+            frames[0].save(path, save_all=True, append_images=frames[1:], duration=60, loop=0)
+            QtWidgets.QMessageBox.information(win, "Clip", f"✅ Saved: {path}")
+        if was:
+            anim_timer.start(45)
 
     def _anim_geometry():
         """pts (world) y dirs (DOF firmado) de los sensores activos, para la malla."""
@@ -1555,6 +1679,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         m_anim.set_show_sensors(chk_showsen.isChecked())
         m_anim.set_view(st["layout"], np.radians(st["az"]), np.radians(st["el"]), -1)
         p_anim.getViewBox().autoRange(padding=0.2)
+        _update_modal_panel()
         anim_timer.start(45)
     chk_showsen.toggled.connect(lambda on: m_anim.set_show_sensors(on))
 
@@ -1562,7 +1687,11 @@ def build_app(layout: OMALayout, simulated: bool = True):
         anim_timer.stop(); m_anim.set_disp(None); m_anim.set_anim(None)
 
     btn_play.clicked.connect(_anim_play); btn_stop.clicked.connect(_anim_stop)
-    cb_asrc.currentIndexChanged.connect(lambda *_: _anim_reload_modes())
+    btn_gif.clicked.connect(_save_clip)
+    btn_v_iso.clicked.connect(lambda: _set_view(50, 28)); btn_v_top.clicked.connect(lambda: _set_view(0, 88))
+    btn_v_side.clicked.connect(lambda: _set_view(90, 10)); btn_v_front.clicked.connect(lambda: _set_view(0, 10))
+    cb_amode.currentIndexChanged.connect(lambda *_: _update_modal_panel())
+    cb_asrc.currentIndexChanged.connect(lambda *_: (_anim_reload_modes(), _update_modal_panel()))
 
     def _anim_rotate(dx, dy):
         st["az"] = (st["az"] + dx * 0.4) % 360.0
@@ -2003,7 +2132,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     <p><b>Watermelon Modal</b> — version <b>{__version__}</b>. Part of the <b>Watermelon System</b>
     platform for machinery diagnostics.<br>
     Developed by <b>SIGA S.A.S.</b> — Machinery Diagnostics Engineering.<br>
-    Contact: <a href='mailto:info@sigasas.com'>info@sigasas.com</a> · Cali — Colombia.<br>
+    Contact: <a href='mailto:ehernandez@sigasas.com'>ehernandez@sigasas.com</a> · Bogotá — Colombia.<br>
     <span style='color:#64748b'>© 2026 SIGA S.A.S. All rights reserved.</span></p>
     </div>
     """)
