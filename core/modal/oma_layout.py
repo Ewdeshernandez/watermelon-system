@@ -40,7 +40,7 @@ COMPONENT_KINDS = [
     "Axial compressor", "Centrifugal compressor", "Reciprocating compressor", "Screw compressor",
     "Multistage pump", "Screw pump", "Single-stage pump",
     "Gearbox", "Generator", "Fan / Blower", "Coupling", "Bearing housing",
-    "Skid 1", "Skid 2", "Suction pipe", "Discharge pipe",
+    "Support leg", "Skid 1", "Skid 2", "Suction pipe", "Discharge pipe",
 ]
 
 # Rotating machines (carry NDE/DE bearings) — used by norm-based placement
@@ -65,6 +65,8 @@ def component_default_box(kind: str, x0: float):
         return (x0, x0 + 0.18, 0.08, 0.42, 0.04)
     if "coupling" in k:
         return (x0, x0 + 0.06, 0.05, 0.14, 0.06)
+    if "leg" in k or "pedestal" in k or "pata" in k:
+        return (x0, x0 + 0.06, 0.00, 0.08, 0.07)   # pata/soporte: caja baja bajo el equipo
     if "skid" in k:
         return (x0, x0 + 0.40, -0.10, 0.00, 0.22)
     if "gearbox" in k or "bearing" in k:
@@ -348,3 +350,84 @@ def default_24ch_layout(name: str = "Tren Motor-Bomba P-762007",
                 reference_sensor=(n in (0, 4))))
             n += 1
     return OMALayout(name=name, points=points, machine_components=default_components())
+
+
+# =====================================================================
+# Preset de campo: Motor eléctrico + bomba multietapa sobre skid grande
+# =====================================================================
+def motor_multistage_pump_layout(
+        name: str = "Motor-Bomba multietapa",
+        client: str = "",
+        location: str = "",
+        tag: str = "",
+        running_speed_rpm: float = 3600.0,
+        sensitivity: float = DEFAULT_SENSITIVITY_MV_PER_G) -> OMALayout:
+    """Tren MOTOR eléctrico → acople → BOMBA multietapa (cojinetes planos), montado
+    sobre un SKID grande. 17 acelerómetros IEPE (100 mV/g por defecto):
+
+      Máquina (9):  Motor LL 3 (A,H,V) · Motor LA 2 (H,V) ·
+                    Bomba LA 2 (H,V) · Bomba LL 2 (H,V)
+      Skid (8):     Motor LL 2 (V,H) · Motor LA 2 (V,H) ·
+                    Bomba LA 2 (V,H) · Bomba LL 2 (V,H)
+
+    Convención de ejes: A=axial (a lo largo del eje), H=horizontal, V=vertical.
+    Canales asignados en BNC 1..17 → 5 módulos NI 9234 (slots 1..5), 3 canales
+    libres. Referencias OMA fijas: 1V (Motor LL vertical) y 4V (Bomba LL vertical).
+    """
+    # Geometría (cajas 3D) FIEL a la máquina de campo: motor eléctrico ALTO sobre
+    # el skid → acople elevado → BOMBA multietapa montada SOBRE PATAS (pedestales)
+    # a la altura del eje, no apoyada directo en el skid.
+    comps = [
+        MachineComponent("Electric motor", "Motor Siemens", 0.04, 0.40, 0.00, 0.32, depth=0.13),
+        MachineComponent("Coupling", "Acople", 0.40, 0.47, 0.10, 0.17, depth=0.05),
+        MachineComponent("Multistage pump", "Bomba multietapa (6 et.)", 0.47, 0.80, 0.08, 0.20, depth=0.09),
+        MachineComponent("Support leg", "Pata bomba LA", 0.49, 0.55, 0.00, 0.08, depth=0.07),
+        MachineComponent("Support leg", "Pata bomba LL", 0.72, 0.78, 0.00, 0.08, depth=0.07),
+        MachineComponent("Skid 1", "Skid", 0.00, 0.85, -0.10, 0.00, depth=0.24),
+    ]
+
+    # (componente, referencia, número, [(dof, x_norm, y_norm)])
+    #   dof: A=axial H=horizontal V=vertical
+    #   La bomba va elevada (y≈0.14–0.20); sus sensores van sobre el cuerpo/cojinete.
+    #   Los sensores "de skid" de la bomba van al pie de las patas, sobre el skid.
+    plan = [
+        # --- máquina (cojinetes) ---
+        ("Motor", "LL (lado libre)",  1, [("A", 0.05, 0.13), ("H", 0.07, 0.16), ("V", 0.07, 0.24)]),
+        ("Motor", "LA (lado acople)", 2, [("H", 0.37, 0.16), ("V", 0.37, 0.24)]),
+        ("Bomba", "LA (lado acople)", 3, [("H", 0.51, 0.14), ("V", 0.51, 0.20)]),
+        ("Bomba", "LL (lado libre)",  4, [("H", 0.76, 0.14), ("V", 0.76, 0.20)]),
+        # --- skid / base ---
+        ("Skid", "Motor LL", 5, [("V", 0.07, -0.02), ("H", 0.07, -0.07)]),
+        ("Skid", "Motor LA", 6, [("V", 0.37, -0.02), ("H", 0.37, -0.07)]),
+        ("Skid", "Bomba LA", 7, [("V", 0.52, -0.02), ("H", 0.52, -0.07)]),
+        ("Skid", "Bomba LL", 8, [("V", 0.75, -0.02), ("H", 0.75, -0.07)]),
+    ]
+
+    points: List[MeasPoint] = []
+    n = 0
+    for comp, ref, number, dofs in plan:
+        for dof, x, y in dofs:
+            slot = n // 4 + 1
+            ch = n % 4
+            is_ref = (number == 1 and dof == "V") or (number == 4 and dof == "V")
+            points.append(MeasPoint(
+                idx=n + 1, component=comp, position_ref=ref, dof=dof,
+                module_slot=slot, channel_index=ch, sensitivity_mv_per_g=sensitivity,
+                number=number, meas_type="A", x_norm=x, y_norm=y,
+                reference_sensor=is_ref))
+            n += 1
+
+    lay = OMALayout(
+        name=name, machine_type="Motor eléctrico – bomba multietapa (6 etapas), cojinetes planos",
+        client=client, location=location, tag=tag,
+        components=["Electric motor", "Coupling", "Multistage pump", "Support leg", "Skid 1"],
+        machine_components=comps, points=points,
+        test_modes=["OMA"], test_type="OMA",
+        running_speed_rpm=running_speed_rpm)
+    # Adquisición OMA para 3600 rpm (1X=60 Hz): fs 2560 (válido en 9234 = 51200/20),
+    # Fmax 800 Hz cubre armónicos + paso de álabes; registro largo.
+    lay.fs_hz = 2560.0
+    lay.block_size = 4096
+    lay.fmax_hz = 800.0
+    lay.duration_s = 600.0
+    return lay

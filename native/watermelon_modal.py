@@ -40,15 +40,30 @@ from core.modal.live_impact import (FRFAccumulator, HitQuality, SynthMode, asses
 from core.modal.oma_layout import (OMALayout, MeasPoint, MachineComponent, default_components,
                                     auto_place_by_norm, recommended_acquisition, component_default_box,
                                     is_pipe, COMPONENT_KINDS, POSITION_REFS, DOFS, MEAS_TYPES,
-                                    save_layout_local, list_layouts_local, load_layout_local)
+                                    save_layout_local, list_layouts_local, load_layout_local,
+                                    motor_multistage_pump_layout)
+
+# Presets "de fábrica" (nombre visible → función que arma el OMALayout)
+FACTORY_PRESETS = {
+    "Motor + bomba multietapa (sobre patas) — 17 sensores": motor_multistage_pump_layout,
+}
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
+
+__version__ = "0.9.9"
 
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
 
 DEMO_MODES = [SynthMode(19.4, 0.020, 1.0), SynthMode(38.8, 0.015, 0.7),
               SynthMode(77.4, 0.012, 0.45), SynthMode(129.9, 0.010, 0.30)]
+
+
+# Dirección física de cada eje en el dibujo 3D. X = a lo largo del tren (axial),
+# Y = horizontal transversal, Z = vertical. Se aceptan letras de instrumento
+# H (horizontal→Y), V (vertical→Z), A (axial→X) además de X/Y/Z.
+_AXIS_DIR = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1),
+             "A": (1, 0, 0), "H": (0, 1, 0), "V": (0, 0, 1)}
 
 
 def _comp_color(kind: str) -> str:
@@ -61,7 +76,7 @@ def _comp_color(kind: str) -> str:
         return "#0ea5e9"
     if "compressor" in k:
         return "#0d9488"
-    if "pump" in k:
+    if "pump" in k or "bomba" in k:
         return "#16a34a"
     if "generator" in k:
         return "#7c3aed"
@@ -69,6 +84,8 @@ def _comp_color(kind: str) -> str:
         return "#b45309"
     if "coupling" in k:
         return "#334155"
+    if "leg" in k or "pedestal" in k or "pata" in k:
+        return "#475569"
     if "skid" in k:
         return "#a16207"
     if "fan" in k or "blower" in k:
@@ -229,7 +246,7 @@ class Machine3DItem(pg.GraphicsObject):
             if not self.show_sensors:                    # animación: solo la pieza en movimiento
                 continue
             wy = 0.20
-            d = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}.get(mp.axis, (0, 0, 1))
+            d = _AXIS_DIR.get(mp.axis, (0, 0, 1))
             sg = -1.0 if mp.dof.startswith("-") else 1.0
             # desplazamiento animado de la forma modal (a lo largo del DOF)
             dd = 0.0
@@ -299,7 +316,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     app.setStyleSheet(_stylesheet())
     pg.setConfigOptions(antialias=True)
     win = QtWidgets.QMainWindow()
-    win.setWindowTitle(f"Watermelon Modal — {layout.name}")
+    win.setWindowTitle(f"Watermelon Modal v{__version__} — {layout.name}")
     win.resize(1320, 850)
 
     st = {"layout": layout, "acc": FRFAccumulator(layout.fs_hz, layout.block_size),
@@ -310,6 +327,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
     tb.setStyleSheet(f"QToolBar {{ background: {NAVY}; padding: 6px 12px; }}")
     brand = QtWidgets.QLabel("  🍉 Watermelon Modal")
     brand.setStyleSheet("color:white; font-weight:800; font-size:15px;"); tb.addWidget(brand)
+    ver_lbl = QtWidgets.QLabel(f"v{__version__}")
+    ver_lbl.setStyleSheet("color:#94a3b8; font-weight:700; font-size:12px; padding-left:8px;")
+    ver_lbl.setToolTip("Versión del software Watermelon Modal"); tb.addWidget(ver_lbl)
     spc = QtWidgets.QWidget(); spc.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     tb.addWidget(spc)
     mode_lbl = QtWidgets.QLabel(("SIMULATED — no hardware" if simulated else "LIVE — NI 9234") + "   ")
@@ -469,12 +489,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
     tbl_sum.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_sum.verticalHeader().setVisible(False)
     sul.addWidget(tbl_sum, 1)
     save_row = QtWidgets.QHBoxLayout()
+    btn_preset = QtWidgets.QPushButton("⭐ Presets")
+    btn_preset.setToolTip("Cargar una configuración de fábrica lista (máquina + sensores + adquisición).")
     btn_savelocal = QtWidgets.QPushButton("💾 Save locally")
     btn_loadlocal = QtWidgets.QPushButton("📂 Load local")
     btn_savecloud = QtWidgets.QPushButton("☁ Save to Watermelon System")
     btn_savecloud.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
     btn_loadcloud = QtWidgets.QPushButton("☁ Load from cloud")
-    for b in (btn_savelocal, btn_loadlocal, btn_savecloud, btn_loadcloud):
+    for b in (btn_preset, btn_savelocal, btn_loadlocal, btn_savecloud, btn_loadcloud):
         save_row.addWidget(b)
     save_row.addStretch(1)
     sul.addLayout(save_row)
@@ -816,6 +838,13 @@ def build_app(layout: OMALayout, simulated: bool = True):
         if ok and name:
             st["layout"] = load_layout_local(name); _reload_from_layout()
 
+    def _load_preset():
+        names = list(FACTORY_PRESETS.keys())
+        name, ok = QtWidgets.QInputDialog.getItem(win, "Presets de fábrica", "Configuración:", names, 0, False)
+        if ok and name:
+            st["layout"] = FACTORY_PRESETS[name]()   # arma máquina + sensores + adquisición
+            _reload_from_layout()
+
     def _save_cloud():
         _table_to_layout()
         try:
@@ -863,6 +892,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_delp.clicked.connect(_del_point); btn_reco.clicked.connect(_recommend_acq)
     sp_fs.valueChanged.connect(_upd_df); cb_blk.currentTextChanged.connect(_upd_df); sp_fmax.valueChanged.connect(_upd_df)
     btn_apply.clicked.connect(_apply_all)
+    btn_preset.clicked.connect(_load_preset)
     btn_savelocal.clicked.connect(_save_local); btn_loadlocal.clicked.connect(_load_local)
     btn_savecloud.clicked.connect(_save_cloud); btn_loadcloud.clicked.connect(_load_cloud)
 
@@ -1344,7 +1374,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         """pts (world) y dirs (DOF firmado) de los sensores activos, para la malla."""
         lay = st["layout"]; pts = []; dirs = []
         for mp in lay.active_points():
-            d = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1)}.get(mp.axis, (0, 0, 1))
+            d = _AXIS_DIR.get(mp.axis, (0, 0, 1))
             sg = -1.0 if mp.dof.startswith("-") else 1.0
             pts.append([mp.x_norm, 0.20, mp.y_norm]); dirs.append([sg * d[0], sg * d[1], sg * d[2]])
         return np.array(pts, float), np.array(dirs, float)
