@@ -45,12 +45,12 @@ from core.modal.oma_layout import (OMALayout, MeasPoint, MachineComponent, defau
 
 # Presets "de fábrica" (nombre visible → función que arma el OMALayout)
 FACTORY_PRESETS = {
-    "Motor + bomba multietapa (sobre patas) — 17 sensores": motor_multistage_pump_layout,
+    "Motor + multistage pump (on pedestals) — 17 sensors": motor_multistage_pump_layout,
 }
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.14"
+__version__ = "0.9.15"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -148,7 +148,7 @@ def _field_disp(v, anim):
 
 
 def _heat_qcolor(t):
-    """Colormap informativo tipo ARTeMIS: VERDE (no vibra) → ámbar → ROJO (más vibra)."""
+    """Informative colormap: GREEN (low vibration) -> amber -> RED (high vibration)."""
     t = max(0.0, min(1.0, t))
     stops = [(0.0, (22, 163, 74)), (0.35, (132, 204, 22)), (0.6, (245, 158, 11)),
              (0.8, (249, 115, 22)), (1.0, (220, 38, 38))]
@@ -294,18 +294,36 @@ def _stylesheet() -> str:
     return f"""
     QWidget {{ font-family: 'Segoe UI', Arial; font-size: 12px; color: {NAVY}; }}
     QMainWindow, QTabWidget::pane {{ background: #f5f8fd; }}
-    QTabBar::tab {{ background: #e6ecf5; padding: 8px 16px; margin-right: 3px;
+    QTabWidget::pane {{ border: 1px solid #dbe4f0; border-radius: 10px; top: -1px; }}
+    QTabBar::tab {{ background: #e6ecf5; color: #334155; padding: 8px 16px; margin-right: 3px;
         border-top-left-radius: 8px; border-top-right-radius: 8px; font-weight: 700; }}
+    QTabBar::tab:hover {{ background: #d4deee; }}
     QTabBar::tab:selected {{ background: {NAVY}; color: white; }}
     QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{ background: white;
-        border: 1px solid #cbd5e1; border-radius: 6px; padding: 4px 8px; }}
+        border: 1px solid #cbd5e1; border-radius: 6px; padding: 4px 8px; selection-background-color: {ACC}; }}
+    QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {{ border: 1px solid {ACC}; }}
     QSpinBox, QDoubleSpinBox {{ padding-right: 20px; }}
+    QComboBox::drop-down {{ border: none; width: 20px; }}
     QPushButton {{ background: {NAVY}; color: white; border: none; font-weight: 700;
         padding: 8px 15px; border-radius: 8px; }}
     QPushButton:hover {{ background: #0e3a6b; }}
+    QPushButton:pressed {{ background: #0b2e56; }}
     QPushButton:disabled {{ background: #94a3b8; }}
-    QTableWidget {{ background: white; gridline-color: #e6ecf5; }}
-    QHeaderView::section {{ background: {NAVY}; color: white; padding: 5px; border: none; font-weight: 700; }}
+    QCheckBox {{ spacing: 6px; }}
+    QCheckBox::indicator {{ width: 16px; height: 16px; border: 1px solid #94a3b8; border-radius: 4px; background: white; }}
+    QCheckBox::indicator:checked {{ background: {GREEN}; border: 1px solid {GREEN}; }}
+    QTableWidget {{ background: white; gridline-color: #eef2f8; border: 1px solid #e2e8f0;
+        border-radius: 8px; alternate-background-color: #fafcff; }}
+    QTableWidget::item:selected {{ background: #d9ebfb; color: {NAVY}; }}
+    QHeaderView::section {{ background: {NAVY}; color: white; padding: 6px; border: none; font-weight: 700; }}
+    QTextBrowser {{ background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 6px; }}
+    QToolTip {{ background: {NAVY}; color: white; border: none; padding: 6px 8px; border-radius: 6px; }}
+    QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px; }}
+    QScrollBar::handle:vertical {{ background: #c3cfe0; border-radius: 5px; min-height: 30px; }}
+    QScrollBar::handle:vertical:hover {{ background: #9fb2cd; }}
+    QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
+    QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 2px; }}
+    QScrollBar::handle:horizontal {{ background: #c3cfe0; border-radius: 5px; min-width: 30px; }}
     """
 
 
@@ -344,7 +362,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     brand.setStyleSheet("color:white; font-weight:800; font-size:15px;"); tb.addWidget(brand)
     ver_lbl = QtWidgets.QLabel(f"v{__version__}")
     ver_lbl.setStyleSheet("color:#94a3b8; font-weight:700; font-size:12px; padding-left:8px;")
-    ver_lbl.setToolTip("Versión del software Watermelon Modal"); tb.addWidget(ver_lbl)
+    ver_lbl.setToolTip("Watermelon Modal software version"); tb.addWidget(ver_lbl)
     spc = QtWidgets.QWidget(); spc.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     tb.addWidget(spc)
     # ¿Hay una NI 9234 conectada AHORA? Autodetecta al arrancar (no depende de --sim).
@@ -361,10 +379,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
     ni_channels = _detect_ni_channels()
     hw_present = ni_channels > 0
     if hw_present:
-        mode_lbl = QtWidgets.QLabel(f"● LIVE — {DAQ_NAME} · {ni_channels} canales   ")
+        mode_lbl = QtWidgets.QLabel(f"● LIVE — {DAQ_NAME} · {ni_channels} channels   ")
         mode_lbl.setStyleSheet("color:#34d399; font-weight:700;")
     else:
-        mode_lbl = QtWidgets.QLabel("● SIMULADO — sin adquisición conectada   ")
+        mode_lbl = QtWidgets.QLabel("● SIMULATED — no acquisition connected   ")
         mode_lbl.setStyleSheet("color:#fbbf24; font-weight:700;")
     mode_lbl.setToolTip("Se detecta al abrir el programa. Cada captura usa la fuente "
                         f"elegida en 'Source' (Simulado / {DAQ_NAME}).")
@@ -434,9 +452,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
     for lab, w in (("L", sp_len), ("H", sp_hei), ("W", sp_wid)):
         bld.addWidget(QtWidgets.QLabel(lab)); bld.addWidget(w)
     btn_color = QtWidgets.QPushButton("🎨 Color")
-    btn_color.setToolTip("Elegí el color del equipo seleccionado (ej. motor gris, bomba verde).")
+    btn_color.setToolTip("Pick the colour of the selected equipment (e.g. grey motor, green pump).")
     btn_colreset = QtWidgets.QPushButton("↺")
-    btn_colreset.setToolTip("Volver al color por defecto según el tipo de equipo.")
+    btn_colreset.setToolTip("Reset to the default colour for the equipment type.")
     btn_colreset.setMaximumWidth(34)
     bld.addWidget(btn_color); bld.addWidget(btn_colreset)
     chk_lock = QtWidgets.QCheckBox("🔒 Rotate view (lock parts)")
@@ -536,7 +554,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     sul.addWidget(tbl_sum, 1)
     save_row = QtWidgets.QHBoxLayout()
     btn_preset = QtWidgets.QPushButton("⭐ Presets")
-    btn_preset.setToolTip("Cargar una configuración de fábrica lista (máquina + sensores + adquisición).")
+    btn_preset.setToolTip("Load a ready factory configuration (machine + sensors + acquisition).")
     btn_savelocal = QtWidgets.QPushButton("💾 Save locally")
     btn_loadlocal = QtWidgets.QPushButton("📂 Load local")
     btn_savecloud = QtWidgets.QPushButton("☁ Save to Watermelon System")
@@ -913,7 +931,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
 
     def _load_preset():
         names = list(FACTORY_PRESETS.keys())
-        name, ok = QtWidgets.QInputDialog.getItem(win, "Presets de fábrica", "Configuración:", names, 0, False)
+        name, ok = QtWidgets.QInputDialog.getItem(win, "Factory presets", "Configuration:", names, 0, False)
         if ok and name:
             st["layout"] = FACTORY_PRESETS[name]()   # arma máquina + sensores + adquisición
             _reload_from_layout()
@@ -1058,7 +1076,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     cb_src = QtWidgets.QComboBox(); cb_src.addItems(["Simulado", f"{DAQ_NAME} (live)"]); crow.addWidget(cb_src)
     if hw_present:
         cb_src.setCurrentIndex(1)                          # hay hardware → live por defecto
-    btn_testni = QtWidgets.QPushButton("🔌 Probar adquisición")
+    btn_testni = QtWidgets.QPushButton("🔌 Test acquisition")
     btn_ocap = QtWidgets.QPushButton("▶ Capture + FDD"); btn_ocap.setStyleSheet(
         f"QPushButton{{background:{ACC};font-size:14px;padding:10px 20px;}} QPushButton:hover{{background:#1490c2;}}")
     btn_upload = QtWidgets.QPushButton("☁ Upload run to cloud")
@@ -1072,22 +1090,22 @@ def build_app(layout: OMALayout, simulated: bool = True):
         except Exception as e:  # noqa: BLE001
             cause = getattr(e, "__cause__", None)
             root = f"\n\nDetalle: {type(cause).__name__}: {cause}" if cause else ""
-            QtWidgets.QMessageBox.warning(win, "Adquisición Watermelon",
-                f"❌ No se pudo iniciar el módulo de adquisición.\n\n{type(e).__name__}: {e}{root}\n\n"
-                "Revisá cable, alimentación del equipo y vuelve a intentar.")
+            QtWidgets.QMessageBox.warning(win, "Watermelon acquisition",
+                f"❌ Could not start the acquisition module.\n\n{type(e).__name__}: {e}{root}\n\n"
+                "Check the cable, unit power and try again.")
             return
         if not devs:
-            QtWidgets.QMessageBox.warning(win, "Adquisición Watermelon",
-                "⚠ No se detecta el equipo de adquisición.\nRevisá el cable USB y la alimentación.")
+            QtWidgets.QMessageBox.warning(win, "Watermelon acquisition",
+                "⚠ Acquisition unit not detected.\nCheck the USB cable and power.")
             return
         chassis = [d for d in devs if "cdaq" in d["product_type"].lower() or "9178" in d["product_type"]]
         mods = [d for d in devs if "9234" in d["product_type"]]
         nch = len(mods) * 4
         lines = [f"✅ {DAQ_NAME} conectado."]
-        lines.append(f"Módulos de adquisición: {len(mods)} → {nch} canales disponibles.")
-        lines.append(f"\nConexión OK — podés capturar con Source = {DAQ_NAME} (live)." if mods
-                     else "No se detectan módulos de canales — revisá que estén bien insertados.")
-        QtWidgets.QMessageBox.information(win, "Adquisición Watermelon", "\n".join(lines))
+        lines.append(f"Acquisition modules: {len(mods)} → {nch} channels available.")
+        lines.append(f"\nConnection OK — you can capture with Source = {DAQ_NAME} (live)." if mods
+                     else "No channel modules detected — check they are properly seated.")
+        QtWidgets.QMessageBox.information(win, "Watermelon acquisition", "\n".join(lines))
     btn_testni.clicked.connect(_test_ni)
     ocs = QtWidgets.QHBoxLayout()
     tbl_om = QtWidgets.QTableWidget(0, 4); tbl_om.setHorizontalHeaderLabels(["Freq (Hz)", "Damping (%)", "Complexity (%)", "Class"])
@@ -1122,7 +1140,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 lbl_ost.setText(f"{DAQ_NAME}: {data.shape[0]} muestras · {data.shape[1]} canales")
             except Exception as e:  # noqa: BLE001
                 QtWidgets.QMessageBox.warning(win, DAQ_NAME,
-                    f"Sin adquisición / falló la captura → usando simulado.\n\n{type(e).__name__}: {e}")
+                    f"No acquisition / capture failed → using simulated.\n\n{type(e).__name__}: {e}")
                 data = None
         if data is None:                                # simulado
             lbl_ost.setText(f"Capturing {secs:.0f}s @ {fs:.0f}Hz · {nch} channels (simulated)…")
@@ -1448,8 +1466,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
         for m in res.modes:
             p_stab.plot([m.frequency_hz, m.frequency_hz], [0, res.orders[-1]],
                         pen=pg.mkPen(NAVY, width=1, style=QtCore.Qt.DashLine))
-        lbl_ssi.setText(f"✅ SSI: {len(res.modes)} modos estables. Verde = polo estable entre órdenes; "
-                        "la línea azul es el modo identificado. El ± es la INCERTIDUMBRE (dispersión).")
+        lbl_ssi.setText(f"✅ SSI: {len(res.modes)} stable modes. Green = pole stable across orders; "
+                        "the blue line is the identified mode. The ± is the UNCERTAINTY (dispersion).")
         lbl_ssi.setStyleSheet(f"color:{GREEN};font-weight:700;")
         _anim_reload_modes()
     btn_ssi.clicked.connect(_run_ssi)
@@ -1473,8 +1491,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     arow.addWidget(btn_play); arow.addWidget(btn_stop); arow.addStretch(1)
     anl.addLayout(arow)
     anl.addWidget(QtWidgets.QLabel(
-        "<i style='color:#64748b'>Los puntos oscilan según la forma modal. Baja complejidad = modo "
-        "estructural real; alta = sospechoso (forzado/armónico). Arrastre izq = girar.</i>"))
+        "<i style='color:#64748b'>Points oscillate with the mode shape. Low complexity = real "
+        "structural mode; high = suspicious (forced/harmonic). Left-drag = rotate.</i>"))
     p_anim = pg.PlotWidget(viewBox=OrbitViewBox()); p_anim.setBackground("w"); p_anim.setAspectLocked(True)
     p_anim.hideAxis("left"); p_anim.hideAxis("bottom"); p_anim.setMenuEnabled(False)
     m_anim = Machine3DItem(); p_anim.addItem(m_anim)
@@ -1860,11 +1878,143 @@ def build_app(layout: OMALayout, simulated: bool = True):
             QtWidgets.QMessageBox.information(win, "Preliminary", f"✅ Saved: {path}")
     btn_prel.clicked.connect(_gen_preliminary)
 
+    # ---------------------------------------------------------------
+    # HELP / MANUAL / ABOUT  (English, with diagrams)
+    # ---------------------------------------------------------------
+    def _diagram_workflow() -> QtGui.QPixmap:
+        pm = QtGui.QPixmap(820, 130); pm.fill(QtGui.QColor("white"))
+        p = QtGui.QPainter(pm); p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        steps = [("Configure", NAVY), ("Acquire OMA", "#2563eb"), ("FDD", "#16a34a"),
+                 ("SSI", "#f59e0b"), ("Validate", "#7c3aed"), ("Report", "#dc2626")]
+        x = 12; w = 118; h = 54; y = 40
+        for i, (label, col) in enumerate(steps):
+            p.setBrush(QtGui.QColor(col)); p.setPen(QtGui.QPen(QtGui.QColor("#0f172a"), 1))
+            p.drawRoundedRect(x, y, w, h, 9, 9)
+            p.setPen(QtGui.QColor("white")); f = p.font(); f.setBold(True); f.setPointSize(10); p.setFont(f)
+            p.drawText(QtCore.QRectF(x, y, w, h), QtCore.Qt.AlignCenter, label)
+            if i < len(steps) - 1:
+                p.setPen(QtGui.QPen(QtGui.QColor("#64748b"), 2))
+                p.drawLine(x + w, y + h // 2, x + w + 16, y + h // 2)
+                p.drawLine(x + w + 10, y + h // 2 - 4, x + w + 16, y + h // 2)
+                p.drawLine(x + w + 10, y + h // 2 + 4, x + w + 16, y + h // 2)
+            x += w + 16
+        p.setPen(QtGui.QColor("#334155")); f2 = p.font(); f2.setBold(False); f2.setPointSize(9); p.setFont(f2)
+        p.drawText(12, 24, "Watermelon Modal — field-to-report workflow")
+        p.end(); return pm
+
+    def _diagram_sensors() -> QtGui.QPixmap:
+        pm = QtGui.QPixmap(820, 210); pm.fill(QtGui.QColor("white"))
+        p = QtGui.QPainter(pm); p.setRenderHint(QtGui.QPainter.Antialiasing, True)
+        p.setPen(QtGui.QColor("#334155")); f = p.font(); f.setBold(True); f.setPointSize(9); p.setFont(f)
+        p.drawText(12, 20, "Sensor placement per bearing (API 670 / ISO 20816): each bearing → H, V, A")
+        # eje
+        p.setPen(QtGui.QPen(QtGui.QColor("#0f172a"), 6)); p.drawLine(120, 130, 700, 130)
+        for bx, name in ((190, "NDE (free)"), (630, "DE (coupling)")):
+            p.setBrush(QtGui.QColor("#94a3b8")); p.setPen(QtGui.QPen(QtGui.QColor("#0f172a"), 1))
+            p.drawRect(bx - 34, 108, 68, 44)                                   # bearing housing
+            arrows = [("V", bx, 70, bx, 104, "#dc2626"), ("H", bx + 40, 130, bx + 78, 130, "#2563eb"),
+                      ("A", bx, 130, bx - 40, 165, "#16a34a")]
+            for lab, x0, y0, x1, y1, col in arrows:
+                p.setPen(QtGui.QPen(QtGui.QColor(col), 2)); p.drawLine(x0, y0, x1, y1)
+                p.setPen(QtGui.QColor(col)); f3 = p.font(); f3.setPointSize(9); f3.setBold(True); p.setFont(f3)
+                p.drawText(x1 - 6, y1 + (12 if lab == "A" else -4), lab)
+            p.setPen(QtGui.QColor("#334155")); f4 = p.font(); f4.setBold(False); p.setFont(f4)
+            p.drawText(bx - 40, 178, name)
+        p.setPen(QtGui.QColor("#64748b"))
+        p.drawText(120, 200, "H = horizontal radial · V = vertical radial · A = axial (along shaft)")
+        p.end(); return pm
+
+    pg_help = QtWidgets.QWidget(); hl = QtWidgets.QVBoxLayout(pg_help)
+    about = QtWidgets.QLabel(
+        f"<div style='background:{NAVY};color:white;border-radius:8px;padding:12px 16px'>"
+        f"<span style='font-size:18px;font-weight:800'>🍉 Watermelon Modal</span>"
+        f"<span style='color:#93c5fd;font-weight:700'>&nbsp;&nbsp;v{__version__}</span><br>"
+        f"<span style='color:#cbd5e1'>EMA + OMA field analysis · one platform, field to report · "
+        f"acquisition: {DAQ_NAME}</span></div>")
+    about.setTextFormat(QtCore.Qt.RichText); hl.addWidget(about)
+    help_view = QtWidgets.QTextBrowser(); help_view.setOpenExternalLinks(True)
+    _doc = help_view.document()
+    _doc.addResource(QtGui.QTextDocument.ImageResource, QtCore.QUrl("wf"), _diagram_workflow())
+    _doc.addResource(QtGui.QTextDocument.ImageResource, QtCore.QUrl("sensors"), _diagram_sensors())
+    help_view.setHtml(f"""
+    <div style='font-family:Segoe UI, Arial; color:#0f172a'>
+    <h2>User manual</h2>
+    <p><img src='wf'></p>
+    <h3>1 · Overview</h3>
+    <p>Watermelon Modal performs <b>EMA</b> (impact test) and <b>OMA</b> (operational modal
+    analysis) in the field, uploads runs to Watermelon System (cloud) and produces a full
+    normative report. Standards: <b>ISO 7626-1..6</b> (EMA), <b>ISO 20816</b> (OMA),
+    <b>API 684</b> (Campbell separation).</p>
+
+    <h3>2 · Configuration — recommended practice</h3>
+    <p><img src='sensors'></p>
+    <ol>
+    <li><b>Build the machine</b> (Configuration → Machine): add each equipment (motor, coupling,
+    pump, skid, pedestals) and drag it into place. Use the ⭐ <i>Factory presets</i> for a quick start.</li>
+    <li><b>Place sensors</b> (Sensors): on every bearing put a triaxial set — <b>H</b> (horizontal),
+    <b>V</b> (vertical), <b>A</b> (axial). For structural problems (e.g. weak skid), add sensors on
+    the <b>skid/base</b> at each foot to capture base motion. Mark 1–2 <b>reference</b> sensors (fixed,
+    high-response points) — required for OMA.</li>
+    <li><b>Acquisition</b> (ISO 20816 / Brincker): OMA needs a <b>long record</b> — at least
+    1000–2000 cycles of the lowest mode (typically <b>5–10 min</b>), simultaneous sampling, no force
+    window. Set <b>Fmax</b> to cover the modes of interest; keep a fine Δf (large block).</li>
+    </ol>
+
+    <h3>3 · How to take an OMA measurement</h3>
+    <ol>
+    <li>Connect the {DAQ_NAME} unit <b>before</b> opening the app → the banner turns green
+    (<b>LIVE</b>) and shows the channel count.</li>
+    <li>Load the machine (Preset or cloud) and confirm sensors/BNC in <i>Measurement points</i>.</li>
+    <li>Go to <b>OMA capture</b>, set <i>Source = {DAQ_NAME} (live)</i>, run <b>Test acquisition</b>
+    to confirm all channels, then press <b>Capture + FDD</b> with the machine running at operating speed.</li>
+    <li>Run <b>SSI (subspace)</b> to confirm modes by a second method (accurate damping + uncertainty).</li>
+    <li>Read the <b>Automatic mode validation</b> table (validated / doubtful / rejected, harmonics flagged).</li>
+    <li>With internet, press <b>Upload run to cloud</b> → it appears in Watermelon System (web) for the report.</li>
+    </ol>
+
+    <h3>4 · Impact test (EMA) — ISO 7626-5</h3>
+    <p>Use an instrumented hammer on channel 1. Force + exponential windows are ON by default. Take
+    3–5 averages per point; accept a hit only if <b>coherence ≥ 0.8</b> in the band and no overload /
+    double-hit. Identify modes in <b>Modes (EMA)</b> (peak-picking + half-power damping + Nyquist).</p>
+
+    <h3>5 · Reading the results</h3>
+    <ul>
+    <li><b>FDD singular values:</b> each peak of SV1 is a candidate mode.</li>
+    <li><b>SSI stabilization:</b> green poles that stay stable across model orders are real modes; the
+    <b>±</b> is the uncertainty.</li>
+    <li><b>Complexity / MPC:</b> low = real structural mode; high = suspicious (forced/harmonic).</li>
+    <li><b>Campbell (API 684):</b> a natural frequency within <b>±15%</b> of a running-speed order
+    (1×, 2×, …) is a resonance risk — for a weak skid, look for low structural modes near 1×/2×.</li>
+    <li><b>Automatic validation:</b> combines all of the above into a verdict per mode.</li>
+    </ul>
+
+    <h3>6 · Troubleshooting</h3>
+    <ul>
+    <li><b>Unit not detected:</b> check USB cable and unit power, reconnect, reopen the app.</li>
+    <li><b>Poor coherence (EMA):</b> re-hit cleanly, avoid double hits, check sensor mounting.</li>
+    <li><b>Too many modes / harmonics:</b> trust the validation table; harmonics of running speed are flagged.</li>
+    </ul>
+
+    <h3>7 · Standards</h3>
+    <p>ISO 7626-1..6 · ISO 20816 · API 684 · API 670 (sensor placement).</p>
+
+    <hr>
+    <h3>About</h3>
+    <p><b>Watermelon Modal</b> — version <b>{__version__}</b>. Part of the <b>Watermelon System</b>
+    platform for machinery diagnostics.<br>
+    Developed by <b>SIGA S.A.S.</b> — Machinery Diagnostics Engineering.<br>
+    Contact: <a href='mailto:info@sigasas.com'>info@sigasas.com</a> · Cali — Colombia.<br>
+    <span style='color:#64748b'>© 2026 SIGA S.A.S. All rights reserved.</span></p>
+    </div>
+    """)
+    hl.addWidget(help_view, 1)
+    tabs.addTab(pg_help, "Help")
+
     # Orden lógico de pestañas: EMA (impacto → modos) juntos, OMA (captura → SSI)
     # juntos, luego correlación / Campbell / formas / reporte.
     _desired_order = ["Configuration", "Impact test (EMA)", "Modes (EMA)",
                       "OMA capture", "SSI (subspace)", "Comparative", "Campbell",
-                      "Mode shapes", "Preliminary report"]
+                      "Mode shapes", "Preliminary report", "Help"]
     _bar = tabs.tabBar()
     for _target, _title in enumerate(_desired_order):
         _cur = next((i for i in range(tabs.count()) if tabs.tabText(i) == _title), None)
