@@ -150,7 +150,8 @@ def _build_demo_D():
                   "complexity": m.complexity_pct, "cls": m.classification} for m in fdd.modes]
     return {"lay": lay, "oma_modes": oma_modes, "sv_traces": sv_traces,
             "ema_freqs": [fn for fn, _ in DEMO_MODES], "rpm": lay.running_speed_rpm,
-            "raw": (data, fs), "shapes": None, "source": "demo", "name": lay.name}
+            "raw": (data, fs), "shapes": None, "source": "demo", "name": lay.name,
+            "ema_curve": None, "ema_modes_full": None, "ssi_cloud": None}
 
 
 def _build_cloud_D(payload: dict):
@@ -171,11 +172,20 @@ def _build_cloud_D(payload: dict):
         sh = m.get("shape") or {}
         re = np.asarray(sh.get("re", []), float); im = np.asarray(sh.get("im", []), float)
         shapes.append(np.abs(re + 1j * im) if re.size else None)
+    ema_blk = payload.get("ema") or None
+    ema_curve = None; ema_modes_full = None
+    if ema_blk and ema_blk.get("freqs"):
+        ema_curve = {"freqs": np.asarray(ema_blk["freqs"], float),
+                     "mag_db": np.asarray(ema_blk.get("mag_db", []), float),
+                     "coh": np.asarray(ema_blk.get("coh", []), float)}
+        ema_modes_full = ema_blk.get("modes") or None
     return {"lay": lay, "oma_modes": oma_modes, "sv_traces": sv_traces,
             "ema_freqs": list(payload.get("ema_modes", []) or []),
             "rpm": float(payload.get("running_rpm", lay.running_speed_rpm) or lay.running_speed_rpm),
             "raw": None, "shapes": shapes, "source": "cloud",
-            "name": payload.get("name", lay.name)}
+            "name": payload.get("name", lay.name),
+            "ema_curve": ema_curve, "ema_modes_full": ema_modes_full,
+            "ssi_cloud": payload.get("ssi") or None}
 
 
 # ================================================================== HEADER
@@ -265,18 +275,23 @@ with _t[0]:
 # ---------------------------------------------------------------- 2 EMA
 with _t[1]:
     _sec("Impact test (EMA)", "FRF + coherence per hammer hit", "ISO 7626-5")
-    f, H, coh = _demo_frf()
     from plotly.subplots import make_subplots
+    if D["ema_curve"] is not None:
+        _fx = D["ema_curve"]["freqs"]; _mag = D["ema_curve"]["mag_db"]; _coh = D["ema_curve"]["coh"]
+    else:
+        f, H, coh = _demo_frf(); _fx = f; _mag = 20 * np.log10(np.abs(H)); _coh = coh
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, row_heights=[0.7, 0.3],
                         vertical_spacing=0.06, subplot_titles=("Mobility |H(f)|", "Coherence"))
-    fig.add_trace(go.Scatter(x=f, y=20 * np.log10(np.abs(H)), line=dict(color=BLUE)), 1, 1)
-    fig.add_trace(go.Scatter(x=f, y=coh, line=dict(color=GREEN)), 2, 1)
+    fig.add_trace(go.Scatter(x=_fx, y=_mag, line=dict(color=BLUE)), 1, 1)
+    fig.add_trace(go.Scatter(x=_fx, y=_coh, line=dict(color=GREEN)), 2, 1)
     fig.update_yaxes(title_text="dB", row=1, col=1); fig.update_yaxes(range=[0, 1.05], row=2, col=1)
     fig.update_xaxes(title_text="Frequency (Hz)", row=2, col=1)
     fig.update_layout(height=470, template="plotly_white", showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
-    if D["source"] == "cloud":
-        st.caption("Impact FRF is acquired in the field app; this cloud run is operational (OMA).")
+    if D["ema_curve"] is not None:
+        st.success("Real impact FRF from the field run (ISO 7626-5).")
+    elif D["source"] == "cloud":
+        st.caption("This cloud run is operational (OMA) — no impact test uploaded.")
     else:
         st.success("5/5 averages accepted · coherence ≥ 0.8 in band (ISO 7626-5).")
 
@@ -286,9 +301,14 @@ with _t[2]:
     f, H, coh = _demo_frf()
     cc1, cc2 = st.columns([2, 3])
     with cc1:
-        st.dataframe([{"Freq (Hz)": round(fr, 2), "Reliable": "✓"} for fr in D["ema_freqs"]] or
-                     [{"Freq (Hz)": fn, "Damping (%)": round(z * 100, 2)} for fn, z in DEMO_MODES],
-                     use_container_width=True, hide_index=True)
+        if D["ema_modes_full"]:
+            st.dataframe([{"Freq (Hz)": round(m["fn"], 2), "Damping (%)": round(m["zeta"], 3),
+                           "Coherence": round(m["coh"], 3) if m.get("coh") is not None else "—"}
+                          for m in D["ema_modes_full"]], use_container_width=True, hide_index=True)
+        else:
+            st.dataframe([{"Freq (Hz)": round(fr, 2), "Reliable": "✓"} for fr in D["ema_freqs"]] or
+                         [{"Freq (Hz)": fn, "Damping (%)": round(z * 100, 2)} for fn, z in DEMO_MODES],
+                         use_container_width=True, hide_index=True)
     with cc2:
         fig = go.Figure(go.Scatter(x=H.real, y=H.imag, mode="lines", line=dict(color=NAVY)))
         fig.update_layout(title="Nyquist (mobility)", height=380, template="plotly_white",
@@ -338,6 +358,28 @@ with _t[4]:
                        "Damping (%)": round(m.damping_ratio_pct, 3),
                        "± %": round(m.std_damping_pct, 3)} for i, m in enumerate(ssi.modes)],
                      use_container_width=True, hide_index=True)
+    elif D["ssi_cloud"] and D["ssi_cloud"].get("diagram"):
+        _ssi = D["ssi_cloud"]
+        fig = go.Figure()
+        for entry in _ssi["diagram"]:
+            order, fr, mask = entry[0], np.asarray(entry[1], float), entry[2]
+            if fr.size == 0:
+                continue
+            fig.add_trace(go.Scatter(x=list(fr), y=[order] * len(fr), mode="markers",
+                          marker=dict(size=6, color=[GREEN if m else "#cbd5e1" for m in mask]),
+                          showlegend=False, hoverinfo="skip"))
+        for m in _ssi["modes"]:
+            fig.add_vline(x=m["fn"], line=dict(color=RED, width=1, dash="dot"))
+        fig.update_layout(title="Stabilization diagram (green = stable pole)", height=430,
+                          template="plotly_white", xaxis_title="Frequency (Hz)", yaxis_title="Model order")
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe([{"Mode": i + 1, "Freq (Hz)": round(m["fn"], 3),
+                       "± Hz": round(m.get("std_fn", 0.0), 3),
+                       "Damping (%)": round(m["zeta"], 3),
+                       "± %": round(m.get("std_zeta", 0.0), 3)}
+                      for i, m in enumerate(_ssi["modes"])],
+                     use_container_width=True, hide_index=True)
+        st.caption("Real SSI-COV stabilization diagram from the field run.")
     else:
         st.info("SSI-COV runs on the raw time series in the field app. This cloud run stores the "
                 "identified modes below (raw record stays on the field laptop).")

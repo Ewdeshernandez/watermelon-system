@@ -50,7 +50,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.12"
+__version__ = "0.9.13"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1197,13 +1197,39 @@ def build_app(layout: OMALayout, simulated: bool = True):
                       "complexity": m.complexity_pct, "class": m.classification, "shape": _sh(m)}
                      for m in fdd.modes]
             # modos EMA (si hay) para la correlación EMA↔OMA en el reporte
-            ema = []
+            ema = []; ema_block = None
             res = st["acc"].result()
             if res is not None:
-                ema = [mp.frequency_hz for mp in modes_from_frf(res, fmin=5, fmax=lay.fmax_hz)]
+                ema_peaks = modes_from_frf(res, fmin=5, fmax=lay.fmax_hz)
+                ema = [mp.frequency_hz for mp in ema_peaks]
+                # curva FRF + coherencia (submuestreada) para verla idéntica en la web
+                ef = np.asarray(res.frequencies_hz); emag = np.asarray(res.magnitude)
+                ecoh = np.asarray(res.coherence)
+                eb = ef <= lay.fmax_hz
+                st_e = max(1, int(np.sum(eb)) // 800)
+                ema_block = {
+                    "freqs": ef[eb][::st_e].tolist(),
+                    "mag_db": (20 * np.log10(np.maximum(emag[eb][::st_e], 1e-12))).tolist(),
+                    "coh": ecoh[eb][::st_e].tolist(),
+                    "modes": [{"fn": mp.frequency_hz, "zeta": mp.damping_ratio_pct,
+                               "coh": getattr(mp, "coherence_at_peak", None)} for mp in ema_peaks],
+                }
+            # SSI (si se corrió): modos + diagrama de estabilización para la web
+            ssi_block = None
+            ssi_res = st.get("ssi")
+            if ssi_res is not None and getattr(ssi_res, "modes", None):
+                ssi_block = {
+                    "modes": [{"fn": m.frequency_hz, "zeta": m.damping_ratio_pct,
+                               "std_fn": m.std_frequency_hz, "std_zeta": m.std_damping_pct}
+                              for m in ssi_res.modes],
+                    "diagram": [[int(o), np.asarray(fr).tolist(),
+                                 [bool(x) for x in np.asarray(mk).tolist()]]
+                                for (o, fr, mk) in ssi_res.diagram],
+                }
             payload = {"name": lay.name, "kind": "OMA", "modes": modes, "svd": svd,
                        "channel_names": lay.channel_names(), "running_rpm": lay.running_speed_rpm,
-                       "ema_modes": ema, "client": lay.client, "asset": lay.machine_type,
+                       "ema_modes": ema, "ema": ema_block, "ssi": ssi_block,
+                       "client": lay.client, "asset": lay.machine_type,
                        "location": lay.location, "layout": lay.to_dict()}
             r = modal_cloud.save_run(lay.name, payload)
             if r.get("ok"):
