@@ -2,13 +2,14 @@
 pages/18_Modal_Analysis.py — Watermelon Modal (WEB)
 ===================================================
 
-Copia EXACTA del app de campo (native/watermelon_modal.py): mismas 9 pestañas,
-mismo flujo y mismos gráficos. La web es SOLO análisis (no captura hardware):
-consume las CORRIDAS reales que el campo sube a la nube (tabla modal_runs). Si
-no hay red / no hay corridas, usa un dataset de muestra para no quedar vacía.
+Web = SOLO análisis (la CONFIGURACIÓN se hace en el software de campo). Consume
+las CORRIDAS reales que el campo sube a la nube (tabla modal_runs). Si no hay red
+/ no hay corridas, usa un dataset de muestra para no quedar vacía. El equipo se
+muestra como contexto de solo-lectura en el encabezado.
 
-Pestañas: Configuration · Impact test (EMA) · Modes (EMA) · OMA capture ·
-SSI (subspace) · Comparative · Campbell · Mode shapes · Preliminary report.
+Pestañas: Impact test (EMA) · Modes (EMA) · OMA capture · SSI (subspace) ·
+Comparative · Campbell · Mode shapes · Report (PDF SIGA completo: portada + TOC +
+todas las secciones, mismo motor que el módulo de Reportes).
 
 Marco normativo: ISO 7626-1..6 (EMA) · ISO 20816 (OMA) · API 684 (Campbell).
 """
@@ -148,10 +149,19 @@ def _build_demo_D():
                  for r in range(min(sv.shape[0], 4))]
     oma_modes = [{"fn": m.natural_frequency_hz, "zeta": m.damping_ratio_pct,
                   "complexity": m.complexity_pct, "cls": m.classification} for m in fdd.modes]
+    _fb = freqs[band]; _sv1 = sv[0][band]; _st = max(1, len(_fb) // 900)
+    payload = {"name": lay.name, "kind": "OMA", "running_rpm": lay.running_speed_rpm,
+               "client": lay.client, "asset": lay.machine_type, "location": lay.location,
+               "channel_names": lay.channel_names(), "ema_modes": [fn for fn, _ in DEMO_MODES],
+               "svd": {"freqs": _fb[::_st].tolist(), "sv1": _sv1[::_st].tolist()},
+               "modes": [{"fn": m.natural_frequency_hz, "zeta": m.damping_ratio_pct,
+                          "complexity": m.complexity_pct, "class": m.classification,
+                          "shape": {"re": [], "im": []}} for m in fdd.modes],
+               "layout": lay.to_dict()}
     return {"lay": lay, "oma_modes": oma_modes, "sv_traces": sv_traces,
             "ema_freqs": [fn for fn, _ in DEMO_MODES], "rpm": lay.running_speed_rpm,
             "raw": (data, fs), "shapes": None, "source": "demo", "name": lay.name,
-            "ema_curve": None, "ema_modes_full": None, "ssi_cloud": None}
+            "ema_curve": None, "ema_modes_full": None, "ssi_cloud": None, "payload": payload}
 
 
 def _build_cloud_D(payload: dict):
@@ -185,7 +195,7 @@ def _build_cloud_D(payload: dict):
             "raw": None, "shapes": shapes, "source": "cloud",
             "name": payload.get("name", lay.name),
             "ema_curve": ema_curve, "ema_modes_full": ema_modes_full,
-            "ssi_cloud": payload.get("ssi") or None}
+            "ssi_cloud": payload.get("ssi") or None, "payload": payload}
 
 
 # ================================================================== HEADER
@@ -227,53 +237,20 @@ else:
 
 lay = D["lay"]; nch = lay.n_channels()
 
-TABS = ["🔵  Configuration", "🟢  Impact test (EMA)", "🟣  Modes (EMA)", "🟡  OMA capture",
+# Contexto del equipo (solo-lectura; la CONFIGURACIÓN se hace en el software de campo).
+st.markdown(
+    f"<div style='background:#f1f5f9;border-radius:8px;padding:8px 14px;margin:4px 0 2px'>"
+    f"<b>{lay.name}</b> · {lay.client or '—'} · {lay.location or '—'} · "
+    f"Tag {lay.tag or '—'} · {int(D['rpm'])} RPM · {nch} sensors</div>",
+    unsafe_allow_html=True)
+
+TABS = ["🟢  Impact test (EMA)", "🟣  Modes (EMA)", "🟡  OMA capture",
         "🟠  SSI (subspace)", "🔴  Comparative", "🟤  Campbell", "⚫  Mode shapes",
-        "🔵  Preliminary report"]
-_t = st.tabs(TABS)
+        "🔵  Report"]
+tab_ema, tab_modes, tab_oma, tab_ssi, tab_cmp, tab_camp, tab_shapes, tab_report = st.tabs(TABS)
 
-# ---------------------------------------------------------------- 1 CONFIG
-with _t[0]:
-    _sec("Configuration", "Machine · sensors · acquisition", "ISO 7626 / ISO 20816")
-    _pts_rows = [{"BNC": p.bnc, "Code": p.code, "Component": p.component,
-                  "Reference": p.position_ref, "DOF": p.dof,
-                  "Sens. (mV/g)": p.sensitivity_mv_per_g,
-                  "Ref?": "★" if p.reference_sensor else ""} for p in lay.active_points()]
-    _cfg = st.tabs(["🔵  Machine", "🟢  Sensors", "🟡  Measurement points",
-                    "🟠  Acquisition", "🔴  Summary"])
-    # --- Machine ---
-    with _cfg[0]:
-        m1, m2 = st.columns([3, 2])
-        with m1:
-            st.plotly_chart(_geometry_fig(lay, show_sensors=False), use_container_width=True)
-        with m2:
-            st.markdown("**Machine & client**")
-            st.write({"Machine": lay.name, "Client": lay.client, "Location": lay.location,
-                      "Tag": lay.tag, "Type": lay.machine_type, "RPM": int(D["rpm"])})
-    # --- Sensors ---
-    with _cfg[1]:
-        st.plotly_chart(_geometry_fig(lay, show_sensors=True), use_container_width=True)
-        st.caption(f"{nch} accelerometers placed · numbers = BNC channel.")
-    # --- Measurement points ---
-    with _cfg[2]:
-        st.dataframe(_pts_rows, use_container_width=True, hide_index=True, height=430)
-    # --- Acquisition ---
-    with _cfg[3]:
-        st.write({"fs (Hz)": int(lay.fs_hz), "Block size": lay.block_size,
-                  "Fmax (Hz)": int(lay.fmax_hz), "Duration (s)": int(lay.duration_s),
-                  "Channels": nch, "Test": "/".join(lay.test_modes)})
-        st.caption(f"Δf = {lay.fs_hz/lay.block_size:.3f} Hz · record {lay.block_size/lay.fs_hz*1000:.0f} ms.")
-    # --- Summary ---
-    with _cfg[4]:
-        _cols = st.columns(4)
-        _cols[0].metric("Machine", lay.tag or lay.name)
-        _cols[1].metric("Client", lay.client)
-        _cols[2].metric("Components", len(lay.machine_components))
-        _cols[3].metric("Sensors", nch)
-        st.dataframe(_pts_rows, use_container_width=True, hide_index=True, height=300)
-
-# ---------------------------------------------------------------- 2 EMA
-with _t[1]:
+# ---------------------------------------------------------------- 1 EMA
+with tab_ema:
     _sec("Impact test (EMA)", "FRF + coherence per hammer hit", "ISO 7626-5")
     from plotly.subplots import make_subplots
     if D["ema_curve"] is not None:
@@ -296,7 +273,7 @@ with _t[1]:
         st.success("5/5 averages accepted · coherence ≥ 0.8 in band (ISO 7626-5).")
 
 # ---------------------------------------------------------------- 3 MODES EMA
-with _t[2]:
+with tab_modes:
     _sec("Modes (EMA)", "Peak-picking + half-power damping + Nyquist", "ISO 7626-6")
     f, H, coh = _demo_frf()
     cc1, cc2 = st.columns([2, 3])
@@ -317,7 +294,7 @@ with _t[2]:
         st.plotly_chart(fig, use_container_width=True)
 
 # ---------------------------------------------------------------- 4 OMA
-with _t[3]:
+with tab_oma:
     _sec("OMA capture", "Singular values of spectral densities + FDD modes",
          "ISO 20816 · Brincker 2001")
     if D["sv_traces"]:
@@ -343,7 +320,7 @@ with _t[3]:
         st.info(mv_sum(_verd))
 
 # ---------------------------------------------------------------- 5 SSI
-with _t[4]:
+with tab_ssi:
     _sec("SSI (subspace)", "Covariance-driven SSI-COV + stabilization diagram + uncertainty",
          "OMA · Brincker & Ventura")
     if D["raw"] is not None:
@@ -396,7 +373,7 @@ with _t[4]:
                      use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------------- 6 COMPARATIVE
-with _t[5]:
+with tab_cmp:
     _sec("Comparative — EMA vs OMA", "Match impact modes against operational modes",
          "ISO 7626 / OMA")
     oma_f = [m["fn"] for m in D["oma_modes"]]
@@ -422,7 +399,7 @@ with _t[5]:
             st.info(ema_oma_summary(matches))
 
 # ---------------------------------------------------------------- 7 CAMPBELL
-with _t[6]:
+with tab_camp:
     _sec("Campbell diagram", "Natural frequencies vs running-speed orders", "API 684 sec. 1.6 (±15%)")
     modes_hz = [m["fn"] for m in D["oma_modes"] if m["cls"] != "spurious"] or [m["fn"] for m in D["oma_modes"]]
     if not modes_hz:
@@ -450,7 +427,7 @@ with _t[6]:
             st.info(camp_summary(crossings))
 
 # ---------------------------------------------------------------- 8 MODE SHAPES
-with _t[7]:
+with tab_shapes:
     _sec("Mode shapes", "3D operational deflection — amplitude colormap (green→red)")
     modes = D["oma_modes"]
     opts = [f"Mode {i+1} — {m['fn']:.1f} Hz" for i, m in enumerate(modes)] or ["—"]
@@ -469,22 +446,36 @@ with _t[7]:
     st.caption("Marker color = relative vibration amplitude at each sensor for the selected mode.")
 
 # ---------------------------------------------------------------- 9 PRELIMINARY
-with _t[8]:
-    _sec("Preliminary report", "Automatic report — all graphs + analysis & recommendations")
-    st.markdown(f"**{lay.name}** · {lay.client} · {lay.location} · {int(D['rpm'])} RPM")
-    if D["oma_modes"]:
-        c = st.columns(3)
-        c[0].metric("OMA modes", len(D["oma_modes"]))
-        c[1].metric("1X (Hz)", f"{D['rpm']/60:.1f}")
-        c[2].metric("Sensors", nch)
-        st.markdown("**Automatic analysis**")
-        st.write("- Operational modes identified by FDD" +
-                 (" and confirmed by SSI (subspace)." if D["raw"] is not None else "."))
-        st.write("- Campbell: separation vs 1X..4X evaluated against API 684 (±15%).")
-        if D["ema_freqs"]:
-            st.write("- EMA↔OMA correlation consistent within tolerance.")
-        st.markdown("**Recommendations**")
-        st.write("- Monitor modes near operating-speed orders; verify separation margins in operation.")
-        st.caption("PDF uses core.modal.preliminary_report (same engine as the field app).")
-    else:
+with tab_report:
+    _sec("Report", "Full OMA report — cover, table of contents, all sections",
+         "SIGA-FMT-179 · ISO 20816 · API 684")
+    c = st.columns(4)
+    c[0].metric("Machine", lay.tag or lay.name)
+    c[1].metric("OMA modes", len(D["oma_modes"]))
+    c[2].metric("1X (Hz)", f"{D['rpm']/60:.1f}")
+    c[3].metric("Sensors", nch)
+    st.caption("Same corporate template as the Reports module: cover page + format band + "
+               "table of contents + machine, OMA (singular values + modes), Campbell, "
+               "EMA↔OMA correlation and conclusions.")
+    _lang = st.radio("Language", ["Español", "English"], horizontal=True, key="rep_lang")
+    if not D["oma_modes"]:
         st.info("Select a field run with identified modes to assemble the report.")
+    elif st.button("📄 Generate full report (PDF)", type="primary", key="rep_gen"):
+        try:
+            from core.modal.run_report import build_report_from_run
+            with st.spinner("Building the SIGA report (cover · TOC · all sections)…"):
+                pdf = build_report_from_run(D["payload"], bilingual_es=(_lang == "Español"))
+            st.session_state["_modal_report_pdf"] = pdf
+        except Exception as e:  # noqa: BLE001
+            st.error(f"Could not build the report: {type(e).__name__}: {e}")
+    _pdf = st.session_state.get("_modal_report_pdf")
+    if _pdf:
+        st.download_button("⬇ Download report PDF", data=_pdf,
+                           file_name=f"OMA_{(lay.tag or lay.name).replace(' ', '_')}.pdf",
+                           mime="application/pdf", use_container_width=True)
+        import base64
+        _b64 = base64.b64encode(_pdf).decode()
+        st.markdown(
+            f'<iframe src="data:application/pdf;base64,{_b64}" width="100%" height="820" '
+            f'style="border:1px solid #e2e8f0;border-radius:8px"></iframe>',
+            unsafe_allow_html=True)
