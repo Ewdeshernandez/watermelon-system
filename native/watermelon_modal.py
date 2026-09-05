@@ -50,7 +50,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.18"
+__version__ = "0.9.19"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -2034,50 +2034,116 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_prel.clicked.connect(_gen_preliminary)
 
     # ---------------------------------------------------------------
-    # HELP / MANUAL / ABOUT  (English, with diagrams)
+    # HELP / MANUAL / ABOUT  (English, with a REAL worked example)
     # ---------------------------------------------------------------
-    def _diagram_workflow() -> QtGui.QPixmap:
-        pm = QtGui.QPixmap(820, 130); pm.fill(QtGui.QColor("white"))
-        p = QtGui.QPainter(pm); p.setRenderHint(QtGui.QPainter.Antialiasing, True)
-        steps = [("Configure", NAVY), ("Acquire OMA", "#2563eb"), ("FDD", "#16a34a"),
-                 ("SSI", "#f59e0b"), ("Validate", "#7c3aed"), ("Report", "#dc2626")]
-        x = 12; w = 118; h = 54; y = 40
-        for i, (label, col) in enumerate(steps):
-            p.setBrush(QtGui.QColor(col)); p.setPen(QtGui.QPen(QtGui.QColor("#0f172a"), 1))
-            p.drawRoundedRect(x, y, w, h, 9, 9)
-            p.setPen(QtGui.QColor("white")); f = p.font(); f.setBold(True); f.setPointSize(10); p.setFont(f)
-            p.drawText(QtCore.QRectF(x, y, w, h), QtCore.Qt.AlignCenter, label)
-            if i < len(steps) - 1:
-                p.setPen(QtGui.QPen(QtGui.QColor("#64748b"), 2))
-                p.drawLine(x + w, y + h // 2, x + w + 16, y + h // 2)
-                p.drawLine(x + w + 10, y + h // 2 - 4, x + w + 16, y + h // 2)
-                p.drawLine(x + w + 10, y + h // 2 + 4, x + w + 16, y + h // 2)
-            x += w + 16
-        p.setPen(QtGui.QColor("#334155")); f2 = p.font(); f2.setBold(False); f2.setPointSize(9); p.setFont(f2)
-        p.drawText(12, 24, "Watermelon Modal — field-to-report workflow")
-        p.end(); return pm
+    def _hx_grab(widget, w, h):
+        widget.setFixedSize(w, h)
+        QtWidgets.QApplication.processEvents()
+        return widget.grab()
 
-    def _diagram_sensors() -> QtGui.QPixmap:
-        pm = QtGui.QPixmap(820, 210); pm.fill(QtGui.QColor("white"))
-        p = QtGui.QPainter(pm); p.setRenderHint(QtGui.QPainter.Antialiasing, True)
-        p.setPen(QtGui.QColor("#334155")); f = p.font(); f.setBold(True); f.setPointSize(9); p.setFont(f)
-        p.drawText(12, 20, "Sensor placement per bearing (API 670 / ISO 20816): each bearing → H, V, A")
-        # eje
-        p.setPen(QtGui.QPen(QtGui.QColor("#0f172a"), 6)); p.drawLine(120, 130, 700, 130)
-        for bx, name in ((190, "NDE (free)"), (630, "DE (coupling)")):
-            p.setBrush(QtGui.QColor("#94a3b8")); p.setPen(QtGui.QPen(QtGui.QColor("#0f172a"), 1))
-            p.drawRect(bx - 34, 108, 68, 44)                                   # bearing housing
-            arrows = [("V", bx, 70, bx, 104, "#dc2626"), ("H", bx + 40, 130, bx + 78, 130, "#2563eb"),
-                      ("A", bx, 130, bx - 40, 165, "#16a34a")]
-            for lab, x0, y0, x1, y1, col in arrows:
-                p.setPen(QtGui.QPen(QtGui.QColor(col), 2)); p.drawLine(x0, y0, x1, y1)
-                p.setPen(QtGui.QColor(col)); f3 = p.font(); f3.setPointSize(9); f3.setBold(True); p.setFont(f3)
-                p.drawText(x1 - 6, y1 + (12 if lab == "A" else -4), lab)
-            p.setPen(QtGui.QColor("#334155")); f4 = p.font(); f4.setBold(False); p.setFont(f4)
-            p.drawText(bx - 40, 178, name)
-        p.setPen(QtGui.QColor("#64748b"))
-        p.drawText(120, 200, "H = horizontal radial · V = vertical radial · A = axial (along shaft)")
-        p.end(); return pm
+    def _hx_plot3d(lay, anim=None, az=50.0, el=24.0, w=760, h=340):
+        pw = pg.PlotWidget(viewBox=OrbitViewBox()); pw.setBackground("w")
+        pw.setAspectLocked(True); pw.hideAxis("left"); pw.hideAxis("bottom"); pw.setMenuEnabled(False)
+        it = Machine3DItem(); pw.addItem(it)
+        it.set_show_sensors(anim is None)
+        if anim is not None:
+            it.set_anim(anim); it.set_disp(anim["amps"])
+        it.set_view(lay, np.radians(az), np.radians(el), -1)
+        pw.getViewBox().autoRange(padding=0.15)
+        return _hx_grab(pw, w, h)
+
+    def _hx_add(vbox, title, pixmap, desc):
+        t = QtWidgets.QLabel(f"<b style='font-size:13px;color:{NAVY}'>{title}</b>")
+        t.setTextFormat(QtCore.Qt.RichText); vbox.addWidget(t)
+        img = QtWidgets.QLabel(); img.setPixmap(pixmap)
+        img.setStyleSheet("border:1px solid #e2e8f0;border-radius:8px;background:white;padding:4px")
+        vbox.addWidget(img)
+        d = QtWidgets.QLabel(desc); d.setWordWrap(True); d.setStyleSheet("color:#475569;margin-bottom:12px")
+        d.setTextFormat(QtCore.Qt.RichText); vbox.addWidget(d)
+
+    def _gen_help_example():
+        if st.get("_help_done"):
+            return
+        st["_help_done"] = True
+        btn_ex.setEnabled(False); btn_ex.setText("Generating…"); QtWidgets.QApplication.processEvents()
+        try:
+            from core.modal.oma_engine import run_oma
+            from core.modal.campbell import compute_crossings, SpeedBand
+            from scipy.signal import lfilter
+            lay = motor_multistage_pump_layout(name="Cenit — Estación Medellín · U2",
+                                               client="Cenit", location="Estación Medellín",
+                                               tag="UNIDAD 2 · MPE2420", running_speed_rpm=3600)
+            nch = lay.n_channels(); rng = np.random.default_rng(3); fs = 1280.0; N = int(60 * fs)
+            data = np.zeros((N, nch))
+            for fn0, z0 in ((19.4, 0.031), (38.8, 0.018), (77.4, 0.012), (129.9, 0.010)):
+                wn = 2 * np.pi * fn0; wd = wn * (1 - z0 * z0) ** 0.5
+                r = np.exp(-z0 * wn / fs); th = wd / fs
+                q = lfilter([1.0], [1.0, -2 * r * np.cos(th), r * r], rng.standard_normal(N)); q /= (np.std(q) or 1)
+                data += np.outer(q, rng.standard_normal(nch))
+            data += 0.05 * rng.standard_normal((N, nch))
+            fmax = min(fs / 2.56, lay.fmax_hz)
+            fdd = run_oma(time_data=data, sample_rate_hz=fs, nperseg=4096,
+                          channel_names=lay.channel_names(), f_min_hz=5.0, f_max_hz=fmax)
+            # 1) Configuración 3D
+            _hx_add(exl, "Step 1 · Configure the machine & sensors",
+                    _hx_plot3d(lay),
+                    "Build the motor–pump train and place 17 accelerometers (H/V/A per bearing + "
+                    "skid feet). Numbers are the BNC channels. This is the field configuration.")
+            # 2) FDD singular values
+            pw = pg.PlotWidget(); pw.setBackground("w"); pw.setLabel("bottom", "Frequency", "Hz")
+            pw.setLabel("left", "dB"); pw.showGrid(x=True, y=True, alpha=0.3); pw.addLegend(offset=(-10, 10))
+            freqs = np.asarray(fdd.frequencies_hz); sv = np.asarray(fdd.singular_values); bnd = freqs <= fmax
+            _cs = ["#2563eb", "#dc2626", "#16a34a", "#f59e0b"]
+            for i in range(min(sv.shape[0], 4)):
+                pw.plot(freqs[bnd], 10 * np.log10(np.maximum(sv[i][bnd], 1e-30)),
+                        pen=pg.mkPen(_cs[i], width=1.7 if i == 0 else 1.0), name=f"SV{i+1}")
+            for m in fdd.modes:
+                pw.addItem(pg.InfiniteLine(m.natural_frequency_hz, pen=pg.mkPen("#dc2626", style=QtCore.Qt.DotLine)))
+            _hx_add(exl, "Step 2 · OMA capture → FDD singular values",
+                    _hx_grab(pw, 760, 320),
+                    "With the machine running, capture ~5–10 min and run FDD. Each red line is a "
+                    "natural frequency (peak of SV1). Here: <b>19.4, 38.8, 77.4, 129.9 Hz</b>.")
+            # 3) Mode shape coloured (first mode)
+            m0 = fdd.modes[0]; sh = np.asarray(m0.mode_shape, complex).ravel()
+            sh = sh / (np.max(np.abs(sh)) or 1.0)
+            pts = np.array([[p.x_norm, 0.20, p.y_norm] for p in lay.active_points()], float)
+            dirs = np.array([[(_AXIS_DIR.get(p.axis, (0, 0, 1)))[0], (_AXIS_DIR.get(p.axis, (0, 0, 1)))[1],
+                              (_AXIS_DIR.get(p.axis, (0, 0, 1)))[2]] for p in lay.active_points()], float)
+            amps = 0.12 * np.real(sh); mags = 0.12 * np.abs(sh); n = min(len(amps), len(pts))
+            anim = {"pts": pts[:n], "dirs": dirs[:n], "amps": amps[:n], "mags": mags[:n], "mmax": 0.12}
+            _hx_add(exl, f"Step 3 · Mode shape — {m0.natural_frequency_hz:.1f} Hz (colour = amplitude)",
+                    _hx_plot3d(lay, anim=anim),
+                    "The deformed shape shows how the structure moves at this mode. Green = still, "
+                    "red = maximum motion. A weak skid shows large motion at the base/pedestals.")
+            # 4) Campbell
+            pw2 = pg.PlotWidget(); pw2.setBackground("w"); pw2.setLabel("bottom", "Running speed", "RPM")
+            pw2.setLabel("left", "Frequency", "Hz"); pw2.showGrid(x=True, y=True, alpha=0.3)
+            rpm_op = 3600.0; rpm_max = rpm_op * 1.4; modes_hz = [m.natural_frequency_hz for m in fdd.modes]
+            ymax = max(modes_hz) * 1.3; rr = np.linspace(0, rpm_max, 60)
+            for o in (0.5, 1, 2, 3, 4, 5, 6, 7, 8):
+                pw2.plot(rr, o * rr / 60.0, pen=pg.mkPen("#6B7280", width=1, style=QtCore.Qt.DotLine))
+            for fn0 in modes_hz:
+                pw2.plot([0, rpm_max], [fn0, fn0], pen=pg.mkPen(GREEN, width=2))
+            reg = pg.LinearRegionItem([rpm_op * 0.85, rpm_op * 1.15], movable=False,
+                                      brush=pg.mkBrush(239, 68, 68, 40)); reg.setZValue(-10); pw2.addItem(reg)
+            pw2.plot([rpm_op, rpm_op], [0, ymax], pen=pg.mkPen(NAVY, width=3))
+            pw2.setXRange(0, rpm_max); pw2.setYRange(0, ymax)
+            _hx_add(exl, "Step 4 · Campbell (API 684) — resonance screening",
+                    _hx_grab(pw2, 760, 320),
+                    "Orders 0.5×–8× (grey) vs natural frequencies (green). The red band is the "
+                    "operating speed ±15%. A mode inside the band near an order = resonance risk.")
+            lbl_ex_done = QtWidgets.QLabel(
+                "<div style='background:#ecfdf5;border-radius:8px;padding:10px;color:#065f46'>"
+                "<b>Auto-diagnosis (example):</b> the 19.4 Hz mode shows high motion at the skid feet "
+                "with damping ~3% → consistent with <b>low skid rigidity</b>. Recommendation: verify "
+                "base/grouting stiffness and separation from 1× (60 Hz).</div>")
+            lbl_ex_done.setWordWrap(True); lbl_ex_done.setTextFormat(QtCore.Qt.RichText); exl.addWidget(lbl_ex_done)
+        except Exception as e:  # noqa: BLE001
+            err = QtWidgets.QLabel(f"Could not generate the example: {type(e).__name__}: {e}")
+            err.setWordWrap(True); exl.addWidget(err)
+            btn_ex.setEnabled(True); btn_ex.setText("🍉 Generate worked example (Cenit Medellín)")
+            return
+        btn_ex.setText("✅ Worked example — Cenit Medellín")
 
     pg_help = QtWidgets.QWidget(); hl = QtWidgets.QVBoxLayout(pg_help)
     about = QtWidgets.QLabel(
@@ -2087,82 +2153,63 @@ def build_app(layout: OMALayout, simulated: bool = True):
         f"<span style='color:#cbd5e1'>EMA + OMA field analysis · one platform, field to report · "
         f"acquisition: {DAQ_NAME}</span></div>")
     about.setTextFormat(QtCore.Qt.RichText); hl.addWidget(about)
-    help_view = QtWidgets.QTextBrowser(); help_view.setOpenExternalLinks(True)
-    _doc = help_view.document()
-    _doc.addResource(QtGui.QTextDocument.ImageResource, QtCore.QUrl("wf"), _diagram_workflow())
-    _doc.addResource(QtGui.QTextDocument.ImageResource, QtCore.QUrl("sensors"), _diagram_sensors())
-    help_view.setHtml(f"""
-    <div style='font-family:Segoe UI, Arial; color:#0f172a'>
-    <h2>User manual</h2>
-    <p><img src='wf'></p>
-    <h3>1 · Overview</h3>
-    <p>Watermelon Modal performs <b>EMA</b> (impact test) and <b>OMA</b> (operational modal
-    analysis) in the field, uploads runs to Watermelon System (cloud) and produces a full
-    normative report. Standards: <b>ISO 7626-1..6</b> (EMA), <b>ISO 20816</b> (OMA),
-    <b>API 684</b> (Campbell separation).</p>
 
-    <h3>2 · Configuration — recommended practice</h3>
-    <p><img src='sensors'></p>
-    <ol>
-    <li><b>Build the machine</b> (Configuration → Machine): add each equipment (motor, coupling,
-    pump, skid, pedestals) and drag it into place. Use the ⭐ <i>Factory presets</i> for a quick start.</li>
-    <li><b>Place sensors</b> (Sensors): on every bearing put a triaxial set — <b>H</b> (horizontal),
-    <b>V</b> (vertical), <b>A</b> (axial). For structural problems (e.g. weak skid), add sensors on
-    the <b>skid/base</b> at each foot to capture base motion. Mark 1–2 <b>reference</b> sensors (fixed,
-    high-response points) — required for OMA.</li>
-    <li><b>Acquisition</b> (ISO 20816 / Brincker): OMA needs a <b>long record</b> — at least
-    1000–2000 cycles of the lowest mode (typically <b>5–10 min</b>), simultaneous sampling, no force
-    window. Set <b>Fmax</b> to cover the modes of interest; keep a fine Δf (large block).</li>
-    </ol>
-
-    <h3>3 · How to take an OMA measurement</h3>
-    <ol>
-    <li>Connect the {DAQ_NAME} unit <b>before</b> opening the app → the banner turns green
-    (<b>LIVE</b>) and shows the channel count.</li>
-    <li>Load the machine (Preset or cloud) and confirm sensors/BNC in <i>Measurement points</i>.</li>
-    <li>Go to <b>OMA capture</b>, set <i>Source = {DAQ_NAME} (live)</i>, run <b>Test acquisition</b>
-    to confirm all channels, then press <b>Capture + FDD</b> with the machine running at operating speed.</li>
-    <li>Run <b>SSI (subspace)</b> to confirm modes by a second method (accurate damping + uncertainty).</li>
-    <li>Read the <b>Automatic mode validation</b> table (validated / doubtful / rejected, harmonics flagged).</li>
-    <li>With internet, press <b>Upload run to cloud</b> → it appears in Watermelon System (web) for the report.</li>
-    </ol>
-
-    <h3>4 · Impact test (EMA) — ISO 7626-5</h3>
-    <p>Use an instrumented hammer on channel 1. Force + exponential windows are ON by default. Take
-    3–5 averages per point; accept a hit only if <b>coherence ≥ 0.8</b> in the band and no overload /
-    double-hit. Identify modes in <b>Modes (EMA)</b> (peak-picking + half-power damping + Nyquist).</p>
-
-    <h3>5 · Reading the results</h3>
+    _hscroll = QtWidgets.QScrollArea(); _hscroll.setWidgetResizable(True)
+    _hscroll.setStyleSheet("QScrollArea{border:none;background:transparent}")
+    _hinner = QtWidgets.QWidget(); _hin = QtWidgets.QVBoxLayout(_hinner)
+    manual = QtWidgets.QLabel(); manual.setWordWrap(True); manual.setTextFormat(QtCore.Qt.RichText)
+    manual.setStyleSheet("background:white;border:1px solid #e2e8f0;border-radius:8px;padding:14px")
+    manual.setText(f"""
+    <h2 style='color:{NAVY};margin-top:0'>User manual</h2>
+    <p>Watermelon Modal runs <b>EMA</b> (impact) and <b>OMA</b> (operational) modal analysis in the
+    field, uploads runs to Watermelon System (cloud) and produces a full normative report.
+    Standards: <b>ISO 7626-1..6</b>, <b>ISO 20816</b>, <b>API 684</b>, <b>API 670</b>.</p>
+    <h3 style='color:{NAVY}'>1 · Configuration (recommended)</h3>
     <ul>
-    <li><b>FDD singular values:</b> each peak of SV1 is a candidate mode.</li>
-    <li><b>SSI stabilization:</b> green poles that stay stable across model orders are real modes; the
-    <b>±</b> is the uncertainty.</li>
-    <li><b>Complexity / MPC:</b> low = real structural mode; high = suspicious (forced/harmonic).</li>
-    <li><b>Campbell (API 684):</b> a natural frequency within <b>±15%</b> of a running-speed order
-    (1×, 2×, …) is a resonance risk — for a weak skid, look for low structural modes near 1×/2×.</li>
-    <li><b>Automatic validation:</b> combines all of the above into a verdict per mode.</li>
+    <li>Build the machine (motor, coupling, pump, skid, pedestals) — use ⭐ <i>Factory presets</i>.</li>
+    <li>Per bearing place a triaxial set: <b>H</b> horizontal, <b>V</b> vertical, <b>A</b> axial.</li>
+    <li>For structural problems (weak skid) add sensors on the <b>skid feet</b> to capture base motion.</li>
+    <li>Mark 1–2 <b>reference</b> sensors (fixed) — required for OMA.</li>
+    <li>Acquisition: OMA needs a <b>long record (5–10 min)</b>, simultaneous sampling, no force window.</li>
     </ul>
-
-    <h3>6 · Troubleshooting</h3>
+    <h3 style='color:{NAVY}'>2 · Take an OMA measurement</h3>
+    <ol>
+    <li>Connect the {DAQ_NAME} unit before opening the app → banner turns green (LIVE).</li>
+    <li>OMA capture → Source = {DAQ_NAME} (live) → <b>Test acquisition</b> → <b>Capture + FDD</b>.</li>
+    <li>Run <b>SSI</b> to confirm modes (accurate damping + uncertainty).</li>
+    <li>Read the <b>automatic mode validation</b> (validated / doubtful / rejected, harmonics flagged).</li>
+    <li>With internet, <b>Upload run</b> → it appears in Watermelon System (web) for the report.</li>
+    </ol>
+    <h3 style='color:{NAVY}'>3 · Impact test (EMA) — ISO 7626-5</h3>
+    <p>Hammer on channel 1; force + exponential windows ON; 3–5 averages; accept only if
+    <b>coherence ≥ 0.8</b>. Identify in <b>Modes (EMA)</b> (half-power + Nyquist).</p>
+    <h3 style='color:{NAVY}'>4 · Reading results</h3>
     <ul>
-    <li><b>Unit not detected:</b> check USB cable and unit power, reconnect, reopen the app.</li>
-    <li><b>Poor coherence (EMA):</b> re-hit cleanly, avoid double hits, check sensor mounting.</li>
-    <li><b>Too many modes / harmonics:</b> trust the validation table; harmonics of running speed are flagged.</li>
+    <li><b>FDD singular values:</b> each SV1 peak is a candidate mode.</li>
+    <li><b>SSI stabilization:</b> stable green poles across orders = real modes; ± = uncertainty.</li>
+    <li><b>Complexity (Argand):</b> collinear vectors = real mode; scattered = suspicious.</li>
+    <li><b>Campbell (API 684):</b> a mode within ±15% of an order (0.5×–8×) is a resonance risk.</li>
     </ul>
-
-    <h3>7 · Standards</h3>
-    <p>ISO 7626-1..6 · ISO 20816 · API 684 · API 670 (sensor placement).</p>
-
-    <hr>
-    <h3>About</h3>
-    <p><b>Watermelon Modal</b> — version <b>{__version__}</b>. Part of the <b>Watermelon System</b>
-    platform for machinery diagnostics.<br>
+    <h3 style='color:{NAVY}'>5 · Standards</h3>
+    <p>ISO 7626-1..6 · ISO 20816 · API 684 · API 670.</p>
+    <hr><h3 style='color:{NAVY}'>About</h3>
+    <p><b>Watermelon Modal</b> v{__version__} — part of the <b>Watermelon System</b> platform.<br>
     Developed by <b>SIGA S.A.S.</b> — Machinery Diagnostics Engineering.<br>
     Contact: <a href='mailto:ehernandez@sigasas.com'>ehernandez@sigasas.com</a> · Bogotá — Colombia.<br>
     <span style='color:#64748b'>© 2026 SIGA S.A.S. All rights reserved.</span></p>
-    </div>
     """)
-    hl.addWidget(help_view, 1)
+    _hin.addWidget(manual)
+    _exhdr = QtWidgets.QLabel(f"<h2 style='color:{NAVY}'>Worked example — Cenit · Estación Medellín</h2>"
+                             "<p style='color:#475569'>A complete OMA of a motor + multistage pump, "
+                             "step by step, with the real graphs the software produces.</p>")
+    _exhdr.setTextFormat(QtCore.Qt.RichText); _exhdr.setWordWrap(True); _hin.addWidget(_exhdr)
+    btn_ex = QtWidgets.QPushButton("🍉 Generate worked example (Cenit Medellín)")
+    btn_ex.setStyleSheet(f"QPushButton{{background:{GREEN};font-size:14px;padding:10px 18px;}}")
+    _hin.addWidget(btn_ex)
+    _exw = QtWidgets.QWidget(); exl = QtWidgets.QVBoxLayout(_exw); _hin.addWidget(_exw)
+    btn_ex.clicked.connect(_gen_help_example)
+    _hin.addStretch(1)
+    _hscroll.setWidget(_hinner); hl.addWidget(_hscroll, 1)
     tabs.addTab(pg_help, "Help")
 
     # Orden lógico de pestañas: EMA (impacto → modos) juntos, OMA (captura → SSI)
