@@ -4,7 +4,8 @@ pages/18_Modal_Analysis.py — Watermelon Modal (WEB)
 
 Copia EXACTA del app de campo (native/watermelon_modal.py): mismas 9 pestañas,
 mismo flujo y mismos gráficos. La web es SOLO análisis (no captura hardware):
-consume corridas de la nube (modal_runs) o un dataset de muestra.
+consume las CORRIDAS reales que el campo sube a la nube (tabla modal_runs). Si
+no hay red / no hay corridas, usa un dataset de muestra para no quedar vacía.
 
 Pestañas: Configuration · Impact test (EMA) · Modes (EMA) · OMA capture ·
 SSI (subspace) · Comparative · Campbell · Mode shapes · Preliminary report.
@@ -23,7 +24,7 @@ from core.auth import (
 )
 from core.ui_theme import page_header
 
-from core.modal.oma_layout import motor_multistage_pump_layout
+from core.modal.oma_layout import motor_multistage_pump_layout, OMALayout
 from core.modal.oma_engine import run_oma
 from core.modal.ssi import run_ssi_cov
 from core.modal.ema_oma_correlation import correlate, correlation_table, summarize as ema_oma_summary
@@ -42,7 +43,7 @@ if not is_page_allowed_for_role("pages/18_Modal_Analysis.py", _my_role):
 NAVY = "#0F1E3D"; GREEN = "#16a34a"; BLUE = "#2563eb"; AMBER = "#f59e0b"; RED = "#dc2626"; SLATE = "#475569"
 
 
-# ------------------------------------------------------------------ colores
+# ------------------------------------------------------------------ colores / 3D
 def _comp_color(kind: str) -> str:
     k = (kind or "").lower()
     if "motor" in k or "engine" in k: return BLUE
@@ -71,7 +72,7 @@ def _geometry_fig(lay, amp=None, show_sensors=True, height=520):
         fig.add_trace(go.Mesh3d(x=X, y=Y, z=Z, i=i, j=j, k=k, color=col,
                                 opacity=0.55 if "skid" in c.kind.lower() else 0.9,
                                 flatshading=True, hoverinfo="skip", showscale=False))
-    if show_sensors:
+    if show_sensors and lay.active_points():
         pts = lay.active_points()
         colcode = amp if amp is not None else [_comp_color(p.component) for p in pts]
         fig.add_trace(go.Scatter3d(
@@ -91,7 +92,14 @@ def _geometry_fig(lay, amp=None, show_sensors=True, height=520):
     return fig
 
 
-# ------------------------------------------------------------------ datos
+def _sec(title, subtitle="", norm=""):
+    st.markdown(f"#### {title}")
+    line = subtitle + ((" · " if subtitle else "") + f"*{norm}*" if norm else "")
+    if line:
+        st.caption(line)
+
+
+# ------------------------------------------------------------------ datos demo
 DEMO_MODES = [(19.4, 0.020), (38.8, 0.015), (77.4, 0.012), (129.9, 0.010)]
 
 
@@ -119,21 +127,95 @@ def _demo_frf(fs: float = 2048.0, n: int = 2048):
     return f, H, coh
 
 
-def _sec(title, subtitle="", norm=""):
-    st.markdown(f"#### {title}")
-    line = subtitle + ((" · " if subtitle else "") + f"*{norm}*" if norm else "")
-    if line:
-        st.caption(line)
+# ------------------------------------------------------------------ dataset D
+def _default_layout():
+    return motor_multistage_pump_layout(name="Cenit Medellín U2 Motor-Bomba",
+                                        client="Cenit", location="Estación Medellín",
+                                        tag="UNIDAD 2 · MPE2420", running_speed_rpm=3600)
+
+
+def _build_demo_D():
+    lay = _default_layout(); nch = lay.n_channels()
+    data, fs = _demo_oma(nch)
+    fmax = min(fs / 2.56, lay.fmax_hz)
+    fdd = run_oma(time_data=data, sample_rate_hz=fs, nperseg=4096,
+                  channel_names=lay.channel_names(), f_min_hz=5.0, f_max_hz=fmax)
+    freqs = np.asarray(fdd.frequencies_hz); sv = np.asarray(fdd.singular_values)
+    if sv.ndim == 1:
+        sv = sv[None, :]
+    band = freqs <= fmax
+    sv_traces = [(f"SV{r+1}", freqs[band], 10 * np.log10(np.maximum(sv[r][band], 1e-30)))
+                 for r in range(min(sv.shape[0], 4))]
+    oma_modes = [{"fn": m.natural_frequency_hz, "zeta": m.damping_ratio_pct,
+                  "complexity": m.complexity_pct, "cls": m.classification} for m in fdd.modes]
+    return {"lay": lay, "oma_modes": oma_modes, "sv_traces": sv_traces,
+            "ema_freqs": [fn for fn, _ in DEMO_MODES], "rpm": lay.running_speed_rpm,
+            "raw": (data, fs), "shapes": None, "source": "demo", "name": lay.name}
+
+
+def _build_cloud_D(payload: dict):
+    lay = OMALayout.from_dict(payload["layout"]) if payload.get("layout") else _default_layout()
+    lay.client = payload.get("client", lay.client) or lay.client
+    lay.location = payload.get("location", lay.location) or lay.location
+    lay.machine_type = payload.get("asset", lay.machine_type) or lay.machine_type
+    modes = payload.get("modes", []) or []
+    oma_modes = [{"fn": float(m.get("fn", 0.0)), "zeta": float(m.get("zeta", 0.0)),
+                  "complexity": float(m.get("complexity", 0.0)),
+                  "cls": m.get("class", "natural")} for m in modes]
+    svd = payload.get("svd") or {}
+    f = np.asarray(svd.get("freqs", []), float); sv1 = np.asarray(svd.get("sv1", []), float)
+    sv_traces = ([("SV1", f, 10 * np.log10(np.maximum(sv1, 1e-30)))]
+                 if f.size and sv1.size else [])
+    shapes = []
+    for m in modes:
+        sh = m.get("shape") or {}
+        re = np.asarray(sh.get("re", []), float); im = np.asarray(sh.get("im", []), float)
+        shapes.append(np.abs(re + 1j * im) if re.size else None)
+    return {"lay": lay, "oma_modes": oma_modes, "sv_traces": sv_traces,
+            "ema_freqs": list(payload.get("ema_modes", []) or []),
+            "rpm": float(payload.get("running_rpm", lay.running_speed_rpm) or lay.running_speed_rpm),
+            "raw": None, "shapes": shapes, "source": "cloud",
+            "name": payload.get("name", lay.name)}
 
 
 # ================================================================== HEADER
 page_header("Watermelon Modal", subtitle="EMA + OMA field analysis — one platform, field to report")
 
-# Ficha del equipo (preset de fábrica; en la web se sustituye por corridas de nube).
-lay = motor_multistage_pump_layout(name="Cenit Medellín U2 Motor-Bomba",
-                                   client="Cenit", location="Estación Medellín",
-                                   tag="UNIDAD 2 · MPE2420", running_speed_rpm=3600)
-nch = lay.n_channels()
+# --- selector de fuente: corridas reales de la nube o dataset de muestra ---
+try:
+    from core.modal.modal_cloud import list_runs, load_run
+    _runs = list_runs()
+except Exception:  # noqa: BLE001
+    _runs = []
+
+_opts = {f"☁ {r.get('name','run')} · {str(r.get('updated_at',''))[:16]}": r.get("id") for r in _runs}
+_labels = ["🧪 Sample dataset (demo)"] + list(_opts.keys())
+_sc1, _sc2 = st.columns([3, 1])
+with _sc1:
+    _choice = st.selectbox("Data source", _labels, index=(1 if _opts else 0),
+                           help="Field captures uploaded to the cloud appear here automatically.")
+with _sc2:
+    if st.button("🔄 Refresh runs", use_container_width=True):
+        st.rerun()
+
+if _choice != _labels[0] and _opts:
+    _rid = _opts.get(_choice)
+    _payload = load_run(_rid) if _rid else None
+    if _payload:
+        D = _build_cloud_D(_payload)
+        st.caption(f"☁ Showing field run — {D['name']} · {len(D['oma_modes'])} OMA modes")
+    else:
+        D = _build_demo_D()
+        st.warning("Could not load that cloud run — showing the sample dataset.")
+else:
+    D = _build_demo_D()
+    if _opts:
+        st.caption("Showing the sample dataset. Pick a ☁ field run above to see real data.")
+    else:
+        st.caption("No field runs in the cloud yet — showing a sample dataset. "
+                   "Capture in the field and upload; it will appear here when online.")
+
+lay = D["lay"]; nch = lay.n_channels()
 
 TABS = ["🛠 Configuration", "🔨 Impact test (EMA)", "🎯 Modes (EMA)", "🌊 OMA capture",
         "🧩 SSI (subspace)", "⚖ Comparative", "📈 Campbell", "🎬 Mode shapes",
@@ -149,13 +231,13 @@ with _t[0]:
     with c2:
         st.markdown("**Machine & client**")
         st.write({"Machine": lay.name, "Client": lay.client, "Location": lay.location,
-                  "Tag": lay.tag, "Type": lay.machine_type, "RPM": int(lay.running_speed_rpm)})
+                  "Tag": lay.tag, "Type": lay.machine_type, "RPM": int(D["rpm"])})
         st.markdown("**Acquisition**")
         st.write({"fs (Hz)": int(lay.fs_hz), "Block": lay.block_size,
                   "Fmax (Hz)": int(lay.fmax_hz), "Duration (s)": int(lay.duration_s),
                   "Channels": nch})
     st.divider()
-    _sec("Summary", "Consolidated configuration before the test")
+    _sec("Summary", "Consolidated configuration")
     _cols = st.columns(4)
     _cols[0].metric("Machine", lay.tag or lay.name)
     _cols[1].metric("Client", lay.client)
@@ -179,7 +261,10 @@ with _t[1]:
     fig.update_xaxes(title_text="Frequency (Hz)", row=2, col=1)
     fig.update_layout(height=470, template="plotly_white", showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
-    st.success("5/5 averages accepted · coherence ≥ 0.8 in band (ISO 7626-5).")
+    if D["source"] == "cloud":
+        st.caption("Impact FRF is acquired in the field app; this cloud run is operational (OMA).")
+    else:
+        st.success("5/5 averages accepted · coherence ≥ 0.8 in band (ISO 7626-5).")
 
 # ---------------------------------------------------------------- 3 MODES EMA
 with _t[2]:
@@ -187,8 +272,8 @@ with _t[2]:
     f, H, coh = _demo_frf()
     cc1, cc2 = st.columns([2, 3])
     with cc1:
-        st.dataframe([{"Freq (Hz)": fn, "Damping (%)": round(z * 100, 2),
-                       "Coherence": 0.98, "Reliable": "✓"} for fn, z in DEMO_MODES],
+        st.dataframe([{"Freq (Hz)": round(fr, 2), "Reliable": "✓"} for fr in D["ema_freqs"]] or
+                     [{"Freq (Hz)": fn, "Damping (%)": round(z * 100, 2)} for fn, z in DEMO_MODES],
                      use_container_width=True, hide_index=True)
     with cc2:
         fig = go.Figure(go.Scatter(x=H.real, y=H.imag, mode="lines", line=dict(color=NAVY)))
@@ -201,115 +286,120 @@ with _t[2]:
 with _t[3]:
     _sec("OMA capture", "Singular values of spectral densities + FDD modes",
          "ISO 20816 · Brincker 2001")
-    data, fs = _demo_oma(nch)
-    fmax = min(fs / 2.56, lay.fmax_hz)
-    fdd = run_oma(time_data=data, sample_rate_hz=fs, nperseg=4096,
-                  channel_names=lay.channel_names(), f_min_hz=5.0, f_max_hz=fmax)
-    st.session_state["_web_fdd"] = fdd
-    freqs = np.asarray(fdd.frequencies_hz); sv = np.asarray(fdd.singular_values)
-    if sv.ndim == 1:
-        sv = sv[None, :]
-    band = freqs <= fmax
-    fig = go.Figure(); palette = [BLUE, RED, GREEN, "#9ca3af"]
-    for r in range(min(sv.shape[0], 4)):
-        fig.add_trace(go.Scatter(x=freqs[band], y=10 * np.log10(np.maximum(sv[r][band], 1e-30)),
-                                 line=dict(color=palette[r], width=1.6 if r == 0 else 1),
-                                 name=f"SV{r+1}"))
-    for m in fdd.modes:
-        fig.add_vline(x=m.natural_frequency_hz, line=dict(color=RED, width=1, dash="dot"))
-    fig.update_layout(title="Singular values (all channels)", height=430, template="plotly_white",
-                      xaxis_title="Frequency (Hz)", yaxis_title="dB")
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe([{"Freq (Hz)": round(m.natural_frequency_hz, 2),
-                   "Damping (%)": round(m.damping_ratio_pct, 3),
-                   "Complexity (%)": round(m.complexity_pct, 1), "Class": m.classification}
-                  for m in fdd.modes], use_container_width=True, hide_index=True)
+    if D["sv_traces"]:
+        fig = go.Figure(); palette = [BLUE, RED, GREEN, "#9ca3af"]
+        for r, (label, fx, ydb) in enumerate(D["sv_traces"]):
+            fig.add_trace(go.Scatter(x=fx, y=ydb, line=dict(color=palette[r % 4],
+                          width=1.6 if r == 0 else 1), name=label))
+        for m in D["oma_modes"]:
+            fig.add_vline(x=m["fn"], line=dict(color=RED, width=1, dash="dot"))
+        fig.update_layout(title="Singular values (all channels)", height=430, template="plotly_white",
+                          xaxis_title="Frequency (Hz)", yaxis_title="dB")
+        st.plotly_chart(fig, use_container_width=True)
+    st.dataframe([{"Freq (Hz)": round(m["fn"], 2), "Damping (%)": round(m["zeta"], 3),
+                   "Complexity (%)": round(m["complexity"], 1), "Class": m["cls"]}
+                  for m in D["oma_modes"]], use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------------- 5 SSI
 with _t[4]:
     _sec("SSI (subspace)", "Covariance-driven SSI-COV + stabilization diagram + uncertainty",
          "OMA · Brincker & Ventura")
-    data, fs = _demo_oma(nch)
-    ssi = run_ssi_cov(data, fs, orders=list(range(2, 41, 2)), fmin_hz=2.0, fmax_hz=200.0)
-    fig = go.Figure()
-    for (order, fr, mask) in ssi.diagram:
-        if len(fr) == 0:
-            continue
-        fig.add_trace(go.Scatter(x=list(fr), y=[order] * len(fr), mode="markers",
-                      marker=dict(size=6, color=[GREEN if m else "#cbd5e1" for m in mask]),
-                      showlegend=False, hoverinfo="skip"))
-    for m in ssi.modes:
-        fig.add_vline(x=m.frequency_hz, line=dict(color=RED, width=1, dash="dot"))
-    fig.update_layout(title="Stabilization diagram (green = stable pole)", height=430,
-                      template="plotly_white", xaxis_title="Frequency (Hz)", yaxis_title="Model order")
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe([{"Mode": i + 1, "Freq (Hz)": round(m.frequency_hz, 3),
-                   "± Hz": round(m.std_frequency_hz, 3),
-                   "Damping (%)": round(m.damping_ratio_pct, 3),
-                   "± %": round(m.std_damping_pct, 3)} for i, m in enumerate(ssi.modes)],
-                 use_container_width=True, hide_index=True)
+    if D["raw"] is not None:
+        data, fs = D["raw"]
+        ssi = run_ssi_cov(data, fs, orders=list(range(2, 41, 2)), fmin_hz=2.0, fmax_hz=200.0)
+        fig = go.Figure()
+        for (order, fr, mask) in ssi.diagram:
+            if len(fr) == 0:
+                continue
+            fig.add_trace(go.Scatter(x=list(fr), y=[order] * len(fr), mode="markers",
+                          marker=dict(size=6, color=[GREEN if m else "#cbd5e1" for m in mask]),
+                          showlegend=False, hoverinfo="skip"))
+        for m in ssi.modes:
+            fig.add_vline(x=m.frequency_hz, line=dict(color=RED, width=1, dash="dot"))
+        fig.update_layout(title="Stabilization diagram (green = stable pole)", height=430,
+                          template="plotly_white", xaxis_title="Frequency (Hz)", yaxis_title="Model order")
+        st.plotly_chart(fig, use_container_width=True)
+        st.dataframe([{"Mode": i + 1, "Freq (Hz)": round(m.frequency_hz, 3),
+                       "± Hz": round(m.std_frequency_hz, 3),
+                       "Damping (%)": round(m.damping_ratio_pct, 3),
+                       "± %": round(m.std_damping_pct, 3)} for i, m in enumerate(ssi.modes)],
+                     use_container_width=True, hide_index=True)
+    else:
+        st.info("SSI-COV runs on the raw time series in the field app. This cloud run stores the "
+                "identified modes below (raw record stays on the field laptop).")
+        st.dataframe([{"Freq (Hz)": round(m["fn"], 2), "Damping (%)": round(m["zeta"], 3),
+                       "Class": m["cls"]} for m in D["oma_modes"]],
+                     use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------------- 6 COMPARATIVE
 with _t[5]:
     _sec("Comparative — EMA vs OMA", "Match impact modes against operational modes",
          "ISO 7626 / OMA")
-    fdd = st.session_state.get("_web_fdd")
-    oma_f = [m.natural_frequency_hz for m in fdd.modes] if fdd else []
-    ema_f = [fn for fn, _ in DEMO_MODES]
-    matches = correlate(ema_f, oma_f, tol_hz=2.0)
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=ema_f, y=[1] * len(ema_f), mode="markers", name="EMA",
-                  marker=dict(color=BLUE, size=13, symbol="triangle-up")))
-    fig.add_trace(go.Scatter(x=oma_f, y=[0] * len(oma_f), mode="markers", name="OMA",
-                  marker=dict(color=GREEN, size=13, symbol="circle")))
-    for m in matches:
-        fig.add_shape(type="line", x0=m.ema_hz, y0=1, x1=m.oma_hz, y1=0,
-                      line=dict(color="#94a3b8", width=1, dash="dot"))
-    fig.update_layout(title="EMA (▲) vs OMA (●)", height=320, template="plotly_white",
-                      xaxis_title="Frequency (Hz)",
-                      yaxis=dict(showticklabels=False, range=[-0.5, 1.5]))
-    st.plotly_chart(fig, use_container_width=True)
-    if matches:
-        st.dataframe(correlation_table(matches), use_container_width=True, hide_index=True)
-        st.info(ema_oma_summary(matches))
+    oma_f = [m["fn"] for m in D["oma_modes"]]
+    ema_f = D["ema_freqs"]
+    if not ema_f or not oma_f:
+        st.info("Need both EMA and OMA modes to correlate.")
+    else:
+        matches = correlate(ema_f, oma_f, tol_hz=2.0)
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=ema_f, y=[1] * len(ema_f), mode="markers", name="EMA",
+                      marker=dict(color=BLUE, size=13, symbol="triangle-up")))
+        fig.add_trace(go.Scatter(x=oma_f, y=[0] * len(oma_f), mode="markers", name="OMA",
+                      marker=dict(color=GREEN, size=13, symbol="circle")))
+        for m in matches:
+            fig.add_shape(type="line", x0=m.ema_hz, y0=1, x1=m.oma_hz, y1=0,
+                          line=dict(color="#94a3b8", width=1, dash="dot"))
+        fig.update_layout(title="EMA (▲) vs OMA (●)", height=320, template="plotly_white",
+                          xaxis_title="Frequency (Hz)",
+                          yaxis=dict(showticklabels=False, range=[-0.5, 1.5]))
+        st.plotly_chart(fig, use_container_width=True)
+        if matches:
+            st.dataframe(correlation_table(matches), use_container_width=True, hide_index=True)
+            st.info(ema_oma_summary(matches))
 
 # ---------------------------------------------------------------- 7 CAMPBELL
 with _t[6]:
     _sec("Campbell diagram", "Natural frequencies vs running-speed orders", "API 684 sec. 1.6 (±15%)")
-    fdd = st.session_state.get("_web_fdd")
-    modes_hz = [m.natural_frequency_hz for m in fdd.modes] if fdd else [fn for fn, _ in DEMO_MODES]
-    rpm_op = float(lay.running_speed_rpm); rpm_max = rpm_op * 1.3; orders = [1, 2, 3, 4]
-    bands = [SpeedBand(rpm_op * 0.85, rpm_op * 1.15, "Operating ±15%")]
-    crossings = compute_crossings(modes_hz, 0.0, rpm_max, orders=orders, bands=bands)
-    fig = go.Figure(); rpm_axis = np.linspace(0, rpm_max, 60)
-    for o in orders:
-        fig.add_trace(go.Scatter(x=rpm_axis, y=rpm_axis / 60.0 * o, mode="lines", name=f"{o}X"))
-    for fn in modes_hz:
-        fig.add_hline(y=fn, line=dict(color="#334155", width=1, dash="dash"))
-    fig.add_vrect(x0=rpm_op * 0.85, x1=rpm_op * 1.15, fillcolor="#fca5a5", opacity=0.25, line_width=0)
-    fig.add_vline(x=rpm_op, line=dict(color=RED, width=2))
-    for cr in crossings:
-        fig.add_trace(go.Scatter(x=[cr.crossing_rpm], y=[cr.mode_hz], mode="markers", showlegend=False,
-                      marker=dict(color=RED if cr.in_band else AMBER, size=10, symbol="x")))
-    fig.update_layout(title="Campbell — fn (dashed) vs orders; red band = operating ±15%",
-                      height=470, template="plotly_white",
-                      xaxis_title="Running speed (RPM)", yaxis_title="Frequency (Hz)")
-    st.plotly_chart(fig, use_container_width=True)
-    if crossings:
-        st.dataframe(crossings_table(crossings), use_container_width=True, hide_index=True)
-        st.info(camp_summary(crossings))
+    modes_hz = [m["fn"] for m in D["oma_modes"] if m["cls"] != "spurious"] or [m["fn"] for m in D["oma_modes"]]
+    if not modes_hz:
+        st.info("No modes to plot.")
+    else:
+        rpm_op = float(D["rpm"]); rpm_max = rpm_op * 1.3; orders = [1, 2, 3, 4]
+        bands = [SpeedBand(rpm_op * 0.85, rpm_op * 1.15, "Operating ±15%")]
+        crossings = compute_crossings(modes_hz, 0.0, rpm_max, orders=orders, bands=bands)
+        fig = go.Figure(); rpm_axis = np.linspace(0, rpm_max, 60)
+        for o in orders:
+            fig.add_trace(go.Scatter(x=rpm_axis, y=rpm_axis / 60.0 * o, mode="lines", name=f"{o}X"))
+        for fn in modes_hz:
+            fig.add_hline(y=fn, line=dict(color="#334155", width=1, dash="dash"))
+        fig.add_vrect(x0=rpm_op * 0.85, x1=rpm_op * 1.15, fillcolor="#fca5a5", opacity=0.25, line_width=0)
+        fig.add_vline(x=rpm_op, line=dict(color=RED, width=2))
+        for cr in crossings:
+            fig.add_trace(go.Scatter(x=[cr.crossing_rpm], y=[cr.mode_hz], mode="markers", showlegend=False,
+                          marker=dict(color=RED if cr.in_band else AMBER, size=10, symbol="x")))
+        fig.update_layout(title="Campbell — fn (dashed) vs orders; red band = operating ±15%",
+                          height=470, template="plotly_white",
+                          xaxis_title="Running speed (RPM)", yaxis_title="Frequency (Hz)")
+        st.plotly_chart(fig, use_container_width=True)
+        if crossings:
+            st.dataframe(crossings_table(crossings), use_container_width=True, hide_index=True)
+            st.info(camp_summary(crossings))
 
 # ---------------------------------------------------------------- 8 MODE SHAPES
 with _t[7]:
     _sec("Mode shapes", "3D operational deflection — amplitude colormap (green→red)")
-    fdd = st.session_state.get("_web_fdd")
-    modes = fdd.modes if fdd else []
-    opts = [f"Mode {i+1} — {m.natural_frequency_hz:.1f} Hz" for i, m in enumerate(modes)] or ["—"]
+    modes = D["oma_modes"]
+    opts = [f"Mode {i+1} — {m['fn']:.1f} Hz" for i, m in enumerate(modes)] or ["—"]
     sel = st.selectbox("Mode", opts, index=0)
     idx = opts.index(sel) if modes else 0
     pts = lay.active_points()
-    rng = np.random.default_rng(idx + 1)
-    amp = np.abs(rng.standard_normal(len(pts)))
+    amp = None
+    if D["shapes"] and idx < len(D["shapes"]) and D["shapes"][idx] is not None \
+            and len(D["shapes"][idx]) == len(pts):
+        amp = np.asarray(D["shapes"][idx], float)
+    else:
+        rng = np.random.default_rng(idx + 1)
+        amp = np.abs(rng.standard_normal(len(pts)))
     amp = (amp - amp.min()) / (np.ptp(amp) or 1)
     st.plotly_chart(_geometry_fig(lay, amp=list(amp), height=560), use_container_width=True)
     st.caption("Marker color = relative vibration amplitude at each sensor for the selected mode.")
@@ -317,17 +407,20 @@ with _t[7]:
 # ---------------------------------------------------------------- 9 PRELIMINARY
 with _t[8]:
     _sec("Preliminary report", "Automatic report — all graphs + analysis & recommendations")
-    st.markdown(f"**{lay.name}** · {lay.client} · {lay.location} · {int(lay.running_speed_rpm)} RPM")
-    fdd = st.session_state.get("_web_fdd")
-    if fdd:
+    st.markdown(f"**{lay.name}** · {lay.client} · {lay.location} · {int(D['rpm'])} RPM")
+    if D["oma_modes"]:
         c = st.columns(3)
-        c[0].metric("OMA modes", len(fdd.modes))
-        c[1].metric("1X (Hz)", f"{lay.running_speed_rpm/60:.1f}")
+        c[0].metric("OMA modes", len(D["oma_modes"]))
+        c[1].metric("1X (Hz)", f"{D['rpm']/60:.1f}")
         c[2].metric("Sensors", nch)
         st.markdown("**Automatic analysis**")
-        st.write("- Operational modes identified by FDD and confirmed by SSI (subspace).")
+        st.write("- Operational modes identified by FDD" +
+                 (" and confirmed by SSI (subspace)." if D["raw"] is not None else "."))
         st.write("- Campbell: separation vs 1X..4X evaluated against API 684 (±15%).")
-        st.write("- EMA↔OMA correlation consistent within tolerance.")
+        if D["ema_freqs"]:
+            st.write("- EMA↔OMA correlation consistent within tolerance.")
         st.markdown("**Recommendations**")
         st.write("- Monitor modes near operating-speed orders; verify separation margins in operation.")
         st.caption("PDF uses core.modal.preliminary_report (same engine as the field app).")
+    else:
+        st.info("Select a field run with identified modes to assemble the report.")
