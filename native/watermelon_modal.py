@@ -50,7 +50,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.15"
+__version__ = "0.9.16"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1251,7 +1251,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             ema = []; ema_block = None
             res = st["acc"].result()
             if res is not None:
-                ema_peaks = modes_from_frf(res, fmin=5, fmax=lay.fmax_hz)
+                ema_peaks = modes_from_frf(res, fmin=5, fmax=lay.fmax_hz, exp_tau=st["acc"].exp_tau())
                 ema = [mp.frequency_hz for mp in ema_peaks]
                 # curva FRF + coherencia (submuestreada) para verla idéntica en la web
                 ef = np.asarray(res.frequencies_hz); emag = np.asarray(res.magnitude)
@@ -1310,7 +1310,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         res = st["acc"].result()
         if res is None:
             QtWidgets.QMessageBox.information(win, "Modes", "Accept some hits in Impact test."); return
-        modes = modes_from_frf(res, fmin=5.0, fmax=st["layout"].fmax_hz); tbl_modes.setRowCount(0)
+        modes = modes_from_frf(res, fmin=5.0, fmax=st["layout"].fmax_hz, exp_tau=st["acc"].exp_tau()); tbl_modes.setRowCount(0)
         for mo in modes:
             r = tbl_modes.rowCount(); tbl_modes.insertRow(r)
             for c, v in enumerate([f"{mo.frequency_hz:.1f}", f"{mo.damping_ratio_pct:.2f}",
@@ -1336,7 +1336,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     def _refresh_comparative():
         from core.modal.ema_oma_correlation import correlate, summarize as _cs
         res = st["acc"].result()
-        ema = [mp.frequency_hz for mp in modes_from_frf(res, fmin=5, fmax=st["layout"].fmax_hz)] if res else []
+        ema = [mp.frequency_hz for mp in modes_from_frf(res, fmin=5, fmax=st["layout"].fmax_hz, exp_tau=st["acc"].exp_tau())] if res else []
         oma = [m.natural_frequency_hz for m in st["oma_fdd"].modes] if st["oma_fdd"] else []
         tbl_cmp.setRowCount(0)
         if not ema or not oma:
@@ -1372,7 +1372,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             return [m.natural_frequency_hz for m in st["oma_fdd"].modes]
         res = st["acc"].result()
         if res is not None:
-            return [mp.frequency_hz for mp in modes_from_frf(res, fmin=5, fmax=st["layout"].fmax_hz)]
+            return [mp.frequency_hz for mp in modes_from_frf(res, fmin=5, fmax=st["layout"].fmax_hz, exp_tau=st["acc"].exp_tau())]
         return []
 
     def _refresh_campbell():
@@ -1840,7 +1840,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         ema_rows = []
         if res is not None and fdd:
             from core.modal.ema_oma_correlation import correlate
-            ema = [mp.frequency_hz for mp in modes_from_frf(res, fmin=5, fmax=lay.fmax_hz)]
+            ema = [mp.frequency_hz for mp in modes_from_frf(res, fmin=5, fmax=lay.fmax_hz, exp_tau=st["acc"].exp_tau())]
             oma = [m.natural_frequency_hz for m in fdd.modes]
             for mm in correlate(ema, oma, tol_hz=2.5):
                 ema_rows.append([f"{mm.ema_hz:.2f}", f"{mm.oma_hz:.3f}", f"{mm.delta_hz:.3f}"])

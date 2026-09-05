@@ -238,6 +238,13 @@ class FRFAccumulator:
             return None
         return self._build(self.Gxx, self.Gyy, self.Gxy, self.count)
 
+    def exp_tau(self) -> Optional[float]:
+        """Constante τ de la ventana exponencial (para corregir el sesgo de damping)."""
+        if not self.use_exp_window:
+            return None
+        T = self.n / self.fs
+        return -T / np.log(max(1e-6, self.exp_decay_frac))
+
     def _build(self, gxx, gyy, gxy, count) -> FRFResult:
         gxx_safe = np.where(gxx > 1e-30, gxx, 1e-30)
         gyy_safe = np.where(gyy > 1e-30, gyy, 1e-30)
@@ -250,7 +257,18 @@ class FRFAccumulator:
 
 
 def modes_from_frf(frf: FRFResult, fmin: float = 5.0,
-                   fmax: Optional[float] = None) -> List[ModalPeak]:
-    """Identifica modos (fn, damping, coherencia) desde la FRF promediada."""
-    return detect_modal_peaks(frf.frequencies_hz, frf.magnitude,
-                              coherence=frf.coherence, f_min_hz=fmin, f_max_hz=fmax)
+                   fmax: Optional[float] = None,
+                   exp_tau: Optional[float] = None) -> List[ModalPeak]:
+    """Identifica modos (fn, damping, coherencia) desde la FRF promediada.
+
+    `exp_tau`: si se usó ventana exponencial, se resta su sesgo de amortiguamiento
+    ζ_bias = 1/(2π·fn·τ) a cada modo (ISO 7626-5). Sin él, el damping EMA queda
+    sobreestimado en modos poco amortiguados."""
+    peaks = detect_modal_peaks(frf.frequencies_hz, frf.magnitude,
+                               coherence=frf.coherence, f_min_hz=fmin, f_max_hz=fmax)
+    if exp_tau and exp_tau > 0:
+        for p in peaks:
+            if p.frequency_hz > 0:
+                bias_pct = 1.0 / (2.0 * np.pi * p.frequency_hz * exp_tau) * 100.0
+                p.damping_ratio_pct = max(0.01, p.damping_ratio_pct - bias_pct)
+    return peaks

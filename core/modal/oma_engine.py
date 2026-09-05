@@ -155,12 +155,13 @@ def classify_mode(
                 harmonic_order = n
                 break
 
-    # Lógica de clasificación combinada (criterio Artemis-like):
-    # - Complexity baja + no harmonic → natural (fn)
-    # - Complexity alta + harmonic → harmonic (Nx)
-    # - Complexity alta sin harmonic → spurious
-    # - Complexity media → natural pero con menos confianza
-    if is_harmonic and complexity_pct >= complexity_natural_threshold:
+    # Clasificación:
+    # - Coincide con un orden de giro (k×RPM) → HARMONIC (criterio primario). Las
+    #   componentes forzadas están fase-bloqueadas y suelen tener BAJA complejidad,
+    #   así que NO se puede exigir complejidad alta para llamarlas armónico.
+    # - Complejidad muy alta sin coincidencia → spurious.
+    # - Resto → natural (modo estructural).
+    if is_harmonic:
         classification = "harmonic"
     elif complexity_pct >= complexity_spurious_threshold:
         classification = "spurious"

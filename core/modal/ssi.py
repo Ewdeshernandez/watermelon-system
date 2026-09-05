@@ -90,8 +90,12 @@ def _mpc(shape: np.ndarray) -> float:
     sxx = float(re @ re); syy = float(im @ im); sxy = float(re @ im)
     if sxx + syy < 1e-30:
         return 0.0
-    lam = ((syy - sxx) + np.sqrt((syy - sxx) ** 2 + 4 * sxy ** 2)) / 2.0
-    mpc = ((sxx + lam) ** 2) / ((sxx + syy + 2 * abs(lam)) * (sxx + syy)) if (sxx + syy) > 0 else 0.0
+    # MPC de Pappa (invariante a una fase global e^{iθ} del modo): depende solo de
+    # los autovalores de la matriz de dispersión 2×2 [[sxx,sxy],[sxy,syy]].
+    tr = sxx + syy
+    discr = max(tr ** 2 / 4.0 - (sxx * syy - sxy ** 2), 0.0)
+    lam1 = tr / 2.0 + np.sqrt(discr); lam2 = tr / 2.0 - np.sqrt(discr)
+    mpc = ((lam1 - lam2) / (lam1 + lam2)) ** 2 if (lam1 + lam2) > 1e-30 else 0.0
     return float(np.clip((1.0 - mpc) * 100.0, 0.0, 100.0))
 
 
