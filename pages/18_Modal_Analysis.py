@@ -1178,6 +1178,55 @@ if _active_modal_tab == "🛠 Configuration":
                         geom.sensors.append(new_s)
                     st.rerun()
 
+    # -----------------------------------------------------------------
+    # Summary — consolidado de configuración (espejo del app de campo)
+    # -----------------------------------------------------------------
+    st.divider()
+    modal_section_header(
+        title="Summary",
+        subtitle="Consolidated configuration before the test",
+        icon="📋",
+    )
+    _sum_geom = st.session_state.get("modal_geometry")
+    _sum_meta = st.session_state.get("modal_adhoc_meta", {}) or {}
+    if _sum_geom is None:
+        modal_empty_state(
+            icon="📋",
+            title="Nothing to summarize yet",
+            description="Register/select the asset and build the geometry above, then come back here.",
+        )
+    else:
+        modal_kpi_row([
+            (str(_sum_meta.get("tag", "") or _sum_geom.name or "—"), "Machine", "tag / name", "navy"),
+            (str(_sum_meta.get("client", "") or "—"), "Client", "asset owner", "cyan"),
+            (str(len(_sum_geom.blocks)), "Components", "3D solids", "green"),
+            (str(len(_sum_geom.sensors)), "Sensors", "measurement points", "amber"),
+        ])
+        _mc1, _mc2 = st.columns(2)
+        with _mc1:
+            st.markdown("**Asset**")
+            st.write({
+                "Machine / Tag": _sum_meta.get("tag", "") or (_sum_geom.name or ""),
+                "Client": _sum_meta.get("client", ""),
+                "Location": _sum_meta.get("station", ""),
+                "Model": _sum_meta.get("model", ""),
+            })
+        with _mc2:
+            st.markdown("**Sensors**")
+            import pandas as _pd_sum
+            _srows = [{"Sensor": s.name, "Type": s.sensor_type,
+                       "Mounting": s.effective_mounting(), "DOF": s.dof}
+                      for s in _sum_geom.sensors]
+            if _srows:
+                st.dataframe(_pd_sum.DataFrame(_srows), use_container_width=True,
+                             hide_index=True, height=240)
+            else:
+                st.caption("No sensors placed yet.")
+        if _sum_meta.get("notes"):
+            st.caption("Notes: " + str(_sum_meta.get("notes")))
+        st.caption("Save the configuration (local / cloud) from the sections above — the field app "
+                   "and this page share the same layout in Watermelon System.")
+
 
 # ---------------------------------------------------------------------
 # Tab 2 — Adquisición
