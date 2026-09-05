@@ -171,7 +171,8 @@ modal_hero_card(
 # radio guarda la pestaña activa en session_state y sobrevive los reruns, así
 # el usuario se queda donde estaba (v3.31.445).
 _MODAL_TABS = [
-    "🛠 Setup", "📥 Adquisición", "🔨 EMA", "🌊 OMA",
+    "🛠 Configuration", "📥 Acquisition", "🔨 EMA (impact)", "🌊 OMA capture",
+    "🧩 SSI (subspace)", "⚖ Comparative", "📈 Campbell",
     "🎬 Mode Shapes 3D", "🧮 FEA Compare", "📊 Reports",
 ]
 _active_modal_tab = st.radio(
@@ -184,7 +185,7 @@ st.divider()
 # ---------------------------------------------------------------------
 # Tab 1 — Setup
 # ---------------------------------------------------------------------
-if _active_modal_tab == "🛠 Setup":
+if _active_modal_tab == "🛠 Configuration":
     modal_section_header(
         title="Modal test configuration",
         subtitle="Select or register the asset under analysis",
@@ -1181,7 +1182,7 @@ if _active_modal_tab == "🛠 Setup":
 # ---------------------------------------------------------------------
 # Tab 2 — Adquisición
 # ---------------------------------------------------------------------
-if _active_modal_tab == "📥 Adquisición":
+if _active_modal_tab == "📥 Acquisition":
     st.subheader("Data acquisition")
     st.caption("Three paths: live capture from the acquisition unit, import a pre-captured file, or import legacy FRFs.")
 
@@ -2438,7 +2439,7 @@ if _active_modal_tab == "📥 Adquisición":
 # ---------------------------------------------------------------------
 # Tab 3 — EMA Processing
 # ---------------------------------------------------------------------
-if _active_modal_tab == "🔨 EMA":
+if _active_modal_tab == "🔨 EMA (impact)":
     st.subheader("Experimental Modal Analysis")
     st.caption(
         "Identification of modal parameters (natural frequency, damping, mode shape) "
@@ -2696,7 +2697,7 @@ if _active_modal_tab == "🔨 EMA":
 # ---------------------------------------------------------------------
 # Tab 4 — OMA Processing (FDD)
 # ---------------------------------------------------------------------
-if _active_modal_tab == "🌊 OMA":
+if _active_modal_tab == "🌊 OMA capture":
     st.subheader("Operational Modal Analysis — FDD")
     st.caption(
         "Frequency Domain Decomposition (Brincker 2001) on the system's operational "
@@ -5068,6 +5069,186 @@ if _active_modal_tab == "📊 Reports":
                             )
                             with st.expander("Technical detail"):
                                 st.code(_tb.format_exc(), language="text")
+
+
+# =====================================================================
+# Tab — SSI (subspace)   [espejo del app de campo]
+# =====================================================================
+if _active_modal_tab == "🧩 SSI (subspace)":
+    modal_section_header(
+        title="SSI — Stochastic Subspace Identification",
+        subtitle="Covariance-driven (SSI-COV) + stabilization diagram + uncertainty",
+        norm_ref="OMA · Brincker & Ventura",
+        icon="🧩",
+    )
+    _tdms_ssi = st.session_state.get("modal_tdms")
+    if _tdms_ssi is None:
+        modal_empty_state(
+            icon="🧩",
+            title="No operational data loaded",
+            description=("SSI needs a continuous .tdms record (same one used for OMA). "
+                         "Load it in the Acquisition tab, then run SSI here."),
+        )
+    else:
+        _c1, _c2, _c3 = st.columns(3)
+        with _c1:
+            _ssi_fmin = st.number_input("f min (Hz)", 0.5, 2000.0, 2.0, key="ssi_fmin")
+        with _c2:
+            _ssi_fmax = st.number_input("f max (Hz)", 5.0, 5000.0, 200.0, key="ssi_fmax")
+        with _c3:
+            _ssi_omax = st.number_input("Max model order", 4, 80, 40, step=2, key="ssi_omax")
+        if st.button("🧩 Run SSI-COV", type="primary", use_container_width=True, key="ssi_run"):
+            from core.modal.ssi import run_ssi_cov
+            _data = np.stack([ch.data for ch in _tdms_ssi.channels], axis=1)
+            _fs = float(_tdms_ssi.sample_rate_hz)
+            with st.spinner("SSI-COV: covariances → block Toeplitz → SVD → poles per order…"):
+                st.session_state["modal_ssi_result"] = run_ssi_cov(
+                    _data, _fs, orders=list(range(2, int(_ssi_omax) + 1, 2)),
+                    fmin_hz=float(_ssi_fmin), fmax_hz=float(_ssi_fmax))
+        _ssi = st.session_state.get("modal_ssi_result")
+        if _ssi is not None:
+            _figs = go.Figure()
+            for (_order, _freqs, _mask) in _ssi.diagram:
+                if len(_freqs) == 0:
+                    continue
+                _figs.add_trace(go.Scatter(
+                    x=list(_freqs), y=[_order] * len(_freqs), mode="markers",
+                    marker=dict(size=6, color=["#16a34a" if m else "#cbd5e1" for m in _mask]),
+                    showlegend=False,
+                    hovertemplate="%{x:.2f} Hz · order %{y}<extra></extra>"))
+            for _m in _ssi.modes:
+                _figs.add_vline(x=_m.frequency_hz, line=dict(color="#dc2626", width=1, dash="dot"))
+            _figs.update_layout(
+                title="Stabilization diagram — green = stable pole, red = identified mode",
+                xaxis_title="Frequency (Hz)", yaxis_title="Model order",
+                height=470, template="plotly_white")
+            st.plotly_chart(_figs, use_container_width=True)
+            import pandas as _pd_ssi
+            _rows = [{"Mode": i + 1, "Freq (Hz)": round(m.frequency_hz, 3),
+                      "± Hz": round(m.std_frequency_hz, 3),
+                      "Damping (%)": round(m.damping_ratio_pct, 3),
+                      "± %": round(m.std_damping_pct, 3)}
+                     for i, m in enumerate(_ssi.modes)]
+            st.dataframe(_pd_ssi.DataFrame(_rows), use_container_width=True, hide_index=True)
+            st.caption("Uncertainty (±) = dispersion of each stable pole across model orders.")
+
+
+# =====================================================================
+# Tab — Comparative (EMA vs OMA)   [espejo del app de campo]
+# =====================================================================
+if _active_modal_tab == "⚖ Comparative":
+    modal_section_header(
+        title="Comparative — EMA vs OMA",
+        subtitle="Match impact modes against operational modes (Δf, Δ%, MAC)",
+        norm_ref="ISO 7626 · OMA",
+        icon="⚖",
+    )
+
+    def _mode_freq(_m):
+        return float(getattr(_m, "frequency_hz",
+                     getattr(_m, "natural_frequency_hz", 0.0)) or 0.0)
+
+    _ema_modes = st.session_state.get("modal_tdms_modes") or []
+    _fdd_cmp = st.session_state.get("modal_oma_result")
+    _oma_modes = list(_fdd_cmp.modes) if _fdd_cmp is not None else []
+    _ema_f = [_mode_freq(m) for m in _ema_modes]
+    _oma_f = [float(getattr(m, "natural_frequency_hz", 0.0)) for m in _oma_modes]
+    if not _ema_f or not _oma_f:
+        modal_empty_state(
+            icon="⚖",
+            title="Need both EMA and OMA modes",
+            description=("Identify impact modes in the EMA tab and operational modes in "
+                         "OMA capture. This tab correlates them (closest frequency, MAC)."),
+        )
+    else:
+        _tol = st.number_input("Matching tolerance (Hz)", 0.1, 20.0, 2.0, key="cmp_tol")
+        from core.modal.ema_oma_correlation import correlate, correlation_table, summarize
+        _matches = correlate(_ema_f, _oma_f, tol_hz=float(_tol))
+        _figc = go.Figure()
+        _figc.add_trace(go.Scatter(x=_ema_f, y=[1] * len(_ema_f), mode="markers",
+                        name="EMA", marker=dict(color="#2563eb", size=13, symbol="triangle-up")))
+        _figc.add_trace(go.Scatter(x=_oma_f, y=[0] * len(_oma_f), mode="markers",
+                        name="OMA", marker=dict(color="#16a34a", size=13, symbol="circle")))
+        for _mt in _matches:
+            _figc.add_shape(type="line", x0=_mt.ema_hz, y0=1, x1=_mt.oma_hz, y1=0,
+                            line=dict(color="#94a3b8", width=1, dash="dot"))
+        _figc.update_layout(
+            title="EMA (▲) vs OMA (●) — matched pairs linked",
+            xaxis_title="Frequency (Hz)",
+            yaxis=dict(showticklabels=False, range=[-0.5, 1.5]),
+            height=340, template="plotly_white")
+        st.plotly_chart(_figc, use_container_width=True)
+        if _matches:
+            import pandas as _pd_cmp
+            st.dataframe(_pd_cmp.DataFrame(correlation_table(_matches)),
+                         use_container_width=True, hide_index=True)
+            st.info(summarize(_matches))
+        else:
+            st.warning("No EMA↔OMA matches within tolerance.")
+
+
+# =====================================================================
+# Tab — Campbell   [promovida a pestaña propia, espejo del app de campo]
+# =====================================================================
+if _active_modal_tab == "📈 Campbell":
+    modal_section_header(
+        title="Campbell diagram",
+        subtitle="Natural frequencies vs running-speed orders — resonance separation",
+        norm_ref="API 684 sec. 1.6 (±15%)",
+        icon="📈",
+    )
+    _fdd_cam = st.session_state.get("modal_oma_result")
+    _cam_modes = list(_fdd_cam.modes) if _fdd_cam is not None else []
+    _modes_hz = [float(getattr(m, "natural_frequency_hz", 0.0)) for m in _cam_modes
+                 if getattr(m, "classification", "natural") != "spurious"]
+    if not _modes_hz:
+        _ema_cam = st.session_state.get("modal_tdms_modes") or []
+        _modes_hz = [float(getattr(m, "frequency_hz", 0.0)) for m in _ema_cam]
+    if not _modes_hz:
+        modal_empty_state(
+            icon="📈",
+            title="No modes identified yet",
+            description="Identify modes first (OMA capture or EMA), then build the Campbell diagram.",
+        )
+    else:
+        _cc1, _cc2, _cc3 = st.columns(3)
+        with _cc1:
+            _rpm_op = st.number_input("Operating speed (RPM)", 0.0, 60000.0, 3600.0, key="camp_rpm")
+        with _cc2:
+            _rpm_max = st.number_input("RPM axis max", 100.0, 60000.0,
+                                       float(max(_rpm_op * 1.3, 4000.0)), key="camp_rmax")
+        with _cc3:
+            _n_ord = st.number_input("Orders (1X..NX)", 1, 8, 4, key="camp_ord")
+        _orders = list(range(1, int(_n_ord) + 1))
+        from core.modal.campbell import compute_crossings, crossings_table, SpeedBand, summarize as _camp_sum
+        _bands = [SpeedBand(_rpm_op * 0.85, _rpm_op * 1.15, "Operating ±15%")] if _rpm_op > 0 else None
+        _crossings = compute_crossings(_modes_hz, 0.0, float(_rpm_max), orders=_orders, bands=_bands)
+        _figk = go.Figure()
+        _rpm_axis = np.linspace(0.0, float(_rpm_max), 60)
+        for _o in _orders:
+            _figk.add_trace(go.Scatter(x=_rpm_axis, y=_rpm_axis / 60.0 * _o,
+                            mode="lines", name=f"{_o}X", line=dict(width=1.5)))
+        for _f in _modes_hz:
+            _figk.add_hline(y=_f, line=dict(color="#334155", width=1, dash="dash"))
+        if _rpm_op > 0:
+            _figk.add_vrect(x0=_rpm_op * 0.85, x1=_rpm_op * 1.15,
+                            fillcolor="#fca5a5", opacity=0.25, line_width=0)
+            _figk.add_vline(x=_rpm_op, line=dict(color="#dc2626", width=2))
+        for _cr in _crossings:
+            _figk.add_trace(go.Scatter(x=[_cr.crossing_rpm], y=[_cr.mode_hz], mode="markers",
+                            showlegend=False,
+                            marker=dict(color="#dc2626" if _cr.in_band else "#f59e0b",
+                                        size=10, symbol="x")))
+        _figk.update_layout(
+            title="Campbell — fn (dashed) vs orders; red band = operating ±15%",
+            xaxis_title="Running speed (RPM)", yaxis_title="Frequency (Hz)",
+            height=490, template="plotly_white")
+        st.plotly_chart(_figk, use_container_width=True)
+        _krows = crossings_table(_crossings)
+        if _krows:
+            import pandas as _pd_cam
+            st.dataframe(_pd_cam.DataFrame(_krows), use_container_width=True, hide_index=True)
+            st.info(_camp_sum(_crossings))
 
 
 # =====================================================================
