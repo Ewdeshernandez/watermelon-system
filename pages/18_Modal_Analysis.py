@@ -217,36 +217,50 @@ else:
 
 lay = D["lay"]; nch = lay.n_channels()
 
-TABS = ["🛠 Configuration", "🔨 Impact test (EMA)", "🎯 Modes (EMA)", "🌊 OMA capture",
-        "🧩 SSI (subspace)", "⚖ Comparative", "📈 Campbell", "🎬 Mode shapes",
-        "📋 Preliminary report"]
+TABS = ["🔵  Configuration", "🟢  Impact test (EMA)", "🟣  Modes (EMA)", "🟡  OMA capture",
+        "🟠  SSI (subspace)", "🔴  Comparative", "🟤  Campbell", "⚫  Mode shapes",
+        "🔵  Preliminary report"]
 _t = st.tabs(TABS)
 
 # ---------------------------------------------------------------- 1 CONFIG
 with _t[0]:
     _sec("Configuration", "Machine · sensors · acquisition", "ISO 7626 / ISO 20816")
-    c1, c2 = st.columns([3, 2])
-    with c1:
-        st.plotly_chart(_geometry_fig(lay), use_container_width=True)
-    with c2:
-        st.markdown("**Machine & client**")
-        st.write({"Machine": lay.name, "Client": lay.client, "Location": lay.location,
-                  "Tag": lay.tag, "Type": lay.machine_type, "RPM": int(D["rpm"])})
-        st.markdown("**Acquisition**")
-        st.write({"fs (Hz)": int(lay.fs_hz), "Block": lay.block_size,
+    _pts_rows = [{"BNC": p.bnc, "Code": p.code, "Component": p.component,
+                  "Reference": p.position_ref, "DOF": p.dof,
+                  "Sens. (mV/g)": p.sensitivity_mv_per_g,
+                  "Ref?": "★" if p.reference_sensor else ""} for p in lay.active_points()]
+    _cfg = st.tabs(["🔵  Machine", "🟢  Sensors", "🟡  Measurement points",
+                    "🟠  Acquisition", "🔴  Summary"])
+    # --- Machine ---
+    with _cfg[0]:
+        m1, m2 = st.columns([3, 2])
+        with m1:
+            st.plotly_chart(_geometry_fig(lay, show_sensors=False), use_container_width=True)
+        with m2:
+            st.markdown("**Machine & client**")
+            st.write({"Machine": lay.name, "Client": lay.client, "Location": lay.location,
+                      "Tag": lay.tag, "Type": lay.machine_type, "RPM": int(D["rpm"])})
+    # --- Sensors ---
+    with _cfg[1]:
+        st.plotly_chart(_geometry_fig(lay, show_sensors=True), use_container_width=True)
+        st.caption(f"{nch} accelerometers placed · numbers = BNC channel.")
+    # --- Measurement points ---
+    with _cfg[2]:
+        st.dataframe(_pts_rows, use_container_width=True, hide_index=True, height=430)
+    # --- Acquisition ---
+    with _cfg[3]:
+        st.write({"fs (Hz)": int(lay.fs_hz), "Block size": lay.block_size,
                   "Fmax (Hz)": int(lay.fmax_hz), "Duration (s)": int(lay.duration_s),
-                  "Channels": nch})
-    st.divider()
-    _sec("Summary", "Consolidated configuration")
-    _cols = st.columns(4)
-    _cols[0].metric("Machine", lay.tag or lay.name)
-    _cols[1].metric("Client", lay.client)
-    _cols[2].metric("Components", len(lay.machine_components))
-    _cols[3].metric("Sensors", nch)
-    st.dataframe(
-        [{"BNC": p.bnc, "Code": p.code, "Component": p.component, "Reference": p.position_ref,
-          "DOF": p.dof, "Ref?": "★" if p.reference_sensor else ""} for p in lay.active_points()],
-        use_container_width=True, hide_index=True, height=320)
+                  "Channels": nch, "Test": "/".join(lay.test_modes)})
+        st.caption(f"Δf = {lay.fs_hz/lay.block_size:.3f} Hz · record {lay.block_size/lay.fs_hz*1000:.0f} ms.")
+    # --- Summary ---
+    with _cfg[4]:
+        _cols = st.columns(4)
+        _cols[0].metric("Machine", lay.tag or lay.name)
+        _cols[1].metric("Client", lay.client)
+        _cols[2].metric("Components", len(lay.machine_components))
+        _cols[3].metric("Sensors", nch)
+        st.dataframe(_pts_rows, use_container_width=True, hide_index=True, height=300)
 
 # ---------------------------------------------------------------- 2 EMA
 with _t[1]:
