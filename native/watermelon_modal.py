@@ -50,7 +50,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.17"
+__version__ = "0.9.18"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1169,9 +1169,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
         freqs = fdd.frequencies_hz; sv = np.asarray(fdd.singular_values)
         if sv.ndim == 1: sv = sv[None, :]
         band = freqs <= fmax
-        p_svd.clear(); _svcol = ["#2563eb", "#dc2626", "#16a34a", "#9ca3af"]
+        p_svd.clear(); _svcol = ["#2563eb", "#dc2626", "#16a34a", "#f59e0b"]
+        p_svd.setTitle(f"Singular values — {sv.shape[0]} channels (SV1 dominant; SV2–4 reveal close modes)", color=NAVY)
         for i in range(sv.shape[0]):
-            col = _svcol[i] if i < 4 else "#dbe2ec"; wdt = 1.7 if i == 0 else (1.0 if i < 4 else 0.5)
+            col = _svcol[i] if i < 4 else "#94a3b8"; wdt = 1.8 if i == 0 else (1.1 if i < 4 else 0.6)
             p_svd.plot(freqs[band], 10 * np.log10(np.maximum(sv[i][band], 1e-30)), pen=pg.mkPen(col, width=wdt), name=(f"SV{i+1}" if i < 4 else None))
         for m in fdd.modes:
             j = int(np.argmin(np.abs(freqs - m.natural_frequency_hz)))
@@ -1390,12 +1391,17 @@ def build_app(layout: OMALayout, simulated: bool = True):
         SM = 0.15; lo, hi = rpm_op * (1 - SM), rpm_op * (1 + SM); rpm_max = max(rpm_op * 1.4, 1500.0)
         if not modes:
             lbl_cam.setText("No modes yet — run OMA capture or identify EMA modes."); tbl_cam.setRowCount(0); return
-        ymax = max(modes) * 1.25; orders = (0.5, 1.0, 2.0, 3.0, 4.0); rpm = np.linspace(0, rpm_max, 60)
+        ymax = max(modes) * 1.30; orders = (0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0); rpm = np.linspace(0, rpm_max, 60)
         reg = pg.LinearRegionItem([max(0, lo), min(rpm_max, hi)], movable=False, brush=pg.mkBrush(239, 68, 68, 32)); reg.setZValue(-20); p_cam.addItem(reg)
         reg2 = pg.LinearRegionItem([rpm_op / 2 * (1 - SM), rpm_op / 2 * (1 + SM)], movable=False, brush=pg.mkBrush(245, 158, 11, 26)); reg2.setZValue(-20); p_cam.addItem(reg2)
         for o in orders:
             p_cam.plot(rpm, o * rpm / 60.0, pen=pg.mkPen("#6B7280", width=1, style=QtCore.Qt.DotLine))
-            t = pg.TextItem(f"{o:g}×", color="#6B7280", anchor=(0, 0.5)); t.setPos(rpm_max * 0.98, o * rpm_max / 60.0); p_cam.addItem(t)
+            # etiqueta donde la línea de orden sale del gráfico (queda siempre visible)
+            if o * rpm_max / 60.0 <= ymax:
+                lx, ly = rpm_max * 0.98, o * rpm_max / 60.0
+            else:
+                lx, ly = ymax * 60.0 / o, ymax * 0.98
+            t = pg.TextItem(f"{o:g}×", color="#6B7280", anchor=(0.5, 1.0)); t.setPos(lx, ly); p_cam.addItem(t)
         for fn in modes:
             p_cam.plot([0, rpm_max], [fn, fn], pen=pg.mkPen(GREEN, width=2))
         bands = [SpeedBand(rpm_op, SM * rpm_op, f"Operating {rpm_op:.0f}±{SM*100:.0f}%"), SpeedBand(rpm_op / 2, SM * rpm_op / 2, "½ speed")]
@@ -1588,8 +1594,25 @@ def build_app(layout: OMALayout, simulated: bool = True):
         for k, v in rows:
             html += f"<tr><td style='color:#64748b'>{k}&nbsp;&nbsp;</td><td><b>{v}</b></td></tr>"
         html += "</table>"
-        _q = "real (structural)" if cplx < 15 else ("moderate" if cplx < 45 else "complex (suspicious)")
-        html += f"<div style='margin-top:8px;color:#64748b'>Interpretation: <b>{_q}</b> mode</div>"
+        # --- autodiagnóstico del modo (complejidad + armónico de giro) ---
+        if cplx < 15:
+            diag, dcol = "Real structural mode — mode-shape vectors are collinear.", GREEN
+        elif cplx < 45:
+            diag, dcol = "Moderately complex — plausible; confirm with SSI.", AMBER
+        else:
+            diag, dcol = "Highly complex — likely forced/harmonic or noisy; verify or discard.", RED
+        harm_note = ""
+        if rr:
+            order = fn / (rr / 60.0)
+            k = round(order)
+            if k >= 1 and abs(order - k) <= 0.06:
+                harm_note = (f"<br><span style='color:{RED}'>⚠ Near {k}× running speed "
+                             f"({k*rr/60.0:.1f} Hz) — possible harmonic, not a structural mode.</span>")
+            elif abs(order - 0.5) <= 0.04:
+                harm_note = (f"<br><span style='color:{AMBER}'>⚠ Near 0.5× — sub-synchronous "
+                             f"(check looseness/oil whirl).</span>")
+        html += (f"<div style='margin-top:10px;padding:8px;background:#f8fafc;border-radius:6px'>"
+                 f"<b>Auto-diagnosis:</b> <span style='color:{dcol}'>{diag}</span>{harm_note}</div>")
         lbl_modal.setText(html)
         # Argand: vector por sensor (magnitud + fase) → colinealidad = modo real
         sh = np.asarray(getattr(m, "mode_shape", []), complex).ravel()
@@ -1600,9 +1623,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
             p_argand.plot([-1.05, 1.05], [0, 0], pen=pg.mkPen("#e2e8f0", width=1))
             p_argand.plot([0, 0], [-1.05, 1.05], pen=pg.mkPen("#e2e8f0", width=1))
             for c in s:
-                p_argand.plot([0, float(c.real)], [0, float(c.imag)], pen=pg.mkPen(BLUE, width=1.4))
+                p_argand.plot([0, float(c.real)], [0, float(c.imag)], pen=pg.mkPen(ACC, width=1.4))
             p_argand.addItem(pg.ScatterPlotItem([float(c.real) for c in s], [float(c.imag) for c in s],
-                                                size=7, brush=pg.mkBrush(BLUE), pen=None))
+                                                size=7, brush=pg.mkBrush(ACC), pen=None))
             p_argand.setXRange(-1.1, 1.1); p_argand.setYRange(-1.1, 1.1)
 
     def _set_view(az, el):
@@ -1679,8 +1702,11 @@ def build_app(layout: OMALayout, simulated: bool = True):
         m_anim.set_show_sensors(chk_showsen.isChecked())
         m_anim.set_view(st["layout"], np.radians(st["az"]), np.radians(st["el"]), -1)
         p_anim.getViewBox().autoRange(padding=0.2)
-        _update_modal_panel()
-        anim_timer.start(45)
+        anim_timer.start(45)                         # arranca SIEMPRE (aunque el panel falle)
+        try:
+            _update_modal_panel()
+        except Exception:  # noqa: BLE001
+            pass
     chk_showsen.toggled.connect(lambda on: m_anim.set_show_sensors(on))
 
     def _anim_stop():
