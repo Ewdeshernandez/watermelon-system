@@ -50,7 +50,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.9"
+__version__ = "0.9.10"
 
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -332,8 +332,28 @@ def build_app(layout: OMALayout, simulated: bool = True):
     ver_lbl.setToolTip("Versión del software Watermelon Modal"); tb.addWidget(ver_lbl)
     spc = QtWidgets.QWidget(); spc.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     tb.addWidget(spc)
-    mode_lbl = QtWidgets.QLabel(("SIMULATED — no hardware" if simulated else "LIVE — NI 9234") + "   ")
-    mode_lbl.setStyleSheet(f"color:{'#fbbf24' if simulated else '#34d399'}; font-weight:700;"); tb.addWidget(mode_lbl)
+    # ¿Hay una NI 9234 conectada AHORA? Autodetecta al arrancar (no depende de --sim).
+    def _detect_ni_channels():
+        try:
+            from core.modal.acq_backend import list_available_devices
+            n = 0
+            for d in list_available_devices():
+                if "9234" in str(d.get("product_type", "")):
+                    n += 4                                   # cada 9234 = 4 canales IEPE
+            return n
+        except Exception:  # noqa: BLE001  (sin driver / sin hardware)
+            return 0
+    ni_channels = _detect_ni_channels()
+    hw_present = ni_channels > 0
+    if hw_present:
+        mode_lbl = QtWidgets.QLabel(f"● LIVE — NI 9234 conectada ({ni_channels} canales)   ")
+        mode_lbl.setStyleSheet("color:#34d399; font-weight:700;")
+    else:
+        mode_lbl = QtWidgets.QLabel("● SIMULATED — sin hardware NI   ")
+        mode_lbl.setStyleSheet("color:#fbbf24; font-weight:700;")
+    mode_lbl.setToolTip("Se detecta al abrir el programa. Cada captura usa la fuente "
+                        "elegida en 'Source' (Simulated / NI 9234 live).")
+    tb.addWidget(mode_lbl)
 
     tabs = QtWidgets.QTabWidget(); win.setCentralWidget(tabs)
 
@@ -981,6 +1001,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     crow = QtWidgets.QHBoxLayout()
     crow.addWidget(QtWidgets.QLabel("Source:"))
     cb_src = QtWidgets.QComboBox(); cb_src.addItems(["Simulated", "NI 9234 (live)"]); crow.addWidget(cb_src)
+    if hw_present:
+        cb_src.setCurrentText("NI 9234 (live)")            # hay hardware → live por defecto
     btn_testni = QtWidgets.QPushButton("🔌 Test NI")
     btn_ocap = QtWidgets.QPushButton("▶ Capture + FDD"); btn_ocap.setStyleSheet(
         f"QPushButton{{background:{ACC};font-size:14px;padding:10px 20px;}} QPushButton:hover{{background:#1490c2;}}")
@@ -1152,7 +1174,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     tbl_modes.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_modes.verticalHeader().setVisible(False); tbl_modes.setMaximumWidth(520)
     p_nyq = pg.PlotWidget(); p_nyq.setBackground("w"); p_nyq.setAspectLocked(True); p_nyq.setTitle("Nyquist", color=NAVY); p_nyq.showGrid(x=True, y=True, alpha=0.3)
     nyq_curve = p_nyq.plot([], [], pen=pg.mkPen(NAVY, width=1.5)); ms.addWidget(tbl_modes, 2); ms.addWidget(p_nyq, 3); ql.addLayout(ms, 1)
-    tabs.addTab(pg_mod, "Modes")
+    tabs.addTab(pg_mod, "Modes (EMA)")
 
     def _identify():
         res = st["acc"].result()
@@ -1725,6 +1747,17 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 fh.write(pdf)
             QtWidgets.QMessageBox.information(win, "Preliminary", f"✅ Saved: {path}")
     btn_prel.clicked.connect(_gen_preliminary)
+
+    # Orden lógico de pestañas: EMA (impacto → modos) juntos, OMA (captura → SSI)
+    # juntos, luego correlación / Campbell / formas / reporte.
+    _desired_order = ["Configuration", "Impact test (EMA)", "Modes (EMA)",
+                      "OMA capture", "SSI (subspace)", "Comparative", "Campbell",
+                      "Mode shapes", "Preliminary report"]
+    _bar = tabs.tabBar()
+    for _target, _title in enumerate(_desired_order):
+        _cur = next((i for i in range(tabs.count()) if tabs.tabText(i) == _title), None)
+        if _cur is not None and _cur != _target:
+            _bar.moveTab(_cur, _target)
 
     return app, win
 
