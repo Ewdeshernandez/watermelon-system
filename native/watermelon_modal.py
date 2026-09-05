@@ -50,7 +50,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.10"
+__version__ = "0.9.11"
 
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -202,7 +202,7 @@ class Machine3DItem(pg.GraphicsObject):
         anim = self.anim
         faces = []                                          # (dep, pw, base|None, shade, colmag)
         for c in self.layout.machine_components:
-            base = QtGui.QColor(_comp_color(c.kind))
+            base = QtGui.QColor(c.color) if getattr(c, "color", "") else QtGui.QColor(_comp_color(c.kind))
             for f in _cuboid_faces(c):
                 # en animación cada cara se subdivide en una malla fina (degradé suave)
                 quads = _subdivide_quad(f, 5) if anim is not None else [f]
@@ -413,6 +413,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
     sp_wid = QtWidgets.QDoubleSpinBox(); sp_wid.setRange(0.02, 0.6); sp_wid.setSingleStep(0.02); sp_wid.setDecimals(2)
     for lab, w in (("L", sp_len), ("H", sp_hei), ("W", sp_wid)):
         bld.addWidget(QtWidgets.QLabel(lab)); bld.addWidget(w)
+    btn_color = QtWidgets.QPushButton("🎨 Color")
+    btn_color.setToolTip("Elegí el color del equipo seleccionado (ej. motor gris, bomba verde).")
+    btn_colreset = QtWidgets.QPushButton("↺")
+    btn_colreset.setToolTip("Volver al color por defecto según el tipo de equipo.")
+    btn_colreset.setMaximumWidth(34)
+    bld.addWidget(btn_color); bld.addWidget(btn_colreset)
     chk_lock = QtWidgets.QCheckBox("🔒 Rotate view (lock parts)")
     chk_lock.setToolTip("ON: arrastrar gira/posiciona TODO el conjunto (X/Y/Z). "
                         "OFF: arrastrar mueve cada equipo por separado.")
@@ -745,6 +751,23 @@ def build_app(layout: OMALayout, simulated: bool = True):
         c.x0 = cx - L / 2; c.x1 = cx + L / 2; c.y0 = cz - H / 2; c.y1 = cz + H / 2; c.depth = W / 2
         _draw_train(fit=False)
 
+    def _pick_color():
+        i = cb_comp.currentIndex(); comps = st["layout"].machine_components
+        if not (0 <= i < len(comps)):
+            return
+        c = comps[i]
+        init = QtGui.QColor(c.color) if c.color else QtGui.QColor(_comp_color(c.kind))
+        col = QtWidgets.QColorDialog.getColor(init, win, f"Color — {c.display()}")
+        if col.isValid():
+            c.color = col.name()            # "#rrggbb"
+            _draw_train(fit=False)
+
+    def _reset_color():
+        i = cb_comp.currentIndex(); comps = st["layout"].machine_components
+        if 0 <= i < len(comps):
+            comps[i].color = ""             # vuelve al color por tipo
+            _draw_train(fit=False)
+
     def _auto_arrange():
         """Alineación GENTIL: respeta dónde dejaste cada equipo; solo destraba solapes
         mínimos entre equipos rotativos (empujando a la derecha lo justo) y reengancha
@@ -900,11 +923,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
         chk_ema.setChecked("EMA" in lay.test_modes); chk_oma.setChecked("OMA" in lay.test_modes)
         sp_fs.setValue(int(lay.fs_hz)); cb_blk.setCurrentText(str(lay.block_size))
         sp_fmax.setValue(lay.fmax_hz); sp_dur.setValue(int(lay.duration_s))
-        win.setWindowTitle(f"Watermelon Modal — {lay.name}")
+        win.setWindowTitle(f"Watermelon Modal v{__version__} — {lay.name}")
         _fill_points(); _sync_comp_combo(); _refresh_summary(); _upd_df(); _draw_train(fit=True)
 
     # wiring
     btn_addcomp.clicked.connect(_add_component); btn_delcomp.clicked.connect(_del_component)
+    btn_color.clicked.connect(_pick_color); btn_colreset.clicked.connect(_reset_color)
     cb_comp.currentIndexChanged.connect(lambda *_: _load_comp_dims())
     for sp in (sp_len, sp_hei, sp_wid): sp.valueChanged.connect(_apply_comp_dims)
     cb_place.currentIndexChanged.connect(lambda *_: _draw_train())

@@ -102,6 +102,7 @@ class MachineComponent:
     y0: float = -0.30            # altura (Z en el dibujo 3D): base..tope
     y1: float = 0.30
     depth: float = 0.16          # semi-profundidad (Y) para el sólido 3D
+    color: str = ""              # color de relleno "#rrggbb" (vacío = color por tipo)
 
     def display(self) -> str:
         return self.label or self.kind
