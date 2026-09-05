@@ -50,7 +50,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.13"
+__version__ = "0.9.14"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1096,6 +1096,15 @@ def build_app(layout: OMALayout, simulated: bool = True):
     p_svd.setTitle("Singular values of spectral densities — all channels", color=NAVY); p_svd.showGrid(x=True, y=True, alpha=0.3); p_svd.addLegend(offset=(-10, 10))
     ocs.addWidget(tbl_om, 2); ocs.addWidget(p_svd, 3); cl2.addLayout(ocs, 1)
     lbl_ost = QtWidgets.QLabel(""); cl2.addWidget(lbl_ost)
+    # Validación automática de modos (validado / dudoso / rechazado + armónicos)
+    cl2.addWidget(QtWidgets.QLabel("<b>Automatic mode validation</b> "
+                                   "<span style='color:#64748b'>(validated / doubtful / rejected)</span>"))
+    tbl_val = QtWidgets.QTableWidget(0, 6)
+    tbl_val.setHorizontalHeaderLabels(["fn (Hz)", "ζ (%)", "Complex (%)", "Verdict", "SSI/Harm", "Reasons"])
+    tbl_val.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    tbl_val.verticalHeader().setVisible(False); tbl_val.setMaximumHeight(180)
+    cl2.addWidget(tbl_val)
+    lbl_val = QtWidgets.QLabel(""); cl2.addWidget(lbl_val)
     tabs.addTab(pg_oc, "OMA capture")
 
     def _oma_capture():
@@ -1147,6 +1156,30 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 tbl_om.setItem(rr, c, QtWidgets.QTableWidgetItem(v))
         lbl_ost.setText(f"✅ FDD done — {len(fdd.modes)} modes. See Comparative (EMA vs OMA) and Campbell.")
         lbl_ost.setStyleSheet(f"color:{GREEN};font-weight:700;"); _refresh_campbell(); _refresh_comparative()
+        _refresh_validation()
+
+    def _refresh_validation():
+        fdd = st.get("oma_fdd")
+        if fdd is None:
+            return
+        from core.modal.mode_validation import validate_modes, summarize as _mv_sum
+        ssi_res = st.get("ssi")
+        ssi_freqs = [m.frequency_hz for m in ssi_res.modes] if (ssi_res and ssi_res.modes) else []
+        verdicts = validate_modes(fdd.modes, ssi_freqs_hz=ssi_freqs,
+                                  running_speed_rpm=st["layout"].running_speed_rpm)
+        _vc = {"validated": "#16a34a", "doubtful": "#f59e0b", "rejected": "#dc2626"}
+        tbl_val.setRowCount(0)
+        for v in verdicts:
+            r = tbl_val.rowCount(); tbl_val.insertRow(r)
+            flag = ("✓SSI " if v.confirmed_by_ssi else "") + ("⚠Harm" if v.is_harmonic else "")
+            cells = [f"{v.frequency_hz:.2f}", f"{v.damping_ratio_pct:.3f}", f"{v.complexity_pct:.1f}",
+                     v.verdict.capitalize(), flag.strip(), "; ".join(v.reasons)]
+            for c, txt in enumerate(cells):
+                it = QtWidgets.QTableWidgetItem(txt)
+                if c == 3:
+                    it.setForeground(QtGui.QColor(_vc.get(v.verdict, "#0f172a")))
+                tbl_val.setItem(r, c, it)
+        lbl_val.setText(_mv_sum(verdicts)); lbl_val.setStyleSheet("color:#334155;")
 
     def _capture_ni(lay, secs):
         """Captura REAL continua desde la NI 9234 (IEPE). Lanza excepción si no hay HW."""
