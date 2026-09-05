@@ -496,7 +496,7 @@ if _active_modal_tab == "🛠 Setup":
                         (str(n_accel), "Accelerometers",
                          "Typical IEPE accelerometer 100 mV/g", "cyan"),
                         (str(n_prox), "Proximity",
-                         "Typical Bently 200 mV/mil", "amber"),
+                         "Typical proximity probe 200 mV/mil", "amber"),
                         (str(n_3d_ready), "Modal 3D ready",
                          "with position_3d + DOF", "green"),
                     ])
@@ -1366,12 +1366,12 @@ if _active_modal_tab == "📥 Adquisición":
             if _modules:
                 _bnc_max = max(m["bnc_range"][1] for m in _modules)
                 _discovery_msg = (
-                    f"✓ Detected {len(_modules)} modules in the acquisition unit '{_ni_chassis}' "
+                    f"✓ Detected {len(_modules)} modules in the Watermelon acquisition unit "
                     f"→ BNC 1..{_bnc_max} available"
                 )
             else:
                 _discovery_msg = (
-                    f"⚠ Watermelon acquisition unit '{_ni_chassis}' not detected. "
+                    "⚠ Watermelon acquisition unit not detected. "
                     "You can configure channels for remote capture, but the "
                     "execution will run from the plant laptop via the companion."
                 )
