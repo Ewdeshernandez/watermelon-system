@@ -333,6 +333,14 @@ with _t[3]:
     st.dataframe([{"Freq (Hz)": round(m["fn"], 2), "Damping (%)": round(m["zeta"], 3),
                    "Complexity (%)": round(m["complexity"], 1), "Class": m["cls"]}
                   for m in D["oma_modes"]], use_container_width=True, hide_index=True)
+    # --- Validación automática de modos (validado / dudoso / rechazado) ---
+    if D["oma_modes"]:
+        from core.modal.mode_validation import validate_modes, verdict_rows, summarize as mv_sum
+        _ssi_freqs = [m["fn"] for m in (D["ssi_cloud"] or {}).get("modes", [])] if D["ssi_cloud"] else []
+        _verd = validate_modes(D["oma_modes"], ssi_freqs_hz=_ssi_freqs, running_speed_rpm=D["rpm"])
+        st.markdown("**Automatic mode validation** *(validated / doubtful / rejected)*")
+        st.dataframe(verdict_rows(_verd), use_container_width=True, hide_index=True)
+        st.info(mv_sum(_verd))
 
 # ---------------------------------------------------------------- 5 SSI
 with _t[4]:
