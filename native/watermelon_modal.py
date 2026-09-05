@@ -50,7 +50,11 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.11"
+__version__ = "0.9.12"
+
+# Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
+# hardware en la interfaz: el cliente solo debe ver "Watermelon".
+DAQ_NAME = "Watermelon DAQ"
 
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -317,7 +321,18 @@ def build_app(layout: OMALayout, simulated: bool = True):
     pg.setConfigOptions(antialias=True)
     win = QtWidgets.QMainWindow()
     win.setWindowTitle(f"Watermelon Modal v{__version__} — {layout.name}")
-    win.resize(1320, 850)
+    # Auto-ajuste a la pantalla: nunca más grande que el área disponible (deja
+    # visible la barra de título con minimizar/cerrar) y queda centrada.
+    _scr = app.primaryScreen()
+    _av = _scr.availableGeometry() if _scr else None
+    if _av is not None:
+        _w = min(1320, _av.width() - 40); _h = min(850, _av.height() - 80)
+        win.resize(max(900, _w), max(560, _h))
+        win.setMinimumSize(820, 520)
+        win.move(_av.left() + (_av.width() - win.width()) // 2,
+                 _av.top() + (_av.height() - win.height()) // 2)
+    else:
+        win.resize(1320, 850)
 
     st = {"layout": layout, "acc": FRFAccumulator(layout.fs_hz, layout.block_size),
           "pending": None, "target": 5, "oma_fdd": None,
@@ -346,13 +361,13 @@ def build_app(layout: OMALayout, simulated: bool = True):
     ni_channels = _detect_ni_channels()
     hw_present = ni_channels > 0
     if hw_present:
-        mode_lbl = QtWidgets.QLabel(f"● LIVE — NI 9234 conectada ({ni_channels} canales)   ")
+        mode_lbl = QtWidgets.QLabel(f"● LIVE — {DAQ_NAME} · {ni_channels} canales   ")
         mode_lbl.setStyleSheet("color:#34d399; font-weight:700;")
     else:
-        mode_lbl = QtWidgets.QLabel("● SIMULATED — sin hardware NI   ")
+        mode_lbl = QtWidgets.QLabel("● SIMULADO — sin adquisición conectada   ")
         mode_lbl.setStyleSheet("color:#fbbf24; font-weight:700;")
     mode_lbl.setToolTip("Se detecta al abrir el programa. Cada captura usa la fuente "
-                        "elegida en 'Source' (Simulated / NI 9234 live).")
+                        f"elegida en 'Source' (Simulado / {DAQ_NAME}).")
     tb.addWidget(mode_lbl)
 
     tabs = QtWidgets.QTabWidget(); win.setCentralWidget(tabs)
@@ -408,6 +423,11 @@ def build_app(layout: OMALayout, simulated: bool = True):
     bld.addWidget(cb_kind); bld.addWidget(btn_addcomp); bld.addWidget(btn_delcomp)
     bld.addSpacing(14); bld.addWidget(QtWidgets.QLabel("<b>Size:</b>"));
     cb_comp = QtWidgets.QComboBox(); cb_comp.setMinimumWidth(150); bld.addWidget(cb_comp)
+    bld.addWidget(QtWidgets.QLabel("Name:"))
+    e_compname = QtWidgets.QLineEdit(); e_compname.setMinimumWidth(130)
+    e_compname.setPlaceholderText("ej. Motor ABB")
+    e_compname.setToolTip("Nombre que se muestra sobre el equipo en el dibujo (editable).")
+    bld.addWidget(e_compname)
     sp_len = QtWidgets.QDoubleSpinBox(); sp_len.setRange(0.02, 1.0); sp_len.setSingleStep(0.02); sp_len.setDecimals(2)
     sp_hei = QtWidgets.QDoubleSpinBox(); sp_hei.setRange(0.02, 0.8); sp_hei.setSingleStep(0.02); sp_hei.setDecimals(2)
     sp_wid = QtWidgets.QDoubleSpinBox(); sp_wid.setRange(0.02, 0.6); sp_wid.setSingleStep(0.02); sp_wid.setDecimals(2)
@@ -741,6 +761,16 @@ def build_app(layout: OMALayout, simulated: bool = True):
         for sp in (sp_len, sp_hei, sp_wid): sp.blockSignals(True)
         sp_len.setValue(round(c.x1 - c.x0, 2)); sp_hei.setValue(round(c.y1 - c.y0, 2)); sp_wid.setValue(round(2 * c.depth, 2))
         for sp in (sp_len, sp_hei, sp_wid): sp.blockSignals(False)
+        e_compname.blockSignals(True); e_compname.setText(c.display()); e_compname.blockSignals(False)
+
+    def _apply_comp_name(*_):
+        i = cb_comp.currentIndex(); comps = st["layout"].machine_components
+        if not (0 <= i < len(comps)):
+            return
+        comps[i].label = e_compname.text().strip()
+        # refresca el nombre en el combo sin perder la selección
+        cb_comp.blockSignals(True); cb_comp.setItemText(i, comps[i].display()); cb_comp.blockSignals(False)
+        _draw_train(fit=False)
 
     def _apply_comp_dims(*_):
         i = cb_comp.currentIndex(); comps = st["layout"].machine_components
@@ -929,6 +959,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # wiring
     btn_addcomp.clicked.connect(_add_component); btn_delcomp.clicked.connect(_del_component)
     btn_color.clicked.connect(_pick_color); btn_colreset.clicked.connect(_reset_color)
+    e_compname.editingFinished.connect(_apply_comp_name)
     cb_comp.currentIndexChanged.connect(lambda *_: _load_comp_dims())
     for sp in (sp_len, sp_hei, sp_wid): sp.valueChanged.connect(_apply_comp_dims)
     cb_place.currentIndexChanged.connect(lambda *_: _draw_train())
@@ -1024,10 +1055,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
     pg_oc = QtWidgets.QWidget(); cl2 = QtWidgets.QVBoxLayout(pg_oc)
     crow = QtWidgets.QHBoxLayout()
     crow.addWidget(QtWidgets.QLabel("Source:"))
-    cb_src = QtWidgets.QComboBox(); cb_src.addItems(["Simulated", "NI 9234 (live)"]); crow.addWidget(cb_src)
+    cb_src = QtWidgets.QComboBox(); cb_src.addItems(["Simulado", f"{DAQ_NAME} (live)"]); crow.addWidget(cb_src)
     if hw_present:
-        cb_src.setCurrentText("NI 9234 (live)")            # hay hardware → live por defecto
-    btn_testni = QtWidgets.QPushButton("🔌 Test NI")
+        cb_src.setCurrentIndex(1)                          # hay hardware → live por defecto
+    btn_testni = QtWidgets.QPushButton("🔌 Probar adquisición")
     btn_ocap = QtWidgets.QPushButton("▶ Capture + FDD"); btn_ocap.setStyleSheet(
         f"QPushButton{{background:{ACC};font-size:14px;padding:10px 20px;}} QPushButton:hover{{background:#1490c2;}}")
     btn_upload = QtWidgets.QPushButton("☁ Upload run to cloud")
@@ -1035,30 +1066,28 @@ def build_app(layout: OMALayout, simulated: bool = True):
 
     def _test_ni():
         try:
-            import nidaqmx  # noqa: F401  — probamos el import directo (causa raíz)
+            import nidaqmx  # noqa: F401  — import interno (no visible al usuario)
             from nidaqmx.system import System
-            devs = [{"name": d.name, "product_type": d.product_type, "serial": str(d.serial_num)}
-                    for d in System.local().devices]
+            devs = [{"product_type": d.product_type} for d in System.local().devices]
         except Exception as e:  # noqa: BLE001
             cause = getattr(e, "__cause__", None)
-            root = f"\n\nRoot cause: {type(cause).__name__}: {cause}" if cause else ""
-            QtWidgets.QMessageBox.warning(win, "NI test",
-                f"❌ Could not load the NI driver package inside the app.\n\n{type(e).__name__}: {e}{root}\n\n"
-                "If NI MAX sees the chassis, this is a packaging issue (send this text).")
+            root = f"\n\nDetalle: {type(cause).__name__}: {cause}" if cause else ""
+            QtWidgets.QMessageBox.warning(win, "Adquisición Watermelon",
+                f"❌ No se pudo iniciar el módulo de adquisición.\n\n{type(e).__name__}: {e}{root}\n\n"
+                "Revisá cable, alimentación del equipo y vuelve a intentar.")
             return
         if not devs:
-            QtWidgets.QMessageBox.warning(win, "NI test",
-                "⚠ No NI devices detected.\nCheck: USB cable, chassis power, and that NI-DAQmx sees it (NI MAX).")
+            QtWidgets.QMessageBox.warning(win, "Adquisición Watermelon",
+                "⚠ No se detecta el equipo de adquisición.\nRevisá el cable USB y la alimentación.")
             return
         chassis = [d for d in devs if "cdaq" in d["product_type"].lower() or "9178" in d["product_type"]]
         mods = [d for d in devs if "9234" in d["product_type"]]
-        lines = [f"✅ {len(devs)} NI device(s) detected:"]
-        for d in devs:
-            lines.append(f"   • {d['name']} — {d['product_type']} (S/N {d['serial']})")
-        lines.append(f"\nChassis: {len(chassis)} · NI 9234 modules: {len(mods)} → up to {len(mods)*4} channels.")
-        lines.append("Connection OK — you can capture with Source = NI 9234 (live)." if mods
-                     else "No 9234 modules found — check the modules are seated in the chassis.")
-        QtWidgets.QMessageBox.information(win, "NI test", "\n".join(lines))
+        nch = len(mods) * 4
+        lines = [f"✅ {DAQ_NAME} conectado."]
+        lines.append(f"Módulos de adquisición: {len(mods)} → {nch} canales disponibles.")
+        lines.append(f"\nConexión OK — podés capturar con Source = {DAQ_NAME} (live)." if mods
+                     else "No se detectan módulos de canales — revisá que estén bien insertados.")
+        QtWidgets.QMessageBox.information(win, "Adquisición Watermelon", "\n".join(lines))
     btn_testni.clicked.connect(_test_ni)
     ocs = QtWidgets.QHBoxLayout()
     tbl_om = QtWidgets.QTableWidget(0, 4); tbl_om.setHorizontalHeaderLabels(["Freq (Hz)", "Damping (%)", "Complexity (%)", "Class"])
@@ -1075,16 +1104,16 @@ def build_app(layout: OMALayout, simulated: bool = True):
         if nch < 2:
             QtWidgets.QMessageBox.information(win, "OMA", "Add ≥2 active sensors first (Sensors tab)."); return
         secs = min(float(lay.duration_s), 60.0); N = int(secs * fs); rng = st["rng"]
-        live = cb_src.currentText().startswith("NI")
+        live = cb_src.currentIndex() == 1
         data = None
-        if live:                                        # captura REAL NI 9234 (con fallback)
-            lbl_ost.setText("Connecting to NI 9234…"); QtWidgets.QApplication.processEvents()
+        if live:                                        # captura REAL con hardware (con fallback)
+            lbl_ost.setText(f"Conectando con {DAQ_NAME}…"); QtWidgets.QApplication.processEvents()
             try:
                 data, fs = _capture_ni(lay, secs)
-                lbl_ost.setText(f"NI 9234: captured {data.shape[0]} samples · {data.shape[1]} ch")
+                lbl_ost.setText(f"{DAQ_NAME}: {data.shape[0]} muestras · {data.shape[1]} canales")
             except Exception as e:  # noqa: BLE001
-                QtWidgets.QMessageBox.warning(win, "NI 9234",
-                    f"No NI hardware / capture failed → using simulated.\n\n{type(e).__name__}: {e}")
+                QtWidgets.QMessageBox.warning(win, DAQ_NAME,
+                    f"Sin adquisición / falló la captura → usando simulado.\n\n{type(e).__name__}: {e}")
                 data = None
         if data is None:                                # simulado
             lbl_ost.setText(f"Capturing {secs:.0f}s @ {fs:.0f}Hz · {nch} channels (simulated)…")

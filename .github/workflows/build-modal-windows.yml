@@ -96,7 +96,7 @@ jobs:
           Watermelon Modal - ensayo de impacto (analisis modal, Windows)
           ==============================================================
 
-          Requisito hardware real: driver NI-DAQmx + modulo NI 9234 (IEPE).
+          Adquisicion Watermelon DAQ (IEPE) para captura real.
           Sin hardware: doble clic en 0_SIMULADOR_impacto.bat -> demo simulada.
 
           FLUJO (pestana Impact test):
