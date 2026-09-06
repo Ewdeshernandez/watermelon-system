@@ -51,7 +51,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.30"
+__version__ = "0.9.31"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1684,7 +1684,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
             band = freqs <= fmax
             fb = freqs[band]; sv1 = sv[0][band]
             step = max(1, len(fb) // 900)
-            svd = {"freqs": fb[::step].tolist(), "sv1": sv1[::step].tolist()}
+            _nsv = int(min(sv.shape[0], 4))     # SV1..SV4 (para la vista multi-curva de la web)
+            svd = {"freqs": fb[::step].tolist(), "sv1": sv1[::step].tolist(),
+                   "sv": [sv[r][band][::step].tolist() for r in range(_nsv)]}
             def _sh(m):
                 s = np.asarray(getattr(m, "mode_shape", []), complex).ravel()
                 return {"re": s.real.tolist(), "im": s.imag.tolist()}
@@ -1721,15 +1723,42 @@ def build_app(layout: OMALayout, simulated: bool = True):
                                  [bool(x) for x in np.asarray(mk).tolist()]]
                                 for (o, fr, mk) in ssi_res.diagram],
                 }
+            # verificación de sensores (si se hizo) para el reporte web
+            sc_rec = None
+            _scr = st.get("_sc_record")
+            if _scr:
+                import base64 as _b64sc
+                sc_rec = {"rows": _scr["rows"], "ts": _scr["ts"], "n_ok": _scr["n_ok"],
+                          "n_total": _scr["n_total"], "live": _scr.get("live", False),
+                          "png_b64": _b64sc.b64encode(_scr["png"]).decode()}
             payload = {"name": lay.name, "kind": "OMA", "modes": modes, "svd": svd,
                        "channel_names": lay.channel_names(), "running_rpm": lay.running_speed_rpm,
-                       "ema_modes": ema, "ema": ema_block, "ssi": ssi_block,
+                       "ema_modes": ema, "ema": ema_block, "ssi": ssi_block, "sensor_check": sc_rec,
                        "client": lay.client, "asset": lay.machine_type,
                        "location": lay.location, "layout": lay.to_dict()}
-            r = modal_cloud.save_run(lay.name, payload)
+            # --- Subir la DATA CRUDA (todos los canales) a la nube: la web recalcula
+            #     todo (SVD completo multi-curva, SSI, cualquier Fmax) desde el crudo ---
+            rid, ts = modal_cloud.new_run_id(lay.name)
+            payload["raw_ref"] = None
+            _data_fs = st.get("oma_data")
+            if _data_fs is not None:
+                try:
+                    _dlg = QtWidgets.QProgressDialog("Uploading raw data to the cloud…", None, 0, 0, win)
+                    _dlg.setWindowTitle("Cloud"); _dlg.setMinimumDuration(0); _dlg.setModal(True)
+                    _dlg.show(); QtWidgets.QApplication.processEvents()
+                    _d, _fs = _data_fs
+                    rr = modal_cloud.upload_raw(rid, _d, _fs, lay.channel_names())
+                    _dlg.close()
+                    if rr.get("ok"):
+                        payload["raw_ref"] = rr
+                except Exception:  # noqa: BLE001
+                    pass
+            r = modal_cloud.save_run(lay.name, payload, run_id=rid, ts=ts)
             if r.get("ok"):
+                _rawmsg = ("with raw data" if payload.get("raw_ref") else "results only")
                 QtWidgets.QMessageBox.information(win, "Cloud",
-                    f"☁ Run uploaded ({len(fdd.modes)} modes). Generate the report from the web.")
+                    f"☁ Run uploaded ({len(fdd.modes)} modes, {_rawmsg}). "
+                    "Generate the report from the web.")
             else:
                 QtWidgets.QMessageBox.warning(win, "Cloud", f"Could not upload: {r.get('reason')}")
         except Exception as e:  # noqa: BLE001
@@ -2849,6 +2878,69 @@ def build_app(layout: OMALayout, simulated: bool = True):
     return app, win
 
 
+class _UpdateChecker(QtCore.QThread):
+    """Consulta los Releases de GitHub en segundo plano (sin congelar la UI)."""
+    found = QtCore.Signal(object)
+
+    def __init__(self, current_version, parent=None):
+        super().__init__(parent); self._ver = current_version
+
+    def run(self):
+        try:
+            from core.modal.updater import check_for_update
+            info = check_for_update(self._ver)
+            if info:
+                self.found.emit(info)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _show_update_banner(win, info):
+    """Aviso NO intrusivo de actualización + botón para actualizar de una."""
+    try:
+        ver = info.get("version", "?")
+        box = QtWidgets.QMessageBox(win)
+        box.setWindowTitle("Watermelon Modal — actualización disponible")
+        box.setIcon(QtWidgets.QMessageBox.Information)
+        box.setText(f"<b>Hay una versión más nueva disponible: v{ver}</b>")
+        box.setInformativeText("¿Actualizar ahora? Se descargará el instalador y se "
+                               "aplicará sobre la instalación actual. La app se cerrará "
+                               "para completar la actualización.\n\n"
+                               + (info.get("notes", "") or "")[:400])
+        b_now = box.addButton("Actualizar ahora", QtWidgets.QMessageBox.AcceptRole)
+        box.addButton("Después", QtWidgets.QMessageBox.RejectRole)
+        box.exec()
+        if box.clickedButton() is not b_now:
+            return
+        from core.modal import updater
+        url = info.get("setup_url") or info.get("zip_url")
+        if not url:
+            if info.get("html_url"):
+                QtGui.QDesktopServices.openUrl(QtCore.QUrl(info["html_url"]))
+            return
+        dlg = QtWidgets.QProgressDialog("Descargando actualización…", "Cancelar", 0, 100, win)
+        dlg.setWindowTitle("Actualizando"); dlg.setModal(True); dlg.setMinimumDuration(0); dlg.show()
+
+        def _prog(fr):
+            dlg.setValue(int(fr * 100)); QtWidgets.QApplication.processEvents()
+        path = updater.download_file(url, on_progress=_prog)
+        dlg.close()
+        if not path:
+            QtWidgets.QMessageBox.warning(win, "Actualizar", "No se pudo descargar la actualización.")
+            return
+        if path.lower().endswith("setup.exe"):
+            updater.launch_installer(path)
+            QtWidgets.QApplication.quit()          # el instalador reemplaza y relanza
+        else:
+            # zip portable: abrir la carpeta para que el usuario reemplace manualmente
+            try:
+                QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(os.path.dirname(path)))
+            except Exception:  # noqa: BLE001
+                pass
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description="Watermelon Modal — EMA + OMA (native)")
     ap.add_argument("--sim", action="store_true", default=True)
@@ -2858,7 +2950,16 @@ def main(argv=None):
     # la carga (Load local) o —lo recomendado— usa un ⭐ Preset.
     lay = OMALayout(name=args.name, machine_components=[], points=[])
     try:
-        app, win = build_app(lay, simulated=True); win.show(); sys.exit(app.exec())
+        app, win = build_app(lay, simulated=True); win.show()
+        # Auto-actualizador: al conectar a internet, avisa si hay versión nueva.
+        try:
+            _chk = _UpdateChecker(__version__, win)
+            _chk.found.connect(lambda info: _show_update_banner(win, info))
+            win._update_checker = _chk           # mantener referencia viva
+            QtCore.QTimer.singleShot(3000, _chk.start)
+        except Exception:  # noqa: BLE001
+            pass
+        sys.exit(app.exec())
     except Exception:  # noqa: BLE001
         err = traceback.format_exc()
         try:

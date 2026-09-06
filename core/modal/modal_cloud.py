@@ -58,18 +58,29 @@ def list_layouts_cloud() -> List[Dict[str, Any]]:
 _RUNS_TABLE = "modal_runs"
 
 
-def save_run(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+_RAW_BUCKET = "modal-raw"
+
+
+def new_run_id(name: str):
+    """Genera (run_id, ts_iso) determinístico para una corrida — para nombrar la
+    data cruda en Storage y la fila en la tabla con el MISMO id."""
+    from datetime import datetime
+    from core.modal.oma_layout import _slug
+    ts = datetime.now().isoformat(timespec="seconds")
+    return f"{_slug(name)}_{ts.replace(':', '').replace('-', '')}", ts
+
+
+def save_run(name: str, payload: Dict[str, Any], run_id: str = "", ts: str = "") -> Dict[str, Any]:
     """Sube una CORRIDA OMA (modos + config) a la nube (tabla `modal_runs`) para
-    que la web genere el reporte. payload libre (jsonb)."""
+    que la web genere el reporte. payload libre (jsonb). Si se pasan run_id/ts se
+    usan (para que coincidan con la data cruda subida a Storage)."""
     c = _client()
     if c is None:
         return {"ok": False, "reason": "offline"}
     try:
-        from datetime import datetime
-        from core.modal.oma_layout import _slug
-        ts = datetime.now().isoformat(timespec="seconds")
-        row = {"id": f"{_slug(name)}_{ts.replace(':', '').replace('-', '')}",
-               "name": name or "Modal run", "metadata": payload, "updated_at": ts}
+        if not run_id or not ts:
+            run_id, ts = new_run_id(name)
+        row = {"id": run_id, "name": name or "Modal run", "metadata": payload, "updated_at": ts}
         try:
             c.table(_RUNS_TABLE).upsert(row).execute()
         except Exception:  # noqa: BLE001
@@ -77,6 +88,55 @@ def save_run(name: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"ok": True, "name": name, "id": row["id"]}
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
+
+
+def upload_raw(run_id: str, data, fs: float, channels=None) -> Dict[str, Any]:
+    """Sube la DATA CRUDA (onda de todos los canales) a Supabase Storage, gzip.
+    Devuelve un `raw_ref` para guardar en el payload y que la web la recalcule."""
+    c = _client()
+    if c is None:
+        return {"ok": False, "reason": "offline"}
+    try:
+        import io, gzip
+        import numpy as np
+        arr = np.asarray(data, dtype=np.float32)
+        if arr.ndim == 1:
+            arr = arr[:, None]
+        buf = io.BytesIO(); np.save(buf, arr)
+        raw = gzip.compress(buf.getvalue(), 6)
+        key = f"{run_id}.npy.gz"
+        try:
+            c.storage.create_bucket(_RAW_BUCKET)            # idempotente
+        except Exception:  # noqa: BLE001
+            pass
+        store = c.storage.from_(_RAW_BUCKET)
+        try:
+            store.upload(key, raw, {"upsert": "true"})
+        except Exception:  # noqa: BLE001
+            store.update(key, raw)
+        return {"ok": True, "bucket": _RAW_BUCKET, "path": key, "fs": float(fs),
+                "n_ch": int(arr.shape[1]), "n_samples": int(arr.shape[0]),
+                "channels": list(channels or []), "size_bytes": len(raw)}
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
+
+
+def download_raw(ref: Dict[str, Any]):
+    """Descarga la data cruda referida por `raw_ref`. Devuelve (data[N,ch], fs) o None."""
+    if not ref or not ref.get("path"):
+        return None
+    c = _client()
+    if c is None:
+        return None
+    try:
+        import io, gzip
+        import numpy as np
+        store = c.storage.from_(ref.get("bucket", _RAW_BUCKET))
+        raw = store.download(ref["path"])
+        data = np.load(io.BytesIO(gzip.decompress(raw)))
+        return data, float(ref.get("fs", 0.0))
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def list_runs() -> List[Dict[str, Any]]:

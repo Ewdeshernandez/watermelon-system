@@ -321,8 +321,14 @@ def _build_cloud_D(payload: dict):
                   "cls": m.get("class", "natural")} for m in modes]
     svd = payload.get("svd") or {}
     f = np.asarray(svd.get("freqs", []), float); sv1 = np.asarray(svd.get("sv1", []), float)
-    sv_traces = ([("SV1", f, 10 * np.log10(np.maximum(sv1, 1e-30)))]
-                 if f.size and sv1.size else [])
+    _svlist = svd.get("sv")            # lista de curvas SV1..SVn (nuevo: multi-sensor)
+    if f.size and _svlist:
+        sv_traces = [(f"SV{r+1}", f, 10 * np.log10(np.maximum(np.asarray(c, float), 1e-30)))
+                     for r, c in enumerate(_svlist) if len(c) == f.size]
+    elif f.size and sv1.size:
+        sv_traces = [("SV1", f, 10 * np.log10(np.maximum(sv1, 1e-30)))]
+    else:
+        sv_traces = []
     shapes = []
     for m in modes:
         sh = m.get("shape") or {}
@@ -342,7 +348,7 @@ def _build_cloud_D(payload: dict):
     return {"lay": lay, "oma_modes": oma_modes, "sv_traces": sv_traces,
             "ema_freqs": list(payload.get("ema_modes", []) or []),
             "rpm": float(payload.get("running_rpm", lay.running_speed_rpm) or lay.running_speed_rpm),
-            "raw": None, "shapes": shapes, "source": "cloud",
+            "raw": None, "raw_ref": payload.get("raw_ref"), "shapes": shapes, "source": "cloud",
             "name": payload.get("name", lay.name),
             "ema_curve": ema_curve, "ema_modes_full": ema_modes_full,
             "ssi_cloud": payload.get("ssi") or None, "payload": payload}
@@ -387,6 +393,42 @@ else:
                    "Capture in the field and upload; it will appear here when online.")
 
 lay = D["lay"]; nch = lay.n_channels()
+
+# --- Data cruda en la nube: recalcular TODO en la web (SVD completo + SSI en vivo) ---
+@st.cache_data(show_spinner=False)
+def _load_raw_cached(path, bucket, fs):
+    from core.modal.modal_cloud import download_raw
+    return download_raw({"path": path, "bucket": bucket, "fs": fs})
+
+
+_rref = D.get("raw_ref")
+if _rref and D.get("source") == "cloud" and _rref.get("path"):
+    _mb = (_rref.get("size_bytes", 0) or 0) / 1e6
+    _use_raw = st.checkbox(
+        f"⚡ Recompute from raw data ({_rref.get('n_ch','?')} ch · full SVD + live SSI · ~{_mb:.1f} MB)",
+        value=False, key="use_raw",
+        help="Downloads the full raw waveform this run uploaded and recomputes everything on the web.")
+    if _use_raw:
+        with st.spinner("Downloading raw waveform and recomputing FDD…"):
+            _rr = _load_raw_cached(_rref.get("path"), _rref.get("bucket", "modal-raw"), _rref.get("fs"))
+        if _rr is not None:
+            _rdata, _rfs = _rr
+            D["raw"] = (_rdata, _rfs)
+            try:
+                _fmax = min(_rfs / 2.56, lay.fmax_hz)
+                _fdd = run_oma(time_data=_rdata, sample_rate_hz=_rfs, nperseg=4096,
+                               channel_names=lay.channel_names(), f_min_hz=5.0, f_max_hz=_fmax)
+                _fr = np.asarray(_fdd.frequencies_hz); _sv = np.asarray(_fdd.singular_values)
+                if _sv.ndim == 1:
+                    _sv = _sv[None, :]
+                _bd = _fr <= _fmax
+                D["sv_traces"] = [(f"SV{r+1}", _fr[_bd], 10 * np.log10(np.maximum(_sv[r][_bd], 1e-30)))
+                                  for r in range(min(_sv.shape[0], 4))]
+                st.caption(f"⚡ Recomputed from raw — {min(_sv.shape[0],4)} singular-value curves · live SSI enabled.")
+            except Exception as _e:  # noqa: BLE001
+                st.warning(f"Raw recompute failed: {type(_e).__name__}")
+        else:
+            st.warning("Could not download the raw data for this run.")
 
 # --- Modos manuales (peak-picking en la web) — se fusionan con los automáticos.
 #     Los automáticos (FDD) quedan protegidos; sólo los manuales se pueden quitar. ---
