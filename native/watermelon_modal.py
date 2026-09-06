@@ -51,7 +51,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.29"
+__version__ = "0.9.30"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -675,7 +675,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
     scbar.addWidget(cb_scsrc)
     btn_scstart = QtWidgets.QPushButton("▶ Start live"); btn_scstart.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
     btn_scstop = QtWidgets.QPushButton("⏹ Stop")
-    scbar.addWidget(btn_scstart); scbar.addWidget(btn_scstop)
+    btn_scsnap = QtWidgets.QPushButton("📸 Save as verification record")
+    btn_scsnap.setToolTip("Save this sensor check (waveforms + status) as proof the sensors are OK — "
+                          "it goes into the preliminary and final report.")
+    scbar.addWidget(btn_scstart); scbar.addWidget(btn_scstop); scbar.addWidget(btn_scsnap)
     scl.addLayout(scbar)
     scsplit = QtWidgets.QHBoxLayout()
     p_scope = pg.PlotWidget(); p_scope.setBackground("w"); p_scope.setMenuEnabled(False)
@@ -854,6 +857,23 @@ def build_app(layout: OMALayout, simulated: bool = True):
             it = tbl_sc.item(i, 3); it.setText(stt); it.setForeground(QtGui.QColor(scol))
     st["_sc"]["timer"].timeout.connect(_sc_tick)
     btn_scstart.clicked.connect(_sc_start); btn_scstop.clicked.connect(_sc_stop)
+
+    def _sc_snapshot():
+        sc = st["_sc"]
+        if not sc.get("names"):
+            QtWidgets.QMessageBox.information(win, "Sensor check", "Start the live check first."); return
+        import datetime as _dt
+        buf = QtCore.QBuffer(); buf.open(QtCore.QIODevice.WriteOnly)
+        p_scope.grab().save(buf, "PNG"); png = bytes(buf.data())
+        rows = []
+        for i in range(tbl_sc.rowCount()):
+            rows.append([tbl_sc.item(i, j).text() if tbl_sc.item(i, j) else "" for j in range(4)])
+        n_ok = sum(1 for r in rows if r[3].startswith("OK") or "responding" in r[3])
+        st["_sc_record"] = {"png": png, "rows": rows, "ts": _dt.datetime.now().isoformat(timespec="seconds"),
+                            "n_ok": n_ok, "n_total": len(rows), "live": bool(sc.get("live"))}
+        lbl_sc.setText(f"✅ Verification record saved ({n_ok}/{len(rows)} channels OK) — "
+                       "it will appear in the report.")
+    btn_scsnap.clicked.connect(_sc_snapshot)
 
     # =====================================================================
     # Config helpers
@@ -1416,10 +1436,31 @@ def build_app(layout: OMALayout, simulated: bool = True):
         secs = min(float(lay.duration_s), 60.0); N = int(secs * fs); rng = st["rng"]
         live = cb_src.currentIndex() == 1
         data = None
+        # --- Popup de progreso de la captura (muestras, tiempo, MB, restante) ---
+        total = int(secs * fs)
+        dlg = QtWidgets.QDialog(win); dlg.setWindowTitle("Acquisition"); dlg.setMinimumWidth(460)
+        _dv = QtWidgets.QVBoxLayout(dlg)
+        _dh = QtWidgets.QLabel(f"<b>{'LIVE — ' + DAQ_NAME if live else 'Simulated'}</b> · "
+                               f"{nch} channels · fs {fs:.0f} Hz · target {secs:.0f} s / {total:,} samples")
+        _dh.setTextFormat(QtCore.Qt.RichText); _dv.addWidget(_dh)
+        _bar = QtWidgets.QProgressBar(); _bar.setRange(0, 100); _dv.addWidget(_bar)
+        _dst = QtWidgets.QLabel("Starting…"); _dst.setStyleSheet("color:#334155;"); _dv.addWidget(_dst)
+        _dbtn = QtWidgets.QPushButton("Close"); _dbtn.setEnabled(False); _dbtn.clicked.connect(dlg.accept)
+        _dv.addWidget(_dbtn, alignment=QtCore.Qt.AlignRight)
+        dlg.setModal(True); dlg.show(); QtWidgets.QApplication.processEvents()
+
+        def _cap_progress(frac, text):
+            frac = max(0.0, min(1.0, float(frac))); _bar.setValue(int(frac * 100))
+            smp = int(frac * total); tsec = frac * secs; rem = max(0.0, secs - tsec)
+            mb = smp * nch * 4 / 1e6
+            _dst.setText(f"Samples: {smp:,} / {total:,} · {tsec:.1f}/{secs:.0f} s · "
+                         f"remaining {rem:.1f} s · {mb:.1f} MB")
+            QtWidgets.QApplication.processEvents()
+
         if live:                                        # captura REAL con hardware (con fallback)
-            lbl_ost.setText(f"Conectando con {DAQ_NAME}…"); QtWidgets.QApplication.processEvents()
+            _dst.setText(f"Connecting to {DAQ_NAME}…"); QtWidgets.QApplication.processEvents()
             try:
-                data, fs = _capture_ni(lay, secs)
+                data, fs = _capture_ni(lay, secs, on_progress=_cap_progress)
                 msg = f"{DAQ_NAME}: {data.shape[0]} muestras · {data.shape[1]} canales"
                 _trpm = st.get("_tach_rpm")
                 if _trpm:                              # keyphasor → RPM exacta para Campbell/armónicos
@@ -1427,12 +1468,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     msg += f" · tach: {_trpm:.0f} RPM"
                 lbl_ost.setText(msg)
             except Exception as e:  # noqa: BLE001
-                QtWidgets.QMessageBox.warning(win, DAQ_NAME,
-                    f"No acquisition / capture failed → using simulated.\n\n{type(e).__name__}: {e}")
+                _dst.setText(f"No acquisition → simulated ({type(e).__name__})")
                 data = None
         if data is None:                                # simulado
-            lbl_ost.setText(f"Capturing {secs:.0f}s @ {fs:.0f}Hz · {nch} channels (simulated)…")
-            QtWidgets.QApplication.processEvents()
+            _cap_progress(0.15, "Simulating…")
             data = np.zeros((N, nch))
             for sm in DEMO_MODES:
                 fn, z = sm.fn_hz, sm.zeta
@@ -1440,6 +1479,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 q = lfilter([1.0], [1.0, -2 * r * np.cos(th), r * r], rng.standard_normal(N)); q /= (np.std(q) or 1)
                 data += np.outer(q, rng.standard_normal(nch))
             data += 0.05 * rng.standard_normal((N, nch))
+            _cap_progress(0.9, "Simulated data ready")
+        _mb = data.shape[0] * data.shape[1] * 4 / 1e6
+        _dst.setText("Processing FDD…"); _bar.setValue(95); QtWidgets.QApplication.processEvents()
         st["oma_data"] = (data, float(fs))              # guardado para SSI / upload
         st["_run_saved"] = False                        # nueva corrida → aún sin guardar
         fmax = min(fs / 2.56, lay.fmax_hz)
@@ -1459,6 +1501,13 @@ def build_app(layout: OMALayout, simulated: bool = True):
         lbl_ost.setText(f"✅ FDD done — {len(fdd.modes)} modes. Click a peak to add · click a marker to remove.")
         lbl_ost.setStyleSheet(f"color:{GREEN};font-weight:700;")
         _refresh_validation(); _refresh_campbell(); _refresh_comparative()
+        # --- Cierre del popup: data finalizada, habilita Close ---
+        _bar.setValue(100)
+        _dst.setText(f"✅ Data finished · {data.shape[0]:,} samples × {data.shape[1]} ch · "
+                     f"{data.shape[0]/fs:.1f} s · {_mb:.1f} MB · {len(fdd.modes)} modes")
+        _dst.setStyleSheet(f"color:{GREEN}; font-weight:700;")
+        _dbtn.setEnabled(True); _dbtn.setDefault(True)
+        dlg.exec()
 
     def _refresh_validation():
         """Llena la tabla ÚNICA de OMA: modos + veredicto automático + notas."""
@@ -1486,8 +1535,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 tbl_om.setItem(r, c, it)
         lbl_omasum.setText(_mv_sum(verdicts))
 
-    def _capture_ni(lay, secs):
-        """Captura REAL continua desde la NI 9234 (IEPE). Lanza excepción si no hay HW."""
+    def _capture_ni(lay, secs, on_progress=None):
+        """Captura REAL continua desde el DAQ (IEPE/AC). Lanza excepción si no hay HW."""
         import tempfile
         from core.modal.acq_backend import (AcquisitionConfig, ChannelConfig, capture,
                                             list_available_devices)
@@ -1524,7 +1573,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         cfg = AcquisitionConfig(mode="oma_continuous", sample_rate_hz=lay.fs_hz,
                                 duration_s=float(secs), channels=chans, chassis_name=chassis,
                                 output_tdms_path=tmp)
-        path = capture(cfg, lambda *a, **k: None)
+        path = capture(cfg, on_progress or (lambda *a, **k: None))
         tf = TdmsFile.read(str(path)); grp = tf.groups()[0]
         cols = [np.asarray(ch[:], float) for ch in grp.channels()]
         if tach_bnc > 0 and len(cols) == len(chans):
@@ -1571,9 +1620,16 @@ def build_app(layout: OMALayout, simulated: bool = True):
                          "diagram": [[int(o), np.asarray(fr).tolist(),
                                       [bool(x) for x in np.asarray(mk).tolist()]]
                                      for (o, fr, mk) in ssi_res.diagram]}
+        sc_rec = None
+        _scr = st.get("_sc_record")
+        if _scr:
+            import base64 as _b64
+            sc_rec = {"rows": _scr["rows"], "ts": _scr["ts"], "n_ok": _scr["n_ok"],
+                      "n_total": _scr["n_total"], "live": _scr.get("live", False),
+                      "png_b64": _b64.b64encode(_scr["png"]).decode()}
         return {"name": lay.name, "kind": "OMA", "modes": modes, "svd": svd,
                 "channel_names": lay.channel_names(), "running_rpm": lay.running_speed_rpm,
-                "ema_modes": ema, "ema": ema_block, "ssi": ssi_block,
+                "ema_modes": ema, "ema": ema_block, "ssi": ssi_block, "sensor_check": sc_rec,
                 "client": lay.client, "asset": lay.machine_type,
                 "location": lay.location, "layout": lay.to_dict()}
 
@@ -2473,6 +2529,17 @@ def build_app(layout: OMALayout, simulated: bool = True):
         sh, sr = _table_data(tbl_sum)
         sections.append({"title": L("Configuración", "Configuration"), "figures": cfg_figs,
                          "table": {"headers": sh, "rows": sr}})
+        # 1b) Verificación de sensores (si se guardó el registro del Sensor check)
+        _scr = st.get("_sc_record")
+        if _scr:
+            sections.append({
+                "title": L("Verificación de sensórica (en vivo)", "Sensor verification (live)"),
+                "intro": L(f"Registro de verificación: {_scr['n_ok']}/{_scr['n_total']} canales OK "
+                           f"({_scr['ts']}).",
+                           f"Verification record: {_scr['n_ok']}/{_scr['n_total']} channels OK "
+                           f"({_scr['ts']})."),
+                "figures": [(f"{FIG} " + L("Chequeo de sensores en vivo.", "Live sensor check."), _scr["png"])],
+                "table": {"headers": ["Ch", "RMS", "Peak", "Status"], "rows": _scr["rows"]}})
         # 2) EMA (si hay) + OMA densidad espectral
         res = st["acc"].result()
         if "EMA" in lay.test_modes and res is not None:
