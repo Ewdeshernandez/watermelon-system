@@ -1512,8 +1512,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     cams = QtWidgets.QHBoxLayout()
     p_cam = pg.PlotWidget(); p_cam.setBackground("w"); p_cam.setLabel("left", "Frequency", "Hz"); p_cam.setLabel("bottom", "Speed", "RPM")
     p_cam.setTitle("Campbell diagram", color=NAVY); p_cam.showGrid(x=True, y=True, alpha=0.3)
-    tbl_cam = QtWidgets.QTableWidget(0, 5); tbl_cam.setMaximumWidth(520); tbl_cam.verticalHeader().setVisible(False)
-    tbl_cam.setHorizontalHeaderLabels(["Mode", "Order", "RPM", "Margin%", "Status"]); tbl_cam.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    tbl_cam = QtWidgets.QTableWidget(0, 6); tbl_cam.setMaximumWidth(560); tbl_cam.verticalHeader().setVisible(False)
+    tbl_cam.setHorizontalHeaderLabels(["Mode", "Order", "Cross RPM", "Margin%", "Status", "vs speed"]); tbl_cam.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
     cams.addWidget(tbl_cam, 2); cams.addWidget(p_cam, 3); cml.addLayout(cams, 1)
     lbl_cam = QtWidgets.QLabel(""); lbl_cam.setWordWrap(True); cml.addWidget(lbl_cam)
     tabs.addTab(pg_cam, "Campbell")
@@ -1556,7 +1556,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             p_cam.addItem(pg.ScatterPlotItem([c.crossing_rpm], [c.mode_hz], size=12, symbol="x", pen=pg.mkPen(sevcol[c.severity], width=2), brush=pg.mkBrush(sevcol[c.severity])))
             if c.severity in ("coincidence", "near"):
                 r = tbl_cam.rowCount(); tbl_cam.insertRow(r)
-                for j, v in enumerate([f"{c.mode_hz:.2f}", f"{c.order:g}×", f"{c.crossing_rpm:.0f}", f"{c.sep_margin_pct:.1f}", {"coincidence": "Coincidence", "near": "Near"}[c.severity]]):
+                for j, v in enumerate([f"{c.mode_hz:.2f}", f"{c.order:g}×", f"{c.crossing_rpm:.0f}", f"{c.sep_margin_pct:.1f}", {"coincidence": "Coincidence", "near": "Near"}[c.severity], f"{rpm_op:.0f}"]):
                     it = QtWidgets.QTableWidgetItem(v)
                     if j == 4: it.setForeground(QtGui.QBrush(QtGui.QColor(sevcol[c.severity])))
                     tbl_cam.setItem(r, j, it)
@@ -1574,6 +1574,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 if c.severity in ("coincidence", "near"):
                     p_cam.addItem(pg.ScatterPlotItem([c.crossing_rpm], [c.mode_hz], size=13, symbol="d",
                                   pen=pg.mkPen("#7c3aed", width=2), brush=pg.mkBrush(124, 58, 237, 120)))
+                    r = tbl_cam.rowCount(); tbl_cam.insertRow(r)
+                    for j, v in enumerate([f"{c.mode_hz:.2f}", f"{c.order:g}×", f"{c.crossing_rpm:.0f}",
+                                           f"{c.sep_margin_pct:.1f}",
+                                           {"coincidence": "Coincidence", "near": "Near"}[c.severity], f"{rpm2:.0f}"]):
+                        it = QtWidgets.QTableWidgetItem(v)
+                        if j == 4: it.setForeground(QtGui.QBrush(QtGui.QColor("#7c3aed")))
+                        if j == 5: it.setForeground(QtGui.QBrush(QtGui.QColor("#7c3aed")))
+                        tbl_cam.setItem(r, j, it)
         for xb, lab in ((lo, f"−{SM*100:.0f}%\n{lo:.0f}"), (hi, f"+{SM*100:.0f}%\n{hi:.0f}")):
             p_cam.plot([xb, xb], [0, ymax], pen=pg.mkPen(RED, width=1, style=QtCore.Qt.DashLine))
             tt = pg.TextItem(lab, color=RED, anchor=(0.5, 1.0)); tt.setPos(xb, ymax * 0.82); p_cam.addItem(tt)
