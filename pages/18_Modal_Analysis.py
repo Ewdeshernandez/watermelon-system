@@ -390,13 +390,17 @@ lay = D["lay"]; nch = lay.n_channels()
 #     Los automáticos (FDD) quedan protegidos; sólo los manuales se pueden quitar. ---
 _run_key = str(D.get("name", "run"))
 _MANUAL_KEY = f"modal_manual::{_run_key}"
+_EXCL_KEY = f"modal_excluded::{_run_key}"
 _manual_modes = st.session_state.setdefault(_MANUAL_KEY, [])
+_excluded = st.session_state.setdefault(_EXCL_KEY, [])   # fns (round 2) de modos auto deseleccionados
 for _am in D["oma_modes"]:
     _am.setdefault("source", "auto")
 for _mm in _manual_modes:
     _mm.setdefault("source", "manual")
-D["auto_n"] = len(D["oma_modes"])
-D["oma_modes"] = sorted(D["oma_modes"] + list(_manual_modes), key=lambda m: m["fn"])
+D["auto_all"] = list(D["oma_modes"])                     # auto originales (para re-incluir)
+_shown_auto = [m for m in D["auto_all"] if round(m["fn"], 2) not in _excluded]
+D["auto_n"] = len(_shown_auto)
+D["oma_modes"] = sorted(_shown_auto + list(_manual_modes), key=lambda m: m["fn"])
 
 
 def _pick_mode_from_curve(fx, ydb, f_click, win_frac=0.06):
@@ -562,27 +566,36 @@ if nav == T_OMA:
                 fig.add_vline(x=_o * _x1, line=dict(color=AMBER, width=1, dash="dot"))
                 fig.add_annotation(x=_o * _x1, y=1.0, yref="paper", yanchor="bottom",
                                    text=f"{_o}×", showarrow=False, font=dict(size=10, color=AMBER))
-        # marcadores de modos (auto = verde, manual = púrpura)
+        # marcadores: modos incluidos (auto=verde, manual=púrpura) + auto DESELECCIONADOS (gris hueco)
+        def _ynear(fn):
+            j = int(np.argmin(np.abs(_f1 - fn))) if _f1.size else 0
+            return float(_y1[j]) if _y1.size else 0.0
         for m in D["oma_modes"]:
-            j = int(np.argmin(np.abs(_f1 - m["fn"]))) if _f1.size else 0
-            yv = float(_y1[j]) if _y1.size else 0.0
-            _mk = "#7c3aed" if m.get("source") == "manual" else GREEN
+            yv = _ynear(m["fn"])
+            _man = m.get("source") == "manual"
             fig.add_trace(go.Scatter(x=[m["fn"]], y=[yv], mode="markers",
-                          marker=dict(size=11, color=_mk, symbol="diamond" if m.get("source") == "manual" else "circle",
-                                      line=dict(width=1.5, color="white")),
-                          showlegend=False,
-                          hovertemplate=f"<b>{m['fn']:.2f} Hz</b> · ζ {m['zeta']:.2f}%%<extra>"
-                                        f"{'manual' if m.get('source')=='manual' else 'FDD'}</extra>"))
+                          marker=dict(size=13, color=("#7c3aed" if _man else GREEN),
+                                      symbol=("diamond" if _man else "circle"),
+                                      line=dict(width=1.6, color="white")), showlegend=False,
+                          hovertemplate=f"<b>{m['fn']:.2f} Hz</b> · ζ {m['zeta']:.2f}%%  —  click to remove"
+                                        f"<extra>{'manual' if _man else 'FDD'}</extra>"))
             fig.add_annotation(x=m["fn"], y=yv, text=f"<b>{m['fn']:.1f}</b>", showarrow=True,
                                arrowhead=0, arrowcolor="#cbd5e1", ax=0, ay=-24,
                                font=dict(size=10, color=NAVY), bgcolor="rgba(255,255,255,.9)",
                                bordercolor="#e2e8f0", borderpad=2)
+        for m in D["auto_all"]:                       # auto deseleccionados → hueco, re-clic para incluir
+            if round(m["fn"], 2) in _excluded:
+                fig.add_trace(go.Scatter(x=[m["fn"]], y=[_ynear(m["fn"])], mode="markers",
+                              marker=dict(size=12, color="rgba(0,0,0,0)", symbol="circle-open",
+                                          line=dict(width=1.6, color="#94a3b8")), showlegend=False,
+                              hovertemplate=f"<b>{m['fn']:.2f} Hz</b> — excluded · click to include<extra></extra>"))
         fig.update_layout(title=f"Singular values of the spectral density matrix — {max(1, len(D['sv_traces']))} curve(s)",
                           height=470, template="watermelon", dragmode="zoom",
                           xaxis_title="Frequency (Hz)", yaxis_title="Magnitude (dB)")
         _ev = st.plotly_chart(fig, use_container_width=True, key="oma_sv_pick",
                               on_select="rerun", selection_mode="points")
-        # --- clic sobre la curva → agrega el modo del pico más cercano ---
+        # --- clic: cerca de un modo lo QUITA (auto→excluir, manual→borrar);
+        #     cerca de un auto excluido lo RE-INCLUYE; en un pico libre AGREGA ---
         try:
             _pts = (_ev.get("selection", {}) or {}).get("points", []) if _ev else []
         except Exception:  # noqa: BLE001
@@ -591,19 +604,41 @@ if nav == T_OMA:
             _sig = tuple(sorted(round(float(p.get("x", 0)), 2) for p in _pts))
             if st.session_state.get("_oma_last_sig") != _sig:
                 st.session_state["_oma_last_sig"] = _sig
-                _added = 0
+                _dirty = False
                 for p in _pts:
-                    cand = _pick_mode_from_curve(_f1, _y1, float(p.get("x", 0)))
+                    x = float(p.get("x", 0))
+                    tol = max(0.8, 0.012 * max(x, 1.0))
+                    # 1) manual cercano → borrar
+                    _mh = min(_manual_modes, key=lambda e: abs(e["fn"] - x)) if _manual_modes else None
+                    if _mh and abs(_mh["fn"] - x) <= tol:
+                        _manual_modes.remove(_mh); _dirty = True; continue
+                    # 2) auto mostrado cercano → excluir
+                    _sa = [e for e in D["auto_all"] if round(e["fn"], 2) not in _excluded]
+                    _ah = min(_sa, key=lambda e: abs(e["fn"] - x)) if _sa else None
+                    if _ah and abs(_ah["fn"] - x) <= tol:
+                        _excluded.append(round(_ah["fn"], 2)); _dirty = True; continue
+                    # 3) auto excluido cercano → re-incluir
+                    _xa = [e for e in D["auto_all"] if round(e["fn"], 2) in _excluded]
+                    _xh = min(_xa, key=lambda e: abs(e["fn"] - x)) if _xa else None
+                    if _xh and abs(_xh["fn"] - x) <= tol:
+                        _excluded.remove(round(_xh["fn"], 2)); _dirty = True; continue
+                    # 4) pico libre → agregar manual
+                    cand = _pick_mode_from_curve(_f1, _y1, x)
                     if cand and all(abs(cand["fn"] - e["fn"]) > 0.5 for e in D["oma_modes"]):
-                        _manual_modes.append(cand); _added += 1
-                if _added:
+                        _manual_modes.append(cand); _dirty = True
+                if _dirty:
+                    st.session_state[_MANUAL_KEY] = _manual_modes
+                    st.session_state[_EXCL_KEY] = _excluded
                     st.rerun()
-        st.caption("Tip: **click a point on the curve** (or use the box-select) to add a mode at that peak; "
-                   "half-power damping is estimated automatically. Auto (FDD) modes are protected — only "
-                   "manually-added modes can be removed below.")
+        st.caption("**Click a peak** to add a mode · **click a marker** to deselect it "
+                   "(deselected FDD peaks turn hollow — click again to include). "
+                   "Half-power damping is estimated automatically.")
+        if len(D["sv_traces"]) == 1:
+            st.caption("ℹ This run carries a single singular-value curve (SV1 — the combination of all "
+                       "sensors). SV2–SVn, which separate closely-spaced modes, appear with the sample dataset.")
 
-    # --- Agregar modo por frecuencia + quitar manuales (fila de controles compacta) ---
-    cc = st.columns([2, 1, 3])
+    # --- Controles: agregar por frecuencia exacta + reset selección ---
+    cc = st.columns([2, 1, 1, 3])
     with cc[0]:
         _fadd = st.number_input("Add mode at frequency (Hz)", min_value=0.0,
                                 max_value=float(lay.fmax_hz), value=0.0, step=0.5, key="oma_fadd")
@@ -618,24 +653,60 @@ if nav == T_OMA:
             if cand and all(abs(cand["fn"] - e["fn"]) > 0.5 for e in D["oma_modes"]):
                 _manual_modes.append(cand); st.rerun()
     with cc[2]:
-        _rm = [f"{m['fn']:.2f} Hz" for m in _manual_modes]
-        if _rm:
-            _sel = st.multiselect("Remove manual mode(s)", _rm, key="oma_rm")
-            if st.button("🗑 Remove selected", key="oma_rm_btn") and _sel:
-                keep = [m for m in _manual_modes if f"{m['fn']:.2f} Hz" not in _sel]
-                st.session_state[_MANUAL_KEY] = keep
-                st.rerun()
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        if st.button("↺ Reset", use_container_width=True, key="oma_reset",
+                     help="Restore the automatic FDD selection (clears manual & deselected)"):
+            st.session_state[_MANUAL_KEY] = []; st.session_state[_EXCL_KEY] = []
+            st.session_state.pop("_oma_last_sig", None); st.rerun()
 
-    # --- UNA sola tabla consolidada: parámetros modales + veredicto ---
-    def _vlabel(fn):
-        v = _vmap.get(round(fn, 2))
-        return getattr(v, "verdict", "—") if v else "—"
-    st.dataframe([{"#": i + 1, "Freq (Hz)": round(m["fn"], 2), "Damping ζ (%)": round(m["zeta"], 3),
-                   "Complexity (%)": round(m["complexity"], 1),
-                   "Class": m["cls"], "Source": m.get("source", "auto"),
-                   "Validation": _vlabel(m["fn"])}
-                  for i, m in enumerate(D["oma_modes"])],
-                 use_container_width=True, hide_index=True)
+    # --- Tabla consolidada BONITA (marcos, colores, chips) ---
+    def _v_of(fn):
+        return _vmap.get(round(fn, 2))
+    _VCOL = {"validated": ("#16a34a", "#eaf7ef"), "doubtful": ("#b45309", "#fef3e2"),
+             "rejected": ("#dc2626", "#fdeaea")}
+    _VTXT = {"validated": "Validated", "doubtful": "Doubtful", "rejected": "Rejected"}
+    _rows_html = []
+    for i, m in enumerate(D["oma_modes"], 1):
+        v = _v_of(m["fn"]); vk = getattr(v, "verdict", "") if v else ""
+        vc, vb = _VCOL.get(vk, ("#64748b", "#eef2f8"))
+        harm = "  ⚠" if (v and getattr(v, "is_harmonic", False)) else ""
+        _man = m.get("source") == "manual"
+        src_c, src_b, src_t = (("#7c3aed", "#f2ecfd", "Manual") if _man else ("#2563eb", "#e8f0ff", "FDD"))
+        vlabel = (_VTXT.get(vk, "—") + harm) if vk else "—"
+        _rows_html.append(
+            f"<tr>"
+            f"<td class='idx'>{i}</td>"
+            f"<td class='fn'>{m['fn']:.2f}<span class='u'> Hz</span></td>"
+            f"<td class='num'>{m['zeta']:.2f}<span class='u'> %</span></td>"
+            f"<td class='num'>{m['complexity']:.0f}<span class='u'> %</span></td>"
+            f"<td><span class='cls'>{m['cls']}</span></td>"
+            f"<td><span class='badge' style='color:{src_c};background:{src_b}'>{src_t}</span></td>"
+            f"<td><span class='pill' style='color:{vc};background:{vb}'>{vlabel}</span></td>"
+            f"</tr>")
+    _table_html = f"""
+    <style>
+      .wm-modes {{ width:100%; border-collapse:separate; border-spacing:0; font-family:'IBM Plex Sans',sans-serif;
+        border:1px solid #e6ecf5; border-radius:14px; overflow:hidden; box-shadow:0 6px 18px rgba(15,30,61,.06); }}
+      .wm-modes th {{ background:{NAVY}; color:#fff; font-size:11px; font-weight:600; letter-spacing:.04em;
+        text-transform:uppercase; text-align:center; padding:11px 10px; }}
+      .wm-modes td {{ padding:10px 10px; text-align:center; border-top:1px solid #eef2f8; font-size:14px; color:#0f1e3d; }}
+      .wm-modes tr:nth-child(even) td {{ background:#f7fafd; }}
+      .wm-modes tr:hover td {{ background:#eef6ff; }}
+      .wm-modes td.idx {{ color:#94a3b8; font-family:'IBM Plex Mono',monospace; width:38px; }}
+      .wm-modes td.fn {{ font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:15px; }}
+      .wm-modes td.num {{ font-family:'IBM Plex Mono',monospace; }}
+      .wm-modes .u {{ color:#94a3b8; font-size:11px; font-weight:400; }}
+      .wm-modes .cls {{ font-size:12px; color:#475569; }}
+      .wm-modes .badge, .wm-modes .pill {{ padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; white-space:nowrap; }}
+    </style>
+    <table class="wm-modes">
+      <thead><tr><th>#</th><th>Frequency</th><th>Damping ζ</th><th>Complexity</th>
+        <th>Class</th><th>Source</th><th>Validation</th></tr></thead>
+      <tbody>{''.join(_rows_html)}</tbody>
+    </table>"""
+    if D["oma_modes"]:
+        st.markdown(_table_html, unsafe_allow_html=True)
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     if _verd:
         st.info(mv_sum(_verd))
 
