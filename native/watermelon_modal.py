@@ -51,7 +51,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.31"
+__version__ = "0.9.32"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1497,6 +1497,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
         for i in range(sv.shape[0]):
             col = _svcol[i] if i < 4 else "#94a3b8"; wdt = 1.8 if i == 0 else (1.1 if i < 4 else 0.6)
             p_svd.plot(freqs[band], 10 * np.log10(np.maximum(sv[i][band], 1e-30)), pen=pg.mkPen(col, width=wdt), name=(f"SV{i+1}" if i < 4 else None))
+        # el eje X arranca en 0 (que el 0 coincida con el eje Y, sin correrse)
+        _xmax_svd = float(freqs[band].max()) if np.any(band) else 1.0
+        p_svd.setXRange(0, _xmax_svd, padding=0)
+        p_svd.getViewBox().setLimits(xMin=0)
         _draw_svd_markers()
         lbl_ost.setText(f"✅ FDD done — {len(fdd.modes)} modes. Click a peak to add · click a marker to remove.")
         lbl_ost.setStyleSheet(f"color:{GREEN};font-weight:700;")

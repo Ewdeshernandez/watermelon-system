@@ -431,20 +431,16 @@ if _rref and D.get("source") == "cloud" and _rref.get("path"):
             st.warning("Could not download the raw data for this run.")
 
 # --- Modos manuales (peak-picking en la web) — se fusionan con los automáticos.
-#     Los automáticos (FDD) quedan protegidos; sólo los manuales se pueden quitar. ---
+#     Los automáticos (FDD) quedan PROTEGIDOS: sólo se pueden quitar los manuales. ---
 _run_key = str(D.get("name", "run"))
 _MANUAL_KEY = f"modal_manual::{_run_key}"
-_EXCL_KEY = f"modal_excluded::{_run_key}"
 _manual_modes = st.session_state.setdefault(_MANUAL_KEY, [])
-_excluded = st.session_state.setdefault(_EXCL_KEY, [])   # fns (round 2) de modos auto deseleccionados
 for _am in D["oma_modes"]:
     _am.setdefault("source", "auto")
 for _mm in _manual_modes:
     _mm.setdefault("source", "manual")
-D["auto_all"] = list(D["oma_modes"])                     # auto originales (para re-incluir)
-_shown_auto = [m for m in D["auto_all"] if round(m["fn"], 2) not in _excluded]
-D["auto_n"] = len(_shown_auto)
-D["oma_modes"] = sorted(_shown_auto + list(_manual_modes), key=lambda m: m["fn"])
+D["auto_n"] = len(D["oma_modes"])
+D["oma_modes"] = sorted(D["oma_modes"] + list(_manual_modes), key=lambda m: m["fn"])
 
 
 def _pick_mode_from_curve(fx, ydb, f_click, win_frac=0.06):
@@ -614,7 +610,7 @@ if nav == T_OMA:
                 fig.add_vline(x=_o * _x1, line=dict(color=AMBER, width=1, dash="dot"))
                 fig.add_annotation(x=_o * _x1, y=1.0, yref="paper", yanchor="bottom",
                                    text=f"{_o}×", showarrow=False, font=dict(size=10, color=AMBER))
-        # marcadores: modos incluidos (auto=verde, manual=púrpura) + auto DESELECCIONADOS (gris hueco)
+        # marcadores: automáticos (verde, PROTEGIDOS) + manuales (púrpura, removibles)
         def _ynear(fn):
             j = int(np.argmin(np.abs(_f1 - fn))) if _f1.size else 0
             return float(_y1[j]) if _y1.size else 0.0
@@ -625,25 +621,22 @@ if nav == T_OMA:
                           marker=dict(size=13, color=("#7c3aed" if _man else GREEN),
                                       symbol=("diamond" if _man else "circle"),
                                       line=dict(width=1.6, color="white")), showlegend=False,
-                          hovertemplate=f"<b>{m['fn']:.2f} Hz</b> · ζ {m['zeta']:.2f}%%  —  click to remove"
-                                        f"<extra>{'manual' if _man else 'FDD'}</extra>"))
+                          hovertemplate=f"<b>{m['fn']:.2f} Hz</b> · ζ {m['zeta']:.2f}%%"
+                                        + ("  —  click to remove" if _man else " · FDD (protected)")
+                                        + f"<extra>{'manual' if _man else 'FDD'}</extra>"))
             fig.add_annotation(x=m["fn"], y=yv, text=f"<b>{m['fn']:.1f}</b>", showarrow=True,
                                arrowhead=0, arrowcolor="#cbd5e1", ax=0, ay=-24,
                                font=dict(size=10, color=NAVY), bgcolor="rgba(255,255,255,.9)",
                                bordercolor="#e2e8f0", borderpad=2)
-        for m in D["auto_all"]:                       # auto deseleccionados → hueco, re-clic para incluir
-            if round(m["fn"], 2) in _excluded:
-                fig.add_trace(go.Scatter(x=[m["fn"]], y=[_ynear(m["fn"])], mode="markers",
-                              marker=dict(size=12, color="rgba(0,0,0,0)", symbol="circle-open",
-                                          line=dict(width=1.6, color="#94a3b8")), showlegend=False,
-                              hovertemplate=f"<b>{m['fn']:.2f} Hz</b> — excluded · click to include<extra></extra>"))
+        _xmax = float(_f1.max()) if _f1.size else 1.0
         fig.update_layout(title=f"Singular values of the spectral density matrix — {max(1, len(D['sv_traces']))} curve(s)",
                           height=520, template="watermelon", dragmode="zoom", clickmode="event+select",
+                          xaxis=dict(range=[0, _xmax], constrain="domain"),
                           xaxis_title="Frequency (Hz)", yaxis_title="Magnitude (dB)")
         _ev = st.plotly_chart(fig, use_container_width=True, key="oma_sv_pick",
                               on_select="rerun", selection_mode=["points", "box"])
-        # --- clic: cerca de un modo lo QUITA (auto→excluir, manual→borrar);
-        #     cerca de un auto excluido lo RE-INCLUYE; en un pico libre AGREGA ---
+        # --- clic: cerca de un MANUAL lo borra; en un pico libre agrega manual;
+        #     los AUTOMÁTICOS (FDD) están protegidos (clic sobre ellos no hace nada) ---
         try:
             _pts = (_ev.get("selection", {}) or {}).get("points", []) if _ev else []
         except Exception:  # noqa: BLE001
@@ -653,6 +646,7 @@ if nav == T_OMA:
             if st.session_state.get("_oma_last_sig") != _sig:
                 st.session_state["_oma_last_sig"] = _sig
                 _dirty = False
+                _autos = [e for e in D["oma_modes"] if e.get("source") != "manual"]
                 for p in _pts:
                     x = float(p.get("x", 0))
                     tol = max(0.8, 0.012 * max(x, 1.0))
@@ -660,26 +654,18 @@ if nav == T_OMA:
                     _mh = min(_manual_modes, key=lambda e: abs(e["fn"] - x)) if _manual_modes else None
                     if _mh and abs(_mh["fn"] - x) <= tol:
                         _manual_modes.remove(_mh); _dirty = True; continue
-                    # 2) auto mostrado cercano → excluir
-                    _sa = [e for e in D["auto_all"] if round(e["fn"], 2) not in _excluded]
-                    _ah = min(_sa, key=lambda e: abs(e["fn"] - x)) if _sa else None
-                    if _ah and abs(_ah["fn"] - x) <= tol:
-                        _excluded.append(round(_ah["fn"], 2)); _dirty = True; continue
-                    # 3) auto excluido cercano → re-incluir
-                    _xa = [e for e in D["auto_all"] if round(e["fn"], 2) in _excluded]
-                    _xh = min(_xa, key=lambda e: abs(e["fn"] - x)) if _xa else None
-                    if _xh and abs(_xh["fn"] - x) <= tol:
-                        _excluded.remove(round(_xh["fn"], 2)); _dirty = True; continue
-                    # 4) pico libre → agregar manual
+                    # 2) automático cercano → protegido, no hacer nada
+                    if _autos and min(abs(e["fn"] - x) for e in _autos) <= tol:
+                        continue
+                    # 3) pico libre → agregar manual
                     cand = _pick_mode_from_curve(_f1, _y1, x)
                     if cand and all(abs(cand["fn"] - e["fn"]) > 0.5 for e in D["oma_modes"]):
                         _manual_modes.append(cand); _dirty = True
                 if _dirty:
                     st.session_state[_MANUAL_KEY] = _manual_modes
-                    st.session_state[_EXCL_KEY] = _excluded
                     st.rerun()
-        st.caption("**Click a peak** to add a mode · **click a marker** to deselect it "
-                   "(deselected FDD peaks turn hollow — click again to include). "
+        st.caption("**Click a peak** to add a mode (purple) · **click a purple marker** to remove it. "
+                   "The automatic FDD modes (green) are protected. "
                    "Half-power damping is estimated automatically.")
         if len(D["sv_traces"]) == 1:
             st.caption("ℹ This run carries a single singular-value curve (SV1 — the combination of all "
@@ -703,8 +689,8 @@ if nav == T_OMA:
     with cc[2]:
         st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
         if st.button("↺ Reset", use_container_width=True, key="oma_reset",
-                     help="Restore the automatic FDD selection (clears manual & deselected)"):
-            st.session_state[_MANUAL_KEY] = []; st.session_state[_EXCL_KEY] = []
+                     help="Clear all manually-added modes (keeps the automatic FDD modes)"):
+            st.session_state[_MANUAL_KEY] = []
             st.session_state.pop("_oma_last_sig", None); st.rerun()
 
     # --- Tabla consolidada BONITA (marcos, colores, chips) ---
