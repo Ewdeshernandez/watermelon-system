@@ -444,7 +444,7 @@ def self_test_channel(channel: ChannelConfig, sample_rate_hz: float = 5120,
     """
     try:
         import nidaqmx
-        from nidaqmx.constants import AcquisitionType
+        from nidaqmx.constants import AcquisitionType, CurrentExcitSource
     except ImportError as exc:
         raise ImportError("nidaqmx requerido para self_test_channel") from exc
 
@@ -453,11 +453,13 @@ def self_test_channel(channel: ChannelConfig, sample_rate_hz: float = 5120,
 
     with nidaqmx.Task() as task:
         if channel.coupling.upper() == "IEPE":
+            _g = channel.voltage_range * 1000.0 / (channel.sensitivity_mv_per_eu or 100.0)
             task.ai_channels.add_ai_accel_chan(
                 phys_chan,
                 sensitivity=channel.sensitivity_mv_per_eu,
-                max_val=channel.voltage_range,
-                min_val=-channel.voltage_range,
+                max_val=_g, min_val=-_g,
+                current_excit_source=CurrentExcitSource.INTERNAL,
+                current_excit_val=0.002,
             )
         else:
             task.ai_channels.add_ai_voltage_chan(
@@ -569,7 +571,7 @@ def _capture_ema(config: AcquisitionConfig, progress: Callable) -> Path:
     """
     try:
         import nidaqmx
-        from nidaqmx.constants import AcquisitionType
+        from nidaqmx.constants import AcquisitionType, CurrentExcitSource
         import numpy as np
     except ImportError as exc:
         raise ImportError(
@@ -622,9 +624,12 @@ def _capture_ema(config: AcquisitionConfig, progress: Callable) -> Path:
             for ch in config.channels:
                 phys = _build_phys_channel(chassis, ch)
                 if ch.coupling.upper() == "IEPE":
+                    _g = ch.voltage_range * 1000.0 / (ch.sensitivity_mv_per_eu or 100.0)
                     task.ai_channels.add_ai_accel_chan(
                         phys, sensitivity=ch.sensitivity_mv_per_eu,
-                        max_val=ch.voltage_range, min_val=-ch.voltage_range,
+                        max_val=_g, min_val=-_g,
+                        current_excit_source=CurrentExcitSource.INTERNAL,
+                        current_excit_val=0.002,
                     )
                 else:
                     task.ai_channels.add_ai_voltage_chan(
@@ -757,7 +762,7 @@ def _capture_oma(config: AcquisitionConfig, progress: Callable) -> Path:
     """
     try:
         import nidaqmx
-        from nidaqmx.constants import AcquisitionType
+        from nidaqmx.constants import AcquisitionType, CurrentExcitSource
         import numpy as np
         from nptdms import TdmsWriter, ChannelObject, GroupObject, RootObject
     except ImportError as exc:
@@ -801,9 +806,14 @@ def _capture_oma(config: AcquisitionConfig, progress: Callable) -> Path:
         for ch in config.channels:
             phys = _build_phys_channel(chassis, ch)
             if ch.coupling.upper() == "IEPE":
+                # Rango en unidades de ACELERACIÓN (g), no en voltios:
+                #   g_range = Vrange · 1000 / sensibilidad(mV/g)   (ej. 5V·1000/100 = ±50 g)
+                _g = ch.voltage_range * 1000.0 / (ch.sensitivity_mv_per_eu or 100.0)
                 task.ai_channels.add_ai_accel_chan(
                     phys, sensitivity=ch.sensitivity_mv_per_eu,
-                    max_val=ch.voltage_range, min_val=-ch.voltage_range,
+                    max_val=_g, min_val=-_g,
+                    current_excit_source=CurrentExcitSource.INTERNAL,
+                    current_excit_val=0.002,          # NI 9234: IEPE 2 mA
                 )
             else:
                 task.ai_channels.add_ai_voltage_chan(

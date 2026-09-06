@@ -50,7 +50,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.23"
+__version__ = "0.9.24"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1374,13 +1374,16 @@ def build_app(layout: OMALayout, simulated: bool = True):
             return
         if fclick <= 0:
             return
-        # ¿clic cerca de un modo existente? → quitarlo (toggle)
+        # ¿clic cerca de un modo existente? → solo se pueden QUITAR los MANUALES
         near = [m for m in fdd.modes if abs(m.natural_frequency_hz - fclick) <= 1.5]
         if near:
             victim = min(near, key=lambda m: abs(m.natural_frequency_hz - fclick))
+            if round(victim.natural_frequency_hz, 1) not in st.get("_manual_freqs", set()):
+                lbl_ost.setText("🔒 System-identified modes cannot be removed (only manual ones).")
+                return
             fdd.modes.remove(victim)
             st.get("_manual_freqs", set()).discard(round(victim.natural_frequency_hz, 1))
-            lbl_ost.setText(f"✖ Mode removed at {victim.natural_frequency_hz:.2f} Hz.")
+            lbl_ost.setText(f"✖ Manual mode removed at {victim.natural_frequency_hz:.2f} Hz.")
             _draw_svd_markers(); _refresh_validation(); _refresh_campbell(); _refresh_comparative(); _anim_reload_modes()
             return
         # si no, agregar un modo en el pico local
@@ -1425,9 +1428,11 @@ def build_app(layout: OMALayout, simulated: bool = True):
         if not (0 <= row < len(fdd.modes)):
             lbl_ost.setText("Select a mode row in the table first."); return
         victim = fdd.modes[row]          # la tabla está ordenada igual que fdd.modes (por fn)
+        if round(victim.natural_frequency_hz, 1) not in st.get("_manual_freqs", set()):
+            lbl_ost.setText("🔒 System-identified modes cannot be removed (only manual ones)."); return
         fdd.modes.remove(victim)
         st.get("_manual_freqs", set()).discard(round(victim.natural_frequency_hz, 1))
-        lbl_ost.setText(f"✖ Mode removed at {victim.natural_frequency_hz:.2f} Hz.")
+        lbl_ost.setText(f"✖ Manual mode removed at {victim.natural_frequency_hz:.2f} Hz.")
         _draw_svd_markers(); _refresh_validation(); _refresh_campbell(); _refresh_comparative(); _anim_reload_modes()
     btn_delmode.clicked.connect(_remove_selected_mode)
 
@@ -2418,7 +2423,9 @@ def main(argv=None):
     ap.add_argument("--sim", action="store_true", default=True)
     ap.add_argument("--name", default="Motor-Pump train")
     args = ap.parse_args(argv)
-    lay = OMALayout(name=args.name, machine_components=default_components())  # geometry only, no sensors
+    # Arranca EN BLANCO: sin máquina ni sensores. El usuario la crea en Configuration,
+    # la carga (Load local) o —lo recomendado— usa un ⭐ Preset.
+    lay = OMALayout(name=args.name, machine_components=[], points=[])
     try:
         app, win = build_app(lay, simulated=True); win.show(); sys.exit(app.exec())
     except Exception:  # noqa: BLE001

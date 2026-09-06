@@ -82,8 +82,9 @@ def build_preliminary_pdf(
                        spaceBefore=10, spaceAfter=4)
     body = ParagraphStyle("B", parent=ss["BodyText"], fontSize=9.2, leading=13)
     small = ParagraphStyle("S", parent=ss["BodyText"], fontSize=8, textColor=colors.HexColor("#64748b"))
+    from reportlab.lib.enums import TA_CENTER
     cap = ParagraphStyle("C", parent=ss["BodyText"], fontSize=8, textColor=colors.HexColor("#475569"),
-                         spaceBefore=2, spaceAfter=8)
+                         spaceBefore=2, spaceAfter=10, alignment=TA_CENTER)
 
     buf = BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2 * cm, rightMargin=2 * cm,
@@ -95,19 +96,26 @@ def build_preliminary_pdf(
         try:
             im = PILImage.open(BytesIO(raw)); w, h = im.size
             r = min(max_w_cm * cm / w, max_h_cm * cm / h)
-            return Image(BytesIO(raw), width=w * r, height=h * r)
+            img = Image(BytesIO(raw), width=w * r, height=h * r)
+            img.hAlign = "CENTER"          # figuras centradas
+            return img
         except Exception:  # noqa: BLE001
             return None
 
     def _table(headers, rows):
         hh = [Paragraph(f"<b><font color='white'>{h}</font></b>", small) for h in headers]
         data = [hh] + [[Paragraph(str(x), body) for x in row] for row in rows]
-        cw = (16.0 / max(1, len(headers))) * cm
+        cw = (17.0 / max(1, len(headers))) * cm
         t = Table(data, colWidths=[cw] * len(headers), repeatRows=1)
+        t.hAlign = "CENTER"
         t.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(NAVY)),
-                               ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor(GRAY)),
-                               ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f8fafc")]),
-                               ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
+                               ("LINEBELOW", (0, 0), (-1, 0), 1.2, colors.HexColor(GREEN)),
+                               ("LINEBELOW", (0, 1), (-1, -1), 0.25, colors.HexColor("#e2e8f0")),
+                               ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f4f8fc")]),
+                               ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                               ("ALIGN", (1, 1), (-1, -1), "CENTER"),
+                               ("LEFTPADDING", (0, 0), (-1, -1), 6), ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+                               ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
         return t
 
     # ---- Encabezado ----
@@ -127,7 +135,7 @@ def build_preliminary_pdf(
               [T["type"], meta.get("machine_type", ""), T["location"], meta.get("location", "")],
               [T["test"], meta.get("test_type", ""), T["rpm"], f"{meta.get('rpm', '')} RPM"],
               [T["tech"], meta.get("technician", ""), T["rev"], meta.get("reviewer", "")],
-              [T["date"], meta.get("date", ""), T["equip"], meta.get("equipment", "NI 9234 / cDAQ-9178")]]
+              [T["date"], meta.get("date", ""), T["equip"], meta.get("equipment", "Watermelon DAQ")]]
     t = Table([[Paragraph(f"<b>{a}</b>", small), Paragraph(str(b), body),
                 Paragraph(f"<b>{c}</b>", small), Paragraph(str(d), body)] for a, b, c, d in idrows],
               colWidths=[2.6 * cm, 5.4 * cm, 2.6 * cm, 5.4 * cm])
@@ -174,9 +182,9 @@ def build_preliminary_pdf(
         if tab and tab.get("rows"):
             blk.append(_table(tab["headers"], tab["rows"])); blk.append(Spacer(1, 4))
         for capt, png in (sec.get("figures") or []):
-            im = _img(png, 16, 8.5)
+            im = _img(png, 17, 11)                  # figuras más grandes y centradas
             if im is not None:
-                blk.append(im); blk.append(Paragraph(capt, cap))
+                blk.append(Spacer(1, 4)); blk.append(im); blk.append(Paragraph(capt, cap))
         story.append(KeepTogether(blk) if len(blk) <= 3 else blk[0])
         if not (len(blk) <= 3):
             for fl in blk[1:]:
