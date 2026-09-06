@@ -50,7 +50,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.22"
+__version__ = "0.9.23"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -611,8 +611,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_loadlocal = QtWidgets.QPushButton("📂 Load local")
     btn_savecloud = QtWidgets.QPushButton("☁ Save to Watermelon System")
     btn_savecloud.setStyleSheet(f"QPushButton{{background:{GREEN};}} QPushButton:hover{{background:#0e9f6e;}}")
-    btn_loadcloud = QtWidgets.QPushButton("☁ Load from cloud")
-    for b in (btn_preset, btn_savelocal, btn_loadlocal, btn_savecloud, btn_loadcloud):
+    for b in (btn_preset, btn_savelocal, btn_loadlocal, btn_savecloud):
         save_row.addWidget(b)
     save_row.addStretch(1)
     sul.addLayout(save_row)
@@ -1039,7 +1038,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_apply.clicked.connect(_apply_all)
     btn_preset.clicked.connect(_load_preset)
     btn_savelocal.clicked.connect(_save_local); btn_loadlocal.clicked.connect(_load_local)
-    btn_savecloud.clicked.connect(_save_cloud); btn_loadcloud.clicked.connect(_load_cloud)
+    btn_savecloud.clicked.connect(_save_cloud)
 
     _fill_points(); _sync_comp_combo(); _refresh_summary(); _upd_df(); _draw_train(fit=True)
 
@@ -1132,7 +1131,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_ocap = QtWidgets.QPushButton("▶ Capture + FDD"); btn_ocap.setStyleSheet(
         f"QPushButton{{background:{ACC};font-size:14px;padding:10px 20px;}} QPushButton:hover{{background:#1490c2;}}")
     btn_upload = QtWidgets.QPushButton("☁ Upload run to cloud")
-    crow.addWidget(btn_testni); crow.addWidget(btn_ocap); crow.addWidget(btn_upload); crow.addStretch(1); cl2.addLayout(crow)
+    btn_delmode = QtWidgets.QPushButton("✖ Remove selected mode")
+    btn_delmode.setToolTip("Remove the mode selected in the table (or click its marker on the plot).")
+    crow.addWidget(btn_testni); crow.addWidget(btn_ocap); crow.addWidget(btn_upload)
+    crow.addWidget(btn_delmode); crow.addStretch(1); cl2.addLayout(crow)
 
     def _test_ni():
         try:
@@ -1415,6 +1417,20 @@ def build_app(layout: OMALayout, simulated: bool = True):
         _draw_svd_markers(); _refresh_validation(); _refresh_campbell(); _refresh_comparative(); _anim_reload_modes()
     p_svd.scene().sigMouseClicked.connect(_toggle_manual_mode)
 
+    def _remove_selected_mode():
+        fdd = st.get("oma_fdd")
+        if fdd is None or not fdd.modes:
+            return
+        row = tbl_om.currentRow()
+        if not (0 <= row < len(fdd.modes)):
+            lbl_ost.setText("Select a mode row in the table first."); return
+        victim = fdd.modes[row]          # la tabla está ordenada igual que fdd.modes (por fn)
+        fdd.modes.remove(victim)
+        st.get("_manual_freqs", set()).discard(round(victim.natural_frequency_hz, 1))
+        lbl_ost.setText(f"✖ Mode removed at {victim.natural_frequency_hz:.2f} Hz.")
+        _draw_svd_markers(); _refresh_validation(); _refresh_campbell(); _refresh_comparative(); _anim_reload_modes()
+    btn_delmode.clicked.connect(_remove_selected_mode)
+
     # =====================================================================
     # MODES (EMA)
     # =====================================================================
@@ -1645,10 +1661,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
     sp_ascale = QtWidgets.QDoubleSpinBox(); sp_ascale.setRange(0.01, 0.5); sp_ascale.setValue(0.10); sp_ascale.setSingleStep(0.02)
     arow.addWidget(sp_ascale)
     chk_showsen = QtWidgets.QCheckBox("Sensors"); chk_showsen.setChecked(False)
-    chk_ghost = QtWidgets.QCheckBox("Ghost"); chk_ghost.setChecked(True)
-    chk_ghost.setToolTip("Show the undeformed reference outline.")
-    chk_wire = QtWidgets.QCheckBox("Wire"); chk_wire.setChecked(True)
-    chk_wire.setToolTip("Show the deflection mesh (line through the sensors).")
+    chk_ghost = QtWidgets.QCheckBox("Ghost"); chk_ghost.setChecked(False)
+    chk_ghost.setToolTip("Optional: dashed outline of the machine AT REST — to compare rest vs deformed.")
+    chk_wire = QtWidgets.QCheckBox("Wire"); chk_wire.setChecked(False)
+    chk_wire.setToolTip("Optional: deflection mesh (lines through the sensors) — the classic OMA wireframe.")
     arow.addWidget(chk_showsen); arow.addWidget(chk_ghost); arow.addWidget(chk_wire)
     btn_play = QtWidgets.QPushButton("▶ Animate"); btn_play.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
     btn_stop = QtWidgets.QPushButton("⏹ Stop")
@@ -1672,7 +1688,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
     p_anim = pg.PlotWidget(viewBox=OrbitViewBox()); p_anim.setBackground("w"); p_anim.setAspectLocked(True)
     p_anim.hideAxis("left"); p_anim.hideAxis("bottom"); p_anim.setMenuEnabled(False)
     m_anim = Machine3DItem(); p_anim.addItem(m_anim)
-    m_anim.set_show_sensors(chk_showsen.isChecked())     # honra el checkbox desde el inicio
+    m_anim.set_show_sensors(chk_showsen.isChecked())     # honra los checkbox desde el inicio
+    m_anim.set_show_ghost(chk_ghost.isChecked()); m_anim.set_show_wire(chk_wire.isChecked())
     anim_split.addWidget(p_anim, 3)
     right_panel = QtWidgets.QVBoxLayout()
     lbl_modal = QtWidgets.QLabel("Select a mode."); lbl_modal.setTextFormat(QtCore.Qt.RichText)
@@ -2367,6 +2384,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _hin.addStretch(1)
     _hscroll.setWidget(_hinner); hl.addWidget(_hscroll, 1)
     tabs.addTab(pg_help, "Help")
+
+    # Tablas de RESULTADOS = solo lectura (no se pueden editar → credibilidad/seguridad).
+    # La de 'Measurement points' (tbl_pts) sí queda editable: es configuración de entrada.
+    for _rt in (tbl_sum, tbl_om, tbl_modes, tbl_cmp, tbl_cam, tbl_ssi, tbl_qual):
+        _rt.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+        _rt.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
 
     # Orden lógico de pestañas: EMA (impacto → modos) juntos, OMA (captura → SSI)
     # juntos, luego correlación / Campbell / formas / reporte.
