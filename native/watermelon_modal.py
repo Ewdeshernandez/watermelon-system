@@ -50,7 +50,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.20"
+__version__ = "0.9.21"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -169,7 +169,15 @@ class Machine3DItem(pg.GraphicsObject):
         self.disp = None          # desplazamiento animado por punto activo (a lo largo del DOF)
         self.anim = None          # {pts(Nx3), dirs(Nx3), amps(N), mags(N), mmax} → deforma+colorea
         self.show_sensors = True  # mostrar/ocultar marcadores de sensores
+        self.show_ghost = True    # contorno sin deformar (referencia) durante animación
+        self.show_wire = True     # malla de nodos/líneas entre sensores (deflexión)
         self._rect = QtCore.QRectF(-1, -1, 2, 2)
+
+    def set_show_ghost(self, on):
+        self.show_ghost = bool(on); self.update()
+
+    def set_show_wire(self, on):
+        self.show_wire = bool(on); self.update()
 
     def set_view(self, layout, az, el, sel):
         self.layout = layout; self.az = az; self.el = el; self.sel = sel
@@ -209,7 +217,7 @@ class Machine3DItem(pg.GraphicsObject):
             base = QtGui.QColor(c.color) if getattr(c, "color", "") else QtGui.QColor(_comp_color(c.kind))
             for f in _cuboid_faces(c):
                 # en animación cada cara se subdivide en una malla fina (degradé suave)
-                quads = _subdivide_quad(f, 5) if anim is not None else [f]
+                quads = _subdivide_quad(f, 7) if anim is not None else [f]
                 for q in quads:
                     colmag = None
                     if anim is not None:
@@ -242,32 +250,58 @@ class Machine3DItem(pg.GraphicsObject):
             else:
                 pen = QtGui.QPen(QtGui.QColor("#1e293b")); pen.setCosmetic(True); pen.setWidthF(0.8)
             painter.setPen(pen); painter.drawPolygon(poly)
-        ai = -1
+
+        # (a) FANTASMA: contorno sin deformar (referencia) durante la animación
+        if anim is not None and self.show_ghost:
+            gpen = QtGui.QPen(QtGui.QColor(100, 116, 139, 130)); gpen.setCosmetic(True)
+            gpen.setWidthF(0.9); gpen.setStyle(QtCore.Qt.DashLine)
+            painter.setPen(gpen); painter.setBrush(QtCore.Qt.NoBrush)
+            for c in self.layout.machine_components:
+                for f in _cuboid_faces(c):
+                    pwg = [_project(*p, self.az, self.el) for p in f]
+                    painter.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(p[0], p[1]) for p in pwg]))
+
+        # posiciones DEFORMADAS de los sensores (para malla + marcadores)
+        nodes = []; ai = -1
         for i, mp in enumerate(self.layout.points):
             if not mp.active:
                 continue
             ai += 1
-            if not self.show_sensors:                    # animación: solo la pieza en movimiento
-                continue
-            wy = 0.20
-            d = _AXIS_DIR.get(mp.axis, (0, 0, 1))
-            sg = -1.0 if mp.dof.startswith("-") else 1.0
-            # desplazamiento animado de la forma modal (a lo largo del DOF)
-            dd = 0.0
-            if self.disp is not None and ai < len(self.disp):
-                dd = float(self.disp[ai])
-            px = mp.x_norm + sg * dd * d[0]; py = wy + sg * dd * d[1]; pz = mp.y_norm + sg * dd * d[2]
+            d = _AXIS_DIR.get(mp.axis, (0, 0, 1)); sg = -1.0 if mp.dof.startswith("-") else 1.0
+            dd = float(self.disp[ai]) if (self.disp is not None and ai < len(self.disp)) else 0.0
+            px = mp.x_norm + sg * dd * d[0]; py = 0.20 + sg * dd * d[1]; pz = mp.y_norm + sg * dd * d[2]
             sx, sy, _ = _project(px, py, pz, self.az, self.el)
-            tx, ty, _ = _project(px + sg * 0.09 * d[0], py + sg * 0.09 * d[1],
-                                 pz + sg * 0.09 * d[2], self.az, self.el)
-            arrow = QtGui.QPen(QtGui.QColor(GREEN)); arrow.setCosmetic(True); arrow.setWidthF(2.2)
-            painter.setPen(arrow); painter.drawLine(QtCore.QPointF(sx, sy), QtCore.QPointF(tx, ty))
-            col = QtGui.QColor(_comp_color(mp.component))
-            r = 0.018 if i == self.sel else (0.014 if mp.reference_sensor else 0.010)
-            painter.setBrush(QtGui.QBrush(col))
-            pen = QtGui.QPen(QtGui.QColor(RED if i == self.sel else "#ffffff"))
-            pen.setCosmetic(True); pen.setWidthF(2.0 if i == self.sel else 1.2); painter.setPen(pen)
-            painter.drawEllipse(QtCore.QPointF(sx, sy), r, r)
+            nodes.append((mp.x_norm, mp.y_norm, sx, sy, i, mp, px, py, pz, sg, d))
+
+        # (b) MALLA de deflexión: una línea por componente (evita cruces largos)
+        if anim is not None and self.show_wire and len(nodes) >= 2:
+            wpen = QtGui.QPen(QtGui.QColor("#1d4ed8")); wpen.setCosmetic(True); wpen.setWidthF(1.6)
+            groups = {}
+            for t in nodes:
+                groups.setdefault(t[5].component, []).append(t)
+            for grp in groups.values():
+                grp.sort(key=lambda t: (t[0], t[1]))     # por x, luego altura
+                painter.setPen(wpen); painter.setBrush(QtCore.Qt.NoBrush)
+                if len(grp) >= 2:
+                    painter.drawPolyline(QtGui.QPolygonF([QtCore.QPointF(t[2], t[3]) for t in grp]))
+            painter.setBrush(QtGui.QBrush(QtGui.QColor("#1d4ed8")))
+            painter.setPen(QtGui.QPen(QtGui.QColor("#ffffff"), 0))
+            for t in nodes:
+                painter.drawEllipse(QtCore.QPointF(t[2], t[3]), 0.006, 0.006)
+
+        # marcadores + flechas de DOF (solo si show_sensors)
+        if self.show_sensors:
+            for (_xn, _yn, sx, sy, i, mp, px, py, pz, sg, d) in nodes:
+                tx, ty, _ = _project(px + sg * 0.09 * d[0], py + sg * 0.09 * d[1],
+                                     pz + sg * 0.09 * d[2], self.az, self.el)
+                arrow = QtGui.QPen(QtGui.QColor(GREEN)); arrow.setCosmetic(True); arrow.setWidthF(2.2)
+                painter.setPen(arrow); painter.drawLine(QtCore.QPointF(sx, sy), QtCore.QPointF(tx, ty))
+                col = QtGui.QColor(_comp_color(mp.component))
+                r = 0.018 if i == self.sel else (0.014 if mp.reference_sensor else 0.010)
+                painter.setBrush(QtGui.QBrush(col))
+                pen = QtGui.QPen(QtGui.QColor(RED if i == self.sel else "#ffffff"))
+                pen.setCosmetic(True); pen.setWidthF(2.0 if i == self.sel else 1.2); painter.setPen(pen)
+                painter.drawEllipse(QtCore.QPointF(sx, sy), r, r)
 
 
 class OrbitViewBox(pg.ViewBox):
@@ -1577,8 +1611,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
     arow.addWidget(QtWidgets.QLabel("Scale:"))
     sp_ascale = QtWidgets.QDoubleSpinBox(); sp_ascale.setRange(0.01, 0.5); sp_ascale.setValue(0.10); sp_ascale.setSingleStep(0.02)
     arow.addWidget(sp_ascale)
-    chk_showsen = QtWidgets.QCheckBox("Show sensors"); chk_showsen.setChecked(False)
-    arow.addWidget(chk_showsen)
+    chk_showsen = QtWidgets.QCheckBox("Sensors"); chk_showsen.setChecked(False)
+    chk_ghost = QtWidgets.QCheckBox("Ghost"); chk_ghost.setChecked(True)
+    chk_ghost.setToolTip("Show the undeformed reference outline.")
+    chk_wire = QtWidgets.QCheckBox("Wire"); chk_wire.setChecked(True)
+    chk_wire.setToolTip("Show the deflection mesh (line through the sensors).")
+    arow.addWidget(chk_showsen); arow.addWidget(chk_ghost); arow.addWidget(chk_wire)
     btn_play = QtWidgets.QPushButton("▶ Animate"); btn_play.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
     btn_stop = QtWidgets.QPushButton("⏹ Stop")
     arow.addWidget(btn_play); arow.addWidget(btn_stop)
@@ -1616,7 +1654,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _rp_w = QtWidgets.QWidget(); _rp_w.setLayout(right_panel); _rp_w.setMaximumWidth(360)
     anim_split.addWidget(_rp_w)
     anl.addLayout(anim_split, 1)
-    _cbar = QtWidgets.QLabel("low  ·  vibration amplitude  ·  high")
+    _cbar = QtWidgets.QLabel("0 %   ·   relative modal amplitude   ·   100 %")
     _cbar.setAlignment(QtCore.Qt.AlignCenter); _cbar.setFixedHeight(22)
     _cbar.setStyleSheet("color:white; font-weight:700; border-radius:5px; padding:2px;"
                         "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
@@ -1791,6 +1829,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
         except Exception:  # noqa: BLE001
             pass
     chk_showsen.toggled.connect(lambda on: m_anim.set_show_sensors(on))
+    chk_ghost.toggled.connect(lambda on: m_anim.set_show_ghost(on))
+    chk_wire.toggled.connect(lambda on: m_anim.set_show_wire(on))
 
     def _anim_stop():
         anim_timer.stop(); m_anim.set_disp(None); m_anim.set_anim(None)
