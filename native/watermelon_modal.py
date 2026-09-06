@@ -51,7 +51,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.32"
+__version__ = "0.9.33"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -419,6 +419,26 @@ def build_app(layout: OMALayout, simulated: bool = True):
     ver_lbl = QtWidgets.QLabel(f"v{__version__}")
     ver_lbl.setStyleSheet("color:#94a3b8; font-weight:700; font-size:12px; padding-left:8px;")
     ver_lbl.setToolTip("Watermelon Modal software version"); tb.addWidget(ver_lbl)
+    btn_upd = QtWidgets.QToolButton(); btn_upd.setText("⟳ Update")
+    btn_upd.setStyleSheet("QToolButton{color:#cbd5e1;background:transparent;border:1px solid #334155;"
+                          "border-radius:6px;padding:2px 8px;font-size:11px;margin-left:8px;}"
+                          "QToolButton:hover{color:#fff;border-color:#16a34a;}")
+    btn_upd.setToolTip("Buscar actualización ahora")
+
+    def _manual_check():
+        try:
+            from core.modal.updater import diagnose
+            btn_upd.setEnabled(False); btn_upd.setText("⟳ …"); QtWidgets.QApplication.processEvents()
+            info, msg = diagnose(__version__)
+            btn_upd.setEnabled(True); btn_upd.setText("⟳ Update")
+            if info:
+                _show_update_banner(win, info)
+            else:
+                QtWidgets.QMessageBox.information(win, "Actualización", msg)
+        except Exception as e:  # noqa: BLE001
+            btn_upd.setEnabled(True); btn_upd.setText("⟳ Update")
+            QtWidgets.QMessageBox.warning(win, "Actualización", f"{type(e).__name__}: {e}")
+    btn_upd.clicked.connect(_manual_check); tb.addWidget(btn_upd)
     spc = QtWidgets.QWidget(); spc.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     tb.addWidget(spc)
     # ¿Hay una NI 9234 conectada AHORA? Autodetecta al arrancar (no depende de --sim).

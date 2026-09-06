@@ -66,6 +66,28 @@ def check_for_update(current_version: str, timeout: float = 6.0) -> Optional[Dic
             "setup_url": setup_url, "zip_url": zip_url, "html_url": rel.get("html_url", "")}
 
 
+def diagnose(current_version: str, timeout: float = 6.0):
+    """Chequeo MANUAL con diagnóstico legible (para el botón del campo). Devuelve
+    (info_or_None, mensaje). Sirve para ver por qué no aparece la actualización
+    (red bloqueada, proxy, al día, etc.)."""
+    url = f"https://api.github.com/repos/{REPO}/releases?per_page=10"
+    try:
+        req = urllib.request.Request(url, headers=_UA)
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            code = r.getcode()
+            rels = json.load(r)
+    except Exception as e:  # noqa: BLE001
+        return None, (f"No pude consultar GitHub.\n{type(e).__name__}: {e}\n\n"
+                      f"URL: {url}\n¿La red del PC bloquea github.com o requiere proxy?")
+    tags = [x.get("tag_name") for x in (rels or []) if str(x.get("tag_name", "")).startswith("modal-v")]
+    info = check_for_update(current_version, timeout)
+    if info:
+        return info, (f"Hay una versión más nueva: v{info['version']} (tienes v{current_version}).\n"
+                      f"HTTP {code}. Últimos releases: {', '.join(tags[:5])}")
+    return None, (f"Estás al día (v{current_version}).\nHTTP {code}. "
+                  f"Últimos releases: {', '.join(tags[:5]) or '—'}")
+
+
 def download_file(url: str, dest: Optional[str] = None, timeout: float = 300.0,
                   on_progress=None) -> Optional[str]:
     """Descarga `url` a `dest` (o a temp). Devuelve la ruta local o None."""

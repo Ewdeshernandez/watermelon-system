@@ -59,6 +59,7 @@ jobs:
             --hidden-import core.modal.oma_engine \
             --hidden-import core.modal.acq_backend \
             --hidden-import core.modal.modal_cloud \
+            --hidden-import core.modal.updater \
             --hidden-import core.modal.preliminary_report \
             --hidden-import nptdms \
             --hidden-import reportlab \
