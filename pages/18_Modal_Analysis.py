@@ -577,9 +577,7 @@ if nav == T_MODES:
 
 # ---------------------------------------------------------------- 4 OMA (análisis)
 if nav == T_OMA:
-    _sec("Spectral density (FDD) — modal identification",
-         "All singular value curves · SV1 dominant, SV2–SV4 reveal close modes · "
-         "click the curve to add a mode", "ISO 20816 · Brincker 2001")
+    _sec("Spectral density (FDD)", "", "ISO 20816")
     from core.modal.mode_validation import validate_modes, summarize as mv_sum
     _ssi_freqs = [m["fn"] for m in (D["ssi_cloud"] or {}).get("modes", [])] if D["ssi_cloud"] else []
     _verd = validate_modes(D["oma_modes"], ssi_freqs_hz=_ssi_freqs, running_speed_rpm=D["rpm"]) \
@@ -629,12 +627,13 @@ if nav == T_OMA:
                                font=dict(size=10, color=NAVY), bgcolor="rgba(255,255,255,.9)",
                                bordercolor="#e2e8f0", borderpad=2)
         _xmax = float(_f1.max()) if _f1.size else 1.0
-        fig.update_layout(title=f"Singular values of the spectral density matrix — {max(1, len(D['sv_traces']))} curve(s)",
-                          height=520, template="watermelon", dragmode="zoom", clickmode="event+select",
+        fig.update_layout(title=None, height=540, template="watermelon", dragmode="zoom",
+                          clickmode="event+select", margin=dict(l=62, r=16, t=16, b=52),
                           xaxis=dict(range=[0, _xmax], constrain="domain"),
                           xaxis_title="Frequency (Hz)", yaxis_title="Magnitude (dB)")
         _ev = st.plotly_chart(fig, use_container_width=True, key="oma_sv_pick",
-                              on_select="rerun", selection_mode=["points", "box"])
+                              on_select="rerun", selection_mode=["points", "box"],
+                              config={"displayModeBar": False})
         # --- clic: cerca de un MANUAL lo borra; en un pico libre agrega manual;
         #     los AUTOMÁTICOS (FDD) están protegidos (clic sobre ellos no hace nada) ---
         try:
@@ -664,32 +663,11 @@ if nav == T_OMA:
                 if _dirty:
                     st.session_state[_MANUAL_KEY] = _manual_modes
                     st.rerun()
-        st.caption("**Click a peak** to add a mode (purple) · **click a purple marker** to remove it. "
-                   "The automatic FDD modes (green) are protected. "
-                   "Half-power damping is estimated automatically.")
-        if len(D["sv_traces"]) == 1:
-            st.caption("ℹ This run carries a single singular-value curve (SV1 — the combination of all "
-                       "sensors). SV2–SVn, which separate closely-spaced modes, appear with the sample dataset.")
+        st.caption("Click a peak to add a mode · click a purple marker to remove it.")
 
-    # --- Controles: agregar por frecuencia exacta + reset selección ---
-    cc = st.columns([2, 1, 1, 3])
-    with cc[0]:
-        _fadd = st.number_input("Add mode at frequency (Hz)", min_value=0.0,
-                                max_value=float(lay.fmax_hz), value=0.0, step=0.5, key="oma_fadd")
-    with cc[1]:
-        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-        if st.button("➕ Add", use_container_width=True, key="oma_add_btn") and _fadd > 0:
-            if D["sv_traces"]:
-                cand = _pick_mode_from_curve(D["sv_traces"][0][1], D["sv_traces"][0][2], float(_fadd))
-            else:
-                cand = {"fn": round(float(_fadd), 3), "zeta": 1.0, "complexity": 0.0,
-                        "cls": "manual", "source": "manual"}
-            if cand and all(abs(cand["fn"] - e["fn"]) > 0.5 for e in D["oma_modes"]):
-                _manual_modes.append(cand); st.rerun()
-    with cc[2]:
-        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-        if st.button("↺ Reset", use_container_width=True, key="oma_reset",
-                     help="Clear all manually-added modes (keeps the automatic FDD modes)"):
+    # Un solo control: limpiar los modos manuales (los automáticos no se tocan)
+    if _manual_modes:
+        if st.button(f"↺ Clear {len(_manual_modes)} manual mode(s)", key="oma_reset"):
             st.session_state[_MANUAL_KEY] = []
             st.session_state.pop("_oma_last_sig", None); st.rerun()
 
