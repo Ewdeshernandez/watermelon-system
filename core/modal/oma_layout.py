@@ -458,3 +458,50 @@ def motor_multistage_pump_layout(
     lay.fmax_hz = 800.0
     lay.duration_s = 600.0
     return lay
+
+
+def motor_pump_proximity_layout(
+        name: str = "Motor-Bomba — proximidad (XY)",
+        client: str = "", location: str = "", tag: str = "",
+        running_speed_rpm: float = 3600.0,
+        sensitivity_mv_per_mil: float = 200.0) -> OMALayout:
+    """Tren MOTOR → BOMBA sobre cojinetes planos, con 8 sondas de PROXIMIDAD en
+    pares XY (ortogonales a ±45°) en cada cojinete: Motor LL, Motor LA, Bomba LA,
+    Bomba LL. Mide DESPLAZAMIENTO relativo del eje (mil).
+
+    IMPORTANTE: proximidad NO es IEPE. En el NI 9234 se conecta como AC/voltaje
+    (bias del gap removido) → captura la VIBRACIÓN dinámica del eje (no el gap DC).
+    8 canales → BNC 1..8. Referencias OMA: 1Y (Motor LL Y) y 4Y (Bomba LL Y).
+    """
+    comps = [
+        MachineComponent("Electric motor", "Motor", 0.04, 0.34, 0.00, 0.20, depth=0.12),
+        MachineComponent("Coupling", "Acople", 0.34, 0.40, 0.06, 0.14, depth=0.06),
+        MachineComponent("Multistage pump", "Bomba", 0.40, 0.74, 0.00, 0.17, depth=0.10),
+        MachineComponent("Skid 1", "Skid", 0.00, 0.82, -0.10, 0.00, depth=0.22),
+    ]
+    # (referencia, número, x_norm) — cada cojinete lleva X (+45°) e Y (−45°)
+    plan = [("LL (lado libre)",  1, 0.06, 0.16),
+            ("LA (lado acople)", 2, 0.34, 0.16),
+            ("LA (lado acople)", 3, 0.46, 0.14),
+            ("LL (lado libre)",  4, 0.72, 0.14)]
+    comp_of = {1: "Motor", 2: "Motor", 3: "Bomba", 4: "Bomba"}
+    points: List[MeasPoint] = []
+    n = 0
+    for ref, num, x, y in plan:
+        for ax, xo in (("X", 0.02), ("Y", -0.02)):
+            slot = n // 4 + 1; ch = n % 4
+            is_ref = (num in (1, 4) and ax == "Y")
+            points.append(MeasPoint(
+                idx=n + 1, component=comp_of[num], position_ref=ref, dof=ax,
+                module_slot=slot, channel_index=ch, sensitivity_mv_per_g=sensitivity_mv_per_mil,
+                unit="mil", coupling="AC", number=num, meas_type="D",
+                x_norm=x + xo, y_norm=y, reference_sensor=is_ref))
+            n += 1
+    lay = OMALayout(
+        name=name, machine_type="Motor–bomba, cojinetes planos, sondas de proximidad XY",
+        client=client, location=location, tag=tag,
+        components=["Electric motor", "Coupling", "Multistage pump", "Skid 1"],
+        machine_components=comps, points=points, test_modes=["OMA"], test_type="OMA",
+        running_speed_rpm=running_speed_rpm)
+    lay.fs_hz = 2560.0; lay.block_size = 4096; lay.fmax_hz = 800.0; lay.duration_s = 600.0
+    return lay

@@ -41,16 +41,17 @@ from core.modal.oma_layout import (OMALayout, MeasPoint, MachineComponent, defau
                                     auto_place_by_norm, recommended_acquisition, component_default_box,
                                     is_pipe, COMPONENT_KINDS, POSITION_REFS, DOFS, MEAS_TYPES,
                                     save_layout_local, list_layouts_local, load_layout_local,
-                                    motor_multistage_pump_layout)
+                                    motor_multistage_pump_layout, motor_pump_proximity_layout)
 
 # Presets "de fábrica" (nombre visible → función que arma el OMALayout)
 FACTORY_PRESETS = {
     "Motor + multistage pump (on pedestals) — 17 sensors": motor_multistage_pump_layout,
+    "Motor-pump — 8 proximity probes XY (plain bearings)": motor_pump_proximity_layout,
 }
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.24"
+__version__ = "0.9.25"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1261,9 +1262,17 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     chassis = d["name"]; break
         except Exception:  # noqa: BLE001
             pass
-        chans = [ChannelConfig(name=p.code, coupling="IEPE",
-                               sensitivity_mv_per_eu=p.sensitivity_mv_per_g, bnc_port=p.bnc, units="g")
-                 for p in lay.active_points()]
+        # Proximidad (meas_type='D') → AC/voltaje + mil (NUNCA IEPE sobre una sonda).
+        # Acelerómetro (A) / velocidad (V) → IEPE + g. Seguridad y unidades correctas.
+        def _chan_for(p):
+            if p.meas_type == "D":
+                return ChannelConfig(name=p.code, coupling="AC",
+                                     sensitivity_mv_per_eu=p.sensitivity_mv_per_g,
+                                     bnc_port=p.bnc, units="mil")
+            return ChannelConfig(name=p.code, coupling="IEPE",
+                                 sensitivity_mv_per_eu=p.sensitivity_mv_per_g,
+                                 bnc_port=p.bnc, units="g")
+        chans = [_chan_for(p) for p in lay.active_points()]
         tmp = os.path.join(tempfile.gettempdir(), "wm_modal_oma.tdms")
         cfg = AcquisitionConfig(mode="oma_continuous", sample_rate_hz=lay.fs_hz,
                                 duration_s=float(secs), channels=chans, chassis_name=chassis,

@@ -762,7 +762,7 @@ def _capture_oma(config: AcquisitionConfig, progress: Callable) -> Path:
     """
     try:
         import nidaqmx
-        from nidaqmx.constants import AcquisitionType, CurrentExcitSource
+        from nidaqmx.constants import AcquisitionType, CurrentExcitSource, Coupling
         import numpy as np
         from nptdms import TdmsWriter, ChannelObject, GroupObject, RootObject
     except ImportError as exc:
@@ -816,10 +816,15 @@ def _capture_oma(config: AcquisitionConfig, progress: Callable) -> Path:
                     current_excit_val=0.002,          # NI 9234: IEPE 2 mA
                 )
             else:
-                task.ai_channels.add_ai_voltage_chan(
+                _vc = task.ai_channels.add_ai_voltage_chan(
                     phys, max_val=ch.voltage_range,
                     min_val=-ch.voltage_range,
                 )
+                if ch.coupling.upper() == "AC":     # proximidad: quita el DC del gap (−bias)
+                    try:
+                        _vc.ai_coupling = Coupling.AC
+                    except Exception:  # noqa: BLE001
+                        pass
 
         task.timing.cfg_samp_clk_timing(
             rate=fs,
