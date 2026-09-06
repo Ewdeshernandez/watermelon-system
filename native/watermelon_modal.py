@@ -51,7 +51,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.28"
+__version__ = "0.9.29"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1587,7 +1587,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         if payload is None:
             QtWidgets.QMessageBox.information(win, "Save run", "Run OMA capture first."); return
         try:
-            import json as _json, datetime as _dt, shutil as _shutil
+            import json as _json, datetime as _dt, shutil as _shutil, tempfile
             from core.modal.oma_layout import _slug
             ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
             folder = os.path.join(_runs_dir(), f"{_slug(st['layout'].name)}_{ts}")
