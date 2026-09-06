@@ -49,13 +49,20 @@ import plotly.graph_objects as _go
 _pio.templates["watermelon"] = _go.layout.Template(
     layout=dict(
         font=dict(family="IBM Plex Sans, Segoe UI, Arial", size=13, color="#334155"),
-        title=dict(font=dict(family="IBM Plex Sans", size=15, color=NAVY)),
+        title=dict(font=dict(family="IBM Plex Sans", size=16, color=NAVY), x=0.01, xanchor="left", y=0.97),
         colorway=[BLUE, GREEN, RED, "#7c3aed", AMBER, "#0891b2", "#db2777", SLATE],
-        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#f8fafc",
-        xaxis=dict(gridcolor="#e6ecf5", zerolinecolor="#dbe4f0", linecolor="#cbd5e1", ticks="outside", tickcolor="#cbd5e1"),
-        yaxis=dict(gridcolor="#e6ecf5", zerolinecolor="#dbe4f0", linecolor="#cbd5e1", ticks="outside", tickcolor="#cbd5e1"),
-        margin=dict(l=56, r=20, t=44, b=48),
-        legend=dict(bgcolor="rgba(255,255,255,.7)", bordercolor="#e2e8f0", borderwidth=1),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#fbfcfe",
+        hovermode="x unified", hoverlabel=dict(bgcolor="white", bordercolor="#e2e8f0",
+                                               font=dict(family="IBM Plex Mono", size=12)),
+        xaxis=dict(gridcolor="#eef2f8", zerolinecolor="#dbe4f0", linecolor="#cbd5e1",
+                   ticks="outside", tickcolor="#cbd5e1", ticklen=4,
+                   title=dict(font=dict(size=12, color="#64748b"))),
+        yaxis=dict(gridcolor="#eef2f8", zerolinecolor="#dbe4f0", linecolor="#cbd5e1",
+                   ticks="outside", tickcolor="#cbd5e1", ticklen=4,
+                   title=dict(font=dict(size=12, color="#64748b"))),
+        margin=dict(l=62, r=24, t=48, b=52),
+        legend=dict(bgcolor="rgba(255,255,255,.85)", bordercolor="#e2e8f0", borderwidth=1,
+                    orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     ))
 
 
@@ -373,24 +380,6 @@ else:
 
 lay = D["lay"]; nch = lay.n_channels()
 
-# --- Modo oscuro industrial (opcional) ---
-_dark = st.toggle("🌙 Dark mode", key="wm_dark")
-if _dark:
-    _wt = _pio.templates["watermelon"].layout
-    _wt.plot_bgcolor = "#0f141c"; _wt.font.color = "#cbd5e1"
-    _wt.xaxis.gridcolor = "#243040"; _wt.xaxis.linecolor = "#334155"; _wt.xaxis.tickcolor = "#334155"
-    _wt.yaxis.gridcolor = "#243040"; _wt.yaxis.linecolor = "#334155"; _wt.yaxis.tickcolor = "#334155"
-    _wt.title.font.color = "#eaf0f7"
-    _wt.legend.bgcolor = "rgba(20,27,38,.7)"; _wt.legend.bordercolor = "#243040"
-    st.markdown("""<style>
-      .stApp{ background:#0b0f14; }
-      .block-container, .stMarkdown, p, span, label, h1,h2,h3,h4 { color:#e7edf5 !important; }
-      .wm-kpi{ background:#141b26 !important; border-color:#243040 !important; }
-      .wm-kpi .v{ color:#eaf0f7 !important; } .wm-kpi .l{ color:#94a3b6 !important; }
-      .stTabs [data-baseweb="tab"]{ background:#141b26; color:#c7d2e0; }
-      [data-testid="stDataFrame"]{ filter:invert(.92) hue-rotate(180deg); }
-    </style>""", unsafe_allow_html=True)
-
 # --- Veredicto global (validación automática de modos) para el hero ---
 from core.modal.mode_validation import validate_modes as _vm
 _ssi_f = [m["fn"] for m in (D["ssi_cloud"] or {}).get("modes", [])] if D["ssi_cloud"] else []
@@ -432,7 +421,7 @@ st.markdown(f"""
 
 TABS = ["🟢  Impact test (EMA)", "🟣  Modes (EMA)", "🟡  OMA capture",
         "🟠  SSI (subspace)", "🔴  Comparative", "🟤  Campbell", "⚫  Mode shapes",
-        "📈  Trend / Compare", "🔵  Report"]
+        "🔵  Trend / Compare", "🟢  Report"]
 (tab_ema, tab_modes, tab_oma, tab_ssi, tab_cmp, tab_camp, tab_shapes,
  tab_trend, tab_report) = st.tabs(TABS)
 
@@ -485,14 +474,25 @@ with tab_oma:
     _sec("OMA capture", "Singular values of spectral densities + FDD modes",
          "ISO 20816 · Brincker 2001")
     if D["sv_traces"]:
-        fig = go.Figure(); palette = [BLUE, RED, GREEN, "#9ca3af"]
+        fig = go.Figure(); palette = [BLUE, "#dc2626", GREEN, "#94a3b8"]
         for r, (label, fx, ydb) in enumerate(D["sv_traces"]):
-            fig.add_trace(go.Scatter(x=fx, y=ydb, line=dict(color=palette[r % 4],
-                          width=1.6 if r == 0 else 1), name=label))
+            fig.add_trace(go.Scatter(x=fx, y=ydb, name=label, mode="lines",
+                          line=dict(color=palette[r % 4], width=2.2 if r == 0 else 1.1),
+                          fill="tozeroy" if r == 0 else None,
+                          fillcolor="rgba(37,99,235,.06)" if r == 0 else None,
+                          hovertemplate="%{x:.1f} Hz · %{y:.1f} dB<extra>"+label+"</extra>"))
+        # marcar y ETIQUETAR cada modo sobre SV1
+        _f1, _y1 = D["sv_traces"][0][1], D["sv_traces"][0][2]
         for m in D["oma_modes"]:
-            fig.add_vline(x=m["fn"], line=dict(color=RED, width=1, dash="dot"))
-        fig.update_layout(title="Singular values (all channels)", height=430, template="watermelon",
-                          xaxis_title="Frequency (Hz)", yaxis_title="dB")
+            j = int(np.argmin(np.abs(np.asarray(_f1) - m["fn"]))) if len(_f1) else 0
+            yv = float(_y1[j]) if len(_y1) else 0
+            fig.add_vline(x=m["fn"], line=dict(color="#cbd5e1", width=1, dash="dot"))
+            fig.add_annotation(x=m["fn"], y=yv, text=f"<b>{m['fn']:.1f}</b>", showarrow=True,
+                               arrowhead=0, arrowcolor="#cbd5e1", ax=0, ay=-22,
+                               font=dict(size=11, color=NAVY), bgcolor="rgba(255,255,255,.85)",
+                               bordercolor="#e2e8f0", borderpad=2)
+        fig.update_layout(title="Singular values of spectral densities", height=440,
+                          template="watermelon", xaxis_title="Frequency (Hz)", yaxis_title="Magnitude (dB)")
         st.plotly_chart(fig, use_container_width=True)
     st.dataframe([{"Freq (Hz)": round(m["fn"], 2), "Damping (%)": round(m["zeta"], 3),
                    "Complexity (%)": round(m["complexity"], 1), "Class": m["cls"]}
@@ -607,21 +607,40 @@ with tab_camp:
     if not modes_hz:
         st.info("No modes to plot.")
     else:
-        rpm_op = float(D["rpm"]); rpm_max = rpm_op * 1.3; orders = [1, 2, 3, 4]
+        rpm_op = float(D["rpm"]); rpm_max = rpm_op * 1.35; orders = [0.5, 1, 2, 3, 4, 5, 6, 7, 8]
         bands = [SpeedBand(rpm_op * 0.85, rpm_op * 1.15, "Operating ±15%")]
         crossings = compute_crossings(modes_hz, 0.0, rpm_max, orders=orders, bands=bands)
-        fig = go.Figure(); rpm_axis = np.linspace(0, rpm_max, 60)
-        for o in orders:
-            fig.add_trace(go.Scatter(x=rpm_axis, y=rpm_axis / 60.0 * o, mode="lines", name=f"{o}X"))
-        for fn in modes_hz:
-            fig.add_hline(y=fn, line=dict(color="#334155", width=1, dash="dash"))
-        fig.add_vrect(x0=rpm_op * 0.85, x1=rpm_op * 1.15, fillcolor="#fca5a5", opacity=0.25, line_width=0)
-        fig.add_vline(x=rpm_op, line=dict(color=RED, width=2))
+        ymax = max(modes_hz) * 1.3; fig = go.Figure(); rpm_axis = np.linspace(0, rpm_max, 60)
+        fig.add_vrect(x0=rpm_op * 0.85, x1=rpm_op * 1.15, fillcolor="rgba(220,38,38,.10)",
+                      line_width=0, annotation_text="±15% (API 684)", annotation_position="top left",
+                      annotation_font=dict(size=11, color=RED))
+        for o in orders:                                    # líneas de orden desde el origen
+            fig.add_trace(go.Scatter(x=rpm_axis, y=rpm_axis / 60.0 * o, mode="lines",
+                          line=dict(color="#c7d2e0", width=1, dash="dot"), showlegend=False, hoverinfo="skip"))
+            ly = o * rpm_max / 60.0
+            lx = rpm_max * 0.99 if ly <= ymax else ymax * 60.0 / o
+            fig.add_annotation(x=lx, y=min(ly, ymax), text=f"{o:g}×", showarrow=False,
+                               font=dict(size=10, color="#94a3b8"), xanchor="right", yanchor="bottom")
+        for fn in modes_hz:                                 # frecuencias naturales
+            fig.add_hline(y=fn, line=dict(color="#334155", width=1.2, dash="dash"))
+        fig.add_vline(x=rpm_op, line=dict(color=NAVY, width=2.5))
+        fig.add_annotation(x=rpm_op, y=ymax, text=f"<b>N = {rpm_op:.0f} RPM</b>", showarrow=False,
+                           font=dict(size=11, color=NAVY), yanchor="bottom", bgcolor="rgba(255,255,255,.85)")
+        _seen = {"coincidence": False, "near": False}
+        _sc = {"coincidence": RED, "near": AMBER, "clear": "#cbd5e1"}
+        _sn = {"coincidence": "Coincidence", "near": "Near"}
         for cr in crossings:
-            fig.add_trace(go.Scatter(x=[cr.crossing_rpm], y=[cr.mode_hz], mode="markers", showlegend=False,
-                          marker=dict(color=RED if cr.in_band else AMBER, size=10, symbol="x")))
-        fig.update_layout(title="Campbell — fn (dashed) vs orders; red band = operating ±15%",
-                          height=470, template="watermelon",
+            sev = cr.severity
+            show = sev in _seen and not _seen.get(sev, True)
+            fig.add_trace(go.Scatter(x=[cr.crossing_rpm], y=[cr.mode_hz], mode="markers",
+                          name=_sn.get(sev, ""), legendgroup=sev, showlegend=show,
+                          marker=dict(color=_sc.get(sev, "#cbd5e1"), size=12, symbol="x-thin",
+                                      line=dict(width=2, color=_sc.get(sev, "#cbd5e1"))),
+                          hovertemplate=f"{cr.mode_hz:.1f} Hz · {cr.order:g}× · %{{x:.0f}} RPM<extra></extra>"))
+            if sev in _seen:
+                _seen[sev] = True
+        fig.update_layout(title="Campbell diagram — resonance screening (API 684)",
+                          height=480, template="watermelon", yaxis_range=[0, ymax],
                           xaxis_title="Running speed (RPM)", yaxis_title="Frequency (Hz)")
         st.plotly_chart(fig, use_container_width=True)
         if crossings:
@@ -717,7 +736,7 @@ with tab_report:
                                 bands=[SpeedBand(D["rpm"] * 0.85, D["rpm"] * 1.15, "Op ±15%")])
         _nar = _narrative(lay.name, D["oma_modes"], D["rpm"], _verd, _cx)
         st.markdown(f"<div style='background:#eef6ff;border-left:4px solid {BLUE};border-radius:8px;"
-                    f"padding:12px 16px;margin:6px 0'><b>🧠 Auto-diagnosis</b><br>{_nar}</div>",
+                    f"padding:12px 16px;margin:6px 0'><b>Auto-diagnosis</b><br>{_nar}</div>",
                     unsafe_allow_html=True)
     # --- Registro de verificación de sensores (del campo) ---
     _scr = (D.get("payload") or {}).get("sensor_check")
@@ -734,9 +753,115 @@ with tab_report:
         st.info("Select a field run with identified modes to assemble the report.")
     elif st.button("📄 Generate full report (PDF)", type="primary", key="rep_gen"):
         try:
-            from core.modal.run_report import build_report_from_run
-            with st.spinner("Building the SIGA report (cover · TOC · all sections)…"):
-                pdf = build_report_from_run(D["payload"], bilingual_es=(_lang == "Español"))
+            from core.modal.preliminary_report import build_preliminary_pdf
+            import base64 as _b64m
+            es = (_lang == "Español")
+            _L = (lambda s, e: s if es else e)
+            with st.spinner("Rendering figures and building the report (cover · TOC · mode shapes)…"):
+                def _png(fig, w=1100, h=520):
+                    try:
+                        return fig.to_image(format="png", width=w, height=h, scale=2)
+                    except Exception:  # noqa: BLE001
+                        return None
+                sections = []
+                # 1) Configuration (3D machine)
+                cfg_png = _png(_geometry_fig(lay, height=460), 1100, 520)
+                sections.append({"title": _L("Configuración", "Configuration"),
+                    "figures": [(_L("Figura. Máquina y sensores (3D).", "Figure. Machine & sensors (3D)."), cfg_png)] if cfg_png else [],
+                    "table": {"headers": ["BNC", "Code", "Component", "Ref", "DOF"],
+                              "rows": [[p.bnc, p.code, p.component, p.position_ref, p.dof] for p in lay.active_points()]}})
+                # 2) Sensor verification (si hay)
+                if _scr and _scr.get("png_b64"):
+                    sections.append({"title": _L("Verificación de sensórica", "Sensor verification"),
+                        "intro": _L(f"{_scr.get('n_ok')}/{_scr.get('n_total')} canales OK ({str(_scr.get('ts',''))[:16]}).",
+                                    f"{_scr.get('n_ok')}/{_scr.get('n_total')} channels OK ({str(_scr.get('ts',''))[:16]})."),
+                        "figures": [(_L("Figura. Chequeo de sensores en vivo.", "Figure. Live sensor check."),
+                                     _b64m.b64decode(_scr["png_b64"]))],
+                        "table": {"headers": ["Ch", "RMS", "Peak", "Status"], "rows": _scr.get("rows", [])}})
+                # 3) OMA singular values + modes
+                sv_fig = go.Figure()
+                for r, (label, fx, ydb) in enumerate(D["sv_traces"]):
+                    sv_fig.add_trace(go.Scatter(x=fx, y=ydb, name=label,
+                                     line=dict(color=[BLUE, "#dc2626", GREEN, "#94a3b8"][r % 4], width=2 if r == 0 else 1)))
+                for m in D["oma_modes"]:
+                    sv_fig.add_vline(x=m["fn"], line=dict(color="#cbd5e1", width=1, dash="dot"))
+                sv_fig.update_layout(title="Singular values", template="watermelon",
+                                     xaxis_title="Frequency (Hz)", yaxis_title="dB")
+                sections.append({"title": _L("OMA — densidad espectral (FDD)", "OMA — spectral density (FDD)"),
+                    "figures": [(_L("Figura. Valores singulares.", "Figure. Singular values."), _png(sv_fig))] if D["sv_traces"] else [],
+                    "table": {"headers": ["Freq (Hz)", "Damping (%)", "Complex (%)", "Class"],
+                              "rows": [[round(m["fn"], 2), round(m["zeta"], 3), round(m["complexity"], 1), m["cls"]] for m in D["oma_modes"]]}})
+                # 4) Campbell
+                _mh = [m["fn"] for m in D["oma_modes"] if m["cls"] != "spurious"] or [m["fn"] for m in D["oma_modes"]]
+                _cx = compute_crossings(_mh, 0.0, D["rpm"] * 1.35, orders=[0.5, 1, 2, 3, 4, 5, 6, 7, 8],
+                                        bands=[SpeedBand(D["rpm"] * 0.85, D["rpm"] * 1.15, "Op ±15%")])
+                cam = go.Figure(); rr = np.linspace(0, D["rpm"] * 1.35, 60); _ym = max(_mh) * 1.3
+                cam.add_vrect(x0=D["rpm"] * 0.85, x1=D["rpm"] * 1.15, fillcolor="rgba(220,38,38,.10)", line_width=0)
+                for o in [0.5, 1, 2, 3, 4, 5, 6, 7, 8]:
+                    cam.add_trace(go.Scatter(x=rr, y=rr / 60 * o, mode="lines", line=dict(color="#c7d2e0", width=1, dash="dot"), showlegend=False))
+                for fn in _mh:
+                    cam.add_hline(y=fn, line=dict(color="#334155", width=1, dash="dash"))
+                cam.add_vline(x=D["rpm"], line=dict(color=NAVY, width=2.5))
+                for cr in _cx:
+                    if cr.severity in ("coincidence", "near"):
+                        cam.add_trace(go.Scatter(x=[cr.crossing_rpm], y=[cr.mode_hz], mode="markers", showlegend=False,
+                                      marker=dict(color=RED if cr.severity == "coincidence" else AMBER, size=11, symbol="x")))
+                cam.update_layout(title="Campbell (API 684)", template="watermelon", yaxis_range=[0, _ym],
+                                  xaxis_title="Running speed (RPM)", yaxis_title="Frequency (Hz)")
+                sections.append({"title": _L("Campbell — cribado de resonancia (API 684)", "Campbell — resonance screening (API 684)"),
+                    "figures": [(_L("Figura. Diagrama de Campbell.", "Figure. Campbell diagram."), _png(cam))],
+                    "table": {"headers": ["Mode", "fn (Hz)", "Order", "Crossing RPM", "Margin%", "Status"],
+                              "rows": [[c.mode_label, round(c.mode_hz, 2), f"{c.order:g}×", round(c.crossing_rpm, 0),
+                                        round(c.sep_margin_pct, 1),
+                                        {"coincidence": "Coincidence", "near": "Near", "clear": "Clear"}[c.severity]]
+                                       for c in _cx[:12]]}})
+                # 5) Mode shapes (3-4 modos)
+                mfigs = []
+                for i, m in enumerate(D["oma_modes"][:4]):
+                    a = D["shapes"][i] if (D["shapes"] and i < len(D["shapes"]) and D["shapes"][i] is not None) else np.random.default_rng(i + 1).standard_normal(nch)
+                    a = np.abs(np.asarray(a, float)); a = (a - a.min()) / (np.ptp(a) or 1)
+                    p = _png(_geometry_fig(lay, amp=list(a), height=420), 900, 460)
+                    if p:
+                        mfigs.append((_L(f"Figura. Modo {i+1} — {m['fn']:.1f} Hz.", f"Figure. Mode {i+1} — {m['fn']:.1f} Hz."), p))
+                if mfigs:
+                    sections.append({"title": _L("Formas modales", "Mode shapes"), "figures": mfigs})
+                # meta + análisis + hallazgos + recomendaciones
+                nar = _narrative(lay.name, D["oma_modes"], D["rpm"], _verd, _cx)
+                findings = []
+                _ib = [c for c in _cx if c.in_band]
+                if _ib:
+                    findings.append(_L(f"El modo {min(_ib,key=lambda c:c.sep_margin_pct).mode_hz:.1f} Hz cae dentro de ±15% de un orden de giro (riesgo de resonancia).",
+                                       f"The {min(_ib,key=lambda c:c.sep_margin_pct).mode_hz:.1f} Hz mode falls within ±15% of a running-speed order (resonance risk)."))
+                if _drops if '_drops' in dir() else False:
+                    findings.append(_L("Una frecuencia natural bajó ≥3% entre corridas: posible pérdida de rigidez.",
+                                       "A natural frequency dropped ≥3% between runs: possible stiffness loss."))
+                if not findings:
+                    findings.append(_L("Sin coincidencias de resonancia dentro de la banda de operación.",
+                                       "No resonance coincidences within the operating band."))
+                recs = [_L("Correlacionar amplitud/fase de vibración vs velocidad en operación (API 684).",
+                           "Correlate vibration amplitude/phase vs speed in operation (API 684)."),
+                        _L("Si hay modo cerca de 1×/2× con amplitud alta, evaluar rigidización de base/skid.",
+                           "If a mode near 1×/2× shows high amplitude, evaluate base/skid stiffening.")]
+                quality = [(_L("OMA capturado y modos hallados", "OMA captured & modes found"), "GO", f"{len(D['oma_modes'])} modes"),
+                           (_L("Canales activos", "Channels active"), "GO", str(nch)),
+                           (_L("Verificación de sensores", "Sensor verification"),
+                            "GO" if _scr else _L("Pendiente", "Pending"),
+                            f"{_scr.get('n_ok')}/{_scr.get('n_total')} OK" if _scr else "—")]
+                meta = {"title": _L("Reporte Análisis Modal Operacional (OMA)", "Operational Modal Analysis Report (OMA)"),
+                        "asset": lay.tag or lay.name, "client": lay.client, "machine_type": lay.machine_type,
+                        "location": lay.location, "test_type": "OMA", "rpm": int(D["rpm"]),
+                        "verdict": _chip.split(" —")[0]}
+                logo_png = None
+                try:
+                    from pathlib import Path as _P
+                    _lp = _P("assets/watermelon_logo.png")
+                    logo_png = _lp.read_bytes() if _lp.exists() else None
+                except Exception:  # noqa: BLE001
+                    logo_png = None
+                pdf = build_preliminary_pdf(meta=meta, quality=quality, sections=sections,
+                                            analysis=[nar], findings=findings, recommendations=recs,
+                                            photos=[], run_id=D.get("name", ""), logo_png=logo_png,
+                                            lang="es" if es else "en")
             st.session_state["_modal_report_pdf"] = pdf
         except Exception as e:  # noqa: BLE001
             st.error(f"Could not build the report: {type(e).__name__}: {e}")
