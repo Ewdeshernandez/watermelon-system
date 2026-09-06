@@ -77,24 +77,26 @@ def _inject_theme():
     <style>
       @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
       html, body, [class*="css"] { font-family:'IBM Plex Sans',system-ui,sans-serif; }
-      .block-container { padding-top: 1.4rem; max-width: 1200px; }
-      /* Hero */
+      .block-container { padding-top: 0.8rem; max-width: 1200px; }
+      /* espaciado compacto entre widgets superiores (data source, captions) */
+      div[data-testid="stSelectbox"] { margin-bottom: 0; }
+      /* Hero (compacto) */
       .wm-hero { background: linear-gradient(110deg,#0F1E3D 0%,#12325a 55%,#16a34a 160%);
-        border-radius:16px; padding:20px 24px; color:#fff; box-shadow:0 10px 30px rgba(15,30,61,.18);
-        display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; }
-      .wm-hero h1 { font-size:24px; font-weight:700; margin:0 0 4px; letter-spacing:-.01em; }
-      .wm-hero .meta { color:#cbd5e1; font-size:13px; }
-      .wm-chip { font-size:12px; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
-        padding:7px 14px; border-radius:999px; }
+        border-radius:12px; padding:11px 18px; color:#fff; box-shadow:0 6px 18px rgba(15,30,61,.16);
+        display:flex; justify-content:space-between; align-items:center; gap:14px; flex-wrap:wrap; }
+      .wm-hero h1 { font-size:18px; font-weight:700; margin:0 0 2px; letter-spacing:-.01em; }
+      .wm-hero .meta { color:#cbd5e1; font-size:12px; }
+      .wm-chip { font-size:11px; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+        padding:5px 12px; border-radius:999px; }
       .wm-go { background:#16a34a; color:#fff; } .wm-rev { background:#f59e0b; color:#0f1e3d; }
       .wm-nogo { background:#dc2626; color:#fff; }
-      /* KPI cards */
-      .wm-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:14px 0 6px; }
-      .wm-kpi { background:#fff; border:1px solid #e6ecf5; border-radius:14px; padding:14px 16px;
-        box-shadow:0 1px 2px rgba(15,30,61,.04),0 6px 18px rgba(15,30,61,.05); }
-      .wm-kpi .v { font-family:'IBM Plex Mono',monospace; font-size:26px; font-weight:600; color:#0F1E3D; line-height:1.1; }
-      .wm-kpi .l { font-size:12px; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-top:4px; }
-      .wm-kpi .s { font-size:12px; color:#94a3b8; }
+      /* KPI cards (compactas) */
+      .wm-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:8px 0 2px; }
+      .wm-kpi { background:#fff; border:1px solid #e6ecf5; border-radius:11px; padding:8px 13px;
+        box-shadow:0 1px 2px rgba(15,30,61,.04),0 4px 12px rgba(15,30,61,.04); }
+      .wm-kpi .v { font-family:'IBM Plex Mono',monospace; font-size:20px; font-weight:600; color:#0F1E3D; line-height:1.1; }
+      .wm-kpi .l { font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-top:2px; }
+      .wm-kpi .s { font-size:11px; color:#94a3b8; }
       /* Tabs */
       .stTabs [data-baseweb="tab-list"] { gap:4px; }
       .stTabs [data-baseweb="tab"] { background:#eef2f8; border-radius:9px 9px 0 0; padding:8px 14px; font-weight:600; }
@@ -559,6 +561,10 @@ if nav == T_OMA:
                       line=dict(color=BLUE, width=2.4), fill="tozeroy",
                       fillcolor="rgba(37,99,235,.07)",
                       hovertemplate="%{x:.1f} Hz · %{y:.1f} dB<extra>SV1</extra>"))
+        # capa de PUNTOS invisible sobre SV1 → hace clicable toda la curva (para agregar picos)
+        fig.add_trace(go.Scatter(x=_f1, y=_y1, mode="markers", name="pick",
+                      marker=dict(size=9, color="rgba(0,0,0,0)"), showlegend=False,
+                      hovertemplate="%{x:.1f} Hz — click to add<extra></extra>"))
         # 1× y armónicos de la velocidad de operación
         _x1 = D["rpm"] / 60.0
         for _o in (1, 2, 3):
@@ -590,10 +596,10 @@ if nav == T_OMA:
                                           line=dict(width=1.6, color="#94a3b8")), showlegend=False,
                               hovertemplate=f"<b>{m['fn']:.2f} Hz</b> — excluded · click to include<extra></extra>"))
         fig.update_layout(title=f"Singular values of the spectral density matrix — {max(1, len(D['sv_traces']))} curve(s)",
-                          height=470, template="watermelon", dragmode="zoom",
+                          height=520, template="watermelon", dragmode="zoom", clickmode="event+select",
                           xaxis_title="Frequency (Hz)", yaxis_title="Magnitude (dB)")
         _ev = st.plotly_chart(fig, use_container_width=True, key="oma_sv_pick",
-                              on_select="rerun", selection_mode="points")
+                              on_select="rerun", selection_mode=["points", "box"])
         # --- clic: cerca de un modo lo QUITA (auto→excluir, manual→borrar);
         #     cerca de un auto excluido lo RE-INCLUYE; en un pico libre AGREGA ---
         try:
