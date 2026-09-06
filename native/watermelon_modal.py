@@ -50,7 +50,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.19"
+__version__ = "0.9.20"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -378,15 +378,23 @@ def build_app(layout: OMALayout, simulated: bool = True):
             return 0
     ni_channels = _detect_ni_channels()
     hw_present = ni_channels > 0
-    if hw_present:
-        mode_lbl = QtWidgets.QLabel(f"● LIVE — {DAQ_NAME} · {ni_channels} channels   ")
-        mode_lbl.setStyleSheet("color:#34d399; font-weight:700;")
-    else:
-        mode_lbl = QtWidgets.QLabel("● SIMULATED — no acquisition connected   ")
-        mode_lbl.setStyleSheet("color:#fbbf24; font-weight:700;")
-    mode_lbl.setToolTip("Se detecta al abrir el programa. Cada captura usa la fuente "
-                        f"elegida en 'Source' (Simulado / {DAQ_NAME}).")
+    mode_lbl = QtWidgets.QLabel("")
+    mode_lbl.setToolTip("Auto-detected. Updates when you connect/disconnect the unit. "
+                        f"Each capture uses the 'Source' you pick (Simulated / {DAQ_NAME}).")
     tb.addWidget(mode_lbl)
+
+    def _refresh_hw_banner():
+        nonlocal ni_channels, hw_present
+        ni_channels = _detect_ni_channels(); hw_present = ni_channels > 0
+        if hw_present:
+            mode_lbl.setText(f"● LIVE — {DAQ_NAME} · {ni_channels} channels   ")
+            mode_lbl.setStyleSheet("color:#34d399; font-weight:700;")
+        else:
+            mode_lbl.setText("● SIMULATED — no acquisition connected   ")
+            mode_lbl.setStyleSheet("color:#fbbf24; font-weight:700;")
+    _refresh_hw_banner()
+    _hw_timer = QtCore.QTimer(win); _hw_timer.setInterval(5000)   # re-detecta cada 5 s
+    _hw_timer.timeout.connect(_refresh_hw_banner); _hw_timer.start()
 
     tabs = QtWidgets.QTabWidget(); win.setCentralWidget(tabs)
 
@@ -913,7 +921,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     def _recommend_acq():
         _table_to_layout()
         mode = "OMA" if "OMA" in st["layout"].test_modes else "EMA"
-        rec = recommended_acquisition(mode)
+        rec = recommended_acquisition(mode, running_rpm=st["layout"].running_speed_rpm)
         sp_fs.setValue(int(rec["fs_hz"])); cb_blk.setCurrentText(str(rec["block_size"]))
         sp_fmax.setValue(rec["fmax_hz"]); sp_dur.setValue(int(rec["duration_s"])); sp_tgt.setValue(rec["averages"])
         lbl_reco.setText(f"<b>{mode} — recommended:</b> {rec['note']}")
@@ -1118,21 +1126,17 @@ def build_app(layout: OMALayout, simulated: bool = True):
         QtWidgets.QMessageBox.information(win, "Watermelon acquisition", "\n".join(lines))
     btn_testni.clicked.connect(_test_ni)
     ocs = QtWidgets.QHBoxLayout()
-    tbl_om = QtWidgets.QTableWidget(0, 4); tbl_om.setHorizontalHeaderLabels(["Freq (Hz)", "Damping (%)", "Complexity (%)", "Class"])
-    tbl_om.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch); tbl_om.verticalHeader().setVisible(False); tbl_om.setMaximumWidth(520)
+    # Tabla única: modos + validación automática (validado/dudoso/rechazado + notas)
+    tbl_om = QtWidgets.QTableWidget(0, 6)
+    tbl_om.setHorizontalHeaderLabels(["Freq (Hz)", "Damping (%)", "Complex (%)", "Class", "Verdict", "Notes"])
+    tbl_om.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    tbl_om.verticalHeader().setVisible(False); tbl_om.setMinimumWidth(560)
     p_svd = pg.PlotWidget(); p_svd.setBackground("w"); p_svd.setLabel("left", "dB | (1 g)² / Hz"); p_svd.setLabel("bottom", "Frequency", "Hz")
     p_svd.setTitle("Singular values of spectral densities — all channels", color=NAVY); p_svd.showGrid(x=True, y=True, alpha=0.3); p_svd.addLegend(offset=(-10, 10))
-    ocs.addWidget(tbl_om, 2); ocs.addWidget(p_svd, 3); cl2.addLayout(ocs, 1)
-    lbl_ost = QtWidgets.QLabel(""); cl2.addWidget(lbl_ost)
-    # Validación automática de modos (validado / dudoso / rechazado + armónicos)
-    cl2.addWidget(QtWidgets.QLabel("<b>Automatic mode validation</b> "
-                                   "<span style='color:#64748b'>(validated / doubtful / rejected)</span>"))
-    tbl_val = QtWidgets.QTableWidget(0, 6)
-    tbl_val.setHorizontalHeaderLabels(["fn (Hz)", "ζ (%)", "Complex (%)", "Verdict", "SSI/Harm", "Reasons"])
-    tbl_val.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
-    tbl_val.verticalHeader().setVisible(False); tbl_val.setMaximumHeight(180)
-    cl2.addWidget(tbl_val)
-    lbl_val = QtWidgets.QLabel(""); cl2.addWidget(lbl_val)
+    ocs.addWidget(tbl_om, 3); ocs.addWidget(p_svd, 4); cl2.addLayout(ocs, 1)
+    lbl_ost = QtWidgets.QLabel("<i style='color:#64748b'>Tip: click on a peak of the spectral "
+                              "density to add a mode manually.</i>"); cl2.addWidget(lbl_ost)
+    lbl_omasum = QtWidgets.QLabel(""); lbl_omasum.setStyleSheet("color:#334155;"); cl2.addWidget(lbl_omasum)
     tabs.addTab(pg_oc, "OMA capture")
 
     def _oma_capture():
@@ -1164,7 +1168,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
             data += 0.05 * rng.standard_normal((N, nch))
         st["oma_data"] = (data, float(fs))              # guardado para SSI / upload
         fmax = min(fs / 2.56, lay.fmax_hz)
-        fdd = run_oma(data, fs, nperseg=4096, f_min_hz=5.0, f_max_hz=fmax, channel_names=lay.channel_names())
+        _run_hz = (lay.running_speed_rpm or 0.0) / 60.0 or None
+        fdd = run_oma(data, fs, nperseg=4096, f_min_hz=5.0, f_max_hz=fmax,
+                      channel_names=lay.channel_names(), running_speed_hz=_run_hz)
         st["oma_fdd"] = fdd
         freqs = fdd.frequencies_hz; sv = np.asarray(fdd.singular_values)
         if sv.ndim == 1: sv = sv[None, :]
@@ -1178,16 +1184,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
             j = int(np.argmin(np.abs(freqs - m.natural_frequency_hz)))
             p_svd.addItem(pg.ScatterPlotItem([m.natural_frequency_hz], [10 * np.log10(max(sv[0][j], 1e-30))], size=10, symbol="o",
                           pen=pg.mkPen(RED, width=2), brush=pg.mkBrush(255, 255, 255, 0)))
-        tbl_om.setRowCount(0)
-        for m in fdd.modes:
-            rr = tbl_om.rowCount(); tbl_om.insertRow(rr)
-            for c, v in enumerate([f"{m.natural_frequency_hz:.2f}", f"{m.damping_ratio_pct:.3f}", f"{m.complexity_pct:.1f}", m.classification]):
-                tbl_om.setItem(rr, c, QtWidgets.QTableWidgetItem(v))
         lbl_ost.setText(f"✅ FDD done — {len(fdd.modes)} modes. See Comparative (EMA vs OMA) and Campbell.")
-        lbl_ost.setStyleSheet(f"color:{GREEN};font-weight:700;"); _refresh_campbell(); _refresh_comparative()
-        _refresh_validation()
+        lbl_ost.setStyleSheet(f"color:{GREEN};font-weight:700;")
+        _refresh_validation(); _refresh_campbell(); _refresh_comparative()
 
     def _refresh_validation():
+        """Llena la tabla ÚNICA de OMA: modos + veredicto automático + notas."""
         fdd = st.get("oma_fdd")
         if fdd is None:
             return
@@ -1197,18 +1199,20 @@ def build_app(layout: OMALayout, simulated: bool = True):
         verdicts = validate_modes(fdd.modes, ssi_freqs_hz=ssi_freqs,
                                   running_speed_rpm=st["layout"].running_speed_rpm)
         _vc = {"validated": "#16a34a", "doubtful": "#f59e0b", "rejected": "#dc2626"}
-        tbl_val.setRowCount(0)
-        for v in verdicts:
-            r = tbl_val.rowCount(); tbl_val.insertRow(r)
-            flag = ("✓SSI " if v.confirmed_by_ssi else "") + ("⚠Harm" if v.is_harmonic else "")
-            cells = [f"{v.frequency_hz:.2f}", f"{v.damping_ratio_pct:.3f}", f"{v.complexity_pct:.1f}",
-                     v.verdict.capitalize(), flag.strip(), "; ".join(v.reasons)]
+        tbl_om.setRowCount(0)
+        for m, v in zip(fdd.modes, verdicts):
+            r = tbl_om.rowCount(); tbl_om.insertRow(r)
+            notes = "; ".join(v.reasons)
+            if v.confirmed_by_ssi:
+                notes = ("✓SSI · " + notes) if notes else "✓SSI"
+            cells = [f"{m.natural_frequency_hz:.2f}", f"{m.damping_ratio_pct:.3f}",
+                     f"{m.complexity_pct:.1f}", m.classification, v.verdict.capitalize(), notes]
             for c, txt in enumerate(cells):
                 it = QtWidgets.QTableWidgetItem(txt)
-                if c == 3:
+                if c == 4:
                     it.setForeground(QtGui.QColor(_vc.get(v.verdict, "#0f172a")))
-                tbl_val.setItem(r, c, it)
-        lbl_val.setText(_mv_sum(verdicts)); lbl_val.setStyleSheet("color:#334155;")
+                tbl_om.setItem(r, c, it)
+        lbl_omasum.setText(_mv_sum(verdicts))
 
     def _capture_ni(lay, secs):
         """Captura REAL continua desde la NI 9234 (IEPE). Lanza excepción si no hay HW."""
@@ -1303,6 +1307,56 @@ def build_app(layout: OMALayout, simulated: bool = True):
             QtWidgets.QMessageBox.warning(win, "Cloud", f"Upload failed: {type(e).__name__}: {e}")
     btn_ocap.clicked.connect(_oma_capture); btn_upload.clicked.connect(_upload_run)
 
+    def _add_manual_mode(ev):
+        """Clic en la densidad espectral → agrega un modo manual en esa frecuencia."""
+        fdd = st.get("oma_fdd")
+        if fdd is None or ev.button() != QtCore.Qt.LeftButton:
+            return
+        try:
+            pt = p_svd.getViewBox().mapSceneToView(ev.scenePos()); fclick = float(pt.x())
+        except Exception:  # noqa: BLE001
+            return
+        freqs = np.asarray(fdd.frequencies_hz); sv1 = np.asarray(fdd.singular_values)
+        sv1 = sv1[0] if sv1.ndim > 1 else sv1
+        if fclick <= 0 or freqs.size == 0:
+            return
+        win_ = (freqs >= fclick - 2.5) & (freqs <= fclick + 2.5)   # snap al pico local (±2.5 Hz)
+        if not win_.any():
+            return
+        idx = int(np.where(win_)[0][np.argmax(sv1[win_])])
+        fn = float(freqs[idx])
+        if any(abs(m.natural_frequency_hz - fn) < 0.5 for m in fdd.modes):
+            lbl_ost.setText(f"Mode near {fn:.2f} Hz already exists."); return
+        from core.modal.oma_engine import modal_complexity_mpc, classify_mode
+        try:
+            shape = np.asarray(fdd.mode_shapes_at_freq[:, 0, idx], complex)
+        except Exception:  # noqa: BLE001
+            shape = np.zeros(0, complex)
+        # half-power (−3 dB en potencia) alrededor del pico → damping
+        peak = sv1[idx]; half = peak / 2.0
+        lo_i = idx
+        while lo_i > 0 and sv1[lo_i] > half:
+            lo_i -= 1
+        hi_i = idx
+        while hi_i < len(sv1) - 1 and sv1[hi_i] > half:
+            hi_i += 1
+        bw = float(freqs[hi_i] - freqs[lo_i]); zeta = (bw / (2 * fn) * 100.0) if fn > 0 else 0.0
+        cpx = float(modal_complexity_mpc(shape)) if shape.size else 0.0
+        run_hz = (st["layout"].running_speed_rpm or 0.0) / 60.0 or None
+        cls, is_h, ordn = classify_mode(fn, cpx, running_speed_hz=run_hz)
+        from core.modal.oma_engine import OMAMode
+        fdd.modes.append(OMAMode(mode_number=len(fdd.modes) + 1, natural_frequency_hz=fn,
+                                 damping_ratio_pct=zeta, mode_shape=shape,
+                                 singular_value_peak=float(peak), bandwidth_3db_hz=bw,
+                                 is_harmonic=is_h, harmonic_order=ordn, confidence=0.8,
+                                 complexity_pct=cpx, classification=cls))
+        fdd.modes.sort(key=lambda m: m.natural_frequency_hz)
+        p_svd.addItem(pg.ScatterPlotItem([fn], [10 * np.log10(max(peak, 1e-30))], size=13, symbol="t",
+                      pen=pg.mkPen(ACC, width=2), brush=pg.mkBrush(ACC)))
+        lbl_ost.setText(f"✚ Manual mode added at {fn:.2f} Hz (ζ≈{zeta:.2f}%). Re-validated.")
+        _refresh_validation(); _refresh_campbell(); _refresh_comparative(); _anim_reload_modes()
+    p_svd.scene().sigMouseClicked.connect(_add_manual_mode)
+
     # =====================================================================
     # MODES (EMA)
     # =====================================================================
@@ -1368,7 +1422,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # =====================================================================
     pg_cam = QtWidgets.QWidget(); cml = QtWidgets.QVBoxLayout(pg_cam)
     crow2 = QtWidgets.QHBoxLayout(); btn_refc = QtWidgets.QPushButton("↻ Recompute Campbell"); btn_refc.setStyleSheet(f"QPushButton{{background:{ACC};}}")
-    crow2.addWidget(btn_refc); crow2.addWidget(QtWidgets.QLabel("Automatic fn↔order crossings (½×..4×) + operating bands (API 684).")); crow2.addStretch(1); cml.addLayout(crow2)
+    crow2.addWidget(btn_refc)
+    crow2.addWidget(QtWidgets.QLabel("Automatic fn↔order crossings (0.5×..8×) + operating bands (API 684)."))
+    crow2.addSpacing(16)
+    chk_cam2 = QtWidgets.QCheckBox("Compare 2nd speed:")
+    chk_cam2.setToolTip("Overlay a second operating speed to compare (e.g. 3600 vs 3200 RPM). "
+                        "The order lines do NOT move — only the operating speed line/band.")
+    sp_cam2 = QtWidgets.QDoubleSpinBox(); sp_cam2.setRange(0, 60000); sp_cam2.setValue(3200); sp_cam2.setSuffix(" RPM")
+    crow2.addWidget(chk_cam2); crow2.addWidget(sp_cam2); crow2.addStretch(1); cml.addLayout(crow2)
     cams = QtWidgets.QHBoxLayout()
     p_cam = pg.PlotWidget(); p_cam.setBackground("w"); p_cam.setLabel("left", "Frequency", "Hz"); p_cam.setLabel("bottom", "Speed", "RPM")
     p_cam.setTitle("Campbell diagram", color=NAVY); p_cam.showGrid(x=True, y=True, alpha=0.3)
@@ -1388,7 +1449,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
 
     def _refresh_campbell():
         p_cam.clear(); modes = _current_modes(); rpm_op = st["layout"].running_speed_rpm or 1185.0
-        SM = 0.15; lo, hi = rpm_op * (1 - SM), rpm_op * (1 + SM); rpm_max = max(rpm_op * 1.4, 1500.0)
+        rpm2 = float(sp_cam2.value()) if chk_cam2.isChecked() else 0.0
+        SM = 0.15; lo, hi = rpm_op * (1 - SM), rpm_op * (1 + SM)
+        rpm_max = max(rpm_op * 1.4, rpm2 * 1.4, 1500.0)
         if not modes:
             lbl_cam.setText("No modes yet — run OMA capture or identify EMA modes."); tbl_cam.setRowCount(0); return
         ymax = max(modes) * 1.30; orders = (0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0); rpm = np.linspace(0, rpm_max, 60)
@@ -1417,6 +1480,18 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     tbl_cam.setItem(r, j, it)
         p_cam.plot([rpm_op, rpm_op], [0, ymax], pen=pg.mkPen(NAVY, width=3))
         t_op = pg.TextItem(f"N machine\n{rpm_op:.0f} RPM", color=NAVY, anchor=(0.5, 1.0)); t_op.setPos(rpm_op, ymax * 0.995); p_cam.addItem(t_op)
+        if rpm2 > 0:                                  # segunda velocidad de comparación
+            lo2, hi2 = rpm2 * (1 - SM), rpm2 * (1 + SM)
+            reg3 = pg.LinearRegionItem([lo2, hi2], movable=False, brush=pg.mkBrush(124, 58, 237, 30))
+            reg3.setZValue(-20); p_cam.addItem(reg3)
+            p_cam.plot([rpm2, rpm2], [0, ymax], pen=pg.mkPen("#7c3aed", width=3, style=QtCore.Qt.DashLine))
+            t2 = pg.TextItem(f"2nd speed\n{rpm2:.0f} RPM", color="#7c3aed", anchor=(0.5, 1.0)); t2.setPos(rpm2, ymax * 0.90); p_cam.addItem(t2)
+            cx2 = compute_crossings(modes, 0, rpm_max, orders=orders,
+                                    bands=[SpeedBand(rpm2, SM * rpm2, f"2nd {rpm2:.0f}±{SM*100:.0f}%")])
+            for c in cx2:
+                if c.severity in ("coincidence", "near"):
+                    p_cam.addItem(pg.ScatterPlotItem([c.crossing_rpm], [c.mode_hz], size=13, symbol="d",
+                                  pen=pg.mkPen("#7c3aed", width=2), brush=pg.mkBrush(124, 58, 237, 120)))
         for xb, lab in ((lo, f"−{SM*100:.0f}%\n{lo:.0f}"), (hi, f"+{SM*100:.0f}%\n{hi:.0f}")):
             p_cam.plot([xb, xb], [0, ymax], pen=pg.mkPen(RED, width=1, style=QtCore.Qt.DashLine))
             tt = pg.TextItem(lab, color=RED, anchor=(0.5, 1.0)); tt.setPos(xb, ymax * 0.82); p_cam.addItem(tt)
@@ -1427,6 +1502,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
                         f"(zone {lo:.0f}–{hi:.0f} RPM) · <b>{n_coin}</b> coincidence(s) inside the operating "
                         "band. A crossing does not confirm resonance by itself — correlate with amplitude/phase.")
     btn_refc.clicked.connect(_refresh_campbell)
+    chk_cam2.toggled.connect(lambda *_: _refresh_campbell())
+    sp_cam2.editingFinished.connect(lambda *_: (_refresh_campbell() if chk_cam2.isChecked() else None))
 
     # =====================================================================
     # SSI (subspace) — premium: modos con incertidumbre + estabilización
@@ -1539,6 +1616,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _rp_w = QtWidgets.QWidget(); _rp_w.setLayout(right_panel); _rp_w.setMaximumWidth(360)
     anim_split.addWidget(_rp_w)
     anl.addLayout(anim_split, 1)
+    _cbar = QtWidgets.QLabel("low  ·  vibration amplitude  ·  high")
+    _cbar.setAlignment(QtCore.Qt.AlignCenter); _cbar.setFixedHeight(22)
+    _cbar.setStyleSheet("color:white; font-weight:700; border-radius:5px; padding:2px;"
+                        "background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+                        "stop:0 #16a34a, stop:0.5 #f59e0b, stop:1 #dc2626);")
+    anl.addWidget(_cbar)
     tabs.addTab(pg_anim, "Mode shapes")
 
     st["_anim_phase"] = 0.0

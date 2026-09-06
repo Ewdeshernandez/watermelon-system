@@ -77,19 +77,45 @@ def component_default_box(kind: str, x0: float):
 
 
 # Recomendaciones de adquisición por norma (ISO 7626 EMA / ISO 20816 OMA)
-def recommended_acquisition(test_mode: str) -> dict:
-    """Devuelve parámetros recomendados por norma + una nota explicativa."""
+_VALID_FS = [1280.0, 1600.0, 2048.0, 2560.0, 3200.0, 4096.0, 5120.0, 6400.0, 8192.0]
+
+
+def _fs_for_fmax(fmax_hz: float) -> float:
+    """Menor fs 'limpia' que respeta fs ≥ 2.56·Fmax (anti-aliasing)."""
+    need = 2.56 * fmax_hz
+    for fs in _VALID_FS:
+        if fs >= need:
+            return fs
+    return _VALID_FS[-1]
+
+
+def recommended_acquisition(test_mode: str, running_rpm: float = 0.0) -> dict:
+    """Parámetros recomendados por norma, **según la velocidad de giro**.
+
+    La banda (Fmax) se fija para cubrir hasta ~8× la velocidad de operación (los
+    órdenes que exige el screening de Campbell / API 684), con un mínimo de 200 Hz.
+    fs = 2.56·Fmax (anti-aliasing) redondeado a una tasa válida; block para Δf fino.
+    """
+    run_hz = (running_rpm or 0.0) / 60.0
     if (test_mode or "").upper().startswith("EMA"):
-        return {"fs_hz": 2048.0, "block_size": 4096, "fmax_hz": 800.0, "duration_s": 30.0,
+        fmax = 800.0 if run_hz <= 0 else max(400.0, min(2000.0, round(15.0 * run_hz / 50.0) * 50.0))
+        fs = _fs_for_fmax(fmax)
+        return {"fs_hz": fs, "block_size": 4096, "fmax_hz": fmax, "duration_s": 30.0,
                 "window": "force+exp", "averages": 5,
-                "note": ("ISO 7626-5 (martillo): Fmax que cubra los modos de interés, ventana de "
-                         "fuerza + exponencial, 3–5 promedios por punto, coherencia ≥ 0.8 en banda. "
-                         "Δf fino (block grande) para damping.")}
-    return {"fs_hz": 1280.0, "block_size": 4096, "fmax_hz": 200.0, "duration_s": 600.0,
+                "note": (f"ISO 7626-5 (impact): Fmax {fmax:.0f} Hz to cover the modes of interest"
+                         + (f" (~15x running speed {run_hz:.0f} Hz)" if run_hz > 0 else "")
+                         + f"; fs {fs:.0f} Hz; force + exponential windows; 3-5 averages; "
+                         "coherence >= 0.8 in band.")}
+    # OMA
+    fmax = 200.0 if run_hz <= 0 else max(200.0, min(1000.0, round(10.0 * run_hz / 50.0) * 50.0))
+    fs = _fs_for_fmax(fmax)
+    return {"fs_hz": fs, "block_size": 4096, "fmax_hz": fmax, "duration_s": 600.0,
             "window": "hanning", "averages": 1,
-            "note": ("ISO 20816 / OMA (Brincker & Ventura): registro LARGO (≥ 1000–2000 ciclos del "
-                     "modo más bajo, típ. 5–10 min), muestreo simultáneo, Fmax según banda de interés, "
-                     "sin ventana de fuerza (excitación ambiental/operacional).")}
+            "note": ("ISO 20816 / OMA (Brincker & Ventura): LONG record (>= 1000-2000 cycles of the "
+                     "lowest mode, typ. 5-10 min), simultaneous sampling, no force window. "
+                     + (f"Fmax {fmax:.0f} Hz ~= 10x running speed ({run_hz:.0f} Hz) so Campbell "
+                        f"covers up to 8x; fs {fs:.0f} Hz." if run_hz > 0
+                        else f"Fmax {fmax:.0f} Hz (set the running speed for an RPM-based band)."))}
 
 
 @dataclass
