@@ -50,7 +50,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.21"
+__version__ = "0.9.22"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1214,11 +1214,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
         for i in range(sv.shape[0]):
             col = _svcol[i] if i < 4 else "#94a3b8"; wdt = 1.8 if i == 0 else (1.1 if i < 4 else 0.6)
             p_svd.plot(freqs[band], 10 * np.log10(np.maximum(sv[i][band], 1e-30)), pen=pg.mkPen(col, width=wdt), name=(f"SV{i+1}" if i < 4 else None))
-        for m in fdd.modes:
-            j = int(np.argmin(np.abs(freqs - m.natural_frequency_hz)))
-            p_svd.addItem(pg.ScatterPlotItem([m.natural_frequency_hz], [10 * np.log10(max(sv[0][j], 1e-30))], size=10, symbol="o",
-                          pen=pg.mkPen(RED, width=2), brush=pg.mkBrush(255, 255, 255, 0)))
-        lbl_ost.setText(f"✅ FDD done — {len(fdd.modes)} modes. See Comparative (EMA vs OMA) and Campbell.")
+        _draw_svd_markers()
+        lbl_ost.setText(f"✅ FDD done — {len(fdd.modes)} modes. Click a peak to add · click a marker to remove.")
         lbl_ost.setStyleSheet(f"color:{GREEN};font-weight:700;")
         _refresh_validation(); _refresh_campbell(); _refresh_comparative()
 
@@ -1341,8 +1338,31 @@ def build_app(layout: OMALayout, simulated: bool = True):
             QtWidgets.QMessageBox.warning(win, "Cloud", f"Upload failed: {type(e).__name__}: {e}")
     btn_ocap.clicked.connect(_oma_capture); btn_upload.clicked.connect(_upload_run)
 
-    def _add_manual_mode(ev):
-        """Clic en la densidad espectral → agrega un modo manual en esa frecuencia."""
+    def _draw_svd_markers():
+        """(Re)dibuja los marcadores de modos sobre la densidad espectral."""
+        fdd = st.get("oma_fdd")
+        for it in st.get("_svd_markers", []):
+            try:
+                p_svd.removeItem(it)
+            except Exception:  # noqa: BLE001
+                pass
+        st["_svd_markers"] = []
+        if fdd is None:
+            return
+        freqs = np.asarray(fdd.frequencies_hz); sv = np.asarray(fdd.singular_values)
+        sv1 = sv[0] if sv.ndim > 1 else sv
+        man = st.get("_manual_freqs", set())
+        for m in fdd.modes:
+            j = int(np.argmin(np.abs(freqs - m.natural_frequency_hz)))
+            is_man = round(m.natural_frequency_hz, 1) in man
+            it = pg.ScatterPlotItem([m.natural_frequency_hz], [10 * np.log10(max(sv1[j], 1e-30))],
+                    size=13 if is_man else 11, symbol="t" if is_man else "o",
+                    pen=pg.mkPen(ACC if is_man else RED, width=2),
+                    brush=pg.mkBrush(ACC) if is_man else pg.mkBrush(255, 255, 255, 0))
+            p_svd.addItem(it); st["_svd_markers"].append(it)
+
+    def _toggle_manual_mode(ev):
+        """Clic en la densidad espectral: cerca de un modo lo QUITA; en un pico lo AGREGA."""
         fdd = st.get("oma_fdd")
         if fdd is None or ev.button() != QtCore.Qt.LeftButton:
             return
@@ -1350,23 +1370,29 @@ def build_app(layout: OMALayout, simulated: bool = True):
             pt = p_svd.getViewBox().mapSceneToView(ev.scenePos()); fclick = float(pt.x())
         except Exception:  # noqa: BLE001
             return
-        freqs = np.asarray(fdd.frequencies_hz); sv1 = np.asarray(fdd.singular_values)
-        sv1 = sv1[0] if sv1.ndim > 1 else sv1
-        if fclick <= 0 or freqs.size == 0:
+        if fclick <= 0:
             return
-        win_ = (freqs >= fclick - 2.5) & (freqs <= fclick + 2.5)   # snap al pico local (±2.5 Hz)
+        # ¿clic cerca de un modo existente? → quitarlo (toggle)
+        near = [m for m in fdd.modes if abs(m.natural_frequency_hz - fclick) <= 1.5]
+        if near:
+            victim = min(near, key=lambda m: abs(m.natural_frequency_hz - fclick))
+            fdd.modes.remove(victim)
+            st.get("_manual_freqs", set()).discard(round(victim.natural_frequency_hz, 1))
+            lbl_ost.setText(f"✖ Mode removed at {victim.natural_frequency_hz:.2f} Hz.")
+            _draw_svd_markers(); _refresh_validation(); _refresh_campbell(); _refresh_comparative(); _anim_reload_modes()
+            return
+        # si no, agregar un modo en el pico local
+        freqs = np.asarray(fdd.frequencies_hz); sv = np.asarray(fdd.singular_values)
+        sv1 = sv[0] if sv.ndim > 1 else sv
+        win_ = (freqs >= fclick - 2.5) & (freqs <= fclick + 2.5)
         if not win_.any():
             return
-        idx = int(np.where(win_)[0][np.argmax(sv1[win_])])
-        fn = float(freqs[idx])
-        if any(abs(m.natural_frequency_hz - fn) < 0.5 for m in fdd.modes):
-            lbl_ost.setText(f"Mode near {fn:.2f} Hz already exists."); return
-        from core.modal.oma_engine import modal_complexity_mpc, classify_mode
+        idx = int(np.where(win_)[0][np.argmax(sv1[win_])]); fn = float(freqs[idx])
+        from core.modal.oma_engine import modal_complexity_mpc, classify_mode, OMAMode
         try:
             shape = np.asarray(fdd.mode_shapes_at_freq[:, 0, idx], complex)
         except Exception:  # noqa: BLE001
             shape = np.zeros(0, complex)
-        # half-power (−3 dB en potencia) alrededor del pico → damping
         peak = sv1[idx]; half = peak / 2.0
         lo_i = idx
         while lo_i > 0 and sv1[lo_i] > half:
@@ -1378,18 +1404,16 @@ def build_app(layout: OMALayout, simulated: bool = True):
         cpx = float(modal_complexity_mpc(shape)) if shape.size else 0.0
         run_hz = (st["layout"].running_speed_rpm or 0.0) / 60.0 or None
         cls, is_h, ordn = classify_mode(fn, cpx, running_speed_hz=run_hz)
-        from core.modal.oma_engine import OMAMode
         fdd.modes.append(OMAMode(mode_number=len(fdd.modes) + 1, natural_frequency_hz=fn,
                                  damping_ratio_pct=zeta, mode_shape=shape,
                                  singular_value_peak=float(peak), bandwidth_3db_hz=bw,
                                  is_harmonic=is_h, harmonic_order=ordn, confidence=0.8,
                                  complexity_pct=cpx, classification=cls))
         fdd.modes.sort(key=lambda m: m.natural_frequency_hz)
-        p_svd.addItem(pg.ScatterPlotItem([fn], [10 * np.log10(max(peak, 1e-30))], size=13, symbol="t",
-                      pen=pg.mkPen(ACC, width=2), brush=pg.mkBrush(ACC)))
-        lbl_ost.setText(f"✚ Manual mode added at {fn:.2f} Hz (ζ≈{zeta:.2f}%). Re-validated.")
-        _refresh_validation(); _refresh_campbell(); _refresh_comparative(); _anim_reload_modes()
-    p_svd.scene().sigMouseClicked.connect(_add_manual_mode)
+        st.setdefault("_manual_freqs", set()).add(round(fn, 1))
+        lbl_ost.setText(f"✚ Mode added at {fn:.2f} Hz (ζ≈{zeta:.2f}%). Click the marker to remove it.")
+        _draw_svd_markers(); _refresh_validation(); _refresh_campbell(); _refresh_comparative(); _anim_reload_modes()
+    p_svd.scene().sigMouseClicked.connect(_toggle_manual_mode)
 
     # =====================================================================
     # MODES (EMA)
@@ -1463,7 +1487,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
     chk_cam2.setToolTip("Overlay a second operating speed to compare (e.g. 3600 vs 3200 RPM). "
                         "The order lines do NOT move — only the operating speed line/band.")
     sp_cam2 = QtWidgets.QDoubleSpinBox(); sp_cam2.setRange(0, 60000); sp_cam2.setValue(3200); sp_cam2.setSuffix(" RPM")
-    crow2.addWidget(chk_cam2); crow2.addWidget(sp_cam2); crow2.addStretch(1); cml.addLayout(crow2)
+    crow2.addWidget(chk_cam2); crow2.addWidget(sp_cam2)
+    crow2.addSpacing(12)
+    chk_half = QtWidgets.QCheckBox("½× band (sub-sync)")
+    chk_half.setToolTip("Optional — NOT required by API 684. Screens sub-synchronous excitation "
+                        "(oil whirl ~0.42-0.48x, looseness) at half the operating speed.")
+    crow2.addWidget(chk_half); crow2.addStretch(1); cml.addLayout(crow2)
     cams = QtWidgets.QHBoxLayout()
     p_cam = pg.PlotWidget(); p_cam.setBackground("w"); p_cam.setLabel("left", "Frequency", "Hz"); p_cam.setLabel("bottom", "Speed", "RPM")
     p_cam.setTitle("Campbell diagram", color=NAVY); p_cam.showGrid(x=True, y=True, alpha=0.3)
@@ -1490,7 +1519,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
             lbl_cam.setText("No modes yet — run OMA capture or identify EMA modes."); tbl_cam.setRowCount(0); return
         ymax = max(modes) * 1.30; orders = (0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0); rpm = np.linspace(0, rpm_max, 60)
         reg = pg.LinearRegionItem([max(0, lo), min(rpm_max, hi)], movable=False, brush=pg.mkBrush(239, 68, 68, 32)); reg.setZValue(-20); p_cam.addItem(reg)
-        reg2 = pg.LinearRegionItem([rpm_op / 2 * (1 - SM), rpm_op / 2 * (1 + SM)], movable=False, brush=pg.mkBrush(245, 158, 11, 26)); reg2.setZValue(-20); p_cam.addItem(reg2)
+        if chk_half.isChecked():
+            reg2 = pg.LinearRegionItem([rpm_op / 2 * (1 - SM), rpm_op / 2 * (1 + SM)], movable=False, brush=pg.mkBrush(245, 158, 11, 26)); reg2.setZValue(-20); p_cam.addItem(reg2)
         for o in orders:
             p_cam.plot(rpm, o * rpm / 60.0, pen=pg.mkPen("#6B7280", width=1, style=QtCore.Qt.DotLine))
             # etiqueta donde la línea de orden sale del gráfico (queda siempre visible)
@@ -1501,7 +1531,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
             t = pg.TextItem(f"{o:g}×", color="#6B7280", anchor=(0.5, 1.0)); t.setPos(lx, ly); p_cam.addItem(t)
         for fn in modes:
             p_cam.plot([0, rpm_max], [fn, fn], pen=pg.mkPen(GREEN, width=2))
-        bands = [SpeedBand(rpm_op, SM * rpm_op, f"Operating {rpm_op:.0f}±{SM*100:.0f}%"), SpeedBand(rpm_op / 2, SM * rpm_op / 2, "½ speed")]
+        bands = [SpeedBand(rpm_op, SM * rpm_op, f"Operating {rpm_op:.0f}±{SM*100:.0f}%")]
+        if chk_half.isChecked():
+            bands.append(SpeedBand(rpm_op / 2, SM * rpm_op / 2, "½ speed"))
         cx = compute_crossings(modes, 0, rpm_max, orders=orders, bands=bands); sevcol = {"coincidence": RED, "near": AMBER, "clear": "#94a3b8"}
         tbl_cam.setRowCount(0)
         for c in cx:
@@ -1537,6 +1569,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
                         "band. A crossing does not confirm resonance by itself — correlate with amplitude/phase.")
     btn_refc.clicked.connect(_refresh_campbell)
     chk_cam2.toggled.connect(lambda *_: _refresh_campbell())
+    chk_half.toggled.connect(lambda *_: _refresh_campbell())
     sp_cam2.editingFinished.connect(lambda *_: (_refresh_campbell() if chk_cam2.isChecked() else None))
 
     # =====================================================================
