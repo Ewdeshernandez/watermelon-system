@@ -130,7 +130,8 @@ def build_preliminary_pdf(
     story.append(HRFlowable(width="100%", thickness=2.4, color=colors.HexColor(GREEN), spaceBefore=4, spaceAfter=8))
 
     # ---- 1. Identificación ----
-    story.append(Paragraph(f"1. {T['ident']}", H))
+    sec_n = 1
+    story.append(Paragraph(f"{sec_n}. {T['ident']}", H)); sec_n += 1
     idrows = [[T["asset"], meta.get("asset", ""), T["client"], meta.get("client", "")],
               [T["type"], meta.get("machine_type", ""), T["location"], meta.get("location", "")],
               [T["test"], meta.get("test_type", ""), T["rpm"], f"{meta.get('rpm', '')} RPM"],
@@ -145,8 +146,22 @@ def build_preliminary_pdf(
                            ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3)]))
     story.append(t); story.append(Spacer(1, 8))
 
-    # ---- 2. Go/No-Go ----
-    story.append(Paragraph(f"2. {T['quality']}", H))
+    # ---- 2. Hallazgos (van justo después de identificación) ----
+    if findings:
+        story.append(Paragraph(f"{sec_n}. {T['findings']}", H)); sec_n += 1
+        for i, f in enumerate(findings, 1):
+            story.append(Paragraph(f"{i}. {f}", body))
+        story.append(Spacer(1, 6))
+
+    # ---- 3. Recomendaciones ----
+    if recommendations:
+        story.append(Paragraph(f"{sec_n}. {T['recs']}", H)); sec_n += 1
+        for i, r in enumerate(recommendations, 1):
+            story.append(Paragraph(f"{i}. {r}", body))
+        story.append(Spacer(1, 8))
+
+    # ---- Go/No-Go ----
+    story.append(Paragraph(f"{sec_n}. {T['quality']}", H)); sec_n += 1
     qrows = [[c, s, d] for c, s, d in quality]
     qt_head = [T["check"], T["status"], T["detail"]]
     qb = [[Paragraph(f"<b><font color='white'>{h}</font></b>", small) for h in qt_head]]
@@ -165,15 +180,15 @@ def build_preliminary_pdf(
         story.append(Paragraph(f"<b>{T['overall']}: <font color='{_status_color(verdict)}'>{verdict}</font></b>", body))
     story.append(Spacer(1, 8))
 
-    # ---- 3. Automatic analysis ----
+    # ---- Automatic analysis ----
     if analysis:
-        story.append(Paragraph(f"3. {T['analysis']}", H))
+        story.append(Paragraph(f"{sec_n}. {T['analysis']}", H)); sec_n += 1
         for a in analysis:
             story.append(Paragraph("• " + a, body))
         story.append(Spacer(1, 6))
 
     # ---- Secciones automáticas (config/EMA/OMA/modes/comparative/campbell/ssi/shapes) ----
-    n = 4
+    n = sec_n
     for sec in (sections or []):
         blk: List[Any] = [Paragraph(f"{n}. {sec.get('title', '')}", H)]
         if sec.get("intro"):
@@ -190,18 +205,6 @@ def build_preliminary_pdf(
             for fl in blk[1:]:
                 story.append(fl)
         story.append(Spacer(1, 4)); n += 1
-
-    # ---- Findings + recommendations ----
-    if findings:
-        story.append(Paragraph(f"{n}. {T['findings']}", H)); n += 1
-        for i, f in enumerate(findings, 1):
-            story.append(Paragraph(f"{i}. {f}", body))
-        story.append(Spacer(1, 4))
-    if recommendations:
-        story.append(Paragraph(f"{n}. {T['recs']}", H)); n += 1
-        for i, r in enumerate(recommendations, 1):
-            story.append(Paragraph(f"{i}. {r}", body))
-        story.append(Spacer(1, 6))
 
     # ---- Evidence ----
     if photos:

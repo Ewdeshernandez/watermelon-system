@@ -51,7 +51,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.26"
+__version__ = "0.9.27"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1165,11 +1165,13 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_testni = QtWidgets.QPushButton("🔌 Test acquisition")
     btn_ocap = QtWidgets.QPushButton("▶ Capture + FDD"); btn_ocap.setStyleSheet(
         f"QPushButton{{background:{ACC};font-size:14px;padding:10px 20px;}} QPushButton:hover{{background:#1490c2;}}")
-    btn_upload = QtWidgets.QPushButton("☁ Upload run to cloud")
+    btn_saverun = QtWidgets.QPushButton("💾 Save run locally")
+    btn_saverun.setToolTip("Save this run (results + raw data) to a visible folder on this PC.")
+    btn_upload = QtWidgets.QPushButton("☁ Sync / Upload to Watermelon System")
     btn_delmode = QtWidgets.QPushButton("✖ Remove selected mode")
     btn_delmode.setToolTip("Remove the mode selected in the table (or click its marker on the plot).")
-    crow.addWidget(btn_testni); crow.addWidget(btn_ocap); crow.addWidget(btn_upload)
-    crow.addWidget(btn_delmode); crow.addStretch(1); cl2.addLayout(crow)
+    crow.addWidget(btn_testni); crow.addWidget(btn_ocap); crow.addWidget(btn_saverun)
+    crow.addWidget(btn_upload); crow.addWidget(btn_delmode); crow.addStretch(1); cl2.addLayout(crow)
 
     def _test_ni():
         try:
@@ -1243,6 +1245,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 data += np.outer(q, rng.standard_normal(nch))
             data += 0.05 * rng.standard_normal((N, nch))
         st["oma_data"] = (data, float(fs))              # guardado para SSI / upload
+        st["_run_saved"] = False                        # nueva corrida → aún sin guardar
         fmax = min(fs / 2.56, lay.fmax_hz)
         _run_hz = (lay.running_speed_rpm or 0.0) / 60.0 or None
         fdd = run_oma(data, fs, nperseg=4096, f_min_hz=5.0, f_max_hz=fmax,
@@ -1333,6 +1336,87 @@ def build_app(layout: OMALayout, simulated: bool = True):
             st["_tach_rpm"] = _rpm_from_tach(tach, lay.fs_hz)
         return np.asarray(cols, float).T, lay.fs_hz
 
+    def _build_run_payload():
+        """Arma el payload de la corrida (modos/svd/ema/ssi/layout) — compartido por
+        guardar-local y subir-a-nube."""
+        fdd = st.get("oma_fdd")
+        if fdd is None:
+            return None
+        lay = st["layout"]
+        freqs = np.asarray(fdd.frequencies_hz); sv = np.asarray(fdd.singular_values)
+        if sv.ndim == 1:
+            sv = sv[None, :]
+        fmax = min(float(lay.fs_hz) / 2.56, float(lay.fmax_hz)); band = freqs <= fmax
+        fb = freqs[band]; sv1 = sv[0][band]; step = max(1, len(fb) // 900)
+        svd = {"freqs": fb[::step].tolist(), "sv1": sv1[::step].tolist()}
+        def _sh(m):
+            s = np.asarray(getattr(m, "mode_shape", []), complex).ravel()
+            return {"re": s.real.tolist(), "im": s.imag.tolist()}
+        modes = [{"fn": m.natural_frequency_hz, "zeta": m.damping_ratio_pct,
+                  "complexity": m.complexity_pct, "class": m.classification, "shape": _sh(m)}
+                 for m in fdd.modes]
+        ema = []; ema_block = None
+        res = st["acc"].result()
+        if res is not None:
+            ema_peaks = modes_from_frf(res, fmin=5, fmax=lay.fmax_hz, exp_tau=st["acc"].exp_tau())
+            ema = [mp.frequency_hz for mp in ema_peaks]
+            ef = np.asarray(res.frequencies_hz); emag = np.asarray(res.magnitude); ecoh = np.asarray(res.coherence)
+            eb = ef <= lay.fmax_hz; st_e = max(1, int(np.sum(eb)) // 800)
+            ema_block = {"freqs": ef[eb][::st_e].tolist(),
+                         "mag_db": (20 * np.log10(np.maximum(emag[eb][::st_e], 1e-12))).tolist(),
+                         "coh": ecoh[eb][::st_e].tolist(),
+                         "modes": [{"fn": mp.frequency_hz, "zeta": mp.damping_ratio_pct,
+                                    "coh": getattr(mp, "coherence_at_peak", None)} for mp in ema_peaks]}
+        ssi_block = None; ssi_res = st.get("ssi")
+        if ssi_res is not None and getattr(ssi_res, "modes", None):
+            ssi_block = {"modes": [{"fn": m.frequency_hz, "zeta": m.damping_ratio_pct,
+                                    "std_fn": m.std_frequency_hz, "std_zeta": m.std_damping_pct}
+                                   for m in ssi_res.modes],
+                         "diagram": [[int(o), np.asarray(fr).tolist(),
+                                      [bool(x) for x in np.asarray(mk).tolist()]]
+                                     for (o, fr, mk) in ssi_res.diagram]}
+        return {"name": lay.name, "kind": "OMA", "modes": modes, "svd": svd,
+                "channel_names": lay.channel_names(), "running_rpm": lay.running_speed_rpm,
+                "ema_modes": ema, "ema": ema_block, "ssi": ssi_block,
+                "client": lay.client, "asset": lay.machine_type,
+                "location": lay.location, "layout": lay.to_dict()}
+
+    def _runs_dir():
+        d = os.path.join(os.path.expanduser("~"), "WatermelonModal", "runs")
+        os.makedirs(d, exist_ok=True); return d
+
+    def _save_run_local():
+        """Guarda la corrida (resultados + data cruda) en una carpeta VISIBLE."""
+        payload = _build_run_payload()
+        if payload is None:
+            QtWidgets.QMessageBox.information(win, "Save run", "Run OMA capture first."); return
+        try:
+            import json as _json, datetime as _dt, shutil as _shutil
+            from core.modal.oma_layout import _slug
+            ts = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+            folder = os.path.join(_runs_dir(), f"{_slug(st['layout'].name)}_{ts}")
+            os.makedirs(folder, exist_ok=True)
+            with open(os.path.join(folder, "run.json"), "w", encoding="utf-8") as f:
+                _json.dump(payload, f, ensure_ascii=False, indent=2)
+            # data cruda (tiempo) para reproceso
+            od = st.get("oma_data")
+            if od is not None:
+                data, fs = od
+                np.savez_compressed(os.path.join(folder, "data.npz"),
+                                    data=np.asarray(data, np.float32), fs=float(fs),
+                                    channels=np.array(st["layout"].channel_names()))
+            tmp = os.path.join(tempfile.gettempdir(), "wm_modal_oma.tdms")
+            if os.path.exists(tmp):
+                try:
+                    _shutil.copy2(tmp, os.path.join(folder, "capture.tdms"))
+                except Exception:  # noqa: BLE001
+                    pass
+            st["_run_saved"] = True; st["_run_folder"] = folder
+            QtWidgets.QMessageBox.information(win, "Save run",
+                f"✅ Run saved locally:\n{folder}\n\n(results run.json · raw data.npz · capture.tdms)")
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(win, "Save run", f"Could not save: {type(e).__name__}: {e}")
+
     def _upload_run():
         fdd = st.get("oma_fdd")
         if fdd is None:
@@ -1399,6 +1483,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(win, "Cloud", f"Upload failed: {type(e).__name__}: {e}")
     btn_ocap.clicked.connect(_oma_capture); btn_upload.clicked.connect(_upload_run)
+    btn_saverun.clicked.connect(_save_run_local)
 
     def _draw_svd_markers():
         """(Re)dibuja los marcadores de modos sobre la densidad espectral."""
@@ -2474,6 +2559,25 @@ def build_app(layout: OMALayout, simulated: bool = True):
         _cur = next((i for i in range(tabs.count()) if tabs.tabText(i) == _title), None)
         if _cur is not None and _cur != _target:
             _bar.moveTab(_cur, _target)
+
+    # Aviso: no cerrar con una corrida sin guardar localmente.
+    def _close_event(ev):
+        if st.get("oma_fdd") is not None and not st.get("_run_saved", False):
+            r = QtWidgets.QMessageBox.question(
+                win, "Save before closing?",
+                "You have an unsaved OMA run.\nSave it locally before closing?",
+                QtWidgets.QMessageBox.Save | QtWidgets.QMessageBox.Discard | QtWidgets.QMessageBox.Cancel,
+                QtWidgets.QMessageBox.Save)
+            if r == QtWidgets.QMessageBox.Save:
+                _save_run_local()
+                ev.accept() if st.get("_run_saved") else ev.ignore()
+            elif r == QtWidgets.QMessageBox.Discard:
+                ev.accept()
+            else:
+                ev.ignore()
+        else:
+            ev.accept()
+    win.closeEvent = _close_event
 
     return app, win
 
