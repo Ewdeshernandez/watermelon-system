@@ -206,6 +206,7 @@ class OMALayout:
     chassis: str = "cDAQ-9178"
     module_model: str = "NI 9234"
     running_speed_rpm: float = 1185.0
+    tach_bnc: int = 0                     # 0 = sin keyphasor/tach; >0 = BNC del pulso 1×/vuelta
 
     # ---- utilidades ----
     def active_points(self) -> List[MeasPoint]:

@@ -51,7 +51,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.25"
+__version__ = "0.9.26"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -111,6 +111,27 @@ def _unproject(sx, sy, az, el):
     wx = sx / ca if abs(ca) > 1e-6 else sx
     wz = (sy - wx * sa * se) / ce if abs(ce) > 1e-6 else sy
     return wx, wz
+
+
+def _rpm_from_tach(sig, fs):
+    """RPM desde un pulso keyphasor (1×/vuelta): flancos de subida → periodo → 60/T."""
+    x = np.asarray(sig, float)
+    if x.size < 16:
+        return None
+    x = x - float(np.mean(x))
+    thr = 0.5 * float(np.max(np.abs(x)))
+    if thr <= 1e-9:
+        return None
+    above = x > thr
+    rises = np.where((~above[:-1]) & (above[1:]))[0]
+    if len(rises) < 2:
+        return None
+    periods = np.diff(rises) / float(fs)
+    periods = periods[periods > 0]
+    if periods.size == 0:
+        return None
+    rpm = 60.0 / float(np.median(periods))
+    return rpm if 30.0 <= rpm <= 60000.0 else None
 
 
 def _cuboid_faces(c):
@@ -586,6 +607,17 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _wb = QtWidgets.QWidget(); _wbl = QtWidgets.QHBoxLayout(_wb); _wbl.setContentsMargins(0, 0, 0, 0)
     _wbl.addWidget(chk_fwin); _wbl.addWidget(chk_ewin); _wbl.addStretch(1)
     al.addRow("Windows:", _wb)
+    # Keyphasor / tach OPCIONAL: si no hay, se deja apagado y no cambia nada.
+    _tb = QtWidgets.QWidget(); _tbl = QtWidgets.QHBoxLayout(_tb); _tbl.setContentsMargins(0, 0, 0, 0)
+    chk_tach = QtWidgets.QCheckBox("Keyphasor / tach on BNC")
+    chk_tach.setChecked(layout.tach_bnc > 0)
+    chk_tach.setToolTip("OPTIONAL. If the machine has a once-per-rev pulse, capture it on a FREE BNC "
+                        "to measure exact RPM, anchor Campbell and flag harmonics. If not, leave it off.")
+    sp_tach = QtWidgets.QSpinBox(); sp_tach.setRange(1, 20); sp_tach.setValue(layout.tach_bnc or 20)
+    sp_tach.setEnabled(chk_tach.isChecked())
+    chk_tach.toggled.connect(sp_tach.setEnabled)
+    _tbl.addWidget(chk_tach); _tbl.addWidget(sp_tach); _tbl.addStretch(1)
+    al.addRow("Tacho:", _tb)
     lbl_df = QtWidgets.QLabel(""); al.addRow("Resolution:", lbl_df)
     aol.addLayout(al)
     rrow = QtWidgets.QHBoxLayout()
@@ -692,6 +724,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         lay.test_type = lay.test_modes[0]
         lay.fs_hz = float(sp_fs.value()); lay.block_size = int(cb_blk.currentText())
         lay.fmax_hz = float(sp_fmax.value()); lay.duration_s = float(sp_dur.value())
+        lay.tach_bnc = int(sp_tach.value()) if chk_tach.isChecked() else 0
 
     def _view_angles():
         return np.radians(st["az"]), np.radians(st["el"])
@@ -1022,6 +1055,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         e_client.setText(lay.client); e_loc.setText(lay.location); sp_rpm.setValue(lay.running_speed_rpm)
         chk_ema.setChecked("EMA" in lay.test_modes); chk_oma.setChecked("OMA" in lay.test_modes)
         sp_fs.setValue(int(lay.fs_hz)); cb_blk.setCurrentText(str(lay.block_size))
+        chk_tach.setChecked(lay.tach_bnc > 0); sp_tach.setValue(lay.tach_bnc or 20); sp_tach.setEnabled(lay.tach_bnc > 0)
         sp_fmax.setValue(lay.fmax_hz); sp_dur.setValue(int(lay.duration_s))
         win.setWindowTitle(f"Watermelon Modal v{__version__} — {lay.name}")
         _fill_points(); _sync_comp_combo(); _refresh_summary(); _upd_df(); _draw_train(fit=True)
@@ -1188,7 +1222,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
             lbl_ost.setText(f"Conectando con {DAQ_NAME}…"); QtWidgets.QApplication.processEvents()
             try:
                 data, fs = _capture_ni(lay, secs)
-                lbl_ost.setText(f"{DAQ_NAME}: {data.shape[0]} muestras · {data.shape[1]} canales")
+                msg = f"{DAQ_NAME}: {data.shape[0]} muestras · {data.shape[1]} canales"
+                _trpm = st.get("_tach_rpm")
+                if _trpm:                              # keyphasor → RPM exacta para Campbell/armónicos
+                    lay.running_speed_rpm = float(_trpm); sp_rpm.setValue(float(_trpm))
+                    msg += f" · tach: {_trpm:.0f} RPM"
+                lbl_ost.setText(msg)
             except Exception as e:  # noqa: BLE001
                 QtWidgets.QMessageBox.warning(win, DAQ_NAME,
                     f"No acquisition / capture failed → using simulated.\n\n{type(e).__name__}: {e}")
@@ -1273,13 +1312,25 @@ def build_app(layout: OMALayout, simulated: bool = True):
                                  sensitivity_mv_per_eu=p.sensitivity_mv_per_g,
                                  bnc_port=p.bnc, units="g")
         chans = [_chan_for(p) for p in lay.active_points()]
+        # Keyphasor/tach OPCIONAL: canal de voltaje extra en su BNC (si está activado).
+        st["_tach_rpm"] = None
+        tach_bnc = int(getattr(lay, "tach_bnc", 0) or 0)
+        if tach_bnc > 0:
+            used = {p.bnc for p in lay.active_points()}
+            if tach_bnc in used:
+                raise ValueError(f"Tach BNC {tach_bnc} ya lo usa un sensor. Elegí un BNC libre.")
+            chans.append(ChannelConfig(name="TACH", coupling="AC",
+                                       sensitivity_mv_per_eu=1000.0, bnc_port=tach_bnc, units="V"))
         tmp = os.path.join(tempfile.gettempdir(), "wm_modal_oma.tdms")
         cfg = AcquisitionConfig(mode="oma_continuous", sample_rate_hz=lay.fs_hz,
                                 duration_s=float(secs), channels=chans, chassis_name=chassis,
                                 output_tdms_path=tmp)
         path = capture(cfg, lambda *a, **k: None)
         tf = TdmsFile.read(str(path)); grp = tf.groups()[0]
-        cols = [ch[:] for ch in grp.channels()]
+        cols = [np.asarray(ch[:], float) for ch in grp.channels()]
+        if tach_bnc > 0 and len(cols) == len(chans):
+            tach = cols.pop()                       # el tach es el último canal
+            st["_tach_rpm"] = _rpm_from_tach(tach, lay.fs_hz)
         return np.asarray(cols, float).T, lay.fs_hz
 
     def _upload_run():

@@ -36,7 +36,7 @@ _T = {
            "analysis": "Automatic analysis", "findings": "Findings",
            "recs": "Recommendations", "evidence": "Field evidence",
            "asset": "Asset", "client": "Client", "type": "Type", "location": "Location",
-           "test": "Test", "rpm": "Running speed", "tech": "Technician", "rev": "Reviewed by",
+           "test": "Test", "rpm": "Running speed", "tech": "Specialist", "rev": "Approved by",
            "date": "Date", "equip": "Equipment", "prep": "Prepared by", "rev2": "Reviewed by",
            "disc": ("<b>PRELIMINARY REPORT</b> — valid only for the conditions present during the service. "
                     "Subject to specialist validation and to the full analysis report generated from Watermelon System (web). "
@@ -47,7 +47,7 @@ _T = {
            "analysis": "Análisis automático", "findings": "Hallazgos",
            "recs": "Recomendaciones", "evidence": "Evidencia de campo",
            "asset": "Activo", "client": "Cliente", "type": "Tipo", "location": "Ubicación",
-           "test": "Ensayo", "rpm": "Velocidad", "tech": "Técnico", "rev": "Revisado por",
+           "test": "Ensayo", "rpm": "Velocidad", "tech": "Especialista", "rev": "Aprobado por",
            "date": "Fecha", "equip": "Equipo", "prep": "Preparado por", "rev2": "Revisado por",
            "disc": ("<b>REPORTE PRELIMINAR</b> — válido únicamente para las condiciones presentes durante el servicio. "
                     "Sujeto a validación de especialista y al reporte de análisis completo generado desde Watermelon System (web). "
@@ -221,11 +221,5 @@ def build_preliminary_pdf(
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor(GRAY), spaceBefore=6, spaceAfter=4))
     story.append(Paragraph(
         T["disc"].format(rid=run_id or "—"), small))
-    story.append(Spacer(1, 10))
-    sig = Table([[Paragraph("_______________________________<br/>" + T["prep"] + ": " + meta.get("technician", ""), small),
-                  Paragraph("_______________________________<br/>" + T["rev2"] + ": " + meta.get("reviewer", ""), small)]],
-                colWidths=[8 * cm, 8 * cm])
-    story.append(sig)
-
     doc.build(story)
     return buf.getvalue()
