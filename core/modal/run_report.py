@@ -48,12 +48,18 @@ def _fdd_from_run(run: Dict[str, Any]) -> _FDD:
 
 
 def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
-                          shape_pngs=None, findings=None, recommendations=None) -> bytes:
+                          shape_pngs=None, findings=None, recommendations=None,
+                          meta_extra=None, config_png=None, sensor_png=None,
+                          sensor_rows=None) -> bytes:
     """Genera el PDF OMA SIGA desde el payload de una corrida (`modal_runs`).
 
     `shape_pngs`: lista opcional de PNGs (vista 3D de geometría) por modo, en orden;
     reemplazan el diagrama de barras de la forma modal manteniendo el formato SIGA.
-    `findings`/`recommendations`: si se pasan, sobrescriben los del payload."""
+    `findings`/`recommendations`: si se pasan, sobrescriben los del payload.
+    `meta_extra`: dict que se fusiona en `meta` (consecutive, prepared_by, reviewed_by,
+    report_date, roles, ciudad, etc.) para portada/firmas/consecutivo del shell SIGA.
+    `config_png`/`sensor_png`/`sensor_rows`: figuras extra (config 3D, verificación de
+    sensores) embebidas en el reporte."""
     from core.modal.oma_siga_report import build_oma_siga_pdf
     from core.modal.campbell import SpeedBand
     from core.modal.ema_oma_correlation import correlate
@@ -85,6 +91,8 @@ def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
         "client": run.get("client", ""), "location": run.get("location", ""),
         "prepared_by": "Watermelon System", "prepared_role": "Machinery Diagnostics",
     }
+    if meta_extra:
+        meta.update({k: v for k, v in meta_extra.items() if v not in (None, "")})
     return build_oma_siga_pdf(
         meta=meta,
         conditions=[{"label": run.get("name", "Condición operacional"), "fdd_result": fdd,
@@ -92,4 +100,5 @@ def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
         campbell=campbell, ema_oma=ema_oma,
         findings=findings if findings is not None else run.get("findings"),
         recommendations=recommendations if recommendations is not None else run.get("recommendations"),
-        mode_shape_pngs=shape_pngs)
+        mode_shape_pngs=shape_pngs, config_png=config_png, sensor_png=sensor_png,
+        sensor_rows=sensor_rows)

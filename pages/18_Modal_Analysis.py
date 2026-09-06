@@ -7,9 +7,15 @@ las CORRIDAS reales que el campo sube a la nube (tabla modal_runs). Si no hay re
 / no hay corridas, usa un dataset de muestra para no quedar vacía. El equipo se
 muestra como contexto de solo-lectura en el encabezado.
 
-Pestañas: Impact test (EMA) · Modes (EMA) · OMA capture · SSI (subspace) ·
-Comparative · Campbell · Mode shapes · Report (PDF SIGA completo: portada + TOC +
-todas las secciones, mismo motor que el módulo de Reportes).
+Navegación PERSISTENTE (segmented control, no st.tabs — así no se "salta" de
+sección al generar el reporte): Spectral density (FDD) · Mode shapes · SSI ·
+Campbell · Impact (EMA) · Modes (EMA) · Comparative · Trend · Report.
+
+Densidad espectral (FDD): todas las curvas de valores singulares (SV1 en color,
+SV2–SVn en gris) + peak-picking (clic en la curva para agregar/quitar modos).
+Report: PDF SIGA completo (portada + TOC + configuración 3D + verificación de
+sensores + densidad espectral + formas modales 3D + Campbell + hallazgos/
+recomendaciones editables + consecutivo + realizado/aprobado) con archivado.
 
 Marco normativo: ISO 7626-1..6 (EMA) · ISO 20816 (OMA) · API 684 (Campbell).
 """
@@ -380,6 +386,45 @@ else:
 
 lay = D["lay"]; nch = lay.n_channels()
 
+# --- Modos manuales (peak-picking en la web) — se fusionan con los automáticos.
+#     Los automáticos (FDD) quedan protegidos; sólo los manuales se pueden quitar. ---
+_run_key = str(D.get("name", "run"))
+_MANUAL_KEY = f"modal_manual::{_run_key}"
+_manual_modes = st.session_state.setdefault(_MANUAL_KEY, [])
+for _am in D["oma_modes"]:
+    _am.setdefault("source", "auto")
+for _mm in _manual_modes:
+    _mm.setdefault("source", "manual")
+D["auto_n"] = len(D["oma_modes"])
+D["oma_modes"] = sorted(D["oma_modes"] + list(_manual_modes), key=lambda m: m["fn"])
+
+
+def _pick_mode_from_curve(fx, ydb, f_click, win_frac=0.06):
+    """Ajusta un modo a partir de un clic: busca el pico local cercano y estima
+    el amortiguamiento por half-power (-3 dB) sobre la curva SV1 (en dB)."""
+    fx = np.asarray(fx, float); ydb = np.asarray(ydb, float)
+    if fx.size == 0:
+        return None
+    win = max(1.0, win_frac * max(f_click, 1.0))
+    m = np.abs(fx - f_click) <= win
+    if not np.any(m):
+        m = np.abs(fx - f_click) <= (2 * win)
+    if not np.any(m):
+        return None
+    idx = int(np.where(m)[0][np.argmax(ydb[m])])
+    fn = float(fx[idx]); peak = float(ydb[idx]); half = peak - 3.0103
+    lo = idx
+    while lo > 0 and ydb[lo] > half:
+        lo -= 1
+    hi = idx
+    while hi < len(ydb) - 1 and ydb[hi] > half:
+        hi += 1
+    bw = float(fx[hi] - fx[lo])
+    zeta = max(0.05, min(20.0, (bw / (2.0 * fn) * 100.0))) if fn > 0 else 0.0
+    return {"fn": round(fn, 3), "zeta": round(zeta, 3), "complexity": 0.0,
+            "cls": "manual", "source": "manual"}
+
+
 # --- Veredicto global (validación automática de modos) para el hero ---
 from core.modal.mode_validation import validate_modes as _vm
 _ssi_f = [m["fn"] for m in (D["ssi_cloud"] or {}).get("modes", [])] if D["ssi_cloud"] else []
@@ -419,14 +464,31 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-TABS = ["🟢  Impact test (EMA)", "🟣  Modes (EMA)", "🟡  OMA capture",
-        "🟠  SSI (subspace)", "🔴  Comparative", "🟤  Campbell", "⚫  Mode shapes",
-        "🔵  Trend / Compare", "🟢  Report"]
-(tab_ema, tab_modes, tab_oma, tab_ssi, tab_cmp, tab_camp, tab_shapes,
- tab_trend, tab_report) = st.tabs(TABS)
+T_OMA = "🟡  Spectral density (FDD)"
+T_SHAPES = "⚫  Mode shapes"
+T_SSI = "🟠  SSI (subspace)"
+T_CAMP = "🟤  Campbell"
+T_EMA = "🟢  Impact test (EMA)"
+T_MODES = "🟣  Modes (EMA)"
+T_CMP = "🔴  Comparative"
+T_TREND = "🔵  Trend / Compare"
+T_REPORT = "📄  Report"
+_NAVOPTS = [T_OMA, T_SHAPES, T_SSI, T_CAMP, T_EMA, T_MODES, T_CMP, T_TREND, T_REPORT]
+
+# Navegación PERSISTENTE (segmented control con estado) — a diferencia de st.tabs,
+# conserva la sección activa tras cada rerun (arregla el "salto" al generar reporte).
+if "modal_nav" not in st.session_state:
+    st.session_state["modal_nav"] = T_OMA
+if hasattr(st, "segmented_control"):
+    nav = st.segmented_control("Section", _NAVOPTS, key="modal_nav",
+                               label_visibility="collapsed") or st.session_state["modal_nav"]
+else:  # respaldo para versiones viejas de Streamlit
+    nav = st.radio("Section", _NAVOPTS, key="modal_nav", horizontal=True,
+                   label_visibility="collapsed")
+st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------- 1 EMA
-with tab_ema:
+if nav == T_EMA:
     _sec("Impact test (EMA)", "FRF + coherence per hammer hit", "ISO 7626-5")
     from plotly.subplots import make_subplots
     if D["ema_curve"] is not None:
@@ -449,7 +511,7 @@ with tab_ema:
         st.success("5/5 averages accepted · coherence ≥ 0.8 in band (ISO 7626-5).")
 
 # ---------------------------------------------------------------- 3 MODES EMA
-with tab_modes:
+if nav == T_MODES:
     _sec("Modes (EMA)", "Peak-picking + half-power damping + Nyquist", "ISO 7626-6")
     f, H, coh = _demo_frf()
     cc1, cc2 = st.columns([2, 3])
@@ -469,42 +531,114 @@ with tab_modes:
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
         st.plotly_chart(fig, use_container_width=True)
 
-# ---------------------------------------------------------------- 4 OMA
-with tab_oma:
-    _sec("OMA capture", "Singular values of spectral densities + FDD modes",
-         "ISO 20816 · Brincker 2001")
+# ---------------------------------------------------------------- 4 OMA (análisis)
+if nav == T_OMA:
+    _sec("Spectral density (FDD) — modal identification",
+         "All singular value curves · SV1 dominant, SV2–SV4 reveal close modes · "
+         "click the curve to add a mode", "ISO 20816 · Brincker 2001")
+    from core.modal.mode_validation import validate_modes, summarize as mv_sum
+    _ssi_freqs = [m["fn"] for m in (D["ssi_cloud"] or {}).get("modes", [])] if D["ssi_cloud"] else []
+    _verd = validate_modes(D["oma_modes"], ssi_freqs_hz=_ssi_freqs, running_speed_rpm=D["rpm"]) \
+        if D["oma_modes"] else []
+    _vmap = {round(v.frequency_hz, 2): v for v in _verd} if _verd else {}
+
     if D["sv_traces"]:
-        fig = go.Figure(); palette = [BLUE, "#dc2626", GREEN, "#94a3b8"]
-        for r, (label, fx, ydb) in enumerate(D["sv_traces"]):
-            fig.add_trace(go.Scatter(x=fx, y=ydb, name=label, mode="lines",
-                          line=dict(color=palette[r % 4], width=2.2 if r == 0 else 1.1),
-                          fill="tozeroy" if r == 0 else None,
-                          fillcolor="rgba(37,99,235,.06)" if r == 0 else None,
-                          hovertemplate="%{x:.1f} Hz · %{y:.1f} dB<extra>"+label+"</extra>"))
-        # marcar y ETIQUETAR cada modo sobre SV1
-        _f1, _y1 = D["sv_traces"][0][1], D["sv_traces"][0][2]
+        _f1, _y1 = np.asarray(D["sv_traces"][0][1], float), np.asarray(D["sv_traces"][0][2], float)
+        fig = go.Figure()
+        # SV2..SVn de fondo (gris), reveal de modos cercanos
+        for r, (label, fx, ydb) in enumerate(D["sv_traces"][1:], start=2):
+            fig.add_trace(go.Scatter(x=fx, y=ydb, name=f"SV{r}", mode="lines",
+                          line=dict(color="#cbd5e1", width=1.0), opacity=0.9,
+                          hovertemplate="%{x:.1f} Hz · %{y:.1f} dB<extra>SV"+str(r)+"</extra>"))
+        # SV1 dominante (color + relleno)
+        fig.add_trace(go.Scatter(x=_f1, y=_y1, name="SV1", mode="lines",
+                      line=dict(color=BLUE, width=2.4), fill="tozeroy",
+                      fillcolor="rgba(37,99,235,.07)",
+                      hovertemplate="%{x:.1f} Hz · %{y:.1f} dB<extra>SV1</extra>"))
+        # 1× y armónicos de la velocidad de operación
+        _x1 = D["rpm"] / 60.0
+        for _o in (1, 2, 3):
+            if _o * _x1 <= (_f1.max() if _f1.size else 0):
+                fig.add_vline(x=_o * _x1, line=dict(color=AMBER, width=1, dash="dot"))
+                fig.add_annotation(x=_o * _x1, y=1.0, yref="paper", yanchor="bottom",
+                                   text=f"{_o}×", showarrow=False, font=dict(size=10, color=AMBER))
+        # marcadores de modos (auto = verde, manual = púrpura)
         for m in D["oma_modes"]:
-            j = int(np.argmin(np.abs(np.asarray(_f1) - m["fn"]))) if len(_f1) else 0
-            yv = float(_y1[j]) if len(_y1) else 0
-            fig.add_vline(x=m["fn"], line=dict(color="#cbd5e1", width=1, dash="dot"))
+            j = int(np.argmin(np.abs(_f1 - m["fn"]))) if _f1.size else 0
+            yv = float(_y1[j]) if _y1.size else 0.0
+            _mk = "#7c3aed" if m.get("source") == "manual" else GREEN
+            fig.add_trace(go.Scatter(x=[m["fn"]], y=[yv], mode="markers",
+                          marker=dict(size=11, color=_mk, symbol="diamond" if m.get("source") == "manual" else "circle",
+                                      line=dict(width=1.5, color="white")),
+                          showlegend=False,
+                          hovertemplate=f"<b>{m['fn']:.2f} Hz</b> · ζ {m['zeta']:.2f}%%<extra>"
+                                        f"{'manual' if m.get('source')=='manual' else 'FDD'}</extra>"))
             fig.add_annotation(x=m["fn"], y=yv, text=f"<b>{m['fn']:.1f}</b>", showarrow=True,
-                               arrowhead=0, arrowcolor="#cbd5e1", ax=0, ay=-22,
-                               font=dict(size=11, color=NAVY), bgcolor="rgba(255,255,255,.85)",
+                               arrowhead=0, arrowcolor="#cbd5e1", ax=0, ay=-24,
+                               font=dict(size=10, color=NAVY), bgcolor="rgba(255,255,255,.9)",
                                bordercolor="#e2e8f0", borderpad=2)
-        fig.update_layout(title="Singular values of spectral densities", height=440,
-                          template="watermelon", xaxis_title="Frequency (Hz)", yaxis_title="Magnitude (dB)")
-        st.plotly_chart(fig, use_container_width=True)
-    st.dataframe([{"Freq (Hz)": round(m["fn"], 2), "Damping (%)": round(m["zeta"], 3),
-                   "Complexity (%)": round(m["complexity"], 1), "Class": m["cls"]}
-                  for m in D["oma_modes"]], use_container_width=True, hide_index=True)
-    # --- Validación automática de modos (validado / dudoso / rechazado) ---
-    if D["oma_modes"]:
-        from core.modal.mode_validation import validate_modes, verdict_rows, summarize as mv_sum
-        _ssi_freqs = [m["fn"] for m in (D["ssi_cloud"] or {}).get("modes", [])] if D["ssi_cloud"] else []
-        _verd = validate_modes(D["oma_modes"], ssi_freqs_hz=_ssi_freqs, running_speed_rpm=D["rpm"])
-        st.markdown("**Automatic mode validation** *(validated / doubtful / rejected)*")
-        st.dataframe(verdict_rows(_verd), use_container_width=True, hide_index=True)
+        fig.update_layout(title=f"Singular values of the spectral density matrix — {max(1, len(D['sv_traces']))} curve(s)",
+                          height=470, template="watermelon", dragmode="zoom",
+                          xaxis_title="Frequency (Hz)", yaxis_title="Magnitude (dB)")
+        _ev = st.plotly_chart(fig, use_container_width=True, key="oma_sv_pick",
+                              on_select="rerun", selection_mode="points")
+        # --- clic sobre la curva → agrega el modo del pico más cercano ---
+        try:
+            _pts = (_ev.get("selection", {}) or {}).get("points", []) if _ev else []
+        except Exception:  # noqa: BLE001
+            _pts = []
+        if _pts:
+            _sig = tuple(sorted(round(float(p.get("x", 0)), 2) for p in _pts))
+            if st.session_state.get("_oma_last_sig") != _sig:
+                st.session_state["_oma_last_sig"] = _sig
+                _added = 0
+                for p in _pts:
+                    cand = _pick_mode_from_curve(_f1, _y1, float(p.get("x", 0)))
+                    if cand and all(abs(cand["fn"] - e["fn"]) > 0.5 for e in D["oma_modes"]):
+                        _manual_modes.append(cand); _added += 1
+                if _added:
+                    st.rerun()
+        st.caption("Tip: **click a point on the curve** (or use the box-select) to add a mode at that peak; "
+                   "half-power damping is estimated automatically. Auto (FDD) modes are protected — only "
+                   "manually-added modes can be removed below.")
+
+    # --- Agregar modo por frecuencia + quitar manuales (fila de controles compacta) ---
+    cc = st.columns([2, 1, 3])
+    with cc[0]:
+        _fadd = st.number_input("Add mode at frequency (Hz)", min_value=0.0,
+                                max_value=float(lay.fmax_hz), value=0.0, step=0.5, key="oma_fadd")
+    with cc[1]:
+        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
+        if st.button("➕ Add", use_container_width=True, key="oma_add_btn") and _fadd > 0:
+            if D["sv_traces"]:
+                cand = _pick_mode_from_curve(D["sv_traces"][0][1], D["sv_traces"][0][2], float(_fadd))
+            else:
+                cand = {"fn": round(float(_fadd), 3), "zeta": 1.0, "complexity": 0.0,
+                        "cls": "manual", "source": "manual"}
+            if cand and all(abs(cand["fn"] - e["fn"]) > 0.5 for e in D["oma_modes"]):
+                _manual_modes.append(cand); st.rerun()
+    with cc[2]:
+        _rm = [f"{m['fn']:.2f} Hz" for m in _manual_modes]
+        if _rm:
+            _sel = st.multiselect("Remove manual mode(s)", _rm, key="oma_rm")
+            if st.button("🗑 Remove selected", key="oma_rm_btn") and _sel:
+                keep = [m for m in _manual_modes if f"{m['fn']:.2f} Hz" not in _sel]
+                st.session_state[_MANUAL_KEY] = keep
+                st.rerun()
+
+    # --- UNA sola tabla consolidada: parámetros modales + veredicto ---
+    def _vlabel(fn):
+        v = _vmap.get(round(fn, 2))
+        return getattr(v, "verdict", "—") if v else "—"
+    st.dataframe([{"#": i + 1, "Freq (Hz)": round(m["fn"], 2), "Damping ζ (%)": round(m["zeta"], 3),
+                   "Complexity (%)": round(m["complexity"], 1),
+                   "Class": m["cls"], "Source": m.get("source", "auto"),
+                   "Validation": _vlabel(m["fn"])}
+                  for i, m in enumerate(D["oma_modes"])],
+                 use_container_width=True, hide_index=True)
+    if _verd:
         st.info(mv_sum(_verd))
+
     # --- Registro de verificación de sensores (del software de campo) ---
     _scr = (D.get("payload") or {}).get("sensor_check")
     if _scr:
@@ -522,7 +656,7 @@ with tab_oma:
                              use_container_width=True, hide_index=True, height=240)
 
 # ---------------------------------------------------------------- 5 SSI
-with tab_ssi:
+if nav == T_SSI:
     _sec("SSI (subspace)", "Covariance-driven SSI-COV + stabilization diagram + uncertainty",
          "OMA · Brincker & Ventura")
     if D["raw"] is not None:
@@ -575,7 +709,7 @@ with tab_ssi:
                      use_container_width=True, hide_index=True)
 
 # ---------------------------------------------------------------- 6 COMPARATIVE
-with tab_cmp:
+if nav == T_CMP:
     _sec("Comparative — EMA vs OMA", "Match impact modes against operational modes",
          "ISO 7626 / OMA")
     oma_f = [m["fn"] for m in D["oma_modes"]]
@@ -601,7 +735,7 @@ with tab_cmp:
             st.info(ema_oma_summary(matches))
 
 # ---------------------------------------------------------------- 7 CAMPBELL
-with tab_camp:
+if nav == T_CAMP:
     _sec("Campbell diagram", "Natural frequencies vs running-speed orders", "API 684 sec. 1.6 (±15%)")
     modes_hz = [m["fn"] for m in D["oma_modes"] if m["cls"] != "spurious"] or [m["fn"] for m in D["oma_modes"]]
     if not modes_hz:
@@ -648,7 +782,7 @@ with tab_camp:
             st.info(camp_summary(crossings))
 
 # ---------------------------------------------------------------- 8 MODE SHAPES
-with tab_shapes:
+if nav == T_SHAPES:
     _sec("Mode shapes", "3D operational deflection — amplitude colormap (green→red)")
     modes = D["oma_modes"]
     opts = [f"Mode {i+1} — {m['fn']:.1f} Hz" for i, m in enumerate(modes)] or ["—"]
@@ -665,7 +799,7 @@ with tab_shapes:
                "The machine is shown faint for reference.")
 
 # ---------------------------------------------------------------- 8b TREND / COMPARE
-with tab_trend:
+if nav == T_TREND:
     _sec("Trend / Compare", "Track natural frequencies across field runs over time",
          "condition monitoring")
     _series = []   # (label, date, [fn,...])
@@ -720,114 +854,191 @@ with tab_trend:
         st.success("Natural frequencies stable across runs — no stiffness loss detected.")
 
 # ---------------------------------------------------------------- 9 PRELIMINARY
-with tab_report:
-    _sec("Report", "Full OMA report — cover, table of contents, all sections",
+if nav == T_REPORT:
+    _sec("Report", "Full OMA report — cover · table of contents · configuration · "
+         "sensor check · spectral density · mode shapes · Campbell · findings",
          "SIGA-FMT-179 · ISO 20816 · API 684")
-    c = st.columns(4)
-    c[0].metric("Machine", lay.tag or lay.name)
-    c[1].metric("OMA modes", len(D["oma_modes"]))
-    c[2].metric("1X (Hz)", f"{D['rpm']/60:.1f}")
-    c[3].metric("Sensors", nch)
-    # --- Diagnóstico automático (narrativa tipo experto) ---
+    from datetime import date as _date
+    _scr = (D.get("payload") or {}).get("sensor_check")
+
+    # --- Auto-diagnóstico + hallazgos/recomendaciones automáticos (editables) ---
+    _mh = [m["fn"] for m in D["oma_modes"] if m["cls"] != "spurious"] or [m["fn"] for m in D["oma_modes"]]
+    _cx = compute_crossings(_mh, 0.0, D["rpm"] * 1.35, orders=[0.5, 1, 2, 3, 4, 5, 6, 7, 8],
+                            bands=[SpeedBand(D["rpm"] * 0.85, D["rpm"] * 1.15, "Operación ±15%")]) if _mh else []
     if D["oma_modes"]:
-        _mh = [m["fn"] for m in D["oma_modes"] if m["cls"] != "spurious"] or [m["fn"] for m in D["oma_modes"]]
-        _cx = compute_crossings(_mh, 0.0, D["rpm"] * 1.3,
-                                orders=[1, 2, 3, 4],
-                                bands=[SpeedBand(D["rpm"] * 0.85, D["rpm"] * 1.15, "Op ±15%")])
         _nar = _narrative(lay.name, D["oma_modes"], D["rpm"], _verd, _cx)
         st.markdown(f"<div style='background:#eef6ff;border-left:4px solid {BLUE};border-radius:8px;"
                     f"padding:12px 16px;margin:6px 0'><b>Auto-diagnosis</b><br>{_nar}</div>",
                     unsafe_allow_html=True)
-    # --- Registro de verificación de sensores (del campo) ---
-    _scr = (D.get("payload") or {}).get("sensor_check")
-    if _scr and _scr.get("png_b64"):
-        with st.expander(f"🔴 Sensor verification record — {_scr.get('n_ok','?')}/{_scr.get('n_total','?')} OK"):
-            st.markdown(f'<img src="data:image/png;base64,{_scr["png_b64"]}" '
-                        'style="width:100%;border:1px solid #e2e8f0;border-radius:10px">',
-                        unsafe_allow_html=True)
-    st.caption("Same corporate template as the Reports module: cover page + format band + "
-               "table of contents + machine, OMA (singular values + modes), Campbell, "
-               "EMA↔OMA correlation and conclusions.")
-    _lang = st.radio("Language", ["Español", "English"], horizontal=True, key="rep_lang")
+
+    def _auto_findings(es):
+        out = []
+        _ib = [c for c in _cx if c.in_band]
+        if _ib:
+            _w = min(_ib, key=lambda c: c.sep_margin_pct)
+            out.append(f"El modo de {_w.mode_hz:.1f} Hz coincide con el orden {_w.order:g}× dentro de la banda "
+                       f"de ±15% de la velocidad de operación (riesgo de resonancia)." if es else
+                       f"The {_w.mode_hz:.1f} Hz mode coincides with the {_w.order:g}× order within the ±15% "
+                       f"operating-speed band (resonance risk).")
+        else:
+            out.append("No se detectaron coincidencias de resonancia dentro de la banda de operación." if es else
+                       "No resonance coincidences within the operating band.")
+        return out
+
+    def _auto_recs(es):
+        return ["Correlacionar amplitud y fase de vibración contra la velocidad en operación (API 684)." if es else
+                "Correlate vibration amplitude and phase against running speed (API 684).",
+                "Si un modo cercano a 1×/2× presenta amplitud elevada, evaluar la rigidización de la base/skid "
+                "y verificar torque de anclajes." if es else
+                "If a mode near 1×/2× shows high amplitude, evaluate base/skid stiffening and check anchor-bolt torque."]
+
     if not D["oma_modes"]:
         st.info("Select a field run with identified modes to assemble the report.")
-    elif st.button("📄 Generate full report (PDF)", type="primary", key="rep_gen"):
-        try:
-            from core.modal.run_report import build_report_from_run
-            es = (_lang == "Español")
-            _L = (lambda s, e: s if es else e)
-            with st.spinner("Rendering 3D mode shapes and building the SIGA report (cover · TOC · findings)…"):
-                # Formas modales 3D (misma vista de geometría del app) → PNG por modo
-                pts = lay.active_points()
-                shape_pngs = []
-                for i, m in enumerate(D["oma_modes"][:3]):
-                    if D["shapes"] and i < len(D["shapes"]) and D["shapes"][i] is not None \
-                            and len(D["shapes"][i]) == len(pts):
-                        a = np.asarray(D["shapes"][i], float)
-                    else:
-                        a = np.random.default_rng(i + 1).standard_normal(len(pts))
+    else:
+        _lang = st.radio("Language", ["Español", "English"], horizontal=True, key="rep_lang")
+        _es = (_lang == "Español")
+        # ---------------- Metadata del reporte (consecutivo, firmas) -------------
+        st.markdown("**Report identification**")
+        _uname = (_user.get("name") or _user.get("full_name") or _user.get("email", "")).split("@")[0]
+        m1 = st.columns([1.2, 1, 1.4])
+        with m1[0]:
+            _consec = st.text_input("Consecutive", key="rep_consec",
+                                    value=st.session_state.get("rep_consec", f"OMA-{_date.today().year}-001"))
+        with m1[1]:
+            _rdate = st.text_input("Date", key="rep_date", value=st.session_state.get("rep_date", str(_date.today())))
+        with m1[2]:
+            _asset = st.text_input("Asset / Tag", key="rep_asset", value=st.session_state.get("rep_asset", lay.tag or lay.name))
+        m2 = st.columns(2)
+        with m2[0]:
+            _client = st.text_input("Client", key="rep_client", value=st.session_state.get("rep_client", lay.client or ""))
+        with m2[1]:
+            _location = st.text_input("Location", key="rep_loc", value=st.session_state.get("rep_loc", lay.location or ""))
+        m3 = st.columns(2)
+        with m3[0]:
+            _prep_by = st.text_input("Prepared by (Realizado por)", key="rep_prep", value=st.session_state.get("rep_prep", _uname))
+            _prep_role = st.text_input("Role", key="rep_prep_role", value=st.session_state.get("rep_prep_role", "Especialista"))
+        with m3[1]:
+            _rev_by = st.text_input("Approved by (Aprobado por)", key="rep_rev", value=st.session_state.get("rep_rev", ""))
+            _rev_role = st.text_input("Role ", key="rep_rev_role", value=st.session_state.get("rep_rev_role", "Aprobado por"))
+        _city = st.text_input("City", key="rep_city", value=st.session_state.get("rep_city", "Bogotá D.C."))
+
+        # ---------------- Hallazgos y Recomendaciones EDITABLES ------------------
+        st.markdown("**Findings & recommendations** *(one per line — edit freely)*")
+        fr = st.columns(2)
+        with fr[0]:
+            _find_txt = st.text_area("Findings (Hallazgos)", key="rep_find",
+                                     value=st.session_state.get("rep_find", "\n".join(_auto_findings(_es))), height=150)
+        with fr[1]:
+            _rec_txt = st.text_area("Recommendations (Recomendaciones)", key="rep_rec",
+                                    value=st.session_state.get("rep_rec", "\n".join(_auto_recs(_es))), height=150)
+        st.caption("Embedded in the PDF: machine 3D configuration · sensor-check status · spectral density "
+                   "(singular values) · mode shapes (3D) · Campbell (API 684) · EMA↔OMA correlation.")
+
+        if st.button("📄 Generate full report (PDF)", type="primary", key="rep_gen"):
+            try:
+                from core.modal.run_report import build_report_from_run
+                import base64 as _b64m
+                with st.spinner("Rendering figures (config · sensors · mode shapes) and building the SIGA report…"):
+                    pts = lay.active_points()
+                    # formas modales 3D
+                    shape_pngs = []
+                    for i, m in enumerate(D["oma_modes"][:3]):
+                        if D["shapes"] and i < len(D["shapes"]) and D["shapes"][i] is not None \
+                                and len(D["shapes"][i]) == len(pts):
+                            a = np.asarray(D["shapes"][i], float)
+                        else:
+                            a = np.random.default_rng(i + 1).standard_normal(len(pts))
+                        try:
+                            shape_pngs.append(_geometry_fig(lay, amp=a, height=460).to_image(
+                                format="png", width=1100, height=620, scale=2))
+                        except Exception:  # noqa: BLE001
+                            shape_pngs.append(None)
+                    # configuración 3D
                     try:
-                        png = _geometry_fig(lay, amp=a, height=460).to_image(
-                            format="png", width=1100, height=620, scale=2)
+                        config_png = _geometry_fig(lay, height=520).to_image(format="png", width=1200, height=680, scale=2)
                     except Exception:  # noqa: BLE001
-                        png = None
-                    shape_pngs.append(png)
-                # Hallazgos y recomendaciones automáticos (si el payload no los trae)
-                _mh = [m["fn"] for m in D["oma_modes"] if m["cls"] != "spurious"] or [m["fn"] for m in D["oma_modes"]]
-                _cx = compute_crossings(_mh, 0.0, D["rpm"] * 1.35, orders=[0.5, 1, 2, 3, 4, 5, 6, 7, 8],
-                                        bands=[SpeedBand(D["rpm"] * 0.85, D["rpm"] * 1.15, "Operación ±15%")])
-                findings = []
-                _ib = [c for c in _cx if c.in_band]
-                if _ib:
-                    _w = min(_ib, key=lambda c: c.sep_margin_pct)
-                    findings.append(
-                        f"El modo de {_w.mode_hz:.1f} Hz coincide con el orden {_w.order:g}× dentro de "
-                        f"la banda de ±15% de la velocidad de operación (riesgo de resonancia)."
-                        if es else
-                        f"The {_w.mode_hz:.1f} Hz mode coincides with the {_w.order:g}× order within the "
-                        f"±15% operating-speed band (resonance risk).")
-                _dr = _drops if '_drops' in dir() else []
-                if _dr:
-                    findings.append(
-                        "Al menos una frecuencia natural descendió ≥3% respecto a corridas previas: "
-                        "posible pérdida de rigidez (aflojamiento, fisura o degradación del skid/base)."
-                        if es else
-                        "At least one natural frequency dropped ≥3% vs previous runs: possible loss of "
-                        "stiffness (loosening, cracking, or skid/base degradation).")
-                if not findings:
-                    findings.append(
-                        "No se detectaron coincidencias de resonancia dentro de la banda de operación "
-                        "para los modos identificados."
-                        if es else
-                        "No resonance coincidences were detected within the operating band for the "
-                        "identified modes.")
-                recommendations = [
-                    "Correlacionar amplitud y fase de vibración contra la velocidad en operación (API 684)."
-                    if es else
-                    "Correlate vibration amplitude and phase against running speed (API 684).",
-                    "Si un modo cercano a 1×/2× presenta amplitud elevada, evaluar la rigidización de la "
-                    "base/skid y verificar torque de anclajes."
-                    if es else
-                    "If a mode near 1×/2× shows high amplitude, evaluate base/skid stiffening and check "
-                    "anchor-bolt torque.",
-                ]
-                # respetar los del payload si existen
-                _pl = D.get("payload") or {}
-                pdf = build_report_from_run(
-                    _pl, bilingual_es=es, shape_pngs=shape_pngs,
-                    findings=_pl.get("findings") or findings,
-                    recommendations=_pl.get("recommendations") or recommendations)
-            st.session_state["_modal_report_pdf"] = pdf
-        except Exception as e:  # noqa: BLE001
-            st.error(f"Could not build the report: {type(e).__name__}: {e}")
-    _pdf = st.session_state.get("_modal_report_pdf")
-    if _pdf:
-        st.download_button("⬇ Download report PDF", data=_pdf,
-                           file_name=f"OMA_{(lay.tag or lay.name).replace(' ', '_')}.pdf",
-                           mime="application/pdf", use_container_width=True)
-        import base64
-        _b64 = base64.b64encode(_pdf).decode()
-        st.markdown(
-            f'<iframe src="data:application/pdf;base64,{_b64}" width="100%" height="820" '
-            f'style="border:1px solid #e2e8f0;border-radius:8px"></iframe>',
-            unsafe_allow_html=True)
+                        config_png = None
+                    # verificación de sensores (imagen del campo)
+                    sensor_png = None; sensor_rows = None
+                    if _scr:
+                        if _scr.get("png_b64"):
+                            try:
+                                sensor_png = _b64m.b64decode(_scr["png_b64"])
+                            except Exception:  # noqa: BLE001
+                                sensor_png = None
+                        sensor_rows = _scr.get("rows") or None
+                    _findings = [x.strip() for x in _find_txt.splitlines() if x.strip()]
+                    _recs = [x.strip() for x in _rec_txt.splitlines() if x.strip()]
+                    _meta_extra = {"consecutive": _consec, "report_date": _rdate, "asset": _asset,
+                                   "client": _client, "location": _location,
+                                   "prepared_by": _prep_by, "prepared_role": _prep_role, "prepared_city": _city,
+                                   "reviewed_by": _rev_by, "reviewed_role": _rev_role, "reviewed_city": _city}
+                    pdf = build_report_from_run(
+                        D.get("payload") or {}, bilingual_es=_es, shape_pngs=shape_pngs,
+                        findings=_findings, recommendations=_recs, meta_extra=_meta_extra,
+                        config_png=config_png, sensor_png=sensor_png, sensor_rows=sensor_rows)
+                st.session_state["_modal_report_pdf"] = pdf
+                st.session_state["_modal_report_meta"] = {
+                    "consecutive": _consec, "client": _client, "asset": _asset,
+                    "location": _location, "report_date": _rdate, "report_title": "Reporte OMA",
+                    "prepared_by": _prep_by, "reviewed_by": _rev_by, "format_code": "SIGA-FMT-179"}
+                st.success("Report generated.")
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Could not build the report: {type(e).__name__}: {e}")
+
+        _pdf = st.session_state.get("_modal_report_pdf")
+        if _pdf:
+            dl = st.columns([1, 1])
+            with dl[0]:
+                st.download_button("⬇ Download PDF", data=_pdf,
+                                   file_name=f"{(_consec or 'OMA').replace(' ', '_')}.pdf",
+                                   mime="application/pdf", use_container_width=True)
+            with dl[1]:
+                _share = st.checkbox("Share with client", key="rep_share")
+                if st.button("✅ Approve & store", key="rep_archive", use_container_width=True):
+                    try:
+                        from core.reports_archive import archive_report_pdf
+                        r = archive_report_pdf(pdf_bytes=_pdf,
+                                               meta=st.session_state.get("_modal_report_meta", {}),
+                                               owner_email=_user.get("email", ""),
+                                               shared_with_client=bool(_share),
+                                               extra_notes="Watermelon Modal (web) OMA report")
+                        if r.get("ok"):
+                            st.success(f"Stored · {r.get('archive_id','')}")
+                        else:
+                            st.error(f"Could not store: {r.get('error','?')}")
+                    except Exception as e:  # noqa: BLE001
+                        st.error(f"Could not store: {type(e).__name__}: {e}")
+            import base64
+            _b64 = base64.b64encode(_pdf).decode()
+            st.markdown(
+                f'<iframe src="data:application/pdf;base64,{_b64}" width="100%" height="820" '
+                f'style="border:1px solid #e2e8f0;border-radius:8px"></iframe>',
+                unsafe_allow_html=True)
+
+    # ---------------- Reportes almacenados (archivo) -------------------------
+    with st.expander("📁 Stored OMA reports", expanded=False):
+        try:
+            from core.reports_archive import list_archived_reports, get_archived_pdf_bytes
+            _arch = list_archived_reports(viewer_email=_user.get("email", ""), viewer_role=_my_role,
+                                          text_search="OMA", limit=100)
+        except Exception:  # noqa: BLE001
+            _arch = []
+        if not _arch:
+            st.caption("No stored OMA reports yet. Generate one above and click **Approve & store**.")
+        else:
+            for _a in _arch[:25]:
+                _am = _a.get("meta", {}) or {}
+                _cid = _a.get("archive_id", "")
+                cols = st.columns([3, 2, 2, 1.4])
+                cols[0].markdown(f"**{_am.get('consecutive','—')}** · {_am.get('client','')}")
+                cols[1].write(_am.get("asset", ""))
+                cols[2].write(str(_a.get("archived_at", ""))[:16])
+                if cols[3].button("⬇", key=f"dl_{_cid}"):
+                    try:
+                        _bytes = get_archived_pdf_bytes(_cid, _user.get("email", ""), _my_role)
+                        if _bytes:
+                            st.download_button("Download", data=_bytes, file_name=f"{_am.get('consecutive','OMA')}.pdf",
+                                               mime="application/pdf", key=f"dlb_{_cid}")
+                    except Exception as e:  # noqa: BLE001
+                        st.error(f"{type(e).__name__}: {e}")

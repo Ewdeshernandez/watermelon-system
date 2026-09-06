@@ -98,6 +98,9 @@ def build_oma_siga_pdf(
     norms: Optional[Sequence[str]] = None,
     max_shape_modes: int = 3,
     mode_shape_pngs: Optional[Sequence[bytes]] = None,
+    config_png: Optional[bytes] = None,
+    sensor_png: Optional[bytes] = None,
+    sensor_rows: Optional[Sequence[Sequence[Any]]] = None,
 ) -> bytes:
     """Arma el PDF OMA SIGA. `conditions` = [{label, fdd_result, notes?}, ...].
 
@@ -150,6 +153,30 @@ def build_oma_siga_pdf(
         "La instrumentación se instaló siguiendo las buenas prácticas de medición estructural "
         "(API 684, ISO 20816), empleando acelerómetros piezoeléctricos calibrados con montaje "
         "rígido. Se verificó la fijación, el cableado y la sincronización de canales."), styles))
+    # 5.1 · Configuración de medición (vista 3D de la máquina y sensores)
+    if config_png:
+        body.append(subsection("5.1 Configuración de medición", styles))
+        img = safe_image(config_png, 16.5, 9.0)
+        if img is not None:
+            body.append(img)
+            body.append(p("Figura. Disposición de la máquina y ubicación de los sensores (3D).",
+                          styles, "WMFigureCaption"))
+    # 5.2 · Verificación de sensórica (chequeo de campo antes de la captura)
+    if sensor_png or sensor_rows:
+        body.append(subsection("5.2 Verificación de sensórica", styles))
+        body.append(p("Antes de la captura se verificó que cada canal estuviera cableado y "
+                      "respondiendo (prueba de golpe/tap en campo).", styles))
+        if sensor_png:
+            img = safe_image(sensor_png, 16.5, 8.0)
+            if img is not None:
+                body.append(img)
+                body.append(p("Figura. Chequeo multicanal de sensores en vivo.",
+                              styles, "WMFigureCaption"))
+        if sensor_rows:
+            body.append(grid_table(["Canal", "RMS", "Pico", "Estado"],
+                                   [list(r)[:4] for r in sensor_rows], styles))
+            body.append(p("Tabla. Estado de los sensores en la verificación de campo.",
+                          styles, "WMFigureCaption"))
 
     # 6 · Resultados OMA — por condición
     body.append(section("6. Resultados – Análisis Modal Operacional (OMA)", styles))
