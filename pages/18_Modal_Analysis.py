@@ -43,6 +43,56 @@ if not is_page_allowed_for_role("pages/18_Modal_Analysis.py", _my_role):
 
 NAVY = "#0F1E3D"; GREEN = "#16a34a"; BLUE = "#2563eb"; AMBER = "#f59e0b"; RED = "#dc2626"; SLATE = "#475569"
 
+# --- Tema de gráficos "watermelon" (industrial, consistente en toda la página) ---
+import plotly.io as _pio
+import plotly.graph_objects as _go
+_pio.templates["watermelon"] = _go.layout.Template(
+    layout=dict(
+        font=dict(family="IBM Plex Sans, Segoe UI, Arial", size=13, color="#334155"),
+        title=dict(font=dict(family="IBM Plex Sans", size=15, color=NAVY)),
+        colorway=[BLUE, GREEN, RED, "#7c3aed", AMBER, "#0891b2", "#db2777", SLATE],
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="#f8fafc",
+        xaxis=dict(gridcolor="#e6ecf5", zerolinecolor="#dbe4f0", linecolor="#cbd5e1", ticks="outside", tickcolor="#cbd5e1"),
+        yaxis=dict(gridcolor="#e6ecf5", zerolinecolor="#dbe4f0", linecolor="#cbd5e1", ticks="outside", tickcolor="#cbd5e1"),
+        margin=dict(l=56, r=20, t=44, b=48),
+        legend=dict(bgcolor="rgba(255,255,255,.7)", bordercolor="#e2e8f0", borderwidth=1),
+    ))
+
+
+def _inject_theme():
+    st.markdown("""
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap');
+      html, body, [class*="css"] { font-family:'IBM Plex Sans',system-ui,sans-serif; }
+      .block-container { padding-top: 1.4rem; max-width: 1200px; }
+      /* Hero */
+      .wm-hero { background: linear-gradient(110deg,#0F1E3D 0%,#12325a 55%,#16a34a 160%);
+        border-radius:16px; padding:20px 24px; color:#fff; box-shadow:0 10px 30px rgba(15,30,61,.18);
+        display:flex; justify-content:space-between; align-items:flex-start; gap:16px; flex-wrap:wrap; }
+      .wm-hero h1 { font-size:24px; font-weight:700; margin:0 0 4px; letter-spacing:-.01em; }
+      .wm-hero .meta { color:#cbd5e1; font-size:13px; }
+      .wm-chip { font-size:12px; font-weight:700; letter-spacing:.03em; text-transform:uppercase;
+        padding:7px 14px; border-radius:999px; }
+      .wm-go { background:#16a34a; color:#fff; } .wm-rev { background:#f59e0b; color:#0f1e3d; }
+      .wm-nogo { background:#dc2626; color:#fff; }
+      /* KPI cards */
+      .wm-kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin:14px 0 6px; }
+      .wm-kpi { background:#fff; border:1px solid #e6ecf5; border-radius:14px; padding:14px 16px;
+        box-shadow:0 1px 2px rgba(15,30,61,.04),0 6px 18px rgba(15,30,61,.05); }
+      .wm-kpi .v { font-family:'IBM Plex Mono',monospace; font-size:26px; font-weight:600; color:#0F1E3D; line-height:1.1; }
+      .wm-kpi .l { font-size:12px; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-top:4px; }
+      .wm-kpi .s { font-size:12px; color:#94a3b8; }
+      /* Tabs */
+      .stTabs [data-baseweb="tab-list"] { gap:4px; }
+      .stTabs [data-baseweb="tab"] { background:#eef2f8; border-radius:9px 9px 0 0; padding:8px 14px; font-weight:600; }
+      .stTabs [aria-selected="true"] { background:#0F1E3D !important; color:#fff !important; }
+      @media (prefers-color-scheme: dark){
+        .wm-kpi{ background:#141b26; border-color:#243040; }
+        .wm-kpi .v{ color:#eaf0f7; }
+      }
+    </style>
+    """, unsafe_allow_html=True)
+
 
 # ------------------------------------------------------------------ colores / 3D
 def _comp_color(kind: str) -> str:
@@ -199,6 +249,7 @@ def _build_cloud_D(payload: dict):
 
 
 # ================================================================== HEADER
+_inject_theme()
 page_header("Watermelon Modal", subtitle="EMA + OMA field analysis — one platform, field to report")
 
 # --- selector de fuente: corridas reales de la nube o dataset de muestra ---
@@ -237,12 +288,44 @@ else:
 
 lay = D["lay"]; nch = lay.n_channels()
 
-# Contexto del equipo (solo-lectura; la CONFIGURACIÓN se hace en el software de campo).
-st.markdown(
-    f"<div style='background:#f1f5f9;border-radius:8px;padding:8px 14px;margin:4px 0 2px'>"
-    f"<b>{lay.name}</b> · {lay.client or '—'} · {lay.location or '—'} · "
-    f"Tag {lay.tag or '—'} · {int(D['rpm'])} RPM · {nch} sensors</div>",
-    unsafe_allow_html=True)
+# --- Veredicto global (validación automática de modos) para el hero ---
+from core.modal.mode_validation import validate_modes as _vm
+_ssi_f = [m["fn"] for m in (D["ssi_cloud"] or {}).get("modes", [])] if D["ssi_cloud"] else []
+_verd = _vm(D["oma_modes"], ssi_freqs_hz=_ssi_f, running_speed_rpm=D["rpm"]) if D["oma_modes"] else []
+_nval = sum(1 for v in _verd if v.verdict == "validated")
+_ndbt = sum(1 for v in _verd if v.verdict == "doubtful")
+_nrej = sum(1 for v in _verd if v.verdict == "rejected")
+if _nrej:
+    _chip, _cls = "NO-GO — review", "wm-nogo"
+elif _ndbt:
+    _chip, _cls = "Review", "wm-rev"
+else:
+    _chip, _cls = "GO — data acceptable", "wm-go"
+
+# --- Hero de la máquina (industrial, con veredicto) ---
+st.markdown(f"""
+<div class="wm-hero">
+  <div>
+    <h1>{lay.name}</h1>
+    <div class="meta">{lay.client or '—'} · {lay.location or '—'} · Tag {lay.tag or '—'} ·
+      {lay.machine_type or 'Motor-pump'}</div>
+  </div>
+  <div style="text-align:right">
+    <span class="wm-chip {_cls}">{_chip}</span>
+    <div class="meta" style="margin-top:8px">{'☁ Field run' if D['source']=='cloud' else '🧪 Sample dataset'}</div>
+  </div>
+</div>
+<div class="wm-kpis">
+  <div class="wm-kpi"><div class="v">{len(D['oma_modes'])}</div><div class="l">OMA modes</div>
+    <div class="s">{_nval} validated · {_ndbt} doubtful · {_nrej} rejected</div></div>
+  <div class="wm-kpi"><div class="v">{int(D['rpm'])}</div><div class="l">Running speed</div>
+    <div class="s">1× = {D['rpm']/60:.1f} Hz</div></div>
+  <div class="wm-kpi"><div class="v">{nch}</div><div class="l">Sensors</div>
+    <div class="s">{len(lay.machine_components)} components</div></div>
+  <div class="wm-kpi"><div class="v">{int(lay.fmax_hz)}<span style="font-size:14px"> Hz</span></div>
+    <div class="l">Bandwidth (Fmax)</div><div class="s">fs {int(lay.fs_hz)} Hz</div></div>
+</div>
+""", unsafe_allow_html=True)
 
 TABS = ["🟢  Impact test (EMA)", "🟣  Modes (EMA)", "🟡  OMA capture",
         "🟠  SSI (subspace)", "🔴  Comparative", "🟤  Campbell", "⚫  Mode shapes",
@@ -263,7 +346,7 @@ with tab_ema:
     fig.add_trace(go.Scatter(x=_fx, y=_coh, line=dict(color=GREEN)), 2, 1)
     fig.update_yaxes(title_text="dB", row=1, col=1); fig.update_yaxes(range=[0, 1.05], row=2, col=1)
     fig.update_xaxes(title_text="Frequency (Hz)", row=2, col=1)
-    fig.update_layout(height=470, template="plotly_white", showlegend=False)
+    fig.update_layout(height=470, template="watermelon", showlegend=False)
     st.plotly_chart(fig, use_container_width=True)
     if D["ema_curve"] is not None:
         st.success("Real impact FRF from the field run (ISO 7626-5).")
@@ -288,7 +371,7 @@ with tab_modes:
                          use_container_width=True, hide_index=True)
     with cc2:
         fig = go.Figure(go.Scatter(x=H.real, y=H.imag, mode="lines", line=dict(color=NAVY)))
-        fig.update_layout(title="Nyquist (mobility)", height=380, template="plotly_white",
+        fig.update_layout(title="Nyquist (mobility)", height=380, template="watermelon",
                           xaxis_title="Re", yaxis_title="Im")
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
         st.plotly_chart(fig, use_container_width=True)
@@ -304,7 +387,7 @@ with tab_oma:
                           width=1.6 if r == 0 else 1), name=label))
         for m in D["oma_modes"]:
             fig.add_vline(x=m["fn"], line=dict(color=RED, width=1, dash="dot"))
-        fig.update_layout(title="Singular values (all channels)", height=430, template="plotly_white",
+        fig.update_layout(title="Singular values (all channels)", height=430, template="watermelon",
                           xaxis_title="Frequency (Hz)", yaxis_title="dB")
         st.plotly_chart(fig, use_container_width=True)
     st.dataframe([{"Freq (Hz)": round(m["fn"], 2), "Damping (%)": round(m["zeta"], 3),
@@ -318,6 +401,21 @@ with tab_oma:
         st.markdown("**Automatic mode validation** *(validated / doubtful / rejected)*")
         st.dataframe(verdict_rows(_verd), use_container_width=True, hide_index=True)
         st.info(mv_sum(_verd))
+    # --- Registro de verificación de sensores (del software de campo) ---
+    _scr = (D.get("payload") or {}).get("sensor_check")
+    if _scr:
+        with st.expander(f"🔴 Sensor verification record — {_scr.get('n_ok','?')}/{_scr.get('n_total','?')} "
+                         f"channels OK ({str(_scr.get('ts',''))[:16]})", expanded=False):
+            st.caption("Proof the sensors were wired and responding before the capture (field bump/tap test).")
+            _png = _scr.get("png_b64")
+            if _png:
+                st.markdown(f'<img src="data:image/png;base64,{_png}" '
+                            'style="width:100%;border:1px solid #e2e8f0;border-radius:10px">',
+                            unsafe_allow_html=True)
+            _rows = _scr.get("rows") or []
+            if _rows:
+                st.dataframe([{"Ch": r[0], "RMS": r[1], "Peak": r[2], "Status": r[3]} for r in _rows],
+                             use_container_width=True, hide_index=True, height=240)
 
 # ---------------------------------------------------------------- 5 SSI
 with tab_ssi:
@@ -336,7 +434,7 @@ with tab_ssi:
         for m in ssi.modes:
             fig.add_vline(x=m.frequency_hz, line=dict(color=RED, width=1, dash="dot"))
         fig.update_layout(title="Stabilization diagram (green = stable pole)", height=430,
-                          template="plotly_white", xaxis_title="Frequency (Hz)", yaxis_title="Model order")
+                          template="watermelon", xaxis_title="Frequency (Hz)", yaxis_title="Model order")
         st.plotly_chart(fig, use_container_width=True)
         st.dataframe([{"Mode": i + 1, "Freq (Hz)": round(m.frequency_hz, 3),
                        "± Hz": round(m.std_frequency_hz, 3),
@@ -356,7 +454,7 @@ with tab_ssi:
         for m in _ssi["modes"]:
             fig.add_vline(x=m["fn"], line=dict(color=RED, width=1, dash="dot"))
         fig.update_layout(title="Stabilization diagram (green = stable pole)", height=430,
-                          template="plotly_white", xaxis_title="Frequency (Hz)", yaxis_title="Model order")
+                          template="watermelon", xaxis_title="Frequency (Hz)", yaxis_title="Model order")
         st.plotly_chart(fig, use_container_width=True)
         st.dataframe([{"Mode": i + 1, "Freq (Hz)": round(m["fn"], 3),
                        "± Hz": round(m.get("std_fn", 0.0), 3),
@@ -390,7 +488,7 @@ with tab_cmp:
         for m in matches:
             fig.add_shape(type="line", x0=m.ema_hz, y0=1, x1=m.oma_hz, y1=0,
                           line=dict(color="#94a3b8", width=1, dash="dot"))
-        fig.update_layout(title="EMA (▲) vs OMA (●)", height=320, template="plotly_white",
+        fig.update_layout(title="EMA (▲) vs OMA (●)", height=320, template="watermelon",
                           xaxis_title="Frequency (Hz)",
                           yaxis=dict(showticklabels=False, range=[-0.5, 1.5]))
         st.plotly_chart(fig, use_container_width=True)
@@ -419,7 +517,7 @@ with tab_camp:
             fig.add_trace(go.Scatter(x=[cr.crossing_rpm], y=[cr.mode_hz], mode="markers", showlegend=False,
                           marker=dict(color=RED if cr.in_band else AMBER, size=10, symbol="x")))
         fig.update_layout(title="Campbell — fn (dashed) vs orders; red band = operating ±15%",
-                          height=470, template="plotly_white",
+                          height=470, template="watermelon",
                           xaxis_title="Running speed (RPM)", yaxis_title="Frequency (Hz)")
         st.plotly_chart(fig, use_container_width=True)
         if crossings:
