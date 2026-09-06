@@ -143,6 +143,87 @@ def _geometry_fig(lay, amp=None, show_sensors=True, height=520):
     return fig
 
 
+_AX = {"A": (1, 0, 0), "X": (1, 0, 0), "H": (0, 1, 0), "Y": (0, 1, 0),
+       "V": (0, 0, 1), "Z": (0, 0, 1)}
+
+
+def _mode_anim_fig(lay, amps_signed, height=560):
+    """Forma modal 3D ANIMADA: la máquina (tenue) + nodos de sensores que oscilan
+    a lo largo de su DOF, coloreados por amplitud. Con botón Play."""
+    pts = lay.active_points()
+    if not pts or amps_signed is None or len(amps_signed) != len(pts):
+        return _geometry_fig(lay, height=height)
+    a = np.asarray(amps_signed, float)
+    a = a / (np.max(np.abs(a)) or 1.0)
+    col = np.abs(a)
+    P0 = np.array([[p.x_norm, 0.20, p.y_norm] for p in pts], float)
+    dirs = np.array([_AX.get(p.axis, (0, 0, 1)) for p in pts], float)
+    dirs *= np.array([[-1.0 if p.dof.startswith("-") else 1.0] for p in pts])
+    scale = 0.12
+    base = go.Figure()
+    # máquina tenue de fondo
+    for c in lay.machine_components:
+        cc = getattr(c, "color", "") or _comp_color(c.kind)
+        X, Y, Z, i, j, k = _cube(c.x0, c.x1, c.y0, c.y1, c.depth)
+        base.add_trace(go.Mesh3d(x=X, y=Y, z=Z, i=i, j=j, k=k, color=cc, opacity=0.18,
+                                 flatshading=True, hoverinfo="skip", showscale=False))
+
+    def _nodes(phase):
+        d = P0 + (scale * a * np.sin(phase))[:, None] * dirs
+        return d
+
+    d0 = _nodes(0.0)
+    base.add_trace(go.Scatter3d(x=d0[:, 0], y=d0[:, 1], z=d0[:, 2], mode="markers",
+                   marker=dict(size=6, color=col, colorscale="YlOrRd", cmin=0, cmax=1,
+                               line=dict(width=1, color="#0f172a")),
+                   hovertext=[p.code for p in pts], hoverinfo="text", name="mode"))
+    frames = []
+    for f in range(24):
+        ph = f / 24.0 * 2 * np.pi; d = _nodes(ph)
+        frames.append(go.Frame(data=[go.Scatter3d(x=d[:, 0], y=d[:, 1], z=d[:, 2], mode="markers",
+                      marker=dict(size=6, color=col, colorscale="YlOrRd", cmin=0, cmax=1,
+                                  line=dict(width=1, color="#0f172a")))],
+                      traces=[len(lay.machine_components)]))
+    base.frames = frames
+    base.update_layout(
+        height=height, margin=dict(l=0, r=0, t=10, b=0), showlegend=False,
+        scene=dict(aspectmode="data", xaxis=dict(visible=False), yaxis=dict(visible=False),
+                   zaxis=dict(visible=False), camera=dict(eye=dict(x=1.5, y=1.5, z=1.0))),
+        paper_bgcolor="rgba(0,0,0,0)",
+        updatemenus=[dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
+            buttons=[dict(label="▶ Play", method="animate",
+                          args=[None, dict(frame=dict(duration=60, redraw=True), fromcurrent=True,
+                                           transition=dict(duration=0), mode="immediate")]),
+                     dict(label="⏸", method="animate",
+                          args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])])
+    return base
+
+
+def _narrative(name, modes, rpm, verdicts, crossings):
+    """Diagnóstico automático en prosa (tipo experto) a partir de modos/Campbell."""
+    if not modes:
+        return "No operational modes identified yet."
+    fns = sorted(m["fn"] for m in modes)
+    x1 = rpm / 60.0
+    nval = sum(1 for v in verdicts if v.verdict == "validated")
+    nharm = sum(1 for v in verdicts if getattr(v, "is_harmonic", False))
+    inband = [c for c in crossings if c.in_band]
+    parts = [f"{len(modes)} operational modes were identified between {fns[0]:.1f} and {fns[-1]:.1f} Hz "
+             f"({nval} validated by FDD∩SSI)."]
+    if nharm:
+        parts.append(f"{nharm} peak(s) coincide with running-speed orders (1×={x1:.1f} Hz) and are flagged "
+                     "as harmonics, not structural modes.")
+    if inband:
+        c = min(inband, key=lambda c: c.sep_margin_pct)
+        parts.append(f"⚠ The {c.mode_hz:.1f} Hz mode falls within ±15% of the {c.order:g}× order "
+                     f"(margin {c.sep_margin_pct:.1f}%, API 684) — a resonance risk near operating speed; "
+                     "correlate with amplitude/phase and evaluate skid/base stiffness.")
+    else:
+        parts.append("No natural frequency falls within ±15% of the running-speed orders (API 684): "
+                     "adequate separation at the operating speed.")
+    return " ".join(parts)
+
+
 def _sec(title, subtitle="", norm=""):
     st.markdown(f"#### {title}")
     line = subtitle + ((" · " if subtitle else "") + f"*{norm}*" if norm else "")
@@ -231,7 +312,11 @@ def _build_cloud_D(payload: dict):
     for m in modes:
         sh = m.get("shape") or {}
         re = np.asarray(sh.get("re", []), float); im = np.asarray(sh.get("im", []), float)
-        shapes.append(np.abs(re + 1j * im) if re.size else None)
+        # parte real (con signo) para animar la oscilación; si es imaginaria pura, magnitud
+        if re.size:
+            shapes.append(re if np.any(np.abs(re) > 1e-9) else np.abs(re + 1j * im))
+        else:
+            shapes.append(None)
     ema_blk = payload.get("ema") or None
     ema_curve = None; ema_modes_full = None
     if ema_blk and ema_blk.get("freqs"):
@@ -288,6 +373,24 @@ else:
 
 lay = D["lay"]; nch = lay.n_channels()
 
+# --- Modo oscuro industrial (opcional) ---
+_dark = st.toggle("🌙 Dark mode", key="wm_dark")
+if _dark:
+    _wt = _pio.templates["watermelon"].layout
+    _wt.plot_bgcolor = "#0f141c"; _wt.font.color = "#cbd5e1"
+    _wt.xaxis.gridcolor = "#243040"; _wt.xaxis.linecolor = "#334155"; _wt.xaxis.tickcolor = "#334155"
+    _wt.yaxis.gridcolor = "#243040"; _wt.yaxis.linecolor = "#334155"; _wt.yaxis.tickcolor = "#334155"
+    _wt.title.font.color = "#eaf0f7"
+    _wt.legend.bgcolor = "rgba(20,27,38,.7)"; _wt.legend.bordercolor = "#243040"
+    st.markdown("""<style>
+      .stApp{ background:#0b0f14; }
+      .block-container, .stMarkdown, p, span, label, h1,h2,h3,h4 { color:#e7edf5 !important; }
+      .wm-kpi{ background:#141b26 !important; border-color:#243040 !important; }
+      .wm-kpi .v{ color:#eaf0f7 !important; } .wm-kpi .l{ color:#94a3b6 !important; }
+      .stTabs [data-baseweb="tab"]{ background:#141b26; color:#c7d2e0; }
+      [data-testid="stDataFrame"]{ filter:invert(.92) hue-rotate(180deg); }
+    </style>""", unsafe_allow_html=True)
+
 # --- Veredicto global (validación automática de modos) para el hero ---
 from core.modal.mode_validation import validate_modes as _vm
 _ssi_f = [m["fn"] for m in (D["ssi_cloud"] or {}).get("modes", [])] if D["ssi_cloud"] else []
@@ -329,8 +432,9 @@ st.markdown(f"""
 
 TABS = ["🟢  Impact test (EMA)", "🟣  Modes (EMA)", "🟡  OMA capture",
         "🟠  SSI (subspace)", "🔴  Comparative", "🟤  Campbell", "⚫  Mode shapes",
-        "🔵  Report"]
-tab_ema, tab_modes, tab_oma, tab_ssi, tab_cmp, tab_camp, tab_shapes, tab_report = st.tabs(TABS)
+        "📈  Trend / Compare", "🔵  Report"]
+(tab_ema, tab_modes, tab_oma, tab_ssi, tab_cmp, tab_camp, tab_shapes,
+ tab_trend, tab_report) = st.tabs(TABS)
 
 # ---------------------------------------------------------------- 1 EMA
 with tab_ema:
@@ -532,16 +636,69 @@ with tab_shapes:
     sel = st.selectbox("Mode", opts, index=0)
     idx = opts.index(sel) if modes else 0
     pts = lay.active_points()
-    amp = None
     if D["shapes"] and idx < len(D["shapes"]) and D["shapes"][idx] is not None \
             and len(D["shapes"][idx]) == len(pts):
-        amp = np.asarray(D["shapes"][idx], float)
+        amp = np.asarray(D["shapes"][idx], float)              # forma modal (con signo)
     else:
-        rng = np.random.default_rng(idx + 1)
-        amp = np.abs(rng.standard_normal(len(pts)))
-    amp = (amp - amp.min()) / (np.ptp(amp) or 1)
-    st.plotly_chart(_geometry_fig(lay, amp=list(amp), height=560), use_container_width=True)
-    st.caption("Marker color = relative vibration amplitude at each sensor for the selected mode.")
+        amp = np.random.default_rng(idx + 1).standard_normal(len(pts))
+    st.plotly_chart(_mode_anim_fig(lay, amp, height=560), use_container_width=True)
+    st.caption("Press ▶ Play — nodes oscillate along their DOF; colour = amplitude (green→red). "
+               "The machine is shown faint for reference.")
+
+# ---------------------------------------------------------------- 8b TREND / COMPARE
+with tab_trend:
+    _sec("Trend / Compare", "Track natural frequencies across field runs over time",
+         "condition monitoring")
+    _series = []   # (label, date, [fn,...])
+    if _opts:
+        _pick = st.multiselect("Runs to compare", list(_opts.keys()),
+                               default=list(_opts.keys())[:6])
+        for lab in _pick:
+            pl = load_run(_opts[lab])
+            if pl:
+                fns = sorted(float(m.get("fn", 0)) for m in (pl.get("modes") or []))
+                _series.append((pl.get("name", lab), str(lab).split("· ")[-1], fns))
+    if len(_series) < 2:
+        st.info("Pick 2+ field runs above to see the trend. "
+                "Showing an example of how the same machine is tracked over time:")
+        base = [19.4, 38.8, 77.4, 129.9]
+        for k, dd in enumerate(["2026-06-01", "2026-07-15", "2026-09-06"]):
+            drift = 1 - 0.012 * k          # el skid pierde rigidez → fn baja con el tiempo
+            _series.append((f"Run {k+1}", dd, [round(f * drift, 2) for f in base]))
+    # emparejar modos por cercanía al primer run → líneas de tendencia
+    ref = _series[0][2]
+    fig = go.Figure()
+    xs = [s[1] for s in _series]
+    for mi, f0 in enumerate(ref):
+        ys = []
+        for (_nm, _dt, fns) in _series:
+            near = min(fns, key=lambda x: abs(x - f0)) if fns else None
+            ys.append(near if (near is not None and abs(near - f0) <= 0.15 * f0) else None)
+        fig.add_trace(go.Scatter(x=xs, y=ys, mode="lines+markers", name=f"Mode {mi+1} (~{f0:.0f} Hz)",
+                      connectgaps=True, marker=dict(size=9)))
+    fig.update_layout(title="Natural frequency trend across runs", height=440, template="watermelon",
+                      xaxis_title="Run / date", yaxis_title="Frequency (Hz)")
+    st.plotly_chart(fig, use_container_width=True)
+    # tabla + alerta de caída
+    import pandas as _pd_tr
+    rows = []
+    for mi, f0 in enumerate(ref):
+        vals = []
+        for (_nm, _dt, fns) in _series:
+            near = min(fns, key=lambda x: abs(x - f0)) if fns else None
+            vals.append(near if (near is not None and abs(near - f0) <= 0.15 * f0) else None)
+        v0, vN = vals[0], vals[-1]
+        dpc = ((vN - v0) / v0 * 100) if (v0 and vN) else None
+        rows.append({"Mode": f"~{f0:.0f} Hz",
+                     **{s[1]: (f"{v:.2f}" if v else "—") for s, v in zip(_series, vals)},
+                     "Δ% (first→last)": (f"{dpc:+.1f}%" if dpc is not None else "—")})
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+    _drops = [r for r in rows if r["Δ% (first→last)"] != "—" and float(r["Δ% (first→last)"].rstrip('%')) <= -3]
+    if _drops:
+        st.warning("⚠ A natural frequency dropped ≥3% over time — possible loss of stiffness "
+                   "(loosening, cracking, or skid/base degradation). Investigate.")
+    else:
+        st.success("Natural frequencies stable across runs — no stiffness loss detected.")
 
 # ---------------------------------------------------------------- 9 PRELIMINARY
 with tab_report:
@@ -552,6 +709,23 @@ with tab_report:
     c[1].metric("OMA modes", len(D["oma_modes"]))
     c[2].metric("1X (Hz)", f"{D['rpm']/60:.1f}")
     c[3].metric("Sensors", nch)
+    # --- Diagnóstico automático (narrativa tipo experto) ---
+    if D["oma_modes"]:
+        _mh = [m["fn"] for m in D["oma_modes"] if m["cls"] != "spurious"] or [m["fn"] for m in D["oma_modes"]]
+        _cx = compute_crossings(_mh, 0.0, D["rpm"] * 1.3,
+                                orders=[1, 2, 3, 4],
+                                bands=[SpeedBand(D["rpm"] * 0.85, D["rpm"] * 1.15, "Op ±15%")])
+        _nar = _narrative(lay.name, D["oma_modes"], D["rpm"], _verd, _cx)
+        st.markdown(f"<div style='background:#eef6ff;border-left:4px solid {BLUE};border-radius:8px;"
+                    f"padding:12px 16px;margin:6px 0'><b>🧠 Auto-diagnosis</b><br>{_nar}</div>",
+                    unsafe_allow_html=True)
+    # --- Registro de verificación de sensores (del campo) ---
+    _scr = (D.get("payload") or {}).get("sensor_check")
+    if _scr and _scr.get("png_b64"):
+        with st.expander(f"🔴 Sensor verification record — {_scr.get('n_ok','?')}/{_scr.get('n_total','?')} OK"):
+            st.markdown(f'<img src="data:image/png;base64,{_scr["png_b64"]}" '
+                        'style="width:100%;border:1px solid #e2e8f0;border-radius:10px">',
+                        unsafe_allow_html=True)
     st.caption("Same corporate template as the Reports module: cover page + format band + "
                "table of contents + machine, OMA (singular values + modes), Campbell, "
                "EMA↔OMA correlation and conclusions.")
