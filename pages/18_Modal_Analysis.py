@@ -753,115 +753,70 @@ with tab_report:
         st.info("Select a field run with identified modes to assemble the report.")
     elif st.button("📄 Generate full report (PDF)", type="primary", key="rep_gen"):
         try:
-            from core.modal.preliminary_report import build_preliminary_pdf
-            import base64 as _b64m
+            from core.modal.run_report import build_report_from_run
             es = (_lang == "Español")
             _L = (lambda s, e: s if es else e)
-            with st.spinner("Rendering figures and building the report (cover · TOC · mode shapes)…"):
-                def _png(fig, w=1100, h=520):
+            with st.spinner("Rendering 3D mode shapes and building the SIGA report (cover · TOC · findings)…"):
+                # Formas modales 3D (misma vista de geometría del app) → PNG por modo
+                pts = lay.active_points()
+                shape_pngs = []
+                for i, m in enumerate(D["oma_modes"][:3]):
+                    if D["shapes"] and i < len(D["shapes"]) and D["shapes"][i] is not None \
+                            and len(D["shapes"][i]) == len(pts):
+                        a = np.asarray(D["shapes"][i], float)
+                    else:
+                        a = np.random.default_rng(i + 1).standard_normal(len(pts))
                     try:
-                        return fig.to_image(format="png", width=w, height=h, scale=2)
+                        png = _geometry_fig(lay, amp=a, height=460).to_image(
+                            format="png", width=1100, height=620, scale=2)
                     except Exception:  # noqa: BLE001
-                        return None
-                sections = []
-                # 1) Configuration (3D machine)
-                cfg_png = _png(_geometry_fig(lay, height=460), 1100, 520)
-                sections.append({"title": _L("Configuración", "Configuration"),
-                    "figures": [(_L("Figura. Máquina y sensores (3D).", "Figure. Machine & sensors (3D)."), cfg_png)] if cfg_png else [],
-                    "table": {"headers": ["BNC", "Code", "Component", "Ref", "DOF"],
-                              "rows": [[p.bnc, p.code, p.component, p.position_ref, p.dof] for p in lay.active_points()]}})
-                # 2) Sensor verification (si hay)
-                if _scr and _scr.get("png_b64"):
-                    sections.append({"title": _L("Verificación de sensórica", "Sensor verification"),
-                        "intro": _L(f"{_scr.get('n_ok')}/{_scr.get('n_total')} canales OK ({str(_scr.get('ts',''))[:16]}).",
-                                    f"{_scr.get('n_ok')}/{_scr.get('n_total')} channels OK ({str(_scr.get('ts',''))[:16]})."),
-                        "figures": [(_L("Figura. Chequeo de sensores en vivo.", "Figure. Live sensor check."),
-                                     _b64m.b64decode(_scr["png_b64"]))],
-                        "table": {"headers": ["Ch", "RMS", "Peak", "Status"], "rows": _scr.get("rows", [])}})
-                # 3) OMA singular values + modes
-                sv_fig = go.Figure()
-                for r, (label, fx, ydb) in enumerate(D["sv_traces"]):
-                    sv_fig.add_trace(go.Scatter(x=fx, y=ydb, name=label,
-                                     line=dict(color=[BLUE, "#dc2626", GREEN, "#94a3b8"][r % 4], width=2 if r == 0 else 1)))
-                for m in D["oma_modes"]:
-                    sv_fig.add_vline(x=m["fn"], line=dict(color="#cbd5e1", width=1, dash="dot"))
-                sv_fig.update_layout(title="Singular values", template="watermelon",
-                                     xaxis_title="Frequency (Hz)", yaxis_title="dB")
-                sections.append({"title": _L("OMA — densidad espectral (FDD)", "OMA — spectral density (FDD)"),
-                    "figures": [(_L("Figura. Valores singulares.", "Figure. Singular values."), _png(sv_fig))] if D["sv_traces"] else [],
-                    "table": {"headers": ["Freq (Hz)", "Damping (%)", "Complex (%)", "Class"],
-                              "rows": [[round(m["fn"], 2), round(m["zeta"], 3), round(m["complexity"], 1), m["cls"]] for m in D["oma_modes"]]}})
-                # 4) Campbell
+                        png = None
+                    shape_pngs.append(png)
+                # Hallazgos y recomendaciones automáticos (si el payload no los trae)
                 _mh = [m["fn"] for m in D["oma_modes"] if m["cls"] != "spurious"] or [m["fn"] for m in D["oma_modes"]]
                 _cx = compute_crossings(_mh, 0.0, D["rpm"] * 1.35, orders=[0.5, 1, 2, 3, 4, 5, 6, 7, 8],
-                                        bands=[SpeedBand(D["rpm"] * 0.85, D["rpm"] * 1.15, "Op ±15%")])
-                cam = go.Figure(); rr = np.linspace(0, D["rpm"] * 1.35, 60); _ym = max(_mh) * 1.3
-                cam.add_vrect(x0=D["rpm"] * 0.85, x1=D["rpm"] * 1.15, fillcolor="rgba(220,38,38,.10)", line_width=0)
-                for o in [0.5, 1, 2, 3, 4, 5, 6, 7, 8]:
-                    cam.add_trace(go.Scatter(x=rr, y=rr / 60 * o, mode="lines", line=dict(color="#c7d2e0", width=1, dash="dot"), showlegend=False))
-                for fn in _mh:
-                    cam.add_hline(y=fn, line=dict(color="#334155", width=1, dash="dash"))
-                cam.add_vline(x=D["rpm"], line=dict(color=NAVY, width=2.5))
-                for cr in _cx:
-                    if cr.severity in ("coincidence", "near"):
-                        cam.add_trace(go.Scatter(x=[cr.crossing_rpm], y=[cr.mode_hz], mode="markers", showlegend=False,
-                                      marker=dict(color=RED if cr.severity == "coincidence" else AMBER, size=11, symbol="x")))
-                cam.update_layout(title="Campbell (API 684)", template="watermelon", yaxis_range=[0, _ym],
-                                  xaxis_title="Running speed (RPM)", yaxis_title="Frequency (Hz)")
-                sections.append({"title": _L("Campbell — cribado de resonancia (API 684)", "Campbell — resonance screening (API 684)"),
-                    "figures": [(_L("Figura. Diagrama de Campbell.", "Figure. Campbell diagram."), _png(cam))],
-                    "table": {"headers": ["Mode", "fn (Hz)", "Order", "Crossing RPM", "Margin%", "Status"],
-                              "rows": [[c.mode_label, round(c.mode_hz, 2), f"{c.order:g}×", round(c.crossing_rpm, 0),
-                                        round(c.sep_margin_pct, 1),
-                                        {"coincidence": "Coincidence", "near": "Near", "clear": "Clear"}[c.severity]]
-                                       for c in _cx[:12]]}})
-                # 5) Mode shapes (3-4 modos)
-                mfigs = []
-                for i, m in enumerate(D["oma_modes"][:4]):
-                    a = D["shapes"][i] if (D["shapes"] and i < len(D["shapes"]) and D["shapes"][i] is not None) else np.random.default_rng(i + 1).standard_normal(nch)
-                    a = np.abs(np.asarray(a, float)); a = (a - a.min()) / (np.ptp(a) or 1)
-                    p = _png(_geometry_fig(lay, amp=list(a), height=420), 900, 460)
-                    if p:
-                        mfigs.append((_L(f"Figura. Modo {i+1} — {m['fn']:.1f} Hz.", f"Figure. Mode {i+1} — {m['fn']:.1f} Hz."), p))
-                if mfigs:
-                    sections.append({"title": _L("Formas modales", "Mode shapes"), "figures": mfigs})
-                # meta + análisis + hallazgos + recomendaciones
-                nar = _narrative(lay.name, D["oma_modes"], D["rpm"], _verd, _cx)
+                                        bands=[SpeedBand(D["rpm"] * 0.85, D["rpm"] * 1.15, "Operación ±15%")])
                 findings = []
                 _ib = [c for c in _cx if c.in_band]
                 if _ib:
-                    findings.append(_L(f"El modo {min(_ib,key=lambda c:c.sep_margin_pct).mode_hz:.1f} Hz cae dentro de ±15% de un orden de giro (riesgo de resonancia).",
-                                       f"The {min(_ib,key=lambda c:c.sep_margin_pct).mode_hz:.1f} Hz mode falls within ±15% of a running-speed order (resonance risk)."))
-                if _drops if '_drops' in dir() else False:
-                    findings.append(_L("Una frecuencia natural bajó ≥3% entre corridas: posible pérdida de rigidez.",
-                                       "A natural frequency dropped ≥3% between runs: possible stiffness loss."))
+                    _w = min(_ib, key=lambda c: c.sep_margin_pct)
+                    findings.append(
+                        f"El modo de {_w.mode_hz:.1f} Hz coincide con el orden {_w.order:g}× dentro de "
+                        f"la banda de ±15% de la velocidad de operación (riesgo de resonancia)."
+                        if es else
+                        f"The {_w.mode_hz:.1f} Hz mode coincides with the {_w.order:g}× order within the "
+                        f"±15% operating-speed band (resonance risk).")
+                _dr = _drops if '_drops' in dir() else []
+                if _dr:
+                    findings.append(
+                        "Al menos una frecuencia natural descendió ≥3% respecto a corridas previas: "
+                        "posible pérdida de rigidez (aflojamiento, fisura o degradación del skid/base)."
+                        if es else
+                        "At least one natural frequency dropped ≥3% vs previous runs: possible loss of "
+                        "stiffness (loosening, cracking, or skid/base degradation).")
                 if not findings:
-                    findings.append(_L("Sin coincidencias de resonancia dentro de la banda de operación.",
-                                       "No resonance coincidences within the operating band."))
-                recs = [_L("Correlacionar amplitud/fase de vibración vs velocidad en operación (API 684).",
-                           "Correlate vibration amplitude/phase vs speed in operation (API 684)."),
-                        _L("Si hay modo cerca de 1×/2× con amplitud alta, evaluar rigidización de base/skid.",
-                           "If a mode near 1×/2× shows high amplitude, evaluate base/skid stiffening.")]
-                quality = [(_L("OMA capturado y modos hallados", "OMA captured & modes found"), "GO", f"{len(D['oma_modes'])} modes"),
-                           (_L("Canales activos", "Channels active"), "GO", str(nch)),
-                           (_L("Verificación de sensores", "Sensor verification"),
-                            "GO" if _scr else _L("Pendiente", "Pending"),
-                            f"{_scr.get('n_ok')}/{_scr.get('n_total')} OK" if _scr else "—")]
-                meta = {"title": _L("Reporte Análisis Modal Operacional (OMA)", "Operational Modal Analysis Report (OMA)"),
-                        "asset": lay.tag or lay.name, "client": lay.client, "machine_type": lay.machine_type,
-                        "location": lay.location, "test_type": "OMA", "rpm": int(D["rpm"]),
-                        "verdict": _chip.split(" —")[0]}
-                logo_png = None
-                try:
-                    from pathlib import Path as _P
-                    _lp = _P("assets/watermelon_logo.png")
-                    logo_png = _lp.read_bytes() if _lp.exists() else None
-                except Exception:  # noqa: BLE001
-                    logo_png = None
-                pdf = build_preliminary_pdf(meta=meta, quality=quality, sections=sections,
-                                            analysis=[nar], findings=findings, recommendations=recs,
-                                            photos=[], run_id=D.get("name", ""), logo_png=logo_png,
-                                            lang="es" if es else "en")
+                    findings.append(
+                        "No se detectaron coincidencias de resonancia dentro de la banda de operación "
+                        "para los modos identificados."
+                        if es else
+                        "No resonance coincidences were detected within the operating band for the "
+                        "identified modes.")
+                recommendations = [
+                    "Correlacionar amplitud y fase de vibración contra la velocidad en operación (API 684)."
+                    if es else
+                    "Correlate vibration amplitude and phase against running speed (API 684).",
+                    "Si un modo cercano a 1×/2× presenta amplitud elevada, evaluar la rigidización de la "
+                    "base/skid y verificar torque de anclajes."
+                    if es else
+                    "If a mode near 1×/2× shows high amplitude, evaluate base/skid stiffening and check "
+                    "anchor-bolt torque.",
+                ]
+                # respetar los del payload si existen
+                _pl = D.get("payload") or {}
+                pdf = build_report_from_run(
+                    _pl, bilingual_es=es, shape_pngs=shape_pngs,
+                    findings=_pl.get("findings") or findings,
+                    recommendations=_pl.get("recommendations") or recommendations)
             st.session_state["_modal_report_pdf"] = pdf
         except Exception as e:  # noqa: BLE001
             st.error(f"Could not build the report: {type(e).__name__}: {e}")

@@ -97,6 +97,7 @@ def build_oma_siga_pdf(
     instrumentation: str = "",
     norms: Optional[Sequence[str]] = None,
     max_shape_modes: int = 3,
+    mode_shape_pngs: Optional[Sequence[bytes]] = None,
 ) -> bytes:
     """Arma el PDF OMA SIGA. `conditions` = [{label, fdd_result, notes?}, ...].
 
@@ -175,7 +176,9 @@ def build_oma_siga_pdf(
         modes = list(getattr(fdd, "modes", []) or [])
         chn = getattr(fdd, "channel_names", None) or [f"CH{i+1}" for i in range(
             len(getattr(modes[0], "mode_shape", [])) if modes else 0)]
-        for m in modes[:max_shape_modes]:
+        # Formas modales 3D pre-renderizadas (vista de geometría) sólo para la 1ª condición
+        _shapes3d = list(mode_shape_pngs) if (k == 1 and mode_shape_pngs) else []
+        for mi, m in enumerate(modes[:max_shape_modes]):
             fn = float(getattr(m, "natural_frequency_hz", 0))
             try:
                 _fig(modal_animator.build_complexity_polar_plot(
@@ -185,12 +188,24 @@ def build_oma_siga_pdf(
                             f"(complejidad {float(getattr(m,'complexity_pct',0)):.1f}%).")
             except Exception:  # noqa: BLE001
                 pass
-            try:
-                _fig(modal_animator.build_bar_chart_mode_shape(
-                    getattr(m, "mode_shape"), chn, mode_label=f"{fn:.3f} Hz"),
-                    caption=f"Figura. Forma modal – modo {fn:.3f} Hz.")
-            except Exception:  # noqa: BLE001
-                pass
+            # Forma modal: preferir la vista 3D de geometría si viene pre-renderizada;
+            # si no, caer al diagrama de barras nativo.
+            _png3d = _shapes3d[mi] if mi < len(_shapes3d) else None
+            if _png3d:
+                img = safe_image(_png3d, 16.5, 9.0)
+                if img is not None:
+                    body.append(img)
+                    body.append(p(f"Figura. Forma modal (deformada 3D) – modo {fn:.3f} Hz.",
+                                  styles, "WMFigureCaption"))
+                else:
+                    _png3d = None
+            if not _png3d:
+                try:
+                    _fig(modal_animator.build_bar_chart_mode_shape(
+                        getattr(m, "mode_shape"), chn, mode_label=f"{fn:.3f} Hz"),
+                        caption=f"Figura. Forma modal – modo {fn:.3f} Hz.")
+                except Exception:  # noqa: BLE001
+                    pass
         # MAC de la condición
         try:
             if len(modes) >= 2:
