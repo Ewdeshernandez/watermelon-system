@@ -51,7 +51,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.27"
+__version__ = "0.9.28"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -658,6 +658,202 @@ def build_app(layout: OMALayout, simulated: bool = True):
     apply_bar.addWidget(btn_apply); apply_bar.addWidget(lbl_applyinfo); apply_bar.addStretch(1)
     cfg_ol.addLayout(apply_bar)
     tabs.addTab(cfg_outer, "Configuration")
+
+    # =================================================================
+    # SENSOR CHECK — verificación en vivo (osciloscopio multicanal + tap test)
+    # =================================================================
+    pg_sc = QtWidgets.QWidget(); scl = QtWidgets.QVBoxLayout(pg_sc)
+    scbar = QtWidgets.QHBoxLayout()
+    scbar.addWidget(QtWidgets.QLabel("<b>Live sensor check</b> "
+                    "<span style='color:#64748b'>— confirm every channel is wired before capturing. "
+                    "Tap a sensor and watch its lane react.</span>"))
+    scbar.addStretch(1)
+    scbar.addWidget(QtWidgets.QLabel("Source:"))
+    cb_scsrc = QtWidgets.QComboBox(); cb_scsrc.addItems(["Simulated", f"{DAQ_NAME} (live)"])
+    if hw_present:
+        cb_scsrc.setCurrentIndex(1)
+    scbar.addWidget(cb_scsrc)
+    btn_scstart = QtWidgets.QPushButton("▶ Start live"); btn_scstart.setStyleSheet(f"QPushButton{{background:{GREEN};}}")
+    btn_scstop = QtWidgets.QPushButton("⏹ Stop")
+    scbar.addWidget(btn_scstart); scbar.addWidget(btn_scstop)
+    scl.addLayout(scbar)
+    scsplit = QtWidgets.QHBoxLayout()
+    p_scope = pg.PlotWidget(); p_scope.setBackground("w"); p_scope.setMenuEnabled(False)
+    p_scope.setTitle("Live channels", color=NAVY); p_scope.showGrid(x=False, y=False)
+    p_scope.setLabel("bottom", "time (rolling)")
+    p_scope.getAxis("left").setStyle(tickTextOffset=6)
+    scsplit.addWidget(p_scope, 3)
+    tbl_sc = QtWidgets.QTableWidget(0, 4)
+    tbl_sc.setHorizontalHeaderLabels(["Ch", "RMS", "Peak", "Status"])
+    tbl_sc.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
+    tbl_sc.verticalHeader().setVisible(False); tbl_sc.setMaximumWidth(360)
+    tbl_sc.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+    scsplit.addWidget(tbl_sc)
+    scl.addLayout(scsplit, 1)
+    lbl_sc = QtWidgets.QLabel("Idle — press ▶ Start live."); lbl_sc.setStyleSheet("color:#334155;")
+    scl.addWidget(lbl_sc)
+    tabs.addTab(pg_sc, "Sensor check")
+
+    st["_sc"] = {"on": False, "task": None, "timer": QtCore.QTimer(win),
+                 "curves": [], "ring": None, "base": None, "names": []}
+    st["_sc"]["timer"].setInterval(100)                  # ~10 Hz refresco
+
+    def _sc_open_task():
+        try:
+            import nidaqmx
+            from nidaqmx.constants import AcquisitionType, CurrentExcitSource, Coupling
+            from core.modal.acq_backend import (list_available_devices, _build_phys_channel, ChannelConfig)
+        except Exception:  # noqa: BLE001
+            return None
+        chassis = "cDAQ1"
+        try:
+            for d in list_available_devices():
+                if "cdaq" in d["product_type"].lower() or "9178" in d["product_type"]:
+                    chassis = d["name"]; break
+        except Exception:  # noqa: BLE001
+            pass
+        lay = st["layout"]; fs = float(lay.fs_hz)
+        try:
+            task = nidaqmx.Task()
+            for p in lay.active_points():
+                cfg = ChannelConfig(name=p.code, coupling=("AC" if p.meas_type == "D" else "IEPE"),
+                                    sensitivity_mv_per_eu=p.sensitivity_mv_per_g, bnc_port=p.bnc,
+                                    units=("mil" if p.meas_type == "D" else "g"))
+                phys = _build_phys_channel(chassis, cfg)
+                if cfg.coupling == "IEPE":
+                    g = cfg.voltage_range * 1000.0 / (cfg.sensitivity_mv_per_eu or 100.0)
+                    task.ai_channels.add_ai_accel_chan(phys, sensitivity=cfg.sensitivity_mv_per_eu,
+                        max_val=g, min_val=-g, current_excit_source=CurrentExcitSource.INTERNAL,
+                        current_excit_val=0.002)
+                else:
+                    vc = task.ai_channels.add_ai_voltage_chan(phys, max_val=cfg.voltage_range,
+                                                              min_val=-cfg.voltage_range)
+                    try:
+                        vc.ai_coupling = Coupling.AC
+                    except Exception:  # noqa: BLE001
+                        pass
+            task.timing.cfg_samp_clk_timing(rate=fs, sample_mode=AcquisitionType.CONTINUOUS,
+                                            samps_per_chan=int(fs))
+            task.start()
+            return task
+        except Exception:  # noqa: BLE001
+            try:
+                task.close()
+            except Exception:  # noqa: BLE001
+                pass
+            return None
+
+    def _sc_start():
+        pts = st["layout"].active_points()
+        if not pts:
+            lbl_sc.setText("No sensors configured — load a preset or build the machine first."); return
+        _sc_stop()
+        nch = len(pts); Nd = 512
+        names = [p.code for p in pts]
+        sc = st["_sc"]
+        sc["names"] = names; sc["ring"] = np.zeros((nch, Nd)); sc["base"] = np.full(nch, 1e-6)
+        sc["units"] = ["mil" if p.meas_type == "D" else "g" for p in pts]
+        sc["ranges"] = [(50.0 if p.meas_type != "D" else 50.0) for p in pts]  # g (100mV/g±5V) / mil
+        # scope: una traza por canal, con etiqueta = código en el eje izquierdo
+        p_scope.clear(); sc["curves"] = []
+        _pal = ["#2563eb", "#16a34a", "#dc2626", "#7c3aed", "#f59e0b", "#0891b2", "#db2777", "#334155"]
+        sc["colors"] = [_pal[i % len(_pal)] for i in range(nch)]
+        for i in range(nch):
+            c = p_scope.plot(pen=pg.mkPen(sc["colors"][i], width=1.2)); sc["curves"].append(c)
+        p_scope.getAxis("left").setTicks([[(i, names[i]) for i in range(nch)]])
+        p_scope.setYRange(-0.7, nch - 0.3); p_scope.setXRange(0, Nd)
+        tbl_sc.setRowCount(nch)
+        for i, nm in enumerate(names):
+            for j in range(4):
+                tbl_sc.setItem(i, j, QtWidgets.QTableWidgetItem(nm if j == 0 else "—"))
+        live = cb_scsrc.currentIndex() == 1
+        sc["task"] = _sc_open_task() if live else None
+        sc["live"] = sc["task"] is not None
+        if live and sc["task"] is None:
+            lbl_sc.setText("⚠ Could not open the acquisition unit — showing simulated signals.")
+        else:
+            lbl_sc.setText(("● LIVE — tap a sensor; its lane should react." if sc["live"]
+                            else "Simulated signals (no hardware). Connect the unit + pick "
+                                 f"'{DAQ_NAME} (live)' to check real sensors."))
+        sc["on"] = True; sc["timer"].start()
+
+    def _sc_stop():
+        sc = st["_sc"]; sc["timer"].stop(); sc["on"] = False
+        if sc.get("task") is not None:
+            try:
+                sc["task"].close()
+            except Exception:  # noqa: BLE001
+                pass
+            sc["task"] = None
+
+    def _sc_read_chunk(nch):
+        sc = st["_sc"]
+        if sc.get("live") and sc.get("task") is not None:
+            try:
+                import nidaqmx
+                d = sc["task"].read(number_of_samples_per_channel=nidaqmx.constants.READ_ALL_AVAILABLE,
+                                    timeout=0.0)
+                if not d:
+                    return None
+                if not isinstance(d[0], list):
+                    d = [d]
+                arr = np.asarray(d, float)
+                return arr if arr.size else None
+            except Exception:  # noqa: BLE001
+                return None
+        # simulado: ruido + eventual "golpe" aleatorio en un canal
+        m = max(8, int(st["layout"].fs_hz * 0.1))
+        rng = st["rng"]; arr = 0.02 * rng.standard_normal((nch, m))
+        if rng.random() < 0.15:
+            k = rng.integers(0, nch)
+            arr[k] += np.hanning(m) * (0.6 + rng.random())
+        return arr
+
+    def _sc_tick():
+        sc = st["_sc"]
+        if not sc["on"] or sc["ring"] is None:
+            return
+        nch = sc["ring"].shape[0]
+        chunk = _sc_read_chunk(nch)
+        if chunk is None or chunk.shape[0] != nch or chunk.shape[1] == 0:
+            return
+        # stats por canal (del chunk crudo)
+        rms = np.sqrt(np.mean(chunk ** 2, axis=1)); pk = np.max(np.abs(chunk), axis=1)
+        # decimar el chunk para el display y empujar al ring
+        m = chunk.shape[1]; step = max(1, m // 24)
+        dec = chunk[:, ::step]
+        nd = dec.shape[1]; Nd = sc["ring"].shape[1]
+        if nd >= Nd:
+            sc["ring"] = dec[:, -Nd:]
+        else:
+            sc["ring"] = np.concatenate([sc["ring"][:, nd:], dec], axis=1)
+        # línea base (mínimo histórico de rms) para detectar "tap"
+        sc["base"] = np.minimum(sc["base"] * 1.02 + 1e-9, np.maximum(sc["base"], rms))
+        base = np.maximum(sc["base"], 1e-6)
+        # dibujar cada canal en su carril (auto-escala por carril)
+        x = np.arange(sc["ring"].shape[1])
+        for i, cur in enumerate(sc["curves"]):
+            lane = sc["ring"][i]
+            g = 0.42 / max(float(np.max(np.abs(lane))), 1e-6)
+            resp = pk[i] > 4.0 * base[i] and pk[i] > 3 * rms.mean()
+            cur.setPen(pg.mkPen("#f59e0b", width=2.2) if resp
+                       else pg.mkPen(sc["colors"][i], width=1.2))
+            cur.setData(x, lane * g + i)
+            # tabla
+            rng_i = sc["ranges"][i]; unit = sc["units"][i]
+            if pk[i] < 1e-4:
+                stt, scol = "No signal", "#dc2626"
+            elif pk[i] > 0.9 * rng_i:
+                stt, scol = "Overload", "#dc2626"
+            elif resp:
+                stt, scol = "● responding", "#f59e0b"
+            else:
+                stt, scol = "OK", "#16a34a"
+            tbl_sc.item(i, 1).setText(f"{rms[i]:.3g} {unit}")
+            tbl_sc.item(i, 2).setText(f"{pk[i]:.3g} {unit}")
+            it = tbl_sc.item(i, 3); it.setText(stt); it.setForeground(QtGui.QColor(scol))
+    st["_sc"]["timer"].timeout.connect(_sc_tick)
+    btn_scstart.clicked.connect(_sc_start); btn_scstop.clicked.connect(_sc_stop)
 
     # =====================================================================
     # Config helpers
@@ -2551,7 +2747,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
 
     # Orden lógico de pestañas: EMA (impacto → modos) juntos, OMA (captura → SSI)
     # juntos, luego correlación / Campbell / formas / reporte.
-    _desired_order = ["Configuration", "Impact test (EMA)", "Modes (EMA)",
+    _desired_order = ["Configuration", "Sensor check", "Impact test (EMA)", "Modes (EMA)",
                       "OMA capture", "SSI (subspace)", "Comparative", "Campbell",
                       "Mode shapes", "Preliminary report", "Help"]
     _bar = tabs.tabBar()
@@ -2562,6 +2758,10 @@ def build_app(layout: OMALayout, simulated: bool = True):
 
     # Aviso: no cerrar con una corrida sin guardar localmente.
     def _close_event(ev):
+        try:
+            _sc_stop()                                   # libera el task NI del live
+        except Exception:  # noqa: BLE001
+            pass
         if st.get("oma_fdd") is not None and not st.get("_run_saved", False):
             r = QtWidgets.QMessageBox.question(
                 win, "Save before closing?",
