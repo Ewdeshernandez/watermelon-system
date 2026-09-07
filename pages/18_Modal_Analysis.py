@@ -874,8 +874,6 @@ if nav == T_SSI:
                   f"<span class='num'>±{m.get('std_zeta',0.0):.2f}</span>"] for i, m in enumerate(_ssi["modes"])]
 
     if _diagram:
-        st.markdown(f"<div style='background:#eef6ff;border-left:4px solid {BLUE};border-radius:8px;"
-                    f"padding:10px 14px;margin:2px 0 8px'>{_SSI_HELP}</div>", unsafe_allow_html=True)
         _chart(_ssi_plot(_diagram, _freqs, _sv0))
         # diagnóstico automático
         if _freqs:
