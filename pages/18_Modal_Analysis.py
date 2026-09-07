@@ -894,14 +894,17 @@ if nav == T_CAMP:
         st.info("No modes to plot.")
     else:
         # --- Controles: 2ª velocidad opcional + banda ½× (sub-síncrono) ---
-        cco = st.columns([1.3, 1, 1.2])
+        try:
+            cco = st.columns([1.1, 1, 1], vertical_alignment="bottom")
+        except TypeError:      # Streamlit < 1.36 no soporta vertical_alignment
+            cco = st.columns([1.1, 1, 1])
         with cco[0]:
             _cmp2 = st.checkbox("Compare 2nd speed", value=False, key="camp_cmp2",
                                 help="Overlay a second operating speed. Order lines don't move — only the speed line/band.")
         with cco[1]:
             _rpm2 = st.number_input("2nd speed (RPM)", min_value=0.0, max_value=60000.0,
                                     value=float(round(D["rpm"] * 0.9)), step=10.0, key="camp_rpm2",
-                                    disabled=not _cmp2)
+                                    disabled=not _cmp2, label_visibility="collapsed")
         with cco[2]:
             _half = st.checkbox("½× band (sub-sync)", value=False, key="camp_half",
                                 help="Optional (not API 684): screens sub-synchronous excitation at half speed.")
@@ -983,9 +986,16 @@ if nav == T_CAMP:
                           f"<span class='num'>{c.sep_margin_pct:.1f}</span>",
                           _pill(_stat_txt[c.severity], *( ("#dc2626", "#fdeaea") if c.severity == "coincidence" else ("#b45309", "#fef3e2"))),
                           f"<span class='num'>{vs}</span>"] for c, vs in sorted(_rows_cx, key=lambda t: t[0].sep_margin_pct)])
+            _ib = [c for c in crossings if c.in_band]
+            if _ib:
+                _w = min(_ib, key=lambda c: c.sep_margin_pct)
+                _nco = sum(1 for c in crossings if c.severity == "coincidence")
+                st.info(f"**{_nco} coincidence(s)** inside the operating band. Closest: mode "
+                        f"**{_w.mode_hz:.1f} Hz** crosses **{_w.order:g}×** at {_w.crossing_rpm:.0f} RPM "
+                        f"(margin {_w.sep_margin_pct:.1f}%). A crossing alone does not confirm resonance "
+                        "(API 684) — correlate with amplitude and phase during operation.")
         else:
             st.success("No fn↔order crossings inside the operating band(s) — adequate separation (API 684).")
-        st.info(camp_summary(crossings))
 
 # ---------------------------------------------------------------- 8 MODE SHAPES
 if nav == T_SHAPES:
