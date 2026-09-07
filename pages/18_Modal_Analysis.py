@@ -529,11 +529,12 @@ def _geom_preview_fig(lay, geom, height=460, show_machine=True):
     return fig
 
 
-def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0, show_machine=True):
-    """Forma modal animada sobre la GEOMETRÍA del usuario (wireframe estilo ARTeMIS):
-    aristas + nodos coloreados por amplitud + outline fantasma."""
+def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0):
+    """Forma modal animada sobre la GEOMETRÍA del campo (estilo ARTeMIS): SUPERFICIES
+    sólidas con gradiente Jet si hay caras, + aristas negras + nodos."""
     nodes = geom.get("nodes") or []
     lines = geom.get("lines") or []
+    surfaces = geom.get("surfaces") or []
     if not nodes:
         return _mode_surface_fig(lay, amps_signed, height, scale_mul)
     disp_map = _station_disp_map(lay, amps_signed)
@@ -541,39 +542,58 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0, show_machi
     MAG = np.linalg.norm(ND, axis=1); cmax = MAG.max() or 1.0; MAGn = MAG / cmax
     span = float(np.ptp(P[:, 0])) or 1.0
     scale = 0.18 * span / (np.linalg.norm(ND, axis=1).max() or 1.0) * scale_mul
+    I, J, K = [], [], []
+    for f in surfaces:
+        if len(f) >= 3:
+            for t in range(1, len(f) - 1):
+                I.append(f[0]); J.append(f[t]); K.append(f[t + 1])
+    has_surf = bool(I)
 
     def _defP(ph):
         return P + (scale * np.sin(ph)) * ND
 
+    def _surf_tr(dP):
+        return go.Mesh3d(x=dP[:, 0], y=dP[:, 1], z=dP[:, 2], i=I, j=J, k=K, intensity=MAGn,
+                         cmin=0, cmax=1, coloraxis="coloraxis", flatshading=False, opacity=1.0,
+                         lighting=dict(ambient=0.82, diffuse=0.5, specular=0.12), hoverinfo="skip")
+
     def _edge_tr(dP):
         ex, ey, ez = _edges_xyz(dP, lines)
-        return go.Scatter3d(x=ex, y=ey, z=ez, mode="lines", line=dict(color="#334155", width=5), hoverinfo="skip")
+        return go.Scatter3d(x=ex, y=ey, z=ez, mode="lines",
+                            line=dict(color="#0f172a" if has_surf else "#334155", width=2 if has_surf else 5),
+                            hoverinfo="skip")
 
     def _node_tr(dP, colorbar=True):
-        mk = dict(size=7, color=MAGn, colorscale="Jet", cmin=0, cmax=1, line=dict(width=1, color="#0f172a"))
-        if colorbar:
-            mk["colorbar"] = dict(title="ampl", thickness=13, len=0.6, x=0.98)
-        return go.Scatter3d(x=dP[:, 0], y=dP[:, 1], z=dP[:, 2], mode="markers",
-                            marker=mk, hovertext=[n["id"] for n in nodes], hoverinfo="text")
+        if has_surf:
+            mk = dict(size=3, color="#0f172a")
+        else:
+            mk = dict(size=7, color=MAGn, colorscale="Jet", cmin=0, cmax=1, line=dict(width=1, color="#0f172a"))
+            if colorbar:
+                mk["colorbar"] = dict(title="ampl", thickness=13, len=0.6, x=0.98)
+        return go.Scatter3d(x=dP[:, 0], y=dP[:, 1], z=dP[:, 2], mode="markers", marker=mk,
+                            hovertext=[n["id"] for n in nodes], hoverinfo="text")
 
     fig = go.Figure()
-    n_ctx = 0
-    if show_machine:
-        for tr in _mode_machine_meshes(lay, opacity=0.05):
-            fig.add_trace(tr)
-        n_ctx = len(lay.machine_components)
-    ex, ey, ez = _edges_xyz(P, lines)                    # outline fantasma
-    fig.add_trace(go.Scatter3d(x=ex, y=ey, z=ez, mode="lines",
-                  line=dict(color="rgba(148,163,184,.45)", width=2, dash="dot"), hoverinfo="skip"))
     d0 = _defP(np.pi / 2)
-    fig.add_trace(_edge_tr(d0)); fig.add_trace(_node_tr(d0))
-    ei = n_ctx + 1                                       # ghost=n_ctx, edges=n_ctx+1, nodes=n_ctx+2
+    traces = []
+    if has_surf:
+        fig.add_trace(_surf_tr(d0)); traces.append(len(fig.data) - 1)
+    fig.add_trace(_edge_tr(d0)); _ie = len(fig.data) - 1
+    fig.add_trace(_node_tr(d0)); _ino = len(fig.data) - 1
     frames = []
     for f in range(28):
         ph = f / 28.0 * 2 * np.pi; dP = _defP(ph)
-        frames.append(go.Frame(data=[_edge_tr(dP), _node_tr(dP, colorbar=False)], traces=[ei, ei + 1]))
+        data, tr = [], []
+        if has_surf:
+            data.append(_surf_tr(dP)); tr.append(traces[0])
+        data.append(_edge_tr(dP)); tr.append(_ie)
+        data.append(_node_tr(dP, colorbar=False)); tr.append(_ino)
+        frames.append(go.Frame(data=data, traces=tr))
     fig.frames = frames
     lay_kw = _mode_scene(height)
+    if has_surf:
+        lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1,
+                                   colorbar=dict(title="ampl", thickness=13, len=0.6, x=0.98))
     lay_kw["updatemenus"] = [dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
         buttons=[dict(label="▶ Play", method="animate",
                       args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True,
@@ -1446,16 +1466,14 @@ if nav == T_SHAPES:
         else:
             amp = np.random.default_rng(idx + 1).standard_normal(len(pts))
         _smul = float(_scl.replace("×", ""))
-        # Geometría definida en el CAMPO (viaja en el payload) → la web sólo la visualiza.
+        # Geometría definida en el CAMPO (viaja en el payload); si no viene, se deriva
+        # de la configuración de la máquina (misma función del campo). La web SOLO visualiza.
+        from core.modal.oma_layout import default_geometry as _default_geometry
         _pl_geom = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
-        if _pl_geom and _pl_geom.get("nodes"):
-            _chart(_mode_geom_fig(lay, _pl_geom, amp, height=600, scale_mul=_smul))
-            st.caption("Press ▶ Play — the mode animates on the machine geometry defined in the field. "
-                       "Node colour = displacement amplitude (blue→red). Drag to rotate.")
-        else:
-            _chart(_mode_surface_fig(lay, amp, height=600, scale_mul=_smul, annotate=True))
-            st.caption("Press ▶ Play — the equipment surfaces deform, coloured by amplitude; arrows show "
-                       "each sensor's direction of motion. Drag to rotate.")
+        _geom = _pl_geom if (_pl_geom and _pl_geom.get("nodes")) else _default_geometry(lay)
+        _chart(_mode_geom_fig(lay, _geom, amp, height=600, scale_mul=_smul))
+        st.caption("Press ▶ Play — the machine surfaces deform, coloured by displacement amplitude "
+                   "(blue = still, red = max). Geometry comes from the field configuration. Drag to rotate.")
         bcol = st.columns([1, 3])
         with bcol[0]:
             if st.button("🎬 Export video (GIF)", key="ms_gif"):

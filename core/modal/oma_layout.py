@@ -207,6 +207,9 @@ class OMALayout:
     module_model: str = "NI 9234"
     running_speed_rpm: float = 1185.0
     tach_bnc: int = 0                     # 0 = sin keyphasor/tach; >0 = BNC del pulso 1×/vuelta
+    # Geometría ARTeMIS para formas modales: {"nodes":[{id,x,y,z,sensor}], "lines":[[i,j]],
+    # "surfaces":[[i,j,k(,l)]]}. Se define en el campo y la web SOLO la visualiza.
+    geometry: dict = field(default_factory=dict)
 
     # ---- utilidades ----
     def active_points(self) -> List[MeasPoint]:
@@ -267,6 +270,44 @@ class OMALayout:
                                    for c in d.get("machine_components", [])]
         okl = {f.name for f in _f(OMALayout)}
         return OMALayout(**{k: v for k, v in d.items() if k in okl})
+
+
+_BOX_EDGES = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4),
+              (0, 4), (1, 5), (2, 6), (3, 7)]
+_BOX_FACES = [(0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
+
+
+def _cube_verts(c: "MachineComponent"):
+    x0, x1, y0, y1, d = c.x0, c.x1, c.y0, c.y1, c.depth
+    X = [x0, x1, x1, x0, x0, x1, x1, x0]
+    Y = [-d, -d, d, d, -d, -d, d, d]
+    Z = [y0, y0, y0, y0, y1, y1, y1, y1]
+    return list(zip(X, Y, Z))
+
+
+def default_geometry(layout: "OMALayout") -> dict:
+    """Geometría ARTeMIS por defecto a partir de los componentes: wireframe de cajas
+    (8 esquinas + 12 aristas + 6 caras por componente) + un nodo por estación de
+    sensor. Editable en el campo; la web la visualiza."""
+    nodes, lines, surfaces = [], [], []
+    for ci, c in enumerate(layout.machine_components):
+        base = len(nodes)
+        for v, (x, y, z) in enumerate(_cube_verts(c)):
+            nodes.append({"id": f"C{ci}_{v}", "x": round(float(x), 4), "y": round(float(y), 4),
+                          "z": round(float(z), 4), "sensor": ""})
+        for a, b in _BOX_EDGES:
+            lines.append([base + a, base + b])
+        for f in _BOX_FACES:
+            surfaces.append([base + i for i in f])
+    seen = {}
+    for p in layout.active_points():
+        key = f"{p.component} {p.position_ref}".strip()
+        if key in seen:
+            continue
+        seen[key] = 1
+        nodes.append({"id": key, "x": round(float(p.x_norm), 4), "y": 0.2,
+                      "z": round(float(p.y_norm), 4), "sensor": key})
+    return {"nodes": nodes, "lines": lines, "surfaces": surfaces}
 
 
 def default_components() -> List[MachineComponent]:

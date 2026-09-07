@@ -1647,6 +1647,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
             sc_rec = {"rows": _scr["rows"], "ts": _scr["ts"], "n_ok": _scr["n_ok"],
                       "n_total": _scr["n_total"], "live": _scr.get("live", False),
                       "png_b64": _b64.b64encode(_scr["png"]).decode()}
+        if not lay.geometry:                     # geometría ARTeMIS para la web (viaja en el layout)
+            from core.modal.oma_layout import default_geometry
+            lay.geometry = default_geometry(lay)
         return {"name": lay.name, "kind": "OMA", "modes": modes, "svd": svd,
                 "channel_names": lay.channel_names(), "running_rpm": lay.running_speed_rpm,
                 "ema_modes": ema, "ema": ema_block, "ssi": ssi_block, "sensor_check": sc_rec,
@@ -1751,6 +1754,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 sc_rec = {"rows": _scr["rows"], "ts": _scr["ts"], "n_ok": _scr["n_ok"],
                           "n_total": _scr["n_total"], "live": _scr.get("live", False),
                           "png_b64": _b64sc.b64encode(_scr["png"]).decode()}
+            if not lay.geometry:                 # geometría ARTeMIS para la web (viaja en el layout)
+                from core.modal.oma_layout import default_geometry
+                lay.geometry = default_geometry(lay)
             payload = {"name": lay.name, "kind": "OMA", "modes": modes, "svd": svd,
                        "channel_names": lay.channel_names(), "running_rpm": lay.running_speed_rpm,
                        "ema_modes": ema, "ema": ema_block, "ssi": ssi_block, "sensor_check": sc_rec,
