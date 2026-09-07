@@ -547,9 +547,37 @@ def _geom_preview_fig(lay, geom, height=460, show_machine=True):
     return fig
 
 
+def _dense_mesh(P, surfaces, n=4):
+    """Subdivide cada cara (quad o triángulo) en una malla n×n → muchos vértices
+    para un gradiente FINO (como ARTeMIS)."""
+    V, I, J, K = [], [], [], []
+    for f in surfaces:
+        if len(f) < 3:
+            continue
+        if len(f) >= 4:
+            a, b, c, d = (np.asarray(P[f[0]], float), np.asarray(P[f[1]], float),
+                          np.asarray(P[f[2]], float), np.asarray(P[f[3]], float))
+            base = len(V); w = n + 1
+            for iu in range(w):
+                for iv in range(w):
+                    u = iu / n; v = iv / n
+                    V.append((1 - u) * (1 - v) * a + u * (1 - v) * b + u * v * c + (1 - u) * v * d)
+            for iu in range(n):
+                for iv in range(n):
+                    p0 = base + iu * w + iv; p1 = base + (iu + 1) * w + iv; p2 = p1 + 1; p3 = p0 + 1
+                    I += [p0, p0]; J += [p1, p2]; K += [p2, p3]
+        else:
+            base = len(V)
+            for x in f:
+                V.append(np.asarray(P[x], float))
+            for t in range(1, len(f) - 1):
+                I.append(base); J.append(base + t); K.append(base + t + 1)
+    return (np.array(V, float) if V else np.zeros((0, 3))), I, J, K
+
+
 def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0):
-    """Forma modal animada sobre la GEOMETRÍA del campo (estilo ARTeMIS): SUPERFICIES
-    sólidas con gradiente Jet si hay caras, + aristas negras + nodos."""
+    """Forma modal animada sobre la GEOMETRÍA del campo (estilo ARTeMIS): superficie
+    sólida con malla densa (gradiente Jet), aristas, flechas de DOF por eje y triada."""
     nodes = geom.get("nodes") or []
     lines = geom.get("lines") or []
     surfaces = geom.get("surfaces") or []
@@ -557,15 +585,15 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0):
         return _mode_surface_fig(lay, amps_signed, height, scale_mul)
     disp_map = _station_disp_map(lay, amps_signed)
     P, ND = _geom_node_disp(geom, disp_map)
+    span = float(np.ptp(P[:, 0])) or 1.0
     MAG = np.linalg.norm(ND, axis=1)
-    # contraste automático: satura el ~15% superior para que el gradiente se lea
-    # aunque el modo sea "picudo" (un sensor domina) — como hacen los software modales.
+    # contraste automático (percentil) para que el gradiente se lea aunque el modo sea "picudo"
     _pos = MAG[MAG > 0]
     cnorm = float(np.percentile(_pos, 85)) if _pos.size else 1.0
     cnorm = cnorm or (MAG.max() or 1.0)
     MAGn = np.clip(MAG / cnorm, 0.0, 1.0)
-    span = float(np.ptp(P[:, 0])) or 1.0
-    scale = 0.18 * span / (MAG.max() or 1.0) * scale_mul
+    scale = 0.16 * span / (MAG.max() or 1.0) * scale_mul
+    # malla por caras de los componentes (nodos = 8 esquinas por caja) → forma coherente
     I, J, K = [], [], []
     for f in surfaces:
         if len(f) >= 3:
@@ -587,47 +615,47 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0):
                             line=dict(color="#0f172a" if has_surf else "#334155", width=2 if has_surf else 5),
                             hoverinfo="skip")
 
-    def _node_tr(dP, colorbar=True):
-        if has_surf:
-            mk = dict(size=3, color="#0f172a")
-        else:
-            mk = dict(size=7, color=MAGn, colorscale="Jet", cmin=0, cmax=1, line=dict(width=1, color="#0f172a"))
-            if colorbar:
-                mk["colorbar"] = dict(title="ampl", thickness=13, len=0.6, x=0.98)
-        return go.Scatter3d(x=dP[:, 0], y=dP[:, 1], z=dP[:, 2], mode="markers", marker=mk,
-                            hovertext=[n["id"] for n in nodes], hoverinfo="text")
-
     fig = go.Figure()
-    d0 = _defP(np.pi / 2)
-    traces = []
     if has_surf:
-        fig.add_trace(_surf_tr(d0)); traces.append(len(fig.data) - 1)
-    fig.add_trace(_edge_tr(d0)); _ie = len(fig.data) - 1
-    fig.add_trace(_node_tr(d0)); _ino = len(fig.data) - 1
+        fig.add_trace(_surf_tr(_defP(np.pi / 2))); _is = len(fig.data) - 1
+    fig.add_trace(_edge_tr(_defP(np.pi / 2))); _ie = len(fig.data) - 1
     frames = []
-    for f in range(28):
-        ph = f / 28.0 * 2 * np.pi; dP = _defP(ph)
+    for f in range(26):
+        ph = f / 26.0 * 2 * np.pi
         data, tr = [], []
         if has_surf:
-            data.append(_surf_tr(dP)); tr.append(traces[0])
-        data.append(_edge_tr(dP)); tr.append(_ie)
-        data.append(_node_tr(dP, colorbar=False)); tr.append(_ino)
+            data.append(_surf_tr(_defP(ph))); tr.append(_is)
+        data.append(_edge_tr(_defP(ph))); tr.append(_ie)
         frames.append(go.Frame(data=data, traces=tr))
     fig.frames = frames
-    # anotaciones: números de nodo + flechas de DOF en las estaciones de sensor
-    _sm = np.array([bool(n.get("sensor")) for n in nodes])
+
+    # --- estáticos: flechas de DOF por eje (color) + nodos numerados + triada X/Y/Z ---
+    _acol = {"A": "#db2777", "X": "#db2777", "H": "#16a34a", "Y": "#16a34a", "V": "#2563eb", "Z": "#2563eb"}
+    alen = 0.08 * span; _by = {}
+    for p in lay.active_points():
+        ax = _AX.get(p.axis, (0, 0, 1)); s = -1.0 if p.dof.startswith("-") else 1.0
+        col = _acol.get(p.axis, "#0f172a"); b = _by.setdefault(col, {"x": [], "y": [], "z": [], "u": [], "v": [], "w": []})
+        b["x"].append(p.x_norm); b["y"].append(0.20); b["z"].append(p.y_norm)
+        b["u"].append(ax[0] * s * alen); b["v"].append(ax[1] * s * alen); b["w"].append(ax[2] * s * alen)
+    for col, b in _by.items():
+        fig.add_trace(go.Cone(x=b["x"], y=b["y"], z=b["z"], u=b["u"], v=b["v"], w=b["w"], anchor="tail",
+                      sizemode="absolute", sizeref=alen * 0.5, showscale=False,
+                      colorscale=[[0, col], [1, col]], hoverinfo="skip"))
+    _sm = np.array([bool(nd.get("sensor")) for nd in nodes])
     if _sm.any():
-        SP, SD = P[_sm], ND[_sm]
-        alen = 0.09 * span
-        _nz = np.linalg.norm(SD, axis=1, keepdims=True); _nz[_nz == 0] = 1.0
-        U = SD / _nz * alen
-        fig.add_trace(go.Cone(x=SP[:, 0], y=SP[:, 1], z=SP[:, 2], u=U[:, 0], v=U[:, 1], w=U[:, 2],
-                      anchor="tail", sizemode="absolute", sizeref=alen * 0.5, showscale=False,
-                      colorscale=[[0, "#0f172a"], [1, "#0f172a"]], hoverinfo="skip"))
+        SP = P[_sm]
         fig.add_trace(go.Scatter3d(x=SP[:, 0], y=SP[:, 1], z=SP[:, 2], mode="markers+text",
                       text=[str(i + 1) for i in range(len(SP))], textposition="top center",
-                      textfont=dict(size=10, color="#0f172a"), marker=dict(size=3, color="#0f172a"),
+                      textfont=dict(size=9, color="#0f172a"), marker=dict(size=3, color="#0f172a"),
                       hoverinfo="skip"))
+    _o = np.array([P[:, 0].min(), P[:, 1].min() - 0.06 * span, P[:, 2].min()]); _tl = 0.14 * span
+    for vec, c, nm in (((1, 0, 0), "#dc2626", "X"), ((0, 1, 0), "#16a34a", "Y"), ((0, 0, 1), "#2563eb", "Z")):
+        e = _o + np.array(vec, float) * _tl
+        fig.add_trace(go.Scatter3d(x=[_o[0], e[0]], y=[_o[1], e[1]], z=[_o[2], e[2]], mode="lines",
+                      line=dict(color=c, width=4), hoverinfo="skip"))
+        fig.add_trace(go.Scatter3d(x=[e[0]], y=[e[1]], z=[e[2]], mode="text", text=[nm],
+                      textfont=dict(size=12, color=c), hoverinfo="skip"))
+
     lay_kw = _mode_scene(height)
     if has_surf:
         lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1, showscale=False)
