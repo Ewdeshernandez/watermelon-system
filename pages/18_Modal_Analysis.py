@@ -338,73 +338,126 @@ def _mode_anim_fig(lay, amps_signed, height=560):
     return base
 
 
-def _mode_shape_fig(lay, amps_signed, height=580, scale_mul=1.0):
-    """Forma modal 3D estilo ARTeMIS: combina A/H/V de cada ESTACIÓN en un vector de
-    movimiento y anima el ESQUELETO de la máquina deformándose, con outline fantasma
-    (sin deformar), nodos coloreados por amplitud (colorbar) y botón Play."""
+def _mode_shape_data(lay, amps_signed, scale_mul=1.0):
+    """Combina A/H/V de cada ESTACIÓN en un vector de movimiento 3D y arma un beam
+    SUAVE (spline cúbico) que se deforma — mucho más pro que una línea quebrada."""
     pts = lay.active_points()
     if not pts or amps_signed is None or len(amps_signed) != len(pts):
-        return _geometry_fig(lay, height=height)
-    a = np.asarray(amps_signed, float)
-    a = a / (np.max(np.abs(a)) or 1.0)
-    # Agrupar por estación (component + position_ref) → vector de desplazamiento 3D
+        return None
+    a = np.asarray(amps_signed, float); a = a / (np.max(np.abs(a)) or 1.0)
     stations = {}
     for p, ai in zip(pts, a):
         key = (p.component, p.position_ref)
         dvec = np.array(_AX.get(p.axis, (0, 0, 1)), float) * (-1.0 if p.dof.startswith("-") else 1.0) * float(ai)
-        s = stations.setdefault(key, {"pos": np.array([p.x_norm, 0.20, p.y_norm], float),
-                                      "disp": np.zeros(3), "label": f"{p.component} {p.position_ref}"})
+        s = stations.setdefault(key, {"pos": np.array([p.x_norm, 0.20, p.y_norm], float), "disp": np.zeros(3)})
         s["disp"] += dvec
     order = sorted(stations.values(), key=lambda s: (s["pos"][0], s["pos"][2]))
     P0 = np.array([s["pos"] for s in order], float)
     DISP = np.array([s["disp"] for s in order], float)
-    labels = [s["label"] for s in order]
-    MAG = np.linalg.norm(DISP, axis=1); MAG = MAG / (MAG.max() or 1.0)
+    MAGn = np.linalg.norm(DISP, axis=1); MAGn = MAGn / (MAGn.max() or 1.0)
     span = float(np.ptp(P0[:, 0])) or 1.0
-    scale = 0.22 * span / (np.max(np.linalg.norm(DISP, axis=1)) or 1.0) * scale_mul
+    scale = 0.24 * span / (np.max(np.linalg.norm(DISP, axis=1)) or 1.0) * scale_mul
+    Ps, Ds = P0, DISP
+    if len(order) >= 3:
+        t = np.zeros(len(P0)); t[1:] = np.cumsum(np.linalg.norm(np.diff(P0, axis=0), axis=1))
+        if t[-1] <= 0:
+            t = np.arange(len(P0), dtype=float)
+        tt = np.linspace(t[0], t[-1], 90)
+        try:
+            from scipy.interpolate import CubicSpline
+            Ps = np.vstack([CubicSpline(t, P0[:, c])(tt) for c in range(3)]).T
+            Ds = np.vstack([CubicSpline(t, DISP[:, c])(tt) for c in range(3)]).T
+        except Exception:  # noqa: BLE001
+            Ps, Ds = P0, DISP
+    return {"P0": P0, "DISP": DISP, "MAGn": MAGn, "Ps": Ps, "Ds": Ds, "scale": scale}
 
-    fig = go.Figure()
-    # máquina tenue (contexto)
+
+def _mode_machine_meshes(lay, opacity=0.09):
+    out = []
     for c in lay.machine_components:
         cc = getattr(c, "color", "") or _comp_color(c.kind)
         X, Y, Z, i, j, k = _cube(c.x0, c.x1, c.y0, c.y1, c.depth)
-        fig.add_trace(go.Mesh3d(x=X, y=Y, z=Z, i=i, j=j, k=k, color=cc, opacity=0.10,
-                                flatshading=True, hoverinfo="skip", showscale=False))
+        out.append(go.Mesh3d(x=X, y=Y, z=Z, i=i, j=j, k=k, color=cc, opacity=opacity,
+                             flatshading=True, hoverinfo="skip", showscale=False))
+    return out
+
+
+def _mode_dynamic_traces(d, phase, colorbar=True):
+    """Beam suave + nodos, en una fase dada (para animar y para el GIF)."""
+    beam = d["Ps"] + (d["scale"] * np.sin(phase)) * d["Ds"]
+    nodes = d["P0"] + (d["scale"] * np.sin(phase)) * d["DISP"]
+    mk = dict(size=7, color=d["MAGn"], colorscale="Turbo", cmin=0, cmax=1,
+              line=dict(width=1, color="#0f172a"))
+    if colorbar:
+        mk["colorbar"] = dict(title="ampl", thickness=12, len=0.55, x=0.98)
+    beam_tr = go.Scatter3d(x=beam[:, 0], y=beam[:, 1], z=beam[:, 2], mode="lines",
+                           line=dict(color=BLUE, width=8), hoverinfo="skip", name="mode")
+    node_tr = go.Scatter3d(x=nodes[:, 0], y=nodes[:, 1], z=nodes[:, 2], mode="markers",
+                           marker=mk, hoverinfo="skip", name="nodes")
+    return beam_tr, node_tr
+
+
+def _mode_scene(height, paper="rgba(0,0,0,0)"):
+    return dict(height=height, margin=dict(l=0, r=0, t=10, b=0), showlegend=False,
+                paper_bgcolor=paper,
+                scene=dict(aspectmode="data", xaxis=dict(visible=False), yaxis=dict(visible=False),
+                           zaxis=dict(visible=False), camera=dict(eye=dict(x=1.6, y=1.4, z=0.85))))
+
+
+def _mode_shape_fig(lay, amps_signed, height=580, scale_mul=1.0):
+    d = _mode_shape_data(lay, amps_signed, scale_mul)
+    if d is None:
+        return _geometry_fig(lay, height=height)
+    fig = go.Figure()
+    for tr in _mode_machine_meshes(lay):
+        fig.add_trace(tr)
     n_ctx = len(lay.machine_components)
-    # outline FANTASMA (sin deformar)
-    fig.add_trace(go.Scatter3d(x=P0[:, 0], y=P0[:, 1], z=P0[:, 2], mode="lines+markers",
-                  line=dict(color="rgba(148,163,184,.55)", width=3, dash="dot"),
-                  marker=dict(size=3, color="#cbd5e1"), hoverinfo="skip", name="undeformed"))
-
-    def _def(phase):
-        return P0 + (scale * np.sin(phase)) * DISP
-
-    d0 = _def(np.pi / 2)                      # arranca en la deflexión máxima
-    _mk = dict(size=7, color=MAG, colorscale="Turbo", cmin=0, cmax=1,
-               line=dict(width=1, color="#0f172a"),
-               colorbar=dict(title="ampl", thickness=12, len=0.6, x=0.98))
-    fig.add_trace(go.Scatter3d(x=d0[:, 0], y=d0[:, 1], z=d0[:, 2], mode="lines+markers",
-                  line=dict(color=BLUE, width=6), marker=_mk,
-                  hovertext=labels, hoverinfo="text", name="mode"))
+    fig.add_trace(go.Scatter3d(x=d["Ps"][:, 0], y=d["Ps"][:, 1], z=d["Ps"][:, 2], mode="lines",
+                  line=dict(color="rgba(148,163,184,.6)", width=4, dash="dot"),
+                  hoverinfo="skip", name="undeformed"))
+    beam0, node0 = _mode_dynamic_traces(d, np.pi / 2)
+    fig.add_trace(beam0); fig.add_trace(node0)
     frames = []
-    for f in range(28):
-        ph = f / 28.0 * 2 * np.pi; d = _def(ph)
-        frames.append(go.Frame(data=[go.Scatter3d(x=d[:, 0], y=d[:, 1], z=d[:, 2],
-                      mode="lines+markers", line=dict(color=BLUE, width=6), marker=_mk)],
-                      traces=[n_ctx + 1]))
+    for f in range(30):
+        ph = f / 30.0 * 2 * np.pi
+        b, n = _mode_dynamic_traces(d, ph, colorbar=False)
+        frames.append(go.Frame(data=[b, n], traces=[n_ctx + 1, n_ctx + 2]))
     fig.frames = frames
-    fig.update_layout(
-        height=height, margin=dict(l=0, r=0, t=10, b=0), showlegend=False,
-        scene=dict(aspectmode="data", xaxis=dict(visible=False), yaxis=dict(visible=False),
-                   zaxis=dict(visible=False), camera=dict(eye=dict(x=1.6, y=1.5, z=0.9))),
-        paper_bgcolor="rgba(0,0,0,0)",
-        updatemenus=[dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
-            buttons=[dict(label="▶ Play", method="animate",
-                          args=[None, dict(frame=dict(duration=55, redraw=True), fromcurrent=True,
-                                           transition=dict(duration=0), mode="immediate")]),
-                     dict(label="⏸ Pause", method="animate",
-                          args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])])
+    lay_kw = _mode_scene(height)
+    lay_kw["updatemenus"] = [dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
+        buttons=[dict(label="▶ Play", method="animate",
+                      args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True,
+                                       transition=dict(duration=0), mode="immediate")]),
+                 dict(label="⏸ Pause", method="animate",
+                      args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])]
+    fig.update_layout(**lay_kw)
     return fig
+
+
+def _mode_shape_gif(lay, amps_signed, scale_mul=1.0, n=22, w=620, h=460):
+    """Renderiza la deformación a un GIF descargable (video decente)."""
+    import io
+    from PIL import Image
+    d = _mode_shape_data(lay, amps_signed, scale_mul)
+    if d is None:
+        return None
+    imgs = []
+    for f in range(n):
+        ph = f / n * 2 * np.pi
+        fig = go.Figure()
+        for tr in _mode_machine_meshes(lay):
+            fig.add_trace(tr)
+        fig.add_trace(go.Scatter3d(x=d["Ps"][:, 0], y=d["Ps"][:, 1], z=d["Ps"][:, 2], mode="lines",
+                      line=dict(color="rgba(148,163,184,.6)", width=4, dash="dot"), hoverinfo="skip"))
+        b, nd = _mode_dynamic_traces(d, ph, colorbar=False)
+        fig.add_trace(b); fig.add_trace(nd)
+        fig.update_layout(**_mode_scene(h, paper="white"))
+        imgs.append(Image.open(io.BytesIO(fig.to_image(format="png", width=w, height=h, scale=1))).convert("RGB"))
+    if not imgs:
+        return None
+    buf = io.BytesIO()
+    imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:], duration=60, loop=0)
+    return buf.getvalue()
 
 
 def _narrative(name, modes, rpm, verdicts, crossings):
@@ -1129,9 +1182,22 @@ if nav == T_SHAPES:
             amp = np.asarray(D["shapes"][idx], float)          # forma modal (con signo)
         else:
             amp = np.random.default_rng(idx + 1).standard_normal(len(pts))
-        _chart(_mode_shape_fig(lay, amp, height=580, scale_mul=float(_scl.replace("×", ""))))
-        st.caption("Press ▶ Play — the skeleton deforms as the mode moves; the dotted gray outline is the "
-                   "structure at rest. Colour = displacement amplitude (blue→red). Drag to rotate.")
+        _smul = float(_scl.replace("×", ""))
+        _chart(_mode_shape_fig(lay, amp, height=580, scale_mul=_smul))
+        st.caption("Press ▶ Play — the structure deforms as the mode moves; the dotted gray line is the "
+                   "shape at rest. Colour = displacement amplitude. Drag to rotate.")
+        bcol = st.columns([1, 3])
+        with bcol[0]:
+            if st.button("🎬 Export video (GIF)", key="ms_gif"):
+                with st.spinner("Rendering animation…"):
+                    _gif = _mode_shape_gif(lay, amp, scale_mul=_smul)
+                if _gif:
+                    st.session_state["_ms_gif"] = _gif
+                    st.session_state["_ms_gif_name"] = f"mode_{idx+1}_{m['fn']:.0f}Hz.gif"
+        if st.session_state.get("_ms_gif"):
+            st.download_button("⬇ Download animation", data=st.session_state["_ms_gif"],
+                               file_name=st.session_state.get("_ms_gif_name", "mode_shape.gif"),
+                               mime="image/gif")
 
 # ---------------------------------------------------------------- 8b TREND / COMPARE
 if nav == T_TREND:
