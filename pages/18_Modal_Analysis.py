@@ -338,6 +338,75 @@ def _mode_anim_fig(lay, amps_signed, height=560):
     return base
 
 
+def _mode_shape_fig(lay, amps_signed, height=580, scale_mul=1.0):
+    """Forma modal 3D estilo ARTeMIS: combina A/H/V de cada ESTACIÓN en un vector de
+    movimiento y anima el ESQUELETO de la máquina deformándose, con outline fantasma
+    (sin deformar), nodos coloreados por amplitud (colorbar) y botón Play."""
+    pts = lay.active_points()
+    if not pts or amps_signed is None or len(amps_signed) != len(pts):
+        return _geometry_fig(lay, height=height)
+    a = np.asarray(amps_signed, float)
+    a = a / (np.max(np.abs(a)) or 1.0)
+    # Agrupar por estación (component + position_ref) → vector de desplazamiento 3D
+    stations = {}
+    for p, ai in zip(pts, a):
+        key = (p.component, p.position_ref)
+        dvec = np.array(_AX.get(p.axis, (0, 0, 1)), float) * (-1.0 if p.dof.startswith("-") else 1.0) * float(ai)
+        s = stations.setdefault(key, {"pos": np.array([p.x_norm, 0.20, p.y_norm], float),
+                                      "disp": np.zeros(3), "label": f"{p.component} {p.position_ref}"})
+        s["disp"] += dvec
+    order = sorted(stations.values(), key=lambda s: (s["pos"][0], s["pos"][2]))
+    P0 = np.array([s["pos"] for s in order], float)
+    DISP = np.array([s["disp"] for s in order], float)
+    labels = [s["label"] for s in order]
+    MAG = np.linalg.norm(DISP, axis=1); MAG = MAG / (MAG.max() or 1.0)
+    span = float(np.ptp(P0[:, 0])) or 1.0
+    scale = 0.22 * span / (np.max(np.linalg.norm(DISP, axis=1)) or 1.0) * scale_mul
+
+    fig = go.Figure()
+    # máquina tenue (contexto)
+    for c in lay.machine_components:
+        cc = getattr(c, "color", "") or _comp_color(c.kind)
+        X, Y, Z, i, j, k = _cube(c.x0, c.x1, c.y0, c.y1, c.depth)
+        fig.add_trace(go.Mesh3d(x=X, y=Y, z=Z, i=i, j=j, k=k, color=cc, opacity=0.10,
+                                flatshading=True, hoverinfo="skip", showscale=False))
+    n_ctx = len(lay.machine_components)
+    # outline FANTASMA (sin deformar)
+    fig.add_trace(go.Scatter3d(x=P0[:, 0], y=P0[:, 1], z=P0[:, 2], mode="lines+markers",
+                  line=dict(color="rgba(148,163,184,.55)", width=3, dash="dot"),
+                  marker=dict(size=3, color="#cbd5e1"), hoverinfo="skip", name="undeformed"))
+
+    def _def(phase):
+        return P0 + (scale * np.sin(phase)) * DISP
+
+    d0 = _def(np.pi / 2)                      # arranca en la deflexión máxima
+    _mk = dict(size=7, color=MAG, colorscale="Turbo", cmin=0, cmax=1,
+               line=dict(width=1, color="#0f172a"),
+               colorbar=dict(title="ampl", thickness=12, len=0.6, x=0.98))
+    fig.add_trace(go.Scatter3d(x=d0[:, 0], y=d0[:, 1], z=d0[:, 2], mode="lines+markers",
+                  line=dict(color=BLUE, width=6), marker=_mk,
+                  hovertext=labels, hoverinfo="text", name="mode"))
+    frames = []
+    for f in range(28):
+        ph = f / 28.0 * 2 * np.pi; d = _def(ph)
+        frames.append(go.Frame(data=[go.Scatter3d(x=d[:, 0], y=d[:, 1], z=d[:, 2],
+                      mode="lines+markers", line=dict(color=BLUE, width=6), marker=_mk)],
+                      traces=[n_ctx + 1]))
+    fig.frames = frames
+    fig.update_layout(
+        height=height, margin=dict(l=0, r=0, t=10, b=0), showlegend=False,
+        scene=dict(aspectmode="data", xaxis=dict(visible=False), yaxis=dict(visible=False),
+                   zaxis=dict(visible=False), camera=dict(eye=dict(x=1.6, y=1.5, z=0.9))),
+        paper_bgcolor="rgba(0,0,0,0)",
+        updatemenus=[dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
+            buttons=[dict(label="▶ Play", method="animate",
+                          args=[None, dict(frame=dict(duration=55, redraw=True), fromcurrent=True,
+                                           transition=dict(duration=0), mode="immediate")]),
+                     dict(label="⏸ Pause", method="animate",
+                          args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])])
+    return fig
+
+
 def _narrative(name, modes, rpm, verdicts, crossings):
     """Diagnóstico automático en prosa (tipo experto) a partir de modos/Campbell."""
     if not modes:
@@ -1034,20 +1103,35 @@ if nav == T_CAMP:
 
 # ---------------------------------------------------------------- 8 MODE SHAPES
 if nav == T_SHAPES:
-    _sec("Mode shapes", "3D operational deflection — amplitude colormap (green→red)")
+    _sec("Mode shapes", "3D operational deflection — the structure deforms; amplitude colormap")
     modes = D["oma_modes"]
-    opts = [f"Mode {i+1} — {m['fn']:.1f} Hz" for i, m in enumerate(modes)] or ["—"]
-    sel = st.selectbox("Mode", opts, index=0)
-    idx = opts.index(sel) if modes else 0
-    pts = lay.active_points()
-    if D["shapes"] and idx < len(D["shapes"]) and D["shapes"][idx] is not None \
-            and len(D["shapes"][idx]) == len(pts):
-        amp = np.asarray(D["shapes"][idx], float)              # forma modal (con signo)
+    if not modes:
+        st.info("No modes to display.")
     else:
-        amp = np.random.default_rng(idx + 1).standard_normal(len(pts))
-    _chart(_mode_anim_fig(lay, amp, height=560))
-    st.caption("Press ▶ Play — nodes oscillate along their DOF; colour = amplitude (green→red). "
-               "The machine is shown faint for reference.")
+        cms = st.columns([2.4, 1])
+        with cms[0]:
+            opts = [f"Mode {i+1} — {m['fn']:.1f} Hz" for i, m in enumerate(modes)]
+            sel = st.selectbox("Mode", opts, index=0, label_visibility="collapsed")
+        with cms[1]:
+            _scl = st.select_slider("Deformation", options=["0.5×", "1×", "2×", "3×"], value="1×",
+                                    label_visibility="collapsed")
+        idx = opts.index(sel)
+        m = modes[idx]
+        # KPIs del modo
+        k = st.columns(3)
+        k[0].metric("Frequency", f"{m['fn']:.2f} Hz")
+        k[1].metric("Damping ζ", f"{m['zeta']:.2f} %")
+        k[2].metric("Complexity", f"{m['complexity']:.0f} %",
+                    help="0% = real/normal mode (clean); high % = complex/operational mode.")
+        pts = lay.active_points()
+        if D["shapes"] and idx < len(D["shapes"]) and D["shapes"][idx] is not None \
+                and len(D["shapes"][idx]) == len(pts):
+            amp = np.asarray(D["shapes"][idx], float)          # forma modal (con signo)
+        else:
+            amp = np.random.default_rng(idx + 1).standard_normal(len(pts))
+        _chart(_mode_shape_fig(lay, amp, height=580, scale_mul=float(_scl.replace("×", ""))))
+        st.caption("Press ▶ Play — the skeleton deforms as the mode moves; the dotted gray outline is the "
+                   "structure at rest. Colour = displacement amplitude (blue→red). Drag to rotate.")
 
 # ---------------------------------------------------------------- 8b TREND / COMPARE
 if nav == T_TREND:
