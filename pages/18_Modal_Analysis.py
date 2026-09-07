@@ -601,10 +601,12 @@ if nav == T_OMA:
         fig.add_trace(go.Scatter(x=_f1, y=_y1, mode="markers", name="pick",
                       marker=dict(size=9, color="rgba(0,0,0,0)"), showlegend=False,
                       hovertemplate="%{x:.1f} Hz — click to add<extra></extra>"))
-        # 1× y armónicos de la velocidad de operación
+        # Órdenes de la velocidad de giro (1×..5×): si un modo cae sobre una línea,
+        # la rotación lo excita → riesgo de resonancia (API 684).
         _x1 = D["rpm"] / 60.0
-        for _o in (1, 2, 3):
-            if _o * _x1 <= (_f1.max() if _f1.size else 0):
+        _fmaxplot = float(_f1.max()) if _f1.size else 0
+        for _o in (1, 2, 3, 4, 5):
+            if _o * _x1 <= _fmaxplot:
                 fig.add_vline(x=_o * _x1, line=dict(color=AMBER, width=1, dash="dot"))
                 fig.add_annotation(x=_o * _x1, y=1.0, yref="paper", yanchor="bottom",
                                    text=f"{_o}×", showarrow=False, font=dict(size=10, color=AMBER))
@@ -627,7 +629,7 @@ if nav == T_OMA:
                                font=dict(size=10, color=NAVY), bgcolor="rgba(255,255,255,.9)",
                                bordercolor="#e2e8f0", borderpad=2)
         _xmax = float(_f1.max()) if _f1.size else 1.0
-        fig.update_layout(title=None, height=540, template="watermelon", dragmode="zoom",
+        fig.update_layout(title_text="", height=540, template="watermelon", dragmode="zoom",
                           clickmode="event+select", margin=dict(l=62, r=16, t=16, b=52),
                           xaxis=dict(range=[0, _xmax], constrain="domain"),
                           xaxis_title="Frequency (Hz)", yaxis_title="Magnitude (dB)")
