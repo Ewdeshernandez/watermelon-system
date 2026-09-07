@@ -45,13 +45,18 @@ from core.modal.oma_layout import (OMALayout, MeasPoint, MachineComponent, defau
 
 # Presets "de fábrica" (nombre visible → función que arma el OMALayout)
 FACTORY_PRESETS = {
+    "⭐ Cenit · Estación Medellín — Motor + bomba multietapa (17 sensores)":
+        lambda: motor_multistage_pump_layout(
+            name="Cenit Medellín · Motor-Bomba", client="Cenit",
+            location="Estación Medellín", tag="UNIDAD 2 · MPE2420",
+            running_speed_rpm=3600.0),
     "Motor + multistage pump (on pedestals) — 17 sensors": motor_multistage_pump_layout,
     "Motor-pump — 8 proximity probes XY (plain bearings)": motor_pump_proximity_layout,
 }
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.37"
+__version__ = "0.9.38"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
