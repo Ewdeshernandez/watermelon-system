@@ -591,7 +591,7 @@ T_MODES = "🟣  Modes (EMA)"
 T_CMP = "🔴  Comparative"
 T_TREND = "🔵  Trend / Compare"
 T_REPORT = "📄  Report"
-_NAVOPTS = [T_OMA, T_SHAPES, T_SSI, T_CAMP, T_EMA, T_MODES, T_CMP, T_TREND, T_REPORT]
+_NAVOPTS = [T_OMA, T_SSI, T_CAMP, T_SHAPES, T_CMP, T_EMA, T_MODES, T_TREND, T_REPORT]
 
 # Navegación PERSISTENTE (segmented control con estado) — a diferencia de st.tabs,
 # conserva la sección activa tras cada rerun (arregla el "salto" al generar reporte).
