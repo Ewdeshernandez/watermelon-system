@@ -51,7 +51,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.33"
+__version__ = "0.9.34"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -419,26 +419,6 @@ def build_app(layout: OMALayout, simulated: bool = True):
     ver_lbl = QtWidgets.QLabel(f"v{__version__}")
     ver_lbl.setStyleSheet("color:#94a3b8; font-weight:700; font-size:12px; padding-left:8px;")
     ver_lbl.setToolTip("Watermelon Modal software version"); tb.addWidget(ver_lbl)
-    btn_upd = QtWidgets.QToolButton(); btn_upd.setText("⟳ Update")
-    btn_upd.setStyleSheet("QToolButton{color:#cbd5e1;background:transparent;border:1px solid #334155;"
-                          "border-radius:6px;padding:2px 8px;font-size:11px;margin-left:8px;}"
-                          "QToolButton:hover{color:#fff;border-color:#16a34a;}")
-    btn_upd.setToolTip("Buscar actualización ahora")
-
-    def _manual_check():
-        try:
-            from core.modal.updater import diagnose
-            btn_upd.setEnabled(False); btn_upd.setText("⟳ …"); QtWidgets.QApplication.processEvents()
-            info, msg = diagnose(__version__)
-            btn_upd.setEnabled(True); btn_upd.setText("⟳ Update")
-            if info:
-                _show_update_banner(win, info)
-            else:
-                QtWidgets.QMessageBox.information(win, "Actualización", msg)
-        except Exception as e:  # noqa: BLE001
-            btn_upd.setEnabled(True); btn_upd.setText("⟳ Update")
-            QtWidgets.QMessageBox.warning(win, "Actualización", f"{type(e).__name__}: {e}")
-    btn_upd.clicked.connect(_manual_check); tb.addWidget(btn_upd)
     spc = QtWidgets.QWidget(); spc.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Preferred)
     tb.addWidget(spc)
     # ¿Hay una NI 9234 conectada AHORA? Autodetecta al arrancar (no depende de --sim).
@@ -2859,6 +2839,65 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _hscroll.setWidget(_hinner); hl.addWidget(_hscroll, 1)
     tabs.addTab(pg_help, "Help")
 
+    # ================================================================= UPDATES
+    pg_upd = QtWidgets.QWidget(); ul = QtWidgets.QVBoxLayout(pg_upd)
+    ul.setContentsMargins(28, 24, 28, 24)
+    _card = QtWidgets.QFrame()
+    _card.setStyleSheet("QFrame{background:white;border:1px solid #e6ecf5;border-radius:16px;}")
+    _card.setMaximumWidth(680)
+    _cl = QtWidgets.QVBoxLayout(_card); _cl.setContentsMargins(30, 28, 30, 28); _cl.setSpacing(14)
+    _uh = QtWidgets.QLabel("🍉  Watermelon Modal")
+    _uh.setStyleSheet(f"font-size:22px;font-weight:800;color:{NAVY};border:none;")
+    _cur = QtWidgets.QLabel(f"Versión instalada: <b>v{__version__}</b>")
+    _cur.setStyleSheet("font-size:14px;color:#475569;border:none;"); _cur.setTextFormat(QtCore.Qt.RichText)
+    _status = QtWidgets.QLabel("Presiona <b>Buscar actualizaciones</b> para revisar si hay una versión nueva.")
+    _status.setStyleSheet("font-size:13px;color:#64748b;border:none;")
+    _status.setWordWrap(True); _status.setTextFormat(QtCore.Qt.RichText)
+    _notes = QtWidgets.QTextBrowser()
+    _notes.setStyleSheet("QTextBrowser{border:1px solid #eef2f8;border-radius:10px;background:#fbfcfe;"
+                         "font-size:12px;color:#334155;padding:8px;}")
+    _notes.setMaximumHeight(200); _notes.hide()
+    _brow = QtWidgets.QPushButton("🔍  Buscar actualizaciones")
+    _brow.setStyleSheet(f"QPushButton{{background:{NAVY};color:white;font-size:14px;font-weight:600;"
+                        "padding:10px 20px;border-radius:9px;}QPushButton:hover{background:#12325a;}")
+    _bgo = QtWidgets.QPushButton("⬇  Actualizar ahora")
+    _bgo.setStyleSheet(f"QPushButton{{background:{GREEN};color:white;font-size:14px;font-weight:700;"
+                       "padding:10px 20px;border-radius:9px;}QPushButton:hover{background:#12833a;}")
+    _bgo.hide()
+    _brow_row = QtWidgets.QHBoxLayout(); _brow_row.addWidget(_brow); _brow_row.addWidget(_bgo); _brow_row.addStretch(1)
+    _cl.addWidget(_uh); _cl.addWidget(_cur); _cl.addWidget(_status); _cl.addWidget(_notes); _cl.addLayout(_brow_row)
+    _foot = QtWidgets.QLabel("Las actualizaciones se descargan e instalan solas; la app se reinicia al terminar. "
+                             "Requiere conexión a internet.")
+    _foot.setStyleSheet("font-size:11px;color:#94a3b8;border:none;"); _foot.setWordWrap(True)
+    _cl.addWidget(_foot)
+    ul.addWidget(_card, 0, QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop); ul.addStretch(1)
+    st["_pending_update"] = None
+
+    def _upd_check():
+        _brow.setEnabled(False); _brow.setText("🔍  Buscando…"); QtWidgets.QApplication.processEvents()
+        try:
+            from core.modal.updater import diagnose
+            info, msg = diagnose(__version__)
+        except Exception as e:  # noqa: BLE001
+            info, msg = None, f"Error: {type(e).__name__}: {e}"
+        _brow.setEnabled(True); _brow.setText("🔍  Buscar actualizaciones")
+        st["_pending_update"] = info
+        if info:
+            _status.setText(f"✅ <b style='color:{GREEN}'>Nueva versión disponible: v{info['version']}</b>"
+                            + (f" · publicada {info.get('published','')}" if info.get('published') else ""))
+            _notes.setPlainText((info.get("notes") or "Sin notas.").strip()); _notes.show()
+            _bgo.show()
+        else:
+            _status.setText(msg.replace("\n", "<br>"))
+            _notes.hide(); _bgo.hide()
+
+    def _upd_go():
+        info = st.get("_pending_update")
+        if info:
+            _show_update_banner(win, info)
+    _brow.clicked.connect(_upd_check); _bgo.clicked.connect(_upd_go)
+    tabs.addTab(pg_upd, "Updates")
+
     # Tablas de RESULTADOS = solo lectura (no se pueden editar → credibilidad/seguridad).
     # La de 'Measurement points' (tbl_pts) sí queda editable: es configuración de entrada.
     for _rt in (tbl_sum, tbl_om, tbl_modes, tbl_cmp, tbl_cam, tbl_ssi, tbl_qual):
@@ -2869,7 +2908,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     # juntos, luego correlación / Campbell / formas / reporte.
     _desired_order = ["Configuration", "Sensor check", "Impact test (EMA)", "Modes (EMA)",
                       "OMA capture", "SSI (subspace)", "Comparative", "Campbell",
-                      "Mode shapes", "Preliminary report", "Help"]
+                      "Mode shapes", "Preliminary report", "Help", "Updates"]
     _bar = tabs.tabBar()
     for _target, _title in enumerate(_desired_order):
         _cur = next((i for i in range(tabs.count()) if tabs.tabText(i) == _title), None)

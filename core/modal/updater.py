@@ -23,6 +23,21 @@ REPO = os.environ.get("WM_MODAL_REPO", "Ewdeshernandez/watermelon-system")
 _UA = {"User-Agent": "WatermelonModal-Updater", "Accept": "application/vnd.github+json"}
 
 
+def _ssl_context():
+    """Contexto SSL con CA de certifi. En el .exe empaquetado (PyInstaller) el
+    almacén de certificados del sistema no siempre está disponible → sin esto
+    falla con CERTIFICATE_VERIFY_FAILED. certifi trae su propio cacert.pem."""
+    import ssl
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:  # noqa: BLE001
+        try:
+            return ssl.create_default_context()
+        except Exception:  # noqa: BLE001
+            return None
+
+
 def _parse_ver(s: str):
     nums = re.findall(r"\d+", s or "")
     nums = [int(x) for x in nums[:3]]
@@ -37,7 +52,7 @@ def check_for_update(current_version: str, timeout: float = 6.0) -> Optional[Dic
     try:
         url = f"https://api.github.com/repos/{REPO}/releases?per_page=30"
         req = urllib.request.Request(url, headers=_UA)
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as r:
             rels = json.load(r)
     except Exception:  # noqa: BLE001
         return None
@@ -63,6 +78,7 @@ def check_for_update(current_version: str, timeout: float = 6.0) -> Optional[Dic
             zip_url = a.get("browser_download_url")
     return {"version": ".".join(str(x) for x in v), "tag": rel.get("tag_name", ""),
             "notes": (rel.get("body", "") or "")[:2000],
+            "published": (rel.get("published_at", "") or "")[:10],
             "setup_url": setup_url, "zip_url": zip_url, "html_url": rel.get("html_url", "")}
 
 
@@ -73,7 +89,7 @@ def diagnose(current_version: str, timeout: float = 6.0):
     url = f"https://api.github.com/repos/{REPO}/releases?per_page=10"
     try:
         req = urllib.request.Request(url, headers=_UA)
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as r:
             code = r.getcode()
             rels = json.load(r)
     except Exception as e:  # noqa: BLE001
@@ -96,7 +112,7 @@ def download_file(url: str, dest: Optional[str] = None, timeout: float = 300.0,
     dest = dest or os.path.join(tempfile.gettempdir(), url.split("/")[-1].split("?")[0])
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "WatermelonModal-Updater"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl_context()) as r:
             total = int(r.headers.get("Content-Length", 0) or 0)
             got = 0
             with open(dest, "wb") as f:
