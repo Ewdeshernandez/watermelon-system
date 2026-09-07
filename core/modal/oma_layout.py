@@ -301,13 +301,21 @@ def default_geometry(layout: "OMALayout") -> dict:
             surfaces.append([base + i for i in f])
     seen = {}
     for p in layout.active_points():
-        key = f"{p.component} {p.position_ref}".strip()
+        # estación = POSICIÓN física (x,y). Las etiquetas del campo pueden repetirse
+        # (mismo position_ref en todos), así que agrupar por posición evita colapsar
+        # los 17 sensores en un solo punto (que dejaba la forma modal plana).
+        key = station_key(p)
         if key in seen:
             continue
         seen[key] = 1
-        nodes.append({"id": key, "x": round(float(p.x_norm), 4), "y": 0.2,
+        nodes.append({"id": p.code, "x": round(float(p.x_norm), 4), "y": 0.2,
                       "z": round(float(p.y_norm), 4), "sensor": key})
     return {"nodes": nodes, "lines": lines, "surfaces": surfaces}
+
+
+def station_key(p) -> str:
+    """Clave de estación por POSICIÓN física (no por etiqueta, que puede repetirse)."""
+    return f"{round(float(p.x_norm), 3)}|{round(float(p.y_norm), 3)}"
 
 
 def default_components() -> List[MachineComponent]:

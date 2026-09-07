@@ -347,14 +347,16 @@ def _mode_shape_data(lay, amps_signed, scale_mul=1.0):
     a = np.asarray(amps_signed, float); a = a / (np.max(np.abs(a)) or 1.0)
     stations = {}
     for p, ai in zip(pts, a):
-        key = (p.component, p.position_ref)
+        key = _stn_key(p)                        # por POSICIÓN (no por etiqueta, que puede repetirse)
         dvec = np.array(_AX.get(p.axis, (0, 0, 1)), float) * (-1.0 if p.dof.startswith("-") else 1.0) * float(ai)
         s = stations.setdefault(key, {"pos": np.array([p.x_norm, 0.20, p.y_norm], float), "disp": np.zeros(3)})
         s["disp"] += dvec
     order = sorted(stations.values(), key=lambda s: (s["pos"][0], s["pos"][2]))
     P0 = np.array([s["pos"] for s in order], float)
     DISP = np.array([s["disp"] for s in order], float)
-    MAGn = np.linalg.norm(DISP, axis=1); MAGn = MAGn / (MAGn.max() or 1.0)
+    _mg = np.linalg.norm(DISP, axis=1); _pp = _mg[_mg > 0]
+    _cn = float(np.percentile(_pp, 85)) if _pp.size else 1.0
+    MAGn = np.clip(_mg / (_cn or (_mg.max() or 1.0)), 0.0, 1.0)
     span = float(np.ptp(P0[:, 0])) or 1.0
     scale = 0.24 * span / (np.max(np.linalg.norm(DISP, axis=1)) or 1.0) * scale_mul
     Ps, Ds = P0, DISP
@@ -434,23 +436,28 @@ def _mode_shape_fig(lay, amps_signed, height=580, scale_mul=1.0):
     return fig
 
 
+def _stn_key(p):
+    """Clave de estación por POSICIÓN física (las etiquetas del campo pueden repetirse)."""
+    return f"{round(float(p.x_norm), 3)}|{round(float(p.y_norm), 3)}"
+
+
 def _layout_stations(lay):
-    """Estaciones de medición (component + position_ref) con su posición 3D."""
+    """Estaciones de medición por posición física, con su posición 3D."""
     pts = lay.active_points()
     stations = {}
-    for i, p in enumerate(pts):
-        key = f"{p.component} {p.position_ref}".strip()
-        s = stations.setdefault(key, {"label": key, "pos": np.array([p.x_norm, 0.20, p.y_norm], float)})
+    for p in pts:
+        key = _stn_key(p)
+        stations.setdefault(key, {"label": key, "pos": np.array([p.x_norm, 0.20, p.y_norm], float)})
     return list(stations.values())
 
 
 def _station_disp_map(lay, amps_signed):
-    """{label de estación → vector de desplazamiento 3D} para una forma modal."""
+    """{clave de estación (posición) → vector de desplazamiento 3D} para una forma modal."""
     pts = lay.active_points()
     a = np.asarray(amps_signed, float); a = a / (np.max(np.abs(a)) or 1.0)
     disp = {}
     for i, p in enumerate(pts):
-        key = f"{p.component} {p.position_ref}".strip()
+        key = _stn_key(p)
         dvec = np.array(_AX.get(p.axis, (0, 0, 1)), float) * (-1.0 if p.dof.startswith("-") else 1.0) * float(a[i])
         disp[key] = disp.get(key, np.zeros(3)) + dvec
     return disp
@@ -539,9 +546,15 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0):
         return _mode_surface_fig(lay, amps_signed, height, scale_mul)
     disp_map = _station_disp_map(lay, amps_signed)
     P, ND = _geom_node_disp(geom, disp_map)
-    MAG = np.linalg.norm(ND, axis=1); cmax = MAG.max() or 1.0; MAGn = MAG / cmax
+    MAG = np.linalg.norm(ND, axis=1)
+    # contraste automático: satura el ~15% superior para que el gradiente se lea
+    # aunque el modo sea "picudo" (un sensor domina) — como hacen los software modales.
+    _pos = MAG[MAG > 0]
+    cnorm = float(np.percentile(_pos, 85)) if _pos.size else 1.0
+    cnorm = cnorm or (MAG.max() or 1.0)
+    MAGn = np.clip(MAG / cnorm, 0.0, 1.0)
     span = float(np.ptp(P[:, 0])) or 1.0
-    scale = 0.18 * span / (np.linalg.norm(ND, axis=1).max() or 1.0) * scale_mul
+    scale = 0.18 * span / (MAG.max() or 1.0) * scale_mul
     I, J, K = [], [], []
     for f in surfaces:
         if len(f) >= 3:
