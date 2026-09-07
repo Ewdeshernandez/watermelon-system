@@ -154,6 +154,13 @@ def _show_table(headers, rows):
     _st.markdown(_pretty_table(headers, rows), unsafe_allow_html=True)
 
 
+def _chart(fig, **kw):
+    """st.plotly_chart sin la barra de botones de Plotly (cámara/zoom/±) — look limpio."""
+    import streamlit as _st
+    return _st.plotly_chart(fig, use_container_width=True,
+                            config={"displayModeBar": False}, **kw)
+
+
 def _show_dicts(rows):
     """Renderiza una lista de dicts (p.ej. de correlation_table/crossings_table) con
     el estilo bonito. Colorea la columna de estado/severidad si existe."""
@@ -620,7 +627,7 @@ if nav == T_EMA:
     fig.update_yaxes(title_text="dB", row=1, col=1); fig.update_yaxes(range=[0, 1.05], row=2, col=1)
     fig.update_xaxes(title_text="Frequency (Hz)", row=2, col=1)
     fig.update_layout(height=470, template="watermelon", showlegend=False)
-    st.plotly_chart(fig, use_container_width=True)
+    _chart(fig)
     if D["ema_curve"] is not None:
         st.success("Real impact FRF from the field run (ISO 7626-5).")
     elif D["source"] == "cloud":
@@ -651,7 +658,7 @@ if nav == T_MODES:
         fig.update_layout(title="Nyquist (mobility)", height=380, template="watermelon",
                           xaxis_title="Re", yaxis_title="Im")
         fig.update_yaxes(scaleanchor="x", scaleratio=1)
-        st.plotly_chart(fig, use_container_width=True)
+        _chart(fig)
 
 # ---------------------------------------------------------------- 4 OMA (análisis)
 if nav == T_OMA:
@@ -816,9 +823,9 @@ if nav == T_SSI:
                           showlegend=False, hoverinfo="skip"))
         for m in ssi.modes:
             fig.add_vline(x=m.frequency_hz, line=dict(color=RED, width=1, dash="dot"))
-        fig.update_layout(title="Stabilization diagram (green = stable pole)", height=430,
+        fig.update_layout(title_text="", height=430,
                           template="watermelon", xaxis_title="Frequency (Hz)", yaxis_title="Model order")
-        st.plotly_chart(fig, use_container_width=True)
+        _chart(fig)
         _show_table(["#", "Frequency", "± Hz", "Damping ζ", "± %"],
                     [[f"<span class='idx'>{i+1}</span>", f"<span class='fn'>{m.frequency_hz:.3f}<span class='u'> Hz</span></span>",
                       f"<span class='num'>{m.std_frequency_hz:.3f}</span>",
@@ -836,9 +843,9 @@ if nav == T_SSI:
                           showlegend=False, hoverinfo="skip"))
         for m in _ssi["modes"]:
             fig.add_vline(x=m["fn"], line=dict(color=RED, width=1, dash="dot"))
-        fig.update_layout(title="Stabilization diagram (green = stable pole)", height=430,
+        fig.update_layout(title_text="", height=430,
                           template="watermelon", xaxis_title="Frequency (Hz)", yaxis_title="Model order")
-        st.plotly_chart(fig, use_container_width=True)
+        _chart(fig)
         _show_table(["#", "Frequency", "± Hz", "Damping ζ", "± %"],
                     [[f"<span class='idx'>{i+1}</span>", f"<span class='fn'>{m['fn']:.3f}<span class='u'> Hz</span></span>",
                       f"<span class='num'>{m.get('std_fn',0.0):.3f}</span>",
@@ -874,57 +881,111 @@ if nav == T_CMP:
         fig.update_layout(title="EMA (▲) vs OMA (●)", height=320, template="watermelon",
                           xaxis_title="Frequency (Hz)",
                           yaxis=dict(showticklabels=False, range=[-0.5, 1.5]))
-        st.plotly_chart(fig, use_container_width=True)
+        _chart(fig)
         if matches:
             _show_dicts(correlation_table(matches))
             st.info(ema_oma_summary(matches))
 
 # ---------------------------------------------------------------- 7 CAMPBELL
 if nav == T_CAMP:
-    _sec("Campbell diagram", "Natural frequencies vs running-speed orders", "API 684 sec. 1.6 (±15%)")
+    _sec("Campbell diagram", "Natural frequencies vs running-speed orders", "API 684 (±15%)")
     modes_hz = [m["fn"] for m in D["oma_modes"] if m["cls"] != "spurious"] or [m["fn"] for m in D["oma_modes"]]
     if not modes_hz:
         st.info("No modes to plot.")
     else:
-        rpm_op = float(D["rpm"]); rpm_max = rpm_op * 1.35; orders = [0.5, 1, 2, 3, 4, 5, 6, 7, 8]
-        bands = [SpeedBand(rpm_op * 0.85, rpm_op * 1.15, "Operating ±15%")]
-        crossings = compute_crossings(modes_hz, 0.0, rpm_max, orders=orders, bands=bands)
-        ymax = max(modes_hz) * 1.3; fig = go.Figure(); rpm_axis = np.linspace(0, rpm_max, 60)
-        fig.add_vrect(x0=rpm_op * 0.85, x1=rpm_op * 1.15, fillcolor="rgba(220,38,38,.10)",
-                      line_width=0, annotation_text="±15% (API 684)", annotation_position="top left",
-                      annotation_font=dict(size=11, color=RED))
-        for o in orders:                                    # líneas de orden desde el origen
+        # --- Controles: 2ª velocidad opcional + banda ½× (sub-síncrono) ---
+        cco = st.columns([1.3, 1, 1.2])
+        with cco[0]:
+            _cmp2 = st.checkbox("Compare 2nd speed", value=False, key="camp_cmp2",
+                                help="Overlay a second operating speed. Order lines don't move — only the speed line/band.")
+        with cco[1]:
+            _rpm2 = st.number_input("2nd speed (RPM)", min_value=0.0, max_value=60000.0,
+                                    value=float(round(D["rpm"] * 0.9)), step=10.0, key="camp_rpm2",
+                                    disabled=not _cmp2)
+        with cco[2]:
+            _half = st.checkbox("½× band (sub-sync)", value=False, key="camp_half",
+                                help="Optional (not API 684): screens sub-synchronous excitation at half speed.")
+
+        rpm_op = float(D["rpm"]); SM = 0.15
+        lo, hi = rpm_op * (1 - SM), rpm_op * (1 + SM)
+        rpm2 = float(_rpm2) if _cmp2 and _rpm2 > 0 else 0.0
+        rpm_max = max(rpm_op * 1.4, rpm2 * 1.4, 1500.0)
+        orders = [0.5, 1, 2, 3, 4, 5, 6, 7, 8]
+        ymax = max(modes_hz) * 1.30
+        rpm_axis = np.linspace(0, rpm_max, 80)
+        fig = go.Figure()
+        # banda de operación ±15% (rojo)
+        fig.add_vrect(x0=lo, x1=hi, fillcolor="rgba(239,68,68,.13)", line_width=0)
+        if _half:
+            fig.add_vrect(x0=rpm_op / 2 * (1 - SM), x1=rpm_op / 2 * (1 + SM),
+                          fillcolor="rgba(245,158,11,.12)", line_width=0)
+        if rpm2 > 0:
+            fig.add_vrect(x0=rpm2 * (1 - SM), x1=rpm2 * (1 + SM), fillcolor="rgba(124,58,237,.12)", line_width=0)
+        # líneas de orden 0.5×..8× + etiqueta donde salen del gráfico
+        for o in orders:
             fig.add_trace(go.Scatter(x=rpm_axis, y=rpm_axis / 60.0 * o, mode="lines",
-                          line=dict(color="#c7d2e0", width=1, dash="dot"), showlegend=False, hoverinfo="skip"))
-            ly = o * rpm_max / 60.0
-            lx = rpm_max * 0.99 if ly <= ymax else ymax * 60.0 / o
-            fig.add_annotation(x=lx, y=min(ly, ymax), text=f"{o:g}×", showarrow=False,
-                               font=dict(size=10, color="#94a3b8"), xanchor="right", yanchor="bottom")
-        for fn in modes_hz:                                 # frecuencias naturales
-            fig.add_hline(y=fn, line=dict(color="#334155", width=1.2, dash="dash"))
-        fig.add_vline(x=rpm_op, line=dict(color=NAVY, width=2.5))
+                          line=dict(color="#6B7280", width=1, dash="dot"), showlegend=False, hoverinfo="skip"))
+            if o * rpm_max / 60.0 <= ymax:
+                lx, ly = rpm_max * 0.985, o * rpm_max / 60.0
+            else:
+                lx, ly = ymax * 60.0 / o, ymax * 0.985
+            fig.add_annotation(x=lx, y=ly, text=f"{o:g}×", showarrow=False,
+                               font=dict(size=10, color="#6B7280"), xanchor="right", yanchor="top")
+        # frecuencias naturales (verde)
+        for fn in modes_hz:
+            fig.add_hline(y=fn, line=dict(color=GREEN, width=2))
+        # líneas de N y ±15%
+        fig.add_vline(x=rpm_op, line=dict(color=NAVY, width=3))
         fig.add_annotation(x=rpm_op, y=ymax, text=f"<b>N = {rpm_op:.0f} RPM</b>", showarrow=False,
                            font=dict(size=11, color=NAVY), yanchor="bottom", bgcolor="rgba(255,255,255,.85)")
-        _seen = {"coincidence": False, "near": False}
+        for xb, lab in ((lo, f"−15% · {lo:.0f}"), (hi, f"+15% · {hi:.0f}")):
+            fig.add_vline(x=xb, line=dict(color=RED, width=1, dash="dash"))
+            fig.add_annotation(x=xb, y=ymax * 0.86, text=lab, showarrow=False,
+                               font=dict(size=9, color=RED), yanchor="top")
+        # cruces de la velocidad de operación
+        bands = [SpeedBand(rpm_op, SM * rpm_op, f"Operating {rpm_op:.0f}±15%")]
+        if _half:
+            bands.append(SpeedBand(rpm_op / 2, SM * rpm_op / 2, "½ speed"))
+        crossings = compute_crossings(modes_hz, 0.0, rpm_max, orders=orders, bands=bands)
         _sc = {"coincidence": RED, "near": AMBER, "clear": "#cbd5e1"}
-        _sn = {"coincidence": "Coincidence", "near": "Near"}
         for cr in crossings:
-            sev = cr.severity
-            show = sev in _seen and not _seen.get(sev, True)
-            fig.add_trace(go.Scatter(x=[cr.crossing_rpm], y=[cr.mode_hz], mode="markers",
-                          name=_sn.get(sev, ""), legendgroup=sev, showlegend=show,
-                          marker=dict(color=_sc.get(sev, "#cbd5e1"), size=12, symbol="x-thin",
-                                      line=dict(width=2, color=_sc.get(sev, "#cbd5e1"))),
+            fig.add_trace(go.Scatter(x=[cr.crossing_rpm], y=[cr.mode_hz], mode="markers", showlegend=False,
+                          marker=dict(color=_sc.get(cr.severity, "#cbd5e1"), size=12, symbol="x-thin",
+                                      line=dict(width=2, color=_sc.get(cr.severity, "#cbd5e1"))),
                           hovertemplate=f"{cr.mode_hz:.1f} Hz · {cr.order:g}× · %{{x:.0f}} RPM<extra></extra>"))
-            if sev in _seen:
-                _seen[sev] = True
-        fig.update_layout(title="Campbell diagram — resonance screening (API 684)",
-                          height=480, template="watermelon", yaxis_range=[0, ymax],
-                          xaxis_title="Running speed (RPM)", yaxis_title="Frequency (Hz)")
-        st.plotly_chart(fig, use_container_width=True)
-        if crossings:
-            _show_dicts(crossings_table(crossings))
-            st.info(camp_summary(crossings))
+        # segunda velocidad (púrpura) + sus cruces
+        _rows_cx = [(c, f"{rpm_op:.0f}") for c in crossings if c.severity in ("coincidence", "near")]
+        if rpm2 > 0:
+            fig.add_vline(x=rpm2, line=dict(color="#7c3aed", width=3, dash="dash"))
+            fig.add_annotation(x=rpm2, y=ymax * 0.9, text=f"<b>2nd · {rpm2:.0f}</b>", showarrow=False,
+                               font=dict(size=10, color="#7c3aed"), yanchor="top")
+            cx2 = compute_crossings(modes_hz, 0.0, rpm_max, orders=orders,
+                                    bands=[SpeedBand(rpm2, SM * rpm2, f"2nd {rpm2:.0f}±15%")])
+            for c in cx2:
+                if c.severity in ("coincidence", "near"):
+                    fig.add_trace(go.Scatter(x=[c.crossing_rpm], y=[c.mode_hz], mode="markers", showlegend=False,
+                                  marker=dict(color="#7c3aed", size=13, symbol="diamond",
+                                              line=dict(width=1.5, color="white")),
+                                  hovertemplate=f"{c.mode_hz:.1f} Hz · {c.order:g}× · {rpm2:.0f} RPM<extra>2nd</extra>"))
+                    _rows_cx.append((c, f"{rpm2:.0f}"))
+        fig.update_layout(title_text="", height=500, template="watermelon",
+                          xaxis=dict(range=[0, rpm_max]), yaxis=dict(range=[0, ymax]),
+                          xaxis_title=f"Running speed (RPM) · N = {rpm_op:.0f} · API 684 ±15%",
+                          yaxis_title="Frequency (Hz)")
+        _chart(fig)
+        # --- Tabla: SOLO los que están en resonancia (coincidence / near) ---
+        _stat_txt = {"coincidence": "Coincidence", "near": "Near"}
+        if _rows_cx:
+            _show_table(["Mode", "Order", "Crossing RPM", "Margin %", "Status", "vs speed"],
+                        [[f"<span class='fn'>{c.mode_hz:.2f}<span class='u'> Hz</span></span>",
+                          f"<span class='num'>{c.order:g}×</span>",
+                          f"<span class='num'>{c.crossing_rpm:.0f}</span>",
+                          f"<span class='num'>{c.sep_margin_pct:.1f}</span>",
+                          _pill(_stat_txt[c.severity], *( ("#dc2626", "#fdeaea") if c.severity == "coincidence" else ("#b45309", "#fef3e2"))),
+                          f"<span class='num'>{vs}</span>"] for c, vs in sorted(_rows_cx, key=lambda t: t[0].sep_margin_pct)])
+        else:
+            st.success("No fn↔order crossings inside the operating band(s) — adequate separation (API 684).")
+        st.info(camp_summary(crossings))
 
 # ---------------------------------------------------------------- 8 MODE SHAPES
 if nav == T_SHAPES:
@@ -939,7 +1000,7 @@ if nav == T_SHAPES:
         amp = np.asarray(D["shapes"][idx], float)              # forma modal (con signo)
     else:
         amp = np.random.default_rng(idx + 1).standard_normal(len(pts))
-    st.plotly_chart(_mode_anim_fig(lay, amp, height=560), use_container_width=True)
+    _chart(_mode_anim_fig(lay, amp, height=560))
     st.caption("Press ▶ Play — nodes oscillate along their DOF; colour = amplitude (green→red). "
                "The machine is shown faint for reference.")
 
@@ -976,7 +1037,7 @@ if nav == T_TREND:
                       connectgaps=True, marker=dict(size=9)))
     fig.update_layout(title="Natural frequency trend across runs", height=440, template="watermelon",
                       xaxis_title="Run / date", yaxis_title="Frequency (Hz)")
-    st.plotly_chart(fig, use_container_width=True)
+    _chart(fig)
     # tabla + alerta de caída
     import pandas as _pd_tr
     rows = []
