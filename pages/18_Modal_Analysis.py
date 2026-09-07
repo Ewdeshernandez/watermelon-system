@@ -590,6 +590,20 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0):
         data.append(_node_tr(dP, colorbar=False)); tr.append(_ino)
         frames.append(go.Frame(data=data, traces=tr))
     fig.frames = frames
+    # anotaciones: números de nodo + flechas de DOF en las estaciones de sensor
+    _sm = np.array([bool(n.get("sensor")) for n in nodes])
+    if _sm.any():
+        SP, SD = P[_sm], ND[_sm]
+        alen = 0.09 * span
+        _nz = np.linalg.norm(SD, axis=1, keepdims=True); _nz[_nz == 0] = 1.0
+        U = SD / _nz * alen
+        fig.add_trace(go.Cone(x=SP[:, 0], y=SP[:, 1], z=SP[:, 2], u=U[:, 0], v=U[:, 1], w=U[:, 2],
+                      anchor="tail", sizemode="absolute", sizeref=alen * 0.5, showscale=False,
+                      colorscale=[[0, "#0f172a"], [1, "#0f172a"]], hoverinfo="skip"))
+        fig.add_trace(go.Scatter3d(x=SP[:, 0], y=SP[:, 1], z=SP[:, 2], mode="markers+text",
+                      text=[str(i + 1) for i in range(len(SP))], textposition="top center",
+                      textfont=dict(size=10, color="#0f172a"), marker=dict(size=3, color="#0f172a"),
+                      hoverinfo="skip"))
     lay_kw = _mode_scene(height)
     if has_surf:
         lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1,
