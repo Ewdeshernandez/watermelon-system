@@ -101,12 +101,86 @@ def _inject_theme():
       .stTabs [data-baseweb="tab-list"] { gap:4px; }
       .stTabs [data-baseweb="tab"] { background:#eef2f8; border-radius:9px 9px 0 0; padding:8px 14px; font-weight:600; }
       .stTabs [aria-selected="true"] { background:#0F1E3D !important; color:#fff !important; }
+      /* Tablas bonitas (mismo estilo en TODO el módulo) */
+      table.wm-modes { width:100%; border-collapse:separate; border-spacing:0;
+        font-family:'IBM Plex Sans',sans-serif; border:1px solid #e6ecf5; border-radius:14px;
+        overflow:hidden; box-shadow:0 6px 18px rgba(15,30,61,.06); margin:2px 0 10px; }
+      table.wm-modes th { background:#0F1E3D; color:#fff; font-size:11px; font-weight:600;
+        letter-spacing:.04em; text-transform:uppercase; text-align:center; padding:11px 10px; }
+      table.wm-modes td { padding:10px 10px; text-align:center; border-top:1px solid #eef2f8;
+        font-size:14px; color:#0f1e3d; }
+      table.wm-modes tr:nth-child(even) td { background:#f7fafd; }
+      table.wm-modes tr:hover td { background:#eef6ff; }
+      table.wm-modes td.idx { color:#94a3b8; font-family:'IBM Plex Mono',monospace; width:38px; }
+      table.wm-modes td.fn { font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:15px; }
+      table.wm-modes td.num { font-family:'IBM Plex Mono',monospace; }
+      table.wm-modes .u { color:#94a3b8; font-size:11px; font-weight:400; }
+      table.wm-modes .cls { font-size:12px; color:#475569; }
+      table.wm-modes .badge, table.wm-modes .pill { padding:3px 10px; border-radius:999px;
+        font-size:11px; font-weight:700; white-space:nowrap; }
       @media (prefers-color-scheme: dark){
         .wm-kpi{ background:#141b26; border-color:#243040; }
         .wm-kpi .v{ color:#eaf0f7; }
       }
     </style>
     """, unsafe_allow_html=True)
+
+
+def _pill(text, color, bg):
+    return f"<span class='pill' style='color:{color};background:{bg}'>{text}</span>"
+
+
+def _status_pill(s):
+    s0 = str(s).strip().lower()
+    if s0.startswith("ok") or "pass" in s0:
+        return _pill("OK", "#16a34a", "#eaf7ef")
+    if "respond" in s0 or "warn" in s0:
+        return _pill(str(s).replace("●", "").strip() or "responding", "#b45309", "#fef3e2")
+    if "fail" in s0 or "no" in s0:
+        return _pill(str(s), "#dc2626", "#fdeaea")
+    return _pill(str(s), "#64748b", "#eef2f8")
+
+
+def _pretty_table(headers, rows):
+    """Tabla HTML con el estilo del módulo (marcos, chips, monoespaciado). `rows`
+    es una lista de listas; cada celda puede llevar HTML (chips, <span class=...>)."""
+    head = "".join(f"<th>{h}</th>" for h in headers)
+    body = "".join("<tr>" + "".join(f"<td>{c}</td>" for c in r) + "</tr>" for r in rows)
+    return f'<table class="wm-modes"><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>'
+
+
+def _show_table(headers, rows):
+    import streamlit as _st
+    _st.markdown(_pretty_table(headers, rows), unsafe_allow_html=True)
+
+
+def _show_dicts(rows):
+    """Renderiza una lista de dicts (p.ej. de correlation_table/crossings_table) con
+    el estilo bonito. Colorea la columna de estado/severidad si existe."""
+    import streamlit as _st
+    if not rows:
+        return
+    heads = list(rows[0].keys())
+    _stat_keys = {"Estado", "Status", "Severidad", "Severity"}
+    body = []
+    for r in rows:
+        cells = []
+        for h in heads:
+            v = r.get(h, "")
+            if h in _stat_keys:
+                vs = str(v).lower()
+                if any(k in vs for k in ("coincid", "fail", "no-go", "rechaz")):
+                    cells.append(_pill(str(v), "#dc2626", "#fdeaea"))
+                elif any(k in vs for k in ("cercan", "near", "dudos", "doubt", "warn")):
+                    cells.append(_pill(str(v), "#b45309", "#fef3e2"))
+                elif any(k in vs for k in ("libre", "clear", "ok", "valid")):
+                    cells.append(_pill(str(v), "#16a34a", "#eaf7ef"))
+                else:
+                    cells.append(_pill(str(v), "#64748b", "#eef2f8"))
+            else:
+                cells.append(f"<span class='num'>{v}</span>" if isinstance(v, (int, float)) else str(v))
+        body.append(cells)
+    _st.markdown(_pretty_table(heads, body), unsafe_allow_html=True)
 
 
 # ------------------------------------------------------------------ colores / 3D
@@ -561,13 +635,17 @@ if nav == T_MODES:
     cc1, cc2 = st.columns([2, 3])
     with cc1:
         if D["ema_modes_full"]:
-            st.dataframe([{"Freq (Hz)": round(m["fn"], 2), "Damping (%)": round(m["zeta"], 3),
-                           "Coherence": round(m["coh"], 3) if m.get("coh") is not None else "—"}
-                          for m in D["ema_modes_full"]], use_container_width=True, hide_index=True)
+            _show_table(["#", "Frequency", "Damping ζ", "Coherence"],
+                        [[f"<span class='idx'>{i}</span>", f"<span class='fn'>{m['fn']:.2f}<span class='u'> Hz</span></span>",
+                          f"<span class='num'>{m['zeta']:.2f}<span class='u'> %</span></span>",
+                          f"<span class='num'>{round(m['coh'],3) if m.get('coh') is not None else '—'}</span>"]
+                         for i, m in enumerate(D["ema_modes_full"], 1)])
         else:
-            st.dataframe([{"Freq (Hz)": round(fr, 2), "Reliable": "✓"} for fr in D["ema_freqs"]] or
-                         [{"Freq (Hz)": fn, "Damping (%)": round(z * 100, 2)} for fn, z in DEMO_MODES],
-                         use_container_width=True, hide_index=True)
+            _er = ([[f"<span class='fn'>{fr:.2f}<span class='u'> Hz</span></span>", _pill("reliable", "#16a34a", "#eaf7ef")]
+                    for fr in D["ema_freqs"]] or
+                   [[f"<span class='fn'>{fn:.2f}<span class='u'> Hz</span></span>",
+                     f"<span class='num'>{round(z*100,2)}<span class='u'> %</span></span>"] for fn, z in DEMO_MODES])
+            _show_table(["Frequency", "Damping ζ" if not D["ema_freqs"] else "Status"], _er)
     with cc2:
         fig = go.Figure(go.Scatter(x=H.real, y=H.imag, mode="lines", line=dict(color=NAVY)))
         fig.update_layout(title="Nyquist (mobility)", height=380, template="watermelon",
@@ -697,30 +775,12 @@ if nav == T_OMA:
             f"<td><span class='badge' style='color:{src_c};background:{src_b}'>{src_t}</span></td>"
             f"<td><span class='pill' style='color:{vc};background:{vb}'>{vlabel}</span></td>"
             f"</tr>")
-    _table_html = f"""
-    <style>
-      .wm-modes {{ width:100%; border-collapse:separate; border-spacing:0; font-family:'IBM Plex Sans',sans-serif;
-        border:1px solid #e6ecf5; border-radius:14px; overflow:hidden; box-shadow:0 6px 18px rgba(15,30,61,.06); }}
-      .wm-modes th {{ background:{NAVY}; color:#fff; font-size:11px; font-weight:600; letter-spacing:.04em;
-        text-transform:uppercase; text-align:center; padding:11px 10px; }}
-      .wm-modes td {{ padding:10px 10px; text-align:center; border-top:1px solid #eef2f8; font-size:14px; color:#0f1e3d; }}
-      .wm-modes tr:nth-child(even) td {{ background:#f7fafd; }}
-      .wm-modes tr:hover td {{ background:#eef6ff; }}
-      .wm-modes td.idx {{ color:#94a3b8; font-family:'IBM Plex Mono',monospace; width:38px; }}
-      .wm-modes td.fn {{ font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:15px; }}
-      .wm-modes td.num {{ font-family:'IBM Plex Mono',monospace; }}
-      .wm-modes .u {{ color:#94a3b8; font-size:11px; font-weight:400; }}
-      .wm-modes .cls {{ font-size:12px; color:#475569; }}
-      .wm-modes .badge, .wm-modes .pill {{ padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; white-space:nowrap; }}
-    </style>
-    <table class="wm-modes">
-      <thead><tr><th>#</th><th>Frequency</th><th>Damping ζ</th><th>Complexity</th>
-        <th>Class</th><th>Source</th><th>Validation</th></tr></thead>
-      <tbody>{''.join(_rows_html)}</tbody>
-    </table>"""
+    _table_html = ('<table class="wm-modes"><thead><tr>'
+                   "<th>#</th><th>Frequency</th><th>Damping ζ</th><th>Complexity</th>"
+                   "<th>Class</th><th>Source</th><th>Validation</th></tr></thead>"
+                   f"<tbody>{''.join(_rows_html)}</tbody></table>")
     if D["oma_modes"]:
         st.markdown(_table_html, unsafe_allow_html=True)
-        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     if _verd:
         st.info(mv_sum(_verd))
 
@@ -729,7 +789,6 @@ if nav == T_OMA:
     if _scr:
         with st.expander(f"🔴 Sensor verification record — {_scr.get('n_ok','?')}/{_scr.get('n_total','?')} "
                          f"channels OK ({str(_scr.get('ts',''))[:16]})", expanded=False):
-            st.caption("Proof the sensors were wired and responding before the capture (field bump/tap test).")
             _png = _scr.get("png_b64")
             if _png:
                 st.markdown(f'<img src="data:image/png;base64,{_png}" '
@@ -737,8 +796,9 @@ if nav == T_OMA:
                             unsafe_allow_html=True)
             _rows = _scr.get("rows") or []
             if _rows:
-                st.dataframe([{"Ch": r[0], "RMS": r[1], "Peak": r[2], "Status": r[3]} for r in _rows],
-                             use_container_width=True, hide_index=True, height=240)
+                _show_table(["Channel", "RMS", "Peak", "Status"],
+                            [[f"<b>{r[0]}</b>", f"<span class='num'>{r[1]}</span>",
+                              f"<span class='num'>{r[2]}</span>", _status_pill(r[3])] for r in _rows])
 
 # ---------------------------------------------------------------- 5 SSI
 if nav == T_SSI:
@@ -759,11 +819,11 @@ if nav == T_SSI:
         fig.update_layout(title="Stabilization diagram (green = stable pole)", height=430,
                           template="watermelon", xaxis_title="Frequency (Hz)", yaxis_title="Model order")
         st.plotly_chart(fig, use_container_width=True)
-        st.dataframe([{"Mode": i + 1, "Freq (Hz)": round(m.frequency_hz, 3),
-                       "± Hz": round(m.std_frequency_hz, 3),
-                       "Damping (%)": round(m.damping_ratio_pct, 3),
-                       "± %": round(m.std_damping_pct, 3)} for i, m in enumerate(ssi.modes)],
-                     use_container_width=True, hide_index=True)
+        _show_table(["#", "Frequency", "± Hz", "Damping ζ", "± %"],
+                    [[f"<span class='idx'>{i+1}</span>", f"<span class='fn'>{m.frequency_hz:.3f}<span class='u'> Hz</span></span>",
+                      f"<span class='num'>{m.std_frequency_hz:.3f}</span>",
+                      f"<span class='num'>{m.damping_ratio_pct:.3f}<span class='u'> %</span></span>",
+                      f"<span class='num'>{m.std_damping_pct:.3f}</span>"] for i, m in enumerate(ssi.modes)])
     elif D["ssi_cloud"] and D["ssi_cloud"].get("diagram"):
         _ssi = D["ssi_cloud"]
         fig = go.Figure()
@@ -779,19 +839,19 @@ if nav == T_SSI:
         fig.update_layout(title="Stabilization diagram (green = stable pole)", height=430,
                           template="watermelon", xaxis_title="Frequency (Hz)", yaxis_title="Model order")
         st.plotly_chart(fig, use_container_width=True)
-        st.dataframe([{"Mode": i + 1, "Freq (Hz)": round(m["fn"], 3),
-                       "± Hz": round(m.get("std_fn", 0.0), 3),
-                       "Damping (%)": round(m["zeta"], 3),
-                       "± %": round(m.get("std_zeta", 0.0), 3)}
-                      for i, m in enumerate(_ssi["modes"])],
-                     use_container_width=True, hide_index=True)
+        _show_table(["#", "Frequency", "± Hz", "Damping ζ", "± %"],
+                    [[f"<span class='idx'>{i+1}</span>", f"<span class='fn'>{m['fn']:.3f}<span class='u'> Hz</span></span>",
+                      f"<span class='num'>{m.get('std_fn',0.0):.3f}</span>",
+                      f"<span class='num'>{m['zeta']:.3f}<span class='u'> %</span></span>",
+                      f"<span class='num'>{m.get('std_zeta',0.0):.3f}</span>"] for i, m in enumerate(_ssi["modes"])])
         st.caption("Real SSI-COV stabilization diagram from the field run.")
     else:
         st.info("SSI-COV runs on the raw time series in the field app. This cloud run stores the "
                 "identified modes below (raw record stays on the field laptop).")
-        st.dataframe([{"Freq (Hz)": round(m["fn"], 2), "Damping (%)": round(m["zeta"], 3),
-                       "Class": m["cls"]} for m in D["oma_modes"]],
-                     use_container_width=True, hide_index=True)
+        _show_table(["Frequency", "Damping ζ", "Class"],
+                    [[f"<span class='fn'>{m['fn']:.2f}<span class='u'> Hz</span></span>",
+                      f"<span class='num'>{m['zeta']:.3f}<span class='u'> %</span></span>",
+                      f"<span class='cls'>{m['cls']}</span>"] for m in D["oma_modes"]])
 
 # ---------------------------------------------------------------- 6 COMPARATIVE
 if nav == T_CMP:
@@ -816,7 +876,7 @@ if nav == T_CMP:
                           yaxis=dict(showticklabels=False, range=[-0.5, 1.5]))
         st.plotly_chart(fig, use_container_width=True)
         if matches:
-            st.dataframe(correlation_table(matches), use_container_width=True, hide_index=True)
+            _show_dicts(correlation_table(matches))
             st.info(ema_oma_summary(matches))
 
 # ---------------------------------------------------------------- 7 CAMPBELL
@@ -863,7 +923,7 @@ if nav == T_CAMP:
                           xaxis_title="Running speed (RPM)", yaxis_title="Frequency (Hz)")
         st.plotly_chart(fig, use_container_width=True)
         if crossings:
-            st.dataframe(crossings_table(crossings), use_container_width=True, hide_index=True)
+            _show_dicts(crossings_table(crossings))
             st.info(camp_summary(crossings))
 
 # ---------------------------------------------------------------- 8 MODE SHAPES
@@ -930,7 +990,7 @@ if nav == T_TREND:
         rows.append({"Mode": f"~{f0:.0f} Hz",
                      **{s[1]: (f"{v:.2f}" if v else "—") for s, v in zip(_series, vals)},
                      "Δ% (first→last)": (f"{dpc:+.1f}%" if dpc is not None else "—")})
-    st.dataframe(rows, use_container_width=True, hide_index=True)
+    _show_dicts(rows)
     _drops = [r for r in rows if r["Δ% (first→last)"] != "—" and float(r["Δ% (first→last)"].rstrip('%')) <= -3]
     if _drops:
         st.warning("⚠ A natural frequency dropped ≥3% over time — possible loss of stiffness "
