@@ -612,7 +612,8 @@ def _mode_surface_comps(lay, amps_signed, scale_mul=1.0):
     span = float(np.ptp(allV[:, 0])) or 1.0
     maxd = max((np.linalg.norm(cc["DV"], axis=1).max() for cc in comps), default=1.0) or 1.0
     scale = 0.16 * span / maxd * scale_mul
-    return {"comps": comps, "cmax": cmax, "scale": scale, "P0": P0}
+    return {"comps": comps, "cmax": cmax, "scale": scale, "span": span,
+            "P0": P0, "DISP": d["DISP"], "MAGn": d["MAGn"]}
 
 
 def _surface_meshes(s, phase):
@@ -634,7 +635,7 @@ def _mode_surface_layout(height, cmax):
     return lay_kw
 
 
-def _mode_surface_fig(lay, amps_signed, height=600, scale_mul=1.0):
+def _mode_surface_fig(lay, amps_signed, height=600, scale_mul=1.0, annotate=True):
     s = _mode_surface_comps(lay, amps_signed, scale_mul)
     if s is None:
         return _geometry_fig(lay, height=height)
@@ -642,10 +643,22 @@ def _mode_surface_fig(lay, amps_signed, height=600, scale_mul=1.0):
     for tr in _surface_meshes(s, np.pi / 2):
         fig.add_trace(tr)
     ncomp = len(s["comps"])
-    # nodos de medición (pequeños, referencia)
-    P0 = s["P0"]
-    fig.add_trace(go.Scatter3d(x=P0[:, 0], y=P0[:, 1], z=P0[:, 2], mode="markers",
-                  marker=dict(size=3, color="#0f172a"), hoverinfo="skip"))
+    # nodos de medición + números + flechas de dirección (DOF) estilo ARTeMIS
+    P0, DISP = s["P0"], s["DISP"]
+    if annotate and len(P0):
+        alen = 0.09 * s["span"]
+        norm = np.linalg.norm(DISP, axis=1, keepdims=True); norm[norm == 0] = 1.0
+        U = DISP / norm * alen
+        fig.add_trace(go.Cone(x=P0[:, 0], y=P0[:, 1], z=P0[:, 2], u=U[:, 0], v=U[:, 1], w=U[:, 2],
+                      anchor="tail", sizemode="absolute", sizeref=alen * 0.5, showscale=False,
+                      colorscale=[[0, "#0f172a"], [1, "#0f172a"]], hoverinfo="skip"))
+        fig.add_trace(go.Scatter3d(x=P0[:, 0], y=P0[:, 1], z=P0[:, 2], mode="markers+text",
+                      text=[str(i + 1) for i in range(len(P0))], textposition="top center",
+                      textfont=dict(size=10, color="#0f172a"),
+                      marker=dict(size=3, color="#0f172a"), hoverinfo="skip"))
+    else:
+        fig.add_trace(go.Scatter3d(x=P0[:, 0], y=P0[:, 1], z=P0[:, 2], mode="markers",
+                      marker=dict(size=3, color="#0f172a"), hoverinfo="skip"))
     frames = []
     for f in range(28):
         ph = f / 28.0 * 2 * np.pi
@@ -1006,7 +1019,6 @@ st.markdown(f"""
 
 T_OMA = "🟡  Spectral density (FDD)"
 T_SHAPES = "⚫  Mode shapes"
-T_GEOM = "🟣  Geometry"
 T_SSI = "🟠  SSI (subspace)"
 T_CAMP = "🟤  Campbell"
 T_EMA = "🟢  Impact test (EMA)"
@@ -1014,7 +1026,7 @@ T_MODES = "🟣  Modes (EMA)"
 T_CMP = "🔴  Comparative"
 T_TREND = "🔵  Trend / Compare"
 T_REPORT = "📄  Report"
-_NAVOPTS = [T_OMA, T_SSI, T_CAMP, T_GEOM, T_SHAPES, T_CMP, T_EMA, T_MODES, T_TREND, T_REPORT]
+_NAVOPTS = [T_OMA, T_SSI, T_CAMP, T_SHAPES, T_CMP, T_EMA, T_MODES, T_TREND, T_REPORT]
 
 # Navegación PERSISTENTE (segmented control con estado) — a diferencia de st.tabs,
 # conserva la sección activa tras cada rerun (arregla el "salto" al generar reporte).
@@ -1434,16 +1446,16 @@ if nav == T_SHAPES:
         else:
             amp = np.random.default_rng(idx + 1).standard_normal(len(pts))
         _smul = float(_scl.replace("×", ""))
-        _geom = st.session_state.get(f"geom::{D['name']}")
-        _use_geom = bool(_geom and _geom.get("nodes"))
-        if _use_geom:
-            _chart(_mode_geom_fig(lay, _geom, amp, height=600, scale_mul=_smul))
-            st.caption("Press ▶ Play — the mode animates on YOUR geometry (wireframe). Edit it in the "
-                       "🟣 Geometry tab · node colour = displacement amplitude (blue→red). Drag to rotate.")
+        # Geometría definida en el CAMPO (viaja en el payload) → la web sólo la visualiza.
+        _pl_geom = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
+        if _pl_geom and _pl_geom.get("nodes"):
+            _chart(_mode_geom_fig(lay, _pl_geom, amp, height=600, scale_mul=_smul))
+            st.caption("Press ▶ Play — the mode animates on the machine geometry defined in the field. "
+                       "Node colour = displacement amplitude (blue→red). Drag to rotate.")
         else:
-            _chart(_mode_surface_fig(lay, amp, height=600, scale_mul=_smul))
-            st.caption("Press ▶ Play — the equipment surfaces deform, coloured by amplitude. "
-                       "Build a faithful wireframe in the 🟣 Geometry tab for an ARTeMIS-style model.")
+            _chart(_mode_surface_fig(lay, amp, height=600, scale_mul=_smul, annotate=True))
+            st.caption("Press ▶ Play — the equipment surfaces deform, coloured by amplitude; arrows show "
+                       "each sensor's direction of motion. Drag to rotate.")
         bcol = st.columns([1, 3])
         with bcol[0]:
             if st.button("🎬 Export video (GIF)", key="ms_gif"):
@@ -1456,66 +1468,6 @@ if nav == T_SHAPES:
             st.download_button("⬇ Download animation", data=st.session_state["_ms_gif"],
                                file_name=st.session_state.get("_ms_gif_name", "mode_shape.gif"),
                                mime="image/gif")
-
-# ---------------------------------------------------------------- GEOMETRY
-if nav == T_GEOM:
-    _sec("Geometry", "Build the machine wireframe (nodes + lines) — mode shapes animate on it",
-         "ARTeMIS-style geometry")
-    import pandas as _pd
-    _gkey = f"geom::{D['name']}"
-    if _gkey not in st.session_state:
-        st.session_state[_gkey] = _default_geometry(lay)
-    geom = st.session_state[_gkey]
-    _sts = [s["label"] for s in _layout_stations(lay)]
-
-    gc = st.columns([1.1, 1.2, 0.9, 2])
-    if gc[0].button("↺ Reset to sensors", help="Rebuild the default geometry from sensor stations"):
-        st.session_state[_gkey] = _default_geometry(lay); st.rerun()
-    if gc[1].button("Auto-connect: spine (X)", help="Connect nodes in a chain along the machine axis"):
-        _n = geom["nodes"]; _o = sorted(range(len(_n)), key=lambda i: (_n[i]["x"], _n[i]["z"]))
-        geom["lines"] = [[_o[i], _o[i + 1]] for i in range(len(_o) - 1)]
-        st.session_state[_gkey] = geom; st.rerun()
-    if gc[2].button("Clear lines"):
-        geom["lines"] = []; st.session_state[_gkey] = geom; st.rerun()
-
-    st.markdown("**Nodes** — edit positions or add rows. Leave *sensor* blank for a slave node "
-                "(it follows the nearest sensors automatically).")
-    _ndf = _pd.DataFrame(geom["nodes"] or [], columns=["id", "x", "y", "z", "sensor"])
-    _ned = st.data_editor(_ndf, num_rows="dynamic", use_container_width=True, hide_index=True,
-                          key="geom_nodes_ed",
-                          column_config={"sensor": st.column_config.SelectboxColumn("sensor", options=[""] + _sts)})
-    new_nodes = []
-    for _, r in _ned.iterrows():
-        try:
-            if r.get("id") in (None, "") and all((r.get(c) in (None, "")) for c in ("x", "y", "z")):
-                continue
-            new_nodes.append({"id": str(r.get("id") or f"N{len(new_nodes)+1}"),
-                              "x": float(r.get("x") or 0.0), "y": float(r.get("y") or 0.0),
-                              "z": float(r.get("z") or 0.0), "sensor": str(r.get("sensor") or "")})
-        except Exception:  # noqa: BLE001
-            pass
-
-    st.markdown("**Lines** — connect nodes by id to draw the wireframe.")
-    _ids = [n["id"] for n in new_nodes]
-    _ldf = _pd.DataFrame([{"from": _ids[a], "to": _ids[b]} for a, b in geom["lines"]
-                          if a < len(_ids) and b < len(_ids)], columns=["from", "to"])
-    _led = st.data_editor(_ldf, num_rows="dynamic", use_container_width=True, hide_index=True,
-                          key="geom_lines_ed",
-                          column_config={"from": st.column_config.SelectboxColumn("from", options=_ids),
-                                         "to": st.column_config.SelectboxColumn("to", options=_ids)})
-    _idmap = {nid: i for i, nid in enumerate(_ids)}
-    new_lines = []
-    for _, r in _led.iterrows():
-        a = _idmap.get(str(r.get("from"))); b = _idmap.get(str(r.get("to")))
-        if a is not None and b is not None and a != b:
-            new_lines.append([a, b])
-    geom = {"nodes": new_nodes, "lines": new_lines}
-    st.session_state[_gkey] = geom
-
-    st.markdown("**Preview**")
-    _chart(_geom_preview_fig(lay, geom, height=500))
-    st.caption("🔵 sensor node · 🟠 slave node (interpolated). Go to ⚫ Mode shapes to see the mode "
-               "animate on this geometry.")
 
 # ---------------------------------------------------------------- 8b TREND / COMPARE
 if nav == T_TREND:
