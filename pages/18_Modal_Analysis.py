@@ -434,6 +434,106 @@ def _mode_shape_fig(lay, amps_signed, height=580, scale_mul=1.0):
     return fig
 
 
+def _idw(V, P0, DISP, power=2.0):
+    """Interpolación por distancia inversa: desplazamiento en cada vértice a partir
+    de las estaciones medidas."""
+    d = np.linalg.norm(V[:, None, :] - P0[None, :, :], axis=2)
+    w = 1.0 / (d ** power + 1e-6)
+    w /= w.sum(axis=1, keepdims=True)
+    return w @ DISP
+
+
+def _mode_surface_comps(lay, amps_signed, scale_mul=1.0):
+    """Para cada componente (caja) interpola el campo de desplazamiento a sus vértices
+    → superficie sólida que se deforma y se colorea por amplitud (estilo ARTeMIS)."""
+    d = _mode_shape_data(lay, amps_signed, scale_mul)
+    if d is None:
+        return None
+    P0, DISP = d["P0"], d["DISP"]
+    comps, cmax = [], 1e-9
+    for c in lay.machine_components:
+        X, Y, Z, i, j, k = _cube(c.x0, c.x1, c.y0, c.y1, c.depth)
+        V = np.column_stack([X, Y, Z]).astype(float)
+        DV = _idw(V, P0, DISP)
+        mag = np.linalg.norm(DV, axis=1)
+        cmax = max(cmax, float(mag.max()))
+        comps.append({"V": V, "DV": DV, "mag": mag, "i": i, "j": j, "k": k})
+    allV = np.vstack([cc["V"] for cc in comps])
+    span = float(np.ptp(allV[:, 0])) or 1.0
+    maxd = max((np.linalg.norm(cc["DV"], axis=1).max() for cc in comps), default=1.0) or 1.0
+    scale = 0.16 * span / maxd * scale_mul
+    return {"comps": comps, "cmax": cmax, "scale": scale, "P0": P0}
+
+
+def _surface_meshes(s, phase):
+    out = []
+    for comp in s["comps"]:
+        Vd = comp["V"] + (s["scale"] * np.sin(phase)) * comp["DV"]
+        out.append(go.Mesh3d(x=Vd[:, 0], y=Vd[:, 1], z=Vd[:, 2],
+                   i=comp["i"], j=comp["j"], k=comp["k"], intensity=comp["mag"],
+                   cmin=0, cmax=s["cmax"], coloraxis="coloraxis", flatshading=False,
+                   opacity=1.0, lighting=dict(ambient=0.82, diffuse=0.5, specular=0.12),
+                   hoverinfo="skip"))
+    return out
+
+
+def _mode_surface_layout(height, cmax):
+    lay_kw = _mode_scene(height)
+    lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=cmax,
+                               colorbar=dict(title="ampl", thickness=14, len=0.6, x=0.98))
+    return lay_kw
+
+
+def _mode_surface_fig(lay, amps_signed, height=600, scale_mul=1.0):
+    s = _mode_surface_comps(lay, amps_signed, scale_mul)
+    if s is None:
+        return _geometry_fig(lay, height=height)
+    fig = go.Figure()
+    for tr in _surface_meshes(s, np.pi / 2):
+        fig.add_trace(tr)
+    ncomp = len(s["comps"])
+    # nodos de medición (pequeños, referencia)
+    P0 = s["P0"]
+    fig.add_trace(go.Scatter3d(x=P0[:, 0], y=P0[:, 1], z=P0[:, 2], mode="markers",
+                  marker=dict(size=3, color="#0f172a"), hoverinfo="skip"))
+    frames = []
+    for f in range(28):
+        ph = f / 28.0 * 2 * np.pi
+        frames.append(go.Frame(data=_surface_meshes(s, ph), traces=list(range(ncomp))))
+    fig.frames = frames
+    lay_kw = _mode_surface_layout(height, s["cmax"])
+    lay_kw["updatemenus"] = [dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
+        buttons=[dict(label="▶ Play", method="animate",
+                      args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True,
+                                       transition=dict(duration=0), mode="immediate")]),
+                 dict(label="⏸ Pause", method="animate",
+                      args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])]
+    fig.update_layout(**lay_kw)
+    return fig
+
+
+def _mode_surface_gif(lay, amps_signed, scale_mul=1.0, n=22, w=680, h=500):
+    import io
+    from PIL import Image
+    s = _mode_surface_comps(lay, amps_signed, scale_mul)
+    if s is None:
+        return None
+    imgs = []
+    for f in range(n):
+        ph = f / n * 2 * np.pi
+        fig = go.Figure()
+        for tr in _surface_meshes(s, ph):
+            fig.add_trace(tr)
+        lay_kw = _mode_surface_layout(h, s["cmax"]); lay_kw["paper_bgcolor"] = "white"
+        fig.update_layout(**lay_kw)
+        imgs.append(Image.open(io.BytesIO(fig.to_image(format="png", width=w, height=h, scale=1))).convert("RGB"))
+    if not imgs:
+        return None
+    buf = io.BytesIO()
+    imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:], duration=60, loop=0)
+    return buf.getvalue()
+
+
 def _mode_shape_gif(lay, amps_signed, scale_mul=1.0, n=22, w=620, h=460):
     """Renderiza la deformación a un GIF descargable (video decente)."""
     import io
@@ -1183,14 +1283,14 @@ if nav == T_SHAPES:
         else:
             amp = np.random.default_rng(idx + 1).standard_normal(len(pts))
         _smul = float(_scl.replace("×", ""))
-        _chart(_mode_shape_fig(lay, amp, height=580, scale_mul=_smul))
-        st.caption("Press ▶ Play — the structure deforms as the mode moves; the dotted gray line is the "
-                   "shape at rest. Colour = displacement amplitude. Drag to rotate.")
+        _chart(_mode_surface_fig(lay, amp, height=600, scale_mul=_smul))
+        st.caption("Press ▶ Play — the equipment surfaces deform and are coloured by displacement "
+                   "amplitude (blue = still, red = max). Drag to rotate.")
         bcol = st.columns([1, 3])
         with bcol[0]:
             if st.button("🎬 Export video (GIF)", key="ms_gif"):
                 with st.spinner("Rendering animation…"):
-                    _gif = _mode_shape_gif(lay, amp, scale_mul=_smul)
+                    _gif = _mode_surface_gif(lay, amp, scale_mul=_smul)
                 if _gif:
                     st.session_state["_ms_gif"] = _gif
                     st.session_state["_ms_gif_name"] = f"mode_{idx+1}_{m['fn']:.0f}Hz.gif"
