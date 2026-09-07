@@ -93,15 +93,14 @@ def diagnose(current_version: str, timeout: float = 6.0):
             code = r.getcode()
             rels = json.load(r)
     except Exception as e:  # noqa: BLE001
-        return None, (f"No pude consultar GitHub.\n{type(e).__name__}: {e}\n\n"
-                      f"URL: {url}\n¿La red del PC bloquea github.com o requiere proxy?")
+        return None, (f"Could not reach the update server.\n{type(e).__name__}: {e}\n\n"
+                      f"URL: {url}\nDoes this PC's network block the update server or require a proxy?")
     tags = [x.get("tag_name") for x in (rels or []) if str(x.get("tag_name", "")).startswith("modal-v")]
     info = check_for_update(current_version, timeout)
     if info:
-        return info, (f"Hay una versión más nueva: v{info['version']} (tienes v{current_version}).\n"
-                      f"HTTP {code}. Últimos releases: {', '.join(tags[:5])}")
-    return None, (f"Estás al día (v{current_version}).\nHTTP {code}. "
-                  f"Últimos releases: {', '.join(tags[:5]) or '—'}")
+        return info, (f"A newer version is available: v{info['version']} (you have v{current_version}).\n"
+                      f"HTTP {code}.")
+    return None, (f"You are up to date (v{current_version}).\nHTTP {code}.")
 
 
 def download_file(url: str, dest: Optional[str] = None, timeout: float = 300.0,

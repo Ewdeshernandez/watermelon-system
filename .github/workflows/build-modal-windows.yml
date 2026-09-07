@@ -159,5 +159,5 @@ jobs:
           [ -f installer_log.txt ] && ASSETS="$ASSETS installer_log.txt"
           gh release create "${GITHUB_REF_NAME}" $ASSETS \
             --title "Watermelon Modal ${GITHUB_REF_NAME}" \
-            --notes "Modulo nativo de analisis modal (Windows, impacto). Instalador: WatermelonModal-Setup.exe. Alternativa portable: WatermelonModal-windows.zip. Hardware real: NI-DAQmx + NI 9234. Sin firmar aun -> SmartScreen/SAC pueden pedir confirmacion." \
+            --notes "Watermelon Modal — native analysis module (Windows). Installer: WatermelonModal-Setup.exe. Portable: WatermelonModal-windows.zip. Not code-signed yet -> SmartScreen may ask for confirmation." \
           || for a in $ASSETS; do gh release upload "${GITHUB_REF_NAME}" "$a" --clobber; done

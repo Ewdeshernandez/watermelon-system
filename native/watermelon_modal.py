@@ -51,11 +51,27 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.35"
+__version__ = "0.9.36"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
 DAQ_NAME = "Watermelon DAQ"
+
+
+def _wl(text) -> str:
+    """White-label: quita CUALQUIER marca/modelo de hardware de un texto visible
+    (mensajes de error del driver, nombres de dispositivo, etc.). El cliente/
+    competencia nunca debe ver la marca real del hardware."""
+    import re as _re
+    s = str(text)
+    s = _re.sub(r"NI-?DAQ\s*mx|NI-?DAQ", "Watermelon DAQ", s, flags=_re.IGNORECASE)
+    s = _re.sub(r"National\s+Instruments", "Watermelon", s, flags=_re.IGNORECASE)
+    s = _re.sub(r"\bnidaqmx\b", "acquisition driver", s, flags=_re.IGNORECASE)
+    s = _re.sub(r"\bcDAQ[\w-]*", "DAQ", s, flags=_re.IGNORECASE)
+    s = _re.sub(r"\bNI\s?9\d{3}\b", "sensor module", s)
+    s = _re.sub(r"\bMod\d+\b", "module", s)
+    s = _re.sub(r"\bNI\b", "Watermelon", s)
+    return s
 
 NAVY = "#0F1E3D"; ACC = "#1AAEE5"; GREEN = "#10b981"; AMBER = "#f59e0b"; RED = "#ef4444"
 
@@ -1396,9 +1412,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
             devs = [{"product_type": d.product_type} for d in System.local().devices]
         except Exception as e:  # noqa: BLE001
             cause = getattr(e, "__cause__", None)
-            root = f"\n\nDetalle: {type(cause).__name__}: {cause}" if cause else ""
+            root = _wl(f"\n\nDetail: {type(cause).__name__}: {cause}") if cause else ""
             QtWidgets.QMessageBox.warning(win, "Watermelon acquisition",
-                f"❌ Could not start the acquisition module.\n\n{type(e).__name__}: {e}{root}\n\n"
+                f"❌ Could not start the acquisition module.\n\n{_wl(f'{type(e).__name__}: {e}')}{root}\n\n"
                 "Check the cable, unit power and try again.")
             return
         if not devs:
@@ -1408,7 +1424,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         chassis = [d for d in devs if "cdaq" in d["product_type"].lower() or "9178" in d["product_type"]]
         mods = [d for d in devs if "9234" in d["product_type"]]
         nch = len(mods) * 4
-        lines = [f"✅ {DAQ_NAME} conectado."]
+        lines = [f"✅ {DAQ_NAME} connected."]
         lines.append(f"Acquisition modules: {len(mods)} → {nch} channels available.")
         lines.append(f"\nConnection OK — you can capture with Source = {DAQ_NAME} (live)." if mods
                      else "No channel modules detected — check they are properly seated.")
@@ -2845,55 +2861,57 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _card = QtWidgets.QFrame()
     _card.setStyleSheet("QFrame{background:white;border:1px solid #e6ecf5;border-radius:16px;}")
     _card.setMaximumWidth(680)
-    _cl = QtWidgets.QVBoxLayout(_card); _cl.setContentsMargins(32, 30, 32, 30); _cl.setSpacing(16)
+    _cl = QtWidgets.QVBoxLayout(_card); _cl.setContentsMargins(34, 30, 34, 30); _cl.setSpacing(14)
+
+    def _mkfont(pt, bold=False):
+        f = QtGui.QFont(); f.setPointSize(pt); f.setBold(bold); return f
+
     _uh = QtWidgets.QLabel("🍉  Watermelon Modal")
-    _uh.setStyleSheet(f"font-size:22px;font-weight:800;color:{NAVY};border:none;padding:2px 0 6px 0;")
-    _uh.setMinimumHeight(38)
-    _cur = QtWidgets.QLabel(f"Versión instalada: <b>v{__version__}</b>")
-    _cur.setStyleSheet("font-size:14px;color:#475569;border:none;padding:2px 0;")
-    _cur.setTextFormat(QtCore.Qt.RichText); _cur.setMinimumHeight(24)
-    _status = QtWidgets.QLabel("Presiona <b>Buscar actualizaciones</b> para revisar si hay una versión nueva.")
-    _status.setStyleSheet("font-size:13px;color:#64748b;border:none;padding:2px 0;")
-    _status.setWordWrap(True); _status.setTextFormat(QtCore.Qt.RichText); _status.setMinimumHeight(24)
-    _notes = QtWidgets.QTextBrowser()
+    _uh.setFont(_mkfont(16, True)); _uh.setStyleSheet(f"color:{NAVY};border:none;")
+    _cur = QtWidgets.QLabel(f"Installed version:  v{__version__}")
+    _cur.setFont(_mkfont(11)); _cur.setStyleSheet("color:#475569;border:none;")
+    _status = QtWidgets.QLabel("Press <b>Check for updates</b> to see if a newer version is available.")
+    _status.setFont(_mkfont(10)); _status.setStyleSheet("color:#64748b;border:none;")
+    _status.setWordWrap(True); _status.setTextFormat(QtCore.Qt.RichText)
+    _notes = QtWidgets.QTextBrowser(); _notes.setFont(_mkfont(9))
     _notes.setStyleSheet("QTextBrowser{border:1px solid #eef2f8;border-radius:10px;background:#fbfcfe;"
-                         "font-size:12px;color:#334155;padding:8px;}")
+                         "color:#334155;padding:8px;}")
     _notes.setMaximumHeight(200); _notes.hide()
-    _brow = QtWidgets.QPushButton("🔍  Buscar actualizaciones")
-    _brow.setStyleSheet(f"QPushButton{{background:{NAVY};color:white;font-size:14px;font-weight:600;"
-                        "padding:10px 20px;border-radius:9px;}QPushButton:hover{background:#12325a;}")
-    _bgo = QtWidgets.QPushButton("⬇  Actualizar ahora")
-    _bgo.setStyleSheet(f"QPushButton{{background:{GREEN};color:white;font-size:14px;font-weight:700;"
-                       "padding:10px 20px;border-radius:9px;}QPushButton:hover{background:#12833a;}")
+    _brow = QtWidgets.QPushButton("🔍  Check for updates"); _brow.setFont(_mkfont(11, True))
+    _brow.setStyleSheet(f"QPushButton{{background:{NAVY};color:white;padding:10px 20px;"
+                        "border-radius:9px;}QPushButton:hover{background:#12325a;}")
+    _bgo = QtWidgets.QPushButton("⬇  Update now"); _bgo.setFont(_mkfont(11, True))
+    _bgo.setStyleSheet(f"QPushButton{{background:{GREEN};color:white;padding:10px 20px;"
+                       "border-radius:9px;}QPushButton:hover{background:#12833a;}")
     _bgo.hide()
-    _brow.setMinimumHeight(40); _bgo.setMinimumHeight(40)
+    _brow.setMinimumHeight(42); _bgo.setMinimumHeight(42)
     _brow_row = QtWidgets.QHBoxLayout(); _brow_row.setSpacing(12)
     _brow_row.addWidget(_brow); _brow_row.addWidget(_bgo); _brow_row.addStretch(1)
-    _cl.addWidget(_uh); _cl.addWidget(_cur); _cl.addWidget(_status)
-    _cl.addWidget(_notes); _cl.addSpacing(4); _cl.addLayout(_brow_row)
-    _foot = QtWidgets.QLabel("Las actualizaciones se descargan e instalan solas; la app se reinicia al terminar. "
-                             "Requiere conexión a internet.")
-    _foot.setStyleSheet("font-size:11px;color:#94a3b8;border:none;"); _foot.setWordWrap(True)
-    _cl.addWidget(_foot)
+    _cl.addWidget(_uh); _cl.addSpacing(2); _cl.addWidget(_cur); _cl.addWidget(_status)
+    _cl.addWidget(_notes); _cl.addSpacing(8); _cl.addLayout(_brow_row)
+    _foot = QtWidgets.QLabel("Updates download and install automatically; the app restarts when done. "
+                             "Requires an internet connection.")
+    _foot.setFont(_mkfont(9)); _foot.setStyleSheet("color:#94a3b8;border:none;"); _foot.setWordWrap(True)
+    _cl.addSpacing(6); _cl.addWidget(_foot)
     ul.addWidget(_card, 0, QtCore.Qt.AlignHCenter | QtCore.Qt.AlignTop); ul.addStretch(1)
     st["_pending_update"] = None
 
     def _upd_check():
-        _brow.setEnabled(False); _brow.setText("🔍  Buscando…"); QtWidgets.QApplication.processEvents()
+        _brow.setEnabled(False); _brow.setText("🔍  Checking…"); QtWidgets.QApplication.processEvents()
         try:
             from core.modal.updater import diagnose
             info, msg = diagnose(__version__)
         except Exception as e:  # noqa: BLE001
-            info, msg = None, f"Error: {type(e).__name__}: {e}"
-        _brow.setEnabled(True); _brow.setText("🔍  Buscar actualizaciones")
+            info, msg = None, _wl(f"Error: {type(e).__name__}: {e}")
+        _brow.setEnabled(True); _brow.setText("🔍  Check for updates")
         st["_pending_update"] = info
         if info:
-            _status.setText(f"✅ <b style='color:{GREEN}'>Nueva versión disponible: v{info['version']}</b>"
-                            + (f" · publicada {info.get('published','')}" if info.get('published') else ""))
-            _notes.setPlainText((info.get("notes") or "Sin notas.").strip()); _notes.show()
+            _status.setText(f"✅ <b style='color:{GREEN}'>New version available: v{info['version']}</b>"
+                            + (f" · published {info.get('published','')}" if info.get('published') else ""))
+            _notes.setPlainText(_wl((info.get("notes") or "No notes.").strip())); _notes.show()
             _bgo.show()
         else:
-            _status.setText(msg.replace("\n", "<br>"))
+            _status.setText(_wl(msg).replace("\n", "<br>"))
             _notes.hide(); _bgo.hide()
 
     def _upd_go():
@@ -2968,15 +2986,14 @@ def _show_update_banner(win, info):
     try:
         ver = info.get("version", "?")
         box = QtWidgets.QMessageBox(win)
-        box.setWindowTitle("Watermelon Modal — actualización disponible")
+        box.setWindowTitle("Watermelon Modal — update available")
         box.setIcon(QtWidgets.QMessageBox.Information)
-        box.setText(f"<b>Hay una versión más nueva disponible: v{ver}</b>")
-        box.setInformativeText("¿Actualizar ahora? Se descargará el instalador y se "
-                               "aplicará sobre la instalación actual. La app se cerrará "
-                               "para completar la actualización.\n\n"
-                               + (info.get("notes", "") or "")[:400])
-        b_now = box.addButton("Actualizar ahora", QtWidgets.QMessageBox.AcceptRole)
-        box.addButton("Después", QtWidgets.QMessageBox.RejectRole)
+        box.setText(f"<b>A newer version is available: v{ver}</b>")
+        box.setInformativeText("Update now? The installer will be downloaded and applied over "
+                               "the current installation. The app will close to finish the update.\n\n"
+                               + _wl((info.get("notes", "") or "")[:400]))
+        b_now = box.addButton("Update now", QtWidgets.QMessageBox.AcceptRole)
+        box.addButton("Later", QtWidgets.QMessageBox.RejectRole)
         box.exec()
         if box.clickedButton() is not b_now:
             return
@@ -2986,15 +3003,15 @@ def _show_update_banner(win, info):
             if info.get("html_url"):
                 QtGui.QDesktopServices.openUrl(QtCore.QUrl(info["html_url"]))
             return
-        dlg = QtWidgets.QProgressDialog("Descargando actualización…", "Cancelar", 0, 100, win)
-        dlg.setWindowTitle("Actualizando"); dlg.setModal(True); dlg.setMinimumDuration(0); dlg.show()
+        dlg = QtWidgets.QProgressDialog("Downloading update…", "Cancel", 0, 100, win)
+        dlg.setWindowTitle("Updating"); dlg.setModal(True); dlg.setMinimumDuration(0); dlg.show()
 
         def _prog(fr):
             dlg.setValue(int(fr * 100)); QtWidgets.QApplication.processEvents()
         path = updater.download_file(url, on_progress=_prog)
         dlg.close()
         if not path:
-            QtWidgets.QMessageBox.warning(win, "Actualizar", "No se pudo descargar la actualización.")
+            QtWidgets.QMessageBox.warning(win, "Update", "Could not download the update.")
             return
         if path.lower().endswith("setup.exe"):
             updater.launch_installer(path)
