@@ -51,7 +51,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.36"
+__version__ = "0.9.37"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -2088,21 +2088,44 @@ def build_app(layout: OMALayout, simulated: bool = True):
                                    f"{m.complexity_pct:.0f}", str(m.n_stable)]):
                 tbl_ssi.setItem(r, c, QtWidgets.QTableWidgetItem(v))
         p_stab.clear()
+        ymax = float(res.orders[-1]) if len(res.orders) else 45.0
+        # Densidad espectral SV1 de fondo (escalada al eje de orden): sus picos deben
+        # coincidir con las columnas verdes → confirma que el modo es real.
+        _fdd = st.get("oma_fdd")
+        if _fdd is not None:
+            _fr = np.asarray(_fdd.frequencies_hz); _sv = np.asarray(_fdd.singular_values)
+            _sv1 = _sv[0] if _sv.ndim > 1 else _sv
+            _bnd = _fr <= fmax
+            if np.any(_bnd):
+                _db = 10 * np.log10(np.maximum(_sv1[_bnd], 1e-30))
+                _rng = (float(_db.max()) - float(_db.min())) or 1.0
+                _ys = (_db - _db.min()) / _rng * ymax
+                p_stab.plot(_fr[_bnd], _ys, pen=pg.mkPen((37, 99, 235, 140), width=1.6))
+        # Columnas verdes en cada modo estable
+        for m in res.modes:
+            reg = pg.LinearRegionItem([m.frequency_hz * 0.985, m.frequency_hz * 1.015],
+                                      movable=False, brush=pg.mkBrush(22, 163, 74, 30))
+            reg.setZValue(-20); p_stab.addItem(reg)
+        # Polos: estables (verde, grandes) vs espurios (gris, pequeños)
         for (order, freqs, mask) in res.diagram:
             if len(freqs) == 0:
                 continue
             st_f = freqs[mask]; un_f = freqs[~mask]
             if len(un_f):
-                p_stab.addItem(pg.ScatterPlotItem(un_f, [order] * len(un_f), size=6, symbol="x",
+                p_stab.addItem(pg.ScatterPlotItem(un_f, [order] * len(un_f), size=4, symbol="o",
                                pen=pg.mkPen("#cbd5e1"), brush=pg.mkBrush("#cbd5e1")))
             if len(st_f):
                 p_stab.addItem(pg.ScatterPlotItem(st_f, [order] * len(st_f), size=8, symbol="o",
-                               pen=pg.mkPen(GREEN, width=1.5), brush=pg.mkBrush(GREEN)))
+                               pen=pg.mkPen("w", width=0.5), brush=pg.mkBrush(GREEN)))
+        # Etiqueta de frecuencia arriba de cada columna
         for m in res.modes:
-            p_stab.plot([m.frequency_hz, m.frequency_hz], [0, res.orders[-1]],
-                        pen=pg.mkPen(NAVY, width=1, style=QtCore.Qt.DashLine))
-        lbl_ssi.setText(f"✅ SSI: {len(res.modes)} stable modes. Green = pole stable across orders; "
-                        "the blue line is the identified mode. The ± is the UNCERTAINTY (dispersion).")
+            t = pg.TextItem(f"{m.frequency_hz:.1f}", color="#166534", anchor=(0.5, 1.0))
+            t.setPos(m.frequency_hz, ymax * 1.06); p_stab.addItem(t)
+        p_stab.setXRange(0, fmax, padding=0); p_stab.setYRange(0, ymax * 1.1)
+        p_stab.getViewBox().setLimits(xMin=0)
+        lbl_ssi.setText(f"✅ SSI: {len(res.modes)} stable modes. Green column = pole stable across orders "
+                        "(a real mode); gray = numerical noise. The blue curve behind is the spectral "
+                        "density — its peaks should sit on the green columns. ± = uncertainty.")
         lbl_ssi.setStyleSheet(f"color:{GREEN};font-weight:700;")
         _anim_reload_modes()
     btn_ssi.clicked.connect(_run_ssi)
