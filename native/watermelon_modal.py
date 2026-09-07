@@ -51,7 +51,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.34"
+__version__ = "0.9.35"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -2845,14 +2845,16 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _card = QtWidgets.QFrame()
     _card.setStyleSheet("QFrame{background:white;border:1px solid #e6ecf5;border-radius:16px;}")
     _card.setMaximumWidth(680)
-    _cl = QtWidgets.QVBoxLayout(_card); _cl.setContentsMargins(30, 28, 30, 28); _cl.setSpacing(14)
+    _cl = QtWidgets.QVBoxLayout(_card); _cl.setContentsMargins(32, 30, 32, 30); _cl.setSpacing(16)
     _uh = QtWidgets.QLabel("🍉  Watermelon Modal")
-    _uh.setStyleSheet(f"font-size:22px;font-weight:800;color:{NAVY};border:none;")
+    _uh.setStyleSheet(f"font-size:22px;font-weight:800;color:{NAVY};border:none;padding:2px 0 6px 0;")
+    _uh.setMinimumHeight(38)
     _cur = QtWidgets.QLabel(f"Versión instalada: <b>v{__version__}</b>")
-    _cur.setStyleSheet("font-size:14px;color:#475569;border:none;"); _cur.setTextFormat(QtCore.Qt.RichText)
+    _cur.setStyleSheet("font-size:14px;color:#475569;border:none;padding:2px 0;")
+    _cur.setTextFormat(QtCore.Qt.RichText); _cur.setMinimumHeight(24)
     _status = QtWidgets.QLabel("Presiona <b>Buscar actualizaciones</b> para revisar si hay una versión nueva.")
-    _status.setStyleSheet("font-size:13px;color:#64748b;border:none;")
-    _status.setWordWrap(True); _status.setTextFormat(QtCore.Qt.RichText)
+    _status.setStyleSheet("font-size:13px;color:#64748b;border:none;padding:2px 0;")
+    _status.setWordWrap(True); _status.setTextFormat(QtCore.Qt.RichText); _status.setMinimumHeight(24)
     _notes = QtWidgets.QTextBrowser()
     _notes.setStyleSheet("QTextBrowser{border:1px solid #eef2f8;border-radius:10px;background:#fbfcfe;"
                          "font-size:12px;color:#334155;padding:8px;}")
@@ -2864,8 +2866,11 @@ def build_app(layout: OMALayout, simulated: bool = True):
     _bgo.setStyleSheet(f"QPushButton{{background:{GREEN};color:white;font-size:14px;font-weight:700;"
                        "padding:10px 20px;border-radius:9px;}QPushButton:hover{background:#12833a;}")
     _bgo.hide()
-    _brow_row = QtWidgets.QHBoxLayout(); _brow_row.addWidget(_brow); _brow_row.addWidget(_bgo); _brow_row.addStretch(1)
-    _cl.addWidget(_uh); _cl.addWidget(_cur); _cl.addWidget(_status); _cl.addWidget(_notes); _cl.addLayout(_brow_row)
+    _brow.setMinimumHeight(40); _bgo.setMinimumHeight(40)
+    _brow_row = QtWidgets.QHBoxLayout(); _brow_row.setSpacing(12)
+    _brow_row.addWidget(_brow); _brow_row.addWidget(_bgo); _brow_row.addStretch(1)
+    _cl.addWidget(_uh); _cl.addWidget(_cur); _cl.addWidget(_status)
+    _cl.addWidget(_notes); _cl.addSpacing(4); _cl.addLayout(_brow_row)
     _foot = QtWidgets.QLabel("Las actualizaciones se descargan e instalan solas; la app se reinicia al terminar. "
                              "Requiere conexión a internet.")
     _foot.setStyleSheet("font-size:11px;color:#94a3b8;border:none;"); _foot.setWordWrap(True)
