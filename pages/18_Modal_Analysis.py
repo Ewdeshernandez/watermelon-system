@@ -161,6 +161,49 @@ def _chart(fig, **kw):
                             config={"displayModeBar": False}, **kw)
 
 
+def _ssi_plot(diagram, mode_freqs, sv_trace=None):
+    """Diagrama de estabilización LEGIBLE: polos estables (verde) vs espurios (gris),
+    columnas resaltadas en cada modo, y la densidad espectral (SV1) de fondo para
+    que se vea que los picos coinciden con las columnas estables."""
+    sx, sy, ux, uy = [], [], [], []
+    omax = 40
+    for (order, fr, mask) in diagram:
+        omax = max(omax, int(order))
+        for f, m in zip(np.asarray(fr, float), mask):
+            (sx if m else ux).append(float(f)); (sy if m else uy).append(int(order))
+    xmax = max([max(sx) if sx else 0, max(ux) if ux else 0, max(mode_freqs) if mode_freqs else 0, 50]) * 1.05
+    fig = go.Figure()
+    for f in mode_freqs:                                   # columna verde en cada modo
+        fig.add_vrect(x0=f * 0.985, x1=f * 1.015, fillcolor="rgba(22,163,74,.12)", line_width=0)
+    if sv_trace is not None:                               # densidad espectral de fondo (eje derecho)
+        fx, ydb = np.asarray(sv_trace[1], float), np.asarray(sv_trace[2], float)
+        fig.add_trace(go.Scatter(x=fx, y=ydb, mode="lines", name="Spectral density (SV1)",
+                      line=dict(color="rgba(37,99,235,.5)", width=1.6), yaxis="y2", hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=ux, y=uy, mode="markers", name="Spurious (numerical)",
+                  marker=dict(size=4, color="#cbd5e1"), hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=sx, y=sy, mode="markers", name="Stable pole",
+                  marker=dict(size=7, color=GREEN, line=dict(width=.5, color="white")),
+                  hovertemplate="%{x:.1f} Hz · order %{y}<extra>stable</extra>"))
+    for f in mode_freqs:
+        fig.add_annotation(x=f, y=omax, text=f"<b>{f:.1f}</b>", showarrow=False,
+                           font=dict(size=10, color="#166534"), yanchor="bottom",
+                           bgcolor="rgba(255,255,255,.85)")
+    fig.update_layout(height=470, template="watermelon",
+                      xaxis=dict(range=[0, xmax], title="Frequency (Hz)"),
+                      yaxis=dict(title="Model order", range=[0, omax * 1.12]),
+                      yaxis2=dict(overlaying="y", side="right", showgrid=False, showticklabels=False),
+                      legend=dict(orientation="h", y=1.02, x=1, xanchor="right"))
+    return fig
+
+
+_SSI_HELP = (
+    "**How to read it —** each dot is a pole from a model of increasing order (y-axis). "
+    "A **real structural mode** shows up as a **vertical green column**: poles that stay "
+    "**stable** (same frequency) as the order grows. Scattered **gray** dots are numerical / "
+    "noise poles — ignore them. The **blue spectral-density curve** behind should **peak right "
+    "at each green column** — that agreement is the confirmation the mode is real.")
+
+
 def _show_dicts(rows):
     """Renderiza una lista de dicts (p.ej. de correlation_table/crossings_table) con
     el estilo bonito. Colorea la columna de estado/severidad si existe."""
@@ -809,52 +852,46 @@ if nav == T_OMA:
 
 # ---------------------------------------------------------------- 5 SSI
 if nav == T_SSI:
-    _sec("SSI (subspace)", "Covariance-driven SSI-COV + stabilization diagram + uncertainty",
-         "OMA · Brincker & Ventura")
+    _sec("SSI — stabilization diagram",
+         "A second, independent method (subspace) that confirms the FDD modes", "OMA · Brincker & Ventura")
+    _sv0 = D["sv_traces"][0] if D["sv_traces"] else None
+    _diagram = None; _rows = None; _freqs = []
     if D["raw"] is not None:
         data, fs = D["raw"]
         ssi = run_ssi_cov(data, fs, orders=list(range(2, 41, 2)), fmin_hz=2.0, fmax_hz=200.0)
-        fig = go.Figure()
-        for (order, fr, mask) in ssi.diagram:
-            if len(fr) == 0:
-                continue
-            fig.add_trace(go.Scatter(x=list(fr), y=[order] * len(fr), mode="markers",
-                          marker=dict(size=6, color=[GREEN if m else "#cbd5e1" for m in mask]),
-                          showlegend=False, hoverinfo="skip"))
-        for m in ssi.modes:
-            fig.add_vline(x=m.frequency_hz, line=dict(color=RED, width=1, dash="dot"))
-        fig.update_layout(title_text="", height=430,
-                          template="watermelon", xaxis_title="Frequency (Hz)", yaxis_title="Model order")
-        _chart(fig)
-        _show_table(["#", "Frequency", "± Hz", "Damping ζ", "± %"],
-                    [[f"<span class='idx'>{i+1}</span>", f"<span class='fn'>{m.frequency_hz:.3f}<span class='u'> Hz</span></span>",
-                      f"<span class='num'>{m.std_frequency_hz:.3f}</span>",
-                      f"<span class='num'>{m.damping_ratio_pct:.3f}<span class='u'> %</span></span>",
-                      f"<span class='num'>{m.std_damping_pct:.3f}</span>"] for i, m in enumerate(ssi.modes)])
+        _diagram = ssi.diagram; _freqs = [m.frequency_hz for m in ssi.modes]
+        _rows = [[f"<span class='idx'>{i+1}</span>", f"<span class='fn'>{m.frequency_hz:.2f}<span class='u'> Hz</span></span>",
+                  f"<span class='num'>±{m.std_frequency_hz:.2f}</span>",
+                  f"<span class='num'>{m.damping_ratio_pct:.2f}<span class='u'> %</span></span>",
+                  f"<span class='num'>±{m.std_damping_pct:.2f}</span>"] for i, m in enumerate(ssi.modes)]
     elif D["ssi_cloud"] and D["ssi_cloud"].get("diagram"):
         _ssi = D["ssi_cloud"]
-        fig = go.Figure()
-        for entry in _ssi["diagram"]:
-            order, fr, mask = entry[0], np.asarray(entry[1], float), entry[2]
-            if fr.size == 0:
-                continue
-            fig.add_trace(go.Scatter(x=list(fr), y=[order] * len(fr), mode="markers",
-                          marker=dict(size=6, color=[GREEN if m else "#cbd5e1" for m in mask]),
-                          showlegend=False, hoverinfo="skip"))
-        for m in _ssi["modes"]:
-            fig.add_vline(x=m["fn"], line=dict(color=RED, width=1, dash="dot"))
-        fig.update_layout(title_text="", height=430,
-                          template="watermelon", xaxis_title="Frequency (Hz)", yaxis_title="Model order")
-        _chart(fig)
-        _show_table(["#", "Frequency", "± Hz", "Damping ζ", "± %"],
-                    [[f"<span class='idx'>{i+1}</span>", f"<span class='fn'>{m['fn']:.3f}<span class='u'> Hz</span></span>",
-                      f"<span class='num'>{m.get('std_fn',0.0):.3f}</span>",
-                      f"<span class='num'>{m['zeta']:.3f}<span class='u'> %</span></span>",
-                      f"<span class='num'>{m.get('std_zeta',0.0):.3f}</span>"] for i, m in enumerate(_ssi["modes"])])
-        st.caption("Real SSI-COV stabilization diagram from the field run.")
+        _diagram = [[e[0], np.asarray(e[1], float), e[2]] for e in _ssi["diagram"]]
+        _freqs = [m["fn"] for m in _ssi["modes"]]
+        _rows = [[f"<span class='idx'>{i+1}</span>", f"<span class='fn'>{m['fn']:.2f}<span class='u'> Hz</span></span>",
+                  f"<span class='num'>±{m.get('std_fn',0.0):.2f}</span>",
+                  f"<span class='num'>{m['zeta']:.2f}<span class='u'> %</span></span>",
+                  f"<span class='num'>±{m.get('std_zeta',0.0):.2f}</span>"] for i, m in enumerate(_ssi["modes"])]
+
+    if _diagram:
+        st.markdown(f"<div style='background:#eef6ff;border-left:4px solid {BLUE};border-radius:8px;"
+                    f"padding:10px 14px;margin:2px 0 8px'>{_SSI_HELP}</div>", unsafe_allow_html=True)
+        _chart(_ssi_plot(_diagram, _freqs, _sv0))
+        # diagnóstico automático
+        if _freqs:
+            _fs = " · ".join(f"{f:.1f} Hz" for f in sorted(_freqs))
+            _agree = ""
+            if _sv0 is not None and D["oma_modes"]:
+                _om = [m["fn"] for m in D["oma_modes"]]
+                _match = sum(1 for f in _freqs if any(abs(f - o) <= 0.03 * max(o, 1) for o in _om))
+                _agree = f" **{_match}/{len(_freqs)}** of them line up with the FDD peaks (independent confirmation)."
+            st.success(f"SSI confirms **{len(_freqs)} stable mode(s)**: {_fs}.{_agree}")
+        if _rows:
+            _show_table(["#", "Frequency", "± Hz", "Damping ζ", "± %"], _rows)
+        st.caption("The ± columns are the uncertainty of each estimate — smaller is more reliable.")
     else:
-        st.info("SSI-COV runs on the raw time series in the field app. This cloud run stores the "
-                "identified modes below (raw record stays on the field laptop).")
+        st.info("SSI runs on the raw waveform. Older cloud runs stored only the results; the modes "
+                "identified by FDD are shown below. Re-upload from the field to enable the live diagram.")
         _show_table(["Frequency", "Damping ζ", "Class"],
                     [[f"<span class='fn'>{m['fn']:.2f}<span class='u'> Hz</span></span>",
                       f"<span class='num'>{m['zeta']:.3f}<span class='u'> %</span></span>",
