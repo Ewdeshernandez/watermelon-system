@@ -434,6 +434,156 @@ def _mode_shape_fig(lay, amps_signed, height=580, scale_mul=1.0):
     return fig
 
 
+def _layout_stations(lay):
+    """Estaciones de medición (component + position_ref) con su posición 3D."""
+    pts = lay.active_points()
+    stations = {}
+    for i, p in enumerate(pts):
+        key = f"{p.component} {p.position_ref}".strip()
+        s = stations.setdefault(key, {"label": key, "pos": np.array([p.x_norm, 0.20, p.y_norm], float)})
+    return list(stations.values())
+
+
+def _station_disp_map(lay, amps_signed):
+    """{label de estación → vector de desplazamiento 3D} para una forma modal."""
+    pts = lay.active_points()
+    a = np.asarray(amps_signed, float); a = a / (np.max(np.abs(a)) or 1.0)
+    disp = {}
+    for i, p in enumerate(pts):
+        key = f"{p.component} {p.position_ref}".strip()
+        dvec = np.array(_AX.get(p.axis, (0, 0, 1)), float) * (-1.0 if p.dof.startswith("-") else 1.0) * float(a[i])
+        disp[key] = disp.get(key, np.zeros(3)) + dvec
+    return disp
+
+
+_BOX_EDGES = [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5), (5, 6), (6, 7), (7, 4),
+              (0, 4), (1, 5), (2, 6), (3, 7)]
+
+
+def _default_geometry(lay):
+    """Geometría inicial = wireframe de CAJAS (una por componente, 8 esquinas + 12
+    aristas) + los nodos de sensores. Las esquinas son esclavas (interpoladas)."""
+    nodes, lines = [], []
+    for ci, c in enumerate(lay.machine_components):
+        X, Y, Z, _i, _j, _k = _cube(c.x0, c.x1, c.y0, c.y1, c.depth)
+        base = len(nodes)
+        for v in range(8):
+            nodes.append({"id": f"C{ci}_{v}", "x": round(float(X[v]), 4), "y": round(float(Y[v]), 4),
+                          "z": round(float(Z[v]), 4), "sensor": ""})
+        for a, b in _BOX_EDGES:
+            lines.append([base + a, base + b])
+    for s in _layout_stations(lay):
+        nodes.append({"id": s["label"], "x": round(float(s["pos"][0]), 4), "y": round(float(s["pos"][1]), 4),
+                      "z": round(float(s["pos"][2]), 4), "sensor": s["label"]})
+    return {"nodes": nodes, "lines": lines}
+
+
+def _edges_xyz(P, lines):
+    ex, ey, ez = [], [], []
+    n = len(P)
+    for a, b in lines:
+        if 0 <= a < n and 0 <= b < n:
+            ex += [P[a, 0], P[b, 0], None]; ey += [P[a, 1], P[b, 1], None]; ez += [P[a, 2], P[b, 2], None]
+    return ex, ey, ez
+
+
+def _geom_node_disp(geom, disp_map):
+    """Desplazamiento de cada nodo: si es sensor usa su estación; si es esclavo,
+    interpola (IDW) desde los nodos-sensor."""
+    nodes = geom["nodes"]
+    P = np.array([[n["x"], n["y"], n["z"]] for n in nodes], float) if nodes else np.zeros((0, 3))
+    sp, sd = [], []
+    for n in nodes:
+        if n.get("sensor") and n["sensor"] in disp_map:
+            sp.append([n["x"], n["y"], n["z"]]); sd.append(disp_map[n["sensor"]])
+    sp = np.array(sp, float) if sp else np.zeros((0, 3)); sd = np.array(sd, float) if sd else np.zeros((0, 3))
+    ND = np.zeros((len(nodes), 3))
+    for i, n in enumerate(nodes):
+        if n.get("sensor") and n["sensor"] in disp_map:
+            ND[i] = disp_map[n["sensor"]]
+        elif len(sp):
+            ND[i] = _idw(P[i:i + 1], sp, sd)[0]
+    return P, ND
+
+
+def _geom_preview_fig(lay, geom, height=460, show_machine=True):
+    nodes = geom["nodes"]; lines = geom["lines"]
+    P = np.array([[n["x"], n["y"], n["z"]] for n in nodes], float) if nodes else np.zeros((0, 3))
+    fig = go.Figure()
+    if show_machine:
+        for tr in _mode_machine_meshes(lay, opacity=0.06):
+            fig.add_trace(tr)
+    if len(P):
+        ex, ey, ez = _edges_xyz(P, lines)
+        fig.add_trace(go.Scatter3d(x=ex, y=ey, z=ez, mode="lines",
+                      line=dict(color="#334155", width=4), hoverinfo="skip"))
+        _sens = np.array([bool(n.get("sensor")) for n in nodes])
+        _cols = np.where(_sens, "#2563eb", "#f59e0b")
+        # etiquetar sólo los nodos-sensor (evita saturar con las esquinas de cajas)
+        _txt = [n["id"] if n.get("sensor") else "" for n in nodes]
+        fig.add_trace(go.Scatter3d(x=P[:, 0], y=P[:, 1], z=P[:, 2], mode="markers+text",
+                      text=_txt, textposition="top center", textfont=dict(size=9, color="#1d4ed8"),
+                      marker=dict(size=np.where(_sens, 6, 3), color=_cols, line=dict(width=1, color="#0f172a")),
+                      hovertext=[n["id"] for n in nodes], hoverinfo="text"))
+    fig.update_layout(**_mode_scene(height, paper="rgba(0,0,0,0)"))
+    return fig
+
+
+def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0, show_machine=True):
+    """Forma modal animada sobre la GEOMETRÍA del usuario (wireframe estilo ARTeMIS):
+    aristas + nodos coloreados por amplitud + outline fantasma."""
+    nodes = geom.get("nodes") or []
+    lines = geom.get("lines") or []
+    if not nodes:
+        return _mode_surface_fig(lay, amps_signed, height, scale_mul)
+    disp_map = _station_disp_map(lay, amps_signed)
+    P, ND = _geom_node_disp(geom, disp_map)
+    MAG = np.linalg.norm(ND, axis=1); cmax = MAG.max() or 1.0; MAGn = MAG / cmax
+    span = float(np.ptp(P[:, 0])) or 1.0
+    scale = 0.18 * span / (np.linalg.norm(ND, axis=1).max() or 1.0) * scale_mul
+
+    def _defP(ph):
+        return P + (scale * np.sin(ph)) * ND
+
+    def _edge_tr(dP):
+        ex, ey, ez = _edges_xyz(dP, lines)
+        return go.Scatter3d(x=ex, y=ey, z=ez, mode="lines", line=dict(color="#334155", width=5), hoverinfo="skip")
+
+    def _node_tr(dP, colorbar=True):
+        mk = dict(size=7, color=MAGn, colorscale="Jet", cmin=0, cmax=1, line=dict(width=1, color="#0f172a"))
+        if colorbar:
+            mk["colorbar"] = dict(title="ampl", thickness=13, len=0.6, x=0.98)
+        return go.Scatter3d(x=dP[:, 0], y=dP[:, 1], z=dP[:, 2], mode="markers",
+                            marker=mk, hovertext=[n["id"] for n in nodes], hoverinfo="text")
+
+    fig = go.Figure()
+    n_ctx = 0
+    if show_machine:
+        for tr in _mode_machine_meshes(lay, opacity=0.05):
+            fig.add_trace(tr)
+        n_ctx = len(lay.machine_components)
+    ex, ey, ez = _edges_xyz(P, lines)                    # outline fantasma
+    fig.add_trace(go.Scatter3d(x=ex, y=ey, z=ez, mode="lines",
+                  line=dict(color="rgba(148,163,184,.45)", width=2, dash="dot"), hoverinfo="skip"))
+    d0 = _defP(np.pi / 2)
+    fig.add_trace(_edge_tr(d0)); fig.add_trace(_node_tr(d0))
+    ei = n_ctx + 1                                       # ghost=n_ctx, edges=n_ctx+1, nodes=n_ctx+2
+    frames = []
+    for f in range(28):
+        ph = f / 28.0 * 2 * np.pi; dP = _defP(ph)
+        frames.append(go.Frame(data=[_edge_tr(dP), _node_tr(dP, colorbar=False)], traces=[ei, ei + 1]))
+    fig.frames = frames
+    lay_kw = _mode_scene(height)
+    lay_kw["updatemenus"] = [dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
+        buttons=[dict(label="▶ Play", method="animate",
+                      args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True,
+                                       transition=dict(duration=0), mode="immediate")]),
+                 dict(label="⏸ Pause", method="animate",
+                      args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])]
+    fig.update_layout(**lay_kw)
+    return fig
+
+
 def _idw(V, P0, DISP, power=2.0):
     """Interpolación por distancia inversa: desplazamiento en cada vértice a partir
     de las estaciones medidas."""
@@ -856,6 +1006,7 @@ st.markdown(f"""
 
 T_OMA = "🟡  Spectral density (FDD)"
 T_SHAPES = "⚫  Mode shapes"
+T_GEOM = "🟣  Geometry"
 T_SSI = "🟠  SSI (subspace)"
 T_CAMP = "🟤  Campbell"
 T_EMA = "🟢  Impact test (EMA)"
@@ -863,7 +1014,7 @@ T_MODES = "🟣  Modes (EMA)"
 T_CMP = "🔴  Comparative"
 T_TREND = "🔵  Trend / Compare"
 T_REPORT = "📄  Report"
-_NAVOPTS = [T_OMA, T_SSI, T_CAMP, T_SHAPES, T_CMP, T_EMA, T_MODES, T_TREND, T_REPORT]
+_NAVOPTS = [T_OMA, T_SSI, T_CAMP, T_GEOM, T_SHAPES, T_CMP, T_EMA, T_MODES, T_TREND, T_REPORT]
 
 # Navegación PERSISTENTE (segmented control con estado) — a diferencia de st.tabs,
 # conserva la sección activa tras cada rerun (arregla el "salto" al generar reporte).
@@ -1283,9 +1434,16 @@ if nav == T_SHAPES:
         else:
             amp = np.random.default_rng(idx + 1).standard_normal(len(pts))
         _smul = float(_scl.replace("×", ""))
-        _chart(_mode_surface_fig(lay, amp, height=600, scale_mul=_smul))
-        st.caption("Press ▶ Play — the equipment surfaces deform and are coloured by displacement "
-                   "amplitude (blue = still, red = max). Drag to rotate.")
+        _geom = st.session_state.get(f"geom::{D['name']}")
+        _use_geom = bool(_geom and _geom.get("nodes"))
+        if _use_geom:
+            _chart(_mode_geom_fig(lay, _geom, amp, height=600, scale_mul=_smul))
+            st.caption("Press ▶ Play — the mode animates on YOUR geometry (wireframe). Edit it in the "
+                       "🟣 Geometry tab · node colour = displacement amplitude (blue→red). Drag to rotate.")
+        else:
+            _chart(_mode_surface_fig(lay, amp, height=600, scale_mul=_smul))
+            st.caption("Press ▶ Play — the equipment surfaces deform, coloured by amplitude. "
+                       "Build a faithful wireframe in the 🟣 Geometry tab for an ARTeMIS-style model.")
         bcol = st.columns([1, 3])
         with bcol[0]:
             if st.button("🎬 Export video (GIF)", key="ms_gif"):
@@ -1298,6 +1456,66 @@ if nav == T_SHAPES:
             st.download_button("⬇ Download animation", data=st.session_state["_ms_gif"],
                                file_name=st.session_state.get("_ms_gif_name", "mode_shape.gif"),
                                mime="image/gif")
+
+# ---------------------------------------------------------------- GEOMETRY
+if nav == T_GEOM:
+    _sec("Geometry", "Build the machine wireframe (nodes + lines) — mode shapes animate on it",
+         "ARTeMIS-style geometry")
+    import pandas as _pd
+    _gkey = f"geom::{D['name']}"
+    if _gkey not in st.session_state:
+        st.session_state[_gkey] = _default_geometry(lay)
+    geom = st.session_state[_gkey]
+    _sts = [s["label"] for s in _layout_stations(lay)]
+
+    gc = st.columns([1.1, 1.2, 0.9, 2])
+    if gc[0].button("↺ Reset to sensors", help="Rebuild the default geometry from sensor stations"):
+        st.session_state[_gkey] = _default_geometry(lay); st.rerun()
+    if gc[1].button("Auto-connect: spine (X)", help="Connect nodes in a chain along the machine axis"):
+        _n = geom["nodes"]; _o = sorted(range(len(_n)), key=lambda i: (_n[i]["x"], _n[i]["z"]))
+        geom["lines"] = [[_o[i], _o[i + 1]] for i in range(len(_o) - 1)]
+        st.session_state[_gkey] = geom; st.rerun()
+    if gc[2].button("Clear lines"):
+        geom["lines"] = []; st.session_state[_gkey] = geom; st.rerun()
+
+    st.markdown("**Nodes** — edit positions or add rows. Leave *sensor* blank for a slave node "
+                "(it follows the nearest sensors automatically).")
+    _ndf = _pd.DataFrame(geom["nodes"] or [], columns=["id", "x", "y", "z", "sensor"])
+    _ned = st.data_editor(_ndf, num_rows="dynamic", use_container_width=True, hide_index=True,
+                          key="geom_nodes_ed",
+                          column_config={"sensor": st.column_config.SelectboxColumn("sensor", options=[""] + _sts)})
+    new_nodes = []
+    for _, r in _ned.iterrows():
+        try:
+            if r.get("id") in (None, "") and all((r.get(c) in (None, "")) for c in ("x", "y", "z")):
+                continue
+            new_nodes.append({"id": str(r.get("id") or f"N{len(new_nodes)+1}"),
+                              "x": float(r.get("x") or 0.0), "y": float(r.get("y") or 0.0),
+                              "z": float(r.get("z") or 0.0), "sensor": str(r.get("sensor") or "")})
+        except Exception:  # noqa: BLE001
+            pass
+
+    st.markdown("**Lines** — connect nodes by id to draw the wireframe.")
+    _ids = [n["id"] for n in new_nodes]
+    _ldf = _pd.DataFrame([{"from": _ids[a], "to": _ids[b]} for a, b in geom["lines"]
+                          if a < len(_ids) and b < len(_ids)], columns=["from", "to"])
+    _led = st.data_editor(_ldf, num_rows="dynamic", use_container_width=True, hide_index=True,
+                          key="geom_lines_ed",
+                          column_config={"from": st.column_config.SelectboxColumn("from", options=_ids),
+                                         "to": st.column_config.SelectboxColumn("to", options=_ids)})
+    _idmap = {nid: i for i, nid in enumerate(_ids)}
+    new_lines = []
+    for _, r in _led.iterrows():
+        a = _idmap.get(str(r.get("from"))); b = _idmap.get(str(r.get("to")))
+        if a is not None and b is not None and a != b:
+            new_lines.append([a, b])
+    geom = {"nodes": new_nodes, "lines": new_lines}
+    st.session_state[_gkey] = geom
+
+    st.markdown("**Preview**")
+    _chart(_geom_preview_fig(lay, geom, height=500))
+    st.caption("🔵 sensor node · 🟠 slave node (interpolated). Go to ⚫ Mode shapes to see the mode "
+               "animate on this geometry.")
 
 # ---------------------------------------------------------------- 8b TREND / COMPARE
 if nav == T_TREND:
