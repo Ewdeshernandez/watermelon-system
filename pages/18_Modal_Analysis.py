@@ -118,6 +118,17 @@ def _inject_theme():
       table.wm-modes .cls { font-size:12px; color:#475569; }
       table.wm-modes .badge, table.wm-modes .pill { padding:3px 10px; border-radius:999px;
         font-size:11px; font-weight:700; white-space:nowrap; }
+      /* Panel Modal Values (estilo ARTeMIS) */
+      .wm-mv { background:#fff; border:1px solid #e6ecf5; border-radius:12px; padding:12px 14px;
+        margin-bottom:12px; box-shadow:0 1px 2px rgba(15,30,61,.04); }
+      .wm-mv .h { font-size:13px; font-weight:700; color:#0F1E3D; letter-spacing:.02em;
+        border-bottom:1px solid #eef2f8; padding-bottom:6px; margin-bottom:8px; }
+      .wm-mv .row { display:flex; justify-content:space-between; align-items:center; font-size:12.5px;
+        color:#64748b; padding:3px 0; }
+      .wm-mv .row b { color:#0f1e3d; font-family:'IBM Plex Mono',monospace; font-weight:600; }
+      .wm-mv .sw { width:22px; height:12px; border-radius:3px; display:inline-block; }
+      .wm-cbar { width:16px; height:118px; border-radius:4px; border:1px solid #e2e8f0;
+        background:linear-gradient(to top,#00007f,#1f3fff,#00c8ff,#22e06b,#ffd21a,#ff6a00,#c11414,#7f0000); }
       @media (prefers-color-scheme: dark){
         .wm-kpi{ background:#141b26; border-color:#243040; }
         .wm-kpi .v{ color:#eaf0f7; }
@@ -619,8 +630,7 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0):
                       hoverinfo="skip"))
     lay_kw = _mode_scene(height)
     if has_surf:
-        lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1,
-                                   colorbar=dict(title="ampl", thickness=13, len=0.6, x=0.98))
+        lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1, showscale=False)
     lay_kw["updatemenus"] = [dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
         buttons=[dict(label="▶ Play", method="animate",
                       args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True,
@@ -1480,12 +1490,6 @@ if nav == T_SHAPES:
                                     label_visibility="collapsed")
         idx = opts.index(sel)
         m = modes[idx]
-        # KPIs del modo
-        k = st.columns(3)
-        k[0].metric("Frequency", f"{m['fn']:.2f} Hz")
-        k[1].metric("Damping ζ", f"{m['zeta']:.2f} %")
-        k[2].metric("Complexity", f"{m['complexity']:.0f} %",
-                    help="0% = real/normal mode (clean); high % = complex/operational mode.")
         pts = lay.active_points()
         if D["shapes"] and idx < len(D["shapes"]) and D["shapes"][idx] is not None \
                 and len(D["shapes"][idx]) == len(pts):
@@ -1493,26 +1497,54 @@ if nav == T_SHAPES:
         else:
             amp = np.random.default_rng(idx + 1).standard_normal(len(pts))
         _smul = float(_scl.replace("×", ""))
-        # Geometría definida en el CAMPO (viaja en el payload); si no viene, se deriva
-        # de la configuración de la máquina (misma función del campo). La web SOLO visualiza.
         from core.modal.oma_layout import default_geometry as _default_geometry
         _pl_geom = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
         _geom = _pl_geom if (_pl_geom and _pl_geom.get("nodes")) else _default_geometry(lay)
-        _chart(_mode_geom_fig(lay, _geom, amp, height=600, scale_mul=_smul))
-        st.caption("Press ▶ Play — the machine surfaces deform, coloured by displacement amplitude "
-                   "(blue = still, red = max). Geometry comes from the field configuration. Drag to rotate.")
-        bcol = st.columns([1, 3])
-        with bcol[0]:
-            if st.button("🎬 Export video (GIF)", key="ms_gif"):
-                with st.spinner("Rendering animation…"):
+
+        # incertidumbres (Std.) desde SSI si hay un modo que coincide
+        _stdf = _stdz = "N/A"
+        for _sm in (D.get("ssi_cloud") or {}).get("modes", []):
+            if abs(float(_sm.get("fn", 0)) - m["fn"]) <= 0.03 * max(m["fn"], 1):
+                _stdf = f"{_sm.get('std_fn', 0):.3f} Hz"; _stdz = f"{_sm.get('std_zeta', 0):.3f} %"; break
+        _logdec = 2 * np.pi * m["zeta"] / 100.0
+
+        mv = st.columns([3, 1.05])
+        with mv[0]:
+            st.markdown(f"<div style='text-align:center;color:#64748b;font-weight:600;font-size:13px;"
+                        f"margin-bottom:2px'>Mode {idx+1} · operating deflection shape · {m['fn']:.3f} Hz</div>",
+                        unsafe_allow_html=True)
+            _chart(_mode_geom_fig(lay, _geom, amp, height=600, scale_mul=_smul))
+            st.caption("Press ▶ Play — surfaces deform, coloured by displacement amplitude. "
+                       "Geometry comes from the field configuration. Drag to rotate.")
+        with mv[1]:
+            st.markdown(
+                "<div class='wm-mv'><div class='h'>Modal Values</div>"
+                f"<div class='row'><span>Frequency</span><b>{m['fn']:.3f} Hz</b></div>"
+                f"<div class='row'><span>Std. Frequency</span><b>{_stdf}</b></div>"
+                f"<div class='row'><span>Damping</span><b>{m['zeta']:.3f} %</b></div>"
+                f"<div class='row'><span>Std. Damping</span><b>{_stdz}</b></div>"
+                f"<div class='row'><span>Log. decrement</span><b>{_logdec:.3f}</b></div>"
+                f"<div class='row'><span>Complexity</span><b>{m['complexity']:.3f} %</b></div>"
+                f"<div class='row'><span>Class</span><b>{m['cls']}</b></div></div>"
+                "<div class='wm-mv'><div class='h'>Graphical objects</div>"
+                "<div class='row'><span>Surfaces</span><span class='sw' style='background:#38bdf8'></span></div>"
+                "<div class='row'><span>Edges</span><span class='sw' style='background:#0f172a'></span></div></div>"
+                "<div class='wm-mv'><div class='h'>Colormap</div>"
+                "<div style='display:flex;align-items:center;gap:10px'>"
+                "<div class='wm-cbar'></div>"
+                "<div style='display:flex;flex-direction:column;justify-content:space-between;height:118px;"
+                "font-size:11px;color:#64748b'><span>Max</span><span>0</span></div></div></div>",
+                unsafe_allow_html=True)
+            if st.button("🎬 Export video (GIF)", key="ms_gif", use_container_width=True):
+                with st.spinner("Rendering…"):
                     _gif = _mode_surface_gif(lay, amp, scale_mul=_smul)
                 if _gif:
                     st.session_state["_ms_gif"] = _gif
                     st.session_state["_ms_gif_name"] = f"mode_{idx+1}_{m['fn']:.0f}Hz.gif"
-        if st.session_state.get("_ms_gif"):
-            st.download_button("⬇ Download animation", data=st.session_state["_ms_gif"],
-                               file_name=st.session_state.get("_ms_gif_name", "mode_shape.gif"),
-                               mime="image/gif")
+            if st.session_state.get("_ms_gif"):
+                st.download_button("⬇ Download", data=st.session_state["_ms_gif"],
+                                   file_name=st.session_state.get("_ms_gif_name", "mode_shape.gif"),
+                                   mime="image/gif", use_container_width=True)
 
 # ---------------------------------------------------------------- 8b TREND / COMPARE
 if nav == T_TREND:
