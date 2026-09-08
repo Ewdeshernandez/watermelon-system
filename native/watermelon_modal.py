@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.43"
+__version__ = "0.9.44"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -244,24 +244,36 @@ def _rotor_faces(layout, anim, az, el):
     """Caras del ROTOR deformado (proximidad): eje + masa del motor + impulsores de la
     bomba, flexionados según las sondas y coloreados por amplitud (Jet). Devuelve
     [dep, pw(proyectado), qcolor, shade, None] listo para el painter."""
-    pts = np.asarray(anim["pts"], float); dirs = np.asarray(anim["dirs"], float)
+    pts = np.asarray(anim["pts"], float)
     amps = np.asarray(anim["amps"], float)
     mags = np.asarray(anim.get("mags") if anim.get("mags") is not None else np.abs(amps), float)
-    n = min(len(pts), len(dirs), len(amps), len(mags))
+    apts = [p for p in getattr(layout, "points", []) if getattr(p, "active", True)]
+    n = min(len(pts), len(amps), len(mags), len(apts))
     if n < 2:
         return []
-    pts, dirs, amps, mags = pts[:n], dirs[:n], amps[:n], mags[:n]
-    # estaciones por x: posición (instantánea) y color (envolvente)
+    pts, amps, mags = pts[:n], amps[:n], mags[:n]
+    # estaciones por POSICIÓN x (no por etiqueta): la sonda mide radial → mapeo por
+    # letra de eje como la web (X/H→horizontal dy, V/Z→vertical dz). Posición usa la
+    # amplitud instantánea (con signo); el color usa la envolvente.
     stt = {}
     for i in range(n):
-        x = float(pts[i][0]); key = round(x, 4)
+        p = apts[i]; x = float(getattr(p, "x_norm", pts[i][0])); key = round(x, 4)
         b = stt.setdefault(key, {"x": x, "dy": 0.0, "dz": 0.0, "my": 0.0, "mz": 0.0})
-        dv = amps[i] * dirs[i]; mv = mags[i] * dirs[i]
-        b["dy"] += float(dv[1]); b["dz"] += float(dv[2])
-        b["my"] += float(mv[1]); b["mz"] += float(mv[2])
+        sg = -1.0 if (getattr(p, "dof", "") or "").startswith("-") else 1.0
+        d = float(amps[i]) * sg; md = float(abs(mags[i]))
+        ax = (getattr(p, "axis", "") or "").upper()
+        if ax in ("X", "H", "A"):
+            b["dy"] += d; b["my"] += md
+        else:
+            b["dz"] += d; b["mz"] += md
     items = sorted(stt.values(), key=lambda b: b["x"])
     xs = np.array([b["x"] for b in items]); dys = np.array([b["dy"] for b in items]); dzs = np.array([b["dz"] for b in items])
     mlat = np.array([np.hypot(b["my"], b["mz"]) for b in items])
+    # suavizado ligero (3 puntos): datos ruidosos no "rompen"/retuercen el eje
+    if len(dys) >= 3:
+        def _sm(v):
+            w = v.copy(); w[1:-1] = 0.25 * v[:-2] + 0.5 * v[1:-1] + 0.25 * v[2:]; return w
+        dys = _sm(dys); dzs = _sm(dzs); mlat = _sm(mlat)
     _pos = mlat[mlat > 0]; cnorm = float(np.percentile(_pos, 85)) if _pos.size else 1.0
     cnorm = cnorm or 1.0
     # centro del rotor (plano de las sondas) y rangos motor/bomba
