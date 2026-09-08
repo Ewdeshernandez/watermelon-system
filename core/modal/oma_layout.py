@@ -556,5 +556,5 @@ def motor_pump_proximity_layout(
         components=["Electric motor", "Coupling", "Multistage pump", "Skid 1"],
         machine_components=comps, points=points, test_modes=["OMA"], test_type="OMA",
         running_speed_rpm=running_speed_rpm)
-    lay.fs_hz = 2560.0; lay.block_size = 4096; lay.fmax_hz = 800.0; lay.duration_s = 600.0
+    lay.fs_hz = 2560.0; lay.block_size = 4096; lay.fmax_hz = 800.0; lay.duration_s = 300.0
     return lay

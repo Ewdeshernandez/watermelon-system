@@ -654,7 +654,7 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
     if mot:                                                            # masa del motor
         _add(*_cyl(mot[0], mot[1], 0.055 * L, 18, 22, len(verts)))
     if pmp:                                                            # impulsores de la bomba (discos sólidos)
-        n_imp = 6; pw = (pmp[1] - pmp[0])
+        n_imp = 10; pw = (pmp[1] - pmp[0])
         for ii in range(n_imp):
             xc = pmp[0] + pw * (ii + 0.5) / n_imp
             _add(*_disk(xc, 0.065 * L, 0.010 * L, 26, len(verts)))
