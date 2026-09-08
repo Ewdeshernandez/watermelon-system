@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.40"
+__version__ = "0.9.41"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1465,7 +1465,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
                                f"{nch} channels · fs {fs:.0f} Hz · target {secs:.0f} s / {total:,} samples")
         _dh.setTextFormat(QtCore.Qt.RichText); _dv.addWidget(_dh)
         _bar = QtWidgets.QProgressBar(); _bar.setRange(0, 100); _dv.addWidget(_bar)
-        _dst = QtWidgets.QLabel("Starting…"); _dst.setStyleSheet("color:#334155;"); _dv.addWidget(_dst)
+        _dst = QtWidgets.QLabel("● Acquisition started — capturing… (please do not press again)")
+        _dst.setStyleSheet("color:#16a34a; font-weight:700;"); _dv.addWidget(_dst)
         _dbtn = QtWidgets.QPushButton("Close"); _dbtn.setEnabled(False); _dbtn.clicked.connect(dlg.accept)
         _dv.addWidget(_dbtn, alignment=QtCore.Qt.AlignRight)
         dlg.setModal(True); dlg.show(); QtWidgets.QApplication.processEvents()
@@ -1821,7 +1822,18 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 QtWidgets.QMessageBox.warning(win, "Cloud", f"Could not upload: {r.get('reason')}")
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(win, "Cloud", f"Upload failed: {type(e).__name__}: {e}")
-    btn_ocap.clicked.connect(_oma_capture); btn_upload.clicked.connect(_upload_run)
+    def _oma_capture_click():
+        # Feedback INMEDIATO: bloquea el botón y avisa que arrancó (evita doble captura).
+        if not btn_ocap.isEnabled():
+            return
+        _txt0 = btn_ocap.text()
+        btn_ocap.setEnabled(False); btn_ocap.setText("● Capturing… please wait")
+        QtWidgets.QApplication.processEvents()
+        try:
+            _oma_capture()
+        finally:
+            btn_ocap.setEnabled(True); btn_ocap.setText(_txt0)
+    btn_ocap.clicked.connect(_oma_capture_click); btn_upload.clicked.connect(_upload_run)
     btn_saverun.clicked.connect(_save_run_local)
 
     def _draw_svd_markers():
