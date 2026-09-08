@@ -575,9 +575,10 @@ def _dense_mesh(P, surfaces, n=4):
     return (np.array(V, float) if V else np.zeros((0, 3))), I, J, K
 
 
-def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0):
+def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0, static=False):
     """Forma modal animada sobre la GEOMETRÍA del campo (estilo ARTeMIS): superficie
-    sólida con malla densa (gradiente Jet), aristas, flechas de DOF por eje y triada."""
+    sólida con malla densa (gradiente Jet), aristas, flechas de DOF por eje y triada.
+    static=True → sin animación ni botón Play, con colorbar (para el PDF del reporte)."""
     nodes = geom.get("nodes") or []
     lines = geom.get("lines") or []
     surfaces = geom.get("surfaces") or []
@@ -645,15 +646,16 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0):
     if has_surf:
         fig.add_trace(_surf_tr(_defVr(np.pi / 2))); _is = len(fig.data) - 1
         fig.add_trace(_grid_tr(_defVr(np.pi / 2))); _ig = len(fig.data) - 1
-    frames = []
-    for f in range(26):
-        ph = f / 26.0 * 2 * np.pi; dv = _defVr(ph)
-        data, tr = [], []
-        if has_surf:
-            data.append(_surf_tr(dv)); tr.append(_is)
-            data.append(_grid_tr(dv)); tr.append(_ig)
-        frames.append(go.Frame(data=data, traces=tr))
-    fig.frames = frames
+    if not static:
+        frames = []
+        for f in range(26):
+            ph = f / 26.0 * 2 * np.pi; dv = _defVr(ph)
+            data, tr = [], []
+            if has_surf:
+                data.append(_surf_tr(dv)); tr.append(_is)
+                data.append(_grid_tr(dv)); tr.append(_ig)
+            frames.append(go.Frame(data=data, traces=tr))
+        fig.frames = frames
 
     # --- estáticos: flechas de DOF por eje (color) + nodos numerados + triada X/Y/Z ---
     _acol = {"A": "#db2777", "X": "#db2777", "H": "#16a34a", "Y": "#16a34a", "V": "#2563eb", "Z": "#2563eb"}
@@ -684,7 +686,15 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0):
 
     lay_kw = _mode_scene(height)
     if has_surf:
-        lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1, showscale=False)
+        if static:
+            lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1,
+                                       colorbar=dict(thickness=12, len=0.6, x=0.98,
+                                                     tickvals=[0, 1], ticktext=["0", "Max"], title="ampl"))
+        else:
+            lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1, showscale=False)
+    if static:
+        fig.update_layout(**lay_kw)
+        return fig
     lay_kw["updatemenus"] = [dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
         buttons=[dict(label="▶ Play", method="animate",
                       args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True,
@@ -1740,9 +1750,12 @@ if nav == T_REPORT:
             try:
                 from core.modal.run_report import build_report_from_run
                 import base64 as _b64m
-                with st.spinner("Rendering figures (config · sensors · mode shapes) and building the SIGA report…"):
+                with st.spinner("Rendering figures (config · sensors · spectral density · SSI · mode shapes) and building the SIGA report…"):
+                    from core.modal.oma_layout import default_geometry as _dg_r
                     pts = lay.active_points()
-                    # formas modales 3D
+                    _pl_geom = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
+                    _geom_r = _pl_geom if (_pl_geom and _pl_geom.get("nodes")) else _dg_r(lay)
+                    # formas modales estilo ARTeMIS (superficies + cuadrícula), estáticas para el PDF
                     shape_pngs = []
                     for i, m in enumerate(D["oma_modes"][:3]):
                         if D["shapes"] and i < len(D["shapes"]) and D["shapes"][i] is not None \
@@ -1751,15 +1764,26 @@ if nav == T_REPORT:
                         else:
                             a = np.random.default_rng(i + 1).standard_normal(len(pts))
                         try:
-                            shape_pngs.append(_geometry_fig(lay, amp=a, height=460).to_image(
-                                format="png", width=1100, height=620, scale=2))
+                            shape_pngs.append(_mode_geom_fig(lay, _geom_r, a, height=520, static=True).to_image(
+                                format="png", width=1100, height=640, scale=2))
                         except Exception:  # noqa: BLE001
                             shape_pngs.append(None)
-                    # configuración 3D
+                    # configuración 3D (máquina + sensores)
                     try:
                         config_png = _geometry_fig(lay, height=520).to_image(format="png", width=1200, height=680, scale=2)
                     except Exception:  # noqa: BLE001
                         config_png = None
+                    # diagrama de estabilización SSI (si la corrida lo trae)
+                    ssi_png = None
+                    _ssic = D.get("ssi_cloud") or {}
+                    if _ssic.get("diagram"):
+                        try:
+                            _dg2 = [[e[0], np.asarray(e[1], float), e[2]] for e in _ssic["diagram"]]
+                            _fq = [mm["fn"] for mm in _ssic.get("modes", [])]
+                            _sv0r = D["sv_traces"][0] if D["sv_traces"] else None
+                            ssi_png = _ssi_plot(_dg2, _fq, _sv0r).to_image(format="png", width=1100, height=560, scale=2)
+                        except Exception:  # noqa: BLE001
+                            ssi_png = None
                     # verificación de sensores (imagen del campo)
                     sensor_png = None; sensor_rows = None
                     if _scr:
@@ -1778,7 +1802,8 @@ if nav == T_REPORT:
                     pdf = build_report_from_run(
                         D.get("payload") or {}, bilingual_es=_es, shape_pngs=shape_pngs,
                         findings=_findings, recommendations=_recs, meta_extra=_meta_extra,
-                        config_png=config_png, sensor_png=sensor_png, sensor_rows=sensor_rows)
+                        config_png=config_png, sensor_png=sensor_png, sensor_rows=sensor_rows,
+                        ssi_png=ssi_png)
                 st.session_state["_modal_report_pdf"] = pdf
                 st.session_state["_modal_report_meta"] = {
                     "consecutive": _consec, "client": _client, "asset": _asset,

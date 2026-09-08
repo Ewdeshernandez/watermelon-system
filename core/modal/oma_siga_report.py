@@ -101,6 +101,7 @@ def build_oma_siga_pdf(
     config_png: Optional[bytes] = None,
     sensor_png: Optional[bytes] = None,
     sensor_rows: Optional[Sequence[Sequence[Any]]] = None,
+    ssi_png: Optional[bytes] = None,
 ) -> bytes:
     """Arma el PDF OMA SIGA. `conditions` = [{label, fdd_result, notes?}, ...].
 
@@ -274,6 +275,17 @@ def build_oma_siga_pdf(
             body.append(p("Tabla. Cruces fn ↔ orden dentro de las bandas de operación.",
                           styles, "WMFigureCaption"))
         body.append(p(camp_summary(cx), styles))
+
+    # 6.S · Diagrama de estabilización SSI (confirmación independiente)
+    if ssi_png:
+        body.append(section("6.S Confirmación por subespacio (SSI-COV)", styles))
+        body.append(p("Método independiente (SSI-COV): las columnas verticales de polos estables "
+                      "confirman los modos físicos identificados por FDD; los picos de la densidad "
+                      "espectral coinciden con esas columnas.", styles))
+        img = safe_image(ssi_png, 17.0, 8.5)
+        if img is not None:
+            body.append(img)
+            body.append(p("Figura. Diagrama de estabilización SSI-COV.", styles, "WMFigureCaption"))
 
     # 7 · Correlación EMA–OMA
     if ema_oma:
