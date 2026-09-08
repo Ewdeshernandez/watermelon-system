@@ -109,10 +109,10 @@ def recommended_acquisition(test_mode: str, running_rpm: float = 0.0) -> dict:
     # OMA
     fmax = 200.0 if run_hz <= 0 else max(200.0, min(1000.0, round(10.0 * run_hz / 50.0) * 50.0))
     fs = _fs_for_fmax(fmax)
-    return {"fs_hz": fs, "block_size": 4096, "fmax_hz": fmax, "duration_s": 600.0,
+    return {"fs_hz": fs, "block_size": 4096, "fmax_hz": fmax, "duration_s": 300.0,
             "window": "hanning", "averages": 1,
-            "note": ("ISO 20816 / OMA (Brincker & Ventura): LONG record (>= 1000-2000 cycles of the "
-                     "lowest mode, typ. 5-10 min), simultaneous sampling, no force window. "
+            "note": ("ISO 20816 / OMA (Brincker & Ventura): LONG record — minimum ~5 min "
+                     "(>= 1000-2000 cycles of the lowest mode), simultaneous sampling, no force window. "
                      + (f"Fmax {fmax:.0f} Hz ~= 10x running speed ({run_hz:.0f} Hz) so Campbell "
                         f"covers up to 8x; fs {fs:.0f} Hz." if run_hz > 0
                         else f"Fmax {fmax:.0f} Hz (set the running speed for an RPM-based band)."))}
