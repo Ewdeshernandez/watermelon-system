@@ -595,7 +595,7 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0):
     scale = 0.16 * span / (MAG.max() or 1.0) * scale_mul
     # Malla densa por interpolación BILINEAL de las 4 esquinas de cada cara: la
     # cuadrícula se deforma coherente (no se "derrite") y agrega MUCHAS líneas (ARTeMIS).
-    N = 4
+    N = 5
     Vr, Vd, Vi, I, J, K, LP = [], [], [], [], [], [], []
     for f in surfaces:
         if len(f) < 4:
