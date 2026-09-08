@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.46"
+__version__ = "0.9.47"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1011,6 +1011,11 @@ def build_app(layout: OMALayout, simulated: bool = True):
         # línea base (mínimo histórico de rms) para detectar "tap"
         sc["base"] = np.minimum(sc["base"] * 1.02 + 1e-9, np.maximum(sc["base"], rms))
         base = np.maximum(sc["base"], 1e-6)
+        # mediana de RMS entre canales → detectar un canal MUCHO más callado (desconectado)
+        med_rms = float(np.median(rms)) if len(rms) else 0.0
+        # canal con mayor respuesta al golpe (para señalar cuál tocaste)
+        _ratio = pk / np.maximum(base, 1e-9)
+        _imax = int(np.argmax(_ratio)) if len(_ratio) else -1
         # dibujar cada canal en su carril (auto-escala por carril)
         x = np.arange(sc["ring"].shape[1])
         for i, cur in enumerate(sc["curves"]):
@@ -1022,12 +1027,16 @@ def build_app(layout: OMALayout, simulated: bool = True):
             cur.setData(x, lane * g + i)
             # tabla
             rng_i = sc["ranges"][i]; unit = sc["units"][i]
-            if pk[i] < 1e-4:
-                stt, scol = "No signal", "#dc2626"
-            elif pk[i] > 0.9 * rng_i:
-                stt, scol = "Overload", "#dc2626"
+            # desconectado/muerto: casi sin señal en absoluto, o MUCHO más callado que el
+            # resto (< 6% de la mediana) — un acelerómetro vivo sobre la estructura nunca
+            # queda tan por debajo de sus vecinos.
+            _dead = pk[i] < 2e-4 or rms[i] < 1e-5 or (med_rms > 5e-5 and rms[i] < 0.06 * med_rms)
+            if pk[i] > 0.9 * rng_i:
+                stt, scol = "⚠ OVERLOAD", "#dc2626"
+            elif _dead:
+                stt, scol = "✖ NO SIGNAL (check wiring)", "#dc2626"
             elif resp:
-                stt, scol = "● responding", "#f59e0b"
+                stt, scol = ("● TAPPED (strongest)" if i == _imax else "● responding"), "#f59e0b"
             else:
                 stt, scol = "OK", "#16a34a"
             tbl_sc.item(i, 1).setText(f"{rms[i]:.3g} {unit}")
@@ -1046,7 +1055,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         rows = []
         for i in range(tbl_sc.rowCount()):
             rows.append([tbl_sc.item(i, j).text() if tbl_sc.item(i, j) else "" for j in range(4)])
-        n_ok = sum(1 for r in rows if r[3].startswith("OK") or "responding" in r[3])
+        n_ok = sum(1 for r in rows if "NO SIGNAL" not in r[3] and "OVERLOAD" not in r[3])
         st["_sc_record"] = {"png": png, "rows": rows, "ts": _dt.datetime.now().isoformat(timespec="seconds"),
                             "n_ok": n_ok, "n_total": len(rows), "live": bool(sc.get("live"))}
         lbl_sc.setText(f"✅ Verification record saved ({n_ok}/{len(rows)} channels OK) — "
