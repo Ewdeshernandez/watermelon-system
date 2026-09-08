@@ -804,6 +804,7 @@ def build_geometry_with_mode_shape(
     phase_offset_rad: float = 0.0,
     camera_eye: Optional[Dict[str, float]] = None,
     camera_up: Optional[Dict[str, float]] = None,
+    deform_pct: float = 0.18,
 ):
     """
     Construye una figura 3D con la geometria del activo + flechas de mode shape
@@ -900,9 +901,9 @@ def build_geometry_with_mode_shape(
                 max_disp = max(max_disp, abs(_eval_spline(mnt, axis, float(x))))
 
     span = max(geom.shaft_end - geom.shaft_start, 100.0)
-    # Deformacion visual: hasta 18% del span — exageracion estetica para que
-    # la flexion sea claramente visible (Artemis usa ~20% por default)
-    deform_scale = (span * 0.18) / max_disp if max_disp > 1e-9 else 0.0
+    # Deformacion visual: hasta deform_pct del span — exageracion estetica para
+    # que la flexion sea claramente visible (Artemis usa ~20% por default)
+    deform_scale = (span * float(deform_pct)) / max_disp if max_disp > 1e-9 else 0.0
 
     def _kind_to_mounting(kind: str) -> str:
         """Mapea kind del bloque a mounting de sensores que lo deforman."""

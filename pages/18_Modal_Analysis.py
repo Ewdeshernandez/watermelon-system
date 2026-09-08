@@ -714,131 +714,95 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
 
 
 def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0, static=False):
-    """Forma modal animada sobre la GEOMETRÍA del campo (estilo ARTeMIS): superficie
-    sólida con malla densa (gradiente Jet), aristas, flechas de DOF por eje y triada.
-    static=True → sin animación ni botón Play, con colorbar (para el PDF del reporte)."""
-    nodes = geom.get("nodes") or []
-    lines = geom.get("lines") or []
-    surfaces = geom.get("surfaces") or []
-    if not nodes:
-        return _mode_surface_fig(lay, amps_signed, height, scale_mul)
-    disp_map = _station_disp_map(lay, amps_signed)
-    P, ND = _geom_node_disp(geom, disp_map)
-    span = float(np.ptp(P[:, 0])) or 1.0
-    MAG = np.linalg.norm(ND, axis=1)
-    # contraste automático (percentil) para que el gradiente se lea aunque el modo sea "picudo"
-    _pos = MAG[MAG > 0]
-    cnorm = float(np.percentile(_pos, 85)) if _pos.size else 1.0
-    cnorm = cnorm or (MAG.max() or 1.0)
-    MAGn = np.clip(MAG / cnorm, 0.0, 1.0)
-    scale = 0.16 * span / (MAG.max() or 1.0) * scale_mul
-    # Malla densa por interpolación BILINEAL de las 4 esquinas de cada cara: la
-    # cuadrícula se deforma coherente (no se "derrite") y agrega MUCHAS líneas (ARTeMIS).
-    N = 5
-    Vr, Vd, Vi, I, J, K, LP = [], [], [], [], [], [], []
-    for f in surfaces:
-        if len(f) < 4:
-            continue
-        Pc = [P[f[0]], P[f[1]], P[f[2]], P[f[3]]]
-        Dc = [ND[f[0]], ND[f[1]], ND[f[2]], ND[f[3]]]
-        Ic = [MAGn[f[0]], MAGn[f[1]], MAGn[f[2]], MAGn[f[3]]]   # color = bilineal de esquinas ya normalizadas
-        base = len(Vr); w = N + 1
-        for iu in range(w):
-            for iv in range(w):
-                u = iu / N; v = iv / N
-                bw = ((1 - u) * (1 - v), u * (1 - v), u * v, (1 - u) * v)
-                Vr.append(bw[0] * Pc[0] + bw[1] * Pc[1] + bw[2] * Pc[2] + bw[3] * Pc[3])
-                Vd.append(bw[0] * Dc[0] + bw[1] * Dc[1] + bw[2] * Dc[2] + bw[3] * Dc[3])
-                Vi.append(bw[0] * Ic[0] + bw[1] * Ic[1] + bw[2] * Ic[2] + bw[3] * Ic[3])
-        for iu in range(N):
-            for iv in range(N):
-                p0 = base + iu * w + iv; p1 = base + (iu + 1) * w + iv; p2 = p1 + 1; p3 = p0 + 1
-                I += [p0, p0]; J += [p1, p2]; K += [p2, p3]
-        for iu in range(w):
-            for iv in range(N):
-                LP.append((base + iu * w + iv, base + iu * w + iv + 1))
-        for iv in range(w):
-            for iu in range(N):
-                LP.append((base + iu * w + iv, base + (iu + 1) * w + iv))
-    Vr = np.array(Vr, float) if Vr else np.zeros((0, 3))
-    Vd = np.array(Vd, float) if Vd else np.zeros((0, 3))
-    Vi = np.array(Vi, float) if Vi else np.zeros((0,))
-    has_surf = len(Vr) > 0
+    """Forma modal de la CARCASA (acelerómetros) con la MISMA estética limpia que el
+    rotor: cuerpo liso (cilindros escalonados por componente) que se FLEXIONA con el
+    modo, coloreado por amplitud (gradiente Jet), sin cajas ni flechas. `geom` se
+    mantiene por compatibilidad de firma (se ignora). static=True → sin Play (PDF)."""
+    pts = lay.active_points()
+    a = np.asarray(amps_signed, float); a = a / (np.max(np.abs(a)) or 1.0)
+    # estaciones a lo largo del eje: acumula deflexión transversal (H→dy, V→dz)
+    stt = {}
+    for p, ai in zip(pts, a):
+        key = round(float(p.x_norm), 4)
+        b = stt.setdefault(key, {"x": float(p.x_norm), "dy": 0.0, "dz": 0.0})
+        d = float(ai) * (-1.0 if (p.dof or "").startswith("-") else 1.0)
+        ax = (p.axis or "").upper()
+        if ax in ("H", "Y"):
+            b["dy"] += d
+        elif ax in ("V", "Z"):
+            b["dz"] += d
+        # axial (A/X) no flexiona lateralmente → se ignora para la forma
+    items = sorted(stt.values(), key=lambda b: b["x"])
+    if len(items) < 2:
+        items = [{"x": 0.0, "dy": 0.0, "dz": 0.0}, {"x": 1.0, "dy": 0.0, "dz": 0.0}]
+    xs = np.array([b["x"] for b in items]); dys = np.array([b["dy"] for b in items]); dzs = np.array([b["dz"] for b in items])
+    # cuerpo = cilindros escalonados por componente (motor grueso, acople fino, bomba…)
+    _skip = ("skid", "leg", "pipe", "tuber", "pata", "soporte")
+    comps = [c for c in (lay.machine_components or [])
+             if not any(w in (c.kind + " " + (c.label or "")).lower() for w in _skip)]
+    if comps:
+        xmin = min(c.x0 for c in comps); xmax = max(c.x1 for c in comps)
+    else:
+        xmin, xmax = float(xs.min()), float(xs.max())
+    span = (xmax - xmin) or 1.0
+    x0, x1 = xmin - 0.03 * span, xmax + 0.03 * span; L = x1 - x0
+    verts, axc, I, J, K = [], [], [], [], []
 
-    def _defVr(ph):
-        return Vr + (scale * np.sin(ph)) * Vd
+    def _add(v, ax, i, j, k):
+        verts.extend(v); axc.extend(ax); I.extend(i); J.extend(j); K.extend(k)
+    if comps:
+        for c in comps:
+            r = min(max(0.5 * abs(c.y1 - c.y0), c.depth, 0.035 * L), 0.16 * L)
+            _add(*_cyl(c.x0, c.x1, r, 22, 26, len(verts)))
+    else:
+        _add(*_cyl(x0, x1, 0.06 * L, 48, 26, len(verts)))
+    V0 = np.array(verts, float); AX = np.array(axc, float)
+    DY = np.interp(AX, xs, dys); DZ = np.interp(AX, xs, dzs); LAT = np.sqrt(DY ** 2 + DZ ** 2)
+    _pos = LAT[LAT > 0]; cnorm = float(np.percentile(_pos, 85)) if _pos.size else 1.0
+    MAGn = np.clip(LAT / (cnorm or 1.0), 0.0, 1.0)
+    maxlat = float(np.sqrt(dys ** 2 + dzs ** 2).max()) or 1.0
+    scale = 0.14 * L / maxlat * scale_mul
+
+    def _defV(ph):
+        out = V0.copy(); s = scale * np.sin(ph)
+        out[:, 1] += DY * s; out[:, 2] += DZ * s
+        return out
 
     def _surf_tr(dv):
-        return go.Mesh3d(x=dv[:, 0], y=dv[:, 1], z=dv[:, 2], i=I, j=J, k=K, intensity=Vi,
+        return go.Mesh3d(x=dv[:, 0], y=dv[:, 1], z=dv[:, 2], i=I, j=J, k=K, intensity=MAGn,
                          cmin=0, cmax=1, coloraxis="coloraxis", flatshading=False, opacity=1.0,
                          lighting=dict(ambient=0.82, diffuse=0.5, specular=0.12), hoverinfo="skip")
 
-    def _grid_tr(dv):
-        ex, ey, ez = [], [], []
-        for a, b in LP:
-            ex += [dv[a, 0], dv[b, 0], None]; ey += [dv[a, 1], dv[b, 1], None]; ez += [dv[a, 2], dv[b, 2], None]
-        return go.Scatter3d(x=ex, y=ey, z=ez, mode="lines",
-                            line=dict(color="rgba(15,23,42,.85)", width=2), hoverinfo="skip")
+    def _center_tr(ph):
+        xc = np.linspace(x0, x1, 60); s = scale * np.sin(ph)
+        yc = np.interp(xc, xs, dys) * s; zc = np.interp(xc, xs, dzs) * s
+        return go.Scatter3d(x=xc, y=yc, z=zc, mode="lines", line=dict(color="#0f172a", width=3), hoverinfo="skip")
 
     fig = go.Figure()
-    if has_surf:
-        fig.add_trace(_surf_tr(_defVr(np.pi / 2))); _is = len(fig.data) - 1
-        fig.add_trace(_grid_tr(_defVr(np.pi / 2))); _ig = len(fig.data) - 1
+    fig.add_trace(_surf_tr(_defV(np.pi / 2))); _isf = len(fig.data) - 1
+    fig.add_trace(_center_tr(np.pi / 2)); _icl = len(fig.data) - 1
+    fig.add_trace(go.Scatter3d(x=xs, y=[0] * len(xs), z=[0] * len(xs), mode="markers",
+                  marker=dict(size=4, color="#0f172a"), hoverinfo="skip"))
     if not static:
         frames = []
         for f in range(26):
-            ph = f / 26.0 * 2 * np.pi; dv = _defVr(ph)
-            data, tr = [], []
-            if has_surf:
-                data.append(_surf_tr(dv)); tr.append(_is)
-                data.append(_grid_tr(dv)); tr.append(_ig)
-            frames.append(go.Frame(data=data, traces=tr))
+            ph = f / 26.0 * 2 * np.pi
+            frames.append(go.Frame(data=[_surf_tr(_defV(ph)), _center_tr(ph)], traces=[_isf, _icl]))
         fig.frames = frames
-
-    # --- estáticos: flechas de DOF por eje (color) + nodos numerados + triada X/Y/Z ---
-    _acol = {"A": "#db2777", "X": "#db2777", "H": "#16a34a", "Y": "#16a34a", "V": "#2563eb", "Z": "#2563eb"}
-    alen = 0.08 * span; _by = {}
-    for p in lay.active_points():
-        ax = _AX.get(p.axis, (0, 0, 1)); s = -1.0 if p.dof.startswith("-") else 1.0
-        col = _acol.get(p.axis, "#0f172a"); b = _by.setdefault(col, {"x": [], "y": [], "z": [], "u": [], "v": [], "w": []})
-        b["x"].append(p.x_norm); b["y"].append(0.20); b["z"].append(p.y_norm)
-        b["u"].append(ax[0] * s * alen); b["v"].append(ax[1] * s * alen); b["w"].append(ax[2] * s * alen)
-    for col, b in _by.items():
-        fig.add_trace(go.Cone(x=b["x"], y=b["y"], z=b["z"], u=b["u"], v=b["v"], w=b["w"], anchor="tail",
-                      sizemode="absolute", sizeref=alen * 0.5, showscale=False,
-                      colorscale=[[0, col], [1, col]], hoverinfo="skip"))
-    _sm = np.array([bool(nd.get("sensor")) for nd in nodes])
-    if _sm.any():
-        SP = P[_sm]
-        fig.add_trace(go.Scatter3d(x=SP[:, 0], y=SP[:, 1], z=SP[:, 2], mode="markers+text",
-                      text=[str(i + 1) for i in range(len(SP))], textposition="top center",
-                      textfont=dict(size=9, color="#0f172a"), marker=dict(size=3, color="#0f172a"),
-                      hoverinfo="skip"))
-    _o = np.array([P[:, 0].min(), P[:, 1].min() - 0.06 * span, P[:, 2].min()]); _tl = 0.14 * span
-    for vec, c, nm in (((1, 0, 0), "#dc2626", "X"), ((0, 1, 0), "#16a34a", "Y"), ((0, 0, 1), "#2563eb", "Z")):
-        e = _o + np.array(vec, float) * _tl
-        fig.add_trace(go.Scatter3d(x=[_o[0], e[0]], y=[_o[1], e[1]], z=[_o[2], e[2]], mode="lines",
-                      line=dict(color=c, width=4), hoverinfo="skip"))
-        fig.add_trace(go.Scatter3d(x=[e[0]], y=[e[1]], z=[e[2]], mode="text", text=[nm],
-                      textfont=dict(size=12, color=c), hoverinfo="skip"))
-
     lay_kw = _mode_scene(height)
-    if has_surf:
-        if static:
-            lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1,
-                                       colorbar=dict(thickness=12, len=0.6, x=0.98,
-                                                     tickvals=[0, 1], ticktext=["0", "Max"], title="ampl"))
-        else:
-            lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1, showscale=False)
     if static:
-        fig.update_layout(**lay_kw)
-        return fig
-    lay_kw["updatemenus"] = [dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
-        buttons=[dict(label="▶ Play", method="animate",
-                      args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True,
-                                       transition=dict(duration=0), mode="immediate")]),
-                 dict(label="⏸ Pause", method="animate",
-                      args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])]
+        lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1,
+                                   colorbar=dict(thickness=12, len=0.6, x=0.98,
+                                                 tickvals=[0, 1], ticktext=["0", "Max"], title="ampl"))
+    else:
+        lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1, showscale=False)
+    if not static:
+        lay_kw["updatemenus"] = [dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
+            buttons=[dict(label="▶ Play", method="animate",
+                          args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True,
+                                           transition=dict(duration=0), mode="immediate")]),
+                     dict(label="⏸ Pause", method="animate",
+                          args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])]
     fig.update_layout(**lay_kw)
     return fig
 
@@ -1721,8 +1685,9 @@ if nav == T_SHAPES:
                            "from the proximity probes. This is the ROTOR, not the casing.")
             else:
                 _chart(_mode_geom_fig(lay, _geom, amp, height=600, scale_mul=_smul))
-                st.caption("Press ▶ Play — surfaces deform, coloured by displacement amplitude. "
-                           "Geometry comes from the field configuration. Drag to rotate.")
+                st.caption("Press ▶ Play — **casing** deflection shape (accelerometers). The machine "
+                           "body bends with the mode, coloured by displacement amplitude (blue→red). "
+                           "Drag to rotate.")
         with mv[1]:
             st.markdown(
                 "<div class='wm-mv'><div class='h'>Modal Values</div>"
