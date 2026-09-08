@@ -730,6 +730,18 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
                                            transition=dict(duration=0), mode="immediate")]),
                      dict(label="⏸ Pause", method="animate",
                           args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])]
+    # Centrar el rotor en X (que quede centrado en el marco, no corrido a un lado) y
+    # alejar un poco la cámara para que NO se salga de cuadro durante la animación.
+    _xmid = 0.5 * (x0 + x1)
+    for _tr in fig.data:
+        if getattr(_tr, "x", None) is not None:
+            _tr.x = np.asarray(_tr.x, float) - _xmid
+    for _fr in (fig.frames or []):
+        for _tr in _fr.data:
+            if getattr(_tr, "x", None) is not None:
+                _tr.x = np.asarray(_tr.x, float) - _xmid
+    lay_kw["scene"]["camera"] = dict(eye=dict(x=1.9, y=1.65, z=1.0),
+                                     center=dict(x=0, y=0, z=0))
     fig.update_layout(**lay_kw)
     return fig
 
