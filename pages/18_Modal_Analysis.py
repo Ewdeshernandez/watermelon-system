@@ -598,6 +598,24 @@ def _cyl(xa, xb, r, na, nt, base):
     return verts, axc, I, J, K
 
 
+def _disk(xc, r, w, nt, base):
+    """Disco SÓLIDO (impulsor) perpendicular al eje: dos caras + borde."""
+    V, AX, I, J, K = [], [], [], [], []
+    V.append([xc - w, 0, 0]); AX.append(xc - w); c0 = base
+    V.append([xc + w, 0, 0]); AX.append(xc + w); c1 = base + 1
+    r0 = base + 2; r1 = r0 + nt
+    for j in range(nt):
+        th = 2 * np.pi * j / nt; V.append([xc - w, r * np.cos(th), r * np.sin(th)]); AX.append(xc - w)
+    for j in range(nt):
+        th = 2 * np.pi * j / nt; V.append([xc + w, r * np.cos(th), r * np.sin(th)]); AX.append(xc + w)
+    for j in range(nt):
+        j2 = (j + 1) % nt
+        I.append(c0); J.append(r0 + j); K.append(r0 + j2)          # cara frontal
+        I.append(c1); J.append(r1 + j2); K.append(r1 + j)          # cara trasera
+        I += [r0 + j, r0 + j]; J += [r1 + j, r1 + j2]; K += [r1 + j2, r0 + j2]  # borde
+    return V, AX, I, J, K
+
+
 def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
     """Forma modal del ROTOR (proximidad): eje + masa del motor + impulsores de la
     bomba, que FLEXIONA lateralmente según las sondas XY (X→radial horiz, Y→radial vert)."""
@@ -635,11 +653,11 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
     _add(*_cyl(x0, x1, rs, 60, 20, len(verts)))                        # eje
     if mot:                                                            # masa del motor
         _add(*_cyl(mot[0], mot[1], 0.055 * L, 18, 22, len(verts)))
-    if pmp:                                                            # impulsores de la bomba (discos)
+    if pmp:                                                            # impulsores de la bomba (discos sólidos)
         n_imp = 6; pw = (pmp[1] - pmp[0])
         for ii in range(n_imp):
             xc = pmp[0] + pw * (ii + 0.5) / n_imp
-            _add(*_cyl(xc - 0.006 * L, xc + 0.006 * L, 0.06 * L, 3, 26, len(verts)))
+            _add(*_disk(xc, 0.065 * L, 0.010 * L, 26, len(verts)))
     V0 = np.array(verts, float); AX = np.array(axc, float)
     DY = np.interp(AX, xs, dys); DZ = np.interp(AX, xs, dzs)
     LAT = np.sqrt(DY ** 2 + DZ ** 2)
