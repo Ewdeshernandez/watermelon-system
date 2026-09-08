@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.45"
+__version__ = "0.9.46"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -875,7 +875,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         st["_sc"]["err"] = ""
         try:
             import nidaqmx
-            from nidaqmx.constants import AcquisitionType, CurrentExcitSource, Coupling
+            from nidaqmx.constants import AcquisitionType, ExcitationSource, Coupling
             from core.modal.acq_backend import (discover_acq_modules, resolve_phys_channel, ChannelConfig)
         except Exception as e:  # noqa: BLE001
             st["_sc"]["err"] = _wl(f"{type(e).__name__}: {e}"); return None
@@ -896,7 +896,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 if cfg.coupling == "IEPE":
                     g = cfg.voltage_range * 1000.0 / (cfg.sensitivity_mv_per_eu or 100.0)
                     task.ai_channels.add_ai_accel_chan(phys, sensitivity=cfg.sensitivity_mv_per_eu,
-                        max_val=g, min_val=-g, current_excit_source=CurrentExcitSource.INTERNAL,
+                        max_val=g, min_val=-g, current_excit_source=ExcitationSource.INTERNAL,
                         current_excit_val=0.002)
                 else:
                     vc = task.ai_channels.add_ai_voltage_chan(phys, max_val=cfg.voltage_range,

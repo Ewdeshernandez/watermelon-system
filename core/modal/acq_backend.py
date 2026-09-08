@@ -459,7 +459,7 @@ def self_test_channel(channel: ChannelConfig, sample_rate_hz: float = 5120,
     """
     try:
         import nidaqmx
-        from nidaqmx.constants import AcquisitionType, CurrentExcitSource
+        from nidaqmx.constants import AcquisitionType, ExcitationSource
     except ImportError as exc:
         raise ImportError("nidaqmx requerido para self_test_channel") from exc
 
@@ -473,7 +473,7 @@ def self_test_channel(channel: ChannelConfig, sample_rate_hz: float = 5120,
                 phys_chan,
                 sensitivity=channel.sensitivity_mv_per_eu,
                 max_val=_g, min_val=-_g,
-                current_excit_source=CurrentExcitSource.INTERNAL,
+                current_excit_source=ExcitationSource.INTERNAL,
                 current_excit_val=0.002,
             )
         else:
@@ -586,7 +586,7 @@ def _capture_ema(config: AcquisitionConfig, progress: Callable) -> Path:
     """
     try:
         import nidaqmx
-        from nidaqmx.constants import AcquisitionType, CurrentExcitSource
+        from nidaqmx.constants import AcquisitionType, ExcitationSource
         import numpy as np
     except ImportError as exc:
         raise ImportError(
@@ -643,7 +643,7 @@ def _capture_ema(config: AcquisitionConfig, progress: Callable) -> Path:
                     task.ai_channels.add_ai_accel_chan(
                         phys, sensitivity=ch.sensitivity_mv_per_eu,
                         max_val=_g, min_val=-_g,
-                        current_excit_source=CurrentExcitSource.INTERNAL,
+                        current_excit_source=ExcitationSource.INTERNAL,
                         current_excit_val=0.002,
                     )
                 else:
@@ -777,7 +777,7 @@ def _capture_oma(config: AcquisitionConfig, progress: Callable) -> Path:
     """
     try:
         import nidaqmx
-        from nidaqmx.constants import AcquisitionType, CurrentExcitSource, Coupling
+        from nidaqmx.constants import AcquisitionType, ExcitationSource, Coupling
         import numpy as np
         from nptdms import TdmsWriter, ChannelObject, GroupObject, RootObject
     except ImportError as exc:
@@ -828,7 +828,7 @@ def _capture_oma(config: AcquisitionConfig, progress: Callable) -> Path:
                 task.ai_channels.add_ai_accel_chan(
                     phys, sensitivity=ch.sensitivity_mv_per_eu,
                     max_val=_g, min_val=-_g,
-                    current_excit_source=CurrentExcitSource.INTERNAL,
+                    current_excit_source=ExcitationSource.INTERNAL,
                     current_excit_val=0.002,          # NI 9234: IEPE 2 mA
                 )
             else:
