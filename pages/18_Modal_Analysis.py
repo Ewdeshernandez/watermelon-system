@@ -575,6 +575,126 @@ def _dense_mesh(P, surfaces, n=4):
     return (np.array(V, float) if V else np.zeros((0, 3))), I, J, K
 
 
+def _rotor_is(lay):
+    """¿La corrida es de PROXIMIDAD (rotor)? → sensores de desplazamiento (mil)."""
+    pts = lay.active_points()
+    return bool(pts) and sum(1 for p in pts if getattr(p, "meas_type", "A") == "D") >= max(2, len(pts) // 2)
+
+
+def _cyl(xa, xb, r, na, nt, base):
+    """Malla de un cilindro a lo largo de X: devuelve (verts, axial, I,J,K)."""
+    verts, axc, I, J, K = [], [], [], [], []
+    for k in range(na):
+        xk = xa + (xb - xa) * (k / (na - 1) if na > 1 else 0)
+        for j in range(nt):
+            th = 2 * np.pi * j / nt
+            verts.append([xk, r * np.cos(th), r * np.sin(th)]); axc.append(xk)
+    for k in range(na - 1):
+        for j in range(nt):
+            j2 = (j + 1) % nt
+            p0 = base + k * nt + j; p1 = base + (k + 1) * nt + j
+            p2 = base + (k + 1) * nt + j2; p3 = base + k * nt + j2
+            I += [p0, p0]; J += [p1, p2]; K += [p2, p3]
+    return verts, axc, I, J, K
+
+
+def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
+    """Forma modal del ROTOR (proximidad): eje + masa del motor + impulsores de la
+    bomba, que FLEXIONA lateralmente según las sondas XY (X→radial horiz, Y→radial vert)."""
+    pts = lay.active_points()
+    if not pts or amps_signed is None or len(amps_signed) != len(pts):
+        return _geometry_fig(lay, height=height)
+    a = np.asarray(amps_signed, float); a = a / (np.max(np.abs(a)) or 1.0)
+    # cojinetes: agrupar por (componente, referencia) → deflexión lateral (dy,dz)
+    bear = {}
+    for p, ai in zip(pts, a):
+        key = f"{p.component} {p.position_ref}"
+        b = bear.setdefault(key, {"x": float(p.x_norm), "dy": 0.0, "dz": 0.0})
+        d = float(ai) * (-1.0 if p.dof.startswith("-") else 1.0)
+        if (p.axis or "").upper() in ("X", "H", "A"):
+            b["dy"] += d
+        else:
+            b["dz"] += d
+        b["x"] = float(p.x_norm)
+    items = sorted(bear.values(), key=lambda b: b["x"])
+    xs = np.array([b["x"] for b in items]); dys = np.array([b["dy"] for b in items]); dzs = np.array([b["dz"] for b in items])
+    xmin, xmax = float(xs.min()), float(xs.max()); span = (xmax - xmin) or 1.0
+    x0, x1 = xmin - 0.06 * span, xmax + 0.06 * span; L = x1 - x0
+    rs = 0.020 * L                                   # radio del eje
+    # rangos de motor y bomba (para masa e impulsores)
+    def _crange(kws):
+        for c in lay.machine_components:
+            if any(w in (c.kind + " " + c.label).lower() for w in kws):
+                return c.x0, c.x1
+        return None
+    mot = _crange(["motor"]); pmp = _crange(["pump", "bomba"])
+    verts, axc, I, J, K = [], [], [], [], []
+
+    def _add(v, ax, i, j, k):
+        verts.extend(v); axc.extend(ax); I.extend(i); J.extend(j); K.extend(k)
+    _add(*_cyl(x0, x1, rs, 60, 20, len(verts)))                        # eje
+    if mot:                                                            # masa del motor
+        _add(*_cyl(mot[0], mot[1], 0.055 * L, 18, 22, len(verts)))
+    if pmp:                                                            # impulsores de la bomba (discos)
+        n_imp = 6; pw = (pmp[1] - pmp[0])
+        for ii in range(n_imp):
+            xc = pmp[0] + pw * (ii + 0.5) / n_imp
+            _add(*_cyl(xc - 0.006 * L, xc + 0.006 * L, 0.06 * L, 3, 26, len(verts)))
+    V0 = np.array(verts, float); AX = np.array(axc, float)
+    DY = np.interp(AX, xs, dys); DZ = np.interp(AX, xs, dzs)
+    LAT = np.sqrt(DY ** 2 + DZ ** 2)
+    _pos = LAT[LAT > 0]; cnorm = float(np.percentile(_pos, 85)) if _pos.size else 1.0
+    MAGn = np.clip(LAT / (cnorm or 1.0), 0.0, 1.0)
+    maxlat = float(np.sqrt(dys ** 2 + dzs ** 2).max()) or 1.0
+    scale = 0.14 * L / maxlat * scale_mul
+
+    def _defV(ph):
+        out = V0.copy(); s = scale * np.sin(ph)
+        out[:, 1] += DY * s; out[:, 2] += DZ * s
+        return out
+
+    def _surf_tr(dv):
+        return go.Mesh3d(x=dv[:, 0], y=dv[:, 1], z=dv[:, 2], i=I, j=J, k=K, intensity=MAGn,
+                         cmin=0, cmax=1, coloraxis="coloraxis", flatshading=False, opacity=1.0,
+                         lighting=dict(ambient=0.82, diffuse=0.5, specular=0.12), hoverinfo="skip")
+
+    def _center_tr(ph):
+        xc = np.linspace(x0, x1, 60); yc = np.interp(xc, xs, dys) * scale * np.sin(ph)
+        zc = np.interp(xc, xs, dzs) * scale * np.sin(ph)
+        return go.Scatter3d(x=xc, y=yc, z=zc, mode="lines", line=dict(color="#0f172a", width=3), hoverinfo="skip")
+
+    fig = go.Figure()
+    fig.add_trace(_surf_tr(_defV(np.pi / 2))); _isf = len(fig.data) - 1
+    fig.add_trace(_center_tr(np.pi / 2)); _icl = len(fig.data) - 1
+    # marcadores de cojinete (sensores)
+    fig.add_trace(go.Scatter3d(x=xs, y=[0] * len(xs), z=[0] * len(xs), mode="markers+text",
+                  text=[f"B{i+1}" for i in range(len(xs))], textposition="top center",
+                  textfont=dict(size=10, color="#0f172a"), marker=dict(size=4, color="#0f172a"),
+                  hoverinfo="skip"))
+    if not static:
+        frames = []
+        for f in range(26):
+            ph = f / 26.0 * 2 * np.pi
+            frames.append(go.Frame(data=[_surf_tr(_defV(ph)), _center_tr(ph)], traces=[_isf, _icl]))
+        fig.frames = frames
+    lay_kw = _mode_scene(height)
+    if static:
+        lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1,
+                                   colorbar=dict(thickness=12, len=0.6, x=0.98,
+                                                 tickvals=[0, 1], ticktext=["0", "Max"], title="ampl"))
+    else:
+        lay_kw["coloraxis"] = dict(colorscale="Jet", cmin=0, cmax=1, showscale=False)
+    if not static:
+        lay_kw["updatemenus"] = [dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
+            buttons=[dict(label="▶ Play", method="animate",
+                          args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True,
+                                           transition=dict(duration=0), mode="immediate")]),
+                     dict(label="⏸ Pause", method="animate",
+                          args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])]
+    fig.update_layout(**lay_kw)
+    return fig
+
+
 def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0, static=False):
     """Forma modal animada sobre la GEOMETRÍA del campo (estilo ARTeMIS): superficie
     sólida con malla densa (gradiente Jet), aristas, flechas de DOF por eje y triada.
@@ -1577,9 +1697,14 @@ if nav == T_SHAPES:
             st.markdown(f"<div style='text-align:center;color:#64748b;font-weight:600;font-size:13px;"
                         f"margin-bottom:2px'>Mode {idx+1} · operating deflection shape · {m['fn']:.3f} Hz</div>",
                         unsafe_allow_html=True)
-            _chart(_mode_geom_fig(lay, _geom, amp, height=600, scale_mul=_smul))
-            st.caption("Press ▶ Play — surfaces deform, coloured by displacement amplitude. "
-                       "Geometry comes from the field configuration. Drag to rotate.")
+            if _rotor_is(lay):                   # proximidad → forma modal del ROTOR (eje + impulsores)
+                _chart(_mode_rotor_fig(lay, amp, height=600, scale_mul=_smul))
+                st.caption("Press ▶ Play — **rotor** deflection shape (shaft + motor mass + pump impellers) "
+                           "from the proximity probes. This is the ROTOR, not the casing.")
+            else:
+                _chart(_mode_geom_fig(lay, _geom, amp, height=600, scale_mul=_smul))
+                st.caption("Press ▶ Play — surfaces deform, coloured by displacement amplitude. "
+                           "Geometry comes from the field configuration. Drag to rotate.")
         with mv[1]:
             st.markdown(
                 "<div class='wm-mv'><div class='h'>Modal Values</div>"
@@ -1764,8 +1889,9 @@ if nav == T_REPORT:
                         else:
                             a = np.random.default_rng(i + 1).standard_normal(len(pts))
                         try:
-                            shape_pngs.append(_mode_geom_fig(lay, _geom_r, a, height=520, static=True).to_image(
-                                format="png", width=1100, height=640, scale=2))
+                            _fig_ms = (_mode_rotor_fig(lay, a, height=520, static=True) if _rotor_is(lay)
+                                       else _mode_geom_fig(lay, _geom_r, a, height=520, static=True))
+                            shape_pngs.append(_fig_ms.to_image(format="png", width=1100, height=640, scale=2))
                         except Exception:  # noqa: BLE001
                             shape_pngs.append(None)
                     # configuración 3D (máquina + sensores)
