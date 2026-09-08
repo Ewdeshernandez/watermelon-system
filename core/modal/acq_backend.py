@@ -317,32 +317,47 @@ def discover_acq_modules(chassis_name: str = "cDAQ1") -> List[Dict]:
             "funciona en el laptop de captura con driver del fabricante driver."
         ) from exc
 
+    import re as _re
     system = System.local()
-    modules = []
+    raw = []
     for dev in system.devices:
         product = (dev.product_type or "").upper()
         if "9234" not in product:
             continue
-        # El driver NI nombra módulos como "cDAQ1Mod1", "cDAQ1Mod2"...
-        name = dev.name
-        if not name.startswith(chassis_name) or "Mod" not in name:
-            continue
-        try:
-            slot = int(name.split("Mod")[-1])
-        except (ValueError, IndexError):
-            continue
-        if not (1 <= slot <= 8):
-            continue
-        bnc_start = (slot - 1) * 4 + 1
-        bnc_end = bnc_start + 3
+        # Enumera TODOS los módulos de adquisición, sin asumir nombre de chasis ni
+        # slots contiguos: pueden estar en un chasis (cDAQ1Mod1..) o en varios
+        # carriers USB (cDAQ1Mod1, cDAQ2Mod1, …). Se ordena natural y se les asigna
+        # un slot lógico secuencial 1..N, conservando el NOMBRE REAL del módulo.
+        raw.append({"device_name": dev.name, "product_type": dev.product_type,
+                    "serial": str(getattr(dev, "serial_num", ""))})
+
+    def _natkey(m):
+        nums = _re.findall(r"\d+", m["device_name"])
+        return tuple(int(n) for n in nums) if nums else (0,)
+    raw.sort(key=_natkey)
+    modules = []
+    for i, m in enumerate(raw):
+        slot = i + 1                       # slot LÓGICO (orden de BNC), no el físico
         modules.append({
             "slot": slot,
-            "device_name": name,
-            "product_type": dev.product_type,
-            "serial": str(dev.serial_num),
-            "bnc_range": (bnc_start, bnc_end),
+            "device_name": m["device_name"],   # nombre REAL para el driver (p.ej. cDAQ2Mod1)
+            "product_type": m["product_type"],
+            "serial": m["serial"],
+            "bnc_range": ((slot - 1) * 4 + 1, (slot - 1) * 4 + 4),
         })
-    return sorted(modules, key=lambda m: m["slot"])
+    return modules
+
+
+def resolve_phys_channel(ch: "ChannelConfig", modules: List[Dict]) -> str:
+    """Nombre físico driver usando el NOMBRE REAL del módulo (robusto a chasis/slots).
+    `ch.module_slot` es el slot lógico 1..N (derivado del BNC). Lanza si falta módulo."""
+    idx = int(ch.module_slot) - 1
+    if idx < 0 or idx >= len(modules):
+        raise RuntimeError(
+            f"Canal '{ch.name}' (BNC {ch.bnc_port}) necesita el módulo #{ch.module_slot}, "
+            f"pero solo hay {len(modules)} módulo(s) de adquisición detectado(s). "
+            f"Conecta/energiza más módulos o reduce los canales.")
+    return f"{modules[idx]['device_name']}/ai{ch.channel_index}"
 
 
 def diagnose_acquisition(chassis_name: str = "cDAQ1") -> Dict[str, object]:
@@ -802,9 +817,10 @@ def _capture_oma(config: AcquisitionConfig, progress: Callable) -> Path:
     })
     group = GroupObject("Acquisition")
 
+    _modules = discover_acq_modules(chassis)          # nombres REALES de módulos (robusto)
     with nidaqmx.Task() as task, TdmsWriter(str(output_path)) as writer:
         for ch in config.channels:
-            phys = _build_phys_channel(chassis, ch)
+            phys = resolve_phys_channel(ch, _modules)
             if ch.coupling.upper() == "IEPE":
                 # Rango en unidades de ACELERACIÓN (g), no en voltios:
                 #   g_range = Vrange · 1000 / sensibilidad(mV/g)   (ej. 5V·1000/100 = ±50 g)

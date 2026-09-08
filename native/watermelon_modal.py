@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.44"
+__version__ = "0.9.45"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -872,27 +872,27 @@ def build_app(layout: OMALayout, simulated: bool = True):
     st["_sc"]["timer"].setInterval(100)                  # ~10 Hz refresco
 
     def _sc_open_task():
+        st["_sc"]["err"] = ""
         try:
             import nidaqmx
             from nidaqmx.constants import AcquisitionType, CurrentExcitSource, Coupling
-            from core.modal.acq_backend import (list_available_devices, _build_phys_channel, ChannelConfig)
-        except Exception:  # noqa: BLE001
-            return None
-        chassis = "cDAQ1"
-        try:
-            for d in list_available_devices():
-                if "cdaq" in d["product_type"].lower() or "9178" in d["product_type"]:
-                    chassis = d["name"]; break
-        except Exception:  # noqa: BLE001
-            pass
+            from core.modal.acq_backend import (discover_acq_modules, resolve_phys_channel, ChannelConfig)
+        except Exception as e:  # noqa: BLE001
+            st["_sc"]["err"] = _wl(f"{type(e).__name__}: {e}"); return None
         lay = st["layout"]; fs = float(lay.fs_hz)
+        try:
+            _modules = discover_acq_modules()          # nombres REALES de módulos (robusto)
+        except Exception as e:  # noqa: BLE001
+            st["_sc"]["err"] = _wl(f"{type(e).__name__}: {e}"); return None
+        if not _modules:
+            st["_sc"]["err"] = "No acquisition modules detected (check power/USB)."; return None
         try:
             task = nidaqmx.Task()
             for p in lay.active_points():
                 cfg = ChannelConfig(name=p.code, coupling=("AC" if p.meas_type == "D" else "IEPE"),
                                     sensitivity_mv_per_eu=p.sensitivity_mv_per_g, bnc_port=p.bnc,
                                     units=("mil" if p.meas_type == "D" else "g"))
-                phys = _build_phys_channel(chassis, cfg)
+                phys = resolve_phys_channel(cfg, _modules)
                 if cfg.coupling == "IEPE":
                     g = cfg.voltage_range * 1000.0 / (cfg.sensitivity_mv_per_eu or 100.0)
                     task.ai_channels.add_ai_accel_chan(phys, sensitivity=cfg.sensitivity_mv_per_eu,
@@ -909,7 +909,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
                                             samps_per_chan=int(fs))
             task.start()
             return task
-        except Exception:  # noqa: BLE001
+        except Exception as e:  # noqa: BLE001
+            st["_sc"]["err"] = _wl(f"{type(e).__name__}: {e}")
             try:
                 task.close()
             except Exception:  # noqa: BLE001
@@ -943,11 +944,18 @@ def build_app(layout: OMALayout, simulated: bool = True):
         sc["task"] = _sc_open_task() if live else None
         sc["live"] = sc["task"] is not None
         if live and sc["task"] is None:
-            lbl_sc.setText("⚠ Could not open the acquisition unit — showing simulated signals.")
-        else:
-            lbl_sc.setText(("● LIVE — tap a sensor; its lane should react." if sc["live"]
-                            else "Simulated signals (no hardware). Connect the unit + pick "
-                                 f"'{DAQ_NAME} (live)' to check real sensors."))
+            # NO simular disfrazado de real: falla fuerte con el motivo y NO arranca.
+            _err = sc.get("err") or "unknown error"
+            QtWidgets.QMessageBox.critical(win, f"{DAQ_NAME} not available — no real signals",
+                f"❌ Could not open {DAQ_NAME}. NOT showing simulated signals (that would look real).\n\n"
+                f"{_err}\n\nMost likely the acquisition driver is not installed on this PC, or the unit "
+                "is not connected/powered. Press ‘Test acquisition’ (OMA capture tab) to diagnose.\n\n"
+                "To demo without hardware, switch the source to ‘Simulated’.")
+            lbl_sc.setText(f"⚠ {DAQ_NAME} not available — {_err}")
+            sc["on"] = False; return
+        lbl_sc.setText(("● LIVE — tap a sensor; its lane should react." if sc["live"]
+                        else "Simulated signals (no hardware). Connect the unit + pick "
+                             f"'{DAQ_NAME} (live)' to check real sensors."))
         sc["on"] = True; sc["timer"].start()
 
     def _sc_stop():
@@ -1575,11 +1583,37 @@ def build_app(layout: OMALayout, simulated: bool = True):
             QtWidgets.QMessageBox.warning(win, "Watermelon acquisition",
                 "⚠ Acquisition unit not detected.\nCheck the USB cable and power.")
             return
-        chassis = [d for d in devs if "cdaq" in d["product_type"].lower() or "9178" in d["product_type"]]
         mods = [d for d in devs if "9234" in d["product_type"]]
         nch = len(mods) * 4
-        lines = [f"✅ {DAQ_NAME} connected."]
-        lines.append(f"Acquisition modules: {len(mods)} → {nch} channels available.")
+        lines = [f"✅ {DAQ_NAME} connected.",
+                 f"Acquisition modules: {len(mods)} → {nch} channels available."]
+        # Mapa REAL de BNC → canal físico para la config actual (verdad de campo)
+        try:
+            from core.modal.acq_backend import discover_acq_modules, resolve_phys_channel, ChannelConfig
+            _mods = discover_acq_modules()
+            lines.append("\nModules (in BNC order):")
+            for m in _mods:
+                lines.append(f"  #{m['slot']} → {_wl(m['device_name'])}  (BNC {m['bnc_range'][0]}-{m['bnc_range'][1]})")
+            _lay = st["layout"]; _aps = _lay.active_points()
+            if _aps:
+                lines.append("\nThis run maps to:")
+                _bad = 0
+                for p in _aps[:6]:
+                    cfg = ChannelConfig(name=p.code, coupling=("AC" if p.meas_type == "D" else "IEPE"),
+                                        sensitivity_mv_per_eu=p.sensitivity_mv_per_g, bnc_port=p.bnc,
+                                        units=("mil" if p.meas_type == "D" else "g"))
+                    try:
+                        lines.append(f"  {p.code} (BNC {p.bnc}) → {_wl(resolve_phys_channel(cfg, _mods))}")
+                    except Exception as _e:  # noqa: BLE001
+                        _bad += 1; lines.append(f"  {p.code} (BNC {p.bnc}) → ❌ {_wl(str(_e))}")
+                if len(_aps) > 6:
+                    lines.append(f"  … (+{len(_aps)-6} more)")
+                _need = max((p.bnc for p in _aps), default=0); _needmods = (int(_need) + 3) // 4
+                if _needmods > len(_mods):
+                    lines.append(f"\n⚠ You need {_needmods} modules for BNC up to {_need}, "
+                                 f"but only {len(_mods)} are detected.")
+        except Exception as _e:  # noqa: BLE001
+            lines.append(f"\n(Channel map unavailable: {_wl(str(_e))})")
         lines.append(f"\nConnection OK — you can capture with Source = {DAQ_NAME} (live)." if mods
                      else "No channel modules detected — check they are properly seated.")
         QtWidgets.QMessageBox.information(win, "Watermelon acquisition", "\n".join(lines))
@@ -1628,20 +1662,46 @@ def build_app(layout: OMALayout, simulated: bool = True):
                          f"remaining {rem:.1f} s · {mb:.1f} MB")
             QtWidgets.QApplication.processEvents()
 
-        if live:                                        # captura REAL con hardware (con fallback)
+        if live:                                        # captura REAL con hardware — SIN fallback silencioso
+            import time as _time
             _dst.setText(f"Connecting to {DAQ_NAME}…"); QtWidgets.QApplication.processEvents()
+            _t0 = _time.time()
             try:
                 data, fs = _capture_ni(lay, secs, on_progress=_cap_progress)
-                msg = f"{DAQ_NAME}: {data.shape[0]} muestras · {data.shape[1]} canales"
-                _trpm = st.get("_tach_rpm")
-                if _trpm:                              # keyphasor → RPM exacta para Campbell/armónicos
-                    lay.running_speed_rpm = float(_trpm); sp_rpm.setValue(float(_trpm))
-                    msg += f" · tach: {_trpm:.0f} RPM"
-                lbl_ost.setText(msg)
             except Exception as e:  # noqa: BLE001
-                _dst.setText(f"No acquisition → simulated ({type(e).__name__})")
-                data = None
-        if data is None:                                # simulado
+                try:
+                    dlg.accept()
+                except Exception:  # noqa: BLE001
+                    pass
+                _cause = getattr(e, "__cause__", None)
+                _root = _wl(f"\n\nDetail: {type(_cause).__name__}: {_cause}") if _cause else ""
+                QtWidgets.QMessageBox.critical(win, "NO real acquisition — nothing recorded",
+                    f"❌ Could not capture from {DAQ_NAME}. NO data was recorded (nothing was simulated).\n\n"
+                    f"{_wl(f'{type(e).__name__}: {e}')}{_root}\n\n"
+                    "Most likely the acquisition driver is not installed on this PC, or the unit is "
+                    "not connected/powered. Press ‘Test acquisition’ to diagnose.\n\n"
+                    "To run a demo without hardware, switch Source to ‘Simulated’.")
+                return
+            # Guardia anti-simulación: una captura REAL de N segundos DEBE tardar ~N segundos.
+            _el = _time.time() - _t0
+            if _el < 0.5 * secs:
+                try:
+                    dlg.accept()
+                except Exception:  # noqa: BLE001
+                    pass
+                QtWidgets.QMessageBox.critical(win, "Acquisition too fast — not real",
+                    f"❌ The capture finished in {_el:.1f} s but {secs:.0f} s were requested. "
+                    "A real acquisition cannot finish faster than its duration.\n\n"
+                    "The unit did not stream real samples. NO run was created. Press ‘Test acquisition’ "
+                    "to check the connection, or switch Source to ‘Simulated’ for a demo.")
+                return
+            msg = f"{DAQ_NAME}: {data.shape[0]} muestras · {data.shape[1]} canales · {_el:.0f} s"
+            _trpm = st.get("_tach_rpm")
+            if _trpm:                              # keyphasor → RPM exacta para Campbell/armónicos
+                lay.running_speed_rpm = float(_trpm); sp_rpm.setValue(float(_trpm))
+                msg += f" · tach: {_trpm:.0f} RPM"
+            lbl_ost.setText(msg)
+        if data is None:                                # simulado (SOLO si Source = Simulated)
             _cap_progress(0.15, "Simulating…")
             data = np.zeros((N, nch))
             for sm in DEMO_MODES:
