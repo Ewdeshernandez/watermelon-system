@@ -623,10 +623,11 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
     if not pts or amps_signed is None or len(amps_signed) != len(pts):
         return _geometry_fig(lay, height=height)
     a = np.asarray(amps_signed, float); a = a / (np.max(np.abs(a)) or 1.0)
-    # cojinetes: agrupar por (componente, referencia) → deflexión lateral (dy,dz)
+    # cojinetes: agrupar por POSICIÓN x (no por etiqueta: muchas corridas traen el mismo
+    # component/position_ref en todos los puntos y colapsarían a una sola estación).
     bear = {}
     for p, ai in zip(pts, a):
-        key = f"{p.component} {p.position_ref}"
+        key = round(float(p.x_norm), 3)
         b = bear.setdefault(key, {"x": float(p.x_norm), "dy": 0.0, "dz": 0.0})
         d = float(ai) * (-1.0 if p.dof.startswith("-") else 1.0)
         if (p.axis or "").upper() in ("X", "H", "A"):
@@ -636,6 +637,11 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
         b["x"] = float(p.x_norm)
     items = sorted(bear.values(), key=lambda b: b["x"])
     xs = np.array([b["x"] for b in items]); dys = np.array([b["dy"] for b in items]); dzs = np.array([b["dz"] for b in items])
+    # suavizado ligero (3 puntos): evita que datos ruidosos "rompan"/retuerzan el eje
+    if len(dys) >= 3:
+        def _sm(v):
+            w = v.copy(); w[1:-1] = 0.25 * v[:-2] + 0.5 * v[1:-1] + 0.25 * v[2:]; return w
+        dys = _sm(dys); dzs = _sm(dzs)
     xmin, xmax = float(xs.min()), float(xs.max()); span = (xmax - xmin) or 1.0
     x0, x1 = xmin - 0.06 * span, xmax + 0.06 * span; L = x1 - x0
     rs = 0.020 * L                                   # radio del eje
@@ -664,7 +670,7 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
     _pos = LAT[LAT > 0]; cnorm = float(np.percentile(_pos, 85)) if _pos.size else 1.0
     MAGn = np.clip(LAT / (cnorm or 1.0), 0.0, 1.0)
     maxlat = float(np.sqrt(dys ** 2 + dzs ** 2).max()) or 1.0
-    scale = 0.14 * L / maxlat * scale_mul
+    scale = 0.11 * L / maxlat * scale_mul
 
     def _defV(ph):
         out = V0.copy(); s = scale * np.sin(ph)
@@ -1683,18 +1689,13 @@ if nav == T_SHAPES:
     if not modes:
         st.info("No modes to display.")
     else:
-        cms = st.columns([2, 1, 1.1])
+        cms = st.columns([2.4, 1])
         with cms[0]:
             opts = [f"Mode {i+1} — {m['fn']:.1f} Hz" for i, m in enumerate(modes)]
             sel = st.selectbox("Mode", opts, index=0, label_visibility="collapsed")
         with cms[1]:
             _scl = st.select_slider("Deformation", options=["0.5×", "1×", "2×", "3×"], value="1×",
                                     label_visibility="collapsed")
-        with cms[2]:
-            _vopts = ["Rotor (proximity)", "Casing (accel)"]
-            _vdef = 0 if _rotor_is(lay) else 1
-            _view = st.segmented_control("View", _vopts, default=_vopts[_vdef],
-                                         key="ms_view", label_visibility="collapsed") or _vopts[_vdef]
         idx = opts.index(sel)
         m = modes[idx]
         pts = lay.active_points()
@@ -1720,7 +1721,7 @@ if nav == T_SHAPES:
             st.markdown(f"<div style='text-align:center;color:#64748b;font-weight:600;font-size:13px;"
                         f"margin-bottom:2px'>Mode {idx+1} · operating deflection shape · {m['fn']:.3f} Hz</div>",
                         unsafe_allow_html=True)
-            if _view.startswith("Rotor"):        # proximidad → forma modal del ROTOR (eje + impulsores)
+            if _rotor_is(lay):                   # proximidad → forma modal del ROTOR (eje + impulsores)
                 _chart(_mode_rotor_fig(lay, amp, height=600, scale_mul=_smul))
                 st.caption("Press ▶ Play — **rotor** deflection shape (shaft + motor mass + pump impellers) "
                            "from the proximity probes. This is the ROTOR, not the casing.")
