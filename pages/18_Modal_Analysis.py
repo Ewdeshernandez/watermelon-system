@@ -593,39 +593,65 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0):
     cnorm = cnorm or (MAG.max() or 1.0)
     MAGn = np.clip(MAG / cnorm, 0.0, 1.0)
     scale = 0.16 * span / (MAG.max() or 1.0) * scale_mul
-    # malla por caras de los componentes (nodos = 8 esquinas por caja) → forma coherente
-    I, J, K = [], [], []
+    # Malla densa por interpolación BILINEAL de las 4 esquinas de cada cara: la
+    # cuadrícula se deforma coherente (no se "derrite") y agrega MUCHAS líneas (ARTeMIS).
+    N = 3
+    Vr, Vd, Vi, I, J, K, LP = [], [], [], [], [], [], []
     for f in surfaces:
-        if len(f) >= 3:
-            for t in range(1, len(f) - 1):
-                I.append(f[0]); J.append(f[t]); K.append(f[t + 1])
-    has_surf = bool(I)
+        if len(f) < 4:
+            continue
+        Pc = [P[f[0]], P[f[1]], P[f[2]], P[f[3]]]
+        Dc = [ND[f[0]], ND[f[1]], ND[f[2]], ND[f[3]]]
+        Ic = [MAGn[f[0]], MAGn[f[1]], MAGn[f[2]], MAGn[f[3]]]   # color = bilineal de esquinas ya normalizadas
+        base = len(Vr); w = N + 1
+        for iu in range(w):
+            for iv in range(w):
+                u = iu / N; v = iv / N
+                bw = ((1 - u) * (1 - v), u * (1 - v), u * v, (1 - u) * v)
+                Vr.append(bw[0] * Pc[0] + bw[1] * Pc[1] + bw[2] * Pc[2] + bw[3] * Pc[3])
+                Vd.append(bw[0] * Dc[0] + bw[1] * Dc[1] + bw[2] * Dc[2] + bw[3] * Dc[3])
+                Vi.append(bw[0] * Ic[0] + bw[1] * Ic[1] + bw[2] * Ic[2] + bw[3] * Ic[3])
+        for iu in range(N):
+            for iv in range(N):
+                p0 = base + iu * w + iv; p1 = base + (iu + 1) * w + iv; p2 = p1 + 1; p3 = p0 + 1
+                I += [p0, p0]; J += [p1, p2]; K += [p2, p3]
+        for iu in range(w):
+            for iv in range(N):
+                LP.append((base + iu * w + iv, base + iu * w + iv + 1))
+        for iv in range(w):
+            for iu in range(N):
+                LP.append((base + iu * w + iv, base + (iu + 1) * w + iv))
+    Vr = np.array(Vr, float) if Vr else np.zeros((0, 3))
+    Vd = np.array(Vd, float) if Vd else np.zeros((0, 3))
+    Vi = np.array(Vi, float) if Vi else np.zeros((0,))
+    has_surf = len(Vr) > 0
 
-    def _defP(ph):
-        return P + (scale * np.sin(ph)) * ND
+    def _defVr(ph):
+        return Vr + (scale * np.sin(ph)) * Vd
 
-    def _surf_tr(dP):
-        return go.Mesh3d(x=dP[:, 0], y=dP[:, 1], z=dP[:, 2], i=I, j=J, k=K, intensity=MAGn,
+    def _surf_tr(dv):
+        return go.Mesh3d(x=dv[:, 0], y=dv[:, 1], z=dv[:, 2], i=I, j=J, k=K, intensity=Vi,
                          cmin=0, cmax=1, coloraxis="coloraxis", flatshading=False, opacity=1.0,
                          lighting=dict(ambient=0.82, diffuse=0.5, specular=0.12), hoverinfo="skip")
 
-    def _edge_tr(dP):
-        ex, ey, ez = _edges_xyz(dP, lines)
+    def _grid_tr(dv):
+        ex, ey, ez = [], [], []
+        for a, b in LP:
+            ex += [dv[a, 0], dv[b, 0], None]; ey += [dv[a, 1], dv[b, 1], None]; ez += [dv[a, 2], dv[b, 2], None]
         return go.Scatter3d(x=ex, y=ey, z=ez, mode="lines",
-                            line=dict(color="#0f172a" if has_surf else "#334155", width=2 if has_surf else 5),
-                            hoverinfo="skip")
+                            line=dict(color="rgba(15,23,42,.85)", width=2), hoverinfo="skip")
 
     fig = go.Figure()
     if has_surf:
-        fig.add_trace(_surf_tr(_defP(np.pi / 2))); _is = len(fig.data) - 1
-    fig.add_trace(_edge_tr(_defP(np.pi / 2))); _ie = len(fig.data) - 1
+        fig.add_trace(_surf_tr(_defVr(np.pi / 2))); _is = len(fig.data) - 1
+        fig.add_trace(_grid_tr(_defVr(np.pi / 2))); _ig = len(fig.data) - 1
     frames = []
     for f in range(26):
-        ph = f / 26.0 * 2 * np.pi
+        ph = f / 26.0 * 2 * np.pi; dv = _defVr(ph)
         data, tr = [], []
         if has_surf:
-            data.append(_surf_tr(_defP(ph))); tr.append(_is)
-        data.append(_edge_tr(_defP(ph))); tr.append(_ie)
+            data.append(_surf_tr(dv)); tr.append(_is)
+            data.append(_grid_tr(dv)); tr.append(_ig)
         frames.append(go.Frame(data=data, traces=tr))
     fig.frames = frames
 
