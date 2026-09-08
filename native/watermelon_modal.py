@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.38"
+__version__ = "0.9.39"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1454,7 +1454,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         _table_to_layout(); lay = st["layout"]; fs = lay.fs_hz; nch = lay.n_channels()
         if nch < 2:
             QtWidgets.QMessageBox.information(win, "OMA", "Add ≥2 active sensors first (Sensors tab)."); return
-        secs = min(float(lay.duration_s), 60.0); N = int(secs * fs); rng = st["rng"]
+        secs = min(float(lay.duration_s), 300.0); N = int(secs * fs); rng = st["rng"]
         live = cb_src.currentIndex() == 1
         data = None
         # --- Popup de progreso de la captura (muestras, tiempo, MB, restante) ---
@@ -1502,13 +1502,22 @@ def build_app(layout: OMALayout, simulated: bool = True):
             data += 0.05 * rng.standard_normal((N, nch))
             _cap_progress(0.9, "Simulated data ready")
         _mb = data.shape[0] * data.shape[1] * 4 / 1e6
-        _dst.setText("Processing FDD…"); _bar.setValue(95); QtWidgets.QApplication.processEvents()
+        _dst.setText("Processing FDD… (please wait, do not close)")
+        _bar.setRange(0, 0); QtWidgets.QApplication.processEvents()   # barra indeterminada (procesando)
         st["oma_data"] = (data, float(fs))              # guardado para SSI / upload
         st["_run_saved"] = False                        # nueva corrida → aún sin guardar
         fmax = min(fs / 2.56, lay.fmax_hz)
         _run_hz = (lay.running_speed_rpm or 0.0) / 60.0 or None
-        fdd = run_oma(data, fs, nperseg=4096, f_min_hz=5.0, f_max_hz=fmax,
-                      channel_names=lay.channel_names(), running_speed_hz=_run_hz)
+        # FDD en un hilo mientras la UI sigue viva (evita 'Not responding' con 17 ch / registros largos).
+        import concurrent.futures as _cf
+        import time as _t
+        with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
+            _fut = _ex.submit(run_oma, data, fs, nperseg=4096, f_min_hz=5.0, f_max_hz=fmax,
+                              channel_names=lay.channel_names(), running_speed_hz=_run_hz)
+            while not _fut.done():
+                QtWidgets.QApplication.processEvents(); _t.sleep(0.05)
+            fdd = _fut.result()
+        _bar.setRange(0, 100); _bar.setValue(98); QtWidgets.QApplication.processEvents()
         st["oma_fdd"] = fdd
         freqs = fdd.frequencies_hz; sv = np.asarray(fdd.singular_values)
         if sv.ndim == 1: sv = sv[None, :]
@@ -1767,23 +1776,41 @@ def build_app(layout: OMALayout, simulated: bool = True):
                        "ema_modes": ema, "ema": ema_block, "ssi": ssi_block, "sensor_check": sc_rec,
                        "client": lay.client, "asset": lay.machine_type,
                        "location": lay.location, "layout": lay.to_dict()}
-            # --- Subir la DATA CRUDA (todos los canales) a la nube: la web recalcula
-            #     todo (SVD completo multi-curva, SSI, cualquier Fmax) desde el crudo ---
+            # --- Data cruda OPCIONAL (pesada). Por defecto NO se sube: la web ya arma
+            #     las formas modales y la geometría con los resultados. Si se quiere
+            #     reprocesar en la web (SVD completo/SSI), se sube en un hilo (sin colgar). ---
             rid, ts = modal_cloud.new_run_id(lay.name)
             payload["raw_ref"] = None
             _data_fs = st.get("oma_data")
+            _want_raw = False
             if _data_fs is not None:
+                _mbraw = _data_fs[0].shape[0] * _data_fs[0].shape[1] * 4 / 1e6
+                _want_raw = QtWidgets.QMessageBox.question(
+                    win, "Cloud",
+                    f"Upload the raw waveform too (~{_mbraw:.0f} MB)?\n\n"
+                    "No = fast (results + geometry, recommended for the demo).\n"
+                    "Yes = also lets the web recompute everything from raw (heavier).",
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.No) == QtWidgets.QMessageBox.Yes
+            if _want_raw:
+                import concurrent.futures as _cf2
+                import time as _t2
+                _dlg = QtWidgets.QProgressDialog("Uploading raw data to the cloud…", None, 0, 0, win)
+                _dlg.setWindowTitle("Cloud"); _dlg.setMinimumDuration(0); _dlg.setModal(True)
+                _dlg.show(); QtWidgets.QApplication.processEvents()
                 try:
-                    _dlg = QtWidgets.QProgressDialog("Uploading raw data to the cloud…", None, 0, 0, win)
-                    _dlg.setWindowTitle("Cloud"); _dlg.setMinimumDuration(0); _dlg.setModal(True)
-                    _dlg.show(); QtWidgets.QApplication.processEvents()
                     _d, _fs = _data_fs
-                    rr = modal_cloud.upload_raw(rid, _d, _fs, lay.channel_names())
-                    _dlg.close()
+                    with _cf2.ThreadPoolExecutor(max_workers=1) as _ex2:
+                        _fu = _ex2.submit(modal_cloud.upload_raw, rid, _d, _fs, lay.channel_names())
+                        while not _fu.done():
+                            QtWidgets.QApplication.processEvents(); _t2.sleep(0.05)
+                        rr = _fu.result()
                     if rr.get("ok"):
                         payload["raw_ref"] = rr
                 except Exception:  # noqa: BLE001
                     pass
+                finally:
+                    _dlg.close()
             r = modal_cloud.save_run(lay.name, payload, run_id=rid, ts=ts)
             if r.get("ok"):
                 _rawmsg = ("with raw data" if payload.get("raw_ref") else "results only")

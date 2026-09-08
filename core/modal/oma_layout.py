@@ -506,7 +506,10 @@ def motor_multistage_pump_layout(
     lay.fs_hz = 2560.0
     lay.block_size = 4096
     lay.fmax_hz = 800.0
-    lay.duration_s = 600.0
+    # OMA por norma: registro largo para buen promediado espectral. 300 s @ fs 2560
+    # con nperseg 4096 ≈ 187 promedios (sólido, ISO 20816 / Brincker). Se procesa/sube
+    # en segundo plano para no congelar la UI.
+    lay.duration_s = 300.0
     return lay
 
 
