@@ -665,7 +665,20 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
             xc = pmp[0] + pw * (ii + 0.5) / n_imp
             _add(*_disk(xc, 0.065 * L, 0.010 * L, 26, len(verts)))
     V0 = np.array(verts, float); AX = np.array(axc, float)
-    DY = np.interp(AX, xs, dys); DZ = np.interp(AX, xs, dzs)
+    # deflexión SUAVE: PCHIP (cúbica monótona) con clamp en extremos → curva de flexión
+    # real, sin quiebres (kink) cuando el modo es "picudo" (p.ej. datos ruidosos).
+    _xlo, _xhi = float(xs.min()), float(xs.max())
+
+    def _smooth(q, yv):
+        q = np.clip(np.asarray(q, float), _xlo, _xhi)
+        if len(xs) >= 2:
+            try:
+                from scipy.interpolate import PchipInterpolator
+                return PchipInterpolator(xs, yv, extrapolate=False)(q)
+            except Exception:  # noqa: BLE001
+                pass
+        return np.interp(q, xs, yv)
+    DY = _smooth(AX, dys); DZ = _smooth(AX, dzs)
     LAT = np.sqrt(DY ** 2 + DZ ** 2)
     _pos = LAT[LAT > 0]; cnorm = float(np.percentile(_pos, 85)) if _pos.size else 1.0
     MAGn = np.clip(LAT / (cnorm or 1.0), 0.0, 1.0)
@@ -682,10 +695,12 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
                          cmin=0, cmax=1, coloraxis="coloraxis", flatshading=False, opacity=1.0,
                          lighting=dict(ambient=0.82, diffuse=0.5, specular=0.12), hoverinfo="skip")
 
+    _xc = np.linspace(x0, x1, 60); _ycb = _smooth(_xc, dys); _zcb = _smooth(_xc, dzs)
+
     def _center_tr(ph):
-        xc = np.linspace(x0, x1, 60); yc = np.interp(xc, xs, dys) * scale * np.sin(ph)
-        zc = np.interp(xc, xs, dzs) * scale * np.sin(ph)
-        return go.Scatter3d(x=xc, y=yc, z=zc, mode="lines", line=dict(color="#0f172a", width=3), hoverinfo="skip")
+        s = scale * np.sin(ph)
+        return go.Scatter3d(x=_xc, y=_ycb * s, z=_zcb * s, mode="lines",
+                            line=dict(color="#0f172a", width=3), hoverinfo="skip")
 
     fig = go.Figure()
     fig.add_trace(_surf_tr(_defV(np.pi / 2))); _isf = len(fig.data) - 1

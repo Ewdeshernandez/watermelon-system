@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.47"
+__version__ = "0.9.48"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -314,6 +314,21 @@ def _rotor_faces(layout, anim, az, el):
     for (px, pr) in prof:
         rings.append([(px, pr * np.cos(2 * np.pi * j / nt), pr * np.sin(2 * np.pi * j / nt)) for j in range(nt)])
     light = np.array([0.4, -0.7, 0.6]); light /= np.linalg.norm(light)
+    # deflexión SUAVE: interpolación PCHIP (cúbica monótona) en vez de lineal, para que
+    # el modo se vea como una curva de flexión real y no como segmentos quebrados (kink).
+    _xlo, _xhi = float(xs.min()), float(xs.max())
+
+    def _smoothfn(yv):
+        yv = np.asarray(yv, float)
+        if len(xs) >= 2:
+            try:
+                from scipy.interpolate import PchipInterpolator
+                _f = PchipInterpolator(xs, yv, extrapolate=False)
+                return lambda q: float(_f(min(max(q, _xlo), _xhi)))   # clamp: sin overshoot en extremos
+            except Exception:  # noqa: BLE001
+                pass
+        return lambda q: float(np.interp(q, xs, yv))
+    _fdy = _smoothfn(dys); _fdz = _smoothfn(dzs); _fml = _smoothfn(mlat)
     faces = []
     for k in range(len(rings) - 1):
         Ra, Rb = rings[k], rings[k + 1]
@@ -322,9 +337,9 @@ def _rotor_faces(layout, anim, az, el):
             q = [Ra[j], Rb[j], Rb[j2], Ra[j2]]
             fd = []; ts = []
             for (vx, vy, vz) in q:
-                dy = float(np.interp(vx, xs, dys)); dz = float(np.interp(vx, xs, dzs))
+                dy = _fdy(vx); dz = _fdz(vx)
                 fd.append((vx, cy + vy + dy, cz + vz + dz))
-                ts.append(min(1.0, float(np.interp(vx, xs, mlat)) / cnorm))
+                ts.append(min(1.0, max(0.0, _fml(vx)) / cnorm))
             pw_ = [_project(*p, az, el) for p in fd]
             dep = float(np.mean([p[2] for p in pw_]))
             v1 = np.subtract(fd[1], fd[0]); v2 = np.subtract(fd[2], fd[0])
