@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.41"
+__version__ = "0.9.42"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1614,7 +1614,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
         if tach_bnc > 0 and len(cols) == len(chans):
             tach = cols.pop()                       # el tach es el último canal
             st["_tach_rpm"] = _rpm_from_tach(tach, lay.fs_hz)
-        return np.asarray(cols, float).T, lay.fs_hz
+        arr = np.asarray(cols, float).T             # (N, nch), en unidades del canal
+        # Proximidad (meas_type 'D') viene en VOLTIOS (9234 en modo voltaje AC) →
+        # convertir a MILS con la sensibilidad (200 mV/mil ⇒ V/0.2). Acelerómetros ya están en g.
+        for _i, _p in enumerate(lay.active_points()):
+            if _i < arr.shape[1] and getattr(_p, "meas_type", "A") == "D":
+                _svm = float(getattr(_p, "sensitivity_mv_per_g", 200.0)) or 200.0
+                arr[:, _i] = arr[:, _i] / (_svm / 1000.0)   # V → mil
+        return arr, lay.fs_hz
 
     def _build_run_payload():
         """Arma el payload de la corrida (modos/svd/ema/ssi/layout) — compartido por
