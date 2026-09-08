@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.48"
+__version__ = "0.9.49"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -2654,15 +2654,47 @@ def build_app(layout: OMALayout, simulated: bool = True):
     chk_ghost.toggled.connect(lambda on: m_anim.set_show_ghost(on))
     chk_wire.toggled.connect(lambda on: m_anim.set_show_wire(on))
 
+    def _anim_static_rotor():
+        """Rotor (proximidad) en su forma ESTÁTICA deformada — para mostrarlo en reposo
+        SIN caer a las cajas de la carcasa. Devuelve True si lo pudo renderizar."""
+        if not _layout_is_rotor(st["layout"]):
+            return False
+        sh = _cur_shape()
+        geo = st.get("_anim_geo")
+        if geo is None or len(geo[0]) == 0:
+            try:
+                geo = _anim_geometry(); st["_anim_geo"] = geo
+            except Exception:  # noqa: BLE001
+                geo = None
+        if sh is None or geo is None or len(geo[0]) == 0:
+            return False
+        pts, dirs = geo; scale = sp_ascale.value()
+        amps = scale * np.real(sh); mags = scale * np.abs(sh)
+        n = min(len(amps), len(pts))
+        if not n:
+            return False
+        m_anim.set_disp(amps[:n].tolist())
+        m_anim.set_anim({"pts": pts[:n], "dirs": dirs[:n], "amps": amps[:n],
+                         "mags": mags[:n], "mmax": float(scale)})
+        return True
+
     def _anim_stop():
-        anim_timer.stop(); m_anim.set_disp(None); m_anim.set_anim(None)
+        anim_timer.stop()
+        # Proximidad (rotor): al PARAR NO volver a las cajas — congelar el rotor deformado.
+        if _layout_is_rotor(st["layout"]):
+            _anim_static_rotor(); return
+        m_anim.set_disp(None); m_anim.set_anim(None)     # carcasa: máquina en reposo (normal)
 
     btn_play.clicked.connect(_anim_play); btn_stop.clicked.connect(_anim_stop)
     btn_gif.clicked.connect(_save_clip)
     btn_v_iso.clicked.connect(lambda: _set_view(50, 28)); btn_v_top.clicked.connect(lambda: _set_view(0, 88))
     btn_v_side.clicked.connect(lambda: _set_view(90, 10)); btn_v_front.clicked.connect(lambda: _set_view(0, 10))
-    cb_amode.currentIndexChanged.connect(lambda *_: _update_modal_panel())
-    cb_asrc.currentIndexChanged.connect(lambda *_: (_anim_reload_modes(), _update_modal_panel()))
+    def _anim_refresh_panel():
+        _update_modal_panel()
+        if not anim_timer.isActive():        # proximidad en reposo → rotor estático, no cajas
+            _anim_static_rotor()
+    cb_amode.currentIndexChanged.connect(lambda *_: _anim_refresh_panel())
+    cb_asrc.currentIndexChanged.connect(lambda *_: (_anim_reload_modes(), _anim_refresh_panel()))
 
     def _anim_rotate(dx, dy):
         st["az"] = (st["az"] + dx * 0.4) % 360.0
