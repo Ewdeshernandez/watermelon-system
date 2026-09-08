@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.42"
+__version__ = "0.9.43"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -190,6 +190,138 @@ def _field_disp(v, anim):
     return disp, colmag
 
 
+def _jet_qcolor(t):
+    """Jet colormap (dark blue -> cyan -> yellow -> red) — para la forma modal del ROTOR
+    (proximidad), igual a la web / ARTeMIS."""
+    t = max(0.0, min(1.0, t))
+    stops = [(0.0, (0, 0, 143)), (0.12, (0, 0, 255)), (0.35, (0, 190, 255)),
+             (0.55, (110, 255, 130)), (0.75, (255, 220, 0)), (0.9, (255, 90, 0)), (1.0, (170, 0, 0))]
+    for i in range(len(stops) - 1):
+        t0, c0 = stops[i]; t1, c1 = stops[i + 1]
+        if t <= t1:
+            f = (t - t0) / (t1 - t0 or 1)
+            r = int(c0[0] + f * (c1[0] - c0[0])); g = int(c0[1] + f * (c1[1] - c0[1])); b = int(c0[2] + f * (c1[2] - c0[2]))
+            return QtGui.QColor(r, g, b)
+    return QtGui.QColor(170, 0, 0)
+
+
+def _layout_is_rotor(layout):
+    """¿La corrida es de PROXIMIDAD (rotor)? → ≥ mitad de sensores de desplazamiento."""
+    pts = [p for p in getattr(layout, "points", []) if getattr(p, "active", True)]
+    if not pts:
+        return False
+    return sum(1 for p in pts if getattr(p, "meas_type", "A") == "D") >= max(2, len(pts) // 2)
+
+
+def _cyl_quads(x0, x1, r, na, nt):
+    """Cilindro a lo largo de X como lista de quads (4 puntos world cada uno)."""
+    ring = lambda xk: [(xk, r * np.cos(2 * np.pi * j / nt), r * np.sin(2 * np.pi * j / nt)) for j in range(nt)]
+    quads = []
+    xs = [x0 + (x1 - x0) * (k / (na - 1) if na > 1 else 0) for k in range(na)]
+    R = [ring(xk) for xk in xs]
+    for k in range(na - 1):
+        for j in range(nt):
+            j2 = (j + 1) % nt
+            quads.append([R[k][j], R[k + 1][j], R[k + 1][j2], R[k][j2]])
+    return quads
+
+
+def _disk_quads(xc, r, w, nt):
+    """Disco sólido (impulsor) perpendicular a X: rim + dos caras (fan como quads)."""
+    fr = [(xc - w, r * np.cos(2 * np.pi * j / nt), r * np.sin(2 * np.pi * j / nt)) for j in range(nt)]
+    bk = [(xc + w, r * np.cos(2 * np.pi * j / nt), r * np.sin(2 * np.pi * j / nt)) for j in range(nt)]
+    cf = (xc - w, 0.0, 0.0); cb = (xc + w, 0.0, 0.0)
+    quads = []
+    for j in range(nt):
+        j2 = (j + 1) % nt
+        quads.append([fr[j], bk[j], bk[j2], fr[j2]])       # rim
+        quads.append([cf, fr[j], fr[j2], cf])              # cara frontal (fan → quad degenerado)
+        quads.append([cb, bk[j2], bk[j], cb])              # cara trasera
+    return quads
+
+
+def _rotor_faces(layout, anim, az, el):
+    """Caras del ROTOR deformado (proximidad): eje + masa del motor + impulsores de la
+    bomba, flexionados según las sondas y coloreados por amplitud (Jet). Devuelve
+    [dep, pw(proyectado), qcolor, shade, None] listo para el painter."""
+    pts = np.asarray(anim["pts"], float); dirs = np.asarray(anim["dirs"], float)
+    amps = np.asarray(anim["amps"], float)
+    mags = np.asarray(anim.get("mags") if anim.get("mags") is not None else np.abs(amps), float)
+    n = min(len(pts), len(dirs), len(amps), len(mags))
+    if n < 2:
+        return []
+    pts, dirs, amps, mags = pts[:n], dirs[:n], amps[:n], mags[:n]
+    # estaciones por x: posición (instantánea) y color (envolvente)
+    stt = {}
+    for i in range(n):
+        x = float(pts[i][0]); key = round(x, 4)
+        b = stt.setdefault(key, {"x": x, "dy": 0.0, "dz": 0.0, "my": 0.0, "mz": 0.0})
+        dv = amps[i] * dirs[i]; mv = mags[i] * dirs[i]
+        b["dy"] += float(dv[1]); b["dz"] += float(dv[2])
+        b["my"] += float(mv[1]); b["mz"] += float(mv[2])
+    items = sorted(stt.values(), key=lambda b: b["x"])
+    xs = np.array([b["x"] for b in items]); dys = np.array([b["dy"] for b in items]); dzs = np.array([b["dz"] for b in items])
+    mlat = np.array([np.hypot(b["my"], b["mz"]) for b in items])
+    _pos = mlat[mlat > 0]; cnorm = float(np.percentile(_pos, 85)) if _pos.size else 1.0
+    cnorm = cnorm or 1.0
+    # centro del rotor (plano de las sondas) y rangos motor/bomba
+    cy = 0.20; cz = float(np.mean(pts[:, 2])) if len(pts) else 0.0
+    comps = getattr(layout, "machine_components", []) or []
+    def _crange(kws):
+        for c in comps:
+            if any(w in (c.kind + " " + (c.label or "")).lower() for w in kws):
+                return c.x0, c.x1
+        return None
+    mot = _crange(["motor"]); pmp = _crange(["pump", "bomba"])
+    xmin = float(xs.min()); xmax = float(xs.max())
+    if comps:
+        _rc = [c for c in comps if not any(w in (c.kind + " " + (c.label or "")).lower()
+               for w in ("skid", "leg", "pata", "soporte", "pipe", "tuber"))]
+        if _rc:
+            xmin = min(xmin, min(c.x0 for c in _rc)); xmax = max(xmax, max(c.x1 for c in _rc))
+    span = (xmax - xmin) or 1.0; x0, x1 = xmin - 0.05 * span, xmax + 0.05 * span; L = x1 - x0
+    rs = 0.030 * L
+    # PERFIL de radio (x, r): UNA sola superficie de revolución continua (sin sólidos
+    # concéntricos → el painter la ordena bien). Sube en el motor y en cada impulsor.
+    prof = [(x0, rs)]
+    def _bulge(a, b, r):                       # tramo grueso con hombros anulares
+        prof.append((a, rs)); prof.append((a, r)); prof.append((b, r)); prof.append((b, rs))
+    marks = []
+    if mot:
+        marks.append((mot[0], mot[1], 0.058 * L))
+    if pmp:
+        n_imp = 10; pw = (pmp[1] - pmp[0]); w = 0.014 * L
+        for ii in range(n_imp):
+            xc = pmp[0] + pw * (ii + 0.5) / n_imp
+            marks.append((xc - w, xc + w, 0.075 * L))
+    for a, b, r in sorted(marks):
+        _bulge(a, b, r)
+    prof.append((x1, rs))
+    nt = 26
+    rings = []
+    for (px, pr) in prof:
+        rings.append([(px, pr * np.cos(2 * np.pi * j / nt), pr * np.sin(2 * np.pi * j / nt)) for j in range(nt)])
+    light = np.array([0.4, -0.7, 0.6]); light /= np.linalg.norm(light)
+    faces = []
+    for k in range(len(rings) - 1):
+        Ra, Rb = rings[k], rings[k + 1]
+        for j in range(nt):
+            j2 = (j + 1) % nt
+            q = [Ra[j], Rb[j], Rb[j2], Ra[j2]]
+            fd = []; ts = []
+            for (vx, vy, vz) in q:
+                dy = float(np.interp(vx, xs, dys)); dz = float(np.interp(vx, xs, dzs))
+                fd.append((vx, cy + vy + dy, cz + vz + dz))
+                ts.append(min(1.0, float(np.interp(vx, xs, mlat)) / cnorm))
+            pw_ = [_project(*p, az, el) for p in fd]
+            dep = float(np.mean([p[2] for p in pw_]))
+            v1 = np.subtract(fd[1], fd[0]); v2 = np.subtract(fd[2], fd[0])
+            nrm = np.cross(v1, v2); nn = np.linalg.norm(nrm)
+            shade = 0.62 + 0.38 * abs(float(np.dot(nrm / nn, light))) if nn > 0 else 0.78
+            faces.append([dep, pw_, _jet_qcolor(float(np.mean(ts))), shade, None])
+    return faces
+
+
 def _heat_qcolor(t):
     """Informative colormap: GREEN (low vibration) -> amber -> RED (high vibration)."""
     t = max(0.0, min(1.0, t))
@@ -255,26 +387,31 @@ class Machine3DItem(pg.GraphicsObject):
         painter.setRenderHint(QtGui.QPainter.Antialiasing, True)
         light = np.array([0.4, -0.7, 0.6]); light /= np.linalg.norm(light)
         anim = self.anim
+        # ROTOR (proximidad): eje + impulsores flexionados con Jet, en vez de cuboides
+        is_rotor = anim is not None and _layout_is_rotor(self.layout)
         faces = []                                          # (dep, pw, base|None, shade, colmag)
-        for c in self.layout.machine_components:
-            base = QtGui.QColor(c.color) if getattr(c, "color", "") else QtGui.QColor(_comp_color(c.kind))
-            for f in _cuboid_faces(c):
-                # en animación cada cara se subdivide en una malla fina (degradé suave)
-                quads = _subdivide_quad(f, 7) if anim is not None else [f]
-                for q in quads:
-                    colmag = None
-                    if anim is not None:
-                        dv = [_field_disp(np.array(p, float), anim) for p in q]
-                        fd = [tuple(np.array(p, float) + dv[k][0]) for k, p in enumerate(q)]
-                        pw = [_project(*p, self.az, self.el) for p in fd]
-                        colmag = float(np.mean([dv[k][1] for k in range(len(q))]))
-                    else:
-                        pw = [_project(*p, self.az, self.el) for p in q]
-                    dep = float(np.mean([p[2] for p in pw]))
-                    v1 = np.subtract(q[1], q[0]); v2 = np.subtract(q[2], q[0])
-                    nrm = np.cross(v1, v2); nn = np.linalg.norm(nrm)
-                    shade = 0.6 + 0.4 * abs(float(np.dot(nrm / nn, light))) if nn > 0 else 0.75
-                    faces.append([dep, pw, base, shade, colmag])
+        if is_rotor:
+            faces = _rotor_faces(self.layout, anim, self.az, self.el)
+        else:
+            for c in self.layout.machine_components:
+                base = QtGui.QColor(c.color) if getattr(c, "color", "") else QtGui.QColor(_comp_color(c.kind))
+                for f in _cuboid_faces(c):
+                    # en animación cada cara se subdivide en una malla fina (degradé suave)
+                    quads = _subdivide_quad(f, 7) if anim is not None else [f]
+                    for q in quads:
+                        colmag = None
+                        if anim is not None:
+                            dv = [_field_disp(np.array(p, float), anim) for p in q]
+                            fd = [tuple(np.array(p, float) + dv[k][0]) for k, p in enumerate(q)]
+                            pw = [_project(*p, self.az, self.el) for p in fd]
+                            colmag = float(np.mean([dv[k][1] for k in range(len(q))]))
+                        else:
+                            pw = [_project(*p, self.az, self.el) for p in q]
+                        dep = float(np.mean([p[2] for p in pw]))
+                        v1 = np.subtract(q[1], q[0]); v2 = np.subtract(q[2], q[0])
+                        nrm = np.cross(v1, v2); nn = np.linalg.norm(nrm)
+                        shade = 0.6 + 0.4 * abs(float(np.dot(nrm / nn, light))) if nn > 0 else 0.75
+                        faces.append([dep, pw, base, shade, colmag])
         # normaliza el color sobre TODA la máquina → verde (menos) → rojo (más)
         if anim is not None:
             mags = [fc[4] for fc in faces if fc[4] is not None]
@@ -295,7 +432,7 @@ class Machine3DItem(pg.GraphicsObject):
             painter.setPen(pen); painter.drawPolygon(poly)
 
         # (a) FANTASMA: contorno sin deformar (referencia) durante la animación
-        if anim is not None and self.show_ghost:
+        if anim is not None and self.show_ghost and not is_rotor:
             gpen = QtGui.QPen(QtGui.QColor(100, 116, 139, 130)); gpen.setCosmetic(True)
             gpen.setWidthF(0.9); gpen.setStyle(QtCore.Qt.DashLine)
             painter.setPen(gpen); painter.setBrush(QtCore.Qt.NoBrush)
@@ -317,7 +454,7 @@ class Machine3DItem(pg.GraphicsObject):
             nodes.append((mp.x_norm, mp.y_norm, sx, sy, i, mp, px, py, pz, sg, d))
 
         # (b) MALLA de deflexión: una línea por componente (evita cruces largos)
-        if anim is not None and self.show_wire and len(nodes) >= 2:
+        if anim is not None and self.show_wire and len(nodes) >= 2 and not is_rotor:
             wpen = QtGui.QPen(QtGui.QColor("#1d4ed8")); wpen.setCosmetic(True); wpen.setWidthF(1.6)
             groups = {}
             for t in nodes:
