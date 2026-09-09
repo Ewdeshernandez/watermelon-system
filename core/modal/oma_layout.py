@@ -248,7 +248,7 @@ class OMALayout:
         for p in pts:
             if str(getattr(p, "meas_type", "A")).upper() == "D":
                 groups[getattr(p, "number", getattr(p, "idx", 0))].append(p)
-        _AXES = ["X", "Y", "Z"]
+        _AXES = ["Y", "X", "Z"]                        # convención API 670 / Bently: Y primero
         changed = False
         for _num, gp in groups.items():
             gp.sort(key=lambda q: (getattr(q, "bnc", 0), q.idx))
@@ -557,7 +557,9 @@ def motor_pump_proximity_layout(
         MachineComponent("Multistage pump", "Bomba", 0.40, 0.74, 0.00, 0.17, depth=0.10),
         MachineComponent("Skid 1", "Skid", 0.00, 0.82, -0.10, 0.00, depth=0.22),
     ]
-    # (referencia, número, x_norm) — cada cojinete lleva X (+45°) e Y (−45°)
+    # (referencia, número, x_norm) — cada cojinete lleva Y (45° izq) y X (45° der).
+    # Convención API 670 / Bently: la Y es la referencia y se conecta PRIMERO (BNC más
+    # bajo), luego la X. Por eso el orden del par es (Y, X): BNC impar=Y, par=X.
     plan = [("LL (lado libre)",  1, 0.06, 0.16),
             ("LA (lado acople)", 2, 0.34, 0.16),
             ("LA (lado acople)", 3, 0.46, 0.14),
@@ -566,7 +568,7 @@ def motor_pump_proximity_layout(
     points: List[MeasPoint] = []
     n = 0
     for ref, num, x, y in plan:
-        for ax, xo in (("X", 0.02), ("Y", -0.02)):
+        for ax, xo in (("Y", 0.02), ("X", -0.02)):
             slot = n // 4 + 1; ch = n % 4
             is_ref = (num in (1, 4) and ax == "Y")
             points.append(MeasPoint(
