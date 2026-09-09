@@ -96,6 +96,7 @@ def build_oma_siga_pdf(
     recommendations: Optional[Sequence[str]] = None,
     instrumentation: str = "",
     norms: Optional[Sequence[str]] = None,
+    technique: str = "OMA",
     max_shape_modes: int = 3,
     mode_shape_pngs: Optional[Sequence[bytes]] = None,
     config_png: Optional[bytes] = None,
@@ -125,8 +126,8 @@ def build_oma_siga_pdf(
             if caption:
                 body.append(p(caption, styles, "WMFigureCaption"))
 
-    # Numeración por contador (el orden lo define el usuario: Hallazgos y
-    # Recomendaciones van PRIMERO, justo después de la Tabla de Contenido).
+    # Numeración por contador. Orden estándar de reportes SIGA (core.reports_ext):
+    # 1.Introducción y alcance → 2.Hallazgos → 3.Recomendaciones → 4.Desarrollo …
     _sn = [0]
 
     def _S(title):
@@ -134,35 +135,60 @@ def build_oma_siga_pdf(
         body.append(section(f"{_sn[0]}. {title}", styles))
         return _sn[0]
 
-    # 1 · Hallazgos (primero, tras el TOC)
-    if findings:
-        _S("Hallazgos")
-        body.extend(numbered_list(list(findings), styles))
+    _is_ema = str(technique).upper().startswith("EMA")
 
-    # 2 · Recomendaciones (segundo)
-    if recommendations:
-        _S("Recomendaciones")
-        body.extend(numbered_list(list(recommendations), styles))
-
-    # 3 · Introducción y alcance
+    # 1 · Introducción y alcance
     _S("Introducción y alcance")
     body.append(p(intro or (
-        "Se realizó un Análisis Modal Operacional (OMA) sobre el conjunto evaluado, con "
-        "el objetivo de identificar las principales frecuencias naturales, factores de "
-        "amortiguamiento y formas modales a partir de las respuestas vibratorias adquiridas "
-        "durante la operación del equipo."), styles))
+        ("Se realizó un Análisis Modal Experimental (EMA) sobre el conjunto evaluado, con el "
+         "objetivo de identificar las principales frecuencias naturales, factores de "
+         "amortiguamiento y formas modales de la estructura mediante excitación controlada.")
+        if _is_ema else
+        ("Se realizó un Análisis Modal Operacional (OMA) sobre el conjunto evaluado, con "
+         "el objetivo de identificar las principales frecuencias naturales, factores de "
+         "amortiguamiento y formas modales a partir de las respuestas vibratorias adquiridas "
+         "durante la operación del equipo.")), styles))
 
-    # 4 · Antecedentes
+    # (opcional) Antecedentes
     if background:
         _S("Antecedentes")
         body.append(p(background, styles))
 
-    # 5 · Desarrollo / instrumentación
+    # 2 · Hallazgos
+    if findings:
+        _S("Hallazgos")
+        body.extend(numbered_list(list(findings), styles))
+
+    # 3 · Recomendaciones
+    if recommendations:
+        _S("Recomendaciones")
+        body.extend(numbered_list(list(recommendations), styles))
+
+    # 4 · Desarrollo del servicio — abre con la técnica y las normas (automático EMA/OMA)
     _dev_no = _S("Desarrollo del servicio")
+    _tech_intro = (
+        ("El servicio se ejecutó mediante <b>Análisis Modal Experimental (EMA)</b>, técnica "
+         "input–output que identifica los parámetros modales a partir de las Funciones de "
+         "Respuesta en Frecuencia (FRF), obtenidas con excitación controlada por martillo de "
+         "impacto instrumentado y la respuesta medida con acelerómetros piezoeléctricos. Se "
+         "aplica promediado de impactos y control de coherencia para asegurar la calidad de las "
+         "FRF. El desarrollo se fundamenta en la norma <b>ISO 7626-5</b> (medición de movilidad "
+         "mecánica por excitación de impacto) y las guías <b>ISO 20816</b> y <b>API 684</b>.")
+        if _is_ema else
+        ("El servicio se ejecutó mediante <b>Análisis Modal Operacional (OMA)</b>, técnica "
+         "<i>output-only</i> que identifica los parámetros modales de la estructura "
+         "(frecuencias naturales, amortiguamiento y formas modales) a partir únicamente de la "
+         "respuesta vibratoria durante la operación normal del equipo, sin excitación "
+         "artificial. El procesamiento emplea descomposición en el dominio de la frecuencia "
+         "(FDD) de las densidades espectrales, con confirmación por subespacio estocástico "
+         "(SSI-COV). El desarrollo se fundamenta en las normas <b>ISO 20816</b> (medición y "
+         "evaluación de vibración en máquinas), <b>ISO 7626</b> (parámetros modales / movilidad "
+         "mecánica) y las guías <b>API 684</b> (rotordinámica y velocidades críticas)."))
+    body.append(p(_tech_intro, styles))
     body.append(p(instrumentation or (
-        "La instrumentación se instaló siguiendo las buenas prácticas de medición estructural "
-        "(API 684, ISO 20816), empleando acelerómetros piezoeléctricos calibrados con montaje "
-        "rígido. Se verificó la fijación, el cableado y la sincronización de canales."), styles))
+        "La instrumentación se instaló siguiendo las buenas prácticas de medición estructural, "
+        "empleando acelerómetros piezoeléctricos calibrados con montaje rígido. Se verificó la "
+        "fijación, el cableado y la sincronización de canales antes de la captura."), styles))
     # Configuración de medición (vista 3D de la máquina y sensores)
     if config_png:
         body.append(subsection(f"{_dev_no}.1 Configuración de medición", styles))

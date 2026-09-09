@@ -93,11 +93,14 @@ def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
     }
     if meta_extra:
         meta.update({k: v for k, v in meta_extra.items() if v not in (None, "")})
+    # Técnica automática: EMA si la corrida es de impacto (sin modos OMA), OMA si no.
+    _kind = str(run.get("kind", "") or "").lower()
+    _technique = "EMA" if (_kind.startswith("ema") or (not fdd.modes and (run.get("ema_modes")))) else "OMA"
     return build_oma_siga_pdf(
         meta=meta,
         conditions=[{"label": run.get("name", "Condición operacional"), "fdd_result": fdd,
                      "notes": "Procesamiento FDD de la corrida capturada en campo."}],
-        campbell=campbell, ema_oma=ema_oma,
+        campbell=campbell, ema_oma=ema_oma, technique=_technique,
         findings=findings if findings is not None else run.get("findings"),
         recommendations=recommendations if recommendations is not None else run.get("recommendations"),
         mode_shape_pngs=shape_pngs, config_png=config_png, sensor_png=sensor_png,
