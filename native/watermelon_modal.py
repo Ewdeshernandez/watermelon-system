@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.53"
+__version__ = "0.9.54"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1607,11 +1607,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_upsaved = QtWidgets.QPushButton("☁ Upload a SAVED run")
     btn_upsaved.setToolTip("Pick a run saved earlier on this PC (offline) and upload it now "
                            "that you have internet — results + raw data.")
+    btn_openrun = QtWidgets.QPushButton("📂 Open & analyze a SAVED run")
+    btn_openrun.setToolTip("Reabre una corrida guardada en este PC y la muestra aquí "
+                           "(modos, densidad espectral, formas modales, Campbell) para revisarla.")
     btn_delmode = QtWidgets.QPushButton("✖ Remove selected mode")
     btn_delmode.setToolTip("Remove the mode selected in the table (or click its marker on the plot).")
     crow.addWidget(btn_testni); crow.addWidget(btn_ocap); crow.addWidget(btn_saverun)
-    crow.addWidget(btn_upload); crow.addWidget(btn_upsaved); crow.addWidget(btn_delmode)
-    crow.addStretch(1); cl2.addLayout(crow)
+    crow.addWidget(btn_upload); crow.addWidget(btn_upsaved); crow.addWidget(btn_openrun)
+    crow.addWidget(btn_delmode); crow.addStretch(1); cl2.addLayout(crow)
 
     def _test_ni():
         try:
@@ -2149,6 +2152,65 @@ def build_app(layout: OMALayout, simulated: bool = True):
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(win, "Upload saved run", f"Error: {type(e).__name__}: {e}")
 
+    def _open_saved_run():
+        """Reabre una corrida GUARDADA en disco y la muestra aquí (modos, densidad
+        espectral, formas modales, Campbell) para revisarla/analizarla en campo."""
+        import json as _json
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            win, "Open a saved run (contains run.json)", _runs_dir())
+        if not folder:
+            return
+        rjson = os.path.join(folder, "run.json")
+        if not os.path.exists(rjson):
+            QtWidgets.QMessageBox.warning(win, "Open run", "That folder has no run.json."); return
+        try:
+            with open(rjson, encoding="utf-8") as f:
+                run = _json.load(f)
+            from core.modal.oma_layout import OMALayout
+            from core.modal.run_report import _fdd_from_run
+            # 1) restaurar la configuración (layout) y refrescar la vista de config
+            laydict = run.get("layout")
+            if laydict:
+                st["layout"] = OMALayout.from_dict(laydict)
+                lay = st["layout"]
+                try:
+                    e_name.setText(lay.name or ""); sp_rpm.setValue(float(lay.running_speed_rpm or 0))
+                    sp_fs.setValue(int(lay.fs_hz)); sp_fmax.setValue(float(lay.fmax_hz))
+                    sp_dur.setValue(float(lay.duration_s)); e_client.setText(lay.client or "")
+                    e_loc.setText(lay.location or "")
+                except Exception:  # noqa: BLE001
+                    pass
+                _fill_points(); _sync_comp_combo(); _refresh_summary(); _draw_train(fit=True)
+            lay = st["layout"]
+            # 2) data cruda (para re-análisis / SSI / subir) si está
+            _npz = os.path.join(folder, "data.npz")
+            if os.path.exists(_npz):
+                _z = np.load(_npz, allow_pickle=True)
+                st["oma_data"] = (np.asarray(_z["data"], float), float(_z["fs"]))
+            # 3) resultados FDD desde el payload → mostrar en todas las pestañas
+            fdd = _fdd_from_run(run); st["oma_fdd"] = fdd
+            st["_run_saved"] = True; st["_run_folder"] = folder
+            freqs = np.asarray(fdd.frequencies_hz); sv = np.asarray(fdd.singular_values)
+            if sv.ndim == 1:
+                sv = sv[None, :]
+            fmax = min(float(lay.fs_hz) / 2.56, float(lay.fmax_hz)); band = freqs <= fmax
+            p_svd.clear(); _svcol = ["#2563eb", "#dc2626", "#16a34a", "#f59e0b"]
+            p_svd.setTitle(f"Singular values — {sv.shape[0]} channels (SV1 dominant; SV2–4 reveal close modes)", color=NAVY)
+            for i in range(sv.shape[0]):
+                col = _svcol[i] if i < 4 else "#94a3b8"; wdt = 1.8 if i == 0 else (1.1 if i < 4 else 0.6)
+                p_svd.plot(freqs[band], 10 * np.log10(np.maximum(sv[i][band], 1e-30)),
+                           pen=pg.mkPen(col, width=wdt), name=(f"SV{i+1}" if i < 4 else None))
+            if np.any(band):
+                p_svd.setXRange(0, float(freqs[band].max()), padding=0); p_svd.getViewBox().setLimits(xMin=0)
+            _draw_svd_markers(); _refresh_validation(); _refresh_campbell(); _refresh_comparative()
+            _anim_reload_modes()
+            _raw = "con data cruda" if os.path.exists(_npz) else "solo resultados"
+            QtWidgets.QMessageBox.information(win, "Open run",
+                f"✅ Corrida cargada ({len(fdd.modes)} modos, {_raw}).\n"
+                "Revisa las pestañas: OMA capture (espectro), Mode shapes, Campbell.")
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(win, "Open run", f"Error: {type(e).__name__}: {e}")
+
     def _oma_capture_click():
         # Feedback INMEDIATO: bloquea el botón y avisa que arrancó (evita doble captura).
         if not btn_ocap.isEnabled():
@@ -2162,6 +2224,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             btn_ocap.setEnabled(True); btn_ocap.setText(_txt0)
     btn_ocap.clicked.connect(_oma_capture_click); btn_upload.clicked.connect(_upload_run)
     btn_saverun.clicked.connect(_save_run_local); btn_upsaved.clicked.connect(_upload_saved_run)
+    btn_openrun.clicked.connect(_open_saved_run)
 
     def _draw_svd_markers():
         """(Re)dibuja los marcadores de modos sobre la densidad espectral."""
