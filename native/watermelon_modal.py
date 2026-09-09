@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.52"
+__version__ = "0.9.53"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -402,6 +402,23 @@ class Machine3DItem(pg.GraphicsObject):
                     for (wx, wy, wz) in f:
                         sx, sy, _ = _project(wx, wy, wz, self.az, self.el)
                         xs.append(sx); ys.append(sy)
+            # ROTOR (proximidad): el rotor + su deflexión se dibuja MÁS GRANDE que las
+            # cajas → si no se incluye aquí, el encuadre queda chico y el rotor "se sale"
+            # dejando un cuadro blanco. Se agrega su caja envolvente (con margen de flexión).
+            if _layout_is_rotor(self.layout):
+                aps = [p for p in getattr(self.layout, "points", []) if getattr(p, "active", True)]
+                if aps:
+                    xn = [float(p.x_norm) for p in aps]
+                    zn = [float(getattr(p, "y_norm", 0.0)) for p in aps]
+                    xmin, xmax = min(xn), max(xn); span = (xmax - xmin) or 1.0
+                    rx0, rx1 = xmin - 0.06 * span, xmax + 0.06 * span; L = rx1 - rx0
+                    cy = 0.20; cz = (sum(zn) / len(zn)) if zn else 0.0
+                    rad = 0.09 * L + 0.20 * L          # radio del cuerpo + alcance de deflexión
+                    for X in (rx0, rx1):
+                        for Y in (cy - rad, cy + rad):
+                            for Z in (cz - rad, cz + rad):
+                                sx, sy, _ = _project(X, Y, Z, self.az, self.el)
+                                xs.append(sx); ys.append(sy)
         x0, x1 = min(xs), max(xs); y0, y1 = min(ys), max(ys)
         self._rect = QtCore.QRectF(x0, y0, max(0.1, x1 - x0), max(0.1, y1 - y0))
 
@@ -2644,7 +2661,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     def _set_view(az, el):
         st["az"] = float(az); st["el"] = float(np.clip(el, 8.0, 88.0))
         m_anim.set_view(st["layout"], np.radians(st["az"]), np.radians(st["el"]), -1)
-        p_anim.getViewBox().autoRange(padding=0.2)
+        p_anim.getViewBox().autoRange(padding=0.06)
 
     def _save_clip():
         sh = _cur_shape()
@@ -2714,7 +2731,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         st["_anim_geo"] = _anim_geometry()
         m_anim.set_show_sensors(chk_showsen.isChecked())
         m_anim.set_view(st["layout"], np.radians(st["az"]), np.radians(st["el"]), -1)
-        p_anim.getViewBox().autoRange(padding=0.2)
+        p_anim.getViewBox().autoRange(padding=0.06)
         anim_timer.start(45)                         # arranca SIEMPRE (aunque el panel falle)
         try:
             _update_modal_panel()
@@ -2746,6 +2763,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
         m_anim.set_disp(amps[:n].tolist())
         m_anim.set_anim({"pts": pts[:n], "dirs": dirs[:n], "amps": amps[:n],
                          "mags": mags[:n], "mmax": float(scale)})
+        m_anim.set_view(st["layout"], np.radians(st["az"]), np.radians(st["el"]), -1)
+        p_anim.getViewBox().autoRange(padding=0.06)   # encuadra el rotor (llena la pantalla)
         return True
 
     def _anim_stop():
@@ -2913,7 +2932,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             amps = scale * np.real(sh[:n]); mags = scale * np.abs(sh[:n])
             m_anim.set_disp(amps.tolist())
             m_anim.set_anim({"pts": pts[:n], "dirs": dirs[:n], "amps": amps, "mags": mags, "mmax": float(scale)})
-            p_anim.getViewBox().autoRange(padding=0.2)
+            p_anim.getViewBox().autoRange(padding=0.06)
             QtWidgets.QApplication.processEvents()
             png = _grab_png(p_anim)
             if png:
