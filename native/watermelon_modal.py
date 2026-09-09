@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.49"
+__version__ = "0.9.50"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -933,6 +933,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             return None
 
     def _sc_start():
+        st["layout"].fix_proximity_axes()          # 1XD/1XD → 1XD/1YD (repara ejes duplicados)
         pts = st["layout"].active_points()
         if not pts:
             lbl_sc.setText("No sensors configured — load a preset or build the machine first."); return
@@ -1658,7 +1659,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
 
     def _oma_capture():
         from scipy.signal import lfilter
-        _table_to_layout(); lay = st["layout"]; fs = lay.fs_hz; nch = lay.n_channels()
+        _table_to_layout(); lay = st["layout"]; lay.fix_proximity_axes()
+        fs = lay.fs_hz; nch = lay.n_channels()
         if nch < 2:
             QtWidgets.QMessageBox.information(win, "OMA", "Add ≥2 active sensors first (Sensors tab)."); return
         secs = min(float(lay.duration_s), 300.0); N = int(secs * fs); rng = st["rng"]

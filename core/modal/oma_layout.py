@@ -234,6 +234,31 @@ class OMALayout:
     def references(self) -> List[MeasPoint]:
         return [p for p in self.active_points() if p.reference_sensor]
 
+    def fix_proximity_axes(self) -> bool:
+        """Repara ejes DUPLICADOS en proximidad. Si dentro de un mismo cojinete
+        (mismo `number`) hay probes con el mismo eje (p.ej. dos 1XD), reasigna los
+        ejes a X, Y (, Z) en orden de BNC → 1XD, 1YD. Sólo actúa si hay códigos
+        duplicados; una config correcta no se toca. Devuelve True si cambió algo."""
+        pts = self.active_points()
+        codes = [p.code for p in pts]
+        if len(set(codes)) == len(codes):
+            return False                               # sin duplicados → nada que hacer
+        from collections import defaultdict
+        groups: dict = defaultdict(list)
+        for p in pts:
+            if str(getattr(p, "meas_type", "A")).upper() == "D":
+                groups[getattr(p, "number", getattr(p, "idx", 0))].append(p)
+        _AXES = ["X", "Y", "Z"]
+        changed = False
+        for _num, gp in groups.items():
+            gp.sort(key=lambda q: (getattr(q, "bnc", 0), q.idx))
+            for i, p in enumerate(gp):
+                want = _AXES[i % 3]
+                if p.axis != want:
+                    p.dof = want                       # sin signo (como el preset); code = number+axis+D
+                    changed = True
+        return changed
+
     def validate(self) -> List[str]:
         """Devuelve lista de problemas (vacía = OK)."""
         errs: List[str] = []

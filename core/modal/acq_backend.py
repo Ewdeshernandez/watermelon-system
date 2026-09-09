@@ -818,6 +818,14 @@ def _capture_oma(config: AcquisitionConfig, progress: Callable) -> Path:
     group = GroupObject("Acquisition")
 
     _modules = discover_acq_modules(chassis)          # nombres REALES de módulos (robusto)
+    # Nombres de canal ÚNICOS para el TDMS (nptdms falla con "Duplicate object paths"
+    # si dos canales comparten nombre, p.ej. una config de proximidad con dos probes
+    # X en el mismo cojinete). Se conserva el nombre y sólo se sufija el duplicado.
+    _seen: Dict[str, int] = {}
+    _uniq_names: List[str] = []
+    for _c in config.channels:
+        _b = (_c.name or "CH"); _k = _seen.get(_b, 0) + 1; _seen[_b] = _k
+        _uniq_names.append(_b if _k == 1 else f"{_b}#{_k}")
     with nidaqmx.Task() as task, TdmsWriter(str(output_path)) as writer:
         for ch in config.channels:
             phys = resolve_phys_channel(ch, _modules)
@@ -861,7 +869,7 @@ def _capture_oma(config: AcquisitionConfig, progress: Callable) -> Path:
 
             # Construir ChannelObjects para este segmento
             ch_objs = []
-            for ch_cfg, samples in zip(config.channels, data):
+            for _ci, (ch_cfg, samples) in enumerate(zip(config.channels, data)):
                 arr = np.asarray(samples, dtype=np.float32)  # float32 = 4 bytes
                 props = (
                     {  # primer segmento lleva metadata del canal
@@ -877,7 +885,7 @@ def _capture_oma(config: AcquisitionConfig, progress: Callable) -> Path:
                     } if first_segment else {}
                 )
                 ch_objs.append(
-                    ChannelObject("Acquisition", ch_cfg.name, arr,
+                    ChannelObject("Acquisition", _uniq_names[_ci], arr,
                                    properties=props)
                 )
 
