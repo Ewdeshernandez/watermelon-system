@@ -96,11 +96,20 @@ def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
     # Técnica automática: EMA si la corrida es de impacto (sin modos OMA), OMA si no.
     _kind = str(run.get("kind", "") or "").lower()
     _technique = "EMA" if (_kind.startswith("ema") or (not fdd.modes and (run.get("ema_modes")))) else "OMA"
+    # Tipo de sensor automático desde el layout: proximidad (meas_type "D") vs acelerómetro.
+    _apts = [q for q in ((run.get("layout") or {}).get("points") or []) if q.get("active", True)]
+    _nprox = sum(1 for q in _apts if str(q.get("meas_type", "A")).upper() == "D")
+    if _apts and _nprox >= max(2, len(_apts) // 2):
+        _sensor_kind = "proximity"
+    elif _nprox > 0:
+        _sensor_kind = "mixed"
+    else:
+        _sensor_kind = "accel"
     return build_oma_siga_pdf(
         meta=meta,
         conditions=[{"label": run.get("name", "Condición operacional"), "fdd_result": fdd,
                      "notes": "Procesamiento FDD de la corrida capturada en campo."}],
-        campbell=campbell, ema_oma=ema_oma, technique=_technique,
+        campbell=campbell, ema_oma=ema_oma, technique=_technique, sensor_kind=_sensor_kind,
         findings=findings if findings is not None else run.get("findings"),
         recommendations=recommendations if recommendations is not None else run.get("recommendations"),
         mode_shape_pngs=shape_pngs, config_png=config_png, sensor_png=sensor_png,

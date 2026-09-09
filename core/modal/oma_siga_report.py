@@ -97,6 +97,7 @@ def build_oma_siga_pdf(
     instrumentation: str = "",
     norms: Optional[Sequence[str]] = None,
     technique: str = "OMA",
+    sensor_kind: str = "accel",          # "accel" | "proximity" | "mixed"
     max_shape_modes: int = 3,
     mode_shape_pngs: Optional[Sequence[bytes]] = None,
     config_png: Optional[bytes] = None,
@@ -136,18 +137,42 @@ def build_oma_siga_pdf(
         return _sn[0]
 
     _is_ema = str(technique).upper().startswith("EMA")
+    _sk = str(sensor_kind or "accel").lower()
+    _prox = _sk == "proximity"; _mixed = _sk == "mixed"
+    # objeto que se caracteriza según el sensor (incluye la preposición correcta)
+    _obj = ("del ROTOR (eje)" if _prox else
+            "del ROTOR (eje) y de la carcasa" if _mixed else "de la estructura (carcasa)")
+    # frase de instrumentación/sensado según el tipo de sensor
+    if _prox:
+        _sense = (
+            "Las respuestas se adquirieron con <b>sondas de proximidad (corrientes de "
+            "Foucault / eddy-current)</b> instaladas en los cojinetes, que observan "
+            "directamente el eje en las direcciones radiales X e Y (par a 90°). La señal se "
+            "acondicionó en <b>desplazamiento (mils)</b>. Por lo tanto, las formas modales "
+            "identificadas corresponden al <b>ROTOR</b>, no a la carcasa.")
+    elif _mixed:
+        _sense = (
+            "Las respuestas se adquirieron combinando <b>acelerómetros piezoeléctricos</b> "
+            "montados en la carcasa (en g) y <b>sondas de proximidad (eddy-current)</b> en los "
+            "cojinetes observando el eje en X–Y (en mils); así se caracterizan tanto la "
+            "carcasa como el <b>ROTOR</b>.")
+    else:
+        _sense = (
+            "Las respuestas se adquirieron con <b>acelerómetros piezoeléctricos</b> calibrados, "
+            "montados rígidamente sobre la carcasa; las formas modales corresponden a la "
+            "<b>estructura / carcasa</b>.")
 
     # 1 · Introducción y alcance
     _S("Introducción y alcance")
     body.append(p(intro or (
-        ("Se realizó un Análisis Modal Experimental (EMA) sobre el conjunto evaluado, con el "
-         "objetivo de identificar las principales frecuencias naturales, factores de "
-         "amortiguamiento y formas modales de la estructura mediante excitación controlada.")
+        (f"Se realizó un Análisis Modal Experimental (EMA) sobre el conjunto evaluado, con el "
+         f"objetivo de identificar las principales frecuencias naturales, factores de "
+         f"amortiguamiento y formas modales {_obj} mediante excitación controlada.")
         if _is_ema else
-        ("Se realizó un Análisis Modal Operacional (OMA) sobre el conjunto evaluado, con "
-         "el objetivo de identificar las principales frecuencias naturales, factores de "
-         "amortiguamiento y formas modales a partir de las respuestas vibratorias adquiridas "
-         "durante la operación del equipo.")), styles))
+        (f"Se realizó un Análisis Modal Operacional (OMA) sobre el conjunto evaluado, con "
+         f"el objetivo de identificar las principales frecuencias naturales, factores de "
+         f"amortiguamiento y formas modales {_obj} a partir de las respuestas vibratorias "
+         f"adquiridas durante la operación del equipo.")), styles))
 
     # (opcional) Antecedentes
     if background:
@@ -185,10 +210,10 @@ def build_oma_siga_pdf(
          "evaluación de vibración en máquinas), <b>ISO 7626</b> (parámetros modales / movilidad "
          "mecánica) y las guías <b>API 684</b> (rotordinámica y velocidades críticas)."))
     body.append(p(_tech_intro, styles))
+    # instrumentación según el tipo de sensor (proximidad→rotor / acelerómetro→carcasa)
     body.append(p(instrumentation or (
-        "La instrumentación se instaló siguiendo las buenas prácticas de medición estructural, "
-        "empleando acelerómetros piezoeléctricos calibrados con montaje rígido. Se verificó la "
-        "fijación, el cableado y la sincronización de canales antes de la captura."), styles))
+        _sense + " Antes de la captura se verificó la instalación, el cableado y la "
+        "sincronización simultánea de todos los canales."), styles))
     # Configuración de medición (vista 3D de la máquina y sensores)
     if config_png:
         body.append(subsection(f"{_dev_no}.1 Configuración de medición", styles))
