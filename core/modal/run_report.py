@@ -86,7 +86,7 @@ def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
 
     meta = {
         "report_title": "Reporte Análisis Modal Operacional (OMA)",
-        "format_code": "SIGA-FMT-179", "format_version": "1",
+        "hide_format_band": True,        # sin banda/título de formato (FMT) — pedido del usuario
         "asset": run.get("asset") or run.get("name") or "Equipo",
         "client": run.get("client", ""), "location": run.get("location", ""),
         "prepared_by": "Watermelon System", "prepared_role": "Machinery Diagnostics",

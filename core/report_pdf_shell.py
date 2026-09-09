@@ -251,10 +251,11 @@ class WMDocTemplate(SimpleDocTemplate):
 
 def _make_drawers(meta: Dict[str, Any]):
     page_width, page_height = A4
+    hide_band = bool(meta.get("hide_format_band"))     # oculta la banda de formato (FMT)
     format_code = meta.get("format_code") or "WMS-FMT-001"
     format_version = meta.get("format_version") or "1"
     format_date = meta.get("format_date") or _today_str()
-    format_header = f"{format_code} | Versión {format_version} | Fecha {format_date}"
+    format_header = "" if hide_band else f"{format_code} | Versión {format_version} | Fecha {format_date}"
     report_title = meta.get("report_title") or "Reporte técnico"
     internal_left = 2.1 * cm
     internal_right = 2.1 * cm
@@ -289,7 +290,8 @@ def _make_drawers(meta: Dict[str, Any]):
         canvas.rect(0, 0, page_width, page_height, fill=1, stroke=0)
         canvas.setFillColor(colors.HexColor(_INK))
         canvas.setFont(BOLD, 7.8)
-        canvas.drawString(internal_left, page_height - 1.0 * cm, format_header)
+        if format_header:
+            canvas.drawString(internal_left, page_height - 1.0 * cm, format_header)
         canvas.setFont(BOLD, 9.0)
         canvas.drawRightString(page_width - internal_right, page_height - 1.0 * cm, f"Página {doc.page}")
         canvas.setStrokeColor(colors.HexColor(_CYAN))
@@ -317,10 +319,14 @@ def _make_drawers(meta: Dict[str, Any]):
         canvas.setLineWidth(1.1)
         canvas.line(internal_left, page_height - 1.35 * cm, internal_width_end, page_height - 1.35 * cm)
         canvas.setFillColor(colors.HexColor(_INK))
-        canvas.setFont(BOLD, 7.8)
-        canvas.drawString(internal_left, page_height - 1.0 * cm, format_header)
-        canvas.setFont(REGULAR, 7.8)
-        canvas.drawString(internal_left + 7.2 * cm, page_height - 1.0 * cm, f"| {report_title}")
+        if format_header:
+            canvas.setFont(BOLD, 7.8)
+            canvas.drawString(internal_left, page_height - 1.0 * cm, format_header)
+            canvas.setFont(REGULAR, 7.8)
+            canvas.drawString(internal_left + 7.2 * cm, page_height - 1.0 * cm, f"| {report_title}")
+        else:                                            # banda FMT oculta → sólo el título
+            canvas.setFont(BOLD, 7.8)
+            canvas.drawString(internal_left, page_height - 1.0 * cm, report_title)
         canvas.setStrokeColor(colors.HexColor(_CYAN))
         canvas.setLineWidth(1.0)
         canvas.line(internal_left, 0.95 * cm, internal_width_end, 0.95 * cm)

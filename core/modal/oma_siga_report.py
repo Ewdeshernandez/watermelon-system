@@ -125,46 +125,55 @@ def build_oma_siga_pdf(
             if caption:
                 body.append(p(caption, styles, "WMFigureCaption"))
 
-    # 1 · Introducción
-    body.append(section("1. Introducción y alcance", styles))
+    # Numeración por contador (el orden lo define el usuario: Hallazgos y
+    # Recomendaciones van PRIMERO, justo después de la Tabla de Contenido).
+    _sn = [0]
+
+    def _S(title):
+        _sn[0] += 1
+        body.append(section(f"{_sn[0]}. {title}", styles))
+        return _sn[0]
+
+    # 1 · Hallazgos (primero, tras el TOC)
+    if findings:
+        _S("Hallazgos")
+        body.extend(numbered_list(list(findings), styles))
+
+    # 2 · Recomendaciones (segundo)
+    if recommendations:
+        _S("Recomendaciones")
+        body.extend(numbered_list(list(recommendations), styles))
+
+    # 3 · Introducción y alcance
+    _S("Introducción y alcance")
     body.append(p(intro or (
         "Se realizó un Análisis Modal Operacional (OMA) sobre el conjunto evaluado, con "
         "el objetivo de identificar las principales frecuencias naturales, factores de "
         "amortiguamiento y formas modales a partir de las respuestas vibratorias adquiridas "
         "durante la operación del equipo."), styles))
 
-    # 2 · Antecedentes
+    # 4 · Antecedentes
     if background:
-        body.append(section("2. Antecedentes", styles))
+        _S("Antecedentes")
         body.append(p(background, styles))
 
-    # 3 · Hallazgos
-    if findings:
-        body.append(section("3. Hallazgos", styles))
-        body.extend(numbered_list(list(findings), styles))
-
-    # 4 · Recomendaciones
-    if recommendations:
-        body.append(section("4. Recomendaciones finales", styles))
-        body.extend(numbered_list(list(recommendations), styles))
-
     # 5 · Desarrollo / instrumentación
-    body.append(section("5. Desarrollo del servicio", styles))
+    _dev_no = _S("Desarrollo del servicio")
     body.append(p(instrumentation or (
         "La instrumentación se instaló siguiendo las buenas prácticas de medición estructural "
         "(API 684, ISO 20816), empleando acelerómetros piezoeléctricos calibrados con montaje "
         "rígido. Se verificó la fijación, el cableado y la sincronización de canales."), styles))
-    # 5.1 · Configuración de medición (vista 3D de la máquina y sensores)
+    # Configuración de medición (vista 3D de la máquina y sensores)
     if config_png:
-        body.append(subsection("5.1 Configuración de medición", styles))
+        body.append(subsection(f"{_dev_no}.1 Configuración de medición", styles))
         img = safe_image(config_png, 16.5, 9.0)
         if img is not None:
             body.append(img)
             body.append(p("Figura. Disposición de la máquina y ubicación de los sensores (3D).",
                           styles, "WMFigureCaption"))
-    # 5.2 · Verificación de sensórica (chequeo de campo antes de la captura)
+    # Verificación de sensórica (chequeo de campo antes de la captura)
     if sensor_png or sensor_rows:
-        body.append(subsection("5.2 Verificación de sensórica", styles))
+        body.append(subsection(f"{_dev_no}.2 Verificación de sensórica", styles))
         body.append(p("Antes de la captura se verificó que cada canal estuviera cableado y "
                       "respondiendo (prueba de golpe/tap en campo).", styles))
         if sensor_png:
@@ -180,11 +189,11 @@ def build_oma_siga_pdf(
                           styles, "WMFigureCaption"))
 
     # 6 · Resultados OMA — por condición
-    body.append(section("6. Resultados – Análisis Modal Operacional (OMA)", styles))
+    _res_no = _S("Resultados – Análisis Modal Operacional (OMA)")
     for k, cond in enumerate(conditions, 1):
         fdd = cond.get("fdd_result")
         label = cond.get("label", f"Condición {k}")
-        body.append(subsection(f"6.{k} {label}", styles))
+        body.append(subsection(f"{_res_no}.{k} {label}", styles))
         if cond.get("notes"):
             body.append(p(cond["notes"], styles))
         # σ(f)
@@ -258,7 +267,7 @@ def build_oma_siga_pdf(
             orders=campbell.get("orders") or (0.5, 1.0, 2.0, 3.0, 4.0),
             bands=bands, mode_labels=campbell.get("mode_labels"),
             classification=campbell.get("classification"))
-        body.append(section("6.C Evaluación mediante Diagrama de Campbell", styles))
+        body.append(subsection(f"{_res_no}.C Evaluación mediante Diagrama de Campbell", styles))
         fig = build_campbell_figure(
             campbell["modes_hz"], campbell.get("rpm_min", 0.0), campbell["rpm_max"],
             orders=campbell.get("orders") or (0.5, 1.0, 2.0, 3.0, 4.0), bands=bands,
@@ -278,7 +287,7 @@ def build_oma_siga_pdf(
 
     # 6.S · Diagrama de estabilización SSI (confirmación independiente)
     if ssi_png:
-        body.append(section("6.S Confirmación por subespacio (SSI-COV)", styles))
+        body.append(subsection(f"{_res_no}.S Confirmación por subespacio (SSI-COV)", styles))
         body.append(p("Método independiente (SSI-COV): las columnas verticales de polos estables "
                       "confirman los modos físicos identificados por FDD; los picos de la densidad "
                       "espectral coinciden con esas columnas.", styles))
@@ -290,7 +299,7 @@ def build_oma_siga_pdf(
     # 7 · Correlación EMA–OMA
     if ema_oma:
         from core.modal.ema_oma_correlation import correlation_table, summarize as corr_summary
-        body.append(section("7. Correlación dinámica complementaria EMA–OMA", styles))
+        _S("Correlación dinámica complementaria EMA–OMA")
         crows = correlation_table(ema_oma)
         if crows:
             heads = list(crows[0].keys())
@@ -299,8 +308,8 @@ def build_oma_siga_pdf(
                           styles, "WMFigureCaption"))
         body.append(p(corr_summary(ema_oma), styles))
 
-    # 8 · Normativa
-    body.append(section("8. Normativa", styles))
+    # Normativa
+    _S("Normativa")
     body.extend(bullets(list(norms or DEFAULT_NORMS), styles))
 
     return render_report_pdf(meta, body)
