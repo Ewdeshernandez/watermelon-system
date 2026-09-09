@@ -34,8 +34,16 @@ class _FDD:
 def _fdd_from_run(run: Dict[str, Any]) -> _FDD:
     svd = run.get("svd") or {}
     freqs = np.asarray(svd.get("freqs", []), float)
-    sv1 = np.asarray(svd.get("sv1", []), float)
-    sv = sv1[None, :] if sv1.size else np.zeros((1, freqs.size))
+    # Todas las curvas de valores singulares (SV1..SVn), no sólo SV1: revelan modos
+    # cercanos. El payload trae `sv` = lista de curvas; `sv1` es el fallback legacy.
+    _svm = svd.get("sv")
+    if _svm is not None and len(_svm):
+        sv = np.asarray(_svm, float)
+        if sv.ndim == 1:
+            sv = sv[None, :]
+    else:
+        sv1 = np.asarray(svd.get("sv1", []), float)
+        sv = sv1[None, :] if sv1.size else np.zeros((1, freqs.size))
     modes = []
     for m in run.get("modes", []):
         sh = m.get("shape") or {}
@@ -45,6 +53,72 @@ def _fdd_from_run(run: Dict[str, Any]) -> _FDD:
     chn = run.get("channel_names") or [f"P{i+1}" for i in range(
         len(modes[0].mode_shape) if modes else 0)]
     return _FDD(freqs, sv, modes, chn)
+
+
+def _ssi_png_from_run(run: Dict[str, Any], fdd) -> "bytes | None":
+    """Diagrama de estabilización SSI (fortaleza del análisis) desde run['ssi'].
+    Polos estables (verde) vs espurios (gris) + densidad espectral (SV1) de fondo."""
+    ssi = run.get("ssi") or {}
+    diagram = ssi.get("diagram") or []
+    if not diagram:
+        return None
+    try:
+        import plotly.graph_objects as go
+        mode_freqs = [float(m.get("fn", 0)) for m in (ssi.get("modes") or [])] or \
+                     [float(getattr(m, "natural_frequency_hz", 0)) for m in getattr(fdd, "modes", [])]
+        sx, sy, ux, uy = [], [], [], []
+        omax = 40
+        for (order, fr, mask) in diagram:
+            omax = max(omax, int(order))
+            for f, mk in zip(np.asarray(fr, float), mask):
+                (sx if mk else ux).append(float(f)); (sy if mk else uy).append(int(order))
+        xmax = max([max(sx) if sx else 0, max(ux) if ux else 0,
+                    max(mode_freqs) if mode_freqs else 0, 50]) * 1.05
+        fig = go.Figure()
+        for f in mode_freqs:
+            fig.add_vrect(x0=f * 0.985, x1=f * 1.015, fillcolor="rgba(22,163,74,.12)", line_width=0)
+        # densidad espectral (SV1) de fondo
+        _fr = np.asarray(getattr(fdd, "frequencies_hz", []), float)
+        _sv = np.asarray(getattr(fdd, "singular_values", []), float)
+        if _fr.size and _sv.size:
+            _sv0 = _sv[0] if _sv.ndim > 1 else _sv
+            fig.add_trace(go.Scatter(x=_fr, y=10.0 * np.log10(np.maximum(_sv0, 1e-30)),
+                          mode="lines", name="Densidad espectral (SV1)",
+                          line=dict(color="rgba(37,99,235,.45)", width=1.5), yaxis="y2", hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=ux, y=uy, mode="markers", name="Polo espurio (numérico)",
+                      marker=dict(size=4, color="#cbd5e1"), hoverinfo="skip"))
+        fig.add_trace(go.Scatter(x=sx, y=sy, mode="markers", name="Polo estable",
+                      marker=dict(size=7, color="#16a34a", line=dict(width=.5, color="white"))))
+        for f in mode_freqs:
+            fig.add_annotation(x=f, y=omax, text=f"<b>{f:.1f}</b>", showarrow=False,
+                               font=dict(size=9, color="#166534"), yanchor="bottom",
+                               bgcolor="rgba(255,255,255,.85)")
+        fig.update_layout(height=470, template="plotly_white",
+                          xaxis=dict(range=[0, xmax], title="Frecuencia (Hz)"),
+                          yaxis=dict(title="Orden del modelo", range=[0, omax * 1.12]),
+                          yaxis2=dict(overlaying="y", side="right", showgrid=False, showticklabels=False),
+                          legend=dict(orientation="h", y=1.02, x=1, xanchor="right"),
+                          margin=dict(l=60, r=30, t=30, b=50))
+        return fig.to_image(format="png", width=1100, height=560, scale=2)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _sensor_check_from_run(run: Dict[str, Any]):
+    """(png, rows) de la verificación de sensores (fortaleza) desde run['sensor_check']."""
+    sc = run.get("sensor_check") or {}
+    if not isinstance(sc, dict):
+        return None, None
+    rows = sc.get("rows") or None
+    png = None
+    _b64 = sc.get("png_b64") or sc.get("png")
+    if _b64:
+        try:
+            import base64
+            png = base64.b64decode(_b64) if isinstance(_b64, str) else bytes(_b64)
+        except Exception:  # noqa: BLE001
+            png = None
+    return png, rows
 
 
 def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
@@ -83,6 +157,13 @@ def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
     if ema and modes_hz:
         ema_oma = correlate(ema, modes_hz, tol_hz=2.5,
                             oma_labels=[f"{f:.3f}" for f in modes_hz])
+
+    # SSI (fortaleza): si no lo pasaron, generarlo automáticamente desde run["ssi"].
+    if ssi_png is None:
+        ssi_png = _ssi_png_from_run(run, fdd)
+    # Verificación de sensores (fortaleza): idem desde run["sensor_check"].
+    if sensor_png is None and sensor_rows is None:
+        sensor_png, sensor_rows = _sensor_check_from_run(run)
 
     meta = {
         "report_title": "Reporte Análisis Modal Operacional (OMA)",

@@ -1870,7 +1870,9 @@ def build_app(layout: OMALayout, simulated: bool = True):
             sv = sv[None, :]
         fmax = min(float(lay.fs_hz) / 2.56, float(lay.fmax_hz)); band = freqs <= fmax
         fb = freqs[band]; sv1 = sv[0][band]; step = max(1, len(fb) // 900)
-        svd = {"freqs": fb[::step].tolist(), "sv1": sv1[::step].tolist()}
+        _nsv = int(min(sv.shape[0], 4))              # SV1..SV4 (multi-curva)
+        svd = {"freqs": fb[::step].tolist(), "sv1": sv1[::step].tolist(),
+               "sv": [sv[r][band][::step].tolist() for r in range(_nsv)]}
         def _sh(m):
             s = np.asarray(getattr(m, "mode_shape", []), complex).ravel()
             return {"re": s.real.tolist(), "im": s.imag.tolist()}

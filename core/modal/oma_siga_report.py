@@ -52,11 +52,11 @@ def _svd_figure(fdd, title: str = "Valores singulares de las densidades espectra
     if sv.ndim == 1:
         sv = sv[None, :]
     fig = go.Figure()
-    colors = ["#0F1E3D", "#1AAEE5", "#94a3b8"]
-    for i in range(min(3, sv.shape[0])):
+    colors = ["#0F1E3D", "#1AAEE5", "#16a34a", "#f59e0b"]
+    for i in range(min(4, sv.shape[0])):
         fig.add_trace(go.Scatter(x=freqs, y=10.0 * np.log10(np.maximum(sv[i], 1e-30)),
                                  mode="lines", name=f"SV{i+1}",
-                                 line=dict(color=colors[i], width=1.6 if i == 0 else 1.0)))
+                                 line=dict(color=colors[i], width=1.8 if i == 0 else 1.0)))
     for m in getattr(fdd, "modes", []) or []:
         fn = float(getattr(m, "natural_frequency_hz", 0.0))
         j = int(np.argmin(np.abs(freqs - fn)))
