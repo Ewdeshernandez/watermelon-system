@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.51"
+__version__ = "0.9.52"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1587,10 +1587,14 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_saverun = QtWidgets.QPushButton("💾 Save run locally")
     btn_saverun.setToolTip("Save this run (results + raw data) to a visible folder on this PC.")
     btn_upload = QtWidgets.QPushButton("☁ Sync / Upload to Watermelon System")
+    btn_upsaved = QtWidgets.QPushButton("☁ Upload a SAVED run")
+    btn_upsaved.setToolTip("Pick a run saved earlier on this PC (offline) and upload it now "
+                           "that you have internet — results + raw data.")
     btn_delmode = QtWidgets.QPushButton("✖ Remove selected mode")
     btn_delmode.setToolTip("Remove the mode selected in the table (or click its marker on the plot).")
     crow.addWidget(btn_testni); crow.addWidget(btn_ocap); crow.addWidget(btn_saverun)
-    crow.addWidget(btn_upload); crow.addWidget(btn_delmode); crow.addStretch(1); cl2.addLayout(crow)
+    crow.addWidget(btn_upload); crow.addWidget(btn_upsaved); crow.addWidget(btn_delmode)
+    crow.addStretch(1); cl2.addLayout(crow)
 
     def _test_ni():
         try:
@@ -2066,6 +2070,68 @@ def build_app(layout: OMALayout, simulated: bool = True):
                 QtWidgets.QMessageBox.warning(win, "Cloud", f"Could not upload: {r.get('reason')}")
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(win, "Cloud", f"Upload failed: {type(e).__name__}: {e}")
+    def _upload_saved_run():
+        """Recarga una corrida GUARDADA en disco (offline) y la sube a la nube ahora
+        que hay internet — resultados + data cruda. Flujo campo: capturas sin internet
+        → 'Save run locally' → después, con internet → 'Upload a SAVED run'."""
+        import json as _json
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            win, "Select a saved run folder (contains run.json)", _runs_dir())
+        if not folder:
+            return
+        rjson = os.path.join(folder, "run.json")
+        if not os.path.exists(rjson):
+            QtWidgets.QMessageBox.warning(win, "Upload saved run",
+                "That folder has no run.json.\nPick a folder created by 'Save run locally'."); return
+        try:
+            with open(rjson, encoding="utf-8") as f:
+                payload = _json.load(f)
+            from core.modal import modal_cloud
+            name = payload.get("name", "OMA")
+            rid, ts = modal_cloud.new_run_id(name)
+            payload["raw_ref"] = None
+            # data cruda guardada (data.npz) — subirla también si el usuario quiere
+            _npz = os.path.join(folder, "data.npz")
+            if os.path.exists(_npz):
+                _mb = os.path.getsize(_npz) / 1e6
+                if QtWidgets.QMessageBox.question(
+                        win, "Cloud",
+                        f"Upload the raw waveform too (~{_mb:.0f} MB)?\n\n"
+                        "Yes = todo (resultados + cruda). No = solo resultados.",
+                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                        QtWidgets.QMessageBox.Yes) == QtWidgets.QMessageBox.Yes:
+                    import concurrent.futures as _cf3, time as _t3
+                    _z = np.load(_npz, allow_pickle=True)
+                    _d = np.asarray(_z["data"], float); _fs = float(_z["fs"])
+                    _ch = [str(c) for c in list(_z["channels"])]
+                    _dlg = QtWidgets.QProgressDialog("Uploading raw data to the cloud…", None, 0, 0, win)
+                    _dlg.setWindowTitle("Cloud"); _dlg.setMinimumDuration(0); _dlg.setModal(True)
+                    _dlg.show(); QtWidgets.QApplication.processEvents()
+                    try:
+                        with _cf3.ThreadPoolExecutor(max_workers=1) as _ex3:
+                            _fu = _ex3.submit(modal_cloud.upload_raw, rid, _d, _fs, _ch)
+                            while not _fu.done():
+                                QtWidgets.QApplication.processEvents(); _t3.sleep(0.05)
+                            rr = _fu.result()
+                        if rr.get("ok"):
+                            payload["raw_ref"] = rr
+                    except Exception:  # noqa: BLE001
+                        pass
+                    finally:
+                        _dlg.close()
+            r = modal_cloud.save_run(name, payload, run_id=rid, ts=ts)
+            if r.get("ok"):
+                _rawmsg = ("con data cruda" if payload.get("raw_ref") else "solo resultados")
+                QtWidgets.QMessageBox.information(win, "Cloud",
+                    f"☁ Corrida subida ({len(payload.get('modes', []))} modos, {_rawmsg}).\n"
+                    "Genera el reporte desde la web.")
+            else:
+                QtWidgets.QMessageBox.warning(win, "Cloud",
+                    f"No se pudo subir: {r.get('reason', 'offline')}.\n"
+                    "Verifica el internet e intenta de nuevo (la corrida sigue guardada).")
+        except Exception as e:  # noqa: BLE001
+            QtWidgets.QMessageBox.warning(win, "Upload saved run", f"Error: {type(e).__name__}: {e}")
+
     def _oma_capture_click():
         # Feedback INMEDIATO: bloquea el botón y avisa que arrancó (evita doble captura).
         if not btn_ocap.isEnabled():
@@ -2078,7 +2144,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
         finally:
             btn_ocap.setEnabled(True); btn_ocap.setText(_txt0)
     btn_ocap.clicked.connect(_oma_capture_click); btn_upload.clicked.connect(_upload_run)
-    btn_saverun.clicked.connect(_save_run_local)
+    btn_saverun.clicked.connect(_save_run_local); btn_upsaved.clicked.connect(_upload_saved_run)
 
     def _draw_svd_markers():
         """(Re)dibuja los marcadores de modos sobre la densidad espectral."""
