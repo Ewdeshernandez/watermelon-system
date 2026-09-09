@@ -1922,6 +1922,9 @@ if nav == T_REPORT:
         st.caption("Embedded in the PDF: machine 3D configuration · sensor-check status · spectral density "
                    "(singular values) · mode shapes (3D) · Campbell (API 684) · EMA↔OMA correlation.")
 
+        _hide_spur = st.checkbox(
+            "Ocultar modos **spurious / harmonic** del reporte (recomendado — deja solo los modos estructurales)",
+            value=True, key="rep_hide_spur")
         if st.button("📄 Generate full report (PDF)", type="primary", key="rep_gen"):
             try:
                 from core.modal.run_report import build_report_from_run
@@ -1931,12 +1934,18 @@ if nav == T_REPORT:
                     pts = lay.active_points()
                     _pl_geom = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
                     _geom_r = _pl_geom if (_pl_geom and _pl_geom.get("nodes")) else _dg_r(lay)
+                    # filtro spurious/harmonic (1 clic): modos + sus formas, en paralelo
+                    _pairs = list(zip(D["oma_modes"], (D["shapes"] or [None] * len(D["oma_modes"]))))
+                    if _hide_spur:
+                        _pairs = [(mm, ss) for (mm, ss) in _pairs
+                                  if str(mm.get("cls", "")).lower() not in ("spurious", "harmonic")]
+                    _modes_r = [mm for mm, ss in _pairs]; _shapes_r = [ss for mm, ss in _pairs]
                     # formas modales estilo ARTeMIS (superficies + cuadrícula), estáticas para el PDF
                     shape_pngs = []
-                    for i, m in enumerate(D["oma_modes"][:3]):
-                        if D["shapes"] and i < len(D["shapes"]) and D["shapes"][i] is not None \
-                                and len(D["shapes"][i]) == len(pts):
-                            a = np.asarray(D["shapes"][i], float)
+                    for i, m in enumerate(_modes_r[:3]):
+                        if i < len(_shapes_r) and _shapes_r[i] is not None \
+                                and len(_shapes_r[i]) == len(pts):
+                            a = np.asarray(_shapes_r[i], float)
                         else:
                             a = np.random.default_rng(i + 1).standard_normal(len(pts))
                         try:
@@ -1976,8 +1985,13 @@ if nav == T_REPORT:
                                    "client": _client, "location": _location,
                                    "prepared_by": _prep_by, "prepared_role": _prep_role, "prepared_city": _city,
                                    "reviewed_by": _rev_by, "reviewed_role": _rev_role, "reviewed_city": _city}
+                    # payload para el reporte, con o sin spurious/harmonic (tablas, Campbell)
+                    _pay_r = dict(D.get("payload") or {})
+                    if _hide_spur and _pay_r.get("modes"):
+                        _pay_r = {**_pay_r, "modes": [mm for mm in _pay_r["modes"]
+                                  if str(mm.get("class", "")).lower() not in ("spurious", "harmonic")]}
                     pdf = build_report_from_run(
-                        D.get("payload") or {}, bilingual_es=_es, shape_pngs=shape_pngs,
+                        _pay_r, bilingual_es=_es, shape_pngs=shape_pngs,
                         findings=_findings, recommendations=_recs, meta_extra=_meta_extra,
                         config_png=config_png, sensor_png=sensor_png, sensor_rows=sensor_rows,
                         ssi_png=ssi_png)
