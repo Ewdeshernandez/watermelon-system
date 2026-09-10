@@ -1485,6 +1485,9 @@ if nav == T_OMA:
              "rejected": ("#dc2626", "#fdeaea")}
     _VTXT = {"validated": "Validated", "doubtful": "Doubtful", "rejected": "Rejected"}
     _rows_html = []
+    from core.modal.run_report import mode_confidence as _mode_conf
+    _CONFCOL = {"Alta": ("#166534", "#e7f7ee"), "Media": ("#b45309", "#fdf3e3"),
+                "Baja": ("#b91c1c", "#fdeaea")}
     for i, m in enumerate(D["oma_modes"], 1):
         v = _v_of(m["fn"]); vk = getattr(v, "verdict", "") if v else ""
         vc, vb = _VCOL.get(vk, ("#64748b", "#eef2f8"))
@@ -1492,6 +1495,8 @@ if nav == T_OMA:
         _man = m.get("source") == "manual"
         src_c, src_b, src_t = (("#7c3aed", "#f2ecfd", "Manual") if _man else ("#2563eb", "#e8f0ff", "FDD"))
         vlabel = (_VTXT.get(vk, "—") + harm) if vk else "—"
+        _cf = _mode_conf(m["fn"], m["zeta"], m["complexity"], m.get("cls", "natural"), _ssi_freqs, D["rpm"])
+        _cfc, _cfb = _CONFCOL.get(_cf, ("#64748b", "#eef2f8"))
         _rows_html.append(
             f"<tr>"
             f"<td class='idx'>{i}</td>"
@@ -1501,10 +1506,11 @@ if nav == T_OMA:
             f"<td><span class='cls'>{m['cls']}</span></td>"
             f"<td><span class='badge' style='color:{src_c};background:{src_b}'>{src_t}</span></td>"
             f"<td><span class='pill' style='color:{vc};background:{vb}'>{vlabel}</span></td>"
+            f"<td><span class='pill' style='color:{_cfc};background:{_cfb};font-weight:800'>{_cf}</span></td>"
             f"</tr>")
     _table_html = ('<table class="wm-modes"><thead><tr>'
                    "<th>#</th><th>Frequency</th><th>Damping ζ</th><th>Complexity</th>"
-                   "<th>Class</th><th>Source</th><th>Validation</th></tr></thead>"
+                   "<th>Class</th><th>Source</th><th>Validation</th><th>Confianza</th></tr></thead>"
                    f"<tbody>{''.join(_rows_html)}</tbody></table>")
     if D["oma_modes"]:
         st.markdown(_table_html, unsafe_allow_html=True)
