@@ -439,7 +439,7 @@ def _mode_shape_fig(lay, amps_signed, height=580, scale_mul=1.0):
     lay_kw = _mode_scene(height)
     lay_kw["updatemenus"] = [dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
         buttons=[dict(label="▶ Play", method="animate",
-                      args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True,
+                      args=[None, dict(frame=dict(duration=130, redraw=True), fromcurrent=True,
                                        transition=dict(duration=0), mode="immediate")]),
                  dict(label="⏸ Pause", method="animate",
                       args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])]
@@ -616,7 +616,7 @@ def _disk(xc, r, w, nt, base):
     return V, AX, I, J, K
 
 
-def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
+def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False, phase=np.pi / 2):
     """Forma modal del ROTOR (proximidad): eje + masa del motor + impulsores de la
     bomba, que FLEXIONA lateralmente según las sondas XY (X→radial horiz, Y→radial vert)."""
     pts = lay.active_points()
@@ -703,8 +703,9 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
                             line=dict(color="#0f172a", width=3), hoverinfo="skip")
 
     fig = go.Figure()
-    fig.add_trace(_surf_tr(_defV(np.pi / 2))); _isf = len(fig.data) - 1
-    fig.add_trace(_center_tr(np.pi / 2)); _icl = len(fig.data) - 1
+    _ph0 = float(phase)
+    fig.add_trace(_surf_tr(_defV(_ph0))); _isf = len(fig.data) - 1
+    fig.add_trace(_center_tr(_ph0)); _icl = len(fig.data) - 1
     # marcadores de cojinete (sensores)
     fig.add_trace(go.Scatter3d(x=xs, y=[0] * len(xs), z=[0] * len(xs), mode="markers+text",
                   text=[f"B{i+1}" for i in range(len(xs))], textposition="top center",
@@ -726,7 +727,7 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
     if not static:
         lay_kw["updatemenus"] = [dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
             buttons=[dict(label="▶ Play", method="animate",
-                          args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True,
+                          args=[None, dict(frame=dict(duration=130, redraw=True), fromcurrent=True,
                                            transition=dict(duration=0), mode="immediate")]),
                      dict(label="⏸ Pause", method="animate",
                           args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])]
@@ -742,11 +743,20 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False):
                 _tr.x = np.asarray(_tr.x, float) - _xmid
     lay_kw["scene"]["camera"] = dict(eye=dict(x=1.9, y=1.65, z=1.0),
                                      center=dict(x=0, y=0, z=0))
+    # Rangos de eje FIJOS que cubren la deflexión máxima (±) → el rotor NO se sale del
+    # cuadro durante la animación (encaja todos los frames, centrado).
+    _allv = np.vstack([_defV(np.pi / 2), _defV(-np.pi / 2), V0]).astype(float)
+    _allv[:, 0] -= _xmid
+    def _rng(_a, _b, _f=0.10):
+        _m = (_b - _a) * _f + 1e-6; return [_a - _m, _b + _m]
+    lay_kw["scene"]["xaxis"] = dict(visible=False, range=_rng(_allv[:, 0].min(), _allv[:, 0].max()))
+    lay_kw["scene"]["yaxis"] = dict(visible=False, range=_rng(_allv[:, 1].min(), _allv[:, 1].max()))
+    lay_kw["scene"]["zaxis"] = dict(visible=False, range=_rng(_allv[:, 2].min(), _allv[:, 2].max()))
     fig.update_layout(**lay_kw)
     return fig
 
 
-def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0, static=False):
+def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0, static=False, phase=np.pi / 2):
     """Forma modal animada sobre la GEOMETRÍA del campo (estilo ARTeMIS): superficie
     sólida con malla densa (gradiente Jet), aristas, flechas de DOF por eje y triada.
     static=True → sin animación ni botón Play, con colorbar (para el PDF del reporte)."""
@@ -815,8 +825,8 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0, static=Fal
 
     fig = go.Figure()
     if has_surf:
-        fig.add_trace(_surf_tr(_defVr(np.pi / 2))); _is = len(fig.data) - 1
-        fig.add_trace(_grid_tr(_defVr(np.pi / 2))); _ig = len(fig.data) - 1
+        fig.add_trace(_surf_tr(_defVr(float(phase)))); _is = len(fig.data) - 1
+        fig.add_trace(_grid_tr(_defVr(float(phase)))); _ig = len(fig.data) - 1
     if not static:
         frames = []
         for f in range(26):
@@ -868,7 +878,7 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0, static=Fal
         return fig
     lay_kw["updatemenus"] = [dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
         buttons=[dict(label="▶ Play", method="animate",
-                      args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True,
+                      args=[None, dict(frame=dict(duration=130, redraw=True), fromcurrent=True,
                                        transition=dict(duration=0), mode="immediate")]),
                  dict(label="⏸ Pause", method="animate",
                       args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])]
@@ -959,7 +969,7 @@ def _mode_surface_fig(lay, amps_signed, height=600, scale_mul=1.0, annotate=True
     lay_kw = _mode_surface_layout(height, s["cmax"])
     lay_kw["updatemenus"] = [dict(type="buttons", showactive=False, x=0.02, y=0.05, xanchor="left",
         buttons=[dict(label="▶ Play", method="animate",
-                      args=[None, dict(frame=dict(duration=50, redraw=True), fromcurrent=True,
+                      args=[None, dict(frame=dict(duration=130, redraw=True), fromcurrent=True,
                                        transition=dict(duration=0), mode="immediate")]),
                  dict(label="⏸ Pause", method="animate",
                       args=[[None], dict(frame=dict(duration=0, redraw=False), mode="immediate")])])]
@@ -986,6 +996,30 @@ def _mode_surface_gif(lay, amps_signed, scale_mul=1.0, n=22, w=680, h=500):
         return None
     buf = io.BytesIO()
     imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:], duration=60, loop=0)
+    return buf.getvalue()
+
+
+def _mode_video_gif(lay, geom, amps_signed, is_rotor, scale_mul=1.0, n=24, w=780, h=520):
+    """GIF real de la forma modal usando el MISMO render que se ve (rotor o carcasa):
+    renderiza n fases del ciclo y las une. Devuelve bytes GIF o None."""
+    import io
+    from PIL import Image
+    imgs = []
+    for f in range(n):
+        ph = f / n * 2 * np.pi
+        try:
+            fig = (_mode_rotor_fig(lay, amps_signed, height=h, scale_mul=scale_mul, static=True, phase=ph)
+                   if is_rotor else
+                   _mode_geom_fig(lay, geom, amps_signed, height=h, scale_mul=scale_mul, static=True, phase=ph))
+            fig.update_layout(coloraxis_showscale=False)
+            png = fig.to_image(format="png", width=w, height=h, scale=1)
+            imgs.append(Image.open(io.BytesIO(png)).convert("RGB"))
+        except Exception:  # noqa: BLE001
+            continue
+    if not imgs:
+        return None
+    buf = io.BytesIO()
+    imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:], duration=90, loop=0)
     return buf.getvalue()
 
 
@@ -1797,11 +1831,14 @@ if nav == T_SHAPES:
                 "font-size:11px;color:#64748b'><span>Max</span><span>0</span></div></div></div>",
                 unsafe_allow_html=True)
             if st.button("🎬 Export video (GIF)", key="ms_gif", use_container_width=True):
-                with st.spinner("Rendering…"):
-                    _gif = _mode_surface_gif(lay, amp, scale_mul=_smul)
+                with st.spinner("Rendering the animation (takes a few seconds)…"):
+                    _gif = _mode_video_gif(lay, _geom, amp, _rotor_is(lay), scale_mul=_smul)
                 if _gif:
                     st.session_state["_ms_gif"] = _gif
-                    st.session_state["_ms_gif_name"] = f"mode_{idx+1}_{m['fn']:.0f}Hz.gif"
+                    _kind = "rotor" if _rotor_is(lay) else "casing"
+                    st.session_state["_ms_gif_name"] = f"mode_{idx+1}_{m['fn']:.0f}Hz_{_kind}.gif"
+                else:
+                    st.warning("Could not render the video. Try again.")
             if st.session_state.get("_ms_gif"):
                 st.download_button("⬇ Download", data=st.session_state["_ms_gif"],
                                    file_name=st.session_state.get("_ms_gif_name", "mode_shape.gif"),
