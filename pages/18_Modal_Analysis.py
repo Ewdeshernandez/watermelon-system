@@ -1486,8 +1486,10 @@ if nav == T_OMA:
     _VTXT = {"validated": "Validated", "doubtful": "Doubtful", "rejected": "Rejected"}
     _rows_html = []
     from core.modal.run_report import mode_confidence as _mode_conf
-    _CONFCOL = {"Alta": ("#166534", "#e7f7ee"), "Media": ("#b45309", "#fdf3e3"),
-                "Baja": ("#b91c1c", "#fdeaea")}
+    # UI del analista en inglés (el reporte va en español)
+    _CONF_EN = {"Alta": "High", "Media": "Medium", "Baja": "Low"}
+    _CONFCOL = {"High": ("#166534", "#e7f7ee"), "Medium": ("#b45309", "#fdf3e3"),
+                "Low": ("#b91c1c", "#fdeaea")}
     for i, m in enumerate(D["oma_modes"], 1):
         v = _v_of(m["fn"]); vk = getattr(v, "verdict", "") if v else ""
         vc, vb = _VCOL.get(vk, ("#64748b", "#eef2f8"))
@@ -1495,7 +1497,8 @@ if nav == T_OMA:
         _man = m.get("source") == "manual"
         src_c, src_b, src_t = (("#7c3aed", "#f2ecfd", "Manual") if _man else ("#2563eb", "#e8f0ff", "FDD"))
         vlabel = (_VTXT.get(vk, "—") + harm) if vk else "—"
-        _cf = _mode_conf(m["fn"], m["zeta"], m["complexity"], m.get("cls", "natural"), _ssi_freqs, D["rpm"])
+        _cf = _CONF_EN.get(_mode_conf(m["fn"], m["zeta"], m["complexity"], m.get("cls", "natural"),
+                                      _ssi_freqs, D["rpm"]), "—")
         _cfc, _cfb = _CONFCOL.get(_cf, ("#64748b", "#eef2f8"))
         _rows_html.append(
             f"<tr>"
@@ -1722,14 +1725,26 @@ if nav == T_SHAPES:
     if not modes:
         st.info("No modes to display.")
     else:
-        cms = st.columns([2.4, 1])
+        # Confianza por modo (para filtrar las formas que valen la pena)
+        from core.modal.run_report import mode_confidence as _mc
+        _CONF_EN = {"Alta": "High", "Media": "Medium", "Baja": "Low"}
+        _ssf = [mm["fn"] for mm in (D["ssi_cloud"] or {}).get("modes", [])] if D["ssi_cloud"] else []
+        _conf_all = [_CONF_EN.get(_mc(mm["fn"], mm["zeta"], mm["complexity"], mm.get("cls", "natural"),
+                                      _ssf, D["rpm"]), "—") for mm in modes]
+        cms = st.columns([2.2, 0.9, 1.3])
+        with cms[2]:
+            _only_hi = st.toggle("Only worthwhile modes", value=False, key="ms_only_hi",
+                                 help="Hide Low-confidence modes (keeps High/Medium — confirmed FDD+SSI).")
+        _sel_idx = [i for i in range(len(modes)) if (not _only_hi) or _conf_all[i] in ("High", "Medium")]
+        if not _sel_idx:
+            _sel_idx = list(range(len(modes)))
         with cms[0]:
-            opts = [f"Mode {i+1} — {m['fn']:.1f} Hz" for i, m in enumerate(modes)]
+            opts = [f"Mode {i+1} — {modes[i]['fn']:.1f} Hz  ·  {_conf_all[i]}" for i in _sel_idx]
             sel = st.selectbox("Mode", opts, index=0, label_visibility="collapsed")
         with cms[1]:
             _scl = st.select_slider("Deformation", options=["0.5×", "1×", "2×", "3×"], value="1×",
                                     label_visibility="collapsed")
-        idx = opts.index(sel)
+        idx = _sel_idx[opts.index(sel)]
         m = modes[idx]
         pts = lay.active_points()
         if D["shapes"] and idx < len(D["shapes"]) and D["shapes"][idx] is not None \
