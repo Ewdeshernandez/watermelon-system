@@ -713,8 +713,8 @@ def _mode_rotor_fig(lay, amps_signed, height=600, scale_mul=1.0, static=False, p
                   hoverinfo="skip"))
     if not static:
         frames = []
-        for f in range(26):
-            ph = f / 26.0 * 2 * np.pi
+        for f in range(40):
+            ph = f / 20.0 * 2 * np.pi
             frames.append(go.Frame(data=[_surf_tr(_defV(ph)), _center_tr(ph)], traces=[_isf, _icl]))
         fig.frames = frames
     lay_kw = _mode_scene(height)
@@ -829,8 +829,8 @@ def _mode_geom_fig(lay, geom, amps_signed, height=600, scale_mul=1.0, static=Fal
         fig.add_trace(_grid_tr(_defVr(float(phase)))); _ig = len(fig.data) - 1
     if not static:
         frames = []
-        for f in range(26):
-            ph = f / 26.0 * 2 * np.pi; dv = _defVr(ph)
+        for f in range(40):
+            ph = f / 20.0 * 2 * np.pi; dv = _defVr(ph)
             data, tr = [], []
             if has_surf:
                 data.append(_surf_tr(dv)); tr.append(_is)
@@ -999,9 +999,10 @@ def _mode_surface_gif(lay, amps_signed, scale_mul=1.0, n=22, w=680, h=500):
     return buf.getvalue()
 
 
-def _mode_video_gif(lay, geom, amps_signed, is_rotor, scale_mul=1.0, n=24, w=780, h=520):
-    """GIF real de la forma modal usando el MISMO render que se ve (rotor o carcasa):
-    renderiza n fases del ciclo y las une. Devuelve bytes GIF o None."""
+def _mode_video_gif(lay, geom, amps_signed, is_rotor, scale_mul=1.0, n=14, w=640, h=440):
+    """GIF animado real de la forma modal usando el MISMO render que se ve (rotor o
+    carcasa): renderiza n fases del ciclo y las une en un GIF que hace bucle. n moderado
+    para que el render (kaleido) termine rápido. Devuelve bytes GIF o None."""
     import io
     from PIL import Image
     imgs = []
@@ -1011,15 +1012,16 @@ def _mode_video_gif(lay, geom, amps_signed, is_rotor, scale_mul=1.0, n=24, w=780
             fig = (_mode_rotor_fig(lay, amps_signed, height=h, scale_mul=scale_mul, static=True, phase=ph)
                    if is_rotor else
                    _mode_geom_fig(lay, geom, amps_signed, height=h, scale_mul=scale_mul, static=True, phase=ph))
-            fig.update_layout(coloraxis_showscale=False)
+            fig.update_layout(coloraxis_showscale=False, margin=dict(l=0, r=0, t=0, b=0))
             png = fig.to_image(format="png", width=w, height=h, scale=1)
             imgs.append(Image.open(io.BytesIO(png)).convert("RGB"))
         except Exception:  # noqa: BLE001
             continue
-    if not imgs:
+    if len(imgs) < 2:
         return None
     buf = io.BytesIO()
-    imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:], duration=90, loop=0)
+    imgs[0].save(buf, format="GIF", save_all=True, append_images=imgs[1:],
+                 duration=110, loop=0, optimize=True)
     return buf.getvalue()
 
 
@@ -1831,7 +1833,7 @@ if nav == T_SHAPES:
                 "font-size:11px;color:#64748b'><span>Max</span><span>0</span></div></div></div>",
                 unsafe_allow_html=True)
             if st.button("🎬 Export video (GIF)", key="ms_gif", use_container_width=True):
-                with st.spinner("Rendering the animation (takes a few seconds)…"):
+                with st.spinner("Rendering the animated video (~30–60 s, please wait)…"):
                     _gif = _mode_video_gif(lay, _geom, amp, _rotor_is(lay), scale_mul=_smul)
                 if _gif:
                     st.session_state["_ms_gif"] = _gif
