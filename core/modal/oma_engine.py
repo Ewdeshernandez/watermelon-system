@@ -313,6 +313,39 @@ def run_fdd(
 # Detección de picos en first singular value
 # =====================================================================
 
+def _efdd_mode_shape(fdd_result: FDDResult, idx_full: int, sv1: np.ndarray,
+                     mac_min: float = 0.80, max_lines: int = 40) -> np.ndarray:
+    """EFDD — refina la forma modal promediando la **campana SDOF** alrededor del pico:
+    toma las líneas de frecuencia cuyo primer vector singular tiene MAC ≥ mac_min con el
+    del pico, las alinea en fase y las promedia ponderadas por SV1. Resultado: una forma
+    más colineal (menos dispersa) → complejidad más baja y confiable. Cae al vector del
+    pico (FDD clásico) si algo falla."""
+    U = fdd_result.mode_shapes_at_freq                      # (N, N, n_freq)
+    n_freq = U.shape[2]
+    phi0 = np.asarray(U[:, 0, idx_full], dtype=complex)
+    if np.vdot(phi0, phi0).real <= 1e-30:
+        return phi0
+
+    def _mac(a, b):
+        den = np.vdot(a, a).real * np.vdot(b, b).real
+        return float(abs(np.vdot(a, b)) ** 2 / den) if den > 1e-30 else 0.0
+
+    acc = phi0 * float(sv1[idx_full])
+    for step in (-1, 1):
+        k = idx_full + step; used = 0
+        while 0 <= k < n_freq and used < max_lines:
+            phik = np.asarray(U[:, 0, k], dtype=complex)
+            if _mac(phi0, phik) < mac_min:
+                break
+            proj = np.vdot(phi0, phik)                      # alinear fase con el pico
+            if abs(proj) > 1e-30:
+                phik = phik * (np.conjugate(proj) / abs(proj))
+            acc = acc + phik * float(sv1[k])
+            k += step; used += 1
+    nrm = np.sqrt(np.vdot(acc, acc).real)
+    return (acc / nrm) if nrm > 1e-30 else phi0
+
+
 def detect_oma_modes(
     fdd_result: FDDResult,
     f_min_hz: float = 5.0,
@@ -321,6 +354,7 @@ def detect_oma_modes(
     min_distance_hz: float = 2.0,
     running_speed_hz: Optional[float] = None,
     harmonic_tol_pct: float = 0.5,
+    use_efdd: bool = True,
 ) -> List[OMAMode]:
     """
     Detecta modos OMA picos en el first singular value.
@@ -384,8 +418,14 @@ def detect_oma_modes(
         bw = max(f2 - f1, 1e-9)
         damping_pct = bw / (2.0 * fn) * 100.0
 
-        # Mode shape: primer singular vector en esta frecuencia
-        mode_shape = fdd_result.mode_shapes_at_freq[:, 0, idx_full]
+        # Mode shape: EFDD (promedio de la campana SDOF) o FDD clásico (una línea)
+        if use_efdd:
+            try:
+                mode_shape = _efdd_mode_shape(fdd_result, idx_full, sv1)
+            except Exception:  # noqa: BLE001  — cualquier fallo → FDD de una línea
+                mode_shape = fdd_result.mode_shapes_at_freq[:, 0, idx_full]
+        else:
+            mode_shape = fdd_result.mode_shapes_at_freq[:, 0, idx_full]
 
         # Modal Complexity (MPC) — criterio Artemis para natural vs harmonic
         complexity_pct = modal_complexity_mpc(mode_shape)
@@ -437,9 +477,13 @@ def run_oma(
     prominence_db: float = 6.0,
     min_distance_hz: float = 2.0,
     running_speed_hz: Optional[float] = None,
+    use_efdd: bool = True,
 ) -> FDDResult:
     """
     Pipeline OMA completo: FDD + detección automática de modos.
+
+    `use_efdd`: si True (por defecto), la forma modal se refina con EFDD (promedio de la
+    campana SDOF) → complejidad más baja/limpia. Poner False para FDD clásico de una línea.
 
     Returns:
         FDDResult con .modes poblado.
@@ -452,6 +496,7 @@ def run_oma(
         prominence_db=prominence_db,
         min_distance_hz=min_distance_hz,
         running_speed_hz=running_speed_hz,
+        use_efdd=use_efdd,
     )
     return result
 
