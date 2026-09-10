@@ -1925,6 +1925,15 @@ if nav == T_REPORT:
         _hide_spur = st.checkbox(
             "Ocultar modos **spurious / harmonic** del reporte (recomendado — deja solo los modos estructurales)",
             value=True, key="rep_hide_spur")
+        _only_conf = st.checkbox(
+            "Solo modos de **alta confianza** (confirmados FDD+SSI · complejidad < 15% · amortiguación física)",
+            value=False, key="rep_only_conf")
+        from core.modal.run_report import mode_confidence as _mode_conf
+        _ssi_f = [float(_mm.get("fn", 0)) for _mm in ((D.get("ssi_cloud") or {}).get("modes") or []) if _mm.get("fn")]
+        _rpm_r = float(D.get("rpm") or 0.0)
+        def _conf_of(_m):
+            return _mode_conf(_m.get("fn", 0), _m.get("zeta", 0), _m.get("complexity", 0),
+                              _m.get("cls", _m.get("class", "natural")), _ssi_f, _rpm_r)
         if st.button("📄 Generate full report (PDF)", type="primary", key="rep_gen"):
             try:
                 from core.modal.run_report import build_report_from_run
@@ -1934,11 +1943,13 @@ if nav == T_REPORT:
                     pts = lay.active_points()
                     _pl_geom = ((D.get("payload") or {}).get("layout") or {}).get("geometry")
                     _geom_r = _pl_geom if (_pl_geom and _pl_geom.get("nodes")) else _dg_r(lay)
-                    # filtro spurious/harmonic (1 clic): modos + sus formas, en paralelo
+                    # filtro spurious/harmonic + confianza (1 clic): modos + sus formas, en paralelo
                     _pairs = list(zip(D["oma_modes"], (D["shapes"] or [None] * len(D["oma_modes"]))))
                     if _hide_spur:
                         _pairs = [(mm, ss) for (mm, ss) in _pairs
                                   if str(mm.get("cls", "")).lower() not in ("spurious", "harmonic")]
+                    if _only_conf:
+                        _pairs = [(mm, ss) for (mm, ss) in _pairs if _conf_of(mm) == "Alta"]
                     _modes_r = [mm for mm, ss in _pairs]; _shapes_r = [ss for mm, ss in _pairs]
                     # formas modales estilo ARTeMIS (superficies + cuadrícula), estáticas para el PDF
                     shape_pngs = []
@@ -1985,11 +1996,16 @@ if nav == T_REPORT:
                                    "client": _client, "location": _location,
                                    "prepared_by": _prep_by, "prepared_role": _prep_role, "prepared_city": _city,
                                    "reviewed_by": _rev_by, "reviewed_role": _rev_role, "reviewed_city": _city}
-                    # payload para el reporte, con o sin spurious/harmonic (tablas, Campbell)
+                    # payload para el reporte, con filtros de spurious/harmonic y/o confianza
                     _pay_r = dict(D.get("payload") or {})
-                    if _hide_spur and _pay_r.get("modes"):
-                        _pay_r = {**_pay_r, "modes": [mm for mm in _pay_r["modes"]
-                                  if str(mm.get("class", "")).lower() not in ("spurious", "harmonic")]}
+                    if (_hide_spur or _only_conf) and _pay_r.get("modes"):
+                        def _keep(mm):
+                            if _hide_spur and str(mm.get("class", "")).lower() in ("spurious", "harmonic"):
+                                return False
+                            if _only_conf and _conf_of(mm) != "Alta":
+                                return False
+                            return True
+                        _pay_r = {**_pay_r, "modes": [mm for mm in _pay_r["modes"] if _keep(mm)]}
                     pdf = build_report_from_run(
                         _pay_r, bilingual_es=_es, shape_pngs=shape_pngs,
                         findings=_findings, recommendations=_recs, meta_extra=_meta_extra,

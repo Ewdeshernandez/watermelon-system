@@ -71,16 +71,20 @@ def _svd_figure(fdd, title: str = "Valores singulares de las densidades espectra
     return fig
 
 
-def _candidate_rows(fdd) -> List[List[Any]]:
+def _candidate_rows(fdd, confidence=None) -> List[List[Any]]:
     rows = []
+    conf = list(confidence or [])
     for i, m in enumerate(getattr(fdd, "modes", []) or [], 1):
-        rows.append([
+        row = [
             i,
             f"{float(getattr(m, 'natural_frequency_hz', 0)):.3f}",
             f"{float(getattr(m, 'damping_ratio_pct', 0)):.3f}",
             f"{float(getattr(m, 'complexity_pct', 0)):.3f}",
             getattr(m, "classification", "natural"),
-        ])
+        ]
+        if confidence is not None:
+            row.append(conf[i - 1] if (i - 1) < len(conf) else "—")
+        rows.append(row)
     return rows
 
 
@@ -252,12 +256,14 @@ def build_oma_siga_pdf(
             _fig(_svd_figure(fdd), caption=f"Figura. Valores singulares – {label}.")
         except Exception:  # noqa: BLE001
             pass
-        # tabla candidatos (NATIVA)
-        rows = _candidate_rows(fdd)
+        # tabla candidatos (NATIVA) — con columna Confianza si viene
+        _conf = cond.get("mode_confidence")
+        rows = _candidate_rows(fdd, _conf)
         if rows:
-            body.append(grid_table(
-                ["#", "Frecuencia [Hz]", "Amortiguamiento [%]", "Complexity [%]", "Clasificación"],
-                rows, styles))
+            _heads = ["#", "Frecuencia [Hz]", "Amortiguamiento [%]", "Complexity [%]", "Clasificación"]
+            if _conf is not None:
+                _heads.append("Confianza")
+            body.append(grid_table(_heads, rows, styles))
             body.append(p(f"Tabla. Parámetros modales identificados – {label}.",
                           styles, "WMFigureCaption"))
         # figuras por modo (complexity polar + forma modal) para los primeros modos

@@ -55,6 +55,37 @@ def _fdd_from_run(run: Dict[str, Any]) -> _FDD:
     return _FDD(freqs, sv, modes, chn)
 
 
+def mode_confidence(fn: float, zeta_pct: float, complexity_pct: float, cls: str,
+                    ssi_freqs, rpm: float = 0.0) -> str:
+    """Confianza de un modo (Alta/Media/Baja) combinando: confirmación cruzada FDD↔SSI,
+    complejidad (MPC), amortiguación física y coincidencia con armónicos de giro.
+
+    - Alta: confirmado por SSI, complejidad < 15%, damping físico (0.1–8%), no armónico.
+    - Media: confirmado por SSI o complejidad < 15%, damping físico, no muy complejo.
+    - Baja: complejidad > 40%, sin confirmación SSI, damping no físico (≈0 o > 15%),
+            armónico de giro, o clasificado spurious/harmonic.
+    """
+    fn = float(fn or 0.0); z = float(zeta_pct or 0.0); cx = float(complexity_pct or 0.0)
+    conf_ssi = any(abs(fn - float(sf)) <= max(0.02 * fn, 1.0) for sf in (ssi_freqs or []))
+    harmonic = False
+    if rpm:
+        order = fn / (float(rpm) / 60.0) if rpm else 0.0
+        k = round(order)
+        harmonic = (k >= 1 and abs(order - k) <= 0.03)
+    damp_bad = (z < 0.05) or (z > 15.0)
+    if str(cls or "").lower() in ("spurious", "harmonic") or damp_bad or cx > 40.0 or harmonic:
+        return "Baja"
+    if conf_ssi and cx < 15.0 and (0.1 <= z <= 8.0):
+        return "Alta"
+    if (conf_ssi or cx < 15.0) and cx < 40.0:
+        return "Media"
+    return "Baja"
+
+
+def _ssi_freqs_of(run: Dict[str, Any]):
+    return [float(m.get("fn", 0)) for m in ((run.get("ssi") or {}).get("modes") or []) if m.get("fn")]
+
+
 def _ssi_png_from_run(run: Dict[str, Any], fdd) -> "bytes | None":
     """Diagrama de estabilización SSI (fortaleza del análisis) desde run['ssi'].
     Polos estables (verde) vs espurios (gris) + densidad espectral (SV1) de fondo."""
@@ -186,10 +217,16 @@ def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
         _sensor_kind = "mixed"
     else:
         _sensor_kind = "accel"
+    # Confianza por modo (FDD↔SSI + complejidad + damping + armónicos), alineada a fdd.modes
+    _ssif = _ssi_freqs_of(run)
+    _conf = [mode_confidence(mm.get("fn", 0), mm.get("zeta", 0), mm.get("complexity", 0),
+                             mm.get("class", "natural"), _ssif, rpm)
+             for mm in (run.get("modes") or [])]
     return build_oma_siga_pdf(
         meta=meta,
         conditions=[{"label": run.get("name", "Condición operacional"), "fdd_result": fdd,
-                     "notes": "Procesamiento FDD de la corrida capturada en campo."}],
+                     "notes": "Procesamiento FDD de la corrida capturada en campo.",
+                     "mode_confidence": _conf}],
         campbell=campbell, ema_oma=ema_oma, technique=_technique, sensor_kind=_sensor_kind,
         findings=findings if findings is not None else run.get("findings"),
         recommendations=recommendations if recommendations is not None else run.get("recommendations"),
