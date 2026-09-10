@@ -1972,9 +1972,10 @@ if nav == T_REPORT:
                     if _only_conf:
                         _pairs = [(mm, ss) for (mm, ss) in _pairs if _conf_of(mm) == "Alta"]
                     _modes_r = [mm for mm, ss in _pairs]; _shapes_r = [ss for mm, ss in _pairs]
+                    _SHAPE_CAP = 8   # todas las formas confiables (tope para no inflar el PDF)
                     # formas modales estilo ARTeMIS (superficies + cuadrícula), estáticas para el PDF
                     shape_pngs = []
-                    for i, m in enumerate(_modes_r[:3]):
+                    for i, m in enumerate(_modes_r[:_SHAPE_CAP]):
                         if i < len(_shapes_r) and _shapes_r[i] is not None \
                                 and len(_shapes_r[i]) == len(pts):
                             a = np.asarray(_shapes_r[i], float)
@@ -2031,7 +2032,7 @@ if nav == T_REPORT:
                         _pay_r, bilingual_es=_es, shape_pngs=shape_pngs,
                         findings=_findings, recommendations=_recs, meta_extra=_meta_extra,
                         config_png=config_png, sensor_png=sensor_png, sensor_rows=sensor_rows,
-                        ssi_png=ssi_png)
+                        ssi_png=ssi_png, max_shape_modes=len(shape_pngs))
                 st.session_state["_modal_report_pdf"] = pdf
                 st.session_state["_modal_report_meta"] = {
                     "consecutive": _consec, "client": _client, "asset": _asset,

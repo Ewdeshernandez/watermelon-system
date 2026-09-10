@@ -155,7 +155,7 @@ def _sensor_check_from_run(run: Dict[str, Any]):
 def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
                           shape_pngs=None, findings=None, recommendations=None,
                           meta_extra=None, config_png=None, sensor_png=None,
-                          sensor_rows=None, ssi_png=None) -> bytes:
+                          sensor_rows=None, ssi_png=None, max_shape_modes: int = 3) -> bytes:
     """Genera el PDF OMA SIGA desde el payload de una corrida (`modal_runs`).
 
     `shape_pngs`: lista opcional de PNGs (vista 3D de geometría) por modo, en orden;
@@ -231,4 +231,5 @@ def build_report_from_run(run: Dict[str, Any], bilingual_es: bool = True,
         findings=findings if findings is not None else run.get("findings"),
         recommendations=recommendations if recommendations is not None else run.get("recommendations"),
         mode_shape_pngs=shape_pngs, config_png=config_png, sensor_png=sensor_png,
-        sensor_rows=sensor_rows, ssi_png=ssi_png)
+        sensor_rows=sensor_rows, ssi_png=ssi_png,
+        max_shape_modes=max(int(max_shape_modes), len(shape_pngs or [])))
