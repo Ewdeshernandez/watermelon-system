@@ -609,6 +609,25 @@ def _can_view(viewer_email: str, viewer_role: str, sidecar: Dict[str, Any]) -> b
     return owner == viewer
 
 
+def next_consecutive(prefix: str, viewer_email: str = "system",
+                     viewer_role: str = "admin") -> str:
+    """Siguiente consecutivo automático (prefijo + NNN, 3 dígitos) según los reportes
+    ya archivados. Ej.: prefix='OMA-2026-' → 'OMA-2026-003' si el mayor existente es 002.
+    Si no hay ninguno (o falla la consulta), arranca en 001."""
+    try:
+        items = list_archived_reports(viewer_email=viewer_email or "system",
+                                      viewer_role=viewer_role or "admin", limit=500)
+    except Exception:  # noqa: BLE001
+        items = []
+    _pat = re.compile(re.escape(prefix) + r"(\d+)\s*$", re.IGNORECASE)
+    mx = 0
+    for it in items:
+        m = _pat.match(str(it.get("consecutive", "") or "").strip())
+        if m:
+            mx = max(mx, int(m.group(1)))
+    return f"{prefix}{mx + 1:03d}"
+
+
 def list_archived_reports(
     *,
     viewer_email: str,
