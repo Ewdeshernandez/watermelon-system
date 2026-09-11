@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.56"
+__version__ = "0.9.57"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -440,8 +440,9 @@ class Machine3DItem(pg.GraphicsObject):
             for c in self.layout.machine_components:
                 base = QtGui.QColor(c.color) if getattr(c, "color", "") else QtGui.QColor(_comp_color(c.kind))
                 for f in _cuboid_faces(c):
-                    # en animación cada cara se subdivide en una malla fina (degradé suave)
-                    quads = _subdivide_quad(f, 7) if anim is not None else [f]
+                    # en animación cada cara se subdivide en una malla fina (degradé suave
+                    # + mallado visible tipo ARTeMIS)
+                    quads = _subdivide_quad(f, 5) if anim is not None else [f]
                     for q in quads:
                         colmag = None
                         if anim is not None:
@@ -469,9 +470,11 @@ class Machine3DItem(pg.GraphicsObject):
             col = QtGui.QColor(int(base.red() * shade), int(base.green() * shade), int(base.blue() * shade))
             poly = QtGui.QPolygonF([QtCore.QPointF(p[0], p[1]) for p in pw])
             painter.setBrush(QtGui.QBrush(col))
-            if anim is not None:                             # malla fina → sin líneas de grilla
+            if anim is not None and not is_rotor:            # MALLADO tipo ARTeMIS (líneas de la malla)
+                pen = QtGui.QPen(QtGui.QColor(15, 23, 42, 70)); pen.setCosmetic(True); pen.setWidthF(0.5)
+            elif anim is not None:                           # rotor: superficie lisa (sin grilla)
                 pen = QtGui.QPen(col); pen.setCosmetic(True); pen.setWidthF(0.3)
-            else:
+            else:                                            # estático: aristas de las cajas
                 pen = QtGui.QPen(QtGui.QColor("#1e293b")); pen.setCosmetic(True); pen.setWidthF(0.8)
             painter.setPen(pen); painter.drawPolygon(poly)
 
