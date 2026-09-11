@@ -597,6 +597,36 @@ def run_oma(
     return result
 
 
+def preprocess_signals(time_data: np.ndarray, sample_rate_hz: float,
+                       detrend: bool = True, band=None, decimate_factor: int = 1):
+    """Preproceso de señal para OMA (analista). Devuelve (data, fs):
+      · detrend lineal por canal → quita deriva/rampa (mejora la estimación espectral).
+      · band=(lo,hi) Hz → filtro pasa-banda Butterworth de fase cero (sosfiltfilt) para
+        enfocar una banda (p.ej. aislar los modos de interés del ruido de baja frecuencia).
+      · decimate_factor N>1 → decimación con anti-alias (baja fs a fs/N) → más resolución
+        en frecuencia dentro de la banda baja (equivalente al 'decimation' de ARTeMIS).
+    No modifica la data cruda del llamador (opera sobre copia)."""
+    from scipy import signal as _sg
+    x = np.asarray(time_data, float)
+    if x.ndim == 1:
+        x = x[:, None]
+    x = x.copy()
+    fs = float(sample_rate_hz)
+    if detrend:
+        x = _sg.detrend(x, axis=0, type="linear")
+    if band is not None:
+        lo, hi = float(band[0]), float(band[1]); nyq = fs / 2.0
+        wl = max(1e-4, lo / nyq); wh = min(0.999, hi / nyq)
+        if 0.0 < wl < wh < 1.0:
+            sos = _sg.butter(4, [wl, wh], btype="band", output="sos")
+            x = _sg.sosfiltfilt(sos, x, axis=0)
+    if decimate_factor and int(decimate_factor) > 1:
+        q = int(decimate_factor)
+        x = _sg.decimate(x, q, axis=0, ftype="iir", zero_phase=True)
+        fs = fs / q
+    return x, fs
+
+
 def kurtosis_harmonic_indicator(time_data: np.ndarray, sample_rate_hz: float,
                                 freqs_hz, bw_hz: float = 1.5):
     """Indicador de ARMÓNICOS por KURTOSIS (Brincker & Andersen, OMA).

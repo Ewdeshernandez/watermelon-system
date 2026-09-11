@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.66"
+__version__ = "0.9.67"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1652,6 +1652,25 @@ def build_app(layout: OMALayout, simulated: bool = True):
     crowB.addWidget(_grp("Datos:")); crowB.addWidget(btn_saverun); crowB.addWidget(btn_openrun)
     crowB.addWidget(_tbsep()); crowB.addWidget(btn_upload); crowB.addWidget(btn_upsaved)
     crowB.addStretch(1); cl2.addLayout(crowB)
+    # Fila 3 — PREPROCESO de señal (solo análisis; la data cruda se guarda intacta)
+    crowP = QtWidgets.QHBoxLayout()
+    crowP.addWidget(_grp("Preproceso:"))
+    chk_detr = QtWidgets.QCheckBox("Detrend"); chk_detr.setChecked(True)
+    chk_detr.setToolTip("Quita deriva/rampa lineal de cada canal antes del análisis (recomendado).")
+    crowP.addWidget(chk_detr)
+    chk_band = QtWidgets.QCheckBox("Band-pass"); chk_band.setToolTip(
+        "Filtro pasa-banda de fase cero para enfocar una banda de frecuencia (aísla los modos de "
+        "interés del ruido). Solo afecta el análisis.")
+    sp_blo = QtWidgets.QDoubleSpinBox(); sp_blo.setRange(0.5, 5000); sp_blo.setValue(5.0); sp_blo.setSuffix(" Hz")
+    sp_bhi = QtWidgets.QDoubleSpinBox(); sp_bhi.setRange(1.0, 25000); sp_bhi.setValue(500.0); sp_bhi.setSuffix(" Hz")
+    crowP.addWidget(chk_band); crowP.addWidget(QtWidgets.QLabel("lo")); crowP.addWidget(sp_blo)
+    crowP.addWidget(QtWidgets.QLabel("hi")); crowP.addWidget(sp_bhi)
+    crowP.addWidget(_tbsep()); crowP.addWidget(QtWidgets.QLabel("Decimate"))
+    cb_dec = QtWidgets.QComboBox(); cb_dec.addItems(["×1", "×2", "×4"])
+    cb_dec.setToolTip("Decimación con anti-alias: baja fs → MÁS resolución en frecuencia en la "
+                      "banda baja (como el 'decimation' de ARTeMIS). ×2 = mitad de fs, doble Δf.")
+    crowP.addWidget(cb_dec)
+    crowP.addStretch(1); cl2.addLayout(crowP)
 
     def _test_ni():
         try:
@@ -1801,15 +1820,28 @@ def build_app(layout: OMALayout, simulated: bool = True):
         _mb = data.shape[0] * data.shape[1] * 4 / 1e6
         _dst.setText("Processing FDD… (please wait, do not close)")
         _bar.setRange(0, 0); QtWidgets.QApplication.processEvents()   # barra indeterminada (procesando)
-        st["oma_data"] = (data, float(fs))              # guardado para SSI / upload
+        st["oma_data"] = (data, float(fs))              # RAW — guardado/upload intacto
         st["_run_saved"] = False                        # nueva corrida → aún sin guardar
-        fmax = min(fs / 2.56, lay.fmax_hz)
+        # --- Preproceso de señal (SOLO análisis; la cruda de arriba queda intacta) ---
+        _band = (sp_blo.value(), sp_bhi.value()) if chk_band.isChecked() else None
+        _dec = {0: 1, 1: 2, 2: 4}.get(cb_dec.currentIndex(), 1)
+        if chk_detr.isChecked() or _band is not None or _dec > 1:
+            try:
+                from core.modal.oma_engine import preprocess_signals
+                data_an, fs_an = preprocess_signals(data, fs, detrend=chk_detr.isChecked(),
+                                                    band=_band, decimate_factor=_dec)
+            except Exception:  # noqa: BLE001
+                data_an, fs_an = data, fs
+        else:
+            data_an, fs_an = data, fs
+        st["oma_data_an"] = (data_an, float(fs_an))     # data de ANÁLISIS (FDD + SSI)
+        fmax = min(fs_an / 2.56, lay.fmax_hz)
         _run_hz = (lay.running_speed_rpm or 0.0) / 60.0 or None
         # FDD en un hilo mientras la UI sigue viva (evita 'Not responding' con 17 ch / registros largos).
         import concurrent.futures as _cf
         import time as _t
         with _cf.ThreadPoolExecutor(max_workers=1) as _ex:
-            _fut = _ex.submit(run_oma, data, fs, nperseg=4096, f_min_hz=5.0, f_max_hz=fmax,
+            _fut = _ex.submit(run_oma, data_an, fs_an, nperseg=4096, f_min_hz=5.0, f_max_hz=fmax,
                               channel_names=lay.channel_names(), running_speed_hz=_run_hz)
             while not _fut.done():
                 QtWidgets.QApplication.processEvents(); _t.sleep(0.05)
@@ -1826,7 +1858,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
                     _k = 1
                     while _run_hz * _k <= fmax:
                         _cand.append(_run_hz * _k); _k += 1
-                _kf = kurtosis_harmonic_indicator(data, fs, sorted({round(c, 2) for c in _cand}))
+                _kf = kurtosis_harmonic_indicator(data_an, fs_an, sorted({round(c, 2) for c in _cand}))
                 _hf = [d["freq"] for d in _kf if d["is_harmonic"]]
                 if _hf:
                     _cleaned = reduce_harmonics_sv(fdd.frequencies_hz, fdd.singular_values, _hf)
@@ -2247,6 +2279,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             if os.path.exists(_npz):
                 _z = np.load(_npz, allow_pickle=True)
                 st["oma_data"] = (np.asarray(_z["data"], float), float(_z["fs"]))
+                st.pop("oma_data_an", None)             # corrida cargada → sin preproceso previo
             # 3) resultados FDD desde el payload → mostrar en todas las pestañas
             fdd = _fdd_from_run(run); st["oma_fdd"] = fdd
             st["_run_saved"] = True; st["_run_folder"] = folder
@@ -2650,7 +2683,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
     tabs.addTab(pg_ssi, "SSI (subspace)")
 
     def _run_ssi():
-        d = st.get("oma_data")
+        d = st.get("oma_data_an") or st.get("oma_data")   # usa la data de análisis (preproceso)
         if not d:
             QtWidgets.QMessageBox.information(win, "SSI", "Run OMA capture first (it stores the time data)."); return
         from core.modal.ssi import run_ssi_cov
