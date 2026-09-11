@@ -495,7 +495,17 @@ def _free_block_composer(prefix: str) -> List[Dict[str, Any]]:
                 _dfk = f"{prefix}_bdf_{bid}_{ncol}"
                 if _dfk not in st.session_state:
                     seed = b.get("_df") or {}
-                    data = {c: (seed.get(c) or ["", ""]) for c in cols}
+                    # Todas las columnas deben tener la MISMA longitud, si no
+                    # pandas revienta ("All arrays must be of the same length").
+                    # Al cambiar el nº de columnas el seed puede traer columnas
+                    # de distinto largo → se padean/truncan a nrows.
+                    nrows = max([len(v) for v in seed.values() if isinstance(v, list)]
+                                + [2])
+                    data = {}
+                    for c in cols:
+                        col = list(seed.get(c) or [])
+                        col = col[:nrows] + [""] * (nrows - len(col))
+                        data[c] = col
                     st.session_state[_dfk] = pd.DataFrame(data)
                 ed = st.data_editor(st.session_state[_dfk], num_rows="dynamic",
                                     use_container_width=True,
