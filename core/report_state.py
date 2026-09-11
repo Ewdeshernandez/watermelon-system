@@ -709,6 +709,33 @@ def _resolve_state_file(filename: Optional[Path] = None,
     return _LEGACY_REPORT_STATE_FILE
 
 
+def _mirror_active_draft(items: Any, meta: Any,
+                         filename: Path | None, email: Optional[str]) -> None:
+    """Mantiene el DRAFT NOMBRADO activo sincronizado con el slot de trabajo.
+
+    Bug que resuelve: al 'Enviar a Reporte' o autoguardar, el trabajo va al slot
+    único report_state.json, pero el draft del que partió el usuario (p.ej.
+    SIGA-REP-TEC-553) quedaba estancado. Al recargar ese draft, las figuras
+    enviadas 'desaparecían' o aparecía un reporte viejo/otro. Ahora, mientras
+    haya un draft activo (report_active_draft en sesión), cada guardado del slot
+    de trabajo también actualiza ese draft. Solo espeja cuando se guarda el slot
+    de trabajo (filename is None), nunca al guardar un draft/export explícito
+    (evita recursión)."""
+    if filename is not None:
+        return
+    try:
+        import streamlit as st  # type: ignore
+    except Exception:
+        return
+    name = st.session_state.get("report_active_draft")
+    if not name:
+        return
+    try:
+        save_named_report_draft(draft_name=name, items=items, meta=meta, email=email)
+    except Exception:
+        pass  # no bloqueante — el slot de trabajo ya se guardó
+
+
 def save_report_state(*, items: Any, meta: Any,
                        filename: Path | None = None,
                        email: Optional[str] = None) -> bool:
@@ -755,6 +782,7 @@ def save_report_state(*, items: Any, meta: Any,
     try:
         _do_save()
         PERSIST_LAST_ERROR.clear()
+        _mirror_active_draft(items, meta, filename, effective_email)
         return True
     except OSError as exc:
         if getattr(exc, "errno", None) == errno.ENOSPC:

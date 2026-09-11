@@ -4560,6 +4560,27 @@ st.markdown('<div class="wm-divider"></div>', unsafe_allow_html=True)
 
 drafts = list_report_drafts()
 
+# Campos de portada que tienen widget-key report_meta_*. Al cargar un draft hay
+# que RE-SINCRONIZAR estas keys, si no Streamlit ignora value= (porque la key ya
+# existe del render anterior) y la portada NO se actualiza — además re-escribe el
+# meta con los valores viejos. Este era el bug "cargo SIGA-REP-TEC-553 y no
+# cambia la portada".
+_COVER_FIELDS = [
+    "report_title", "client", "asset", "unit", "location", "consecutive",
+    "asset_class", "asset_model", "train_description",
+    "prepared_by", "prepared_role", "prepared_city",
+    "reviewed_by", "reviewed_role", "reviewed_city", "report_date", "period",
+]
+
+
+def _sync_cover_widget_keys(meta_dict):
+    """Sincroniza las widget-keys report_meta_* con el meta cargado/reseteado."""
+    for _f in _COVER_FIELDS:
+        st.session_state[f"report_meta_{_f}"] = meta_dict.get(_f, "") or ""
+    if not st.session_state.get("report_meta_report_date"):
+        st.session_state["report_meta_report_date"] = TODAY_STR
+
+
 st.markdown('<div class="wm-section-title">Report drafts</div>', unsafe_allow_html=True)
 
 d1, d2, d3, d4 = st.columns([1.9, 1.1, 1.1, 1.1])
@@ -4586,6 +4607,8 @@ with d2:
             items=st.session_state.get("report_items", []),
             meta=st.session_state.get("report_meta", {}),
         )
+        # a partir de aquí, este draft es el ACTIVO: se sincroniza con el trabajo.
+        st.session_state["report_active_draft"] = saved_name
         save_report_state(items=st.session_state.get("report_items", []), meta=st.session_state.get("report_meta", {}))
         st.success(f"Draft saved: {saved_name}")
         st.rerun()
@@ -4600,6 +4623,9 @@ with d3:
             items=st.session_state.get("report_items", []),
             meta=st.session_state.get("report_meta", {}),
         )
+        # el trabajo continúa sobre la copia: la marcamos como draft activo.
+        st.session_state["report_active_draft"] = saved_name
+        st.session_state["report_draft_name_value"] = saved_name
         st.success(f"Draft duplicated: {saved_name}")
         st.rerun()
 with d4:
@@ -4610,6 +4636,9 @@ with d4:
         st.session_state["report_meta"] = dict(DEFAULT_REPORT_META)
         st.session_state["report_pdf_bytes"] = None
         st.session_state["report_pdf_error"] = None
+        # limpiar portada en la UI y desligar cualquier draft activo (reporte nuevo).
+        _sync_cover_widget_keys(st.session_state["report_meta"])
+        st.session_state["report_active_draft"] = None
         clear_report_state()
         save_report_state(items=st.session_state["report_items"], meta=st.session_state["report_meta"])
         st.rerun()
@@ -4637,6 +4666,13 @@ with d6:
         st.session_state["report_meta"] = merged_meta
         st.session_state["report_pdf_bytes"] = None
         st.session_state["report_pdf_error"] = None
+        # (a) sincronizar las widget-keys de portada para que la UI muestre el
+        # meta del draft (si no, prevalecen los valores viejos del render anterior).
+        _sync_cover_widget_keys(merged_meta)
+        st.session_state["report_draft_name_value"] = selected_draft
+        # (b) marcar este draft como ACTIVO: los envíos/autoguardados posteriores
+        # se espejarán a él, así "Enviar a Reporte" cae en el reporte que se edita.
+        st.session_state["report_active_draft"] = selected_draft
         save_report_state(items=st.session_state["report_items"], meta=st.session_state["report_meta"])
         st.success(f"Draft loaded: {selected_draft}")
         st.rerun()
@@ -4645,8 +4681,9 @@ with d7:
     st.write("")
     if st.button("Delete draft", use_container_width=True, disabled=not drafts or selected_draft == "—"):
         delete_named_report_draft(selected_draft)
-        if st.session_state.get("report_draft_name_value") == selected_draft:
-            pass
+        # si el draft borrado era el activo, desligarlo (no seguir espejando a él).
+        if st.session_state.get("report_active_draft") == selected_draft:
+            st.session_state["report_active_draft"] = None
         st.success(f"Draft deleted: {selected_draft}")
         st.rerun()
 
