@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.60"
+__version__ = "0.9.61"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -91,6 +91,11 @@ DEMO_MODES = [SynthMode(19.4, 0.020, 1.0), SynthMode(38.8, 0.015, 0.7),
 _AXIS_DIR = {"X": (1, 0, 0), "Y": (0, 1, 0), "Z": (0, 0, 1),
              "A": (1, 0, 0), "H": (0, 1, 0), "V": (0, 0, 1)}
 
+# Subdivisión de cada cara en la animación → malla fina tipo ARTeMIS. Más alto =
+# deflexión más suave/continua (a costa de más líneas de grilla; el lápiz de la
+# grilla es sutil para que se lea limpio).
+_MESH_N = 7
+
 
 def _comp_color(kind: str) -> str:
     k = (kind or "").lower()
@@ -110,8 +115,12 @@ def _comp_color(kind: str) -> str:
         return "#b45309"
     if "coupling" in k:
         return "#334155"
+    if "bearing" in k or "housing" in k or "cojinete" in k or "borne" in k:
+        return "#64748b"
     if "leg" in k or "pedestal" in k or "pata" in k:
         return "#475569"
+    if "foundation" in k or "fundac" in k:
+        return "#9aa3ad"                       # concreto (referencia a tierra)
     if "skid" in k:
         return "#a16207"
     if "fan" in k or "blower" in k:
@@ -345,7 +354,7 @@ def _rotor_faces(layout, anim, az, el):
             v1 = np.subtract(fd[1], fd[0]); v2 = np.subtract(fd[2], fd[0])
             nrm = np.cross(v1, v2); nn = np.linalg.norm(nrm)
             shade = 0.62 + 0.38 * abs(float(np.dot(nrm / nn, light))) if nn > 0 else 0.78
-            faces.append([dep, pw_, _jet_qcolor(float(np.mean(ts))), shade, None])
+            faces.append([dep, pw_, _jet_qcolor(float(np.mean(ts))), shade, None, False])
     return faces
 
 
@@ -439,13 +448,15 @@ class Machine3DItem(pg.GraphicsObject):
         else:
             for c in self.layout.machine_components:
                 base = QtGui.QColor(c.color) if getattr(c, "color", "") else QtGui.QColor(_comp_color(c.kind))
+                is_static = bool(getattr(c, "static", False))     # fundación/tierra: NO se deforma
+                deform = anim is not None and not is_static
                 for f in _cuboid_faces(c):
-                    # en animación cada cara se subdivide en una malla fina (degradé suave
-                    # + mallado visible tipo ARTeMIS)
-                    quads = _subdivide_quad(f, 5) if anim is not None else [f]
+                    # en animación cada cara móvil se subdivide en una malla fina (degradé
+                    # suave + mallado visible tipo ARTeMIS); la fundación queda como caja fija
+                    quads = _subdivide_quad(f, _MESH_N) if deform else [f]
                     for q in quads:
                         colmag = None
-                        if anim is not None:
+                        if deform:
                             dv = [_field_disp(np.array(p, float), anim) for p in q]
                             fd = [tuple(np.array(p, float) + dv[k][0]) for k, p in enumerate(q)]
                             pw = [_project(*p, self.az, self.el) for p in fd]
@@ -456,7 +467,7 @@ class Machine3DItem(pg.GraphicsObject):
                         v1 = np.subtract(q[1], q[0]); v2 = np.subtract(q[2], q[0])
                         nrm = np.cross(v1, v2); nn = np.linalg.norm(nrm)
                         shade = 0.6 + 0.4 * abs(float(np.dot(nrm / nn, light))) if nn > 0 else 0.75
-                        faces.append([dep, pw, base, shade, colmag])
+                        faces.append([dep, pw, base, shade, colmag, deform])
         # normaliza el color sobre TODA la máquina → verde (menos) → rojo (más)
         if anim is not None:
             mags = [fc[4] for fc in faces if fc[4] is not None]
@@ -466,15 +477,15 @@ class Machine3DItem(pg.GraphicsObject):
                 if fc[4] is not None:
                     fc[2] = _heat_qcolor((fc[4] - cmin) / rng)
         faces.sort(key=lambda t: t[0])
-        for dep, pw, base, shade, _cm in faces:
+        for dep, pw, base, shade, _cm, mesh in faces:
             col = QtGui.QColor(int(base.red() * shade), int(base.green() * shade), int(base.blue() * shade))
             poly = QtGui.QPolygonF([QtCore.QPointF(p[0], p[1]) for p in pw])
             painter.setBrush(QtGui.QBrush(col))
-            if anim is not None and not is_rotor:            # MALLADO tipo ARTeMIS (líneas de la malla)
-                pen = QtGui.QPen(QtGui.QColor(15, 23, 42, 70)); pen.setCosmetic(True); pen.setWidthF(0.5)
-            elif anim is not None:                           # rotor: superficie lisa (sin grilla)
+            if mesh:                                         # MALLADO tipo ARTeMIS (líneas de la malla)
+                pen = QtGui.QPen(QtGui.QColor(15, 23, 42, 55)); pen.setCosmetic(True); pen.setWidthF(0.5)
+            elif anim is not None and is_rotor:              # rotor: superficie lisa (sin grilla)
                 pen = QtGui.QPen(col); pen.setCosmetic(True); pen.setWidthF(0.3)
-            else:                                            # estático: aristas de las cajas
+            else:                                            # estático / fundación fija: aristas de las cajas
                 pen = QtGui.QPen(QtGui.QColor("#1e293b")); pen.setCosmetic(True); pen.setWidthF(0.8)
             painter.setPen(pen); painter.drawPolygon(poly)
 
@@ -484,6 +495,8 @@ class Machine3DItem(pg.GraphicsObject):
             gpen.setWidthF(0.9); gpen.setStyle(QtCore.Qt.DashLine)
             painter.setPen(gpen); painter.setBrush(QtCore.Qt.NoBrush)
             for c in self.layout.machine_components:
+                if getattr(c, "static", False):              # fundación fija: no lleva fantasma
+                    continue
                 for f in _cuboid_faces(c):
                     pwg = [_project(*p, self.az, self.el) for p in f]
                     painter.drawPolygon(QtGui.QPolygonF([QtCore.QPointF(p[0], p[1]) for p in pwg]))

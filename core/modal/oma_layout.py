@@ -40,7 +40,7 @@ COMPONENT_KINDS = [
     "Axial compressor", "Centrifugal compressor", "Reciprocating compressor", "Screw compressor",
     "Multistage pump", "Screw pump", "Single-stage pump",
     "Gearbox", "Generator", "Fan / Blower", "Coupling", "Bearing housing",
-    "Support leg", "Skid 1", "Skid 2", "Suction pipe", "Discharge pipe",
+    "Support leg", "Skid 1", "Skid 2", "Foundation", "Suction pipe", "Discharge pipe",
 ]
 
 # Rotating machines (carry NDE/DE bearings) — used by norm-based placement
@@ -129,6 +129,7 @@ class MachineComponent:
     y1: float = 0.30
     depth: float = 0.16          # semi-profundidad (Y) para el sólido 3D
     color: str = ""              # color de relleno "#rrggbb" (vacío = color por tipo)
+    static: bool = False         # referencia FIJA a tierra (fundación): no se deforma en la animación
 
     def display(self) -> str:
         return self.label or self.kind
@@ -480,12 +481,27 @@ def motor_multistage_pump_layout(
     # el skid → acople elevado → BOMBA multietapa montada SOBRE PATAS (pedestales)
     # a la altura del eje, no apoyada directo en el skid.
     comps = [
-        MachineComponent("Electric motor", "Motor Siemens", 0.04, 0.40, 0.00, 0.32, depth=0.13),
-        MachineComponent("Coupling", "Acople", 0.40, 0.47, 0.10, 0.17, depth=0.05),
-        MachineComponent("Multistage pump", "Bomba multietapa (6 et.)", 0.47, 0.80, 0.08, 0.20, depth=0.09),
-        MachineComponent("Support leg", "Pata bomba LA", 0.49, 0.55, 0.00, 0.08, depth=0.07),
-        MachineComponent("Support leg", "Pata bomba LL", 0.72, 0.78, 0.00, 0.08, depth=0.07),
+        # --- fundación de concreto: referencia FIJA a tierra (no se deforma) ---
+        MachineComponent("Foundation", "Fundación (concreto)", -0.03, 0.90, -0.26, -0.10, depth=0.30, static=True),
+        # --- skid sobre la fundación ---
         MachineComponent("Skid 1", "Skid", 0.00, 0.85, -0.10, 0.00, depth=0.24),
+        # --- motor eléctrico: cuerpo elevado sobre patas + caja de bornes arriba ---
+        MachineComponent("Electric motor", "Motor Siemens", 0.05, 0.38, 0.05, 0.30, depth=0.13),
+        MachineComponent("Bearing housing", "Caja de bornes", 0.15, 0.27, 0.30, 0.37, depth=0.06),
+        MachineComponent("Support leg", "Pata motor LL", 0.07, 0.12, 0.00, 0.06, depth=0.12),
+        MachineComponent("Support leg", "Pata motor LA", 0.32, 0.37, 0.00, 0.06, depth=0.12),
+        # --- pedestales de cojinete (donde miden los sensores) ---
+        MachineComponent("Bearing housing", "Cojinete motor LL", 0.04, 0.09, 0.06, 0.18, depth=0.15),
+        MachineComponent("Bearing housing", "Cojinete motor LA", 0.35, 0.40, 0.06, 0.18, depth=0.15),
+        # --- acople ---
+        MachineComponent("Coupling", "Acople", 0.40, 0.47, 0.10, 0.17, depth=0.05),
+        # --- bomba multietapa: cuerpo alargado + cojinetes en los extremos ---
+        MachineComponent("Multistage pump", "Bomba multietapa (6 et.)", 0.49, 0.78, 0.08, 0.20, depth=0.09),
+        MachineComponent("Bearing housing", "Cojinete bomba LA", 0.47, 0.52, 0.08, 0.18, depth=0.15),
+        MachineComponent("Bearing housing", "Cojinete bomba LL", 0.75, 0.80, 0.08, 0.18, depth=0.15),
+        # --- patas de la bomba ---
+        MachineComponent("Support leg", "Pata bomba LA", 0.50, 0.56, 0.00, 0.08, depth=0.07),
+        MachineComponent("Support leg", "Pata bomba LL", 0.72, 0.78, 0.00, 0.08, depth=0.07),
     ]
 
     # (componente, referencia, número, [(dof, x_norm, y_norm)])
@@ -522,7 +538,8 @@ def motor_multistage_pump_layout(
     lay = OMALayout(
         name=name, machine_type="Motor eléctrico – bomba multietapa (6 etapas), cojinetes planos",
         client=client, location=location, tag=tag,
-        components=["Electric motor", "Coupling", "Multistage pump", "Support leg", "Skid 1"],
+        components=["Foundation", "Electric motor", "Coupling", "Multistage pump",
+                    "Bearing housing", "Support leg", "Skid 1"],
         machine_components=comps, points=points,
         test_modes=["OMA"], test_type="OMA",
         running_speed_rpm=running_speed_rpm)
