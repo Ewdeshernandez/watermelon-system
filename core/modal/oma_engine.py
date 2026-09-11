@@ -346,6 +346,79 @@ def _efdd_mode_shape(fdd_result: FDDResult, idx_full: int, sv1: np.ndarray,
     return (acc / nrm) if nrm > 1e-30 else phi0
 
 
+def _efdd_sdof_damping(fdd_result: FDDResult, idx_full: int, sv1: np.ndarray,
+                       freq: np.ndarray, mac_min: float = 0.80, max_lines: int = 120):
+    """EFDD clásico (Brincker 2001) — damping por DECREMENTO LOGARÍTMICO de la
+    autocorrelación de la campana SDOF, y frecuencia por cruces por cero (no half-power).
+
+      1) Campana SDOF = SV1 en las líneas cuyo 1er vector singular tiene MAC≥mac_min con el
+         del pico (0 fuera) → aísla el modo de 1 GDL.
+      2) IRFFT de la campana (PSD de un solo lado, Hermitiana) → función de autocorrelación
+         SDOF r(τ): una sinusoide amortiguada de decaimiento exponencial.
+      3) Extremos de r(τ) → regresión de ln|r_k| vs t_k; pendiente = -ζ·ω_n (log-dec).
+      4) Cruces por cero de r(τ) → frecuencia amortiguada f_d → f_n = f_d/√(1-ζ²).
+
+    Devuelve (fn_hz, zeta_pct) o None si la campana es pobre o el ajuste no es físico
+    (entonces el llamador cae al damping half-power). dt = 1/fs (fs real de la corrida).
+    """
+    U = fdd_result.mode_shapes_at_freq
+    n = U.shape[2]
+    if not (0 <= idx_full < n):
+        return None
+    phi0 = np.asarray(U[:, 0, idx_full], dtype=complex)
+    if np.vdot(phi0, phi0).real <= 1e-30:
+        return None
+
+    def _mac(a, b):
+        den = np.vdot(a, a).real * np.vdot(b, b).real
+        return float(abs(np.vdot(a, b)) ** 2 / den) if den > 1e-30 else 0.0
+
+    lo = idx_full; used = 0
+    while lo - 1 >= 0 and used < max_lines and _mac(phi0, U[:, 0, lo - 1]) >= mac_min:
+        lo -= 1; used += 1
+    hi = idx_full; used = 0
+    while hi + 1 < n and used < max_lines and _mac(phi0, U[:, 0, hi + 1]) >= mac_min:
+        hi += 1; used += 1
+    if hi - lo < 4:
+        return None                                 # campana demasiado angosta
+    bell = np.zeros(n, float)
+    bell[lo:hi + 1] = np.maximum(np.asarray(sv1[lo:hi + 1], float), 0.0)
+    R = np.fft.irfft(bell)                          # autocorrelación (real, par)
+    if R.size < 8 or R[0] <= 0:
+        return None
+    R = R / R[0]
+    df = float(freq[1] - freq[0]) if len(freq) > 1 else 1.0
+    dt = 1.0 / (2.0 * (n - 1) * df)                 # = 1/fs
+    nuse = R.size // 2
+    r = R[:nuse]; t = np.arange(nuse) * dt
+    dr = np.diff(r)
+    ext = np.where(np.sign(dr[:-1]) != np.sign(dr[1:]))[0] + 1
+    ext = np.array([k for k in ext if abs(r[k]) > 0.12], dtype=int)   # envolvente sobre ruido
+    if ext.size < 3:
+        return None
+    tk = t[ext]; yk = np.log(np.abs(r[ext]))
+    A = np.vstack([np.ones_like(tk), tk]).T
+    slope = float(np.linalg.lstsq(A, yk, rcond=None)[0][1])
+    if slope >= 0:
+        return None                                 # no decae → no físico
+    zc = np.where(np.sign(r[:-1]) != np.sign(r[1:]))[0]
+    if zc.size >= 3:
+        kk = np.arange(zc.size, dtype=float)
+        Az = np.vstack([np.ones_like(kk), kk]).T
+        half_T = float(np.linalg.lstsq(Az, t[zc], rcond=None)[0][1])
+        fd = 1.0 / (2.0 * half_T) if half_T > 1e-9 else float(freq[idx_full])
+    else:
+        fd = float(freq[idx_full])
+    wn = 2.0 * np.pi * fd
+    if wn <= 0:
+        return None
+    zeta = -slope / wn
+    if not (1e-4 < zeta < 0.20):                    # 0.01%..20% (físico)
+        return None
+    fn = fd / np.sqrt(max(1e-9, 1.0 - zeta * zeta))
+    return float(fn), float(zeta * 100.0)
+
+
 def detect_oma_modes(
     fdd_result: FDDResult,
     f_min_hz: float = 5.0,
@@ -437,6 +510,16 @@ def detect_oma_modes(
                 mode_shape = _efdd_mode_shape(fdd_result, idx_full, sv1)
             except Exception:  # noqa: BLE001  — cualquier fallo → FDD de una línea
                 mode_shape = fdd_result.mode_shapes_at_freq[:, 0, idx_full]
+            # Damping EFDD por decremento logarítmico de la autocorrelación SDOF (Brincker):
+            # más preciso que half-power. Si la campana no lo permite, se conserva half-power.
+            # NOTA: sólo se toma el DAMPING; la frecuencia se deja en el pico sub-bin (más
+            # precisa que la de cruces por cero, que sesga en campanas angostas/asimétricas).
+            try:
+                _ed = _efdd_sdof_damping(fdd_result, idx_full, sv1, freq)
+                if _ed is not None:
+                    damping_pct = _ed[1]
+            except Exception:  # noqa: BLE001
+                pass
         else:
             mode_shape = fdd_result.mode_shapes_at_freq[:, 0, idx_full]
 
