@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.55"
+__version__ = "0.9.56"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1610,11 +1610,15 @@ def build_app(layout: OMALayout, simulated: bool = True):
     btn_openrun = QtWidgets.QPushButton("📂 Open & analyze a SAVED run")
     btn_openrun.setToolTip("Reabre una corrida guardada en este PC y la muestra aquí "
                            "(modos, densidad espectral, formas modales, Campbell) para revisarla.")
+    btn_reana = QtWidgets.QPushButton("🔄 Re-analyze (EFDD + SSI)")
+    btn_reana.setToolTip("Vuelve a analizar la data cruda cargada con EFDD (formas modales/"
+                         "complejidad refinadas) y recalcula el SSI. Útil para corridas viejas "
+                         "capturadas antes de EFDD (histórico).")
     btn_delmode = QtWidgets.QPushButton("✖ Remove selected mode")
     btn_delmode.setToolTip("Remove the mode selected in the table (or click its marker on the plot).")
     crow.addWidget(btn_testni); crow.addWidget(btn_ocap); crow.addWidget(btn_saverun)
     crow.addWidget(btn_upload); crow.addWidget(btn_upsaved); crow.addWidget(btn_openrun)
-    crow.addWidget(btn_delmode); crow.addStretch(1); cl2.addLayout(crow)
+    crow.addWidget(btn_reana); crow.addWidget(btn_delmode); crow.addStretch(1); cl2.addLayout(crow)
 
     def _test_ni():
         try:
@@ -2211,6 +2215,56 @@ def build_app(layout: OMALayout, simulated: bool = True):
         except Exception as e:  # noqa: BLE001
             QtWidgets.QMessageBox.warning(win, "Open run", f"Error: {type(e).__name__}: {e}")
 
+    def _reanalyze_efdd():
+        """Re-analiza la data cruda cargada (capturada u 'Open saved run') con EFDD y
+        recalcula el SSI → refina formas/complejidad de corridas del histórico."""
+        od = st.get("oma_data")
+        if od is None:
+            QtWidgets.QMessageBox.information(win, "Re-analyze",
+                "Primero captura una corrida o usa 'Open & analyze a SAVED run' (necesita la data cruda)."); return
+        data, fs = od; lay = st["layout"]
+        fmax = min(float(fs) / 2.56, float(lay.fmax_hz))
+        _run_hz = (lay.running_speed_rpm or 0.0) / 60.0 or None
+        _dlg = QtWidgets.QProgressDialog("Re-analyzing with EFDD (and recomputing SSI)…", None, 0, 0, win)
+        _dlg.setWindowTitle("Re-analyze"); _dlg.setMinimumDuration(0); _dlg.setModal(True); _dlg.show()
+        QtWidgets.QApplication.processEvents()
+        try:
+            import concurrent.futures as _cf4, time as _t4
+            with _cf4.ThreadPoolExecutor(max_workers=1) as _ex4:
+                _fut = _ex4.submit(lambda: run_oma(
+                    time_data=data, sample_rate_hz=fs, nperseg=4096,
+                    channel_names=lay.channel_names(), f_min_hz=5.0, f_max_hz=fmax,
+                    running_speed_hz=_run_hz, use_efdd=True))
+                while not _fut.done():
+                    QtWidgets.QApplication.processEvents(); _t4.sleep(0.05)
+                fdd = _fut.result()
+            st["oma_fdd"] = fdd
+            freqs = np.asarray(fdd.frequencies_hz); sv = np.asarray(fdd.singular_values)
+            if sv.ndim == 1:
+                sv = sv[None, :]
+            band = freqs <= fmax
+            p_svd.clear(); _svcol = ["#2563eb", "#dc2626", "#16a34a", "#f59e0b"]
+            p_svd.setTitle(f"Singular values — {sv.shape[0]} channels (EFDD)", color=NAVY)
+            for i in range(sv.shape[0]):
+                col = _svcol[i] if i < 4 else "#94a3b8"; wdt = 1.8 if i == 0 else (1.1 if i < 4 else 0.6)
+                p_svd.plot(freqs[band], 10 * np.log10(np.maximum(sv[i][band], 1e-30)),
+                           pen=pg.mkPen(col, width=wdt), name=(f"SV{i+1}" if i < 4 else None))
+            if np.any(band):
+                p_svd.setXRange(0, float(freqs[band].max()), padding=0); p_svd.getViewBox().setLimits(xMin=0)
+            _draw_svd_markers(); _refresh_validation(); _refresh_campbell(); _refresh_comparative()
+            _anim_reload_modes()
+            try:
+                _run_ssi()                                   # recalcula SSI sobre la misma cruda
+            except Exception:  # noqa: BLE001
+                pass
+            _dlg.close()
+            QtWidgets.QMessageBox.information(win, "Re-analyze",
+                f"✅ Re-analizado con EFDD: {len(fdd.modes)} modos. SSI recalculado. "
+                "Revisa Mode shapes, SSI y Campbell.")
+        except Exception as e:  # noqa: BLE001
+            _dlg.close()
+            QtWidgets.QMessageBox.warning(win, "Re-analyze", f"Error: {type(e).__name__}: {e}")
+
     def _oma_capture_click():
         # Feedback INMEDIATO: bloquea el botón y avisa que arrancó (evita doble captura).
         if not btn_ocap.isEnabled():
@@ -2224,7 +2278,7 @@ def build_app(layout: OMALayout, simulated: bool = True):
             btn_ocap.setEnabled(True); btn_ocap.setText(_txt0)
     btn_ocap.clicked.connect(_oma_capture_click); btn_upload.clicked.connect(_upload_run)
     btn_saverun.clicked.connect(_save_run_local); btn_upsaved.clicked.connect(_upload_saved_run)
-    btn_openrun.clicked.connect(_open_saved_run)
+    btn_openrun.clicked.connect(_open_saved_run); btn_reana.clicked.connect(_reanalyze_efdd)
 
     def _draw_svd_markers():
         """(Re)dibuja los marcadores de modos sobre la densidad espectral."""
