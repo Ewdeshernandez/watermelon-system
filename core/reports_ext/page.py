@@ -294,17 +294,25 @@ def _daily(meta):
 
 
 def _preliminary(meta):
-    rep_section_header("Reporte Preliminar", "Objeto · hallazgos preliminares · recomendaciones",
+    rep_section_header("Reporte Preliminar",
+                       "Contexto del evento · hallazgos · conclusiones y plan de acción",
                        "SIGA-FMT-PRE")
-    objeto = st.text_area("Objeto y alcance", key="prel_objeto", height=80)
-    resumen = st.text_area("Resumen preliminar", key="prel_resumen", height=80)
-    c1, c2 = st.columns(2)
-    hall = c1.text_area("Hallazgos preliminares (uno por línea)", key="prel_hall", height=120)
-    obs = c2.text_area("Observaciones (una por línea)", key="prel_obs", height=120)
-    reco = st.text_area("Recomendaciones (una por línea)", key="prel_reco", height=100)
-    photos = _photo_uploader("prel")
-    content = {"objeto": objeto, "resumen": resumen, "hallazgos": _lines(hall),
-               "observaciones": _lines(obs), "recomendaciones": _lines(reco), "photos": photos}
+    # 2. Contexto del evento
+    contexto = st.text_area("2. Contexto del evento", key="prel_contexto", height=110)
+
+    # 3. Hallazgos preliminares (lista + tablas/imágenes opcionales)
+    hall = st.text_area("3. Hallazgos preliminares (uno por línea)",
+                        key="prel_hall", height=120)
+    with st.expander("Agregar tablas / imágenes a los hallazgos (opcional)",
+                     expanded=False):
+        hall_blocks = _free_block_composer("prel_hall")
+
+    # 4. Conclusiones y plan de acción
+    conclusiones = st.text_area("4. Conclusiones y plan de acción",
+                                key="prel_concl", height=120)
+
+    content = {"contexto": contexto, "hallazgos": _lines(hall),
+               "hall_blocks": hall_blocks, "conclusiones": conclusiones}
     _generate("prel", "preliminar", meta, content)
 
 

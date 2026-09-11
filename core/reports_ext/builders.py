@@ -132,35 +132,31 @@ def build_daily_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> bytes:
 # 2. REPORTE PRELIMINAR
 # =====================================================================
 def build_preliminary_pdf(*, meta: Dict[str, Any], content: Dict[str, Any]) -> bytes:
-    """content: objeto(text), resumen(text), hallazgos[list], observaciones[list],
-    recomendaciones[list], photos[list]."""
+    """content: contexto(text), hallazgos[list], hall_blocks[free-order],
+    conclusiones(text)."""
     styles = make_styles()
     body: List[Any] = []
     body += _service_data(meta, styles, content.get("servicio", ""))
 
-    if content.get("objeto"):
-        body.append(section("2. Objeto y alcance", styles))
-        body.append(p(content["objeto"], styles)); body.append(Spacer(1, 0.2 * cm))
-    if content.get("resumen"):
-        body.append(section("3. Resumen preliminar", styles))
-        body.append(p(content["resumen"], styles)); body.append(Spacer(1, 0.2 * cm))
-
-    body.append(section("4. Hallazgos preliminares", styles))
-    body += bullets(content.get("hallazgos", []) or ["—"], styles)
+    # 2. Contexto del evento
+    body.append(section("2. Contexto del evento", styles))
+    body.append(p(content.get("contexto") or "—", styles))
     body.append(Spacer(1, 0.3 * cm))
 
-    if content.get("observaciones"):
-        body.append(section("5. Observaciones", styles))
-        body += bullets(content["observaciones"], styles)
-        body.append(Spacer(1, 0.3 * cm))
+    # 3. Hallazgos preliminares (lista + tablas/imágenes opcionales)
+    body.append(section("3. Hallazgos preliminares", styles))
+    body += bullets(content.get("hallazgos", []) or ["—"], styles)
+    body.append(Spacer(1, 0.2 * cm))
+    body += free_blocks_flowables(content.get("hall_blocks") or [], styles,
+                                  credit=photo_credit())
+    body.append(Spacer(1, 0.3 * cm))
 
-    body.append(section("6. Recomendaciones", styles))
-    body += bullets(content.get("recomendaciones", []) or ["—"], styles)
+    # 4. Conclusiones y plan de acción
+    body.append(section("4. Conclusiones y plan de acción", styles))
+    body.append(p(content.get("conclusiones") or "—", styles))
     body.append(Spacer(1, 0.2 * cm))
     body.append(p("Nota: este es un reporte <b>preliminar</b>; los resultados "
                   "definitivos se emiten en el reporte técnico final.", styles))
-
-    body += _photos(content, styles, "7")
 
     return render_report_pdf(
         _shell_meta(meta, title="Reporte Preliminar", format_code="SIGA-FMT-PRE",
