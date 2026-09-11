@@ -597,6 +597,70 @@ def run_oma(
     return result
 
 
+def kurtosis_harmonic_indicator(time_data: np.ndarray, sample_rate_hz: float,
+                                freqs_hz, bw_hz: float = 1.5):
+    """Indicador de ARMÓNICOS por KURTOSIS (Brincker & Andersen, OMA).
+
+    Un armónico determinístico (sinusoide de una máquina en giro) filtrado en banda tiene
+    una densidad de probabilidad tipo ARCOSENO → kurtosis ≈ 1.5 (< Gaussiana = 3). Una
+    respuesta ESTRUCTURAL (banda angosta aleatoria) es ~Gaussiana → kurtosis ≈ 3. Así se
+    distingue un pico armónico de un modo real SIN depender de la velocidad de giro.
+
+    Devuelve lista de dicts {freq, kurtosis, is_harmonic} (is_harmonic si kurtosis < 2.4).
+    """
+    try:
+        from scipy.signal import butter, sosfiltfilt
+    except Exception:  # noqa: BLE001
+        return [{"freq": float(f), "kurtosis": float("nan"), "is_harmonic": False} for f in freqs_hz]
+    x = np.asarray(time_data, float)
+    if x.ndim == 1:
+        x = x[:, None]
+    ref = x[:, int(np.argmax(np.var(x, axis=0)))]                # canal de mayor energía
+    ref = ref - float(np.mean(ref))
+    nyq = float(sample_rate_hz) / 2.0
+    out = []
+    for f0 in freqs_hz:
+        f0 = float(f0)
+        lo = max(0.5, f0 - bw_hz) / nyq
+        hi = min(nyq * 0.999, f0 + bw_hz) / nyq
+        k = float("nan"); harm = False
+        if 0.0 < lo < hi < 1.0:
+            try:
+                sos = butter(4, [lo, hi], btype="band", output="sos")
+                y = sosfiltfilt(sos, ref)
+                y = y - float(np.mean(y)); s = float(np.std(y))
+                if s > 1e-12:
+                    k = float(np.mean((y / s) ** 4))             # kurtosis (Gauss=3, arcsin≈1.5)
+                    harm = k < 2.4
+            except Exception:  # noqa: BLE001
+                pass
+        out.append({"freq": f0, "kurtosis": k, "is_harmonic": harm})
+    return out
+
+
+def reduce_harmonics_sv(freqs, sv, harmonic_freqs, bw_hz: float = 1.5) -> np.ndarray:
+    """Reduce (remueve) picos ARMÓNICOS en las curvas de valores singulares: reemplaza las
+    líneas dentro de ±bw_hz de cada frecuencia armónica por interpolación lineal de los
+    niveles vecinos de banda ancha → revela el modo estructural debajo del armónico, sin
+    tocar el resto del espectro. Acepta SV 1-D (sólo SV1) o 2-D (todas las curvas)."""
+    freqs = np.asarray(freqs, float); sv = np.asarray(sv, float)
+    single = sv.ndim == 1
+    if single:
+        sv = sv[None, :]
+    out = sv.copy()
+    for hf in harmonic_freqs:
+        band = np.abs(freqs - float(hf)) <= bw_hz
+        if not band.any():
+            continue
+        idx = np.where(band)[0]
+        i0, i1 = idx[0] - 1, idx[-1] + 1
+        if i0 < 0 or i1 >= len(freqs):
+            continue
+        for r in range(out.shape[0]):
+            out[r, idx] = np.interp(freqs[idx], [freqs[i0], freqs[i1]], [out[r, i0], out[r, i1]])
+    return out[0] if single else out
+
+
 def compute_mac_matrix(modes: List[OMAMode]) -> np.ndarray:
     """
     Compute Modal Assurance Criterion (MAC) matrix entre todos los modos.

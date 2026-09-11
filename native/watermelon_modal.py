@@ -56,7 +56,7 @@ FACTORY_PRESETS = {
 from core.modal.oma_engine import run_oma
 from core.modal.campbell import compute_crossings, SpeedBand
 
-__version__ = "0.9.64"
+__version__ = "0.9.65"
 
 # Nombre PÚBLICO del sistema de adquisición. Nunca exponer marca/modelo del
 # hardware en la interfaz: el cliente solo debe ver "Watermelon".
@@ -1614,6 +1614,12 @@ def build_app(layout: OMALayout, simulated: bool = True):
     cb_src = QtWidgets.QComboBox(); cb_src.addItems(["Simulado", f"{DAQ_NAME} (live)"]); crow.addWidget(cb_src)
     if hw_present:
         cb_src.setCurrentIndex(1)                          # hay hardware → live por defecto
+    chk_harm = QtWidgets.QCheckBox("Reduce harmonics (kurtosis)")
+    chk_harm.setToolTip("Detecta picos ARMÓNICOS de la máquina en giro por kurtosis (sinusoide "
+                        "= arcoseno, kurtosis<2.4) y los remueve de la densidad espectral, "
+                        "revelando el modo estructural debajo. Solo afecta el análisis, NO la "
+                        "data cruda. Recomendado en máquinas en operación.")
+    crow.addWidget(chk_harm)
     btn_testni = QtWidgets.QPushButton("🔌 Test acquisition")
     btn_ocap = QtWidgets.QPushButton("▶ Capture + FDD"); btn_ocap.setStyleSheet(
         f"QPushButton{{background:{ACC};font-size:14px;padding:10px 20px;}} QPushButton:hover{{background:#1490c2;}}")
@@ -1808,6 +1814,28 @@ def build_app(layout: OMALayout, simulated: bool = True):
             while not _fut.done():
                 QtWidgets.QApplication.processEvents(); _t.sleep(0.05)
             fdd = _fut.result()
+        # --- Reducción de armónicos (opcional, kurtosis) — SOLO análisis, no toca la cruda ---
+        _n_harm = 0
+        if chk_harm.isChecked() and getattr(fdd, "modes", None):
+            try:
+                from core.modal.oma_engine import (kurtosis_harmonic_indicator,
+                                                   reduce_harmonics_sv, detect_oma_modes)
+                import dataclasses as _dc
+                _cand = [m.natural_frequency_hz for m in fdd.modes]
+                if _run_hz:                                  # + órdenes enteros de giro en banda
+                    _k = 1
+                    while _run_hz * _k <= fmax:
+                        _cand.append(_run_hz * _k); _k += 1
+                _kf = kurtosis_harmonic_indicator(data, fs, sorted({round(c, 2) for c in _cand}))
+                _hf = [d["freq"] for d in _kf if d["is_harmonic"]]
+                if _hf:
+                    _cleaned = reduce_harmonics_sv(fdd.frequencies_hz, fdd.singular_values, _hf)
+                    fdd = _dc.replace(fdd, singular_values=np.asarray(_cleaned))
+                    fdd.modes = detect_oma_modes(fdd, f_min_hz=5.0, f_max_hz=fmax,
+                                                 running_speed_hz=_run_hz)
+                    _n_harm = len(_hf)
+            except Exception:  # noqa: BLE001
+                pass
         _bar.setRange(0, 100); _bar.setValue(98); QtWidgets.QApplication.processEvents()
         st["oma_fdd"] = fdd
         freqs = fdd.frequencies_hz; sv = np.asarray(fdd.singular_values)
@@ -1823,7 +1851,8 @@ def build_app(layout: OMALayout, simulated: bool = True):
         p_svd.setXRange(0, _xmax_svd, padding=0)
         p_svd.getViewBox().setLimits(xMin=0)
         _draw_svd_markers()
-        lbl_ost.setText(f"✅ FDD done — {len(fdd.modes)} modes. Click a peak to add · click a marker to remove.")
+        _hmsg = f" · {_n_harm} harmonic(s) reduced" if _n_harm else ""
+        lbl_ost.setText(f"✅ FDD done — {len(fdd.modes)} modes{_hmsg}. Click a peak to add · click a marker to remove.")
         lbl_ost.setStyleSheet(f"color:{GREEN};font-weight:700;")
         _refresh_validation(); _refresh_campbell(); _refresh_comparative()
         # --- Cierre del popup: data finalizada, habilita Close ---
